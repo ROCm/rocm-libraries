@@ -14,6 +14,7 @@
  *   - ckc_safe_inv_l            (safe_inv_l)
  *   - ckc_wave_reduce_stages    (wave_reduce_stages -- pure host-side selector)
  *   - ckc_warp_xor_reduce_sum   (warp_xor_reduce_sum)
+ *   - ckc_dequant_fp8x8_to_dtype (dequant_fp8x8_to_dtype)
  *
  * Each IR-emitting helper reproduces its Python counterpart's ckc_b_* builder-
  * call sequence byte-faithfully (same ops, same order, same operands), binding
@@ -116,6 +117,29 @@ int ckc_wave_reduce_stages(ckc_ir_builder_t* b, int wave_size, int lanes_per_row
  * stage, ``warp_shuffle_xor`` then ``fadd`` -- identical op order to the
  * Python. */
 ckc_value_t* ckc_warp_xor_reduce_sum(ckc_ir_builder_t* b, ckc_value_t* v, int stages);
+
+/* ------------------------------------------------------ fp8 in-register dequant */
+
+/* dequant_fp8x8_to_dtype(b, fp8_vec, scale, dtype) analogue: in-register dequant
+ * of a ``<8 x fp8e4m3>`` to a packed ``<8 x dtype>``.
+ *
+ * Splits the 8 fp8 inputs into two ``<4 x fp8>`` quads, runs the packed
+ * ``cvt_pk_f32_fp8x4`` on each, multiplies every f32 lane by ``scale`` (an
+ * UNFUSED explicit ``fmul`` -- NOT the fused E8M0-scale cvt, which would
+ * silently truncate non-power-of-two scales), casts to ``dtype`` and re-packs
+ * into a ``<8 x dtype>`` ready to feed the bf16/fp16 MFMA.
+ *
+ * Emits, in the exact order of the Python: 8 ``vec_extract`` + ``vec_pack`` for
+ * the lo quad (fp8e4m3), 8 ``vec_extract`` + ``vec_pack`` for the hi quad,
+ * ``cvt_pk_f32_fp8x4`` lo then hi, then 8 ``(vec_extract -> fmul -> cast_f32_to)``
+ * triples (lo lanes 0..3 then hi lanes 0..3), then the final ``vec_pack(dtype)``.
+ *
+ * ``dtype`` is the packed-output element type (bf16 or f16). Returns NULL
+ * (sticky error) if ``dtype`` is NULL. */
+ckc_value_t* ckc_dequant_fp8x8_to_dtype(ckc_ir_builder_t* b,
+                                        ckc_value_t* fp8_vec,
+                                        ckc_value_t* scale,
+                                        const ckc_type_t* dtype);
 
 #ifdef __cplusplus
 } /* extern "C" */

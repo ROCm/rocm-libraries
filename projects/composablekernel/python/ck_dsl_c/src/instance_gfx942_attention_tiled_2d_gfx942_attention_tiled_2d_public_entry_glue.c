@@ -432,27 +432,53 @@ ckc_kernel_def_t* ckc_build_unified_attention_2d_tiled_scalar(
     if (!ckc_gfx942_attn2d_build_ctx_init(&ctx, b, spec, arch))
         return NULL;
 
+    /* The emission order below mirrors the single linear Python emitter exactly
+     * (the byte-identity contract is on the lowered .ll, so the IR op stream must
+     * be produced in Python source order):
+     *
+     *   q_load (1913) -> tile bounds + softmax iter-arg inits (1982-2161) ->
+     *   pre-loop K/V buffer descriptors (2163-2351) -> Q VGPR gather (3426-3592)
+     *   -> tile-0 K prefetch + cur_buf carry (3591, 3606-3607) -> LICM hoist
+     *   (3609-3688) -> kv_step (3689) -> scf.for KV loop (5050-5052) ->
+     *   epilogue (5054-5287).
+     */
+
     /* 1. Cooperatively stage Q[BLOCK_M, HD] global -> LDS (lines 1913-1980). */
     ckc_gfx942_attn2d_emit_q_load(&ctx);
 
-    /* 2. Gather the per-lane Q MFMA A-operand to VGPRs (lines 3426-3592). */
-    ckc_gfx942_attn2d_emit_q_gather(&ctx);
+    /* 2. max_seq_prefix_len -> tile_start/tile_end + online-softmax m/l/acc carry
+     *    inits + named iter_args (lines 1982-2161). */
+    ckc_gfx942_attn2d_emit_loop_bounds_and_inits(&ctx);
 
-    /* 3. LICM hoist of the per-reg row/pos/head/mask invariants (3609-3700). */
-    ckc_gfx942_attn2d_emit_licm_hoist(&ctx);
-
-    /* 4. Pre-loop: buffer descriptors + tile-0 prefetch (lines 2163-2351). */
+    /* 3. Pre-loop: build K/V buffer descriptors (lines 2163-2351). */
     ckc_gfx942_attn2d_emit_preloop(&ctx);
 
-    /* 5. KV-loop body over the online-softmax scf.for carry (3701-5042).
-     * ckc_gfx942_attn2d_build_ctx_init established tile_start/tile_end/kv_step
-     * and the iter_args carry; emit_kv_body runs one full KV-tile body inside
-     * the loop region and writes ctx.out_carry. The loop region wiring + carry
-     * unpack/repack threading is owned by the loop scaffolding established in
-     * ctx_init / consumed by emit_kv_body per the internal contract. */
-    ckc_gfx942_attn2d_emit_kv_body(&ctx);
+    /* 4. Gather the per-lane Q MFMA A-operand to VGPRs (lines 3426-3592). */
+    ckc_gfx942_attn2d_emit_q_gather(&ctx);
 
-    /* 6. Epilogue: drain async copies, read loop results, normalize + store;
+    /* 5. tile-0 K prefetch into buffer 0 + ("cur_buf", 0) carry append (3591,
+     *    3606-3607). */
+    ckc_gfx942_attn2d_emit_preloop_prefetch(&ctx);
+
+    /* 6. LICM hoist of the per-reg row/pos/head/mask invariants (3609-3688). */
+    ckc_gfx942_attn2d_emit_licm_hoist(&ctx);
+
+    /* 7. kv_step const (3689). */
+    ckc_gfx942_attn2d_emit_kv_step(&ctx);
+
+    /* 8. KV-loop: build the scf.for over [tile_start, tile_end) with the named
+     *    online-softmax carry and run one full KV-tile body inside it (5050-5052).
+     *    drive_kv_loop returns the loop handle whose results are the rewritten
+     *    carry the epilogue consumes; mirror them into ctx.out_carry. */
+    ckc_for_t kvloop = ckc_gfx942_attn2d_drive_kv_loop(&ctx);
+    if (kvloop.op != NULL)
+    {
+        for (int i = 0; i < kvloop.op->num_results; ++i)
+            ctx.out_carry[i] = kvloop.op->results[i];
+        ctx.out_carry_count = kvloop.op->num_results;
+    }
+
+    /* 9. Epilogue: drain async copies, read loop results, normalize + store;
      * returns b->kernel on success (lines 5054-5287). */
     kernel = ckc_gfx942_attn2d_emit_epilogue(&ctx);
 

@@ -96,6 +96,16 @@ const ckc_mmaop_t* ckc_archtarget_op_for_shape(const ckc_archtarget_t* t,
     return ckc_mma_catalog_op_for_shape(&t->mma, family, a_dtype, b_dtype, c_dtype, m, n, k);
 }
 
+const ckc_mmaop_t* ckc_archtarget_by_op_id(const ckc_archtarget_t* t, const char* op_id)
+{
+    /* target.mma.by_op_id(op_id): look up an atom by its op_id handle. */
+    if (t == NULL)
+    {
+        return NULL;
+    }
+    return ckc_mma_catalog_by_op_id(&t->mma, op_id);
+}
+
 const char* ckc_archtarget_isa_triple(const ckc_archtarget_t* t, char* out, size_t out_cap)
 {
     /* ArchTarget.isa_triple property. */

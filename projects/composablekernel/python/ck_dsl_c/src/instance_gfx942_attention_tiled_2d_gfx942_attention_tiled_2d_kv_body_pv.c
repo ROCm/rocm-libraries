@@ -47,18 +47,26 @@
  * function (the lowerer/CSE folds the repeats, matching Python LICM). */
 static ckc_value_t* lane_rg_of(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
+    if (ctx->lane_rg_v != NULL)
+        return ctx->lane_rg_v;
     return ckc_b_div(B, ctx->lane, ckc_b_const_i32(B, 16));
 }
 static ckc_value_t* lane_col_of(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
+    if (ctx->lane_col_v != NULL)
+        return ctx->lane_col_v;
     return ckc_b_mod(B, ctx->lane, ckc_b_const_i32(B, 16));
 }
 static ckc_value_t* lane_half32_of(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
+    if (ctx->lane_half32_v != NULL)
+        return ctx->lane_half32_v;
     return ckc_b_div(B, ctx->lane, ckc_b_const_i32(B, 32));
 }
 static ckc_value_t* lane_col32_of(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
+    if (ctx->lane_col32_v != NULL)
+        return ctx->lane_col32_v;
     return ckc_b_mod(B, ctx->lane, ckc_b_const_i32(B, 32));
 }
 
@@ -168,21 +176,15 @@ static ckc_value_t* ckc_pv32_v_load_paired(ckc_ir_builder_t* b,
  *  for a 16x16x16 atom over V_lds at (row base = k*16, col base = n*16). Each of
  *  the 4 elements is a distinct V row; _v_load1 applies the swizzle slot mapping.
  * ============================================================ */
+/* v_n_col / v_k_chunk_base / v_buf are computed ONCE per N-tile by the caller
+ * (Python hoists them out of the PV k-loop, lines 4897-4919); passed in here so
+ * we don't re-emit the same SSA values on every k iteration. */
 ckc_value_t* ckc_gfx942_attn2d_strided_v_b_operand(ckc_gfx942_attn2d_build_ctx_t* ctx,
-                                                   int k_iter, int n_tile)
+                                                   int k_iter, ckc_value_t* v_n_col,
+                                                   ckc_value_t* v_k_chunk_base,
+                                                   ckc_value_t* v_buf)
 {
-    ckc_value_t* lane_col = lane_col_of(ctx);
-    ckc_value_t* lane_rg  = lane_rg_of(ctx);
-
-    /* v_n_col = n*16 + lane_col ; v_k_chunk_base = lane_rg*4 (lines 4897-4898) */
-    ckc_value_t* v_n_col      = ckc_b_add(B,
-                                     ckc_b_mul(B, ckc_b_const_i32(B, n_tile),
-                                               ckc_b_const_i32(B, 16)),
-                                     lane_col);
-    ckc_value_t* v_k_chunk_base = ckc_b_mul(B, lane_rg, ckc_b_const_i32(B, 4));
-
-    ckc_value_t* v_buf = ckc_b_const_i32(B, 0);
-    ckc_value_t* bv    = ckc_b_zero_vec(B, DT, 4);
+    ckc_value_t* bv = ckc_b_zero_vec(B, DT, 4);
     for(int j = 0; j < 4; ++j)
     {
         ckc_value_t* v_row = ckc_b_add(B, ckc_b_const_i32(B, k_iter * 16 + j),
@@ -398,29 +400,8 @@ ckc_value_t* ckc_gfx942_attn2d_apply_transposed_pv_regs(ckc_gfx942_attn2d_build_
  *  isolation.
  * ============================================================ */
 
-/* Inbound softmax-derived state for the PV bucket. The peer QK/softmax bucket
- * fills this and hands it to ckc_gfx942_attn2d_emit_pv_bucket. (A plain struct,
- * not a ctx field, keeps the shared header untouched per the bucket contract;
- * the driver allocates it on its stack.) */
-typedef struct ckc_gfx942_attn2d_pv_inputs
-{
-    ckc_value_t* const* alpha_regs; /* SOFTMAX_STATE_SLOTS                       */
-    int alpha_count;
-    ckc_value_t* const* new_l_vals; /* SOFTMAX_STATE_SLOTS                       */
-    ckc_value_t* const* m_new;      /* SOFTMAX_STATE_SLOTS                       */
-    /* PT32 register groups: pt32[g] is the flat [p_tile*RPL + reg] array for
-     * group g; group 0 = current tile, group 1 = GROUPED_KV2 second tile. */
-    ckc_value_t* const* pt32_g0;
-    ckc_value_t* const* pt32_g1;
-    int pt32_count;
-    /* p_regs_f32[reg][n] flattened reg*QK_N_TILES + n (REGISTER_PV path). */
-    ckc_value_t* const* p_regs_f32;
-    int p_regs_f32_stride; /* == QK_N_TILES                                    */
-    /* GROUPED_KV2 V re-issue inputs. */
-    ckc_value_t* safe_tile1;
-    ckc_value_t* nxt_buf;
-    ckc_value_t* cur_buf;
-} ckc_gfx942_attn2d_pv_inputs_t;
+/* ckc_gfx942_attn2d_pv_inputs_t is declared in the internal header so the peer
+ * QK/softmax bucket can fill it and hand it to ckc_gfx942_attn2d_emit_pv_bucket. */
 
 /* Pack helpers (Python _pack_p_a16 / _pack_p_a32 via the peer phase functions).
  * The register-PV A operand for a 16x16x16 / 16x16x32 atom. */
@@ -616,15 +597,31 @@ void ckc_gfx942_attn2d_emit_pv_bucket(ckc_gfx942_attn2d_build_ctx_t* ctx,
                 acc_per_atom[atom] = ckc_b_vec_pack(B, scaled, 4, F32);
             }
 
+            /* v_n_col = n*16 + lane_col ; v_k_chunk_base = lane_rg*4 ; v_buf = 0
+             * computed ONCE per N-tile (Python 4897-4919, hoisted out of the
+             * k-loop) and threaded into _strided_v_b_operand. */
+            ckc_value_t* v_n_col = ckc_b_add(
+                B, ckc_b_mul(B, ckc_b_const_i32(B, n), ckc_b_const_i32(B, 16)),
+                lane_col);
+            ckc_value_t* v_k_chunk_base =
+                ckc_b_mul(B, lane_rg_of(ctx), ckc_b_const_i32(B, 4));
+            ckc_value_t* v_buf = ckc_b_const_i32(B, 0);
+
             /* K=16 narrow atom (gfx942): build <4 x dtype> B operand from 4
              * strided LDS loads via _strided_v_b_operand (lines 5009-5029). */
             for(int k = 0; k < PV_K_ITERS; ++k)
             {
+                /* p_off = k*16 + lane_rg*4. Python emits a FRESH lane_rg*4 here
+                 * (not the hoisted v_k_chunk_base), so re-emit the mul. Python
+                 * evaluates the left const(k*16) BEFORE the mul (left-to-right);
+                 * bind it to a temp so C arg-eval order does not allocate the
+                 * mul's const ahead of it and shift the mul's %value. */
+                ckc_value_t* p_off_base = ckc_b_const_i32(B, k * 16);
                 ckc_value_t* p_off = ckc_b_add(
-                    B, ckc_b_const_i32(B, k * 16),
+                    B, p_off_base,
                     ckc_b_mul(B, lane_rg_of(ctx), ckc_b_const_i32(B, 4)));
-                ckc_value_t* B_v =
-                    ckc_gfx942_attn2d_strided_v_b_operand(ctx, k, n);
+                ckc_value_t* B_v = ckc_gfx942_attn2d_strided_v_b_operand(
+                    ctx, k, v_n_col, v_k_chunk_base, v_buf);
                 for(int atom = 0; atom < M_ATOMS; ++atom)
                 {
                     ckc_value_t* A_p;
@@ -704,12 +701,15 @@ void ckc_gfx942_attn2d_emit_pv_bucket(ckc_gfx942_attn2d_build_ctx_t* ctx,
  * ============================================================ */
 ckc_for_t ckc_gfx942_attn2d_drive_kv_loop(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
-    /* Build the (name, init) iter-arg list from ctx->iter_args. */
+    /* Build the (name, init) iter-arg list from ctx->iter_args. The carry slot
+     * names ("m0","l0",...,"acc0"/"acc0a0","cur_buf") are emitted verbatim as the
+     * loop's phi-node names, so they must come from ctx->iter_args_names to match
+     * the Python iter_args tuple names byte-for-byte. */
     ckc_iter_arg_t iargs[CKC_GFX942_ATTN2D_MAX_ITER_ARGS];
     static const char* const kIvName = "kv_tile";
     for(int i = 0; i < ctx->iter_args_count; ++i)
     {
-        iargs[i].name = NULL; /* builder auto-names carry slots */
+        iargs[i].name = ctx->iter_args_names[i];
         iargs[i].init = ctx->iter_args[i];
     }
 
@@ -740,6 +740,8 @@ ckc_for_t ckc_gfx942_attn2d_drive_kv_loop(ckc_gfx942_attn2d_build_ctx_t* ctx)
         {
             ctx->acc_cur[i] = iv[ml + i];
         }
+        /* trailing cur_buf carry (carry[ml + num_accs]). */
+        ctx->cur_buf = iv[ml + num_accs];
     }
 
     ckc_gfx942_attn2d_emit_kv_body(ctx);

@@ -94,57 +94,114 @@ static int ckc__v_bytes_per_call_swz(const ckc_gfx942_attn2d_build_ctx_t* ctx)
     return bpc;
 }
 
-/* kv_block_bytes_c value = BS * NUM_KV * HD * KV_BYTES (one-block buffer bound). */
+/* kv_block_bytes_c value = BS * NUM_KV * HD * KV_BYTES (one-block buffer bound).
+ * Python creates this const ONCE at line 2227 and reuses it in every loader;
+ * cache it on ctx so we do not allocate a duplicate const per loader (which
+ * would shift downstream %values). */
 static ckc_value_t* ckc__kv_block_bytes_c(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
-    int kv_stride_blk_b = ctx->BS * ctx->NUM_KV * ctx->HD * ctx->KV_BYTES;
-    return ckc_b_const_i32(ctx->b, kv_stride_blk_b);
+    if (ctx->kv_block_bytes_c_v == NULL)
+    {
+        int kv_stride_blk_b = ctx->BS * ctx->NUM_KV * ctx->HD * ctx->KV_BYTES;
+        ctx->kv_block_bytes_c_v = ckc_b_const_i32(ctx->b, kv_stride_blk_b);
+    }
+    return ctx->kv_block_bytes_c_v;
 }
 
-/* lane_half_base = tid * KV_HALVES_PER_LANE. */
+/* lane_half_base = tid * KV_HALVES_PER_LANE (Python 2232). Emitted once in
+ * emit_preloop and cached on ctx so every loader reuses the same SSA value
+ * (matches the single Python local). */
 static ckc_value_t* ckc__lane_half_base(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
-    return ckc_b_mul(ctx->b, ctx->tid,
-                     ckc_b_const_i32(ctx->b, ckc__kv_halves_per_lane(ctx)));
+    if (ctx->lane_half_base_v == NULL)
+        ctx->lane_half_base_v = ckc_b_mul(
+            ctx->b, ctx->tid, ckc_b_const_i32(ctx->b, ckc__kv_halves_per_lane(ctx)));
+    return ctx->lane_half_base_v;
 }
 
-/* seq_base = to_sgpr_u32(seq_idx * bt_stride_p). */
+/* seq_base = to_sgpr_u32(seq_idx * bt_stride_p) (Python 2327). Cached on ctx. */
 static ckc_value_t* ckc__seq_base(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
-    return ckc_b_to_sgpr_u32(ctx->b, ckc_b_mul(ctx->b, ctx->seq_idx, ctx->bt_stride_p));
+    if (ctx->seq_base == NULL)
+        ctx->seq_base = ckc_b_to_sgpr_u32(
+            ctx->b, ckc_b_mul(ctx->b, ctx->seq_idx, ctx->bt_stride_p));
+    return ctx->seq_base;
 }
 
-/* block_table_max_idx = to_sgpr_u32(num_seqs_p * bt_stride_p). */
+/* block_table_max_idx = to_sgpr_u32(num_seqs_p * bt_stride_p) (Python 2340). */
 static ckc_value_t* ckc__block_table_max_idx(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
-    return ckc_b_to_sgpr_u32(ctx->b, ckc_b_mul(ctx->b, ctx->num_seqs_p, ctx->bt_stride_p));
+    if (ctx->block_table_max_idx == NULL)
+        ctx->block_table_max_idx = ckc_b_to_sgpr_u32(
+            ctx->b, ckc_b_mul(ctx->b, ctx->num_seqs_p, ctx->bt_stride_p));
+    return ctx->block_table_max_idx;
+}
+
+/* K_lds_addr = ptrtoint(K_lds) (Python 2234); cached. */
+static ckc_value_t* ckc__K_lds_addr(ckc_gfx942_attn2d_build_ctx_t* ctx)
+{
+    if (ctx->K_lds_addr_v == NULL)
+        ctx->K_lds_addr_v = ckc_b_smem_addr_of(ctx->b, ctx->K_lds);
+    return ctx->K_lds_addr_v;
+}
+
+/* V_lds_addr = ptrtoint(V_lds) (Python 2235); cached. */
+static ckc_value_t* ckc__V_lds_addr(ckc_gfx942_attn2d_build_ctx_t* ctx)
+{
+    if (ctx->V_lds_addr_v == NULL)
+        ctx->V_lds_addr_v = ckc_b_smem_addr_of(ctx->b, ctx->V_lds);
+    return ctx->V_lds_addr_v;
+}
+
+/* zero_soff = const_i32(0) (Python 2238). Python creates this ONE const and
+ * reuses it as the soffset in every async load; cache it so the loaders do not
+ * each allocate a duplicate const. */
+static ckc_value_t* ckc__zero_soff(ckc_gfx942_attn2d_build_ctx_t* ctx)
+{
+    if (ctx->zero_soff_v == NULL)
+        ctx->zero_soff_v = ckc_b_const_i32(ctx->b, 0);
+    return ctx->zero_soff_v;
 }
 
 /* wave_lds_offset_i64 (K/V): const_i64(0) for NUM_WARPS==1, else the SGPR-pinned
- * zext(wave_id * WAVE_BYTES). */
+ * zext(wave_id * WAVE_BYTES). Python creates it once (2254/2263) and reuses it;
+ * cache. */
 static ckc_value_t* ckc__wave_lds_offset_i64(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
+    if (ctx->wave_lds_off_i64_v != NULL)
+        return ctx->wave_lds_off_i64_v;
     if (ctx->NUM_WARPS == 1)
-        return ckc_b_const_i64(ctx->b, 0);
+    {
+        ctx->wave_lds_off_i64_v = ckc_b_const_i64(ctx->b, 0);
+        return ctx->wave_lds_off_i64_v;
+    }
     ckc_value_t* off_i32 = ckc_b_to_sgpr_u32(
         ctx->b, ckc_b_mul(ctx->b, ctx->wave_id,
                           ckc_b_const_i32(ctx->b, ckc__wave_bytes(ctx))));
-    return ckc_b_zext(ctx->b, off_i32, ckc_i64());
+    ctx->wave_lds_off_i64_v = ckc_b_zext(ctx->b, off_i32, ckc_i64());
+    return ctx->wave_lds_off_i64_v;
 }
 
-/* v_wave_lds_offset_i64: the V-specific (swizzle-aware) wave offset. */
+/* v_wave_lds_offset_i64: the V-specific (swizzle-aware) wave offset. Cached. */
 static ckc_value_t* ckc__v_wave_lds_offset_i64(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
+    if (ctx->v_wave_lds_off_i64_v != NULL)
+        return ctx->v_wave_lds_off_i64_v;
     if (!ctx->SWIZZLE_VLDS || ctx->NUM_WARPS == 1)
     {
         if (ctx->NUM_WARPS == 1)
-            return ckc_b_const_i64(ctx->b, 0);
-        return ckc__wave_lds_offset_i64(ctx);
+        {
+            ctx->v_wave_lds_off_i64_v = ckc_b_const_i64(ctx->b, 0);
+            return ctx->v_wave_lds_off_i64_v;
+        }
+        ctx->v_wave_lds_off_i64_v = ckc__wave_lds_offset_i64(ctx);
+        return ctx->v_wave_lds_off_i64_v;
     }
     int v_wave_bytes = ckc__wave_bytes(ctx) + (ctx->SWIZZLE_VLDS ? ctx->V_LDS_PAD * 2 : 0);
     ckc_value_t* off_i32 = ckc_b_to_sgpr_u32(
         ctx->b, ckc_b_mul(ctx->b, ctx->wave_id, ckc_b_const_i32(ctx->b, v_wave_bytes)));
-    return ckc_b_zext(ctx->b, off_i32, ckc_i64());
+    ctx->v_wave_lds_off_i64_v = ckc_b_zext(ctx->b, off_i32, ckc_i64());
+    return ctx->v_wave_lds_off_i64_v;
 }
 
 /* ==========================================================================
@@ -229,12 +286,14 @@ ckc_value_t* ckc_gfx942_attn2d_v_load1(ckc_gfx942_attn2d_build_ctx_t* ctx,
         ckc_value_t* group = ckc_b_lshr(b, v_row, ckc_b_const_i32(b, ctx->V_GROUP_SHIFT));
         ckc_value_t* within =
             ckc_b_land(b, v_row, ckc_b_const_i32(b, ctx->V_ROWS_PER_CALL - 1));
-        ckc_value_t* slot = ckc_b_add(
-            b,
-            ckc_b_add(
-                b, ckc_b_mul(b, group, ckc_b_const_i32(b, ctx->V_GROUP_STRIDE)),
-                ckc_b_mul(b, within, ckc_b_const_i32(b, ctx->V_LDS_STRIDE))),
-            v_n_col);
+        /* slot = (group*GS + within*LS) + v_n_col. Python emits the group mul
+         * before the within mul; sequence via temps (C arg-eval is unspecified). */
+        ckc_value_t* group_mul =
+            ckc_b_mul(b, group, ckc_b_const_i32(b, ctx->V_GROUP_STRIDE));
+        ckc_value_t* within_mul =
+            ckc_b_mul(b, within, ckc_b_const_i32(b, ctx->V_LDS_STRIDE));
+        ckc_value_t* slot =
+            ckc_b_add(b, ckc_b_add(b, group_mul, within_mul), v_n_col);
         ckc_value_t* idx[2];
         idx[0] = v_buf;
         idx[1] = slot;
@@ -266,36 +325,93 @@ void ckc_gfx942_attn2d_emit_preloop(ckc_gfx942_attn2d_build_ctx_t* ctx)
         (void)((ctx->T * ctx->HD) % kv_halves_per_call);
     }
 
-    /* Per-lane starting half index (2232). lane_half_base is consumed by the
-     * loaders, which recompute it; no standalone op is required here. */
+    /* kv_block_bytes_c (2227): Python creates this one-block-bound const here,
+     * BEFORE lane_half_base, and reuses it in every loader. Emit it now so its
+     * SSA value lands in source order. */
+    (void)ckc__kv_block_bytes_c(ctx);
 
-    /* K/V LDS dest base addresses (2234-2238) are recomputed by each loader from
-     * ctx->K_lds / ctx->V_lds via smem_addr_of; nothing to persist on ctx. */
+    /* Per-lane starting half index (2232), then K/V LDS base ptrtoints (2234-
+     * 2235). These are SINGLE Python locals consumed by every loader; emit them
+     * here, in source order, and cache on ctx so the loaders reuse the same SSA
+     * values (the byte-identity contract requires the exact op stream). */
+    (void)ckc__lane_half_base(ctx);
+    (void)ckc__K_lds_addr(ctx);
+    (void)ckc__V_lds_addr(ctx);
 
-    /* seq_base + block_table_max_idx (2327-2340) -- the per-sequence base index
-     * into block_tables and the global block-table footprint bound. Both are
-     * recomputed by the fast paged-KV closures from ctx geometry. */
-    (void)ckc__seq_base;
-    (void)ckc__block_table_max_idx;
-    (void)ckc__wave_lds_offset_i64;
-    (void)ckc__v_wave_lds_offset_i64;
+    /* zero_soff (2238), then wave_lds_offset_i64 (2254) and
+     * v_wave_lds_offset_i64 (2279). Python creates each as a single SSA value
+     * HERE (even the const_i64(0) consumes a value number) and reuses them in
+     * every loader. Force their creation now, in source order, and cache so the
+     * loaders reuse them instead of allocating duplicates -- otherwise their
+     * value numbers land later and shift the whole downstream stream. */
+    (void)ckc__zero_soff(ctx);
+    (void)ckc__wave_lds_offset_i64(ctx);
+    (void)ckc__v_wave_lds_offset_i64(ctx);
     (void)ckc__bytes_per_buf;
     (void)ckc__v_bytes_per_call_swz;
     (void)ckc__kv_calls_per_tile;
     (void)ckc__bytes_per_call;
     (void)ckc__kv_block_bytes_c;
-    (void)ckc__lane_half_base;
 
-    /* FAST_PAGED_KV_DESC: the gfx942 production paged-KV path emits no standalone
-     * descriptor object -- the per-call byte offsets are built directly by
-     * _fast_paged_kv_blocks / _fast_paged_kv_voff (2352-2398). ctx->kv_desc is
-     * left NULL on this path.
-     *
-     * The non-fast TensorDescriptor.indirect / .offset_i64_split descriptor path
-     * (2399-2438, 2474, 2527, 2589) routes through transform kinds not yet on the
-     * C transforms surface (indirect, offset_i64_split); it is stubbed-to-link.
-     * gfx942's buildable space uses FAST_PAGED_KV_DESC. */
-    ctx->kv_desc = NULL;
+    /* FAST_PAGED_KV_DESC: the gfx942 production fast paged-KV path emits no
+     * standalone descriptor object -- the per-call byte offsets are built
+     * directly by _fast_paged_kv_blocks / _fast_paged_kv_voff (2352-2398). */
+    if (ctx->FAST_PAGED_KV_DESC)
+    {
+        ctx->kv_desc = NULL;
+        return;
+    }
+
+    /* ---- Paged KV byte descriptor (full transform DAG, 2327-2438) ----
+     * seq_base + block_table_max_idx are the per-sequence base index into
+     * block_tables and the global footprint bound; both wave-uniform SGPRs.
+     * Emit them HERE (before the Q gather) so the SSA stream matches Python. */
+    ckc_value_t* seq_base = ckc__seq_base(ctx);
+    ckc_value_t* max_idx = ckc__block_table_max_idx(ctx);
+
+    /* _kv_base = naive("paged_kv_bytes",
+     *     lengths=[1<<24, BS, NUM_KV, HD],
+     *     strides=[kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, KV_BYTES],
+     *     coord_names=("physical_block","token","kv_head","dim")). */
+    int blk_b = ctx->BS * ctx->NUM_KV * ctx->HD * ctx->KV_BYTES;
+    int tok_b = ctx->NUM_KV * ctx->HD * ctx->KV_BYTES;
+    int h_b = ctx->HD * ctx->KV_BYTES;
+    int kv_lengths[4] = {1 << 24, ctx->BS, ctx->NUM_KV, ctx->HD};
+    int kv_strides[4] = {blk_b, tok_b, h_b, ctx->KV_BYTES};
+    static const char* const kv_coords[4] = {"physical_block", "token", "kv_head",
+                                             "dim"};
+    ckc_tensor_descriptor_t* kv_base = ckc_tensor_descriptor_naive(
+        b, "paged_kv_bytes", kv_lengths, 4, kv_strides, kv_coords, 4);
+
+    /* Single-block tile (N_BLOCKS_PER_TILE == 1, T == BS):
+     *   indirect(tile_idx -> physical_block) ; unmerge(linear_half -> token,dim).
+     * Multi-block (N_BLOCKS_PER_TILE > 1):
+     *   unmerge(linear_half -> block_within_tile,token,dim) ;
+     *   embed((tile_idx,block_within_tile) -> linear_block_idx) ;
+     *   indirect(linear_block_idx -> physical_block). */
+    if (ctx->N_BLOCKS_PER_TILE == 1)
+    {
+        const char* td_into[2] = {"token", "dim"};
+        int td_dims[2] = {ctx->T, ctx->HD};
+        const ckc_transform_t* chain[2];
+        chain[0] = ckc_indirect(b, "tile_idx", "physical_block", ctx->block_tables,
+                                seq_base, max_idx, 0);
+        chain[1] = ckc_unmerge(b, "linear_half", td_into, 2, td_dims);
+        ctx->kv_desc = ckc_tensor_descriptor_transform(b, kv_base, chain, 2);
+    }
+    else
+    {
+        const char* td_into[3] = {"block_within_tile", "token", "dim"};
+        int td_dims[3] = {ctx->N_BLOCKS_PER_TILE, ctx->BS, ctx->HD};
+        const char* emb_upper[2] = {"tile_idx", "block_within_tile"};
+        int emb_strides[2] = {ctx->N_BLOCKS_PER_TILE, 1};
+        const ckc_transform_t* chain[3];
+        chain[0] = ckc_unmerge(b, "linear_half", td_into, 3, td_dims);
+        chain[1] = ckc_embed(b, emb_upper, 2, "linear_block_idx", emb_strides, 0);
+        chain[2] = ckc_indirect(b, "linear_block_idx", "physical_block",
+                                ctx->block_tables, seq_base, max_idx, 0);
+        ctx->kv_desc = ckc_tensor_descriptor_transform(b, kv_base, chain, 3);
+    }
 
     /* tile-0 prefetch (issue_k(tile0) / issue_v(tile0)) is driven by the loop
      * driver glue, which calls the loader phase functions below in Python order. */
@@ -411,9 +527,9 @@ void ckc_gfx942_attn2d_issue_k_load_runtime(ckc_gfx942_attn2d_build_ctx_t* ctx,
     int kv_calls_per_tile = ckc__kv_calls_per_tile(ctx);
     int kv_halves_per_call = ckc__kv_halves_per_call(ctx);
 
-    ckc_value_t* K_lds_addr = ckc_b_smem_addr_of(b, ctx->K_lds);
+    ckc_value_t* K_lds_addr = ckc__K_lds_addr(ctx);
     ckc_value_t* wave_off = ckc__wave_lds_offset_i64(ctx);
-    ckc_value_t* zero_soff = ckc_b_const_i32(b, 0);
+    ckc_value_t* zero_soff = ckc__zero_soff(ctx);
     ckc_value_t* kv_block_bytes_c = ckc__kv_block_bytes_c(ctx);
     ckc_value_t* lane_half_base = ckc__lane_half_base(ctx);
 
@@ -445,10 +561,19 @@ void ckc_gfx942_attn2d_issue_k_load_runtime(ckc_gfx942_attn2d_build_ctx_t* ctx,
         }
         else
         {
-            /* Non-fast TensorDescriptor.offset / offset_i64_split path: not on
-             * the C transforms surface (stub-to-link; gfx942 uses fast path). */
-            voff = ckc_b_add(b, ckc_b_const_i32(b, call * kv_halves_per_call),
-                             lane_half_base);
+            /* Non-fast paged-KV (N_BLOCKS_PER_TILE==1 / multi-block):
+             *   linear_half = call*KV_HALVES_PER_CALL + lane_half_base
+             *   voff, _ = paged_kv_desc.offset(tile_idx=, linear_half=, kv_head=)
+             * (Python 2470-2489; I64_KV_ADDR is false in gfx942's buildable
+             * space, so the plain i32 voffset is used). */
+            ckc_value_t* linear_half = ckc_b_add(
+                b, ckc_b_const_i32(b, call * kv_halves_per_call), lane_half_base);
+            const char* in_names[3] = {"tile_idx", "linear_half", "kv_head"};
+            ckc_value_t* in_values[3] = {kv_tile_idx, linear_half, ctx->kv_head_idx};
+            ckc_value_t* valid = NULL;
+            if (!ckc_transforms_descriptor_offset(b, ctx->kv_desc, in_names,
+                                                  in_values, 3, &voff, &valid))
+                return;
         }
         ckc_value_t* k_dst = ckc_b_smem_ptr_add(
             b, K_wave_base, ckc_b_const_i64(b, (int64_t)call * bytes_per_call));
@@ -474,9 +599,9 @@ void ckc_gfx942_attn2d_issue_k_slice_load_runtime(ckc_gfx942_attn2d_build_ctx_t*
     int kv_halves_per_call = ckc__kv_halves_per_call(ctx);
     int k_slice_calls_per_tile = (ctx->T * ctx->K_SLICE_HD) / kv_halves_per_call;
 
-    ckc_value_t* K_lds_addr = ckc_b_smem_addr_of(b, ctx->K_lds);
+    ckc_value_t* K_lds_addr = ckc__K_lds_addr(ctx);
     ckc_value_t* wave_off = ckc__wave_lds_offset_i64(ctx);
-    ckc_value_t* zero_soff = ckc_b_const_i32(b, 0);
+    ckc_value_t* zero_soff = ckc__zero_soff(ctx);
     ckc_value_t* kv_block_bytes_c = ckc__kv_block_bytes_c(ctx);
     ckc_value_t* lane_half_base = ckc__lane_half_base(ctx);
 
@@ -526,9 +651,9 @@ void ckc_gfx942_attn2d_issue_v_load_runtime(ckc_gfx942_attn2d_build_ctx_t* ctx,
     int v_bytes_per_call_swz = ckc__v_bytes_per_call_swz(ctx);
 
     (void)buf_idx; /* V is single-buffered; always slot 0. */
-    ckc_value_t* V_lds_addr = ckc_b_smem_addr_of(b, ctx->V_lds);
+    ckc_value_t* V_lds_addr = ckc__V_lds_addr(ctx);
     ckc_value_t* v_wave_off = ckc__v_wave_lds_offset_i64(ctx);
-    ckc_value_t* zero_soff = ckc_b_const_i32(b, 0);
+    ckc_value_t* zero_soff = ckc__zero_soff(ctx);
     ckc_value_t* kv_block_bytes_c = ckc__kv_block_bytes_c(ctx);
     ckc_value_t* lane_half_base = ckc__lane_half_base(ctx);
 
@@ -556,9 +681,17 @@ void ckc_gfx942_attn2d_issue_v_load_runtime(ckc_gfx942_attn2d_build_ctx_t* ctx,
         }
         else
         {
-            /* Non-fast TensorDescriptor path: stub-to-link (gfx942 fast path). */
-            voff = ckc_b_add(b, ckc_b_const_i32(b, call * kv_halves_per_call),
-                             lane_half_base);
+            /* Non-fast paged-KV: voff = paged_kv_desc.offset(tile_idx=,
+             * linear_half=call*KV_HALVES_PER_CALL+lane_half_base, kv_head=)
+             * (Python 2585-2605; I64_KV_ADDR false in gfx942 buildable space). */
+            ckc_value_t* linear_half = ckc_b_add(
+                b, ckc_b_const_i32(b, call * kv_halves_per_call), lane_half_base);
+            const char* in_names[3] = {"tile_idx", "linear_half", "kv_head"};
+            ckc_value_t* in_values[3] = {kv_tile_idx, linear_half, ctx->kv_head_idx};
+            ckc_value_t* valid = NULL;
+            if (!ckc_transforms_descriptor_offset(b, ctx->kv_desc, in_names,
+                                                  in_values, 3, &voff, &valid))
+                return;
         }
         ckc_value_t* v_dst = ckc_b_smem_ptr_add(
             b, V_wave_base, ckc_b_const_i64(b, (int64_t)call * v_bytes_per_call_swz));

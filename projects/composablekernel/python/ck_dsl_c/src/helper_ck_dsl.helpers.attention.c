@@ -176,3 +176,64 @@ ckc_value_t* ckc_warp_xor_reduce_sum(ckc_ir_builder_t* b, ckc_value_t* v, int st
     }
     return cur;
 }
+
+/* ------------------------------------------------------ fp8 in-register dequant */
+
+ckc_value_t* ckc_dequant_fp8x8_to_dtype(ckc_ir_builder_t* b,
+                                        ckc_value_t* fp8_vec,
+                                        ckc_value_t* scale,
+                                        const ckc_type_t* dtype)
+{
+    /* FP8E4M3 is the imported singleton scalar type in the Python; bind to the
+     * ir.h accessor. */
+    const ckc_type_t* fp8e4m3 = ckc_fp8e4m3();
+    ckc_value_t* lo_comp[4];
+    ckc_value_t* hi_comp[4];
+    ckc_value_t* lo_fp8;
+    ckc_value_t* hi_fp8;
+    ckc_value_t* lo_f32;
+    ckc_value_t* hi_f32;
+    ckc_value_t* deq[8];
+    int i;
+
+    if(dtype == NULL)
+    {
+        return ckc_attn_set_err(b, CKC_ERR_VALUE, "dequant_fp8x8_to_dtype: dtype is NULL");
+    }
+
+    /* lo_fp8 = b.vec_pack([b.vec_extract(fp8_vec, i) for i in range(4)], FP8E4M3) */
+    for(i = 0; i < 4; ++i)
+    {
+        lo_comp[i] = ckc_b_vec_extract(b, fp8_vec, i);
+    }
+    lo_fp8 = ckc_b_vec_pack(b, lo_comp, 4, fp8e4m3);
+
+    /* hi_fp8 = b.vec_pack([b.vec_extract(fp8_vec, i) for i in range(4, 8)], FP8E4M3) */
+    for(i = 0; i < 4; ++i)
+    {
+        hi_comp[i] = ckc_b_vec_extract(b, fp8_vec, 4 + i);
+    }
+    hi_fp8 = ckc_b_vec_pack(b, hi_comp, 4, fp8e4m3);
+
+    /* lo_f32 = b.cvt_pk_f32_fp8x4(lo_fp8); hi_f32 = b.cvt_pk_f32_fp8x4(hi_fp8) */
+    lo_f32 = ckc_b_cvt_pk_f32_fp8x4(b, lo_fp8);
+    hi_f32 = ckc_b_cvt_pk_f32_fp8x4(b, hi_fp8);
+
+    /* deq = [b.cast_f32_to(b.fmul(b.vec_extract(lo_f32, i), scale), dtype) for i in range(4)]
+     *     + [b.cast_f32_to(b.fmul(b.vec_extract(hi_f32, i), scale), dtype) for i in range(4)]
+     *
+     * The list comprehension evaluates the lo loop fully, then the hi loop;
+     * within each iteration the order is vec_extract -> fmul -> cast_f32_to. */
+    for(i = 0; i < 4; ++i)
+    {
+        deq[i] = ckc_b_cast_f32_to(b, ckc_b_fmul(b, ckc_b_vec_extract(b, lo_f32, i), scale), dtype);
+    }
+    for(i = 0; i < 4; ++i)
+    {
+        deq[4 + i] =
+            ckc_b_cast_f32_to(b, ckc_b_fmul(b, ckc_b_vec_extract(b, hi_f32, i), scale), dtype);
+    }
+
+    /* return b.vec_pack(deq, dtype) */
+    return ckc_b_vec_pack(b, deq, 8, dtype);
+}

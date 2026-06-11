@@ -38,6 +38,7 @@
 #include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <string.h>
 
 #include "ckc/instance_gfx942_attention_tiled_2d_internal.h"
 #include "ckc/helper_helper_ck_dsl.helpers.attention.h"  /* ckc_apply_softcap_log2 */
@@ -52,19 +53,29 @@
 
 static ckc_value_t* fh_neg_inf(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
-    /* b.const_f32(float("-inf")) */
+    /* b.const_f32(float("-inf")) -- created once in the prologue (line 1892)
+     * and reused; reuse the cached value so we do not allocate a duplicate. */
+    if (ctx->neg_inf_v != NULL)
+        return ctx->neg_inf_v;
     return ckc_b_const_f32(ctx->b, -INFINITY);
 }
 
 static ckc_value_t* fh_rcp_ln2(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
-    /* b.const_f32(1.4426950408889634) */
+    /* b.const_f32(1.4426950408889634) -- created once in the prologue (1895)
+     * and reused; reuse the cached value. */
+    if (ctx->rcp_ln2_v != NULL)
+        return ctx->rcp_ln2_v;
     return ckc_b_const_f32(ctx->b, 1.4426950408889634);
 }
 
 static ckc_value_t* fh_sw_const(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
-    /* b.const_i32(int(SLIDING_WINDOW)) */
+    /* b.const_i32(int(SLIDING_WINDOW)) -- created once in the constants block
+     * (line 1910) and reused; reuse the cached SSA value so we don't allocate
+     * a duplicate %N. */
+    if (ctx->sw_const_v != NULL)
+        return ctx->sw_const_v;
     return ckc_b_const_i32(ctx->b, ctx->SLIDING_WINDOW);
 }
 
@@ -74,22 +85,31 @@ static ckc_value_t* fh_qk_scale(ckc_gfx942_attn2d_build_ctx_t* ctx)
     return ctx->qk_scale_v;
 }
 
-/* lane_rg = lane // 16, lane_col = lane % 16 (prologue lines 2014-2015). */
+/* lane_rg = lane // 16, lane_col = lane % 16 (prologue lines 2014-2015).
+ * Reuse the cached SSA value emitted once at line 2014. */
 static ckc_value_t* fh_lane_rg(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
+    if (ctx->lane_rg_v != NULL)
+        return ctx->lane_rg_v;
     return ckc_b_div(ctx->b, ctx->lane, ckc_b_const_i32(ctx->b, 16));
 }
 static ckc_value_t* fh_lane_col(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
+    if (ctx->lane_col_v != NULL)
+        return ctx->lane_col_v;
     return ckc_b_mod(ctx->b, ctx->lane, ckc_b_const_i32(ctx->b, 16));
 }
 /* lane_col32 = lane % 32, lane_half(32) = lane // 32 (prologue 2016-2017). */
 static ckc_value_t* fh_lane_col32(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
+    if (ctx->lane_col32_v != NULL)
+        return ctx->lane_col32_v;
     return ckc_b_mod(ctx->b, ctx->lane, ckc_b_const_i32(ctx->b, 32));
 }
 static ckc_value_t* fh_lane_half32(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
+    if (ctx->lane_half32_v != NULL)
+        return ctx->lane_half32_v;
     return ckc_b_div(ctx->b, ctx->lane, ckc_b_const_i32(ctx->b, 32));
 }
 
@@ -99,6 +119,9 @@ static ckc_value_t* fh_lane_half32(ckc_gfx942_attn2d_build_ctx_t* ctx)
  *   max_seq_prefix_len = select(msp_raw < seq_len, msp_raw, seq_len)            */
 static ckc_value_t* fh_max_seq_prefix_len(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
+    /* Reuse the cached prologue value (Python keeps one local). */
+    if (ctx->max_seq_prefix_len_v != NULL)
+        return ctx->max_seq_prefix_len_v;
     int bm1_div_nqk = (ctx->BLOCK_M - 1) / ctx->NQK;
     ckc_value_t* msp_raw = ckc_b_add(
         ctx->b, ckc_b_add(ctx->b, ctx->context_len, ctx->qb_start_pos),
@@ -241,6 +264,13 @@ void ckc_gfx942_attn2d_emit_kv_body(ckc_gfx942_attn2d_build_ctx_t* ctx)
     /* ---- next-tile bookkeeping (lines 3718-3772) ---- *
      * cur_buf / nxt_buf live in the loop carry; the front half computes tile_off
      * and the clamped next-tile index used by the K prefetch issued after QK. */
+
+    /* nxt_buf = 1 - cur_buf (single-buffer: cur_buf). Python emits this FIRST in
+     * the loop body (before tile_off); cache it for the post-QK K issue. */
+    ctx->nxt_buf_v = ctx->K_SINGLE_BUF
+                         ? ctx->cur_buf
+                         : ckc_b_sub(b, ckc_b_const_i32(b, 1), ctx->cur_buf);
+
     ckc_value_t* tile_off = ckc_b_mul(b, ctx->kv_tile_iv, ckc_b_const_i32(b, ctx->T));
 
     /* safe_next_tile = select(kv_tile_iv + step < tile_end, kv_tile_iv + step,
@@ -251,6 +281,30 @@ void ckc_gfx942_attn2d_emit_kv_body(ckc_gfx942_attn2d_build_ctx_t* ctx)
     ckc_value_t* safe_next_tile =
         ckc_b_select(b, in_range_next, next_tile_iv_raw, ctx->kv_tile_iv);
     (void)safe_next_tile;
+
+    /* GROUPED_KV2 second-tile index (lines 3723-3726); NULL on the default path. */
+    ckc_value_t* safe_tile1 = NULL;
+    if (ctx->GROUPED_KV2)
+    {
+        ckc_value_t* tile1_iv_raw =
+            ckc_b_add(b, ctx->kv_tile_iv, ckc_b_const_i32(b, 1));
+        ckc_value_t* tile1_in_range =
+            ckc_b_cmp_lt(b, tile1_iv_raw, ctx->tile_end);
+        safe_tile1 =
+            ckc_b_select(b, tile1_in_range, tile1_iv_raw, ctx->kv_tile_iv);
+    }
+
+    /* softmax-derived state forwarded to the PV bucket (filled by the narrow
+     * path below; alpha/new_l/m_new per softmax state slot). */
+    ckc_value_t* alpha_regs[CKC_GFX942_ATTN2D_MAX_REGS_PER_LANE];
+    ckc_value_t* new_l_vals[CKC_GFX942_ATTN2D_MAX_REGS_PER_LANE];
+    ckc_value_t* m_new_out[CKC_GFX942_ATTN2D_MAX_REGS_PER_LANE];
+    for (int _i = 0; _i < CKC_GFX942_ATTN2D_MAX_REGS_PER_LANE; ++_i)
+    {
+        alpha_regs[_i] = NULL;
+        new_l_vals[_i] = NULL;
+        m_new_out[_i] = NULL;
+    }
 
     /* ---- wait for current K + LDS barrier (lines 3776-3777) ---- */
     ckc_b_s_waitcnt(b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);
@@ -293,17 +347,20 @@ void ckc_gfx942_attn2d_emit_kv_body(ckc_gfx942_attn2d_build_ctx_t* ctx)
             {
                 /* 16x16x16 B (K^T) operand per lane: col = n*16 + lane%16,
                  * K = k*16 + lane_rg*4 + 0..3 (<4 x dtype>). */
+                /* Python evaluates the left const(k*16) BEFORE the mul (its
+                 * const(4) + the mul). Bind the left const first so C's arg
+                 * evaluation order does not allocate the mul's const ahead of
+                 * it and shift the mul's %value. */
+                ckc_value_t* kc_base = ckc_b_const_i32(b, k * 16);
                 ckc_value_t* kc_off = ckc_b_add(
-                    b, ckc_b_const_i32(b, k * 16),
+                    b, kc_base,
                     ckc_b_mul(b, lane_rg, ckc_b_const_i32(b, 4)));
                 ckc_value_t* k_row =
                     ckc_b_add(b, ckc_b_const_i32(b, n * 16), lane_col);
                 ckc_value_t* idx[3];
                 /* B_v = K_lds[cur_buf, k_row, kc_off], <4 x dtype>. cur_buf is the
-                 * loop-carried K buffer index; the narrow default is single-buf
-                 * (slot 0). Use const-0 as the carried cur_buf placeholder until
-                 * the carry plumbing is shared. */
-                idx[0] = ckc_b_const_i32(b, 0); /* cur_buf */
+                 * loop-carried K buffer index (the double-buffer slot). */
+                idx[0] = ctx->cur_buf; /* cur_buf */
                 idx[1] = k_row;
                 idx[2] = kc_off;
                 ckc_value_t* B_v =
@@ -323,8 +380,53 @@ void ckc_gfx942_attn2d_emit_kv_body(ckc_gfx942_attn2d_build_ctx_t* ctx)
             }
         }
 
-        /* The post-QK V/K issue + the partial-wait before PV (lines 4256-4293,
-         * 4499-4538) are scheduling glue the peer back-half owns. */
+        /* ============================================================ *
+         *  post-QK V/K issue (lines 4256-4293)
+         *
+         *  Now that QK no longer needs VMEM, start current V first and next K
+         *  second so the partial wait before PV leaves only next K pending.
+         *  cur_buf is the loop carry; nxt_buf alternates (or aliases for the
+         *  single-buffer path).
+         * ============================================================ */
+        ckc_value_t* cur_buf = ctx->cur_buf;
+        /* nxt_buf was computed at the body front (Python emits it first); reuse. */
+        ckc_value_t* nxt_buf =
+            (ctx->nxt_buf_v != NULL)
+                ? ctx->nxt_buf_v
+                : (ctx->K_SINGLE_BUF ? cur_buf
+                                     : ckc_b_sub(b, ckc_b_const_i32(b, 1), cur_buf));
+        if (ctx->K_SINGLE_BUF)
+        {
+            ckc_b_s_waitcnt(b, /*vmcnt=*/-1, /*lgkmcnt=*/0, /*expcnt=*/-1);
+            ckc_b_sync(b);
+            if (ctx->TRANSPOSED_V_STORE && ctx->CFV_STORE_SPLIT)
+            {
+                /* split cfvst already issued V; only next-K remains. */
+            }
+            else if (!ctx->EARLY_V_SCHEDULE)
+            {
+                ckc_gfx942_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
+            }
+            ckc_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
+        }
+        else if (ctx->GROUPED_KV2)
+        {
+            ckc_gfx942_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
+            ckc_gfx942_attn2d_issue_k(ctx, safe_next_tile, cur_buf);
+        }
+        else if (ctx->EARLY_V_SCHEDULE)
+        {
+            ckc_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
+        }
+        else if (ctx->TRANSPOSED_V_STORE && ctx->CFV_STORE_SPLIT)
+        {
+            ckc_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
+        }
+        else
+        {
+            ckc_gfx942_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
+            ckc_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
+        }
 
         /* ============================================================ *
          *  mask / scale / softcap / alibi / qq-bias (lines 4385-4444)
@@ -439,8 +541,12 @@ void ckc_gfx942_attn2d_emit_kv_body(ckc_gfx942_attn2d_build_ctx_t* ctx)
                     /* publish P into P_lds[row, col] (lines 4476-4487). The
                      * FP8-PV quantise path (PV_FP8_MFMA, lines 4478-4483) is gated
                      * by ctx->FP8_MFMA_PV; the default narrow build stores
-                     * cast_f32_to(p, dtype). */
-                    ckc_value_t* row = fh_in_warp_row(ctx, lane_rg, reg);
+                     * cast_f32_to(p, dtype). Reuse the LICM-hoisted per-reg row
+                     * (Python's `_state_row` here resolves to the same hoisted
+                     * `row` SSA value, wave_row_base + _in_warp_row(reg)). */
+                    ckc_value_t* row = (ctx->hoist_in_warp_row[reg] != NULL)
+                                           ? ctx->hoist_in_warp_row[reg]
+                                           : fh_in_warp_row(ctx, lane_rg, reg);
                     ckc_value_t* col = ckc_b_add(
                         b, ckc_b_mul(b, ckc_b_const_i32(b, n),
                                      ckc_b_const_i32(b, 16)),
@@ -464,29 +570,92 @@ void ckc_gfx942_attn2d_emit_kv_body(ckc_gfx942_attn2d_build_ctx_t* ctx)
         }
 
         /* ---- alpha + running-L update (lines 4491-4498) ---- *
-         * alpha[r] = exp2(m_vals[r] - m_new[r]);
-         * new_l[r] = l_vals[r] * alpha[r] + l_local[r].
-         * The front half publishes m_new into ctx->m_cur and new_l into
-         * ctx->l_cur so the peer PV phase + the carry yield can consume them. */
+         * alpha[r] = exp2(m_vals[r] - m_new[r]);  m_vals[r] is the carry m_old.
+         * new_l[r] = l_vals[r] * alpha[r] + l_local[r]; l_vals[r] is the carry
+         * l_old. Both feed the PV bucket (alpha scales acc; new_l is the yielded
+         * running denominator). */
+        /* Python emits ALL alpha_regs first (one comprehension), THEN all
+         * new_l_vals (a second comprehension); keep that two-pass order. */
+        for (int r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
+            alpha_regs[r] =
+                ckc_b_exp2(b, ckc_b_fsub(b, ctx->m_cur[r], m_new[r]));
         for (int r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
         {
-            ckc_value_t* alpha =
-                ckc_b_exp2(b, ckc_b_fsub(b, ctx->m_cur[r], m_new[r]));
-            ckc_value_t* new_l = ckc_b_fadd(
-                b, ckc_b_fmul(b, ctx->l_cur[r], alpha), l_local[r]);
-            /* stash for the peer: m_cur <- m_new, l_cur <- new_l. The peer PV
-             * phase reads ctx->m_cur (the alpha for acc scaling it recomputes
-             * identically) and ctx->l_cur (the running denominator). */
-            ctx->m_cur[r] = m_new[r];
-            ctx->l_cur[r] = new_l;
-            (void)alpha;
+            new_l_vals[r] = ckc_b_fadd(
+                b, ckc_b_fmul(b, ctx->l_cur[r], alpha_regs[r]), l_local[r]);
+            m_new_out[r] = m_new[r];
         }
     }
 
-    /* The PV MFMA (acc *= alpha; acc += P @ V) + the carry yield are the peer
-     * back-half's responsibility; they read the front-half results from
-     * ctx->m_cur / ctx->l_cur / P_lds and write ctx->out_carry. */
-    (void)SOFTMAX_STATE_SLOTS;
+    /* ============================================================ *
+     *  partial wait before PV (lines 4499-4538)
+     *
+     *  Wait for current V while leaving next K pending. Current V was issued
+     *  before next K, so kv_calls_per_tile pending operations are exactly the
+     *  next-K stream. The exotic GROUPED_KV2 / fp8 / transposed-V drains are
+     *  gated by their ctx flags; the default narrow path takes the partial wait.
+     * ============================================================ */
+    {
+        /* kv_calls_per_tile = (T*HD) / (THREADS * (ASYNC_LDS_MAX_BYTES_PER_LANE/2))
+         * (Python prologue 2177-2287; compile-time geometry). */
+        int kv_halves_per_lane = ctx->ASYNC_LDS_MAX_BYTES_PER_LANE / 2;
+        int kv_calls_per_tile =
+            (ctx->T * ctx->HD) / (ctx->THREADS * kv_halves_per_lane);
+        if (ctx->GROUPED_KV2 || ctx->KV_FP8)
+        {
+            ckc_b_s_waitcnt(b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);
+            ckc_b_sync(b);
+        }
+        else if (ctx->TRANSPOSED_V_STORE && ctx->CFV_STORE_SPLIT &&
+                 !ctx->K_SLICED_ACTIVE)
+        {
+            ckc_b_s_waitcnt(b, kv_calls_per_tile, kv_calls_per_tile, -1);
+            ckc_b_s_barrier_bare(b);
+        }
+        else if (ctx->TRANSPOSED_V_STORE && ctx->CFV_STORE_SPLIT)
+        {
+            ckc_b_s_waitcnt(b, 0, 0, -1);
+            ckc_b_sync(b);
+        }
+        else if (ctx->TRANSPOSED_V)
+        {
+            ckc_b_s_waitcnt(b, 0, 0, -1);
+            ckc_b_sync(b);
+        }
+        else
+        {
+            ckc_b_s_waitcnt(b, kv_calls_per_tile, kv_calls_per_tile, -1);
+            ckc_b_sync(b);
+        }
+    }
+
+    /* ============================================================ *
+     *  PV MFMA + carry yield (lines 4540-5041)
+     *
+     *  Hand the softmax results to the peer PV bucket, which runs acc *= alpha;
+     *  acc += P @ V and emits the scf_yield carry. The narrow (non-register-PV)
+     *  path reads P from P_lds; alpha/new_l/m_new and the buffer carry come from
+     *  the front half here.
+     * ============================================================ */
+    {
+        ckc_gfx942_attn2d_pv_inputs_t pv_in;
+        memset(&pv_in, 0, sizeof(pv_in));
+        pv_in.alpha_regs = alpha_regs;
+        pv_in.alpha_count = SOFTMAX_STATE_SLOTS;
+        pv_in.new_l_vals = new_l_vals;
+        pv_in.m_new = m_new_out;
+        pv_in.cur_buf = ctx->cur_buf;
+        /* Reuse the body-front nxt_buf (Python computes it once at body top). */
+        pv_in.nxt_buf =
+            (ctx->nxt_buf_v != NULL)
+                ? ctx->nxt_buf_v
+                : (ctx->K_SINGLE_BUF
+                       ? ctx->cur_buf
+                       : ckc_b_sub(b, ckc_b_const_i32(b, 1), ctx->cur_buf));
+        pv_in.safe_tile1 = safe_tile1;
+        ckc_gfx942_attn2d_emit_pv_bucket(ctx, &pv_in);
+    }
+
     (void)QK_K_STEP;
     return;
 }

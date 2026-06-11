@@ -192,10 +192,21 @@ static ckc_value_t* dfcp_spec_descriptor(ckc_ir_builder_t* b_,
     s_col = ckc_b_lshr(b_, rem, ckc_b_const_i32(b_, 3));
     ci = ckc_b_land(b_, rem, ckc_b_const_i32(b_, 7));
 
-    hi = ckc_b_sub(b_, ckc_b_add(b_, ckc_b_add(b_, st->h_base, local_oh), r),
-                   ckc_b_const_i32(b_, st->pH));
-    wi = ckc_b_sub(b_, ckc_b_add(b_, ckc_b_add(b_, st->w_base, local_ow), s_col),
-                   ckc_b_const_i32(b_, st->pW));
+    /* hi = b.sub(b.add(b.add(h_base, local_oh), r), b.const_i32(pH))
+     * Python evaluates the sub's args left-to-right: the add chain emits BEFORE
+     * the const_i32(pH). C call-arg order is unspecified (GCC: right-to-left),
+     * which would emit the const first and shift later SSA names. Sequence the
+     * add chain into a temp to pin Python source-order. */
+    {
+        ckc_value_t* h_acc =
+            ckc_b_add(b_, ckc_b_add(b_, st->h_base, local_oh), r);
+        hi = ckc_b_sub(b_, h_acc, ckc_b_const_i32(b_, st->pH));
+    }
+    {
+        ckc_value_t* w_acc =
+            ckc_b_add(b_, ckc_b_add(b_, st->w_base, local_ow), s_col);
+        wi = ckc_b_sub(b_, w_acc, ckc_b_const_i32(b_, st->pW));
+    }
     /* Python evaluates land(cmp_ge(...), cmp_lt(...)) arguments left-to-right,
      * so the `icmp sge` is emitted BEFORE the `icmp slt`. C leaves argument
      * evaluation order unspecified (this compiler evaluates right-to-left, which
@@ -254,12 +265,24 @@ void ckc_dfcp_load_conv0_a_tile_specialized(
     st.c_c = ckc_b_const_i32(b, c->C);
     st.c_sc = ckc_b_const_i32(b, c->S * c->C); /* 24 for the target shape. */
     st.c_k_gemm = ckc_b_const_i32(b, ckc_conv_problem_k_gemm(c));
-    st.h_base = ckc_b_mul(
-        b, ckc_b_block_id_y(b),
-        ckc_b_const_i32(b, spec->pool_tile_h * p->pool_stride_h));
-    st.w_base = ckc_b_mul(
-        b, ckc_b_block_id_z(b),
-        ckc_b_const_i32(b, spec->pool_tile_w * p->pool_stride_w));
+    /* h_base = b.mul(b.block_id_y(), b.const_i32(...)); w_base likewise.
+     * Python evaluates the mul's args left-to-right (block_id_* before the
+     * const), so the block_id takes its SSA counter slot first. C call-arg order
+     * is unspecified (GCC: right-to-left) and would swap the slots, shifting
+     * every later numbered SSA name. Hoist the block_id calls into temps to pin
+     * Python source-order. */
+    {
+        ckc_value_t* bid_y = ckc_b_block_id_y(b);
+        st.h_base = ckc_b_mul(
+            b, bid_y,
+            ckc_b_const_i32(b, spec->pool_tile_h * p->pool_stride_h));
+    }
+    {
+        ckc_value_t* bid_z = ckc_b_block_id_z(b);
+        st.w_base = ckc_b_mul(
+            b, bid_z,
+            ckc_b_const_i32(b, spec->pool_tile_w * p->pool_stride_w));
+    }
     st.pH = c->pH;
     st.pW = c->pW;
     st.Hi = c->Hi;
@@ -343,16 +366,27 @@ ckc_value_t* ckc_dfcp_setup_input_footprint_cache(
     c_foot_w = ckc_b_const_i32(b, foot_w);
     c_half_bytes = ckc_b_const_i32(b, 2);
     oob = ckc_b_const_i32(b, 0x7fffffff); /* Python (1 << 31) - 1 */
-    h_base = ckc_b_sub(
-        b,
-        ckc_b_mul(b, ckc_b_block_id_y(b),
-                  ckc_b_const_i32(b, spec->pool_tile_h * p->pool_stride_h)),
-        ckc_b_const_i32(b, c->pH));
-    w_base = ckc_b_sub(
-        b,
-        ckc_b_mul(b, ckc_b_block_id_z(b),
-                  ckc_b_const_i32(b, spec->pool_tile_w * p->pool_stride_w)),
-        ckc_b_const_i32(b, c->pW));
+    /* h_base = b.sub(b.mul(b.block_id_y(), b.const_i32(...)), b.const_i32(pH))
+     * Python evaluates the mul's args left-to-right (block_id_y before its
+     * const). C call-arg order is unspecified (GCC: right-to-left); hoist the
+     * block_id calls into temps to pin Python source-order so later SSA names
+     * line up. */
+    {
+        ckc_value_t* bid_y = ckc_b_block_id_y(b);
+        h_base = ckc_b_sub(
+            b,
+            ckc_b_mul(b, bid_y,
+                      ckc_b_const_i32(b, spec->pool_tile_h * p->pool_stride_h)),
+            ckc_b_const_i32(b, c->pH));
+    }
+    {
+        ckc_value_t* bid_z = ckc_b_block_id_z(b);
+        w_base = ckc_b_sub(
+            b,
+            ckc_b_mul(b, bid_z,
+                      ckc_b_const_i32(b, spec->pool_tile_w * p->pool_stride_w)),
+            ckc_b_const_i32(b, c->pW));
+    }
 
     for (e = 0; e < elems_per_thread; e++)
     {

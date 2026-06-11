@@ -227,17 +227,47 @@ typedef struct ckc_gfx942_attn2d_build_ctx
      * The compile-time TransposeLDSLayout<M=16,K=*,B=1> parameters used by the
      * strided-V B-operand reader and the transposed feeds. */
     int tlds_m, tlds_k, tlds_b;
+    /* TransposeLdsReader.bind(b, lane) SSA values (Python layouts.py 280-292),
+     * emitted at line 1888 right before qk_scale; cached for the PV reader. */
+    ckc_value_t* tlds_lane_div_16;
+    ckc_value_t* tlds_lane_div_4_mod_4;
+    ckc_value_t* tlds_col;
+
+    /* Per-warp lane decomposition SSA values (Python 2014-2022), emitted once in
+     * emit_loop_bounds_and_inits and reused by every consumer. */
+    ckc_value_t* lane_rg_v;
+    ckc_value_t* lane_col_v;
+    ckc_value_t* lane_half32_v;
+    ckc_value_t* lane_col32_v;
+    ckc_value_t* lane_col_div4_v;
+    ckc_value_t* lane_col_mod4_v;
+    ckc_value_t* lane_rg_is0_v;
+    ckc_value_t* lane_rg_is1_v;
+    ckc_value_t* lane_rg_is2_v;
 
     /* ---- SSA constants (lines 1891-1912) ---- */
     ckc_value_t* c0;
     ckc_value_t* zero_f;
+    ckc_value_t* neg_inf_v;  /* b.const_f32(-inf)              (1892) */
+    ckc_value_t* one_f_v;    /* b.const_f32(1.0)               (1894) */
+    ckc_value_t* rcp_ln2_v;  /* b.const_f32(1.4426950408889634) (1895) */
     ckc_value_t* qk_scale_v; /* derived from scale_p            */
+    ckc_value_t* sw_const_v; /* b.const_i32(SLIDING_WINDOW) (1910) */
 
     /* ---- paged-KV byte descriptor (full transform DAG, lines 2163-2351) ---- */
-    ckc_tensor_descriptor_t* q_desc;  /* output/query [token,head,dim]   */
-    ckc_tensor_descriptor_t* kv_desc; /* paged K/V byte descriptor       */
-    ckc_value_t* k_rsrc;              /* make_buffer_resource(K)         */
-    ckc_value_t* v_rsrc;              /* make_buffer_resource(V)         */
+    ckc_tensor_descriptor_t* q_desc;   /* output/query [token,head,dim]   */
+    ckc_tensor_descriptor_t* kv_desc;  /* paged K/V byte descriptor       */
+    ckc_value_t* seq_base;             /* to_sgpr_u32(seq_idx*bt_stride)  */
+    ckc_value_t* block_table_max_idx;  /* to_sgpr_u32(num_seqs*bt_stride) */
+    ckc_value_t* kv_block_bytes_c_v;   /* const BS*NUM_KV*HD*KV_BYTES (2227) */
+    ckc_value_t* lane_half_base_v;     /* tid * KV_HALVES_PER_LANE (2232) */
+    ckc_value_t* zero_soff_v;          /* const_i32(0) soffset (2238)     */
+    ckc_value_t* wave_lds_off_i64_v;   /* wave_lds_offset_i64 (2254/2263) */
+    ckc_value_t* v_wave_lds_off_i64_v; /* v_wave_lds_offset_i64 (2279/87) */
+    ckc_value_t* K_lds_addr_v;         /* ptrtoint K_lds (2234)           */
+    ckc_value_t* V_lds_addr_v;         /* ptrtoint V_lds (2235)           */
+    ckc_value_t* k_rsrc;               /* make_buffer_resource(K)         */
+    ckc_value_t* v_rsrc;               /* make_buffer_resource(V)         */
     ckc_value_t* out_rsrc;
 
     /* ---- per-lane Q VGPR gather (lines 3426-3592) ---- *
@@ -252,6 +282,7 @@ typedef struct ckc_gfx942_attn2d_build_ctx
     /* ---- KV-loop bounds + step (lines 1981-2006) ---- */
     ckc_value_t* tile_start;
     ckc_value_t* tile_end;
+    ckc_value_t* max_seq_prefix_len_v; /* cached (Python 1982-1984)        */
     ckc_value_t* kv_step;
 
     /* ---- online-softmax iter-args (lines 2007-2023) ---- *
@@ -260,6 +291,12 @@ typedef struct ckc_gfx942_attn2d_build_ctx
      * + num_accs. ACC indexing: acc lives at iter_args[ml_count + n*ACC_M_ATOMS
      * + atom]; the helpers below resolve that. */
     ckc_value_t* iter_args[CKC_GFX942_ATTN2D_MAX_ITER_ARGS];
+    /* Per-slot carry name WITHOUT leading '%' ("m0","l0",...,"acc0"/"acc0a0",
+     * "cur_buf"). The names are emitted verbatim as the loop's phi-node names, so
+     * they must match the Python iter_args tuple names for byte-identity. Each
+     * entry points into ctx->iter_args_name_buf. */
+    const char* iter_args_names[CKC_GFX942_ATTN2D_MAX_ITER_ARGS];
+    char iter_args_name_buf[CKC_GFX942_ATTN2D_MAX_ITER_ARGS][24];
     int iter_args_count;
     int ml_count;    /* 2 * SOFTMAX_STATE_SLOTS         */
     int ACC_N_TILES; /* PV_N_TILES (epilogue alias)     */
@@ -280,6 +317,14 @@ typedef struct ckc_gfx942_attn2d_build_ctx
      * (the no-SW transposed split runs a full-tile skip_mask=True phase then a
      * boundary phase). out_carry receives the rewritten carry for the next iter. */
     ckc_value_t* kv_tile_iv;
+    /* The loop-carried K/V double-buffer slot (carry[ml_count + num_accs]); set
+     * by drive_kv_loop alongside kv_tile_iv. The body computes nxt_buf from it
+     * (1 - cur_buf, or cur_buf for the single-buffer path). */
+    ckc_value_t* cur_buf;
+    /* nxt_buf = 1 - cur_buf (or cur_buf when single-buffered). Python emits it at
+     * the TOP of the loop body (before tile_off); computed by the front half and
+     * reused by the post-QK K issue. */
+    ckc_value_t* nxt_buf_v;
     bool skip_mask;
     ckc_value_t* m_cur[CKC_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     ckc_value_t* l_cur[CKC_GFX942_ATTN2D_MAX_REGS_PER_LANE];
@@ -458,11 +503,65 @@ void ckc_gfx942_attn2d_emit_q_load(ckc_gfx942_attn2d_build_ctx_t* ctx);
  * Fills ctx->hoist_* before the loop. */
 void ckc_gfx942_attn2d_emit_licm_hoist(ckc_gfx942_attn2d_build_ctx_t* ctx);
 
+/* ----- KV-loop bounds + online-softmax iter-arg carry inits ----- *
+ * Ports Python lines 1982-2161 (tile_start/tile_end via max_seq_prefix_len) and
+ * the m/l/acc init computation that seeds the scf_for_iter carry. Must run after
+ * emit_q_load (so the sink loads land in Python order) and before emit_preloop.
+ * Fills ctx->tile_start/tile_end and ctx->iter_args[0 .. ml_count + num_accs)
+ * with their names; the trailing cur_buf carry is appended later by
+ * emit_loop_step_const (Python line 3606-3607) and kv_step by the same. */
+void ckc_gfx942_attn2d_emit_loop_bounds_and_inits(ckc_gfx942_attn2d_build_ctx_t* ctx);
+
+/* ----- tile-0 prefetch + cur_buf carry + kv_step (lines 3591-3689) ----- *
+ * Emits _issue_k(tile_start, 0), appends the ("cur_buf", const_i32(0)) carry to
+ * iter_args, and records ctx->kv_step. Runs after emit_q_gather, before
+ * emit_licm_hoist. */
+void ckc_gfx942_attn2d_emit_preloop_prefetch(ckc_gfx942_attn2d_build_ctx_t* ctx);
+
+/* ----- kv_step const (Python 3689) ----- *
+ * Emitted after emit_licm_hoist to match Python const emission order. */
+void ckc_gfx942_attn2d_emit_kv_step(ckc_gfx942_attn2d_build_ctx_t* ctx);
+
+/* ----- drive the scf_for_iter KV loop (lines 5043-5052) ----- *
+ * Builds the loop over [tile_start, tile_end) step kv_step with the named
+ * iter_args carry, enters the body region, unpacks the carry into
+ * ctx->m_cur/l_cur/acc_cur + sets ctx->kv_tile_iv, runs emit_kv_body, then
+ * leaves. Returns the loop handle whose .op->results are the rewritten carry the
+ * epilogue consumes. */
+ckc_for_t ckc_gfx942_attn2d_drive_kv_loop(ckc_gfx942_attn2d_build_ctx_t* ctx);
+
 /* ----- KV-loop body (_emit_kv_body, lines 3701-5042) ----- *
  * One full KV-tile body: QK MFMA + softcap/mask/softmax + PV MFMA + acc scale,
  * threading the online-softmax carry. Reads ctx->kv_tile_iv / ctx->skip_mask /
  * ctx->m_cur / ctx->l_cur / ctx->acc_cur and writes ctx->out_carry. */
 void ckc_gfx942_attn2d_emit_kv_body(ckc_gfx942_attn2d_build_ctx_t* ctx);
+
+/* Inbound softmax-derived state for the PV bucket. The QK/softmax front half
+ * fills this and hands it to ckc_gfx942_attn2d_emit_pv_bucket; the PV bucket runs
+ * acc *= alpha; acc += P @ V and emits the scf_yield carry. */
+typedef struct ckc_gfx942_attn2d_pv_inputs
+{
+    ckc_value_t* const* alpha_regs; /* SOFTMAX_STATE_SLOTS                       */
+    int alpha_count;
+    ckc_value_t* const* new_l_vals; /* SOFTMAX_STATE_SLOTS                       */
+    ckc_value_t* const* m_new;      /* SOFTMAX_STATE_SLOTS                       */
+    /* PT32 register groups: pt32[g] is the flat [p_tile*RPL + reg] array for
+     * group g; group 0 = current tile, group 1 = GROUPED_KV2 second tile. */
+    ckc_value_t* const* pt32_g0;
+    ckc_value_t* const* pt32_g1;
+    int pt32_count;
+    /* p_regs_f32[reg][n] flattened reg*QK_N_TILES + n (REGISTER_PV path). */
+    ckc_value_t* const* p_regs_f32;
+    int p_regs_f32_stride; /* == QK_N_TILES                                    */
+    /* GROUPED_KV2 V re-issue inputs. */
+    ckc_value_t* safe_tile1;
+    ckc_value_t* nxt_buf;
+    ckc_value_t* cur_buf;
+} ckc_gfx942_attn2d_pv_inputs_t;
+
+/* PV MFMA + carry yield bucket (Python lines 4540-5041). */
+void ckc_gfx942_attn2d_emit_pv_bucket(ckc_gfx942_attn2d_build_ctx_t* ctx,
+                                      const ckc_gfx942_attn2d_pv_inputs_t* in);
 
 /* ----- inner QK / PV closures of _emit_kv_body (lines 3868, 4573, 4900) ----- */
 /* _kslot(group_idx) -> K_lds slot (sliced-ring slot map). */
@@ -475,8 +574,11 @@ ckc_value_t* ckc_gfx942_attn2d_apply_transposed_pv_regs(ckc_gfx942_attn2d_build_
                                                         int p_count);
 /* _strided_v_b_operand(k_iter) -> the PV V B-operand from strided LDS reads
  * (gfx942 non-transpose path). */
-ckc_value_t*
-ckc_gfx942_attn2d_strided_v_b_operand(ckc_gfx942_attn2d_build_ctx_t* ctx, int k_iter, int n_tile);
+ckc_value_t* ckc_gfx942_attn2d_strided_v_b_operand(ckc_gfx942_attn2d_build_ctx_t* ctx,
+                                                   int k_iter,
+                                                   ckc_value_t* v_n_col,
+                                                   ckc_value_t* v_k_chunk_base,
+                                                   ckc_value_t* v_buf);
 
 /* ----- epilogue (lines 5054-5287) ----- *
  * Drains outstanding async copies, reads the loop results into ctx->l_final /

@@ -993,3 +993,123 @@ ckc_status_t ckc_wmma_attention_fwd_inner_body(ckc_ir_builder_t* b,
 
     return ckc_ir_builder_status(b);
 }
+
+/* ===========================================================================
+ * Additional symbols ported from ck_dsl.helpers.attention.
+ * ===========================================================================
+ */
+
+/* ----------------------------------------------------- mfma_32x32x16_for_dtype *
+ *
+ * Python:
+ *     if dtype.name == "f16":     return b.mfma_f32_32x32x16_f16(a, bv, c)
+ *     if dtype.name == "bf16":    return b.mfma_f32_32x32x16_bf16(a, bv, c)
+ *     if dtype.name == "fp8e4m3": return b.mfma_f32_32x32x16_fp8(a, bv, c)
+ *     raise ValueError(f"unsupported MFMA 32x32x16 dtype {dtype.name}")
+ */
+ckc_value_t* ckc_mfma_attn_mfma_32x32x16_for_dtype(ckc_ir_builder_t* b,
+                                                   const ckc_type_t* dtype,
+                                                   ckc_value_t* a,
+                                                   ckc_value_t* bv,
+                                                   ckc_value_t* c)
+{
+    if (dtype == NULL || dtype->name == NULL)
+    {
+        if (b != NULL)
+        {
+            ckc_i_set_err(b, CKC_ERR_VALUE, "unsupported MFMA 32x32x16 dtype (null)");
+        }
+        return NULL;
+    }
+    if (strcmp(dtype->name, "f16") == 0)
+    {
+        return ckc_b_mfma_f32_32x32x16_f16(b, a, bv, c);
+    }
+    if (strcmp(dtype->name, "bf16") == 0)
+    {
+        return ckc_b_mfma_f32_32x32x16_bf16(b, a, bv, c);
+    }
+    if (strcmp(dtype->name, "fp8e4m3") == 0)
+    {
+        return ckc_b_mfma_f32_32x32x16_fp8(b, a, bv, c);
+    }
+    if (b != NULL)
+    {
+        ckc_i_set_err(b, CKC_ERR_VALUE, "unsupported MFMA 32x32x16 dtype %s", dtype->name);
+    }
+    return NULL;
+}
+
+/* ----------------------------------------------------- dequant_fp8x8_to_dtype *
+ *
+ * Python:
+ *     lo_fp8 = b.vec_pack([b.vec_extract(fp8_vec, i) for i in range(4)], FP8E4M3)
+ *     hi_fp8 = b.vec_pack([b.vec_extract(fp8_vec, i) for i in range(4, 8)], FP8E4M3)
+ *     lo_f32 = b.cvt_pk_f32_fp8x4(lo_fp8)
+ *     hi_f32 = b.cvt_pk_f32_fp8x4(hi_fp8)
+ *     deq = [b.cast_f32_to(b.fmul(b.vec_extract(lo_f32, i), scale), dtype) for i in range(4)]
+ *         + [b.cast_f32_to(b.fmul(b.vec_extract(hi_f32, i), scale), dtype) for i in range(4)]
+ *     return b.vec_pack(deq, dtype)
+ *
+ * FP8E4M3 is the imported singleton scalar type in the Python; bind to the ir.h
+ * accessor. Order of emission matches the Python list comprehension exactly:
+ * lo quad (extract*4 -> pack), hi quad (extract*4 -> pack), cvt lo then hi,
+ * then 8 (vec_extract -> fmul -> cast_f32_to) triples (lo 0..3 then hi 0..3),
+ * then the final vec_pack(dtype).
+ */
+ckc_value_t* ckc_mfma_attn_dequant_fp8x8_to_dtype(ckc_ir_builder_t* b,
+                                                  ckc_value_t* fp8_vec,
+                                                  ckc_value_t* scale,
+                                                  const ckc_type_t* dtype)
+{
+    const ckc_type_t* fp8e4m3 = ckc_fp8e4m3();
+    ckc_value_t* lo_comp[4];
+    ckc_value_t* hi_comp[4];
+    ckc_value_t* lo_fp8;
+    ckc_value_t* hi_fp8;
+    ckc_value_t* lo_f32;
+    ckc_value_t* hi_f32;
+    ckc_value_t* deq[8];
+    int i;
+
+    if (dtype == NULL)
+    {
+        if (b != NULL)
+        {
+            ckc_i_set_err(b, CKC_ERR_VALUE, "dequant_fp8x8_to_dtype: dtype is NULL");
+        }
+        return NULL;
+    }
+
+    /* lo_fp8 = b.vec_pack([b.vec_extract(fp8_vec, i) for i in range(4)], FP8E4M3) */
+    for (i = 0; i < 4; ++i)
+    {
+        lo_comp[i] = ckc_b_vec_extract(b, fp8_vec, i);
+    }
+    lo_fp8 = ckc_b_vec_pack(b, lo_comp, 4, fp8e4m3);
+
+    /* hi_fp8 = b.vec_pack([b.vec_extract(fp8_vec, i) for i in range(4, 8)], FP8E4M3) */
+    for (i = 0; i < 4; ++i)
+    {
+        hi_comp[i] = ckc_b_vec_extract(b, fp8_vec, 4 + i);
+    }
+    hi_fp8 = ckc_b_vec_pack(b, hi_comp, 4, fp8e4m3);
+
+    /* lo_f32 = b.cvt_pk_f32_fp8x4(lo_fp8); hi_f32 = b.cvt_pk_f32_fp8x4(hi_fp8) */
+    lo_f32 = ckc_b_cvt_pk_f32_fp8x4(b, lo_fp8);
+    hi_f32 = ckc_b_cvt_pk_f32_fp8x4(b, hi_fp8);
+
+    /* deq lo lanes 0..3, then hi lanes 0..3; each: vec_extract -> fmul -> cast */
+    for (i = 0; i < 4; ++i)
+    {
+        deq[i] = ckc_b_cast_f32_to(b, ckc_b_fmul(b, ckc_b_vec_extract(b, lo_f32, i), scale), dtype);
+    }
+    for (i = 0; i < 4; ++i)
+    {
+        deq[4 + i] =
+            ckc_b_cast_f32_to(b, ckc_b_fmul(b, ckc_b_vec_extract(b, hi_f32, i), scale), dtype);
+    }
+
+    /* return b.vec_pack(deq, dtype) */
+    return ckc_b_vec_pack(b, deq, 8, dtype);
+}

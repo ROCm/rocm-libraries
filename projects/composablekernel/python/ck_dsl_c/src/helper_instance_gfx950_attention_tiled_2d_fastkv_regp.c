@@ -1,0 +1,242 @@
+/* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ * SPDX-License-Identifier: MIT
+ *
+ * C99 port of ck_dsl/instances/gfx950/attention_tiled_2d_fastkv_regp.py.
+ * See ckc/helper_instance_gfx950_attention_tiled_2d_fastkv_regp.h for the
+ * symbol map and the relationship to the already-ported tiled-2D surface.
+ */
+
+#include "ckc/helper_instance_gfx950_attention_tiled_2d_fastkv_regp.h"
+
+#include <stdio.h>
+#include <string.h>
+
+/* ------------------------------------------------------------------ helpers */
+
+/* Record a Python ValueError text on the sticky-error builder. Mirrors the
+ * idiom used by the rest of the attention port. A dead/NULL builder is a no-op. */
+static void ckc__fastkv_regp_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* msg)
+{
+    if (b == NULL)
+        return;
+    if (b->status != CKC_OK) /* sticky: keep the first failure */
+        return;
+    b->status = st;
+    snprintf(b->err, (size_t)CKC_ERR_MSG_CAP, "%s", msg ? msg : "");
+}
+
+/* ===================================================================== *
+ *  _FastKvRegisterPProxy  (Python lines 29-46)
+ * ===================================================================== */
+
+ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy_t
+ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy_make(
+    const ckc_attention_tiled_2d_spec_t* spec)
+{
+    ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy_t p;
+    memset(&p, 0, sizeof(p));
+    if (spec != NULL)
+        p.spec = *spec; /* self._spec = spec */
+    return p;
+}
+
+bool ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy_use_register_pv(
+    const ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy_t* p)
+{
+    (void)p;
+    /* @property use_register_pv -> True (independent of the wrapped spec). */
+    return true;
+}
+
+ckc_status_t ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy_kernel_name(
+    const char* base, char* out, size_t out_cap, size_t* out_len)
+{
+    /* f"{base}_fastkv_regp" */
+    static const char kSuffix[] = "_fastkv_regp";
+    size_t base_len, suffix_len, total;
+
+    if (base == NULL || out == NULL)
+        return CKC_ERR_VALUE;
+
+    base_len = strlen(base);
+    suffix_len = sizeof(kSuffix) - 1; /* excludes NUL */
+    total = base_len + suffix_len;
+
+    if (out_cap < total + 1) /* +1 for NUL */
+        return CKC_ERR_VALUE;
+
+    memcpy(out, base, base_len);
+    memcpy(out + base_len, kSuffix, suffix_len + 1); /* copy NUL too */
+
+    if (out_len != NULL)
+        *out_len = total;
+    return CKC_OK;
+}
+
+/* ===================================================================== *
+ *  make_fastkv_register_p_spec(...)  (Python lines 49-94)
+ * ===================================================================== */
+
+ckc_attention_tiled_2d_spec_t ckc_gfx950_make_fastkv_register_p_spec(
+    const ckc_attention_tiled_2d_spec_t* spec,
+    bool scalar_state,
+    bool mask_once,
+    bool has_mask_limit,
+    bool mask_limit,
+    bool half_local_pv,
+    bool skip_legacy_qreg)
+{
+    ckc_attention_tiled_2d_spec_t out;
+    bool use_mask_limit;
+
+    /* dataclasses.replace(spec, ...): start from a copy of the source spec. */
+    memset(&out, 0, sizeof(out));
+    if (spec != NULL)
+        out = *spec;
+
+    /* use_mask_limit resolution (mask_limit keyword default None -> the derived
+     * boolean; otherwise the explicit override). Evaluated against the *source*
+     * spec's flags, exactly as the Python expression reads ``spec.*``. */
+    if (!has_mask_limit)
+    {
+        use_mask_limit =
+            scalar_state && mask_once &&
+            (spec != NULL ? spec->sliding_window == 0 : true) &&
+            (spec != NULL ? !spec->has_softcap : true) &&
+            (spec != NULL ? !spec->use_alibi : true) &&
+            (spec != NULL ? !spec->use_qq_bias : true);
+    }
+    else
+    {
+        use_mask_limit = mask_limit;
+    }
+
+    /* The forced experiment knobs (replace(...) kwargs). */
+    out.num_warps = 4;
+
+    out.has_waves_per_eu = true;
+    out.waves_per_eu = 2;
+
+    out.has_tile_size = true;
+    out.tile_size = 2 * (spec != NULL ? spec->block_size : 0);
+
+    out.block_m_per_warp = 32;
+    out.use_mfma_32x32 = true;
+    out.use_transposed_qk_32x32 = true;
+    out.use_transposed_scalar_state = scalar_state;
+    out.use_transposed_mask_once = mask_once;
+    out.use_transposed_half_local_pv = half_local_pv;
+    out.use_mfma32_skip_legacy_qreg = skip_legacy_qreg;
+    out.use_transposed_mask_limit = use_mask_limit;
+    out.use_fast_paged_kv_desc = true;
+    out.use_agpr_alloc_zero = false;
+    out.use_register_pv = false;
+
+    return out;
+}
+
+/* ===================================================================== *
+ *  supports_fastkv_register_p_2d(...)  (Python lines 97-141)
+ * ===================================================================== */
+
+bool ckc_gfx950_supports_fastkv_register_p_2d(
+    const ckc_gfx950_supports_fastkv_register_p_2d_args_t* args, char* reason, size_t reason_cap)
+{
+    ckc_gfx942_attention_tiled_2d_supports_args_t targs;
+    bool ok;
+
+    if (args == NULL)
+        return false;
+
+    /* ok, reason = supports_tiled_2d(... num_warps=4, kv_storage_dtype=None,
+     *   tile_size = tile_size if tile_size is not None else 2*block_size,
+     *   arch=arch) */
+    targs = ckc_gfx942_attention_tiled_2d_supports_args_default();
+    targs.head_size = args->head_size;
+    targs.block_size = args->block_size;
+    targs.dtype = args->dtype;
+    targs.num_queries_per_kv = args->num_queries_per_kv;
+    targs.use_alibi = args->use_alibi;
+    targs.use_qq_bias = args->use_qq_bias;
+    targs.use_fp8 = args->use_fp8;
+    targs.q_dtype = args->q_dtype;
+    targs.num_warps = 4;
+    targs.kv_storage_dtype = NULL; /* Python kv_storage_dtype=None */
+    targs.has_tile_size = true;
+    targs.tile_size = args->has_tile_size ? args->tile_size : 2 * args->block_size;
+    targs.arch = (args->arch != NULL) ? args->arch : "gfx950";
+
+    ok = ckc_gfx942_attention_tiled_2d_supports(&targs, reason, reason_cap);
+    if (!ok)
+        return false; /* reason already populated by the tiled gate */
+
+    /* The experiment's hard shape restriction. */
+    if (!(args->dtype != NULL && strcmp(args->dtype, "bf16") == 0 &&
+          args->head_size == 64 && args->block_size == 32 &&
+          args->num_query_heads == 64 && args->num_kv_heads == 8))
+    {
+        if (reason != NULL && reason_cap > 0)
+            snprintf(reason, reason_cap, "%s",
+                     "fastKV register-P experiment is restricted to bf16 d64_b32_h64kv8");
+        return false;
+    }
+
+    if (reason != NULL && reason_cap > 0)
+        snprintf(reason, reason_cap, "%s", "supported");
+    return true;
+}
+
+/* ===================================================================== *
+ *  build_unified_attention_2d_fastkv_register_p(...)  (Python lines 144-162)
+ * ===================================================================== */
+
+ckc_kernel_def_t* ckc_build_unified_attention_2d_fastkv_register_p(
+    ckc_ir_builder_t* b, const ckc_attention_tiled_2d_spec_t* spec, const char* arch)
+{
+    ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy_t proxy;
+    ckc_attention_tiled_2d_spec_t built;
+
+    if (b == NULL || spec == NULL)
+        return NULL;
+    if (b->status != CKC_OK) /* dead builder: no-op */
+        return NULL;
+
+    /* if not spec.use_fast_paged_kv_desc: raise ValueError(...) */
+    if (!spec->use_fast_paged_kv_desc)
+    {
+        ckc__fastkv_regp_set_err(
+            b, CKC_ERR_VALUE,
+            "fastKV register-P experiment requires use_fast_paged_kv_desc");
+        return NULL;
+    }
+    /* if not (spec.use_mfma_32x32 and spec.use_transposed_qk_32x32): raise ... */
+    if (!(spec->use_mfma_32x32 && spec->use_transposed_qk_32x32))
+    {
+        ckc__fastkv_regp_set_err(b, CKC_ERR_VALUE,
+                                 "fastKV register-P experiment requires transposed R4");
+        return NULL;
+    }
+    /* if spec.kv_storage_dtype is not None: raise ValueError(...) */
+    if (spec->kv_storage_dtype != NULL)
+    {
+        ckc__fastkv_regp_set_err(
+            b, CKC_ERR_VALUE,
+            "fastKV register-P experiment does not support FP8 KV cache");
+        return NULL;
+    }
+
+    /* return build_unified_attention_2d_tiled(_FastKvRegisterPProxy(spec), arch)
+     *
+     * The proxy forwards every attribute to the wrapped spec except the
+     * use_register_pv @property, which it forces True. The C tiled builder reads
+     * a plain spec struct, so apply the single proxy override (use_register_pv ->
+     * true) onto a copy and pass that through. ``arch`` NULL == Python "gfx950";
+     * the tiled builder defaults NULL to its own arch and threads it onward. */
+    proxy = ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy_make(spec);
+    built = proxy.spec;
+    built.use_register_pv =
+        ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy_use_register_pv(&proxy);
+
+    return ckc_build_unified_attention_2d_tiled_scalar(
+        b, &built, (arch != NULL) ? arch : "gfx950");
+}

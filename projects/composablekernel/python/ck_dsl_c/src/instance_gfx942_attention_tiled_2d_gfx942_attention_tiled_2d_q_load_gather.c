@@ -125,24 +125,34 @@ void ckc_gfx942_attn2d_emit_q_load(ckc_gfx942_attn2d_build_ctx_t* ctx)
                           ctx->tid);
         /* Q_row = q_vid // Q_VECS_PER_ROW */
         Q_row = ckc_b_div(b, q_vid, ckc_b_const_i32(b, (int64_t)Q_VECS_PER_ROW));
-        /* Q_col = (q_vid % Q_VECS_PER_ROW) * 8 */
-        Q_col = ckc_b_mul(b,
-                          ckc_b_mod(b, q_vid,
-                                    ckc_b_const_i32(b, (int64_t)Q_VECS_PER_ROW)),
-                          ckc_b_const_i32(b, 8));
+        /* Q_col = (q_vid % Q_VECS_PER_ROW) * 8. Python emits the inner mod (and
+         * its const) before the outer const; sequence via a temp. */
+        {
+            ckc_value_t* q_mod =
+                ckc_b_mod(b, q_vid, ckc_b_const_i32(b, (int64_t)Q_VECS_PER_ROW));
+            Q_col = ckc_b_mul(b, q_mod, ckc_b_const_i32(b, 8));
+        }
         /* q_pos_t = qb_start_pos + Q_row // NQK */
         q_pos_t = ckc_b_add(b, ctx->qb_start_pos,
                             ckc_b_div(b, Q_row, ckc_b_const_i32(b, (int64_t)ctx->NQK)));
-        /* qh_t = kv_head_idx * NQK + Q_row % NQK */
-        qh_t = ckc_b_add(b,
-                         ckc_b_mul(b, ctx->kv_head_idx,
-                                   ckc_b_const_i32(b, (int64_t)ctx->NQK)),
-                         ckc_b_mod(b, Q_row, ckc_b_const_i32(b, (int64_t)ctx->NQK)));
-        /* qmask_t = (q_pos_t < cur_batch_q_len) && (qh_t < NUM_QH) */
-        qmask_t = ckc_b_land(b,
-                             ckc_b_cmp_lt(b, q_pos_t, ctx->cur_batch_q_len),
-                             ckc_b_cmp_lt(b, qh_t,
-                                          ckc_b_const_i32(b, (int64_t)ctx->NUM_QH)));
+        /* qh_t = kv_head_idx * NQK + Q_row % NQK
+         * (force left-to-right arg emission: Python emits the mul before the
+         * mod; C arg-eval order is unspecified, so sequence them via temps). */
+        {
+            ckc_value_t* qh_mul = ckc_b_mul(b, ctx->kv_head_idx,
+                                            ckc_b_const_i32(b, (int64_t)ctx->NQK));
+            ckc_value_t* qh_mod =
+                ckc_b_mod(b, Q_row, ckc_b_const_i32(b, (int64_t)ctx->NQK));
+            qh_t = ckc_b_add(b, qh_mul, qh_mod);
+        }
+        /* qmask_t = (q_pos_t < cur_batch_q_len) && (qh_t < NUM_QH)
+         * (Python emits the q_pos cmp before the qh cmp). */
+        {
+            ckc_value_t* lt_pos = ckc_b_cmp_lt(b, q_pos_t, ctx->cur_batch_q_len);
+            ckc_value_t* lt_qh =
+                ckc_b_cmp_lt(b, qh_t, ckc_b_const_i32(b, (int64_t)ctx->NUM_QH));
+            qmask_t = ckc_b_land(b, lt_pos, lt_qh);
+        }
         /* q_pos_safe / qh_safe = select(qmask_t, ..., 0) */
         q_pos_safe = ckc_b_select(b, qmask_t, q_pos_t, ckc_b_const_i32(b, 0));
         qh_safe    = ckc_b_select(b, qmask_t, qh_t, ckc_b_const_i32(b, 0));
@@ -220,8 +230,13 @@ void ckc_gfx942_attn2d_emit_q_gather(ckc_gfx942_attn2d_build_ctx_t* ctx)
     b     = ctx->b;
     dtype = ctx->dtype;
 
-    lane_rg  = ckc_b_div(b, ctx->lane, ckc_b_const_i32(b, 16));
-    lane_col = ckc_b_mod(b, ctx->lane, ckc_b_const_i32(b, 16));
+    /* Reuse the cached lane decomposition (emitted once at line 2014). */
+    lane_rg  = (ctx->lane_rg_v != NULL)
+                   ? ctx->lane_rg_v
+                   : ckc_b_div(b, ctx->lane, ckc_b_const_i32(b, 16));
+    lane_col = (ctx->lane_col_v != NULL)
+                   ? ctx->lane_col_v
+                   : ckc_b_mod(b, ctx->lane, ckc_b_const_i32(b, 16));
 
     ctx->q_regs_count   = 0;
     ctx->q32_regs_count = 0;
@@ -270,9 +285,13 @@ void ckc_gfx942_attn2d_emit_q_gather(ckc_gfx942_attn2d_build_ctx_t* ctx)
                 int num_idx;
                 ckc_value_t* qreg;
 
-                /* q_col_off = k*16 + lane_rg*4 */
+                /* q_col_off = k*16 + lane_rg*4. Python evaluates the left
+                 * const(k*16) BEFORE the mul (left-to-right); bind it to a temp
+                 * so C's arg-eval order does not allocate the mul's const ahead
+                 * of it and shift the mul's %value. */
+                ckc_value_t* q_col_base = ckc_b_const_i32(b, (int64_t)(k * 16));
                 q_col_off =
-                    ckc_b_add(b, ckc_b_const_i32(b, (int64_t)(k * 16)),
+                    ckc_b_add(b, q_col_base,
                               ckc_b_mul(b, lane_rg, ckc_b_const_i32(b, 4)));
 
                 if(ctx->Q_ALIAS_K)

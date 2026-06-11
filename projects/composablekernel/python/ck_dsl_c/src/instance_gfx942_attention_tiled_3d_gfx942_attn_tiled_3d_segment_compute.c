@@ -109,15 +109,16 @@ void ckc_gfx942_attention_tiled_3d_emit_loop_init(
         for (reg = 0; reg < 4; reg++)
         {
             ckc_value_t* row = ckc__c_row(ctx, reg);
-            ckc_value_t* qp_r =
-                ckc_b_add(b, ctx->qb_start_pos,
-                          ckc_b_div(b, row, ckc_b_const_i32(b, cfg->NQK)));
-            ckc_value_t* qh_r = ckc_b_add(
-                b, ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, cfg->NQK)),
-                ckc_b_mod(b, row, ckc_b_const_i32(b, cfg->NQK)));
-            ckc_value_t* row_ok = ckc_b_land(
-                b, ckc_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len),
-                ckc_b_cmp_lt(b, qh_r, ckc_b_const_i32(b, cfg->NUM_QH)));
+            ckc_value_t* qp_r_div = ckc_b_div(b, row, ckc_b_const_i32(b, cfg->NQK));
+            ckc_value_t* qp_r = ckc_b_add(b, ctx->qb_start_pos, qp_r_div);
+            ckc_value_t* qh_r_mul =
+                ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, cfg->NQK));
+            ckc_value_t* qh_r_mod = ckc_b_mod(b, row, ckc_b_const_i32(b, cfg->NQK));
+            ckc_value_t* qh_r = ckc_b_add(b, qh_r_mul, qh_r_mod);
+            ckc_value_t* row_ok_a = ckc_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
+            ckc_value_t* row_ok_b =
+                ckc_b_cmp_lt(b, qh_r, ckc_b_const_i32(b, cfg->NUM_QH));
+            ckc_value_t* row_ok = ckc_b_land(b, row_ok_a, row_ok_b);
             ctx->hoist_row[reg] = row;
             ctx->hoist_qp_r[reg] = qp_r;
             ctx->hoist_qh_r[reg] = qh_r;
@@ -156,10 +157,10 @@ void ckc_gfx942_attention_tiled_3d_emit_loop_init(
             else
             {
                 ckc_value_t* row = ckc__c_row(ctx, r);
-                qh = ckc_b_add(
-                    b,
-                    ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, cfg->NQK)),
-                    ckc_b_mod(b, row, ckc_b_const_i32(b, cfg->NQK)));
+                ckc_value_t* qh_mul =
+                    ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, cfg->NQK));
+                ckc_value_t* qh_mod = ckc_b_mod(b, row, ckc_b_const_i32(b, cfg->NQK));
+                qh = ckc_b_add(b, qh_mul, qh_mod);
             }
             qh_in = ckc_b_cmp_lt(b, qh, ckc_b_const_i32(b, cfg->NUM_QH));
             sink_h = ckc_b_global_load(b, ctx->sinks, qh, dtype, 2);
@@ -188,6 +189,11 @@ void ckc_gfx942_attention_tiled_3d_emit_loop_init(
             ctx->acc_inits[n] = acc_zero;
         }
     }
+
+    /* ---- async DMA infra + paged-KV descriptor (lines 538-602) ----
+     * Emitted here (not in emit_prologue) so the SSA op order matches Python's
+     * single linear build: acc_zero precedes the buffer rsrc / seq_base / desc. */
+    ckc_gfx942_attention_tiled_3d_emit_async_infra(ctx);
 
     /* ---- first K load + cur_buf_init (lines 721-724) ---- */
     ckc_gfx942_attention_tiled_3d_issue_k(ctx, ctx->tile_start,
@@ -327,9 +333,9 @@ void ckc_gfx942_attention_tiled_3d_emit_softmax_loop(
         /* ---------------- QK (narrow 16x16x16, K-step 16) ---------------- */
         for (k = 0; k < cfg->QK_K_ITERS; k++)
         {
-            ckc_value_t* q_col_off =
-                ckc_b_add(b, ckc_b_const_i32(b, k * 16),
-                          ckc_b_mul(b, ctx->lane_rg, ckc_b_const_i32(b, 4)));
+            ckc_value_t* q_col_c = ckc_b_const_i32(b, k * 16);
+            ckc_value_t* q_col_m = ckc_b_mul(b, ctx->lane_rg, ckc_b_const_i32(b, 4));
+            ckc_value_t* q_col_off = ckc_b_add(b, q_col_c, q_col_m);
             ckc_value_t* idx[2];
             idx[0] = ctx->lane_col;
             idx[1] = q_col_off;
@@ -340,9 +346,9 @@ void ckc_gfx942_attention_tiled_3d_emit_softmax_loop(
             ckc_value_t* acc_v = ckc_b_zero_vec_f32(b, 4);
             for (k = 0; k < cfg->QK_K_ITERS; k++)
             {
-                ckc_value_t* kc_off =
-                    ckc_b_add(b, ckc_b_const_i32(b, k * 16),
-                              ckc_b_mul(b, ctx->lane_rg, ckc_b_const_i32(b, 4)));
+                ckc_value_t* kc_c = ckc_b_const_i32(b, k * 16);
+                ckc_value_t* kc_m = ckc_b_mul(b, ctx->lane_rg, ckc_b_const_i32(b, 4));
+                ckc_value_t* kc_off = ckc_b_add(b, kc_c, kc_m);
                 ckc_value_t* k_row = ckc_b_add(
                     b, ckc_b_const_i32(b, n * 16), ctx->lane_col);
                 ckc_value_t* idx[3];
@@ -365,10 +371,10 @@ void ckc_gfx942_attention_tiled_3d_emit_softmax_loop(
             for (reg = 0; reg < 4; reg++)
             {
                 ckc_value_t* row = ckc__c_row(ctx, reg);
-                ckc_value_t* qh_r = ckc_b_add(
-                    b,
-                    ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, cfg->NQK)),
-                    ckc_b_mod(b, row, ckc_b_const_i32(b, cfg->NQK)));
+                ckc_value_t* qh_r_mul =
+                    ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, cfg->NQK));
+                ckc_value_t* qh_r_mod = ckc_b_mod(b, row, ckc_b_const_i32(b, cfg->NQK));
+                ckc_value_t* qh_r = ckc_b_add(b, qh_r_mul, qh_r_mod);
                 ckc_value_t* qh_ok =
                     ckc_b_cmp_lt(b, qh_r, ckc_b_const_i32(b, cfg->NUM_QH));
                 alibi_per_row[reg] = ckc_b_masked_global_load(
@@ -392,17 +398,20 @@ void ckc_gfx942_attention_tiled_3d_emit_softmax_loop(
             else
             {
                 ckc_value_t* row = ckc__c_row(ctx, reg);
-                qp_r = ckc_b_add(b, ctx->qb_start_pos,
-                                 ckc_b_div(b, row, ckc_b_const_i32(b, cfg->NQK)));
+                ckc_value_t* qp_r_div =
+                    ckc_b_div(b, row, ckc_b_const_i32(b, cfg->NQK));
+                qp_r = ckc_b_add(b, ctx->qb_start_pos, qp_r_div);
                 {
-                    ckc_value_t* qh_r = ckc_b_add(
-                        b,
-                        ckc_b_mul(b, ctx->kv_head_idx,
-                                  ckc_b_const_i32(b, cfg->NQK)),
-                        ckc_b_mod(b, row, ckc_b_const_i32(b, cfg->NQK)));
-                    row_ok = ckc_b_land(
-                        b, ckc_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len),
-                        ckc_b_cmp_lt(b, qh_r, ckc_b_const_i32(b, cfg->NUM_QH)));
+                    ckc_value_t* qh_r_mul = ckc_b_mul(
+                        b, ctx->kv_head_idx, ckc_b_const_i32(b, cfg->NQK));
+                    ckc_value_t* qh_r_mod =
+                        ckc_b_mod(b, row, ckc_b_const_i32(b, cfg->NQK));
+                    ckc_value_t* qh_r = ckc_b_add(b, qh_r_mul, qh_r_mod);
+                    ckc_value_t* row_ok_a =
+                        ckc_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
+                    ckc_value_t* row_ok_b =
+                        ckc_b_cmp_lt(b, qh_r, ckc_b_const_i32(b, cfg->NUM_QH));
+                    row_ok = ckc_b_land(b, row_ok_a, row_ok_b);
                 }
             }
             for (n = 0; n < cfg->QK_N_TILES; n++)
@@ -560,16 +569,19 @@ void ckc_gfx942_attention_tiled_3d_emit_softmax_loop(
             }
             acc_v = ckc_b_vec_pack(b, scaled_comps, 4, f32);
 
-            v_n_col = ckc_b_add(
-                b, ckc_b_mul(b, ckc_b_const_i32(b, n), ckc_b_const_i32(b, 16)),
-                ctx->lane_col);
+            {
+                ckc_value_t* v_n_mul =
+                    ckc_b_mul(b, ckc_b_const_i32(b, n), ckc_b_const_i32(b, 16));
+                v_n_col = ckc_b_add(b, v_n_mul, ctx->lane_col);
+            }
             v_k_chunk_base = ckc_b_mul(b, ctx->lane_rg, ckc_b_const_i32(b, 4));
 
             for (k = 0; k < cfg->PV_K_ITERS; k++)
             {
-                ckc_value_t* p_off = ckc_b_add(
-                    b, ckc_b_const_i32(b, k * 16),
-                    ckc_b_mul(b, ctx->lane_rg, ckc_b_const_i32(b, 4)));
+                ckc_value_t* p_off_c = ckc_b_const_i32(b, k * 16);
+                ckc_value_t* p_off_m =
+                    ckc_b_mul(b, ctx->lane_rg, ckc_b_const_i32(b, 4));
+                ckc_value_t* p_off = ckc_b_add(b, p_off_c, p_off_m);
                 ckc_value_t* idx[2];
                 ckc_value_t* A_p;
                 ckc_value_t* B_v;
@@ -657,20 +669,26 @@ void ckc_gfx942_attention_tiled_3d_emit_epilogue(
             }
             else
             {
+                ckc_value_t* qp_r_div;
+                ckc_value_t* qh_r_mul;
+                ckc_value_t* qh_r_mod;
+                ckc_value_t* row_ok_a;
+                ckc_value_t* row_ok_b;
                 row = ckc__c_row(ctx, reg);
-                qp_r = ckc_b_add(b, ctx->qb_start_pos,
-                                 ckc_b_div(b, row, ckc_b_const_i32(b, cfg->NQK)));
-                qh_r = ckc_b_add(
-                    b,
-                    ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, cfg->NQK)),
-                    ckc_b_mod(b, row, ckc_b_const_i32(b, cfg->NQK)));
-                row_ok = ckc_b_land(
-                    b, ckc_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len),
-                    ckc_b_cmp_lt(b, qh_r, ckc_b_const_i32(b, cfg->NUM_QH)));
+                qp_r_div = ckc_b_div(b, row, ckc_b_const_i32(b, cfg->NQK));
+                qp_r = ckc_b_add(b, ctx->qb_start_pos, qp_r_div);
+                qh_r_mul = ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, cfg->NQK));
+                qh_r_mod = ckc_b_mod(b, row, ckc_b_const_i32(b, cfg->NQK));
+                qh_r = ckc_b_add(b, qh_r_mul, qh_r_mod);
+                row_ok_a = ckc_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
+                row_ok_b = ckc_b_cmp_lt(b, qh_r, ckc_b_const_i32(b, cfg->NUM_QH));
+                row_ok = ckc_b_land(b, row_ok_a, row_ok_b);
             }
-            col = ckc_b_add(
-                b, ckc_b_mul(b, ckc_b_const_i32(b, n), ckc_b_const_i32(b, 16)),
-                ctx->lane_col);
+            {
+                ckc_value_t* col_mul =
+                    ckc_b_mul(b, ckc_b_const_i32(b, n), ckc_b_const_i32(b, 16));
+                col = ckc_b_add(b, col_mul, ctx->lane_col);
+            }
             qtoken = ckc_b_add(b, ctx->cu_q_start, qp_r);
             {
                 const char* names[4];
@@ -695,8 +713,10 @@ void ckc_gfx942_attention_tiled_3d_emit_epilogue(
     }
 
     /* ---- segm_max / segm_expsum stores (lines 949-967) ---- */
-    lane_writes_ml = ckc_b_cmp_eq(
-        b, ckc_b_mod(b, ctx->tid, ckc_b_const_i32(b, 16)), ckc_b_const_i32(b, 0));
+    {
+        ckc_value_t* lwm_mod = ckc_b_mod(b, ctx->tid, ckc_b_const_i32(b, 16));
+        lane_writes_ml = ckc_b_cmp_eq(b, lwm_mod, ckc_b_const_i32(b, 0));
+    }
     for (reg = 0; reg < 4; reg++)
     {
         ckc_value_t* qp_r;
@@ -715,14 +735,18 @@ void ckc_gfx942_attention_tiled_3d_emit_epilogue(
         else
         {
             ckc_value_t* row = ckc__c_row(ctx, reg);
-            qp_r = ckc_b_add(b, ctx->qb_start_pos,
-                             ckc_b_div(b, row, ckc_b_const_i32(b, cfg->NQK)));
-            qh_r = ckc_b_add(
-                b, ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, cfg->NQK)),
-                ckc_b_mod(b, row, ckc_b_const_i32(b, cfg->NQK)));
-            row_ok = ckc_b_land(
-                b, ckc_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len),
-                ckc_b_cmp_lt(b, qh_r, ckc_b_const_i32(b, cfg->NUM_QH)));
+            ckc_value_t* qp_r_div = ckc_b_div(b, row, ckc_b_const_i32(b, cfg->NQK));
+            ckc_value_t* qh_r_mul;
+            ckc_value_t* qh_r_mod;
+            ckc_value_t* row_ok_a;
+            ckc_value_t* row_ok_b;
+            qp_r = ckc_b_add(b, ctx->qb_start_pos, qp_r_div);
+            qh_r_mul = ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, cfg->NQK));
+            qh_r_mod = ckc_b_mod(b, row, ckc_b_const_i32(b, cfg->NQK));
+            qh_r = ckc_b_add(b, qh_r_mul, qh_r_mod);
+            row_ok_a = ckc_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
+            row_ok_b = ckc_b_cmp_lt(b, qh_r, ckc_b_const_i32(b, cfg->NUM_QH));
+            row_ok = ckc_b_land(b, row_ok_a, row_ok_b);
         }
         qtoken = ckc_b_add(b, ctx->cu_q_start, qp_r);
         {

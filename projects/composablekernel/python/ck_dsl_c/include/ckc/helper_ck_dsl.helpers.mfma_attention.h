@@ -266,6 +266,53 @@ ckc_status_t ckc_wmma_attention_fwd_inner_body(ckc_ir_builder_t* b,
                                                bool v_lds_stage,
                                                const ckc_arch_target_t* target);
 
+/* ===========================================================================
+ * Additional symbols ported from ck_dsl.helpers.attention (the real home of
+ * mfma_32x32x16_for_dtype / dequant_fp8x8_to_dtype) into this module's surface,
+ * per the C-port symbol request. These are byte-faithful reproductions of the
+ * Python builder-call sequences. The module-prefixed names
+ * (ckc_mfma_attn_*) keep external linkage distinct from any other module that
+ * also ports the same Python function.
+ * ===========================================================================
+ */
+
+/* ------------------------------------------------------- mfma_32x32x16_for_dtype *
+ *
+ * Python (ck_dsl/helpers/attention.py):
+ *
+ *     def mfma_32x32x16_for_dtype(b, dtype, a, bv, c) -> Value:
+ *         if dtype.name == "f16":     return b.mfma_f32_32x32x16_f16(a, bv, c)
+ *         if dtype.name == "bf16":    return b.mfma_f32_32x32x16_bf16(a, bv, c)
+ *         if dtype.name == "fp8e4m3": return b.mfma_f32_32x32x16_fp8(a, bv, c)
+ *         raise ValueError(f"unsupported MFMA 32x32x16 dtype {dtype.name}")
+ *
+ * Dispatches the 32x32x16 MFMA atom (per-lane A/B: <8 x dtype>, C/D: <16 x f32>)
+ * for f16 / bf16 / fp8e4m3. Returns the per-lane <16 x f32> accumulator, or NULL
+ * (sticky CKC_ERR_VALUE) for a NULL/unsupported dtype. */
+ckc_value_t* ckc_mfma_attn_mfma_32x32x16_for_dtype(
+    ckc_ir_builder_t* b, const ckc_type_t* dtype, ckc_value_t* a, ckc_value_t* bv, ckc_value_t* c);
+
+/* ------------------------------------------------------- dequant_fp8x8_to_dtype *
+ *
+ * Python (ck_dsl/helpers/attention.py):
+ *
+ *     def dequant_fp8x8_to_dtype(b, fp8_vec, scale, dtype) -> Value:
+ *         lo_fp8 = b.vec_pack([b.vec_extract(fp8_vec, i) for i in range(4)], FP8E4M3)
+ *         hi_fp8 = b.vec_pack([b.vec_extract(fp8_vec, i) for i in range(4, 8)], FP8E4M3)
+ *         lo_f32 = b.cvt_pk_f32_fp8x4(lo_fp8)
+ *         hi_f32 = b.cvt_pk_f32_fp8x4(hi_fp8)
+ *         deq = [b.cast_f32_to(b.fmul(b.vec_extract(lo_f32, i), scale), dtype) for i in range(4)]
+ *             + [b.cast_f32_to(b.fmul(b.vec_extract(hi_f32, i), scale), dtype) for i in range(4)]
+ *         return b.vec_pack(deq, dtype)
+ *
+ * In-register dequant of <8 x fp8e4m3> to a packed <8 x dtype>. The scale is an
+ * UNFUSED explicit fmul (NOT the fused E8M0-scale cvt) so arbitrary non-pow2
+ * scales stay exact. Returns NULL (sticky CKC_ERR_VALUE) if `dtype` is NULL. */
+ckc_value_t* ckc_mfma_attn_dequant_fp8x8_to_dtype(ckc_ir_builder_t* b,
+                                                  ckc_value_t* fp8_vec,
+                                                  ckc_value_t* scale,
+                                                  const ckc_type_t* dtype);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

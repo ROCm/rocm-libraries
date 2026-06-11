@@ -100,9 +100,14 @@ ckc_kernel_def_t* ckc_gfx942_attn2d_emit_epilogue(ckc_gfx942_attn2d_build_ctx_t*
     for (r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
         ctx->l_nonzero[r] = ckc_b_fcmp(b, "ogt", ctx->l_final[r], zero_f);
 
-    /* lane_col = lane % 16 ; lane_col32 = lane % 32 (recomputed; not in ctx). */
-    ckc_value_t* lane_col   = ckc_b_mod(b, lane, ckc_b_const_i32(b, 16));
-    ckc_value_t* lane_col32 = ckc_b_mod(b, lane, ckc_b_const_i32(b, 32));
+    /* lane_col = lane % 16 ; lane_col32 = lane % 32. Reuse the cached prologue
+     * SSA values (emitted once at line 2014) instead of recomputing. */
+    ckc_value_t* lane_col =
+        (ctx->lane_col_v != NULL) ? ctx->lane_col_v
+                                  : ckc_b_mod(b, lane, ckc_b_const_i32(b, 16));
+    ckc_value_t* lane_col32 =
+        (ctx->lane_col32_v != NULL) ? ctx->lane_col32_v
+                                    : ckc_b_mod(b, lane, ckc_b_const_i32(b, 32));
 
     if (ctx->USE_MFMA_32X32)
     {
@@ -238,25 +243,34 @@ ckc_kernel_def_t* ckc_gfx942_attn2d_emit_epilogue(ckc_gfx942_attn2d_build_ctx_t*
     ckc_value_t* tid = ctx->tid;
     ckc_value_t* OUT_ROW_BASE =
         ckc_b_div(b, tid, ckc_b_const_i32(b, OUT_THREADS_PER_ROW));
+    /* Python evaluates b.mod(tid, const(OUT_THREADS_PER_ROW)) BEFORE the
+     * trailing const (left-to-right). Bind the mod to a temp so C's arg-eval
+     * order does not allocate the trailing const ahead of it and shift it. */
+    ckc_value_t* OUT_col_mod =
+        ckc_b_mod(b, tid, ckc_b_const_i32(b, OUT_THREADS_PER_ROW));
     ckc_value_t* OUT_col_base_in_stripe = ckc_b_mul(
-        b,
-        ckc_b_mod(b, tid, ckc_b_const_i32(b, OUT_THREADS_PER_ROW)),
+        b, OUT_col_mod,
         ckc_b_const_i32(b, OUT_CHUNKS_PER_THREAD * OUT_VEC));
 
     /* Compute (op_pos, op_qh, op_mask, out_base) once per CTA -- these depend
      * only on OUT_row, which is loop-invariant across stripes. */
     ckc_value_t* op_pos = ckc_b_add(
         b, qb_start_pos, ckc_b_div(b, OUT_ROW_BASE, ckc_b_const_i32(b, NQK)));
-    ckc_value_t* op_qh = ckc_b_add(
-        b,
-        ckc_b_mul(b, kv_head_idx, ckc_b_const_i32(b, NQK)),
-        ckc_b_mod(b, OUT_ROW_BASE, ckc_b_const_i32(b, NQK)));
-    ckc_value_t* op_mask = ckc_b_land(
-        b,
-        ckc_b_cmp_lt(b, op_pos, cur_batch_q_len),
-        ckc_b_cmp_lt(b, op_qh, ckc_b_const_i32(b, NUM_QH)));
-    ckc_value_t* out_base = epilogue_q_desc_offset(
-        ctx, ckc_b_add(b, cu_q_start, op_pos), op_qh, ckc_b_const_i32(b, 0));
+    /* op_qh = kv_head*NQK + OUT_ROW_BASE%NQK (mul before mod); op_mask = (op_pos
+     * < q_len) && (op_qh < NUM_QH) (pos cmp before qh cmp). Sequence via temps. */
+    ckc_value_t* op_qh_mul = ckc_b_mul(b, kv_head_idx, ckc_b_const_i32(b, NQK));
+    ckc_value_t* op_qh_mod = ckc_b_mod(b, OUT_ROW_BASE, ckc_b_const_i32(b, NQK));
+    ckc_value_t* op_qh = ckc_b_add(b, op_qh_mul, op_qh_mod);
+    ckc_value_t* op_mask_pos = ckc_b_cmp_lt(b, op_pos, cur_batch_q_len);
+    ckc_value_t* op_mask_qh = ckc_b_cmp_lt(b, op_qh, ckc_b_const_i32(b, NUM_QH));
+    ckc_value_t* op_mask = ckc_b_land(b, op_mask_pos, op_mask_qh);
+    /* Python evaluates token=add(cu_q_start, op_pos) BEFORE dim=const(0)
+     * (kwargs left-to-right). Bind them in that order so C's arg-eval order
+     * does not allocate the dim const ahead of the token add and shift it. */
+    ckc_value_t* out_token = ckc_b_add(b, cu_q_start, op_pos);
+    ckc_value_t* out_dim0 = ckc_b_const_i32(b, 0);
+    ckc_value_t* out_base =
+        epilogue_q_desc_offset(ctx, out_token, op_qh, out_dim0);
 
     for (stripe = 0; stripe < OUT_STRIPES; ++stripe)
     {

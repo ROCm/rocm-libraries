@@ -234,8 +234,17 @@ ckc_value_t* ckc_dfcp_extra_params(ckc_dfcp_build_ctx_t* ctx)
     /* W1_bytes = b.param("W1_bytes", I32) */
     w1_bytes = ckc_b_param(b, "W1_bytes", ckc_i32(), NULL);
 
-    /* make_buffer_resource(b, W1, num_bytes=W1_bytes).rsrc */
+    /* make_buffer_resource(b, W1, num_bytes=W1_bytes).rsrc
+     *
+     * Python's make_buffer_resource (helpers/tensor_view.py) builds the rsrc AND
+     * a pre-bound zero soffset (soffset = b.const_i32(0)) before returning the
+     * BufferResource; extra_params keeps only .rsrc. That discarded const_i32(0)
+     * still consumes one build-time SSA counter (it is DCE'd before printing), so
+     * a port that omits it shifts every later numbered SSA name by -1 (e.g.
+     * @A_smem22 vs the reference @A_smem23). Emit the throwaway const so the
+     * whole IR stays byte-identical to the Python reference. */
     rsrc = ckc_b_buffer_rsrc(b, w1, w1_bytes);
+    (void)ckc_b_const_i32(b, 0);
 
     ctx->w1_rsrc = rsrc;
     return rsrc;
@@ -277,18 +286,30 @@ static void ckc_dfcp_decode_row_to_hw(ckc_ir_builder_t* b,
         local_w = ckc_b_mod(b, row, c_conv_tile_w);
     }
 
-    /* global_h = block_id_y()*(pool_tile_h*pool_stride_h) + local_h */
-    global_h = ckc_b_add(
-        b,
-        ckc_b_mul(b, ckc_b_block_id_y(b),
-                  ckc_b_const_i32(b, spec->pool_tile_h * p->pool_stride_h)),
-        local_h);
+    /* global_h = block_id_y()*(pool_tile_h*pool_stride_h) + local_h
+     *
+     * Python (b.mul(b.block_id_y(), b.const_i32(...))) evaluates its arguments
+     * left-to-right, so block_id_y() takes its SSA counter slot BEFORE the const.
+     * C argument evaluation order is unspecified (GCC here is right-to-left),
+     * which would swap the two slots and shift every later numbered SSA name.
+     * Hoist block_id_y/_z into temps first to pin the Python source-order. */
+    {
+        ckc_value_t* bid_y = ckc_b_block_id_y(b);
+        global_h = ckc_b_add(
+            b,
+            ckc_b_mul(b, bid_y,
+                      ckc_b_const_i32(b, spec->pool_tile_h * p->pool_stride_h)),
+            local_h);
+    }
     /* global_w = block_id_z()*(pool_tile_w*pool_stride_w) + local_w */
-    global_w = ckc_b_add(
-        b,
-        ckc_b_mul(b, ckc_b_block_id_z(b),
-                  ckc_b_const_i32(b, spec->pool_tile_w * p->pool_stride_w)),
-        local_w);
+    {
+        ckc_value_t* bid_z = ckc_b_block_id_z(b);
+        global_w = ckc_b_add(
+            b,
+            ckc_b_mul(b, bid_z,
+                      ckc_b_const_i32(b, spec->pool_tile_w * p->pool_stride_w)),
+            local_w);
+    }
 
     *out_h = global_h;
     *out_w = global_w;

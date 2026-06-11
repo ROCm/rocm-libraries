@@ -166,10 +166,20 @@ void ckc_dfcp_emit_inline_maxpool_from_cshuffle(
     c_half_bytes = ckc_b_const_i32(b, 2);
     oob_sentinel = ckc_b_const_i32(b, (int64_t)2147483647);
     neg_inf = ckc_b_const_f32(b, -3.4028234663852886e38);
-    block_pool_h =
-        ckc_b_mul(b, ckc_b_block_id_y(b), ckc_b_const_i32(b, spec->pool_tile_h));
-    block_pool_w =
-        ckc_b_mul(b, ckc_b_block_id_z(b), ckc_b_const_i32(b, spec->pool_tile_w));
+    /* block_pool_h/w = b.mul(b.block_id_*(), b.const_i32(...)). Python evaluates
+     * mul args left-to-right (block_id before const); C call-arg order is
+     * unspecified (GCC: right-to-left). Hoist block_id into temps to pin
+     * Python source-order so later SSA names line up. */
+    {
+        ckc_value_t* bid_y = ckc_b_block_id_y(b);
+        block_pool_h =
+            ckc_b_mul(b, bid_y, ckc_b_const_i32(b, spec->pool_tile_h));
+    }
+    {
+        ckc_value_t* bid_z = ckc_b_block_id_z(b);
+        block_pool_w =
+            ckc_b_mul(b, bid_z, ckc_b_const_i32(b, spec->pool_tile_w));
+    }
 
     for (e = 0; e < elems_per_thread; ++e)
     {
@@ -315,10 +325,20 @@ void ckc_dfcp_emit_wmma_maxpool_from_registers(
 
     col = ckc_b_mod(b, grid->lane, ckc_b_const_i32(b, 16));  /* channel within an n-atom */
     half = ckc_b_div(b, grid->lane, ckc_b_const_i32(b, 16)); /* which 8-col half of the conv row */
-    block_pool_h =
-        ckc_b_mul(b, ckc_b_block_id_y(b), ckc_b_const_i32(b, spec->pool_tile_h));
-    block_pool_w =
-        ckc_b_mul(b, ckc_b_block_id_z(b), ckc_b_const_i32(b, spec->pool_tile_w));
+    /* block_pool_h = b.mul(b.block_id_y(), b.const_i32(pool_tile_h)); _w likewise.
+     * Python evaluates the mul args left-to-right (block_id before const). C
+     * call-arg order is unspecified (GCC: right-to-left); hoist block_id into
+     * temps to pin Python source-order so later SSA names line up. */
+    {
+        ckc_value_t* bid_y = ckc_b_block_id_y(b);
+        block_pool_h =
+            ckc_b_mul(b, bid_y, ckc_b_const_i32(b, spec->pool_tile_h));
+    }
+    {
+        ckc_value_t* bid_z = ckc_b_block_id_z(b);
+        block_pool_w =
+            ckc_b_mul(b, bid_z, ckc_b_const_i32(b, spec->pool_tile_w));
+    }
     gpho = ckc_b_add(b, block_pool_h, grid->warp_m_idx); /* pho == warp_m_idx */
     /* pwo = half*4 + w_local; conv cols 2*pwo,2*pwo+1 -> slots 2*w_local,2*w_local+1. */
     pwo_base =
@@ -430,10 +450,20 @@ void ckc_dfcp_emit_inline_maxpool_from_registers(
 
     channel = ckc_b_mod(b, grid->lane, ckc_b_const_i32(b, 32));
     m_blk = ckc_b_div(b, grid->lane, ckc_b_const_i32(b, 32));
-    block_pool_h =
-        ckc_b_mul(b, ckc_b_block_id_y(b), ckc_b_const_i32(b, spec->pool_tile_h));
-    block_pool_w =
-        ckc_b_mul(b, ckc_b_block_id_z(b), ckc_b_const_i32(b, spec->pool_tile_w));
+    /* block_pool_h/w = b.mul(b.block_id_*(), b.const_i32(...)). Python evaluates
+     * mul args left-to-right (block_id before const); C call-arg order is
+     * unspecified (GCC: right-to-left). Hoist block_id into temps to pin
+     * Python source-order so later SSA names line up. */
+    {
+        ckc_value_t* bid_y = ckc_b_block_id_y(b);
+        block_pool_h =
+            ckc_b_mul(b, bid_y, ckc_b_const_i32(b, spec->pool_tile_h));
+    }
+    {
+        ckc_value_t* bid_z = ckc_b_block_id_z(b);
+        block_pool_w =
+            ckc_b_mul(b, bid_z, ckc_b_const_i32(b, spec->pool_tile_w));
+    }
     pho_base = ckc_b_add(
         b, block_pool_h, ckc_b_mul(b, grid->warp_m_idx, ckc_b_const_i32(b, 2)));
     pwo_base =

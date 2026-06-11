@@ -30,6 +30,7 @@
  * set and ctx_init returns false.
  */
 
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -637,18 +638,51 @@ bool ckc_gfx942_attn2d_build_ctx_init(ckc_gfx942_attn2d_build_ctx_t* ctx,
     ctx->tlds_m = 16;
     ctx->tlds_k = PV_K_STEP;
     ctx->tlds_b = 1;
+    /* TransposeLdsReader.bind(b, lane) materializes 3 lane-derived SSA values
+     * here (Python layouts.py 289-291), emitted BEFORE qk_scale:
+     *   lane_div_16      = div(lane, 16)
+     *   lane_div_4_mod_4 = mod(div(lane, 4), 4)
+     *   col              = mul(mod(lane, 4), 4) */
+    ctx->tlds_lane_div_16 = ckc_b_div(b, ctx->lane, ckc_b_const_i32(b, 16));
+    {
+        /* Match Python's left-to-right value creation exactly:
+         *   lane_div_4_mod_4 = mod(div(lane, 4), 4)  -- inner div emitted first;
+         *   col              = mul(mod(lane, 4), 4)  -- inner mod emitted first.
+         * Sequence via temps so the inner op is numbered before the outer const
+         * (C arg-eval order is unspecified and would otherwise reorder them). */
+        ckc_value_t* c4a = ckc_b_const_i32(b, 4);
+        ckc_value_t* div4 = ckc_b_div(b, ctx->lane, c4a);
+        ctx->tlds_lane_div_4_mod_4 = ckc_b_mod(b, div4, ckc_b_const_i32(b, 4));
+        ckc_value_t* mod4 = ckc_b_mod(b, ctx->lane, ckc_b_const_i32(b, 4));
+        ctx->tlds_col = ckc_b_mul(b, mod4, ckc_b_const_i32(b, 4));
+    }
 
-    /* ---- SSA constants (lines 1891-1912) ---- */
-    ctx->c0     = ckc_b_const_i32(b, 0);
-    ctx->zero_f = ckc_b_const_f32(b, 0.0);
+    /* ---- SSA constants (lines 1892-1896) ---- *
+     * Match Python's exact creation order: neg_inf, zero_f, one_f, rcp_ln2,
+     * then qk_scale. (The previous port created an i32 0 here that Python does
+     * not, and skipped neg_inf/one_f, shifting every later SSA counter.) */
+    /* Cache neg_inf / one_f / rcp_ln2 so downstream phases (m_inits, mask)
+     * REUSE these exact SSA values instead of recreating fresh consts -- each
+     * recreation would allocate an extra %value and shift the counter. Python
+     * builds them once here in the constants block. */
+    ctx->neg_inf_v = ckc_b_const_f32(b, -INFINITY); /* neg_inf (1892) */
+    ctx->zero_f = ckc_b_const_f32(b, 0.0); /* zero_f (1893) */
+    ctx->one_f_v = ckc_b_const_f32(b, 1.0);       /* one_f (1894) */
     {
         const double rcp_ln2 = 1.4426950408889634;
-        ckc_value_t* rcp_ln2_v = ckc_b_const_f32(b, rcp_ln2);
-        ckc_value_t* qk_scale  = ckc_b_fmul(b, ctx->scale_p, rcp_ln2_v);
+        ctx->rcp_ln2_v = ckc_b_const_f32(b, rcp_ln2); /* (1895) */
+        ckc_value_t* qk_scale  = ckc_b_fmul(b, ctx->scale_p, ctx->rcp_ln2_v); /* (1896) */
         if(FP8_NATIVE_QK)
             qk_scale = ckc_b_fmul(b, qk_scale, ctx->k_scale_p);
         ctx->qk_scale_v = qk_scale;
     }
+    /* sw_const = b.const_i32(int(SLIDING_WINDOW)) (line 1910). Python creates
+     * this once here in the constants block and REUSES it in the tile-bound
+     * (line 1994) and mask (lines 4111/4328/4403) regions. The previous port
+     * created an unused i32 0 here and a FRESH const in the loop scaffold,
+     * allocating an extra SSA value that shifted every later %N. Cache it. */
+    ctx->sw_const_v = ckc_b_const_i32(b, ctx->SLIDING_WINDOW);
+    ctx->c0 = ctx->sw_const_v;
 
     /* ---- acc geometry the epilogue aliases (lines 2142-2143) ---- */
     ctx->ACC_N_TILES = USE_MFMA_32X32 ? (HD / 32) : PV_N_TILES;
@@ -667,11 +701,17 @@ bool ckc_gfx942_attn2d_build_ctx_init(ckc_gfx942_attn2d_build_ctx_t* ctx,
 
 static ckc_value_t* ckc_a2d_lane_rg(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
+    /* Reuse the cached SSA value (emitted once in emit_loop_bounds_and_inits).
+     * Fall back to a fresh op only if a caller runs before that phase. */
+    if (ctx->lane_rg_v != NULL)
+        return ctx->lane_rg_v;
     return ckc_b_div(ctx->b, ctx->lane, ckc_b_const_i32(ctx->b, 16));
 }
 
 static ckc_value_t* ckc_a2d_lane_col(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
+    if (ctx->lane_col_v != NULL)
+        return ctx->lane_col_v;
     return ckc_b_mod(ctx->b, ctx->lane, ckc_b_const_i32(ctx->b, 16));
 }
 
@@ -681,8 +721,12 @@ ckc_value_t* ckc_gfx942_attn2d_in_warp_row(ckc_gfx942_attn2d_build_ctx_t* ctx, i
      * row = lane_rg*4 + (atom_idx*16 + in_atom) */
     int atom_idx = r / 4;
     int in_atom  = r % 4;
-    return ckc_b_add(ctx->b,
-                     ckc_b_mul(ctx->b, ckc_a2d_lane_rg(ctx), ckc_b_const_i32(ctx->b, 4)),
+    /* Python evaluates b.mul(lane_rg, const(4)) BEFORE the trailing const
+     * (left-to-right arg order). Bind the mul to a temp so C's arg-eval order
+     * does not allocate the trailing const ahead of the mul and shift it. */
+    ckc_value_t* rg4 =
+        ckc_b_mul(ctx->b, ckc_a2d_lane_rg(ctx), ckc_b_const_i32(ctx->b, 4));
+    return ckc_b_add(ctx->b, rg4,
                      ckc_b_const_i32(ctx->b, atom_idx * 16 + in_atom));
 }
 
@@ -887,12 +931,16 @@ void ckc_gfx942_attn2d_emit_licm_hoist(ckc_gfx942_attn2d_build_ctx_t* ctx)
 
         ckc_value_t* qp_r = ckc_b_add(b, ctx->qb_start_pos,
                                       ckc_b_div(b, row, ckc_b_const_i32(b, ctx->NQK)));
-        ckc_value_t* qh_r = ckc_b_add(
-            b, ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, ctx->NQK)),
-            ckc_b_mod(b, row, ckc_b_const_i32(b, ctx->NQK)));
-        ckc_value_t* row_ok = ckc_b_land(
-            b, ckc_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len),
-            ckc_b_cmp_lt(b, qh_r, ckc_b_const_i32(b, ctx->NUM_QH)));
+        /* qh_r = kv_head*NQK + row%NQK (mul before mod). */
+        ckc_value_t* qh_mul =
+            ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, ctx->NQK));
+        ckc_value_t* qh_mod = ckc_b_mod(b, row, ckc_b_const_i32(b, ctx->NQK));
+        ckc_value_t* qh_r = ckc_b_add(b, qh_mul, qh_mod);
+        /* row_ok = (qp_r < q_len) && (qh_r < NUM_QH) (qp cmp before qh cmp). */
+        ckc_value_t* row_ok_pos = ckc_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
+        ckc_value_t* row_ok_qh =
+            ckc_b_cmp_lt(b, qh_r, ckc_b_const_i32(b, ctx->NUM_QH));
+        ckc_value_t* row_ok = ckc_b_land(b, row_ok_pos, row_ok_qh);
         ckc_value_t* causal_lim = ckc_b_add(b, ctx->context_len, qp_r);
 
         ctx->hoist_in_warp_row[reg] = row;

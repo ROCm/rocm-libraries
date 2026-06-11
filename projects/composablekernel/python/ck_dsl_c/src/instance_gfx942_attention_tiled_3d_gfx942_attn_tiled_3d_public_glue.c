@@ -893,8 +893,10 @@ ckc_kernel_def_t* ckc_build_unified_attention_3d_tiled_gfx942(
      * online-softmax scf.for (726-912) -> segment-workspace epilogue (914-967).
      */
     ckc_gfx942_attention_tiled_3d_declare_params(&ctx);
+    /* emit_prologue already emits the early zero-fill AND the Q->LDS feed inline
+     * (matching the single Python build function); calling emit_q_to_lds again
+     * here would duplicate the Q->LDS loop. */
     ckc_gfx942_attention_tiled_3d_emit_prologue(&ctx);
-    ckc_gfx942_attention_tiled_3d_emit_q_to_lds(&ctx);
     ckc_gfx942_attention_tiled_3d_emit_loop_init(&ctx);
     ckc_gfx942_attention_tiled_3d_emit_softmax_loop(&ctx);
     ckc_gfx942_attention_tiled_3d_emit_epilogue(&ctx);

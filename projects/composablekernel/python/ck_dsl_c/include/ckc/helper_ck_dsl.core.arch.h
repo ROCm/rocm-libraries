@@ -10,6 +10,7 @@
  *   class MmaOp (frozen)              ckc_mmaop_t      (alias) + ckc_mmaop_*
  *   ArchTarget.from_gfx(gfx)          ckc_archtarget_from_gfx()
  *   target.mma.op_for_shape(...)      ckc_archtarget_op_for_shape()
+ *   target.mma.by_op_id(op_id)        ckc_archtarget_by_op_id()
  *
  * WHY A SHIM. The canonical, byte-identical port of the WHOLE arch module
  * (LayoutMap, MmaOp, MmaCatalog, ArchTarget, the embedded arch_specs.json SSOT,
@@ -103,6 +104,11 @@ const ckc_mmaop_t* ckc_archtarget_op_for_shape(const ckc_archtarget_t* t,
                                                int m,
                                                int n,
                                                int k);
+
+/* target.mma.by_op_id(op_id): the catalog atom whose op_id handle matches
+ * `op_id` (the backend's MMA key, e.g. "mfma_f32_16x16x16_f16"), or NULL if the
+ * target carries no such atom. Forwards to ckc_mma_catalog_by_op_id on t->mma. */
+const ckc_mmaop_t* ckc_archtarget_by_op_id(const ckc_archtarget_t* t, const char* op_id);
 
 /* ArchTarget.isa_triple -> "amdgcn-amd-amdhsa--<gfx>" into `out`. */
 const char* ckc_archtarget_isa_triple(const ckc_archtarget_t* t, char* out, size_t out_cap);

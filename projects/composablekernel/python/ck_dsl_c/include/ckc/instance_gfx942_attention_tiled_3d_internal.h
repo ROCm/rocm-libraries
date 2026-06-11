@@ -421,6 +421,11 @@ void ckc_gfx942_attention_tiled_3d_emit_q_to_lds(ckc_gfx942_attention_tiled_3d_b
  * Also issues the first K load (_issue_k(tile_start, 0), line 721). */
 void ckc_gfx942_attention_tiled_3d_emit_loop_init(ckc_gfx942_attention_tiled_3d_build_ctx_t* ctx);
 
+/* Emit the async DMA infra (buffer rsrc, lds addrs) + paged-KV descriptor
+ * (Python lines 538-602). Called by emit_loop_init right after acc_zero so the
+ * SSA op order matches Python's single linear build. */
+void ckc_gfx942_attention_tiled_3d_emit_async_infra(ckc_gfx942_attention_tiled_3d_build_ctx_t* ctx);
+
 /* The online-softmax scf.for over [tile_start, tile_end) (lines 726-912): per-
  * iter buffer swap, QK narrow MFMA + V/next-K prefetch, alibi/softcap/qq_bias/
  * mask, online (m,l) update via warp_xor reductions, P_lds store, PV narrow MFMA

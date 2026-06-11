@@ -411,8 +411,11 @@ void ckc_gfx942_attention_tiled_3d_emit_prologue(
     }
 
     /* tps = cdiv(seq_len, NUM_SEG*T) (line 357) */
-    ctx->tps = ckc_b_div(B, ckc_b_add(B, ctx->seq_len, ckc_b_const_i32(B, NUM_SEG * T - 1)),
-                         ckc_b_const_i32(B, NUM_SEG * T));
+    {
+        ckc_value_t* tps_num =
+            ckc_b_add(B, ctx->seq_len, ckc_b_const_i32(B, NUM_SEG * T - 1));
+        ctx->tps = ckc_b_div(B, tps_num, ckc_b_const_i32(B, NUM_SEG * T));
+    }
 
     /* ---- descriptors (lines 359-373) ---- */
     {
@@ -434,8 +437,10 @@ void ckc_gfx942_attention_tiled_3d_emit_prologue(
     }
 
     /* seg_start_tile_pos = seg_idx*tps*T (line 375) */
-    ctx->seg_start_tile_pos =
-        ckc_b_mul(B, ckc_b_mul(B, ctx->seg_idx, ctx->tps), ckc_b_const_i32(B, T));
+    {
+        ckc_value_t* sst_inner = ckc_b_mul(B, ctx->seg_idx, ctx->tps);
+        ctx->seg_start_tile_pos = ckc_b_mul(B, sst_inner, ckc_b_const_i32(B, T));
+    }
 
     /* early-out zero-fill block (lines 376-419) */
     ckc_gfx942_attention_tiled_3d_emit_early_zero_fill(ctx);
@@ -467,30 +472,47 @@ void ckc_gfx942_attention_tiled_3d_emit_prologue(
 
     /* ---- Per-segment tile range (lines 470-477) ---- */
     {
+        ckc_value_t* msp_inner = ckc_b_add(B, ctx->context_len, ctx->qb_start_pos);
         ckc_value_t* msp_raw =
-            ckc_b_add(B, ckc_b_add(B, ctx->context_len, ctx->qb_start_pos),
-                      ckc_b_const_i32(B, CFG.bm1_div_nqk + 1));
+            ckc_b_add(B, msp_inner, ckc_b_const_i32(B, CFG.bm1_div_nqk + 1));
+        ckc_value_t* msp_cmp = ckc_b_cmp_lt(B, msp_raw, ctx->seq_len);
+        ckc_value_t* nt_inner;
+        ckc_value_t* tile_end_raw_mul_inner;
+        ckc_value_t* tile_end_raw;
+        ckc_value_t* tile_end_cmp;
         ctx->max_seq_prefix_len =
-            ckc_b_select(B, ckc_b_cmp_lt(B, msp_raw, ctx->seq_len), msp_raw, ctx->seq_len);
-        ctx->num_tiles =
-            ckc_b_div(B, ckc_b_add(B, ctx->max_seq_prefix_len, ckc_b_const_i32(B, T - 1)),
-                      ckc_b_const_i32(B, T));
+            ckc_b_select(B, msp_cmp, msp_raw, ctx->seq_len);
+        nt_inner =
+            ckc_b_add(B, ctx->max_seq_prefix_len, ckc_b_const_i32(B, T - 1));
+        ctx->num_tiles = ckc_b_div(B, nt_inner, ckc_b_const_i32(B, T));
 
         ctx->tile_start = ckc_b_mul(B, ctx->seg_idx, ctx->tps);
-        {
-            ckc_value_t* tile_end_raw =
-                ckc_b_mul(B, ckc_b_add(B, ctx->seg_idx, ckc_b_const_i32(B, 1)), ctx->tps);
-            ctx->tile_end =
-                ckc_b_select(B, ckc_b_cmp_lt(B, tile_end_raw, ctx->num_tiles), tile_end_raw,
-                             ctx->num_tiles);
-        }
+        tile_end_raw_mul_inner =
+            ckc_b_add(B, ctx->seg_idx, ckc_b_const_i32(B, 1));
+        tile_end_raw = ckc_b_mul(B, tile_end_raw_mul_inner, ctx->tps);
+        tile_end_cmp = ckc_b_cmp_lt(B, tile_end_raw, ctx->num_tiles);
+        ctx->tile_end =
+            ckc_b_select(B, tile_end_cmp, tile_end_raw, ctx->num_tiles);
     }
 
     /* ---- lane decode (lines 482-483) ---- */
     ctx->lane_rg  = ckc_b_div(B, ctx->tid, ckc_b_const_i32(B, 16));
     ctx->lane_col = ckc_b_mod(B, ctx->tid, ckc_b_const_i32(B, 16));
 
-    /* ---- async DMA infra (lines 551-567) ---- */
+    /* NOTE: the async DMA infra (lines 538-567) and the paged-KV descriptor
+     * (lines 569-602) are emitted AFTER acc_zero in Python's single linear
+     * build; they are emitted by emit_loop_init (via
+     * ckc_gfx942_attention_tiled_3d_emit_async_infra) so the SSA emission order
+     * matches Python byte-for-byte. */
+}
+
+/* Async DMA infra + paged-KV descriptor (Python lines 538-602). Emitted from
+ * emit_loop_init right after acc_zero so the op order matches the single
+ * linear Python build. */
+void ckc_gfx942_attention_tiled_3d_emit_async_infra(
+    ckc_gfx942_attention_tiled_3d_build_ctx_t* ctx)
+{
+    /* ---- async DMA infra (lines 538-567) ---- */
     ctx->big_bytes   = ckc_b_const_i32(B, 0x7FFF0000);
     ctx->key_rsrc    = ckc_b_buffer_rsrc(B, ctx->key, ctx->big_bytes);
     ctx->value_rsrc  = ckc_b_buffer_rsrc(B, ctx->value, ctx->big_bytes);
@@ -520,9 +542,9 @@ void ckc_gfx942_attention_tiled_3d_emit_early_zero_fill(
     {
         ckc_value_t* neg_inf_local = ckc_b_const_f32(B, -INFINITY);
         ckc_value_t* zero_local    = ckc_b_const_f32(B, 0.0);
+        ckc_value_t* lwm_mod = ckc_b_mod(B, ctx->tid, ckc_b_const_i32(B, 16));
         ckc_value_t* lane_writes_ml_e =
-            ckc_b_cmp_eq(B, ckc_b_mod(B, ctx->tid, ckc_b_const_i32(B, 16)),
-                         ckc_b_const_i32(B, 0));
+            ckc_b_cmp_eq(B, lwm_mod, ckc_b_const_i32(B, 0));
 
         /* ml zero-fill (lines 380-395) */
         for(reg = 0; reg < 4; ++reg)
@@ -556,18 +578,19 @@ void ckc_gfx942_attention_tiled_3d_emit_early_zero_fill(
                 {
                     ckc_value_t* row =
                         ckc_gfx942_attention_tiled_3d_mfma_16x16_c_row(ctx, ctx->tid, reg);
-                    ckc_value_t* col =
-                        ckc_b_add(B, ckc_b_mul(B, ckc_b_const_i32(B, n), ckc_b_const_i32(B, 16)),
-                                  lane_col_e);
-                    ckc_value_t* qp_r =
-                        ckc_b_add(B, ctx->qb_start_pos,
-                                  ckc_b_div(B, row, ckc_b_const_i32(B, NQK)));
-                    ckc_value_t* qh_r =
-                        ckc_b_add(B, ckc_b_mul(B, ctx->kv_head_idx, ckc_b_const_i32(B, NQK)),
-                                  ckc_b_mod(B, row, ckc_b_const_i32(B, NQK)));
-                    ckc_value_t* row_ok =
-                        ckc_b_land(B, ckc_b_cmp_lt(B, qp_r, ctx->cur_batch_q_len),
-                                   ckc_b_cmp_lt(B, qh_r, ckc_b_const_i32(B, NUM_QH)));
+                    ckc_value_t* col_mul =
+                        ckc_b_mul(B, ckc_b_const_i32(B, n), ckc_b_const_i32(B, 16));
+                    ckc_value_t* col = ckc_b_add(B, col_mul, lane_col_e);
+                    ckc_value_t* qp_r_div = ckc_b_div(B, row, ckc_b_const_i32(B, NQK));
+                    ckc_value_t* qp_r = ckc_b_add(B, ctx->qb_start_pos, qp_r_div);
+                    ckc_value_t* qh_r_mul =
+                        ckc_b_mul(B, ctx->kv_head_idx, ckc_b_const_i32(B, NQK));
+                    ckc_value_t* qh_r_mod = ckc_b_mod(B, row, ckc_b_const_i32(B, NQK));
+                    ckc_value_t* qh_r = ckc_b_add(B, qh_r_mul, qh_r_mod);
+                    ckc_value_t* row_ok_a = ckc_b_cmp_lt(B, qp_r, ctx->cur_batch_q_len);
+                    ckc_value_t* row_ok_b =
+                        ckc_b_cmp_lt(B, qh_r, ckc_b_const_i32(B, NUM_QH));
+                    ckc_value_t* row_ok = ckc_b_land(B, row_ok_a, row_ok_b);
                     ckc_value_t* qp_r_safe = ckc_b_select(B, row_ok, qp_r, ckc_b_const_i32(B, 0));
                     ckc_value_t* qh_r_safe = ckc_b_select(B, row_ok, qh_r, ckc_b_const_i32(B, 0));
                     ckc_value_t* qtoken    = ckc_b_add(B, ctx->cu_q_start, qp_r_safe);
@@ -598,30 +621,29 @@ void ckc_gfx942_attention_tiled_3d_emit_q_to_lds(
 
     for(li = 0; li < Q_VECS_PER_THREAD; ++li)
     {
-        ckc_value_t* q_vid =
-            ckc_b_add(B, ckc_b_mul(B, ckc_b_const_i32(B, li), ckc_b_const_i32(B, THREADS)),
-                      ctx->tid);
+        ckc_value_t* q_vid_mul = ckc_b_mul(B, ckc_b_const_i32(B, li), ckc_b_const_i32(B, THREADS));
+        ckc_value_t* q_vid = ckc_b_add(B, q_vid_mul, ctx->tid);
         ckc_value_t* Q_row = ckc_b_div(B, q_vid, ckc_b_const_i32(B, Q_VECS_PER_ROW));
-        ckc_value_t* Q_col =
-            ckc_b_mul(B, ckc_b_mod(B, q_vid, ckc_b_const_i32(B, Q_VECS_PER_ROW)),
-                      ckc_b_const_i32(B, 8));
-        ckc_value_t* q_pos_t =
-            ckc_b_add(B, ctx->qb_start_pos, ckc_b_div(B, Q_row, ckc_b_const_i32(B, NQK)));
-        ckc_value_t* qh_t =
-            ckc_b_add(B, ckc_b_mul(B, ctx->kv_head_idx, ckc_b_const_i32(B, NQK)),
-                      ckc_b_mod(B, Q_row, ckc_b_const_i32(B, NQK)));
-        ckc_value_t* qmask_t =
-            ckc_b_land(B, ckc_b_cmp_lt(B, q_pos_t, ctx->cur_batch_q_len),
-                       ckc_b_cmp_lt(B, qh_t, ckc_b_const_i32(B, NUM_QH)));
+        ckc_value_t* Q_col_mod = ckc_b_mod(B, q_vid, ckc_b_const_i32(B, Q_VECS_PER_ROW));
+        ckc_value_t* Q_col = ckc_b_mul(B, Q_col_mod, ckc_b_const_i32(B, 8));
+        ckc_value_t* q_pos_div = ckc_b_div(B, Q_row, ckc_b_const_i32(B, NQK));
+        ckc_value_t* q_pos_t = ckc_b_add(B, ctx->qb_start_pos, q_pos_div);
+        ckc_value_t* qh_t_mul = ckc_b_mul(B, ctx->kv_head_idx, ckc_b_const_i32(B, NQK));
+        ckc_value_t* qh_t_mod = ckc_b_mod(B, Q_row, ckc_b_const_i32(B, NQK));
+        ckc_value_t* qh_t = ckc_b_add(B, qh_t_mul, qh_t_mod);
+        ckc_value_t* qmask_a = ckc_b_cmp_lt(B, q_pos_t, ctx->cur_batch_q_len);
+        ckc_value_t* qmask_b = ckc_b_cmp_lt(B, qh_t, ckc_b_const_i32(B, NUM_QH));
+        ckc_value_t* qmask_t = ckc_b_land(B, qmask_a, qmask_b);
         ckc_value_t* q_pos_safe = ckc_b_select(B, qmask_t, q_pos_t, ckc_b_const_i32(B, 0));
         ckc_value_t* qh_safe    = ckc_b_select(B, qmask_t, qh_t, ckc_b_const_i32(B, 0));
+        ckc_value_t* q_off_tok  = ckc_b_add(B, ctx->cu_q_start, q_pos_safe);
         ckc_value_t* q_off_base =
-            ckc__q_offset(ctx, ckc_b_add(B, ctx->cu_q_start, q_pos_safe), qh_safe,
-                          ckc_b_const_i32(B, 0));
+            ckc__q_offset(ctx, q_off_tok, qh_safe, ckc_b_const_i32(B, 0));
+        ckc_value_t* v8_idx = ckc_b_add(B, q_off_base, Q_col);
         ckc_value_t* v8 =
-            ckc_b_global_load_vN(B, ctx->query, ckc_b_add(B, q_off_base, Q_col), dtype, 8, 16);
-        ckc_value_t* sel =
-            ckc_b_vector_select(B, ckc_b_vector_splat(B, qmask_t, 8), v8, ctx->z8);
+            ckc_b_global_load_vN(B, ctx->query, v8_idx, dtype, 8, 16);
+        ckc_value_t* splat = ckc_b_vector_splat(B, qmask_t, 8);
+        ckc_value_t* sel = ckc_b_vector_select(B, splat, v8, ctx->z8);
         ckc_value_t* idxs[2] = {Q_row, Q_col};
         ckc_b_smem_store_vN(B, ctx->Q_lds, idxs, 2, sel, 8);
     }
@@ -741,16 +763,17 @@ void ckc_gfx942_attention_tiled_3d_issue_fp8_dequant_loads(
 
     for(call = 0; call < fp8_chunks_per_thread; ++call)
     {
-        ckc_value_t* chunk_id =
-            ckc_b_add(B, ckc_b_mul(B, ckc_b_const_i32(B, call), ckc_b_const_i32(B, THREADS)),
-                      ctx->tid);
+        ckc_value_t* chunk_mul =
+            ckc_b_mul(B, ckc_b_const_i32(B, call), ckc_b_const_i32(B, THREADS));
+        ckc_value_t* chunk_id = ckc_b_add(B, chunk_mul, ctx->tid);
         ckc_value_t* row =
             ckc_b_div(B, chunk_id, ckc_b_const_i32(B, HD / fp8_elems_per_chunk));
+        ckc_value_t* col_mod =
+            ckc_b_mod(B, chunk_id, ckc_b_const_i32(B, HD / fp8_elems_per_chunk));
         ckc_value_t* col =
-            ckc_b_mul(B, ckc_b_mod(B, chunk_id, ckc_b_const_i32(B, HD / fp8_elems_per_chunk)),
-                      ckc_b_const_i32(B, fp8_elems_per_chunk));
-        ckc_value_t* linear_half_first =
-            ckc_b_add(B, ckc_b_mul(B, row, ckc_b_const_i32(B, HD)), col);
+            ckc_b_mul(B, col_mod, ckc_b_const_i32(B, fp8_elems_per_chunk));
+        ckc_value_t* lhf_mul = ckc_b_mul(B, row, ckc_b_const_i32(B, HD));
+        ckc_value_t* linear_half_first = ckc_b_add(B, lhf_mul, col);
         ckc_value_t* voff =
             ckc__paged_kv_offset(ctx, kv_tile_idx, linear_half_first, ctx->kv_head_idx);
         ckc_value_t* fp8_vec = ckc_b_global_load_vN(B, src, voff, ckc_fp8e4m3(),
@@ -767,15 +790,19 @@ void ckc_gfx942_attention_tiled_3d_issue_fp8_dequant_loads(
         ckc_value_t* packed;
         ckc_value_t* idxs[3];
 
+        /* Python: lo_fp8 = vec_pack([vec_extract(i) for i in range(4)]) then
+         * hi_fp8 = vec_pack([vec_extract(i) for i in range(4,8)]). The extracts
+         * for each quad are emitted immediately before that quad's pack -- NOT
+         * all 8 up front -- so interleave extract+pack per quad. */
         for(i = 0; i < 4; ++i)
         {
             lo_comps[i] = ckc_b_vec_extract(B, fp8_vec, i);
         }
+        lo_fp8 = ckc_b_vec_pack(B, lo_comps, 4, ckc_fp8e4m3());
         for(i = 0; i < 4; ++i)
         {
             hi_comps[i] = ckc_b_vec_extract(B, fp8_vec, i + 4);
         }
-        lo_fp8 = ckc_b_vec_pack(B, lo_comps, 4, ckc_fp8e4m3());
         hi_fp8 = ckc_b_vec_pack(B, hi_comps, 4, ckc_fp8e4m3());
         lo_f32 = ckc_b_cvt_pk_f32_fp8x4(B, lo_fp8);
         hi_f32 = ckc_b_cvt_pk_f32_fp8x4(B, hi_fp8);
