@@ -13,24 +13,21 @@ namespace lgbm {
 // rank.categorical_vocab.spec_id.
 inline constexpr std::size_t kNumSpecIds = 9;
 
-// Per-spec_id GPU descriptor block consumed by the LGBM rank + applicability
-// models. Field order MUST match gen_gpu_table.py NUMERIC_FIELDS + CAT_FIELDS;
-// the categorical fields hold integer codes into the model's categorical
-// vocabularies (or -1 for missing).
+// Per-spec_id GPU descriptor block consumed by the LGBM rank model (v5,
+// 59-feature pruned). Field order MUST match gen_gpu_table.py NUMERIC_FIELDS +
+// CAT_FIELDS; the categorical fields hold integer codes into the model's
+// categorical vocabularies (or -1 for missing).
 struct GpuFeatures
 {
-    // 25 numeric features (indices 37..61 in the model feature_order).
+    // 20 numeric features (indices 33..52 in the v5 feature_order).
     double cu_count;
     double wave_size;
     double simds_per_cu;
-    double max_waves_per_cu;
     double lds_size_per_cu_kb;
     double lds_size_per_workgroup_kb;
     double l1_cache_kb_per_cu;
     double l2_cache_total_kb;
     double l3_infinity_cache_kb;
-    double vgpr_per_simd;
-    double sgpr_per_simd;
     double boost_clock_mhz;
     double xcd_count;
     double shader_engines;
@@ -41,16 +38,13 @@ struct GpuFeatures
     double peak_tflops_fp16;
     double peak_tflops_bf16;
     double peak_tflops_fp8;
-    double peak_tflops_fp4;
     double peak_tflops_int8;
     double mfma_shape_count;
-    double dtype_support_count;
 
-    // 6 categorical codes (indices 62..67). spec_id_code doubles as the
+    // 5 categorical codes (indices 53..57). spec_id_code doubles as the
     // index into kGpuTable.
     int gfx_id_code;
     int arch_family_code;
-    int matrix_core_gen_code;
     int winograd_support_code;
     int asm_implicit_gemm_support_code;
     int spec_id_code;

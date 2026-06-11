@@ -15,7 +15,7 @@ namespace lgbm {
 
 // Number of features the rank + applicability models consume per row. Matches
 // model_meta.json rank.feature_order length.
-inline constexpr int kNumFeatures = 69;
+inline constexpr int kNumFeatures = 59;
 
 // Singleton bundling the model metadata + per-spec thresholds. Constructed
 // lazily on first call to Get(); thread-safe via the Meyers idiom.

@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 """
-Regenerate Treelite --source-only C for the LGBM rank + applicability models.
+Regenerate Treelite --source-only C for the LGBM rank model.
 
 Run from this directory (or anywhere; paths are resolved relative to the script):
 
     python3 regen_models.py [--source-dir ~/AutoResearchAllLGBM]
 
-Outputs into ./rank/ and ./appl/:
-    main.c, tu0.c..tu7.c, header.h, recipe.json
+Outputs into ./rank/:
+    main.c, tu0.c..tu7.c, quantize.c, header.h, recipe.json
 
 These files are checked into the MIOpen tree. Only re-run when the source
-LightGBM .txt models change. Requires `treelite>=4` and `tl2cgen>=1`.
+LightGBM .txt model changes. Requires `treelite>=4` and `tl2cgen>=1`.
+
+v5 (2026-06-09): rank-only. The applicability model was dropped in v4
+(threshold -> 0 with no quality loss under the 3x cost model), and the
+rank feature set was pruned 69 -> 59 in v5. Source model is
+model_rank_pruned59_t800.txt.
 """
 from __future__ import annotations
 
@@ -29,8 +34,7 @@ HERE = Path(__file__).resolve().parent
 
 MODELS = [
     # (subdir, libname, source .txt model)
-    ("rank", "lgbm_rank",  "model_rank_med_t1200.txt"),
-    ("appl", "lgbm_appl",  "model_applicability_narrow_t1000.txt"),
+    ("rank", "lgbm_rank", "model_rank_pruned59_t800.txt"),
 ]
 
 

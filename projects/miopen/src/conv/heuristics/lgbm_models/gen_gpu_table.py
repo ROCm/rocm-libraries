@@ -25,21 +25,24 @@ DEFAULT_META     = Path(os.path.expanduser("~/AutoResearchAllLGBM/deploy/model_m
 OUT_FILE         = HERE.parent / "lgbm_gpu_table.cpp"
 
 # Must match GpuFeatures struct field order in lgbm_gpu_features.hpp.
+# v5 (59-feature pruned model) GPU numeric block, in feature_order. The v4
+# schema dropped max_waves_per_cu, vgpr_per_simd, sgpr_per_simd,
+# peak_tflops_fp4, and dtype_support_count (zero-gain features).
 NUMERIC_FIELDS = [
-    "cu_count", "wave_size", "simds_per_cu", "max_waves_per_cu",
+    "cu_count", "wave_size", "simds_per_cu",
     "lds_size_per_cu_kb", "lds_size_per_workgroup_kb",
     "l1_cache_kb_per_cu", "l2_cache_total_kb", "l3_infinity_cache_kb",
-    "vgpr_per_simd", "sgpr_per_simd", "boost_clock_mhz",
+    "boost_clock_mhz",
     "xcd_count", "shader_engines", "cacheline_size_bytes", "vram_bytes",
     "peak_tflops_fp64", "peak_tflops_fp32", "peak_tflops_fp16",
-    "peak_tflops_bf16", "peak_tflops_fp8", "peak_tflops_fp4",
-    "peak_tflops_int8",
-    "mfma_shape_count", "dtype_support_count",
+    "peak_tflops_bf16", "peak_tflops_fp8", "peak_tflops_int8",
+    "mfma_shape_count",
 ]
-PEAK_DTYPES = ["fp64", "fp32", "fp16", "bf16", "fp8", "fp4", "int8"]
-# Categorical fields are stored as their integer vocab codes (or -1 for missing).
+PEAK_DTYPES = ["fp64", "fp32", "fp16", "bf16", "fp8", "int8"]
+# Categorical fields are stored as their integer vocab codes (or -1 for
+# missing). v5 dropped matrix_core_gen.
 CAT_FIELDS = [
-    "gfx_id", "arch_family", "matrix_core_gen",
+    "gfx_id", "arch_family",
     "winograd_support", "asm_implicit_gemm_support",
     "spec_id",
 ]

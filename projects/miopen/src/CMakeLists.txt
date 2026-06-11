@@ -328,13 +328,12 @@ if(MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
         conv/heuristics/lgbm_metadata.cpp
         conv/heuristics/lgbm_gpu_table.cpp)
     file(GLOB LGBM_RANK_SRCS conv/heuristics/lgbm_models/rank/*.c)
-    file(GLOB LGBM_APPL_SRCS conv/heuristics/lgbm_models/appl/*.c)
-    list(APPEND MIOpen_Source ${LGBM_RANK_SRCS} ${LGBM_APPL_SRCS})
+    list(APPEND MIOpen_Source ${LGBM_RANK_SRCS})
     # Generated C: silence machine-generated warnings, and rename every
-    # exported symbol so the rank and appl translation units don't collide
-    # at link time. Treelite emits the same names in both: predict,
-    # postprocess, quantize, predict_unit0..7, the metadata accessors, and
-    # the is_categorical global.
+    # exported symbol with an lgbm_rank_ prefix. The prefixing keeps these
+    # generic Treelite names (predict, quantize, predict_unit0..7, the
+    # metadata accessors, the is_categorical global) out of MIOpen's global
+    # namespace. (v5 is rank-only; the applicability model was dropped in v4.)
     set(LGBM_EXPORT_SYMS
         predict postprocess quantize
         predict_unit0 predict_unit1 predict_unit2 predict_unit3
@@ -343,15 +342,11 @@ if(MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
         get_threshold_type get_leaf_output_type
         is_categorical)
     set(LGBM_RANK_DEFS "-w")
-    set(LGBM_APPL_DEFS "-w")
     foreach(sym ${LGBM_EXPORT_SYMS})
         list(APPEND LGBM_RANK_DEFS "-D${sym}=lgbm_rank_${sym}")
-        list(APPEND LGBM_APPL_DEFS "-D${sym}=lgbm_appl_${sym}")
     endforeach()
     set_source_files_properties(${LGBM_RANK_SRCS} PROPERTIES
         COMPILE_OPTIONS "${LGBM_RANK_DEFS}")
-    set_source_files_properties(${LGBM_APPL_SRCS} PROPERTIES
-        COMPILE_OPTIONS "${LGBM_APPL_DEFS}")
 endif()
 
 list(APPEND MIOpen_Source tmp_dir.cpp binary_cache.cpp md5.cpp)

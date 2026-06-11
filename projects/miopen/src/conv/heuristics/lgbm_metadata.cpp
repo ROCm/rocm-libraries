@@ -29,10 +29,9 @@ LgbmMetadata::LgbmMetadata()
         auto meta   = ai::common::LoadJSON(meta_path);
         auto thresh = ai::common::LoadJSON(thresh_path);
 
-        // model_meta.json has separate "rank" and "appl" blocks; the
-        // feature schemas are identical (verified in model_meta.json), and
-        // we use the rank block as the source of truth for the
-        // categorical_vocab + solvers. triple_vocab lives under "appl".
+        // model_meta.json holds the rank model's feature schema under "rank"
+        // (categorical_vocab + solvers). In v5 triple_vocab is a top-level key;
+        // older bundles nested it under "appl". Accept either.
         const auto& rank = meta.at("rank");
 
         for(auto it = rank.at("categorical_vocab").begin();
@@ -45,11 +44,15 @@ LgbmMetadata::LgbmMetadata()
         for(int i = 0; i < static_cast<int>(solvers.size()); ++i)
             solver_index[solvers[i]] = i;
 
-        for(auto it = meta.at("appl").at("triple_vocab").begin();
-            it != meta.at("appl").at("triple_vocab").end();
-            ++it)
+        const nlohmann::json* triple = nullptr;
+        if(meta.contains("triple_vocab"))
+            triple = &meta.at("triple_vocab");
+        else if(meta.contains("appl") && meta.at("appl").contains("triple_vocab"))
+            triple = &meta.at("appl").at("triple_vocab");
+        if(triple != nullptr)
         {
-            triple_vocab[it.key()] = it.value().get<std::vector<std::string>>();
+            for(auto it = triple->begin(); it != triple->end(); ++it)
+                triple_vocab[it.key()] = it.value().get<std::vector<std::string>>();
         }
 
         if(thresh.contains("default"))
