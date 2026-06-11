@@ -534,7 +534,7 @@ static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
         case HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED:
             // TODO: implement 1D version.
             // TODO: what do we do with multi-gpu multi-batch 1D transforms?
-            throw std::runtime_error("HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED not implemented");
+            throw HIPFFT_NOT_IMPLEMENTED;
             break;
         case HIPFFT_FORMAT_UNDEFINED:
             break;
@@ -546,8 +546,7 @@ static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
     {
         // Multi-batch transforms are trivially divided.
         splitdim = 0;
-        return HIPFFT_NOT_IMPLEMENTED;
-        //throw std::runtime_error("Multi-batch multi-gpu transforms not implemented");
+        throw HIPFFT_NOT_IMPLEMENTED;
     }
 
     // Sanity check that split_dim isn't out-of-bounds:

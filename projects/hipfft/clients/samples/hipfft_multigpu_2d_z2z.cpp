@@ -89,13 +89,6 @@ int main()
     if(hipfftCreate(&plan) != HIPFFT_SUCCESS)
         throw std::runtime_error("failed to create plan");
 
-    // Create a GPU stream and assign it to the plan
-    hipStream_t stream{};
-    if(hipStreamCreate(&stream) != hipSuccess)
-        throw std::runtime_error("hipStreamCreate failed.");
-    if(hipfftSetStream(plan, stream) != HIPFFT_SUCCESS)
-        throw std::runtime_error("hipfftSetStream failed.");
-
     // Assign GPUs to the plan
     std::vector<int> gpus(ngpus);
     std::iota(gpus.begin(), gpus.end(), 0);
@@ -170,14 +163,14 @@ int main()
                                      + std::to_string(hipfft_rt));
     }
 
-    std::cout << "inoutdesc->subFormat: " << inoutdesc->subFormat << "\n";
+    std::cout << "inoutdesc->subFormat (pre-FFT): " << inoutdesc->subFormat << "\n";
 
     // Execute the plan
     hipfft_rt = hipfftXtExecDescriptor(plan, inoutdesc, inoutdesc, direction);
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftXtExecDescriptor failed.");
 
-    std::cout << "inoutdesc->subFormat: " << inoutdesc->subFormat << "\n";
+    std::cout << "inoutdesc->subFormat (post-FFT): " << inoutdesc->subFormat << "\n";
 
     std::cout << "Distributed output data on the GPUs:\n";
     for(size_t idx = 0; idx < ngpus; ++idx)
@@ -220,9 +213,6 @@ int main()
 
     if(hipfftDestroy(plan) != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftDestroy failed.");
-
-    if(hipStreamDestroy(stream) != hipSuccess)
-        throw std::runtime_error("hipStreamDestroy failed.");
 
     return 0;
 }
