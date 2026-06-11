@@ -369,6 +369,7 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
     const void* dummy_ptr = &dummy;
     int64_t     m, n, k, lda, ldb, ldc, ldd, lde, batch_stride_a, batch_stride_b, batch_stride_c,
         batch_stride_d, batch_stride_e;
+    int32_t    bias_stride = matmul_descr->bias_stride;
     hipDataType            bias_type;
     hipDataType            aux_type;
     hipDataType            a_type, b_type, c_type, d_type;
@@ -506,7 +507,8 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                         handle->Synchronizer,
                                         swizzleA,
                                         swizzleB,
-                                        batchMode};
+                                        batchMode,
+                                        bias_stride};
 
     if(scaleAlphaVec)
     {
@@ -580,6 +582,48 @@ rocblaslt_status rocblaslt_destroy(const rocblaslt_handle handle)
     {
         return status;
     }
+    return rocblaslt_status_success;
+}
+
+/********************************************************************************
+ * \brief Set the handle-level SM-count-target override.
+ *******************************************************************************/
+rocblaslt_status rocblaslt_set_sm_count_target(rocblaslt_handle handle,
+                                               int32_t          sm_count_target)
+{
+    if(handle == nullptr)
+    {
+        log_error(__func__, "handle", handle);
+        return rocblaslt_status_invalid_handle;
+    }
+    if(sm_count_target < 0)
+    {
+        log_error(__func__, "negative sm_count_target", sm_count_target);
+        return rocblaslt_status_invalid_value;
+    }
+    log_api(__func__, "handle", handle, "sm_count_target", sm_count_target);
+    handle->sm_count_target = sm_count_target;
+    return rocblaslt_status_success;
+}
+
+/********************************************************************************
+ * \brief Get the handle-level SM-count-target override.
+ *******************************************************************************/
+rocblaslt_status rocblaslt_get_sm_count_target(rocblaslt_handle handle,
+                                               int32_t*         sm_count_target)
+{
+    if(handle == nullptr)
+    {
+        log_error(__func__, "handle", handle);
+        return rocblaslt_status_invalid_handle;
+    }
+    if(sm_count_target == nullptr)
+    {
+        log_error(__func__, "sm_count_target", sm_count_target);
+        return rocblaslt_status_invalid_value;
+    }
+    *sm_count_target = handle->sm_count_target;
+    log_api(__func__, "handle", handle, "sm_count_target", *sm_count_target);
     return rocblaslt_status_success;
 }
 
@@ -1307,6 +1351,15 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                     return rocblaslt_status_invalid_value;
                 }
                 break;
+            case ROCBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE:
+                if((sizeof(int32_t) <= sizeInBytes) && (*(int32_t*)buf >= 0))
+                    memcpy(&matmulDesc->bias_stride, buf, sizeof(int32_t));
+                else
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;                
             case ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT:
                 if(sizeof(int32_t) <= sizeInBytes)
                 {
@@ -1346,6 +1399,41 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                 else
                 {
                     log_error(__func__, "invalid act arg1 buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;
+            case ROCBLASLT_MATMUL_DESC_SM_COUNT_TARGET:
+                if(sizeof(int32_t) <= sizeInBytes)
+                {
+                    int32_t requested = 0;
+                    memcpy(&requested, buf, sizeof(int32_t));
+                    // 0 means "all CUs"; negative values are rejected.
+                    if(requested < 0)
+                    {
+                        log_error(__func__, "negative sm_count_target", requested);
+                        return rocblaslt_status_invalid_value;
+                    }
+                    matmulDesc->sm_count_target = requested;
+                }
+                else
+                {
+                    log_error(__func__, "invalid sm_count_target buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;
+            case ROCBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT:
+                if(sizeof(int32_t) <= sizeInBytes)
+                {
+                    int32_t requested = 0;
+                    memcpy(&requested, buf, sizeof(int32_t));
+                    // Treat any nonzero as "enable"; clamp to 0/1 for forward-compat.
+                    matmulDesc->dyn_persistent_tile_ext = (requested != 0) ? 1 : 0;
+                }
+                else
+                {
+                    log_error(__func__,
+                              "invalid dyn_persistent_tile_ext buf size",
+                              sizeInBytes);
                     return rocblaslt_status_invalid_value;
                 }
                 break;
@@ -1634,6 +1722,16 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                 }
                 memcpy(buf, &matmulDesc->aux_type, sizeof(int32_t));
                 break;
+            case ROCBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(int32_t);
+                if(sizeInBytes < sizeof(int32_t))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matmulDesc->bias_stride, sizeof(int32_t));
+                break;                
             case ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT:
                 if(sizeWritten)
                     *sizeWritten = sizeof(int32_t);
@@ -1653,6 +1751,28 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                     return rocblaslt_status_invalid_value;
                 }
                 memcpy(buf, &matmulDesc->compute_input_typeB, sizeof(int32_t));
+                break;
+            case ROCBLASLT_MATMUL_DESC_SM_COUNT_TARGET:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(int32_t);
+                if(sizeInBytes < sizeof(int32_t))
+                {
+                    log_error(__func__, "invalid sm_count_target buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matmulDesc->sm_count_target, sizeof(int32_t));
+                break;
+            case ROCBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(int32_t);
+                if(sizeInBytes < sizeof(int32_t))
+                {
+                    log_error(__func__,
+                              "invalid dyn_persistent_tile_ext buf size",
+                              sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matmulDesc->dyn_persistent_tile_ext, sizeof(int32_t));
                 break;
             default:
                 log_error(__func__, "invalid attribute", matmulAttr);
@@ -1779,6 +1899,35 @@ rocblaslt_status
                     "data",
                     pref->max_workspace_bytes);
             break;
+        case ROCBLASLT_MATMUL_PREF_SM_COUNT_TARGET:
+        {
+            if(dataSize < sizeof(int32_t))
+            {
+                log_error(__func__, "invalid sm_count_target buf size", dataSize);
+                return rocblaslt_status_invalid_value;
+            }
+            int32_t requested = 0;
+            memcpy(&requested, data, sizeof(int32_t));
+            // 0 means "all CUs"; negative values are rejected.
+            if(requested < 0)
+            {
+                log_error(__func__, "negative sm_count_target", requested);
+                return rocblaslt_status_invalid_value;
+            }
+            pref->sm_count_target = requested;
+            log_api(__func__,
+                    "matmulPref",
+                    pref,
+                    "attr",
+                    attribute,
+                    "buf",
+                    data,
+                    "sizeInBytes",
+                    dataSize,
+                    "data",
+                    pref->sm_count_target);
+            break;
+        }
         default:
             log_error(__func__, "invalid attribute", attribute);
             return rocblaslt_status_invalid_value;
@@ -1842,6 +1991,26 @@ rocblaslt_status
                     sizeInBytes,
                     "data[out]",
                     pref->max_workspace_bytes);
+            break;
+        case ROCBLASLT_MATMUL_PREF_SM_COUNT_TARGET:
+            if(sizeInBytes < sizeof(int32_t))
+            {
+                log_error(__func__, "invalid sm_count_target buf size", sizeInBytes);
+                return rocblaslt_status_invalid_value;
+            }
+            *sizeWritten    = sizeof(int32_t);
+            *(int32_t*)data = pref->sm_count_target;
+            log_api(__func__,
+                    "matmulPref",
+                    pref,
+                    "attr",
+                    attribute,
+                    "buf",
+                    data,
+                    "sizeInBytes",
+                    sizeInBytes,
+                    "data[out]",
+                    pref->sm_count_target);
             break;
         default:
             return rocblaslt_status_invalid_value;
@@ -1956,6 +2125,12 @@ rocblaslt_status
             dummy_bias_address = true;
             matmul_desc->bias  = &dummy_bias_address;
         }
+        // If bias_stride is set but batch mode is not strided, it's invalid. 
+        if((matmul_desc->bias_stride > 0) && (matA->batch_mode != HIPBLASLT_BATCH_MODE_STRIDED))
+        {
+            log_error(__func__, "invalid bias_stride", matmul_desc->bias_stride, "for non-strided batch mode\n");
+            return rocblaslt_status_invalid_value;
+        }
         auto prob = construct_rocblaslt_problem(
             handle, matmul_desc, matA, matB, matC, matD, &alpha, &beta, pref->max_workspace_bytes);
 
@@ -1973,18 +2148,6 @@ rocblaslt_status
                 requestedAlgoCount--;
 
             log_api(__func__, "OverrideAlgoCount", override_success ? 1 : 0);
-        }
-        if(heuristicResultsArray[0].algo.data[0] != 0)
-        {
-            std::vector<rocblaslt_matmul_heuristic_result> allSolutionsResults;
-            size_t required_workspace_size = 0;
-            if(rocblaslt_status_success
-               == isSolutionSupported(handle,
-                                      prob,
-                                      tensile_data,
-                                      &heuristicResultsArray[0].algo,
-                                      &heuristicResultsArray[0].workspaceSize))                    
-                return rocblaslt_status_success;    
         }
         if(requestedAlgoCount > 0)
         {
@@ -2429,6 +2592,15 @@ std::optional<std::filesystem::path> rocblaslt_find_library_relative_path(
     const std::optional<std::filesystem::path>& relpath,
     const std::optional<std::filesystem::path>& default_lib_dir)
 {
+    // Strict semantics:
+    //   - When relpath is supplied, the probe MUST resolve to the full file path
+    //     (lib_dir / relpath) and that path MUST exist. We never silently fall back
+    //     to returning a bare directory when the requested file is missing — that
+    //     mode masked file-not-found behind callers that then appended a filename
+    //     to a wrong root, producing /opt/rocm/lib/hipblaslt/library/* fallback
+    //     loads under the per-base layout.
+    //   - When relpath is not supplied, callers want the library root itself; we
+    //     return the first candidate directory that exists.
     auto pathIfExists
         = [&](const std::filesystem::path& p) -> std::optional<std::filesystem::path> {
         if(relpath)
@@ -2436,6 +2608,7 @@ std::optional<std::filesystem::path> rocblaslt_find_library_relative_path(
             auto full_path = p / (*relpath);
             if(std::filesystem::exists(full_path))
                 return full_path;
+            return {};
         }
 
         if(std::filesystem::exists(p))
