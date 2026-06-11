@@ -82,6 +82,7 @@ from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgp
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection
 from Tensile.Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal
+from Tensile.Components.Subtile.Kernel import mapAcctoArchRegsFromTileInfo
 from Tensile.Common.DataType import DataType
 from Tensile.Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
 from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk
@@ -8231,17 +8232,18 @@ class KernelWriterAssembly(KernelWriter):
       #instCycles = kernel["MatrixInstM"] // 2 # 32x32 is 64 cycles, 16x16 is 32 cycles, 4x4 is 8 cycles
       #module.add(SNop(waitState=instCycles))
       module.addComment1("Mapping of Acc register -> C Vgpr register")
-      # Subtile D-tile accumulators may use VGPRs before AGPRs, so map each
-      # logical MFMA accumulator register to its actual pool/index.
-      accRegMap = None
       if kernel.get("UseSubtileImpl"):
-        accRegMap = accRegMapFromTileInfo(kernel, self.states.d.tileInfo)
-      self.codes.accVgprRead = mapAcctoArchRegs(
-          kernel, self.states.maxLimitAgprs, write=False, accRegMap=accRegMap)
+        self.codes.accVgprRead = mapAcctoArchRegsFromTileInfo(
+            kernel, self.states.d.tileInfo, write=False)
+      else:
+        self.codes.accVgprRead = mapAcctoArchRegs(kernel, self.states.maxLimitAgprs, write=False)
       if (kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0) or \
          ((kernel["GlobalSplitU"] == -1 or kernel["GlobalSplitU"] > 0) and (kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1)):
-        self.codes.accVgprWrite = mapAcctoArchRegs(
-            kernel, self.states.maxLimitAgprs, write=True, accRegMap=accRegMap)
+        if kernel.get("UseSubtileImpl"):
+          self.codes.accVgprWrite = mapAcctoArchRegsFromTileInfo(
+              kernel, self.states.d.tileInfo, write=True)
+        else:
+          self.codes.accVgprWrite = mapAcctoArchRegs(kernel, self.states.maxLimitAgprs, write=True)
       if kernel["MIArchVgpr"]:
         module.addComment1("Multiply MI out register with Alpha -> C Vgpr register")
         self.codes.mulAlphaMultipleBuffer = moveMIoutToArch(kernel, self.states.startVgprAlphaTmp)

@@ -12,8 +12,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
 from Tensile.Common.DataType import DataType
-from Tensile.Components.Subtile.Kernel import emitMfmaInstruction
-from Tensile.KernelWriterModules import mapAcctoArchRegs
+from Tensile.Components.Subtile.Kernel import emitMfmaInstruction, mapAcctoArchRegsFromAccRegMap
 from gpu_test_helpers import init_rocisa  # initializes rocisa target=gfx950
 
 
@@ -316,7 +315,7 @@ def test_subtile_acc_map_reads_vgpr_first_accumulators():
         2: (False, 0),
         3: (False, 1),
     }
-    asm = str(mapAcctoArchRegs(kernel, maxAgpr=256, write=False, accRegMap=accRegMap))
+    asm = str(mapAcctoArchRegsFromAccRegMap(kernel, accRegMap, write=False))
 
     assert "v_readfirstlane_b32" not in asm
     assert "v_mov_b32 v" in asm and "v120" in asm and "v121" in asm

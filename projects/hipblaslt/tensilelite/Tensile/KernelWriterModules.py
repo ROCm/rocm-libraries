@@ -208,34 +208,11 @@ def accVgprImagNumOffset(kernel):
   acc2arch, _ = accToArchMapper(kernel)
   return len(acc2arch) * kernel["MIRegPerOut"]
 
-def accRegMapFromTileInfo(kernel, tileInfo):
-  """Map logical MFMA accumulator indices to the D-tile register pool/index.
-
-  Subtile D-tile registers are allocated in MFMA accumulator order, so flattening
-  tileInfo.vgprTiles yields logical accumulator index N at the N-th register.
-  """
-  accRegMap = {}
-  accIdx = 0
-  for vtile in tileInfo.vgprTiles:
-    isVgpr = vtile.regList.is_vgpr
-    for regIdx in vtile.regList.indices:
-      accRegMap[accIdx] = (isVgpr, regIdx)
-      accIdx += 1
-
-  acc2arch, _ = accToArchMapper(kernel)
-  complexMultiplier = 2 if kernel["ProblemType"]["DataType"].isComplex() else 1
-  expectedAcc = len(acc2arch) * kernel["MIRegPerOut"] * complexMultiplier
-  assert accIdx == expectedAcc, \
-      "subtile accRegMap covers %u registers but expected %u accumulators" \
-      % (accIdx, expectedAcc)
-
-  return accRegMap
-
 ##############################################################################
 # MapAcctoArch
 # function to map MFMA Acc  Registers to Arch VGPR register
 ##############################################################################
-def mapAcctoArchRegs(kernel, maxAgpr=256, write=False, accRegMap=None):
+def mapAcctoArchRegs(kernel, maxAgpr=256, write=False, spilledVgprBase=None):
   acc2arch, _ = accToArchMapper(kernel)
 
   complexMultiplier = 2 if kernel["ProblemType"]["DataType"].isComplex() else 1
@@ -247,28 +224,6 @@ def mapAcctoArchRegs(kernel, maxAgpr=256, write=False, accRegMap=None):
         destIdx = (acc2arch[i]*complexMultiplier + cm) * kernel["MIRegPerOut"] + r
         srcIdx = ((i * kernel["MIRegPerOut"] + r) + (cm*accImOffset))
         if not kernel["MIArchVgpr"]:
-          if accRegMap is not None:
-            # Subtile kernels supply an explicit logical-acc -> (pool, index)
-            # map. It must cover every accumulator; a miss would otherwise
-            # fall through to the legacy addressing below and silently emit
-            # moves against the wrong registers, so fail loudly instead.
-            accLocation = accRegMap.get(srcIdx)
-            assert accLocation is not None, (
-                "subtile accRegMap is missing logical accumulator index %u; "
-                "the map must cover all %u accumulators" % (srcIdx, len(itemList)))
-            isVgpr, regIdx = accLocation
-            accStr = vgpr(regIdx) if isVgpr else accvgpr(regIdx)
-            if write:
-              copyInst = VMovB32 if isVgpr else VAccvgprWriteB32
-              itemList[destIdx] = copyInst(dst=accStr,
-                                           src=vgpr(Holder(name="ValuC")),
-                                           comment="copy vreg[%u] to MI out reg" % destIdx)
-            else:
-              copyInst = VMovB32 if isVgpr else VAccvgprReadB32
-              itemList[destIdx] = copyInst(dst=vgpr(Holder(name="ValuC")),
-                                           src=accStr,
-                                           comment="copy MI out reg to vreg[%u]" % destIdx)
-            continue
           def gprfunc(idx):
             if idx >= maxAgpr:
               return vgpr(idx-maxAgpr)
@@ -276,10 +231,16 @@ def mapAcctoArchRegs(kernel, maxAgpr=256, write=False, accRegMap=None):
               return accvgpr(idx)
           accStr = gprfunc(srcIdx)
           if srcIdx >= maxAgpr:
-            # Spilled accumulator: lives in an arch vgpr, not an accvgpr,
-            # addressed via the legacy "ValuC+N" scheme (vgprValuC == 0 here).
+            # Spilled accumulator: lives in an arch vgpr, not an accvgpr.
+            # For subtile kernels the spilled D-tile vgprs are allocated from
+            # the pool at spilledVgprBase (not at ValuC+N), so reference them
+            # directly.  For non-subtile kernels spilledVgprBase is None and
+            # the legacy "ValuC+N" addressing is used (vgprValuC == 0 there).
             spill_offset = srcIdx - maxAgpr
-            spilledVgpr = vgpr("ValuC+%u" % spill_offset)
+            if spilledVgprBase is not None:
+              spilledVgpr = vgpr(spilledVgprBase + spill_offset)
+            else:
+              spilledVgpr = vgpr("ValuC+%u" % spill_offset)
             if write:
               itemList[destIdx] = VMovB32(dst=spilledVgpr,
                                              src=vgpr(Holder(name="ValuC")),

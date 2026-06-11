@@ -1,1 +1,5 @@
 .tox/
+
+# Generated TensileLite run outputs/results.
+tensile-out-*/
+tensile-out-*.log

@@ -23,41 +23,83 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Lightweight utilities for GlobalWriteBatch — no rocisa dependency.
+"""Lightweight utilities for the subtile GlobalWriteBatch integration.
 
 Kept in a separate module so that unit tests can import these helpers without
 pulling in the rocisa C++ bindings.
 """
 
-from ..Common import DataDirection
+from ...Common import DataDirection
+
+
+# ---------------------------------------------------------------------------
+# Low-level helpers shared between GlobalWriteBatch and StreamK
+# ---------------------------------------------------------------------------
+
+def _extract_direct_vgpr_from_acc_read(accReadInst):
+    """Return the physical VGPR index if accReadInst is a VGPR→VGPR move, else None.
+
+    For VGPR-first FP4 subtile accumulators the acc→ValuC code list contains
+    ``v_mov_b32 v[ValuC+N], v[physReg]`` moves (src is a plain arch-VGPR).
+    For AGPR-backed accumulators the src is an accvgpr (regType="a"), which
+    returns None here so the normal replaceHolder path is used instead.
+    """
+    if len(accReadInst.srcs) != 1:
+        return None
+    src = accReadInst.srcs[0]
+    if getattr(src, "regType", None) != "v":
+        return None
+    if getattr(src, "regName", None) is not None:
+        return None
+    regIdx = getattr(src, "regIdx", None)
+    return regIdx if isinstance(regIdx, int) else None
+
+
+def _is_legal_valuC_offset(startVgprValu, maxVgpr, valuCOffset, width=1):
+    """Return True when v[startVgprValu + valuCOffset + width - 1] is within bounds."""
+    return startVgprValu + valuCOffset + width <= maxVgpr
+
+
+def _is_fp4_subtile_accumulator_vgpr_first(kernel) -> bool:
+    """Return True for the scoped FP4 subtile kernels that use VGPR-first accumulators."""
+    if not kernel.get("UseSubtileImpl"):
+        return False
+    pt = kernel.get("ProblemType", {})
+    dataTypeA = pt.get("DataTypeA")
+    dataTypeB = pt.get("DataTypeB")
+    return (
+        dataTypeA is not None and dataTypeB is not None
+        and dataTypeA.isFloat4() and dataTypeB.isFloat4()
+    )
 
 
 def _can_bypass_valu_c(kernel, edge: bool, atomic: bool, use_bias,
                        beta: bool = False) -> bool:
-    """Return True when acc→ValuC v_mov moves can be skipped (subtile bypass).
+    """Return True when acc->ValuC v_mov moves can be skipped (subtile bypass).
 
     The bypass is only valid when every ValuC read in the global-write epilogue
-    uses _valuCVgpr / _storeSumIdx.  Any epilogue feature whose ValuC reads were
+    uses _valuCVgpr / _storeSumIdx. Any epilogue feature whose ValuC reads were
     NOT updated to those helpers must disable the bypass to avoid reading
     uninitialized staging registers:
 
-    * ActivationFuncCall  – copyData reads raw elementSumIdx (ValuC).
-    * Bias read           – VAddF32/VAddPKF32 src1 uses raw "ValuC+%d".
+    * Bias read           - VAddF32/VAddPKF32 src1 uses raw "ValuC+%d".
     * Bias write (BiasSrc=D, not WorkGroupReduction)
-                          – biasReductionModule addStore uses raw "ValuC+%d".
-    * UseScaleCD          – scaleDModule uses raw "ValuC+%d".
-    * UseE (non-gradient) – E-output pack path uses raw ValuC prefix.
-    * HPA with non-16bit dest – packdata/convertData use inputPrefix="ValuC+";
+                          - biasReductionModule addStore uses raw "ValuC+%d".
+    * UseScaleCD          - scaleDModule uses raw "ValuC+%d".
+    * UseE (non-gradient) - E-output pack path uses raw ValuC prefix.
+    * HPA with non-16bit dest - packdata/convertData use inputPrefix="ValuC+";
       16-bit (Half/BF16) is already protected by the is16bitSubtile packdata skip.
-    * Half/BF16 dest + beta – _addSumAlphaWithCBeta Half/BF16 paths (VAddPKF16,
-      mixinst, VMacF32) are not updated; only the F32-single beta path is.
-    * Non-HPA Half compute  – _applyAlpha VMulPKF16 path is not updated.
-    * Int32 compute         – _applyAlpha VMulLOU32 path is not updated.
+    * Non-HPA Half dest + beta - _addSumAlphaWithCBeta VAddPKF16 path is not
+      updated. HPA Half/BF16 beta paths use _valuCVgpr and are bypass-safe.
+    * Non-HPA Half compute  - _applyAlpha VMulPKF16 path is not updated.
+    * Int32 compute         - _applyAlpha VMulLOU32 path is not updated.
 
     UseScaleAB=Vector and UseScaleAlphaVec: applyScaleVec was updated to use
     _valuCVgpr for all src/dst reads, so these no longer block the bypass.
+    ActivationFuncCall uses _copyActivationData, which also resolves ValuC
+    through _valuCVgpr, so activation function calls are bypass-safe.
     However, the bypass for these scale-vec paths is only validated for the
-    beta=0 (C = A*B, no C-accumulation) case.  When beta is non-zero the
+    beta=0 (C = A*B, no C-accumulation) case. When beta is non-zero the
     interaction with _addSumAlphaWithCBeta has not been tested and bypass
     is conservatively disabled.
     """
@@ -65,17 +107,15 @@ def _can_bypass_valu_c(kernel, edge: bool, atomic: bool, use_bias,
         return False
     if kernel["LocalSplitU"] != 1:
         return False
-    if edge or atomic:
+    if atomic:
         return False
     pt = kernel["ProblemType"]
     if pt.get("Gradient", False):
         return False
-    if kernel.get("ActivationFuncCall", False):
-        return False
     if use_bias == DataDirection.READ:
         return False
     # biasReductionModule: stores "ValuC+%d" directly when BiasSrc=D and
-    # WorkGroupReduction is off — that code was not updated for bypass.
+    # WorkGroupReduction is off - that code was not updated for bypass.
     if (use_bias == DataDirection.WRITE
             and not kernel.get("WorkGroupReduction", False)
             and pt.get("BiasSrc") == "D"):
@@ -89,9 +129,8 @@ def _can_bypass_valu_c(kernel, edge: bool, atomic: bool, use_bias,
     if beta and (pt.get("UseScaleAlphaVec", False) or pt.get("UseScaleAB", "None") == "Vector"):
         return False
     dest = pt.get("DestDataType")
-    # _addSumAlphaWithCBeta: Half/BF16 paths (VAddPKF16, mixinst, VMacF32)
-    # are not updated; only DestDataType.isSingle() beta was updated.
-    if beta and dest is not None and (dest.isHalf() or dest.isBFloat16()):
+    # _addSumAlphaWithCBeta: non-HPA Half path (VAddPKF16) is not updated.
+    if beta and dest is not None and dest.isHalf() and not pt.get("HighPrecisionAccumulate", False):
         return False
     # _applyAlpha: non-HPA Half compute (VMulPKF16) and Int32 compute
     # (VMulLOU32) paths are not updated for bypass.

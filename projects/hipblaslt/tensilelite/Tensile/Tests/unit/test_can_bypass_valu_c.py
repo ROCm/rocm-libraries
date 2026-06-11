@@ -38,7 +38,7 @@ extra v_mov instructions are emitted for those kernels.
 import pytest
 from unittest.mock import MagicMock
 
-from Tensile.Components.GlobalWriteBatchUtils import _can_bypass_valu_c
+from Tensile.Components.Subtile.GlobalWriteBatchUtils import _can_bypass_valu_c
 from Tensile.Common import DataDirection
 
 
@@ -138,9 +138,9 @@ class TestBypassDisabledForStructuralReasons:
                                   use_bias=DataDirection.NONE) is False
 
     def test_edge_store(self):
-        """Edge stores are excluded because OOB masking changes the flow."""
+        """Subtile edge stores route ValuC through _valuCVgpr/_storeSumIdx."""
         assert _can_bypass_valu_c(_base_kernel(), edge=True, atomic=False,
-                                  use_bias=DataDirection.NONE) is False
+                                  use_bias=DataDirection.NONE) is True
 
     def test_atomic_store(self):
         assert _can_bypass_valu_c(_base_kernel(), edge=False, atomic=True,
@@ -166,11 +166,11 @@ class TestBypassDisabledForEpilogueFeatures:
     """
 
     def test_activation_func_call(self):
-        """copyData in ActivationFuncCall uses raw elementSumIdx → ValuC."""
+        """ActivationFuncCall copies through _valuCVgpr, so it is bypass-safe."""
         k = _base_kernel()
         k["ActivationFuncCall"] = True
         assert _can_bypass_valu_c(k, edge=False, atomic=False,
-                                  use_bias=DataDirection.NONE) is False
+                                  use_bias=DataDirection.NONE) is True
 
     def test_bias_read(self):
         """Bias addition uses vgpr("ValuC+%d"%idx) as src1."""
@@ -388,32 +388,36 @@ class TestBypassDisabledForBiasStore:
 
 
 # ---------------------------------------------------------------------------
-# Half/BF16 dest + beta (_addSumAlphaWithCBeta paths not updated)
+# Half/BF16 dest + beta (_addSumAlphaWithCBeta coverage)
 # ---------------------------------------------------------------------------
 
 class TestBypassDisabledForHalfBf16Beta:
-    """_addSumAlphaWithCBeta Half/BF16 paths (VAddPKF16, mixinst, VMacF32)
-    are not updated for bypass; only DestDataType.isSingle() was updated.
-
-    Disabling bypass when beta is True for Half/BF16 prevents reading
-    uninitialized ValuC staging registers in the beta epilogue.
-    """
+    """Non-HPA Half beta remains unsafe; HPA Half/BF16 beta is bypass-safe."""
 
     def test_half_dest_beta_disabled(self):
-        """Half + beta=True: VAddPKF16/mixinst reads raw "ValuC+%u"."""
+        """Non-HPA Half + beta=True: VAddPKF16 still reads raw "ValuC+%u"."""
         dest = _make_dest_type(is_half=True)
         assert _can_bypass_valu_c(_base_kernel(dest_type=dest),
                                   edge=False, atomic=False,
                                   use_bias=DataDirection.NONE,
                                   beta=True) is False
 
-    def test_bf16_dest_beta_disabled(self):
-        """BFloat16 + beta=True: VMacF32 reads raw "ValuC+%u"."""
+    def test_bf16_dest_beta_allowed(self):
+        """BFloat16 + beta=True: VMacF32 path uses _valuCVgpr."""
         dest = _make_dest_type(is_bf16=True)
         assert _can_bypass_valu_c(_base_kernel(dest_type=dest),
                                   edge=False, atomic=False,
                                   use_bias=DataDirection.NONE,
-                                  beta=True) is False
+                                  beta=True) is True
+
+    def test_hpa_half_dest_beta_allowed(self):
+        """HPA Half + beta=True: mixinst path uses _valuCVgpr."""
+        dest = _make_dest_type(is_half=True)
+        k = _base_kernel(dest_type=dest)
+        k["ProblemType"]["HighPrecisionAccumulate"] = True
+        assert _can_bypass_valu_c(k, edge=False, atomic=False,
+                                  use_bias=DataDirection.NONE,
+                                  beta=True) is True
 
     def test_half_dest_beta_false_allowed(self):
         """Half + beta=False: beta path not entered; only alpha+D-store used.

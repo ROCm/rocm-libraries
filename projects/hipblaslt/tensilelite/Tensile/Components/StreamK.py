@@ -35,6 +35,10 @@ from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
     vectorStaticMultiply, BranchIfNotZero, scalarUInt24DivideAndRemainder, scalarUInt32DivideAndRemainder
 
 from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
+from .Subtile.GlobalWriteBatchUtils import (
+    _extract_direct_vgpr_from_acc_read,
+    _is_legal_valuC_offset,
+)
 
 from ..Common import print2, ceilDivide, log2
 from ..Component import Component
@@ -252,6 +256,19 @@ class StreamK(Component):
     """
     def __call__(self):
         assert(0)
+
+    @staticmethod
+    def _directVgprFromAccReadInst(accReadInst):
+        """Delegate to the shared helper in GlobalWriteBatchUtils."""
+        return _extract_direct_vgpr_from_acc_read(accReadInst)
+
+    @staticmethod
+    def _isLegalValuCOffset(writer, valuCOffset, width=1):
+        """Delegate to the shared helper in GlobalWriteBatchUtils."""
+        return _is_legal_valuC_offset(
+            writer.states.c.startVgprValu,
+            writer.states.regCaps["MaxVgpr"],
+            valuCOffset, width)
 
     @staticmethod
     def _depthUForTc(kernel, tc):
@@ -1373,6 +1390,14 @@ class StreamK(Component):
         # AccVgpr read
         # if kernel.enabledSetPrioSplitLDS:
         #     kStr += inst("s_setprio", "0", "")
+        valuCOverflows = False
+        if kernel.get("UseSubtileImpl") and batchElements:
+            regsPerScalar = writer.states.bpeCinternal // writer.states.bpr
+            maxValuCOffset = max(ss.elementSumIdx[elementIdx] * regsPerScalar + regsPerScalar * (gwvw - 1) + regsPerScalar - 1
+                                 for elementIdx in range(0, len(batchElements)))
+            valuCOverflows = not self._isLegalValuCOffset(writer, maxValuCOffset)
+        valuCSourceMap = {} if valuCOverflows else None
+        valuCSpareOffsets = []
         if codeAccVgprRead is not None and kernel["LocalSplitU"] == 1:
             regsPerScalar = writer.states.bpeCinternal // writer.states.bpr # register per scalar
             # loop over store instructions within one batch
@@ -1382,7 +1407,27 @@ class StreamK(Component):
                     # loop over registers within one scalar
                     for rIdx in range(0, regsPerScalar):
                         startVgprValuOffset = 0 if kernel.get("UseSubtileImpl") else writer.states.c.startVgprValu
-                        module.add(replaceHolder(codeAccVgprRead.popFirstItem(), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - startVgprValuOffset))
+                        valuCOffset = ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - startVgprValuOffset
+                        accReadInst = codeAccVgprRead.popFirstItem()
+                        directVgpr = self._directVgprFromAccReadInst(accReadInst) if valuCSourceMap is not None else None
+                        if directVgpr is None:
+                            spareOffset = None
+                            if valuCSourceMap is not None and not self._isLegalValuCOffset(writer, valuCOffset) and valuCSpareOffsets:
+                                spareOffset = valuCSpareOffsets.pop(0)
+                            if spareOffset is None:
+                                module.add(replaceHolder(accReadInst, valuCOffset))
+                            else:
+                                spareOffset, spareDirectVgpr = spareOffset
+                                valuCSourceMap[spareOffset] = spareDirectVgpr
+                                module.add(replaceHolder(accReadInst, spareOffset))
+                                valuCSourceMap[valuCOffset] = writer.states.c.startVgprValu + spareOffset
+                        else:
+                            if self._isLegalValuCOffset(writer, valuCOffset):
+                                module.add(replaceHolder(accReadInst, valuCOffset))
+                                if writer.states.c.startVgprValu + valuCOffset != directVgpr:
+                                    valuCSpareOffsets.append((valuCOffset, directVgpr))
+                            else:
+                                valuCSourceMap[valuCOffset] = directVgpr
                         # if kernel["StoreCInUnroll"] and not edge:
                         #     tempStr = tempStr.replace("__placeholder__",str(elementIdx*gwvw*regsPerScalar + regsPerScalar*vi + rIdx))
                         #     accVgprRead.addCode(tempStr.replace("ValuC","L2GC"))
@@ -1455,7 +1500,11 @@ class StreamK(Component):
             # (non-subtile), startVgprValu is already accounted for by the vgprValuC
             # assembler macro, so no offset is needed (matches rebase behaviour).
             if kernel.get("UseSubtileImpl"):
-                sumIdx = ss.elementSumIdx[elementIdx] + writer.states.c.startVgprValu
+                if valuCSourceMap is not None:
+                    sumIdx = valuCSourceMap.get(ss.elementSumIdx[elementIdx],
+                                                ss.elementSumIdx[elementIdx] + writer.states.c.startVgprValu)
+                else:
+                    sumIdx = ss.elementSumIdx[elementIdx] + writer.states.c.startVgprValu
             else:
                 sumIdx = ss.elementSumIdx[elementIdx]
             storeWidth = kernel["StoreVectorWidth"]

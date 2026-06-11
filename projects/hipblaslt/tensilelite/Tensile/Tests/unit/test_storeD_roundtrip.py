@@ -34,8 +34,7 @@ from Tensile.Common.Types import DebugConfig
 from Tensile.KernelWriter import CodeModules, StateValues, StateVgprs
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
 from Tensile.KernelWriter import KernelWriter
-from Tensile.KernelWriterModules import accRegMapFromTileInfo, mapAcctoArchRegs
-from Tensile.Components.Subtile.Kernel import TileInfo, CD_F32
+from Tensile.Components.Subtile.Kernel import TileInfo, CD_F32, mapAcctoArchRegsFromTileInfo
 
 from gpu_test_helpers import (
     TileConfig,
@@ -1154,9 +1153,7 @@ def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
 
     tmp_v = writer.vgprPool.checkOut(1, "tmp_init", preventOverflow=False)
 
-    accRegMap = accRegMapFromTileInfo(kernel, tileInfoD)
-    kw.codes.accVgprRead = mapAcctoArchRegs(
-        kernel, kw.states.maxLimitAgprs, write=False, accRegMap=accRegMap)
+    kw.codes.accVgprRead = mapAcctoArchRegsFromTileInfo(kernel, tileInfoD, write=False)
     store_indices_mod = kw.notLocalSplitUGlobalWriteIndices(kernel)
     kw.states.c.startVgprValu = 0
     store_write_mod, _ = kw.notLocalSplitUGlobalWrite(kernel, tPA=None, tPB=None)
@@ -1818,9 +1815,7 @@ def _run_storeD_beta(cfg, tmp_path, size_i, size_j, mi_wave_group=None, dump_asm
 
     tmp_v = writer.vgprPool.checkOut(1, "tmp_v", preventOverflow=False)
 
-    accRegMap = accRegMapFromTileInfo(kernel, tileInfoD)
-    kw.codes.accVgprRead = mapAcctoArchRegs(
-        kernel, kw.states.maxLimitAgprs, write=False, accRegMap=accRegMap)
+    kw.codes.accVgprRead = mapAcctoArchRegsFromTileInfo(kernel, tileInfoD, write=False)
     store_indices_mod = kw.notLocalSplitUGlobalWriteIndices(kernel)
     kw.states.c.startVgprValu = 0
     store_write_mod, _ = kw.notLocalSplitUGlobalWrite(kernel, tPA=None, tPB=None)
@@ -2054,9 +2049,7 @@ def _run_storeD_cload_pagefault(cfg, tmp_path, size_i, size_j, mi_wave_group=Non
 
     tmp_v = writer.vgprPool.checkOut(1, "tmp_v", preventOverflow=False)
 
-    accRegMap = accRegMapFromTileInfo(kernel, tileInfoD)
-    kw.codes.accVgprRead = mapAcctoArchRegs(
-        kernel, kw.states.maxLimitAgprs, write=False, accRegMap=accRegMap)
+    kw.codes.accVgprRead = mapAcctoArchRegsFromTileInfo(kernel, tileInfoD, write=False)
     store_indices_mod = kw.notLocalSplitUGlobalWriteIndices(kernel)
     kw.states.c.startVgprValu = 0
     store_write_mod, _ = kw.notLocalSplitUGlobalWrite(kernel, tPA=None, tPB=None)

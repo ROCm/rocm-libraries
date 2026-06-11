@@ -33,7 +33,7 @@ from rocisa import rocIsa, countInstruction, countGlobalRead, \
 from rocisa.asmpass import rocIsaPass, rocIsaPassOption
 from rocisa.code import KernelBody, Label, Module, StructuredModule, TextBlock
 from rocisa.container import (
-  DPPModifiers, DSModifiers, EXEC, HWRegContainer, MUBUFModifiers,
+  DPPModifiers, DSModifiers, EXEC, Holder, HWRegContainer, MUBUFModifiers,
   RegisterContainer, VCC, VOP3PModifiers,
   accvgpr, mgpr, replaceHolder, sgpr, vgpr,
 )
@@ -54,7 +54,7 @@ from rocisa.instruction import (
   SCmpEQU32, SCmpLeU32, SLShiftLeftB32, SLongBranchPositive,
   SMovB32, SMovB64, SMulI32, SNop,
   SSetPrior, SSetRegIMM32B32, SSubBU32, SSubU32, SWaitAlu, SWaitCnt, SXorB32,
-  VAccvgprWrite, VAddCCOU32, VAddCOU32, VAddU32, VAndB32,
+  VAccvgprReadB32, VAccvgprWrite, VAccvgprWriteB32, VAddCCOU32, VAddCOU32, VAddU32, VAndB32,
   VCmpXEqU32, VCndMaskB32, VFmaMixF32, VMadMixF32,
   VLShiftLeftB32, VLShiftRightB32, VMovB32, VMovB64,
   VMulLOU32, VPermlane16SwapB32, VReadfirstlaneB32, VSubU32, VXorB32,
@@ -127,6 +127,8 @@ from .SubtileScaleEmit import (
     globalReadScalePtrUpdates, globalReadScaleSwizzledDTLInitCommonSgpr,
     emitSubtileScaleDsRead,
 )
+
+from ...KernelWriterModules import accToArchMapper
 
 class ABGRTile:
   """Mutable GR tile for A/B global reads.
@@ -707,23 +709,85 @@ class TileInfo:
     dataTypeB = kernel["ProblemType"].get("DataTypeB", None)
     def isFloat4Type(dtype):
       return dtype is not None and dtype.isFloat4() is True
+    _totalDTileRegs = numMMATiles * numDword
     preferVgpr = isDTile \
         and isFloat4Type(dataTypeA) \
-        and isFloat4Type(dataTypeB)
+        and isFloat4Type(dataTypeB) \
+        and (writer.vgprPool.size() + _totalDTileRegs) <= maxVgprBeforeAgpr
 
-    # Large FP4 subtile tiles can exceed the VGPR accumulator budget.  Do not
-    # fill VGPRs to the architectural cap before spilling to AGPRs; the subtile
-    # main loop and post-loop store path still need transient VGPRs. PGR=2 uses
-    # additional scheduler temporaries, so reserve more headroom there.
-    if preferVgpr:
+    def conservativeSubtileMainLoopVgprReserve():
       pgrReserve = 12 if int(kernel.get("PrefetchGlobalRead", 0)) == 2 else 0
-      vgprReserve = numDword * (int(self.localMMATileGrid[0]) + int(self.localMMATileGrid[1]) + 8 + pgrReserve)
-      vgprAccLimit = max(0, maxVgprBeforeAgpr - vgprReserve)
+      return numDword * (int(self.localMMATileGrid[0]) + int(self.localMMATileGrid[1]) + 8 + pgrReserve)
+
+    def estimateSubtileMainLoopVgprs():
+      stateA = getattr(writer.states, "a", None)
+      stateB = getattr(writer.states, "b", None)
+      tiA = getattr(stateA, "tileInfo", None)
+      tiB = getattr(stateB, "tileInfo", None)
+      if tiA is None or tiB is None:
+        return conservativeSubtileMainLoopVgprReserve()
+
+      stateMXSA = getattr(writer.states, "mxsa", None)
+      stateMXSB = getattr(writer.states, "mxsb", None)
+      scaleTiA = getattr(stateMXSA, "tileInfo", None) if kernel["ProblemType"].get("MXBlockA", 0) else None
+      scaleTiB = getattr(stateMXSB, "tileInfo", None) if kernel["ProblemType"].get("MXBlockB", 0) else None
+
+      if kernel.get("enableTDMA", False):
+        grAGran = ReadGranularity(mn=tiA.localMMATileGrid[0], k=tiA.localMMATileGrid[1])
+      else:
+        grMNA, grKA = tiA.subtileShape[0], tiA.subtileShape[1]
+        grAGran = ReadGranularity(mn=grMNA, k=grKA) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNA, k=grKA)
+
+      if kernel.get("enableTDMB", False):
+        grBGran = ReadGranularity(mn=tiB.localMMATileGrid[0], k=tiB.localMMATileGrid[1])
+      else:
+        grMNB, grKB = tiB.subtileShape[0], tiB.subtileShape[1]
+        grBGran = ReadGranularity(mn=grMNB, k=grKB) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNB, k=grKB)
+
+      lrSAGran = ReadGranularity(mn=scaleTiA.lrSubtileShape[0], k=scaleTiA.lrSubtileShape[1]) if scaleTiA else None
+      lrSBGran = ReadGranularity(mn=scaleTiB.lrSubtileShape[0], k=scaleTiB.lrSubtileShape[1]) if scaleTiB else None
+      grSAGran = ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]) if scaleTiA else None
+      grSBGran = ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]) if scaleTiB else None
+
+      M = tiA.localMMATileGrid[0]
+      N = tiB.localMMATileGrid[0]
+      pgr = int(kernel.get("PrefetchGlobalRead", 0))
+      candidates = [(M, N)] if pgr == 0 else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
+
+      for partSizeM, partSizeN in candidates:
+        cfg = MFMASchedulerConfig(
+            numMFMATilesM=M,
+            numMFMATilesN=N,
+            numSubIterK=tiA.localMMATileGrid[1],
+            lrA=ReadGranularity(mn=1, k=1),
+            lrB=ReadGranularity(mn=1, k=1),
+            grA=grAGran,
+            grB=grBGran,
+            lrSA=lrSAGran,
+            lrSB=lrSBGran,
+            grSA=grSAGran,
+            grSB=grSBGran,
+            partitionSizeM=partSizeM,
+            partitionSizeN=partSizeN,
+            pgr=pgr)
+        scheduler = LogicalScheduler(cfg)
+        scheduler.build()
+        numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
+        if writer.vgprPool.size() + numVgpr <= maxVgpr:
+          return numVgpr
+      return numVgpr
+
+    # Large FP4 subtile tiles can exceed the VGPR accumulator budget. Estimate
+    # the main-loop A/B/scale VGPR demand, then give remaining legal VGPRs to D
+    # accumulators before spilling the rest to AGPRs.
+    if preferVgpr:
+      vgprAccLimit = max(0, maxVgprBeforeAgpr - estimateSubtileMainLoopVgprs())
     else:
       vgprAccLimit = maxVgpr
 
     for i in range(numMMATiles):
-      if preferVgpr and writer.vgprPool.size() + numDword <= vgprAccLimit:
+      nextVgprEnd = int(math.ceil(writer.vgprPool.size() / numDword)) * numDword + numDword
+      if preferVgpr and nextVgprEnd <= vgprAccLimit:
         pool = writer.vgprPool
         regType = RegisterType.Vgpr
       elif preferVgpr and writer.agprPool.size() + numDword <= maxAgpr:
@@ -992,6 +1056,65 @@ def initVgprTilesToZero(writer, kernel, tileInfo):
   _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, curPool == writer.agprPool)
 
   return module
+
+
+def accRegMapFromTileInfo(kernel, tileInfo):
+  """Map logical MFMA accumulator indices to a subtile D-tile register location."""
+  accRegMap = {}
+  accIdx = 0
+  for vtile in tileInfo.vgprTiles:
+    isVgpr = vtile.regList.is_vgpr
+    for regIdx in vtile.regList.indices:
+      accRegMap[accIdx] = (isVgpr, regIdx)
+      accIdx += 1
+
+  acc2arch, _ = accToArchMapper(kernel)
+  complexMultiplier = 2 if kernel["ProblemType"]["DataType"].isComplex() else 1
+  expectedAcc = len(acc2arch) * kernel["MIRegPerOut"] * complexMultiplier
+  assert accIdx == expectedAcc, \
+      "subtile accRegMap covers %u registers but expected %u accumulators" \
+      % (accIdx, expectedAcc)
+
+  return accRegMap
+
+
+def mapAcctoArchRegsFromAccRegMap(kernel, accRegMap, write=False):
+  """Build acc<->ValuC copies for subtile D accumulators from an explicit map."""
+  acc2arch, _ = accToArchMapper(kernel)
+
+  complexMultiplier = 2 if kernel["ProblemType"]["DataType"].isComplex() else 1
+  itemList = [None] * kernel["MIRegPerOut"] * complexMultiplier * len(acc2arch)
+  accImOffset = len(acc2arch) * kernel["MIRegPerOut"]
+  for i in range(len(acc2arch)):
+    for cm in range(complexMultiplier):
+      for r in range(kernel["MIRegPerOut"]):
+        destIdx = (acc2arch[i] * complexMultiplier + cm) * kernel["MIRegPerOut"] + r
+        srcIdx = (i * kernel["MIRegPerOut"] + r) + (cm * accImOffset)
+        accLocation = accRegMap.get(srcIdx)
+        assert accLocation is not None, (
+            "subtile accRegMap is missing logical accumulator index %u; "
+            "the map must cover all %u accumulators" % (srcIdx, len(itemList)))
+        isVgpr, regIdx = accLocation
+        accStr = vgpr(regIdx) if isVgpr else accvgpr(regIdx)
+        if write:
+          copyInst = VMovB32 if isVgpr else VAccvgprWriteB32
+          itemList[destIdx] = copyInst(dst=accStr,
+                                       src=vgpr(Holder(name="ValuC")),
+                                       comment="copy vreg[%u] to MI out reg" % destIdx)
+        else:
+          copyInst = VMovB32 if isVgpr else VAccvgprReadB32
+          itemList[destIdx] = copyInst(dst=vgpr(Holder(name="ValuC")),
+                                       src=accStr,
+                                       comment="copy MI out reg to vreg[%u]" % destIdx)
+
+  imod = Module("SubtileAccVgpr{}".format("Write" if write else "Read"))
+  imod.setItems(itemList)
+  return imod
+
+
+def mapAcctoArchRegsFromTileInfo(kernel, tileInfo, write=False):
+  """Build acc<->ValuC copies using the actual subtile D-tile allocation."""
+  return mapAcctoArchRegsFromAccRegMap(kernel, accRegMapFromTileInfo(kernel, tileInfo), write)
 
 # ---------------------------------------------------------------------------
 # Pick the MXMFMAInstruction instType for the V_MFMA_SCALE_F32_<MxNxK>_F8F6F4

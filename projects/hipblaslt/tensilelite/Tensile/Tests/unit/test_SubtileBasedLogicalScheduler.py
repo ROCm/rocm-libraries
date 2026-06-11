@@ -2946,3 +2946,91 @@ class TestBuildTailloopPGR0:
 
         finally:
             sched.deallocVgprTiles(writer)
+
+
+class TestPreferVgprGuard:
+    """Verify the pool-size guard on preferVgpr.
+
+    For FP4 CDTile kernels, preferVgpr is only True when all D-tile
+    accumulator registers fit within the 256-VGPR hardware limit:
+        writer.vgprPool.size() + numMMATiles * numDword <= maxVgprBeforeAgpr (256)
+
+    When pool_size + totalDTileRegs > 256, preferVgpr must be False and
+    every tile must fall back to AGPR, preventing copy instructions from
+    referencing v[256+].
+    """
+
+    def _make_writer(self, pre_alloc_vgprs, max_vgpr=256, physical_max_vgpr=512):
+        """Return a minimal writer stub with vgprPool pre-filled to simulate
+        prior A/B tile allocations."""
+        from types import SimpleNamespace
+        from rocisa import rocIsa
+        from rocisa.register import RegisterPool
+        from rocisa.enum import RegisterType
+
+        ri = rocIsa.getInstance()
+        import shutil
+        asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
+        ri.init((9, 5, 0), asmpath)
+        ri.setKernel((9, 5, 0), 64)
+
+        writer = SimpleNamespace()
+        writer.vgprPool = RegisterPool(0, RegisterType.Vgpr, False)
+        writer.agprPool = RegisterPool(0, RegisterType.Accvgpr, False)
+        writer.states = SimpleNamespace(
+            regCaps={"MaxVgpr": max_vgpr, "PhysicalMaxVgpr": physical_max_vgpr},
+        )
+        if pre_alloc_vgprs > 0:
+            writer.vgprPool.checkOut(pre_alloc_vgprs)
+        return writer
+
+    def _alloc_cdtile(self, writer, mt0, mt1, wave_group=None):
+        """Allocate CDTile registers for a given FP4 macro-tile size."""
+        if wave_group is None:
+            wave_group = [2, 2]
+        kernel = create_kernel(mt0, mt1, fp4=True, miWaveGroup=wave_group)
+        dTileInfo = makeTileInfo('D', kernel)
+        dTileInfo.allocVgprTileRegisters_legacy(writer, kernel)
+        return dTileInfo
+
+    @pytest.mark.parametrize("pre_alloc,mt0,mt1", [
+        # MT256x256: 64 tiles × 4 DWORDs = 256 total accumulator registers.
+        # Any P > 0 pushes P+256 above the 256-VGPR limit.
+        (4, 256, 256),
+        (1, 256, 256),
+        # MT128x128: 16 tiles × 4 DWORDs = 64 total.
+        # P=193 → 193+64=257 > 256 → overflow.
+        (193, 128, 128),
+    ])
+    def test_overflow_forces_all_agpr(self, pre_alloc, mt0, mt1):
+        """When pool_size + totalDTileRegs > 256, preferVgpr must be False
+        and every CDTile tile must be allocated in AGPR."""
+        writer = self._make_writer(pre_alloc)
+        dTileInfo = self._alloc_cdtile(writer, mt0, mt1)
+        assert len(dTileInfo.vgprTiles) > 0
+        vgpr_tiles = [t for t in dTileInfo.vgprTiles if t.regList.is_vgpr]
+        assert vgpr_tiles == [], (
+            f"Expected all CDTile tiles in AGPR when pool overflows "
+            f"(pre_alloc={pre_alloc}, MT{mt0}x{mt1}), "
+            f"but {len(vgpr_tiles)} tile(s) landed in VGPR"
+        )
+
+    @pytest.mark.parametrize("pre_alloc,mt0,mt1", [
+        # MT256x256: P=0 → 0+256=256 ≤ 256 → preferVgpr=True → first tile VGPR.
+        # vgprAccLimit = 256 - conservative(96) = 160; nextVgprEnd=4 ≤ 160 ✓
+        (0, 256, 256),
+        # MT128x128: P=4 → 4+64=68 ≤ 256 → preferVgpr=True → first tile VGPR.
+        # vgprAccLimit = 256 - conservative(64) = 192; nextVgprEnd=8 ≤ 192 ✓
+        (4, 128, 128),
+    ])
+    def test_fits_enables_vgpr(self, pre_alloc, mt0, mt1):
+        """When pool_size + totalDTileRegs ≤ 256, preferVgpr must be True
+        and at least the first CDTile tile must be in VGPR."""
+        writer = self._make_writer(pre_alloc)
+        dTileInfo = self._alloc_cdtile(writer, mt0, mt1)
+        assert len(dTileInfo.vgprTiles) > 0
+        first_is_vgpr = dTileInfo.vgprTiles[0].regList.is_vgpr
+        assert first_is_vgpr, (
+            f"Expected first CDTile tile in VGPR when pool fits "
+            f"(pre_alloc={pre_alloc}, MT{mt0}x{mt1})"
+        )
