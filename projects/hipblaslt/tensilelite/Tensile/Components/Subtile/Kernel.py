@@ -43,7 +43,7 @@ from rocisa.instruction import (
   SSetPrior, SSetRegIMM32B32, SSubBU32, SSubU32, SWaitAlu, SWaitCnt, SXorB32,
   VAccvgprWrite, VAddCCOU32, VAddCOU32, VAddU32, VAndB32,
   VCmpXEqU32, VCndMaskB32, VFmaMixF32, VMadMixF32,
-  VLShiftLeftB32, VLShiftRightB32, VMovB32, VMovB64,
+  VLShiftLeftB32, VLShiftRightB32, VMinI32, VMovB32, VMovB64,
   VMulLOU32, VPermlane16SwapB32, VReadfirstlaneB32, VSubU32, VXorB32,
 )
 from rocisa.label import LabelManager
@@ -1863,14 +1863,6 @@ def lraTileAssignment(writer, kernel):
   return _lraTileAssignment_cpp(writer, kernel)
 
 
-def localReadResetOffsetsSubtile(writer, kernel):
-  module = Module()
-  module.addComment0("REMOVE WHEN IMPLEMNTED: Placeholder for subtile based LR offset reset code")
-  for i in range(8):
-    module.addComment("")
-  return module
-
-
 def emitSubtileDsRead(writer, kernel, tileInfo, subtileId):
   module = Module()
   sId0 = subtileId[0]
@@ -2087,11 +2079,33 @@ def _lraTileAssignment_cpp(writer, kernel):
 
 
 def localReadResetOffsetsSubtile(writer, kernel):
-  module = Module()
-  module.addComment0("REMOVE WHEN IMPLEMNTED: Placeholder for subtile based LR offset reset code")
-  for i in range(8):
-    module.addComment("")
+  """Reset subtile LR offsets for A and B back to the lower LDS buffer.
 
+  Called from StreamK before re-entering the main loop (PrefetchGlobalRead +
+  UseSubtileImpl).  After an odd-exit iteration the LDS-buffer swap may have
+  left the offset VGPRs pointing at the upper buffer.
+
+  Each offset is paired with a swap-mask VGPR (sharedVgprLROffsetSwap) that
+  was initialised as  swap = offset_buf0 XOR (offset_buf0 + ldsTotalSize).
+  XOR-ing the current offset with the swap mask yields the other-bank address;
+  VMinI32 then selects the lower (buffer-0) address, restoring the invariant
+  expected at loop entry.
+  """
+  module = Module("localReadResetOffsetsSubtile")
+  atile = writer.states.a.tileInfo
+  btile = writer.states.b.tileInfo
+  if not atile.sharedVgprLROffset and not btile.sharedVgprLROffset:
+    return module
+  tmpVgpr = writer.vgprPool.checkOut(1, "localReadResetOffsetsSubtile")
+  for ti in [atile, btile]:
+    for i in range(len(ti.sharedVgprLROffset)):
+      voff  = ti.sharedVgprLROffset[i]
+      vswap = ti.sharedVgprLROffsetSwap[i]
+      module.add(VXorB32(dst=vgpr(tmpVgpr), src0=vgpr(voff), src1=vgpr(vswap),
+                         comment=f"{ti.tc}: other-bank addr for offset[{i}]"))
+      module.add(VMinI32(dst=vgpr(voff), src0=vgpr(voff), src1=vgpr(tmpVgpr),
+                         comment=f"{ti.tc}: clamp offset[{i}] to lower LDS buffer"))
+  writer.vgprPool.checkIn(tmpVgpr)
   return module
 
 
