@@ -50,7 +50,6 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
     static_assert(kSubQKHeaddim <= 256, "hdim bigger than 256 is not suitable for this pipeline!");
 
     static constexpr bool kIsGroupMode = Problem::kIsGroupMode;
-    // seq_k padding requires setting -INF on p OOB (not zero) to keep softmax correct.
     static_assert(Problem::kPadSeqLenQ == true && Problem::kPadHeadDimQ == true &&
                   Problem::kPadHeadDimV == true);
     static constexpr bool kPadSeqLenQ       = true;
@@ -68,8 +67,6 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
                   "Jenga: only NO_BIAS / ELEMENTWISE_BIAS / ALIBI supported.");
     static_assert(!kHasDropout, "Jenga sparse attention does not support dropout.");
     static_assert(!kStoreLSE, "Jenga sparse attention does not support LSE output.");
-    static_assert(!kHasLogitsSoftCap || BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
-                  "Jenga: logits soft-cap only supported with NO_BIAS.");
 
     static constexpr index_t kAlignmentQ = Policy::template GetAlignmentQ<Problem>();
     static constexpr index_t kAlignmentK = Policy::template GetAlignmentK<Problem>();
@@ -249,15 +246,12 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
             __builtin_amdgcn_sched_barrier(0);
         }
 
-        const index_t num_block     = num_total_loop;
-        bool* block_relation_onehot = reinterpret_cast<bool*>(smem_ptr) + GetSmemSize();
-        const index_t thread_offset = static_cast<index_t>(4 * threadIdx.x);
-        amd_direct_load_global_to_lds<bool, 4>(block_relation_onehot_ptr,
-                                               4 * threadIdx.x,
-                                               block_relation_onehot,
-                                               4 * threadIdx.x,
-                                               thread_offset < num_block,
-                                               num_block);
+        // Read the one-hot selection directly from global (race-free): the prior async
+        // global-to-LDS staging had no s_waitcnt before the reads below, so it could read stale --
+        // wrong for causal (skipped the diagonal block).
+        // Offset by the first tile in the range (seqlen_k_start/kN0): the loop indexes
+        // [i_total_loops] starting at seqlen_k_start (>0 for SWA, 0 for full causal).
+        const bool* block_relation_onehot = block_relation_onehot_ptr + (seqlen_k_start / kN0);
 
         auto k_dram_block_window =
             make_tile_window(k_dram_block_window_tmp.get_bottom_tensor_view(),
@@ -456,7 +450,6 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
                                                            k_origin.at(number<0>{}),
                                                            number<kM0>{},
                                                            number<kN0>{});
-
                 if(need_perpixel_check)
                 {
                     set_tile_if(

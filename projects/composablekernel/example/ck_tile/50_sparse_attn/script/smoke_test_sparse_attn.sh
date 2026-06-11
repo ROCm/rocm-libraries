@@ -36,7 +36,24 @@ KNOWN_FAILS_FILE=${KNOWN_FAILS_FILE:-"$SCRIPT_DIR/sparse_attn_fwd_known_fails_$G
 
 COMMON_ARGS='-v=1 -warmup=0 -repeat=1'
 
+# Smoke defaults to a fast subset; run_full_test.sh overrides these for the full matrix.
+#   PERMS    : iperm/operm directions to sweep (smoke: 1; full: "0 1")
+#   SL       : long-seqlen used by validated cases (smoke: 2048; full: 4096)
+#   QSCALES  : sage qscale modes (smoke: perwarp; full: all four)
+#   VARIANTS : APIs to test (default all); tokens: jenga vsa sparge sparge_sage
+PERMS="${PERMS:-1}"
+SL="${SL:-2048}"
+QSCALES="${QSCALES:-perwarp}"
+VARIANTS="${VARIANTS:-jenga vsa sparge sparge_sage}"
+
+# want <token> : true if the variant is in the selected set.
+want() { case " $VARIANTS " in *" $1 "*) return 0;; *) return 1;; esac; }
+
 run_exe() {
+    # Skip if this invocation's -api=<x> is not in VARIANTS.
+    local a api=""
+    for a in "$@"; do case "$a" in -api=*) api="${a#-api=}";; esac; done
+    if [ -n "$api" ] && ! want "$api"; then return 0; fi
     set +e
     echo ">>> $EXE $*"
     "$EXE" "$@"
@@ -60,17 +77,14 @@ echo ""
 echo ""
 echo "=== Jenga Sparse Attention ==="
 for prec in "fp16" "bf16" ; do
-for perm in 0 1 ; do
+for perm in $PERMS ; do
     run_exe $COMMON_ARGS -api=jenga -prec=$prec -b=1 -h=4 -d=128 -s=1024  -sparsity=0.5 -iperm=$perm -operm=$perm
-    run_exe $COMMON_ARGS -api=jenga -prec=$prec -b=1 -h=4 -d=128 -s=4096  -sparsity=0.5 -iperm=$perm -operm=$perm
+    run_exe $COMMON_ARGS -api=jenga -prec=$prec -b=1 -h=4 -d=128 -s=$SL -sparsity=0.5 -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=jenga -prec=$prec -b=2 -h=4 -d=128 -s=2048  -sparsity=0.3 -iperm=$perm -operm=$perm
     # GQA
     run_exe $COMMON_ARGS -api=jenga -prec=$prec -b=1 -h=8 -h_k=2 -d=128 -s=2048 -sparsity=0.5 -iperm=$perm -operm=$perm
-    # Causal mask (-mask=t/b/swa) NOT supported in jenga batch — wrapper rejects with
-    # "not supported" message. Root cause is the kernel's edge-tile mask elision
-    # (b61fd1ca) producing config-dependent drift > atol. See project_jenga_alibi_drift
-    # memory and CP3.11 commit. Use sparge or vsa for masked workloads.
-    # Phase 3 / CP3.3 bias (elementwise rank 0/1, batch + mask=0 only).
+    # jenga batch ignores -mask; use sparge/vsa for masked workloads.
+    # Elementwise bias (rank 0/1, batch + mask=0 only).
     run_exe $COMMON_ARGS -api=jenga -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=e:0 -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=jenga -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=e:1 -iperm=$perm -operm=$perm
 done
@@ -82,16 +96,12 @@ done
 echo ""
 echo "=== Jenga group ==="
 for prec in "fp16" "bf16" ; do
-for perm in 0 1 ; do
+for perm in $PERMS ; do
     run_exe $COMMON_ARGS -api=jenga -mode=1 -prec=$prec -b=2 -h=4 -d=128 -s=1024 -sparsity=0.5 -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=jenga -mode=1 -prec=$prec -b=4 -h=4 -d=128 -s=1024 -sparsity=0.3 -iperm=$perm -operm=$perm
     # GQA
     run_exe $COMMON_ARGS -api=jenga -mode=1 -prec=$prec -b=2 -h=8 -h_k=2 -d=128 -s=1024 -sparsity=0.5 -iperm=$perm -operm=$perm
-    # CP3.7 group + ALIBI: dispatch works but jenga + alibi + mask=t/b shares the same
-    # known numerical drift as batch (kernel/CPU-ref mask divergence × bias amplification).
-    # Excluded from gating; validate manually if needed.
-    # CP3.10 group + ELEMENTWISE rank 0/1/2 — clean (jenga's mask drift only manifests
-    # for alibi where bias-scale amplification is large).
+    # group + elementwise bias (rank 0/1/2). alibi excluded: known mask-drift under bias amplification.
     run_exe $COMMON_ARGS -api=jenga -mode=1 -prec=$prec -b=2 -h=4 -d=128 -s=1024 -sparsity=0.5 -bias=e:0 -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=jenga -mode=1 -prec=$prec -b=2 -h=4 -d=128 -s=1024 -sparsity=0.5 -bias=e:1 -mask=t -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=jenga -mode=1 -prec=$prec -b=2 -h=4 -d=128 -s=1024 -sparsity=0.5 -bias=e:2 -iperm=$perm -operm=$perm
@@ -104,32 +114,28 @@ done
 echo ""
 echo "=== VSA Sparse Attention ==="
 for prec in "fp16" "bf16" ; do
-for perm in 0 1 ; do
+for perm in $PERMS ; do
     run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=1 -h=4 -d=128 -s=1024  -sparsity=0.5 -iperm=$perm -operm=$perm
-    run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=1 -h=4 -d=128 -s=4096  -sparsity=0.5 -iperm=$perm -operm=$perm
+    run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=1 -h=4 -d=128 -s=$SL -sparsity=0.5 -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=2 -h=4 -d=128 -s=2048  -sparsity=0.3 -iperm=$perm -operm=$perm
     # Top-left causal
-    run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=1 -h=4 -d=128 -s=4096  -sparsity=0.5 -mask=t -iperm=$perm -operm=$perm
+    run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=1 -h=4 -d=128 -s=$SL -sparsity=0.5 -mask=t -iperm=$perm -operm=$perm
     # Bottom-right causal
-    run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=1 -h=4 -d=128 -s=4096  -sparsity=0.5 -mask=b -iperm=$perm -operm=$perm
-    # SWA / generic window — full FA-style sliding window expressivity (parity with 01_fmha):
-    #   t:l,r = top-left causal, window left=l/right=r (l=-1 → unbounded left)
-    #   b:l,r = bottom-right causal variant
-    #   g:y,x = pure generic window (y=row-extent above diag, x=col-extent below)
-    #   xt:N  = xformer sliding window of total size N (top-left)
-    run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=1 -h=4 -d=128 -s=4096  -sparsity=0.5 -mask=t:-1,0 -iperm=$perm -operm=$perm
-    run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=1 -h=4 -d=128 -s=4096  -sparsity=0.5 -mask=t:128,32 -iperm=$perm -operm=$perm
-    run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=1 -h=4 -d=128 -s=4096  -sparsity=0.5 -mask=b:0,32 -iperm=$perm -operm=$perm
-    run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=1 -h=4 -d=128 -s=4096  -sparsity=0.5 -mask=g:128,32 -iperm=$perm -operm=$perm
-    run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=1 -h=4 -d=128 -s=4096  -sparsity=0.5 -mask=xt:256 -iperm=$perm -operm=$perm
-    # Phase 3 / CP3.3 bias (elementwise rank 0/1 + alibi rank 0/1, batch only).
+    run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=1 -h=4 -d=128 -s=$SL -sparsity=0.5 -mask=b -iperm=$perm -operm=$perm
+    # SWA / generic window (t:l,r / b:l,r / g:y,x / xt:N), same syntax as 01_fmha.
+    run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=1 -h=4 -d=128 -s=$SL -sparsity=0.5 -mask=t:-1,0 -iperm=$perm -operm=$perm
+    run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=1 -h=4 -d=128 -s=$SL -sparsity=0.5 -mask=t:128,32 -iperm=$perm -operm=$perm
+    run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=1 -h=4 -d=128 -s=$SL -sparsity=0.5 -mask=b:0,32 -iperm=$perm -operm=$perm
+    run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=1 -h=4 -d=128 -s=$SL -sparsity=0.5 -mask=g:128,32 -iperm=$perm -operm=$perm
+    run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=1 -h=4 -d=128 -s=$SL -sparsity=0.5 -mask=xt:256 -iperm=$perm -operm=$perm
+    # bias: elementwise rank 0/1 + alibi rank 0/1 (batch only).
     run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=e:0 -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=e:1 -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=e:1 -mask=t -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=a   -mask=t -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=a:1 -mask=t -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=a   -mask=b -iperm=$perm -operm=$perm
-    # CP3.5 elementwise rank=2 (full b*h*sq*sk, no broadcast).
+    # elementwise rank=2 (full b*h*sq*sk, no broadcast).
     run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=e:2 -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=vsa -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=e:2 -mask=t -iperm=$perm -operm=$perm
 done
@@ -141,18 +147,18 @@ done
 echo ""
 echo "=== VSA group ==="
 for prec in "fp16" "bf16" ; do
-for perm in 0 1 ; do
+for perm in $PERMS ; do
     # mask=0 (regression guard for the NoMask dispatch fix)
     run_exe $COMMON_ARGS -api=vsa -mode=1 -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -mask=0 -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=vsa -mode=1 -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -mask=t -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=vsa -mode=1 -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -mask=b -iperm=$perm -operm=$perm
     # GQA
     run_exe $COMMON_ARGS -api=vsa -mode=1 -prec=$prec -b=2 -h=8 -h_k=2 -d=128 -s=2048 -sparsity=0.5 -mask=t -iperm=$perm -operm=$perm
-    # CP3.6 group + ALIBI (rank 0/1, requires causal mask).
+    # group + alibi (rank 0/1, requires causal mask).
     run_exe $COMMON_ARGS -api=vsa -mode=1 -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=a   -mask=t -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=vsa -mode=1 -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=a:1 -mask=t -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=vsa -mode=1 -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=a   -mask=b -iperm=$perm -operm=$perm
-    # CP3.9 group + ELEMENTWISE rank 0/1/2.
+    # group + elementwise rank 0/1/2.
     run_exe $COMMON_ARGS -api=vsa -mode=1 -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=e:0 -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=vsa -mode=1 -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=e:1 -mask=t -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=vsa -mode=1 -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=e:2 -iperm=$perm -operm=$perm
@@ -165,38 +171,38 @@ done
 echo ""
 echo "=== SpargeAttention ==="
 for prec in "fp16" "bf16" ; do
-for perm in 0 1 ; do
+for perm in $PERMS ; do
     # CDF mode, no mask
-    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=4096 -sparsity=0.5 -iperm=$perm -operm=$perm
+    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=$SL -sparsity=0.5 -iperm=$perm -operm=$perm
     # Top-left causal
-    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=4096 -sparsity=0.5 -mask=t -iperm=$perm -operm=$perm
+    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=$SL -sparsity=0.5 -mask=t -iperm=$perm -operm=$perm
     # Bottom-right causal
-    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=4096 -sparsity=0.5 -mask=b -iperm=$perm -operm=$perm
+    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=$SL -sparsity=0.5 -mask=b -iperm=$perm -operm=$perm
     # SWA / generic window — same expressivity as 01_fmha (mask.hpp parses all 4 forms).
-    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=4096 -sparsity=0.5 -mask=t:128,32 -iperm=$perm -operm=$perm
-    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=4096 -sparsity=0.5 -mask=g:128,32 -iperm=$perm -operm=$perm
-    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=4096 -sparsity=0.5 -mask=xt:256 -iperm=$perm -operm=$perm
+    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=$SL -sparsity=0.5 -mask=t:128,32 -iperm=$perm -operm=$perm
+    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=$SL -sparsity=0.5 -mask=g:128,32 -iperm=$perm -operm=$perm
+    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=$SL -sparsity=0.5 -mask=xt:256 -iperm=$perm -operm=$perm
     # Attention sink
-    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=4096 -sparsity=0.5 -mask=t -sink=1 -iperm=$perm -operm=$perm
+    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=$SL -sparsity=0.5 -mask=t -sink=1 -iperm=$perm -operm=$perm
     # CDF mode (-sparge_mode=cdf; topk is the default mode)
-    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=4096 -sparsity=0.6 -sparge_mode=cdf -iperm=$perm -operm=$perm
+    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=$SL -sparsity=0.6 -sparge_mode=cdf -iperm=$perm -operm=$perm
     # Stage 2 P*V skip threshold
-    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=4096 -sparsity=0.6 -pvthreshd=3 -iperm=$perm -operm=$perm
+    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=$SL -sparsity=0.6 -pvthreshd=3 -iperm=$perm -operm=$perm
     # K smoothing off
-    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=4096 -sparsity=0.6 -smooth_k=0 -iperm=$perm -operm=$perm
+    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=$SL -sparsity=0.6 -smooth_k=0 -iperm=$perm -operm=$perm
     # Sim threshold (K-sim/Q-sim union)
-    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=4096 -sparsity=0.6 -simthreshold=0.5 -iperm=$perm -operm=$perm
+    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=$SL -sparsity=0.6 -simthreshold=0.5 -iperm=$perm -operm=$perm
     # Print sparsity (FLOP/byte rescale path)
-    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=4096 -sparsity=0.5 -print_sparsity=1 -iperm=$perm -operm=$perm
-    # Phase 1 bias (elementwise rank 0/1, batch only)
+    run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=1 -h=4 -d=128 -s=$SL -sparsity=0.5 -print_sparsity=1 -iperm=$perm -operm=$perm
+    # bias: elementwise rank 0/1 (batch only)
     run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=e:0 -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=e:1 -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=e:1 -mask=t -iperm=$perm -operm=$perm
-    # Phase 2 bias (alibi rank 0/1, requires causal mask)
+    # bias: alibi rank 0/1 (requires causal mask)
     run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=a   -mask=t -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=a:1 -mask=t -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=a   -mask=b -iperm=$perm -operm=$perm
-    # CP3.5 elementwise rank=2 (full b*h*sq*sk, no broadcast).
+    # elementwise rank=2 (full b*h*sq*sk, no broadcast).
     run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=e:2 -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=sparge -prec=$prec -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=e:2 -mask=t -iperm=$perm -operm=$perm
 done
@@ -208,19 +214,18 @@ done
 echo ""
 echo "=== Sparge group ==="
 for prec in "fp16" "bf16" ; do
-for perm in 0 1 ; do
+for perm in $PERMS ; do
     # CDF mode, no mask
     run_exe $COMMON_ARGS -api=sparge -mode=1 -prec=$prec -b=2 -h=4 -d=128 -s=1024 -sparsity=0.5 -iperm=$perm -operm=$perm
     # Top-left causal
     run_exe $COMMON_ARGS -api=sparge -mode=1 -prec=$prec -b=2 -h=4 -d=128 -s=1024 -sparsity=0.5 -mask=t -iperm=$perm -operm=$perm
     # GQA
     run_exe $COMMON_ARGS -api=sparge -mode=1 -prec=$prec -b=2 -h=8 -h_k=2 -d=128 -s=1024 -sparsity=0.5 -iperm=$perm -operm=$perm
-    # Phase 3 / CP3.4 group + ALIBI (rank 0/1, requires causal mask).
+    # group + alibi (rank 0/1, requires causal mask).
     run_exe $COMMON_ARGS -api=sparge -mode=1 -prec=$prec -b=2 -h=4 -d=128 -s=1024 -sparsity=0.5 -bias=a   -mask=t -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=sparge -mode=1 -prec=$prec -b=2 -h=4 -d=128 -s=1024 -sparsity=0.5 -bias=a:1 -mask=t -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=sparge -mode=1 -prec=$prec -b=2 -h=4 -d=128 -s=1024 -sparsity=0.5 -bias=a   -mask=b -iperm=$perm -operm=$perm
-    # CP3.8 group + ELEMENTWISE rank 0/1/2. Layout: [B,h_or_1,max_sq,max_sk] padded
-    # (kernel reads [0:sq_b, 0:sk_b] sub-region per batch).
+    # group + elementwise rank 0/1/2 (padded [B,h_or_1,max_sq,max_sk]; kernel reads per-batch sub-region).
     run_exe $COMMON_ARGS -api=sparge -mode=1 -prec=$prec -b=2 -h=4 -d=128 -s=1024 -sparsity=0.5 -bias=e:0 -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=sparge -mode=1 -prec=$prec -b=2 -h=4 -d=128 -s=1024 -sparsity=0.5 -bias=e:1 -mask=t -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=sparge -mode=1 -prec=$prec -b=2 -h=4 -d=128 -s=1024 -sparsity=0.5 -bias=e:2 -iperm=$perm -operm=$perm
@@ -235,14 +240,14 @@ done
 echo ""
 echo "=== SpargeAttention-Sage (quantized) ==="
 for qkdtype in int8 fp8 ; do
-for qscale in perwarp blockscale perthread pertensor ; do
-for perm in 0 1 ; do
+for qscale in $QSCALES ; do
+for perm in $PERMS ; do
     # no mask
-    run_exe $COMMON_ARGS -api=sparge_sage -prec=bf16 -qkdtype=$qkdtype -qscale=$qscale -b=1 -h=4 -d=128 -s=4096 -sparsity=0.5 -iperm=$perm -operm=$perm
+    run_exe $COMMON_ARGS -api=sparge_sage -prec=bf16 -qkdtype=$qkdtype -qscale=$qscale -b=1 -h=4 -d=128 -s=$SL -sparsity=0.5 -iperm=$perm -operm=$perm
     # Top-left causal
-    run_exe $COMMON_ARGS -api=sparge_sage -prec=bf16 -qkdtype=$qkdtype -qscale=$qscale -b=1 -h=4 -d=128 -s=4096 -sparsity=0.5 -mask=t -iperm=$perm -operm=$perm
+    run_exe $COMMON_ARGS -api=sparge_sage -prec=bf16 -qkdtype=$qkdtype -qscale=$qscale -b=1 -h=4 -d=128 -s=$SL -sparsity=0.5 -mask=t -iperm=$perm -operm=$perm
     # GQA
-    run_exe $COMMON_ARGS -api=sparge_sage -prec=bf16 -qkdtype=$qkdtype -qscale=$qscale -b=1 -h=8 -h_k=2 -d=128 -s=4096 -sparsity=0.5 -iperm=$perm -operm=$perm
+    run_exe $COMMON_ARGS -api=sparge_sage -prec=bf16 -qkdtype=$qkdtype -qscale=$qscale -b=1 -h=8 -h_k=2 -d=128 -s=$SL -sparsity=0.5 -iperm=$perm -operm=$perm
     # Elementwise bias rank=1
     run_exe $COMMON_ARGS -api=sparge_sage -prec=bf16 -qkdtype=$qkdtype -qscale=$qscale -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=e:1 -iperm=$perm -operm=$perm
     # ALIBI (requires causal mask)
@@ -259,7 +264,7 @@ echo ""
 echo "=== Sparge-Sage group ==="
 for qkdtype in int8 fp8 ; do
 for qscale in perwarp pertensor ; do
-for perm in 0 1 ; do
+for perm in $PERMS ; do
     # no mask
     run_exe $COMMON_ARGS -api=sparge_sage -mode=1 -prec=bf16 -qkdtype=$qkdtype -qscale=$qscale -b=2 -h=4 -d=128 -s=1024 -sparsity=0.5 -iperm=$perm -operm=$perm
     # Top-left causal
@@ -271,15 +276,11 @@ done
 done
 
 # ============================================================================
-# Summary
-# ============================================================================
-# ============================================================================
 # Logits soft cap (Gemma-style; NO_BIAS only). batch + group, all 3 APIs.
-# Pre-softmax: s = cap * tanh(s * scale / cap).
 # ============================================================================
 echo "=== Logits soft cap ==="
 for prec in fp16 bf16 ; do
-for perm in 0 1 ; do
+for perm in $PERMS ; do
     # Batch mode + cap=8 (Gemma-2 / Gemma-3 style)
     run_exe $COMMON_ARGS -api=jenga  -prec=$prec -b=2 -h=4 -d=128 -s=1024 -sparsity=0.5 -mask=0          -logits_soft_cap=8.0 -iperm=$perm -operm=$perm
     run_exe $COMMON_ARGS -api=vsa    -prec=$prec -b=2 -h=4 -d=128 -s=1024 -sparsity=0.5 -mask=t          -logits_soft_cap=8.0 -iperm=$perm -operm=$perm

@@ -50,7 +50,6 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
     static_assert(kSubQKHeaddim <= 256, "hdim bigger than 256 is not suitable for this pipeline!");
 
     static constexpr bool kIsGroupMode = Problem::kIsGroupMode;
-    // seq_k padding requires setting -INF on p (not zero) for OOB lanes.
     static_assert(Problem::kPadSeqLenQ == true && Problem::kPadHeadDimQ == true &&
                   Problem::kPadHeadDimV == true);
     static constexpr bool kPadSeqLenQ       = true;
@@ -68,9 +67,6 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
                   "VSA: only NO_BIAS / ELEMENTWISE_BIAS / ALIBI supported.");
     static_assert(!kHasDropout, "VSA sparse attention does not support dropout.");
     static_assert(!kStoreLSE, "VSA sparse attention does not support LSE output.");
-    // Logits soft-cap (Gemma-style): supported only with NO_BIAS, mirroring upstream FMHA.
-    static_assert(!kHasLogitsSoftCap || BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
-                  "VSA: logits soft-cap only supported with NO_BIAS.");
 
     static constexpr index_t kAlignmentQ = Policy::template GetAlignmentQ<Problem>();
     static constexpr index_t kAlignmentK = Policy::template GetAlignmentK<Problem>();
@@ -212,9 +208,8 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
         q_dram_window.init_raw();
 
         // K async copy is inline asm, so Q must use inline-asm load too.
+        // rocm-6.2+: manually clearing q miscompiles (scratch spills); the ctor clears it.
         auto q = decltype(load_tile(q_dram_window)){};
-        // rocm-6.2+: do NOT manually clear q here — the static-distributed-tensor ctor
-        // already zeroes it, and an explicit set_tile causes scratch spills.
         load_tile_raw(q, q_dram_window);
         __builtin_amdgcn_sched_barrier(0);
 
@@ -247,8 +242,7 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
         {
             if(num_total_loop <= 0)
             {
-                // rocm-6.1: fence(0) is required when the whole tile is masked out,
-                // otherwise downstream compute is corrupted (suspected compiler bug).
+                // rocm-6.1: fully-masked tile must fence(0) or downstream compute is corrupted.
                 buffer_load_fence(0);
                 return o_acc;
             }
@@ -338,11 +332,9 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
             async_load_fence();
             __builtin_amdgcn_s_barrier();
 
-            // Guard the read: on the last iteration block_idx is unused, but
-            // kv_block_idx_ptr[i_total_loops + 1] would index one past the per-row LUT
-            // (kv_blocks == num_k_blocks under dense selection) -- an OOB read on the final
-            // (b,h,q) row. Skip the load when no next iteration follows.
             // WG-uniform LUT delta; readfirstlane pins to SGPR for scalar tile-window math.
+            // Guard the read: on the last iteration kv_block_idx_ptr[i_total_loops + 1] would
+            // index one past the per-row LUT (OOB on the final row); block_idx is unused there.
             int block_idx =
                 (i_total_loops + 1 < num_total_loop)
                     ? __builtin_amdgcn_readfirstlane(kv_block_idx_ptr[i_total_loops + 1])
@@ -544,7 +536,6 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
                 l(i_idx) = tmp * l[i_idx] + rowsum_p[i_idx];
                 sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
-                    // FA v2 rescale: tmp already = exp(m_old - m_new).
                     o_acc(i_j_idx) *= tmp;
                 });
             });

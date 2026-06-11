@@ -50,8 +50,6 @@ struct FmhaFwdJengaKernel
     static constexpr bool kIsGroupMode = FmhaPipeline::kIsGroupMode;
     static_assert(!kStoreLSE, "Jenga sparse attention does not support LSE output.");
     static_assert(!kHasDropout, "Jenga sparse attention does not support dropout.");
-    static_assert(!kHasLogitsSoftCap || BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
-                  "Jenga: logits soft-cap requires NO_BIAS.");
     static_assert(!kDoFp8StaticQuant,
                   "Jenga sparse attention does not support FP8 static quantization yet.");
 
@@ -80,9 +78,9 @@ struct FmhaFwdJengaKernel
         ck_tile::index_t hdim_v;
 
         ck_tile::index_t num_head_q;
-        // nhead_q / nhead_k; >1 means MQA/GQA.
-        ck_tile::index_t nhead_ratio_qk;
+        ck_tile::index_t nhead_ratio_qk; // nhead_q / nhead_k; >1 = MQA/GQA
         float scale_s;
+
 
         ck_tile::index_t stride_q;
         ck_tile::index_t stride_k;
@@ -126,8 +124,7 @@ struct FmhaFwdJengaKernel
         ck_tile::index_t batch_stride_o;
     };
 
-    // Group / varlen mode: mask_batch_offset_ptr is [B+1] start in packed mask buffer;
-    // last entry holds per-head total used to size the per-head slab.
+    // Group / varlen: mask_batch_offset_ptr is [B+1] start in the packed mask buffer.
     struct FmhaFwdGroupModeKargs
         : FmhaFwdCommonKargs,
           std::conditional_t<kHasMask, FmhaFwdMaskKargs, FmhaFwdEmptyKargs<1>>,
@@ -373,15 +370,14 @@ struct FmhaFwdJengaKernel
 
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
-        // Pipeline/epilogue smem plus staging for block_relation_onehot: each of the
-        // kBlockSize threads stages 4 bools via amd_direct_load_global_to_lds<bool, 4>.
+        // Pipeline/epilogue smem plus block_relation_onehot staging: each of kBlockSize threads
+        // stages 4 bools via amd_direct_load_global_to_lds<bool, 4>.
         return ck_tile::max(FmhaPipeline::GetSmemSize(), EpiloguePipeline::GetSmemSize()) +
                static_cast<ck_tile::index_t>(kBlockSize * 4 * sizeof(bool));
     }
 
     CK_TILE_DEVICE void operator()(Kargs kargs) const
     {
-        // GetSmemSize() already includes the block_relation_onehot staging region.
         __shared__ char smem_ptr[GetSmemSize()];
 
         const auto [i_tile_m, i_tile_n, i_nhead, i_batch] = GetTileIndex(kargs);
@@ -417,8 +413,8 @@ struct FmhaFwdJengaKernel
                     ? kargs.seqlen_k_ptr[i_batch]
                     : (kargs.seqstart_k_ptr[i_batch + 1] - kargs.seqstart_k_ptr[i_batch]);
 
-            // GridSize uses max_seqlen_q so trailing q-blocks may be beyond seqlen_q;
-            // i_tile_m is WG-uniform so the early return is divergence-safe.
+            // Trailing q-blocks may exceed seqlen_q; i_tile_m is WG-uniform so this is
+            // divergence-safe.
             if(static_cast<index_t>(i_tile_m * FmhaPipeline::kM0) >= seqlen_q_actual)
                 return;
         }
@@ -444,17 +440,15 @@ struct FmhaFwdJengaKernel
             static_cast<long_index_t>(i_nhead / kargs.nhead_ratio_qk) * kargs.nhead_stride_v +
             batch_offset_v;
 
-        // sparse mask: batch-mode is rectangular [B,H,Qblks,Kblks];
-        // group-mode is batch-outer/head-mid packed: per-batch block [H, q_b*k_b]
-        // (X_b via mask_batch_offset_ptr adjacent diff), blocks concatenated across batch.
-        // new_index = Xstart_b * H + head * X_b + local.
+        // sparse mask. Batch: rectangular [B,H,Qblks,Kblks]. Group: batch-outer/head-mid packed,
+        // per-batch [H, q_b*k_b] (X_b via mask_batch_offset_ptr diff); new_index = Xstart_b*H +
+        // head*X_b + local.
         const bool* block_relation_onehot_ptr = [&]() -> const bool* {
             const auto* base = reinterpret_cast<const bool*>(kargs.block_relation_onehot_ptr);
             if constexpr(kIsGroupMode)
             {
                 const index_t k_blocks_b =
                     ck_tile::integer_divide_ceil(seqlen_k_actual, FmhaPipeline::kN0);
-                // WG-uniform; readfirstlane keeps these in SGPR.
                 const long_index_t xstart_b = __builtin_amdgcn_readfirstlane(
                     kargs.mask_batch_offset_ptr[i_batch]);
                 const long_index_t x_b = __builtin_amdgcn_readfirstlane(
@@ -640,8 +634,7 @@ struct FmhaFwdJengaKernel
                 const long_index_t off =
                     static_cast<long_index_t>(i_batch) * kargs.stride_bias + i_nhead;
                 SaccDataType slope = slope_arr ? slope_arr[off] : SaccDataType{0};
-                // FAST_EXP2: pre-scale slope by log2e so ALIBI matches the
-                // already-scaled QK term (scale_s folded log2e at MakeKargs).
+                // FAST_EXP2: pre-scale slope by log2e to match the already-scaled QK term.
 #if CK_TILE_FMHA_FWD_FAST_EXP2
                 slope = slope * ck_tile::log2e_v<SaccDataType>;
 #endif

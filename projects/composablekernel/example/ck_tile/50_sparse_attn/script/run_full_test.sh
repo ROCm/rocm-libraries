@@ -3,14 +3,8 @@
 # SPDX-License-Identifier: MIT
 
 #
-# in order to run this script you'd first need to build the tile_example_sparse_attn_fwd executable in ../build/bin/
-#
-# run the script as "./run_full_test.sh <tag for your test environment> <branch name> <host name> <gpu_arch>
-# input arguments:
-# environment tag  : a string describing the specifics of your test environment
-# branch name      : name of the branch in git repo (git status | grep -e 'On branch')
-# host name        : $hostname
-# gpu architecture: e.g., gfx90a, or gfx942, etc.
+# Build tile_example_sparse_attn_fwd first, then:
+#   ./run_full_test.sh <env_tag> <branch> <host> <gpu_arch>   (e.g. gfx90a / gfx942)
 
 set -euo pipefail
 
@@ -36,8 +30,9 @@ function print_log_header(){
 	/opt/rocm/bin/amdclang++ --version | grep -e 'InstalledDir' >> $1;
 }
 
-#run verification tests
-time example/ck_tile/50_sparse_attn/script/smoke_test_sparse_attn.sh
+#run verification tests (full matrix: both perms, long seqlen, all sage qscales)
+time PERMS="0 1" SL=4096 QSCALES="perwarp perblock perthread pertensor" \
+    example/ck_tile/50_sparse_attn/script/smoke_test_sparse_attn.sh
 
 #run performance benchmarks
 export sparse_attn_fwd_log="perf_sparse_attn_fwd_$GPU_arch.log"

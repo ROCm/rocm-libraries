@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Summarize sparse-attention benchmark JSONL into markdown tables.
+"""Summarize benchmark_sparse_attn.sh JSONL into markdown tables.
 
-Reads <outdir>/{dense,sparge,sage_int8,sage_fp8}.jsonl produced by
-benchmark_sparse_attn.sh. Dense latency (bf16, example 01 async) is the unified
-denominator. Reports latency speedup (x) and official-convention TOPS
-(full dense-equivalent FLOPs / time).
+Dense (bf16) latency is the speedup denominator; TOPS uses full dense-equivalent FLOPs.
 """
 import argparse, json, os, sys
 
@@ -14,8 +11,7 @@ D = 128  # hdim_q == hdim_v in these sweeps
 
 
 def norm_mask(m):
-    """Reconcile mask labels across files. Accepts the dense labels ('no'/'causal'),
-    the sparse binary's raw CLI flags ('0'/'1'), and common aliases ('no_mask','t')."""
+    # normalize mask labels: 0/no/no_mask -> "no"; 1/causal/t -> "causal".
     s = str(m)
     if s in ("0", "no", "no_mask"):
         return "no"
@@ -25,7 +21,7 @@ def norm_mask(m):
 
 
 def full_flops(b, h, s, mask):
-    # 2 GEMMs (QK^T, PV), 2 flop/MAC, each over area*d_qk and area*d_v (d_qk==d_v==D)
+    # 2 GEMMs x 2 flop/MAC x area x D (causal area = s(s+1)/2).
     area = s * s if mask == "no" else s * (s + 1) / 2.0
     return 4.0 * b * h * area * D
 
@@ -59,19 +55,33 @@ def key(r):
     return (int(r["seqlen_k"]), r["mask_type"])
 
 
+# (token, display name, jsonl file). Token matches benchmark_sparse_attn.sh VARIANTS.
+ALL_VARIANTS = [
+    ("jenga",     "Jenga",     "jenga.jsonl"),
+    ("vsa",       "VSA",       "vsa.jsonl"),
+    ("sparge",    "Sparge",    "sparge.jsonl"),
+    ("sage_int8", "Sage-INT8", "sage_int8.jsonl"),
+    ("sage_fp8",  "Sage-FP8",  "sage_fp8.jsonl"),
+]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("outdir")
+    ap.add_argument("--variants", default=os.environ.get("VARIANTS", ""),
+                    help="space-separated subset (default all): "
+                         "jenga vsa sparge sage_int8 sage_fp8")
     args = ap.parse_args()
 
-    # dict comprehension dedups by (seqlen_k, mask): later rows overwrite earlier
-    # ones (NOT averaged), so Sweep B re-running dense at s=16384 is harmless.
+    sel = args.variants.split() or [t for t, _, _ in ALL_VARIANTS]
+    chosen = [(disp, f) for tok, disp, f in ALL_VARIANTS if tok in sel]
+    if not chosen:
+        print(f"No known variants in '{args.variants}'.", file=sys.stderr)
+        sys.exit(1)
+
+    # dedup by (seqlen_k, mask): later rows overwrite earlier (Sweep B re-runs dense at 16384).
     dense = {key(r): r for r in load(args.outdir, "dense.jsonl")}
-    variants = {
-        "Sparge":    load(args.outdir, "sparge.jsonl"),
-        "Sage-INT8": load(args.outdir, "sage_int8.jsonl"),
-        "Sage-FP8":  load(args.outdir, "sage_fp8.jsonl"),
-    }
+    variants = {disp: load(args.outdir, f) for disp, f in chosen}
     if not dense:
         print("No dense.jsonl rows found.", file=sys.stderr)
         sys.exit(1)
@@ -103,7 +113,7 @@ def main():
         print("No variant rows found; nothing to summarize.", file=sys.stderr)
         sys.exit(1)
 
-    cols = ["Sparge", "Sage-INT8", "Sage-FP8"]
+    cols = [disp for disp, _ in chosen]
 
     def cell(rec, v):
         if v not in rec:

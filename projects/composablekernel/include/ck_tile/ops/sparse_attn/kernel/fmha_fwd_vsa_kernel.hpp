@@ -52,8 +52,6 @@ struct FmhaFwdVSAKernel
     static constexpr bool kHasBias     = (BiasEnum != BlockAttentionBiasEnum::NO_BIAS);
     static_assert(!kStoreLSE, "VSA sparse attention does not support LSE output.");
     static_assert(!kHasDropout, "VSA sparse attention does not support dropout.");
-    static_assert(!kHasLogitsSoftCap || BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
-                  "VSA: logits soft-cap requires NO_BIAS.");
     static_assert(!kDoFp8StaticQuant,
                   "VSA sparse attention does not support FP8 static quantization yet.");
 
@@ -83,8 +81,7 @@ struct FmhaFwdVSAKernel
         ck_tile::index_t hdim_v;
 
         ck_tile::index_t num_head_q;
-        // nhead_q / nhead_k; >1 means MQA/GQA.
-        ck_tile::index_t nhead_ratio_qk;
+        ck_tile::index_t nhead_ratio_qk; // nhead_q / nhead_k; >1 = MQA/GQA
         float scale_s;
 
         ck_tile::index_t stride_q;
@@ -129,7 +126,7 @@ struct FmhaFwdVSAKernel
         ck_tile::index_t batch_stride_o;
     };
 
-    // Group / varlen mode: lut_batch_offset_ptr is [B+1] cumulative q_blocks*k_blocks per batch;
+    // Group / varlen: lut_batch_offset_ptr is [B+1] cumulative q_blocks*k_blocks per batch;
     // seqstart_q_block_ptr doubles as the valid_block_num offset table.
     struct FmhaFwdGroupModeKargs
         : FmhaFwdCommonKargs,
@@ -446,17 +443,15 @@ struct FmhaFwdVSAKernel
             static_cast<long_index_t>(i_nhead / kargs.nhead_ratio_qk) * kargs.nhead_stride_v +
             batch_offset_v;
 
-        // sparse LUT/vbn: batch is rectangular; group is batch-outer/head-mid packed.
-        // Per-batch block is [H, X_b] (LUT X_b = q_b*k_b via lut_batch_offset_ptr,
-        // vbn X_b = q_b via seqstart_q_block_ptr); blocks concatenated across batch.
-        // new_index = Xstart_b * H + head * X_b + local.
+        // sparse LUT/vbn. Batch: rectangular. Group: batch-outer/head-mid packed, per-batch [H, X_b]
+        // (LUT X_b = q_b*k_b via lut_batch_offset_ptr, vbn X_b = q_b via seqstart_q_block_ptr);
+        // new_index = Xstart_b*H + head*X_b + local.
         const int* lut_ptr = [&]() -> const int* {
             const auto* base = reinterpret_cast<const int*>(kargs.lut_ptr);
             if constexpr(kIsGroupMode)
             {
                 const index_t k_blocks_b =
                     ck_tile::integer_divide_ceil(seqlen_k_actual, FmhaPipeline::kN0);
-                // WG-uniform; readfirstlane keeps these in SGPR.
                 const long_index_t xstart_b = __builtin_amdgcn_readfirstlane(
                     kargs.lut_batch_offset_ptr[i_batch]);
                 const long_index_t x_b = __builtin_amdgcn_readfirstlane(
@@ -565,7 +560,7 @@ struct FmhaFwdVSAKernel
             }
             else
             {
-                // ColMajor V: laid out as [hdim_v, seqlen_k] already (matches jenga kernel).
+                // ColMajor V: already laid out as [hdim_v, seqlen_k].
                 const auto v_dram_naive = make_naive_tensor_view<address_space_enum::global>(
                     v_ptr,
                     make_tuple(kargs.hdim_v, seqlen_k_actual),
@@ -613,8 +608,6 @@ struct FmhaFwdVSAKernel
         }();
 
         AttentionVariant variant;
-        // LogitsSoftCapParams folds sm_scale and log2e (under FAST_EXP2) into the precomputed
-        // reciprocal; see variants.hpp::LogitsSoftCapParams ctor.
         const auto variant_params = [&]() {
             if constexpr(kHasLogitsSoftCap)
                 return ck_tile::LogitsSoftCapParams<FmhaMask, CK_TILE_FMHA_FWD_FAST_EXP2>{
@@ -667,9 +660,8 @@ struct FmhaFwdVSAKernel
                 const long_index_t off =
                     static_cast<long_index_t>(i_batch) * kargs.stride_bias + i_nhead;
                 SaccDataType slope = slope_arr ? slope_arr[off] : SaccDataType{0};
-                // FAST_EXP2 path uses exp2(s-m) and pre-scales s_acc by scale_s*log2e;
-                // position_encoding adds slope*col raw, so we must fold log2e here too
-                // or alibi ends up effectively scaled by 1/log2e (~0.693).
+                // FAST_EXP2: fold log2e into slope to match s_acc (pre-scaled by scale_s*log2e),
+                // else alibi ends up scaled by 1/log2e.
 #if CK_TILE_FMHA_FWD_FAST_EXP2
                 slope = slope * ck_tile::log2e_v<SaccDataType>;
 #endif

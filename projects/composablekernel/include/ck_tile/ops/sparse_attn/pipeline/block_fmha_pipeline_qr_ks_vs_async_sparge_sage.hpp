@@ -12,22 +12,9 @@
 
 namespace ck_tile {
 
-// Quantized sparse attention pipeline (sparge_sage).
-//
-// Base = SageAttention async pipeline (int8/fp8 QK GEMM + PERWARP/PERTHREAD/BLOCKSCALE/PERTENSOR
-// descale + fp8 V path), grafted with the sparge delta-encoded LUT block-skipping.
-//
-// Differences vs. BlockSageAttentionPipelineQRKSVSAsync:
-//   - operator() takes (kv_block_idx_ptr, kv_blocks): K/V (and bias) windows traverse the
-//     LUT-selected K-blocks instead of contiguous seqlen_k.
-//   - descale-follow-LUT: the k descale index uses the *real* absolute position of the currently
-//     LUT-selected block (k_abs_pos) rather than the contiguous assumption
-//     (seqlen_k_start + i_total_loops*kN0). q descale and the rest of the descale logic are
-//     unchanged.
-//
-// Supports batch + group, causal / sliding-window mask, ALIBI / elementwise bias, and all four
-// qscale granularities (PERWARP / PERTHREAD / BLOCKSCALE / PERTENSOR). V keeps the SageAttention
-// fp8 path untouched.
+// Quantized sparse attention pipeline (sparge_sage): SageAttention async pipeline grafted with
+// the sparge delta-encoded LUT block-skipping. descale-follow-LUT: k descale indexes the real
+// absolute position of the LUT-selected block (k_abs_pos), not the contiguous assumption.
 template <typename Problem_, typename Policy_ = BlockSageAttentionPipelineQRKSVSAsyncDefaultPolicy>
 struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
 {
@@ -39,8 +26,6 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
     using SaccDataType        = remove_cvref_t<typename Problem::SaccDataType>;
     using SMPLComputeDataType = remove_cvref_t<typename Problem::SMPLComputeDataType>;
     using PDataType           = remove_cvref_t<typename Problem::PDataType>;
-    // fp16/bf16 example configs use P=V=fp16/bf16 (qscale=no). Quantized Sage paths use fp8 P/V;
-    // FP8 softmax shift, v_descale, and PV-gemm LDS layout assume fp8_t for those cases.
     static_assert(std::is_same_v<PDataType, VDataType>,
                   "SpargeSage pipeline requires PDataType == VDataType for the PV gemm");
     static_assert(std::is_same_v<QDataType, half_t> || std::is_same_v<QDataType, bf16_t> ||
@@ -61,6 +46,8 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
 
     static constexpr index_t kBlockSize = Problem::kBlockSize;
 
+    static constexpr index_t kNumWarps = kBlockSize / get_warp_size();
+
     static constexpr index_t kM0           = BlockSageAttnShape::kM0;
     static constexpr index_t kN0           = BlockSageAttnShape::kN0;
     static constexpr index_t kK0           = BlockSageAttnShape::kK0;
@@ -72,18 +59,14 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
     static_assert(kSubQKHeaddim <= 256, "hdim bigger than 256 is not suitable for this pipeline!");
 
     static constexpr bool kIsGroupMode = Problem::kIsGroupMode;
-    // TODO: seq_q always support padding, hdim_q/v support multiple of vector(like 8x)
-    //       only need special care about seq_k padding (oob need set -INF of p instead of zero)
     static_assert(Problem::kPadSeqLenQ == true && Problem::kPadHeadDimQ == true &&
                   Problem::kPadHeadDimV == true);
     static constexpr bool kPadSeqLenQ  = true;
     static constexpr bool kPadSeqLenK  = Problem::kPadSeqLenK;
-    static constexpr bool kPadHeadDimQ = true; // support multiple of vector(like 8x)
-    static constexpr bool kPadHeadDimV = true; // support multiple of vector(like 8x)
+    static constexpr bool kPadHeadDimQ = true;
+    static constexpr bool kPadHeadDimV = true;
     static constexpr auto QScaleEnum   = Problem::QScaleEnum;
 
-    // last dimension vector length used to create tensor view(and decide buffer_load vector length)
-    // ... together with tensor distribution. tensor dist should able to overwrite this
     static constexpr index_t kAlignmentQ = Policy::template GetAlignmentQ<Problem>();
     static constexpr index_t kAlignmentK = Policy::template GetAlignmentK<Problem>();
     static constexpr index_t kAlignmentV = []() {
@@ -94,11 +77,8 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
     }();
     static constexpr index_t kAlignmentO = Policy::template GetAlignmentO<Problem>();
 
-    // FP8 softmax shift constants to map softmax output into representable FP8 range
-    // OCP E4M3 FP8: max exponent = 8, max value ~240 (2^8 * 1.875)
-    //   Use shift=8.0 so exp2(s - m - 8) maps softmax to [0, 2^8] range
-    // FNUZ E4M3 FP8: max exponent = 7, max value ~120 (2^7 * 1.875)
-    //   Use shift=7.0 so exp2(s - m - 7) maps softmax to [0, 2^7] range
+    // FP8 softmax shift: exp2(s - m - shift) maps softmax into representable FP8 range.
+    // OCP E4M3 max exp 8 -> shift 8; FNUZ E4M3 max exp 7 -> shift 7.
     static constexpr float OCP_FP8_SHIFT  = 8.0f;
     static constexpr float FNUZ_FP8_SHIFT = 7.0f;
 
@@ -136,9 +116,11 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
 
     static constexpr const char* name = "qr_async_sparge_sage";
 
+    // Tail kNumWarps floats reserved for the pv-skip cross-warp predicate reduction.
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
-        return Policy::template GetSmemSize<Problem>();
+        return Policy::template GetSmemSize<Problem>() +
+               static_cast<ck_tile::index_t>(kNumWarps * sizeof(float));
     }
 
     template <BlockAttentionBiasEnum BiasEnum = BlockAttentionBiasEnum::NO_BIAS,
@@ -165,8 +147,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                const SAccElementFunction& s_acc_element_func,
                const PComputeElementFunction& p_compute_element_func,
                const OAccElementFunction& o_acc_element_func,
-               // ELEMENTWISE_BIAS: [M0, N0] bias DRAM window (origin {q_origin, seqlen_k_start});
-               // unused (dummy) for NO_BIAS / ALIBI.
+               // ELEMENTWISE_BIAS: [M0, N0] bias window; dummy for NO_BIAS / ALIBI.
                const BiasDramBlockWindowTmp& bias_dram_block_window_tmp,
                const int* kv_block_idx_ptr,
                int kv_blocks,
@@ -180,7 +161,10 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                [[maybe_unused]] const float* q_descale_ptr = nullptr,
                const float* k_descale_ptr                  = nullptr,
                const float* v_descale_ptr                  = nullptr,
-               [[maybe_unused]] float q_descale_value      = 1.0f) const
+               [[maybe_unused]] float q_descale_value      = 1.0f,
+               float pvthreshd                             = 0.0f,
+               const void* pvthreshd_per_head              = nullptr,
+               float logits_soft_cap                       = 0.0f) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -196,6 +180,11 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                       "wrong!");
 
         constexpr auto LdsSeq = Policy::template GetLdsBufferSequence<Problem>();
+
+        // pv-skip cross-warp reduction scratch (tail reserved in GetSmemSize).
+        float* const skip_scratch =
+            reinterpret_cast<float*>(reinterpret_cast<char*>(smem_ptr) +
+                                     Policy::template GetSmemSize<Problem>());
 
         // K tile in LDS
         auto k_lds_ptr   = reinterpret_cast<KDataType*>(smem_ptr);
@@ -234,22 +223,17 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                                               Policy::template MakeQRegTileDistribution<Problem>());
         q_dram_window.init_raw();
 
-        // TODO: we use async Copy for K, which is inline asm
-        // a side effect is we have to use inline asm for q as well
+        // K async copy is inline asm, so Q must use inline-asm load too.
+        // rocm-6.2+: manually clearing q miscompiles; the distributed-tensor ctor clears it.
         auto q = decltype(load_tile(q_dram_window)){};
-        // TODO: start from rocm-6.2, compiler will have problem if manually set clear of q.
-        // however, q would be cleared in the constructor of static distributed tensor
-        // set_tile(q, number<0>{}); // use per-dword clear to avoid scratch
         load_tile_raw(q, q_dram_window);
         __builtin_amdgcn_sched_barrier(0);
 
         using SaccBlockTileType = decltype(gemm_0.MakeCBlockTile());
 
-        // reduction function for softmax
         const auto f_max = [](auto e0, auto e1) { return max(e0, e1); };
         const auto f_sum = [](auto e0, auto e1) { return e0 + e1; };
 
-        // infer Sacc, S, P, M, L, Oacc type
         using SBlockTileType =
             std::conditional_t<std::is_same_v<typename SaccBlockTileType::DataType, SaccDataType>,
                                SaccBlockTileType,
@@ -260,7 +244,6 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
 
         using OaccBlockTileType = decltype(gemm_1.MakeCBlockTile());
 
-        // init Oacc, M, L
         auto o_acc = OaccBlockTileType{};
         auto m     = MLBlockTileType{};
         auto l     = MLBlockTileType{};
@@ -273,25 +256,22 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
         __builtin_amdgcn_sched_barrier(0);
         const auto q_origin = q_dram_window.get_window_origin();
 
-        // ---- sparge LUT graft -------------------------------------------------------------------
-        // K/V windows traverse LUT-selected K-blocks. LUT entries index K-blocks; multiply by kN0.
+        // sparge LUT graft: K/V windows traverse LUT-selected K-blocks (LUT entries index
+        // K-blocks; multiply by kN0). k_abs_pos tracks the selected block's absolute K position
+        // for descale-follow-LUT.
         const int seqlen_k_start = kv_block_idx_ptr[0] * kN0;
         const auto num_total_loop = kv_blocks;
-        // Absolute K seqlen position of the currently selected block (descale-follow-LUT).
         index_t k_abs_pos = seqlen_k_start;
 
-        // check early exit if no work to do
         if constexpr(AttnMask::IsMasking || kPadSeqLenK)
         {
             if(num_total_loop <= 0)
             {
-                buffer_load_fence(0); // rocm-6.1, if whole tile is masked out, need to fence(0)
-                                      // otherwise will have compute error(maybe compiler bug?)
-
-                // Note: here occ are all cleard, return it
+                // rocm-6.1: fully-masked tile must fence(0) or compute is corrupted.
+                buffer_load_fence(0);
                 return o_acc;
             }
-            __builtin_amdgcn_sched_barrier(0); // make sure sched_barrier(0) for this check
+            __builtin_amdgcn_sched_barrier(0);
         }
 
         auto k_dram_block_window =
@@ -303,8 +283,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
             k_dram_block_window.get_bottom_tensor_view(),
             k_dram_block_window.get_window_lengths(),
             k_dram_block_window.get_window_origin(),
-            Policy::template MakeKDramTileDistribution<Problem>()); // K DRAM tile window for
-                                                                    // load
+            Policy::template MakeKDramTileDistribution<Problem>());
         k_dram_window.init_raw();
         constexpr auto k_oob_ck = bool_constant<true>{};
         constexpr auto k_pre_np = bool_constant<false>{};
@@ -315,12 +294,9 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                              {0, seqlen_k_start},
                              Policy::template MakeVDramTileDistribution<Problem>());
 
-        // ELEMENTWISE_BIAS: load the [M0, N0] bias tile directly into the gemm0 C-block (s_acc)
-        // distribution -- i.e. SaccBlockTileType's tile_distribution. This is the same trick the
-        // fp16 fmha policy uses (MakeBiasDramTileDistribution == MakeCBlockTile distribution): the
-        // bias tile and the descaled s_acc share one distribution by construction, so the add is
-        // index-aligned regardless of the int8-MFMA SwizzleB/TransposedC C layout. The window
-        // origin follows the LUT-selected K block (advanced by the LUT delta each iteration).
+        // ELEMENTWISE_BIAS: load the bias tile into s_acc's distribution so the add is
+        // index-aligned regardless of the int8-MFMA SwizzleB/TransposedC C layout. Origin
+        // follows the LUT-selected K block.
         auto bias_dram_window = [&]() {
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
             {
@@ -336,15 +312,13 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
             }
         }();
 
-        // prefetch K tile
         async_load_tile_raw(
             k_lds_store(LdsSeq.at(number<0>{})), k_dram_window, number<-1>{}, k_oob_ck, k_pre_np);
         move_tile_window(k_dram_window, {0, kK0});
         __builtin_amdgcn_sched_barrier(0);
 
         buffer_load_fence(k_dram_window.get_num_of_access(), q.get_thread_buffer());
-        (void)q_element_func; // ??? rocm-6.x if use q element func will have scratch on hdim=64/32
-        // auto q_tile = q;      // tile_elementwise_in(q_element_func, q);
+        (void)q_element_func; // rocm-6.x: applying q element func spills to scratch on hdim=64/32
 
         index_t i_total_loops      = 0;
         constexpr index_t k0_loops = kQKHeaddim / kK0;
@@ -355,10 +329,54 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
         constexpr index_t kGemm0MPerWarp = BlockSageAttnShape::Gemm0WarpTile::at(number<0>{});
         static_assert(kGemm0MPerWarp == 32);
         constexpr index_t kWarpSz = get_warp_size();
-        // sub_warp_idx is 0 or 1, indicating which half of the warp (used for PERTHREAD K-scale
-        // indexing)
+
+        // pv-skip: skip a block when every Q-row's block-peak is > pvthreshd below the running
+        // max. m_local is taken after bias, so the predicate is valid for NO_BIAS/ALIBI/ELEMENTWISE.
+        // On skip m == m_old (rescale 1, l unchanged) and p_compute is zeroed; V-LDS stores /
+        // window moves / k_abs_pos stay unconditional to keep descale aligned.
+        // soft-cap disables pv-skip (raw-QK units no longer match; cap already bounds the range).
+        const float pvthreshd_eff =
+            pvthreshd_per_head
+                ? reinterpret_cast<const float*>(pvthreshd_per_head)[block_indices.qo_head_idx]
+                : pvthreshd;
+        const bool stage2_enabled  = (pvthreshd_eff > 0.0f) && (logits_soft_cap <= 0.0f);
+        const float skip_threshold = -pvthreshd_eff;
+
+        auto compute_skip_flag = [&](const auto& m_local_t, const auto& m_ij_t) -> bool {
+            if(!stage2_enabled)
+                return false;
+            float lane_max_diff = -ck_tile::numeric<float>::infinity();
+            constexpr auto m_spans = remove_cvref_t<decltype(m_ij_t)>::get_distributed_spans();
+            sweep_tile_span(m_spans[number<0>{}], [&](auto idx0) {
+                constexpr auto i_idx = make_tuple(idx0);
+                const float diff     = static_cast<float>(m_local_t[i_idx]) -
+                                       static_cast<float>(m_ij_t[i_idx]);
+                if(diff > lane_max_diff)
+                    lane_max_diff = diff;
+            });
+            for(index_t o = get_warp_size() / 2; o > 0; o /= 2) // intra-warp max
+            {
+                const float v_remote = warp_shuffle_down(lane_max_diff, static_cast<uint32_t>(o));
+                if(v_remote > lane_max_diff)
+                    lane_max_diff = v_remote;
+            }
+            const index_t lane_id = ck_tile::get_lane_id();
+            const index_t warp_id = ck_tile::get_warp_id();
+            if(lane_id == 0)
+                skip_scratch[warp_id] = lane_max_diff;
+            block_sync_lds();
+            float block_max_diff = -ck_tile::numeric<float>::infinity();
+#pragma unroll
+            for(index_t w = 0; w < kNumWarps; ++w)
+            {
+                const float v = skip_scratch[w];
+                if(v > block_max_diff)
+                    block_max_diff = v;
+            }
+            return block_max_diff < skip_threshold;
+        };
+        // which half of the warp (used for PERTHREAD K-scale indexing)
         index_t sub_warp_idx = (threadIdx.x % kWarpSz) / kGemm0MPerWarp;
-        // main loop
         do
         {
             float k_descale = 1.0f;
@@ -370,7 +388,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
             }
             else if constexpr(QScaleEnum == BlockSageAttentionQuantScaleEnum::PERTENSOR)
             {
-                // PERTENSOR: a single per-(b,h) global K scale (no descale-follow-LUT).
+                // PERTENSOR: single per-(b,h) global K scale (no descale-follow-LUT).
                 k_descale = k_descale_ptr[0];
             }
             constexpr index_t kNumKScalesPW =
@@ -403,7 +421,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
 
             // STAGE 1, QK gemm
             auto s_acc_gemm = SaccBlockTileType{};
-            clear_tile(s_acc_gemm); // initialize C
+            clear_tile(s_acc_gemm);
             if constexpr(k0_loops > 1)
             {
                 static_for<0, k0_loops - 1, 1>{}([&](auto i_k0) {
@@ -427,16 +445,14 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                 });
             }
 
-            // TODO: this to fix a bug when loop smaller than 2,
-            // the following fence/barrier will be scheduled inside 1st loop
+            // Compiler workaround: at k0_loops<=2 the fence/barrier below gets scheduled
+            // inside the 1st loop without this barrier.
             if constexpr(k0_loops <= 2)
                 __builtin_amdgcn_sched_barrier(0);
 
             // WG-uniform LUT delta; readfirstlane pins to SGPR for scalar tile-window math.
-            // Guard the read: on the last iteration block_idx is unused, but
-            // kv_block_idx_ptr[i_total_loops + 1] would index one past the per-row LUT
-            // (kv_blocks == num_k_blocks under dense selection) -- an OOB read on the final
-            // (b,h,q) row. Skip the load when no next iteration follows.
+            // Guard the read: on the last iteration kv_block_idx_ptr[i_total_loops + 1] would
+            // index one past the per-row LUT (OOB on the final row); block_idx is unused there.
             int block_idx =
                 (i_total_loops + 1 < num_total_loop)
                     ? __builtin_amdgcn_readfirstlane(kv_block_idx_ptr[i_total_loops + 1])
@@ -458,34 +474,25 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
             }
             __builtin_amdgcn_sched_barrier(1);
 
-            // Convert GEMM output to SaccDataType for softmax (if needed)
             auto s_acc = [&]() {
                 using GemmDataType = typename decltype(s_acc_gemm)::DataType;
                 if constexpr(std::is_same_v<GemmDataType, SaccDataType>)
                 {
-                    return s_acc_gemm; // No conversion needed (e.g., float -> float)
+                    return s_acc_gemm;
                 }
                 else
                 {
-                    return cast_tile<SaccDataType>(s_acc_gemm); // Convert (e.g., int32 -> float)
+                    return cast_tile<SaccDataType>(s_acc_gemm);
                 }
             }();
 
             if constexpr(QScaleEnum == BlockSageAttentionQuantScaleEnum::PERTHREAD)
             {
-                // PERTHREAD: kBlockScaleSizeK=16
-                // The s_acc tile distribution is determined by
-                // WarpGemmMfmaI8I8I32M32N32K32SwizzleBTransposedCDistribution, which guarantees
-                // each thread processes exactly 16 consecutive elements in the K dimension. This
-                // distribution is inherent to the MFMA 32x32x16 instruction with kKIter=2 and
-                // TransposedC layout. Therefore, col_offset >> 4 correctly maps thread-local
-                // elements to K scale indices.
+                // PERTHREAD (kBlockScaleSizeK=16): SwizzleB+TransposedC MFMA 32x32x16 gives each
+                // thread 16 consecutive K elements, so col_offset>>4 maps to the K scale index.
                 static_assert(Problem::kBlockScaleSizeK == 16,
                               "PERTHREAD: kBlockScaleSizeK must be 16");
 
-                // Validate the WarpGemm type matches the expected MFMA instruction with SwizzleB +
-                // TransposedC This ensures the distribution has 16 consecutive K elements per
-                // thread
                 using BlockGemm0 = remove_cvref_t<decltype(gemm_0)>;
                 constexpr auto WarpGemmCfg =
                     BlockGemm0::Policy::template GetWarpGemmMWarpNWarp<Problem>();
@@ -510,8 +517,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                     index_t col_offset = 0;
                     sweep_tile_span(s_acc_spans[number<1>{}], [&](auto idx1) {
                         constexpr auto i_j_idx = make_tuple(idx0, idx1);
-                        // col_offset counts columns in distributed view
-                        // Divide by 16 (>>4) to map to K scale groups (kBlockScaleSizeK=16)
+                        // >>4: 16 K elements per scale group (kBlockScaleSizeK=16)
                         const index_t scale_idx = col_offset >> 4;
                         s_acc(i_j_idx) *= combined_scales_reg[scale_idx];
                         col_offset++;
@@ -520,13 +526,8 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
             }
             else if constexpr(QScaleEnum == BlockSageAttentionQuantScaleEnum::PERWARP)
             {
-                // PERWARP: kBlockScaleSizeK=64, i.e., 64 global K elements share one scale
-                // Distribution: thread_i and thread_(i+32) interleave to cover K dimension
-                // In each thread's view, every 32 idx1 steps correspond to 64 global K elements
-
-                // Validate the WarpGemm type matches the expected MFMA instruction with SwizzleB +
-                // TransposedC This ensures each thread has 16 consecutive elements, and warp-level
-                // grouping is correct
+                // PERWARP (kBlockScaleSizeK=64): SwizzleB+TransposedC interleaves thread_i and
+                // thread_(i+32) over K, so every 32 idx1 steps span 64 K elements (col_offset>>5).
                 using BlockGemm0 = remove_cvref_t<decltype(gemm_0)>;
                 constexpr auto WarpGemmCfg =
                     BlockGemm0::Policy::template GetWarpGemmMWarpNWarp<Problem>();
@@ -551,10 +552,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                     index_t col_offset = 0;
                     sweep_tile_span(s_acc_spans[number<1>{}], [&](auto idx1) {
                         constexpr auto i_j_idx = make_tuple(idx0, idx1);
-                        // col_offset counts columns in distributed view
-                        // When N0=64: each thread has 32 elements; when N0=128: each thread has 64
-                        // elements Divide by 32 (>>5) to map to K scale groups
-                        // (kBlockScaleSizeK=64)
+                        // >>5: 64 K elements per scale group (kBlockScaleSizeK=64)
                         const index_t scale_idx = col_offset >> 5;
                         s_acc(i_j_idx) *= combined_scales_reg[scale_idx];
                         col_offset++;
@@ -564,12 +562,8 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
             else if constexpr(QScaleEnum == BlockSageAttentionQuantScaleEnum::BLOCKSCALE ||
                               QScaleEnum == BlockSageAttentionQuantScaleEnum::PERTENSOR)
             {
-                // BLOCKSCALE: one q_descale per tile (passed in via q_descale_value) combined with
-                // the per-block k_descale (descale-follow-LUT). PERTENSOR: a single per-(b,h)
-                // q_descale (q_descale_value) and k_descale (k_descale_ptr[0]) scalar applied to the
-                // whole tile. sparge_sage routes q_descale through q_descale_value rather than
-                // s_acc_element_func (which stays identity), so build the scalar dequant from both
-                // here.
+                // BLOCKSCALE/PERTENSOR: scalar dequant = q_descale_value * k_descale (k_descale
+                // is per-block descale-follow-LUT for BLOCKSCALE, k_descale_ptr[0] for PERTENSOR).
                 const float qk_descale = q_descale_value * k_descale;
                 s_acc = tile_elementwise_in(scales<float>(qk_descale), s_acc);
             }
@@ -578,15 +572,26 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                 s_acc = tile_elementwise_in(s_acc_element_func, s_acc);
             }
 
-            // ALIBI: add a position bias to the descaled (fp32) s_acc. The softmax below computes
-            // exp2(scale_s * s - scale_s * m) with scale_s already carrying log2e (FAST_EXP2), i.e.
-            // a natural-exp softmax of (scale * s + bias). To inject the alibi term consistently we
-            // need exp2(scale_s * s + slope*log2e*pos), so the slope handed to position_encoding is
-            // pre-divided by scale_s in the kernel: update() then adds (slope*log2e/scale_s)*pos to
-            // s_acc, and the scale_s multiply inside exp2 restores slope*log2e*pos. The (row,col)
-            // mapping uses get_x_indices_from_distributed_indices over the *actual* int8-MFMA s_acc
-            // distribution (same path the mask uses), and col follows the LUT-selected K block via
-            // k_dram_block_window's origin -- so alibi tracks the sparse block layout correctly.
+            // Gemma soft-cap on descaled s_acc before masking (NO_BIAS only): with raw scale
+            // sc = scale_s/log2e, s' = (cap/sc)*tanh(sc/cap*s); exp2(scale_s*s') then restores
+            // exp(cap*tanh(scale*s/cap)). cap == 0 disables.
+            if(logits_soft_cap > 0.0f)
+            {
+                const float sc        = (scale_s != 0.0f)
+                                            ? scale_s / ck_tile::log2e_v<float>
+                                            : 1.0f;
+                const float scc       = sc / logits_soft_cap;
+                const float cap_div_sc = logits_soft_cap / sc;
+                tile_elementwise_inout(
+                    [&](auto& x) {
+                        x = type_convert<SaccDataType>(
+                            cap_div_sc * tanh_fast<float>(scc * type_convert<float>(x)));
+                    },
+                    s_acc);
+            }
+
+            // ALIBI: add slope*pos to descaled s_acc; kernel pre-divides slope by scale_s so
+            // exp2(scale_s*...) restores slope*log2e*pos. col follows the LUT-selected K block.
             if constexpr(!std::is_same_v<remove_cvref_t<PositionEncoding>,
                                          EmptyPositionEncoding<SaccDataType>>)
             {
@@ -604,11 +609,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                 });
             }
 
-            // ELEMENTWISE_BIAS: add the loaded bias tile (which shares s_acc's distribution) to the
-            // descaled fp32 s_acc. softmax computes exp2(scale_s*s_acc - ...) with scale_s = scale*
-            // log2e, reproducing a natural-exp softmax of (scale*qk + bias); so to inject bias in
-            // that domain we add bias*log2e/scale_s (== bias/scale), and the scale_s multiply inside
-            // exp2 restores bias*log2e. The bias tile is loaded just-in-time per iteration below.
+            // ELEMENTWISE_BIAS: add bias*log2e/scale_s so exp2(scale_s*...) restores bias*log2e.
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
             {
                 const auto bias_tile  = load_tile(bias_dram_window);
@@ -623,7 +624,6 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                     bias_tile);
             }
             // STAGE 2, scale_s, mask, softmax
-            // logits_soft_cap is always disabled
             if constexpr(kPadSeqLenK || AttnMask::IsMasking)
             {
                 const auto k_origin      = k_dram_block_window.get_window_origin();
@@ -656,29 +656,31 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                 }
             }
 
-            const auto s = cast_tile<SMPLComputeDataType>(s_acc); // S{j}
+            const auto s = cast_tile<SMPLComputeDataType>(s_acc);
             auto m_local = block_tile_reduce<SMPLComputeDataType>(
                 s,
                 sequence<1>{},
                 f_max,
-                -numeric<SMPLComputeDataType>::infinity()); // m_local = rowmax(S{j})
+                -numeric<SMPLComputeDataType>::infinity());
             block_tile_reduce_sync(m_local, f_max, bool_constant<false>{});
 
-            const auto m_old = m; // m{j-1}
+            const auto m_old = m;
             tile_elementwise_inout(
-                [](auto& e0, auto e1, auto e2) { e0 = max(e1, e2); }, m, m_old, m_local); // m{j}
+                [](auto& e0, auto e1, auto e2) { e0 = max(e1, e2); }, m, m_old, m_local);
+
+            // pv-skip decided on RAW (descaled) QK m_local vs running m, before the FP8 shift/exp2
+            // (same raw-QK basis as sparge + host ref). See pvthreshd_eff comment above.
+            const bool skip_block = compute_skip_flag(m_local, m);
 
             auto p_compute = make_static_distributed_tensor<SMPLComputeDataType>(
-                s.get_tile_distribution()); // Pcompute{j}
+                s.get_tile_distribution());
 
             __builtin_amdgcn_sched_barrier(0x7F);
-            // Ensure gemm_0's LDS reads (K tile) from all threads are completed before V store
-            // Only needed when K tail and V use the same LDS buffer
+            // K tail and V share this LDS buffer: barrier so gemm_0's K reads finish before V store.
             if constexpr(LdsSeq.at(number<k0_loops - 1>{}) == LdsSeq.at(number<k0_loops>{}))
             {
                 __builtin_amdgcn_s_barrier();
             }
-            // store & prefetch next v, after the max reduction
             if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
             {
                 auto v_shuffle_tmp = make_static_distributed_tensor<VDataType>(
@@ -692,7 +694,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
 
                 store_tile(
                     v_lds_window_tmp,
-                    tile_elementwise_in(v_element_func, v_shuffle_tmp)); // store the prefetch
+                    tile_elementwise_in(v_element_func, v_shuffle_tmp));
             }
             else
             {
@@ -701,16 +703,17 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                                    sequence<(LdsSeq.at(number<k0_loops>{})) * kN1, 0>{},
                                    sequence<(LdsSeq.at(number<k0_loops>{}) + 1) * kN1, kK1>{});
                 store_tile(v_lds_window_tmp,
-                           tile_elementwise_in(v_element_func, v_buf)); // store the prefetch
+                           tile_elementwise_in(v_element_func, v_buf));
             }
 
             if constexpr(k1_loops > 1)
             {
+                // Compiler workaround: moving the window right after load_tile spills to scratch.
                 move_tile_window(
                     v_dram_window,
-                    {0, kK1}); // will have scratch if move this right after load_tile(v_dram)...
+                    {0, kK1});
                 v_buf = load_tile(
-                    v_dram_window, number<-1>{}, bool_constant<false>{}); // load next v_buf
+                    v_dram_window, number<-1>{}, bool_constant<false>{});
             }
             __builtin_amdgcn_sched_barrier(0);
 
@@ -730,9 +733,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
             constexpr auto p_spans = decltype(p_compute)::get_distributed_spans();
             sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
-                // For BLOCKSCALE: precompute (m - shift) once per row
-                // exp2(s - m + shift) = exp2(s - (m - shift))
-                // else: exp2(scale_s*s - scale_s*m + shift) = exp2(scale_s*s - (scale_s*m - shift))
+                // precompute row_max = scale_s*m - shift so exp2(scale_s*s - row_max) folds the shift.
                 auto validated_m = get_validated_m(m[i_idx]);
                 auto row_max     = scale_s * validated_m;
                 if constexpr(QScaleEnum == BlockSageAttentionQuantScaleEnum::BLOCKSCALE ||
@@ -741,8 +742,8 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                              QScaleEnum == BlockSageAttentionQuantScaleEnum::PERTENSOR)
                 {
 #if CK_TILE_USE_OCP_FP8
-                    validated_m -= OCP_FP8_SHIFT; // OCP FP8 softmax shift
-                    row_max -= OCP_FP8_SHIFT;     // for else branch
+                    validated_m -= OCP_FP8_SHIFT;
+                    row_max -= OCP_FP8_SHIFT;
 #else
                     validated_m -= FNUZ_FP8_SHIFT;
                     row_max -= FNUZ_FP8_SHIFT;
@@ -750,16 +751,16 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                 }
                 sweep_tile_span(p_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
-                    // logits_soft_cap is always disabled
-                    p_compute(i_j_idx) = exp2(scale_s * s[i_j_idx] - row_max);
+                    // pv-skip: zero P so rowsum_p == 0 and the PV gemm contributes nothing.
+                    p_compute(i_j_idx) =
+                        skip_block ? SMPLComputeDataType{0} : exp2(scale_s * s[i_j_idx] - row_max);
                 });
             });
 
             auto rowsum_p = block_tile_reduce<SMPLComputeDataType>(
-                p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0}); // rowsum(Pcompute{j})
+                p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0});
 
             block_tile_reduce_sync(rowsum_p, f_sum, bool_constant<false>{});
-            // l{j}, Oacc{j}
             constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
             sweep_tile_span(o_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
@@ -767,7 +768,6 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                 const auto m_new = get_validated_m(m[i_idx]);
                 auto row_max     = scale_s * m_new;
                 const auto tmp   = exp2(scale_s * m_old[i_idx] - row_max);
-                // Update l and rescale o_acc
                 l(i_idx) = tmp * l(i_idx) + rowsum_p[i_idx];
                 sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
@@ -777,9 +777,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
 
             const auto p = [&]() {
 #if CK_TILE_FMHA_FLOAT_TO_FLOAT16_RTN
-                // For fp32 to fp16,
-                // impl::cast_tile_pkrtz_fp16_fp32 would cause precision issue,
-                // since it uses __builtin_amdgcn_cvt_pkrtz, which is round to zero.
+                // cast_tile_pkrtz uses cvt_pkrtz (round-to-zero) -> fp32->fp16 precision loss.
                 return cast_tile<PDataType>(tile_elementwise_in(p_compute_element_func, p_compute));
 #else
                 if constexpr(std::is_same_v<PDataType, fp16_t>)
@@ -792,16 +790,13 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
             }();
 
             // STAGE 3, KV gemm
-            // For BLOCKSCALE, PERWARP, and PERTHREAD modes, accumulate directly to o_acc
-            // Apply per-channel v_descale after the loop (before normalization)
-
             if constexpr(k1_loops > 1)
             {
                 static_for<0, k1_loops - 1, 1>{}([&](auto i_k1) {
                     if constexpr(i_k1 != 0 && i_k1 < k1_loops - 1)
                     {
                         v_buf = load_tile(
-                            v_dram_window, number<-1>{}, bool_constant<false>{}); // load next v_buf
+                            v_dram_window, number<-1>{}, bool_constant<false>{});
                     }
                     block_sync_lds();
                     gemm_1(o_acc,
@@ -823,7 +818,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                             sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{}) + 1) * kN1, kK1>{});
                         store_tile(v_lds_window_tmp,
                                    tile_elementwise_in(v_element_func,
-                                                       v_shuffle_tmp)); // store the prefetch
+                                                       v_shuffle_tmp));
                     }
                     else
                     {
@@ -832,7 +827,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                             sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{})) * kN1, 0>{},
                             sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{}) + 1) * kN1, kK1>{});
                         store_tile(v_lds_window_tmp,
-                                   tile_elementwise_in(v_element_func, v_buf)); // store next v_buf
+                                   tile_elementwise_in(v_element_func, v_buf));
                     }
                     if constexpr(i_k1 < k1_loops - 1)
                         move_tile_window(v_dram_window, {0, kK1});
@@ -841,10 +836,8 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
             i_total_loops++;
             if(i_total_loops < num_total_loop)
             {
-                // descale-follow-LUT & window advance: jump K/V by the LUT block delta.
-                // K window already covers one block during the inner loop; V (inside this loop) has
-                // advanced kN0 already, so it needs an extra (block_idx-1)*kN0. K needs block_idx*kN0
-                // from this block's origin. Update the absolute K position used by k descale.
+                // Window advance by the LUT block delta. V already advanced kN0 in this loop, so it
+                // needs an extra (block_idx-1)*kN0; K needs block_idx*kN0. k_abs_pos drives k descale.
                 k_abs_pos += kN0 * block_idx;
 
                 // bias follows K's LUT delta; otherwise non-contiguous LUT blocks misalign bias.
@@ -879,24 +872,18 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
 
         } while(i_total_loops < num_total_loop);
 
-        // Apply per-channel v_descale for BLOCKSCALE, PERWARP, and PERTHREAD modes (after loop,
-        // before normalization)
+        // Per-channel v_descale (quantized modes), after the loop and before normalization.
         if constexpr(Problem::QScaleEnum == ck_tile::BlockSageAttentionQuantScaleEnum::BLOCKSCALE ||
                      Problem::QScaleEnum == ck_tile::BlockSageAttentionQuantScaleEnum::PERWARP ||
                      Problem::QScaleEnum == ck_tile::BlockSageAttentionQuantScaleEnum::PERTHREAD ||
                      Problem::QScaleEnum == ck_tile::BlockSageAttentionQuantScaleEnum::PERTENSOR)
         {
-            // Ensure all V LDS reads from the last gemm_1 complete before reusing K/V LDS space
+            // Barrier so the last gemm_1's V LDS reads finish before reusing K/V LDS space.
             block_sync_lds();
 
-            // V is col-major, each column (channel) has its own scale
-            // o_acc shape: [M0, N1] where N1 is hdim_v
-            // v_descale_ptr points to per-channel scales [hdim_v]
-            // Load v_descale to LDS for better memory access pattern
-            // Reuse K/V LDS space (they're no longer needed)
+            // Stage per-channel v_descale [hdim_v] into the now-free K/V LDS space.
             auto v_descale_lds = reinterpret_cast<float*>(smem_ptr);
 
-            // Cooperatively load v_descale to LDS
             const index_t num_threads = kBlockSize;
             for(index_t i = threadIdx.x; i < kN1; i += num_threads)
             {
@@ -904,9 +891,8 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
             }
             block_sync_lds();
 
-            // channel_idx below uses tile_idx.at(1) without an i_n1 tile offset, so
-            // the V per-channel descale assumes a single N1 tile spans hdim_v
-            // (num_tile_n1 == 1, i.e. hdim_v <= kN1).
+            // channel_idx uses tile_idx.at(1) without an i_n1 offset, so this assumes a single
+            // N1 tile spans hdim_v (hdim_v <= kN1).
             static_assert(kN1 >= kQKHeaddim,
                           "sage V per-channel descale assumes a single N1 tile "
                           "(hdim_v <= kN1)");
@@ -914,7 +900,6 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
             sweep_tile_span(o_tmp_spans[number<0>{}], [&](auto idx0) {
                 sweep_tile_span(o_tmp_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
-                    // Get the global tile index for the N1 (channel) dimension
                     const auto tile_idx = get_x_indices_from_distributed_indices(
                         o_acc.get_tile_distribution(), i_j_idx);
                     const index_t channel_idx = tile_idx.at(number<1>{});
@@ -924,7 +909,6 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
             });
         }
 
-        // finally, O
         constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
 
         sweep_tile_span(o_spans[number<0>{}], [&](auto idx0) {
@@ -973,7 +957,10 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                const float* q_descale_ptr             = nullptr,
                const float* k_descale_ptr             = nullptr,
                const float* v_descale_ptr             = nullptr,
-               [[maybe_unused]] float q_descale_value = 1.0f) const
+               [[maybe_unused]] float q_descale_value = 1.0f,
+               float pvthreshd                        = 0.0f,
+               const void* pvthreshd_per_head         = nullptr,
+               float logits_soft_cap                  = 0.0f) const
     {
         return operator()<BiasEnum>(q_dram_block_window_tmp,
                           identity{},
@@ -997,7 +984,10 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                           q_descale_ptr,
                           k_descale_ptr,
                           v_descale_ptr,
-                          q_descale_value);
+                          q_descale_value,
+                          pvthreshd,
+                          pvthreshd_per_head,
+                          logits_soft_cap);
     }
 };
 

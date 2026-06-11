@@ -27,11 +27,7 @@ GEN_DIR = ""
 
 
 def update_file(file_path, content):
-    """Update the file at file_path with the given content if it differs from the existing content.
-
-    It avoids unnecessary touching of the file which triggers rebuilds
-    """
-
+    # Write only if content differs, to avoid touching the file and triggering rebuilds.
     existing_content = ""
     if path.exists(file_path):
         with open(file_path, "r") as file:
@@ -69,17 +65,17 @@ using fmha_shape_{F_idx} = ck_tile::TileFmhaShape<fmha_block_tile_{F_idx},
                                       {F_vlayout}>;
 
 // TileFmhaTraits: spad, skpad, dpad, dvpad, has_logits_soft_cap, bias_enum,
-//                 store_lse, has_dropout, has_randval, quant_scale_enum, occupancy, is_v_rowmajor_skip
+//                 has_bias_grad, store_lse, has_dropout, quant_scale_enum, occupancy, skip_min_seqlen_q
 using fmha_trait_{F_idx} = ck_tile::TileFmhaTraits<{F_spad},
                                                     {F_skpad},
                                                     {F_dpad},
                                                     {F_dvpad},
                                                     {F_logits_cpp},
                                                     {F_bias},
-                                                    false,  // store_lse - NOT supported
-                                                    false,  // has_dropout - NOT supported
-                                                    false,  // has_randval - NOT supported
-                                                    ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE,  // FP8 quant - NOT supported
+                                                    false,
+                                                    false,
+                                                    false,
+                                                    ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE,
                                                     {F_occupancy},
                                                     false>;
 
@@ -163,7 +159,7 @@ bool get_num_cus(unsigned& num_cus) {{
 
 unsigned get_num_thread_blocks(unsigned batch, unsigned nheads, unsigned max_seqlen_q, unsigned kM0) {{
     const unsigned num_m_blocks = (max_seqlen_q + kM0 - 1) / kM0;
-    const unsigned num_n_blocks = 1; // we assume that num_n_blocks is always 1
+    const unsigned num_n_blocks = 1;
 
     return batch * nheads * num_m_blocks * num_n_blocks;
 }}
@@ -172,7 +168,7 @@ unsigned get_num_thread_blocks(unsigned batch, unsigned nheads, unsigned max_seq
 float fmha_jenga_fwd(fmha_jenga_fwd_traits t, fmha_jenga_fwd_args a, const ck_tile::stream_config& s){{
     float r = -1;
 
-    [[maybe_unused]] const float min_cu_util_rate = 0.8; // minimum CU utilization rate
+    [[maybe_unused]] const float min_cu_util_rate = 0.8;
 
     unsigned num_cus;
     if (!get_num_cus(num_cus)) {{
@@ -182,7 +178,7 @@ float fmha_jenga_fwd(fmha_jenga_fwd_traits t, fmha_jenga_fwd_args a, const ck_ti
     [[maybe_unused]] auto get_num_blocks = [&](unsigned kM0) {{
         return get_num_thread_blocks(a.batch, a.nhead_q, a.max_seqlen_q, kM0);
     }};
-    
+
     const bool has_load_tr = ck_tile::is_load_tr_supported();
 
 {F_dispatch}
@@ -676,8 +672,6 @@ class KernelComponentFactory:
                 bias_modes,
             ):
                 if bias == "alibi" and mask in ("no", "s_no"):
-                    continue
-                if logits == "t" and bias != "no":
                     continue
                 pipelines.append(
                     FmhaFwdPipeline(  # fmt: skip

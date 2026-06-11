@@ -14,18 +14,18 @@ auto create_args(int argc, char* argv[])
         .insert("api",
                 "jenga",
                 "sparse attention API:\n"
-                "  jenga:        block sparse attention (one-hot mask)\n"
+                "  jenga:        block-sparse attention (one-hot mask; Jenga, arXiv 2505.16864)\n"
                 "  vsa:          block sparse attention (LUT format)\n"
                 "  sparge: SpargeAttention (preprocess + mask prediction + attention)\n"
                 "  sparge_sage: quantized SpargeAttention (INT8 QK, FP8 V; -qscale)")
         .insert("qscale", "perwarp",
-                "sparge_sage quantization scale mode: perwarp|blockscale|perthread|pertensor")
+                "sparge_sage quantization scale mode: perwarp|perblock|perthread|pertensor")
         .insert("qkdtype", "int8",
                 "sparge_sage Q/K quant dtype: int8 (i8fp8bf16) | fp8 (fp8bf16). V is always fp8.")
         .insert("v", "1", "0:no validation, 1:validation")
         .insert("b", "1", "batch size")
-        .insert("h", "4", "num of head for q")
-        .insert("h_k", "-1", "num of head for k/v, -1 means equal to h")
+        .insert("h", "4", "num of head, for q")
+        .insert("h_k", "-1", "num of head, for k/v, -1 means equal to h")
         .insert("s", "4096", "seqlen_q")
         .insert("s_k", "-1", "seqlen_k, -1 means equal to s")
         .insert("d", "128", "head dim for q, k")
@@ -33,57 +33,59 @@ auto create_args(int argc, char* argv[])
         .insert("scale_s", "0", "softmax scale factor; 0 ⇒ 1/sqrt(d) (default).\n"
                                 "Override for fixed-scale eval / RoPE-aware models.")
         .insert("logits_soft_cap", "0", "Gemma-style logits soft cap; 0 ⇒ disabled.\n"
-                                        "Pre-softmax: s = cap * tanh(s * scale / cap). NO_BIAS only.")
-        .insert("sparsity", "0.5",
+                                        "Pre-softmax: s = cap * tanh(s * scale / cap).")
+        .insert("sparsity", "0.02",
                 "target sparsity ratio [0,1). 0=dense, higher=more sparse.\n"
                 "  jenga / vsa: random-mask activation probability (skip ratio).\n"
-                "  sparge: passed to the algorithm selected by -sparge_mode (see below).")
-        .insert("sparge_mode", "topk",
-                "sparge: block-selection algorithm.\n"
-                "  topk (default): pick max(1, round((1-sparsity) * num_k_blocks)) blocks\n"
-                "                  per Q-block. Realised sparsity matches -sparsity exactly.\n"
-                "  cdf:            CDF threshold; greedily add blocks until cumulative softmax\n"
-                "                  probability >= 1-sparsity. Realised sparsity floats.")
-        .insert("simthreshold", "0.0", "cosine similarity threshold (sparge only)")
+                "  sparge / sparge_sage: passed to the algorithm selected by -sparge_mode (see below).\n"
+                "  default 0.02 -> cdf threshold 0.98 (matches official SpargeAttn meansim).")
+        .insert("sparge_mode", "cdf",
+                "sparge / sparge_sage: block-selection algorithm.\n"
+                "  cdf (default): CDF threshold; greedily add blocks until cumulative softmax\n"
+                "                 probability >= 1-sparsity (1-0.02 = 0.98, official default).\n"
+                "  topk:          pick max(1, round((1-sparsity) * num_k_blocks)) blocks per\n"
+                "                 Q-block. Realised sparsity matches -sparsity exactly.")
+        .insert("simthreshold", "0.6",
+                "cosine similarity threshold (sparge & sparge_sage). Official SpargeAttn meansim "
+                "default 0.6.")
         .insert("mask",
                 "0",
                 "0: no mask, 1: top-left(same as 't'), 2:bottom-right(same as 'b')\n"
                 "'t', top-left causal mask, 'b', bottom-r causal mask\n"
                 "'t:l,r', top-left sliding window attn(swa) with FA style left right size\n"
                 "'b:l,r', bottom-r sliding window attn(swa) with FA style left right size\n"
-                "(supported only by `vsa` and `sparge`; `jenga` ignores this flag)")
-        .insert("sink", "0", "1: attention sink (always include first K block, sparge only)")
-        .insert("pvthreshd", "0.0",
-                "P*V skip threshold for sparge (0 = disabled; >0 enables Stage 2)")
+                "(supported by all: `jenga` / `vsa` / `sparge` / `sparge_sage`)")
+        .insert("sink", "0",
+                "1: attention sink (always include first K block, sparge & sparge_sage)")
+        .insert("pvthreshd", "50",
+                "P*V runtime block-skip threshold (log2 units) for sparge & sparge_sage\n"
+                "(0 = disabled; >0 enables Stage 2). Official SpargeAttn default 50.")
         .insert("perhead_test", "0",
-                "sparge: synthesize per-head hyperparam pattern for smoke test (requires -h >= 2)")
+                "sparge/sparge_sage: synthesize a per-head hyperparam pattern for smoke test "
+                "(requires -h >= 2).")
         .insert("sparsity_per_head", "",
-                "sparge: per-Q-head sparsity, comma-separated floats of length nhead_q.\n"
-                "Overrides scalar -sparsity / -perhead_test. Routed to topk or cdf field by\n"
-                "-sparge_mode (each value is converted to 1 - sparsity[h] for the active field).")
+                "sparge/sparge_sage: per-Q-head sparsity (nhead_q comma-separated floats). Overrides "
+                "-sparsity / -perhead_test; routed to topk/cdf by -sparge_mode (as 1 - sparsity[h]).")
         .insert("sim_per_head", "",
-                "sparge: per-Q-head simthreshold, comma-separated floats of length nhead_q.\n"
-                "Overrides scalar -simthreshold / -perhead_test (requires -simthreshold > 0).")
+                "sparge/sparge_sage: per-Q-head simthreshold (nhead_q floats). Overrides "
+                "-simthreshold / -perhead_test (requires -simthreshold > 0).")
         .insert("pvthreshd_per_head", "",
-                "sparge: per-Q-head pvthreshd, comma-separated floats of length nhead_q.\n"
-                "Overrides scalar -pvthreshd / -perhead_test for the pvthreshd field.")
+                "sparge/sparge_sage: per-Q-head pvthreshd (nhead_q floats). Overrides "
+                "-pvthreshd / -perhead_test.")
         .insert("bias", "n",
-                "sparge bias (Phase 1+2, batch only):\n"
-                "  n / 0          : no bias\n"
-                "  e / 1          : elementwise rank=0 (1*1*sq*sk, broadcast across b/h)\n"
-                "  e:1 / 1:1      : elementwise rank=1 (1*h*sq*sk, broadcast across b)\n"
-                "  a / 2          : alibi rank=0 (1*h slope, requires causal mask)\n"
-                "  a:1 / 2:1      : alibi rank=1 (b*h slope)\n"
-                "(jenga / vsa / sparge group ignore this flag)")
-        .insert("smooth_k", "1", "K smoothing (center K by per-channel mean): sparge preprocess "
-                                 "pool/sim and sparge_sage K-quant. 0 disables. Matches official "
-                                 "SpargeAttn smooth_k (default on).")
+                "n or 0, no bias\n"
+                "e(lementwise) or 1, elementwise bias 1*1*sq*sk. e:1, 1*h*sq*sk. e:2, b*h*sq*sk\n"
+                "a(libi) or 2, alibi 1*h slope (needs causal mask). a:1, b*h\n"
+                "(jenga / vsa / sparge / sparge_sage; batch + group)")
+        .insert("smooth_k", "1",
+                "center K by per-channel mean (selection pool/sim + sage K-quant). 0 disables. "
+                "Official SpargeAttn default on.")
         .insert("print_sparsity", "0",
                 "sparge: 1 = read back actual sparsity; needed for accurate TFlops/GB/s")
         .insert("block_size", "128", "block size for sparse attention (BLKQ=BLKK)")
         .insert("vlayout", "r", "r for row-major(seqlen*hdim), c for col-major(hdim*seqlen)")
         .insert("mode", "0",
-                "kernel mode. 0:batch, 1:group (jenga + vsa + sparge)")
+                "kernel mode. 0:batch, 1:group (jenga + vsa + sparge + sparge_sage)")
         .insert("json", "0",
                 "1 to also emit a JSON-Lines summary (prefix 'JSON '). 0 to skip.")
         .insert("jsonfile", "",

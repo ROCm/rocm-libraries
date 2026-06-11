@@ -29,7 +29,7 @@ def _load_ops_module(importer, module_name: str):
     return module
 
 
-# inspect all modules under 'codegen.ops' and register API handlers
+# Load all modules under codegen.ops and register their API handlers.
 ops = []
 for importer, module_name, _ in pkgutil.iter_modules(codegen.ops.__path__):
     full_module_name = "%s.%s" % (codegen.ops.__name__, module_name)

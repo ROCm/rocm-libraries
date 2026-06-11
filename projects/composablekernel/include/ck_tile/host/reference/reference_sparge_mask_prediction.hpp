@@ -12,7 +12,6 @@
 #include "ck_tile/host/host_tensor.hpp"
 
 // CPU reference for sparge's mask-prediction stage.
-
 namespace ck_tile {
 
 template <typename T>
@@ -44,12 +43,10 @@ HostTensor<float> compute_block_means(
     return means;
 }
 
-// Block self-similarity = mean over the full pairwise cosine Gram matrix of the block's
-// tokens, matching upstream SpargeAttn (utils.py: L2-normalize each token, grams=x@x^T,
-// sim = sum(grams)/(BS*BS)). Using the identity
-//   sum_{i,j} <t_i/|t_i|, t_j/|t_j|> = || sum_i (t_i/|t_i|) ||^2
-// we accumulate the unit-vector sum u[d] and report ||u||^2 / count^2. The `means`
-// argument is unused for the Gram formula but kept for signature compatibility.
+// Block self-similarity = mean of the pairwise cosine Gram matrix, matching upstream SpargeAttn
+// (L2-normalize tokens, sim = sum(x@x^T)/BS^2). Via the identity
+// sum_{i,j} <u_i,u_j> = ||sum_i u_i||^2 we accumulate the unit-vector sum u and report
+// ||u||^2 / count^2. `means` is unused here but kept for signature compatibility.
 template <typename T>
 HostTensor<float> compute_block_similarity(
     const HostTensor<T>& data_bhsd,
@@ -112,18 +109,13 @@ compute_global_k_mean(const HostTensor<T>& k_bhsd,
     return km;
 }
 
-// Scalar reference for the per-warp row-wise INT8 quantization fused into preprocess.
-// Mirrors BlockSpargePreprocessPipeline::quantize_block bit-for-bit:
-//   (smooth_k, K side) center val by per-channel km[c] before absmax + quant,
-//   per-token absmax over the full hidden dim,
-//   group absmax over `tokens_per_scale` consecutive tokens, scale = absmax / 127,
-//   int8 = type_convert<int8_t>(saturates<int8_t>{}(val / scale)).
-// km (nullable): per-channel K-mean [batch, nhead, hdim]. Pass nullptr for Q (no centering).
-// Inputs are [batch, nhead, seqlen, hdim]. Outputs:
-//   q_int8 [batch, nhead, seqlen, hdim], q_scale [batch, nhead, num_block_scale]
-//   with num_block_scale = num_blocks * (block_size / tokens_per_scale), grouped per
-//   128-token block (block_size / tokens_per_scale scales per block), matching the
-//   device per-block scale_out layout concatenated over blocks.
+// Reference for the per-warp row-wise INT8 quant fused into preprocess. Mirrors
+// BlockSpargePreprocessPipeline::quantize_block bit-for-bit: (smooth_k, K side) center val by
+// per-channel km[c] first; group absmax over tokens_per_scale tokens x full hidden;
+// scale = absmax/127; int8 = saturate(val/scale).
+// km (nullable): per-channel K-mean [B,H,D]; nullptr for Q (no centering). Outputs int8 [B,H,S,D]
+// and scale [B,H,num_block_scale] with num_block_scale = num_blocks*(block_size/tokens_per_scale),
+// block-packed to match the device scale_out layout.
 template <typename T>
 void reference_sparge_rowwise_quant(const HostTensor<T>& data_bhsd,
                                     index_t              batch,
@@ -152,7 +144,6 @@ void reference_sparge_rowwise_quant(const HostTensor<T>& data_bhsd,
 
                 for(index_t g = 0; g < scales_per_blk; ++g)
                 {
-                    // group absmax over tokens_per_scale tokens x full hidden.
                     float amax = 0.0f;
                     for(index_t tt = 0; tt < tokens_per_scale; ++tt)
                     {
@@ -187,10 +178,9 @@ void reference_sparge_rowwise_quant(const HostTensor<T>& data_bhsd,
             }
 }
 
-// FP8 variant of reference_sparge_rowwise_quant (SageAttention fp8bf16 Q/K path). Same per-warp
-// row-wise grouping, but scale = absmax / fp8_max and quant = type_convert<fp8_t> (no integer
-// saturate; the fp8 conversion itself clamps). Outputs the fp8-roundtripped value as float so the
-// caller can dequantize bit-for-bit (val_deq = float(fp8) * scale), matching the device.
+// FP8 variant of reference_sparge_rowwise_quant (fp8bf16 Q/K path): scale = absmax/fp8_max,
+// quant = fp8_t (the cast clamps). Outputs the fp8-roundtripped value as float so the caller
+// can dequantize bit-for-bit (val_deq = float(fp8) * scale).
 template <typename T>
 void reference_sparge_rowwise_quant_fp8(const HostTensor<T>& data_bhsd,
                                         index_t              batch,
@@ -254,9 +244,8 @@ void reference_sparge_rowwise_quant_fp8(const HostTensor<T>& data_bhsd,
             }
 }
 
-// PERTENSOR reference quant (SageAttention global per-(batch,head) scale). Mirrors
-// BlockSpargeQKQuantPipeline: scale = absmax_over_all_tokens_and_hidden(X) / divisor (127 for
-// INT8), x = round(X / scale). Emits one scale per (b,h) at scale_out[(b*nhead+h)]. INT8 path.
+// PERTENSOR reference quant (global per-(b,h) scale). Mirrors BlockSpargeQKQuantPipeline:
+// scale = absmax_over_all_tokens_and_hidden / 127; one scale per (b,h). INT8 path.
 template <typename T>
 void reference_sparge_global_quant(const HostTensor<T>& data_bhsd,
                                    index_t              batch,
@@ -390,7 +379,6 @@ reference_sparge_mask_prediction(const HostTensor<T>& q_bhsd,
     auto q_sim = compute_block_similarity(q_bhsd, q_means, batch, nhead, num_q_blocks,
                                           block_size_q, seqlen_q, hdim);
 
-    // Create k_means/k_sim the same way as q_means/q_sim (no extra empty allocation).
     auto k_means = compute_block_means(k_bhsd, batch, nhead_k, num_k_blocks,
                                        block_size_k, seqlen_k, hdim);
     auto k_sim   = compute_block_similarity(k_bhsd, k_means, batch, nhead_k, num_k_blocks,
@@ -447,8 +435,7 @@ reference_sparge_mask_prediction(const HostTensor<T>& q_bhsd,
                                (first_q - window_left + causal_delta) / block_size_k)
                     : index_t{0};
 
-                // qi block lacks intra-block similarity: attend all causal-valid K blocks
-                // (official ~sim_qblocks => sim <= threshold)
+                // Low-sim qi block (official ~sim_qblocks, sim <= thr): attend all causal-valid K.
                 if(head_simthreshold > 0.0f && q_sim(b, h, qi) <= head_simthreshold)
                 {
                     for(index_t kj = 0; kj < num_k_blocks; ++kj)
@@ -464,16 +451,14 @@ reference_sparge_mask_prediction(const HostTensor<T>& q_bhsd,
                     {
                         row[static_cast<size_t>(kj)] = -1e30f;
                     }
-                    // kj block lacks intra-block similarity: exclude from the softmax
-                    // competition (official pooled_score[~sim_kblocks]=-inf); it is
-                    // force-selected after the loop. ~sim => sim <= threshold.
+                    // Low-sim kj block (official pooled_score[~sim_kblocks]=-inf): exclude from
+                    // the softmax competition; force-selected after the loop.
                     else if(head_simthreshold > 0.0f && k_sim_expand(b, h, kj) <= head_simthreshold)
                     {
                         row[static_cast<size_t>(kj)] = -1e30f;
                     }
                     else
                     {
-                        // compute the qi & kj block attention score
                         float dot = 0.0f;
                         for(index_t d = 0; d < hdim; ++d)
                             dot += q_means(b, h, qi, d) * k_means_expand(b, h, kj, d);
@@ -482,7 +467,6 @@ reference_sparge_mask_prediction(const HostTensor<T>& q_bhsd,
                 }
 
                 float mx = *std::max_element(row.begin(), row.end());
-                // compute normalized attention probability over K blocks (softmax)
                 std::vector<float> probs(static_cast<size_t>(num_k_blocks));
                 float se = 0.0f;
                 for(index_t kj = 0; kj < num_k_blocks; ++kj)
@@ -521,9 +505,8 @@ reference_sparge_mask_prediction(const HostTensor<T>& q_bhsd,
                     }
                     else
                     {
-                        // official CDF (searchsorted right=True => #{cdf <= thr}): stop
-                        // before the block that pushes the cumulative past cdfthreshd; keep
-                        // at least one.
+                        // CDF (official searchsorted right=True): stop before the block that pushes
+                        // the cumulative past cdfthreshd; keep at least one.
                         const float next = cum + probs[static_cast<size_t>(kj)];
                         if(n_selected != 0 && next > head_cdfthreshd)
                             break;
@@ -533,8 +516,8 @@ reference_sparge_mask_prediction(const HostTensor<T>& q_bhsd,
                     }
                 }
 
-                // Force-include low-similarity K blocks (official final_map[~sim_kblocks]=1).
-                // They were excluded from the softmax competition above (row=-1e30).
+                // Force-include low-sim K blocks (official final_map[~sim_kblocks]=1; excluded
+                // from the competition above).
                 if(head_simthreshold > 0.0f)
                 {
                     for(index_t kj = 0; kj < num_k_blocks; ++kj)

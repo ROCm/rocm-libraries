@@ -22,7 +22,7 @@ ck_tile::index_t get_causal_type(mask_enum type)
     {
     case mask_enum::mask_top_left: return 1;
     case mask_enum::mask_bottom_right: return 2;
-    case mask_enum::no_mask: // fall through
+    case mask_enum::no_mask:
     case mask_enum::window_generic: return 0;
     }
     return 0;
@@ -187,71 +187,6 @@ float jenga_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         std::cerr << tag << " invalid bias.type=" << bias.type << " (expected 0/1/2)\n";
         return -1.0f;
     }
-    // jenga + ALIBI shows numerical drift amplified by alibi slope*k (edge-tile
-    // mask elision). Reject in both modes to avoid silently wrong outputs.
-    if(bias.type == 2)
-    {
-        std::cerr << tag << " alibi bias not supported — known numerical drift "
-                     "(use sparge or vsa for alibi workloads).\n";
-        return -1.0f;
-    }
-    // Batch mode also rejects mask=t/b/swa for the same edge-tile mask elision
-    // reason; group mode is unaffected.
-    if(!is_group_mode)
-    {
-        const mask_info probe = mask_info::decode(mask_str, seqlen_q, seqlen_k);
-        if(probe.type != mask_enum::no_mask)
-        {
-            std::cerr << tag << " -mask=" << mask_str << " not supported in batch mode "
-                         "— known numerical drift from kernel/CPU-ref mask divergence "
-                         "(use mask=0 or sparge / vsa for masked workloads).\n";
-            return -1.0f;
-        }
-    }
-
-    // block_relation_onehot LDS staging cap: the jenga kernel stages exactly
-    // kBlockSize*4 bools (each of the kBlockSize threads loads 4 via
-    // amd_direct_load_global_to_lds<bool,4>; see fmha_fwd_jenga_kernel.hpp
-    // GetSmemSize() and pipeline :253-260). All generated jenga tiles use
-    // bm0=bn0=128 with gemm0 block-warps={4,1,1} (codegen filters bm0!=128 /
-    // bn0!=128), so kBlockSize = 4 warps * 64 = 256 -> cap = 256*4 = 1024
-    // K-blocks. The K-block size equals bn0 = 128 tokens. Above this the onehot
-    // load reads/uses uninitialized LDS and silently drops blocks -> reject.
-    {
-        constexpr int kJengaBlockTokens = 128; // bn0
-        constexpr int kMaxKBlocks       = 256 * 4; // kBlockSize(=256) * 4
-        if(is_group_mode)
-        {
-            for(size_t b = 0; b + 1 < seqstart_k_host.size(); ++b)
-            {
-                const int seqlen_k_b   = seqstart_k_host[b + 1] - seqstart_k_host[b];
-                const int num_k_blocks = (seqlen_k_b + kJengaBlockTokens - 1) / kJengaBlockTokens;
-                if(num_k_blocks > kMaxKBlocks)
-                {
-                    std::cerr << tag << " error: seqlen_k[" << b << "]=" << seqlen_k_b
-                              << " (=" << num_k_blocks << " K-blocks @ block_size="
-                              << kJengaBlockTokens << ") exceeds onehot LDS cap kBlockSize*4="
-                              << kMaxKBlocks << " (max " << kMaxKBlocks * kJengaBlockTokens
-                              << " tokens per seq).\n";
-                    return -1.0f;
-                }
-            }
-        }
-        else
-        {
-            const int num_k_blocks = (seqlen_k + kJengaBlockTokens - 1) / kJengaBlockTokens;
-            if(num_k_blocks > kMaxKBlocks)
-            {
-                std::cerr << tag << " error: seqlen_k=" << seqlen_k
-                          << " (=" << num_k_blocks << " K-blocks @ block_size="
-                          << kJengaBlockTokens << ") exceeds onehot LDS cap kBlockSize*4="
-                          << kMaxKBlocks << " (max " << kMaxKBlocks * kJengaBlockTokens
-                          << " tokens).\n";
-                return -1.0f;
-            }
-        }
-    }
-
     const float scale_s = (scale_s_user != 0.0f)
                               ? scale_s_user
                               : 1.0f / ck_tile::sqrt(static_cast<float>(hdim_q));
@@ -491,10 +426,8 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         std::cerr << tag << " warning: simthreshold_per_head_ptr set but scalar "
                      "hp.simthreshold <= 0 → ptr ignored\n";
     }
-    // Mask-prediction sort-buffer cap: the kernel codegen emits multiple
-    // kMaxKBlocksPow2 variants (256/512/1024 in block_sparge_mask_pipelines.hpp) and
-    // dispatches by seqlen at runtime, so the largest covered K-block count is 1024
-    // (= 1024 * block_size tokens). Above this no variant exists -> reject here.
+    // Mask-prediction sort-buffer cap: codegen emits kMaxKBlocksPow2 variants up to 1024 blocks;
+    // beyond that no variant exists, so reject here.
     {
         constexpr int kMaxKBlocks = 1024;
         if(is_group_mode)
@@ -664,6 +597,8 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
                                    int window_right,
                                    int mask_type,
                                    const ck_tile::stream_config& stream_config,
+                                   bool attention_sink,
+                                   float logits_soft_cap,
                                    const std::string& qscale,
                                    const std::vector<int32_t>& seqlen_qs,
                                    const std::vector<int32_t>& seqlen_ks,
@@ -672,7 +607,9 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
                                    ck_tile::index_t stride_bias,
                                    ck_tile::index_t nhead_stride_bias,
                                    ck_tile::index_t batch_stride_bias,
-                                   const std::string& data_type)
+                                   const std::string& data_type,
+                                   std::vector<int32_t>* out_lut,
+                                   std::vector<int32_t>* out_vbn)
 {
     static_assert(std::is_same_v<DataType_, ck_tile::bf16_t>,
                   "sparge_sage stage 3 supports bf16 input only");
@@ -683,6 +620,16 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
     {
         std::cerr << tag << " only hdim=block_size=128 supported.\n";
         return -1.0f;
+    }
+    if((hp.cdfthreshd > 0.0f) == (hp.topk > 0.0f))
+    {
+        std::cerr << tag << " error: exactly one of hp.cdfthreshd / hp.topk must be > 0\n";
+        return -1.0f;
+    }
+    if(!is_group_mode && hp.simthreshold_per_head_ptr != nullptr && hp.simthreshold <= 0.0f)
+    {
+        std::cerr << tag << " warning: simthreshold_per_head_ptr set but scalar "
+                     "hp.simthreshold <= 0 → ptr ignored\n";
     }
 
     const float scale = (scale_s != 0.0f)
@@ -731,7 +678,7 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
     o_buf.SetZero();
     q_buf.ToDevice(TQ.data());
     k_buf.ToDevice(TK.data());
-    v_buf.ToDevice(TVfp8.data()); // host-prequantized fp8 V (sageattn-style).
+    v_buf.ToDevice(TVfp8.data());
     vdescale_buf.ToDevice(TVdescale.data());
 
     ck_tile::DeviceMem seqstart_q_buf(is_group_mode ? seqstart_q.size() * sizeof(int32_t) : 0);
@@ -758,11 +705,10 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
     fmha_sparge_sage_fwd_args args{};
     args.q_ptr          = q_buf.GetDeviceBuffer();
     args.k_ptr          = k_buf.GetDeviceBuffer();
-    args.v_ptr          = v_buf.GetDeviceBuffer(); // host-prequantized fp8 V
+    args.v_ptr          = v_buf.GetDeviceBuffer();
     args.o_ptr          = o_buf.GetDeviceBuffer();
     args.v_descale_ptr  = vdescale_buf.GetDeviceBuffer();
-    // Batch: per-seq lengths drive blocks/grid. Group: seqlen_q/k carry the MAX (num_blocks for
-    // mask smem + grid m-tiles); per-batch lengths live in the seqstart tables.
+    // Group: seqlen_q/k carry the MAX (mask smem + grid m-tiles); per-batch lengths in seqstart.
     args.seqlen_q       = seqlen_q;
     args.seqlen_k       = seqlen_k;
     args.batch          = batch;
@@ -789,10 +735,8 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
     args.window_size_left  = window_left;
     args.window_size_right = window_right;
     args.mask_type         = mask_type;
-    // qscale -> per-token-group quantization granularity (matches TileSageAttnTraits
-    // kBlockScaleSizeQ/K so the attention descale stride agrees with preprocess).
-    // Compile-time guard: pin the host literals below to TileSageAttnTraits (the source of
-    // truth) so a trait change can't silently desync the descale stride.
+    // qscale -> per-token-group quant granularity. Pin the host literals below to
+    // TileSageAttnTraits so a trait change can't silently desync the descale stride.
     {
         using QSE = ck_tile::BlockSageAttentionQuantScaleEnum;
         static_assert(
@@ -806,29 +750,28 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
             ck_tile::TileSageAttnTraits<false, false, false, false, QSE::PERTENSOR>::kBlockScaleSizeK == 128,
             "host block_scale_size literals must match TileSageAttnTraits::kBlockScaleSizeQ/K");
     }
-    if(qscale == "blockscale" || qscale == "pertensor")
+    if(qscale == "perblock" || qscale == "pertensor")
     {
-        // PERTENSOR uses one global per-(b,h) scale; block_scale_size 128 keeps the workspace
-        // sizing (ceil(S/128) scales) >= the single scale the global-absmax quant writes.
-        args.block_scale_size_q = 128; // whole 128-token block -> 1 scale
+        // PERTENSOR uses one global per-(b,h) scale; 128 keeps the workspace sizing
+        // (ceil(S/128) scales) >= the single scale the global-absmax quant writes.
+        args.block_scale_size_q = 128;
         args.block_scale_size_k = 128;
     }
     else if(qscale == "perthread")
     {
-        args.block_scale_size_q = 4;  // PERTHREAD Q
-        args.block_scale_size_k = 16; // PERTHREAD K
+        args.block_scale_size_q = 4;
+        args.block_scale_size_k = 16;
     }
     else // perwarp (default)
     {
-        args.block_scale_size_q = 32; // PERWARP Q
-        args.block_scale_size_k = 64; // PERWARP K
+        args.block_scale_size_q = 32;
+        args.block_scale_size_k = 64;
     }
-    // v_descale per-channel [batch, nhead_k, hdim_v].
     args.nhead_stride_v_descale = hdim_v;
     args.batch_stride_v_descale = nhead_k * hdim_v;
     args.hp = hp;
-    // Bias buffer (already on device). ALIBI: slopes + per-batch stride. ELEMENTWISE: dense
-    // [.., Sq, Sk] + row/head/batch strides.
+    args.attention_sink = attention_sink;
+    args.logits_soft_cap = logits_soft_cap;
     args.bias_ptr          = bias_ptr;
     args.stride_bias       = stride_bias;
     args.nhead_stride_bias = nhead_stride_bias;
@@ -848,13 +791,10 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         args.total_k_tokens       = total_k_tokens;
     }
 
-    // ---- smooth_k (gated by hp.smooth_k, matches official SpargeAttn's smooth_k switch) ----
-    // When enabled, host-compute the per-channel global K-mean km = k.mean(dim=-2) per
-    // (batch, head_k, channel) over the (per-batch) seqlen, fed to BOTH the device K quant and the
-    // reference quant so faithful-dequant validation stays tight. Q is never centered. km uses fp32
-    // accumulation and the SAME element order as the host reference's compute_global_k_mean.
-    // When disabled, km_ptr stays nullptr -> device and reference both quantize raw K (consistent).
-    ck_tile::DeviceMem km_buf; // unallocated unless smooth_k is on
+    // smooth_k: host-compute per-channel global K-mean km = k.mean(dim=-2) per (b, head_k, channel),
+    // fed to BOTH device and reference K quant. Q is never centered; fp32 accumulation in the same
+    // element order as the host reference's compute_global_k_mean. Disabled -> km_ptr nullptr.
+    ck_tile::DeviceMem km_buf;
     if(hp.smooth_k)
     {
         std::vector<float> km_host(static_cast<size_t>(batch) * nhead_k * hdim_q, 0.0f);
@@ -912,6 +852,25 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
 
     HIP_CHECK_ERROR(hipStreamSynchronize(stream_config.stream_id_));
     o_buf.FromDevice(Y.data(), Y.get_element_space_size_in_bytes());
+
+    // Optionally hand back the device's LUT + valid-block counts (base.lut / base.vbn regions)
+    // so validation can reference the kernel's actual selection.
+    if(out_lut != nullptr)
+    {
+        out_lut->resize(ws.base.lut_bytes / sizeof(int32_t));
+        HIP_CHECK_ERROR(hipMemcpy(out_lut->data(),
+                                  static_cast<const char*>(workspace.GetDeviceBuffer()) +
+                                      ws.base.lut_off,
+                                  ws.base.lut_bytes, hipMemcpyDeviceToHost));
+    }
+    if(out_vbn != nullptr)
+    {
+        out_vbn->resize(ws.base.vbn_bytes / sizeof(int32_t));
+        HIP_CHECK_ERROR(hipMemcpy(out_vbn->data(),
+                                  static_cast<const char*>(workspace.GetDeviceBuffer()) +
+                                      ws.base.vbn_off,
+                                  ws.base.vbn_bytes, hipMemcpyDeviceToHost));
+    }
     return ave_time;
 }
 
@@ -922,10 +881,10 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         ck_tile::HostTensor<T>&, int, int, int, int, int, int, int, bool, bool,        \
         const ck_tile::sparge_hyperparam_args&, int, float,                            \
         int, int, int, int,                                                            \
-        const ck_tile::stream_config&, const std::string&,                             \
+        const ck_tile::stream_config&, bool, float, const std::string&,                 \
         const std::vector<int32_t>&, const std::vector<int32_t>&,                      \
         int, const void*, ck_tile::index_t, ck_tile::index_t, ck_tile::index_t,        \
-        const std::string&)
+        const std::string&, std::vector<int32_t>*, std::vector<int32_t>*)
 
 #define INSTANTIATE_JENGA(T)                                                           \
     template float jenga_sparse_attention<T>(const ck_tile::HostTensor<T>&,            \

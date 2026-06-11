@@ -15,13 +15,11 @@
 #include <cassert>
 #include <type_traits>
 
-// sparge_sage attention kernel: quantized sparse attention. Reads quantized Q/K (INT8 or FP8,
-// produced by the fused preprocess) + per-(b,h) descales (PERWARP / PERTHREAD / BLOCKSCALE /
-// PERTENSOR granularity) + fp8 V (+ per-channel v_descale), traverses the LUT-selected K-blocks,
-// and applies SageAttention descale-follow-LUT. Supports batch + group, causal / sliding-window
-// mask, and ALIBI / elementwise bias; hdim128. The preprocess + mask-prediction kernels are
-// instantiated separately in codegen (templated on the original fp16/bf16 input type and the
-// chosen QScale granularity); this file only owns the attention kernel.
+// sparge_sage attention kernel: quantized sparse attention. Reads quantized Q/K (INT8/FP8 from the
+// fused preprocess) + per-(b,h) descales (PERWARP / PERTHREAD / BLOCKSCALE / PERTENSOR) + fp8 V
+// (+ per-channel v_descale), traverses the LUT-selected K-blocks, applies SageAttention
+// descale-follow-LUT. Batch + group, causal / sliding-window mask, ALIBI / elementwise bias,
+// hdim128. Preprocess + mask-prediction kernels are instantiated separately in codegen.
 
 namespace ck_tile {
 
@@ -34,9 +32,8 @@ struct FmhaFwdSpargeSageKernel
     using EpiloguePipeline = remove_cvref_t<EpiloguePipeline_>;
     using Problem          = remove_cvref_t<typename SagePipeline::Problem>;
 
-    // sparge_sage bias scope: NO_BIAS / ALIBI / ELEMENTWISE_BIAS. Bias is added to the descaled
-    // fp32 s_acc; elementwise tiles load into the gemm0 C (s_acc) distribution so the int8-MFMA
-    // SwizzleB/TransposedC layout aligns by construction.
+    // Bias added to the descaled fp32 s_acc; elementwise tiles load into the gemm0 C (s_acc)
+    // distribution so the int8-MFMA SwizzleB/TransposedC layout aligns by construction.
     static constexpr auto BiasEnum = BiasEnum_;
     static_assert(BiasEnum == BlockAttentionBiasEnum::NO_BIAS ||
                       BiasEnum == BlockAttentionBiasEnum::ALIBI ||
@@ -74,10 +71,9 @@ struct FmhaFwdSpargeSageKernel
 
     static constexpr bool kUseAsyncCopy = SagePipeline::Policy::AsyncCopy;
 
-    // Q/K/V/O are the original DRAM tensors except Q/K are INT8 (from workspace) and V is FP8.
     struct Kargs
     {
-        const void* q_ptr; // int8
+        const void* q_ptr; // int8 (from workspace)
         const void* k_ptr; // int8
         const void* v_ptr; // fp8
         void* o_ptr;
@@ -111,7 +107,7 @@ struct FmhaFwdSpargeSageKernel
         index_t batch_stride_v;
         index_t batch_stride_o;
 
-        // descale strides (layout matches sageattn: [batch, nhead, num_block_scale]).
+        // descale strides; layout [batch, nhead, num_block_scale].
         index_t nhead_stride_q_descale;
         index_t nhead_stride_k_descale;
         index_t nhead_stride_v_descale;
@@ -126,19 +122,17 @@ struct FmhaFwdSpargeSageKernel
         index_t window_size_right;
         GenericAttentionMaskEnum mask_type;
 
-        // Bias buffer. ALIBI: slope array (SaccDataType); stride_bias=0 -> slope[i_nhead] (shared),
-        // stride_bias=nhead -> slope[b*nhead + h]. ELEMENTWISE_BIAS: dense [.., Sq, Sk] tensor;
-        // stride_bias = row stride (Sk), nhead/batch strides select the (b,h) plane. Unused NO_BIAS.
+        // ALIBI: slope array; stride_bias=0 -> slope[i_nhead] (shared), else slope[b*stride_bias+h].
+        // ELEMENTWISE_BIAS: dense [.., Sq, Sk]; stride_bias = row stride, nhead/batch select (b,h).
         const void* bias_ptr           = nullptr;
         index_t     stride_bias        = 0;
         index_t     nhead_stride_bias  = 0;
         index_t     batch_stride_bias  = 0;
 
-        // Group / varlen mode (batch leaves all nullptr / 0). seqstart_*_ptr give per-batch
-        // token starts; seqstart_q_block_ptr / lut_batch_offset_ptr give the batch-outer/head-mid
-        // packed offsets for VBN/LUT; q/k descale use the same block-packed scheme (block_id *
-        // scales_per_block). quant Q/K and descale carry packed totals via nhead strides set by
-        // the host (quant_nhead_stride = total_tokens * hdim; descale nhead_stride = total_*_scale).
+        // Group / varlen (batch leaves all nullptr / 0). seqstart_*_ptr: per-batch token starts.
+        // seqstart_q_block_ptr / lut_batch_offset_ptr: packed VBN/LUT offsets; q/k descale use the
+        // same block-packed scheme (block_id * scales_per_block). quant Q/K and descale nhead
+        // strides carry packed totals (host: total_tokens*hdim and total_*_scale).
         const int32_t* seqstart_q_ptr       = nullptr;
         const int32_t* seqstart_k_ptr       = nullptr;
         const int32_t* seqlen_q_ptr         = nullptr;
@@ -147,6 +141,13 @@ struct FmhaFwdSpargeSageKernel
         const int32_t* seqstart_k_block_ptr = nullptr;
         const int32_t* lut_batch_offset_ptr = nullptr;
         index_t        batch                = 0;
+
+        // pv-skip: runtime PV-norm block skip (log2 units; 0 = disabled). per_head ptr (length
+        // nhead_q, nullable) overrides the scalar per Q-head.
+        float          pvthreshd            = 0.0f;
+        const void*    pvthreshd_per_head_ptr = nullptr;
+
+        float          logits_soft_cap      = 0.0f; // 0 = disabled
     };
 
     CK_TILE_HOST static Kargs MakeKargs(const void* q_ptr,
@@ -244,9 +245,8 @@ struct FmhaFwdSpargeSageKernel
         return kargs;
     }
 
-    // Group-mode kargs: same as batch but with packed/seqstart tables. seqlen_q/seqlen_k are
-    // per-batch (read on device); the int8/descale nhead strides carry packed totals (the host
-    // sizes them as total_tokens*hdim and total_*_scale_blocks respectively).
+    // Group-mode kargs: batch kargs plus packed/seqstart tables. seqlen_q/seqlen_k read per-batch
+    // on device; int8/descale nhead strides carry packed totals.
     CK_TILE_HOST static Kargs MakeKargsGroup(const void* q_ptr,
                                              const void* k_ptr,
                                              const void* v_ptr,
@@ -358,9 +358,8 @@ struct FmhaFwdSpargeSageKernel
 
     CK_TILE_DEVICE static constexpr auto GetTileIndex(const Kargs& kargs)
     {
-        // The masked M-tile reversal below (gridDim.y - 1 - i_tile_m) and the V
-        // per-channel descale in the pipeline both assume a single N1 tile spans
-        // the whole hdim_v (num_tile_n1 == 1). Sage requires hdim_v <= kN1.
+        // Masked M-tile reversal below and the pipeline's per-channel V descale both assume a
+        // single N1 tile spans hdim_v (num_tile_n1 == 1), i.e. hdim_v <= kN1.
         static_assert(SagePipeline::kN1 >= SagePipeline::kQKHeaddim,
                       "sage masked M-tile reversal assumes a single N1 tile "
                       "(hdim_v <= kN1)");
@@ -372,8 +371,7 @@ struct FmhaFwdSpargeSageKernel
         const index_t i_tile_n    = i_block - i_tile_m * num_tile_n1;
         if constexpr(kHasMask)
         {
-            // Reverse the M tile so masked (top) rows run last (matches sparge kernel; assumes
-            // num_tile_n1 == 1 for the masked path).
+            // Reverse M tile so masked (top) rows run last (assumes num_tile_n1 == 1).
             return make_tuple(gridDim.y - 1 - i_tile_m, i_tile_n, i_nhead, i_batch);
         }
         else
@@ -417,9 +415,8 @@ struct FmhaFwdSpargeSageKernel
         long_index_t batch_offset_o;
         index_t      seqlen_q_actual;
         index_t      seqlen_k_actual;
-        // Group: token starts from seqstart (int8 Q/K & FP8 V are packed token-major; per-token
-        // strides match the contiguous [packed, H, S, D] / V layout). Per-batch scale starts use
-        // the same batch-outer/head-mid packed block scheme as means/LUT.
+        // Group: token starts from seqstart; per-batch scale starts use the same
+        // batch-outer/head-mid packed block scheme as means/LUT.
         long_index_t q_scale_block_start = 0; // packed scale-block start for (batch,head) in q
         long_index_t k_scale_block_start = 0; // packed scale-block start for (batch,kv_head) in k
         if constexpr(kIsGroupMode)
@@ -445,7 +442,7 @@ struct FmhaFwdSpargeSageKernel
             if(static_cast<index_t>(i_tile_m * SagePipeline::kM0) >= seqlen_q_actual)
                 return;
 
-            // Packed scale-block start: (block_start_b * nhead + head * blocks_b) * scales_per_blk.
+            // Packed scale-block start = (bstart*nhead + head*blocks_b) * scales_per_blk.
             const index_t scales_per_blk_q =
                 SagePipeline::kM0 / kargs.block_scale_size_q;
             const index_t scales_per_blk_k =
@@ -491,9 +488,9 @@ struct FmhaFwdSpargeSageKernel
                            static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_o +
                            batch_offset_o;
 
-        // LUT / VBN. Batch: rectangular [B,Hq,nq,nk] / [B,Hq,nq]. Group: batch-outer/head-mid
-        // packed (lut X_b = q_b*k_b via lut_batch_offset_ptr, vbn X_b = q_b via
-        // seqstart_q_block_ptr); new_index = Xstart_b * Hq + head * X_b + local.
+        // LUT / VBN. Batch: rectangular. Group: batch-outer/head-mid packed (lut X_b = q_b*k_b via
+        // lut_batch_offset_ptr, vbn X_b = q_b via seqstart_q_block_ptr); new_index = Xstart_b*Hq +
+        // head*X_b + local.
         const int* lut_row = [&]() -> const int* {
             const auto* base = reinterpret_cast<const int*>(kargs.lut_ptr);
             if constexpr(kIsGroupMode)
@@ -544,12 +541,10 @@ struct FmhaFwdSpargeSageKernel
             }
         }();
 
-        // descale pointers. Batch: offset to (batch, head). Group: q/k descale use the packed
-        // scale-block start (per (batch,head) contiguous scale run, indexed by row/abs-pos / tps);
-        // v descale stays per-channel (per batch,head_k).
-        // PERTENSOR: one global scale per (batch, head). Both batch and group lay q/k scale as
-        // [batch, nhead, 1] (nhead stride 1, batch stride = nhead), so the per-(b,h) offset is the
-        // same form for both modes (q_scale_block_start is for the per-block-packed schemes only).
+        // descale pointers. Batch: offset to (batch, head). Group: q/k use the packed scale-block
+        // start (indexed by row/abs-pos / tps); v descale stays per-channel (per batch,head_k).
+        // PERTENSOR: one global scale per (batch,head) laid as [batch, nhead, 1] in both modes, so
+        // the per-(b,h) offset is identical (q_scale_block_start applies only to packed schemes).
         const float* q_descale_ptr =
             (QScaleEnum == BlockSageAttentionQuantScaleEnum::PERTENSOR)
                 ? kargs.q_descale_ptr +
@@ -575,7 +570,6 @@ struct FmhaFwdSpargeSageKernel
             static_cast<long_index_t>(i_batch) * kargs.batch_stride_v_descale +
             static_cast<long_index_t>(i_nhead_k) * kargs.nhead_stride_v_descale;
 
-        // Q DRAM (int8, load-once whole hdim).
         const auto q_dram = [&]() {
             const auto q_dram_naive = make_naive_tensor_view<address_space_enum::global>(
                 q_ptr,
@@ -648,9 +642,9 @@ struct FmhaFwdSpargeSageKernel
             v_dram, make_tuple(number<SagePipeline::kN1>{}, number<SagePipeline::kK1>{}),
             {i_n1, 0});
 
-        // ELEMENTWISE_BIAS: a dense [.., Sq, Sk] tensor for this (batch, head). The pipeline loads
-        // [M0, N0] tiles into the gemm0 C (s_acc) distribution and advances the window by the LUT
-        // delta. NO_BIAS / ALIBI get a 1x1 dummy window (the pipeline never touches it).
+        // ELEMENTWISE_BIAS: dense [.., Sq, Sk] for this (batch, head); pipeline loads [M0,N0] tiles
+        // into the gemm0 C (s_acc) distribution and advances by the LUT delta. NO_BIAS / ALIBI get
+        // a 1x1 dummy window.
         auto bias_dram_window = [&]() {
             using BiasDataType = SaccDataType;
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
@@ -701,13 +695,10 @@ struct FmhaFwdSpargeSageKernel
             else
                 return AttnMask{seqlen_q_actual, seqlen_k_actual};
         }();
-        // ALIBI position encoding. The pipeline adds slope_eff*pos directly to the descaled
-        // (fp32) s_acc, then softmax multiplies by kargs.scale_s (= scale * log2e under FAST_EXP2)
-        // inside exp2. The reference applies the alibi term in the *natural-exp / unscaled-QK*
-        // domain: exp(scale*s + slope*pos). To make exp2(kargs.scale_s * (s + slope_eff*pos))
-        // reproduce that, set slope_eff = slope * log2e / kargs.scale_s = slope / scale. Slopes
-        // are addressed exactly like sparge: stride_bias=0 -> slope[i_nhead] (shared across batch),
-        // stride_bias=nhead -> slope[i_batch*stride_bias + i_nhead].
+        // ALIBI: pipeline adds slope_eff*pos to the descaled s_acc, then softmax multiplies by
+        // kargs.scale_s (= scale*log2e under FAST_EXP2) inside exp2. To reproduce the reference
+        // exp(scale*s + slope*pos), set slope_eff = slope*log2e / scale_s = slope / scale.
+        // Slope addressing matches sparge: stride_bias=0 -> slope[i_nhead]; else slope[b*stride+h].
         auto position_encoding = [&]() {
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI)
             {
@@ -747,7 +738,7 @@ struct FmhaFwdSpargeSageKernel
             seqlen_q_actual > 0 ? integer_divide_ceil(seqlen_q_actual, kBlockSq) - 1 : 0;
         const index_t q_scale_idx =
             q_scale_idx_raw < max_q_scale_idx ? q_scale_idx_raw : max_q_scale_idx;
-        // PERTENSOR: single per-(b,h) scalar (index 0); other modes index by row/scale-block.
+        // PERTENSOR: single per-(b,h) scalar; other modes index by scale-block.
         const float q_descale =
             (QScaleEnum == BlockSageAttentionQuantScaleEnum::PERTENSOR) ? q_descale_ptr[0]
                                                                        : q_descale_ptr[q_scale_idx];
@@ -771,7 +762,10 @@ struct FmhaFwdSpargeSageKernel
                                          nullptr,
                                          k_descale_ptr,
                                          v_descale_ptr,
-                                         q_descale);
+                                         q_descale,
+                                         kargs.pvthreshd,
+                                         kargs.pvthreshd_per_head_ptr,
+                                         kargs.logits_soft_cap);
 
         auto o_dram = [&]() {
             const auto o_dram_naive = make_naive_tensor_view<address_space_enum::global>(

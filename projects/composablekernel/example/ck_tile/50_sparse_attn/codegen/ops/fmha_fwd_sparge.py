@@ -65,6 +65,8 @@ using fmha_shape_{F_idx} = ck_tile::TileFmhaShape<fmha_block_tile_{F_idx},
                                       ck_tile::sequence<{F_wm1}, {F_wn1}, {F_wk1}>,
                                       {F_vlayout}>;
 
+// TileFmhaTraits: spad, skpad, dpad, dvpad, has_logits_soft_cap, bias_enum,
+//                 has_bias_grad, store_lse, has_dropout, quant_scale_enum, occupancy, skip_min_seqlen_q
 using fmha_trait_{F_idx} = ck_tile::TileFmhaTraits<{F_spad},
                                                     {F_skpad},
                                                     {F_dpad},
@@ -115,10 +117,7 @@ using fmha_kernel_{F_idx} =
 using trait_{F_idx} = fmha_sparge_fwd_traits_<{F_hdim}, {F_dtype}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout},
                         {F_pipeline_enum}, {F_logits_cpp}/*logits*/, fmha_mask_{F_idx}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_mode}, {F_bias}>;
 
-// ---- 1. Fused K+Q preprocess callable (both sides' block means + optional sim) ----
-// K and Q are data-independent; fusing them into one launch saves a host kernel dispatch
-// (the dominant cost at short seqlen). Outputs land at the same offsets as the split
-// kernels, so mask-prediction is unchanged. smooth_k is a no-op: km_ptr stays nullptr.
+// 1. Fused K+Q preprocess (block means + optional sim).
 static auto make_preprocess_callable_{F_idx}(const fmha_sparge_fwd_args& a,
                                              float* d_k_means,
                                              float* d_q_means,
@@ -145,7 +144,7 @@ static auto make_preprocess_callable_{F_idx}(const fmha_sparge_fwd_args& a,
     pp_kargs.k.head_stride  = a.nhead_stride_k;
     pp_kargs.k.seq_stride   = a.stride_k;
     pp_kargs.k.simthreshold = a.hp.simthreshold;
-    pp_kargs.k.km_ptr       = nullptr;  // Preprocess emits unsmoothed; SKC subtracts km after.
+    pp_kargs.k.km_ptr       = nullptr;
 
     pp_kargs.q.data         = a.q_ptr;
     pp_kargs.q.means        = d_q_means;
@@ -160,7 +159,7 @@ static auto make_preprocess_callable_{F_idx}(const fmha_sparge_fwd_args& a,
     pp_kargs.q.head_stride  = a.nhead_stride_q;
     pp_kargs.q.seq_stride   = a.stride_q;
     pp_kargs.q.simthreshold = a.hp.simthreshold;
-    pp_kargs.q.km_ptr       = nullptr;  // Q side never subtracts km.
+    pp_kargs.q.km_ptr       = nullptr;
 
     if constexpr(is_group)
     {{
@@ -179,12 +178,7 @@ static auto make_preprocess_callable_{F_idx}(const fmha_sparge_fwd_args& a,
         pp_::GetSmemSize(a.hdim_q), pp_kargs);
 }}
 
-// ---- 2. Mask prediction callable ----
-// Templated on kMaxKBlocksPow2 (the K-block sort capacity). The mask-prediction kernel
-// type depends only on (is_group, kMaxKBlocksPow2, kBlockSize) -- NOT on the attention
-// trait -- so the linker dedups it across all attention .cpp variants: only one instance
-// per (is_group, kMaxKBlocksPow2) is emitted regardless of how many attention kernels
-// exist. The host dispatches by seqlen to the smallest covering variant (see body).
+// 2. Mask prediction. Templated on kMaxKBlocksPow2 (K-block sort capacity).
 template <ck_tile::index_t kMaxKBlocksPow2>
 static auto make_mask_prediction_callable_{F_idx}(const fmha_sparge_fwd_args& a,
                                                   float* d_k_means,
@@ -246,8 +240,7 @@ static auto make_mask_prediction_callable_{F_idx}(const fmha_sparge_fwd_args& a,
         mp_::GetSmemSize(a.hdim_q, num_k_blocks), mp_kargs);
 }}
 
-// ---- 3. Attention callable ----
-// `a` is taken by value; the caller must have already set a.internal_lut_ptr / a.internal_vbn_ptr.
+// 3. Attention. Caller must set a.internal_lut_ptr / a.internal_vbn_ptr first.
 static auto make_attention_callable_{F_idx}(fmha_sparge_fwd_args a)
 {{
     using k_ = fmha_kernel_{F_idx};
@@ -269,10 +262,7 @@ float fmha_sparge_fwd_<trait_{F_idx}>(const ck_tile::stream_config& s, fmha_spar
     const ck_tile::index_t num_q_blocks = (a.seqlen_q + a.pp_block_size - 1) / a.pp_block_size;
 
     const bool sim_enabled = (a.hp.simthreshold > 0.0f);
-    // smooth_k is now a no-op: subtracting km from k_means just shifts every score within a
-    // (b, hq, q_block) by a constant (-dot(q_means, km)), which softmax max-subtract removes
-    // → selection unchanged. We keep the API field for compat but skip the work entirely.
-    // Sparge schedule: Preprocess(unsmoothed) -> mask-pred -> attention (3 launches).
+    // smooth_k is a no-op: the constant km shift cancels in softmax max-subtract. Kept for API compat.
     (void)a.hp.smooth_k;
     const auto ws_layout   = is_group
         ? compute_sparge_workspace_layout_group(a, a.total_q_blocks, a.total_k_blocks, a.total_qk_blocks)
@@ -309,12 +299,8 @@ float fmha_sparge_fwd_<trait_{F_idx}>(const ck_tile::stream_config& s, fmha_spar
     a.internal_vbn_ptr = d_vbn;
     auto attn_callable = make_attention_callable_{F_idx}(a);
 
-    // Single launch chain — 3 kernels: fused K+Q preprocess, mask-pred, attn.
-    // (K/Q preprocess fused into one launch; km subtraction proven a no-op for selection)
-    //
-    // Mask-prediction sort-capacity dispatch: pick the smallest kMaxKBlocksPow2 variant
-    // that covers num_k_blocks. Only the mask kernel is multi-variant; pp/attn are shared.
-    //   256 -> 32k tokens, 512 -> 64k, 1024 -> 128k  (BLKK=128).
+    // Smallest kMaxKBlocksPow2 covering num_k_blocks (only the mask kernel is multi-variant):
+    // 256 -> 32k tokens, 512 -> 64k, 1024 -> 128k (BLKK=128).
     auto launch_with_cap = [&](auto cap_const) {{
         constexpr ck_tile::index_t kCap = decltype(cap_const)::value;
         auto mp_callable = make_mask_prediction_callable_{F_idx}<kCap>(
@@ -336,7 +322,7 @@ float fmha_sparge_fwd_<trait_{F_idx}>(const ck_tile::stream_config& s, fmha_spar
         if(own_workspace) (void)hipFree(workspace);
         return -1.0f;
     }}
-    (void)sim_enabled; // sim path no longer needs a special branch.
+    (void)sim_enabled;
 
     if(a.sparsity_out != nullptr)
     {{
@@ -348,9 +334,6 @@ float fmha_sparge_fwd_<trait_{F_idx}>(const ck_tile::stream_config& s, fmha_spar
         size_t total_selected = 0;
         for(size_t i = 0; i < n_vbn; ++i)
             total_selected += static_cast<size_t>(h_vbn[i]);
-        // Total possible attention block-pairs:
-        //   batch : n_vbn * num_k_blocks
-        //   group : Hq * sum_b(q_blocks[b] * k_blocks[b])  (uses lut layout total)
         const size_t total_possible = is_group
             ? static_cast<size_t>(a.nhead_q) * a.total_qk_blocks
             : n_vbn * static_cast<size_t>(num_k_blocks);
@@ -359,7 +342,6 @@ float fmha_sparge_fwd_<trait_{F_idx}>(const ck_tile::stream_config& s, fmha_spar
             : 0.0f;
     }}
 
-    // Free temporary device memory if we allocated it
     if(own_workspace)
     {{
         (void)hipFree(workspace);
@@ -805,8 +787,6 @@ class KernelComponentFactory:
                 bias_modes,
             ):
                 if bias == "alibi" and mask in ("no", "s_no"):
-                    continue
-                if logits == "t" and bias != "no":
                     continue
                 pipelines.append(
                     FmhaFwdPipeline(

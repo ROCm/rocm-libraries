@@ -12,7 +12,7 @@ if(NOT INST_TARGETS)
   return()
 endif()
 
-message(STATUS "Building Sparse Attention (Jenga, VSA & Sparge) for targets: ${INST_TARGETS}")
+message(STATUS "Building Sparse Attention (Jenga, VSA, Sparge & Sparge-Sage) for targets: ${INST_TARGETS}")
 
 file(GLOB_RECURSE CODE_GEN_SCRIPTS CONFIGURE_DEPENDS
   ${CMAKE_CURRENT_LIST_DIR}/generate.py

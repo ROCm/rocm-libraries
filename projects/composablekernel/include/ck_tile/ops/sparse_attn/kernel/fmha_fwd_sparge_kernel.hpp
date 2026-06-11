@@ -17,21 +17,15 @@
 #include <variant>
 
 // SpargeAttention pipeline: preprocess (K/Q means + sims) -> mask prediction -> attention.
-// smooth_k semantics:
-//   * Non-quant sparge: smooth_k is a no-op for selection. Subtracting km from the K block means
-//     shifts every q@k_mean score within a (b, hq, q_block) by the constant -dot(q_mean, km),
-//     which softmax max-subtract removes -> the selected blocks are unchanged. So km_ptr stays
-//     nullptr on the non-quant path.
-//   * Quant sparge_sage: smooth_k centers K by its per-channel global mean (km) BEFORE int8/fp8
-//     quantization (official SpargeAttn), shrinking K's quant error. The attention pipeline is
-//     NOT changed: the implied -q@km^T correction is a per-row constant that softmax absorbs, so
-//     no dequant-time fixup is needed. Q is never centered (km_ptr nullptr on the Q side).
+// smooth_k: km only affects quant (sparge_sage), where K is centered by its per-channel global
+// mean before int8/fp8 quant (official SpargeAttn) to shrink quant error. The implied -q@km^T is a
+// per-row constant softmax absorbs, so no attention/dequant fixup is needed and selection is
+// unchanged. Non-quant path keeps km_ptr nullptr; Q is never centered.
 
 namespace ck_tile {
 
-// Per-side preprocess kargs (one tensor's means + sims). K and Q each get their own
-// instance so the kernel only carries the fields it actually uses; k_total_wg is gone —
-// each kernel exposes GridSize() so the caller never recomputes work-group counts by hand.
+// Per-side preprocess kargs (one tensor's means + sims). K and Q each carry only the fields
+// they use; GridSize() exposes work-group counts so the caller never recomputes them.
 struct SpargePreprocessOneSideKargs
 {
     const void* data;  // K or Q input
@@ -61,28 +55,25 @@ struct SpargePreprocessOneSideKargs
     const int32_t* seqstart_block_ptr  = nullptr;
     index_t        total_blocks        = 0;
 
-    // Quantization outputs (sparge_sage). When quant_out != nullptr the preprocess pipeline
-    // additionally produces per-warp row-wise quant of this side. Layout matches the raw
-    // input (token-major, hdim stride 1, same batch/head/seq strides via quant_* below); scale_out
-    // is [batch, nhead, num_block_scale] with num_block_scale = ceil(seqlen / tokens_per_scale).
+    // Quant outputs (sparge_sage): int8 buffer matches the raw input token layout (hdim stride 1,
+    // same batch/head/seq strides); scale_out is [batch, nhead, num_block_scale],
+    // num_block_scale = ceil(seqlen / tokens_per_scale).
     int8_t*  quant_out        = nullptr;
     float*   scale_out        = nullptr;
     index_t  tokens_per_scale = 0;       // PERWARP: Q=32, K=64
     index_t  num_block_scale  = 0;       // ceil(seqlen / tokens_per_scale) (batch mode)
 };
 
-// Fused K+Q preprocess: one launch covers both sides. The grid's x axis concatenates the
-// K block-range [0, k_xblocks) and the Q block-range [k_xblocks, k_xblocks + q_xblocks);
-// y axis is max(nhead_k, nhead_q) with the smaller side guarded. Outputs land at the exact
-// same offsets as the two separate kernels, so mask-prediction needs no change.
+// Fused K+Q preprocess: one launch covers both sides. The grid x axis concatenates the K
+// block-range [0, k_xblocks) and the Q range [k_xblocks, ...); y = max(nhead_k, nhead_q) with the
+// smaller side guarded. Outputs land at the same offsets as the separate kernels.
 struct SpargePreprocessFusedKargs
 {
     SpargePreprocessOneSideKargs k;
     SpargePreprocessOneSideKargs q;
 };
 
-// Binary search: largest b with seqstart_block_ptr[b] <= g_block.
-// readfirstlane keeps the WG-uniform result in SGPR.
+// Binary search: largest b with seqstart_block_ptr[b] <= g_block. readfirstlane -> SGPR.
 CK_TILE_DEVICE index_t
 sparge_block_to_batch(const int32_t* seqstart_block_ptr, index_t batch, index_t g_block)
 {
@@ -99,11 +90,9 @@ sparge_block_to_batch(const int32_t* seqstart_block_ptr, index_t batch, index_t 
     return __builtin_amdgcn_readfirstlane(lo);
 }
 
-// Single-side block-mean / block-sim preprocess. Optionally subtracts a global mean
-// (km_ptr, fused). Batch mode uses a 3D grid (blockIdx.x = block, .y = head, .z = batch)
-// so the (batch, head, block) decode is free. Group mode is batch-outer/head-mid packed:
-// the x axis is the total_blocks count and a binary search over seqstart_block_ptr recovers
-// (batch, block_in_batch); y = head.
+// Single-side block-mean / block-sim preprocess (optionally subtracting km). Batch: 3D grid
+// (x=block, y=head, z=batch). Group: x = total_blocks, binary search over seqstart_block_ptr
+// recovers (batch, block_in_batch); y = head.
 template <typename InputType_,
           bool kIsGroupMode_                              = false,
           index_t kBlockSize_                             = 256,
@@ -147,8 +136,7 @@ struct FmhaFwdSpargePreprocessOneSideKernel
         run_side(kargs, blockIdx.x, blockIdx.y, blockIdx.z, smem_raw);
     }
 
-    // Body extracted so the fused K+Q kernel can re-dispatch with synthetic grid coords
-    // (gx/gy/gz) instead of raw blockIdx — lets one launch cover both sides.
+    // Body extracted so the fused K+Q kernel can re-dispatch with synthetic grid coords (gx/gy/gz).
     CK_TILE_DEVICE static void run_side(const SpargePreprocessOneSideKargs& kargs,
                                         index_t gx, index_t gy, index_t gz, char* smem_raw)
     {
@@ -158,8 +146,7 @@ struct FmhaFwdSpargePreprocessOneSideKernel
         long_index_t mean_out_off;
         long_index_t sim_out_off;
         long_index_t km_bh_off;
-        // Packed scale-block index (group): the (batch,head,block) origin in scale units,
-        // = packed_idx * scales_per_block. Batch mode leaves it 0 (recomputed below).
+        // Group: packed scale-block index (= packed_idx, scaled by scales_per_block below).
         long_index_t scale_packed_block = 0;
 
         if constexpr(kIsGroupMode)
@@ -171,9 +158,8 @@ struct FmhaFwdSpargePreprocessOneSideKernel
             const index_t start_b = __builtin_amdgcn_readfirstlane(
                 kargs.seqstart_block_ptr[batch_id]);
             block_id = g_block - start_b;
-            // Batch-outer/head-mid packed layout: per-batch block [H, X_b] (means with
-            // trailing D), blocks concatenated across batch. X_b = blocks of this batch.
-            // new_index = Xstart_b * H + head * X_b + local.
+            // Batch-outer/head-mid packed: per-batch [H, X_b] (X_b = blocks of this batch),
+            // concatenated across batch. packed_idx = Xstart_b*H + head*X_b + local.
             const index_t x_b = __builtin_amdgcn_readfirstlane(
                 kargs.seqstart_block_ptr[batch_id + 1] - start_b);
 
@@ -192,7 +178,6 @@ struct FmhaFwdSpargePreprocessOneSideKernel
             sim_out_off  = packed_idx;
             km_bh_off =
                 static_cast<long_index_t>(batch_id) * kargs.nhead + head_id;
-            // Same packed block index, in scale units (scales_per_block applied below).
             scale_packed_block = packed_idx;
         }
         else
@@ -229,11 +214,9 @@ struct FmhaFwdSpargePreprocessOneSideKernel
         pp.km_ptr       = kargs.km_ptr
             ? kargs.km_ptr + km_bh_off * static_cast<long_index_t>(kargs.hdim) : nullptr;
 
-        // Quant outputs (sparge_sage). int8 buffer shares the raw input token layout (same
-        // batch/head/seq strides); the pipeline re-applies the block_id*block_size window.
-        // Batch: scale buffer is [batch, nhead, num_block_scale]. Group: int8 reuses the packed
-        // token layout (batch_offset = seqstart*seq_stride already), and scales are packed by the
-        // same batch-outer/head-mid block index used for means/sim, times scales_per_block.
+        // Quant outputs (sparge_sage). int8 shares the raw input token layout; the pipeline
+        // re-applies the block_id*block_size window. Scales: batch [batch, nhead, num_block_scale];
+        // group packed by the same batch-outer/head-mid block index * scales_per_block.
         if constexpr(kDoQuant)
         {
             const index_t tps = kargs.tokens_per_scale;
@@ -243,25 +226,21 @@ struct FmhaFwdSpargePreprocessOneSideKernel
             pp.quant_stride_seq = kargs.seq_stride;
             if(kargs.quant_out != nullptr && tps > 0)
             {
-                // quant origin = (batch, head) seq start; the pipeline re-applies the
-                // block_id * block_size window internally (matching the raw slice's mean path
-                // which also pre-slices only to batch/head and windows on block_id).
+                // quant origin = (batch, head) seq start; pipeline re-applies the block window.
                 pp.quant_out = reinterpret_cast<QuantType*>(kargs.quant_out) + batch_offset +
                               static_cast<long_index_t>(head_id) * kargs.head_stride;
                 const index_t scales_per_block = kargs.block_size / tps;
                 if constexpr(kIsGroupMode)
                 {
-                    // scale origin = packed block index * scales_per_block. Per-(batch,head)
-                    // K-scales form a contiguous run over local block positions, which the
-                    // attention kernel indexes by k_abs_pos / tps.
+                    // scale origin = packed block index * scales_per_block (contiguous per-(b,h)
+                    // run, indexed by k_abs_pos / tps in the attention kernel).
                     pp.scale_out = kargs.scale_out +
                                    scale_packed_block *
                                        static_cast<long_index_t>(scales_per_block);
                 }
                 else
                 {
-                    // scale origin = [batch, head, block_id * (block_size / tps)] within
-                    // num_block_scale-strided rows.
+                    // scale origin = [batch, head, block_id * scales_per_block].
                     const long_index_t bh =
                         static_cast<long_index_t>(batch_id) * kargs.nhead + head_id;
                     pp.scale_out = kargs.scale_out +
@@ -275,9 +254,8 @@ struct FmhaFwdSpargePreprocessOneSideKernel
     }
 };
 
-// Two distinct kernel types (K side and Q side) so the launch chain issues two separate
-// kernel calls. They share the implementation but are different C++ types, which keeps the
-// "two kernel calls" structure explicit and lets each get its own grid.
+// Distinct K-side / Q-side types so the launch chain issues two separate kernel calls, each
+// with its own grid, while sharing the implementation.
 template <typename InputType_,
           bool kIsGroupMode_                       = false,
           index_t kBlockSize_                      = 256,
@@ -300,10 +278,8 @@ struct FmhaFwdSpargePreprocessQKernel
 {
 };
 
-// Fused K+Q preprocess kernel: a single launch dispatches both sides via run_side. K and Q
-// are data-independent, so one grid covering both saves a kernel launch (host dispatch is the
-// dominant cost at short sequence lengths). Per-side outputs are written at identical offsets,
-// leaving mask-prediction untouched.
+// Fused K+Q preprocess: one launch dispatches both data-independent sides via run_side, saving a
+// kernel launch (dominant cost at short seqlen). Outputs land at identical offsets.
 template <typename InputType_,
           bool kIsGroupMode_                       = false,
           index_t kBlockSize_                      = 256,
@@ -319,7 +295,6 @@ struct FmhaFwdSpargePreprocessFusedKernel
     static constexpr index_t kBlockSize   = Side::kBlockSize;
     static constexpr index_t kBlockPerCu  = Side::kBlockPerCu;
 
-    // x axis of grid is the K block-count for this index range.
     CK_TILE_HOST_DEVICE static index_t k_xblocks(const SpargePreprocessFusedKargs& kargs)
     {
         return kIsGroupMode_ ? kargs.k.total_blocks : kargs.k.num_blocks;
@@ -357,7 +332,7 @@ struct FmhaFwdSpargePreprocessFusedKernel
         if(gx < k_x)
         {
             if(gy >= kargs.k.nhead)
-                return;  // GQA: K side has fewer heads than the grid's y extent.
+                return;  // GQA: K side has fewer heads than grid y.
             Side::run_side(kargs.k, gx, gy, gz, smem_raw);
         }
         else
@@ -369,12 +344,10 @@ struct FmhaFwdSpargePreprocessFusedKernel
     }
 };
 
-// ----------------------------- PERTENSOR global Q/K INT8 quantization -----------------------------
-// Device-side SageAttention PERTENSOR Q/K quant: one work-group per (batch, head) computes the
-// global absmax over the full X slice [seqlen, hdim], emits one scale = absmax/127 and INT8 X.
-// Used for both Q and K (with their own head counts). Batch mode: 2D grid (head, batch). Group mode:
-// same grid, per-batch token window from seqstart (X int8 packed [1, H, total_tokens, D]). The
-// single scale lands at scale_out[batch_id * nhead + head_id] for both modes.
+// PERTENSOR Q/K INT8 quant: one work-group per (batch, head) computes the global absmax over the
+// full X slice [seqlen, hdim], emits one scale = absmax/127 and INT8 X. Batch: 2D grid (head,
+// batch). Group: same grid, per-batch token window from seqstart. Scale lands at
+// scale_out[batch_id * nhead + head_id] for both modes.
 struct SpargeQKQuantKargs
 {
     const void* x_ptr;     // bf16 X (Q or K)
@@ -441,8 +414,8 @@ struct FmhaFwdSpargeQKQuantKernel
         {
             const long_index_t start =
                 static_cast<long_index_t>(kargs.seqstart_ptr[batch_id]);
-            x_batch_off     = start * kargs.stride_x;     // packed token offset (bf16)
-            quant_batch_off = start * kargs.stride_quant; // packed token offset (quant)
+            x_batch_off     = start * kargs.stride_x;
+            quant_batch_off = start * kargs.stride_quant;
             seqlen_actual  = __builtin_amdgcn_readfirstlane(
                 kargs.seqlen_ptr != nullptr
                     ? kargs.seqlen_ptr[batch_id]
@@ -462,7 +435,7 @@ struct FmhaFwdSpargeQKQuantKernel
             reinterpret_cast<QuantType*>(kargs.quant_ptr) + quant_batch_off +
             static_cast<long_index_t>(head_id) * kargs.nhead_stride_quant;
 
-        // One global scale per (batch, head); packed [batch, nhead] for both batch and group.
+        // One global scale per (batch, head); packed [batch, nhead].
         float* scale_out =
             kargs.scale_ptr +
             static_cast<long_index_t>(batch_id) * kargs.nhead + head_id;
@@ -472,7 +445,7 @@ struct FmhaFwdSpargeQKQuantKernel
         pp.hdim            = kargs.hdim;
         pp.stride_seq       = kargs.stride_x;
         pp.quant_stride_seq = kargs.stride_quant;
-        // smooth_k: per-channel km for this (batch, head); km layout [batch, nhead, hdim].
+        // smooth_k: per-channel km[batch, nhead, hdim] for this (batch, head).
         pp.km_ptr = kargs.km_ptr
             ? kargs.km_ptr +
                   (static_cast<long_index_t>(batch_id) * kargs.nhead + head_id) *
@@ -600,12 +573,10 @@ struct FmhaFwdSpargeMaskPredictionKernel
             const index_t num_k_blocks_b =
                 ck_tile::integer_divide_ceil(seqlen_k_b, kargs.block_size);
 
-            // Batch-outer/head-mid packed layout: per-batch block [H, X_b] (means with
-            // trailing D), blocks concatenated across batch. new_index =
-            // Xstart_b * H + head * X_b + local. q_means/q_sim/vbn use H=nhead_q,
-            // X_b=num_q_blocks_b; k_means/k_sim use H=nhead_k, X_b=num_k_blocks_b;
-            // lut uses H=nhead_q, X_b=q_b*k_b. Pre-slice to (batch,head) start; the
-            // pipeline indexes (b*nhead+head)*num_blocks*D with b=0, nhead=1.
+            // Batch-outer/head-mid packed: per-batch [H, X_b], new_index = Xstart_b*H + head*X_b +
+            // local. q_means/q_sim/vbn: H=nhead_q, X_b=num_q_blocks_b; k_means/k_sim: H=nhead_k,
+            // X_b=num_k_blocks_b; lut: H=nhead_q, X_b=q_b*k_b. Pre-slice to (batch,head); pipeline
+            // then runs with b=0, nhead=1.
             const long_index_t q_means_view_off =
                 (static_cast<long_index_t>(qstart_b) * kargs.nhead_q +
                  static_cast<long_index_t>(head) * num_q_blocks_b) *
@@ -756,8 +727,6 @@ struct FmhaFwdSpargeKernel
                   "Sparge: only NO_BIAS / ELEMENTWISE_BIAS / ALIBI supported.");
     static_assert(!kStoreLSE, "Sparge sparse attention does not support LSE output.");
     static_assert(!kHasDropout, "Sparge sparse attention does not support dropout.");
-    static_assert(!kHasLogitsSoftCap || BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
-                  "Sparge: logits soft-cap requires NO_BIAS.");
     static_assert(!kDoFp8StaticQuant,
                   "Sparge sparse attention does not support FP8 static quantization yet.");
 
@@ -1164,10 +1133,9 @@ struct FmhaFwdSpargeKernel
                            static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_o +
                            batch_offset_o;
 
-        // LUT / VBN: batch is rectangular; group is batch-outer/head-mid packed:
-        // per-batch block [H, X_b] (LUT X_b = q_b*k_b via lut_batch_offset_ptr,
-        // vbn X_b = q_b via seqstart_q_block_ptr), blocks concatenated across batch.
-        // new_index = Xstart_b * H + head * X_b + local.
+        // LUT / VBN. Batch: rectangular. Group: batch-outer/head-mid packed, per-batch [H, X_b]
+        // (LUT X_b = q_b*k_b via lut_batch_offset_ptr, vbn X_b = q_b via seqstart_q_block_ptr);
+        // new_index = Xstart_b*H + head*X_b + local.
         const long_index_t lut_xstart_b = [&]() -> long_index_t {
             if constexpr(kIsGroupMode)
                 return __builtin_amdgcn_readfirstlane(
@@ -1383,7 +1351,7 @@ struct FmhaFwdSpargeKernel
                 return FmhaMask{seqlen_q_actual, seqlen_k_actual};
         }();
 
-        // ALIBI slope: stride_bias=0 -> slope[i_nhead] (shared); stride_bias=nhead -> slope[b*nhead+h].
+        // ALIBI slope: stride_bias=0 -> slope[i_nhead] (shared); else slope[b*stride_bias + h].
         auto position_encoding = [&]() {
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI)
             {
@@ -1391,8 +1359,7 @@ struct FmhaFwdSpargeKernel
                 const long_index_t off =
                     static_cast<long_index_t>(i_batch) * kargs.stride_bias + i_nhead;
                 SaccDataType slope = slope_arr ? slope_arr[off] : SaccDataType{0};
-                // FAST_EXP2: pre-scale slope by log2e so ALIBI matches the
-                // already-scaled QK term (scale_s folded log2e at MakeKargs).
+                // FAST_EXP2: pre-scale slope by log2e to match the already-scaled QK term.
 #if CK_TILE_FMHA_FWD_FAST_EXP2
                 slope = slope * ck_tile::log2e_v<SaccDataType>;
 #endif

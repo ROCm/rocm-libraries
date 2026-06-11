@@ -67,10 +67,6 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
                   "Sparge: only NO_BIAS / ELEMENTWISE_BIAS / ALIBI supported.");
     static_assert(!kHasDropout, "Sparge does not support dropout.");
     static_assert(!kStoreLSE, "Sparge does not support LSE output.");
-    // Logits soft-cap is NO_BIAS only: combining cap+bias needs a different
-    // ordering (cap on Q*K then add bias) and its own validator path.
-    static_assert(!kHasLogitsSoftCap || BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
-                  "Sparge: logits soft-cap only supported with NO_BIAS.");
 
     static constexpr index_t kAlignmentQ = Policy::template GetAlignmentQ<Problem>();
     static constexpr index_t kAlignmentK = Policy::template GetAlignmentK<Problem>();
@@ -105,7 +101,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
 
     static constexpr index_t kNumWarps = kBlockSize / get_warp_size();
 
-    // Tail kNumWarps floats reserved for the warp-filter predicate reduction.
+    // Tail kNumWarps floats reserved for the pv-skip predicate reduction.
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
         return Policy::template GetSmemSize<Problem>() +
@@ -280,13 +276,13 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
         static_assert(1 <= k0_loops);
         static_assert(1 <= k1_loops);
 
-        // Hoist outside compute_skip_flag — captured by ref every iteration otherwise.
-        // Skip threshold is in log2 units (matches softmax exp2 base); positive = stronger filter.
+        // pv-skip: m_local is taken after bias, so the predicate is valid for NO_BIAS/ALIBI/
+        // ELEMENTWISE. Threshold in log2 units; soft-cap disables it (raw-QK units no longer apply).
         const float pvthreshd_eff =
             pvthreshd_per_head
                 ? reinterpret_cast<const float*>(pvthreshd_per_head)[block_indices.qo_head_idx]
                 : pvthreshd;
-        const bool stage2_enabled = (pvthreshd_eff > 0.0f);
+        const bool stage2_enabled = (pvthreshd_eff > 0.0f) && !kHasLogitsSoftCap;
         const float skip_threshold = -pvthreshd_eff;
 
         auto compute_skip_flag = [&](const auto& m_local_t, const auto& m_ij_t) -> bool {
@@ -356,10 +352,8 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
             __builtin_amdgcn_s_barrier();
 
             // WG-uniform LUT delta; readfirstlane pins to SGPR for scalar tile-window math.
-            // Guard the read: on the last iteration there is no next block and block_idx is
-            // unused, but kv_block_idx_ptr[i_total_loops + 1] would index one past the per-row
-            // LUT (kv_blocks == num_k_blocks under dense selection), an OOB read on the final
-            // (b,h,q) row. Skip the load when no next iteration follows.
+            // Guard the read: on the last iteration kv_block_idx_ptr[i_total_loops + 1] would
+            // index one past the per-row LUT (OOB on the final row); block_idx is unused there.
             int block_idx =
                 (i_total_loops + 1 < num_total_loop)
                     ? __builtin_amdgcn_readfirstlane(kv_block_idx_ptr[i_total_loops + 1])
@@ -392,9 +386,8 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
             }
             else if constexpr(kHasLogitsSoftCap)
             {
-                // Gemma soft cap: s = soft_cap * tanh(s * sm_scale / soft_cap).
-                // variant_params already folded sm_scale (and log2e under FAST_EXP2),
-                // so skip the standalone scale_s multiply here.
+                // Gemma soft cap: s = soft_cap*tanh(s*sm_scale/soft_cap). variant_params already
+                // folded sm_scale (and log2e under FAST_EXP2), so no standalone scale_s here.
                 for(index_t i = 0; i < s_acc.thread_buf_.size(); ++i)
                 {
                     s_acc.thread_buf_[i] = variant.LogitsTransform(variant_params,
@@ -524,8 +517,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
                 sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
                     constexpr auto i_idx = make_tuple(idx0);
 #if CK_TILE_FMHA_FWD_FAST_EXP2
-                    // BIAS/ALIBI/SoftCap pre-scaled s_acc above (m already in log2-space);
-                    // NO_BIAS path folds scale_s into the exp2 here.
+                    // BIAS/ALIBI/SoftCap pre-scaled s_acc above; NO_BIAS folds scale_s into exp2 here.
                     constexpr bool s_acc_prescaled =
                         (BiasEnum != BlockAttentionBiasEnum::NO_BIAS) || kHasLogitsSoftCap;
                     auto row_max = s_acc_prescaled
@@ -557,7 +549,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
                         if constexpr((BiasEnum != BlockAttentionBiasEnum::NO_BIAS) ||
                                      kHasLogitsSoftCap)
                         {
-                            // s_acc already in log2-space from BIAS path or LogitsTransform.
+                            // s_acc already in log2-space (BIAS path / LogitsTransform).
                             return exp2(m_old[i_idx] - get_validated_m(m[i_idx]));
                         }
                         else
@@ -660,10 +652,8 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
                 // bias must follow K's delta jump; otherwise non-contiguous LUT blocks misalign bias.
                 if constexpr(BiasEnum != BlockAttentionBiasEnum::NO_BIAS)
                     move_tile_window(bias_dram_window, {0, kN0 * block_idx});
-                // v_dram_window already advanced by the +kK1 pre-loop prefetch move (~line 500)
-                // plus the per-k1-loop moves inside this iteration, so it now sits at the
-                // current block's end; the (block_idx-1) delta tops it up to the next
-                // LUT-selected block's start (block_idx is the absolute block delta).
+                // v_dram_window already sits at this block's end (prefetch + per-k1 moves), so the
+                // (block_idx-1) delta tops it up to the next LUT-selected block's start.
                 move_tile_window(v_dram_window, {0, kN0 * (block_idx - 1)});
                 move_tile_window(k_dram_block_window, {kN0 * block_idx, 0});
                 k_dram_window.set_window_origin(k_dram_block_window.get_window_origin());

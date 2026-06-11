@@ -86,9 +86,8 @@ struct SpargeSageI8Fp8Bf16
     using ODataType           = ck_tile::bf16_t;
 };
 
-// sparge_sage fp8bf16 type config: FP8 Q/K (instead of INT8), FP8 V/P, bf16 O. The QK gemm0 uses
-// the fp8 MFMA warpgemm (WarpGemmMfmaFp8Fp8F32M32N32K32SwizzleBTransposedCDistribution) selected by
-// the pipeline policy from QDataType. Preprocess/QK-quant emit fp8 with scale = absmax/fp8_max.
+// sparge_sage fp8bf16 type config: FP8 Q/K (instead of INT8), FP8 V/P, bf16 O. gemm0 uses the
+// fp8 MFMA warpgemm; preprocess/QK-quant emit fp8 with scale = absmax/fp8_max.
 struct SpargeSageFp8Bf16
 {
     using InputDataType       = ck_tile::bf16_t;
@@ -796,12 +795,10 @@ float fmha_vsa_fwd_(const ck_tile::stream_config&, fmha_vsa_fwd_args);
 
 float fmha_vsa_fwd(fmha_vsa_fwd_args, const ck_tile::stream_config&);
 
-// ============================ sparge_sage (quantized sparge) ============================
-// Supports batch + group, causal / sliding-window mask, ALIBI / elementwise bias, all four qscale
-// granularities (PERWARP / PERTHREAD / BLOCKSCALE / PERTENSOR), INT8 or FP8 Q/K (i8fp8bf16 /
-// fp8bf16); hdim128. Reuses the sparge fused preprocess (with Q/K quant fused in) + mask
-// prediction, then runs the quantized sage attention pipeline. V is FP8 with per-channel
-// v_descale, quantized on the host (the only V path).
+// sparge_sage (quantized sparge): batch + group, causal/sliding-window mask, ALIBI/elementwise
+// bias, all four qscale granularities, INT8 or FP8 Q/K (i8fp8bf16 / fp8bf16), hdim128. Reuses the
+// sparge fused preprocess + mask prediction, then runs the quantized sage attention pipeline.
+// V is host-quantized FP8 with per-channel v_descale.
 struct fmha_sparge_sage_fwd_args
 {
     const void* q_ptr;        // original fp16/bf16 (for preprocess)
@@ -844,6 +841,12 @@ struct fmha_sparge_sage_fwd_args
     ck_tile::index_t window_size_right = -1;
     ck_tile::index_t mask_type         = 0; // ck_tile::GenericAttentionMaskEnum
 
+    // Attention sink: force-include the first K block in selection (shared mask-pred feature).
+    bool attention_sink                = false;
+
+    // Gemma-style logits soft-cap (0 = disabled; NO_BIAS only). Matches sparge.
+    float logits_soft_cap              = 0.0f;
+
     // v_descale layout strides (matches sageattn per-channel).
     ck_tile::index_t nhead_stride_v_descale = 0;
     ck_tile::index_t batch_stride_v_descale = 0;
@@ -854,9 +857,8 @@ struct fmha_sparge_sage_fwd_args
 
     void* workspace_ptr = nullptr;
 
-    // smooth_k: per-channel global K-mean km[batch, nhead_k, hdim] (fp32), host-computed and
-    // uploaded. When non-null the K quant (fused preprocess + PERTENSOR QKQuant) centers K by km
-    // before quantizing (official SpargeAttn). nullptr disables (Q is never centered).
+    // smooth_k: per-channel global K-mean km[B, Hk, D] (fp32). When non-null the K quant centers
+    // K by km before quantizing (official SpargeAttn); nullptr disables. Q is never centered.
     const void* km_ptr = nullptr;
 
     // Bias buffer. ALIBI: slope array (rank-1 [nhead] => stride_bias=0; rank-2 => stride_bias=nhead).
@@ -868,9 +870,8 @@ struct fmha_sparge_sage_fwd_args
 
     ck_tile::sparge_hyperparam_args hp{};
 
-    // Group / varlen mode (batch leaves all nullptr / 0). Mirrors fmha_sparge_fwd_args: seqstart
-    // token tables + batch-outer/head-mid packed block tables. total_*_blocks size the packed
-    // means/LUT/VBN/int8/scale workspaces.
+    // Group / varlen mode (batch leaves all nullptr / 0). seqstart token tables + packed block
+    // tables; total_*_blocks size the packed means/LUT/VBN/int8/scale workspaces.
     const void* seqstart_q_ptr        = nullptr;
     const void* seqstart_k_ptr        = nullptr;
     const void* seqlen_q_ptr          = nullptr;
@@ -910,7 +911,7 @@ compute_sparge_sage_workspace_layout(const fmha_sparge_sage_fwd_args& a)
     proxy.seqlen_q     = a.seqlen_q;
     proxy.seqlen_k     = a.seqlen_k;
     proxy.pp_block_size = a.pp_block_size;
-    proxy.hp.simthreshold = 0.0f;
+    proxy.hp.simthreshold = a.hp.simthreshold; // size sim buffers when sim selection is on
     proxy.hp.smooth_k     = false;
 
     sparge_sage_workspace_layout L{};
@@ -956,7 +957,7 @@ compute_sparge_sage_workspace_layout_group(const fmha_sparge_sage_fwd_args& a)
     proxy.nhead_k         = a.nhead_k;
     proxy.hdim_q          = a.hdim_q;
     proxy.pp_block_size   = a.pp_block_size;
-    proxy.hp.simthreshold = 0.0f;
+    proxy.hp.simthreshold = a.hp.simthreshold; // size sim buffers when sim selection is on
     proxy.hp.smooth_k     = false;
 
     sparge_sage_workspace_layout L{};

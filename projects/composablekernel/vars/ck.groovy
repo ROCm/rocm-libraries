@@ -550,6 +550,18 @@ def build_and_run_fmha(String arch){
     return cmd
 }
 
+def build_and_run_sparse_attn(String arch){
+    // tile_example_fmha_fwd is the dense baseline used by benchmark_sparse_attn.sh.
+    def cmd = """ cmake -G Ninja -DCMAKE_PREFIX_PATH="${env.WORKSPACE}/projects/composablekernel/install;/opt/rocm" \
+                -DGPU_TARGETS="${arch}" \
+                -DCMAKE_CXX_COMPILER="${params.BUILD_COMPILER}" \
+                -DCMAKE_HIP_COMPILER="${params.BUILD_COMPILER}" .. && \
+                ninja -j128 tile_example_sparse_attn_fwd tile_example_fmha_fwd && \
+                cd ../ &&
+                example/ck_tile/50_sparse_attn/script/run_full_test.sh "CI_${params.COMPILER_VERSION}" "${env.BRANCH_NAME}" "${NODE_NAME}" "${arch}" """
+    return cmd
+}
+
 def cmake_build(Map conf=[:]){
 
     def config_targets = conf.get("config_targets","check")

@@ -1,9 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Returns GPU kernel time in ms (negative on error).
-// mask_str: "0" / "1"|"t" / "2"|"b" / "t:l,r" / "b:l,r".
-// Group mode (varlen) is signalled by passing non-empty seqstart vectors,
-// mirroring 01_fmha's fmha_fwd() dispatch convention.
+// Returns GPU kernel time in ms (negative on error). mask_str: "0"/"1"|"t"/"2"|"b"/"t:l,r"/"b:l,r".
+// Group mode (varlen) is signalled by passing non-empty seqstart vectors.
 
 #pragma once
 
@@ -115,9 +113,8 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
                                     const std::vector<int32_t>& seqlen_qs = {},
                                     const std::vector<int32_t>& seqlen_ks = {});
 
-// sparge_sage (quantized sparge): bf16 Q/K (device-quantized to INT8 in the fused preprocess),
-// caller-provided FP8 V + per-channel v_descale. Batch / no-mask / no-bias / PERWARP / hdim128.
-// Returns GPU time in ms (negative on error).
+// sparge_sage (quantized sparge): bf16 Q/K (device-quantized in the fused preprocess),
+// caller-provided FP8 V + per-channel v_descale. Returns GPU time in ms (negative on error).
 template <typename DataType_>
 float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,    // bf16 [B,H,S,D]
                                    const ck_tile::HostTensor<DataType_>& TK,    // bf16 [B,Hk,Sk,D]
@@ -141,17 +138,21 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,    
                                    int window_right,
                                    int mask_type,
                                    const ck_tile::stream_config& stream_config,
+                                   bool attention_sink = false,
+                                   float logits_soft_cap = 0.0f,
                                    const std::string& qscale = "perwarp",
-                                   // Group / varlen mode: non-empty -> packed Q/K/V/O with these
-                                   // per-batch lengths; max_seqlen taken from seqlen_q/seqlen_k.
+                                   // Group / varlen mode: non-empty -> packed Q/K/V/O.
                                    const std::vector<int32_t>& seqlen_qs = {},
                                    const std::vector<int32_t>& seqlen_ks = {},
-                                   // Bias: 0=no_bias, 1=elementwise, 2=alibi. bias_ptr is the device
-                                   // bias buffer (alibi slopes or dense [.., Sq, Sk]); the strides
-                                   // are alibi's batch stride / elementwise's row/head/batch strides.
+                                   // Bias: 0=no_bias, 1=elementwise, 2=alibi (slopes or dense
+                                   // [.., Sq, Sk] in bias_ptr; strides as for sage attn).
                                    int bias_type            = 0,
                                    const void* bias_ptr     = nullptr,
                                    ck_tile::index_t stride_bias       = 0,
                                    ck_tile::index_t nhead_stride_bias = 0,
                                    ck_tile::index_t batch_stride_bias = 0,
-                                   const std::string& data_type       = "i8fp8bf16");
+                                   const std::string& data_type       = "i8fp8bf16",
+                                   // Optional: download the device's selected-block LUT + valid-block
+                                   // counts so validation can reference the kernel's actual selection.
+                                   std::vector<int32_t>* out_lut = nullptr,
+                                   std::vector<int32_t>* out_vbn = nullptr);
