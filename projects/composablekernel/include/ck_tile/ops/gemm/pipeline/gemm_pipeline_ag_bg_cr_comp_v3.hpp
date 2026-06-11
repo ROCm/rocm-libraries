@@ -506,16 +506,6 @@ struct GemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
             constexpr BDramTileWindowStep b_dram_tile_window_step =
                 is_b_row_major ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
 
-            // using ABlockTileDistr = decltype(a_tile_windows[I0{}].get_tile_distribution());
-            // using ABlockTile =
-            //     decltype(make_static_distributed_tensor<ADataType>(ABlockTileDistr{}));
-            // ABlockTile a_global_tile;
-
-            // using BBlockTileDistr = decltype(b_tile_windows[I0{}].get_tile_distribution());
-            // using BBlockTile =
-            //     decltype(make_static_distributed_tensor<BDataType>(BBlockTileDistr{}));
-            // BBlockTile b_global_tile;
-
             // Pre-compute LDS store window coordinates once (avoids ~96 VALU per
             // store_tile()/LocalPrefill call inside the K-loop).
             using ElementwiseAsRes =
