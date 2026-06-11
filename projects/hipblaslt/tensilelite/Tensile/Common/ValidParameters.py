@@ -773,6 +773,8 @@ validParameters = { # we need to make sure this matches develop
     # In order to remove the copying from Acc vgpr to Arch vgpr, only use Arch vgprs for v_mfma_xxx.
     # Only support for kernel whose totalVgpr counts less than 256 and gcn that has control bit ACC_CD.
     "MIArchVgpr": [False, True],
+    # gfx11 WMMA: force A onto a VGPR bank distinct from the C accumulator (+2 cyc if shared).
+    "WMMABankDistinctC": [False, True],
     # StreamK (SK) kernels divide work evenly among CUs by splitting along MT and K dimensions.
     # Total work units are calculated as (#MTs x #LoopIters) and divided among workgroups.
     # In most cases each workgroup will calculate a partial tile that are accumulated in a fixup step in the same kernel

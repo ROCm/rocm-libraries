@@ -1570,6 +1570,10 @@ class Solution(collections.abc.Mapping):
   ):
     isa = tuple(state["ISA"])
 
+    # WMMABankDistinctC only affects gfx11 (WMMA V1); normalize it off elsewhere.
+    if "WMMABankDistinctC" in state and not isaInfoMap[isa].asmCaps["HasWMMA_V1"]:
+      state["WMMABankDistinctC"] = False
+
     if state["WavefrontSize"] == -1:
       state["WavefrontSize"] = 32 if isaInfoMap[isa].archCaps["HasWave32"] else 64
 

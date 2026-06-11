@@ -565,6 +565,7 @@ defaultBenchmarkCommonParameters = [
     {"StoreSyncOpt": [0]},
     {"GroupLoadStore": [False]},
     {"MIArchVgpr": [False]},
+    {"WMMABankDistinctC": [True]},
     {"StreamK": [0]},
     {"StreamKForceDPOnly": [0]},
     {"StreamKAtomic": [0]},

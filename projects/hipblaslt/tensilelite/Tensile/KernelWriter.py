@@ -8525,10 +8525,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # ----------------------------
       # TODO: alignment hack, figure out a better solution
       vgprIdx = ((vgprIdx+1)//2)*2
-      # Avoid bank conflict between VgprA and VgprC.
-      # Skip for WMMA_V3: VgprA and VgprC are loaded in different cycles.
+      # VGPR banks (bank = vgpr % 4): a WMMA reads A/B/C in lockstep, so A and C
+      # sharing a bank serialize the read (+2 cyc). WMMABankDistinctC forces A onto
+      # a bank distinct from C (B is already odd).
       if(self.states.archCaps["VgprBank"] and not self.states.asmCaps["HasWMMA_V3"]):
-        if (self.states.c.startVgprValu % 4) != (vgprIdx % 4):
+        sameBank = (self.states.c.startVgprValu % 4) == (vgprIdx % 4)
+        if kernel["WMMABankDistinctC"]:
+          if sameBank:
+            vgprIdx += 2
+        elif not sameBank:
           vgprIdx += 2
       # dot2: alignment hack for wider local read
       if kernel["UseDotInstruction"] and kernel["InnerUnroll"] > 1:

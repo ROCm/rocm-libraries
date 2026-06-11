@@ -81,6 +81,7 @@ def getRequiredParametersMin() -> set:
         'LocalReadVectorWidth',
         'LocalWritePerMfma',
         'MIArchVgpr',
+        'WMMABankDistinctC',
         'MaxOccupancy',
         'NonTemporal',
         'NonTemporalA',
