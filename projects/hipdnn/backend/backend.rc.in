@@ -33,12 +33,12 @@ BLOCK "040904b0"
 BEGIN
 VALUE "Comments", ""
 VALUE "CompanyName", "Advanced Micro Devices, Inc."
-VALUE "FileDescription", "hipDNN Backend @HIPDNN_BACKEND_VERSION_MAJOR@.@HIPDNN_BACKEND_VERSION_MINOR@.@HIPDNN_BACKEND_VERSION_PATCH@"
+VALUE "FileDescription", "hipDNN Backend"
 VALUE "FileVersion", "@HIPDNN_BACKEND_VERSION_MAJOR@.@HIPDNN_BACKEND_VERSION_MINOR@.@HIPDNN_BACKEND_VERSION_PATCH@"
 VALUE "InternalName", "hipdnn_backend"
 VALUE "LegalCopyright", "Copyright (C) Advanced Micro Devices, Inc., or its affiliates."
 VALUE "OriginalFilename", "hipdnn_backend.dll"
-VALUE "ProductName", "hipDNN Backend @HIPDNN_BACKEND_VERSION_MAJOR@.@HIPDNN_BACKEND_VERSION_MINOR@.@HIPDNN_BACKEND_VERSION_PATCH@"
+VALUE "ProductName", "hipDNN Backend"
 VALUE "ProductVersion", "@HIPDNN_BACKEND_VERSION_MAJOR@.@HIPDNN_BACKEND_VERSION_MINOR@.@HIPDNN_BACKEND_VERSION_PATCH@"
 END
 END

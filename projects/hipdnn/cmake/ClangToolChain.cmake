@@ -36,7 +36,57 @@
 # Platform-specific compiler configuration
 if(WIN32)
     set(DEFAULT_ROCM_COMPILER_EXTENSION ".exe")
-    set(CMAKE_RC_COMPILER "CMAKE_RC_COMPILER-NOTREQUIRED")
+
+    # hipDNN embeds a Windows VERSIONINFO resource (backend.rc) into the backend DLL, which
+    # requires a resource compiler. The ROCm clang/wheel toolchain does not ship llvm-rc, so detect
+    # one here: prefer llvm-rc (clang ecosystem), then fall back to the Windows SDK rc.exe. If none
+    # is found, fail configuration with a FATAL_ERROR rather than silently dropping VERSIONINFO.
+    if(NOT DEFINED CMAKE_RC_COMPILER OR CMAKE_RC_COMPILER MATCHES "NOTREQUIRED$")
+        find_program(HIPDNN_RC_COMPILER NAMES llvm-rc PATHS ${ROCM_CMAKE_LLVM_BIN_PATH} ENV PATH)
+        if(HIPDNN_RC_COMPILER)
+            set(CMAKE_RC_COMPILER "${HIPDNN_RC_COMPILER}")
+            message(STATUS "hipDNN: using llvm-rc resource compiler: ${CMAKE_RC_COMPILER}")
+        else()
+            # Locate the newest installed Windows 10/11 SDK rc.exe and its matching include dirs.
+            # CMake cannot parse "(x86)" inside an $ENV{} reference, so search the standard roots.
+            foreach(_hipdnn_winsdk_root "C:/Program Files (x86)/Windows Kits/10"
+                                        "C:/Program Files/Windows Kits/10"
+            )
+                file(GLOB _hipdnn_sdk_ver_dirs LIST_DIRECTORIES true
+                     "${_hipdnn_winsdk_root}/bin/10.*"
+                )
+                list(SORT _hipdnn_sdk_ver_dirs)
+                list(REVERSE _hipdnn_sdk_ver_dirs)
+                foreach(_hipdnn_ver_dir IN LISTS _hipdnn_sdk_ver_dirs)
+                    if(EXISTS "${_hipdnn_ver_dir}/x64/rc.exe")
+                        get_filename_component(_hipdnn_sdk_ver "${_hipdnn_ver_dir}" NAME)
+                        set(CMAKE_RC_COMPILER "${_hipdnn_ver_dir}/x64/rc.exe")
+                        # MS rc.exe does not auto-discover SDK headers (winresrc.h); pass explicitly.
+                        set(CMAKE_RC_FLAGS_INIT
+                            "/I \"${_hipdnn_winsdk_root}/Include/${_hipdnn_sdk_ver}/um\" /I \"${_hipdnn_winsdk_root}/Include/${_hipdnn_sdk_ver}/shared\""
+                        )
+                        message(
+                            STATUS "hipDNN: using Windows SDK resource compiler: ${CMAKE_RC_COMPILER}"
+                        )
+                        break()
+                    endif()
+                endforeach()
+                if(CMAKE_RC_COMPILER AND NOT CMAKE_RC_COMPILER MATCHES "NOTREQUIRED$")
+                    break()
+                endif()
+            endforeach()
+        endif()
+        if(NOT CMAKE_RC_COMPILER OR CMAKE_RC_COMPILER MATCHES "NOTREQUIRED$")
+            message(
+                FATAL_ERROR
+                    "hipDNN: no resource compiler (llvm-rc/rc.exe) found. The Windows backend DLL "
+                    "embeds a VERSIONINFO resource (backend.rc) and requires one. Install the Windows "
+                    "SDK (provides rc.exe) or make llvm-rc available on PATH / in the ROCm llvm/bin "
+                    "directory, then re-run CMake configuration."
+            )
+        endif()
+    endif()
+
     # No suitable default on windows, use this as a possible example.
     set(DEFAULT_ROCM_CMAKE_PATH "c:/dist/therock")
 else()
