@@ -2779,7 +2779,8 @@ inline flatbuffers::FlatBufferBuilder createValidReductionGraph()
     return builder;
 }
 
-inline flatbuffers::FlatBufferBuilder createValidResampleFwdGraph()
+inline flatbuffers::FlatBufferBuilder createValidResampleFwdGraph(std::optional<bool> generateIndex
+                                                                  = std::nullopt)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -2794,23 +2795,42 @@ inline flatbuffers::FlatBufferBuilder createValidResampleFwdGraph()
         builder, 1, "x", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &xStrides, &xDims));
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 2, "y", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &yStrides, &yDims));
+    const bool shouldGenerateIndex = generateIndex.value_or(false);
+    if(shouldGenerateIndex)
+    {
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                3,
+                "index",
+                hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                &yStrides,
+                &yDims));
+    }
 
     const std::vector<int64_t> prePadding = {0, 0};
     const std::vector<int64_t> postPadding = {0, 0};
     const std::vector<int64_t> stride = {2, 2};
     const std::vector<int64_t> window = {2, 2};
+    ::flatbuffers::Optional<bool> flatbufferGenerateIndex = ::flatbuffers::nullopt;
+    if(generateIndex.has_value())
+    {
+        const bool generateIndexValue = generateIndex.value_or(false);
+        flatbufferGenerateIndex = ::flatbuffers::Optional<bool>(generateIndexValue);
+    }
 
     auto resampleAttr = hipdnn_flatbuffers_sdk::data_objects::CreateResampleFwdAttributesDirect(
         builder,
         1,
         2,
-        ::flatbuffers::nullopt,
+        shouldGenerateIndex ? ::flatbuffers::Optional<int64_t>(3) : ::flatbuffers::nullopt,
         &prePadding,
         &postPadding,
         &stride,
         &window,
         hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL,
-        hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD);
+        hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD,
+        flatbufferGenerateIndex);
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(

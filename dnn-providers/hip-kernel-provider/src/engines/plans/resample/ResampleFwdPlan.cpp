@@ -3,10 +3,11 @@
 
 #include "ResampleFwdPlan.hpp"
 
-#include "compilation/KernelCompileOptions.hpp"
-#include "core/Utils.hpp"
-#include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
-#include "engines/hip_mlops_engine/plans/resample/ResamplePlanUtils.hpp"
+#include "HipKernelUtils.hpp"
+#include "engines/plans/PlanUtils.hpp"
+#include "engines/plans/resample/ResamplePlanUtils.hpp"
+#include "hip/HipKernelCompileOptions.hpp"
+#include "hip/IKernelCompiler.hpp"
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
@@ -16,9 +17,6 @@
 
 namespace hip_kernel_provider::resample
 {
-using namespace hip_kernel_provider::compilation;
-using namespace hip_kernel_provider::core::utils;
-
 namespace
 {
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
@@ -44,7 +42,7 @@ const char* getIndexTypeString(const data_objects::TensorAttributes* index)
         HIPDNN_PLUGIN_STATUS_BAD_PARAM, "ResampleFwd index tensor must have INT32 data type.");
 }
 
-void addDimOptions(KernelCompileOptions& options,
+void addDimOptions(HipKernelCompileOptions& options,
                    const ResampleFwdParams& params,
                    size_t spatialDims)
 {
@@ -71,7 +69,7 @@ void addDimOptions(KernelCompileOptions& options,
     }
 }
 
-void addStrideOptions(KernelCompileOptions& options,
+void addStrideOptions(HipKernelCompileOptions& options,
                       const ResampleFwdParams& params,
                       size_t spatialDims)
 {
@@ -115,7 +113,7 @@ void addStrideOptions(KernelCompileOptions& options,
     }
 }
 
-void addSpatialOptions(KernelCompileOptions& options,
+void addSpatialOptions(HipKernelCompileOptions& options,
                        const ResampleFwdParams& params,
                        size_t spatialDims)
 {
@@ -226,7 +224,7 @@ ResampleFwdPlan::ResampleFwdPlan(ResampleFwdParams&& params)
 {
 }
 
-size_t ResampleFwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
+size_t ResampleFwdPlan::getWorkspaceSize([[maybe_unused]] const HipKernelHandle& handle) const
 {
     return 0;
 }
@@ -276,7 +274,7 @@ void ResampleFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     const std::string computeTypeString = getKernelParamTypeString(_params.computeDataType());
     const std::string indexTypeString = getIndexTypeString(_params.index());
 
-    KernelCompileOptions options(_params.x(), deviceProperties);
+    HipKernelCompileOptions options(_params.x(), deviceProperties);
     options.add("HIP_PLUGIN_RESAMPLE_INPUT_TYPE", inputTypeString);
     options.add("HIP_PLUGIN_RESAMPLE_OUTPUT_TYPE", outputTypeString);
     options.add("HIP_PLUGIN_RESAMPLE_COMPUTE_TYPE", computeTypeString);
@@ -298,7 +296,7 @@ void ResampleFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     _runnableKernel->setGridSize(static_cast<unsigned int>(gridSize), 1, 1);
 }
 
-void ResampleFwdPlan::execute(const Handle& handle,
+void ResampleFwdPlan::execute(const HipKernelHandle& handle,
                               const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                               uint32_t numDeviceBuffers,
                               [[maybe_unused]] void* workspace) const
@@ -309,14 +307,17 @@ void ResampleFwdPlan::execute(const Handle& handle,
             HIPDNN_PLUGIN_STATUS_BAD_PARAM, "ResampleFwdPlan::execute() called before compile()");
     }
 
-    auto xBuffer = findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
-    auto yBuffer = findDeviceBuffer(_params.y()->uid(), deviceBuffers, numDeviceBuffers);
+    auto xBuffer
+        = hip_kernel_utils::findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
+    auto yBuffer
+        = hip_kernel_utils::findDeviceBuffer(_params.y()->uid(), deviceBuffers, numDeviceBuffers);
 
     void* indexBufferPtr = nullptr;
     if(_params.index() != nullptr)
     {
-        indexBufferPtr
-            = findDeviceBuffer(_params.index()->uid(), deviceBuffers, numDeviceBuffers).ptr;
+        indexBufferPtr = hip_kernel_utils::findDeviceBuffer(
+                             _params.index()->uid(), deviceBuffers, numDeviceBuffers)
+                             .ptr;
     }
 
     _runnableKernel->launch(handle.getStream(), xBuffer.ptr, yBuffer.ptr, indexBufferPtr);

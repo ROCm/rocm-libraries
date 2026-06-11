@@ -5636,7 +5636,7 @@ public:
      *         - [0] y: Resampled output tensor
      *         - [1] index: Max-pool indices when requested; nullptr otherwise
      *
-     * @see hipdnn_frontend::graph::ResampleFwdAttributes
+        * @see hipdnn_frontend::graph::ResampleFwdAttributes
      */
     // NOLINTBEGIN(readability-identifier-naming)
     std::array<std::shared_ptr<TensorAttributes>, 2> resample(std::shared_ptr<TensorAttributes> x,
@@ -5658,7 +5658,7 @@ public:
         if(generateIndex && attributes.get_resample_mode() == ResampleMode::MAXPOOL)
         {
             index = outputTensor(attributes.get_name() + "::Index");
-            // Index tensor needs to be a integer data type, default to int32
+            // Index tensor needs to be an integer data type, default to int32.
             index->set_data_type(DataType::INT32);
             attributes.set_index(index);
         }
@@ -5678,19 +5678,9 @@ public:
      * Supported modes include max pooling and average pooling with either excluded or included
      * padding.
      *
-     * Example for 2D max pooling (using NCHW notation for illustration):
-     * @code
-     * y[n,c,oh,ow] = max_{r,s} x[n, c,
-     *                            oh*stride_h + r - pre_pad_h,
-     *                            ow*stride_w + s - pre_pad_w]
-     *
-     * output_dim = floor((input + pre_padding + post_padding - window) / stride) + 1
-     * @endcode
-     *
      * @param x Input activation tensor (batch, channels, spatial dimensions)
-     * @param attributes Resample parameters: mode, padding mode, pre/post padding, stride,
-     *        window size. Optional max-pool index generation parameter is ignored.
-     * @return  y: Resampled output tensor
+     * @param attributes Resample parameters. Optional max-pool index generation is ignored.
+     * @return y: Resampled output tensor
      *
      * @see hipdnn_frontend::graph::ResampleFwdAttributes
      */
@@ -5699,24 +5689,8 @@ public:
                                                    ResampleFwdAttributes attributes)
     // NOLINTEND(readability-identifier-naming)
     {
-        if(attributes.get_name().empty())
-        {
-            attributes.set_name("ResampleFwd_" + std::to_string(_sub_nodes.size()));
-        }
-        if(x->get_name().empty())
-        {
-            x->set_name(attributes.get_name() + "::X");
-        }
-
-        auto y = outputTensor(attributes.get_name() + "::Y");
-
-        attributes.set_x(std::move(x));
-        attributes.set_y(y);
-
-        _sub_nodes.emplace_back(
-            std::make_shared<ResampleFwdNode>(std::move(attributes), graph_attributes));
-
-        return y;
+        attributes.set_generate_index(false);
+        return resample(std::move(x), std::move(attributes))[0];
     }
 
     // NOLINTBEGIN(readability-identifier-naming)

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "engines/hip_mlops_engine/plans/ApplicabilityChecks.hpp"
+#include "engines/plans/ApplicabilityChecks.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/resample_fwd_attributes_generated.h>
 

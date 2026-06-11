@@ -40,9 +40,7 @@ struct ResampleFwdParams
         , window(resampleAttributes.window()->begin(), resampleAttributes.window()->end())
         , mode(resampleAttributes.resample_mode())
         , paddingMode(resampleAttributes.padding_mode())
-        , generateIndex(indexAttributes != nullptr
-                        && (!resampleAttributes.generate_index().has_value()
-                            || resampleAttributes.generate_index().value()))
+        , generateIndex(indexAttributes != nullptr)
     {
     }
 
@@ -58,7 +56,7 @@ struct ResampleFwdParams
 };
 
 template <typename XDataType,
-          typename OutputDataType,
+          typename YDataType,
           typename ComputeDataType,
           typename IndexDataType = int32_t>
 class ResampleFwdPlan : public IGraphNodePlanExecutor
@@ -83,8 +81,8 @@ public:
     {
         auto shallowXTensor
             = createShallowTensor<XDataType>(_params.xTensor, variantPack.at(_params.xTensor.uid));
-        auto shallowYTensor = createShallowTensor<OutputDataType>(
-            _params.yTensor, variantPack.at(_params.yTensor.uid));
+        auto shallowYTensor
+            = createShallowTensor<YDataType>(_params.yTensor, variantPack.at(_params.yTensor.uid));
 
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<IndexDataType>> shallowIndexTensor;
         if(_params.generateIndex)
@@ -94,15 +92,14 @@ public:
         }
 
         utilities::CpuFpReferenceResampleFwd::
-            forward<XDataType, OutputDataType, ComputeDataType, IndexDataType>(
-                *shallowXTensor,
-                *shallowYTensor,
-                _params.prePadding,
-                _params.stride,
-                _params.window,
-                _params.mode,
-                _params.paddingMode,
-                shallowIndexTensor.get());
+            forward<XDataType, YDataType, ComputeDataType, IndexDataType>(*shallowXTensor,
+                                                                          *shallowYTensor,
+                                                                          _params.prePadding,
+                                                                          _params.stride,
+                                                                          _params.window,
+                                                                          _params.mode,
+                                                                          _params.paddingMode,
+                                                                          shallowIndexTensor.get());
     }
 
 private:
@@ -122,14 +119,14 @@ struct ResampleIndexNative<hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET
 };
 
 template <hipdnn_flatbuffers_sdk::data_objects::DataType XDataTypeEnum,
-          hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType YDataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType IndexDataTypeEnum>
 class ResampleFwdPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
     using XDataType = utilities::DataTypeToNative<XDataTypeEnum>;
-    using OutputDataType = utilities::DataTypeToNative<OutputDataTypeEnum>;
+    using YDataType = utilities::DataTypeToNative<YDataTypeEnum>;
     using ComputeDataType = utilities::DataTypeToNative<ComputeDataTypeEnum>;
     using IndexDataType = typename ResampleIndexNative<IndexDataTypeEnum>::type;
 
@@ -153,7 +150,7 @@ public:
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->x_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->y_tensor_uid());
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), XDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), OutputDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), YDataTypeEnum);
 
         if constexpr(IndexDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
         {
@@ -192,7 +189,7 @@ public:
                                    : nullptr;
 
         return std::make_unique<
-            ResampleFwdPlan<XDataType, OutputDataType, ComputeDataType, IndexDataType>>(
+            ResampleFwdPlan<XDataType, YDataType, ComputeDataType, IndexDataType>>(
             ResampleFwdParams(*nodeAttributes,
                               *tensorMap.at(nodeAttributes->x_tensor_uid()),
                               *tensorMap.at(nodeAttributes->y_tensor_uid()),
