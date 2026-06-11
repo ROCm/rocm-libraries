@@ -307,6 +307,7 @@ Tests:
     - gerc_strided_batched: *single_precision_complex
 
 # per-batch alpha (rocblas_set_batch_alpha_stride) coverage, device pointer mode only
+# stride_c 1 is the densely packed alpha[batch] layout, stride_c 2 a strided layout
 - name: geru_stride_alpha
   category: pre_checkin
   function:
@@ -317,27 +318,10 @@ Tests:
   incx_incy: *incx_incy_range
   alpha: [ -0.5, 2.0 ]
   alphai: [ -0.5, 1.0 ]
-  stride_scale: [ 1, 2 ]
-  batch_count: [ 3 ]
-  alpha_beta_stride: true
-  stride_c: 2 # alpha stride
-  pointer_mode_host: false
-
-# unit alpha stride (alpha[batch] tightly packed)
-- name: geru_stride_alpha
-  category: pre_checkin
-  function:
-    - geru_batched
-    - geru_strided_batched
-  precision: *single_double_precisions_complex
-  matrix_size: *tiny_matrix
-  incx_incy: *incx_incy_range
-  alpha: [ 2.0 ]
-  alphai: [ 1.0 ]
   stride_scale: [ 1 ]
   batch_count: [ 3 ]
   alpha_beta_stride: true
-  stride_c: 1 # alpha stride (densely packed)
+  stride_c: [ 1, 2 ] # alpha stride
   pointer_mode_host: false
 
 ...

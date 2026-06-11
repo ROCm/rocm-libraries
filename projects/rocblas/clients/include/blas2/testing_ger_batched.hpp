@@ -392,6 +392,15 @@ void testing_ger_batched(const Arguments& arg)
 
         CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
 
+        const T* alpha = &h_alpha;
+        if(arg.alpha_beta_stride)
+        {
+            CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
+            CHECK_HIP_ERROR(d_alpha.transfer_from(halpha));
+            alpha = d_alpha;
+            handle.pre_test(arg);
+        }
+
         hipStream_t stream;
         CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
 
@@ -404,7 +413,7 @@ void testing_ger_batched(const Arguments& arg)
                           (handle,
                            M,
                            N,
-                           &h_alpha,
+                           alpha,
                            dx.ptr_on_device(),
                            incx,
                            dy.ptr_on_device(),
@@ -415,6 +424,11 @@ void testing_ger_batched(const Arguments& arg)
         }
 
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+
+        if(arg.alpha_beta_stride)
+        {
+            handle.post_test(arg);
+        }
 
         ArgumentModel<e_M, e_N, e_alpha, e_lda, e_incx, e_incy, e_batch_count>{}.log_args<T>(
             rocblas_cout,

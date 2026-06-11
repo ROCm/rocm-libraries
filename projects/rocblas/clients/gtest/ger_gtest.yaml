@@ -346,6 +346,7 @@ Tests:
   repeatability_check: true
 
 # per-batch alpha (rocblas_set_batch_alpha_stride) coverage, device pointer mode only
+# stride_c 1 is the densely packed alpha[batch] layout, stride_c 2 a strided layout
 - name: ger_stride_alpha
   category: pre_checkin
   function:
@@ -355,26 +356,10 @@ Tests:
   matrix_size: *small_matrix_size_range
   incx_incy: *incx_incy_range
   alpha: [ -0.5, 2.0 ]
-  stride_scale: [ 1, 2 ]
-  batch_count: [ 3 ]
-  alpha_beta_stride: true
-  stride_c: 2 # alpha stride
-  pointer_mode_host: false
-
-# unit alpha stride (alpha[batch] tightly packed)
-- name: ger_stride_alpha
-  category: pre_checkin
-  function:
-    - ger_batched
-    - ger_strided_batched
-  precision: *single_double_precisions
-  matrix_size: *tiny_matrix
-  incx_incy: *incx_incy_range
-  alpha: [ -0.5, 2.0 ]
   stride_scale: [ 1 ]
   batch_count: [ 3 ]
   alpha_beta_stride: true
-  stride_c: 1 # alpha stride (densely packed)
+  stride_c: [ 1, 2 ] # alpha stride
   pointer_mode_host: false
 
 # large-m single-precision case exercises the gfx942 sger kernel (is_float && m > 1024)
