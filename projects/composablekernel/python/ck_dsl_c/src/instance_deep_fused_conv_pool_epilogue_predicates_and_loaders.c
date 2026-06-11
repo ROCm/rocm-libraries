@@ -367,25 +367,22 @@ ckc_value_t* ckc_dfcp_setup_input_footprint_cache(
     c_half_bytes = ckc_b_const_i32(b, 2);
     oob = ckc_b_const_i32(b, 0x7fffffff); /* Python (1 << 31) - 1 */
     /* h_base = b.sub(b.mul(b.block_id_y(), b.const_i32(...)), b.const_i32(pH))
-     * Python evaluates the mul's args left-to-right (block_id_y before its
-     * const). C call-arg order is unspecified (GCC: right-to-left); hoist the
-     * block_id calls into temps to pin Python source-order so later SSA names
-     * line up. */
+     * Python evaluates left-to-right: block_id_y -> its const -> the mul -> the
+     * pH const -> the sub. C call-arg order is unspecified (GCC: right-to-left),
+     * which both swaps the mul's two args AND evaluates the sub's pH const before
+     * the mul. Hoist block_id AND the mul into temps to pin Python source-order
+     * so later SSA names line up (the pH const must take its slot AFTER the mul). */
     {
         ckc_value_t* bid_y = ckc_b_block_id_y(b);
-        h_base = ckc_b_sub(
-            b,
-            ckc_b_mul(b, bid_y,
-                      ckc_b_const_i32(b, spec->pool_tile_h * p->pool_stride_h)),
-            ckc_b_const_i32(b, c->pH));
+        ckc_value_t* mul_y = ckc_b_mul(
+            b, bid_y, ckc_b_const_i32(b, spec->pool_tile_h * p->pool_stride_h));
+        h_base = ckc_b_sub(b, mul_y, ckc_b_const_i32(b, c->pH));
     }
     {
         ckc_value_t* bid_z = ckc_b_block_id_z(b);
-        w_base = ckc_b_sub(
-            b,
-            ckc_b_mul(b, bid_z,
-                      ckc_b_const_i32(b, spec->pool_tile_w * p->pool_stride_w)),
-            ckc_b_const_i32(b, c->pW));
+        ckc_value_t* mul_z = ckc_b_mul(
+            b, bid_z, ckc_b_const_i32(b, spec->pool_tile_w * p->pool_stride_w));
+        w_base = ckc_b_sub(b, mul_z, ckc_b_const_i32(b, c->pW));
     }
 
     for (e = 0; e < elems_per_thread; e++)
@@ -553,10 +550,19 @@ void ckc_dfcp_load_conv0_a_tile_from_input_cache(
             s_col = ckc_b_div(b, rem, c_c);
             ci = ckc_b_mod(b, rem, c_c);
         }
-        ih = ckc_b_add(b, ckc_b_mul(b, local_oh, ckc_b_const_i32(b, c->sH)),
-                       ckc_b_mul(b, r, ckc_b_const_i32(b, c->dH)));
-        iw = ckc_b_add(b, ckc_b_mul(b, local_ow, ckc_b_const_i32(b, c->sW)),
-                       ckc_b_mul(b, s_col, ckc_b_const_i32(b, c->dW)));
+        /* ih = b.add(b.mul(local_oh, sH), b.mul(r, dH)); iw similarly. Python
+         * evaluates the left mul before the right; C call-arg order is
+         * unspecified (GCC: right-to-left), which swaps the two mul SSA slots.
+         * Hoist the left mul into a temp to pin Python source-order. */
+        {
+            ckc_value_t* mul_h = ckc_b_mul(b, local_oh, ckc_b_const_i32(b, c->sH));
+            ih = ckc_b_add(b, mul_h, ckc_b_mul(b, r, ckc_b_const_i32(b, c->dH)));
+        }
+        {
+            ckc_value_t* mul_w = ckc_b_mul(b, local_ow, ckc_b_const_i32(b, c->sW));
+            iw = ckc_b_add(b, mul_w,
+                           ckc_b_mul(b, s_col, ckc_b_const_i32(b, c->dW)));
+        }
         foot_row = ckc_b_add(b, ckc_b_mul(b, ih, c_foot_w), iw);
         {
             ckc_value_t* lidx[2];

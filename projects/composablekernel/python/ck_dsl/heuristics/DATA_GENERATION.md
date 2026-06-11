@@ -1,247 +1,168 @@
 # Data Generation Guide
 
-This document explains how to build benchmark binaries from the CK Tile engine,
-generate benchmark datasets, and manage them for the ML kernel performance
-prediction system.
+This document explains how to generate training data for the ML kernel
+performance prediction system using the **ck_dsl sweep** -- entirely within
+`ck_dsl`, with no CK Tile / CMake / ninja build step.
 
 ## Overview
 
 The ML heuristic needs benchmark data: measured TFLOPS, latency, and bandwidth
-for every (problem shape, kernel config) pair. The tile engine builds one
-executable per kernel configuration. Each executable benchmarks a single kernel
-on a given problem size and outputs JSON with performance metrics.
+for every (problem shape, kernel config) pair. `gen_gemm_sweep_data.py` produces
+this end-to-end inside `ck_dsl`:
+
+1. **Enumerate a shape corpus** `(M, N, K)` covering inference / training / edge
+   cases.
+2. **Enumerate kernel-config variants** as `UniversalGemmSpec` objects via
+   `ck_dsl.instances.all_dispatcher_configs` (already validity-filtered by
+   `is_valid_spec`).
+3. **Build every variant on the fly** with `ck_dsl.sweep.build_all_instances`
+   (LLVM IR -> HSACO, cached on disk).
+4. **Run each `(variant, shape)`** through `ck_dsl.sweep_bench.sweep_run` to
+   record per-shape TFLOPS and correctness.
+5. **Write a training parquet** with exactly the columns
+   `feature_engine.GemmUniversalFeatureEngine` / `train.py` consume.
 
 ```
-CK source  -->  CMake configure  -->  ninja build  -->  benchmark binaries
-                                                          (4608 per op/dtype/layout)
-
-benchmark binaries  -->  run on GPU  -->  streaming log  -->  parquet dataset
-                          (per shape)       (JSON blocks)      (canonical schema)
+shape corpus  (M,N,K)  ---\
+                           >--  build_all_instances  -->  cached HSACOs
+UniversalGemmSpec variants /         (LLVM IR -> HSACO)
+                                           |
+                                           v
+                                     sweep_run        -->  TFLOPS + correctness
+                                  (per (variant, shape))         per shape
+                                           |
+                                           v
+                                  training parquet  (canonical schema)
 ```
+
+Because the config columns are read directly off each `UniversalGemmSpec`
+(authoritative), the parquet is always self-consistent with the kernels that
+were actually built -- no kernel-name parsing.
 
 ## Prerequisites
 
 - **ROCm**: HIP >= 6.0.3 (for gfx950: HIP >= 6.0.4)
-- **Build tools**: CMake >= 3.21, Ninja, HIP-aware clang compiler
 - **Python**: 3.10+ with `pandas`, `pyarrow`
 - **GPU**: ROCm-capable AMD GPU (MI250X, MI300X, MI355X, etc.)
+- **ck_dsl**: importable on `PYTHONPATH` (the generator drives `ck_dsl.sweep`
+  and `ck_dsl.sweep_bench` directly; no separate binary build is required)
 
 ---
-
-## Part 1: Building Benchmark Binaries from the Tile Engine
-
-If you already have pre-built binaries (e.g., in `/workspace/ck_tile/bin/`),
-skip to Part 2. This section explains how to build them from source.
-
-### Step 1: CMake Configure
-
-From the CK repository root:
-
-```bash
-cmake -S /workspace/rocm-libraries/projects/composablekernel \
-      -B build \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DGPU_TARGETS="gfx950" \
-      -DGEMM_UNIVERSAL_DATATYPE="fp8" \
-      -DGEMM_UNIVERSAL_LAYOUT="rcr" \
-      -G Ninja
-```
-
-**Key CMake variables:**
-
-| Variable | Default | Description |
-|---|---|---|
-| `GPU_TARGETS` | (required) | Target GPU architectures. Supported: `gfx90a`, `gfx942`, `gfx950`, `gfx1201`. Semicolon-separated for multiple. |
-| `GEMM_UNIVERSAL_DATATYPE` | `"fp8;fp16"` | Data types to build. Options: `fp8`, `fp16`, `bf16`, `bf8`. Semicolon-separated. |
-| `GEMM_UNIVERSAL_LAYOUT` | `"rcr;rrr;crr;ccr"` | Layouts to build. Semicolon-separated. |
-| `GEMM_UNIVERSAL_CONFIG_FILE` | `"default_config.json"` | Kernel config file (in the `configs/` directory). Controls which tile sizes, warp configs, pipelines, etc. are enumerated. |
-| `ENABLE_CCACHE_GEMM_UNIVERSAL` | `OFF` | Enable ccache for faster rebuilds. |
-
-**Example: build only fp8 RCR for gfx950 (fastest, ~4608 kernels):**
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-      -DGPU_TARGETS="gfx950" \
-      -DGEMM_UNIVERSAL_DATATYPE="fp8" \
-      -DGEMM_UNIVERSAL_LAYOUT="rcr" \
-      -G Ninja
-```
-
-**Example: build all dtypes and layouts (slow, ~4608 * 4 * 4 = ~73K kernels):**
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-      -DGPU_TARGETS="gfx950" \
-      -DGEMM_UNIVERSAL_DATATYPE="fp8;fp16;bf16;bf8" \
-      -DGEMM_UNIVERSAL_LAYOUT="rcr;rrr;crr;ccr" \
-      -G Ninja
-```
-
-### What happens during configure
-
-1. CMake calls `gemm_universal_instance_builder.py --list_kernels` to enumerate
-   all valid kernel configurations from the config JSON.
-2. It writes `gemm_universal_kernel_list.txt` (one kernel per line) and
-   `gemm_universal_kernel_count.txt` to the build directory.
-3. For each kernel, it creates a ninja build target.
-
-### Step 2: Build
-
-```bash
-# Build all benchmarks for the configured dtypes/layouts
-ninja -C build benchmark_gemm_universal_all
-
-# Or build a specific dtype/layout combo
-ninja -C build benchmark_gemm_universal_fp8_rcr
-
-# Or build by pipeline type
-ninja -C build benchmark_gemm_universal_compv4_pipeline
-ninja -C build benchmark_gemm_universal_mem_pipeline
-
-# Or build a single specific kernel
-ninja -C build benchmark_gemm_universal_fp8_rcr_compv3_cshuffle_intrawave_False_False_False_False_128x128x128_1x4x1_16x16x128
-```
-
-**Build time estimates:**
-- ~4608 kernels (one dtype, one layout): 1-4 hours depending on CPU cores
-- Use `-j <N>` to control parallelism: `ninja -C build -j 32 benchmark_gemm_universal_fp8_rcr`
-
-### Step 3: Verify binaries
-
-Binaries are placed in `build/bin/`:
-
-```bash
-ls build/bin/benchmark_gemm_universal_fp8_rcr_* | wc -l
-# Expected: 4608 (for default config)
-
-# Test one binary
-./build/bin/benchmark_gemm_universal_fp8_rcr_compv3_cshuffle_intrawave_False_False_False_False_128x128x128_1x4x1_16x16x128 \
-    -m=1024 -n=1024 -k=1024 -warmup=3 -repeat=10 -verify=0
-```
-
-### Kernel config files
-
-The config files live in:
-```
-tile_engine/ops/gemm/gemm_universal/configs/
-  default_config.json       # Default: full enumeration
-  default_ci_config.json    # CI: reduced set for fast testing
-  user_provided_config.json # Custom: your own subset
-```
-
-To use a custom config:
-```bash
-cmake ... -DGEMM_UNIVERSAL_CONFIG_FILE="user_provided_config.json"
-```
-
-The config controls which tile sizes (e.g., 128x128x64, 256x256x32), warp
-configurations (e.g., 2x2x1, 1x4x1), pipelines (compv3, compv4, mem),
-schedulers, and other parameters are included in the kernel enumeration.
-
-### Building StreamK / other ops
-
-The same pattern applies to other tile engine ops:
-
-```bash
-# StreamK
-ninja -C build benchmark_gemm_streamk_fp8_rcr
-
-# Grouped convolution
-ninja -C build benchmark_grouped_conv_fwd_fp16_nhwgc
-```
-
-Each op has its own instance builder and config directory.
-
----
-
-## Part 2: Running Benchmarks and Generating Data
 
 ## Quick Start
 
-### 1. Run benchmarks for a set of shapes
+### 1. Generate training data with the ck_dsl sweep
 
-Each binary accepts `-m=`, `-n=`, `-k=`, `-warmup=`, `-repeat=`, `-verify=` flags
-and outputs JSON to stdout:
-
-```bash
-/workspace/ck_tile/bin/benchmark_gemm_universal_fp8_rcr_compv3_cshuffle_intrawave_False_False_False_False_128x128x128_1x4x1_16x16x128 \
-    -m=1024 -n=1024 -k=1024 -warmup=3 -repeat=10 -verify=0
-```
-
-Output:
-```json
-{
-  "name": "gemm_universal_fp8_rcr_compv3_cshuffle_intrawave_...",
-  "problem": {
-    "split_k": 1, "m": 1024, "n": 1024, "k": 1024,
-    "dtype_a": "fp8", "dtype_b": "fp8", ...
-  },
-  "perf_result": {
-    "latency(ms)": 0.04,
-    "tflops(TFlops)": 204.60,
-    "bandwidth(GB/s)": 624.39
-  }
-}
-```
-
-### 2. Batch generation using provided scripts
-
-**Wide coverage (diverse shapes across all regimes):**
-```bash
-python3 generate_wide_coverage.py \
-    --bin_dir /workspace/ck_tile/bin \
-    --out_dir data/wide_coverage \
-    --batch_size 25 \
-    --warmup 3 --repeat 10
-```
-
-**Edge-case dimensions (N=1, K=1, small N/K):**
-```bash
-python3 generate_edge_dims.py
-```
-
-Both scripts write streaming log files that `data_pipeline.py` can parse.
-
-### 3. Parse logs into parquet
+Run the generator as a module from the `python/` directory (so `ck_dsl` is
+importable):
 
 ```bash
-python3 data_pipeline.py <log_file> \
-    -o data/my_dataset.parquet \
+python3 -m ck_dsl.heuristics.gen_gemm_sweep_data \
+    --out data/gemm_universal_gfx950.parquet \
+    --cache-dir /tmp/ck_dsl_sweep_cache \
     --arch gfx950 \
-    --capture_hw
+    --shape-set wide
 ```
 
-The `--capture_hw` flag runs `rocminfo` once and injects the GPU hardware
-profile (CU count, clock speed, cache sizes, etc.) into every row.
+This builds the variant grid (cached under `--cache-dir`), runs every
+`(variant, shape)` pair, and writes the training parquet directly -- no
+intermediate JSON or log files, and no `data_pipeline.py` conversion step.
+
+**Key flags:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--out` | (required) | Output training parquet path. |
+| `--cache-dir` | `/tmp/ck_dsl_sweep_cache` | Cached HSACO binaries + sweep manifest/results. Reused across runs. |
+| `--arch` | `gfx950` | Target GPU architecture (e.g. `gfx942`, `gfx950`). |
+| `--shape-set` | `wide` | Shape corpus: `wide`, `edge`, or `all`. |
+| `--max-shapes` | (all) | Cap the number of shapes (smoke tests / quick iteration). |
+| `--pipelines` | `compv3,compv4` | Comma-separated pipeline families to enumerate. |
+| `--epilogues` | `default,cshuffle` | Comma-separated epilogue families to enumerate. |
+| `--parallel` | `os.cpu_count()` | Build parallelism (`1` = serial). |
+| `--attempts` | `3` | Fresh-process perf attempts per `(variant, shape)`. |
+| `--launcher` | (python) | Optional C++ launcher; omit to use `python -m ck_dsl.run_manifest`. |
+
+**Smoke test (a handful of shapes, fast):**
+```bash
+python3 -m ck_dsl.heuristics.gen_gemm_sweep_data \
+    --out /tmp/smoke.parquet --shape-set wide --max-shapes 16
+```
+
+**Edge-case corpus (N=1, K=1, tiny dims):**
+```bash
+python3 -m ck_dsl.heuristics.gen_gemm_sweep_data \
+    --out data/gemm_universal_gfx950_edge.parquet --shape-set edge
+```
+
+### Shape corpora
+
+The shape corpus is generated in-process (no external scripts):
+
+- **`wide`** (`generate_wide_shapes()`): comprehensive coverage -- M=1
+  single-token inference, tiny/small/medium/large M, square powers-of-two,
+  skinny/tall, deep/shallow K, prime dimensions, and LLM-specific shapes
+  (DeepSeek MoE, LLaMA-7B/70B, GPT-style attention).
+- **`edge`** (`generate_edge_shapes()`): degenerate / edge cases -- N=1
+  (vector-matrix), K=1 (rank-1 update), M=1, all-ones, and small N/K (2-16).
+- **`all`**: the union of `wide` and `edge`.
+
+These corpora were folded in verbatim from the retired CK-Tile
+`generate_wide_coverage.py` / `generate_edge_dims.py`, so coverage is unchanged.
+
+### 2. Train a model
+
+The parquet is already in the canonical schema, so training is a direct call:
+
+```bash
+python3 train.py \
+    --data_dir data/ \
+    --out_dir models/gemm_universal_gfx950 \
+    --op gemm_universal --arch gfx950
+```
+
+The downstream pipeline (`train.py` / `predict.py` / `evaluate.py` /
+`search.py` / `feature_engine.py`) is unchanged -- it is data-source-agnostic
+and consumes the same canonical schema the CK-Tile path used to emit, so
+existing models keep working.
 
 ## Canonical Data Schema
 
-Every parquet file follows this schema:
+Every parquet file follows this schema (each row is one `(variant, shape)`
+pair; the config columns are recovered directly from the `UniversalGemmSpec`):
 
 | Column | Type | Description |
 |---|---|---|
-| `op_type` | str | `gemm_universal`, `gemm_streamk`, etc. |
+| `op_type` | str | `gemm_universal` |
 | `dtype` | str | `fp8`, `fp16`, `bf16`, `bf8` |
 | `layout` | str | `rcr`, `rrr`, `crr`, `ccr` |
 | `arch` | str | `gfx942`, `gfx950`, etc. |
-| `kernel_name` | str | Full kernel identifier |
+| `kernel_name` | str | Full kernel identifier (`spec.kernel_name()`) |
 | `m`, `n`, `k` | int | Problem dimensions |
 | `split_k` | int | Split-K factor (1 = standard) |
-| `measured_tflops` | float | Ground-truth TFLOPS |
-| `latency_ms` | float | Measured latency |
-| `bandwidth_gb_s` | float | Measured bandwidth |
-| `is_valid` | bool | True if tflops > 0 and latency > 0 |
+| `measured_tflops` | float | Ground-truth TFLOPS (0 if incorrect/failed) |
+| `latency_ms` | float | Latency derived from TFLOPS |
+| `bandwidth_gb_s` | float | Bandwidth derived from latency |
+| `is_valid` | bool | True if the variant ran correctly with tflops > 0 |
 | `tile_m`, `tile_n`, `tile_k` | int | Tile dimensions |
 | `warp_m`, `warp_n`, `warp_k` | int | Warp config |
 | `warp_tile_m/n/k` | int | Warp tile dimensions |
-| `pipeline` | str | `compv3`, `compv4`, `mem`, etc. |
+| `pipeline` | str | `compv3`, `compv4`, etc. |
 | `scheduler` | str | `intrawave`, `interwave` |
 | `epilogue` | str | `cshuffle`, `default` |
 | `pad_m`, `pad_n`, `pad_k` | bool | Padding flags |
 | `persistent` | bool | Persistent kernel flag |
-| `run_id` | str | Unique collection run identifier |
+| `run_id` | int | Collection run identifier |
+
+Rows that fail build, verification, or perf are emitted with `is_valid=False`
+and zero targets, so the model can learn the failure surface (same convention
+the CK-Tile path used).
 
 ## Shape Selection Guidelines
 
-Good training data requires diverse shapes. Cover all of these regimes:
+Good training data requires diverse shapes. The `wide` and `edge` corpora
+already cover the regimes below; extend `generate_wide_shapes()` /
+`generate_edge_shapes()` in `gen_gemm_sweep_data.py` if you need more.
 
 ### By M dimension (batch size / output rows)
 - **M=1**: single-token inference (hardest case for tiling)
@@ -273,90 +194,63 @@ Good training data requires diverse shapes. Cover all of these regimes:
 ### Minimum recommended coverage
 
 For a production-quality model, aim for:
-- At least 200 unique (M, N, K) shapes
+- At least 200 unique (M, N, K) shapes (the `wide` corpus is well above this)
 - At least 10 shapes per shape family
-- All kernel configs (4608 for fp8 RCR) run against every shape
+- The full variant grid run against every shape
 - Multiple layouts if training a cross-layout model
 
 ## Benchmark Quality Guidelines
 
-### Warmup and repeat
-- Minimum `warmup=3`, `repeat=10` for fast iteration
-- Production quality: `warmup=5`, `repeat=20` for stable measurements
-- The `perf_result` values are averaged over `repeat` iterations
+### Attempts
+- The generator runs `--attempts` fresh-process perf passes per
+  `(variant, shape)` and keeps the median TFLOPS. Default `3`; raise it for
+  more stable measurements.
 
 ### Noise handling
-- Use **median** latency when aggregating multiple runs of the same benchmark
-- Flag measurements where coefficient of variation exceeds 10%
-- Avoid benchmarking under thermal throttling (check GPU temperature)
-- Lock GPU clocks if possible for reproducibility
+- TFLOPS is taken as the median across attempts.
+- Avoid benchmarking under thermal throttling (check GPU temperature).
+- Lock GPU clocks if possible for reproducibility.
 
 ### Environment metadata
 Store with every dataset:
-- GPU model and architecture (from `rocminfo`)
+- GPU model and architecture (`--arch`)
 - ROCm driver version
 - Clock mode (default / locked)
-- Git hash of the CK tile engine build (if available)
+- Git hash of the ck_dsl checkout
 - Timestamp
 
-## Adding Data for a New Op
+## Extending to a New Layout or Dtype
 
-To generate benchmark data for a new operation (e.g., `gemm_streamk`):
+The same generator covers new layouts and dtypes via the variant grid:
 
-1. **Build the binaries** using the tile engine:
-   ```bash
-   ninja -C build benchmark_gemm_streamk_fp8_rcr
-   ```
-
-2. **Write a generation script** (or modify `generate_wide_coverage.py`):
-   - Change the executable glob pattern to match the new op
-   - Add any op-specific CLI flags the binaries need
-
-3. **Run and parse**:
-   ```bash
-   python3 data_pipeline.py my_streamk_run.log \
-       -o data/gemm_streamk_fp8_gfx950.parquet --arch gfx950
-   ```
-
-4. **Train**:
-   ```bash
-   python3 train.py --op gemm_streamk --dtype fp8 --arch gfx950 \
-       --data_dir data/ --out_dir models/gemm_streamk_fp8_gfx950
-   ```
-
-## Adding Data for a New Layout
-
-Same binaries, same shapes -- just change the layout filter:
+- The enumerated `UniversalGemmSpec` variants already span the dtype/layout
+  families supported by `all_dispatcher_configs`.
+- Train a cross-layout model by putting all layouts in the same `data_dir`; the
+  feature engine includes `layout` as a categorical feature, so one model can
+  handle all layouts.
 
 ```bash
-# Build rrr binaries
-ninja -C build benchmark_gemm_universal_fp8_rrr
-
-# Generate and parse
-# ... (same flow, different bin_dir or executable glob)
-
-# Train a cross-layout model by putting all layouts in the same data_dir
-python3 train.py --data_dir data/ --out_dir models/gemm_universal_fp8_gfx950_all_layouts
+# Train a cross-layout model over all generated parquets
+python3 train.py --data_dir data/ \
+    --out_dir models/gemm_universal_gfx950_all_layouts
 ```
-
-The feature engine includes `layout` as a categorical feature, so one model
-can handle all layouts.
 
 ## Incremental Data Collection
 
-When you have a trained model and want to add more data:
+When you want to add more data:
 
-1. Generate new data (new shapes, new layouts, etc.)
-2. Parse into parquet alongside existing data
-3. Warm-start from the previous model:
+1. Generate new data (new shapes, new arch, etc.) into a new parquet in the
+   same `data_dir`. The HSACO cache under `--cache-dir` is reused, so only
+   new variants are rebuilt.
+2. Warm-start from the previous model:
    ```bash
    python3 train.py --data_dir data/ --out_dir models/v2 \
        --warm_start models/v1 \
        --warm_start_n_estimators 200
    ```
 
-This adds 200 new trees on top of the existing model. The feature schema
-must match exactly (enforced automatically).
+This adds 200 new trees on top of the existing model. The feature schema must
+match exactly (enforced automatically).
 
 ## File Organization
 
@@ -365,16 +259,10 @@ Recommended directory structure:
 ```
 heuristics/
   data/
-    gemm_universal_fp8_rcr_gfx950.parquet      # original 108 shapes
-    wide_coverage/                               # batch log files
-      wide_coverage_batch_001.log
-      wide_coverage_batch_002.log
-      ...
-    edge_dims/                                   # N=1, K=1 edge cases
-      edge_dims_batch_001.log
-      ...
+    gemm_universal_gfx950.parquet        # wide corpus
+    gemm_universal_gfx950_edge.parquet   # edge corpus
   models/
-    gemm_universal_fp8_gfx950/                  # trained model artifacts
+    gemm_universal_gfx950/               # trained model artifacts
       model_tflops.lgbm
       model_latency.lgbm
       model_bandwidth.lgbm
@@ -383,30 +271,32 @@ heuristics/
       cv_metrics_tflops.json
       eval_report.json
       ...
+/tmp/ck_dsl_sweep_cache/                 # cached HSACOs + sweep manifest/results
 ```
 
 ## Troubleshooting
 
-### Benchmark binary exits with non-zero code
-Some kernel configs are invalid for certain problem sizes (e.g., tile_m=256
-with M=16). The data pipeline marks these as `is_valid=False` and they are
-filtered out during training. This is expected.
+### Some variants are marked `is_valid=False`
+Some kernel configs are invalid or fail to build/verify for certain problem
+sizes (e.g., tile_m=256 with M=16). These rows are emitted with `is_valid=False`
+and zero targets, and are filtered out during training. This is expected and
+gives the model a failure surface to learn from.
 
-### Edge dims produce very few results
+### Edge dims produce very few valid results
 N=1 and K=1 shapes are degenerate -- most kernel configurations have minimum
 dimension requirements and will fail or produce zero TFLOPS. The small number
 of valid results is still useful (it tells the model which configs work for
 these shapes).
 
-### Benchmarks are slow
-Each shape requires running all 4608 kernel executables sequentially. At
-~0.01s per kernel, that is ~46 seconds per shape. For 700 shapes, expect
-~9 hours. Tips:
-- Run on a dedicated GPU (no other workloads)
-- Use `--batch_size 25` to get incremental output
-- Parse and train on partial data while generation continues
+### Generation is slow
+Each shape runs the full variant grid. Tips:
+- Run on a dedicated GPU (no other workloads).
+- Use `--max-shapes` to iterate on a subset first.
+- Keep `--cache-dir` stable so HSACOs are reused across runs (only new
+  variants rebuild).
+- Lower `--attempts` for quick iteration; raise it for production quality.
 
 ### Data from different GPUs / driver versions
-Store `run_id` and hardware metadata with each dataset. Training on mixed
-data is allowed but not recommended for production models. Filter to a
-single `run_id` or `arch` for clean experiments.
+Store `run_id`, `arch`, and hardware metadata with each dataset. Training on
+mixed data is allowed but not recommended for production models. Filter to a
+single `arch` for clean experiments.

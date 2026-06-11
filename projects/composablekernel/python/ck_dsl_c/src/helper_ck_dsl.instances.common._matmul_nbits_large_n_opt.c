@@ -209,8 +209,13 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
     ckc_value_t* wave_m = ckc_b_div(b, wave_id, ckc_b_const_i32(b, t->warp_n));
     ckc_value_t* wave_n = ckc_b_mod(b, wave_id, ckc_b_const_i32(b, t->warp_n));
 
-    ckc_value_t* m0 = ckc_b_mul(b, ckc_b_block_id_y(b), ckc_b_const_i32(b, tile_m));
-    ckc_value_t* n0 = ckc_b_mul(b, ckc_b_block_id_x(b), ckc_b_const_i32(b, tile_n));
+    /* Python evaluates b.block_id_y() (then b.const_i32(tile_m)) left-to-right;
+     * C argument evaluation order is unspecified, so force the block-id intrinsic
+     * to be emitted FIRST to keep the SSA value numbering byte-identical. */
+    ckc_value_t* bidy = ckc_b_block_id_y(b);
+    ckc_value_t* m0 = ckc_b_mul(b, bidy, ckc_b_const_i32(b, tile_m));
+    ckc_value_t* bidx = ckc_b_block_id_x(b);
+    ckc_value_t* n0 = ckc_b_mul(b, bidx, ckc_b_const_i32(b, tile_n));
     ckc_value_t* wm_local = ckc_b_mul(b, wave_m, ckc_b_const_i32(b, rows_per_wave));
     ckc_value_t* wn_base = ckc_b_add(b, n0, ckc_b_mul(b, wave_n, ckc_b_const_i32(b, cols_per_wave)));
 
@@ -268,9 +273,11 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
             int ch;
             for (ch = 0; ch < a_chunks; ++ch)
             {
-                ckc_value_t* lin = ckc_b_add(
-                    b, ckc_b_mul(b, tid, ckc_b_const_i32(b, a_chunks * 8)),
-                    ckc_b_const_i32(b, ch * 8));
+                /* Python: b.add(b.mul(tid, const(a_chunks*8)), const(ch*8)) --
+                 * the mul (incl. its const) is fully evaluated before const(ch*8).
+                 * Force that order; C arg evaluation order is unspecified. */
+                ckc_value_t* lin_mul = ckc_b_mul(b, tid, ckc_b_const_i32(b, a_chunks * 8));
+                ckc_value_t* lin = ckc_b_add(b, lin_mul, ckc_b_const_i32(b, ch * 8));
                 ckc_value_t* r = ckc_b_div(b, lin, c_tile_k);
                 ckc_value_t* c = ckc_b_mod(b, lin, c_tile_k);
                 ckc_value_t* g_idx = ckc_b_add(
@@ -467,9 +474,10 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
         int ch;
         for (ch = 0; ch < c_chunks; ++ch)
         {
-            ckc_value_t* lin = ckc_b_add(
-                b, ckc_b_mul(b, tid, ckc_b_const_i32(b, c_chunks * 8)),
-                ckc_b_const_i32(b, ch * 8));
+            /* Python: b.add(b.mul(tid, const(c_chunks*8)), const(ch*8)) -- evaluate
+             * the mul (incl. its const) before const(ch*8) to match SSA numbering. */
+            ckc_value_t* lin_mul = ckc_b_mul(b, tid, ckc_b_const_i32(b, c_chunks * 8));
+            ckc_value_t* lin = ckc_b_add(b, lin_mul, ckc_b_const_i32(b, ch * 8));
             ckc_value_t* r = ckc_b_div(b, lin, c_tile_n);
             ckc_value_t* c = ckc_b_mod(b, lin, c_tile_n);
             ckc_value_t* idxs[2];

@@ -5,8 +5,10 @@
 # tests/parity/matmul_nbits_emit.py -- Python reference emitter for the
 # MatMulNBits parity harness. Selects one of 6 configs by argv[1] (index 0..5),
 # builds the MatMulNBitsSpec, builds the kernel via build_matmul_nbits(arch=
-# 'gfx950') and prints lower_kernel_to_llvm(kernel, arch='gfx950') to stdout so
-# it can be byte-compared with the C emitter matmul_nbits_emit.c.
+# 'gfx1201') and prints lower_kernel_to_llvm(kernel, arch='gfx1201') to stdout so
+# it can be byte-compared with the C emitter matmul_nbits_emit.c. gfx1201 is one
+# of the matmul_nbits SUPPORTED_ARCHES (gfx1151/gfx1201); gfx950 is rejected by
+# the validator on both sides, so it must NOT be used here.
 import sys
 
 from ck_dsl.instances.common.matmul_nbits import build_matmul_nbits
@@ -151,8 +153,8 @@ def main() -> int:
         return 2
     idx = int(sys.argv[1])
     spec = _spec(idx)
-    kernel = build_matmul_nbits(spec, arch="gfx950")
-    text = lower_kernel_to_llvm(kernel, arch="gfx950")
+    kernel = build_matmul_nbits(spec, arch="gfx1201")
+    text = lower_kernel_to_llvm(kernel, arch="gfx1201")
     sys.stdout.write(text)
     return 0
 

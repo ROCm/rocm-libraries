@@ -27,16 +27,17 @@ bool c_jit_enabled() {
     return on;
 }
 
-// Build a Kernel for a GEMM problem directly from the C engine (.ll + manifest),
-// set up for comgr-from-.ll compilation against `isa`.
-std::unique_ptr<ck_dsl::Kernel> make_c_jit_gemm_kernel(
-    const CkDslParamParser::ParsedGemmParams& params, const std::string& arch,
-    const std::string& isa) {
+// Populate a C-engine GEMM problem from the parsed graph params + the recon
+// default knobs (compv3/default tile combo). Strings (pipeline/epilogue/...)
+// keep their POD defaults except for the demo-proven overrides below; dtype is
+// derived from the graph. Pointers into `arch`/`dt` stay valid for the caller's
+// build_gemm() call (their backing storage outlives this populate step).
+ck_dsl::CEngine::GemmProblem make_gemm_problem(const CkDslParamParser::ParsedGemmParams& params,
+                                               const std::string& arch, const char* dt) {
     ck_dsl::CEngine::GemmProblem prob;
     prob.M = static_cast<int>(params.M);
     prob.N = static_cast<int>(params.N);
     prob.K = static_cast<int>(params.K);
-    const char* dt = params.dtype == "bf16" ? "bf16" : "fp16";
     prob.dtype_a = dt;
     prob.dtype_b = dt;
     prob.dtype_c = dt;
@@ -44,6 +45,53 @@ std::unique_ptr<ck_dsl::Kernel> make_c_jit_gemm_kernel(
     prob.pipeline = "compv3";
     prob.epilogue = "default";
     prob.arch = arch.c_str();
+    return prob;
+}
+
+// Overlay the heuristic's chosen knobs (extracted from the winning candidate's
+// manifest) onto a GEMM problem, replacing the hardcoded defaults. Only knobs
+// the manifest actually carries are applied; zero/blank fields keep the POD
+// default so a sparse manifest never zeroes out a valid tile dim. The decoded
+// pipeline/scheduler/epilogue strings are owned by the MlKernelConfig encoding
+// tables (static string literals), so they stay valid for build_gemm().
+void apply_gemm_knobs(ck_dsl::CEngine::GemmProblem& prob, const ck_dsl::MlKernelConfig& k) {
+    if (k.tile_m > 0) prob.tile_m = k.tile_m;
+    if (k.tile_n > 0) prob.tile_n = k.tile_n;
+    if (k.tile_k > 0) prob.tile_k = k.tile_k;
+    if (k.warp_m > 0) prob.warp_m = k.warp_m;
+    if (k.warp_n > 0) prob.warp_n = k.warp_n;
+    if (k.warp_k > 0) prob.warp_k = k.warp_k;
+    if (k.warp_tile_m > 0) prob.warp_tile_m = k.warp_tile_m;
+    if (k.warp_tile_n > 0) prob.warp_tile_n = k.warp_tile_n;
+    if (k.warp_tile_k > 0) prob.warp_tile_k = k.warp_tile_k;
+    prob.pipeline = ck_dsl::MlKernelConfig::dec_pipeline(k.pipeline);
+    prob.scheduler = ck_dsl::MlKernelConfig::dec_scheduler(k.scheduler);
+    prob.epilogue = ck_dsl::MlKernelConfig::dec_epilogue(k.epilogue);
+}
+
+// Build a Kernel for a GEMM problem directly from the C engine (.ll + manifest),
+// set up for comgr-from-.ll compilation against `isa`. When the dispatcher (with
+// the LGBM heuristic if CK_DSL_ML_MODEL_DIR is set, FirstFit otherwise) can
+// select a candidate from the registry, the JIT'd kernel uses THAT candidate's
+// knobs; otherwise (empty registry / no model) it falls back to recon defaults.
+std::unique_ptr<ck_dsl::Kernel> make_c_jit_gemm_kernel(
+    const CkDslHandle& handle, const CkDslParamParser::ParsedGemmParams& params,
+    const std::string& arch, const std::string& isa) {
+    const char* dt = params.dtype == "bf16" ? "bf16" : "fp16";
+    ck_dsl::CEngine::GemmProblem prob = make_gemm_problem(params, arch, dt);
+
+    // Wire the heuristic into the C-JIT selection path: rank registered
+    // candidates for this problem and, if one wins, JIT it with its knobs.
+    try {
+        auto problem = CkDslParamParser::buildProblem(params, handle.gfxArch());
+        auto choice = handle.dispatcher().select(problem);
+        if (choice.valid() && handle.store().has(choice.cache_key)) {
+            const auto& manifest = handle.store().at(choice.cache_key).manifest;
+            apply_gemm_knobs(prob, ck_dsl::MlKernelConfig::from_manifest(manifest));
+        }
+    } catch (...) {
+        // No registry / heuristic failure: keep the recon defaults.
+    }
 
     auto r = ck_dsl::CEngine::build_gemm(prob);
     return std::make_unique<ck_dsl::Kernel>(
@@ -106,7 +154,7 @@ void CkDslGemmPlanBuilder::buildPlan(
     if (c_jit_enabled()) {
         // C-JIT path: build the kernel .ll + manifest directly from the pure-C
         // engine (no ArtifactStore, no Python, no shipped HSACO).
-        kernel = make_c_jit_gemm_kernel(params, handle.gfxArch(), handle.isa());
+        kernel = make_c_jit_gemm_kernel(handle, params, handle.gfxArch(), handle.isa());
     } else {
         // Default path: dispatcher selects a shipped candidate, ArtifactStore
         // materializes it (prebuilt HSACO, else comgr-from-.ll).

@@ -63,6 +63,31 @@ struct MlKernelConfig {
         return e == "cshuffle" ? 1 : 0;
     }
 
+    // Inverse decoders: turn the int-encoded knobs back into the C-engine's
+    // string knob vocabulary (CEngine::*Problem.pipeline/scheduler/epilogue).
+    // Used by the C-JIT path to feed the heuristic's pick into the C engine.
+    static const char* dec_pipeline(int p) {
+        switch (p) {
+            case 1:
+                return "compv4";
+            case 2:
+                return "compv5";
+            case 3:
+                return "mem";
+            case 4:
+                return "preshufflev2";
+            case 0:
+            default:
+                return "compv3";
+        }
+    }
+    static const char* dec_scheduler(int s) {
+        return s == 1 ? "interwave" : "intrawave";
+    }
+    static const char* dec_epilogue(int e) {
+        return e == 1 ? "cshuffle" : "default";
+    }
+
     static MlKernelConfig from_manifest(const Manifest& m) {
         MlKernelConfig c;
         c.tile_m = m.block_m;

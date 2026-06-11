@@ -25,10 +25,30 @@ bool c_jit_enabled() {
     return on;
 }
 
+// Overlay the heuristic's chosen knobs (from the winning candidate's manifest)
+// onto a conv problem, replacing the implicit-GEMM tile defaults. Only knobs the
+// manifest carries are applied (zero fields keep the POD default). Conv has no
+// scheduler/warp_k knob in the C-engine spec; those manifest fields are ignored.
+void apply_conv_knobs(ck_dsl::CEngine::ConvProblem& prob, const ck_dsl::MlKernelConfig& k) {
+    if (k.tile_m > 0) prob.tile_m = k.tile_m;
+    if (k.tile_n > 0) prob.tile_n = k.tile_n;
+    if (k.tile_k > 0) prob.tile_k = k.tile_k;
+    if (k.warp_m > 0) prob.warp_m = k.warp_m;
+    if (k.warp_n > 0) prob.warp_n = k.warp_n;
+    if (k.warp_tile_m > 0) prob.warp_tile_m = k.warp_tile_m;
+    if (k.warp_tile_n > 0) prob.warp_tile_n = k.warp_tile_n;
+    if (k.warp_tile_k > 0) prob.warp_tile_k = k.warp_tile_k;
+    prob.pipeline = ck_dsl::MlKernelConfig::dec_pipeline(k.pipeline);
+    prob.epilogue = ck_dsl::MlKernelConfig::dec_epilogue(k.epilogue);
+}
+
 // Build a Kernel for a conv (implicit-GEMM) problem directly from the C engine.
+// When the dispatcher (LGBM heuristic if CK_DSL_ML_MODEL_DIR is set, FirstFit
+// otherwise) selects a candidate from the registry, the JIT'd kernel uses that
+// candidate's knobs; otherwise it falls back to the recon implicit-GEMM defaults.
 std::unique_ptr<ck_dsl::Kernel> make_c_jit_conv_kernel(
-    const CkDslConvParamParser::ParsedConvParams& params, const std::string& arch,
-    const std::string& isa) {
+    const CkDslHandle& handle, const CkDslConvParamParser::ParsedConvParams& params,
+    const std::string& arch, const std::string& isa) {
     ck_dsl::CEngine::ConvProblem prob;
     prob.N = params.N;
     prob.Hi = params.Hi;
@@ -44,6 +64,18 @@ std::unique_ptr<ck_dsl::Kernel> make_c_jit_conv_kernel(
     prob.dH = params.dH;
     prob.dW = params.dW;
     prob.arch = arch.c_str();
+
+    // Wire the heuristic into the C-JIT selection path.
+    try {
+        auto problem = CkDslConvParamParser::buildProblem(params, handle.gfxArch());
+        auto choice = handle.dispatcher().select(problem);
+        if (choice.valid() && handle.store().has(choice.cache_key)) {
+            const auto& manifest = handle.store().at(choice.cache_key).manifest;
+            apply_conv_knobs(prob, ck_dsl::MlKernelConfig::from_manifest(manifest));
+        }
+    } catch (...) {
+        // No registry / heuristic failure: keep the recon defaults.
+    }
 
     auto r = ck_dsl::CEngine::build_conv(prob);
     return std::make_unique<ck_dsl::Kernel>(
@@ -94,7 +126,7 @@ void CkDslConvPlanBuilder::buildPlan(
     if (c_jit_enabled()) {
         // C-JIT path: build the conv kernel .ll + manifest directly from the
         // pure-C engine (no ArtifactStore, no Python, no shipped HSACO).
-        kernel = make_c_jit_conv_kernel(params, handle.gfxArch(), handle.isa());
+        kernel = make_c_jit_conv_kernel(handle, params, handle.gfxArch(), handle.isa());
     } else {
         // Default path: dispatcher select + ArtifactStore materialize.
         auto problem = CkDslConvParamParser::buildProblem(params, handle.gfxArch());

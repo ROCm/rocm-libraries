@@ -7,9 +7,11 @@ Data pipeline for CK Tile heuristics.
 
 Parses benchmark logs and structured JSON into a canonical parquet dataset.
 Supports:
-  - Streaming log format (Shape N: headers + inline JSON) from ck_tile profiling runs
-  - Structured JSON from generate_benchmark_data.py
-  - Direct parquet passthrough
+  - Streaming log format (Shape N: headers + inline JSON) from legacy profiling runs
+  - Direct parquet passthrough (e.g. produced by gen_gemm_sweep_data.py)
+
+build_training_dataset() is the generic parquet loader consumed by train.py /
+evaluate.py and is source-agnostic.
 """
 
 import json

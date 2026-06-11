@@ -599,3 +599,517 @@ class GemmUniversalFeatureEngine(FeatureEngine):
             return (wm * wn * wk) in [2, 4, 8]
 
         return [_lds_constraint, _warp_constraint]
+
+
+# ---------------------------------------------------------------------
+# FMHA (attention / SDPA) feature engine
+# ---------------------------------------------------------------------
+
+# Mirrors ``encode_fmha_dtype`` in the C++ ``ml_heuristic.hpp`` (fp16 -> 0,
+# bf16 -> 1; every other dtype currently folds onto fp16=0).
+FMHA_DTYPE_MAP = {"fp16": 0, "f16": 0, "bf16": 1}
+
+
+def _fmha_dtype_bytes(dt: str) -> float:
+    """Bytes-per-element matching C++ ``fmha_dtype_bytes`` (fp8/bf8=1, fp32=4)."""
+    if dt == "fp32":
+        return 4.0
+    if dt in ("fp8", "bf8"):
+        return 1.0
+    return 2.0
+
+
+class FmhaFeatureEngine(FeatureEngine):
+    """Feature engine for fused multi-head attention (SDPA) kernels.
+
+    Produces EXACTLY the 68-feature layout the C++
+    ``ml_extract_fmha_features`` (``ml_heuristic.hpp``,
+    ``CKDSL_FMHA_NUM_FEATURES == 68``) emits, field-for-field, so a model
+    trained on this engine's parquet predicts identically whether scored
+    from Python (search / evaluate) or from the C++ dispatcher at runtime.
+
+    Feature parity is the contract: the ordered list returned by
+    :meth:`get_feature_names` is the ground truth column order; each entry
+    is computed with the same formula the C++ extractor uses.
+    """
+
+    NUM_FEATURES = 68
+
+    def __init__(
+        self,
+        num_cus: int = 304,
+        simds_per_cu: int = 4,
+        shader_engines: int = 32,
+        max_clock_mhz: int = 2400,
+        wavefront_size: int = 64,
+        lds_capacity: int = 65536,
+        num_xcd: int = 8,
+    ):
+        # Defaults match the C++ ``FmhaHardwareProfile`` defaults exactly.
+        self._hw = {
+            "num_cus": num_cus,
+            "simds_per_cu": simds_per_cu,
+            "shader_engines": shader_engines,
+            "max_clock_mhz": max_clock_mhz,
+            "wavefront_size": wavefront_size,
+            "lds_capacity": lds_capacity,
+            "num_xcd": num_xcd,
+            "total_simds": num_cus * simds_per_cu,
+        }
+
+    def get_feature_names(self) -> list[str]:
+        # Order matches ml_extract_fmha_features' returned array element-for-element.
+        return [
+            "batch",  # 0
+            "seqlen_q",  # 1
+            "seqlen_k",  # 2
+            "nhead_q",  # 3
+            "nhead_k",  # 4
+            "hdim_q",  # 5
+            "hdim_v",  # 6
+            "dtype_enc",  # 7
+            "log2_batch",  # 8
+            "log2_seqlen_q",  # 9
+            "log2_seqlen_k",  # 10
+            "log2_nhead_q",  # 11
+            "log2_nhead_k",  # 12
+            "log2_hdim_q",  # 13
+            "log2_hdim_v",  # 14
+            "gqa_ratio",  # 15
+            "aspect_sq_sk",  # 16
+            "log2_ops",  # 17
+            "arithmetic_intensity",  # 18
+            "decode_flag",  # 19
+            "pipeline_code",  # 20
+            "tile_m0",  # 21
+            "tile_n0",  # 22
+            "tile_k0",  # 23
+            "tile_n1",  # 24
+            "tile_k1",  # 25
+            "tile_k0max",  # 26
+            "pad_s",  # 27
+            "pad_sk",  # 28
+            "pad_d",  # 29
+            "pad_dv",  # 30
+            "mask",  # 31
+            "bias",  # 32
+            "lse",  # 33
+            "dropout",  # 34
+            "logits",  # 35
+            "sink",  # 36
+            "skip",  # 37
+            "qscale",  # 38
+            "paged",  # 39
+            "num_tiles_m",  # 40
+            "num_tiles_k",  # 41
+            "total_tiles",  # 42
+            "tile_eff_sq",  # 43
+            "tile_eff_sk",  # 44
+            "overall_tile_efficiency",  # 45
+            "cu_utilization",  # 46
+            "tile_volume",  # 47
+            "tile_area",  # 48
+            "lds_usage_estimate",  # 49
+            "lds_usage_ratio",  # 50
+            "ratio_d_to_tk0",  # 51
+            "ratio_dv_to_tn1",  # 52
+            "sq_le_tm0",  # 53
+            "sk_le_tn0",  # 54
+            "d_eq_dv",  # 55
+            "gqa_flag",  # 56
+            "total_q_elems",  # 57
+            "total_kv_elems",  # 58
+            "feature_count",  # 59
+            "hw_num_cus",  # 60
+            "hw_simds_per_cu",  # 61
+            "hw_total_simds",  # 62
+            "hw_shader_engines",  # 63
+            "hw_max_clock_mhz",  # 64
+            "hw_wavefront_size",  # 65
+            "hw_lds_capacity",  # 66
+            "hw_num_xcd",  # 67
+        ]
+
+    def get_categorical_features(self) -> list[str]:
+        return ["dtype_enc", "pipeline_code", "mask"]
+
+    def extract(self, problem: dict, kernel: dict) -> np.ndarray:
+        def _g(d, *keys, default=0):
+            for k in keys:
+                if k in d and d[k] is not None:
+                    return d[k]
+            return default
+
+        batch = float(_g(problem, "batch", "num_seqs", default=0))
+        sq = float(_g(problem, "seqlen_q", "max_seqlen_q", default=0))
+        sk = float(_g(problem, "seqlen_k", "max_seqlen_k", default=0))
+        hq = float(_g(problem, "nhead_q", "num_query_heads", default=0))
+        hk = max(float(_g(problem, "nhead_k", "num_kv_heads", default=1)), 1.0)
+        dq = float(_g(problem, "hdim_q", "head_size", default=0))
+        dv = float(_g(problem, "hdim_v", "head_size", default=dq))
+        dtype = str(_g(problem, "dtype", default="fp16"))
+
+        bpe = _fmha_dtype_bytes(dtype)
+        dt_enc = float(FMHA_DTYPE_MAP.get(dtype, 0))
+
+        def l2(x):
+            return math.log2(max(x, 1.0))
+
+        gqa = hq / hk
+        asp = sq / max(sk, 1.0)
+        ops = 2.0 * batch * hq * sq * sk * (dq + dv)
+        mem = (
+            batch * hq * sq * dq
+            + batch * hk * sk * dq
+            + batch * hk * sk * dv
+            + batch * hq * sq * dv
+        ) * bpe
+        ai = ops / max(mem, 1.0)
+        decode = 1.0 if sq <= 1 else 0.0
+
+        pip = float(_g(kernel, "pipeline", "pipeline_code", default=1))
+        tm0 = float(_g(kernel, "tile_m0", "tm0", "block_q", default=16))
+        tn0 = float(_g(kernel, "tile_n0", "tn0", "tile_size", default=0))
+        tk0 = float(_g(kernel, "tile_k0", "tk0", "head_size", default=dq))
+        tn1 = float(_g(kernel, "tile_n1", "tn1", default=dv))
+        tk1 = float(_g(kernel, "tile_k1", "tk1", default=tn0))
+        tk0max = float(_g(kernel, "tile_k0max", "tk0max", default=tk0))
+
+        ps = float(_g(kernel, "pad_s", default=0))
+        psk = float(_g(kernel, "pad_sk", default=0))
+        pd = float(_g(kernel, "pad_d", default=0))
+        pdv = float(_g(kernel, "pad_dv", default=0))
+        mask = float(_g(kernel, "mask", "mask_type", default=0))
+        bias = float(_g(kernel, "bias", default=0))
+        lse = float(_g(kernel, "lse", default=0))
+        dropout = float(_g(kernel, "dropout", default=0))
+        logits = float(_g(kernel, "logits", default=0))
+        sink = float(_g(kernel, "sink", "use_sinks", default=0))
+        skip = float(_g(kernel, "skip", default=0))
+        qscale = float(_g(kernel, "qscale", default=0))
+        paged = float(_g(kernel, "paged", default=1))
+
+        ntm = math.ceil(sq / max(tm0, 1.0))
+        ntk = math.ceil(sk / max(tn0, 1.0))
+        tot = batch * hq * ntm * ntk
+
+        def eff(d, t):
+            if t <= 0:
+                return 1.0
+            r = math.fmod(d, t)
+            return r / t if r > 0 else 1.0
+
+        esq = eff(sq, tm0)
+        esk = eff(sk, tn0)
+        oeff = esq * esk
+        cu = tot / max(float(self._hw["num_cus"]), 1.0)
+        tvol = tm0 * tn0 * tk0
+        tarea = tm0 * tn0
+        lds = (tm0 * tk0 + tn0 * tk0) * bpe
+        ldsr = lds / max(float(self._hw["lds_capacity"]), 1.0)
+        rdk0 = dq / max(tk0, 1.0)
+        rdn1 = dv / tn1 if tn1 > 0 else 0.0
+        sq1 = 1.0 if sq <= tm0 else 0.0
+        sk1 = 1.0 if sk <= tn0 else 0.0
+        deq = 1.0 if dq == dv else 0.0
+        gqa_f = 1.0 if hq != hk else 0.0
+        totq = batch * hq * sq * dq
+        totkv = batch * hk * sk * (dq + dv)
+        fc = (
+            lse
+            + dropout
+            + logits
+            + sink
+            + skip
+            + paged
+            + (1.0 if mask > 0 else 0.0)
+            + (1.0 if bias > 0 else 0.0)
+        )
+
+        hw = self._hw
+        return np.array(
+            [
+                batch,
+                sq,
+                sk,
+                hq,
+                hk,
+                dq,
+                dv,
+                dt_enc,
+                l2(batch),
+                l2(sq),
+                l2(sk),
+                l2(hq),
+                l2(hk),
+                l2(dq),
+                l2(dv),
+                gqa,
+                asp,
+                l2(ops),
+                ai,
+                decode,
+                pip,
+                tm0,
+                tn0,
+                tk0,
+                tn1,
+                tk1,
+                tk0max,
+                ps,
+                psk,
+                pd,
+                pdv,
+                mask,
+                bias,
+                lse,
+                dropout,
+                logits,
+                sink,
+                skip,
+                qscale,
+                paged,
+                ntm,
+                ntk,
+                tot,
+                esq,
+                esk,
+                oeff,
+                cu,
+                tvol,
+                tarea,
+                lds,
+                ldsr,
+                rdk0,
+                rdn1,
+                sq1,
+                sk1,
+                deq,
+                gqa_f,
+                totq,
+                totkv,
+                fc,
+                hw["num_cus"],
+                hw["simds_per_cu"],
+                hw["total_simds"],
+                hw["shader_engines"],
+                hw["max_clock_mhz"],
+                hw["wavefront_size"],
+                hw["lds_capacity"],
+                hw["num_xcd"],
+            ],
+            dtype=np.float64,
+        )
+
+
+# ---------------------------------------------------------------------
+# MoE (fused gather / silu_mul / topk-reduce trio) feature engine
+# ---------------------------------------------------------------------
+
+
+class MoeFeatureEngine(FeatureEngine):
+    """Minimal feature engine for the fused-MoE streaming trio.
+
+    MoE gather / silu_mul / topk-reduce are streaming, atomic-contention
+    bound kernels, so the targets of interest are latency / bandwidth
+    rather than TFLOPS. The feature set is deliberately small (problem
+    dims + the two tunable knobs ``block_size`` / ``vec`` + a handful of
+    derived byte-movement / occupancy metrics).
+    """
+
+    def __init__(
+        self,
+        num_cus: int = 256,
+        lds_capacity: int = 65536,
+        max_clock_mhz: int = 2400,
+        num_xcd: int = 8,
+    ):
+        self._hw = {
+            "num_cus": num_cus,
+            "lds_capacity": lds_capacity,
+            "max_clock_mhz": max_clock_mhz,
+            "num_xcd": num_xcd,
+        }
+
+    def get_feature_names(self) -> list[str]:
+        return [
+            # Problem features
+            "tokens",
+            "experts",
+            "topk",
+            "hidden",
+            "intermediate",
+            "dtype_enc",
+            "log2_tokens",
+            "log2_hidden",
+            "log2_intermediate",
+            # Kernel knobs
+            "block_size",
+            "vec",
+            # Derived
+            "total_pairs",
+            "grouped_input_bytes",
+            "hidden_bytes",
+            "output_bytes",
+            "elems_per_thread_hidden",
+            "elems_per_thread_inter",
+            "cu_utilization",
+            # Hardware
+            "hw_num_cus",
+            "hw_lds_capacity",
+            "hw_max_clock_mhz",
+            "hw_num_xcd",
+        ]
+
+    def get_categorical_features(self) -> list[str]:
+        return ["dtype_enc", "block_size", "vec"]
+
+    def extract(self, problem: dict, kernel: dict) -> np.ndarray:
+        tokens = int(problem.get("tokens", 0))
+        experts = int(problem.get("experts", 0))
+        topk = int(problem.get("topk", 0))
+        hidden = int(problem.get("hidden", 0))
+        intermediate = int(problem.get("intermediate", 0))
+        dtype = str(problem.get("dtype", "f16"))
+        bpe = DTYPE_BYTES.get(dtype, DTYPE_BYTES.get("fp16", 2.0))
+        dtype_enc = float(FMHA_DTYPE_MAP.get(dtype, 0))
+
+        block_size = int(kernel.get("block_size", 256))
+        vec = int(kernel.get("vec", 4))
+
+        total_pairs = tokens * topk
+        grouped_input_bytes = total_pairs * hidden * bpe
+        hidden_bytes = tokens * hidden * bpe
+        output_bytes = tokens * hidden * bpe
+        ept_hidden = hidden // max(block_size, 1)
+        ept_inter = intermediate // max(block_size, 1)
+        cu_util = total_pairs / max(self._hw["num_cus"], 1)
+
+        hw = self._hw
+        return np.array(
+            [
+                tokens,
+                experts,
+                topk,
+                hidden,
+                intermediate,
+                dtype_enc,
+                math.log2(max(tokens, 1)),
+                math.log2(max(hidden, 1)),
+                math.log2(max(intermediate, 1)),
+                block_size,
+                vec,
+                total_pairs,
+                grouped_input_bytes,
+                hidden_bytes,
+                output_bytes,
+                ept_hidden,
+                ept_inter,
+                cu_util,
+                hw["num_cus"],
+                hw["lds_capacity"],
+                hw["max_clock_mhz"],
+                hw["num_xcd"],
+            ],
+            dtype=np.float64,
+        )
+
+
+# ---------------------------------------------------------------------
+# Norm (LayerNorm2D / RMSNorm2D forward) feature engine
+# ---------------------------------------------------------------------
+
+
+class NormFeatureEngine(FeatureEngine):
+    """Minimal feature engine for 2D LayerNorm / RMSNorm forward kernels.
+
+    Row-wise normalization is bandwidth-bound (one CTA per row, an LDS
+    reduction over ``n_per_block`` columns). Features capture the row
+    width, the tunable ``block_size`` / ``vec`` knobs, and the derived
+    per-thread work / byte-movement / LDS-occupancy metrics.
+    """
+
+    def __init__(
+        self,
+        num_cus: int = 256,
+        lds_capacity: int = 65536,
+        max_clock_mhz: int = 2400,
+        num_xcd: int = 8,
+    ):
+        self._hw = {
+            "num_cus": num_cus,
+            "lds_capacity": lds_capacity,
+            "max_clock_mhz": max_clock_mhz,
+            "num_xcd": num_xcd,
+        }
+
+    def get_feature_names(self) -> list[str]:
+        return [
+            # Problem features
+            "rows",
+            "n_per_block",
+            "dtype_enc",
+            "log2_rows",
+            "log2_n_per_block",
+            # Kernel knobs
+            "block_size",
+            "vec",
+            # Derived
+            "elems_per_thread",
+            "row_bytes",
+            "total_bytes",
+            "lds_reduce_bytes",
+            "lds_usage_ratio",
+            "cu_utilization",
+            # Hardware
+            "hw_num_cus",
+            "hw_lds_capacity",
+            "hw_max_clock_mhz",
+            "hw_num_xcd",
+        ]
+
+    def get_categorical_features(self) -> list[str]:
+        return ["dtype_enc", "block_size", "vec"]
+
+    def extract(self, problem: dict, kernel: dict) -> np.ndarray:
+        rows = int(problem.get("rows", problem.get("m", 0)))
+        n_per_block = int(
+            problem.get("n_per_block", problem.get("n", kernel.get("n_per_block", 0)))
+        )
+        dtype = str(problem.get("dtype", "f16"))
+        bpe = DTYPE_BYTES.get(dtype, DTYPE_BYTES.get("fp16", 2.0))
+        dtype_enc = float(FMHA_DTYPE_MAP.get(dtype, 0))
+
+        block_size = int(kernel.get("block_size", 256))
+        vec = int(kernel.get("vec", 4))
+
+        ept = n_per_block // max(block_size, 1)
+        row_bytes = n_per_block * bpe
+        total_bytes = rows * n_per_block * bpe
+        lds_reduce_bytes = block_size * 4  # one f32 reduction word per thread
+        lds_ratio = lds_reduce_bytes / max(self._hw["lds_capacity"], 1)
+        cu_util = rows / max(self._hw["num_cus"], 1)
+
+        hw = self._hw
+        return np.array(
+            [
+                rows,
+                n_per_block,
+                dtype_enc,
+                math.log2(max(rows, 1)),
+                math.log2(max(n_per_block, 1)),
+                block_size,
+                vec,
+                ept,
+                row_bytes,
+                total_bytes,
+                lds_reduce_bytes,
+                lds_ratio,
+                cu_util,
+                hw["num_cus"],
+                hw["lds_capacity"],
+                hw["max_clock_mhz"],
+                hw["num_xcd"],
+            ],
+            dtype=np.float64,
+        )

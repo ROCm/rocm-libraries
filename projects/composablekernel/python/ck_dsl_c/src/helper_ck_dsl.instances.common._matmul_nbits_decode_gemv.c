@@ -162,8 +162,13 @@ ckc_kernel_def_t* ckc_build_decode_gemv_matmul_nbits(
     /* tid = b.thread_id_x()
        n   = b.add(b.mul(b.block_id_x(), b.const_i32(bs)), tid) */
     tid = ckc_b_thread_id_x(b);
-    n   = ckc_b_add(b, ckc_b_mul(b, ckc_b_block_id_x(b), ckc_b_const_i32(b, (int64_t)bs)),
-                    tid);
+    /* Python evaluates block_id_x() before const_i32(bs); C arg evaluation is
+     * right-to-left, so bind the block-id first to preserve SSA-id order. */
+    {
+        ckc_value_t* bid_x = ckc_b_block_id_x(b);
+        n = ckc_b_add(b, ckc_b_mul(b, bid_x, ckc_b_const_i32(b, (int64_t)bs)),
+                      tid);
+    }
 
     /* with b.scf_if(b.cmp_lt(n, cN)): */
     nguard = ckc_b_scf_if(b, ckc_b_cmp_lt(b, n, cN));
@@ -263,11 +268,17 @@ ckc_kernel_def_t* ckc_build_decode_gemv_matmul_nbits(
 
                 /* prod = b.fadd(
                        b.fmul(a_lo, b.fmul(lo, scale_f32)),
-                       b.fmul(a_hi, b.fmul(hi, scale_f32))) */
-                prod = ckc_b_fadd(
-                    b,
-                    ckc_b_fmul(b, a_lo, ckc_b_fmul(b, lo, scale_f32)),
-                    ckc_b_fmul(b, a_hi, ckc_b_fmul(b, hi, scale_f32)));
+                       b.fmul(a_hi, b.fmul(hi, scale_f32)))
+                   Python evaluates the fadd's first arg (the a_lo term) before
+                   the second; C arg evaluation is right-to-left, so bind each
+                   term to a temp in Python order to preserve SSA-id order. */
+                {
+                    ckc_value_t* prod_lo =
+                        ckc_b_fmul(b, a_lo, ckc_b_fmul(b, lo, scale_f32));
+                    ckc_value_t* prod_hi =
+                        ckc_b_fmul(b, a_hi, ckc_b_fmul(b, hi, scale_f32));
+                    prod = ckc_b_fadd(b, prod_lo, prod_hi);
+                }
 
                 /* b.scf_yield(b.fadd(acc, prod)) */
                 yielded = ckc_b_fadd(b, acc, prod);

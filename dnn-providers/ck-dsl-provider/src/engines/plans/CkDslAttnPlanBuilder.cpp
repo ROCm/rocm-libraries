@@ -31,8 +31,8 @@ bool c_jit_enabled() {
 // block that CkDslAttnPlan's constructor reads (block_size / block_q); synthesize
 // it here so the existing Plan logic works unchanged on the C-JIT path.
 std::unique_ptr<ck_dsl::Kernel> make_c_jit_attn_kernel(
-    const CkDslAttnParamParser::ParsedAttnParams& params, const std::string& arch,
-    const std::string& isa) {
+    const CkDslHandle& handle, const CkDslAttnParamParser::ParsedAttnParams& params,
+    const std::string& arch, const std::string& isa) {
     ck_dsl::CEngine::SdpaProblem prob;
     prob.total_q = static_cast<int>(params.batch * params.seqlen_q);
     prob.num_seqs = static_cast<int>(params.batch);
@@ -46,6 +46,24 @@ std::unique_ptr<ck_dsl::Kernel> make_c_jit_attn_kernel(
     prob.sliding_window = 0;
     prob.softcap = 0.0;
     prob.arch = arch.c_str();
+
+    // Wire the FMHA heuristic into the C-JIT selection path: rank registered
+    // attention candidates (LGBM if CK_DSL_ML_MODEL_DIR is set, FirstFit
+    // otherwise) and, if one wins, JIT the scalar SDPA kernel with that
+    // candidate's block_size knob. No registry -> keep the default block_size.
+    try {
+        auto problem = CkDslAttnParamParser::buildProblem(params, handle.gfxArch());
+        auto choice = handle.dispatcher().select(problem);
+        if (choice.valid() && handle.store().has(choice.cache_key)) {
+            const auto& m = handle.store().at(choice.cache_key).manifest;
+            const auto& cfg = m.raw.has("attention_config") ? m.raw.at("attention_config") : m.raw;
+            int bs = static_cast<int>(cfg.get_int("block_size", 0));
+            if (bs <= 0) bs = static_cast<int>(cfg.get_int("block_q", 0));
+            if (bs > 0) prob.block_size = bs;
+        }
+    } catch (...) {
+        // No registry / heuristic failure: keep the default block_size.
+    }
 
     auto r = ck_dsl::CEngine::build_sdpa(prob);
 
@@ -108,7 +126,7 @@ void CkDslAttnPlanBuilder::buildPlan(
     if (c_jit_enabled()) {
         // C-JIT path: build the attention kernel .ll + manifest directly from
         // the pure-C engine (no ArtifactStore, no Python, no shipped HSACO).
-        kernel = make_c_jit_attn_kernel(params, handle.gfxArch(), handle.isa());
+        kernel = make_c_jit_attn_kernel(handle, params, handle.gfxArch(), handle.isa());
     } else {
         // Default path: dispatcher select + ArtifactStore materialize.
         auto problem = CkDslAttnParamParser::buildProblem(params, handle.gfxArch());

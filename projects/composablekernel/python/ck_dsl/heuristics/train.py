@@ -52,11 +52,25 @@ TARGET_COLUMNS = {
         "bandwidth": "bandwidth_gb_s",
     },
     "fmha": {
-        "tflops": "tflops",
+        "tflops": "measured_tflops",
+        "latency": "latency_ms",
+        "bandwidth": "bandwidth_gb_s",
+    },
+    "norm": {
+        "tflops": "measured_tflops",
+        "latency": "latency_ms",
+        "bandwidth": "bandwidth_gb_s",
+    },
+    "moe": {
+        "tflops": "measured_tflops",
         "latency": "latency_ms",
         "bandwidth": "bandwidth_gb_s",
     },
 }
+
+# Map a CLI --operation name to the op_type tag the generator writes into the
+# parquet. Most are 1:1; the moe generator tags rows as "fused_moe".
+OP_TYPE_ALIASES = {"moe": "fused_moe"}
 
 # Targets where log1p transform is applied by default.
 # TFLOPS and bandwidth span orders of magnitude; latency is already small-scale.
@@ -94,7 +108,17 @@ def get_feature_engine(operation: str, **hw_kwargs):
 
         return GroupedConvFeatureEngine(**hw_kwargs)
     elif operation == "fmha":
-        raise NotImplementedError("FMHA feature engine not yet implemented")
+        from feature_engine import FmhaFeatureEngine
+
+        return FmhaFeatureEngine(**hw_kwargs)
+    elif operation == "norm":
+        from feature_engine import NormFeatureEngine
+
+        return NormFeatureEngine(**hw_kwargs)
+    elif operation == "moe":
+        from feature_engine import MoeFeatureEngine
+
+        return MoeFeatureEngine(**hw_kwargs)
     else:
         raise ValueError(f"Unknown operation type: {operation}")
 
@@ -207,7 +231,37 @@ def compute_group_keys(df: pd.DataFrame, operation: str) -> np.ndarray:
             axis=1,
         ).values
     elif operation == "fmha":
-        raise NotImplementedError("FMHA group key computation not yet implemented")
+        # Group by the attention problem geometry (batch, seqlens, heads, hdim).
+        return df.apply(
+            lambda r: f"{r.get('batch', 0)}_{r.get('seqlen_q', 0)}_{r.get('seqlen_k', 0)}_"
+            f"{r.get('nhead_q', 0)}_{r.get('nhead_k', 0)}_{r.get('hdim_q', 0)}_"
+            f"{r.get('hdim_v', 0)}_{r.get('dtype', '')}",
+            axis=1,
+        ).values
+    elif operation == "norm":
+        # Group by row width + dtype (the norm "problem")
+        return (
+            df["rows"].astype(str)
+            + "_"
+            + df["n_per_block"].astype(str)
+            + "_"
+            + df["dtype"].astype(str)
+        ).values
+    elif operation == "moe":
+        # Group by the MoE problem geometry (tokens, experts, topk, dims, dtype)
+        return (
+            df["tokens"].astype(str)
+            + "_"
+            + df["experts"].astype(str)
+            + "_"
+            + df["topk"].astype(str)
+            + "_"
+            + df["hidden"].astype(str)
+            + "_"
+            + df["intermediate"].astype(str)
+            + "_"
+            + df["dtype"].astype(str)
+        ).values
     else:
         raise ValueError(f"Unknown operation type: {operation}")
 
@@ -243,7 +297,30 @@ def compute_tflops_efficiency(
         groupby_cols = base_cols + [col for col in optional_cols if col in df.columns]
         tflops_col = "tflops"
     elif operation == "fmha":
-        raise NotImplementedError("FMHA efficiency computation not yet implemented")
+        groupby_cols = [
+            "batch",
+            "seqlen_q",
+            "seqlen_k",
+            "nhead_q",
+            "nhead_k",
+            "hdim_q",
+            "hdim_v",
+            "dtype",
+        ]
+        tflops_col = "measured_tflops"
+    elif operation == "norm":
+        groupby_cols = ["rows", "n_per_block", "dtype"]
+        tflops_col = "measured_tflops"
+    elif operation == "moe":
+        groupby_cols = [
+            "tokens",
+            "experts",
+            "topk",
+            "hidden",
+            "intermediate",
+            "dtype",
+        ]
+        tflops_col = "measured_tflops"
     else:
         raise ValueError(f"Unknown operation type: {operation}")
 
@@ -261,7 +338,15 @@ def compute_tflops_efficiency(
             "efficiency": efficiency,
         }
         # Add shape-specific keys
-        if operation == "gemm_universal":
+        if operation == "norm":
+            result.update(
+                {
+                    "rows": shape_key[0],
+                    "n_per_block": shape_key[1],
+                    "dtype": shape_key[2],
+                }
+            )
+        elif operation == "gemm_universal":
             result.update({"m": shape_key[0], "n": shape_key[1], "k": shape_key[2]})
         elif operation == "grouped_conv":
             result.update(
@@ -510,8 +595,8 @@ def main():
     parser.add_argument(
         "--operation",
         default="gemm_universal",
-        choices=["gemm_universal", "grouped_conv", "fmha"],
-        help="Operation type (gemm_universal, grouped_conv, fmha)",
+        choices=["gemm_universal", "grouped_conv", "fmha", "norm", "moe"],
+        help="Operation type (gemm_universal, grouped_conv, fmha, norm, moe)",
     )
     parser.add_argument(
         "--op",
@@ -565,7 +650,10 @@ def main():
     print()
 
     print(f"Loading data from {args.data_dir}...")
-    df = build_training_dataset(args.data_dir, op_type=operation, dtype=args.dtype)
+    parquet_op_type = OP_TYPE_ALIASES.get(operation, operation)
+    df = build_training_dataset(
+        args.data_dir, op_type=parquet_op_type, dtype=args.dtype
+    )
     print(f"  Total rows: {len(df)}")
 
     # Print unique shapes based on operation type

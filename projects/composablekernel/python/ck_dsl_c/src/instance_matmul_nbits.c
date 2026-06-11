@@ -279,8 +279,13 @@ ckc_kernel_def_t* ckc_build_large_n_matmul_nbits(ckc_ir_builder_t* b,
     ckc_value_t* wave_m = ckc_b_div(b, wave_id, ckc_b_const_i32(b, t->warp_n));
     ckc_value_t* wave_n = ckc_b_mod(b, wave_id, ckc_b_const_i32(b, t->warp_n));
 
-    ckc_value_t* m0 = ckc_b_mul(b, ckc_b_block_id_y(b), ckc_b_const_i32(b, t->tile_m));
-    ckc_value_t* n0 = ckc_b_mul(b, ckc_b_block_id_x(b), ckc_b_const_i32(b, t->tile_n));
+    /* Python evaluates block_id_y()/block_id_x() BEFORE const_i32(); C arg
+     * evaluation is right-to-left, so bind the block-id to a temp first to keep
+     * SSA-value-id creation order identical to Python. */
+    ckc_value_t* bid_y = ckc_b_block_id_y(b);
+    ckc_value_t* m0 = ckc_b_mul(b, bid_y, ckc_b_const_i32(b, t->tile_m));
+    ckc_value_t* bid_x = ckc_b_block_id_x(b);
+    ckc_value_t* n0 = ckc_b_mul(b, bid_x, ckc_b_const_i32(b, t->tile_n));
     ckc_value_t* wm_base = ckc_b_add(b, m0, ckc_b_mul(b, wave_m, ckc_b_const_i32(b, rows_per_wave)));
     ckc_value_t* wn_base = ckc_b_add(b, n0, ckc_b_mul(b, wave_n, ckc_b_const_i32(b, cols_per_wave)));
 
