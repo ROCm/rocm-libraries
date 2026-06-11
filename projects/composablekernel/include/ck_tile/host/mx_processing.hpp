@@ -137,13 +137,12 @@ auto preShuffleScaleBufferPermuteN_gfx950(
     constexpr ck_tile::index_t MNXdlPack  = 2;
     constexpr ck_tile::index_t KXdlPack   = 2;
     constexpr ck_tile::index_t NRepeat    = NPerBlock / NWarp / XdlMNThread;
-    constexpr ck_tile::index_t XdlKThread = ck_tile::get_warp_size() / XdlMNThread; // 4
+    constexpr ck_tile::index_t XdlKThread = ck_tile::get_warp_size() / XdlMNThread;
 
     if(K % (KXdlPack * XdlKThread) != 0)
     {
         throw std::runtime_error("wrong! K must be a multiple of (KXdlPack * XdlKThread)");
     }
-
     const ck_tile::index_t K0 = K / KXdlPack / XdlKThread;
 
     for(ck_tile::index_t n = 0; n < MN; ++n)
