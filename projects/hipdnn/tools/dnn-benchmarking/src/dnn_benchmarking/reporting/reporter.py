@@ -221,7 +221,8 @@ class Reporter:
             return
         cpu = env.get("cpu_model") or "unknown CPU"
         gpu = env.get("gpu_model") or "unknown GPU"
-        rocm = env.get("rocm_version") or "unknown ROCm"
+        cuda = env.get("cuda_version")
+        cudnn = env.get("cudnn_version")
         cu = env.get("gpu_compute_units")
         hbm = env.get("gpu_hbm_gb")
         gpu_extras = []
@@ -232,7 +233,16 @@ class Reporter:
         gpu_label = gpu + (f" ({', '.join(gpu_extras)})" if gpu_extras else "")
         self._print(f"Host:    {cpu}")
         self._print(f"GPU:     {gpu_label}")
-        self._print(f"ROCm:    {rocm}")
+        # A CUDA wheel reports cuda_version; a ROCm wheel does not. Show the
+        # platform-appropriate label so CUDA hosts never print a ROCm line
+        # (and vice versa).
+        if cuda is not None:
+            self._print(f"CUDA:    {cuda}")
+            if cudnn is not None:
+                self._print(f"cuDNN:   {cudnn}")
+        else:
+            rocm = env.get("rocm_version") or "unknown ROCm"
+            self._print(f"ROCm:    {rocm}")
 
     def print_suite_graph_start(self, index: int, total: int, graph_name: str) -> None:
         """Print per-graph progress line at start (no trailing newline).

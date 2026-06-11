@@ -4,6 +4,7 @@
 """Unit tests for Reporter suite-specific methods."""
 
 import io
+from unittest.mock import patch
 
 from dnn_benchmarking.config.benchmark_config import SuiteConfig
 from dnn_benchmarking.reporting.reporter import Reporter
@@ -540,3 +541,47 @@ class TestPrintHeader:
         reporter.print_graph_result_table(graph)
 
         assert "reference" in output.getvalue()
+
+
+class TestMachineSummaryPlatformLabel:
+    """The suite header shows a platform-appropriate accelerator label.
+
+    A CUDA wheel reports cuda_version (and cudnn_version); a ROCm wheel
+    reports rocm_version. The header must show only the label that matches
+    the running platform — CUDA hosts never print a ROCm line, and ROCm
+    hosts never print a CUDA/cuDNN line.
+    """
+
+    @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
+    def test_cuda_host_shows_cuda_and_cudnn_not_rocm(self, mock_env) -> None:
+        mock_env.return_value = {
+            "cpu_model": "Test CPU",
+            "gpu_model": "NVIDIA GeForce RTX 5080",
+            "rocm_version": None,
+            "cuda_version": "13.0",
+            "cudnn_version": "9.20.0",
+        }
+        output = io.StringIO()
+        Reporter(output=output).print_suite_header(1)
+        out = output.getvalue()
+
+        assert "CUDA:    13.0" in out
+        assert "cuDNN:   9.20.0" in out
+        assert "ROCm:" not in out
+
+    @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
+    def test_rocm_host_shows_rocm_not_cuda(self, mock_env) -> None:
+        mock_env.return_value = {
+            "cpu_model": "Test CPU",
+            "gpu_model": "AMD Instinct MI300X",
+            "rocm_version": "6.2.0",
+            "cuda_version": None,
+            "cudnn_version": None,
+        }
+        output = io.StringIO()
+        Reporter(output=output).print_suite_header(1)
+        out = output.getvalue()
+
+        assert "ROCm:    6.2.0" in out
+        assert "CUDA:" not in out
+        assert "cuDNN:" not in out
