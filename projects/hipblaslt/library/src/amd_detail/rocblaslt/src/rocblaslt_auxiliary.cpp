@@ -2149,18 +2149,6 @@ rocblaslt_status
 
             log_api(__func__, "OverrideAlgoCount", override_success ? 1 : 0);
         }
-        if(heuristicResultsArray[0].algo.data[0] != 0)
-        {
-            std::vector<rocblaslt_matmul_heuristic_result> allSolutionsResults;
-            size_t required_workspace_size = 0;
-            if(rocblaslt_status_success
-               == isSolutionSupported(handle,
-                                      prob,
-                                      tensile_data,
-                                      &heuristicResultsArray[0].algo,
-                                      &heuristicResultsArray[0].workspaceSize))                    
-                return rocblaslt_status_success;    
-        }
         if(requestedAlgoCount > 0)
         {
             status = getBestSolutions(prob,
