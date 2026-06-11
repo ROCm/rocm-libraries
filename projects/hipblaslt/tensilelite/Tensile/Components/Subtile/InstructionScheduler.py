@@ -146,7 +146,7 @@ class _SlotPlacer:
 # ── Scheduling rules ──
 
 # Hardcoded gap to hide ds_read latency. TODO: compute this more accurately.
-_MIN_MFMA_GAP_DS_READ_TO_WAIT = 4
+_MIN_MFMA_GAP_DS_READ_TO_WAIT = 8
 
 _isDsRead = lambda x: isinstance(x, LocalReadInstruction)
 _isBufferLoad = lambda x: isinstance(x, GlobalReadInstruction)
