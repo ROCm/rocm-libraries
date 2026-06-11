@@ -145,6 +145,7 @@ class SchedulerConfig:
     partitionSizeM: Union[int, List[int]] = 0  # partition size(s) in M dimension (0 = full dim)
     partitionSizeN: Union[int, List[int]] = 0  # partition size(s) in N dimension (0 = full dim)
     pgr: int = 2              # Prefetch Global Read
+    isMXFP8: bool = False     # True for MX-scaled FP8 kernels (miK=128 with SA/SB)
 
     # Resolve a partition spec into per-partition sizes along one dimension.
     # spec is either:
@@ -256,6 +257,11 @@ class SchedulerConfig:
     @property
     def numPartitions(self) -> int:
         return self.numPartitionsM * self.numPartitionsN
+
+    @property
+    def subIterK_major(self) -> bool:
+        """Use subIterK-major MFMA ordering for MXFP8 kernels with multiple partitions."""
+        return self.isMXFP8 and self.numPartitions > 1
 
     @staticmethod
     def get_partition_candidates(tileInfoA, tileInfoB) -> list:
@@ -608,6 +614,9 @@ class LogicalScheduler:
         if self.config.plr == 0:
             return self._place_LRs_PLR0()
 
+        if self.config.subIterK_major:
+            return self._place_LRs_subIterK_major()
+
         cfg = self.config
         numP = cfg.numPartitions
         part_ranges = [self._partition_tile_range(pi) for pi in range(numP)]
@@ -637,6 +646,99 @@ class LogicalScheduler:
             for side in ('A', 'B'):
                 if load[side]:
                     loaded_ranges[side] = {cur[side], nxt[side]}
+
+        self._partitions = partitions
+        self._completed.add(Pass.LR)
+        return partitions
+
+    def _place_LRs_subIterK_major(self) -> List[List[SubIterKSlot]]:
+        """Place MFMAs and LRs for subIterK-major ordering (MXFP8, numP > 1).
+
+        Execution order: for si in range(numK): for pi in range(numP).
+
+        LRS prefetch rules per slot (si, pi):
+        - Same-subIterK transition (pi < numP-1): next slot is (si, pi+1).
+          Only B-side changes (A is shared across partitions). Load B+SB for
+          next partition.
+        - Cross-subIterK transition (pi == numP-1, si < numK-1): next slot is
+          (si+1, 0). All tensors change subIterK. Load A+SA+B+SB for next si,
+          first partition.
+        - Wrap (si == numK-1, pi == numP-1): load all tensors with mt=1.
+        """
+        cfg = self.config
+        numK = cfg.numSubIterK
+        numP = cfg.numPartitions
+        part_ranges = [self._partition_tile_range(pi) for pi in range(numP)]
+        all_tensors = self._lr_tensors()
+
+        # Build per-partition slots (all numP partitions, each with numK subIterK slots).
+        partitions = [self._create_partition_slots(part_ranges[pi]) for pi in range(numP)]
+
+        placed = set()
+
+        for si in range(numK):
+            for pi in range(numP):
+                is_last_slot = (si == numK - 1 and pi == numP - 1)
+                is_cross_k = (pi == numP - 1 and not is_last_slot)
+                is_same_k = (not is_cross_k and not is_last_slot)
+
+                if is_last_slot:
+                    # Wrap: prefetch all tensors for next mt iteration (mt=1).
+                    nxt_si, nxt_pi = 0, 0
+                    lr_mt = 1
+                    load_sides = {'A', 'B'}
+                elif is_cross_k:
+                    # Cross-subIterK: prefetch A+SA+B+SB for (si+1, pi=0).
+                    nxt_si, nxt_pi = si + 1, 0
+                    lr_mt = 0
+                    load_sides = {'A', 'B'}
+                else:
+                    # Same-subIterK: only B-side changes for (si, pi+1).
+                    nxt_si, nxt_pi = si, pi + 1
+                    lr_mt = 0
+                    load_sides = {'B'}
+
+                nxt_range = part_ranges[nxt_pi]
+                slot = partitions[pi][si]
+
+                for k_gran in sorted(set(g.k for _, g in all_tensors)):
+                    group = [(t, g) for t, g in all_tensors if g.k == k_gran]
+                    # K chunk covering nxt_si
+                    chunk_idx = nxt_si // k_gran
+                    lr_k_start = chunk_idx * k_gran
+                    lr_k_end = lr_k_start + k_gran
+
+                    sides = [[(t, g) for t, g in group if t in ('A', 'SA')],
+                             [(t, g) for t, g in group if t in ('B', 'SB')]]
+                    sides = [s for s in sides if s]
+
+                    for side_tensors in sides:
+                        side_key = 'A' if side_tensors[0][0] in ('A', 'SA') else 'B'
+                        if side_key not in load_sides:
+                            continue
+
+                        ts, te = nxt_range[side_key]
+                        for tensor, gran in side_tensors:
+                            # Skip scale LRS at cross-K when nxt_si falls in the
+                            # same K-chunk as si: the scale VGPR already covers
+                            # all K in this chunk (loaded by the preloop or a
+                            # prior cross-K LRS).  Scale is only refreshed at the
+                            # wrap slot (is_last_slot, lr_mt=1) for the next DU.
+                            if (is_cross_k and tensor in ('SA', 'SB')
+                                    and chunk_idx == (si // gran.k)):
+                                continue
+                            lr_key = (tensor, lr_k_start, lr_k_end, ts, te, lr_mt)
+                            if lr_key in placed:
+                                continue
+                            placed.add(lr_key)
+                            lr = LRPlacement(
+                                tensor=tensor,
+                                mtIteration=lr_mt,
+                                tiles=MFMATileRange(lr_k_start, lr_k_end, ts, te),
+                                subIterK_slot=si,
+                            )
+                            slot.lrs.append(lr)
+                            lr.partition = pi
 
         self._partitions = partitions
         self._completed.add(Pass.LR)
@@ -812,12 +914,18 @@ class LogicalScheduler:
             lr_grans['SB'] = cfg.lrSB
 
         # ── Phase 1: find last MFMA read for each key ──
+        numP = cfg.numPartitions
+        si_major = cfg.subIterK_major
+
+        def flat_pos(pi, si):
+            return si * numP + pi if si_major else pi * numK + si
+
         last_read = {}  # key -> flat position
         for pi, slots in enumerate(self._partitions):
             for slot in slots:
                 if not slot.mfma:
                     continue
-                pos = pi * numK + slot.subIterK
+                pos = flat_pos(pi, slot.subIterK)
                 k = slot.subIterK
                 for tensor in self.tensors:
                     side = TENSOR_SIDE[tensor]
@@ -868,54 +976,63 @@ class LogicalScheduler:
 
             next_iter = {}
 
-            for pi, slots in enumerate(self._partitions):
-                for slot in slots:
-                    pos = pi * numK + slot.subIterK
-                    k = slot.subIterK
+            def _iter_slots():
+                if si_major:
+                    for si in range(numK):
+                        for pi, slots in enumerate(self._partitions):
+                            yield pi, slots[si]
+                else:
+                    for pi, slots in enumerate(self._partitions):
+                        for slot in slots:
+                            yield pi, slot
 
-                    if slot.mfma:
-                        for tensor in self.tensors:
-                            side = TENSOR_SIDE[tensor]
-                            tileRange = slot.mfma.tileA if side == 'A' else slot.mfma.tileB
-                            gran = lr_grans[tensor]
-                            tile_map = {}
-                            for t in tileRange.tileId_list:
-                                group = (t // gran.mn) * gran.mn
-                                k_chunk = (k // gran.k) * gran.k
-                                key = (tensor, group, k_chunk)
-                                if key not in active:
-                                    active[key] = pools[tensor].alloc()
-                                tile_map[group] = active[key]
-                            slot.mfma.vgpr_tile_maps.setdefault(tensor, []).append(tile_map)
+            for pi, slot in _iter_slots():
+                pos = flat_pos(pi, slot.subIterK)
+                k = slot.subIterK
 
-                    for lr in slot.lrs:
-                        tensor = lr.tensor
-                        is_wrapping = lr.mtIteration != 0
-                        target = next_iter if is_wrapping else active
-
+                if slot.mfma:
+                    for tensor in self.tensors:
+                        side = TENSOR_SIDE[tensor]
+                        tileRange = slot.mfma.tileA if side == 'A' else slot.mfma.tileB
                         gran = lr_grans[tensor]
                         tile_map = {}
-                        seen_keys = set()
-                        for t in lr.tiles.tileId_list:
+                        for t in tileRange.tileId_list:
                             group = (t // gran.mn) * gran.mn
-                            for lk in lr.tiles.subIterK_list:
-                                k_chunk = (lk // gran.k) * gran.k
-                                key = (tensor, group, k_chunk)
-                                if key in seen_keys:
-                                    continue
-                                seen_keys.add(key)
-                                if key in target:
-                                    pools[tensor].release(target[key])
-                                vid = pools[tensor].alloc()
-                                target[key] = vid
-                                tile_map[group] = vid
-                        lr.vgpr_tile_map.append(tile_map)
+                            k_chunk = (k // gran.k) * gran.k
+                            key = (tensor, group, k_chunk)
+                            if key not in active:
+                                active[key] = pools[tensor].alloc()
+                            tile_map[group] = active[key]
+                        slot.mfma.vgpr_tile_maps.setdefault(tensor, []).append(tile_map)
 
-                    to_release = [key for key, lr_pos in last_read.items()
-                                  if lr_pos == pos and key in active]
-                    for key in to_release:
-                        pools[key[0]].release(active[key])
-                        del active[key]
+                for lr in slot.lrs:
+                    tensor = lr.tensor
+                    is_wrapping = lr.mtIteration != 0
+                    target = next_iter if is_wrapping else active
+
+                    gran = lr_grans[tensor]
+                    tile_map = {}
+                    seen_keys = set()
+                    for t in lr.tiles.tileId_list:
+                        group = (t // gran.mn) * gran.mn
+                        for lk in lr.tiles.subIterK_list:
+                            k_chunk = (lk // gran.k) * gran.k
+                            key = (tensor, group, k_chunk)
+                            if key in seen_keys:
+                                continue
+                            seen_keys.add(key)
+                            if key in target:
+                                pools[tensor].release(target[key])
+                            vid = pools[tensor].alloc()
+                            target[key] = vid
+                            tile_map[group] = vid
+                    lr.vgpr_tile_map.append(tile_map)
+
+                to_release = [key for key, lr_pos in last_read.items()
+                              if lr_pos == pos and key in active]
+                for key in to_release:
+                    pools[key[0]].release(active[key])
+                    del active[key]
 
             for t in self.tensors:
                 max_peaks[t] = max(max_peaks[t], pools[t].peak)
@@ -1844,8 +1961,12 @@ class LogicalScheduler:
         numP = len(self._partitions)
         numK = len(self._partitions[0])
         flat_len = numP * numK
+        si_major = self.config.subIterK_major
 
-        consumer_flat = consumer_pi * numK + consumer_slot
+        def _flat(pi, si):
+            return si * numP + pi if si_major else pi * numK + si
+
+        consumer_flat = _flat(consumer_pi, consumer_slot)
         wraps_needed = abs(dep_ref.mt_offset)
 
         # Locate dep_flat: the flat position of the dependency GR in the schedule.
@@ -1853,7 +1974,7 @@ class LogicalScheduler:
         for p_idx, pslots in enumerate(self._partitions):
             for k_idx, slot in enumerate(pslots):
                 if any(gr is dep_ref.ref for gr in slot.grs):
-                    dep_flat = p_idx * numK + k_idx
+                    dep_flat = _flat(p_idx, k_idx)
                     break
             if dep_flat is not None:
                 break
@@ -1925,8 +2046,12 @@ class LogicalScheduler:
         pos = consumer_flat
         for step in range(total_steps):
             pos = (pos - 1) % flat_len
-            pi = pos // numK
-            slot_k = pos % numK
+            if si_major:
+                slot_k = pos // numP
+                pi = pos % numP
+            else:
+                pi = pos // numK
+                slot_k = pos % numK
             slot = self._partitions[pi][slot_k]
 
             # On the final step we are at dep's slot: stop when we reach the dep GR.
@@ -2052,43 +2177,55 @@ class LogicalScheduler:
         maxUnroll = max(self.config.numUnroll.values()) if self.config.numUnroll else 1
         multiDU = maxUnroll > 1 and self.config.pgr == 1
 
-        for pi, slots in enumerate(self._partitions):
-            for slot in slots:
-                for lr in slot.lrs:
-                    tensor = lr.tensor
-                    mt = lr.mtIteration
-                    per_uid_k = self._per_uid_k(tensor)
-                    lr_uid = lr.tiles.subIterK_start // per_uid_k
-                    if tensor not in first_lr:
-                        first_lr[tensor] = lr
-                    mt_changed = tensor in last_lr_mt and last_lr_mt[tensor] != mt
-                    uid_changed = tensor in last_lr_uid and last_lr_uid[tensor] != lr_uid
-                    if mt_changed and uid_changed:
-                        lr.preOps.append(LRIncOp(tensor=tensor, isUnrollSwap=True))
-                        lr_inc_tensors.add(tensor)
-                    elif mt_changed:
-                        lr.preOps.append(LRIncOp(tensor=tensor))
-                        lr_inc_tensors.add(tensor)
-                    elif uid_changed:
-                        lr.preOps.append(LRIncOp(tensor=tensor, isUnrollSwap=True))
-                    last_lr[tensor] = lr
-                    last_lr_mt[tensor] = mt
-                    last_lr_uid[tensor] = lr_uid
-                for gr in slot.grs:
-                    tensor = gr.tensor
-                    uid = gr.unrollId
-                    mt = gr.mtIteration
-                    key = (tensor, uid)
-                    last_gr[key] = gr
-                    if not multiDU:
-                        if key in last_gr_mt:
-                            prev_mt = last_gr_mt[key]
-                        else:
-                            prev_mt = 0
-                        if prev_mt != mt:
-                            if gr.tiles.tileId_start == 0:
-                                gr.preOps.append(GRIncOp(tensor=tensor, unrollId=uid))
-                    last_gr_mt[key] = mt
+        numK_ins = len(self._partitions[0]) if self._partitions else 0
+        si_major_ins = self.config.subIterK_major
+
+        def _iter_slots_ins():
+            if si_major_ins:
+                for si in range(numK_ins):
+                    for pi, slots in enumerate(self._partitions):
+                        yield pi, slots[si]
+            else:
+                for pi, slots in enumerate(self._partitions):
+                    for slot in slots:
+                        yield pi, slot
+
+        for pi, slot in _iter_slots_ins():
+            for lr in slot.lrs:
+                tensor = lr.tensor
+                mt = lr.mtIteration
+                per_uid_k = self._per_uid_k(tensor)
+                lr_uid = lr.tiles.subIterK_start // per_uid_k
+                if tensor not in first_lr:
+                    first_lr[tensor] = lr
+                mt_changed = tensor in last_lr_mt and last_lr_mt[tensor] != mt
+                uid_changed = tensor in last_lr_uid and last_lr_uid[tensor] != lr_uid
+                if mt_changed and uid_changed:
+                    lr.preOps.append(LRIncOp(tensor=tensor, isUnrollSwap=True))
+                    lr_inc_tensors.add(tensor)
+                elif mt_changed:
+                    lr.preOps.append(LRIncOp(tensor=tensor))
+                    lr_inc_tensors.add(tensor)
+                elif uid_changed:
+                    lr.preOps.append(LRIncOp(tensor=tensor, isUnrollSwap=True))
+                last_lr[tensor] = lr
+                last_lr_mt[tensor] = mt
+                last_lr_uid[tensor] = lr_uid
+            for gr in slot.grs:
+                tensor = gr.tensor
+                uid = gr.unrollId
+                mt = gr.mtIteration
+                key = (tensor, uid)
+                last_gr[key] = gr
+                if not multiDU:
+                    if key in last_gr_mt:
+                        prev_mt = last_gr_mt[key]
+                    else:
+                        prev_mt = 0
+                    if prev_mt != mt:
+                        if gr.tiles.tileId_start == 0:
+                            gr.preOps.append(GRIncOp(tensor=tensor, unrollId=uid))
+                last_gr_mt[key] = mt
 
         if multiDU:
             for (tensor, uid), gr in last_gr.items():
@@ -2295,11 +2432,17 @@ class LogicalScheduler:
 
                 # ── Phase 4: Consolidate MFMA deps ──
                 # After chaining, MFMA only needs the tail of its dep chain.
+                # Consolidate whenever any same-slot LR dep is not already last_lr;
+                # this covers both multi-dep cases and the single-dep case where
+                # the dep lands on a non-tail LR (e.g. subIterK-major SA vs SB).
                 if slot.mfma and last_lr is not None:
                     slot_lr_set = set(id(lr) for lr in ordered_lrs)
                     lr_deps = [d for d in slot.mfma.deps
                                if id(d.ref) in slot_lr_set]
-                    if len(lr_deps) > 1:
+                    needs_consolidate = (
+                        lr_deps and id(lr_deps[-1].ref) != id(last_lr)
+                    ) or len(lr_deps) > 1
+                    if needs_consolidate:
                         other_deps = [d for d in slot.mfma.deps
                                       if id(d.ref) not in slot_lr_set]
                         slot.mfma.deps = other_deps + [
@@ -3104,18 +3247,27 @@ class LogicalScheduler:
 
         module = Module(label)
         module.addComment0(f"{label} start")
-        for pi, partition_emitted in enumerate(emitted_3d):
-            for k, em_list in enumerate(partition_emitted):
-                module.addComment0(f"partition={pi} subIterK={k}")
-                has_mfma = any(em.opType == 'mfma' for em in em_list)
+        numK_em = len(emitted_3d[0]) if emitted_3d else 0
+        if self.config.subIterK_major:
+            pairs = [(pi, k)
+                     for k in range(numK_em)
+                     for pi in range(len(emitted_3d))]
+        else:
+            pairs = [(pi, k)
+                     for pi in range(len(emitted_3d))
+                     for k in range(numK_em)]
+        for pi, k in pairs:
+            em_list = emitted_3d[pi][k]
+            module.addComment0(f"partition={pi} subIterK={k}")
+            has_mfma = any(em.opType == 'mfma' for em in em_list)
 
-                if schedule and em_list and has_mfma:
-                    scheduled = instructionSchedule(em_list)
-                    module.add(scheduled)
-                else:
-                    for em in em_list:
-                        for inst in em.instructions:
-                            module.add(inst)
+            if schedule and em_list and has_mfma:
+                scheduled = instructionSchedule(em_list)
+                module.add(scheduled)
+            else:
+                for em in em_list:
+                    for inst in em.instructions:
+                        module.add(inst)
         module.addComment0(f"{label} end")
         return module
 

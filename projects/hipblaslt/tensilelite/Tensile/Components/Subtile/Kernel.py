@@ -1247,7 +1247,9 @@ def mainLoop(writer, kernel, tensorParametersA, tensorParametersB):
           grSB=grSBGran,
           partitionSizeM=partSizeM,
           partitionSizeN=partSizeN,
-          pgr=schedulerPgr
+          pgr=schedulerPgr,
+          isMXFP8=(bool(scaleTiA or scaleTiB)
+                   and kernel["ProblemType"]["DataTypeA"].is8bitFloat()),
       )
       
       scheduler = LogicalScheduler(cfg)
