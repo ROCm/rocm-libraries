@@ -1508,4 +1508,42 @@ namespace hipblaslt_ext
         return status;
     }
 
+    /* This function is introduced for supporting rocblas hipblaslt integration
+     * This function is invoked from hipblaslt_host.cpp (runHipblasltContractionProblem())
+     * when rocblas already knows the solution index. This function checks if the 
+     * kernel corresponding to the solution index is supported on a given GPU and
+     * returns the workspace size required for the kernel.
+     */
+    hipblasStatus_t isSolutionSupported(hipblasLtMatmulHeuristicResult_t* heuristicResultsArray,
+                                         hipblasLtHandle_t                  handle,
+                                         hipblasLtMatmulDesc_t              matmulDesc,
+                                         const void*                        alpha,
+                                         hipblasLtMatrixLayout_t            matA,
+                                         hipblasLtMatrixLayout_t            matB,
+                                         const void*                        beta,
+                                         hipblasLtMatrixLayout_t            matC,
+                                         hipblasLtMatrixLayout_t            matD,
+                                         size_t*                            workspaceSize,
+                                         int*                               returnAlgoCount)
+    {
+        if(heuristicResultsArray[0].algo.data[0] != 0)
+        {
+            rocblaslt_status status = rocblaslt_matmul_is_algo_supported((rocblaslt_handle)handle,
+                                                                         (rocblaslt_matmul_desc)matmulDesc,
+                                                                         alpha,
+                                                                         (rocblaslt_matrix_layout)matA,
+                                                                         (rocblaslt_matrix_layout)matB,
+                                                                         beta,
+                                                                         (rocblaslt_matrix_layout)matC,
+                                                                         (rocblaslt_matrix_layout)matD,
+                                                                         (rocblaslt_matmul_algo*)&heuristicResultsArray[0].algo,
+                                                                         &heuristicResultsArray[0].workspaceSize);
+            if(rocblaslt_status_success == status)
+                (*returnAlgoCount)++;
+            if(workspaceSize != nullptr)
+                *workspaceSize = heuristicResultsArray[0].workspaceSize;
+            return (hipblasStatus_t)status;
+        }
+        return HIPBLAS_STATUS_SUCCESS;
+    }
 } // End of namespace hipblasltext

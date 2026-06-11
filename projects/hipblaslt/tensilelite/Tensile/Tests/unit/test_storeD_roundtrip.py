@@ -22,8 +22,6 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
 
-from hip import hip  # type: ignore
-
 from unittest.mock import MagicMock
 
 from rocisa.code import Module, TextBlock
@@ -39,7 +37,6 @@ from Tensile.Components.Subtile.Kernel import TileInfo, CD_F32
 
 from gpu_test_helpers import (
     TileConfig,
-    HAS_GFX950,
     GFX_TARGET,
     WAVESIZE,
     NUM_THREADS,
@@ -47,11 +44,13 @@ from gpu_test_helpers import (
     generate_kernel_asm,
     assemble_and_run,
     assemble_kernel,
+    hip,
     hip_check,
     init_rocisa,
+    requires_gpu,
 )
 
-pytestmark = pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
+pytestmark = requires_gpu
 
 # ---------------------------------------------------------------------------
 # Test configurations: (mt_a, mt_b, depth_u)

@@ -270,7 +270,15 @@ inline const char* hipsparseStatusToString(hipsparseStatus_t status)
 
 // EXPECT_HIPSPARSE_STATUS
 #ifdef GOOGLE_TEST
-#define EXPECT_HIPSPARSE_STATUS2(STATUS, EXPECT) ASSERT_EQ(STATUS, EXPECT)
+#define EXPECT_HIPSPARSE_STATUS2(STATUS, EXPECT)                                                 \
+    do                                                                                           \
+    {                                                                                            \
+        hipsparseStatus_t expect_hipsparse_status_status_ = (STATUS);                            \
+        hipsparseStatus_t expect_hipsparse_status_expect_ = (EXPECT);                            \
+        ASSERT_EQ(expect_hipsparse_status_status_, expect_hipsparse_status_expect_)              \
+            << "received " << hipsparseStatusToString(expect_hipsparse_status_status_)           \
+            << ", expected " << hipsparseStatusToString(expect_hipsparse_status_expect_) << "."; \
+    } while(0)
 #else
 #define EXPECT_HIPSPARSE_STATUS2(status, expect)                                            \
     if(status != expect)                                                                    \

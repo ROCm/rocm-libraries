@@ -401,6 +401,13 @@ bool serializeVisit(const MemTokenData& mod, std::ostream& os) {
     return true;
 }
 
+// LabelData
+bool serializeVisit(const LabelData& mod, std::ostream& os) {
+    os << ", mod.label = { label = \"" << mod.label << "\""
+       << ", alignment = " << static_cast<int>(mod.alignment) << " }";
+    return true;
+}
+
 template <typename ModifierType, typename... Rest, unsigned Dummy = 0>
 bool serializeVisit(const Modifier& mod, std::ostream& os) {
     if (auto* modifier = dyn_cast<ModifierType>(&mod)) {
@@ -415,7 +422,7 @@ bool ModifierSerializer::serialize(const Modifier& mod, std::ostream& os) {
                           CacheScopeModifiers, SMEMModifiers, SDWAModifiers, DPPModifiers,
                           VOP3Modifiers, VOP3PModifiers, True16Modifiers, EXEC, VCC, SWaitCntData,
                           SWaitTensorCntData, SWaitStoreCntData, SDelayAluData, SWaitAluData,
-                          MFMAModifiers, MatrixFmtModifiers, MemTokenData>(mod, os);
+                          MFMAModifiers, MatrixFmtModifiers, MemTokenData, LabelData>(mod, os);
 }
 
 /*
@@ -547,6 +554,9 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
         if (fields.contains("tokens")) {
             inst->addModifier(MemTokenData(getIntVector(fields, "tokens")));
         }
+    } else if (attrKey == "mod.label") {
+        inst->addModifier(LabelData(getStr(fields, "label", ""),
+                                    static_cast<uint16_t>(getInt(fields, "alignment", 1))));
     }
     // mod.sdwa, mod.vop3p, mod.true16: no deserialize support yet
 }
