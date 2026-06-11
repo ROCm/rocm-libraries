@@ -41,6 +41,8 @@
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
+#include "stinkytofu/transforms/asm/InsertWaitAluPass.hpp"
+#include "stinkytofu/transforms/asm/LongBranchLoweringPass.hpp"
 #include "stinkytofu/transforms/asm/LoopRegionRemarkPass.hpp"
 #include "stinkytofu/transforms/asm/MemTokenConsistencyCheckPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
@@ -154,8 +156,23 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     pm.addPass(createInsertVgprMsbPass());
     pm.addPass(createCFGBuilderPass());
     pm.addPass(createMemTokenConsistencyCheckPass());
+
     if (optLevel != OptLevel::O0) {
-        pm.addPass(createInsertDelayAluPass(/*minWavesPerSimd=*/2));
+        // -- region: expertScheduleMode2 (label_ASM_Start .. noLoadLoopBody) --
+        // Wait-alu insertion + mode2 lifecycle run scoped to the compute region only,
+        {
+            PassManager innerPM;
+            registerAllAnalyses(innerPM.getAnalysisManager());
+            configureDebugOutput(innerPM, moduleOptions, "expertScheduleMode2", debugStreams);
+            innerPM.addPass(createLongBranchLoweringPass());
+            innerPM.addPass(createCFGBuilderPass());
+            innerPM.addPass(createInsertWaitAluPass());
+            // Shares this region scope for convenience only — not gated by expert mode.
+            innerPM.addPass(createInsertDelayAluPass(/*minWavesPerSimd=*/2));
+            pm.addPass(
+                createKernelToRegionPassAdaptor(module, "expertScheduleMode2", std::move(innerPM)));
+        }
+
         pm.addPass(createLoopRegionRemarkPass());
     }
     pm.addPass(createEstimateAsmCyclesPass());
@@ -174,7 +191,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
 struct Gfx1250Registrar {
     Gfx1250Registrar() {
         BackendRegistry::setArchPipeline(
-            GFX1250_ARCH, {buildGfx1250Pipeline, {"loopWithPrefetch", "noLoadLoopBody"}});
+            GFX1250_ARCH,
+            {buildGfx1250Pipeline, {"loopWithPrefetch", "noLoadLoopBody", "expertScheduleMode2"}});
     }
 };
 static Gfx1250Registrar s_gfx1250Registrar;
