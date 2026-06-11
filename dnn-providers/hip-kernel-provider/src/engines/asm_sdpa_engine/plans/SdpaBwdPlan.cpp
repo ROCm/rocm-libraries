@@ -444,11 +444,8 @@ size_t SdpaBwdPlan::getWorkspaceSize(const Handle& /*handle*/) const
 {
     return sdpaBwdWorkspaceSize(_params.batchSize,
                                 _params.numHeadsQ,
-                                _params.numHeadsKv,
                                 _params.seqLenQ,
-                                _params.seqLenKv,
                                 _params.headDimQk,
-                                _params.headDimV,
                                 _params.accumulatorType);
 }
 
@@ -493,8 +490,7 @@ void SdpaBwdPlan::execute(const Handle& handle,
     // 4. Carve workspace into sub-buffers.
     // A32: dq_acc follows D buffer (DQDKDV accumulates FP32 dQ there, then DQ_CONVERT casts).
     // A16: DQDKDV writes dQ directly to the output buffer; dq_acc is not allocated.
-    // GQA: expanded dK/dV buffers follow dq_acc (or D if A16).
-    // Layout: D buffer | dq_acc (A32 only) | dk_expanded (GQA only) | dv_expanded (GQA only)
+    // Layout: D buffer | dq_acc (A32 only)
     auto* dBufPtr = workspace;
     size_t wsOffset = sdpaBwdDBufferSize(_params.batchSize, _params.numHeadsQ, _params.seqLenQ);
 
@@ -508,59 +504,10 @@ void SdpaBwdPlan::execute(const Handle& handle,
             _params.batchSize, _params.numHeadsQ, _params.seqLenQ, _params.headDimQk);
     }
 
-    // GQA: The DQDKDV kernel writes dK and dV per Q-head (nhead_q heads total).
-    // When nhead_q > nhead_k, the graph output dK/dV only has nhead_k heads.
-    // AITER allocates expanded dk/dv buffers with nhead_q heads, lets the kernel
-    // write all Q-head contributions, then sums across the GQA ratio dimension
-    // (asm_mha_bwd.cu lines 142-149, 337-339 at commit 17d4a33).
-    const bool isGqa = _params.numHeadsQ > _params.numHeadsKv;
-    void* dkExpandedPtr = nullptr;
-    void* dvExpandedPtr = nullptr;
-    if(isGqa)
-    {
-        dkExpandedPtr = static_cast<char*>(workspace) + wsOffset;
-        wsOffset += sdpaBwdGqaExpandedBufferSize(
-            _params.batchSize, _params.numHeadsQ, _params.seqLenKv, _params.headDimQk);
-        dvExpandedPtr = static_cast<char*>(workspace) + wsOffset;
-    }
-
-    // For the kernel, use expanded buffers (GQA) or graph output buffers (non-GQA).
-    void* dkKernelPtr = isGqa ? dkExpandedPtr : dkPtr;
-    void* dvKernelPtr = isGqa ? dvExpandedPtr : dvPtr;
-
     // 5. Build convenience args struct (mirrors AITER mha_bwd_args).
     // Byte-stride uint32 overflow was already rejected by isApplicable.
-    MhaBwdArgs mhaArgs = buildMhaBwdArgs(_params,
-                                         qPtr,
-                                         kPtr,
-                                         vPtr,
-                                         oPtr,
-                                         doPtr,
-                                         lsePtr,
-                                         dqPtr,
-                                         dkKernelPtr,
-                                         dvKernelPtr,
-                                         dBufPtr,
-                                         dqAccPtr);
-
-    // GQA: override dK/dV strides to match expanded buffer layout [B, H_q, S_kv, D].
-    // The expanded buffers are contiguous with nhead_q heads instead of nhead_k.
-    if(isGqa)
-    {
-        // Expanded buffer: [B, H_q, S_kv, D] contiguous (BHSD layout)
-        // stride_dk  = D         (seq stride — step between adjacent sequence positions)
-        // nhead_stride_dk = S_kv * D  (head stride — step between adjacent heads)
-        // batch_stride_dk = H_q * S_kv * D (batch stride)
-        mhaArgs.stride_dk = _params.headDimQk;
-        mhaArgs.nhead_stride_dk = static_cast<unsigned int>(_params.seqLenKv) * _params.headDimQk;
-        mhaArgs.batch_stride_dk
-            = static_cast<unsigned int>(_params.numHeadsQ) * _params.seqLenKv * _params.headDimQk;
-
-        mhaArgs.stride_dv = _params.headDimV;
-        mhaArgs.nhead_stride_dv = static_cast<unsigned int>(_params.seqLenKv) * _params.headDimV;
-        mhaArgs.batch_stride_dv
-            = static_cast<unsigned int>(_params.numHeadsQ) * _params.seqLenKv * _params.headDimV;
-    }
+    const MhaBwdArgs mhaArgs = buildMhaBwdArgs(
+        _params, qPtr, kPtr, vPtr, oPtr, doPtr, lsePtr, dqPtr, dkPtr, dvPtr, dBufPtr, dqAccPtr);
 
     // 6. Launch kernels on the same stream.
     // a32: 3 kernels — ODO → DQDKDV → DQ_CONVERT (sequential dependencies)
@@ -639,168 +586,6 @@ void SdpaBwdPlan::execute(const Handle& handle,
             "SdpaBwdPlan::execute: hipModuleLaunchKernel failed for SDPA backward DQDKDV");
     }
     plan_utils::throwOnLaunchPostError("SDPA backward DQDKDV");
-
-    // 6b½. GQA reduction: sum expanded dK/dV [B, H_q, S_kv, D] → output [B, H_kv, S_kv, D].
-    // Each group of `ratio` consecutive Q-head slices is summed element-wise into
-    // one KV-head slice.  AITER does this via torch::sum_out (asm_mha_bwd.cu:337-339).
-    // POC: host-side reduction — correct, not performance-critical for integration tests.
-    // TODO: Replace with a GPU-side reduction kernel for production performance.
-    if(isGqa)
-    {
-        const hipError_t syncErr = hipStreamSynchronize(stream);
-        if(syncErr != hipSuccess)
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                std::string("SdpaBwdPlan::execute: hipStreamSynchronize failed before GQA "
-                            "reduction, error: ")
-                    + hipGetErrorString(syncErr));
-        }
-
-        const unsigned int ratio = _params.numHeadsQ / _params.numHeadsKv;
-
-        const bool isBf16 = _params.ioDataType == IoDataType::BF16;
-
-        // 16-bit ↔ float conversion helpers for BF16 and FP16.
-        auto halfToFloat = [isBf16](uint16_t h) -> float {
-            if(isBf16)
-            {
-                // BF16: sign(1) + exp(8) + mantissa(7) — upper 16 bits of IEEE 754 float
-                uint32_t bits = static_cast<uint32_t>(h) << 16;
-                float val;
-                std::memcpy(&val, &bits, sizeof(float));
-                return val;
-            }
-            // FP16: sign(1) + exp(5) + mantissa(10) → IEEE 754 float
-            uint32_t sign = (static_cast<uint32_t>(h) & 0x8000u) << 16;
-            uint32_t expF16 = (h >> 10) & 0x1Fu;
-            uint32_t mantissa = h & 0x3FFu;
-            if(expF16 == 0)
-            {
-                // Subnormal or zero
-                if(mantissa == 0)
-                {
-                    float val;
-                    std::memcpy(&val, &sign, sizeof(float));
-                    return val;
-                }
-                // Normalize subnormal
-                expF16 = 1;
-                while((mantissa & 0x400u) == 0)
-                {
-                    mantissa <<= 1;
-                    expF16--;
-                }
-                mantissa &= 0x3FFu;
-                uint32_t bits = sign | ((expF16 + 127 - 15) << 23) | (mantissa << 13);
-                float val;
-                std::memcpy(&val, &bits, sizeof(float));
-                return val;
-            }
-            if(expF16 == 0x1Fu)
-            {
-                // Inf/NaN
-                uint32_t bits = sign | 0x7F800000u | (mantissa << 13);
-                float val;
-                std::memcpy(&val, &bits, sizeof(float));
-                return val;
-            }
-            uint32_t bits = sign | ((expF16 + 127 - 15) << 23) | (mantissa << 13);
-            float val;
-            std::memcpy(&val, &bits, sizeof(float));
-            return val;
-        };
-
-        auto floatToHalf = [isBf16](float f) -> uint16_t {
-            uint32_t bits;
-            std::memcpy(&bits, &f, sizeof(float));
-            if(isBf16)
-            {
-                // Float → BF16 (round-to-nearest-even)
-                bits += 0x7FFFu + ((bits >> 16) & 1u);
-                return static_cast<uint16_t>(bits >> 16);
-            }
-            // Float → FP16
-            const uint32_t sign = (bits >> 16) & 0x8000u;
-            int32_t expF32 = static_cast<int32_t>((bits >> 23) & 0xFFu) - 127 + 15;
-            const uint32_t mantissa = bits & 0x7FFFFFu;
-            if(expF32 >= 0x1F)
-            {
-                return static_cast<uint16_t>(sign | 0x7C00u); // Inf
-            }
-            if(expF32 <= 0)
-            {
-                return static_cast<uint16_t>(sign); // Flush to zero
-            }
-            // Round-to-nearest-even
-            uint32_t shifted = mantissa >> 13;
-            const uint32_t remainder = mantissa & 0x1FFFu;
-            if(remainder > 0x1000u || (remainder == 0x1000u && (shifted & 1u)))
-            {
-                shifted++;
-                if(shifted > 0x3FFu)
-                {
-                    shifted = 0;
-                    expF32++;
-                    if(expF32 >= 0x1F)
-                    {
-                        return static_cast<uint16_t>(sign | 0x7C00u);
-                    }
-                }
-            }
-            return static_cast<uint16_t>(sign | (static_cast<uint32_t>(expF32) << 10) | shifted);
-        };
-
-        // Lambda: reduce one expanded buffer (dK or dV) from [B, H_q, S_kv, D] → [B, H_kv, S_kv, D]
-        // by summing `ratio` consecutive head slices.
-        auto reduceGqaExpanded = [&](void* expandedDevPtr,
-                                     void* outputDevPtr,
-                                     unsigned int headDim) {
-            const size_t headSliceElems = static_cast<size_t>(_params.seqLenKv) * headDim;
-            const size_t totalExpandedElems
-                = static_cast<size_t>(_params.batchSize) * _params.numHeadsQ * headSliceElems;
-            const size_t outputElems
-                = static_cast<size_t>(_params.batchSize) * _params.numHeadsKv * headSliceElems;
-
-            std::vector<uint16_t> expanded(totalExpandedElems);
-            (void)hipMemcpy(expanded.data(),
-                            expandedDevPtr,
-                            totalExpandedElems * sizeof(uint16_t),
-                            hipMemcpyDeviceToHost);
-
-            // Accumulate in FP32, then convert back to BF16/FP16
-            std::vector<float> reduced(outputElems, 0.0f);
-            for(unsigned int b = 0; b < _params.batchSize; ++b)
-            {
-                for(unsigned int hk = 0; hk < _params.numHeadsKv; ++hk)
-                {
-                    const size_t outOff
-                        = (static_cast<size_t>(b) * _params.numHeadsKv + hk) * headSliceElems;
-                    for(unsigned int r = 0; r < ratio; ++r)
-                    {
-                        const unsigned int hq = hk * ratio + r;
-                        const size_t inOff
-                            = (static_cast<size_t>(b) * _params.numHeadsQ + hq) * headSliceElems;
-                        for(size_t i = 0; i < headSliceElems; ++i)
-                        {
-                            reduced[outOff + i] += halfToFloat(expanded[inOff + i]);
-                        }
-                    }
-                }
-            }
-
-            std::vector<uint16_t> output(outputElems);
-            for(size_t i = 0; i < outputElems; ++i)
-            {
-                output[i] = floatToHalf(reduced[i]);
-            }
-            (void)hipMemcpy(
-                outputDevPtr, output.data(), outputElems * sizeof(uint16_t), hipMemcpyHostToDevice);
-        };
-
-        reduceGqaExpanded(dkExpandedPtr, dkPtr, _params.headDimQk);
-        reduceGqaExpanded(dvExpandedPtr, dvPtr, _params.headDimV);
-    }
 
     // 6c. DQ_CONVERT (FP32 → BF16) — A32 path only.
     // A16 wrote dQ directly to the output BF16 buffer in step 6b; no cast needed.

@@ -523,38 +523,39 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsGfx950)
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsFractionalGqaRatio)
-{
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
-    {
-        GTEST_SKIP();
-    }
-
-    // nhead_q = 6, nhead_k = 4 → 6 % 4 = 2.  SdpaBwdPlan would silently
-    // truncate ratio = 6/4 = 1, dropping K/V heads in dispatch.
-    const std::vector<int64_t> qDims = {2, 6, 256, 128};
-    const std::vector<int64_t> kDims = {2, 4, 256, 128};
-    const std::vector<int64_t> vDims = {2, 4, 256, 128};
-    const std::vector<int64_t> oDims = {2, 6, 256, 128};
-
-    auto builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
-        qDims,
-        hipdnn_data_sdk::utilities::generateStrides(qDims),
-        kDims,
-        hipdnn_data_sdk::utilities::generateStrides(kDims),
-        vDims,
-        hipdnn_data_sdk::utilities::generateStrides(vDims),
-        oDims,
-        hipdnn_data_sdk::utilities::generateStrides(oDims),
-        DataType::BFLOAT16);
-
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
-        builder.GetBufferPointer(), builder.GetSize());
-
-    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
-}
+// ALMIOPEN-2079: Re-enable when GQA support is implemented
+// TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsFractionalGqaRatio)
+// {
+//     using namespace hipdnn_flatbuffers_sdk::data_objects;
+//
+//     if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+//     {
+//         GTEST_SKIP();
+//     }
+//
+//     // nhead_q = 6, nhead_k = 4 → 6 % 4 = 2.  SdpaBwdPlan would silently
+//     // truncate ratio = 6/4 = 1, dropping K/V heads in dispatch.
+//     const std::vector<int64_t> qDims = {2, 6, 256, 128};
+//     const std::vector<int64_t> kDims = {2, 4, 256, 128};
+//     const std::vector<int64_t> vDims = {2, 4, 256, 128};
+//     const std::vector<int64_t> oDims = {2, 6, 256, 128};
+//
+//     auto builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+//         qDims,
+//         hipdnn_data_sdk::utilities::generateStrides(qDims),
+//         kDims,
+//         hipdnn_data_sdk::utilities::generateStrides(kDims),
+//         vDims,
+//         hipdnn_data_sdk::utilities::generateStrides(vDims),
+//         oDims,
+//         hipdnn_data_sdk::utilities::generateStrides(oDims),
+//         DataType::BFLOAT16);
+//
+//     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+//         builder.GetBufferPointer(), builder.GetSize());
+//
+//     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
+// }
 
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsAsymmetricHdim)
 {

@@ -20,14 +20,6 @@ enum class AccumulatorType : uint8_t
     A16 // BF16 accumulator — 2-kernel path (ODO → DQDKDV)
 };
 
-/// IO data type for SDPA backward. Needed for GQA reduction which interprets
-/// raw 16-bit values differently for BF16 vs FP16.
-enum class IoDataType : uint8_t
-{
-    BF16,
-    FP16
-};
-
 /**
  * @brief Parameters for SDPA backward kernel execution.
  *
@@ -143,10 +135,6 @@ struct SdpaBwdParams
     // Used by computeMaskCoordinates() to compute the offset applied to
     // mask_x/mask_y for SLIDING_WINDOW kernels.
     bool topLeftAlignment = true;
-
-    // IO data type — needed by the GQA host-side reduction to interpret
-    // raw 16-bit values correctly (BF16 vs FP16 have different bit layouts).
-    IoDataType ioDataType = IoDataType::BF16;
 };
 
 } // namespace asm_sdpa_engine

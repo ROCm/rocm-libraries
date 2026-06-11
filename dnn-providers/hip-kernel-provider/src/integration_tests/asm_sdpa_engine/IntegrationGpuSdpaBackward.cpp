@@ -79,10 +79,11 @@ std::vector<SdpaBwdTestCase> getSdpaBwdTestCases()
         SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 512, 128}, std::nullopt, -1, 0, true),
         // Asymmetric Sq != Skv — bottom-right causal
         SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 512, 128}, std::nullopt, -1, 0, false),
-        // GQA: 4 Q heads, 1 KV head — no mask
-        SdpaBwdTestCase({1, 4, 256, 128}, {1, 1, 256, 128}),
-        // GQA: 4 Q heads, 1 KV head — top-left causal
-        SdpaBwdTestCase({1, 4, 256, 128}, {1, 1, 256, 128}, std::nullopt, -1, 0, true),
+        // ALMIOPEN-2079: Re-enable when GQA support is implemented
+        // // GQA: 4 Q heads, 1 KV head — no mask
+        // SdpaBwdTestCase({1, 4, 256, 128}, {1, 1, 256, 128}),
+        // // GQA: 4 Q heads, 1 KV head — top-left causal
+        // SdpaBwdTestCase({1, 4, 256, 128}, {1, 1, 256, 128}, std::nullopt, -1, 0, true),
     };
 }
 

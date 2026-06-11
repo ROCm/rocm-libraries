@@ -551,17 +551,6 @@ bool SdpaBwdPlanBuilder::isApplicable(
         vTensor->dims()->size() != 4,
         "v tensor must be rank 4 (Actual rank: " + std::to_string(vTensor->dims()->size()) + ")");
 
-    // GQA: SdpaBwdPlan packs ratio = nhead_q / nhead_k (integer division) into
-    // the dqdkdv kernarg.  A fractional ratio is a kernel-correctness violation
-    // (silent truncation), not a "no row matches" registry miss, so reject it
-    // here rather than letting buildPlan succeed and execute corrupt dQ/dK/dV.
-    auto numHeadsQ = qTensor->dims()->Get(1);
-    auto numHeadsKv = kTensor->dims()->Get(1);
-    HIP_KERNEL_RETURN_FALSE_IF(numHeadsKv == 0 || numHeadsQ % numHeadsKv != 0,
-                               "GQA requires nhead_q % nhead_k == 0 (Actual: nhead_q="
-                                   + std::to_string(numHeadsQ)
-                                   + ", nhead_k=" + std::to_string(numHeadsKv) + ")");
-
     // Stats is FP32 (LSE from forward pass)
     HIP_KERNEL_RETURN_FALSE_IF(statsTensor->data_type() != DataType::FLOAT,
                                "stats tensor datatype must be FP32 (Actual type: "
@@ -692,6 +681,7 @@ bool SdpaBwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(!dqdkdvCfgOpt,
                                "Failed to resolve dqdkdv config for byte-stride validation");
     const bool useA32 = (dqdkdvTuple.atomic32 == static_cast<int>(AccumulatorMode::A32));
+    const auto numHeadsQ = qTensor->dims()->Get(1);
     const int64_t seqLenQ = qTensor->dims()->Get(2);
     HIP_KERNEL_RETURN_FALSE_IF(!wouldBwdByteStridesFitUint32(*qTensor,
                                                              *kTensor,
@@ -722,7 +712,6 @@ size_t SdpaBwdPlanBuilder::getMaxWorkspaceSize(
     const auto& attrs = opGraph.nodeWrappers().front()->attributesAs<SdpaBackwardAttributes>();
     const auto& tensorMap = opGraph.getTensorMap();
     const auto* qTensor = tensorMap.at(attrs.q_tensor_uid());
-    const auto* vTensor = tensorMap.at(attrs.v_tensor_uid());
 
     // Q tensor layout is [B, H_q, S_q, D_qk]
     auto batch = static_cast<size_t>(qTensor->dims()->Get(0));
@@ -730,16 +719,10 @@ size_t SdpaBwdPlanBuilder::getMaxWorkspaceSize(
     auto seqLenQ = static_cast<size_t>(qTensor->dims()->Get(2));
     auto headDimQk = static_cast<size_t>(qTensor->dims()->Get(3));
 
-    // V tensor layout is [B, H_kv, S_kv, D_v]
-    auto headsKv = static_cast<size_t>(vTensor->dims()->Get(1));
-    auto seqLenKv = static_cast<size_t>(vTensor->dims()->Get(2));
-    auto headDimV = static_cast<size_t>(vTensor->dims()->Get(3));
-
     const AccumulatorType accType
         = executionSettings.accumulatorType.value_or(AccumulatorType::A32);
 
-    return sdpaBwdWorkspaceSize(
-        batch, headsQ, headsKv, seqLenQ, seqLenKv, headDimQk, headDimV, accType);
+    return sdpaBwdWorkspaceSize(batch, headsQ, seqLenQ, headDimQk, accType);
 }
 
 void SdpaBwdPlanBuilder::initializeExecutionSettings(
@@ -1147,7 +1130,6 @@ void SdpaBwdPlanBuilder::buildPlan(
     params.statsStrideBatch = statsStrideBatch;
     params.attnScale = attnScale;
     params.accumulatorType = accType;
-    params.ioDataType = (dataTypeId == "fp16") ? IoDataType::FP16 : IoDataType::BF16;
     params.maskOrdinal = static_cast<int32_t>(maskType);
     if(maskType == MaskType::SLIDING_WINDOW)
     {
