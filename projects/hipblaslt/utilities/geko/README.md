@@ -325,6 +325,20 @@ tox                           # in an isolated tox environment
 `tox` and `invoke test` forward extra arguments straight to pytest, e.g.
 `tox -- --skip-slow --skip-geko-bin` or `invoke test --skip-slow`.
 
+The plain `python3 -m pytest` / `invoke test` / `tox` paths assume you have already
+provisioned the environment by hand (steps 2–4, i.e. `tensilelite/requirements-dev.txt`
+which builds `rocisa`). To provision that environment automatically and run the suite
+inside it, use the `integration` tox env, which installs the tensilelite dependencies
+(`rocisa`) from the hipBLASLt checkout pointed at by `HIPBLASLT_PATH` before running pytest:
+
+```bash
+HIPBLASLT_PATH=~/rocm-libraries/projects/hipblaslt tox -e integration
+HIPBLASLT_PATH=~/rocm-libraries/projects/hipblaslt tox -e integration -- --skip-slow
+```
+
+Tests that require Tensile/`rocisa` are skipped (not errored) when `rocisa` is not
+importable, so the hermetic subset still runs in a bare environment.
+
 Integration tests need a hipBLASLt repo and (in some cases) a tuning config and/or a workload log. Pass these via custom pytest options:
 
 ```bash

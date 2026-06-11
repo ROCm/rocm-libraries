@@ -14,7 +14,7 @@ Integration, artifact checks, and MI / optimization / fork-param coverage for `g
 
 ## Running
 
-From repo root (`TuningDriver/geko`):
+From the `geko` utilities directory (`projects/hipblaslt/utilities/geko` under your ROCm / hipBLASLt checkout):
 
 ```bash
 python3 -m pytest tests/config_generator/ -v -rs \

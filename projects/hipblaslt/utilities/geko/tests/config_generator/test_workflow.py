@@ -122,6 +122,7 @@ class TestConfigGeneratorIntegration:
                 [
                     sys.executable,
                     str(script),
+                    "--hipblaslt",
                     str(hipblaslt_path),
                     "--config",
                     str(variant),

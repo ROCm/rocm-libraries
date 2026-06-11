@@ -81,8 +81,9 @@ class TestIntegration:
             [
                 sys.executable,
                 configure_py,
-                str(hip.resolve()),
                 str(workload.resolve()),
+                "--hipblaslt",
+                str(hip.resolve()),
                 "--workdir",
                 str(workdir.resolve()),
                 "--architecture",

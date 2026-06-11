@@ -149,6 +149,14 @@ def tensilelite_sys_path(hipblaslt_path):
         pytest.skip(f"tensilelite not found under {hipblaslt_path}")
     s = str(tl)
     sys.path.insert(0, s)
+    # The directory existing does not guarantee rocisa was built/installed in this
+    # checkout. Tensile imports rocisa (a compiled nanobind extension) lazily, so
+    # without this guard a missing rocisa surfaces as an error deep inside a test
+    # rather than a clean skip. See tox -e integration to provision the env.
+    pytest.importorskip(
+        "rocisa",
+        reason=f"rocisa not importable from {tl}; build it (e.g. tox -e integration).",
+    )
     try:
         yield
     finally:

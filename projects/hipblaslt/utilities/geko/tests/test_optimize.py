@@ -32,9 +32,9 @@ Usage:
 
     Hint: add -rs to see skip reasons, or -v for verbose output.
 
-    ``TestPipelineFast`` exercises ``optimize.main()`` with Tensile/GPU work mocked;
-    it runs in CI without hipBLASLt. ``TestIntegration`` runs configure then real
-    optimize (long-running; needs GPU).
+    ``TestPipelineFast`` exercises ``geko.pipeline.run_optimize`` with Tensile/GPU
+    work mocked; it runs in CI without hipBLASLt. ``TestIntegration`` runs configure
+    then real optimize (long-running; needs a built hipBLASLt and GPU).
 """
 
 import json
@@ -62,7 +62,7 @@ _OPTIMIZE_TIMEOUT_S = 7200
 # ---------------------------------------------------------------------------
 
 class TestPipelineFast:
-    """Call ``optimize.main()`` with heavy steps stubbed; no real tuning or benchmarks."""
+    """Call ``run_optimize`` with heavy steps stubbed; no real tuning or benchmarks."""
 
     def test_main_completes_with_mocks(self, tmp_path):
         """Full control-flow: validation, state flags, mocked run → merge → analyze."""
@@ -167,8 +167,9 @@ class TestIntegration:
             [
                 sys.executable,
                 configure_py,
-                hip_abs,
                 workload_abs,
+                "--hipblaslt",
+                hip_abs,
                 "--workdir",
                 workdir_abs,
                 "--architecture",
@@ -191,6 +192,7 @@ class TestIntegration:
             [
                 sys.executable,
                 optimize_py,
+                "--hipblaslt",
                 hip_abs,
                 "--workdir",
                 workdir_abs,

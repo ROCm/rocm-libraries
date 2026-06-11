@@ -1,9 +1,9 @@
 # Geko tests
 
-Run from repo root (`TuningDriver/geko`):
+Run from the `geko` utilities directory (`projects/hipblaslt/utilities/geko` under your ROCm / hipBLASLt checkout):
 
 ```bash
-cd ~/TuningDriver/geko
+cd ~/rocm-libraries/projects/hipblaslt/utilities/geko
 
 python3 -m pytest tests/ -v -rs \
     --hipblaslt-path ~/rocm-libraries/projects/hipblaslt \
