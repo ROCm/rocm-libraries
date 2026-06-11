@@ -46,14 +46,16 @@ projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/
 ├── rocisa_stinkytofu_adaptor/     # Python package (mirrors rocisa submodules)
 │   ├── __init__.py                # rocIsa singleton shell + re-exports
 │   ├── base.py                    # Item, rocIsa state sink, isaToGfx
-│   ├── caps.py / enum.py          # gfx1250 caps + IntEnum shims
+│   ├── caps.py / enum.py          # dynamic HW caps + IntEnum shims
 │   ├── register.py                # RegisterPool (real)
 │   ├── container.py               # RegisterContainer, vgpr/sgpr/… factories
-│   ├── code.py                    # Module, TextBlock, Signature*, …
+│   ├── code.py                    # Module, Macro, Signature*, KernelBody, …
 │   ├── label.py                   # LabelManager (real)
-│   ├── instruction.py             # Instruction bases + VMovB32 (partial)
-│   ├── functions.py               # ArgumentLoader (real) + dummy helpers
-│   ├── macro.py / asmpass.py      # dummy exports (structural)
+│   ├── instruction.py             # Instruction bases, MacroInstruction, VMovB32 (partial)
+│   ├── functions.py               # ArgumentLoader offsets real; emit stubs
+│   ├── macro.py                   # dummy macro builders only (Macro* lives in code.py)
+│   ├── asmpass.py                 # rocIsaPass port (partial; some passes stub)
+│   ├── stinky_interop.py          # toStinkyTofuModule + signature emit wrapper
 │   └── _dummy.py                  # make_dummy_* factories
 ├── tests/
 │   ├── test.sh                    # wrapper: PYTHONPATH + unittest discover

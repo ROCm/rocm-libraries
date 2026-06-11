@@ -52,7 +52,9 @@ What it does (real):
 Not yet done:
     - ``initTmps`` returns ``None``; the C++ implementation builds a
       ``Module`` of ``SMovB32`` / ``VMovB32`` per Available slot.
-      Restore once those classes are real (Phase 3-4).
+      Restore once those instruction shims return real ``Item``s for
+      emission (today ``VMovB32`` exists but init-temp wiring is still
+      unimplemented here).
 
 logicalIR correspondence:
     None. ``StinkyRegister`` (``shared/stinkytofu/include/stinkytofu/

@@ -974,8 +974,8 @@ class HolderContainer(RegisterContainer):
 # an Instruction's parameter list, calls its setRegNum(dst) and replaces
 # the slot with the resolved RegisterContainer snapshot.
 #
-# TODO(T6): Module / Instruction are still dummies at T2; this duck-types
-# on .items() / .getParams() so it lights up automatically once T6 lands.
+# Tree shape follows real ``Module.items()`` / ``Instruction.getParams()``
+# from this adaptor (historical T6 note removed).
 def replaceHolder(inst, dst: int):
     """Resolve all ``HolderContainer``s in ``inst`` using ``dst``.
 

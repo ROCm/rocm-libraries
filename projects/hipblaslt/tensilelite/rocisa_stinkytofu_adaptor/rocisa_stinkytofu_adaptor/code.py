@@ -33,7 +33,7 @@ What it does (real):
     - ``Module`` / ``TextBlock`` — real Python container nodes that
       mirror rocisa's tree API (add / items / itemsSize / count /
       flatitems / findIndex / replaceItem / popFirstItem / ...).
-      ``Module.to_stinky_asm(arch)`` is the **left-path entry point**:
+      ``Module.to_stinky_asm(arch, *, logical_name=...)`` is the **left-path entry point**:
       walks the item tree, builds a ``_stinkytofu.LogicalModule`` from
       every leaf that exposes ``to_stinky_logical()``, then routes it
       through ``_stinkytofu.lower_logical_module(...)`` to return a

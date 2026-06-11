@@ -54,26 +54,41 @@ What it does (real):
     - Submodules with real implementations: ``register`` (pool),
       ``enum`` (real ``IntEnum``s), ``base`` (state + accessors,
       ``KernelInfo`` / ``IsaInfo`` / ``OutputOptions``), ``caps``
-      (gfx1250 snapshot).
+      (dynamic hardware caps), ``container`` (register refs, modifiers,
+      ``MemTokenData``), ``label`` (``LabelManager``), ``code`` /
+      ``instruction`` / ``macro`` (see each module — coverage varies).
     - Submodule registration as ``rocisa.<submodule>`` for ``base``,
       ``enum``, ``container``, ``code``, ``label``, ``instruction``,
       ``functions``, ``asmpass``, ``macro``, ``register``.
+    - GLC/SLC asm keyword helpers: ``getGlcBitName`` / ``getSlcBitName`` read
+      active ISA asm caps via ``caps`` + ``rocIsa.getInstance()``.
+    - Stinkytofu binding probes: ``hasStinkyTofuBackend``,
+      ``isSupportedByStinkyTofu``, ``getRegisteredArchKeys`` delegate to the
+      standalone ``stinkytofu`` module (``_stinkytofu.so``).
+    - Stinkytofu asm-IR entry points: ``toStinkyTofuModule`` (``stinky_interop``)
+      lowers a Python ``code.Module`` through ``Module.to_stinky_asm`` →
+      ``stinkytofu.lower_logical_module``, matching the ``KernelWriter`` call
+      shape. ``StinkyAsmModule`` is the binding class when ``stinkytofu``
+      imports; otherwise a dummy placeholder. When a ``signature`` is passed,
+      emit prepends ``SignatureBase.toString()`` (text banner only — not the
+      full native stinkytofu signature conversion / metadata path).
 
-Not yet done (dummy):
-    - ``getGlcBitName`` / ``getSlcBitName`` (real; gfx1250 asm caps).
-    - Counters: ``count*``, ``find*``, ``getMFMAs``.
-    - ``asmpass``: partial Python port of ``rocIsaPass`` (``macroToInstruction``,
-      ``convertTextVariablesToRegisters``, ``getCycles`` gfx1250→0); activation
-      de-dup, graph optimisation, and ``insertDelayAlu`` are stubs for now.
-    - Interop hooks: ``hasStinkyTofuBackend``, ``isSupportedByStinkyTofu``,
-      ``getRegisteredArchKeys`` — forward to the standalone ``stinkytofu``
-      binding (``_stinkytofu.so``).
-    - Interop: ``toStinkyTofuModule`` — lowers ``code.Module`` via
-      ``Module.to_stinky_asm`` (``stinky_interop``). ``StinkyAsmModule`` —
-      re-exported from ``stinkytofu`` when the binding is importable.
-    - ``macro``: ``MacroVMagicDiv`` / ``PseudoRandomGenerator`` shims still dummy.
-    - ``container``: register-reference layer + ``Container`` ABC,
-      hardware tokens, ``MemTokenData``, and ``*Modifiers``.
+Not yet done or behind native parity:
+    - Module-level counters: ``count*``, ``findInstCount``, ``getMFMAs`` — dummy.
+    - ``asmpass``: ``rocIsaPass`` runs the real macro / text-variable passes;
+      ``removeDuplicatedFunction``, the ``doOpt()`` graph path,
+      ``insertDelayAlu``, and ``getCycles`` (always ``0`` on gfx1250) are
+      stubs or simplified vs the C++ implementation.
+    - ``toStinkyTofuModule(..., options=…)``: keyword accepted for API parity
+      with native rocisa, but values are **not** forwarded into
+      ``lower_logical_module`` (the binding still uses default
+      ``StinkyAsmModule::ModuleOptions`` there). Broadening ``to_stinky_logical``
+      coverage in ``instruction`` remains the main limiter on how much kernel
+      body reaches asm IR.
+    - ``macro`` submodule: only ``MacroVMagicDiv`` / ``VMagicDiv`` /
+      ``PseudoRandomGenerator*`` builder callables are still dummy
+      (see ``macro.py``). ``Macro`` / ``MacroInstruction`` IR types live
+      in ``code.py`` / ``instruction.py`` and are real.
 
 Design note — singleton state ownership:
     All process-wide state that the C++ ``rocisa::rocIsa`` singleton
