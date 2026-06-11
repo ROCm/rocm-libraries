@@ -346,4 +346,15 @@ class DuctileBackend(OptimizationBackend):
         finally:
             # Always restore original validation setting
             globalParameters["NumElementsToValidate"] = netv_original
+
+    def supports_solution_pool(self) -> bool:
+        """DuctileBackend does not support loading solutions from pool files.
+        
+        The GA-driven backend requires generating solutions through its own
+        optimization loop rather than using pre-computed solution pools.
+        
+        Returns:
+            False - DuctileBackend does not use solution pool files
+        """
+        return False
         

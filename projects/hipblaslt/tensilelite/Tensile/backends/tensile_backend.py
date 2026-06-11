@@ -139,5 +139,11 @@ class TensileBackend(OptimizationBackend):
 
         # Benchmark all solutions
         benchmark_runner(solutions, isCached=cacheValid and not useSolutionPool, buildOnly=buildOnly)
+
+    def supports_solution_pool(self) -> bool:
+        """TensileBackend supports loading solutions from pool files.
         
-       
+        Returns:
+            True - TensileBackend can use solution pool files
+        """
+        return True

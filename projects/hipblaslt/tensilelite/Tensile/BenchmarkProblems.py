@@ -829,9 +829,12 @@ def main(
     # Load solution pool index if provided and supported by the backend
     solutionPoolIndex = None
     if solutionPoolFiles:
-        #TODO check with provided backend if solution pool is supported before loading
-        #TODO raise warning if solution pool files are provided but backend doesn't support it
-        solutionPoolIndex = _loadSolutionPool(solutionPoolFiles)
+        backend_name = str(backend.get("Name", "tensile")).lower()
+        if BackendFactory.create(backend_name).supports_solution_pool():
+            solutionPoolIndex = _loadSolutionPool(solutionPoolFiles)
+        else:
+            printWarning(f"Backend '{backend_name}' does not support solution pools; ignoring provided pool files.")
+            solutionPoolFiles = None
 
     benchmarkDataPath = ensurePath(outputPath / BENCHMARK_DATA_DIR)
 

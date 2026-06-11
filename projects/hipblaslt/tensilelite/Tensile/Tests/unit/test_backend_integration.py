@@ -37,6 +37,9 @@ class _BackendForFactoryTest(OptimizationBackend):
     def run(self, backend_config, benchmark_config, benchmark_runner, cacheValid=False, buildOnly=False):
         return None
 
+    def supports_solution_pool(self):
+        return False
+
 
 def test_backend_factory_rejects_non_backend_class(monkeypatch):
     monkeypatch.setattr(BackendFactory, "_backends", {})
@@ -161,3 +164,16 @@ def test_ductile_backend_warns_when_cache_or_build_only(monkeypatch, tmp_path):
     backend.run({}, benchmark_config, lambda *_args, **_kwargs: ("unused.csv", 0), cacheValid=True, buildOnly=True)
     assert any("cacheValid is not supported" in msg for msg in warnings)
     assert any("buildOnly is not supported" in msg for msg in warnings)
+
+
+def test_tensile_backend_supports_solution_pool():
+    """Verify that TensileBackend supports solution pools."""
+    backend = TensileBackend()
+    assert backend.supports_solution_pool() is True
+
+
+@pytest.mark.skipif(not ductile_backend_mod.DUCTILE_AVAILABLE, reason="Ductile modules are not available")
+def test_ductile_backend_does_not_support_solution_pool():
+    """Verify that DuctileBackend does not support solution pools."""
+    backend = DuctileBackend()
+    assert backend.supports_solution_pool() is False

@@ -225,8 +225,36 @@ def load_CMS_groups(
     a comment derived from ``MIDesign.calculate_mfma_parameters`` (MT, TT, WG,
     MIBlockM), matching the loop below.
     """
-    from Tensile.Components.CustomSchedule import query_cms_kernels
-    from Tensile.Common.ValidParameters import validParameters
+    try:
+        from Tensile.Components.CustomSchedule import query_cms_kernels
+        from Tensile.Common.ValidParameters import validParameters
+    except ImportError:
+        import sys
+        import os
+        # Walk up directory tree looking for tensilelite as a sibling directory
+        # This works regardless of where the file is moved within the project structure
+        current_file = os.path.abspath(__file__)
+        current_dir = os.path.dirname(current_file)
+        tensilelite_path = None
+        
+        # Walk up until we find a parent containing 'tensilelite' directory
+        while current_dir != os.path.dirname(current_dir):  # not at filesystem root
+            candidate_path = os.path.join(current_dir, "tensilelite")
+            if os.path.isdir(candidate_path):
+                tensilelite_path = candidate_path
+                break
+            current_dir = os.path.dirname(current_dir)
+        
+        if tensilelite_path:
+            sys.path.insert(0, tensilelite_path)
+            from Tensile.Components.CustomSchedule import query_cms_kernels
+            from Tensile.Common.ValidParameters import validParameters
+        else:
+            raise ImportError(
+                "Tensile not found. Could not locate tensilelite directory "
+                "in parent directories of this file."
+            )
+    
 
     cms_dtype = _DTYPE_TO_CMS_QUERY.get(datatype.lower())
     if cms_dtype is None:

@@ -80,6 +80,15 @@ class OptimizationBackend(ABC):
         """
         pass
 
+    @abstractmethod
+    def supports_solution_pool(self) -> bool:
+        """Check if this backend supports loading solutions from a solution pool.
+        
+        Returns:
+            True if the backend can load solutions from pool files, False otherwise.
+        """
+        pass
+
 
 class BackendFactory:
     """Factory for registering and instantiating benchmark backends."""
