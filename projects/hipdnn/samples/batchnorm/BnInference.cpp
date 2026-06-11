@@ -28,10 +28,10 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     std::cout << "Running batch normalization inference graph " << inputType << " [" << layout
               << "]" << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
-    const int64_t n = 16; // BATCH SIZE
-    const int64_t c = 16; // CHANNELS (FEATURES)
-    const int64_t h = 16; // HEIGHT (SPATIAL DIMENSION)
-    const int64_t w = 16; // WIDTH (SPATIAL DIMENSION)
+    auto n = config.dims.size() > 0 ? config.dims[0] : 16;
+    auto c = config.dims.size() > 1 ? config.dims[1] : 16;
+    auto h = config.dims.size() > 2 ? config.dims[2] : 16;
+    auto w = config.dims.size() > 3 ? config.dims[3] : 16;
 
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
@@ -50,7 +50,8 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto y = graph->batchnorm_inference(x, mean, invVariance, scale, bias, bnAttributes);
     y->set_output(true);
 
-    HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
+    HIPDNN_FE_CHECK(graph->build(handle));
+
     std::cout << "Graph build successful.\n";
 
     utilities::Tensor<InputType> xTensor(x->get_dim(), layout);
@@ -100,7 +101,8 @@ bool SampleRunner::operator()(const TensorLayout& layout)
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
         std::cout << "CPU reference validation:\n";
-        const bool yValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
+
+        bool yValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
             std::cout, "y", validator, yRefTensor, yTensor, tolerance, tolerance);
 
         validationPassed = yValid;
@@ -114,6 +116,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     std::cout << "\nBatch normalization inference graph execution complete for " << inputType
               << ".\n\n";
+
     return validationPassed;
 }
 
@@ -126,7 +129,7 @@ int main(int argc, char* argv[])
         auto [handle, handleError] = createHipdnnHandle();
         HIPDNN_FE_CHECK(handleError);
 
-        const bool allPassed = run(SampleRunner{*handle, config});
+    bool allPassed = run(SampleRunner{*handle, config}, config);
 
         if(allPassed)
         {

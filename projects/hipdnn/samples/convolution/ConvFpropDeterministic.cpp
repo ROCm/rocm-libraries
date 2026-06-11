@@ -29,28 +29,27 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     std::cout << "Running deterministic convolution fprop graph " << inputType << " [" << layout
               << "]" << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
-    constexpr int64_t N = 16; // Batch size
+    auto n = config.dims.size() > 0 ? config.dims[0] : 16;
+    auto c = config.dims.size() > 1 ? config.dims[1] : 16;
+    auto h = config.dims.size() > 2 ? config.dims[2] : 16;
+    auto w = config.dims.size() > 3 ? config.dims[3] : 16;
 
-    // Input
-    constexpr int64_t C = 16; // Number of input (x) channels
-    constexpr int64_t H = 16; // Height
-    constexpr int64_t W = 16; // Width
+    auto k = config.filter.size() > 0 ? config.filter[0] : 16;
+    auto r = config.filter.size() > 0 ? config.filter[0] : 3;
+    auto s = config.filter.size() > 1 ? config.filter[1] : 3;
 
-    // Filter
-    constexpr int64_t K = 16; // Number of output (y) channels
-    constexpr int64_t R = 3; // Height
-    constexpr int64_t S = 3; // Width
-    constexpr int64_t U = 1; // Height stride
-    constexpr int64_t V = 1; // Width stride
-    constexpr int64_t PAD_H = 1; // Height padding
-    constexpr int64_t PAD_W = 1; // Width padding
-    constexpr int64_t DIL_H = 1; // Height dilation
-    constexpr int64_t DIL_W = 1; // Width dilation
+    auto u = config.stride.size() > 0 ? config.stride[0] : 1;
+    auto v = config.stride.size() > 1 ? config.stride[1] : 1;
+
+    auto padH = config.padding.size() > 0 ? config.padding[0] : 1;
+    auto padW = config.padding.size() > 1 ? config.padding[1] : 1;
+
+    auto dilH = config.dilation.size() > 0 ? config.dilation[0] : 1;
+    auto dilW = config.dilation.size() > 1 ? config.dilation[1] : 1;
 
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType).set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    // Set the preferred engine to deterministic for bit-reproducible results
     graph->set_preferred_engine_id_ext(MIOPEN_ENGINE_DETERMINISTIC_NAME);
 
     auto xAttr = createTensor({N, C, H, W}, inputType, layout);
@@ -65,7 +64,8 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto yAttr = graph->conv_fprop(xAttr, wAttr, convAttributes);
     yAttr->set_output(true);
 
-    HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
+    HIPDNN_FE_CHECK(graph->build(handle));
+
     std::cout << "Graph build successful (using deterministic engine).\n";
 
     utilities::Tensor<InputType> xTensor(xAttr->get_dim(), layout);
@@ -82,7 +82,6 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     HIPDNN_FE_CHECK(graph->get_workspace_size(workspaceSize));
     const utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
 
-    // First execution
     {
         std::unordered_map<int64_t, void*> variantPack;
         variantPack[xAttr->get_uid()] = xTensor.memory().deviceData();
@@ -93,7 +92,6 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         yTensor1.memory().markDeviceModified();
     }
 
-    // Second execution with same inputs
     {
         std::unordered_map<int64_t, void*> variantPack;
         variantPack[xAttr->get_uid()] = xTensor.memory().deviceData();
@@ -109,21 +107,17 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     std::cout << "First 10 y values (run 1): ";
     for(int i = 0; i < 10; ++i)
-    {
         std::cout << static_cast<float>(y1HostPtr[i]) << " ";
-    }
     std::cout << '\n';
 
     std::cout << "First 10 y values (run 2): ";
     for(int i = 0; i < 10; ++i)
-    {
         std::cout << static_cast<float>(y2HostPtr[i]) << " ";
-    }
     std::cout << '\n';
 
-    // Verify determinism - results should be bit-exact
     bool determinismPassed = true;
     auto elementCount = getTensorElementCount(yAttr);
+
     for(int64_t i = 0; i < elementCount; ++i)
     {
         if(y1HostPtr[i] != y2HostPtr[i])
@@ -136,13 +130,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     }
 
     if(determinismPassed)
-    {
         std::cout << "Determinism check: PASSED (results are bit-exact)\n";
-    }
     else
-    {
         std::cout << "Determinism check: FAILED (results differ)\n";
-    }
 
     bool validationPassed = true;
 
@@ -160,8 +150,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         auto yValidator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
-        std::cout << "CPU reference validation:\n";
-        const bool yValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
+        bool yValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
             std::cout, "y", yValidator, yRefTensor, yTensor1, tolerance, tolerance);
 
         validationPassed = yValid;
@@ -169,6 +158,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     std::cout << "Deterministic convolution fprop graph execution complete for " << inputType
               << ".\n\n";
+
     return determinismPassed && validationPassed;
 }
 
@@ -183,7 +173,7 @@ int main(int argc, char* argv[])
         hipdnnHandle_t handle = nullptr;
         HIPDNN_CHECK(hipdnnCreate(&handle));
 
-        const bool allPassed = run(SampleRunner{handle, config});
+    bool allPassed = run(SampleRunner{handle, config}, config);
 
         HIPDNN_CHECK(hipdnnDestroy(handle));
 

@@ -14,6 +14,7 @@
 #include <memory>
 #include <numeric>
 #include <random>
+#include <sstream> // added
 #include <vector>
 
 // NOLINTBEGIN(google-global-names-in-headers)
@@ -22,7 +23,8 @@ using hipdnn_data_sdk::utilities::TensorLayout;
 // Use portable custom types instead of HIP types (works with any C++ compiler)
 using hipdnn_data_sdk::types::bfloat16;
 using hipdnn_data_sdk::types::half;
-// NOLINTEND(google-global-names-in-headers)
+
+// ERROR MACROS
 
 #define HIP_CHECK(status)                                                                      \
     do                                                                                         \
@@ -58,32 +60,7 @@ using hipdnn_data_sdk::types::half;
         }                                                                                 \
     } while(0)
 
-// Skip-aware variant of HIPDNN_FE_CHECK for use inside bool-returning sample
-// callbacks (e.g. SampleRunner::operator()). On GRAPH_NOT_SUPPORTED the macro
-// prints a clear skip message and `return true;` so the enclosing variant is
-// counted as gracefully skipped (samples/README.md documents this contract).
-// On any other non-good status, behavior matches HIPDNN_FE_CHECK (exit 1).
-//
-// The macro contains `return true;`, so it MUST only be used inside a
-// bool-returning function context. For non-bool contexts (e.g. int main),
-// use HIPDNN_FE_CHECK instead.
-#define HIPDNN_FE_CHECK_SKIPPABLE(statusObj)                                                    \
-    do                                                                                          \
-    {                                                                                           \
-        auto const& status = statusObj;                                                         \
-        if(!status.is_good())                                                                   \
-        {                                                                                       \
-            if(status.get_code() == hipdnn_frontend::ErrorCode::GRAPH_NOT_SUPPORTED)            \
-            {                                                                                   \
-                std::cout << "Skipping: no engine has an applicable solution for this "         \
-                          << "graph on the current device. (" << status.get_message() << ")\n"; \
-                return true;                                                                    \
-            }                                                                                   \
-            std::cerr << "hipDNN Frontend Error: " << status.get_message() << " in file "       \
-                      << __FILE__ << " at line " << __LINE__ << '\n';                           \
-            exit(EXIT_FAILURE);                                                                 \
-        }                                                                                       \
-    } while(0)
+// CLI HELP
 
 enum class SampleType
 {
@@ -96,22 +73,61 @@ inline void printSampleHelp(const std::string& sampleName,
 {
     std::cout << "Usage: " << sampleName << " [OPTIONS]\n"
               << "Options:\n"
-              << "  --verify-cpu, -vc           Enable CPU reference validation\n";
+              << "  --verify-cpu, -vc           Enable CPU reference validation\n"
+              << "  --engine-id <int>           Preferred engine ID\n"
+              << "  --dtype <fp32|fp16|bf16>    Data type\n"
+              << "  --layout <nchw|nhwc>        Tensor layout\n"
+              << "  --dims N,C,H,W              Input dimensions\n"
+              << "  --filter R,S                Filter size\n"
+              << "  --stride U,V                Stride\n"
+              << "  --padding PH,PW             Padding\n"
+              << "  --dilation DH,DW            Dilation\n";
 
     if(sampleType == SampleType::BN_TRAINING)
     {
-        std::cout << "  --batch-stats-only          Use batch statistics only (no running stats)\n"
-                  << "  --full-training             Use full training with running statistics\n";
+        std::cout << "  --batch-stats-only          Use batch statistics only\n"
+                  << "  --full-training             Use running statistics\n";
     }
 
-    std::cout << "  --help, -h                  Show this help message\n\n";
+    std::cout << "  --help, -h                  Show help\n";
 }
+
+// CONFIG
 
 struct Config
 {
     bool cpuValidation = false;
     bool useRunningStats = false;
+
+    // NEW CLI fields
+    int engine_id = -1;
+    std::string dtype;
+    std::string layout;
+
+    std::vector<int64_t> dims;
+    std::vector<int64_t> filter;
+    std::vector<int64_t> stride;
+    std::vector<int64_t> padding;
+    std::vector<int64_t> dilation;
 };
+
+// PARSING UTILS
+
+inline std::vector<int64_t> parseList(const std::string& str)
+{
+    std::vector<int64_t> result;
+    std::stringstream ss(str);
+    std::string item;
+
+    while(std::getline(ss, item, ','))
+    {
+        result.push_back(std::stoll(item));
+    }
+
+    return result;
+}
+
+// CLI PARSER
 
 inline Config
     parseCommandLineArgs(int argc, char** argv, SampleType sampleType = SampleType::GENERIC)
@@ -120,7 +136,7 @@ inline Config
 
     for(int i = 1; i < argc; ++i)
     {
-        auto arg = std::string(argv[i]);
+        std::string arg = argv[i];
 
         if(arg == "--verify-cpu" || arg == "-vc")
         {
@@ -134,6 +150,42 @@ inline Config
         {
             config.useRunningStats = true;
         }
+
+        // NEW FLAGS
+
+        else if(arg == "--engine-id")
+        {
+            config.engine_id = std::stoi(argv[++i]);
+        }
+        else if(arg == "--dtype")
+        {
+            config.dtype = argv[++i];
+        }
+        else if(arg == "--layout")
+        {
+            config.layout = argv[++i];
+        }
+        else if(arg == "--dims")
+        {
+            config.dims = parseList(argv[++i]);
+        }
+        else if(arg == "--filter")
+        {
+            config.filter = parseList(argv[++i]);
+        }
+        else if(arg == "--stride")
+        {
+            config.stride = parseList(argv[++i]);
+        }
+        else if(arg == "--padding")
+        {
+            config.padding = parseList(argv[++i]);
+        }
+        else if(arg == "--dilation")
+        {
+            config.dilation = parseList(argv[++i]);
+        }
+
         else if(arg == "--help" || arg == "-h")
         {
             printSampleHelp(argv[0], sampleType);
@@ -150,18 +202,45 @@ inline Config
     return config;
 }
 
+// RUN FUNCTION
+
 template <typename F>
-bool run(F&& f)
+bool run(F&& f, const Config& config)
 {
     bool allPassed = true;
-    allPassed &= f.template operator()<float, float>(TensorLayout::NCHW);
-    allPassed &= f.template operator()<half, float>(TensorLayout::NCHW);
-    allPassed &= f.template operator()<bfloat16, float>(TensorLayout::NCHW);
-    allPassed &= f.template operator()<float, float>(TensorLayout::NHWC);
-    allPassed &= f.template operator()<half, float>(TensorLayout::NHWC);
-    allPassed &= f.template operator()<bfloat16, float>(TensorLayout::NHWC);
+
+    std::vector<std::string> dtypes;
+    std::vector<TensorLayout> layouts;
+
+    // dtype selection
+    if(!config.dtype.empty())
+        dtypes.push_back(config.dtype);
+    else
+        dtypes = {"fp32", "fp16", "bf16"};
+
+    // layout selection
+    if(!config.layout.empty())
+        layouts.push_back(config.layout == "nhwc" ? TensorLayout::NHWC : TensorLayout::NCHW);
+    else
+        layouts = {TensorLayout::NCHW, TensorLayout::NHWC};
+
+    for(const auto& dt : dtypes)
+    {
+        for(const auto& layout : layouts)
+        {
+            if(dt == "fp32")
+                allPassed &= f.template operator()<float, float>(layout);
+            else if(dt == "fp16")
+                allPassed &= f.template operator()<half, float>(layout);
+            else if(dt == "bf16")
+                allPassed &= f.template operator()<bfloat16, float>(layout);
+        }
+    }
+
     return allPassed;
 }
+
+// TENSOR HELPERS
 
 inline std::shared_ptr<hipdnn_frontend::graph::Tensor_attributes>
     createTensor(const std::vector<int64_t>& dims,
@@ -169,9 +248,8 @@ inline std::shared_ptr<hipdnn_frontend::graph::Tensor_attributes>
                  const TensorLayout& layout = TensorLayout::NCHW)
 {
     auto tensor = std::make_shared<hipdnn_frontend::graph::Tensor_attributes>();
-    tensor->set_dim(dims).set_data_type(dataType);
-    tensor->set_stride(hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder));
-
+    tensor->set_dim(dims).set_data_type(dataType).set_stride(
+        hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder));
     return tensor;
 }
 
@@ -185,6 +263,8 @@ inline int64_t
     }
     return count;
 }
+
+// SAMPLE RUNNER
 
 struct SampleRunner
 {

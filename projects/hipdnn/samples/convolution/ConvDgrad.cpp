@@ -27,33 +27,43 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     std::cout << "Running convolution backward data graph " << inputType << " [" << layout << "]"
               << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
-    constexpr int64_t N = 16; // Batch size
+    // Input (dx)
+    auto n = config.dims.size() > 0 ? config.dims[0] : 16;
+    auto c = config.dims.size() > 1 ? config.dims[1] : 16;
+    auto h = config.dims.size() > 2 ? config.dims[2] : 16;
+    auto w = config.dims.size() > 3 ? config.dims[3] : 16;
 
-    // Input (dx dimensions)
-    constexpr int64_t C = 16; // Number of dx channels
-    constexpr int64_t H = 16; // Height
-    constexpr int64_t W = 16; // Width
+    // Filter + channels
+    auto k = config.filter.size() > 0 ? config.filter[0] : 16;
+    auto r = config.filter.size() > 0 ? config.filter[0] : 3;
+    auto s = config.filter.size() > 1 ? config.filter[1] : 3;
 
-    // Filter
-    constexpr int64_t K = 16; // Number of dy channels
-    constexpr int64_t R = 3; // Height
-    constexpr int64_t S = 3; // Width
-    constexpr int64_t U = 1; // Height stride
-    constexpr int64_t V = 1; // Width stride
-    constexpr int64_t PAD_H = 1; // Height padding
-    constexpr int64_t PAD_W = 1; // Width padding
-    constexpr int64_t DIL_H = 1; // Height dilation
-    constexpr int64_t DIL_W = 1; // Width dilation
+    // Stride
+    auto u = config.stride.size() > 0 ? config.stride[0] : 1;
+    auto v = config.stride.size() > 1 ? config.stride[1] : 1;
 
-    // Output (dy dimensions) - computed based on input and conv parameters
-    const int64_t outH = (H + 2 * PAD_H - DIL_H * (R - 1) - 1) / U + 1;
-    const int64_t outW = (W + 2 * PAD_W - DIL_W * (S - 1) - 1) / V + 1;
+    // Padding
+    auto padH = config.padding.size() > 0 ? config.padding[0] : 1;
+    auto padW = config.padding.size() > 1 ? config.padding[1] : 1;
+
+    // Dilation
+    auto dilH = config.dilation.size() > 0 ? config.dilation[0] : 1;
+    auto dilW = config.dilation.size() > 1 ? config.dilation[1] : 1;
+
+    // Output (dy shape)
+    const int64_t outH = (h + 2 * padH - dilH * (r - 1) - 1) / u + 1;
+    const int64_t outW = (w + 2 * padW - dilW * (s - 1) - 1) / v + 1;
 
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType).set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    auto dyAttr = createTensor({N, K, outH, outW}, inputType, layout);
-    auto wAttr = createTensor({K, C, R, S}, inputType, layout);
+    if(config.engine_id != -1)
+    {
+        graph->set_preferred_engine_id_ext(config.engine_id);
+    }
+
+    auto dyAttr = createTensor({n, k, outH, outW}, inputType, layout);
+    auto wAttr = createTensor({k, c, r, s}, inputType, layout);
 
     graph::ConvDgradAttributes convAttributes;
     convAttributes.set_name("conv_backward_data_node");
@@ -65,7 +75,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto dxAttr = graph->conv_dgrad(dyAttr, wAttr, convAttributes);
     dxAttr->set_output(true);
 
-    HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
+    HIPDNN_FE_CHECK(graph->build(handle));
     std::cout << "Graph build successful.\n";
 
     utilities::Tensor<InputType> dyTensor(dyAttr->get_dim(), layout);
@@ -112,7 +122,8 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         auto absoluteTolerance = hipdnn_test_sdk::utilities::conv::
             calculateConvDgradTolerance<InputType, InputType, float>(
                 0.0, 1.0, 0.0, 1.0, wAttr->get_dim());
-        constexpr float RELATIVE_TOLERANCE = 0.01f;
+
+        constexpr float relativeTolerance = 0.01f;
 
         auto dxValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(
             absoluteTolerance, RELATIVE_TOLERANCE);
@@ -131,6 +142,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     }
 
     std::cout << "Convolution backward data graph execution complete for " << inputType << ".\n\n";
+
     return validationPassed;
 }
 
@@ -143,7 +155,7 @@ int main(int argc, char* argv[])
         auto [handle, handleError] = createHipdnnHandle();
         HIPDNN_FE_CHECK(handleError);
 
-        const bool allPassed = run(SampleRunner{*handle, config});
+    bool allPassed = run(SampleRunner{*handle, config}, config);
 
         if(allPassed)
         {
