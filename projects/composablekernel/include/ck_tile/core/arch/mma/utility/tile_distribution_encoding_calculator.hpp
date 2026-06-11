@@ -27,7 +27,7 @@ namespace ck_tile::core::arch::mma {
  * be invoked with uncompressed A matrix, compression handled internally).
  * @tparam MmaOp           Intrinsic (amdgcn_mma).
  * @tparam CTranspose      Whether we are using CTranspose.
- * @tparam SFactor         Swizzle factor. Not implemented.
+ * @tparam SFactor         Swizzle factor: special permutation of the M dimension.
  * @tparam kIter           K composition factor (consecutive intrinsic calls to form larger k dim).
  * @tparam AttrNumAccessAV Requested NumAccess *value* for the A matrix. Must be multiple of
  *                         "fundamental" NumAccess for intrinsic. See details in amdgcn_mma.hpp.
@@ -59,7 +59,17 @@ struct TileDistrEncCalc
 
     static_assert(MmaOp::kABKPerLane % (NumAccessA * MmaOp::kCompressionRatio) == 0);
     static_assert(MmaOp::kABKPerLane % NumAccessB == 0);
-    static_assert(SFactor == 1, "Swizzle not implemented yet."); // TODO: Implement Swizzle.
+
+    // Swizzle seems like a very special modifier and may not work in many cases.
+    // static_assert(SFactor == 1 || MmaOp::kCMBlocks == 1, "Swizzle with blocks is untested!");
+    // static_assert(SFactor == 1 || MmaOp::kCNBlocks == 1, "Swizzle with blocks is untested!");
+    // static_assert(SFactor == 1 || MmaOp::kARepeat == 1, "Swizzle with repeat is untested!");
+    // static_assert(SFactor == 1 || MmaOp::kBRepeat == 1, "Swizzle with repeat is untested!");
+    // static_assert(SFactor == 1 || NumAccessA == 1, "Swizzle with numAccess is untested!");
+    // static_assert(SFactor == 1 || NumAccessB == 1, "Swizzle with numAccess is untested!");
+    // static_assert(SFactor == 1 || MmaOp::kCompressionRatio == 1, "Swizzle with compression is
+    // untested!");
+    static_assert(MmaOp::kCMNumAccess % SFactor == 0, "kCMNumAccess must be multiple of SFactor");
 
     template <index_t MajorDimSize, index_t Repeat, index_t NumAccess, index_t CompressionRatio = 1>
     using ABWarpDstrEnc = tile_distribution_encoding<
@@ -73,13 +83,30 @@ struct TileDistrEncCalc
         sequence<2, 2>,
         sequence<0, 2>>;
 
+    // Special A Warp distribution encoding just for swizzle case. This was split out since it
+    // specifically deals with the M dimension which would make not sense for B.
+    template <index_t Repeat, index_t NumAccess, index_t CompressionRatio = 1>
+    using AWarpDstrEncSwizzle = tile_distribution_encoding<
+        sequence<Repeat>,
+        tuple<sequence<MmaOp::kCMBlocks * MmaOp::kCMNumAccess / SFactor,
+                       MmaOp::kM / MmaOp::kCMBlocks / MmaOp::kCMPerLane,
+                       SFactor,
+                       MmaOp::kCMPerLane / MmaOp::kCMNumAccess>,
+              sequence<NumAccess,
+                       MmaOp::kK / MmaOp::kABKPerLane,
+                       MmaOp::kABKPerLane / NumAccess / CompressionRatio * kIter>>,
+        tuple<sequence<2, 0, 1, 1, 1, 1>>,
+        tuple<sequence<1, 0, 0, 2, 1, 3>>,
+        sequence<2, 2>,
+        sequence<0, 2>>;
+
     static constexpr auto get_cwarp_dstr_encoding()
     {
         // We unmerge the M and N dimensions in the same way every time.
         using MSubDims = sequence<MmaOp::kCMBlocks,
-                                  MmaOp::kCMNumAccess,
+                                  MmaOp::kCMNumAccess / SFactor,
                                   MmaOp::kM / MmaOp::kCMBlocks / MmaOp::kCMPerLane,
-                                  MmaOp::kCMPerLane / MmaOp::kCMNumAccess>;
+                                  MmaOp::kCMPerLane * SFactor / MmaOp::kCMNumAccess>;
         using NSubDims = sequence<MmaOp::kCNBlocks, MmaOp::kN / MmaOp::kCNBlocks>;
 
         // In case of CTranspose, all we do is swap the M and N dimension.
@@ -111,7 +138,11 @@ struct TileDistrEncCalc
     }
 
     static constexpr index_t compressionRatioA = UncompressedA ? 1 : MmaOp::kCompressionRatio;
-    using AEnc_ = ABWarpDstrEnc<MmaOp::kM, MmaOp::kARepeat, NumAccessA, compressionRatioA>;
+
+    using AEnc_ = std::conditional_t<
+        (SFactor > 1),
+        AWarpDstrEncSwizzle<MmaOp::kARepeat, NumAccessA, compressionRatioA>,
+        ABWarpDstrEnc<MmaOp::kM, MmaOp::kARepeat, NumAccessA, compressionRatioA>>;
     using BEnc_ = ABWarpDstrEnc<MmaOp::kN, MmaOp::kBRepeat, NumAccessB>;
 
     public:
