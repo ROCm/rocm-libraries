@@ -23,17 +23,111 @@ SOFTWARE.
 */
 
 #include "benchmarks_common.h"
+#include <cstring>
 
-int main()
+void printUsage(const char* programName)
 {
+    cout << "Usage: " << programName << " [OPTIONS]\n" << endl;
+    cout << "Options:" << endl;
+    cout << "  -t, --threads <N>        Number of threads to use (default: auto-detect)" << endl;
+    cout << "  -g, --gray-path <PATH>   Path to grayscale images (default: " << DEFAULT_GRAY_IMAGE_PATH << ")" << endl;
+    cout << "  -r, --rgb-path <PATH>    Path to RGB images (default: " << DEFAULT_RGB_IMAGE_PATH << ")" << endl;
+    cout << "  -h, --help               Display this help message" << endl;
+    cout << "\nExamples:" << endl;
+    cout << "  " << programName << "                           # Auto-detect threads" << endl;
+    cout << "  " << programName << " --threads 64              # Use 64 threads" << endl;
+    cout << "  " << programName << " -t 32 -g ./my_images/     # Use 32 threads with custom dataset" << endl;
+    cout << endl;
+}
+
+int main(int argc, char* argv[])
+{
+    // Parse command-line arguments
+    for (int i = 1; i < argc; i++)
+    {
+        if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0)
+        {
+            printUsage(argv[0]);
+            return 0;
+        }
+        else if (strcmp(argv[i], "-t") == 0 || strcmp(argv[i], "--threads") == 0)
+        {
+            if (i + 1 < argc)
+            {
+                NUM_THREADS = atoi(argv[++i]);
+                if (NUM_THREADS <= 0)
+                {
+                    cerr << "Error: Thread count must be a positive integer" << endl;
+                    return 1;
+                }
+            }
+            else
+            {
+                cerr << "Error: --threads requires a value" << endl;
+                printUsage(argv[0]);
+                return 1;
+            }
+        }
+        else if (strcmp(argv[i], "-g") == 0 || strcmp(argv[i], "--gray-path") == 0)
+        {
+            if (i + 1 < argc)
+            {
+                GRAY_IMAGE_PATH = argv[++i];
+            }
+            else
+            {
+                cerr << "Error: --gray-path requires a value" << endl;
+                printUsage(argv[0]);
+                return 1;
+            }
+        }
+        else if (strcmp(argv[i], "-r") == 0 || strcmp(argv[i], "--rgb-path") == 0)
+        {
+            if (i + 1 < argc)
+            {
+                RGB_IMAGE_PATH = argv[++i];
+            }
+            else
+            {
+                cerr << "Error: --rgb-path requires a value" << endl;
+                printUsage(argv[0]);
+                return 1;
+            }
+        }
+        else
+        {
+            cerr << "Error: Unknown option: " << argv[i] << endl;
+            printUsage(argv[0]);
+            return 1;
+        }
+    }
+
+    // Auto-detect thread count if not specified
+    int maxAvailableThreads = omp_get_max_threads();
+    if (NUM_THREADS == 0)
+    {
+        NUM_THREADS = maxAvailableThreads;
+        cout << "Auto-detected " << NUM_THREADS << " available threads" << endl;
+    }
     // Initialize RPP HOST backend handle
     rppHandle_t handle;
+    rppStatus_t status;
 #if ENABLE_PARALLEL_THREADS
-    rppCreate(&handle, 1, NUM_THREADS, nullptr, RPP_HOST_BACKEND);
+    status = rppCreate(&handle, 1, NUM_THREADS, nullptr, RPP_HOST_BACKEND);
+    if (status != rppStatusSuccess)
+    {
+        cerr << "Error: Failed to initialize RPP handle with " << NUM_THREADS << " threads (Status: " << status << ")" << endl;
+        return 1;
+    }
     // Control OpenCV threading to match RPP configuration for fair comparison
     cv::setNumThreads(NUM_THREADS);
 #else
-    rppCreate(&handle, 1, 1, nullptr, RPP_HOST_BACKEND);
+    status = rppCreate(&handle, 1, 1, nullptr, RPP_HOST_BACKEND);
+    if (status != rppStatusSuccess)
+    {
+        cerr << "Error: Failed to initialize RPP handle with 1 thread (Status: " << status << ")" << endl;
+        return 1;
+    }
     cv::setNumThreads(1);
 #endif
 
@@ -109,8 +203,17 @@ int main()
     cout << "OS: " << getOSInfo() << endl;
     cout << "CPU: " << getCPUInfo() << endl;
     cout << "Memory: " << getMemoryInfo() << endl;
-    cout << "Number of Threads: " << NUM_THREADS << endl;
+    cout << "\n--- Benchmark Configuration ---" << endl;
+#if ENABLE_PARALLEL_THREADS
+    cout << "Parallel Threading: ENABLED" << endl;
+    cout << "Number of Threads: " << NUM_THREADS << " (max available: " << maxAvailableThreads << ")" << endl;
+#else
+    cout << "Parallel Threading: DISABLED" << endl;
+    cout << "Number of Threads: 1" << endl;
+#endif
     cout << "Number of Runs: " << NUM_RUNS << endl;
+    cout << "Grayscale Dataset: " << GRAY_IMAGE_PATH << endl;
+    cout << "RGB Dataset: " << RGB_IMAGE_PATH << endl;
     cout << "========================================" << endl;
 
     
@@ -537,10 +640,16 @@ int main()
 #else
     string excelFilename = "opencv_vs_rpp_benchmark_results_parallel_threads_OFF.xlsx";
 #endif
-    writeResultsToExcel(excelFilename, grayscaleResults, rgbResults);
+
+    bool exportSuccess = writeResultsToExcel(excelFilename, grayscaleResults, rgbResults);
+    if (!exportSuccess)
+    {
+        cerr << "\nWarning: Benchmark completed successfully, but failed to export results to Excel." << endl;
+        cerr << "         Benchmark data is still available in memory but not saved to disk." << endl;
+    }
 
     // Cleanup RPP handle
     rppDestroy(handle, RPP_HOST_BACKEND);
 
-    return 0;
+    return exportSuccess ? 0 : 1;
 }

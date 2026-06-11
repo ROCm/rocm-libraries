@@ -24,6 +24,11 @@ SOFTWARE.
 
 #include "benchmarks_common.h"
 
+// Global configuration variables (defined here, declared extern in header)
+int NUM_THREADS = 0;  // Will be set at runtime
+string GRAY_IMAGE_PATH = DEFAULT_GRAY_IMAGE_PATH;
+string RGB_IMAGE_PATH = DEFAULT_RGB_IMAGE_PATH;
+
 // Global vectors to store results (defined here, declared extern in header)
 vector<BenchmarkResult> grayscaleResults;
 vector<BenchmarkResult> rgbResults;
@@ -363,15 +368,16 @@ RpptROI3D createFullImageROI3D(const Mat& img)
 }
 
 // ==================== RPP COLOR AUGMENTATIONS ====================
-void writeResultsToExcel(const string& filename,
+bool writeResultsToExcel(const string& filename,
                         const vector<BenchmarkResult>& grayResults,
                         const vector<BenchmarkResult>& colorResults)
 {
     lxw_workbook  *workbook  = workbook_new(filename.c_str());
     if (!workbook)
     {
-        cerr << "Error creating Excel workbook: " << filename << endl;
-        return;
+        cerr << "Error: Failed to create Excel workbook: " << filename << endl;
+        cerr << "       Possible causes: insufficient permissions, invalid path, or disk full" << endl;
+        return false;
     }
 
     // Create formats
@@ -494,8 +500,16 @@ void writeResultsToExcel(const string& filename,
         row++;
     }
 
-    workbook_close(workbook);
-    cout << "\nResults exported to: " << filename << endl;
+    lxw_error error = workbook_close(workbook);
+    if (error != LXW_NO_ERROR)
+    {
+        cerr << "Error: Failed to close Excel workbook: " << filename << " (Error code: " << error << ")" << endl;
+        cerr << "       The file may be corrupted or incomplete" << endl;
+        return false;
+    }
+
+    cout << "\nResults exported successfully to: " << filename << endl;
+    return true;
 }
 
 // ==================== MAIN ====================
@@ -596,7 +610,7 @@ void init_grid_dropout_boxes(int batchCount, RpptRoiLtrb* anchorBoxInfoTensor, R
 // Dropout helper function for channel dropout
 void generate_channel_dropout_mask(Rpp8u* dropoutTensor, Rpp32f* dropoutProbability, int batchSize, int channels, int seed)
 {
-    int numThreads = omp_get_max_threads();
+    int numThreads = NUM_THREADS;
     omp_set_dynamic(0);
 
 #pragma omp parallel for num_threads(numThreads)

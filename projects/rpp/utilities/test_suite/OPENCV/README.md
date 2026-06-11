@@ -68,6 +68,10 @@ This modular design separates concerns and makes it easier to:
 - GCC with C++17 support
 - Python 3 with Pillow (PIL) library (for dataset generation)
 - Sudo privileges (for installing OpenCV)
+- **Minimum 2GB RAM** (4GB+ recommended for 128 images × 1080p dataset)
+  - Grayscale dataset: ~250MB RAM
+  - RGB dataset: ~700MB RAM
+  - Total with both: ~1GB for images + overhead
 
 ### Required Libraries
 - **OpenCV 4.x** with components: core, imgproc, imgcodecs
@@ -152,9 +156,32 @@ The executable will be created at `build/opencv_vs_rpp_host_benchmarking`
 
 #### Step 4: Run the Benchmark
 
+**Basic usage (auto-detect threads):**
 ```bash
 ./build/opencv_vs_rpp_host_benchmarking
 ```
+
+**Command-line options:**
+```bash
+./build/opencv_vs_rpp_host_benchmarking [OPTIONS]
+
+Options:
+  -t, --threads <N>        Number of threads to use (default: auto-detect)
+  -g, --gray-path <PATH>   Path to grayscale images (default: 1080p_128images_dataset/)
+  -r, --rgb-path <PATH>    Path to RGB images (default: 1080p_128images_dataset/)
+  -h, --help               Display help message
+
+Examples:
+  ./build/opencv_vs_rpp_host_benchmarking                    # Auto-detect threads
+  ./build/opencv_vs_rpp_host_benchmarking --threads 64       # Use 64 threads
+  ./build/opencv_vs_rpp_host_benchmarking -t 32 -g ./imgs/   # Custom threads and dataset
+```
+
+**Thread Configuration:**
+- By default, the benchmark auto-detects the maximum available threads using OpenMP
+- You can override this with the `-t` or `--threads` option
+- Thread count only applies when built with `ENABLE_PARALLEL_THREADS=ON`
+- When built with `ENABLE_PARALLEL_THREADS=OFF`, always uses 1 thread regardless of the argument
 
 
 ## Understanding the Output
@@ -255,16 +282,31 @@ make -j$(nproc)
 
 When parallel threads are disabled, all OpenMP `#pragma omp parallel for` directives are excluded from compilation, allowing you to measure single-threaded performance. The output Excel filename will automatically indicate which mode was used.
 
-### Modifying Test Parameters
+### Configuring Thread Count
 
-Edit `benchmarks_common.h` and adjust these constants:
+The benchmark automatically detects the maximum available threads on your system. You can override this at runtime:
+
+**Runtime configuration (recommended):**
+```bash
+# Use all available threads (auto-detect)
+./build/opencv_vs_rpp_host_benchmarking
+
+# Use specific thread count
+./build/opencv_vs_rpp_host_benchmarking --threads 64
+./build/opencv_vs_rpp_host_benchmarking -t 32
+```
+
+**Note:** Thread count configuration only applies when built with `ENABLE_PARALLEL_THREADS=ON`. When built with `ENABLE_PARALLEL_THREADS=OFF`, the benchmark always uses 1 thread regardless of command-line arguments.
+
+### Modifying Other Test Parameters
+
+To change the number of benchmark iterations, edit `benchmarks_common.h`:
 
 ```cpp
-#define NUM_THREADS  128    // Number of parallel threads (only used when ENABLE_PARALLEL_THREADS=ON)
 #define NUM_RUNS     100    // Number of iterations per operation
 ```
 
-After changing these values, rebuild the project:
+After changing this value, rebuild the project:
 
 ```bash
 cd build
@@ -295,13 +337,25 @@ The build system will automatically locate the RPP headers and libraries.
 
 ### Using Custom Image Dataset
 
-Replace the synthetic images in `1080p_128images_dataset/` with your own images. Supported formats:
+**Option 1: Command-line arguments (recommended):**
+```bash
+# Use custom dataset path for both grayscale and RGB
+./build/opencv_vs_rpp_host_benchmarking --gray-path ./my_images/ --rgb-path ./my_images/
+
+# Use different paths for grayscale and RGB
+./build/opencv_vs_rpp_host_benchmarking -g ./gray_imgs/ -r ./rgb_imgs/
+```
+
+**Option 2: Replace default dataset:**
+Replace the synthetic images in `1080p_128images_dataset/` with your own images.
+
+**Supported image formats:**
 - JPEG (.jpg, .jpeg)
 - PNG (.png)
 - BMP (.bmp)
 - TIFF (.tiff)
 
-The benchmark will automatically detect and process all valid images in the directory.
+The benchmark will automatically detect and process all valid images in the specified directory.
 
 ## Troubleshooting
 
@@ -411,12 +465,25 @@ python3 generate_test_dataset.py
 
 ## Performance Notes
 
-- The benchmark uses OpenMP for parallel processing (can be disabled with `-DENABLE_PARALLEL_THREADS=OFF`)
-- Default thread count is 128 when parallel threading is enabled (can be adjusted via `NUM_THREADS` in `benchmarks_common.h`)
-- Each operation is run 100 times to get stable average timings (can be adjusted via `NUM_RUNS` in `benchmarks_common.h`)
-- Results may vary based on CPU architecture, memory bandwidth, and system load
-- For accurate comparisons, close other resource-intensive applications
-- To compare parallel vs single-threaded performance, build twice with different `ENABLE_PARALLEL_THREADS` settings and compare the resulting Excel files
+- **Thread Configuration:**
+  - The benchmark auto-detects the maximum available threads by default
+  - Override with `--threads N` command-line argument
+  - Thread count only applies when built with `ENABLE_PARALLEL_THREADS=ON`
+  - Uses OpenMP for parallel processing (can be disabled at build time with `-DENABLE_PARALLEL_THREADS=OFF`)
+  
+- **Benchmark Iterations:**
+  - Each operation runs 100 times by default for stable average timings
+  - Adjustable via `NUM_RUNS` in `benchmarks_common.h` (requires rebuild)
+  
+- **Performance Variability:**
+  - Results vary based on CPU architecture, memory bandwidth, and system load
+  - Close other resource-intensive applications for accurate comparisons
+  - Test with different thread counts to find optimal performance for your system
+  
+- **Parallel vs Single-threaded Comparison:**
+  - Build with `ENABLE_PARALLEL_THREADS=ON` and run with different `--threads` values
+  - Build with `ENABLE_PARALLEL_THREADS=OFF` for single-threaded baseline
+  - Compare the resulting Excel files to analyze scaling efficiency
 
 ## Tested Operations
 

@@ -52,16 +52,21 @@ SOFTWARE.
 #include "rpp_version.h"
 #include "xlsxwriter.h"
 
-// Test image paths
-#define GRAY_IMAGE_PATH "1080p_128images_dataset/"
-#define RGB_IMAGE_PATH  "1080p_128images_dataset/"
-
-#define NUM_THREADS  128
-#define NUM_RUNS     100
-
 using namespace std;
 using namespace cv;
 using namespace chrono;
+
+// Test image paths - can be overridden via command line
+#define DEFAULT_GRAY_IMAGE_PATH "1080p_128images_dataset/"
+#define DEFAULT_RGB_IMAGE_PATH  "1080p_128images_dataset/"
+
+// Default number of runs per benchmark
+#define NUM_RUNS     100
+
+// Global configuration variables (set at runtime)
+extern int NUM_THREADS;
+extern string GRAY_IMAGE_PATH;
+extern string RGB_IMAGE_PATH;
 
 // Structure to store benchmark results
 struct BenchmarkResult
@@ -107,7 +112,7 @@ string getOSInfo();
 string getRPPVersion();
 string getCurrentDateTime();
 string getDtypeString(int cvType);
-void writeResultsToExcel(const string& filename,
+bool writeResultsToExcel(const string& filename,
                         const vector<BenchmarkResult>& grayResults,
                         const vector<BenchmarkResult>& colorResults);
 
