@@ -127,8 +127,8 @@ static bool fused_real_stockham_fits_lds(const function_pool&   pool,
     FMKey key(cfftLength, precision, CS_KERNEL_STOCKHAM);
     if(!pool.has_function(key))
         return false;
-    const size_t bwd             = std::max<size_t>(pool.get_kernel(key).transforms_per_block, 1);
-    const size_t fused_lds_bytes = (cfftLength + 1) * bwd * complex_type_size(precision);
+    const size_t batch_width     = std::max<size_t>(pool.get_kernel(key).transforms_per_block, 1);
+    const size_t fused_lds_bytes = (cfftLength + 1) * batch_width * complex_type_size(precision);
     return fused_lds_bytes <= deviceProp.sharedMemPerBlock;
 }
 
