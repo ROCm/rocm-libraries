@@ -789,16 +789,14 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
                                  precision,
                                  arrayType);
 
-                // translate peer location to its RCCL rank (single-process RCCL:
-                // peer device belongs to the same local communicator)
-                const int peer_rank = rccl.get_rank(t.peer_location.device);
-
+                // endpoints are addressed by device id; the wrapper maps
+                // the peer device to its RCCL rank internally
                 switch(t.op)
                 {
                 case rccl_op::send:
                     rccl.send(data_ptr,
                               t.count,
-                              peer_rank,
+                              t.peer_location.device,
                               t.local_location.device,
                               t.stream,
                               precision,
@@ -807,7 +805,7 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
                 case rccl_op::recv:
                     rccl.recv(data_ptr,
                               t.count,
-                              peer_rank,
+                              t.peer_location.device,
                               t.local_location.device,
                               t.stream,
                               precision,

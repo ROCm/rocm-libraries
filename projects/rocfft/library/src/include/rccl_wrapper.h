@@ -128,19 +128,21 @@ public:
                   rocfft_precision                precision,
                   rocfft_array_type               array_type) const;
 
-    // point-to-point send.  throws rocfft_rccl_exception_t on RCCL failure.
+    // point-to-point send: endpoints are device ids (peer / local),
+    // throws rocfft_rccl_exception_t on RCCL failure.
     void send(const void*       sendbuf,
               size_t            count,
-              int               peer_rank,
+              int               peer_device_id,
               int               device_id,
               hipStream_t       stream,
               rocfft_precision  precision,
               rocfft_array_type array_type) const;
 
-    // point-to-point receive.  throws rocfft_rccl_exception_t on RCCL failure.
+    // point-to-point receive: endpoints are device ids (peer / local),
+    // throws rocfft_rccl_exception_t on RCCL failure.
     void recv(void*             recvbuf,
               size_t            count,
-              int               peer_rank,
+              int               peer_device_id,
               int               device_id,
               hipStream_t       stream,
               rocfft_precision  precision,

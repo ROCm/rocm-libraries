@@ -1266,6 +1266,11 @@ struct CommRCCLAllToAll : public MultiPlanItem
         , count_per_rank(_count_per_rank)
         , agents(std::move(_agents))
     {
+        // single-process RCCL only, so the local rank is always 0;
+        // ExecutesOnRank() relies on this being set explicitly since
+        // the MultiPlanItem base does not default-initialize it
+        local_comm_rank = 0;
+
         // validate caller-supplied agent count against the communicator
         const auto nranks = rccl.num_ranks();
         if(agents.size() != nranks)

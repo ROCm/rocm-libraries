@@ -40,9 +40,8 @@ static std::mutex                                  comm_cache_mutex;
 // map a rocFFT precision to the corresponding NCCL datatype.
 // rocFFT half/float/double map to ncclFloat16/32/64.
 //
-// note: NCCL has no native complex datatype, so callers transferring
-// complex layouts must double the element count via
-// array_type_is_complex(array_type) ? 2 : 1.
+// note: NCCL has no complex datatype, interleaved complex doubles the
+// count (array_type_is_interleaved ? 2 : 1), planar does not.
 static ncclDataType_t get_nccl_dtype(rocfft_precision precision)
 {
     switch(real_type_size(precision))
@@ -108,49 +107,53 @@ rocfft_rccl_comm_t rocfft_rccl_comm_t::create(const std::set<int>& devices)
         return it->second;
     }
 
+    const int ndevices = static_cast<int>(devices.size());
+
+    rocfft_rccl_comm_t new_comm;
+    new_comm.pimpl = std::make_shared<Impl>();
+
+    // generate unique id for this communicator group,
+    // for single-node this stays local, for multi-node the root
+    // rank would broadcast this via MPI_Bcast
+    ncclResult_t result = ncclGetUniqueId(&new_comm.pimpl->uniqueId);
+    if(result != ncclSuccess)
     {
-        const int ndevices = static_cast<int>(devices.size());
-
-        rocfft_rccl_comm_t new_comm;
-        new_comm.pimpl = std::make_shared<Impl>();
-
-        // generate unique id for this communicator group.
-        // for single-node this stays local; for multi-node the root
-        // rank would broadcast this via MPI_Bcast.
-        ncclResult_t result = ncclGetUniqueId(&new_comm.pimpl->uniqueId);
-        if(result != ncclSuccess)
-        {
-            return {};
-        }
-
-        // init one communicator per device using ncclCommInitRank,
-        // batched inside a group call for single-process efficiency.
-        // ranks are assigned in sorted device-id order (std::set).
-        try
-        {
-            rocfft_rccl_group_t group;
-            int                 rank = 0;
-            for(int dev : devices)
-            {
-                rocfft_scoped_device set_dev(dev);
-                ncclComm_t           comm = nullptr;
-                result = ncclCommInitRank(&comm, ndevices, new_comm.pimpl->uniqueId, rank);
-                if(result != ncclSuccess)
-                    return {};
-                new_comm.pimpl->device_to_comm[dev] = comm;
-                ++rank;
-            }
-
-            group.end();
-        }
-        catch(const rocfft_rccl_exception_t&)
-        {
-            // already logged by rocfft_rccl_group_t; fall back
-            return {};
-        }
-
-        comm_cache[devices] = std::move(new_comm);
+        // log and return empty so the caller falls back to P2P/A2A
+        log_trace(__func__, "ncclGetUniqueId failed", result);
+        return {};
     }
+
+    // init one communicator per device using ncclCommInitRank,
+    // batched inside a group call for single-process efficiency.
+    // ranks are assigned in sorted device-id order
+    try
+    {
+        rocfft_rccl_group_t group;
+        int                 rank = 0;
+        for(int dev : devices)
+        {
+            rocfft_scoped_device set_dev(dev);
+            ncclComm_t           comm = nullptr;
+            result = ncclCommInitRank(&comm, ndevices, new_comm.pimpl->uniqueId, rank);
+                if(result != ncclSuccess)
+                {
+                    // log and return empty so the caller falls back to P2P/A2A
+                    log_trace(__func__, "ncclCommInitRank failed on device", dev, result);
+                    return {};
+                }
+            new_comm.pimpl->device_to_comm[dev] = comm;
+            ++rank;
+        }
+
+        group.end();
+    }
+    catch(const rocfft_rccl_exception_t&)
+    {
+        // already logged by rocfft_rccl_group_t; fall back
+        return {};
+    }
+
+    comm_cache[devices] = std::move(new_comm);
 
     return comm_cache[devices];
 }
@@ -183,9 +186,14 @@ int rocfft_rccl_comm_t::get_rank(int device_id) const
         throw std::invalid_argument("rocfft_rccl_comm_t::get_rank: device_id "
                                     + std::to_string(device_id)
                                     + " is not part of this communicator");
-    int rank = -1;
-    if(ncclCommUserRank(it->second, &rank) != ncclSuccess)
-        throw std::runtime_error("rocfft_rccl_comm_t::get_rank: ncclCommUserRank failed");
+    int          rank   = -1;
+    ncclResult_t result = ncclCommUserRank(it->second, &rank);
+    if(result != ncclSuccess)
+    {
+        // logged by the general rocfft_handle_exception handler when it propagates
+        throw rocfft_rccl_exception_t("rocfft_rccl_comm_t::get_rank: ncclCommUserRank failed",
+                                      result);
+    }
     return rank;
 }
 
@@ -264,7 +272,8 @@ void rocfft_rccl_comm_t::alltoall(const std::vector<const void*>& sendbufs,
 
     // resolve precision/complex/device mapping once outside the loop
     const auto devices    = get_devices();
-    const auto nccl_count = count * (array_type_is_complex(array_type) ? 2 : 1);
+    // interleaved complex = 2 real scalars per element; planar/real = 1
+    const auto nccl_count = count * (array_type_is_interleaved(array_type) ? 2 : 1);
     const auto dtype      = get_nccl_dtype(precision);
 
     // batch all per-device calls in a single RCCL group so they
@@ -282,7 +291,7 @@ void rocfft_rccl_comm_t::alltoall(const std::vector<const void*>& sendbufs,
 
             if(result != ncclSuccess)
             {
-                log_trace(__func__, "ncclAllToAll failed", result);
+                // logged by the general rocfft_handle_exception handler when it propagates
                 throw rocfft_rccl_exception_t(
                     "ncclAllToAll failed on device " + std::to_string(devices[r]), result);
             }
@@ -294,16 +303,17 @@ void rocfft_rccl_comm_t::alltoall(const std::vector<const void*>& sendbufs,
 
 void rocfft_rccl_comm_t::send(const void*       sendbuf,
                               size_t            count,
-                              int               peer_rank,
+                              int               peer_device_id,
                               int               device_id,
                               hipStream_t       stream,
                               rocfft_precision  precision,
                               rocfft_array_type array_type) const
 {
-    ncclComm_t comm = get_comm(device_id);
+    ncclComm_t comm      = get_comm(device_id);
+    const int  peer_rank = get_rank(peer_device_id);
 
     ncclResult_t result = ncclSend(sendbuf,
-                                   count * (array_type_is_complex(array_type) ? 2 : 1),
+                                   count * (array_type_is_interleaved(array_type) ? 2 : 1),
                                    get_nccl_dtype(precision),
                                    peer_rank,
                                    comm,
@@ -311,25 +321,26 @@ void rocfft_rccl_comm_t::send(const void*       sendbuf,
 
     if(result != ncclSuccess)
     {
-        log_trace(__func__, "ncclSend failed", result);
+        // logged by the general rocfft_handle_exception handler when it propagates
         throw rocfft_rccl_exception_t("ncclSend failed on device " + std::to_string(device_id)
-                                          + " to peer " + std::to_string(peer_rank),
+                                          + " to peer device " + std::to_string(peer_device_id),
                                       result);
     }
 }
 
 void rocfft_rccl_comm_t::recv(void*             recvbuf,
                               size_t            count,
-                              int               peer_rank,
+                              int               peer_device_id,
                               int               device_id,
                               hipStream_t       stream,
                               rocfft_precision  precision,
                               rocfft_array_type array_type) const
 {
-    ncclComm_t comm = get_comm(device_id);
+    ncclComm_t comm      = get_comm(device_id);
+    const int  peer_rank = get_rank(peer_device_id);
 
     ncclResult_t result = ncclRecv(recvbuf,
-                                   count * (array_type_is_complex(array_type) ? 2 : 1),
+                                   count * (array_type_is_interleaved(array_type) ? 2 : 1),
                                    get_nccl_dtype(precision),
                                    peer_rank,
                                    comm,
@@ -337,9 +348,9 @@ void rocfft_rccl_comm_t::recv(void*             recvbuf,
 
     if(result != ncclSuccess)
     {
-        log_trace(__func__, "ncclRecv failed", result);
+        // logged by the general rocfft_handle_exception handler when it propagates
         throw rocfft_rccl_exception_t("ncclRecv failed on device " + std::to_string(device_id)
-                                          + " from peer " + std::to_string(peer_rank),
+                                          + " from peer device " + std::to_string(peer_device_id),
                                       result);
     }
 }
