@@ -533,6 +533,7 @@ typename std::enable_if<!std::is_same<int8_t, T>::value, T>::type saturate_cast(
 }
 
 std::vector<void*> benchmark_allocation();
+int32_t            hipblaslt_get_arch();
 int32_t            hipblaslt_get_arch_major();
 void hipblaslt_print_version();
 

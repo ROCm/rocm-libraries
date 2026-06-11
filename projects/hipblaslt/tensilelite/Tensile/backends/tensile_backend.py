@@ -33,6 +33,8 @@ from typing import List, Dict, Any, Callable, Tuple
 from Tensile.BenchmarkStructs import constructForkPermutations
 
 from Tensile.Common.TimingInstrumentation import timing_context
+from Tensile.Common import print1
+
 from .base import OptimizationBackend
 
 
@@ -51,7 +53,7 @@ class TensileBackend(OptimizationBackend):
             backend_config: Dict[str, Any],
             benchmark_config: Dict[str, Any],
             benchmark_runner: Callable[[List[Any]], Tuple[str, int]],
-            useCache: bool = False,
+            cacheValid: bool = False,
             buildOnly: bool = False) -> None:
         """Execute exhaustive enumeration loop with solution generation.
         
@@ -66,57 +68,76 @@ class TensileBackend(OptimizationBackend):
                 - ForkParameters flag
                 - problemType, assembler, debugConfig, isaInfoMap
             benchmark_runner: Function returning (resultsFileName, returncode)
-            useCache: If True, use cached solutions if available
+            cacheValid: If True, use cached solutions if available
             buildOnly: If True, skip benchmarking
             
         Returns:
             None
         """
-
         # Validate required config
-        required_keys = ["forkParams", "constantParams", "paramGroups", 
-                        "customKernels", "internalSupportParams", "customKernelWildcard",
-                        "ForkParameters", "problemType", "assembler", "debugConfig", "isaInfoMap"]
+        required_keys = [
+            "forkParametersEnabled", 
+            "problemType", 
+            "assembler", 
+            "debugConfig", 
+            "isaInfoMap", 
+            "benchmarkStep", 
+            "solutionPoolIndex"
+        ]
         for key in required_keys:
             if key not in benchmark_config:
                 raise ValueError(f"BenchmarkProblems: Missing required backend config key: {key}")
 
         # Extract configuration
-        fork_params = benchmark_config["forkParams"]
-        constant_params = benchmark_config["constantParams"]
-        param_groups = benchmark_config["paramGroups"]
-        custom_kernels = benchmark_config["customKernels"]
-        internal_support_params = benchmark_config["internalSupportParams"]
-        custom_kernel_wildcard = benchmark_config["customKernelWildcard"]
-        fork_parameters_enabled = benchmark_config["ForkParameters"]
-        problem_type = benchmark_config["problemType"]
+        forkParametersEnabled = benchmark_config["forkParametersEnabled"]
+        problemType = benchmark_config["problemType"]
         assembler = benchmark_config["assembler"]
-        debug_config = benchmark_config["debugConfig"]
-        isa_info_map = benchmark_config["isaInfoMap"]
+        debugConfig = benchmark_config["debugConfig"]
+        isaInfoMap = benchmark_config["isaInfoMap"]
+        benchmarkStep = benchmark_config["benchmarkStep"]
+        solutionPoolIndex = benchmark_config["solutionPoolIndex"] or {}
 
-        # Enumerate benchmark permutations and create solution objects
-        with timing_context("python_solution_generation"):
-            # Import locally to avoid circular dependency with BenchmarkProblems
-            from Tensile.BenchmarkProblems import _generateForkedSolutions, _generateCustomKernelSolutions
-            
-            with timing_context("python_solgen_fork_permutations"):
-                fork_permutations = constructForkPermutations(fork_params, param_groups) \
-                    if fork_parameters_enabled else []
-                max_possible_solutions = len(fork_permutations)
+        # Import locals to avoid circular dependency
+        from Tensile.BenchmarkProblems import (_generateForkedSolutions, _generateCustomKernelSolutions,
+                                               _constructAllPoolSolutions)
+    
+        configPTStr = str(problemType)
+        useSolutionPool = configPTStr in solutionPoolIndex
 
-            with timing_context("python_solgen_forked_solutions"):
-                reg_solutions = _generateForkedSolutions(problem_type, constant_params, 
-                                                         fork_permutations, assembler, 
-                                                         debug_config, isa_info_map)
+        solutions = None
+        if not cacheValid or useSolutionPool:
+            if useSolutionPool:
+                poolEntries = solutionPoolIndex[configPTStr]
+                with timing_context("python_solution_pool_construction"):
+                    solutions = _constructAllPoolSolutions(poolEntries, assembler, debugConfig, isaInfoMap)
+                print1("# Total {} solutions from {} pool file(s)".format(len(solutions), len(poolEntries)))
+                maxPossibleSolutions = len(solutions)
+            else:
+                # enumerate benchmark permutations and create resulting solution objects
+                with timing_context("python_solution_generation"):
+                    with timing_context("python_solgen_fork_permutations"):
+                        forkPermutations = constructForkPermutations(benchmarkStep.forkParams, \
+                                benchmarkStep.paramGroups) if forkParametersEnabled else []
+                        maxPossibleSolutions = len(forkPermutations)
 
-            with timing_context("python_solgen_custom_kernels"):
-                kc_solutions = _generateCustomKernelSolutions(problem_type, custom_kernels,
-                                                              internal_support_params,
-                                                              not custom_kernel_wildcard,
-                                                              assembler, debug_config, isa_info_map)
+                    with timing_context("python_solgen_forked_solutions"):
+                        regSolutions = _generateForkedSolutions(problemType, \
+                                benchmarkStep.constantParams, forkPermutations, assembler, \
+                                    debugConfig, isaInfoMap)
 
-            max_possible_solutions += len(kc_solutions)
-            all_solutions = reg_solutions + kc_solutions
-        
+                    with timing_context("python_solgen_custom_kernels"):
+                        kcSolutions = _generateCustomKernelSolutions(problemType, \
+                                benchmarkStep.customKernels, benchmarkStep.internalSupportParams, \
+                                not benchmarkStep.customKernelWildcard, assembler, debugConfig, \
+                                    isaInfoMap)
+
+                    maxPossibleSolutions += len(kcSolutions)
+                    solutions = regSolutions + kcSolutions
+
+            print1("# Actual Solutions: {} / {} after SolutionStructs\n" \
+                .format(len(solutions), maxPossibleSolutions))
+
         # Benchmark all solutions
-        benchmark_runner(all_solutions, useCache=useCache, buildOnly=buildOnly)
+        benchmark_runner(solutions, isCached=cacheValid and not useSolutionPool, buildOnly=buildOnly)
+        
+       

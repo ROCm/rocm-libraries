@@ -139,7 +139,7 @@ class DuctileBackend(OptimizationBackend):
             backend_config: Dict[str, Any],
             benchmark_config: Dict[str, Any],
             benchmark_runner: Callable[[List[Any]], Tuple[str, int]],
-            useCache: bool = False,
+            cacheValid: bool = False,
             buildOnly: bool = False) -> None:
         """Execute GA optimization loop.
         
@@ -153,7 +153,7 @@ class DuctileBackend(OptimizationBackend):
                 - problemType, assembler, debugConfig, isaInfoMap
                 - sourcePath
             benchmark_runner: Function returning (resultsFileName, returncode)
-            useCache: DuctileBackend does not support caching; warns and forces False
+            cacheValid: DuctileBackend does not support caching; warns and forces False
             buildOnly: DuctileBackend does not support build-only mode; warns and forces False
             
         Returns:
@@ -161,19 +161,18 @@ class DuctileBackend(OptimizationBackend):
         """
         source_path = benchmark_config.get("sourcePath", None)
 
-        if useCache:
-            printWarning("DuctileBackend: UseCache is not supported; running with UseCache=False")
+        if cacheValid:
+            printWarning("DuctileBackend: cacheValid is not supported; running with cacheValid=False")
         if buildOnly:
             printWarning("DuctileBackend: buildOnly is not supported; running full benchmark")
 
-        if "forkParams" not in benchmark_config:
-            raise ValueError("BenchmarkProblems: Missing required backend config key: forkParams")
-        if "constantParams" not in benchmark_config:
-            raise ValueError("BenchmarkProblems: Missing required backend config key: constantParams")
-
-        fork_params = benchmark_config["forkParams"].copy()
-        param_groups = benchmark_config.get("paramGroups", [])
-        constant_params = benchmark_config["constantParams"]
+        if "benchmarkStep" not in benchmark_config or benchmark_config["benchmarkStep"] is None:
+            raise ValueError("BenchmarkProblems: Missing required backend config key: benchmarkStep")
+        
+        benchmark_step = benchmark_config["benchmarkStep"]
+        fork_params = benchmark_step.forkParams.copy()
+        param_groups = benchmark_step.paramGroups
+        constant_params = benchmark_step.constantParams
         problem_type = benchmark_config.get("problemType")
         assembler = benchmark_config.get("assembler")
         debug_config = benchmark_config.get("debugConfig")
@@ -251,7 +250,7 @@ class DuctileBackend(OptimizationBackend):
                 shutil.rmtree(source_path)
 
             # Benchmark solutions - Ductile forces no cache and no build-only.
-            results_filename, returncode = benchmark_runner(solutions, useCache=False, buildOnly=False)
+            results_filename, returncode = benchmark_runner(solutions, isCached=False, buildOnly=False)
             
             if not results_filename or not os.path.isfile(results_filename):
                 printExit(f"BenchmarkProblems: Expected results file does not exist: {results_filename}")

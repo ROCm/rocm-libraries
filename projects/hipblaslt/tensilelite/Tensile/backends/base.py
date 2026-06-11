@@ -51,7 +51,7 @@ class OptimizationBackend(ABC):
             backend_config: Dict[str, Any],
             benchmark_config: Dict[str, Any],
             benchmark_runner: Callable[..., Tuple[str, int]],
-            useCache: bool = False,
+            cacheValid: bool = False,
             buildOnly: bool = False) -> None:
         """Execute the backend's optimization strategy.
         
@@ -69,10 +69,10 @@ class OptimizationBackend(ABC):
                           sourcePath
                           
             benchmark_runner: Callable that benchmarks a list of solutions and returns results.
-                            Signature: (solutions, useCache=False, buildOnly=False)
+                            Signature: (solutions, isCached=False, buildOnly=False)
                                      -> (resultsFileName, returncode)
                             
-            useCache: If True, use cached solutions if available
+            cacheValid: If True, matching cache data is available for this step
             buildOnly: If True, skip benchmarking (only build/compile kernels)
         
         Returns:

@@ -76,14 +76,19 @@ def _base_ductile_merged_config():
 
 
 def _make_benchmark_config(tmp_path):
+    benchmark_step = types.SimpleNamespace(
+        forkParams={"DepthU": [32, 64], "SourceSwap": [0, 1]},
+        paramGroups=[],
+        constantParams={},
+    )
+
     return {
-        "forkParams": {"DepthU": [32, 64], "SourceSwap": [0, 1]},
-        "constantParams": {},
-        "paramGroups": [],
+        "forkParametersEnabled": True,
         "problemType": types.SimpleNamespace(state={}),
         "assembler": object(),
         "debugConfig": types.SimpleNamespace(splitGSU=False),
         "isaInfoMap": {"gfx942": {}},
+        "benchmarkStep": benchmark_step,
         "sourcePath": str(tmp_path / "source"),
         "rootPath": str(tmp_path),
         "configName": "ductile-eval",

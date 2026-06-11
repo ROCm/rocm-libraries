@@ -34,7 +34,7 @@ pytestmark = pytest.mark.unit
 
 
 class _BackendForFactoryTest(OptimizationBackend):
-    def run(self, backend_config, benchmark_config, benchmark_runner, useCache=False, buildOnly=False):
+    def run(self, backend_config, benchmark_config, benchmark_runner, cacheValid=False, buildOnly=False):
         return None
 
 
@@ -82,29 +82,34 @@ def test_tensile_backend_run_calls_benchmark_runner(monkeypatch):
     monkeypatch.setattr(bp, "_generateForkedSolutions", lambda *_args, **_kwargs: ["fork_a", "fork_b"])
     monkeypatch.setattr(bp, "_generateCustomKernelSolutions", lambda *_args, **_kwargs: ["ck_a"])
 
-    def benchmark_runner(solutions, useCache=False, buildOnly=False):
+    def benchmark_runner(solutions, isCached=False, buildOnly=False):
         calls["solutions"] = solutions
-        calls["useCache"] = useCache
+        calls["isCached"] = isCached
         calls["buildOnly"] = buildOnly
         return "results.csv", 0
 
+    benchmark_step = types.SimpleNamespace(
+        forkParams={"x": [1, 2]},
+        paramGroups=[],
+        constantParams={},
+        customKernels=[],
+        internalSupportParams={},
+        customKernelWildcard=False,
+    )
+
     benchmark_config = {
-        "forkParams": {"x": [1, 2]},
-        "constantParams": {},
-        "paramGroups": [],
-        "customKernels": [],
-        "internalSupportParams": {},
-        "customKernelWildcard": False,
-        "ForkParameters": True,
+        "forkParametersEnabled": True,
         "problemType": object(),
         "assembler": object(),
         "debugConfig": object(),
         "isaInfoMap": {"gfx942": {}},
+        "benchmarkStep": benchmark_step,
+        "solutionPoolIndex": {},
     }
 
-    backend.run({}, benchmark_config, benchmark_runner, useCache=True, buildOnly=False)
+    backend.run({}, benchmark_config, benchmark_runner, cacheValid=False, buildOnly=False)
     assert calls["solutions"] == ["fork_a", "fork_b", "ck_a"]
-    assert calls["useCache"] is True
+    assert calls["isCached"] is False
     assert calls["buildOnly"] is False
 
 
@@ -127,8 +132,9 @@ def test_ductile_backend_warns_when_cache_or_build_only(monkeypatch, tmp_path):
     monkeypatch.setattr("Tensile.backends.ductile_backend.GeneticAlgorithm", FakeGA)
 
     backend = DuctileBackend()
-    benchmark_config = {
-        "forkParams": {
+
+    benchmark_step = types.SimpleNamespace(
+        forkParams={
             "DepthU": [32, 64],
             "PrefetchGlobalRead": [1, 2],
             "PrefetchLocalRead": [1],
@@ -136,19 +142,22 @@ def test_ductile_backend_warns_when_cache_or_build_only(monkeypatch, tmp_path):
             "SourceSwap": [0, 1],
             "1LDSBuffer": [0, 1],
         },
-        "constantParams": {},
-        "paramGroups": [],
+        paramGroups=[],
+        constantParams={},
+    )
+    benchmark_config = {
+        "forkParametersEnabled": True,
         "problemType": types.SimpleNamespace(state={}),
         "assembler": object(),
         "debugConfig": types.SimpleNamespace(splitGSU=False),
         "isaInfoMap": {"gfx942": {}},
-        "sourcePath": str(tmp_path / "source"),
+        "benchmarkStep": benchmark_step,
         "rootPath": str(tmp_path),
         "configName": "ductile-test",
         "benchmarkStepIdx": 0,
         "totalBenchmarkSteps": 1,
     }
 
-    backend.run({}, benchmark_config, lambda *_args, **_kwargs: ("unused.csv", 0), useCache=True, buildOnly=True)
-    assert any("UseCache is not supported" in msg for msg in warnings)
+    backend.run({}, benchmark_config, lambda *_args, **_kwargs: ("unused.csv", 0), cacheValid=True, buildOnly=True)
+    assert any("cacheValid is not supported" in msg for msg in warnings)
     assert any("buildOnly is not supported" in msg for msg in warnings)
