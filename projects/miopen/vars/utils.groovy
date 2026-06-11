@@ -199,8 +199,8 @@ def cmake_fin_build_cmd(prefixpath){
             rm -rf build
             mkdir build
             cd build
-            CXX=${compilerpath} cmake -G Ninja ${configargs} ${flags} ..
-            dumb-init ninja -j\$(nproc) ${make_targets}
+            CXX=${compilerpath} cmake ${configargs} ${flags} ..
+            dumb-init make -j\$(nproc) ${make_targets}
     """
     return fin_cmd
 }
