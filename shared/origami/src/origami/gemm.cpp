@@ -1250,8 +1250,10 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
   // Cache-line sharing:
   // When M or N is small, multiple tile rows/columns fit in the same 128B
   // cache lines, reducing the actual unique bytes loaded.
-  double a_cl_factor = std::min(1.0, problem.size.m * a_bytes / cl);
-  double b_cl_factor = std::min(1.0, problem.size.n * b_bytes / cl);
+  // [EXPERIMENT] Removed: do NOT assume loading one tile's cache line also
+  // fetches a neighbouring tile's data. Each tile counts full unique bytes.
+  double a_cl_factor = 1.0;
+  double b_cl_factor = 1.0;
 
   // Spatial Reuse:
   const size_t rectangular_mn = l2_tiles.m * l2_tiles.n;
@@ -1547,9 +1549,18 @@ double compute_memory_latency(const problem_t& problem,
     Ld_CU_bytes += math::safe_ceil_div(config.mt.nk(), problem.b_mx_block_size);
 
   // 3) Total loads by all CUs, split by operand (per K-iter).
-  double Ld_A_total = Ld_A_iter_bytes * static_cast<double>(num_active_cus);
-  double Ld_B_total = Ld_B_iter_bytes * static_cast<double>(num_active_cus);
-  double total_Ld   = Ld_CU_bytes     * static_cast<double>(num_active_cus);
+  //
+  // [EXPERIMENT] Cross-tile cache-line sharing is modeled here on the LOAD
+  // volume (instead of as a cache hit-rate boost in estimate_cache_hit_rates,
+  // where a_cl_factor/b_cl_factor are now 1.0).  When M (or N) is small,
+  // neighbouring tiles' rows/columns pack into the same 64B cache line, so the
+  // actual unique bytes fetched from memory is reduced by that fraction.
+  const double a_cl_share = std::min(1.0, problem.size.m * a_bytes / cl_d);
+  const double b_cl_share = std::min(1.0, problem.size.n * b_bytes / cl_d);
+  double Ld_A_total = Ld_A_iter_bytes * static_cast<double>(num_active_cus) * a_cl_share;
+  double Ld_B_total = Ld_B_iter_bytes * static_cast<double>(num_active_cus) * b_cl_share;
+
+  double total_Ld   = Ld_A_total + Ld_B_total;
 
   const bool a_nontemporal = config.cache_hints_a > 3;
   const bool b_nontemporal = config.cache_hints_b > 3;
@@ -1647,10 +1658,6 @@ double compute_epilogue_latency(const problem_t& problem,
   const size_t grid_m                  = context.grid_m;
   const size_t grid_n                  = context.grid_n;
   const size_t num_output_tiles        = context.num_output_tiles;
-  // Baseline store bandwidth is HBM (mem3); the caller applies the
-  // cache-hints-d dependent L2 advantage post-hoc in compute_tile_latency
-  // because the advantage's magnitude depends on the mainloop/epilogue
-  // store-rate ratio (see ntd_l2_help_factor below).
   const double store_bw                = hardware.mem3_perf_ratio * context.mem_bw_limited;
   const double reduce_bw               = hardware.mem3_perf_ratio * context.write_mem_bw_limited;
   const bool debug                     = context.debug;
@@ -1668,23 +1675,9 @@ double compute_epilogue_latency(const problem_t& problem,
   // distinct SIMDs) is
   //   reads_per_wave = (MT_M * MT_N) / (wave_num * WF) * mi_reg_per_out
   // where mi_reg_per_out is the number of 32-bit sub-registers per
-  // accumulator element (1 for f32-accumulated MFMAs, 2 for f64 /
-  // complex-f32, 4 for complex-f64).
-  //
-  // The obvious-looking proxy ceil(MT_M/MI_M) * ceil(MT_N/MI_N) is the
-  // tile-level MFMA count per K-slice; it only equals reads_per_wave
-  // when MI_M * MI_N == wave_num * WF (numerically true for MI16x16 at
-  // the default 2x2 wave layout on WF=64, but 4x too low for MI32x32
-  // and 16x too low for hypothetical MI64x64).  Use the physically
-  // correct reads_per_wave here.
-  const size_t wave_num_epi = config.has_tensile_params()
-      ? config.tensile().wave_num
-      : size_t{4};
-  const double wave_num_epi_d = std::max(1.0, static_cast<double>(wave_num_epi));
-  const double threads_per_wave_d =
-      std::max(1.0, static_cast<double>(heuristic.epilogue_threads_per_wave));
+  const size_t wave_num_epi = std::max<size_t>(config.wave.m * config.wave.n, 1);
   const double acc_elems_per_thread =
-      static_cast<double>(MT_M * MT_N) / (threads_per_wave_d * wave_num_epi_d);
+      static_cast<double>(MT_M * MT_N) / (heuristic.epilogue_threads_per_wave * wave_num_epi);
   // mi_dtype in Origami is the MFMA operand type.  For every MFMA we
   // care about, accumulator width == max(operand_bytes, 4) (f32 acc for
   // f16/bf16/f8/int8/xf32, f64 acc for Double, complex acc for complex
@@ -1905,25 +1898,22 @@ double compute_tile_latency(const problem_t& problem,
   double L_mem     = compute_memory_latency(problem, hardware, config, context);
 
   // ---------------------------------------------------------------------------
-  // Per-wave aspect pressure (per ORIGAMI_per_wave_aspect_model.md §3-§4).
+  // Per-wave aspect pressure.
   //
-  // The MFMA-only L_compute above counts MFMAs and divides by parallel_mi_cu
-  // but doesn't see the wave/MIWT layout's secondary effects:
-  //   (a) compute body must hide LDS-read latency  (§3.1)
-  //   (b) VGPR / wave-slot occupancy gates memory-stall hiding  (§3.2)
-  //   (c) PGR pipeline needs a long-enough mainloop body          (§3.4)
-  //   (d) multi-wave WGs pack fewer WGs per CU                    (§3.5)
+  // The MFMA-only L_compute above counts MFMAs and divides by parallel_mi_cu,
+  // but ignores secondary effects of the wave/MIWT layout that gate effective
+  // throughput:
+  //   (a) occupancy must be high enough to hide exposed memory stalls
+  //       (occupancy_score);
+  //   (b) enough workgroups must be co-resident per CU to overlap work across
+  //       workgroup boundaries  (wg_score).
   //
-  // Each pressure is a score in [0, 1]; the combined score is a throughput
-  // multiplier (lower score = effectively longer compute).  All four scores
-  // are applied to L_compute (the only term in our model that captures
-  // MFMA throughput), and the *multiplier* (= 1/score) is hard-capped at
-  // PER_WAVE_MAX_MULTIPLIER so that one badly-misranked term doesn't
-  // dominate the total predicted latency.
+  // Each effect is a score in [0, 1]; their product is a throughput multiplier
+  // applied to L_compute (the only term that captures MFMA throughput). The
+  // multiplier (1 / score) is capped at PER_WAVE_MAX_MULTIPLIER so that a
+  // single mis-scored term cannot dominate the predicted latency.
   //
-  // Constants are starting points (the proposal acknowledges they need a
-  // fitting pass against a tuning corpus); enabled on gfx94x/gfx95x where
-  // the proposal's calibration anchor was collected.
+  // Restricted to gfx942/gfx950, where the occupancy targets were calibrated.
   // ---------------------------------------------------------------------------
   if (hardware.arch == hardware_t::architecture_t::gfx950 ||
       hardware.arch == hardware_t::architecture_t::gfx942) {
@@ -1931,116 +1921,64 @@ double compute_tile_latency(const problem_t& problem,
     const size_t MT_N_pw   = config.mt.n;
     const size_t MI_M_pw   = std::max<size_t>(config.mi.m, 1);
     const size_t MI_N_pw   = std::max<size_t>(config.mi.n, 1);
-    const size_t MI_K_pw   = std::max<size_t>(config.mi.k, 1);
     const size_t MIWG_M_pw = std::max<size_t>(config.wave.m, 1);
     const size_t MIWG_N_pw = std::max<size_t>(config.wave.n, 1);
     const size_t MIWT_M_pw = std::max<size_t>(MT_M_pw / (MI_M_pw * MIWG_M_pw), 1);
     const size_t MIWT_N_pw = std::max<size_t>(MT_N_pw / (MI_N_pw * MIWG_N_pw), 1);
     const size_t waves_per_wg = MIWG_M_pw * MIWG_N_pw;
 
-    // ----------------------------------------- MFMA / LDS-read cycle costs
-    // cycles_per_mfma is dtype- and shape-dependent; for gfx950 BF16 the
-    // measured values are ~8 (MI16x16x32) and ~32 (MI32x32x16).  Default
-    // to those; for other dtypes, scale relative to the BF16 baseline.
-    const bool is_mi32 = (MI_M_pw >= 32 || MI_N_pw >= 32);
-    double cycles_per_mfma = is_mi32 ? 32.0 : 8.0;
-    if (a_bits != 16 || b_bits != 16) {
-      // f32 / xf32 emulation paths run heavier per-MFMA; bump 2x as a
-      // first-order correction until a per-dtype table is filled in.
-      cycles_per_mfma *= 2.0;
-    }
-    const double mfma_count   = static_cast<double>(MIWT_M_pw)
-                              * static_cast<double>(MIWT_N_pw);
-    const double mfma_cycles  = mfma_count * cycles_per_mfma;
-    constexpr size_t LRVW_PW  = 8;
-    const double lds_read_instr =
-        (static_cast<double>(MIWT_M_pw) + static_cast<double>(MIWT_N_pw))
-        * std::max(1.0, static_cast<double>(MI_K_pw) / static_cast<double>(LRVW_PW));
-    const double lds_read_cycles = lds_read_instr;  // 1 issue cycle/read
-
-    // ----------------------------------------- Per-thread VGPR estimate
-    // Per thread, per MFMA: A = MI_M*MI_K/64 * bytes/4; B = MI_K*MI_N/64*bytes/4;
-    // D (f32 accum) = MI_M*MI_N/64 * 4/4 = MI_M*MI_N/64.  Operand registers
-    // are shared across MIWT_M (A) and MIWT_N (B) MFMAs at the same K
-    // position, so the operand budget scales as MIWT_M + MIWT_N (not the
-    // MFMA-count product).  PGR>=2 double-buffers the operands.
-    const double a_bytes_pw = static_cast<double>(a_bits) / 8.0;
-    const double b_bytes_pw = static_cast<double>(b_bits) / 8.0;
-    const double a_vgpr_per_slice =
-        static_cast<double>(MI_M_pw * MI_K_pw) * a_bytes_pw / 64.0 / 4.0;
-    const double b_vgpr_per_slice =
-        static_cast<double>(MI_K_pw * MI_N_pw) * b_bytes_pw / 64.0 / 4.0;
-    constexpr double ACCUM_BYTES_PER_OUTPUT = 4.0;  // f32 accumulator
-    const double d_vgpr_per_mfma =
-        static_cast<double>(MI_M_pw * MI_N_pw) * ACCUM_BYTES_PER_OUTPUT / 64.0 / 4.0;
-    const double pgr_factor = (pgr >= 2) ? 2.0 : 1.0;
-    const double accum_vgpr   = mfma_count * d_vgpr_per_mfma;
-    const double operand_vgpr = (static_cast<double>(MIWT_M_pw) * a_vgpr_per_slice
-                              + static_cast<double>(MIWT_N_pw) * b_vgpr_per_slice)
-                              * pgr_factor;
-    constexpr double ADDRESS_CALC_VGPR = 30.0;
-    const double total_vgpr_pw = accum_vgpr + operand_vgpr + ADDRESS_CALC_VGPR;
-
-    // Occupancy stepwise (gfx95x VGPR allocation, granular).
-    double occupancy_waves;
-    if      (total_vgpr_pw <=  96.0) occupancy_waves = 4.0;
-    else if (total_vgpr_pw <= 128.0) occupancy_waves = 3.0;
-    else if (total_vgpr_pw <= 168.0) occupancy_waves = 2.0;
-    else if (total_vgpr_pw <= 256.0) occupancy_waves = 1.0;
-    else                              occupancy_waves = 0.5;
-    constexpr double TARGET_OCCUPANCY = 4.0;
-    const double occupancy_score = std::clamp(
-        occupancy_waves / TARGET_OCCUPANCY, 0.0, 1.0);
-
-    // ----------------------------------------- Scores
-    // §3.1 LDS-read latency hiding.
-    constexpr double LATENCY_HIDING_THRESHOLD = 1.5;
-    const double latency_hiding_score = std::clamp(
-        mfma_cycles
-        / (LATENCY_HIDING_THRESHOLD * std::max(lds_read_cycles, 1.0)),
-        0.0, 1.0);
-
-    // §3.4 Mainloop body length is intentionally NOT included here.  The
-    // proposal's body_score is a per-K-iter "is the MFMA chain long enough
-    // to hide a single global-load round trip" gate, but for normal
-    // problems with k_iters >> pgr the PGR steady-state pipeline already
-    // amortises the global-load latency across many iters — body_score
-    // ends up penalising perfectly-fine narrow-MIWT kernels (e.g. f32
-    // MIWT 1x3 gets a 3x penalty even though K=512 / MT_K=64 = 8 iters
-    // amortise fine).  A proper body_score would compare *total* mainloop
-    // cycles against global-load latency; until that's calibrated we omit
-    // the term.
+    // Occupancy.
     //
-    // §3.5 WG slots per CU.
-    constexpr double THREAD_BUDGET_PER_CU   = 2048.0;
+    // config.occupancy (Tensile CUOccupancy) is the resident workgroups per
+    // CU: min over the LDS-, VGPR-, accVGPR-, and SGPR-limited occupancies,
+    // each expressed in WGs/CU. It supersedes the former per-thread VGPR step
+    // table. Latency hiding, however, is driven by resident waves per SIMD, so
+    // convert: waves/SIMD = WGs/CU * waves/WG / SIMDs_per_CU.
+    constexpr double SIMDS_PER_CU = 4.0;
+    const double wgs_per_cu = static_cast<double>(std::max(config.occupancy, 1));
+    const double waves_per_simd =
+        wgs_per_cu * static_cast<double>(waves_per_wg) / SIMDS_PER_CU;
+    constexpr double TARGET_OCCUPANCY = 4.0;  // waves/SIMD
+    const double occupancy_score = std::clamp(
+        waves_per_simd / TARGET_OCCUPANCY, 0.0, 1.0);
+
+    // A latency-hiding score (per-iter MFMA cycles vs LDS-read latency) was
+    // evaluated here but removed: a full-sweep 0x/1x A/B showed it changed 0 of
+    // 2613 picks, so it was inert. Its inputs (cycles_per_mfma, mfma_cycles,
+    // lds_read_cycles) were removed with it.
+    //
+    // A mainloop-body-length score (whether the per-iter MFMA chain hides one
+    // global-load round trip) is intentionally omitted: for k_iters >> PGR the
+    // steady-state prefetch pipeline already amortises global-load latency, so
+    // the per-iter form over-penalises narrow-MIWT kernels. It would need a
+    // total-mainloop-vs-load-latency formulation to be correct.
+    //
+    // Workgroup co-residency: how many workgroups fit on a CU to overlap work
+    // across WG boundaries. config.occupancy is already resident WGs/CU, so it
+    // is used directly, replacing a hardware wave-slot ceiling that assumed
+    // maximum occupancy and therefore never penalised register-starved kernels.
+    const double wg_slots_per_cu = wgs_per_cu;
     constexpr double TARGET_WG_SLOTS_PER_CU = 2.0;
-    const double wg_slots_per_cu = THREAD_BUDGET_PER_CU
-        / (64.0 * static_cast<double>(waves_per_wg));
     const double wg_score = std::clamp(
         wg_slots_per_cu / TARGET_WG_SLOTS_PER_CU, 0.0, 1.0);
 
-    // Occupancy only buys throughput by hiding *exposed* memory stalls — the
-    // part of a K-iter's memory latency that the PGR pipeline can't overlap
-    // behind compute.  For a compute-bound tile (L_compute >= L_mem) memory
-    // is fully hidden, so low occupancy costs nothing; the penalty must fade.
-    // Without this, a large-tile f32 GEMM (e.g. MT256x256 MIWT8x8) carries a
-    // big accumulator file -> low occupancy_score -> the ×1.5 cap compounds
-    // across every one of K/MT_K iters, and the model wrongly ranks the
-    // fastest compute kernel last (f32 4096^3 squares).
+    // Occupancy only helps by hiding *exposed* memory stalls: the portion of
+    // per-iter memory latency the prefetch pipeline cannot overlap behind
+    // compute. For compute-bound tiles (L_compute >= L_mem) memory is fully
+    // hidden, so the occupancy penalty must fade; otherwise a large-accumulator
+    // f32 tile (e.g. MT256x256) is penalised every K-iter and the fastest
+    // compute kernel is wrongly ranked last.
     const double exposed_mem_frac = std::clamp(
         (L_mem - L_compute) / std::max(L_mem, 1.0), 0.0, 1.0);
     const double occupancy_score_eff =
         1.0 - (1.0 - occupancy_score) * exposed_mem_frac;
 
-    // Combined score (§4) — three terms (latency_hiding × occupancy × wg).
-    double per_wave_score =
-        latency_hiding_score * occupancy_score_eff * wg_score;
+    // Combined throughput score: occupancy * wg.
+    double per_wave_score = occupancy_score_eff * wg_score;
 
-    // Cap the multiplier.  The proposal's score can drop to ~0.06 for a
-    // single-spill, single-wave-per-CU kernel, which would inflate compute
-    // by 16x — too aggressive given that real-world spill kernels lose
-    // ~30-50% throughput, not 16x.  Cap multiplier at 1.5x (i.e. the
-    // per-wave-aspect penalty contributes at most 50% extra L_compute).
+    // Cap the multiplier. An uncapped product can fall to ~0.06 (single wave,
+    // register spilling), implying a 16x compute inflation; real low-occupancy
+    // kernels lose closer to 30-50%. Cap the penalty at 1.5x L_compute.
     constexpr double PER_WAVE_MAX_MULTIPLIER = 1.5;
     constexpr double PER_WAVE_MIN_SCORE = 1.0 / PER_WAVE_MAX_MULTIPLIER;
     per_wave_score = std::max(per_wave_score, PER_WAVE_MIN_SCORE);
@@ -2051,11 +1989,8 @@ double compute_tile_latency(const problem_t& problem,
       OLOG_DEBUG("per_wave MIWT_M: " << MIWT_M_pw);
       OLOG_DEBUG("per_wave MIWT_N: " << MIWT_N_pw);
       OLOG_DEBUG("per_wave waves_per_wg: " << waves_per_wg);
-      OLOG_DEBUG("per_wave mfma_cycles: " << mfma_cycles);
-      OLOG_DEBUG("per_wave lds_read_cycles: " << lds_read_cycles);
-      OLOG_DEBUG("per_wave latency_hiding_score: " << latency_hiding_score);
-      OLOG_DEBUG("per_wave total_vgpr: " << total_vgpr_pw);
-      OLOG_DEBUG("per_wave occupancy_waves: " << occupancy_waves);
+      OLOG_DEBUG("per_wave wgs_per_cu: " << wgs_per_cu);
+      OLOG_DEBUG("per_wave waves_per_simd: " << waves_per_simd);
       OLOG_DEBUG("per_wave occupancy_score: " << occupancy_score);
       OLOG_DEBUG("per_wave exposed_mem_frac: " << exposed_mem_frac);
       OLOG_DEBUG("per_wave occupancy_score_eff: " << occupancy_score_eff);
@@ -2095,11 +2030,11 @@ double compute_tile_latency(const problem_t& problem,
       ? std::min<long>(pgr - 1, k_iters - 1) : 0;
   const size_t tail_k = K % MT_K;
 
-  // K-loop issue-efficiency scale: small reductions pay an issue penalty.
+  // K-loop issue-efficiency scale.
   const double eff_scale =
       (splitting_factor > 4) ? 1.0 : heuristic.main_loop_efficiency;
 
-  // Edge / spatial waste penalty (baseline form).  utilization is the ratio
+  // Edge / spatial waste penalty.  utilization is the ratio
   // of useful problem volume to launched volume; the kernel still pays for
   // the launched volume, so per-iter latency scales by 1/utilization.
   const double utilization = calculate_work_utilization(problem, config);
@@ -2223,6 +2158,61 @@ double compute_tile_latency(const problem_t& problem,
   constexpr double K_ITER_LOOP_OVERHEAD = 500.0;
   const double L_loop_overhead = K_ITER_LOOP_OVERHEAD * static_cast<double>(k_iters);
 
+  // [EXPERIMENT] Sub-cache-line DepthU narrow-load penalty.
+  //
+  // When the unroll (K) dimension is the coalesced global-load axis (Tensile
+  // TLU=False: A for transA=T, B for transB=N), a wave's coalesced load spans
+  // MT_K*bpe contiguous bytes.  Below the 128 B physical cache line the wave
+  // issues narrow, under-filled load transactions every K-iter -> extra exposed
+  // load-issue latency.
+  //
+  // Modelled as a per-K-iter cost that depends ONLY on MT_K and the number of
+  // K-coalesced operands -- NOT on byte volume / MT_M / MT_N (a traffic-coupled
+  // form distorts tile-shape selection: it scales with the operand's MT_N and
+  // wrongly biases NN toward small-MT_N tiles).  TN (both operands K-coalesced)
+  // gets ~2x the weight of NN (B only); NT (neither) is unaffected.  Scaled by
+  // total k_iters (every K-iter -- prologue/main/tail -- issues the narrow
+  // loads), additive like L_loop_overhead.
+  constexpr double phys_cl = 128.0;
+  const double a_bytes_du  = static_cast<double>(a_bits) / 8.0;
+  const double b_bytes_du  = static_cast<double>(b_bits) / 8.0;
+  const bool a_k_coalesced = (problem.a_transpose == transpose_t::T);   // TN / TT
+  const bool b_k_coalesced = (problem.b_transpose == transpose_t::N);   // NN / TN
+  const double mt_k_dd     = static_cast<double>(std::max<size_t>(MT_K, 1));
+  const double a_underfill = a_k_coalesced
+      ? std::max(0.0, phys_cl / std::max(mt_k_dd * a_bytes_du, 1.0) - 1.0) : 0.0;
+  const double b_underfill = b_k_coalesced
+      ? std::max(0.0, phys_cl / std::max(mt_k_dd * b_bytes_du, 1.0) - 1.0) : 0.0;
+  const double narrow_load_factor = a_underfill + b_underfill;
+  constexpr double NARROW_LOAD_ITER_PENALTY = 500.0;  // tunable
+  const double L_narrow_load = narrow_load_factor * static_cast<double>(k_iters)
+                             * NARROW_LOAD_ITER_PENALTY;
+
+  // [EXPERIMENT] Deep-DepthU penalty for free-dimension-coalesced operands.
+  //
+  // The mirror of the narrow-load term.  An operand whose coalesced global-load
+  // axis is the FREE dim (Tensile TLU=True: A for transA=N, B for transB=T)
+  // fills its cache line along M / N, NOT along K -- so growing MT_K buys it no
+  // coalescing benefit, only deeper LDS/register state, lower occupancy, and
+  // fewer K-iters to pipeline.  HW confirms this for NT (both operands free):
+  // MT_K=128 measures ~2x slower than MT_K<=64.  So MT_K beyond a physical
+  // cache line is "unamortised depth" for free-coalesced operands.
+  //
+  // Symmetric form: per free-coalesced operand, charge max(0, MT_K*bpe/128 - 1)
+  // (= 0 at/below a 128 B line, 1 at MT_K=128 bf16, 3 at MT_K=256).  Weighted by
+  // operand count: NT 2x (A+B free), NN/TT 1x (one free), TN 0x (both K-coalesced
+  // -> deep MT_K genuinely helps them, no penalty).  Scaled by k_iters, additive.
+  const bool a_free_coalesced = !a_k_coalesced;   // NN / NT
+  const bool b_free_coalesced = !b_k_coalesced;   // NT / TT
+  const double a_deep = a_free_coalesced
+      ? std::max(0.0, mt_k_dd * a_bytes_du / phys_cl - 1.0) : 0.0;
+  const double b_deep = b_free_coalesced
+      ? std::max(0.0, mt_k_dd * b_bytes_du / phys_cl - 1.0) : 0.0;
+  const double deep_k_factor = a_deep + b_deep;
+  constexpr double DEEP_K_ITER_PENALTY = 0.0;  // disabled: blanket deep-K penalty regressed NT in aggregate
+  const double L_deep_k = deep_k_factor * static_cast<double>(k_iters)
+                        * DEEP_K_ITER_PENALTY;
+
   // DepthU waste — when the K elements one WG actually processes
   // (`k_effective`) is below MT_K, the kernel still pays for an MT_K-wide
   // LDS allocation, register state, and prefetch handshake that the
@@ -2272,7 +2262,8 @@ double compute_tile_latency(const problem_t& problem,
 
   // MainLoop subtotal.
   const double L_mainloop =
-      L_main + L_ngll + L_nll + L_tail + L_pgr_stall + L_loop_overhead + L_du_waste;
+      L_main + L_ngll + L_nll + L_tail + L_pgr_stall + L_loop_overhead + L_du_waste
+      + L_narrow_load + L_deep_k;
 
   // ---------------------------------------------------------------------------
   // 3. Epilogue (per-tile store; compute is already covered by NLL)
@@ -2516,6 +2507,10 @@ double compute_tile_latency(const problem_t& problem,
     OLOG_DEBUG("num_main_iters: " << int(num_main_iters));
     OLOG_DEBUG("num_ngll_iters: " << int(num_ngll_iters));
     OLOG_DEBUG("L_mem_stream: " << L_mem_stream);
+    OLOG_DEBUG("narrow_load_factor: " << narrow_load_factor);
+    OLOG_DEBUG("L_narrow_load: " << L_narrow_load);
+    OLOG_DEBUG("deep_k_factor: " << deep_k_factor);
+    OLOG_DEBUG("L_deep_k: " << L_deep_k);
     OLOG_DEBUG("L_compute_stream: " << L_compute_stream);
 
     OLOG_DEBUG("L_prologue: " << L_prologue);
