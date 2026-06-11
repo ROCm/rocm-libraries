@@ -892,6 +892,8 @@ class Module(Item):
     Left-path entry point::
 
         asm_module = code_module.to_stinky_asm([12, 5, 0])
+        # Or with Tensile-style kernel label:
+        # asm_module = code_module.to_stinky_asm([12, 5, 0], logical_name="my_kernel")
         print(asm_module.emitAssembly())
 
     See module-level docstring for the architectural picture.
@@ -1190,7 +1192,12 @@ class Module(Item):
         raise RuntimeError("Module is not picklable")
 
     # ----------------------------------------------------- logicalIR handoff
-    def to_stinky_asm(self, arch: Sequence[int]):
+    def to_stinky_asm(
+        self,
+        arch: Sequence[int],
+        *,
+        logical_name: Optional[str] = None,
+    ):
         """Lower this Module tree to a ``stinkytofu.StinkyAsmModule``.
 
         Walks ``itemList`` in tree order and forwards every leaf that
@@ -1209,6 +1216,10 @@ class Module(Item):
         Args:
             arch: target ISA ``[major, minor, stepping]``, e.g.
                 ``[12, 5, 0]`` for gfx1250.
+            logical_name: optional override for the ``LogicalModule`` /
+                asm module name. When omitted, uses ``self.name`` or
+                ``"kernel"`` (matches prior behaviour and pairs with
+                ``rocisa.toStinkyTofuModule(..., moduleName, ...)``).
 
         Returns:
             ``stinkytofu.StinkyAsmModule``.
@@ -1219,7 +1230,8 @@ class Module(Item):
         """
         import stinkytofu as _st  # noqa: WPS433  (optional runtime dep)
 
-        lm = _st.LogicalModule(self.name or "kernel")
+        lm_label = logical_name if logical_name is not None else (self.name or "kernel")
+        lm = _st.LogicalModule(lm_label)
         for inst in self._collect_logical_insts():
             lm.add(inst)
         return _st.lower_logical_module(lm, list(arch))

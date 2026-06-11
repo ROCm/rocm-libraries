@@ -68,7 +68,9 @@ Not yet done (dummy):
     - Interop hooks: ``hasStinkyTofuBackend``, ``isSupportedByStinkyTofu``,
       ``getRegisteredArchKeys`` — forward to the standalone ``stinkytofu``
       binding (``_stinkytofu.so``).
-    - Interop hooks still dummy: ``StinkyAsmModule``, ``toStinkyTofuModule``.
+    - Interop: ``toStinkyTofuModule`` — lowers ``code.Module`` via
+      ``Module.to_stinky_asm`` (``stinky_interop``). ``StinkyAsmModule`` —
+      re-exported from ``stinkytofu`` when the binding is importable.
     - ``macro``: ``MacroVMagicDiv`` / ``PseudoRandomGenerator`` shims still dummy.
     - ``container``: register-reference layer + ``Container`` ABC,
       hardware tokens, ``MemTokenData``, and ``*Modifiers``.
@@ -107,8 +109,16 @@ from . import instruction as instruction
 from . import label as label
 from . import macro as macro
 from . import register as register
+from .stinky_interop import toStinkyTofuModule
 
 _P = "rocisa"
+
+try:
+    import stinkytofu as _stinkytofu  # type: ignore[import-not-found]
+
+    StinkyAsmModule = _stinkytofu.StinkyAsmModule
+except ImportError:
+    StinkyAsmModule = make_dummy_class(f"{_P}.StinkyAsmModule")
 
 
 # ---------------------------------------------------------------------------
@@ -312,7 +322,5 @@ def getRegisteredArchKeys():
     return stinkytofu.getRegisteredArchKeys()
 
 
-# Path 2 interop (see init_stinkytofu in
-# shared/stinkytofu/src/conversion/rocisa/ToStinkyTofuUtils.cpp) — still dummy.
-StinkyAsmModule = make_dummy_class(f"{_P}.StinkyAsmModule")
-toStinkyTofuModule = make_dummy_func(f"{_P}.toStinkyTofuModule")
+# Path-1 interop: ``toStinkyTofuModule`` / ``StinkyAsmModule`` (see
+# ``stinky_interop.py`` and ``code.Module.to_stinky_asm``).
