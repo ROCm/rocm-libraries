@@ -62,6 +62,7 @@ namespace TensileLite
         X_MACRO(SizeFree2) \
         X_MACRO(SizeFree3) \
         X_MACRO(SizeSum) \
+        X_MACRO(SizeSumDiv2) \
         X_MACRO(SizeSum1) \
         X_MACRO(SizeSum2) \
         X_MACRO(StrideA0) \
@@ -88,6 +89,12 @@ namespace TensileLite
         X_MACRO(StrideD0Bytes) \
         X_MACRO(StrideMetadata0) \
         X_MACRO(StrideMetadata1) \
+        X_MACRO(StrideAK) \
+        X_MACRO(StrideBK) \
+        X_MACRO(StrideCK) \
+        X_MACRO(StrideCM) \
+        X_MACRO(StrideASK) \
+        X_MACRO(StrideBSK) \
         X_MACRO(Alpha) \
         X_MACRO(Beta) \
         X_MACRO(SplitK) \

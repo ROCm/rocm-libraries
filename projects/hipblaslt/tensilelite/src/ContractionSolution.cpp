@@ -2053,6 +2053,9 @@ namespace TensileLite
                 case CustomArgSemantic::SizeSum:
                     rv.args.appendCustomType("SizeSum", problem.problemSizes()[problem.problemSizes().size() - 1], arg.type);
                     break;
+                case CustomArgSemantic::SizeSumDiv2:
+                    rv.args.appendCustomType("SizeSumDiv2", problem.problemSizes()[problem.problemSizes().size() - 1] / 2, arg.type);
+                    break;
                 case CustomArgSemantic::SizeSum1:
                     rv.args.appendCustomType("SizeSum1", problem.problemSizes()[problem.problemSizes().size() - 2], arg.type);
                     break;
@@ -2162,6 +2165,24 @@ namespace TensileLite
                     break;
                 case CustomArgSemantic::StrideMetadata1:
                     rv.args.appendCustomType("StrideMetadata1", problem.metadata().strides()[2], arg.type);
+                    break;
+                case CustomArgSemantic::StrideAK:
+                    rv.args.appendCustomType("StrideAK", 1, arg.type);
+                    break;
+                case CustomArgSemantic::StrideBK:
+                    rv.args.appendCustomType("StrideBK", 1, arg.type);
+                    break;
+                case CustomArgSemantic::StrideCK:
+                    rv.args.appendCustomType("StrideCK", 0, arg.type);
+                    break;
+                case CustomArgSemantic::StrideCM:
+                    rv.args.appendCustomType("StrideCM", 1, arg.type);
+                    break;
+                case CustomArgSemantic::StrideASK:
+                    rv.args.appendCustomType("StrideASK", 1, arg.type);
+                    break;
+                case CustomArgSemantic::StrideBSK:
+                    rv.args.appendCustomType("StrideBSK", 1, arg.type);
                     break;
                 case CustomArgSemantic::Alpha:
                     rv.args.append("Alpha", inputs.alpha, problem.alphaType());
