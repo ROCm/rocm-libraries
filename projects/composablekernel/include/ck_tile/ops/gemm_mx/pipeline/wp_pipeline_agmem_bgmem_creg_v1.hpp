@@ -69,12 +69,12 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
     template <bool IsWave32Host = false>
     static constexpr index_t GetVectorSizeA()
     {
-        return 32;
+        return PipelinePolicy::template GetVectorSizeA<Problem>();
     }
     template <bool IsWave32Host = false>
     static constexpr index_t GetVectorSizeB()
     {
-        return 32;
+        return PipelinePolicy::template GetVectorSizeB<Problem>();
     }
     static constexpr index_t GetVectorSizeC() { return Problem::VectorSizeC; }
 
@@ -722,6 +722,9 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
                                    index_t num_loop,
                                    void* __restrict__ p_smem) const
     {
+        static_assert(std::is_same_v<AElementFunction, element_wise::PassThrough>);
+        static_assert(std::is_same_v<BElementFunction, element_wise::PassThrough>);
+
         constexpr index_t smem_size = PipelinePolicy::template GetSmemSize<Problem>();
         const auto smem             = reinterpret_cast<uint8_t*>(p_smem);
         const bool has_hot_loop     = Base::BlockHasHotloop(num_loop);

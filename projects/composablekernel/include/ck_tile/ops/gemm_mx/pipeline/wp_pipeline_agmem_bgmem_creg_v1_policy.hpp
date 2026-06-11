@@ -57,6 +57,9 @@ struct MXGemmPipelineAgBgCrPolicy : UniversalGemmPipelineAgBgCrPolicy
     static constexpr index_t AK1 = DWORDx4 * APackedSize;
     static constexpr index_t BK1 = DWORDx4 * BPackedSize;
 
+    CK_TILE_HOST_DEVICE static constexpr auto GetVectorSizeA() { return AK1; }
+    CK_TILE_HOST_DEVICE static constexpr auto GetVectorSizeB() { return BK1; }
+
     CK_TILE_HOST_DEVICE static constexpr auto GetBlockGemm()
     {
         using WarpGemm        = WarpGemmDispatcher<ADataType,
@@ -386,6 +389,8 @@ struct MXGemmPipelineAgBgCrPolicy
     FORWARD_METHOD_(MakeMX_ScaleB_FlatDramTileDistribution);
     FORWARD_METHOD_(GetSmemSizeA);
     FORWARD_METHOD_(GetSmemSize);
+    FORWARD_METHOD_(GetVectorSizeA);
+    FORWARD_METHOD_(GetVectorSizeB);
 
 #undef FORWARD_METHOD_
 
