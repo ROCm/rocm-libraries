@@ -14,6 +14,7 @@ from dnn_benchmarking.execution.suite_runner import (
     _resolve_engine_name,
     _get_reference_provider,
     _check_correctness,
+    _run_timed_pytorch_reference,
     set_plugin_path,
 )
 from dnn_benchmarking.config.benchmark_config import MetricsConfig, SuiteConfig
@@ -62,7 +63,7 @@ def _make_config(**overrides):
         "warmup_iters": 2,
         "benchmark_iters": 3,
         "seed": 42,
-        "gpu_backend": "none",
+        "timing_backend": "none",
     }
     defaults.update(overrides)
     return SuiteConfig(**defaults)
@@ -439,7 +440,7 @@ class TestSuiteConfigValidation:
         assert config.rtol is None
         assert config.atol is None
         assert config.tolerance_override is None
-        assert config.gpu_backend == "auto"
+        assert config.timing_backend == "auto"
         assert config.reference_provider == "none"
 
     def test_negative_warmup_raises(self):
@@ -471,20 +472,20 @@ class TestSuiteConfigValidation:
         config = SuiteConfig(verbose=True)
         assert config.verbose is True
 
-    def test_invalid_gpu_backend_raises(self):
-        with pytest.raises(ValueError, match="gpu_backend"):
-            SuiteConfig(gpu_backend="bogus")
+    def test_invalid_timing_backend_raises(self):
+        with pytest.raises(ValueError, match="timing_backend"):
+            SuiteConfig(timing_backend="bogus")
 
     def test_invalid_reference_provider_raises(self):
         with pytest.raises(ValueError, match="reference_provider"):
             SuiteConfig(reference_provider="not_a_real_provider")
 
-    def test_default_gpu_backend_and_reference_provider_accepted(self):
+    def test_default_timing_backend_and_reference_provider_accepted(self):
         config = SuiteConfig()
-        assert config.gpu_backend == "auto"
+        assert config.timing_backend == "auto"
         assert config.reference_provider == "none"
-        for backend in ("torch", "auto", "none"):
-            SuiteConfig(gpu_backend=backend)
+        for backend in ("hip", "auto", "none"):
+            SuiteConfig(timing_backend=backend)
         for provider in ("none", "pytorch"):
             SuiteConfig(reference_provider=provider)
 
@@ -925,6 +926,50 @@ class TestCorrectnessChecking:
         assert result.results[0].status == "skipped"
         assert ref_provider.compute_reference.call_count == 1
         assert mock_check_corr.call_args.args[3] is ref_outputs
+
+    @patch("dnn_benchmarking.execution.pytorch_executor.PyTorchCudaExecutor")
+    @patch("dnn_benchmarking.execution.pytorch_buffer_manager.PyTorchCudaBufferManager")
+    def test_timed_pytorch_reference_honors_disabled_timing(
+        self,
+        mock_buffer_manager_cls,
+        mock_pytorch_executor_cls,
+    ):
+        """PyTorch reference rows honor SuiteConfig timing_backend='none'."""
+        executor = MagicMock()
+        executor.init_time_ms = 0.5
+        bench_result = MagicMock()
+        bench_result.e2e_timings = [1.0, 2.0]
+        bench_result.kernel_timings = None
+        bench_result.has_kernel_timings = False
+        executor.benchmark.return_value = bench_result
+        mock_pytorch_executor_cls.return_value = executor
+
+        buffer_manager = _make_bm_mock()
+        buffer_manager.get_tensors.return_value = {}
+        buffer_manager.get_output_tensors.return_value = []
+        mock_buffer_manager_cls.return_value = buffer_manager
+
+        result = _run_timed_pytorch_reference(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            graph_name="test_graph",
+            tensor_infos=[],
+            config=_make_config(
+                reference_provider="pytorch",
+                timing_backend="none",
+                metrics=MetricsConfig(tier="off"),
+            ),
+            input_data={},
+            analytical_flops=None,
+            analytical_flops_partial=False,
+            analytical_io_bytes=None,
+        )
+
+        mock_pytorch_executor_cls.assert_called_once()
+        assert mock_pytorch_executor_cls.call_args.kwargs["timing_backend"] == "none"
+        assert result.result.e2e_stats is not None
+        assert result.result.gpu_kernel_stats is None
+        assert result.result.status == "success"
 
 
 class TestCheckCorrectnessOutputCount:

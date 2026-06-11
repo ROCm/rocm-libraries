@@ -203,7 +203,7 @@ def run_suite_cli(
             engine_filter=args.engine,
             rtol=args.rtol,
             atol=args.atol,
-            gpu_backend="auto",
+            timing_backend="auto",
             reference_provider=args.validate,
             verbose=args.verbose,
             metrics=metrics_config,
