@@ -297,7 +297,7 @@ ragged-tensor SDK types.
 **Frontend validation** (in `validate()`):
 
 - The `ragged_offset` aux exists in the graph (by UID), has rank
-  1, and its first dim equals `B + 1` where `B` is the primary's
+  4, and its first dim equals `B + 1` where `B` is the primary's
   first dim.
 - `get_alignment() >= 1`.
 
@@ -386,7 +386,7 @@ These apply to both `RaggedTensor<T>` and
 
    The widen-to-`int64_t` cost is negligible relative to the per-
    element work the CPU reference does, and the structural
-   invariants in item 5 (rank 1, packed, length `B + 1`) plus the
+   invariants in item 5 (rank 4, packed, length `B + 1`) plus the
    element-size check in item 5 below bound the surface where
    type-erasure could go wrong to this one helper. See
    [§6.3](#63-templating-the-ragged-tensor-types-on-indext) for
@@ -442,7 +442,7 @@ These apply to both `RaggedTensor<T>` and
    - `raggedOffset != nullptr`.
    - `raggedOffset->elementCount() == paddedDims[0] + 1`
      (i.e. `B + 1`).
-   - `raggedOffset` has rank 1.
+   - `raggedOffset` has rank 4.
    - `raggedOffset->elementSize() == 4 || raggedOffset->elementSize() == 8`
      (int32 or int64 element type — checked once at construction
      so the type-erased `readOffset` helper from item 1 only ever
@@ -573,7 +573,7 @@ required ctor input and is not derivable from a single
 //    held by shared_ptr so it can be threaded into the ragged
 //    primary's ctor and shared across multiple ragged primaries.
 auto qRaggedOffset =
-    std::make_shared<utilities::Tensor<int32_t>>(/*dims=*/{B + 1});
+    std::make_shared<utilities::Tensor<int32_t>>(/*dims=*/{B + 1, 1, 1, 1});
 qRaggedOffset->fillFromHost(myOffsetsHost);   // user-supplied values
 
 // 2. Allocate the ragged primary. The buffer is sized to exactly
@@ -739,7 +739,7 @@ executor's virtual-tensor pass (see
 std::shared_ptr<ITensor> qRaggedOffset = makeShallowITensor(
     _params.qTensor.raggedOffsetDataType,
     variantPack.at(_params.qTensor.raggedOffsetUid),
-    /* aux dims/strides: [B + 1], packed */);
+    /* aux dims/strides: [B + 1, 1, 1, 1], packed */);
 
 // The view's buffer is exactly ragged_offset[B] elements;
 // alignment plays no part in sizing (§4.2). physicalElementCount
@@ -1252,7 +1252,7 @@ runtime branch per offset read. The branch widens an `int32_t`
 or `int64_t` aux element up to `int64_t`; on any modern CPU this
 is essentially free relative to the per-element work the CPU
 reference performs, and the structural invariants on the aux
-(rank 1, packed, B+1 long, int32 or int64) bound the surface
+(rank 4, packed, B+1 long, int32 or int64) bound the surface
 where type-erasure could go wrong to one small helper. In
 return:
 
