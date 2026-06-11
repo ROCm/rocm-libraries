@@ -1112,7 +1112,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               curPackIdx += 1
         if i == 0:
           if not packItems:
-            tmpVgpr = self.vgprPool.checkOut(1)
+            tmpVgpr = self.vgprPool.checkOut(1, tag="_makeSubIterSchedule_tmpVgpr")
             iterCode.add(VMovB32(dst=vgpr(tmpVgpr), src="0x0", comment="valu operation to have different priority"))
             self.vgprPool.checkIn(tmpVgpr)
           iterCode.add(SSetPrior(prior=3, comment="Raise priority while processing macs"))
@@ -4470,8 +4470,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   def createNegIdentityMatrix(self, kernel):
     module = Module("NegIdentityMatrix")
-    tmp = self.vgprPool.checkOut(1)
-    lane4 = self.vgprPool.checkOut(1)
+    tmp = self.vgprPool.checkOut(1, tag="createNegIdentityMatrix_tmpVgpr")
+    lane4 = self.vgprPool.checkOut(1, tag="createNegIdentityMatrix_lane4")
     mfmaHigh = vgpr(self.states.startVgprIdentityMatrix)
     mfmaLow = vgpr(self.states.startVgprIdentityMatrix+1)
 
@@ -4716,7 +4716,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["UseSubtileImpl"] and kernel["MIArchVgpr"] and self._subtileDtileBaseVgpr is not None:
         self.states.c.startVgprValu = self._subtileDtileBaseVgpr
       else:
-        self.states.c.startVgprValu = self.vgprPool.checkOutAligned(1, 4)
+        self.states.c.startVgprValu = self.vgprPool.checkOutAligned(1, 4, tag="postLoop_startVgprValu")
 
       module.addComment0("ValuC range: [%u-%u), %s"%(self.states.c.startVgprValu, self.states.c.startVgprValu+self.states.c.numVgprValu, \
                              "serializedStore enabled" if self.states.serializedStore else ""))
@@ -4768,7 +4768,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(loopComponent.closePersistentLoop(self, kernel))
       # After persistent loop exits, skip over all deferred blocks
       kernelEndLabel = Label("KernelEnd", "")
-      with self.allocTmpSgpr(3) as tmpSgprInfo:
+      with self.allocTmpSgpr(3, tag="kernelBodySubtile_tmpSgprInfo") as tmpSgprInfo:
         module.add(SLongBranchPositive(kernelEndLabel, tmpSgprInfo, comment="persistent loop done, skip deferred blocks"))
       module.addComment0("#" * 60)
       module.addComment0("#" * 60)
@@ -8659,7 +8659,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       # Safe guard for preload arguments
       while(1):
-        tmpSgpr = self.sgprPool.checkOut(1, preventOverflow=False)
+        tmpSgpr = self.sgprPool.checkOut(1, tag="preloadGuard_tmpSgpr", preventOverflow=False)
         if tmpSgpr >= self.states.archCaps["MaxSgprPreload"]:
           self.sgprPool.checkIn(tmpSgpr)
           break
@@ -10031,25 +10031,25 @@ class KernelWriter(metaclass=abc.ABCMeta):
       _placeholder.name = "Branch_%s"%_target.getLabelName()
       if _operation == "SCBranchSCC0":
         if currentInstLength - count + 1 >= self.states.asmCaps["ShortBranchMaxLength"]:
-          with self.allocTmpSgpr(3) as tmpSgprInfo:
+          with self.allocTmpSgpr(3, tag="updateBranchPlaceHolder_tmpSgprInfo") as tmpSgprInfo:
               _placeholder.add(self.longBranchScc0(_target, 1, tmpSgprInfo))
         else:
           _placeholder.add(SCBranchSCC0(labelName=_target.getLabelName()))
       elif _operation == "SCBranchSCC1":
         if currentInstLength - count + 1 >= self.states.asmCaps["ShortBranchMaxLength"]:
-          with self.allocTmpSgpr(3) as tmpSgprInfo:
+          with self.allocTmpSgpr(3, tag="updateBranchPlaceHolder_tmpSgprInfo2") as tmpSgprInfo:
               _placeholder.add(self.longBranchScc1(_target, 1, tmpSgprInfo))
         else:
           _placeholder.add(SCBranchSCC1(labelName=_target.getLabelName()))
       elif _operation == "SCBranchVCCNZ":
         if currentInstLength - count + 1 >= self.states.asmCaps["ShortBranchMaxLength"]:
-          with self.allocTmpSgpr(3) as tmpSgprInfo:
+          with self.allocTmpSgpr(3, tag="updateBranchPlaceHolder_tmpSgprInfo3") as tmpSgprInfo:
               _placeholder.add(self.longBranchVccnz(_target, 1, tmpSgprInfo))
         else:
           _placeholder.add(SCBranchVCCNZ(labelName=_target.getLabelName()))
       elif _operation == "SBranch":
         if currentInstLength - count + 1 >= self.states.asmCaps["ShortBranchMaxLength"]:
-          with self.allocTmpSgpr(3) as tmpSgprInfo:
+          with self.allocTmpSgpr(3, tag="updateBranchPlaceHolder_tmpSgprInfo4") as tmpSgprInfo:
             _placeholder.add(SLongBranchPositive(_target, tmpSgprInfo))
         else:
           _placeholder.add(SBranch(labelName=_target.getLabelName()))
