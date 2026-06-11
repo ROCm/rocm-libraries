@@ -1,0 +1,86 @@
+/* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ * SPDX-License-Identifier: MIT
+ *
+ * tests/parity/moe_smoothquant_emit.c -- C-side emitter for the
+ * moe_smoothquant parity harness. Selects one of the sampled
+ * MoeSmoothQuantSpec configs by argv[1] (the config index), builds the spec,
+ * lowers via ckc_build_moe_smoothquant_new(b, spec, arch) then
+ * ckc_lower_kernel_to_llvm (arch gfx950, flavor AUTO), and prints the .ll to
+ * stdout so the output can be byte-compared with the Python emitter
+ * moe_smoothquant_emit.py.
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "ckc/ir.h"
+#include "ckc/lower_llvm.h"
+#include "ckc/instance_moe_smoothquant.h"
+
+/* Build the MoeSmoothQuantSpec for config `idx`. Returns 0 or -1. */
+static int make_spec(int idx, ckc_moe_smoothquant_spec_t *s) {
+    switch (idx) {
+    case 0: /* N512 topk2 E64 f16->i8 b256 v4 */
+        ckc_moe_smoothquant_spec_init(s, 512, 2, 64);
+        s->dtype = "f16"; s->out_dtype = "i8";
+        s->block_size = 256; s->vec = 4;
+        break;
+    case 1: /* N1024 topk4 E128 bf16->fp8e4m3 b256 v4 */
+        ckc_moe_smoothquant_spec_init(s, 1024, 4, 128);
+        s->dtype = "bf16"; s->out_dtype = "fp8e4m3";
+        s->block_size = 256; s->vec = 4;
+        break;
+    case 2: /* N2048 topk8 E256 f16->i8 b256 v4 tokens=256 */
+        ckc_moe_smoothquant_spec_init(s, 2048, 8, 256);
+        s->dtype = "f16"; s->out_dtype = "i8";
+        s->block_size = 256; s->vec = 4;
+        s->tokens_set = true; s->tokens = 256;
+        break;
+    case 3: /* N4096 topk1 E8 f16->i8 b512 v8 */
+        ckc_moe_smoothquant_spec_init(s, 4096, 1, 8);
+        s->dtype = "f16"; s->out_dtype = "i8";
+        s->block_size = 512; s->vec = 8;
+        break;
+    default:
+        return -1;
+    }
+    return 0;
+}
+
+int main(int argc, char **argv) {
+    if (argc < 2) {
+        fprintf(stderr, "usage: %s <config_index 0..3>\n", argv[0]);
+        return 2;
+    }
+    int idx = atoi(argv[1]);
+
+    ckc_moe_smoothquant_spec_t spec;
+    if (make_spec(idx, &spec) != 0) {
+        fprintf(stderr, "unknown config index %d\n", idx);
+        return 2;
+    }
+
+    ckc_ir_builder_t b;
+    ckc_kernel_def_t *kernel = ckc_build_moe_smoothquant_new(&b, &spec, "gfx950");
+    if (kernel == NULL || !ckc_ir_builder_ok(&b)) {
+        fprintf(stderr, "build failed for config %d: %s\n", idx,
+                ckc_ir_builder_error(&b));
+        ckc_ir_builder_free(&b);
+        return 1;
+    }
+
+    char *llvm_text = NULL;
+    char err[CKC_ERR_MSG_CAP];
+    err[0] = 0;
+    ckc_status_t st = ckc_lower_kernel_to_llvm_ex(
+        kernel, CKC_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text, err, sizeof err);
+    if (st != CKC_OK || !llvm_text) {
+        fprintf(stderr, "lower failed: status=%d err=%s\n", (int)st, err);
+        ckc_ir_builder_free(&b);
+        return 1;
+    }
+    fputs(llvm_text, stdout);
+    free(llvm_text);
+    ckc_ir_builder_free(&b);
+    return 0;
+}

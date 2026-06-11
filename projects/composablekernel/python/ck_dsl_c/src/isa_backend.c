@@ -346,7 +346,7 @@ int ckc_isa_emit_wmma_int_call(ckc_strbuf_t *out,
 }
 
 /* ---------------------------------------------------------------------------
- * TODO(port): emit_mma / emit_wmma full lowerer dispatch.
+ * emit_mma / emit_wmma full lowerer dispatch -- ported in lower_llvm.
  *
  * The Python ISABackend.emit_mma rebuilds the legacy ISA-named op
  *   Op(name="tile.<op_id>", operands=..., results=..., attrs=...-{op_id}, loc=...)
@@ -354,18 +354,20 @@ int ckc_isa_emit_wmma_int_call(ckc_strbuf_t *out,
  * (RDNA). emit_wmma itself drives the live lowerer: lowerer._need(decl_key),
  * lowerer._operand(v), lowerer._fresh("wmma_a"), lowerer._current().emit(...).
  *
- * None of {_Lowerer, lower_op, _need, _operand, _fresh, _current} have a C type
- * in this port yet (lower_llvm.py is unported). The text-generating heart of
- * emit_wmma is ported above as ckc_isa_emit_wmma_call / _int_call (operating on
- * SSA name strings + a ckc_strbuf), and the full op.name -> spec resolution is
- * ckc_isa_resolve_wmma / the lookup functions. When the lower_llvm port lands
- * and provides a ckc_lowerer_t with _need/_operand/_fresh/_current, wire a
- * ckc_isa_emit_mma(lowerer, op) here that:
- *   1. reads op->attrs "op_id" (ckc_attr_get_str),
- *   2. for CDNA: rebuilds "tile.<op_id>" and calls the lowerer's MFMA handler,
- *   3. for RDNA: resolves the spec, _need(decl_key), pulls operand names via
- *      _operand, mints cast names via _fresh, and calls the *_call emitters
- *      above with _current()'s strbuf.
- * The NotImplementedError path (WMMA op on a CDNA target / unknown op name)
- * maps to CKC_ERR_NOTIMPL.
+ * Because that path is lowerer-driven, it lives with the lowerer state
+ * (ckc_lower_t), not behind this stateless backend-fact API. It is fully
+ * ported in src/lower_llvm_lower_llvm_mma.c.c as the `_op_tile_mma` op_id
+ * router (registered for CKC_OP_TILE_MMA): it reads op->attrs "op_id" via
+ * ckc_attr_get_str and dispatches each CDNA atom to its file-static
+ * `_op_tile_mfma_*` handler (which drive ckc_ll_need / ckc_ll_operand /
+ * ckc_ll_fresh / ckc_ll_emit -- the C analogues of _need/_operand/_fresh/
+ * _current().emit), reproducing the historical MFMA text byte-for-byte. The
+ * Python NotImplementedError raised when a WMMA op_id reaches a CDNA target is
+ * mirrored there by `_op_tile_wmma_*` handlers that ckc_ll_fail(CKC_ERR_NOTIMPL)
+ * with the same message, and an unknown op_id likewise maps to CKC_ERR_NOTIMPL.
+ *
+ * What is self-contained and therefore lives HERE -- the byte-identical WMMA
+ * call text and its bf16 bitcast prologue given SSA operand name strings -- is
+ * ckc_isa_emit_wmma_call / ckc_isa_emit_wmma_int_call above, and the full
+ * op.name -> spec resolution is ckc_isa_resolve_wmma / the lookup functions.
  * --------------------------------------------------------------------------- */

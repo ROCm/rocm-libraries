@@ -218,8 +218,13 @@ ckc_value_t *ckc_b_warp_shuffle_xor(ckc_ir_builder_t *b, ckc_value_t *v, int lan
     {
         ckc_value_t *lane = ckc_b_lane_id(b);
         ckc_value_t *xor_const = ckc_b_const_i32(b, (int64_t)lane_xor);
-        ckc_value_t *addr = ckc_b_xor(b, lane, xor_const);
-        ckc_value_t *addr_shl = ckc_b_shl(b, addr, ckc_b_const_i32(b, 2));
+        /* Python uses result_name_hint="lxor"/"laddr" for these two ops (not the
+         * default "xor"/"shl" of ckc_b_xor/ckc_b_shl), so emit via ckc_i_binop
+         * with the matching hints to keep the SSA names byte-identical. */
+        ckc_value_t *addr =
+            ckc_i_binop(b, CKC_OP_ARITH_XOR, lane, xor_const, "lxor");
+        ckc_value_t *addr_shl =
+            ckc_i_binop(b, CKC_OP_ARITH_SHL, addr, ckc_b_const_i32(b, 2), "laddr");
         if (ckc_i_type_is(v->type, "f32")) {
             ckc_value_t *v_i = ckc_b_bitcast(b, v, ckc_i32());
             ckc_value_t *r = ckc_b_ds_bpermute(b, addr_shl, v_i);

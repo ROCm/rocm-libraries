@@ -243,11 +243,22 @@ void ckc_i_attrs_copy(ckc_ir_builder_t *b, ckc_attr_map_t *dst,
                 break;
             case CKC_ATTR_LIST:
             default:
-                /* TODO(port): nested attr-list deep copy (scf.for iter_args
-                 * metadata). For the linking milestone, shallow-copy the entry
-                 * directly into the destination so list-valued attrs survive.
-                 * This shares the arena-owned items array with the source,
-                 * which is safe under the single-arena lifetime. */
+                /* List-valued attrs (scf.for ``iter_args`` metadata) are
+                 * copied by sharing the source's arena-owned ``items`` array.
+                 * This is the FAITHFUL port of Python's attr copy, not a
+                 * shortcut: IRBuilder builds an Op with ``attrs=dict(attrs or
+                 * {})`` (ir.py: IRBuilder.op / IRBuilder.scf_for), and
+                 * ``dict(...)`` is a SHALLOW copy -- it duplicates the
+                 * key->value mapping but shares each value object by reference.
+                 * The list value here is the ``iter_meta`` list of dicts, built
+                 * once in scf_for and never mutated afterwards, so the shared
+                 * reference is observationally identical to a deep copy. Sharing
+                 * the same ``items`` pointer reproduces that reference-sharing
+                 * exactly and is safe under the single-arena lifetime (the list
+                 * and the destination map share one arena). The scalar cases
+                 * above route through the public setters because those values
+                 * are stored inline (no shared backing object), matching
+                 * dict()'s by-value copy of immutable scalars. */
                 if (dst->count >= dst->cap) {
                     int nc = dst->cap ? dst->cap * 2 : 4;
                     ckc_attr_entry_t *ne = (ckc_attr_entry_t *)ckc_arena_alloc(
@@ -409,6 +420,19 @@ ckc_value_t *ckc_i_binop(ckc_ir_builder_t *b, ckc_opcode_t opcode,
         return NULL;
     }
     if (a == NULL || bb == NULL) {
+#ifdef CKC_TRACE_BINOP
+        {
+            extern int backtrace(void **, int);
+            extern char **backtrace_symbols(void *const *, int);
+            void *bt[40];
+            int n = backtrace(bt, 40);
+            char **syms = backtrace_symbols(bt, n);
+            fprintf(stderr, "[binop NULL] hint=%s a=%p bb=%p\n",
+                    result_name_hint ? result_name_hint : "(null)",
+                    (void *)a, (void *)bb);
+            for (int _i = 0; _i < n; _i++) fprintf(stderr, "  %s\n", syms[_i]);
+        }
+#endif
         return (ckc_value_t *)ckc_i_set_err(b, CKC_ERR_VALUE,
                                             "binop: NULL operand");
     }

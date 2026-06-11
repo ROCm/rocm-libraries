@@ -1,0 +1,178 @@
+/* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ * SPDX-License-Identifier: MIT
+ *
+ * helper_ck_dsl.helpers.attention.c -- C99 port of selected symbols from
+ * ck_dsl/helpers/attention.py.
+ *
+ * Each helper reproduces its Python counterpart's ckc_b_* builder-call sequence
+ * byte-faithfully (same ops, same order, same operands). The host-side control
+ * structure (the Python ``None`` defaults, the mask_mode dispatch, the
+ * fixed-count XOR butterfly loop) is reproduced exactly so the emitted op stream
+ * is identical to the Python.
+ *
+ * Lifetime: every node is arena-owned (ckc_ir_builder_t.arena). Nothing is freed
+ * individually; the arena bulk-frees the whole graph.
+ */
+
+#include <stdarg.h>
+#include <stdio.h>
+
+#include "ckc/helper_ck_dsl.helpers.attention.h"
+#include "ckc/ir.h"
+
+/* ----------------------------------------------------------------- helpers */
+
+/* Set the builder's sticky error (first failure wins) and return NULL. Mirrors
+ * the private set-err but binds only to ckc/ir.h's public struct fields
+ * (status + err). */
+static void* ckc_attn_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
+{
+    if(b == NULL)
+    {
+        return NULL;
+    }
+    if(b->status == CKC_OK)
+    {
+        va_list ap;
+        va_start(ap, fmt);
+        vsnprintf(b->err, (size_t)CKC_ERR_MSG_CAP, fmt, ap);
+        va_end(ap);
+        b->status = st;
+    }
+    return NULL;
+}
+
+/* ------------------------------------------------------------------- masks */
+
+ckc_value_t* ckc_causal_mask(ckc_ir_builder_t* b,
+                             ckc_value_t* key_pos,
+                             ckc_value_t* context_len,
+                             ckc_value_t* query_pos)
+{
+    /* return b.cmp_le(key_pos, b.add(context_len, query_pos)) */
+    return ckc_b_cmp_le(b, key_pos, ckc_b_add(b, context_len, query_pos));
+}
+
+ckc_value_t* ckc_sliding_window_mask(ckc_ir_builder_t* b,
+                                     ckc_value_t* key_pos,
+                                     ckc_value_t* context_len,
+                                     ckc_value_t* query_pos,
+                                     int sliding_window)
+{
+    /* dist = b.sub(b.add(context_len, query_pos), key_pos)
+     * return b.cmp_lt(dist, b.const_i32(sliding_window)) */
+    ckc_value_t* dist = ckc_b_sub(b, ckc_b_add(b, context_len, query_pos), key_pos);
+    return ckc_b_cmp_lt(b, dist, ckc_b_const_i32(b, (int64_t)sliding_window));
+}
+
+ckc_value_t* ckc_apply_attention_mask(ckc_ir_builder_t* b,
+                                      ckc_value_t* score_log2,
+                                      ckc_attn_mask_mode_t mask_mode,
+                                      ckc_value_t* k_idx,
+                                      ckc_value_t* query_pos,
+                                      int sliding_window,
+                                      ckc_value_t* context_len,
+                                      ckc_value_t* neg_inf)
+{
+    ckc_value_t* keep;
+
+    /* if mask_mode == "none": return score_log2 */
+    if(mask_mode == CKC_ATTN_MASK_NONE)
+    {
+        return score_log2;
+    }
+    /* if neg_inf is None: neg_inf = b.const_f32(-1e30) */
+    if(neg_inf == NULL)
+    {
+        neg_inf = ckc_b_const_f32(b, -1e30);
+    }
+    /* if context_len is None: context_len = b.const_i32(0) */
+    if(context_len == NULL)
+    {
+        context_len = ckc_b_const_i32(b, 0);
+    }
+    if(mask_mode == CKC_ATTN_MASK_CAUSAL)
+    {
+        /* keep = causal_mask(b, k_idx, context_len, query_pos) */
+        keep = ckc_causal_mask(b, k_idx, context_len, query_pos);
+    }
+    else if(mask_mode == CKC_ATTN_MASK_SLIDING_WINDOW)
+    {
+        /* keep = sliding_window_mask(b, k_idx, context_len, query_pos, sliding_window) */
+        keep = ckc_sliding_window_mask(b, k_idx, context_len, query_pos, sliding_window);
+    }
+    else
+    {
+        /* raise ValueError(f"unknown mask_mode {mask_mode!r}") */
+        return ckc_attn_set_err(b, CKC_ERR_VALUE, "unknown mask_mode %d", (int)mask_mode);
+    }
+    /* return b.select(keep, score_log2, neg_inf) */
+    return ckc_b_select(b, keep, score_log2, neg_inf);
+}
+
+/* ------------------------------------------------------ online-softmax inv-l */
+
+ckc_value_t* ckc_safe_inv_l(ckc_ir_builder_t* b, ckc_value_t* denom)
+{
+    /* zero_mask = b.fcmp("oeq", denom, b.const_f32(0.0))
+     * inv_l_raw = b.rcp(denom)
+     * return b.select(zero_mask, b.const_f32(0.0), inv_l_raw) */
+    ckc_value_t* zero_mask = ckc_b_fcmp(b, "oeq", denom, ckc_b_const_f32(b, 0.0));
+    ckc_value_t* inv_l_raw = ckc_b_rcp(b, denom);
+    return ckc_b_select(b, zero_mask, ckc_b_const_f32(b, 0.0), inv_l_raw);
+}
+
+/* ---------------------------------------------- wave row-reduction selector */
+
+int ckc_wave_reduce_stages(ckc_ir_builder_t* b, int wave_size, int lanes_per_row)
+{
+    int bits;
+    int n;
+
+    /* if lanes_per_row <= 0 or (lanes_per_row & (lanes_per_row - 1)) != 0:
+     *     raise ValueError(...) */
+    if(lanes_per_row <= 0 || (lanes_per_row & (lanes_per_row - 1)) != 0)
+    {
+        ckc_attn_set_err(
+            b, CKC_ERR_VALUE, "lanes_per_row must be a power of two, got %d", lanes_per_row);
+        return -1;
+    }
+    /* if lanes_per_row > wave_size: raise ValueError(...) */
+    if(lanes_per_row > wave_size)
+    {
+        ckc_attn_set_err(b,
+                         CKC_ERR_VALUE,
+                         "lanes_per_row (%d) cannot exceed wave_size (%d)",
+                         lanes_per_row,
+                         wave_size);
+        return -1;
+    }
+    /* return lanes_per_row.bit_length() - 1 */
+    bits = 0;
+    n = lanes_per_row;
+    while(n > 0)
+    {
+        bits += 1;
+        n >>= 1;
+    }
+    return bits - 1;
+}
+
+/* -------------------------------------------------- cross-lane sum reduction */
+
+ckc_value_t* ckc_warp_xor_reduce_sum(ckc_ir_builder_t* b, ckc_value_t* v, int stages)
+{
+    /* cur = v
+     * for k in range(stages):
+     *     remote = b.warp_shuffle_xor(cur, 1 << k)
+     *     cur = b.fadd(cur, remote)
+     * return cur */
+    ckc_value_t* cur = v;
+    int k;
+    for(k = 0; k < stages; ++k)
+    {
+        ckc_value_t* remote = ckc_b_warp_shuffle_xor(b, cur, 1 << k);
+        cur = ckc_b_fadd(b, cur, remote);
+    }
+    return cur;
+}

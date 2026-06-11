@@ -30,6 +30,7 @@
 /* per-op handlers (file-static; reached via the op_id router, not the table) */
 static void _op_tile_wmma_f32_16x16x16_f16(ckc_lower_t *L, const ckc_op_t *op);
 static void _op_tile_wmma_f32_16x16x16_bf16(ckc_lower_t *L, const ckc_op_t *op);
+static void _emit_wmma(ckc_lower_t *L, const ckc_op_t *op, const char *op_id);
 static void _op_tile_mma(ckc_lower_t *L, const ckc_op_t *op);
 static void _op_tile_mfma_f32_16x16x16_f16(ckc_lower_t *L, const ckc_op_t *op);
 static void _op_tile_mfma_f32_16x16x32_f16(ckc_lower_t *L, const ckc_op_t *op);
@@ -117,11 +118,24 @@ static void _op_tile_mma(ckc_lower_t *L, const ckc_op_t *op) {
         _op_tile_mfma_f32_16x16x96_fp6(L, op);
     } else if (strcmp(op_id, "mfma_f32_16x16x128_fp8") == 0) {
         _op_tile_mfma_f32_16x16x128_fp8(L, op);
-    /* WMMA op_id reaching a CDNA backend -> reject (Python emit_wmma raises). */
-    } else if (strcmp(op_id, "wmma_f32_16x16x16_f16") == 0) {
-        _op_tile_wmma_f32_16x16x16_f16(L, op);
-    } else if (strcmp(op_id, "wmma_f32_16x16x16_bf16") == 0) {
-        _op_tile_wmma_f32_16x16x16_bf16(L, op);
+    /* WMMA op_ids. On an RDNA backend (gfx11/gfx12) these emit a real WMMA
+     * call (Python Gfx11/Gfx12RdnaBackend.emit_wmma); on a CDNA backend they
+     * reject (Python ISABackend.emit_wmma raises NotImplementedError). The
+     * gfx12-specific op_ids ("wmma_gfx12_*") can only occur on RDNA4. */
+    } else if (strncmp(op_id, "wmma_", 5) == 0) {
+        if (L->backend && L->backend->kind == CKC_LL_ISA_RDNA) {
+            _emit_wmma(L, op, op_id);
+        } else if (strcmp(op_id, "wmma_f32_16x16x16_f16") == 0) {
+            _op_tile_wmma_f32_16x16x16_f16(L, op);
+        } else if (strcmp(op_id, "wmma_f32_16x16x16_bf16") == 0) {
+            _op_tile_wmma_f32_16x16x16_bf16(L, op);
+        } else {
+            ckc_ll_fail(L, CKC_ERR_NOTIMPL,
+                        "WMMA op 'tile.%s' not available on %s "
+                        "(WMMA is an RDNA/gfx11 instruction; this is a "
+                        "CDNA/MFMA target)",
+                        op_id, L->backend ? L->backend->gfx : "(cdna)");
+        }
     } else {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL,
                     "tile.mma: unsupported op_id '%s'", op_id);
@@ -149,6 +163,102 @@ static void _op_tile_wmma_f32_16x16x16_bf16(ckc_lower_t *L, const ckc_op_t *op) 
                 "WMMA op 'tile.wmma_f32_16x16x16_bf16' not available on %s "
                 "(WMMA is an RDNA/gfx11 instruction; this is a CDNA/MFMA target)",
                 L->backend ? L->backend->gfx : "(cdna)");
+}
+
+/* ====================================================================== */
+/* RDNA WMMA emission (Python Gfx11RdnaBackend / Gfx12RdnaBackend          */
+/* .emit_wmma). The legacy op name is "tile.<op_id>"; the gfx12 op_ids     */
+/* ("wmma_gfx12_*") resolve against the RDNA4 table (8-wide fragments),    */
+/* the rest against the RDNA3/3.5 table (16-wide). bf16 operands are       */
+/* bitcast to <W x i16> before the call (call_elt != ssa_elt).            */
+/* ====================================================================== */
+
+/* Local float-WMMA spec table, a faithful copy of the Python backend tables
+ * (_RDNA_WMMA for RDNA3/3.5 + _RDNA_GFX12_WMMA for RDNA4). Held here rather than
+ * via ckc/isa_backend.h to avoid the header's own `ckc_isa_backend` struct
+ * colliding with the lowerer's same-named backend struct. The op_ids are
+ * disjoint between the two families, so one flat table resolves both: gfx12
+ * op_ids carry the "wmma_gfx12_" prefix (8-wide fragments), the rest are
+ * RDNA3/3.5 (16-wide). */
+typedef struct _wmma_spec {
+    const char *op_id;     /* the tile.mma op_id (no "tile." prefix)        */
+    const char *decl_key;  /* _need() key                                   */
+    const char *intrinsic; /* fully-mangled @llvm.amdgcn.wmma....           */
+    const char *ssa_elt;   /* SSA operand element type                      */
+    const char *call_elt;  /* call-site operand element type                */
+    int frag_width;        /* A/B operand vector width (16 RDNA3/3.5, 8 RDNA4) */
+} _wmma_spec_t;
+
+static const _wmma_spec_t WMMA_SPECS[] = {
+    /* _RDNA_WMMA (RDNA3/3.5, frag_width 16) */
+    {"wmma_f32_16x16x16_f16", "wmma.f32.16x16x16.f16",
+     "llvm.amdgcn.wmma.f32.16x16x16.f16.v8f32.v16f16", "half", "half", 16},
+    {"wmma_f32_16x16x16_bf16", "wmma.f32.16x16x16.bf16",
+     "llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v16i16", "bfloat", "i16", 16},
+    /* _RDNA_GFX12_WMMA (RDNA4, frag_width 8) */
+    {"wmma_gfx12_f32_16x16x16_f16", "wmma.gfx12.f32.16x16x16.f16",
+     "llvm.amdgcn.wmma.f32.16x16x16.f16.v8f32.v8f16", "half", "half", 8},
+    {"wmma_gfx12_f32_16x16x16_bf16", "wmma.gfx12.f32.16x16x16.bf16",
+     "llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v8i16", "bfloat", "i16", 8},
+};
+static const int WMMA_SPECS_N = (int)(sizeof(WMMA_SPECS) / sizeof(WMMA_SPECS[0]));
+
+static void _emit_wmma(ckc_lower_t *L, const ckc_op_t *op, const char *op_id) {
+    const _wmma_spec_t *spec = NULL;
+    const ckc_value_t *a, *b, *c;
+    const char *a_arg, *b_arg;
+    int w, i;
+
+    if (!ckc_ll_live(L)) {
+        return;
+    }
+    if (op->num_operands != 3) {
+        ckc_ll_fail(L, CKC_ERR_VALUE, "%s expects 3 operands",
+                    op->name ? op->name : "tile.mma");
+        return;
+    }
+
+    for (i = 0; i < WMMA_SPECS_N; i++) {
+        if (strcmp(WMMA_SPECS[i].op_id, op_id) == 0) {
+            spec = &WMMA_SPECS[i];
+            break;
+        }
+    }
+    if (spec == NULL) {
+        ckc_ll_fail(L, CKC_ERR_NOTIMPL,
+                    "WMMA op 'tile.%s' not yet wired for %s", op_id,
+                    L->backend ? L->backend->gfx : "(rdna)");
+        return;
+    }
+
+    a = op->operands[0];
+    b = op->operands[1];
+    c = op->operands[2];
+    w = spec->frag_width;
+
+    ckc_ll_need(L, spec->decl_key);
+    a_arg = ckc_ll_operand(L, a);
+    b_arg = ckc_ll_operand(L, b);
+
+    if (strcmp(spec->call_elt, spec->ssa_elt) != 0) {
+        /* bf16 (and any future type whose SSA element differs from the
+         * intrinsic's operand element): bitcast <W x ssa_elt> -> <W x call_elt>. */
+        const char *a_cast = ckc_ll_fresh(L, "wmma_a");
+        const char *b_cast = ckc_ll_fresh(L, "wmma_b");
+        ckc_ll_emitf(L, "  %s = bitcast <%d x %s> %s to <%d x %s>",
+                     a_cast, w, spec->ssa_elt, a_arg, w, spec->call_elt);
+        ckc_ll_emitf(L, "  %s = bitcast <%d x %s> %s to <%d x %s>",
+                     b_cast, w, spec->ssa_elt, b_arg, w, spec->call_elt);
+        a_arg = a_cast;
+        b_arg = b_cast;
+    }
+
+    ckc_ll_emitf(L,
+        "  %s = call <8 x float> @%s("
+        "<%d x %s> %s, <%d x %s> %s, <8 x float> %s)",
+        mma_result_name(L, op), spec->intrinsic,
+        w, spec->call_elt, a_arg, w, spec->call_elt, b_arg,
+        ckc_ll_operand(L, c));
 }
 
 /* ====================================================================== */

@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# tests/parity/add_rmsnorm2d_rdquant_emit.py -- Python reference emitter for the
+# add_rmsnorm2d_rdquant parity harness. Selects one of the sampled configs by
+# argv[1] (the config index), builds the AddRmsnorm2DRdquantSpec, builds the
+# kernel via build_add_rmsnorm2d_rdquant(arch='gfx950') and prints
+# lower_kernel_to_llvm(arch='gfx950') to stdout so it can be byte-compared with
+# the C emitter add_rmsnorm2d_rdquant_emit.c.
+import sys
+
+from ck_dsl.instances.common.add_rmsnorm2d_rdquant import (
+    AddRmsnorm2DRdquantSpec,
+    build_add_rmsnorm2d_rdquant,
+    is_valid_spec,
+)
+from ck_dsl import lower_kernel_to_llvm
+
+
+def _spec(idx: int) -> AddRmsnorm2DRdquantSpec:
+    if idx == 0:
+        return AddRmsnorm2DRdquantSpec(
+            n_per_block=4096,
+            dtype="f16",
+            out_dtype="i8",
+            block_size=256,
+            vec=4,
+            save_residual=True,
+            save_yscale=True,
+            wave_size=64,
+        )
+    if idx == 1:
+        return AddRmsnorm2DRdquantSpec(
+            n_per_block=8192,
+            dtype="f16",
+            out_dtype="fp8e4m3",
+            block_size=256,
+            vec=8,
+            save_residual=True,
+            save_yscale=True,
+            wave_size=64,
+        )
+    if idx == 2:
+        return AddRmsnorm2DRdquantSpec(
+            n_per_block=2048,
+            dtype="bf16",
+            out_dtype="bf8e5m2",
+            block_size=128,
+            vec=4,
+            save_residual=False,
+            save_yscale=False,
+            wave_size=64,
+        )
+    if idx == 3:
+        return AddRmsnorm2DRdquantSpec(
+            n_per_block=16384,
+            dtype="f16",
+            out_dtype="i8",
+            block_size=256,
+            vec=4,
+            save_residual=True,
+            save_yscale=True,
+            wave_size=64,
+        )
+    if idx == 4:
+        return AddRmsnorm2DRdquantSpec(
+            n_per_block=1024,
+            dtype="bf16",
+            out_dtype="i8",
+            block_size=64,
+            vec=4,
+            save_residual=True,
+            save_yscale=True,
+            wave_size=64,
+        )
+    if idx == 5:
+        return AddRmsnorm2DRdquantSpec(
+            n_per_block=6144,
+            dtype="f16",
+            out_dtype="fp8e4m3",
+            block_size=256,
+            vec=2,
+            save_residual=True,
+            save_yscale=False,
+            wave_size=64,
+        )
+    raise SystemExit(f"unknown config index {idx}")
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        sys.stderr.write("usage: add_rmsnorm2d_rdquant_emit.py <config_index 0..5>\n")
+        return 2
+    idx = int(sys.argv[1])
+    spec = _spec(idx)
+    ok, reason = is_valid_spec(spec, "gfx950")
+    if not ok:
+        sys.stderr.write(f"invalid spec: {reason}\n")
+        return 1
+    kernel = build_add_rmsnorm2d_rdquant(spec, arch="gfx950")
+    text = lower_kernel_to_llvm(kernel, arch="gfx950")
+    sys.stdout.write(text)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

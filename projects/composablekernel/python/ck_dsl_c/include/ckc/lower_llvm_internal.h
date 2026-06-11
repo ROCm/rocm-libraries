@@ -50,6 +50,9 @@ extern const char* const CKC_LL_TRIPLE;
 /* CDNA buffer-resource-descriptor DWORD3 (Python ISABackend.buffer_rsrc_word3
  * == 0x00027000). RDNA word3 differs (0x31014000) -- see backend struct. */
 #define CKC_LL_BUFFER_RSRC_WORD3_CDNA 0x00027000
+/* RDNA (gfx10/11/12) "raw" SRD DWORD3 (Python Gfx11RdnaBackend.buffer_rsrc_word3
+ * == 0x31014000). gfx11/gfx12 share this value. */
+#define CKC_LL_BUFFER_RSRC_WORD3_RDNA 0x31014000
 
 /* ====================================================================== */
 /* Intrinsic-declaration table                                            */
@@ -86,6 +89,15 @@ extern const int CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT;
  * matching tile.<op_id> CDNA handler.
  *
  * encode_waitcnt: -1 for a counter means "no wait" (architectural max). */
+/* RDNA-family discriminator for the lowering path. CDNA targets reject WMMA;
+ * RDNA3/3.5 (gfx11) and RDNA4 (gfx12) emit WMMA. The gfx12 op_ids are distinct
+ * (``wmma_gfx12_*``), so the kind only needs to separate CDNA from RDNA-any. */
+typedef enum ckc_ll_isa_kind
+{
+    CKC_LL_ISA_CDNA = 0, /* gfx908/gfx90a/gfx942/gfx950 (MFMA)         */
+    CKC_LL_ISA_RDNA      /* gfx11 / gfx12 (WMMA)                       */
+} ckc_ll_isa_kind_t;
+
 typedef struct ckc_isa_backend
 {
     const char* gfx;        /* "gfx950", "gfx942", ...                     */
@@ -93,6 +105,7 @@ typedef struct ckc_isa_backend
     const char* triple;     /* CKC_LL_TRIPLE                               */
     int buffer_rsrc_word3;
     int (*encode_waitcnt)(int vmcnt, int expcnt, int lgkmcnt);
+    ckc_ll_isa_kind_t kind; /* CDNA (reject WMMA) vs RDNA (emit WMMA)      */
 } ckc_isa_backend_t;
 
 /* Resolve a gfx string to its backend (Python backend_for). NULL => "gfx950".

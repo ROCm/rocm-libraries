@@ -37,6 +37,12 @@ static const ckc_value_t *ll_result(const ckc_op_t *op) {
     return (op && op->num_results > 0) ? op->results[0] : NULL;
 }
 
+/* Replace every occurrence of `tok` with `repl` across `blk`'s lines, in place.
+ * Defined in the scf.* section; forward-declared here for the for-CFG builders
+ * that back-patch deferred %FOR_LATCH / %FOR_EXIT labels. */
+static void ll_block_replace(ckc_lower_t *L, ckc_ll_block_t *blk,
+                             const char *tok, const char *repl);
+
 /* Element type name of a vector type, or NULL. */
 static const char *ll_vec_elem_name(const ckc_type_t *t) {
     if (t && t->kind == CKC_TYPE_VECTOR && t->elem) {
@@ -350,45 +356,118 @@ static void _op_vector_sext(ckc_lower_t *L, const ckc_op_t *op) {
 }
 
 /* Python _op_vector_fma: packed llvm.fmuladd.v<N><elem>.
- * TODO(port): faithful intrinsic-name mangling + decl registration. */
+ *
+ *     a, b, c = op.operands
+ *     vec_ty = a.type; count = vec_ty.count; elem_ty = vec_ty.elem
+ *     elem_name = elem_ty.name
+ *     if elem_name not in ("f16","bf16","f32"): raise NotImplementedError
+ *     intrin_key = f"fmuladd.v{count}{elem_name}"; self._need(intrin_key)
+ *     vec_llvm = _llvm_type(vec_ty)
+ *     emit f"  {res} = call {vec_llvm} @llvm.fmuladd.v{count}{elem_name}("
+ *          f"{vec_llvm} {a}, {vec_llvm} {b}, {vec_llvm} {c})"
+ *
+ * The intrin key (e.g. "fmuladd.v4f32") is a static row of the
+ * _INTRINSIC_DECLS table, so ckc_ll_need() resolves the canonical declare. */
 static void _op_vector_fma(ckc_lower_t *L, const ckc_op_t *op) {
     const ckc_value_t *res = ll_result(op);
     if (!ckc_ll_live(L) || !res || op->num_operands < 3) {
         return;
     }
-    /* TODO(port): mangle llvm.fmuladd.v<count>f<width> and register the decl;
-     * for now fold to a*b+c via two packed ops so the value is defined and the
-     * dispatch is total. */
     const ckc_value_t *a = op->operands[0];
     const ckc_value_t *b = op->operands[1];
     const ckc_value_t *c = op->operands[2];
-    const char *ty = ckc_ll_llvm_type(L, res->type);
-    const char *mul = ckc_ll_fresh(L, "vfma.mul");
-    ckc_ll_emitf(L, "  %s = fmul %s %s, %s", mul, ty, ckc_ll_operand(L, a),
-                 ckc_ll_operand(L, b));
-    ckc_ll_emitf(L, "  %s = fadd %s %s, %s", res->name, ty, mul,
+    const ckc_type_t *vec_ty = a->type;
+    if (!vec_ty || vec_ty->kind != CKC_TYPE_VECTOR || !vec_ty->elem ||
+        !vec_ty->elem->name) {
+        ckc_ll_fail(L, CKC_ERR_NOTIMPL, "vector_fma: not a vector");
+        return;
+    }
+    int count = vec_ty->count;
+    const char *elem_name = vec_ty->elem->name;
+    if (!(strcmp(elem_name, "f16") == 0 || strcmp(elem_name, "bf16") == 0 ||
+          strcmp(elem_name, "f32") == 0)) {
+        ckc_ll_fail(L, CKC_ERR_NOTIMPL,
+                    "vector_fma: unsupported element type %s", elem_name);
+        return;
+    }
+    const char *intrin_key =
+        ckc_arena_printf(&L->arena, "fmuladd.v%d%s", count, elem_name);
+    ckc_ll_need(L, intrin_key);
+    const char *vec_llvm = ckc_ll_llvm_type(L, vec_ty);
+    ckc_ll_emitf(L,
+                 "  %s = call %s @llvm.fmuladd.v%d%s(%s %s, %s %s, %s %s)",
+                 res->name, vec_llvm, count, elem_name, vec_llvm,
+                 ckc_ll_operand(L, a), vec_llvm, ckc_ll_operand(L, b), vec_llvm,
                  ckc_ll_operand(L, c));
 }
 
-/* Python _op_vector_max: packed max via element fold.
- * TODO(port): exact intrinsic / packed-max form. */
+/* Python _op_vector_max: per-element extract + fcmp ogt + select, then
+ * reassemble via an insertelement chain.
+ *
+ *     a, b = op.operands
+ *     vec_ty = a.type; count = vec_ty.count; elem_ty = vec_ty.elem
+ *     vals = []
+ *     for i in range(count):
+ *         ea = fresh("vmax.a"); eb = fresh("vmax.b")
+ *         cmp = fresh("vmax.cmp"); sel = fresh("vmax.sel")
+ *         emit f"  {ea} = extractelement {vec_ty} {a}, i32 {i}"
+ *         emit f"  {eb} = extractelement {vec_ty} {b}, i32 {i}"
+ *         emit f"  {cmp} = fcmp ogt {elem_ty} {ea}, {eb}"
+ *         emit f"  {sel} = select i1 {cmp}, {elem_ty} {ea}, {elem_ty} {eb}"
+ *         vals.append(sel)
+ *     prev = "undef"
+ *     for i, v in enumerate(vals):
+ *         name = res.name if i==count-1 else fresh("vmax")
+ *         emit f"  {name} = insertelement {vec_ty} {prev}, {elem_ty} {v}, i32 {i}"
+ *         prev = name
+ */
 static void _op_vector_max(ckc_lower_t *L, const ckc_op_t *op) {
     const ckc_value_t *res = ll_result(op);
     if (!ckc_ll_live(L) || !res || op->num_operands < 2) {
         return;
     }
-    /* TODO(port): faithful packed v_pk_max / llvm.maxnum.vN lowering. Emit a
-     * defined value via fcmp+select so the SSA name exists and links. */
     const ckc_value_t *a = op->operands[0];
     const ckc_value_t *b = op->operands[1];
-    const ckc_type_t *vt = res->type;
-    int count = (vt && vt->kind == CKC_TYPE_VECTOR) ? vt->count : 0;
-    const char *ty = ckc_ll_llvm_type(L, vt);
-    const char *cmp = ckc_ll_fresh(L, "vmax.cmp");
-    ckc_ll_emitf(L, "  %s = fcmp ogt %s %s, %s", cmp, ty, ckc_ll_operand(L, a),
-                 ckc_ll_operand(L, b));
-    ckc_ll_emitf(L, "  %s = select <%d x i1> %s, %s %s, %s %s", res->name, count,
-                 cmp, ty, ckc_ll_operand(L, a), ty, ckc_ll_operand(L, b));
+    const ckc_type_t *vec_ty = a->type;
+    if (!vec_ty || vec_ty->kind != CKC_TYPE_VECTOR) {
+        ckc_ll_fail(L, CKC_ERR_NOTIMPL, "vector.max: not a vector");
+        return;
+    }
+    int count = vec_ty->count;
+    const ckc_type_t *elem_ty = vec_ty->elem;
+    const char *vec_llvm = ckc_ll_llvm_type(L, vec_ty);
+    const char *elem_llvm = ckc_ll_llvm_type(L, elem_ty);
+    const char *a_op = ckc_ll_operand(L, a);
+    const char *b_op = ckc_ll_operand(L, b);
+    /* Collect per-lane select results so the insertelement chain matches the
+     * Python two-loop structure (and thus the fresh-name ordering). */
+    const char **vals =
+        (const char **)ckc_arena_alloc(&L->arena, sizeof(const char *) * count);
+    if (!vals && count > 0) {
+        ckc_ll_fail(L, CKC_ERR_OOM, "vector.max: arena OOM");
+        return;
+    }
+    for (int i = 0; i < count; i++) {
+        const char *ea = ckc_ll_fresh(L, "vmax.a");
+        const char *eb = ckc_ll_fresh(L, "vmax.b");
+        const char *cmp = ckc_ll_fresh(L, "vmax.cmp");
+        const char *sel = ckc_ll_fresh(L, "vmax.sel");
+        ckc_ll_emitf(L, "  %s = extractelement %s %s, i32 %d", ea, vec_llvm,
+                     a_op, i);
+        ckc_ll_emitf(L, "  %s = extractelement %s %s, i32 %d", eb, vec_llvm,
+                     b_op, i);
+        ckc_ll_emitf(L, "  %s = fcmp ogt %s %s, %s", cmp, elem_llvm, ea, eb);
+        ckc_ll_emitf(L, "  %s = select i1 %s, %s %s, %s %s", sel, cmp, elem_llvm,
+                     ea, elem_llvm, eb);
+        vals[i] = sel;
+    }
+    const char *prev = "undef";
+    for (int i = 0; i < count; i++) {
+        const char *name = (i == count - 1) ? res->name : ckc_ll_fresh(L, "vmax");
+        ckc_ll_emitf(L, "  %s = insertelement %s %s, %s %s, i32 %d", name,
+                     vec_llvm, prev, elem_llvm, vals[i], i);
+        prev = name;
+    }
 }
 
 /* Python _op_vector_select: packed vselect. */
@@ -450,20 +529,36 @@ static void _op_vector_reduce_max(ckc_lower_t *L, const ckc_op_t *op) {
     }
 }
 
-/* Python _op_vector_splat.
- * TODO(port): faithful insertelement+shufflevector broadcast. */
+/* Python _op_vector_splat: broadcast a scalar via an insertelement chain.
+ *
+ *     (scalar,) = op.operands
+ *     vec_ty = _llvm_type(op.result.type); elem_ty = _llvm_type(scalar.type)
+ *     prev = "undef"; count = op.result.type.count
+ *     for i in range(count):
+ *         name = res.name if i==count-1 else fresh("splat")
+ *         emit f"  {name} = insertelement {vec_ty} {prev}, {elem_ty} {scalar}, i32 {i}"
+ *         prev = name
+ */
 static void _op_vector_splat(ckc_lower_t *L, const ckc_op_t *op) {
     const ckc_value_t *res = ll_result(op);
     if (!ckc_ll_live(L) || !res || op->num_operands < 1) {
         return;
     }
-    /* TODO(port): exact insertelement %undef, scalar, 0 + shufflevector
-     * zeroinitializer broadcast. Stub: zeroinitializer select so the SSA name
-     * is defined and the module links. */
-    const char *ty = ckc_ll_llvm_type(L, res->type);
-    ckc_ll_emitf(L,
-                 "  %s = select i1 true, %s zeroinitializer, %s zeroinitializer",
-                 res->name, ty, ty);
+    const ckc_value_t *scalar = op->operands[0];
+    const char *vec_ty = ckc_ll_llvm_type(L, res->type);
+    const char *elem_ty = ckc_ll_llvm_type(L, scalar->type);
+    const char *scal = ckc_ll_operand(L, scalar);
+    int count = (res->type && res->type->kind == CKC_TYPE_VECTOR)
+                    ? res->type->count
+                    : 0;
+    const char *prev = "undef";
+    for (int i = 0; i < count; i++) {
+        const char *name =
+            (i == count - 1) ? res->name : ckc_ll_fresh(L, "splat");
+        ckc_ll_emitf(L, "  %s = insertelement %s %s, %s %s, i32 %d", name,
+                     vec_ty, prev, elem_ty, scal, i);
+        prev = name;
+    }
 }
 
 /* Python _op_vector_extract. */
@@ -496,34 +591,102 @@ static void _op_vector_insert(ckc_lower_t *L, const ckc_op_t *op) {
                  (long long)idx);
 }
 
-/* Python _op_vector_pack.
- * TODO(port): faithful per-lane insertelement chain. */
+/* Python _op_vector_pack: pack N scalars into <N x elem> via an insertelement
+ * chain.
+ *
+ *     result_ty = op.result.type
+ *     vec_ty = _llvm_type(result_ty); elem_ty = _llvm_type(result_ty.elem)
+ *     prev = "undef"; count = result_ty.count
+ *     for i, comp in enumerate(op.operands):
+ *         name = res.name if i==count-1 else fresh("vpk")
+ *         emit f"  {name} = insertelement {vec_ty} {prev}, {elem_ty} {comp}, i32 {i}"
+ *         prev = name
+ */
 static void _op_vector_pack(ckc_lower_t *L, const ckc_op_t *op) {
     const ckc_value_t *res = ll_result(op);
     if (!ckc_ll_live(L) || !res) {
         return;
     }
-    /* TODO(port): build the packed vector via an insertelement chain over
-     * op->operands. Stub to zeroinitializer so the value is defined. */
-    const char *ty = ckc_ll_llvm_type(L, res->type);
-    ckc_ll_emitf(L,
-                 "  %s = select i1 true, %s zeroinitializer, %s zeroinitializer",
-                 res->name, ty, ty);
-}
-
-/* Python _op_vector_concat.
- * TODO(port): faithful shufflevector concat. */
-static void _op_vector_concat(ckc_lower_t *L, const ckc_op_t *op) {
-    const ckc_value_t *res = ll_result(op);
-    if (!ckc_ll_live(L) || !res) {
+    const ckc_type_t *result_ty = res->type;
+    if (!result_ty || result_ty->kind != CKC_TYPE_VECTOR) {
+        ckc_ll_fail(L, CKC_ERR_NOTIMPL, "vector.pack: result not a vector");
         return;
     }
-    /* TODO(port): two-input shufflevector with the concat index mask. Stub to
-     * zeroinitializer so the result name links. */
-    const char *ty = ckc_ll_llvm_type(L, res->type);
-    ckc_ll_emitf(L,
-                 "  %s = select i1 true, %s zeroinitializer, %s zeroinitializer",
-                 res->name, ty, ty);
+    const char *vec_ty = ckc_ll_llvm_type(L, result_ty);
+    const char *elem_ty = ckc_ll_llvm_type(L, result_ty->elem);
+    int count = result_ty->count;
+    const char *prev = "undef";
+    for (int i = 0; i < op->num_operands; i++) {
+        const char *name = (i == count - 1) ? res->name : ckc_ll_fresh(L, "vpk");
+        ckc_ll_emitf(L, "  %s = insertelement %s %s, %s %s, i32 %d", name,
+                     vec_ty, prev, elem_ty, ckc_ll_operand(L, op->operands[i]),
+                     i);
+        prev = name;
+    }
+}
+
+/* Python _op_vector_concat: concatenate two equal-typed vectors into a
+ * double-width vector via per-lane extract + insert.
+ *
+ *     a, b_op = op.operands
+ *     a_n = a.type.count; b_n = b_op.type.count
+ *     elem_ll = _llvm_type(a.type.elem); out_ty_ll = _llvm_type(op.result.type)
+ *     prev = "undef"
+ *     for i in range(a_n):
+ *         ext = fresh("vc.a")
+ *         emit f"  {ext} = extractelement {a.type} {a}, i32 {i}"
+ *         nxt = fresh("vc.ins")
+ *         emit f"  {nxt} = insertelement {out_ty_ll} {prev}, {elem_ll} {ext}, i32 {i}"
+ *         prev = nxt
+ *     for i in range(b_n):
+ *         ext = fresh("vc.b")
+ *         emit f"  {ext} = extractelement {b.type} {b_op}, i32 {i}"
+ *         nxt = res.name if i==b_n-1 else fresh("vc.ins")
+ *         emit f"  {nxt} = insertelement {out_ty_ll} {prev}, {elem_ll} {ext}, i32 {a_n+i}"
+ *         prev = nxt
+ */
+static void _op_vector_concat(ckc_lower_t *L, const ckc_op_t *op) {
+    const ckc_value_t *res = ll_result(op);
+    if (!ckc_ll_live(L) || !res || op->num_operands < 2) {
+        return;
+    }
+    const ckc_value_t *a = op->operands[0];
+    const ckc_value_t *b_op = op->operands[1];
+    const ckc_type_t *a_ty = a->type;
+    const ckc_type_t *b_ty = b_op->type;
+    if (!a_ty || a_ty->kind != CKC_TYPE_VECTOR || !b_ty ||
+        b_ty->kind != CKC_TYPE_VECTOR) {
+        ckc_ll_fail(L, CKC_ERR_NOTIMPL, "vector.concat: not a vector");
+        return;
+    }
+    int a_n = a_ty->count;
+    int b_n = b_ty->count;
+    const char *elem_ll = ckc_ll_llvm_type(L, a_ty->elem);
+    const char *out_ty_ll = ckc_ll_llvm_type(L, res->type);
+    const char *a_ty_ll = ckc_ll_llvm_type(L, a_ty);
+    const char *b_ty_ll = ckc_ll_llvm_type(L, b_ty);
+    const char *a_op = ckc_ll_operand(L, a);
+    const char *b_op_str = ckc_ll_operand(L, b_op);
+    const char *prev = "undef";
+    for (int i = 0; i < a_n; i++) {
+        const char *ext = ckc_ll_fresh(L, "vc.a");
+        ckc_ll_emitf(L, "  %s = extractelement %s %s, i32 %d", ext, a_ty_ll,
+                     a_op, i);
+        const char *nxt = ckc_ll_fresh(L, "vc.ins");
+        ckc_ll_emitf(L, "  %s = insertelement %s %s, %s %s, i32 %d", nxt,
+                     out_ty_ll, prev, elem_ll, ext, i);
+        prev = nxt;
+    }
+    for (int i = 0; i < b_n; i++) {
+        const char *ext = ckc_ll_fresh(L, "vc.b");
+        ckc_ll_emitf(L, "  %s = extractelement %s %s, i32 %d", ext, b_ty_ll,
+                     b_op_str, i);
+        const char *nxt =
+            (i == b_n - 1) ? res->name : ckc_ll_fresh(L, "vc.ins");
+        ckc_ll_emitf(L, "  %s = insertelement %s %s, %s %s, i32 %d", nxt,
+                     out_ty_ll, prev, elem_ll, ext, a_n + i);
+        prev = nxt;
+    }
 }
 
 /* Python _op_vector_bitcast. */
@@ -538,29 +701,28 @@ static void _op_vector_bitcast(ckc_lower_t *L, const ckc_op_t *op) {
                  ckc_ll_llvm_type(L, res->type));
 }
 
-/* Python _op_vector_trunc_f32_to_f16.
- * TODO(port): faithful fptrunc <N x float> to <N x half>. */
+/* Python _op_vector_trunc_f32_to_f16: delegates to _op_vector_trunc_f32_to.
+ *
+ *     def _op_vector_trunc_f32_to_f16(self, op):
+ *         self._op_vector_trunc_f32_to(op)
+ */
+static void _op_vector_trunc_f32_to(ckc_lower_t *L, const ckc_op_t *op);
 static void _op_vector_trunc_f32_to_f16(ckc_lower_t *L, const ckc_op_t *op) {
-    const ckc_value_t *res = ll_result(op);
-    if (!ckc_ll_live(L) || !res || op->num_operands < 1) {
-        return;
-    }
-    const ckc_value_t *v = op->operands[0];
-    /* TODO(port): confirm exact rounding/flavor handling matches Python. */
-    ckc_ll_emitf(L, "  %s = fptrunc %s %s to %s", res->name,
-                 ckc_ll_llvm_type(L, v->type), ckc_ll_operand(L, v),
-                 ckc_ll_llvm_type(L, res->type));
+    _op_vector_trunc_f32_to(L, op);
 }
 
-/* Python _op_vector_trunc_f32_to.
- * TODO(port): faithful generic fptrunc to the target element type. */
+/* Python _op_vector_trunc_f32_to: plain packed fptrunc to the result type.
+ *
+ *     (v,) = op.operands
+ *     in_ty = _llvm_type(v.type); out_ty = _llvm_type(op.result.type)
+ *     emit f"  {res} = fptrunc {in_ty} {v} to {out_ty}"
+ */
 static void _op_vector_trunc_f32_to(ckc_lower_t *L, const ckc_op_t *op) {
     const ckc_value_t *res = ll_result(op);
     if (!ckc_ll_live(L) || !res || op->num_operands < 1) {
         return;
     }
     const ckc_value_t *v = op->operands[0];
-    /* TODO(port): bf16 path may need a bitcast/intrinsic rather than fptrunc. */
     ckc_ll_emitf(L, "  %s = fptrunc %s %s to %s", res->name,
                  ckc_ll_llvm_type(L, v->type), ckc_ll_operand(L, v),
                  ckc_ll_llvm_type(L, res->type));
@@ -706,52 +868,395 @@ static void _op_tile_s_setprio(ckc_lower_t *L, const ckc_op_t *op) {
 /* scf.* / cf.* control flow                                                */
 /* ======================================================================== */
 
-/* Python _lower_normal_for: header / body / latch / exit CFG with phi nodes.
- * TODO(port): full faithful port of the phi back-patching, FOR_LATCH/FOR_EXIT
- * label fixup, and iter-arg yield wiring. */
-void ckc_ll_lower_normal_for(ckc_lower_t *L, const ckc_op_t *op) {
-    if (!ckc_ll_live(L)) {
-        return;
+/* Fetch the i-th iter_args metadata map's "name"/"type" string fields. The
+ * Python iter_meta is op.attrs["iter_args"], a list of {"name","type"} dicts;
+ * here it is a CKC_ATTR_LIST whose items are small attr maps. Returns false if
+ * the list is absent or i is out of range. */
+static bool ll_iter_meta(const ckc_op_t *op, int i, const char **out_name,
+                         const char **out_type) {
+    const ckc_attr_value_t *v = ckc_attr_get(&op->attrs, "iter_args");
+    if (!v || v->kind != CKC_ATTR_LIST || i < 0 || i >= v->u.list.count) {
+        return false;
     }
-    /* TODO(port): build the for.header/for.body/for.latch/for.exit blocks,
-     * emit the induction-variable + iter-arg phis, lower op->regions[0] under a
-     * fresh yield frame, back-patch the latch phi operands from the popped
-     * yield frame, and resolve the deferred FOR_EXIT / FOR_LATCH labels. For
-     * now record/discard a yield frame so the scf.yield handler stays balanced
-     * and lower the body inline so its ops are still emitted (un-looped). */
-    ckc_ll_yield_push(L);
-    if (op->num_regions > 0 && op->regions[0]) {
-        ckc_ll_lower_region(L, op->regions[0]);
+    const ckc_attr_map_t *m = v->u.list.items[i];
+    if (!m) {
+        return false;
     }
-    const char *const *items = NULL;
-    int n = 0;
-    ckc_ll_yield_pop(L, &items, &n);
-    (void)items;
-    (void)n;
+    if (out_name) {
+        *out_name = ckc_attr_get_str(m, "name");
+    }
+    if (out_type) {
+        *out_type = ckc_attr_get_str(m, "type");
+    }
+    return true;
 }
 
-/* Python _lower_unrolled_for: straight-line replication of the body for
- * constant bounds.
- * TODO(port): full faithful port -- per-iteration value renaming, trailing
- * tile.sync elision, and iter-arg threading across unrolled copies. */
-void ckc_ll_lower_unrolled_for(ckc_lower_t *L, const ckc_op_t *op) {
-    if (!ckc_ll_live(L)) {
+/* Python _lower_normal_for: header / body / latch / exit CFG with phi nodes.
+ *
+ *     num_iter = int(attrs.get("num_iter_args", 0))
+ *     lower, upper, step = operands[:3]; iter_inits = operands[3:3+num_iter]
+ *     iter_meta = attrs.get("iter_args", []); iv_name = attrs["iv"]
+ *     iv_ty = _llvm_type(lower.type)
+ *     pred_block = self._current().label
+ *     header = self._new_block("for.header")
+ *     self._blocks[-2].emit(f"  br label %{header.label}"); blocks[-2].terminated = True
+ *     header.emit(f"  {iv_name} = phi {iv_ty} [ {lower}, %{pred_block} ], "
+ *                 f"[ %iv.next.{header.label}, %FOR_LATCH ]")
+ *     for meta, init in zip(iter_meta, iter_inits):
+ *         ll_ty = _llvm_type_from_name(meta["type"])
+ *         header.emit(f"  {meta['name']} = phi {ll_ty} [ {init}, %{pred_block} ], "
+ *                     f"[ {meta['name']}.next.{header.label}, %FOR_LATCH ]")
+ *     cmp = fresh("cmp")
+ *     header.emit(f"  {cmp} = icmp slt {iv_ty} {iv_name}, {upper}")
+ *     body = self._new_block("for.body")
+ *     header.emit(f"  br i1 {cmp}, label %{body.label}, label %FOR_EXIT")
+ *     header.terminated = True
+ *     self._yield_stack.append([]); self.lower_region(op.regions[0])
+ *     last_body = self._current(); latch = self._new_block("for.latch")
+ *     last_body.emit(f"  br label %{latch.label}"); last_body.terminated = True
+ *     yielded = self._yield_stack.pop()  # len must == num_iter
+ *     iv_next = f"%iv.next.{header.label}"
+ *     latch.emit(f"  {iv_next} = add nsw {iv_ty} {iv_name}, {step}")
+ *     for meta, yld in zip(iter_meta, yielded):
+ *         ll_ty = _llvm_type_from_name(meta["type"])
+ *         latch.emit(f"  {meta['name']}.next.{header.label} = bitcast {ll_ty} {yld} to {ll_ty}")
+ *     latch.emit(f"  br label %{header.label}"); latch.terminated = True
+ *     exit_blk = self._new_block("for.exit")
+ *     for line in header.lines: replace %FOR_LATCH->%latch ; %FOR_EXIT->%exit
+ *     for meta, result in zip(iter_meta, op.results):
+ *         ll_ty = _llvm_type_from_name(meta["type"])
+ *         exit_blk.emit(f"  {result.name} = bitcast {ll_ty} {meta['name']} to {ll_ty}")
+ */
+void ckc_ll_lower_normal_for(ckc_lower_t *L, const ckc_op_t *op) {
+    if (!ckc_ll_live(L) || op->num_operands < 3) {
         return;
     }
-    /* TODO(port): evaluate the constant lower/upper/step, then for each trip
-     * rename the IV + iter args and re-lower op->regions[0], eliding the
-     * trailing tile.sync via L->unroll_elide_sync_op on non-final trips. For
-     * now lower the body once (under a yield frame) so dispatch is total and
-     * the contained ops are emitted. */
+    int64_t num_iter = 0;
+    ckc_attr_get_int(&op->attrs, "num_iter_args", &num_iter);
+    const ckc_value_t *lower = op->operands[0];
+    const ckc_value_t *upper = op->operands[1];
+    const ckc_value_t *step = op->operands[2];
+    const char *iv_name = ckc_attr_get_str(&op->attrs, "iv");
+    if (!iv_name) {
+        ckc_ll_fail(L, CKC_ERR_KEY, "scf.for: missing iv attr");
+        return;
+    }
+    const char *iv_ty = ckc_ll_llvm_type(L, lower->type);
+
+    ckc_ll_block_t *pred = ckc_ll_current(L);
+    const char *pred_block = pred ? pred->label : "";
+
+    ckc_ll_block_t *header = ckc_ll_new_block(L, "for.header");
+    /* self._blocks[-2] is the block just before the freshly-pushed header. */
+    ckc_ll_block_t *prev_blk =
+        ckc_ll_block_at(L, ckc_ll_block_count(L) - 2);
+    if (prev_blk && header) {
+        ckc_ll_block_emitf(L, prev_blk, "  br label %%%s", header->label);
+        prev_blk->terminated = true;
+    }
+
+    ckc_ll_block_emitf(L, header,
+                       "  %s = phi %s [ %s, %%%s ], "
+                       "[ %%iv.next.%s, %%FOR_LATCH ]",
+                       iv_name, iv_ty, ckc_ll_operand(L, lower), pred_block,
+                       header->label);
+    for (int i = 0; i < (int)num_iter; i++) {
+        const char *mname = NULL, *mtype = NULL;
+        if (!ll_iter_meta(op, i, &mname, &mtype) || !mname || !mtype) {
+            break;
+        }
+        const ckc_value_t *init = op->operands[3 + i];
+        const char *ll_ty = ckc_ll_llvm_type_from_name(L, mtype);
+        ckc_ll_block_emitf(L, header,
+                           "  %s = phi %s [ %s, %%%s ], "
+                           "[ %s.next.%s, %%FOR_LATCH ]",
+                           mname, ll_ty, ckc_ll_operand(L, init), pred_block,
+                           mname, header->label);
+    }
+
+    const char *cmp = ckc_ll_fresh(L, "cmp");
+    ckc_ll_block_emitf(L, header, "  %s = icmp slt %s %s, %s", cmp, iv_ty,
+                       iv_name, ckc_ll_operand(L, upper));
+
+    ckc_ll_block_t *body = ckc_ll_new_block(L, "for.body");
+    ckc_ll_block_emitf(L, header,
+                       "  br i1 %s, label %%%s, label %%FOR_EXIT", cmp,
+                       body->label);
+    header->terminated = true;
+
     ckc_ll_yield_push(L);
     if (op->num_regions > 0 && op->regions[0]) {
         ckc_ll_lower_region(L, op->regions[0]);
     }
-    const char *const *items = NULL;
-    int n = 0;
-    ckc_ll_yield_pop(L, &items, &n);
-    (void)items;
-    (void)n;
+
+    ckc_ll_block_t *last_body = ckc_ll_current(L);
+    ckc_ll_block_t *latch = ckc_ll_new_block(L, "for.latch");
+    if (last_body && latch) {
+        ckc_ll_block_emitf(L, last_body, "  br label %%%s", latch->label);
+        last_body->terminated = true;
+    }
+
+    const char *const *yielded = NULL;
+    int n_yield = 0;
+    ckc_ll_yield_pop(L, &yielded, &n_yield);
+    if (n_yield != (int)num_iter) {
+        ckc_ll_fail(L, CKC_ERR_VALUE,
+                    "scf.for expected %d yielded values, got %d",
+                    (int)num_iter, n_yield);
+        return;
+    }
+
+    ckc_ll_block_emitf(L, latch, "  %%iv.next.%s = add nsw %s %s, %s",
+                       header->label, iv_ty, iv_name, ckc_ll_operand(L, step));
+    for (int i = 0; i < (int)num_iter; i++) {
+        const char *mname = NULL, *mtype = NULL;
+        if (!ll_iter_meta(op, i, &mname, &mtype) || !mname || !mtype) {
+            break;
+        }
+        const char *ll_ty = ckc_ll_llvm_type_from_name(L, mtype);
+        ckc_ll_block_emitf(L, latch, "  %s.next.%s = bitcast %s %s to %s",
+                           mname, header->label, ll_ty,
+                           yielded ? yielded[i] : "", ll_ty);
+    }
+    ckc_ll_block_emitf(L, latch, "  br label %%%s", header->label);
+    latch->terminated = true;
+
+    ckc_ll_block_t *exit_blk = ckc_ll_new_block(L, "for.exit");
+    if (exit_blk) {
+        const char *latch_repl =
+            ckc_arena_printf(&L->arena, "%%%s", latch->label);
+        const char *exit_repl =
+            ckc_arena_printf(&L->arena, "%%%s", exit_blk->label);
+        ll_block_replace(L, header, "%FOR_LATCH", latch_repl);
+        ll_block_replace(L, header, "%FOR_EXIT", exit_repl);
+        for (int i = 0; i < (int)num_iter && i < op->num_results; i++) {
+            const char *mname = NULL, *mtype = NULL;
+            if (!ll_iter_meta(op, i, &mname, &mtype) || !mname || !mtype) {
+                break;
+            }
+            const char *ll_ty = ckc_ll_llvm_type_from_name(L, mtype);
+            const ckc_value_t *result = op->results[i];
+            ckc_ll_block_emitf(L, exit_blk, "  %s = bitcast %s %s to %s",
+                               result->name, ll_ty, mname, ll_ty);
+        }
+    }
+}
+
+/* One (Value*, saved-name) record for the unrolled-for name renaming. */
+typedef struct ll_rename {
+    ckc_value_t *val;
+    const char *saved;
+} ll_rename_t;
+
+/* Python _lower_unrolled_for: straight-line replication of the body for
+ * constant bounds. See the Python source for the full strategy comment; the
+ * mechanics ported here are:
+ *
+ *   - eval constant lower/upper/step -> trip_count = (upper-lower)//step
+ *   - current_iter_values[meta.name] = operand(init)
+ *   - find the IV + iter-arg Value objects by scanning region operands for
+ *     `operand.name == iv_name/meta.name and operand.op == op`
+ *   - detect a trailing tile.sync (second-last region op) when
+ *     attrs["elide_trailing_barrier"] (default True)
+ *   - per iteration: emit `iv_const = add iv_ty 0, iv_value`, rename the IV +
+ *     iter-arg objects + ALL body op results to `%base.unrollN`, set the
+ *     elide marker on non-final trips, lower the region under a yield frame,
+ *     thread yielded values into current_iter_values, restore names
+ *   - bind op.results to the final current_iter_values via bitcast
+ *
+ * The Value.name fields are `const char*`; the Python rebinds them in place, so
+ * we cast away const for the duration of each trip and restore afterwards. */
+void ckc_ll_lower_unrolled_for(ckc_lower_t *L, const ckc_op_t *op) {
+    if (!ckc_ll_live(L) || op->num_operands < 3 || op->num_regions < 1 ||
+        !op->regions[0]) {
+        return;
+    }
+    int64_t num_iter = 0;
+    ckc_attr_get_int(&op->attrs, "num_iter_args", &num_iter);
+    const ckc_value_t *lower = op->operands[0];
+    const ckc_value_t *upper = op->operands[1];
+    const ckc_value_t *step = op->operands[2];
+    const char *iv_name = ckc_attr_get_str(&op->attrs, "iv");
+    if (!iv_name) {
+        ckc_ll_fail(L, CKC_ERR_KEY, "scf.for: missing iv attr");
+        return;
+    }
+    const ckc_region_t *body = op->regions[0];
+
+    /* current_iter_values: name -> current LLVM operand string. Indexed
+     * parallel to iter_meta (0..num_iter-1). */
+    const char **current_iter_values = NULL;
+    if (num_iter > 0) {
+        current_iter_values = (const char **)ckc_arena_alloc(
+            &L->arena, sizeof(const char *) * (size_t)num_iter);
+        if (!current_iter_values) {
+            ckc_ll_fail(L, CKC_ERR_OOM, "unrolled_for: arena OOM");
+            return;
+        }
+        for (int i = 0; i < (int)num_iter; i++) {
+            current_iter_values[i] = ckc_ll_operand(L, op->operands[3 + i]);
+        }
+    }
+
+    int64_t lower_val = ckc_ll_eval_constant(L, lower);
+    int64_t upper_val = ckc_ll_eval_constant(L, upper);
+    int64_t step_val = ckc_ll_eval_constant(L, step);
+    if (step_val == 0) {
+        ckc_ll_fail(L, CKC_ERR_VALUE, "unrolled_for: zero step");
+        return;
+    }
+    int64_t trip_count = (upper_val - lower_val) / step_val;
+
+    /* Find the IV + iter-arg Value objects referenced by body operands. */
+    ckc_value_t *iv_value_obj = NULL;
+    ckc_value_t **iter_value_objs =
+        num_iter > 0 ? (ckc_value_t **)ckc_arena_alloc(
+                           &L->arena, sizeof(ckc_value_t *) * (size_t)num_iter)
+                     : NULL;
+    int iter_value_count = 0;
+    for (int bi = 0; bi < body->num_ops; bi++) {
+        const ckc_op_t *bop = body->ops[bi];
+        for (int oi = 0; oi < bop->num_operands; oi++) {
+            ckc_value_t *operand = bop->operands[oi];
+            if (!operand || !operand->name) {
+                continue;
+            }
+            if (operand->op == op && strcmp(operand->name, iv_name) == 0) {
+                iv_value_obj = operand;
+            }
+            for (int mi = 0; mi < (int)num_iter; mi++) {
+                const char *mname = NULL;
+                if (!ll_iter_meta(op, mi, &mname, NULL) || !mname) {
+                    continue;
+                }
+                if (operand->op == op && strcmp(operand->name, mname) == 0) {
+                    bool present = false;
+                    for (int k = 0; k < iter_value_count; k++) {
+                        if (iter_value_objs[k] == operand) {
+                            present = true;
+                            break;
+                        }
+                    }
+                    if (!present && iter_value_objs) {
+                        iter_value_objs[iter_value_count++] = operand;
+                    }
+                }
+            }
+        }
+    }
+
+    /* Trailing tile.sync detection (second-last body op). */
+    bool elide_enabled =
+        ckc_attr_get_bool(&op->attrs, "elide_trailing_barrier", true);
+    const ckc_op_t *trailing_sync_op = NULL;
+    if (elide_enabled && body->num_ops >= 2) {
+        const ckc_op_t *second_last = body->ops[body->num_ops - 2];
+        if (second_last->opcode == CKC_OP_TILE_SYNC) {
+            trailing_sync_op = second_last;
+        }
+    }
+
+    const char *iv_ty = ckc_ll_llvm_type(L, lower->type);
+
+    for (int64_t iteration = 0; iteration < trip_count; iteration++) {
+        int64_t iv_value = lower_val + iteration * step_val;
+        const char *iv_const_name = ckc_ll_fresh(L, "iv_const");
+        ckc_ll_emitf(L, "  %s = add %s 0, %lld", iv_const_name, iv_ty,
+                     (long long)iv_value);
+
+        /* Collect (Value*, saved-name) for restoration after this trip. */
+        int max_renames = 1 + iter_value_count;
+        for (int bi = 0; bi < body->num_ops; bi++) {
+            max_renames += body->ops[bi]->num_results;
+        }
+        ll_rename_t *renames = (ll_rename_t *)ckc_arena_alloc(
+            &L->arena, sizeof(ll_rename_t) * (size_t)(max_renames > 0 ? max_renames : 1));
+        if (!renames) {
+            ckc_ll_fail(L, CKC_ERR_OOM, "unrolled_for: arena OOM");
+            return;
+        }
+        int n_renames = 0;
+
+        if (iv_value_obj) {
+            renames[n_renames].val = iv_value_obj;
+            renames[n_renames].saved = iv_value_obj->name;
+            n_renames++;
+            iv_value_obj->name = iv_const_name;
+        }
+        /* Rename iter-arg objects to their current operand string. */
+        for (int k = 0; k < iter_value_count; k++) {
+            ckc_value_t *vo = iter_value_objs[k];
+            renames[n_renames].val = vo;
+            renames[n_renames].saved = vo->name;
+            n_renames++;
+            for (int mi = 0; mi < (int)num_iter; mi++) {
+                const char *mname = NULL;
+                if (!ll_iter_meta(op, mi, &mname, NULL) || !mname) {
+                    continue;
+                }
+                if (strcmp(vo->name, mname) == 0) {
+                    vo->name = current_iter_values[mi];
+                    break;
+                }
+            }
+        }
+        /* Rename all body op results to %base.unrollN. */
+        for (int bi = 0; bi < body->num_ops; bi++) {
+            const ckc_op_t *bop = body->ops[bi];
+            for (int ri = 0; ri < bop->num_results; ri++) {
+                ckc_value_t *result = bop->results[ri];
+                renames[n_renames].val = result;
+                renames[n_renames].saved = result->name;
+                n_renames++;
+                const char *base = result->name;
+                if (base && base[0] == '%') {
+                    base++;
+                }
+                result->name = ckc_arena_printf(&L->arena, "%%%s.unroll%lld",
+                                                base ? base : "",
+                                                (long long)iteration);
+            }
+        }
+
+        bool is_final = (iteration == trip_count - 1);
+        L->unroll_elide_sync_op =
+            (trailing_sync_op && !is_final) ? trailing_sync_op : NULL;
+
+        ckc_ll_yield_push(L);
+        ckc_ll_lower_region(L, body);
+        const char *const *yielded = NULL;
+        int n_yield = 0;
+        ckc_ll_yield_pop(L, &yielded, &n_yield);
+
+        L->unroll_elide_sync_op = NULL;
+
+        /* Restore original names. */
+        for (int k = 0; k < n_renames; k++) {
+            renames[k].val->name = renames[k].saved;
+        }
+
+        if (n_yield != (int)num_iter) {
+            ckc_ll_fail(L, CKC_ERR_VALUE,
+                        "scf.for expected %d yielded values, got %d",
+                        (int)num_iter, n_yield);
+            return;
+        }
+        for (int i = 0; i < (int)num_iter; i++) {
+            current_iter_values[i] =
+                ckc_arena_strdup(&L->arena, yielded ? yielded[i] : "");
+        }
+    }
+
+    for (int i = 0; i < (int)num_iter && i < op->num_results; i++) {
+        const char *mname = NULL, *mtype = NULL;
+        if (!ll_iter_meta(op, i, &mname, &mtype) || !mtype) {
+            break;
+        }
+        const char *ll_ty = ckc_ll_llvm_type_from_name(L, mtype);
+        const ckc_value_t *result = op->results[i];
+        ckc_ll_emitf(L, "  %s = bitcast %s %s to %s", result->name, ll_ty,
+                     current_iter_values[i], ll_ty);
+    }
 }
 
 /* Python _op_scf_for: pick unrolled vs normal lowering. */
@@ -771,20 +1276,91 @@ static void _op_scf_for(ckc_lower_t *L, const ckc_op_t *op) {
     }
 }
 
-/* Python _op_scf_if.
- * TODO(port): full then/else CFG with the cond branch and join block. */
-static void _op_scf_if(ckc_lower_t *L, const ckc_op_t *op) {
-    if (!ckc_ll_live(L)) {
+/* Replace every occurrence of `tok` with `repl` across `blk`'s lines, in place
+ * (arena-allocating the rewritten lines). Mirrors the Python
+ * `cur.lines[i] = line.replace(tok, repl)` back-patch loop. */
+static void ll_block_replace(ckc_lower_t *L, ckc_ll_block_t *blk,
+                             const char *tok, const char *repl) {
+    if (!blk || !tok || !repl) {
         return;
     }
-    /* TODO(port): emit the i1 cond branch, lower the then-region (and optional
-     * else-region) into fresh blocks, and join. For now lower the then-region
-     * inline so its ops are emitted and the dispatch is total. */
-    if (op->num_regions > 0 && op->regions[0]) {
-        ckc_ll_lower_region(L, op->regions[0]);
+    size_t tok_len = strlen(tok);
+    size_t repl_len = strlen(repl);
+    for (size_t li = 0; li < blk->lines.len; li++) {
+        const char *line = blk->lines.data[li];
+        if (!line) {
+            continue;
+        }
+        /* Count occurrences first to size the output. */
+        int n = 0;
+        for (const char *p = strstr(line, tok); p; p = strstr(p + tok_len, tok)) {
+            n++;
+        }
+        if (n == 0) {
+            continue;
+        }
+        size_t out_len = strlen(line) + (size_t)n * (repl_len - tok_len);
+        char *out = (char *)ckc_arena_alloc(&L->arena, out_len + 1);
+        if (!out) {
+            ckc_ll_fail(L, CKC_ERR_OOM, "scf.if: back-patch arena OOM");
+            return;
+        }
+        char *w = out;
+        const char *s = line;
+        const char *p;
+        while ((p = strstr(s, tok)) != NULL) {
+            size_t pre = (size_t)(p - s);
+            memcpy(w, s, pre);
+            w += pre;
+            memcpy(w, repl, repl_len);
+            w += repl_len;
+            s = p + tok_len;
+        }
+        strcpy(w, s);
+        blk->lines.data[li] = out;
     }
-    if (op->num_regions > 1 && op->regions[1]) {
-        ckc_ll_lower_region(L, op->regions[1]);
+}
+
+/* Python _op_scf_if: i1 cond branch into a fresh then-block, lower the
+ * then-region, then a join block, with a deferred %IF_END placeholder.
+ *
+ *     (cond,) = op.operands; then_region = op.regions[0]
+ *     cur = self._current()
+ *     then_blk = self._new_block("if.then")
+ *     cur.emit(f"  br i1 {cond}, label %{then_blk.label}, label %IF_END")
+ *     cur.terminated = True
+ *     self.lower_region(then_region)
+ *     then_last = self._current()
+ *     end_blk = self._new_block("if.end")
+ *     if not then_last.terminated:
+ *         then_last.emit(f"  br label %{end_blk.label}"); then_last.terminated = True
+ *     for i, line in enumerate(cur.lines):
+ *         cur.lines[i] = line.replace("%IF_END", f"%{end_blk.label}")
+ *
+ * Note: the Python scf.if lowers ONLY regions[0]; there is no else region. */
+static void _op_scf_if(ckc_lower_t *L, const ckc_op_t *op) {
+    if (!ckc_ll_live(L) || op->num_operands < 1 || op->num_regions < 1) {
+        return;
+    }
+    const ckc_value_t *cond = op->operands[0];
+    ckc_ll_block_t *cur = ckc_ll_current(L);
+    ckc_ll_block_t *then_blk = ckc_ll_new_block(L, "if.then");
+    if (cur && then_blk) {
+        ckc_ll_block_emitf(L, cur, "  br i1 %s, label %%%s, label %%IF_END",
+                           ckc_ll_operand(L, cond), then_blk->label);
+        cur->terminated = true;
+    }
+    ckc_ll_lower_region(L, op->regions[0]);
+    ckc_ll_block_t *then_last = ckc_ll_current(L);
+    ckc_ll_block_t *end_blk = ckc_ll_new_block(L, "if.end");
+    if (then_last && !then_last->terminated && end_blk) {
+        ckc_ll_block_emitf(L, then_last, "  br label %%%s", end_blk->label);
+        then_last->terminated = true;
+    }
+    if (cur && end_blk) {
+        const char *repl =
+            ckc_arena_printf(&L->arena, "%%%s", end_blk->label);
+        ll_block_replace(L, cur, "%IF_END", repl);
     }
 }
 
@@ -799,15 +1375,21 @@ static void _op_scf_yield(ckc_lower_t *L, const ckc_op_t *op) {
 }
 
 /* Python _op_cf_return: terminate the current block with `ret void`.
- * TODO(port): confirm value-returning kernels (none today emit ret <ty>). */
+ *
+ *     def _op_cf_return(self, op):
+ *         self._current().emit(" ret void")
+ *         self._current().terminated = True
+ *
+ * Note the SINGLE leading space in " ret void" -- it matches the Python text
+ * byte-for-byte (the no-op finalize() terminator uses the same spelling). */
 static void _op_cf_return(ckc_lower_t *L, const ckc_op_t *op) {
     (void)op;
     if (!ckc_ll_live(L)) {
         return;
     }
+    ckc_ll_emit(L, " ret void");
     ckc_ll_block_t *cur = ckc_ll_current(L);
-    if (cur && !cur->terminated) {
-        ckc_ll_emit(L, "  ret void");
+    if (cur) {
         cur->terminated = true;
     }
 }

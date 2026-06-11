@@ -166,16 +166,31 @@ static void gemm_kernel_name(const ckc_cktile_gemm_spec_t *spec,
                   t->warp_tile_m, t->warp_tile_n, t->warp_tile_k,
                   tr->pipeline, tr->scheduler, tr->epilogue);
 
-    /* flags, in Python dict insertion order. TraitSpec exposes only pad /
-     * persistent here; the remaining flags (bat/preb/dtl/pref/actt) come from
-     * fields we did not mirror. We honour the two we have plus `bat`. */
-    bool pad = (tr->pad_m || tr->pad_n || tr->pad_k);
-    if (pad)              n += snprintf(buf + n, (n < (int)cap) ? cap - (size_t)n : 0, "_pad");
-    if (tr->persistent)  n += snprintf(buf + n, (n < (int)cap) ? cap - (size_t)n : 0, "_pers");
-    if (spec->batched)   n += snprintf(buf + n, (n < (int)cap) ? cap - (size_t)n : 0, "_bat");
-    /* TODO(port): preb/dtl/pref/actt flags require mirroring the corresponding
-     * TraitSpec fields (preshuffle_b/direct_to_lds/dtl_prefetch/active_tile_skip);
-     * out of scope for the v1 fp16 path. */
+    /* flags, in Python dict insertion order (UniversalGemmSpec.kernel_name):
+     *   {"pad", "pers", "bat", "preb", "dtl", "pref", "actt"}
+     * kernel_name_join appends "_<name>" for each truthy flag in iteration
+     * order. The four trailing flags map to TraitSpec fields that this v1
+     * CK-Tile path does not model (preshuffle_b / direct_to_lds /
+     * dtl_prefetch / active_tile_skip); they all default to False in
+     * gemm_universal.TraitSpec and the emitted CK-Tile body here never
+     * enables them, so for every spec this struct can express they are
+     * always False and contribute no suffix. Holding them at their default
+     * reproduces Python's kernel_name() byte-for-byte across this path's
+     * representable domain while preserving the exact suffix ordering. */
+    bool pad  = (tr->pad_m || tr->pad_n || tr->pad_k);
+    bool pers = tr->persistent;
+    bool bat  = spec->batched;
+    bool preb = false; /* TraitSpec.preshuffle_b    (default False) */
+    bool dtl  = false; /* TraitSpec.direct_to_lds   (default False) */
+    bool pref = false; /* TraitSpec.dtl_prefetch    (default False) */
+    bool actt = false; /* TraitSpec.active_tile_skip(default False) */
+    if (pad)  n += snprintf(buf + n, (n < (int)cap) ? cap - (size_t)n : 0, "_pad");
+    if (pers) n += snprintf(buf + n, (n < (int)cap) ? cap - (size_t)n : 0, "_pers");
+    if (bat)  n += snprintf(buf + n, (n < (int)cap) ? cap - (size_t)n : 0, "_bat");
+    if (preb) n += snprintf(buf + n, (n < (int)cap) ? cap - (size_t)n : 0, "_preb");
+    if (dtl)  n += snprintf(buf + n, (n < (int)cap) ? cap - (size_t)n : 0, "_dtl");
+    if (pref) n += snprintf(buf + n, (n < (int)cap) ? cap - (size_t)n : 0, "_pref");
+    if (actt) n += snprintf(buf + n, (n < (int)cap) ? cap - (size_t)n : 0, "_actt");
     (void)n;
     mangle_replace_slash(buf);
 }

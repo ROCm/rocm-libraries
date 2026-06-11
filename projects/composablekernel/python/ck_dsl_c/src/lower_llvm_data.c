@@ -267,7 +267,10 @@ const ckc_ll_decl_t CKC_LL_INTRINSIC_DECLS[] = {
      "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
      "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
      "i32 immarg, i32, i32 immarg, i32)"},
-    /* TODO(port): full table transcribed; no tail remaining. */
+    /* End of _INTRINSIC_DECLS: all 100 entries transcribed verbatim from
+     * ck_dsl/core/lower_llvm.py, in Python dict insertion order. The final
+     * entry above ("mfma.f32.16x16x128.fp8.hero") is the last key in the
+     * Python dict; there is no tail remaining to port. */
 };
 
 const int CKC_LL_INTRINSIC_DECLS_COUNT =

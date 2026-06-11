@@ -16,9 +16,8 @@
  *     utility helpers the per-op buckets consume.
  *
  * Faithful translation of ck_dsl.core.lower_llvm (_Lowerer + module helpers).
- * Where a body would run long it is reduced to a correct-shaped TODO(port)
- * stub that compiles and returns a sane default; this round's goal is a
- * LINKING engine.
+ * Every spine helper below is fully ported from its Python counterpart; no
+ * stub bodies remain in this file.
  */
 #include "ckc/lower_llvm_internal.h"
 
@@ -82,11 +81,35 @@ static ckc_llvm_flavor_t ll_resolve_flavor(void) {
  * defined in the control bucket. Static storage: returned by pointer. */
 static const ckc_isa_backend_t LL_BACKEND_GFX950 = {
     "gfx950", NULL, NULL, CKC_LL_BUFFER_RSRC_WORD3_CDNA,
-    ckc_ll_encode_waitcnt_gfx9_10
+    ckc_ll_encode_waitcnt_gfx9_10, CKC_LL_ISA_CDNA
 };
 static const ckc_isa_backend_t LL_BACKEND_GFX942 = {
     "gfx942", NULL, NULL, CKC_LL_BUFFER_RSRC_WORD3_CDNA,
-    ckc_ll_encode_waitcnt_gfx9_10
+    ckc_ll_encode_waitcnt_gfx9_10, CKC_LL_ISA_CDNA
+};
+static const ckc_isa_backend_t LL_BACKEND_GFX908 = {
+    "gfx908", NULL, NULL, CKC_LL_BUFFER_RSRC_WORD3_CDNA,
+    ckc_ll_encode_waitcnt_gfx9_10, CKC_LL_ISA_CDNA
+};
+static const ckc_isa_backend_t LL_BACKEND_GFX90A = {
+    "gfx90a", NULL, NULL, CKC_LL_BUFFER_RSRC_WORD3_CDNA,
+    ckc_ll_encode_waitcnt_gfx9_10, CKC_LL_ISA_CDNA
+};
+/* RDNA backends (Python Gfx11RdnaBackend / Gfx12RdnaBackend): same
+ * datalayout/triple as CDNA on the ROCm releases we target, but the RDNA buffer
+ * SRD word3 and the contiguous gfx11 s_waitcnt layout. gfx12 differs from gfx11
+ * only in WMMA fragment width, which the op_id ("wmma_gfx12_*") encodes. */
+static const ckc_isa_backend_t LL_BACKEND_GFX1151 = {
+    "gfx1151", NULL, NULL, CKC_LL_BUFFER_RSRC_WORD3_RDNA,
+    ckc_ll_encode_waitcnt_gfx11, CKC_LL_ISA_RDNA
+};
+static const ckc_isa_backend_t LL_BACKEND_GFX1201 = {
+    "gfx1201", NULL, NULL, CKC_LL_BUFFER_RSRC_WORD3_RDNA,
+    ckc_ll_encode_waitcnt_gfx11, CKC_LL_ISA_RDNA
+};
+static const ckc_isa_backend_t LL_BACKEND_GFX11_GENERIC = {
+    "gfx11-generic", NULL, NULL, CKC_LL_BUFFER_RSRC_WORD3_RDNA,
+    ckc_ll_encode_waitcnt_gfx11, CKC_LL_ISA_RDNA
 };
 
 /* Mutable copies so datalayout/triple (extern consts resolved at runtime) can
@@ -99,6 +122,16 @@ const ckc_isa_backend_t *ckc_ll_backend_for(const char *arch, ckc_status_t *st) 
         base = &LL_BACKEND_GFX950;
     } else if (strcmp(arch, "gfx942") == 0) {
         base = &LL_BACKEND_GFX942;
+    } else if (strcmp(arch, "gfx908") == 0) {
+        base = &LL_BACKEND_GFX908;
+    } else if (strcmp(arch, "gfx90a") == 0) {
+        base = &LL_BACKEND_GFX90A;
+    } else if (strcmp(arch, "gfx1151") == 0) {
+        base = &LL_BACKEND_GFX1151;
+    } else if (strcmp(arch, "gfx1201") == 0) {
+        base = &LL_BACKEND_GFX1201;
+    } else if (strcmp(arch, "gfx11-generic") == 0) {
+        base = &LL_BACKEND_GFX11_GENERIC;
     } else {
         if (st) {
             *st = CKC_ERR_KEY;
@@ -913,35 +946,30 @@ void ckc_ll_finalize(ckc_lower_t *L, ckc_strbuf_t *out) {
     }
 
     /* Needed intrinsic declarations, in canonical TABLE order (then dynamic
-     * decls). This mirrors finalize iterating self._decls in insertion order. */
+     * decls). This mirrors finalize iterating self._decls in insertion order.
+     *
+     * Python builds self._decls as dict(_INTRINSIC_DECLS) then .update(
+     * _INTRINSIC_DECLS_LLVM22_OVERRIDES) for the LLVM22 flavor. dict.update
+     * REPLACES the value text for an existing key but PRESERVES that key's
+     * original insertion position. So we must iterate the base table in order
+     * and, per needed key, emit the override text when the flavor is LLVM22 and
+     * the key has an override -- NOT emit all overrides in a separate leading
+     * loop (which would float overridden keys, e.g. make.buffer.rsrc, to the
+     * front of the declare block). */
     bool any_need = false;
-    if (L->flavor == CKC_LLVM_FLAVOR_LLVM22) {
-        for (int i = 0; i < CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT; i++) {
-            const char *k = CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[i].key;
-            if (ll_need_has(L, k)) {
-                ckc_strbuf_appendf(out, "%s\n",
-                    CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[i].decl);
-                any_need = true;
-            }
-        }
-    }
     for (int i = 0; i < CKC_LL_INTRINSIC_DECLS_COUNT; i++) {
         const char *k = CKC_LL_INTRINSIC_DECLS[i].key;
-        /* Skip if an LLVM22 override already emitted this key. */
-        bool overridden = false;
+        const char *decl_text = CKC_LL_INTRINSIC_DECLS[i].decl;
         if (L->flavor == CKC_LLVM_FLAVOR_LLVM22) {
             for (int j = 0; j < CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT; j++) {
                 if (strcmp(CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[j].key, k) == 0) {
-                    overridden = true;
+                    decl_text = CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[j].decl;
                     break;
                 }
             }
         }
-        if (overridden) {
-            continue;
-        }
         if (ll_need_has(L, k)) {
-            ckc_strbuf_appendf(out, "%s\n", CKC_LL_INTRINSIC_DECLS[i].decl);
+            ckc_strbuf_appendf(out, "%s\n", decl_text);
             any_need = true;
         }
     }
@@ -1023,10 +1051,13 @@ void ckc_ll_finalize(ckc_lower_t *L, ckc_strbuf_t *out) {
             ckc_strbuf_appendf(out, " \"amdgpu-agpr-alloc\"=\"%s\"", fa);
         }
     }
-    ckc_strbuf_append(out, " norecurse nounwind }\n\n");
+    ckc_strbuf_append(out, " norecurse nounwind }\n");
 
+    /* Python finalize does "\n".join(out) with a trailing "" element, so the
+     * file ends in a single newline; when the fp-atomic metadata is present it
+     * is preceded by a blank line (out.append("") before "!1 = !{}"). */
     if (L->needs_fp_atomic_md) {
-        ckc_strbuf_append(out, "!1 = !{}\n\n");
+        ckc_strbuf_append(out, "\n!1 = !{}\n");
     }
 }
 

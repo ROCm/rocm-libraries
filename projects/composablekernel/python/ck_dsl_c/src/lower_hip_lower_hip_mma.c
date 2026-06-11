@@ -23,6 +23,9 @@
 #include "ckc/lower_hip.h"
 #include "ckc/lower_hip_internal.h"
 
+#include <stdio.h>  /* snprintf */
+#include <stdlib.h> /* atoi     */
+
 /* Convenience: the single result Value of `op` (Python op.result). */
 static const ckc_value_t *h_res(const ckc_op_t *op) {
     return op->results[0];
@@ -40,39 +43,95 @@ static const char *h_elem_scalar(const ckc_type_t *t) {
     return ckc_h_hip_scalar(nm);
 }
 
-/* Marked placeholder for a deferred-port handler: emits a comment line that
- * documents the op so the generated source still parses, then returns the
- * (still-OK) sticky status. */
-static ckc_status_t h_stub(ckc_h_lowerer_t *lw, const ckc_op_t *op) {
-    ckc_h_emitf(lw, "// TODO(port): faithful lowering of %s deferred",
-                op->name ? op->name : "<op>");
+/* ============================== mma ====================================== */
+
+/* def _op_tile_mma(self, op):
+ *     op_id = op.attrs["op_id"]
+ *     legacy = Op(name=f"tile.{op_id}", operands=list(op.operands),
+ *                 results=list(op.results),
+ *                 attrs={k: v for k, v in op.attrs.items() if k != "op_id"},
+ *                 loc=op.loc)
+ *     self.lower_op(legacy)
+ *
+ * The HIP source path has no ISA backend: the neutral tile.mma op carries the
+ * concrete atom name in attrs["op_id"], which we re-form into "tile.<op_id>"
+ * and re-dispatch through the regular per-op handler (the mfma_* / wmma_* family
+ * + the MX/fp4/fp6 scaled shims, all defined as concrete CKC_OP_TILE_* handlers
+ * in this and other buckets). The concrete handlers read only op.operands /
+ * op.result (and the WMMA gate keys off the op_id *string* it is passed, not
+ * op.attrs), so a synthetic op aliasing the same operands/results/regions and
+ * reusing the original attrs map reproduces the Python emission exactly. */
+static ckc_status_t ckc_h_op_tile_mma(ckc_h_lowerer_t *lw, const ckc_op_t *op) {
+    const char *op_id;
+    char dotted[160];
+    ckc_opcode_t legacy_opcode;
+    ckc_h_handler_fn fn;
+    ckc_op_t legacy;
+    if (!ckc_h_live(lw)) {
+        return lw->status;
+    }
+    op_id = ckc_attr_get_str(&op->attrs, "op_id");
+    if (!op_id) {
+        return ckc_h_fail(lw, CKC_ERR_KEY, "tile.mma: missing 'op_id' attr");
+    }
+    snprintf(dotted, sizeof(dotted), "tile.%s", op_id);
+    legacy_opcode = ckc_opcode_from_name(dotted);
+    fn = ckc_h_dispatch(legacy_opcode);
+    if (!fn) {
+        /* Python: lower_op(Op("tile.<op_id>", ...)) raises NotImplementedError
+         * when no _op_tile_<op_id> handler exists. */
+        return ckc_h_fail(lw, CKC_ERR_NOTIMPL, "no HIP lowering for op '%s'",
+                          dotted);
+    }
+    /* Build the synthetic "tile.<op_id>" op: same operands/results/regions, the
+     * original attrs map (op_id is simply ignored by the concrete handlers). */
+    legacy = *op;
+    legacy.opcode = legacy_opcode;
+    legacy.name = ckc_arena_strdup(&lw->b->arena, dotted);
+    return fn(lw, &legacy);
+}
+
+/* def _op_tile_register_p_from_qk_c(self, op):
+ *     (qk_c,) = op.operands
+ *     target = op.attrs["target_dtype"]
+ *     res_t = _type_to_hip(op.result.type)
+ *     nice = _name(op.result)
+ *     self._emit(f"{res_t} {nice};")
+ *     for i in range(8):
+ *         self._emit(f"{nice}[{i}] = ({target}){_name(qk_c)}[{i}];") */
+static ckc_status_t ckc_h_op_tile_register_p_from_qk_c(ckc_h_lowerer_t *lw,
+                                                       const ckc_op_t *op) {
+    const ckc_value_t *qk_c = op->operands[0];
+    const ckc_value_t *r = h_res(op);
+    const char *target = ckc_attr_get_str(&op->attrs, "target_dtype");
+    const char *res_t = ckc_h_type_to_hip(lw, r->type);
+    const char *nice = ckc_h_name(lw, r);
+    const char *qn = ckc_h_name(lw, qk_c);
+    int i;
+    if (!target) {
+        return ckc_h_fail(lw, CKC_ERR_KEY,
+                          "register_p_from_qk_c: missing 'target_dtype' attr");
+    }
+    ckc_h_emitf(lw, "%s %s;", res_t, nice);
+    for (i = 0; i < 8; i++) {
+        ckc_h_emitf(lw, "%s[%d] = (%s)%s[%d];", nice, i, target, qn, i);
+    }
     return lw->status;
 }
 
-/* ============================== mma ====================================== */
-
-/* def _op_tile_mma(self, op): re-dispatches tile.<op_id> to the concrete MFMA/
- * WMMA handler. The concrete matrix-engine intrinsic emission (the mfma_* /
- * wmma_* family + the MX/fp4/fp6 scaled shims) is a large, arch-gated port that
- * is deferred. Registered as a stub so the opcode resolves. */
-static ckc_status_t ckc_h_op_tile_mma(ckc_h_lowerer_t *lw, const ckc_op_t *op) {
-    /* TODO(port): faithful MFMA/WMMA lowering deferred -- re-dispatch of the
-     * concrete tile.<op_id> matrix atom (mfma_f32_*, wmma_*, scaled MX shims). */
-    return h_stub(lw, op);
-}
-
-/* def _op_tile_register_p_from_qk_c(self, op): P13 register-permutation shim. */
-static ckc_status_t ckc_h_op_tile_register_p_from_qk_c(ckc_h_lowerer_t *lw,
-                                                       const ckc_op_t *op) {
-    /* TODO(port): faithful register_p_from_qk_c lowering deferred. */
-    return h_stub(lw, op);
-}
-
-/* def _op_tile_inline_asm(self, op): raw inline-asm payload passthrough. */
+/* tile.inline_asm has NO _op_tile_inline_asm method in lower_hip.py: the HIP
+ * source backend does not lower raw inline-asm payloads. Python's lower_op
+ * getattr-dispatch therefore returns None and raises
+ *   NotImplementedError(f"no HIP lowering for op {op.name!r}")
+ * Faithful parity: set the sticky CKC_ERR_NOTIMPL with the same message shape
+ * the central dispatcher (ckc_h_lower_op) uses for an unhandled op. */
 static ckc_status_t ckc_h_op_tile_inline_asm(ckc_h_lowerer_t *lw,
                                              const ckc_op_t *op) {
-    /* TODO(port): faithful inline_asm lowering deferred. */
-    return h_stub(lw, op);
+    if (!ckc_h_live(lw)) {
+        return lw->status;
+    }
+    return ckc_h_fail(lw, CKC_ERR_NOTIMPL, "no HIP lowering for op '%s'",
+                      op->name ? op->name : ckc_opcode_name(op->opcode));
 }
 
 /* ============================== cross-lane =============================== */
@@ -275,31 +334,107 @@ static ckc_status_t ckc_h_op_tile_perm_b32(ckc_h_lowerer_t *lw, const ckc_op_t *
     return lw->status;
 }
 
-/* The transpose LDS reads need the smem _storage side table + the arch gate.
- * The arch gate is exported; the storage resolution is deferred. Keep the gate
- * (so an unsupported target still errors) then emit the TODO stub. */
-static ckc_status_t ckc_h_op_tile_ds_read_tr16_b64(ckc_h_lowerer_t *lw,
-                                                   const ckc_op_t *op) {
-    if (ckc_h_require_ds_read_tr(lw, "ds_read_tr16_b64") != CKC_OK) {
+/* Join the names of `vals[0..n)` with "][" (Python "][".join(...)). Returns ""
+ * for n==0. Mirrors mem_idx_join in the memory bucket. */
+static const char *h_idx_join(ckc_h_lowerer_t *lw, ckc_value_t *const *vals, int n) {
+    ckc_strbuf_t sb;
+    const char *out;
+    int i;
+    if (n <= 0) {
+        return "";
+    }
+    ckc_strbuf_init(&sb, 0);
+    for (i = 0; i < n; i++) {
+        if (i > 0) {
+            ckc_strbuf_append(&sb, "][");
+        }
+        ckc_strbuf_append(&sb, ckc_h_name(lw, vals[i]));
+    }
+    out = ckc_arena_strdup(&lw->b->arena, ckc_strbuf_cstr(&sb));
+    ckc_strbuf_free(&sb);
+    return out ? out : "";
+}
+
+/* Python idiom `{"f16": "f16x", "bf16": "bf16x"}.get(elem, "f16x")`. */
+static const char *h_tr_vec_prefix(const char *elem) {
+    if (elem && !__builtin_strcmp(elem, "bf16")) {
+        return "bf16x";
+    }
+    return "f16x";
+}
+
+/* Shared port of _op_tile_ds_read_tr16_b64 / _b128. The two variants differ
+ * only in the raw type / shim name / lane count / memcpy byte count.
+ *   self._require_ds_read_tr(op_id)
+ *   smem = op.operands[0]; indices = op.operands[1:]
+ *   storage = smem.op.attrs.get("_storage")  -- RuntimeError on miss
+ *   idx_str = "][".join(_name(i) for i in indices)
+ *   elem = op.attrs.get("elem_type", "f16")
+ *   vec_prefix = {"f16":"f16x","bf16":"bf16x"}.get(elem, "f16x")
+ *   nice = _name(op.result); raw_tmp = f"_trraw_{nice.lstrip('%')}"
+ *   self._emit(f"{raw_ty} {raw_tmp} = {shim}("
+ *              f"(const __attribute__((address_space(3))) void*)&{storage}[{idx_str}]);")
+ *   self._emit(f"{vec_prefix}{lanes} {nice}; __builtin_memcpy(&{nice}, &{raw_tmp}, {bytes});")
+ * (_name already strips the leading '%', so nice.lstrip('%') == nice.) */
+static ckc_status_t h_ds_read_tr16(ckc_h_lowerer_t *lw, const ckc_op_t *op,
+                                   const char *op_id, const char *raw_ty,
+                                   const char *shim, int lanes, int bytes) {
+    const ckc_value_t *smem;
+    const char *storage, *idx_str, *elem, *vec_prefix, *nice, *raw_tmp;
+    char raw_buf[160];
+    if (ckc_h_require_ds_read_tr(lw, op_id) != CKC_OK) {
         return lw->status;
     }
-    return h_stub(lw, op);
+    smem = op->operands[0];
+    storage = ckc_h_smem_storage(lw, smem);
+    if (!storage) {
+        return ckc_h_fail(lw, CKC_ERR_VALUE,
+                          "%s before smem_alloc was lowered", op_id);
+    }
+    idx_str = h_idx_join(lw, &op->operands[1], op->num_operands - 1);
+    elem = ckc_attr_get_str(&op->attrs, "elem_type");
+    if (!elem) {
+        elem = "f16";
+    }
+    vec_prefix = h_tr_vec_prefix(elem);
+    nice = ckc_h_name(lw, op->results[0]);
+    snprintf(raw_buf, sizeof(raw_buf), "_trraw_%s", nice);
+    raw_tmp = raw_buf;
+    ckc_h_emitf(lw,
+                "%s %s = %s("
+                "(const __attribute__((address_space(3))) void*)&%s[%s]);",
+                raw_ty, raw_tmp, shim, storage, idx_str);
+    ckc_h_emitf(lw, "%s%d %s; __builtin_memcpy(&%s, &%s, %d);",
+                vec_prefix, lanes, nice, nice, raw_tmp, bytes);
+    return lw->status;
+}
+
+static ckc_status_t ckc_h_op_tile_ds_read_tr16_b64(ckc_h_lowerer_t *lw,
+                                                   const ckc_op_t *op) {
+    return h_ds_read_tr16(lw, op, "ds_read_tr16_b64", "i16x4_raw",
+                          "_llvm_amdgcn_ds_read_tr16_b64", 4, 8);
 }
 
 static ckc_status_t ckc_h_op_tile_ds_read_tr16_b128(ckc_h_lowerer_t *lw,
                                                     const ckc_op_t *op) {
-    if (ckc_h_require_ds_read_tr(lw, "ds_read_tr16_b128") != CKC_OK) {
-        return lw->status;
-    }
-    return h_stub(lw, op);
+    return h_ds_read_tr16(lw, op, "ds_read_tr16_b128", "i16x8_raw",
+                          "_llvm_amdgcn_ds_read_tr16_b128", 8, 16);
 }
 
+/* tile.ds_read_tr_b8 has NO _op_tile_ds_read_tr_b8 method in lower_hip.py: the
+ * HIP source backend has no 8-bit transpose-read lowering (the IRBuilder exposes
+ * ds_read_tr_b8 but only the LLVM path lowers it). Python's getattr-dispatch
+ * returns None and raises NotImplementedError immediately -- there is NO arch
+ * gate on this path (the gate runs only inside the b64/b128 methods that
+ * actually exist). Faithful parity: fail straight to CKC_ERR_NOTIMPL with the
+ * unhandled-op message shape; do not invoke ckc_h_require_ds_read_tr. */
 static ckc_status_t ckc_h_op_tile_ds_read_tr_b8(ckc_h_lowerer_t *lw,
                                                 const ckc_op_t *op) {
-    if (ckc_h_require_ds_read_tr(lw, "ds_read_tr_b8") != CKC_OK) {
+    if (!ckc_h_live(lw)) {
         return lw->status;
     }
-    return h_stub(lw, op);
+    return ckc_h_fail(lw, CKC_ERR_NOTIMPL, "no HIP lowering for op '%s'",
+                      op->name ? op->name : ckc_opcode_name(op->opcode));
 }
 
 /* ============================== barriers / scheduling ==================== */
@@ -754,19 +889,196 @@ static ckc_status_t ckc_h_op_scf_if(ckc_h_lowerer_t *lw, const ckc_op_t *op) {
     return lw->status;
 }
 
-/* scf.for / scf.yield carry per-iter-arg metadata (a list of {name,type} dicts)
- * in op.attrs; that structured-attr shape and the enclosing-for walk used by
- * scf.yield are not yet modeled by the C attr map. Register both so the
- * dispatch table is complete; faithful body is deferred. */
+/* Python local `cpp_type_for(type_name)` inside _op_scf_for:
+ *     if type_name.startswith("vec<f32x"): return f"f32x{int(inner)}"
+ *     if type_name.startswith("vec<f16x"): return f"f16x{int(inner)}"
+ *     return _HIP_TYPE.get(type_name, "auto")
+ * The IR vector type name is "vec<<elem>x<n>>", so the inner is the n digits
+ * between "vec<f32x"/"vec<f16x" and the trailing ">". Returns an arena string. */
+static const char *h_for_cpp_type(ckc_h_lowerer_t *lw, const char *type_name) {
+    const char *hip;
+    if (type_name && !__builtin_strncmp(type_name, "vec<f32x", 8)) {
+        int n = atoi(type_name + 8);
+        return ckc_arena_printf(&lw->b->arena, "f32x%d", n);
+    }
+    if (type_name && !__builtin_strncmp(type_name, "vec<f16x", 8)) {
+        int n = atoi(type_name + 8);
+        return ckc_arena_printf(&lw->b->arena, "f16x%d", n);
+    }
+    hip = type_name ? ckc_h_hip_scalar(type_name) : NULL;
+    return hip ? hip : "auto";
+}
+
+/* def _op_scf_for(self, op):
+ *     num_iter = op.attrs.get("num_iter_args", 0)
+ *     lower, upper, step = op.operands[0:3]
+ *     iter_inits = op.operands[3 : 3 + num_iter]
+ *     iter_meta = op.attrs.get("iter_args", [])
+ *     iv_name = op.attrs["iv"][1:]
+ *     iv_ty = _HIP_TYPE[op.attrs["iv_type"]]
+ *     for meta, result in zip(iter_meta, op.results):
+ *         self._emit(f"{cpp_type_for(meta['type'])} {_name(result)};")
+ *     self._emit("{"); push
+ *     for meta, init in zip(iter_meta, iter_inits):
+ *         self._emit(f"{cpp_type_for(meta['type'])} {meta['name'][1:]} = {_name(init)};")
+ *     self._emit(f"for({iv_ty} {iv_name} = {_name(lower)}; {iv_name} < {_name(upper)};"
+ *                f" {iv_name} += {_name(step)}) {{")
+ *     push; lower_region(op.regions[0]); pop; self._emit("}")
+ *     for meta, result in zip(iter_meta, op.results):
+ *         self._emit(f"{_name(result)} = {meta['name'][1:]};")
+ *     pop; self._emit("}")
+ * (meta['name'] / iv carry a leading '%' that [1:] strips; the C builder stores
+ *  the iter_args list as a CKC_ATTR_LIST of small {name,type} attr maps.) */
 static ckc_status_t ckc_h_op_scf_for(ckc_h_lowerer_t *lw, const ckc_op_t *op) {
-    /* TODO(port): faithful scf.for lowering deferred (iter_args metadata +
-     * nested region emission). */
-    return h_stub(lw, op);
+    const ckc_value_t *lower = op->operands[0];
+    const ckc_value_t *upper = op->operands[1];
+    const ckc_value_t *step = op->operands[2];
+    const ckc_attr_value_t *iter_meta;
+    const char *iv_full, *iv_name, *iv_type, *iv_ty;
+    const char *lo_n, *up_n, *st_n;
+    int64_t num_iter = 0;
+    int meta_n = 0, i;
+    struct ckc_attr_map **items = NULL;
+
+    if (!ckc_h_live(lw)) {
+        return lw->status;
+    }
+    ckc_attr_get_int(&op->attrs, "num_iter_args", &num_iter);
+
+    iter_meta = ckc_attr_get(&op->attrs, "iter_args");
+    if (iter_meta && iter_meta->kind == CKC_ATTR_LIST) {
+        items = iter_meta->u.list.items;
+        meta_n = iter_meta->u.list.count;
+    }
+
+    iv_full = ckc_attr_get_str(&op->attrs, "iv");
+    if (!iv_full) {
+        return ckc_h_fail(lw, CKC_ERR_KEY, "scf.for: missing 'iv' attr");
+    }
+    iv_name = (iv_full[0] == '%') ? iv_full + 1 : iv_full; /* [1:] */
+    iv_type = ckc_attr_get_str(&op->attrs, "iv_type");
+    iv_ty = iv_type ? ckc_h_hip_scalar(iv_type) : NULL;
+    if (!iv_ty) {
+        /* Python _HIP_TYPE[...] KeyError parity. */
+        return ckc_h_fail(lw, CKC_ERR_KEY, "scf.for: no HIP type for iv_type '%s'",
+                          iv_type ? iv_type : "<none>");
+    }
+
+    /* Declare for-op results in the enclosing scope (zip stops at min length). */
+    for (i = 0; i < meta_n && i < op->num_results; i++) {
+        const char *mtype = ckc_attr_get_str(items[i], "type");
+        ckc_h_emitf(lw, "%s %s;", h_for_cpp_type(lw, mtype),
+                    ckc_h_name(lw, op->results[i]));
+    }
+
+    /* Inner C++ block: iter_args, the loop, and assignment back to results. */
+    ckc_h_emit(lw, "{");
+    ckc_h_push_indent(lw);
+    /* zip(iter_meta, iter_inits): iter_inits = operands[3 : 3 + num_iter]. */
+    for (i = 0; i < meta_n && i < (int)num_iter; i++) {
+        const char *mtype = ckc_attr_get_str(items[i], "type");
+        const char *mname = ckc_attr_get_str(items[i], "name");
+        const char *mnm = (mname && mname[0] == '%') ? mname + 1 : (mname ? mname : "");
+        ckc_h_emitf(lw, "%s %s = %s;", h_for_cpp_type(lw, mtype), mnm,
+                    ckc_h_name(lw, op->operands[3 + i]));
+    }
+    lo_n = ckc_h_name(lw, lower);
+    up_n = ckc_h_name(lw, upper);
+    st_n = ckc_h_name(lw, step);
+    ckc_h_emitf(lw, "for(%s %s = %s; %s < %s; %s += %s) {",
+                iv_ty, iv_name, lo_n, iv_name, up_n, iv_name, st_n);
+    ckc_h_push_indent(lw);
+    ckc_h_lower_region(lw, op->regions[0]);
+    ckc_h_pop_indent(lw);
+    ckc_h_emit(lw, "}");
+    for (i = 0; i < meta_n && i < op->num_results; i++) {
+        const char *mname = ckc_attr_get_str(items[i], "name");
+        const char *mnm = (mname && mname[0] == '%') ? mname + 1 : (mname ? mname : "");
+        ckc_h_emitf(lw, "%s = %s;", ckc_h_name(lw, op->results[i]), mnm);
+    }
+    ckc_h_pop_indent(lw);
+    ckc_h_emit(lw, "}");
+    return lw->status;
+}
+
+/* def _op_scf_yield(self, op):
+ *     parent_for = _find_enclosing_for(self.kernel.body, op)
+ *     if parent_for is None: raise RuntimeError("scf.yield without enclosing scf.for")
+ *     meta = parent_for.attrs.get("iter_args", [])
+ *     if len(op.operands) != len(meta):
+ *         raise RuntimeError(f"scf.yield: {len(op.operands)} values vs {len(meta)} iter_args")
+ *     for m, v in zip(meta, op.operands):
+ *         self._emit(f"{m['name'][1:]} = {_name(v)};")
+ *
+ * def _find_enclosing_for(region, target):
+ *     for op in region.ops:
+ *         if op.name == "scf.for":
+ *             for r in op.regions:
+ *                 if target in r.ops: return op
+ *         ... (recurse into nested regions) */
+static const ckc_op_t *h_find_enclosing_for(const ckc_region_t *region,
+                                            const ckc_op_t *target) {
+    int i, r, k;
+    if (!region) {
+        return NULL;
+    }
+    for (i = 0; i < region->num_ops; i++) {
+        const ckc_op_t *op = region->ops[i];
+        if (op->opcode == CKC_OP_SCF_FOR) {
+            for (r = 0; r < op->num_regions; r++) {
+                const ckc_region_t *reg = op->regions[r];
+                const ckc_op_t *found;
+                for (k = 0; k < reg->num_ops; k++) {
+                    if (reg->ops[k] == target) {
+                        return op;
+                    }
+                }
+                found = h_find_enclosing_for(reg, target);
+                if (found) {
+                    return found;
+                }
+            }
+        } else {
+            for (r = 0; r < op->num_regions; r++) {
+                const ckc_op_t *found = h_find_enclosing_for(op->regions[r], target);
+                if (found) {
+                    return found;
+                }
+            }
+        }
+    }
+    return NULL;
 }
 
 static ckc_status_t ckc_h_op_scf_yield(ckc_h_lowerer_t *lw, const ckc_op_t *op) {
-    /* TODO(port): faithful scf.yield lowering deferred (enclosing-for walk). */
-    return h_stub(lw, op);
+    const ckc_op_t *parent_for;
+    const ckc_attr_value_t *meta;
+    struct ckc_attr_map **items = NULL;
+    int meta_n = 0, i;
+
+    if (!ckc_h_live(lw)) {
+        return lw->status;
+    }
+    parent_for = h_find_enclosing_for(lw->kernel->body, op);
+    if (!parent_for) {
+        return ckc_h_fail(lw, CKC_ERR_VALUE, "scf.yield without enclosing scf.for");
+    }
+    meta = ckc_attr_get(&parent_for->attrs, "iter_args");
+    if (meta && meta->kind == CKC_ATTR_LIST) {
+        items = meta->u.list.items;
+        meta_n = meta->u.list.count;
+    }
+    if (op->num_operands != meta_n) {
+        return ckc_h_fail(lw, CKC_ERR_VALUE,
+                          "scf.yield: %d values vs %d iter_args",
+                          op->num_operands, meta_n);
+    }
+    for (i = 0; i < meta_n; i++) {
+        const char *mname = ckc_attr_get_str(items[i], "name");
+        const char *mnm = (mname && mname[0] == '%') ? mname + 1 : (mname ? mname : "");
+        ckc_h_emitf(lw, "%s = %s;", mnm, ckc_h_name(lw, op->operands[i]));
+    }
+    return lw->status;
 }
 
 /* ============================== registration table ====================== */

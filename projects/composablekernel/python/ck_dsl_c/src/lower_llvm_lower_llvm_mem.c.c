@@ -180,10 +180,11 @@ static void op_memref_global_atomic_add_f32(ckc_lower_t *L, const ckc_op_t *op) 
     ckc_ll_emitf(L,
         "  %s = getelementptr inbounds float, ptr addrspace(1) %s, i32 %s",
         gep, ckc_ll_operand(L, ptr), ckc_ll_operand(L, idx));
-    /* Python freshes "a" but does not use the returned name (the atomicrmw
-     * result goes to op.result). Match the counter bump for byte-identical
-     * fresh-name sequencing. */
-    (void)ckc_ll_fresh(L, "a");
+    /* Python: tmp = self._fresh("a"); the atomicrmw result goes to this fresh
+     * local, NOT to op.result (this op has no result -- has_result == false).
+     * Capture the fresh name and use it (using ll_res here would deref a NULL
+     * results[0] and crash). */
+    const char *tmp = ckc_ll_fresh(L, "a");
     L->needs_fp_atomic_md = true;
     ckc_ll_emitf(L,
         "  %s = atomicrmw fadd ptr addrspace(1) %s, "
@@ -191,7 +192,7 @@ static void op_memref_global_atomic_add_f32(ckc_lower_t *L, const ckc_op_t *op) 
         ", !amdgpu.no.fine.grained.memory !1"
         ", !amdgpu.no.remote.memory !1"
         ", !amdgpu.ignore.denormal.mode !1",
-        ll_res(op), gep, ckc_ll_operand(L, val));
+        tmp, gep, ckc_ll_operand(L, val));
 }
 
 static void op_memref_global_atomic_add_pk_bf16(ckc_lower_t *L,
@@ -399,7 +400,25 @@ static void op_tile_smem_load_vN(ckc_lower_t *L, const ckc_op_t *op) {
     const char *base = ckc_ll_fresh(L, "smem.base");
     const char *idx_strs = ll_smem_gidx(L, op, 1, op->num_operands);
     const char *elem_ty = ckc_ll_llvm_type(L, op->results[0]->type->elem);
-    int elem_bytes = ll_elem_bytes(op->results[0]->type->elem->name);
+    /* Python _op_tile_smem_load_vN uses a LOCAL dict that, unlike the other
+     * handlers, does NOT list fp8e4m3 / bf8e5m2 -- so they fall to the default
+     * 2 (not 1). Replicate that exact dict here rather than the shared
+     * ll_elem_bytes (which maps fp8/bf8 -> 1), or the fp8 down-GEMM LDS reads
+     * emit `align 16` instead of the Python `align 32`.
+     *   {"i8":1,"f16":2,"bf16":2,"i32":4,"f32":4,"i64":8}.get(name, 2) */
+    const char *en = op->results[0]->type->elem->name;
+    int elem_bytes = 2;
+    if (en) {
+        if (strcmp(en, "i8") == 0) {
+            elem_bytes = 1;
+        } else if (strcmp(en, "f16") == 0 || strcmp(en, "bf16") == 0) {
+            elem_bytes = 2;
+        } else if (strcmp(en, "i32") == 0 || strcmp(en, "f32") == 0) {
+            elem_bytes = 4;
+        } else if (strcmp(en, "i64") == 0) {
+            elem_bytes = 8;
+        }
+    }
     int64_t align = vec * elem_bytes;
     ckc_ll_emitf(L,
         "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s",
