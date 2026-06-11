@@ -71,15 +71,15 @@ void testing_spmv_coo_bad_arg(const Arguments& argus)
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
     hipsparseHandle_t              handle = unique_ptr_handle->handle;
 
-    auto drow_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * safe_size), device_free};
-    auto dcol_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * safe_size), device_free};
+    auto drow_managed = hipsparse_unique_ptr{device_malloc(sizeof(I) * safe_size), device_free};
+    auto dcol_managed = hipsparse_unique_ptr{device_malloc(sizeof(I) * safe_size), device_free};
     auto dval_managed = hipsparse_unique_ptr{device_malloc(sizeof(A) * safe_size), device_free};
     auto dx_managed   = hipsparse_unique_ptr{device_malloc(sizeof(X) * safe_size), device_free};
     auto dy_managed   = hipsparse_unique_ptr{device_malloc(sizeof(Y) * safe_size), device_free};
     auto dbuf_managed = hipsparse_unique_ptr{device_malloc(sizeof(char) * safe_size), device_free};
 
-    int*  drow = (int*)drow_managed.get();
-    int*  dcol = (int*)dcol_managed.get();
+    I*    drow = (I*)drow_managed.get();
+    I*    dcol = (I*)dcol_managed.get();
     A*    dval = (A*)dval_managed.get();
     X*    dx   = (X*)dx_managed.get();
     Y*    dy   = (Y*)dy_managed.get();

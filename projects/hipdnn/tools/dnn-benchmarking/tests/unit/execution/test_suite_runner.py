@@ -14,6 +14,7 @@ from dnn_benchmarking.execution.suite_runner import (
     _resolve_engine_name,
     _get_reference_provider,
     _check_correctness,
+    _run_timed_pytorch_reference,
     set_plugin_path,
 )
 from dnn_benchmarking.config.benchmark_config import MetricsConfig, SuiteConfig
@@ -62,7 +63,7 @@ def _make_config(**overrides):
         "warmup_iters": 2,
         "benchmark_iters": 3,
         "seed": 42,
-        "gpu_backend": "none",
+        "timing_backend": "none",
     }
     defaults.update(overrides)
     return SuiteConfig(**defaults)
@@ -439,7 +440,7 @@ class TestSuiteConfigValidation:
         assert config.rtol is None
         assert config.atol is None
         assert config.tolerance_override is None
-        assert config.gpu_backend == "auto"
+        assert config.timing_backend == "auto"
         assert config.reference_provider == "none"
 
     def test_negative_warmup_raises(self):
@@ -471,21 +472,21 @@ class TestSuiteConfigValidation:
         config = SuiteConfig(verbose=True)
         assert config.verbose is True
 
-    def test_invalid_gpu_backend_raises(self):
-        with pytest.raises(ValueError, match="gpu_backend"):
-            SuiteConfig(gpu_backend="bogus")
+    def test_invalid_timing_backend_raises(self):
+        with pytest.raises(ValueError, match="timing_backend"):
+            SuiteConfig(timing_backend="bogus")
 
     def test_invalid_reference_provider_raises(self):
         with pytest.raises(ValueError, match="reference_provider"):
             SuiteConfig(reference_provider="not_a_real_provider")
 
-    def test_default_gpu_backend_and_reference_provider_accepted(self):
+    def test_default_timing_backend_and_reference_provider_accepted(self):
         config = SuiteConfig()
-        assert config.gpu_backend == "auto"
+        assert config.timing_backend == "auto"
         assert config.reference_provider == "none"
-        for backend in ("torch", "auto", "none"):
-            SuiteConfig(gpu_backend=backend)
-        for provider in ("none", "pytorch", "cpu_plugin"):
+        for backend in ("hip", "auto", "none"):
+            SuiteConfig(timing_backend=backend)
+        for provider in ("none", "pytorch"):
             SuiteConfig(reference_provider=provider)
 
 
@@ -811,51 +812,6 @@ class TestCorrectnessChecking:
         assert r.correctness.execution_success is False
         assert r.correctness.tolerance_match is None
 
-    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
-    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
-    @patch("dnn_benchmarking.execution.suite_runner._check_correctness")
-    @patch("dnn_benchmarking.execution.suite_runner.Executor")
-    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
-    def test_reference_outputs_computed_once_for_multiple_engines(
-        self,
-        mock_bm_cls,
-        mock_exec_cls,
-        mock_check_corr,
-        mock_get_ref,
-        mock_resolve_name,
-    ):
-        """Reference provider runs once per graph and feeds every engine."""
-        mock_resolve_name.side_effect = lambda eid: f"engine_{eid}"
-        ref_outputs = {
-            2: ReferenceOutput(data=np.array([1.0], dtype=np.float32), tensor_uid=2)
-        }
-        ref_provider = MagicMock()
-        ref_provider.name = "cpu_plugin"
-        ref_provider.compute_reference.return_value = ref_outputs
-        mock_get_ref.return_value = ref_provider
-        mock_check_corr.return_value = CorrectnessResult(
-            execution_success=True,
-            tolerance_match=True,
-            rtol=1e-5,
-            atol=1e-6,
-        )
-        mock_exec_cls.side_effect = _make_exec_factory(engine_ids=[1, 2])
-        mock_bm_cls.return_value = _make_bm_mock()
-
-        result = run_graph_all_providers(
-            graph_path=Path("test.json"),
-            graph_json=_make_graph_json(),
-            tensor_infos=[_make_tensor_info(1), _make_tensor_info(2, is_output=True)],
-            config=_make_config(reference_provider="cpu_plugin"),
-            handle=MagicMock(),
-        )
-
-        assert [r.engine_id for r in result.results] == [1, 2]
-        assert ref_provider.compute_reference.call_count == 1
-        assert mock_check_corr.call_count == 2
-        for call_args in mock_check_corr.call_args_list:
-            assert call_args.args[3] is ref_outputs
-
     @patch("dnn_benchmarking.execution.suite_runner._run_timed_pytorch_reference")
     @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
@@ -970,6 +926,50 @@ class TestCorrectnessChecking:
         assert result.results[0].status == "skipped"
         assert ref_provider.compute_reference.call_count == 1
         assert mock_check_corr.call_args.args[3] is ref_outputs
+
+    @patch("dnn_benchmarking.execution.pytorch_executor.PyTorchCudaExecutor")
+    @patch("dnn_benchmarking.execution.pytorch_buffer_manager.PyTorchCudaBufferManager")
+    def test_timed_pytorch_reference_honors_disabled_timing(
+        self,
+        mock_buffer_manager_cls,
+        mock_pytorch_executor_cls,
+    ):
+        """PyTorch reference rows honor SuiteConfig timing_backend='none'."""
+        executor = MagicMock()
+        executor.init_time_ms = 0.5
+        bench_result = MagicMock()
+        bench_result.e2e_timings = [1.0, 2.0]
+        bench_result.kernel_timings = None
+        bench_result.has_kernel_timings = False
+        executor.benchmark.return_value = bench_result
+        mock_pytorch_executor_cls.return_value = executor
+
+        buffer_manager = _make_bm_mock()
+        buffer_manager.get_tensors.return_value = {}
+        buffer_manager.get_output_tensors.return_value = []
+        mock_buffer_manager_cls.return_value = buffer_manager
+
+        result = _run_timed_pytorch_reference(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            graph_name="test_graph",
+            tensor_infos=[],
+            config=_make_config(
+                reference_provider="pytorch",
+                timing_backend="none",
+                metrics=MetricsConfig(tier="off"),
+            ),
+            input_data={},
+            analytical_flops=None,
+            analytical_flops_partial=False,
+            analytical_io_bytes=None,
+        )
+
+        mock_pytorch_executor_cls.assert_called_once()
+        assert mock_pytorch_executor_cls.call_args.kwargs["timing_backend"] == "none"
+        assert result.result.e2e_stats is not None
+        assert result.result.gpu_kernel_stats is None
+        assert result.result.status == "success"
 
 
 class TestCheckCorrectnessOutputCount:

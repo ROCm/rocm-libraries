@@ -29,17 +29,17 @@ namespace rocRollerTest
     struct FloatReference<rocRoller::FP6> // E2M3
     {
         // clang-format off
-        static constexpr auto Values = std::to_array<float>({
-            0.000,  0.125,   0.25,   0.375,   0.50,   0.625,   0.75,   0.875,
-            1.000,  1.125,   1.25,   1.375,   1.50,   1.625,   1.75,   1.875,
-            2.000,  2.250,   2.50,   2.750,   3.00,   3.250,   3.50,   3.750,
-            4.000,  4.500,   5.00,   5.500,   6.00,   6.500,   7.00,   7.500,
-
-           -0.000, -0.125,  -0.25,  -0.375,  -0.50,  -0.625,  -0.75,  -0.875,
-           -1.000, -1.125,  -1.25,  -1.375,  -1.50,  -1.625,  -1.75,  -1.875,
-           -2.000, -2.250,  -2.50,  -2.750,  -3.00,  -3.250,  -3.50,  -3.750,
-           -4.000, -4.500,  -5.00,  -5.500,  -6.00,  -6.500,  -7.00,  -7.500
-        });
+         static constexpr auto Values = std::to_array<float>({
+             0.000,  0.125,   0.25,   0.375,   0.50,   0.625,   0.75,   0.875,
+             1.000,  1.125,   1.25,   1.375,   1.50,   1.625,   1.75,   1.875,
+             2.000,  2.250,   2.50,   2.750,   3.00,   3.250,   3.50,   3.750,
+             4.000,  4.500,   5.00,   5.500,   6.00,   6.500,   7.00,   7.500,
+ 
+            -0.000, -0.125,  -0.25,  -0.375,  -0.50,  -0.625,  -0.75,  -0.875,
+            -1.000, -1.125,  -1.25,  -1.375,  -1.50,  -1.625,  -1.75,  -1.875,
+            -2.000, -2.250,  -2.50,  -2.750,  -3.00,  -3.250,  -3.50,  -3.750,
+            -4.000, -4.500,  -5.00,  -5.500,  -6.00,  -6.500,  -7.00,  -7.500
+         });
         // clang-format on
     };
 
@@ -47,25 +47,25 @@ namespace rocRollerTest
     struct FloatReference<rocRoller::BF6> // E3M2
     {
         // clang-format off
-        static constexpr auto Values = std::to_array<float>({
-            0.00,    0.0625,    0.125,    0.1875,
-            0.25,    0.3125,    0.375,    0.4375,
-            0.50,    0.6250,    0.750,    0.8750,
-            1.00,    1.2500,    1.500,    1.7500,
-            2.00,    2.5000,    3.000,    3.5000,
-            4.00,    5.0000,    6.000,    7.0000,
-            8.00,   10.0000,   12.000,   14.0000,
-           16.00,   20.0000,   24.000,   28.0000,
-
-           -0.00,   -0.0625,   -0.125,   -0.1875,
-           -0.25,   -0.3125,   -0.375,   -0.4375,
-           -0.50,   -0.6250,   -0.750,   -0.8750,
-           -1.00,   -1.2500,   -1.500,   -1.7500,
-           -2.00,   -2.5000,   -3.000,   -3.5000,
-           -4.00,   -5.0000,   -6.000,   -7.0000,
-           -8.00,  -10.0000,  -12.000,  -14.0000,
-          -16.00,  -20.0000,  -24.000,  -28.0000
-        });
+         static constexpr auto Values = std::to_array<float>({
+             0.00,    0.0625,    0.125,    0.1875,
+             0.25,    0.3125,    0.375,    0.4375,
+             0.50,    0.6250,    0.750,    0.8750,
+             1.00,    1.2500,    1.500,    1.7500,
+             2.00,    2.5000,    3.000,    3.5000,
+             4.00,    5.0000,    6.000,    7.0000,
+             8.00,   10.0000,   12.000,   14.0000,
+            16.00,   20.0000,   24.000,   28.0000,
+ 
+            -0.00,   -0.0625,   -0.125,   -0.1875,
+            -0.25,   -0.3125,   -0.375,   -0.4375,
+            -0.50,   -0.6250,   -0.750,   -0.8750,
+            -1.00,   -1.2500,   -1.500,   -1.7500,
+            -2.00,   -2.5000,   -3.000,   -3.5000,
+            -4.00,   -5.0000,   -6.000,   -7.0000,
+            -8.00,  -10.0000,  -12.000,  -14.0000,
+           -16.00,  -20.0000,  -24.000,  -28.0000
+         });
         // clang-format on
     };
 
@@ -76,9 +76,9 @@ namespace rocRollerTest
     {
     public:
         /*
-         * Packs F6 to F6x16 on CPU, buffer_load that into F6x16 to
-         * GPU, buffer_store to CPU
-         */
+          * Packs F6 to F6x16 on CPU, buffer_load that into F6x16 to
+          * GPU, buffer_store to CPU
+          */
         void genF6x16BufferLoadAndStore(int num_f6, DataType F6x16Type)
         {
             int N = (num_f6 / numF6PerF6x16) * numBytesPerF6x16;
@@ -129,8 +129,10 @@ namespace rocRollerTest
 
                 Expression::ExpressionPtr bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
                 bufferExpr = BufferDescriptor::SetDefaults(bufferExpr, m_context);
-                bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_a->expression());
-                bufferExpr = BufferDescriptor::SetSize(bufferExpr, Expression::literal(N));
+                bufferExpr
+                    = BufferDescriptor::SetBasePointer(bufferExpr, s_a->expression(), m_context);
+                bufferExpr
+                    = BufferDescriptor::SetSize(bufferExpr, Expression::literal(N), m_context);
                 bufferExpr = BufferDescriptor::SetOptions(bufferExpr,
                                                           Expression::literal(131072)); //0x00020000
 
@@ -144,7 +146,8 @@ namespace rocRollerTest
                 co_yield m_context->mem()->loadBuffer(
                     v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
 
-                bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_result->expression());
+                bufferExpr = BufferDescriptor::SetBasePointer(
+                    bufferExpr, s_result->expression(), m_context);
                 co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
 
                 co_yield m_context->mem()->storeBuffer(
@@ -157,9 +160,9 @@ namespace rocRollerTest
         }
 
         /**
-         * Packs F6 to F6x16 on CPU, global_load that into F6x16 to GPU,
-         * global_store to CPU
-         */
+          * Packs F6 to F6x16 on CPU, global_load that into F6x16 to GPU,
+          * global_store to CPU
+          */
         void genF6x16GlobalLoadAndStore(int num_f6, DataType F6x16Type)
         {
             int  N = (num_f6 / numF6PerF6x16) * numBytesPerF6x16;
@@ -529,39 +532,39 @@ namespace rocRollerTest
         }
 
         // clang-format off
-        std::array fp6 = {0.125f,  /* 000001 */
-                          0.25f,   /* 000010 */
-                          0.375f,  /* 000011 */
-                          0.5f,    /* 000100 */
-                          0.625f,  /* 000101 */
-                          0.75f,   /* 000110 */
-                          0.875f,  /* 000111 */
-                          1.f,     /* 001000 */
-                          1.125f,  /* 001001 */
-                          1.25f,   /* 001010 */
-                          1.375f,  /* 001011 */
-                          1.5f,    /* 001100 */
-                          1.625f,  /* 001101 */
-                          1.75f,   /* 001110 */
-                          1.875f,  /* 001111 */
-                          2.f};    /* 010000 */
-
-        std::array bf6 = {0.0625f, /* 000001 */
-                          0.125f,  /* 000010 */
-                          0.1875f, /* 000011 */
-                          0.25f,   /* 000100 */
-                          0.3125f, /* 000101 */
-                          0.375f,  /* 000110 */
-                          0.4375f, /* 000111 */
-                          0.50f,   /* 001000 */
-                          0.625f,  /* 001001 */
-                          0.75f,   /* 001010 */
-                          0.875f,  /* 001011 */
-                          1.f,     /* 001100 */
-                          1.25f,   /* 001101 */
-                          1.5f,    /* 001110 */
-                          1.75f,   /* 001111 */
-                          2.f};    /* 010000 */
+         std::array fp6 = {0.125f,  /* 000001 */
+                           0.25f,   /* 000010 */
+                           0.375f,  /* 000011 */
+                           0.5f,    /* 000100 */
+                           0.625f,  /* 000101 */
+                           0.75f,   /* 000110 */
+                           0.875f,  /* 000111 */
+                           1.f,     /* 001000 */
+                           1.125f,  /* 001001 */
+                           1.25f,   /* 001010 */
+                           1.375f,  /* 001011 */
+                           1.5f,    /* 001100 */
+                           1.625f,  /* 001101 */
+                           1.75f,   /* 001110 */
+                           1.875f,  /* 001111 */
+                           2.f};    /* 010000 */
+ 
+         std::array bf6 = {0.0625f, /* 000001 */
+                           0.125f,  /* 000010 */
+                           0.1875f, /* 000011 */
+                           0.25f,   /* 000100 */
+                           0.3125f, /* 000101 */
+                           0.375f,  /* 000110 */
+                           0.4375f, /* 000111 */
+                           0.50f,   /* 001000 */
+                           0.625f,  /* 001001 */
+                           0.75f,   /* 001010 */
+                           0.875f,  /* 001011 */
+                           1.f,     /* 001100 */
+                           1.25f,   /* 001101 */
+                           1.5f,    /* 001110 */
+                           1.75f,   /* 001111 */
+                           2.f};    /* 010000 */
         // clang-format on
 
         auto testPacking = [&](auto& floats, auto fmt) {
