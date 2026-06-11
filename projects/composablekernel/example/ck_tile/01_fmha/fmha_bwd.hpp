@@ -18,35 +18,16 @@
 #include <utility>
 #include <variant>
 
-// Helper for graph capture: stores closure data for graph replay
-namespace {
-struct FmhaBwdGraphClosure
-{
-    void* pin_w_ptr;
-    const int* seqstart_q_ptr;
-    const int* seqstart_k_ptr;
-    // MUST be a COPY of pack_workspace_host_, not a reference!
-    // The launcher object is destroyed after graph capture.
-    std::function<void(void*, const int*, const int*)> pack_fn_copy;
-
-    static void invoke(void* ud)
-    {
-        auto* data = static_cast<FmhaBwdGraphClosure*>(ud);
-        try
-        {
-            data->pack_fn_copy(data->pin_w_ptr, data->seqstart_q_ptr, data->seqstart_k_ptr);
-        }
-        catch(const std::exception& e)
-        {
-            std::cerr << "fmha_bwd_launcher: pack_workspace_host threw: " << e.what() << '\n';
-        }
-        catch(...)
-        {
-            std::cerr << "fmha_bwd_launcher: pack_workspace_host threw unknown\n";
-        }
-    }
-};
-} // namespace
+// Function pointer type for workspace packing (no captures, points to code segment)
+using PrepareWorkspaceHostFunc = void (*)(void*,      // host_ws
+                                          int,        // batch
+                                          int,        // hdim_q
+                                          int,        // nhead_q
+                                          int,        // seqlen_q
+                                          int,        // seqlen_k
+                                          const int*, // seqstart_q
+                                          const int*  // seqstart_k
+);
 
 struct FmhaBwdFp32
 {
@@ -618,6 +599,56 @@ float fmha_bwd(const fmha_bwd_traits&, fmha_bwd_args, const ck_tile::stream_conf
 
 struct fmha_bwd_launcher
 {
+    // POD closure for graph capture (trivially destructible, no heap allocation)
+    struct GraphClosure
+    {
+        PrepareWorkspaceHostFunc func_ptr;
+        void* pin_w_ptr;
+        const int* seqstart_q_ptr;
+        const int* seqstart_k_ptr;
+        int batch;
+        int hdim_q;
+        int nhead_q;
+        int seqlen_q;
+        int seqlen_k;
+
+        static void invoke(void* ud)
+        {
+            auto* closure = static_cast<GraphClosure*>(ud);
+            if(closure->func_ptr)
+            {
+                // Callback runs on the HIP driver helper thread across a C ABI boundary;
+                // any exception escaping it would call std::terminate.
+                try
+                {
+                    closure->func_ptr(closure->pin_w_ptr,
+                                      closure->batch,
+                                      closure->hdim_q,
+                                      closure->nhead_q,
+                                      closure->seqlen_q,
+                                      closure->seqlen_k,
+                                      closure->seqstart_q_ptr,
+                                      closure->seqstart_k_ptr);
+                }
+                catch(const std::exception& e)
+                {
+                    // The H2D queued after this callback will copy indeterminate
+                    // metadata to device and the kernel will produce wrong results;
+                    // unlikely in practice since pack_workspace_host only throws on
+                    // precondition violations.
+                    std::cerr << "fmha_bwd_launcher: pack_workspace_host threw: " << e.what()
+                              << '\n';
+                }
+                catch(...)
+                {
+                    std::cerr << "fmha_bwd_launcher: pack_workspace_host threw unknown\n";
+                }
+            }
+        }
+    };
+    static_assert(std::is_trivially_destructible_v<GraphClosure>,
+                  "GraphClosure must be trivially destructible for placement-new without dtor");
+
     std::function<float(fmha_bwd_args, const ck_tile::stream_config&)> run{
         [](fmha_bwd_args, const ck_tile::stream_config&) {
             std::cerr << "fmha_bwd: no kernel found for given traits, skipping run\n";
@@ -633,8 +664,24 @@ struct fmha_bwd_launcher
     ~fmha_bwd_launcher() noexcept { schedule_pin_staging_release(); }
 
     // Stream-async: zero dq_acc, D2H seqstart, host-pack metadata, H2D into device_ws.
+    //
     // `pinned_host_alloc` returns a shared_ptr to a pinned host buffer; its deleter
     // is invoked on the stream tail after the H2D completes.
+    //
+    // REQUIRED PRECONDITIONS for `pinned_host_alloc`:
+    //
+    // 1. **Capture-safe allocation**: The allocator must NOT call synchronizing APIs
+    //    (e.g., bare hipHostMalloc) during active stream capture, as these invalidate
+    //    the capture and cause hipStreamEndCapture to fail. Use a caching allocator
+    //    that serves from cache during capture (e.g., PyTorch CachingHostAllocator).
+    //
+    // 2. **Buffer lifetime in graph mode**: In graph capture mode (detected via
+    //    hipStreamIsCapturing), the returned buffer is NOT freed automatically after
+    //    the H2D completes. The caller MUST keep the buffer alive for the graph's
+    //    entire lifetime (until hipGraphDestroy), otherwise graph replay will read
+    //    from freed memory. In normal (non-graph) mode, the buffer is automatically
+    //    freed on the stream tail after the H2D.
+    //
     void prepare_workspace_async( //
         void* device_ws_ptr,
         const int* seqstart_q_dev,
@@ -671,17 +718,13 @@ struct fmha_bwd_launcher
         HIP_CHECK_ERROR(hipStreamIsCapturing(stream, &capture_status));
         const bool is_graph_capture = (capture_status == hipStreamCaptureStatusActive);
 
-        // Allocate pinned buffer (with extra aligned space for closure in graph mode)
-        size_t total_bytes = data_size;
-        if(is_graph_capture)
-        {
-            // Align data_size up to closure alignment, then add closure size
-            constexpr size_t closure_align = alignof(FmhaBwdGraphClosure);
-            constexpr size_t closure_size  = sizeof(FmhaBwdGraphClosure);
-            const size_t aligned_data      = (data_size + closure_align - 1) & ~(closure_align - 1);
-            total_bytes                    = aligned_data + closure_size;
-        }
-        auto pin_base = pinned_host_alloc(total_bytes);
+        // Allocate pinned buffer with extra aligned space for closure
+        // Both modes use placement new for closure (POD, trivially destructible)
+        constexpr size_t closure_align = alignof(GraphClosure);
+        constexpr size_t closure_size  = sizeof(GraphClosure);
+        const size_t aligned_data      = (data_size + closure_align - 1) & ~(closure_align - 1);
+        const size_t total_bytes       = aligned_data + closure_size;
+        auto pin_base                  = pinned_host_alloc(total_bytes);
 
         if(needs_zero_dq_acc_ && workspace_size > host_ws_size_)
             HIP_CHECK_ERROR(hipMemsetAsync(static_cast<char*>(device_ws_ptr) + host_ws_size_,
@@ -708,88 +751,56 @@ struct fmha_bwd_launcher
                 pin_k, seqstart_k_dev, seqstart_bytes, hipMemcpyDeviceToHost, stream));
         }
 
-        if(is_graph_capture)
-        {
-            // === GRAPH CAPTURE MODE ===
-            // Use placement new to construct closure in pinned buffer (with proper alignment).
-            constexpr size_t closure_align = alignof(FmhaBwdGraphClosure);
-            const size_t aligned_offset    = (data_size + closure_align - 1) & ~(closure_align - 1);
-            void* closure_addr             = base + aligned_offset;
+        // === UNIFIED PATH: Both modes use placement new for POD closure ===
+        // Construct closure in aligned location within pinned buffer (all POD, trivially
+        // destructible)
+        void* closure_addr = base + aligned_data;
+        auto* closure      = new(closure_addr) GraphClosure{
+            prepare_ws_func_, // Function pointer (points to code segment, always valid)
+            pin_w,
+            seqstart_q_pinned,
+            seqstart_k_pinned,
+            batch_, // Copy captured data (independent of launcher lifetime)
+            hdim_q_,
+            nhead_q_,
+            seqlen_q_,
+            seqlen_k_};
 
-            // Construct closure in-place (destructor not called - cleanup via buffer release)
-            auto* graph_data = new(closure_addr) FmhaBwdGraphClosure{
-                pin_w,
-                seqstart_q_pinned,
-                seqstart_k_pinned,
-                pack_workspace_host_ // COPY the std::function (launcher object will be destroyed)
-            };
-
-            HIP_CHECK_ERROR(hipLaunchHostFunc(stream, FmhaBwdGraphClosure::invoke, graph_data));
-
-            // DON'T call schedule_pin_staging_release() - would be captured and cause double-free.
-            // DON'T move/modify pin_base - it's owned by the caller who must keep it alive for
-            // the graph's lifetime. The closure embedded in pin_base references pin_w/seqstart
-            // pointers which remain valid as long as pin_base exists.
-        }
-        else
-        {
-            // === NORMAL MODE (no graph capture) ===
-            auto pack_closure =
-                std::make_unique<std::function<void()>>([=, fn = pack_workspace_host_]() {
-                    fn(pin_w, seqstart_q_pinned, seqstart_k_pinned);
-                });
-            // Callback runs on the HIP driver helper thread across a C ABI boundary;
-            // any exception escaping it would call std::terminate.
-            HIP_CHECK_ERROR(hipLaunchHostFunc(
-                stream,
-                [](void* ud) {
-                    std::unique_ptr<std::function<void()>> c{
-                        static_cast<std::function<void()>*>(ud)};
-                    try
-                    {
-                        (*c)();
-                    }
-                    catch(const std::exception& e)
-                    {
-                        // The H2D queued after this callback will copy indeterminate
-                        // metadata to device and the kernel will produce wrong results;
-                        // unlikely in practice since pack_workspace_host_ only throws on
-                        // precondition violations.
-                        std::cerr << "fmha_bwd_launcher: pack_workspace_host threw: " << e.what()
-                                  << '\n';
-                    }
-                    catch(...)
-                    {
-                        std::cerr << "fmha_bwd_launcher: pack_workspace_host threw unknown\n";
-                    }
-                },
-                pack_closure.get()));
-            // Ownership transferred to the callback only after a successful launch.
-            pack_closure.release();
-        }
+        HIP_CHECK_ERROR(hipLaunchHostFunc(stream, GraphClosure::invoke, closure));
 
         HIP_CHECK_ERROR(
             hipMemcpyAsync(device_ws_ptr, pin_w, host_ws_size_, hipMemcpyHostToDevice, stream));
 
-        // Release any previous in-flight buffer before taking a new one (normal mode only).
         if(!is_graph_capture)
         {
-            schedule_pin_staging_release();
+            // Normal mode: transfer ownership of pinned buffer and schedule release.
+            // The H2D memcpy above copies host-prepared metadata to device workspace.
+            // Pinned buffer must stay alive until H2D completes, so we schedule its
+            // release on the stream tail (via hipLaunchHostFunc callback).
+            schedule_pin_staging_release(); // Release any previous in-flight buffer first
             pin_staging_    = std::move(pin_base);
             release_stream_ = stream;
         }
+        // Graph mode: pin_base stays owned by caller (via shared_ptr ref-count).
+        // Caller must keep it alive for the graph's lifetime. Closure and data pointers
+        // within pin_base remain valid as long as caller holds pin_base.
     }
 
     private:
     fmha_bwd_traits traits_{};
     size_t host_ws_size_    = 0;
     bool needs_zero_dq_acc_ = false;
-    // Pure CPU; safe to invoke from a hipLaunchHostFunc callback.
-    std::function<void(void* host_ws, const int* seqstart_q, const int* seqstart_k)>
-        pack_workspace_host_{[](void*, const int*, const int*) {
-            std::cerr
-                << "fmha_bwd: no kernel found for given traits, skipping pack_workspace_host\n";
-        }};
+
+    // Function pointer (points to code segment, survives launcher destruction)
+    PrepareWorkspaceHostFunc prepare_ws_func_ = nullptr;
+
+    // Captured data (copied to closure in graph mode)
+    int batch_    = 0;
+    int hdim_q_   = 0;
+    int nhead_q_  = 0;
+    int seqlen_q_ = 0;
+    int seqlen_k_ = 0;
+
     std::shared_ptr<void> pin_staging_;
     hipStream_t release_stream_ = nullptr;
 
@@ -835,15 +846,26 @@ struct fmha_bwd_launcher
                 t.is_group_mode ? t.seqlen_q : t.batch * t.seqlen_q;
             device_ws_size = fmha_bwd_dq_dk_dv_dq_ws_device_upper_bound_<T1, Arch>(
                 t.batch, t.hdim_q, t.nhead_q, total_seqlen_q_padded, t.max_seqlen_k);
-            pack_workspace_host_ = [batch    = t.batch,
-                                    hdim_q   = t.hdim_q,
-                                    nhead_q  = t.nhead_q,
-                                    seqlen_q = t.seqlen_q,
-                                    seqlen_k = t.seqlen_k //
-            ](void* host_ws, const int* seqstart_q, const int* seqstart_k) {
+
+            // Store function pointer (no-capture lambda converts to function pointer)
+            prepare_ws_func_ = [](void* host_ws,
+                                  int batch,
+                                  int hdim_q,
+                                  int nhead_q,
+                                  int seqlen_q,
+                                  int seqlen_k,
+                                  const int* seqstart_q,
+                                  const int* seqstart_k) {
                 fmha_bwd_dq_dk_dv_dq_prepare_ws_host_<T1, Arch>(
                     host_ws, batch, hdim_q, nhead_q, seqlen_q, seqlen_k, seqstart_q, seqstart_k);
             };
+
+            // Store captured data as member variables
+            batch_    = t.batch;
+            hdim_q_   = t.hdim_q;
+            nhead_q_  = t.nhead_q;
+            seqlen_q_ = t.seqlen_q;
+            seqlen_k_ = t.seqlen_k;
         }
         workspace_size     = host_ws_size_ + device_ws_size;
         needs_zero_dq_acc_ = fmha_bwd_dq_dk_dv_needs_zero_dq_acc_<T1, Arch>();
