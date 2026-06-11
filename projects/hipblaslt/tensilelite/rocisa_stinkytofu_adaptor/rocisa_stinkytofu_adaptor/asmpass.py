@@ -21,31 +21,105 @@
 ################################################################################
 """Shim for ``rocisa.asmpass``.
 
-What this file is:
-    Mirrors ``rocisa/rocisa/src/pass/pass.cpp`` (``init_pass``) — the
-    rocIsa optimisation pass list and per-pass options.
+Python port of ``rocisa/rocisa/include/pass.hpp`` + ``rocisa/src/pass/pass.cpp``.
+All passes mutate the adaptor ``KernelBody`` / ``Module`` tree in place (no
+``_stinkytofu`` dependency).
 
-What it does (real):
-    - None.
+Implemented:
+    - ``rocIsaPassOption`` / ``rocIsaPassResult`` / ``rocIsaPass``
+    - ``macroToInstruction``, ``compositeToInstruction`` (no-op until
+      ``CompositeInstruction`` exposes ``getInstructions``),
+      ``convertTextVariablesToRegisters``
+    - ``getActFuncModuleName`` / ``getActFuncBranchModuleName``
 
-Not yet done (dummy):
-    - ``getActFuncModuleName``, ``getActFuncBranchModuleName``
-    - ``rocIsaPass``, ``rocIsaPassOption``, ``rocIsaPassResult``
-
-logicalIR correspondence:
-    Optimisation lives in ``StinkyAsmModule::runOptimizationPipeline`` —
-    a single module-level call, not a named pass list.
+Deferred (no-op or stub):
+    - ``removeDuplicatedFunction`` (activation de-dup)
+    - ``buildGraph`` / ``removeDuplicateAssignment`` when ``doOpt()`` is true
+    - ``insertDelayAlu``
+    - ``getCycles`` returns ``0`` (matches native gfx1250 unsupported path)
 """
 
 from __future__ import annotations
 
-from ._dummy import make_dummy_class, make_dummy_func
+from typing import Any
 
-_P = "rocisa.asmpass"
+from . import code as _code
+from ._pass_impl import (
+    build_graph_and_remove_dup_assign,
+    composite_to_instruction,
+    convert_text_variables_to_registers,
+    get_act_func_branch_module_name,
+    get_act_func_module_name,
+    get_cycles,
+    insert_delay_alu,
+    macro_to_instruction,
+    remove_duplicated_function,
+)
 
 
-getActFuncModuleName = make_dummy_func(f"{_P}.getActFuncModuleName")
-getActFuncBranchModuleName = make_dummy_func(f"{_P}.getActFuncBranchModuleName")
-rocIsaPass = make_dummy_func(f"{_P}.rocIsaPass")
-rocIsaPassOption = make_dummy_class(f"{_P}.rocIsaPassOption")
-rocIsaPassResult = make_dummy_class(f"{_P}.rocIsaPassResult")
+class rocIsaPassOption:
+    """Mirror ``rocisa::rocIsaPassOption`` (``pass.hpp``)."""
+
+    __slots__ = (
+        "insertDelayAlu",
+        "removeDupFunc",
+        "removeDupAssign",
+        "getCycles",
+        "numWaves",
+    )
+
+    def __init__(self) -> None:
+        self.insertDelayAlu: bool = False
+        self.removeDupFunc: bool = True
+        self.removeDupAssign: bool = True
+        self.getCycles: bool = True
+        self.numWaves: int = 0
+
+    def doOpt(self) -> bool:
+        return self.removeDupAssign
+
+
+class rocIsaPassResult:
+    """Mirror ``rocisa::rocIsaPassResult`` (``pass.hpp``)."""
+
+    __slots__ = ("cycles",)
+
+    def __init__(self) -> None:
+        self.cycles: int = -1
+
+
+def getActFuncModuleName(gwvw: int, sgpr: int, tmpVgpr: int, tmpSgpr: int) -> str:
+    return get_act_func_module_name(gwvw, sgpr, tmpVgpr, tmpSgpr)
+
+
+def getActFuncBranchModuleName() -> str:
+    return get_act_func_branch_module_name()
+
+
+def rocIsaPass(kernel: Any, option: rocIsaPassOption) -> rocIsaPassResult:
+    """Mirror ``rocisa::rocIsaPass`` (``pass.cpp``)."""
+    body = kernel.body
+    if body is None:
+        raise RuntimeError("Kernel body is empty")
+
+    result = rocIsaPassResult()
+
+    if option.removeDupFunc:
+        remove_duplicated_function(body)
+
+    macro_to_instruction(body)
+    composite_to_instruction(body)
+    convert_text_variables_to_registers(body)
+
+    if option.doOpt():
+        build_graph_and_remove_dup_assign(
+            body, int(kernel.totalVgprs), int(kernel.totalSgprs)
+        )
+
+    if option.insertDelayAlu:
+        insert_delay_alu(body)
+
+    if option.getCycles:
+        result.cycles = get_cycles(body, int(option.numWaves))
+
+    return result

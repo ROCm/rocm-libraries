@@ -62,12 +62,14 @@ What it does (real):
 Not yet done (dummy):
     - ``getGlcBitName`` / ``getSlcBitName`` (real; gfx1250 asm caps).
     - Counters: ``count*``, ``find*``, ``getMFMAs``.
+    - ``asmpass``: partial Python port of ``rocIsaPass`` (``macroToInstruction``,
+      ``convertTextVariablesToRegisters``, ``getCycles`` gfx1250→0); activation
+      de-dup, graph optimisation, and ``insertDelayAlu`` are stubs for now.
     - Interop hooks: ``hasStinkyTofuBackend``, ``isSupportedByStinkyTofu``,
-      ``getRegisteredArchKeys`` — delegate into the standalone
-      ``stinkytofu`` binding (``_stinkytofu.so``).
+      ``getRegisteredArchKeys`` — forward to the standalone ``stinkytofu``
+      binding (``_stinkytofu.so``).
     - Interop hooks still dummy: ``StinkyAsmModule``, ``toStinkyTofuModule``.
-    - Submodules still all-dummy: ``code``, ``label``,
-      ``instruction``, ``functions``, ``asmpass``, ``macro``.
+    - ``macro``: ``MacroVMagicDiv`` / ``PseudoRandomGenerator`` shims still dummy.
     - ``container``: register-reference layer + ``Container`` ABC,
       hardware tokens, ``MemTokenData``, and ``*Modifiers``.
 
