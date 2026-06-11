@@ -2199,19 +2199,10 @@ class KernelWriterAssembly(KernelWriter):
         sgprOffset += 4
         self.argLoader.setOffset(sgprOffset)
 
-    # Batch offset arguments for general batched mode
-    # Store kernarg offsets for on-demand loading (no persistent SGPRs needed)
-    if not kernel["ProblemType"]["GroupedGemm"]:
-      sgprOffset = self.argLoader.getOffset()
-      self.states.batchOffsetDKernArgOffset = sgprOffset
-      sgprOffset += 8   # 64-bit = 8 bytes
-      self.states.batchOffsetCKernArgOffset = sgprOffset
-      sgprOffset += 8
-      self.states.batchOffsetAKernArgOffset = sgprOffset
-      sgprOffset += 8
-      self.states.batchOffsetBKernArgOffset = sgprOffset
-      sgprOffset += 8
-      self.argLoader.setOffset(sgprOffset)
+    # Batch offset arguments for general batched mode are loaded on-demand from
+    # their kernarg byte offsets. Those offsets are recorded accurately by
+    # the signature builder (see Signature.py) into self.states.batchOffset*KernArgOffset,
+    # so nothing is computed here.
 
     return kernelArgs
 

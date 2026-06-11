@@ -260,16 +260,6 @@ class SignatureDefault(Signature):
             signature.addArg("skTiles",                            SVK.SIG_VALUE, "u32")
             userArgumentsInfo.gemmArgumentSize += 8
 
-        # Batch offset support for general batched mode (pointer array)
-        # Placed after core GEMM args (strides, alpha/beta, StreamK)
-        # Enabled for all SupportUserArgs kernels (offsets are 0 when not in General Batched mode)
-        if not kernel["ProblemType"]["GroupedGemm"]:
-            signature.addArg("batchOffsetD", SVK.SIG_VALUE, "u64")
-            signature.addArg("batchOffsetC", SVK.SIG_VALUE, "u64")
-            signature.addArg("batchOffsetA", SVK.SIG_VALUE, "u64")
-            signature.addArg("batchOffsetB", SVK.SIG_VALUE, "u64")
-            userArgumentsInfo.gemmArgumentSize += 32  # 4 offsets * 8 bytes each
-
         if kernel["ProblemType"]["UseScaleAB"]:
             signature.addArg("AddressScaleA", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg("AddressScaleB", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
@@ -330,19 +320,32 @@ class SignatureDefault(Signature):
             signature.addArg(    "AmaxWS",      SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg(    "AmaxSync",    SVK.SIG_GLOBALBUFFER, "u32",        "generic")
 
-        # Batch offset support for general batched mode (pointer array)
-        # Enabled for all SupportUserArgs kernels (offsets are 0 when not in General Batched mode)
-#        if not kernel["ProblemType"]["GroupedGemm"]:
-#            signature.addArg("batchOffsetD", SVK.SIG_VALUE, "u64")
-#            signature.addArg("batchOffsetC", SVK.SIG_VALUE, "u64")
-#            signature.addArg("batchOffsetA", SVK.SIG_VALUE, "u64")
-#            signature.addArg("batchOffsetB", SVK.SIG_VALUE, "u64")
-#            userArgumentsInfo.gemmArgumentSize += 32  # 4 offsets * 8 bytes each
-
         if (kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1):
             signature.addArg(    "dstD", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
             signature.addArg(               "Synchronizer", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg(               "GSUSync", SVK.SIG_VALUE,              "u32")
+
+        # Batch offset support for general batched mode (pointer array).
+        # Placed at the tail of the kernarg buffer (after the dstD/Synchronizer block)
+        # so no later arg is shifted; the host appends them in the same position,
+        # after the dstD/Synchronizer/seed block. Record each arg's kernarg byte
+        # offset so the assembly loads them from the accurate position rather
+        # than re-deriving it.
+        #
+        # signature.offset counts from the very first arg including the common header.
+        # The assembly loads these args with KernArgAddress already advanced past
+        # that header by commonArgsSize, so subtract it.
+        if not kernel["ProblemType"]["GroupedGemm"]:
+            commonArgsSize = userArgumentsInfo.commonArgsSize
+            writer.states.batchOffsetDKernArgOffset = signature.offset - commonArgsSize
+            signature.addArg("batchOffsetD", SVK.SIG_VALUE, "u64")
+            writer.states.batchOffsetCKernArgOffset = signature.offset - commonArgsSize
+            signature.addArg("batchOffsetC", SVK.SIG_VALUE, "u64")
+            writer.states.batchOffsetAKernArgOffset = signature.offset - commonArgsSize
+            signature.addArg("batchOffsetA", SVK.SIG_VALUE, "u64")
+            writer.states.batchOffsetBKernArgOffset = signature.offset - commonArgsSize
+            signature.addArg("batchOffsetB", SVK.SIG_VALUE, "u64")
+            userArgumentsInfo.gemmArgumentSize += 32  # 4 offsets * 8 bytes each
 
         activationType = ActivationType("all")
         for name in activationType.getAdditionalArgStringList():

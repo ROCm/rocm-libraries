@@ -1096,17 +1096,6 @@ namespace TensileLite
                                           autoGsuVal,
                                           ntab);
 
-        // Batch offset support for General Batched GEMM (SupportUserArgs kernels)
-        // Placed after core GEMM args (strides, alpha/beta, StreamK) to match kernel signature
-        //if(problemType.supportDeviceUserArguments && !problemType.groupedGemm)
-        if(!problemType.groupedGemm)
-        {
-            args.template append<int64_t>("batchOffsetD", inputs.batchOffsetD);
-            args.template append<int64_t>("batchOffsetC", inputs.batchOffsetC);
-            args.template append<int64_t>("batchOffsetA", inputs.batchOffsetA);
-            args.template append<int64_t>("batchOffsetB", inputs.batchOffsetB);
-        }
-
 	// NOTE: an assumption here is A & B must be both MX data types or non-MX data types.
 	//       Mixing is not supported.
         if(!problemType.useScaleAB.empty())
@@ -1996,6 +1985,16 @@ namespace TensileLite
             rv.args.append<uint32_t>("GSUSync", 0);
         }
 
+        // Batch offset support for General Batched GEMM (SupportUserArgs kernels).
+        // Appended at the tail, after the dstD/Synchronizer block, to match the
+        // kernel signature order (see Signature.py).
+        if(!problemType.groupedGemm)
+        {
+            rv.args.append<int64_t>("batchOffsetD", inputs.batchOffsetD);
+            rv.args.append<int64_t>("batchOffsetC", inputs.batchOffsetC);
+            rv.args.append<int64_t>("batchOffsetA", inputs.batchOffsetA);
+            rv.args.append<int64_t>("batchOffsetB", inputs.batchOffsetB);
+        }
 
         if(problemType.stochasticRounding)
         {
@@ -2275,13 +2274,6 @@ namespace TensileLite
             rv.args.append<void const*>("C", inputs.c);
         else
             rv.args.append<void const* const*>("batchC", inputs.batchC);
-
-        // Pass batch offsets when kernel expects them (SupportUserArgs=true, not GroupedGemm)
-//        if(problemType.supportDeviceUserArguments && !problemType.groupedGemm)
-//        {
-//            rv.args.append<int64_t>("batchOffsetD", inputs.batchOffsetD);
-//            rv.args.append<int64_t>("batchOffsetC", inputs.batchOffsetC);
-//        }
 
         if(problemType.useBias && sizeMapping.globalAccumulation == 0 && (!problemType.useGradient))
         {

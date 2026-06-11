@@ -323,6 +323,12 @@ class StateValues:
   numSgprToLoad: int                     = 0 # For kernel args
   preloadGuard: List[int]                = field(init=False)  # For preload kernel args guard
   numSgprPreload: int                    = 0 # For kernel args
+  # Kernarg byte offsets of the general-batched offsets, set when the signature
+  # appends them at the tail (0 for grouped-gemm kernels that omit them)
+  batchOffsetDKernArgOffset: int         = 0
+  batchOffsetCKernArgOffset: int         = 0
+  batchOffsetAKernArgOffset: int         = 0
+  batchOffsetBKernArgOffset: int         = 0
   numSgprAlpha: int                      = 0 # For user arguments
   numSgprBeta: int                       = 0 # For user arguments
   numStoreSgprNames: List[str]           = field(init=False) # For post-loop kernel args

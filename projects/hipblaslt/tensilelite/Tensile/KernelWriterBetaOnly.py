@@ -89,11 +89,6 @@ class KernelWriterBetaOnly(KernelWriterBase):
     batch   = "" if isStridedBuffer else "Batch"
     kStr += "  " + ptrStr + " const * " + batch + "C," + self.endLine
 
-#    # Batch offsets for General Batched GEMM (SupportUserArgs kernels)
-#    if self.state["ProblemType"]["SupportUserArgs"]:
-#      kStr += "  int64_t const batchOffsetD,%s" % (self.endLine)
-#      kStr += "  int64_t const batchOffsetC,%s" % (self.endLine)
-
     # bias
     if self.state["ProblemType"]["BetaOnlyUseBias"]:
       biasPtrStr = self.state["ProblemType"]["BiasDataType"].toDevice(self.language)
@@ -223,17 +218,9 @@ class KernelWriterBetaOnly(KernelWriterBase):
       if not self.state["_GlobalAccumulation"]:
         ptrStr = self.state["ProblemType"]["DestDataType"].toDevice(self.language)
         kStr += "  " + ptrStr + " * D = BatchD[wg];" + self.endLine
-#        if self.state["ProblemType"]["SupportUserArgs"]:
-#          kStr += "  " + ptrStr + " * D = BatchD[wg] + batchOffsetD;" + self.endLine
-#        else:
-#          kStr += "  " + ptrStr + " * D = BatchD[wg];" + self.endLine
       ptrStr  = self.state["ProblemType"]["DestDataType"].toDevice(self.language)
       zeroStr = self.state["ProblemType"]["ComputeDataType"].zeroString(self.language, 1)
       kStr += "  " + ptrStr + f" const* C = (beta == {zeroStr}) ? nullptr : BatchC[wg];" + self.endLine
-#      if self.state["ProblemType"]["SupportUserArgs"]:
-#        kStr += "  " + ptrStr + f" const* C = (beta == {zeroStr}) ? nullptr : BatchC[wg] + batchOffsetC;" + self.endLine
-#      else:
-#        kStr += "  " + ptrStr + f" const* C = (beta == {zeroStr}) ? nullptr : BatchC[wg];" + self.endLine
 
     kStr += self.endLine
     ########################################
