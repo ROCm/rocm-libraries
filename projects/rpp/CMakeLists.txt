@@ -365,7 +365,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES VERSION ${PROJECT_VERSION} SOVE
 # Public headers: build tree vs install tree (GNUInstallDirs paths are relative to the install prefix).
 target_include_directories(${PROJECT_NAME}
     PUBLIC
-        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/api
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/api>"
         "$<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/api>"
         "$<BUILD_INTERFACE:${PROJECT_BINARY_DIR}>"
         "$<BUILD_INTERFACE:${ROCM_PATH}/include>"
