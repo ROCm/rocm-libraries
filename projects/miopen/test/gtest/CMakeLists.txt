@@ -2,6 +2,15 @@ find_package(GTest REQUIRED)
 
 include(GoogleTest)
 
+# Stage the LGBM picker validation fixture next to the model assets so the
+# CPU_LgbmPickerFixture test can locate it via GetSystemDbPath() at run time.
+if(MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/lgbm_test_vectors.json"
+        "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}/lgbm_test_vectors.json"
+        COPYONLY)
+endif()
+
 if(MIOPEN_USE_HIPBLASLT)
   find_package(hipblaslt REQUIRED PATHS /opt/rocm $ENV{HIP_PATH})
 endif()
