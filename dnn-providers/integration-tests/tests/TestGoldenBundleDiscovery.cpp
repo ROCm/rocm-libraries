@@ -27,10 +27,10 @@ protected:
 
     void SetUp() override
     {
-        auto path = std::filesystem::temp_directory_path()
-                    / ("golden_discovery_test_" + std::to_string(::testing::UnitTest::GetInstance()
-                                                                     ->current_test_info()
-                                                                     ->line()));
+        auto path
+            = std::filesystem::temp_directory_path()
+              / ("golden_discovery_test_"
+                 + std::to_string(::testing::UnitTest::GetInstance()->current_test_info()->line()));
         std::filesystem::remove_all(path);
         _scopedDir.emplace(path);
         _tempDir = _scopedDir->path();

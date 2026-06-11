@@ -18,9 +18,8 @@ using namespace hipdnn_integration_tests::golden;
 namespace
 {
 
-std::unique_ptr<hipdnn_data_sdk::utilities::ITensor> makeTensor(
-    const std::vector<int64_t>& dims,
-    const std::vector<float>& values)
+std::unique_ptr<hipdnn_data_sdk::utilities::ITensor> makeTensor(const std::vector<int64_t>& dims,
+                                                                const std::vector<float>& values)
 {
     std::vector<int64_t> strides(dims.size());
     int64_t stride = 1;
