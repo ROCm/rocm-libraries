@@ -42,60 +42,6 @@ struct MxGemmPipelineTypeSelector<MxGemmPipelineType::CompTDMV2, Problem>
     static constexpr auto GetName() { return "GemmPipelineAgBgCrCompTDMV2"; }
 };
 
-/**
- * @brief Pre-shuffle scale buffer for gfx1250 wmma mx scale instruction.
- *
- * Reorganizes the scale data from row-major (MN x K) layout to the hardware-specific
- * layout expected by the gfx1250 wmma instruction.
- *
- * @tparam ScaleType Scale data type (e.g., e8m0_t)
- * @tparam ScaleBlockSize The block size for microscaling (e.g., 32)
- * @tparam KStride Whether K is the fast-moving dimension
- */
-template <typename ScaleType, ck_tile::index_t ScaleBlockSize, bool KStride>
-void preShuffleScaleBuffer_gfx1250(const ScaleType* src,
-                                   ScaleType* dst,
-                                   ck_tile::index_t MN,
-                                   ck_tile::index_t K)
-{
-    static_assert(ScaleBlockSize == 32 && sizeof(ScaleType) == 1,
-                  "wrong! only support 8-bit scale with ScaleBlockSize=32");
-
-    constexpr ck_tile::index_t MPerXdlops = 16;
-    constexpr ck_tile::index_t KPerXdlops = 128;
-
-    int MNPack = 2;
-    int KPack  = 1;
-
-    int MNStep = MPerXdlops;
-    int KStep  = KPerXdlops / ScaleBlockSize;
-
-    int K0 = K / KPack / KStep;
-
-    for(int mn = 0; mn < MN; ++mn)
-    {
-        int iMNRepeat = mn / (MNStep * MNPack);
-        int tempmn    = mn % (MNStep * MNPack);
-
-        for(int k = 0; k < K; ++k)
-        {
-            int iKRepeat = k / (KStep * KPack);
-            int tempk    = k % (KStep * KPack);
-
-            int outputIndex = (iMNRepeat * MNPack * MNStep) * (KStep * KPack * K0) +
-                              (iKRepeat * KStep * KPack) * (MNStep * MNPack) +
-                              tempmn * (KStep * KPack) + tempk;
-
-            if constexpr(KStride)
-            {
-                dst[outputIndex] = src[mn * K + k];
-            }
-            else
-                dst[outputIndex] = src[k * MN + mn];
-        }
-    }
-}
-
 template <typename Tuple>
 class TestCkTileMxGroupedGemm : public ::testing::Test
 {
