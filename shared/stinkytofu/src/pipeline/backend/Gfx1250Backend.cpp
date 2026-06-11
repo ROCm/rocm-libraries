@@ -101,7 +101,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     configureDebugOutput(pm, moduleOptions, "kernel-OuterPM", debugStreams);
 
     const bool runScheduler = optLevel != OptLevel::O0;
-    if (runScheduler) {
+    if (runScheduler || moduleOptions.EnableESM2) {
         // strip delay_alu before scheduling
         pm.addPass(createRemoveDelayAluPass());
         // strip s_wait_alu before scheduling
@@ -159,19 +159,11 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
 
     pm.addPass(createInsertVgprMsbPass());
 
-    if (runScheduler) {
-        // -- region: expertScheduleMode2 (label_ASM_Start .. noLoadLoopBody) --
-        // Wait-alu insertion + mode2 lifecycle run scoped to the compute region only.
-        // This must run BEFORE the kernel-wide createCFGBuilderPass() below: the
-        // ScopeAdaptor extracts a contiguous instruction range from the still-FLAT
-        // single-BB module function and spliceBack asserts size()==1. Running it
-        // after the kernel-wide CFGBuilder (which splits the function into multiple
-        // BasicBlocks) trips that assert. The region's own CFG is built inside the
-        // inner PM on the extracted range.
+    if (runScheduler || moduleOptions.EnableESM2) {
+        // expertScheduleMode2 region (label_ASM_Start..noLoadLoopBody): wait-alu + mode2
+        // lifecycle. Must precede the kernel-wide CFGBuilder — ScopeAdaptor needs the flat
+        // single-BB function. Re-derive its range first (see RederiveExpertScopePass).
         {
-            // The earlier {loopWithPrefetch, noLoadLoopBody} adaptor mutated the IR
-            // and dangled this overlapping group's stored range; re-derive it from
-            // the live IR before the adaptor consumes it. See RederiveExpertScopePass.
             pm.addPass(createRederiveExpertScopePass(module, "expertScheduleMode2",
                                                      "label_ASM_Start", "noLoadLoopBody"));
             PassManager innerPM;
