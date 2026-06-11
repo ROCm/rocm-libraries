@@ -1,5 +1,5 @@
 {
-    "generated_on": "09 Jun 2026, 08:09:00",
+    "generated_on": "11 Jun 2026, 07:55:44",
     "gpu": {
         "num_cu": 304,
         "arch": "gfx942"
@@ -10,9 +10,10 @@
     "sessions": [
         10,
         12,
-        14
+        14,
+        16
     ],
-    "note": "Data merged from sessions: [10, 12, 14]",
+    "note": "Data merged from sessions: [10, 12, 14, 16]",
     "solver_name": "ConvHipImplicitGemmGroupWrwXdlops",
     "output_params": [
         "000_kernel_name",
@@ -222,6 +223,42 @@
             "17": "024_BlkGemmPipelineVersion"
         }
     },
+    "conditional_layouts": {
+        "DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3": {
+            "base_param_count": 15,
+            "conditional_params": {
+                "NumGroupsToMerge": {
+                    "kind": "present_if_gt_one",
+                    "base_index": 15
+                },
+                "SplitK": {
+                    "kind": "appended_suffix"
+                }
+            },
+            "packed_params": {
+                "TileLoadMathThreadGroupSize": {
+                    "index": 0,
+                    "codec": "tile_load_math_lm",
+                    "outputs": [
+                        "TileLoadThreadGroupSize",
+                        "TileMathThreadGroupSize"
+                    ]
+                }
+            }
+        },
+        "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_DirectLoad_MergedGroups": {
+            "base_param_count": 15,
+            "conditional_params": {
+                "NumGroupsToMerge": {
+                    "kind": "present_if_gt_one",
+                    "base_index": 15
+                },
+                "SplitK": {
+                    "kind": "appended_suffix"
+                }
+            }
+        }
+    },
     "split_k_values": [
         -1,
         1,
@@ -299,26 +336,20 @@
                 "Default": 0,
                 "Filter1x1Stride1Pad0": 1
             },
-            "017_NumGroupsToMerge": {
-                "1": 0,
-                "2": 1,
-                "4": 2,
-                "8": 3
-            },
             "019_GemmSpecialization_layout": {
                 "DeviceBatchedGemmXdlUniversal<Default, CRR>": 0,
                 "DeviceBatchedGemmXdlUniversal<MNKPadding, CRR>": 1
             },
             "023_BlkGemmPipelineScheduler": {
-                "Interwave": 0,
-                "Intrawave": 1
+                "BlkGemmPipelineScheduler:Interwave": 0,
+                "BlkGemmPipelineScheduler:Intrawave": 1
             },
             "024_BlkGemmPipelineVersion": {
-                "v1": 0,
-                "v2": 1,
-                "v3": 2,
-                "v4": 3,
-                "v5": 4
+                "BlkGemmPipelineVersion:v1": 0,
+                "BlkGemmPipelineVersion:v2": 1,
+                "BlkGemmPipelineVersion:v3": 2,
+                "BlkGemmPipelineVersion:v4": 3,
+                "BlkGemmPipelineVersion:v5": 4
             }
         }
     },
@@ -356,26 +387,20 @@
                 "0": "Default",
                 "1": "Filter1x1Stride1Pad0"
             },
-            "017_NumGroupsToMerge": {
-                "0": 1,
-                "1": 2,
-                "2": 4,
-                "3": 8
-            },
             "019_GemmSpecialization_layout": {
                 "0": "DeviceBatchedGemmXdlUniversal<Default, CRR>",
                 "1": "DeviceBatchedGemmXdlUniversal<MNKPadding, CRR>"
             },
             "023_BlkGemmPipelineScheduler": {
-                "0": "Interwave",
-                "1": "Intrawave"
+                "0": "BlkGemmPipelineScheduler:Interwave",
+                "1": "BlkGemmPipelineScheduler:Intrawave"
             },
             "024_BlkGemmPipelineVersion": {
-                "0": "v1",
-                "1": "v2",
-                "2": "v3",
-                "3": "v4",
-                "4": "v5"
+                "0": "BlkGemmPipelineVersion:v1",
+                "1": "BlkGemmPipelineVersion:v2",
+                "2": "BlkGemmPipelineVersion:v3",
+                "3": "BlkGemmPipelineVersion:v4",
+                "4": "BlkGemmPipelineVersion:v5"
             }
         }
     },
@@ -397,41 +422,5 @@
             "015_CShuffleNXdlPerWavePerShuffle": "1"
         }
     },
-    "missing_value_token": -1.0,
-    "conditional_layouts": {
-        "DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3": {
-            "base_param_count": 15,
-            "conditional_params": {
-                "NumGroupsToMerge": {
-                    "kind": "present_if_gt_one",
-                    "base_index": 15
-                },
-                "SplitK": {
-                    "kind": "appended_suffix"
-                }
-            },
-            "packed_params": {
-                "TileLoadMathThreadGroupSize": {
-                    "index": 0,
-                    "codec": "tile_load_math_lm",
-                    "outputs": [
-                        "TileLoadThreadGroupSize",
-                        "TileMathThreadGroupSize"
-                    ]
-                }
-            }
-        },
-        "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_DirectLoad_MergedGroups": {
-            "base_param_count": 15,
-            "conditional_params": {
-                "NumGroupsToMerge": {
-                    "kind": "present_if_gt_one",
-                    "base_index": 15
-                },
-                "SplitK": {
-                    "kind": "appended_suffix"
-                }
-            }
-        }
-    }
+    "missing_value_token": -1.0
 }

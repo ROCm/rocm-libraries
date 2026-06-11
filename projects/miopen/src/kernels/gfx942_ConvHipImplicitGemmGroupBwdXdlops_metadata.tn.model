@@ -1,5 +1,5 @@
 {
-    "generated_on": "09 Jun 2026, 08:06:38",
+    "generated_on": "11 Jun 2026, 07:52:28",
     "gpu": {
         "num_cu": 304,
         "arch": "gfx942"
@@ -10,9 +10,10 @@
     "sessions": [
         10,
         12,
-        14
+        14,
+        16
     ],
-    "note": "Data merged from sessions: [10, 12, 14]",
+    "note": "Data merged from sessions: [10, 12, 14, 16]",
     "solver_name": "ConvHipImplicitGemmGroupBwdXdlops",
     "output_params": [
         "000_kernel_name",
@@ -113,6 +114,7 @@
             "15": "020_CShuffleNRepeatPerShuffle"
         }
     },
+    "conditional_layouts": {},
     "split_k_values": [
         1,
         2,
