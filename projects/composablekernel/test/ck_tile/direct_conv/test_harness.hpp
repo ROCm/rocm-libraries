@@ -15,6 +15,7 @@
 #include "ck_tile/ref/naive_grouped_conv_fwd_gpu.hpp"
 #include "ck_tile/ref/naive_grouped_conv_bwd_data_gpu.hpp"
 #include "ck_tile/ops/grouped_convolution/utils/grouped_conv_host_args.hpp"
+#include "ck/library/utility/gpu_verification.hpp"
 
 /// Templated integration test harness for direct convolution kernel structs.
 ///
@@ -31,6 +32,36 @@ class DirectConvGroupedTestHarness : public ::testing::Test
 {
     protected:
     using HalfT = ElementT;
+
+    // ck::profiler::gpu_verify dispatches on the ck:: numeric types. The ck_tile
+    // element types share the same underlying representation (_Float16 / __bf16),
+    // so map ElementT to its ck:: equivalent for the device-side comparison.
+    using VerifyT = std::conditional_t<std::is_same_v<ElementT, ck_tile::bfloat16_t>,
+                                       ck::bhalf_t,
+                                       ck::half_t>;
+
+    // Compare two device buffers on the GPU. Only a small result struct is copied
+    // back to the host, avoiding a full device-to-host transfer of both tensors.
+    static bool GpuCompare(const void* d_result,
+                           const void* d_ref,
+                           std::size_t size,
+                           const char* msg)
+    {
+        // BF16 needs wider tolerance because MFMA multiplies at BF16 precision
+        // (7-bit mantissa) while the GPU reference promotes to fp32 first.
+        // Tolerance values match profiler/common.hpp get_rtol/get_atol<ck::bhalf_t>.
+        constexpr float rtol = std::is_same_v<ElementT, ck_tile::bfloat16_t> ? 5e-2f : 1e-2f;
+        constexpr float atol = std::is_same_v<ElementT, ck_tile::bfloat16_t> ? 5e-2f : 1e-2f;
+
+        auto result = ck::profiler::gpu_verify<VerifyT>(d_result, d_ref, rtol, atol, size);
+        if(result.error_count != 0)
+        {
+            std::cerr << msg << std::endl;
+            result.print_error_summary();
+            return false;
+        }
+        return true;
+    }
 
 #ifdef CK_TILE_TEST_NO_DGRAD
     // Helper kept void so GTEST_SKIP() (which expands to a void `return`) is
@@ -134,18 +165,11 @@ class DirectConvGroupedTestHarness : public ::testing::Test
         if(!supported)
             return false;
 
-        // Compare
-        std::vector<HalfT> h_result(out_size);
-        std::vector<HalfT> h_ref(out_size);
-        d_out.FromDevice(h_result.data());
-        d_ref_out.FromDevice(h_ref.data());
-
-        // BF16 needs wider tolerance because MFMA multiplies at BF16 precision
-        // (7-bit mantissa) while the GPU reference promotes to fp32 first.
-        // Tolerance values match profiler/common.hpp get_rtol/get_atol<ck::bhalf_t>.
-        constexpr double rtol = std::is_same_v<ElementT, ck_tile::bfloat16_t> ? 5e-2 : 1e-2;
-        constexpr double atol = std::is_same_v<ElementT, ck_tile::bfloat16_t> ? 5e-2 : 1e-2;
-        return check_err(h_result, h_ref, "Error: Fprop incorrect results!", rtol, atol);
+        // Compare on the GPU (only a small result struct is copied back to host).
+        return GpuCompare(d_out.GetDeviceBuffer(),
+                          d_ref_out.GetDeviceBuffer(),
+                          out_size,
+                          "Error: Fprop incorrect results!");
     }
 
     template <int ConfigIdx>
@@ -244,18 +268,11 @@ class DirectConvGroupedTestHarness : public ::testing::Test
         if(!supported)
             return false;
 
-        // Compare
-        std::vector<HalfT> h_result(in_size);
-        std::vector<HalfT> h_ref(in_size);
-        d_in_grad.FromDevice(h_result.data());
-        d_ref_in_grad.FromDevice(h_ref.data());
-
-        // BF16 needs wider tolerance because MFMA multiplies at BF16 precision
-        // (7-bit mantissa) while the GPU reference promotes to fp32 first.
-        // Tolerance values match profiler/common.hpp get_rtol/get_atol<ck_til::bfloat16_t>.
-        constexpr double rtol = std::is_same_v<ElementT, ck_tile::bfloat16_t> ? 5e-2 : 1e-2;
-        constexpr double atol = std::is_same_v<ElementT, ck_tile::bfloat16_t> ? 5e-2 : 1e-2;
-        return check_err(h_result, h_ref, "Error: Dgrad incorrect results!", rtol, atol);
+        // Compare on the GPU (only a small result struct is copied back to host).
+        return GpuCompare(d_in_grad.GetDeviceBuffer(),
+                          d_ref_in_grad.GetDeviceBuffer(),
+                          in_size,
+                          "Error: Dgrad incorrect results!");
 #endif // CK_TILE_TEST_NO_DGRAD
     }
 };
