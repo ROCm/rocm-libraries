@@ -28,6 +28,7 @@
 
 #include <Tensile/msgpack/Loading.hpp>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 
@@ -73,6 +74,9 @@ namespace TensileLite
     static bool readCompressedMsgObject(std::string const&     gz_filename,
                                          msgpack::object_handle& result)
     {
+        using clock = std::chrono::steady_clock;
+        auto t_read_start = clock::now();
+
         std::ifstream in(gz_filename, std::ios::binary | std::ios::ate);
         if(!in.is_open())
             return false;
@@ -83,6 +87,8 @@ namespace TensileLite
         in.read(reinterpret_cast<char*>(compressed.data()), compressed_size);
         if(!in)
             return false;
+
+        auto t_decomp_start = clock::now();
 
         z_stream strm{};
         if(inflateInit2(&strm, 15 + 32) != Z_OK)
@@ -118,6 +124,20 @@ namespace TensileLite
 
         inflateEnd(&strm);
 
+        auto t_end = clock::now();
+
+        if(finished_parsing && Debug::Instance().printDataInit())
+        {
+            auto ms = [](auto a, auto b) {
+                return std::chrono::duration<double, std::milli>(b - a).count();
+            };
+            std::cout << "[TensileLite] Loaded " << gz_filename
+                      << ": read=" << ms(t_read_start, t_decomp_start) << "ms"
+                      << " decompress+parse=" << ms(t_decomp_start, t_end) << "ms"
+                      << " total=" << ms(t_read_start, t_end) << "ms"
+                      << "  (" << compressed_size / 1048576.0 << " MB)" << std::endl;
+        }
+
         return finished_parsing;
     }
 
@@ -138,6 +158,9 @@ namespace TensileLite
             }
 
             // Fall back to uncompressed file
+            using clock   = std::chrono::steady_clock;
+            auto t_read_start = clock::now();
+
             std::ifstream in(filename, std::ios::in | std::ios::binary);
             if(!in.is_open())
             {
@@ -159,6 +182,8 @@ namespace TensileLite
                 finished_parsing = unp.next(result);
             } while(!finished_parsing && !in.fail());
 
+            auto t_end = clock::now();
+
             if(!finished_parsing)
             {
                 if(Debug::Instance().printDataInit())
@@ -170,6 +195,17 @@ namespace TensileLite
                 }
 
                 return false;
+            }
+
+            if(Debug::Instance().printDataInit())
+            {
+                auto ms = [](auto a, auto b) {
+                    return std::chrono::duration<double, std::milli>(b - a).count();
+                };
+                auto file_size = static_cast<double>(in.tellg()) / 1048576.0;
+                std::cout << "[TensileLite] Loaded " << filename
+                          << ": total=" << ms(t_read_start, t_end) << "ms"
+                          << "  (" << file_size << " MB uncompressed)" << std::endl;
             }
         }
         catch(std::runtime_error const& exc)
