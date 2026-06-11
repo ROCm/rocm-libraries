@@ -100,8 +100,8 @@ def cmd_regress(args: argparse.Namespace) -> int:
     else:
         arch, arch_source = lib.detect_arch()
         if arch is None:
-            arch = lib.DEFAULT_ARCH
-            arch_source = f"auto-detect failed, defaulting to '{lib.DEFAULT_ARCH}'"
+            print("Could not auto-detect architecture. Please specify with --arch.")
+            return 1
 
     cases = lib.parse_cases(args.cases, arch)
     if not cases:
@@ -157,7 +157,11 @@ def cmd_regress(args: argparse.Namespace) -> int:
     passed = sum(1 for r in results if r.verdict(args.tolerance) == "PASS")
     failed = sum(1 for r in results if r.verdict(args.tolerance) == "FAIL")
     info = sum(1 for r in results if r.verdict(args.tolerance) == "INFO")
-    print(f"\nResult: {passed} passed, {failed} failed, {info} report-only")
+    not_tested = sum(1 for r in results if r.verdict(args.tolerance) == "NOT TESTED")
+    print(
+        f"\nResult: {passed} passed, {failed} failed, {info} report-only, "
+        f"{not_tested} not tested"
+    )
 
     return 0 if failed == 0 else 1
 

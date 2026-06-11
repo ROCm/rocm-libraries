@@ -8,6 +8,54 @@
 namespace ck_tile {
 namespace direct_conv {
 
+// Portable 16-byte (8 x 16-bit element) buffer-load-to-LDS.
+//
+// The direct-conv kernels stage the input tile in LDS by issuing one
+// 16-byte-per-thread load from global memory. On CDNA4 (gfx950) this is a
+// single buffer-load-to-LDS (dwordx4 async copy), which bypasses registers.
+// CDNA3 (gfx942) only supports the dword (4-byte) buffer-load-to-LDS variant,
+// so the dwordx4 async copy is unavailable there.
+//
+// To support gfx942 we fall back to a regular 16-byte buffer load into a
+// register followed by an LDS store. This produces a byte-for-byte identical
+// LDS layout (8 contiguous elements per thread at `lds_dest`) as the async
+// path, so all downstream LDS reads are unchanged — only the staging path
+// differs. The fallback costs an extra register round-trip versus the gfx950
+// async copy.
+//
+// OOB handling mirrors amd_async_buffer_load: when `is_valid` is false the
+// per-thread offset is forced out of bounds so the buffer load returns zeros.
+template <typename ElementType>
+__device__ __forceinline__ void buffer_load16_to_lds(
+    CK_TILE_LDS_ADDR ElementType* lds_dest,
+    const __amdgpu_buffer_rsrc_t& rsrc,
+    ck_tile::index_t voffset,
+    ck_tile::index_t is_valid)
+{
+#if defined(__gfx950__)
+    ck_tile::amd_async_buffer_load<ElementType, 8,
+        ck_tile::amd_buffer_coherence_enum::coherence_default, true>(
+        lds_dest, rsrc, voffset, 0, ck_tile::number<0>{}, is_valid);
+#elif defined(__HIP_DEVICE_COMPILE__)
+    // gfx942 (and other non-gfx950 device targets): regular 16-byte buffer
+    // load + LDS store. 0x7fffffff forces an OOB access that returns 0.
+    const ck_tile::index_t v = is_valid ? voffset : 0x7fffffff;
+    const ck_tile::int32x4_t data =
+        __builtin_amdgcn_raw_buffer_load_b128(rsrc, v, 0, 0);
+    // `lds_dest` is the WARP-level LDS base (shared by all 64 lanes). The
+    // hardware buffer_load_lds scatters lane i's 16 bytes to base + i*8 elems;
+    // reproduce that per-lane scatter here.
+    const int lane_id = ck_tile::get_lane_id();
+    __builtin_memcpy(lds_dest + lane_id * 8, &data, sizeof(data)); // 16 bytes
+#else
+    // Host compilation pass: the buffer-load builtins are device-only.
+    (void)lds_dest;
+    (void)rsrc;
+    (void)voffset;
+    (void)is_valid;
+#endif
+}
+
 // Shared InputLoader for grouped convolution kernels.
 //
 // Uses precomputed scalar state instead of persistent tile_window objects
@@ -307,14 +355,7 @@ struct InputLoader
         CK_TILE_LDS_ADDR ElementType* lds_dest =
             store_input_lds + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
 
-        ck_tile::amd_async_buffer_load<ElementType, 8,
-            ck_tile::amd_buffer_coherence_enum::coherence_default, true>(
-            lds_dest,
-            input_rsrc,
-            input_voffset,
-            0,
-            ck_tile::number<0>{},
-            is_valid);
+        buffer_load16_to_lds<ElementType>(lds_dest, input_rsrc, input_voffset, is_valid);
     }
 
     // Padded path: create temporary tile_windows per row, use load_tile + store_tile.

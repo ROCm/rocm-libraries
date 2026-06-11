@@ -31,10 +31,6 @@ from pathlib import Path
 # its expected value. Performance improvements above expected are accepted.
 DEFAULT_TOLERANCE = 0.075
 
-# Architecture key used when the GPU cannot be detected or no per-arch value
-# matches. Falls back to the original reference values.
-DEFAULT_ARCH = "mi355"
-
 # Bare "expected=<v>" tokens are stored under this key as an
 # architecture-independent fallback.
 _FALLBACK_KEY = "expected"
@@ -44,6 +40,7 @@ _FALLBACK_KEY = "expected"
 _ARCH_PATTERNS = [
     ("mi355", re.compile(r"mi355", re.IGNORECASE)),
     ("mi350", re.compile(r"mi350", re.IGNORECASE)),
+    ("mi300", re.compile(r"mi300", re.IGNORECASE)),
 ]
 
 
@@ -123,8 +120,6 @@ def _select_expected(values: dict[str, float], arch: str | None) -> float | None
         return values[arch]
     if _FALLBACK_KEY in values:
         return values[_FALLBACK_KEY]
-    if DEFAULT_ARCH in values:
-        return values[DEFAULT_ARCH]
     return None
 
 
@@ -305,6 +300,11 @@ def parse_failed_instances(stdout: str) -> list[str]:
 # report
 # ===========================================================================
 
+# The profiler reports "name:  (instance -1)" in its best-config block when no
+# applicable instance exists for the problem (empty instance name, index -1).
+_NO_INSTANCE_RE = re.compile(r"^\(instance\s+-1\)$")
+
+
 @dataclass
 class Result:
     case: Case
@@ -322,9 +322,17 @@ class Result:
             return None
         return (self.tflops - self.case.expected) / self.case.expected * 100.0
 
+    @property
+    def no_instance(self) -> bool:
+        """True if the profiler found no applicable instance (best is "(instance -1)")."""
+        return bool(_NO_INSTANCE_RE.match(self.best_instance.strip()))
+
     def verdict(self, tolerance: float) -> str:
         if not self.ran:
             return "FAIL"
+        # No applicable instance for this problem -> nothing was exercised.
+        if self.no_instance:
+            return "NOT TESTED"
         if self.case.expected is None:
             return "INFO"
         # Accept if within -tolerance of expected (improvements always pass).
@@ -429,9 +437,10 @@ def render_markdown(results: list[Result], tolerance: float, meta: dict) -> str:
     passed = sum(1 for r in results if r.verdict(tolerance) == "PASS")
     failed = sum(1 for r in results if r.verdict(tolerance) == "FAIL")
     info = sum(1 for r in results if r.verdict(tolerance) == "INFO")
+    not_tested = sum(1 for r in results if r.verdict(tolerance) == "NOT TESTED")
     lines.append(
-        f"**Result: {passed} passed, {failed} failed, {info} report-only "
-        f"({len(results)} total)**"
+        f"**Result: {passed} passed, {failed} failed, {info} report-only, "
+        f"{not_tested} not tested ({len(results)} total)**"
     )
     lines.append("")
 
