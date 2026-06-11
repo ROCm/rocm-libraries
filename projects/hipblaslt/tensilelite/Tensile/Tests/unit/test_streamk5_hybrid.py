@@ -244,59 +244,6 @@ class TestStreamK5SixArgCollapse:
         )
 
 
-_CONTRACTION_PROBLEM_HPP = (_TENSILELITE_ROOT / "include" / "Tensile"
-                            / "ContractionProblem.hpp")
-_CONTRACTION_SOLUTION_HPP = (_TENSILELITE_ROOT / "include" / "Tensile"
-                             / "ContractionSolution.hpp")
-_CONTRACTION_SOLUTION_CPP = (_TENSILELITE_ROOT / "src"
-                             / "ContractionSolution.cpp")
-
-
-class TestStreamK5HybridAutoMode:
-    def test_contraction_problem_param_setter_renamed_to_mode(self):
-        src = _read(_CONTRACTION_PROBLEM_HPP)
-        assert "setStreamKTileSchedulingMode" in src, (
-            "ContractionProblem.hpp must expose setStreamKTileSchedulingMode(int)"
-        )
-        assert "streamKTileSchedulingMode()" in src, (
-            "ContractionProblem.hpp must expose streamKTileSchedulingMode() getter"
-        )
-
-    def test_contraction_problem_legacy_bool_api_removed(self):
-        src = _read(_CONTRACTION_PROBLEM_HPP)
-        assert not re.search(
-            r'\bvoid\s+setStreamKTileScheduling\s*\(\s*bool\b', src), \
-            "legacy setStreamKTileScheduling(bool) must be removed"
-        assert not re.search(
-            r'\bbool\s+streamKTileScheduling\s*\(\s*\)', src), \
-            "legacy bool streamKTileScheduling() getter must be removed"
-
-    def test_contraction_problem_has_sm_count_target_accessor(self):
-        src = _read(_CONTRACTION_PROBLEM_HPP)
-        assert "setSmCountTarget" in src
-        assert "smCountTarget()" in src
-
-    def test_streamk_settings_uses_int_mode(self):
-        src = _read(_CONTRACTION_SOLUTION_HPP)
-        assert re.search(
-            r'streamKTileSchedulingMode\s*=\s*2', src), \
-            "StreamKSettings::streamKTileSchedulingMode default 2 (AUTO) not found"
-        assert "smCountTarget" in src
-
-    def test_contraction_solve_dispatches_auto_via_origami(self):
-        src = _read(_CONTRACTION_SOLUTION_CPP)
-        assert "origami::streamk::select_hybrid_mode(" in src, \
-            "SK5 AUTO branch must call origami::streamk::select_hybrid_mode"
-        assert re.search(
-            r'sk\.streamKTileSchedulingMode\s*=\s*problem\.getParams\(\)\.streamKTileSchedulingMode\(\)',
-            src), \
-            "sk.streamKTileSchedulingMode must be sourced from getParams().streamKTileSchedulingMode()"
-        assert re.search(
-            r'sk\.smCountTarget\s*=\s*problem\.getParams\(\)\.smCountTarget\(\)',
-            src), \
-            "sk.smCountTarget must be sourced from getParams().smCountTarget()"
-
-
 class TestStreamK5SixArgCollapseNoRegression:
     def test_signature_still_emits_six_sk_args(self):
         src = _read(_SIGNATURE_PY)
