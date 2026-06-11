@@ -142,84 +142,131 @@ struct LoadAndConvertKernel
     {
         using S = typename Problem::BlockShape;
 
-        constexpr auto block_dims    = make_tuple(S::Block_M, S::Block_N);
-        constexpr auto block_strides = make_tuple(S::Block_N, 1);
-
-        const index_t m_block_base = __builtin_amdgcn_readfirstlane(get_block_id() * S::Block_M);
+        constexpr auto block_dims = make_tuple(S::Block_M, S::Block_N);
 
         // LDS buffer
         __shared__ XDataType a_lds[S::Block_M * S::Block_N];
 
-        auto a_lds_view = make_naive_tensor_view<address_space_enum::lds>(
-            a_lds, block_dims, block_strides, number<S::Vector_N>{}, number<1>{});
-
-        auto a_block_lds_write_window = make_tile_window(a_lds_view, block_dims, {0, 0});
-
-        auto a_block_lds_read_window = [&] {
-            if constexpr(LoadTranspose::value)
-            {
-                constexpr auto block_dims_t    = make_tuple(S::Block_N, S::Block_M);
-                constexpr auto block_strides_t = make_tuple(1, S::Block_N);
-
-                auto view = make_naive_tensor_view<address_space_enum::lds>(
-                    a_lds,
-                    block_dims_t,
-                    block_strides_t,
-                    number<Policy::template GetVectorSize<XDataType>()>{},
-                    number<1>{});
-
-                return make_tile_window(
-                    view,
-                    block_dims_t,
-                    {0, 0},
-                    Policy::template MakeDRAMTransposedDistribution<Problem, XDataType>());
-            }
-            else
-            {
-                return make_tile_window(
-                    a_lds_view,
-                    block_dims,
-                    {0, 0},
-                    Policy::template MakeDRAMDistribution<Problem, XDataType>());
-            }
-        }();
-
-        // Input tensor
-        const auto a_tensor = make_naive_tensor_view<address_space_enum::global>(
-            a, make_tuple(M, N), make_tuple(N, 1), number<S::Vector_N>{}, number<1>{});
-
-        auto a_block_window =
-            make_tile_window(a_tensor,
-                             block_dims,
-                             {m_block_base, 0},
-                             Policy::template MakeDRAMDistribution<Problem, XDataType>());
-
-        // Output tensor
-        const auto c_tensor = make_naive_tensor_view<address_space_enum::global>(
-            c, make_tuple(M, N), make_tuple(N, 1), number<S::Vector_N>{}, number<1>{});
-
-        auto c_block_window =
-            make_tile_window(c_tensor,
-                             block_dims,
-                             {m_block_base, 0},
-                             Policy::template MakeDRAMDistribution<Problem, YDataType>());
-
-        const index_t num_n_loops = integer_divide_ceil(N, S::Block_N);
-        for(index_t n_iter = 0; n_iter < num_n_loops; ++n_iter)
+        if constexpr(LoadTranspose::value)
         {
-            auto dram_tile = load_tile(a_block_window);
-            store_tile(a_block_lds_write_window, dram_tile);
-            block_sync_lds();
+            // Transpose loads (gfx950) expect the original column-major LDS / (1,M) global layout
+            // paired with MakeDRAMTransposedDistribution.
+            constexpr auto block_strides = make_tuple(1, S::Block_M);
 
-            decltype(load_tile(c_block_window)) c_tile;
-            load_and_convert_tile<8, LoadTranspose::value>(c_tile, a_block_lds_read_window);
-            store_tile(c_block_window, c_tile);
-            block_sync_lds();
+            const index_t m_block_base = get_block_id() * S::Block_M;
 
-            if(n_iter < num_n_loops - 1)
+            auto a_lds_view = make_naive_tensor_view<address_space_enum::lds>(
+                a_lds, block_dims, block_strides, number<1>{}, number<1>{});
+
+            auto a_block_lds_write_window = make_tile_window(a_lds_view, block_dims, {0, 0});
+
+            constexpr auto block_dims_t    = make_tuple(S::Block_N, S::Block_M);
+            constexpr auto block_strides_t = make_tuple(S::Block_M, 1);
+
+            auto a_lds_transpose_view = make_naive_tensor_view<address_space_enum::lds>(
+                a_lds,
+                block_dims_t,
+                block_strides_t,
+                number<Policy::template GetVectorSize<XDataType>()>{},
+                number<1>{});
+
+            auto a_block_lds_read_window = make_tile_window(
+                a_lds_transpose_view,
+                block_dims_t,
+                {0, 0},
+                Policy::template MakeDRAMTransposedDistribution<Problem, XDataType>());
+
+            const auto a_tensor = make_naive_tensor_view<address_space_enum::global>(
+                a, make_tuple(M, N), make_tuple(1, M), number<1>{}, number<1>{});
+
+            auto a_block_window =
+                make_tile_window(a_tensor,
+                                 block_dims,
+                                 {m_block_base, 0},
+                                 Policy::template MakeDRAMDistribution<Problem, XDataType>());
+
+            const auto c_tensor = make_naive_tensor_view<address_space_enum::global>(
+                c, make_tuple(M, N), make_tuple(1, M), number<1>{}, number<1>{});
+
+            auto c_block_window =
+                make_tile_window(c_tensor,
+                                 block_dims,
+                                 {m_block_base, 0},
+                                 Policy::template MakeDRAMDistribution<Problem, YDataType>());
+
+            const index_t num_n_loops = integer_divide_ceil(N, S::Block_N);
+            for(index_t n_iter = 0; n_iter < num_n_loops; ++n_iter)
             {
-                move_tile_window(a_block_window, {0, S::Block_N});
-                move_tile_window(c_block_window, {0, S::Block_N});
+                auto dram_tile = load_tile(a_block_window);
+                store_tile(a_block_lds_write_window, dram_tile);
+                block_sync_lds();
+
+                decltype(load_tile(c_block_window)) c_tile;
+                load_and_convert_tile<8, LoadTranspose::value>(c_tile, a_block_lds_read_window);
+                store_tile(c_block_window, c_tile);
+                block_sync_lds();
+
+                if(n_iter < num_n_loops - 1)
+                {
+                    move_tile_window(a_block_window, {0, S::Block_N});
+                    move_tile_window(c_block_window, {0, S::Block_N});
+                }
+            }
+        }
+        else
+        {
+            // Row-major LDS / global and readfirstlane on block row fix validation on gfx942.
+            constexpr auto block_strides = make_tuple(S::Block_N, 1);
+
+            const index_t m_block_base =
+                __builtin_amdgcn_readfirstlane(get_block_id() * S::Block_M);
+
+            auto a_lds_view = make_naive_tensor_view<address_space_enum::lds>(
+                a_lds, block_dims, block_strides, number<S::Vector_N>{}, number<1>{});
+
+            auto a_block_lds_write_window = make_tile_window(a_lds_view, block_dims, {0, 0});
+
+            auto a_block_lds_read_window =
+                make_tile_window(a_lds_view,
+                                 block_dims,
+                                 {0, 0},
+                                 Policy::template MakeDRAMDistribution<Problem, XDataType>());
+
+            const auto a_tensor = make_naive_tensor_view<address_space_enum::global>(
+                a, make_tuple(M, N), make_tuple(N, 1), number<S::Vector_N>{}, number<1>{});
+
+            auto a_block_window =
+                make_tile_window(a_tensor,
+                                 block_dims,
+                                 {m_block_base, 0},
+                                 Policy::template MakeDRAMDistribution<Problem, XDataType>());
+
+            const auto c_tensor = make_naive_tensor_view<address_space_enum::global>(
+                c, make_tuple(M, N), make_tuple(N, 1), number<S::Vector_N>{}, number<1>{});
+
+            auto c_block_window =
+                make_tile_window(c_tensor,
+                                 block_dims,
+                                 {m_block_base, 0},
+                                 Policy::template MakeDRAMDistribution<Problem, YDataType>());
+
+            const index_t num_n_loops = integer_divide_ceil(N, S::Block_N);
+            for(index_t n_iter = 0; n_iter < num_n_loops; ++n_iter)
+            {
+                auto dram_tile = load_tile(a_block_window);
+                store_tile(a_block_lds_write_window, dram_tile);
+                block_sync_lds();
+
+                decltype(load_tile(c_block_window)) c_tile;
+                load_and_convert_tile<8, LoadTranspose::value>(c_tile, a_block_lds_read_window);
+                store_tile(c_block_window, c_tile);
+                block_sync_lds();
+
+                if(n_iter < num_n_loops - 1)
+                {
+                    move_tile_window(a_block_window, {0, S::Block_N});
+                    move_tile_window(c_block_window, {0, S::Block_N});
+                }
             }
         }
     }
