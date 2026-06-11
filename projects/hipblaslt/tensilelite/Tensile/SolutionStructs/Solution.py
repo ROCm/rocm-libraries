@@ -389,7 +389,7 @@ class GateTypeArgs:
         self.gateTypes.append(datatype)
 
       if not self.gateTypes:
-        printExit("Must provide a bias type in benchmark parameters if UseGateResidual is set to True.")
+        printExit("Must provide a gate type in benchmark parameters if UseGateResidual is set to True.")
 
       self.totalProblemSizes = len(self.gateTypes)
 

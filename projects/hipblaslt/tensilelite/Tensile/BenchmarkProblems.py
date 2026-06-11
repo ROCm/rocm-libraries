@@ -606,7 +606,8 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                                  benchmarkStep.factorDimArgs, benchmarkStep.activationArgs,
                                  benchmarkStep.icacheFlushArgs, conProblemType,
                                  sourcePath, codeObjectFiles, resultsFileName,
-                                 outFile, deviceId, gfxName, probSolMap=probSolMap)
+                                 outFile, benchmarkStep.gateTypeArgs,
+                                 deviceId, gfxName, probSolMap=probSolMap)
 
         # I think the size portion of this yaml could be removed,
         # but for now it's needed, so we update it even in the cache case

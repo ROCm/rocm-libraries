@@ -33,7 +33,7 @@ from enum import Enum
 from glob import glob
 
 from Tensile.SolutionStructs.Problem import ProblemType, ProblemSizesMock, ProblemSizesMockDummy
-from Tensile.SolutionStructs import ActivationArgs, BiasTypeArgs, FactorDimArgs
+from Tensile.SolutionStructs import ActivationArgs, BiasTypeArgs, FactorDimArgs, GateTypeArgs
 from Tensile.Toolchain.Component import Assembler
 
 import rocisa
@@ -146,7 +146,7 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
     else:
       biasTypeArgs = ""
     if len(problemType["GateResidualDataTypeList"]) > 0:
-      gateTypeArgs = BiasTypeArgs(problemType, [problemType["GateResidualDataTypeList"][0]])
+      gateTypeArgs = GateTypeArgs(problemType, [problemType["GateResidualDataTypeList"][0]])
     else:
       gateTypeArgs = ""
     activationEnums = [[{'Enum': 'relu'}]]
