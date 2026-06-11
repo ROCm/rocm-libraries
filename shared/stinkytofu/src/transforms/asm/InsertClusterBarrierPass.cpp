@@ -116,8 +116,8 @@ StinkyRegister makeSymbolicSgpr(const std::string& symbolicName) {
 /// the instruction to have no MemTokenData modifier (used to keep the
 /// cluster-scope wait idempotency check independent of Tensile-emitted
 /// `wait_kmcnt`-style modifiers).
-bool isBarrierWithLiteralId(const StinkyInstruction& inst, bool wantSignal,
-                            int id, bool rejectMemToken) {
+bool isBarrierWithLiteralId(const StinkyInstruction& inst, bool wantSignal, int id,
+                            bool rejectMemToken) {
     if (wantSignal ? !isBarrierSignal(inst) : !isBarrierWait(inst)) return false;
     if (rejectMemToken && inst.getModifier<MemTokenData>() != nullptr) return false;
     const auto& srcs = inst.getSrcRegs();
@@ -163,8 +163,8 @@ bool isSegmentBoundary(const StinkyInstruction& inst) {
 /// segment boundary is crossed so the trigger always lives in the same
 /// segment as \p anchor. Used by Rule 4's per-`tensor_load_to_lds` scan to
 /// resolve each load's anchor wait.
-StinkyInstruction* findPrecedingWorkgroupBarrierWaitInSegment(
-    BasicBlock::iterator segmentBegin, StinkyInstruction* anchor) {
+StinkyInstruction* findPrecedingWorkgroupBarrierWaitInSegment(BasicBlock::iterator segmentBegin,
+                                                              StinkyInstruction* anchor) {
     auto it = BasicBlock::iterator(anchor);
     while (it != segmentBegin) {
         --it;
@@ -212,8 +212,7 @@ StinkyInstruction* findLiveLoopCounterLCmpUpstream(StinkyInstruction* anchor) {
         }
         if (inst->is(InstFlag::IF_ImplicitWriteSCC)) {
             const auto uOp = inst->getUnifiedOpcode();
-            const bool isLclEqCmp32 =
-                (uOp == GFX::s_cmp_eq_u32 || uOp == GFX::s_cmp_eq_i32);
+            const bool isLclEqCmp32 = (uOp == GFX::s_cmp_eq_u32 || uOp == GFX::s_cmp_eq_i32);
             if (!isLclEqCmp32) return nullptr;
             const auto& srcs = inst->getSrcRegs();
             if (srcs.empty()) return nullptr;
@@ -293,8 +292,8 @@ StinkyInstruction* findFirstTensorLoadBetween(BasicBlock::iterator start,
 /// \p boundary (exclusive) and return the nearest preceding
 /// `s_barrier_wait -1`, or nullptr. Same "no segment-boundary stopping"
 /// semantics as `findFirstTensorLoadBetween`. Used by Rule 5a.
-StinkyInstruction* findPrecedingWorkgroupBarrierWaitBetween(
-    BasicBlock::iterator boundary, StinkyInstruction* anchor) {
+StinkyInstruction* findPrecedingWorkgroupBarrierWaitBetween(BasicBlock::iterator boundary,
+                                                            StinkyInstruction* anchor) {
     auto it = BasicBlock::iterator(anchor);
     while (it != boundary) {
         --it;
@@ -348,8 +347,7 @@ void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilde
     StinkyInstruction* brInst = irBuilder.create(brDesc, anchor);
     brInst->addSrcReg(StinkyRegister(labelName));
     brInst->addModifier<LabelData>(LabelData{labelName});
-    brInst->addModifier<CommentData>(
-        CommentData{"Execute cluster barrier signal for waveID 0"});
+    brInst->addModifier<CommentData>(CommentData{"Execute cluster barrier signal for waveID 0"});
 
     StinkyInstruction* signalInst = irBuilder.create(signalDesc, anchor);
     signalInst->addSrcReg(StinkyRegister(kClusterBarrierId));
@@ -376,8 +374,8 @@ void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilde
 ///     here (comment: `"workgroup sync"`) so the cluster signal
 ///     that immediately follows still sits at a valid LDS-coherence
 ///     point.
-void insertWorkgroupBarrierSyncBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
-                                      GfxArchID archId, const char* waitComment) {
+void insertWorkgroupBarrierSyncBefore(IRBase* anchor, AsmIRBuilder& irBuilder, GfxArchID archId,
+                                      const char* waitComment) {
     const HwInstDesc* signalDesc = getMCIDByUOp(GFX::s_barrier_signal, archId);
     const HwInstDesc* waitDesc = getMCIDByUOp(GFX::s_barrier_wait, archId);
     assert(signalDesc && waitDesc &&
@@ -461,16 +459,14 @@ void insertWorkgroupBarrierSyncBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
 ///             `insertRule4InheritedSccSignalBlockBefore`. See
 ///             `insertClusterBarrierHandshakeBefore`.
 void insertLoopCounterLGatedClusterBarrierSignalBefore(
-    IRBase* anchor, AsmIRBuilder& irBuilder, GfxArchID archId, GFX cmpUOp,
-    int skipWhenScc1Imm, const std::string& cmpComment,
-    const std::string& branchComment,
+    IRBase* anchor, AsmIRBuilder& irBuilder, GfxArchID archId, GFX cmpUOp, int skipWhenScc1Imm,
+    const std::string& cmpComment, const std::string& branchComment,
     const char* workgroupSyncWaitComment = nullptr) {
     const std::string lclLabelName = std::string(kSkipLabelPrefixLCL) + makeRandomHash();
 
     const HwInstDesc* cmpDesc = getMCIDByUOp(cmpUOp, archId);
     const HwInstDesc* brDesc = getMCIDByUOp(GFX::s_cbranch_scc1, archId);
-    assert(cmpDesc && brDesc &&
-           "LoopCounterL gate opcodes are not supported on this architecture");
+    assert(cmpDesc && brDesc && "LoopCounterL gate opcodes are not supported on this architecture");
 
     StinkyInstruction* cmpInst = irBuilder.create(cmpDesc, anchor);
     cmpInst->addSrcReg(makeSymbolicSgpr(kLoopCounterLSymbol));
@@ -483,8 +479,7 @@ void insertLoopCounterLGatedClusterBarrierSignalBefore(
     brInst->addModifier<CommentData>(CommentData{branchComment});
 
     if (workgroupSyncWaitComment != nullptr) {
-        insertWorkgroupBarrierSyncBefore(anchor, irBuilder, archId,
-                                         workgroupSyncWaitComment);
+        insertWorkgroupBarrierSyncBefore(anchor, irBuilder, archId, workgroupSyncWaitComment);
     }
 
     insertClusterBarrierSignalOnlyBefore(anchor, irBuilder, archId);
@@ -516,8 +511,7 @@ void insertLoopCounterLGatedClusterBarrierSignalBefore(
 /// cbranch expects), while both wave paths (fall-through and wave-skip)
 /// land at or past the inner label and re-evaluate the cmp.
 void insertRule4InheritedSccSignalBlockBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
-                                              GfxArchID archId,
-                                              StinkyInstruction* liveLclCmp) {
+                                              GfxArchID archId, StinkyInstruction* liveLclCmp) {
     const std::string innerLabel = std::string(kSkipLabelPrefix) + makeRandomHash();
     const std::string outerLabel = std::string(kSkipLabelPrefixLCL) + makeRandomHash();
 
@@ -542,8 +536,7 @@ void insertRule4InheritedSccSignalBlockBefore(IRBase* anchor, AsmIRBuilder& irBu
     StinkyInstruction* innerBr = irBuilder.create(brSccDesc0, anchor);
     innerBr->addSrcReg(StinkyRegister(innerLabel));
     innerBr->addModifier<LabelData>(LabelData{innerLabel});
-    innerBr->addModifier<CommentData>(
-        CommentData{"Execute cluster barrier signal for waveID 0"});
+    innerBr->addModifier<CommentData>(CommentData{"Execute cluster barrier signal for waveID 0"});
 
     StinkyInstruction* signalInst = irBuilder.create(signalDesc, anchor);
     signalInst->addSrcReg(StinkyRegister(kClusterBarrierId));
@@ -578,12 +571,12 @@ void insertRule4InheritedSccSignalBlockBefore(IRBase* anchor, AsmIRBuilder& irBu
 ///
 /// Used by Rule 4's drain-gated mode (b) (when `kRule4ForceUngatedSignalMode`
 /// is off) to skip the cluster wait on the drain iterations.
-void insertLoopCounterLGatedClusterBarrierWaitBefore(
-    IRBase* anchor, AsmIRBuilder& irBuilder, GfxArchID archId, GFX cmpUOp,
-    int skipWhenScc1Imm, const std::string& cmpComment,
-    const std::string& branchComment) {
-    const std::string lclLabelName =
-        std::string(kSkipWaitLabelPrefixLCL) + makeRandomHash();
+void insertLoopCounterLGatedClusterBarrierWaitBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
+                                                     GfxArchID archId, GFX cmpUOp,
+                                                     int skipWhenScc1Imm,
+                                                     const std::string& cmpComment,
+                                                     const std::string& branchComment) {
+    const std::string lclLabelName = std::string(kSkipWaitLabelPrefixLCL) + makeRandomHash();
 
     const HwInstDesc* cmpDesc = getMCIDByUOp(cmpUOp, archId);
     const HwInstDesc* brDesc = getMCIDByUOp(GFX::s_cbranch_scc1, archId);
@@ -614,8 +607,8 @@ void insertLoopCounterLGatedClusterBarrierWaitBefore(
 /// Forward declaration: defined further down (Rule 2 / Rule 5b helper).
 /// Rule 4's handshake now also emits a bare trailing `s_barrier_wait -3`
 /// via this helper, so it must be visible before that call site.
-void insertClusterBarrierWaitBefore(IRBase* anchor, const char* comment,
-                                    AsmIRBuilder& irBuilder, GfxArchID archId);
+void insertClusterBarrierWaitBefore(IRBase* anchor, const char* comment, AsmIRBuilder& irBuilder,
+                                    GfxArchID archId);
 
 /// Emit Rule 4's cluster-barrier handshake before `anchor` (the iterator
 /// position right after the load's anchoring `s_barrier_wait -1`).
@@ -652,9 +645,8 @@ void insertClusterBarrierWaitBefore(IRBase* anchor, const char* comment,
 ///       decremented LCL before the anchor.
 ///
 /// \p pgrValue and \p lclPreDecrement are consulted by mode (b) only.
-void insertClusterBarrierHandshakeBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
-                                         GfxArchID archId, int pgrValue,
-                                         StinkyInstruction* liveLclCmp,
+void insertClusterBarrierHandshakeBefore(IRBase* anchor, AsmIRBuilder& irBuilder, GfxArchID archId,
+                                         int pgrValue, StinkyInstruction* liveLclCmp,
                                          int lclPreDecrement) {
     if (kRule4ForceUngatedSignalMode) {
         // Mode (c): always-ungated signal. Emit the WaveIdx-gated
@@ -680,8 +672,7 @@ void insertClusterBarrierHandshakeBefore(IRBase* anchor, AsmIRBuilder& irBuilder
         // Mode (a) inherited-SCC: ungated leading wait + a single-iter
         // inherited signal skip.
         const HwInstDesc* waitDesc = getMCIDByUOp(GFX::s_barrier_wait, archId);
-        assert(waitDesc &&
-               "Cluster-barrier wait opcode is not supported on this architecture");
+        assert(waitDesc && "Cluster-barrier wait opcode is not supported on this architecture");
         StinkyInstruction* waitInst = irBuilder.create(waitDesc, anchor);
         waitInst->addSrcReg(StinkyRegister(kClusterBarrierId));
         waitInst->addModifier<CommentData>(CommentData{"cluster barrier wait"});
@@ -754,8 +745,8 @@ bool isFollowedByClusterBarrierHandshakeOrSignal(StinkyInstruction* anchor) {
     if (next == nullptr) return false;
     if (isClusterBarrierWait(*next)) return true;
     const auto uOp = next->getUnifiedOpcode();
-    if (uOp == GFX::s_cmp_eq_u32 || uOp == GFX::s_cmp_le_u32 ||
-        uOp == GFX::s_cmp_eq_i32 || uOp == GFX::s_cmp_le_i32) {
+    if (uOp == GFX::s_cmp_eq_u32 || uOp == GFX::s_cmp_le_u32 || uOp == GFX::s_cmp_eq_i32 ||
+        uOp == GFX::s_cmp_le_i32) {
         const auto& srcs = next->getSrcRegs();
         if (srcs.empty()) return false;
         const std::string& sym = srcs[0].getSymbolicName();
@@ -802,8 +793,8 @@ bool isImmediatelyPrecededByClusterBarrierWait(StinkyInstruction* anchor) {
 ///     already appears at the kernel's first tensor_load in reference asm)
 ///   - Rule 5b uses `"cluster barrier wait"`.
 /// (Used by Rule 2 and Rule 5b.)
-void insertClusterBarrierWaitBefore(IRBase* anchor, const char* comment,
-                                    AsmIRBuilder& irBuilder, GfxArchID archId) {
+void insertClusterBarrierWaitBefore(IRBase* anchor, const char* comment, AsmIRBuilder& irBuilder,
+                                    GfxArchID archId) {
     const HwInstDesc* waitDesc = getMCIDByUOp(GFX::s_barrier_wait, archId);
     assert(waitDesc && "Cluster-barrier wait opcode is not supported on this architecture");
     StinkyInstruction* waitInst = irBuilder.create(waitDesc, anchor);
@@ -856,8 +847,8 @@ class InsertClusterBarrierPassImpl : public Pass {
             //         against the pre-mutation IR -- so a later `pending`
             //         entry's emission cannot influence an earlier one's SCC
             //         analysis or decrement count.
-            std::vector<std::tuple<StinkyInstruction*, BasicBlock::iterator,
-                                   StinkyInstruction*, int>>
+            std::vector<
+                std::tuple<StinkyInstruction*, BasicBlock::iterator, StinkyInstruction*, int>>
                 pending;
             std::unordered_set<StinkyInstruction*> seenTriggers;
 
@@ -887,16 +878,14 @@ class InsertClusterBarrierPassImpl : public Pass {
                 // LCL cmp NOW (against the original IR) so each Rule-4 site
                 // is analyzed independently from any sibling sites that
                 // will be mutated later in the same BB sweep.
-                StinkyInstruction* liveLclCmp =
-                    findLiveLoopCounterLCmpUpstream(trigger);
+                StinkyInstruction* liveLclCmp = findLiveLoopCounterLCmpUpstream(trigger);
                 // Count any `s_sub LCL, LCL, imm` the schedule hoisted above
                 // the anchor so the drain-gated mode (b) thresholds can be
                 // compensated. (Unused when mode (c) is active.)
                 const int lclPreDecrement =
                     sumLoopCounterLDecrementsBeforeInSegment(segBegin, trigger);
-                pending.emplace_back(trigger,
-                                     std::next(BasicBlock::iterator(trigger)),
-                                     liveLclCmp, lclPreDecrement);
+                pending.emplace_back(trigger, std::next(BasicBlock::iterator(trigger)), liveLclCmp,
+                                     lclPreDecrement);
             }
 
             // Rule 1: signal-only handshake immediately AFTER each
@@ -1023,8 +1012,7 @@ class InsertClusterBarrierPassImpl : public Pass {
                     if (!sectionAlreadyHasClusterBarrier) {
                         if (foundWait != nullptr) {
                             setupNewTileExistingWait = foundWait;
-                            setupNewTileAnchorIt =
-                                std::next(BasicBlock::iterator(foundWait));
+                            setupNewTileAnchorIt = std::next(BasicBlock::iterator(foundWait));
                         } else if (plrValue_ == 0) {
                             setupNewTileAnchorIt = BasicBlock::iterator(openLoopLLabel);
                             setupNewTileNeedsWorkgroupSync = true;
@@ -1041,8 +1029,7 @@ class InsertClusterBarrierPassImpl : public Pass {
                     }
                 }
                 if (conflictsWithRule4 ||
-                    isFollowedByClusterBarrierHandshakeOrSignal(
-                        setupNewTileExistingWait)) {
+                    isFollowedByClusterBarrierHandshakeOrSignal(setupNewTileExistingWait)) {
                     setupNewTileAnchorIt = bb.end();
                 }
             }
@@ -1076,8 +1063,7 @@ class InsertClusterBarrierPassImpl : public Pass {
                 if (markerIt != bb.end()) {
                     tailTL = findFirstTensorLoadBetween(std::next(markerIt), bb.end());
                     if (tailTL != nullptr) {
-                        tailWait =
-                            findPrecedingWorkgroupBarrierWaitBetween(markerIt, tailTL);
+                        tailWait = findPrecedingWorkgroupBarrierWaitBetween(markerIt, tailTL);
                         if (tailWait != nullptr) {
                             tailWaitNextIt = std::next(BasicBlock::iterator(tailWait));
                         }
@@ -1099,8 +1085,7 @@ class InsertClusterBarrierPassImpl : public Pass {
                         break;
                     }
                 }
-                if (conflictsWithRule4 ||
-                    isFollowedByClusterBarrierHandshakeOrSignal(tailWait)) {
+                if (conflictsWithRule4 || isFollowedByClusterBarrierHandshakeOrSignal(tailWait)) {
                     tailWait = nullptr;
                 }
             }
@@ -1135,8 +1120,7 @@ class InsertClusterBarrierPassImpl : public Pass {
                     /*cmpComment=*/"LoopCounter <= " + immStr + "?",
                     /*branchComment=*/"skip cluster barrier when LoopCounterL <= " + immStr,
                     /*workgroupSyncWaitComment=*/
-                    setupNewTileNeedsWorkgroupSync ? "workgroup sync"
-                                                    : nullptr);
+                    setupNewTileNeedsWorkgroupSync ? "workgroup sync" : nullptr);
             }
             // Rule 5a -- signal-only after the tail loop's preceding workgroup wait.
             if (tailWait != nullptr) {
@@ -1146,8 +1130,7 @@ class InsertClusterBarrierPassImpl : public Pass {
             }
             // Rule 5b -- bare cluster wait immediately before the tail load.
             if (tailTL != nullptr) {
-                insertClusterBarrierWaitBefore(tailTL, "cluster barrier wait", irBuilder,
-                                               archId);
+                insertClusterBarrierWaitBefore(tailTL, "cluster barrier wait", irBuilder, archId);
             }
         }
 
@@ -1163,8 +1146,7 @@ class InsertClusterBarrierPassImpl : public Pass {
             if (firstTL != nullptr && !isImmediatelyPrecededByClusterBarrierWait(firstTL)) {
                 BasicBlock* parent = firstTL->getParent();
                 AsmIRBuilder irBuilder(*parent, archId);
-                insertClusterBarrierWaitBefore(firstTL, "cluster_barrier wait", irBuilder,
-                                               archId);
+                insertClusterBarrierWaitBefore(firstTL, "cluster_barrier wait", irBuilder, archId);
             }
         }
 
