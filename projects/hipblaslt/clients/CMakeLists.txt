@@ -127,6 +127,13 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/../library/src/amd_detail/rocblaslt/src/include
     )
 
+    # Pull in the FP64 emulation object files directly (same objects the
+    # hipblaslt shared library is built from) so the test can call the internal
+    # entry points without them being exported from the release ABI.
+    if(HIPBLASLT_ENABLE_HOST)
+        target_link_libraries(hipblaslt-test PRIVATE hipblaslt-fp64-emulation)
+    endif()
+
     add_subdirectory(tests)
 endif()
 if(HIPBLASLT_ENABLE_SAMPLES)

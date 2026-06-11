@@ -23,17 +23,6 @@
 #include "rocblaslt.h"
 #include <hip/hip_runtime_api.h>
 
-/* Internal emulation symbols are hidden by default (the library is built with
- * CXX_VISIBILITY_PRESET=hidden).  In testing builds (HIPBLASLT_BUILD_TESTING)
- * the entry points exercised by hipblaslt-test are given default visibility so
- * the test binary can link against them.  In a normal release build the macro
- * expands to nothing, leaving the public ABI unchanged. */
-#if defined(HIPBLASLT_BUILD_TESTING)
-#include <hipblaslt/hipblaslt-export.h>
-#define FP64_EMUL_TEST_EXPORT HIPBLASLT_EXPORT
-#else
-#define FP64_EMUL_TEST_EXPORT
-#endif
 
 /* Returns true when HIPBLASLT_EMULATE_DOUBLE_PRECISION=1 is set.
  * The environment variable is read once and cached. */
@@ -61,11 +50,11 @@ uint32_t fp64EmulationSpecialValuesMask();
  * Default (env var absent or 0): 16 moduli (~125 bits of CRT capacity).
  * Maximum supported: 18 moduli (~140 bits of CRT capacity).
  * Notable values: 55 bits → 7 GEMMs, 79 bits → 10 GEMMs, 110 bits → 14 GEMMs. */
-FP64_EMUL_TEST_EXPORT unsigned fp64EmulationNumModuli();
+unsigned fp64EmulationNumModuli();
 
 /* Returns the byte count of the emulation workspace for the given problem.
  * Use this to check whether a caller-provided workspace is sufficient. */
-FP64_EMUL_TEST_EXPORT size_t fp64EmulationWorkspaceSize(int64_t m, int64_t n, int64_t k, unsigned num_moduli);
+size_t fp64EmulationWorkspaceSize(int64_t m, int64_t n, int64_t k, unsigned num_moduli);
 
 /* Forward declaration — callers already include handle.h which provides the full
  * definition.  Declared here so the two helpers below can use the type.     */
@@ -76,7 +65,7 @@ struct _rocblaslt_handle;
  * arithmetic-intensity heuristic (or EAGER strategy).  Does NOT check epilogue-
  * specific conditions (bias, scaleAlpha, E, pointermode) — those remain the
  * caller's responsibility.                                                   */
-FP64_EMUL_TEST_EXPORT bool fp64EmulationWouldApply(const _rocblaslt_handle* h,
+bool fp64EmulationWouldApply(const _rocblaslt_handle* h,
                               hipDataType              type_a,
                               int64_t                  m,
                               int64_t                  n,
@@ -112,7 +101,7 @@ struct Fp64EmulationSettings {
  *         rocblaslt_status_memory_error if workspace allocation fails,
  *         rocblaslt_status_not_supported if Inf/NaN is detected (caller
  *             should fall back to native FP64). */
-FP64_EMUL_TEST_EXPORT rocblaslt_status fp64EmulatedGemm(hipblasOperation_t          opA,
+rocblaslt_status fp64EmulatedGemm(hipblasOperation_t          opA,
                                   hipblasOperation_t          opB,
                                   int64_t                     m,
                                   int64_t                     n,

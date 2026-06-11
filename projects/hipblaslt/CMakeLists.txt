@@ -353,13 +353,6 @@ if(HIPBLASLT_ENABLE_HOST)
         ROCBLASLT_TENSILE_LAZY_LOAD=$<BOOL:${HIPBLASLT_ENABLE_LAZY_LOAD}>
     )
 
-    # In testing builds, give the FP64 emulation test entry points default
-    # visibility (see FP64_EMUL_TEST_EXPORT in fp64_emulation.hpp) so that
-    # hipblaslt-test can link against them.  The release ABI is unaffected.
-    if(HIPBLASLT_BUILD_TESTING OR BUILD_TESTING)
-        target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_BUILD_TESTING)
-    endif()
-
     if(HIPBLASLT_ENABLE_MARKER)
         target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_MARKER)
         target_include_directories(hipblaslt PRIVATE ${ROCTRACER_INCLUDE_DIR})

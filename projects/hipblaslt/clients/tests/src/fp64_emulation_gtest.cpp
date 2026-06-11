@@ -35,8 +35,9 @@
 //   * Fp64EmulationTest      - owns a hipblasLtHandle_t for API-driven tests.
 //
 // The internal entry points (declared in the rocblaslt-private fp64_emulation.hpp)
-// are only linkable because the library exports them under HIPBLASLT_BUILD_TESTING
-// (see FP64_EMUL_TEST_EXPORT).
+// are linkable here because hipblaslt-test privately links the
+// hipblaslt-fp64-emulation OBJECT library - the same object files the hipblaslt
+// shared library is built from - so no symbols are exported from the release ABI.
 //
 
 #include "fp64_emulation.hpp" // internal: functions under test
