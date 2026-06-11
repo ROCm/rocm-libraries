@@ -54,17 +54,17 @@ class LraTileAssignmentVALU(LraTileAssignment):
         module = Module("LraTileAssignmentVALU")
 
         # allocate resources
-        qReg    = writer.vgprPool.checkOut(1,"qReg") # quotient
-        rReg    = writer.vgprPool.checkOut(1,"rReg") # remainder
+        qReg    = writer.vgprPool.checkOut(1, tag="LraTileAssignmentVALU_qReg") # quotient
+        rReg    = writer.vgprPool.checkOut(1, tag="LraTileAssignmentVALU_rReg") # remainder
         # dot2: currently only support unroll major LDS
         tc               = tP["tensorChar"]
         umlds            = kernel["UnrollMajorLDS%s" % tc]
         LdsPad           = kernel["LdsPad%s" % tc] if kernel["LdsBlockSizePerPad%s" % tc] == 0 else 0
         strideTile       = kernel["_DepthU%s"%tc] + LdsPad if umlds else 1
-        tmpVgpr          = writer.vgprPool.checkOutAligned(2,2,"tmpVgpr")
+        tmpVgpr          = writer.vgprPool.checkOutAligned(2,2, tag="LraTileAssignmentVALU_tmpVgpr")
         tmpVgprRes       = ContinuousRegister(tmpVgpr, 2)
 
-        with writer.allocTmpSgpr(1) as tmpSgprInfo:
+        with writer.allocTmpSgpr(1, tag="LraTileAssignmentVALU_tmpSgprInfo") as tmpSgprInfo:
             if tP["tileIdx"] == 0:
                 # kStr += "%slr%s = serial %% SG%s%s%s" \
                 #         % (writer.commentPrefix, tP["tileChar"], tP["tileChar"], \
@@ -151,7 +151,7 @@ class LraTileAssignmentTransposedMFMA(LraTileAssignment):
         # alloc vgpr
         tReg    = writer.vgprPool.checkOut(1,"tReg") # remainder
         kReg    = writer.vgprPool.checkOut(1,"kReg") # remainder
-        tmpVgpr = writer.vgprPool.checkOutAligned(2, 2, "tmpVgpr")
+        tmpVgpr = writer.vgprPool.checkOutAligned(2, 2, tag="LraTileAssignmentTransposedMFMA_tmpVgpr")
         tmpVgprRes = ContinuousRegister(tmpVgpr, 2)
 
         # alloc vgpr
@@ -199,7 +199,7 @@ class LraTileAssignmentTransposedMFMA(LraTileAssignment):
         strideUnroll = mt + ldsPad
         strideWave   = numTileInInst * matrixInstT * vectorWidth
 
-        with writer.allocTmpSgpr(1) as tmpSgprInfo:
+        with writer.allocTmpSgpr(1, tag="LraTileAssignmentTransposedMFMA_tmpSgprInfo") as tmpSgprInfo:
             # tile offset = (wtId%16)//8*8
             module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, \
                 "0. thread id in wave: wtid = tid %% wavelength(%u)" % waveWidth))
@@ -292,7 +292,7 @@ class LraTileAssignmentTransposedMFMAB8(LraTileAssignmentTransposedMFMA):
         # alloc vgpr
         tReg    = writer.vgprPool.checkOut(1,"tReg") # remainder
         kReg    = writer.vgprPool.checkOut(1,"kReg") # remainder
-        tmpVgpr = writer.vgprPool.checkOutAligned(2, 2, "tmpVgpr")
+        tmpVgpr = writer.vgprPool.checkOutAligned(2, 2, tag="LraTileAssignmentTransposedMFMAB8_tmpVgpr")
         tmpVgprRes = ContinuousRegister(tmpVgpr, 2)
 
         # alloc vgpr
@@ -340,7 +340,7 @@ class LraTileAssignmentTransposedMFMAB8(LraTileAssignmentTransposedMFMA):
         strideUnroll = mt + ldsPad
         strideWave   = numTileInInst * matrixInstT * vectorWidth
 
-        with writer.allocTmpSgpr(1) as tmpSgprInfo:
+        with writer.allocTmpSgpr(1, tag="LraTileAssignmentTransposedMFMAB8_tmpSgprInfo") as tmpSgprInfo:
             # tile offset = (wtId%8)//4*8
             module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, \
                 "0. thread id in wave: wtid = tid %% wavelength(%u)" % waveWidth))
@@ -514,7 +514,7 @@ class LraTileAssignmentTransposedMFMAF4(LraTileAssignmentTransposedMFMA):
         # alloc vgpr
         tReg    = writer.vgprPool.checkOut(1,"tReg") # remainder
         kReg    = writer.vgprPool.checkOut(1,"kReg") # remainder
-        tmpVgpr = writer.vgprPool.checkOutAligned(2, 2, "tmpVgpr")
+        tmpVgpr = writer.vgprPool.checkOutAligned(2, 2, tag="LraTileAssignmentTransposedMFMAF4_tmpVgpr")
         tmpVgprRes = ContinuousRegister(tmpVgpr, 2)
 
         # alloc vgpr
@@ -559,7 +559,7 @@ class LraTileAssignmentTransposedMFMAF4(LraTileAssignmentTransposedMFMA):
         strideUnroll = mt + ldsPad
         strideWave   = matrixInstT * vectorWidth
 
-        with writer.allocTmpSgpr(1) as tmpSgprInfo:
+        with writer.allocTmpSgpr(1, tag="LraTileAssignmentTransposedMFMAF4_tmpSgprInfo") as tmpSgprInfo:
             module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, "wtId=tid%wavelen"))
             # calc col index
             module.add(vectorStaticDivide(sReg, kReg, self.NUM_READ_ELEMENT_PER_THREAD, tmpVgprRes, f"s=wtid//{self.NUM_READ_ELEMENT_PER_THREAD}"))
@@ -618,7 +618,7 @@ class LraTileAssignmentTransposedMFMAF6(LraTileAssignmentTransposedMFMA):
         # alloc vgpr
         tReg    = writer.vgprPool.checkOut(1,"tReg") # remainder
         kReg    = writer.vgprPool.checkOut(1,"kReg") # remainder
-        tmpVgpr = writer.vgprPool.checkOutAligned(2, 2, "tmpVgpr")
+        tmpVgpr = writer.vgprPool.checkOutAligned(2, 2, tag="LraTileAssignmentTransposedMFMAF6_tmpVgpr")
         tmpVgprRes = ContinuousRegister(tmpVgpr, 2)
 
         # alloc vgpr
@@ -658,7 +658,7 @@ class LraTileAssignmentTransposedMFMAF6(LraTileAssignmentTransposedMFMA):
         strideUnroll = mt + ldsPad
         strideWave   = kernel["MatrixInstM"] * vectorWidth
 
-        with writer.allocTmpSgpr(1) as tmpSgprInfo:
+        with writer.allocTmpSgpr(1, tag="LraTileAssignmentTransposedMFMAF6_tmpSgprInfo") as tmpSgprInfo:
             module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, "wtId(k)=tid%wavelen"))
             # calc col index
             # col = (wtId % 8) // 4 * 32 + (wtId // 8) * 4 + wtId % 4
@@ -719,7 +719,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         # alloc vgpr
         tReg    = writer.vgprPool.checkOut(1,"tReg") # remainder
         kReg    = writer.vgprPool.checkOut(1,"kReg") # remainder
-        tmpVgpr = writer.vgprPool.checkOutAligned(2,2,"tmpVgpr")
+        tmpVgpr = writer.vgprPool.checkOutAligned(2,2, tag="LraTileAssignmentMFMA_tmpVgpr")
         tmpVgprRes = ContinuousRegister(tmpVgpr, 2)
 
         module.add(self.LraTileAssignmentCode(writer, kernel, tP, tReg, kReg, tmpVgprRes))
@@ -855,8 +855,8 @@ class LraTileAssignmentMFMA(LraTileAssignment):
           strideTile  = 1 # DTV case. Actual stride will be applied later.
 
         def perpPerm(vgprReg):
-           reMap0 = writer.vgprPool.checkOut(1)
-           reMap1 = writer.vgprPool.checkOut(1)
+           reMap0 = writer.vgprPool.checkOut(1, tag="perpPerm_reMap0")
+           reMap1 = writer.vgprPool.checkOut(1, tag="perpPerm_reMap1")
            perpStrideInv = permBlock // perpStride
 
            module.addComment0("Computing strided(%u) perp indicies"%perpStrideInv)
@@ -874,10 +874,10 @@ class LraTileAssignmentMFMA(LraTileAssignment):
            writer.vgprPool.checkIn(reMap0)
            writer.vgprPool.checkIn(reMap1)
 
-        with writer.allocTmpSgpr(1) as tmpSgprInfo:
+        with writer.allocTmpSgpr(1, tag="LraTileAssignmentMFMA_tmpSgprInfo") as tmpSgprInfo:
 
             if perpBlockSize > 0:
-               rotVgpr = writer.vgprPool.checkOut(1) # remainder
+               rotVgpr = writer.vgprPool.checkOut(1, tag="perpPerm_rotVgpr") # remainder
 
             # tile offset
             module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, \
