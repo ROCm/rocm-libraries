@@ -92,7 +92,7 @@ class PersistentLoopOn(PersistentLoop):
         # so on the 2nd iteration the value would be stale.
         if kernel["enableTDMA"] or kernel["enableTDMB"]:
             wavelen = kernel["WavefrontSize"]
-            with writer.allocTmpSgpr(1) as tmpSgprRes:
+            with writer.allocTmpSgpr(1, tag="PersistentLoopOn_openPersistentLoop_tmpSgprRes") as tmpSgprRes:
                 module.add(VReadfirstlaneB32(sgpr(tmpSgprRes.idx), vgpr("Serial"), "first tId"))
                 module.add(SLShiftRightB32(sgpr("WaveIdx"), ceil(log2(wavelen)), sgpr(tmpSgprRes.idx),
                                            "re-init WaveIdx for persistent loop iteration"))
@@ -142,12 +142,12 @@ class PersistentLoopOn(PersistentLoop):
         module.add(skCloseLoopLabel)
         if kernel.get("DebugPersistentKernelLoopForever", False):
             # StreamK 1/2/3 have no other exit, so this makes the kernel loop infinitely.
-            with writer.allocTmpSgpr(3) as tmpSgprInfo:
+            with writer.allocTmpSgpr(3, tag="PersistentLoopOn_closePersistentLoop_tmpSgprInfo") as tmpSgprInfo:
                 module.add(SLongBranchNegative(Label("PersistentLoopStart", ""), tmpSgprInfo))
         elif kernel["StreamK"] == 4:
             # module.add(SCmpGeU32(src0=sgpr("StreamKTileIdx"), src1=sgpr("SKTiles"), comment="Check if done all StreamK tiles"))
             module.add(SBarrier(comment="Sync before SK4 persistent re-entry"))
-            with writer.allocTmpSgpr(3) as tmpSgprInfo:
+            with writer.allocTmpSgpr(3, tag="PersistentLoopOn_closePersistentLoop_tmpSgprInfo2") as tmpSgprInfo:
                 module.add(SLongBranchNegative(Label("PersistentLoopStart", ""), tmpSgprInfo))
         elif kernel["StreamK"] == 2:
             streamk = Component.StreamK.find(writer)

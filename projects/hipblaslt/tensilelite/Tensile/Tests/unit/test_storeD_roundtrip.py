@@ -22,8 +22,6 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
 
-from hip import hip  # type: ignore
-
 from unittest.mock import MagicMock
 
 from rocisa.code import Module, TextBlock
@@ -39,7 +37,6 @@ from Tensile.Components.Subtile.Kernel import TileInfo, CD_F32
 
 from gpu_test_helpers import (
     TileConfig,
-    HAS_GFX950,
     GFX_TARGET,
     WAVESIZE,
     NUM_THREADS,
@@ -47,11 +44,13 @@ from gpu_test_helpers import (
     generate_kernel_asm,
     assemble_and_run,
     assemble_kernel,
+    hip,
     hip_check,
     init_rocisa,
+    requires_gpu,
 )
 
-pytestmark = pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
+pytestmark = requires_gpu
 
 # ---------------------------------------------------------------------------
 # Test configurations: (mt_a, mt_b, depth_u)
@@ -462,7 +461,7 @@ def _build_sgprs_for_test(writer):
       s[24:27] = SrdInput (4-aligned)
     """
     # s[0:3] reserved: s[0:1] = kernarg ptr, s[2:3] = padding to 4-align SrdD
-    writer.sgprPool.checkOut(4)
+    writer.sgprPool.checkOut(4, tag="_build_sgprs_for_test_sgprs")
 
     # SrdD: 4 sgprs for buffer descriptor (must be 4-aligned for buffer_store)
     srd_d_base = writer.sgprPool.checkOut(4, "SrdD")
@@ -507,7 +506,7 @@ def _build_sgprs_for_test(writer):
     writer.sgprs["Alpha"] = alpha                # s[20:21]
 
     # Pad to 4-align SrdInput (s[22:23] = padding, SrdInput starts at s[24])
-    writer.sgprPool.checkOut(2)
+    writer.sgprPool.checkOut(2, tag="_build_sgprs_for_test_pad_to_4_align_SrdInput")
 
     # SrdInput: input buffer descriptor (4-aligned)
     srd_in_base = writer.sgprPool.checkOut(4, "SrdInput")
