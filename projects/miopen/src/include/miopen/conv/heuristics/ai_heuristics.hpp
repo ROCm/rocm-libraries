@@ -50,6 +50,12 @@ namespace ai {
 // Common utility functions for AI heuristics (2D, 3D, and KTN)
 namespace common {
 
+// Sign- and bounds-safe one-hot encoding. A label outside [0, num_classes) yields an all-zero
+// vector (and a warning): an unknown or negative category degrades to "no class" rather than
+// indexing out of range (static_cast<size_t> of a negative value would otherwise be undefined).
+// Defined in ai_heuristics.cpp.
+std::vector<int> OneHot(long long label, std::size_t num_classes);
+
 /**
  * @brief Load JSON from file path
  * @param path File system path to JSON file

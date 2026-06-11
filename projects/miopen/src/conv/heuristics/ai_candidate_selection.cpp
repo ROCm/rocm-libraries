@@ -34,6 +34,7 @@
 #include <nlohmann/json.hpp>
 #include <miopen/filesystem.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
+#include <miopen/stringutils.hpp>
 #include <algorithm>
 #include <vector>
 #include <string>
@@ -368,17 +369,6 @@ float FeatureAt(const std::map<std::string, float>& features, const std::string&
     return it->second;
 }
 
-std::vector<int> OneHot(std::size_t label, std::size_t num_classes)
-{
-    std::vector<int> out(num_classes, 0);
-    if(label < num_classes)
-        out[label] = 1;
-    else
-        MIOPEN_LOG_W("EngineerCandidateSelectionInputFeatures: one_hot label "
-                     << label << " out of range for " << num_classes << " classes");
-    return out;
-}
-
 std::size_t EncodePrecisionLabel(float precision_feature)
 {
     // Indices must match the "precision" input encoding in the metadata:
@@ -448,11 +438,11 @@ EngineerCandidateSelectionInputFeatures(const std::vector<float>& raw_features,
     const std::size_t num_cu = 254;
 
     const auto in_layout =
-        OneHot(static_cast<std::size_t>(FeatureAt(features_by_name, "in_layout")), 2);
+        common::OneHot(static_cast<long long>(FeatureAt(features_by_name, "in_layout")), 2);
     const auto fil_layout =
-        OneHot(static_cast<std::size_t>(FeatureAt(features_by_name, "fil_layout")), 2);
+        common::OneHot(static_cast<long long>(FeatureAt(features_by_name, "fil_layout")), 2);
     const auto out_layout =
-        OneHot(static_cast<std::size_t>(FeatureAt(features_by_name, "out_layout")), 2);
+        common::OneHot(static_cast<long long>(FeatureAt(features_by_name, "out_layout")), 2);
     const auto precision_label = EncodePrecisionLabel(FeatureAt(features_by_name, "precision"));
     if(precision_label >= precision_class_count)
     {
@@ -463,7 +453,8 @@ EngineerCandidateSelectionInputFeatures(const std::vector<float>& raw_features,
                      std::to_string(precision_label) + " not supported by this model (" +
                      std::to_string(precision_class_count) + " precision classes)");
     }
-    const auto precision = OneHot(precision_label, precision_class_count);
+    const auto precision =
+        common::OneHot(static_cast<long long>(precision_label), precision_class_count);
     // Direction one-hot is present in ExtractTunaNetND2dFeatures but omitted here because
     // CandidateSelection metadata holds direction as a constant input.
 
@@ -610,11 +601,6 @@ std::size_t ComputeKernelConfigPreprocessorOutputDim(const CandidateSelectionMet
     return onehot_features + raw_numerical_features + kKernelConfigDerivedFeatureCount;
 }
 
-bool ParamNameEndsWith(const std::string& param_name, const std::string& suffix)
-{
-    return param_name.ends_with(suffix);
-}
-
 float GetRawConfigParamBySuffix(const std::vector<float>& raw_config_features,
                                 const std::vector<std::string>& active_params,
                                 const std::string& suffix,
@@ -622,7 +608,7 @@ float GetRawConfigParamBySuffix(const std::vector<float>& raw_config_features,
 {
     for(std::size_t i = 0; i < active_params.size(); ++i)
     {
-        if(ParamNameEndsWith(active_params[i], suffix))
+        if(EndsWith(active_params[i], suffix))
             return raw_config_features[i];
     }
     return missing_token;
@@ -1086,7 +1072,7 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
                 return false;
             return std::ranges::any_of(
                 conditional_layout->conditional_params,
-                [&](const auto& entry) { return ParamNameEndsWith(mapped_name, entry.first); });
+                [&](const auto& entry) { return EndsWith(mapped_name, entry.first); });
         };
 
         // Build a map from param_name to value for this candidate
@@ -1171,7 +1157,7 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
                     const std::string& out_name = packed.outputs[out_pos];
                     for(const auto& param_name : output_params)
                     {
-                        if(ParamNameEndsWith(param_name, out_name))
+                        if(EndsWith(param_name, out_name))
                             param_value_map[param_name] = (*decoded)[out_pos];
                     }
                 }
@@ -1195,7 +1181,7 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
                     continue;
                 for(const auto& param_name : output_params)
                 {
-                    if(ParamNameEndsWith(param_name, cond_name))
+                    if(EndsWith(param_name, cond_name))
                         param_value_map[param_name] = candidate[*idx];
                 }
             }

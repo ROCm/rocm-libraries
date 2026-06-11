@@ -48,6 +48,21 @@ namespace miopen {
 namespace ai {
 // Common utilities now in ai_common.hpp
 
+namespace common {
+// Sign- and bounds-safe one-hot. Declared in ai_heuristics.hpp; shared by the immediate-mode
+// (TunaNet) and kernel-tuning (candidate-selection) paths.
+std::vector<int> OneHot(long long label, std::size_t num_classes)
+{
+    std::vector<int> out(num_classes, 0);
+    if(label >= 0 && static_cast<std::size_t>(label) < num_classes)
+        out[static_cast<std::size_t>(label)] = 1;
+    else
+        MIOPEN_LOG_W("OneHot: label " << label << " out of range for " << num_classes
+                                      << " classes, returning all-zero vector");
+    return out;
+}
+} // namespace common
+
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 namespace immed_mode {
 Metadata::Metadata(const std::string& arch)
@@ -95,17 +110,6 @@ size_t Metadata::EncodePrecision(miopenDataType_t data_type) const
 size_t Metadata::EncodeLayout(const std::string& layout) const
 {
     return layout_encodings.at(layout);
-}
-
-std::vector<int> one_hot(const size_t label, const size_t num_classes)
-{
-    std::vector<int> out = std::vector<int>(num_classes, 0);
-    if(label < num_classes)
-        out[label] = 1;
-    else
-        MIOPEN_LOG_W("one_hot: label " << label << " out of range for " << num_classes
-                                       << " classes, returning all-zero vector");
-    return out;
 }
 
 /** `Model` encapuslates the machinery required to run inference on a TunaNet model
@@ -820,14 +824,16 @@ static std::vector<float> ExtractTunaNetND2dFeatures(const conv::ProblemDescript
     const std::size_t num_cu =
         254; // ctx.GetStream().GetMaxComputeUnits(); // should this be fixed?
 
-    const std::vector<int> in_layout = one_hot(metadata.EncodeInLayout(problem.GetInLayout()), 2);
+    const std::vector<int> in_layout =
+        common::OneHot(metadata.EncodeInLayout(problem.GetInLayout()), 2);
     const std::vector<int> fil_layout =
-        one_hot(metadata.EncodeFilLayout(problem.GetWeightsLayout()), 2);
+        common::OneHot(metadata.EncodeFilLayout(problem.GetWeightsLayout()), 2);
     const std::vector<int> out_layout =
-        one_hot(metadata.EncodeOutLayout(problem.GetOutLayout()), 2);
+        common::OneHot(metadata.EncodeOutLayout(problem.GetOutLayout()), 2);
     const std::vector<int> precision =
-        one_hot(metadata.EncodePrecision(problem.GetInDataType()), 4);
-    const std::vector<int> direction = one_hot(metadata.EncodeDirection(problem.GetDirection()), 3);
+        common::OneHot(metadata.EncodePrecision(problem.GetInDataType()), 4);
+    const std::vector<int> direction =
+        common::OneHot(metadata.EncodeDirection(problem.GetDirection()), 3);
 
     // Avoid division by zero
     if(groups < 1)
