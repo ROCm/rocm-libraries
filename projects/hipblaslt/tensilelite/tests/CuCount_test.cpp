@@ -305,8 +305,9 @@ TEST(StreamKForceDPOnlyTest, DoesNotRequestPartialWorkspace)
 // can never silently launch the SK4 grid again (the original regression where
 // SK5-off matched SK4's grid_size=256 instead of SK3's tile-count grid).
 // AUTO (mode 2) routes through origami::streamk::select_hybrid_mode and
-// requires HipAMDGPU::analyticalHardware; see the AUTO/smCountTarget tests
-// below (mock analytical hardware, no GPU required).
+// requires HipAMDGPU::analyticalHardware; see the AUTO smoke test below
+// (mock analytical hardware, no GPU required). Threshold and smCountTarget
+// cases are covered by origami/tests/test_streamk.cpp.
 // ===========================================================================
 
 namespace
@@ -560,36 +561,7 @@ INSTANTIATE_TEST_SUITE_P(
         return info.param.suffix;
     });
 
-TEST(StreamK5HybridModeTest, SmCountTargetForwardsIntoAutoHeuristic)
-{
-    StreamK5AnalyticalEnv env;
-    auto                  problem = makeGemmProblem(2560, 2560, 64);
-    problem.setParams().setStreamKTileSchedulingMode(2);
-    problem.setParams().setSmCountTarget(0);
-
-    EXPECT_FALSE(env.solution.streamK5EffectiveDynamic(problem, env.device))
-        << "smCountTarget=0 should use full N_CU and keep AUTO static";
-
-    problem.setParams().setSmCountTarget(static_cast<int>(kGfx950AnalyticalCuCount / 2));
-    EXPECT_TRUE(env.solution.streamK5EffectiveDynamic(problem, env.device))
-        << "smCountTarget must clamp available CUs and flip AUTO to dynamic";
-}
-
-TEST(StreamK5HybridModeTest, SmCountTargetZeroMatchesFullCuCount)
-{
-    StreamK5AnalyticalEnv env;
-    auto                  problem = makeGemmProblem(4096, 4096, 64);
-    problem.setParams().setStreamKTileSchedulingMode(2);
-
-    problem.setParams().setSmCountTarget(0);
-    const bool withZero = env.solution.streamK5EffectiveDynamic(problem, env.device);
-
-    problem.setParams().setSmCountTarget(static_cast<int>(kGfx950AnalyticalCuCount));
-    const bool withFull = env.solution.streamK5EffectiveDynamic(problem, env.device);
-
-    EXPECT_EQ(withZero, withFull)
-        << "smCountTarget=0 and smCountTarget=N_CU must resolve AUTO identically";
-}
+// smCountTarget AUTO behavior is covered by origami/tests/test_streamk.cpp.
 
 // ===========================================================================
 // Sk3Sk5OffPartition512Test -- dump and compare host partition state for the

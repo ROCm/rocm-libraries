@@ -367,13 +367,7 @@ class StreamK(Component):
         if skConstsInVgprs:
             module.add(VReadfirstlaneB32(dst=sgpr(sMagicNum), src=vgpr(writer.states.skConstVgprs["MagicNumberItersPerTile"])))
             module.add(VReadfirstlaneB32(dst=sgpr(sMagicShift), src=vgpr(writer.states.skConstVgprs["MagicShiftItersPerTile"])))
-        # SK5 hybrid mode: bit 30 of MagicShiftItersPerTile carries the
-        # SK3/SK4 mode-select bit and is already cleared in place by
-        # _emitModeExtraction at preLoop. Bit 31 is the magic-division "add"
-        # indicator and bits 0-4 are the shift amount; sMagicDiv2 consumes
-        # both, so the mask must preserve them and drop only the mode bit.
-        # Mask to {add bit | 5-bit shift} defensively in case the source
-        # value is ever re-fetched.
+        # SK5: mode bit (30) already cleared at preLoop; keep magic add + shift.
         if kernel["StreamK"] == 5:
             module.add(SAndB32(dst=sgpr(sMagicShift), src0=sgpr(sMagicShift), src1=hex(0x8000001F),
                                comment="SK5: keep magic add bit (31) + 5-bit shift, drop mode bit (30)"))
@@ -3502,18 +3496,7 @@ class StreamKHybrid(StreamK):
     # Helpers
     # ------------------------------------------------------------------
     def _emitModeExtraction(self, writer, kernel):
-        """Extract bit 30 of MagicShiftItersPerTile -> StreamKHybridMode,
-        then clear only bit 30 in place so the SK4 path's read via the
-        SKTiles RegSet alias (which aliases sgprMagicShiftItersPerTile) sees
-        a clean tile count, while the SK3 path keeps its magic-division
-        "add" bit.
-
-        Bit 31 cannot carry the mode (magicNumberAlg2 uses it as the
-        magic-division "add" indicator; see the class docstring). Bit 30 is
-        free in both encodings: the magic shift only ever uses bits 0-4
-        (shift, <= 31) plus bit 31 (add), and the SK4 tile count is far below
-        2^30.
-        """
+        """Extract mode bit 30 into StreamKHybridMode; clear it in place."""
         module = Module("SK5 mode extraction")
         module.add(SLShiftRightB32(dst=sgpr("StreamKHybridMode"),
                                    src=sgpr("MagicShiftItersPerTile"),

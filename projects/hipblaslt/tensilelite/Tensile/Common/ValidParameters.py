@@ -762,14 +762,8 @@ validParameters = { # we need to make sure this matches develop
     # 2 : Two-Tile StreamK (each WG completes an even number of sk iterations, followed by an even number of dp tiles)
     # 3 : Two-Tile StreamK with DP before SK tiles
     # 4 : Dynamic StreamK using per-XCD work queues
-    # 5 : Hybrid SK3 + SK4: emits BOTH the static (mode 3) and dynamic (mode 4)
-    #     code paths in a single kernel. A runtime mode bit packed into bit 30
-    #     of MagicShiftItersPerTile (set by the host from the
-    #     HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT matmul descriptor
-    #     attribute, or the TENSILE_STREAMK5_FORCE_MODE debug env override)
-    #     selects which path runs end-to-end. The bit is loaded once at kernel
-    #     entry into the StreamKHybridMode SGPR and consulted at each SK3/SK4
-    #     codegen fork point.
+    # 5 : Hybrid SK3 + SK4 in one kernel; mode bit 30 of MagicShiftItersPerTile
+    #     selects the active sub-path (see StreamKHybrid in StreamK.py).
     # StreamK kernels can adjust the number of CUs being used.
     # Using fewer sometimes increases overall throughput by allowing other kernels to run in parallel.
     # StreamK grid is controlled by setting these enviornment variables:
