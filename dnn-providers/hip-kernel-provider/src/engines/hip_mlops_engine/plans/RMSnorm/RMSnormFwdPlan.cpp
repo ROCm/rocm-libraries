@@ -4,10 +4,10 @@
 #include "RMSnormFwdPlan.hpp"
 #include "../PlanUtils.hpp"
 #include "RMSnormCommon.hpp"
-#include "hip/HipKernelCompileOptions.hpp"
+#include "compilation/KernelCompileOptions.hpp"
 
-#include "HipKernelUtils.hpp"
-#include "hip/IKernelCompiler.hpp"
+#include "compilation/IKernelCompiler.hpp"
+#include "core/Utils.hpp"
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
@@ -15,6 +15,8 @@
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+
+using namespace hip_kernel_provider::core::utils;
 
 namespace hip_kernel_provider::rmsnorm
 {
@@ -73,7 +75,7 @@ RMSnormFwdPlan::RMSnormFwdPlan(RMSnormFwdParams&& params)
 {
 }
 
-size_t RMSnormFwdPlan::getWorkspaceSize([[maybe_unused]] const HipKernelHandle& handle) const
+size_t RMSnormFwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
 {
     // No workspace needed for RMS norm
     return 0;
@@ -140,7 +142,7 @@ void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     const std::string computeTypeString = getKernelParamTypeString(computeDataType);
 
     // Prepare compilation options
-    HipKernelCompileOptions options(_params.x(), deviceProperties);
+    KernelCompileOptions options(_params.x(), deviceProperties);
     options.add("HIP_PLUGIN_RMSNORM_INNER_SIZE", innerSize);
     options.add("HIP_PLUGIN_RMSNORM_STRIDE", stride);
     options.add("HIP_PLUGIN_RMSNORM_INPUT_TYPE", inputTypeString);
@@ -157,7 +159,7 @@ void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     _runnableKernel->setGridSize(xgridsize, ygridsize, zgridsize);
 }
 
-void RMSnormFwdPlan::execute(const HipKernelHandle& handle,
+void RMSnormFwdPlan::execute(const Handle& handle,
                              const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                              uint32_t numDeviceBuffers,
                              [[maybe_unused]] void* workspace) const
@@ -169,23 +171,18 @@ void RMSnormFwdPlan::execute(const HipKernelHandle& handle,
     }
 
     // Get device buffer pointers
-    auto xBuffer
-        = hip_kernel_utils::findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
-    auto scaleBuffer = hip_kernel_utils::findDeviceBuffer(
-        _params.scale()->uid(), deviceBuffers, numDeviceBuffers);
-    auto yBuffer
-        = hip_kernel_utils::findDeviceBuffer(_params.y()->uid(), deviceBuffers, numDeviceBuffers);
+    auto xBuffer = findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
+    auto scaleBuffer = findDeviceBuffer(_params.scale()->uid(), deviceBuffers, numDeviceBuffers);
+    auto yBuffer = findDeviceBuffer(_params.y()->uid(), deviceBuffers, numDeviceBuffers);
 
-    void* biasBufferPtr = (_params.bias() == nullptr)
-                              ? nullptr
-                              : hip_kernel_utils::findDeviceBuffer(
-                                    _params.bias()->uid(), deviceBuffers, numDeviceBuffers)
-                                    .ptr;
-    void* invRMSBufferPtr = (_params.invRMS() == nullptr)
-                                ? nullptr
-                                : hip_kernel_utils::findDeviceBuffer(
-                                      _params.invRMS()->uid(), deviceBuffers, numDeviceBuffers)
-                                      .ptr;
+    void* biasBufferPtr
+        = (_params.bias() == nullptr)
+              ? nullptr
+              : findDeviceBuffer(_params.bias()->uid(), deviceBuffers, numDeviceBuffers).ptr;
+    void* invRMSBufferPtr
+        = (_params.invRMS() == nullptr)
+              ? nullptr
+              : findDeviceBuffer(_params.invRMS()->uid(), deviceBuffers, numDeviceBuffers).ptr;
 
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT epsilonTensor;
     _params.epsilon()->UnPackTo(&epsilonTensor);

@@ -278,6 +278,8 @@ def make_writer_and_tileinfos(kernel, fp4=False):
     ri = rocIsa.getInstance()
     import shutil
     asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
+    # Always re-init to gfx950: rocisa is a process-wide singleton and
+    # gfx1250 codegen tests may have changed it in the same pytest session.
     ri.init((9, 5, 0), asmpath)
     ri.setKernel((9, 5, 0), 64)
 
@@ -294,6 +296,7 @@ def make_writer_and_tileinfos(kernel, fp4=False):
         regCaps={"MaxSgpr": 106, "MaxVgpr": 256, "PhysicalMaxVgpr": 512},
         unrollIdx=0,
         laneSGPRCount=2,
+        subtileLdsSwizzle=True,
     )
     writer.allocTmpSgpr = lambda num, alignment=None, tag=None: allocTmpGpr(
         writer.sgprPool, num, writer.states.regCaps["MaxSgpr"], alignment, tag, None)
