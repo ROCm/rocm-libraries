@@ -15,6 +15,8 @@
 #include <Tensile/Debug.hpp>
 #include <Tensile/ExactLogicLibrary.hpp>
 #include <Tensile/hip/HipHardware.hpp>
+#include <origami/hardware.hpp>
+#include <origami/streamk.hpp>
 
 #include "FallbackTestUtils.hpp"
 
@@ -302,9 +304,79 @@ TEST(StreamKForceDPOnlyTest, DoesNotRequestPartialWorkspace)
 // the single source of truth; these tests lock that resolution so SK5-off
 // can never silently launch the SK4 grid again (the original regression where
 // SK5-off matched SK4's grid_size=256 instead of SK3's tile-count grid).
-// AUTO (mode 2) routes through the origami heuristic and needs analytical
-// hardware, so it is exercised by the on-device OOB sweep rather than here.
+// AUTO (mode 2) routes through origami::streamk::select_hybrid_mode and
+// requires HipAMDGPU::analyticalHardware; see the AUTO/smCountTarget tests
+// below (mock analytical hardware, no GPU required).
 // ===========================================================================
+
+namespace
+{
+    constexpr size_t kGfx950AnalyticalCuCount = 256;
+
+    origami::hardware_t makeGfx950AnalyticalHardware()
+    {
+        using arch_t = origami::hardware_t::architecture_t;
+        return origami::hardware_t(arch_t::gfx950,
+                                   kGfx950AnalyticalCuCount,
+                                   163840,
+                                   8,
+                                   1.0,
+                                   1.0,
+                                   1.0,
+                                   4000000,
+                                   1.2,
+                                   1,
+                                   std::make_tuple(0.0, 0.008, 0.0));
+    }
+
+    hip::HipAMDGPU makeHipDeviceWithAnalytical(origami::hardware_t const& hw)
+    {
+        hip::HipAMDGPU device;
+        device.processor        = AMDGPU::Processor::gfx950;
+        device.computeUnitCount = static_cast<int>(hw.N_CU);
+        device.deviceName       = "test-gfx950-analytical";
+        device.analyticalHardware = std::make_shared<origami::hardware_t>(hw);
+        return device;
+    }
+
+    ContractionSolution makeStreamK5Solution()
+    {
+        ContractionSolution solution;
+        solution.sizeMapping.streamK           = 5;
+        solution.sizeMapping.macroTile         = TensileLite::dim3(128, 128, 1);
+        solution.sizeMapping.depthU            = 64;
+        solution.sizeMapping.matrixInstruction = {16, 16, 32, 1};
+        solution.sizeMapping.CUOccupancy       = 1;
+        return solution;
+    }
+
+    ContractionProblemGemm makeGemmProblem(size_t m, size_t n, size_t k)
+    {
+        auto problem = ContractionProblemGemm::GEMM(
+            false, false, m, n, k, m, n, m, 1.0, false, 1);
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        return problem;
+    }
+} // namespace
+
+TEST(StreamK5HybridModeTest, ProblemParamsDefaultToAuto)
+{
+    auto problem = dummyProblem();
+    EXPECT_EQ(problem.getParams().streamKTileSchedulingMode(), 2)
+        << "StreamK=5 hybrid mode should default to AUTO (2)";
+    EXPECT_EQ(problem.getParams().smCountTarget(), 0)
+        << "smCountTarget should default to 0 (use all device CUs)";
+}
+
+TEST(StreamK5HybridModeTest, ProblemParamsRoundTripModeAndSmCountTarget)
+{
+    auto problem = dummyProblem();
+    problem.setParams().setStreamKTileSchedulingMode(1);
+    problem.setParams().setSmCountTarget(128);
+    EXPECT_EQ(problem.getParams().streamKTileSchedulingMode(), 1);
+    EXPECT_EQ(problem.getParams().smCountTarget(), 128);
+}
 
 TEST(StreamK5HybridModeTest, TriStateOffResolvesStatic)
 {
@@ -338,6 +410,72 @@ TEST(StreamK5HybridModeTest, TriStateOnResolvesDynamic)
     problem.setParams().setStreamKTileSchedulingMode(1); // ON -> dynamic (SK4)
     EXPECT_TRUE(solution.streamK5EffectiveDynamic(problem, device))
         << "StreamK=5 ON must resolve to the dynamic (SK4) sub-path";
+}
+
+TEST(StreamK5HybridModeTest, TriStateAutoResolvesStaticViaOrigami)
+{
+    auto solution = makeStreamK5Solution();
+    auto hw       = makeGfx950AnalyticalHardware();
+    auto device   = makeHipDeviceWithAnalytical(hw);
+
+    // 2560^2 @ MT128 -> 400 tiles; tiles/CU ~= 1.56 < 2.08 threshold -> static.
+    auto problem = makeGemmProblem(2560, 2560, 64);
+    problem.setParams().setStreamKTileSchedulingMode(2);
+
+    EXPECT_FALSE(solution.streamK5EffectiveDynamic(problem, device))
+        << "StreamK=5 AUTO must delegate to origami and pick static for low tiles/CU";
+}
+
+TEST(StreamK5HybridModeTest, TriStateAutoResolvesDynamicViaOrigami)
+{
+    auto solution = makeStreamK5Solution();
+    auto hw       = makeGfx950AnalyticalHardware();
+    auto device   = makeHipDeviceWithAnalytical(hw);
+
+    // 4096^2 @ MT128 -> 1024 tiles; tiles/CU = 4 > 2.08 threshold -> dynamic.
+    auto problem = makeGemmProblem(4096, 4096, 64);
+    problem.setParams().setStreamKTileSchedulingMode(2);
+
+    EXPECT_TRUE(solution.streamK5EffectiveDynamic(problem, device))
+        << "StreamK=5 AUTO must delegate to origami and pick dynamic for high tiles/CU";
+}
+
+TEST(StreamK5HybridModeTest, SmCountTargetForwardsIntoAutoHeuristic)
+{
+    auto solution = makeStreamK5Solution();
+    auto hw       = makeGfx950AnalyticalHardware();
+    auto device   = makeHipDeviceWithAnalytical(hw);
+
+    // Borderline static with full CU count; halving effective CUs flips to dynamic.
+    auto problem = makeGemmProblem(2560, 2560, 64);
+    problem.setParams().setStreamKTileSchedulingMode(2);
+    problem.setParams().setSmCountTarget(0);
+
+    EXPECT_FALSE(solution.streamK5EffectiveDynamic(problem, device))
+        << "smCountTarget=0 should use full N_CU and keep AUTO static";
+
+    problem.setParams().setSmCountTarget(static_cast<int>(kGfx950AnalyticalCuCount / 2));
+    EXPECT_TRUE(solution.streamK5EffectiveDynamic(problem, device))
+        << "smCountTarget must clamp available CUs and flip AUTO to dynamic";
+}
+
+TEST(StreamK5HybridModeTest, SmCountTargetZeroMatchesFullCuCount)
+{
+    auto solution = makeStreamK5Solution();
+    auto hw       = makeGfx950AnalyticalHardware();
+    auto device   = makeHipDeviceWithAnalytical(hw);
+
+    auto problem = makeGemmProblem(4096, 4096, 64);
+    problem.setParams().setStreamKTileSchedulingMode(2);
+
+    problem.setParams().setSmCountTarget(0);
+    const bool withZero = solution.streamK5EffectiveDynamic(problem, device);
+
+    problem.setParams().setSmCountTarget(static_cast<int>(kGfx950AnalyticalCuCount));
+    const bool withFull = solution.streamK5EffectiveDynamic(problem, device);
+
+    EXPECT_EQ(withZero, withFull)
+        << "smCountTarget=0 and smCountTarget=N_CU must resolve AUTO identically";
 }
 
 // ===========================================================================
