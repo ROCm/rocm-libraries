@@ -184,6 +184,9 @@ void testing_ger_batched(const Arguments& arg)
     T       h_alpha     = arg.get_alpha<T>();
     int64_t batch_count = arg.batch_count;
 
+    bool    ab_striding  = arg.alpha_beta_stride;
+    int64_t alpha_stride = ab_striding ? arg.stride_c : 0;
+
     rocblas_local_handle handle{arg};
 
     // argument check before allocating invalid memory
@@ -203,19 +206,20 @@ void testing_ger_batched(const Arguments& arg)
     HOST_MEMCHECK(host_batch_matrix<T>, hA_gold, (M, N, lda, batch_count));
     HOST_MEMCHECK(host_batch_vector<T>, hy, (N, incy, batch_count));
     HOST_MEMCHECK(host_batch_vector<T>, hx, (M, incx, batch_count));
-    HOST_MEMCHECK(host_vector<T>, halpha, (1));
-    halpha[0] = h_alpha;
+    HOST_MEMCHECK(host_vector<T>, halpha, (batch_count, alpha_stride));
 
     // Allocate device memory
     DEVICE_MEMCHECK(device_batch_matrix<T>, dA, (M, N, lda, batch_count));
     DEVICE_MEMCHECK(device_batch_vector<T>, dy, (N, incy, batch_count));
     DEVICE_MEMCHECK(device_batch_vector<T>, dx, (M, incx, batch_count));
-    DEVICE_MEMCHECK(device_vector<T>, d_alpha, (1));
+    DEVICE_MEMCHECK(device_vector<T>, d_alpha, (batch_count, alpha_stride));
 
     // Initialize data on host memory
     rocblas_init_matrix(hA, arg, rocblas_client_never_set_nan, rocblas_client_general_matrix, true);
     rocblas_init_vector(hx, arg, rocblas_client_alpha_sets_nan, false, true);
     rocblas_init_vector(hy, arg, rocblas_client_alpha_sets_nan);
+
+    rocblas_init_vector_alternating_sign(halpha, h_alpha);
 
     hA_gold.copy_from(hA);
 
@@ -294,7 +298,7 @@ void testing_ger_batched(const Arguments& arg)
                     DEVICE_MEMCHECK(device_batch_matrix<T>, dA_copy, (M, N, lda, batch_count));
                     DEVICE_MEMCHECK(device_batch_vector<T>, dy_copy, (N, incy, batch_count));
                     DEVICE_MEMCHECK(device_batch_vector<T>, dx_copy, (M, incx, batch_count));
-                    DEVICE_MEMCHECK(device_vector<T>, d_alpha_copy, (1));
+                    DEVICE_MEMCHECK(device_vector<T>, d_alpha_copy, (batch_count, alpha_stride));
 
                     CHECK_HIP_ERROR(dx_copy.transfer_from(hx));
                     CHECK_HIP_ERROR(dy_copy.transfer_from(hy));
@@ -329,7 +333,8 @@ void testing_ger_batched(const Arguments& arg)
         cpu_time_used = get_time_us_no_sync();
         for(size_t b = 0; b < batch_count; ++b)
         {
-            ref_ger<T, CONJ>(M, N, h_alpha, hx[b], incx, hy[b], incy, hA_gold[b], lda);
+            ref_ger<T, CONJ>(
+                M, N, halpha[b * alpha_stride], hx[b], incx, hy[b], incy, hA_gold[b], lda);
         }
         cpu_time_used = get_time_us_no_sync() - cpu_time_used;
 

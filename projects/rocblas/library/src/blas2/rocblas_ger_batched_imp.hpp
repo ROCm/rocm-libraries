@@ -117,7 +117,9 @@ namespace
                              "--lda",
                              lda,
                              "--batch_count",
-                             batch_count);
+                             batch_count,
+                             "--alpha_stride",
+                             handle->get_stride_alpha());
 
         if(layer_mode & rocblas_layer_mode_log_profile)
             logger.log_profile(handle,
@@ -169,11 +171,43 @@ namespace
 
         rocblas_status status;
         if constexpr(rocblas_is_complex<T> && CONJ)
-            status = ROCBLAS_API(rocblas_internal_gerc_batched_template)(
-                handle, m, n, alpha, 0, x, 0, incx, 0, y, 0, incy, 0, A, 0, lda, 0, batch_count);
+            status = ROCBLAS_API(rocblas_internal_gerc_batched_template)(handle,
+                                                                         m,
+                                                                         n,
+                                                                         alpha,
+                                                                         handle->get_stride_alpha(),
+                                                                         x,
+                                                                         0,
+                                                                         incx,
+                                                                         0,
+                                                                         y,
+                                                                         0,
+                                                                         incy,
+                                                                         0,
+                                                                         A,
+                                                                         0,
+                                                                         lda,
+                                                                         0,
+                                                                         batch_count);
         else
-            status = ROCBLAS_API(rocblas_internal_ger_batched_template)(
-                handle, m, n, alpha, 0, x, 0, incx, 0, y, 0, incy, 0, A, 0, lda, 0, batch_count);
+            status = ROCBLAS_API(rocblas_internal_ger_batched_template)(handle,
+                                                                        m,
+                                                                        n,
+                                                                        alpha,
+                                                                        handle->get_stride_alpha(),
+                                                                        x,
+                                                                        0,
+                                                                        incx,
+                                                                        0,
+                                                                        y,
+                                                                        0,
+                                                                        incy,
+                                                                        0,
+                                                                        A,
+                                                                        0,
+                                                                        lda,
+                                                                        0,
+                                                                        batch_count);
 
         if(status != rocblas_status_success)
             return status;

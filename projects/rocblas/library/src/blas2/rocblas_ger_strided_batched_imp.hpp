@@ -134,7 +134,9 @@ namespace
                              "--stride_a",
                              strideA,
                              "--batch_count",
-                             batch_count);
+                             batch_count,
+                             "--alpha_stride",
+                             handle->get_stride_alpha());
 
         if(layer_mode & rocblas_layer_mode_log_profile)
             logger.log_profile(handle,
@@ -212,7 +214,7 @@ namespace
                                                                  m,
                                                                  n,
                                                                  alpha,
-                                                                 0,
+                                                                 handle->get_stride_alpha(),
                                                                  x,
                                                                  0,
                                                                  incx,
@@ -231,7 +233,7 @@ namespace
                                                                 m,
                                                                 n,
                                                                 alpha,
-                                                                0,
+                                                                handle->get_stride_alpha(),
                                                                 x,
                                                                 0,
                                                                 incx,
