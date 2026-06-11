@@ -319,14 +319,33 @@ RpptGenericDesc toGenericDesc(const RpptDesc& desc)
     genericDesc.offsetInBytes = desc.offsetInBytes;
     genericDesc.dataType = desc.dataType;
     genericDesc.layout = desc.layout;
-    genericDesc.dims[0] = desc.n;
-    genericDesc.dims[1] = desc.c;
-    genericDesc.dims[2] = desc.h;
-    genericDesc.dims[3] = desc.w;
-    genericDesc.strides[0] = desc.strides.nStride;
-    genericDesc.strides[1] = desc.strides.cStride;
-    genericDesc.strides[2] = desc.strides.hStride;
-    genericDesc.strides[3] = desc.strides.wStride;
+
+    // Set dims and strides based on layout
+    if (desc.layout == RpptLayout::NHWC)
+    {
+        // NHWC: dims = [N, H, W, C]
+        genericDesc.dims[0] = desc.n;
+        genericDesc.dims[1] = desc.h;
+        genericDesc.dims[2] = desc.w;
+        genericDesc.dims[3] = desc.c;
+        genericDesc.strides[0] = desc.strides.nStride;
+        genericDesc.strides[1] = desc.strides.hStride;
+        genericDesc.strides[2] = desc.strides.wStride;
+        genericDesc.strides[3] = desc.strides.cStride;
+    }
+    else // NCHW
+    {
+        // NCHW: dims = [N, C, H, W]
+        genericDesc.dims[0] = desc.n;
+        genericDesc.dims[1] = desc.c;
+        genericDesc.dims[2] = desc.h;
+        genericDesc.dims[3] = desc.w;
+        genericDesc.strides[0] = desc.strides.nStride;
+        genericDesc.strides[1] = desc.strides.cStride;
+        genericDesc.strides[2] = desc.strides.hStride;
+        genericDesc.strides[3] = desc.strides.wStride;
+    }
+
     return genericDesc;
 }
 
@@ -569,6 +588,89 @@ void init_grid_dropout_boxes(int batchCount, RpptRoiLtrb* anchorBoxInfoTensor, R
                 anchorBoxInfoTensor[boxIdx].lt.y = y1;
                 anchorBoxInfoTensor[boxIdx].rb.x = x2;
                 anchorBoxInfoTensor[boxIdx].rb.y = y2;
+            }
+        }
+    }
+}
+
+// Dropout helper function for channel dropout
+void generate_channel_dropout_mask(Rpp8u* dropoutTensor, Rpp32f* dropoutProbability, int batchSize, int channels, int seed)
+{
+    int numThreads = omp_get_max_threads();
+    omp_set_dynamic(0);
+
+#pragma omp parallel for num_threads(numThreads)
+    for (int batchCount = 0; batchCount < batchSize; batchCount++)
+    {
+        std::mt19937 rng(seed + batchCount);
+        std::bernoulli_distribution keepDist(1.0f - dropoutProbability[batchCount]);
+        Rpp8u *maskPtrTemp = dropoutTensor + (batchCount * channels);
+        bool atLeastOne = false;
+
+        for (int channel = 0; channel < channels; channel++)
+        {
+            maskPtrTemp[channel] = keepDist(rng);
+            atLeastOne |= maskPtrTemp[channel];
+        }
+
+        if (!atLeastOne)
+            maskPtrTemp[rng() % channels] = 1;
+    }
+}
+
+// Dropout helper function for cutout dropout
+void init_cutout_dropout(int batchSize, int maxBoxesPerImage, Rpp32u* numOfBoxes, RpptRoiLtrb* anchorBoxInfoTensor, RpptROIPtr roiTensorPtrSrc, int channels, int BitDepthTestMode, int seed, int dropoutType, void *colorBuffer)
+{
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<float> pos_ratio(0.1f, 0.9f);
+    std::uniform_real_distribution<float> wh_ratio_cutout(0.4f, 0.6f);
+
+    Rpp8u *colors8u = reinterpret_cast<Rpp8u *>(colorBuffer);
+    Rpp16f *colors16f = reinterpret_cast<Rpp16f *>(colorBuffer);
+    Rpp32f *colors32f = reinterpret_cast<Rpp32f *>(colorBuffer);
+    Rpp8s *colors8s = reinterpret_cast<Rpp8s *>(colorBuffer);
+
+    for (int i = 0; i < batchSize; i++)
+    {
+        numOfBoxes[i] = maxBoxesPerImage;
+        for (int j = 0; j < maxBoxesPerImage; j++)
+        {
+            int idx = i * maxBoxesPerImage + j;
+
+            // Get ROI dimensions
+            Rpp32f roiWidth = static_cast<Rpp32f>(roiTensorPtrSrc[i].xywhROI.roiWidth);
+            Rpp32f roiHeight = static_cast<Rpp32f>(roiTensorPtrSrc[i].xywhROI.roiHeight);
+            Rpp32f roiX = static_cast<Rpp32f>(roiTensorPtrSrc[i].xywhROI.xy.x);
+            Rpp32f roiY = static_cast<Rpp32f>(roiTensorPtrSrc[i].xywhROI.xy.y);
+
+            // Random box dimensions (40-60% of ROI)
+            Rpp32f boxWidth = roiWidth * wh_ratio_cutout(rng);
+            Rpp32f boxHeight = roiHeight * wh_ratio_cutout(rng);
+
+            // Random position within ROI
+            Rpp32f maxX = roiX + roiWidth - boxWidth;
+            Rpp32f maxY = roiY + roiHeight - boxHeight;
+            Rpp32f boxX = roiX + (maxX - roiX) * pos_ratio(rng);
+            Rpp32f boxY = roiY + (maxY - roiY) * pos_ratio(rng);
+
+            // Set anchor box in LTRB format
+            anchorBoxInfoTensor[idx].lt.x = static_cast<Rpp32u>(boxX);
+            anchorBoxInfoTensor[idx].lt.y = static_cast<Rpp32u>(boxY);
+            anchorBoxInfoTensor[idx].rb.x = static_cast<Rpp32u>(boxX + boxWidth);
+            anchorBoxInfoTensor[idx].rb.y = static_cast<Rpp32u>(boxY + boxHeight);
+
+            // Set random color for the box
+            for (int c = 0; c < channels; c++)
+            {
+                int colorIdx = idx * channels + c;
+                if (BitDepthTestMode == 0) // U8
+                    colors8u[colorIdx] = static_cast<Rpp8u>(rng() % 256);
+                else if (BitDepthTestMode == 2) // F32
+                    colors32f[colorIdx] = static_cast<Rpp32f>(rng() % 256) / 255.0f;
+                else if (BitDepthTestMode == 1) // F16
+                    colors16f[colorIdx] = static_cast<Rpp16f>(rng() % 256) / 255.0f;
+                else if (BitDepthTestMode == 6) // I8
+                    colors8s[colorIdx] = static_cast<Rpp8s>((rng() % 256) - 128);
             }
         }
     }

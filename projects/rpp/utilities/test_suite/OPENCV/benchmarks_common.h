@@ -211,7 +211,7 @@ void benchmark_OpenCV_ColorJitter(const vector<Mat>& imgs, float brightness, flo
 void benchmark_OpenCV_BoxFilter(const vector<Mat>& imgs, bool isColor, int kernelSize);
 void benchmark_OpenCV_MedianFilter(const vector<Mat>& imgs, bool isColor, int kernelSize);
 void benchmark_OpenCV_GaussianFilter(const vector<Mat>& imgs, bool isColor, int kernelSize, double sigma);
-void benchmark_OpenCV_SobelFilter(const vector<Mat>& imgs, bool isColor);
+void benchmark_OpenCV_SobelFilter(const vector<Mat>& imgs, bool isColor, int sobelType);
 void benchmark_OpenCV_Emboss(const vector<Mat>& imgs, bool isColor, int kernelSize, float strength);
 void benchmark_OpenCV_Crop(const vector<Mat>& imgs, bool isColor, int cropWidth, int cropHeight);
 void benchmark_OpenCV_Resize(const vector<Mat>& imgs, bool isColor, int dstW, int dstH, int interpType, const string& interpName);

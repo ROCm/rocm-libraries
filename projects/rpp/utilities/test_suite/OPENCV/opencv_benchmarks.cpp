@@ -25,6 +25,12 @@ SOFTWARE.
 #include "benchmarks_common.h"
 
 // ==================== OPENCV BENCHMARK FUNCTIONS ====================
+//
+// IMPORTANT NOTE: All input images are in RGB format (not BGR)!
+// The loadBatchImages() function converts from BGR to RGB at load time for compatibility with RPP.
+// All OpenCV color conversions must use COLOR_RGB2XXX instead of COLOR_BGR2XXX.
+//
+// ====================================================================
 
 void benchmark_OpenCV_Brightness(const vector<Mat>& imgs, bool isColor, float alpha, float beta)
 {
@@ -44,7 +50,7 @@ void benchmark_OpenCV_Brightness(const vector<Mat>& imgs, bool isColor, float al
     ostringstream params;
     params << "alpha=" << alpha << ", beta=" << beta;
     printResult("OpenCV Brightness", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), params.str());
+                duration<double, milli>(end - start).count(), params.str());
 }
 
 void benchmark_OpenCV_GammaCorrection(const vector<Mat>& imgs, bool isColor, float gamma)
@@ -66,7 +72,7 @@ void benchmark_OpenCV_GammaCorrection(const vector<Mat>& imgs, bool isColor, flo
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV GammaCorrection", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "gamma=" + to_string(gamma));
+                duration<double, milli>(end - start).count(), "gamma=" + to_string(gamma));
 }
 
 void benchmark_OpenCV_Blend(const vector<Mat>& imgs, bool isColor, float alpha)
@@ -87,7 +93,7 @@ void benchmark_OpenCV_Blend(const vector<Mat>& imgs, bool isColor, float alpha)
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV Blend", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "alpha=" + to_string(alpha));
+                duration<double, milli>(end - start).count(), "alpha=" + to_string(alpha));
 }
 
 void benchmark_OpenCV_Contrast(const vector<Mat>& imgs, bool isColor, float contrastFactor, float contrastCenter)
@@ -109,7 +115,7 @@ void benchmark_OpenCV_Contrast(const vector<Mat>& imgs, bool isColor, float cont
     ostringstream params;
     params << "factor=" << contrastFactor << ", center=" << contrastCenter;
     printResult("OpenCV Contrast", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), params.str());
+                duration<double, milli>(end - start).count(), params.str());
 }
 
 void benchmark_OpenCV_Exposure(const vector<Mat>& imgs, bool isColor, float stop)
@@ -129,7 +135,7 @@ void benchmark_OpenCV_Exposure(const vector<Mat>& imgs, bool isColor, float stop
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV Exposure", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "stop=" + to_string(stop));
+                duration<double, milli>(end - start).count(), "stop=" + to_string(stop));
 }
 
 void benchmark_OpenCV_Hue(const vector<Mat>& imgs, float hueDelta)
@@ -145,18 +151,19 @@ void benchmark_OpenCV_Hue(const vector<Mat>& imgs, float hueDelta)
 #endif
         for (int i = 0; i < num_images; ++i)
         {
+            // Note: Input images are in RGB format (converted in loadBatchImages)
             Mat hsv;
-            cvtColor(imgs[i], hsv, COLOR_BGR2HSV);
+            cvtColor(imgs[i], hsv, COLOR_RGB2HSV);
             vector<Mat> channels;
             split(hsv, channels);
             channels[0] += hueDelta;
             merge(channels, hsv);
-            cvtColor(hsv, out[i], COLOR_HSV2BGR);
+            cvtColor(hsv, out[i], COLOR_HSV2RGB);
         }
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV Hue", imgs.size(), true,
-                duration_cast<milliseconds>(end - start).count(), "delta=" + to_string(hueDelta));
+                duration<double, milli>(end - start).count(), "delta=" + to_string(hueDelta));
 }
 
 void benchmark_OpenCV_Saturation(const vector<Mat>& imgs, float satFactor)
@@ -172,18 +179,19 @@ void benchmark_OpenCV_Saturation(const vector<Mat>& imgs, float satFactor)
 #endif
         for (int i = 0; i < num_images; ++i)
         {
+            // Note: Input images are in RGB format (converted in loadBatchImages)
             Mat hsv;
-            cvtColor(imgs[i], hsv, COLOR_BGR2HSV);
+            cvtColor(imgs[i], hsv, COLOR_RGB2HSV);
             vector<Mat> channels;
             split(hsv, channels);
             channels[1] *= satFactor;
             merge(channels, hsv);
-            cvtColor(hsv, out[i], COLOR_HSV2BGR);
+            cvtColor(hsv, out[i], COLOR_HSV2RGB);
         }
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV Saturation", imgs.size(), true,
-                duration_cast<milliseconds>(end - start).count(), "factor=" + to_string(satFactor));
+                duration<double, milli>(end - start).count(), "factor=" + to_string(satFactor));
 }
 
 void benchmark_OpenCV_ColorToGreyscale(const vector<Mat>& imgs)
@@ -198,17 +206,59 @@ void benchmark_OpenCV_ColorToGreyscale(const vector<Mat>& imgs)
         #pragma omp parallel for num_threads(NUM_THREADS)
 #endif
         for (int i = 0; i < num_images; ++i)
-            cvtColor(imgs[i], out[i], COLOR_BGR2GRAY);
+            cvtColor(imgs[i], out[i], COLOR_RGB2GRAY);
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV ColorToGreyscale", imgs.size(), true,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count());
 }
 
 void benchmark_OpenCV_ColorJitter(const vector<Mat>& imgs, float brightness, float contrast, float saturation, float hue)
 {
     int num_images = (int)imgs.size();
     vector<Mat> out(num_images);
+
+    // Precompute Color Transform Matrix (CTM) matching RPP's implementation
+    // This ensures mathematical equivalence with RPP HOST backend
+    contrast += 1.0f;  // RPP adds 1.0 to contrast
+    float hue_rad = hue * CV_PI / 180.0f;  // Convert degrees to radians
+    float sch = saturation * cos(hue_rad);
+    float ssh = saturation * sin(hue_rad);
+
+    // RGB to greyscale weights (RPP uses these)
+    const float RGB_TO_GREY_WEIGHT_RED = 0.299f;
+    const float RGB_TO_GREY_WEIGHT_GREEN = 0.587f;
+    const float RGB_TO_GREY_WEIGHT_BLUE = 0.114f;
+
+    // Hue/Saturation matrix components (matching RPP's sch_mat and ssh_mat)
+    const float sch_mat[9] = {0.701f, -0.299f, -0.300f, -0.587f, 0.413f, -0.588f, -0.114f, -0.114f, 0.886f};
+    const float ssh_mat[9] = {0.168f, -0.328f, 1.250f, 0.330f, 0.035f, -1.050f, -0.497f, 0.292f, -0.203f};
+
+    // Build hue-saturation matrix (3x3)
+    // Each row is initialized with the same greyscale weight (row 0 = RED, row 1 = GREEN, row 2 = BLUE)
+    float hue_sat[9];
+    for (int i = 0; i < 3; ++i)
+    {
+        float grey_weight = (i == 0) ? RGB_TO_GREY_WEIGHT_RED : (i == 1) ? RGB_TO_GREY_WEIGHT_GREEN : RGB_TO_GREY_WEIGHT_BLUE;
+        for (int j = 0; j < 3; ++j)
+        {
+            int idx = i * 3 + j;
+            hue_sat[idx] = grey_weight + sch * sch_mat[idx] + ssh * ssh_mat[idx];
+        }
+    }
+
+    // Build brightness-contrast matrix (diagonal)
+    float bright_cont[9] = {contrast, 0, 0, 0, contrast, 0, 0, 0, contrast};
+
+    // Compute combined CTM = hue_sat * bright_cont
+    float ctm[9];
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j)
+        {
+            ctm[i * 3 + j] = 0;
+            for (int k = 0; k < 3; ++k)
+                ctm[i * 3 + j] += hue_sat[i * 3 + k] * bright_cont[k * 3 + j];
+        }
 
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
@@ -218,25 +268,37 @@ void benchmark_OpenCV_ColorJitter(const vector<Mat>& imgs, float brightness, flo
 #endif
         for (int i = 0; i < num_images; ++i)
         {
-            Mat temp;
-            imgs[i].convertTo(temp, -1, brightness, 0);
-            temp.convertTo(temp, -1, contrast, 0);
+            out[i] = Mat::zeros(imgs[i].size(), imgs[i].type());
 
-            Mat hsv;
-            cvtColor(temp, hsv, COLOR_BGR2HSV);
-            vector<Mat> channels;
-            split(hsv, channels);
-            channels[0] += hue;
-            channels[1] *= saturation;
-            merge(channels, hsv);
-            cvtColor(hsv, out[i], COLOR_HSV2BGR);
+            // Note: Input images are already in RGB format (converted in loadBatchImages)
+            // Apply CTM pixel-by-pixel (matching RPP's approach)
+            for (int y = 0; y < imgs[i].rows; ++y)
+            {
+                for (int x = 0; x < imgs[i].cols; ++x)
+                {
+                    Vec3b pixel = imgs[i].at<Vec3b>(y, x);
+                    float r = pixel[0], g = pixel[1], b = pixel[2];
+
+                    // Apply CTM and add brightness
+                    float new_r = ctm[0] * r + ctm[1] * g + ctm[2] * b + brightness;
+                    float new_g = ctm[3] * r + ctm[4] * g + ctm[5] * b + brightness;
+                    float new_b = ctm[6] * r + ctm[7] * g + ctm[8] * b + brightness;
+
+                    // Round and clamp to [0, 255]
+                    out[i].at<Vec3b>(y, x) = Vec3b(
+                        saturate_cast<uchar>(round(new_r)),
+                        saturate_cast<uchar>(round(new_g)),
+                        saturate_cast<uchar>(round(new_b))
+                    );
+                }
+            }
         }
     }
     auto end = high_resolution_clock::now();
     ostringstream params;
-    params << "bright=" << brightness << ", cont=" << contrast << ", sat=" << saturation << ", hue=" << hue;
+    params << "bright=" << brightness << ", cont=" << (contrast - 1.0f) << ", sat=" << saturation << ", hue=" << hue;
     printResult("OpenCV ColorJitter", imgs.size(), true,
-                duration_cast<milliseconds>(end - start).count(), params.str());
+                duration<double, milli>(end - start).count(), params.str());
 }
 
 void benchmark_OpenCV_BoxFilter(const vector<Mat>& imgs, bool isColor, int kernelSize)
@@ -256,7 +318,7 @@ void benchmark_OpenCV_BoxFilter(const vector<Mat>& imgs, bool isColor, int kerne
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV BoxFilter", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "kernel=" + to_string(kernelSize));
+                duration<double, milli>(end - start).count(), "kernel=" + to_string(kernelSize));
 }
 
 void benchmark_OpenCV_MedianFilter(const vector<Mat>& imgs, bool isColor, int kernelSize)
@@ -275,7 +337,7 @@ void benchmark_OpenCV_MedianFilter(const vector<Mat>& imgs, bool isColor, int ke
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV MedianFilter", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "kernel=" + to_string(kernelSize));
+                duration<double, milli>(end - start).count(), "kernel=" + to_string(kernelSize));
 }
 
 void benchmark_OpenCV_GaussianFilter(const vector<Mat>& imgs, bool isColor, int kernelSize, double sigma)
@@ -296,13 +358,23 @@ void benchmark_OpenCV_GaussianFilter(const vector<Mat>& imgs, bool isColor, int 
     ostringstream params;
     params << "kernel=" << kernelSize << ", sigma=" << sigma;
     printResult("OpenCV GaussianFilter", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), params.str());
+                duration<double, milli>(end - start).count(), params.str());
 }
 
-void benchmark_OpenCV_SobelFilter(const vector<Mat>& imgs, bool isColor)
+void benchmark_OpenCV_SobelFilter(const vector<Mat>& imgs, bool isColor, int sobelType)
 {
     int num_images = (int)imgs.size();
     vector<Mat> out(num_images);
+    vector<Mat> grayImgs(num_images);
+
+    // Match RPP: convert to grayscale first (Sobel requires single-channel)
+    for (int i = 0; i < num_images; ++i)
+    {
+        if (isColor)
+            cvtColor(imgs[i], grayImgs[i], COLOR_RGB2GRAY);
+        else
+            grayImgs[i] = imgs[i];
+    }
 
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
@@ -312,17 +384,46 @@ void benchmark_OpenCV_SobelFilter(const vector<Mat>& imgs, bool isColor)
 #endif
         for (int i = 0; i < num_images; ++i)
         {
-            Mat grad_x, grad_y, abs_grad_x, abs_grad_y;
-            Sobel(imgs[i], grad_x, CV_16S, 1, 0, 3, 1, 0, BORDER_REPLICATE);
-            Sobel(imgs[i], grad_y, CV_16S, 0, 1, 3, 1, 0, BORDER_REPLICATE);
-            convertScaleAbs(grad_x, abs_grad_x);
-            convertScaleAbs(grad_y, abs_grad_y);
-            addWeighted(abs_grad_x, 0.5, abs_grad_y, 0.5, 0, out[i]);
+            if (sobelType == 0)
+            {
+                // X gradient
+                Sobel(grayImgs[i], out[i], CV_8U, 1, 0, 3, 1, 0, BORDER_REPLICATE);
+            }
+            else if (sobelType == 1)
+            {
+                // Y gradient
+                Sobel(grayImgs[i], out[i], CV_8U, 0, 1, 3, 1, 0, BORDER_REPLICATE);
+            }
+            else // sobelType == 2
+            {
+                // Combined magnitude: sqrt(gx^2 + gy^2)
+                Mat grad_x, grad_y;
+                Sobel(grayImgs[i], grad_x, CV_16S, 1, 0, 3, 1, 0, BORDER_REPLICATE);
+                Sobel(grayImgs[i], grad_y, CV_16S, 0, 1, 3, 1, 0, BORDER_REPLICATE);
+
+                convertScaleAbs(grad_x, grad_x);
+                convertScaleAbs(grad_y, grad_y);
+
+                Mat magnitude = Mat::zeros(grayImgs[i].size(), CV_8U);
+                for (int y = 0; y < grayImgs[i].rows; ++y)
+                {
+                    for (int x = 0; x < grayImgs[i].cols; ++x)
+                    {
+                        float gx = grad_x.at<uchar>(y, x);
+                        float gy = grad_y.at<uchar>(y, x);
+                        float mag = std::sqrt(gx * gx + gy * gy);
+                        magnitude.at<uchar>(y, x) = saturate_cast<uchar>(mag);
+                    }
+                }
+                out[i] = magnitude;
+            }
         }
     }
     auto end = high_resolution_clock::now();
+    ostringstream params;
+    params << "type=" << sobelType;
     printResult("OpenCV SobelFilter", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count(), params.str());
 }
 
 void benchmark_OpenCV_Crop(const vector<Mat>& imgs, bool isColor, int cropWidth, int cropHeight)
@@ -348,7 +449,7 @@ void benchmark_OpenCV_Crop(const vector<Mat>& imgs, bool isColor, int cropWidth,
     ostringstream params;
     params << "w=" << cropWidth << ", h=" << cropHeight;
     printResult("OpenCV Crop", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), params.str());
+                duration<double, milli>(end - start).count(), params.str());
 }
 
 void benchmark_OpenCV_Resize(const vector<Mat>& imgs, bool isColor, int dstW, int dstH, int interpType, const string& interpName)
@@ -369,7 +470,7 @@ void benchmark_OpenCV_Resize(const vector<Mat>& imgs, bool isColor, int dstW, in
     ostringstream params;
     params << "type=" << interpName << ", size=" << dstW << "x" << dstH;
     printResult("OpenCV Resize", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), params.str());
+                duration<double, milli>(end - start).count(), params.str());
 }
 
 void benchmark_OpenCV_Flip(const vector<Mat>& imgs, bool isColor, int flipCode)
@@ -389,7 +490,7 @@ void benchmark_OpenCV_Flip(const vector<Mat>& imgs, bool isColor, int flipCode)
     auto end = high_resolution_clock::now();
     string flipType = (flipCode == 0) ? "Vertical" : (flipCode == 1) ? "Horizontal" : "Both";
     printResult("OpenCV Flip", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "type=" + flipType);
+                duration<double, milli>(end - start).count(), "type=" + flipType);
 }
 
 void benchmark_OpenCV_Rotate(const vector<Mat>& imgs, bool isColor, float angleDeg)
@@ -412,7 +513,7 @@ void benchmark_OpenCV_Rotate(const vector<Mat>& imgs, bool isColor, float angleD
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV Rotate", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "angle=" + to_string(angleDeg));
+                duration<double, milli>(end - start).count(), "angle=" + to_string(angleDeg));
 }
 
 void benchmark_OpenCV_WarpAffine(const vector<Mat>& imgs, bool isColor)
@@ -420,9 +521,8 @@ void benchmark_OpenCV_WarpAffine(const vector<Mat>& imgs, bool isColor)
     int num_images = (int)imgs.size();
     vector<Mat> out(num_images);
 
-    Point2f srcTri[3] = {Point2f(0, 0), Point2f(100, 0), Point2f(0, 100)};
-    Point2f dstTri[3] = {Point2f(10, 10), Point2f(90, 20), Point2f(20, 90)};
-    Mat affineMat = getAffineTransform(srcTri, dstTri);
+    // Match RPP affine matrix: [1.0, 0.1, 10.0, 0.1, 1.0, 10.0]
+    Mat affineMat = (Mat_<double>(2, 3) << 1.0, 0.1, 10.0, 0.1, 1.0, 10.0);
 
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
@@ -435,7 +535,7 @@ void benchmark_OpenCV_WarpAffine(const vector<Mat>& imgs, bool isColor)
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV WarpAffine", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count());
 }
 
 void benchmark_OpenCV_Erode(const vector<Mat>& imgs, bool isColor, int kernelSize)
@@ -455,7 +555,7 @@ void benchmark_OpenCV_Erode(const vector<Mat>& imgs, bool isColor, int kernelSiz
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV Erode", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "kernel=" + to_string(kernelSize));
+                duration<double, milli>(end - start).count(), "kernel=" + to_string(kernelSize));
 }
 
 void benchmark_OpenCV_Dilate(const vector<Mat>& imgs, bool isColor, int kernelSize)
@@ -475,14 +575,19 @@ void benchmark_OpenCV_Dilate(const vector<Mat>& imgs, bool isColor, int kernelSi
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV Dilate", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "kernel=" + to_string(kernelSize));
+                duration<double, milli>(end - start).count(), "kernel=" + to_string(kernelSize));
 }
 
 void benchmark_OpenCV_AddScalar(const vector<Mat>& imgs, bool isColor, float addVal)
 {
     int num_images = (int)imgs.size();
     vector<Mat> out(num_images);
+    vector<Mat> imgsF32(num_images);
     Scalar s(addVal, addVal, addVal);
+
+    // Convert to F32 for fair comparison with RPP (which only supports F32)
+    for (int i = 0; i < num_images; ++i)
+        imgs[i].convertTo(imgsF32[i], CV_32F);
 
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
@@ -491,18 +596,23 @@ void benchmark_OpenCV_AddScalar(const vector<Mat>& imgs, bool isColor, float add
         #pragma omp parallel for num_threads(NUM_THREADS)
 #endif
         for (int i = 0; i < num_images; ++i)
-            add(imgs[i], s, out[i]);
+            add(imgsF32[i], s, out[i]);
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV AddScalar", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "value=" + to_string(addVal));
+                duration<double, milli>(end - start).count(), "value=" + to_string(addVal));
 }
 
 void benchmark_OpenCV_SubtractScalar(const vector<Mat>& imgs, bool isColor, float subVal)
 {
     int num_images = (int)imgs.size();
     vector<Mat> out(num_images);
+    vector<Mat> imgsF32(num_images);
     Scalar s(subVal, subVal, subVal);
+
+    // Convert to F32 for fair comparison with RPP (which only supports F32)
+    for (int i = 0; i < num_images; ++i)
+        imgs[i].convertTo(imgsF32[i], CV_32F);
 
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
@@ -511,17 +621,22 @@ void benchmark_OpenCV_SubtractScalar(const vector<Mat>& imgs, bool isColor, floa
         #pragma omp parallel for num_threads(NUM_THREADS)
 #endif
         for (int i = 0; i < num_images; ++i)
-            subtract(imgs[i], s, out[i]);
+            subtract(imgsF32[i], s, out[i]);
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV SubtractScalar", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "value=" + to_string(subVal));
+                duration<double, milli>(end - start).count(), "value=" + to_string(subVal));
 }
 
 void benchmark_OpenCV_MultiplyScalar(const vector<Mat>& imgs, bool isColor, float mulVal)
 {
     int num_images = (int)imgs.size();
     vector<Mat> out(num_images);
+    vector<Mat> imgsF32(num_images);
+
+    // Convert to F32 for fair comparison with RPP (which only supports F32)
+    for (int i = 0; i < num_images; ++i)
+        imgs[i].convertTo(imgsF32[i], CV_32F);
 
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
@@ -530,19 +645,21 @@ void benchmark_OpenCV_MultiplyScalar(const vector<Mat>& imgs, bool isColor, floa
         #pragma omp parallel for num_threads(NUM_THREADS)
 #endif
         for (int i = 0; i < num_images; ++i)
-            multiply(imgs[i], Scalar(mulVal, mulVal, mulVal), out[i]);
+            multiply(imgsF32[i], Scalar(mulVal, mulVal, mulVal), out[i]);
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV MultiplyScalar", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "value=" + to_string(mulVal));
+                duration<double, milli>(end - start).count(), "value=" + to_string(mulVal));
 }
 
 void benchmark_OpenCV_BitwiseAnd(const vector<Mat>& imgs, bool isColor)
 {
     int num_images = (int)imgs.size();
     vector<Mat> out(num_images), imgs2(num_images);
+
+    // Match RPP: use exact copy for second operand
     for (int i = 0; i < num_images; ++i)
-        imgs[i].convertTo(imgs2[i], -1, 0.9, 20);
+        imgs[i].copyTo(imgs2[i]);
 
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
@@ -555,15 +672,17 @@ void benchmark_OpenCV_BitwiseAnd(const vector<Mat>& imgs, bool isColor)
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV BitwiseAnd", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count());
 }
 
 void benchmark_OpenCV_BitwiseOr(const vector<Mat>& imgs, bool isColor)
 {
     int num_images = (int)imgs.size();
     vector<Mat> out(num_images), imgs2(num_images);
+
+    // Match RPP: use exact copy for second operand
     for (int i = 0; i < num_images; ++i)
-        imgs[i].convertTo(imgs2[i], -1, 0.9, 20);
+        imgs[i].copyTo(imgs2[i]);
 
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
@@ -576,7 +695,7 @@ void benchmark_OpenCV_BitwiseOr(const vector<Mat>& imgs, bool isColor)
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV BitwiseOr", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count());
 }
 
 void benchmark_OpenCV_BitwiseNot(const vector<Mat>& imgs, bool isColor)
@@ -595,7 +714,7 @@ void benchmark_OpenCV_BitwiseNot(const vector<Mat>& imgs, bool isColor)
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV BitwiseNot", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count());
 }
 
 void benchmark_OpenCV_BitwiseXor(const vector<Mat>& imgs, bool isColor)
@@ -616,7 +735,7 @@ void benchmark_OpenCV_BitwiseXor(const vector<Mat>& imgs, bool isColor)
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV BitwiseXor", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count());
 }
 
 void benchmark_OpenCV_Threshold(const vector<Mat>& imgs, bool isColor, double thresh)
@@ -635,7 +754,7 @@ void benchmark_OpenCV_Threshold(const vector<Mat>& imgs, bool isColor, double th
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV Threshold", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "thresh=" + to_string(thresh));
+                duration<double, milli>(end - start).count(), "thresh=" + to_string(thresh));
 }
 
 void benchmark_OpenCV_HistogramEqualize(const vector<Mat>& imgs, bool isColor)
@@ -654,7 +773,7 @@ void benchmark_OpenCV_HistogramEqualize(const vector<Mat>& imgs, bool isColor)
             if (isColor)
             {
                 Mat ycrcb;
-                cvtColor(imgs[i], ycrcb, COLOR_BGR2YCrCb);
+                cvtColor(imgs[i], ycrcb, COLOR_RGB2YCrCb);
                 vector<Mat> channels;
                 split(ycrcb, channels);
                 equalizeHist(channels[0], channels[0]);
@@ -669,7 +788,7 @@ void benchmark_OpenCV_HistogramEqualize(const vector<Mat>& imgs, bool isColor)
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV HistogramEqualize", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count());
 }
 
 void benchmark_OpenCV_LUT(const vector<Mat>& imgs, bool isColor)
@@ -691,7 +810,7 @@ void benchmark_OpenCV_LUT(const vector<Mat>& imgs, bool isColor)
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV LUT", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count());
 }
 
 void benchmark_OpenCV_Magnitude(const vector<Mat>& imgs, bool isColor)
@@ -715,7 +834,7 @@ void benchmark_OpenCV_Magnitude(const vector<Mat>& imgs, bool isColor)
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV Magnitude", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count());
 }
 
 void benchmark_OpenCV_Phase(const vector<Mat>& imgs, bool isColor)
@@ -739,13 +858,17 @@ void benchmark_OpenCV_Phase(const vector<Mat>& imgs, bool isColor)
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV Phase", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count());
 }
 
 void benchmark_OpenCV_Normalize(const vector<Mat>& imgs, bool isColor)
 {
     int num_images = (int)imgs.size();
     vector<Mat> out(num_images);
+
+    // Match RPP z-score normalization: output = (input - mean) / stddev * scale + shift
+    float scale = 1.0f;
+    float shift = 0.0f;
 
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
@@ -754,11 +877,30 @@ void benchmark_OpenCV_Normalize(const vector<Mat>& imgs, bool isColor)
         #pragma omp parallel for num_threads(NUM_THREADS)
 #endif
         for (int i = 0; i < num_images; ++i)
-            normalize(imgs[i], out[i], 0, 255, NORM_MINMAX);
+        {
+            Mat temp;
+            imgs[i].convertTo(temp, CV_32F);
+
+            Scalar meanVal, stddevVal;
+            meanStdDev(temp, meanVal, stddevVal);
+
+            // Z-score normalization per channel
+            int channels = temp.channels();
+            vector<Mat> tempChannels(channels);
+            split(temp, tempChannels);
+
+            for (int c = 0; c < channels; ++c)
+            {
+                tempChannels[c] = (tempChannels[c] - meanVal[c]) / (stddevVal[c] + 1e-7) * scale + shift;
+            }
+
+            merge(tempChannels, temp);
+            temp.convertTo(out[i], imgs[i].type());
+        }
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV Normalize", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count());
 }
 
 void benchmark_OpenCV_WarpPerspective(const vector<Mat>& imgs, bool isColor)
@@ -766,9 +908,8 @@ void benchmark_OpenCV_WarpPerspective(const vector<Mat>& imgs, bool isColor)
     int num_images = (int)imgs.size();
     vector<Mat> out(num_images);
 
-    Point2f srcQuad[4] = {Point2f(0, 0), Point2f(100, 0), Point2f(100, 100), Point2f(0, 100)};
-    Point2f dstQuad[4] = {Point2f(10, 10), Point2f(90, 20), Point2f(90, 90), Point2f(20, 80)};
-    Mat perspMat = getPerspectiveTransform(srcQuad, dstQuad);
+    // Match RPP perspective matrix: [1.0, 0.1, 0.0, 0.1, 1.0, 0.0, 0.0, 0.0, 1.0]
+    Mat perspMat = (Mat_<double>(3, 3) << 1.0, 0.1, 0.0, 0.1, 1.0, 0.0, 0.0, 0.0, 1.0);
 
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
@@ -781,7 +922,7 @@ void benchmark_OpenCV_WarpPerspective(const vector<Mat>& imgs, bool isColor)
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV WarpPerspective", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count());
 }
 
 void benchmark_OpenCV_Remap(const vector<Mat>& imgs, bool isColor)
@@ -791,14 +932,15 @@ void benchmark_OpenCV_Remap(const vector<Mat>& imgs, bool isColor)
 
     if (imgs.empty()) return;
 
+    // Match RPP sine wave distortion mapping
     Mat map_x(imgs[0].size(), CV_32FC1);
     Mat map_y(imgs[0].size(), CV_32FC1);
-    for (int j = 0; j < map_x.rows; ++j)
+    for (int y = 0; y < map_x.rows; ++y)
     {
-        for (int i = 0; i < map_x.cols; ++i)
+        for (int x = 0; x < map_x.cols; ++x)
         {
-            map_x.at<float>(j, i) = i;
-            map_y.at<float>(j, i) = map_x.rows - j;
+            map_y.at<float>(y, x) = y + sin(x * 0.01f) * 5.0f;
+            map_x.at<float>(y, x) = x + cos(y * 0.01f) * 5.0f;
         }
     }
 
@@ -813,7 +955,7 @@ void benchmark_OpenCV_Remap(const vector<Mat>& imgs, bool isColor)
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV Remap", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count());
 }
 
 void benchmark_OpenCV_FusedMultiplyAddScalar(const vector<Mat>& imgs, bool isColor, float mul, float add)
@@ -834,7 +976,7 @@ void benchmark_OpenCV_FusedMultiplyAddScalar(const vector<Mat>& imgs, bool isCol
     ostringstream params;
     params << "mul=" << mul << ", add=" << add;
     printResult("OpenCV FusedMultiplyAddScalar", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), params.str());
+                duration<double, milli>(end - start).count(), params.str());
 }
 
 void benchmark_OpenCV_Transpose(const vector<Mat>& imgs, bool isColor)
@@ -853,7 +995,7 @@ void benchmark_OpenCV_Transpose(const vector<Mat>& imgs, bool isColor)
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV Transpose", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count());
 }
 
 void benchmark_OpenCV_Emboss(const vector<Mat>& imgs, bool isColor)
@@ -875,7 +1017,7 @@ void benchmark_OpenCV_Emboss(const vector<Mat>& imgs, bool isColor)
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV Emboss", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count());
 }
 
 void benchmark_OpenCV_TensorMin(const vector<Mat>& imgs, bool isColor)
@@ -927,7 +1069,11 @@ void benchmark_OpenCV_TensorMax(const vector<Mat>& imgs, bool isColor)
 void benchmark_OpenCV_TensorSum(const vector<Mat>& imgs, bool isColor)
 {
     int num_images = (int)imgs.size();
-    vector<Scalar> sumVals(num_images);
+    int channels = imgs[0].channels();
+    // For fair comparison with RPP: Use 64-bit integers for U8 images
+    // OpenCV cv::sum returns Scalar (doubles), we store as uint64_t for consistency
+    int outputSize = (channels == 3) ? num_images * 4 : num_images;
+    vector<uint64_t> sumVals(outputSize);
 
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
@@ -936,7 +1082,22 @@ void benchmark_OpenCV_TensorSum(const vector<Mat>& imgs, bool isColor)
         #pragma omp parallel for num_threads(NUM_THREADS)
 #endif
         for (int i = 0; i < num_images; ++i)
-            sumVals[i] = cv::sum(imgs[i]);
+        {
+            Scalar s = cv::sum(imgs[i]);
+            int offset = (channels == 3) ? i * 4 : i;
+            if (channels == 3)
+            {
+                // Store B, G, R sums separately, then total (matching RPP order)
+                sumVals[offset + 0] = static_cast<uint64_t>(s[0]);  // B or channel 0
+                sumVals[offset + 1] = static_cast<uint64_t>(s[1]);  // G or channel 1
+                sumVals[offset + 2] = static_cast<uint64_t>(s[2]);  // R or channel 2
+                sumVals[offset + 3] = static_cast<uint64_t>(s[0] + s[1] + s[2]);  // Total
+            }
+            else
+            {
+                sumVals[offset] = static_cast<uint64_t>(s[0]);
+            }
+        }
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV TensorSum", imgs.size(), isColor,
@@ -1007,7 +1168,7 @@ void benchmark_OpenCV_GaussianNoise(const vector<Mat>& imgs, bool isColor, float
     ostringstream params;
     params << "mean=" << mean << ", stddev=" << stddev;
     printResult("OpenCV GaussianNoise", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), params.str());
+                duration<double, milli>(end - start).count(), params.str());
 }
 
 void benchmark_OpenCV_SaltAndPepperNoise(const vector<Mat>& imgs, bool isColor, float noiseProb)
@@ -1059,7 +1220,7 @@ void benchmark_OpenCV_SaltAndPepperNoise(const vector<Mat>& imgs, bool isColor, 
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV SaltAndPepperNoise", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "prob=" + to_string(noiseProb));
+                duration<double, milli>(end - start).count(), "prob=" + to_string(noiseProb));
 }
 
 void benchmark_OpenCV_Copy(const vector<Mat>& imgs, bool isColor)
@@ -1078,7 +1239,7 @@ void benchmark_OpenCV_Copy(const vector<Mat>& imgs, bool isColor)
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV Copy", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count());
 }
 
 void benchmark_OpenCV_Posterize(const vector<Mat>& imgs, bool isColor, Rpp32u bits)
@@ -1098,7 +1259,7 @@ void benchmark_OpenCV_Posterize(const vector<Mat>& imgs, bool isColor, Rpp32u bi
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV Posterize", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "bits=" + to_string(bits));
+                duration<double, milli>(end - start).count(), "bits=" + to_string(bits));
 }
 
 void benchmark_OpenCV_Solarize(const vector<Mat>& imgs, bool isColor, Rpp8u threshold)
@@ -1128,7 +1289,7 @@ void benchmark_OpenCV_Solarize(const vector<Mat>& imgs, bool isColor, Rpp8u thre
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV Solarize", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "threshold=" + to_string((int)threshold));
+                duration<double, milli>(end - start).count(), "threshold=" + to_string((int)threshold));
 }
 
 void benchmark_OpenCV_NoiseShot(const vector<Mat>& imgs, bool isColor, float shotNoiseFactor)
@@ -1153,11 +1314,18 @@ void benchmark_OpenCV_NoiseShot(const vector<Mat>& imgs, bool isColor, float sho
             {
                 for (int x = 0; x < temp.cols; ++x)
                 {
-                    for (int c = 0; c < temp.channels(); ++c)
+                    if (temp.channels() == 3)
                     {
-                        float val = temp.at<Vec3f>(y, x)[c];
-                        float noiseVal = noise.at<Vec3f>(y, x)[c] * sqrt(val / 255.0f);
-                        temp.at<Vec3f>(y, x)[c] = val + noiseVal;
+                        Vec3f& pixel = temp.at<Vec3f>(y, x);
+                        const Vec3f& n = noise.at<Vec3f>(y, x);
+                        for (int c = 0; c < 3; ++c)
+                            pixel[c] = pixel[c] + n[c] * sqrt(pixel[c] / 255.0f);
+                    }
+                    else
+                    {
+                        float& val = temp.at<float>(y, x);
+                        float noiseVal = noise.at<float>(y, x);
+                        val += noiseVal * sqrt(val / 255.0f);
                     }
                 }
             }
@@ -1166,7 +1334,7 @@ void benchmark_OpenCV_NoiseShot(const vector<Mat>& imgs, bool isColor, float sho
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV NoiseShot", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "factor=" + to_string(shotNoiseFactor));
+                duration<double, milli>(end - start).count(), "factor=" + to_string(shotNoiseFactor));
 }
 
 void benchmark_OpenCV_Gridmask(const vector<Mat>& imgs, bool isColor, Rpp32u tileWidth, Rpp32f gridRatio)
@@ -1200,13 +1368,19 @@ void benchmark_OpenCV_Gridmask(const vector<Mat>& imgs, bool isColor, Rpp32u til
     ostringstream params;
     params << "tile=" << tileWidth << ", ratio=" << gridRatio;
     printResult("OpenCV Gridmask", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), params.str());
+                duration<double, milli>(end - start).count(), params.str());
 }
 
 void benchmark_OpenCV_ColorCast(const vector<Mat>& imgs, bool isColor, Rpp32f rShift, Rpp32f gShift, Rpp32f bShift)
 {
     int num_images = (int)imgs.size();
     vector<Mat> out(num_images);
+
+    // Match RPP color_cast formula: output = alpha * (input - cast_color) + cast_color
+    float alpha = 1.0f;
+    uchar rCast = (uchar)max(0.0f, min(255.0f, rShift));
+    uchar gCast = (uchar)max(0.0f, min(255.0f, gShift));
+    uchar bCast = (uchar)max(0.0f, min(255.0f, bShift));
 
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
@@ -1216,19 +1390,31 @@ void benchmark_OpenCV_ColorCast(const vector<Mat>& imgs, bool isColor, Rpp32f rS
 #endif
         for (int i = 0; i < num_images; ++i)
         {
-            vector<Mat> channels;
-            split(imgs[i], channels);
-            channels[0] += bShift;
-            channels[1] += gShift;
-            channels[2] += rShift;
-            merge(channels, out[i]);
+            imgs[i].copyTo(out[i]);
+            int channels = out[i].channels();
+
+            if (channels == 3)
+            {
+                for (int y = 0; y < out[i].rows; ++y)
+                {
+                    uchar* ptr = out[i].ptr<uchar>(y);
+                    for (int x = 0; x < out[i].cols; ++x)
+                    {
+                        // BGR order in OpenCV
+                        ptr[0] = saturate_cast<uchar>(alpha * (ptr[0] - bCast) + bCast);
+                        ptr[1] = saturate_cast<uchar>(alpha * (ptr[1] - gCast) + gCast);
+                        ptr[2] = saturate_cast<uchar>(alpha * (ptr[2] - rCast) + rCast);
+                        ptr += 3;
+                    }
+                }
+            }
         }
     }
     auto end = high_resolution_clock::now();
     ostringstream params;
     params << "r=" << rShift << ", g=" << gShift << ", b=" << bShift;
     printResult("OpenCV ColorCast", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), params.str());
+                duration<double, milli>(end - start).count(), params.str());
 }
 
 void benchmark_OpenCV_ColorTemperature(const vector<Mat>& imgs, bool isColor, Rpp32s adjustmentValue)
@@ -1254,7 +1440,7 @@ void benchmark_OpenCV_ColorTemperature(const vector<Mat>& imgs, bool isColor, Rp
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV ColorTemperature", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "adjustment=" + to_string(adjustmentValue));
+                duration<double, milli>(end - start).count(), "adjustment=" + to_string(adjustmentValue));
 }
 
 void benchmark_OpenCV_Vignette(const vector<Mat>& imgs, bool isColor, Rpp32f vignetteIntensity)
@@ -1297,16 +1483,21 @@ void benchmark_OpenCV_Vignette(const vector<Mat>& imgs, bool isColor, Rpp32f vig
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV Vignette", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "intensity=" + to_string(vignetteIntensity));
+                duration<double, milli>(end - start).count(), "intensity=" + to_string(vignetteIntensity));
 }
 
 void benchmark_OpenCV_NonLinearBlend(const vector<Mat>& imgs, bool isColor, Rpp32f stdDev)
 {
     int num_images = (int)imgs.size();
-    vector<Mat> out(num_images), imgs2(num_images);
+    if (num_images < 2) {
+        cout << "NonLinearBlend requires at least 2 images. Skipping." << endl;
+        return;
+    }
 
-    for (int i = 0; i < num_images; ++i)
-        imgs[i].convertTo(imgs2[i], -1, 0.8, 30);
+    vector<Mat> out(num_images);
+
+    // Precompute Gaussian multiplier
+    float multiplier = -0.5f / (stdDev * stdDev);
 
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
@@ -1314,18 +1505,70 @@ void benchmark_OpenCV_NonLinearBlend(const vector<Mat>& imgs, bool isColor, Rpp3
 #if ENABLE_PARALLEL_THREADS
         #pragma omp parallel for num_threads(NUM_THREADS)
 #endif
-        for (int i = 0; i < num_images; ++i)
+        for (int i = 0; i < num_images - 1; ++i)
         {
-            Mat temp1, temp2;
-            imgs[i].convertTo(temp1, CV_32F, 1.0 / 255.0);
-            imgs2[i].convertTo(temp2, CV_32F, 1.0 / 255.0);
-            Mat blended = temp1.mul(temp2) * 255.0;
-            blended.convertTo(out[i], imgs[i].type());
+            const Mat& src1 = imgs[i];
+            const Mat& src2 = imgs[i + 1];
+            out[i] = Mat(src1.size(), src1.type());
+
+            int height = src1.rows;
+            int width = src1.cols;
+            int channels = src1.channels();
+            int halfHeight = height / 2;
+            int halfWidth = width / 2;
+
+            // Hoist channel branching outside loops
+            if (channels == 1)
+            {
+                for (int y = 0; y < height; ++y)
+                {
+                    const uchar* src1Row = src1.ptr<uchar>(y);
+                    const uchar* src2Row = src2.ptr<uchar>(y);
+                    uchar* outRow = out[i].ptr<uchar>(y);
+
+                    int iLoc = y - halfHeight;
+                    float iLocComponent = iLoc * iLoc * multiplier;
+
+                    for (int x = 0; x < width; ++x)
+                    {
+                        int jLoc = x - halfWidth;
+                        float gaussianValue = std::exp(iLocComponent + jLoc * jLoc * multiplier);
+
+                        float result = src2Row[x] + (src1Row[x] - src2Row[x]) * gaussianValue;
+                        outRow[x] = saturate_cast<uchar>(result);
+                    }
+                }
+            }
+            else if (channels == 3)
+            {
+                for (int y = 0; y < height; ++y)
+                {
+                    const uchar* src1Row = src1.ptr<uchar>(y);
+                    const uchar* src2Row = src2.ptr<uchar>(y);
+                    uchar* outRow = out[i].ptr<uchar>(y);
+
+                    int iLoc = y - halfHeight;
+                    float iLocComponent = iLoc * iLoc * multiplier;
+
+                    for (int x = 0; x < width; ++x)
+                    {
+                        int jLoc = x - halfWidth;
+                        float gaussianValue = std::exp(iLocComponent + jLoc * jLoc * multiplier);
+
+                        int idx = x * 3;
+                        for (int c = 0; c < 3; ++c)
+                        {
+                            float result = src2Row[idx + c] + (src1Row[idx + c] - src2Row[idx + c]) * gaussianValue;
+                            outRow[idx + c] = saturate_cast<uchar>(result);
+                        }
+                    }
+                }
+            }
         }
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV NonLinearBlend", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "stddev=" + to_string(stdDev));
+                duration<double, milli>(end - start).count(), "stddev=" + to_string(stdDev));
 }
 
 void benchmark_OpenCV_Erase(const vector<Mat>& imgs, bool isColor, Rpp32u numBoxes)
@@ -1342,19 +1585,22 @@ void benchmark_OpenCV_Erase(const vector<Mat>& imgs, bool isColor, Rpp32u numBox
         for (int i = 0; i < num_images; ++i)
         {
             out[i] = imgs[i].clone();
+            std::mt19937 rng(12345 + i + k * num_images);
             for (Rpp32u b = 0; b < numBoxes; ++b)
             {
                 int boxW = imgs[i].cols / 4;
                 int boxH = imgs[i].rows / 4;
-                int x = rand() % (imgs[i].cols - boxW);
-                int y = rand() % (imgs[i].rows - boxH);
+                std::uniform_int_distribution<int> distX(0, imgs[i].cols - boxW - 1);
+                std::uniform_int_distribution<int> distY(0, imgs[i].rows - boxH - 1);
+                int x = distX(rng);
+                int y = distY(rng);
                 out[i](Rect(x, y, boxW, boxH)).setTo(0);
             }
         }
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV Erase", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "boxes=" + to_string(numBoxes));
+                duration<double, milli>(end - start).count(), "boxes=" + to_string(numBoxes));
 }
 
 void benchmark_OpenCV_CoarseDropout(const vector<Mat>& imgs, bool isColor, Rpp32u numDropouts)
@@ -1371,19 +1617,24 @@ void benchmark_OpenCV_CoarseDropout(const vector<Mat>& imgs, bool isColor, Rpp32
         for (int i = 0; i < num_images; ++i)
         {
             out[i] = imgs[i].clone();
+            std::mt19937 rng(12345 + i + k * num_images);
+            std::uniform_int_distribution<int> distW(50, 149);
+            std::uniform_int_distribution<int> distH(50, 149);
             for (Rpp32u d = 0; d < numDropouts; ++d)
             {
-                int w = 50 + rand() % 100;
-                int h = 50 + rand() % 100;
-                int x = rand() % max(1, imgs[i].cols - w);
-                int y = rand() % max(1, imgs[i].rows - h);
+                int w = distW(rng);
+                int h = distH(rng);
+                std::uniform_int_distribution<int> distX(0, max(0, imgs[i].cols - w - 1));
+                std::uniform_int_distribution<int> distY(0, max(0, imgs[i].rows - h - 1));
+                int x = distX(rng);
+                int y = distY(rng);
                 out[i](Rect(x, y, w, h)).setTo(0);
             }
         }
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV CoarseDropout", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "dropouts=" + to_string(numDropouts));
+                duration<double, milli>(end - start).count(), "dropouts=" + to_string(numDropouts));
 }
 
 void benchmark_OpenCV_GridDropout(const vector<Mat>& imgs, bool isColor, Rpp32u numGridsPerRow, Rpp32u numGridsPerColumn)
@@ -1400,6 +1651,8 @@ void benchmark_OpenCV_GridDropout(const vector<Mat>& imgs, bool isColor, Rpp32u 
         for (int i = 0; i < num_images; ++i)
         {
             out[i] = imgs[i].clone();
+            std::mt19937 rng(12345 + i + k * num_images);
+            std::uniform_int_distribution<int> dist(0, 1);
             int cellW = imgs[i].cols / numGridsPerRow;
             int cellH = imgs[i].rows / numGridsPerColumn;
 
@@ -1407,7 +1660,7 @@ void benchmark_OpenCV_GridDropout(const vector<Mat>& imgs, bool isColor, Rpp32u 
             {
                 for (Rpp32u c = 0; c < numGridsPerColumn; ++c)
                 {
-                    if (rand() % 2 == 0)
+                    if (dist(rng) == 0)
                     {
                         int x = r * cellW;
                         int y = c * cellH;
@@ -1423,7 +1676,7 @@ void benchmark_OpenCV_GridDropout(const vector<Mat>& imgs, bool isColor, Rpp32u 
     ostringstream params;
     params << "rows=" << numGridsPerRow << ", cols=" << numGridsPerColumn;
     printResult("OpenCV GridDropout", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), params.str());
+                duration<double, milli>(end - start).count(), params.str());
 }
 
 void benchmark_OpenCV_RandomErase(const vector<Mat>& imgs, bool isColor)
@@ -1440,25 +1693,39 @@ void benchmark_OpenCV_RandomErase(const vector<Mat>& imgs, bool isColor)
         for (int i = 0; i < num_images; ++i)
         {
             out[i] = imgs[i].clone();
-            int w = 100 + rand() % 200;
-            int h = 100 + rand() % 200;
-            int x = rand() % max(1, imgs[i].cols - w);
-            int y = rand() % max(1, imgs[i].rows - h);
-            out[i](Rect(x, y, w, h)).setTo(Scalar(rand() % 256, rand() % 256, rand() % 256));
+            std::mt19937 rng(12345 + i + k * num_images);
+            std::uniform_int_distribution<int> distSize(100, 299);
+            std::uniform_int_distribution<int> distColor(0, 255);
+            int w = distSize(rng);
+            int h = distSize(rng);
+            std::uniform_int_distribution<int> distX(0, max(0, imgs[i].cols - w - 1));
+            std::uniform_int_distribution<int> distY(0, max(0, imgs[i].rows - h - 1));
+            int x = distX(rng);
+            int y = distY(rng);
+            out[i](Rect(x, y, w, h)).setTo(Scalar(distColor(rng), distColor(rng), distColor(rng)));
         }
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV RandomErase", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count());
 }
 
 void benchmark_OpenCV_ColorTwist(const vector<Mat>& imgs, bool isColor)
 {
+    if (!isColor)
+    {
+        cout << "ColorTwist requires RGB images. Skipping." << endl;
+        return;
+    }
+
     int num_images = (int)imgs.size();
     vector<Mat> out(num_images);
 
-    float twist[] = {0.8f, 0.1f, 0.1f, 0.1f, 0.9f, 0.1f, 0.1f, 0.1f, 0.7f};
-    Mat twistMat(3, 3, CV_32F, twist);
+    // Match RPP color_twist parameters
+    float alpha = 1.0f;
+    float beta = 0.0f;
+    float hueShift = 60.0f;  // degrees
+    float saturationFactor = 1.3f;
 
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
@@ -1468,45 +1735,76 @@ void benchmark_OpenCV_ColorTwist(const vector<Mat>& imgs, bool isColor)
 #endif
         for (int i = 0; i < num_images; ++i)
         {
-            Mat temp;
-            imgs[i].convertTo(temp, CV_32F);
-            transform(temp, temp, twistMat);
-            temp.convertTo(out[i], imgs[i].type());
+            Mat temp, hsv;
+            imgs[i].convertTo(temp, CV_32F, 1.0 / 255.0);
+
+            // Apply alpha/beta: temp = alpha * temp + beta
+            temp = alpha * temp + beta;
+
+            // Convert to HSV for hue and saturation adjustments
+            cvtColor(temp, hsv, COLOR_RGB2HSV);
+            vector<Mat> channels;
+            split(hsv, channels);
+
+            // Adjust hue (shift in degrees, OpenCV uses 0-180 range for 8-bit)
+            channels[0] += hueShift / 2.0f;  // OpenCV H is 0-180, so divide by 2
+
+            // Adjust saturation
+            channels[1] *= saturationFactor;
+
+            merge(channels, hsv);
+            cvtColor(hsv, temp, COLOR_HSV2RGB);
+
+            temp.convertTo(out[i], imgs[i].type(), 255.0);
         }
     }
     auto end = high_resolution_clock::now();
+    ostringstream params;
+    params << "hue=" << hueShift << ", sat=" << saturationFactor;
     printResult("OpenCV ColorTwist", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count(), params.str());
 }
 
 void benchmark_OpenCV_CropAndPatch(const vector<Mat>& imgs, bool isColor)
 {
     int num_images = (int)imgs.size();
+    if (num_images < 2) {
+        cout << "CropAndPatch requires at least 2 images. Skipping." << endl;
+        return;
+    }
+
     vector<Mat> out(num_images);
 
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
-        for (int i = 0; i < num_images; ++i)
+        // Match RPP: crop from img[i], patch into img[i+1]
+        for (int i = 0; i < num_images - 1; ++i)
         {
-            out[i] = imgs[i].clone();
-            int patchW = imgs[i].cols / 4;
-            int patchH = imgs[i].rows / 4;
-            int srcX = rand() % (imgs[i].cols - patchW);
-            int srcY = rand() % (imgs[i].rows - patchH);
-            int dstX = rand() % (imgs[i].cols - patchW);
-            int dstY = rand() % (imgs[i].rows - patchH);
+            out[i] = Mat::zeros(imgs[i].size(), imgs[i].type());
 
-            Mat patch = imgs[i](Rect(srcX, srcY, patchW, patchH));
-            patch.copyTo(out[i](Rect(dstX, dstY, patchW, patchH)));
+            int h = imgs[i].rows;
+            int w = imgs[i].cols;
+
+            // Crop region (center quarter) from img[i]
+            int cropX = w / 4;
+            int cropY = h / 4;
+            int cropW = w / 2;
+            int cropH = h / 2;
+
+            // Patch region (same as crop) into img[i+1]
+            Mat patch = imgs[i](Rect(cropX, cropY, cropW, cropH));
+
+            // Initialize output with img[i+1]
+            imgs[i+1].copyTo(out[i]);
+
+            // Patch the cropped region
+            patch.copyTo(out[i](Rect(cropX, cropY, cropW, cropH)));
         }
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV CropAndPatch", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count(), "center_quarter");
 }
 
 void benchmark_OpenCV_CropMirrorNormalize(const vector<Mat>& imgs, bool isColor)
@@ -1541,7 +1839,7 @@ void benchmark_OpenCV_CropMirrorNormalize(const vector<Mat>& imgs, bool isColor)
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV CropMirrorNormalize", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count());
 }
 
 void benchmark_OpenCV_ResizeMirrorNormalize(const vector<Mat>& imgs, bool isColor)
@@ -1571,7 +1869,7 @@ void benchmark_OpenCV_ResizeMirrorNormalize(const vector<Mat>& imgs, bool isColo
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV ResizeMirrorNormalize", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count());
 }
 
 void benchmark_OpenCV_ResizeCropMirror(const vector<Mat>& imgs, bool isColor)
@@ -1601,37 +1899,7 @@ void benchmark_OpenCV_ResizeCropMirror(const vector<Mat>& imgs, bool isColor)
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV ResizeCropMirror", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
-}
-
-void benchmark_OpenCV_RICAP(const vector<Mat>& imgs, bool isColor)
-{
-    int num_images = (int)imgs.size();
-    if (num_images < 4) return;
-
-    vector<Mat> out(num_images);
-
-    auto start = high_resolution_clock::now();
-    for (int k = 0; k < NUM_RUNS; ++k)
-    {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
-        for (int i = 0; i < num_images; ++i)
-        {
-            out[i] = Mat::zeros(imgs[i].size(), imgs[i].type());
-            int halfW = imgs[i].cols / 2;
-            int halfH = imgs[i].rows / 2;
-
-            imgs[i % num_images](Rect(0, 0, halfW, halfH)).copyTo(out[i](Rect(0, 0, halfW, halfH)));
-            imgs[(i+1) % num_images](Rect(0, 0, halfW, halfH)).copyTo(out[i](Rect(halfW, 0, halfW, halfH)));
-            imgs[(i+2) % num_images](Rect(0, 0, halfW, halfH)).copyTo(out[i](Rect(0, halfH, halfW, halfH)));
-            imgs[(i+3) % num_images](Rect(0, 0, halfW, halfH)).copyTo(out[i](Rect(halfW, halfH, halfW, halfH)));
-        }
-    }
-    auto end = high_resolution_clock::now();
-    printResult("OpenCV RICAP", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count());
 }
 
 void benchmark_OpenCV_ChannelDropout(const vector<Mat>& imgs, bool isColor, float dropoutProb)
@@ -1685,7 +1953,7 @@ void benchmark_OpenCV_ChannelDropout(const vector<Mat>& imgs, bool isColor, floa
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV ChannelDropout", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "prob=" + to_string(dropoutProb));
+                duration<double, milli>(end - start).count(), "prob=" + to_string(dropoutProb));
 }
 
 void benchmark_OpenCV_CutoutDropout(const vector<Mat>& imgs, bool isColor, Rpp32u numBoxes)
@@ -1702,21 +1970,25 @@ void benchmark_OpenCV_CutoutDropout(const vector<Mat>& imgs, bool isColor, Rpp32
         for (int i = 0; i < num_images; ++i)
         {
             out[i] = imgs[i].clone();
+            std::mt19937 rng(12345 + i + k * num_images);
+            std::uniform_int_distribution<int> distRatio(0, 199);
 
             // Create cutout boxes with specific color fill
             for (Rpp32u b = 0; b < numBoxes; ++b)
             {
                 // Random box size (40-60% of image dimensions)
-                int boxW = static_cast<int>((0.4f + (rand() % 200) / 1000.0f) * imgs[i].cols);
-                int boxH = static_cast<int>((0.4f + (rand() % 200) / 1000.0f) * imgs[i].rows);
+                int boxW = static_cast<int>((0.4f + distRatio(rng) / 1000.0f) * imgs[i].cols);
+                int boxH = static_cast<int>((0.4f + distRatio(rng) / 1000.0f) * imgs[i].rows);
 
                 // Ensure box fits in image
                 boxW = min(boxW, imgs[i].cols);
                 boxH = min(boxH, imgs[i].rows);
 
                 // Random position
-                int x = rand() % max(1, imgs[i].cols - boxW + 1);
-                int y = rand() % max(1, imgs[i].rows - boxH + 1);
+                std::uniform_int_distribution<int> distX(0, max(0, imgs[i].cols - boxW));
+                std::uniform_int_distribution<int> distY(0, max(0, imgs[i].rows - boxH));
+                int x = distX(rng);
+                int y = distY(rng);
 
                 // Fill with random color (cutout style)
                 Scalar color;
@@ -1731,7 +2003,7 @@ void benchmark_OpenCV_CutoutDropout(const vector<Mat>& imgs, bool isColor, Rpp32
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV CutoutDropout", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "boxes=" + to_string(numBoxes));
+                duration<double, milli>(end - start).count(), "boxes=" + to_string(numBoxes));
 }
 
 void benchmark_OpenCV_JpegCompressionDistortion(const vector<Mat>& imgs, bool isColor, Rpp32s quality)
@@ -1762,7 +2034,7 @@ void benchmark_OpenCV_JpegCompressionDistortion(const vector<Mat>& imgs, bool is
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV JpegCompressionDistortion", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "quality=" + to_string(quality));
+                duration<double, milli>(end - start).count(), "quality=" + to_string(quality));
 }
 
 void benchmark_OpenCV_Emboss(const vector<Mat>& imgs, bool isColor, int kernelSize, float strength)
@@ -1821,7 +2093,7 @@ void benchmark_OpenCV_Emboss(const vector<Mat>& imgs, bool isColor, int kernelSi
     ostringstream params;
     params << "kernel=" << kernelSize << ", strength=" << strength;
     printResult("OpenCV Emboss", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), params.str());
+                duration<double, milli>(end - start).count(), params.str());
 }
 
 void benchmark_OpenCV_ChannelPermute(const vector<Mat>& imgs, bool isColor)
@@ -1856,7 +2128,7 @@ void benchmark_OpenCV_ChannelPermute(const vector<Mat>& imgs, bool isColor)
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV ChannelPermute", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "BGR->RGB");
+                duration<double, milli>(end - start).count(), "BGR->RGB");
 }
 
 void benchmark_OpenCV_Slice(const vector<Mat>& imgs, bool isColor)
@@ -1888,7 +2160,7 @@ void benchmark_OpenCV_Slice(const vector<Mat>& imgs, bool isColor)
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV Slice", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count(), "center_half");
+                duration<double, milli>(end - start).count(), "center_half");
 }
 
 void benchmark_OpenCV_Fisheye(const vector<Mat>& imgs, bool isColor)
@@ -1946,7 +2218,7 @@ void benchmark_OpenCV_Fisheye(const vector<Mat>& imgs, bool isColor)
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV Fisheye", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count());
 }
 
 void benchmark_OpenCV_LensCorrection(const vector<Mat>& imgs, bool isColor)
@@ -1978,5 +2250,5 @@ void benchmark_OpenCV_LensCorrection(const vector<Mat>& imgs, bool isColor)
     }
     auto end = high_resolution_clock::now();
     printResult("OpenCV LensCorrection", imgs.size(), isColor,
-                duration_cast<milliseconds>(end - start).count());
+                duration<double, milli>(end - start).count());
 }

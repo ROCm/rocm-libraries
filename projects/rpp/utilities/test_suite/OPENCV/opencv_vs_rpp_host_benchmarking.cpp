@@ -30,8 +30,11 @@ int main()
     rppHandle_t handle;
 #if ENABLE_PARALLEL_THREADS
     rppCreate(&handle, 1, NUM_THREADS, nullptr, RPP_HOST_BACKEND);
+    // Control OpenCV threading to match RPP configuration for fair comparison
+    cv::setNumThreads(NUM_THREADS);
 #else
     rppCreate(&handle, 1, 1, nullptr, RPP_HOST_BACKEND);
+    cv::setNumThreads(1);
 #endif
 
     int batchSizeGray = 0, maxWidthGray = 0, maxHeightGray = 0;
@@ -110,6 +113,7 @@ int main()
     cout << "Number of Runs: " << NUM_RUNS << endl;
     cout << "========================================" << endl;
 
+    
     // ==================== GRAYSCALE ====================
     if (!imgsGray.empty())
     {
@@ -137,10 +141,16 @@ int main()
 
         benchmark_RPP_GaussianFilter(imgsGray, false, filterKernel, gaussSigma, handle);
         benchmark_OpenCV_GaussianFilter(imgsGray, false, filterKernel, gaussSigma);
-
+        
         benchmark_RPP_SobelFilter(imgsGray, false, 0, handle);
-        benchmark_OpenCV_SobelFilter(imgsGray, false);
+        benchmark_OpenCV_SobelFilter(imgsGray, false, 0);
 
+        benchmark_RPP_SobelFilter(imgsGray, false, 1, handle);
+        benchmark_OpenCV_SobelFilter(imgsGray, false, 1);
+
+        benchmark_RPP_SobelFilter(imgsGray, false, 2, handle);
+        benchmark_OpenCV_SobelFilter(imgsGray, false, 2);
+        
         benchmark_RPP_Emboss(imgsGray, false, 3, 1.0f, handle);
         benchmark_OpenCV_Emboss(imgsGray, false, 3, 1.0f);
 
@@ -187,7 +197,7 @@ int main()
 
         benchmark_RPP_Dilate(imgsGray, false, morphKernel, handle);
         benchmark_OpenCV_Dilate(imgsGray, false, morphKernel);
-
+        
         cout << "\n--- Arithmetic Operations ---" << endl;
         benchmark_RPP_AddScalar(imgsGray, false, addVal, handle);
         benchmark_OpenCV_AddScalar(imgsGray, false, addVal);
@@ -197,10 +207,10 @@ int main()
 
         benchmark_RPP_MultiplyScalar(imgsGray, false, mulVal, handle);
         benchmark_OpenCV_MultiplyScalar(imgsGray, false, mulVal);
-
+        
         benchmark_RPP_Blend(imgsGray, false, blendAlpha, handle);
         benchmark_OpenCV_Blend(imgsGray, false, blendAlpha);
-
+        
         cout << "\n--- Bitwise Operations ---" << endl;
         benchmark_RPP_BitwiseAnd(imgsGray, false, handle);
         benchmark_OpenCV_BitwiseAnd(imgsGray, false);
@@ -274,8 +284,8 @@ int main()
 
         benchmark_RPP_Remap(imgsGray, false, handle);
         benchmark_OpenCV_Remap(imgsGray, false);
+        
     }
-
     // ==================== RGB ====================
     if (!imgsRGB.empty())
     {
@@ -319,8 +329,7 @@ int main()
         benchmark_RPP_GaussianFilter(imgsRGB, true, filterKernel, gaussSigma, handle);
         benchmark_OpenCV_GaussianFilter(imgsRGB, true, filterKernel, gaussSigma);
 
-        benchmark_RPP_SobelFilter(imgsRGB, true, 0, handle);
-        benchmark_OpenCV_SobelFilter(imgsRGB, true);
+        // SobelFilter skipped for RGB (only works on grayscale - see grayscale section)
 
         benchmark_RPP_Emboss(imgsRGB, true, 3, 1.0f, handle);
         benchmark_OpenCV_Emboss(imgsRGB, true, 3, 1.0f);
@@ -515,8 +524,6 @@ int main()
         benchmark_RPP_ResizeCropMirror(imgsRGB, true, handle);
         benchmark_OpenCV_ResizeCropMirror(imgsRGB, true);
 
-        benchmark_RPP_RICAP(imgsRGB, true, handle);
-        benchmark_OpenCV_RICAP(imgsRGB, true);
     }
 
     cout << "\n========================================" << endl;

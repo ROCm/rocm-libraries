@@ -27,10 +27,10 @@ Creates 128 images at 1080p resolution with various patterns and colors.
 """
 
 import os
-import sys
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 import random
 import math
+import numpy as np
 
 # Configuration
 OUTPUT_DIR = "1080p_128images_dataset"
@@ -100,17 +100,9 @@ def generate_circle_image(index, output_path):
 
 def generate_noise_image(index, output_path):
     """Generate random noise."""
-    pixels = []
-    for _ in range(HEIGHT):
-        row = []
-        for _ in range(WIDTH):
-            row.append((random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)))
-        pixels.append(row)
-
-    img = Image.new('RGB', (WIDTH, HEIGHT))
-    for y in range(HEIGHT):
-        for x in range(WIDTH):
-            img.putpixel((x, y), pixels[y][x])
+    # Vectorized numpy array creation is 100-1000x faster than pixel loops
+    noise_array = np.random.randint(0, 256, (HEIGHT, WIDTH, 3), dtype=np.uint8)
+    img = Image.fromarray(noise_array, 'RGB')
 
     filename = os.path.join(output_path, f"noise_{index:03d}.png")
     img.save(filename, 'PNG')
@@ -152,27 +144,36 @@ def generate_solid_color_image(index, output_path):
 
 def generate_radial_pattern_image(index, output_path):
     """Generate radial pattern from center."""
-    img = Image.new('RGB', (WIDTH, HEIGHT))
-
     cx, cy = WIDTH // 2, HEIGHT // 2
     max_dist = math.sqrt(cx**2 + cy**2)
 
-    for y in range(HEIGHT):
-        for x in range(WIDTH):
-            dist = math.sqrt((x - cx)**2 + (y - cy)**2)
-            intensity = int((dist / max_dist) * 255)
+    # Vectorized computation using numpy meshgrid
+    x = np.arange(WIDTH)
+    y = np.arange(HEIGHT)
+    X, Y = np.meshgrid(x, y)
 
-            r = (intensity + index * 10) % 256
-            g = (255 - intensity) % 256
-            b = (intensity * 2) % 256
+    # Calculate distance from center for all pixels at once
+    dist = np.sqrt((X - cx)**2 + (Y - cy)**2)
+    intensity = (dist / max_dist * 255).astype(np.uint8)
 
-            img.putpixel((x, y), (r, g, b))
+    # Calculate RGB channels
+    r = (intensity + index * 10) % 256
+    g = (255 - intensity) % 256
+    b = (intensity * 2) % 256
+
+    # Stack channels to create RGB image
+    img_array = np.stack([r, g, b], axis=-1).astype(np.uint8)
+    img = Image.fromarray(img_array, 'RGB')
 
     filename = os.path.join(output_path, f"radial_{index:03d}.png")
     img.save(filename, 'PNG')
     return filename
 
 def main():
+    # Set random seeds for reproducibility
+    random.seed(42)
+    np.random.seed(42)
+
     print("=" * 60)
     print("OpenCV Benchmark Test Dataset Generator")
     print("=" * 60)

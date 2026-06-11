@@ -66,7 +66,7 @@ find_library(XLSXWRITER_LIBRARY
 )
 
 # Find RPP library
-find_package(rpp 3.0.0 QUIET)
+find_package(rpp 3.1.2 QUIET)
 if(rpp_FOUND)
     message("-- ${White}${PROJECT_NAME}: rpp found with find_package(rpp QUIET)${ColourReset}")
     message("-- \t${White}rpp_INCLUDE_DIR -- ${rpp_INCLUDE_DIR}${ColourReset}")
@@ -99,7 +99,6 @@ add_executable(opencv_vs_rpp_host_benchmarking
     benchmarks_utils.cpp
     rpp_benchmarks.cpp
     opencv_benchmarks.cpp
-    dropout_helpers.cpp
     opencv_vs_rpp_host_benchmarking.cpp
 )
 

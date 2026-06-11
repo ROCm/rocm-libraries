@@ -98,7 +98,7 @@ cmake -DROCM_PATH=/path/to/your/rocm ..
 The easiest way to get started is to use the complete setup script:
 
 ```bash
-cd /path/to/rpp_ms_develop/utilities/test_suite/OPENCV
+cd utilities/test_suite/OPENCV
 ./run_benchmarking.sh
 ```
 
@@ -129,6 +129,7 @@ Install OpenCV and build tools:
 ```bash
 sudo apt-get update
 sudo apt-get install -y libopencv-dev libgomp1 cmake build-essential libxlsxwriter-dev
+pip3 install Pillow  # Required for generate_test_dataset.py
 ```
 
 Verify OpenCV installation:
@@ -393,7 +394,6 @@ make -j$(nproc)
 If you get permission errors when running scripts:
 
 ```bash
-chmod +x setup_and_build.sh
 chmod +x run_benchmarking.sh
 chmod +x generate_test_dataset.py
 ```
