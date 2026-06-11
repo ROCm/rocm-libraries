@@ -293,15 +293,15 @@ class TestComputeOccupancyRealCustomKernels:
 
 
 # ---------------------------------------------------------------------------
-# TestPythonDebugWarning — Change 2a: print2-gated warning in processKernelSource
+# TestPythonDebugWarning — Test warning messages
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# TestNonGfx9OccupancyNotComputed — Fix #2 / Fix #4 interaction
+# TestNonGfx9OccupancyNotComputed — Check for architectures not implemented in occupancy calculator
 # ---------------------------------------------------------------------------
 
 class TestNonGfx9OccupancyNotComputed:
-    """Fix #2 + Fix #4: Non-gfx9 ISAs must not yield a CUOccupancy override.
+    """Non-gfx9 ISAs must not yield a CUOccupancy override.
 
     compute_occupancy_from_asm_source returns None for non-gfx9 ISAs because
     _arch_caps_for_kernel returns None (the formula is gfx9/wave64-specific).
