@@ -2006,6 +2006,30 @@ class LogicalScheduler:
                                     or wait_dep.ref.subIterK_slot != lr.subIterK_slot)
                         counts = self._compute_inflight_loads(
                             pi, lr.subIterK_slot, wait_dep.ref.tensor, wait_dep)
+                        # Residual StreamK wait_gr race fix: the exact
+                        # inflight-count walk in _compute_inflight_loads
+                        # under-counts the outstanding global-read tail for
+                        # WRAP-LRs (consumers that read an LDS buffer across a
+                        # body-iteration / MT-prefetch boundary) once the
+                        # StreamK grid assigns multiple partial tiles / wrap
+                        # iterations to a workgroup. The result is a too-weak
+                        # vmcnt so the ds_read can consume a buffer whose
+                        # producing buffer_load has not retired -> stale LDS,
+                        # non-deterministic verify failures that scale with the
+                        # output-tile grid. Several narrow per-config drains
+                        # were added (PRs that fixed MT256x256/MT192x256 small
+                        # cases) but grid-dependent configs remain uncovered.
+                        # For any wrap/cross-iter consumer in the multi-DU
+                        # subtile regime, force a full vmcnt(0) drain (a
+                        # superset of those per-config drains) so LDS is fully
+                        # written before it is read.
+                        any_wrap = (lr.mtIteration > 0
+                                    or any(d.mt_offset != 0 for d in gr_deps))
+                        multiDU = (self.config.numUnroll
+                                   and max(self.config.numUnroll.values()) > 1
+                                   and self.config.pgr == 1)
+                        if multiDU and any_wrap:
+                            counts = WaitGRCounts()
                         lr.preOps.append(WaitGROp(wait_gr_counts=counts,
                                                   has_sync=True,
                                                   adjustVmcnt=is_cross))
