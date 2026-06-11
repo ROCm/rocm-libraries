@@ -157,6 +157,7 @@ NB_MODULE(origami, m) {
       .def_rw("gwvw_d", &origami::config_t::gwvw_d)
       .def_rw("vector_width_a", &origami::config_t::vector_width_a)
       .def_rw("vector_width_b", &origami::config_t::vector_width_b)
+      .def_rw("index", &origami::config_t::index)
       // Tensile-specific parameters accessed via variant backend
       .def("tensile",
            static_cast<origami::tensile_params_t& (origami::config_t::*)()>(
