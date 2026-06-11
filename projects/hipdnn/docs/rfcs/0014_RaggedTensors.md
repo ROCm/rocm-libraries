@@ -206,7 +206,10 @@ carries any ragged-specific information.
   `rawHostData()`, iteration via `LinearIndex` / `CompositeIndex`
   strategies.
 - **`TensorBase<T>`** — adds typed addressing
-  (`getHostValue` / `setHostValue`).
+  (`getHostValue` / `setHostValue`). These are **non-virtual**
+  conveniences that funnel through `ITensor::getIndex`, so the
+  override point for custom addressing is `getIndex`, not these
+  methods.
 - **`Tensor<T>`** — owning dense tensor backed by
   `MigratableMemory<T, HostAlloc, DeviceAlloc>`. Asserts
   `_packed = (elementCount == elementSpace)`.
@@ -254,8 +257,11 @@ corresponding CPU reference (e.g.
    `IndexT` template parameter — see
    [§4.5](#45-data-sdk-shared-elements) item 1). `seq_lens` is
    not part of either type.
-3. **`ITensor`** gains a polymorphic index-strategy hook so ragged
-   iteration can supply a `RaggedCompositeIndex`.
+3. **`ITensor`** gains two complementary polymorphic hooks: a
+   `getIndexImpl` override point behind `getIndex` so ragged
+   *addressing* bases each batch at `ragged_offset[b]`, and an
+   index-strategy hook so ragged *iteration* can supply a
+   `RaggedCompositeIndex`.
 4. **Plan layer** wraps the variant-pack pointer in a
    `ShallowRaggedTensor` per execute and passes it as
    `TensorBase<T>&`. CPU references and kernels that need
@@ -390,13 +396,38 @@ These apply to both `RaggedTensor<T>` and
    uphold so the reported geometry matches kernel and
    overridable-shape expectations; the SDK types do not derive or
    verify it.
-3. **Variant index-strategy hook on `ITensor`**: introduce
-   `virtual IndexType makeIndex(bool isEnd) const`.
-   The `isEnd` parameter selects the begin vs end iterator
-   position, mirroring the existing `LinearIndex` /
-   `CompositeIndex` constructor pattern. A new `RaggedCompositeIndex`
-   is added to the `IndexType` variant that walks each batch's full
-   `[ragged_offset[b], ragged_offset[b+1])` range in turn.
+3. **Two complementary indexing hooks on `ITensor`** — one for
+   addressing, one for traversal:
+
+   - **Addressing (`getIndexImpl`).** `getIndex(const
+     std::vector<int64_t>&)` is refactored to forward to a new
+     `protected virtual int64_t getIndexImpl(const
+     std::vector<int64_t>&) const` holding the default offset
+     computation (`inner_product` of indices and strides); the
+     argument-count check stays in the non-virtual forwarder. Both
+     ragged types override `getIndexImpl` to base each batch's
+     offset at `readOffset(b)` (see
+     [§4.6](#46-data-sdk-raggedtensort-owning-ragged-aware)).
+     Every addressing path funnels through `getIndex`
+     (`getHostValue` / `setHostValue` / `operator()`,
+     `CompositeIndex::getValue`, `TensorView`), so this single
+     override makes direct addressing ragged-aware everywhere — at
+     the cost of making `getIndex` a virtual call for all
+     non-packed tensors (see [§5](#known-limitations) item 7).
+   - **Traversal (`makeIndex` / `RaggedCompositeIndex`).**
+     Introduce `virtual IndexType makeIndex(bool isEnd) const`
+     (`isEnd` selects the begin vs end position, mirroring the
+     existing `LinearIndex` / `CompositeIndex` pattern) and add a
+     `RaggedCompositeIndex` to the `IndexType` variant that walks
+     each batch's full `[ragged_offset[b], ragged_offset[b+1])`
+     range in turn. This is **required in addition to**
+     `getIndexImpl`: traversal bounds derive from `dims()` /
+     `elementCount()`, so a plain `CompositeIndex` would visit
+     `prod(paddedDims)` positions rather than the
+     `ragged_offset[B]` that `elementCount()` reports (item 6).
+     `RaggedCompositeIndex` emits `{b, within-batch…}` indices and
+     delegates the per-element offset back to `getIndex`, keeping
+     the offset math in one place.
 4. **Iteration walks `ragged_offset` ranges, not `seq_lens`-bounded
    ranges.** Each batch's full per-batch range is iterated as
    part of that batch. Padding never leaks into the wrong batch's
@@ -472,6 +503,7 @@ public:
     //   elementSpace() -> physicalElementCount           (allocation size == ragged_offset[B])
     //   elementCount() -> ragged_offset[B]               (iterated elements)
     //   isPacked()     -> false
+    //   getIndexImpl() -> readOffset(b) + sq*stride_1 + ...  (ragged addressing)
     //   begin/end      -> RaggedCompositeIndex via makeIndex()
     //                      (walks each batch's ragged_offset range)
     //
@@ -511,18 +543,21 @@ it. The primary's T-typed buffer remains mutable as usual via
 `rawHostData` / `rawDeviceData` / `MigratableMemory`.
 
 **Ragged-aware multi-dim addressing.** `RaggedTensor<T>`
-overrides `getHostValue` / `setHostValue` from `TensorBase<T>` so
-that a multi-dim index `{b, sq, …}` translates to a physical
-offset using `readOffset(b)` (i.e. `ragged_offset[b]` widened to
-`int64_t`) as the per-batch base — i.e.
+overrides `getIndexImpl` (the protected virtual from
+[§4.5](#45-data-sdk-shared-elements) item 3) so that a multi-dim
+index `{b, sq, …}` translates to a physical offset using
+`readOffset(b)` (i.e. `ragged_offset[b]` widened to `int64_t`) as
+the per-batch base:
 `physical_offset = readOffset(b) + sq * stride_1 + …`. (The
-inherited implementation uses only the padded strides, which
-would index into `b * stride_0 + …` regardless of where batch
-`b`'s range actually starts in the physical buffer.) Callers may
-index into batch `b` with `sq` ranging up to that batch's per-batch
-extent (`readOffset(b+1) - readOffset(b)`); indices outside
-that range are out-of-bounds for that batch and behavior is
-unspecified.
+default implementation uses only the padded strides, indexing
+into `b * stride_0 + …` regardless of where batch `b`'s range
+actually starts in the physical buffer.) Overriding `getIndexImpl`
+rather than the non-virtual `getHostValue` / `setHostValue` is
+what makes every addressing path ragged-aware at once (§4.5 item
+3). Callers may index into batch `b` with `sq` ranging up to that
+batch's per-batch extent (`readOffset(b+1) - readOffset(b)`);
+indices outside that range are out-of-bounds for that batch and
+behavior is unspecified.
 
 #### 4.6.1 User-side construction pattern
 
@@ -609,10 +644,10 @@ public:
 `ShallowRaggedTensor` performs the same constructor-time
 structural validation listed in
 [§4.5](#45-data-sdk-shared-elements), including the int32/int64
-element-size check on the aux. It shares its
-`RaggedCompositeIndex` implementation and its type-erased
-`readOffset` helper with `RaggedTensor`; only memory ownership
-differs.
+element-size check on the aux. It shares its `getIndexImpl`
+override, its `RaggedCompositeIndex` implementation, and its
+type-erased `readOffset` helper with `RaggedTensor`; only memory
+ownership differs.
 
 Unlike `RaggedTensor`, `ShallowRaggedTensor` does not carry an
 allocator template parameter — pinned-vs-pageable is determined
@@ -1050,6 +1085,17 @@ would only skip over validating this one value.
    parameter on `RaggedTensor` / `ShallowRaggedTensor` / per-op
    plan templates / test-SDK factories — is discussed in
    [§6.3](#63-templating-the-ragged-tensor-types-on-indext).
+7. **`getIndex` becomes a virtual call for non-packed tensors.**
+   Forwarding `getIndex` to the new `getIndexImpl` virtual
+   ([§4.5](#45-data-sdk-shared-elements) item 3) adds one vtable
+   dispatch to a previously inlinable function — on the per-element
+   path of `CompositeIndex::getValue` and every `operator()` /
+   `getHostValue` / `setHostValue` call, for *all* non-packed
+   tensors, not only ragged ones. (Packed tensors iterate via
+   `LinearIndex`, which never calls `getIndex`.) The cost is
+   negligible for the correctness-oriented CPU-reference paths this
+   RFC targets, consistent with the perf stance in
+   [§6.3](#63-templating-the-ragged-tensor-types-on-indext).
 
 ---
 
@@ -1095,9 +1141,11 @@ disappears, and what remains is pure cost:
   pattern at the plan layer that the single-type design folds
   into `ShallowRaggedTensor<T>` directly).
 - **A storage type that derives from `TensorBase<T>` but whose
-  `getHostValue` / `setHostValue` have no meaningful semantics on
-  the ragged primary's physical buffer** — those methods would
-  need to either throw or address into "raw physical positions",
+  default addressing (`getIndex` / `getHostValue` /
+  `setHostValue`) has no meaningful semantics on the ragged
+  primary's physical buffer** — with no aux ref it cannot base
+  addressing at `ragged_offset[b]`, so addressing would need to
+  either throw or address into "raw physical positions",
   motivating a further hierarchy refactor (introducing a
   `TypedTensor<T>` between `ITensor` and `TensorBase<T>`) just to
   clean up.
@@ -1216,7 +1264,8 @@ return:
   plan-builder matrix stays at its existing size.
 - The CPU reference signature is unchanged — it still takes
   `TensorBase<T>&` for the primary, and the aux is hidden inside
-  the ragged tensor's `getHostValue` / `setHostValue` overrides.
+  the ragged tensor's `getIndexImpl` override (reached via
+  `getHostValue` / `setHostValue` and the iterator).
 - The single sourced cost is the runtime element-size branch
   inside `readOffset`, paid on each offset read by the CPU
   reference.
@@ -1306,6 +1355,7 @@ with either:
   test-SDK factories (as analyzed in §6.3).
 
 Neither change is needed for the in-scope use cases, where the
-aux is only read inside the CPU reference's `getHostValue` /
-`setHostValue` path and where GPU kernels consume the aux as an
-opaque `void*` from the variant pack.
+aux is only read inside the ragged tensor's `getIndexImpl`
+override (reached via `getHostValue` / `setHostValue` and the
+iterator) and where GPU kernels consume the aux as an opaque
+`void*` from the variant pack.
