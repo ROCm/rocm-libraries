@@ -40,6 +40,9 @@ MACRO(IF_DSAtomic)
 MACRO(IF_Barrier)
 MACRO(IF_Branch)
 MACRO(IF_ConditionalBranch)
+// Indirect branch: target PC is computed from a register at runtime
+// (e.g. s_setpc_b64, s_swappc_b64). Always set together with IF_Branch.
+MACRO(IF_IndirectBranch)
 MACRO(IF_WaitCnt)
 MACRO(IF_WaitTensorCnt)
 

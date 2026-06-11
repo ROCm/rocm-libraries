@@ -134,7 +134,7 @@ The pinned upstream reference is cuDNN FE **v1.24.0**, verified in
 ### 4.1 Layout and packaging
 
 The shim will primarily reside under
-`projects/hipdnn/frontend/include/compatibility/cudnn/` and be exposed as an
+`projects/hipdnn/frontend/include/hipdnn_compatibility/cudnn/` and be exposed as an
 exported header-only CMake target. The objects will be namespaced
 `hipdnn_frontend::compatibility::cudnn_frontend` (referred to below as
 `<shim_ns>`), mirroring upstream's `cudnn_frontend` namespace as closely as
@@ -148,7 +148,7 @@ Proposed source layout (filenames mirror upstream cuDNN FE exactly, all
 `.h` per §5.1):
 
 ```
-projects/hipdnn/frontend/include/compatibility/cudnn/
+projects/hipdnn/frontend/include/hipdnn_compatibility/cudnn/
     cudnn.h                         # Stub: v9-required C-API types only (see §4.7)
     cudnn_frontend.h                # Umbrella; matches upstream filename
     cudnn_frontend_version.h
@@ -180,7 +180,7 @@ enum mappings (`type_mapping.h`), and the error/logging bridges. The
 wrappers only — not one file per node.
 
 A separate, **opt-in** header,
-`<compatibility/cudnn/cuda_runtime_compat.h>`, will provide `#define`
+`<hipdnn_compatibility/cudnn/cuda_runtime_compat.h>`, will provide `#define`
 overrides for the small fixed set of CUDA runtime symbols that frequently
 appear in cuDNN-consuming code and have direct HIP equivalents:
 
@@ -678,7 +678,7 @@ v0.x source compatibility, see
 The shim is part of `hipdnn_frontend`'s versioning surface (see RFC 0005).
 That implies:
 
-- Its public headers live under `frontend/include/compatibility/cudnn/` and
+- Its public headers live under `frontend/include/hipdnn_compatibility/cudnn/` and
   are versioned together with `hipdnn_frontend` (single `version.json`).
 - Within a major version of `hipdnn_frontend`, the shim's surface area may
   **only** grow (new node wrappers, new enum values mapped) — never shrink
@@ -864,7 +864,7 @@ hipDNN-native PyTorch that ships in 2027.
 
 ### 7.1 Phase 1 — Foundations (compiles, builds, has CI)
 
-- Add `projects/hipdnn/frontend/include/compatibility/cudnn/` to the
+- Add `projects/hipdnn/frontend/include/hipdnn_compatibility/cudnn/` to the
   source tree.
 - Stand up `cudnn_frontend.h` umbrella header (empty but installable).
 - Add CMake target `hipdnn_cudnn_shim` (or integrate into `hipdnn_frontend`
@@ -1044,7 +1044,7 @@ PyTorch build (or rewritten to v9 first).
 
 ### 8.1 Unit tests
 
-Location: `projects/hipdnn/frontend/tests/compatibility/cudnn/`. Same
+Location: `projects/hipdnn/frontend/tests/hipdnn_compatibility/cudnn/`. Same
 gtest framework as the rest of the frontend tests; same naming convention
 (`TestCudnnShim*.cpp`, suites prefixed `TestCudnnShim*`).
 
@@ -1158,7 +1158,7 @@ PyTorch in, or (c) the test is run on-demand by the shim's named owners
   RFC's authoring time. Because v0.x types live in the same upstream
   `cudnn_frontend` namespace and ship from headers adjacent to the v9
   ones, the follow-up is purely **additive** to this shim — new headers
-  in the existing `compatibility/cudnn/` directory and new declarations
+  in the existing `hipdnn_compatibility/cudnn/` directory and new declarations
   in `<shim_ns>` and `<shim_ns>::detail`, with no rename or move of v9
   symbols. The path layout in §4.1 was chosen with that in mind. See
   §4.7 and
