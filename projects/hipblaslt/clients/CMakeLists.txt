@@ -120,6 +120,13 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         target_compile_definitions(hipblaslt-test PRIVATE HIPBLASLT_USE_ROCROLLER)
     endif()
 
+    # fp64_emulation_gtest.cpp includes the rocblaslt-private fp64_emulation.hpp
+    # (and its rocblaslt.h dependency) to unit-test the emulation entry points.
+    target_include_directories(hipblaslt-test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../library/src/amd_detail/rocblaslt/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../library/src/amd_detail/rocblaslt/src/include
+    )
+
     add_subdirectory(tests)
 endif()
 if(HIPBLASLT_ENABLE_SAMPLES)
