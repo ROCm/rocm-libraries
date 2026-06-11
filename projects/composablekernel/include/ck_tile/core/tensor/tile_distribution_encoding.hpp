@@ -16,12 +16,12 @@
 
 namespace ck_tile {
 
-template <typename RsLengths_,                  // sequence<...>
-          typename HsLengthss_,                 // tuple<sequence<...>, ...>
-          typename Ps2RHssMajor_,               // tuple<sequence<...>, ...>
-          typename Ps2RHssMinor_,               // tuple<sequence<...>, ...>
-          typename Ys2RHsMajor_,                // sequence<...>
-          typename Ys2RHsMinor_>                // sequence<...>
+template <typename RsLengths_,    // sequence<...>
+          typename HsLengthss_,   // tuple<sequence<...>, ...>
+          typename Ps2RHssMajor_, // tuple<sequence<...>, ...>
+          typename Ps2RHssMinor_, // tuple<sequence<...>, ...>
+          typename Ys2RHsMajor_,  // sequence<...>
+          typename Ys2RHsMinor_>  // sequence<...>
 struct tile_distribution_encoding
 {
     using RsLengths    = remove_cvref_t<RsLengths_>;

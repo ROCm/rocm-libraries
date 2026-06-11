@@ -1977,13 +1977,9 @@ CK_TILE_DEVICE void amd_async_buffer_load(CK_TILE_LDS_ADDR T* smem,
                                           index_t flag                              = 0,
                                           bool_constant<oob_conditional_check>      = {})
 {
-#ifdef __HIP_DEVICE_COMPILE__
     constexpr index_t bytes = sizeof(T) * N;
     static_assert(IMM < (1 << 12), "wrong! immediate offset too large");
 
-    // Architecture-specific size validation.  Skip during the host compilation
-    // pass (where __gfx*__ macros are not defined) because the builtin is
-    // device-only and will never execute on the host.
 #if defined(__gfx950__)
     static_assert(bytes == 4 || bytes == 12 || bytes == 16,
                   "wrong! only support in dword, dwordx3, dwordx4");
@@ -2011,14 +2007,6 @@ CK_TILE_DEVICE void amd_async_buffer_load(CK_TILE_LDS_ADDR T* smem,
 #ifdef __clang__
 #pragma clang diagnostic pop
 #endif
-#else
-    // Suppress unused parameter warnings
-    (void)smem;
-    (void)rsrc;
-    (void)src_thread_addr_offset;
-    (void)src_wave_addr_offset;
-    (void)flag;
-#endif // __HIP_DEVICE_COMPILE__
 }
 
 template <index_t N,

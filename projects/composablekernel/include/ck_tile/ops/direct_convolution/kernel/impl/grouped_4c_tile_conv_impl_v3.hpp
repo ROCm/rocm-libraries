@@ -302,8 +302,8 @@ struct WeightLoader : direct_conv::WeightAccessor<cfg.kh, cfg.kw,
             const int wave_c64 = (static_cast<int>(threadIdx.x) / WAVE_SIZE) % cfg.waves_c64;
 
             // transpose_get (ds_read_b64_tr_b16) is a raw bitwise LDS load,
-            // so we always use _Float16 / fp16x4_t for the buffer view and
-            // bit_cast to the actual VecType (bf16x4_t for BF16).
+            // so we always use _Float16 for the buffer view and bit_cast the
+            // loaded thread_buffer to the actual VecType (bf16x4_t for BF16).
             auto output_lds_fp16 = ck_tile::buffer_view<
                 ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>{
                 reinterpret_cast<_Float16*>(weight_lds),
@@ -322,8 +322,9 @@ struct WeightLoader : direct_conv::WeightAccessor<cfg.kh, cfg.kw,
                 cfg.data_type == DataType::bf16, bf16x4_t, fp16x4_t>;
             for(int khw = 0; khw < cfg.kh * cfg.kw; khw++)
             {
-                auto loaded = output_lds_fp16.template transpose_get<ck_tile::fp16x4_t>(
-                    weight_base + khw * TC::GROUP_SIZE, 0, true);
+                auto loaded =
+                    output_lds_fp16.template transpose_get<ck_tile::thread_buffer<_Float16, 4>>(
+                        weight_base + khw * TC::GROUP_SIZE, 0, true);
                 this->weights[khw] = ck_tile::bit_cast<VecType>(loaded);
             }
         }
