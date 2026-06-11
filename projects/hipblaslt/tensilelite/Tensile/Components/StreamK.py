@@ -65,7 +65,7 @@ class XCCMappingOn(XCCMapping):
     def __call__(self, writer, kernel):
         module = Module("XCCMapping On")
 
-        with writer.allocTmpSgpr(4) as tmpSgprRes:
+        with writer.allocTmpSgpr(4, tag="StreamKXCCMappingOn_tmpSgprRes") as tmpSgprRes:
             sXCC   = tmpSgprRes.idx
             sGridC = tmpSgprRes.idx + 1
             sGridF = tmpSgprRes.idx + 2
@@ -276,7 +276,7 @@ class StreamK(Component):
     def shiftSrd(self, writer, srdIdx) -> Module:
       module = Module("shiftSrd")
       if writer.states.version[:2] == (12, 5):
-        with writer.allocTmpSgpr(1) as stmpRes:
+        with writer.allocTmpSgpr(1, tag="shiftSrd_tmpSgprRes") as stmpRes:
           module.addComment("Shift num records for gfx125x")
           module.add(SAndB32(sgpr(stmpRes.idx), sgpr(srdIdx+2), 0x7F))
           module.add(SLShiftLeftB32(sgpr(stmpRes.idx), 25, sgpr(stmpRes.idx)))
@@ -468,7 +468,7 @@ class StreamK(Component):
         writer.releaseStreamKConstSgpr(sSkt)
         module.add(SCBranchSCC1(labelName=skSplitSrd.getLabelName(), comment="branch if split == 1"))
         # Parallel reduction: adjust output buffer address to per split buffer
-        with writer.allocTmpSgpr(4, alignment=1) as tmpSgprInfo:
+        with writer.allocTmpSgpr(4, alignment=1, tag="computeStoreSrdStartCommon_tmpSgprInfo") as tmpSgprInfo:
             if tmpSgprInfo.idx % 2 == 0:
                 tmpSgprX2  = tmpSgprInfo.idx+0
                 tmpSgpr0   = tmpSgprInfo.idx+0
@@ -588,7 +588,7 @@ class StreamK(Component):
                 if ((kernel["DepthU"] & (kernel["DepthU"] - 1)) == 0):
                     module.add(scalarStaticDivideAndRemainder(qReg=tmpSgpr, rReg=tmpSgpr+1, dReg=("SizesSum+%u" % unrollIdx), divisor=kernel["DepthU"], tmpSgprRes=None, doRemainder=2))
                 else:
-                    with writer.allocTmpSgpr(4) as tmpSgpr1:
+                    with writer.allocTmpSgpr(4, tag="calculateLoopNumIterCommon_tmpSgpr1") as tmpSgpr1:
                         module.add(scalarStaticDivideAndRemainder(qReg=tmpSgpr, rReg=tmpSgpr+1, dReg=("SizesSum+%u" % unrollIdx), divisor=kernel["DepthU"], tmpSgprRes=tmpSgpr1, doRemainder=2))
                 module.add(SCmpEQU32(src0=sgpr(tmpSgpr+1), src1=0, comment="numIter%s == 0"%loopChar ))
                 module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=0, src1=1, comment="check if size uses tail loop"))
@@ -639,7 +639,7 @@ class StreamK(Component):
             sPartialIdx = writer.sgprPool.checkOut(1, "SK_Fixup_Partial_idx")
 
             sSkExtraIters = writer.sgprPool.checkOut(1, "extraIters")
-            tmpSgpr = writer.sgprPool.checkOut(1, "tmpSgpr")
+            tmpSgpr = writer.sgprPool.checkOut(1, tag="StreamKCommon_storeBranches_tmpSgpr")
             module.add(self.skExtraIters(writer, kernel, sSkExtraIters, tmpSgpr))
             writer.sgprPool.checkIn(tmpSgpr)
 
@@ -657,11 +657,11 @@ class StreamK(Component):
             module.add(skFixupTreeLabel)
 
             # Calculate partialIdx
-            tmpVgpr = writer.vgprPool.checkOutAligned(4, 2)
+            tmpVgpr = writer.vgprPool.checkOutAligned(4, 2, tag="StreamKCommon_storeBranches_tmpVgpr")
             tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=4)
 
             # Get Iter of the start of the tile
-            tmpSgpr = writer.sgprPool.checkOut(3, "tmpSgpr")
+            tmpSgpr = writer.sgprPool.checkOut(3, tag="StreamKCommon_storeBranches_tmpSgpr2")
 
             # Compute dpSectionSize = (totalTiles - skTiles) * ItersPerTile
             sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
@@ -866,7 +866,7 @@ class StreamK(Component):
                     # Keep original Fixup_E0 label inline as a stub
                     fixupInlineLabel = Label(label=writer.labels.getNameInc("Fixup_E%u" % 0), comment="")
                     module.add(fixupInlineLabel)
-                    with writer.allocTmpSgpr(3) as tmpSgprInfo:
+                    with writer.allocTmpSgpr(3, tag="StreamKOn_fixupInline_tmpSgprInfo") as tmpSgprInfo:
                         module.add(SLongBranchPositive(fixupDeferredLabel, tmpSgprInfo, comment="jump to deferred fixup block"))
                     module.addComment0("=" * 60)
                     module.addComment0(" Fixup block deferred to after persistent loop")
@@ -877,7 +877,7 @@ class StreamK(Component):
                     fixupModule = Module("Fixup_DeferredBlock")
                     fixupModule.add(fixupDeferredLabel)
                     fixupModule.add(self.fixupStep(writer, kernel, vectorWidths, elements, fixupEdge, tmpVgpr, cvtVgprStruct, sCtaIdx))
-                    with writer.allocTmpSgpr(3) as tmpSgprInfo:
+                    with writer.allocTmpSgpr(3, tag="StreamKOn_fixupDeferred_tmpSgprInfo") as tmpSgprInfo:
                         posLabel = writer.labels.getNameInc("FixupDeferredReturnDir")
                         fixupModule.add(SLongBranch(fixupReturnLabel, tmpSgprInfo, posLabel, comment="return from deferred fixup block"))
                     writer.states.deferredFixupModule = fixupModule
@@ -943,7 +943,7 @@ class StreamK(Component):
             partialsLabels[edge] = Label(writer.labels.getNameInc("GW_Partials_E%u" % ( 1 if edge else 0)), comment="")
 
         if False in edges and True in edges:
-            with self.allocTmpSgpr(4) as tmpSgprInfo:
+            with self.allocTmpSgpr(4, tag="StreamKCommon_writePartials_tmpSgprInfo") as tmpSgprInfo:
                 module.add(writer.checkIsEdge(kernel, tmpSgprInfo, partialsLabels[True], partialsLabels[True]))
 
         # WritePartials writes to workspace (no bias LDS barriers), safe to defer.
@@ -956,7 +956,7 @@ class StreamK(Component):
             # Inline stub
             for edge in edges:
                 module.add(partialsLabels[edge])
-            with writer.allocTmpSgpr(3) as tmpSgprInfo:
+            with writer.allocTmpSgpr(3, tag="StreamKCommon_writePartials_tmpSgprInfo2") as tmpSgprInfo:
                 module.add(SLongBranchPositive(partialsDeferredLabel, tmpSgprInfo, comment="writePartials (deferred)"))
             module.addComment0("=" * 60)
             module.addComment0(" WritePartials block deferred to after persistent loop")
@@ -1202,7 +1202,7 @@ class StreamK(Component):
         #kStr += "// storeStats, %d, %d, %d\n"% (edgeI, numSgprs, numElementsPerBatch)
         # so if we don't have *GPR resources to handle a larger batch then need
         # to mark overflowedResources rather than generate a kernel that won't work.
-        with writer.allocTmpSgpr(numSgprs, 2) as tmpSgprRes:
+        with writer.allocTmpSgpr(numSgprs, 2, tag="StreamKCommon_partialsWriteBatch_tmpSgprRes") as tmpSgprRes:
             tmpSgpr = tmpSgprRes.idx
             elementSgprs = tmpSgpr + ss.cfg.numTempSgprPerBatch
 
@@ -1244,7 +1244,7 @@ class StreamK(Component):
                 module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(sIdx), shiftHex=log2(4), comment="flag offset based on CTA index"))
                 writer.releaseStreamKConstSgpr(sIdx)
 
-            with writer.allocTmpSgpr(1) as flagSgprRes:
+            with writer.allocTmpSgpr(1, tag="StreamKCommon_setFlag_tmpSgprRes") as flagSgprRes:
                 flagSgpr = flagSgprRes.idx
                 skipFlagSet = Label(label=writer.labels.getNameInc("SK_SkipFlagSet"), comment="")
                 module.add(VReadfirstlaneB32(dst=sgpr(flagSgpr), src=vgpr("Serial"), comment="Wave 0 updates flags"))
@@ -1261,7 +1261,7 @@ class StreamK(Component):
 
         if "Deferred" in endLabel.getLabelName():
             posLabel = writer.labels.getNameInc("PartialsDeferredReturnDir")
-            with writer.allocTmpSgpr(3) as tmpSgprInfo:
+            with writer.allocTmpSgpr(3, tag="StreamKCommon_partialsDeferredReturn_tmpSgprInfo") as tmpSgprInfo:
                 module.add(SLongBranch(endLabel, tmpSgprInfo, posLabel, comment="jump to end"))
         else:
             module.add(SBranch(labelName=endLabel.getLabelName(), comment="jump to end"))
@@ -1274,7 +1274,7 @@ class StreamK(Component):
     def setFlagValue(self, writer, src, soffset, comment=""):
         module = Module("Buffer Store Flag Value")
         memOrder = Component.StreamKMemoryOrdering.find(writer)
-        tmpSgprBuffer = writer.sgprPool.checkOutAligned(4, 4, preventOverflow=False)
+        tmpSgprBuffer = writer.sgprPool.checkOutAligned(4, 4, tag="StreamKCommon_setFlagValue_tmpSgprBuffer", preventOverflow=False)
         tmpVgprOff = writer.vgprPool.checkOut(1, "vaddr_off")
         module.add(VMovB32(dst=vgpr(tmpVgprOff), src=0, comment="zero vaddr offset"))
         module.add(SMovB64(dst=sgpr(tmpSgprBuffer, 2), src=sgpr("AddressFlags", 2)))
@@ -1300,7 +1300,7 @@ class StreamK(Component):
         """
         module = Module("Buffer Load Flag Value")
         memOrder = Component.StreamKMemoryOrdering.find(writer)
-        tmpSgprBuffer = writer.sgprPool.checkOutAligned(4, 4, preventOverflow=False)
+        tmpSgprBuffer = writer.sgprPool.checkOutAligned(4, 4, tag="StreamKCommon_getFlagValue_tmpSgprBuffer", preventOverflow=False)
         tmpVgprOff = writer.vgprPool.checkOut(1, "vaddr_off")
         module.add(VMovB32(dst=vgpr(tmpVgprOff), src=0, comment="zero vaddr offset"))
         module.add(SMovB64(dst=sgpr(tmpSgprBuffer, 2), src=sgpr("AddressFlags", 2)))
@@ -1718,7 +1718,7 @@ class StreamK(Component):
             # so if we don't have *GPR resources to handle a larger batch then need
             # to mark overflowedResources rather than generate a kernel that won't work.
 
-            with writer.allocTmpSgpr(numSgprs, 2) as tmpSgprRes:
+            with writer.allocTmpSgpr(numSgprs, 2, tag="StreamKCommon_fixupStep_tmpSgprRes") as tmpSgprRes:
                 tmpSgpr = tmpSgprRes.idx
                 elementSgprs = tmpSgpr + ss.cfg.numTempSgprPerBatch
 
@@ -3360,7 +3360,7 @@ class StreamKDynamic(StreamK):
             partialsLabels[edge] = Label(writer.labels.getNameInc("GW_Partials_E%u" % ( 1 if edge else 0)), comment="")
 
         if False in edges and True in edges:
-            with self.allocTmpSgpr(4) as tmpSgprInfo:
+            with self.allocTmpSgpr(4, tag="StreamKDynamic_writePartials_tmpSgprInfo") as tmpSgprInfo:
                 module.add(writer.checkIsEdge(kernel, tmpSgprInfo, partialsLabels[True], partialsLabels[True]))
 
         for edge in edges:
