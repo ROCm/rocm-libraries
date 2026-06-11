@@ -485,7 +485,7 @@ class TestSuiteConfigValidation:
         assert config.reference_provider == "none"
         for backend in ("torch", "auto", "none"):
             SuiteConfig(gpu_backend=backend)
-        for provider in ("none", "pytorch", "cpu_plugin"):
+        for provider in ("none", "pytorch"):
             SuiteConfig(reference_provider=provider)
 
 
@@ -810,51 +810,6 @@ class TestCorrectnessChecking:
         assert r.correctness is not None
         assert r.correctness.execution_success is False
         assert r.correctness.tolerance_match is None
-
-    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
-    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
-    @patch("dnn_benchmarking.execution.suite_runner._check_correctness")
-    @patch("dnn_benchmarking.execution.suite_runner.Executor")
-    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
-    def test_reference_outputs_computed_once_for_multiple_engines(
-        self,
-        mock_bm_cls,
-        mock_exec_cls,
-        mock_check_corr,
-        mock_get_ref,
-        mock_resolve_name,
-    ):
-        """Reference provider runs once per graph and feeds every engine."""
-        mock_resolve_name.side_effect = lambda eid: f"engine_{eid}"
-        ref_outputs = {
-            2: ReferenceOutput(data=np.array([1.0], dtype=np.float32), tensor_uid=2)
-        }
-        ref_provider = MagicMock()
-        ref_provider.name = "cpu_plugin"
-        ref_provider.compute_reference.return_value = ref_outputs
-        mock_get_ref.return_value = ref_provider
-        mock_check_corr.return_value = CorrectnessResult(
-            execution_success=True,
-            tolerance_match=True,
-            rtol=1e-5,
-            atol=1e-6,
-        )
-        mock_exec_cls.side_effect = _make_exec_factory(engine_ids=[1, 2])
-        mock_bm_cls.return_value = _make_bm_mock()
-
-        result = run_graph_all_providers(
-            graph_path=Path("test.json"),
-            graph_json=_make_graph_json(),
-            tensor_infos=[_make_tensor_info(1), _make_tensor_info(2, is_output=True)],
-            config=_make_config(reference_provider="cpu_plugin"),
-            handle=MagicMock(),
-        )
-
-        assert [r.engine_id for r in result.results] == [1, 2]
-        assert ref_provider.compute_reference.call_count == 1
-        assert mock_check_corr.call_count == 2
-        for call_args in mock_check_corr.call_args_list:
-            assert call_args.args[3] is ref_outputs
 
     @patch("dnn_benchmarking.execution.suite_runner._run_timed_pytorch_reference")
     @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")

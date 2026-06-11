@@ -7,10 +7,12 @@ from typing import Any, Dict, List, Optional
 
 import torch
 
+from ..common import torch_support
+
 from ..config.benchmark_config import BenchmarkConfig
 from ..reporting.statistics import BenchmarkMetadata, BenchmarkResult
 from . import pytorch_ops
-from .timing import Timer, TorchGpuTimer, _is_torch_available
+from .timing import Timer, TorchGpuTimer
 
 
 class PyTorchExecutionError(Exception):
@@ -45,7 +47,7 @@ class PyTorchCudaExecutor:
         Raises:
             PyTorchExecutionError: If PyTorch GPU is not available.
         """
-        if not _is_torch_available():
+        if not torch_support.gpu_available():
             raise PyTorchExecutionError(
                 "PyTorch GPU not available. Install PyTorch with CUDA or ROCm support."
             )
