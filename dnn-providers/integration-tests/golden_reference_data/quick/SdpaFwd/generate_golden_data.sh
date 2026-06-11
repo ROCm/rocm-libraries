@@ -44,8 +44,5 @@ python3 "$GENERATOR" \
     --q-dims 1 8 256 128 --v-dims 1 2 256 128 \
     --seed 42
 
-# Remove .meta.json files (not consumed by the shared test harness)
-rm -f "$OUTDIR"/*/*.meta.json
-
 echo "=== Done. Golden data written to: $OUTDIR ==="
 find "$OUTDIR" -type f | sort

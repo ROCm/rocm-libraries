@@ -325,9 +325,6 @@ def validate_against_aiter(
     except ImportError:
         print("  AITER:         SKIPPED (aiter not installed)")
         return True
-    except Exception as e:
-        print(f"  AITER:         SKIPPED ({e})")
-        return True
 
 
 def generate_forward_bundle(
