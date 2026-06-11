@@ -324,10 +324,9 @@ TEST(MXFlatmmPersistent, Single_Tile_Sanity_Random)
 //       Dimensions are arch-conditional: dimensions must be large enough to
 //       exceed the persistent grid size for the architecture. ----
 
-constexpr bool kIsGFX1250 = GetCurrentTargetId() == ck_tile::core::arch::TargetId::GFX1250;
-constexpr ck_tile::index_t kMultiTileM = kIsGFX1250 ? 512 : 2048;
-constexpr ck_tile::index_t kMultiTileN = kIsGFX1250 ? 4096 : 8192;
-constexpr ck_tile::index_t kMultiTileK = kIsGFX1250 ? 256 : 1024;
+constexpr ck_tile::index_t kMultiTileM = 2048;
+constexpr ck_tile::index_t kMultiTileN = 8192;
+constexpr ck_tile::index_t kMultiTileK = 1024;
 
 TEST(MXFlatmmPersistent, Multi_Tile_Per_Block_Random)
 {
