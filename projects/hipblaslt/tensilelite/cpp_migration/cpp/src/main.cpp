@@ -1113,6 +1113,77 @@ void bind_rocisa_module_builder(nb::module_& b) {
            "FP4/FP8). All register indices and flags are resolved in Python "
            "and passed in as plain ints/booleans. instTypeName is the string "
            "from mfma_f8f6f4_inst_type() for miK==128; empty for BF16.")
+      // ---- GR / LR / scale offset-assignment builders (grc.149) -----------
+      .def("gr_compute_offset", &ModuleBuilder::gr_compute_offset,
+           nb::arg("plan"), nb::arg("tc"),
+           nb::arg("colId"), nb::arg("rowId"), nb::arg("output"),
+           nb::arg("colBytes"), nb::arg("mulTmp"),
+           "Port of _grComputeOffset_cpp: GR byte-offset from col+row.")
+      .def("gr_compute_row_partition",
+           &ModuleBuilder::gr_compute_row_partition,
+           nb::arg("plan"), nb::arg("tc"),
+           nb::arg("waveId"), nb::arg("rowOffset"),
+           nb::arg("localRow"), nb::arg("partitionRow"), nb::arg("tmpSgpr"),
+           "Port of _grComputeRowPartition_cpp: per-wave GR row offset.")
+      .def("gr_swizzle_col_ids", &ModuleBuilder::gr_swizzle_col_ids,
+           nb::arg("planA"), nb::arg("planB"),
+           nb::arg("laneId"), nb::arg("colIdA"), nb::arg("colIdB"),
+           nb::arg("waveId"), nb::arg("ldsRowId"), nb::arg("tmp"),
+           nb::arg("waveRotation"),
+           "Port of _grSwizzleColIds_cpp: swizzle column IDs for A and B.")
+      .def("gr_compute_all_offsets", &ModuleBuilder::gr_compute_all_offsets,
+           nb::arg("plan"), nb::arg("tc"),
+           nb::arg("sharedVgprGROffset"),
+           nb::arg("colId"), nb::arg("rowId"), nb::arg("rowOffset"),
+           nb::arg("rotatedColId"), nb::arg("tmpBlock"),
+           nb::arg("colBytes"), nb::arg("mulTmp"),
+           "Port of _grComputeAllOffsets_cpp: all GR offsets for one tensor.")
+      .def("lr_compute_offset", &ModuleBuilder::lr_compute_offset,
+           nb::arg("plan"), nb::arg("tc"),
+           nb::arg("sharedVgprLROffset"), nb::arg("colOffset"),
+           nb::arg("rowOffset"),
+           "Port of _computeLROffset_cpp: LR byte-offsets for all MFMA reads.")
+      .def("lr_apply_wave_partition",
+           &ModuleBuilder::lr_apply_wave_partition,
+           nb::arg("plan"), nb::arg("tc"),
+           nb::arg("sharedVgprLROffset"), nb::arg("waveId"),
+           nb::arg("tmpSgpr"), nb::arg("wavesize"),
+           "Port of _applyWavePartitionLROffset_cpp: wave partition for LR.")
+      .def("scale_gr_offset", &ModuleBuilder::scale_gr_offset,
+           nb::arg("tc"), nb::arg("plan"),
+           nb::arg("vtmp"), nb::arg("stmp"), nb::arg("sharedGROffset0"),
+           "Port of _graScaleOffset_cpp: GR offset for one scale tensor.")
+      .def("scale_lr_wave_partition",
+           &ModuleBuilder::scale_lr_wave_partition,
+           nb::arg("tc"), nb::arg("plan"),
+           nb::arg("sharedLROffset0"), nb::arg("waveId"),
+           nb::arg("tmp"), nb::arg("tmpSgpr"),
+           "Port of _applyScaleWavePartitionLROffset_cpp.")
+      .def("scale_lr_offset_assign",
+           &ModuleBuilder::scale_lr_offset_assign,
+           nb::arg("wavesize"), nb::arg("planA"), nb::arg("planB"),
+           nb::arg("waveIdVgpr"),
+           nb::arg("partTmpA"), nb::arg("sgprTmpA"),
+           nb::arg("partTmpB"), nb::arg("sgprTmpB"),
+           nb::arg("laneOffset"), nb::arg("tmpSgpr"),
+           nb::arg("sharedLROffsetA"), nb::arg("sharedLROffsetB"),
+           nb::arg("sharedLROffsetSwapA"), nb::arg("sharedLROffsetSwapB"),
+           nb::arg("ldsStartOffsetMXSA"), nb::arg("ldsStartOffsetMXSB"),
+           nb::arg("ldsTotalSize"),
+           "Port of lraTileAssignmentScaleSwizzled: scale LR offset assign.")
+      .def("dtl_init_common_sgpr_post_partition",
+           &ModuleBuilder::dtl_init_common_sgpr_post_partition,
+           nb::arg("rowOffsetA"), nb::arg("rowOffsetB"), nb::arg("tmpSgpr"),
+           nb::arg("subIterKBytes"), nb::arg("ldsStartOffsetB"),
+           nb::arg("ldsTotalSize"),
+           "Port of _globalReadDTLInitCommonSgpr_legacy post-partition: "
+           "LDS byte shift + SGPR stores.")
+      .def("dtl_init_scale_sgpr",
+           &ModuleBuilder::dtl_init_scale_sgpr,
+           nb::arg("vgprWaveId"), nb::arg("wavesize"), nb::arg("bytesPerLoad"),
+           nb::arg("ldsStartOffsetMXSA"), nb::arg("ldsStartOffsetMXSB"),
+           nb::arg("ldsTotalSize"),
+           "Port of globalReadScaleSwizzledDTLInitCommonSgpr: scale SGPR init.")
       ;
 }
 

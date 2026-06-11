@@ -46,9 +46,13 @@
 #include <nanobind/stl/vector.h>
 
 #include <cassert>
+#include <cmath>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
+
+#include "tensile_writer/tile_info.hpp"
 
 namespace tw::subtile::rocisa_builder {
 
@@ -101,6 +105,26 @@ class ModuleBuilder {
     mfma_instruction_cls_ = inst_.attr("MFMAInstruction");
     mxmfma_instruction_cls_ = inst_.attr("MXMFMAInstruction");
     swait_cnt_cls_ = inst_.attr("SWaitCnt");
+
+    // Instruction classes for GR/LR/scale offset-assignment emission.
+    vlshift_right_b32_cls_      = inst_.attr("VLShiftRightB32");
+    vlshift_left_b32_cls_       = inst_.attr("VLShiftLeftB32");
+    vand_b32_cls_               = inst_.attr("VAndB32");
+    vmov_b32_cls_               = inst_.attr("VMovB32");
+    vadd_u32_cls_               = inst_.attr("VAddU32");
+    vsub_u32_cls_               = inst_.attr("VSubU32");
+    vmul_lo_u32_cls_            = inst_.attr("VMulLOU32");
+    vcmpx_eq_u32_cls_           = inst_.attr("VCmpXEqU32");
+    vperm_lane16_swap_b32_cls_  = inst_.attr("VPermlane16SwapB32");
+    vread_firstlane_b32_cls_    = inst_.attr("VReadfirstlaneB32");
+    smul_i32_cls_               = inst_.attr("SMulI32");
+    slshift_left_b32_cls_       = inst_.attr("SLShiftLeftB32");
+    smov_b64_cls_               = inst_.attr("SMovB64");
+    snop_cls_                   = inst_.attr("SNop");
+    // Container handles for special registers and modifiers.
+    vcc_fn_            = container.attr("VCC");
+    exec_fn_           = container.attr("EXEC");
+    dpp_modifiers_cls_ = container.attr("DPPModifiers");
   }
 
   // ---- Module / container factories ------------------------------------
@@ -498,7 +522,614 @@ class ModuleBuilder {
     return mod;
   }
 
+  // ---- GR / LR / scale offset-assignment emit (ported from Kernel.py) -----
+  //
+  // These are fine-grained C++ equivalents of the Python rocisa-building
+  // sub-functions in Kernel.py (_grComputeOffset_cpp, _grComputeRowPartition_cpp,
+  // _grSwizzleColIds_cpp, _grComputeAllOffsets_cpp, _computeLROffset_cpp,
+  // _applyWavePartitionLROffset_cpp, _graScaleOffset_cpp,
+  // _applyScaleWavePartitionLROffset_cpp, lraTileAssignmentScaleSwizzled,
+  // _globalReadDTLInitCommonSgpr_legacy, globalReadScaleSwizzledDTLInitCommonSgpr).
+  //
+  // Boundary contract: Python pre-allocates all VGPR/SGPR temporaries from the
+  // writer pools and passes their integer indices here. C++ builds a rocisa Module
+  // for each sub-function; Python checkIns all temporaries after. Named SGPRs
+  // (StrideA0I, LocalWriteBaseAddrA, etc.) are accessed by string in C++.
+
+  // === Port of _grComputeOffset_cpp ===
+  // Compute one GR byte-offset from column ID and row offset into `output` VGPR.
+  // colBytes, mulTmp: pre-allocated scratch VGPRs (1 each).
+  // tc: "A" → StrideA0I, "B" → StrideB1J.
+  nb::object gr_compute_offset(nb::handle plan_h, const std::string& tc,
+                                int colId, int rowId, int output,
+                                int colBytes, int mulTmp) const {
+    const auto& plan = nb::cast<const GROffsetAssignPlan&>(plan_h);
+    nb::object mod = module();
+    const std::string strideRef = (tc == "A") ? "StrideA0I" : "StrideB1J";
+    const long lwLog2      = log2_exact(plan.loadWidth);
+    const long bpeBitsLog2 = log2_exact(plan.bpeBits);
+
+    add(mod, vlshift_left_b32_cls_("dst"_a = vgpr_fn_(colBytes),
+        "shiftHex"_a = lwLog2, "src"_a = vgpr_fn_(colId),
+        "comment"_a = "scale col_id by load_width"));
+    add(mod, vmul_lo_u32_cls_("dst"_a = vgpr_fn_(mulTmp),
+        "src0"_a = sgpr_fn_(strideRef), "src1"_a = vgpr_fn_(rowId),
+        "comment"_a = tc + ": rowId * stride"));
+    add(mod, vlshift_left_b32_cls_("dst"_a = vgpr_fn_(mulTmp),
+        "shiftHex"_a = bpeBitsLog2, "src"_a = vgpr_fn_(mulTmp),
+        "comment"_a = tc + ": rowId*stride*bpe"));
+    add(mod, vlshift_right_b32_cls_("dst"_a = vgpr_fn_(mulTmp),
+        "shiftHex"_a = 3L, "src"_a = vgpr_fn_(mulTmp),
+        "comment"_a = "to bytes"));
+    add(mod, vadd_u32_cls_("dst"_a = vgpr_fn_(output),
+        "src0"_a = vgpr_fn_(colBytes), "src1"_a = vgpr_fn_(mulTmp),
+        "comment"_a = tc + ": GR row_offset"));
+    return mod;
+  }
+
+  // === Port of _grComputeRowPartition_cpp ===
+  // Compute per-wave row offset for one GR tensor.
+  // localRow, partitionRow: pre-allocated scratch VGPRs (1 each).
+  // tmpSgpr: pre-allocated scratch SGPR (1); loaded with partitionOffset.
+  // Output is written to rowOffset VGPR.
+  nb::object gr_compute_row_partition(nb::handle plan_h, const std::string& tc,
+                                      int waveId, int rowOffset,
+                                      int localRow, int partitionRow,
+                                      int tmpSgpr) const {
+    const auto& plan = nb::cast<const GROffsetAssignPlan&>(plan_h);
+    nb::object mod = module();
+    const long nrpwLog2 = log2_exact(plan.numRowsPerWave);
+
+    add(mod, smov_b32_cls_("dst"_a = sgpr_fn_(tmpSgpr),
+        "src"_a = plan.partitionOffset, "comment"_a = tc + ": row offset"));
+    if (plan.partitionMode == 1) {
+      add(mod, vand_b32_cls_("dst"_a = vgpr_fn_(localRow),
+          "src0"_a = 1L, "src1"_a = vgpr_fn_(waveId),
+          "comment"_a = tc + ": waveId % 2"));
+      add(mod, vlshift_right_b32_cls_("dst"_a = vgpr_fn_(partitionRow),
+          "shiftHex"_a = 1L, "src"_a = vgpr_fn_(waveId),
+          "comment"_a = tc + ": waveId / 2"));
+    } else if (plan.partitionMode == 0) {
+      add(mod, vmov_b32_cls_("dst"_a = vgpr_fn_(localRow),
+          "src"_a = 0, "comment"_a = tc));
+      add(mod, vmov_b32_cls_("dst"_a = vgpr_fn_(partitionRow),
+          "src"_a = vgpr_fn_(waveId), "comment"_a = tc));
+    } else if (plan.partitionMode == 2) {
+      add(mod, vmov_b32_cls_("dst"_a = vgpr_fn_(localRow),
+          "src"_a = vgpr_fn_(waveId), "comment"_a = tc));
+      add(mod, vmov_b32_cls_("dst"_a = vgpr_fn_(partitionRow),
+          "src"_a = 0, "comment"_a = tc));
+    } else {
+      throw std::invalid_argument(
+          "gr_compute_row_partition: unsupported partitionMode " +
+          std::to_string(plan.partitionMode));
+    }
+    add(mod, vlshift_left_b32_cls_("dst"_a = vgpr_fn_(localRow),
+        "shiftHex"_a = nrpwLog2, "src"_a = vgpr_fn_(localRow),
+        "comment"_a = tc + ": local row offset"));
+    add(mod, vmul_lo_u32_cls_("dst"_a = vgpr_fn_(partitionRow),
+        "src0"_a = sgpr_fn_(tmpSgpr), "src1"_a = vgpr_fn_(partitionRow),
+        "comment"_a = tc + ": wave row offset"));
+    add(mod, vadd_u32_cls_("dst"_a = vgpr_fn_(rowOffset),
+        "src0"_a = vgpr_fn_(localRow), "src1"_a = vgpr_fn_(partitionRow),
+        "comment"_a = tc + ": row offset"));
+    return mod;
+  }
+
+  // === Port of _grSwizzleColIds_cpp ===
+  // Swizzle column IDs for GR tensors A and B.
+  // ldsRowId, tmp, waveRotation: pre-allocated scratch VGPRs (1 each).
+  // colIdA is both input (from Serial & blockSize-1) and output.
+  // colIdB is output (initialized from colIdA).
+  nb::object gr_swizzle_col_ids(nb::handle planA_h, nb::handle planB_h,
+                                 int laneId, int colIdA, int colIdB,
+                                 int waveId, int ldsRowId, int tmp,
+                                 int waveRotation) const {
+    const auto& planA = nb::cast<const GROffsetAssignPlan&>(planA_h);
+    const auto& planB = nb::cast<const GROffsetAssignPlan&>(planB_h);
+    nb::object mod = module();
+    add_comment0(mod, "Swizzling");
+    const long blockSize          = planA.blockSize;
+    const long numRowsPerLDSBanks = planA.numRowsPerLDSBanks;
+    const long bsLog2             = log2_exact(blockSize);
+    const long nrLBLog2           = log2_exact(numRowsPerLDSBanks);
+    const long half               = blockSize / 2;
+
+    add(mod, vlshift_right_b32_cls_("dst"_a = vgpr_fn_(ldsRowId),
+        "shiftHex"_a = bsLog2, "src"_a = vgpr_fn_(laneId),
+        "comment"_a = "row id within wave"));
+    add(mod, vlshift_right_b32_cls_("dst"_a = vgpr_fn_(ldsRowId),
+        "shiftHex"_a = nrLBLog2, "src"_a = vgpr_fn_(ldsRowId),
+        "comment"_a = "lds row id"));
+    add(mod, vand_b32_cls_("dst"_a = vgpr_fn_(tmp),
+        "src0"_a = vgpr_fn_(ldsRowId), "src1"_a = 1L,
+        "comment"_a = "swap_bit = ldsRowId & 1"));
+
+    if (planA.isFp8) {
+      // FP8: step1 = block-swap, step2 = wave K_group rotation
+      const long halfLog2 = log2_exact(half);
+      add(mod, vlshift_left_b32_cls_("dst"_a = vgpr_fn_(tmp),
+          "shiftHex"_a = halfLog2, "src"_a = vgpr_fn_(tmp),
+          "comment"_a = "swap_bit * " + std::to_string(half)));
+      add(mod, vxor_b32_cls_("dst"_a = vgpr_fn_(colIdA),
+          "src0"_a = vgpr_fn_(colIdA), "src1"_a = vgpr_fn_(tmp),
+          "comment"_a = "FP8 step1: block-swap colIdA"));
+      add(mod, vmov_b32_cls_("dst"_a = vgpr_fn_(colIdB),
+          "src"_a = vgpr_fn_(colIdA), "comment"_a = "colIdB = colIdA"));
+      add(mod, vand_b32_cls_("dst"_a = vgpr_fn_(tmp),
+          "src0"_a = vgpr_fn_(waveId), "src1"_a = 1L,
+          "comment"_a = "wave_half = waveId & 1"));
+      add(mod, vlshift_left_b32_cls_("dst"_a = vgpr_fn_(tmp),
+          "shiftHex"_a = 1L, "src"_a = vgpr_fn_(tmp),
+          "comment"_a = "rotation = wave_half * 2"));
+      // Step2: apply wave K_group rotation to A and B (only if loadRatioGR != 0.5)
+      for (auto [cId, loadRatio] :
+           std::vector<std::pair<int,double>>{{colIdA, planA.loadRatioGR},
+                                              {colIdB, planB.loadRatioGR}}) {
+        if (loadRatio != 0.5) {
+          add(mod, vand_b32_cls_("dst"_a = vgpr_fn_(waveRotation),
+              "src0"_a = vgpr_fn_(cId), "src1"_a = 4L,
+              "comment"_a = "FP8 step2: block_bit = colId & 4"));
+          add(mod, vand_b32_cls_("dst"_a = vgpr_fn_(cId),
+              "src0"_a = vgpr_fn_(cId), "src1"_a = 3L,
+              "comment"_a = "K_group = colId & 3"));
+          add(mod, vadd_u32_cls_("dst"_a = vgpr_fn_(cId),
+              "src0"_a = vgpr_fn_(cId), "src1"_a = vgpr_fn_(tmp),
+              "comment"_a = "K_group + rotation"));
+          add(mod, vand_b32_cls_("dst"_a = vgpr_fn_(cId),
+              "src0"_a = vgpr_fn_(cId), "src1"_a = 3L,
+              "comment"_a = "(K_group+rotation) % 4"));
+          add(mod, vadd_u32_cls_("dst"_a = vgpr_fn_(cId),
+              "src0"_a = vgpr_fn_(cId), "src1"_a = vgpr_fn_(waveRotation),
+              "comment"_a = "K_group_rot + block_bit"));
+        }
+      }
+    } else {
+      // FP4/FP16/BF16: pair-swap on even ldsRowId + intra/inter-wave rotation
+      add(mod, vcmpx_eq_u32_cls_("dst"_a = vcc_fn_(),
+          "src0"_a = 0, "src1"_a = vgpr_fn_(tmp),
+          "comment"_a = "lds row id % 2 == 0 ?"));
+      // Build DPPModifiers(quad_perm=[1,0,3,2]) for pair-swap
+      nb::list quad_perm;
+      quad_perm.append(1); quad_perm.append(0);
+      quad_perm.append(3); quad_perm.append(2);
+      nb::object dpp = dpp_modifiers_cls_("quad_perm"_a = quad_perm);
+      add(mod, vmov_b32_cls_("dst"_a = vgpr_fn_(colIdA),
+          "src"_a = vgpr_fn_(colIdA), "dpp"_a = dpp,
+          "comment"_a = "swap colId pairs for swizzling"));
+      add(mod, smov_b64_cls_("dst"_a = exec_fn_(), "src"_a = -1L, "comment"_a = ""));
+      add(mod, vmov_b32_cls_("dst"_a = vgpr_fn_(colIdB),
+          "src"_a = vgpr_fn_(colIdA), "comment"_a = ""));
+      add_comment0(mod, "Rotation within a single wave");
+      add(mod, vlshift_right_b32_cls_("dst"_a = vgpr_fn_(tmp),
+          "shiftHex"_a = 1L, "src"_a = vgpr_fn_(ldsRowId), "comment"_a = ""));
+      add(mod, vlshift_left_b32_cls_("dst"_a = vgpr_fn_(tmp),
+          "shiftHex"_a = 1L, "src"_a = vgpr_fn_(tmp),
+          "comment"_a = "(ldsRowId //2) * 2"));
+      add(mod, vsub_u32_cls_("dst"_a = vgpr_fn_(tmp),
+          "src0"_a = blockSize, "src1"_a = vgpr_fn_(tmp),
+          "comment"_a = "rotation offset : blockSize - (ldsRowId//2)*2"));
+      const long wrotLog2 = log2_exact(2L * numRowsPerLDSBanks);
+      for (auto [cId, loadRatio] :
+           std::vector<std::pair<int,double>>{{colIdA, planA.loadRatioGR},
+                                              {colIdB, planB.loadRatioGR}}) {
+        if (loadRatio != 0.5) {
+          add_comment0(mod, "Rotation per wave");
+          add(mod, vand_b32_cls_("dst"_a = vgpr_fn_(waveRotation),
+              "src0"_a = vgpr_fn_(waveId), "src1"_a = 1L, "comment"_a = ""));
+          add(mod, vlshift_left_b32_cls_("dst"_a = vgpr_fn_(waveRotation),
+              "shiftHex"_a = wrotLog2, "src"_a = vgpr_fn_(waveRotation),
+              "comment"_a = ""));
+          add(mod, vsub_u32_cls_("dst"_a = vgpr_fn_(waveRotation),
+              "src0"_a = vgpr_fn_(tmp), "src1"_a = vgpr_fn_(waveRotation),
+              "comment"_a = ""));
+          add(mod, vadd_u32_cls_("dst"_a = vgpr_fn_(cId),
+              "src0"_a = vgpr_fn_(waveRotation), "src1"_a = vgpr_fn_(cId),
+              "comment"_a = ""));
+        } else {
+          add(mod, vadd_u32_cls_("dst"_a = vgpr_fn_(cId),
+              "src0"_a = vgpr_fn_(tmp), "src1"_a = vgpr_fn_(cId),
+              "comment"_a = ""));
+        }
+      }
+      add(mod, vand_b32_cls_("dst"_a = vgpr_fn_(colIdA),
+          "src0"_a = vgpr_fn_(colIdA), "src1"_a = blockSize - 1,
+          "comment"_a = "(col + offset) % block_size"));
+      add(mod, vand_b32_cls_("dst"_a = vgpr_fn_(colIdB),
+          "src0"_a = vgpr_fn_(colIdB), "src1"_a = blockSize - 1,
+          "comment"_a = "(col + offset) % block_size"));
+    }
+    return mod;
+  }
+
+  // === Port of _grComputeAllOffsets_cpp ===
+  // Compute GR offsets for all loads of one tensor.
+  // Combines rowId into rowOffset, then calls gr_compute_offset for each load.
+  // rotatedColId: pre-allocated scratch VGPR (1) for rotated column (multi-load).
+  // tmpBlock: pre-allocated scratch VGPR (1) for FP8 block-bit isolation
+  //   (pass -1 when not needed, i.e. when sharedVgprGROffset.size()==1 or
+  //    loadRatioGR != 0.5 or !isFp8).
+  // colBytes, mulTmp: scratch VGPRs for gr_compute_offset (1 each).
+  nb::object gr_compute_all_offsets(nb::handle plan_h, const std::string& tc,
+                                    const std::vector<int>& sharedVgprGROffset,
+                                    int colId, int rowId, int rowOffset,
+                                    int rotatedColId, int tmpBlock,
+                                    int colBytes, int mulTmp) const {
+    const auto& plan = nb::cast<const GROffsetAssignPlan&>(plan_h);
+    nb::object mod = module();
+
+    add(mod, vadd_u32_cls_("dst"_a = vgpr_fn_(rowOffset),
+        "src0"_a = vgpr_fn_(rowId), "src1"_a = vgpr_fn_(rowOffset),
+        "comment"_a = tc + ": row offset"));
+    add(mod, gr_compute_offset(plan_h, tc, colId, rowOffset,
+                               sharedVgprGROffset[0], colBytes, mulTmp));
+
+    for (int i = 1; i < static_cast<int>(sharedVgprGROffset.size()); ++i) {
+      add(mod, vadd_u32_cls_("dst"_a = vgpr_fn_(rowOffset),
+          "src0"_a = plan.grAdvanceOffset, "src1"_a = vgpr_fn_(rowOffset),
+          "comment"_a = tc + ": advance row for GR offset " + std::to_string(i)));
+      if (plan.loadRatioGR == 0.5) {
+        if (plan.isFp8) {
+          add(mod, vand_b32_cls_("dst"_a = vgpr_fn_(tmpBlock),
+              "src0"_a = vgpr_fn_(colId), "src1"_a = 4L,
+              "comment"_a = tc + ": block_bit = colId & 4"));
+          add(mod, vand_b32_cls_("dst"_a = vgpr_fn_(rotatedColId),
+              "src0"_a = vgpr_fn_(colId), "src1"_a = 3L,
+              "comment"_a = tc + ": K_group = colId & 3"));
+          add(mod, vadd_u32_cls_("dst"_a = vgpr_fn_(rotatedColId),
+              "src0"_a = vgpr_fn_(rotatedColId), "src1"_a = 2L,
+              "comment"_a = tc + ": K_group + 2"));
+          add(mod, vand_b32_cls_("dst"_a = vgpr_fn_(rotatedColId),
+              "src0"_a = vgpr_fn_(rotatedColId), "src1"_a = 3L,
+              "comment"_a = tc + ": (K_group+2) % 4"));
+          add(mod, vadd_u32_cls_("dst"_a = vgpr_fn_(rotatedColId),
+              "src0"_a = vgpr_fn_(rotatedColId), "src1"_a = vgpr_fn_(tmpBlock),
+              "comment"_a = tc + ": K_group_rot + block_bit"));
+        } else {
+          const long colRotation = plan.blockSize / 2;
+          add(mod, vadd_u32_cls_("dst"_a = vgpr_fn_(rotatedColId),
+              "src0"_a = colRotation, "src1"_a = vgpr_fn_(colId),
+              "comment"_a = tc + ": rotate col for GR offset " + std::to_string(i)));
+          add(mod, vand_b32_cls_("dst"_a = vgpr_fn_(rotatedColId),
+              "src0"_a = vgpr_fn_(rotatedColId), "src1"_a = plan.blockSize - 1,
+              "comment"_a = "(col + " + std::to_string(colRotation) + ") % block_size"));
+        }
+      } else {
+        add(mod, vmov_b32_cls_("dst"_a = vgpr_fn_(rotatedColId),
+            "src"_a = vgpr_fn_(colId), "comment"_a = ""));
+      }
+      add(mod, gr_compute_offset(plan_h, tc, rotatedColId, rowOffset,
+                                 sharedVgprGROffset[i], colBytes, mulTmp));
+    }
+    return mod;
+  }
+
+  // === Port of _computeLROffset_cpp ===
+  // Compute LR byte-offsets for all MFMA reads of one tensor.
+  // sharedVgprLROffset[0] is initialized from colOffset; subsequent entries
+  // are each advanced by numMFMACols (wrapped at blockSize).  All entries are
+  // then scaled by loadWidthLR and shifted by rowOffset.
+  nb::object lr_compute_offset(nb::handle plan_h, const std::string& tc,
+                                const std::vector<int>& sharedVgprLROffset,
+                                int colOffset, int rowOffset) const {
+    const auto& plan = nb::cast<const LROffsetAssignPlan&>(plan_h);
+    nb::object mod = module();
+    const long lwLog2      = log2_exact(plan.loadWidthLR);
+    const long blockSize   = plan.blockSize;
+    const long numMFMACols = plan.numMFMACols;
+
+    add(mod, vmov_b32_cls_("dst"_a = vgpr_fn_(sharedVgprLROffset[0]),
+        "src"_a = vgpr_fn_(colOffset), "comment"_a = tc + ": laneId"));
+    for (int i = 1; i < static_cast<int>(sharedVgprLROffset.size()); ++i) {
+      add(mod, vadd_u32_cls_("dst"_a = vgpr_fn_(sharedVgprLROffset[i]),
+          "src0"_a = vgpr_fn_(sharedVgprLROffset[i-1]), "src1"_a = numMFMACols,
+          "comment"_a = tc + ": colOffset for MFMA " + std::to_string(i) + " of subtile"));
+      add(mod, vand_b32_cls_("dst"_a = vgpr_fn_(sharedVgprLROffset[i]),
+          "src0"_a = vgpr_fn_(sharedVgprLROffset[i]), "src1"_a = blockSize - 1,
+          "comment"_a = tc + ": colOffset = colOffset % block_size"));
+    }
+    for (int i = 0; i < static_cast<int>(sharedVgprLROffset.size()); ++i) {
+      add(mod, vlshift_left_b32_cls_("dst"_a = vgpr_fn_(sharedVgprLROffset[i]),
+          "shiftHex"_a = lwLog2, "src"_a = vgpr_fn_(sharedVgprLROffset[i]),
+          "comment"_a = tc + ": colOffset*loadWidth"));
+      add(mod, vadd_u32_cls_("dst"_a = vgpr_fn_(sharedVgprLROffset[i]),
+          "src0"_a = vgpr_fn_(sharedVgprLROffset[i]), "src1"_a = vgpr_fn_(rowOffset),
+          "comment"_a = tc + ": row + col"));
+    }
+    return mod;
+  }
+
+  // === Port of _applyWavePartitionLROffset_cpp ===
+  // Apply wave-partition adjustment to LR offsets for one tensor.
+  // Returns an empty module when wavePartMode==-1 (no partition) or sInterval==0.
+  // waveId: pre-allocated scratch VGPR (1) — written by this function.
+  // tmpSgpr: pre-allocated scratch SGPR (1).
+  nb::object lr_apply_wave_partition(nb::handle plan_h, const std::string& tc,
+                                     const std::vector<int>& sharedVgprLROffset,
+                                     int waveId, int tmpSgpr,
+                                     long wavesize) const {
+    const auto& plan = nb::cast<const LROffsetAssignPlan&>(plan_h);
+    nb::object mod = module();
+    if (plan.wavePartMode == -1) return mod;  // loadRatioGR >= 2.0: skip
+
+    const long wsLog2 = log2_exact(wavesize);
+    add(mod, vlshift_right_b32_cls_("dst"_a = vgpr_fn_(waveId),
+        "shiftHex"_a = wsLog2, "src"_a = vgpr_fn_(std::string("Serial")),
+        "comment"_a = "waveId"));
+
+    const long sInterval = plan.sInterval;
+    if (plan.wavePartMode == 1) {  // loadRatioGR == 1.0
+      const long mWaves = plan.mWavesM;
+      if (tc == "A") {
+        add(mod, vand_b32_cls_("dst"_a = vgpr_fn_(waveId),
+            "src0"_a = mWaves - 1, "src1"_a = vgpr_fn_(waveId),
+            "comment"_a = tc + ": waveId % " + std::to_string(mWaves)));
+      } else {
+        add(mod, vlshift_right_b32_cls_("dst"_a = vgpr_fn_(waveId),
+            "shiftHex"_a = log2_exact(mWaves), "src"_a = vgpr_fn_(waveId),
+            "comment"_a = tc + ": waveId / " + std::to_string(mWaves)));
+      }
+    } else if (plan.wavePartMode != 0) {
+      throw std::invalid_argument(
+          "lr_apply_wave_partition: unsupported wavePartMode " +
+          std::to_string(plan.wavePartMode));
+    }
+    if (sInterval == 0) return mod;
+
+    add(mod, smov_b32_cls_("dst"_a = sgpr_fn_(tmpSgpr),
+        "src"_a = sInterval, "comment"_a = tc + ": interleave stride"));
+    add(mod, vmul_lo_u32_cls_("dst"_a = vgpr_fn_(waveId),
+        "src1"_a = vgpr_fn_(waveId), "src0"_a = sgpr_fn_(tmpSgpr),
+        "comment"_a = ""));
+    for (int vId : sharedVgprLROffset) {
+      add(mod, vadd_u32_cls_("dst"_a = vgpr_fn_(vId),
+          "src0"_a = vgpr_fn_(vId), "src1"_a = vgpr_fn_(waveId),
+          "comment"_a = tc + ": wave partition LR offset"));
+    }
+    return mod;
+  }
+
+  // === Port of _graScaleOffset_cpp ===
+  // Compute GR offset for one MX scale tensor (MXSA or MXSB).
+  // vtmp: pre-allocated scratch VGPR (1). stmp: pre-allocated scratch SGPR (1).
+  // sharedGROffset0: ti_.sharedVgprGROffset[0] (output).
+  nb::object scale_gr_offset(const std::string& tc, nb::handle plan_h,
+                              int vtmp, int stmp, int sharedGROffset0) const {
+    const auto& plan = nb::cast<const ScaleGROffsetAssignPlan&>(plan_h);
+    nb::object mod = module();
+    add_comment(mod, "Computing GR Offset for " + tc);
+    const long lwShift  = log2_exact(plan.loadWidth);
+    // Python uses int(math.log2(x)) which floors; for power-of-2 values this
+    // equals log2_exact.
+    const long ntpgLog2 = log2_exact(plan.numThreadsPerGroup);
+    const long bpeLog2  = log2_exact(plan.bpe);
+
+    add(mod, vlshift_right_b32_cls_("dst"_a = vgpr_fn_(vtmp),
+        "shiftHex"_a = ntpgLog2, "src"_a = vgpr_fn_(std::string("Serial")),
+        "comment"_a = tc + ": grOffset = serial / " + std::to_string(plan.loadWidth)));
+    add(mod, slshift_left_b32_cls_("dst"_a = sgpr_fn_(stmp),
+        "shiftHex"_a = bpeLog2, "src"_a = sgpr_fn_("Strides" + tc),
+        "comment"_a = "*= bpe (" + std::to_string(plan.bpe) + ")"));
+    add(mod, vmul_lo_u32_cls_("dst"_a = vgpr_fn_(vtmp),
+        "src1"_a = vgpr_fn_(vtmp), "src0"_a = sgpr_fn_(stmp),
+        "comment"_a = "Apply scale" + tc + " stride to each group"));
+    add(mod, vand_b32_cls_("dst"_a = vgpr_fn_(sharedGROffset0),
+        "src0"_a = plan.numThreadsPerGroup - 1,
+        "src1"_a = vgpr_fn_(std::string("Serial")),
+        "comment"_a = tc + ": grOffset = serial % " + std::to_string(plan.loadWidth)));
+    add(mod, vlshift_left_b32_cls_("dst"_a = vgpr_fn_(sharedGROffset0),
+        "shiftHex"_a = lwShift, "src"_a = vgpr_fn_(sharedGROffset0),
+        "comment"_a = "Scale by load width for each thread in group"));
+    add(mod, vadd_u32_cls_("dst"_a = vgpr_fn_(sharedGROffset0),
+        "src0"_a = vgpr_fn_(sharedGROffset0), "src1"_a = vgpr_fn_(vtmp),
+        "comment"_a = "Final offset calc"));
+    return mod;
+  }
+
+  // === Port of _applyScaleWavePartitionLROffset_cpp ===
+  // Compute wave-partition LR offset for one MX scale tensor.
+  // waveId: input VGPR (read-only, pre-shifted to waveId by caller).
+  // tmp: pre-allocated scratch VGPR (1). tmpSgpr: pre-allocated scratch SGPR (1).
+  // sharedLROffset0: ti_.sharedVgprLROffset[0] (output).
+  nb::object scale_lr_wave_partition(const std::string& tc, nb::handle plan_h,
+                                      int sharedLROffset0, int waveId,
+                                      int tmp, int tmpSgpr) const {
+    const auto& plan = nb::cast<const ScaleLROffsetAssignPlan&>(plan_h);
+    nb::object mod = module();
+    if (plan.isA) {
+      add(mod, vand_b32_cls_("dst"_a = vgpr_fn_(tmp),
+          "src0"_a = plan.mWavesM - 1, "src1"_a = vgpr_fn_(waveId),
+          "comment"_a = "scale" + tc + ": waveId % " + std::to_string(plan.mWavesM)));
+    } else {
+      add(mod, vlshift_right_b32_cls_("dst"_a = vgpr_fn_(tmp),
+          "shiftHex"_a = log2_exact(plan.mWavesM), "src"_a = vgpr_fn_(waveId),
+          "comment"_a = "scale" + tc + ": waveId / numWavesM"));
+    }
+    add(mod, smov_b32_cls_("dst"_a = sgpr_fn_(tmpSgpr),
+        "src"_a = plan.totalScaleBytes,
+        "comment"_a = "scale" + tc + ": scale region"));
+    add(mod, vmul_lo_u32_cls_("dst"_a = vgpr_fn_(sharedLROffset0),
+        "src0"_a = sgpr_fn_(tmpSgpr), "src1"_a = vgpr_fn_(tmp),
+        "comment"_a = "scale" + tc + ": partition offset"));
+    return mod;
+  }
+
+  // === Port of lraTileAssignmentScaleSwizzled ===
+  // Complete scale LR offset assignment for MXSA and MXSB.
+  // waveIdVgpr: pre-allocated VGPR (1). partTmpA/B, sgprTmpA/B: scratch (1 each).
+  // laneOffset, tmpSgpr: pre-allocated scratch (1 each).
+  // sharedLROffset[A/B]: ti_.sharedVgprLROffset[0] (output).
+  // sharedLROffsetSwap[A/B]: ti_.sharedVgprLROffsetSwap[0] (output).
+  nb::object scale_lr_offset_assign(
+      long wavesize, nb::handle planA_h, nb::handle planB_h,
+      int waveIdVgpr, int partTmpA, int sgprTmpA,
+      int partTmpB, int sgprTmpB, int laneOffset, int tmpSgpr,
+      int sharedLROffsetA, int sharedLROffsetB,
+      int sharedLROffsetSwapA, int sharedLROffsetSwapB,
+      long ldsStartOffsetMXSA, long ldsStartOffsetMXSB,
+      long ldsTotalSize) const {
+    nb::object mod = module();
+    add_comment0(mod, "LR Offset Calculation for Scale Tensors");
+    const long wsLog2 = log2_exact(wavesize);
+    add(mod, vlshift_right_b32_cls_("dst"_a = vgpr_fn_(waveIdVgpr),
+        "shiftHex"_a = wsLog2, "src"_a = vgpr_fn_(std::string("Serial")),
+        "comment"_a = "scale: waveId"));
+    add(mod, scale_lr_wave_partition("MXSA", planA_h,
+        sharedLROffsetA, waveIdVgpr, partTmpA, sgprTmpA));
+    add(mod, scale_lr_wave_partition("MXSB", planB_h,
+        sharedLROffsetB, waveIdVgpr, partTmpB, sgprTmpB));
+    add(mod, vand_b32_cls_("dst"_a = vgpr_fn_(laneOffset),
+        "src0"_a = vgpr_fn_(std::string("Serial")), "src1"_a = wavesize - 1,
+        "comment"_a = "scale: laneId"));
+    add(mod, vlshift_left_b32_cls_("dst"_a = vgpr_fn_(laneOffset),
+        "shiftHex"_a = 2L, "src"_a = vgpr_fn_(laneOffset),
+        "comment"_a = "scale: laneId * 4"));
+    add(mod, vadd_u32_cls_("dst"_a = vgpr_fn_(sharedLROffsetA),
+        "src0"_a = vgpr_fn_(laneOffset), "src1"_a = vgpr_fn_(sharedLROffsetA),
+        "comment"_a = "scaleA: lrOffset = laneId * 4"));
+    add(mod, vadd_u32_cls_("dst"_a = vgpr_fn_(sharedLROffsetB),
+        "src0"_a = vgpr_fn_(laneOffset), "src1"_a = vgpr_fn_(sharedLROffsetB),
+        "comment"_a = "scaleB: lrOffset = laneId * 4"));
+    add(mod, smov_b32_cls_("dst"_a = sgpr_fn_(tmpSgpr),
+        "src"_a = ldsStartOffsetMXSA,
+        "comment"_a = "scale: LDS offset for A scale"));
+    add(mod, vadd_u32_cls_("dst"_a = vgpr_fn_(sharedLROffsetA),
+        "src0"_a = vgpr_fn_(sharedLROffsetA), "src1"_a = sgpr_fn_(tmpSgpr),
+        "comment"_a = "scaleA: +=LDS offset"));
+    add(mod, smov_b32_cls_("dst"_a = sgpr_fn_(tmpSgpr),
+        "src"_a = ldsStartOffsetMXSB,
+        "comment"_a = "scale: LDS offset for B scale"));
+    add(mod, vadd_u32_cls_("dst"_a = vgpr_fn_(sharedLROffsetB),
+        "src0"_a = vgpr_fn_(sharedLROffsetB), "src1"_a = sgpr_fn_(tmpSgpr),
+        "comment"_a = "scaleB: +=LDS offset"));
+    add(mod, smov_b32_cls_("dst"_a = sgpr_fn_(tmpSgpr),
+        "src"_a = ldsTotalSize,
+        "comment"_a = "scale: total LDS size for swap"));
+    for (auto [vId, swapId, tcName] :
+         std::initializer_list<std::tuple<int,int,std::string>>{
+             {sharedLROffsetA, sharedLROffsetSwapA, "MXSA"},
+             {sharedLROffsetB, sharedLROffsetSwapB, "MXSB"}}) {
+      add(mod, vadd_u32_cls_("dst"_a = vgpr_fn_(swapId),
+          "src0"_a = vgpr_fn_(vId), "src1"_a = sgpr_fn_(tmpSgpr),
+          "comment"_a = "scale" + tcName + ": LR swap"));
+      add(mod, vxor_b32_cls_("dst"_a = vgpr_fn_(swapId),
+          "src0"_a = vgpr_fn_(vId), "src1"_a = vgpr_fn_(swapId),
+          "comment"_a = "scale" + tcName + ": LR swap"));
+    }
+    return mod;
+  }
+
+  // === Port of _globalReadDTLInitCommonSgpr_legacy ===
+  // Compute shared LDS base SGPRs for DTL (Direct-To-LDS) loads.
+  // vgprWaveId: pre-allocated VGPR (1; caller has already computed waveId
+  //   with VLShiftRightB32 from Serial if needed, OR caller passes this
+  //   fresh and this function fills it).
+  // Note: caller emits the initial VLShiftRightB32 to fill vgprWaveId, then
+  //   calls gr_compute_row_partition for A and B (which need localRow/partRow).
+  //   This method emits the LDS-byte conversion and SGPR stores.
+  // rowOffsetA, rowOffsetB: output VGPRs from gr_compute_row_partition.
+  // subIterKBytes: to convert row count → LDS bytes.
+  nb::object dtl_init_common_sgpr_post_partition(
+      int rowOffsetA, int rowOffsetB, int tmpSgpr,
+      long subIterKBytes, long ldsStartOffsetB, long ldsTotalSize) const {
+    nb::object mod = module();
+    const long sikLog2 = log2_exact(subIterKBytes);
+    add(mod, vlshift_left_b32_cls_("dst"_a = vgpr_fn_(rowOffsetA),
+        "shiftHex"_a = sikLog2, "src"_a = vgpr_fn_(rowOffsetA),
+        "comment"_a = "Apply wave-specific offset for A"));
+    add(mod, vlshift_left_b32_cls_("dst"_a = vgpr_fn_(rowOffsetB),
+        "shiftHex"_a = sikLog2, "src"_a = vgpr_fn_(rowOffsetB),
+        "comment"_a = "Apply wave-specific offset for B"));
+    add(mod, snop_cls_("waitState"_a = 0,
+        "comment"_a = "Wait for VGPR to be ready"));
+    add(mod, vread_firstlane_b32_cls_(
+        "dst"_a = sgpr_fn_(std::string("LocalWriteBaseAddrA")),
+        "src"_a = vgpr_fn_(rowOffsetA),
+        "comment"_a = "Store base LDS offset, will be modified"));
+    add(mod, vread_firstlane_b32_cls_(
+        "dst"_a = sgpr_fn_(std::string("LocalWriteBaseAddrB")),
+        "src"_a = vgpr_fn_(rowOffsetB),
+        "comment"_a = "Store base LDS offset, will be modified"));
+    add(mod, sadd_u32_cls_(
+        "dst"_a = sgpr_fn_(std::string("LocalWriteBaseAddrB")),
+        "src0"_a = sgpr_fn_(std::string("LocalWriteBaseAddrB")),
+        "src1"_a = ldsStartOffsetB, "comment"_a = ""));
+    add(mod, sadd_u32_cls_("dst"_a = sgpr_fn_(std::string("SwapA")),
+        "src0"_a = sgpr_fn_(std::string("LocalWriteBaseAddrA")),
+        "src1"_a = ldsTotalSize, "comment"_a = ""));
+    add(mod, sxor_b32_cls_("dst"_a = sgpr_fn_(std::string("SwapA")),
+        "src0"_a = sgpr_fn_(std::string("LocalWriteBaseAddrA")),
+        "src1"_a = sgpr_fn_(std::string("SwapA")), "comment"_a = ""));
+    add(mod, sadd_u32_cls_("dst"_a = sgpr_fn_(std::string("SwapB")),
+        "src0"_a = sgpr_fn_(std::string("LocalWriteBaseAddrB")),
+        "src1"_a = ldsTotalSize, "comment"_a = ""));
+    add(mod, sxor_b32_cls_("dst"_a = sgpr_fn_(std::string("SwapB")),
+        "src0"_a = sgpr_fn_(std::string("LocalWriteBaseAddrB")),
+        "src1"_a = sgpr_fn_(std::string("SwapB")), "comment"_a = ""));
+    return mod;
+  }
+
+  // === Port of globalReadScaleSwizzledDTLInitCommonSgpr ===
+  // Compute scale LDS base SGPRs for DTL loads.
+  // vgprWaveId: pre-allocated VGPR (1); will be overwritten.
+  // bytesPerLoad = loadWidthGR * wavesize.
+  nb::object dtl_init_scale_sgpr(int vgprWaveId, long wavesize, long bytesPerLoad,
+                                  long ldsStartOffsetMXSA, long ldsStartOffsetMXSB,
+                                  long ldsTotalSize) const {
+    nb::object mod = module();
+    add_comment0(mod, "Compute shared offsets used by m0 in DTL loads");
+    const long wsLog2  = log2_exact(wavesize);
+    const long bplLog2 = log2_exact(bytesPerLoad);
+    add(mod, vlshift_right_b32_cls_("dst"_a = vgpr_fn_(vgprWaveId),
+        "shiftHex"_a = wsLog2, "src"_a = vgpr_fn_(std::string("Serial")),
+        "comment"_a = "Wave Id"));
+    add(mod, vlshift_left_b32_cls_("dst"_a = vgpr_fn_(vgprWaveId),
+        "shiftHex"_a = bplLog2, "src"_a = vgpr_fn_(vgprWaveId),
+        "comment"_a = "Apply wave-specific common offset (" +
+                       std::to_string(bytesPerLoad) + ") for A/B"));
+    add(mod, snop_cls_("waitState"_a = 0,
+        "comment"_a = "Wait for VGPR to be ready"));
+    add(mod, vread_firstlane_b32_cls_(
+        "dst"_a = sgpr_fn_(std::string("LocalWriteBaseAddrMXSA")),
+        "src"_a = vgpr_fn_(vgprWaveId),
+        "comment"_a = "Store base LDS offset, will be modified"));
+    add(mod, vread_firstlane_b32_cls_(
+        "dst"_a = sgpr_fn_(std::string("LocalWriteBaseAddrMXSB")),
+        "src"_a = vgpr_fn_(vgprWaveId),
+        "comment"_a = "Store base LDS offset, will be modified"));
+    add(mod, sadd_u32_cls_(
+        "dst"_a = sgpr_fn_(std::string("LocalWriteBaseAddrMXSA")),
+        "src0"_a = sgpr_fn_(std::string("LocalWriteBaseAddrMXSA")),
+        "src1"_a = ldsStartOffsetMXSA, "comment"_a = ""));
+    add(mod, sadd_u32_cls_(
+        "dst"_a = sgpr_fn_(std::string("LocalWriteBaseAddrMXSB")),
+        "src0"_a = sgpr_fn_(std::string("LocalWriteBaseAddrMXSB")),
+        "src1"_a = ldsStartOffsetMXSB, "comment"_a = ""));
+    add(mod, sadd_u32_cls_("dst"_a = sgpr_fn_(std::string("SwapMXSA")),
+        "src0"_a = sgpr_fn_(std::string("LocalWriteBaseAddrMXSA")),
+        "src1"_a = ldsTotalSize, "comment"_a = ""));
+    add(mod, sxor_b32_cls_("dst"_a = sgpr_fn_(std::string("SwapMXSA")),
+        "src0"_a = sgpr_fn_(std::string("LocalWriteBaseAddrMXSA")),
+        "src1"_a = sgpr_fn_(std::string("SwapMXSA")), "comment"_a = ""));
+    add(mod, sadd_u32_cls_("dst"_a = sgpr_fn_(std::string("SwapMXSB")),
+        "src0"_a = sgpr_fn_(std::string("LocalWriteBaseAddrMXSB")),
+        "src1"_a = ldsTotalSize, "comment"_a = ""));
+    add(mod, sxor_b32_cls_("dst"_a = sgpr_fn_(std::string("SwapMXSB")),
+        "src0"_a = sgpr_fn_(std::string("LocalWriteBaseAddrMXSB")),
+        "src1"_a = sgpr_fn_(std::string("SwapMXSB")), "comment"_a = ""));
+    return mod;
+  }
+
  private:
+  // Exact integer log2: requires v > 0 and v must be a power of two.
+  static long log2_exact(long v) {
+    if (v <= 0) throw std::invalid_argument("log2_exact: v must be > 0");
+    long r = 0;
+    while ((1L << r) < v) ++r;
+    if ((1L << r) != v) throw std::invalid_argument("log2_exact: v must be a power of 2");
+    return r;
+  }
+
   nb::object module_cls_;
   nb::object textblock_cls_;
   nb::object label_cls_;
@@ -521,6 +1152,27 @@ class ModuleBuilder {
   nb::object mfma_instruction_cls_;
   nb::object mxmfma_instruction_cls_;
   nb::object swait_cnt_cls_;
+
+  // GR/LR/scale offset-assignment instruction classes.
+  nb::object vlshift_right_b32_cls_;
+  nb::object vlshift_left_b32_cls_;
+  nb::object vand_b32_cls_;
+  nb::object vmov_b32_cls_;
+  nb::object vadd_u32_cls_;
+  nb::object vsub_u32_cls_;
+  nb::object vmul_lo_u32_cls_;
+  nb::object vcmpx_eq_u32_cls_;
+  nb::object vperm_lane16_swap_b32_cls_;
+  nb::object vread_firstlane_b32_cls_;
+  nb::object smul_i32_cls_;
+  nb::object slshift_left_b32_cls_;
+  nb::object smov_b64_cls_;
+  nb::object snop_cls_;
+  // Special register / modifier handles.
+  nb::object vcc_fn_;
+  nb::object exec_fn_;
+  nb::object dpp_modifiers_cls_;
+
   nb::object inst_;
 };
 
