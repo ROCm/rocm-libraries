@@ -76,7 +76,8 @@ TYPED_TEST_SUITE(WGRuntimeTest, WGDispatcherTypesList);
 
 TYPED_TEST(WGRuntimeTest, Compare_Dispatcher_MakeWG)
 {
-    ck_tile::test::warp_gemm::RunCompareDispatcherAndReference<TypeParam, 16, 16, 128, true, false>();
+    ck_tile::test::warp_gemm::
+        RunCompareDispatcherAndReference<TypeParam, 16, 16, 128, true, false>();
 }
 
 // The 32x32x64 scaled-MFMA "unscaled" overload must use a unity e8m0 default scale
@@ -84,5 +85,6 @@ TYPED_TEST(WGRuntimeTest, Compare_Dispatcher_MakeWG)
 // default scale would multiply by 2^(0-127) and zero the result.
 TYPED_TEST(WGRuntimeTest, DefaultScaleMatchesUnity_32x32x64)
 {
-    ck_tile::test::warp_gemm::RunCompareDispatcherAndReference<TypeParam, 32, 32, 64, false, false>();
+    ck_tile::test::warp_gemm::
+        RunCompareDispatcherAndReference<TypeParam, 32, 32, 64, false, false>();
 }
