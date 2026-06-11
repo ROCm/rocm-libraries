@@ -37,15 +37,35 @@ inline bool
 // Mask classification
 // =============================================================================
 //
+// Mask types for AITER ASM (.co) kernel dispatch.
+//
 // Shared by SdpaFwdPlanBuilder and SdpaBwdPlanBuilder. The CSV `mask` column
 // stores these ordinals directly, so the integer values are part of the
 // dispatch contract and must not be reordered.
+//
+// These ordinals match the ASM mask type returned by AITER's asm_mask_type()
+// lambda (mha_bwd.cu / mha_fwd.cu), NOT the mask_enum values in ck_tile_shim.h.
+// The distinction matters for sliding windows:
+//
+//   AITER mask_enum::window_generic (ordinal 3) — a fully generic window mask
+//   that asm_mask_type() maps to -1 (unsupported). It falls back to CK kernels,
+//   which are not part of this ASM provider.
+//
+//   SLIDING_WINDOW (ordinal 3 here) — a causal mask with finite left/right
+//   bounds. asm_mask_type() returns 3 when mask_top_left or mask_bottom_right
+//   has non-standard window sizes (i.e. not the pure causal -1/0 pattern).
+//   These dispatch to ASM "swa" (sliding window attention) .co kernels
+//   (e.g. bwd_hd128_bf16_swa_a32_rtne_psskddv.co).
+//
+// The numeric coincidence (both are ordinal 3) is because AITER's CSV tables
+// reuse the same column values that asm_mask_type() returns, and window_generic
+// never reaches ASM dispatch.
 enum class MaskType : int
 {
     NO_MASK = 0,
     TOP_LEFT_CAUSAL = 1,
     BOTTOM_RIGHT_CAUSAL = 2,
-    WINDOW_GENERIC = 3
+    SLIDING_WINDOW = 3
 };
 
 // Classify the mask requested by an SDPA (forward or backward) attribute set.
@@ -111,7 +131,33 @@ MaskType getMaskType(const SdpaAttrsT& attrs)
                    ? MaskType::BOTTOM_RIGHT_CAUSAL
                    : MaskType::TOP_LEFT_CAUSAL;
     }
-    return MaskType::WINDOW_GENERIC; // anything else is a sliding window
+    return MaskType::SLIDING_WINDOW; // anything else is a sliding window
+}
+
+// =============================================================================
+// Sliding-window mask coordinate transformation
+// =============================================================================
+//
+// Converts raw window sizes (left_bound, right_bound from the hipDNN graph)
+// into the precomputed mask coordinates (mask_y, mask_x) that the AITER ASM
+// DQDKDV kernel expects in its argument struct.
+//
+// AITER reference: ck_tile_shim.h::compute_mask_coordinates()
+// Called only for mask type 3 (SLIDING_WINDOW); mask types 0-2 bake mask
+// behavior into the kernel binary and ignore mask_x/mask_y.
+//
+// Negative window sizes (including -1) are treated as unbounded: replaced with
+// seqLen-1 on the corresponding axis, matching AITER's semantics.
+inline std::pair<int32_t, int32_t> computeMaskCoordinates(
+    int32_t leftSize, int32_t rightSize, int32_t seqLenQ, int32_t seqLenK, bool isTopLeft)
+{
+    const int32_t leftDefault = isTopLeft ? seqLenQ - 1 : seqLenK - 1;
+    const int32_t rightDefault = isTopLeft ? seqLenK - 1 : seqLenQ - 1;
+    leftSize = leftSize < 0 ? leftDefault : leftSize;
+    rightSize = rightSize < 0 ? rightDefault : rightSize;
+    const int32_t xOff = isTopLeft ? 0 : seqLenK - seqLenQ;
+    const int32_t yOff = isTopLeft ? 0 : seqLenQ - seqLenK;
+    return {1 + leftSize + yOff, 1 + rightSize + xOff}; // {mask_y, mask_x}
 }
 
 // =============================================================================

@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <hip/hip_runtime.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -14,19 +15,23 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace
 {
 
 // =============================================================================
-// MhaBwdArgs — convenience struct mirroring AITER's mha_bwd_args
+// MhaBwdArgs — convenience struct bridging SdpaBwdParams → kernel args
 // =============================================================================
-// This intermediate struct holds all high-level parameters (tensor pointers,
-// element strides, dimensions, scale) so the build* helpers below can mirror
-// AITER's mha_bwd.cu line-for-line, making future AITER
+// Subset of AITER's mha_bwd_args (csrc/include/mha_bwd.h) covering the
+// batch-mode, no-bias, no-dropout path.  Lets the build* helpers below mirror
+// AITER's mha_bwd.cu field assignments line-for-line, making future AITER
 // updates a textual diff.
 //
-// AITER provenance: csrc/include/mha_bwd.h::mha_bwd_args (commit 9522048)
+// Omitted vs AITER's full mha_bwd_args: dispatch flags (use_asm_v3 etc.),
+// bias/dbias, dropout, group-mode seq pointers, sink attention, allocators.
+//
+// AITER provenance: csrc/include/mha_bwd.h (commit 17d4a33)
 //
 // Naming convention: field names match AITER where possible.  Strides are in
 // *elements* here; they are converted to bytes in the build helpers.
@@ -114,11 +119,17 @@ struct MhaBwdArgs
     unsigned int stride_dq_acc;
     int64_t nhead_stride_dq_acc;
     int64_t batch_stride_dq_acc;
+
+    // Mask parameters — matching AITER's mha_bwd_args fields.
+    // Window mask coordinates are computed inline in buildDqdkdvArgs()
+    // (matching AITER's mha_bwd.cu), not precomputed here.
+    int window_size_left = -1;
+    int window_size_right = -1;
 };
 // NOLINTEND(readability-identifier-naming)
 
 // =============================================================================
-// Build helpers — mirror AITER mha_bwd.cu (commit 9522048)
+// Build helpers — mirror AITER mha_bwd.cu (commit 17d4a33)
 // =============================================================================
 
 constexpr unsigned int K_BF16_SIZE = 2;
@@ -126,7 +137,7 @@ constexpr unsigned int K_FP32_SIZE = 4;
 
 constexpr unsigned int K_BWD_BLOCK_DIM = 256;
 
-// AITER reference: mha_bwd.cu::run_fmha_bwd_odo() (commit 9522048)
+// AITER reference: mha_bwd.cu::run_fmha_bwd_odo() (commit 17d4a33)
 asm_sdpa_engine::fmha_bwd_odo_args buildOdoArgs(const MhaBwdArgs& a)
 {
     asm_sdpa_engine::fmha_bwd_odo_args odo{};
@@ -149,14 +160,15 @@ asm_sdpa_engine::fmha_bwd_odo_args buildOdoArgs(const MhaBwdArgs& a)
     return odo;
 }
 
-// AITER reference: mha_bwd.cu::run_fmha_bwd_dqdkdv() (commit 9522048)
+// AITER reference: mha_bwd.cu::run_fmha_bwd_dqdkdv() (commit 17d4a33)
 //
 // `tsKv` is the K/V tile size for the resolved kernel (CSV column 'ts').  In
 // AITER it comes from the kernel-traits template parameter at the call site;
 // here it is plumbed in from the dispatch tuple via SdpaBwdParams::dqdkdvTiles.
 // Kept as an explicit parameter (not a field on MhaBwdArgs) to mirror AITER's
 // mha_bwd_args layout exactly.
-asm_sdpa_engine::fmha_bwd_dqdkdv_args buildDqdkdvArgs(const MhaBwdArgs& a, unsigned int tsKv)
+asm_sdpa_engine::fmha_bwd_dqdkdv_args
+    buildDqdkdvArgs(const MhaBwdArgs& a, unsigned int tsKv, const asm_sdpa_engine::SdpaBwdParams& p)
 {
     asm_sdpa_engine::fmha_bwd_dqdkdv_args dqdkdv{};
 
@@ -232,14 +244,26 @@ asm_sdpa_engine::fmha_bwd_dqdkdv_args buildDqdkdvArgs(const MhaBwdArgs& a, unsig
     // a16: max_seqlen_dq = 0 (AITER convention: a16 path, no dq_convert)
     dqdkdv.max_seqlen_dq = (a.accType == asm_sdpa_engine::AccumulatorType::A32) ? a.seqlen_q : 0;
 
-    // No window mask for POC
-    dqdkdv.mask_x = -1;
-    dqdkdv.mask_y = -1;
+    // Window attention mask coordinates — computed inline, matching AITER's
+    // mha_bwd.cu (commit 17d4a33).  Only SLIDING_WINDOW (mask=3) uses these;
+    // mask types 0-2 bake mask behavior into the kernel binary and ignore
+    // mask_y/mask_x (left at zero-init default).
+    if(p.maskOrdinal == static_cast<int32_t>(asm_sdpa_engine::plan_utils::MaskType::SLIDING_WINDOW))
+    {
+        auto [mask_y, mask_x]
+            = asm_sdpa_engine::plan_utils::computeMaskCoordinates(a.window_size_left,
+                                                                  a.window_size_right,
+                                                                  static_cast<int32_t>(a.seqlen_q),
+                                                                  static_cast<int32_t>(a.seqlen_k),
+                                                                  p.topLeftAlignment);
+        dqdkdv.mask_y = mask_y;
+        dqdkdv.mask_x = mask_x;
+    }
 
     return dqdkdv;
 }
 
-// AITER reference: mha_bwd.cu::run_fmha_bwd_convert_dq() (commit 9522048)
+// AITER reference: mha_bwd.cu::run_fmha_bwd_convert_dq() (commit 17d4a33)
 // Only called for a32 accumulator kernels.
 asm_sdpa_engine::fmha_bwd_post_kernel_args buildPostArgs(const MhaBwdArgs& a)
 {
@@ -352,6 +376,12 @@ MhaBwdArgs buildMhaBwdArgs(const asm_sdpa_engine::SdpaBwdParams& p,
     a.batch_stride_dq_acc
         = static_cast<int64_t>(p.numHeadsQ) * p.seqLenQ * p.headDimQk; // H_q * S_q * D_qk
 
+    // Window attention mask parameters (raw bounds, not yet transformed).
+    // computeMaskCoordinates() is called in buildDqdkdvArgs() for mask type 3,
+    // matching AITER's inline usage in mha_bwd.cu.
+    a.window_size_left = p.windowLeft;
+    a.window_size_right = p.windowRight;
+
     // The kernel args structs use uint32_t for byte strides.  Verify that
     // stride_in_elements * K_FP32_SIZE fits before we silently truncate
     // in buildPostArgs().  Overflow would cause the DQ_CONVERT kernel to
@@ -414,8 +444,11 @@ size_t SdpaBwdPlan::getWorkspaceSize(const Handle& /*handle*/) const
 {
     return sdpaBwdWorkspaceSize(_params.batchSize,
                                 _params.numHeadsQ,
+                                _params.numHeadsKv,
                                 _params.seqLenQ,
+                                _params.seqLenKv,
                                 _params.headDimQk,
+                                _params.headDimV,
                                 _params.accumulatorType);
 }
 
@@ -460,20 +493,74 @@ void SdpaBwdPlan::execute(const Handle& handle,
     // 4. Carve workspace into sub-buffers.
     // A32: dq_acc follows D buffer (DQDKDV accumulates FP32 dQ there, then DQ_CONVERT casts).
     // A16: DQDKDV writes dQ directly to the output buffer; dq_acc is not allocated.
+    // GQA: expanded dK/dV buffers follow dq_acc (or D if A16).
+    // Layout: D buffer | dq_acc (A32 only) | dk_expanded (GQA only) | dv_expanded (GQA only)
     auto* dBufPtr = workspace;
+    size_t wsOffset = sdpaBwdDBufferSize(_params.batchSize, _params.numHeadsQ, _params.seqLenQ);
+
     // A32: dq_acc buffer follows D buffer in workspace.
     // A16: no dq_acc buffer (nullptr) — DQDKDV writes dQ directly to user output.
     void* dqAccPtr = nullptr;
     if(_params.accumulatorType == AccumulatorType::A32)
     {
-        dqAccPtr = static_cast<char*>(workspace)
-                   + sdpaBwdDBufferSize(_params.batchSize, _params.numHeadsQ, _params.seqLenQ);
+        dqAccPtr = static_cast<char*>(workspace) + wsOffset;
+        wsOffset += sdpaBwdDqAccBufferSize(
+            _params.batchSize, _params.numHeadsQ, _params.seqLenQ, _params.headDimQk);
     }
+
+    // GQA: The DQDKDV kernel writes dK and dV per Q-head (nhead_q heads total).
+    // When nhead_q > nhead_k, the graph output dK/dV only has nhead_k heads.
+    // AITER allocates expanded dk/dv buffers with nhead_q heads, lets the kernel
+    // write all Q-head contributions, then sums across the GQA ratio dimension
+    // (asm_mha_bwd.cu lines 142-149, 337-339 at commit 17d4a33).
+    const bool isGqa = _params.numHeadsQ > _params.numHeadsKv;
+    void* dkExpandedPtr = nullptr;
+    void* dvExpandedPtr = nullptr;
+    if(isGqa)
+    {
+        dkExpandedPtr = static_cast<char*>(workspace) + wsOffset;
+        wsOffset += sdpaBwdGqaExpandedBufferSize(
+            _params.batchSize, _params.numHeadsQ, _params.seqLenKv, _params.headDimQk);
+        dvExpandedPtr = static_cast<char*>(workspace) + wsOffset;
+    }
+
+    // For the kernel, use expanded buffers (GQA) or graph output buffers (non-GQA).
+    void* dkKernelPtr = isGqa ? dkExpandedPtr : dkPtr;
+    void* dvKernelPtr = isGqa ? dvExpandedPtr : dvPtr;
 
     // 5. Build convenience args struct (mirrors AITER mha_bwd_args).
     // Byte-stride uint32 overflow was already rejected by isApplicable.
-    const MhaBwdArgs mhaArgs = buildMhaBwdArgs(
-        _params, qPtr, kPtr, vPtr, oPtr, doPtr, lsePtr, dqPtr, dkPtr, dvPtr, dBufPtr, dqAccPtr);
+    MhaBwdArgs mhaArgs = buildMhaBwdArgs(_params,
+                                         qPtr,
+                                         kPtr,
+                                         vPtr,
+                                         oPtr,
+                                         doPtr,
+                                         lsePtr,
+                                         dqPtr,
+                                         dkKernelPtr,
+                                         dvKernelPtr,
+                                         dBufPtr,
+                                         dqAccPtr);
+
+    // GQA: override dK/dV strides to match expanded buffer layout [B, H_q, S_kv, D].
+    // The expanded buffers are contiguous with nhead_q heads instead of nhead_k.
+    if(isGqa)
+    {
+        // Expanded buffer: [B, H_q, S_kv, D] contiguous (BHSD layout)
+        // stride_dk  = D         (seq stride — step between adjacent sequence positions)
+        // nhead_stride_dk = S_kv * D  (head stride — step between adjacent heads)
+        // batch_stride_dk = H_q * S_kv * D (batch stride)
+        mhaArgs.stride_dk = _params.headDimQk;
+        mhaArgs.nhead_stride_dk = static_cast<unsigned int>(_params.seqLenKv) * _params.headDimQk;
+        mhaArgs.batch_stride_dk
+            = static_cast<unsigned int>(_params.numHeadsQ) * _params.seqLenKv * _params.headDimQk;
+
+        mhaArgs.stride_dv = _params.headDimV;
+        mhaArgs.nhead_stride_dv = static_cast<unsigned int>(_params.seqLenKv) * _params.headDimV;
+        mhaArgs.batch_stride_dv
+            = static_cast<unsigned int>(_params.numHeadsQ) * _params.seqLenKv * _params.headDimV;
+    }
 
     // 6. Launch kernels on the same stream.
     // a32: 3 kernels — ODO → DQDKDV → DQ_CONVERT (sequential dependencies)
@@ -503,14 +590,24 @@ void SdpaBwdPlan::execute(const Handle& handle,
     plan_utils::throwOnLaunchPostError("SDPA backward ODO");
 
     // 6b. Build args and launch kernel 2: DQDKDV
-    auto dqdkdvArgs = buildDqdkdvArgs(mhaArgs, _params.dqdkdvTiles.ts);
+    auto dqdkdvArgs = buildDqdkdvArgs(mhaArgs, _params.dqdkdvTiles.ts, _params);
 
-    const unsigned int gdxDqdkdv = _params.dqdkdvTiles.gridDim(mhaArgs.seqlen_k);
+    unsigned int gdxDqdkdv = _params.dqdkdvTiles.gridDim(mhaArgs.seqlen_k);
+
+    // Causal masks (TOP_LEFT_CAUSAL=1, BOTTOM_RIGHT_CAUSAL=2) zero out roughly
+    // half the attention matrix.  The causal kernel binary tiles the remaining
+    // triangular region assuming the grid-x has been halved — launching with the
+    // full grid causes tiles to process wrong data and corrupts dQ.
+    // AITER reference: mha_bwd.cu line 600-603 (commit 17d4a33)
+    if(_params.maskOrdinal == 1 || _params.maskOrdinal == 2)
+    {
+        gdxDqdkdv = (gdxDqdkdv + 1) / 2;
+    }
 
     // A32: zero dq_acc before DQDKDV. The atomic-accumulator kernel adds per-K-tile
     // dQ contributions atomically and does not pre-zero; stale residue from a
     // prior workspace lease would silently corrupt dQ. AITER allocates dq_accum
-    // via torch::zeros (aiter/csrc/py_itfs_cu/asm_mha_bwd.cu:137 at commit 9522048).
+    // via torch::zeros (aiter/csrc/py_itfs_cu/asm_mha_bwd.cu:137 at commit 17d4a33).
     // A16 writes dQ directly — no accumulator buffer needed, skip the memset.
     if(_params.accumulatorType == AccumulatorType::A32)
     {
@@ -542,6 +639,168 @@ void SdpaBwdPlan::execute(const Handle& handle,
             "SdpaBwdPlan::execute: hipModuleLaunchKernel failed for SDPA backward DQDKDV");
     }
     plan_utils::throwOnLaunchPostError("SDPA backward DQDKDV");
+
+    // 6b½. GQA reduction: sum expanded dK/dV [B, H_q, S_kv, D] → output [B, H_kv, S_kv, D].
+    // Each group of `ratio` consecutive Q-head slices is summed element-wise into
+    // one KV-head slice.  AITER does this via torch::sum_out (asm_mha_bwd.cu:337-339).
+    // POC: host-side reduction — correct, not performance-critical for integration tests.
+    // TODO: Replace with a GPU-side reduction kernel for production performance.
+    if(isGqa)
+    {
+        const hipError_t syncErr = hipStreamSynchronize(stream);
+        if(syncErr != hipSuccess)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                std::string("SdpaBwdPlan::execute: hipStreamSynchronize failed before GQA "
+                            "reduction, error: ")
+                    + hipGetErrorString(syncErr));
+        }
+
+        const unsigned int ratio = _params.numHeadsQ / _params.numHeadsKv;
+
+        const bool isBf16 = _params.ioDataType == IoDataType::BF16;
+
+        // 16-bit ↔ float conversion helpers for BF16 and FP16.
+        auto halfToFloat = [isBf16](uint16_t h) -> float {
+            if(isBf16)
+            {
+                // BF16: sign(1) + exp(8) + mantissa(7) — upper 16 bits of IEEE 754 float
+                uint32_t bits = static_cast<uint32_t>(h) << 16;
+                float val;
+                std::memcpy(&val, &bits, sizeof(float));
+                return val;
+            }
+            // FP16: sign(1) + exp(5) + mantissa(10) → IEEE 754 float
+            uint32_t sign = (static_cast<uint32_t>(h) & 0x8000u) << 16;
+            uint32_t expF16 = (h >> 10) & 0x1Fu;
+            uint32_t mantissa = h & 0x3FFu;
+            if(expF16 == 0)
+            {
+                // Subnormal or zero
+                if(mantissa == 0)
+                {
+                    float val;
+                    std::memcpy(&val, &sign, sizeof(float));
+                    return val;
+                }
+                // Normalize subnormal
+                expF16 = 1;
+                while((mantissa & 0x400u) == 0)
+                {
+                    mantissa <<= 1;
+                    expF16--;
+                }
+                mantissa &= 0x3FFu;
+                uint32_t bits = sign | ((expF16 + 127 - 15) << 23) | (mantissa << 13);
+                float val;
+                std::memcpy(&val, &bits, sizeof(float));
+                return val;
+            }
+            if(expF16 == 0x1Fu)
+            {
+                // Inf/NaN
+                uint32_t bits = sign | 0x7F800000u | (mantissa << 13);
+                float val;
+                std::memcpy(&val, &bits, sizeof(float));
+                return val;
+            }
+            uint32_t bits = sign | ((expF16 + 127 - 15) << 23) | (mantissa << 13);
+            float val;
+            std::memcpy(&val, &bits, sizeof(float));
+            return val;
+        };
+
+        auto floatToHalf = [isBf16](float f) -> uint16_t {
+            uint32_t bits;
+            std::memcpy(&bits, &f, sizeof(float));
+            if(isBf16)
+            {
+                // Float → BF16 (round-to-nearest-even)
+                bits += 0x7FFFu + ((bits >> 16) & 1u);
+                return static_cast<uint16_t>(bits >> 16);
+            }
+            // Float → FP16
+            const uint32_t sign = (bits >> 16) & 0x8000u;
+            int32_t expF32 = static_cast<int32_t>((bits >> 23) & 0xFFu) - 127 + 15;
+            const uint32_t mantissa = bits & 0x7FFFFFu;
+            if(expF32 >= 0x1F)
+            {
+                return static_cast<uint16_t>(sign | 0x7C00u); // Inf
+            }
+            if(expF32 <= 0)
+            {
+                return static_cast<uint16_t>(sign); // Flush to zero
+            }
+            // Round-to-nearest-even
+            uint32_t shifted = mantissa >> 13;
+            const uint32_t remainder = mantissa & 0x1FFFu;
+            if(remainder > 0x1000u || (remainder == 0x1000u && (shifted & 1u)))
+            {
+                shifted++;
+                if(shifted > 0x3FFu)
+                {
+                    shifted = 0;
+                    expF32++;
+                    if(expF32 >= 0x1F)
+                    {
+                        return static_cast<uint16_t>(sign | 0x7C00u);
+                    }
+                }
+            }
+            return static_cast<uint16_t>(sign | (static_cast<uint32_t>(expF32) << 10) | shifted);
+        };
+
+        // Lambda: reduce one expanded buffer (dK or dV) from [B, H_q, S_kv, D] → [B, H_kv, S_kv, D]
+        // by summing `ratio` consecutive head slices.
+        auto reduceGqaExpanded = [&](void* expandedDevPtr,
+                                     void* outputDevPtr,
+                                     unsigned int headDim) {
+            const size_t headSliceElems = static_cast<size_t>(_params.seqLenKv) * headDim;
+            const size_t totalExpandedElems
+                = static_cast<size_t>(_params.batchSize) * _params.numHeadsQ * headSliceElems;
+            const size_t outputElems
+                = static_cast<size_t>(_params.batchSize) * _params.numHeadsKv * headSliceElems;
+
+            std::vector<uint16_t> expanded(totalExpandedElems);
+            (void)hipMemcpy(expanded.data(),
+                            expandedDevPtr,
+                            totalExpandedElems * sizeof(uint16_t),
+                            hipMemcpyDeviceToHost);
+
+            // Accumulate in FP32, then convert back to BF16/FP16
+            std::vector<float> reduced(outputElems, 0.0f);
+            for(unsigned int b = 0; b < _params.batchSize; ++b)
+            {
+                for(unsigned int hk = 0; hk < _params.numHeadsKv; ++hk)
+                {
+                    const size_t outOff
+                        = (static_cast<size_t>(b) * _params.numHeadsKv + hk) * headSliceElems;
+                    for(unsigned int r = 0; r < ratio; ++r)
+                    {
+                        const unsigned int hq = hk * ratio + r;
+                        const size_t inOff
+                            = (static_cast<size_t>(b) * _params.numHeadsQ + hq) * headSliceElems;
+                        for(size_t i = 0; i < headSliceElems; ++i)
+                        {
+                            reduced[outOff + i] += halfToFloat(expanded[inOff + i]);
+                        }
+                    }
+                }
+            }
+
+            std::vector<uint16_t> output(outputElems);
+            for(size_t i = 0; i < outputElems; ++i)
+            {
+                output[i] = floatToHalf(reduced[i]);
+            }
+            (void)hipMemcpy(
+                outputDevPtr, output.data(), outputElems * sizeof(uint16_t), hipMemcpyHostToDevice);
+        };
+
+        reduceGqaExpanded(dkExpandedPtr, dkPtr, _params.headDimQk);
+        reduceGqaExpanded(dvExpandedPtr, dvPtr, _params.headDimV);
+    }
 
     // 6c. DQ_CONVERT (FP32 → BF16) — A32 path only.
     // A16 wrote dQ directly to the output BF16 buffer in step 6b; no cast needed.
