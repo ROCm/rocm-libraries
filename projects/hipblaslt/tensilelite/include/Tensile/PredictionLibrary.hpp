@@ -54,6 +54,10 @@ namespace TensileLite
     {
         std::vector<std::pair<int, std::shared_ptr<MySolution>>> solution_list;
         std::vector<origami::config_t>                           origami_config_list;
+        // Per-config ML features for the mosaic scorer, index-aligned with
+        // origami_config_list. Built once at deserialize (the kernel name +
+        // SizeMapping are available there); see Serialization/PredictionLibrary.hpp.
+        std::vector<mosaic::ConfigML>                            mosaic_config_ml_list;
 
         mutable std::atomic<bool> lastFindTopRetAll = false;
 
@@ -190,7 +194,8 @@ namespace TensileLite
             auto prediction_result
                 = Debug::Instance().useMosaic()
                       ? mosaic::hipblaslt::rank_configs(
-                            origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list)
+                            origami_problem, *(pAMDGPU->analyticalHardware),
+                            origami_config_list, &mosaic_config_ml_list)
                       : origami::rank_configs(
                             origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
 

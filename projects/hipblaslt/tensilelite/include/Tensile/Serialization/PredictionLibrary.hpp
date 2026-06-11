@@ -127,6 +127,23 @@ namespace TensileLite
                             };
 
                             lib.origami_config_list.emplace_back(origami_config);
+
+                            // Per-config ML features for the mosaic scorer. The
+                            // kernel-name codegen tokens (LRVW/PLR/NTC/NTE/LPA/
+                            // LPB/...) plus 3 SizeMapping fields (NonTemporalD,
+                            // PrefetchGlobalRead, LocalSplitU) -- mirrors the
+                            // training pipeline's lib/dat.py derivation so the
+                            // deployed picks match the model. Index-aligned with
+                            // origami_config_list.
+                            std::string mosaic_kernel_name = solution->name();
+                            if(mosaic_kernel_name.empty())
+                                mosaic_kernel_name = solution->kernelName;
+                            lib.mosaic_config_ml_list.emplace_back(
+                                mosaic::hipblaslt::parse_config_ml(
+                                    mosaic_kernel_name,
+                                    solution->sizeMapping.NonTemporalD,
+                                    solution->sizeMapping.PrefetchGlobalRead,
+                                    solution->sizeMapping.LocalSplitU));
                         }
                     }
                 }

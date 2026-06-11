@@ -56,16 +56,6 @@ enum class DataType : int {
 // Matrix transpose flag.
 enum class Transpose { T, N, Count };
 
-// Prediction mode a Config may carry through (the engine itself does not branch
-// on it). Fixed integer values so a framework adapter can static_cast across.
-enum class PredictionMode : std::uint32_t {
-  estimation = 0,
-  simulation = 1,
-  mosaic     = 2,
-  count,
-  none = 0xFFFFFFFFu
-};
-
 // Compact (M, N, K) triple, plus the mk()/nk() helpers used by the
 // LDS-capacity gate.
 struct Dim3 {
@@ -123,8 +113,6 @@ struct Config {
   int prefetch_global_read  = 2;
 
   std::size_t index = 0;
-
-  PredictionMode prediction_mode = PredictionMode::estimation;
 };
 
 // Optional per-config extended feature fields (cache hints, prefetch, LDS pad).

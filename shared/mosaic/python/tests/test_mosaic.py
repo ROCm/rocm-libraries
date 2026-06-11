@@ -49,7 +49,6 @@ def _make_configs():
         c.mi.k = 32
         c.occupancy = 1 + i
         c.index = 1000 + i
-        c.prediction_mode = mosaic.PredictionMode.mosaic
         configs.append(c)
     return configs
 
@@ -57,7 +56,6 @@ def _make_configs():
 def test_enums_exist():
     assert int(mosaic.DataType.BFloat16) >= 0
     assert mosaic.Transpose.T != mosaic.Transpose.N
-    assert int(mosaic.PredictionMode.mosaic) == 2
 
 
 def test_dim3_helpers():

@@ -13,7 +13,6 @@ try:
         # Enums
         DataType,
         Transpose,
-        PredictionMode,
         # Data structures
         Dim3,
         Problem,
@@ -41,7 +40,6 @@ __all__ = [
     # Enums
     "DataType",
     "Transpose",
-    "PredictionMode",
     # Data structures
     "Dim3",
     "Problem",

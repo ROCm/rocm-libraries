@@ -58,14 +58,6 @@ NB_MODULE(mosaic, m) {
       .value("Count", mosaic::Transpose::Count)
       .export_values();
 
-  nb::enum_<mosaic::PredictionMode>(m, "PredictionMode")
-      .value("estimation", mosaic::PredictionMode::estimation)
-      .value("simulation", mosaic::PredictionMode::simulation)
-      .value("mosaic", mosaic::PredictionMode::mosaic)
-      .value("count", mosaic::PredictionMode::count)
-      .value("none", mosaic::PredictionMode::none)
-      .export_values();
-
   // ── structs ───────────────────────────────────────────────────────────────
   nb::class_<mosaic::Dim3>(m, "Dim3")
       .def(nb::init<>())
@@ -104,8 +96,7 @@ NB_MODULE(mosaic, m) {
       .def_rw("global_split_u", &mosaic::Config::global_split_u)
       .def_rw("local_split_u", &mosaic::Config::local_split_u)
       .def_rw("prefetch_global_read", &mosaic::Config::prefetch_global_read)
-      .def_rw("index", &mosaic::Config::index)
-      .def_rw("prediction_mode", &mosaic::Config::prediction_mode);
+      .def_rw("index", &mosaic::Config::index);
 
   nb::class_<mosaic::ConfigML>(m, "ConfigML")
       .def(nb::init<>())

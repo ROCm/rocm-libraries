@@ -28,7 +28,9 @@
 #include "mosaic/model.hpp"
 #include "mosaic/types.hpp"
 
+#include <cstdlib>
 #include <limits>
+#include <string>
 #include <vector>
 
 namespace mosaic {
@@ -46,8 +48,16 @@ inline mosaic::Transpose to_mosaic(origami::transpose_t t) {
   return static_cast<mosaic::Transpose>(static_cast<int>(t));
 }
 
-inline mosaic::PredictionMode to_mosaic(origami::prediction_modes_t m) {
-  return static_cast<mosaic::PredictionMode>(static_cast<std::uint32_t>(m));
+// Read an integer that follows a `<tok><digits>` marker in a Tensile kernel
+// name (e.g. "_LRVW8_" -> 8). Returns `dflt` when the token is absent. Mirrors
+// the Python pipeline's parse_ml_kernel_params_from_name (lib/dat.py) so the
+// deployed C++ features match the trained model byte-for-byte.
+inline int kernel_name_int(const std::string& name, const char* tok, int dflt) {
+  const std::size_t p = name.find(tok);
+  if (p == std::string::npos) return dflt;
+  std::size_t i = p + std::char_traits<char>::length(tok);
+  if (i >= name.size() || name[i] < '0' || name[i] > '9') return dflt;
+  return static_cast<int>(std::strtol(name.c_str() + i, nullptr, 10));
 }
 
 inline mosaic::Problem to_mosaic(const origami::problem_t& p) {
@@ -77,7 +87,6 @@ inline mosaic::Config to_mosaic(const origami::config_t& c) {
   mc.vector_width_a  = c.vector_width_a;
   mc.vector_width_b  = c.vector_width_b;
   mc.index           = c.index;
-  mc.prediction_mode = to_mosaic(c.prediction_mode);
   // Tensile-derived knobs (carried for completeness; not read by the scorer).
   if (c.has_tensile_params()) {
     const origami::tensile_params_t& t = c.tensile();
@@ -114,14 +123,43 @@ inline int route(const origami::problem_t& problem) {
   return mosaic::route(detail::to_mosaic(problem));
 }
 
+// Build the per-config ML feature struct mosaic's item/inter towers consume.
+// hipBLASLt's SizeMapping only carries 3 of these fields (NonTemporalD,
+// PrefetchGlobalRead, LocalSplitU -- pass them in); the rest are encoded in the
+// Tensile kernel name. The tokens + defaults mirror the Python pipeline's
+// lib/dat.py:parse_ml_kernel_params_from_name so the deployed C++ features match
+// the trained model. Call once per solution (at library load) and pass the
+// resulting list (index-aligned with the config list) to rank_configs.
+inline mosaic::ConfigML parse_config_ml(const std::string& kernel_name,
+                                        int non_temporal_d,
+                                        int prefetch_global_read,
+                                        int local_split_u) {
+  mosaic::ConfigML m;
+  m.cache_hints_c         = detail::kernel_name_int(kernel_name, "_NTC", 0);
+  m.cache_hints_d         = non_temporal_d;
+  m.cache_hints_e         = detail::kernel_name_int(kernel_name, "_NTE", 0);
+  m.prefetch_global_read  = prefetch_global_read;
+  m.prefetch_local_read   = detail::kernel_name_int(kernel_name, "_PLR", 1);
+  m.lds_read_vector_width = detail::kernel_name_int(kernel_name, "_LRVW", 1);
+  m.local_split_u         = local_split_u;
+  m.lds_pad_a             = detail::kernel_name_int(kernel_name, "_LPA", 0);
+  m.lds_pad_b             = detail::kernel_name_int(kernel_name, "_LPB", 0);
+  m.lds_buffer_pad_a      = detail::kernel_name_int(kernel_name, "_LBSPPA", 0);
+  m.lds_buffer_pad_b      = detail::kernel_name_int(kernel_name, "_LBSPPB", 0);
+  return m;
+}
+
 // Rank candidate configs for a problem with the mosaic two-tower scorer.
+// `configs_ml` (optional, index-aligned with `configs`) supplies the per-config
+// ML features (see parse_config_ml); pass nullptr to use engine defaults.
 // Returns one origami::prediction_result_t per input config: survivors first in
 // ascending latency (latency = -score), filtered-out configs last with NaN
 // latency -- matching the legacy origami ML runtime's contract.
 inline std::vector<origami::prediction_result_t> rank_configs(
     const origami::problem_t& problem,
     const origami::hardware_t& hardware,
-    const std::vector<origami::config_t>& configs) {
+    const std::vector<origami::config_t>& configs,
+    const std::vector<mosaic::ConfigML>* configs_ml) {
   const mosaic::Problem  mp = detail::to_mosaic(problem);
   const mosaic::Hardware mh = detail::to_mosaic(hardware);
 
@@ -130,7 +168,7 @@ inline std::vector<origami::prediction_result_t> rank_configs(
   for (const origami::config_t& c : configs) mcfgs.push_back(detail::to_mosaic(c));
 
   const std::vector<mosaic::Result> res =
-      mosaic::rank_configs(mp, mh, mcfgs, /*configs_ml=*/nullptr);
+      mosaic::rank_configs(mp, mh, mcfgs, configs_ml);
 
   const double kNaN = std::numeric_limits<double>::quiet_NaN();
   std::vector<origami::prediction_result_t> result;
@@ -140,6 +178,14 @@ inline std::vector<origami::prediction_result_t> rank_configs(
     result.push_back(origami::prediction_result_t{latency, configs[r.config_index]});
   }
   return result;
+}
+
+// Convenience overload: rank without per-config ML features (engine defaults).
+inline std::vector<origami::prediction_result_t> rank_configs(
+    const origami::problem_t& problem,
+    const origami::hardware_t& hardware,
+    const std::vector<origami::config_t>& configs) {
+  return rank_configs(problem, hardware, configs, /*configs_ml=*/nullptr);
 }
 
 }  // namespace hipblaslt

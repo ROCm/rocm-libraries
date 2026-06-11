@@ -59,7 +59,6 @@ std::vector<mosaic::Config> make_configs() {
     c.grvw_b          = 8;
     c.gwvw_d          = 4;
     c.index           = static_cast<std::size_t>(1000 + i);
-    c.prediction_mode = mosaic::PredictionMode::mosaic;
     configs.push_back(c);
   }
   return configs;
