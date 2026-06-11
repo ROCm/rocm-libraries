@@ -1,0 +1,92 @@
+{
+  "args_signature": [
+    {
+      "name": "output_ptr",
+      "type": "ptr<f16, global>"
+    },
+    {
+      "name": "query_ptr",
+      "type": "ptr<f16, global>"
+    },
+    {
+      "name": "key_cache_ptr",
+      "type": "ptr<f16, global>"
+    },
+    {
+      "name": "value_cache_ptr",
+      "type": "ptr<f16, global>"
+    },
+    {
+      "name": "sink_ptr",
+      "type": "ptr<f16, global>"
+    },
+    {
+      "name": "block_tables_ptr",
+      "type": "ptr<i32, global>"
+    },
+    {
+      "name": "seq_lens_ptr",
+      "type": "ptr<i32, global>"
+    },
+    {
+      "name": "alibi_slopes_ptr",
+      "type": "ptr<f32, global>"
+    },
+    {
+      "name": "qq_bias_ptr",
+      "type": "ptr<f32, global>"
+    },
+    {
+      "name": "query_start_len_ptr",
+      "type": "ptr<i32, global>"
+    },
+    {
+      "name": "scale",
+      "type": "f32"
+    },
+    {
+      "name": "k_scale",
+      "type": "f32"
+    },
+    {
+      "name": "v_scale",
+      "type": "f32"
+    },
+    {
+      "name": "out_scale",
+      "type": "f32"
+    },
+    {
+      "name": "softcap",
+      "type": "f32"
+    },
+    {
+      "name": "num_seqs",
+      "type": "i32"
+    },
+    {
+      "name": "block_table_stride",
+      "type": "i32"
+    },
+    {
+      "name": "qq_bias_stride_0",
+      "type": "i32"
+    }
+  ],
+  "attention_config": {
+    "block_q": 16,
+    "block_size": 16,
+    "dtype": "fp16",
+    "head_size": 128,
+    "num_kv_heads": 2,
+    "num_query_heads": 16,
+    "num_warps": 4
+  },
+  "ck_dependency": false,
+  "hsaco": "ck_dsl_uattn2d_tiled_d128_b16_t32_h16kv2_fp16_w4_mw32_mfma32_stqk.hsaco",
+  "ir_authored": true,
+  "kernel_name": "ck_dsl_uattn2d_tiled_d128_b16_t32_h16kv2_fp16_w4_mw32_mfma32_stqk",
+  "kind": "attention_unified",
+  "schema": "ck.dsl.example.manifest/v1",
+  "threads_per_block": 256
+}
