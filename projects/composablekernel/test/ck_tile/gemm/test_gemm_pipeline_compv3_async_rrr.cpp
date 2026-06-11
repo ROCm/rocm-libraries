@@ -6,13 +6,13 @@
 #include "gtest/gtest.h"
 
 template <typename T>
-class TestCkTileGemmPipelineCompV3Async
-    : public TestCkTileGemmPipeline<T, TestCkTileGemmPipelineCompV3Async<T>>
+class TestCkTileGemmPipelineCompV3AsyncRRR
+    : public TestCkTileGemmPipeline<T, TestCkTileGemmPipelineCompV3AsyncRRR<T>>
 {
     public:
     static constexpr bool check_data_type()
     {
-        using Base = TestCkTileGemmPipeline<T, TestCkTileGemmPipelineCompV3Async<T>>;
+        using Base = TestCkTileGemmPipeline<T, TestCkTileGemmPipelineCompV3AsyncRRR<T>>;
         if constexpr(std::is_same_v<typename Base::BLayout, Row> &&
                      std::is_same_v<typename Base::BDataType, I4>)
         {
@@ -24,9 +24,9 @@ class TestCkTileGemmPipelineCompV3Async
     static constexpr bool Async = true;
 };
 
-#define TEST_SUITE_NAME TestCkTileGemmPipelineCompV3Async
+#define TEST_SUITE_NAME TestCkTileGemmPipelineCompV3AsyncRRR
 
-TYPED_TEST_SUITE(TEST_SUITE_NAME, KernelTypesCompV3Async);
+TYPED_TEST_SUITE(TEST_SUITE_NAME, KernelTypesCompV3AsyncRRR);
 
 #include "test_gemm_pipeline_ut_cases.inc"
 
