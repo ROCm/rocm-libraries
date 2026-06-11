@@ -386,8 +386,8 @@ void ckc_moe_down_emit_compute(ckc_moe_down_build_ctx_t* ctx)
     int group_sizes[1];
     group_sizes[0] = n;
 
-    ckc_value_t* acc_inits_flat[CKC_MOE_MAX_ACCS];
-    const char* acc_names_flat[CKC_MOE_MAX_ACCS];
+    ckc_value_t* acc_inits_flat[CKC_MOE_MAX_ACCS] = {0};
+    const char* acc_names_flat[CKC_MOE_MAX_ACCS] = {0};
     ckc_value_t* out_flat[CKC_MOE_MAX_ACCS];
     for (int i = 0; i < n; ++i)
     {

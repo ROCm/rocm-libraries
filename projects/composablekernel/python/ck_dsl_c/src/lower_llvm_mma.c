@@ -203,6 +203,51 @@ static const _wmma_spec_t WMMA_SPECS[] = {
 };
 static const int WMMA_SPECS_N = (int)(sizeof(WMMA_SPECS) / sizeof(WMMA_SPECS[0]));
 
+/* Integer WMMA spec table (Python _RDNA_WMMA_INT). Integer WMMA differs from
+ * the float path: operands/accumulator are i32 vectors (A/B packed, C/D the i32
+ * accumulator), and the intrinsic signature carries i1 signedness flags before
+ * each matrix operand and a trailing i1 clamp. Operands arrive in SSA already
+ * as <N x i32> so no bitcast is needed. Quantized data is signed and within i32
+ * range, so the flags are (signedA=1, signedB=1, clamp=0). */
+typedef struct _wmma_int_spec {
+    const char *op_id;     /* the tile.mma op_id (no "tile." prefix)        */
+    const char *decl_key;  /* _need() key                                   */
+    const char *intrinsic; /* fully-mangled @llvm.amdgcn.wmma....           */
+    int op_vec;            /* A/B operand vector width                      */
+    int acc_vec;           /* accumulator/result vector width               */
+} _wmma_int_spec_t;
+
+static const _wmma_int_spec_t WMMA_INT_SPECS[] = {
+    {"wmma_i32_16x16x16_iu8", "wmma.i32.16x16x16.iu8",
+     "llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v4i32", 4, 8},
+    {"wmma_i32_16x16x16_iu4", "wmma.i32.16x16x16.iu4",
+     "llvm.amdgcn.wmma.i32.16x16x16.iu4.v8i32.v2i32", 2, 8},
+};
+static const int WMMA_INT_SPECS_N =
+    (int)(sizeof(WMMA_INT_SPECS) / sizeof(WMMA_INT_SPECS[0]));
+
+/* Emit an integer WMMA (iu8/iu4) call (Python _emit_wmma_int). The signature is
+ * (i1 signedA, <N x i32> A, i1 signedB, <N x i32> B, <8 x i32> C, i1 clamp) with
+ * an <8 x i32> result. Both signedness flags are 1 (signed quant data); clamp
+ * is 0 (values stay within i32 range). No operand bitcast (already <N x i32>). */
+static void _emit_wmma_int(ckc_lower_t *L, const ckc_op_t *op,
+                           const _wmma_int_spec_t *spec) {
+    const ckc_value_t *a, *b, *c;
+    a = op->operands[0];
+    b = op->operands[1];
+    c = op->operands[2];
+    ckc_ll_need(L, spec->decl_key);
+    ckc_ll_emitf(L,
+        "  %s = call <%d x i32> @%s("
+        "i1 1, <%d x i32> %s, "
+        "i1 1, <%d x i32> %s, "
+        "<%d x i32> %s, i1 0)",
+        mma_result_name(L, op), spec->acc_vec, spec->intrinsic,
+        spec->op_vec, ckc_ll_operand(L, a),
+        spec->op_vec, ckc_ll_operand(L, b),
+        spec->acc_vec, ckc_ll_operand(L, c));
+}
+
 static void _emit_wmma(ckc_lower_t *L, const ckc_op_t *op, const char *op_id) {
     const _wmma_spec_t *spec = NULL;
     const ckc_value_t *a, *b, *c;
@@ -216,6 +261,15 @@ static void _emit_wmma(ckc_lower_t *L, const ckc_op_t *op, const char *op_id) {
         ckc_ll_fail(L, CKC_ERR_VALUE, "%s expects 3 operands",
                     op->name ? op->name : "tile.mma");
         return;
+    }
+
+    /* Integer WMMA (iu8/iu4) is checked first, mirroring
+     * Gfx11RdnaBackend.emit_wmma (int_spec lookup precedes the float table). */
+    for (i = 0; i < WMMA_INT_SPECS_N; i++) {
+        if (strcmp(WMMA_INT_SPECS[i].op_id, op_id) == 0) {
+            _emit_wmma_int(L, op, &WMMA_INT_SPECS[i]);
+            return;
+        }
     }
 
     for (i = 0; i < WMMA_SPECS_N; i++) {

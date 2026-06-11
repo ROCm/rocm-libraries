@@ -7,6 +7,7 @@
  */
 
 #include "ckc/helper_instance_gfx950_attention_tiled_2d_fastkv_regp.h"
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_kernel_name_join */
 
 #include <stdio.h>
 #include <string.h>
@@ -23,6 +24,83 @@ static void ckc__fastkv_regp_set_err(ckc_ir_builder_t* b, ckc_status_t st, const
         return;
     b->status = st;
     snprintf(b->err, (size_t)CKC_ERR_MSG_CAP, "%s", msg ? msg : "");
+}
+
+/* gfx950 UnifiedAttention2DTiledSpec.kernel_name() (ck_dsl/instances/gfx950/
+ * attention_tiled_2d.py kernel_name). The gfx950 part list is SHORTER than the
+ * gfx942 one (no wpe, no mfma32x8/qdir/kvcp/gldlds/qgrid/cfv/... parts), so the
+ * fastKV register-P base name must be built from this list rather than the
+ * gfx942 ckc_attention_tiled_2d_spec_kernel_name. Mirrors the Python order. */
+static ckc_status_t ckc__fastkv_gfx950_base_name(
+    const ckc_attention_tiled_2d_spec_t* s, char* out, size_t out_cap)
+{
+    char t_buf[32], hkv_buf[64], kv_buf[64], sw_buf[32], w_buf[32], mw_buf[32];
+    char d_buf[16], b_buf[16];
+
+    if (s == NULL || out == NULL)
+        return CKC_ERR_VALUE;
+
+    snprintf(d_buf, sizeof(d_buf), "d%d", s->head_size);
+    snprintf(b_buf, sizeof(b_buf), "b%d", s->block_size);
+    if (ckc_attention_tiled_2d_spec_n_blocks_per_tile(s) != 1)
+        snprintf(t_buf, sizeof(t_buf), "t%d",
+                 ckc_attention_tiled_2d_spec_tile_size_eff(s));
+    else
+        t_buf[0] = '\0';
+    snprintf(hkv_buf, sizeof(hkv_buf), "h%dkv%d", s->num_query_heads,
+             s->num_kv_heads);
+    if (s->kv_storage_dtype != NULL)
+        snprintf(kv_buf, sizeof(kv_buf), "kv%s", s->kv_storage_dtype);
+    else
+        kv_buf[0] = '\0';
+    if (s->sliding_window > 0)
+        snprintf(sw_buf, sizeof(sw_buf), "sw%d", s->sliding_window);
+    else
+        sw_buf[0] = '\0';
+    if (s->num_warps != 1)
+        snprintf(w_buf, sizeof(w_buf), "w%d", s->num_warps);
+    else
+        w_buf[0] = '\0';
+    if (s->block_m_per_warp != 16)
+        snprintf(mw_buf, sizeof(mw_buf), "mw%d", s->block_m_per_warp);
+    else
+        mw_buf[0] = '\0';
+
+    {
+        const char* parts[] = {
+            d_buf,
+            b_buf,
+            t_buf,
+            hkv_buf,
+            s->dtype ? s->dtype : "",
+            kv_buf,
+            s->use_sinks ? "sinks" : "",
+            sw_buf,
+            s->has_softcap ? "softcap" : "",
+            s->use_alibi ? "alibi" : "",
+            s->use_qq_bias ? "qqb" : "",
+            w_buf,
+            mw_buf,
+            s->use_mfma_32x32 ? "mfma32" : "",
+            s->use_transposed_qk_32x32 ? "stqk" : "",
+            s->use_transposed_scalar_state ? "s1" : "",
+            s->use_transposed_mask_once ? "mask1" : "",
+            s->use_transposed_invariant_hoist ? "hoist" : "",
+            s->use_transposed_half_local_pv ? "hlpv" : "",
+            s->use_mfma32_skip_legacy_qreg ? "skipqreg" : "",
+            s->use_transposed_mask_limit ? "mlim" : "",
+            s->use_grouped_kv2_softmax ? "gkv2" : "",
+            s->use_fast_paged_kv_desc ? "fastkvdesc" : "",
+            s->use_early_v_schedule ? "earlyv" : "",
+            s->use_agpr_alloc_zero ? "agpr0" : "",
+            s->use_fp8_mfma_qk ? "fp8mfma" : "",
+            s->use_fp8_mfma_pv ? "fp8pv" : "",
+            s->use_register_pv ? "regpv" : "",
+        };
+        size_t num_parts = sizeof(parts) / sizeof(parts[0]);
+        return ckc_kernel_name_join("ck_dsl_uattn2d_tiled", parts, num_parts,
+                                    NULL, NULL, 0, out, out_cap, NULL);
+    }
 }
 
 /* ===================================================================== *
@@ -236,6 +314,28 @@ ckc_kernel_def_t* ckc_build_unified_attention_2d_fastkv_register_p(
     built = proxy.spec;
     built.use_register_pv =
         ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy_use_register_pv(&proxy);
+
+    /* The proxy overrides kernel_name() -> "<wrapped.kernel_name()>_fastkv_regp"
+     * (Python _FastKvRegisterPProxy.kernel_name). The tiled builder names the
+     * kernel from b->kernel->name (set by the caller's ckc_ir_builder_init seed),
+     * so rename the builder's kernel to the proxy name BEFORE building -- the name
+     * flows into the @Klds/@Vlds globals and the kernel symbol. */
+    if (b->kernel != NULL)
+    {
+        char base[1024];
+        char full[1056];
+        /* base = self._spec.kernel_name() over the WRAPPED (original) spec, whose
+         * use_register_pv is the spec's own value (False) -- the proxy's True
+         * override is NOT reflected in the kernel name (Python proxy delegates
+         * kernel_name to the wrapped spec, then appends "_fastkv_regp"). Use the
+         * gfx950 part list, not the gfx942 ckc_attention_tiled_2d_spec_kernel_name. */
+        if (ckc__fastkv_gfx950_base_name(spec, base, sizeof(base)) == CKC_OK &&
+            ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy_kernel_name(
+                base, full, sizeof(full), NULL) == CKC_OK)
+        {
+            b->kernel->name = ckc_arena_strdup(&b->arena, full);
+        }
+    }
 
     return ckc_build_unified_attention_2d_tiled_scalar(
         b, &built, (arch != NULL) ? arch : "gfx950");

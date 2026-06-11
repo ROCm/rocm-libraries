@@ -172,6 +172,15 @@ ckc_value_t* ckc_dfcp_stage_accumulators_to_cshuffle_lds(
     }
     c_smem = c_view.base;
 
+    /* c_window = c_view.tile(storage_shape, [b.const_i32(0), b.const_i32(0)])
+     * (py 425-428). The window itself is unused (the stores below go through
+     * coord_fn on c_smem directly), but Python still emits the two origin
+     * const_i32(0) values, each consuming an SSA counter (they are DCE'd before
+     * printing). Mirror them so the @DeepFusionC_smem global id and every later
+     * numbered SSA name line up with the Python reference. */
+    (void)ckc_b_const_i32(b, 0);
+    (void)ckc_b_const_i32(b, 0);
+
     warp_m_off = ckc_warp_grid_warp_m_off(b, grid);
     warp_n_off = ckc_warp_grid_warp_n_off(b, grid);
     c_map = ckc_mmaop_c_layout(op, b);

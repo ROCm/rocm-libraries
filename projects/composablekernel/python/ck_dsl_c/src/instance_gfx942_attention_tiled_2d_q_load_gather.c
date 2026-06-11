@@ -247,6 +247,15 @@ void ckc_gfx942_attn2d_emit_q_gather(ckc_gfx942_attn2d_build_ctx_t* ctx)
      *   ctx->q_regs[atom * QK_K_ITERS + k]. */
     ctx->q_regs_count = ctx->M_ATOMS_PER_WARP * ctx->QK_K_ITERS;
 
+    /* Legacy Q-gather A-operand width. gfx950 reads <8 x dtype> with
+     * q_col_off = k*32 + lane_rg*8 (16x16x32-style A; Python gfx950 2270-2274);
+     * gfx942 reads <4 x dtype> with k*16 + lane_rg*4 (Python gfx942 3449-3456). */
+    const bool q_gather_wide =
+        (ctx->target != NULL && ctx->target->memory.has_ds_read_tr);
+    const int q_kstep = q_gather_wide ? 32 : 16;
+    const int q_kwide = q_gather_wide ? 8 : 4;
+    const int q_n     = q_gather_wide ? 8 : 4;
+
     /* if not (Q_DIRECT_GLOBAL or (USE_MFMA_32X32 and SKIP_LEGACY_QREG)): */
     if(!(ctx->Q_DIRECT_GLOBAL ||
          (ctx->USE_MFMA_32X32 && ctx->SKIP_LEGACY_QREG)))
@@ -285,14 +294,14 @@ void ckc_gfx942_attn2d_emit_q_gather(ckc_gfx942_attn2d_build_ctx_t* ctx)
                 int num_idx;
                 ckc_value_t* qreg;
 
-                /* q_col_off = k*16 + lane_rg*4. Python evaluates the left
-                 * const(k*16) BEFORE the mul (left-to-right); bind it to a temp
-                 * so C's arg-eval order does not allocate the mul's const ahead
-                 * of it and shift the mul's %value. */
-                ckc_value_t* q_col_base = ckc_b_const_i32(b, (int64_t)(k * 16));
+                /* q_col_off = k*q_kstep + lane_rg*q_kwide. Python evaluates the
+                 * left const(k*q_kstep) BEFORE the mul (left-to-right); bind it
+                 * to a temp so C's arg-eval order does not allocate the mul's
+                 * const ahead of it and shift the mul's %value. */
+                ckc_value_t* q_col_base = ckc_b_const_i32(b, (int64_t)(k * q_kstep));
                 q_col_off =
                     ckc_b_add(b, q_col_base,
-                              ckc_b_mul(b, lane_rg, ckc_b_const_i32(b, 4)));
+                              ckc_b_mul(b, lane_rg, ckc_b_const_i32(b, q_kwide)));
 
                 if(ctx->Q_ALIAS_K)
                 {
@@ -308,8 +317,8 @@ void ckc_gfx942_attn2d_emit_q_gather(ckc_gfx942_attn2d_build_ctx_t* ctx)
                     num_idx = 2;
                 }
 
-                /* Q_reg[atom][k] = b.smem_load_vN(Q_lds, *idx, dtype=dtype, n=4) */
-                qreg = ckc_b_smem_load_vN(b, ctx->Q_lds, idx, num_idx, dtype, 4);
+                /* Q_reg[atom][k] = b.smem_load_vN(Q_lds, *idx, dtype, n=q_n) */
+                qreg = ckc_b_smem_load_vN(b, ctx->Q_lds, idx, num_idx, dtype, q_n);
                 ctx->q_regs[atom * ctx->QK_K_ITERS + k] = qreg;
             }
         }
@@ -349,6 +358,9 @@ void ckc_gfx942_attn2d_emit_q_gather(ckc_gfx942_attn2d_build_ctx_t* ctx)
 
         lane_half  = ckc_b_div(b, ctx->lane, ckc_b_const_i32(b, 32));
         lane_col32 = ckc_b_mod(b, ctx->lane, ckc_b_const_i32(b, 32));
+        /* Python reassigns lane_col32 here (gfx950 2329); the transposed QK reads
+         * this fresh value. Publish it so the QK/softmax TU reuses the same SSA. */
+        ctx->lane_col32_q32_v = lane_col32;
         q32_row    = ckc_b_add(b, ctx->wave_row_base, lane_col32);
 
         if(ctx->Q_ALIAS_K)
@@ -375,9 +387,15 @@ void ckc_gfx942_attn2d_emit_q_gather(ckc_gfx942_attn2d_build_ctx_t* ctx)
             ckc_value_t* q32_col;
             ckc_value_t* q32 = NULL;
 
-            /* q32_col = k*QK_K_STEP + lane_half*Q32_HALF_STRIDE */
+            /* q32_col = k*QK_K_STEP + lane_half*Q32_HALF_STRIDE. Python evaluates
+             * the left const(k*QK_K_STEP) BEFORE the mul (left-to-right arg eval),
+             * which consumes a counter value even when it folds to a literal 0 in
+             * the output. Bind it to a temp first so C's arg-eval order matches
+             * and does not shift the mul's %value. */
+            ckc_value_t* q32_col_base =
+                ckc_b_const_i32(b, (int64_t)(k * ctx->QK_K_STEP));
             q32_col = ckc_b_add(
-                b, ckc_b_const_i32(b, (int64_t)(k * ctx->QK_K_STEP)),
+                b, q32_col_base,
                 ckc_b_mul(b, lane_half,
                           ckc_b_const_i32(b, (int64_t)Q32_HALF_STRIDE)));
 

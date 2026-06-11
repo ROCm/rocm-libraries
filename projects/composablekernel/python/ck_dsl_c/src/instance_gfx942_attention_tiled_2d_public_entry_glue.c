@@ -618,6 +618,17 @@ ckc_kernel_def_t* ckc_build_unified_attention_2d_tiled_scalar_new(
     return ckc_build_unified_attention_2d_tiled_scalar(b, spec, arch);
 }
 
+/* Public wrapper over the static spec.kernel_name() port, so the fastKV
+ * register-P build can derive the wrapped spec's base name and append its
+ * "_fastkv_regp" suffix (Python _FastKvRegisterPProxy.kernel_name). */
+ckc_status_t ckc_attention_tiled_2d_spec_kernel_name(
+    const ckc_attention_tiled_2d_spec_t* spec, char* out, size_t out_cap)
+{
+    if (spec == NULL || out == NULL)
+        return CKC_ERR_VALUE;
+    return ckc__attn2d_kernel_name(spec, out, out_cap);
+}
+
 /* ===================================================================== *
  *  build -> lower convenience.
  * ===================================================================== */

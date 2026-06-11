@@ -43,6 +43,7 @@
 #include "ckc/instance_gfx942_attention_tiled_2d_internal.h"
 #include "ckc/helper_helper_ck_dsl.helpers.attention.h"  /* ckc_apply_softcap_log2 */
 #include "ckc/helper_ck_dsl.helpers.attention.h"          /* ckc_warp_xor_reduce_sum */
+#include "ckc/helper_ck_dsl.helpers.mfma_attention.h" /* ckc_mfma_attn_mfma_32x32x16_for_dtype */
 #include "ckc/helper_helper_ck_dsl.instances.gfx942.attention_tiled_2d.h" /* _mfma_32x32_c_* */
 
 /* ===================================================================== *
@@ -187,6 +188,24 @@ static ckc_value_t* fh_mfma_16x16x16(ckc_gfx942_attn2d_build_ctx_t* ctx,
     return ckc_mfma_16x16x16_for_dtype(ctx->b, ctx->dtype, a, bv, c);
 }
 
+/* _mfma_32x32x16(b, dtype, a, bv, c): transposed-32x32 QK/PV atom dispatch. */
+static ckc_value_t* fh_mfma_32x32x16(ckc_gfx942_attn2d_build_ctx_t* ctx,
+                                     ckc_value_t* a, ckc_value_t* bv, ckc_value_t* c)
+{
+    return ckc_mfma_attn_mfma_32x32x16_for_dtype(ctx->b, ctx->dtype, a, bv, c);
+}
+
+/* _read_k8_mfma_operand(buf, k_row, k_off) for the non-fp8 path (Python 2242):
+ * b.smem_load_vN(K_lds, buf, k_row, k_off, dtype, n=8). */
+static ckc_value_t* fh_read_k8_mfma_operand(ckc_gfx942_attn2d_build_ctx_t* ctx,
+                                            ckc_value_t* buf,
+                                            ckc_value_t* k_row,
+                                            ckc_value_t* k_off)
+{
+    ckc_value_t* idx[3] = {buf, k_row, k_off};
+    return ckc_b_smem_load_vN(ctx->b, ctx->K_lds, idx, 3, ctx->dtype, 8);
+}
+
 /* _apply_softcap(b, s, softcap) == apply_softcap_log2 (line 140). */
 static ckc_value_t* fh_apply_softcap(ckc_gfx942_attn2d_build_ctx_t* ctx,
                                      ckc_value_t* s)
@@ -273,17 +292,11 @@ void ckc_gfx942_attn2d_emit_kv_body(ckc_gfx942_attn2d_build_ctx_t* ctx)
 
     ckc_value_t* tile_off = ckc_b_mul(b, ctx->kv_tile_iv, ckc_b_const_i32(b, ctx->T));
 
-    /* safe_next_tile = select(kv_tile_iv + step < tile_end, kv_tile_iv + step,
-     *                         kv_tile_iv) (lines 3767-3772; non-grouped step=1) */
-    ckc_value_t* next_tile_iv_raw =
-        ckc_b_add(b, ctx->kv_tile_iv, ckc_b_const_i32(b, ctx->GROUPED_KV2 ? 2 : 1));
-    ckc_value_t* in_range_next = ckc_b_cmp_lt(b, next_tile_iv_raw, ctx->tile_end);
-    ckc_value_t* safe_next_tile =
-        ckc_b_select(b, in_range_next, next_tile_iv_raw, ctx->kv_tile_iv);
-    (void)safe_next_tile;
-
-    /* GROUPED_KV2 second-tile index (lines 3723-3726); NULL on the default path. */
+    /* GROUPED_KV2 second-tile index + tile_off_g1 (Python 3723-3729). Python
+     * emits this block BEFORE the st_*_iter mask hoist and BEFORE next_tile_iv,
+     * so keep that order for SSA value numbering. NULL on the default path. */
     ckc_value_t* safe_tile1 = NULL;
+    ckc_value_t* tile_off_g1 = NULL;
     if (ctx->GROUPED_KV2)
     {
         ckc_value_t* tile1_iv_raw =
@@ -292,7 +305,56 @@ void ckc_gfx942_attn2d_emit_kv_body(ckc_gfx942_attn2d_build_ctx_t* ctx)
             ckc_b_cmp_lt(b, tile1_iv_raw, ctx->tile_end);
         safe_tile1 =
             ckc_b_select(b, tile1_in_range, tile1_iv_raw, ctx->kv_tile_iv);
+        tile_off_g1 = ckc_b_add(b, tile_off, ckc_b_const_i32(b, ctx->T));
     }
+
+    /* Transposed-32x32 mask-once iter-scoped invariant hoist (Python 2523-2549).
+     * Fires only on the TRANSPOSED_QK_32X32 + TRANSPOSED_MASK_ONCE path; emitted
+     * here (before next_tile_iv_raw) to match Python's value order. The transposed
+     * softmax below reads st_*_iter through these locals. */
+    ckc_value_t* st_qp_iter = NULL;
+    ckc_value_t* st_row_ok_iter = NULL;
+    ckc_value_t* st_causal_lim_iter = NULL;
+    ckc_value_t* st_alibi_slope_iter = NULL;
+    if (ctx->USE_MFMA_32X32 && ctx->TRANSPOSED_QK_32X32 && ctx->TRANSPOSED_MASK_ONCE)
+    {
+        ckc_value_t* st_q_row_iter =
+            ckc_b_add(b, ctx->wave_row_base, ckc__mfma_32x32_c_col(b, ctx->lane, 0));
+        st_qp_iter = ckc_b_add(
+            b, ctx->qb_start_pos,
+            ckc_b_div(b, st_q_row_iter, ckc_b_const_i32(b, ctx->NQK)));
+        /* st_qh_iter = kv_head_idx*NQK + st_q_row_iter%NQK. Python evaluates the
+         * left mul BEFORE the right mod; bind sub-exprs in source order so C's
+         * unspecified arg-eval order does not swap the value numbers. */
+        ckc_value_t* st_qh_mul =
+            ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, ctx->NQK));
+        ckc_value_t* st_qh_mod =
+            ckc_b_mod(b, st_q_row_iter, ckc_b_const_i32(b, ctx->NQK));
+        ckc_value_t* st_qh_iter = ckc_b_add(b, st_qh_mul, st_qh_mod);
+        /* row_ok = land(qp<cur_batch_q_len, qh<NUM_QH); qp cmp emitted first. */
+        ckc_value_t* st_ok_qp = ckc_b_cmp_lt(b, st_qp_iter, ctx->cur_batch_q_len);
+        ckc_value_t* st_ok_qh =
+            ckc_b_cmp_lt(b, st_qh_iter, ckc_b_const_i32(b, ctx->NUM_QH));
+        st_row_ok_iter = ckc_b_land(b, st_ok_qp, st_ok_qh);
+        st_causal_lim_iter = ckc_b_add(b, ctx->context_len, st_qp_iter);
+        if (ctx->USE_ALIBI)
+        {
+            ckc_value_t* st_qh_iter_ok =
+                ckc_b_cmp_lt(b, st_qh_iter, ckc_b_const_i32(b, ctx->NUM_QH));
+            st_alibi_slope_iter = ckc_b_masked_global_load(
+                b, ctx->alibi_slopes_ptr, st_qh_iter, st_qh_iter_ok,
+                ckc_b_const_f32(b, 0.0), ckc_f32(), 4);
+        }
+    }
+
+    /* safe_next_tile = select(kv_tile_iv + step < tile_end, kv_tile_iv + step,
+     *                         kv_tile_iv) (lines 3767-3772; non-grouped step=1) */
+    ckc_value_t* next_tile_iv_raw =
+        ckc_b_add(b, ctx->kv_tile_iv, ckc_b_const_i32(b, ctx->GROUPED_KV2 ? 2 : 1));
+    ckc_value_t* in_range_next = ckc_b_cmp_lt(b, next_tile_iv_raw, ctx->tile_end);
+    ckc_value_t* safe_next_tile =
+        ckc_b_select(b, in_range_next, next_tile_iv_raw, ctx->kv_tile_iv);
+    (void)safe_next_tile;
 
     /* softmax-derived state forwarded to the PV bucket (filled by the narrow
      * path below; alpha/new_l/m_new per softmax state slot). */
@@ -306,29 +368,270 @@ void ckc_gfx942_attn2d_emit_kv_body(ckc_gfx942_attn2d_build_ctx_t* ctx)
         m_new_out[_i] = NULL;
     }
 
+    /* PT32 register groups for the transposed register-P PV (Python PT32_groups,
+     * 2858-2873). Flat [p_tile * 16 + reg] per group; group 0 = current tile,
+     * group 1 = GROUPED_KV2 second tile. Filled by the transposed QK/softmax
+     * branch and threaded into the PV bucket. The PV side indexes
+     * p_regs[p_tile * REGS_PER_LANE + reg] (REGS_PER_LANE == 16 here). */
+    ckc_value_t* pt32_g0[CKC_GFX942_ATTN2D_MAX_N_TILES * 16];
+    ckc_value_t* pt32_g1[CKC_GFX942_ATTN2D_MAX_N_TILES * 16];
+    for (int _i = 0; _i < CKC_GFX942_ATTN2D_MAX_N_TILES * 16; ++_i)
+    {
+        pt32_g0[_i] = NULL;
+        pt32_g1[_i] = NULL;
+    }
+    bool transposed_path = (ctx->USE_MFMA_32X32 && ctx->TRANSPOSED_QK_32X32);
+
     /* ---- wait for current K + LDS barrier (lines 3776-3777) ---- */
     ckc_b_s_waitcnt(b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);
     ckc_b_sync(b);
 
-    /* The EARLY_V_SCHEDULE / GROUPED_KV2 prefetch issues (lines 3778-3787) call
-     * peer K/V loaders; they are scheduling glue the back-half owns alongside the
-     * post-QK V/K issue. Left to the peer to keep a single issue site. */
+    /* EARLY_V_SCHEDULE / GROUPED_KV2 iter-start prefetch (Python 2566-2575).
+     * EARLY_V: issue current V before QK. GROUPED_KV2: while QK0 reads cur_buf,
+     * prefetch QK1's K tile into nxt_buf. */
+    if (ctx->EARLY_V_SCHEDULE)
+    {
+        ckc_gfx942_attn2d_issue_v(ctx, ctx->kv_tile_iv, ctx->cur_buf);
+    }
+    if (ctx->GROUPED_KV2)
+    {
+        ckc_gfx942_attn2d_issue_k(ctx, safe_tile1, ctx->nxt_buf_v);
+    }
 
     /* ============================================================ *
      *  S = Q @ K^T
      * ============================================================ */
-    if (ctx->USE_MFMA_32X32)
+    if (ctx->USE_MFMA_32X32 && ctx->TRANSPOSED_QK_32X32)
     {
-        /* The 32x32 / transposed-32x32 / grouped-KV2 score-tile + softmax spans
-         * (lines 3820-4234, 3968-4206) are long and gated by ctx flags that the
-         * default gfx942 narrow build never sets. They are the peer back-half's
-         * to complete; stubbed here so the narrow path links and stays faithful.
-         * TODO(peer): port lines 3820-4234 (S32/ST32 tiles + transposed softmax). */
-        (void)lane_col32;
+        /* ============================================================ *
+         *  Transposed-score QK: S^T = K @ Q^T (Python 2611-2666)
+         *
+         *  A = K tile rows (KV tokens), B = Q rows (queries). C tile:
+         *  row = KV position in tile, col = query row in warp's 32-row Q tile.
+         *  Consumes Q32_reg (ctx->q32_regs), NOT Q_lds (Q_ALIAS_K race).
+         * ============================================================ */
+        /* Python reassigned lane_col32 in the Q32 gather (gfx950 2329); the
+         * transposed QK reads that value for k_row_t, not the prologue one. */
+        ckc_value_t* lane_col32_qk = (ctx->lane_col32_q32_v != NULL)
+                                         ? ctx->lane_col32_q32_v
+                                         : lane_col32;
+        ckc_value_t* ST32_n[CKC_GFX942_ATTN2D_MAX_N_TILES];
+        ckc_value_t* ST32_n_g1[CKC_GFX942_ATTN2D_MAX_N_TILES];
+        for (int n = 0; n < QK_N_TILES; ++n)
+        {
+            ckc_value_t* acc32 = ckc_b_zero_vec_f32(b, 16);
+            ckc_value_t* k_row_t =
+                ckc_b_add(b, ckc_b_const_i32(b, n * 32), lane_col32_qk);
+            for (int k = 0; k < QK_K_ITERS; ++k)
+            {
+                /* Python emits const(k*16) before the mul (left-to-right); bind
+                 * it first so C arg-eval order keeps the value numbering. */
+                ckc_value_t* k_off_base = ckc_b_const_i32(b, k * 16);
+                ckc_value_t* k_off_t = ckc_b_add(
+                    b, k_off_base,
+                    ckc_b_mul(b, lane_half, ckc_b_const_i32(b, 8)));
+                ckc_value_t* A_k_t =
+                    fh_read_k8_mfma_operand(ctx, ctx->cur_buf, k_row_t, k_off_t);
+                ckc_value_t* B_q_t = ctx->q32_regs[k];
+                acc32 = fh_mfma_32x32x16(ctx, A_k_t, B_q_t, acc32);
+            }
+            ST32_n[n] = acc32;
+        }
+        if (ctx->GROUPED_KV2)
+        {
+            /* Second score tile for grouped online-softmax (Python 2651-2666). */
+            ckc_b_s_waitcnt(b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);
+            ckc_b_sync(b);
+            for (int n = 0; n < QK_N_TILES; ++n)
+            {
+                ckc_value_t* acc32 = ckc_b_zero_vec_f32(b, 16);
+                ckc_value_t* k_row_t =
+                    ckc_b_add(b, ckc_b_const_i32(b, n * 32), lane_col32_qk);
+                for (int k = 0; k < QK_K_ITERS; ++k)
+                {
+                    /* const(k*16) bound before the mul (left-to-right). */
+                    ckc_value_t* k_off_base = ckc_b_const_i32(b, k * 16);
+                    ckc_value_t* k_off_t = ckc_b_add(
+                        b, k_off_base,
+                        ckc_b_mul(b, lane_half, ckc_b_const_i32(b, 8)));
+                    ckc_value_t* A_k_t = fh_read_k8_mfma_operand(
+                        ctx, ctx->nxt_buf_v, k_row_t, k_off_t);
+                    ckc_value_t* B_q_t = ctx->q32_regs[k];
+                    acc32 = fh_mfma_32x32x16(ctx, A_k_t, B_q_t, acc32);
+                }
+                ST32_n_g1[n] = acc32;
+            }
+        }
+
+        /* ============================================================ *
+         *  Transposed softmax (Python 2667-2899).
+         *
+         *  Config family: TRANSPOSED_MASK_LIMIT=False, INVARIANT_HOIST=False,
+         *  MASK_ONCE=True. Per-element mask via st_*_iter (the else branch of the
+         *  Python mask switch). skip_mask is always False here.
+         * ============================================================ */
+        ckc_value_t* st_local_max = neg_inf;
+        /* st_scores[group][n][reg] (group 0/1). */
+        ckc_value_t* st_scores0[CKC_GFX942_ATTN2D_MAX_N_TILES][16];
+        ckc_value_t* st_scores1[CKC_GFX942_ATTN2D_MAX_N_TILES][16];
+        int n_groups = ctx->GROUPED_KV2 ? 2 : 1;
+        for (int group_idx = 0; group_idx < n_groups; ++group_idx)
+        {
+            ckc_value_t* const* st_regs = (group_idx == 0) ? ST32_n : ST32_n_g1;
+            ckc_value_t* group_tile_off =
+                (group_idx == 0) ? tile_off : tile_off_g1;
+            for (int n = 0; n < QK_N_TILES; ++n)
+            {
+                for (int reg = 0; reg < 16; ++reg)
+                {
+                    /* else branch (non-mask-limit): per-element mask.
+                     * Python emits const(n*32) before _mfma_32x32_c_row (left-to-
+                     * right); bind it first to keep the value numbering. */
+                    ckc_value_t* k_local_base = ckc_b_const_i32(b, n * 32);
+                    ckc_value_t* k_local = ckc_b_add(
+                        b, k_local_base,
+                        ckc__mfma_32x32_c_row(b, ctx->lane, reg));
+                    ckc_value_t* row_ok = st_row_ok_iter;
+                    ckc_value_t* causal_lim = st_causal_lim_iter;
+                    ckc_value_t* col_abs = ckc_b_add(b, group_tile_off, k_local);
+                    ckc_value_t* causal_ok = ckc_b_cmp_le(b, col_abs, causal_lim);
+                    ckc_value_t* in_prefix =
+                        ckc_b_cmp_lt(b, col_abs, max_seq_prefix_len);
+                    ckc_value_t* m_ok = ckc_b_land(
+                        b, ckc_b_land(b, row_ok, causal_ok), in_prefix);
+                    if (ctx->SLIDING_WINDOW > 0)
+                    {
+                        ckc_value_t* dist = ckc_b_sub(b, causal_lim, col_abs);
+                        m_ok = ckc_b_land(
+                            b, m_ok, ckc_b_cmp_lt(b, dist, sw_const));
+                    }
+                    ckc_value_t* s_raw = ckc_b_vec_extract(b, st_regs[n], reg);
+                    ckc_value_t* s_scaled = ckc_b_fmul(b, s_raw, qk_scale);
+                    if (ctx->USE_SOFTCAP)
+                    {
+                        s_scaled = ckc_b_fmul(
+                            b, fh_apply_softcap(ctx, s_scaled), rcp_ln2);
+                    }
+                    ckc_value_t* score = ckc_b_select(b, m_ok, s_scaled, neg_inf);
+                    if (ctx->USE_ALIBI)
+                    {
+                        /* slope * (col_abs - context_len) * RCP_LN2 (2825-2829). */
+                        ckc_value_t* pos_off =
+                            ckc_b_sub(b, col_abs, ctx->context_len);
+                        ckc_value_t* pos_f = ckc_b_sitofp_f32(b, pos_off);
+                        ckc_value_t* add_term = ckc_b_fmul(
+                            b, ckc_b_fmul(b, st_alibi_slope_iter, pos_f), rcp_ln2);
+                        score = ckc_b_fadd(b, score, add_term);
+                    }
+                    if (ctx->USE_QQ_BIAS)
+                    {
+                        /* qq_bias[qp_r, col_abs - context_len] (2831-2851). */
+                        ckc_value_t* krp = ckc_b_sub(b, col_abs, ctx->context_len);
+                        ckc_value_t* krp_ok = ckc_b_land(
+                            b, ckc_b_cmp_ge(b, krp, ckc_b_const_i32(b, 0)),
+                            ckc_b_cmp_lt(b, krp, ctx->qq_bias_stride0_p));
+                        ckc_value_t* qq_ok = ckc_b_land(b, row_ok, krp_ok);
+                        ckc_value_t* qp_safe = ckc_b_select(
+                            b, row_ok, st_qp_iter, ckc_b_const_i32(b, 0));
+                        ckc_value_t* qq_idx = ckc_b_add(
+                            b, ckc_b_mul(b, qp_safe, ctx->qq_bias_stride0_p), krp);
+                        ckc_value_t* qq_v = ckc_b_masked_global_load(
+                            b, ctx->qq_bias_ptr, qq_idx, qq_ok,
+                            ckc_b_const_f32(b, 0.0), ckc_f32(), 4);
+                        score = ckc_b_fadd(
+                            b, score, ckc_b_fmul(b, qq_v, rcp_ln2));
+                    }
+                    if (group_idx == 0)
+                        st_scores0[n][reg] = score;
+                    else
+                        st_scores1[n][reg] = score;
+                    st_local_max = ckc_b_fmax(b, st_local_max, score);
+                }
+            }
+        }
+        /* cross-half max exchange + online max (Python 2853-2858). */
+        ckc_value_t* st_remote_max =
+            ckc_b_warp_shuffle_xor(b, st_local_max, 32);
+        ckc_value_t* st_tile_max = ckc_b_fmax(b, st_local_max, st_remote_max);
+        ckc_value_t* st_m_raw = ckc_b_fmax(b, ctx->m_cur[0], st_tile_max);
+        ckc_value_t* st_ok = ckc_b_fcmp(b, "ogt", st_m_raw, neg_inf);
+        ckc_value_t* st_m_new = ckc_b_select(b, st_ok, st_m_raw, zero_f);
+
+        /* PT32_groups build + l_local (Python 2858-2873). */
+        ckc_value_t* st_l_local = zero_f;
+        for (int group_idx = 0; group_idx < n_groups; ++group_idx)
+        {
+            ckc_value_t** pt32 = (group_idx == 0) ? pt32_g0 : pt32_g1;
+            for (int n = 0; n < QK_N_TILES; ++n)
+            {
+                for (int reg = 0; reg < 16; ++reg)
+                {
+                    ckc_value_t* score = (group_idx == 0) ? st_scores0[n][reg]
+                                                          : st_scores1[n][reg];
+                    ckc_value_t* p_t =
+                        ckc_b_exp2(b, ckc_b_fsub(b, score, st_m_new));
+                    pt32[n * 16 + reg] = p_t;
+                    st_l_local = ckc_b_fadd(b, st_l_local, p_t);
+                }
+            }
+        }
+        /* l_sum = l_local + lane^32 (Python 2876-2877). */
+        ckc_value_t* st_l_remote =
+            ckc_b_warp_shuffle_xor(b, st_l_local, 32);
+        ckc_value_t* st_l_sum = ckc_b_fadd(b, st_l_local, st_l_remote);
+
+        /* m_new / l_local broadcast across SOFTMAX_STATE_SLOTS (Python 2885-2886);
+         * stored to ctx scratch so the downstream alpha/L block reads them. */
+        ckc_value_t* m_new[CKC_GFX942_ATTN2D_MAX_REGS_PER_LANE];
+        ckc_value_t* l_local[CKC_GFX942_ATTN2D_MAX_REGS_PER_LANE];
+        for (int r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
+        {
+            m_new[r] = st_m_new;
+            l_local[r] = st_l_sum;
+        }
+
+        /* ============================================================ *
+         *  post-QK V/K issue (Python 2962-2974). For the transposed path this
+         *  happens AFTER the softmax above (matches Python ordering).
+         * ============================================================ */
+        ckc_value_t* cur_buf = ctx->cur_buf;
+        ckc_value_t* nxt_buf = ctx->nxt_buf_v;
+        if (ctx->GROUPED_KV2)
+        {
+            ckc_gfx942_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
+            ckc_gfx942_attn2d_issue_k(ctx, safe_next_tile, cur_buf);
+        }
+        else if (ctx->EARLY_V_SCHEDULE)
+        {
+            ckc_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
+        }
+        else
+        {
+            ckc_gfx942_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
+            ckc_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
+        }
+
+        /* ============================================================ *
+         *  alpha + running-L update (Python 3171-3181). Shared form; the
+         *  transposed path threads broadcast m_new/l_local. Two-pass order.
+         * ============================================================ */
+        for (int r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
+            alpha_regs[r] =
+                ckc_b_exp2(b, ckc_b_fsub(b, ctx->m_cur[r], m_new[r]));
+        for (int r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
+        {
+            new_l_vals[r] = ckc_b_fadd(
+                b, ckc_b_fmul(b, ctx->l_cur[r], alpha_regs[r]), l_local[r]);
+            m_new_out[r] = m_new[r];
+        }
+    }
+    else if (ctx->USE_MFMA_32X32)
+    {
+        /* Non-transposed 32x32 QK/softmax (Python 2898-2914 + 2989-3168). Not
+         * exercised by the fastkv register-P configs; kept stubbed structurally. */
         (void)fh_warp_xor_reduce_max_32lane;
         (void)fh_warp_xor_reduce_sum_32lane;
         (void)ckc__mfma_32x32_c_row;
-        (void)ckc__mfma_32x32_c_col;
     }
     else
     {
@@ -596,9 +899,9 @@ void ckc_gfx942_attn2d_emit_kv_body(ckc_gfx942_attn2d_build_ctx_t* ctx)
      *  gated by their ctx flags; the default narrow path takes the partial wait.
      * ============================================================ */
     {
-        /* kv_calls_per_tile = (T*HD) / (THREADS * (ASYNC_LDS_MAX_BYTES_PER_LANE/2))
-         * (Python prologue 2177-2287; compile-time geometry). */
-        int kv_halves_per_lane = ctx->ASYNC_LDS_MAX_BYTES_PER_LANE / 2;
+        /* kv_calls_per_tile = (T*HD) / (THREADS * KV_DMA_HALVES_PER_LANE) (Python
+         * prologue 2177-2181 gfx942 / 1413-1415 gfx950; compile-time geometry). */
+        int kv_halves_per_lane = ctx->KV_DMA_HALVES_PER_LANE;
         int kv_calls_per_tile =
             (ctx->T * ctx->HD) / (ctx->THREADS * kv_halves_per_lane);
         if (ctx->GROUPED_KV2 || ctx->KV_FP8)
@@ -644,6 +947,14 @@ void ckc_gfx942_attn2d_emit_kv_body(ckc_gfx942_attn2d_build_ctx_t* ctx)
         pv_in.alpha_count = SOFTMAX_STATE_SLOTS;
         pv_in.new_l_vals = new_l_vals;
         pv_in.m_new = m_new_out;
+        if (transposed_path)
+        {
+            /* Register-P^T groups built by the transposed softmax above. The PV
+             * bucket consumes pt32_g0 (and pt32_g1 under GROUPED_KV2) directly. */
+            pv_in.pt32_g0 = pt32_g0;
+            pv_in.pt32_g1 = pt32_g1;
+            pv_in.pt32_count = QK_N_TILES * 16;
+        }
         pv_in.cur_buf = ctx->cur_buf;
         /* Reuse the body-front nxt_buf (Python computes it once at body top). */
         pv_in.nxt_buf =

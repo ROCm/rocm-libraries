@@ -42,7 +42,8 @@
 
 #include "ckc/ir_internal.h" /* ckc_i_set_err (sticky-error helper) */
 
-#include <stdio.h>  /* snprintf */
+#include <stdarg.h> /* va_list (interpolated reject reasons) */
+#include <stdio.h>  /* snprintf / vsnprintf */
 #include <string.h> /* strcmp */
 
 /* ------------------------------------------------------------------ *
@@ -508,13 +509,16 @@ ckc_deep_fused_conv_pool_spec_t ckc_make_deep_fused_conv_pool_spec(
 /* ------------------------------------------------------------------ *
  * is_valid_spec (lines 286-356)
  * ------------------------------------------------------------------ */
-static bool reject(char* reason, size_t cap, const char* fmt)
+/* printf-style so the reason string is byte-identical to the Python
+ * ValueError f-strings (which interpolate K / tile_n / pool dims / etc.). */
+static bool reject(char* reason, size_t cap, const char* fmt, ...)
 {
     if (reason != NULL && cap > 0)
     {
-        /* Best-effort fixed message; the structured Python f-strings only ever
-         * surface as ValueError text and never enter the IR. */
-        snprintf(reason, cap, "%s", fmt);
+        va_list ap;
+        va_start(ap, fmt);
+        vsnprintf(reason, cap, fmt, ap);
+        va_end(ap);
     }
     return false;
 }
@@ -570,7 +574,8 @@ bool ckc_deep_fused_conv_pool_is_valid_spec(
           strcmp(spec->pipeline, "compv3") == 0 ||
           strcmp(spec->pipeline, "compv4") == 0))
     {
-        return reject(reason, reason_cap, "unsupported pipeline");
+        return reject(reason, reason_cap, "unsupported pipeline '%s'",
+                      spec->pipeline);
     }
     if (spec->async_dma &&
         (spec->cache_input_footprint || spec->direct_conv0_from_input_cache))
@@ -595,7 +600,7 @@ bool ckc_deep_fused_conv_pool_is_valid_spec(
     if (c->N != 1)
     {
         return reject(reason, reason_cap,
-                      "v1 tiled schedule supports only N=1");
+                      "v1 tiled schedule supports only N=1 (got N=%d)", c->N);
     }
     if (spec->pool_tile_h <= 0 || spec->pool_tile_w <= 0)
     {
@@ -607,23 +612,31 @@ bool ckc_deep_fused_conv_pool_is_valid_spec(
     if (spec->tile_m != conv_tile_h * conv_tile_w)
     {
         return reject(reason, reason_cap,
-                      "tile_m must equal rectangular conv tile");
+                      "tile_m=%d must equal rectangular conv tile %dx%d=%d",
+                      spec->tile_m, conv_tile_h, conv_tile_w,
+                      conv_tile_h * conv_tile_w);
     }
     if ((pool_ho % spec->pool_tile_h) || (pool_wo % spec->pool_tile_w))
     {
         return reject(reason, reason_cap,
-                      "v1 requires pool dims divisible by pool tile");
+                      "v1 requires pool dims (%d, %d) divisible by "
+                      "pool tile (%d, %d)",
+                      pool_ho, pool_wo, spec->pool_tile_h, spec->pool_tile_w);
     }
     if (c->K > spec->tile_n)
     {
         return reject(reason, reason_cap,
-                      "v1 requires one CTA to own all conv channels");
+                      "v1 requires one CTA to own all conv channels: "
+                      "K=%d > tile_n=%d",
+                      c->K, spec->tile_n);
     }
     conv1_channels = ckc_fused_conv_pool_problem_conv1_channels(p);
     if (conv1_channels > spec->tile_n)
     {
         return reject(reason, reason_cap,
-                      "v1 requires one CTA to own all conv1 channels");
+                      "v1 requires one CTA to own all conv1 channels: "
+                      "K1=%d > tile_n=%d",
+                      conv1_channels, spec->tile_n);
     }
     if (c->K % 8)
     {
@@ -643,7 +656,8 @@ bool ckc_deep_fused_conv_pool_is_valid_spec(
     conv1_tile_k = ckc_deep_fused_conv_pool_spec_effective_conv1_tile_k(spec);
     if (conv1_tile_k <= 0)
     {
-        return reject(reason, reason_cap, "conv1_tile_k must be positive");
+        return reject(reason, reason_cap,
+                      "conv1_tile_k must be positive (got %d)", conv1_tile_k);
     }
     if (conv1_tile_k % spec->warp_tile_k)
     {

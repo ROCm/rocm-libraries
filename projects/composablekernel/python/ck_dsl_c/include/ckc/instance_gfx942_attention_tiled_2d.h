@@ -153,6 +153,13 @@ ckc_kernel_def_t* ckc_build_unified_attention_2d_tiled_scalar(
 ckc_kernel_def_t* ckc_build_unified_attention_2d_tiled_scalar_new(
     ckc_ir_builder_t* b, const ckc_attention_tiled_2d_spec_t* spec, const char* arch);
 
+/* UnifiedAttention2DTiledSpec.kernel_name() (Python lines 827-885). Writes the
+ * NUL-terminated kernel name into ``out`` (capacity ``out_cap``). Returns
+ * CKC_ERR_VALUE on NULL args or insufficient capacity. */
+ckc_status_t ckc_attention_tiled_2d_spec_kernel_name(const ckc_attention_tiled_2d_spec_t* spec,
+                                                     char* out,
+                                                     size_t out_cap);
+
 /* Convenience: given a spec, init a builder, build, and lower to LLVM .ll text.
  * ``arch`` NULL == "gfx942". On CKC_OK *out_ll receives a malloc'd
  * NUL-terminated string the caller frees with free(); on failure it is left NULL

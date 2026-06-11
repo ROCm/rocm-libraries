@@ -221,17 +221,26 @@ void ckc_dfcp_emit_inline_maxpool_from_cshuffle(
         }
         for (yy = 0; yy < 2; ++yy)
         {
-            ckc_value_t* local_conv_h = ckc_b_add(
-                b, ckc_b_mul(b, local_pho, ckc_b_const_i32(b, 2)),
-                ckc_b_const_i32(b, yy));
+            /* local_conv_h = b.add(b.mul(local_pho, b.const_i32(2)),
+             *                      b.const_i32(yy))
+             * Python evaluates the add's args left-to-right (the mul, with its
+             * const 2, emits BEFORE const(yy)); for yy==0 const(0) is still
+             * emitted and DCE'd. C call-arg order is unspecified (GCC:
+             * right-to-left); hoist the mul into a temp to pin source-order. */
+            ckc_value_t* lch_mul = ckc_b_mul(b, local_pho, ckc_b_const_i32(b, 2));
+            ckc_value_t* local_conv_h =
+                ckc_b_add(b, lch_mul, ckc_b_const_i32(b, yy));
             int xx;
             for (xx = 0; xx < 2; ++xx)
             {
-                ckc_value_t* local_conv_w = ckc_b_add(
-                    b, ckc_b_mul(b, local_pwo, ckc_b_const_i32(b, 2)),
-                    ckc_b_const_i32(b, xx));
-                ckc_value_t* conv_m_local = ckc_b_add(
-                    b, ckc_b_mul(b, local_conv_h, c_conv_tile_w), local_conv_w);
+                ckc_value_t* lcw_mul =
+                    ckc_b_mul(b, local_pwo, ckc_b_const_i32(b, 2));
+                ckc_value_t* local_conv_w =
+                    ckc_b_add(b, lcw_mul, ckc_b_const_i32(b, xx));
+                ckc_value_t* cml_mul =
+                    ckc_b_mul(b, local_conv_h, c_conv_tile_w);
+                ckc_value_t* conv_m_local =
+                    ckc_b_add(b, cml_mul, local_conv_w);
                 ckc_value_t* idx[2];
                 ckc_value_t* v_vec;
                 idx[0] = conv_m_local;

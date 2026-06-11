@@ -117,8 +117,8 @@ ckc_status_t ckc_unpack_i4_byte_to_pair_f32(ckc_ir_builder_t* b,
 {
     ckc_value_t* low_i32;
     ckc_value_t* high_i32;
-    ckc_value_t* low_f32;
-    ckc_value_t* high_f32;
+    ckc_value_t* low_f32 = NULL;
+    ckc_value_t* high_f32 = NULL;
     ckc_status_t st;
 
     if (!ckc_i_live(b))
@@ -159,8 +159,8 @@ ckc_status_t ckc_unpack_i4_byte_to_pair_f16(ckc_ir_builder_t* b,
                                             ckc_value_t** out_low,
                                             ckc_value_t** out_high)
 {
-    ckc_value_t* low_f32;
-    ckc_value_t* high_f32;
+    ckc_value_t* low_f32 = NULL;
+    ckc_value_t* high_f32 = NULL;
     ckc_value_t* low_f16;
     ckc_value_t* high_f16;
     ckc_status_t st;
@@ -204,8 +204,8 @@ ckc_status_t ckc_dequant_i4_byte_to_f16_pair(ckc_ir_builder_t* b,
                                              ckc_value_t** out_low,
                                              ckc_value_t** out_high)
 {
-    ckc_value_t* low_f32;
-    ckc_value_t* high_f32;
+    ckc_value_t* low_f32 = NULL;
+    ckc_value_t* high_f32 = NULL;
     ckc_value_t* low_f16;
     ckc_value_t* high_f16;
     ckc_status_t st;

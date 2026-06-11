@@ -145,6 +145,12 @@ typedef struct ckc_gfx942_attn2d_build_ctx
     /* threads / wave / async-DMA width (lines 1282-1320) */
     int NUM_WARPS, WAVE, THREADS;
     int ASYNC_LDS_MAX_DWORDS, ASYNC_LDS_MAX_BYTES_PER_LANE;
+    /* K/V async-DMA payload width. gfx942 uses dwords=1 (4 bytes/lane = 2 bf16
+     * halves); gfx950 (wide ds_read_tr path) uses dwords=4 (16 bytes/lane = 8
+     * bf16 halves). KV_DMA_HALVES_PER_LANE drives lane_half_base / per-call /
+     * wave-byte stride; KV_DMA_DWORDS is the async_buffer_load_lds_addr dwords
+     * arg. Distinct from ASYNC_LDS_MAX_* which still drives the V swizzle. */
+    int KV_DMA_HALVES_PER_LANE, KV_DMA_DWORDS;
     int BLOCK_M_PER_WARP, M_ATOMS_PER_WARP, REGS_PER_LANE, SOFTMAX_STATE_SLOTS;
 
     /* ---- kernel name + attrs (lines 1321-1327) ---- */
@@ -239,6 +245,16 @@ typedef struct ckc_gfx942_attn2d_build_ctx
     ckc_value_t* lane_col_v;
     ckc_value_t* lane_half32_v;
     ckc_value_t* lane_col32_v;
+    /* The Q32 gather RE-EMITS lane_col32 = lane%32 (Python gfx950 2329), which
+     * shadows the prologue lane_col32 for the rest of the function. The
+     * transposed QK reads THIS value (not the prologue one) for k_row_t. */
+    ckc_value_t* lane_col32_q32_v;
+    /* Transposed PV: Python emits v_buf = const_i32(0) + use_hi = cmp_eq(
+     * lane_half32, 1) ONCE before the acc-scaling loop (gfx950 3231-3232), then
+     * _apply_transposed_pv_regs reuses them. Cache here so the C PV bucket emits
+     * them in the same place and the per-n apply calls reuse the same SSA. */
+    ckc_value_t* pv_v_buf_v;
+    ckc_value_t* pv_use_hi_v;
     ckc_value_t* lane_col_div4_v;
     ckc_value_t* lane_col_mod4_v;
     ckc_value_t* lane_rg_is0_v;

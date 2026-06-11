@@ -283,6 +283,21 @@ bool ckc_gfx942_attn2d_build_ctx_init(ckc_gfx942_attn2d_build_ctx_t* ctx,
     ctx->ASYNC_LDS_MAX_DWORDS         = ASYNC_LDS_MAX_DWORDS;
     ctx->ASYNC_LDS_MAX_BYTES_PER_LANE = ASYNC_LDS_MAX_BYTES_PER_LANE;
 
+    /* K/V async-DMA payload width. The gfx950 tiled-2D builder uses dwords=4
+     * (16 bytes/lane = 8 bf16 halves: KV_HALVES_PER_CALL = THREADS*8,
+     * lane_half_base = tid*8, WAVE_BYTES = WAVE*16); gfx942 uses dwords=1 (4
+     * bytes/lane = 2 halves). Keyed off the wide ds_read_tr path (gfx950). */
+    if(target->memory.has_ds_read_tr)
+    {
+        ctx->KV_DMA_HALVES_PER_LANE = 8;
+        ctx->KV_DMA_DWORDS          = 4;
+    }
+    else
+    {
+        ctx->KV_DMA_HALVES_PER_LANE = ASYNC_LDS_MAX_BYTES_PER_LANE / 2;
+        ctx->KV_DMA_DWORDS          = ASYNC_LDS_MAX_DWORDS;
+    }
+
     const int BLOCK_M_PER_WARP = spec->block_m_per_warp;
     const int M_ATOMS_PER_WARP = BLOCK_M_PER_WARP / 16; /* MFMA_M */
     const int REGS_PER_LANE    = ckc_attention_tiled_2d_spec_regs_per_lane(spec);

@@ -326,7 +326,7 @@ ckc_kernel_def_t* ckc_build_topk_softmax(ckc_ir_builder_t* b,
     ckc_value_t* cache_idx[CKC_TOPK_MAX_EPOT];
     ckc_value_t* picks_val[CKC_TOPK_MAX_K];
     ckc_value_t* picks_idx[CKC_TOPK_MAX_K];
-    ckc_value_t* exps[CKC_TOPK_MAX_K];
+    ckc_value_t* exps[CKC_TOPK_MAX_K] = {0};
 
     ckc_value_t* lds_red    = NULL;
     ckc_value_t* lds_winner = NULL;

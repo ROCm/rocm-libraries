@@ -142,28 +142,38 @@ static ckc_value_t* ckc_pv32_v_load_paired(ckc_ir_builder_t* b,
                                            ckc_value_t* lane_col32,
                                            const ckc_type_t* dtype)
 {
-    /* col_group16 = (lane_col32 / 16) * 16 */
-    ckc_value_t* col_group16 =
-        ckc_b_mul(b, ckc_b_div(b, lane_col32, ckc_b_const_i32(b, 16)),
-                  ckc_b_const_i32(b, 16));
-    /* tr_col32 = col_group16 + (lane_col32 % 4) * 4 */
-    ckc_value_t* tr_col32 = ckc_b_add(
-        b, col_group16,
-        ckc_b_mul(b, ckc_b_mod(b, lane_col32, ckc_b_const_i32(b, 4)),
-                  ckc_b_const_i32(b, 4)));
-    /* tr_row_base32 = k*16 + lane_half32*4 + ((lane_col32 / 4) % 4) */
-    ckc_value_t* tr_row_base32 = ckc_b_add(
-        b,
-        ckc_b_add(b, ckc_b_const_i32(b, k * 16),
-                  ckc_b_mul(b, lane_half32, ckc_b_const_i32(b, 4))),
-        ckc_b_mod(b, ckc_b_div(b, lane_col32, ckc_b_const_i32(b, 4)),
-                  ckc_b_const_i32(b, 4)));
-    ckc_value_t* col = ckc_b_add(b, ckc_b_const_i32(b, n * 32), tr_col32);
+    /* All sub-expressions are bound in Python source (left-to-right) order so
+     * C's unspecified arg-eval order does not shuffle the SSA value numbering. */
+    /* col_group16 = (lane_col32 / 16) * 16. Python emits the div (with its const
+     * 16) BEFORE the mul's const 16; bind the div first so C's arg-eval order
+     * does not allocate the mul's const ahead of the div and shift its %value. */
+    ckc_value_t* col_div16 = ckc_b_div(b, lane_col32, ckc_b_const_i32(b, 16));
+    ckc_value_t* col_group16 = ckc_b_mul(b, col_div16, ckc_b_const_i32(b, 16));
+    /* tr_col32 = col_group16 + (lane_col32 % 4) * 4. Bind the mod before the
+     * mul's const so C arg-eval keeps Python's value order. */
+    ckc_value_t* tr_col_mod = ckc_b_mod(b, lane_col32, ckc_b_const_i32(b, 4));
+    ckc_value_t* tr_col_rhs = ckc_b_mul(b, tr_col_mod, ckc_b_const_i32(b, 4));
+    ckc_value_t* tr_col32 = ckc_b_add(b, col_group16, tr_col_rhs);
+    /* tr_row_base32 = (k*16 + lane_half32*4) + ((lane_col32 / 4) % 4). Python
+     * evaluates the inner add (const(k*16), mul(lane_half32,4)) BEFORE the mod. */
+    ckc_value_t* tr_row_k = ckc_b_const_i32(b, k * 16);
+    ckc_value_t* tr_row_inner =
+        ckc_b_add(b, tr_row_k, ckc_b_mul(b, lane_half32, ckc_b_const_i32(b, 4)));
+    ckc_value_t* tr_row_div4 = ckc_b_div(b, lane_col32, ckc_b_const_i32(b, 4));
+    ckc_value_t* tr_row_mod = ckc_b_mod(b, tr_row_div4, ckc_b_const_i32(b, 4));
+    ckc_value_t* tr_row_base32 = ckc_b_add(b, tr_row_inner, tr_row_mod);
 
-    ckc_value_t* idx0[3] = {v_buf, tr_row_base32, col};
+    /* Python computes the col = add(const(n*32), tr_col32) INLINE inside EACH
+     * ds_read call (helpers/attention.py 811-813, 818-820), so it is emitted
+     * TWICE -- once per read. Mirror that (do NOT hoist) for value numbering. */
+    ckc_value_t* col0 =
+        ckc_b_add(b, ckc_b_const_i32(b, n * 32), tr_col32);
+    ckc_value_t* idx0[3] = {v_buf, tr_row_base32, col0};
     ckc_value_t* A_r0    = ckc_b_ds_read_tr16_b64(b, V_lds, idx0, 3, dtype);
     ckc_value_t* row1    = ckc_b_add(b, tr_row_base32, ckc_b_const_i32(b, 8));
-    ckc_value_t* idx1[3] = {v_buf, row1, col};
+    ckc_value_t* col1 =
+        ckc_b_add(b, ckc_b_const_i32(b, n * 32), tr_col32);
+    ckc_value_t* idx1[3] = {v_buf, row1, col1};
     ckc_value_t* A_r1    = ckc_b_ds_read_tr16_b64(b, V_lds, idx1, 3, dtype);
     return ckc_b_vec_concat(b, A_r0, A_r1);
 }
@@ -219,12 +229,23 @@ ckc_value_t* ckc_gfx942_attn2d_apply_transposed_pv_regs(ckc_gfx942_attn2d_build_
     const int T   = ctx->T;
 
     ckc_value_t* lane_half32 = lane_half32_of(ctx);
-    ckc_value_t* lane_col32  = lane_col32_of(ctx);
-    ckc_value_t* v_buf       = ckc_b_const_i32(B, 0);
-    ckc_value_t* use_hi      = ckc_b_cmp_eq(B, lane_half32, ckc_b_const_i32(B, 1));
+    /* Python's transposed PV reads the Q32-gather-reassigned lane_col32 (gfx950
+     * 2329 / 3235), not the prologue one. Use the published value if present. */
+    ckc_value_t* lane_col32  = (ctx->lane_col32_q32_v != NULL)
+                                   ? ctx->lane_col32_q32_v
+                                   : lane_col32_of(ctx);
+    /* Reuse the v_buf / use_hi emitted ONCE by the PV bucket before the scaling
+     * loop (Python emits them once outside _apply_transposed_pv_regs, gfx950
+     * 3231-3232). Fall back to fresh values if not pre-seeded. */
+    ckc_value_t* v_buf  = (ctx->pv_v_buf_v != NULL) ? ctx->pv_v_buf_v
+                                                    : ckc_b_const_i32(B, 0);
+    ckc_value_t* use_hi = (ctx->pv_use_hi_v != NULL)
+                              ? ctx->pv_use_hi_v
+                              : ckc_b_cmp_eq(B, lane_half32, ckc_b_const_i32(B, 1));
 
-    /* v_dim32 = n*32 + lane_col32 (line 4574). */
-    ckc_value_t* v_dim32 = ckc_b_add(B, ckc_b_const_i32(B, n * 32), lane_col32);
+    /* v_dim32 = n*32 + lane_col32 (line 4574). Python emits const(n*32) first. */
+    ckc_value_t* v_dim32_base = ckc_b_const_i32(B, n * 32);
+    ckc_value_t* v_dim32 = ckc_b_add(B, v_dim32_base, lane_col32);
 
     (void)p_count;
 
@@ -340,7 +361,10 @@ ckc_value_t* ckc_gfx942_attn2d_apply_transposed_pv_regs(ckc_gfx942_attn2d_build_
             for(int kk = 0; kk < 8; ++kk)
             {
                 int k_static       = k * 16 + kk;
-                ckc_value_t* v_row = ckc_b_add(B, ckc_b_const_i32(B, k_static),
+                /* Python emits const(k_static) before the mul (left-to-right);
+                 * bind it first so C arg-eval order keeps the value numbering. */
+                ckc_value_t* v_row_base = ckc_b_const_i32(B, k_static);
+                ckc_value_t* v_row = ckc_b_add(B, v_row_base,
                                                ckc_b_mul(B, lane_half32,
                                                          ckc_b_const_i32(B, 8)));
                 ckc_value_t* idx[3] = {v_buf, v_row, v_dim32};
@@ -438,6 +462,13 @@ void ckc_gfx942_attn2d_emit_pv_bucket(ckc_gfx942_attn2d_build_ctx_t* ctx,
     {
         if(ctx->TRANSPOSED_QK_32X32)
         {
+            /* Python emits v_buf = const(0) + use_hi = cmp_eq(lane_half32, 1)
+             * ONCE here, BEFORE the acc-scaling loop (gfx950 3231-3232);
+             * _apply_transposed_pv_regs reuses them. Cache so the per-n apply
+             * calls below reuse the same SSA values. */
+            ctx->pv_v_buf_v = ckc_b_const_i32(B, 0);
+            ctx->pv_use_hi_v =
+                ckc_b_cmp_eq(B, lane_half32_of(ctx), ckc_b_const_i32(B, 1));
             for(int n = 0; n < ACC_N_TILES; ++n)
             {
                 ckc_value_t* old_acc = ckc_gfx942_attn2d_acc_get(ctx, n, 0);

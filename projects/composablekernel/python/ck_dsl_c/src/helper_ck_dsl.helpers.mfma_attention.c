@@ -688,7 +688,12 @@ ckc_status_t ckc_wmma_attention_fwd_inner_body(ckc_ir_builder_t* b,
     int c_frag = op->c_frag_len;
     int n_dk = head_size / 16;
 
-    ckc_value_t* lane = ckc_b_mod(b, ckc_b_thread_id_x(b), ckc_b_const_i32(b, wave));
+    /* Python evaluates b.mod(b.thread_id_x(), b.const_i32(wave)) left-to-right:
+     * thread_id_x is created before the wave constant. C arg eval order is
+     * unspecified (gcc is right-to-left), so hoist the operands into ordered
+     * temporaries to match the Python value-creation order exactly. */
+    ckc_value_t* tid = ckc_b_thread_id_x(b);
+    ckc_value_t* lane = ckc_b_mod(b, tid, ckc_b_const_i32(b, wave));
     ckc_value_t* c16 = ckc_b_const_i32(b, 16);
 
     ckc_value_t* a_row = NULL;
@@ -704,9 +709,12 @@ ckc_status_t ckc_wmma_attention_fwd_inner_body(ckc_ir_builder_t* b,
 
     /* ---- Pre-load Q fragments ---- */
     ckc_value_t* q_row = ckc_b_add(b, p->q_tile_base, a_row);
-    ckc_value_t* q_addr_row_base =
-        ckc_b_add(b, ckc_b_mul(b, q_row, p->stride_q_token),
-                  ckc_b_mul(b, p->head_idx, p->stride_q_head));
+    /* Python: b.add(b.mul(q_row, stride_q_token), b.mul(head_idx, stride_q_head))
+     * -- the token mul is created before the head mul (left-to-right). Hoist to
+     * fix the C arg-eval order (gcc is right-to-left). */
+    ckc_value_t* q_tok_mul = ckc_b_mul(b, q_row, p->stride_q_token);
+    ckc_value_t* q_hd_mul = ckc_b_mul(b, p->head_idx, p->stride_q_head);
+    ckc_value_t* q_addr_row_base = ckc_b_add(b, q_tok_mul, q_hd_mul);
     ckc_value_t* q_frags[CKC_ATTN_MAX_ATOMS];
     for (int d = 0; d < n_dk; ++d)
     {
@@ -793,11 +801,12 @@ ckc_status_t ckc_wmma_attention_fwd_inner_body(ckc_ir_builder_t* b,
         }
         else
         {
-            k_addr_row_base =
-                ckc_b_add(b,
-                          ckc_b_add(b, ckc_b_mul(b, k_row_for_lane, p->stride_k_token),
-                                    ckc_b_mul(b, p->kv_head_idx, p->stride_k_head)),
-                          k_off);
+            /* Python: add(add(mul(k_row_for_lane, stride_k_token),
+             *               mul(kv_head_idx, stride_k_head)), k_off)
+             * -- token mul created before head mul. Hoist for arg-eval order. */
+            ckc_value_t* k_tok_mul = ckc_b_mul(b, k_row_for_lane, p->stride_k_token);
+            ckc_value_t* k_hd_mul = ckc_b_mul(b, p->kv_head_idx, p->stride_k_head);
+            k_addr_row_base = ckc_b_add(b, ckc_b_add(b, k_tok_mul, k_hd_mul), k_off);
         }
 
         /* ---- QK^T WMMA chain ---- */
@@ -865,11 +874,10 @@ ckc_status_t ckc_wmma_attention_fwd_inner_body(ckc_ir_builder_t* b,
             }
             else
             {
-                v_stage_base =
-                    ckc_b_add(b,
-                              ckc_b_add(b, ckc_b_mul(b, v_stage_row, p->stride_v_token),
-                                        ckc_b_mul(b, p->kv_head_idx, p->stride_v_head)),
-                              v_off);
+                /* Python: token mul before head mul (left-to-right). */
+                ckc_value_t* vs_tok_mul = ckc_b_mul(b, v_stage_row, p->stride_v_token);
+                ckc_value_t* vs_hd_mul = ckc_b_mul(b, p->kv_head_idx, p->stride_v_head);
+                v_stage_base = ckc_b_add(b, ckc_b_add(b, vs_tok_mul, vs_hd_mul), v_off);
             }
             for (int e = 0; e < head_size / 8; ++e)
             {
@@ -926,11 +934,10 @@ ckc_status_t ckc_wmma_attention_fwd_inner_body(ckc_ir_builder_t* b,
                     }
                     else
                     {
-                        v_row_base =
-                            ckc_b_add(b,
-                                      ckc_b_add(b, ckc_b_mul(b, v_row, p->stride_v_token),
-                                                ckc_b_mul(b, p->kv_head_idx, p->stride_v_head)),
-                                      v_off);
+                        /* Python: token mul before head mul (left-to-right). */
+                        ckc_value_t* v_tok_mul = ckc_b_mul(b, v_row, p->stride_v_token);
+                        ckc_value_t* v_hd_mul = ckc_b_mul(b, p->kv_head_idx, p->stride_v_head);
+                        v_row_base = ckc_b_add(b, ckc_b_add(b, v_tok_mul, v_hd_mul), v_off);
                     }
                     v_elem = ckc_b_global_load(b, p->V, ckc_b_add(b, v_row_base, d_col), dtype_ir, 2);
                 }
@@ -983,10 +990,11 @@ ckc_status_t ckc_wmma_attention_fwd_inner_body(ckc_ir_builder_t* b,
             }
             ckc_value_t* o_row = ckc_b_add(b, p->q_tile_base, row_rel);
             ckc_value_t* o_col = ckc_b_add(b, ckc_b_const_i32(b, d * 16), col_n);
-            ckc_value_t* o_addr = ckc_b_add(
-                b, ckc_b_add(b, ckc_b_mul(b, o_row, p->stride_o_token),
-                             ckc_b_mul(b, p->head_idx, p->stride_o_head)),
-                o_col);
+            /* Python: token mul before head mul (left-to-right). */
+            ckc_value_t* o_tok_mul = ckc_b_mul(b, o_row, p->stride_o_token);
+            ckc_value_t* o_hd_mul = ckc_b_mul(b, p->head_idx, p->stride_o_head);
+            ckc_value_t* o_addr =
+                ckc_b_add(b, ckc_b_add(b, o_tok_mul, o_hd_mul), o_col);
             ckc_b_global_store(b, p->O, o_addr, ckc_b_cast_f32_to(b, v_f32, dtype_ir), 2);
         }
     }

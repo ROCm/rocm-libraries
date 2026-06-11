@@ -17,7 +17,14 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-add_compile_options(-Wall -Wextra -Wno-unused-parameter)
+# -Wno-comment: doc-comments faithfully quote LLVM IR / Python source containing
+#   '/*' sequences (e.g. pointer math, packed-lane notes) -- intentional, not a bug.
+# -Wno-unused-function: a few static parity-anchor / arch-gated helpers are kept
+#   for documentation/symmetry even when a given config doesn't reference them.
+# -Wno-format-truncation: error-message snprintf calls write into bounded
+#   CKC_ERR_MSG_CAP buffers; truncating a long diagnostic string is intentional.
+add_compile_options(-Wall -Wextra -Wno-unused-parameter -Wno-comment
+                    -Wno-unused-function -Wno-format-truncation)
 
 file(GLOB CKC_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c")
 

@@ -115,20 +115,31 @@ ckc_kernel_def_t* ckc_gfx942_attn2d_emit_epilogue(ckc_gfx942_attn2d_build_ctx_t*
         {
             /* Per-lane direct scalar global stores. Each lane already owns 16 d
              * positions at one fixed q_row, so the 32 lanes in a half-wave
-             * naturally produce 32 adjacent-token, 16-element stores per cycle. */
-            ckc_value_t* q_row_t = ckc_b_add(b, wave_row_base, lane_col32);
+             * naturally produce 32 adjacent-token, 16-element stores per cycle.
+             *
+             * lane_col32 here is the Q32-gather-reassigned value (Python gfx950
+             * 2329 shadows the prologue one for the whole function, incl. the
+             * epilogue); op_qh emits mul BEFORE mod and op_mask emits the pos cmp
+             * BEFORE the qh cmp, matching Python's left-to-right value order. */
+            ckc_value_t* lane_col32_t = (ctx->lane_col32_q32_v != NULL)
+                                            ? ctx->lane_col32_q32_v
+                                            : lane_col32;
+            ckc_value_t* q_row_t = ckc_b_add(b, wave_row_base, lane_col32_t);
             ckc_value_t* op_pos_t =
                 ckc_b_add(b, qb_start_pos, ckc_b_div(b, q_row_t, ckc_b_const_i32(b, NQK)));
-            ckc_value_t* op_qh_t = ckc_b_add(
-                b,
-                ckc_b_mul(b, kv_head_idx, ckc_b_const_i32(b, NQK)),
-                ckc_b_mod(b, q_row_t, ckc_b_const_i32(b, NQK)));
-            ckc_value_t* op_mask_t = ckc_b_land(
-                b,
-                ckc_b_cmp_lt(b, op_pos_t, cur_batch_q_len),
-                ckc_b_cmp_lt(b, op_qh_t, ckc_b_const_i32(b, NUM_QH)));
-            ckc_value_t* out_base_t = epilogue_q_desc_offset(
-                ctx, ckc_b_add(b, cu_q_start, op_pos_t), op_qh_t, ckc_b_const_i32(b, 0));
+            ckc_value_t* op_qh_mul = ckc_b_mul(b, kv_head_idx, ckc_b_const_i32(b, NQK));
+            ckc_value_t* op_qh_mod = ckc_b_mod(b, q_row_t, ckc_b_const_i32(b, NQK));
+            ckc_value_t* op_qh_t = ckc_b_add(b, op_qh_mul, op_qh_mod);
+            ckc_value_t* op_ok_pos = ckc_b_cmp_lt(b, op_pos_t, cur_batch_q_len);
+            ckc_value_t* op_ok_qh =
+                ckc_b_cmp_lt(b, op_qh_t, ckc_b_const_i32(b, NUM_QH));
+            ckc_value_t* op_mask_t = ckc_b_land(b, op_ok_pos, op_ok_qh);
+            /* Python evaluates the q_desc.offset token arg (cu_q_start+op_pos_t)
+             * before the dim const(0); bind in order to keep value numbering. */
+            ckc_value_t* op_token_t = ckc_b_add(b, cu_q_start, op_pos_t);
+            ckc_value_t* out_base_t =
+                epilogue_q_desc_offset(ctx, op_token_t, op_qh_t,
+                                       ckc_b_const_i32(b, 0));
 
             ckc_value_t* inv_l_t      = ckc_b_rcp(b, ctx->l_final[0]);
             ckc_value_t* l_nonzero_t  = ckc_b_fcmp(b, "ogt", ctx->l_final[0], zero_f);
@@ -138,8 +149,11 @@ ckc_kernel_def_t* ckc_gfx942_attn2d_emit_epilogue(ckc_gfx942_attn2d_build_ctx_t*
                 ckc_value_t* acc32 = ckc_gfx942_attn2d_acc_final_get(ctx, n, 0);
                 for (reg = 0; reg < REGS_PER_LANE; ++reg)
                 {
+                    /* Python emits const(n*32) before _mfma_32x32_c_row
+                     * (left-to-right); bind it first to keep value numbering. */
+                    ckc_value_t* out_col_base = ckc_b_const_i32(b, n * 32);
                     ckc_value_t* out_col_t = ckc_b_add(
-                        b, ckc_b_const_i32(b, n * 32), ckc__mfma_32x32_c_row(b, lane, reg));
+                        b, out_col_base, ckc__mfma_32x32_c_row(b, lane, reg));
                     ckc_value_t* v          = ckc_b_vec_extract(b, acc32, reg);
                     ckc_value_t* normalized = ckc_b_fmul(b, v, inv_l_t);
                     ckc_value_t* final_h    = ckc_b_cast_f32_to(

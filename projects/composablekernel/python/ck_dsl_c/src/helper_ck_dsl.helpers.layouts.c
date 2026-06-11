@@ -121,12 +121,25 @@ ckc_bound_transpose_lds_reader_t* ckc_transpose_lds_reader_bind(ckc_ir_builder_t
     bound->lane_div_16 = ckc_b_div(b, lane, ckc_b_const_i32(b, 16));
 
     /* lane_div_4_mod_4 = b.mod(b.div(lane, b.const_i32(4)), b.const_i32(4))
-     * inner b.div is evaluated first (its const_i32(4) operand), then b.mod. */
-    bound->lane_div_4_mod_4 =
-        ckc_b_mod(b, ckc_b_div(b, lane, ckc_b_const_i32(b, 4)), ckc_b_const_i32(b, 4));
+     * Python evaluates left-to-right: the inner b.div (and its const_i32(4)
+     * operand) is created BEFORE the outer b.mod's const_i32(4) operand. C
+     * argument evaluation order is unspecified (gcc evaluates right-to-left,
+     * which would create the outer const before the inner div and shift every
+     * value id below by one). Sequence the inner div via an explicit temporary
+     * so the const/div/const/mod creation order matches Python exactly. */
+    {
+        ckc_value_t* inner_div = ckc_b_div(b, lane, ckc_b_const_i32(b, 4));
+        bound->lane_div_4_mod_4 = ckc_b_mod(b, inner_div, ckc_b_const_i32(b, 4));
+    }
 
-    /* col = b.mul(b.mod(lane, b.const_i32(4)), b.const_i32(4)) */
-    bound->col = ckc_b_mul(b, ckc_b_mod(b, lane, ckc_b_const_i32(b, 4)), ckc_b_const_i32(b, 4));
+    /* col = b.mul(b.mod(lane, b.const_i32(4)), b.const_i32(4))
+     * Same left-to-right sequencing requirement as lane_div_4_mod_4 above:
+     * Python creates the inner b.mod (and its const operand) before the outer
+     * b.mul's const operand. Force the order with an explicit temporary. */
+    {
+        ckc_value_t* inner_mod = ckc_b_mod(b, lane, ckc_b_const_i32(b, 4));
+        bound->col = ckc_b_mul(b, inner_mod, ckc_b_const_i32(b, 4));
+    }
 
     if(!ckc_lay_live(b))
     {

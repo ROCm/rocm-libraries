@@ -1,59 +1,58 @@
 /* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  * SPDX-License-Identifier: MIT
  *
- * helper_instance_gfx950_deep_fused_conv_pool_internal.h.c -- C99 port of the ten
- * PRIVATE shared-state + closure-phase symbols of the gfx950 (CDNA, wave64, MFMA
- * 32x32x16) arch shim over build_deep_fused_conv_pool
+ * instance_gfx950_deep_fused_conv_pool_gfx950_dfcp_ctx_and_loaders.c -- the
+ * build-context init + the conv0 A-load closure phases / coord callbacks of the
+ * chunked C99 port of the gfx950 (CDNA, wave64, MFMA 32x32x16) arch shim over
+ * build_deep_fused_conv_pool
  *   (ck_dsl/instances/gfx950/deep_fused_conv_pool.py -> re-exported common
  *    ck_dsl/instances/common/deep_fused_conv_pool.py build_deep_fused_conv_pool,
- *    Python lines 1212-1401).
+ *    Python lines 1212-1401; prologue 1215-1220 + the conv0 A-load nested
+ *    closures 1222-1332).
  *
- * SYMBOLS PORTED IN THIS TRANSLATION UNIT (exactly the requested set):
- *   - ckc_gfx950_dfcp_build_ctx_t                    (struct -- in the header)
- *   - ckc_gfx950_dfcp_build_ctx_init                 (Python prologue locals)
- *   - ckc_gfx950_dfcp_extra_params                   (extra_params -> W1 rsrc)
- *   - ckc_gfx950_dfcp_m_index_fn                     (m_index_fn -> M index)
- *   - ckc_gfx950_dfcp_a_mhw_index_fn                 (a_mhw_index_fn -> n,ho,wo)
- *   - ckc_gfx950_dfcp_setup_input_cache              (setup_input_cache)
- *   - ckc_gfx950_dfcp_setup_specialized_a_loader     (setup_specialized_a_loader)
- *   - ckc_gfx950_dfcp_load_a_tile_from_cache         (load_a_tile_from_cache)
- *   - ckc_gfx950_dfcp_load_a_tile_specialized        (load_a_tile_specialized)
- *   - ckc_gfx950_dfcp_load_a_operand_from_cache      (load_a_operand_from_cache)
- *   - ckc_gfx950_dfcp_epilogue_override              (epilogue_override)
+ * SCOPE OF THIS PART-FILE (one bucket of the chunked gfx950 port):
+ *   - ckc_gfx950_dfcp_build_ctx_init          (the Python prologue: arch
+ *                                              normalise, common_spec, conv_spec/
+ *                                              op store, defer/deferred_epi,
+ *                                              MFMA intra-lane maxpool decision,
+ *                                              A-load routing flags)
+ *   - ckc_gfx950_dfcp_extra_params            (extra_params -> W1 buffer rsrc)
+ *   - ckc_gfx950_dfcp_m_index_fn              (m_index_fn -> flattened M index)
+ *   - ckc_gfx950_dfcp_a_mhw_index_fn          (a_mhw_index_fn -> (n,ho,wo))
+ *   - ckc_gfx950_dfcp_setup_input_cache       (setup_input_cache)
+ *   - ckc_gfx950_dfcp_setup_specialized_a_loader (setup_specialized_a_loader)
+ *   - ckc_gfx950_dfcp_load_a_tile_from_cache  (load_a_tile_from_cache)
+ *   - ckc_gfx950_dfcp_load_a_tile_specialized (load_a_tile_specialized)
+ *   - ckc_gfx950_dfcp_load_a_operand_from_cache (load_a_operand_from_cache)
  *
- * Each closure stages its per-callback args (grid / conv-managed resources) onto
+ * Each phase stages its per-callback args (grid / conv-managed resources) onto
  * the shared ctx so the body reads only the ctx, then delegates to the
- * family-agnostic common emit helpers (ckc_dfcp_* over ctx->common_spec). The
- * gfx950 closures carry no per-family branching in the numeric core; the MFMA op
- * resolved by the driver drives the common bodies. The builder call sequence is
- * byte-identical to the Python closures (and to the common port part-file
- * instance_deep_fused_conv_pool_build_entry_and_closures.c, aside from the
- * ctx->common_spec forwarding).
+ * family-agnostic common emit helpers (ckc_dfcp_*) over ctx->common_spec -- the
+ * gfx950 closures carry no per-family branching in the numeric core; the MFMA
+ * op resolved by the driver drives the common bodies. Byte-identical builder
+ * call sequence to the Python closures (and to the common port part-file
+ * instance_deep_fused_conv_pool_build_entry_and_closures.c / the parallel
+ * gfx1201 part-file, with which these are byte-faithful aside from the
+ * ctx->common_spec forwarding and the gfx950 intra-lane maxpool routing).
  *
- * gfx950 vs gfx1201 maxpool routing.
- *   gfx950 (MFMA 32x32) selects the intra-lane register-resident maxpool fast
- *   path (_maxpool_is_intra_lane / _emit_inline_maxpool_from_registers) when its
- *   exact 32x32 geometry holds; the WMMA intra-lane fast path is geometry-gated
- *   off; otherwise the layout-agnostic cshuffle-LDS gather + maxpool runs. This
- *   walk is byte-faithful to the common closure (Python lines 1358-1375).
- *
- * Public build driver + conv-builder trampolines are NOT part of this requested
- * set; they live in the gfx950 public-entry TU (when present) and are reached via
- * this internal header. STUB-TO-LINK: nothing in this set requires stubbing --
- * every body either emits IR via ckc_b_* / ckc_dfcp_* or stages ctx fields.
+ * Peer phases (epilogue_override, the public driver + trampolines, the spec /
+ * value-type surface, the conv1 GEMM + LDS staging, the maxpool gates +
+ * emitters) live in sibling gfx950 part-files and are reached only via the
+ * internal header; this TU implements ONLY the ctx init + the conv0 A-load
+ * closures + coord callbacks.
  */
-#include "ckc/helper_instance_gfx950_deep_fused_conv_pool_internal.h.h"
+#include "ckc/instance_gfx950_deep_fused_conv_pool.h"
+#include "ckc/instance_gfx950_deep_fused_conv_pool_internal.h"
 
 #include <stddef.h>
 #include <string.h> /* memset */
 
 #include "ckc/ir.h"
-#include "ckc/ir_internal.h" /* ckc_i_set_err (unused-path parity) */
 #include "ckc/helper_ck_dsl.instances.common.deep_fused_conv_pool.h"
 
 /* ===================================================================== *
  * ckc_gfx950_dfcp_build_ctx_init -- the Python build_deep_fused_conv_pool
- * prologue, driven by the gfx950 (MFMA) op.
+ * prologue, driven by the gfx950 (MFMA 32x32x16) op.
  *
  * Mirrors:
  *   ok, why = is_valid_spec(spec, arch); if not ok: raise ...   (driver gate)
@@ -63,9 +62,10 @@
  *
  * The validity gate + conv_spec/op resolution are performed by the public driver
  * (it owns the conv_spec/op storage); this init takes them as args and stages the
- * build-time-constant ctx fields, per the internal-header contract: normalise
- * arch -> "gfx950", common_spec = &spec->base, derive defer / deferred_epi, the
- * MFMA register-residency decision, and the A-load routing flags.
+ * build-time-constant ctx fields, per the internal-header contract:
+ * normalise arch -> "gfx950", common_spec = &spec->base, derive defer /
+ * deferred_epi, the MFMA intra-lane register-residency decision, and the A-load
+ * routing flags.
  * ===================================================================== */
 ckc_status_t
 ckc_gfx950_dfcp_build_ctx_init(ckc_gfx950_dfcp_build_ctx_t* ctx,
@@ -102,12 +102,15 @@ ckc_gfx950_dfcp_build_ctx_init(ckc_gfx950_dfcp_build_ctx_t* ctx,
     ctx->defer = ckc_dfcp_epilogue_is_pool_deferrable(&cs->conv1_epilogue);
     ctx->deferred_epi = ctx->defer ? &cs->conv1_epilogue : NULL;
 
-    /* MFMA register-residency decision (gfx950 maxpool routing). The per-callback
-     * grid is not known at prologue time; the epilogue phase stages the grid and
-     * re-evaluates the predicate (_maxpool_is_intra_lane(spec, grid)) with it.
-     * Staged here as false; re-derived in the epilogue dispatch over the live
-     * grid. */
-    ctx->use_mfma_register_maxpool = false;
+    /* MFMA intra-lane register-residency decision (gfx950 maxpool routing -- the
+     * ACTIVE fast path for the MFMA 32x32 warp tile, unlike the gfx1201 WMMA
+     * counterpart):
+     *   use_intra_lane_maxpool = _maxpool_is_intra_lane(common_spec, grid)
+     * The per-callback grid is not known at prologue time (ctx->grid is NULL after
+     * the memset); the predicate is geometry-gated and the epilogue dispatch
+     * re-evaluates it over the live grid. Staged here via the common helper so the
+     * decision is computed through the single canonical predicate. */
+    ctx->use_intra_lane_maxpool = ckc_dfcp_maxpool_is_intra_lane(cs, ctx->grid);
 
     /* A-load routing (the build_implicit_gemm_conv override selection tail):
      *   use_input_cache  = cache_input_footprint or direct_conv0_from_input_cache
@@ -174,7 +177,8 @@ ckc_value_t* ckc_gfx950_dfcp_extra_params(ckc_gfx950_dfcp_build_ctx_t* ctx)
      * BufferResource; extra_params keeps only .rsrc. That discarded const_i32(0)
      * still consumes one build-time SSA counter (it is DCE'd before printing), so
      * every later numbered SSA name is +1 vs a port that omits it. Emit the
-     * throwaway const here to stay byte-identical. */
+     * throwaway const here to stay byte-identical (otherwise @A_smem22 vs the
+     * reference @A_smem23, and the whole IR is shifted by -1). */
     rsrc = ckc_b_buffer_rsrc(b, w1, w1_bytes);
     (void)ckc_b_const_i32(b, 0);
 
@@ -463,126 +467,4 @@ ckc_value_t* ckc_gfx950_dfcp_load_a_operand_from_cache(
 
     return ckc_dfcp_load_conv0_a_operand_from_input_cache(
         ctx->b, ctx->common_spec, row, k_off, col_base, frag_len, cache);
-}
-
-/* ===================================================================== *
- * CLOSURE PHASE: epilogue_override(b, conv_spec_, accs, grid, y_rsrc, w1_rsrc)
- *
- * Walks (Python order, deep_fused_conv_pool.py:1334-1375), driven by the gfx950
- * (MFMA 32x32x16) op:
- *   c_smem  = _stage_accumulators_to_cshuffle_lds(b, op, accs, grid, sync=False)
- *   w1_smem = _load_conv1_weights_to_lds(b, spec, w1_rsrc, grid, sync=False)
- *   b.sync()                                   # single merged barrier
- *   defer = _epilogue_is_pool_deferrable(spec.conv1_epilogue)  (staged ctx->defer)
- *   conv1_accs = _emit_conv1_1x1(..., defer_epilogue=defer)
- *   deferred_epi = spec.conv1_epilogue if defer else None
- *   if _maxpool_is_intra_lane(spec, grid):                     # MFMA fast path
- *       _emit_inline_maxpool_from_registers(..., epilogue=deferred_epi)
- *   elif _maxpool_is_intra_lane_wmma(spec, grid, op):          # WMMA fast path
- *       _emit_wmma_maxpool_from_registers(..., op, epilogue=deferred_epi)
- *   else:
- *       conv1_smem = _stage_accumulators_to_cshuffle_lds(b, op, conv1_accs, grid)
- *       _emit_inline_maxpool_from_cshuffle(..., epilogue=deferred_epi)
- * ===================================================================== */
-void ckc_gfx950_dfcp_epilogue_override(ckc_gfx950_dfcp_build_ctx_t* ctx,
-                                       const ckc_implicit_gemm_conv_spec_t* conv_spec_,
-                                       ckc_value_t* const* accs,
-                                       size_t num_accs,
-                                       const ckc_warp_grid_t* grid,
-                                       ckc_value_t* y_rsrc,
-                                       ckc_value_t* w1_rsrc)
-{
-    ckc_ir_builder_t* b;
-    const ckc_deep_fused_conv_pool_spec_t* spec; /* common spec view (&spec->base) */
-    const ckc_mma_op_t* op;                      /* MFMA 32x32x16 op               */
-    bool defer;
-    const ckc_conv_acc_epilogue_t* deferred_epi;
-    ckc_status_t st;
-    size_t i;
-
-    if (ctx == NULL || ctx->b == NULL)
-    {
-        return;
-    }
-    b = ctx->b;
-    spec = ctx->common_spec; /* the family-agnostic emit helpers know only this */
-    op = ctx->op;            /* resolved MFMA op (wave64, m=n=32, k=16)         */
-
-    /* Stage per-callback scratch onto the ctx so the body reads only the ctx. */
-    ctx->conv_spec_cb = conv_spec_;
-    ctx->grid = grid;
-    ctx->y_rsrc = y_rsrc;
-    ctx->w1_rsrc = w1_rsrc;
-    ctx->num_conv0_accs = 0;
-    for (i = 0; i < num_accs && i < (size_t)CKC_GFX950_DFCP_MAX_ACCS; ++i)
-    {
-        ctx->conv0_accs[i] = accs[i];
-    }
-    ctx->num_conv0_accs = (num_accs < (size_t)CKC_GFX950_DFCP_MAX_ACCS)
-                              ? num_accs
-                              : (size_t)CKC_GFX950_DFCP_MAX_ACCS;
-
-    /* Barrier-merge: the conv0 cshuffle stage (writes DeepFusionC_smem) and the
-     * W1 load (writes W1_smem) target disjoint LDS tiles, and the conv1 MMA below
-     * reads both. Emit each producer without its own barrier and gate the
-     * consumer on a single block-wide barrier; this also lets the W1 global loads
-     * overlap the conv0 cshuffle LDS stores. */
-    ctx->c_smem = ckc_dfcp_stage_accumulators_to_cshuffle_lds(
-        b, op, accs, num_accs, grid, /*sync=*/false);
-    ctx->w1_smem = ckc_dfcp_load_conv1_weights_to_lds(b, spec, w1_rsrc, grid,
-                                                      /*sync=*/false);
-    ckc_b_sync(b);
-
-    /* VALU opt: ReLU/bias/clamp/(scale>=0) are monotonic, so the conv1 epilogue
-     * commutes with maxpool. Defer it past the pool to apply once per pooled
-     * pixel instead of per conv1 acc element (~4x fewer fmax). The decision is the
-     * one ckc_gfx950_dfcp_build_ctx_init computed from spec.conv1_epilogue. */
-    defer = ctx->defer;
-
-    st = ckc_dfcp_emit_conv1_1x1(b, spec, conv_spec_, op, ctx->c_smem,
-                                 ctx->w1_smem, grid, /*defer_epilogue=*/defer,
-                                 ctx->conv1_accs, (size_t)CKC_GFX950_DFCP_MAX_ACCS,
-                                 &ctx->num_conv1_accs);
-    if (st != CKC_OK)
-    {
-        /* error already routed through b by the emit helper */
-        return;
-    }
-
-    deferred_epi = defer ? &spec->conv1_epilogue : NULL;
-    ctx->deferred_epi = deferred_epi;
-
-    /* MFMA register-residency decision -- re-derived over the live per-callback
-     * grid (the prologue cannot see the grid). For gfx950 the 32x32 geometry
-     * makes this the selected fast path. */
-    ctx->use_mfma_register_maxpool = ckc_dfcp_maxpool_is_intra_lane(spec, grid);
-
-    if (ctx->use_mfma_register_maxpool)
-    {
-        /* MFMA-32x32 register-resident fast path. Each lane's vec<16> conv1
-         * accumulator already holds the 4 pool windows it owns (intra-lane, no
-         * shuffle), so reduce straight to global output. */
-        ckc_dfcp_emit_inline_maxpool_from_registers(
-            b, spec, ctx->conv1_accs, ctx->num_conv1_accs, y_rsrc, grid,
-            deferred_epi);
-    }
-    else if (ckc_dfcp_maxpool_is_intra_lane_wmma(spec, grid, op))
-    {
-        /* RDNA4 analogue -- geometry-gated off for the MFMA warp_tile 32x32, so
-         * this branch is never taken here; preserved to keep the walk
-         * byte-faithful to the common closure. */
-        ckc_dfcp_emit_wmma_maxpool_from_registers(b, spec, ctx->conv1_accs,
-                                                  ctx->num_conv1_accs, y_rsrc,
-                                                  grid, op, deferred_epi);
-    }
-    else
-    {
-        /* Generic layout-agnostic cshuffle-LDS gather + maxpool: stage the conv1
-         * accs to LDS (with its own barrier) and reduce from there. */
-        ckc_value_t* conv1_smem = ckc_dfcp_stage_accumulators_to_cshuffle_lds(
-            b, op, ctx->conv1_accs, ctx->num_conv1_accs, grid, /*sync=*/true);
-        ctx->conv1_smem = conv1_smem;
-        ckc_dfcp_emit_inline_maxpool_from_cshuffle(b, spec, conv1_smem, y_rsrc,
-                                                   grid, deferred_epi);
-    }
 }

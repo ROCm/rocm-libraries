@@ -13,7 +13,7 @@
 # byte-compared with the C emitter gfx950_attention_tiled_2d_fastkv_regp_emit.c.
 import sys
 
-from ck_dsl.instances.gfx942.attention_tiled_2d import UnifiedAttention2DTiledSpec
+from ck_dsl.instances.gfx950.attention_tiled_2d import UnifiedAttention2DTiledSpec
 from ck_dsl.instances.gfx950.attention_tiled_2d_fastkv_regp import (
     build_unified_attention_2d_fastkv_register_p,
 )
