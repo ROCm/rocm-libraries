@@ -102,7 +102,7 @@ separate `seq_lens[B]` tensor referenced through the op's
 node-level attributes (e.g. `SdpaAttributes::set_seq_len_q`). Each
 entry in `seq_lens` specifies the number of valid elements in that batch. `seq_lens` is independent
 of the ragged-tensor abstraction: it can be used in isolation, or with the `ragged_offset`
-(and the `ragged_offset` similarily functions with or without it).
+(and the `ragged_offset` similarly functions with or without it).
 Ops that care about per-batch valid lengths read `seq_lens` from the variant pack directly.
 
 Both `ragged_offset` and `seq_lens` aux tensors may be referenced
@@ -245,10 +245,9 @@ corresponding CPU reference (e.g.
 
 1. **Frontend / flatbuffer / backend** propagate
    `ragged_offset_tensor_uid` and `alignment` per tensor.
-   Declarative only; no new C-API entry points. `alignment` is a
-   needed addition bundled into this change; it is not consumed by
-   any ragged-tensor logic in this RFC (see
-   [§4.2](#42-frontend-tensorattributes-additions)).
+   Declarative only; no new C-API entry points (see
+   [§4.2](#42-frontend-tensorattributes-additions) for
+   `alignment`).
 2. **Data SDK** introduces a single new owning type
    `RaggedTensor<T>` and its non-owning peer
    `ShallowRaggedTensor<T>`. Both expose ragged-aware
@@ -350,9 +349,9 @@ present.
 Backend tensor descriptor mirrors the frontend additions: optional
 `ragged_offset_tensor_uid` and `alignment` (default 16), exposed
 through existing get/set-attribute paths under new enum values in
-the hipDNN extension range. As on the frontend, `alignment` is a
-needed addition bundled into this change and is not otherwise
-consumed here (see [§4.2](#42-frontend-tensorattributes-additions)). No new `hipdnnBackend*` entry points,
+the hipDNN extension range. As on the frontend, `alignment` is
+carried through but unused here (see
+[§4.2](#42-frontend-tensorattributes-additions)). No new `hipdnnBackend*` entry points,
 and the variant pack representation is unchanged: at execute time
 the variant pack carries `UID → void*` for every tensor in the
 graph, including ragged primaries, their `ragged_offset`, and any
@@ -386,9 +385,9 @@ These apply to both `RaggedTensor<T>` and
 
    The widen-to-`int64_t` cost is negligible relative to the per-
    element work the CPU reference does, and the structural
-   invariants in item 5 (rank 4, packed, length `B + 1`) plus the
-   element-size check in item 5 below bound the surface where
-   type-erasure could go wrong to this one helper. See
+   invariants in item 5 (rank 4, packed, length `B + 1`, and the
+   element-size check) bound the surface where type-erasure could
+   go wrong to this one helper. See
    [§6.3](#63-templating-the-ragged-tensor-types-on-indext) for
    why this is preferred over a templated `IndexT` parameter.
 2. **`dims()[1]` is required to be `S_max`** (the max padded
@@ -618,9 +617,8 @@ template <typename T>
 class ShallowRaggedTensor : public TensorBase<T>
 {
 public:
-    // As with RaggedTensor, physicalElementCount is optional and is
-    // inferred as ragged_offset[B] from the aux when omitted; pass
-    // it to avoid the aux read (and any device->host sync).
+    // As with RaggedTensor (§4.6), physicalElementCount is optional
+    // and inferred as ragged_offset[B] when omitted.
     ShallowRaggedTensor(
         void*                    data,
         std::vector<int64_t>     paddedDims,
@@ -743,9 +741,8 @@ std::shared_ptr<ITensor> qRaggedOffset = makeShallowITensor(
 
 // The view's buffer is exactly ragged_offset[B] elements;
 // alignment plays no part in sizing (§4.2). physicalElementCount
-// is left to be inferred from the aux here — a caller that already
-// has ragged_offset[B] on hand could pass it as the trailing
-// optional argument to skip the aux read.
+// is inferred from the aux here (see §4.6 for passing it
+// explicitly).
 auto qView = std::make_shared<ShallowRaggedTensor<QType>>(
     variantPack.at(_params.qTensor.uid),
     _params.qTensor.dims,
@@ -797,9 +794,8 @@ on the ragged primary itself.
 
 #### 4.10.1 Reuse at the executor virtual-tensor pass
 
-The CPU executor's existing virtual-tensor pass (Flow 2 stage
-2.7 in `RaggedTensorsTensorFlows.md`) walks `tensorMap` from the
-deserialized flatbuffer graph, allocates one `ITensor` per
+The CPU executor's existing virtual-tensor pass walks `tensorMap`
+from the deserialized flatbuffer graph, allocates one `ITensor` per
 virtual attribute that is not already in the variant pack, and
 patches `rawHostData()` of the new allocation back into the
 variant pack. For ragged virtual intermediates this needs the
@@ -974,11 +970,9 @@ The buffer is sized to exactly `ragged_offset[B]` elements:
 physicalElementCount = ragged_offset[B]
 ```
 
-`alignment` does not enter this calculation — it is a pointer
-alignment requirement, not a sizing parameter (see
-[§4.2](#42-frontend-tensorattributes-additions)). `elementCount()`
-on the resulting `RaggedTensor` is likewise `ragged_offset[B]`
-(see [§4.5](#45-data-sdk-shared-elements) item 6).
+`alignment` does not enter this calculation (see
+[§4.5](#45-data-sdk-shared-elements) item 6); `elementCount()`
+on the resulting `RaggedTensor` is likewise `ragged_offset[B]`.
 
 #### 4.11.3 Bundle init pass
 
@@ -1008,8 +1002,7 @@ The same one-pass loop in `initializeBundle` handles all four
 cases; the only new logic is the "is this UID a ragged output?"
 branch that picks `fillWithSentinelValue()` over
 `randomizeTensor()`. Whether a UID corresponds to an output is
-already tracked by the harness in `outputTensorIds` (see Flow 2
-stage 2.2 in `RaggedTensorsTensorFlows.md`).
+already tracked by the harness in `outputTensorIds`.
 
 #### 4.11.4 Output validation in `verifyGraph`
 
@@ -1036,11 +1029,11 @@ Because `seq_lens` is not attached to the ragged primary, there
 is no SDK-level "wrap with `seq_lens` for ragged-aware compare"
 fallback to fall back to.
 
-Even if it is not possible to have a fully avoidable sentinel value,
-a random sentinel should have a very low likelihood of showing up in
-the output (though this would increase with very large tensors). The
-consequence of the CPU reference generating this is also small, as it
-would only skip over validating this one value.
+Even where no value is guaranteed to be unproducible by the reference,
+a random sentinel has a very low likelihood of showing up in
+the output (though this rises with very large tensors). The
+consequence of the CPU reference producing it is also small: the
+validator would only skip over this one value.
 
 ---
 
@@ -1194,17 +1187,17 @@ batch's range.
   signatures, pre-supplied bundle strict checks,
   alternatives-section analysis) to buy what amounts to a
   per-batch loop bound in one CPU reference function body.
-- **Associations between `seq_lens` and primaries is determined by the nodes by context**
-  Unlike the `ragged_offset` which is directly specified in the
+- **Associations between `seq_lens` and primaries are determined by the nodes through context.**
+  Unlike the `ragged_offset`, which is directly specified in the
   `TensorAttributes`, the association between `seq_lens` and a primary
   is determined by the intended use of arguments for the node. This would
-  require a per node mapping that associates primaries with their intended
+  require a per-node mapping that associates primaries with their intended
   sequence length parameters, and walking each of the nodes to find that mapping.
 - **`seq_lens` does not bind 1:1 to a primary.** There is nothing
   that structurally guarantees that a single primary cannot have two
-  diferent `seq_lens` associated with it in two different operations
+  different `seq_lens` associated with it in two different operations
   in the graph. Even if we took the previous approach of walking the nodes
-  to find their associations, this mapping is ill formed.
+  to find their associations, this mapping is ill-formed.
 - **Significant complexity savings.** Dropping `seq_lens` from
   the SDK removes the storage-vs-view split, the
   post-construction-attach-seq_lens problem, the `validSeqLen`
