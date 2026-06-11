@@ -12,8 +12,7 @@
 // `ds_read` is still targeting.
 //
 // To trigger the bug the kernel must be persistent and total_tiles must exceed
-// the persistent grid size so a workgroup processes >1 tile. On the FFM gfx1250
-// simulator the grid is 48 blocks; FP8xFP8 at M=512, N=4096 yields 64 tiles.
+// the persistent grid size so a workgroup processes >1 tile.
 //
 // Both init regimes (constant and random) validate against reference_mx_gemm;
 // the constant regime additionally has a closed-form expected output of K.
@@ -72,10 +71,13 @@ auto preShuffleWeight(ck_tile::HostTensor<dtype>& src)
     return shuffled;
 }
 
-using ADataType          = ck_tile::fp8_t;
-using BDataType          = ck_tile::fp8_t;
-using CDataType          = ck_tile::half_t;
-using MXFlatmmArchTraits = MXFlatmm_GFX1250_FP8FP8_Traits;
+using ADataType = ck_tile::fp8_t;
+using BDataType = ck_tile::fp8_t;
+using CDataType = ck_tile::half_t;
+using MXFlatmmArchTraits =
+    std::conditional_t<GetCurrentTargetId() == ck_tile::core::arch::TargetId::GFX1250,
+                       MXFlatmm_GFX1250_FP8FP8_Traits,
+                       MXFlatmm_GFX950_FP8FP8_Traits>;
 
 using FlatmmConfig = typename MXFlatmmArchTraits::Config;
 using AccDataType  = float;
@@ -330,17 +332,30 @@ TEST(MXFlatmmPersistent, Single_Tile_Sanity_Random)
         /*M=*/128, /*N=*/256, /*K=*/256, /*init_method=*/0, /*expect_multi_tile=*/false);
 }
 
-// ---- Multi-tile trigger: 64 tiles > 48 blocks on FFM gfx1250, so some
-//      workgroups process 2 tiles. Fails before the LDS-sync fix, passes after. ----
+// TODO: total_tiles must exceed the persistent grid size.
+//       Dimensions are arch-conditional: simulators have fewer CUs and cannot
+//       handle very large tensors, while real hardware needs more tiles to
+//       exceed its larger persistent grid. ----
+
+constexpr bool kIsGFX1250 = GetCurrentTargetId() == ck_tile::core::arch::TargetId::GFX1250;
+constexpr ck_tile::index_t kMultiTileM = kIsGFX1250 ? 512 : 2048;
+constexpr ck_tile::index_t kMultiTileN = kIsGFX1250 ? 4096 : 8192;
+constexpr ck_tile::index_t kMultiTileK = kIsGFX1250 ? 256 : 1024;
 
 TEST(MXFlatmmPersistent, Multi_Tile_Per_Block_Const)
 {
-    run_persistent_test(
-        /*M=*/512, /*N=*/4096, /*K=*/256, /*init_method=*/1, /*expect_multi_tile=*/true);
+    run_persistent_test(kMultiTileM,
+                        kMultiTileN,
+                        kMultiTileK,
+                        /*init_method=*/1,
+                        /*expect_multi_tile=*/true);
 }
 
 TEST(MXFlatmmPersistent, Multi_Tile_Per_Block_Random)
 {
-    run_persistent_test(
-        /*M=*/512, /*N=*/4096, /*K=*/256, /*init_method=*/0, /*expect_multi_tile=*/true);
+    run_persistent_test(kMultiTileM,
+                        kMultiTileN,
+                        kMultiTileK,
+                        /*init_method=*/0,
+                        /*expect_multi_tile=*/true);
 }

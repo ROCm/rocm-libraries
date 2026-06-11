@@ -304,23 +304,43 @@ class TestGroupedGemmMXFlatmm : public ::testing::Test
             scale_b_dev_bufs.push_back(std::move(sb_dev));
         }
 
-        // Build grouped host args
+        // Copy each host vector to a device buffer and hand the kernel the device pointers.
+        auto to_device = [](const auto& host_vec) {
+            using ElemType = std::remove_cvref_t<decltype(host_vec[0])>;
+            auto dev = std::make_unique<ck_tile::DeviceMem>(host_vec.size() * sizeof(ElemType));
+            dev->ToDevice(host_vec.data());
+            return dev;
+        };
+
+        auto d_Ms        = to_device(h_Ms);
+        auto d_Ns        = to_device(h_Ns);
+        auto d_Ks        = to_device(h_Ks);
+        auto d_a_ptrs    = to_device(h_a_ptrs);
+        auto d_b_ptrs    = to_device(h_b_ptrs);
+        auto d_c_ptrs    = to_device(h_c_ptrs);
+        auto d_stride_As = to_device(h_stride_As);
+        auto d_stride_Bs = to_device(h_stride_Bs);
+        auto d_stride_Cs = to_device(h_stride_Cs);
+        auto d_scale_as  = to_device(h_scale_as);
+        auto d_scale_bs  = to_device(h_scale_bs);
+
+        // Build grouped host args from the device-resident metadata arrays
         ck_tile::GroupedFlatmmHostArgs<ScaleA, ScaleB, NumDTensor> host_args{
             static_cast<ck_tile::index_t>(group_count),
-            h_Ms.data(),
-            h_Ns.data(),
-            h_Ks.data(),
-            h_a_ptrs.data(),
-            h_stride_As.data(),
-            h_b_ptrs.data(),
-            h_stride_Bs.data(),
+            static_cast<ck_tile::index_t*>(d_Ms->GetDeviceBuffer()),
+            static_cast<ck_tile::index_t*>(d_Ns->GetDeviceBuffer()),
+            static_cast<ck_tile::index_t*>(d_Ks->GetDeviceBuffer()),
+            static_cast<const void**>(d_a_ptrs->GetDeviceBuffer()),
+            static_cast<ck_tile::index_t*>(d_stride_As->GetDeviceBuffer()),
+            static_cast<const void**>(d_b_ptrs->GetDeviceBuffer()),
+            static_cast<ck_tile::index_t*>(d_stride_Bs->GetDeviceBuffer()),
             {},
             {},
-            h_c_ptrs.data(),
-            h_stride_Cs.data(),
+            static_cast<void**>(d_c_ptrs->GetDeviceBuffer()),
+            static_cast<ck_tile::index_t*>(d_stride_Cs->GetDeviceBuffer()),
             1,
-            h_scale_as.data(),
-            h_scale_bs.data()};
+            static_cast<ScaleA*>(d_scale_as->GetDeviceBuffer()),
+            static_cast<ScaleB*>(d_scale_bs->GetDeviceBuffer())};
 
         // --- Instantiate and launch the GroupedMXFlatmmKernel ---
         //
