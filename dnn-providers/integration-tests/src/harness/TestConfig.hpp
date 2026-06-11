@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <filesystem>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
@@ -127,9 +128,11 @@ public:
             }
         }
 
-        // Detect device 0's gfx arch once at startup. Used by [[test_skips]]
+        // Detect device 0's gfx arch and VRAM once at startup. Used by
+        // [[test_skips]] and golden-ref metadata guards (arch/VRAM checks).
         // todo: In future allow the test runner to use any specified device.
         instance._currentArch = hipdnn_test_sdk::utilities::currentDeviceArch();
+        instance._currentDeviceVramMb = hipdnn_test_sdk::utilities::currentDeviceTotalVramMb();
 
         // Detect platform once at startup (always succeeds; PlatformUtils.hpp
         // refuses to compile on unsupported OSes).
@@ -229,6 +232,14 @@ public:
         return _currentArch;
     }
 
+    // Total VRAM in MB for device 0 detected at init time. Zero if detection
+    // failed (e.g. no GPU present). Used by golden-ref metadata VRAM guards.
+    std::size_t getCurrentDeviceVramMb() const
+    {
+        throwIfNotInitialized();
+        return _currentDeviceVramMb;
+    }
+
     // Lowercase platform name detected at init time ("windows" or "linux").
     const std::string& getCurrentPlatform() const
     {
@@ -297,6 +308,7 @@ private:
     std::optional<ReferenceExecutorType> _referenceExecutorType;
     std::optional<std::filesystem::path> _goldenDataDir;
     std::string _currentArch;
+    std::size_t _currentDeviceVramMb = 0;
     std::string _currentPlatform;
     bool _failOnUnsupported = false;
     bool _skipGraphValidation = false;

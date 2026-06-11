@@ -12,6 +12,7 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Visitor.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/utilities/BundleMetadata.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
@@ -20,11 +21,6 @@
 #include "harness/TestConfig.hpp"
 #include "harness/golden/GoldenBundleDiscovery.hpp"
 #include "harness/golden/GoldenTensorComparator.hpp"
-
-#if __has_include(<hipdnn_test_sdk/utilities/BundleMetadata.hpp>)
-#include <hipdnn_test_sdk/utilities/BundleMetadata.hpp>
-#define HIPDNN_HAS_BUNDLE_METADATA 1
-#endif
 
 namespace hipdnn_integration_tests::golden
 {
@@ -56,11 +52,16 @@ protected:
             GTEST_SKIP() << "Bundle file missing (DVC not pulled?): " << _bundlePath;
         }
 
-#ifdef HIPDNN_HAS_BUNDLE_METADATA
         applyMetadataGuards();
-#endif
 
-        _graphAndTensors = hipdnn_test_sdk::utilities::loadGraphAndTensors(_bundlePath);
+        try
+        {
+            _graphAndTensors = hipdnn_test_sdk::utilities::loadGraphAndTensors(_bundlePath);
+        }
+        catch(const std::exception& e)
+        {
+            GTEST_SKIP() << "Tensor data not available (DVC not pulled?): " << e.what();
+        }
         _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();
     }
 
@@ -265,7 +266,6 @@ private:
         }
     }
 
-#ifdef HIPDNN_HAS_BUNDLE_METADATA
     void applyMetadataGuards()
     {
         auto meta = hipdnn_test_sdk::utilities::loadBundleMetadata(_bundlePath);
@@ -274,15 +274,18 @@ private:
             return;
         }
 
-        auto archReason
-            = hipdnn_test_sdk::utilities::checkArchCompatibility(
-                *meta, TestConfig::get().getCurrentArch());
-        if(archReason.has_value())
+        if(auto reason = hipdnn_test_sdk::utilities::checkVramRequirement(
+               *meta, TestConfig::get().getCurrentDeviceVramMb()))
         {
-            GTEST_SKIP() << *archReason;
+            GTEST_SKIP() << *reason;
+        }
+
+        if(auto reason = hipdnn_test_sdk::utilities::checkArchCompatibility(
+               *meta, TestConfig::get().getCurrentArch()))
+        {
+            GTEST_SKIP() << *reason;
         }
     }
-#endif
 };
 
 } // namespace hipdnn_integration_tests::golden

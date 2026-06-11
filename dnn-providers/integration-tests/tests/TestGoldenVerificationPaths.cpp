@@ -114,7 +114,15 @@ TEST(TestGoldenVerificationCpuRef, BatchNormSmallFp32MatchesGoldenData)
         GTEST_SKIP() << "Golden bundle not available (DVC not pulled?): " << bundlePath;
     }
 
-    auto graphAndTensors = hipdnn_test_sdk::utilities::loadGraphAndTensors(bundlePath);
+    hipdnn_test_sdk::utilities::GraphAndTensorMap graphAndTensors;
+    try
+    {
+        graphAndTensors = hipdnn_test_sdk::utilities::loadGraphAndTensors(bundlePath);
+    }
+    catch(const std::exception&)
+    {
+        GTEST_SKIP() << "Tensor data not available (DVC not pulled?): " << bundlePath;
+    }
     auto goldenOutputs = graphAndTensors.extractAndClearOutputTensorData();
 
     auto hostBuffers = graphAndTensors.hostBufferMap();
@@ -146,7 +154,15 @@ TEST(TestGoldenVerificationGpuRef, SkipsWhenNoGpuPlanAvailable)
         GTEST_SKIP() << "Golden bundle not available (DVC not pulled?): " << bundlePath;
     }
 
-    auto graphAndTensors = hipdnn_test_sdk::utilities::loadGraphAndTensors(bundlePath);
+    hipdnn_test_sdk::utilities::GraphAndTensorMap graphAndTensors;
+    try
+    {
+        graphAndTensors = hipdnn_test_sdk::utilities::loadGraphAndTensors(bundlePath);
+    }
+    catch(const std::exception&)
+    {
+        GTEST_SKIP() << "Tensor data not available (DVC not pulled?): " << bundlePath;
+    }
     auto goldenOutputs = graphAndTensors.extractAndClearOutputTensorData();
 
     std::unordered_map<int64_t, void*> deviceBufferMap;
