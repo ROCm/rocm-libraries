@@ -27,6 +27,24 @@ test_categories:
       - "comprehensive"
       - "full"
 
+  # Multi-GPU only subset. These tests are excluded from the single-GPU
+  # categories above (via "*multi_gpu*" excludes) and are instead selected
+  # by a dedicated multi-GPU CI job that runs `ctest -L multigpu_<tier>`.
+  # The labels are namespaced (multigpu_*) so they never overlap with the
+  # single-GPU tier labels, meaning a single-GPU `ctest -L standard` run can
+  # never pick these up, and `ctest -L multigpu_quick` is naturally empty.
+  multigpu_tests:
+    description: "Multi-GPU only - hipfft-test *multi_gpu* (multi-GPU runner)"
+    test_patterns:
+      - "*multi_gpu*"
+    exclude:
+    extra_args:
+      - "--test_prob"
+      - "0.02"
+    labels:
+      - "multigpu_comprehensive"
+      - "multigpu_full"
+
 execution_settings:
   default_timeout: 600
   timeout_multiplier: 1
@@ -35,3 +53,4 @@ execution_settings:
     standard: 3600       # 1 hour
     comprehensive: 14400 # 4 hours
     full: 43200          # 12 hours
+    multigpu_tests: 3600 # 1 hour
