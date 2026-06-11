@@ -178,8 +178,11 @@ CandidateSelectionMetadata::CandidateSelectionMetadata(const std::string& arch,
                     }
                     else
                     {
-                        MIOPEN_THROW("Unknown conditional param kind '" + kind + "' for '" +
-                                     param_name + "' in conditional_layouts[" + kernel_name + "]");
+                        MIOPEN_THROW((std::ostringstream()
+                                      << "Unknown conditional param kind '" << kind << "' for '"
+                                      << param_name << "' in conditional_layouts[" << kernel_name
+                                      << "]")
+                                         .str());
                     }
                     layout.conditional_params.emplace(param_name, cp);
                 }
@@ -199,8 +202,11 @@ CandidateSelectionMetadata::CandidateSelectionMetadata(const std::string& arch,
                     }
                     else
                     {
-                        MIOPEN_THROW("Unknown packed-param codec '" + codec + "' for '" +
-                                     param_name + "' in conditional_layouts[" + kernel_name + "]");
+                        MIOPEN_THROW((std::ostringstream()
+                                      << "Unknown packed-param codec '" << codec << "' for '"
+                                      << param_name << "' in conditional_layouts[" << kernel_name
+                                      << "]")
+                                         .str());
                     }
                     layout.packed_params.emplace(param_name, std::move(pp));
                 }
@@ -575,8 +581,7 @@ std::size_t ComputeKernelConfigPreprocessorOutputDim(const CandidateSelectionMet
 
 bool ParamNameEndsWith(const std::string& param_name, const std::string& suffix)
 {
-    return param_name.size() >= suffix.size() &&
-           param_name.compare(param_name.size() - suffix.size(), suffix.size(), suffix) == 0;
+    return param_name.ends_with(suffix);
 }
 
 float GetRawConfigParamBySuffix(const std::vector<float>& raw_config_features,
@@ -1033,13 +1038,9 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
         const auto is_conditional_param = [&](const std::string& mapped_name) {
             if(conditional_layout == nullptr)
                 return false;
-            for(const auto& [cond_name, spec] : conditional_layout->conditional_params)
-            {
-                (void)spec;
-                if(ParamNameEndsWith(mapped_name, cond_name))
-                    return true;
-            }
-            return false;
+            return std::ranges::any_of(
+                conditional_layout->conditional_params,
+                [&](const auto& entry) { return ParamNameEndsWith(mapped_name, entry.first); });
         };
 
         // Build a map from param_name to value for this candidate
