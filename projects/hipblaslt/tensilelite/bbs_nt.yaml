@@ -3,6 +3,7 @@ TestParameters:
 GlobalParameters:
   SyncsPerBenchmark: 1
   NumElementsToValidate: 0
+  NumElementsToValidateWinner: -1
   KernelTime: False
   NewClient: 2
   BoundsCheck: False
@@ -58,18 +59,19 @@ BenchmarkProblems:
         - ForceDisableShadowInit: [1]
         - MatrixInstruction:
           #- [16, 16, 128, 1,  1,  2, 2,  2, 2]
-          - [16, 16, 32, 1,  1,  1, 1,  2, 2]
-          - [16, 16, 32, 1,  1,  2, 2,  2, 2]
-          - [16, 16, 32, 1,  1,  2, 4,  2, 2]
-          - [16, 16, 32, 1,  1,  2, 4,  2, 2]
-          - [16, 16, 32, 1,  1,  4, 2,  2, 2]
+          #- [16, 16, 32, 1,  1,  1, 1,  2, 2]
+          #- [16, 16, 32, 1,  1,  2, 2,  2, 2]
+          #- [16, 16, 32, 1,  1,  2, 4,  2, 2]
+          #- [16, 16, 32, 1,  1,  2, 4,  2, 2]
+          #- [16, 16, 32, 1,  1,  4, 2,  2, 2]
           - [16, 16, 32, 1,  1,  4, 4,  2, 2]
           - [16, 16, 32, 1,  1,  4, 8,  2, 2]
           - [16, 16, 32, 1,  1,  4, 7,  2, 2]
           - [16, 16, 32, 1,  1,  8, 4,  2, 2]
           - [16, 16, 32, 1,  1,  7, 4,  2, 2]
           - [16, 16, 32, 1,  1,  8, 8,  2, 2]
-        - DepthU: [64]
+        - DepthU: [64,128]
+        - HalfPLR: [0,1,2,3]
         - TDMInst: [3]
           #- TDMSplit: [False, True]
         - TransposeLDS: [-1]
@@ -83,7 +85,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - StoreRemapVectorWidth: [0]
-        - GlobalSplitU: [1,2,3,4]
+        - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]

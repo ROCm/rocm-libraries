@@ -3,6 +3,7 @@ TestParameters:
 GlobalParameters:
   SyncsPerBenchmark: 1
   NumElementsToValidate: 0
+  NumElementsToValidateWinner: -1
   KernelTime: False
   NewClient: 2
   BoundsCheck: False
@@ -30,6 +31,7 @@ GlobalParameters:
   UseGPUTimer: False
   MaxLDS: 327680
   DeviceLDS: 327680
+  SkipSlowSolutionRatio: 0.8
 
 
 BenchmarkProblems:
