@@ -36,7 +36,7 @@ from rocisa.code import Module
 # Debug: emit `s_mov_b32 m0, LoopCounterL; s_ttracedata` at the start of
 # every mainloop iteration so SQTT / trace decoders can identify iterations.
 # Set to False to drop the markers (saves 2 instructions per iter).
-DEBUG_EMIT_MAINLOOP_TRACE_MARKER = False
+DEBUG_EMIT_MAINLOOP_TRACE_MARKER = True
 
 # ds_load_b128 reads 4 contiguous VGPRs.
 DS_B128_VGPRS = 4
@@ -1010,9 +1010,13 @@ class LogicalScheduler:
     def _build_gr_slot_bounds(self):
         """Build lower and upper slot bounds for GR placement.
 
-        lower: (pi, tensor) -> [(subIterK, k_start, k_end)] for LR(mt=0).
-               GR(mt=2) can't be placed at a slot where a later LR(mt=0)
-               in the same partition has overlapping k-range (LDS conflict).
+        lower: tensor -> [(flat, t_start, t_end, k_start, k_end)] for LR(mt=0).
+               GR(mt=2) writes the same LDS buffer as MT n, so it can't be
+               placed at/before a flat slot where a later LR(mt=0) in *any*
+               partition reads an overlapping tile/k-range (LDS conflict).
+               Collisions span partitions: an LR(n) read for tensor B may sit
+               in partition pi+1 while the GR(n+2) overwrite is emitted in
+               partition pi, so the check must be in flat execution order.
         upper: (tensor, mt) -> first flat slot index with LR(tensor, mt).
                GR(tensor, mt) must be placed strictly before this slot.
         """
@@ -1024,8 +1028,10 @@ class LogicalScheduler:
                 flat = pi * numK + slot.subIterK
                 for lr in slot.lrs:
                     if lr.mtIteration == 0:
-                        lower.setdefault((pi, lr.tensor), []).append(
-                            (slot.subIterK,
+                        lower.setdefault(lr.tensor, []).append(
+                            (flat,
+                             lr.tiles.tileId_start,
+                             lr.tiles.tileId_end,
                              lr.tiles.subIterK_start,
                              lr.tiles.subIterK_end))
                     key = (lr.tensor, lr.mtIteration)
@@ -1034,18 +1040,20 @@ class LogicalScheduler:
         return lower, upper
 
     @staticmethod
-    def _has_lr_conflict(lr_lower, tensor, mt_val, pi, subIterK,
-                         gr_k_start, gr_k_end):
-        """Return True if placing GR(mt_val) at (pi, subIterK) conflicts.
+    def _has_lr_conflict(lr_lower, tensor, mt_val, flat,
+                         gr_t_start, gr_t_end, gr_k_start, gr_k_end):
+        """Return True if placing GR(mt_val) at flat slot conflicts.
 
-        GR(MT n+2) writes the same LDS buffer as MT n, so it conflicts
-        only if a later LR(MT n) in the same partition accesses an
-        overlapping subIterK range.
+        GR(MT n+2) writes the same LDS buffer as MT n, so it conflicts if a
+        later LR(MT n) — in flat execution order across all partitions —
+        still reads an overlapping tile/subIterK range from that buffer.
         """
         if mt_val != 2:
             return False
-        for lr_slot, lr_ks, lr_ke in lr_lower.get((pi, tensor), []):
-            if lr_slot > subIterK and gr_k_start < lr_ke and lr_ks < gr_k_end:
+        for lr_flat, lr_ts, lr_te, lr_ks, lr_ke in lr_lower.get(tensor, []):
+            if (lr_flat > flat and
+                    gr_t_start < lr_te and lr_ts < gr_t_end and
+                    gr_k_start < lr_ke and lr_ks < gr_k_end):
                 return True
         return False
 
@@ -1098,7 +1106,7 @@ class LogicalScheduler:
                            last) if nAtoms else 0
             while (slot < last and
                    self._has_lr_conflict(lower, tensor, mt_val,
-                                         slot // numK, slot % numK, ks, ke)):
+                                         slot, ts, te, ks, ke)):
                 slot += 1
             buckets[slot].append((tensor, mt_val, ts, te, ks, ke))
 
