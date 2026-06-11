@@ -639,7 +639,7 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                 - resultsFileName: Path to benchmark results CSV
                 - returncode: Benchmark client return code (0=success)
             """
-            nonlocal benchmarkTestFails
+            nonlocal benchmarkTestFails, codeObjectFiles, cachedLibraryFile
             
             if not isCached:
                  # New compiles always go to the hash-keyed dir, never overwrite legacy in place.
