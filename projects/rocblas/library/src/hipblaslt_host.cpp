@@ -138,6 +138,14 @@ namespace
                            std::complex<double>,
                            std::conditional_t<std::is_same_v<T, int8_t>, int32_t, T>>>;
 
+    /***********************************************************************
+     * Variable template to set scale type to F32 if the data type of BF16 *
+     **********************************************************************/
+    template <typename T>
+    constexpr auto hipblaslt_scaletype = hipblaslt_datatype<T>;
+
+    template <>
+    constexpr auto hipblaslt_scaletype<rocblas_bfloat16> = HIP_R_32F;
     /****************************************************************
      * Construct a HipBlasLT GEMM from a RocblasContractionProblem *
      ****************************************************************/
@@ -543,7 +551,7 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                                           sizeof(int64_t))));
     hipblasLtMatmulDesc_t matmulDesc;
     RETURN_IF_ROCBLAS_ERROR(static_cast<rocblas_status>(
-        hipblasLtMatmulDescCreate(&matmulDesc, hipblaslt_compute_type<Tc>, hipblaslt_datatype<Ti>),
+        hipblasLtMatmulDescCreate(&matmulDesc, hipblaslt_compute_type<Tc>, hipblaslt_scaletype<Ti>),
         HIPBLAS_STATUS_SUCCESS));
     RETURN_IF_ROCBLAS_ERROR(static_cast<rocblas_status>(hipblasLtMatmulDescSetAttribute(
         matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSA, &transA, sizeof(int32_t))));
