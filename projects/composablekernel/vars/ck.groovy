@@ -418,11 +418,21 @@ def getDockerImage(Map conf=[:]){
 // ---------------------------------------------------------------------------
 
 // Cheap host-level probes — exit status is the answer, no log parsing.
-def daemonUp()      { sh(returnStatus:true, script:'docker info >/dev/null 2>&1') == 0 }
-def driverUp()      { sh(returnStatus:true, script:'test -e /sys/module/amdgpu/version') == 0 }
-def devicesUp()     { sh(returnStatus:true, script:'test -e /dev/kfd && ls /dev/dri/renderD* >/dev/null 2>&1') == 0 }
+def daemonUp() {
+    echo "Preflight: checking docker daemon"
+    sh(returnStatus:true, script:'docker info >/dev/null 2>&1') == 0
+}
+def driverUp() {
+    echo "Preflight: checking amdgpu driver"
+    sh(returnStatus:true, script:'test -e /sys/module/amdgpu/version') == 0
+}
+def devicesUp() {
+    echo "Preflight: checking GPU devices"
+    sh(returnStatus:true, script:'test -e /dev/kfd && ls /dev/dri/renderD* >/dev/null 2>&1') == 0
+}
 def cacheWritable() { sh(returnStatus:true, script:'D=${SCCACHE_DIR:-/.cache/sccache}; mkdir -p "$D/probe" 2>/dev/null') == 0 }
 def diskOk(String path='/var/jenkins/workspace', int minGb=5) {
+    echo "Preflight: checking disk space on ${path} (minimum ${minGb}GB)"
     sh(returnStdout:true, script:"df --output=avail -BG ${path} | tail -1 | tr -dc '0-9'").trim().toInteger() >= minGb
 }
 
@@ -433,10 +443,12 @@ def gpuUsable(String image) { sh(returnStatus:true, script:"docker run --rm --de
 // required. Image/registry/container faults are classified in the body by pullImage
 // and the in-container GPU check, where the correct conf is available.
 def preflight() {
+    echo "Preflight: starting node health checks on ${env.NODE_NAME}"
     if (!daemonUp())  throw new org.ck.NodeFault('docker-daemon-down')
     if (!driverUp())  throw new org.ck.NodeFault('driver-not-loaded')
     if (!devicesUp()) throw new org.ck.NodeFault('gpu-devices-missing')
     if (!diskOk())    throw new org.ck.NodeFault('disk-space-low')
+    echo "Preflight: all checks passed on ${env.NODE_NAME}"
     // sccache cache-dir writability is not checked here: sccache runs inside
     // the container, so /.cache/sccache on the host is always root-owned and
     // a host-level mkdir probe would always fail (false NodeFault on every node).
