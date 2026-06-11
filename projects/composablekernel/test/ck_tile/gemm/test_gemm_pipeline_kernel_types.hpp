@@ -184,6 +184,17 @@ using KernelTypesCompV3AsyncCCR = ::testing::Types<
     std::tuple<    Col,     Col,     Row,       F8,        BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>
 >;
 
+using KernelTypesCompV3AsyncPersistent = ::testing::Types<
+    std::tuple<    Row,     Row,     Row,       F16,       F16,         F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3, Persistent>,
+    std::tuple<    Row,     Row,     Row,       F8,        F8,          F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3, Persistent>,
+    std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3, Persistent>,
+    std::tuple<    Row,     Col,     Row,       F8,        F8,          F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3, Persistent>,
+    std::tuple<    Col,     Row,     Row,       F16,       F16,         F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3, Persistent>,
+    std::tuple<    Col,     Row,     Row,       F8,        F8,          F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3, Persistent>,
+    std::tuple<    Col,     Col,     Row,       F16,       F16,         F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3, Persistent>,
+    std::tuple<    Col,     Col,     Row,       F8,        F8,          F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3, Persistent>
+>;
+
 #ifdef CK_USE_GFX1250
 #define MinK  I64
 #else
