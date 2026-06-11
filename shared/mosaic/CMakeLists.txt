@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# mosaic: standalone, framework-agnostic kernel-recommender (MLREC_v6 runtime).
+# mosaic: standalone, framework-agnostic kernel-recommender (MLREC_v1 runtime).
 # Builds a STATIC library with NO GEMM-framework dependency.
 
 cmake_minimum_required(VERSION 3.25.2)

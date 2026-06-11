@@ -24,7 +24,7 @@
 
 namespace mosaic {
 
-// Explicitly load weights from a .bin path (MLREC_v6 format). Replaces any
+// Explicitly load weights from a .bin path (MLREC_v1 format). Replaces any
 // previously loaded model on success. Returns false on any I/O or format
 // error. Normally callers rely on the lazy singleton instead.
 bool load_weights(const std::string& bin_path);

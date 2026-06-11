@@ -2,11 +2,11 @@
 // SPDX-License-Identifier:  MIT
 //
 // =============================================================================
-// mosaic engine -- the MLREC_v6 runtime (framework-agnostic)
+// mosaic engine -- the MLREC_v1 runtime (framework-agnostic)
 // =============================================================================
 //
 // The GRID-aware ("split-tree, per-cell two-tower MLP") GEMM kernel
-// recommender: inference math, the on-disk MLREC_v6 `.bin` serialization, the
+// recommender: inference math, the on-disk MLREC_v1 `.bin` serialization, the
 // feature catalog, the whitening, the smart-K signature filter, the argmax
 // tie-break, and a self-contained LDS-capacity feasibility gate. The engine
 // depends on no GEMM framework.
@@ -669,7 +669,7 @@ constexpr std::uint8_t kDtypeFp32 = 0;
 constexpr std::uint8_t kDtypeBf16 = 1;
 constexpr std::uint8_t kDtypeInt8 = 2;
 
-// ── binary readers (MLREC_v6; mirror of stage06's writer) ──────────────────
+// ── binary readers (MLREC_v1; mirror of stage06's writer) ──────────────────
 template <typename T>
 bool read_pod(std::istream& f, T* out) {
   f.read(reinterpret_cast<char*>(out), sizeof(T));
@@ -748,11 +748,11 @@ bool load_binary_stream(std::istream& f, LoadedModel* out) {
 
   char magic[8];
   f.read(magic, 8);
-  if (f.gcount() != 8 || std::memcmp(magic, "MLREC_v6", 8) != 0) return false;
+  if (f.gcount() != 8 || std::memcmp(magic, "MLREC_v1", 8) != 0) return false;
 
   std::uint32_t version = 0;
   if (!read_pod(f, &version)) return false;
-  if (version != 6) return false;
+  if (version != 1) return false;
 
   std::uint32_t endian = 0;
   if (!read_pod(f, &endian)) return false;

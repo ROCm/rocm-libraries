@@ -126,7 +126,7 @@ NB_MODULE(mosaic, m) {
 
   // ── free functions ──────────────────────────────────────────────────────--
   m.def("load_weights", &mosaic::load_weights, nb::arg("bin_path"),
-        "Explicitly load MLREC_v6 weights from a .bin path. Returns false on "
+        "Explicitly load MLREC_v1 weights from a .bin path. Returns false on "
         "any I/O or format error.");
 
   m.def("weights_loaded", &mosaic::weights_loaded,
