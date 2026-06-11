@@ -216,19 +216,11 @@ inline bool isWaitAluInst(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::s_wait_alu;
 }
 
-// TODO: replace with canonical isReturn() / isCall() helpers once they land.
-//
-// s_setpc_b64 is two things at runtime: a return (paired with a prior
-// s_swappc_b64) or an intra-function long jump. The opcode alone can't tell
-// them apart, so we handle neither here. Returns are already covered by the
-// disable/re-enable inserted around the call's s_swappc_b64; long jumps
-// don't need a flip.
+// isReturn = kernel exit (s_endpgm). Used to drop mode2 before the wave exits.
+// Note: function-call returns (s_setpc_b64 s[26:27]) are intentionally NOT
+// handled here — mode2 is confined to the loop region.
 inline bool isReturn(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::s_endpgm;
-}
-
-inline bool isCall(const StinkyInstruction& inst) {
-    return inst.getUnifiedOpcode() == GFX::s_swappc_b64;
 }
 
 // ---------------------------------------------------------------------------
@@ -625,6 +617,25 @@ class InsertWaitAluPassImpl : public Pass {
             PASS_DEBUG(std::cerr << "[InsertWaitAlu]   visit " << inst->getHwInstDesc()->mnemonic
                                  << "\n");
 
+            // Function call (s_swappc): treat as an analysis barrier — reset the
+            // scoreboard so pre-call producer scores don't leak into post-call
+            // tracking as phantom dependencies.
+            //
+            // No drain / no callee-return handling is needed: mode2 is confined
+            // to the loop region (see insertSchedModeLifecycle), and every
+            // s_swappc lives in the mode0 epilogue (GlobalWriteBatch is the sole
+            // call emitter). In mode0 the hardware auto-stalls on all hazards —
+            // caller leftovers and callee outputs are all handled by HW, so the
+            // pass needs to emit nothing around the call.
+            if (isCall(*inst)) {
+                PASS_DEBUG(std::cerr << "[InsertWaitAlu]   call — reset brackets (mode0 epilogue, "
+                                        "HW handles hazards)\n");
+                sb.applyWaitcnt(CT_VA_VDST, 0);
+                sb.applyWaitcnt(CT_VM_VSRC, 0);
+                ++it;
+                continue;
+            }
+
             Wait wait = computeWaitForInst(*inst, sb);
             if (wait.hasAny()) {
                 PASS_DEBUG(std::cerr
@@ -681,36 +692,47 @@ class InsertWaitAluPassImpl : public Pass {
 
         PASS_DEBUG(std::cerr << "[InsertWaitAlu] Phase 3: insert mode2 lifecycle setregs\n");
 
-        // Anchor at label_Preload_Offset_Start: the kernarg-preload entry
-        // jumps directly there (skipping the +0..255 prologue), and the
-        // non-preload path falls through into it, so one anchor covers both.
-        BasicBlock* anchorBB = entry;
+        // The wave can enter the compute region through two labels: the
+        // kernarg-preload path jumps straight to label_Preload_Offset_Start
+        // (skipping the +0..255 prologue), while the non-preload path enters at
+        // label_ASM_Start (the main-body entry). A kernel may emit either or
+        // both. Enable mode2 at EVERY entry label present so whichever path the
+        // wave takes hits a setreg(SCHED_MODE)=2 — re-enabling is idempotent and
+        // the span between the two labels is SALU kernarg processing (no
+        // VALU/VMEM in flight), so a second enable is still drain-free.
+        // If no entry label is found, fall back to the function entry block.
+        std::vector<BasicBlock*> anchorBBs;
         for (BasicBlock& bb : func) {
-            if (bb.getLabel() == "label_Preload_Offset_Start") {
-                anchorBB = &bb;
+            if (bb.getLabel() == "label_Preload_Offset_Start" ||
+                bb.getLabel() == "label_ASM_Start") {
+                anchorBBs.push_back(&bb);
+            }
+        }
+        if (anchorBBs.empty()) anchorBBs.push_back(entry);
+
+        // Drain-free: each anchor is a kernel entry (all DEPCTR counters zero,
+        // SALU kernarg code follows), and mode2->mode0 needs no drain either.
+        for (BasicBlock* anchorBB : anchorBBs) {
+            // Skip leading labels / pseudo instructions so the setreg lands at
+            // the first real instruction position after the label.
+            auto anchorIt = anchorBB->begin();
+            while (anchorIt != anchorBB->end()) {
+                auto* inst = dyn_cast<StinkyInstruction>(anchorIt.getNodePtr());
+                if (inst && isPseudoInst(inst)) {
+                    ++anchorIt;
+                    continue;
+                }
                 break;
             }
+            IRBase* anchor = (anchorIt == anchorBB->end()) ? nullptr : anchorIt.getNodePtr();
+            makeSchedModeSetreg(*anchorBB, anchor, /*value=*/2);
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu]   inserted setreg(SCHED_MODE)=2 at entry "
+                                    "bb=\""
+                                 << anchorBB->getLabel() << "\"\n");
         }
 
-        // Enable mode2 at anchor: skip leading labels / pseudo instructions so
-        // the setreg lands at the first real instruction position.
-        auto anchorIt = anchorBB->begin();
-        while (anchorIt != anchorBB->end()) {
-            auto* inst = dyn_cast<StinkyInstruction>(anchorIt.getNodePtr());
-            if (inst && isPseudoInst(inst)) {
-                ++anchorIt;
-                continue;
-            }
-            break;
-        }
-        IRBase* anchor = (anchorIt == anchorBB->end()) ? nullptr : anchorIt.getNodePtr();
-        makeSchedModeSetreg(*anchorBB, anchor, /*value=*/2);
-        PASS_DEBUG(std::cerr << "[InsertWaitAlu]   inserted setreg(SCHED_MODE)=2 at entry bb=\""
-                             << anchorBB->getLabel() << "\"\n");
-
-        // Disable mode2 before every return / call; re-enable after every call.
-        // Walking the IR by collecting first (insertion would invalidate the
-        // forward iterator otherwise).
+        // Disable mode2 before every return and every call. We do NOT re-enable
+        // after a call: function calls only occur in the mode0 epilogue.
         struct Insertion {
             BasicBlock* bb;
             StinkyInstruction* anchor;
@@ -728,15 +750,91 @@ class InsertWaitAluPassImpl : public Pass {
                     bbsWithExitDisable.insert(&bb);
                 } else if (isCall(*inst)) {
                     work.push_back({&bb, inst, /*value=*/0, /*insertAfter=*/false});
-                    work.push_back({&bb, inst, /*value=*/2, /*insertAfter=*/true});
                 }
             }
         }
-        // Fall-off exit fallback: any BB with no successors that does not end
-        // in a return needs an end-of-BB disable. Covers label-scoped runs
-        // (--from-label / --to-label) where the extracted region has no
-        // s_endpgm / s_setpc_b64 but execution still leaves the function at
-        // the natural end of the last BB.
+
+        // A BB containing no real (non-pseudo) instruction is an out-of-region
+        // placeholder: CFGBuilder created it as the target of a branch whose real
+        // destination lives outside the extracted scope.
+        auto hasRealInst = [](BasicBlock& b) {
+            for (auto it = b.begin(); it != b.end(); ++it) {
+                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                if (inst && !isPseudoInst(inst)) return true;
+            }
+            return false;
+        };
+        // A "scope-exit placeholder" is a label-only BB that CFGBuilder created
+        // as the target of a branch whose real IR lives OUTSIDE the extracted
+        // region: it has no real instructions AND no path back to real in-region
+        // content (a leaf, or a chain of label-only BBs that dead-ends). This
+        // must NOT match an in-region label-only BB that merely falls through to
+        // its real body in the next BB (e.g. label_ActivationSetPCAddrEnd,
+        // label_GW_B0_FD0_OptNLL_MB, the To_Activation_* arm targets) — those are
+        // not exits and would otherwise collect spurious mode0 disables.
+        auto isExitPlaceholder = [&](BasicBlock& start) {
+            if (hasRealInst(start)) return false;
+            std::unordered_set<BasicBlock*> seen;
+            std::vector<BasicBlock*> stack{&start};
+            while (!stack.empty()) {
+                BasicBlock* b = stack.back();
+                stack.pop_back();
+                if (!seen.insert(b).second) continue;
+                for (BasicBlock* s : b->getSuccessors()) {
+                    if (!s) continue;
+                    if (hasRealInst(*s)) return false;  // reaches real in-region code
+                    stack.push_back(s);
+                }
+            }
+            return true;  // no real in-region content reachable -> true exit
+        };
+
+        // Scope-exit via control transfer to an out-of-region target. After
+        // LongBranchLowering stamps LabelData on a long branch, CFGBuilder wires
+        // an edge to the target; if that target's real IR is outside the
+        // extracted scope it becomes an empty placeholder BB. The source BB then
+        // still has a successor, so the no-successor fallback below misses it.
+        // Detect "branch/long-branch whose successor is a true exit placeholder"
+        // and drop mode2 BEFORE the terminator so the exit path runs in mode0.
+        for (BasicBlock& bb : func) {
+            if (bbsWithExitDisable.count(&bb)) continue;
+            bool exitsRegion = false;
+            for (BasicBlock* succ : bb.getSuccessors()) {
+                if (succ && isExitPlaceholder(*succ)) {
+                    exitsRegion = true;
+                    break;
+                }
+            }
+            if (!exitsRegion) continue;
+            StinkyInstruction* tail = nullptr;
+            for (auto it = bb.begin(); it != bb.end(); ++it) {
+                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                if (!inst || isPseudoInst(inst)) continue;
+                tail = inst;
+            }
+            if (!tail) continue;
+            // If the BB branches out (tail is a branch / long-branch), the disable
+            // must precede the terminator. If it falls through to the out-of-region
+            // placeholder (tail is an ordinary instruction), the disable goes
+            // AFTER the tail — at the very end of the BB — so that ALL incoming
+            // paths (fall-through AND any long-branch that targets this BB's label,
+            // landing after an earlier same-BB disable) flow through it before
+            // leaving the region.
+            const bool tailTransfers =
+                isBranch(*tail) || tail->getUnifiedOpcode() == GFX::s_setpc_b64;
+            work.push_back({&bb, tail, /*value=*/0, /*insertAfter=*/!tailTransfers});
+            bbsWithExitDisable.insert(&bb);
+        }
+        // Region-exit fallback: any BB with no in-region successor leaves the
+        // mode2 scope and needs a disable. Two flavors:
+        //   * exits via a control-transfer terminator — a long-branch-out
+        //     (s_setpc_b64 carrying LabelData to an out-of-region label, which
+        //     CFGBuilder gave no in-region successor) or an s_branch/s_cbranch to
+        //     an out-of-region label. The disable must go BEFORE that terminator
+        //     so it runs on the way out.
+        //   * genuine fall-off at the natural end of the region — the disable
+        //     goes after the tail.
+        // (mode2->mode0 is HW-free, so a redundant disable here is harmless.)
         for (BasicBlock& bb : func) {
             if (bbsWithExitDisable.count(&bb)) continue;
             if (!bb.getSuccessors().empty()) continue;
@@ -752,7 +850,9 @@ class InsertWaitAluPassImpl : public Pass {
                 tail = inst;
             }
             if (tail) {
-                work.push_back({&bb, tail, /*value=*/0, /*insertAfter=*/true});
+                const bool tailExits =
+                    isBranch(*tail) || tail->getUnifiedOpcode() == GFX::s_setpc_b64;
+                work.push_back({&bb, tail, /*value=*/0, /*insertAfter=*/!tailExits});
                 continue;
             }
             // Label-only trailing BB (e.g. the --to-label boundary BB in
