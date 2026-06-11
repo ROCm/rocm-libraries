@@ -6211,7 +6211,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")
 
     # Check if StinkyTofu assembly output should be used
-    if stModule is not None:
+    if os.environ.get("USE_ROCISA_ASM") is None and stModule:
       t2_start = time.perf_counter()
       st_asm = stModule.emitAssembly()
       t2_end = time.perf_counter()
