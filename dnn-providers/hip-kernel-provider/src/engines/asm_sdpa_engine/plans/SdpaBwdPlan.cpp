@@ -3,6 +3,7 @@
 
 #include "plans/SdpaBwdPlan.hpp"
 #include "asm/SdpaBwdKernelArgs.hpp"
+#include "plans/SdpaKernelUtils.hpp"
 #include "plans/SdpaPlanUtils.hpp"
 
 #include <cstddef>
@@ -481,11 +482,34 @@ void SdpaBwdPlan::execute(const Handle& handle,
     // Launching on the same stream guarantees ordering without explicit barriers.
     auto stream = handle.getStream();
 
+    const bool perfLog = isPerfLogEnabled();
+    const auto execStart = SteadyClock::now();
+
+    hipEvent_t gpuOdoStart = nullptr;
+    hipEvent_t gpuOdoStop = nullptr;
+    hipEvent_t gpuDqdkdvStart = nullptr;
+    hipEvent_t gpuDqdkdvStop = nullptr;
+    hipEvent_t gpuPostStart = nullptr;
+    hipEvent_t gpuPostStop = nullptr;
+    if(perfLog)
+    {
+        (void)hipEventCreate(&gpuOdoStart);
+        (void)hipEventCreate(&gpuOdoStop);
+        (void)hipEventCreate(&gpuDqdkdvStart);
+        (void)hipEventCreate(&gpuDqdkdvStop);
+        (void)hipEventCreate(&gpuPostStart);
+        (void)hipEventCreate(&gpuPostStop);
+    }
+
     // 6a. Build args and launch kernel 1: ODO
     auto odoArgs = buildOdoArgs(mhaArgs);
 
     const unsigned int gdxOdo = _params.odoTiles.gridDim(mhaArgs.seqlen_q);
 
+    if(perfLog)
+    {
+        (void)hipEventRecord(gpuOdoStart, stream);
+    }
     if(!launchKernel("SDPA backward ODO",
                      _odoKernel.function(),
                      &odoArgs,
@@ -499,6 +523,10 @@ void SdpaBwdPlan::execute(const Handle& handle,
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
             "SdpaBwdPlan::execute: hipModuleLaunchKernel failed for SDPA backward ODO");
+    }
+    if(perfLog)
+    {
+        (void)hipEventRecord(gpuOdoStop, stream);
     }
     plan_utils::throwOnLaunchPostError("SDPA backward ODO");
 
@@ -527,6 +555,10 @@ void SdpaBwdPlan::execute(const Handle& handle,
         }
     }
 
+    if(perfLog)
+    {
+        (void)hipEventRecord(gpuDqdkdvStart, stream);
+    }
     if(!launchKernel("SDPA backward DQDKDV",
                      _dqdkdvKernel.function(),
                      &dqdkdvArgs,
@@ -541,16 +573,25 @@ void SdpaBwdPlan::execute(const Handle& handle,
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
             "SdpaBwdPlan::execute: hipModuleLaunchKernel failed for SDPA backward DQDKDV");
     }
+    if(perfLog)
+    {
+        (void)hipEventRecord(gpuDqdkdvStop, stream);
+    }
     plan_utils::throwOnLaunchPostError("SDPA backward DQDKDV");
 
     // 6c. DQ_CONVERT (FP32 → BF16) — A32 path only.
     // A16 wrote dQ directly to the output BF16 buffer in step 6b; no cast needed.
+    float gpuPostMs = 0;
     if(_params.accumulatorType == AccumulatorType::A32)
     {
         auto postArgs = buildPostArgs(mhaArgs);
 
         const unsigned int gdxPost = _params.dqConvertTiles.gridDim(mhaArgs.seqlen_q);
 
+        if(perfLog)
+        {
+            (void)hipEventRecord(gpuPostStart, stream);
+        }
         if(!launchKernel("SDPA backward DQ_CONVERT",
                          _postKernel->function(),
                          &postArgs,
@@ -565,7 +606,40 @@ void SdpaBwdPlan::execute(const Handle& handle,
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                 "SdpaBwdPlan::execute: hipModuleLaunchKernel failed for SDPA backward DQ_CONVERT");
         }
+        if(perfLog)
+        {
+            (void)hipEventRecord(gpuPostStop, stream);
+        }
         plan_utils::throwOnLaunchPostError("SDPA backward DQ_CONVERT");
+    }
+
+    if(perfLog)
+    {
+        // Synchronize on the last recorded event to get all GPU timings
+        hipEvent_t lastStop = (_params.accumulatorType == AccumulatorType::A32) ? gpuPostStop
+                                                                               : gpuDqdkdvStop;
+        (void)hipEventSynchronize(lastStop);
+
+        float gpuOdoMs = 0;
+        float gpuDqdkdvMs = 0;
+        (void)hipEventElapsedTime(&gpuOdoMs, gpuOdoStart, gpuOdoStop);
+        (void)hipEventElapsedTime(&gpuDqdkdvMs, gpuDqdkdvStart, gpuDqdkdvStop);
+        if(_params.accumulatorType == AccumulatorType::A32)
+        {
+            (void)hipEventElapsedTime(&gpuPostMs, gpuPostStart, gpuPostStop);
+        }
+
+        (void)hipEventDestroy(gpuOdoStart);
+        (void)hipEventDestroy(gpuOdoStop);
+        (void)hipEventDestroy(gpuDqdkdvStart);
+        (void)hipEventDestroy(gpuDqdkdvStop);
+        (void)hipEventDestroy(gpuPostStart);
+        (void)hipEventDestroy(gpuPostStop);
+
+        HIPDNN_PLUGIN_LOG_INFO("[PERF] SdpaBwdPlan::execute total_host="
+                               << elapsedUs(execStart, SteadyClock::now())
+                               << "us odo_gpu=" << gpuOdoMs << "ms dqdkdv_gpu=" << gpuDqdkdvMs
+                               << "ms dq_convert_gpu=" << gpuPostMs << "ms");
     }
 }
 

@@ -6,6 +6,7 @@
 #include "asm_fmha_v3_bwd_configs.hpp"
 #include "core/Utils.hpp"
 #include "plans/SdpaBwdPlan.hpp"
+#include "plans/SdpaKernelUtils.hpp"
 #include "plans/SdpaPlanUtils.hpp"
 
 #include <array>
@@ -785,6 +786,8 @@ void SdpaBwdPlanBuilder::buildPlan(
     // selection; it drives CSV row selection, DQ_CONVERT loading, the dq_acc
     // workspace, and params below. Defaults to A32 when the knob is unset.
     // -------------------------------------------------------------------------
+    const auto buildPlanStart = SteadyClock::now();
+
     const AccumulatorType accType
         = executionContext.executionSettings().accumulatorType.value_or(AccumulatorType::A32);
 
@@ -1144,6 +1147,12 @@ void SdpaBwdPlanBuilder::buildPlan(
     // both paths uniformly.
     executionContext.setPlan(std::make_unique<SdpaBwdPlan>(
         std::move(*odoKernel), std::move(*dqdkdvKernel), std::move(postKernel), params));
+
+    if(isPerfLogEnabled())
+    {
+        HIPDNN_PLUGIN_LOG_INFO("[PERF] SdpaBwdPlanBuilder::buildPlan total="
+                               << elapsedUs(buildPlanStart, SteadyClock::now()) << "us");
+    }
 }
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::getCustomKnobs(

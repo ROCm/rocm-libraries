@@ -6,6 +6,7 @@
 #include "asm_fmha_v3_fwd_configs.hpp"
 #include "core/Utils.hpp"
 #include "plans/SdpaFwdPlan.hpp"
+#include "plans/SdpaKernelUtils.hpp"
 #include "plans/SdpaPlanUtils.hpp"
 
 #include <cmath>
@@ -276,6 +277,7 @@ void SdpaFwdPlanBuilder::buildPlan(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
     Context& executionContext) const
 {
+    const auto buildPlanStart = SteadyClock::now();
 
     // Get device properties
     std::string deviceString;
@@ -421,6 +423,12 @@ void SdpaFwdPlanBuilder::buildPlan(
     }
 
     executionContext.setPlan(std::make_unique<SdpaFwdPlan>(std::move(*kernel), params));
+
+    if(isPerfLogEnabled())
+    {
+        HIPDNN_PLUGIN_LOG_INFO("[PERF] SdpaFwdPlanBuilder::buildPlan total="
+                               << elapsedUs(buildPlanStart, SteadyClock::now()) << "us");
+    }
 }
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaFwdPlanBuilder::getCustomKnobs(

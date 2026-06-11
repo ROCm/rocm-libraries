@@ -3,6 +3,7 @@
 
 #include "plans/SdpaFwdPlan.hpp"
 #include "asm/SdpaFwdKernelArgs.hpp"
+#include "plans/SdpaKernelUtils.hpp"
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <unordered_map>
 #include <utility>
@@ -138,6 +139,18 @@ void SdpaFwdPlan::execute(const Handle& handle,
 
     const unsigned int blockDimX = _params.headDimQk == 192 && _params.headDimV == 128 ? 256 : 512;
 
+    const bool perfLog = isPerfLogEnabled();
+    const auto execStart = SteadyClock::now();
+
+    hipEvent_t gpuStart = nullptr;
+    hipEvent_t gpuStop = nullptr;
+    if(perfLog)
+    {
+        (void)hipEventCreate(&gpuStart);
+        (void)hipEventCreate(&gpuStop);
+        (void)hipEventRecord(gpuStart, handle.getStream());
+    }
+
     launchKernel("fwd",
                  _kernel.function(),
                  &args,
@@ -147,6 +160,19 @@ void SdpaFwdPlan::execute(const Handle& handle,
                  gridDimZ,
                  blockDimX,
                  handle.getStream());
+
+    if(perfLog)
+    {
+        (void)hipEventRecord(gpuStop, handle.getStream());
+        (void)hipEventSynchronize(gpuStop);
+        float gpuMs = 0;
+        (void)hipEventElapsedTime(&gpuMs, gpuStart, gpuStop);
+        (void)hipEventDestroy(gpuStart);
+        (void)hipEventDestroy(gpuStop);
+        HIPDNN_PLUGIN_LOG_INFO("[PERF] SdpaFwdPlan::execute total_host="
+                               << elapsedUs(execStart, SteadyClock::now())
+                               << "us kernel_gpu=" << gpuMs << "ms");
+    }
 }
 
 } // namespace asm_sdpa_engine

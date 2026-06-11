@@ -5,8 +5,10 @@
 
 #include "SdpaBwdParams.hpp"
 
+#include <chrono>
 #include <cstddef>
 #include <hip/hip_runtime.h>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <optional>
 #include <string>
@@ -14,6 +16,28 @@
 
 namespace asm_sdpa_engine
 {
+
+// =============================================================================
+// Performance timing utilities (ALMIOPEN-1942)
+// =============================================================================
+//
+// Enabled at runtime by setting the HIPDNN_SDPA_PERF_LOG environment variable
+// to any non-empty value. When disabled, isPerfLogEnabled() returns false on
+// every call with no syscall overhead (the env var is checked once and cached).
+
+inline bool isPerfLogEnabled()
+{
+    static const bool enabled = !hipdnn_data_sdk::utilities::getEnv("HIPDNN_SDPA_PERF_LOG").empty();
+    return enabled;
+}
+
+using SteadyClock = std::chrono::steady_clock;
+using TimePoint = SteadyClock::time_point;
+
+inline int64_t elapsedUs(TimePoint start, TimePoint end)
+{
+    return std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+}
 
 // =============================================================================
 // Workspace alignment utilities
@@ -113,6 +137,7 @@ inline bool launchKernel(const char* kernelName,
     // The stream determines execution ordering.  All kernels on the same
     // stream run sequentially; using the handle's stream allows the caller
     // to overlap SDPA work with independent operations on other streams.
+    const auto t0 = SteadyClock::now();
     const hipError_t err = hipModuleLaunchKernel(func,
                                                  gridX,
                                                  gridY,
@@ -124,6 +149,7 @@ inline bool launchKernel(const char* kernelName,
                                                  stream,
                                                  nullptr, // kernel args (not used with config)
                                                  config);
+    const auto t1 = SteadyClock::now();
     if(err != hipSuccess)
     {
         HIPDNN_PLUGIN_LOG_ERROR("Failed to launch "
@@ -133,6 +159,12 @@ inline bool launchKernel(const char* kernelName,
 
     HIPDNN_PLUGIN_LOG_INFO(kernelName << " kernel launched: grid=[" << gridX << "," << gridY << ","
                                       << gridZ << "] block=[" << blockDim << ",1,1]");
+    if(isPerfLogEnabled())
+    {
+        HIPDNN_PLUGIN_LOG_INFO("[PERF] launchKernel(" << kernelName
+                                                      << "): hipModuleLaunchKernel="
+                                                      << elapsedUs(t0, t1) << "us");
+    }
     return true;
 }
 
@@ -226,8 +258,10 @@ private:
 inline std::optional<HipModuleGuard> loadKernelModule(const std::string& coPath,
                                                       const char* funcName)
 {
+    const auto tLoadStart = SteadyClock::now();
     hipModule_t rawModule = nullptr;
     hipError_t err = hipModuleLoad(&rawModule, coPath.c_str());
+    const auto tLoadEnd = SteadyClock::now();
     if(err != hipSuccess)
     {
         HIPDNN_PLUGIN_LOG_ERROR(
@@ -236,8 +270,10 @@ inline std::optional<HipModuleGuard> loadKernelModule(const std::string& coPath,
     }
     HipModuleGuard guard(rawModule);
 
+    const auto tFuncStart = SteadyClock::now();
     hipFunction_t func = nullptr;
     err = hipModuleGetFunction(&func, guard.module(), funcName);
+    const auto tFuncEnd = SteadyClock::now();
     if(err != hipSuccess)
     {
         HIPDNN_PLUGIN_LOG_ERROR("Failed to get kernel function '"
@@ -245,6 +281,15 @@ inline std::optional<HipModuleGuard> loadKernelModule(const std::string& coPath,
         return std::nullopt; // guard destructor unloads module
     }
     guard.setFunction(func);
+
+    if(isPerfLogEnabled())
+    {
+        HIPDNN_PLUGIN_LOG_INFO("[PERF] loadKernelModule: hipModuleLoad="
+                               << elapsedUs(tLoadStart, tLoadEnd)
+                               << "us hipModuleGetFunction=" << elapsedUs(tFuncStart, tFuncEnd)
+                               << "us total="
+                               << elapsedUs(tLoadStart, tFuncEnd) << "us file=" << coPath);
+    }
 
     return guard; // moved out
 }
