@@ -203,14 +203,14 @@ std::pair<flatbuffers::FlatBufferBuilder, BatchnormFwdInferenceWithVariancePlan>
 TEST(TestBatchnormFwdInferenceWithVariancePlan, ExecuteWithoutCompileThrows)
 {
     auto [fbb, plan] = createPlanFromGraph();
-    const HipKernelHandle handle;
+    const Handle handle;
     EXPECT_THROW(plan.execute(handle, nullptr, 0), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestBatchnormFwdInferenceWithVariancePlan, GetWorkspaceSizeReturnsZero)
 {
     auto [fbb, plan] = createPlanFromGraph();
-    const HipKernelHandle handle;
+    const Handle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }
 
@@ -219,7 +219,7 @@ TEST(TestBatchnormFwdInferenceWithVariancePlan, IsMoveConstructible)
     auto [fbb, plan] = createPlanFromGraph();
 
     const BatchnormFwdInferenceWithVariancePlan moved(std::move(plan));
-    const HipKernelHandle handle;
+    const Handle handle;
     EXPECT_EQ(moved.getWorkspaceSize(handle), 0u);
 }
 

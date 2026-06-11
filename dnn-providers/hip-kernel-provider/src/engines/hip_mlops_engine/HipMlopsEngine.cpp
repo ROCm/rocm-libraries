@@ -24,13 +24,12 @@ int64_t HipMlopsEngine::id() const
 static void initializeHipKernelSettings(
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
         engineConfig,
-    [[maybe_unused]] HipKernelSettings& executionSettings)
+    [[maybe_unused]] Settings& executionSettings)
 {
 }
 
 bool HipMlopsEngine::isApplicable(
-    HipKernelHandle& handle,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     // This is wrong if we ever have more than 1 plan builder thats applicable.
     // If this is the case, we should split plan builders accross multiple engines.
@@ -44,7 +43,7 @@ bool HipMlopsEngine::isApplicable(
     return false;
 }
 
-void HipMlopsEngine::getDetails(HipKernelHandle& handle,
+void HipMlopsEngine::getDetails(Handle& handle,
                                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                                 hipdnnPluginConstData_t& detailsOut) const
 {
@@ -86,18 +85,18 @@ void HipMlopsEngine::getDetails(HipKernelHandle& handle,
 }
 
 size_t HipMlopsEngine::getMaxWorkspaceSize(
-    const HipKernelHandle& handle,
+    const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
 {
-    HipKernelSettings baseExecutionSettings;
+    Settings baseExecutionSettings;
     initializeHipKernelSettings(engineConfig, baseExecutionSettings);
     size_t workspaceSize = 0;
     for(const auto& planBuilder : _planBuilders)
     {
         if(planBuilder->isApplicable(handle, opGraph))
         {
-            HipKernelSettings executionSettings = baseExecutionSettings;
+            Settings executionSettings = baseExecutionSettings;
             planBuilder->initializeExecutionSettings(
                 handle, opGraph, engineConfig, executionSettings);
             workspaceSize
@@ -109,12 +108,12 @@ size_t HipMlopsEngine::getMaxWorkspaceSize(
 }
 
 void HipMlopsEngine::initializeExecutionContext(
-    const HipKernelHandle& handle,
+    const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-    HipKernelContext& executionContext) const
+    Context& executionContext) const
 {
-    HipKernelSettings executionSettings;
+    Settings executionSettings;
     initializeHipKernelSettings(engineConfig, executionSettings);
 
     for(const auto& planBuilder : _planBuilders)
@@ -140,9 +139,7 @@ void HipMlopsEngine::initializeExecutionContext(
 }
 
 void HipMlopsEngine::addPlanBuilder(
-    std::unique_ptr<
-        hipdnn_plugin_sdk::IPlanBuilder<HipKernelHandle, HipKernelSettings, HipKernelContext>>
-        planBuilder)
+    std::unique_ptr<hipdnn_plugin_sdk::IPlanBuilder<Handle, Settings, Context>> planBuilder)
 {
     _planBuilders.push_back(std::move(planBuilder));
 }

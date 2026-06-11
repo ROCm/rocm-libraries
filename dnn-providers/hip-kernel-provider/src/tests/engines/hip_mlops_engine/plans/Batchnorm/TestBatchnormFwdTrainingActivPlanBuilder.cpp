@@ -4,8 +4,8 @@
 #include <cstdio>
 #include <gtest/gtest.h>
 
-#include "HipKernelContext.hpp"
-#include "HipKernelHandle.hpp"
+#include "core/Context.hpp"
+#include "core/Handle.hpp"
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormFwdTrainingPlanBuilder.hpp"
 #include "mocks/MockCompiledProgram.hpp"
 #include "mocks/MockDevicePropertyProvider.hpp"
@@ -31,7 +31,7 @@ protected:
     MockKernelCompiler _mockKernelCompiler;
     MockDevicePropertyProvider _mockDevicePropertyProvider;
     BatchnormFwdTrainingPlanBuilder _planBuilder{_mockKernelCompiler, _mockDevicePropertyProvider};
-    HipKernelHandle _dummyHandle;
+    Handle _dummyHandle;
     MockEngineConfig _mockEngineConfig;
 
     void setupMockCompileChain()
@@ -111,7 +111,7 @@ TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, GetMaxWorkspaceSizeReturnsZero)
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
-    const HipKernelSettings settings;
+    const Settings settings;
 
     EXPECT_EQ(_planBuilder.getMaxWorkspaceSize(_dummyHandle, graph, settings), 0u);
 }
@@ -123,7 +123,7 @@ TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, BuildPlanSetsPlanForValidGraph)
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
-    HipKernelContext ctx;
+    Context ctx;
     const MockEngineConfig mockEngineConfig;
 
     EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx));
@@ -177,7 +177,7 @@ TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, BuildPlanThrowsForMalformedBatc
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
-    HipKernelContext ctx;
+    Context ctx;
     const MockEngineConfig mockEngineConfig;
 
     EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx),
@@ -279,7 +279,7 @@ TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, BuildPlanThrowsForMalformedActi
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
-    HipKernelContext ctx;
+    Context ctx;
     const MockEngineConfig mockEngineConfig;
 
     EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx),
