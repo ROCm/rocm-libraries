@@ -50,11 +50,7 @@ TYPED_TEST(TestGroupedGemmMXFlatmm, Basic_4Groups_Random)
     this->Run({128, 256, 384, 512}, {512, 1024, 512, 1024}, {256, 512, 768, 1024}, 4, init_random);
 }
 
-TYPED_TEST(TestGroupedGemmMXFlatmm, Single_Group)
-{
-    // K=512 (Class B), smallest non-trivial size.
-    this->Run({128}, {512}, {512}, 1, init_const);
-}
+TYPED_TEST(TestGroupedGemmMXFlatmm, Single_Group) { this->Run({128}, {512}, {512}, 1, init_const); }
 
 TYPED_TEST(TestGroupedGemmMXFlatmm, Single_Group_Random)
 {
@@ -63,8 +59,6 @@ TYPED_TEST(TestGroupedGemmMXFlatmm, Single_Group_Random)
 
 TYPED_TEST(TestGroupedGemmMXFlatmm, Two_Groups_Same_Size)
 {
-    // K=256 (Class A): confirms runtime dispatch selects
-    // (HasHotLoop=false, TailNum=Odd) for the single-loop case.
     this->Run({128, 128}, {512, 512}, {256, 256}, 2, init_const);
 }
 
@@ -79,18 +73,18 @@ TYPED_TEST(TestGroupedGemmMXFlatmm, Eight_Groups)
     // class hit, deeply mixed. Exercises per-tile runtime dispatch across all 4
     // (HasHotLoop, TailNum) variants in one launch, validating grouped-GEMM-MX
     // correctness when groups of different K classes coexist.
-    this->Run({128, 256, 384, 512, 128, 256, 384, 512},
-              {512, 1024, 512, 1024, 512, 1024, 512, 1024},
-              {256, 512, 768, 1024, 1280, 1536, 1792, 2048},
+    this->Run({128, 256, 384, 512, 128, 512, 256, 384},
+              {512, 1024, 512, 1024, 512, 1024, 1024, 512},
+              {256, 512, 768, 1024, 1280, 2048, 1536, 1792},
               8,
               init_const);
 }
 
 TYPED_TEST(TestGroupedGemmMXFlatmm, Eight_Groups_Random)
 {
-    this->Run({128, 256, 384, 512, 128, 256, 384, 512},
-              {512, 1024, 512, 1024, 512, 1024, 512, 1024},
-              {256, 512, 768, 1024, 1280, 1536, 1792, 2048},
+    this->Run({128, 256, 384, 512, 128, 512, 256, 384},
+              {512, 1024, 512, 1024, 512, 1024, 1024, 512},
+              {256, 512, 768, 1024, 1280, 2048, 1536, 1792},
               8,
               init_random);
 }

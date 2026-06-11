@@ -6,12 +6,11 @@
 
 #include "test_grouped_gemm_mx_flatmm_common.hpp"
 
-// clang-format off
-// gfx1250-only; no gfx950 TDM traits exist, so no arch selection is needed.
-//
-// FP4xFP4 TDM is intentionally omitted: the path is numerically broken (random
+// FIXME:FP4xFP4 TDM is intentionally omitted: the path is numerically broken (random
 // init fails with ~49% wrong values; constant init happens to mask it).
 // TODO: Re-enable once the FP4xFP4 TDM kernel is fixed.
+
+// clang-format off
 using KernelTypes = ::testing::Types<
     //         ADataType, BDataType, CDataType, ArchTraits
     std::tuple<F8,        F8,        F16,       MXFlatmmTDM_GFX1250_FP8FP8_Traits>,

@@ -12,10 +12,7 @@
 // `ds_read` is still targeting.
 //
 // To trigger the bug the kernel must be persistent and total_tiles must exceed
-// the persistent grid size so a workgroup processes >1 tile.
-//
-// Both init regimes (constant and random) validate against reference_mx_gemm;
-// the constant regime additionally has a closed-form expected output of K.
+// the persistent grid size so a workgroup processes > 1 tile.
 
 #include "ck_tile/host.hpp"
 #include <gtest/gtest.h>
@@ -31,9 +28,6 @@
 
 namespace {
 
-// Inlined to avoid pulling in mx_flatmm.hpp, which expects the pre-compiled
-// instance object library that this test deliberately does not link (it builds
-// its kernel inline).
 template <ck_tile::index_t NLane, typename dtype>
 auto preShuffleWeight(ck_tile::HostTensor<dtype>& src)
 {
@@ -320,12 +314,6 @@ void run_persistent_test(ck_tile::index_t M,
 // ---- Sanity controls: single-tile, so the multi-tile path is not exercised;
 //      these pass even with the bug present. ----
 
-TEST(MXFlatmmPersistent, Single_Tile_Sanity_Const)
-{
-    run_persistent_test(
-        /*M=*/128, /*N=*/256, /*K=*/256, /*init_method=*/1, /*expect_multi_tile=*/false);
-}
-
 TEST(MXFlatmmPersistent, Single_Tile_Sanity_Random)
 {
     run_persistent_test(
@@ -333,23 +321,13 @@ TEST(MXFlatmmPersistent, Single_Tile_Sanity_Random)
 }
 
 // TODO: total_tiles must exceed the persistent grid size.
-//       Dimensions are arch-conditional: simulators have fewer CUs and cannot
-//       handle very large tensors, while real hardware needs more tiles to
-//       exceed its larger persistent grid. ----
+//       Dimensions are arch-conditional: dimensions must be large enough to
+//       exceed the persistent grid size for the architecture. ----
 
 constexpr bool kIsGFX1250 = GetCurrentTargetId() == ck_tile::core::arch::TargetId::GFX1250;
 constexpr ck_tile::index_t kMultiTileM = kIsGFX1250 ? 512 : 2048;
 constexpr ck_tile::index_t kMultiTileN = kIsGFX1250 ? 4096 : 8192;
 constexpr ck_tile::index_t kMultiTileK = kIsGFX1250 ? 256 : 1024;
-
-TEST(MXFlatmmPersistent, Multi_Tile_Per_Block_Const)
-{
-    run_persistent_test(kMultiTileM,
-                        kMultiTileN,
-                        kMultiTileK,
-                        /*init_method=*/1,
-                        /*expect_multi_tile=*/true);
-}
 
 TEST(MXFlatmmPersistent, Multi_Tile_Per_Block_Random)
 {

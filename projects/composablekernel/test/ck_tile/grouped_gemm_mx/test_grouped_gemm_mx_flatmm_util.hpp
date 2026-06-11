@@ -16,9 +16,6 @@
 #include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/flatmm.hpp"
 #include "ck_tile/ops/gemm.hpp"
-
-// Arch traits for MX FLATMM grouped tests. Local copy so grouped_gemm_mx
-// does not depend on the flatmm test folder.
 #include "mx_flatmm_arch_traits.hpp"
 
 // Initialization proxy: pk_fp6x16_t lacks converters for FillUniformDistribution.
@@ -344,10 +341,6 @@ class TestGroupedGemmMXFlatmm : public ::testing::Test
 
         // --- Instantiate and launch the GroupedMXFlatmmKernel ---
         //
-        // Both MX FLATMM pipelines dispatch (HasHotLoop, TailNum) at runtime
-        // based on num_loop, so the values baked into the pipeline problem below
-        // are not load-bearing (kept at library defaults). Groups within a
-        // single call may use any mix of K values.
         using FlatmmShape = ck_tile::TileGemmShape<
             ck_tile::sequence<FlatmmConfig::M_Tile, FlatmmConfig::N_Tile, FlatmmConfig::K_Tile>,
             ck_tile::sequence<FlatmmConfig::M_Warp, FlatmmConfig::N_Warp, FlatmmConfig::K_Warp>,
@@ -373,6 +366,10 @@ class TestGroupedGemmMXFlatmm : public ::testing::Test
                                                             FlatmmConfig::NumWaveGroups,
                                                             /*UseAsyncCopy=*/true>;
 
+        // Both MX FLATMM pipelines dispatch (HasHotLoop, TailNum) at runtime
+        // based on num_loop, so the values baked into the pipeline problem below
+        // are not load-bearing (kept at library defaults). Groups within a
+        // single call may use any mix of K values.
         using MXPipelineProblem =
             ck_tile::MXFlatmmPipelineProblem<ADataType,
                                              BDataType,

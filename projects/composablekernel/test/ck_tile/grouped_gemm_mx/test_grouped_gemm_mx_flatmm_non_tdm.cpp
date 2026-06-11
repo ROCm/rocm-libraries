@@ -5,10 +5,10 @@
 
 #include "test_grouped_gemm_mx_flatmm_common.hpp"
 
+// Compile-time arch dispatch via GetCurrentTargetId(). Only the selected arch's kernels are
+// instantiated.
+
 // clang-format off
-// Compile-time arch dispatch via GetCurrentTargetId(). Selecting one arch's
-// list rather than concatenating both keeps multiarch (gfx950+gfx1250) builds
-// compiling: only the selected arch's kernels are instantiated.
 using KernelTypes = std::conditional_t<
     GetCurrentTargetId() == ck_tile::core::arch::TargetId::GFX1250,
     ::testing::Types<
