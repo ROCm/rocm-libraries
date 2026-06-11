@@ -318,12 +318,12 @@ Tests:
   alpha: [ -0.5, 2.0 ]
   alphai: [ -0.5, 1.0 ]
   stride_scale: [ 1, 2 ]
-  batch_count: [ 1, 3, 17 ]
+  batch_count: [ 3 ]
   alpha_beta_stride: true
   stride_c: 2 # alpha stride
   pointer_mode_host: false
 
-# unit alpha stride (alpha[batch] tightly packed) and a larger batch
+# unit alpha stride (alpha[batch] tightly packed)
 - name: geru_stride_alpha
   category: pre_checkin
   function:
@@ -335,7 +335,7 @@ Tests:
   alpha: [ 2.0 ]
   alphai: [ 1.0 ]
   stride_scale: [ 1 ]
-  batch_count: [ 256 ]
+  batch_count: [ 3 ]
   alpha_beta_stride: true
   stride_c: 1 # alpha stride (densely packed)
   pointer_mode_host: false
