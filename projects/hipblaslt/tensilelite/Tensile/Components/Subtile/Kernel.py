@@ -15,19 +15,6 @@ from Tensile.Components.Subtile.LogicalScheduler import (
 from ...Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion
 
-
-from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, Label
-from rocisa.label import LabelManager
-
-from rocisa.container import MUBUFModifiers, vgpr, sgpr, accvgpr, mgpr
-from rocisa.enum import InstType, SelectBit, CacheScope
-from rocisa.instruction import MFMAInstruction
-
-import math
-from copy import deepcopy
-from dataclasses import dataclass, field
-from typing import Dict, List, NamedTuple, Optional, Tuple, Type
-from contextlib import contextmanager
 from rocisa import rocIsa, countInstruction, countGlobalRead, \
   countLocalRead, countLocalWrite, countDSStoreB256, getMFMAs
 from rocisa.asmpass import rocIsaPass, rocIsaPassOption
@@ -80,21 +67,6 @@ from rocisa.register import RegisterPool
 
 from tensile_writer.subtile import geometry as _cppgeo
 
-
-################################################################################
-# C++-backed geometry value/query layer
-#
-# The *pure geometry math* query methods below are serviced unconditionally by
-# the compiled ``tensile_writer`` nanobind extension
-# (tensile_writer.subtile.geometry). The Python dataclasses in this module are
-# the public facade: they own the API objects (tags, ``replace()``,
-# singledispatch dispatch) while every ported value/query method forwards to
-# the matching C++ object built on demand. There is no pure-Python fallback —
-# the geometry formulas live in C++ only.
-#
-# Only value/query math crosses into C++. No writer state, register allocation,
-# rocisa emission, or main-loop logic is delegated.
-################################################################################
 
 def _cpp_mma(layout: 'MMALayout'):
   return _cppgeo.MMALayout(layout.instM, layout.blocks, layout.vgprs, layout.waveSize)
@@ -1551,54 +1523,6 @@ def _graTileAssignment_cpp(writer, kernel, useSwizzling=True):
 
 ##################################################
 # Subroutine to generate GR load code
-#
-def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
-  """Emit buffer_load instructions for a single subtile (sId0, sId1).
-
-  When loadRatioGR > 1, multiple local subtiles share the same global read.
-  Only the first subtile in each group emits the load; others return empty.
-
-  Args:
-      tileInfo: TileInfo or TileInfo for the tensor component
-      sId0:     Subtile row index
-      sId1:     Subtile column index (K-dimension)
-  """
-  # Instruction-shape plan (skip predicate, MUBUF offsetK, per-load m0 offsets)
-  # computed by the C++ ABTileInfoQuery via TileInfo — pure data. Register
-  # state (soffset/voff) is resolved here (writer-owned) and the rocisa
-  # construction is done by the C++ ModuleBuilder.
-  plan = tileInfo.singleBufferLoadPlan(sId0, sId1)
-  if plan.skip:
-    return Module()
-
-  tc = tileInfo.tc
-  isGlc = bool(kernel["NonTemporal%s"%tc] & 0x1)
-  isSlc = bool(kernel["NonTemporal%s"%tc] & 0x2)
-  isNT  = bool(kernel["NonTemporal%s"%tc] & 0x4)
-
-  regListIdx = tileInfo.grRegGroupForSubtileRow(sId0)
-  regList = tileInfo.localSubtilesRegister[regListIdx]
-  useSgpr = regList.is_sgpr
-
-  # soffset is constant across loads; voff is per-load. Both are resolved from
-  # the writer's register state and passed to the builder as operand objects.
-  soffset = regList.ref(0) if len(regList) > 0 and useSgpr else 0
-  voffs = [
-      (tileInfo.sharedVgprGROffset[i] if useSgpr or len(regList) == 0
-       else regList.indices[i])
-      for i in range(len(plan.m0Offsets))
-  ]
-  return _mfma_builder().single_buffer_load(
-      tc, isGlc, isSlc, isNT, plan.offsetK, plan.grBaseId,
-      list(plan.m0Offsets), soffset, voffs)
-
-
-def emitSubtileBufferLoad(tc, writer, kernel, subtileId):
-  tileInfo = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
-  return emitSingleBufferLoad(tileInfo, kernel, subtileId[0], subtileId[1])
-
-##################################################
-# Subroutine to generate GR load code
 # Initial idea: maybe store asm in modules in a separate obj?
 #
 def globalReadDoSubtile(tc, writer, kernel):
@@ -1648,56 +1572,6 @@ def _globalReadDTLInitCommonSgpr_legacy(writer, kernel):
   writer.vgprPool.checkIn(vgprWaveId)
   writer.vgprPool.checkIn(tmpVgpr)
   return module
-
-##################################################
-# Subroutine to generate DTL M0 LDS buffer swap
-#
-def globalReadLDSBufferSwap(tc, writer, kernel):
-  if tc in ['A', 'B']:
-    ti_ = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
-    return ti_.emitGRLDSBufferSwap(writer, kernel)
-  else:
-    ti_ = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
-    return emitScaleGRLDSSwap(ti_, writer, kernel)
-
-##################################################
-# Subroutine to update ptrs
-#
-def globalReadPtrUpdates(tc, writer, kernel):
-  ti_ = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
-  return ti_.emitGRPtrUpdate(writer, kernel)
-
-
-# ---------------------------------------------------------------------------
-# Scale GR emit
-# ---------------------------------------------------------------------------
-
-def emitScaleGRLDSSwap(ti, writer, kernel):
-  """Toggle scale GR DTL write target between double-buffer halves."""
-  return _mfma_builder().gr_lds_buffer_swap(ti.tc)
-
-
-def globalReadDoScaleSubtile(tc, writer, kernel):
-  """Scale GR: load scale bytes global -> LDS via DTL BufferLoadB128."""
-  if not kernel["ProblemType"].get("MXBlockA", 0) and not kernel["ProblemType"].get("MXBlockB", 0):
-    return Module()
-
-  tileInfo = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
-
-  isGlc = bool(kernel["NonTemporal%s"%tc] & 0x1)
-  isSlc = bool(kernel["NonTemporal%s"%tc] & 0x2)
-  isNT  = bool(kernel["NonTemporal%s"%tc] & 0x4)
-
-  assert len(tileInfo.sharedVgprGROffset) > 0, "Scale GR requires at least 1 GR offset VGPR"
-
-  return _mfma_builder().scale_gr_load(tc, isGlc, isSlc, isNT, tileInfo.sharedVgprGROffset[0])
-
-
-def globalReadScalePtrUpdates(tc, writer, kernel):
-  """Advance scale SRD base pointer by one depthU iteration."""
-  ti_ = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
-  inc = int(ti_.lrSubtileSize * ti_.lrGlobalSubtileGrid[1])
-  return _mfma_builder().scale_gr_ptr_update(tc, inc)
 
 # emitSingleBufferLoad, emitScaleGRLDSSwap, globalReadPtrUpdates,
 # globalReadLDSBufferSwap, globalReadDoScaleSubtile, globalReadScalePtrUpdates
@@ -2036,15 +1910,6 @@ def localReadDTLInitCommonSwapVgpr(writer, kernel):
     module.add(VXorB32(dst=vgpr(vgprSwapId), src0=vgpr(vgprId), src1=vgpr(vgprSwapId), comment=""))
   writer.sgprPool.checkIn(stmp)
   return module
-
-
-# emitSingleDsRead, localReadLDSBufferSwap, emitScaleLRLDSSwap, emitScaleDsRead
-# live in _lr_emit_leaves to break the Kernel ↔ LogicalScheduler import cycle.
-from ._lr_emit_leaves import (
-    emitSingleDsRead, localReadLDSBufferSwap,
-    emitScaleLRLDSSwap, emitScaleDsRead,
-)
-
 
 
 # ---------------------------------------------------------------------------
