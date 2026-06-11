@@ -59,6 +59,8 @@ function(add_relative_test test_name test_target resource_group)
     file(APPEND "${INSTALL_TEST_FILE}" "add_test(${test_name} \"../${EXE_NAME}\")\n")
     # Set the resource group for the test. This must correspond to a GPU resource present in resources.json.
     file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(${test_name} PROPERTIES RESOURCE_GROUPS \"1,${resource_group}:1\")\n")
+    # Record this target so the test-categories pass can attach gtest-filter labels later.
+    set_property(GLOBAL APPEND PROPERTY ROCPRIM_TEST_TARGETS "${test_target}")
 endfunction()
 
 function(add_hip_test TEST_NAME TEST_SOURCES)
@@ -150,6 +152,31 @@ add_subdirectory(rocprim)
 # hipGraph tests
 add_hip_test("hipgraph.basic" hipgraph/test_hipgraph_basic.cpp)
 add_hip_test("hipgraph.algs" hipgraph/test_hipgraph_algs.cpp)
+
+# ****************************************************************************
+# Test Filter Standardization
+# ****************************************************************************
+
+if(EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+
+    message(STATUS "Applying test categories for rocprim")
+    get_property(_rp_test_targets GLOBAL PROPERTY ROCPRIM_TEST_TARGETS)
+    foreach(_rp_t IN LISTS _rp_test_targets)
+        get_target_property(_rp_dir ${_rp_t} RUNTIME_OUTPUT_DIRECTORY)
+        apply_test_category_labels(${_rp_t}
+            "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+            "${_rp_dir}" "${INSTALL_TEST_FILE}")
+    endforeach()
+
+else()
+    message(
+        STATUS
+        "Shared CTest categories not found at "
+        "${CMAKE_CURRENT_SOURCE_DIR}/TestCategories.cmake - "
+        "skipping rocprim test category labels"
+    )
+endif()
 
 if (ROCPRIM_INSTALL)
   rocm_install(
