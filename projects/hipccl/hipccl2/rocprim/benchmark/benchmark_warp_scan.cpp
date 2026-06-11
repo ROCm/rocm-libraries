@@ -48,36 +48,35 @@
 // clang-format on
 
 template<typename Benchmark>
-auto add_benchmarks(primbench::executor& executor)
-    -> std::enable_if_t<std::is_same<Benchmark, inclusive_scan>::value
-                        || std::is_same<Benchmark, exclusive_scan>::value>
+void add_benchmarks(primbench::executor& executor)
 {
-    BENCHMARK_TYPE(int32_t)
-    BENCHMARK_TYPE(float)
-    BENCHMARK_TYPE(double)
-    BENCHMARK_TYPE(int8_t)
-    BENCHMARK_TYPE(uint8_t)
-    BENCHMARK_TYPE(rocprim::half)
-    BENCHMARK_TYPE(custom_f64_f64)
-    BENCHMARK_TYPE(custom_i32_f64)
-    BENCHMARK_TYPE(rocprim::int128_t)
-    BENCHMARK_TYPE(rocprim::uint128_t)
-}
-
-template<typename Benchmark>
-auto add_benchmarks(primbench::executor& executor)
-    -> std::enable_if_t<std::is_same<Benchmark, broadcast>::value>
-{
-    BENCHMARK_TYPE_P2(int32_t)
-    BENCHMARK_TYPE_P2(float)
-    BENCHMARK_TYPE_P2(double)
-    BENCHMARK_TYPE_P2(int8_t)
-    BENCHMARK_TYPE_P2(uint8_t)
-    BENCHMARK_TYPE_P2(rocprim::half)
-    BENCHMARK_TYPE_P2(custom_f64_f64)
-    BENCHMARK_TYPE_P2(custom_i32_f64)
-    BENCHMARK_TYPE_P2(rocprim::int128_t)
-    BENCHMARK_TYPE_P2(rocprim::uint128_t)
+    if constexpr(std::is_same_v<Benchmark, inclusive_scan>
+                 || std::is_same_v<Benchmark, exclusive_scan>)
+    {
+        BENCHMARK_TYPE(int32_t)
+        BENCHMARK_TYPE(float)
+        BENCHMARK_TYPE(double)
+        BENCHMARK_TYPE(int8_t)
+        BENCHMARK_TYPE(uint8_t)
+        BENCHMARK_TYPE(rocprim::half)
+        BENCHMARK_TYPE(custom_f64_f64)
+        BENCHMARK_TYPE(custom_i32_f64)
+        BENCHMARK_TYPE(rocprim::int128_t)
+        BENCHMARK_TYPE(rocprim::uint128_t)
+    }
+    else if constexpr(std::is_same_v<Benchmark, broadcast>)
+    {
+        BENCHMARK_TYPE_P2(int32_t)
+        BENCHMARK_TYPE_P2(float)
+        BENCHMARK_TYPE_P2(double)
+        BENCHMARK_TYPE_P2(int8_t)
+        BENCHMARK_TYPE_P2(uint8_t)
+        BENCHMARK_TYPE_P2(rocprim::half)
+        BENCHMARK_TYPE_P2(custom_f64_f64)
+        BENCHMARK_TYPE_P2(custom_i32_f64)
+        BENCHMARK_TYPE_P2(rocprim::int128_t)
+        BENCHMARK_TYPE_P2(rocprim::uint128_t)
+    }
 }
 
 int main(int argc, char* argv[])

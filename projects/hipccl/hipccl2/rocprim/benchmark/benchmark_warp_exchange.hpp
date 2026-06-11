@@ -63,94 +63,57 @@ template<unsigned int BlockSize,
          typename T>
 __device__
 auto warp_exchange_device_fn(T* d_output, unsigned int trials)
-    -> std::enable_if_t<common::device_test_enabled_for_warp_size_v<LogicalWarpSize>
-                        && !std::is_same<Op, ScatterToStripedOp>::value>
 {
-    T thread_data[ItemsPerThread];
-
-    ROCPRIM_UNROLL
-    for(unsigned int i = 0; i < ItemsPerThread; ++i)
+    if constexpr(common::device_test_enabled_for_warp_size_v<LogicalWarpSize>)
     {
-        // generate unique value each data-element
-        thread_data[i] = static_cast<T>(threadIdx.x * ItemsPerThread + i);
-    }
+        T                      thread_data[ItemsPerThread];
+        unsigned int           thread_ranks[ItemsPerThread];
+        constexpr unsigned int warps_in_block = BlockSize / LogicalWarpSize;
+        const unsigned int     warp_id        = threadIdx.x / LogicalWarpSize;
+        const unsigned int     lane_id        = threadIdx.x % LogicalWarpSize;
 
-    using warp_exchange_type = ::rocprim::warp_exchange<T, ItemsPerThread, LogicalWarpSize>;
-    constexpr unsigned int                    warps_in_block = BlockSize / LogicalWarpSize;
-    const unsigned int                        warp_id        = threadIdx.x / LogicalWarpSize;
-    ROCPRIM_SHARED_MEMORY
-    typename warp_exchange_type::storage_type storage[warps_in_block];
+        ROCPRIM_UNROLL
+        for(unsigned int i = 0; i < ItemsPerThread; ++i)
+        {
+            // generate unique value each data-element
+            thread_data[i] = static_cast<T>(threadIdx.x * ItemsPerThread + i);
+            if constexpr(std::is_same<Op, ScatterToStripedOp>::value)
+            {
+                // generate unique destination location for each data-element
+                const unsigned int s_lane_id = i % 2 == 0 ? LogicalWarpSize - 1 - lane_id : lane_id;
+                thread_ranks[i]
+                    = s_lane_id * ItemsPerThread + i; // scatter values in warp across whole storage
+            }
+        }
 
-    ROCPRIM_NO_UNROLL
-    for(unsigned int i = 0; i < trials; ++i)
-    {
-        Op{}(warp_exchange_type(), thread_data, storage[warp_id]);
-        ::rocprim::wave_barrier();
-    }
+        using warp_exchange_type = ::rocprim::warp_exchange<T, ItemsPerThread, LogicalWarpSize>;
 
-    ROCPRIM_UNROLL
-    for(unsigned int i = 0; i < ItemsPerThread; ++i)
-    {
-        const unsigned int global_idx = (BlockSize * blockIdx.x + threadIdx.x) * ItemsPerThread + i;
-        d_output[global_idx]          = thread_data[i];
+        ROCPRIM_SHARED_MEMORY
+        typename warp_exchange_type::storage_type storage[warps_in_block];
+
+        ROCPRIM_NO_UNROLL
+        for(unsigned int i = 0; i < trials; ++i)
+        {
+            if constexpr(std::is_same<Op, ScatterToStripedOp>::value)
+            {
+                Op{}(warp_exchange_type(), thread_data, thread_ranks, storage[warp_id]);
+            }
+            else
+            {
+                Op{}(warp_exchange_type(), thread_data, storage[warp_id]);
+            }
+            ::rocprim::wave_barrier();
+        }
+
+        ROCPRIM_UNROLL
+        for(unsigned int i = 0; i < ItemsPerThread; ++i)
+        {
+            const unsigned int global_idx
+                = (BlockSize * blockIdx.x + threadIdx.x) * ItemsPerThread + i;
+            d_output[global_idx] = thread_data[i];
+        }
     }
 }
-
-template<unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         unsigned int LogicalWarpSize,
-         typename Op,
-         typename T>
-__device__
-auto warp_exchange_device_fn(T* d_output, unsigned int trials)
-    -> std::enable_if_t<common::device_test_enabled_for_warp_size_v<LogicalWarpSize>
-                        && std::is_same<Op, ScatterToStripedOp>::value>
-{
-    T                      thread_data[ItemsPerThread];
-    unsigned int           thread_ranks[ItemsPerThread];
-    constexpr unsigned int warps_in_block = BlockSize / LogicalWarpSize;
-    const unsigned int     warp_id        = threadIdx.x / LogicalWarpSize;
-    const unsigned int     lane_id        = threadIdx.x % LogicalWarpSize;
-
-    ROCPRIM_UNROLL
-    for(unsigned int i = 0; i < ItemsPerThread; ++i)
-    {
-        // generate unique value each data-element
-        thread_data[i] = static_cast<T>(threadIdx.x * ItemsPerThread + i);
-        // generate unique destination location for each data-element
-        const unsigned int s_lane_id = i % 2 == 0 ? LogicalWarpSize - 1 - lane_id : lane_id;
-        thread_ranks[i]
-            = s_lane_id * ItemsPerThread + i; // scatter values in warp across whole storage
-    }
-
-    using warp_exchange_type = ::rocprim::warp_exchange<T, ItemsPerThread, LogicalWarpSize>;
-    ROCPRIM_SHARED_MEMORY
-    typename warp_exchange_type::storage_type storage[warps_in_block];
-
-    ROCPRIM_NO_UNROLL
-    for(unsigned int i = 0; i < trials; ++i)
-    {
-        Op{}(warp_exchange_type(), thread_data, thread_ranks, storage[warp_id]);
-        ::rocprim::wave_barrier();
-    }
-
-    ROCPRIM_UNROLL
-    for(unsigned int i = 0; i < ItemsPerThread; ++i)
-    {
-        const unsigned int global_idx = (BlockSize * blockIdx.x + threadIdx.x) * ItemsPerThread + i;
-        d_output[global_idx]          = thread_data[i];
-    }
-}
-
-template<unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         unsigned int LogicalWarpSize,
-         typename Op,
-         typename T>
-__device__
-auto warp_exchange_device_fn(T* /*d_output*/, unsigned int /*trials*/)
-    -> std::enable_if_t<!common::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
-{}
 
 template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
