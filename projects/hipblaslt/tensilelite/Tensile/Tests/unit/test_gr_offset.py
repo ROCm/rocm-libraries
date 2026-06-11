@@ -29,7 +29,7 @@ from gpu_test_helpers import (
     generate_load_params,
 )
 
-from Tensile.Components.Subtile.SubtileGREmit import graTileAssignment
+from Tensile.Components.Subtile.Kernel import graTileAssignment
 from rocisa.code import Module, TextBlock
 from rocisa.container import sgpr
 from rocisa.instruction import SMovB32, SMovB64, SWaitCnt

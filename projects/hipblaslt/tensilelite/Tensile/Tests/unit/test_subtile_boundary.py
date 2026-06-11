@@ -9,7 +9,7 @@
 #
 # Production code outside Tensile/Components/Subtile/ may import only:
 #   * Tensile/KernelWriter.py        -> from .Components.Subtile.Kernel import *
-#   * Tensile/Components/StreamK.py  -> SubtileLREmit.localReadResetOffsetsSubtile
+#   * Tensile/Components/StreamK.py  -> Kernel.localReadResetOffsetsSubtile
 #
 # A new hit here means the boundary widened and must be triaged before merge.
 #
@@ -30,7 +30,7 @@ _IMPORT_RE = re.compile(r"(?:from\s+\S*Subtile|import\s+\S*Subtile)")
 ALLOWED_PRODUCTION_SITES = {
     "KernelWriter.py": {"from .Components.Subtile.Kernel import *"},
     "Components/StreamK.py": {
-        "from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile"
+        "from .Subtile.Kernel import localReadResetOffsetsSubtile"
     },
 }
 
@@ -86,8 +86,8 @@ def test_streamk_uses_only_sanctioned_lr_symbol():
         if _IMPORT_RE.search(ln)
     ]
     assert subtile_imports == [
-        "from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile"
+        "from .Subtile.Kernel import localReadResetOffsetsSubtile"
     ], (
         "StreamK.py may import only localReadResetOffsetsSubtile from the "
-        "Subtile package; got: " + repr(subtile_imports)
+        "Subtile package (via Kernel.py); got: " + repr(subtile_imports)
     )

@@ -60,11 +60,11 @@ from tensile_writer.subtile.loop_orchestrator import (
 )
 from tensile_writer.subtile.module_builder import ModuleBuilder as _ModuleBuilder
 
-from Tensile.Components.Subtile.SubtileGREmit import (
+from Tensile.Components.Subtile._gr_emit_leaves import (
     emitSingleBufferLoad, globalReadPtrUpdates, globalReadLDSBufferSwap,
     globalReadDoScaleSubtile, globalReadScalePtrUpdates,
 )
-from Tensile.Components.Subtile.SubtileLREmit import (
+from Tensile.Components.Subtile._lr_emit_leaves import (
     emitSingleDsRead, localReadLDSBufferSwap,
     emitScaleDsRead,
 )

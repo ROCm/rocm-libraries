@@ -39,8 +39,8 @@ from rocisa.instruction import SLoadB32, SLoadB64, SLoadB128, SMovB32, SMovB64, 
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType
 from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16, AB_B8
-from Tensile.Components.Subtile.SubtileGREmit import graTileAssignment, globalReadDTLInitCommonSgpr, globalReadDoSubtile
-from Tensile.Components.Subtile.SubtileLREmit import lraTileAssignment, localReadDoSubtile
+from Tensile.Components.Subtile.Kernel import graTileAssignment, globalReadDTLInitCommonSgpr, globalReadDoSubtile
+from Tensile.Components.Subtile.Kernel import lraTileAssignment, localReadDoSubtile
 
 # ---- GPU target detection ----
 def _detect_gfx_target():

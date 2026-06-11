@@ -5,9 +5,9 @@
 
 The compiled ``_tensile_writer`` nanobind extension hosts the pure subtile
 geometry math. This package re-exports it under a stable Python namespace so
-callers (and the optional delegation path in
-``Tensile.Components.Subtile.SubtileGeometry``) can import
-``tensile_writer.subtile.geometry`` without touching the extension directly.
+callers (``Tensile.Components.Subtile.Kernel`` imports
+``tensile_writer.subtile.geometry``) can import it without touching the
+extension directly.
 """
 
 from . import _tensile_writer  # noqa: F401  (compiled nanobind extension)

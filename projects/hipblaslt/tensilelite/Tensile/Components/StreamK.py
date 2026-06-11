@@ -34,7 +34,7 @@ from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, 
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
     vectorStaticMultiply, BranchIfNotZero, scalarUInt24DivideAndRemainder, scalarUInt32DivideAndRemainder
 
-from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
+from .Subtile.Kernel import localReadResetOffsetsSubtile
 
 from ..Common import print2, ceilDivide, log2
 from ..Component import Component

@@ -5,7 +5,7 @@
 """Regression tests for the C++ (nanobind) subtile GR/LR *offset assignment*
 path, now C++-only for every AB (ABTilePair) geometry.
 
-``SubtileGREmit.graTileAssignment`` and ``SubtileLREmit.lraTileAssignment``
+``Kernel.graTileAssignment`` and ``Kernel.lraTileAssignment``
 derive the offset-assignment scalar math (block/row/partition sizes, advance
 and rotation strides, the subtile soffset stride, and the FP8 swizzle selector)
 before emitting the rocisa offset-calculation instructions. That math is
@@ -58,8 +58,8 @@ from rocisa.enum import RegisterType
 
 from Tensile.Components.Subtile.Kernel import (
     TileInfo, AB_B16, AB_B8, AB_B4, AB_B16_2x2, AB_B4_2x2)
-from Tensile.Components.Subtile.SubtileGREmit import graTileAssignment
-from Tensile.Components.Subtile.SubtileLREmit import lraTileAssignment
+from Tensile.Components.Subtile.Kernel import graTileAssignment
+from Tensile.Components.Subtile.Kernel import lraTileAssignment
 
 WAVESIZE = 64
 GOLDEN_PATH = os.path.join(SCRIPT_DIR, "subtileOffsetAssign_golden.txt")

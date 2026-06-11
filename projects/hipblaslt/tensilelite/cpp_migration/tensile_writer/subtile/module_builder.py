@@ -10,8 +10,7 @@ exposes ``ModuleBuilder`` — a C++ class that constructs genuine ``rocisa``
 ``Module`` objects by driving the ``rocisa`` Python API.
 
 It is the foundation for moving the subtile emit loops
-(``InstructionEmitter`` / ``SubtileGREmit`` / ``SubtileLREmit`` /
-``SubtileScaleEmit``) into C++ in later slices. Construction is backend-routed
+(``InstructionEmitter`` / ``Kernel``) into C++ in later slices. Construction is backend-routed
 through rocisa (StinkyTofu is not used for gfx950 subtile, which emits via the
 rocisa string/Module path).
 
