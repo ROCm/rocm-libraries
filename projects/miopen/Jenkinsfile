@@ -491,7 +491,7 @@ pipeline {
                 stage('Hip Tidy') {
                     agent{ label rocmnode("nogpu") }
                     environment{
-                        setup_cmd = "CXX='/opt/rocm/llvm/bin/clang++' cmake -DCMAKE_PREFIX_PATH=/opt/rocm -DMIOPEN_BACKEND=HIP -DBUILD_DEV=On .. "
+                        setup_cmd = "CXX='/opt/rocm/llvm/bin/clang++' cmake -G Ninja -DCMAKE_PREFIX_PATH=/opt/rocm -DMIOPEN_BACKEND=HIP -DBUILD_DEV=On .. "
                         build_cmd = "ninja -j\$(nproc) -k 0 analyze"
                     }
                     steps{
