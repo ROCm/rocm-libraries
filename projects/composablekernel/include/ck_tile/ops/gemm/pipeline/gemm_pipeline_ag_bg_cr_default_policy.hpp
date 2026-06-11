@@ -364,15 +364,8 @@ struct GemmPipelineAgBgCrDefaultPolicy
         constexpr auto wg_attr_num_access_B = WGAttrNumAccessEnum::Default;
 #endif
 
-        using ADataType = remove_cvref_t<typename Problem::ADataType>;
-        using BDataType = remove_cvref_t<typename Problem::BDataType>;
-        using ATypeToUse =
-            std::conditional_t<std::is_same_v<ADataType, pk_int4_t>, BDataType, ADataType>;
-        using BTypeToUse = std::conditional_t<std::is_same_v<BDataType, pk_int4_t> ||
-                                                  std::is_same_v<BDataType, pk_fp4_t> ||
-                                                  sizeof(BDataType) < sizeof(ADataType),
-                                              ADataType,
-                                              BDataType>;
+        using ATypeToUse = typename Problem::AComputeDataType;
+        using BTypeToUse = typename Problem::BComputeDataType;
 
         using WarpGemm = WarpGemmDispatcher<ATypeToUse,
                                             BTypeToUse,
