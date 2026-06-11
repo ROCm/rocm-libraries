@@ -230,21 +230,7 @@ void rocfft_plan_t::AddAntecedent(size_t itemIdx, size_t antecedentIdx)
 
 std::vector<size_t> rocfft_plan_t::WorkBufBytesPerDevice() const
 {
-    int deviceCount = 0;
-    if(hipGetDeviceCount(&deviceCount) != hipSuccess)
-        throw std::runtime_error("failed to get device count");
-    std::vector<size_t> workBufBytes(deviceCount);
-
-    const auto base_type_size = real_type_size(precision);
-
-    for(const auto& i : multiPlan)
-    {
-        if(!i)
-            continue;
-        if(i->ExecutesOnLocalRank())
-            i->WorkBufBytesPerDevice(base_type_size, workBufBytes);
-    }
-    return workBufBytes;
+    return tempBufferUserAllocs;
 }
 
 rocfft_status rocfft_plan_description_set_comm(rocfft_plan_description description,
@@ -1560,21 +1546,6 @@ rocfft_status
     return rocfft_status_success;
 }
 
-void rocfft_plan_t::AllocateInternalTempBuffers()
-{
-    for(auto& t : tempBuffers)
-    {
-        if(t.first.comm_rank != desc.get_local_comm_rank())
-            continue;
-
-        t.second->alloc(t.first.device);
-        if(LOG_PLAN_ENABLED())
-            *LogSingleton::GetInstance().GetPlanOS()
-                << "temp buffer " << t.second->data() << ", device " << t.first.device
-                << ", size_bytes " << t.second->get_size_bytes() << std::endl;
-    }
-}
-
 // Given user-specified brick layout, return a vector of BufferPtrs
 // that point to those bricks.  Assign comm_rank and rank-specific
 // index on those BufferPtrs appropriately.  Constructor specifies
@@ -1637,14 +1608,16 @@ static bool DimensionSplitInField(size_t length, size_t dimIdx, const rocfft_fie
 
 // Construct a single-device execPlan - fill out the provided
 // execPlan with nodes to implement the FFT.
-static std::unique_ptr<ExecPlan> BuildSingleDevicePlan(NodeMetaData&         rootPlanData,
-                                                       int                   local_comm_rank,
-                                                       rocfft_location_t     location,
-                                                       rocfft_transform_type transformType,
-                                                       const std::optional<LoadOps>&  loadOps,
-                                                       const std::optional<StoreOps>& storeOps,
-                                                       bool partOfMultiPlan)
+template <bool probe_solution_map>
+std::unique_ptr<ExecPlan>
+    rocfft_plan_t::BuildSingleDevicePlan(NodeMetaData&                  rootPlanData,
+                                         rocfft_location_t              location,
+                                         const std::optional<LoadOps>&  loadOps,
+                                         const std::optional<StoreOps>& storeOps,
+                                         bool                           partOfMultiPlan)
 {
+    const auto local_comm_rank = desc.get_local_comm_rank();
+
     rocfft_scoped_device dev(location.device);
 
     auto execPlanMultiItem = std::make_unique<ExecPlan>(local_comm_rank, partOfMultiPlan, location);
@@ -1656,33 +1629,9 @@ static std::unique_ptr<ExecPlan> BuildSingleDevicePlan(NodeMetaData&         roo
 
         // If we are doing tuning initializing now, we shouldn't apply any solution,
         // since we are trying enumerating solutions now
-        if(TuningBenchmarker::GetSingleton().IsInitializingTuning() == false)
+        if constexpr(probe_solution_map)
         {
-            // Solutions do not consider strides.  Even-length real
-            // transforms need special consideration, since the
-            // even-length optimization is only valid for stride-1 on
-            // the fastest dimension.  So only apply a solution if
-            // we're not doing even-length real, or if fastest dim
-            // stride is 1.
-            const auto& realLength     = transformType == rocfft_transform_type_real_forward
-                                             ? execPlan.rootPlan->length
-                                             : execPlan.rootPlan->outputLength;
-            const bool  evenLengthReal = (transformType == rocfft_transform_type_real_forward
-                                         || transformType == rocfft_transform_type_real_inverse)
-                                        && realLength.front() % 2 == 0;
-            const bool stride1 = execPlan.rootPlan->inStride.front() == 1
-                                 && execPlan.rootPlan->outStride.front() == 1;
-            if(evenLengthReal && !stride1)
-            {
-                if(LOG_TRACE_ENABLED())
-                {
-                    (*LogSingleton::GetInstance().GetTraceOS())
-                        << "transform is even-length real but not stride-1, not applying solution "
-                           "map"
-                        << std::endl;
-                }
-            }
-            else
+            if(TuningBenchmarker::GetSingleton().IsInitializingTuning() == false)
             {
                 execPlan.rootScheme = ApplySolution(execPlan);
                 if(execPlan.rootScheme)
@@ -1725,7 +1674,28 @@ static std::unique_ptr<ExecPlan> BuildSingleDevicePlan(NodeMetaData&         roo
         }
 
         // TODO: more descriptions are needed
-        ProcessNode(execPlan);
+        try
+        {
+            ProcessNode(execPlan);
+        }
+        catch(const std::exception& e)
+        {
+            // No fallback if the solution map wasn't used
+            if constexpr(!probe_solution_map)
+                throw;
+
+            if(!execPlan.rootScheme)
+                throw; // solution map was probed but no entry found therein
+
+            if(LOG_TRACE_ENABLED())
+            {
+                (*LogSingleton::GetInstance().GetTraceOS())
+                    << "Node couldn't be processed using solution map entry. Details: " << e.what()
+                    << std::endl;
+            }
+            return BuildSingleDevicePlan<!probe_solution_map>(
+                rootPlanData, location, loadOps, storeOps, partOfMultiPlan);
+        }
 
         // Plan is compiled, no need to alloc twiddles + kargs etc
         if(rocfft_getenv("ROCFFT_INTERNAL_COMPILE_ONLY") == "1")
@@ -1742,6 +1712,20 @@ static std::unique_ptr<ExecPlan> BuildSingleDevicePlan(NodeMetaData&         roo
         {
             if(!GetTuningKernelInfo(execPlan))
                 throw std::runtime_error("Unable to get the solution info.");
+        }
+
+        // We have the plan, set work memory requirements if this
+        // plan will run on this rank
+        if(execPlan.workBufSize)
+        {
+            // note: workBufSize counts in complex elements, not bytes
+            TempBufferLease workMemLease{
+                tempBuffers,
+                local_comm_rank,
+                location,
+                execPlan.workBufSize
+                    * element_size(precision, rocfft_array_type_complex_interleaved)};
+            execPlanMultiItem->workPtr = BufferPtr::temp(workMemLease.data());
         }
 
         return execPlanMultiItem;
@@ -2100,13 +2084,8 @@ void rocfft_plan_t::MakeSingleDevPlanWithGatherScatterIfNeeded()
     std::vector<size_t> gather_items;
     if(!plan_is_single_dev)
         gather_items = CreateInputGatheringItemsIfNeeded(exec_plan_metadata, exec_plan_location);
-    auto exec_item             = BuildSingleDevicePlan(exec_plan_metadata,
-                                           desc.get_local_comm_rank(),
-                                           exec_plan_location,
-                                           transformType,
-                                           desc.loadOps,
-                                           desc.storeOps,
-                                           !plan_is_single_dev);
+    auto exec_item = BuildSingleDevicePlan(
+        exec_plan_metadata, exec_plan_location, desc.loadOps, desc.storeOps, !plan_is_single_dev);
     exec_item->description     = "Single-device FFT execution plan";
     const auto exec_item_index = AddMultiPlanItem(std::move(exec_item), gather_items);
     if(!plan_is_single_dev)
@@ -2316,9 +2295,7 @@ std::vector<size_t> rocfft_plan_t::create_plan_items_for(
             rootPlanData.deviceProp = get_curr_device_prop();
         }
         auto singlePlan       = BuildSingleDevicePlan(rootPlanData,
-                                                desc.get_local_comm_rank(),
                                                 item_loc,
-                                                fft_operations.fft_type,
                                                 fft_operations.get_load_ops(),
                                                 fft_operations.get_store_ops(),
                                                 true);
@@ -2350,16 +2327,15 @@ std::vector<size_t> rocfft_plan_t::create_plan_items_for(
 // new item will begin execution.
 //
 // NOTE: lengths and stride include batch dimension
-static size_t C2CBrickOneDimension(rocfft_plan_t&                 plan,
-                                   size_t                         dimIdx,
-                                   rocfft_location_t              location,
-                                   const std::vector<size_t>&     lengths,
-                                   const std::vector<size_t>&     stride,
-                                   BufferPtr                      input,
-                                   BufferPtr                      output,
-                                   const std::optional<LoadOps>&  loadOps,
-                                   const std::optional<StoreOps>& storeOps,
-                                   const std::vector<size_t>&     antecedents)
+size_t rocfft_plan_t::C2CBrickOneDimension(size_t                         dimIdx,
+                                           rocfft_location_t              location,
+                                           const std::vector<size_t>&     lengths,
+                                           const std::vector<size_t>&     stride,
+                                           BufferPtr                      input,
+                                           BufferPtr                      output,
+                                           const std::optional<LoadOps>&  loadOps,
+                                           const std::optional<StoreOps>& storeOps,
+                                           const std::vector<size_t>&     antecedents)
 {
     auto transformLengths = lengths;
     auto transformStride  = stride;
@@ -2380,28 +2356,22 @@ static size_t C2CBrickOneDimension(rocfft_plan_t&                 plan,
     rootPlanData.length    = transformLengths;
     rootPlanData.inStride  = transformStride;
     rootPlanData.outStride = transformStride;
-    rootPlanData.direction = plan.transformType == rocfft_transform_type_complex_forward
-                                     || plan.transformType == rocfft_transform_type_real_forward
+    rootPlanData.direction = transformType == rocfft_transform_type_complex_forward
+                                     || transformType == rocfft_transform_type_real_forward
                                  ? -1
                                  : 1;
     rootPlanData.placement
         = input == output ? rocfft_placement_inplace : rocfft_placement_notinplace;
-    rootPlanData.precision         = plan.precision;
+    rootPlanData.precision         = precision;
     rootPlanData.inArrayType       = rocfft_array_type_complex_interleaved;
     rootPlanData.outArrayType      = rocfft_array_type_complex_interleaved;
-    rootPlanData.rootTransformType = plan.transformType;
+    rootPlanData.rootTransformType = transformType;
     rootPlanData.deviceProp        = get_curr_device_prop();
     rootPlanData.input_buffer      = input;
     rootPlanData.output_buffer     = output;
 
-    auto singlePlan = BuildSingleDevicePlan(rootPlanData,
-                                            plan.desc.get_local_comm_rank(),
-                                            location,
-                                            plan.transformType,
-                                            loadOps,
-                                            storeOps,
-                                            true);
-    return plan.AddMultiPlanItem(std::move(singlePlan), antecedents);
+    auto singlePlan = BuildSingleDevicePlan(rootPlanData, location, loadOps, storeOps, true);
+    return AddMultiPlanItem(std::move(singlePlan), antecedents);
 }
 
 void rocfft_plan_t::C2CField(const rocfft_field_t&          field,
@@ -2435,8 +2405,7 @@ void rocfft_plan_t::C2CField(const rocfft_field_t&          field,
             std::optional<StoreOps> appliedStoreOps
                 = dimIdx == fftDims.back() ? storeOps : std::nullopt;
 
-            auto transformItem              = C2CBrickOneDimension(*this,
-                                                      dimIdx,
+            auto transformItem              = C2CBrickOneDimension(dimIdx,
                                                       inBrick.location,
                                                       inBrick.layout.lengths_and_batches(),
                                                       inBrick.layout.strides_and_distances(),
@@ -3710,13 +3679,6 @@ bool rocfft_plan_t::BuildMultiDevicePlan()
         {
             return false;
         }
-        // FIXME: some real inverse transforms with odd innermost length produce
-        // wrong results [more investigation needed to determine exact root cause]
-        if(transformType == rocfft_transform_type_real_inverse
-           && desc.innermost_length_is_odd(io_data_label::OUTPUT))
-        {
-            return false;
-        }
 
         // desc.{in,out}Fields.size() == 1 guaranteed given validation checks
         const auto& ifield = desc.get_field_for(io_data_label::INPUT);
@@ -4376,14 +4338,27 @@ int rocfft_plan_description_t::get_local_comm_size() const
 #endif
 }
 
-rocfft_status rocfft_plan_create_internal(rocfft_plan                   plan,
-                                          const rocfft_result_placement placement,
-                                          const rocfft_transform_type   transform_type,
-                                          const rocfft_precision        precision,
-                                          const size_t                  dimensions,
-                                          const size_t*                 lengths,
-                                          const size_t                  number_of_transforms,
-                                          const rocfft_plan_description description)
+void rocfft_plan_t::DetermineTempBufferUserAllocs()
+{
+    int deviceCount = rocfft_scoped_device::device_count();
+    tempBufferUserAllocs.resize(deviceCount);
+
+    // sum up the temp allocations per-device, for this rank
+    for(const auto& buf : tempBuffers)
+    {
+        if(buf.first.comm_rank == desc.get_local_comm_rank())
+            tempBufferUserAllocs[buf.first.device] += buf.second->get_size_bytes();
+    }
+}
+
+static rocfft_status rocfft_plan_create_internal(rocfft_plan                   plan,
+                                                 const rocfft_result_placement placement,
+                                                 const rocfft_transform_type   transform_type,
+                                                 const rocfft_precision        precision,
+                                                 const size_t                  dimensions,
+                                                 const size_t*                 lengths,
+                                                 const size_t                  number_of_transforms,
+                                                 const rocfft_plan_description description)
 {
 #ifdef ROCFFT_MPI_ENABLE
 // TODO allgather for placement, transform_type, precision, dimensions, {lengths}, and
@@ -4418,7 +4393,11 @@ rocfft_status rocfft_plan_create_internal(rocfft_plan                   plan,
             plan->MakeSingleDevPlanWithGatherScatterIfNeeded();
         }
 
-        plan->AllocateInternalTempBuffers();
+        // Roll up all of the information on individual temp buffers
+        // that the plan will require into a single number per device
+        // that we will request users to allocate.
+        plan->DetermineTempBufferUserAllocs();
+
         return rocfft_status_success;
     }
     catch(std::exception& e)
@@ -4900,6 +4879,17 @@ void TreeNode::SanityCheck(SchemeTree* solution_scheme, std::vector<FMKey>& kern
             throw std::runtime_error("scheme-decomposition error: plan-tree != scheme-tree");
         if(scheme != solution_scheme->curScheme)
             throw std::runtime_error("scheme-decomposition error: node-scheme != solution-scheme");
+        // Add any other scheme-specific assumptions omitted in the map's keys below
+        switch(solution_scheme->curScheme)
+        {
+        case CS_REAL_TRANSFORM_EVEN:
+            if(inStride.front() != 1 || outStride.front() != 1)
+                throw std::runtime_error("scheme-decomposition error: CS_REAL_TRANSFORM_EVEN "
+                                         "schemes cannot be used with non-unit strides");
+            break;
+        default:
+            break;
+        }
     }
 
     OperatingBuffer previousOut = obIn;
@@ -5857,28 +5847,9 @@ void ProcessNode(ExecPlan& execPlan)
     execPlan.rootPlan->CollapseContiguousDims();
 
     // Check the buffer, param and tree integrity, Note we do this after fusion
-    try
-    {
-        // rootScheme might be nullptr and solution_kernels might be empty (when no solution)
-        // if has solution, will also check if it's valid
-        execPlan.rootPlan->SanityCheck(rootScheme, execPlan.solution_kernels);
-    }
-    catch(const std::exception& e)
-    {
-        // When SanityCheck fails,
-        // if solution_kernels is empty or rootScheme is nullptr,
-        // means this has nothing to do with solution map. Throw to terminate
-        if(execPlan.solution_kernels.empty() || rootScheme == nullptr)
-            throw;
-        else
-        {
-            // data from solution map are invalid, then we're not able to use them
-            if(LOG_TRACE_ENABLED())
-                (*LogSingleton::GetInstance().GetTraceOS())
-                    << "input solution are invalid, try replacing kernels" << std::endl;
-            execPlan.rootPlan->SanityCheck();
-        }
-    }
+    // rootScheme might be nullptr and solution_kernels might be empty (when no solution)
+    // if has solution, will also check if it's valid
+    execPlan.rootPlan->SanityCheck(rootScheme, execPlan.solution_kernels);
 
     // get workBufSize..
     size_t tmpBufSize       = 0;

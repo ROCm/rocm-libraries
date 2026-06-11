@@ -825,8 +825,22 @@ namespace TensileLite
                                size_t                  totalElements,
                                hipMemcpyKind           kind)
         {
-            HIP_CHECK_EXC(hipMemcpy(
-                dst, src, multiplyElementSize(totalElements, descriptor.elementBytes()), kind));
+            // If we have elements to copy, pointers must be valid
+            // Null pointers with non-zero totalElements indicates a bug upstream (allocation logic)
+            if(totalElements > 0 && (dst == nullptr || src == nullptr))
+            {
+                std::stringstream ss;
+                ss << "Invalid state in copyInputBuffers: totalElements=" << totalElements
+                   << " but dst=" << dst << " src=" << src
+                   << " for tensor " << descriptor.getName();
+                throw std::runtime_error(ss.str());
+            }
+
+            if(totalElements > 0)
+            {
+                HIP_CHECK_EXC(hipMemcpy(
+                    dst, src, multiplyElementSize(totalElements, descriptor.elementBytes()), kind));
+            }
             return dst;
         }
 
@@ -1810,7 +1824,11 @@ namespace TensileLite
             // swizzled scale into gpuInput.valid (when m_mxScaleLayout selects
             // one), so copySwizzledToGPUBuffer just forwards it; otherwise the
             // canonical scale (cpuInput.valid) is uploaded via the normal path.
-            bool useMXGenerator = isMXProblem(problem);
+            // gfx1250 MX problems go THROUGH the generator (we deliberately do not
+            // gate on m_mxScaleFormat, which would force gfx1250 onto the plain
+            // initArray path). F6 is excluded (develop #7644) because it currently
+            // fails through the generator on gfx1250 and must fall back to initArray.
+            bool useMXGenerator = isMXProblemExceptF6(problem);
             if(useMXGenerator)
                 initializeMXData(problem);
 
@@ -1961,6 +1979,32 @@ namespace TensileLite
                   "or add a mapping in initModeToMXMethod.");
         }
 
+        // generateMXInput emits scales packed for the unpadded data K, but setMXScaleA/B
+        // pad ceil(K/mxBlock) up to a multiple of 8. When those differ (e.g. K=384 →
+        // 12 padded to 16) the kernel and CPU reference read every (m>0, k_block) at the
+        // wrong byte. Only the K-fast layouts (bound dim at index 0 → TN A / NT B) need
+        // this: K-slow layouts keep K-blocks as the slow axis and the unfilled padding
+        // tail is already zero from the pre-memset. Walk the free axis backward so the
+        // expansion can happen in place.
+        static void restrideMXScaleBufferKFast(uint8_t* buffer,
+                                               size_t   compactFreeDim,
+                                               size_t   compactKBlocks,
+                                               size_t   paddedKBlocks,
+                                               size_t   elemBytes)
+        {
+            if(compactKBlocks == paddedKBlocks || compactFreeDim == 0)
+                return;
+            const size_t compactRow = compactKBlocks * elemBytes;
+            const size_t paddedRow  = paddedKBlocks * elemBytes;
+            const size_t padTail    = paddedRow - compactRow;
+            for(size_t f = compactFreeDim; f-- > 1;)
+            {
+                std::memmove(buffer + f * paddedRow, buffer + f * compactRow, compactRow);
+                std::memset(buffer + f * paddedRow + compactRow, 0x00, padTail);
+            }
+            std::memset(buffer + compactRow, 0x00, padTail);
+        }
+
         void DataInitialization::initializeMXData(ContractionProblemGemm const& problem)
         {
             // Seeds A, B, MXSA, MXSB so the default-init loop in initializeCPUInputs
@@ -2075,6 +2119,23 @@ namespace TensileLite
                   hipDataType const hipScaleT = hipMxScaleTypeForDataGenerator(scaleEltType);
 
                   // cpuInput.valid always holds the canonical (non-swizzled) scale.
+                  // generateMXInput emits scales packed for the unpadded data K, but
+                  // setMXScaleA/B pad ceil(K/mxBlock) up to a multiple of 8. For K-fast
+                  // layouts (bound dim at index 0) the compact and padded K-block counts
+                  // can differ, so we must restride the canonical buffer in place so the
+                  // kernel and CPU reference read every (free, k_block) at the right byte
+                  // (develop #7683). K-slow layouts keep K as the slow axis and the
+                  // pre-memset zero tail already covers the padding.
+                  auto const  boundIdx = isMatrixA ? problem.boundIndices()[0].a
+                                                   : problem.boundIndices()[0].b;
+                  auto const  freeIdx  = isMatrixA ? problem.freeIndicesA()[0].i
+                                                   : problem.freeIndicesB()[0].i;
+                  size_t const compactKBlocks
+                      = (dataDesc.sizes()[boundIdx] + mxBlock - 1) / mxBlock;
+                  size_t const paddedKBlocks = scaleDesc.sizes()[boundIdx];
+                  size_t const compactFree   = dataDesc.sizes()[freeIdx];
+                  size_t const scaleElemSize = DataTypeInfo::Get(scaleDesc.dataType()).elementSize;
+                  bool const   kFast         = (boundIdx == 0);
                   for(size_t b = 0; b < batchCount; b++)
                   {
                       auto* dataPtr = static_cast<uint8_t*>(pristineData.cpuInput.valid.get())
@@ -2096,6 +2157,9 @@ namespace TensileLite
                                       initModeToMXMethod(initMode),
                                       -1.0f,
                                       1.0f);
+                      if(kFast)
+                          restrideMXScaleBufferKFast(
+                              scalePtr, compactFree, compactKBlocks, paddedKBlocks, scaleElemSize);
                   }
 
                   // When the kernel needs a swizzled scale, regenerate it with the

@@ -26,7 +26,8 @@
 namespace rocm_ck {
 
 // Matrix multiplication: out = lhs x rhs.
-// acc_dtype is the accumulation type - defaults to FP32, the universal safe
+// Layout defaults (applied during resolve): lhs=Row, rhs=Col, out=Row.
+// acc_dtype is the accumulation type -- defaults to FP32, the universal safe
 // choice across all input types.
 struct GemmOp
 {
@@ -103,25 +104,6 @@ struct ScaleOp
     std::string_view scale;
 };
 
-// Fused multi-head attention backward pass.
-// Implemented as a single CK Tile kernel, not a chain of ops.
-// Feature flags (mask, dropout, bias, deterministic) belong in the Algorithm.
-struct FmhaBwdOp
-{
-    std::string_view q;   // query
-    std::string_view k;   // key
-    std::string_view v;   // value
-    std::string_view lse; // log-sum-exp from forward pass
-    std::string_view do_; // output gradient
-    std::string_view d;   // dot(output_grad, output)
-
-    std::string_view dq; // query gradient
-    std::string_view dk; // key gradient
-    std::string_view dv; // value gradient
-
-    DataType acc_dtype = DataType::FP32;
-};
-
 // The closed set of supported operators. std::monostate marks empty slots.
 using Op = std::variant<std::monostate,
                         GemmOp,
@@ -133,7 +115,6 @@ using Op = std::variant<std::monostate,
                         SiluOp,
                         SigmoidOp,
                         SoftmaxOp,
-                        ScaleOp,
-                        FmhaBwdOp>;
+                        ScaleOp>;
 
 } // namespace rocm_ck

@@ -11,10 +11,14 @@ using F8  = ck_tile::fp8_t;
 using F6  = ck_tile::pk_fp6x16_t;
 
 // clang-format off
-using MxTypes = ::testing::Types<std::tuple<F4, F4, MX_GemmConfig16,         Row, Col, Row>,
-                                 std::tuple<F4, F4, MX_GemmConfigEightWaves, Row, Col, Row>,
-                                 std::tuple<F8, F8, MX_GemmConfig16,         Row, Col, Row>,
-                                 std::tuple<F8, F8, MX_GemmConfigEightWaves, Row, Col, Row>>;
+using MxTypes = ::testing::Types<std::tuple<F4, F4, MX_GemmConfig16,               Row, Col, Row>,
+                                 std::tuple<F4, F4, MX_GemmConfigEightWaves,       Row, Col, Row>,
+                                 std::tuple<F4, F4, MXfp4_GemmConfig16_Preshuffle, Row, Col, Row>,
+                                 std::tuple<F4, F4, MXfp4_GemmConfig16_PermuteN,   Row, Col, Row>,
+                                 std::tuple<F8, F8, MX_GemmConfig16,               Row, Col, Row>,
+                                 std::tuple<F8, F8, MX_GemmConfigEightWaves,       Row, Col, Row>,
+                                 std::tuple<F8, F8, MXfp8_GemmConfig16_Preshuffle, Row, Col, Row>,
+                                 std::tuple<F8, F8, MXfp8_GemmConfig16_PermuteN,   Row, Col, Row>>;
 // clang-format on
 
 template <typename TypeParam>
@@ -26,8 +30,7 @@ TYPED_TEST_SUITE(TestMxGemm, MxTypes);
 
 TYPED_TEST(TestMxGemm, Default)
 {
-    // No M/N/K padding so we use 128x256x256 as smallest dimensions
-    this->Run(128, 256, 256);
-    this->Run(256, 256, 512);
+    this->Run(128, 512, 256);
+    this->Run(256, 512, 512);
     this->Run(1024, 1024, 1024);
 }
