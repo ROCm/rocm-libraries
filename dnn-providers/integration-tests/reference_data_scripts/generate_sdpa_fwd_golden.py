@@ -416,6 +416,7 @@ def generate_forward_bundle(
     json_path = f"{base_filename}.json"
     with open(json_path, "w") as f:
         json.dump(graph_json, f, indent=4)
+        f.write("\n")
     print(f"  Graph JSON: {json_path}")
 
     # Write meta JSON (provenance: generator version, reference source, config)
@@ -432,6 +433,7 @@ def generate_forward_bundle(
     meta_path = f"{base_filename}.meta.json"
     with open(meta_path, "w") as f:
         json.dump(meta_json, f, indent=4)
+        f.write("\n")
     print(f"  Meta JSON: {meta_path}")
 
     # Optional: cross-check golden output against AITER GPU kernel
