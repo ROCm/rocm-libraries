@@ -449,6 +449,11 @@ inline bool isIndirectBranch(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_IndirectBranch);
 }
 
+// Structural call predicate. Only s_swappc_b64 is a call mnemonic in the tree.
+inline bool isCall(const StinkyInstruction& inst) {
+    return inst.getUnifiedOpcode() == GFX::s_swappc_b64;
+}
+
 // Label names of basic-block targets for \p given branch instruction.
 //
 // At most one target is returned today. Switch / multi-way branch semantics
