@@ -63,16 +63,40 @@ constexpr size_t sdpaBwdDqAccBufferSize(size_t batch, size_t headsQ, size_t seqL
     return alignUp(batch * headsQ * seqLenQ * headDim * sizeof(float), K_WORKSPACE_ALIGNMENT_BYTES);
 }
 
-/// Total backward workspace size, accounting for accumulator type.
-/// - A32: D buffer (FP32) + dq_acc buffer (FP32)
-/// - A16: D buffer (FP32) only — a16 kernels write dQ directly in BF16
-constexpr size_t sdpaBwdWorkspaceSize(
-    size_t batch, size_t headsQ, size_t seqLenQ, size_t headDim, AccumulatorType accType)
+/// GQA expanded dK/dV buffer: shape [B, H_q, S_kv, D] in BF16/FP16 (2 bytes per element).
+/// The DQDKDV kernel writes dK and dV per Q-head (nhead_q heads total), but the
+/// graph output dK/dV has only nhead_k heads. AITER handles this by allocating
+/// "expanded" dk/dv buffers with nhead_q heads, letting the kernel write all
+/// Q-head contributions, then summing across the GQA ratio dimension afterward
+/// (asm_mha_bwd.cu lines 142-149, 337-339).
+/// Only needed when headsQ > headsKv (GQA/MQA).
+constexpr size_t
+    sdpaBwdGqaExpandedBufferSize(size_t batch, size_t headsQ, size_t seqLenKv, size_t headDim)
+{
+    constexpr size_t K_ELEM_SIZE = 2; // BF16/FP16
+    return alignUp(batch * headsQ * seqLenKv * headDim * K_ELEM_SIZE, K_WORKSPACE_ALIGNMENT_BYTES);
+}
+
+/// Total backward workspace size, accounting for accumulator type and GQA.
+/// Layout: D buffer | dq_acc (A32 only) | dk_expanded (GQA only) | dv_expanded (GQA only)
+constexpr size_t sdpaBwdWorkspaceSize(size_t batch,
+                                      size_t headsQ,
+                                      size_t headsKv,
+                                      size_t seqLenQ,
+                                      size_t seqLenKv,
+                                      size_t headDimQk,
+                                      size_t headDimV,
+                                      AccumulatorType accType)
 {
     size_t size = sdpaBwdDBufferSize(batch, headsQ, seqLenQ);
     if(accType == AccumulatorType::A32)
     {
-        size += sdpaBwdDqAccBufferSize(batch, headsQ, seqLenQ, headDim);
+        size += sdpaBwdDqAccBufferSize(batch, headsQ, seqLenQ, headDimQk);
+    }
+    if(headsQ > headsKv)
+    {
+        size += sdpaBwdGqaExpandedBufferSize(batch, headsQ, seqLenKv, headDimQk);
+        size += sdpaBwdGqaExpandedBufferSize(batch, headsQ, seqLenKv, headDimV);
     }
     return size;
 }

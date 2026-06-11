@@ -370,7 +370,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_PrefersBottomRightCausalOverWindowBo
 
     // causal_mask_bottom_right=true takes precedence over the bounds trio, even
     // though a symmetric sliding window (left=64, right=64) would derive
-    // WINDOW_GENERIC: result is bottom-right causal.
+    // SLIDING_WINDOW: result is bottom-right causal.
     auto builder = createSdpaFwdGraphWithMask(
         /*causalMask=*/false,
         /*causalMaskBottomRight=*/true,
@@ -450,7 +450,7 @@ TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_BothUnsetDerivesNoMask)
         flatbuffers::nullopt,
         DiagonalAlignment::TOP_LEFT);
 
-    plan_utils::MaskType maskType = plan_utils::MaskType::WINDOW_GENERIC;
+    plan_utils::MaskType maskType = plan_utils::MaskType::SLIDING_WINDOW;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
     EXPECT_EQ(maskType, plan_utils::MaskType::NO_MASK);
 }
@@ -466,12 +466,12 @@ TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_BothUnboundedDerivesNoMask)
         flatbuffers::Optional<int64_t>(-1),
         DiagonalAlignment::TOP_LEFT);
 
-    plan_utils::MaskType maskType = plan_utils::MaskType::WINDOW_GENERIC;
+    plan_utils::MaskType maskType = plan_utils::MaskType::SLIDING_WINDOW;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
     EXPECT_EQ(maskType, plan_utils::MaskType::NO_MASK);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_SymmetricWindowDerivesWindowGeneric)
+TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_SymmetricWindowDerivesSlidingWindow)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -484,10 +484,10 @@ TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_SymmetricWindowDerivesWindowGeneri
 
     plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::WINDOW_GENERIC);
+    EXPECT_EQ(maskType, plan_utils::MaskType::SLIDING_WINDOW);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_LeftOnlyDerivesWindowGeneric)
+TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_LeftOnlyDerivesSlidingWindow)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -501,7 +501,7 @@ TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_LeftOnlyDerivesWindowGeneric)
 
     plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::WINDOW_GENERIC);
+    EXPECT_EQ(maskType, plan_utils::MaskType::SLIDING_WINDOW);
 }
 
 } // namespace
