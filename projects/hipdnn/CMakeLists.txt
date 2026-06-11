@@ -65,7 +65,7 @@ endif()
 # passing -DHIPDNN_VERSION; that override wins over the literal below (CACHE
 # STRING). The literal here is only the default for local/standalone builds when
 # no packager override is supplied.
-set(HIPDNN_VERSION "0.1.0" CACHE STRING
+set(HIPDNN_VERSION "0.0.1" CACHE STRING
     "hipDNN product version; controlled by TheRock via -DHIPDNN_VERSION for releases"
 )
 

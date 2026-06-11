@@ -14,7 +14,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # are standalone (no umbrella CMake defines HIPDNN_VERSION), so fall back to a
 # literal kept in sync with pyproject.toml and the top-level default.
 if(NOT DEFINED HIPDNN_VERSION)
-    set(HIPDNN_VERSION "0.1.0")
+    set(HIPDNN_VERSION "0.0.1")
 endif()
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/__init__.py.in"
