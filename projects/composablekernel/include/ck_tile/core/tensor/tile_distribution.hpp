@@ -15,9 +15,10 @@
 #include "ck_tile/core/utility/functional.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck_tile {
 
 template <typename Distribution>
@@ -67,8 +68,9 @@ CK_TILE_HOST_DEVICE constexpr auto make_tile_distributed_index(sequence<Is...>)
 template <typename PsYs2XsAdaptor_,
           typename Ys2DDescriptor_,
           typename StaticTileDistributionEncoding_,
-          typename TileDistributionDetail_> // FIXME: this is for hold ad-hoc but useful info,
+          typename TileDistributionDetail_, // FIXME: this is for hold ad-hoc but useful info,
                                             // should be more elegnat
+          bool IsWarpLevelParallelOnly_ = false>
 struct tile_distribution
 {
     using PsYs2XsAdaptor = remove_cvref_t<PsYs2XsAdaptor_>;
@@ -99,7 +101,16 @@ struct tile_distribution
 
         if constexpr(NDimP == 1)
         {
-            return array<index_t, 1>{get_lane_id()};
+            if constexpr(IsWarpLevelParallelOnly_)
+            {
+                constexpr auto p_len_over_h =
+                    DstrEncode::detail::get_uniformed_p_dim_lengths_over_h();
+                return array<index_t, 1>{get_warp_id() % p_len_over_h[0]};
+            }
+            else
+            {
+                return array<index_t, 1>{get_lane_id()};
+            }
         }
         else if constexpr(NDimP == 2)
         {
@@ -455,8 +466,10 @@ struct tile_distribution_detail
 } // namespace detail
 
 // this returns a static tile_distribution
-template <typename StaticTileDistributionEncoding_>
-CK_TILE_HOST_DEVICE constexpr auto make_static_tile_distribution(StaticTileDistributionEncoding_)
+template <typename StaticTileDistributionEncoding_, bool IsWarpLevelParallelOnly_ = false>
+CK_TILE_HOST_DEVICE constexpr auto
+make_static_tile_distribution(StaticTileDistributionEncoding_,
+                              bool_constant<IsWarpLevelParallelOnly_> = {})
 {
     using DstrEncode = remove_cvref_t<StaticTileDistributionEncoding_>;
 
@@ -488,8 +501,8 @@ CK_TILE_HOST_DEVICE constexpr auto make_static_tile_distribution(StaticTileDistr
         remove_cvref_t<decltype(ps_ys_to_xs_adaptor)>,
         remove_cvref_t<decltype(ys_to_d_descriptor)>,
         remove_cvref_t<DstrEncode>,
-        detail::tile_distribution_detail<remove_cvref_t<decltype(rh_major_minor_to_hidden_ids)>>>{
-        ps_ys_to_xs_adaptor, ys_to_d_descriptor};
+        detail::tile_distribution_detail<remove_cvref_t<decltype(rh_major_minor_to_hidden_ids)>>,
+        IsWarpLevelParallelOnly_>{ps_ys_to_xs_adaptor, ys_to_d_descriptor};
 }
 
 //***********************************************************************************
@@ -695,4 +708,6 @@ CK_TILE_HOST_DEVICE void print(const tile_distribution<PsYs2XsAdaptor_,
 }
 
 } // namespace ck_tile
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

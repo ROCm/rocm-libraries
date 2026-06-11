@@ -35,7 +35,7 @@ from copy import deepcopy
 from typing import Tuple
 PRECISION = 100
 class SIA3(SIA):
-    kernel = {"ScheduleIterAlg": 3}
+    kernel = {"_ScheduleIterAlg": 3}
     def __call__(self):
         assert(0)
 
@@ -93,7 +93,7 @@ class SIA3(SIA):
               firstIter, lastLc, isNGLL, startIterItem)
 
 class SIA2(SIA):
-    kernel = {"ScheduleIterAlg": 2}
+    kernel = {"_ScheduleIterAlg": 2}
     def __call__(self):
         assert(0)
 
@@ -121,7 +121,7 @@ class SIA2(SIA):
               firstIter, lastLc, isNGLL)
 
 class SIA1(SIA):
-    kernel = {"ScheduleIterAlg": 1}
+    kernel = {"_ScheduleIterAlg": 1}
     def __call__(self):
         assert(0)
 
@@ -149,7 +149,7 @@ class SIA1(SIA):
               firstIter, lastLc, isNGLL)
 
 class SIA0(SIA):
-    kernel = {"ScheduleIterAlg": 0}
+    kernel = {"_ScheduleIterAlg": 0}
     def __call__(self):
         assert False
 
@@ -565,6 +565,20 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
                 # TODO: For the 1-wave case, schedule B's TDM load independently for better tensor load balance.
                 deferMod.addComment1("Global Read B (TDM deferred after LDS swap)")
                 deferMod.add(tdmLoadModB)
+            # Metadata TDM also writes to a double-buffered LDS region that is XOR-swapped
+            # alongside A's (see s_xor on sgprtdmMetadataGroup0+1). Defer its tensor_load_to_lds
+            # to tdmLoadIter so the load lands in the post-swap buffer, matching the
+            # ds_load_tr8_b64 reads from the new side; otherwise the async TDM write races
+            # against the current iter's metadata local reads from the same LDS region.
+            if kernel["ProblemType"]["Sparse"]:
+                nonTdmModM, tdmLoadModM = _splitTdmLoad(writer.codes.globalReadMetadata)
+                imod.addComment1("Global Read Metadata")
+                imod.add(nonTdmModM)
+                if tdmLoadModM.itemsSize() > 0:
+                    deferMod.addComment1("Global Read Metadata (TDM deferred after LDS swap)")
+                    deferMod.add(tdmLoadModM)
+            imod.add(writer.codes.gl2PrefetchIncrement)
+            imod.add(writer.codes.gl2Prefetch)
         else:
             imod.addComment1("Global Read A")
             imod.add(writer.codes.dtlsM0UpdateA)
@@ -578,6 +592,11 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
             imod.addComment1("Global Read B")
             imod.add(writer.codes.dtlsM0UpdateB)
             imod.add(writer.codes.globalReadB)
+            if kernel["ProblemType"]["Sparse"]:
+                imod.addComment1("Global Read Metadata")
+                imod.add(writer.codes.globalReadMetadata)
+            imod.add(writer.codes.gl2PrefetchIncrement)
+            imod.add(writer.codes.gl2Prefetch)
     else:
         # put everything in the header (original behavior for PGR=0/1):
         writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateA)
@@ -588,8 +607,11 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
         writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSB)
         writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateB)
         writer.codes.unrollLoopHeader.add(writer.codes.globalReadB)
+        writer.codes.unrollLoopHeader.add(writer.codes.globalReadMetadata) if kernel["ProblemType"]["Sparse"] else None
         writer.codes.unrollLoopHeader.add(globalReadIncACode)
         writer.codes.unrollLoopHeader.add(globalReadIncBCode)
+        writer.codes.unrollLoopHeader.add(writer.codes.gl2PrefetchIncrement)
+        writer.codes.unrollLoopHeader.add(writer.codes.gl2Prefetch)
     # Dummy
     itemsGRToSchedLater = []
     lastLoadIter = 0
@@ -600,6 +622,7 @@ def prepareGRInstToSched(writer, kernel, isNGLL):
     writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSA.header)
     writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSB.header)
     writer.codes.unrollLoopHeader.add(writer.codes.globalReadB.header)
+    writer.codes.unrollLoopHeader.add(writer.codes.globalReadMetadata.header) if kernel["ProblemType"]["Sparse"] else None
 
     # Add all loads from middle as individual schedulable items
     # when using PGR2, put global read instruction right after corresponding localWrite instruction
@@ -611,12 +634,14 @@ def prepareGRInstToSched(writer, kernel, isNGLL):
         itemsGRToSchedLater = list(writer.codes.globalReadA.middle.items()) + \
                          list(writer.codes.globalReadMXSA.middle.items()) + \
                          list(writer.codes.globalReadMXSB.middle.items()) + \
-                         list(writer.codes.globalReadB.middle.items())
+                         list(writer.codes.globalReadB.middle.items()) + \
+                         list(writer.codes.globalReadMetadata.middle.items())
     else:
         itemsGRToSched =  list(writer.codes.globalReadA.middle.items()) + \
                         list(writer.codes.globalReadMXSA.middle.items()) + \
                         list(writer.codes.globalReadMXSB.middle.items()) + \
-                        list(writer.codes.globalReadB.middle.items())
+                        list(writer.codes.globalReadB.middle.items()) + \
+                        list(writer.codes.globalReadMetadata.middle.items())
         itemsGRToSchedLater = []
 
     itemsGRToSchedTemp = []
@@ -747,6 +772,9 @@ def schedGlobalRead(writer, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsP
         writer.codes.globalReadMXSB.middle.getItem(0).add(writer.codes.dtlsM0UpdateMXSB, 0)
     if writer.codes.globalReadB.middle.items():
         writer.codes.globalReadB.middle.getItem(0).add(writer.codes.dtlsM0UpdateB, 0)
+    # TODO: if metadata supports directToLds
+    # if writer.codes.globalReadMetadata.middle.items():
+    #     writer.codes.globalReadMetadata.middle.getItem(0).add(writer.codes.dtlsM0UpdateMetadata, 0)
 
     itemsGRToSched.extend(itemsGRIncToSched)
     # append 'n' global load at a time
@@ -774,6 +802,7 @@ def schedGlobalRead(writer, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsP
     writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadMXSA.footer)
     writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadMXSB.footer)
     writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadB.footer)
+    writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadMetadata.footer)
     return lastLoadIter
 
 ################################################################################
@@ -872,6 +901,16 @@ def prepareLWInstToSched(writer, kernel, numLocalWritesPerSched, isNGLL=False):
               lenB -= lenBFooter
             numDummy += lenB
             insertDummyTop = swapped
+        if kernel["ProblemType"]["Sparse"]:
+            if kernel["DirectToLdsMetadata"]:
+                # DirectToLdsMetadata M0 update
+                numDummy -= 1
+            else:
+                # Workaround, Sparse B + (DTLB only) don't need this since there's no meta GR in globalReadB
+                sparseTc = 'B' if kernel["ProblemType"]["Sparse"] == 2 else 'A'
+                if not (sparseTc == 'B' and kernel["DirectToLdsB"] and not kernel["DirectToLdsA"]) and kernel["DirectToLds%s"%sparseTc]:
+                    numMetaGR = kernel["NumLoadsPerpendicularMetadata"] * kernel["NumLoadsCoalescedMetadata"]
+                    numDummy -= numMetaGR
     # extend localWrite by inserting empty Module
     # See getNumLocalWritePerMfma for how this work
     itemsLWToSchedTemp = []

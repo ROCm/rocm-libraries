@@ -43,6 +43,14 @@ inline int portable_setenv(const char* name, const char* value, int overwrite) {
 #endif
 }
 
+inline int portable_unsetenv(const char* name) {
+#ifdef _WIN32
+  return _putenv_s(name, "");
+#else
+  return unsetenv(name);
+#endif
+}
+
 // List of GPU architectures to test
 inline const std::vector<int> test_architectures = {942, 950, 1250};
 

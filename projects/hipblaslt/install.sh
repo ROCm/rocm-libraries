@@ -71,7 +71,7 @@ while [[ $# -gt 0 ]]; do
             echo "  -k, --relwithdebinfo      RelWithDebInfo build"
             echo "  -a, --architecture <arch>  GPU target(s)"
             echo "  -n, --client-only         Build without Tensile"
-            echo "  -j <N>                    Parallel build jobs"
+            echo "  -j <N>                    Parallel jobs (caps both cmake and Tensile kernel generation)"
             echo "  -l, --logic <path>        Tensile logic path"
             echo "  --static                  Static library"
             echo "  --address-sanitizer       AddressSanitizer"
@@ -92,7 +92,7 @@ while [[ $# -gt 0 ]]; do
         -k|--relwithdebinfo) INVOKE_ARGS="$INVOKE_ARGS --relwithdebinfo" ;;
         -a|--architecture)  shift; INVOKE_ARGS="$INVOKE_ARGS --architecture='$1'" ;;
         -n|--client-only)   INVOKE_ARGS="$INVOKE_ARGS --no-tensile" ;;
-        -j)                 shift; INVOKE_ARGS="$INVOKE_ARGS --jobs $1" ;;
+        -j)                 shift; INVOKE_ARGS="$INVOKE_ARGS --jobs $1 --tensile-threads $1" ;;
         -l|--logic)         shift; INVOKE_ARGS="$INVOKE_ARGS --tensile-logic=$1" ;;
         --static)           INVOKE_ARGS="$INVOKE_ARGS --static" ;;
         --address-sanitizer) INVOKE_ARGS="$INVOKE_ARGS --address-sanitizer" ;;
