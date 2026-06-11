@@ -1,5 +1,5 @@
 #Copyright(c) Advanced Micro Devices, Inc., or its affiliates.
-#SPDX - License - Identifier : MIT
+# SPDX-License-Identifier: MIT
 #CMakeLists.txt for sparse attention(Jenga and VSA)
 
 #Use SUPPORTED_GPU_TARGETS directly
@@ -281,7 +281,6 @@ set_property(TARGET ${EXAMPLE_SPARGE} PROPERTY HIP_ARCHITECTURES ${INST_TARGETS}
 target_compile_options(${EXAMPLE_SPARGE} PRIVATE
   -Wno-undefined-func-template
   -Wno-float-equal
-  -DP2_SCALE_DUMP=1
 )
 
 set_property(GLOBAL PROPERTY RULE_MESSAGES OFF)

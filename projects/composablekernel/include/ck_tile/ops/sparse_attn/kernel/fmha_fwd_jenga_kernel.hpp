@@ -9,6 +9,7 @@
 #include "ck_tile/ops/fmha/block/variants.hpp"
 
 #include <cassert>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -166,8 +167,16 @@ struct FmhaFwdJengaKernel
     {
         // 256-bool LDS staging caps N_k <= 256 per Q-tile.
         // For kN0=64 this means seqlen_k <= 16384.
-        assert(ck_tile::integer_divide_ceil(seqlen_k, FmhaPipeline::kN0) <= 256 &&
-               "256-bool LDS staging caps N_k <= 256 (for kN0=64: seqlen_k <= 16384)");
+        // Always-on runtime rejection (assert compiles out under NDEBUG, which would
+        // let seqlen_k > 16384 silently overflow the LDS staging buffer in release).
+        if(ck_tile::integer_divide_ceil(seqlen_k, FmhaPipeline::kN0) > 256)
+        {
+            throw std::runtime_error(
+                "seqlen_k exceeds 256-block limit: N_k=" +
+                std::to_string(ck_tile::integer_divide_ceil(seqlen_k, FmhaPipeline::kN0)) +
+                ", max=256 (256-bool LDS staging, for kN0=" + std::to_string(FmhaPipeline::kN0) +
+                ": seqlen_k <= 16384)");
+        }
 
         Kargs kargs{{q_ptr,
                      k_ptr,

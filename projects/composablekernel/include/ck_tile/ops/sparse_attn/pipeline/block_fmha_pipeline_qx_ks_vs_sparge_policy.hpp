@@ -54,8 +54,6 @@
 #include "ck_tile/ops/gemm/block/block_gemm_areg_bsmem_creg_v2_custom_policy.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_areg_bsmem_creg_v2.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_areg_bsmem_creg_one_warp_v1.hpp"
-#include "ck_tile/ops/gemm/block/block_gemm_mx_areg_bsmem_creg_v1.hpp"
-#include "ck_tile/ops/gemm/block/block_gemm_mx_areg_bsmem_creg_v1_custom_policy.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qx_ks_vs_custom_policy.hpp"
 
 namespace ck_tile {
@@ -124,10 +122,21 @@ struct BlockFmhaPipelineQXSpargeCustomPolicy</* QLoadOnce = */ true>
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetQKBlockGemm()
     {
-        using GemmProblem =
+        // Sparge int8 path: under int8 Q/K, the MFMA accumulator is int32
+        // even though Problem::SaccDataType stays float (it tracks the
+        // softmax dtype). Override the BlockGemm CDataType to int32 for
+        // the int8 path so MakeCBlockTile produces an int32 tile that
+        // matches the warp gemm. Mirrors sage's GemmAccDataType pattern.
+        using QKGemmAccDataType =
+            std::conditional_t<std::is_same_v<typename Problem::QDataType, int8_t> &&
+                                   std::is_same_v<typename Problem::KDataType, int8_t>,
+                               int32_t,
+                               typename Problem::SaccDataType>;
+
+        using QKGemmProblem =
             BlockGemmProblem<typename Problem::QDataType,
                              typename Problem::KDataType,
-                             typename Problem::SaccDataType,
+                             QKGemmAccDataType,
                              Problem::kNumGemm0Warps * get_warp_size(),
                              TileGemmShape<sequence<Problem::BlockFmhaShape::kM0,
                                                     Problem::BlockFmhaShape::kN0,
@@ -135,141 +144,58 @@ struct BlockFmhaPipelineQXSpargeCustomPolicy</* QLoadOnce = */ true>
                                            typename Problem::BlockFmhaShape::Gemm0BlockWarps,
                                            typename Problem::BlockFmhaShape::Gemm0WarpTile>>;
 
-        constexpr auto QScaleEnum = []() {
-            if constexpr(is_detected<detail::has_qscale_enum_type, Problem>{})
-                return Problem::QScaleEnum;
+        constexpr auto warp_gemm = []() {
+            if constexpr(get_warp_size() == 64 &&
+                         std::is_same_v<typename Problem::QDataType, fp8_t> &&
+                         std::is_same_v<typename Problem::KDataType, fp8_t> &&
+                         std::is_same_v<typename Problem::SaccDataType, float> &&
+                         Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}) == 32 &&
+                         Problem::BlockFmhaShape::Gemm0WarpTile::at(number<1>{}) == 32 &&
+                         Problem::BlockFmhaShape::Gemm0WarpTile::at(number<2>{}) == 32)
+            {
+                constexpr index_t swizzle_factor = 4;
+                return WarpGemmMfmaFp8Fp8F32M32N32K32SwizzleBTransposedCDistribution<
+                    swizzle_factor>{};
+            }
+            else if constexpr(get_warp_size() == 64 &&
+                              std::is_same_v<typename Problem::QDataType, int8_t> &&
+                              std::is_same_v<typename Problem::KDataType, int8_t> &&
+                              Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}) == 32 &&
+                              Problem::BlockFmhaShape::Gemm0WarpTile::at(number<1>{}) == 32 &&
+                              Problem::BlockFmhaShape::Gemm0WarpTile::at(number<2>{}) == 16)
+            {
+                // Sparge int8 GEMM0 for BLOCKSCALE bm0=64. The
+                // WarpGemmDispatcher's int8/int8/int32 entries do not
+                // cover SwizzleA=true, so name the plain TransposeC=true
+                // variant explicitly here; mirrors sage's int8 branch.
+                return WarpGemmMfma_i32_32x32x16_i8_i8_CTransposed{};
+            }
             else
-                return ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE;
-        }();
-
-        if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
-        {
-            constexpr auto warp_gemm = []() {
-                static_assert(std::is_same_v<typename Problem::QDataType, pk_fp4_t> ==
-                              std::is_same_v<typename Problem::KDataType, pk_fp4_t>);
-                constexpr auto AttrNumAccess = std::is_same_v<typename Problem::QDataType, pk_fp4_t>
-                                                   ? WGAttrNumAccessEnum::Single
-                                                   : WGAttrNumAccessEnum::Double;
+            {
+                constexpr bool SwizzleA =
+                    Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}) == 32;
                 return WarpGemmDispatcher<typename Problem::KDataType,
                                           typename Problem::QDataType,
                                           typename Problem::SaccDataType,
                                           Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}),
                                           Problem::BlockFmhaShape::Gemm0WarpTile::at(number<1>{}),
                                           Problem::BlockFmhaShape::Gemm0WarpTile::at(number<2>{}),
-                                          true,  // TransposeC
-                                          false, // SwizzleA
-                                          false,
-                                          AttrNumAccess>{};
-            }();
+                                          true, // TransposeC
+                                          SwizzleA>{};
+            }
+        }();
 
-            // Ensure that QKBlockGemm's C (S) can be used as KVBlockGemm's A (P)
-            constexpr index_t TargetCMPerLane = [] {
-                constexpr auto AttrNumAccess =
-                    ck_tile::is_any_of<typename Problem::PDataType, pk_fp4_t, pk_fp6x16_t>::value
-                        ? WGAttrNumAccessEnum::Single
-                        : WGAttrNumAccessEnum::Double;
-                using WarpGemm =
-                    WarpGemmDispatcher<typename Problem::VDataType,
-                                       typename Problem::PDataType,
-                                       typename Problem::OaccDataType,
-                                       Problem::BlockFmhaShape::Gemm1WarpTile::at(number<0>{}),
-                                       Problem::BlockFmhaShape::Gemm1WarpTile::at(number<1>{}),
-                                       Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}),
-                                       true,  // TransposeC
-                                       false, // SwizzleA
-                                       false,
-                                       AttrNumAccess>;
-                return WarpGemm::WarpGemmAttribute::Impl::kABKPerLane /
-                       WarpGemm::WarpGemmAttribute::AttrNumAccessV;
-            }();
+        using BlockGemmPolicy =
+            BlockGemmARegBSmemCRegV2CustomPolicy<typename Problem::QDataType,
+                                                 typename Problem::KDataType,
+                                                 QKGemmAccDataType,
+                                                 typename Problem::BlockFmhaShape::Gemm0BlockWarps,
+                                                 decltype(warp_gemm)>;
 
-            using BlockGemmPolicy = BlockGemmMxARegBSmemCRegV1CustomPolicy<
-                typename Problem::QDataType,
-                typename Problem::KDataType,
-                typename Problem::SaccDataType,
-                typename Problem::BlockFmhaShape::Gemm0BlockWarps,
-                decltype(warp_gemm)>;
-
-            return BlockGemmMxARegBSmemCRegV1<GemmProblem, BlockGemmPolicy, TargetCMPerLane>{};
-        }
+        if constexpr(1 < Problem::kNumGemm0Warps)
+            return BlockGemmARegBSmemCRegV2<QKGemmProblem, BlockGemmPolicy>{};
         else
-        {
-            // Sparge int8 path: under int8 Q/K, the MFMA accumulator is int32
-            // even though Problem::SaccDataType stays float (it tracks the
-            // softmax dtype). Override the BlockGemm CDataType to int32 for
-            // the int8 path so MakeCBlockTile produces an int32 tile that
-            // matches the warp gemm. Mirrors sage's GemmAccDataType pattern.
-            using QKGemmAccDataType =
-                std::conditional_t<std::is_same_v<typename Problem::QDataType, int8_t> &&
-                                       std::is_same_v<typename Problem::KDataType, int8_t>,
-                                   int32_t,
-                                   typename Problem::SaccDataType>;
-
-            using QKGemmProblem =
-                BlockGemmProblem<typename Problem::QDataType,
-                                 typename Problem::KDataType,
-                                 QKGemmAccDataType,
-                                 Problem::kNumGemm0Warps * get_warp_size(),
-                                 TileGemmShape<sequence<Problem::BlockFmhaShape::kM0,
-                                                        Problem::BlockFmhaShape::kN0,
-                                                        Problem::BlockFmhaShape::kK0>,
-                                               typename Problem::BlockFmhaShape::Gemm0BlockWarps,
-                                               typename Problem::BlockFmhaShape::Gemm0WarpTile>>;
-
-            constexpr auto warp_gemm = []() {
-                if constexpr(get_warp_size() == 64 &&
-                             std::is_same_v<typename Problem::QDataType, fp8_t> &&
-                             std::is_same_v<typename Problem::KDataType, fp8_t> &&
-                             std::is_same_v<typename Problem::SaccDataType, float> &&
-                             Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}) == 32 &&
-                             Problem::BlockFmhaShape::Gemm0WarpTile::at(number<1>{}) == 32 &&
-                             Problem::BlockFmhaShape::Gemm0WarpTile::at(number<2>{}) == 32)
-                {
-                    constexpr index_t swizzle_factor = 4;
-                    return WarpGemmMfmaFp8Fp8F32M32N32K32SwizzleBTransposedCDistribution<
-                        swizzle_factor>{};
-                }
-                else if constexpr(get_warp_size() == 64 &&
-                                  std::is_same_v<typename Problem::QDataType, int8_t> &&
-                                  std::is_same_v<typename Problem::KDataType, int8_t> &&
-                                  Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}) == 32 &&
-                                  Problem::BlockFmhaShape::Gemm0WarpTile::at(number<1>{}) == 32 &&
-                                  Problem::BlockFmhaShape::Gemm0WarpTile::at(number<2>{}) == 16)
-                {
-                    // Sparge int8 GEMM0 for BLOCKSCALE bm0=64. The
-                    // WarpGemmDispatcher's int8/int8/int32 entries do not
-                    // cover SwizzleA=true, so name the plain TransposeC=true
-                    // variant explicitly here; mirrors sage's int8 branch.
-                    return WarpGemmMfma_i32_32x32x16_i8_i8_CTransposed{};
-                }
-                else
-                {
-                    constexpr bool SwizzleA =
-                        Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}) == 32;
-                    return WarpGemmDispatcher<
-                        typename Problem::KDataType,
-                        typename Problem::QDataType,
-                        typename Problem::SaccDataType,
-                        Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}),
-                        Problem::BlockFmhaShape::Gemm0WarpTile::at(number<1>{}),
-                        Problem::BlockFmhaShape::Gemm0WarpTile::at(number<2>{}),
-                        true, // TransposeC
-                        SwizzleA>{};
-                }
-            }();
-
-            using BlockGemmPolicy = BlockGemmARegBSmemCRegV2CustomPolicy<
-                typename Problem::QDataType,
-                typename Problem::KDataType,
-                QKGemmAccDataType,
-                typename Problem::BlockFmhaShape::Gemm0BlockWarps,
-                decltype(warp_gemm)>;
-
-            if constexpr(1 < Problem::kNumGemm0Warps)
-                return BlockGemmARegBSmemCRegV2<QKGemmProblem, BlockGemmPolicy>{};
-            else
-                return BlockGemmARegBSmemCRegOneWarpV1<QKGemmProblem, BlockGemmPolicy>{};
-        }
+            return BlockGemmARegBSmemCRegOneWarpV1<QKGemmProblem, BlockGemmPolicy>{};
     }
 };
 
@@ -1041,79 +967,37 @@ struct BlockFmhaPipelineQXKSVSSpargeCustomPolicy : BlockFmhaPipelineQXSpargeCust
                                            typename Problem::BlockFmhaShape::Gemm1BlockWarps,
                                            typename Problem::BlockFmhaShape::Gemm1WarpTile>>;
 
-        constexpr auto QScaleEnum = []() {
-            if constexpr(is_detected<detail::has_qscale_enum_type, Problem>{})
-                return Problem::QScaleEnum;
+        constexpr auto warp_gemm = []() {
+            if constexpr(get_warp_size() == 64 &&
+                         std::is_same_v<typename Problem::PDataType, fp8_t> &&
+                         std::is_same_v<typename Problem::VDataType, fp8_t> &&
+                         std::is_same_v<typename Problem::OaccDataType, float> &&
+                         Problem::BlockFmhaShape::Gemm1WarpTile::at(number<0>{}) == 32 &&
+                         Problem::BlockFmhaShape::Gemm1WarpTile::at(number<1>{}) == 32 &&
+                         Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 32)
+            {
+                return WarpGemmMfmaFp8Fp8F32M32N32K32SwizzleBTransposedCDistribution<>{};
+            }
             else
-                return ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE;
-        }();
-
-        if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
-        {
-            constexpr auto warp_gemm = []() {
-                static_assert(
-                    ck_tile::is_any_of<typename Problem::PDataType, pk_fp4_t, pk_fp6x16_t>::value ==
-                    std::is_same_v<typename Problem::VDataType, pk_fp4_t>);
-                constexpr auto AttrNumAccess =
-                    ck_tile::is_any_of<typename Problem::PDataType, pk_fp4_t, pk_fp6x16_t>::value
-                        ? WGAttrNumAccessEnum::Single
-                        : WGAttrNumAccessEnum::Double;
+            {
                 return WarpGemmDispatcher<typename Problem::VDataType,
                                           typename Problem::PDataType,
                                           typename Problem::OaccDataType,
                                           Problem::BlockFmhaShape::Gemm1WarpTile::at(number<0>{}),
                                           Problem::BlockFmhaShape::Gemm1WarpTile::at(number<1>{}),
                                           Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}),
-                                          true,
-                                          false,
-                                          false,
-                                          AttrNumAccess>{};
-            }();
+                                          true>{};
+            }
+        }();
 
-            using BlockGemmPolicy = BlockGemmMxARegBSmemCRegV1CustomPolicy<
-                typename Problem::PDataType,
-                typename Problem::VDataType,
-                typename Problem::OaccDataType,
-                typename Problem::BlockFmhaShape::Gemm1BlockWarps,
-                decltype(warp_gemm)>;
+        using BlockGemmPolicy =
+            BlockGemmARegBSmemCRegV2CustomPolicy<typename Problem::PDataType,
+                                                 typename Problem::VDataType,
+                                                 typename Problem::OaccDataType,
+                                                 typename Problem::BlockFmhaShape::Gemm1BlockWarps,
+                                                 decltype(warp_gemm)>;
 
-            return BlockGemmMxARegBSmemCRegV1<GemmProblem, BlockGemmPolicy>{};
-        }
-        else
-        {
-            constexpr auto warp_gemm = []() {
-                if constexpr(get_warp_size() == 64 &&
-                             std::is_same_v<typename Problem::PDataType, fp8_t> &&
-                             std::is_same_v<typename Problem::VDataType, fp8_t> &&
-                             std::is_same_v<typename Problem::OaccDataType, float> &&
-                             Problem::BlockFmhaShape::Gemm1WarpTile::at(number<0>{}) == 32 &&
-                             Problem::BlockFmhaShape::Gemm1WarpTile::at(number<1>{}) == 32 &&
-                             Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 32)
-                {
-                    return WarpGemmMfmaFp8Fp8F32M32N32K32SwizzleBTransposedCDistribution<>{};
-                }
-                else
-                {
-                    return WarpGemmDispatcher<
-                        typename Problem::VDataType,
-                        typename Problem::PDataType,
-                        typename Problem::OaccDataType,
-                        Problem::BlockFmhaShape::Gemm1WarpTile::at(number<0>{}),
-                        Problem::BlockFmhaShape::Gemm1WarpTile::at(number<1>{}),
-                        Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}),
-                        true>{};
-                }
-            }();
-
-            using BlockGemmPolicy = BlockGemmARegBSmemCRegV2CustomPolicy<
-                typename Problem::PDataType,
-                typename Problem::VDataType,
-                typename Problem::OaccDataType,
-                typename Problem::BlockFmhaShape::Gemm1BlockWarps,
-                decltype(warp_gemm)>;
-
-            return BlockGemmARegBSmemCRegV2<GemmProblem, BlockGemmPolicy>{};
-        }
+        return BlockGemmARegBSmemCRegV2<GemmProblem, BlockGemmPolicy>{};
     }
 };
 

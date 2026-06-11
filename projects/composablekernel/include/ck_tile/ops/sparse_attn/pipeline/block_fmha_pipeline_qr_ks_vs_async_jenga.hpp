@@ -509,6 +509,8 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
                     // FIXME: this use different equation from FA v2 paper,
                     // but produce correc result.
                     // Is the equation wrong?
+                    // (Inherited from upstream CK
+                    // block_fmha_batch_prefill_pipeline_qr_ks_vs_async.hpp)
                     o_acc(i_j_idx) *= tmp;
                 });
             });

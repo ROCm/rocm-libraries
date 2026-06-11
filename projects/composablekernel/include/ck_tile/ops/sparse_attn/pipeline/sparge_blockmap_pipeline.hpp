@@ -179,7 +179,7 @@ struct SpargeBlockMapPipeline
 
         for(index_t m = 0; m < SeqPerThread; ++m)
         {
-            // Round 12: hardware fast rsqrt (v_rsq_f32, ~1 ULP) replaces sw sqrt+rcp.
+            // Hardware fast rsqrt (v_rsq_f32, ~1 ULP) replaces software sqrt+rcp.
             float inv_norm = (row_norms[m] > 0.f) ? rsqrtf(row_norms[m]) : 0.f;
             index_t gsq    = m * (SeqThreadPerWarp * NumWarps) + warp_id * SeqThreadPerWarp + m_idx;
             if(gsq < actual_seq)
@@ -471,11 +471,11 @@ struct SpargeBlockMapPipeline
         }
         const float sum_exp = block_reduce_sum(lsum, smem_small);
 
-        // Round 13i: argmax is invariant under positive scaling (inv_sum > 0). When
-        // topk > 0 we never read normalised values for cdfthreshd, so skip the
-        // normalise pass entirely (saves N_k LDS writes + 1 __syncthreads). The
-        // cdfthreshd path (topk <= 0) still requires normalised scores so the
-        // accumulator `cumulative_prob` matches probabilities.
+        // Argmax is invariant under positive scaling (inv_sum > 0). When topk > 0
+        // we never read normalised values for cdfthreshd, so skip the normalise
+        // pass entirely (saves N_k LDS writes + 1 __syncthreads). The cdfthreshd
+        // path (topk <= 0) still requires normalised scores so the accumulator
+        // `cumulative_prob` matches probabilities.
         const bool topk_active = (topk > 0.f);
         const float inv_sum    = (!topk_active && sum_exp > 0.f) ? (1.0f / sum_exp) : 0.f;
         if(!topk_active)
@@ -528,11 +528,11 @@ struct SpargeBlockMapPipeline
             }
             __syncthreads();
 
-            // Round 13g: collapse 2 syncs/round into 1. tid==0 computes the global
-            // winner AND writes the sentinel (smem_bmap=1, smem_scores=-1) in the same
-            // critical section, gated by bv>0. All threads then read smem_small[0] for
-            // the early break / cumulative_prob accumulation. Saves 1 __syncthreads per
-            // round (~32 syncs @ N_k=64 topk=0.5).
+            // Collapse 2 syncs/round into 1. tid==0 computes the global winner AND
+            // writes the sentinel (smem_bmap=1, smem_scores=-1) in the same critical
+            // section, gated by bv>0. All threads then read smem_small[0] for the early
+            // break / cumulative_prob accumulation. Saves 1 __syncthreads per round
+            // (~32 syncs @ N_k=64 topk=0.5).
             if(tid == 0)
             {
                 float bv   = smem_small[0];
