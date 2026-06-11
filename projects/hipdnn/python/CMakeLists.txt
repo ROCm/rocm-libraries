@@ -10,6 +10,18 @@ endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Runtime __version__ comes from the single product version. SKBUILD wheel builds
+# are standalone (no umbrella CMake defines HIPDNN_VERSION), so fall back to a
+# literal kept in sync with pyproject.toml and the top-level default.
+if(NOT DEFINED HIPDNN_VERSION)
+    set(HIPDNN_VERSION "0.1.0")
+endif()
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/__init__.py.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_frontend/__init__.py"
+    @ONLY
+)
+
 find_package(Python 3.12
     REQUIRED COMPONENTS Interpreter Development.Module Development.SABIModule)
 
@@ -74,12 +86,12 @@ set_target_properties(
 
 if(DEFINED SKBUILD)
     install(TARGETS hipdnn_frontend_python DESTINATION hipdnn_frontend)
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/__init__.py"
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_frontend/__init__.py"
             DESTINATION hipdnn_frontend)
 else()
     set(_staging "share/hipdnn/python/hipdnn_frontend")
     install(TARGETS hipdnn_frontend_python DESTINATION "${_staging}")
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/__init__.py"
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_frontend/__init__.py"
             DESTINATION "${_staging}")
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/test/"
             DESTINATION "share/hipdnn/tests/python"

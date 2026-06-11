@@ -4,7 +4,7 @@
 include(CMakePackageConfigHelpers)
 
 # Version handling
-hipdnn_setup_version(hipdnn_frontend)
+hipdnn_setup_product_version(hipdnn_frontend)
 
 # Set project with version
 project(hipdnn_frontend VERSION ${HIPDNN_FRONTEND_VERSION} LANGUAGES CXX)
@@ -12,8 +12,8 @@ project(hipdnn_frontend VERSION ${HIPDNN_FRONTEND_VERSION} LANGUAGES CXX)
 # Read data_sdk version for minimum requirement
 hipdnn_get_component_version(hipdnn_data_sdk HIPDNN_FRONTEND_DATA_SDK_MIN_VERSION)
 
-# Read backend version for minimum requirement
-hipdnn_get_component_version(hipdnn_backend HIPDNN_FRONTEND_BACKEND_MIN_VERSION)
+# Backend ships with the frontend from the same product version
+set(HIPDNN_FRONTEND_BACKEND_MIN_VERSION ${HIPDNN_VERSION})
 
 set(HIP_DNN_FRONTEND_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 

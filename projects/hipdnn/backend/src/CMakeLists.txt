@@ -4,7 +4,7 @@
 include(CMakePackageConfigHelpers)
 
 # Version handling
-hipdnn_setup_version(hipdnn_backend)
+hipdnn_setup_product_version(hipdnn_backend)
 
 # Set project with version
 project(hipdnn_backend VERSION ${HIPDNN_BACKEND_VERSION} LANGUAGES CXX)
@@ -97,6 +97,16 @@ clang_tidy_check(hipdnn_backend_private)
 add_library(hipdnn_backend SHARED HipdnnBackend.cpp)
 
 hipdnn_generate_version_header(hipdnn_backend)
+
+# Embed Windows VERSIONINFO into the DLL
+if(WIN32)
+    configure_file(
+        "${CMAKE_CURRENT_LIST_DIR}/../backend.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/backend.rc"
+        @ONLY
+    )
+    target_sources(hipdnn_backend PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/backend.rc")
+endif()
 
 target_include_directories(
     hipdnn_backend
