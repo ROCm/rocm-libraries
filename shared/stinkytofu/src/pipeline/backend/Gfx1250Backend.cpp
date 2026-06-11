@@ -44,6 +44,7 @@
 #include "stinkytofu/transforms/asm/LongBranchLoweringPass.hpp"
 #include "stinkytofu/transforms/asm/LoopRegionRemarkPass.hpp"
 #include "stinkytofu/transforms/asm/MemTokenConsistencyCheckPass.hpp"
+#include "stinkytofu/transforms/asm/RederiveExpertScopePass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
@@ -143,13 +144,22 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
 
     // -- kernel --
     pm.addPass(createInsertVgprMsbPass());
-    pm.addPass(createCFGBuilderPass());
-    pm.addPass(createMemTokenConsistencyCheckPass());
 
     if (optLevel != OptLevel::O0) {
         // -- region: expertScheduleMode2 (label_ASM_Start .. noLoadLoopBody) --
-        // Wait-alu insertion + mode2 lifecycle run scoped to the compute region only,
+        // Wait-alu insertion + mode2 lifecycle run scoped to the compute region only.
+        // This must run BEFORE the kernel-wide createCFGBuilderPass() below: the
+        // ScopeAdaptor extracts a contiguous instruction range from the still-FLAT
+        // single-BB module function and spliceBack asserts size()==1. Running it
+        // after the kernel-wide CFGBuilder (which splits the function into multiple
+        // BasicBlocks) trips that assert. The region's own CFG is built inside the
+        // inner PM on the extracted range.
         {
+            // The earlier {loopWithPrefetch, noLoadLoopBody} adaptor mutated the IR
+            // and dangled this overlapping group's stored range; re-derive it from
+            // the live IR before the adaptor consumes it. See RederiveExpertScopePass.
+            pm.addPass(createRederiveExpertScopePass(module, "expertScheduleMode2",
+                                                     "label_ASM_Start", "noLoadLoopBody"));
             PassManager innerPM;
             registerAllAnalyses(innerPM.getAnalysisManager());
             configureDebugOutput(innerPM, moduleOptions, "expertScheduleMode2", debugStreams);
@@ -161,7 +171,12 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
             pm.addPass(
                 createKernelToRegionPassAdaptor(module, "expertScheduleMode2", std::move(innerPM)));
         }
+    }
 
+    pm.addPass(createCFGBuilderPass());
+    pm.addPass(createMemTokenConsistencyCheckPass());
+
+    if (optLevel != OptLevel::O0) {
         pm.addPass(createLoopRegionRemarkPass());
     }
     pm.addPass(createEstimateAsmCyclesPass());
