@@ -11,3 +11,4 @@ void attributesBindings(nanobind::module_& m);
 void typesBindings(nanobind::module_& m);
 void handleBindings(nanobind::module_& m);
 void memoryBindings(nanobind::module_& m);
+void hipBindings(nanobind::module_& m);
