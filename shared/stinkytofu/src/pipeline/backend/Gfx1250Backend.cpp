@@ -47,6 +47,7 @@
 #include "stinkytofu/transforms/asm/MemTokenConsistencyCheckPass.hpp"
 #include "stinkytofu/transforms/asm/RederiveExpertScopePass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/RemoveWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
 #include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
@@ -103,6 +104,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     if (runScheduler) {
         // strip delay_alu before scheduling
         pm.addPass(createRemoveDelayAluPass());
+        // strip s_wait_alu before scheduling
+        pm.addPass(createRemoveWaitAluPass());
     }
     PB.applyExtensionPoint(PipelineExtensionPoint::BeforeRegionPasses, pm, module);
 
@@ -156,7 +159,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
 
     pm.addPass(createInsertVgprMsbPass());
 
-    if (optLevel != OptLevel::O0) {
+    if (runScheduler) {
         // -- region: expertScheduleMode2 (label_ASM_Start .. noLoadLoopBody) --
         // Wait-alu insertion + mode2 lifecycle run scoped to the compute region only.
         // This must run BEFORE the kernel-wide createCFGBuilderPass() below: the
@@ -187,7 +190,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     pm.addPass(createCFGBuilderPass());
     pm.addPass(createMemTokenConsistencyCheckPass());
 
-    if (optLevel != OptLevel::O0) {
+    if (runScheduler) {
         pm.addPass(createLoopRegionRemarkPass());
     }
     pm.addPass(createEstimateAsmCyclesPass());
