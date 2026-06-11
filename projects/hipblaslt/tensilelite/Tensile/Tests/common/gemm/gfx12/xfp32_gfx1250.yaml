@@ -27,8 +27,8 @@ BenchmarkProblems:
       DestDataType: S
       ComputeDataType: S
       F32XdlMathOp: X
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
       SupportUserArgs: True
@@ -53,16 +53,19 @@ BenchmarkProblems:
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
         - StaggerU: [0]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - GlobalReadVectorWidthA: [1]
         - GlobalReadVectorWidthB: [1]
-        - 1LDSBuffer: [-1]
-        - ScheduleIterAlg: [3]
+        - 1LDSBuffer: [0]
+        - ScheduleIterAlg: [0]
         - SourceSwap: [1]
         - DirectToVgprA: [False]
         - StoreVectorWidth: [-1]
+        - TDMInst: [3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -84,8 +87,8 @@ BenchmarkProblems:
       DestDataType: S
       ComputeDataType: S
       F32XdlMathOp: X
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       SupportUserArgs: True
@@ -115,7 +118,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1,2]
         - GlobalReadVectorWidthB: [1]
         - 1LDSBuffer: [0]
-        - ScheduleIterAlg: [1]
+        - ScheduleIterAlg: [0, 1]
         - SourceSwap: [1]
         - DirectToVgprA: [False]
         - StoreVectorWidth: [-1]
@@ -140,8 +143,8 @@ BenchmarkProblems:
       DestDataType: S
       ComputeDataType: S
       F32XdlMathOp: X
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
       SupportUserArgs: True
@@ -195,8 +198,8 @@ BenchmarkProblems:
       DestDataType: S
       ComputeDataType: S
       F32XdlMathOp: X
-      TransposeA: 1
-      TransposeB: 1
+      TransposeA: True
+      TransposeB: True
       UseBeta: True
       Batched: True
       SupportUserArgs: True
@@ -225,11 +228,12 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - GlobalReadVectorWidthA: [1]
         - GlobalReadVectorWidthB: [1]
-        - 1LDSBuffer: [1]
-        - ScheduleIterAlg: [3]
+        - 1LDSBuffer: [0]
+        - ScheduleIterAlg: [0]
         - SourceSwap: [1]
         - DirectToVgprA: [False]
         - StoreVectorWidth: [-1]
+        - TDMInst: [3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

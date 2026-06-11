@@ -167,6 +167,11 @@ namespace rocRoller
         RR_EMPTY_STRUCT_WITH_NAME(View);
 
         /**
+         * TDM - denotes TDM descriptor for TDM instructions
+         */
+        RR_EMPTY_STRUCT_WITH_NAME(TDM);
+
+        /**
          * Construct MacroTile.
          *
          * Joins SubDimensions to MacroTile during translation and

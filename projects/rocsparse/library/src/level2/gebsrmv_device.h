@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -41,6 +41,9 @@ namespace rocsparse
                                                       T* __restrict__ y,
                                                       rocsparse_index_base idx_base)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+
         // Lane id
         const rocsparse_int lid = hipThreadIdx_x & (WFSIZE - 1);
 
@@ -116,6 +119,9 @@ namespace rocsparse
                                                   T* __restrict__ y,
                                                   rocsparse_index_base idx_base)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+
         // Lane id
         const rocsparse_int lid = hipThreadIdx_x & (WFSIZE - 1);
 
@@ -184,6 +190,9 @@ namespace rocsparse
                                                   T* __restrict__ y,
                                                   rocsparse_index_base idx_base)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+
         // GEBSR block dimension
         static constexpr int ROWBSRDIM = 2;
 
@@ -286,6 +295,9 @@ namespace rocsparse
                                                   T* __restrict__ y,
                                                   rocsparse_index_base idx_base)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+
         // GEBSR block dimension
         static constexpr int ROWBSRDIM = 3;
 
@@ -399,6 +411,9 @@ namespace rocsparse
                                                   T* __restrict__ y,
                                                   rocsparse_index_base idx_base)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+
         // GEBSR block dimension
         static constexpr int ROWBSRDIM = 4;
 
@@ -522,6 +537,9 @@ namespace rocsparse
                                                   T* __restrict__ y,
                                                   rocsparse_index_base idx_base)
     {
+        static_assert(BLOCKSIZE % (ROWBSRDIM * COLBSRDIM) == 0,
+                      "BLOCKSIZE must be a multiple of ROWBSRDIM * COLBSRDIM.");
+
         // BSR block lane id
         const rocsparse_int lid = hipThreadIdx_x % COLBSRDIM;
 
@@ -752,6 +770,9 @@ namespace rocsparse
                                                      T* __restrict__ y,
                                                      rocsparse_index_base idx_base)
     {
+        static_assert(BLOCKSIZE % (ROWBSRDIM * COLBSRDIM) == 0,
+                      "BLOCKSIZE must be a multiple of ROWBSRDIM * COLBSRDIM.");
+
         // BSR block lane id
         const rocsparse_int lid = hipThreadIdx_x % COLBSRDIM;
 
