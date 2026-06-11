@@ -27,6 +27,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -156,8 +157,8 @@ std::vector<std::string> parsePassNames(int argc, char** argv, int startIdx) {
             if (arg.starts_with(kSnapJson) || arg.starts_with(kSnapAfter) ||
                 arg == "--print-output" || arg == "--emit-asm" || arg == "--remarks" ||
                 arg == "--preserve-symbolic-regs" || arg == "--preserve-comments" ||
-                arg.starts_with("--ds-read-order=") || arg == "--from-label" ||
-                arg == "--to-label" || isKernelConfigArg(arg))
+                arg.starts_with("--ds-read-order=") || arg.starts_with("--vgpr-msb-mode=") ||
+                arg == "--from-label" || arg == "--to-label" || isKernelConfigArg(arg))
                 continue;
             // Two-arg flags: skip both the flag and its value so the value
             // doesn't get mistaken for a pass name and the flag doesn't get
@@ -460,7 +461,28 @@ int main(int argc, char** argv) {
     passFeatureConfig.passOrderSnapshot.dumpAfterPasses =
         extractPassOrderSnapshotAfterPasses(argc, argv);
 
-    // Parse --ds-read-order=ProgramOrder|Ascending|AscendingCache
+    // Parse --vgpr-msb-mode=none|msb8|msb16 (override of ToolchainCaps::probe).
+    // Useful when running on a host whose comgr doesn't know the target ISA,
+    // so the FileCheck/regression tests can pin the mode explicitly.
+    std::optional<stinkytofu::VgprMsbMode> vgprMsbOverride;
+    for (int i = 1; i < argc; ++i) {
+        std::string a = argv[i];
+        if (a.starts_with("--vgpr-msb-mode=")) {
+            std::string val = a.substr(std::string("--vgpr-msb-mode=").size());
+            if (val == "none")
+                vgprMsbOverride = stinkytofu::VgprMsbMode::None;
+            else if (val == "msb8")
+                vgprMsbOverride = stinkytofu::VgprMsbMode::Msb8;
+            else if (val == "msb16")
+                vgprMsbOverride = stinkytofu::VgprMsbMode::Msb16;
+            else {
+                std::cerr << "Error: --vgpr-msb-mode expects none|msb8|msb16, got '" << val
+                          << "'\n";
+                return 1;
+            }
+        }
+    }
+
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (a.starts_with("--ds-read-order=")) {
@@ -749,7 +771,9 @@ int main(int argc, char** argv) {
             passManager.setPassFeatureConfig(passFeatureConfig);
             gemmTileConfig.arch = arch;
             passManager.setGemmTileConfig(gemmTileConfig);
-            passManager.setAsmCapsConfig(stinkytofu::ToolchainCaps::probe(archID));
+            auto caps = stinkytofu::ToolchainCaps::probe(archID);
+            if (vgprMsbOverride) caps.vgprMsbMode = *vgprMsbOverride;
+            passManager.setAsmCapsConfig(caps);
             if (enableRemarks) passManager.getPassContext().setRemarksEnabled(true);
 
             for (const auto& passName : requestedPasses) {

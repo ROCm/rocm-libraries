@@ -193,6 +193,14 @@ class GSU(Component):
     @abc.abstractmethod
     def reductionBranches(self, writer, kernel, tPB, vectorWidths, elements, tmpVgpr, cvtVgprStruct, vectorDataTypes, factorDims, reductionEndLabel, endLabel):
         pass
+    
+    @abc.abstractmethod
+    def initializeSrd(self, writer, ArgTypeCheckLabel, GeneralBatchedGemmSrdInitiation_End, kernel, ch):
+        pass
+
+    @abc.abstractmethod
+    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, multipleBufferChecks, generalBatchedGemmLoad, mat, kernel, tmpS1):
+        pass
 
 class GSUOff(GSU):
     kernel = {"GlobalSplitU": 0}
@@ -300,6 +308,14 @@ class GSUOff(GSU):
         module = Module("GSU Off writeBiasToGlobal")
         return module
 
+    def initializeSrd(self, writer, ArgTypeCheckLabel, GeneralBatchedGemmSrdInitiation_End, kernel, ch):
+        module = Module("GSU Off initializeSrd")
+        return module
+
+    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, multipleBufferChecks, generalBatchedGemmLoad, mat, kernel, tmpS1):
+        module = Module("GSU Off routeToGeneralBatchedOrStridedBatched")
+        return module
+        
 class GSUOn(GSU):
     kernel = {"GlobalSplitUAlgorithm": ["MultipleBuffer", "MultipleBufferSingleKernel"]}
     # if GSU <= gsuThreshold, last wg does the reduction and no R/W to WS
@@ -1982,4 +1998,46 @@ class GSUOn(GSU):
 
         module.addSpaceLine()
 
+        return module
+
+    def initializeSrd(self, writer, ArgTypeCheckLabel, GeneralBatchedGemmSrdInitiation_End, kernel, ch):
+        module = Module("initializeSrd")
+        # Special handling for "MultipleBuffer" and "MultipleBufferSingleKernel" for General Batched GEMM
+        # ArgType == 3 (General Batched GEMM) but GSU == 1, then SrdC/D will be initialized to correct batch matrix address from pointer array (AddressC/D)
+        # ArgType == 3 (General Batched GEMM) but GSU > 1, then SrdC/D will be initialized with workspace.
+        # "MultipleBuffer" means both SrdC and SrdD are workspace pointers
+        # "MultipleBufferSingleKernel" means only SrdD will be workspace pointer while SrdC will be initialized to correct batch matrix address from pointer array (AddressC)      
+        if((kernel["_GlobalAccumulation"] == 'MultipleBuffer') or (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel')):
+            with writer.allocTmpSgpr(1) as tmpSgprGSU:
+                module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+                module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
+                module.add(SCBranchSCC1(labelName=ArgTypeCheckLabel.getLabelName(), comment="Handling General Batched GEMM SRD initialization"))
+                if((kernel["_GlobalAccumulation"] == 'MultipleBuffer') or (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and ch == "D")):
+                    module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=sgpr("Address%s+0"%ch, 2), comment="init SRD base address" )) 
+                    module.add(SBranch(labelName=GeneralBatchedGemmSrdInitiation_End.getLabelName(), comment="End of handling General Batched GEMM SRD initialization"))
+                module.add(ArgTypeCheckLabel)
+        return module
+
+    # GSU = 1, then all C and D will have pointer to device memory holding pointer array to batch matrices. 
+    # So we need logic to get the correct batch matrix address into Srd.
+    # GSU > 1, then AddressA/B will be pointer to device memory holding pointer array to batch matrices but AddressC/D will further depend on the following:
+    # a) MultiBuffer case: AddressC/D will be pointer to workspace and will be handled similar to Strided Batched case.
+    # b) MultiBufferSingleKernel case: AddressC will be pointer to device memory holding pointer array to batch matrices while AddressD will be pointer to workspace.
+    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, argTypeChecks, generalBatchedGemmLoad, mat, kernel, tmpS1):
+        module = Module("routeToGeneralBatchedOrStridedBatched")
+        module.add(SCmpEQU32(src0=sgpr(tmpS1), src1=1, comment="GSU == 1 ?"))
+        if(kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and mat == "C"):
+            module.add(SCBranchSCC0(labelName=argTypeChecks.getLabelName()))
+        else:
+            module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName()))
+        if kernel["ProblemType"]["SupportUserArgs"]:
+            module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+            module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName())) 
+        if(kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and mat == "C"):
+            module.add(SBranch(labelName=stridedBatchedGemmLoad.getLabelName()))
+            module.add(argTypeChecks)
+            if kernel["ProblemType"]["SupportUserArgs"]:
+                module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))   
+                module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName()))
+                module.add(SBranch(labelName=stridedBatchedGemmLoad.getLabelName()))  
         return module
