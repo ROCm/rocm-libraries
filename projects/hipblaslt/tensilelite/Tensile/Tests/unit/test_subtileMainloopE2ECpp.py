@@ -49,7 +49,8 @@ sys.path.insert(0, SCRIPT_DIR)
 pytest.importorskip("rocisa")
 pytest.importorskip("tensile_writer.subtile.geometry")
 pytest.importorskip("tensile_writer.subtile.tile_info")
-pytest.importorskip("tensile_writer.subtile.instruction_scheduler")
+# instruction_scheduler is now accessed directly via _tensile_writer in LogicalScheduler
+pytest.importorskip("tensile_writer")
 
 from Tensile.Components.Subtile.LogicalScheduler import LogicalScheduler
 

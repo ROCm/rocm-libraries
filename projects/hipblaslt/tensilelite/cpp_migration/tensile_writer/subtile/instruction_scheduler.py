@@ -3,16 +3,17 @@
 
 """tensile_writer.subtile.instruction_scheduler — C++-backed instruction scheduler.
 
-Re-exports the ``_tensile_writer.subtile.instruction_scheduler`` nanobind
-submodule (the data-only slot-placement algorithm ported from
-``Tensile.Components.Subtile.InstructionScheduler``) and provides the
-``instructionSchedule`` entry point that drives the C++ algorithm with *live*
-rocisa instruction objects.
+Retained wrapper: ``Tensile/Components/Subtile/LogicalScheduler.py`` imports
+this module as ``_cppsched`` to access the C++ data-only slot-placement
+primitives (``InstKind``, ``Instruction``, ``ModuleRef``, ``ScheduleResult``,
+``schedule``).  The Python adapter functions (``classifyInstruction``,
+``buildModuleRefs``, ``instructionSchedule``, ``instructionScheduleFromLists``)
+have been consolidated into LogicalScheduler.py — this shim re-exports only the
+C++ primitives.
 
-This is the only instruction-scheduling implementation: the pure-Python
-slot-placement twin has been removed and the C++ algorithm runs unconditionally
-(mirroring SubtileGeometry / TileInfo). There is no opt-in flag and no Python
-fallback.
+Re-exports the ``_tensile_writer.subtile.instruction_scheduler`` nanobind
+submodule (the data-only slot-placement algorithm). The C++ algorithm runs
+unconditionally; there is no opt-in flag and no Python fallback.
 
 Design
 ------

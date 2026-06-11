@@ -2198,7 +2198,7 @@ class TestIntegration:
 
     def test_populate_instructions_256x256_fp4(self):
         """Full pipeline: emit → populate_instructions → emit_module on-demand."""
-        from Tensile.Components.Subtile.InstructionScheduler import instructionScheduleFromLists
+        from Tensile.Components.Subtile.LogicalScheduler import instructionScheduleFromLists
 
         kernel = create_kernel(256, 256, fp4=True)
         writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
