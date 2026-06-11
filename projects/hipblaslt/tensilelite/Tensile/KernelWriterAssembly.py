@@ -848,12 +848,12 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.defineSgpr("DummySgpr%d"%i, 1))
 
     if kernel["PrefetchGL2"]:
-      module.add(self.defineSgpr("GL2PrefetchIncA", self.states.rpga, 2))
-      module.add(self.defineSgpr("GL2PrefetchIncB", self.states.rpga, 2))
+      module.add(self.defineSgpr("GL2PrefetchIncA", self.states.rpgo))
+      module.add(self.defineSgpr("GL2PrefetchIncB", self.states.rpgo))
       if kernel["ProblemType"]["MXBlockA"]:
-        module.add(self.defineSgpr("GL2PrefetchIncMXSA", self.states.rpga, 2))
+        module.add(self.defineSgpr("GL2PrefetchIncMXSA", self.states.rpgo))
       if kernel["ProblemType"]["MXBlockB"]:
-        module.add(self.defineSgpr("GL2PrefetchIncMXSB", self.states.rpga, 2))
+        module.add(self.defineSgpr("GL2PrefetchIncMXSB", self.states.rpgo))
 
     if self.sgprPool.size() > self.states.regCaps["MaxSgpr"]:
       print ("warning: Number of defined SGPRS (%d) overflowed max SGPRS (%d)." \
