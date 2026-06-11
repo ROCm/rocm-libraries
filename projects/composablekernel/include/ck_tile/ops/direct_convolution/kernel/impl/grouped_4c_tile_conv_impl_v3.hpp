@@ -279,7 +279,7 @@ struct WeightLoader : direct_conv::WeightAccessor<cfg.kh, cfg.kw,
     using ElementType = ToType<cfg.data_type>;
 
     template <bool Padded_ = true, typename BlockCoords_>
-    __device__ static void load_to_lds(const BlockCoords_& bc,
+    CK_TILE_DEVICE static void load_to_lds(const BlockCoords_& bc,
                                        uint4* weight_lds,
                                        const ElementType* __restrict__ wei,
                                        int c_per_group,
@@ -290,7 +290,7 @@ struct WeightLoader : direct_conv::WeightAccessor<cfg.kh, cfg.kw,
     }
 
     // Read weights from LDS into registers (this->weights[]).
-    __device__ void read_from_lds(uint4* weight_lds)
+    CK_TILE_DEVICE void read_from_lds(uint4* weight_lds)
     {
         if constexpr(cfg.direction == Direction::Dgrad)
         {
@@ -346,7 +346,7 @@ template <auto cfg, bool Padded = true>
 using OutputWriterLds = direct_conv::OutputWriterLds<TileConstants<cfg>, Padded, ToType<cfg.data_type>>;
 
 template <auto cfg, bool Padded = true>
-__device__ void ck_tile_conv2d_grouped_4c_nhwc_impl(const ToType<cfg.data_type>* __restrict__ in,
+CK_TILE_DEVICE void ck_tile_conv2d_grouped_4c_nhwc_impl(const ToType<cfg.data_type>* __restrict__ in,
                                                      const ToType<cfg.data_type>* __restrict__ wei,
                                                      double alpha,
                                                      double beta,

@@ -37,7 +37,7 @@ template <typename TC,
           typename OutputWriterT,
           int INNER_KW = cfg.kw,
           typename ElementType = _Float16>
-__device__ void grouped_conv_compute_loop(const ElementType* __restrict__ in,
+CK_TILE_DEVICE void grouped_conv_compute_loop(const ElementType* __restrict__ in,
                                           const ElementType* __restrict__ wei,
                                           ElementType* __restrict__ out,
                                           int N,

@@ -169,7 +169,7 @@ struct Config
 // cpg = channels_per_group (32 for M16N16K32, 16 for M32N32K16).
 // ===================================================================
 template <auto cfg, typename ElementType = _Float16>
-__device__ void weight_load_to_lds_kyxc(
+CK_TILE_DEVICE void weight_load_to_lds_kyxc(
     uint4* weight_lds,
     const ElementType* __restrict__ wei,
     int block_k_start,
@@ -220,7 +220,7 @@ __device__ void weight_load_to_lds_kyxc(
 // C dimension = block_k_size (output channels of input gradient).
 // ===================================================================
 template <auto cfg, typename ElementType = _Float16>
-__device__ void weight_load_to_lds_kyxc_dgrad(
+CK_TILE_DEVICE void weight_load_to_lds_kyxc_dgrad(
     uint4* weight_lds,
     const ElementType* __restrict__ wei,
     int k_slice_start,
@@ -267,7 +267,7 @@ __device__ void weight_load_to_lds_kyxc_dgrad(
 // Inverse: maps permuted c8 back to logical c8 for LDS reads.
 // ===================================================================
 template <auto cfg>
-__device__ __forceinline__ int swizzle_c8_forward(int spatial, int c8)
+CK_TILE_DEVICE int swizzle_c8_forward(int spatial, int c8)
 {
     using TC = TileConstantsBase<cfg>;
     constexpr int BLOCK_C8 = TC::BLOCK_C8;
@@ -280,7 +280,7 @@ __device__ __forceinline__ int swizzle_c8_forward(int spatial, int c8)
 }
 
 template <auto cfg>
-__device__ __forceinline__ int swizzle_c8_inverse(int spatial, int c8)
+CK_TILE_DEVICE int swizzle_c8_inverse(int spatial, int c8)
 {
     using TC = TileConstantsBase<cfg>;
     constexpr int BLOCK_C8 = TC::BLOCK_C8;
@@ -461,7 +461,7 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
     bool              overflow_active;
 
     template <typename BlockCoords_>
-    __device__ ConvInputLoader(const BlockCoords_& bc,
+    CK_TILE_DEVICE ConvInputLoader(const BlockCoords_& bc,
                                 uint4* input_lds,
                                 const ElementType* __restrict__ in,
                                 int hi,
@@ -562,7 +562,7 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
     // of bytes to the per-thread DRAM offset, leaving the row position alone.
     // Does NOT advance input_voffset / overflow_voffset.
     template <int CS = 0>
-    __device__ __forceinline__ void prefetch_tile_to_lds(int lds_buffer_index)
+    CK_TILE_DEVICE void prefetch_tile_to_lds(int lds_buffer_index)
     {
         static_assert(CS >= 0 && CS < cfg.c_slices_per_wave, "CS out of range");
         constexpr ck_tile::index_t chunk_off = CS * CHUNK_VOFFSET_STRIDE;
@@ -589,7 +589,7 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
     // Override fetch: advance both offsets to the next row, then prefetch
     // chunk CS of that row.
     template <int CS = 0>
-    __device__ __forceinline__ void fetch_tile_to_lds(int lds_buffer_index)
+    CK_TILE_DEVICE void fetch_tile_to_lds(int lds_buffer_index)
     {
         if(base::load_active)
             base::input_voffset += base::row_stride_bytes;
@@ -617,7 +617,7 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
     using ElementType = ToType<cfg.data_type>;
 
     // Load one c_slice of weights from KYXC DRAM into weight LDS (Fprop).
-    __device__ static void load_kyxc_to_lds(
+    CK_TILE_DEVICE static void load_kyxc_to_lds(
         uint4* weight_lds,
         const ElementType* __restrict__ wei,
         int block_k_start,
@@ -629,7 +629,7 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
     }
 
     // Load one k_slice of weights from KYXC DRAM into weight LDS (Dgrad).
-    __device__ static void load_kyxc_to_lds_dgrad(
+    CK_TILE_DEVICE static void load_kyxc_to_lds_dgrad(
         uint4* weight_lds,
         const ElementType* __restrict__ wei,
         int k_slice_start,
@@ -643,7 +643,7 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
     // Wave-local Fprop load: only this wave's 64 threads load its own c_slice
     // into its private LDS region (weight_lds + wave_id * WEIGHT_LDS_SIZE_UINT4).
     // All waves call this simultaneously with no synchronization required.
-    __device__ static void load_kyxc_to_lds_wave(
+    CK_TILE_DEVICE static void load_kyxc_to_lds_wave(
         uint4* wave_lds,        // base of this wave's LDS region
         const ElementType* __restrict__ wei,
         int block_k_start,
@@ -683,7 +683,7 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
 
     // Wave-local Dgrad load: only this wave's 64 threads load its own k_slice
     // into its private LDS region.
-    __device__ static void load_kyxc_to_lds_dgrad_wave(
+    CK_TILE_DEVICE static void load_kyxc_to_lds_dgrad_wave(
         uint4* wave_lds,        // base of this wave's LDS region
         const ElementType* __restrict__ wei,
         int k_slice_start,
@@ -736,7 +736,7 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
     // with that chunk's weight data in LDS; the per-chunk register slot is
     // weights[F * N + CS].
     template <int CS = 0>
-    __device__ void read_from_lds_chunk(uint4* weight_lds)
+    CK_TILE_DEVICE void read_from_lds_chunk(uint4* weight_lds)
     {
         static_assert(CS >= 0 && CS < cfg.c_slices_per_wave, "CS out of range");
         constexpr int KH_KW_L = cfg.kh * cfg.kw;
@@ -808,7 +808,7 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
 
     // Legacy single-chunk entry: equivalent to read_from_lds_chunk<0>().
     // Used by the v3 single-buffer compute loop and by the N=1 path.
-    __device__ void read_from_lds(uint4* weight_lds)
+    CK_TILE_DEVICE void read_from_lds(uint4* weight_lds)
     {
         read_from_lds_chunk<0>(weight_lds);
     }
@@ -848,7 +848,7 @@ struct OutputWriterV3
     int k_offset_or_m_block;
 
     template <typename BlockCoords_>
-    __device__ OutputWriterV3(const BlockCoords_& bc,
+    CK_TILE_DEVICE OutputWriterV3(const BlockCoords_& bc,
                                uint4*, // Unused, matches OutputWriter signature.
                                ElementType* __restrict__ out,
                                int ho,
@@ -875,7 +875,7 @@ struct OutputWriterV3
         }
     }
 
-    __device__ __forceinline__ void flush(AccType acc_val, int p_out, int wave_id)
+    CK_TILE_DEVICE void flush(AccType acc_val, int p_out, int wave_id)
     {
         if(wave_id != 0 || !store_valid)
             return;
@@ -972,7 +972,7 @@ struct OutputWriterV3Lds
     bool              store_valid;
 
     template <typename BlockCoords_>
-    __device__ OutputWriterV3Lds(const BlockCoords_& bc,
+    CK_TILE_DEVICE OutputWriterV3Lds(const BlockCoords_& bc,
                                   uint4* staging_lds_buf,
                                   ElementType* __restrict__ out,
                                   int ho,
@@ -1016,7 +1016,7 @@ struct OutputWriterV3Lds
         }
     }
 
-    __device__ __forceinline__ void flush(AccType acc_val, int p_out, int wave_id)
+    CK_TILE_DEVICE void flush(AccType acc_val, int p_out, int wave_id)
     {
         // Step 1: Wave 0 writes fp16-converted accumulator to staging LDS.
         if(wave_id == 0)
@@ -1073,7 +1073,7 @@ struct OutputWriterV3Lds
 // Kernel entry points.
 // ===================================================================
 template <auto cfg>
-__device__ void ck_tile_conv2d_32c_nhwc_v3_impl(const ToType<cfg.data_type>* __restrict__ in,
+CK_TILE_DEVICE void ck_tile_conv2d_32c_nhwc_v3_impl(const ToType<cfg.data_type>* __restrict__ in,
                                                   const ToType<cfg.data_type>* __restrict__ wei,
                                                   double alpha,
                                                   double beta,

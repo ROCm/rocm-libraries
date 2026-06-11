@@ -218,7 +218,7 @@ struct BlockCoords
     int C8;
     int K;
 
-    __device__ BlockCoords(int groups,
+    CK_TILE_DEVICE BlockCoords(int groups,
                            int c_per_group = cfg.group_size(),
                            int k_per_group = cfg.group_size())
         : C_in(groups * c_per_group), C_out(groups * k_per_group),
@@ -263,7 +263,7 @@ struct BlockCoordsNonGrouped
     int block_k;         // alias for block_k_in (used by InputLoader)
     int block_c8;        // = block_k_in / 8
 
-    __device__ BlockCoordsNonGrouped(int C_total, int K_total)
+    CK_TILE_DEVICE BlockCoordsNonGrouped(int C_total, int K_total)
         : C_in(C_total), C_out(K_total),
           C(C_total), C8(C_total / 8), K(K_total)
     {
@@ -278,7 +278,7 @@ struct BlockCoordsNonGrouped
     }
 
     // Advance input channel offset for the next c_block.
-    __device__ void set_c_block(int c_block)
+    CK_TILE_DEVICE void set_c_block(int c_block)
     {
         const int c_block_size = cfg.block_groups() * cfg.group_size();
         block_k_in = c_block * c_block_size;
@@ -320,7 +320,7 @@ LaunchParams get_launch_params_non_grouped(const Config& cfg, const Conv2dParams
 // ======================================================================
 template <typename TC, int KH, int KW, typename WeightAccessorT,
           typename ElementType = _Float16>
-__device__ void weight_read_fprop(WeightAccessorT& wa, uint4* weight_lds)
+CK_TILE_DEVICE void weight_read_fprop(WeightAccessorT& wa, uint4* weight_lds)
 {
     constexpr auto weight_lds_read_desc = TC::Weight::MakeLdsReadDescriptor();
     auto weight_lds_view =

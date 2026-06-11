@@ -291,7 +291,7 @@ struct InputLoaderToeplitz
     ck_tile::index_t toeplitz_lds_offset;
 
     template <typename BlockCoords_>
-    __device__ InputLoaderToeplitz(const BlockCoords_& bc,
+    CK_TILE_DEVICE InputLoaderToeplitz(const BlockCoords_& bc,
                                    uint4* input_lds,
                                    const ToType<cfg.data_type>* __restrict__ in,
                                    int hi,
@@ -348,12 +348,12 @@ struct InputLoaderToeplitz
         }
     }
 
-    __device__ __forceinline__ void fetch_tile_to_lds(int lds_buffer_index)
+    CK_TILE_DEVICE void fetch_tile_to_lds(int lds_buffer_index)
     {
         shared_loader.fetch_tile_to_lds(lds_buffer_index);
     }
 
-    __device__ __forceinline__ void prefetch_tile_to_lds(int lds_buffer_index)
+    CK_TILE_DEVICE void prefetch_tile_to_lds(int lds_buffer_index)
     {
         shared_loader.prefetch_tile_to_lds(lds_buffer_index);
     }
@@ -361,7 +361,7 @@ struct InputLoaderToeplitz
     // Read Toeplitz input from LDS: single fp16x8_t (no S-loop needed).
     // The S parameter is accepted for interface compatibility with the shared
     // compute loop but is ignored — the Toeplitz kernel uses INNER_KW=1.
-    __device__ __forceinline__ void read_from_lds(
+    CK_TILE_DEVICE void read_from_lds(
         input_type& input_reg, int /*S*/, int lds_buffer_index) const
     {
         const ToType<cfg.data_type>* base = reinterpret_cast<const ToType<cfg.data_type>*>(shared_loader.input_lds_ptr)
@@ -386,7 +386,7 @@ struct WeightLoader
     weight_vec_type weights_[cfg.kh];
 
     template <bool Padded_ = true, typename BlockCoords_>
-    __device__ static void load_to_lds(const BlockCoords_& bc,
+    CK_TILE_DEVICE static void load_to_lds(const BlockCoords_& bc,
                                        uint4* weight_lds,
                                        const ElementType* __restrict__ wei,
                                        int c_per_group,
@@ -397,7 +397,7 @@ struct WeightLoader
 
     // GT-specific weight read from LDS into weights_ array.
     // Each lane reads one fp16x8_t per filter row R.
-    __device__ void read_from_lds(uint4* weight_lds)
+    CK_TILE_DEVICE void read_from_lds(uint4* weight_lds)
     {
         const int lane = static_cast<int>(threadIdx.x) % WAVE_SIZE;
         const int wave = static_cast<int>(threadIdx.x) / WAVE_SIZE;
@@ -455,11 +455,11 @@ struct WeightLoader
 
     // Access weight for filter position (R, S). S is ignored (embedded in Toeplitz).
     template <int R, int S = 0>
-    __device__ __forceinline__ weight_vec_type get() const { return weights_[R]; }
+    CK_TILE_DEVICE weight_vec_type get() const { return weights_[R]; }
 
     // Access transposed weight for Dgrad: reverses R index.
     template <int R, int S = 0>
-    __device__ __forceinline__ weight_vec_type get_transposed() const { return weights_[cfg.kh - 1 - R]; }
+    CK_TILE_DEVICE weight_vec_type get_transposed() const { return weights_[cfg.kh - 1 - R]; }
 };
 
 // ===================================================================
@@ -479,7 +479,7 @@ using OutputWriterLds8c = direct_conv::OutputWriterLds<TileConstants<cfg>, Padde
 // INNER_KW=1 (Toeplitz: S embedded in MFMA K=32, no explicit S-loop).
 // ===================================================================
 template <auto cfg, bool Padded = true>
-__device__ void ck_tile_conv2d_grouped_8c_nhwc_impl(const ToType<cfg.data_type>* __restrict__ in,
+CK_TILE_DEVICE void ck_tile_conv2d_grouped_8c_nhwc_impl(const ToType<cfg.data_type>* __restrict__ in,
                                                         const ToType<cfg.data_type>* __restrict__ wei,
                                                         ToType<cfg.data_type>* __restrict__ out,
                                                         int N,

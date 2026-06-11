@@ -303,7 +303,7 @@ struct InputLoader32c : direct_conv::InputLoader<TileConstants<cfg>, cfg,
     using TC = TileConstants<cfg>;
 
     template <typename BlockCoords_>
-    __device__ InputLoader32c(const BlockCoords_& bc,
+    CK_TILE_DEVICE InputLoader32c(const BlockCoords_& bc,
                                uint4* input_lds,
                                const ToType<cfg.data_type>* __restrict__ in,
                                int hi,
@@ -366,7 +366,7 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
     using ElementType = ToType<cfg.data_type>;
 
     template <bool Padded_ = true, typename BlockCoords_>
-    __device__ static void load_to_lds(const BlockCoords_& bc,
+    CK_TILE_DEVICE static void load_to_lds(const BlockCoords_& bc,
                                        uint4* weight_lds,
                                        const ElementType* __restrict__ wei,
                                        int c_per_group,
@@ -377,7 +377,7 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
     }
 
     // Read weights from LDS into registers (this->weights[]).
-    __device__ void read_from_lds(uint4* weight_lds)
+    CK_TILE_DEVICE void read_from_lds(uint4* weight_lds)
     {
         if constexpr(cfg.direction == Direction::Dgrad)
         {
@@ -398,7 +398,7 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
 
 // Fprop weight read for 32c: loads weight tile and reinterprets as fp16x8_t/bf16x8_t.
 template <typename TC, int KH, int KW, typename ElementType = _Float16>
-__device__ void weight_read_fprop_32c(auto& wa, uint4* weight_lds)
+CK_TILE_DEVICE void weight_read_fprop_32c(auto& wa, uint4* weight_lds)
 {
     constexpr auto weight_lds_read_desc = TC::Weight::MakeLdsReadDescriptor();
     auto weight_lds_view =
@@ -436,7 +436,7 @@ using OutputWriterLds = direct_conv::OutputWriterLds<TileConstants<cfg>, Padded,
 
 // Main device function.
 template <auto cfg, bool Padded = true>
-__device__ void ck_tile_conv2d_grouped_32c_nhwc_impl(const ToType<cfg.data_type>* __restrict__ in,
+CK_TILE_DEVICE void ck_tile_conv2d_grouped_32c_nhwc_impl(const ToType<cfg.data_type>* __restrict__ in,
                                                       const ToType<cfg.data_type>* __restrict__ wei,
                                                       double alpha,
                                                       double beta,

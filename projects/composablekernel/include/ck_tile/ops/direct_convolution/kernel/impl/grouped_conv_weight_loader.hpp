@@ -37,14 +37,14 @@ struct WeightAccessor
     VecType weights[KH * KW * NumSlices];
 
     template <int R, int S, int CS = 0>
-    __device__ __forceinline__ VecType get() const
+    CK_TILE_DEVICE VecType get() const
     {
         static_assert(CS >= 0 && CS < NumSlices, "CS out of range");
         return weights[(R * KW + S) * NumSlices + CS];
     }
 
     template <int R, int S, int CS = 0>
-    __device__ __forceinline__ VecType get_transposed() const
+    CK_TILE_DEVICE VecType get_transposed() const
     {
         return get<KH - 1 - R, KW - 1 - S, CS>();
     }
@@ -77,7 +77,7 @@ using WeightAccessor8 = WeightAccessor<KH, KW, VecType, NumSlices>;
 // cfg must provide:
 //   cfg.kh, cfg.kw, cfg.block_size()
 template <typename TC, auto cfg, bool Padded, typename BlockCoords_, typename ElementType = _Float16>
-__device__ void weight_load_to_lds(const BlockCoords_& bc,
+CK_TILE_DEVICE void weight_load_to_lds(const BlockCoords_& bc,
                                    uint4* weight_lds,
                                    const ElementType* __restrict__ wei,
                                    const int c_per_group,
@@ -240,7 +240,7 @@ __device__ void weight_load_to_lds(const BlockCoords_& bc,
 //   weights[]  — register array indexed by filter position
 template <typename TC, int KH, int KW, typename WeightAccessorT, int WavesPerGroup = 1,
           typename ElementType = _Float16>
-__device__ void weight_read_dgrad(WeightAccessorT& wa, uint4* weight_lds)
+CK_TILE_DEVICE void weight_read_dgrad(WeightAccessorT& wa, uint4* weight_lds)
 {
     constexpr int K_STRIDE = KH * KW * TC::GROUP_SIZE; // stride per K row in fp16
     constexpr int KH_KW = KH * KW;

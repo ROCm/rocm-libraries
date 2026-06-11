@@ -48,7 +48,7 @@ struct OutputWriter
     int               k_valid_count_;    // how many of thread's 4 output channels are valid (0-4)
 
     template <typename BlockCoords_>
-    __device__ OutputWriter(const BlockCoords_& bc,
+    CK_TILE_DEVICE OutputWriter(const BlockCoords_& bc,
                             uint4*, // Unused, matches OutputWriterLds constructor signature.
                             ElementType* __restrict__ out,
                             int ho,
@@ -115,7 +115,7 @@ struct OutputWriter
     }
 
     // Convert fp32x4 accumulator to element type and write directly to global memory.
-    __device__ __forceinline__ void flush(fp32x4_t acc_val, int p_out)
+    CK_TILE_DEVICE void flush(fp32x4_t acc_val, int p_out)
     {
         if(!store_valid)
             return;
@@ -220,7 +220,7 @@ struct OutputWriterLds
     int               k_valid_in_vec_;
 
     template <typename BlockCoords_>
-    __device__ OutputWriterLds(const BlockCoords_& bc,
+    CK_TILE_DEVICE OutputWriterLds(const BlockCoords_& bc,
                                uint4* output_lds,
                                ElementType* __restrict__ out,
                                int ho,
@@ -332,7 +332,7 @@ struct OutputWriterLds
     }
 
     // Convert fp32x4 accumulator to element type and write through LDS to global memory.
-    __device__ __forceinline__ void flush(fp32x4_t acc_val, int p_out)
+    CK_TILE_DEVICE void flush(fp32x4_t acc_val, int p_out)
     {
         // 1. Convert fp32 -> element type (4 elements packed as 2 x 32-bit words).
         uint32_t words[2];

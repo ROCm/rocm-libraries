@@ -26,7 +26,7 @@ namespace direct_conv {
 // OOB handling mirrors amd_async_buffer_load: when `is_valid` is false the
 // per-thread offset is forced out of bounds so the buffer load returns zeros.
 template <typename ElementType>
-__device__ __forceinline__ void buffer_load16_to_lds(
+CK_TILE_DEVICE void buffer_load16_to_lds(
     CK_TILE_LDS_ADDR ElementType* lds_dest,
     const __amdgpu_buffer_rsrc_t& rsrc,
     ck_tile::index_t voffset,
@@ -137,7 +137,7 @@ struct InputLoader
     [[no_unique_address]] std::conditional_t<Padded, PaddedState, EmptyState> padded_state_;
 
     template <typename BlockCoords_>
-    __device__ InputLoader(const BlockCoords_& bc,
+    CK_TILE_DEVICE InputLoader(const BlockCoords_& bc,
                            uint4* input_lds,
                            const ElementType* __restrict__ in,
                            int hi,
@@ -302,7 +302,7 @@ struct InputLoader
         }
     }
 
-    __device__ __forceinline__ void fetch_tile_to_lds(int lds_buffer_index)
+    CK_TILE_DEVICE void fetch_tile_to_lds(int lds_buffer_index)
     {
         if constexpr(Padded)
         {
@@ -328,7 +328,7 @@ struct InputLoader
         prefetch_tile_to_lds(lds_buffer_index);
     }
 
-    __device__ __forceinline__ void prefetch_tile_to_lds(int lds_buffer_index)
+    CK_TILE_DEVICE void prefetch_tile_to_lds(int lds_buffer_index)
     {
         if(load_active)
         {
@@ -350,7 +350,7 @@ struct InputLoader
         }
     }
 
-    __device__ __forceinline__ void prefetch_tile_to_lds_unpadded(int lds_buffer_index)
+    CK_TILE_DEVICE void prefetch_tile_to_lds_unpadded(int lds_buffer_index)
     {
         CK_TILE_LDS_ADDR ElementType* lds_dest =
             store_input_lds + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
@@ -361,7 +361,7 @@ struct InputLoader
     // Padded path: create temporary tile_windows per row, use load_tile + store_tile.
     // This correctly zero-pads channels beyond c_per_group via the pad transform's
     // per-element OOB checking.
-    __device__ __forceinline__ void prefetch_tile_to_lds_padded(int lds_buffer_index)
+    CK_TILE_DEVICE void prefetch_tile_to_lds_padded(int lds_buffer_index)
         requires(Padded)
     {
         constexpr auto input_dram_dist = TC::Input::MakeDramReadTileDistribution();
@@ -406,7 +406,7 @@ struct InputLoader
     // Read a given kw slice for this thread from LDS into registers.
     // Uses precomputed element offsets and direct memcpy load
     // (no buffer_view overhead).
-    __device__ __forceinline__ void read_from_lds(InputType& input_reg, int slice, int lds_buffer_index) const
+    CK_TILE_DEVICE void read_from_lds(InputType& input_reg, int slice, int lds_buffer_index) const
     {
         const ElementType* base = reinterpret_cast<const ElementType*>(input_lds_ptr)
                                + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
@@ -421,7 +421,7 @@ struct InputLoader
     //
     // c_section_delta_elements: (c_local - wave_group) * 32 — the signed offset in fp16
     // elements from the wave's own C-section to the target c_local section.
-    __device__ __forceinline__ void read_from_lds_at_section(
+    CK_TILE_DEVICE void read_from_lds_at_section(
         InputType& input_reg, int slice, int lds_buffer_index,
         int c_section_delta_elements) const
     {

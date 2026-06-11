@@ -43,7 +43,7 @@ namespace ck_tile::direct_conv::conv_32c_tile::v3
 // LDS layout: [num_waves][64 threads][ACC_SIZE floats]
 // Total: num_waves * 64 * ACC_SIZE * sizeof(float)
 template <int NumWaves, typename AccType>
-__device__ __forceinline__ void cross_wave_reduce(
+CK_TILE_DEVICE void cross_wave_reduce(
     AccType& val, float* reduce_lds, int wave_id)
 {
     constexpr int ACC_SIZE = sizeof(AccType) / sizeof(float);
@@ -82,7 +82,7 @@ template <typename TC,
           typename WeightLoaderT,
           typename OutputWriterT,
           typename ElementType = _Float16>
-__device__ void conv_compute_loop_v3(const ElementType* __restrict__ in,
+CK_TILE_DEVICE void conv_compute_loop_v3(const ElementType* __restrict__ in,
                                       const ElementType* __restrict__ wei,
                                       ElementType* __restrict__ out,
                                       int N,
