@@ -4,10 +4,8 @@
 #include "RMSnormBwdPlan.hpp"
 #include "../PlanUtils.hpp"
 #include "RMSnormCommon.hpp"
-#include "hip/HipKernelCompileOptions.hpp"
-
-#include "HipKernelUtils.hpp"
-#include "hip/IKernelCompiler.hpp"
+#include "compilation/KernelCompileOptions.hpp"
+#include "core/Utils.hpp"
 
 #include <cstdint>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
@@ -15,6 +13,8 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+
+using namespace hip_kernel_provider::core::utils;
 
 namespace hip_kernel_provider::rmsnorm
 {
@@ -76,7 +76,7 @@ RMSnormBwdPlan::RMSnormBwdPlan(RMSnormBwdParams&& params)
 {
 }
 
-size_t RMSnormBwdPlan::getWorkspaceSize([[maybe_unused]] const HipKernelHandle& handle) const
+size_t RMSnormBwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
 {
     // No workspace needed for RMS norm
     return 0;
@@ -129,7 +129,7 @@ void RMSnormBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelCompi
     const unsigned int zgridsize = 1;
 
     // Prepare compilation options
-    HipKernelCompileOptions options(_params.x(), deviceProperties);
+    KernelCompileOptions options(_params.x(), deviceProperties);
     options.add("HIP_PLUGIN_RMSNORM_LOCAL_SIZE", xlocalsize);
     options.add("HIP_PLUGIN_RMSNORM_INNER_SIZE", innerSize);
     options.add("HIP_PLUGIN_RMSNORM_OUTER_SIZE", outerSize);
@@ -152,7 +152,7 @@ void RMSnormBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelCompi
     _runnableKernels[1]->setGridSize(xgridsizeBwdWeightBias, ygridsize, zgridsize);
 }
 
-void RMSnormBwdPlan::execute([[maybe_unused]] const HipKernelHandle& handle,
+void RMSnormBwdPlan::execute([[maybe_unused]] const Handle& handle,
                              [[maybe_unused]] const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                              [[maybe_unused]] uint32_t numDeviceBuffers,
                              [[maybe_unused]] void* workspace) const
@@ -164,23 +164,17 @@ void RMSnormBwdPlan::execute([[maybe_unused]] const HipKernelHandle& handle,
     }
 
     // Get device buffer pointers
-    auto xBuffer
-        = hip_kernel_utils::findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
-    auto scaleBuffer = hip_kernel_utils::findDeviceBuffer(
-        _params.scale()->uid(), deviceBuffers, numDeviceBuffers);
-    auto dYBuffer
-        = hip_kernel_utils::findDeviceBuffer(_params.dy()->uid(), deviceBuffers, numDeviceBuffers);
-    auto invRMSBuffer = hip_kernel_utils::findDeviceBuffer(
-        _params.invRMS()->uid(), deviceBuffers, numDeviceBuffers);
-    auto dXBuffer
-        = hip_kernel_utils::findDeviceBuffer(_params.dx()->uid(), deviceBuffers, numDeviceBuffers);
-    auto dScaleBufferPtr = hip_kernel_utils::findDeviceBuffer(
-        _params.dscale()->uid(), deviceBuffers, numDeviceBuffers);
-    void* dBiasBufferPtr = (_params.dbias() == nullptr)
-                               ? nullptr
-                               : hip_kernel_utils::findDeviceBuffer(
-                                     _params.dbias()->uid(), deviceBuffers, numDeviceBuffers)
-                                     .ptr;
+    auto xBuffer = findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
+    auto scaleBuffer = findDeviceBuffer(_params.scale()->uid(), deviceBuffers, numDeviceBuffers);
+    auto dYBuffer = findDeviceBuffer(_params.dy()->uid(), deviceBuffers, numDeviceBuffers);
+    auto invRMSBuffer = findDeviceBuffer(_params.invRMS()->uid(), deviceBuffers, numDeviceBuffers);
+    auto dXBuffer = findDeviceBuffer(_params.dx()->uid(), deviceBuffers, numDeviceBuffers);
+    auto dScaleBufferPtr
+        = findDeviceBuffer(_params.dscale()->uid(), deviceBuffers, numDeviceBuffers);
+    void* dBiasBufferPtr
+        = (_params.dbias() == nullptr)
+              ? nullptr
+              : findDeviceBuffer(_params.dbias()->uid(), deviceBuffers, numDeviceBuffers).ptr;
 
     // Run the BwdData kernel
     _runnableKernels[0]->launch(handle.getStream(),

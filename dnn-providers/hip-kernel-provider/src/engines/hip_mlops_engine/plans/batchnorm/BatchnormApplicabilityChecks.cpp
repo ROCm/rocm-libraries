@@ -9,7 +9,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "BatchnormApplicabilityChecks.hpp"
-#include "HipKernelUtils.hpp"
+#include "core/Utils.hpp"
 
 namespace hip_kernel_provider
 {
@@ -180,7 +180,7 @@ void BatchnormValidator::checkTensorShapesSupported(const std::vector<int64_t>& 
             "At least one IO tensor must be provided for batchnorm.");
     }
 
-    const auto& ioTensorAttr = hip_kernel_utils::findTensorAttributes(_tensorMap, ioTensorIds[0]);
+    const auto& ioTensorAttr = core::utils::findTensorAttributes(_tensorMap, ioTensorIds[0]);
     const std::vector<int64_t> ioDims(ioTensorAttr.dims()->begin(), ioTensorAttr.dims()->end());
 
     validateConsistentShapes(
