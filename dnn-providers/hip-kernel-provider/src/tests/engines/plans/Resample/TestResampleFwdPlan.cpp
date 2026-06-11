@@ -8,8 +8,7 @@
 
 #include <gtest/gtest.h>
 
-#include "core/Handle.hpp"
-#include "engines/hip_mlops_engine/plans/resample/ResampleFwdPlan.hpp"
+#include "engines/plans/resample/ResampleFwdPlan.hpp"
 #include "mocks/MockCompiledProgram.hpp"
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
@@ -204,14 +203,14 @@ TEST(TestResampleFwdParams, IsNotCopyConstructible)
 TEST(TestResampleFwdPlan, ExecuteWithoutCompileThrows)
 {
     auto [fbb, plan] = createPlanFromGraph();
-    const Handle handle;
+    const HipKernelHandle handle;
     EXPECT_THROW(plan.execute(handle, nullptr, 0), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestResampleFwdPlan, GetWorkspaceSizeReturnsZero)
 {
     auto [fbb, plan] = createPlanFromGraph();
-    const Handle handle;
+    const HipKernelHandle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }
 
@@ -219,7 +218,7 @@ TEST(TestResampleFwdPlan, IsMoveConstructible)
 {
     auto [fbb, plan] = createPlanFromGraph();
     const ResampleFwdPlan moved(std::move(plan));
-    const Handle handle;
+    const HipKernelHandle handle;
     EXPECT_EQ(moved.getWorkspaceSize(handle), 0u);
 }
 

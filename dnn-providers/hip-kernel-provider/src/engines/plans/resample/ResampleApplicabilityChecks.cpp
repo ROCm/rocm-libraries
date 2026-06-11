@@ -3,8 +3,8 @@
 
 #include "ResampleApplicabilityChecks.hpp"
 
-#include "core/Utils.hpp"
-#include "engines/hip_mlops_engine/plans/resample/ResamplePlanUtils.hpp"
+#include "HipKernelUtils.hpp"
+#include "engines/plans/resample/ResamplePlanUtils.hpp"
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
@@ -12,8 +12,6 @@
 
 namespace hip_kernel_provider::resample
 {
-using namespace hip_kernel_provider::core::utils;
-
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
 void ResampleValidator::checkTensorLayoutsAndDimsSupported()
@@ -43,8 +41,10 @@ void ResampleValidator::checkTensorDataTypesSupported(
         data_objects::DataType::HALF,
         data_objects::DataType::BFLOAT16};
 
-    const auto& xTensor = findTensorAttributes(_tensorMap, resampleAttr.x_tensor_uid());
-    const auto& yTensor = findTensorAttributes(_tensorMap, resampleAttr.y_tensor_uid());
+    const auto& xTensor
+        = hip_kernel_utils::findTensorAttributes(_tensorMap, resampleAttr.x_tensor_uid());
+    const auto& yTensor
+        = hip_kernel_utils::findTensorAttributes(_tensorMap, resampleAttr.y_tensor_uid());
 
     validateDataTypeIsSupported(xTensor.data_type(),
                                 allowedIoTypes,
@@ -59,8 +59,8 @@ void ResampleValidator::checkTensorDataTypesSupported(
     const bool hasIndex = resampleAttr.index_tensor_uid().has_value();
     if(hasIndex)
     {
-        const auto& indexTensor
-            = findTensorAttributes(_tensorMap, resampleAttr.index_tensor_uid().value());
+        const auto& indexTensor = hip_kernel_utils::findTensorAttributes(
+            _tensorMap, resampleAttr.index_tensor_uid().value());
         if(indexTensor.data_type() != data_objects::DataType::INT32)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -73,8 +73,10 @@ void ResampleValidator::checkTensorDataTypesSupported(
 void ResampleValidator::checkTensorShapesSupported(
     const data_objects::ResampleFwdAttributes& resampleAttr)
 {
-    const auto& xTensor = findTensorAttributes(_tensorMap, resampleAttr.x_tensor_uid());
-    const auto& yTensor = findTensorAttributes(_tensorMap, resampleAttr.y_tensor_uid());
+    const auto& xTensor
+        = hip_kernel_utils::findTensorAttributes(_tensorMap, resampleAttr.x_tensor_uid());
+    const auto& yTensor
+        = hip_kernel_utils::findTensorAttributes(_tensorMap, resampleAttr.y_tensor_uid());
 
     const auto xDims = tensorDims(xTensor);
     const auto yDims = tensorDims(yTensor);
@@ -88,8 +90,8 @@ void ResampleValidator::checkTensorShapesSupported(
 
     if(resampleAttr.index_tensor_uid().has_value())
     {
-        const auto& indexTensor
-            = findTensorAttributes(_tensorMap, resampleAttr.index_tensor_uid().value());
+        const auto& indexTensor = hip_kernel_utils::findTensorAttributes(
+            _tensorMap, resampleAttr.index_tensor_uid().value());
         validateResampleIndexShape(indexTensor, yDims, "ResampleFwd");
     }
 }

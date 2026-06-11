@@ -21,17 +21,17 @@ struct ResampleFwdSignatureKey
     const hipdnn_flatbuffers_sdk::data_objects::NodeAttributes nodeType
         = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleFwdAttributes;
     hipdnn_flatbuffers_sdk::data_objects::DataType xDataType;
-    hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType yDataType;
     hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType;
     hipdnn_flatbuffers_sdk::data_objects::DataType indexDataType;
 
     ResampleFwdSignatureKey() = default;
     constexpr ResampleFwdSignatureKey(hipdnn_flatbuffers_sdk::data_objects::DataType x,
-                                      hipdnn_flatbuffers_sdk::data_objects::DataType output,
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType y,
                                       hipdnn_flatbuffers_sdk::data_objects::DataType compute,
                                       hipdnn_flatbuffers_sdk::data_objects::DataType index)
         : xDataType(x)
-        , outputDataType(output)
+        , yDataType(y)
         , computeDataType(compute)
         , indexDataType(index)
     {
@@ -58,7 +58,7 @@ struct ResampleFwdSignatureKey
         }
 
         xDataType = xTensorAttr->data_type();
-        outputDataType = yTensorAttr->data_type();
+        yDataType = yTensorAttr->data_type();
         computeDataType = node.compute_data_type();
         indexDataType = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
         if(nodeAttributes->index_tensor_uid().has_value())
@@ -82,7 +82,7 @@ struct ResampleFwdSignatureKey
     {
         return static_cast<std::size_t>(static_cast<int>(nodeType))
                ^ (static_cast<std::size_t>(static_cast<int>(xDataType)) << 4)
-               ^ (static_cast<std::size_t>(static_cast<int>(outputDataType)) << 8)
+               ^ (static_cast<std::size_t>(static_cast<int>(yDataType)) << 8)
                ^ (static_cast<std::size_t>(static_cast<int>(computeDataType)) << 12)
                ^ (static_cast<std::size_t>(static_cast<int>(indexDataType)) << 16);
     }
@@ -90,7 +90,7 @@ struct ResampleFwdSignatureKey
     bool operator==(const ResampleFwdSignatureKey& other) const noexcept
     {
         return nodeType == other.nodeType && xDataType == other.xDataType
-               && outputDataType == other.outputDataType && computeDataType == other.computeDataType
+               && yDataType == other.yDataType && computeDataType == other.computeDataType
                && indexDataType == other.indexDataType;
     }
 
@@ -133,7 +133,7 @@ struct ResampleFwdSignatureKey
     }
 
     template <hipdnn_flatbuffers_sdk::data_objects::DataType XDataTypeEnum,
-              hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType YDataTypeEnum,
               hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum,
               hipdnn_flatbuffers_sdk::data_objects::DataType IndexDataTypeEnum>
     static void addPlanBuilder(std::unordered_map<ResampleFwdSignatureKey,
@@ -141,9 +141,9 @@ struct ResampleFwdSignatureKey
                                                   ResampleFwdSignatureKey>& map)
     {
         map[ResampleFwdSignatureKey(
-            XDataTypeEnum, OutputDataTypeEnum, ComputeDataTypeEnum, IndexDataTypeEnum)]
+            XDataTypeEnum, YDataTypeEnum, ComputeDataTypeEnum, IndexDataTypeEnum)]
             = std::make_unique<ResampleFwdPlanBuilder<XDataTypeEnum,
-                                                      OutputDataTypeEnum,
+                                                      YDataTypeEnum,
                                                       ComputeDataTypeEnum,
                                                       IndexDataTypeEnum>>();
     }
@@ -151,7 +151,7 @@ struct ResampleFwdSignatureKey
 
 inline std::ostream& operator<<(std::ostream& os, const ResampleFwdSignatureKey& key)
 {
-    os << "ResampleFwd(x=" << key.xDataType << ", y=" << key.outputDataType
+    os << "ResampleFwd(x=" << key.xDataType << ", y=" << key.yDataType
        << ", compute=" << key.computeDataType << ", index=" << key.indexDataType << ")";
     return os;
 }

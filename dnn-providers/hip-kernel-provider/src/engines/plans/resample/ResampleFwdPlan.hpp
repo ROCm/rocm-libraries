@@ -6,10 +6,9 @@
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
-#include "compilation/ICompiledProgram.hpp"
-#include "compilation/IKernelCompiler.hpp"
-#include "compilation/IRunnableKernel.hpp"
-#include "core/Handle.hpp"
+#include "HipKernelHandle.hpp"
+#include "hip/ICompiledProgram.hpp"
+#include "hip/IRunnableKernel.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/resample_fwd_attributes_generated.h>
 
@@ -19,7 +18,7 @@
 
 namespace hip_kernel_provider
 {
-using namespace compilation;
+class IKernelCompiler;
 
 namespace resample
 {
@@ -65,7 +64,7 @@ private:
     hipdnn_flatbuffers_sdk::data_objects::DataType _computeDataType;
 };
 
-class ResampleFwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
+class ResampleFwdPlan : public hipdnn_plugin_sdk::IPlan<HipKernelHandle>
 {
 public:
     explicit ResampleFwdPlan(ResampleFwdParams&& params);
@@ -78,9 +77,9 @@ public:
 
     void compile(const IKernelCompiler& kernelCompiler, const hipDeviceProp_t& deviceProperties);
 
-    size_t getWorkspaceSize(const Handle& handle) const override;
+    size_t getWorkspaceSize(const HipKernelHandle& handle) const override;
 
-    void execute(const Handle& handle,
+    void execute(const HipKernelHandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace = nullptr) const override;
