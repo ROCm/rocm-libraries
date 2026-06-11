@@ -154,8 +154,11 @@ class LoopOrchestrator {
       builder_.add(mod, scmp_eq_u32_cls_(
           "src0"_a = sgpr_fn_("LoopCounterL"), "src1"_a = 0,
           "comment"_a = "K < DepthU? skip to tail loop"));
+      // rocisa Label.getLabelName() prepends "label_"; branch labelName must
+      // match that asm-visible form exactly (mirrors Python emit_skip which
+      // calls skipLabel.getLabelName() before passing to SCBranchSCC1).
       builder_.add(mod, scbranch_scc1_(
-          "labelName"_a = end_label,
+          "labelName"_a = asmLabel(end_label),
           "comment"_a = "K < DepthU: only tail loop runs"));
     }
 
@@ -187,13 +190,13 @@ class LoopOrchestrator {
         const std::string exit_label = "ExitC" + std::to_string(ui);
         builder_.add(mod,
                      scbranch_scc1_(
-                         "labelName"_a = exit_label,
+                         "labelName"_a = asmLabel(exit_label),
                          "comment"_a = "copy " + std::to_string(ui) +
                                        " exit \u2192 NGLL_C" + std::to_string(ui)));
       } else {
         builder_.add(mod,
                      scbranch_scc0_(
-                         "labelName"_a = loop_begin,
+                         "labelName"_a = asmLabel(loop_begin),
                          "comment"_a = "restart mainloop"));
       }
     }
@@ -227,7 +230,7 @@ class LoopOrchestrator {
     builder_.add(mod, emit_loop(nll_emitted,
                                  "NLL_C" + std::to_string(last), nll_ft,
                                  /*schedule=*/true));
-    builder_.add(mod, sbranch_cls_("labelName"_a = end_label,
+    builder_.add(mod, sbranch_cls_("labelName"_a = asmLabel(end_label),
                                     "comment"_a = "skip other exit paths"));
 
     for (int ui = 0; ui < uf - 1; ++ui) {
@@ -249,7 +252,7 @@ class LoopOrchestrator {
                                    "NLL_C" + std::to_string(ui), nll_idx,
                                    /*schedule=*/true));
       if (ui < uf - 2) {
-        builder_.add(mod, sbranch_cls_("labelName"_a = end_label,
+        builder_.add(mod, sbranch_cls_("labelName"_a = asmLabel(end_label),
                                         "comment"_a = "skip other exit paths"));
       }
     }
@@ -317,6 +320,18 @@ class LoopOrchestrator {
   }
 
  private:
+  // Return the asm-visible label name as rocisa formats it.
+  //
+  // rocisa.code.Label prepends "label_" when serialising a label definition
+  // to assembly (Label.getLabelName() → "label_" + name). Branch instructions
+  // must reference the SAME string; passing the raw name produces a mismatch
+  // (e.g. "s_cbranch_scc0 LoopBeginL" vs "label_LoopBeginL:" in the .s file).
+  // This mirrors Python InstructionEmitter.emit_skip which calls
+  // skipLabel.getLabelName() before passing the result to SCBranchSCC1.
+  static std::string asmLabel(const std::string& name) {
+    return "label_" + name;
+  }
+
   // Port of Kernel._zeroRegRange.
   // Uses MFMA (32x32x16 I8) for blocks of 16 registers, scalar
   // VMovB32/VAccvgprWrite for the remainder.
