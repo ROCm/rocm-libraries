@@ -35,15 +35,15 @@ std::vector<TestCase> GetConvFullTestCases()
         TestCase {{128, 2, 28, 28, 28}, {2, 1, 3, 3, 3}, {1, 1, 1}, {2, 2, 2}, {1, 1, 1}, 2, false, tf32_compute},
         TestCase {{256, 9, 2, 14, 14}, {27, 3, 2, 14, 14}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 3, false, tf32_compute},
         TestCase {{128, 4, 28, 28, 28}, {8, 1, 3, 3, 3}, {1, 1, 1}, {2, 2, 2}, {1, 1, 1}, 4, false, tf32_compute}
-        // clang-format on  
+        // clang-format on
     };
 }
 
 auto GetDevApplicabilityConvCase()
 {
     // For device applicability checks
-    return GetConvTestForGroupXdlops<miopenHalf>(miopenTensorNDHWC,
-                                                 std::move(GetConvSmokeTestCases<TestDataType::FP16>()[0]));
+    return GetConvTestForGroupXdlops<miopenHalf>(
+        miopenTensorNDHWC, std::move(GetConvSmokeTestCases<TestDataType::FP16>()[0]));
 }
 
 // Deterministic test case (for CPU deterministic applicability test)
