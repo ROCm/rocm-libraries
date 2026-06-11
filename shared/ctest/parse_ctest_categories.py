@@ -419,11 +419,12 @@ def main():
         "--explicit-tests",
         default=None,
         help="Semicolon-separated list of test names known at parse time. "
-        "When provided, regex patterns are expanded against this list and "
-        "the emitted code uses explicit per-test set_property() calls. "
-        "Required for install-tree CTestTestfile.cmake files because "
-        "ctest's script interpreter does not support "
-        "get_property(DIRECTORY ... PROPERTY TESTS).",
+        "Regex patterns are expanded against this list, avoiding ctest's "
+        "unsupported get_property(DIRECTORY ... PROPERTY TESTS) loop. "
+        "Combined with install_test_file, emits one set_tests_properties() "
+        "line per test (the only label form ctest --print-labels / -L "
+        "honour in installed CTestTestfile.cmake fragments); otherwise "
+        "emits per-test set_property(TEST ...) calls.",
     )
     args = parser.parse_args()
 

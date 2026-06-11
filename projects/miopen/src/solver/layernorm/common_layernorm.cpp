@@ -77,13 +77,13 @@ void PerformanceConfigLayernorm::HeuristicInit(const miopen::layernorm::ProblemD
         separate_stride      = start_separate_stride;
         stride_in_local_size = start_stride_in_local_size;
         break;
+
     case miopenDouble:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
     case miopenInt8:
     case miopenInt32:
-    case miopenInt64:
-    default: MIOPEN_THROW("Unsupported datatype");
+    case miopenInt64: MIOPEN_THROW("Unsupported datatype");
     }
 #endif
     initialized = true;
@@ -164,13 +164,13 @@ bool PerformanceConfigLayernorm::IsValid(const ExecutionContext& context,
                !(stride_in_local_size && problem.stride > local_size) &&
                !((separate_stride || stride_in_local_size) && problem.stride == 1) &&
                IsValidValue();
+
     case miopenDouble:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
     case miopenInt8:
     case miopenInt32:
-    case miopenInt64:
-    default: MIOPEN_THROW("Unsupported datatype");
+    case miopenInt64: MIOPEN_THROW("Unsupported datatype");
     }
     return false;
 #endif
