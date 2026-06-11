@@ -37,7 +37,7 @@ Only two non-test, non-Subtile modules import from the Subtile package:
 
 | Caller | Import | Allowed surface |
 |---|---|---|
-| `Tensile/KernelWriter.py:50` | `from .Components.Subtile.Kernel import *` | `Kernel.py` facade symbols (see below) |
+| `Tensile/KernelWriter.py:50` | `from .Components.Subtile.Kernel import (` (explicit named import, grc.150) | `Kernel.py` facade symbols (see below) |
 | `Tensile/Components/StreamK.py:37` | `from .Subtile.Kernel import localReadResetOffsetsSubtile` | `localReadResetOffsetsSubtile` only |
 
 ### Allowed `Kernel.py` facade surface used by `KernelWriter.py`
@@ -75,10 +75,11 @@ required external surface:
   only through the `select*Geometry` helpers, so they are an internal detail of
   the geometry selectors and need not be public.
 
-Recommended end-state: replace the `import *` in `KernelWriter.py` with an
-explicit import of the six symbols above (or expose them through an explicit
-`__all__` on `Kernel.py`) so the wildcard cannot silently widen the surface.
-That tightening is a follow-up task, not part of this contract slice.
+Done (grc.150): the `import *` in `KernelWriter.py` has been replaced with an
+explicit named import. The six core facade symbols remain the required surface;
+the import also pulls in additional offset-assignment helpers
+(`graTileAssignment`, `lraTileAssignment`, etc.) that are part of the
+stable-but-not-minimal surface documented below.
 
 ## Test-only import sites (not public API)
 

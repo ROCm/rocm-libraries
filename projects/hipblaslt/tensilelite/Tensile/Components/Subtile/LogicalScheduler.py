@@ -60,14 +60,143 @@ from tensile_writer.subtile.loop_orchestrator import (
 )
 from tensile_writer.subtile.module_builder import ModuleBuilder as _ModuleBuilder
 
-from Tensile.Components.Subtile._gr_emit_leaves import (
-    emitSingleBufferLoad, globalReadPtrUpdates, globalReadLDSBufferSwap,
-    globalReadDoScaleSubtile, globalReadScalePtrUpdates,
-)
-from Tensile.Components.Subtile._lr_emit_leaves import (
-    emitSingleDsRead, localReadLDSBufferSwap,
-    emitScaleDsRead,
-)
+# Shared singleton — ModuleBuilder is stateless (no writer state), so one
+# instance serves the entire scheduler lifetime.
+_LS_BUILDER = None
+
+
+def _ls_builder():
+    global _LS_BUILDER
+    if _LS_BUILDER is None:
+        _LS_BUILDER = _ModuleBuilder()
+    return _LS_BUILDER
+
+
+################################################################################
+# GR/LR emit leaf functions — inlined here (grc.150) to eliminate the
+# _gr_emit_leaves / _lr_emit_leaves cycle-breaker shims.
+#
+# Previously these lived in _gr_emit_leaves.py / _lr_emit_leaves.py to break
+# the Kernel.py ↔ LogicalScheduler.py import cycle.  After grc.149 (all
+# offset-assignment emission ported to C++ ModuleBuilder), there is no longer
+# a separate "leaf" role: the functions are thin _ls_builder() wrappers, and
+# inlining them here collapses three redundant ModuleBuilder singletons into
+# the one already owned by LogicalScheduler (_LS_BUILDER).
+#
+# Kernel.py continues to own its own _kernel_builder()-based copies of the LR
+# helpers (emitSingleDsRead, emitScaleDsRead, emitScaleLRLDSSwap,
+# localReadLDSBufferSwap) for callers that import them from Kernel.py directly.
+# The GR helpers are re-imported by Kernel.py from here (see Kernel.py).
+################################################################################
+
+
+
+# ---------------------------------------------------------------------------
+# GR emit leaf helpers
+# ---------------------------------------------------------------------------
+
+def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
+    """Emit buffer_load instructions for a single subtile (sId0, sId1)."""
+    plan = tileInfo.singleBufferLoadPlan(sId0, sId1)
+    if plan.skip:
+        return Module()
+
+    tc = tileInfo.tc
+    isGlc = bool(kernel["NonTemporal%s" % tc] & 0x1)
+    isSlc = bool(kernel["NonTemporal%s" % tc] & 0x2)
+    isNT  = bool(kernel["NonTemporal%s" % tc] & 0x4)
+
+    regListIdx = tileInfo.grRegGroupForSubtileRow(sId0)
+    regList = tileInfo.localSubtilesRegister[regListIdx]
+    useSgpr = regList.is_sgpr
+
+    soffset = regList.ref(0) if len(regList) > 0 and useSgpr else 0
+    voffs = [
+        (tileInfo.sharedVgprGROffset[i] if useSgpr or len(regList) == 0
+         else regList.indices[i])
+        for i in range(len(plan.m0Offsets))
+    ]
+    return _ls_builder().single_buffer_load(
+        tc, isGlc, isSlc, isNT, plan.offsetK, plan.grBaseId,
+        list(plan.m0Offsets), soffset, voffs)
+
+
+def emitScaleGRLDSSwap(ti, writer, kernel):
+    """Toggle scale GR DTL write target between double-buffer halves."""
+    return _ls_builder().gr_lds_buffer_swap(ti.tc)
+
+
+def globalReadPtrUpdates(tc, writer, kernel):
+    ti_ = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
+    return ti_.emitGRPtrUpdate(writer, kernel)
+
+
+def globalReadLDSBufferSwap(tc, writer, kernel):
+    if tc in ['A', 'B']:
+        ti_ = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
+        return ti_.emitGRLDSBufferSwap(writer, kernel)
+    else:
+        ti_ = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
+        return emitScaleGRLDSSwap(ti_, writer, kernel)
+
+
+def globalReadDoScaleSubtile(tc, writer, kernel):
+    """Scale GR: load scale bytes global -> LDS via DTL BufferLoadB128."""
+    if not kernel["ProblemType"].get("MXBlockA", 0) and not kernel["ProblemType"].get("MXBlockB", 0):
+        return Module()
+
+    tileInfo = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
+
+    isGlc = bool(kernel["NonTemporal%s" % tc] & 0x1)
+    isSlc = bool(kernel["NonTemporal%s" % tc] & 0x2)
+    isNT  = bool(kernel["NonTemporal%s" % tc] & 0x4)
+
+    assert len(tileInfo.sharedVgprGROffset) > 0, "Scale GR requires at least 1 GR offset VGPR"
+
+    return _ls_builder().scale_gr_load(tc, isGlc, isSlc, isNT, tileInfo.sharedVgprGROffset[0])
+
+
+def globalReadScalePtrUpdates(tc, writer, kernel):
+    """Advance scale SRD base pointer by one depthU iteration."""
+    ti_ = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
+    inc = int(ti_.lrSubtileSize * ti_.lrGlobalSubtileGrid[1])
+    return _ls_builder().scale_gr_ptr_update(tc, inc)
+
+
+# ---------------------------------------------------------------------------
+# LR emit leaf helpers
+# ---------------------------------------------------------------------------
+
+def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile):
+    """Emit DSLoadB128 instruction(s) for one MMA tile within a subtile."""
+    dstVgpr = dstTile.regList.indices[0]
+    numRegs = len(dstTile.regList.indices)
+    plan = tileInfo.singleDsReadPlan(sId0, sId1, subIterK, numRegs)
+    dstRegOffsets = [rd.dstRegOffset for rd in plan.reads]
+    addrVgprs = [tileInfo.sharedVgprLROffset[rd.addrIdx] for rd in plan.reads]
+    return _ls_builder().single_ds_read(
+        tileInfo.tc, sId0, sId1, subIterK, dstVgpr, plan.regsPerDsRead,
+        plan.offset, dstRegOffsets, addrVgprs)
+
+
+def emitScaleDsRead(tc, vdst, addrVgpr, dsOffset, scaleGroupIdx, k=-1):
+    """Scale LR: read 4 scale bytes (one E8M0 group) from LDS via ds_read_b32."""
+    return _ls_builder().scale_ds_read(tc, vdst, addrVgpr, dsOffset, scaleGroupIdx, k)
+
+
+def emitScaleLRLDSSwap(ti, writer, kernel):
+    """Toggle scale LR read offsets between double-buffer halves."""
+    return _ls_builder().lr_lds_buffer_swap(
+        ti.tc, list(ti.sharedVgprLROffset), list(ti.sharedVgprLROffsetSwap))
+
+
+def localReadLDSBufferSwap(tc, writer, kernel):
+    if tc in ['A', 'B']:
+        ti_ = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
+        return ti_.emitLRLDSBufferSwap(writer, kernel)
+    else:
+        ti_ = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
+        return emitScaleLRLDSSwap(ti_, writer, kernel)
 
 
 class Pass(IntEnum):
@@ -1084,7 +1213,7 @@ class LogicalScheduler:
         3D structure and calls self._emitter.emit_module per EmittedModule,
         routing through instructionScheduleFromLists when schedule=True.
         """
-        builder = _ModuleBuilder()
+        builder = _ls_builder()
         return _emit_loop(
             builder, self._emitter.emit_module, instructionScheduleFromLists,
             emitted_3d, label, unroll_iter, schedule)
@@ -1104,7 +1233,7 @@ class LogicalScheduler:
         assert Pass.POPULATE in self._completed, \
             "populate_instructions() must be called before emitMainAndExitLoops()"
 
-        builder = _ModuleBuilder()
+        builder = _ls_builder()
         return _emit_main_and_exit_loops(
             builder,
             self._emitter.emit_module,
@@ -1148,7 +1277,7 @@ class LogicalScheduler:
         # run AFTER the loop body, not before.
         mask_k_init_items = list(self._emitter.emit_mask_k_init())
 
-        builder = _ModuleBuilder()
+        builder = _ls_builder()
         result = _emit_tail_loop(
             builder,
             self._emitter.emit_module,
@@ -2015,11 +2144,11 @@ class InstructionEmitter:
 
     def emit_wait_lr(self):
         """Emit SWaitCnt(dscnt=0) — delegated to C++ ModuleBuilder."""
-        return [_ModuleBuilder().wait_lr()]
+        return [_ls_builder().wait_lr()]
 
     def emit_sync(self):
         """Emit SBarrier — delegated to C++ ModuleBuilder."""
-        return [_ModuleBuilder().barrier()]
+        return [_ls_builder().barrier()]
 
     def emit_inline(self, source):
         """Emit a writer-built Module supplied by an InlineModuleOp callback."""

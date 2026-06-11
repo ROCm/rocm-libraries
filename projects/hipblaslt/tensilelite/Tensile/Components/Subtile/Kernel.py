@@ -10,7 +10,10 @@ from functools import singledispatch, cached_property
 from typing import Dict, List, NamedTuple, Optional, Tuple, Type
 from Tensile.Components.Subtile.LogicalScheduler import (
       LogicalScheduler, SchedulerConfig as MFMASchedulerConfig,
-      ReadGranularity)
+      ReadGranularity,
+      emitSingleBufferLoad, emitScaleGRLDSSwap, globalReadPtrUpdates,
+      globalReadLDSBufferSwap, globalReadDoScaleSubtile, globalReadScalePtrUpdates,
+)
 
 from ...Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion
@@ -807,14 +810,15 @@ from tensile_writer.subtile import tile_info as _CPP_TI
 from tensile_writer.subtile import emit as _CPP_EMIT
 from tensile_writer.subtile.module_builder import ModuleBuilder as _ModuleBuilder
 
-# Global singleton — cheap: imports and caches rocisa handles once on first call.
-_MFMA_BUILDER = None
+# Shared singleton for all rocisa module-building in this file — stateless,
+# so one instance covers GR, LR, MFMA, and scale emit paths.
+_KERNEL_BUILDER = None
 
-def _mfma_builder():
-    global _MFMA_BUILDER
-    if _MFMA_BUILDER is None:
-        _MFMA_BUILDER = _ModuleBuilder()
-    return _MFMA_BUILDER
+def _kernel_builder():
+    global _KERNEL_BUILDER
+    if _KERNEL_BUILDER is None:
+        _KERNEL_BUILDER = _ModuleBuilder()
+    return _KERNEL_BUILDER
 
 ################################################################################
 # Concrete tile classes and pre-defined config instances
@@ -1290,7 +1294,7 @@ def _emitGRLDSSwap_TLU0(tag, tile, ti, writer, kernel):
   XOR LocalWriteBaseAddr with Swap to flip to the other LDS buffer. Boundary
   call: the rocisa construction lives in the C++ ModuleBuilder.
   """
-  return _mfma_builder().gr_lds_buffer_swap(ti.tc)
+  return _kernel_builder().gr_lds_buffer_swap(ti.tc)
 
 
 # --- GR pointer update (TLU=0) ----------------------------------------------
@@ -1304,7 +1308,7 @@ def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel):
   Boundary call: the depthU byte increment is a writer-resolved scalar; the
   rocisa SAddU32/SAddCU32 construction lives in the C++ ModuleBuilder.
   """
-  return _mfma_builder().gr_ptr_update(ti.tc, int(ti.depthUBytes))
+  return _kernel_builder().gr_ptr_update(ti.tc, int(ti.depthUBytes))
 
 
 ################################################################################
@@ -1359,7 +1363,7 @@ def _grComputeOffset_cpp(module, writer, tileInfo, plan, colId, rowId, output):
   tc = tileInfo.tc
   colBytes = writer.vgprPool.checkOut(1)
   mulTmp = writer.vgprPool.checkOut(1)
-  module.add(_mfma_builder().gr_compute_offset(plan, tc, colId, rowId, output, colBytes, mulTmp))
+  module.add(_kernel_builder().gr_compute_offset(plan, tc, colId, rowId, output, colBytes, mulTmp))
   writer.vgprPool.checkIn(colBytes)
   writer.vgprPool.checkIn(mulTmp)
 
@@ -1384,7 +1388,7 @@ def _grComputeRowPartition_cpp(module, writer, tileInfo, plan, waveId, rowOffset
   localRow = writer.vgprPool.checkOut(1)
   partitionRow = writer.vgprPool.checkOut(1)
   tmpSgpr = writer.sgprPool.checkOut(1, preventOverflow=False)
-  module.add(_mfma_builder().gr_compute_row_partition(plan, tc, waveId, rowOffset,
+  module.add(_kernel_builder().gr_compute_row_partition(plan, tc, waveId, rowOffset,
                                                        localRow, partitionRow, tmpSgpr))
   writer.vgprPool.checkIn(localRow)
   writer.vgprPool.checkIn(partitionRow)
@@ -1399,7 +1403,7 @@ def _grComputeAllOffsets_cpp(module, writer, tileInfo, plan, colId, rowId, rowOf
   tmpBlock = writer.vgprPool.checkOut(1) if needTmpBlock else rotatedColId
   colBytes = writer.vgprPool.checkOut(1)
   mulTmp = writer.vgprPool.checkOut(1)
-  module.add(_mfma_builder().gr_compute_all_offsets(
+  module.add(_kernel_builder().gr_compute_all_offsets(
       plan, tc, tileInfo.sharedVgprGROffset, colId, rowId, rowOffset,
       rotatedColId, tmpBlock, colBytes, mulTmp))
   if needTmpBlock:
@@ -1413,7 +1417,7 @@ def _grSwizzleColIds_cpp(module, writer, planA, planB, blockSize, numRowsPerLDSB
   ldsRowId = writer.vgprPool.checkOut(1)
   tmp = writer.vgprPool.checkOut(1)
   waveRotation = writer.vgprPool.checkOut(1)
-  module.add(_mfma_builder().gr_swizzle_col_ids(planA, planB, laneId, colIdA, colIdB,
+  module.add(_kernel_builder().gr_swizzle_col_ids(planA, planB, laneId, colIdA, colIdB,
                                                   waveId, ldsRowId, tmp, waveRotation))
   writer.vgprPool.checkIn(ldsRowId)
   writer.vgprPool.checkIn(tmp)
@@ -1488,7 +1492,7 @@ def _globalReadDTLInitCommonSgpr_legacy(writer, kernel):
                               src=vgpr("Serial"), comment="Wave Id"))
   _grComputeRowPartition_cpp(module, writer, tileInfoA, planA, vgprWaveId, rowOffsetA)
   _grComputeRowPartition_cpp(module, writer, tileInfoB, planB, vgprWaveId, rowOffsetB)
-  module.add(_mfma_builder().dtl_init_common_sgpr_post_partition(
+  module.add(_kernel_builder().dtl_init_common_sgpr_post_partition(
       rowOffsetA, rowOffsetB, 0, tileInfoA.subIterKBytes,
       writer.ldsStartOffsetB, writer.ldsTotalSize))
   writer.vgprPool.checkIn(vgprWaveId)
@@ -1496,13 +1500,6 @@ def _globalReadDTLInitCommonSgpr_legacy(writer, kernel):
   writer.vgprPool.checkIn(rowOffsetB)
   return module
 
-# emitSingleBufferLoad, emitScaleGRLDSSwap, globalReadPtrUpdates,
-# globalReadLDSBufferSwap, globalReadDoScaleSubtile, globalReadScalePtrUpdates
-# live in _gr_emit_leaves to break the Kernel <-> LogicalScheduler import cycle.
-from ._gr_emit_leaves import (
-    emitSingleBufferLoad, emitScaleGRLDSSwap, globalReadPtrUpdates,
-    globalReadLDSBufferSwap, globalReadDoScaleSubtile, globalReadScalePtrUpdates,
-)
 
 def emitSubtileBufferLoad(tc, writer, kernel, subtileId):
   tileInfo = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
@@ -1515,16 +1512,6 @@ def emitSubtileBufferLoad(tc, writer, kernel, subtileId):
 # singledispatch over LR tag sentinels (LRTag_1x2, LRTag_TLU1, etc.).
 # ABLRTile calls these via self.config.tag as the dispatch key.
 ################################################################################
-
-_LR_MODULE_BUILDER = None
-
-
-def _lr_builder():
-  global _LR_MODULE_BUILDER
-  if _LR_MODULE_BUILDER is None:
-    _LR_MODULE_BUILDER = _ModuleBuilder()
-  return _LR_MODULE_BUILDER
-
 
 ################################################################################
 # LR Dispatch bases
@@ -1640,7 +1627,7 @@ def _emitLRDTLInit_1x2(tag, tile, ti, writer, kernel):
 @_emitLRLDSBufferSwap.register(LRTag_1x2)
 def _emitLRLDSSwap_1x2(tag, tile, ti, writer, kernel):
   """Toggle LR read offsets between double-buffer halves."""
-  return _lr_builder().lr_lds_buffer_swap(
+  return _kernel_builder().lr_lds_buffer_swap(
       ti.tc, list(tile.sharedVgprLROffset), list(tile.sharedVgprLROffsetSwap))
 
 
@@ -1650,7 +1637,7 @@ def _emitLRLDSSwap_1x2(tag, tile, ti, writer, kernel):
 
 def _computeLROffset_cpp(module, tileInfo, plan, colOffset, rowOffset):
   tc = tileInfo.tc
-  module.add(_mfma_builder().lr_compute_offset(plan, tc, tileInfo.sharedVgprLROffset,
+  module.add(_kernel_builder().lr_compute_offset(plan, tc, tileInfo.sharedVgprLROffset,
                                                 colOffset, rowOffset))
 
 def _applyWavePartitionLROffset_cpp(module, writer, kernel, tileInfo, plan):
@@ -1660,7 +1647,7 @@ def _applyWavePartitionLROffset_cpp(module, writer, kernel, tileInfo, plan):
   wavesize = kernel["WavefrontSize"]
   waveId = writer.vgprPool.checkOut(1)
   tmpSgpr = writer.sgprPool.checkOut(1)
-  module.add(_mfma_builder().lr_apply_wave_partition(
+  module.add(_kernel_builder().lr_apply_wave_partition(
       plan, tc, tileInfo.sharedVgprLROffset, waveId, tmpSgpr, wavesize))
   writer.vgprPool.checkIn(waveId)
   writer.sgprPool.checkIn(tmpSgpr)
@@ -1761,47 +1748,6 @@ def lraTileAssignment(writer, kernel):
   return _lraTileAssignment_cpp(writer, kernel)
 
 
-def emitSubtileDsRead(writer, kernel, tileInfo, subtileId):
-  module = Module()
-  sId0 = subtileId[0]
-  sId1 = subtileId[1]
-  for du in range(tileInfo.subtileShape[1]):
-    mfmaId = tileInfo.getSubtileShapeLinearId(du, 0)
-    tileIdx = tileInfo.lrTileIndexForSubtile(sId0, sId1, mfmaId)
-    dstTile = tileInfo.vgprTiles[tileIdx]
-    module.add(emitSingleDsRead(tileInfo, sId0, sId1, du, dstTile))
-  return module
-
-
-def localReadDoSubtile(tc, writer, kernel):
-  module = Module()
-  tileInfo = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
-  for i in range(tileInfo.localSubtileGrid[0]):
-    for j in range(tileInfo.localSubtileGrid[1]):
-        module.add(emitSubtileDsRead(writer, kernel, tileInfo, [i, j]))
-  return module
-
-
-def localReadDTLInitCommonSwapVgpr(writer, kernel):
-  module = Module()
-  atile = writer.states.a.tileInfo
-  btile = writer.states.b.tileInfo
-  stmp = writer.sgprPool.checkOut(1)
-  module.add(SMovB32(dst=sgpr(stmp), src=writer.ldsTotalSize, comment="Store Total Lds Size for one buffer"))
-  for i in range(len(atile.sharedVgprLROffset)):
-    vgprId = atile.sharedVgprLROffset[i]
-    vgprSwapId = atile.sharedVgprLROffsetSwap[i]
-    module.add(VAddU32(dst=vgpr(vgprSwapId), src0=vgpr(vgprId), src1=sgpr(stmp), comment=""))
-    module.add(VXorB32(dst=vgpr(vgprSwapId), src0=vgpr(vgprId), src1=vgpr(vgprSwapId), comment=""))
-  for i in range(len(btile.sharedVgprLROffset)):
-    vgprId = btile.sharedVgprLROffset[i]
-    vgprSwapId = btile.sharedVgprLROffsetSwap[i]
-    module.add(VAddU32(dst=vgpr(vgprSwapId), src0=vgpr(vgprId), src1=sgpr(stmp), comment=""))
-    module.add(VXorB32(dst=vgpr(vgprSwapId), src0=vgpr(vgprId), src1=vgpr(vgprSwapId), comment=""))
-  writer.sgprPool.checkIn(stmp)
-  return module
-
-
 def localReadResetOffsetsSubtile(writer, kernel):
   """Reset subtile LR offsets for A and B back to the lower LDS buffer.
 
@@ -1857,7 +1803,7 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile):
   plan = tileInfo.singleDsReadPlan(sId0, sId1, subIterK, numRegs)
   dstRegOffsets = [rd.dstRegOffset for rd in plan.reads]
   addrVgprs = [tileInfo.sharedVgprLROffset[rd.addrIdx] for rd in plan.reads]
-  return _lr_builder().single_ds_read(
+  return _kernel_builder().single_ds_read(
       tileInfo.tc, sId0, sId1, subIterK, dstVgpr, plan.regsPerDsRead,
       plan.offset, dstRegOffsets, addrVgprs)
 
@@ -1938,13 +1884,13 @@ def localReadLDSBufferSwap(tc, writer, kernel):
 
 def emitScaleLRLDSSwap(ti, writer, kernel):
   """Toggle scale LR read offsets between double-buffer halves."""
-  return _lr_builder().lr_lds_buffer_swap(
+  return _kernel_builder().lr_lds_buffer_swap(
       ti.tc, list(ti.sharedVgprLROffset), list(ti.sharedVgprLROffsetSwap))
 
 
 def emitScaleDsRead(tc, vdst, addrVgpr, dsOffset, scaleGroupIdx, k=-1):
   """Scale LR: read 4 scale bytes (one E8M0 group) from LDS via ds_read_b32."""
-  return _lr_builder().scale_ds_read(tc, vdst, addrVgpr, dsOffset, scaleGroupIdx, k)
+  return _kernel_builder().scale_ds_read(tc, vdst, addrVgpr, dsOffset, scaleGroupIdx, k)
 
 
 # ---------------------------------------------------------------------------
@@ -1981,7 +1927,7 @@ def _graScaleOffset_cpp(tc, writer, kernel):
   plan = ti_.scaleGrOffsetAssignPlan()
   vtmp = writer.vgprPool.checkOut(1)
   stmp = writer.sgprPool.checkOut(1)
-  mod = _mfma_builder().scale_gr_offset(tc, plan, vtmp, stmp, ti_.sharedVgprGROffset[0])
+  mod = _kernel_builder().scale_gr_offset(tc, plan, vtmp, stmp, ti_.sharedVgprGROffset[0])
   writer.vgprPool.checkIn(vtmp)
   writer.sgprPool.checkIn(stmp)
   return mod
@@ -2001,7 +1947,7 @@ def _applyScaleWavePartitionLROffset_cpp(module, writer, ti_, plan, waveId):
   tc = ti_.tc
   tmp = writer.vgprPool.checkOut(1)
   tmpSgpr = writer.sgprPool.checkOut(1)
-  module.add(_mfma_builder().scale_lr_wave_partition(tc, plan, ti_.sharedVgprLROffset[0],
+  module.add(_kernel_builder().scale_lr_wave_partition(tc, plan, ti_.sharedVgprLROffset[0],
                                                       waveId, tmp, tmpSgpr))
   writer.vgprPool.checkIn(tmp)
   writer.sgprPool.checkIn(tmpSgpr)
@@ -2024,7 +1970,7 @@ def lraTileAssignmentScaleSwizzled(writer, kernel):
   sgprTmpB    = writer.sgprPool.checkOut(1)
   laneOffset  = writer.vgprPool.checkOut(1)
   tmpSgpr     = writer.sgprPool.checkOut(1)
-  module.add(_mfma_builder().scale_lr_offset_assign(
+  module.add(_kernel_builder().scale_lr_offset_assign(
       wavesize, planA, planB,
       waveIdVgpr, partTmpA, sgprTmpA, partTmpB, sgprTmpB, laneOffset, tmpSgpr,
       tiA_.sharedVgprLROffset[0], tiB_.sharedVgprLROffset[0],
@@ -2046,7 +1992,7 @@ def globalReadScaleSwizzledDTLInitCommonSgpr(writer, kernel):
   tiMXSA_ = writer.states.mxsa.tileInfo
   bytesPerLoad = tiMXSA_.loadWidthGR * wavesize
   vgprWaveId = writer.vgprPool.checkOut(1)
-  mod = _mfma_builder().dtl_init_scale_sgpr(
+  mod = _kernel_builder().dtl_init_scale_sgpr(
       vgprWaveId, wavesize, bytesPerLoad,
       writer.ldsStartOffsetMXSA, writer.ldsStartOffsetMXSB, writer.ldsTotalSize)
   writer.vgprPool.checkIn(vgprWaveId)
@@ -2906,9 +2852,8 @@ def initVgprTilesToZero(writer, kernel, tileInfo):
   call checkOut/checkIn.  Returns the rocisa Module from C++ directly.
   """
   from tensile_writer.subtile.loop_orchestrator import init_vgpr_tiles_to_zero
-  from tensile_writer.subtile.module_builder import ModuleBuilder
 
-  builder = ModuleBuilder()
+  builder = _kernel_builder()
 
   if not tileInfo.vgprTiles:
     return init_vgpr_tiles_to_zero(builder, tileInfo.tc, [])
@@ -3015,7 +2960,7 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
     assert unitScaleVgpr >= 0, \
         "emitMfmaInstruction: plain FP8/FP4 fallback requires _subtileUnitScaleVgpr in kernel dict"
 
-  return _mfma_builder().emit_mfma(
+  return _kernel_builder().emit_mfma(
       vgprAStart, opASize, vgprBStart, opBSize,
       vgprCStart, opCSize, vgprDStart, opDSize,
       bool(dIsVgpr), bool(cIsVgpr), bool(kernel["MIArchVgpr"]),

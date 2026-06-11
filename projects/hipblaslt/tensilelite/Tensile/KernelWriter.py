@@ -47,7 +47,21 @@ from .KernelWriterModules import *
 from .Component import Component, LraTileProperties
 from .Components.Signature import UserArgumentsInfo
 from .Components.CustomSchedule import customMainLoopSchedule
-from .Components.Subtile.Kernel import *
+from .Components.Subtile.Kernel import (
+    TileInfo,
+    selectABGeometry,
+    selectDGeometry,
+    selectMXScaleGeometry,
+    initVgprTilesToZero,
+    mainLoop,
+    graTileAssignment,
+    graTileAssignmentScaleSwizzled,
+    lraTileAssignment,
+    lraTileAssignmentScaleSwizzled,
+    localReadDTLInitCommonSwapVgpr,
+    globalReadDTLInitCommonSgpr,
+    globalReadScaleSwizzledDTLInitCommonSgpr,
+)
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType
 from .AsmMemoryInstruction import MemoryInstruction

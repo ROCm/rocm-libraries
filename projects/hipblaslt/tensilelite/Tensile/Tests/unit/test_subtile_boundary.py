@@ -8,9 +8,11 @@
 # docs/subtile_cpp_boundary.md.
 #
 # Production code outside Tensile/Components/Subtile/ may import only:
-#   * Tensile/KernelWriter.py        -> from .Components.Subtile.Kernel import *
+#   * Tensile/KernelWriter.py        -> explicit named import from Subtile.Kernel
 #   * Tensile/Components/StreamK.py  -> Kernel.localReadResetOffsetsSubtile
 #
+# The regex matches the opening line of a multi-line import block; the
+# ALLOWED_PRODUCTION_SITES set contains the exact stripped first line.
 # A new hit here means the boundary widened and must be triaged before merge.
 #
 # Usage: pytest test_subtile_boundary.py -v
@@ -27,8 +29,10 @@ TESTS_DIR = TENSILE_DIR / "Tests"
 _IMPORT_RE = re.compile(r"(?:from\s+\S*Subtile|import\s+\S*Subtile)")
 
 # (relative-to-Tensile path) -> set of sanctioned import lines (verbatim).
+# KernelWriter.py uses an explicit multi-line import; only the opening line
+# matches the regex (grc.150: wildcard replaced with named symbols).
 ALLOWED_PRODUCTION_SITES = {
-    "KernelWriter.py": {"from .Components.Subtile.Kernel import *"},
+    "KernelWriter.py": {"from .Components.Subtile.Kernel import ("},
     "Components/StreamK.py": {
         "from .Subtile.Kernel import localReadResetOffsetsSubtile"
     },
