@@ -89,6 +89,8 @@ class TestParserGlobAndFilters:
         args = parser.parse_args(["--graph", "g.json", "--engine", "1,1,1"])
         assert args.engine == [1, 1, 1]
 
+    def test_engine_flag_preserves_order(self) -> None:
+        parser = create_parser()
         args = parser.parse_args(["--graph", "g.json", "--engine", "3,1,3,2"])
         assert args.engine == [3, 1, 3, 2]
 
@@ -248,6 +250,26 @@ class TestMainRouting:
         suite_config = mock_benchmark.call_args.kwargs["config"]
         assert suite_config.engine_filter == [2, 1]
         assert suite_config.plugin_paths == [Path("/plugins/b"), Path("/plugins/a")]
+
+    @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
+    def test_rocm_path_env_used_when_plugin_path_absent(
+        self, mock_benchmark: MagicMock
+    ) -> None:
+        mock_benchmark.return_value = 0
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = self._create_graph_files(Path(tmpdir), 1)
+
+            from dnn_benchmarking.cli.main import main
+
+            with patch.dict(os.environ, {"ROCM_PATH": "/rocm/env"}):
+                with patch("sys.argv", ["dnn-benchmark", "--graph", paths[0]]):
+                    main()
+
+        suite_config = mock_benchmark.call_args.kwargs["config"]
+        assert suite_config.plugin_paths == [
+            Path("/rocm/env/lib/hipdnn_plugins/engines")
+        ]
 
     @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
     def test_same_engine_plugin_paths_propagate_as_ordered_selections(
@@ -817,7 +839,7 @@ class TestValidationStartupGate:
         config.engine_filter = None
         config.rtol = 1e-5
         config.atol = 1e-8
-        config.gpu_backend = "none"
+        config.timing_backend = "none"
         config.reference_provider = "definitely_not_registered"
         config.verbose = False
 

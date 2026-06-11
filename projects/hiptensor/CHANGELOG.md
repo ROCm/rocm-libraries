@@ -7,6 +7,7 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 ### Added
 
 * Added support for new GPU target gfx1250.
+* Added YAML-driven CTest test filter standardization, applying `quick`/`standard`/`comprehensive`/`full` tier labels to the installed test tree so tests can be run by tier with `ctest -L <tier>`.
 
 ### Optimized
 
