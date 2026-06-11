@@ -23,7 +23,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Unit tests for the two shared low-level helpers exported from GlobalWriteBatchUtils.
+"""Unit tests for the shared low-level helpers exported from GlobalWriteBatchUtils.
 
 These helpers are consumed by both GlobalWriteBatch and StreamK to avoid
 duplication (issue #7 fix).  The tests verify that:
@@ -33,6 +33,9 @@ duplication (issue #7 fix).  The tests verify that:
 
 * _is_legal_valuC_offset correctly determines whether a ValuC staging slot
   is within the hardware VGPR limit.
+
+* _has_any_vgpr_backed_accumulator correctly reflects the actual allocation
+  recorded in tileInfo.vgprTiles, not just the kernel data types.
 """
 
 import pytest
@@ -40,6 +43,7 @@ from unittest.mock import MagicMock
 
 from Tensile.Components.Subtile.GlobalWriteBatchUtils import (
     _extract_direct_vgpr_from_acc_read,
+    _has_any_vgpr_backed_accumulator,
     _is_legal_valuC_offset,
 )
 
@@ -184,3 +188,64 @@ class TestIsLegalValuCOffset:
     ])
     def test_parametrized_legal_checks(self, offset, expected):
         assert _is_legal_valuC_offset(4, 256, offset, width=1) is expected
+
+
+# ---------------------------------------------------------------------------
+# Tests for _has_any_vgpr_backed_accumulator
+# ---------------------------------------------------------------------------
+
+def _mock_vtile(is_vgpr: bool):
+    """Return a minimal mock tile with a regList whose is_vgpr flag is set."""
+    vtile = MagicMock()
+    vtile.regList.is_vgpr = is_vgpr
+    return vtile
+
+
+def _mock_tile_info(vtile_flags):
+    """Return a mock tileInfo whose vgprTiles list has the given is_vgpr flags."""
+    ti = MagicMock()
+    ti.vgprTiles = [_mock_vtile(f) for f in vtile_flags]
+    return ti
+
+
+class TestHasAnyVgprBackedAccumulator:
+    """_has_any_vgpr_backed_accumulator(tileInfo) must reflect actual allocation.
+
+    The key distinction vs _is_fp4_subtile_accumulator_vgpr_first: this function
+    inspects the real register-allocation records, so it returns False when all
+    D-tile registers fell back to AGPR (e.g. VGPR budget exhausted).
+    """
+
+    def test_none_tile_info_returns_false(self):
+        """No tileInfo at all (non-subtile kernel) → False."""
+        assert _has_any_vgpr_backed_accumulator(None) is False
+
+    def test_all_agpr_returns_false(self):
+        """All tiles allocated as AGPR → False, regardless of data type."""
+        ti = _mock_tile_info([False, False, False, False])
+        assert _has_any_vgpr_backed_accumulator(ti) is False
+
+    def test_all_vgpr_returns_true(self):
+        """All tiles allocated as VGPR → True."""
+        ti = _mock_tile_info([True, True, True, True])
+        assert _has_any_vgpr_backed_accumulator(ti) is True
+
+    def test_mixed_vgpr_agpr_returns_true(self):
+        """Some VGPR, some AGPR (partial VGPR-first) → True."""
+        ti = _mock_tile_info([True, False, False, False])
+        assert _has_any_vgpr_backed_accumulator(ti) is True
+
+    def test_empty_tile_list_returns_false(self):
+        """Empty vgprTiles (no D-tile registers at all) → False."""
+        ti = _mock_tile_info([])
+        assert _has_any_vgpr_backed_accumulator(ti) is False
+
+    def test_single_vgpr_tile_returns_true(self):
+        """Single VGPR-backed tile → True."""
+        ti = _mock_tile_info([True])
+        assert _has_any_vgpr_backed_accumulator(ti) is True
+
+    def test_single_agpr_tile_returns_false(self):
+        """Single AGPR-backed tile → False."""
+        ti = _mock_tile_info([False])
+        assert _has_any_vgpr_backed_accumulator(ti) is False

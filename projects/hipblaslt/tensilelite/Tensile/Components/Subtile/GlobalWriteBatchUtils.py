@@ -61,7 +61,12 @@ def _is_legal_valuC_offset(startVgprValu, maxVgpr, valuCOffset, width=1):
 
 
 def _is_fp4_subtile_accumulator_vgpr_first(kernel) -> bool:
-    """Return True for the scoped FP4 subtile kernels that use VGPR-first accumulators."""
+    """Return True for the scoped FP4 subtile kernels that use VGPR-first accumulators.
+
+    NOTE: this only tests the kernel data types — it does not confirm that the VGPR
+    budget was large enough to actually place any accumulator in a VGPR.  Use
+    _has_any_vgpr_backed_accumulator(tileInfo) for a runtime-accurate check.
+    """
     if not kernel.get("UseSubtileImpl"):
         return False
     pt = kernel.get("ProblemType", {})
@@ -71,6 +76,18 @@ def _is_fp4_subtile_accumulator_vgpr_first(kernel) -> bool:
         dataTypeA is not None and dataTypeB is not None
         and dataTypeA.isFloat4() and dataTypeB.isFloat4()
     )
+
+
+def _has_any_vgpr_backed_accumulator(tileInfo) -> bool:
+    """Return True when at least one D-tile accumulator was actually allocated as a VGPR.
+
+    Unlike _is_fp4_subtile_accumulator_vgpr_first, this inspects the actual register
+    allocation recorded in tileInfo.vgprTiles, so it correctly returns False when the
+    VGPR budget was exhausted and all D-tile registers fell back to AGPR.
+    """
+    if tileInfo is None:
+        return False
+    return any(vtile.regList.is_vgpr for vtile in tileInfo.vgprTiles)
 
 
 def _can_bypass_valu_c(kernel, edge: bool, atomic: bool, use_bias,

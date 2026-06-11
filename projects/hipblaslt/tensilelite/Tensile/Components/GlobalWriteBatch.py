@@ -46,7 +46,7 @@ from ..Common import DataDirection, SemanticVersion
 from .Subtile.GlobalWriteBatchUtils import (
   _can_bypass_valu_c,
   _extract_direct_vgpr_from_acc_read,
-  _is_fp4_subtile_accumulator_vgpr_first,
+  _has_any_vgpr_backed_accumulator,
   _is_legal_valuC_offset,
 )
 from ..Common.DataType import DataType
@@ -63,12 +63,17 @@ from math import ceil, log2
 
 
 def _scmpGtU32(writer, src, imm, comment=""):
-    """ISA-aware scalar compare: s_cmpk_gt_u32 when available, else s_cmp_gt_u32 via temp SGPR."""
+    """ISA-aware scalar compare: s_cmpk_gt_u32 when available, else s_cmp_gt_u32 via temp SGPR.
+
+    The temp SGPR is checked out and immediately returned (live for one instruction),
+    so it is safe to suppress the overflow assert here — the slot is reclaimed before
+    any subsequent allocation sees it.
+    """
     if writer.states.asmCaps["HasSCMPK"]:
         return SCmpKGtU32(src=src, simm16=imm, comment=comment)
     else:
         module = Module("scmpGtU32")
-        tmpSgpr = writer.sgprPool.checkOut(1, preventOverflow=False)
+        tmpSgpr = writer.sgprPool.checkOut(1, "ScmpGtU32Tmp", preventOverflow=False)
         module.add(SMovB32(dst=sgpr(tmpSgpr), src=imm))
         module.add(SCmpGtU32(src0=src, src1=sgpr(tmpSgpr), comment=comment))
         writer.sgprPool.checkIn(tmpSgpr)
@@ -134,7 +139,11 @@ class GlobalWriteBatchWriter:
     self.factorDim = factorDim
     self.amdClangVersion = amdClangVersion
     valuCOverflows = parentWriter.states.c.startVgprValu + parentWriter.states.c.numVgprValu > parentWriter.states.regCaps["MaxVgpr"]
-    useDirectVgprAcc = _is_fp4_subtile_accumulator_vgpr_first(kernel)
+    # Use the actual D-tile allocation to detect VGPR-first accumulators: the kernel
+    # may be an FP4-subtile candidate but have all D-tile registers fall to AGPR when
+    # the VGPR budget was exhausted.
+    dTileInfo = getattr(getattr(parentWriter.states, 'd', None), 'tileInfo', None)
+    useDirectVgprAcc = _has_any_vgpr_backed_accumulator(dTileInfo)
     bypassValuC = _can_bypass_valu_c(kernel, edge, atomic, parentWriter.states.useBias, beta=beta)
     # Build the source map when VGPR-first accumulators are present (so _storeSumIdx
     # can dispatch stores directly to the physical register) OR when the full bypass

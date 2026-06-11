@@ -1499,15 +1499,23 @@ class StreamK(Component):
             # WS store reads from the correct accumulator VGPRs.  For the regular path
             # (non-subtile), startVgprValu is already accounted for by the vgprValuC
             # assembler macro, so no offset is needed (matches rebase behaviour).
+            storeWidth = kernel["StoreVectorWidth"]
             if kernel.get("UseSubtileImpl"):
                 if valuCSourceMap is not None:
-                    sumIdx = valuCSourceMap.get(ss.elementSumIdx[elementIdx],
-                                                ss.elementSumIdx[elementIdx] + writer.states.c.startVgprValu)
+                    # Remap the base element and verify all storeWidth elements are
+                    # contiguous in the map before using the physical VGPR base.
+                    baseLogical = ss.elementSumIdx[elementIdx]
+                    physBase = valuCSourceMap.get(baseLogical)
+                    if physBase is not None and all(
+                            valuCSourceMap.get(baseLogical + w, physBase + w) == physBase + w
+                            for w in range(storeWidth)):
+                        sumIdx = physBase
+                    else:
+                        sumIdx = baseLogical + writer.states.c.startVgprValu
                 else:
                     sumIdx = ss.elementSumIdx[elementIdx] + writer.states.c.startVgprValu
             else:
                 sumIdx = ss.elementSumIdx[elementIdx]
-            storeWidth = kernel["StoreVectorWidth"]
             # storeWidth = 2
             if batchIdx == 0 and elementIdx == 0:
                 tmpSgprRes = ContinuousRegister(idx=tmpS01, size=1)
