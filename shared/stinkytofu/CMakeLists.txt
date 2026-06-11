@@ -201,6 +201,7 @@ endif()
 
 # Add source files from src/ subdirectory
 add_subdirectory(src)
+add_subdirectory(examples/plugins)
 
 ##===----------------------------------------------------------------------===##
 # Unit tests
