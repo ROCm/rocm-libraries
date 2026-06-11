@@ -170,24 +170,39 @@ namespace TensileLite
         return stream;
     }
 
-    template <typename T>
+    template <bool useFixed = false, typename T>
     inline std::ostream& stream_write(std::ostream& stream, T&& val)
     {
-        return stream << std::forward<T>(val);
+        using D = std::decay_t<T>;
+        if constexpr(useFixed && (std::is_same_v<D, double> || std::is_same_v<D, float>)) {
+            bool isInt = std::trunc(val) == val;
+            int precision = stream.precision();
+            if (isInt)
+                stream.precision(0);
+            stream << std::forward<T>(val);
+            if (isInt)
+                stream.precision(precision);
+            return stream;
+        } else {
+            return stream << std::forward<T>(val);
+        }
     }
 
-    template <typename T, typename... Ts>
+    template <bool useFixed = false, typename T, typename... Ts>
     inline std::ostream& stream_write(std::ostream& stream, T&& val, Ts&&... vals)
     {
-        return stream_write(stream << std::forward<T>(val), std::forward<Ts>(vals)...);
+        return stream_write<useFixed>(stream_write<useFixed>(stream, std::forward<T>(val)), std::forward<Ts>(vals)...);
     }
 
-    template <typename... Ts>
+    template <bool useFixed = false, typename... Ts>
     inline std::string concatenate(Ts&&... vals)
     {
         std::ostringstream msg;
-        stream_write(msg, std::forward<Ts>(vals)...);
-
+        if constexpr(useFixed)
+            msg.setf(std::ios::fixed);
+        stream_write<useFixed>(msg, std::forward<Ts>(vals)...);
+        if constexpr(useFixed)
+            msg.unsetf(std::ios::fixed);
         return msg.str();
     }
 

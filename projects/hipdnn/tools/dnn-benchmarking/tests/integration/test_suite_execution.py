@@ -28,34 +28,14 @@ def _require_gpu():
         pytest.skip(f"PyTorch not available: {e}")
 
 
-def _find_plugin_path():
-    """Find the hipDNN engine plugin directory."""
-    project_root = Path(__file__).parent.parent.parent
-    candidates = [
-        project_root.parent.parent.parent.parent
-        / "dnn-providers"
-        / "miopen-provider"
-        / "build"
-        / "lib"
-        / "hipdnn_plugins"
-        / "engines",
-        Path("/opt/rocm/lib/hipdnn_plugins/engines"),
-    ]
-    for p in candidates:
-        if p.is_dir() and any(p.glob("*.so")):
-            return str(p)
-    return None
-
-
-def _require_hipdnn():
+def _require_hipdnn(plugin_paths: List[str]):
     """Skip if hipdnn_frontend is not importable or no GPU handle can be created."""
     try:
         import hipdnn_frontend
 
-        plugin_path = _find_plugin_path()
-        if plugin_path is not None:
-            hipdnn_frontend.set_engine_plugin_paths([plugin_path])
-
+        hipdnn_frontend.set_engine_plugin_paths(
+            plugin_paths, hipdnn_frontend.PluginLoadingMode.ABSOLUTE
+        )
         hipdnn_frontend.Handle()
         return hipdnn_frontend
     except ImportError:
@@ -69,10 +49,10 @@ class TestSuiteRunnerIntegration:
     """Integration tests for suite_runner.run_graph_all_providers on real GPU."""
 
     @pytest.fixture
-    def hipdnn(self):
+    def hipdnn(self, plugin_paths: List[str]):
         """Get hipdnn_frontend module or skip."""
         _require_gpu()
-        return _require_hipdnn()
+        return _require_hipdnn(plugin_paths)
 
     @pytest.fixture
     def conv_graph(self) -> Dict[str, Any]:
@@ -171,28 +151,123 @@ class TestSuiteRunnerIntegration:
             assert r.correctness is not None
             assert r.correctness.execution_success is True
 
+    def test_basic_metrics_populated_by_default(
+        self, hipdnn, conv_graph: Dict[str, Any]
+    ) -> None:
+        """Default ``metrics-tier=basic`` populates the always-on fields.
+
+        Asserts shape only — values are platform-dependent so we just
+        check that the always-on probes wired up correctly and the
+        derived TFLOPs / GB/s came out non-negative when the kernel
+        time was measurable.
+        """
+        from dnn_benchmarking.config.benchmark_config import SuiteConfig
+        from dnn_benchmarking.execution.suite_runner import run_graph_all_providers
+        from dnn_benchmarking.graph.loader import GraphLoader
+
+        loader = GraphLoader()
+        tensor_infos = loader.extract_tensor_info(conv_graph)
+        config = SuiteConfig(warmup_iters=1, benchmark_iters=3)
+        handle = hipdnn.Handle()
+
+        result = run_graph_all_providers(
+            _graphs_dir() / "sample_conv_fwd.json",
+            conv_graph,
+            tensor_infos,
+            config,
+            handle,
+        )
+
+        successes = [r for r in result.results if r.status == "success"]
+        if not successes:
+            pytest.skip("No successful provider/engine combinations found")
+
+        for r in successes:
+            # workspace_bytes is non-negative (zero is valid for some engines).
+            assert r.workspace_bytes is not None
+            assert r.workspace_bytes >= 0
+            # Conv graph has compute nodes → analytical_flops > 0.
+            assert r.analytical_flops is not None and r.analytical_flops > 0
+            assert r.analytical_io_bytes is not None and r.analytical_io_bytes > 0
+            # rusage probe populated user CPU time per iter (kernel may be 0).
+            assert (
+                r.cpu_user_time_per_iter_us is not None
+                and r.cpu_user_time_per_iter_us >= 0
+            )
+            # Derived throughputs follow when kernel timing is available.
+            if r.gpu_kernel_stats is not None:
+                assert r.derived_tflops_per_s is not None
+                assert r.derived_tflops_per_s >= 0
+                assert r.derived_gbytes_per_s is not None
+                assert r.derived_gbytes_per_s >= 0
+            # VRAM is populated when amdsmi is available; allow None on
+            # hosts without amdsmi installed (graceful degrade).
+            if r.vram_used_mb is not None:
+                assert r.vram_used_mb >= 0
+
+    def test_metrics_tier_off_suppresses_basic_fields(
+        self, hipdnn, conv_graph: Dict[str, Any]
+    ) -> None:
+        """``metrics-tier=off`` skips the always-on probes entirely."""
+        from dnn_benchmarking.config.benchmark_config import (
+            MetricsConfig,
+            SuiteConfig,
+        )
+        from dnn_benchmarking.execution.suite_runner import run_graph_all_providers
+        from dnn_benchmarking.graph.loader import GraphLoader
+
+        loader = GraphLoader()
+        tensor_infos = loader.extract_tensor_info(conv_graph)
+        config = SuiteConfig(
+            warmup_iters=1,
+            benchmark_iters=2,
+            metrics=MetricsConfig(tier="off"),
+        )
+        handle = hipdnn.Handle()
+
+        result = run_graph_all_providers(
+            _graphs_dir() / "sample_conv_fwd.json",
+            conv_graph,
+            tensor_infos,
+            config,
+            handle,
+        )
+
+        successes = [r for r in result.results if r.status == "success"]
+        if not successes:
+            pytest.skip("No successful provider/engine combinations found")
+
+        for r in successes:
+            # Legacy fields still populated even with metrics off.
+            assert r.cpu_build_time_ms is not None
+            # Always-on fields stay None when tier=off.
+            assert r.workspace_bytes is None
+            assert r.analytical_flops is None
+            assert r.analytical_io_bytes is None
+            assert r.derived_tflops_per_s is None
+            assert r.cpu_user_time_per_iter_us is None
+            assert r.cpu_kernel_time_per_iter_us is None
+            assert r.vram_used_mb is None
+
 
 @pytest.mark.gpu
 class TestSuiteCLIIntegration:
     """Integration tests for suite mode via CLI (subprocess)."""
 
     @pytest.fixture(autouse=True)
-    def check_deps(self):
+    def check_deps(self, plugin_paths: List[str]):
         """Skip all tests if GPU or hipdnn not available."""
         _require_gpu()
-        _require_hipdnn()
+        _require_hipdnn(plugin_paths)
 
     @pytest.fixture
     def project_root(self) -> Path:
         return Path(__file__).parent.parent.parent
 
     @pytest.fixture
-    def cli_plugin_args(self) -> List[str]:
-        """Return --plugin-path args for CLI, or empty list."""
-        path = _find_plugin_path()
-        if path is None:
-            return []
-        return ["--plugin-path", path]
+    def cli_plugin_args(self, plugin_paths: List[str]) -> List[str]:
+        """Return CLI args for --plugin-path using the first resolved plugin path."""
+        return ["--plugin-path", plugin_paths[0]]
 
     @pytest.fixture
     def graph_paths(self) -> List[Path]:
@@ -491,4 +566,4 @@ class TestSuiteCLIIntegration:
             cwd=project_root,
         )
         assert result.returncode == 1
-        assert "not supported with --backend pytorch" in result.stderr
+        assert "not supported with --backend pytorch" in result.stdout

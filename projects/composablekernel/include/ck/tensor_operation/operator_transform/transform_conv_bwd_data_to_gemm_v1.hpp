@@ -13,40 +13,51 @@
 namespace ck {
 namespace tensor_operation {
 
-/**
- * @brief Enable custom tensor transform for convolution backward data output.
- *
- * When set to 1, this macro enables a custom transformation of the output tensor
- * in convolution backward data operations.
- */
-#define CK_USE_CUSTOM_TENSOR_TRANSFORM_FOR_BWD_DATA_OUT 1
-
 template <
     index_t NDimSpatial,
     ck::tensor_operation::device::ConvolutionBackwardDataSpecialization ConvBwdDataSpecialization,
-    index_t AK1,
-    index_t BK1,
-    index_t GemmMPerBlock,
-    index_t GemmNPerBlock,
-    index_t GemmKPerBlock,
+    index_t AK1_,
+    index_t BK1_,
+    index_t GemmMPerBlock_,
+    index_t GemmNPerBlock_,
+    index_t GemmKPerBlock_,
     bool DoPadGemmM,
     bool DoPadGemmN,
     typename ALayout,
     typename BLayout,
     typename CLayout,
-    bool SplitN              = false,
-    typename ADataType       = float,
-    typename CDataType       = float,
-    index_t NumGroupsToMerge = 1,
-    typename IndexType       = index_t,
-    bool CTranspose          = false>
+    bool SplitN               = false,
+    typename ADataType        = float,
+    typename CDataType        = float,
+    index_t NumGroupsToMerge_ = 1,
+    typename IndexType        = index_t,
+    bool CTranspose           = false>
 struct TransformConvBwdDataToGemm_v1
 {
     private:
-    static constexpr auto I0 = Number<0>{};
-    static constexpr auto I1 = Number<1>{};
-    static constexpr auto I2 = Number<2>{};
-    static constexpr auto I3 = Number<3>{};
+    /**
+     * @brief Enable custom tensor transform for convolution backward data output.
+     *
+     * When set to 1, this variable enables a custom transformation of the output tensor
+     * in convolution backward data operations.
+     */
+    static constexpr bool CustomTensorTransformBwdData = true;
+    static constexpr bool UsePaddingOnKDim             = std::is_same_v<IndexType, long_index_t>;
+
+    template <index_t N>
+    using NumberType =
+        std::conditional_t<std::is_same_v<IndexType, index_t>, Number<N>, LongNumber<N>>;
+    static constexpr auto I0 = NumberType<0>{};
+    static constexpr auto I1 = NumberType<1>{};
+    static constexpr auto I2 = NumberType<2>{};
+    static constexpr auto I3 = NumberType<3>{};
+
+    static constexpr IndexType AK1              = static_cast<IndexType>(AK1_);
+    static constexpr IndexType BK1              = static_cast<IndexType>(BK1_);
+    static constexpr IndexType GemmMPerBlock    = static_cast<IndexType>(GemmMPerBlock_);
+    static constexpr IndexType GemmNPerBlock    = static_cast<IndexType>(GemmNPerBlock_);
+    static constexpr IndexType GemmKPerBlock    = static_cast<IndexType>(GemmKPerBlock_);
+    static constexpr IndexType NumGroupsToMerge = static_cast<IndexType>(NumGroupsToMerge_);
 
     static constexpr auto NonSpatialDimsNum = Number<3>{};
 
@@ -197,7 +208,7 @@ struct TransformConvBwdDataToGemm_v1
           ZDot_{static_cast<IndexType>(transform_conv_bwd_data_to_gemm_base.ZDot_)},
           YDot_{static_cast<IndexType>(transform_conv_bwd_data_to_gemm_base.YDot_)},
           XDot_{static_cast<IndexType>(transform_conv_bwd_data_to_gemm_base.XDot_)},
-          batch_k_{transform_conv_bwd_data_to_gemm_base.batch_k_}
+          batch_k_{static_cast<IndexType>(transform_conv_bwd_data_to_gemm_base.batch_k_)}
     {
     }
 
@@ -278,21 +289,24 @@ struct TransformConvBwdDataToGemm_v1
         }
         else
         {
-            Di_ = Do_ = Z_ = ZTilde_ = ConvStrideD_ = DTilde_ = ZDot_ = 1;
-            InLeftPadD_ = InRightPadD_ = DiStride_ = DoStride_ = IdxZTilde_ = 0;
+            Di_ = Do_ = Z_ = ZTilde_ = ConvStrideD_ = DTilde_ = ZDot_ = static_cast<IndexType>(1);
+            InLeftPadD_ = InRightPadD_ = DiStride_ = DoStride_ = IdxZTilde_ =
+                static_cast<IndexType>(0);
         }
 
-        GcdStrideDilationH_ = math::gcd(ConvStrideH_, ConvDilationH_);
-        GcdStrideDilationW_ = math::gcd(ConvStrideW_, ConvDilationW_);
+        GcdStrideDilationH_ = static_cast<IndexType>(math::gcd(ConvStrideH_, ConvDilationH_));
+        GcdStrideDilationW_ = static_cast<IndexType>(math::gcd(ConvStrideW_, ConvDilationW_));
 
         YTilde_ = ConvStrideH_ / GcdStrideDilationH_;
         XTilde_ = ConvStrideW_ / GcdStrideDilationW_;
 
-        HTilde_ = Ho_ + math::integer_divide_ceil(ConvDilationH_ * (Y_ - I1), ConvStrideH_);
-        WTilde_ = Wo_ + math::integer_divide_ceil(ConvDilationW_ * (X_ - I1), ConvStrideW_);
+        HTilde_ = static_cast<IndexType>(
+            Ho_ + math::integer_divide_ceil(ConvDilationH_ * (Y_ - I1), ConvStrideH_));
+        WTilde_ = static_cast<IndexType>(
+            Wo_ + math::integer_divide_ceil(ConvDilationW_ * (X_ - I1), ConvStrideW_));
 
-        YDot_ = math::integer_divide_ceil(Y_, YTilde_);
-        XDot_ = math::integer_divide_ceil(X_, XTilde_);
+        YDot_ = static_cast<IndexType>(math::integer_divide_ceil(Y_, YTilde_));
+        XDot_ = static_cast<IndexType>(math::integer_divide_ceil(X_, XTilde_));
     }
 
 #if 0 // At now not supported to split tensor
@@ -665,8 +679,8 @@ struct TransformConvBwdDataToGemm_v1
                      ck::tensor_operation::device::ConvolutionBackwardDataSpecialization::
                          Filter1x1Stride1Pad0)
         {
-            const index_t K0PerBlock = GemmKPerBlock / AK1;
-            const index_t AK0 =
+            const IndexType K0PerBlock = GemmKPerBlock / AK1;
+            const IndexType AK0 =
                 math::integer_divide_ceil(K_, AK1 * K0PerBlock * batch_k_) * K0PerBlock;
 
             // A: output tensor
@@ -681,19 +695,25 @@ struct TransformConvBwdDataToGemm_v1
                 ck::tensor_operation::device::PadTensorDescriptor(
                     out_gemmak0_gemmmraw_gemmak1_grid_desc,
                     make_tuple(AK0 * batch_k_, GemmMPerBlock, AK1),
-                    Sequence<false, DoPadGemmM, false>{});
+                    Sequence<UsePaddingOnKDim, DoPadGemmM, UsePaddingOnKDim>{});
 
             return out_gemmak0_gemmm_gemmak1_grid_desc;
         }
         else
         {
             // only work on HTilde and WTilde that contribute to non-padding area of input tensor
-            const auto IDTildeSliceBegin = math::integer_divide_floor(
-                math::max(I0, InLeftPadD_ - ConvDilationD_ * (ZTilde_ - I1)), ConvStrideD_);
-            const auto IHTildeSliceBegin = math::integer_divide_floor(
-                math::max(I0, InLeftPadH_ - ConvDilationH_ * (YTilde_ - I1)), ConvStrideH_);
-            const auto IWTildeSliceBegin = math::integer_divide_floor(
-                math::max(I0, InLeftPadW_ - ConvDilationW_ * (XTilde_ - I1)), ConvStrideW_);
+            const auto IDTildeSliceBegin =
+                math::integer_divide_floor(math::max(static_cast<IndexType>(I0),
+                                                     InLeftPadD_ - ConvDilationD_ * (ZTilde_ - I1)),
+                                           ConvStrideD_);
+            const auto IHTildeSliceBegin =
+                math::integer_divide_floor(math::max(static_cast<IndexType>(I0),
+                                                     InLeftPadH_ - ConvDilationH_ * (YTilde_ - I1)),
+                                           ConvStrideH_);
+            const auto IWTildeSliceBegin =
+                math::integer_divide_floor(math::max(static_cast<IndexType>(I0),
+                                                     InLeftPadW_ - ConvDilationW_ * (XTilde_ - I1)),
+                                           ConvStrideW_);
 
             const auto IDTildeSliceEnd = math::min(
                 DTilde_, math::integer_divide_ceil(InLeftPadD_ + Di_ - I1, ConvStrideD_) + I1);
@@ -707,122 +727,132 @@ struct TransformConvBwdDataToGemm_v1
             const auto WTildeSlice = IWTildeSliceEnd - IWTildeSliceBegin;
 
             // GemmK is different for each GEMM
-            const auto ZDotSlice = math::integer_divide_ceil(Z_ - IdxZTilde_, ZTilde_);
-            const auto YDotSlice = math::integer_divide_ceil(Y_ - IdxYTilde_, YTilde_);
-            const auto XDotSlice = math::integer_divide_ceil(X_ - IdxXTilde_, XTilde_);
+            const auto ZDotSlice =
+                static_cast<IndexType>(math::integer_divide_ceil(Z_ - IdxZTilde_, ZTilde_));
+            const auto YDotSlice =
+                static_cast<IndexType>(math::integer_divide_ceil(Y_ - IdxYTilde_, YTilde_));
+            const auto XDotSlice =
+                static_cast<IndexType>(math::integer_divide_ceil(X_ - IdxXTilde_, XTilde_));
 
             if constexpr(NDimSpatial == 2)
             {
-                const index_t K0PerBlock = GemmKPerBlock / AK1;
-                const index_t AK0        = math::integer_divide_ceil(YDotSlice * XDotSlice * K_,
-                                                              AK1 * K0PerBlock * batch_k_) *
-                                    K0PerBlock;
+                const IndexType K0PerBlock = GemmKPerBlock / AK1;
+                const IndexType AK0        = math::integer_divide_ceil(YDotSlice * XDotSlice * K_,
+                                                                AK1 * K0PerBlock * batch_k_) *
+                                      K0PerBlock;
 
-#if CK_USE_CUSTOM_TENSOR_TRANSFORM_FOR_BWD_DATA_OUT == 0
-                // A: output tensor
-                const auto out_n_hop_wop_k_grid_desc = transform_tensor_descriptor(
-                    out_grid_desc,
-                    make_tuple(make_pass_through_transform(N_),
-                               make_pad_transform(Ho_, I0, I0),
-                               make_pad_transform(Wo_, I0, I0),
-                               make_pass_through_transform(K_)),
-                    make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
-                    make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}));
-
-                const auto out_n_ydot_htilde_xdot_wtilde_k_grid_desc = transform_tensor_descriptor(
-                    out_n_hop_wop_k_grid_desc,
-                    make_tuple(
-                        make_pass_through_transform(N_),
-                        make_embed_transform(make_tuple(YDot_, HTilde_),
-                                             make_tuple(-ConvDilationH_ / GcdStrideDilationH_, I1)),
-                        make_embed_transform(make_tuple(XDot_, WTilde_),
-                                             make_tuple(-ConvDilationW_ / GcdStrideDilationW_, I1)),
-                        make_pass_through_transform(K_)),
-                    make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
-                    make_tuple(Sequence<0>{}, Sequence<1, 2>{}, Sequence<3, 4>{}, Sequence<5>{}));
-
-                const auto out_n_ydotslice_htildeslice_xdotslice_wtildeslice_k_grid_desc =
-                    transform_tensor_descriptor(
-                        out_n_ydot_htilde_xdot_wtilde_k_grid_desc,
+                if constexpr(!CustomTensorTransformBwdData)
+                {
+                    // A: output tensor
+                    const auto out_n_hop_wop_k_grid_desc = transform_tensor_descriptor(
+                        out_grid_desc,
                         make_tuple(make_pass_through_transform(N_),
-                                   make_slice_transform(YDot_, I0, YDotSlice),
-                                   make_slice_transform(HTilde_, IHTildeSliceBegin, HTildeSlice),
-                                   make_slice_transform(XDot_, I0, XDotSlice),
-                                   make_slice_transform(WTilde_, IWTildeSliceBegin, WTildeSlice),
+                                   make_pad_transform(Ho_, I0, I0),
+                                   make_pad_transform(Wo_, I0, I0),
                                    make_pass_through_transform(K_)),
-                        make_tuple(Sequence<0>{},
-                                   Sequence<1>{},
-                                   Sequence<2>{},
-                                   Sequence<3>{},
-                                   Sequence<4>{},
-                                   Sequence<5>{}),
-                        make_tuple(Sequence<0>{},
-                                   Sequence<1>{},
-                                   Sequence<2>{},
-                                   Sequence<3>{},
-                                   Sequence<4>{},
-                                   Sequence<5>{}));
+                        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
+                        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}));
 
-                const auto out_gemmk_gemmmraw_grid_desc = transform_tensor_descriptor(
-                    out_n_ydotslice_htildeslice_xdotslice_wtildeslice_k_grid_desc,
-                    make_tuple(make_merge_transform(make_tuple(YDotSlice, XDotSlice, K_)),
-                               make_merge_transform(make_tuple(N_, HTildeSlice, WTildeSlice))),
-                    make_tuple(Sequence<1, 3, 5>{}, Sequence<0, 2, 4>{}),
-                    make_tuple(Sequence<0>{}, Sequence<1>{}));
+                    const auto out_n_ydot_htilde_xdot_wtilde_k_grid_desc =
+                        transform_tensor_descriptor(
+                            out_n_hop_wop_k_grid_desc,
+                            make_tuple(make_pass_through_transform(N_),
+                                       make_embed_transform(
+                                           make_tuple(YDot_, HTilde_),
+                                           make_tuple(-ConvDilationH_ / GcdStrideDilationH_, I1)),
+                                       make_embed_transform(
+                                           make_tuple(XDot_, WTilde_),
+                                           make_tuple(-ConvDilationW_ / GcdStrideDilationW_, I1)),
+                                       make_pass_through_transform(K_)),
+                            make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
+                            make_tuple(
+                                Sequence<0>{}, Sequence<1, 2>{}, Sequence<3, 4>{}, Sequence<5>{}));
 
-                const auto out_gemmk_gemmm_padded_grid_desc =
-                    ck::tensor_operation::device::PadTensorDescriptor(
-                        out_gemmk_gemmmraw_grid_desc,
-                        make_tuple(GemmKPerBlock, GemmMPerBlock),
-                        Sequence<true, DoPadGemmM>{});
+                    const auto out_n_ydotslice_htildeslice_xdotslice_wtildeslice_k_grid_desc =
+                        transform_tensor_descriptor(
+                            out_n_ydot_htilde_xdot_wtilde_k_grid_desc,
+                            make_tuple(
+                                make_pass_through_transform(N_),
+                                make_slice_transform(YDot_, I0, YDotSlice),
+                                make_slice_transform(HTilde_, IHTildeSliceBegin, HTildeSlice),
+                                make_slice_transform(XDot_, I0, XDotSlice),
+                                make_slice_transform(WTilde_, IWTildeSliceBegin, WTildeSlice),
+                                make_pass_through_transform(K_)),
+                            make_tuple(Sequence<0>{},
+                                       Sequence<1>{},
+                                       Sequence<2>{},
+                                       Sequence<3>{},
+                                       Sequence<4>{},
+                                       Sequence<5>{}),
+                            make_tuple(Sequence<0>{},
+                                       Sequence<1>{},
+                                       Sequence<2>{},
+                                       Sequence<3>{},
+                                       Sequence<4>{},
+                                       Sequence<5>{}));
 
-                const auto out_gemmak0_gemmm_gemmak1_grid_desc = transform_tensor_descriptor(
-                    out_gemmk_gemmm_padded_grid_desc,
-                    make_tuple(make_unmerge_transform(make_tuple(AK0 * batch_k_, AK1)),
-                               make_pass_through_transform(
-                                   out_gemmk_gemmm_padded_grid_desc.GetLength(I1))),
-                    make_tuple(Sequence<0>{}, Sequence<1>{}),
-                    make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
-                return out_gemmak0_gemmm_gemmak1_grid_desc;
-#else
-                const auto out_n_hop_wop_k_grid_desc = transform_tensor_descriptor(
-                    out_grid_desc,
-                    make_tuple(make_pass_through_transform(N_),
-                               make_pad_transform(Ho_, I0, I0),
-                               make_pad_transform(Wo_, I0, I0),
-                               make_pass_through_transform(K_)),
-                    make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
-                    make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}));
+                    const auto out_gemmk_gemmmraw_grid_desc = transform_tensor_descriptor(
+                        out_n_ydotslice_htildeslice_xdotslice_wtildeslice_k_grid_desc,
+                        make_tuple(make_merge_transform(make_tuple(YDotSlice, XDotSlice, K_)),
+                                   make_merge_transform(make_tuple(N_, HTildeSlice, WTildeSlice))),
+                        make_tuple(Sequence<1, 3, 5>{}, Sequence<0, 2, 4>{}),
+                        make_tuple(Sequence<0>{}, Sequence<1>{}));
 
-                const auto out_n_hop_wop_k_grid_desc_final = transform_tensor_descriptor(
-                    out_n_hop_wop_k_grid_desc,
-                    make_tuple(make_conv_bwd_data_out_transform(N_,
-                                                                Ho_,
-                                                                Wo_,
-                                                                K_,
-                                                                YDot_,
-                                                                XDot_,
-                                                                HTilde_,
-                                                                WTilde_,
-                                                                ConvDilationH_,
-                                                                ConvDilationW_,
-                                                                HTildeSlice,
-                                                                WTildeSlice,
-                                                                YDotSlice,
-                                                                XDotSlice,
-                                                                IHTildeSliceBegin,
-                                                                IWTildeSliceBegin,
-                                                                GcdStrideDilationH_,
-                                                                GcdStrideDilationW_,
-                                                                AK0 * batch_k_,
-                                                                AK1,
-                                                                GemmMPerBlock,
-                                                                GemmKPerBlock)),
-                    make_tuple(Sequence<0, 1, 2, 3>{}),
-                    make_tuple(Sequence<0, 1, 2>{}));
+                    const auto out_gemmk_gemmm_padded_grid_desc =
+                        ck::tensor_operation::device::PadTensorDescriptor(
+                            out_gemmk_gemmmraw_grid_desc,
+                            make_tuple(GemmKPerBlock, GemmMPerBlock),
+                            Sequence<true, DoPadGemmM>{});
 
-                return out_n_hop_wop_k_grid_desc_final;
-#endif
+                    const auto out_gemmak0_gemmm_gemmak1_grid_desc = transform_tensor_descriptor(
+                        out_gemmk_gemmm_padded_grid_desc,
+                        make_tuple(make_unmerge_transform(make_tuple(AK0 * batch_k_, AK1)),
+                                   make_pass_through_transform(
+                                       out_gemmk_gemmm_padded_grid_desc.GetLength(Number<1>{}))),
+                        make_tuple(Sequence<0>{}, Sequence<1>{}),
+                        make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
+                    return out_gemmak0_gemmm_gemmak1_grid_desc;
+                }
+                else
+                {
+                    const auto out_n_hop_wop_k_grid_desc = transform_tensor_descriptor(
+                        out_grid_desc,
+                        make_tuple(make_pass_through_transform(N_),
+                                   make_pad_transform(Ho_, I0, I0),
+                                   make_pad_transform(Wo_, I0, I0),
+                                   make_pass_through_transform(K_)),
+                        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
+                        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}));
+
+                    const auto out_n_hop_wop_k_grid_desc_final = transform_tensor_descriptor(
+                        out_n_hop_wop_k_grid_desc,
+                        make_tuple(make_conv_bwd_data_out_transform<IndexType>(N_,
+                                                                               Ho_,
+                                                                               Wo_,
+                                                                               K_,
+                                                                               YDot_,
+                                                                               XDot_,
+                                                                               HTilde_,
+                                                                               WTilde_,
+                                                                               ConvDilationH_,
+                                                                               ConvDilationW_,
+                                                                               HTildeSlice,
+                                                                               WTildeSlice,
+                                                                               YDotSlice,
+                                                                               XDotSlice,
+                                                                               IHTildeSliceBegin,
+                                                                               IWTildeSliceBegin,
+                                                                               GcdStrideDilationH_,
+                                                                               GcdStrideDilationW_,
+                                                                               AK0 * batch_k_,
+                                                                               AK1,
+                                                                               GemmMPerBlock,
+                                                                               GemmKPerBlock)),
+                        make_tuple(Sequence<0, 1, 2, 3>{}),
+                        make_tuple(Sequence<0, 1, 2>{}));
+
+                    return out_n_hop_wop_k_grid_desc_final;
+                }
             }
             else if constexpr(NDimSpatial == 3)
             {
@@ -909,17 +939,17 @@ struct TransformConvBwdDataToGemm_v1
                         make_tuple(GemmKPerBlock, GemmMPerBlock),
                         Sequence<true, DoPadGemmM>{});
 
-                const index_t K0PerBlock = GemmKPerBlock / AK1;
-                const index_t AK0 =
-                    math::integer_divide_ceil(out_gemmk_gemmm_padded_grid_desc.GetLength(I0),
-                                              AK1 * K0PerBlock * batch_k_) *
-                    K0PerBlock;
+                const IndexType K0PerBlock = GemmKPerBlock / AK1;
+                const IndexType AK0        = math::integer_divide_ceil(
+                                          out_gemmk_gemmm_padded_grid_desc.GetLength(Number<0>{}),
+                                          AK1 * K0PerBlock * batch_k_) *
+                                      K0PerBlock;
 
                 const auto out_gemmak0_gemmm_gemmak1_grid_desc = transform_tensor_descriptor(
                     out_gemmk_gemmm_padded_grid_desc,
                     make_tuple(make_unmerge_transform(make_tuple(AK0 * batch_k_, AK1)),
                                make_pass_through_transform(
-                                   out_gemmk_gemmm_padded_grid_desc.GetLength(I1))),
+                                   out_gemmk_gemmm_padded_grid_desc.GetLength(Number<1>{}))),
                     make_tuple(Sequence<0>{}, Sequence<1>{}),
                     make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
 
@@ -947,8 +977,8 @@ struct TransformConvBwdDataToGemm_v1
                      ck::tensor_operation::device::ConvolutionBackwardDataSpecialization::
                          Filter1x1Stride1Pad0)
         {
-            const index_t K0PerBlock = GemmKPerBlock / BK1;
-            const index_t BK0 =
+            const IndexType K0PerBlock = GemmKPerBlock / BK1;
+            const IndexType BK0 =
                 math::integer_divide_ceil(K_, BK1 * K0PerBlock * batch_k_) * K0PerBlock;
 
             // B: weight tensor
@@ -964,7 +994,7 @@ struct TransformConvBwdDataToGemm_v1
                 ck::tensor_operation::device::PadTensorDescriptor(
                     wei_gemmbk0_gemmnraw_gemmbk1_grid_desc,
                     make_tuple(BK0 * batch_k_, GemmNPerBlock, BK1),
-                    Sequence<false, DoPadGemmN, false>{});
+                    Sequence<UsePaddingOnKDim, DoPadGemmN, UsePaddingOnKDim>{});
 
             return wei_gemmbk0_gemmn_gemmbk1_grid_desc;
         }
@@ -977,9 +1007,12 @@ struct TransformConvBwdDataToGemm_v1
             const auto wei_grid_desc = MakeWeiGridDesc();
 
             // GemmK is different for each GEMM
-            const auto ZDotSlice = math::integer_divide_ceil(Z_ - IdxZTilde_, ZTilde_);
-            const auto YDotSlice = math::integer_divide_ceil(Y_ - IdxYTilde_, YTilde_);
-            const auto XDotSlice = math::integer_divide_ceil(X_ - IdxXTilde_, XTilde_);
+            const auto ZDotSlice =
+                static_cast<IndexType>(math::integer_divide_ceil(Z_ - IdxZTilde_, ZTilde_));
+            const auto YDotSlice =
+                static_cast<IndexType>(math::integer_divide_ceil(Y_ - IdxYTilde_, YTilde_));
+            const auto XDotSlice =
+                static_cast<IndexType>(math::integer_divide_ceil(X_ - IdxXTilde_, XTilde_));
 
             // B weight tensor
             if constexpr(NDimSpatial == 2)
@@ -1030,17 +1063,17 @@ struct TransformConvBwdDataToGemm_v1
                         make_tuple(GemmKPerBlock, GemmNPerBlock),
                         Sequence<true, DoPadGemmN>{});
 
-                const index_t K0PerBlock = GemmKPerBlock / BK1;
-                const index_t BK0 =
-                    math::integer_divide_ceil(wei_gemmk_gemmn_padded_grid_desc.GetLength(I0),
-                                              BK1 * K0PerBlock * batch_k_) *
-                    K0PerBlock;
+                const IndexType K0PerBlock = GemmKPerBlock / BK1;
+                const IndexType BK0        = math::integer_divide_ceil(
+                                          wei_gemmk_gemmn_padded_grid_desc.GetLength(Number<0>{}),
+                                          BK1 * K0PerBlock * batch_k_) *
+                                      K0PerBlock;
 
                 const auto wei_gemmbk0_gemmn_gemmbk1_grid_desc = transform_tensor_descriptor(
                     wei_gemmk_gemmn_padded_grid_desc,
                     make_tuple(make_unmerge_transform(make_tuple(BK0 * batch_k_, BK1)),
                                make_pass_through_transform(
-                                   wei_gemmk_gemmn_padded_grid_desc.GetLength(I1))),
+                                   wei_gemmk_gemmn_padded_grid_desc.GetLength(Number<1>{}))),
                     make_tuple(Sequence<0>{}, Sequence<1>{}),
                     make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
 
@@ -1115,17 +1148,17 @@ struct TransformConvBwdDataToGemm_v1
                         make_tuple(GemmKPerBlock, GemmNPerBlock),
                         Sequence<true, DoPadGemmN>{});
 
-                const index_t K0PerBlock = GemmKPerBlock / BK1;
-                const index_t BK0 =
-                    math::integer_divide_ceil(wei_gemmk_gemmn_padded_grid_desc.GetLength(I0),
-                                              BK1 * K0PerBlock * batch_k_) *
-                    K0PerBlock;
+                const IndexType K0PerBlock = GemmKPerBlock / BK1;
+                const IndexType BK0        = math::integer_divide_ceil(
+                                          wei_gemmk_gemmn_padded_grid_desc.GetLength(Number<0>{}),
+                                          BK1 * K0PerBlock * batch_k_) *
+                                      K0PerBlock;
 
                 const auto wei_gemmbk0_gemm_gemmbk1_grid_desc = transform_tensor_descriptor(
                     wei_gemmk_gemmn_padded_grid_desc,
                     make_tuple(make_unmerge_transform(make_tuple(BK0 * batch_k_, BK1)),
                                make_pass_through_transform(
-                                   wei_gemmk_gemmn_padded_grid_desc.GetLength(I1))),
+                                   wei_gemmk_gemmn_padded_grid_desc.GetLength(Number<1>{}))),
                     make_tuple(Sequence<0>{}, Sequence<1>{}),
                     make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
 
@@ -1241,11 +1274,14 @@ struct TransformConvBwdDataToGemm_v1
             // only work on DTilde, HTilde and WTilde that contribute to
             // non-padding area of input tensor
             const auto IDTildeSliceBegin = math::integer_divide_floor(
-                math::max(I0, InLeftPadD_ - ConvDilationD_ * (ZTilde_ - I1)), ConvStrideD_);
+                math::max(IndexType{0}, InLeftPadD_ - ConvDilationD_ * (ZTilde_ - I1)),
+                ConvStrideD_);
             const auto IHTildeSliceBegin = math::integer_divide_floor(
-                math::max(I0, InLeftPadH_ - ConvDilationH_ * (YTilde_ - I1)), ConvStrideH_);
+                math::max(IndexType{0}, InLeftPadH_ - ConvDilationH_ * (YTilde_ - I1)),
+                ConvStrideH_);
             const auto IWTildeSliceBegin = math::integer_divide_floor(
-                math::max(I0, InLeftPadW_ - ConvDilationW_ * (XTilde_ - I1)), ConvStrideW_);
+                math::max(IndexType{0}, InLeftPadW_ - ConvDilationW_ * (XTilde_ - I1)),
+                ConvStrideW_);
 
             const auto IDTildeSliceEnd = math::min(
                 DTilde_, math::integer_divide_ceil(InLeftPadD_ + Di_ - I1, ConvStrideD_) + I1);
@@ -1480,9 +1516,11 @@ struct TransformConvBwdDataToGemm_v1
             // only work on HTilde and WTilde that contribute to non-padding area of input
             // tensor
             const auto IHTildeSliceBegin = math::integer_divide_floor(
-                math::max(I0, InLeftPadH_ - ConvDilationH_ * (YTilde_ - I1)), ConvStrideH_);
+                math::max(IndexType{0}, InLeftPadH_ - ConvDilationH_ * (YTilde_ - I1)),
+                ConvStrideH_);
             const auto IWTildeSliceBegin = math::integer_divide_floor(
-                math::max(I0, InLeftPadW_ - ConvDilationW_ * (XTilde_ - I1)), ConvStrideW_);
+                math::max(IndexType{0}, InLeftPadW_ - ConvDilationW_ * (XTilde_ - I1)),
+                ConvStrideW_);
 
             const auto IHTildeSliceEnd = math::min(
                 HTilde_, math::integer_divide_ceil(InLeftPadH_ + Hi_ - I1, ConvStrideH_) + I1);
@@ -1505,6 +1543,298 @@ struct TransformConvBwdDataToGemm_v1
         }
     }
 
+    // Packed descriptor variants for the group_count=1 fast path.
+    // These build descriptors from contiguous (packed) base tensors instead of strided ones,
+    // producing fewer transform layers and matching the non-grouped v2r3 gridwise GEMM interface.
+    // Only implemented for NDimSpatial == 2.
+
+    template <typename ALayout_                   = ALayout,
+              typename std::enable_if<NDimSpatial == 2 &&
+                                          (is_same_v<ALayout_, tensor_layout::convolution::GNHWK> ||
+                                           is_same_v<ALayout_, tensor_layout::convolution::NHWGK>),
+                                      bool>::type = false>
+    __host__ __device__ auto MakeADescriptor_AK0_M_AK1_Packed() const
+    {
+        const auto K0 = K_ / AK1;
+
+        const auto out_n_ho_wo_k_grid_desc =
+            make_naive_tensor_descriptor_packed(make_tuple(N_, Ho_, Wo_, K_));
+
+        if constexpr(ConvBwdDataSpecialization ==
+                     ck::tensor_operation::device::ConvolutionBackwardDataSpecialization::
+                         Filter1x1Stride1Pad0)
+        {
+            const auto out_gemmk0_gemmm_gemmk1_grid_desc = transform_tensor_descriptor(
+                make_naive_tensor_descriptor_packed(make_tuple(N_ * Ho_ * Wo_, K_)),
+                make_tuple(make_pass_through_transform(N_ * Ho_ * Wo_),
+                           make_unmerge_transform(make_tuple(K0, Number<AK1>{}))),
+                make_tuple(Sequence<0>{}, Sequence<1>{}),
+                make_tuple(Sequence<1>{}, Sequence<0, 2>{}));
+
+            return ck::tensor_operation::device::PadTensorDescriptor(
+                out_gemmk0_gemmm_gemmk1_grid_desc,
+                make_tuple(Number<GemmKPerBlock / AK1>{}, Number<GemmMPerBlock>{}, Number<AK1>{}),
+                Sequence<true, DoPadGemmM, UsePaddingOnKDim>{});
+        }
+        else
+        {
+            const auto YDotSlice = math::integer_divide_ceil(Y_ - IdxYTilde_, YTilde_);
+            const auto XDotSlice = math::integer_divide_ceil(X_ - IdxXTilde_, XTilde_);
+
+            const auto IHTildeSliceBegin = math::integer_divide_floor(
+                math::max(I0, InLeftPadH_ - ConvDilationH_ * (YTilde_ - I1)), ConvStrideH_);
+            const auto IWTildeSliceBegin = math::integer_divide_floor(
+                math::max(I0, InLeftPadW_ - ConvDilationW_ * (XTilde_ - I1)), ConvStrideW_);
+            const auto IHTildeSliceEnd = math::min(
+                HTilde_, math::integer_divide_ceil(InLeftPadH_ + Hi_ - I1, ConvStrideH_) + I1);
+            const auto IWTildeSliceEnd = math::min(
+                WTilde_, math::integer_divide_ceil(InLeftPadW_ + Wi_ - I1, ConvStrideW_) + I1);
+            const auto HTildeSlice = IHTildeSliceEnd - IHTildeSliceBegin;
+            const auto WTildeSlice = IWTildeSliceEnd - IWTildeSliceBegin;
+
+            const auto out_n_hop_wop_k_grid_desc = transform_tensor_descriptor(
+                out_n_ho_wo_k_grid_desc,
+                make_tuple(make_pass_through_transform(N_),
+                           make_pad_transform(Ho_, I0, I0),
+                           make_pad_transform(Wo_, I0, I0),
+                           make_pass_through_transform(K_)),
+                make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
+                make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}));
+
+            const auto out_n_ydot_htilde_xdot_wtilde_k_grid_desc = transform_tensor_descriptor(
+                out_n_hop_wop_k_grid_desc,
+                make_tuple(
+                    make_pass_through_transform(N_),
+                    make_embed_transform(make_tuple(YDot_, HTilde_),
+                                         make_tuple(-ConvDilationH_ / GcdStrideDilationH_, I1)),
+                    make_embed_transform(make_tuple(XDot_, WTilde_),
+                                         make_tuple(-ConvDilationW_ / GcdStrideDilationW_, I1)),
+                    make_pass_through_transform(K_)),
+                make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
+                make_tuple(Sequence<0>{}, Sequence<1, 2>{}, Sequence<3, 4>{}, Sequence<5>{}));
+
+            const auto out_n_ydotslice_htildeslice_xdotslice_wtildeslice_k0_k1_grid_desc =
+                transform_tensor_descriptor(
+                    out_n_ydot_htilde_xdot_wtilde_k_grid_desc,
+                    make_tuple(make_pass_through_transform(N_),
+                               make_slice_transform(YDot_, I0, YDotSlice),
+                               make_slice_transform(HTilde_, IHTildeSliceBegin, HTildeSlice),
+                               make_slice_transform(XDot_, I0, XDotSlice),
+                               make_slice_transform(WTilde_, IWTildeSliceBegin, WTildeSlice),
+                               make_unmerge_transform(make_tuple(K0, Number<AK1>{}))),
+                    make_tuple(Sequence<0>{},
+                               Sequence<1>{},
+                               Sequence<2>{},
+                               Sequence<3>{},
+                               Sequence<4>{},
+                               Sequence<5>{}),
+                    make_tuple(Sequence<0>{},
+                               Sequence<1>{},
+                               Sequence<2>{},
+                               Sequence<3>{},
+                               Sequence<4>{},
+                               Sequence<5, 6>{}));
+
+            const auto out_gemmk0_gemmm_gemmk1_grid_desc = transform_tensor_descriptor(
+                out_n_ydotslice_htildeslice_xdotslice_wtildeslice_k0_k1_grid_desc,
+                make_tuple(make_merge_transform(make_tuple(YDotSlice, XDotSlice, K0)),
+                           make_merge_transform(make_tuple(N_, HTildeSlice, WTildeSlice)),
+                           make_pass_through_transform(Number<AK1>{})),
+                make_tuple(Sequence<1, 3, 5>{}, Sequence<0, 2, 4>{}, Sequence<6>{}),
+                make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}));
+
+            return ck::tensor_operation::device::PadTensorDescriptor(
+                out_gemmk0_gemmm_gemmk1_grid_desc,
+                make_tuple(Number<GemmKPerBlock / AK1>{}, Number<GemmMPerBlock>{}, Number<AK1>{}),
+                Sequence<true, DoPadGemmM, UsePaddingOnKDim>{});
+        }
+    }
+
+    template <typename BLayout_                   = BLayout,
+              typename std::enable_if<NDimSpatial == 2 &&
+                                          (is_same_v<BLayout_, tensor_layout::convolution::GKYXC>),
+                                      bool>::type = false>
+    __host__ __device__ auto MakeBDescriptor_BK0_N_BK1_Packed() const
+    {
+        const auto K0 = K_ / BK1;
+
+        if constexpr(ConvBwdDataSpecialization ==
+                     ck::tensor_operation::device::ConvolutionBackwardDataSpecialization::
+                         Filter1x1Stride1Pad0)
+        {
+            const auto wei_gemmk0_gemmn_gemmk1_grid_desc = transform_tensor_descriptor(
+                make_naive_tensor_descriptor_packed(make_tuple(K_, C_)),
+                make_tuple(make_unmerge_transform(make_tuple(K0, Number<BK1>{})),
+                           make_pass_through_transform(C_)),
+                make_tuple(Sequence<0>{}, Sequence<1>{}),
+                make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
+
+            return ck::tensor_operation::device::PadTensorDescriptor(
+                wei_gemmk0_gemmn_gemmk1_grid_desc,
+                make_tuple(Number<GemmKPerBlock / BK1>{}, Number<GemmNPerBlock>{}, Number<BK1>{}),
+                Sequence<true, DoPadGemmN, UsePaddingOnKDim>{});
+        }
+        else
+        {
+            const auto wei_k_y_x_c_grid_desc =
+                make_naive_tensor_descriptor_packed(make_tuple(K_, Y_, X_, C_));
+
+            const auto YDotSlice = math::integer_divide_ceil(Y_ - IdxYTilde_, YTilde_);
+            const auto XDotSlice = math::integer_divide_ceil(X_ - IdxXTilde_, XTilde_);
+
+            const auto wei_k_ydot_ytilde_xdot_xtilde_c_grid_desc = transform_tensor_descriptor(
+                wei_k_y_x_c_grid_desc,
+                make_tuple(make_pass_through_transform(K_),
+                           make_embed_transform(make_tuple(YDot_, YTilde_),
+                                                make_tuple(ConvStrideH_ / GcdStrideDilationH_, I1)),
+                           make_embed_transform(make_tuple(XDot_, XTilde_),
+                                                make_tuple(ConvStrideW_ / GcdStrideDilationW_, I1)),
+                           make_pass_through_transform(C_)),
+                make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
+                make_tuple(Sequence<0>{}, Sequence<1, 2>{}, Sequence<3, 4>{}, Sequence<5>{}));
+
+            const auto wei_k0_k1_ydotslice_xdotslice_c_grid_desc = transform_tensor_descriptor(
+                wei_k_ydot_ytilde_xdot_xtilde_c_grid_desc,
+                make_tuple(make_unmerge_transform(make_tuple(K0, Number<BK1>{})),
+                           make_slice_transform(YDot_, I0, YDotSlice),
+                           make_slice_transform(XDot_, I0, XDotSlice),
+                           make_freeze_transform(IdxYTilde_),
+                           make_freeze_transform(IdxXTilde_),
+                           make_pass_through_transform(C_)),
+                make_tuple(Sequence<0>{},
+                           Sequence<1>{},
+                           Sequence<3>{},
+                           Sequence<2>{},
+                           Sequence<4>{},
+                           Sequence<5>{}),
+                make_tuple(Sequence<0, 1>{},
+                           Sequence<2>{},
+                           Sequence<3>{},
+                           Sequence<>{},
+                           Sequence<>{},
+                           Sequence<4>{}));
+
+            const auto wei_gemmk0_gemmn_gemmk1_grid_desc = transform_tensor_descriptor(
+                wei_k0_k1_ydotslice_xdotslice_c_grid_desc,
+                make_tuple(make_merge_transform(make_tuple(YDotSlice, XDotSlice, K0)),
+                           make_pass_through_transform(C_),
+                           make_pass_through_transform(Number<BK1>{})),
+                make_tuple(Sequence<2, 3, 0>{}, Sequence<4>{}, Sequence<1>{}),
+                make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}));
+
+            return ck::tensor_operation::device::PadTensorDescriptor(
+                wei_gemmk0_gemmn_gemmk1_grid_desc,
+                make_tuple(Number<GemmKPerBlock / BK1>{}, Number<GemmNPerBlock>{}, Number<BK1>{}),
+                Sequence<true, DoPadGemmN, UsePaddingOnKDim>{});
+        }
+    }
+
+    template <typename CLayout_ = CLayout,
+              typename std::enable_if<
+                  NDimSpatial == 2 && (is_same_v<CLayout_, tensor_layout::convolution::GNHWC> ||
+                                       is_same_v<CLayout_, tensor_layout::convolution::NHWGC> ||
+                                       is_same_v<CLayout_, tensor_layout::convolution::G_NHW_C>),
+                  bool>::type = false>
+    __host__ __device__ auto MakeCDescriptor_M_N_Packed() const
+    {
+        const auto in_n_hi_wi_c_grid_desc =
+            make_naive_tensor_descriptor_packed(make_tuple(N_, Hi_, Wi_, C_));
+
+        if constexpr(ConvBwdDataSpecialization ==
+                     ck::tensor_operation::device::ConvolutionBackwardDataSpecialization::
+                         Filter1x1Stride1Pad0)
+        {
+            const auto in_n_y_ho_x_wo_c_grid_desc = transform_tensor_descriptor(
+                in_n_hi_wi_c_grid_desc,
+                make_tuple(make_pass_through_transform(N_),
+                           make_embed_transform(make_tuple(I1, Ho_), make_tuple(I1, ConvStrideH_)),
+                           make_embed_transform(make_tuple(I1, Wo_), make_tuple(I1, ConvStrideW_)),
+                           make_pass_through_transform(C_)),
+                make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
+                make_tuple(Sequence<0>{}, Sequence<1, 2>{}, Sequence<3, 4>{}, Sequence<5>{}));
+
+            const auto in_gemmm_gemmn_grid_desc = transform_tensor_descriptor(
+                in_n_y_ho_x_wo_c_grid_desc,
+                make_tuple(make_freeze_transform(I0),
+                           make_freeze_transform(I0),
+                           make_merge_transform(make_tuple(N_, Ho_, Wo_)),
+                           make_pass_through_transform(C_)),
+                make_tuple(Sequence<1>{}, Sequence<3>{}, Sequence<0, 2, 4>{}, Sequence<5>{}),
+                make_tuple(Sequence<>{}, Sequence<>{}, Sequence<0>{}, Sequence<1>{}));
+
+            return ck::tensor_operation::device::PadTensorDescriptor(
+                in_gemmm_gemmn_grid_desc,
+                make_tuple(Number<GemmMPerBlock>{}, Number<GemmNPerBlock>{}),
+                Sequence<DoPadGemmM, DoPadGemmN>{});
+        }
+        else
+        {
+            const auto IHTildeSliceBegin = math::integer_divide_floor(
+                math::max(I0, InLeftPadH_ - ConvDilationH_ * (YTilde_ - I1)), ConvStrideH_);
+            const auto IWTildeSliceBegin = math::integer_divide_floor(
+                math::max(I0, InLeftPadW_ - ConvDilationW_ * (XTilde_ - I1)), ConvStrideW_);
+            const auto IHTildeSliceEnd = math::min(
+                HTilde_, math::integer_divide_ceil(InLeftPadH_ + Hi_ - I1, ConvStrideH_) + I1);
+            const auto IWTildeSliceEnd = math::min(
+                WTilde_, math::integer_divide_ceil(InLeftPadW_ + Wi_ - I1, ConvStrideW_) + I1);
+            const auto HTildeSlice = IHTildeSliceEnd - IHTildeSliceBegin;
+            const auto WTildeSlice = IWTildeSliceEnd - IWTildeSliceBegin;
+
+            const auto in_n_hip_wip_c_grid_desc = transform_tensor_descriptor(
+                in_n_hi_wi_c_grid_desc,
+                make_tuple(make_pass_through_transform(N_),
+                           make_pad_transform(Hi_, InLeftPadH_, InRightPadH_),
+                           make_pad_transform(Wi_, InLeftPadW_, InRightPadW_),
+                           make_pass_through_transform(C_)),
+                make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
+                make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}));
+
+            const auto in_n_ytilde_htilde_xtilde_wtilde_c_grid_desc = transform_tensor_descriptor(
+                in_n_hip_wip_c_grid_desc,
+                make_tuple(make_pass_through_transform(N_),
+                           make_embed_transform(make_tuple(YTilde_, HTilde_),
+                                                make_tuple(ConvDilationH_, ConvStrideH_)),
+                           make_embed_transform(make_tuple(XTilde_, WTilde_),
+                                                make_tuple(ConvDilationW_, ConvStrideW_)),
+                           make_pass_through_transform(C_)),
+                make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
+                make_tuple(Sequence<0>{}, Sequence<1, 2>{}, Sequence<3, 4>{}, Sequence<5>{}));
+
+            const auto in_n_htildeslice_wtildeslice_c_grid_desc = transform_tensor_descriptor(
+                in_n_ytilde_htilde_xtilde_wtilde_c_grid_desc,
+                make_tuple(make_pass_through_transform(N_),
+                           make_freeze_transform(IdxYTilde_),
+                           make_slice_transform(HTilde_, IHTildeSliceBegin, HTildeSlice),
+                           make_freeze_transform(IdxXTilde_),
+                           make_slice_transform(WTilde_, IWTildeSliceBegin, WTildeSlice),
+                           make_pass_through_transform(C_)),
+                make_tuple(Sequence<0>{},
+                           Sequence<1>{},
+                           Sequence<2>{},
+                           Sequence<3>{},
+                           Sequence<4>{},
+                           Sequence<5>{}),
+                make_tuple(Sequence<0>{},
+                           Sequence<>{},
+                           Sequence<1>{},
+                           Sequence<>{},
+                           Sequence<2>{},
+                           Sequence<3>{}));
+
+            const auto in_gemmm_gemmn_grid_desc = transform_tensor_descriptor(
+                in_n_htildeslice_wtildeslice_c_grid_desc,
+                make_tuple(make_merge_transform(make_tuple(N_, HTildeSlice, WTildeSlice)),
+                           make_pass_through_transform(C_)),
+                make_tuple(Sequence<0, 1, 2>{}, Sequence<3>{}),
+                make_tuple(Sequence<0>{}, Sequence<1>{}));
+
+            return ck::tensor_operation::device::PadTensorDescriptor(
+                in_gemmm_gemmn_grid_desc,
+                make_tuple(Number<GemmMPerBlock>{}, Number<GemmNPerBlock>{}),
+                Sequence<DoPadGemmM, DoPadGemmN>{});
+        }
+    }
+
     IndexType N_;
     IndexType Di_, Hi_, Wi_;
     IndexType Do_, Ho_, Wo_;
@@ -1523,7 +1853,7 @@ struct TransformConvBwdDataToGemm_v1
     IndexType ZTilde_, YTilde_, XTilde_;
     IndexType DTilde_, HTilde_, WTilde_;
     IndexType ZDot_, YDot_, XDot_;
-    index_t batch_k_;
+    IndexType batch_k_;
 };
 
 } // namespace tensor_operation

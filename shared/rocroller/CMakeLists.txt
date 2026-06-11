@@ -6,6 +6,10 @@ set(ROCROLLER_VERSION 1.0.0)
 set(ROCROLLER_SOVERSION 1)
 project(rocroller VERSION ${ROCROLLER_VERSION} LANGUAGES CXX)
 
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 include(CMakeRC)
@@ -124,6 +128,20 @@ endif()
 
 find_package(hip REQUIRED)
 find_package(amd_comgr REQUIRED)
+
+include(CheckCXXSourceCompiles)
+set(CMAKE_REQUIRED_LIBRARIES hip::host)
+check_cxx_source_compiles(
+    "#include <hip/hip_runtime.h>
+    int main() {
+        hipLaunchAttribute attr;
+        attr.id = hipLaunchAttributeClusterDimension;
+        return 0;
+    }"
+    ROCROLLER_HAS_HIP_WORKGROUP_CLUSTERS
+)
+unset(CMAKE_REQUIRED_LIBRARIES)
+
 if(ROCROLLER_ENABLE_LLVM)
     find_package(LLVM REQUIRED)
 endif()
@@ -200,6 +218,10 @@ target_compile_definitions(rocroller
         ROCROLLER_USE_HIP
         __HIP_PLATFORM_AMD__
 )
+
+if(ROCROLLER_HAS_HIP_WORKGROUP_CLUSTERS)
+    target_compile_definitions(rocroller PUBLIC ROCROLLER_HAS_HIP_WORKGROUP_CLUSTERS)
+endif()
 
 if(ROCROLLER_ENABLE_LLVM)
     llvm_map_components_to_libnames(llvm_yaml_libs objectyaml)

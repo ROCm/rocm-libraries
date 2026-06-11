@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -242,7 +242,7 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  <table>
 *  <caption id="spmm_bsr_algorithms">BSR Algorithms</caption>
 *  <tr><th>BSR Algorithms
-*  <tr><td>CUSPARSE_SPMM_BSR_ALG1</td>
+*  <tr><td>HIPSPARSE_SPMM_BSR_ALG1</td>
 *  </table>
 *
 *  Users can also pass \ref HIPSPARSE_SPMM_ALG_DEFAULT, which will automatically select from the algorithms listed above

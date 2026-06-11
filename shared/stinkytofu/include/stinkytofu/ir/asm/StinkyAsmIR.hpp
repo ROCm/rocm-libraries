@@ -82,7 +82,7 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
           issueCycles(mcid->issue),
           latencyCycles(mcid->latency) {}
 
-    ~StinkyInstruction() = default;
+    ~StinkyInstruction() override = default;
 
    public:
     void addSrcReg(const StinkyRegister& srcReg) {
@@ -445,18 +445,41 @@ inline bool isUnconditionalBranch(const StinkyInstruction& inst) {
     return isBranch(inst) && !isConditionalBranch(inst);
 }
 
-// Get the branch target label name from a branch instruction.
-// Branch instructions store their target as the first source register (LiteralString type).
-inline std::string getBranchTarget(const StinkyInstruction& inst) {
-    assert(isBranch(inst) && "Instruction must be a branch");
-    assert(!inst.getSrcRegs().empty() &&
-           "Branch instruction must have at least one source register");
+inline bool isIndirectBranch(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_IndirectBranch);
+}
 
+// Label names of basic-block targets for \p given branch instruction.
+//
+// At most one target is returned today. Switch / multi-way branch semantics
+// (several labels from one terminator) are not modeled.
+//
+// Resolution (first match wins):
+//   - Not a branch → {}
+//   - LabelData{label} → {label} (rocisa converter or LongBranchLoweringPass)
+//   - IF_IndirectBranch without LabelData → {}
+//   - First src is LiteralString → {that string} (raw .s s_branch / s_cbranch_*)
+//   - Otherwise → {}
+inline std::vector<std::string> getBranchTargets(const StinkyInstruction& inst) {
+    if (!isBranch(inst)) return {};
+
+    if (const auto* label = inst.getModifier<LabelData>()) {
+        return {label->label};
+    }
+
+    if (isIndirectBranch(inst)) return {};
+
+    if (inst.getSrcRegs().empty()) return {};
     const StinkyRegister& targetReg = inst.getSrcRegs()[0];
-    assert(targetReg.dataType == StinkyRegister::Type::LiteralString &&
-           "Branch target must be a LiteralString");
+    if (targetReg.dataType != StinkyRegister::Type::LiteralString) return {};
+    return {targetReg.getLiteralString()};
+}
 
-    return targetReg.getLiteralString();
+// Single-target shim. Returns the first label from getBranchTargets(), or "" if
+// the instruction has no statically-known branch target label.
+inline std::string getBranchTarget(const StinkyInstruction& inst) {
+    auto targets = getBranchTargets(inst);
+    return targets.empty() ? std::string{} : targets.front();
 }
 
 inline bool isWaitCnt(const StinkyInstruction& inst) {
@@ -526,6 +549,31 @@ inline bool mustPreserveInstruction(const StinkyInstruction& inst) {
     // Instructions explicitly marked with side effects
     if (isHasSideEffect(inst)) return true;
 
+    return false;
+}
+
+/// Returns true if the instruction has LDS pseudo-register operands,
+/// indicating MemTokenData has been assigned and ordering is enforced
+/// by the DAG via def-use edges.
+inline bool hasLdsPseudoRegs(const StinkyInstruction& inst) {
+    for (const StinkyRegister& r : inst.getSrcRegs())
+        if (r.isRegister() && r.reg.type == RegType::LDS) return true;
+    for (const StinkyRegister& r : inst.getDestRegs())
+        if (r.isRegister() && r.reg.type == RegType::LDS) return true;
+    return false;
+}
+
+/// Returns true if the instruction forces the DAG scheduler to cut a new
+/// region.  This covers true side effects (stores, branches, waits) and
+/// memory ops that lack MemTokenData (LDS pseudo-registers), where the
+/// scheduler has no dependency edges to prove reordering is safe.
+inline bool hasSideEffect(const StinkyInstruction& inst) {
+    if (!inst.getHwInstDesc()) return false;
+    if (isGlobalMemStore(inst) || isBranch(inst) || isWaitCnt(inst) || isHasSideEffect(inst))
+        return true;
+    if ((isBarrier(inst) || isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst)) &&
+        !hasLdsPseudoRegs(inst))
+        return true;
     return false;
 }
 

@@ -241,6 +241,18 @@ enum fft_array_type
     fft_array_type_unset,
 };
 
+inline bool array_type_is_planar(fft_array_type array_type)
+{
+    return array_type == fft_array_type_complex_planar
+           || array_type == fft_array_type_hermitian_planar;
+}
+
+inline bool array_type_is_interleaved(fft_array_type array_type)
+{
+    return array_type == fft_array_type_complex_interleaved
+           || array_type == fft_array_type_hermitian_interleaved;
+}
+
 inline void validate_or_throw(fft_array_type array_type, const std::string& func_name)
 {
     switch(array_type)
@@ -269,6 +281,13 @@ enum fft_result_placement
 {
     fft_placement_inplace,
     fft_placement_notinplace,
+};
+
+// callback functions
+enum fft_callback_type
+{
+    fft_callback_type_none, // don't run callbacks
+    fft_callback_type_funcptr, // run callbacks specified via device function pointer
 };
 
 inline void validate_or_throw(fft_result_placement placement, const std::string& func_name)
