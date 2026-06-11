@@ -172,19 +172,36 @@ __device__ void weight_load_to_lds(const BlockCoords_& bc,
         constexpr auto weight_lds_desc = TC::Weight::MakeLdsWriteDescriptor();
         auto weight_lds_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
             reinterpret_cast<ElementType*>(weight_lds), weight_lds_desc);
+#if defined(__gfx950__)
+        // CDNA4: efficient buffer-load-to-LDS (dwordx4 async copy).
         auto weight_lds_window = ck_tile::make_tile_window(
             weight_lds_view,
             ck_tile::make_tuple(ck_tile::number<cfg.block_size()>{}, ck_tile::number<8>{}),
             {0, 0});
+#else
+        // CDNA3 (gfx942) and host pass: the dwordx4 buffer-load-to-LDS used by
+        // async_load_tile is unavailable, so fall back to load_tile + store_tile
+        // (register round-trip). The LDS window must carry the same distribution
+        // as the DRAM window so store_tile knows each thread's write positions.
+        auto weight_lds_window = ck_tile::make_tile_window(
+            weight_lds_view,
+            ck_tile::make_tuple(ck_tile::number<cfg.block_size()>{}, ck_tile::number<8>{}),
+            {0, 0},
+            weight_dram_dist);
+#endif
 
         // Multi-pass weight loading: when the weight data is larger than
-        // block_size, we need multiple async loads with advancing offsets.
+        // block_size, we need multiple loads with advancing offsets.
         // The pad transform on the DRAM descriptor suppresses OOB reads
         // in the final pass.
         ck_tile::static_for<0, TC::Weight::NUM_WEIGHT_PASSES, 1>{}(
             [&](auto Pass)
             {
+#if defined(__gfx950__)
                 ck_tile::async_load_tile(weight_lds_window, weight_dram_window);
+#else
+                ck_tile::store_tile(weight_lds_window, ck_tile::load_tile(weight_dram_window));
+#endif
                 if constexpr(Pass.value < TC::Weight::NUM_WEIGHT_PASSES - 1)
                 {
                     ck_tile::move_tile_window(weight_dram_window, {cfg.block_size(), 0});

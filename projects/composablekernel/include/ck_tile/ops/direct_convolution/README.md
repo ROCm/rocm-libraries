@@ -81,14 +81,34 @@ The kernel uses MFMA instructions with buffer-load-to-LDS for input staging to c
 
 ## Supported device architectures
 
-CK Tile direct convolutions support `gfx942` and `gfx950` device architectures.
+CK Tile direct convolutions are developed and validated on `gfx950` (CDNA4),
+which supports the full set of variants and directions. `gfx942` (CDNA3) is
+supported for the 4c forward variant only; the remaining variants rely on
+CDNA4-only hardware features (see notes below).
 
-| Variant | fp16 | bf16 |
-|---------|------|------|
-| 4c (MFMA 4x4x4) | gfx942, gfx950 | gfx942, gfx950 |
-| 8c (MFMA 16x16x32) | gfx950 | gfx950 |
-| 16c (MFMA 16x16x16) | gfx942, gfx950 | gfx942, gfx950 |
-| 32c (MFMA 16x16x32) | gfx950 | gfx950 |
+| Variant | Direction | fp16 | bf16 |
+|---------|-----------|------|------|
+| 4c (MFMA 4x4x4) | Fprop | gfx942, gfx950 | gfx942, gfx950 |
+| 4c (MFMA 4x4x4) | Dgrad | gfx950 | gfx950 |
+| 8c (MFMA 16x16x32) | Fprop, Dgrad | gfx950 | gfx950 |
+| 16c (MFMA 16x16x16) | Fprop, Dgrad | gfx950 | gfx950 |
+| 32c (MFMA 16x16x32) | Fprop, Dgrad | gfx950 | gfx950 |
+
+### CDNA4-only feature dependencies
+
+- **MFMA 16x16x32** (`gfx950-insts`): required by the 8c (Toeplitz) and 32c
+  kernels. No CDNA3 equivalent, so 8c/32c cannot compile on gfx942.
+- **`ds_read_b64_tr_b16`** transpose read: required by the Dgrad (backward data)
+  weight read path. CDNA4 only, so all Dgrad variants are gfx950-only.
+- **LDS footprint > 64KB**: the 16c kernel needs 72KB of LDS, exceeding
+  gfx942's 64KB per-workgroup limit.
+- **16-byte buffer-load-to-LDS** (dwordx4 async copy): used by every variant for
+  performant input/weight staging. This one is not a blocker — the kernels fall back to a
+  portable load+store register round-trip on non-gfx950 archs.
+
+On non-gfx950 architectures, only gfx942 is currently tested. 
+The dispatcher codegen emits only the supported subset (4c forward, fp16/bf16). 
+Unsupported direct-conv instances are filtered out at generation time.
 
 ## Project structure
 

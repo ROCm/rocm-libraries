@@ -32,6 +32,16 @@ class DirectConvGroupedTestHarness : public ::testing::Test
     protected:
     using HalfT = ElementT;
 
+#ifdef CK_TILE_TEST_NO_DGRAD
+    // Helper kept void so GTEST_SKIP() (which expands to a void `return`) is
+    // valid; marks the currently running test as skipped.
+    static void SkipDgradUnsupported()
+    {
+        GTEST_SKIP() << "Dgrad (backward-data) direct conv uses ds_read_b64_tr_b16, "
+                        "a CDNA4 (gfx950) only transpose read; skipped on this arch.";
+    }
+#endif
+
     public:
     template <int ConfigIdx>
     bool RunFprop(int N,
@@ -150,6 +160,12 @@ class DirectConvGroupedTestHarness : public ::testing::Test
                   int pad_h,
                   int pad_w)
     {
+#ifdef CK_TILE_TEST_NO_DGRAD
+        // Backward-data direct conv is gfx950-only (CDNA4 transpose read). Skip
+        // these tests on architectures that define CK_TILE_TEST_NO_DGRAD.
+        SkipDgradUnsupported();
+        return true;
+#else
         using namespace ck_tile;
         using Kernel = typename KernelTraits::template BwdDataKernel<ConfigIdx>;
 
@@ -240,5 +256,6 @@ class DirectConvGroupedTestHarness : public ::testing::Test
         constexpr double rtol = std::is_same_v<ElementT, ck_tile::bfloat16_t> ? 5e-2 : 1e-2;
         constexpr double atol = std::is_same_v<ElementT, ck_tile::bfloat16_t> ? 5e-2 : 1e-2;
         return check_err(h_result, h_ref, "Error: Dgrad incorrect results!", rtol, atol);
+#endif // CK_TILE_TEST_NO_DGRAD
     }
 };

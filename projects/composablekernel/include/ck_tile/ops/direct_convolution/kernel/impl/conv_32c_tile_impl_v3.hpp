@@ -571,14 +571,8 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
             CK_TILE_LDS_ADDR ElementType* lds_dest =
                 base::store_input_lds + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
 
-            ck_tile::amd_async_buffer_load<ElementType, 8,
-                ck_tile::amd_buffer_coherence_enum::coherence_default, true>(
-                lds_dest,
-                base::input_rsrc,
-                base::input_voffset + chunk_off,
-                0,
-                ck_tile::number<0>{},
-                base::is_valid);
+            buffer_load16_to_lds<ElementType>(
+                lds_dest, base::input_rsrc, base::input_voffset + chunk_off, base::is_valid);
         }
 
         if(overflow_active)
@@ -586,14 +580,8 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
             CK_TILE_LDS_ADDR ElementType* lds_dest =
                 overflow_lds_dest + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
 
-            ck_tile::amd_async_buffer_load<ElementType, 8,
-                ck_tile::amd_buffer_coherence_enum::coherence_default, true>(
-                lds_dest,
-                base::input_rsrc,
-                overflow_voffset + chunk_off,
-                0,
-                ck_tile::number<0>{},
-                overflow_is_valid);
+            buffer_load16_to_lds<ElementType>(
+                lds_dest, base::input_rsrc, overflow_voffset + chunk_off, overflow_is_valid);
         }
     }
 

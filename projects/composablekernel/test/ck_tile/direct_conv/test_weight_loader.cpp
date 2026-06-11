@@ -311,7 +311,13 @@ TEST_F(ValidConfigTest, C1_K3_only_vec1)
 
 // =============================================================================
 // 16c WeightLoader tests
+//
+// The 16c kernel stages 72KB into LDS, which exceeds the 64KB per-workgroup LDS
+// limit on gfx942 (CDNA3). It is a gfx950 (CDNA4) only variant, so these tests
+// are compiled out on architectures that define CK_TILE_TEST_NO_16C (set by
+// the test CMakeLists for non-gfx950 builds).
 // =============================================================================
+#ifndef CK_TILE_TEST_NO_16C
 
 namespace ns_16c = ck_tile::direct_conv::grouped_16c_tile::v2;
 
@@ -451,6 +457,8 @@ TEST_F(WeightLoader16cTest, Vec1_C9_K12)  { run_and_verify<CFG_16C_VEC1>(9, 12);
 TEST_F(WeightLoader16cTest, Vec1_C12_K9)  { run_and_verify<CFG_16C_VEC1>(12, 9); }
 TEST_F(WeightLoader16cTest, Vec1_C16_K9)  { run_and_verify<CFG_16C_VEC1>(16, 9); }
 TEST_F(WeightLoader16cTest, Vec1_C9_K16_asym) { run_and_verify<CFG_16C_VEC1>(9, 16); }
+
+#endif // CK_TILE_DC_TEST_NO_16C
 
 // =============================================================================
 // 8c WeightLoader tests

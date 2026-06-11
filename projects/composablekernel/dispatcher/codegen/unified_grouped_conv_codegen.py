@@ -2138,6 +2138,53 @@ def load_depthwise_configs_from_json(
     return configs
 
 
+def direct_conv_supported_on_arch(
+    inst: dict,
+    variant: GroupedConvVariant,
+    arch: str,
+) -> bool:
+    """Decide whether a direct-conv instance can compile/run on a given arch.
+
+    Direct-conv kernels were developed and validated on gfx950 (CDNA4). Several
+    of them rely on CDNA4-only hardware features that are unavailable on gfx942
+    (CDNA3) and other architectures:
+
+      * 16-byte buffer-load-to-LDS (dwordx4 async copy) — used by every variant
+        for input staging. The kernel impls fall back to a portable
+        load+store register round-trip on non-gfx950.
+      * MFMA 16x16x32 (gfx950-insts) — used by the 8c (Toeplitz) and 32c
+        kernels. No CDNA3 equivalent, so 8c/32c variants cannot be compiled for gfx942.
+      * ds_read_b64_tr_b16 transpose read — used by bwd_data (Dgrad). CDNA4
+        only, so all bwd_data direct-conv instances are gfx950-only.
+      * LDS footprint > 64KB — the 16c kernel needs 72KB, exceeding gfx942's
+        64KB per-workgroup limit.
+
+    The verified gfx942-capable subset is 4c forward (fp16/bf16).
+    """
+    # gfx950 (CDNA4) supports the full direct-conv feature set.
+    if arch == "gfx950":
+        return True
+
+    if arch != "gfx942":
+        log.warning(
+            f"Unknown architecture {arch}: no direct-conv support"
+        )
+        return False
+    
+    channel_family = inst.get("channel_family")
+
+    # Non-gfx950 archs (gfx942): only 4c forward compiles and runs.
+    #   - bwd_data needs ds_read_b64_tr_b16 (CDNA4 only).
+    #   - 8c/32c need MFMA 16x16x32 (CDNA4 only).
+    #   - 16c needs 72KB LDS (> gfx942 64KB limit).
+    if variant != GroupedConvVariant.FORWARD:
+        return False
+    if channel_family != 4:
+        return False
+
+    return True
+
+
 def build_direct_conv_config(
     inst: dict,
     variant: GroupedConvVariant,
@@ -2231,6 +2278,16 @@ def load_configs_from_json(
         # into the same instances array and carry kind=="direct_conv" with a
         # full numeric Config payload.
         if inst.get("kind") == "direct_conv":
+            # Direct-conv instances are developed for gfx950 (CDNA4). On other
+            # archs only the gfx942-capable subset (4c forward) compiles.
+            if not direct_conv_supported_on_arch(inst, variant, arch):
+                log.info(
+                    f"Skipping direct-conv instance id={inst.get('id')} "
+                    f"(channel_family={inst.get('channel_family')}, "
+                    f"variant={data['variant']}) on arch={arch}: "
+                    f"unsupported outside gfx950"
+                )
+                continue
             configs.append(
                 build_direct_conv_config(
                     inst, variant, ndim_spatial, layout, datatype, arch
