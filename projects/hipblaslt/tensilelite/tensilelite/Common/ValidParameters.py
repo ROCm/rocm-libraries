@@ -933,6 +933,8 @@ validParameters = { # we need to make sure this matches develop
     # In order to remove the copying from Acc vgpr to Arch vgpr, only use Arch vgprs for v_mfma_xxx.
     # Only support for kernel whose totalVgpr counts less than 256 and gcn that has control bit ACC_CD.
     "MIArchVgpr": [False, True],
+    # gfx11 WMMA: force A onto a VGPR bank distinct from the C accumulator (+2 cyc if shared).
+    "WMMABankDistinctC": [False, True],
     # Persistent tile processing and work assignment are independent selectors.
     # None disables persistence and ignores assignment. DataParallel supports StaticGrid;
     # StreamK supports StaticGrid, DynamicWorkQueue and Hybrid.

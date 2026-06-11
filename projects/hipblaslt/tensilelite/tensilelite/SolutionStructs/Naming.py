@@ -264,6 +264,12 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     else:
       requiredParametersTemp.discard("LdsXorSwizzle")
 
+    # WMMABankDistinctC=False is the default; naming it would rename every kernel.
+    if state.get("WMMABankDistinctC", False):
+      requiredParametersTemp.add("WMMABankDistinctC")
+    else:
+      requiredParametersTemp.discard("WMMABankDistinctC")
+
     # ClusterAIDMapping=-1 (disabled) is the default; naming it would rename every kernel.
     if state.get("ClusterAIDMapping", -1) != -1:
       requiredParametersTemp.add("ClusterAIDMapping")

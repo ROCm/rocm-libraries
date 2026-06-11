@@ -620,6 +620,7 @@ defaultBenchmarkCommonParameters = [
     {"MIArchVgpr": [False]},
     {"TileProcessingStrategy": ["None"]},
     {"WorkAssignment": ["StaticGrid"]},
+    {"WMMABankDistinctC": [False]},
     {"StreamKAtomic": [0]},
     {"WorkQueueStealing": [0]},
     {"PersistentXCCMapping": [0]},
