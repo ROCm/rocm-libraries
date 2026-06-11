@@ -10,7 +10,9 @@ validation/
 ├── validate_ml_heuristic.py           # GEMM universal validation
 └── grouped_conv/                      # Grouped convolution specific
     ├── validate_training_shapes.py    # Training data sanity check
-    └── validate_backward_models.py    # Backward pass prediction quality
+    ├── validate_backward_models.py    # Backward pass prediction quality
+    ├── validate_conv_ml_vs_oracle.py  # Conv forward: ML vs oracle (parquet-based, any arch)
+    └── validate_ml_vs_oracle.py       # Conv forward: ML vs oracle (tile_engine CSV, bf16/gfx950)
 ```
 
 ## Scripts Overview
@@ -39,7 +41,8 @@ python validate_ml_heuristic.py --dtype bf16 --model_dir models/gemm_universal_b
 
 ### 2. `grouped_conv/validate_training_shapes.py` - Training Data Sanity Check
 
-**Purpose**: Quick sanity check on shapes WITH multiple kernels in training data.
+**Purpose**: Quick hardware sanity check for the bf16/gfx950 forward model. Hardcoded to
+bf16/gfx950; requires a locally generated `training_data.parquet` (not in the repo).
 
 **Usage**:
 ```bash
@@ -48,11 +51,11 @@ python validate_training_shapes.py
 ```
 
 **What it does**:
-1. Selects 5 random training shapes with ≥5 kernels each
+1. Selects 5 shapes (fixed seed) with ≥5 kernels from the bf16/gfx950 training parquet
 2. For each shape:
    - Gets oracle-best from training data
    - Uses ML to predict best kernel
-   - Builds BOTH kernels (oracle + ML)
+   - Builds BOTH kernels (oracle + ML) via JIT
    - Runs both on hardware
    - Compares actual TFLOPS
 
@@ -63,14 +66,51 @@ python validate_training_shapes.py
 
 **Runtime**: ~5-10 minutes (builds 10 kernels, runs on hardware)
 
-**When to use**:
-- Quick sanity check after model training
-- Verify model isn't overfitting to training data
-- Debug prediction accuracy issues
+**When to use**: Quick sanity check after retraining the bf16/gfx950 forward model.
 
 ---
 
-### 3. `grouped_conv/validate_backward_models.py` - Backward Pass Prediction Quality
+### 3. `grouped_conv/validate_conv_ml_vs_oracle.py` - Conv Forward ML vs Oracle (parquet-based)
+
+**Purpose**: Measure ML model efficiency against oracle-best on a benchmark parquet for any
+conv forward arch.  The parquet is self-describing: hardware constants are read from the
+embedded `hw_*` columns (written by `convert_csv_to_parquet.py`), so no `--arch` flag is
+needed.  Use this after generating a new parquet or retraining the forward model.
+
+**Data sources**:
+- **Parquet**: produced by `convert_csv_to_parquet.py` applied to a conv sweep CSV.
+  Contains one row per (shape × kernel) with measured TFLOPS and embedded hardware columns.
+- **Model**: a directory under `heuristics/models/` such as
+  `grouped_conv_forward_fp16_gfx942/`, containing `model_tflops.lgbm`.
+
+**Usage**:
+```bash
+python validation/grouped_conv/validate_conv_ml_vs_oracle.py \
+    --model        models/grouped_conv_forward_fp16_gfx942 \
+    --oracle-parquet /path/to/conv_fp16_gfx942.parquet
+
+# Different arch — same script, different inputs:
+python validation/grouped_conv/validate_conv_ml_vs_oracle.py \
+    --model        models/grouped_conv_forward_bf16_gfx950 \
+    --oracle-parquet /path/to/conv_bf16_gfx950.parquet \
+    --output       results.csv
+```
+
+**What it does**:
+1. Reads hardware constants from the parquet's `hw_*` columns (num_cus, clock, lds, …)
+2. Groups rows by conv shape; oracle-best = row with highest measured TFLOPS per shape
+3. Scores every measured kernel with the ML model; picks the top-scored kernel
+4. Reports mean/median/P10/P90/min/max efficiency and the 10 worst-case shapes
+
+**Runtime**: seconds to minutes depending on parquet size (no hardware required)
+
+**When to use**:
+- After training or retraining a conv forward model for any arch
+- To verify model quality on a new benchmark dataset before shipping
+
+---
+
+### 4. `grouped_conv/validate_backward_models.py` - Backward Pass Prediction Quality
 
 **Purpose**: Quick prediction quality check for bwd_data and bwd_weight ML models.
 
@@ -111,14 +151,20 @@ python validate_backward_models.py
 |--------|-----------|-----------|---------------|---------|----------|
 | `validate_ml_heuristic.py` | GEMM universal | ✗ | All training | <1 min | GEMM model validation |
 | `validate_training_shapes.py` | Grouped conv fwd | ✓ | 5 training | 5-10 min | Quick sanity check |
+| `validate_conv_ml_vs_oracle.py` | Grouped conv fwd | ✗ | All parquet | <1 min | Forward model validation, any arch |
 | `validate_backward_models.py` | Grouped conv bwd | ✗ | 5-7 hardcoded | <1 min | Backward prediction quality |
 
 ## Typical Workflow
 
 1. **After training forward model**:
    ```bash
-   # Quick check
+   # Quick hardware sanity check (5 shapes, needs GPU)
    python grouped_conv/validate_training_shapes.py
+
+   # Full parquet-based efficiency report (no GPU needed)
+   python grouped_conv/validate_conv_ml_vs_oracle.py \
+       --model models/grouped_conv_forward_fp16_gfx942 \
+       --oracle-parquet /path/to/conv_fp16_gfx942.parquet
    ```
 
 2. **After training backward models**:

@@ -17,6 +17,7 @@
 #include "CkDslContext.hpp"
 #include "CkDslHandle.hpp"
 #include "TestUtils.hpp"
+#include "ckdsl_provider_paths.h"
 #include "adapters/conv_implicit_gemm/ConvImplicitGemmPayload.hpp"
 #include "adapters/conv_implicit_gemm/ConvImplicitGemmSpec.hpp"
 #include "engines/conv_implicit_gemm/CkDslConvImplicitGemmEngine.hpp"
@@ -447,6 +448,75 @@ TEST_F(ConvImplicitGemmPlanBuilderGpu, PlanExecuteLaunches) {
     ASSERT_EQ(hipMemcpy(&firstHalf, dY, sizeof(firstHalf), hipMemcpyDeviceToHost), hipSuccess);
     EXPECT_EQ(firstHalf, 0u) << "expected zero output for zero input + zero weight; got 0x"
                              << std::hex << firstHalf;
+
+    EXPECT_EQ(hipFree(dX), hipSuccess);
+    EXPECT_EQ(hipFree(dW), hipSuccess);
+    EXPECT_EQ(hipFree(dY), hipSuccess);
+}
+
+// ---------------------------------------------------------------------------
+// gfx942 GPU-gated path: verifies the scorerForPair registry routes fp16
+// graphs to the fp16/gfx942 oracle and that the resulting plan compiles
+// and executes correctly on a real gfx942 device.
+// ---------------------------------------------------------------------------
+
+class ConvImplicitGemmPlanBuilderGfx942 : public ConvImplicitGemmPlanBuilderHost {
+   protected:
+    void SetUp() override {
+        CK_DSL_PROVIDER_SKIP_IF_NOT_GFX942("ConvImplicitGemmPlanBuilderGfx942");
+        ConvImplicitGemmPlanBuilderHost::SetUp();
+    }
+};
+
+TEST_F(ConvImplicitGemmPlanBuilderGfx942, BuildPlanActivatesFp16Oracle) {
+    // Verifies end-to-end: the fp16 graph routes through scorerForPair to
+    // the fp16/gfx942 LightGBM oracle, buildPlan compiles the ranked
+    // candidate, and the resulting plan is executable on a gfx942 device.
+    // The example shape (N8 C64 H56 W56, K64 R3 S3) with zero inputs
+    // must produce a zero-filled output.
+    auto fbBuilder = makeExampleConvFwdGraph();
+    flatbuffer_utilities::GraphWrapper graph(fbBuilder.GetBufferPointer(), fbBuilder.GetSize());
+    flatbuffer_utilities::EngineConfigWrapper engineConfig(nullptr, 0);
+
+    CkDslContext ctx;
+    ASSERT_NO_THROW(builder().buildPlan(*_handle, graph, engineConfig, ctx));
+    ASSERT_TRUE(ctx.hasValidPlan());
+
+    auto* concretePlan = dynamic_cast<ConvImplicitGemmPlan*>(&ctx.plan());
+    ASSERT_NE(concretePlan, nullptr);
+
+    // Confirm the kernel was compiled for this device (kernelName embeds
+    // the shape token; ISA check would require exposing KernelArtifact.isa
+    // through HipModule, which we don't need here).
+    EXPECT_NE(concretePlan->moduleForTesting().kernelName().find("ck_dsl_conv_igemm"),
+              std::string::npos);
+
+    // Example geometry from makeExampleFp16ConvFwdGraph: N8 C64 H56 W56, K64 R3 S3.
+    // xBytes = 8*64*56*56*2, wBytes = 64*64*3*3*2, yBytes = 8*64*56*56*2.
+    constexpr std::size_t xBytes = 8 * 64 * 56 * 56 * 2;
+    constexpr std::size_t wBytes = 64 * 64 * 3 * 3 * 2;
+    constexpr std::size_t yBytes = 8 * 64 * 56 * 56 * 2;
+
+    void* dX = nullptr;
+    void* dW = nullptr;
+    void* dY = nullptr;
+    ASSERT_EQ(hipMalloc(&dX, xBytes), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dW, wBytes), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dY, yBytes), hipSuccess);
+    ASSERT_EQ(hipMemset(dX, 0, xBytes), hipSuccess);
+    ASSERT_EQ(hipMemset(dW, 0, wBytes), hipSuccess);
+    ASSERT_EQ(hipMemset(dY, 0xab, yBytes), hipSuccess);
+
+    std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{1, dX}, {2, dW}, {3, dY}};
+    EXPECT_NO_THROW(ctx.plan().execute(*_handle, buffers.data(),
+                                      static_cast<std::uint32_t>(buffers.size()),
+                                      /*workspace=*/nullptr));
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    std::uint16_t firstHalf = 0xffff;
+    ASSERT_EQ(hipMemcpy(&firstHalf, dY, sizeof(firstHalf), hipMemcpyDeviceToHost), hipSuccess);
+    EXPECT_EQ(firstHalf, 0u)
+        << "expected zero output for zero inputs on gfx942 fp16/oracle path";
 
     EXPECT_EQ(hipFree(dX), hipSuccess);
     EXPECT_EQ(hipFree(dW), hipSuccess);

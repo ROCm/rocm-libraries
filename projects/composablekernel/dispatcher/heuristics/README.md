@@ -319,6 +319,7 @@ Extended synthetic problem sets for backward passes cover diverse scenarios:
 ### Model Files
 
 Trained models stored in:
+- `models/grouped_conv_forward_fp16_gfx942/`  — fp16 forward, gfx942 (MI300A/MI300X)
 - `models/grouped_conv_forward_bf16_gfx950/`
 - `models/grouped_conv_bwd_data_bf16_gfx950/`
 - `models/grouped_conv_bwd_weight_bf16_gfx950/`
@@ -408,6 +409,7 @@ Problem Config → Feature Engineering (83 features) → LightGBM Model → Pred
 
 ### Training Pipeline
 
+**bf16/gfx950** (tile_engine benchmark harness):
 ```bash
 # 1. Collect data: Run all kernels on GPU for diverse problem set
 python grouped_conv_full_benchmark.py --problem_set forward_training_miopen
@@ -422,11 +424,29 @@ python train.py --operation grouped_conv --direction forward --dtype bf16
 python validation/grouped_conv/validate_training_shapes.py
 ```
 
+**fp16/gfx942**:
+```bash
+# 1. Collect data: Run a conv sweep on gfx942 hardware to produce a benchmark CSV
+
+# 2. Preprocess: Convert sweep CSV to Parquet (embeds hw_* columns for gfx942)
+python convert_csv_to_parquet.py \
+    --input sweep_results.csv --output conv_fp16_gfx942.parquet --arch gfx942
+
+# 3. Train model
+python train.py --operation grouped_conv --direction forward --dtype fp16 --arch gfx942
+
+# 4. Validate: ML efficiency vs oracle across all benchmark shapes (no GPU needed)
+python validation/grouped_conv/validate_conv_ml_vs_oracle.py \
+    --model models/grouped_conv_forward_fp16_gfx942 \
+    --oracle-parquet conv_fp16_gfx942.parquet
+```
+
 ### Validation Framework
 
 | Test | Purpose | Shapes | Runtime | Target |
 |------|---------|--------|---------|--------|
 | `validate_training_shapes.py` | Sanity check on training data | 5 | 5-10 min | >95% efficiency |
+| `validate_conv_ml_vs_oracle.py` | Forward model efficiency vs oracle (any arch) | All parquet | <1 min | >90% mean efficiency |
 | `validate_backward_models.py` | Backward pass prediction quality | 7 | <1 min | Reasonable predictions |
 
 ### File Structure (Grouped Conv)
@@ -437,16 +457,21 @@ dispatcher/heuristics/
 ├── feature_engine_grouped_conv.py     # Feature engineering
 ├── predict.py                         # Generic Predictor (use with GroupedConvFeatureEngine)
 ├── models/
-│   ├── grouped_conv_forward_bf16_gfx950/
+│   ├── grouped_conv_forward_fp16_gfx942/  # fp16 forward, gfx942
 │   │   ├── model_tflops.lgbm.gz       # Compressed model
 │   │   ├── feature_spec.json          # Feature definitions
 │   │   └── train_manifest.json        # Training metadata
+│   ├── grouped_conv_forward_bf16_gfx950/
+│   │   ├── model_tflops.lgbm.gz
+│   │   ├── feature_spec.json
+│   │   └── train_manifest.json
 │   ├── grouped_conv_bwd_data_bf16_gfx950/
 │   └── grouped_conv_bwd_weight_bf16_gfx950/
 └── validation/
     ├── validate_ml_heuristic.py       # GEMM validation
     └── grouped_conv/
         ├── validate_training_shapes.py
+        ├── validate_conv_ml_vs_oracle.py  # Conv forward ML vs oracle (parquet, any arch)
         └── validate_backward_models.py
 
 tile_engine/ops/grouped_conv/

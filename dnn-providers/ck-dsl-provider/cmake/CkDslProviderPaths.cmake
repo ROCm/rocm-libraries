@@ -232,9 +232,9 @@ endfunction()
 # (projects/composablekernel/dispatcher/heuristics/models/
 #  grouped_conv_forward_fp16_gfx942/model_tflops.lgbm).
 #
-# Same walk-up search as the other resolvers. Like the bf16/gfx950
-# model, this model is uncompressed (not gzipped) so it can be loaded
-# directly by the scorer at runtime.
+# Same walk-up search as the other resolvers. The model ships gzipped
+# in-tree; this resolver expects the decompressed .lgbm to exist
+# (decompress with `gunzip -k ${_modelRelPath}.gz`).
 #
 # Output (set in caller's scope):
 #   CK_DSL_GROUPED_CONV_FWD_FP16_GFX942_MODEL_PATH  absolute path to model_tflops.lgbm
@@ -263,8 +263,8 @@ function(ck_dsl_provider_resolve_grouped_conv_fwd_fp16_gfx942_model)
             "CK DSL provider: failed to locate the grouped-conv-forward "
             "fp16/gfx942 LightGBM model. Walked up from "
             "${CMAKE_CURRENT_LIST_DIR}/.. looking for ${_modelRelPath}. "
-            "The model must exist in-tree (run the fp16/gfx942 training "
-            "pipeline to produce it). Set "
+            "The model ships gzipped in-tree; decompress with "
+            "`gunzip -k ${_modelRelPath}.gz`. Set "
             "CK_DSL_GROUPED_CONV_FWD_FP16_GFX942_MODEL_PATH explicitly to override the search.")
     endif()
 

@@ -45,3 +45,17 @@
                          << "device 0 reports gcnArchName='" << _ckdsl_arch_name << "'";      \
         }                                                                                     \
     } while (0)
+
+// Skip unless device 0 is gfx942. Use in tests that exercise the
+// fp16/gfx942 scorer or load gfx942 HSACO via hipModuleLoadData.
+#define CK_DSL_PROVIDER_SKIP_IF_NOT_GFX942(testName)                                          \
+    do {                                                                                      \
+        CK_DSL_PROVIDER_SKIP_IF_NO_GPU(testName);                                             \
+        hipDeviceProp_t _ckdsl_props{};                                                       \
+        ASSERT_EQ(hipGetDeviceProperties(&_ckdsl_props, 0), hipSuccess);                      \
+        std::string _ckdsl_arch_name = _ckdsl_props.gcnArchName;                              \
+        if (_ckdsl_arch_name.find("gfx942") == std::string::npos) {                           \
+            GTEST_SKIP() << (testName) << ": requires gfx942; "                               \
+                         << "device 0 reports gcnArchName='" << _ckdsl_arch_name << "'";      \
+        }                                                                                     \
+    } while (0)

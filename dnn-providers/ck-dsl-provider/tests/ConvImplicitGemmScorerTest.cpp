@@ -393,7 +393,7 @@ py::dict problemDictFromSelection(const ConvSelectionProblem& p) {
 }
 
 TEST_F(ConvImplicitGemmScorerParity, FeatureVectorMatchesPython) {
-    ConvImplicitGemmScorer scorer;
+    ConvImplicitGemmScorer scorer;  // bf16/gfx950 default constructor
     ASSERT_TRUE(scorer.isLoaded());
 
     // A representative problem + a representative knob set from the
@@ -443,5 +443,71 @@ TEST_F(ConvImplicitGemmScorerParity, FeatureVectorMatchesPython) {
         EXPECT_NEAR(cppFeatures[i], pyView(i), 1e-9)
             << "feature[" << i << "] '" << name << "' diverged: C++=" << cppFeatures[i]
             << " Python=" << pyView(i);
+    }
+}
+
+// fp16/gfx942 parity: C++ extractor (with gfx942 hw profile) vs Python
+// GroupedConvFeatureEngine constructed with the gfx942 hw params from
+// HW_PROFILES in convert_csv_to_parquet.py. Uses the fp16/gfx942 model
+// path to confirm the path constant is correctly wired; any feature
+// divergence between C++ and Python silently corrupts the scored ranking.
+TEST_F(ConvImplicitGemmScorerParity, Fp16Gfx942FeatureVectorMatchesPython) {
+    ConvImplicitGemmScorer scorer{
+        std::string(ck_dsl_provider::kCkDslGroupedConvFwdFp16Gfx942ModelPath), "gfx942"};
+    ASSERT_TRUE(scorer.isLoaded())
+        << "fp16/gfx942 scorer failed to load from "
+        << ck_dsl_provider::kCkDslGroupedConvFwdFp16Gfx942ModelPath;
+
+    const ConvSelectionProblem problem = makeFp16Problem();
+    ConvImplicitGemmPerfKnobs knobs;
+    knobs.tile_m = 64;
+    knobs.tile_n = 128;
+    knobs.tile_k = 64;
+    knobs.warp_m = 2;
+    knobs.warp_n = 2;
+    knobs.warp_tile_m = 32;
+    knobs.warp_tile_n = 32;
+    knobs.warp_tile_k = 16;
+    knobs.pipeline = "compv4";
+    knobs.wave_size = 64;
+
+    const std::vector<double> cppFeatures = scorer.extractFeaturesForTest(problem, knobs);
+    ASSERT_EQ(cppFeatures.size(), 97u)
+        << "feature count drifted from the fp16/gfx942 trained schema (expected 97)";
+
+    py::gil_scoped_acquire gil;
+    py::module_ engineMod = py::module_::import("feature_engine_grouped_conv");
+    py::object engineCls = engineMod.attr("GroupedConvFeatureEngine");
+    // Construct with gfx942 hardware params matching HW_PROFILES["gfx942"]
+    // in convert_csv_to_parquet.py and hardwareProfileForArch("gfx942") in
+    // ConvImplicitGemmScorer.cpp.
+    py::object engine = engineCls(
+        /*num_cus=*/228,
+        /*lds_capacity=*/65536,
+        /*max_clock_mhz=*/2100,
+        /*simds_per_cu=*/4,
+        /*shader_engines=*/28,
+        /*max_waves_per_cu=*/32,
+        /*wavefront_size=*/64,
+        /*l1_cache_kb=*/32,
+        /*l2_cache_kb=*/4096,
+        /*l3_cache_kb=*/262144,
+        /*num_xcd=*/8);
+
+    py::list names = engine.attr("get_feature_names")().cast<py::list>();
+    ASSERT_EQ(names.size(), cppFeatures.size())
+        << "Python fp16/gfx942 feature schema diverged from C++ extractor";
+
+    py::array_t<double> pyArr =
+        engine.attr("extract")(problemDictFromSelection(problem), kernelDictFromKnobs(knobs))
+            .cast<py::array_t<double>>();
+    ASSERT_EQ(static_cast<std::size_t>(pyArr.size()), cppFeatures.size());
+
+    auto pyView = pyArr.unchecked<1>();
+    for (std::size_t i = 0; i < cppFeatures.size(); ++i) {
+        const std::string name = py::str(names[i]).cast<std::string>();
+        EXPECT_NEAR(cppFeatures[i], pyView(i), 1e-9)
+            << "fp16/gfx942 feature[" << i << "] '" << name
+            << "' diverged: C++=" << cppFeatures[i] << " Python=" << pyView(i);
     }
 }
