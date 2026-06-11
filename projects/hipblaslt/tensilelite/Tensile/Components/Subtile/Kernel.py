@@ -471,10 +471,10 @@ class TileInfo:
       self.depthUBytes   = int(self.depthU * geometry.bpe)
       self.subIterKBytes = self.depthUBytes // self.localSubtileGrid[1]
       # TDM path. We apply 16 Bytes padding to each row.
-      # Swizzled LDS layout (gfx950 only) does not need this pad. Tests may
-      # pass writer=None; treat that as non-swizzled.
+      # Swizzled LDS layout (gfx950 only) does not need this pad.
       isTDM = kernel.get("enableTDM%s" % tc, False)
-      isSwizzled = bool(writer is not None and writer.states.subtileLdsSwizzle)
+      isgfx950 = tuple(kernel.get("ISA", ())[:2]) == (9, 5)
+      isSwizzled = bool(kernel.get("UseSubtileImpl", False) and isgfx950)
       self.ldsRowPadBytes = 16 if (isTDM and not isSwizzled) else 0
 
       # Convenience counts for scheduler / diagram
