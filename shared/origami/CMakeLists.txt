@@ -146,21 +146,15 @@ if(ORIGAMI_ENABLE_INSTALL OR ORIGAMI_STANDALONE)
         "*.h"
     )
 
-    # Weights now live in the mosaic library (../mosaic/data/hipblaslt). We still
-    # install them from origami (mosaic is compiled into liborigami.a rather than
-    # add_subdirectory'd) at BOTH the legacy origami path and the mosaic path so
-    # auto-discovery (origami legacy paths + mosaic share/mosaic/data/hipblaslt)
-    # resolves regardless of which library performs the dladdr lookup.
-    set(ORIGAMI_ML_WEIGHTS "${CMAKE_CURRENT_SOURCE_DIR}/../mosaic/data/hipblaslt/ml_recommender_weights.bin")
-    if(EXISTS "${ORIGAMI_ML_WEIGHTS}")
+    # The mosaic engine (compiled into liborigami here, rather than
+    # add_subdirectory'd) auto-discovers its weights relative to the library, so
+    # install them to the mosaic data root. (Step 2 moves this integration so
+    # hipBLASLt links mosaic directly and mosaic installs its own weights.)
+    set(MOSAIC_WEIGHTS_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../mosaic/backends/hipblaslt/data/mosaic_weights.bin")
+    if(EXISTS "${MOSAIC_WEIGHTS_BIN}")
         rocm_install(
-            FILES "${ORIGAMI_ML_WEIGHTS}"
-            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/origami"
-            COMPONENT runtime
-        )
-        rocm_install(
-            FILES "${ORIGAMI_ML_WEIGHTS}"
-            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/mosaic/data/hipblaslt"
+            FILES "${MOSAIC_WEIGHTS_BIN}"
+            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/mosaic/backends/hipblaslt/data"
             COMPONENT runtime
         )
     endif()

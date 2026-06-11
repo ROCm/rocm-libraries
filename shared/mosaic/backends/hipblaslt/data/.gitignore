@@ -1,0 +1,6 @@
+# Confidential: the deploy manifest/summary carry per-cell performance numbers
+# (selection-efficiency, latencies). They must NOT be committed to the branch.
+# Only mosaic_weights.bin (model parameters) is tracked here; the manifest and
+# summary live in the pipeline run output (gemmaiperf/.../runs/<run>/).
+*.manifest.json
+*.summary.txt

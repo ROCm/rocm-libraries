@@ -30,7 +30,7 @@
 #include "origami/origami.hpp"
 #include "origami/types.hpp"
 
-#include "mosaic/mosaic.hpp"
+#include "mosaic/model.hpp"
 #include "mosaic/types.hpp"
 
 #include <limits>

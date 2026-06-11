@@ -5,15 +5,14 @@
 // mosaic -- framework-agnostic neutral types
 // =============================================================================
 //
-// These types are mosaic's OWN, deliberately self-contained: the mosaic
-// kernel-recommender engine includes NO framework headers (no origami, no
-// hipBLASLt). Each struct/enum below carries ONLY the fields the engine and
-// its feature-extraction actually consume.
+// These types are mosaic's OWN, deliberately self-contained: the
+// kernel-recommender engine includes NO GEMM-framework headers. Each
+// struct/enum below carries ONLY the fields the engine and its
+// feature-extraction actually consume.
 //
-// The enum value ORDER intentionally mirrors origami's `data_type_t`,
-// `transpose_t`, and `prediction_modes_t` so that a framework adapter can
-// convert with a plain static_cast (and so the engine's per-enum switch logic
-// stays byte-identical to the reconstructed origami runtime).
+// The enum value ORDER is fixed so a framework adapter (e.g. the hipBLASLt
+// backend) can convert its own GEMM dtype/transpose/prediction-mode enums with
+// a plain static_cast, keeping the engine's per-enum switch logic stable.
 // =============================================================================
 
 #pragma once
@@ -24,8 +23,8 @@
 
 namespace mosaic {
 
-// Mirror of origami::data_type_t (same declaration order -> same integer
-// values, so the adapter may static_cast across).
+// GEMM element data type. Fixed declaration order -> fixed integer values, so a
+// framework adapter may static_cast its own dtype enum across.
 enum class DataType : int {
   Float,
   Double,
@@ -54,21 +53,21 @@ enum class DataType : int {
   None = Count
 };
 
-// Mirror of origami::transpose_t.
+// Matrix transpose flag.
 enum class Transpose { T, N, Count };
 
-// Mirror of origami::prediction_modes_t (used only so a Config can carry the
-// mode through; the mosaic ML ranker itself does not branch on it).
+// Prediction mode a Config may carry through (the engine itself does not branch
+// on it). Fixed integer values so a framework adapter can static_cast across.
 enum class PredictionMode : std::uint32_t {
-  estimation     = 0,
-  simulation     = 1,
-  ml_recommender = 2,
+  estimation = 0,
+  simulation = 1,
+  mosaic     = 2,
   count,
   none = 0xFFFFFFFFu
 };
 
-// Compact (M, N, K) triple. Mirrors origami::dim3_t for the fields the engine
-// reads, plus the mk()/nk() helpers used by the LDS-capacity gate.
+// Compact (M, N, K) triple, plus the mk()/nk() helpers used by the
+// LDS-capacity gate.
 struct Dim3 {
   std::size_t m = 0;
   std::size_t n = 0;
@@ -128,7 +127,7 @@ struct Config {
   PredictionMode prediction_mode = PredictionMode::estimation;
 };
 
-// Optional per-config ML feature fields. 1:1 mirror of origami::config_ml_t.
+// Optional per-config extended feature fields (cache hints, prefetch, LDS pad).
 struct ConfigML {
   int cache_hints_c         = 0;
   int cache_hints_d         = 0;

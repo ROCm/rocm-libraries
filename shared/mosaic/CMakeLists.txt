@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 #
 # mosaic: standalone, framework-agnostic kernel-recommender (MLREC_v6 runtime).
-# Builds a STATIC library with NO origami / hipBLASLt dependency.
+# Builds a STATIC library with NO GEMM-framework dependency.
 
 cmake_minimum_required(VERSION 3.25.2)
 
@@ -15,6 +15,9 @@ else()
 endif()
 
 option(MOSAIC_ENABLE_INSTALL "Configure mosaic installation" ON)
+option(MOSAIC_ENABLE_PYTHON "Enable Python bindings." OFF)
+option(MOSAIC_BUILD_TESTING "Build tests." OFF)
+option(MOSAIC_ENABLE_FETCH "Auto-fetch dependencies (nanobind/Catch2) with FetchContent" ON)
 
 # ── the static library ─────────────────────────────────────────────────────
 add_library(mosaic STATIC)
@@ -26,7 +29,7 @@ set_target_properties(mosaic PROPERTIES
 )
 target_compile_features(mosaic PUBLIC cxx_std_17)
 
-# Public headers (mosaic is self-contained: no origami / HIP headers).
+# Public headers (mosaic is self-contained: no GEMM-framework / HIP headers).
 add_library(mosaic-headers INTERFACE)
 add_library(roc::mosaic-headers ALIAS mosaic-headers)
 target_compile_features(mosaic-headers INTERFACE cxx_std_17)
@@ -36,7 +39,7 @@ target_include_directories(
 )
 target_sources(
     mosaic-headers
-    INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/mosaic/mosaic.hpp>
+    INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/mosaic/model.hpp>
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/mosaic/types.hpp>
 )
 
@@ -46,9 +49,9 @@ target_include_directories(mosaic PUBLIC
 )
 target_link_libraries(mosaic PUBLIC roc::mosaic-headers)
 
-# The engine is hot CPU inference code: same aggressive flags origami used for
-# the reconstructed ml_recommender.cpp. AVX512 paths are guarded by __AVX512F__
-# so the scalar fallback is used where the ISA is unavailable.
+# The engine is hot CPU inference code: aggressive flags for the scoring loop.
+# AVX512 paths are guarded by __AVX512F__ so the scalar fallback is used where
+# the ISA is unavailable.
 set_source_files_properties(
     "${CMAKE_CURRENT_SOURCE_DIR}/src/mosaic/model.cpp"
     PROPERTIES COMPILE_OPTIONS
@@ -63,6 +66,16 @@ target_sources(
 # dladdr-based weight auto-discovery needs libdl on Unix.
 if(UNIX)
     target_link_libraries(mosaic PUBLIC ${CMAKE_DL_LIBS})
+endif()
+
+# ── python bindings + tests (mirroring the framework libs) ──────────────────
+if(MOSAIC_ENABLE_PYTHON)
+    add_subdirectory(python)
+endif()
+
+if(MOSAIC_BUILD_TESTING OR BUILD_TESTING)
+    enable_testing()
+    add_subdirectory(tests)
 endif()
 
 # ── install ─────────────────────────────────────────────────────────────────
@@ -83,12 +96,12 @@ if(MOSAIC_ENABLE_INSTALL OR MOSAIC_STANDALONE)
         PATTERN "*.h"
     )
 
-    # Weights ship under share/mosaic/data/hipblaslt (matches the auto-discovery
-    # search path in model.cpp). The parent moves the .bin into data/hipblaslt.
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/hipblaslt/ml_recommender_weights.bin")
+    # Weights ship under share/mosaic/backends/hipblaslt/data (matches the
+    # auto-discovery search path in model.cpp).
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/backends/hipblaslt/data/mosaic_weights.bin")
         install(
-            FILES "${CMAKE_CURRENT_SOURCE_DIR}/data/hipblaslt/ml_recommender_weights.bin"
-            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/mosaic/data/hipblaslt"
+            FILES "${CMAKE_CURRENT_SOURCE_DIR}/backends/hipblaslt/data/mosaic_weights.bin"
+            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/mosaic/backends/hipblaslt/data"
         )
     endif()
 endif()

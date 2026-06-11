@@ -5,14 +5,14 @@
 // mosaic -- public, framework-neutral kernel-recommender API
 // =============================================================================
 //
-// mosaic is the standalone, framework-agnostic extraction of the deployed
-// GRID-aware ("split-tree, per-cell two-tower MLP") kernel recommender. It
-// depends on NO GEMM framework: callers (e.g. an origami adapter) convert
-// their own types into mosaic's neutral types (see mosaic/types.hpp) and call
-// the entry points below.
+// mosaic is the standalone, framework-agnostic GRID-aware ("split-tree,
+// per-cell two-tower MLP") GEMM kernel recommender. It depends on NO GEMM
+// framework: callers (e.g. a per-framework backend adapter) convert their own
+// types into mosaic's neutral types (see mosaic/types.hpp) and call the entry
+// points below.
 //
-// Weights are loaded lazily by a process-wide singleton via an environment
-// override or auto-discovery relative to libmosaic; see model.cpp.
+// Weights are loaded lazily by a process-wide singleton via the MOSAIC_WEIGHTS
+// environment override or auto-discovery relative to the library; see model.cpp.
 // =============================================================================
 
 #pragma once

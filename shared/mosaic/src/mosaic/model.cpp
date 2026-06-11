@@ -5,49 +5,41 @@
 // mosaic engine -- the MLREC_v6 runtime (framework-agnostic)
 // =============================================================================
 //
-// This translation unit is the standalone extraction of the reconstructed
-// GRID-aware ("split-tree, per-cell two-tower MLP") kernel recommender. The
-// inference math, the on-disk MLREC_v6 `.bin` serialization, the feature
-// catalog, the whitening, the smart-K signature filter and the argmax
-// tie-break are COPIED VERBATIM from the origami reconstruction; ONLY the
-// namespace (origami::ml_recommender -> mosaic) and the types (origami::*  ->
-// mosaic::*) have been renamed. The LDS-capacity gate -- previously borrowed
-// from origami's gemm.cpp -- is re-implemented here byte-for-byte so mosaic
-// stays self-contained.
+// The GRID-aware ("split-tree, per-cell two-tower MLP") GEMM kernel
+// recommender: inference math, the on-disk MLREC_v6 `.bin` serialization, the
+// feature catalog, the whitening, the smart-K signature filter, the argmax
+// tie-break, and a self-contained LDS-capacity feasibility gate. The engine
+// depends on no GEMM framework.
 //
-// Source-of-truth mapping (Python pipeline @ ml_recommender/):
-//   * .bin format            <- stages/stage06_deploy_to_origami.py
+// Source-of-truth mapping (the Python training/deploy pipeline):
+//   * .bin format            <- the deploy stage's v6 writer
 //                               (_emit_v6_bin / _pack_weights /
-//                                _tensor_to_bf16_bytes / _tensor_to_int8_bytes)
-//   * model architecture     <- stages/stage05_train.py  (GenericTwoTower:
+//                                bf16 + int8 packing)
+//   * model architecture     <- the trainer (GenericTwoTower:
 //                               q_proj depth-3, i_proj depth-2,
 //                               inter_mlp [Linear,ReLU,Linear], temperature)
-//   * deployed inference     <- stages/stage05_train.py
-//                               (compute_deployed_top1_picks /
-//                                evaluate_deployed_sel_eff): LDS gate ->
-//                               is_kernel_feasible -> smart_K signature
-//                               filter (two-pass w/ fallback) -> MLP score ->
+//   * deployed inference     <- the trainer's deployed-pick routine: LDS gate ->
+//                               feasibility filter -> smart_K signature filter
+//                               (two-pass w/ fallback) -> MLP score ->
 //                               argmax (first-max wins, matching torch.argmax)
-//   * feature catalog        <- lib/features.py (compute_generic_features +
-//                               FEATURE_GROUPS / query|item|interaction names)
-//   * whitening              <- stages/stage05_train.py (_apply_whiten):
+//   * feature catalog        <- the feature library (compute_generic_features +
+//                               query|item|interaction feature groups)
+//   * whitening              <- the trainer (_apply_whiten):
 //                               sd<1e-6 -> 1.0, normed=(v-mean)/sd
-//   * split-tree routing     <- lib/subcells.py (assign_subcell) +
-//                               lib/grid.py (cell_key / m_tier/n_tier/k_tier/
-//                               b_tier)
-//   * kernel signature       <- lib/dat.py (sig_from_config_t: 8-tuple
+//   * split-tree routing     <- the subcell/grid library (assign_subcell +
+//                               cell_key / m_tier/n_tier/k_tier/b_tier)
+//   * kernel signature       <- the config-signature helper (8-tuple
 //                               mt_m,mt_n,mt_k,mi_m,mi_n,mi_k,cha,chb)
-//   * feasibility filter      <- lib/origami.py (is_kernel_feasible -- itself a
-//                               byte-for-byte mirror of origami::is_kernel_feasible)
+//   * feasibility filter      <- the analytical kernel-feasibility check
 //
 // CORRECTNESS BAR: built from this source, the C++ must produce the SAME
-// kernel pick as the Python `compute_deployed_top1_picks` for every shape
+// kernel pick as the Python deployed-pick routine for every shape
 // (parity == 100%). Hence feature math is done in DOUBLE then cast to
 // float (mirroring Python: math in float64, then np.float32), whitening and
 // the MLP run in float32, and the .bin is read byte-for-byte.
 // =============================================================================
 
-#include "mosaic/mosaic.hpp"
+#include "mosaic/model.hpp"
 #include "mosaic/types.hpp"
 
 #include <algorithm>
@@ -169,8 +161,8 @@ constexpr std::size_t kQueryDim = 55;
 constexpr std::size_t kItemDim  = 23;
 constexpr std::size_t kInterDim = 38;
 
-// ── dtype helpers (mirror lib/features.py _BPE / _DTYPE_ID and
-//     lib/origami.py _DTYPE_BITS). Only the dtypes actually benched
+// ── dtype helpers (mirror the feature library's _BPE / _DTYPE_ID and the
+//     analytical _DTYPE_BITS). Only the dtypes actually benched
 //     (bf16/f16/f8/bf8/f32/xf32) are parity-critical. ──────────────────────
 double bpe_for_dtype(DataType dt) {
   switch (dt) {
@@ -222,7 +214,7 @@ int dtype_id(DataType dt) {
   }
 }
 
-// lib/origami.py _dtype_to_bits (used by is_kernel_feasible).
+// analytical _dtype_to_bits (used by is_kernel_feasible).
 int dtype_bits_feasible(DataType dt) {
   switch (dt) {
     case DataType::Float:
@@ -237,9 +229,8 @@ int dtype_bits_feasible(DataType dt) {
   }
 }
 
-// origami::datatype_to_bits (origami/types.cpp), used by the LDS-capacity
-// gate below. Re-implemented here byte-for-byte so mosaic carries its own copy
-// rather than depending on origami.
+// Bits-per-element by dtype, used by the LDS-capacity gate below. Self-contained
+// so the engine carries its own copy with no external dependency.
 int datatype_to_bits(DataType type) {
   switch (type) {
     case DataType::Float: return 32;
@@ -273,9 +264,8 @@ inline double data_type_to_bytes(DataType type) {
   return static_cast<double>(datatype_to_bits(type)) / 8.0;
 }
 
-// origami::check_lds_capacity (origami/gemm.cpp): does the macro tile's A+B
-// LDS footprint fit in the hardware LDS budget? Re-implemented here so mosaic
-// has no origami dependency.
+// LDS-capacity feasibility: does the macro tile's A+B LDS footprint fit in the
+// hardware LDS budget? Self-contained so the engine has no external dependency.
 bool check_lds_capacity(const Hardware& hardware, const Dim3& mt,
                         const DataType& a_dtype, const DataType& b_dtype) {
   const auto a_loads_in_bytes = mt.mk() * data_type_to_bytes(a_dtype);
@@ -831,8 +821,8 @@ bool load_binary_stream(std::istream& f, LoadedModel* out) {
 
     const std::uint32_t qd = out->q_dim, id = out->i_dim, xd = out->x_dim;
     const std::uint32_t hd = cm.hidden_dim, ed = cm.embed_dim, ih = cm.inter_hidden;
-    // _WEIGHT_ORDER in stage06_deploy_to_origami.py (.weight uses weight_dtype,
-    // .bias always fp32):
+    // _WEIGHT_ORDER from the deploy stage's v6 writer (.weight uses
+    // weight_dtype, .bias always fp32):
     if (!read_weights(f, std::size_t(hd) * qd, &cm.q_w0, wdt)) return false;
     if (!read_floats(f, hd, &cm.q_b0)) return false;
     if (!read_weights(f, std::size_t(hd) * hd, &cm.q_w2, wdt)) return false;
@@ -997,8 +987,8 @@ int resolve_model_cell_index(const LoadedModel& mdl, const Problem& p) {
   }
 }
 
-// ── feasibility filter (byte-for-byte mirror of lib/origami.is_kernel_feasible
-//     == origami::is_kernel_feasible) ─────────────────────────────────────
+// ── feasibility filter (byte-for-byte mirror of the analytical
+//     is_kernel_feasible check) ───────────────────────────────────────────
 bool is_kernel_feasible(const Problem& p, const Config& c) {
   const long long M = static_cast<long long>(p.size.m);
   const long long N = static_cast<long long>(p.size.n);
@@ -1057,14 +1047,13 @@ bool load_weights(const std::string& bin_path) {
   if (!load_binary(bin_path.c_str(), &m)) return false;
   g_model = std::move(m);
   g_loaded = true;
-  // One-shot weights-load banner (gated by ML_DIAG). The deploy pipeline
+  // One-shot weights-load banner (gated by MOSAIC_DIAG). The deploy pipeline
   // (stage07) keys off this line to confirm the .bin was actually picked up
   // rather than silently falling back to the analytical scorer; its absence on
-  // an ML-on bench is a HARD FAIL. Format is byte-compatible with the deployed
-  // origami runtime so stage07's [ML_DIAG FILE] parser keeps working.
-  if (std::getenv("ML_DIAG") != nullptr) {
+  // a mosaic-on bench is a HARD FAIL.
+  if (std::getenv("MOSAIC_DIAG") != nullptr) {
     std::fprintf(stderr,
-                 "[ML_DIAG FILE] arch=%s qhash=%s qdim=%u idim=%u xdim=%u "
+                 "[MOSAIC_DIAG FILE] arch=%s qhash=%s qdim=%u idim=%u xdim=%u "
                  "n_cells=%zu n_splits=%zu\n",
                  g_model.arch.c_str(), g_model.feature_names_hash.c_str(),
                  g_model.q_dim, g_model.i_dim, g_model.x_dim,
@@ -1092,46 +1081,42 @@ std::string self_library_dir() {
   return std::string();
 }
 
-// F6: search the env overrides (MOSAIC_WEIGHTS, then the legacy
-// ML_RECOMMENDER_WEIGHTS) first, then auto-discover relative to libmosaic,
-// then cwd, then the rocm install path. The mosaic data/hipblaslt layout is
-// searched alongside the legacy origami paths for back-compat.
+// Resolve the weights .bin: the MOSAIC_WEIGHTS env override first, then
+// auto-discover relative to the loaded library, then cwd, then the rocm install
+// path. The per-backend layout (backends/<framework>/data) is searched so the
+// same engine can ship weights for hipblaslt / triton / etc.
 void ensure_weights() {
   if (g_loaded) return;
   std::call_once(g_load_once, []() {
     if (g_loaded) return;
     const char* env_mosaic = std::getenv("MOSAIC_WEIGHTS");
     if (env_mosaic && env_mosaic[0] && load_weights(env_mosaic)) return;
-    const char* env = std::getenv("ML_RECOMMENDER_WEIGHTS");
-    if (env && env[0] && load_weights(env)) return;
 
     const std::string dir = self_library_dir();
     if (!dir.empty()) {
       const char* rels[] = {
-          "/ml_recommender_weights.bin",
-          "/data/hipblaslt/ml_recommender_weights.bin",
-          "/data/ml_recommender_weights.bin",
-          "/../data/hipblaslt/ml_recommender_weights.bin",
-          "/../data/ml_recommender_weights.bin",
-          "/../share/mosaic/data/hipblaslt/ml_recommender_weights.bin",
-          "/../share/mosaic/ml_recommender_weights.bin",
-          "/../share/origami/ml_recommender_weights.bin",
+          "/mosaic_weights.bin",
+          "/backends/hipblaslt/data/mosaic_weights.bin",
+          "/data/mosaic_weights.bin",
+          "/../backends/hipblaslt/data/mosaic_weights.bin",
+          "/../data/mosaic_weights.bin",
+          "/../share/mosaic/backends/hipblaslt/data/mosaic_weights.bin",
+          "/../share/mosaic/mosaic_weights.bin",
       };
       for (const char* rel : rels) {
         if (load_weights(dir + rel)) return;
       }
     }
 
-    if (load_weights("./ml_recommender_weights.bin")) return;
-    if (load_weights("/opt/rocm/share/mosaic/data/hipblaslt/ml_recommender_weights.bin")) return;
-    if (load_weights("/opt/rocm/share/mosaic/ml_recommender_weights.bin")) return;
-    if (load_weights("/opt/rocm/share/origami/ml_recommender_weights.bin")) return;
+    if (load_weights("./mosaic_weights.bin")) return;
+    if (load_weights("/opt/rocm/share/mosaic/backends/hipblaslt/data/mosaic_weights.bin")) return;
+    if (load_weights("/opt/rocm/share/mosaic/mosaic_weights.bin")) return;
 
     std::fprintf(stderr,
-                 "[mosaic] no weights loaded; set MOSAIC_WEIGHTS (or "
-                 "ML_RECOMMENDER_WEIGHTS) or place ml_recommender_weights.bin "
-                 "next to libmosaic, in data/hipblaslt/, in cwd, or in "
-                 "/opt/rocm/share/mosaic/data/hipblaslt/\n");
+                 "[mosaic] no weights loaded; set MOSAIC_WEIGHTS or place "
+                 "mosaic_weights.bin next to the library, in "
+                 "backends/hipblaslt/data/, in cwd, or in "
+                 "/opt/rocm/share/mosaic/backends/hipblaslt/data/\n");
   });
 }
 
@@ -1140,7 +1125,7 @@ void ensure_weights() {
 int route(const Problem& problem) {
   ensure_weights();
   if (!g_loaded) return -1;
-  const char* env = std::getenv("ML_FORCE_CLUSTER");
+  const char* env = std::getenv("MOSAIC_FORCE_CELL");
   if (env) {
     int forced = std::atoi(env);
     if (forced >= 0) return forced;
@@ -1240,14 +1225,13 @@ std::vector<Result> rank_configs(const Problem& problem, const Hardware& hardwar
                      return a.second > b.second;
                    });
 
-  // One [ML_PICK] stderr line per ranked call (gated by ML_PICK_LOG). The
-  // deploy pipeline (stage07) parses this to compare the C++ top-1 pick against
-  // the Python student's pick (the C++<->Python parity check). Format is
-  // byte-compatible with the deployed origami runtime's _RE_ML_PICK parser.
-  if (std::getenv("ML_PICK_LOG") != nullptr && !scored.empty()) {
+  // One [MOSAIC_PICK] stderr line per ranked call (gated by MOSAIC_PICK_LOG).
+  // The deploy pipeline (stage07) parses this to compare the C++ top-1 pick
+  // against the Python student's pick (the C++<->Python parity check).
+  if (std::getenv("MOSAIC_PICK_LOG") != nullptr && !scored.empty()) {
     const Config& top = configs[scored[0].first];
     std::fprintf(stderr,
-                 "[ML_PICK] m=%zu n=%zu k=%zu b=%zu tA=%c tB=%c leaf=%s "
+                 "[MOSAIC_PICK] m=%zu n=%zu k=%zu b=%zu tA=%c tB=%c leaf=%s "
                  "top1_sig=(mt_m=%zu,mt_n=%zu,mt_k=%zu,mi_m=%zu,mi_n=%zu,"
                  "mi_k=%zu,cha=%d,chb=%d) top1_score=%f n_configs=%zu\n",
                  problem.size.m, problem.size.n, problem.size.k, problem.batch,
@@ -1276,14 +1260,17 @@ std::vector<Result> rank_configs(const Problem& problem, const Hardware& hardwar
 }
 
 namespace {
-// F7: eager init. Gate on TENSILE_ML_RECOMMENDER being set/truthy (NOT on
-// ML_RECOMMENDER_WEIGHTS); honor MOSAIC_NO_EAGER_INIT /
-// ML_RECOMMENDER_NO_EAGER_INIT for back-compat, though neither is required.
+// Eager init: warm the weights at library load when the mosaic path is enabled,
+// so the first rank_configs() call isn't penalized by the .bin parse. Lazy
+// loading in route()/rank_configs() is the safety net, so this is best-effort.
+// Gated on TENSILE_MOSAIC; honors MOSAIC_NO_EAGER_INIT to opt out.
+// (TENSILE_ML_RECOMMENDER is still honored transitionally until the hipBLASLt
+// integration switches the runtime gate to TENSILE_MOSAIC.)
 struct EagerInit {
   EagerInit() {
     if (std::getenv("MOSAIC_NO_EAGER_INIT") != nullptr) return;
-    if (std::getenv("ML_RECOMMENDER_NO_EAGER_INIT") != nullptr) return;
-    if (!truthy_env(std::getenv("TENSILE_ML_RECOMMENDER"))) return;
+    if (!truthy_env(std::getenv("TENSILE_MOSAIC")) &&
+        !truthy_env(std::getenv("TENSILE_ML_RECOMMENDER"))) return;
     ensure_weights();
   }
 };
