@@ -91,6 +91,7 @@ BenchmarkProblems:
           # - Exact: [4096, 4103, 1, 1024]
           # - Exact: [4096, 4096, 1, 1031]
           - Exact: [4103, 4103, 1, 1031]
+          - Exact: [512, 512, 2, 128]
 
   - # HGEMM NT
     - # ProblemType
@@ -162,3 +163,4 @@ BenchmarkProblems:
           # - Exact: [4096, 4103, 1, 1024]
           # - Exact: [4096, 4096, 1, 1031]
           - Exact: [4103, 4103, 1, 1031]
+          - Exact: [512, 512, 2, 128]
