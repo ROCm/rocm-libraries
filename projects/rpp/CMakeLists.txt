@@ -380,8 +380,6 @@ if( "${BACKEND}" STREQUAL "HIP")
     )
 endif()
 
-add_subdirectory(addkernels)
-
 # Test suite
 enable_testing()
 include(CTest)
