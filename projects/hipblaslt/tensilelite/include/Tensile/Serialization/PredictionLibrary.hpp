@@ -128,18 +128,20 @@ namespace TensileLite
 
                             lib.origami_config_list.emplace_back(origami_config);
 
-                            // Per-config ML features for the mosaic scorer. The
-                            // kernel-name codegen tokens (LRVW/PLR/NTC/NTE/LPA/
-                            // LPB/...) plus 3 SizeMapping fields (NonTemporalD,
-                            // PrefetchGlobalRead, LocalSplitU) -- mirrors the
-                            // training pipeline's lib/dat.py derivation so the
+                            // Pre-build the mosaic config (base params + ML
+                            // features). ML features come from the kernel-name
+                            // codegen tokens (LRVW/PLR/NTC/NTE/LPA/LPB/...) plus
+                            // the 3 SizeMapping fields hipBLASLt carries
+                            // (NonTemporalD, PrefetchGlobalRead, LocalSplitU) --
+                            // mirrors the training pipeline's lib/dat.py so the
                             // deployed picks match the model. Index-aligned with
                             // origami_config_list.
                             std::string mosaic_kernel_name = solution->name();
                             if(mosaic_kernel_name.empty())
                                 mosaic_kernel_name = solution->kernelName;
-                            lib.mosaic_config_ml_list.emplace_back(
-                                mosaic::hipblaslt::parse_config_ml(
+                            lib.mosaic_config_list.emplace_back(
+                                mosaic::hipblaslt::make_config(
+                                    origami_config,
                                     mosaic_kernel_name,
                                     solution->sizeMapping.NonTemporalD,
                                     solution->sizeMapping.PrefetchGlobalRead,

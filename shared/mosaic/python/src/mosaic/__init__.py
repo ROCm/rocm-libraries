@@ -17,7 +17,6 @@ try:
         Dim3,
         Problem,
         Config,
-        ConfigML,
         Hardware,
         Result,
         # Free functions
@@ -44,7 +43,6 @@ __all__ = [
     "Dim3",
     "Problem",
     "Config",
-    "ConfigML",
     "Hardware",
     "Result",
     # Free functions

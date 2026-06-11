@@ -90,7 +90,7 @@ TEST_CASE("mosaic: rank_configs ranking contract", "[mosaic]") {
   const auto configs = make_configs();
   const auto hw      = make_hardware();
 
-  auto results = mosaic::rank_configs(problem, hw, configs, nullptr);
+  auto results = mosaic::rank_configs(problem, hw, configs);
 
   // 1. Every input config is covered exactly once.
   REQUIRE(results.size() == configs.size());

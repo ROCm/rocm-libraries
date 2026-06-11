@@ -94,23 +94,19 @@ NB_MODULE(mosaic, m) {
       .def_rw("vector_width_b", &mosaic::Config::vector_width_b)
       .def_rw("depth_u", &mosaic::Config::depth_u)
       .def_rw("global_split_u", &mosaic::Config::global_split_u)
-      .def_rw("local_split_u", &mosaic::Config::local_split_u)
+      .def_rw("index", &mosaic::Config::index)
+      // Extended ML features (consumed by the item/inter towers).
+      .def_rw("cache_hints_c", &mosaic::Config::cache_hints_c)
+      .def_rw("cache_hints_d", &mosaic::Config::cache_hints_d)
+      .def_rw("cache_hints_e", &mosaic::Config::cache_hints_e)
       .def_rw("prefetch_global_read", &mosaic::Config::prefetch_global_read)
-      .def_rw("index", &mosaic::Config::index);
-
-  nb::class_<mosaic::ConfigML>(m, "ConfigML")
-      .def(nb::init<>())
-      .def_rw("cache_hints_c", &mosaic::ConfigML::cache_hints_c)
-      .def_rw("cache_hints_d", &mosaic::ConfigML::cache_hints_d)
-      .def_rw("cache_hints_e", &mosaic::ConfigML::cache_hints_e)
-      .def_rw("prefetch_global_read", &mosaic::ConfigML::prefetch_global_read)
-      .def_rw("prefetch_local_read", &mosaic::ConfigML::prefetch_local_read)
-      .def_rw("lds_read_vector_width", &mosaic::ConfigML::lds_read_vector_width)
-      .def_rw("local_split_u", &mosaic::ConfigML::local_split_u)
-      .def_rw("lds_pad_a", &mosaic::ConfigML::lds_pad_a)
-      .def_rw("lds_pad_b", &mosaic::ConfigML::lds_pad_b)
-      .def_rw("lds_buffer_pad_a", &mosaic::ConfigML::lds_buffer_pad_a)
-      .def_rw("lds_buffer_pad_b", &mosaic::ConfigML::lds_buffer_pad_b);
+      .def_rw("prefetch_local_read", &mosaic::Config::prefetch_local_read)
+      .def_rw("lds_read_vector_width", &mosaic::Config::lds_read_vector_width)
+      .def_rw("local_split_u", &mosaic::Config::local_split_u)
+      .def_rw("lds_pad_a", &mosaic::Config::lds_pad_a)
+      .def_rw("lds_pad_b", &mosaic::Config::lds_pad_b)
+      .def_rw("lds_buffer_pad_a", &mosaic::Config::lds_buffer_pad_a)
+      .def_rw("lds_buffer_pad_b", &mosaic::Config::lds_buffer_pad_b);
 
   nb::class_<mosaic::Hardware>(m, "Hardware")
       .def(nb::init<>())
@@ -139,19 +135,10 @@ NB_MODULE(mosaic, m) {
   m.def("route", &mosaic::route, nb::arg("problem"),
         "Route a problem to its leaf model-cell index (or -1).");
 
-  // rank_configs: the C++ 4th arg is `const std::vector<ConfigML>*`. Expose it
-  // as an optional list defaulting to None; forward a pointer (or nullptr).
-  m.def(
-      "rank_configs",
-      [](const mosaic::Problem& p, const mosaic::Hardware& hw,
-         const std::vector<mosaic::Config>& configs,
-         std::optional<std::vector<mosaic::ConfigML>> configs_ml) {
-        return mosaic::rank_configs(p, hw, configs,
-                                    configs_ml ? &*configs_ml : nullptr);
-      },
-      nb::arg("problem"), nb::arg("hardware"), nb::arg("configs"),
-      nb::arg("configs_ml") = std::optional<std::vector<mosaic::ConfigML>>(),
-      "Rank candidate configs for a problem. Returns a Result per input "
-      "config: survivors first (scored=True, descending score), then "
-      "filtered-out configs (scored=False). configs_ml may be None.");
+  m.def("rank_configs", &mosaic::rank_configs,
+        nb::arg("problem"), nb::arg("hardware"), nb::arg("configs"),
+        "Rank candidate configs (each carrying its own ML features) for a "
+        "problem. Returns a Result per input config: survivors first "
+        "(scored=True, descending score), then filtered-out configs "
+        "(scored=False).");
 }

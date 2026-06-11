@@ -90,6 +90,11 @@ struct Problem {
 // plus a few Tensile-derived knobs and bookkeeping fields the adapter forwards
 // for completeness. (The mosaic engine itself reads: mt, mi, occupancy,
 // cache_hints_a/b, grvw_a/b, gwvw_d.)
+// A candidate GEMM kernel configuration. Carries both the base macro-tile /
+// MI / cache-hint / vector-width parameters AND the extended ML features
+// (cache hints C/D/E, prefetch, LDS read-width/pad, local-split-U) the
+// two-tower item/inter scorer consumes. Fields the engine does not read are
+// carried through for completeness.
 struct Config {
   Dim3 mt{0, 0, 0};
   Dim3 mi{0, 0, 0};
@@ -106,17 +111,14 @@ struct Config {
   int vector_width_a = 1;
   int vector_width_b = 1;
 
-  // Tensile-derived knobs (carried through; not read by the ML scorer).
-  std::size_t depth_u       = 0;
+  // Carried through; not read by the ML scorer.
+  std::size_t depth_u         = 0;
   std::int16_t global_split_u = 1;
-  int local_split_u         = 1;
-  int prefetch_global_read  = 2;
 
   std::size_t index = 0;
-};
 
-// Optional per-config extended feature fields (cache hints, prefetch, LDS pad).
-struct ConfigML {
+  // Extended ML features consumed by the item/inter towers. Defaults match the
+  // engine's prior nullptr-fallback (prefetch/LRVW/LSU = 1, hints/pads = 0).
   int cache_hints_c         = 0;
   int cache_hints_d         = 0;
   int cache_hints_e         = 0;

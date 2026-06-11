@@ -39,6 +39,7 @@ bool weights_loaded();
 int route(const Problem& p);
 
 // Rank candidate configs for a problem using the per-cell two-tower scorer.
+// Each Config carries its own ML features (cache hints, prefetch, LDS, ...).
 // Mirrors the deployed `compute_deployed_top1_picks`: LDS gate ->
 // feasibility filter -> optional smart-K signature filter (two-pass with
 // fallback) -> two-tower score -> argmax (first-max wins).
@@ -46,9 +47,8 @@ int route(const Problem& p);
 // The returned vector covers EVERY input config: survivors come first, in
 // descending score order (stable, so ties keep input order -> element 0 is the
 // first-max pick), each with scored == true; filtered-out configs follow in
-// ascending input order with scored == false. `configs_ml` may be nullptr.
+// ascending input order with scored == false.
 std::vector<Result> rank_configs(const Problem& p, const Hardware& hw,
-                                 const std::vector<Config>& configs,
-                                 const std::vector<ConfigML>* configs_ml);
+                                 const std::vector<Config>& configs);
 
 }  // namespace mosaic

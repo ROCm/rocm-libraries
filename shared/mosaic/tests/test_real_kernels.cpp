@@ -158,7 +158,7 @@ TEST_CASE("mosaic: rank a real-kernel config list", "[mosaic][real]") {
     p.d_dtype     = fx.d_dt;
     p.mi_dtype    = fx.mi_dt;
 
-    const auto res = mosaic::rank_configs(p, hw, fx.configs, /*configs_ml=*/nullptr);
+    const auto res = mosaic::rank_configs(p, hw, fx.configs);
 
     // Contract: every input config covered exactly once.
     REQUIRE(res.size() == fx.configs.size());

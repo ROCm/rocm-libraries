@@ -82,10 +82,8 @@ def test_rank_configs_contract():
     configs = _make_configs()
 
     results = mosaic.rank_configs(p, hw, configs)
-    # nullopt / None path is also valid:
-    results_none = mosaic.rank_configs(p, hw, configs, None)
 
-    for res in (results, results_none):
+    for res in (results,):
         assert len(res) == len(configs)
         # Every input config index is covered exactly once.
         assert sorted(r.config_index for r in res) == list(range(len(configs)))

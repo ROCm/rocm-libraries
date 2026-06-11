@@ -338,8 +338,8 @@ inline double is_pow2_d(double x) {
   return (xi > 0 && (xi & (xi - 1)) == 0) ? 1.0 : 0.0;
 }
 
-// ML-only per-config kernel knobs (mosaic::ConfigML). Defaults mirror
-// Tensile's defaults (lib/dat.py compute_config_kwargs).
+// ML-only per-config kernel knobs (the Config's extended ML fields). Defaults
+// mirror Tensile's defaults (lib/dat.py compute_config_kwargs).
 struct MlParams {
   int cache_hints_c = 0, cache_hints_d = 0, cache_hints_e = 0;
   int prefetch_global_read = 1, prefetch_local_read = 1;
@@ -348,21 +348,19 @@ struct MlParams {
   int lds_block_size_per_pad_a = 0, lds_block_size_per_pad_b = 0;
 };
 
-MlParams ml_from(const ConfigML* m) {
+MlParams ml_from(const Config& c) {
   MlParams p;
-  if (m) {
-    p.cache_hints_c = m->cache_hints_c;
-    p.cache_hints_d = m->cache_hints_d;
-    p.cache_hints_e = m->cache_hints_e;
-    p.prefetch_global_read = m->prefetch_global_read;
-    p.prefetch_local_read  = m->prefetch_local_read;
-    p.lds_read_vector_width = m->lds_read_vector_width;
-    p.local_split_u = m->local_split_u;
-    p.lds_pad_a = m->lds_pad_a;
-    p.lds_pad_b = m->lds_pad_b;
-    p.lds_block_size_per_pad_a = m->lds_buffer_pad_a;
-    p.lds_block_size_per_pad_b = m->lds_buffer_pad_b;
-  }
+  p.cache_hints_c = c.cache_hints_c;
+  p.cache_hints_d = c.cache_hints_d;
+  p.cache_hints_e = c.cache_hints_e;
+  p.prefetch_global_read = c.prefetch_global_read;
+  p.prefetch_local_read  = c.prefetch_local_read;
+  p.lds_read_vector_width = c.lds_read_vector_width;
+  p.local_split_u = c.local_split_u;
+  p.lds_pad_a = c.lds_pad_a;
+  p.lds_pad_b = c.lds_pad_b;
+  p.lds_block_size_per_pad_a = c.lds_buffer_pad_a;
+  p.lds_block_size_per_pad_b = c.lds_buffer_pad_b;
   return p;
 }
 
@@ -1135,8 +1133,7 @@ int route(const Problem& problem) {
 
 // ── the deployed ranker -- exact mirror of compute_deployed_top1_picks ─────
 std::vector<Result> rank_configs(const Problem& problem, const Hardware& hardware,
-                                 const std::vector<Config>& configs,
-                                 const std::vector<ConfigML>* configs_ml) {
+                                 const std::vector<Config>& configs) {
   ensure_weights();
 
   std::vector<Result> result;
@@ -1206,9 +1203,7 @@ std::vector<Result> rank_configs(const Problem& problem, const Hardware& hardwar
   std::array<float, kInterDim> x_feat;
   for (std::uint32_t ci : cand) {
     const Config& cc = configs[ci];
-    MlParams ml = ml_from((configs_ml && ci < configs_ml->size())
-                              ? &(*configs_ml)[ci]
-                              : nullptr);
+    MlParams ml = ml_from(cc);
     get_or_compute_ie(cm, cc, ml, i_dim, scratch, i_emb);
     float emb_score = score_from_embeds(cm, q_emb.data(), i_emb.data(), cm.embed_dim);
     build_inter_features(problem, cc, ml, hw, x_feat.data());
