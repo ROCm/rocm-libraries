@@ -217,6 +217,16 @@ class TraitSpec:
     # store and ds_read columns -> bit-exact. Measured ~+3% on square fp16/bf16.
     # Default off (golden-gate-safe). Non-DTL only; 2-byte dtypes.
     lds_swizzle: bool = False
+    # compv4/compv3 schedule directives: the per-cluster s_setprio(1/0) +
+    # sched_barrier(0) fences (_mma_cluster) AND the two-stage
+    # sched_group_barrier HotLoop interleave (_emit_hotloop_schedule). On gfx950
+    # these OVER-CONSTRAIN comgr's backend scheduler -- removing them lets the
+    # hardware scheduler pack MFMAs tighter. Measured +1.9-2.5% (MfmaUtil
+    # 63->68%) on square fp16/bf16 GEMM, 200/200 GPU-event-timed cycles, relerr=0
+    # (see optimization/utilities/skills/empirical-case-studies.md, Case Study 7).
+    # None (default): arch-resolved -> hints OFF on gfx950 (take the uplift), ON
+    # elsewhere (preserve the historical emission). True/False forces the choice.
+    emit_sched_hints: Optional[bool] = None
 
 
 @dataclass(frozen=True)
@@ -850,6 +860,15 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     # while consecutive rows hit different banks. Opt-in via CK_SWIZZLE; the
     # 16-half toggle preserves the 8-half load-vector alignment.
     _SWZ = spec.trait.lds_swizzle
+    # compv4 schedule-hint policy: explicit trait override wins; the default
+    # (None) takes the measured gfx950 uplift (hints OFF) and preserves the
+    # historical emission on every other arch. Gates both the per-cluster
+    # s_setprio/sched_barrier fences and the sched_group_barrier HotLoop.
+    _sched_hints = (
+        spec.trait.emit_sched_hints
+        if spec.trait.emit_sched_hints is not None
+        else (arch != "gfx950")
+    )
     # LDS XOR swizzle: ``col ^= ((row >> R) % 2^W) << L``. XOR of any
     # deterministic function of ``row`` into ``col`` is correctness-preserving
     # as long as it is applied identically to the LDS store-source + ds_read
@@ -1562,14 +1581,14 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             # the cluster and cannot float the surrounding ds_read/buffer_load
             # across it. Enabled with lds_swizzle (the reference-faithful mode).
             for mi in range(mfmas_m):
-                if _SWZ:
+                if _SWZ and _sched_hints:
                     b.s_setprio(1)
                 for ni in range(mfmas_n):
                     flat = mi * mfmas_n + ni
                     new_accs[flat] = _emit_mma(
                         b, op, a_rows[mi], b_cols[ni], new_accs[flat]
                     )
-                if _SWZ:
+                if _SWZ and _sched_hints:
                     b.s_setprio(0)
                     b.sched_barrier(0)
 
@@ -1594,7 +1613,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         # ``sched_group_barrier`` is a pure scheduling hint -- changing only
         # its operands cannot change the kernel's numeric result, so this is
         # numerically identical to the flat-hint emission.
-        if spec.trait.pipeline in ("compv3", "compv4"):
+        if _sched_hints and spec.trait.pipeline in ("compv3", "compv4"):
             _emit_hotloop_schedule(b, spec, load_vec)
 
         return new_accs
