@@ -78,6 +78,26 @@ test_categories:
       - "full"
       - "weekly"
 
+  ffm-quick:
+    description: "FFM NPI simulation tests for PR pipelines (target: < 2 hours on FFM runner)"
+    test_patterns:
+      - "quick/*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "ffm-quick"
+      - "ffm"
+
+  ffm-full:
+    description: "FFM NPI nightly tests (initially alias for ffm-quick; expand as capacity grows)"
+    test_patterns:
+      - "quick/*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "ffm-full"
+      - "ffm"
+
 # GPU-specific CTest suites (rocsparse-test_{category}_gfx1151_suite) exclude f64 real/complex
 # parameterized tests on Strix Halo (gfx1151). Run those *_gfx1151_* tests on that hardware;
 # other GPUs use the standard category suites without these exclusions.
@@ -100,3 +120,5 @@ execution_settings:
     standard: 1800
     comprehensive: 14400
     full: 28800
+    ffm-quick: 7200    # 2 hours — hard FFM PR budget
+    ffm-full: 7200     # 2 hours — initially same as ffm-quick

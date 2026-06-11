@@ -466,13 +466,12 @@ protected:
     std::string GetSolverName(int dim, miopen::conv::Direction dir) const
     {
         std::string prefix = (dim == 3) ? "ConvHipImplicitGemm3DGroup" : "ConvHipImplicitGemmGroup";
-        std::string suffix;
+        std::string suffix = "UnknownXdlops";
         switch(dir)
         {
         case miopen::conv::Direction::Forward: suffix = "FwdXdlops"; break;
         case miopen::conv::Direction::BackwardData: suffix = "BwdXdlops"; break;
         case miopen::conv::Direction::BackwardWeights: suffix = "WrwXdlops"; break;
-        default: suffix = "UnknownXdlops"; break;
         }
         return prefix + suffix;
     }
