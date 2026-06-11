@@ -90,10 +90,6 @@ struct UniversalGemmBasePolicy
 #if defined(__gfx950__) || defined(__gfx125__)
     // The combination of pk_int4_t and transposed loading causes numerical errors.
     // Therefore do not use transposed loading in this case.
-    // Also, transpose load (ds_read_tr) requires specific tile distribution patterns
-    // that only work for certain K warp tile sizes based on data type size:
-    // - For 1-byte types (fp8/bf8): K warp tile <= 64
-    // - For 2-byte types (fp16/bf16): K warp tile <= 32
     template <typename T>
     static constexpr bool supports_transpose_load =
         std::is_same_v<T, pk_fp4_t> || std::is_same_v<T, fp16_t> || std::is_same_v<T, bf16_t> ||
