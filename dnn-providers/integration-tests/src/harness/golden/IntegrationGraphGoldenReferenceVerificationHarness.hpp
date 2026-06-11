@@ -65,7 +65,8 @@ protected:
         _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();
     }
 
-    virtual void executeUnderTest(hipdnn_test_sdk::utilities::GraphAndTensorMap& graphAndTensors) = 0;
+    virtual void executeUnderTest(hipdnn_test_sdk::utilities::GraphAndTensorMap& graphAndTensors)
+        = 0;
 
     // GTest entry point. The base owns the load/execute/compare flow; the only
     // per-runner variation is executeUnderTest (CPU ref / GPU ref / engine).
@@ -83,17 +84,15 @@ protected:
     // golden subclasses no longer hand-roll that branching. Device executors
     // write to GPU memory, so outputs are marked device-modified to trigger a
     // device-to-host sync when the comparator reads them.
-    static void runReferenceExecutor(
-        IReferenceGraphExecutor& executor,
-        hipdnn_test_sdk::utilities::GraphAndTensorMap& graphAndTensors)
+    static void runReferenceExecutor(IReferenceGraphExecutor& executor,
+                                     hipdnn_test_sdk::utilities::GraphAndTensorMap& graphAndTensors)
     {
         const bool usesDevice = executor.requiresDeviceMemory();
         const auto variantPack
             = usesDevice ? deviceVariantPack(graphAndTensors) : graphAndTensors.hostBufferMap();
 
-        executor.execute(graphAndTensors.graphBuffer.data(),
-                         graphAndTensors.graphBuffer.size(),
-                         variantPack);
+        executor.execute(
+            graphAndTensors.graphBuffer.data(), graphAndTensors.graphBuffer.size(), variantPack);
 
         if(usesDevice)
         {
@@ -132,15 +131,14 @@ protected:
                 return compareTensors<T>(expectedTensor, actualTensor, atol, rtol);
             };
 
-            auto result = std::visit(
-                hipdnn_data_sdk::utilities::Visitor{
-                    compareFunc,
-                    [](int) -> ComparisonResult {
-                        ComparisonResult r;
-                        r.passed = false;
-                        return r;
-                    }},
-                hipdnn_test_sdk::utilities::datatypeToNativeVariant(dataType));
+            auto result
+                = std::visit(hipdnn_data_sdk::utilities::Visitor{compareFunc,
+                                                                 [](int) -> ComparisonResult {
+                                                                     ComparisonResult r;
+                                                                     r.passed = false;
+                                                                     return r;
+                                                                 }},
+                             hipdnn_test_sdk::utilities::datatypeToNativeVariant(dataType));
 
             if(!result.passed)
             {
@@ -166,8 +164,8 @@ protected:
     }
 
 private:
-    static std::unordered_map<int64_t, void*> deviceVariantPack(
-        hipdnn_test_sdk::utilities::GraphAndTensorMap& graphAndTensors)
+    static std::unordered_map<int64_t, void*>
+        deviceVariantPack(hipdnn_test_sdk::utilities::GraphAndTensorMap& graphAndTensors)
     {
         std::unordered_map<int64_t, void*> pack;
         for(auto& [uid, tensor] : graphAndTensors.tensorMap)
@@ -177,11 +175,11 @@ private:
         return pack;
     }
 
-    static void resolveTolerances(
-        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
-        hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-        float& atol,
-        float& rtol)
+    static void
+        resolveTolerances(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
+                          hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                          float& atol,
+                          float& rtol)
     {
         const float defaultTolerance = deriveDefaultTolerance(wrapper, dataType);
         atol = defaultTolerance;
@@ -189,8 +187,8 @@ private:
     }
 
     template <typename T>
-    static float toleranceForNodeAttributes(
-        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType)
+    static float
+        toleranceForNodeAttributes(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType)
     {
         using NA = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
         namespace tol = hipdnn_test_sdk::utilities;

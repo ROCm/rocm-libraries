@@ -7,8 +7,8 @@
 #include <fstream>
 
 #include <hipdnn_data_sdk/utilities/Visitor.hpp>
-#include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
@@ -55,20 +55,18 @@ void verifyGoldenComparison(
             return compareTensors<T>(expectedTensor, actualTensor, tolerance, tolerance);
         };
 
-        const auto result = std::visit(
-            hipdnn_data_sdk::utilities::Visitor{
-                compareFunc,
-                [](int) -> ComparisonResult {
-                    ComparisonResult r;
-                    r.passed = false;
-                    return r;
-                }},
-            hipdnn_test_sdk::utilities::datatypeToNativeVariant(dataType));
+        const auto result
+            = std::visit(hipdnn_data_sdk::utilities::Visitor{compareFunc,
+                                                             [](int) -> ComparisonResult {
+                                                                 ComparisonResult r;
+                                                                 r.passed = false;
+                                                                 return r;
+                                                             }},
+                         hipdnn_test_sdk::utilities::datatypeToNativeVariant(dataType));
 
-        EXPECT_TRUE(result.passed)
-            << "Golden comparison failed for tensor uid=" << uid << ": "
-            << result.mismatchCount << "/" << result.totalElements
-            << " elements mismatched, max abs error=" << result.maxAbsError;
+        EXPECT_TRUE(result.passed) << "Golden comparison failed for tensor uid=" << uid << ": "
+                                   << result.mismatchCount << "/" << result.totalElements
+                                   << " elements mismatched, max abs error=" << result.maxAbsError;
     }
 }
 
@@ -127,9 +125,7 @@ TEST(TestGoldenVerificationCpuRefFp32, BatchNormSmallMatchesGoldenData)
 
     auto hostBuffers = graphAndTensors.hostBufferMap();
     hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
-        graphAndTensors.graphBuffer.data(),
-        graphAndTensors.graphBuffer.size(),
-        hostBuffers);
+        graphAndTensors.graphBuffer.data(), graphAndTensors.graphBuffer.size(), hostBuffers);
 
     verifyGoldenComparison(graphAndTensors, goldenOutputs, 1e-5f);
 }
@@ -174,10 +170,9 @@ TEST(TestGpuGoldenVerificationRef, SkipsWhenNoPlanAvailable)
     hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor executor;
     try
     {
-        executor.execute(
-            graphAndTensors.graphBuffer.data(),
-            graphAndTensors.graphBuffer.size(),
-            deviceBufferMap);
+        executor.execute(graphAndTensors.graphBuffer.data(),
+                         graphAndTensors.graphBuffer.size(),
+                         deviceBufferMap);
     }
     catch(const std::runtime_error&)
     {

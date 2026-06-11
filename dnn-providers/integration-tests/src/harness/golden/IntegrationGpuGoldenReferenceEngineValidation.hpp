@@ -28,14 +28,13 @@ protected:
         IntegrationGraphGoldenReferenceVerificationHarness::SetUp();
     }
 
-    void executeUnderTest(
-        hipdnn_test_sdk::utilities::GraphAndTensorMap& graphAndTensors) override
+    void executeUnderTest(hipdnn_test_sdk::utilities::GraphAndTensorMap& graphAndTensors) override
     {
         auto handle = getSharedHandle();
 
-        const std::vector<uint8_t> graphBytes(
-            graphAndTensors.graphBuffer.data(),
-            graphAndTensors.graphBuffer.data() + graphAndTensors.graphBuffer.size());
+        const std::vector<uint8_t> graphBytes(graphAndTensors.graphBuffer.data(),
+                                              graphAndTensors.graphBuffer.data()
+                                                  + graphAndTensors.graphBuffer.size());
 
         hipdnn_frontend::graph::Graph graph;
         auto err = graph.from_binary(handle, graphBytes);
@@ -74,8 +73,7 @@ protected:
         result = graph.get_workspace_size(workspaceSize);
         ASSERT_TRUE(result.is_good()) << result.get_message();
         ASSERT_GE(workspaceSize, 0);
-        const hipdnn_data_sdk::utilities::Workspace workspace(
-            static_cast<size_t>(workspaceSize));
+        const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
 
         std::unordered_map<int64_t, void*> variantPack;
         for(auto& [uid, tensor] : graphAndTensors.tensorMap)

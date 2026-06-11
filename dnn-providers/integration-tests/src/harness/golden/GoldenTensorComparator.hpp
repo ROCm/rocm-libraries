@@ -31,8 +31,7 @@ struct ComparisonResult
     float usedRtol = 0.0f;
 };
 
-inline std::vector<int64_t> flatIndexToMultiDim(int64_t flatIndex,
-                                                 const std::vector<int64_t>& dims)
+inline std::vector<int64_t> flatIndexToMultiDim(int64_t flatIndex, const std::vector<int64_t>& dims)
 {
     std::vector<int64_t> result(dims.size());
     for(auto i = static_cast<int64_t>(dims.size()) - 1; i >= 0; --i)
@@ -94,17 +93,15 @@ ComparisonResult compareTensors(const hipdnn_data_sdk::utilities::ITensor& expec
     int64_t idx = 0;
     while(expectedIt != expectedEnd)
     {
-        const auto expVal
-            = static_cast<double>(*static_cast<const T*>(*expectedIt));
-        const auto actVal
-            = static_cast<double>(*static_cast<const T*>(*actualIt));
+        const auto expVal = static_cast<double>(*static_cast<const T*>(*expectedIt));
+        const auto actVal = static_cast<double>(*static_cast<const T*>(*actualIt));
 
         const double absErr = std::abs(expVal - actVal);
         const double denom = std::max(std::abs(expVal), std::abs(actVal));
         const double relErr = (denom > 0.0) ? absErr / denom : 0.0;
 
-        const bool elementPassed = absErr <= static_cast<double>(atol)
-                                   || absErr <= static_cast<double>(rtol) * denom;
+        const bool elementPassed
+            = absErr <= static_cast<double>(atol) || absErr <= static_cast<double>(rtol) * denom;
 
         if(!elementPassed)
         {
@@ -128,13 +125,12 @@ ComparisonResult compareTensors(const hipdnn_data_sdk::utilities::ITensor& expec
     return result;
 }
 
-inline std::string formatComparisonFailure(
-    const std::filesystem::path& bundlePath,
-    int64_t tensorUid,
-    const std::string& tensorName,
-    const std::vector<int64_t>& shape,
-    const std::string& dtype,
-    const ComparisonResult& result)
+inline std::string formatComparisonFailure(const std::filesystem::path& bundlePath,
+                                           int64_t tensorUid,
+                                           const std::string& tensorName,
+                                           const std::vector<int64_t>& shape,
+                                           const std::string& dtype,
+                                           const ComparisonResult& result)
 {
     std::ostringstream oss;
     oss << std::setprecision(8);
@@ -155,8 +151,8 @@ inline std::string formatComparisonFailure(
     if(result.worstFlatIndex >= 0)
     {
         auto multiIdx = flatIndexToMultiDim(result.worstFlatIndex, shape);
-        oss << "  Worst element: flat=" << result.worstFlatIndex
-            << " " << formatMultiDimIndex(multiIdx) << "\n";
+        oss << "  Worst element: flat=" << result.worstFlatIndex << " "
+            << formatMultiDimIndex(multiIdx) << "\n";
         oss << "    expected:    " << result.worstExpected << "\n";
         oss << "    actual:      " << result.worstActual << "\n";
     }
@@ -167,8 +163,8 @@ inline std::string formatComparisonFailure(
         pct = 100.0 * static_cast<double>(result.mismatchCount)
               / static_cast<double>(result.totalElements);
     }
-    oss << "  Mismatched:    " << result.mismatchCount << " / " << result.totalElements
-        << " (" << std::setprecision(2) << std::fixed << pct << "%)\n";
+    oss << "  Mismatched:    " << result.mismatchCount << " / " << result.totalElements << " ("
+        << std::setprecision(2) << std::fixed << pct << "%)\n";
     oss << "=================================\n";
     return oss.str();
 }

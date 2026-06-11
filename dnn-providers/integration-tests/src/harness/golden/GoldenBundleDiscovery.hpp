@@ -18,7 +18,6 @@
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 
-
 namespace hipdnn_integration_tests::golden
 {
 
@@ -35,8 +34,8 @@ struct DiscoveredBundle
 // on top by the caller (see isGoldenMetaFile / discoverGoldenBundles). This is
 // the clean split called for in ALMIOPEN-1968: a generic scan, with golden-ref
 // filtering applied separately rather than baked into the directory walk.
-inline std::vector<std::filesystem::path> scanFilesByExtension(
-    const std::filesystem::path& directory, const std::string& extension)
+inline std::vector<std::filesystem::path>
+    scanFilesByExtension(const std::filesystem::path& directory, const std::string& extension)
 {
     std::vector<std::filesystem::path> paths;
     for(const auto& entry : std::filesystem::recursive_directory_iterator(directory))
@@ -63,8 +62,8 @@ inline bool isGoldenMetaFile(const std::filesystem::path& jsonPath)
     return stem.size() >= 5 && stem.substr(stem.size() - 5) == ".meta";
 }
 
-inline constexpr std::array<const char*, 4> K_TIER_NAMES = {
-    "quick", "standard", "comprehensive", "full"};
+inline constexpr std::array<const char*, 4> K_TIER_NAMES
+    = {"quick", "standard", "comprehensive", "full"};
 
 // RFC 0011 §4.3 test-naming scheme: the tier becomes a GTest suite prefix.
 // `quick` is the default smoke tier and carries no prefix; the others are
@@ -101,8 +100,7 @@ inline std::string sanitizeForGtest(const std::string& input)
     return result;
 }
 
-inline std::string dataTypeToShortString(
-    hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
+inline std::string dataTypeToShortString(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
 {
     using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
     switch(dataType)
@@ -132,9 +130,8 @@ inline std::string dataTypeToShortString(
     }
 }
 
-inline std::string deriveLayoutFromStrides(
-    const flatbuffers::Vector<int64_t>* dims,
-    const flatbuffers::Vector<int64_t>* strides)
+inline std::string deriveLayoutFromStrides(const flatbuffers::Vector<int64_t>* dims,
+                                           const flatbuffers::Vector<int64_t>* strides)
 {
     if(dims == nullptr || strides == nullptr || dims->size() < 4)
     {
@@ -186,8 +183,8 @@ inline std::string deriveLayoutFromStrides(
     return "unknown";
 }
 
-inline std::string nodeAttributesToOperationName(
-    hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType)
+inline std::string
+    nodeAttributesToOperationName(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType)
 {
     using NA = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
     switch(attrType)
@@ -231,8 +228,8 @@ inline std::string nodeAttributesToOperationName(
     }
 }
 
-inline std::string deriveOperationName(
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper)
+inline std::string
+    deriveOperationName(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper)
 {
     std::string opName;
     auto nodeCount = wrapper.nodeCount();
@@ -265,8 +262,8 @@ inline std::string deriveDataTypeFromGraph(
     return "unknown";
 }
 
-inline std::string deriveLayoutFromGraph(
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper)
+inline std::string
+    deriveLayoutFromGraph(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper)
 {
     auto tensorMap = wrapper.getTensorMap();
     for(auto& [uid, attrs] : tensorMap)
@@ -305,13 +302,12 @@ inline DerivedTestName deriveTestName(const std::filesystem::path& jsonPath,
     }
     catch(const std::exception& e)
     {
-        throw std::runtime_error(
-            "Failed to parse bundle JSON " + jsonPath.string() + ": " + e.what());
+        throw std::runtime_error("Failed to parse bundle JSON " + jsonPath.string() + ": "
+                                 + e.what());
     }
     flatbuffers::FlatBufferBuilder builder;
-    auto offset
-        = hipdnn_flatbuffers_sdk::json::to<hipdnn_flatbuffers_sdk::data_objects::Graph>(
-            builder, graphJson);
+    auto offset = hipdnn_flatbuffers_sdk::json::to<hipdnn_flatbuffers_sdk::data_objects::Graph>(
+        builder, graphJson);
     builder.Finish(offset);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper(
@@ -360,8 +356,8 @@ inline std::vector<std::filesystem::path> scanTier(const std::filesystem::path& 
 //   - a generated test-name collision (names both producing paths)
 // The caller registers tests only on success, so any throw aborts startup and
 // surfaces the authoring mistake loudly rather than silently dropping coverage.
-inline std::vector<DiscoveredBundle> discoverGoldenBundles(
-    const std::filesystem::path& goldenDataDir)
+inline std::vector<DiscoveredBundle>
+    discoverGoldenBundles(const std::filesystem::path& goldenDataDir)
 {
     std::vector<DiscoveredBundle> bundles;
     std::unordered_map<std::string, std::filesystem::path> nameToPath;
@@ -374,16 +370,14 @@ inline std::vector<DiscoveredBundle> discoverGoldenBundles(
             continue;
         }
         auto dirName = entry.path().filename().string();
-        const bool isTier = std::any_of(
-            K_TIER_NAMES.begin(), K_TIER_NAMES.end(), [&](const char* tier) {
-                return dirName == tier;
-            });
+        const bool isTier = std::any_of(K_TIER_NAMES.begin(),
+                                        K_TIER_NAMES.end(),
+                                        [&](const char* tier) { return dirName == tier; });
         if(!isTier)
         {
-            throw std::runtime_error(
-                "Unexpected top-level directory '" + dirName
-                + "' in golden reference data at " + goldenDataDir.string()
-                + "; expected one of: quick, standard, comprehensive, full");
+            throw std::runtime_error("Unexpected top-level directory '" + dirName
+                                     + "' in golden reference data at " + goldenDataDir.string()
+                                     + "; expected one of: quick, standard, comprehensive, full");
         }
     }
 
@@ -400,9 +394,8 @@ inline std::vector<DiscoveredBundle> discoverGoldenBundles(
         const auto jsonPaths = scanTier(tierDir);
         if(jsonPaths.empty())
         {
-            throw std::runtime_error(
-                "Golden reference tier directory is empty: " + tierDir.string()
-                + "; every tier must contain at least one bundle");
+            throw std::runtime_error("Golden reference tier directory is empty: " + tierDir.string()
+                                     + "; every tier must contain at least one bundle");
         }
 
         for(const auto& jsonPath : jsonPaths)
@@ -413,10 +406,9 @@ inline std::vector<DiscoveredBundle> discoverGoldenBundles(
             auto it = nameToPath.find(fullName);
             if(it != nameToPath.end())
             {
-                throw std::runtime_error(
-                    "Golden bundle name collision: '" + fullName
-                    + "' produced by both:\n  " + it->second.string()
-                    + "\n  " + jsonPath.string());
+                throw std::runtime_error("Golden bundle name collision: '" + fullName
+                                         + "' produced by both:\n  " + it->second.string() + "\n  "
+                                         + jsonPath.string());
             }
             nameToPath[fullName] = jsonPath;
 

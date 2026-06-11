@@ -37,18 +37,17 @@ void registerBundlesForMode(const std::vector<DiscoveredBundle>& bundles,
     {
         auto suiteName = bundle.suiteName + "_" + runnerSuffix;
 
-        ::testing::RegisterTest(
-            suiteName.c_str(),
-            bundle.testName.c_str(),
-            nullptr,
-            nullptr,
-            __FILE__,
-            __LINE__,
-            [path = bundle.jsonPath]() -> ::testing::Test* {
-                auto* test = new HarnessType();
-                test->setBundlePath(path);
-                return test;
-            });
+        ::testing::RegisterTest(suiteName.c_str(),
+                                bundle.testName.c_str(),
+                                nullptr,
+                                nullptr,
+                                __FILE__,
+                                __LINE__,
+                                [path = bundle.jsonPath]() -> ::testing::Test* {
+                                    auto* test = new HarnessType();
+                                    test->setBundlePath(path);
+                                    return test;
+                                });
     }
 }
 
@@ -76,7 +75,8 @@ inline void registerGoldenBundleTests()
     if(!std::filesystem::exists(goldenDataDir))
     {
         std::cerr << "Warning: --allow-bundles enabled but golden data directory "
-                     "does not exist: " << goldenDataDir << '\n';
+                     "does not exist: "
+                  << goldenDataDir << '\n';
         return;
     }
 
@@ -102,8 +102,8 @@ inline void registerGoldenBundleTests()
     // produces a distinct suite via its runner suffix (see registerBundlesForMode).
     detail::registerBundlesForMode<TestCpuReferenceUsingGoldenValues>(bundles, "CpuRef");
     detail::registerBundlesForMode<TestGpuReferenceUsingGoldenValues>(bundles, "GpuRef");
-    detail::registerBundlesForMode<IntegrationGpuGoldenReferenceEngineValidation>(
-        bundles, "Engine");
+    detail::registerBundlesForMode<IntegrationGpuGoldenReferenceEngineValidation>(bundles,
+                                                                                  "Engine");
 
     std::cout << "Registered " << bundles.size()
               << " golden bundle(s) across CpuRef, GpuRef, and Engine runners\n";
