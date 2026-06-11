@@ -225,6 +225,7 @@ if( BUILD_CLIENTS_BENCH OR BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS )
     set( HIPRAND_DEP hiprand )
   endif()
   if(BUILD_CLIENTS_TESTS)
+    enable_testing()
     rocm_package_setup_client_component(
       tests
       DEPENDS

@@ -46,7 +46,6 @@ test_categories:
       - "multigpu_full"
 
 execution_settings:
-  default_timeout: 600
   timeout_multiplier: 1
   category_timeouts:
     quick: 600           # 10 min
