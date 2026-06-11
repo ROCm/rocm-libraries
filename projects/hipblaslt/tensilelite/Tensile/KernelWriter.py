@@ -8767,7 +8767,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # KernelWriterAssembly.py (SK5 block guarded by emitsParallelReductionSgprAliases).
       # This collapse matches the host's per-mode 6-arg pack
       # (ContractionSolution.cpp SK5 branch). The runtime mode bit
-      # (MSB of MagicShiftItersPerTile) is extracted into StreamKHybridMode
+      # (bit 30 of MagicShiftItersPerTile) is extracted into StreamKHybridMode
       # at preLoop, after which _emitModeExtraction also clears that bit so
       # the SK4 path's read via the SKTiles alias sees a clean value.
       self.defineSgpr("ItersPerTile", 1)
@@ -8849,7 +8849,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # runtime (selected by StreamKHybridMode), so their path-specific
       # persistent SGPRs overlap. Only allocate the shared SGPRs, the
       # SK4-only pair (StreamKTileIdx/StreamKPartialIdx) and the dedicated
-      # StreamKHybridMode bit (extracted from MSB of MagicShiftItersPerTile
+      # StreamKHybridMode bit (extracted from bit 30 of MagicShiftItersPerTile
       # at preLoop entry). The SK3-only pair (StreamKIter/StreamKIterEnd) is
       # NOT defined here: it is RegSet-aliased onto the SK4-only
       # StreamKTileIdx/StreamKPartialIdx slots in KernelWriterAssembly.py

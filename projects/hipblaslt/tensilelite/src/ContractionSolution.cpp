@@ -853,9 +853,9 @@ namespace TensileLite
                     // practice; fail loudly if a pathological problem ever
                     // hits the bound so the kernel-side mask does not
                     // silently corrupt the count.
-                    assert((sk4_skTiles & 0xC0000000u) == 0u
-                           && "SK5 SK4 skTiles must not collide with mode bit "
-                              "(bit 30) or magic add bit (bit 31)");
+                    TENSILE_ASSERT_EXC((sk4_skTiles & 0xC0000000u) == 0u
+                                       && "SK5 SK4 skTiles must not collide with mode bit "
+                                          "(bit 30) or magic add bit (bit 31)");
                     uint32_t packedSkTiles = sk4_skTiles | 0x40000000u;
 
                     // 6 args in canonical (SK3-named) slot order. The
@@ -3828,6 +3828,8 @@ namespace TensileLite
                 batch *= problem.batchSize(i);
             }
             hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+            TENSILE_ASSERT_EXC(hipAMDGPU != nullptr);
+            TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
 
             origami::problem_t origami_problem = {
                 .size  = {x, y, z},
@@ -3838,9 +3840,6 @@ namespace TensileLite
                        static_cast<size_t>(sizeMapping.macroTile.y),
                        static_cast<size_t>(sizeMapping.depthU)},
             };
-
-
-            TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
 
             reductionStrat = origami::streamk::select_reduction(
                 origami_problem,
@@ -3894,8 +3893,8 @@ namespace TensileLite
             };
 
             hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
-            TENSILE_ASSERT_EXC(hipAMDGPU != nullptr
-                               && hipAMDGPU->analyticalHardware != nullptr);
+            TENSILE_ASSERT_EXC(hipAMDGPU != nullptr);
+            TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
             const auto autoMode = origami::streamk::select_hybrid_mode(
                 origami_problem,
                 *(hipAMDGPU->analyticalHardware),

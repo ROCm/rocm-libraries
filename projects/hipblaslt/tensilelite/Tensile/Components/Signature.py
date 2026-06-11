@@ -231,7 +231,7 @@ class SignatureDefault(Signature):
             # (MagicNumberItersPerTile, MagicShiftItersPerTile, SKItersPerWG,
             # skGrid, skTiles) respectively.
             #
-            # The mode bit (bit 31 of slot 2) selects the active path. The
+            # The mode bit (bit 30 of slot 2) selects the active path. The
             # signature metadata uses SK3 names as the primary kernarg labels
             # because they are what defineSgpr() declares; SK4 names exist
             # only as register aliases.

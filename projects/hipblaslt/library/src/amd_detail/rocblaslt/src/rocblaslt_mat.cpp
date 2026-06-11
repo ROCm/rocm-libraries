@@ -1046,7 +1046,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
         swizzleB,
         HIPBLASLT_BATCH_MODE_STRIDED,
         0,
-        0};
+        2}; // streamk_tile_scheduling_ext: AUTO (matches struct default)
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -1368,7 +1368,7 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                         swizzleB,
                                         hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,
                                         0,
-                                        0});
+                                        2}); // streamk_tile_scheduling_ext: AUTO (matches struct default)
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }

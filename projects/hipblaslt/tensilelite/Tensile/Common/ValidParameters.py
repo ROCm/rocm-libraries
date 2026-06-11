@@ -763,7 +763,7 @@ validParameters = { # we need to make sure this matches develop
     # 3 : Two-Tile StreamK with DP before SK tiles
     # 4 : Dynamic StreamK using per-XCD work queues
     # 5 : Hybrid SK3 + SK4: emits BOTH the static (mode 3) and dynamic (mode 4)
-    #     code paths in a single kernel. A runtime mode bit packed into the MSB
+    #     code paths in a single kernel. A runtime mode bit packed into bit 30
     #     of MagicShiftItersPerTile (set by the host from the
     #     HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT matmul descriptor
     #     attribute, or the TENSILE_STREAMK5_FORCE_MODE debug env override)

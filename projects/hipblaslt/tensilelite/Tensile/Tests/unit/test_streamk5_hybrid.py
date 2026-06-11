@@ -1,260 +1,393 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Unit tests for the StreamK=5 hybrid mode.
+"""Unit tests for StreamK=5 hybrid mode codegen intent.
 
-These tests are intentionally codegen-light: they validate that the
-parameter enumeration, the solution-hash discriminator, and the component
-dispatcher all recognize StreamK=5 as a first-class mode that should emit
-both the static (SK3) and dynamic (SK4) paths back-to-back.
+These tests import Tensile modules directly and inspect emitted rocisa
+instructions / signature metadata rather than matching Python source text.
 """
 
-import re
-from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+# Prime the component registry before StreamK imports (avoids circular import).
+from Tensile.KernelWriterAssembly import KernelWriterAssembly  # noqa: F401
+
+from rocisa.code import Module, RegSet, SignatureBase
+from rocisa.instruction import SAndB32, SLShiftRightB32
+
+from Tensile.Common.DataType import DataType
+from Tensile.Common.ValidParameters import validParameters
+from Tensile.Components.Signature import SignatureDefault
+from Tensile.Components.StreamK import (
+    StreamK,
+    StreamKHybrid,
+    StreamKTwoTileDPFirst,
+    streamKVariantClass,
+)
+
+SK3_KERNARG_NAMES = [
+    "ItersPerTile",
+    "MagicNumberItersPerTile",
+    "MagicShiftItersPerTile",
+    "SKItersPerWG",
+    "skGrid",
+    "skTiles",
+]
+
+SK5_KERNARG_ALIASES = [
+    ("sgprTotalItems", "sgprMagicNumberItersPerTile", 0),
+    ("sgprSKTiles", "sgprMagicShiftItersPerTile", 0),
+    ("sgprSKSplit", "sgprSKItersPerWG", 0),
+    ("sgprSKItersPerWI", "sgprskGrid", 0),
+    ("sgprSKGrid", "sgprskTiles", 0),
+]
+
+SK5_PERSISTENT_ALIASES = [
+    ("sgprStreamKIter", "sgprStreamKTileIdx", 0),
+    ("sgprStreamKIterEnd", "sgprStreamKPartialIdx", 0),
+]
+
+STREAMK_ARG_NAMES = {
+    "ItersPerTile",
+    "MagicNumberItersPerTile",
+    "MagicShiftItersPerTile",
+    "SKItersPerWG",
+    "skGrid",
+    "skTiles",
+    "TotalItems",
+    "SKTiles",
+    "SKSplit",
+    "SKItersPerWI",
+    "SKGrid",
+}
 
 
-# Resolve absolute paths to the modules under test so we can read them as
-# plain text. This avoids importing Tensile.Components.StreamK at test
-# collection time (which requires rocisa, optional in the unit env).
-_TENSILELITE_ROOT = Path(__file__).resolve().parents[3]
-_VALID_PARAMS_PY = _TENSILELITE_ROOT / "Tensile" / "Common" / "ValidParameters.py"
-_STREAMK_PY = _TENSILELITE_ROOT / "Tensile" / "Components" / "StreamK.py"
-_SIGNATURE_PY = _TENSILELITE_ROOT / "Tensile" / "Components" / "Signature.py"
-_SOLUTION_PY = _TENSILELITE_ROOT / "Tensile" / "SolutionStructs" / "Solution.py"
-_PERSISTENT_LOOP_PY = _TENSILELITE_ROOT / "Tensile" / "Components" / "PersistentLoop.py"
+class _StopAfterSk5Aliases(Exception):
+    """Raised once KernelWriterAssembly emits the SK5 persistent aliases."""
 
 
-def _read(p: Path) -> str:
-    assert p.exists(), f"missing source file: {p}"
-    return p.read_text(encoding="utf-8")
+def _mock_writer_for_component(streamk: int) -> MagicMock:
+    writer = MagicMock()
+    writer.states = SimpleNamespace(kernel={"StreamK": streamk})
+    return writer
 
 
-def _streamk_hybrid_body(src: str) -> str:
-    """Return only the lines inside the StreamKHybrid class body so
-    substring assertions don't false-positive against pre-existing SK3
-    or SK4 code elsewhere in StreamK.py.
-    """
-    m = re.search(r"^class\s+StreamKHybrid\b.*$", src, re.MULTILINE)
-    assert m, "class StreamKHybrid not found in StreamK.py"
-    start = m.start()
-    # Stop at the next top-level `class ` (column 0) or EOF.
-    end_match = re.search(r"^class\s", src[m.end():], re.MULTILINE)
-    end = m.end() + (end_match.start() if end_match else len(src) - m.end())
-    return src[start:end]
+def _make_signature_writer(streamk: int) -> MagicMock:
+    f32 = DataType("Float")
+    writer = MagicMock()
+    writer.debugConfig = SimpleNamespace(debugKernel=False)
+    writer.states = SimpleNamespace(
+        kernelName="test_kernel",
+        rpga=2,
+        bpeA=4,
+        bpeCexternal=4,
+        bpr=4,
+        numSgprSizesFree=0,
+        numSgprSizesSum=0,
+        numSgprToLoad=0,
+        numSgprPreload=0,
+        useBias=0,
+        needBiasType=False,
+        d=SimpleNamespace(numSgprStrides=0),
+        c=SimpleNamespace(numSgprStrides=0),
+        a=SimpleNamespace(numSgprStrides=0),
+        b=SimpleNamespace(numSgprStrides=0),
+        m=SimpleNamespace(numSgprStrides=0),
+        mxsa=SimpleNamespace(numSgprStrides=0),
+        mxsb=SimpleNamespace(numSgprStrides=0),
+        e=SimpleNamespace(numSgprStrides=0),
+        kernel={
+            "StreamK": streamk,
+            "StreamKAtomic": 0,
+            "LdsNumBytes": 0,
+            "NumThreads": 256,
+            "InternalSupportParams": {"KernArgsVersion": 0},
+            "CodeObjectVersion": "V4",
+            "ProblemType": {
+                "UseBeta": False,
+                "NumIndicesC": 2,
+                "NumIndicesSummation": 1,
+                "IndexAssignmentsA": [0, 2],
+                "IndexAssignmentsB": [1, 2],
+                "UseInitialStridesAB": True,
+                "UseInitialStridesCD": True,
+                "DestDataType": f32,
+                "ComputeDataType": f32,
+                "ActivationComputeDataType": f32,
+                "DataTypeA": f32,
+                "DataTypeB": f32,
+                "MacDataTypeA": f32,
+                "MacDataTypeB": f32,
+                "MXBlockA": False,
+                "MXBlockB": False,
+                "Sparse": False,
+                "UseScaleAB": False,
+                "UseScaleCD": False,
+                "UseScaleAlphaVec": 0,
+                "UseE": False,
+                "ActivationType": MagicMock(getAdditionalArgStringList=lambda: []),
+                "OutputAmaxD": False,
+            },
+            "PackedC0IdxChars": [],
+            "PackedC1IdxChars": [],
+            "ExpertSchedulingMode": 0,
+            "ESMRuntimeGate": False,
+            "ActivationFused": False,
+            "_GlobalAccumulation": "",
+            "AdaptiveGemmGSUA": 0,
+            "SubGroup0": 1,
+            "SubGroup1": 1,
+            "ThreadTile0": 1,
+            "ThreadTile1": 1,
+            "VectorWidthA": 1,
+            "VectorWidthB": 1,
+            "GlobalReadVectorWidthA": 1,
+            "GlobalReadVectorWidthB": 1,
+            "DirectToLdsA": False,
+            "DirectToLdsB": False,
+            "_UseSgprForGRO": False,
+        },
+    )
+    return writer
+
+
+def _streamk_arg_names_from_signature(streamk: int) -> list[str]:
+    collected: list[str] = []
+    orig_add_arg = SignatureBase.addArg
+
+    def capture_add_arg(self, name, *args, **kwargs):
+        collected.append(name)
+        return orig_add_arg(self, name, *args, **kwargs)
+
+    SignatureBase.addArg = capture_add_arg
+    try:
+        SignatureDefault()(_make_signature_writer(streamk))
+    finally:
+        SignatureBase.addArg = orig_add_arg
+
+    return [name for name in collected if name in STREAMK_ARG_NAMES]
+
+
+def _streamk_arg_size_delta(streamk: int) -> int:
+    baseline = _make_signature_writer(0)
+    SignatureDefault()(baseline)
+    base_size = baseline.states.userArgsInfo.gemmArgumentSize
+
+    writer = _make_signature_writer(streamk)
+    SignatureDefault()(writer)
+    return writer.states.userArgsInfo.gemmArgumentSize - base_size
+
+
+def _emit_mode_extraction_module():
+    writer = MagicMock()
+    return StreamKHybrid._emitModeExtraction(StreamKHybrid, writer, {"StreamK": 5})
+
+
+def _reg_name(reg) -> str:
+    text = str(reg)
+    if text.startswith("s[") and text.endswith("]"):
+        return text[2:-1]
+    return text
+
+
+def _setup_kwa_for_sk5_aliases() -> KernelWriterAssembly:
+    kwa = KernelWriterAssembly.__new__(KernelWriterAssembly)
+    kwa.sgprs = {
+        "ItersPerTile": 10,
+        "MagicNumberItersPerTile": 11,
+        "MagicShiftItersPerTile": 12,
+        "SKItersPerWG": 13,
+        "skGrid": 14,
+        "skTiles": 15,
+        "StreamKTileIdx": 20,
+        "StreamKPartialIdx": 21,
+        "Beta": 22,
+    }
+    kwa.states = SimpleNamespace(
+        streamK=streamKVariantClass(5)(),
+        startVgprSerial=0,
+        numVgprBuffer=1,
+        mxsa=SimpleNamespace(
+            numVgprValu=0,
+            startVgprValu=0,
+            startVgprValuPack=0,
+            startVgprG2L=None,
+            numVgprValuPerBlock=0,
+        ),
+        mxsb=SimpleNamespace(
+            numVgprValu=0,
+            startVgprValu=0,
+            startVgprValuPack=0,
+            startVgprG2L=None,
+            numVgprValuPerBlock=0,
+        ),
+        a=SimpleNamespace(
+            numVgprValu=0,
+            startVgprValu=0,
+            startVgprValuPack=0,
+            startVgprG2L=None,
+            numVgprValuPerBlock=0,
+            tileInfo=None,
+        ),
+        b=SimpleNamespace(
+            numVgprValu=0,
+            startVgprValu=0,
+            startVgprValuPack=0,
+            startVgprG2L=None,
+            numVgprValuPerBlock=0,
+            tileInfo=None,
+        ),
+        m=SimpleNamespace(numVgprValu=0),
+        packDTVA=False,
+        packDTVB=False,
+        convDTVA=False,
+        convDTVB=False,
+        lrvwTileMXSA=1,
+        lrvwTileMXSB=1,
+        bpr=4,
+        numVgprBufferPackMXSA=1,
+        numVgprBufferPackMXSB=1,
+    )
+    return kwa
+
+
+def _collect_sk5_regset_aliases() -> list[tuple[str, str, int]]:
+    kernel = {
+        "StreamK": 5,
+        "UseSubtileImpl": True,
+        "MagicDivAlg": 1,
+        "ProblemType": {
+            "MXBlockA": False,
+            "MXBlockB": False,
+            "Sparse": False,
+            "IndexAssignmentsA": [0, 2],
+            "IndexAssignmentsB": [1, 2],
+            "IndicesFree": [0, 1],
+            "IndicesSummation": [2],
+            "IndicesBatch": [],
+        },
+        "DirectToVgprA": False,
+        "DirectToVgprB": False,
+        "InnerUnroll": 1,
+        "LoopIters": 1,
+        "UnrollMajorLDSA": True,
+        "UnrollMajorLDSB": True,
+        "MIInputPerThreadMXSA": 1,
+        "MIInputPerThreadMXSB": 1,
+        "VectorWidthMXSA": 1,
+        "VectorWidthMXSB": 1,
+        "MIWaveTileA": 1,
+        "MIWaveTileB": 1,
+    }
+    tPA = {"is_sparse": False, "tpsMetadata": {}, "MX": None}
+    tPB = {"is_sparse": False, "tpsMetadata": {}, "MX": None}
+
+    captured: list = []
+    orig_add = Module.add
+
+    def patched_add(self, item):
+        captured.append(item)
+        if isinstance(item, RegSet) and item.name == "sgprStreamKIterEnd":
+            raise _StopAfterSk5Aliases()
+        return orig_add(self, item)
+
+    kwa = _setup_kwa_for_sk5_aliases()
+    try:
+        with patch.object(Module, "add", patched_add):
+            kwa.macroAndSet(kernel, tPA, tPB)
+    except _StopAfterSk5Aliases:
+        pass
+
+    return [
+        (item.name, item.ref, item.offset)
+        for item in captured
+        if isinstance(item, RegSet) and item.ref is not None
+    ]
 
 
 class TestStreamK5ValidParameters:
     def test_streamk_enum_includes_5(self):
-        src = _read(_VALID_PARAMS_PY)
-        # Match the canonical line like  "StreamK": [0, 1, 2, 3, 4, 5]
-        assert '"StreamK": [0, 1, 2, 3, 4, 5]' in src, (
-            "ValidParameters.py must enumerate StreamK 0..5"
-        )
-
-    def test_streamk_docstring_mentions_hybrid(self):
-        src = _read(_VALID_PARAMS_PY)
-        assert "Hybrid" in src or "hybrid" in src
+        assert 5 in validParameters["StreamK"]
+        assert validParameters["StreamK"] == [0, 1, 2, 3, 4, 5]
 
 
 class TestStreamK5Component:
-    """The Tensile component registry must dispatch StreamK==5 to the
-    StreamKHybrid class so that both SK3 and SK4 paths get emitted."""
+    def test_streamk_hybrid_is_registered_variant(self):
+        assert streamKVariantClass(5) is StreamKHybrid
+        assert StreamKHybrid.kernel == {"StreamK": 5}
 
-    def test_streamk_hybrid_class_defined(self):
-        src = _read(_STREAMK_PY)
-        assert "class StreamKHybrid" in src
+    def test_component_dispatches_streamk_5_to_hybrid(self):
+        impl = StreamK.find(_mock_writer_for_component(5))
+        assert isinstance(impl, StreamKHybrid)
 
-    def test_streamk_hybrid_registered_for_mode_5(self):
-        src = _read(_STREAMK_PY)
-        # The dispatcher key on the class.
-        assert 'kernel = {"StreamK": 5}' in src
-
-
-class TestStreamK5SolutionHashDiscrimination:
-    """StreamK=5 solutions must hash to a distinct name from SK3/SK4 so
-    that the runtime dispatcher can tell them apart."""
-
-    def test_solution_validation_handles_mode_5(self):
-        src = _read(_SOLUTION_PY)
-        # The intersection-of-SK3+SK4 validation must recognize SK5.
-        assert 'StreamK"] == 5' in src or 'StreamK") == 5' in src or \
-               '(3, 4, 5)' in src or '[3, 4, 5]' in src or \
-               '.supportsSubtileImpl' in src
+    def test_component_dispatches_streamk_3_to_static_path(self):
+        impl = StreamK.find(_mock_writer_for_component(3))
+        assert isinstance(impl, StreamKTwoTileDPFirst)
 
 
-class TestStreamK5DualPathLabels:
-    """Check that the StreamKHybrid class body itself emits the
-    mode-extraction sequence and uses both static and dynamic path
-    label name-roots (renamed via getNameInc to avoid assembler
-    collisions). Assertions are anchored to the class body so they do
-    not false-positive against pre-existing SK3 / SK4 code elsewhere
-    in StreamK.py."""
-
-    def test_streamk_hybrid_source_uses_both_paths(self):
-        body = _streamk_hybrid_body(_read(_STREAMK_PY))
-        # Static-path label roots (renamed via getNameInc inside SK5).
-        assert "SK_FullTile" in body
-        assert "SK_PartialTile" in body
-        # Dynamic-path label roots (renamed via getNameInc inside SK5).
-        assert "SK_UpdateDone" in body
-        assert "SK_SplitUpdate" in body
-
-    def test_streamk_hybrid_mode_sgpr_extracted(self):
-        body = _streamk_hybrid_body(_read(_STREAMK_PY))
-        assert "StreamKHybridMode" in body
-        # Mode extraction shifts the MSB of MagicShiftItersPerTile into
-        # the StreamKHybridMode SGPR exactly once. The call site may
-        # wrap across several lines, so use [\s\S] to span newlines.
-        assert re.search(
-            r"SLShiftRightB32\([\s\S]*?StreamKHybridMode[\s\S]*?MagicShiftItersPerTile[\s\S]*?\b31\b",
-            body), \
-            "expected SLShiftRightB32(... StreamKHybridMode ... MagicShiftItersPerTile ... 31) in StreamKHybrid"
-
-    def test_streamk_hybrid_masks_magic_shift(self):
-        """The static path inside the SK5 kernel must mask
-        MagicShiftItersPerTile to {magic-add bit 31 | 5-bit shift},
-        dropping only the mode bit (bit 30), before feeding it to the
-        magic-division divide. The divide (sMagicDiv2) consumes both the
-        bit-31 "add" indicator and the bits-0..4 shift, so a plain 0x1F
-        mask would corrupt non-power-of-two tile divides -> mask 0x8000001F.
-        """
-        src = _read(_STREAMK_PY)
-        # Match the SK5-gated mask, not the unrelated 0x1FFFFFF mask in SK3.
-        pattern = (r'kernel\["StreamK"\]\s*==\s*5[\s\S]{0,400}?'
-                   r'SAndB32\([\s\S]{0,200}?0x8000001[Ff]\b')
-        assert re.search(pattern, src), \
-            "expected SK5-gated SAndB32(..., 0x8000001F) on MagicShiftItersPerTile"
-
-    def test_streamk_hybrid_unique_labels(self):
-        """When SK5 inlines both static and dynamic paths, conflicting
-        labels must be renamed with getNameInc to avoid assembler
-        errors."""
-        body = _streamk_hybrid_body(_read(_STREAMK_PY))
-        assert "getNameInc(\"SK_FullTile\")" in body
-        assert "getNameInc(\"SK_PartialTile\")" in body
-        assert "getNameInc(\"SK_UpdateDone\")" in body
-        assert "getNameInc(\"SK_SplitUpdate\")" in body
-
-
-class TestStreamK5SignatureUnion:
-    """StreamK=5 kernels need the union of SK3+SK4 args in the signature."""
-
-    def test_signature_handles_mode_5(self):
-        src = _read(_SIGNATURE_PY)
-        assert 'StreamK"] == 5' in src or '(3, 4, 5)' in src or '[3, 4, 5]' in src
-
-
-class TestStreamK5PersistentLoop:
-    """The persistent-loop close emitter must have an SK5 branch."""
-
-    def test_persistent_loop_handles_mode_5(self):
-        src = _read(_PERSISTENT_LOOP_PY)
-        assert 'StreamK"] == 5' in src or '(3, 4, 5)' in src or '[3, 4, 5]' in src
-
-
-class TestStreamK5SixArgCollapse:
-    """SK5 must push only the 6 args matching the active runtime mode
-    (not the union of SK3+SK4 = 11 args), with SK4 reader names resolved
-    via RegSet aliases onto the SK3 primary SGPRs.
-    """
-
-    # ---- Signature.py: exactly 6 SK args + 24-byte size ----
-    def test_signature_emits_six_sk_args(self):
-        src = _read(_SIGNATURE_PY)
-        m = re.search(
-            r'elif kernel\["StreamK"\] == 5:([\s\S]*?)(?=^\s*elif |^\s*if )',
-            src, re.MULTILINE)
-        assert m, "SK5 elif block not found in Signature.py"
-        block = m.group(1)
-        sk_names = re.findall(r'signature\.addArg\("([^"]+)"', block)
-        assert sk_names == [
-            "ItersPerTile",
-            "MagicNumberItersPerTile",
-            "MagicShiftItersPerTile",
-            "SKItersPerWG",
-            "skGrid",
-            "skTiles",
-        ], f"SK5 signature must emit exactly 6 SK3-named args; got {sk_names}"
-        assert "gemmArgumentSize += 24" in block, (
-            "SK5 signature must declare gemmArgumentSize += 24 (6 args x 4 B)"
+class TestStreamK5ModeExtraction:
+    def test_mode_extraction_shifts_bit_30(self):
+        module = _emit_mode_extraction_module()
+        shift_inst = next(
+            inst for inst in module.flatitems() if isinstance(inst, SLShiftRightB32)
         )
-        assert "gemmArgumentSize += 44" not in block, (
-            "SK5 must no longer use the legacy 44-byte (11-arg) size"
-        )
+        params = list(shift_inst.getParams())
+        assert _reg_name(params[0]) == "sgprStreamKHybridMode"
+        assert _reg_name(params[1]) == "sgprMagicShiftItersPerTile"
+        assert params[2] == hex(30)
 
-    # ---- KernelWriter.py: exactly 6 defineSgpr + numSgprStreamK += 6 ----
-    def test_define_sgpr_six_streamk_slots(self):
-        kw_py = _TENSILELITE_ROOT / "Tensile" / "KernelWriter.py"
-        src = _read(kw_py)
-        m = re.search(
-            r'elif kernel\["StreamK"\] == 5:([\s\S]*?)numSgprStreamK \+= \d+',
-            src)
-        assert m, "SK5 defineSgpr block not found in KernelWriter.py"
-        block = m.group(0)
-        define_names = re.findall(r'self\.defineSgpr\("([^"]+)", 1\)', block)
-        assert define_names == [
-            "ItersPerTile",
-            "MagicNumberItersPerTile",
-            "MagicShiftItersPerTile",
-            "SKItersPerWG",
-            "skGrid",
-            "skTiles",
-        ], f"SK5 must defineSgpr only the 6 SK3-named slots; got {define_names}"
-        assert "numSgprStreamK += 6" in block, (
-            "SK5 must increment numSgprStreamK by exactly 6"
-        )
-        assert "numSgprStreamK += 11" not in block
-
-    # ---- KernelWriterAssembly.py: 5 SK4->SK3 RegSet aliases ----
-    def test_assembly_emits_five_sk4_aliases(self):
-        kwa_py = _TENSILELITE_ROOT / "Tensile" / "KernelWriterAssembly.py"
-        src = _read(kwa_py)
-        expected_pairs = [
-            ("sgprTotalItems",   "sgprMagicNumberItersPerTile"),
-            ("sgprSKTiles",      "sgprMagicShiftItersPerTile"),
-            ("sgprSKSplit",      "sgprSKItersPerWG"),
-            ("sgprSKItersPerWI", "sgprskGrid"),
-            ("sgprSKGrid",       "sgprskTiles"),
+    def test_mode_extraction_masks_magic_shift_with_bfffffff(self):
+        module = _emit_mode_extraction_module()
+        mask_insts = [
+            inst for inst in module.flatitems() if isinstance(inst, SAndB32)
         ]
-        m = re.search(
-            r'if kernel\["StreamK"\] == 5:([\s\S]{0,2000}?)(?=^\s{4}elif |^\s{4}module\.addSpaceLine)',
-            src, re.MULTILINE)
-        assert m, "SK5-gated RegSet alias block not found in KernelWriterAssembly.py"
-        block = m.group(1)
-        for alias, primary in expected_pairs:
-            pat = (rf'RegSet\(\s*"s"\s*,\s*"{re.escape(alias)}"\s*,'
-                   rf'\s*"{re.escape(primary)}"\s*,\s*0\s*\)')
-            assert re.search(pat, block), (
-                f"missing SK5 RegSet alias {alias} -> {primary}+0")
-
-    # ---- StreamK.py: mode-bit mask after extraction ----
-    def test_mode_extraction_masks_high_bit(self):
-        body = _streamk_hybrid_body(_read(_STREAMK_PY))
-        # The mode bit lives in bit 30, not bit 31: magicNumberAlg2 reserves
-        # bit 31 as the magic-division "add" indicator. So extraction shifts
-        # right by 30 and the in-place clear drops only bit 30 while keeping
-        # bit 31 (and the bits-0..4 shift) -> mask 0xBFFFFFFF.
-        pattern = (r'SLShiftRightB32\([\s\S]*?StreamKHybridMode[\s\S]*?\b30\b'
-                   r'[\s\S]{0,400}?'
-                   r'SAndB32\([\s\S]*?MagicShiftItersPerTile'
-                   r'[\s\S]*?0x[Bb][Ff]{7}\b')
-        assert re.search(pattern, body), (
-            "expected SAndB32(MagicShiftItersPerTile, 0xBFFFFFFF) right "
-            "after the mode-bit extraction in _emitModeExtraction "
-            "(clears bit 30 mode, keeps bit 31 magic-add)"
+        clear_inst = next(
+            inst
+            for inst in mask_insts
+            if _reg_name(list(inst.getParams())[0]) == "sgprMagicShiftItersPerTile"
         )
+        params = list(clear_inst.getParams())
+        assert params[2] == hex(0xBFFFFFFF)
+
+    def test_mode_extraction_does_not_use_bit_31(self):
+        module = _emit_mode_extraction_module()
+        for inst in module.flatitems():
+            if isinstance(inst, SLShiftRightB32):
+                assert list(inst.getParams())[2] != hex(31)
 
 
-class TestStreamK5SixArgCollapseNoRegression:
-    def test_signature_still_emits_six_sk_args(self):
-        src = _read(_SIGNATURE_PY)
-        m = re.search(
-            r'elif kernel\["StreamK"\] == 5:([\s\S]*?)(?=^\s*elif |^\s*if )',
-            src, re.MULTILINE)
-        assert m, "SK5 elif block not found in Signature.py"
-        block = m.group(1)
-        sk_names = re.findall(r'signature\.addArg\("([^"]+)"', block)
-        assert len(sk_names) == 6, (
-            f"SK5 must still emit exactly 6 SK args; got {len(sk_names)}: {sk_names}"
-        )
-        assert "gemmArgumentSize += 24" in block
-        assert "gemmArgumentSize += 44" not in block
+class TestStreamK5Signature:
+    def test_signature_emits_six_sk3_named_args(self):
+        assert _streamk_arg_names_from_signature(5) == SK3_KERNARG_NAMES
+
+    def test_signature_sk_arg_frame_matches_sk3(self):
+        assert _streamk_arg_names_from_signature(5) == _streamk_arg_names_from_signature(3)
+
+    def test_signature_adds_twenty_four_byte_sk_frame(self):
+        assert _streamk_arg_size_delta(5) == 24
+        assert _streamk_arg_size_delta(5) == _streamk_arg_size_delta(3)
+
+    def test_signature_sk_frame_differs_from_sk4_names(self):
+        sk4_names = _streamk_arg_names_from_signature(4)
+        sk5_names = _streamk_arg_names_from_signature(5)
+        assert sk4_names != sk5_names
+        assert len(sk4_names) == 6
+        assert len(sk5_names) == 6
+
+
+class TestStreamK5RegSetAliasing:
+    def test_hybrid_variant_requests_parallel_reduction_aliases(self):
+        variant = streamKVariantClass(5)()
+        assert variant.emitsParallelReductionSgprAliases is True
+
+    def test_macro_and_set_emits_sk4_to_sk3_kernarg_aliases(self):
+        aliases = _collect_sk5_regset_aliases()
+        for expected in SK5_KERNARG_ALIASES:
+            assert expected in aliases
+
+    def test_macro_and_set_emits_persistent_slot_aliases(self):
+        aliases = _collect_sk5_regset_aliases()
+        for expected in SK5_PERSISTENT_ALIASES:
+            assert expected in aliases

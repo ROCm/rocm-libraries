@@ -412,6 +412,21 @@ TEST(StreamK5HybridModeTest, TriStateOnResolvesDynamic)
         << "StreamK=5 ON must resolve to the dynamic (SK4) sub-path";
 }
 
+TEST(StreamK5HybridModeTest, TriStateAutoRequiresAnalyticalHardware)
+{
+    auto solution = makeStreamK5Solution();
+    hip::HipAMDGPU device;
+    device.processor        = AMDGPU::Processor::gfx950;
+    device.computeUnitCount = static_cast<int>(kGfx950AnalyticalCuCount);
+    device.deviceName       = "test-gfx950-no-analytical";
+
+    auto problem = makeGemmProblem(4096, 4096, 64);
+    problem.setParams().setStreamKTileSchedulingMode(2);
+
+    EXPECT_THROW(solution.streamK5EffectiveDynamic(problem, device), std::runtime_error)
+        << "StreamK=5 AUTO must assert when analyticalHardware is null";
+}
+
 TEST(StreamK5HybridModeTest, TriStateAutoResolvesStaticViaOrigami)
 {
     auto solution = makeStreamK5Solution();
