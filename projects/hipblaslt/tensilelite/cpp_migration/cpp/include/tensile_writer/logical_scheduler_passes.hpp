@@ -27,6 +27,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <deque>
 #include <map>
 #include <optional>

@@ -46,8 +46,11 @@ target_link_libraries(tensile_writer_tests PRIVATE GTest::gtest GTest::gtest_mai
 
 gtest_discover_tests(tensile_writer_tests)
 
-# Developer tool (not a test): regenerates the pass-pipeline golden snapshots
-# consumed by logical_scheduler_passes_test.cpp. See gen_scheduler_goldens.cpp.
+# gen_scheduler_goldens (superseded): generated the scheduler_pass_goldens.inc
+# snapshot file that logical_scheduler_passes_test.cpp previously included.
+# The snapshot approach was replaced in grc.146 with structured in-memory
+# assertions; scheduler_pass_goldens.inc has been deleted. This target is kept
+# as a reference but excluded from all builds.
 add_executable(gen_scheduler_goldens
     "${CMAKE_CURRENT_SOURCE_DIR}/gen_scheduler_goldens.cpp"
 )
@@ -55,6 +58,4 @@ target_include_directories(gen_scheduler_goldens PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include"
 )
-# Excluded from the default build so a normal `cmake --build` does not require
-# it; build explicitly with `--target gen_scheduler_goldens` to regenerate.
 set_target_properties(gen_scheduler_goldens PROPERTIES EXCLUDE_FROM_ALL TRUE)
