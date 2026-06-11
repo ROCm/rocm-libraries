@@ -3557,12 +3557,31 @@ class StreamKHybrid(StreamK):
         # ----- Extract the mode bit once for the whole kernel -----
         module.add(self._emitModeExtraction(writer, kernel))
 
-        def emitDynamicPreLoop(mod):
-            sk4InitDone = Label(writer.labels.getNameInc("SK_InitDone"), "")
-            mod.add(sk4InitDone)
+        sk5StaticPreLoop = Label(writer.labels.getNameInc("SK5_StaticPreLoop"), "")
+        sk5PreLoopDone   = Label(writer.labels.getNameInc("SK5_PreLoopDone"), "")
 
-        def emitStaticPreLoop(mod):
-            sk3InitDone  = Label(writer.labels.getNameInc("SK_InitDone"), "")
+        module.add(SCmpEQU32(src0=sgpr("StreamKHybridMode"), src1=0,
+                             comment="SK5: mode bit == 0 -> SK3 (static) path"))
+        module.add(SCBranchSCC1(labelName=sk5StaticPreLoop.getLabelName(),
+                                comment="SK5: branch to static preLoop"))
+
+        # ===================================================================
+        # DYNAMIC (SK4) PRELOOP BODY
+        # ===================================================================
+        module.addComment2("SK5 dynamic (SK4) preLoop")
+        sk4InitDone = Label(writer.labels.getNameInc("SK_InitDone"), "")
+        module.add(sk4InitDone)
+        module.add(SBranch(labelName=sk5PreLoopDone.getLabelName(),
+                           comment="SK5: skip static preLoop"))
+
+        # ===================================================================
+        # STATIC (SK3) PRELOOP BODY
+        # ===================================================================
+        module.add(sk5StaticPreLoop)
+        module.addComment2("SK5 static (SK3) preLoop")
+
+        sk3InitDone  = Label(writer.labels.getNameInc("SK_InitDone"), "")
+        sk3SplitInit = Label(writer.labels.getNameInc("SK_SplitInit"), "")
 
         # Choose reduction strategy: parallel (no synchronizer) vs tree (synchronizer)
         module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0),
@@ -4130,107 +4149,88 @@ class StreamKHybrid(StreamK):
         if kernel["StreamKAtomic"]:
             return module
 
-        sk5StaticStore = Label(writer.labels.getNameInc("SK5_StaticStore"), "")
-        sk5StoreDone   = Label(writer.labels.getNameInc("SK5_StoreDone"), "")
+        def emitDynamicStore(mod):
+            skStoreLabel = Label(writer.labels.getNameInc("SK_Store"), "")
+            skFixupLabel = Label(writer.labels.getNameInc("SK_Fixup"), "")
 
-        module.add(SCmpEQU32(src0=sgpr("StreamKHybridMode"), src1=0,
-                             comment="SK5: mode bit == 0 -> SK3 (static) path"))
-        module.add(SCBranchSCC1(labelName=sk5StaticStore.getLabelName(),
-                                comment="SK5: branch to static storeBranches"))
+            tmpSgpr = writer.sgprPool.checkOut(4, "globalWriteElements")
+            mod.add(SCmpEQU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr("ItersPerTile"),
+                              comment="does wg finish tile?"))
+            mod.add(writer.longBranchScc0(skPartialsLabel, posNeg=1))
 
-        # ===================================================================
-        # DYNAMIC (SK4) storeBranches BODY (inlined)
-        # ===================================================================
-        module.addComment2("SK5 dynamic (SK4) storeBranches")
+            if kernel["DebugStreamK"] & 1 == 0:
+                mod.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0,
+                                  comment="does wg start tile?"))
+                mod.add(SCBranchSCC1(labelName=skStoreLabel.getLabelName(),
+                                     comment="Branch if started and finished tile, go to regular store code"))
 
-        skStoreLabel = Label(writer.labels.getNameInc("SK_Store"), "")
-        skFixupLabel = Label(writer.labels.getNameInc("SK_Fixup"), "")
+                sPartialIdx = writer.sgprPool.checkOut(1, "PartialIdx")
+                mod.add(self.calculateFirstPartialIdx(sPartialIdx))
 
-        tmpSgpr = writer.sgprPool.checkOut(4, "globalWriteElements")
-        # if we did not finish the tile, store partials
-        module.add(SCmpEQU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr("ItersPerTile"),
-                             comment="does wg finish tile?"))
-        module.add(writer.longBranchScc0(skPartialsLabel, posNeg=1))
+                sFixupEnd = writer.sgprPool.checkOut(1, "FixupEnd")
+                mod.add(SAddU32(dst=sgpr(sFixupEnd), src0=sgpr(sPartialIdx),
+                                src1=sgpr("StreamKPartialIdx"),
+                                comment="Final partial tile index"))
 
-        if kernel["DebugStreamK"] & 1 == 0:
-            module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0,
-                                 comment="does wg start tile?"))
-            module.add(SCBranchSCC1(labelName=skStoreLabel.getLabelName(),
-                                    comment="Branch if started and finished tile, go to regular store code"))
+                mod.add(skFixupLabel)
 
-            sPartialIdx = writer.sgprPool.checkOut(1, "PartialIdx")
-            module.add(self.calculateFirstPartialIdx(sPartialIdx))
+                mod.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(sPartialIdx),
+                                       shiftHex=log2(4),
+                                       comment="flag offset based on partial index"))
+                mod.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=(256*8),
+                                comment="Offset flags to come after the work queues"))
+                mod.add(SLoadB32(dst=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2),
+                                 soffset=sgpr(tmpSgpr),
+                                 smem=SMEMModifiers(glc=True, dlc=True, scope=CacheScope.SCOPE_DEV),
+                                 comment="get flag"))
 
-            sFixupEnd = writer.sgprPool.checkOut(1, "FixupEnd")
-            module.add(SAddU32(dst=sgpr(sFixupEnd), src0=sgpr(sPartialIdx),
-                               src1=sgpr("StreamKPartialIdx"),
-                               comment="Final partial tile index"))
+                mod.add(SWaitCnt(kmcnt=0, comment="wait for flag load"))
+                if kernel["DebugStreamK"] & 2 == 0:
+                    mod.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=1, comment="check if ready"))
+                    mod.add(SCBranchSCC0(labelName=skFixupLabel.getLabelName(),
+                                         comment="if flag not set, wait and check again"))
 
-            module.add(skFixupLabel)
-
-            module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(sPartialIdx),
-                                      shiftHex=log2(4),
-                                      comment="flag offset based on partial index"))
-            module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=(256*8),
-                               comment="Offset flags to come after the work queues"))
-            module.add(SLoadB32(dst=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2),
-                                soffset=sgpr(tmpSgpr),
-                                smem=SMEMModifiers(glc=True, dlc=True, scope=CacheScope.SCOPE_DEV),
-                                comment="get flag"))
-
-            module.add(SWaitCnt(kmcnt=0, comment="wait for flag load"))
-            if kernel["DebugStreamK"] & 2 == 0:
-                module.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=1, comment="check if ready"))
-                module.add(SCBranchSCC0(labelName=skFixupLabel.getLabelName(),
-                                        comment="if flag not set, wait and check again"))
-
-            module.add(SBarrier(comment="wait for all workgroups before resetting flag"))
-            skipFlagReset = Label(writer.labels.getNameInc("SK_SkipFlagReset"), "")
-            module.add(VReadfirstlaneB32(dst=sgpr(tmpSgpr+2), src=vgpr("Serial"),
-                                         comment="Wave 0 updates flags"))
-            module.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=0, comment="Check for wave 0"))
-            module.add(SCBranchSCC0(labelName=skipFlagReset.getLabelName(),
+                mod.add(SBarrier(comment="wait for all workgroups before resetting flag"))
+                skipFlagReset = Label(writer.labels.getNameInc("SK_SkipFlagReset"), "")
+                mod.add(VReadfirstlaneB32(dst=sgpr(tmpSgpr+2), src=vgpr("Serial"),
+                                          comment="Wave 0 updates flags"))
+                mod.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=0, comment="Check for wave 0"))
+                mod.add(SCBranchSCC0(labelName=skipFlagReset.getLabelName(),
                                     comment="Skip flag reset"))
-            if writer.states.asmCaps["HasScalarStore"]:
-                module.add(SStoreB32(src=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2),
-                                     soffset=sgpr(tmpSgpr),
-                                     smem=SMEMModifiers(glc=True), comment="reset flag"))
+                if writer.states.asmCaps["HasScalarStore"]:
+                    mod.add(SStoreB32(src=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2),
+                                      soffset=sgpr(tmpSgpr),
+                                      smem=SMEMModifiers(glc=True), comment="reset flag"))
+                else:
+                    mod.add(VMovB32(dst=vgpr(tmpVgpr), src=0, comment="move 0 to tmpVgpr"))
+                    mod.add(self.setFlagValue(writer, src=vgpr(tmpVgpr), soffset=sgpr(tmpSgpr),
+                                              comment="reset flag"))
+                mod.add(skipFlagReset)
+                writer.sgprPool.checkIn(tmpSgpr)
+
+                fixupEdge = [False]
+                mod.add(self.fixupStep(writer, kernel, vectorWidths, elements,
+                                       fixupEdge, tmpVgpr, cvtVgprStruct, sPartialIdx))
+
+                mod.add(SAddU32(dst=sgpr(sPartialIdx), src0=sgpr(sPartialIdx), src1=1,
+                                comment="next partial tile index"))
+                mod.add(SCmpLtU32(src0=sgpr(sPartialIdx), src1=sgpr(sFixupEnd),
+                                  comment="done loading partial tiles?"))
+                mod.add(SCBranchSCC1(labelName=skFixupLabel.getLabelName(),
+                                     comment="Branch to continue fixup loop"))
+
+                writer.sgprPool.checkIn(sFixupEnd)
+                writer.sgprPool.checkIn(sPartialIdx)
             else:
-                module.add(VMovB32(dst=vgpr(tmpVgpr), src=0, comment="move 0 to tmpVgpr"))
-                module.add(self.setFlagValue(writer, src=vgpr(tmpVgpr), soffset=sgpr(tmpSgpr),
-                                             comment="reset flag"))
-            module.add(skipFlagReset)
-            writer.sgprPool.checkIn(tmpSgpr)
+                writer.sgprPool.checkIn(tmpSgpr)
 
-            fixupEdge = [False]
-            module.add(self.fixupStep(writer, kernel, vectorWidths, elements,
-                                      fixupEdge, tmpVgpr, cvtVgprStruct, sPartialIdx))
+            mod.add(skStoreLabel)
 
-            module.add(SAddU32(dst=sgpr(sPartialIdx), src0=sgpr(sPartialIdx), src1=1,
-                               comment="next partial tile index"))
-            module.add(SCmpLtU32(src0=sgpr(sPartialIdx), src1=sgpr(sFixupEnd),
-                                 comment="done loading partial tiles?"))
-            module.add(SCBranchSCC1(labelName=skFixupLabel.getLabelName(),
-                                    comment="Branch to continue fixup loop"))
+        def emitStaticStore(mod):
+            mod.add(self.storeBranchesCommon(writer, kernel, skPartialsLabel,
+                                             vectorWidths, elements, tmpVgpr, cvtVgprStruct))
 
-            writer.sgprPool.checkIn(sFixupEnd)
-            writer.sgprPool.checkIn(sPartialIdx)
-        else:
-            writer.sgprPool.checkIn(tmpSgpr)
-
-        module.add(skStoreLabel)
-        module.add(SBranch(labelName=sk5StoreDone.getLabelName(),
-                           comment="SK5: skip static storeBranches"))
-
-        # ===================================================================
-        # STATIC (SK3) storeBranches BODY (call into Common)
-        # ===================================================================
-        module.add(sk5StaticStore)
-        module.addComment2("SK5 static (SK3) storeBranches")
-        module.add(self.storeBranchesCommon(writer, kernel, skPartialsLabel,
-                                            vectorWidths, elements, tmpVgpr, cvtVgprStruct))
-
-        module.add(sk5StoreDone)
+        self._emitSk3Sk4Branch(writer, module, "Store", emitDynamicStore, emitStaticStore)
         return module
 
     # ------------------------------------------------------------------
@@ -4256,27 +4256,16 @@ class StreamKHybrid(StreamK):
         for edge in edges:
             module.add(partialsLabels[edge])
 
-            sk5SrdStatic = Label(writer.labels.getNameInc("SK5_PartialsSrdStatic"), "")
-            sk5SrdDone   = Label(writer.labels.getNameInc("SK5_PartialsSrdDone"), "")
+            def emitDynamicSrd(mod):
+                sPartialIdx = writer.sgprPool.checkOut(1, "PartialIdx")
+                mod.add(self.calculatePartialIdx(sPartialIdx))
+                mod.add(self.computeWorkspaceSrd(writer, kernel, sgpr(sPartialIdx)))
+                writer.sgprPool.checkIn(sPartialIdx)
 
-            module.add(SCmpEQU32(src0=sgpr("StreamKHybridMode"), src1=0,
-                                 comment="SK5: mode bit == 0 -> SK3 (static) SRD setup"))
-            module.add(SCBranchSCC1(labelName=sk5SrdStatic.getLabelName(),
-                                    comment="SK5: branch to static SRD setup"))
+            def emitStaticSrd(mod):
+                mod.add(self.computeWorkspaceSrd(writer, kernel, sgpr("StreamKIdx")))
 
-            # Dynamic (SK4) SRD setup: workspace indexed by computed partial idx.
-            sPartialIdx = writer.sgprPool.checkOut(1, "PartialIdx")
-            module.add(self.calculatePartialIdx(sPartialIdx))
-            module.add(self.computeWorkspaceSrd(writer, kernel, sgpr(sPartialIdx)))
-            writer.sgprPool.checkIn(sPartialIdx)
-            module.add(SBranch(labelName=sk5SrdDone.getLabelName(),
-                               comment="SK5: skip static SRD setup"))
-
-            # Static (SK3) SRD setup: workspace indexed by StreamKIdx.
-            module.add(sk5SrdStatic)
-            module.add(self.computeWorkspaceSrd(writer, kernel, sgpr("StreamKIdx")))
-
-            module.add(sk5SrdDone)
+            self._emitSk3Sk4Branch(writer, module, "PartialsSrd", emitDynamicSrd, emitStaticSrd)
 
             module.add(self.partialsWriteProcedure(writer, kernel, vectorWidths, elements,
                                                    False, False, edge, tmpVgpr, cvtVgprStruct,
