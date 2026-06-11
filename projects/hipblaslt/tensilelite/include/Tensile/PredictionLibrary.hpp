@@ -57,6 +57,11 @@ namespace TensileLite
         // with origami_config_list. Built once at deserialize (the kernel name +
         // SizeMapping are available there); see Serialization/PredictionLibrary.hpp.
         std::vector<mosaic::Config>                              mosaic_config_list;
+        // Per-library mosaic model handle, resolved at deserialize from this
+        // logic file's stem via the colocated mosaic_index (see
+        // Serialization/PredictionLibrary.hpp). -1 => fall back to the global
+        // singleton mosaic_weights.bin (back-compat for checkouts with no index).
+        int                                                      mosaic_model = -1;
 
         mutable std::atomic<bool> lastFindTopRetAll = false;
 
@@ -193,7 +198,8 @@ namespace TensileLite
             auto prediction_result
                 = Debug::Instance().useMosaic()
                       ? mosaic::hipblaslt::rank_configs(
-                            origami_problem, *(pAMDGPU->analyticalHardware),
+                            mosaic_model, origami_problem,
+                            *(pAMDGPU->analyticalHardware),
                             mosaic_config_list, origami_config_list)
                       : origami::rank_configs(
                             origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);

@@ -123,6 +123,21 @@ inline int route(const origami::problem_t& problem) {
   return mosaic::route(detail::to_mosaic(problem));
 }
 
+// Resolve (load+register) a per-library mosaic model for a Tensile library-logic
+// file stem (filename without directory/extension) via the colocated
+// "mosaic_index". Returns a handle id >= 0, or -1 if no index/stem match (the
+// caller then falls back to the global singleton mosaic_weights.bin).
+inline int load_model_for_logic(const std::string& logic_stem) {
+  return mosaic::load_model_by_index(logic_stem);
+}
+
+// Route a GEMM problem against a specific model handle (or the singleton when
+// handle < 0).
+inline int route(int handle, const origami::problem_t& p) {
+  return handle >= 0 ? mosaic::route(handle, detail::to_mosaic(p))
+                     : mosaic::route(detail::to_mosaic(p));
+}
+
 // Build a full mosaic::Config (base params + ML features) from a GEMM kernel.
 // The base params come from the origami config_t; the ML features come from the
 // Tensile kernel name (codegen tokens _NTC/_NTE/_PLR/_LRVW/_LPA/_LPB/_LBSPP*)
@@ -166,6 +181,33 @@ inline std::vector<origami::prediction_result_t> rank_configs(
   const mosaic::Hardware mh = detail::to_mosaic(hardware);
 
   const std::vector<mosaic::Result> res = mosaic::rank_configs(mp, mh, mosaic_configs);
+
+  const double kNaN = std::numeric_limits<double>::quiet_NaN();
+  std::vector<origami::prediction_result_t> result;
+  result.reserve(res.size());
+  for (const mosaic::Result& r : res) {
+    const double latency = r.scored ? -r.score : kNaN;
+    result.push_back(origami::prediction_result_t{latency, origami_configs[r.config_index]});
+  }
+  return result;
+}
+
+// Handle-based overload: rank against the per-library model `handle`. When
+// `handle` >= 0 the named model is used; when `handle` < 0 it FALLS BACK to the
+// global singleton (so a checkout without a mosaic_index still works via
+// mosaic_weights.bin). Result mapping is identical to the handle-less overload.
+inline std::vector<origami::prediction_result_t> rank_configs(
+    int handle,
+    const origami::problem_t& problem,
+    const origami::hardware_t& hardware,
+    const std::vector<mosaic::Config>& mosaic_configs,
+    const std::vector<origami::config_t>& origami_configs) {
+  const mosaic::Problem  mp = detail::to_mosaic(problem);
+  const mosaic::Hardware mh = detail::to_mosaic(hardware);
+
+  const std::vector<mosaic::Result> res =
+      handle >= 0 ? mosaic::rank_configs(handle, mp, mh, mosaic_configs)
+                  : mosaic::rank_configs(mp, mh, mosaic_configs);
 
   const double kNaN = std::numeric_limits<double>::quiet_NaN();
   std::vector<origami::prediction_result_t> result;

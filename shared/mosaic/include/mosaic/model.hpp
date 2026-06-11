@@ -51,4 +51,35 @@ int route(const Problem& p);
 std::vector<Result> rank_configs(const Problem& p, const Hardware& hw,
                                  const std::vector<Config>& configs);
 
+// ── multi-model handle API ─────────────────────────────────────────────────
+// The singleton API above is one process-wide model (mosaic_weights.bin). The
+// handle API lets a process hold MANY models at once -- one per Tensile
+// library-logic file -- each selected by an opaque integer handle. The
+// singleton functions are unchanged and remain fully supported for back-compat.
+
+// Load+register a model from a .bin path (MLREC_v1). Returns a handle id >= 0,
+// or -1 on any I/O/format error. Dedups by path: loading the same path twice
+// returns the same handle (and does not reparse). Thread-safe.
+int load_model(const std::string& bin_path);
+
+// True if `handle` refers to a successfully loaded model.
+bool model_loaded(int handle);
+
+// Route a problem against the model `handle`. Returns the cells[] index, or -1
+// when the handle is invalid or no trained ancestor cell exists.
+int route(int handle, const Problem& p);
+
+// Rank candidate configs against the model `handle` (same scoring contract as
+// the singleton rank_configs). When `handle` is < 0 or invalid, every config is
+// returned unscored (the same all-NaN fallback as "no weights loaded").
+std::vector<Result> rank_configs(int handle, const Problem& p, const Hardware& hw,
+                                 const std::vector<Config>& configs);
+
+// Resolve a model for a Tensile library-logic file stem (the logic filename
+// without directory or extension) via a "mosaic_index" file colocated with the
+// weights. Returns a handle id >= 0 on success, or -1 if the index file or the
+// stem is absent. The index dir is found with the same discovery used by the
+// singleton's lazy auto-load.
+int load_model_by_index(const std::string& logic_stem);
+
 }  // namespace mosaic

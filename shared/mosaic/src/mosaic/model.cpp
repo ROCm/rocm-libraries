@@ -665,6 +665,15 @@ static LoadedModel g_model;
 static bool g_loaded = false;
 static std::once_flag g_load_once;
 
+// ── multi-model handle registry ────────────────────────────────────────────
+// Holds the models loaded via the handle API (load_model / load_model_by_index).
+// Each model is heap-owned and CONST after load, so scoring against it needs no
+// lock once the handle is in hand; the mutex only guards the registry
+// containers (vector growth + the path->handle dedup map).
+static std::mutex g_registry_mtx;
+static std::vector<std::unique_ptr<LoadedModel>> g_models;
+static std::unordered_map<std::string, int> g_path_to_handle;
+
 constexpr std::uint8_t kDtypeFp32 = 0;
 constexpr std::uint8_t kDtypeBf16 = 1;
 constexpr std::uint8_t kDtypeInt8 = 2;
@@ -1035,110 +1044,41 @@ std::array<int, 8> sig_of(const Config& c) {
           c.cache_hints_a, c.cache_hints_b};
 }
 
-// ── weight discovery + lazy load (F6/F7) ───────────────────────────────────
-bool truthy_env(const char* v) { return v != nullptr && v[0] != '\0' && v[0] != '0'; }
+// ── model-agnostic scoring core ────────────────────────────────────────────
+// These operate on ANY LoadedModel (const after load), so both the singleton
+// and the handle API funnel through the SAME math. The singleton path is
+// byte-for-byte unchanged: load_weights() populates g_model and route()/
+// rank_configs() forward g_model to these helpers.
 
-}  // namespace
-
-bool load_weights(const std::string& bin_path) {
-  LoadedModel m;
-  if (!load_binary(bin_path.c_str(), &m)) return false;
-  g_model = std::move(m);
-  g_loaded = true;
-  // One-shot weights-load banner (gated by MOSAIC_DIAG). The deploy pipeline
-  // (stage07) keys off this line to confirm the .bin was actually picked up
-  // rather than silently falling back to the analytical scorer; its absence on
-  // a mosaic-on bench is a HARD FAIL.
-  if (std::getenv("MOSAIC_DIAG") != nullptr) {
-    std::fprintf(stderr,
-                 "[MOSAIC_DIAG FILE] arch=%s qhash=%s qdim=%u idim=%u xdim=%u "
-                 "n_cells=%zu n_splits=%zu\n",
-                 g_model.arch.c_str(), g_model.feature_names_hash.c_str(),
-                 g_model.q_dim, g_model.i_dim, g_model.x_dim,
-                 g_model.cells.size(), g_model.splits.size());
-    std::fflush(stderr);
-  }
-  return true;
-}
-
-bool weights_loaded() { return g_loaded; }
-
-namespace {
-
-// Directory containing the loaded libmosaic (via dladdr). Empty on failure.
-std::string self_library_dir() {
-#ifdef __unix__
-  Dl_info info;
-  // Resolve a symbol that lives in THIS shared object.
-  if (dladdr(reinterpret_cast<void*>(&load_binary_stream), &info) && info.dli_fname) {
-    std::string path(info.dli_fname);
-    std::size_t slash = path.find_last_of('/');
-    if (slash != std::string::npos) return path.substr(0, slash);
-  }
-#endif
-  return std::string();
-}
-
-// Resolve the weights .bin: the MOSAIC_WEIGHTS env override first, then
-// auto-discover relative to the loaded library, then cwd, then the rocm install
-// path. The per-backend layout (backends/<framework>/data) is searched so the
-// same engine can ship weights for hipblaslt / triton / etc.
-void ensure_weights() {
-  if (g_loaded) return;
-  std::call_once(g_load_once, []() {
-    if (g_loaded) return;
-    const char* env_mosaic = std::getenv("MOSAIC_WEIGHTS");
-    if (env_mosaic && env_mosaic[0] && load_weights(env_mosaic)) return;
-
-    const std::string dir = self_library_dir();
-    if (!dir.empty()) {
-      const char* rels[] = {
-          "/mosaic_weights.bin",
-          "/backends/hipblaslt/data/mosaic_weights.bin",
-          "/data/mosaic_weights.bin",
-          "/../backends/hipblaslt/data/mosaic_weights.bin",
-          "/../data/mosaic_weights.bin",
-          "/../share/mosaic/backends/hipblaslt/data/mosaic_weights.bin",
-          "/../share/mosaic/mosaic_weights.bin",
-      };
-      for (const char* rel : rels) {
-        if (load_weights(dir + rel)) return;
-      }
-    }
-
-    if (load_weights("./mosaic_weights.bin")) return;
-    if (load_weights("/opt/rocm/share/mosaic/backends/hipblaslt/data/mosaic_weights.bin")) return;
-    if (load_weights("/opt/rocm/share/mosaic/mosaic_weights.bin")) return;
-
-    std::fprintf(stderr,
-                 "[mosaic] no weights loaded; set MOSAIC_WEIGHTS or place "
-                 "mosaic_weights.bin next to the library, in "
-                 "backends/hipblaslt/data/, in cwd, or in "
-                 "/opt/rocm/share/mosaic/backends/hipblaslt/data/\n");
-  });
-}
-
-}  // namespace
-
-int route(const Problem& problem) {
-  ensure_weights();
-  if (!g_loaded) return -1;
+// Route a problem to its leaf model-cell index for `model`. Honors the
+// MOSAIC_FORCE_CELL override exactly like the legacy singleton route().
+int route_impl(const LoadedModel& model, const Problem& problem) {
   const char* env = std::getenv("MOSAIC_FORCE_CELL");
   if (env) {
     int forced = std::atoi(env);
     if (forced >= 0) return forced;
   }
-  return resolve_model_cell_index(g_model, problem);
+  return resolve_model_cell_index(model, problem);
 }
 
-// ── the deployed ranker -- exact mirror of compute_deployed_top1_picks ─────
-std::vector<Result> rank_configs(const Problem& problem, const Hardware& hardware,
-                                 const std::vector<Config>& configs) {
-  ensure_weights();
+// All configs unscored (caller treats unscored as NaN latency). Shared by the
+// impl below and by the singleton wrappers when no model is available.
+std::vector<Result> unscored_all(const std::vector<Config>& configs) {
+  std::vector<Result> result;
+  result.reserve(configs.size());
+  for (std::size_t j = 0; j < configs.size(); ++j)
+    result.push_back(Result{j, 0.0, false});
+  return result;
+}
 
+// The deployed ranker -- exact mirror of compute_deployed_top1_picks, run
+// against `model`. (Body lifted verbatim from the legacy singleton
+// rank_configs; only the model source changed from g_model to `model`.)
+std::vector<Result> rank_configs_impl(const LoadedModel& model, const Problem& problem,
+                                      const Hardware& hardware,
+                                      const std::vector<Config>& configs) {
   std::vector<Result> result;
 
-  // All configs unscored (caller treats unscored as NaN latency).
   auto fallback_all = [&]() {
     result.reserve(configs.size());
     for (std::size_t j = 0; j < configs.size(); ++j)
@@ -1146,16 +1086,16 @@ std::vector<Result> rank_configs(const Problem& problem, const Hardware& hardwar
     return result;
   };
 
-  if (!g_loaded || configs.empty()) return fallback_all();
+  if (configs.empty()) return fallback_all();
 
-  int cell_idx = resolve_model_cell_index(g_model, problem);
+  int cell_idx = resolve_model_cell_index(model, problem);
   if (cell_idx < 0) return fallback_all();
-  const CellModel& cm = g_model.cells[static_cast<std::size_t>(cell_idx)];
+  const CellModel& cm = model.cells[static_cast<std::size_t>(cell_idx)];
 
   const HwView hw = hw_view(hardware);
-  const std::size_t q_dim = g_model.q_dim;
-  const std::size_t i_dim = g_model.i_dim;
-  const std::size_t x_dim = g_model.x_dim;
+  const std::size_t q_dim = model.q_dim;
+  const std::size_t i_dim = model.i_dim;
+  const std::size_t x_dim = model.x_dim;
 
   // smart_K signature whitelist for this cell (may be empty -> no filter).
   const bool have_sk = !cm.smart_k_signatures.empty();
@@ -1252,6 +1192,236 @@ std::vector<Result> rank_configs(const Problem& problem, const Hardware& hardwar
     if (!used[j]) result.push_back(Result{j, 0.0, false});
   }
   return result;
+}
+
+// ── weight discovery + lazy load (F6/F7) ───────────────────────────────────
+bool truthy_env(const char* v) { return v != nullptr && v[0] != '\0' && v[0] != '0'; }
+
+}  // namespace
+
+bool load_weights(const std::string& bin_path) {
+  LoadedModel m;
+  if (!load_binary(bin_path.c_str(), &m)) return false;
+  g_model = std::move(m);
+  g_loaded = true;
+  // One-shot weights-load banner (gated by MOSAIC_DIAG). The deploy pipeline
+  // (stage07) keys off this line to confirm the .bin was actually picked up
+  // rather than silently falling back to the analytical scorer; its absence on
+  // a mosaic-on bench is a HARD FAIL.
+  if (std::getenv("MOSAIC_DIAG") != nullptr) {
+    std::fprintf(stderr,
+                 "[MOSAIC_DIAG FILE] arch=%s qhash=%s qdim=%u idim=%u xdim=%u "
+                 "n_cells=%zu n_splits=%zu\n",
+                 g_model.arch.c_str(), g_model.feature_names_hash.c_str(),
+                 g_model.q_dim, g_model.i_dim, g_model.x_dim,
+                 g_model.cells.size(), g_model.splits.size());
+    std::fflush(stderr);
+  }
+  return true;
+}
+
+bool weights_loaded() { return g_loaded; }
+
+namespace {
+
+// Directory containing the loaded libmosaic (via dladdr). Empty on failure.
+std::string self_library_dir() {
+#ifdef __unix__
+  Dl_info info;
+  // Resolve a symbol that lives in THIS shared object.
+  if (dladdr(reinterpret_cast<void*>(&load_binary_stream), &info) && info.dli_fname) {
+    std::string path(info.dli_fname);
+    std::size_t slash = path.find_last_of('/');
+    if (slash != std::string::npos) return path.substr(0, slash);
+  }
+#endif
+  return std::string();
+}
+
+// Resolve the weights .bin: the MOSAIC_WEIGHTS env override first, then
+// auto-discover relative to the loaded library, then cwd, then the rocm install
+// path. The per-backend layout (backends/<framework>/data) is searched so the
+// same engine can ship weights for hipblaslt / triton / etc.
+void ensure_weights() {
+  if (g_loaded) return;
+  std::call_once(g_load_once, []() {
+    if (g_loaded) return;
+    const char* env_mosaic = std::getenv("MOSAIC_WEIGHTS");
+    if (env_mosaic && env_mosaic[0] && load_weights(env_mosaic)) return;
+
+    const std::string dir = self_library_dir();
+    if (!dir.empty()) {
+      const char* rels[] = {
+          "/mosaic_weights.bin",
+          "/backends/hipblaslt/data/mosaic_weights.bin",
+          "/data/mosaic_weights.bin",
+          "/../backends/hipblaslt/data/mosaic_weights.bin",
+          "/../data/mosaic_weights.bin",
+          "/../share/mosaic/backends/hipblaslt/data/mosaic_weights.bin",
+          "/../share/mosaic/mosaic_weights.bin",
+      };
+      for (const char* rel : rels) {
+        if (load_weights(dir + rel)) return;
+      }
+    }
+
+    if (load_weights("./mosaic_weights.bin")) return;
+    if (load_weights("/opt/rocm/share/mosaic/backends/hipblaslt/data/mosaic_weights.bin")) return;
+    if (load_weights("/opt/rocm/share/mosaic/mosaic_weights.bin")) return;
+
+    std::fprintf(stderr,
+                 "[mosaic] no weights loaded; set MOSAIC_WEIGHTS or place "
+                 "mosaic_weights.bin next to the library, in "
+                 "backends/hipblaslt/data/, in cwd, or in "
+                 "/opt/rocm/share/mosaic/backends/hipblaslt/data/\n");
+  });
+}
+
+bool file_exists(const std::string& path) {
+  std::ifstream f(path, std::ios::binary);
+  return static_cast<bool>(f);
+}
+
+// Find the directory that holds the per-library mosaic weights + their
+// "mosaic_index". Uses the SAME discovery roots as ensure_weights() (the env
+// override, the library-relative backends/<fw>/data layout, cwd, and the rocm
+// install path), but resolves the containing DIRECTORY and returns the first
+// one that actually contains a file named "mosaic_index". Empty on miss.
+std::string mosaic_data_dir() {
+  // 1) MOSAIC_WEIGHTS env: the index lives next to the named .bin.
+  const char* env_mosaic = std::getenv("MOSAIC_WEIGHTS");
+  if (env_mosaic && env_mosaic[0]) {
+    std::string p(env_mosaic);
+    std::size_t slash = p.find_last_of('/');
+    std::string d = (slash != std::string::npos) ? p.substr(0, slash) : std::string(".");
+    if (file_exists(d + "/mosaic_index")) return d;
+  }
+
+  // 2) Library-relative candidate dirs (mirror ensure_weights's rels, minus the
+  //    trailing /mosaic_weights.bin).
+  const std::string dir = self_library_dir();
+  if (!dir.empty()) {
+    const char* rels[] = {
+        "",
+        "/backends/hipblaslt/data",
+        "/data",
+        "/../backends/hipblaslt/data",
+        "/../data",
+        "/../share/mosaic/backends/hipblaslt/data",
+        "/../share/mosaic",
+    };
+    for (const char* rel : rels) {
+      std::string d = dir + rel;
+      if (file_exists(d + "/mosaic_index")) return d;
+    }
+  }
+
+  // 3) cwd then the rocm install path.
+  if (file_exists("./mosaic_index")) return ".";
+  if (file_exists("/opt/rocm/share/mosaic/backends/hipblaslt/data/mosaic_index"))
+    return "/opt/rocm/share/mosaic/backends/hipblaslt/data";
+  if (file_exists("/opt/rocm/share/mosaic/mosaic_index"))
+    return "/opt/rocm/share/mosaic";
+
+  return std::string();
+}
+
+}  // namespace
+
+int route(const Problem& problem) {
+  ensure_weights();
+  if (!g_loaded) return -1;
+  return route_impl(g_model, problem);
+}
+
+// ── the deployed ranker -- exact mirror of compute_deployed_top1_picks ─────
+std::vector<Result> rank_configs(const Problem& problem, const Hardware& hardware,
+                                 const std::vector<Config>& configs) {
+  ensure_weights();
+  if (!g_loaded) return unscored_all(configs);
+  return rank_configs_impl(g_model, problem, hardware, configs);
+}
+
+// ── multi-model handle API ─────────────────────────────────────────────────
+
+int load_model(const std::string& bin_path) {
+  std::lock_guard<std::mutex> lock(g_registry_mtx);
+  // Dedup: same path -> same handle (don't reparse).
+  auto it = g_path_to_handle.find(bin_path);
+  if (it != g_path_to_handle.end()) return it->second;
+
+  auto m = std::make_unique<LoadedModel>();
+  if (!load_binary(bin_path.c_str(), m.get())) return -1;
+
+  if (std::getenv("MOSAIC_DIAG") != nullptr) {
+    std::fprintf(stderr,
+                 "[MOSAIC_DIAG FILE] handle=%d path=%s arch=%s qhash=%s "
+                 "qdim=%u idim=%u xdim=%u n_cells=%zu n_splits=%zu\n",
+                 static_cast<int>(g_models.size()), bin_path.c_str(),
+                 m->arch.c_str(), m->feature_names_hash.c_str(),
+                 m->q_dim, m->i_dim, m->x_dim,
+                 m->cells.size(), m->splits.size());
+    std::fflush(stderr);
+  }
+
+  const int handle = static_cast<int>(g_models.size());
+  g_models.push_back(std::move(m));
+  g_path_to_handle.emplace(bin_path, handle);
+  return handle;
+}
+
+namespace {
+// Fetch a const model pointer for a handle, or nullptr if out of range. Guards
+// the registry vector read with the mutex (cheap; the LoadedModel itself is
+// const after load, so the pointer stays valid without holding the lock).
+const LoadedModel* model_for_handle(int handle) {
+  if (handle < 0) return nullptr;
+  std::lock_guard<std::mutex> lock(g_registry_mtx);
+  if (static_cast<std::size_t>(handle) >= g_models.size()) return nullptr;
+  return g_models[static_cast<std::size_t>(handle)].get();
+}
+}  // namespace
+
+bool model_loaded(int handle) { return model_for_handle(handle) != nullptr; }
+
+int route(int handle, const Problem& p) {
+  const LoadedModel* m = model_for_handle(handle);
+  if (m == nullptr) return -1;
+  return route_impl(*m, p);
+}
+
+std::vector<Result> rank_configs(int handle, const Problem& p, const Hardware& hw,
+                                 const std::vector<Config>& configs) {
+  const LoadedModel* m = model_for_handle(handle);
+  if (m == nullptr) return unscored_all(configs);
+  return rank_configs_impl(*m, p, hw, configs);
+}
+
+int load_model_by_index(const std::string& logic_stem) {
+  const std::string data_dir = mosaic_data_dir();
+  if (data_dir.empty()) return -1;
+
+  std::ifstream idx(data_dir + "/mosaic_index");
+  if (!idx) return -1;
+
+  // Hand-parse the 2-column text index: "<logic_stem>\t<weights_filename>".
+  // '#' comments and blank lines are ignored; any whitespace separates the
+  // columns. No JSON dependency.
+  std::string line;
+  while (std::getline(idx, line)) {
+    // Strip a trailing CR (CRLF files).
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    // Drop comments.
+    std::size_t hash = line.find('#');
+    if (hash != std::string::npos) line = line.substr(0, hash);
+
+    std::istringstream ls(line);
+    std::string stem, weights_file;
+    if (!(ls >> stem >> weights_file)) continue;  // blank / malformed -> skip
+    if (stem == logic_stem)
+      return load_model(data_dir + "/" + weights_file);
+  }
+  return -1;
 }
 
 namespace {

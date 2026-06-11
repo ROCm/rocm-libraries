@@ -148,6 +148,24 @@ namespace TensileLite
                                     solution->sizeMapping.LocalSplitU));
                         }
                     }
+
+                    // Resolve a per-library mosaic model from this logic file's
+                    // stem (filename without directory or extension) via the
+                    // colocated mosaic_index. -1 (no index / no match) leaves the
+                    // global singleton (mosaic_weights.bin) in charge. ctx is the
+                    // LibraryIOContext fetched at the top; derive the stem with
+                    // the same string munging PlaceholderLibrary.hpp uses.
+                    if(ctx != nullptr)
+                    {
+                        std::string stem        = ctx->filename;
+                        std::size_t directoryPos = stem.rfind('/');
+                        if(directoryPos != std::string::npos)
+                            stem = stem.substr(directoryPos + 1);
+                        std::size_t periodPos = stem.rfind('.');
+                        if(periodPos != std::string::npos)
+                            stem = stem.substr(0, periodPos);
+                        lib.mosaic_model = mosaic::hipblaslt::load_model_for_logic(stem);
+                    }
                 }
             }
             const static bool flow = false;
