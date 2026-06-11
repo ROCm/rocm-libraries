@@ -38,6 +38,8 @@
 #include <stack>
 #include <numeric>
 #include <functional>
+#include <any>
+#include <tuple>
 
 #ifdef _WIN32
 // This macro prevents windows.h from defining min/max functions
@@ -82,8 +84,47 @@
     #define IS_ASAN_BUILD 0
 #endif
 
+// This anonymous namespace contains functions needed to print non-primitive types.
+// These must be defined before the TestController class.
+// If you use a transformer (see documentation for TestController::set_transformer),
+// you'll need to ensure that the type you're transforming has a corresponding function
+// - either in your own code, before including this header, or here.
+namespace
+{
+	
+template <typename T, typename U>
+std::ostream& operator<<(std::ostream& os, const std::pair<T, U>& p)
+{
+    return os << "(" << p.first << ", " << p.second << ")";
+}
+
+template <typename T, typename U>
+std::ostream& operator<<(std::ostream& os, const std::tuple<T, U>& p)
+{
+    return os << "(" << std::get<0>(p) << ", " << std::get<1>(p) << ")";
+}
+
+template <typename T, typename U, typename V>
+std::ostream& operator<<(std::ostream& os, const std::tuple<T, U, V>& p)
+{
+    return os << "(" << std::get<0>(p) << ", " << std::get<1>(p) << ", " << std::get<2>(p) << ")";
+}
+	
+}
+
 namespace test_controller
 {
+
+// This is the default size type transformer it just returns the same value
+// it's given without performing any transformation.
+struct IdentityTransformer
+{
+	using size_type = size_t;
+	size_t operator()(const size_type& size) const
+	{
+		return size;
+	}
+};
 
 // Thesestructs are used by the file parsing classes, and should not be visible outside this file.
 namespace
@@ -932,6 +973,9 @@ private:
 //	 - of a normal test fixture.
 //   - Inheriting from ControlledTest ensures that the main test disablement check is performed automatically before
 //	   each test in the suite. Tests will be skipped if they are completely (i.e. for all sizes) disabled.
+//   - If using a type other than size_t for your sizes, define a "transformer" functor and pass it to ControlledTest
+//     as a template argument (within your test fixture definition, eg. class MyTestFixture : public ControlledTest<MyTransformer>).
+//     See the documentation for TestController::set_transformer for more information on the functor requirements and how it's used.
 //
 // 2. Call a maco to filter the input sizes your test uses.
 //	 - If your test uses a single input size, call:
@@ -1036,6 +1080,65 @@ public:
         return sizes_copy;
     }
 
+	// Some tests specify sizes using types other than size_t. For example, the device merge
+    // algorithm requires two input sizes - one for each of the chunks of data being merged.
+    // Because of this, sizes in the device merge tests are stored in a std::tuple<size_t, size_t>.
+    //
+    // The test control file limits you to using scalar values (size_t) when specifying size limits.
+    // However, when performing size filtering, you can pass more complex types to TestController's
+    // filtering functions. If you do this, you must also provide a "transformer" functor that converts
+	// your complex size type into a scalar size_t.
+    // When performing size filtering, TestController will call your functor on each provided input size, and
+	// compare the resulting scalar size_t against the rules in the control file.
+    // For example, device merge tests can provide a functor that converts
+    // tuple<size_t, size_t> to a single size_t by summing the two tuple values to obtain a single, total size.
+	//
+    // Transform functions functors must provide:
+    // - a type called size_type (usually defined with `using size_type = ...`) that indicates the (complex)
+    //   size type that will be transformed.
+    // - an overloaded operator() member function that accepts a parameter of type size_type, and returns a
+    //   single size_t value.
+    // An example transformer is provided below.
+    //
+    // Once you've defined your functor, call TestController::set_transformer (below) to set it.
+    // This will cause all of the filtering functions to use it.
+    // Since TestController is a singleton, once you're done filtering, you'll need to call
+    // TestController::reset_transformer to remove the transformer so that the next test doesn't use it.
+    //
+    // This pattern is automated by the ControlledTest class at the bottom of this file.
+    // When defining your test fixture class, just inherit from ControlledTests and pass
+    // your Functor type as a template argument.
+	// For example:
+	//
+    // struct PairTransformer
+    // {
+    //   using size_type = std::tuple<size_t, size_t>;
+    //	 size_t operator()(const size_type& size) const
+    //	 {
+    //      return std::get<0>(size) + std::get<1>(size);
+    //	 }
+    // };
+    //
+    // class MyTestFixture : public ControlledTest<PairTransformer>
+    // {
+    //   ...
+    // }
+	//
+    // For each test using MyTestFixture, the ControlledTest parent class ensures that
+    // TestController::set_transformer(PairTransformer()) is called
+    // beforehand, and TestController::reset_transformer() is called afterwards.
+	template<class F>
+	inline void set_size_transformer(F size_transformer)
+	{
+		this->size_transformer = TestController::package_transformer(size_transformer);
+	}
+
+	// Resets the size transformer to the identity functor - this is equivalent to not using a transformer.
+	inline void reset_size_transformer()
+	{
+		this->size_transformer = TestController::package_transformer(IdentityTransformer());
+	}
+
     // Disallow copy construction and copy assignment,
     // since this is a singleton.
     TestController(const TestController&) = delete;
@@ -1051,6 +1154,7 @@ private:
     FRIEND_TEST(HipcubTestControllerTests, CheckTestEnablement);
     FRIEND_TEST(HipcubTestControllerTests, FilterSizes);
     FRIEND_TEST(HipcubTestControllerTests, CheckSizeEnablement);
+	FRIEND_TEST(HipcubTestControllerTests, test_filter);
 
     // Private constructor accepting a flag that indicates whether it
     // should read from the control file. If not, the object is left
@@ -1083,6 +1187,26 @@ private:
         return instance;
     }
 
+	// We need a way to store a user-provided custom transformer as a data member.
+	// To do this, we'll "package" it using a lambda function that has a fixed signature,
+	// then store that in a data member of type std::any.
+	template<class F>
+    static constexpr std::function<size_t(const typename F::size_type&)> package_transformer(F transformer)
+    {
+        return std::function<size_t(const typename F::size_type&)>(
+            [transformer](const typename F::size_type& size) {return transformer(size);}
+        );
+    }
+
+	// When we need to use the transformer, we need to extract it from the std::any type data member.
+	// Use std::any_cast to cast it back to the fixed signature we set up in TestController::package_transformer, above.
+	// Note that here we don't need the functor's type, only the size type it operates on.
+    template<class SizeType>
+    static std::function<size_t(const SizeType&)> unpackage_transformer(std::any transformer)
+    {
+        return std::any_cast<std::function<size_t(const SizeType&)>>(transformer);
+    }
+
     // Returns the gfx id of the device that's currently in use.
     inline static std::string get_arch()
     {
@@ -1096,7 +1220,7 @@ private:
         std::string gcn_arch_name(dev_prop.gcnArchName);
 
         // The name may contain extra bits we don't need - eg. the xnack portion of "gfx942:xnack+".
-		std::regex arch_regex(R"(^([^:\0]+))");
+		std::regex arch_regex(R"(^([^:\0]+).*)");
 		std::smatch match;
 		if (std::regex_match(gcn_arch_name, match, arch_regex))
 		{
@@ -1104,7 +1228,8 @@ private:
 		}
 		else
 		{
-			std::cerr << "Warning: unable to parse architecture identifier." << std::endl;
+			std::cerr << "Warning: unable to parse architecture identifier " << "\"" << gcn_arch_name << "\"" << std::endl
+				      << "Architecture-based test control file rules may not be applied correctly." << std::endl;
 		}
 #else
 		arch = "nvidia";
@@ -1119,6 +1244,7 @@ private:
         // Gather data required for filtering
         const std::string gfx_id = TestController::get_arch();
         const std::string qualified_name = TestController::get_qualified_test_name();
+		const auto size_transformer = TestController::unpackage_transformer<T>(this->size_transformer);
         
         // Maps control file line numbers to the sizes that they caused to be skipped.
         std::map<size_t, std::set<T>> skipped_sources;
@@ -1160,11 +1286,16 @@ private:
                     // Each ControlInfo (line of the control file) generates one or more "test functions"
                     // that accept a size as an argument and return true if that size should be disabled.
                     // This lambda function returns true if any of the info's individual test functions return true.
-                    const auto is_skipped = [&it, &skipped_sources](size_t size) {
-                        size_t j;
-                        for (j = 0; j < it->size_test_fns.size() && !it->size_test_fns[j](size); j++);
-                        return j != it->size_test_fns.size();
-                    };
+					const auto is_skipped = [&it, &size_transformer](const T& size) {
+						return std::any_of(
+							it->size_test_fns.begin(),
+							it->size_test_fns.end(),
+							// Before calling the test function, transform the size from the user-provided type
+							// to size_t using the transformer that's been set.
+							[&size, &size_transformer](const auto fn) {
+								return fn(size_transformer(size));
+							});
+					};
 
                     // std::remove_if moves all sizes that satisfy the condition to the end, preserving the
                     // order of other sizes. It returns an iterator pointing past the end of the last non-removed size.
@@ -1295,6 +1426,9 @@ private:
     }
 
 	ControlFileParser parser;
+	// Note: when filtering, a transformer is always applied - when no user-provided transformer has been set, we set it to IdentityTransformer,
+	// which just returns exactly what it's passed.
+	std::any size_transformer = TestController::package_transformer(IdentityTransformer());
 };
 
 // -- Macros to use in unit tests --
@@ -1334,13 +1468,25 @@ private:
 // use a test fixture that inherits from this class. This will automatically
 // cause a check to be executed at the beginning of each test that looks to see if
 // the test is disabled, and skips it if that's the case.
+// If you'd like to use a size transformer, you can pass that as a template argument,
+// and it will be set in the test controller before each test is run, and then removed
+// after each test completes.
+template<class SizeTransformer=IdentityTransformer>
 class ControlledTest : public ::testing::Test
 {
 protected:
+	// Called before each individual test is run.
     void SetUp() override
     {
+		TestController::get_instance().set_size_transformer(SizeTransformer());
         CHECK_TEST_ENABLEMENT();
     }
+
+	// Called after each individual test completes.
+	void TearDown() override
+	{
+		TestController::get_instance().reset_size_transformer();
+	}
 };
     
 } // namespace test_controller

@@ -60,7 +60,7 @@ struct params
 };
 
 template<class Params>
-class HipcubDeviceSegmentedSort : public test_controller::ControlledTest
+class HipcubDeviceSegmentedSort : public test_controller::ControlledTest<>
 {
 public:
     using params = Params;

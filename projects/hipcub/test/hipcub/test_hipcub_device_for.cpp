@@ -43,7 +43,7 @@ struct DeviceForParams
 // ---------------------------------------------------------
 
 template<class Params>
-class HipcubDeviceForTests : public test_controller::ControlledTest
+class HipcubDeviceForTests : public test_controller::ControlledTest<>
 {
 public:
     using input_type                        = typename Params::input_type;
@@ -51,7 +51,7 @@ public:
     static constexpr bool debug_synchronous = false;
 };
 
-class HipcubDeviceForNonTypedTests : public test_controller::ControlledTest
+class HipcubDeviceForNonTypedTests : public test_controller::ControlledTest<>
 {};
 
 using custom_short2  = test_utils::custom_test_type<short>;
@@ -901,14 +901,14 @@ struct DeviceForEachInExtentsParams
 };
 
 template<class Params>
-struct HipcubDeviceForEachInExtentsTests : public test_controller::ControlledTest
+struct HipcubDeviceForEachInExtentsTests : public test_controller::ControlledTest<>
 {
     using extents_type                      = typename Params::extents_type;
     static constexpr bool use_graphs        = Params::use_graphs;
     static constexpr bool debug_synchronous = false;
 };
 
-class HipcubDeviceForEachInExtentsNonTypedTests : public test_controller::ControlledTest
+class HipcubDeviceForEachInExtentsNonTypedTests : public test_controller::ControlledTest<>
 {};
 
 template<class IndexType>
@@ -1090,7 +1090,7 @@ template<class Params>
 class HipcubDeviceForBulkTests : public HipcubDeviceForTests<Params>
 {};
 
-class HipcubDeviceForBulkNonTypedTests: public test_controller::ControlledTest
+class HipcubDeviceForBulkNonTypedTests: public test_controller::ControlledTest<>
 {};
 
 using HipcubDeviceForBulkTestsParams = ::testing::Types<DeviceForParams<int32_t>,

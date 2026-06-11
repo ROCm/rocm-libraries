@@ -45,7 +45,7 @@ struct DeviceReduceParams
 // ---------------------------------------------------------
 
 template<class Params>
-class HipcubDeviceReduceTests : public test_controller::ControlledTest
+class HipcubDeviceReduceTests : public test_controller::ControlledTest<>
 {
 public:
     using input_type                 = typename Params::input_type;
@@ -1166,7 +1166,7 @@ TYPED_TEST(HipcubDeviceReduceTests, TransformReduce)
 // ---------------------------------------------------------
 
 template<class Params>
-class HipcubDeviceReduceLargeIndicesTests : public test_controller::ControlledTest
+class HipcubDeviceReduceLargeIndicesTests : public test_controller::ControlledTest<>
 {
 public:
     using input_type  = typename Params::input_type;

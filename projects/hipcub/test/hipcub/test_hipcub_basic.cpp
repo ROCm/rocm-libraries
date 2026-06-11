@@ -35,7 +35,7 @@
 
 #include "test_utils_controller.hpp"
 
-class HipcubBasicTests : public test_controller::ControlledTest
+class HipcubBasicTests : public test_controller::ControlledTest<>
 {
 };
 

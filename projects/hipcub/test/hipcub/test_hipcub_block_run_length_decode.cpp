@@ -41,7 +41,7 @@ struct Params
 };
 
 template<class Params>
-class HipcubBlockRunLengthDecodeTest : public test_controller::ControlledTest
+class HipcubBlockRunLengthDecodeTest : public test_controller::ControlledTest<>
 {
 public:
     using params = Params;

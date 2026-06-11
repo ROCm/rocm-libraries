@@ -53,7 +53,7 @@ struct params
 };
 
 template<class Params>
-class HipcubBlockRadixSort : public test_controller::ControlledTest
+class HipcubBlockRadixSort : public test_controller::ControlledTest<>
 {
 public:
     using params = Params;

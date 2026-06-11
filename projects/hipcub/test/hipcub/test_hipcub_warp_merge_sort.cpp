@@ -55,7 +55,7 @@ struct params
 };
 
 template<class Params>
-class HipcubWarpMergeSort : public test_controller::ControlledTest {
+class HipcubWarpMergeSort : public test_controller::ControlledTest<> {
 public:
     using params = Params;
 };

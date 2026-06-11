@@ -44,7 +44,7 @@ struct params
 };
 
 template<class Params>
-class HipcubBlockHistogramInputArrayTests : public test_controller::ControlledTest
+class HipcubBlockHistogramInputArrayTests : public test_controller::ControlledTest<>
 {
 public:
     using type = typename Params::type;

@@ -44,7 +44,7 @@ struct params
 // ---------------------------------------------------------
 
 template<class Params>
-class HipcubBlockScanSingleValueTests : public test_controller::ControlledTest
+class HipcubBlockScanSingleValueTests : public test_controller::ControlledTest<>
 {
 public:
     using type                                             = typename Params::type;
@@ -1849,7 +1849,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, ExclusiveSumPrefixCallback)
 // // ---------------------------------------------------------
 
 template<class Params>
-class HipcubBlockScanInputArrayTests : public test_controller::ControlledTest
+class HipcubBlockScanInputArrayTests : public test_controller::ControlledTest<>
 {
 public:
     using type                                                   = typename Params::type;

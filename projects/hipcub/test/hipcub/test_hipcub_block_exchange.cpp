@@ -37,7 +37,7 @@ struct params
 };
 
 template<class Params>
-class HipcubBlockExchangeTests : public test_controller::ControlledTest
+class HipcubBlockExchangeTests : public test_controller::ControlledTest<>
 {
 public:
     using params = Params;

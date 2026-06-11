@@ -43,7 +43,7 @@ struct params
 };
 
 template<typename Params>
-class HipcubBlockShuffleTests : public test_controller::ControlledTest
+class HipcubBlockShuffleTests : public test_controller::ControlledTest<>
 {
 public:
     using type                               = typename Params::type;
