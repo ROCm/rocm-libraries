@@ -37,6 +37,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -174,4 +175,50 @@ TEST_F(CompressedLibraryLoadTest, ReturnsEmptyWhenNeitherExists)
 
     auto mapping = TensileLite::LoadLibraryMapping(datPath.string());
     EXPECT_TRUE(mapping.empty());
+}
+
+TEST_F(CompressedLibraryLoadTest, LoadTimingComparison)
+{
+    // Build a realistic payload: 500 entries with long kernel names matching
+    // the naming convention used in real hipBLASLt shard files.
+    std::map<std::string, std::string> entries;
+    for(int i = 0; i < 500; i++)
+        entries[std::to_string(i)]
+            = "TensileLibrary_gfx942_HPA_BF16_BF16_BF16_BF16_SB_SB_kernels_fallback_gfx942_"
+              + std::to_string(i);
+
+    fs::path datPath = tmpDir / "bench_mapping.dat";
+    fs::path gzPath  = tmpDir / "bench_mapping.dat.gz";
+
+    writeMsgpackMapping(datPath, entries);
+    writeCompressedMsgpackMapping(gzPath, entries);
+
+    constexpr int N = 20;
+
+    // Time uncompressed loads (only .dat present, no .gz)
+    fs::rename(gzPath, gzPath.string() + ".bak");
+    auto t0 = std::chrono::steady_clock::now();
+    for(int i = 0; i < N; i++)
+        TensileLite::LoadLibraryMapping(datPath.string());
+    auto t1          = std::chrono::steady_clock::now();
+    double dat_us    = std::chrono::duration<double, std::micro>(t1 - t0).count() / N;
+    fs::rename(gzPath.string() + ".bak", gzPath);
+
+    // Time compressed loads (.gz present — .dat also exists but is ignored)
+    fs::rename(datPath, datPath.string() + ".bak");
+    auto t2          = std::chrono::steady_clock::now();
+    for(int i = 0; i < N; i++)
+        TensileLite::LoadLibraryMapping(datPath.string());
+    auto t3          = std::chrono::steady_clock::now();
+    double gz_us     = std::chrono::duration<double, std::micro>(t3 - t2).count() / N;
+    fs::rename(datPath.string() + ".bak", datPath);
+
+    std::cout << "\n[LoadTimingComparison] entries=" << entries.size()
+              << "  uncompressed .dat: " << dat_us << " µs/call"
+              << "  compressed .dat.gz: " << gz_us << " µs/call"
+              << "  overhead: " << (gz_us - dat_us) << " µs\n";
+
+    // Correctness check — no EXPECT on timing values to avoid flakiness.
+    auto m = TensileLite::LoadLibraryMapping(datPath.string());
+    EXPECT_EQ(m.size(), entries.size());
 }
