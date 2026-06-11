@@ -52,6 +52,9 @@ struct SpargeBlockMapKernel
         void* lut_ptr;
         void* valid_block_num_ptr;
 
+        void* q_int8_ptr;  // [batch, nhead_q, seqlen_q, D] int8; same strides as Q
+        void* q_scale_ptr; // [batch, nhead_q, N_q] fp32; per-Q-block quant scale
+
         // K-block stats workspace produced by SpargeKStatsKernel
         const void*
             pooled_k_ws_ptr;      // [batch, nhead_k, N_k, D] KDataType (fp16/bf16, matches K dtype)
@@ -93,6 +96,8 @@ struct SpargeBlockMapKernel
                                                  void* block_map_ptr,
                                                  void* lut_ptr,
                                                  void* valid_block_num_ptr,
+                                                 void* q_int8_ptr,
+                                                 void* q_scale_ptr,
                                                  const void* pooled_k_ws_ptr,
                                                  const void* sim_k_ws_ptr,
                                                  const float* topk_per_head,
@@ -121,6 +126,8 @@ struct SpargeBlockMapKernel
                      block_map_ptr,
                      lut_ptr,
                      valid_block_num_ptr,
+                     q_int8_ptr,
+                     q_scale_ptr,
                      pooled_k_ws_ptr,
                      sim_k_ws_ptr,
                      N_k,
@@ -214,6 +221,15 @@ struct SpargeBlockMapKernel
         const float topk_eff       = kargs.topk_per_head[hq];
         const float cdfthreshd_eff = kargs.cdfthreshd_per_head[hq];
 
+        // int8 Q base for this (b, hq, qb); shares Q's element strides (1 byte each).
+        auto* q_int8_out = reinterpret_cast<int8_t*>(kargs.q_int8_ptr) + b * kargs.batch_stride_q +
+                           hq * kargs.nhead_stride_q + qb * kM0 * kargs.stride_q;
+        // q_scale layout matches attention's q_descale indexing:
+        // [b * nhead_q * N_q + hq * N_q + qb].
+        const index_t N_q = integer_divide_ceil(kargs.seqlen_q, kM0);
+        auto* q_scale_out =
+            reinterpret_cast<float*>(kargs.q_scale_ptr) + (b * kargs.nhead_q + hq) * N_q + qb;
+
         Pipeline{}(q_window,
                    k_window,
                    kargs.seqlen_q,
@@ -230,6 +246,9 @@ struct SpargeBlockMapKernel
                    valid_out,
                    pooled_k_ws,
                    sim_k_ws,
+                   q_int8_out,
+                   kargs.stride_q,
+                   q_scale_out,
                    static_cast<void*>(smem),
                    kargs.is_causal_tl,
                    kargs.attention_sink);

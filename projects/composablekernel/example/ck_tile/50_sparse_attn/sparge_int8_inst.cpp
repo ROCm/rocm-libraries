@@ -1,22 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
-// Hand-written instantiation of FmhaFwdSpargeKernel with
-// BlockAttentionQuantScaleEnum::BLOCKSCALE, i.e. kDoFp8StaticQuant = true.
-//
-// Scope:
-//   - Q and K are int8_t (GEMM0 fires mfma_i32_32x32x16_i8); V/P/O stay fp16.
-//   - Per-block dequant: pipeline rescales the int32 s_acc tile by
-//     q_descale * k_descale (per-Q-block / per-K-block scalars from the runner)
-//     before softmax. GEMM1 (P*V) runs in fp16.
-//
-// Tile shape mirrors the codegen entry for sparge bm0=64, hdim=128 (the entry
-// selected by the test_sparge.cpp BLKQ=64 path):
-//   kM0=64, kN0=128, kK0=32, kN1=128, kK1=32, kQKHeaddim=128
-//   gemm0 warps 2x1x1 / 32x32x16 ; gemm1 warps 2x1x1 / 32x32x16
-//
-// PVSkipMode is fixed to kPerWave to match the smoke recipe default. Other PV
-// modes can be added later by mirroring the kernel/pipeline aliases below.
+// Hand-written FmhaFwdSpargeKernel instantiation for BLOCKSCALE int8 Q/K (V/P/O fp16),
+// fixed to PVSkipMode::kPerWave / hdim=128 / bm0=64.
 
 #include "fmha_fwd_trek.hpp"
 
@@ -39,9 +25,8 @@
 
 namespace {
 
-// ---- tile shape: matches codegen sparge bm0=64, hdim=128 entry ----
+// tile shape: kM0 kN0 kK0 kN1 kK1 kQKHeaddim, matches codegen sparge bm0=64 hdim=128
 using sint8_block_tile = ck_tile::sequence<64, 128, 32, 128, 32, 128>;
-//                                      kM0 kN0  kK0  kN1  kK1  kQKHeaddim(D)
 
 using sint8_shape = ck_tile::TileFmhaShape<sint8_block_tile,
                                            ck_tile::sequence<2, 1, 1>,    // Gemm0BlockWarps
@@ -50,10 +35,7 @@ using sint8_shape = ck_tile::TileFmhaShape<sint8_block_tile,
                                            ck_tile::sequence<32, 32, 16>, // Gemm1WarpTile
                                            true>;                         // VLayout row-major
 
-// ---- traits: only BLOCKSCALE differs vs codegen NO_SCALE ----
-//   spad=true, skpad=false, dpad=true, dvpad=true (matches the
-//   `pipelines.append(...)` skpad=false combo in codegen ops/fmha_fwd_sparge.py).
-//   Other fields locked to sparge restrictions (bias/lse/dropout/randval/softcap = false).
+// traits: only BLOCKSCALE differs vs codegen NO_SCALE (spad/dpad/dvpad=true, skpad=false)
 using sint8_trait = ck_tile::TileFmhaTraits<true,  // kPadSeqLenQ
                                             false, // kPadSeqLenK
                                             true,  // kPadHeadDimQ
@@ -68,8 +50,7 @@ using sint8_trait = ck_tile::TileFmhaTraits<true,  // kPadSeqLenQ
                                             false>; // kIsVRowMajorSkip
 
 using sint8_variant = ck_tile::ComposedAttention<0, CK_TILE_FMHA_FWD_FAST_EXP2>;
-// Locked to NoMask (recipe default -mask=0) to keep this a single binary; the
-// codegen dispatcher handles other mask shapes on the -qscale=n path.
+// locked to NoMask (recipe default -mask=0); codegen dispatcher handles other masks
 using sint8_mask = ck_tile::GenericAttentionMask<false>;
 
 using sint8_problem = ck_tile::BlockFmhaPipelineProblem<
@@ -107,12 +88,7 @@ using sint8_kernel =
 
 } // namespace
 
-// ----------------------------------------------------------------------------
-// One-shot launcher for the BLOCKSCALE variant. Mirrors the per-mode oneshot
-// emitted by fmha_fwd_sparge.py codegen, but for the single PVSkipMode::kPerWave
-// + BLOCKSCALE specialization. Tied to fp16 / hdim=128 / bm0=64; caller is
-// responsible for checking the shape matches before dispatching.
-// ----------------------------------------------------------------------------
+// one-shot launcher for the BLOCKSCALE kPerWave variant; caller must match shape (fp16/d128/bm64)
 void fmha_sparge_int8_fwd_oneshot_fp16_d128_bm64(const ck_tile::stream_config& s,
                                                  fmha_sparge_fwd_args a)
 {

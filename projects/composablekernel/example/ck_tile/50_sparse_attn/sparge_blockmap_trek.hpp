@@ -52,6 +52,12 @@ struct sparge_blockmap_args
     // Internal layout (pooled_k then sim_k) given by sparge_blockmap_workspace_layout.
     void* workspace_ptr = nullptr;
 
+    // Caller-owned int8 quant outputs (only used under -qscale=bs). KStats writes
+    // k_int8; block-map writes q_int8 + q_scale. k_scale lives in the workspace.
+    void* q_int8_ptr  = nullptr; // [batch, nhead_q, seqlen_q, D] int8
+    void* k_int8_ptr  = nullptr; // [batch, nhead_k, seqlen_k, D] int8
+    void* q_scale_ptr = nullptr; // [batch, nhead_q, N_q] fp32
+
     // size = nhead_q to match SpargeAttn upstream hyperparameter_check
     const float* simthreshd1_per_head_ptr = nullptr;
     const float* cdfthreshd_per_head_ptr  = nullptr;
@@ -70,7 +76,7 @@ struct sparge_blockmap_workspace_layout
     size_t sim_k_offset; // bytes from workspace_ptr
     size_t sim_k_bytes;
     // Per-K-block quant scale LUT (fp32). Filled by KStats absmax reduce;
-    // attention kernel does not read it yet (reserved for int8 GEMM0 wiring).
+    // consumed as the attention k_descale under -qscale=bs.
     size_t k_scale_offset;
     size_t k_scale_bytes;
     size_t total_bytes;
@@ -114,6 +120,8 @@ auto sparge_blockmap_create_kargs_and_grids(sparge_blockmap_args args,
                                            args.block_map_ptr,
                                            args.lut_ptr,
                                            args.valid_block_num_ptr,
+                                           args.q_int8_ptr,
+                                           args.q_scale_ptr,
                                            pooled_k_ws_ptr,
                                            sim_k_ws_ptr,
                                            args.topk_per_head_ptr,
@@ -143,6 +151,7 @@ auto sparge_kstats_create_kargs_and_grids(sparge_blockmap_args args,
                                          pooled_k_ws_ptr,
                                          sim_k_ws_ptr,
                                          k_scale_ws_ptr,
+                                         args.k_int8_ptr,
                                          args.simthreshd1_per_head_ptr);
 
     dim3 grids = KStatsKernel::GridSize(args.batch, args.nhead_k, args.seqlen_k);
@@ -179,12 +188,6 @@ float sparge_jenga_fwd(sparge_blockmap_traits,
                        fmha_jenga_fwd_traits,
                        fmha_jenga_fwd_args,
                        const ck_tile::stream_config&);
-
-float sparge_vsa_fwd_combined(sparge_blockmap_traits,
-                              sparge_blockmap_args,
-                              fmha_vsa_fwd_traits,
-                              fmha_vsa_fwd_args,
-                              const ck_tile::stream_config&);
 
 float sparge_sparge_fwd_combined(sparge_blockmap_traits,
                                  sparge_blockmap_args,

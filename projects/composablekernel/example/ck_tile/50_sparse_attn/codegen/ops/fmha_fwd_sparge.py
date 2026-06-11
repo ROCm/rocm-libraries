@@ -115,18 +115,8 @@ using fmha_pipeline_problem_{F_idx} = ck_tile::BlockFmhaPipelineProblem<
     {F_trload},
     fmha_trait_{F_idx}>;
 
-// Emit 3 pipeline / kernel instances per traits combo — kNone (PV-skip AST
-// removed; source-equivalent to VSA), kPerWave, kPerBlock (block-wide AND
-// vote gates gemm_1). Host dispatch in fmha_sparge_fwd_api.cpp picks one
-// based on fmha_sparge_fwd_args::hp.pv_mode_compile (0/1/2).
-// fmha_fwd_create_kargs_and_grids<k_>(a) forwards the per-head fields
-// (pv_threshold_per_head_ptr, head_remap_ptr, nhead_in_launch) to MakeKargs.
-// When head_remap_ptr is non-null the wrapper also shrinks grids.y to
-// nhead_in_launch so each bucket fires its own kernel.
-// Suffixes:
-//   _pvsf = PV-Skip OFF      (kNone)
-//   _pvst = PV-Skip per-WAVE (kPerWave)
-//   _pvsb = PV-Skip per-BLOCK (kPerBlock)
+// 3 kernel instances per traits combo; sparge_sparge_fwd_combined buckets heads via head_remap_ptr.
+//   _pvsf = PV-Skip OFF (kNone), _pvst = per-WAVE (kPerWave), _pvsb = per-BLOCK (kPerBlock)
 using fmha_pipeline_{F_idx}_pvsf = ck_tile::BlockFmhaPipelineQRKSVSAsyncSparge<
     fmha_pipeline_problem_{F_idx},
     ck_tile::BlockFmhaPipelineQRKSVSAsyncSpargeDefaultPolicy,
@@ -157,46 +147,7 @@ using trait_{F_idx} = fmha_sparge_fwd_traits_<{F_hdim}, {F_dtype}, {F_bm0}, {F_b
 
 #include <iostream>
 
-// 3 specializations per traits combo — int kPVMode values:
-//   0 = kNone      (pvsf binary)
-//   1 = kPerWave   (pvst binary)
-//   2 = kPerBlock  (pvsb binary)
-template<>
-float fmha_sparge_fwd_<trait_{F_idx}, 0>(const ck_tile::stream_config& s, fmha_sparge_fwd_args a)
-{{
-    using k_ = fmha_kernel_{F_idx}_pvsf;
-    if(s.log_level_ > 0)
-        std::cout << ", " << "{F_kernel_name}_pvsf" << std::flush;
-    auto [kargs, grids] = fmha_fwd_create_kargs_and_grids<k_>(a);
-    const dim3 blocks                      = k_::BlockSize();
-    constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
-    return ck_tile::launch_kernel(s, ck_tile::make_kernel<kBlockPerCu>(k_{{}}, grids, blocks, 0, kargs));
-}}
-
-template<>
-float fmha_sparge_fwd_<trait_{F_idx}, 1>(const ck_tile::stream_config& s, fmha_sparge_fwd_args a)
-{{
-    using k_ = fmha_kernel_{F_idx}_pvst;
-    if(s.log_level_ > 0)
-        std::cout << ", " << "{F_kernel_name}_pvst" << std::flush;
-    auto [kargs, grids] = fmha_fwd_create_kargs_and_grids<k_>(a);
-    const dim3 blocks                      = k_::BlockSize();
-    constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
-    return ck_tile::launch_kernel(s, ck_tile::make_kernel<kBlockPerCu>(k_{{}}, grids, blocks, 0, kargs));
-}}
-
-template<>
-float fmha_sparge_fwd_<trait_{F_idx}, 2>(const ck_tile::stream_config& s, fmha_sparge_fwd_args a)
-{{
-    using k_ = fmha_kernel_{F_idx}_pvsb;
-    if(s.log_level_ > 0)
-        std::cout << ", " << "{F_kernel_name}_pvsb" << std::flush;
-    auto [kargs, grids] = fmha_fwd_create_kargs_and_grids<k_>(a);
-    const dim3 blocks                      = k_::BlockSize();
-    constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
-    return ck_tile::launch_kernel(s, ck_tile::make_kernel<kBlockPerCu>(k_{{}}, grids, blocks, 0, kargs));
-}}
-
+// 3 specializations per traits combo — int kPVMode: 0=kNone(pvsf), 1=kPerWave(pvst), 2=kPerBlock(pvsb)
 template<>
 void fmha_sparge_fwd_oneshot_<trait_{F_idx}, 0>(const ck_tile::stream_config& s, fmha_sparge_fwd_args a)
 {{
@@ -229,88 +180,6 @@ void fmha_sparge_fwd_oneshot_<trait_{F_idx}, 2>(const ck_tile::stream_config& s,
     ck_tile::make_kernel<kBlockPerCu>(k_{{}}, grids, blocks, 0, kargs)(
         ck_tile::stream_config{{s.stream_id_}});
 }}
-"""
-
-FMHA_FWD_API_FILENAME = "fmha_sparge_fwd_api.cpp"
-FMHA_FWD_API = """
-#include <cstdio>
-
-#include <hip/hip_runtime.h>
-
-namespace {{
-bool get_num_cus(unsigned& num_cus) {{
-    int device;
-    auto status = hipGetDevice(&device);
-    if(status != hipSuccess) {{
-        fprintf(stderr, "failed to get device");
-        return false;
-    }}
-
-    hipDeviceProp_t props{{}};
-    status = hipGetDeviceProperties(&props, device);
-    if(status != hipSuccess) {{
-        fprintf(stderr, "failed to get device properties");
-        return false;
-    }}
-
-    num_cus = props.multiProcessorCount;
-    return true;
-}}
-
-unsigned get_num_thread_blocks(unsigned batch, unsigned nheads, unsigned max_seqlen_q, unsigned kM0) {{
-    const unsigned num_m_blocks = (max_seqlen_q + kM0 - 1) / kM0;
-    const unsigned num_n_blocks = 1; // we assume that num_n_blocks is always 1
-
-    return batch * nheads * num_m_blocks * num_n_blocks;
-}}
-}} // namespace
-
-float fmha_sparge_fwd(fmha_sparge_fwd_traits t, fmha_sparge_fwd_args a, const ck_tile::stream_config& s){{
-    float r = -1;
-
-    [[maybe_unused]] const float min_cu_util_rate = 0.8; // minimum CU utilization rate
-
-    unsigned num_cus;
-    if (!get_num_cus(num_cus)) {{
-        return r;
-    }}
-
-    [[maybe_unused]] auto get_num_blocks = [&](unsigned kM0) {{
-        return get_num_thread_blocks(a.batch, a.nhead_q, a.max_seqlen_q, kM0);
-    }};
-    
-    const bool has_load_tr = ck_tile::is_load_tr_supported();
-
-{F_dispatch}
-    return r;
-}}
-"""
-
-FMHA_FWD_API_PER_TRLOAD = """    {F_if}({F_trload_cond}){{
-{F_dtype_case}
-    }}
-"""
-
-FMHA_FWD_API_PER_DTYPE = """    {F_if}(t.data_type.compare(\"{F_dtype}\") == 0){{
-{F_hdim_case}
-    }}
-"""
-FMHA_FWD_API_PER_HDIM_CASE = """        {F_if} (t.hdim_q <= {F_hdim} && t.hdim_v <= {F_hdim_v}) {{
-{F_inner_dispatch}
-        }}
-"""
-
-FMHA_FWD_API_INNER_DISPATCH = """            {F_if}((t.is_v_rowmajor == {F_vlayout}) && ({F_mask_check}) &&
-                        ({F_scheck}) && ({F_seqtune}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint})) {{
-                using trait_ = fmha_sparge_fwd_traits_<{F_hdim}, {F_dtype}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, false/*logits*/, {F_mask}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_trload}>;
-                // pv_mode_compile selects 0=kNone / 1=kPerWave / 2=kPerBlock.
-                switch(a.hp.pv_mode_compile) {{
-                    case 0:  return fmha_sparge_fwd_<trait_, 0>(s, a);
-                    case 1:  return fmha_sparge_fwd_<trait_, 1>(s, a);
-                    case 2:  return fmha_sparge_fwd_<trait_, 2>(s, a);
-                    default: return fmha_sparge_fwd_<trait_, 1>(s, a);  // legacy default = per-wave
-                }}
-            }}
 """
 
 FMHA_FWD_ONESHOT_API_FILENAME = "fmha_sparge_fwd_oneshot_api.cpp"
@@ -518,69 +387,6 @@ class FmhaFwdApiPool:
             self.pool[trait.dtype][hdim] = list()
 
         self.pool[trait.dtype][hdim].append(copy.copy(trait))
-
-    @property
-    def api(self) -> str:
-        tr_load_cond_map = {"t": "has_load_tr", "f": "true"}
-
-        per_tr_load = str()
-        for tr_load in ["t", "f"]:
-            per_dtypes = str()
-            for i, dtype in enumerate(self.pool.keys()):
-                per_hdim_case = str()
-                for j, (hdim, hdim_v) in enumerate(self.pool[dtype].keys()):
-                    traits = [
-                        t
-                        for t in self.pool[dtype][(hdim, hdim_v)]
-                        if tr_load == t.tr_load
-                    ]
-                    inners = str()
-                    for k, trait in enumerate(traits):
-                        if_k = "if" if k == 0 else "else if"
-                        inners = inners + FMHA_FWD_API_INNER_DISPATCH.format(
-                            F_if=if_k,
-                            F_vlayout=LAYOUT_MAP[trait.vlayout],
-                            F_pipeline_enum=PIPELINE_ENUM_MAP[trait.pipeline_tag],
-                            # F_logits removed - hardcoded to false (NOT supported)
-                            F_mask=get_mask_map(self.mask_impl)[trait.mask],
-                            F_mask_check=get_mask_check_map(self.mask_impl)[trait.mask],
-                            F_trload=BOOL_MAP[trait.tr_load],
-                            F_scheck=trait.scheck,
-                            F_seqtune=trait.seqtune,
-                            F_skcheck=trait.skcheck,
-                            F_dcheck=trait.dcheck,
-                            F_dvcheck=trait.dvcheck,
-                            F_constraint=trait.constraint,
-                            F_spad=BOOL_MAP[trait.spad],
-                            F_skpad=BOOL_MAP[trait.skpad],
-                            F_dpad=BOOL_MAP[trait.dpad],
-                            F_dvpad=BOOL_MAP[trait.dvpad],
-                            F_bm0=trait.bm0,
-                            F_bn0=trait.bn0,
-                            F_bk0=trait.bk0,
-                            F_bn1=trait.bn1,
-                            F_bk1=trait.bk1,
-                            F_bk0max=trait.bk0max,
-                            F_hdim=hdim,
-                            F_dtype=FWD_DTYPE_MAP[dtype],
-                        )
-                    if_j = "if" if j == 0 else "else if"
-                    per_hdim_case = per_hdim_case + FMHA_FWD_API_PER_HDIM_CASE.format(
-                        F_if=if_j, F_hdim=hdim, F_hdim_v=hdim_v, F_inner_dispatch=inners
-                    )
-                if_i = "if" if i == 0 else "else if"
-                per_dtypes = per_dtypes + FMHA_FWD_API_PER_DTYPE.format(
-                    F_if=if_i, F_dtype=dtype, F_hdim_case=per_hdim_case
-                )
-            per_tr_load += FMHA_FWD_API_PER_TRLOAD.format(
-                F_if="if",
-                F_trload_cond=tr_load_cond_map[tr_load],
-                F_dtype_case=per_dtypes,
-            )
-        if not per_tr_load:
-            # empty string we add some ignore to suppress warning in api
-            per_tr_load += "    (void)t ; (void)s ; (void)a;"
-        return FMHA_FWD_KERNEL_HEADER + FMHA_FWD_API.format(F_dispatch=per_tr_load)
 
     @property
     def oneshot_api(self) -> str:
@@ -1064,7 +870,6 @@ def write_single_fwd_kernel(kernel: FmhaFwdKernel, autogen_dir: Path) -> None:
 
 
 def write_fwd_api(api_pool: FmhaFwdApiPool, autogen_dir: Path) -> None:
-    update_file(autogen_dir / FMHA_FWD_API_FILENAME, api_pool.api)
     update_file(autogen_dir / FMHA_FWD_ONESHOT_API_FILENAME, api_pool.oneshot_api)
 
 
@@ -1084,5 +889,4 @@ def list_blobs(
         _, kernels = get_fwd_blobs(kernel_filter, receipt, optdim_list, mask_impl)
         for kernel in kernels:
             f.write((file_path.parent / GEN_DIR / kernel.filename).as_posix() + "\n")
-        f.write((file_path.parent / GEN_DIR / FMHA_FWD_API_FILENAME).as_posix() + "\n")
         f.write((file_path.parent / GEN_DIR / FMHA_FWD_ONESHOT_API_FILENAME).as_posix() + "\n")

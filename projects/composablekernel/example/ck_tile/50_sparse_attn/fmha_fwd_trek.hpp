@@ -331,11 +331,6 @@ float fmha_vsa_fwd(fmha_vsa_fwd_traits, fmha_vsa_fwd_args, const ck_tile::stream
 template <typename Traits_>
 float fmha_vsa_fwd_(const ck_tile::stream_config&, fmha_vsa_fwd_args);
 
-template <typename Traits_>
-void fmha_vsa_fwd_oneshot_(const ck_tile::stream_config&, fmha_vsa_fwd_args);
-
-void fmha_vsa_fwd_oneshot(fmha_vsa_fwd_traits, fmha_vsa_fwd_args, const ck_tile::stream_config&);
-
 // sparge: same args as vsa plus a scalar PV-skip threshold (Step 1).
 struct fmha_sparge_fwd_args
 {
@@ -467,16 +462,7 @@ using fmha_sparge_fwd_traits_ = fmha_jenga_fwd_traits_<HDim_,
 
 using fmha_sparge_fwd_traits = fmha_jenga_fwd_traits;
 
-float fmha_sparge_fwd(fmha_sparge_fwd_traits, fmha_sparge_fwd_args, const ck_tile::stream_config&);
-
-// PV-skip mode is a template non-type param so codegen emits all 3
-// instantiations from the same source tree. Host dispatch
-// (fmha_sparge_fwd_api.cpp) selects the specialization based on
-// fmha_sparge_fwd_args::hp.pv_mode_compile at runtime.
-//   0 = kNone, 1 = kPerWave, 2 = kPerBlock  (matches ck_tile::PVSkipMode).
-template <typename Traits_, int kPVMode>
-float fmha_sparge_fwd_(const ck_tile::stream_config&, fmha_sparge_fwd_args);
-
+// kPVMode is a template non-type param so codegen emits all 3: 0=kNone 1=kPerWave 2=kPerBlock
 template <typename Traits_, int kPVMode>
 void fmha_sparge_fwd_oneshot_(const ck_tile::stream_config&, fmha_sparge_fwd_args);
 
@@ -484,8 +470,7 @@ void fmha_sparge_fwd_oneshot(fmha_sparge_fwd_traits,
                              fmha_sparge_fwd_args,
                              const ck_tile::stream_config&);
 
-// Hand-written int8 BLOCKSCALE launcher (Q/K int8, V fp16, per-block dequant).
-// Single specialization: hdim=128, bm0=64, PVSkipMode::kPerWave. Selected by
-// the test runner via -qscale=bs.
+// hand-written int8 BLOCKSCALE launcher (Q/K int8, V fp16); hdim=128/bm0=64/kPerWave, via
+// -qscale=bs
 void fmha_sparge_int8_fwd_oneshot_fp16_d128_bm64(const ck_tile::stream_config&,
                                                  fmha_sparge_fwd_args);

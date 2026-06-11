@@ -263,6 +263,9 @@ struct SpargeBlockMapPipeline
                                    int32_t* valid_block_num_ptr,
                                    const KDataType* __restrict__ pooled_k_ws_ptr,
                                    const uint8_t* __restrict__ sim_k_ws_ptr,
+                                   int8_t* __restrict__ q_int8_out, // [kM0 rows, D] for this qb
+                                   index_t stride_q_int8,           // row stride of q_int8_out
+                                   float* __restrict__ q_scale_out, // 1 fp32 per Q-block
                                    void* smem_ptr,
                                    bool is_causal_tl,
                                    bool attention_sink) const
@@ -323,6 +326,44 @@ struct SpargeBlockMapPipeline
         sh_sq               = reduce_across_k(sh_sq);
         const float denom_q = static_cast<float>(bs_q) * static_cast<float>(bs_q);
         const bool sim_q    = (denom_q > 0.f) && ((sh_sq / denom_q) > simthreshd1);
+
+        // int8 Q quant (absmax/127) before the !sim_q early-exit; null q_int8_out => fp16 path
+        if(q_int8_out != nullptr)
+        {
+            const index_t warp_id = tid / WarpSize;
+            const index_t lane_id = tid % WarpSize;
+            const index_t k_idx   = lane_id % KThreads;
+            const index_t m_idx   = lane_id / KThreads;
+
+            float q_absmax_thread = 0.f;
+            for(index_t i = 0; i < MPerThread * KPerThread; ++i)
+            {
+                const float a = q_data[i] < 0.f ? -q_data[i] : q_data[i];
+                if(a > q_absmax_thread)
+                    q_absmax_thread = a;
+            }
+            const float q_absmax = block_reduce_max(q_absmax_thread, smem_small);
+            if(tid == 0)
+                *q_scale_out = q_absmax / 127.0f;
+
+            const float inv_scale = (q_absmax > 0.f) ? (127.0f / q_absmax) : 0.f;
+            for(index_t m = 0; m < MPerThread; ++m)
+            {
+                const index_t gseq =
+                    m * (SeqThreadPerWarp * NumWarps) + warp_id * SeqThreadPerWarp + m_idx;
+                if(gseq >= bs_q)
+                    continue;
+                for(index_t k = 0; k < KPerThread; ++k)
+                {
+                    const index_t gd = k_idx * KPerThread + k;
+                    float qv         = q_data[m * KPerThread + k] * inv_scale;
+                    qv               = qv >= 0.f ? floor(qv + 0.5f) : ceil(qv - 0.5f);
+                    qv               = max(-127.0f, min(127.0f, qv));
+                    q_int8_out[gseq * stride_q_int8 + gd] =
+                        static_cast<int8_t>(static_cast<int>(qv));
+                }
+            }
+        }
 
         // Not similar → force all K blocks ON, early exit
         if(!sim_q)

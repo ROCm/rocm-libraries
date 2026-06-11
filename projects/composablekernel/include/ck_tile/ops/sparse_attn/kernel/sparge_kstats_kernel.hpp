@@ -43,6 +43,7 @@ struct SpargeKStatsKernel
         void* pooled_k_ptr; // [batch, nhead_k, N_k, D] KDataType (fp16/bf16, matches K dtype)
         void* sim_k_ptr;    // [batch, nhead_k, N_k] uint8
         void* k_scale_ptr;  // [batch, nhead_k, N_k] fp32; per-K-block quant scale
+        void* k_int8_ptr;   // [batch, nhead_k, seqlen_k, D] int8; same strides as K
 
         index_t N_k;
 
@@ -62,6 +63,7 @@ struct SpargeKStatsKernel
                                                  void* pooled_k_ptr,
                                                  void* sim_k_ptr,
                                                  void* k_scale_ptr,
+                                                 void* k_int8_ptr,
                                                  const float* simthreshd1_per_head)
     {
         const index_t N_k = integer_divide_ceil(seqlen_k, kN0);
@@ -76,6 +78,7 @@ struct SpargeKStatsKernel
                      pooled_k_ptr,
                      sim_k_ptr,
                      k_scale_ptr,
+                     k_int8_ptr,
                      N_k,
                      simthreshd1_per_head};
     }
@@ -119,6 +122,10 @@ struct SpargeKStatsKernel
         auto* sim_k_out   = reinterpret_cast<uint8_t*>(kargs.sim_k_ptr) + (khead_off + kb);
         auto* k_scale_out = reinterpret_cast<float*>(kargs.k_scale_ptr) + (khead_off + kb);
 
+        // int8 K base for this (b, hk, kb); shares K's element strides (1 byte each).
+        auto* k_int8_out = reinterpret_cast<int8_t*>(kargs.k_int8_ptr) + b * kargs.batch_stride_k +
+                           hk * kargs.nhead_stride_k + kb * kN0 * kargs.stride_k;
+
         __shared__ char smem[Pipeline::GetSmemSize()];
 
         const float simthreshd1_eff = kargs.simthreshd1_per_head[hk];
@@ -130,6 +137,8 @@ struct SpargeKStatsKernel
                    pooled_k_out,
                    sim_k_out,
                    k_scale_out,
+                   k_int8_out,
+                   kargs.stride_k,
                    static_cast<void*>(smem));
     }
 };

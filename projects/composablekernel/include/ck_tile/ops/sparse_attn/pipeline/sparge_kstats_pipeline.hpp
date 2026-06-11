@@ -35,9 +35,7 @@ struct SpargeKStatsPipeline
     static constexpr index_t kColPaddedStride = Base::kColPaddedStride;
     static constexpr index_t kPerWarpFloats   = Base::kPerWarpFloats;
     static constexpr index_t kReduceBytes     = NumWarps * kPerWarpFloats * sizeof(float);
-    // Small scratch for block_reduce_max (absmax stage): 2*NumWarps floats appended
-    // after the column-reduce slab. Disjoint to avoid WAR against the trailing
-    // cross-warp reduce that has no trailing sync.
+    // absmax block_reduce_max scratch; disjoint from column-reduce slab (no trailing sync)
     static constexpr index_t kSmallBytes = 2 * NumWarps * sizeof(float);
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
@@ -50,8 +48,7 @@ struct SpargeKStatsPipeline
         return Base::MakeKBlockDistribution();
     }
 
-    // operator(): one work-group, one K-block. Writes D fp32 + 1 uint8 + 1 fp32 (k_scale) to
-    // workspace.
+    // operator(): one work-group per K-block; writes pooled K, sim_k, k_scale, and int8 K
     template <typename KWindowType>
     CK_TILE_DEVICE void operator()(const KWindowType& k_window,
                                    index_t seqlen_k,
@@ -60,6 +57,8 @@ struct SpargeKStatsPipeline
                                    KDataType* __restrict__ pooled_k_out, // D KDataType (fp16/bf16)
                                    uint8_t* __restrict__ sim_k_out,      // 1 byte
                                    float* __restrict__ k_scale_out,      // 1 fp32 per K-block
+                                   int8_t* __restrict__ k_int8_out, // [kN0 rows, D] for this kb
+                                   index_t stride_k_int8,           // row stride of k_int8_out
                                    void* smem_ptr) const
     {
         const index_t tid = static_cast<index_t>(threadIdx.x);
@@ -115,9 +114,7 @@ struct SpargeKStatsPipeline
         if(tid == 0)
             *sim_k_out = sim_k ? static_cast<uint8_t>(1) : static_cast<uint8_t>(0);
 
-        // Per-K-block absmax /127 -> scalar fp32 scale for int8 quant.
-        // Standalone scan over raw k_data; block-wide reduce uses smem_small
-        // (disjoint from smem_reduce slab).
+        // per-K-block absmax/127 scale; block reduce uses smem_small (disjoint from smem_reduce)
         float k_absmax_thread = 0.f;
         for(index_t i = 0; i < NPerThread * KPerThread; ++i)
         {
@@ -129,6 +126,28 @@ struct SpargeKStatsPipeline
         const float k_absmax = Base::block_reduce_max(k_absmax_thread, smem_small);
         if(tid == 0)
             *k_scale_out = k_absmax / 127.0f;
+
+        // int8 K from already-loaded k_data (k_absmax broadcast); null k_int8_out => fp16 path
+        if(k_int8_out != nullptr)
+        {
+            const float inv_scale = (k_absmax > 0.f) ? (127.0f / k_absmax) : 0.f;
+            for(index_t m = 0; m < NPerThread; ++m)
+            {
+                const index_t gseq =
+                    m * (SeqThreadPerWarp * NumWarps) + warp_id * SeqThreadPerWarp + m_idx;
+                if(gseq >= bs_k)
+                    continue;
+                for(index_t k = 0; k < KPerThread; ++k)
+                {
+                    const index_t gd = k_idx * KPerThread + k;
+                    float q          = k_data[m * KPerThread + k] * inv_scale;
+                    q                = q >= 0.f ? floor(q + 0.5f) : ceil(q - 0.5f);
+                    q                = max(-127.0f, min(127.0f, q));
+                    k_int8_out[gseq * stride_k_int8 + gd] =
+                        static_cast<int8_t>(static_cast<int>(q));
+                }
+            }
+        }
     }
 };
 

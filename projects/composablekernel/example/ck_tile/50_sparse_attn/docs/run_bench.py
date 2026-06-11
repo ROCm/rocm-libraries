@@ -11,8 +11,11 @@ Curves:
   - sparge_fp16 : sparse + fp16               (tile_example_sparge)
   - sparge_sage : sparse + int8 BLOCKSCALE Q/K (tile_example_sparge -qscale=bs)
 
-Timing is read from rocprof --stats (results.stats.csv AverageNs), not the
-binary's self-reported number. Requires an MI300-class GPU and rocprof.
+Timing comes from the binary's own in-program hipEvent GPU timer (the "X ms"
+it prints to stdout), not rocprof. For the sparse curves this timer brackets
+ALL THREE GPU kernels (kstats + blockmap + attention) via a single grouped
+launch_kernel call, so sparse TOPS reflect the true end-to-end cost. No
+rocprof dependency -- only an MI300-class GPU is needed.
 
 Example (run from the example dir):
   python3 docs/run_bench.py --bin-dir build/bin --csv docs/sparge_bench.csv
@@ -36,32 +39,30 @@ WARMUP, REPEAT = 5, 100
 TOPK_SWEEP_FULL = [0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90]
 TOPK_SWEEP_SMOKE = [0.50]
 
-# Kernel-name regexes matched against rocprof stats CSV "Name" column.
-FMHA_DENSE_RE = re.compile(r"FmhaFwdKernel<ck_tile::BlockFmhaPipelineQRKSVSAsync<")
-FMHA_SPARGE_RE = re.compile(r"FmhaFwdSpargeKernel<ck_tile::BlockFmhaPipelineQRKSVSAsyncSparge<")
-FMHA_SAGE_RE = re.compile(r"SageAttnFwdKernel[<I]")
+# The binary prints ", <avg_ms> ms," from its in-program hipEvent GPU timer.
+MS_RE = re.compile(r",\s*([0-9.]+)\s*ms")
 SPARSITY_RE = re.compile(r"sparsity=([0-9.eE+\-]+)\(([0-9]+)/([0-9]+)\)")
 
 FINITE_THRESH = 20.0
 
 CURVES = {
     "fmha_dense": dict(
-        bin="tile_example_fmha_fwd", regex=FMHA_DENSE_RE, prec="fp16",
+        bin="tile_example_fmha_fwd", prec="fp16",
         extra_flags=["-mask=0", "-vlayout=r"],
         has_sparsity=False, has_topk=False, pv_mode=None, pv_threshold=None, qscale=None,
     ),
     "fmha_sage": dict(
-        bin="tile_example_sageattn_fwd", regex=FMHA_SAGE_RE, prec="fp8bf16",
+        bin="tile_example_sageattn_fwd", prec="fp8bf16",
         extra_flags=["-mask=0", "-vlayout=r", "-qscale=bs"],
         has_sparsity=False, has_topk=False, pv_mode=None, pv_threshold=None, qscale=None,
     ),
     "sparge_fp16": dict(
-        bin="tile_example_sparge", regex=FMHA_SPARGE_RE, prec="fp16",
+        bin="tile_example_sparge", prec="fp16",
         extra_flags=["-pipeline=vsa", "-simthreshd1=0.001", "-cdfthreshd=-1"],
         has_sparsity=True, has_topk=True, pv_mode="warp", pv_threshold=FINITE_THRESH, qscale=None,
     ),
     "sparge_sage": dict(
-        bin="tile_example_sparge", regex=FMHA_SPARGE_RE, prec="fp16",
+        bin="tile_example_sparge", prec="fp16",
         extra_flags=["-pipeline=vsa", "-simthreshd1=0.001", "-cdfthreshd=-1"],
         has_sparsity=True, has_topk=True, pv_mode="warp", pv_threshold=FINITE_THRESH, qscale="bs",
     ),
@@ -98,16 +99,11 @@ def build_cli(bin_dir: Path, curve: str, topk, seed: int) -> list[str]:
     return cli
 
 
-def parse_stats_csv(stats_path: Path, kernel_re: re.Pattern) -> tuple[float, str]:
-    with stats_path.open() as f:
-        matches = [r for r in csv.DictReader(f) if kernel_re.search(r["Name"])]
-    if not matches:
-        raise RuntimeError(f"No row matching {kernel_re.pattern} in {stats_path}")
-    if len(matches) > 1:
-        total_ns = sum(float(m["AverageNs"]) * int(m.get("Calls", 1)) for m in matches)
-        total_calls = sum(int(m.get("Calls", 1)) for m in matches)
-        return total_ns / total_calls, matches[0]["Name"]
-    return float(matches[0]["AverageNs"]), matches[0]["Name"]
+def parse_ms(stdout: str) -> float:
+    m = MS_RE.search(stdout)
+    if not m:
+        raise RuntimeError("No '<avg_ms> ms' token in stdout")
+    return float(m.group(1))
 
 
 def parse_sparsity(stdout: str) -> tuple[float, int, int]:
@@ -121,10 +117,9 @@ def run_one(bin_dir: Path, launcher: list[str], curve: str, topk, seed: int, run
     cfg = CURVES[curve]
     run_dir.mkdir(parents=True, exist_ok=True)
     tag = (f"{curve}__topk{topk:.2f}__seed{seed}" if topk is not None else f"{curve}__seed{seed}")
-    stats_prefix = run_dir / tag
     stdout_path = run_dir / f"{tag}.stdout.txt"
 
-    cmd = launcher + ["rocprof", "--stats", "-o", f"{stats_prefix}.csv"] + build_cli(bin_dir, curve, topk, seed)
+    cmd = launcher + build_cli(bin_dir, curve, topk, seed)
     print(f"[run] {tag}\n      " + " ".join(shlex.quote(x) for x in cmd), flush=True)
 
     t0 = time.time()
@@ -132,18 +127,20 @@ def run_one(bin_dir: Path, launcher: list[str], curve: str, topk, seed: int, run
         proc = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, text=True)
     dt = time.time() - t0
     if proc.returncode != 0:
-        raise RuntimeError(f"rocprof exit={proc.returncode} after {dt:.1f}s; see {stdout_path}")
+        raise RuntimeError(f"binary exit={proc.returncode} after {dt:.1f}s; see {stdout_path}")
 
     _ = list(run_dir.iterdir())  # force attr refresh on networked filesystems
 
-    mean_ns, _ = parse_stats_csv(run_dir / f"{tag}.stats.csv", cfg["regex"])
+    out = stdout_path.read_text()
+    avg_ms = parse_ms(out)
+    mean_ns = avg_ms * 1e6
     tops = tops_from(mean_ns)
     if cfg["has_sparsity"]:
-        sparsity, active, total = parse_sparsity(stdout_path.read_text())
+        sparsity, active, total = parse_sparsity(out)
     else:
         sparsity, active, total = 0.0, 0, 0
 
-    print(f"      mean_ns={mean_ns:.0f}  tops={tops:.2f}  "
+    print(f"      avg_ms={avg_ms:.3f}  tops={tops:.2f}  "
           f"sparsity={sparsity:.4f} ({active}/{total})  wall={dt:.1f}s", flush=True)
     return dict(
         curve_name=curve,

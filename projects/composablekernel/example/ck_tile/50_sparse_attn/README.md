@@ -6,43 +6,45 @@ A Composable Kernel port of [SpargeAttn](https://github.com/thu-ml/SpargeAttn) f
 
 Not yet ported (upstream pinned to commit [`ae5b629`](https://github.com/thu-ml/SpargeAttn/tree/ae5b629ebb41e41f86b3ea2ab5a3283f13ac151a)):
 - **K smoothing** — pre-pool `k -= km`; required for diffusion / video checkpoints (CogVideoX, Mochi-1, Flux, OpenSora, SD 3.5) ([spas_sage_attn/core.py:L53](https://github.com/thu-ml/SpargeAttn/blob/ae5b629ebb41e41f86b3ea2ab5a3283f13ac151a/spas_sage_attn/core.py#L53))
-- **Fused Q/K int8 quant in the pool kernel** — the int8 BLOCKSCALE GEMM0 path exists (see Performance), but the per-block Q/K quant is still computed host-side; upstream fuses it into the pool kernel ([spas_sage_attn/utils.py:L371](https://github.com/thu-ml/SpargeAttn/blob/ae5b629ebb41e41f86b3ea2ab5a3283f13ac151a/spas_sage_attn/utils.py#L371))
 
 ## Performance
 
 ![SpargeAttn + SageAttn comparison](docs/pv_skip_mode_comparison.png)
 
-*MI300X, b=2 h=16 s=8192 d=128, 5 seeds × 9 sparsity points, `-pv_mode=warp`. Two baselines (Dense FP16, Dense + SageAttn FP8 BLOCKSCALE) and two sparse sweeps: SpargeAttn (sparse + FP16) and SpargeAttn + SageAttn (sparse + INT8 BLOCKSCALE Q/K, FP16 V). Point labels are the SpargeAttn + SageAttn speedup vs Dense FP16.*
+*MI300X, b=2 h=16 s=8192 d=128, 5 seeds × 9 sparsity points, `-pv_mode=warp`. Two baselines (Dense FP16, Dense + SageAttn FP8 BLOCKSCALE) and two sparse sweeps: SpargeAttn (sparse + FP16) and SpargeAttn + SageAttn (sparse + INT8 BLOCKSCALE Q/K, FP16 V). Timing is the binary's in-program GPU timer (hipEvent) measured end-to-end over the full pipeline — all three sparse kernels (K-stats + block-map selection + attention) — not an attention-only profile. Point labels are the SpargeAttn + SageAttn speedup vs Dense FP16.*
 
-SpargeAttn + SageAttn (int8 Q/K) sits +15..+19% above the FP16-only sparse sweep at every sparsity, and crosses the dense baseline near sparsity 0.31 vs sparsity 0.40 for FP16.
+SpargeAttn + SageAttn (int8 Q/K) sits ~+12% above the FP16-only sparse sweep (median; +4..+14% across sparsity), and crosses the dense baseline near sparsity 0.47 vs sparsity 0.53 for FP16; at sparsity 0.91 it reaches ~3.5x dense. These numbers are end-to-end across all three GPU kernels (K-stats + block-map selection + attention), so the break-even sparsity is higher than an attention-only timing would suggest.
 
 ### Reproducing the chart
 
-Scripts live in [`docs/`](docs/). Two steps — measure, then plot:
+Scripts live in [`docs/`](docs/). Two steps — measure on your own GPU, then plot:
 
 ```bash
-# 1. sweep on an MI300-class GPU (needs rocprof; ~30 min for the full 5-seed sweep)
-python3 docs/run_bench.py --bin-dir build/bin --csv docs/sparge_bench.csv
+# 1. sweep on an MI300-class GPU (needs an MI300-class GPU; ~5 min for the full 5-seed sweep)
+python3 docs/run_bench.py --bin-dir build/bin --csv sparge_bench.csv
 
-# 2. render the figure from the CSV (no GPU needed; needs matplotlib)
-python3 docs/plot.py --csv docs/sparge_bench.csv \
-        --out docs/pv_skip_mode_comparison.png
+# 2. render the figure from the CSV you just produced (needs matplotlib)
+python3 docs/plot.py --csv sparge_bench.csv --out sparge_chart.png
 ```
 
-`docs/sparge_bench.csv` ships with the measured data behind the published
-figure, so step 2 alone reproduces the chart. Re-run step 1 to regenerate the
-numbers on your own hardware. `run_bench.py --smoke` does a single-sparsity
-quick check; `--launcher "srun --jobid=<id> --overlap"` wraps each run for
-schedulers like SLURM. Data uses random tensors (uniform [-0.5, 0.5]), so the
-measured sparsity per point varies slightly with `--seeds`.
+`run_bench.py` is the readable reference for how each curve's data is produced:
+it documents the four curves, the bench shape, and the CSV schema it writes
+(one row per curve/sparsity/seed). Timing is read from the binary's in-program
+GPU timer (hipEvent, parsed from stdout), which brackets all three sparse kernels
+(K-stats + block-map selection + attention) end-to-end — no rocprof required.
+The exact measured numbers are not vendored —
+re-run step 1 to generate them on your own hardware. `run_bench.py --smoke` does
+a single-sparsity quick check; `--launcher "srun --jobid=<id> --overlap"` wraps
+each run for schedulers like SLURM. Data uses random tensors (uniform
+[-0.5, 0.5]), so the measured sparsity per point varies slightly with `--seeds`.
 
 ## PV-skip modes
 
 `pv_threshold` per-Q-tile skip in the attention kernel is implemented in three variants, selectable at runtime via `-pv_mode={none|warp|block}`:
 
 - **`none`** — skip disabled; baseline matching the no-PV-skip codegen instance.
-- **`warp`** (per-wavefront) — each wavefront votes locally via `__shfl_xor` butterfly AND; SGPR-resident flag. CK-tile-specific variant, not in upstream.
-- **`block`** (per-block) — block-wide consensus vote via LDS broadcast; aligned with upstream sm80 ([`qk_int_sv_f16_cuda_sm80.cuh:L334`](https://github.com/thu-ml/SpargeAttn/blob/ae5b629ebb41e41f86b3ea2ab5a3283f13ac151a/csrc/qattn/qk_int_sv_f16_cuda_sm80.cuh#L334)). V loads stay unconditional in all modes — the guard wraps the PV MMA only, matching upstream and paper Algorithm 1.
+- **`warp`** (per-wavefront) — each wavefront votes locally via `__shfl_xor` butterfly AND; SGPR-resident flag. Maps to upstream `PVThresholdMode::kPerWarp` ([`attn_utils.cuh`](https://github.com/thu-ml/SpargeAttn/blob/ae5b629ebb41e41f86b3ea2ab5a3283f13ac151a/csrc/qattn/attn_utils.cuh#L59)); the per-warp granularity is upstream's, only the butterfly-AND-of-bool implementation is CK-tile-specific.
+- **`block`** (per-block) — block-wide consensus vote via LDS broadcast; upstream `PVThresholdMode::kPerBlock` ([`qk_int_sv_f16_cuda_sm80.cuh:L303`](https://github.com/thu-ml/SpargeAttn/blob/ae5b629ebb41e41f86b3ea2ab5a3283f13ac151a/csrc/qattn/qk_int_sv_f16_cuda_sm80.cuh#L303)). V loads stay unconditional in all modes — the guard wraps the PV MMA only, matching upstream and paper Algorithm 1.
 
 Default is `-pv_mode=warp`; `none` disables the skip and `block` selects the upstream-aligned block-wide vote. On the `kM0=64` tile bucket of the recipe shape, `warp` wins — `block` adds +33..+35 VGPR which depresses occupancy.
 
