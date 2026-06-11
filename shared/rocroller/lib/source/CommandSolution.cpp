@@ -114,9 +114,20 @@ namespace rocRoller
         m_workgroupSize = v;
     }
 
+    void CommandParameters::setManualWorkgroupClusterSize(std::array<unsigned int, 3> const& v)
+    {
+        m_workgroupClusterSize = v;
+    }
+
     std::optional<std::array<unsigned int, 3>> CommandParameters::getManualWorkgroupSize() const
     {
         return m_workgroupSize;
+    }
+
+    std::optional<std::array<unsigned int, 3>>
+        CommandParameters::getManualWorkgroupClusterSize() const
+    {
+        return m_workgroupClusterSize;
     }
 
     void CommandParameters::setManualWavefrontCount(std::pair<uint, uint> wavefrontCounts)
@@ -215,6 +226,8 @@ namespace rocRoller
         if(sharedMem)
             rv.sharedMemBytes = getUnsignedInt(evaluate(sharedMem, args));
 
+        rv.workgroupClusterSize = m_context->kernel()->workgroupClusterSize();
+
         return rv;
     }
 
@@ -296,6 +309,12 @@ namespace rocRoller
             unsigned int wfs = m_context->targetArchitecture().GetCapability(
                 GPUCapability::DefaultWavefrontSize);
             m_context->kernel()->setWorkgroupSize({wfs, 1, 1});
+        }
+
+        if(m_commandParameters->getManualWorkgroupClusterSize())
+        {
+            m_context->kernel()->setWorkgroupClusterSize(
+                *m_commandParameters->getManualWorkgroupClusterSize());
         }
 
         auto zero = std::make_shared<Expression::Expression>(0u);
@@ -401,6 +420,7 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::AddF6LDSPadding>(m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::AddDirect2LDS>(m_context, m_commandParameters));
+        transforms.push_back(std::make_shared<KernelGraph::AddTDMToLDS>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::AddPRNG>(m_context));
         transforms.push_back(
@@ -408,7 +428,7 @@ namespace rocRoller
         transforms.push_back(
             std::make_shared<KernelGraph::AssignIndexExpressions>(m_context, m_command));
         transforms.push_back(std::make_shared<KernelGraph::LoadPacked>(m_context));
-        transforms.push_back(std::make_shared<KernelGraph::AddConvert>());
+        transforms.push_back(std::make_shared<KernelGraph::AddConvert>(m_context));
 
         //
         // TODO: Turn on this transformation by default when SGPR issue gets resolved
@@ -610,7 +630,8 @@ namespace rocRoller
         AssertFatal(m_context);
         AssertFatal(m_context->kernel());
 
-        m_executableKernel = std::make_shared<ExecutableKernel>();
+        m_executableKernel
+            = std::make_shared<ExecutableKernel>(m_context->targetArchitecture().target());
         m_executableKernel->loadKernelFromFile(
             fileName, kernelName, m_context->targetArchitecture().target());
     }
@@ -620,17 +641,17 @@ namespace rocRoller
     {
         AssertFatal(m_context);
 
-        m_executableKernel = std::make_shared<ExecutableKernel>();
+        m_executableKernel
+            = std::make_shared<ExecutableKernel>(m_context->targetArchitecture().target());
         m_executableKernel->loadKernelFromCodeObjectFile(
             fileName, kernelName, m_context->targetArchitecture().target());
 
+        // XXX Instead of adding `setKernel`, should the context load from a code object?
         auto kernels   = AssemblyKernels::fromELF(fileName).kernels;
         auto kernel    = kernels.at(0);
         auto kernelPtr = std::make_shared<AssemblyKernel>(kernel);
         m_context->setKernel(kernelPtr);
         return kernelPtr;
-
-        // XXX Instead of adding `setKernel`, should the context load from a code object?
     }
 
     ContextPtr CommandKernel::getContext()
