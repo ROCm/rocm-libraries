@@ -32,11 +32,6 @@ import math
 from rocisa.code import Module, Label
 from rocisa.instruction import (
     SWaitCnt,
-    MFMAInstruction,
-    MXMFMAInstruction,
-    LocalReadInstruction,
-    GlobalReadInstruction,
-    CommonInstruction,
     SCmpEQU32, SCmpLeU32,
     SCBranchSCC1, SMovB32, VAndB32, VCmpGTI32, VCmpLeI32,
     VCmpLtI32, VCndMaskB32, VLShiftLeftB32, VLShiftRightB32, VMovB32, VSubI32,
@@ -67,12 +62,11 @@ from tensile_writer.subtile.module_builder import ModuleBuilder as _ModuleBuilde
 
 from Tensile.Components.Subtile.SubtileGREmit import (
     emitSingleBufferLoad, globalReadPtrUpdates, globalReadLDSBufferSwap,
+    globalReadDoScaleSubtile, globalReadScalePtrUpdates,
 )
 from Tensile.Components.Subtile.SubtileLREmit import (
     emitSingleDsRead, localReadLDSBufferSwap,
-)
-from Tensile.Components.Subtile.SubtileScaleEmit import (
-    globalReadDoScaleSubtile, globalReadScalePtrUpdates, emitScaleDsRead,
+    emitScaleDsRead,
 )
 
 
@@ -1789,46 +1783,6 @@ def extractPathsFromBeforeDeps(emittedModules) -> tuple:
             regularPaths.append(path)
 
     return mfmaIdx, regularPaths, preMfmaPaths
-
-
-def classifyInstruction(inst):
-    """Classify a live rocisa instruction into a data-only ``Instruction``.
-
-    Mirrors the isinstance() predicates of the slot-placement algorithm. Any
-    instruction that matches none of them is classified as ``Other`` and placed
-    generically — exactly how the original Python algorithm handled such
-    instructions.
-    """
-    _Instruction = _cppsched.Instruction
-    _InstKind = _cppsched.InstKind
-
-    if isinstance(inst, (MFMAInstruction, MXMFMAInstruction)):
-        return _Instruction(_InstKind.Mfma)
-    if isinstance(inst, LocalReadInstruction):
-        return _Instruction(_InstKind.LocalRead)
-    if isinstance(inst, GlobalReadInstruction):
-        return _Instruction(_InstKind.GlobalRead)
-    if isinstance(inst, SWaitCnt):
-        vlcnt = getattr(inst, "vlcnt", -1)
-        adjust = bool(getattr(inst, "adjustVmcnt", True))
-        return _Instruction(_InstKind.WaitCnt, vlcnt, adjust)
-    if isinstance(inst, CommonInstruction):
-        dst = getattr(inst, "dst", None)
-        if dst is not None and getattr(dst, "regType", None) == "m":
-            return _Instruction(_InstKind.M0Update)
-    return _Instruction(_InstKind.Other)
-
-
-def buildModuleRefs(emittedModules):
-    """Build the C++ ``ModuleRef`` model from a list of live EmittedModules."""
-    _ModuleRef = _cppsched.ModuleRef
-    modules = []
-    for em in emittedModules:
-        insts = [classifyInstruction(i) for i in em.instructions]
-        modules.append(
-            _ModuleRef(em.moduleId, em.opType, em.before, insts)
-        )
-    return modules
 
 
 def instructionSchedule(emittedModules):

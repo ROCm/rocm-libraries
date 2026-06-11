@@ -34,8 +34,6 @@ from .SubtileGeometry import (
     RegList,
     GRTag_1x1, GRTag_1x2, GRTag_2x2, GRTag_TLU1,
 )
-from .SubtileScaleEmit import emitScaleGRLDSSwap
-
 from tensile_writer.subtile.module_builder import ModuleBuilder
 
 # Single cached C++ rocisa module-builder. The builder owns no writer state; it
@@ -855,3 +853,35 @@ def globalReadLDSBufferSwap(tc, writer, kernel):
 def globalReadPtrUpdates(tc, writer, kernel):
   ti_ = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
   return ti_.emitGRPtrUpdate(writer, kernel)
+
+
+# ---------------------------------------------------------------------------
+# Scale GR emit
+# ---------------------------------------------------------------------------
+
+def emitScaleGRLDSSwap(ti, writer, kernel):
+  """Toggle scale GR DTL write target between double-buffer halves."""
+  return _builder().gr_lds_buffer_swap(ti.tc)
+
+
+def globalReadDoScaleSubtile(tc, writer, kernel):
+  """Scale GR: load scale bytes global -> LDS via DTL BufferLoadB128."""
+  if not kernel["ProblemType"].get("MXBlockA", 0) and not kernel["ProblemType"].get("MXBlockB", 0):
+    return Module()
+
+  tileInfo = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
+
+  isGlc = bool(kernel["NonTemporal%s"%tc] & 0x1)
+  isSlc = bool(kernel["NonTemporal%s"%tc] & 0x2)
+  isNT  = bool(kernel["NonTemporal%s"%tc] & 0x4)
+
+  assert len(tileInfo.sharedVgprGROffset) > 0, "Scale GR requires at least 1 GR offset VGPR"
+
+  return _builder().scale_gr_load(tc, isGlc, isSlc, isNT, tileInfo.sharedVgprGROffset[0])
+
+
+def globalReadScalePtrUpdates(tc, writer, kernel):
+  """Advance scale SRD base pointer by one depthU iteration."""
+  ti_ = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
+  inc = int(ti_.lrSubtileSize * ti_.lrGlobalSubtileGrid[1])
+  return _builder().scale_gr_ptr_update(tc, inc)

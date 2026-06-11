@@ -5,7 +5,7 @@
 """Regression tests for the C++ (nanobind) MX *scale* GR/LR offset-assignment
 path (swizzled scale), now C++-only for the gfx950 scale geometries.
 
-``SubtileScaleEmit.graTileAssignmentScaleSwizzled`` and
+``Kernel.graTileAssignmentScaleSwizzled`` and
 ``lraTileAssignmentScaleSwizzled`` derive the scale offset-assignment scalar
 math (threads-per-scale-group, per-wave-partition byte stride, M-wave count,
 and the MXSA-vs-MXSB partition-axis selector) before emitting the rocisa scale
@@ -50,7 +50,7 @@ from rocisa.enum import RegisterType
 
 from Tensile.Components.Subtile.Kernel import (
     TileInfo, MXSA_B4, MXSB_B4, MXSA_B8, MXSB_B8)
-from Tensile.Components.Subtile.SubtileScaleEmit import (
+from Tensile.Components.Subtile.Kernel import (
     graTileAssignmentScaleSwizzled, lraTileAssignmentScaleSwizzled)
 
 WAVESIZE = 64

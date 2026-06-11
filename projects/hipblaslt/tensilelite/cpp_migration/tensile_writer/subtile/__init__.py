@@ -9,7 +9,7 @@ Production callers (boundary contract per docs/subtile_cpp_boundary.md):
   instruction_scheduler — LogicalScheduler.py (_cppsched)
   logical_scheduler  — LogicalScheduler.py (_cppls)
   loop_orchestrator  — LogicalScheduler.py (_emit_loop / _emit_main_and_exit_loops / _emit_tail_loop)
-  module_builder     — Kernel.py, SubtileGREmit.py, SubtileLREmit.py, SubtileScaleEmit.py
+  module_builder     — Kernel.py, SubtileGREmit.py, SubtileLREmit.py
   tile_info          — Kernel.py (_CPP_TI)
 """
 

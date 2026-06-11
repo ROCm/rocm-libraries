@@ -28,8 +28,6 @@ from rocisa.instruction import (
 from .SubtileGeometry import (
     LRTag_1x1, LRTag_1x2, LRTag_TLU1,
 )
-from .SubtileScaleEmit import emitScaleLRLDSSwap
-
 from tensile_writer.subtile.module_builder import ModuleBuilder
 
 # Single cached C++ rocisa module-builder (owns no writer state). See
@@ -676,3 +674,18 @@ def localReadLDSBufferSwap(tc, writer, kernel):
   else:
     ti_ = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
     return emitScaleLRLDSSwap(ti_, writer, kernel)
+
+
+# ---------------------------------------------------------------------------
+# Scale LR emit
+# ---------------------------------------------------------------------------
+
+def emitScaleLRLDSSwap(ti, writer, kernel):
+  """Toggle scale LR read offsets between double-buffer halves."""
+  return _builder().lr_lds_buffer_swap(
+      ti.tc, list(ti.sharedVgprLROffset), list(ti.sharedVgprLROffsetSwap))
+
+
+def emitScaleDsRead(tc, vdst, addrVgpr, dsOffset, scaleGroupIdx, k=-1):
+  """Scale LR: read 4 scale bytes (one E8M0 group) from LDS via ds_read_b32."""
+  return _builder().scale_ds_read(tc, vdst, addrVgpr, dsOffset, scaleGroupIdx, k)

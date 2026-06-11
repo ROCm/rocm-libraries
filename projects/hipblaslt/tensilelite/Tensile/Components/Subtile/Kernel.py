@@ -151,12 +151,156 @@ from .SubtileLREmit import (
     lraTileAssignment, localReadDoSubtile, localReadDTLInitCommonSwapVgpr,
     localReadLDSBufferSwap, localReadResetOffsetsSubtile,
     emitSingleDsRead, emitSubtileDsRead, setExecMask,
+    emitScaleDsRead,
 )
-from .SubtileScaleEmit import (
-    globalReadDoScaleSubtile, localReadDoScaleSubtile,
-    graTileAssignmentScaleSwizzled, lraTileAssignmentScaleSwizzled,
-    globalReadScaleSwizzledDTLInitCommonSgpr,
+from .SubtileGREmit import (
+    globalReadDoScaleSubtile,
 )
+
+
+# ---------------------------------------------------------------------------
+# Scale offset-assignment and LR emit
+# ---------------------------------------------------------------------------
+
+def localReadDoScaleSubtile(tc, writer, kernel):
+  """Emit scale ds_reads for all scale groups (PGR=0 path)."""
+  module = Module()
+
+  if not kernel["ProblemType"].get("MXBlockA", 0) and not kernel["ProblemType"].get("MXBlockB", 0):
+    return module
+
+  tileInfo = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
+  if tileInfo.mxBlock == 0:
+    return module
+
+  if hasattr(tileInfo, 'lrSubtileSize'):
+    groupStride = int(tileInfo.lrSubtileSize)
+  else:
+    groupStride = 2 * tileInfo.subtileSize
+
+  numScaleGroups = math.ceil(tileInfo.localSubtileGrid[0] / 2) * tileInfo.localSubtileGrid[1]
+  for gid in range(numScaleGroups):
+    dsOffset = groupStride * gid
+    vdst = tileInfo.vgprTiles[4 * gid].regList.indices[0]
+    module.add(emitScaleDsRead(tc, vdst, tileInfo.sharedVgprLROffset[0], dsOffset, gid))
+
+  return module
+
+
+def _graScaleOffset_cpp(tc, writer, kernel):
+  module = Module()
+  module.addComment("Computing GR Offset for %s"%tc)
+  ti_ = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
+  plan = ti_.scaleGrOffsetAssignPlan()
+  loadWidth = plan.loadWidth
+  loadWidthShift = loadWidth.bit_length() - 1
+  numThreadsPerGroup = plan.numThreadsPerGroup
+  bpe = plan.bpe
+  vtmp = writer.vgprPool.checkOut(1)
+  stmp = writer.sgprPool.checkOut(1)
+  module.add(VLShiftRightB32(dst=vgpr(vtmp),
+                            shiftHex=hex(int(math.log2(numThreadsPerGroup))), src=vgpr("Serial"),
+                            comment="%s: grOffset = serial / %d" % (tc, loadWidth)))
+  module.add(SLShiftLeftB32(sgpr(stmp), int(math.log2(bpe)), sgpr("Strides%s"%tc), comment="*= bpe (%d)"%bpe))
+  module.add(VMulLOU32(dst=vgpr(vtmp), src1=vgpr(vtmp), src0=sgpr(stmp), comment="Apply scale%s stride to each group"%tc))
+  module.add(VAndB32(dst=vgpr(ti_.sharedVgprGROffset[0]),
+                     src0=hex(numThreadsPerGroup - 1), src1=vgpr("Serial"),
+                     comment="%s: grOffset = serial %% %d" % (tc, loadWidth)))
+  module.add(VLShiftLeftB32(dst=vgpr(ti_.sharedVgprGROffset[0]),
+                            shiftHex=hex(loadWidthShift), src=vgpr(ti_.sharedVgprGROffset[0]),
+                            comment="Scale by load width for each thread in group"))
+  module.add(VAddU32(dst=vgpr(ti_.sharedVgprGROffset[0]), src0=vgpr(ti_.sharedVgprGROffset[0]), src1=vgpr(vtmp), comment="Final offset calc"))
+  writer.vgprPool.checkIn(vtmp)
+  writer.sgprPool.checkIn(stmp)
+  return module
+
+
+def graTileAssignmentScaleSwizzled(writer, kernel):
+  """Generate GR offset calculation for scaleA/B (DTL)."""
+  module = Module()
+  if not kernel["ProblemType"].get("MXBlockA", 0) and not kernel["ProblemType"].get("MXBlockB", 0):
+    return module
+  module.add(_graScaleOffset_cpp('MXSA', writer, kernel))
+  module.add(_graScaleOffset_cpp('MXSB', writer, kernel))
+  return module
+
+
+def _applyScaleWavePartitionLROffset_cpp(module, writer, ti_, plan, waveId):
+  tc = ti_.tc
+  tmpSgpr = writer.sgprPool.checkOut(1)
+  tmp = writer.vgprPool.checkOut(2)
+  if plan.isA:
+    module.add(VAndB32(dst=vgpr(tmp), src0=plan.mWavesM-1, src1=vgpr(waveId), comment="scale%s: waveId %% %d"%(tc, plan.mWavesM)))
+  else:
+    module.add(VLShiftRightB32(dst=vgpr(tmp), shiftHex=int(math.log2(plan.mWavesM)), src=vgpr(waveId), comment="scale%s: waveId / numWavesM"%tc))
+  module.add(SMovB32(dst=sgpr(tmpSgpr), src=plan.totalScaleBytes, comment="scale%s: scale region"%tc))
+  module.add(VMulLOU32(dst=vgpr(ti_.sharedVgprLROffset[0]), src0=sgpr(tmpSgpr), src1=vgpr(tmp), comment="scale%s: partition offset"%tc))
+  writer.vgprPool.checkIn(tmp)
+  writer.sgprPool.checkIn(tmpSgpr)
+
+
+def lraTileAssignmentScaleSwizzled(writer, kernel):
+  """Generate LR offset calculation for scaleA/B."""
+  module = Module()
+  if not kernel["ProblemType"].get("MXBlockA", 0) and not kernel["ProblemType"].get("MXBlockB", 0):
+    return module
+  tiA_ = writer.states.mxsa.tileInfo
+  tiB_ = writer.states.mxsb.tileInfo
+  planA = tiA_.scaleLrOffsetAssignPlan(kernel)
+  planB = tiB_.scaleLrOffsetAssignPlan(kernel)
+  module.addComment0("LR Offset Calculation for Scale Tensors")
+  wavesize = kernel["WavefrontSize"]
+  waveIdVgpr = writer.vgprPool.checkOut(1)
+  module.add(VLShiftRightB32(dst=vgpr(waveIdVgpr), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="scale: waveId"))
+  _applyScaleWavePartitionLROffset_cpp(module, writer, tiA_, planA, waveIdVgpr)
+  _applyScaleWavePartitionLROffset_cpp(module, writer, tiB_, planB, waveIdVgpr)
+  writer.vgprPool.checkIn(waveIdVgpr)
+  laneOffset = writer.vgprPool.checkOut(1)
+  module.add(VAndB32(dst=vgpr(laneOffset), src0=vgpr("Serial"), src1=wavesize-1, comment="scale: laneId"))
+  module.add(VLShiftLeftB32(dst=vgpr(laneOffset), shiftHex=hex(2), src=vgpr(laneOffset), comment="scale: laneId * 4"))
+  module.add(VAddU32(dst=vgpr(tiA_.sharedVgprLROffset[0]), src0=vgpr(laneOffset), src1=vgpr(tiA_.sharedVgprLROffset[0]), comment="scaleA: lrOffset = laneId * 4"))
+  module.add(VAddU32(dst=vgpr(tiB_.sharedVgprLROffset[0]), src0=vgpr(laneOffset), src1=vgpr(tiB_.sharedVgprLROffset[0]), comment="scaleB: lrOffset = laneId * 4"))
+  writer.vgprPool.checkIn(laneOffset)
+  tmpSgpr = writer.sgprPool.checkOut(1)
+  module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(writer.ldsStartOffsetMXSA), comment="scale: LDS offset for A scale"))
+  module.add(VAddU32(dst=vgpr(tiA_.sharedVgprLROffset[0]), src0=vgpr(tiA_.sharedVgprLROffset[0]), src1=sgpr(tmpSgpr), comment="scaleA: +=LDS offset"))
+  module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(writer.ldsStartOffsetMXSB), comment="scale: LDS offset for B scale"))
+  module.add(VAddU32(dst=vgpr(tiB_.sharedVgprLROffset[0]), src0=vgpr(tiB_.sharedVgprLROffset[0]), src1=sgpr(tmpSgpr), comment="scaleB: +=LDS offset"))
+  module.add(SMovB32(dst=sgpr(tmpSgpr), src=writer.ldsTotalSize, comment="scale: total LDS size for swap"))
+  for ti_ in [tiA_, tiB_]:
+    for i in range(len(ti_.sharedVgprLROffset)):
+      vgprId     = ti_.sharedVgprLROffset[i]
+      vgprSwapId = ti_.sharedVgprLROffsetSwap[i]
+      module.add(VAddU32(dst=vgpr(vgprSwapId), src0=vgpr(vgprId), src1=sgpr(tmpSgpr), comment="scale%s: LR swap"%ti_.tc))
+      module.add(VXorB32(dst=vgpr(vgprSwapId), src0=vgpr(vgprId), src1=vgpr(vgprSwapId), comment="scale%s: LR swap"%ti_.tc))
+  writer.sgprPool.checkIn(tmpSgpr)
+  return module
+
+
+def globalReadScaleSwizzledDTLInitCommonSgpr(writer, kernel):
+  """Compute shared offsets used by m0 in DTL loads."""
+  module = Module()
+  wavesize = kernel["WavefrontSize"]
+  vgprWaveId = writer.vgprPool.checkOut(1)
+  module.addComment0("Compute shared offsets used by m0 in DTL loads")
+  module.add(VLShiftRightB32(dst=vgpr(vgprWaveId), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="Wave Id"))
+  tiMXSA_ = writer.states.mxsa.tileInfo
+  tiMXSB_ = writer.states.mxsb.tileInfo
+  loadWidth = tiMXSA_.loadWidthGR
+  bytesPerLoad = loadWidth * wavesize
+  module.add(VLShiftLeftB32(dst=vgpr(vgprWaveId), shiftHex=hex((bytesPerLoad).bit_length()-1), src=vgpr(vgprWaveId), comment="Apply wave-specific common offset (%u) for A/B"%bytesPerLoad))
+  module.add(SNop(waitState=0, comment="Wait for VGPR to be ready"))
+  module.add(VReadfirstlaneB32(dst=sgpr("LocalWriteBaseAddrMXSA"), src=vgpr(vgprWaveId), comment="Store base LDS offset, will be modified"))
+  module.add(VReadfirstlaneB32(dst=sgpr("LocalWriteBaseAddrMXSB"), src=vgpr(vgprWaveId), comment="Store base LDS offset, will be modified"))
+  module.add(SAddU32(dst=sgpr("LocalWriteBaseAddrMXSA"), src0=sgpr("LocalWriteBaseAddrMXSA"), src1=hex(writer.ldsStartOffsetMXSA), comment=""))
+  module.add(SAddU32(dst=sgpr("LocalWriteBaseAddrMXSB"), src0=sgpr("LocalWriteBaseAddrMXSB"), src1=hex(writer.ldsStartOffsetMXSB), comment=""))
+  module.add(SAddU32(dst=sgpr("SwapMXSA"), src0=sgpr("LocalWriteBaseAddrMXSA"), src1=writer.ldsTotalSize, comment=""))
+  module.add(SXorB32(dst=sgpr("SwapMXSA"), src0=sgpr("LocalWriteBaseAddrMXSA"), src1=sgpr("SwapMXSA"), comment=""))
+  module.add(SAddU32(dst=sgpr("SwapMXSB"), src0=sgpr("LocalWriteBaseAddrMXSB"), src1=writer.ldsTotalSize, comment=""))
+  module.add(SXorB32(dst=sgpr("SwapMXSB"), src0=sgpr("LocalWriteBaseAddrMXSB"), src1=sgpr("SwapMXSB"), comment=""))
+  writer.vgprPool.checkIn(vgprWaveId)
+  return module
+
 
 class ABGRTile:
   """Mutable GR tile for A/B global reads.
@@ -738,7 +882,7 @@ class TileInfo:
   # graTileAssignmentScaleSwizzled / lraTileAssignmentScaleSwizzled is computed
   # by the C++ MXScaleTileInfoQuery for the gfx950 scale geometries (MXFP4 /
   # MXFP8). There is no Python scalar-math twin; the rocisa emission stays in
-  # SubtileScaleEmit.
+  # Kernel.py (scale offset-assignment section).
 
   def _cppScaleQuery(self):
     """Build (and cache) the C++ MXScaleTileInfoQuery twin for this scale TileInfo.
@@ -780,7 +924,7 @@ class TileInfo:
     if self.lr is not None:
       self.lr.allocOffsetRegisters(self, writer, kernel)
     # MXScaleTilePair offset registers
-    # should be managed by scale-specific alloc in SubtileScaleEmit.py
+    # managed by scale-specific alloc below (MXScaleTilePair)
     if isinstance(self.geometry, MXScaleTilePair):
       self._sharedVgprGROffset = [writer.vgprPool.checkOut(1)]
       self._sharedVgprLROffset = [writer.vgprPool.checkOut(1)]
@@ -794,7 +938,7 @@ class TileInfo:
     numMMATilesPerReg = max(1, int(1 // self.mmaTileRegCount))
     # Scale tiles: legacy MXSA/MXSB used bpe=1 (scale byte) which gives mmaTileRegCount=0.25
     # and numMMATilesPerReg=4. TileInfo uses data bpe (0.5 for f4), halving mmaTileRegCount.
-    # The scale emit code (SubtileScaleEmit.py) uses stride 4 to index vgprTiles, so override.
+    # The scale emit code (localReadDoScaleSubtile) uses stride 4 to index vgprTiles, so override.
     if isinstance(self.geometry, MXScaleTilePair):
       numMMATilesPerReg = 4
     numDword = int(math.ceil(self.mmaTileRegCount))
