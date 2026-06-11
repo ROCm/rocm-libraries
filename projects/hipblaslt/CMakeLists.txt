@@ -249,15 +249,6 @@ if(NOT HIPBLASLT_ENABLE_YAML)
 endif()
 
 if(NOT ROCM_LIBS_SUPERBUILD)
-    # Consume Origami the same way as rocroller (above): in TheRock it is an
-    # installed, findable package; standalone it is fetched/built as a subdirectory.
-    # In the monorepo superbuild this whole branch is skipped and roc::origami comes
-    # from the superbuild's earlier add_subdirectory(shared/origami).
-    #
-    # The TheRock/superbuild path uses the single installed/super-built copy, which is
-    # the dedup that matters in a shared prefix (one liborigami across hipBLASLt and
-    # hipSPARSELt). The standalone add_subdirectory is the dev-build fallback (#3687
-    # had disabled it with `if(FALSE)` "until origami is available in TheRock").
     if(HIPBLASLT_ENABLE_THEROCK)
         find_package(origami CONFIG QUIET)
     endif()

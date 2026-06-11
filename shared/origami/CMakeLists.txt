@@ -38,10 +38,6 @@ rocm_set_soversion(origami "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 
 add_library(roc::origami ALIAS origami)
 
-# Control the exported symbol surface explicitly: hide everything by default and
-# export only what is annotated with ORIGAMI_EXPORT (generated below). This replaces
-# the previous "export everything" behaviour (default visibility +
-# WINDOWS_EXPORT_ALL_SYMBOLS) so the public ABI is the public API and nothing more.
 set_target_properties(origami PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     CXX_VISIBILITY_PRESET hidden
@@ -49,9 +45,6 @@ set_target_properties(origami PROPERTIES
 )
 target_compile_features(origami PUBLIC cxx_std_17)
 
-# Generate origami/origami_export.h defining the ORIGAMI_EXPORT visibility macro
-# (and ORIGAMI_STATIC for static builds). Public headers include it to annotate the
-# exported API. The header is generated at configure time into the build tree.
 include(GenerateExportHeader)
 generate_export_header(origami
     BASE_NAME ORIGAMI
@@ -60,7 +53,6 @@ generate_export_header(origami
     STATIC_DEFINE ORIGAMI_STATIC
 )
 if(ORIGAMI_LIBRARY_TYPE STREQUAL "STATIC")
-    # A static origami has no import library; consumers must see ORIGAMI_EXPORT as empty.
     target_compile_definitions(origami PUBLIC ORIGAMI_STATIC)
 endif()
 
@@ -69,11 +61,6 @@ add_library(roc::origami-headers ALIAS origami-headers)
 
 target_compile_features(origami-headers INTERFACE cxx_std_17)
 
-# Public header contract, expressed as a CMake HEADER file set. This makes the
-# public surface explicit (only these headers are installed/exported), carries
-# the include roots into the build and install interfaces (BASE_DIRS), and lets
-# VERIFY_INTERFACE_HEADER_SETS compile each public header standalone (G3).
-# Anything not listed here is private by construction.
 target_sources(origami-headers
     INTERFACE
     FILE_SET HEADERS
@@ -97,14 +84,8 @@ target_include_directories(
     origami-headers INTERFACE $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-# origami's public headers include <hip/hip_runtime.h> and use hip types
-# (e.g. hipDeviceProp_t) in their signatures, so the header interface genuinely
-# requires hip. Expose hip::host (never hip::device) here so header-only
-# consumers and the header-set verification compile see hip's include dirs.
 target_link_libraries(origami-headers INTERFACE hip::host)
 
-# Rigorously enforce that every public header is a self-contained translation
-# unit (built as `all_verify_interface_header_sets` / the per-target verify).
 set_target_properties(origami-headers PROPERTIES VERIFY_INTERFACE_HEADER_SETS ON)
 
 target_link_libraries(origami PUBLIC roc::origami-headers)
@@ -122,8 +103,6 @@ target_sources(
             "${CMAKE_CURRENT_SOURCE_DIR}/src/simulator/tensilelite/formocast.cpp"
 )
 
-# hip is part of origami's public interface via roc::origami-headers above; this
-# direct link is the library's own (implementation) dependency on the hip runtime.
 target_link_libraries(origami PRIVATE hip::host)
 
 if(ORIGAMI_ENABLE_PYTHON)
@@ -137,10 +116,6 @@ endif()
 
 rocm_install(TARGETS origami)
 
-# origami-headers carries the public HEADERS file set, so it must be installed
-# with its FILE_SET in the same call that adds it to the export (rocm_install's
-# TARGETS wrapper cannot forward FILE_SET). Done explicitly here, appended to
-# the same origami-targets export, before rocm_export_targets writes the export.
 install(TARGETS origami-headers
     EXPORT origami-targets
     FILE_SET HEADERS
