@@ -57,6 +57,19 @@ bool CkDslGemmPlanBuilder::isApplicable(
     if (!CkDslParamParser::isGemmGraph(opGraph)) return false;
     try {
         auto params = CkDslParamParser::parseGemmGraph(opGraph);
+        // Reject B layouts the shipped RCR GEMM can't execute (e.g. row-major
+        // [K,N] / NN, or an unrecognized stride pattern) so the engine manager
+        // can fall back to another provider instead of us silently miscomputing.
+        if (!CkDslParamParser::isSupportedBLayout(params.b_layout)) return false;
+        if (c_jit_enabled()) {
+            // C-JIT path: the kernel is generated on demand from the pure-C
+            // engine, so applicability does NOT depend on the shipped
+            // ArtifactStore/dispatcher catalog (which is empty unless
+            // CK_DSL_KERNEL_LIB_PATH is set). Accept any well-formed GEMM with a
+            // dtype the C engine supports.
+            if (params.M <= 0 || params.N <= 0 || params.K <= 0) return false;
+            return params.dtype == "fp16" || params.dtype == "bf16";
+        }
         auto problem = CkDslParamParser::buildProblem(params, handle.gfxArch());
         return handle.dispatcher().select(problem).valid();
     } catch (...) {
@@ -78,6 +91,16 @@ void CkDslGemmPlanBuilder::buildPlan(
     const CkDslHandle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&, CkDslContext& ctx) const {
     auto params = CkDslParamParser::parseGemmGraph(opGraph);
+
+    // Guard the execute path: the shipped GEMM is RCR-only. Reject any other
+    // detected B layout with a clear BAD_PARAM status rather than launching the
+    // RCR kernel against a row-major [K,N] buffer and returning wrong results.
+    if (!CkDslParamParser::isSupportedBLayout(params.b_layout)) {
+        std::string msg = std::string("CkDsl: unsupported GEMM B layout '") +
+                          CkDslParamParser::bLayoutName(params.b_layout) +
+                          "' (only RCR / B stored [N,K] is supported)";
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM, msg);
+    }
 
     std::unique_ptr<ck_dsl::Kernel> kernel;
     if (c_jit_enabled()) {

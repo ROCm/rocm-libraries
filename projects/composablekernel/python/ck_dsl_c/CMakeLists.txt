@@ -30,6 +30,10 @@ file(GLOB CKC_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.
 
 add_library(ckc_core STATIC ${CKC_CORE_SOURCES})
 target_include_directories(ckc_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+# Required so the .a can be linked into the shared ck_dsl_provider plugin
+# (--whole-archive into a .so): some const data tables otherwise emit
+# R_X86_64_PC32 relocations the linker rejects for a PIC shared object.
+set_target_properties(ckc_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # Optional smoke test: cmake --build build --target ckc_smoke
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/smoke.c")

@@ -8,9 +8,11 @@
 //
 // Layout note: the shipped ck_dsl GEMM is RCR (C[m,n]=sum_k A[m,k]*B[n,k], with
 // B stored [N,K]). hipDNN Matmul validates K-consistency on A[M,K] @ B[K,N], so
-// we DECLARE B as [K,N] but UPLOAD the device buffer in [N,K] order, and verify
-// against the matching reference. (General-matmul B-layout detection is a
-// provider follow-on; here we exercise the kernel's native ABI.)
+// we DECLARE B with logical dims [K,N] but with RCR strides {1,K} (the K axis is
+// contiguous == B physically [N,K]), and UPLOAD the device buffer in [N,K]
+// order. The provider's B-layout detector reads these strides and selects the
+// RCR kernel; a genuine row-major {N,1} B is now rejected cleanly instead of
+// silently miscomputed.
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 
@@ -73,7 +75,9 @@ int main(int argc, char** argv) {
     graph.set_preferred_engine_id_ext(std::string("CK_DSL_GEMM_ENGINE"));
 
     auto A = Graph::tensor(TensorAttributes().set_dim({M, K}).set_stride({K, 1}).set_uid(1));
-    auto B = Graph::tensor(TensorAttributes().set_dim({K, N}).set_stride({N, 1}).set_uid(2));
+    // RCR strides: logical dims [K,N] but the K axis is contiguous ({1,K}),
+    // i.e. B is physically stored [N,K] -- the shipped kernel's native ABI.
+    auto B = Graph::tensor(TensorAttributes().set_dim({K, N}).set_stride({1, K}).set_uid(2));
     auto C = graph.matmul(A, B, MatmulAttributes());
     C->set_output(true).set_dim({M, N}).set_stride({N, 1}).set_uid(3);
 

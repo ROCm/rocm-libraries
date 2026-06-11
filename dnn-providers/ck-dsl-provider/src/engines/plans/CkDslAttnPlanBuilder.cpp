@@ -69,6 +69,19 @@ bool CkDslAttnPlanBuilder::isApplicable(
     if (!CkDslAttnParamParser::isSdpaGraph(opGraph)) return false;
     try {
         auto params = CkDslAttnParamParser::parseSdpaGraph(opGraph);
+        if (c_jit_enabled()) {
+            // C-JIT path: the kernel is generated on demand from the pure-C
+            // engine, so applicability does NOT depend on the shipped
+            // ArtifactStore/dispatcher catalog (which is empty unless
+            // CK_DSL_KERNEL_LIB_PATH is set). Accept any well-formed SDPA in the
+            // BSHD layout (BHSD is rejected at plan build) with a dtype the C
+            // engine supports.
+            if (params.is_bhsd) return false;
+            if (params.batch <= 0 || params.seqlen_q <= 0 || params.seqlen_k <= 0 ||
+                params.nhead_q <= 0 || params.nhead_k <= 0 || params.hdim_q <= 0)
+                return false;
+            return params.dtype == "fp16" || params.dtype == "bf16";
+        }
         auto problem = CkDslAttnParamParser::buildProblem(params, handle.gfxArch());
         return handle.dispatcher().select(problem).valid();
     } catch (...) {

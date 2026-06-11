@@ -57,6 +57,17 @@ bool CkDslConvPlanBuilder::isApplicable(
     if (!CkDslConvParamParser::isConvGraph(opGraph)) return false;
     try {
         auto params = CkDslConvParamParser::parseConvGraph(opGraph);
+        if (c_jit_enabled()) {
+            // C-JIT path: the kernel is generated on demand from the pure-C
+            // engine, so applicability does NOT depend on the shipped
+            // ArtifactStore/dispatcher catalog (which is empty unless
+            // CK_DSL_KERNEL_LIB_PATH is set). Accept any well-formed conv with a
+            // dtype the C engine supports.
+            if (params.N <= 0 || params.C <= 0 || params.K <= 0 || params.Hi <= 0 ||
+                params.Wi <= 0 || params.R <= 0 || params.S <= 0)
+                return false;
+            return params.dtype == "fp16" || params.dtype == "bf16";
+        }
         auto problem = CkDslConvParamParser::buildProblem(params, handle.gfxArch());
         return handle.dispatcher().select(problem).valid();
     } catch (...) {
