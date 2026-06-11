@@ -257,6 +257,26 @@
                     "kind": "appended_suffix"
                 }
             }
+        },
+        "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_Large_Tensor": {
+            "base_param_count": 15,
+            "conditional_params": {
+                "NumGroupsToMerge": {
+                    "kind": "present_if_gt_one",
+                    "base_index": 15
+                },
+                "BlkGemmPipelineScheduler": {
+                    "kind": "inline_after_optionals",
+                    "base_index": 15
+                },
+                "BlkGemmPipelineVersion": {
+                    "kind": "inline_after_optionals",
+                    "base_index": 16
+                },
+                "SplitK": {
+                    "kind": "appended_suffix"
+                }
+            }
         }
     },
     "split_k_values": [

@@ -40,21 +40,22 @@ namespace candidate_selection {
 
 class CandidateSelectionMetadata;
 
-// Declarative description of a CK kernel whose type-string layout is variable, mirroring
-// CK_CONDITIONAL_LAYOUTS in the MIOpenFF preprocessor (miopenff/benchmarking/preproc_maps.py).
-// Loaded from the "conditional_layouts" metadata section; absence means the kernel is fully static.
+// Declarative description of a CK kernel whose type-string layout is variable. Loaded from the
+// "conditional_layouts" metadata section; absence means the kernel is fully static.
 struct ConditionalLayout
 {
     // Kind of a data-dependent (conditional) parameter.
     enum class ConditionalKind
     {
-        present_if_gt_one, // CK emits it only when value > 1, at base_index
-        appended_suffix,   // appended after '>' as "+<int>"; last token when present
+        present_if_gt_one,      // CK emits it only when value > 1, at base_index
+        appended_suffix,        // appended after '>' as "+<int>"; last token when present
+        inline_after_optionals, // always present at base_index, shifted right by the number of
+                                // optional (present_if_gt_one) params that actually appear
     };
     struct ConditionalParam
     {
         ConditionalKind kind;
-        std::size_t base_index = 0; // meaningful for present_if_gt_one
+        std::size_t base_index = 0; // meaningful for present_if_gt_one and inline_after_optionals
     };
     // Codec for a packed token that unpacks into several features.
     enum class PackedCodec

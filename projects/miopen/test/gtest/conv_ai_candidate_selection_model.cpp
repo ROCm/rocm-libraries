@@ -447,6 +447,30 @@ std::vector<std::string> MakeWaveletCandidate(bool include_num_groups, const std
         c.push_back(ngm); // [16] NumGroupsToMerge (CK emits only when > 1)
     return c;
 }
+
+// The CShuffleV3 large-tensor kernel emits BlkGemmPipelineScheduler / -Version
+// ("inline_after_optionals") right after the optional NumGroupsToMerge, then the appended SplitK.
+// base_param_count is 15, so the candidate is kernel_name + 15 base params, then (optional NGM),
+// scheduler, version, then the appended SplitK. CK keeps the "BlkGemmPipelineScheduler:" label on
+// these tokens at inference, so that is what the candidate carries here.
+constexpr const char* kV3LargeTensorKernel =
+    "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_Large_Tensor";
+
+std::vector<std::string> MakeV3LargeTensorCandidate(bool include_num_groups,
+                                                    const std::string& scheduler,
+                                                    const std::string& version,
+                                                    const std::string& ngm = "2")
+{
+    std::vector<std::string> c;
+    c.push_back(kV3LargeTensorKernel); // [0]
+    for(int i = 0; i < 15; ++i)        // [1..15] 15 base params
+        c.push_back("1");
+    if(include_num_groups)
+        c.push_back(ngm);   // NumGroupsToMerge (present only when > 1)
+    c.push_back(scheduler); // inline-after-optionals "BlkGemmPipelineScheduler:..."
+    c.push_back(version);   // inline-after-optionals "BlkGemmPipelineVersion:..."
+    return c;
+}
 } // namespace
 
 TEST_P(GPU_CandidateSelection_FP32, WaveletSplitTileLoadMath_Test)
@@ -524,6 +548,66 @@ TEST_P(GPU_CandidateSelection_FP32, WaveletSplitKResolution_Test)
         ASSERT_EQ(encoded.size(), 1u);
         EXPECT_FLOAT_EQ(encoded[0][splitk_slot], missing)
             << "SplitK decoded as present when use_split_k is false";
+    }
+}
+
+// The pipeline params (BlkGemmPipelineScheduler/-Version) in the CShuffleV3 large-tensor kernel are
+// "inline_after_optionals": their position shifts with the optional NumGroupsToMerge. This verifies
+// that the trailing SplitK is decoded from the correct (appended last) token rather than a
+// pipeline-param token, and that the pipeline params themselves decode.
+TEST_P(GPU_CandidateSelection_FP32, V3LargeTensorPipelineParamDecode_Test)
+{
+    const auto& params = GetParam();
+    CandidateSelectionMetadata meta(params.arch, params.solver);
+    if(!MetadataHasKernel(meta, kV3LargeTensorKernel))
+        GTEST_SKIP() << "V3 large-tensor kernel not present in metadata for " << params.solver;
+    if(meta.GetConditionalLayout(kV3LargeTensorKernel) == nullptr)
+        GTEST_SKIP() << "V3 large-tensor kernel has no conditional layout in metadata for "
+                     << params.solver;
+
+    const int splitk_slot = EncodedSlotForSuffix(meta, "SplitK");
+    const int sched_slot  = EncodedSlotForSuffix(meta, "BlkGemmPipelineScheduler");
+    ASSERT_GE(splitk_slot, 0);
+    ASSERT_GE(sched_slot, 0) << "scheduler expected to be a live (encoded) feature";
+    const float missing = meta.GetMissingValueToken();
+
+    // NumGroups omitted (the g=1 case): [16]=scheduler, [17]=version, [18]=appended SplitK.
+    {
+        auto candidate = MakeV3LargeTensorCandidate(/*include_num_groups=*/false,
+                                                    "BlkGemmPipelineScheduler:Intrawave",
+                                                    "BlkGemmPipelineVersion:v4");
+        candidate.push_back("8"); // appended SplitK (mirrors ExpandKernelParamsWithSplitK)
+        auto encoded = EncodeKernelParams({candidate}, meta, /*use_split_k=*/true);
+        ASSERT_EQ(encoded.size(), 1u) << "V3 large-tensor candidate was unexpectedly skipped";
+        EXPECT_FLOAT_EQ(encoded[0][splitk_slot], 8.0f)
+            << "SplitK must decode from the appended token, not a pipeline-param token";
+        EXPECT_NE(encoded[0][sched_slot], missing) << "scheduler token not decoded";
+    }
+    // NumGroups present: scheduler shifts right by one but is still resolved by position.
+    {
+        auto candidate = MakeV3LargeTensorCandidate(/*include_num_groups=*/true,
+                                                    "BlkGemmPipelineScheduler:Interwave",
+                                                    "BlkGemmPipelineVersion:v1",
+                                                    "2");
+        candidate.push_back("4"); // appended SplitK
+        auto encoded = EncodeKernelParams({candidate}, meta, /*use_split_k=*/true);
+        ASSERT_EQ(encoded.size(), 1u);
+        EXPECT_FLOAT_EQ(encoded[0][splitk_slot], 4.0f)
+            << "SplitK mis-decoded with NumGroups present";
+        EXPECT_NE(encoded[0][sched_slot], missing);
+    }
+    // The scheduler value is actually read: Intrawave vs Interwave must encode differently.
+    {
+        auto intra = MakeV3LargeTensorCandidate(
+            false, "BlkGemmPipelineScheduler:Intrawave", "BlkGemmPipelineVersion:v4");
+        auto inter = MakeV3LargeTensorCandidate(
+            false, "BlkGemmPipelineScheduler:Interwave", "BlkGemmPipelineVersion:v4");
+        auto e_intra = EncodeKernelParams({intra}, meta, /*use_split_k=*/false);
+        auto e_inter = EncodeKernelParams({inter}, meta, /*use_split_k=*/false);
+        ASSERT_EQ(e_intra.size(), 1u);
+        ASSERT_EQ(e_inter.size(), 1u);
+        EXPECT_NE(e_intra[0][sched_slot], e_inter[0][sched_slot])
+            << "Intrawave vs Interwave must encode to different values";
     }
 }
 

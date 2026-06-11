@@ -150,8 +150,8 @@ CandidateSelectionMetadata::CandidateSelectionMetadata(const std::string& arch,
         split_k_values_ = {1}; // Default to 1 if not specified
     }
 
-    // Optional: declarative descriptors for kernels with variable type-string layouts. Mirrors
-    // CK_CONDITIONAL_LAYOUTS in the MIOpenFF preprocessor; absence => all kernels are static.
+    // Optional: declarative descriptors for kernels with variable type-string layouts;
+    // absence => all kernels are static.
     if(metadata.contains("conditional_layouts"))
     {
         for(const auto& [kernel_name, layout_json] : metadata["conditional_layouts"].items())
@@ -175,6 +175,11 @@ CandidateSelectionMetadata::CandidateSelectionMetadata(const std::string& arch,
                     else if(kind == "appended_suffix")
                     {
                         cp.kind = ConditionalLayout::ConditionalKind::appended_suffix;
+                    }
+                    else if(kind == "inline_after_optionals")
+                    {
+                        cp.kind       = ConditionalLayout::ConditionalKind::inline_after_optionals;
+                        cp.base_index = spec.value("base_index", std::size_t{0});
                     }
                     else
                     {
@@ -899,10 +904,8 @@ const CandidateSelectionModel& GetCandidateSelectionModel(const std::string& arc
 }
 
 // Conditional/packed kernel layouts are described declaratively in the metadata's
-// "conditional_layouts" section (parsed into ConditionalLayout). This is the single source of
-// truth, authored in the MIOpenFF preprocessor (miopenff/benchmarking/preproc_maps.py:
-// CK_CONDITIONAL_LAYOUTS) and exported into the model metadata, so adding/changing a conditional
-// kernel needs no C++ change.
+// "conditional_layouts" section (parsed into ConditionalLayout). The descriptor is exported into
+// the model metadata, so adding/changing a conditional kernel needs no C++ change.
 //
 //  - "present_if_gt_one": CK emits the param only when its value > 1, at base_index; its presence
 //  is
@@ -912,43 +915,55 @@ const CandidateSelectionModel& GetCandidateSelectionModel(const std::string& arc
 //    (GetKernelAsTokens) drops that suffix, and it is re-attached as the last candidate token by
 //    ExpandKernelParamsWithSplitK when use_split_k is set. Thus within one EncodeKernelParams call,
 //    "appended param present" == use_split_k (e.g. SplitK).
+//  - "inline_after_optionals": always present at base_index, but shifted right by however many
+//    optional (present_if_gt_one) params actually appear before it (e.g. BlkGemmPipelineScheduler/
+//    -Version sit after the optional NumGroupsToMerge). Position-based, so it is independent of
+//    whether the token keeps its "BlkGemmPipelineScheduler:" label or is a bare value -- the
+//    encodings key it by whatever the metadata recorded.
 //  - packed codec: a single type-string token unpacks into several features (e.g. Wavelet's
 //    "{load}l+{math}m" -> TileLoad/TileMathThreadGroupSize via codec "tile_load_math_lm").
 
 // Resolve the candidate-vector index for a conditional param given the layout. candidate_len
 // includes kernel_name at [0] and the optional trailing appended (split_k) token. Returns
-// std::nullopt when the param is absent for this candidate. Mirrors resolve_ck_param_index()
-// (preproc_maps.py), reframed for the C++ candidate layout (Python list index + 1 == candidate
-// idx).
+// std::nullopt when the param is absent for this candidate.
+// num_inline_after_optionals is the count of always-present inline_after_optionals params in the
+// layout. They each occupy one token, so they (and the appended suffix) are discounted from the
+// candidate length to recover how many optional (present_if_gt_one) params actually appear.
 inline std::optional<size_t>
 ResolveConditionalParamIndex(const ConditionalLayout::ConditionalParam& spec,
                              size_t base_param_count,
                              size_t candidate_len,
+                             size_t num_inline_after_optionals,
                              bool use_split_k)
 {
     // Base candidate length (kernel_name + base_param_count type-string params), no tail.
-    const size_t base_len = base_param_count + 1;
+    const size_t base_len   = base_param_count + 1;
+    const size_t fixed_tail = num_inline_after_optionals + (use_split_k ? 1 : 0);
+    const size_t num_present_optionals =
+        (candidate_len > base_len + fixed_tail) ? (candidate_len - base_len - fixed_tail) : 0;
 
     switch(spec.kind)
     {
-    case ConditionalLayout::ConditionalKind::present_if_gt_one: {
-        // Present iff candidate carries an extra inline token beyond base (+1 for appended suffix).
-        const size_t needed = base_len + 1 + (use_split_k ? 1 : 0);
-        if(candidate_len >= needed)
+    case ConditionalLayout::ConditionalKind::present_if_gt_one:
+        // Present only when an optional slot exists (currently at most one such param per kernel).
+        if(num_present_optionals >= 1)
             return spec.base_index + 1; // Python list index -> candidate index (+1 for kernel_name)
         return std::nullopt;
-    }
     case ConditionalLayout::ConditionalKind::appended_suffix:
         if(!use_split_k || candidate_len < base_len + 1)
             return std::nullopt;
         return candidate_len - 1; // always the appended last token when present
+    case ConditionalLayout::ConditionalKind::inline_after_optionals:
+        // Always present, but shifted right by however many optional params precede it. The value
+        // is whatever token sits there (a labeled "BlkGemmPipelineScheduler:..." or a bare value).
+        return spec.base_index + 1 + num_present_optionals;
     }
     return std::nullopt;
 }
 
 // Decode a packed token into its constituent feature values per `codec`, aligned with the
-// descriptor's output order. Returns std::nullopt if the token does not match. Mirrors
-// split_packed_param() (preproc_maps.py); keep the codecs in sync.
+// descriptor's output order. Returns std::nullopt if the token does not match. The codecs must
+// match those used to produce the model metadata.
 inline std::optional<std::vector<std::string>>
 DecodePackedParam(ConditionalLayout::PackedCodec codec, const std::string& token)
 {
@@ -1133,10 +1148,18 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
 
             // Conditional params: resolve position against the actual candidate length. Absent
             // params are left out of param_value_map, so the encode loop emits the missing token.
+            const size_t num_inline_after_optionals = static_cast<size_t>(std::ranges::count_if(
+                conditional_layout->conditional_params, [](const auto& entry) {
+                    return entry.second.kind ==
+                           ConditionalLayout::ConditionalKind::inline_after_optionals;
+                }));
             for(const auto& [cond_name, spec] : conditional_layout->conditional_params)
             {
-                const auto idx = ResolveConditionalParamIndex(
-                    spec, conditional_layout->base_param_count, candidate.size(), use_split_k);
+                const auto idx = ResolveConditionalParamIndex(spec,
+                                                              conditional_layout->base_param_count,
+                                                              candidate.size(),
+                                                              num_inline_after_optionals,
+                                                              use_split_k);
                 if(!idx || *idx >= candidate.size())
                     continue;
                 for(const auto& param_name : output_params)
