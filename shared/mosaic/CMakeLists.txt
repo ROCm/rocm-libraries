@@ -18,6 +18,10 @@ option(MOSAIC_ENABLE_INSTALL "Configure mosaic installation" ON)
 option(MOSAIC_ENABLE_PYTHON "Enable Python bindings." OFF)
 option(MOSAIC_BUILD_TESTING "Build tests." OFF)
 option(MOSAIC_ENABLE_FETCH "Auto-fetch dependencies (nanobind/Catch2) with FetchContent" ON)
+# The hipBLASLt backend is header-only glue that references origami headers; it
+# is enabled when mosaic is built inside hipBLASLt (where roc::origami-headers
+# exists), and OFF for the framework-agnostic standalone build.
+option(MOSAIC_ENABLE_HIPBLASLT_BACKEND "Build the hipBLASLt backend adapter (needs origami headers)" OFF)
 
 # ── the static library ─────────────────────────────────────────────────────
 add_library(mosaic STATIC)
@@ -66,6 +70,11 @@ target_sources(
 # dladdr-based weight auto-discovery needs libdl on Unix.
 if(UNIX)
     target_link_libraries(mosaic PUBLIC ${CMAKE_DL_LIBS})
+endif()
+
+# ── framework backends (per-GEMM-library glue) ──────────────────────────────
+if(MOSAIC_ENABLE_HIPBLASLT_BACKEND)
+    add_subdirectory(backends/hipblaslt)
 endif()
 
 # ── python bindings + tests (mirroring the framework libs) ──────────────────

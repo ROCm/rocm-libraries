@@ -150,9 +150,9 @@ namespace TensileLite
         return m_predictionLib;
     }
 
-    bool Debug::useMLRecommender() const
+    bool Debug::useMosaic() const
     {
-        return m_mlRecommender;
+        return m_mosaic;
     }
 
     int Debug::getGridbasedTopSols() const
@@ -213,9 +213,9 @@ namespace TensileLite
         if(prediction_only)
             m_predictionLib = strtol(prediction_only, nullptr, 0) != 0;
 
-        const char* ml_recommender = std::getenv("TENSILE_ML_RECOMMENDER");
-        if(ml_recommender)
-            m_mlRecommender = strtol(ml_recommender, nullptr, 0) != 0;
+        const char* mosaic = std::getenv("TENSILE_MOSAIC");
+        if(mosaic)
+            m_mosaic = strtol(mosaic, nullptr, 0) != 0;
 
         const char* solution_index = std::getenv("TENSILE_SOLUTION_INDEX");
         if(solution_index)

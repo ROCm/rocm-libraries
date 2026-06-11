@@ -60,7 +60,6 @@ target_sources(
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/heuristics.hpp>
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/logger.hpp>
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/math.hpp>
-              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/ml_recommender.hpp>
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/origami.hpp>
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/streamk.hpp>
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/types.hpp>
@@ -70,32 +69,12 @@ target_sources(
 
 target_link_libraries(origami PUBLIC roc::origami-headers)
 
-# The MLREC_v6 engine now lives in the standalone, framework-agnostic `mosaic`
-# library (../mosaic). To keep liborigami.a self-contained for direct-linking
-# consumers (hipBLASLt, the F1 microbench) with ZERO link-topology changes, we
-# compile the mosaic engine TU directly into the origami target. mosaic also
-# ships its own CMakeLists.txt for standalone / future-backend (Triton/CK)
-# builds. origami's ml_recommender.cpp is now a thin origami<->mosaic adapter.
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/ml_recommender.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../mosaic/src/mosaic/model.cpp"
-    PROPERTIES COMPILE_OPTIONS
-    "-O3;-march=native;-mavx512f;-mavx512bw;-mfma;-ffast-math;-funroll-loops;-fopenmp-simd"
-)
-
-# mosaic is self-contained (no origami headers); the adapter needs its headers.
-target_include_directories(origami PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../mosaic/include"
-)
-
 target_sources(
     origami
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/gemm.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/hardware.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/heuristics.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/logger.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/ml_recommender.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../mosaic/src/mosaic/model.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/origami.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/streamk.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/types.cpp"
@@ -145,19 +124,6 @@ if(ORIGAMI_ENABLE_INSTALL OR ORIGAMI_STANDALONE)
         PATTERN
         "*.h"
     )
-
-    # The mosaic engine (compiled into liborigami here, rather than
-    # add_subdirectory'd) auto-discovers its weights relative to the library, so
-    # install them to the mosaic data root. (Step 2 moves this integration so
-    # hipBLASLt links mosaic directly and mosaic installs its own weights.)
-    set(MOSAIC_WEIGHTS_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../mosaic/backends/hipblaslt/data/mosaic_weights.bin")
-    if(EXISTS "${MOSAIC_WEIGHTS_BIN}")
-        rocm_install(
-            FILES "${MOSAIC_WEIGHTS_BIN}"
-            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/mosaic/backends/hipblaslt/data"
-            COMPONENT runtime
-        )
-    endif()
 
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/origami-config.cmake.in"

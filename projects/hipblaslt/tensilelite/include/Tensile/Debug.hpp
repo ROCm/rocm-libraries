@@ -64,7 +64,7 @@ namespace TensileLite
 
         bool usePredictionLibrary() const;
 
-        bool useMLRecommender() const;
+        bool useMosaic() const;
 
         bool printLibraryLogicIndex() const;
 
@@ -140,7 +140,7 @@ namespace TensileLite
         int         m_experimentSelection = 0;
         int         m_solution_index      = -1;
         bool        m_predictionLib       = false;
-        bool        m_mlRecommender       = false;
+        bool        m_mosaic              = false;
         std::string m_metric              = "";
         int         m_gridbasedTopSols    = 1;
         bool        m_benchmark           = false;

@@ -10,7 +10,6 @@
 #include <nanobind/stl/vector.h>
 #include "origami/gemm.hpp"
 #include "origami/hardware.hpp"
-#include "origami/ml_recommender.hpp"
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"
 #include "origami/types.hpp"
@@ -434,28 +433,4 @@ NB_MODULE(origami, m) {
   m.def("compute_number_of_output_tiles",
         &origami::streamk::compute_number_of_output_tiles,
         "Compute number of output tiles");
-
-  auto ml = m.def_submodule("ml_recommender",
-                            "Per-cluster two-tower ML GEMM tile prediction");
-
-  ml.def("load_weights",
-         &origami::ml_recommender::load_weights,
-         nanobind::arg("bin_path"));
-
-  ml.def("weights_loaded",
-         &origami::ml_recommender::weights_loaded);
-
-  ml.def("rank_configs",
-         &origami::ml_recommender::rank_configs,
-         nanobind::arg("problem"),
-         nanobind::arg("hardware"),
-         nanobind::arg("configs"));
-
-  ml.def("route_cluster_for_problem",
-         &origami::ml_recommender::route_cluster_for_problem,
-         nanobind::arg("problem"));
-
-  ml.def("cluster_uses_ml",
-         &origami::ml_recommender::cluster_uses_ml,
-         nanobind::arg("cluster_id"));
 }

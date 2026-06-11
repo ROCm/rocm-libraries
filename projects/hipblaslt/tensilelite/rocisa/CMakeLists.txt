@@ -78,6 +78,19 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         endif()
     endif()
 
+    # Locate mosaic (with the hipBLASLt backend): prefer the monorepo sibling.
+    # Added after origami so that roc::origami-headers exists.
+    if(NOT TARGET roc::mosaic-hipblaslt)
+        set(_mosaic_sibling "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/mosaic")
+        if(IS_DIRECTORY "${_mosaic_sibling}")
+            set(MOSAIC_ENABLE_INSTALL OFF)
+            set(MOSAIC_ENABLE_HIPBLASLT_BACKEND ON)
+            add_subdirectory("${_mosaic_sibling}" mosaic EXCLUDE_FROM_ALL)
+        else()
+            find_package(mosaic REQUIRED)
+        endif()
+    endif()
+
     set(ROCISAINST_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/instruction.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/common.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/branch.cpp"
@@ -133,7 +146,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         endif()
     endif()
 
-    target_link_libraries(_rocisa PUBLIC roc::origami)
+    target_link_libraries(_rocisa PUBLIC roc::origami roc::mosaic-hipblaslt)
     target_link_libraries(_rocisa PRIVATE hip::host stinkytofu)
     # rocisa conversion sources include stinkytofu public headers that
     # transitively include generated files (hardware/gfxIsa.inc) from

@@ -7,6 +7,9 @@
 #include "runtime_args_selection.hpp"
 
 #include "origami/origami.hpp"
+#include "mosaic/hipblaslt/adapter.hpp"
+
+#include <Tensile/Debug.hpp>
 
 #include <sstream>
 
@@ -243,7 +246,10 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
     }
 
     auto prediction_result
-        = origami::rank_configs(origami_problem, analytical_hardware, origami_config_list);
+        = TensileLite::Debug::Instance().useMosaic()
+              ? mosaic::hipblaslt::rank_configs(
+                    origami_problem, analytical_hardware, origami_config_list)
+              : origami::rank_configs(origami_problem, analytical_hardware, origami_config_list);
 
 
     for(auto const& result : prediction_result)

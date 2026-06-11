@@ -32,6 +32,7 @@
 #include <vector>
 
 #include <Tensile/UtilsOrigami.hpp>
+#include "mosaic/hipblaslt/adapter.hpp"
 
 #include <Tensile/Macros.hpp>
 
@@ -53,9 +54,6 @@ namespace TensileLite
     {
         std::vector<std::pair<int, std::shared_ptr<MySolution>>> solution_list;
         std::vector<origami::config_t>                           origami_config_list;
-
-        mutable std::vector<origami::config_t> ml_config_list_cached;
-        mutable std::once_flag                 ml_config_list_once;
 
         mutable std::atomic<bool> lastFindTopRetAll = false;
 
@@ -189,20 +187,12 @@ namespace TensileLite
                 .b_mx_block_size = 0, // MX Data types come from rocroller
             };
 
-            std::vector<origami::config_t> const* configs_for_ranking
-                = &origami_config_list;
-            if(Debug::Instance().useMLRecommender())
-            {
-                std::call_once(ml_config_list_once, [this]() {
-                    ml_config_list_cached = origami_config_list;
-                    for(auto& cfg : ml_config_list_cached)
-                        cfg.prediction_mode = origami::prediction_modes_t::ml_recommender;
-                });
-                configs_for_ranking = &ml_config_list_cached;
-            }
-
-            auto prediction_result = origami::rank_configs(
-                origami_problem, *(pAMDGPU->analyticalHardware), *configs_for_ranking);
+            auto prediction_result
+                = Debug::Instance().useMosaic()
+                      ? mosaic::hipblaslt::rank_configs(
+                            origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list)
+                      : origami::rank_configs(
+                            origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
 
             for(const auto& r : prediction_result)
             {

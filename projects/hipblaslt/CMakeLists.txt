@@ -256,6 +256,13 @@ if(NOT ROCM_LIBS_SUPERBUILD)
             set(ORIGAMI_ENABLE_INSTALL OFF)
             add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" origami)
         endblock()
+        # Add the standalone mosaic library AFTER origami so that
+        # roc::origami-headers exists, with the hipBLASLt backend enabled.
+        block(SCOPE_FOR VARIABLES)
+            set(MOSAIC_ENABLE_INSTALL OFF)
+            set(MOSAIC_ENABLE_HIPBLASLT_BACKEND ON)
+            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/mosaic" mosaic)
+        endblock()
     endif()
 endif()
 

@@ -8,7 +8,6 @@
 
 #include "origami/gemm.hpp"
 #include "origami/math.hpp"
-#include "origami/ml_recommender.hpp"
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"
 #include "origami/types.hpp"
@@ -543,24 +542,6 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                                               const hardware_t& hardware,
                                               const std::vector<config_t>& configs) {
   if (configs.empty()) { throw std::runtime_error("No configurations provided."); }
-
-  static const bool s_use_ml = []() {
-    const char* env = std::getenv("TENSILE_ML_RECOMMENDER");
-    return env && (env[0] == '1' || env[0] == 't' || env[0] == 'T');
-  }();
-  bool use_ml =
-    !configs.empty() &&
-    (s_use_ml ||
-     configs[0].prediction_mode == prediction_modes_t::ml_recommender);
-  if (use_ml) {
-    int cid = ml_recommender::route_cluster_for_problem(problem);
-    if (cid >= 0 && !ml_recommender::cluster_uses_ml(cid)) {
-      use_ml = false;
-    }
-  }
-  if (use_ml) {
-    return ml_recommender::rank_configs(problem, hardware, configs);
-  }
 
   struct prediction_result_wrapper_t {
     double latency;
