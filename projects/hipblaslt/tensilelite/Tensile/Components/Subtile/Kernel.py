@@ -710,10 +710,14 @@ class TileInfo:
     def isFloat4Type(dtype):
       return dtype is not None and dtype.isFloat4() is True
     _totalDTileRegs = numMMATiles * numDword
+    # VGPR-first accumulator policy for MXF4 (FP4 on both operands): enable the
+    # policy purely on role/type. How many accumulator tiles actually land in
+    # VGPR is decided per-tile below via vgprAccLimit, so large D-tiles that do
+    # not fully fit in VGPR still get a partial VGPR/AGPR split instead of being
+    # forced onto the AGPR-first path.
     preferVgpr = isDTile \
         and isFloat4Type(dataTypeA) \
-        and isFloat4Type(dataTypeB) \
-        and (writer.vgprPool.size() + _totalDTileRegs) <= maxVgprBeforeAgpr
+        and isFloat4Type(dataTypeB)
 
     def conservativeSubtileMainLoopVgprReserve():
       pgrReserve = 12 if int(kernel.get("PrefetchGlobalRead", 0)) == 2 else 0
@@ -781,7 +785,14 @@ class TileInfo:
     # the main-loop A/B/scale VGPR demand, then give remaining legal VGPRs to D
     # accumulators before spilling the rest to AGPRs.
     if preferVgpr:
+      # Ceiling: leave room below the AGPR boundary for the main-loop A/B/scale
+      # working set. Floor: VGPR must absorb at least the accumulators that
+      # cannot fit in AGPR (totalDTileRegs - maxAgpr), so the remainder is
+      # guaranteed to fit in the AGPR file. The floor never exceeds the ceiling
+      # for a feasible tile; if it does, the tile genuinely cannot be placed.
       vgprAccLimit = max(0, maxVgprBeforeAgpr - estimateSubtileMainLoopVgprs())
+      minVgprAccRegs = max(0, _totalDTileRegs - maxAgpr)
+      vgprAccLimit = max(vgprAccLimit, writer.vgprPool.size() + minVgprAccRegs)
     else:
       vgprAccLimit = maxVgpr
 
