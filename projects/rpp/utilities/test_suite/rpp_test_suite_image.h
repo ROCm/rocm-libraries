@@ -2467,6 +2467,7 @@ void fill_perm_values(Rpp32u *permTensor, bool qaMode, int permOrder)
         permTensor[i] = mapping[permOrder][i];
 }
 
+#if defined(RPP_TEST_SUITE_HAVE_OPENCV) && RPP_TEST_SUITE_HAVE_OPENCV
 // Compare output for single image processing mode
 // Only supports: BRIGHTNESS (0), BLEND (2), FLIP (20), RESIZE (21), CROP (37), BOX_FILTER (49), MEDIAN_FILTER (51), GAUSSIAN_FILTER (54)
 inline void compare_output_single_image(const vector<cv::Mat>& outputVec, const vector<RpptDesc>& srcDescPtr, const vector<RpptDesc>& dstDescPtr, string funcName, RpptImagePatch *dstImgSizes, int noOfImages, string interpolationTypeName, string noiseTypeName, int additionalParam, int testCase, string dst, string scriptPath)
@@ -2692,3 +2693,4 @@ inline void compare_output_single_image(const vector<cv::Mat>& outputVec, const 
         qaResults.close();
     }
 }
+#endif /* RPP_TEST_SUITE_HAVE_OPENCV */
