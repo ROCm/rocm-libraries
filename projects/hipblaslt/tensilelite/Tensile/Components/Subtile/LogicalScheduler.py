@@ -260,8 +260,15 @@ class SchedulerConfig:
 
     @property
     def subIterK_major(self) -> bool:
-        """Use subIterK-major MFMA ordering for MXFP8 kernels with multiple partitions."""
-        return self.isMXFP8 and self.numPartitions > 1
+        """Use subIterK-major MFMA ordering for MXFP8 kernels with N-only partitions.
+
+        Requires numPartitionsM == 1: _place_LRs_subIterK_major only places A LRs
+        for nxt_pi=0 (piM=0 tile range).  When numPartitionsM > 1, partitions with
+        piM > 0 have different A tile ranges that are never covered by an LR, causing
+        an assertion failure in annotate_deps.  Fall back to the regular place_LRs
+        for M-partitioned kernels until the code is extended to handle that case.
+        """
+        return self.isMXFP8 and self.numPartitions > 1 and self.numPartitionsM == 1
 
     @staticmethod
     def get_partition_candidates(tileInfoA, tileInfoB) -> list:
@@ -2202,10 +2209,10 @@ class LogicalScheduler:
         multiDU = maxUnroll > 1 and self.config.pgr == 1
 
         numK_ins = len(self._partitions[0]) if self._partitions else 0
-        si_major_ins = self.config.subIterK_major
+        subIterK_major_ins = self.config.subIterK_major
 
         def _iter_slots_ins():
-            if si_major_ins:
+            if subIterK_major_ins:
                 for si in range(numK_ins):
                     for pi, slots in enumerate(self._partitions):
                         yield pi, slots[si]
@@ -2247,7 +2254,12 @@ class LogicalScheduler:
                     else:
                         prev_mt = 0
                     if prev_mt != mt:
-                        if gr.tiles.tileId_start == 0:
+                        # In si-major walk order, the first GR chunk for a tensor
+                        # may have tileId_start > 0 (e.g. SB tiles 4..8 before 0..4).
+                        # Fire GRIncOp on any first mt-change; in pi-major keep the
+                        # tileId_start==0 guard to avoid double-firing when tile-groups
+                        # appear out of mt order across partitions.
+                        if subIterK_major_ins or gr.tiles.tileId_start == 0:
                             gr.preOps.append(GRIncOp(tensor=tensor, unrollId=uid))
                 last_gr_mt[key] = mt
 
