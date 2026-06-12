@@ -1059,8 +1059,8 @@ def getPassedStagesFromPreviousBuild() {
         }
 
         // Guard 2: get the exact build being restarted from the cause object.
-        // getUpstreamBuild() returns the WorkflowRun that was restarted.
-        def prevRun = restartCause.getUpstreamBuild()
+        // getOriginal() returns the WorkflowRun that was restarted.
+        def prevRun = restartCause.getOriginal()
         if (!prevRun) {
             echo "Selective rerun: could not resolve restarted build, running all stages"
             return passed
