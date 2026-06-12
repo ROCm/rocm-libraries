@@ -308,23 +308,22 @@ static std::vector<hipsparseOperation_t> get_supported_operations(hipDataType da
 {
     switch(datatype)
     {
-        case HIP_R_16BF:
-        case HIP_R_16F:
-        case HIP_R_32F:
-        case HIP_R_32I:
-        case HIP_R_64F:
-        case HIP_R_8I:
-            return {HIPSPARSE_OPERATION_NON_TRANSPOSE,
-                    HIPSPARSE_OPERATION_TRANSPOSE};
-        case HIP_C_32F:
-        case HIP_C_64F:
-            return {HIPSPARSE_OPERATION_NON_TRANSPOSE,
-                    HIPSPARSE_OPERATION_TRANSPOSE,
-                    HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE};
-        default:
-            return {HIPSPARSE_OPERATION_NON_TRANSPOSE,
-                    HIPSPARSE_OPERATION_TRANSPOSE,
-                    HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE};
+    case HIP_R_16BF:
+    case HIP_R_16F:
+    case HIP_R_32F:
+    case HIP_R_32I:
+    case HIP_R_64F:
+    case HIP_R_8I:
+        return {HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE};
+    case HIP_C_32F:
+    case HIP_C_64F:
+        return {HIPSPARSE_OPERATION_NON_TRANSPOSE,
+                HIPSPARSE_OPERATION_TRANSPOSE,
+                HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE};
+    default:
+        return {HIPSPARSE_OPERATION_NON_TRANSPOSE,
+                HIPSPARSE_OPERATION_TRANSPOSE,
+                HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE};
     }
 }
 
@@ -390,9 +389,7 @@ void testing_spmv_csr_reuse_descr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(
         hipsparseCreateCsr(&matA, m, n, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, aType));
 
-    const std::vector<hipsparseOperation_t> ops = {HIPSPARSE_OPERATION_NON_TRANSPOSE,
-                                                   HIPSPARSE_OPERATION_TRANSPOSE,
-                                                   HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE};
+    const std::vector<hipsparseOperation_t> ops = get_supported_operations(aType);
     const std::vector<hipsparseSpMVAlg_t>   algs
         = {HIPSPARSE_SPMV_ALG_DEFAULT, HIPSPARSE_SPMV_CSR_ALG1, HIPSPARSE_SPMV_CSR_ALG2};
 
