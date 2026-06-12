@@ -39,7 +39,7 @@ struct Params
 
 
 template<class Params>
-class HipcubWarpExchangeTest : public ::testing::Test
+class HipcubWarpExchangeTest : public test_controller::ControlledTest<>
 {
 public:
     using params = Params;
@@ -217,6 +217,7 @@ std::enable_if_t<is_warp_exchange_test_enabled<Params, Algorithm>> run_warp_exch
 
     SKIP_IF_UNSUPPORTED_WARP_SIZE(warp_size);
 
+	CHECK_SIZE_ENABLEMENT(static_cast<size_t>(items_count));
     std::vector<T> input(items_count);
     for(int i = 0; i < static_cast<int>(input.size()); i++)
     {
@@ -393,6 +394,7 @@ TYPED_TEST(HipcubWarpExchangeTest, WarpExchangeScatterToStriped)
 
     SKIP_IF_UNSUPPORTED_WARP_SIZE(warp_size);
 
+	CHECK_SIZE_ENABLEMENT(static_cast<size_t>(items_count));
     std::vector<T> input(items_count);
     for(int i = 0; i < static_cast<int>(input.size()); i++)
     {

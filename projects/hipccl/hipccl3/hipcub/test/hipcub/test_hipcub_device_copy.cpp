@@ -199,7 +199,7 @@ TYPED_TEST(DeviceBatchCopyTests, SizeAndTypeVariation)
         {
             size = test_utils::get_random_value<buffer_size_type>(blev_min_size, max_size, rng());
         }
-        CHECK_SIZE_ENABLEMENT(size);
+        CHECK_SIZE_ENABLEMENT(static_cast<size_t>(size));
 
         // convert from number of bytes to number of elements
         size = test_utils::max(1, size / sizeof(value_type));

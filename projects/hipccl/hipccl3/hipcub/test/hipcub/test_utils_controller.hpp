@@ -40,6 +40,7 @@
 #include <functional>
 #include <any>
 #include <tuple>
+#include <iostream>
 
 #ifdef _WIN32
 // This macro prevents windows.h from defining min/max functions
@@ -1458,6 +1459,16 @@ private:
       GTEST_SKIP() << msg; \
 }
 
+#define CHECK_SIZE_ENABLEMENT_WITH_CONTINUE(size) \
+{ \
+  std::string msg; \
+  if (!test_controller::TestController::get_instance().check_size_enablement(size, msg)) \
+  { \
+      std::cout << msg; \
+      continue; \
+  } \
+}	
+
 // Filters a vector of sizes down to those that are enabled.
 // Prints a message indicating the number of sizes that were skipped.
 // If env var HIPCUB_EXTRA_TC_INFO is defined and set to 1, also
@@ -1471,7 +1482,7 @@ private:
 // If you'd like to use a size transformer, you can pass that as a template argument,
 // and it will be set in the test controller before each test is run, and then removed
 // after each test completes.
-template<class SizeTransformer=IdentityTransformer>
+template<class SizeTransformer=test_controller::IdentityTransformer>
 class ControlledTest : public ::testing::Test
 {
 protected:
