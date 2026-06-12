@@ -241,7 +241,9 @@ Problem Problem::MakeTransposed() const
     case miopenProblemDirectionBackwardWeights:
         transposed.SetDirection(miopenProblemDirectionBackwardWeights);
         break;
-    default: MIOPEN_THROW(miopenStatusNotImplemented);
+#ifdef MIOPEN_BETA_API
+    case miopenProblemDirectionInference: MIOPEN_THROW(miopenStatusNotImplemented);
+#endif
     }
 
     transposed.tensor_descriptors.reserve(tensor_descriptors.size());
@@ -291,7 +293,9 @@ AnyInvokeParams Problem::MakeConvInvokeParams(const TensorDescriptor& x_desc,
                                      workspace,
                                      workspace_size,
                                      conv_desc.attribute.gfx90aFp16alt.GetWrW()};
-    default: MIOPEN_THROW(miopenStatusNotImplemented);
+#ifdef MIOPEN_BETA_API
+    case miopenProblemDirectionInference: MIOPEN_THROW(miopenStatusNotImplemented);
+#endif
     }
 }
 
@@ -1046,7 +1050,7 @@ void FusedProblem::AddProblemToPlan(FusionPlanDescriptor& plan, const Problem& p
                     break;
                 }
 #endif
-                default:
+                case miopenProblemDirectionBackwardWeights:
                     MIOPEN_THROW(miopenStatusBadParm,
                                  "Batchnorm only has forward, backward and inference directions");
                 }
@@ -1178,7 +1182,7 @@ fusion::FusionInvokeParams FusedProblem::MakeInvokeParams(
                         break;
                     }
 #endif
-                    default:
+                    case miopenProblemDirectionBackwardWeights:
                         MIOPEN_THROW(
                             miopenStatusBadParm,
                             "Batchnorm only has forward, backward and inference directions");
