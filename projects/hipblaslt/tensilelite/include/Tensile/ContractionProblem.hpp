@@ -1110,14 +1110,14 @@ namespace TensileLite
             return m_maxProblemSize;
         }
 
-        void setMXScaleA(rocisa::DataType mxType, int mxBlock, std::vector<size_t> saStride = {}, bool padScaleTensor = true);
+        void setMXScaleA(rocisa::DataType mxType, int mxBlock, std::vector<size_t> saStride = {}, bool padScaleTensorFreeDim = true);
 
         rocisa::DataType mxTypeA() const
         {
             return m_mxTypeA;
         }
 
-        void setMXScaleB(rocisa::DataType mxType, int mxBlock, std::vector<size_t> sbStride = {}, bool padScaleTensor = true);
+        void setMXScaleB(rocisa::DataType mxType, int mxBlock, std::vector<size_t> sbStride = {}, bool padScaleTensorFreeDim = true);
 
         rocisa::DataType mxTypeB() const
         {
