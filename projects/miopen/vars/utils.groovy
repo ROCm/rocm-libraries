@@ -1070,19 +1070,9 @@ def getPassedStagesFromPreviousBuild() {
             return passed
         }
 
-        // Guard 3: compare GIT_COMMIT set by checkoutRepo() on both builds.
-        def curCommit  = env.GIT_COMMIT
-        def prevCommit = prevRun.getEnvironment()?.get('GIT_COMMIT')
-        if (!curCommit || !prevCommit) {
-            echo "Selective rerun: GIT_COMMIT unavailable (cur=${curCommit} prev=${prevCommit}), running all stages"
-            return passed
-        }
-        if (curCommit != prevCommit) {
-            echo "Selective rerun: commit mismatch (cur=${curCommit.take(8)} prev=${prevCommit.take(8)}), running all stages"
-            return passed
-        }
-
-        echo "Selective rerun: same commit ${curCommit.take(8)}, checking build #${prevRun.number} for passed stages"
+        // No commit guard needed: getOriginal() returns the exact build being
+        // restarted, so the commit is implicitly the same.
+        echo "Selective rerun: restarting from build #${prevRun.number}, checking for passed stages"
         passed = getPassedStagesFromBuild(prevRun)
     } catch (Exception e) {
         echo "Selective rerun: error (${e.message}), running all stages"
