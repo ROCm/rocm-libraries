@@ -129,7 +129,14 @@ enum class PointwiseMode
     TAN = 45, ///< Tangent function
     TANH_BWD = 46, ///< Tanh backward pass
     TANH_FWD = 47, ///< Tanh forward pass
-    COUNT = 48 ///< Number of pointwise modes (sentinel — not a valid mode)
+    // --- cuDNN FE PointwiseMode_t name-superset values (RFC 0012 §4.3) ---
+    // Present so the cuDNN shim can alias PointwiseMode_t 1:1. No hipDNN backend
+    // equivalent yet, so toBackendPointwiseMode() returns std::nullopt for these.
+    // Portions derived from NVIDIA cuDNN frontend, used under the MIT license.
+    MOD = 48, ///< Modulo: x mod y (binary)
+    POW = 49, ///< Power: x raised to y (binary)
+    COS = 50, ///< Cosine function (unary)
+    COUNT = 51 ///< Number of pointwise modes (sentinel — not a valid mode)
 };
 typedef PointwiseMode PointwiseMode_t; ///< @brief Type alias for PointwiseMode
 
@@ -163,7 +170,13 @@ enum class ResampleMode
     NOT_SET = 0, ///< Resample mode not specified
     MAXPOOL = 1, ///< Maximum pooling
     AVGPOOL_EXCLUDE_PADDING = 2, ///< Average pooling (excludes padding from divisor)
-    AVGPOOL_INCLUDE_PADDING = 3 ///< Average pooling (includes padding in divisor)
+    AVGPOOL_INCLUDE_PADDING = 3, ///< Average pooling (includes padding in divisor)
+    // --- cuDNN FE ResampleMode_t name-superset values (RFC 0012 §4.3) ---
+    // Present so the cuDNN shim can alias ResampleMode_t 1:1. No hipDNN backend
+    // equivalent yet, so toBackendResampleMode() returns std::nullopt for these.
+    // Portions derived from NVIDIA cuDNN frontend, used under the MIT license.
+    BILINEAR = 4, ///< Bilinear resampling
+    NEAREST = 5 ///< Nearest-neighbor resampling
 };
 typedef ResampleMode ResampleMode_t; ///< @brief Type alias for ResampleMode
 
@@ -175,7 +188,12 @@ enum class PaddingMode
 {
     NOT_SET = 0, ///< Padding mode not specified
     NEG_INF_PAD = 1, ///< Pad with negative infinity
-    ZERO_PAD = 2 ///< Pad with zeros
+    ZERO_PAD = 2, ///< Pad with zeros
+    // --- cuDNN FE PaddingMode_t name-superset value (RFC 0012 §4.3) ---
+    // Present so the cuDNN shim can alias PaddingMode_t 1:1. No hipDNN backend
+    // equivalent yet, so toBackendPaddingMode() returns std::nullopt for this.
+    // Portions derived from NVIDIA cuDNN frontend, used under the MIT license.
+    EDGE_VAL_PAD = 3 ///< Pad with the edge value
 };
 typedef PaddingMode PaddingMode_t; ///< @brief Type alias for PaddingMode
 
@@ -207,6 +225,17 @@ enum class DataType
     BOOLEAN = 16, ///< 8-bit boolean
     FP8_E4M3_FNUZ = 17, ///< 8-bit floating point (4 exponent, 3 mantissa bits, FNUZ)
     FP8_E5M2_FNUZ = 18, ///< 8-bit floating point (5 exponent, 2 mantissa bits, FNUZ)
+    // --- cuDNN FE DataType_t name-superset values (RFC 0012 §4.3) ---
+    // Present so the cuDNN shim can alias DataType_t 1:1. No hipDNN backend
+    // equivalent yet, so toHipdnnDataType() returns std::nullopt for these; a
+    // graph using one surfaces as a runtime GRAPH_NOT_SUPPORTED, not an enum gap.
+    // Portions derived from NVIDIA cuDNN frontend, used under the MIT license.
+    INT8x4 = 19, ///< Four packed 8-bit signed integers (vectorized layout)
+    UINT8x4 = 20, ///< Four packed 8-bit unsigned integers (vectorized layout)
+    INT8x32 = 21, ///< Thirty-two packed 8-bit signed integers (vectorized layout)
+    FAST_FLOAT_FOR_FP8 = 22, ///< Fast floating-point accumulation type for FP8
+    COMPLEX_FP32 = 23, ///< Complex number with 32-bit floating-point components
+    COMPLEX_FP64 = 24, ///< Complex number with 64-bit floating-point components
 };
 typedef DataType DataType_t; ///< @brief Type alias for DataType
 
@@ -259,6 +288,13 @@ typedef AttentionImplementation
 enum class HeuristicMode
 {
     FALLBACK, ///< Use fallback heuristics for engine selection
+    // --- cuDNN FE HeurMode_t name-superset values (RFC 0012 §4.3, §4.5) ---
+    // Present so the cuDNN shim can alias HeurMode_t 1:1. Until real hipDNN
+    // heuristics exist, every mode maps to fallback selection (RFC 0012 §4.5).
+    // Portions derived from NVIDIA cuDNN frontend, used under the MIT license.
+    A, ///< cuDNN heuristic mode A (mapped to fallback for now)
+    B, ///< cuDNN heuristic mode B (mapped to fallback for now)
+    OPENSOURCE, ///< cuDNN open-source heuristic mode (mapped to fallback for now)
 };
 typedef HeuristicMode HeurMode_t; ///< @brief Type alias for HeuristicMode
 
@@ -914,7 +950,11 @@ inline hipdnnBackendHeurMode_t toBackendType(const HeuristicMode& type)
 {
     switch(type)
     {
+    // All cuDNN heuristic modes currently fold to hipDNN fallback (RFC 0012 §4.5).
     case HeuristicMode::FALLBACK:
+    case HeuristicMode::A:
+    case HeuristicMode::B:
+    case HeuristicMode::OPENSOURCE:
     default:
         return hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK;
     }
@@ -1055,6 +1095,18 @@ inline const char* to_string(const DataType& type)
         return "fp8_e4m3_fnuz";
     case DataType::FP8_E5M2_FNUZ:
         return "fp8_e5m2_fnuz";
+    case DataType::INT8x4:
+        return "int8x4";
+    case DataType::UINT8x4:
+        return "uint8x4";
+    case DataType::INT8x32:
+        return "int8x32";
+    case DataType::FAST_FLOAT_FOR_FP8:
+        return "fast_float_for_fp8";
+    case DataType::COMPLEX_FP32:
+        return "complex_fp32";
+    case DataType::COMPLEX_FP64:
+        return "complex_fp64";
     default:
         return "unknown";
     }
@@ -1168,6 +1220,12 @@ inline const char* to_string(const PointwiseMode& mode)
         return "TANH_BWD";
     case PointwiseMode::TANH_FWD:
         return "TANH_FWD";
+    case PointwiseMode::MOD:
+        return "MOD";
+    case PointwiseMode::POW:
+        return "POW";
+    case PointwiseMode::COS:
+        return "COS";
     default:
         return "UNKNOWN";
     }
@@ -1208,6 +1266,12 @@ inline const char* to_string(const HeuristicMode& mode)
     {
     case HeuristicMode::FALLBACK:
         return "FALLBACK";
+    case HeuristicMode::A:
+        return "A";
+    case HeuristicMode::B:
+        return "B";
+    case HeuristicMode::OPENSOURCE:
+        return "OPENSOURCE";
     default:
         return "unknown";
     }
@@ -1421,6 +1485,7 @@ inline bool isUnaryPointwiseMode(PointwiseMode mode)
     case PointwiseMode::SWISH_FWD:
     case PointwiseMode::TAN:
     case PointwiseMode::TANH_FWD:
+    case PointwiseMode::COS:
         return true;
     default:
         return false;
@@ -1459,6 +1524,8 @@ inline bool isBinaryPointwiseMode(PointwiseMode mode)
     case PointwiseMode::SUB:
     case PointwiseMode::SWISH_BWD:
     case PointwiseMode::TANH_BWD:
+    case PointwiseMode::MOD:
+    case PointwiseMode::POW:
         return true;
     default:
         return false;
