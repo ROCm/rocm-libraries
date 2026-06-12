@@ -237,11 +237,12 @@ typedef struct ckc_gfx950_attn2d_build_ctx
     /* ---- SSA constants ---- */
     ckc_value_t* c0;
     ckc_value_t* zero_f;
-    ckc_value_t* neg_inf_v;  /* b.const_f32(-inf)               */
-    ckc_value_t* one_f_v;    /* b.const_f32(1.0)                */
-    ckc_value_t* rcp_ln2_v;  /* b.const_f32(1.4426950408889634) */
-    ckc_value_t* qk_scale_v; /* derived from scale_p            */
-    ckc_value_t* sw_const_v; /* b.const_i32(SLIDING_WINDOW)     */
+    ckc_value_t* neg_inf_v;      /* b.const_f32(-inf)               */
+    ckc_value_t* one_f_v;        /* b.const_f32(1.0)                */
+    ckc_value_t* rcp_ln2_v;      /* b.const_f32(1.4426950408889634) */
+    ckc_value_t* qk_scale_v;     /* derived from scale_p            */
+    ckc_value_t* pv_fp8_scale_v; /* fdiv(v_scale, 240) when FP8_MFMA_PV (line 1149) */
+    ckc_value_t* sw_const_v;     /* b.const_i32(SLIDING_WINDOW)     */
 
     /* ---- paged-KV byte descriptor (full transform DAG, lines 1163-1630) ---- */
     ckc_tensor_descriptor_t* q_desc;   /* output/query [token,head,dim]   */
@@ -312,6 +313,16 @@ typedef struct ckc_gfx950_attn2d_build_ctx
     ckc_value_t* hoist_q_pos[CKC_GFX950_ATTN2D_MAX_REGS_PER_LANE];
     ckc_value_t* hoist_q_head[CKC_GFX950_ATTN2D_MAX_REGS_PER_LANE];
     ckc_value_t* hoist_row_mask[CKC_GFX950_ATTN2D_MAX_REGS_PER_LANE];
+
+    /* ---- transposed-32x32 invariant-hoist state (Python 2446-2480) ---- *
+     * Computed once in the LICM hoist when TRANSPOSED_INVARIANT_HOIST is set;
+     * NULL otherwise. The transposed-softmax loop body reuses these instead of
+     * recomputing per KV tile. */
+    ckc_value_t* st_qp_hoist;
+    ckc_value_t* st_qh_hoist;
+    ckc_value_t* st_row_ok_hoist;
+    ckc_value_t* st_causal_lim_hoist;
+    ckc_value_t* st_alibi_slope_hoist;
 
     /* ---- KV-loop body live carry (set per _emit_kv_body invocation) ---- *
      * The current loop iter var + the unpacked m/l/acc carry the inner QK/mask/

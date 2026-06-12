@@ -293,6 +293,24 @@ bool ckc_transforms_descriptor_offset(ckc_ir_builder_t* b,
                                       ckc_value_t** out_offset,
                                       ckc_value_t** out_valid);
 
+/* Faithful port of TensorDescriptor.offset_i64_split (transforms.py 1463-1505).
+ * Like ckc_transforms_descriptor_offset but splits the linear offset into
+ * (base_i64, within_i32): the `base_coord` term is scalarised (to_sgpr_u32) and
+ * widened to i64 (no 2 GiB overflow for paged caches), while the remaining base
+ * terms are summed into a small i32 within-block offset. *out_base_i64 and
+ * *out_within are written on success (within is const_i32(0) when no other
+ * terms); *out_valid is NULL == Python None. Returns false (builder error set)
+ * if base_coord is not among the descriptor's base coords. */
+bool ckc_transforms_descriptor_offset_i64_split(ckc_ir_builder_t* b,
+                                                const ckc_tensor_descriptor_t* desc,
+                                                const char* base_coord,
+                                                const char* const* in_names,
+                                                ckc_value_t* const* in_values,
+                                                int n_in,
+                                                ckc_value_t** out_base_i64,
+                                                ckc_value_t** out_within,
+                                                ckc_value_t** out_valid);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

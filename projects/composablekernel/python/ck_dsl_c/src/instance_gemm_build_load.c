@@ -550,9 +550,13 @@ void ckc_gemm_emit_load_phase(ckc_gemm_build_ctx_t* ctx,
         ckc_value_t* n_tile_idx = ckc_b_div(b, ctx->block_n_off, ctx->c_block_n);
         ckc_value_t* k_tile_idx = ckc_b_div(b, k_off, ctx->c_block_k);
         ckc_value_t* n_tile_count = ckc_b_div(b, ctx->N, ctx->c_block_n);
-        ckc_value_t* tile_offset_elements = ckc_b_mul(
-            b, ckc_b_add(b, ckc_b_mul(b, k_tile_idx, n_tile_count), n_tile_idx),
-            ckc_b_const_i32(b, ctx->block_n * ctx->block_k));
+        /* Python evaluates ckc_b_mul args left-to-right: the inner add/mul are
+         * built BEFORE the const. C evaluates call args right-to-left, so bind
+         * each sub-expression to a temp in Python order to match SSA ids. */
+        ckc_value_t* tile_off_inner =
+            ckc_b_add(b, ckc_b_mul(b, k_tile_idx, n_tile_count), n_tile_idx);
+        ckc_value_t* tile_off_const = ckc_b_const_i32(b, ctx->block_n * ctx->block_k);
+        ckc_value_t* tile_offset_elements = ckc_b_mul(b, tile_off_inner, tile_off_const);
         ckc_value_t* base_off = ckc_b_add(b, ctx->batch_off_b, tile_offset_elements);
         for (int e = 0; e < ctx->b_vecs_per_thread; ++e)
         {

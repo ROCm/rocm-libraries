@@ -311,11 +311,16 @@ void ckc_gfx950_attn2d_fast_paged_kv_blocks(ckc_gfx950_attn2d_build_ctx_t* ctx,
     ckc_value_t* logical_block1 = ckc_b_add(b, logical_block0, ckc_b_const_i32(b, 1));
     ckc_value_t* idx0 = ckc_b_add(b, seq_base, logical_block0);
     ckc_value_t* idx1 = ckc_b_add(b, seq_base, logical_block1);
+    /* Python b.masked_global_load(table, idx, b.cmp_lt(idx, max), const(0))
+     * creates the cmp_lt mask BEFORE the const(0) fill (left-to-right). Bind the
+     * masks so C's right-to-left arg eval does not allocate const(0) first. */
+    ckc_value_t* mask0 = ckc_b_cmp_lt(b, idx0, max_idx);
     ckc_value_t* block0 = ckc_b_masked_global_load(
-        b, ctx->block_tables, idx0, ckc_b_cmp_lt(b, idx0, max_idx),
+        b, ctx->block_tables, idx0, mask0,
         ckc_b_const_i32(b, 0), ckc_i32(), 4);
+    ckc_value_t* mask1 = ckc_b_cmp_lt(b, idx1, max_idx);
     ckc_value_t* block1 = ckc_b_masked_global_load(
-        b, ctx->block_tables, idx1, ckc_b_cmp_lt(b, idx1, max_idx),
+        b, ctx->block_tables, idx1, mask1,
         ckc_b_const_i32(b, 0), ckc_i32(), 4);
     if (out_block0)
         *out_block0 = ckc_b_to_sgpr_u32(b, block0);
@@ -429,16 +434,25 @@ void ckc_gfx950_attn2d_issue_k_load_runtime(ckc_gfx950_attn2d_build_ctx_t* ctx,
             /* Non-fast paged-KV (N_BLOCKS_PER_TILE==1 / multi-block):
              *   linear_half = call*KV_HALVES_PER_CALL + lane_half_base
              *   voff, _ = paged_kv_desc.offset(tile_idx=, linear_half=, kv_head=)
-             * (Python 1660-1681). The I64_KV_ADDR offset_i64_split branch is not
-             * on the C transforms surface (stub-to-link; gfx950 production uses
-             * the FAST path which DOES honour I64_KV_ADDR). */
+             * (Python 1660-1681). I64_KV_ADDR uses offset_i64_split, folding the
+             * physical_block term into a 64-bit buffer base. */
             ckc_value_t* linear_half = ckc_b_add(
                 b, ckc_b_const_i32(b, call * kv_halves_per_call), lane_half_base);
             const char* in_names[3] = {"tile_idx", "linear_half", "kv_head"};
             ckc_value_t* in_values[3] = {kv_tile_idx, linear_half, ctx->kv_head_idx};
             ckc_value_t* valid = NULL;
-            if (!ckc_transforms_descriptor_offset(b, ctx->kv_desc, in_names,
-                                                  in_values, 3, &voff, &valid))
+            if (ctx->I64_KV_ADDR)
+            {
+                ckc_value_t* base_i64 = NULL;
+                if (!ckc_transforms_descriptor_offset_i64_split(
+                        b, ctx->kv_desc, "physical_block", in_names, in_values, 3,
+                        &base_i64, &voff, &valid))
+                    return;
+                k_rsrc = ckc_b_buffer_rsrc(
+                    b, ckc_b_global_ptr_add(b, ctx->key, base_i64), kv_block_bytes_c);
+            }
+            else if (!ckc_transforms_descriptor_offset(b, ctx->kv_desc, in_names,
+                                                       in_values, 3, &voff, &valid))
                 return;
         }
         /* k_dst = K_wave_base + call*bytes_per_call (1682). */
@@ -493,14 +507,25 @@ void ckc_gfx950_attn2d_issue_v_load_runtime(ckc_gfx950_attn2d_build_ctx_t* ctx,
         {
             /* Non-fast paged-KV: voff = paged_kv_desc.offset(tile_idx=,
              * linear_half=call*KV_HALVES_PER_CALL+lane_half_base, kv_head=)
-             * (Python 1711-1732). I64_KV_ADDR offset_i64_split stub-to-link. */
+             * (Python 1711-1732). I64_KV_ADDR uses offset_i64_split, folding the
+             * physical_block term into a 64-bit buffer base. */
             ckc_value_t* linear_half = ckc_b_add(
                 b, ckc_b_const_i32(b, call * kv_halves_per_call), lane_half_base);
             const char* in_names[3] = {"tile_idx", "linear_half", "kv_head"};
             ckc_value_t* in_values[3] = {kv_tile_idx, linear_half, ctx->kv_head_idx};
             ckc_value_t* valid = NULL;
-            if (!ckc_transforms_descriptor_offset(b, ctx->kv_desc, in_names,
-                                                  in_values, 3, &voff, &valid))
+            if (ctx->I64_KV_ADDR)
+            {
+                ckc_value_t* base_i64 = NULL;
+                if (!ckc_transforms_descriptor_offset_i64_split(
+                        b, ctx->kv_desc, "physical_block", in_names, in_values, 3,
+                        &base_i64, &voff, &valid))
+                    return;
+                v_rsrc = ckc_b_buffer_rsrc(
+                    b, ckc_b_global_ptr_add(b, ctx->value, base_i64), kv_block_bytes_c);
+            }
+            else if (!ckc_transforms_descriptor_offset(b, ctx->kv_desc, in_names,
+                                                       in_values, 3, &voff, &valid))
                 return;
         }
         /* v_dst = V_wave_base + call*bytes_per_call (1733). */

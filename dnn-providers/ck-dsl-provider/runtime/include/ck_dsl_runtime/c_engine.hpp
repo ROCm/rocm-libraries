@@ -115,6 +115,21 @@ struct CEngine {
         int sliding_window = 0;
         double softcap = 0.0;
         const char* arch = "gfx950";
+
+        // ---- Heuristic-overlaid attention knobs (defaulted; existing callers
+        // are unaffected). These mirror the FMHA manifest's attention_config
+        // (block_q / tile_size / num_warps). On the scalar 2D reference path the
+        // ONE knob that changes the emitted kernel is the KV block size; the
+        // heuristic carries it as block_q (== block_size in attention_config).
+        // apply_attn_knobs() folds block_q into block_size so the JIT'd kernel
+        // identity (name + paged-KV block geometry) tracks the chosen candidate.
+        // tile_size / num_warps are retained for parity with the manifest knob
+        // space (they feed the tiled kernel, not the scalar reference, so they
+        // are not consumed by the scalar lower below but ARE carried/applied so
+        // the overlay is a faithful mirror of apply_gemm_knobs).
+        int block_q = 0;    // 0 == not provided by manifest
+        int tile_size = 0;  // 0 == not provided
+        int num_warps = 0;  // 0 == not provided
     };
 
     // ---- builders --------------------------------------------------------
@@ -305,7 +320,11 @@ inline CEngineResult CEngine::build_sdpa(const SdpaProblem& p) {
     prob.num_query_heads = p.num_query_heads;
     prob.num_kv_heads = p.num_kv_heads;
     prob.head_size = p.head_size;
-    prob.block_size = p.block_size;
+    // The KV block size is the scalar path's one tile knob. Prefer the
+    // heuristic-overlaid block_q (== attention_config block_q/block_size) when
+    // present; else fall back to block_size. This is what makes the kernel
+    // identity (name + paged-KV block geometry) track the chosen candidate.
+    prob.block_size = p.block_q > 0 ? p.block_q : p.block_size;
     prob.max_seqlen_q = p.max_seqlen_q;
     prob.max_seqlen_k = p.max_seqlen_k;
     prob.dtype = p.dtype;

@@ -59,6 +59,27 @@ static int make_cfg(int idx, ckc_implicit_gemm_conv_spec_t *spec,
         spec->problem = ckc_conv_problem_default(8, 56, 56, 64, 64, 1, 1);
         *arch = "gfx950";
         return 0;
+    case 6:
+    case 7:
+    case 8:
+        /* WMMA wave32 RDNA targets: 16x16x16 / mem / default, w32. */
+        spec->problem = ckc_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->warp_tile_m = 16; spec->warp_tile_n = 16; spec->warp_tile_k = 16;
+        spec->wave_size = 32;
+        *arch = (idx == 6) ? "gfx1151"
+              : (idx == 7) ? "gfx1201"
+                           : "gfx11-generic";
+        return 0;
+    case 9:
+        /* chiplet_swizzle gfx950. */
+        spec->problem = ckc_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->tile_m = 128; spec->tile_n = 128; spec->tile_k = 64;
+        spec->chiplet_swizzle = true;
+        spec->chiplet_wgm = 8;
+        spec->chiplet_num_xcds = 8;
+        spec->chiplet_chunk_size = 64;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }

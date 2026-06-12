@@ -287,9 +287,14 @@ ckc_value_t* ckc_gfx942_attn2d_apply_transposed_pv_regs(ckc_gfx942_attn2d_build_
                 ckc_value_t* a_v_elems[4];
                 for(int kk = 0; kk < 4; ++kk)
                 {
-                    /* v_row = (k*8 + kk) + lane_half32*4 (lines 4632-4635). */
+                    /* v_row = (k*8 + kk) + lane_half32*4 (lines 4632-4635).
+                     * Python emits const(k*8+kk) BEFORE the mul (left-to-right);
+                     * bind it first so C's right-to-left arg eval keeps the SSA
+                     * numbering (the const folds to an immediate but still
+                     * advances Python's value counter). */
+                    ckc_value_t* v_row_base = ckc_b_const_i32(B, k * 8 + kk);
                     ckc_value_t* v_row =
-                        ckc_b_add(B, ckc_b_const_i32(B, k * 8 + kk),
+                        ckc_b_add(B, v_row_base,
                                   ckc_b_mul(B, lane_half32, ckc_b_const_i32(B, 4)));
                     ckc_value_t* idx[3] = {v_buf, v_row, v_dim32};
                     ckc_value_t* v1 =
@@ -505,9 +510,12 @@ void ckc_gfx942_attn2d_emit_pv_bucket(ckc_gfx942_attn2d_build_ctx_t* ctx,
         else if(ctx->USE_MFMA_32X32X8)
         {
             /* gfx942 32x32x8 PV (O = P @ V): P_lds bridge + naive strided V
-             * (lines 4771-4815). */
+             * (lines 4771-4815). Python's lane_col32 is the Q-gather-reassigned
+             * value (line 3504); lane_half32 is the prologue one (line 2016). */
             ckc_value_t* v_buf      = ckc_b_const_i32(B, 0);
-            ckc_value_t* lane_col32 = lane_col32_of(ctx);
+            ckc_value_t* lane_col32 = (ctx->lane_col32_q32_v != NULL)
+                                          ? ctx->lane_col32_q32_v
+                                          : lane_col32_of(ctx);
             ckc_value_t* lane_half32 = lane_half32_of(ctx);
             ckc_value_t* p_row32 = ckc_b_add(B, ctx->wave_row_base, lane_col32);
             for(int n = 0; n < ACC_N_TILES; ++n)
@@ -524,14 +532,19 @@ void ckc_gfx942_attn2d_emit_pv_bucket(ckc_gfx942_attn2d_build_ctx_t* ctx,
                     ckc_b_add(B, ckc_b_const_i32(B, n * 32), lane_col32);
                 for(int k = 0; k < PV_K_ITERS; ++k)
                 {
+                    /* Python emits const(k*8) BEFORE the mul (left-to-right);
+                     * bind const first so C's right-to-left arg eval does not
+                     * allocate the mul ahead of it and shift the %value. */
+                    ckc_value_t* p_off_base = ckc_b_const_i32(B, k * 8);
                     ckc_value_t* p_off32 =
-                        ckc_b_add(B, ckc_b_const_i32(B, k * 8),
+                        ckc_b_add(B, p_off_base,
                                   ckc_b_mul(B, lane_half32, ckc_b_const_i32(B, 4)));
                     ckc_value_t* pidx[2] = {p_row32, p_off32};
                     ckc_value_t* A_p32 =
                         ckc_b_smem_load_vN(B, ctx->P_lds, pidx, 2, DT, 4);
+                    ckc_value_t* k_base = ckc_b_const_i32(B, k * 8);
                     ckc_value_t* k_row_base =
-                        ckc_b_add(B, ckc_b_const_i32(B, k * 8),
+                        ckc_b_add(B, k_base,
                                   ckc_b_mul(B, lane_half32, ckc_b_const_i32(B, 4)));
                     ckc_value_t* B_v32 = ckc_b_zero_vec(B, DT, 4);
                     for(int j = 0; j < 4; ++j)

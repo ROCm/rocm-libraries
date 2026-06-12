@@ -213,18 +213,27 @@ void ckc_conv_emit_direct_epilogue_wmma(ckc_ir_builder_t* b,
             ckc_value_t* acc = accs[flat];
             ckc_value_t* atom_m_off;
             ckc_value_t* atom_n_off;
+            /* C evaluates nested call args in unspecified (typically
+             * right-to-left) order, which would create the const before the
+             * inner add and swap their SSA ids vs Python (which evaluates the
+             * inner b.add first, then the b.const_i32). Bind each subexpression
+             * to a temp in Python's left-to-right order. */
+            ckc_value_t* m_inner;
+            ckc_value_t* m_const;
+            ckc_value_t* n_inner;
+            ckc_value_t* n_const;
             ++flat;
 
             /* atom_m_off = b.add(b.add(block_m_off, warp_m_off),
              *                    b.const_i32(mi * spec.warp_tile_m)) */
-            atom_m_off = ckc_b_add(b,
-                                   ckc_b_add(b, block_m_off, warp_m_off),
-                                   ckc_b_const_i32(b, mi * spec->warp_tile_m));
+            m_inner = ckc_b_add(b, block_m_off, warp_m_off);
+            m_const = ckc_b_const_i32(b, mi * spec->warp_tile_m);
+            atom_m_off = ckc_b_add(b, m_inner, m_const);
             /* atom_n_off = b.add(b.add(block_n_off, warp_n_off),
              *                    b.const_i32(ni * spec.warp_tile_n)) */
-            atom_n_off = ckc_b_add(b,
-                                   ckc_b_add(b, block_n_off, warp_n_off),
-                                   ckc_b_const_i32(b, ni * spec->warp_tile_n));
+            n_inner = ckc_b_add(b, block_n_off, warp_n_off);
+            n_const = ckc_b_const_i32(b, ni * spec->warp_tile_n);
+            atom_n_off = ckc_b_add(b, n_inner, n_const);
 
             for (i = 0; i < op->c_frag_len; ++i)
             {

@@ -246,9 +246,13 @@ ckc_kernel_def_t* ckc_moe_silu_mul_body_scalar(ckc_moe_stream_ctx_t* ctx)
 
     for (k = 0; k < ctx->chunks; ++k)
     {
-        /* i_col = b.add(b.const_i32(k*BS*VEC), b.mul(tid, c_vec)) */
-        ckc_value_t* i_col = ckc_b_add(
-            b, ckc_b_const_i32(b, (int64_t)k * BS * VEC), ckc_b_mul(b, ctx->tid, ctx->c_vec));
+        /* i_col = b.add(b.const_i32(k*BS*VEC), b.mul(tid, c_vec))
+         * Python evaluates the two arguments left-to-right, so the const
+         * is created before the mul; bind each to a temp in that order so
+         * the SSA value-id counter matches (C arg eval is right-to-left). */
+        ckc_value_t* i_col_c = ckc_b_const_i32(b, (int64_t)k * BS * VEC);
+        ckc_value_t* i_col_m = ckc_b_mul(b, ctx->tid, ctx->c_vec);
+        ckc_value_t* i_col = ckc_b_add(b, i_col_c, i_col_m);
         /* off = b.add(row_base, i_col) */
         ckc_value_t* off = ckc_b_add(b, ctx->row_base, i_col);
         /* g = load_scalar_as_f32(b, GateOut, off, dtype=dtype) */
@@ -476,9 +480,13 @@ ckc_kernel_def_t* ckc_moe_silu_mul_packed_body_scalar(ckc_moe_stream_ctx_t* ctx)
 
     for (k = 0; k < ctx->chunks; ++k)
     {
-        /* i_col = b.add(b.const_i32(k*BS*VEC), b.mul(tid, c_vec)) */
-        ckc_value_t* i_col = ckc_b_add(
-            b, ckc_b_const_i32(b, (int64_t)k * BS * VEC), ckc_b_mul(b, ctx->tid, ctx->c_vec));
+        /* i_col = b.add(b.const_i32(k*BS*VEC), b.mul(tid, c_vec))
+         * Python evaluates the two arguments left-to-right, so the const
+         * is created before the mul; bind each to a temp in that order so
+         * the SSA value-id counter matches (C arg eval is right-to-left). */
+        ckc_value_t* i_col_c = ckc_b_const_i32(b, (int64_t)k * BS * VEC);
+        ckc_value_t* i_col_m = ckc_b_mul(b, ctx->tid, ctx->c_vec);
+        ckc_value_t* i_col = ckc_b_add(b, i_col_c, i_col_m);
         /* g_off = b.add(gate_base, i_col) */
         ckc_value_t* g_off = ckc_b_add(b, ctx->gate_base, i_col);
         /* u_off = b.add(up_base, i_col) */

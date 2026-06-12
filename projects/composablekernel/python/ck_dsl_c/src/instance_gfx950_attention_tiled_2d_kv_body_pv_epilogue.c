@@ -220,10 +220,10 @@ void ckc_gfx950_attn2d_emit_pv_bucket(ckc_gfx950_attn2d_build_ctx_t* ctx,
         ckc_b_sync(b);
     }
 
-    /* The fp8 PV scale (Python line 1149: v_scale_p / 240.0). It is hoisted in
-     * the preloop peer; recompute it here for the native-fp8 PV path only. */
+    /* The fp8 PV scale (Python line 1149: v_scale_p / 240.0) is hoisted in the
+     * prologue (ctx->pv_fp8_scale_v) so its SSA id matches Python; reuse it. */
     if (ctx->FP8_MFMA_PV)
-        pv_fp8_scale = ckc_b_fdiv(b, ctx->v_scale_p, ckc_b_const_f32(b, 240.0));
+        pv_fp8_scale = ctx->pv_fp8_scale_v;
 
     /* ---- acc *= alpha, acc += P @ V ---- (Python 3219-3412) ---- */
     if (ctx->USE_MFMA_32X32)
@@ -402,9 +402,14 @@ void ckc_gfx950_attn2d_emit_pv_bucket(ckc_gfx950_attn2d_build_ctx_t* ctx,
                     {
                         /* native-fp8 PV stripe path (Python 3439-3507) */
                         ckc_value_t* stripe_const = ckc_b_const_i32(b, (int64_t)n);
-                        ckc_value_t* k_row_per_lane = ckc_b_add(
-                            b, ckc_b_mul(b, ctx->lane_rg_v, ckc_b_const_i32(b, 8)),
-                            ckc_b_div(b, ctx->lane_col_v, ckc_b_const_i32(b, 2)));
+                        /* Python: b.add(b.mul(lane_rg, 8), b.div(lane_col, 2))
+                         * creates the mul BEFORE the div (left-to-right). Bind in
+                         * order so C's right-to-left arg eval matches the SSA ids. */
+                        ckc_value_t* krpl_mul =
+                            ckc_b_mul(b, ctx->lane_rg_v, ckc_b_const_i32(b, 8));
+                        ckc_value_t* krpl_div =
+                            ckc_b_div(b, ctx->lane_col_v, ckc_b_const_i32(b, 2));
+                        ckc_value_t* k_row_per_lane = ckc_b_add(b, krpl_mul, krpl_div);
                         ckc_value_t* k_row_for_iter =
                             ckc_b_add(b, ckc_b_const_i32(b, (int64_t)(k * 32)), k_row_per_lane);
                         ckc_value_t* lo_idx[4];
@@ -508,8 +513,16 @@ void ckc_gfx950_attn2d_emit_pv_bucket(ckc_gfx950_attn2d_build_ctx_t* ctx,
                     ckc_value_t* B_v;
                     /* PV_FP8_MFMA with K=16 is unsupported (Python 3541-3542). */
                     assert(!ctx->FP8_MFMA_PV);
-                    p_off = ckc_b_add(b, ckc_b_const_i32(b, (int64_t)(k * 16)),
-                                      ckc_b_mul(b, ctx->lane_rg_v, ckc_b_const_i32(b, 4)));
+                    /* Python: b.add(b.const_i32(k*16), b.mul(lane_rg, const(4)))
+                     * evaluates the const(k*16) arg BEFORE the mul (left-to-right).
+                     * C arg-eval order is unspecified (typically right-to-left), so
+                     * bind both operands to temps in Python's order. */
+                    {
+                        ckc_value_t* p_off_c = ckc_b_const_i32(b, (int64_t)(k * 16));
+                        ckc_value_t* p_off_rg =
+                            ckc_b_mul(b, ctx->lane_rg_v, ckc_b_const_i32(b, 4));
+                        p_off = ckc_b_add(b, p_off_c, p_off_rg);
+                    }
                     row_lane = ckc_bound_transpose_lds_reader_row(b, ctx->pv_tr_reader, k * 16, 0);
                     ridx[0] = v_buf;
                     ridx[1] = row_lane;

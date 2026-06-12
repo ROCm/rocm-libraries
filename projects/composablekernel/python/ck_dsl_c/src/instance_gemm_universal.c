@@ -132,6 +132,732 @@ static int ckc_gemm_env_int(const char* name, int dflt)
     return (int)strtol(v, NULL, 10);
 }
 
+/* getenv string-equals helper, mirroring os.environ.get(name, dflt) == "1". */
+static int ckc_gemm_env_eq(const char* name, const char* dflt, const char* want)
+{
+    const char* v = getenv(name);
+    if (v == NULL || v[0] == '\0')
+    {
+        v = dflt;
+    }
+    return strcmp(v, want) == 0;
+}
+
+/* ===================================================================== *
+ *  ckc_build_wsp3_gemm -- C99 port of gemm_wsp3.py :: build_wsp3_gemm.
+ *
+ *  Warp-specialized producer/consumer 3-stage GEMM (gfx950-only, fp16-only).
+ *  Mirrors the Python emitter 1:1 so the LLVM .ll is byte-identical. The
+ *  routing point in ckc_build_universal_gemm forwards every pipeline=="wsp3"
+ *  spec here (the universal entry, the grouped/batched delegations).
+ * ===================================================================== */
+
+/* NUM_PRODUCER_WARPS default (gemm_wsp3.py module constant). */
+#define CKC_WSP3_NUM_PRODUCER_WARPS 2
+#define CKC_WSP3_MAX_ACCS CKC_GEMM_MAX_ACCS
+
+/* _pick_load_vec(elems_a, elems_b, threads). */
+static int ckc_wsp3_pick_load_vec(int elems_a, int elems_b, int threads)
+{
+    static const int cand[4] = {8, 4, 2, 1};
+    int i;
+    for (i = 0; i < 4; ++i)
+    {
+        int v = cand[i];
+        if (elems_a % (v * threads) == 0 && elems_b % (v * threads) == 0)
+        {
+            return v;
+        }
+    }
+    return 1;
+}
+
+/* Shared state captured by the three nested closures in gemm_wsp3.py
+ * (_producer_load, _producer_load_async, _consumer_mfma). Mirrors exactly the
+ * enclosing-function locals those closures reference. */
+typedef struct ckc_wsp3_ctx
+{
+    ckc_ir_builder_t* b;
+    const ckc_gemm_universal_spec_t* spec;
+    const ckc_mmaop_t* op;
+    const ckc_type_t* storage_dtype;
+    int block_m, block_n, block_k;
+    int load_vec, a_vecs, b_vecs;
+    int wtm, wtn, wtk;
+    int mfmas_m, mfmas_n, k_atoms;
+    int a_per_lane, b_per_lane;
+    int prod_threads;
+    int dtl_dwords, dtl_halves, dtl_bpl;
+    int a_passes, b_passes;
+    int sched;
+    /* SSA values */
+    ckc_value_t *c0, *c_lv, *c_kdv, *c_prod, *c_block_k;
+    ckc_value_t *tid, *lane;
+    ckc_value_t *block_m_off, *block_n_off, *K;
+    ckc_value_t *A_smem, *B_smem;
+    ckc_tensor_view_t *a_view, *b_view, *a_lds_view, *b_lds_view;
+    ckc_value_t *warp_m_off, *warp_n_off, *k_blk_kbase;
+    ckc_value_t *m_in_atom, *n_in_atom;
+    /* async-only */
+    ckc_value_t *a_rsrc, *b_rsrc, *a_lds0, *b_lds0, *zsoff, *warp_off, *c2;
+    ckc_value_t *c_chunks_per_row, *c_halves_per_chunk;
+} ckc_wsp3_ctx_t;
+
+/* _rc(vec_idx) -> (row, col). */
+static void ckc_wsp3_rc(ckc_wsp3_ctx_t* w, ckc_value_t* vec_idx, ckc_value_t** row,
+                        ckc_value_t** col)
+{
+    ckc_ir_builder_t* b = w->b;
+    *row = ckc_b_div(b, vec_idx, w->c_kdv);
+    *col = ckc_b_mul(b, ckc_b_mod(b, vec_idx, w->c_kdv), w->c_lv);
+}
+
+/* _producer_load(k_off, a_buf_row, b_buf_row): coalesced global->LDS for one
+ * K-tile (global->VGPR->LDS). */
+static void ckc_wsp3_producer_load(ckc_wsp3_ctx_t* w, ckc_value_t* k_off,
+                                   ckc_value_t* a_buf_row, ckc_value_t* b_buf_row)
+{
+    ckc_ir_builder_t* b = w->b;
+    ckc_tile_window_t a_gt, b_gt, a_lt, b_lt;
+    int e;
+    {
+        int a_glen[3] = {1, w->block_m, w->block_k};
+        int b_glen[3] = {1, w->block_n, w->block_k};
+        ckc_value_t* a_gorigin[3] = {w->c0, w->block_m_off, k_off};
+        ckc_value_t* b_gorigin[3] = {w->c0, w->block_n_off, k_off};
+        ckc_make_tile_window(&a_gt, w->a_view, a_glen, a_gorigin, 3);
+        ckc_make_tile_window(&b_gt, w->b_view, b_glen, b_gorigin, 3);
+        int a_llen[2] = {0, w->block_k}; /* depth*block_m filled below */
+        int b_llen[2] = {0, w->block_k};
+        a_llen[0] = w->a_lds_view->desc.shape[0];
+        b_llen[0] = w->b_lds_view->desc.shape[0];
+        ckc_value_t* a_lorigin[2] = {w->c0, w->c0};
+        ckc_value_t* b_lorigin[2] = {w->c0, w->c0};
+        ckc_make_tile_window(&a_lt, w->a_lds_view, a_llen, a_lorigin, 2);
+        ckc_make_tile_window(&b_lt, w->b_lds_view, b_llen, b_lorigin, 2);
+    }
+    for (e = 0; e < w->a_vecs; ++e)
+    {
+        ckc_value_t *row, *col, *val;
+        ckc_value_t* vi = ckc_b_add(b, ckc_b_mul(b, ckc_b_const_i32(b, e), w->c_prod), w->tid);
+        ckc_wsp3_rc(w, vi, &row, &col);
+        ckc_value_t* gidx[3] = {w->c0, row, col};
+        val = ckc_tile_window_load_vec(b, &a_gt, gidx, 3, w->load_vec);
+        ckc_value_t* lidx[2] = {ckc_b_add(b, a_buf_row, row), col};
+        ckc_tile_window_store_vec(b, &a_lt, lidx, 2, val, w->load_vec);
+    }
+    for (e = 0; e < w->b_vecs; ++e)
+    {
+        ckc_value_t *row, *col, *val;
+        ckc_value_t* vi = ckc_b_add(b, ckc_b_mul(b, ckc_b_const_i32(b, e), w->c_prod), w->tid);
+        ckc_wsp3_rc(w, vi, &row, &col);
+        ckc_value_t* gidx[3] = {w->c0, row, col};
+        val = ckc_tile_window_load_vec(b, &b_gt, gidx, 3, w->load_vec);
+        ckc_value_t* lidx[2] = {ckc_b_add(b, b_buf_row, row), col};
+        ckc_tile_window_store_vec(b, &b_lt, lidx, 2, val, w->load_vec);
+    }
+}
+
+/* _producer_load_async(k_off, a_buf, b_buf): direct-to-LDS async loads. */
+static void ckc_wsp3_producer_load_async(ckc_wsp3_ctx_t* w, ckc_value_t* k_off,
+                                         ckc_value_t* a_buf, ckc_value_t* b_buf)
+{
+    ckc_ir_builder_t* b = w->b;
+    int p;
+    ckc_value_t* a_base = ckc_b_smem_ptr_add(
+        b, ckc_b_smem_ptr_add(b, w->a_lds0, ckc_b_zext(b, a_buf, ckc_i64())), w->warp_off);
+    ckc_value_t* b_base = ckc_b_smem_ptr_add(
+        b, ckc_b_smem_ptr_add(b, w->b_lds0, ckc_b_zext(b, b_buf, ckc_i64())), w->warp_off);
+    for (p = 0; p < w->a_passes; ++p)
+    {
+        ckc_value_t* lds =
+            (p == 0) ? a_base
+                     : ckc_b_smem_ptr_add(
+                           b, a_base,
+                           ckc_b_zext(b,
+                                      ckc_b_const_i32(b, p * w->prod_threads * w->dtl_bpl),
+                                      ckc_i64()));
+        ckc_value_t* cidx = ckc_b_add(b, w->tid, ckc_b_const_i32(b, p * w->prod_threads));
+        ckc_value_t* row = ckc_b_div(b, cidx, w->c_chunks_per_row);
+        ckc_value_t* col =
+            ckc_b_mul(b, ckc_b_mod(b, cidx, w->c_chunks_per_row), w->c_halves_per_chunk);
+        ckc_value_t* off = ckc_b_add(b, ckc_b_mul(b, ckc_b_add(b, w->block_m_off, row), w->K),
+                                     ckc_b_add(b, k_off, col));
+        ckc_b_async_buffer_load_lds_addr(b, w->a_rsrc, lds, ckc_b_mul(b, off, w->c2), w->zsoff,
+                                         w->dtl_dwords, 2);
+    }
+    for (p = 0; p < w->b_passes; ++p)
+    {
+        ckc_value_t* lds =
+            (p == 0) ? b_base
+                     : ckc_b_smem_ptr_add(
+                           b, b_base,
+                           ckc_b_zext(b,
+                                      ckc_b_const_i32(b, p * w->prod_threads * w->dtl_bpl),
+                                      ckc_i64()));
+        ckc_value_t* cidx = ckc_b_add(b, w->tid, ckc_b_const_i32(b, p * w->prod_threads));
+        ckc_value_t* row = ckc_b_div(b, cidx, w->c_chunks_per_row);
+        ckc_value_t* col =
+            ckc_b_mul(b, ckc_b_mod(b, cidx, w->c_chunks_per_row), w->c_halves_per_chunk);
+        ckc_value_t* off = ckc_b_add(b, ckc_b_mul(b, ckc_b_add(b, w->block_n_off, row), w->K),
+                                     ckc_b_add(b, k_off, col));
+        ckc_b_async_buffer_load_lds_addr(b, w->b_rsrc, lds, ckc_b_mul(b, off, w->c2), w->zsoff,
+                                         w->dtl_dwords, 2);
+    }
+}
+
+/* _consumer_mfma(accs, a_buf_row, b_buf_row, out_new[num_accs]): one K-tile of
+ * MFMAs for this consumer warp. */
+static void ckc_wsp3_consumer_mfma(ckc_wsp3_ctx_t* w, ckc_value_t* const* accs,
+                                   ckc_value_t* a_buf_row, ckc_value_t* b_buf_row,
+                                   ckc_value_t** out_new)
+{
+    ckc_ir_builder_t* b = w->b;
+    int num_accs = w->mfmas_m * w->mfmas_n;
+    int kk, mi, ni, i;
+    ckc_value_t* a_base = ckc_b_add(b, a_buf_row, w->warp_m_off);
+    ckc_value_t* b_base = ckc_b_add(b, b_buf_row, w->warp_n_off);
+    for (i = 0; i < num_accs; ++i)
+    {
+        out_new[i] = accs[i];
+    }
+    for (kk = 0; kk < w->k_atoms; ++kk)
+    {
+        ckc_value_t* col_base = ckc_b_add(b, w->k_blk_kbase, ckc_b_const_i32(b, kk * w->wtk));
+        ckc_value_t* a_rows[CKC_WSP3_MAX_ACCS];
+        ckc_value_t* b_cols[CKC_WSP3_MAX_ACCS];
+        if (w->sched)
+        {
+            for (mi = 0; mi < w->mfmas_m; ++mi)
+                a_rows[mi] = NULL;
+            for (ni = 0; ni < w->mfmas_n; ++ni)
+                b_cols[ni] = NULL;
+            a_rows[0] = ckc_gemm_emit_smem_load(
+                b, w->A_smem,
+                ckc_b_add(b, a_base, ckc_b_add(b, ckc_b_const_i32(b, 0 * w->wtm), w->m_in_atom)),
+                col_base, w->a_per_lane, w->storage_dtype);
+            ckc_b_s_setprio(b, 1);
+            for (mi = 0; mi < w->mfmas_m; ++mi)
+            {
+                if (mi + 1 < w->mfmas_m)
+                {
+                    a_rows[mi + 1] = ckc_gemm_emit_smem_load(
+                        b, w->A_smem,
+                        ckc_b_add(b, a_base,
+                                  ckc_b_add(b, ckc_b_const_i32(b, (mi + 1) * w->wtm),
+                                            w->m_in_atom)),
+                        col_base, w->a_per_lane, w->storage_dtype);
+                }
+                for (ni = 0; ni < w->mfmas_n; ++ni)
+                {
+                    if (mi == 0)
+                    {
+                        b_cols[ni] = ckc_gemm_emit_smem_load(
+                            b, w->B_smem,
+                            ckc_b_add(b, b_base,
+                                      ckc_b_add(b, ckc_b_const_i32(b, ni * w->wtn),
+                                                w->n_in_atom)),
+                            col_base, w->b_per_lane, w->storage_dtype);
+                    }
+                    int flat = mi * w->mfmas_n + ni;
+                    out_new[flat] = ckc_gemm_emit_mma(b, w->op, a_rows[mi], b_cols[ni],
+                                                      out_new[flat]);
+                    ckc_b_sched_barrier(b, 0);
+                }
+            }
+            ckc_b_s_setprio(b, 0);
+        }
+        else
+        {
+            for (mi = 0; mi < w->mfmas_m; ++mi)
+            {
+                a_rows[mi] = ckc_gemm_emit_smem_load(
+                    b, w->A_smem,
+                    ckc_b_add(b, a_base,
+                              ckc_b_add(b, ckc_b_const_i32(b, mi * w->wtm), w->m_in_atom)),
+                    col_base, w->a_per_lane, w->storage_dtype);
+            }
+            for (ni = 0; ni < w->mfmas_n; ++ni)
+            {
+                b_cols[ni] = ckc_gemm_emit_smem_load(
+                    b, w->B_smem,
+                    ckc_b_add(b, b_base,
+                              ckc_b_add(b, ckc_b_const_i32(b, ni * w->wtn), w->n_in_atom)),
+                    col_base, w->b_per_lane, w->storage_dtype);
+            }
+            int flat = 0;
+            for (mi = 0; mi < w->mfmas_m; ++mi)
+            {
+                for (ni = 0; ni < w->mfmas_n; ++ni)
+                {
+                    out_new[flat] = ckc_gemm_emit_mma(b, w->op, a_rows[mi], b_cols[ni],
+                                                      out_new[flat]);
+                    flat += 1;
+                }
+            }
+        }
+    }
+}
+
+ckc_kernel_def_t* ckc_build_wsp3_gemm(ckc_ir_builder_t* b,
+                                      const ckc_gemm_universal_spec_t* spec,
+                                      const char* arch)
+{
+    const ckc_gemm_tile_spec_t* t;
+    const ckc_mmaop_t* op;
+    const ckc_archtarget_t* target;
+    const ckc_type_t* storage_dtype;
+    int a_per_lane, b_per_lane, c_per_lane;
+    int block_m, block_n, block_k;
+    int warp_m, warp_n, wtm, wtn, wtk;
+    int mfmas_m, mfmas_n, k_atoms;
+    int n_prod_warps, n_cons_warps, total_warps, wave, block_size, prod_threads;
+    int a_total, b_total, load_vec, a_vecs, b_vecs, kdv;
+    int depth, e, kk, mi, ni, p;
+    int sched, async_mode;
+    int DTL_DWORDS = 4, DTL_HALVES = 8, DTL_BPL = 16;
+    int async_ok, a_chunks, b_chunks, a_passes, b_passes, loads_per_tile;
+    int a_buf_bytes, b_buf_bytes, prologue_tiles, keep_vmcnt;
+
+    if (b == NULL || spec == NULL)
+    {
+        return NULL;
+    }
+    if (arch == NULL)
+    {
+        arch = "gfx950";
+    }
+    /* Python: gfx950-only; fp16 A/B only. */
+    if (strcmp(arch, "gfx950") != 0)
+    {
+        return NULL;
+    }
+    if (strcmp(spec->data.dtype_a, "fp16") != 0 || strcmp(spec->data.dtype_b, "fp16") != 0)
+    {
+        return NULL;
+    }
+
+    target = ckc_archtarget_from_gfx(arch);
+    op = ckc_gemm_resolve_mma_op(spec, arch, target);
+    if (op == NULL)
+    {
+        return NULL;
+    }
+    ckc_gemm_atom_frag_lengths(op, &a_per_lane, &b_per_lane, &c_per_lane);
+    storage_dtype = ckc_gemm_storage_dtype(b, spec);
+    if (storage_dtype == NULL)
+    {
+        return NULL;
+    }
+
+    t = &spec->tile;
+    block_m = t->tile_m;
+    block_n = t->tile_n;
+    block_k = t->tile_k;
+    warp_m = t->warp_m;
+    warp_n = t->warp_n;
+    wtm = t->warp_tile_m;
+    wtn = t->warp_tile_n;
+    wtk = t->warp_tile_k;
+    mfmas_m = (block_m / warp_m) / wtm;
+    mfmas_n = (block_n / warp_n) / wtn;
+    k_atoms = block_k / wtk;
+
+    n_prod_warps = ckc_gemm_env_int("CK_WSP3_PROD", CKC_WSP3_NUM_PRODUCER_WARPS);
+    n_cons_warps = warp_m * warp_n;
+    total_warps = n_prod_warps + n_cons_warps;
+    wave = spec->wave_size;
+    block_size = total_warps * wave;
+    prod_threads = n_prod_warps * wave;
+
+    a_total = block_m * block_k;
+    b_total = block_n * block_k;
+    load_vec = ckc_wsp3_pick_load_vec(a_total, b_total, prod_threads);
+    a_vecs = a_total / load_vec / prod_threads;
+    b_vecs = b_total / load_vec / prod_threads;
+    kdv = block_k / load_vec;
+
+    /* IRBuilder(spec.kernel_name()): set the kernel symbol. */
+    {
+        char uni_name[1024];
+        if (ckc_gemm_universal_kernel_name(spec, uni_name, sizeof(uni_name)) != CKC_OK)
+        {
+            ckc_i_set_err(b, CKC_ERR_VALUE, "build_wsp3_gemm: kernel_name() overflow");
+            return NULL;
+        }
+        b->kernel->name = ckc_arena_strdup(&b->arena, uni_name);
+        if (b->kernel->name == NULL)
+        {
+            ckc_i_set_err(b, CKC_ERR_OOM, "build_wsp3_gemm: kernel name OOM");
+            return NULL;
+        }
+    }
+    ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", block_size);
+    if (spec->trait.waves_per_eu_set)
+    {
+        ckc_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", spec->trait.waves_per_eu);
+    }
+
+    /* ---- params ---- */
+    ckc_value_t *A, *Bp, *C, *M, *N, *K;
+    {
+        ckc_param_opts_t opts;
+        const ckc_type_t* ptr_storage = ckc_ptr_type(b, storage_dtype, "global");
+        memset(&opts, 0, sizeof(opts));
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
+        opts.readonly_set = true;
+        opts.align = 16;
+        opts.align_set = true;
+        A = ckc_b_param(b, "A", ptr_storage, &opts);
+        Bp = ckc_b_param(b, "B", ptr_storage, &opts);
+        memset(&opts, 0, sizeof(opts));
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.writeonly = true;
+        opts.writeonly_set = true;
+        opts.align = 16;
+        opts.align_set = true;
+        C = ckc_b_param(b, "C", ptr_storage, &opts);
+        M = ckc_b_param(b, "M", ckc_i32(), NULL);
+        N = ckc_b_param(b, "N", ckc_i32(), NULL);
+        K = ckc_b_param(b, "K", ckc_i32(), NULL);
+    }
+    (void)M;
+    (void)N;
+
+    /* ---- constants ---- */
+    ckc_value_t* c0 = ckc_b_const_i32(b, 0);
+    ckc_value_t* c_wave = ckc_b_const_i32(b, wave);
+    ckc_value_t* c_block_k = ckc_b_const_i32(b, block_k);
+    ckc_value_t* c_block_m = ckc_b_const_i32(b, block_m);
+    ckc_value_t* c_block_n = ckc_b_const_i32(b, block_n);
+    ckc_value_t* c_prod = ckc_b_const_i32(b, prod_threads);
+    ckc_value_t* c_lv = ckc_b_const_i32(b, load_vec);
+    ckc_value_t* c_kdv = ckc_b_const_i32(b, kdv);
+    ckc_value_t* c_nprodw = ckc_b_const_i32(b, n_prod_warps);
+    ckc_value_t* c_warpn = ckc_b_const_i32(b, warp_n);
+
+    ckc_value_t* tid = ckc_b_thread_id_x(b);
+    ckc_value_t* warp_id = ckc_b_div(b, tid, c_wave);
+    ckc_value_t* lane = ckc_b_mod(b, tid, c_wave);
+    ckc_value_t* is_producer = ckc_b_cmp_lt(b, warp_id, c_nprodw);
+    ckc_value_t* is_consumer = ckc_b_cmp_ge(b, warp_id, c_nprodw);
+    ckc_value_t* cwarp = ckc_b_sub(b, warp_id, c_nprodw);
+    ckc_value_t* cwarp_m = ckc_b_div(b, cwarp, c_warpn);
+    ckc_value_t* cwarp_n = ckc_b_mod(b, cwarp, c_warpn);
+
+    /* Python evals b.block_id_*() BEFORE b.const_i32() (left-to-right call args);
+     * bind each to a temp so the C right-to-left arg eval matches SSA ids. */
+    ckc_value_t* bid_y = ckc_b_block_id_y(b);
+    ckc_value_t* block_m_off = ckc_b_mul(b, bid_y, ckc_b_const_i32(b, block_m));
+    ckc_value_t* bid_x = ckc_b_block_id_x(b);
+    ckc_value_t* block_n_off = ckc_b_mul(b, bid_x, ckc_b_const_i32(b, block_n));
+
+    depth = ckc_gemm_env_int("CK_WSP3_DEPTH", 2);
+    ckc_value_t* cD = ckc_b_const_i32(b, depth);
+
+    /* ---- LDS ring ---- */
+    ckc_value_t* A_smem;
+    ckc_value_t* B_smem;
+    {
+        int a_shape[2] = {depth * block_m, block_k};
+        int b_shape[2] = {depth * block_n, block_k};
+        A_smem = ckc_b_smem_alloc(b, storage_dtype, a_shape, 2, "A_smem");
+        B_smem = ckc_b_smem_alloc(b, storage_dtype, b_shape, 2, "B_smem");
+    }
+    ckc_tensor_view_t a_lds_view, b_lds_view, a_view, b_view;
+    {
+        int al_shape[2] = {depth * block_m, block_k};
+        int bl_shape[2] = {depth * block_n, block_k};
+        ckc_make_global_view(&a_lds_view, A_smem, al_shape, 2, storage_dtype, NULL);
+        a_lds_view.addr_space = CKC_ADDR_LDS;
+        ckc_make_global_view(&b_lds_view, B_smem, bl_shape, 2, storage_dtype, NULL);
+        b_lds_view.addr_space = CKC_ADDR_LDS;
+        int g_shape[3] = {1, 1, 1};
+        ckc_stride_t g_strides[3] = {
+            ckc_stride_imm(1), ckc_stride_value(K), ckc_stride_imm(1)};
+        ckc_make_global_view(&a_view, A, g_shape, 3, storage_dtype, g_strides);
+        ckc_make_global_view(&b_view, Bp, g_shape, 3, storage_dtype, g_strides);
+    }
+
+    /* ---- async DTL plumbing (Phase 3) ---- */
+    async_ok = (block_k % DTL_HALVES) == 0;
+    a_chunks = (block_m * block_k) / DTL_HALVES;
+    b_chunks = (block_n * block_k) / DTL_HALVES;
+    a_passes = (a_chunks + prod_threads - 1) / prod_threads;
+    b_passes = (b_chunks + prod_threads - 1) / prod_threads;
+    loads_per_tile = a_passes + b_passes;
+    a_buf_bytes = block_m * block_k * 2;
+    b_buf_bytes = block_n * block_k * 2;
+
+    ckc_value_t *c_chunks_per_row = NULL, *c_halves_per_chunk = NULL, *c2 = NULL;
+    ckc_value_t *a_rsrc = NULL, *b_rsrc = NULL, *a_lds0 = NULL, *b_lds0 = NULL;
+    ckc_value_t *zsoff = NULL, *warp_off = NULL;
+    if (async_ok)
+    {
+        ckc_value_t* big = ckc_b_const_i32(b, 0x7FFF0000);
+        c_chunks_per_row = ckc_b_const_i32(b, block_k / DTL_HALVES);
+        c_halves_per_chunk = ckc_b_const_i32(b, DTL_HALVES);
+        c2 = ckc_b_const_i32(b, 2);
+        a_rsrc = ckc_b_buffer_rsrc(b, A, big);
+        b_rsrc = ckc_b_buffer_rsrc(b, Bp, big);
+        a_lds0 = ckc_b_smem_addr_of(b, A_smem);
+        b_lds0 = ckc_b_smem_addr_of(b, B_smem);
+        zsoff = ckc_b_const_i32(b, 0);
+        warp_off =
+            ckc_b_zext(b, ckc_b_mul(b, warp_id, ckc_b_const_i32(b, wave * DTL_BPL)), ckc_i64());
+    }
+
+    ckc_value_t* m_in_atom = ckc_b_mod(b, lane, ckc_b_const_i32(b, wtm));
+    ckc_value_t* k_blk = ckc_b_div(b, lane, ckc_b_const_i32(b, wtm));
+    ckc_value_t* n_in_atom = ckc_b_mod(b, lane, ckc_b_const_i32(b, wtn));
+    ckc_value_t* warp_m_off = ckc_b_mul(b, cwarp_m, ckc_b_const_i32(b, mfmas_m * wtm));
+    ckc_value_t* warp_n_off = ckc_b_mul(b, cwarp_n, ckc_b_const_i32(b, mfmas_n * wtn));
+    ckc_value_t* k_blk_kbase = ckc_b_mul(b, k_blk, ckc_b_const_i32(b, a_per_lane));
+
+    sched = ckc_gemm_env_eq("CK_WSP3_SCHED", "1", "1");
+
+    int num_accs = mfmas_m * mfmas_n;
+
+    /* Populate the closure-capture context once. */
+    ckc_wsp3_ctx_t w;
+    memset(&w, 0, sizeof(w));
+    w.b = b;
+    w.spec = spec;
+    w.op = op;
+    w.storage_dtype = storage_dtype;
+    w.block_m = block_m;
+    w.block_n = block_n;
+    w.block_k = block_k;
+    w.load_vec = load_vec;
+    w.a_vecs = a_vecs;
+    w.b_vecs = b_vecs;
+    w.wtm = wtm;
+    w.wtn = wtn;
+    w.wtk = wtk;
+    w.mfmas_m = mfmas_m;
+    w.mfmas_n = mfmas_n;
+    w.k_atoms = k_atoms;
+    w.a_per_lane = a_per_lane;
+    w.b_per_lane = b_per_lane;
+    w.prod_threads = prod_threads;
+    w.dtl_dwords = DTL_DWORDS;
+    w.dtl_halves = DTL_HALVES;
+    w.dtl_bpl = DTL_BPL;
+    w.a_passes = a_passes;
+    w.b_passes = b_passes;
+    w.sched = sched;
+    w.c0 = c0;
+    w.c_lv = c_lv;
+    w.c_kdv = c_kdv;
+    w.c_prod = c_prod;
+    w.c_block_k = c_block_k;
+    w.tid = tid;
+    w.lane = lane;
+    w.block_m_off = block_m_off;
+    w.block_n_off = block_n_off;
+    w.K = K;
+    w.A_smem = A_smem;
+    w.B_smem = B_smem;
+    w.a_view = &a_view;
+    w.b_view = &b_view;
+    w.a_lds_view = &a_lds_view;
+    w.b_lds_view = &b_lds_view;
+    w.warp_m_off = warp_m_off;
+    w.warp_n_off = warp_n_off;
+    w.k_blk_kbase = k_blk_kbase;
+    w.m_in_atom = m_in_atom;
+    w.n_in_atom = n_in_atom;
+    w.a_rsrc = a_rsrc;
+    w.b_rsrc = b_rsrc;
+    w.a_lds0 = a_lds0;
+    w.b_lds0 = b_lds0;
+    w.zsoff = zsoff;
+    w.warp_off = warp_off;
+    w.c2 = c2;
+    w.c_chunks_per_row = c_chunks_per_row;
+    w.c_halves_per_chunk = c_halves_per_chunk;
+
+    /* depth==1 serialized path. */
+    if (depth == 1)
+    {
+        /* producer scf.if */
+        ckc_if_t pif = ckc_b_scf_if(b, is_producer);
+        ckc_b_region_enter(b, pif.then_region);
+        {
+            ckc_for_t pfor = ckc_b_scf_for(b, c0, K, c_block_k, "kp");
+            ckc_b_region_enter(b, pfor.body);
+            ckc_wsp3_producer_load(&w, pfor.iv, c0, c0);
+            ckc_b_sync(b);
+            ckc_b_sync(b);
+            ckc_b_region_leave(b);
+        }
+        ckc_b_region_leave(b);
+
+        /* consumer scf.if */
+        ckc_if_t cif = ckc_b_scf_if(b, is_consumer);
+        ckc_b_region_enter(b, cif.then_region);
+        {
+            ckc_iter_arg_t loop_args[CKC_WSP3_MAX_ACCS];
+            char namebuf[CKC_WSP3_MAX_ACCS][24];
+            int i;
+            /* Python: accs0 = [_emit_zero_acc_op(b, op) for _ in range(N)] --
+             * one DISTINCT zero-acc Value per accumulator. */
+            for (i = 0; i < num_accs; ++i)
+            {
+                snprintf(namebuf[i], sizeof(namebuf[i]), "acc%d", i);
+                loop_args[i].name = namebuf[i];
+                loop_args[i].init = ckc_gemm_emit_zero_acc_op(b, op);
+            }
+            ckc_for_t cfor = ckc_b_scf_for_iter(b, c0, K, c_block_k, loop_args, num_accs,
+                                                "kc", false, false);
+            ckc_b_region_enter(b, cfor.body);
+            {
+                ckc_value_t* new_accs[CKC_WSP3_MAX_ACCS];
+                ckc_b_sync(b);
+                ckc_wsp3_consumer_mfma(&w, cfor.iter_vars, c0, c0, new_accs);
+                ckc_b_sync(b);
+                ckc_b_scf_yield(b, new_accs, num_accs);
+            }
+            ckc_b_region_leave(b);
+
+            ckc_gemm_emit_epilogue_default(b, spec, op, cfor.op->results, num_accs, cwarp_m,
+                                           cwarp_n, lane, block_m_off, block_n_off, M, N, C,
+                                           c_per_lane, NULL, NULL, false);
+        }
+        ckc_b_region_leave(b);
+
+        ckc_b_ret(b);
+        return b->kernel;
+    }
+
+    /* depth>=2 ping-pong ring. */
+    async_mode = ckc_gemm_env_eq("CK_WSP3_ASYNC", "0", "1") && async_ok;
+    prologue_tiles = depth - 1;
+    keep_vmcnt = (depth - 2) * loads_per_tile;
+    if (ckc_gemm_env_eq("CK_WSP3_DRAIN", "", "1"))
+    {
+        keep_vmcnt = 0;
+    }
+
+    /* producer scf.if */
+    {
+        ckc_if_t pif = ckc_b_scf_if(b, is_producer);
+        ckc_b_region_enter(b, pif.then_region);
+        if (async_mode)
+        {
+            for (e = 0; e < prologue_tiles; ++e)
+            {
+                /* Python builds the 3 const args left-to-right. */
+                ckc_value_t* k_arg = ckc_b_const_i32(b, e * block_k);
+                ckc_value_t* a_arg = ckc_b_const_i32(b, e * a_buf_bytes);
+                ckc_value_t* b_arg = ckc_b_const_i32(b, e * b_buf_bytes);
+                ckc_wsp3_producer_load_async(&w, k_arg, a_arg, b_arg);
+            }
+        }
+        else
+        {
+            for (e = 0; e < prologue_tiles; ++e)
+            {
+                /* Python builds the 3 const args left-to-right. */
+                ckc_value_t* k_arg = ckc_b_const_i32(b, e * block_k);
+                ckc_value_t* a_arg = ckc_b_const_i32(b, e * block_m);
+                ckc_value_t* b_arg = ckc_b_const_i32(b, e * block_n);
+                ckc_wsp3_producer_load(&w, k_arg, a_arg, b_arg);
+            }
+        }
+        ckc_for_t pfor = ckc_b_scf_for(b, c0, K, c_block_k, "kp");
+        ckc_b_region_enter(b, pfor.body);
+        {
+            ckc_value_t* knext =
+                ckc_b_add(b, pfor.iv, ckc_b_const_i32(b, prologue_tiles * block_k));
+            if (async_mode)
+            {
+                ckc_b_s_waitcnt(b, keep_vmcnt, -1, -1);
+                ckc_b_s_barrier_bare(b);
+                ckc_if_t nif = ckc_b_scf_if(b, ckc_b_cmp_lt(b, knext, K));
+                ckc_b_region_enter(b, nif.then_region);
+                {
+                    ckc_value_t* tnext = ckc_b_div(b, knext, c_block_k);
+                    ckc_value_t* wbuf = ckc_b_mod(b, tnext, cD);
+                    /* Python evals the A buf-offset arg before the B one. */
+                    ckc_value_t* a_arg = ckc_b_mul(b, wbuf, ckc_b_const_i32(b, a_buf_bytes));
+                    ckc_value_t* b_arg = ckc_b_mul(b, wbuf, ckc_b_const_i32(b, b_buf_bytes));
+                    ckc_wsp3_producer_load_async(&w, knext, a_arg, b_arg);
+                }
+                ckc_b_region_leave(b);
+            }
+            else
+            {
+                ckc_b_sync(b);
+                ckc_if_t nif = ckc_b_scf_if(b, ckc_b_cmp_lt(b, knext, K));
+                ckc_b_region_enter(b, nif.then_region);
+                {
+                    ckc_value_t* tnext = ckc_b_div(b, knext, c_block_k);
+                    ckc_value_t* wbuf = ckc_b_mod(b, tnext, cD);
+                    /* Python evals the A buf-row arg before the B one. */
+                    ckc_value_t* a_arg = ckc_b_mul(b, wbuf, c_block_m);
+                    ckc_value_t* b_arg = ckc_b_mul(b, wbuf, c_block_n);
+                    ckc_wsp3_producer_load(&w, knext, a_arg, b_arg);
+                }
+                ckc_b_region_leave(b);
+            }
+        }
+        ckc_b_region_leave(b);
+        ckc_b_region_leave(b);
+    }
+
+    /* consumer scf.if */
+    {
+        ckc_if_t cif = ckc_b_scf_if(b, is_consumer);
+        ckc_b_region_enter(b, cif.then_region);
+        {
+            ckc_iter_arg_t loop_args[CKC_WSP3_MAX_ACCS];
+            char namebuf[CKC_WSP3_MAX_ACCS][24];
+            int i;
+            /* Python: one DISTINCT zero-acc Value per accumulator. */
+            for (i = 0; i < num_accs; ++i)
+            {
+                snprintf(namebuf[i], sizeof(namebuf[i]), "acc%d", i);
+                loop_args[i].name = namebuf[i];
+                loop_args[i].init = ckc_gemm_emit_zero_acc_op(b, op);
+            }
+            ckc_for_t cfor = ckc_b_scf_for_iter(b, c0, K, c_block_k, loop_args, num_accs,
+                                                "kc", false, false);
+            ckc_b_region_enter(b, cfor.body);
+            {
+                ckc_value_t* new_accs[CKC_WSP3_MAX_ACCS];
+                if (async_mode)
+                {
+                    ckc_b_s_barrier_bare(b);
+                }
+                else
+                {
+                    ckc_b_sync(b);
+                }
+                ckc_value_t* tcur = ckc_b_div(b, cfor.iv, c_block_k);
+                ckc_value_t* rbuf = ckc_b_mod(b, tcur, cD);
+                /* Python evals the A buf-row arg before the B one. */
+                ckc_value_t* a_row = ckc_b_mul(b, rbuf, c_block_m);
+                ckc_value_t* b_row = ckc_b_mul(b, rbuf, c_block_n);
+                ckc_wsp3_consumer_mfma(&w, cfor.iter_vars, a_row, b_row, new_accs);
+                ckc_b_scf_yield(b, new_accs, num_accs);
+            }
+            ckc_b_region_leave(b);
+
+            ckc_gemm_emit_epilogue_default(b, spec, op, cfor.op->results, num_accs, cwarp_m,
+                                           cwarp_n, lane, block_m_off, block_n_off, M, N, C,
+                                           c_per_lane, NULL, NULL, false);
+        }
+        ckc_b_region_leave(b);
+    }
+
+    ckc_b_ret(b);
+    return b->kernel;
+}
+
 /* ===================================================================== *
  *  ckc_build_universal_gemm -- THE DRIVER
  *
@@ -161,13 +887,7 @@ ckc_kernel_def_t* ckc_build_universal_gemm(ckc_ir_builder_t* b,
      * emitter is a peer module; route to it here for parity. */
     if (spec->trait.pipeline != NULL && strcmp(spec->trait.pipeline, "wsp3") == 0)
     {
-        /* TODO(port): build_wsp3_gemm(spec, arch). Not in this chunk's scope;
-         * once the wsp3 C emitter exists, forward to it. For now signal the
-         * unported path through the builder error so callers see it. */
-        ckc_attr_map_t dummy;
-        ckc_attr_map_init(&dummy);
-        (void)dummy;
-        return NULL;
+        return ckc_build_wsp3_gemm(b, spec, arch);
     }
 
     /* is_valid_spec(spec, arch). Python raises ValueError on reject. */

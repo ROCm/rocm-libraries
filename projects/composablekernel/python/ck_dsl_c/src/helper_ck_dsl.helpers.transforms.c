@@ -1335,3 +1335,130 @@ bool ckc_transforms_descriptor_offset(ckc_ir_builder_t* b,
     }
     return true;
 }
+
+/* Faithful port of TensorDescriptor.offset_i64_split (transforms.py 1463-1505).
+ * Returns (base_i64, within_i32, valid): the base_coord term computed in i64
+ * (scalarised via to_sgpr_u32 before widening) and all other base terms summed
+ * as a small i32 within-block offset. */
+bool ckc_transforms_descriptor_offset_i64_split(ckc_ir_builder_t* b,
+                                                const ckc_tensor_descriptor_t* desc,
+                                                const char* base_coord,
+                                                const char* const* in_names,
+                                                ckc_value_t* const* in_values,
+                                                int n_in,
+                                                ckc_value_t** out_base_i64,
+                                                ckc_value_t** out_within,
+                                                ckc_value_t** out_valid)
+{
+    ckc_i_coord_map_t coords;
+    int cap;
+    int i;
+    int r;
+    ckc_value_t* base_i64 = NULL;
+    ckc_value_t* within   = NULL;
+    ckc_value_t* valid    = NULL;
+
+    if (!ckc_i_live(b))
+    {
+        return false;
+    }
+
+    for (i = 0; i < desc->n_upper; ++i)
+    {
+        if (!ckc_i_name_in(in_names, n_in, desc->upper_names[i]))
+        {
+            ckc_i_set_err(b,
+                          CKC_ERR_VALUE,
+                          "offset_i64_split() missing upper coords for descriptor %s: %s",
+                          desc->name ? desc->name : "",
+                          desc->upper_names[i]);
+            return false;
+        }
+    }
+
+    cap = n_in;
+    for (i = 0; i < desc->n_chain; ++i)
+    {
+        cap += desc->chain[i]->n_lower;
+    }
+    if (!ckc_i_map_init(b, &coords, cap > 0 ? cap : 1))
+    {
+        return false;
+    }
+    for (i = 0; i < n_in; ++i)
+    {
+        ckc_coord_var_t cv;
+        cv.name  = in_names[i];
+        cv.value = in_values[i];
+        cv.valid = NULL;
+        if (!ckc_i_map_set(b, &coords, cv))
+        {
+            return false;
+        }
+    }
+
+    r = ckc_i_run_chain(b, desc, &coords, /*require_all=*/true);
+    if (r < 0)
+    {
+        return false;
+    }
+
+    for (i = 0; i < desc->n_base; ++i)
+    {
+        const char* name = desc->base_names[i];
+        int stride       = desc->base_strides[i];
+        const ckc_coord_var_t* c = ckc_i_map_get(&coords, name);
+        if (c == NULL)
+        {
+            ckc_i_set_err(b,
+                          CKC_ERR_VALUE,
+                          "after chain, base coord %s not present",
+                          name);
+            return false;
+        }
+        valid = ckc_i_and(b, valid, c->valid);
+        if (strcmp(name, base_coord) == 0)
+        {
+            /* i64 term: pin the wave-uniform block id to an SGPR before widening
+             * (Python b.mul(b.zext(b.to_sgpr_u32(c.value), I64), const_i64(stride))).
+             * Bind the zext to a temp so C's right-to-left arg eval does not create
+             * the const_i64 ahead of the zext and shift the SSA ids. */
+            ckc_value_t* base_val = ckc_b_to_sgpr_u32(b, c->value);
+            ckc_value_t* base_w   = ckc_b_zext(b, base_val, ckc_i64());
+            base_i64 = ckc_b_mul(b, base_w, ckc_b_const_i64(b, (int64_t)stride));
+        }
+        else
+        {
+            ckc_value_t* term =
+                (stride == 1) ? c->value
+                              : ckc_b_mul(b, c->value, ckc_b_const_i32(b, (int64_t)stride));
+            within = (within == NULL) ? term : ckc_b_add(b, within, term);
+        }
+    }
+    if (base_i64 == NULL)
+    {
+        ckc_i_set_err(b,
+                      CKC_ERR_VALUE,
+                      "offset_i64_split: base_coord %s not among base coords",
+                      base_coord);
+        return false;
+    }
+    if (within == NULL)
+    {
+        within = ckc_b_const_i32(b, 0);
+    }
+
+    if (out_base_i64 != NULL)
+    {
+        *out_base_i64 = base_i64;
+    }
+    if (out_within != NULL)
+    {
+        *out_within = within;
+    }
+    if (out_valid != NULL)
+    {
+        *out_valid = valid;
+    }
+    return true;
+}

@@ -249,6 +249,10 @@ typedef struct ckc_gfx942_attn2d_build_ctx
      * shadows the prologue lane_col32 for the rest of the function. The
      * transposed QK reads THIS value (not the prologue one) for k_row_t. */
     ckc_value_t* lane_col32_q32_v;
+    /* The Q32 gather also RE-EMITS lane_half = lane//32 (Python gfx950 line
+     * 3503); the non-transposed 32x32 QK reads THIS value for the K column
+     * offset. Cache so the QK/softmax TU reuses the same SSA. */
+    ckc_value_t* lane_half32_q32_v;
     /* Transposed PV: Python emits v_buf = const_i32(0) + use_hi = cmp_eq(
      * lane_half32, 1) ONCE before the acc-scaling loop (gfx950 3231-3232), then
      * _apply_transposed_pv_regs reuses them. Cache here so the C PV bucket emits

@@ -767,6 +767,10 @@ static bool ckc_g950_build_ctx_init_local(ckc_gfx950_attn2d_build_ctx_t* ctx,
             qk_scale = ckc_b_fmul(b, qk_scale, ctx->k_scale_p);
         ctx->qk_scale_v = qk_scale;
     }
+    /* pv_fp8_scale = fdiv(v_scale, 240.0) when FP8_MFMA_PV (line 1149). Hoisted
+     * here so the SSA id matches Python; the PV epilogue reuses this value. */
+    ctx->pv_fp8_scale_v =
+        FP8_MFMA_PV ? ckc_b_fdiv(b, ctx->v_scale_p, ckc_b_const_f32(b, 240.0)) : NULL;
     ctx->sw_const_v = ckc_b_const_i32(b, SLIDING_WINDOW);    /* sw_const (1150) */
     ctx->c0         = ctx->sw_const_v;
 

@@ -288,20 +288,25 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
         int num_pid_m = (ckc_conv_problem_m(ctx->p) + ctx->block_m - 1) / ctx->block_m;
         int num_pid_n = (ckc_conv_problem_n_gemm(ctx->p) + ctx->block_n - 1) / ctx->block_n;
         ckc_value_t* c_num_pid_n = ckc_b_const_i32(b, num_pid_n);
-        ckc_value_t* wgid_flat =
-            ckc_b_add(b, ckc_b_mul(b, ckc_b_block_id_y(b), c_num_pid_n), ckc_b_block_id_x(b));
-        /* TODO(port): Python calls the compile-time chiplet_aware_super_tile;
-         * the C grid peer currently ports only the *_dynamic variant. Use the
-         * dynamic composition with const num_pid_m/n SSA so the remap is exact
-         * pending the compile-time port. */
+        /* wgid_flat = b.add(b.mul(b.block_id_y(), c_num_pid_n), b.block_id_x()).
+         * Python evaluates the add's first arg (b.mul(b.block_id_y(), ...)) fully
+         * before the second (b.block_id_x()): block_id_y -> mul -> block_id_x ->
+         * add. C arg eval order is unspecified, so pin it with temporaries. */
+        ckc_value_t* bid_y = ckc_b_block_id_y(b);
+        ckc_value_t* mul_y = ckc_b_mul(b, bid_y, c_num_pid_n);
+        ckc_value_t* bid_x = ckc_b_block_id_x(b);
+        ckc_value_t* wgid_flat = ckc_b_add(b, mul_y, bid_x);
+        /* Python calls the COMPILE-TIME chiplet_aware_super_tile (conv tile
+         * counts are derived from the static problem shape): limit and
+         * num_wgid_in_group are folded consts, not div/mul IR. */
         ckc_super_tile_swizzle_result_t swz =
-            ckc_chiplet_aware_super_tile_dynamic(b,
-                                                 wgid_flat,
-                                                 ckc_b_const_i32(b, num_pid_m),
-                                                 c_num_pid_n,
-                                                 spec->chiplet_wgm,
-                                                 spec->chiplet_num_xcds,
-                                                 spec->chiplet_chunk_size);
+            ckc_chiplet_aware_super_tile(b,
+                                         wgid_flat,
+                                         num_pid_m,
+                                         num_pid_n,
+                                         spec->chiplet_wgm,
+                                         spec->chiplet_num_xcds,
+                                         spec->chiplet_chunk_size);
         ctx->block_m_off_v = ckc_b_mul(b, swz.row, ckc_b_const_i32(b, ctx->block_m));
         ctx->block_n_off_v = ckc_b_mul(b, swz.col, ckc_b_const_i32(b, ctx->block_n));
         /* grid = dc_replace(grid, block_m_off=..., block_n_off=...) so the

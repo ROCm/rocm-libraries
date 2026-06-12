@@ -647,8 +647,11 @@ void ckc_gfx950_attn2d_issue_v_fp8_mfma_stripe(ckc_gfx950_attn2d_build_ctx_t* ct
         ckc_value_t* chunk_id = ckc_b_add(
             b, ckc_b_mul(b, ckc_b_const_i32(b, call), ckc_b_const_i32(b, ctx->THREADS)), ctx->tid);
         ckc_value_t* token = ckc_b_div(b, chunk_id, ckc_b_const_i32(b, cols_per_row));
-        ckc_value_t* col   = ckc_b_mul(
-            b, ckc_b_mod(b, chunk_id, ckc_b_const_i32(b, cols_per_row)), ckc_b_const_i32(b, CHUNK));
+        /* Python: col = mul(mod(chunk_id, const(cols_per_row)), const(CHUNK))
+         * creates the mod BEFORE const(CHUNK) (left-to-right); bind the mod so
+         * C's right-to-left arg eval does not allocate const(CHUNK) first. */
+        ckc_value_t* col_mod = ckc_b_mod(b, chunk_id, ckc_b_const_i32(b, cols_per_row));
+        ckc_value_t* col     = ckc_b_mul(b, col_mod, ckc_b_const_i32(b, CHUNK));
         ckc_value_t* linear_first =
             ckc_b_add(b, ckc_b_mul(b, token, ckc_b_const_i32(b, ctx->HD)), col);
         ckc_value_t* voff = ckc_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_first, NULL);

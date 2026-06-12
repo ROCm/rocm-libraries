@@ -181,22 +181,34 @@ ckc_kernel_def_t* ckc_gfx942_attn2d_emit_epilogue(ckc_gfx942_attn2d_build_ctx_t*
         ckc_value_t* tid                   = ctx->tid;
         ckc_value_t* OUT_ROW_BASE32 =
             ckc_b_div(b, tid, ckc_b_const_i32(b, OUT_THREADS_PER_ROW32));
+        /* Python emits mod(tid, OUT_THREADS_PER_ROW32) BEFORE the trailing const
+         * (left-to-right); bind the mod first so C's right-to-left arg eval does
+         * not allocate the const ahead of it and shift the %value. */
+        ckc_value_t* OUT_col_mod32 =
+            ckc_b_mod(b, tid, ckc_b_const_i32(b, OUT_THREADS_PER_ROW32));
         ckc_value_t* OUT_col_base32 = ckc_b_mul(
-            b,
-            ckc_b_mod(b, tid, ckc_b_const_i32(b, OUT_THREADS_PER_ROW32)),
+            b, OUT_col_mod32,
             ckc_b_const_i32(b, OUT_CHUNKS_PER_THREAD32 * OUT_VEC32));
         ckc_value_t* op_pos32_base = ckc_b_add(
             b, qb_start_pos, ckc_b_div(b, OUT_ROW_BASE32, ckc_b_const_i32(b, NQK)));
-        ckc_value_t* op_qh32_base = ckc_b_add(
-            b,
-            ckc_b_mul(b, kv_head_idx, ckc_b_const_i32(b, NQK)),
-            ckc_b_mod(b, OUT_ROW_BASE32, ckc_b_const_i32(b, NQK)));
-        ckc_value_t* op_mask32_base = ckc_b_land(
-            b,
-            ckc_b_cmp_lt(b, op_pos32_base, cur_batch_q_len),
-            ckc_b_cmp_lt(b, op_qh32_base, ckc_b_const_i32(b, NUM_QH)));
+        /* Python emits mul(kv_head,NQK) BEFORE mod(OUT_ROW_BASE,NQK) (left-to-
+         * right); bind each so C's right-to-left arg eval keeps the ordering. */
+        ckc_value_t* op_qh32_mul =
+            ckc_b_mul(b, kv_head_idx, ckc_b_const_i32(b, NQK));
+        ckc_value_t* op_qh32_mod =
+            ckc_b_mod(b, OUT_ROW_BASE32, ckc_b_const_i32(b, NQK));
+        ckc_value_t* op_qh32_base = ckc_b_add(b, op_qh32_mul, op_qh32_mod);
+        /* Python emits the pos cmp BEFORE the qh cmp; bind in order. */
+        ckc_value_t* op_ok_pos32 =
+            ckc_b_cmp_lt(b, op_pos32_base, cur_batch_q_len);
+        ckc_value_t* op_ok_qh32 =
+            ckc_b_cmp_lt(b, op_qh32_base, ckc_b_const_i32(b, NUM_QH));
+        ckc_value_t* op_mask32_base = ckc_b_land(b, op_ok_pos32, op_ok_qh32);
+        /* Python emits the token add (cu_q_start + op_pos32_base) BEFORE the dim
+         * const(0); bind in order so C's right-to-left arg eval keeps numbering. */
+        ckc_value_t* out_token32 = ckc_b_add(b, cu_q_start, op_pos32_base);
         ckc_value_t* out_base32_base = epilogue_q_desc_offset(
-            ctx, ckc_b_add(b, cu_q_start, op_pos32_base), op_qh32_base, ckc_b_const_i32(b, 0));
+            ctx, out_token32, op_qh32_base, ckc_b_const_i32(b, 0));
 
         for (n = 0; n < ACC_N_TILES; ++n)
         {
@@ -205,7 +217,11 @@ ckc_kernel_def_t* ckc_gfx942_attn2d_emit_epilogue(ckc_gfx942_attn2d_build_ctx_t*
             {
                 ckc_value_t* row =
                     ckc_b_add(b, wave_row_base, ckc__mfma_32x32_c_row(b, lane, reg));
-                ckc_value_t* col_in_stripe = lane_col32;
+                /* Python's lane_col32 here is the Q32-gather-reassigned value
+                 * (gfx950 3504 shadows the prologue one for the whole function). */
+                ckc_value_t* col_in_stripe = (ctx->lane_col32_q32_v != NULL)
+                                                 ? ctx->lane_col32_q32_v
+                                                 : lane_col32;
                 ckc_value_t* v             = ckc_b_vec_extract(b, acc32, reg);
                 ckc_value_t* normalized    = ckc_b_fmul(b, v, ctx->rcp_l[reg]);
                 ckc_value_t* final_h       = ckc_b_cast_f32_to(

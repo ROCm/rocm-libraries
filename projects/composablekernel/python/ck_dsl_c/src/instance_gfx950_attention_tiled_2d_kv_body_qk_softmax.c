@@ -267,6 +267,41 @@ void ckc_gfx950_attn2d_emit_licm_hoist(ckc_gfx950_attn2d_build_ctx_t* ctx)
             ctx->hoist_q_head[reg] = slope;
         }
     }
+
+    /* Transposed-32x32 invariant hoist (Python 2446-2480): compute the per-lane
+     * st_q_row/st_qp/st_qh/st_row_ok/st_causal_lim once before the KV loop. */
+    ctx->st_qp_hoist = NULL;
+    ctx->st_qh_hoist = NULL;
+    ctx->st_row_ok_hoist = NULL;
+    ctx->st_causal_lim_hoist = NULL;
+    ctx->st_alibi_slope_hoist = NULL;
+    if (ctx->USE_MFMA_32X32 && ctx->TRANSPOSED_QK_32X32 && ctx->TRANSPOSED_INVARIANT_HOIST)
+    {
+        ckc_value_t* st_q_row =
+            ckc_b_add(b, ctx->wave_row_base, fh_c32_col(ctx, 0));
+        ckc_value_t* st_qp = ckc_b_add(
+            b, ctx->qb_start_pos,
+            ckc_b_div(b, st_q_row, ckc_b_const_i32(b, ctx->NQK)));
+        ckc_value_t* st_qh_mul =
+            ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, ctx->NQK));
+        ckc_value_t* st_qh_mod = ckc_b_mod(b, st_q_row, ckc_b_const_i32(b, ctx->NQK));
+        ckc_value_t* st_qh = ckc_b_add(b, st_qh_mul, st_qh_mod);
+        ckc_value_t* st_ok_qp = ckc_b_cmp_lt(b, st_qp, ctx->cur_batch_q_len);
+        ckc_value_t* st_ok_qh =
+            ckc_b_cmp_lt(b, st_qh, ckc_b_const_i32(b, ctx->NUM_QH));
+        ctx->st_qp_hoist = st_qp;
+        ctx->st_qh_hoist = st_qh;
+        ctx->st_row_ok_hoist = ckc_b_land(b, st_ok_qp, st_ok_qh);
+        ctx->st_causal_lim_hoist = ckc_b_add(b, ctx->context_len, st_qp);
+        if (ctx->USE_ALIBI)
+        {
+            ckc_value_t* st_qh_ok =
+                ckc_b_cmp_lt(b, st_qh, ckc_b_const_i32(b, ctx->NUM_QH));
+            ctx->st_alibi_slope_hoist = ckc_b_masked_global_load(
+                b, ctx->alibi_slopes_ptr, st_qh, st_qh_ok,
+                ckc_b_const_f32(b, 0.0), ckc_f32(), 4);
+        }
+    }
 }
 
 /* ===================================================================== *
@@ -401,6 +436,12 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
 {
     ckc_ir_builder_t* b = ctx->b;
 
+    /* REGISTER_PV: P kept in registers, flattened [reg][n] (stride QK_N_TILES)
+     * to hand to the PV bucket (Python p_regs_f32[reg][n]). Function-scope so
+     * it outlives the softmax sub-block where it is filled. */
+    static ckc_value_t* p_regs_f32_buf[CKC_GFX950_ATTN2D_MAX_REGS_PER_LANE
+                                       * CKC_GFX950_ATTN2D_MAX_N_TILES];
+
     /* ---- recompute the prologue-derived invariants this half needs ---- */
     ckc_value_t* neg_inf = fh_neg_inf(ctx);
     ckc_value_t* rcp_ln2 = fh_rcp_ln2(ctx);
@@ -503,6 +544,16 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
     ckc_b_s_waitcnt(b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);
     ckc_b_sync(b);
 
+    /* Early-V schedule: V_lds is single-buffered and the iter-start full drain
+     * guarantees the previous PV's V reads retired, so the current V copy can be
+     * issued before QK to overlap with QK + softmax (Python 2566-2570). */
+    if (ctx->EARLY_V_SCHEDULE)
+        ckc_gfx950_attn2d_issue_v(ctx, ctx->kv_tile_iv, ctx->cur_buf);
+    /* GROUPED_KV2: prefetch the second K tile into nxt_buf while QK0 reads
+     * cur_buf (Python 2571-2575). */
+    if (ctx->GROUPED_KV2)
+        ckc_gfx950_attn2d_issue_k(ctx, safe_tile1, ctx->nxt_buf_v);
+
     /* ============================================================ *
      *  S = Q @ K^T
      * ============================================================ */
@@ -540,9 +591,12 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
                     ckc_b_add(b, ckc_b_const_i32(b, n * 32), lane_col32);
                 for (int k = 0; k < QK_K_ITERS; ++k)
                 {
+                    /* Python: b.add(const(k*16), b.mul(lane_half, 8)) creates the
+                     * const(k*16) BEFORE the mul (left-to-right); bind it so C's
+                     * arg eval order matches the SSA ids. */
+                    ckc_value_t* k_off_base = ckc_b_const_i32(b, k * 16);
                     ckc_value_t* k_off_t = ckc_b_add(
-                        b, ckc_b_const_i32(b, k * 16),
-                        ckc_b_mul(b, lane_half, ckc_b_const_i32(b, 8)));
+                        b, k_off_base, ckc_b_mul(b, lane_half, ckc_b_const_i32(b, 8)));
                     ckc_value_t* A_k_t = fh_read_k8_mfma_operand(
                         ctx, ctx->nxt_buf_v, k_row_t, k_off_t);
                     ckc_value_t* B_q_t = ctx->q32_regs[k];
@@ -576,7 +630,16 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
                     ckc_value_t* causal_ok;
                     ckc_value_t* in_prefix;
                     ckc_value_t* m_ok;
-                    if (ctx->TRANSPOSED_MASK_ONCE)
+                    if (ctx->TRANSPOSED_INVARIANT_HOIST)
+                    {
+                        /* invariant-hoist: row_ok / causal_lim hoisted pre-loop
+                         * (Python 2776-2779). */
+                        qp_r = ctx->st_qp_hoist;
+                        row_ok = ctx->st_row_ok_hoist;
+                        causal_lim = ctx->st_causal_lim_hoist;
+                        col_abs = ckc_b_add(b, group_tile_off, k_local);
+                    }
+                    else if (ctx->TRANSPOSED_MASK_ONCE)
                     {
                         /* mask-once: row_ok / causal_lim hoisted per-iter. */
                         qp_r = st_qp_iter;
@@ -639,9 +702,13 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
                     if (ctx->USE_QQ_BIAS)
                     {
                         ckc_value_t* krp = ckc_b_sub(b, col_abs, ctx->context_len);
-                        ckc_value_t* krp_ok = ckc_b_land(
-                            b, ckc_b_cmp_ge(b, krp, ckc_b_const_i32(b, 0)),
-                            ckc_b_cmp_lt(b, krp, ctx->qq_bias_stride0_p));
+                        /* Python: b.land(b.cmp_ge(...), b.cmp_lt(...)) emits the
+                         * cmp_ge BEFORE the cmp_lt (left-to-right). Bind each in
+                         * Python order so C's right-to-left arg eval does not swap
+                         * the two compare SSA ids. */
+                        ckc_value_t* krp_ge = ckc_b_cmp_ge(b, krp, ckc_b_const_i32(b, 0));
+                        ckc_value_t* krp_lt = ckc_b_cmp_lt(b, krp, ctx->qq_bias_stride0_p);
+                        ckc_value_t* krp_ok = ckc_b_land(b, krp_ge, krp_lt);
                         ckc_value_t* qq_ok = ckc_b_land(b, row_ok, krp_ok);
                         ckc_value_t* qp_safe = ckc_b_select(
                             b, row_ok, qp_r, ckc_b_const_i32(b, 0));
@@ -813,9 +880,11 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
                 if (ctx->USE_QQ_BIAS)
                 {
                     ckc_value_t* krp = ckc_b_sub(b, col_abs, ctx->context_len);
-                    ckc_value_t* krp_ok = ckc_b_land(
-                        b, ckc_b_cmp_ge(b, krp, ckc_b_const_i32(b, 0)),
-                        ckc_b_cmp_lt(b, krp, ctx->qq_bias_stride0_p));
+                    /* Python emits cmp_ge before cmp_lt (left-to-right); bind in
+                     * order so C's arg eval does not swap the compare SSA ids. */
+                    ckc_value_t* krp_ge = ckc_b_cmp_ge(b, krp, ckc_b_const_i32(b, 0));
+                    ckc_value_t* krp_lt = ckc_b_cmp_lt(b, krp, ctx->qq_bias_stride0_p);
+                    ckc_value_t* krp_ok = ckc_b_land(b, krp_ge, krp_lt);
                     ckc_value_t* qq_ok = ckc_b_land(b, row_ok, krp_ok);
                     ckc_value_t* qp_safe =
                         ckc_b_select(b, row_ok, qp_r, ckc_b_const_i32(b, 0));
@@ -994,9 +1063,11 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
                 if (ctx->USE_QQ_BIAS)
                 {
                     ckc_value_t* krp = ckc_b_sub(b, col_abs, ctx->context_len);
-                    ckc_value_t* krp_ok = ckc_b_land(
-                        b, ckc_b_cmp_ge(b, krp, ckc_b_const_i32(b, 0)),
-                        ckc_b_cmp_lt(b, krp, ctx->qq_bias_stride0_p));
+                    /* Python emits cmp_ge before cmp_lt (left-to-right); bind in
+                     * order so C's arg eval does not swap the compare SSA ids. */
+                    ckc_value_t* krp_ge = ckc_b_cmp_ge(b, krp, ckc_b_const_i32(b, 0));
+                    ckc_value_t* krp_lt = ckc_b_cmp_lt(b, krp, ctx->qq_bias_stride0_p);
+                    ckc_value_t* krp_ok = ckc_b_land(b, krp_ge, krp_lt);
                     ckc_value_t* qq_ok = ckc_b_land(b, row_ok, krp_ok);
                     ckc_value_t* qp_safe =
                         ckc_b_select(b, row_ok, qp_r, ckc_b_const_i32(b, 0));
@@ -1039,6 +1110,8 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
             {
                 ckc_value_t* p =
                     ckc_b_exp2(b, ckc_b_fsub(b, s_local[reg][n], m_new[reg]));
+                if (ctx->REGISTER_PV)
+                    p_regs_f32_buf[reg * QK_N_TILES + n] = p;
                 if (!ctx->REGISTER_PV)
                 {
                     ckc_value_t* row = (ctx->hoist_in_warp_row[reg] != NULL)
@@ -1091,6 +1164,11 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
         pv_in.alpha_count = SOFTMAX_STATE_SLOTS;
         pv_in.new_l_vals = new_l_vals;
         pv_in.m_new = m_new_out;
+        if (ctx->REGISTER_PV)
+        {
+            pv_in.p_regs_f32 = p_regs_f32_buf;
+            pv_in.p_regs_f32_stride = QK_N_TILES;
+        }
         if (transposed_path)
         {
             pv_in.pt32_g0 = pt32_g0;

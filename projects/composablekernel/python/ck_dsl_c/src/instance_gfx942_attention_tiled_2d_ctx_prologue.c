@@ -754,9 +754,11 @@ ckc_value_t* ckc_gfx942_attn2d_state_row(ckc_gfx942_attn2d_build_ctx_t* ctx, int
 
 ckc_value_t* ckc_gfx942_attn2d_bit2(ckc_gfx942_attn2d_build_ctx_t* ctx, ckc_value_t* v, int bit)
 {
-    return ckc_b_land(ctx->b,
-                      ckc_b_lshr(ctx->b, v, ckc_b_const_i32(ctx->b, bit)),
-                      ckc_b_const_i32(ctx->b, 1));
+    /* Python: land(lshr(v, const(bit)), const(1)) emits the lshr BEFORE the
+     * trailing const(1) (left-to-right). Bind the lshr first so C's right-to-
+     * left arg eval does not allocate const(1) ahead of it and shift numbering. */
+    ckc_value_t* shifted = ckc_b_lshr(ctx->b, v, ckc_b_const_i32(ctx->b, bit));
+    return ckc_b_land(ctx->b, shifted, ckc_b_const_i32(ctx->b, 1));
 }
 
 ckc_value_t* ckc_gfx942_attn2d_select_lane_rg(ckc_gfx942_attn2d_build_ctx_t* ctx,
@@ -818,8 +820,15 @@ void ckc_gfx942_attn2d_permute_p_c_to_a16(ckc_gfx942_attn2d_build_ctx_t* ctx,
 {
     ckc_ir_builder_t* b = ctx->b;
     ckc_value_t* lane_col     = ckc_a2d_lane_col(ctx);             /* lane % 16     */
-    ckc_value_t* lane_col_mod4 = ckc_b_mod(b, lane_col, ckc_b_const_i32(b, 4));
-    ckc_value_t* lane_col_div4 = ckc_b_div(b, lane_col, ckc_b_const_i32(b, 4));
+    /* Python uses the prologue-cached lane_col_mod4 / lane_col_div4 (one local
+     * each, gfx950 2018-2019); reuse the same SSA values instead of recomputing
+     * the mod/div here (which inserted two extra ops and shifted numbering). */
+    ckc_value_t* lane_col_mod4 = (ctx->lane_col_mod4_v != NULL)
+                                     ? ctx->lane_col_mod4_v
+                                     : ckc_b_mod(b, lane_col, ckc_b_const_i32(b, 4));
+    ckc_value_t* lane_col_div4 = (ctx->lane_col_div4_v != NULL)
+                                     ? ctx->lane_col_div4_v
+                                     : ckc_b_div(b, lane_col, ckc_b_const_i32(b, 4));
     ckc_value_t* lane_rg       = ckc_a2d_lane_rg(ctx);            /* lane / 16     */
 
     /* The transform is defined for a 4-element register quad. */

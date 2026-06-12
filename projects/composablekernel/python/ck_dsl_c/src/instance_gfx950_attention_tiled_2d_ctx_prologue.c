@@ -439,6 +439,11 @@ bool ckc_gfx950_attn2d_build_ctx_init(ckc_gfx950_attn2d_build_ctx_t* ctx,
     ctx->rcp_ln2_v = ckc_b_const_f32(b, 1.4426950408889634); /* rcp_ln2 (1135) */
     ctx->qk_scale_v = ckc_b_fmul(b, ctx->scale_p, ctx->rcp_ln2_v); /* qk_scale (1136) */
     /* FP8_NATIVE_QK is False -> no qk_scale *= k_scale fold (lines 1137-1143). */
+    /* pv_fp8_scale = fdiv(v_scale, 240.0) when FP8_MFMA_PV (line 1149). Computed
+     * here (between qk_scale and sw_const) so its SSA position matches Python; the
+     * PV epilogue reuses ctx->pv_fp8_scale_v instead of recomputing it. */
+    ctx->pv_fp8_scale_v =
+        ctx->FP8_MFMA_PV ? ckc_b_fdiv(b, ctx->v_scale_p, ckc_b_const_f32(b, 240.0)) : NULL;
 
     /* sw_const = const_i32(SLIDING_WINDOW). Created once in the constants block
      * and reused by the tile-bound + mask regions (peer phases). */
@@ -491,9 +496,12 @@ ckc_value_t* ckc_gfx950_attn2d_state_row(ckc_gfx950_attn2d_build_ctx_t* ctx, int
 
 ckc_value_t* ckc_gfx950_attn2d_bit2(ckc_gfx950_attn2d_build_ctx_t* ctx, ckc_value_t* v, int bit)
 {
-    return ckc_b_land(ctx->b,
-                      ckc_b_lshr(ctx->b, v, ckc_b_const_i32(ctx->b, bit)),
-                      ckc_b_const_i32(ctx->b, 1));
+    /* Python: b.land(b.lshr(v, const(bit)), b.const_i32(1)) creates the lshr
+     * (and its bit const) BEFORE the trailing const(1) (left-to-right). Bind the
+     * lshr to a temp so C's right-to-left arg eval does not allocate const(1)
+     * ahead of the lshr and shift the SSA ids. */
+    ckc_value_t* sh = ckc_b_lshr(ctx->b, v, ckc_b_const_i32(ctx->b, bit));
+    return ckc_b_land(ctx->b, sh, ckc_b_const_i32(ctx->b, 1));
 }
 
 ckc_value_t* ckc_gfx950_attn2d_select_lane_rg(ckc_gfx950_attn2d_build_ctx_t* ctx,

@@ -11,6 +11,8 @@
 #include "CkDslContext.hpp"
 #include "ck_dsl_runtime/c_engine.hpp"
 #include "ck_dsl_runtime/json.hpp"
+#include "ck_dsl_runtime/manifest.hpp"
+#include "ck_dsl_runtime/ml_heuristic.hpp"
 #include "ck_dsl_runtime/timing.hpp"
 #include "engines/CkDslAttnParamParser.hpp"
 
@@ -24,6 +26,38 @@ bool c_jit_enabled() {
         return v && (v[0] == '1' || v[0] == 't' || v[0] == 'T' || v[0] == 'y' || v[0] == 'Y');
     }();
     return on;
+}
+
+// Overlay the heuristic's chosen attention knobs (from the winning candidate's
+// manifest attention_config) onto an SDPA problem, replacing the scalar-path
+// defaults. Mirrors apply_gemm_knobs / apply_conv_knobs: only knobs the manifest
+// actually carries are applied (zero/blank fields keep the POD default), so a
+// sparse manifest never zeroes out a valid block size. The knob the scalar 2D
+// reference kernel consumes is the KV block size, carried by the manifest as
+// block_q (== block_size in attention_config); tile_size / num_warps are carried
+// for parity with the full FMHA knob space (consumed by the tiled kernel, not
+// the scalar reference) so the overlay faithfully mirrors the GEMM path.
+//
+// Knobs are read via the same FmhaKernelConfig::from_manifest the LGBM feature
+// extractor uses, so the config the heuristic RANKED on is exactly the config
+// applied to the JIT build (no second, divergent parse of the manifest).
+void apply_attn_knobs(ck_dsl::CEngine::SdpaProblem& prob, const ck_dsl::Manifest& m,
+                      const ck_dsl::Problem& problem) {
+    const auto& cfg = m.raw.has("attention_config") ? m.raw.at("attention_config") : m.raw;
+    // block_q / block_size: the scalar path's KV block-size tile knob.
+    int bq = static_cast<int>(cfg.get_int("block_q", 0));
+    if (bq <= 0) bq = static_cast<int>(cfg.get_int("block_size", 0));
+    if (bq > 0) prob.block_q = bq;
+    // tile_size / num_warps: full FMHA knob space (parity with apply_gemm_knobs;
+    // not consumed by the scalar lower, see SdpaProblem doc).
+    int ts = static_cast<int>(cfg.get_int("tile_size", 0));
+    if (ts > 0) prob.tile_size = ts;
+    int nw = static_cast<int>(cfg.get_int("num_warps", 0));
+    if (nw > 0) prob.num_warps = nw;
+    // Cross-check the FmhaKernelConfig the heuristic ranked on resolves the same
+    // block_q (tm0); keep prob.block_q authoritative if the manifest carried it.
+    auto k = ck_dsl::FmhaKernelConfig::from_manifest(m, problem);
+    if (prob.block_q <= 0 && k.tm0 > 0) prob.block_q = static_cast<int>(k.tm0);
 }
 
 // Build a Kernel for an SDPA (unified-attention 2D scalar) problem directly from
@@ -50,28 +84,33 @@ std::unique_ptr<ck_dsl::Kernel> make_c_jit_attn_kernel(
     // Wire the FMHA heuristic into the C-JIT selection path: rank registered
     // attention candidates (LGBM if CK_DSL_ML_MODEL_DIR is set, FirstFit
     // otherwise) and, if one wins, JIT the scalar SDPA kernel with that
-    // candidate's block_size knob. No registry -> keep the default block_size.
+    // candidate's attention knobs (apply_attn_knobs, mirroring the GEMM/conv
+    // builders). No registry -> keep the scalar defaults.
     try {
         auto problem = CkDslAttnParamParser::buildProblem(params, handle.gfxArch());
         auto choice = handle.dispatcher().select(problem);
         if (choice.valid() && handle.store().has(choice.cache_key)) {
             const auto& m = handle.store().at(choice.cache_key).manifest;
-            const auto& cfg = m.raw.has("attention_config") ? m.raw.at("attention_config") : m.raw;
-            int bs = static_cast<int>(cfg.get_int("block_size", 0));
-            if (bs <= 0) bs = static_cast<int>(cfg.get_int("block_q", 0));
-            if (bs > 0) prob.block_size = bs;
+            apply_attn_knobs(prob, m, problem);
         }
     } catch (...) {
-        // No registry / heuristic failure: keep the default block_size.
+        // No registry / heuristic failure: keep the default knobs.
     }
 
     auto r = ck_dsl::CEngine::build_sdpa(prob);
 
+    // The block size build_sdpa actually used (block_q overlay folded in).
+    const int used_block = prob.block_q > 0 ? prob.block_q : prob.block_size;
+
     // Inject attention_config so CkDslAttnPlan (which reads block_size/block_q
     // from manifest.raw) is satisfied identically to the shipped-artifact path.
     ck_dsl::json::Object cfg;
-    cfg["block_size"] = ck_dsl::json::Value(static_cast<double>(prob.block_size));
-    cfg["block_q"] = ck_dsl::json::Value(static_cast<double>(prob.block_size));
+    cfg["block_size"] = ck_dsl::json::Value(static_cast<double>(used_block));
+    cfg["block_q"] = ck_dsl::json::Value(static_cast<double>(used_block));
+    if (prob.tile_size > 0)
+        cfg["tile_size"] = ck_dsl::json::Value(static_cast<double>(prob.tile_size));
+    if (prob.num_warps > 0)
+        cfg["num_warps"] = ck_dsl::json::Value(static_cast<double>(prob.num_warps));
     ck_dsl::json::Object root;
     root["attention_config"] = ck_dsl::json::Value(std::move(cfg));
     r.manifest.raw = ck_dsl::json::Value(std::move(root));

@@ -129,6 +129,50 @@ def _spec(idx: int):
             ),
             "gfx950",
         )
+    if idx in (6, 7, 8):
+        # WMMA wave32 RDNA targets: 16x16x16 / mem / default, w32.
+        arch = {6: "gfx1151", 7: "gfx1201", 8: "gfx11-generic"}[idx]
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, R=3, S=3)
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+                wave_size=32,
+                pipeline="mem",
+                epilogue="default",
+            ),
+            arch,
+        )
+    if idx == 9:
+        # chiplet_swizzle gfx950.
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, R=3, S=3)
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=128,
+                tile_n=128,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                chiplet_swizzle=True,
+                chiplet_wgm=8,
+                chiplet_num_xcds=8,
+                chiplet_chunk_size=64,
+            ),
+            "gfx950",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 

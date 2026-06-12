@@ -358,8 +358,10 @@ void ckc_gfx942_attn2d_emit_q_gather(ckc_gfx942_attn2d_build_ctx_t* ctx)
 
         lane_half  = ckc_b_div(b, ctx->lane, ckc_b_const_i32(b, 32));
         lane_col32 = ckc_b_mod(b, ctx->lane, ckc_b_const_i32(b, 32));
-        /* Python reassigns lane_col32 here (gfx950 2329); the transposed QK reads
-         * this fresh value. Publish it so the QK/softmax TU reuses the same SSA. */
+        /* Python reassigns lane_half / lane_col32 here (gfx950 3503-3504); the
+         * non-transposed QK reads these fresh values. Publish so the QK/softmax
+         * TU reuses the same SSA. */
+        ctx->lane_half32_q32_v = lane_half;
         ctx->lane_col32_q32_v = lane_col32;
         q32_row    = ckc_b_add(b, ctx->wave_row_base, lane_col32);
 
