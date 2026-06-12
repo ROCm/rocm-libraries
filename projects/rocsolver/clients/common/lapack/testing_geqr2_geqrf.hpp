@@ -152,7 +152,7 @@ void geqr2_geqrf_initData(const rocblas_handle handle,
                 }
             }
         }
-        else if (matrix == "randint")
+        else if(matrix == "randint")
         {
             rocblas_init<T>(hA, true);
         }

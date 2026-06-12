@@ -145,7 +145,7 @@ void geql2_geqlf_initData(const rocblas_handle handle,
                     for(rocblas_int i = 0; i < m; i++)
                         hA[b][i + j * lda] = (i == j ? T(1) : T(0));
         }
-        else if (matrix == "randint")
+        else if(matrix == "randint")
         {
             rocblas_init<T>(hA, true);
         }
