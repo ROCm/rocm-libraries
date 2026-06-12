@@ -15,8 +15,8 @@ MFMA = `v_mfma_scale_f32_32x32x64_f8f6f4` (cbsz:2 blgp:2, 32 cyc/inst on FP6).
 ## TL;DR
 
 **One kernel paradigm — `lds_gemm_hybrid_dripA` — shape-routed by `mxfp6_dispatch.hpp`.**
-@8192³ FP16 ≈ **2285 TFLOPs** (2026-06-11: +2.7% from an **LDS-transpose epilogue** that coalesces
-the output store — see "Epilogue" below; was 2230 with the scattered store). Beats the previous register-direct + pure-LDS v18 dispatcher
+@8192³ FP16 ≈ **2285 TFLOPs** (2026-06-11: +2.6% from a **swapped-MFMA coalesced-store epilogue** —
+see "Epilogue" in kernel essence; was 2230 with the scattered store). Beats the previous register-direct + pure-LDS v18 dispatcher
 on **all 12 benchmarked shapes (+6~98%)**, including non-pow2 N (5120/7680/9216) where v18
 needed dedicated 18/20-acc mixed tiles — the hybrid paradigm wins those outright.
 
@@ -27,7 +27,7 @@ Tile routing (`choose_tile`):
   M-tile to double WG count and fill idle CUs. Same kernel, different tile args. (occ1 — an
   occ2 variant was tried and is steady-state-neutral; see dead-ends.)
 
-@8192³: warm ≈ 2230, cold ≈ 2030 TFLOPs (~24% peak). ⚠️ **2048×4096 is the weak shape** (warm ~1724 /
+@8192³: warm ≈ 2285 TFLOPs (~25% peak; was 2230 before the coalesced-store epilogue). ⚠️ **2048×4096 is the weak shape** (warm ~1724 /
 cold ~1408): filling 256 CUs at M=2048 forces an 8-acc tile (area math: MT×NT=32768 ⟺ 8 acc), whose
 MFMA window (768 cyc) can't hide B's HBM latency → B-VMEM-exposed, ~18.7% peak. It's the only shape
 that loses to CK FP8 (cold 0.90×). Structurally locked, not a tuning miss.
@@ -124,6 +124,10 @@ Use the library: include `<mxfp6/gemm.hpp>`, link `mxfp6gemm`, then
 `choose_tile(M,N)` → host preprocess (tile scales with the returned MPW/NPW) → `gemm(OutType, …)`.
 
 ---
+
+> ⚠️ The tables in this section (both vs-v18 and vs-CK below) were measured BEFORE the 2026-06-11
+> coalesced-store epilogue. Add ~+2.6% to every "ours/hybrid" number (8192³ 2231→~2287). They are a
+> conservative floor — the vs-CK verdicts only improve.
 
 ## Performance (FP16, vs v18 best-per-shape, same machine 2026-06-10)
 
