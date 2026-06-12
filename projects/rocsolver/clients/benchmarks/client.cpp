@@ -133,8 +133,8 @@ try
             "                           ")
 
         ("matrix",
-         value<std::string>(&argus.matrix)->default_value("rands"),
-            "Test matrix to generate. Options: rands (default), identity.\n"
+         value<std::string>(&argus.matrix)->default_value("randint"),
+            "Test matrix to generate. Options depend on function; common options are randint (default), identity.\n"
             "                           ")
 
         ("mem_query",
