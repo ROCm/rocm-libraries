@@ -912,24 +912,12 @@ class Solution(collections.abc.Mapping):
         return
 
     state["Multicast"] = False
+    state["ClusterBarrier"] = False
     if state["ClusterDim"] != [1, 1]:
       state["Multicast"] = True
-    else:
-      if state["ClusterBarrier"] == True:
-        reject(state, printRejectionReason, "ClusterDim can't be [1, 1] if ClusterBarrier enabled.")
-
-    # ClusterBarrier emits SCmp/branch on sgpr("WaveIdx"), which is only allocated
-    # when TDM is enabled.
-    if state["ClusterBarrier"] == True and state["TDMInst"] == 0:
-      reject(state, printRejectionReason, "ClusterBarrier requires TDMInst != 0 (TDMA or TDMB enabled).")
-
-    # ClusterBarrier codegen emits s_barrier_signal/wait -3, which require the
-    # HasClusterBarrier assembler capability. Otherwise rocisa::SBarrier silently
-    # falls back to code -1 and produces incorrect cluster-scope synchronization.
-    if state["ClusterBarrier"] == True \
-       and not isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
-      reject(state, printRejectionReason,
-             "ClusterBarrier requires asmCaps['HasClusterBarrier'] (s_barrier_wait -3 support).")
+      # ClusterBarrier emits SCmp/branch on sgpr("WaveIdx"), which is only allocated when TDM is enabled.
+      if state["TDMInst"] != 0 and isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
+        state["ClusterBarrier"] = True
 
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
