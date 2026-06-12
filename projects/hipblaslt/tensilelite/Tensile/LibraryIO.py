@@ -42,6 +42,7 @@ import os
 import sys
 import subprocess
 import re
+import zlib
 
 try:
     import orjson as json
@@ -260,7 +261,6 @@ def writeJson(filename, data):
 
 def writeMsgPack(filename, data):
     """Writes data to file in compressed Message Pack format (.dat.gz)."""
-    import zlib
     raw = msgpack.packb(data)
     compressed = zlib.compress(raw, 9)
     with open(filename + ".gz", "wb") as f:
