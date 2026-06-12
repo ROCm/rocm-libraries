@@ -2449,6 +2449,7 @@ class LogicalScheduler:
         for interleaving. When schedule=False, emits instructions sequentially.
         """
         from Tensile.Components.Subtile.InstructionScheduler import instructionSchedule
+        from Tensile.Components.Subtile.WaitAluInsertion import insertLRSwapWaitAlu
         from rocisa.code import Module, Label
         from rocisa.container import sgpr
         from rocisa.instruction import SCmpEQU32, SCBranchSCC0, SMovB32
@@ -2492,6 +2493,9 @@ class LogicalScheduler:
             module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
                                comment="Subtile PAP: clear after first PRELOOP GR merge"))
         module.addComment0(f"{label} end")
+        # SCHED_MODE 2: guard the LR offset-swap -> ds_read RAW hazard once, against
+        # the final post-schedule order (no-op on other archs).
+        module = insertLRSwapWaitAlu(module, writer, kernel)
         return module
 
     def emitMainAndExitLoops(self, writer, kernel, tensorParametersA=None, tensorParametersB=None):
