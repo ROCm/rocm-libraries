@@ -178,7 +178,7 @@ def runDockerBuild(String gpuFamily) {
     node(rocmnode("docker")) {
         try {
             withWorkingDir {
-                def (dockerImage, imageName) = utils.getDockerImageWithStatus(gpu_family: gpuFamily)
+                def (dockerImage, imageName) = utils.getDockerImageWithStatus(gpu_family: gpuFamily, ensure_only: true)
                 // Expose the built CI image name so Publish Dev Image can retag it directly.
                 if (gpuFamily == "ci") {
                     env.CI_DOCKER_IMAGE = imageName

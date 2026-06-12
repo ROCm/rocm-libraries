@@ -518,47 +518,106 @@ def getDockerImage(Map conf=[:])
 
     echo "Docker Args: ${dockerArgs}"
 
+    // ensure_only: true  -- called from the Build Docker stage whose sole goal is
+    //   to guarantee the image exists in the registry. Use docker manifest inspect
+    //   (no layer download) to probe; only build if the image is absent.
+    // ensure_only: false (default) -- called from buildHipClangJob which needs the
+    //   image present in the local daemon. Pull first; build if pull fails.
+    def ensure_only = conf.get("ensure_only", false)
+
     def dockerImage
-    // Check if the image already exists in the remote registry without pulling it.
-    // docker manifest inspect contacts the registry and exits 0 only when the
-    // exact tag is present; it downloads no image layers.
-    def remoteExists = withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-        sh(script: "docker manifest inspect ${image} > /dev/null 2>&1", returnStatus: true) == 0
-    }
-
-    if (remoteExists) {
-        echo "Image ${image} already exists in registry - skipping pull/build."
-        dockerImage = docker.image("${image}")
-    } else {
-        echo "Building image..."
-        def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
-        def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=max,registry.insecure=true " +
-                              "--cache-from type=registry,ref=${cacheRef},registry.insecure=true "
-
-        try {
-            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-                sh """
-                    docker buildx rm ci-builder || true
-                    docker buildx create --name ci-builder --driver docker-container --use
-                    docker buildx use ci-builder
-                    docker buildx inspect --bootstrap
-                """.stripIndent()
-                sh """
-                    DOCKER_BUILDKIT=1 docker buildx build \
-                    --builder ci-builder \
-                    --push \
-                    --tag ${image} \
-                    ${dockerCacheArgs} \
-                    ${dockerArgs} \
-                    ${buildContext}
-                """.stripIndent()
-            }
+    if (ensure_only) {
+        def remoteExists = withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            sh(script: "docker manifest inspect ${image} > /dev/null 2>&1", returnStatus: true) == 0
+        }
+        if (remoteExists) {
+            echo "Image ${image} already exists in registry - skipping build."
             dockerImage = docker.image("${image}")
-        } catch (Exception bex) {
-            echo "Buildx not available or failed, falling back to docker.build"
-            dockerImage = docker.build("${image}", "${dockerArgs} ${buildContext}")
+        } else {
+            echo "Building image..."
+            def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
+            def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=max,registry.insecure=true " +
+                                  "--cache-from type=registry,ref=${cacheRef},registry.insecure=true "
+            try {
+                withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                    sh """
+                        docker buildx rm ci-builder || true
+                        docker buildx create --name ci-builder --driver docker-container --use
+                        docker buildx use ci-builder
+                        docker buildx inspect --bootstrap
+                    """.stripIndent()
+                    sh """
+                        DOCKER_BUILDKIT=1 docker buildx build \
+                        --builder ci-builder \
+                        --push \
+                        --tag ${image} \
+                        ${dockerCacheArgs} \
+                        ${dockerArgs} \
+                        ${buildContext}
+                    """.stripIndent()
+                }
+                dockerImage = docker.image("${image}")
+            } catch (Exception bex) {
+                echo "Buildx not available or failed, falling back to docker.build"
+                dockerImage = docker.build("${image}", "${dockerArgs} ${buildContext}")
+                withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                    dockerImage.push()
+                }
+            }
+        }
+    } else {
+        try{
+            echo "Pulling down image: ${image}"
+            dockerImage = docker.image("${image}")
             withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-                dockerImage.push()
+                dockerImage.pull()
+            }
+            def embeddedTheRockHash = sh(
+                script: "docker inspect --format '{{ index .Config.Labels \"therock.git.hash\" }}' ${image} 2>/dev/null || true",
+                returnStdout: true
+            ).trim()
+            def embeddedCkHash = sh(
+                script: "docker inspect --format '{{ index .Config.Labels \"ck.git.hash\" }}' ${image} 2>/dev/null || true",
+                returnStdout: true
+            ).trim()
+            echo "CI image TheRock hash: ${embeddedTheRockHash ?: 'not set'} | CK hash: ${embeddedCkHash ?: 'not set'}"
+        }
+        catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
+            echo "The job was cancelled or aborted"
+            throw e
+        }
+        catch(Exception ex)
+        {
+            echo "Building image..."
+            def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
+            def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=max,registry.insecure=true " +
+                                  "--cache-from type=registry,ref=${cacheRef},registry.insecure=true "
+
+            try {
+                withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                    sh """
+                        docker buildx rm ci-builder || true
+                        docker buildx create --name ci-builder --driver docker-container --use
+                        docker buildx use ci-builder
+                        docker buildx inspect --bootstrap
+                    """.stripIndent()
+                    sh """
+                        DOCKER_BUILDKIT=1 docker buildx build \
+                        --builder ci-builder \
+                        --push \
+                        --tag ${image} \
+                        ${dockerCacheArgs} \
+                        ${dockerArgs} \
+                        ${buildContext}
+                    """.stripIndent()
+                }
+                dockerImage = docker.image("${image}")
+            } catch (Exception bex) {
+                echo "Buildx not available or failed, falling back to docker.build"
+                dockerImage = docker.build("${image}", "${dockerArgs} ${buildContext}")
+                withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                    dockerImage.push()
+                }
             }
         }
     }
@@ -572,16 +631,37 @@ def getDockerImage(Map conf=[:])
         image = getDockerImageName(dockerArgs)
         image = image + "_perfTest"
 
-        def remotePerfExists = withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-            sh(script: "docker manifest inspect ${image} > /dev/null 2>&1", returnStatus: true) == 0
-        }
-        if (remotePerfExists) {
-            echo "Perf test image ${image} already exists in registry - skipping pull/build."
-            dockerImage = docker.image("${image}")
+        if (ensure_only) {
+            def remotePerfExists = withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                sh(script: "docker manifest inspect ${image} > /dev/null 2>&1", returnStatus: true) == 0
+            }
+            if (remotePerfExists) {
+                echo "Perf test image ${image} already exists in registry - skipping build."
+                dockerImage = docker.image("${image}")
+            } else {
+                dockerImage = docker.build("${image}", "${dockerArgs} -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile ")
+                withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                    dockerImage.push()
+                }
+            }
         } else {
-            dockerImage = docker.build("${image}", "${dockerArgs} -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile ")
-            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-                dockerImage.push()
+            try{
+                echo "Pulling down perf test image: ${image}"
+                dockerImage = docker.image("${image}")
+                withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                    dockerImage.pull()
+                }
+            }
+            catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
+                echo "The job was cancelled or aborted"
+                throw e
+            }
+            catch(Exception ex)
+            {
+                dockerImage = docker.build("${image}", "${dockerArgs} -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile ")
+                withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                    dockerImage.push()
+                }
             }
         }
     }
