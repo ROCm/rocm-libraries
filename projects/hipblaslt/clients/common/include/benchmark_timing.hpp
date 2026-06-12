@@ -70,8 +70,7 @@ namespace hipblaslt_bench
             });
         }
 
-        // Incremental mean/variance via Welford's recurrence: O(1) per sample, numerically
-        // stable for low-cv samples.
+        // Incremental mean/variance via Welford's recurrence: O(1) per sample.
         struct running_stats
         {
             int64_t count = 0;
