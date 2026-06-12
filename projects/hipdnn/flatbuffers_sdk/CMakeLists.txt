@@ -114,6 +114,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
             schemas/engine_details.fbs
             schemas/execution_plan.fbs
             schemas/graph.fbs
+            schemas/serialized_graph_and_plan.fbs
             schemas/knob_value.fbs
             schemas/layernorm_attributes.fbs
             schemas/layernorm_backward_attributes.fbs
