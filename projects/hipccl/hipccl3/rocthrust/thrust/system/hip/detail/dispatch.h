@@ -32,11 +32,11 @@
 #include <thrust/detail/preprocessor.h>
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(cstdint)
 #  include _THRUST_STD_INCLUDE(limits)
 #  include _THRUST_STD_INCLUDE(type_traits)
 #endif
 
-#include <cstdint>
 #include <string>
 
 #if defined(THRUST_FORCE_32_BIT_OFFSET_TYPE) && defined(THRUST_FORCE_64_BIT_OFFSET_TYPE)

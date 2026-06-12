@@ -92,7 +92,7 @@
 #include <thrust/complex.h>
 #include <thrust/detail/complex/math_private.h>
 
-#include <cmath>
+#include _THRUST_STD_INCLUDE(cmath)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail

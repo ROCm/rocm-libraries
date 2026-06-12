@@ -53,8 +53,9 @@
 #include <thrust/complex.h>
 #include <thrust/detail/complex/math_private.h>
 
-#include <cfloat>
-#include <cmath>
+#include _THRUST_STD_INCLUDE(cfloat)
+#include _THRUST_STD_INCLUDE(cmath)
+#include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -278,7 +279,7 @@ THRUST_HOST_DEVICE inline complex<float> cacosf(complex<float> z)
   {
     if (isinf(x))
     {
-      return (complex<float>(y + y, -infinity<float>()));
+      return (complex<float>(y + y, -_THRUST_STD::numeric_limits<float>::infinity()));
     }
     if (isinf(y))
     {

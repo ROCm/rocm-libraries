@@ -29,7 +29,7 @@
 #include <thrust/system/hip/detail/malloc_and_free.h>
 #include <thrust/system/hip/memory.h>
 
-#include <limits>
+#include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim

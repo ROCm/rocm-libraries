@@ -56,7 +56,7 @@
 
 #  include _THRUST_STD_INCLUDE(iterator)
 
-#  include <cstdint>
+#  include _THRUST_STD_INCLUDE(cstdint)
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim

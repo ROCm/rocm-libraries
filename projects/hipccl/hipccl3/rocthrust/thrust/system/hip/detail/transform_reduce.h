@@ -52,7 +52,8 @@
 #  include <thrust/system/hip/detail/reduce.h>
 #  include <thrust/system/hip/detail/util.h>
 
-#  include <cstdint>
+#  include _THRUST_STD_INCLUDE(cstdint)
+
 #  include <iterator>
 
 THRUST_NAMESPACE_BEGIN

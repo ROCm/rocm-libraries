@@ -33,7 +33,8 @@
 
 #include <thrust/random/detail/random_core_access.h>
 
-#include <cstdint>
+#include _THRUST_STD_INCLUDE(cstdint)
+
 #include <iostream>
 
 THRUST_NAMESPACE_BEGIN

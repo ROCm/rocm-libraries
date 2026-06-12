@@ -33,8 +33,9 @@
 
 #include <thrust/random/detail/random_core_access.h>
 
-#include <cstddef> // for size_t
-#include <cstdint>
+#include _THRUST_STD_INCLUDE(cstddef) // for size_t
+#include _THRUST_STD_INCLUDE(cstdint)
+
 #include <iostream>
 
 THRUST_NAMESPACE_BEGIN

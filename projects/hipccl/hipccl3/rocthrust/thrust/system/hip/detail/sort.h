@@ -53,7 +53,8 @@
 #  include <thrust/system/hip/detail/util.h>
 #  include <thrust/type_traits/is_contiguous_iterator.h>
 
-#  include <cstdint>
+#  include _THRUST_STD_INCLUDE(cstdint)
+
 #  include <functional>
 #  include <type_traits>
 
