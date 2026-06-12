@@ -855,7 +855,7 @@ def buildAndTest(Map conf=[:]){
                         }
                         if ( params.RUN_CODEGEN_TESTS && arch == "gfx90a" ){
                                 echo "Run hiprtc codegen tests"
-                                sh """ cd ../codegen && rm -rf build && mkdir build && cd build && \
+                                sh """ cd projects/composablekernel/codegen && rm -rf build && mkdir build && cd build && \
                                         cmake -DCMAKE_PREFIX_PATH=/opt/rocm -DCMAKE_CXX_COMPILER="${params.BUILD_COMPILER}" .. && \
                                         make -j64 check """
                         }
