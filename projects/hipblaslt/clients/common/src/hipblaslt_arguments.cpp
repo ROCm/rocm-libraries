@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "hipblaslt_arguments.hpp"
+#include "benchmark_stats.hpp"
 #include <cstdlib>
 #include <cstring>
 #include <iomanip>
@@ -69,6 +70,17 @@ void Arguments::init()
 
     iters      = 10;
     cold_iters = 2;
+
+    // Adaptive timing: off by default (gated on `adaptive`); the per-knob values are
+    // the preset defaults, used when `adaptive` is enabled.
+    warmup_time      = hipblaslt_bench::adaptive_defaults::warmup_time;
+    sample_time      = hipblaslt_bench::adaptive_defaults::sample_time;
+    measure_time     = hipblaslt_bench::adaptive_defaults::measure_time;
+    max_measure_time = hipblaslt_bench::adaptive_defaults::max_measure_time;
+    noise_threshold  = hipblaslt_bench::adaptive_defaults::noise_threshold;
+    min_iters        = hipblaslt_bench::adaptive_defaults::min_iters;
+    max_iters        = hipblaslt_bench::adaptive_defaults::max_iters;
+    adaptive         = false;
 
     algo                   = 0;
     solution_index         = -1;

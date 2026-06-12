@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
@@ -481,6 +482,47 @@ try
          value<int32_t>(&arg.cold_iters)->default_value(tuningEnv? 1000 : 2),
          "Cold Iterations to run before entering the timing loop")
 
+        ("adaptive",
+         value<bool>(&arg.adaptive)->default_value(false),
+         "Enable adaptive timing: collect timed samples and report the mean with "
+         "median/min/cv columns. Tune with the --adaptive_* options below. Not compatible "
+         "with --iters / --cold_iters.")
+
+        ("adaptive_warmup_time",
+         value<float>(&arg.warmup_time)->default_value(hipblaslt_bench::adaptive_defaults::warmup_time),
+         "Adaptive timing: warm up until this many ms have elapsed")
+
+        ("adaptive_sample_time",
+         value<float>(&arg.sample_time)->default_value(hipblaslt_bench::adaptive_defaults::sample_time),
+         "Adaptive timing: target wall-time (ms) of each timed sample; sets the back-to-back "
+         "batch size (larger = fewer, bigger samples; a value >= adaptive_measure_time makes "
+         "the whole measurement a single batch)")
+
+        ("adaptive_measure_time",
+         value<float>(&arg.measure_time)->default_value(hipblaslt_bench::adaptive_defaults::measure_time),
+         "Adaptive timing: minimum total measurement time in ms")
+
+        ("adaptive_max_measure_time",
+         value<float>(&arg.max_measure_time)->default_value(hipblaslt_bench::adaptive_defaults::max_measure_time),
+         "Adaptive timing: measurement ceiling in ms (0 = unbounded)")
+
+        ("adaptive_min_iters",
+         value<int32_t>(&arg.min_iters)->default_value(hipblaslt_bench::adaptive_defaults::min_iters),
+         "Adaptive timing: floor on total timed iterations (with adaptive_measure_time, the "
+         "minimum collected before convergence can end the run)")
+
+        ("adaptive_max_iters",
+         value<int32_t>(&arg.max_iters)->default_value(hipblaslt_bench::adaptive_defaults::max_iters),
+         "Adaptive timing: ceiling on total timed iterations (0 = unbounded)")
+
+        ("adaptive_noise_threshold",
+         value<float>(&arg.noise_threshold)->default_value(hipblaslt_bench::adaptive_defaults::noise_threshold),
+         "Adaptive timing: convergence target. Past the floor (adaptive_min_iters and "
+         "adaptive_measure_time) the run continues until the mean's relative standard error "
+         "(stddev/mean/sqrt(n)) falls below this fraction, e.g. 0.005 = 0.5%, or the ceiling "
+         "(adaptive_max_measure_time / adaptive_max_iters) is hit. 0 disables convergence: the "
+         "run goes to the ceiling")
+
         ("algo_method",
          value<std::string>(&algo_method_str)->default_value("heuristic"),
          "Use different algorithm search API. Options: heuristic, all, index.")
@@ -657,6 +699,41 @@ try
     {
         hipblaslt_cout << desc << std::endl;
         return 0;
+    }
+
+    // Reject misuse rather than silently ignore, so a misconfigured run never
+    // reports mislabeled numbers. The --adaptive_* options require --adaptive;
+    // conversely --iters/--cold_iters have no effect under --adaptive (warmup and
+    // batch are sized adaptively).
+    if(!arg.adaptive)
+    {
+        for(const char* opt : {"adaptive_warmup_time",
+                               "adaptive_sample_time",
+                               "adaptive_measure_time",
+                               "adaptive_max_measure_time",
+                               "adaptive_min_iters",
+                               "adaptive_max_iters",
+                               "adaptive_noise_threshold"})
+        {
+            if(vm.count(opt) && !vm[opt].defaulted())
+            {
+                hipblaslt_cerr << "error: --" << opt << " requires --adaptive" << std::endl;
+                return EXIT_FAILURE;
+            }
+        }
+    }
+    else
+    {
+        for(const char* opt : {"iters", "cold_iters"})
+        {
+            if(vm.count(opt) && !vm[opt].defaulted())
+            {
+                hipblaslt_cerr << "error: --" << opt
+                               << " cannot be used with --adaptive (use --adaptive_* options)"
+                               << std::endl;
+                return EXIT_FAILURE;
+            }
+        }
     }
 
     hipblaslt_print_version();

@@ -43,6 +43,14 @@ cd hipBLASLt; cd build/release
 --verify |-v               Validate GPU results with CPU?
 --iters |-i <value>        Iterations to run inside timing loop                                                 (Default value is: 10)
 --cold_iters |-j <value>   Cold Iterations to run before entering the timing loop                               (Default value is: 2)
+--adaptive                       Enable adaptive timing; not compatible with --iters / --cold_iters            (Default value is: false)
+--adaptive_warmup_time <value>   Warm up until this many ms have elapsed; requires --adaptive                 (Default value is: 50 ms)
+--adaptive_sample_time <value>   Wall-time of each timed sample = back-to-back batch size (>= measure_time gives one batch); requires --adaptive (Default value is: 1 ms)
+--adaptive_measure_time <value>  Minimum total measurement time; requires --adaptive                         (Default value is: 200 ms)
+--adaptive_max_measure_time <value> Measurement ceiling (0 = unbounded); requires --adaptive                  (Default value is: 1000 ms)
+--adaptive_min_iters <value>     Floor on total timed iterations; requires --adaptive                        (Default value is: 10 iterations)
+--adaptive_max_iters <value>     Ceiling on total timed iterations (0 = unbounded); requires --adaptive      (Default value is: 0 iterations)
+--adaptive_noise_threshold <value> Convergence target: past the floor, keep running until the mean's relative standard error drops below this fraction or the ceiling is hit; 0 disables (run to the ceiling); requires --adaptive (Default value is: 0.005 = 0.5%)
 --algo_method <value>      Use different algorithm search API. Options: heuristic, all, index.                  (Default value is: heuristic)
 --solution_index <value>   Used with --algo_method 2.  Specify solution index to use in benchmark.              (Default value is: -1)
 --requested_solution <value> Requested solution num. Set to -1 to get all solutions. Only valid when algo_method is set to heuristic.  (Default value is: 1)
@@ -103,4 +111,57 @@ Show the efficiency and other performance related args with environment variable
 HIPBLASLT_BENCH_PERF=1 ./clients/hipblaslt-bench -m 4096 -n 4864 -k 32896 --transA N --transB N --a_type bf16_r --b_type bf16_r --c_type bf16_r --d_type bf16_r --compute_type f32_r --iters 416 --cold_iters 416 --use_gpu_timer
 [0]:transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,swizzle_a,swizzle_b,activation_type,bias_vector,bias_type,aux_type,rotating_buffer,flush,use_gpu_timer,num_cu,tiles_per_cu,tile0_gran,tile1_gran,cu_gran,wave_gran,total_gran,mem_read_bytes,mem_write_bytes,lowest_avg_freq,lowest_median_freq,avg_MCLK,median_MCLK,efficiency,hipblaslt-Gflops,hipblaslt-GB/s,us
     N,N,0,1,4096,4864,32896,1,4096,134742016,0,32896,160006144,4096,19922944,4096,19922944,bf16_r,bf16_r,bf16_r,bf16_r,f32_r,0,0,0,0,0,0,0,none,0,bf16_r,bf16_r,0,0,1,256,0,0.984615,1,-nan,1,-nan,13312511180,119537664,1119,1205,2000,2000,92.3889,1.08405e+06,484.741,1209.14
+```
+
+## Adaptive timing
+
+By default the benchmark runs `--cold_iters` warmups followed by a single timed
+loop of `--iters` enqueues and reports the mean. Pass **`--adaptive`** to instead
+take a distribution-based measurement that is robust to noise and lets fast
+kernels accumulate more iterations automatically — without precomputing iteration
+counts per problem. The fixed-count default is unchanged, so existing commands
+behave exactly as before.
+
+A *sample* is a batch of back-to-back iterations run with no synchronization
+between them, timed only at its start and end (so the sample's per-iteration time
+is that span divided by the batch size). The batch is sized from a quick warmup so
+each sample spans roughly `--adaptive_sample_time` ms.
+
+The run lasts **at least** the floor — `--adaptive_min_iters` and
+`--adaptive_measure_time` — and **at most** the ceiling —
+`--adaptive_max_measure_time` and `--adaptive_max_iters`. Past the floor, it keeps
+collecting samples until the mean's relative standard error (stddev / mean / sqrt(n))
+falls below `--adaptive_noise_threshold` (**converged**, `status=converged`) or the
+ceiling is reached (`status=noisy`). With `--adaptive_noise_threshold 0` convergence
+is disabled, so the run goes to the ceiling and `status` is `-`. (To run a fixed
+budget, set the floor and ceiling equal, e.g. `--adaptive_measure_time 200
+--adaptive_max_measure_time 200`. If no ceiling is set at all, a default safety
+ceiling bounds the run.)
+
+The reported `us`/`Gflops` are the **mean**; extra columns expose the distribution:
+`batch`, `samples`, `hot_iters`, `median_us`, `min_us`, `cv`, and `status`
+(`converged` / `noisy` / `-`).
+
+`--adaptive` is the gate; the `--adaptive_*` options tune it and **require**
+`--adaptive` (passing one without it is an error). Defaults: `adaptive_warmup_time
+50` ms, `adaptive_measure_time 200` ms, `adaptive_sample_time 1` ms,
+`adaptive_max_measure_time 1000` ms, `adaptive_min_iters 10`,
+`adaptive_noise_threshold 0.005` — each shows in `--help`.
+
+Under `--adaptive`, warmup and per-sample batch size are determined adaptively, so
+`--iters` and `--cold_iters` have no effect and **passing either with `--adaptive`
+is an error** (use `--adaptive_warmup_time` for warmup and `--adaptive_sample_time`
+to influence the batch). Without `--adaptive`, timing is the fixed-count
+`--cold_iters` / `--iters` path and no distribution columns are printed.
+
+Note on the statistic: the **mean** is reported because it is the more reproducible
+estimator for launch-bound / symmetric-jitter kernels. The **median** is kept as a
+column for outlier-robust comparison on larger kernels. Run-to-run stability on very
+large kernels is dominated by GPU clock/thermal state, which
+`--adaptive_noise_threshold` cannot remove — lock clocks for that.
+
+```
+./clients/hipblaslt-bench -m 4096 -n 4096 -k 4096 --transA N --transB T \
+  --a_type bf16_r --b_type bf16_r --c_type bf16_r --d_type bf16_r --compute_type f32_r \
+  --rotating 512 --adaptive
 ```

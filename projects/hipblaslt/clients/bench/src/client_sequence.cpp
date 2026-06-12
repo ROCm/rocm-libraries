@@ -32,6 +32,7 @@
 
 #include <llvm/ObjectYAML/YAML.h>
 
+#include "benchmark_timing.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_test.hpp"
 #include "utility.hpp"
@@ -257,6 +258,16 @@ public:
     uint32_t iters              = 10;
     int64_t  max_workspace_size = 128 * 1024 * 1024;
     bool     graph_mode         = false;
+    // Adaptive timing (gated on `adaptive`); per-knob values are the preset defaults.
+    float    warmup_time        = hipblaslt_bench::adaptive_defaults::warmup_time;
+    float    sample_time        = hipblaslt_bench::adaptive_defaults::sample_time;
+    float    measure_time       = hipblaslt_bench::adaptive_defaults::measure_time;
+    float    max_measure_time   = hipblaslt_bench::adaptive_defaults::max_measure_time;
+    float    noise_threshold    = hipblaslt_bench::adaptive_defaults::noise_threshold;
+    int32_t  min_iters          = hipblaslt_bench::adaptive_defaults::min_iters;
+    int32_t  max_iters          = hipblaslt_bench::adaptive_defaults::max_iters;
+    bool     use_gpu_timer      = true;
+    bool     adaptive           = false;
 };
 
 class LayerConfigIO
@@ -283,6 +294,15 @@ namespace llvm
                 io.mapOptional("Iter", lc.iters);
                 io.mapOptional("MaxWorkspaceSize", lc.max_workspace_size);
                 io.mapOptional("UseGraphMode", lc.graph_mode);
+                io.mapOptional("UseGpuTimer", lc.use_gpu_timer);
+                io.mapOptional("Adaptive", lc.adaptive);
+                io.mapOptional("AdaptiveWarmupTime", lc.warmup_time);
+                io.mapOptional("AdaptiveSampleTime", lc.sample_time);
+                io.mapOptional("AdaptiveMeasureTime", lc.measure_time);
+                io.mapOptional("AdaptiveMaxMeasureTime", lc.max_measure_time);
+                io.mapOptional("AdaptiveNoiseThreshold", lc.noise_threshold);
+                io.mapOptional("AdaptiveMinIters", lc.min_iters);
+                io.mapOptional("AdaptiveMaxIters", lc.max_iters);
             }
         };
         template <>
@@ -533,32 +553,30 @@ int main(int argc, char** argv)
     CHECK_HIP_ERROR(hipEventCreate(&event_gpu_time_start));
     CHECK_HIP_ERROR(hipEventCreate(&event_gpu_time_end));
 
-    for(int i = 0; i < cold_iters; i++)
+    hipblaslt_bench::TimingConfig timingCfg;
+    timingCfg.iters         = iters;
+    timingCfg.cold_iters    = cold_iters;
+    timingCfg.use_gpu_timer = rv.gs.use_gpu_timer;
+    if(rv.gs.adaptive)
     {
-        for(size_t gemmIdx = 0; gemmIdx < layer.size(); gemmIdx++)
-        {
-            if(layer[gemmIdx].type == Layer::TYPE::GEMM)
-                static_cast<void>((*layer[gemmIdx].gemms)[i % block_count].run(stream));
-        }
+        timingCfg.warmup_time      = rv.gs.warmup_time;
+        timingCfg.sample_time      = rv.gs.sample_time;
+        timingCfg.measure_time     = rv.gs.measure_time;
+        timingCfg.max_measure_time = rv.gs.max_measure_time;
+        timingCfg.min_iters        = rv.gs.min_iters;
+        timingCfg.max_iters        = rv.gs.max_iters;
+        timingCfg.noise_threshold  = rv.gs.noise_threshold;
     }
 
-    CHECK_HIP_ERROR(hipEventSynchronize(event_gpu_time_start));
-    CHECK_HIP_ERROR(hipEventRecord(event_gpu_time_start, stream));
-    hipGraph_t graph = NULL;
-    if(rv.gs.graph_mode)
-    {
-        hipStreamCaptureMode mode = hipStreamCaptureModeGlobal;
-        CHECK_HIP_ERROR(hipStreamBeginCapture(stream, mode));
-    }
-
-    for(int i = 0; i < iters; i++)
-    {
+    // One enqueue of the whole layer sequence for a given (rotating) index.
+    auto launch = [&](int64_t idx) {
+        int b = int(idx % block_count);
         for(size_t gemmIdx = 0; gemmIdx < layer.size(); gemmIdx++)
         {
             switch(layer[gemmIdx].type)
             {
             case Layer::TYPE::GEMM:
-                static_cast<void>((*layer[gemmIdx].gemms)[i % block_count].run(stream));
+                static_cast<void>((*layer[gemmIdx].gemms)[b].run(stream));
                 break;
             case Layer::TYPE::FLUSH:
                 hipLaunchKernelGGL(flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
@@ -567,30 +585,56 @@ int main(int argc, char** argv)
                 break;
             }
         }
-    }
+    };
 
+    // Warmup. Adaptive mode ignores ColdIter/Iter and warms up inside run_measurement.
+    if(!rv.gs.adaptive)
+        for(int i = 0; i < cold_iters; i++)
+            launch(i);
+
+    hipGraph_t                    graph = NULL;
+    hipblaslt_bench::TimingResult timing;
     if(rv.gs.graph_mode)
     {
+        // Capture `iters` enqueues into a graph and time a single replay.
+        CHECK_HIP_ERROR(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+        for(int i = 0; i < iters; i++)
+            launch(i);
         CHECK_HIP_ERROR(hipStreamEndCapture(stream, &graph));
-    }
-    CHECK_HIP_ERROR(hipEventRecord(event_gpu_time_end, stream));
-    CHECK_HIP_ERROR(hipEventSynchronize(event_gpu_time_end));
 
-    if(rv.gs.graph_mode)
-    {
         hipGraphExec_t graph_exec = NULL;
         CHECK_HIP_ERROR(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
-        CHECK_HIP_ERROR(hipEventSynchronize(event_gpu_time_start));
         CHECK_HIP_ERROR(hipEventRecord(event_gpu_time_start, stream));
         CHECK_HIP_ERROR(hipGraphLaunch(graph_exec, stream));
         CHECK_HIP_ERROR(hipEventRecord(event_gpu_time_end, stream));
         CHECK_HIP_ERROR(hipEventSynchronize(event_gpu_time_end));
         CHECK_HIP_ERROR(hipGraphExecDestroy(graph_exec));
+
+        float gpu_time_ms;
+        CHECK_HIP_ERROR(
+            hipEventElapsedTime(&gpu_time_ms, event_gpu_time_start, event_gpu_time_end));
+        timing.median_us = timing.min_us = timing.mean_us
+            = (double(gpu_time_ms) * 1000.0) / (iters < 1 ? 1 : iters);
+        timing.batch     = iters;
+        timing.samples   = 1;
+        timing.hot_iters = iters;
+        timing.converged = true;
     }
-    float gpu_time_ms;
-    CHECK_HIP_ERROR(hipEventElapsedTime(&gpu_time_ms, event_gpu_time_start, event_gpu_time_end));
-    auto gpu_time_used = gpu_time_ms * 1000; // ms to us
-    std::cout << "Time: " << gpu_time_used / iters << std::endl;
+    else
+    {
+        hipblaslt_bench::run_measurement(
+            launch, timingCfg, event_gpu_time_start, event_gpu_time_end, stream, timing);
+    }
+
+    std::cout << "Time: " << timing.mean_us << std::endl;
+    if(timing.samples > 1)
+        std::cout << "  mean over " << timing.samples << " samples, batch " << timing.batch
+                  << ", median " << timing.median_us << " us, min " << timing.min_us
+                  << " us, cv " << timing.cv
+                  << (timing.noise_active
+                          ? (timing.converged ? ", converged" : ", noisy")
+                          : "")
+                  << std::endl;
 
     // Print kernel info
     if(rv.gs.print_kernel_info)

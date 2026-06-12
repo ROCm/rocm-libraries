@@ -115,6 +115,16 @@ struct Arguments
     int32_t iters;
     int32_t cold_iters;
 
+    // Adaptive timing; all *_time fields are milliseconds, 0 disables.
+    float   warmup_time; // warm up until this wall-time is reached
+    float   sample_time; // target span per timed sample; 0 => one enqueue per sample
+    float   measure_time; // minimum total measure time (floor)
+    float   max_measure_time; // measure ceiling; 0 => unbounded
+    float   noise_threshold; // rel. std error convergence target; 0 => disabled
+    int32_t min_iters; // floor on total timed iterations
+    int32_t max_iters; // ceiling on total timed iterations; 0 => unbounded
+    bool    adaptive; // enable the tuned adaptive-timing preset (knobs above override it)
+
     uint32_t algo;
     int32_t  solution_index;
     int32_t  requested_solution_num;
@@ -239,6 +249,14 @@ struct Arguments
     OPER(batch_mode) SEP             \
     OPER(iters) SEP                  \
     OPER(cold_iters) SEP             \
+    OPER(warmup_time) SEP            \
+    OPER(sample_time) SEP            \
+    OPER(measure_time) SEP           \
+    OPER(max_measure_time) SEP       \
+    OPER(noise_threshold) SEP        \
+    OPER(min_iters) SEP              \
+    OPER(max_iters) SEP              \
+    OPER(adaptive) SEP               \
     OPER(algo) SEP                   \
     OPER(solution_index) SEP         \
     OPER(requested_solution_num) SEP \
