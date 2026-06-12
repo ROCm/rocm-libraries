@@ -159,7 +159,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
 
     pm.addPass(createInsertVgprMsbPass());
 
-    if (runScheduler || moduleOptions.EnableESM2) {
+    if (moduleOptions.EnableESM2) {
         // expertScheduleMode2 region (label_ASM_Start..noLoadLoopBody): wait-alu + mode2
         // lifecycle. Must precede the kernel-wide CFGBuilder — ScopeAdaptor needs the flat
         // single-BB function. Re-derive its range first (see RederiveExpertScopePass).
@@ -172,8 +172,6 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
             innerPM.addPass(createLongBranchLoweringPass());
             innerPM.addPass(createCFGBuilderPass());
             innerPM.addPass(createInsertWaitAluPass());
-            // Shares this region scope for convenience only — not gated by expert mode.
-            innerPM.addPass(createInsertDelayAluPass(/*minWavesPerSimd=*/2));
             pm.addPass(
                 createKernelToRegionPassAdaptor(module, "expertScheduleMode2", std::move(innerPM)));
         }
@@ -183,6 +181,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     pm.addPass(createMemTokenConsistencyCheckPass());
 
     if (runScheduler) {
+        pm.addPass(createInsertDelayAluPass(/*minWavesPerSimd=*/2));
         pm.addPass(createLoopRegionRemarkPass());
     }
     pm.addPass(createEstimateAsmCyclesPass());
