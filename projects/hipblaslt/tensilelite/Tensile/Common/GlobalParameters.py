@@ -362,6 +362,8 @@ globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 # splits, and how many s_nop cycles were wasted.
 globalParameters["StinkyTofuEnableRemarks"] = False
 
+globalParameters["DisableSTWaitCnt"] = True
+
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 # we should do this here...
 defaultGlobalParameters = deepcopy(globalParameters)
@@ -425,6 +427,7 @@ defaultBenchmarkCommonParameters = [
     {"UnrollLoopSwapGlobalReadOrder": [0]},
     {"PrefetchGlobalRead": [1]},
     {"PrefetchLocalRead": [1]},
+    {"PrefetchGL2": [0]},
     {"ClusterLocalRead": [1]},
     {"SuppressNoLoadLoop": [False]},
     {"ExpandPointerSwap": [True]},
@@ -514,6 +517,7 @@ defaultBenchmarkCommonParameters = [
     {"GroupLoadStore": [False]},
     {"MIArchVgpr": [False]},
     {"StreamK": [0]},
+    {"StreamKForceDPOnly": [0]},
     {"StreamKAtomic": [0]},
     {"StreamKXCCMapping": [0]},
     {"StreamKFixupTreeReduction": [0]},
@@ -525,7 +529,7 @@ defaultBenchmarkCommonParameters = [
     {"WorkGroupReduction": [False]},
     {"ConvertAfterDS": [False]},
     {"ForceDisableShadowInit": [False]},
-    {"InitCIterWmma": [-1]},
+    {"InitCIterWmma": [0]},
     {"LDSTrInst": [False]},
     {"WaveSplitK": [ False ]},
     {"MbskPrefetchMethod": [-1]},
@@ -534,6 +538,7 @@ defaultBenchmarkCommonParameters = [
     {"SFCWGM": [[[1,1],[1,1]]]},
     {"AdaptiveGemm": [0]},
     {"AdaptiveGemmGSUA": [0]},
+    {"AdaptiveGemmNTAB": [0]},
     {"ExtraMiLatencyLeft": [-1]},
     {"ExtraLatencyForLR": [0]},
     {"TailloopInNll": [False]},
@@ -556,12 +561,8 @@ defaultBenchmarkCommonParameters = [
     # [1, 1] disables clustering. Non-[1, 1] enables Multicast so workgroups within
     # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.
     {"ClusterDim": [[1, 1]]},
-    # ClusterBarrier — True: emit split signal/wait cluster_barrier instructions
-    # so workgroups in a cluster synchronize before/after consuming shared
-    # TDM-multicast data. Requires ClusterDim != [1, 1] and TDMInst != 0;
-    # False: standard per-WG barriers, no inter-WG synchronization.
-    {"ClusterBarrier": [ False ]},
-    {"HalfPLR": [0]}
+    {"HalfPLR": [0]},
+    {"TDMIterateMode": [0]}
 ]
 
 # dictionary of defaults comprised of default option for each parameter

@@ -27,6 +27,7 @@ coverage.xml
 venv/
 env/
 ENV/
+.workspace/
 
 # IDE
 .idea/

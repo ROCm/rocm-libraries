@@ -30,9 +30,9 @@ python
 
 ## Prerequisites
 
-- CMake 3.18 or higher
+- CMake 3.26 or higher
 - A C++ compiler with C++17 support (e.g. clang++)
-- Python 3.9 or higher
+- Python 3.12 or higher
 - ROCm/HIP runtime and libraries
 
 ## Building

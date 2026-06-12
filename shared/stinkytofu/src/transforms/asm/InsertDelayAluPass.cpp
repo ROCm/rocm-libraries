@@ -36,6 +36,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
+#include "stinkytofu/ir/asm/StinkySignature.hpp"
 
 #define DEBUG_TYPE "InsertDelayAluPass"
 
@@ -223,6 +224,34 @@ struct DelayState : RegKeyMap<DelayInfo> {
 class InsertDelayAluPassImpl : public Pass {
     // Saved delay state at exit of each basic block (for cross-BB propagation).
     std::unordered_map<BasicBlock*, DelayState> blockExitState;
+
+    int minWavesPerSimd_;
+
+    // delay_alu only pays off when sibling waves exist to hide ALU latency.
+    // Missing metadata => false (run the pass).
+    //
+    // Assumes static VGPR allocation (granule is fixed per arch). Dynamic VGPR
+    // kernels (`.dynamic_vgpr_en true`) would need separate handling.
+    //
+    // Note: this only reflects what codegen can see (per-wave VGPR allocation).
+    // Whether the actual dispatch fills the GPU depends on runtime problem size
+    // (M, N, batch), which codegen does not have — small GEMMs may still under-
+    // utilize even when this predicate says occupancy is fine.
+    bool shouldSkipForLowOccupancy(const Function& func, GfxArchID archId) const {
+        auto kernelVgprs = func.getMetaData(kSigTotalVgprsMetaKey);
+        if (!kernelVgprs || *kernelVgprs == 0) return false;
+
+        const int waves = getWavesPerSimd(archId, static_cast<int>(*kernelVgprs));
+        if (waves >= minWavesPerSimd_) return false;
+
+        PASS_DEBUG(std::cerr << "[DelayAlu] skipping: kernelVgprs=" << *kernelVgprs
+                             << " -> wavesPerSimd=" << waves
+                             << " < minWavesPerSimd=" << minWavesPerSimd_ << "\n");
+        return true;
+    }
+
+   public:
+    explicit InsertDelayAluPassImpl(int minWavesPerSimd) : minWavesPerSimd_(minWavesPerSimd) {}
 
     // Emit s_delay_alu or pack into a previous one.
     // Returns the last s_delay_alu that still has room for packing (instid1 slot empty),
@@ -460,6 +489,8 @@ class InsertDelayAluPassImpl : public Pass {
         auto arch = passCtx.getGemmTileConfig().arch;
         GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
 
+        if (shouldSkipForLowOccupancy(func, archId)) return PreservedAnalyses::all();
+
         // Get RPO ordering from BBIndexAnalysis for efficient convergence.
         const auto& bbIndex = AM.getResult<BBIndexAnalysis>(func);
         const auto& rpoOrder = bbIndex.rpo;
@@ -510,7 +541,7 @@ char InsertDelayAluPassImpl::ID = 0;
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createInsertDelayAluPass() {
-    return std::make_unique<InsertDelayAluPassImpl>();
+std::unique_ptr<Pass> createInsertDelayAluPass(int minWavesPerSimd) {
+    return std::make_unique<InsertDelayAluPassImpl>(minWavesPerSimd);
 }
 }  // namespace stinkytofu
