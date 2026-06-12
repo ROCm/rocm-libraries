@@ -66,7 +66,7 @@ Tests:
 - name: spmv_csr_reuse_descr
   category: pre_checkin
   function: spmv_csr_reuse_descr
-  indextype: *i64i32
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M: 1
   N: 1
@@ -120,7 +120,7 @@ Tests:
 - name: spmv_csr_reuse_descr
   category: nightly
   function: spmv_csr_reuse_descr
-  indextype: *i64i32
+  indextype: *i32_i64
   precision: *double_only_precisions
   M: 1
   N: 1
