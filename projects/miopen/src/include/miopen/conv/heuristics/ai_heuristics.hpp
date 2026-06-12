@@ -249,6 +249,16 @@ public:
     size_t GetNumCu() const { return num_cu_3d; }
 
     /**
+     * @brief One-hot class counts for the categorical input features, from the metadata encodings.
+     *        Used to size the engineered input one-hots so they track the trained model.
+     */
+    size_t GetPrecisionClassCount() const { return precision_encodings_3d.size(); }
+    size_t GetDirectionClassCount() const { return direction_encodings_3d.size(); }
+    size_t GetInLayoutClassCount() const { return in_layout_encodings.size(); }
+    size_t GetFilLayoutClassCount() const { return fil_layout_encodings.size(); }
+    size_t GetOutLayoutClassCount() const { return out_layout_encodings.size(); }
+
+    /**
      * @brief Get number of output features
      * @return Number of outputs
      */
@@ -372,6 +382,13 @@ protected:
  */
 MIOPEN_INTERNALS_EXPORT std::unique_ptr<ModelND> GetNDModel(const std::string& device,
                                                             const int& dim);
+
+/// Engineered 2D input-feature vector for the TunaNetND input encoder: categorical one-hots
+/// (layouts, precision, direction) sized from the metadata encodings, raw passthrough features, and
+/// the shared common::EngineeredConvFeatures derived block. isFwd selects the channel/spatial
+/// orientation. Exported for golden testing.
+MIOPEN_INTERNALS_EXPORT std::vector<float> ExtractTunaNetND2dFeatures(
+    const conv::ProblemDescription& problem, bool isFwd, const MetadataND& metadata);
 
 } // namespace immed_mode
 

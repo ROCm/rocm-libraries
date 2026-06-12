@@ -433,6 +433,71 @@ std::vector<ConvNDParams> GenerateConvNDParams()
     };
 }
 
+// The TunaNet 2D engineered input vector must stay stable across refactors. This pins the assembly
+// order and the metadata-driven one-hot widths/indices (layouts, precision, direction) and num_cu,
+// by composing the expected vector from the metadata; the derived-feature math is pinned
+// deterministically by CPU_ConvAiEngineeredConvFeatures_NONE.Golden.
+TEST_P(GPU_ConvNDAIHeuristics_FP32, ExtractTunaNet2dFeaturesGolden)
+{
+    if(spatial_dim != 2)
+        GTEST_SKIP() << "Engineered input features are 2D-only";
+
+    immed_mode::MetadataND metadata(device_name, spatial_dim);
+    ASSERT_TRUE(metadata.IsValid());
+
+    // Fixed 2D forward problem (NCHW, FP32): out dims equal in dims for 3x3, pad 1, stride 1.
+    const auto problem = Create2DProblem(
+        1, 64, 56, 56, 64, 3, 3, 1, 1, 1, 1, 1, 1, miopen::conv::Direction::Forward, miopenFloat);
+
+    const auto features = immed_mode::ExtractTunaNetND2dFeatures(problem, /*isFwd=*/true, metadata);
+
+    std::vector<float> expected;
+    const auto append_one_hot = [&](size_t index, size_t width) {
+        std::vector<float> one_hot(width, 0.0f);
+        if(index < width)
+            one_hot.at(index) = 1.0f;
+        expected.insert(expected.end(), one_hot.begin(), one_hot.end());
+    };
+    append_one_hot(metadata.EncodeInLayout(problem.GetInLayout()),
+                   metadata.GetInLayoutClassCount());
+    append_one_hot(metadata.EncodeFilLayout(problem.GetWeightsLayout()),
+                   metadata.GetFilLayoutClassCount());
+    append_one_hot(metadata.EncodeOutLayout(problem.GetOutLayout()),
+                   metadata.GetOutLayoutClassCount());
+    append_one_hot(metadata.EncodePrecision(problem.GetInDataType()),
+                   metadata.GetPrecisionClassCount());
+    append_one_hot(metadata.EncodeDirection(problem.GetDirection()),
+                   metadata.GetDirectionClassCount());
+
+    // Raw passthrough: C_in,H_in,W_in,C_out,H_out,W_out,K_h,K_w then
+    // pad/stride/dilation/batch/group.
+    const std::vector<float> raw = {64.0f,
+                                    56.0f,
+                                    56.0f,
+                                    64.0f,
+                                    56.0f,
+                                    56.0f,
+                                    3.0f,
+                                    3.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f};
+    expected.insert(expected.end(), raw.begin(), raw.end());
+
+    const auto derived =
+        common::EngineeredConvFeatures(1, 64, 64, 56, 56, 56, 56, 3, 3, 1, metadata.GetNumCu());
+    expected.insert(expected.end(), derived.begin(), derived.end());
+
+    ASSERT_EQ(features.size(), expected.size());
+    for(size_t i = 0; i < expected.size(); ++i)
+        EXPECT_FLOAT_EQ(features[i], expected[i]) << "TunaNet feature mismatch at index " << i;
+}
+
 // Test name generator
 std::string ConvNDParamName(const ::testing::TestParamInfo<ConvNDParams>& info)
 {

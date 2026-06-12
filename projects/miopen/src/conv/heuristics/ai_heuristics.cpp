@@ -884,9 +884,8 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
 
 // Keep feature definitions in sync with EngineerCandidateSelectionInputFeatures
 // (ai_candidate_selection.cpp); implementations are intentionally separate.
-static std::vector<float> ExtractTunaNetND2dFeatures(const conv::ProblemDescription& problem,
-                                                     bool isFwd,
-                                                     const MetadataND& metadata)
+MIOPEN_INTERNALS_EXPORT std::vector<float> ExtractTunaNetND2dFeatures(
+    const conv::ProblemDescription& problem, bool isFwd, const MetadataND& metadata)
 {
     MIOPEN_LOG_I2("Using engineered 2d features for Tunanet");
     // Extract convolution parameters
@@ -903,34 +902,26 @@ static std::vector<float> ExtractTunaNetND2dFeatures(const conv::ProblemDescript
     // CU count the model was trained with, for the hardware-aware derived features.
     const std::size_t num_cu = metadata.GetNumCu();
 
-    const std::vector<int> in_layout =
-        common::OneHot(metadata.EncodeInLayout(problem.GetInLayout()), 2);
-    const std::vector<int> fil_layout =
-        common::OneHot(metadata.EncodeFilLayout(problem.GetWeightsLayout()), 2);
-    const std::vector<int> out_layout =
-        common::OneHot(metadata.EncodeOutLayout(problem.GetOutLayout()), 2);
-    const std::vector<int> precision =
-        common::OneHot(metadata.EncodePrecision(problem.GetInDataType()), 4);
-    const std::vector<int> direction =
-        common::OneHot(metadata.EncodeDirection(problem.GetDirection()), 3);
+    // Categorical one-hots; both index and width come from the metadata encodings so they track the
+    // trained model (e.g. precision is 3 or 4 classes depending on INT8 support).
+    const auto in_layout  = common::OneHot(metadata.EncodeInLayout(problem.GetInLayout()),
+                                          metadata.GetInLayoutClassCount());
+    const auto fil_layout = common::OneHot(metadata.EncodeFilLayout(problem.GetWeightsLayout()),
+                                           metadata.GetFilLayoutClassCount());
+    const auto out_layout = common::OneHot(metadata.EncodeOutLayout(problem.GetOutLayout()),
+                                           metadata.GetOutLayoutClassCount());
+    const auto precision  = common::OneHot(metadata.EncodePrecision(problem.GetInDataType()),
+                                          metadata.GetPrecisionClassCount());
+    const auto direction  = common::OneHot(metadata.EncodeDirection(problem.GetDirection()),
+                                          metadata.GetDirectionClassCount());
 
-    std::vector<float> features = {
-        // One-hot encodings
-        static_cast<float>(in_layout[0]),
-        static_cast<float>(in_layout[1]),
-        static_cast<float>(fil_layout[0]),
-        static_cast<float>(fil_layout[1]),
-        static_cast<float>(out_layout[0]),
-        static_cast<float>(out_layout[1]),
-        static_cast<float>(precision[0]),
-        static_cast<float>(precision[1]),
-        static_cast<float>(precision[2]),
-        static_cast<float>(precision[3]),
-        static_cast<float>(direction[0]),
-        static_cast<float>(direction[1]),
-        static_cast<float>(direction[2]),
+    std::vector<float> features;
+    for(const auto* one_hot : {&in_layout, &fil_layout, &out_layout, &precision, &direction})
+        for(const auto bit : *one_hot)
+            features.push_back(static_cast<float>(bit));
 
-        // Raw passthrough features
+    // Raw passthrough features (order matters).
+    const std::vector<float> raw_tail = {
         static_cast<float>(C_in),                       // in_channels
         static_cast<float>(H_in),                       // in_h
         static_cast<float>(W_in),                       // in_w
@@ -948,6 +939,7 @@ static std::vector<float> ExtractTunaNetND2dFeatures(const conv::ProblemDescript
         static_cast<float>(problem.GetOutBatchSize()),  // batchsize
         static_cast<float>(problem.GetGroupCount()),    // group_count
     };
+    features.insert(features.end(), raw_tail.begin(), raw_tail.end());
 
     // Derived feature block (shared with the candidate-selection path).
     const auto derived = common::EngineeredConvFeatures(
