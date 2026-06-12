@@ -993,9 +993,7 @@ rocsparselt_status
                     return rocsparselt_status_invalid_value;
                 }
                 const auto* matA = _matmulDescr->matrix_A;
-                hipDataType compute_dt = (_matmulDescr->compute_type == rocsparselt_compute_i32)
-                                             ? HIP_R_32I
-                                             : HIP_R_32F;
+                hipDataType compute_dt = HIP_R_32F;
                 if(_gateDesc->type != matA->type && _gateDesc->type != matD->type
                    && _gateDesc->type != compute_dt)
                 {

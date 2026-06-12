@@ -1001,6 +1001,18 @@ class GlobalWriteBatchWriter:
           if (vi + j) < self.gwvw:
             cvtMod.add(VMovB32(dst=vgpr(dataGate + vi + j), src=vgpr(cvtTmp + j),
               comment="GateCvt[%s]: store f32 (vi=%d)"%(gateDtype.toNameAbbrev(), vi + j)))
+    elif gateDtype.isInt8():
+      # int8 = 4 signed bytes/dword; extract+sign-extend byte (vi%4) to i32, then -> f32.
+      for vi in range(self.gwvw - 1, -1, -1):
+        dst = dataGate + vi
+        if (vi % 4) != 3:
+          cvtMod.add(VMovB32(dst=vgpr(self.tmpVgpr), src=hex((vi % 4) * 8), comment="byte offset"))
+          cvtMod.add(VBfeI32(dst=vgpr(dst), src0=vgpr(dataGate + vi // 4), src1=vgpr(self.tmpVgpr), src2=8,
+            comment="GateCvt[i8]: int8 -> int32 (vi=%d)"%vi))
+        else:
+          cvtMod.add(VAShiftRightI32(dst=vgpr(dst), shiftHex=24, src=vgpr(dataGate + vi // 4),
+            comment="GateCvt[i8]: int8(byte3) -> int32 (vi=%d)"%vi))
+        cvtMod.add(VCvtI32toF32(dst=vgpr(dst), src=vgpr(dst), comment="GateCvt[i8]: int32 -> f32 (vi=%d)"%vi))
     else:
       raise RuntimeError(
           "GateResidual: unsupported gate dtype %s" % str(gateDtype))

@@ -155,22 +155,54 @@ auto hipsparselt_spmm_dispatch(const Arguments& arg)
         }
         else if(Ti == To && To == HIP_R_8I && Tc == HIPSPARSELT_COMPUTE_32I && TBias == HIP_R_32F)
         {
-            return TEST<int8_t, int8_t, int32_t, float, int8_t>{}(arg);
+            switch(TGate)
+            {
+            case HIP_R_32F:
+                return TEST<int8_t, int8_t, int32_t, float, float>{}(arg);
+            case HIP_R_8I:
+                return TEST<int8_t, int8_t, int32_t, float, int8_t>{}(arg);
+            default:
+                break;
+            }
         }
         else if(Ti == HIP_R_8I && To == HIP_R_16F && Tc == HIPSPARSELT_COMPUTE_32I
                 && TBias == HIP_R_32F)
         {
-            return TEST<int8_t, __half, int32_t, float, int8_t>{}(arg);
+            switch(TGate)
+            {
+            case HIP_R_32F:
+                return TEST<int8_t, __half, int32_t, float, float>{}(arg);
+            case HIP_R_8I:
+                return TEST<int8_t, __half, int32_t, float, int8_t>{}(arg);
+            default:
+                break;
+            }
         }
         else if(Ti == HIP_R_8I && To == HIP_R_16BF && Tc == HIPSPARSELT_COMPUTE_32I
                 && TBias == HIP_R_32F)
         {
-            return TEST<int8_t, hip_bfloat16, int32_t, float, int8_t>{}(arg);
+            switch(TGate)
+            {
+            case HIP_R_32F:
+                return TEST<int8_t, hip_bfloat16, int32_t, float, float>{}(arg);
+            case HIP_R_8I:
+                return TEST<int8_t, hip_bfloat16, int32_t, float, int8_t>{}(arg);
+            default:
+                break;
+            }
         }
         else if(Ti == HIP_R_8I && To == HIP_R_32I && Tc == HIPSPARSELT_COMPUTE_32I
                 && TBias == HIP_R_32F)
         {
-            return TEST<int8_t, int32_t, int32_t, float, int8_t>{}(arg);
+            switch(TGate)
+            {
+            case HIP_R_32F:
+                return TEST<int8_t, int32_t, int32_t, float, float>{}(arg);
+            case HIP_R_8I:
+                return TEST<int8_t, int32_t, int32_t, float, int8_t>{}(arg);
+            default:
+                break;
+            }
         }
 #ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
         else if(Ti == HIP_R_8F_E4M3 && To == HIP_R_32F && Tc == HIPSPARSELT_COMPUTE_32F
