@@ -300,6 +300,7 @@ public:
             print("median_us", timing.median_us);
             print("min_us", timing.min_us);
             print("cv", timing.cv);
+            print("rel_iqr", timing.rel_iqr);
             print("status", status);
         }
 

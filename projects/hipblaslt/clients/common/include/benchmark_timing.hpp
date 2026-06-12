@@ -80,6 +80,19 @@ namespace hipblaslt_bench
             return (std::sqrt(var) / mean) / std::sqrt(double(n));
         }
 
+        // Minimum samples before the convergence test is trusted; a stddev from fewer
+        // is unreliable. Matches nvbench's min-samples default.
+        inline constexpr int min_samples_for_convergence = 10;
+
+        // Linear-interpolated quantile of a sorted, non-empty vector (q in [0, 1]).
+        inline double quantile(const std::vector<double>& sorted, double q)
+        {
+            const double pos = q * double(sorted.size() - 1);
+            const size_t lo  = size_t(std::floor(pos));
+            const size_t hi  = size_t(std::ceil(pos));
+            return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - double(lo));
+        }
+
         inline bool any_adaptive(const TimingConfig& cfg)
         {
             return cfg.warmup_time > 0.0f || cfg.sample_time > 0.0f || cfg.measure_time > 0.0f
@@ -144,6 +157,7 @@ namespace hipblaslt_bench
             const double per_iter = batch_us / floor_iters;
             out.median_us    = out.min_us = out.mean_us = per_iter;
             out.cv           = 0.0;
+            out.rel_iqr      = 0.0;
             out.batch        = floor_iters;
             out.samples      = 1;
             out.hot_iters    = floor_iters;
@@ -216,9 +230,11 @@ namespace hipblaslt_bench
             const bool floor_met = total_iters >= min_iters && total_us >= measure_min_us;
 
             // Past the floor, stop once the mean has converged; otherwise keep going to
-            // the ceiling. With noise_threshold <= 0, convergence never triggers, so the
-            // run goes to the ceiling.
-            if(floor_met && cfg.noise_threshold > 0.0f)
+            // the ceiling. Require a minimum sample count so the stddev (hence the
+            // convergence test) is trustworthy. With noise_threshold <= 0, convergence
+            // never triggers, so the run goes to the ceiling.
+            if(floor_met && cfg.noise_threshold > 0.0f
+               && int(per_iter_samples.size()) >= detail::min_samples_for_convergence)
                 converged = detail::relative_std_error(per_iter_samples) < cfg.noise_threshold;
 
             const bool ceiling = (measure_max_us > 0.0 && total_us >= measure_max_us)
@@ -236,14 +252,17 @@ namespace hipblaslt_bench
 
         std::vector<double> sorted(per_iter_samples);
         std::sort(sorted.begin(), sorted.end());
-        const size_t n    = sorted.size();
-        const double mean = detail::mean_of(per_iter_samples);
-        const double var  = detail::sum_sq_dev(per_iter_samples, mean) / n;
+        const size_t n      = sorted.size();
+        const double mean   = detail::mean_of(per_iter_samples);
+        const double var    = n > 1 ? detail::sum_sq_dev(per_iter_samples, mean) / (n - 1) : 0.0;
+        const double median = detail::quantile(sorted, 0.5);
+        const double iqr    = detail::quantile(sorted, 0.75) - detail::quantile(sorted, 0.25);
 
         out.min_us    = sorted.front();
-        out.median_us = (n % 2) ? sorted[n / 2] : 0.5 * (sorted[n / 2 - 1] + sorted[n / 2]);
+        out.median_us = median;
         out.mean_us   = mean;
         out.cv        = mean > 0.0 ? std::sqrt(var) / mean : 0.0;
+        out.rel_iqr   = median > 0.0 ? iqr / median : 0.0;
         out.batch        = batch;
         out.samples      = int32_t(n);
         out.hot_iters    = total_iters;

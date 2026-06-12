@@ -141,8 +141,10 @@ run is always bounded. (To run a fixed budget, set the floor and ceiling equal, 
 `--adaptive_measure_time 200 --adaptive_max_measure_time 200`.)
 
 The reported `us`/`Gflops` are the **mean**; extra columns expose the distribution:
-`batch`, `samples`, `hot_iters`, `median_us`, `min_us`, `cv`, and `status`
-(`converged` / `noisy` / `-`).
+`batch`, `samples`, `hot_iters`, `median_us`, `min_us`, `cv` (stddev/mean), `rel_iqr`
+(interquartile range / median — a drift-robust dispersion measure), and `status`
+(`converged` / `noisy` / `-`). Convergence requires at least 10 samples so the
+stddev is trustworthy.
 
 `--adaptive` is the gate; the `--adaptive_*` options tune it and **require**
 `--adaptive` (passing one without it is an error). Run `--help` for their current

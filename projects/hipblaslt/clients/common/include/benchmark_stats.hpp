@@ -69,7 +69,8 @@ namespace hipblaslt_bench
         double  median_us = 0.0;
         double  min_us    = 0.0;
         double  mean_us   = 0.0;
-        double  cv        = 0.0; // coefficient of variation across samples (stddev/mean)
+        double  cv        = 0.0; // coefficient of variation across samples (stddev/mean, n-1)
+        double  rel_iqr   = 0.0; // robust dispersion: interquartile range / median
         int32_t batch        = 0; // enqueues per sample (B)
         int32_t samples      = 0; // number of samples collected (K)
         int64_t hot_iters    = 0; // total timed enqueues (B*K)
