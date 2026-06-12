@@ -48,7 +48,7 @@
 #  include <thrust/iterator/iterator_traits.h>
 #  include <thrust/system/hip/detail/dispatch.h>
 
-#  include <cstdint>
+#  include _THRUST_STD_INCLUDE(cstdint)
 
 // rocprim include
 #  include <rocprim/rocprim.hpp>
