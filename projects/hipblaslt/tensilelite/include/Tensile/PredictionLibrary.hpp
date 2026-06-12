@@ -195,8 +195,12 @@ namespace TensileLite
                 .b_mx_block_size = 0, // MX Data types come from rocroller
             };
 
+            // Use the mosaic recommender only when this library actually has a
+            // per-library model (loaded via mosaic_index at deserialize).
+            // Otherwise fall back to plain analytical origami -- NOT to some
+            // other dtype/layout's model.
             auto prediction_result
-                = Debug::Instance().useMosaic()
+                = (Debug::Instance().useMosaic() && mosaic_model >= 0)
                       ? mosaic::hipblaslt::rank_configs(
                             mosaic_model, origami_problem,
                             *(pAMDGPU->analyticalHardware),

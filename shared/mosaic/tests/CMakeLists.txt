@@ -31,7 +31,7 @@ target_link_libraries(mosaic-tests PRIVATE roc::mosaic Catch2::Catch2WithMain)
 # without an explicit MOSAIC_WEIGHTS env override, and the bundled real-kernel
 # fixture (actual Tensile UserArgs.yaml params) for the ranking test.
 target_compile_definitions(mosaic-tests PRIVATE
-    MOSAIC_TEST_WEIGHTS="${CMAKE_CURRENT_SOURCE_DIR}/../backends/hipblaslt/data/mosaic_weights.bin"
+    MOSAIC_TEST_WEIGHTS="${CMAKE_CURRENT_SOURCE_DIR}/../backends/hipblaslt/data/TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_ID75a0_gfx950.mosaic.bin"
     MOSAIC_TEST_KERNELS="${CMAKE_CURRENT_SOURCE_DIR}/data/sample_kernels.tsv"
 )
 

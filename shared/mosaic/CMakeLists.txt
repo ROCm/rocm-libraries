@@ -105,11 +105,20 @@ if(MOSAIC_ENABLE_INSTALL OR MOSAIC_STANDALONE)
         PATTERN "*.h"
     )
 
-    # Weights ship under share/mosaic/backends/hipblaslt/data (matches the
-    # auto-discovery search path in model.cpp).
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/backends/hipblaslt/data/mosaic_weights.bin")
+    # Per-library weights ship under share/mosaic/backends/hipblaslt/data: one
+    # .mosaic.bin per library-logic stem plus the mosaic_index that maps stems
+    # -> binaries. Each PredictionLibrary resolves its own model via the index.
+    file(GLOB MOSAIC_WEIGHT_FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/backends/hipblaslt/data/*.mosaic.bin")
+    if(MOSAIC_WEIGHT_FILES)
         install(
-            FILES "${CMAKE_CURRENT_SOURCE_DIR}/backends/hipblaslt/data/mosaic_weights.bin"
+            FILES ${MOSAIC_WEIGHT_FILES}
+            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/mosaic/backends/hipblaslt/data"
+        )
+    endif()
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/backends/hipblaslt/data/mosaic_index")
+        install(
+            FILES "${CMAKE_CURRENT_SOURCE_DIR}/backends/hipblaslt/data/mosaic_index"
             DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/mosaic/backends/hipblaslt/data"
         )
     endif()

@@ -1424,19 +1424,10 @@ int load_model_by_index(const std::string& logic_stem) {
   return -1;
 }
 
-namespace {
-// Eager init: warm the weights at library load when the mosaic path is enabled,
-// so the first rank_configs() call isn't penalized by the .bin parse. Lazy
-// loading in route()/rank_configs() is the safety net, so this is best-effort.
-// Gated on TENSILE_USE_MOSAIC; honors MOSAIC_NO_EAGER_INIT to opt out.
-struct EagerInit {
-  EagerInit() {
-    if (std::getenv("MOSAIC_NO_EAGER_INIT") != nullptr) return;
-    if (!truthy_env(std::getenv("TENSILE_USE_MOSAIC"))) return;
-    ensure_weights();
-  }
-};
-static EagerInit s_eager_init_instance;
-}  // namespace
+// Note: there is intentionally no eager-init / global-weights warming. In the
+// per-library model scheme each PredictionLibrary loads its own model lazily at
+// deserialize (via mosaic_index). The singleton API (ensure_weights/load_weights)
+// remains only for the standalone tests and Python bindings, which load a model
+// explicitly via MOSAIC_WEIGHTS.
 
 }  // namespace mosaic
