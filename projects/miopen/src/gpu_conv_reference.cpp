@@ -14,7 +14,6 @@
 namespace miopen {
 
 using conv::ProblemDescription;
-using solver::ProblemInterpreter;
 using solver::conv::conv_internal::GetGroupStrideIndex;
 using solver::conv::conv_internal::MakeStrideArray;
 using solver::conv::conv_internal::SplitStrideCtoGC;
@@ -166,7 +165,7 @@ ProblemDescription MakeProblem(const TensorDescriptor& xDesc,
                                const ConvolutionDescriptor& conv,
                                miopen::conv::Direction dir)
 {
-    return ProblemDescription(xDesc, wDesc, yDesc, conv, dir);
+    return {xDesc, wDesc, yDesc, conv, dir};
 }
 
 } // anonymous namespace
