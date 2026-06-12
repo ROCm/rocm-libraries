@@ -445,6 +445,47 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          ::testing::ValuesIn(GenerateConvNDParams()),
                          ConvNDParamName);
 
+// Golden vector for the derived-feature block shared by the TunaNet (ExtractTunaNetND2dFeatures)
+// and candidate-selection input encoders via common::EngineeredConvFeatures. Pins the shared math
+// so a hasty change on either path is caught. The values match the derived tail of the
+// candidate-selection EngineeredInputGolden_Test for the same dimensions, anchoring both consumers
+// to one source. Pure CPU math -- no model files or device required.
+TEST(CPU_ConvAiEngineeredConvFeatures_NONE, Golden)
+{
+    const auto derived                = common::EngineeredConvFeatures(/*N=*/1,
+                                                        /*C_in=*/64,
+                                                        /*C_out=*/64,
+                                                        /*H_in=*/56,
+                                                        /*W_in=*/56,
+                                                        /*H_out=*/56,
+                                                        /*W_out=*/56,
+                                                        /*K_h=*/3,
+                                                        /*K_w=*/3,
+                                                        /*groups=*/1,
+                                                        /*num_cu=*/254);
+    const std::vector<float> expected = {19.2588406f,
+                                         8.05102253f,
+                                         4.17438745f,
+                                         6.35784245f,
+                                         49.0f,
+                                         5.44444466f,
+                                         0.111111112f,
+                                         18.5656948f,
+                                         6.67351675f,
+                                         1.0f,
+                                         0.00286989799f,
+                                         1.0f,
+                                         0.015625f,
+                                         4.04305124f,
+                                         4.04305124f,
+                                         4.17438745f,
+                                         4.17438745f,
+                                         0.693147182f};
+    ASSERT_EQ(derived.size(), expected.size());
+    for(std::size_t i = 0; i < expected.size(); ++i)
+        EXPECT_FLOAT_EQ(derived[i], expected[i]) << "derived feature mismatch at index " << i;
+}
+
 } // namespace
 
 #endif // MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK

@@ -61,17 +61,17 @@ std::vector<int> OneHot(long long label, std::size_t num_classes);
 // dimensions it returns the engineered tail (log-transformed FLOPs/GEMM sizes, utilization and
 // spatial/channel ratios) in a fixed order. Single source of truth so the two paths cannot drift.
 // Defined in ai_heuristics.cpp.
-std::vector<float> EngineeredConvFeatures(std::size_t N,
-                                          std::size_t C_in,
-                                          std::size_t C_out,
-                                          std::size_t H_in,
-                                          std::size_t W_in,
-                                          std::size_t H_out,
-                                          std::size_t W_out,
-                                          std::size_t K_h,
-                                          std::size_t K_w,
-                                          std::size_t groups,
-                                          std::size_t num_cu);
+MIOPEN_INTERNALS_EXPORT std::vector<float> EngineeredConvFeatures(std::size_t N,
+                                                                  std::size_t C_in,
+                                                                  std::size_t C_out,
+                                                                  std::size_t H_in,
+                                                                  std::size_t W_in,
+                                                                  std::size_t H_out,
+                                                                  std::size_t W_out,
+                                                                  std::size_t K_h,
+                                                                  std::size_t K_w,
+                                                                  std::size_t groups,
+                                                                  std::size_t num_cu);
 
 /**
  * @brief Load JSON from file path
