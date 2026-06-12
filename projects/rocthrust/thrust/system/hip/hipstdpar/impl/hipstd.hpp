@@ -44,7 +44,10 @@
 #if defined(__HIPSTDPAR__)
 
 #  include <cstddef>
+#  include <cstdio>
+#  include <cstdlib>
 #  include <iterator>
+#  include <mutex>
 #  include <new>
 #  include <type_traits>
 #  include <utility>
@@ -54,6 +57,34 @@
 
 namespace hipstd
 {
+// Emits a one-time stderr warning when HSA_XNACK is not set to "1" and the
+// interpose-alloc compiler flag was not active.  Without XNACK or managed
+// memory, device-only allocations are not CPU-accessible and hipstdpar
+// algorithms may silently produce wrong results.
+// Suppressed when __HIPSTDPAR_INTERPOSE_ALLOC__ or __HIPSTDPAR_INTERPOSE_ALLOC_V1__
+// is defined because interpose-alloc replaces allocations with hipMallocManaged,
+// making XNACK unnecessary.
+inline void warn_if_no_xnack() noexcept
+{
+#  if !defined(__HIPSTDPAR_INTERPOSE_ALLOC__) && !defined(__HIPSTDPAR_INTERPOSE_ALLOC_V1__)
+#    if defined(__linux__)
+  static ::std::once_flag xnack_flag_;
+  ::std::call_once(xnack_flag_, [] {
+    const char* val = ::std::getenv("HSA_XNACK");
+    if (val == nullptr || val[0] != '1' || val[1] != '\0')
+    {
+      ::std::fputs(
+        "hipstdpar warning: HSA_XNACK is not set to 1. "
+        "Host-allocated memory may not be directly accessible on the device. "
+        "Set HSA_XNACK=1 before running, or recompile with -hipstdpar-interpose-alloc "
+        "to suppress this warning.\n",
+        stderr);
+    }
+  });
+#    endif // __linux__
+#  endif // !__HIPSTDPAR_INTERPOSE_ALLOC__ && !__HIPSTDPAR_INTERPOSE_ALLOC_V1__
+}
+
 template <typename... Cs>
 inline constexpr bool is_offloadable_callable() noexcept
 {
