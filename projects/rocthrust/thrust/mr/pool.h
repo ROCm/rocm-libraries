@@ -38,9 +38,8 @@
 #include <thrust/mr/memory_resource.h>
 #include <thrust/mr/pool_options.h>
 
+#include _THRUST_STD_INCLUDE(cassert)
 #include _THRUST_STD_INCLUDE(cstdint)
-
-#include <cassert>
 
 THRUST_NAMESPACE_BEGIN
 namespace mr
