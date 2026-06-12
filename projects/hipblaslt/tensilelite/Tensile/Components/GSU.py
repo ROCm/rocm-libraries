@@ -108,12 +108,12 @@ class GSU(Component):
 
         if kernel["_GlobalAccumulation"] == "MultipleBuffer" or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
             gsuLabel = Label(label=writer.labels.getNameInc("GSU"), comment="")
-            with writer.allocTmpSgpr(1) as tmpSgprGSU:
+            with writer.allocTmpSgpr(1, tag="computeStoreSrdStart_tmpSgprGSU") as tmpSgprGSU:
                 module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
                 module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
                 module.add(SCBranchSCC1(labelName=gsuLabel.getLabelName(), comment="branch if GSU == 1"))
             # GSU algorithm 2: adjust output buffer address to per GSU buffer
-            with writer.allocTmpSgpr(4, alignment=1) as tmpSgprInfo:
+            with writer.allocTmpSgpr(4, alignment=1, tag="computeStoreSrdStart_tmpSgprInfo") as tmpSgprInfo:
                 if tmpSgprInfo.idx % 2 == 0:
                     tmpSgprX2 = tmpSgprInfo.idx+0
                     tmpSgpr0 = tmpSgprInfo.idx+0
@@ -193,6 +193,14 @@ class GSU(Component):
     @abc.abstractmethod
     def reductionBranches(self, writer, kernel, tPB, vectorWidths, elements, tmpVgpr, cvtVgprStruct, vectorDataTypes, factorDims, reductionEndLabel, endLabel):
         pass
+    
+    @abc.abstractmethod
+    def initializeSrd(self, writer, ArgTypeCheckLabel, GeneralBatchedGemmSrdInitiation_End, kernel, ch):
+        pass
+
+    @abc.abstractmethod
+    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, multipleBufferChecks, generalBatchedGemmLoad, mat, kernel, tmpS1):
+        pass
 
 class GSUOff(GSU):
     kernel = {"GlobalSplitU": 0}
@@ -222,7 +230,7 @@ class GSUOff(GSU):
           m = -m
 
         if writer.states.globalReadIncsUseVgpr:
-            with writer.allocTmpSgpr(2) as tmpSgprInfo:
+            with writer.allocTmpSgpr(2, tag="GSUOff_graIncrements_tmpSgprInfo") as tmpSgprInfo:
                 tmpSgpr = tmpSgprInfo.idx
                 module.add(SMovB32(dst=sgpr(tmpSgpr+0), src="DepthU*%d"%(tP["bpeGR"]), comment="DepthU*Bpe"))
                 module.add(SMulI32(dst=sgpr(tmpSgpr+0), src0=sgpr(tmpSgpr+0), src1=stride, \
@@ -300,6 +308,14 @@ class GSUOff(GSU):
         module = Module("GSU Off writeBiasToGlobal")
         return module
 
+    def initializeSrd(self, writer, ArgTypeCheckLabel, GeneralBatchedGemmSrdInitiation_End, kernel, ch):
+        module = Module("GSU Off initializeSrd")
+        return module
+
+    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, multipleBufferChecks, generalBatchedGemmLoad, mat, kernel, tmpS1):
+        module = Module("GSU Off routeToGeneralBatchedOrStridedBatched")
+        return module
+        
 class GSUOn(GSU):
     kernel = {"GlobalSplitUAlgorithm": ["MultipleBuffer", "MultipleBufferSingleKernel"]}
     # if GSU <= gsuThreshold, last wg does the reduction and no R/W to WS
@@ -318,7 +334,7 @@ class GSUOn(GSU):
 
         gsuLabel    = Label(label=writer.labels.getNameInc("GSU"), comment="")
         gsuLabelEnd = Label(label=writer.labels.getNameInc("GSU_End"), comment="")
-        with writer.allocTmpSgpr(1) as tmpSgprGSU:
+        with writer.allocTmpSgpr(1, tag="GSU On graWorkGroup_tmpSgprGSU") as tmpSgprGSU:
             module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
             module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
             module.add(SCBranchSCC1(labelName=gsuLabel.getLabelName(), comment="branch if GSU == 1"))
@@ -330,7 +346,7 @@ class GSUOn(GSU):
                 module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=2, comment="ArgType == 2 ?"))
                 module.add(SCBranchSCC0(labelName=extReadEpilogueLabeltmp.getLabelName()))
 
-            with writer.allocTmpSgpr(2,2) as tmpSgprD:
+            with writer.allocTmpSgpr(2,2, tag="GSU On graWorkGroup_tmpSgprD") as tmpSgprD:
                 module.add(SMovB64(dst=sgpr(tmpSgprD.idx,2), src=sgpr("AddressD",2), comment="tmp=Output"))
                 module.add(SMovB64(dst=sgpr("AddressD",2), src=sgpr("AddressTD",2), comment="D=Workspace"))
                 module.add(SMovB64(dst=sgpr("AddressTD",2), src=sgpr(tmpSgprD.idx,2), comment="TD=Output"))
@@ -339,11 +355,11 @@ class GSUOn(GSU):
         module.addComment("GSU-not-WGMapRR :nwg1 = (size%s + MT%s - 1) / MT%s;" \
             % (writer.states.tileChar1, writer.states.tileChar1, writer.states.tileChar1))
 
-        tmpVgpr = writer.vgprPool.checkOut(2, "tmp")
+        tmpVgpr = writer.vgprPool.checkOut(2, tag="GSUOn_graWorkGroup_tmpVgpr")
         tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
         gsuwgmrrLabel    = Label(label=writer.labels.getNameInc("GSUWGMRR"), comment="")
         gsuwgmrrLabelEnd = Label(label=writer.labels.getNameInc("GSUWGMRR_End"), comment="")
-        with writer.allocTmpSgpr(1) as tmpSgprInfo:
+        with writer.allocTmpSgpr(1, tag="GSU On graWorkGroup_tmpSgprInfo") as tmpSgprInfo:
             module.add(SAndB32(dst=sgpr(tmpSgprInfo.idx), src0=sgpr("GSU"), src1=hex(0x4000), comment="SCC = (GSUWGMRR == 1) ?"))
             module.add(SCBranchSCC1(labelName=gsuwgmrrLabel.getLabelName(), comment="branch if GSUWGMRR == 1"))
             # wg1       = wg1 / GSU
@@ -439,7 +455,7 @@ class GSUOn(GSU):
         isMirrorIdx = dimIdx in kernel["ProblemType"]["MirrorDims%s"%tc]
 
         if writer.states.globalReadIncsUseVgpr:
-            with writer.allocTmpSgpr(3) as tmpSgprInfo:
+            with writer.allocTmpSgpr(3, tag="GSUOn_graIncrements_tmpSgprInfo") as tmpSgprInfo:
                 tmpSgpr = tmpSgprInfo.idx
                 gsuSgpr = tmpSgpr + 2
                 du = kernel["_DepthU%s"%tc]
@@ -462,7 +478,7 @@ class GSUOn(GSU):
                     dst=vgpr("GlobalReadIncs%s+%u+1"%(tc, 2*loopIdx)), \
                     src=sgpr(tmpSgpr+1)))
         else:
-            with writer.allocTmpSgpr(2) as tmpSgprInfo:
+            with writer.allocTmpSgpr(2, tag="GSUOn_graIncrements_tmpSgprInfo2") as tmpSgprInfo:
                 incr = sgpr("GlobalReadIncs%s+%u"%(tc, loopIdx))
                 tmpSgpr = tmpSgprInfo.idx
                 gsuSgpr = tmpSgpr + 1
@@ -519,7 +535,7 @@ class GSUOn(GSU):
     def graIncrementsRestore(self, writer, kernel, loopCounterName):
         module = Module("GSU On graIncrementsRestore")
 
-        with writer.allocTmpSgpr(1) as tmpSgprInfo:
+        with writer.allocTmpSgpr(1, tag="GSU On graIncrementsRestore_tmpSgprInfo") as tmpSgprInfo:
             gsuSgpr = tmpSgprInfo.idx
             module.add(SAndB32(dst=sgpr(gsuSgpr), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
             module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(gsuSgpr), src1=kernel["DepthU"]))
@@ -563,7 +579,7 @@ class GSUOn(GSU):
         remainder = "GSUSumIdx+1" # numIterPerWgRemainder
         dividend = destName
 
-        tmpVgpr = writer.vgprPool.checkOut(2,"tmp")
+        tmpVgpr = writer.vgprPool.checkOut(2, tag="GSUOn_calculateLoopNumIter_tmpVgpr")
         tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
         module.add(scalarUInt32DivideAndRemainder(quotient, dividend, "GSU", remainder, tmpVgprRes, wavewidth=kernel["WavefrontSize"]))
         writer.vgprPool.checkIn(tmpVgpr)
@@ -579,7 +595,7 @@ class GSUOn(GSU):
 
     def calculateIncrementMetadata(self, writer, kernel, sgprOut):
         module = Module("GSU On calculateLoopNumIter")
-        with writer.allocTmpSgpr(1) as tmpSgprGSU:
+        with writer.allocTmpSgpr(1, tag="GSU On calculateIncrementMetadata_tmpSgprGSU") as tmpSgprGSU:
             module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
             module.add(SMulI32(dst=sgpr(sgprOut), src0=kernel["DepthU"], src1=sgpr(tmpSgprGSU.idx), comment="IncsMetadata = GSU*DepthU"))
             module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x8000), comment="SCC = (GSUC == 1) ?"))
@@ -599,7 +615,7 @@ class GSUOn(GSU):
         needSecondNLL  = isDTV # need 2 NLL for 2 buffers (PGR1/2)
         NLLnum = 2 if needSecondNLL else 1
         gsuLabel = Label(label=writer.labels.getNameInc("GSU"), comment="")
-        with writer.allocTmpSgpr(1) as tmpSgprGSU:
+        with writer.allocTmpSgpr(1, tag="GSU On noLoadLoop_tmpSgprGSU") as tmpSgprGSU:
             module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
             module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
         noLoadLoopModules = None
@@ -643,7 +659,7 @@ class GSUOn(GSU):
         writer.states.bpeCexternal = bpeCexternalBackup
 
         if acclen > 16384:
-            with writer.allocTmpSgpr(3) as tmpSgprInfo:
+            with writer.allocTmpSgpr(3, tag="GSU On noLoadLoop_tmpSgprInfo") as tmpSgprInfo:
                 module.add(writer.longBranchScc0(gsuLabel, posNeg=1, tmpSgprInfo=tmpSgprInfo, comment="branch if GSU != 1"))
         else:
             module.add(SCBranchSCC0(labelName=gsuLabel.getLabelName(), comment="branch if GSU != 1"))
@@ -657,7 +673,7 @@ class GSUOn(GSU):
     def tailLoopNumIter(self, writer, kernel, loopCounter):
         module = Module("GSU On tailLoopNumIter")
 
-        with writer.allocTmpSgpr(3) as tmpSgprInfo:
+        with writer.allocTmpSgpr(3, tag="GSU On tailLoopNumIter_tmpSgprInfo") as tmpSgprInfo:
             tmpSgpr = tmpSgprInfo.idx
             remainder    = "GSUSumIdx+1" # numIterPerWgRemainder
             gsucLabel    = Label(label=writer.labels.getNameInc("GSUC_TL"), comment="")
@@ -670,7 +686,7 @@ class GSUOn(GSU):
             module.add(SBranch(gsucLabelEnd.getLabelName()))
             module.add(gsucLabel)
             # calculate the lastWg
-            tmpVgpr = writer.vgprPool.checkOut(2,"tmp")
+            tmpVgpr = writer.vgprPool.checkOut(2, tag="GSUOn_tailLoopNumIter_tmpVgpr")
             tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
             module.add(SLShiftRightB32(dst=sgpr(tmpSgpr+1), src=sgpr("SizesSum"), shiftHex=log2(kernel["DepthU"]), \
                                             comment="s%s = s[sgprSizesSum] / %s"%(tmpSgpr+1,kernel["DepthU"])))
@@ -700,7 +716,7 @@ class GSUOn(GSU):
             gsuBackup   = kernel["GlobalSplitU"]
             gsuLabel    = Label(label=writer.labels.getNameInc("GSU"), comment="")
             gsuLabelEnd = Label(label=writer.labels.getNameInc("GSU_End"), comment="")
-            with writer.allocTmpSgpr(1) as tmpSgprGSU:
+            with writer.allocTmpSgpr(1, tag="GSU On setupNewTile_tmpSgprGSU") as tmpSgprGSU:
                 module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
                 module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
             module.add(SCBranchSCC1(labelName=gsuLabel.getLabelName(), comment="branch if GSU == 1"))
@@ -838,12 +854,12 @@ class GSUOn(GSU):
             # Temporarily grow pool for sgpr
             sgprList = []
             if kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel':
-                sgprList.append(writer.sgprPool.checkOut(1, preventOverflow=False))
-                sgprList.append(writer.sgprPool.checkOut(1, preventOverflow=False))
-                sgprList.append(writer.sgprPool.checkOut(1, preventOverflow=False))
-                sgprList.append(writer.sgprPool.checkOutAligned(2, 2, preventOverflow=False))
-                sgprList.append(writer.sgprPool.checkOutAligned(2, 2, preventOverflow=False))
-                sgprList.append(writer.sgprPool.checkOutAligned(4, 4, preventOverflow=False))
+                sgprList.append(writer.sgprPool.checkOut(1, tag="reductionProcedure_sgprList1", preventOverflow=False))
+                sgprList.append(writer.sgprPool.checkOut(1, tag="reductionProcedure_sgprList2", preventOverflow=False))
+                sgprList.append(writer.sgprPool.checkOut(1, tag="reductionProcedure_sgprList3", preventOverflow=False))
+                sgprList.append(writer.sgprPool.checkOutAligned(2, 2, tag="reductionProcedure_sgprList4", preventOverflow=False))
+                sgprList.append(writer.sgprPool.checkOutAligned(2, 2, tag="reductionProcedure_sgprList5", preventOverflow=False))
+                sgprList.append(writer.sgprPool.checkOutAligned(4, 4, tag="reductionProcedure_sgprList6", preventOverflow=False))
                 for s in sgprList:
                     writer.sgprPool.checkIn(s)
 
@@ -856,7 +872,7 @@ class GSUOn(GSU):
                 tmpVgprDynamicSize  = vgprMbsk
                 tmpVgprDynamicAlign = 4
             if tmpVgprDynamicSize > 0:
-                tmpVgprDynamic = ContinuousRegister(idx=writer.vgprPool.checkOutAligned(tmpVgprDynamicSize, tmpVgprDynamicAlign), size=tmpVgprDynamicSize)
+                tmpVgprDynamic = ContinuousRegister(idx=writer.vgprPool.checkOutAligned(tmpVgprDynamicSize, tmpVgprDynamicAlign, tag="reductionProcedure_tmpVgprDynamic"), size=tmpVgprDynamicSize)
 
             ss = StoreState(writer, kernel, gwvw, edge, True, atomic, elements[edgeI], vectorDataTypes, dim=0, isWorkspace=True)
 
@@ -899,10 +915,10 @@ class GSUOn(GSU):
 
             if numVgprAvailable < minNeeded:
                 gwvwOrig = gwvw
-                currentOccupancy = writer.getOccupancy(kernel["NumThreads"], writer.getLdsSize(kernel), \
-                        writer.vgprPool.size(), writer.sgprPool.size(), writer.agprPool.size(), writer.states.doubleVgpr)
-                futureOccupancy = writer.getOccupancy(kernel["NumThreads"], writer.getLdsSize(kernel), \
-                        writer.vgprPool.size() - numVgprAvailable + minNeeded, writer.sgprPool.size(), writer.agprPool.size(), writer.states.doubleVgpr)
+                currentOccupancy = writer.getOccupancy(kernel["NumThreads"], writer.vgprPool.size(), \
+                        writer.sgprPool.size(), writer.getLdsSize(kernel), writer.agprPool.size(), writer.states.doubleVgpr)
+                futureOccupancy = writer.getOccupancy(kernel["NumThreads"], writer.vgprPool.size() - numVgprAvailable + minNeeded, \
+                        writer.sgprPool.size(), writer.getLdsSize(kernel), writer.agprPool.size(), writer.states.doubleVgpr)
 
                 if gsuDebug:
                     print("currentOccupancy=%u futureOccupancy=%u VGPRs=%u numVgprAvail=%u vgprPerElem=%u" \
@@ -992,7 +1008,7 @@ class GSUOn(GSU):
             module.addComment1("edge=%d, allocate %u sgpr. perBatchTmpS=%u perBatchMaskS=%u perElementMaskS=%u elementsPerBatch=%u" %
                     (edgeI, numSgprs, ss.cfg.numTempSgprPerBatch, ss.cfg.numMaskSgprPerBatch, ss.cfg.numMaskSgprPerElement, numElementsPerBatch))
 
-            with writer.allocTmpSgpr(numSgprs, 2) as tmpSgpr:
+            with writer.allocTmpSgpr(numSgprs, 2, tag="GSU On globalWriteBatch_tmpSgpr") as tmpSgpr:
                 elementSgprs = tmpSgpr.idx + ss.cfg.numTempSgprPerBatch
                 codeAccVgprRead = deepcopy(writer.codes.accVgprRead) if writer.states.serializedStore else None
                 codeAccVgprWrite = deepcopy(writer.codes.accVgprWrite) if writer.states.serializedStore else None
@@ -1054,9 +1070,9 @@ class GSUOn(GSU):
     def syncOffsetPreparation(self, writer, kernel, tmpSgpr, partialWriteLabel):
         module = Module("GSU Common syncOffsetPreparation")
 
-        tmpS01 = writer.sgprPool.checkOut(1, preventOverflow=False)
-        tmpS02 = writer.sgprPool.checkOut(1, preventOverflow=False)
-        tmpS03 = writer.sgprPool.checkOut(1, preventOverflow=False)
+        tmpS01 = writer.sgprPool.checkOut(1, tag="syncOffsetPreparation_tmpS01", preventOverflow=False)
+        tmpS02 = writer.sgprPool.checkOut(1, tag="syncOffsetPreparation_tmpS02", preventOverflow=False)
+        tmpS03 = writer.sgprPool.checkOut(1, tag="syncOffsetPreparation_tmpS03", preventOverflow=False)
 
         #####################################synchronizer offset cal and set synchronizer#####################################
         #####################################WaveId+WgId*WaveNum+WgNum*WaveNum*Batch#####################################
@@ -1440,10 +1456,10 @@ class GSUOn(GSU):
         reductionSkipLabel = Label(writer.labels.getNameInc("reduction_skip"), comment="")
         reductionAllGsuWgLabel = Label(writer.labels.getNameInc("reduction_all_gsu_wg"), comment="")
 
-        tmpS01 = writer.sgprPool.checkOut(1, preventOverflow=False)
-        tmpS02 = writer.sgprPool.checkOut(1, preventOverflow=False)
-        tmpS05 = writer.sgprPool.checkOutAligned(2,2, preventOverflow=False)
-        tmpS06 = writer.sgprPool.checkOutAligned(4,4, preventOverflow=False)
+        tmpS01 = writer.sgprPool.checkOut(1, tag="GSUSynccodegenOpt_tmpS01", preventOverflow=False)
+        tmpS02 = writer.sgprPool.checkOut(1, tag="GSUSynccodegenOpt_tmpS02", preventOverflow=False)
+        tmpS05 = writer.sgprPool.checkOutAligned(2,2, tag="GSUSynccodegenOpt_tmpS05", preventOverflow=False)
+        tmpS06 = writer.sgprPool.checkOutAligned(4,4, tag="GSUSynccodegenOpt_tmpS06", preventOverflow=False)
         tmpS06Res = ContinuousRegister(idx=tmpS06, size=4)
 
         bufferOOB = tmpVgpr.idx + tmpVgpr.size - 1
@@ -1650,7 +1666,7 @@ class GSUOn(GSU):
 
                 module.addComment("buffer add end2")
         else:
-            tmpWSD = writer.sgprPool.checkOutAligned(4, 4, preventOverflow=False)
+            tmpWSD = writer.sgprPool.checkOutAligned(4, 4, tag="GSUSynccodegenOpt_tmpWSD", preventOverflow=False)
             GSUtotal = writer.getMBSKGSUTotal(kernel)-1
             loadWidth = gwvw * int(max(1, kernel["ProblemType"]["DestDataType"].numRegisters()))
             unrolledWGs = GSUtotal // len(batchElements)
@@ -1982,4 +1998,46 @@ class GSUOn(GSU):
 
         module.addSpaceLine()
 
+        return module
+
+    def initializeSrd(self, writer, ArgTypeCheckLabel, GeneralBatchedGemmSrdInitiation_End, kernel, ch):
+        module = Module("initializeSrd")
+        # Special handling for "MultipleBuffer" and "MultipleBufferSingleKernel" for General Batched GEMM
+        # ArgType == 3 (General Batched GEMM) but GSU == 1, then SrdC/D will be initialized to correct batch matrix address from pointer array (AddressC/D)
+        # ArgType == 3 (General Batched GEMM) but GSU > 1, then SrdC/D will be initialized with workspace.
+        # "MultipleBuffer" means both SrdC and SrdD are workspace pointers
+        # "MultipleBufferSingleKernel" means only SrdD will be workspace pointer while SrdC will be initialized to correct batch matrix address from pointer array (AddressC)      
+        if((kernel["_GlobalAccumulation"] == 'MultipleBuffer') or (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel')):
+            with writer.allocTmpSgpr(1, tag="initializeSrd_tmpSgprGSU") as tmpSgprGSU:
+                module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+                module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
+                module.add(SCBranchSCC1(labelName=ArgTypeCheckLabel.getLabelName(), comment="Handling General Batched GEMM SRD initialization"))
+                if((kernel["_GlobalAccumulation"] == 'MultipleBuffer') or (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and ch == "D")):
+                    module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=sgpr("Address%s+0"%ch, 2), comment="init SRD base address" )) 
+                    module.add(SBranch(labelName=GeneralBatchedGemmSrdInitiation_End.getLabelName(), comment="End of handling General Batched GEMM SRD initialization"))
+                module.add(ArgTypeCheckLabel)
+        return module
+
+    # GSU = 1, then all C and D will have pointer to device memory holding pointer array to batch matrices. 
+    # So we need logic to get the correct batch matrix address into Srd.
+    # GSU > 1, then AddressA/B will be pointer to device memory holding pointer array to batch matrices but AddressC/D will further depend on the following:
+    # a) MultiBuffer case: AddressC/D will be pointer to workspace and will be handled similar to Strided Batched case.
+    # b) MultiBufferSingleKernel case: AddressC will be pointer to device memory holding pointer array to batch matrices while AddressD will be pointer to workspace.
+    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, argTypeChecks, generalBatchedGemmLoad, mat, kernel, tmpS1):
+        module = Module("routeToGeneralBatchedOrStridedBatched")
+        module.add(SCmpEQU32(src0=sgpr(tmpS1), src1=1, comment="GSU == 1 ?"))
+        if(kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and mat == "C"):
+            module.add(SCBranchSCC0(labelName=argTypeChecks.getLabelName()))
+        else:
+            module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName()))
+        if kernel["ProblemType"]["SupportUserArgs"]:
+            module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+            module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName())) 
+        if(kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and mat == "C"):
+            module.add(SBranch(labelName=stridedBatchedGemmLoad.getLabelName()))
+            module.add(argTypeChecks)
+            if kernel["ProblemType"]["SupportUserArgs"]:
+                module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))   
+                module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName()))
+                module.add(SBranch(labelName=stridedBatchedGemmLoad.getLabelName()))  
         return module
