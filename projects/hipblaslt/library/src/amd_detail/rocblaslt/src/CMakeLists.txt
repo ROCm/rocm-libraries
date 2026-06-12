@@ -28,15 +28,8 @@ target_include_directories(hipblaslt PRIVATE "${PROJECT_SOURCE_DIR}/device-libra
 # (where the symbols stay hidden, leaving the public ABI unchanged) and the
 # hipblaslt-test harness (which needs to call the internal entry points
 # directly).  This avoids exporting internal symbols from the release .so.
-#
-# The file contains __global__ HIP kernels and must be compiled as HIP, even
-# though the rest of the sources in this directory are plain C++.
 add_library(hipblaslt-fp64-emulation OBJECT
     "${CMAKE_CURRENT_SOURCE_DIR}/fp64_emulation.cpp"
-)
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/fp64_emulation.cpp"
-    PROPERTIES LANGUAGE HIP
 )
 set_target_properties(hipblaslt-fp64-emulation PROPERTIES
     POSITION_INDEPENDENT_CODE ON
