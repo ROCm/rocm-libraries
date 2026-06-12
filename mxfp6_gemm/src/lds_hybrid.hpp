@@ -172,7 +172,7 @@ __global__ void __launch_bounds__(256, MIN_OCC)
             }
 #pragma unroll
             for (int mi = 0; mi < M_PW; mi++)
-                mfma_scale_f32_32x32x64_fp6<0>(acc[mi][ni], a[mi], b_cur, sav[mi], sbv_cur);
+                mfma_scale_f32_32x32x64_fp6_swapC(acc[mi][ni], a[mi], b_cur, sav[mi], sbv_cur);
         }
     };
 
@@ -194,15 +194,28 @@ __global__ void __launch_bounds__(256, MIN_OCC)
     }
     if (kt < k_tiles) { wait_vmcnt(0); __syncthreads(); compute(0, 0, kt, 0, false, sa0, sb0); }
 
+    // EPILOGUE — naturally COALESCED, no transpose. The swapped-operand MFMA above made acc hold
+    // C^T (lane = N-column), so storing row-major D[m][n] with n = base + lane%32 means consecutive
+    // lanes write consecutive N = consecutive addresses (each store instruction = one 64B-coalesced
+    // cache-line transaction across the 32 N-lanes). No LDS, no barrier, works for any OutT.
+    // (The MFMA layout was the root cause of store backpressure; fixing it at the source beats an
+    // LDS-transpose epilogue — same +2.7% but simpler and FP32/BF16 get it too. See HANDOFF.)
 #pragma unroll
-    for (int mi = 0; mi < M_PW; mi++) {
-        int m = wg_m * M_TILE + (wm * M_PW + mi) * 32;
+    for (int mi = 0; mi < M_PW; mi++)
 #pragma unroll
         for (int ni = 0; ni < N_PW; ni++) {
-            int n = wg_n * N_TILE + (wn * N_PW + ni) * 32;
-            store_acc_t<OutT>(D, N, acc[mi][ni].vec, m, n);
+            int n  = wg_n * N_TILE + (wn * N_PW + ni) * 32 + (lane & 31);
+            int nh = lane >> 5;
+            int mb = wg_m * M_TILE + (wm * M_PW + mi) * 32;
+            const v16f& a = acc[mi][ni].vec;
+#pragma unroll
+            for (int g = 0; g < 4; g++) {
+                int m0 = mb + g * 8 + nh * 4;
+#pragma unroll
+                for (int j = 0; j < 4; j++)
+                    D[(size_t)(m0 + j) * N + n] = (OutT)a[g * 4 + j];
+            }
         }
-    }
 }
 
 } // namespace mxfp6

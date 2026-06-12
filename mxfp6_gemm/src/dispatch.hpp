@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 // INTERNAL: templated GEMM launch for the unified hybrid drip-A kernel. The public,
 // type-erased entry points (mxfp6::gemm / mxfp6::choose_tile) live in mxfp6/gemm.hpp and
 // are defined in src/gemm.cpp, which instantiates this template for F32/F16/BF16.

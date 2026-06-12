@@ -184,6 +184,23 @@ __device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6(
     );
 }
 
+// MFMA with SWAPPED operands: src0=A, src1=B (vs the stock src0=B,src1=A "TransposeC").
+// This makes the accumulator come out as C^T in registers → each lane holds 1 N-COLUMN × 16
+// M-rows. The payoff is in the EPILOGUE: storing row-major D[m][n] with n = base + lane%32 is
+// then NATURALLY COALESCED (consecutive lanes → consecutive N → consecutive addresses), so no
+// LDS-transpose / no barrier / no extra LDS is needed, and it works for any OutT (F16/BF16/F32).
+// Operands are symmetric (both are "lane holds 32 K-values"), so swapping src0/src1 is valid;
+// each operand keeps its own scale (scale0=scale_a with src0=a, scale1=scale_b with src1=b).
+__device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6_swapC(
+    AccTileA& acc, v6i a, v6i b, int scale_a, int scale_b)
+{
+    asm volatile(
+        "v_mfma_scale_f32_32x32x64_f8f6f4 %0, %1, %2, %0, %3, %4 cbsz:2 blgp:2"
+        : "+a"(acc.vec)
+        : "v"(a), "v"(b), "v"(scale_a), "v"(scale_b)
+    );
+}
+
 // MFMA: v6i operands (already 6 contiguous VGPRs from plain loads).
 // No to_v6i round-trip → no scalar reconstruction → operand stays contiguous.
 template <int BYTE_SEL>

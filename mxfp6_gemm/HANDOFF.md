@@ -1,7 +1,11 @@
 # MXFP6 GEMM — Handoff
 
-**Date:** 2026-06-10 · **Branch:** `zhewan/ck/mxfp6-standalone`
+**Date:** 2026-06-11 · **Branch:** `zhewan/ck/mxfp6-standalone`
 **Machine:** AMD Instinct MI350X (gfx950, CDNA4), ROCm 7.0.2.1
+
+> 2026-06-11 session = **no code change** — a measurement/audit pass: confirmed every perf knob is
+> already at its optimum, hard-measured the utilization picture, fair-corrected the vs-CK comparison,
+> and wrote a perf-theory doc. All findings folded in below. Net: kernel is at its structural ceiling.
 
 Problem: `D[M,N] = A[M,K] · B[K,N]`, MXFP6 E2M3 inputs + per-32-block E8M0 scales, FP16/BF16/F32 out.
 MFMA = `v_mfma_scale_f32_32x32x64_f8f6f4` (cbsz:2 blgp:2, 32 cyc/inst on FP6).
@@ -11,7 +15,8 @@ MFMA = `v_mfma_scale_f32_32x32x64_f8f6f4` (cbsz:2 blgp:2, 32 cyc/inst on FP6).
 ## TL;DR
 
 **One kernel paradigm — `lds_gemm_hybrid_dripA` — shape-routed by `mxfp6_dispatch.hpp`.**
-@8192³ FP16 ≈ **2230 TFLOPs**. Beats the previous register-direct + pure-LDS v18 dispatcher
+@8192³ FP16 ≈ **2285 TFLOPs** (2026-06-11: +2.7% from an **LDS-transpose epilogue** that coalesces
+the output store — see "Epilogue" below; was 2230 with the scattered store). Beats the previous register-direct + pure-LDS v18 dispatcher
 on **all 12 benchmarked shapes (+6~98%)**, including non-pow2 N (5120/7680/9216) where v18
 needed dedicated 18/20-acc mixed tiles — the hybrid paradigm wins those outright.
 
@@ -21,6 +26,11 @@ Tile routing (`choose_tile`):
 - **128×256** (8-acc) — ONLY for WG-starved small-M shapes (256×256 grid < #CU); halves the
   M-tile to double WG count and fill idle CUs. Same kernel, different tile args. (occ1 — an
   occ2 variant was tried and is steady-state-neutral; see dead-ends.)
+
+@8192³: warm ≈ 2230, cold ≈ 2030 TFLOPs (~24% peak). ⚠️ **2048×4096 is the weak shape** (warm ~1724 /
+cold ~1408): filling 256 CUs at M=2048 forces an 8-acc tile (area math: MT×NT=32768 ⟺ 8 acc), whose
+MFMA window (768 cyc) can't hide B's HBM latency → B-VMEM-exposed, ~18.7% peak. It's the only shape
+that loses to CK FP8 (cold 0.90×). Structurally locked, not a tuning miss.
 
 ---
 
@@ -34,9 +44,13 @@ hybrid era). The load-bearing levers, all measured:
   occupancy (occ2) was proven net-negative (−14~30%: halving acc collapses intensity and trades
   the latency wall for an L2/bandwidth wall). The 256-AGPR tile is also why occ stays 1 — the
   merged VGPR pool (512) is full; this is structural, not a bug.
-- **32×32×64 MFMA, not 16×16×128.** Same FP6 FLOP/cyc (both 4096) but 16×16×128 needs 2× the
-  instructions + 2× operand bandwidth for the same output — pure overhead. (This is why CK's
-  mxfp6, which uses 16×16×128, is ~2× slower.)
+- **32×32×64 MFMA, not 16×16×128.** Same FP6 FLOP/cyc (both 4096) but for a large 32-aligned tile
+  16×16×128 needs 2× the instructions (and re-fetches operands per small output) — pure overhead
+  here. (This is why CK's mxfp6, which defaults to 16×16×128, is ~2× slower on big aligned GEMMs.)
+  ⚠️ 16×16×128 is NOT useless in general — it wins on small/skinny/non-32-aligned shapes (decode,
+  GEMV, small MoE: 32×32 wastes ≥50% on M=16) and enables high-occupancy small-tile designs
+  (¼ the acc VGPR). It's a granularity-vs-instruction-count trade; we picked the big-aligned side.
+  See `docs/perf_optimization_guide.md` §7.
 - **A staged deep-K in LDS (KT=192), double-buffered (RDB).** The deep-K MFMA window exceeds the
   load latency so latency is hidden by compute without register spill. RDB (prefetch after the
   barrier) makes one barrier/tile cover both RAW and WAR — correct for all shapes.
@@ -50,10 +64,38 @@ hybrid era). The load-bearing levers, all measured:
 - **tiled-scale.** A wave's K-tile scales are contiguous per lane → one `global_load_dwordxN`
   per K-tile. (The #1 correctness pitfall of the LDS port.)
 - **swz0 best on this machine** (the L2-locality remap underperforms the raw WG order here).
+- **Swapped-MFMA coalesced store, +2.6% @8192³ (2026-06-11).** Root cause of store backpressure: the
+  stock MFMA (`src0=B,src1=A`, TransposeC) outputs lane=M-row, so direct stores to row-major D scatter
+  ~32 cache-lines/instr (coalesced-store proxy measured +7.6% recoverable). FIX at the SOURCE: swap the
+  MFMA operands (`src0=A,src1=B` → `mfma_scale_f32_32x32x64_fp6_swapC`) so acc comes out as Cᵀ
+  (lane=N-col); then storing D[m][n] with n=base+lane%32 is NATURALLY COALESCED (consecutive lanes →
+  consecutive N), no transpose/LDS/barrier, any OutT. VGPR 508 / spill 0 / LDS stays 72KB / occ1.
+  An LDS-transpose epilogue gives the SAME +2.7% but needs 132KB LDS + barriers + is FP16-only — the
+  swap is strictly cleaner (kept it). ⚠️ NOT `dwordx4`: tested, no gain — `dwordx4` LDS-read alignment
+  (LROW%8==0) conflicts with bank-conflict-free write (LROW≡2 mod4), and store-instr count isn't the
+  bottleneck (issue 4.4% busy; coalescing already gives full 64B cache-line transactions). ⚠️ Store
+  OVERLAP (hide stores in compute) is a separate FAILED idea (drain −1.1%, B-LDS −1.2%, nt −22%):
+  stores are end-loaded + single VM_CNT. The win is COALESCING, not width or overlap. See
+  `mxfp6_epilogue_drain`.
 
-Profile (RCV, @8192³): occ1 latency-bound, MFMA matrix-unit busy ~30%, ~2.37× theoretical
-headroom locked behind the occ1 wall. Stall ≈ vmcnt(B HBM) 24% + lgkmcnt(A LDS) 21% + v_mfma
-backpressure (real work) 24% + epilogue store drain ~10%. No single reclaimable villain remains.
+**Profile & utilization (hard-measured 2026-06-11; RCV + rocprofv3 counters + `.s` metadata, @8192³ FP16):**
+- **occ1 CONFIRMED three ways** (was doubted, now settled): `.s` metadata 251 arch VGPR + 256 AGPR =
+  **507/512 merged → VGPR-bound occ1** (spill 0; LDS 72KB alone would allow 2); RCV `occupancy.json`
+  ≡ 1. ⚠️ rocprofv3 CSV `VGPR_Count`/`Accum_VGPR_Count` **misreport** on the gfx950 merged pool
+  (showed 256/0; truth 251/256) — trust `.s num_vgpr/num_agpr`, not the CSV.
+- **MFMA duty cycle ~22–24% of nominal peak (9227@2.2GHz) = ~27–29% of the actual sustained clock**
+  (~1.83 GHz measured under load — power/thermal-limited, but only ~880–910 W, NOT hitting the 1000 W
+  cap). Matrix unit ~71% idle on memory latency; ~2.4× headroom locked behind the occ1 wall. ~2× CK's duty.
+- **HBM BW ~11%** (measured FETCH 312 MB + WRITE 163 MB = 474 MB/dispatch; L2 read-hit **89.9%**) →
+  far from bandwidth-bound.
+- **Coalescing optimal**: writes 1.0× (req bytes == FP16 output 134 MB, zero waste); A (lane×16
+  `buffer_load`) + B (`preshuffle_B`) instruction-level 100% coalesced. **Bank conflict 9.5% of
+  LDS-active but LDS off critical path → <1% runtime (red herring)**.
+- Stall mix (ATT): vmcnt(B HBM) ~24% + lgkmcnt(A LDS) ~21% + v_mfma backpressure ~24% + epilogue ~10%.
+- **Net: latency-bound BY DESIGN** — big-tile occ1 trades occupancy for arithmetic intensity (the
+  winning side; occ2 is −14~30%). The 71% idle is *structurally stranded* (VGPR + B-HBM-latency both
+  locked on gfx950), not waste. ⚠️ HBM round-trip "~880 cyc" used in analysis is an **estimate**, not
+  measured (real cost = ~22 cyc/load issue-stall + ~460–500 cyc/hit data-wait; order is right).
 
 ---
 
@@ -73,7 +115,8 @@ drives it through the public API. Layout:
 | `src/lds.hpp` · `src/asm_utils.hpp` | device helpers (`read_op`, `asm_load*`) · MFMA/store/wait |
 | `tests/test_dispatch.cpp` | end-to-end correctness (fresh-alloc + CPU ref) + perf, via the public API |
 | `CMakeLists.txt` | HIP build: static lib `mxfp6gemm` + `ctest` |
-| `profile_out/` | RCV traces + annotated ASM of the hybrid paradigm (analysis artifacts) |
+| `docs/perf_optimization_guide.md` | **perf theory** (AI / roofline / latency-hiding / big-tile / deep-K / MFMA / occ), formula-derived with worked examples & this kernel's real numbers |
+| `docs/PERF_SUMMARY.md` | executive summary (vs-CK, the structural ceiling, what it'd take to go higher) |
 
 Build & test: `cmake -S . -B build -DCMAKE_HIP_ARCHITECTURES=gfx950 && cmake --build build -j && ctest --test-dir build`
 
@@ -107,22 +150,44 @@ for those, e.g. 2048×4096 = 1686 steady vs 1517 swept. Trends/ratios hold eithe
 Absolute TFLOPs also swing ±10% run-to-run from the SCLK/1000W power cap; warm up to steady
 state before comparing. The vs-CK table below is all steady-state.
 
-## vs CK (same machine 2026-06-10, K=8192, `tile_example_mx_flatmm`, FP16, **steady-state**, all warmed)
+## vs CK (same machine, K=8192, `tile_example_mx_flatmm`, FP16) — FAIR matched methodology 2026-06-11
 
-| shape | CK FP8 | CK FP6 | ours FP6 | ours / CK-FP6 | ours / CK-FP8 |
+⚠️ METHODOLOGY CORRECTION (2026-06-11): CK uses `RotatingMemWrapper` (rotates input buffers →
+**cold L2 each rep**). Our earlier table reused a single buffer (**warm inter-rep L2**), which
+inflated ours by 8–15% (most on small-M). The fair comparison is **cold-vs-cold** (both rotate;
+also more realistic — in real inference weights B are evicted between layers). Both sides here are
+sustained back-to-back (CK's repeat loop is gap-free → no turbo-boost bonus; ours measured the
+same way — see [[feedback_interleave_inflation]] for the idle→boost effect that does NOT apply here).
+
+Both cache regimes measured (CK warm via patched build flush_cache=false/rotating_count=1 →
+`bin/tile_example_mx_flatmm_warm`; CK cold = stock rotating_count=50). KEY: CK barely benefits from
+warm L2 (+2~4%) while ours gains +8~18% (we lean on L2 reuse; CK's 16×16×128 does not) → the verdict
+flips with cache regime.
+
+**COLD-vs-COLD** (both rotated/cold; = single-call / real-inference where B is evicted between layers):
+| shape | CK FP8 | CK FP6 | ours FP6 | ours/CK-FP6 | ours/CK-FP8 |
 |---|---|---|---|---|---|
-| 2048×4096 | 1608 | 1019 | 1686 | 1.66× | 1.05× |
-| 2048×8192 | 1757 | 1079 | 2053 | 1.90× | 1.17× |
-| 4096×4096 | 1759 | 1079 | 2185 | 2.03× | 1.24× |
-| 4096×8192 | 1820 | 1097 | 2214 | 2.02× | 1.22× |
-| 8192×8192 | 1843 | 1109 | 2234 | 2.21× | 1.21× |
+| 2048×4096 | 1565 | 1017 | 1408 | 1.38× | **0.90×** |
+| 2048×8192 | 1697 | 1080 | 1865 | 1.73× | 1.10× |
+| 4096×4096 | 1709 | 1080 | 1974 | 1.83× | 1.16× |
+| 4096×8192 | 1799 | 1095 | 2020 | 1.84× | 1.12× |
+| 8192×8192 | 1838 | 1106 | 2031 | 1.84× | 1.10× |
 
-(ours = median of 25 windows after 120 warm iters; CK = warmup=100 repeat=100.)
+**WARM-vs-WARM** (both single-buffer reuse / L2-hot; = repeated-call cache-resident):
+| shape | CK FP8 | CK FP6 | ours FP6 | ours/CK-FP6 | ours/CK-FP8 |
+|---|---|---|---|---|---|
+| 2048×4096 | 1597 | 1056 | 1666 | 1.58× | 1.04× |
+| 2048×8192 | 1732 | 1105 | 2053 | 1.86× | 1.19× |
+| 4096×4096 | 1735 | 1104 | 2164 | 1.96× | 1.25× |
+| 4096×8192 | 1829 | 1113 | 2202 | 1.98× | 1.20× |
+| 8192×8192 | 1849 | 1116 | 2226 | 1.99× | 1.20× |
 
-**Same-precision 1.66~2.21× CK MXFP6; and our FP6 beats CK's FP8 by 1.05~1.24×.** On this machine CK
-FP8 > FP6 (FP6 pinned by the 1000W power cap + CK's 16×16×128). NOTE: an external 2026-05-04
-table showed CK FP6 (3200) > FP8 (3019) at much higher absolutes — that is a *different
-machine / CK build* (no power cap); do NOT compare its numbers to this machine's.
+**Verdict depends on cache regime:** WARM — we win everywhere (FP6 1.58~1.99×, even beat CK FP8
+1.04~1.25×). COLD — we beat CK FP6 1.38~1.84×, but vs CK FP8 0.90~1.16× (LOSE at 2048×4096 0.90×,
+the area-locked 8-acc shape; edge the rest). Report BOTH regimes (see [[feedback_bench_cold_and_warm]]).
+Both sustained back-to-back (no turbo bonus, [[feedback_interleave_inflation]]). On this machine CK
+FP8 > FP6 (FP6 pinned by 1000W cap + CK's 16×16×128). The external 2026-05-04 table (CK FP6 3200 >
+FP8 3019) is a *different machine/build* (no power cap); do NOT compare.
 
 ## Validation
 - Fresh-alloc 0x5A-poison vs CPU ref, both tile paths (256×256 and 128×256), incl. partial-grid
@@ -142,10 +207,29 @@ machine / CK build* (no power cap); do NOT compare its numbers to this machine's
   ring, so the next tile's `vmcnt` wait is held by the in-flight stores — overlap doesn't fire.
   (Plus grid-stride framework −5%.) The store-after-final-MFMA variant spills.
 - **16×16×128 MFMA, wider 128×512 tile:** see kernel essence / scale-path NDB≤1 limit.
+- **Per-shape tuning of drip-A / K_TILE / SWZ on the current hybrid (2026-06-11):** all swept on
+  both tile paths (8192³ 256×256 and 2048×4096 128×256). Production defaults (PFD5/START1/STR1/PER1,
+  KT192, SWZ0) are already the optimum everywhere — **zero gain**. ⚠️ Sequential sweeps show a false
+  +1~2% (KT256/SWZ8 looked better on 2048×4096) — it's an **idle→turbo-boost artifact** (host gaps
+  between measurement windows let the clock boost; `usleep` dose-response 0/2/10ms → 1673/1730/1737).
+  Interleaved A/B or back-to-back kills it; the defaults win. (memory `feedback_interleave_inflation`.)
+- **Larger shapes don't break the ceiling (2026-06-11):** 12288²/16384²/16384³/deep-K all plateau at
+  ~23–24% peak. Cold (realistic) even rises slightly 8192³ 2038 → ~2120–2163 (warm/cold converge as
+  A+B ≫ L2; deep-K K=16384 marginally best cold ~2163). WARM 8192³ (2237) is the warm peak; bigger is
+  not faster. The occ1 latency ceiling is shape-independent for CU-filling shapes.
+- **Using the spare LDS (only 72/160 KB used) — nothing to exploit:** LDS is slack, not the binding
+  constraint (VGPR occ1 + B-HBM-latency are). Deeper K (KT256 = 96 KB) is worse (2227→2106); B-in-LDS
+  is the disproven pure-LDS path (−28~35% small-M); triple-buffer A buys nothing (A already 0% stall).
+  The 72 KB is the *win* of taking B out of LDS (B-direct), not waste.
 
 ## Repro
 ```bash
 cmake -S . -B build -DCMAKE_HIP_ARCHITECTURES=gfx950 && cmake --build build -j && ctest --test-dir build
-# CK reference (same machine): /home/AMD/zhewan/ck-bench-6732acf/bin/tile_example_mx_flatmm
+# CK reference (same machine, ⚠️ args need leading dash):
+#   cold (stock): /home/AMD/zhewan/ck-bench-6732acf/bin/tile_example_mx_flatmm -m=8192 -n=8192 -k=8192 -mx_prec=fp6xfp6 -v=0 -warmup=50 -repeat=100
+#   warm:         .../tile_example_mx_flatmm_warm  (same args; rotating off)        -mx_prec=fp6xfp6|fp8xfp8
+# dev sweep/bench drivers: hipcc -std=c++17 --offload-arch=gfx950 -O3 -Iinclude -Isrc <driver>.cpp [src/gemm.cpp] -o <bin>
+# rocprofv3 utilization: --pmc <counters> --output-format csv --kernel-include-regex lds_gemm_hybrid_dripA
+#   (⚠️ FETCH_SIZE+WRITE_SIZE exceed counter slots together — collect separately; TCP_TCC req unit = 16 B)
 ```
 NFS backup: source mirrored to `/home/AMD/zhewan/rocm-libraries-ck/mxfp6_gemm/`.
