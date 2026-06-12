@@ -564,6 +564,7 @@ int main(int argc, char** argv)
     hipblaslt_bench::TimingConfig timingCfg;
     timingCfg.iters         = iters;
     timingCfg.use_gpu_timer = rv.gs.use_gpu_timer;
+    timingCfg.adaptive      = rv.gs.adaptive;
     if(rv.gs.adaptive)
     {
         timingCfg.warmup_time      = rv.gs.warmup_time;

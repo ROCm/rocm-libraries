@@ -93,12 +93,6 @@ namespace hipblaslt_bench
             return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - double(lo));
         }
 
-        inline bool any_adaptive(const TimingConfig& cfg)
-        {
-            return cfg.warmup_time > 0.0f || cfg.sample_time > 0.0f || cfg.measure_time > 0.0f
-                   || cfg.max_measure_time > 0.0f || cfg.min_iters > 1 || cfg.max_iters > 0
-                   || cfg.noise_threshold > 0.0f;
-        }
     } // namespace detail
 
     // Run `launch(i)` adaptively and fill `out` with the resulting statistics.
@@ -116,8 +110,7 @@ namespace hipblaslt_bench
                                 TimingResult&                out,
                                 const std::function<bool()>& should_abort = {})
     {
-        const bool    use_gpu_timer = cfg.use_gpu_timer;
-        const int32_t floor_iters   = cfg.iters > 0 ? cfg.iters : 1;
+        const bool use_gpu_timer = cfg.use_gpu_timer;
         // Caller signal to abort the sample loop (e.g. a gtest fatal failure in `launch`).
         auto aborted = [&]() { return should_abort && should_abort(); };
 
@@ -150,9 +143,11 @@ namespace hipblaslt_bench
         };
 
         // ---- Fixed-count fast path: a single sample of `iters` enqueues ----
-        if(!detail::any_adaptive(cfg))
+        // cfg.iters is used here and ONLY here; the adaptive path below is self-sizing.
+        if(!cfg.adaptive)
         {
-            double batch_us = 0.0;
+            const int32_t floor_iters = cfg.iters > 0 ? cfg.iters : 1;
+            double        batch_us    = 0.0;
             time_batch(floor_iters, batch_us);
             const double per_iter = batch_us / floor_iters;
             out.median_us    = out.min_us = out.mean_us = per_iter;

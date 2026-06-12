@@ -5593,6 +5593,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         hipblaslt_bench::TimingConfig timingCfg;
         timingCfg.iters         = number_hot_calls;
         timingCfg.use_gpu_timer = arg.use_gpu_timer;
+        timingCfg.adaptive      = arg.adaptive;
         if(arg.adaptive)
         {
             timingCfg.warmup_time      = arg.warmup_time;
