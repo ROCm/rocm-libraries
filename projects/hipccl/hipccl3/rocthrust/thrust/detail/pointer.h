@@ -38,9 +38,9 @@
 #include <thrust/iterator/detail/iterator_traversal_tags.h>
 #include <thrust/iterator/iterator_adaptor.h>
 
+#include _THRUST_STD_INCLUDE(cstddef)
 #include _THRUST_STD_INCLUDE(type_traits)
 
-#include <cstddef>
 #include <ostream>
 
 THRUST_NAMESPACE_BEGIN
