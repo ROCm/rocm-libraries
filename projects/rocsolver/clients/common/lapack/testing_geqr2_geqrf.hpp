@@ -620,12 +620,12 @@ void testing_geqr2_geqrf(Arguments& argus)
     }
 
     // validate results for rocsolver-test
-    // using 30*machine_precision as tolerance (per LAPACK).
+    // using 15*machine_precision as tolerance (LAPACK uses 30 ulp/2).
     // max_errors is already normalized, e.g., by m.
     if(argus.unit_check)
     {
-        ROCSOLVER_TEST_CHECK(T, max_errors[0], 30);
-        ROCSOLVER_TEST_CHECK(T, max_errors[1], 30);
+        ROCSOLVER_TEST_CHECK(T, max_errors[0], 15);
+        ROCSOLVER_TEST_CHECK(T, max_errors[1], 15);
         // Do not check forward comparison with LAPACK, since it is unreliable.
     }
 

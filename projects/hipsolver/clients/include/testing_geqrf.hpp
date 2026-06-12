@@ -715,10 +715,10 @@ void testing_geqrf(Arguments& argus)
     }
 
     // validate results for rocsolver-test
-    // using m * machine_precision as tolerance
-    // (for possibly singular of ill-conditioned matrices we could use m*min(m,n))
+    // using 15*machine_precision as tolerance (LAPACK uses 30 ulp/2).
+    // max_error is already normalized, e.g., by m.
     if(argus.unit_check)
-        ROCSOLVER_TEST_CHECK(T, max_error, m);
+        ROCSOLVER_TEST_CHECK(T, max_error, 15);
 
     // output results for rocsolver-bench
     if(argus.timing)

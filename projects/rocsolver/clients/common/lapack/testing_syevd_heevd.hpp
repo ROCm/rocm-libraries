@@ -983,15 +983,15 @@ void testing_syevd_heevd(Arguments& argus)
     }
 
     // validate results for rocsolver-test
-    // using 10 * machine_precision as tolerance.
+    // using 25 * machine_precision as tolerance (LAPACK uses 50 ulp/2).
     // max_errors is already normalized, e.g., by n.
     if(argus.unit_check)
     {
-        ROCSOLVER_TEST_CHECK(T, max_errors[0], 10);
+        ROCSOLVER_TEST_CHECK(T, max_errors[0], 25);
         if(evect != rocblas_evect_none)
         {
-            ROCSOLVER_TEST_CHECK(T, max_errors[1], 10);
-            ROCSOLVER_TEST_CHECK(T, max_errors[2], 10);
+            ROCSOLVER_TEST_CHECK(T, max_errors[1], 25);
+            ROCSOLVER_TEST_CHECK(T, max_errors[2], 25);
         }
     }
 
