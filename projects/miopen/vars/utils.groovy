@@ -996,94 +996,97 @@ def makeShardedGtestCmd(String buildDir, String gtestFilter="*") {
 //   - the FlowNode walk fails for any reason (fail-open: run all stages)
 // ---------------------------------------------------------------------------
 
-// Reads the SCM commit hash from a build's SCMRevisionAction. This is recorded
-// by the SCM plugin before the pipeline starts, so it is available on both
-// current and previous builds without relying on pipeline-set env vars.
-// Returns null if the action is not present.
+// Walks the FlowNode execution graph of a build and returns the set of stage
+// display names that completed successfully (have both a start and end node,
+// neither of which carries an ErrorAction). Aborted stages never get a
+// StepEndNode so they are naturally excluded.
 @NonCPS
-def getScmCommitHash(def rawBuild) {
-    def scmAction = rawBuild?.actions?.find { action ->
-        action instanceof jenkins.scm.api.SCMRevisionAction
+def getPassedStagesFromBuild(def rawBuild) {
+    def passed = [] as Set
+    def execution = rawBuild?.execution
+    if (!execution) return passed
+
+    def startNodes = [:]       // nodeId -> stageName
+    def endNodes   = [:]       // startNodeId -> StepEndNode
+    def errorIds   = [] as Set // nodeIds that carry an ErrorAction
+
+    def walker = new org.jenkinsci.plugins.workflow.graph.FlowGraphWalker(execution)
+    walker.each { flowNode ->
+        if (flowNode.getAction(org.jenkinsci.plugins.workflow.actions.ErrorAction)) {
+            errorIds << flowNode.id
+        }
+        if (flowNode instanceof org.jenkinsci.plugins.workflow.cps.nodes.StepStartNode) {
+            def label  = flowNode.getAction(org.jenkinsci.plugins.workflow.actions.LabelAction)
+            def thread = flowNode.getAction(org.jenkinsci.plugins.workflow.actions.ThreadNameAction)
+            if (label && !thread) {
+                startNodes[flowNode.id] = label.displayName
+            }
+        } else if (flowNode instanceof org.jenkinsci.plugins.workflow.cps.nodes.StepEndNode) {
+            endNodes[flowNode.startNode?.id] = flowNode
+        }
     }
-    if (scmAction?.revision instanceof org.jenkinsci.plugins.github_branch_source.PullRequestSCMRevision) {
-        return scmAction.revision.pullHash
-    } else if (scmAction?.revision instanceof jenkins.plugins.git.AbstractGitSCMSource$SCMRevisionImpl) {
-        return scmAction.revision.hash
+
+    startNodes.each { startId, stageName ->
+        def endNode = endNodes[startId]
+        if (endNode && !errorIds.contains(startId) && !errorIds.contains(endNode.id)) {
+            passed << stageName
+        }
     }
-    return null
+    return passed
 }
 
-// Walks the FlowNode execution graph of the previous build and collects
-// the display names of all stages that completed without error.
-// Must be @NonCPS because it accesses rawBuild and iterates FlowNodes
-// (non-serializable Jenkins internal objects).
+// Returns the set of stage names to skip on a "Restart from Stage" build.
+// Empty set means run everything (fail-open on any guard failure).
 //
 // Guards:
-// 1. Only runs when the current build was triggered by "Restart from Stage"
-//    (RestartDeclarativePipelineCause). For any other trigger the previous
-//    build may be for a different commit.
-// 2. Compares SCM commit hashes (via SCMRevisionAction) between current and
-//    previous build. If they differ, returns empty so all stages run. This
-//    prevents skipping stages when a new commit is pushed between builds.
+// 1. Must be a "Restart from Stage" trigger - other triggers don't guarantee
+//    we are re-running the same commit.
+// 2. The restarted build is identified directly from the cause object (not
+//    currentBuild.previousBuild, which may be a different commit's build).
+// 3. Commit hashes are compared via GIT_COMMIT env var set by checkoutRepo(),
+//    which is already reliable. If either is missing, run everything.
 @NonCPS
 def getPassedStagesFromPreviousBuild() {
     def passed = [] as Set
     try {
-        // Guard 1: only skip stages on a "Restart from Stage" build.
-        def isRestart = currentBuild.rawBuild?.getCauses()?.any { cause ->
+        // Guard 1: must be a "Restart from Stage" build.
+        def restartCause = currentBuild.rawBuild?.getCauses()?.find { cause ->
             cause.getClass().getName().contains('RestartDeclarativePipeline')
         }
-        if (!isRestart) {
+        if (!restartCause) {
             echo "Selective rerun: not a restart build, running all stages"
             return passed
         }
 
-        def prev = currentBuild.previousBuild
-        if (!prev) return passed
-        if (prev.result == 'SUCCESS') return passed
-
-        // Guard 2: only skip stages if both builds are for the same commit.
-        // If SCM commit hash lookup fails (returns null), skip the guard and
-        // proceed - fail-open so a missing SCMRevisionAction doesn't silently
-        // defeat the entire feature.
-        def curCommit = getScmCommitHash(currentBuild.rawBuild)
-        def prevCommit = getScmCommitHash(prev.rawBuild)
-        if (curCommit && prevCommit && curCommit != prevCommit) {
-            echo "Selective rerun: commit hash mismatch (cur=${curCommit?.take(8)} prev=${prevCommit?.take(8)}), running all stages"
+        // Guard 2: get the exact build being restarted from the cause object.
+        // getUpstreamBuild() returns the WorkflowRun that was restarted.
+        def prevRun = restartCause.getUpstreamBuild()
+        if (!prevRun) {
+            echo "Selective rerun: could not resolve restarted build, running all stages"
             return passed
         }
+        if (prevRun.result?.toString() == 'SUCCESS') {
+            echo "Selective rerun: previous build was SUCCESS, running all stages"
+            return passed
+        }
+
+        // Guard 3: compare GIT_COMMIT set by checkoutRepo() on both builds.
+        def curCommit  = env.GIT_COMMIT
+        def prevCommit = prevRun.getEnvironment()?.get('GIT_COMMIT')
         if (!curCommit || !prevCommit) {
-            echo "Selective rerun: SCM commit hash unavailable, proceeding without commit guard"
+            echo "Selective rerun: GIT_COMMIT unavailable (cur=${curCommit} prev=${prevCommit}), running all stages"
+            return passed
+        }
+        if (curCommit != prevCommit) {
+            echo "Selective rerun: commit mismatch (cur=${curCommit.take(8)} prev=${prevCommit.take(8)}), running all stages"
+            return passed
         }
 
-        def prevRun = prev.rawBuild
-        if (!prevRun) return passed
-
-        def execution = prevRun.execution
-        if (!execution) return passed
-
-        // Walk every FlowNode in the previous build's execution graph.
-        // Stage blocks appear as StepStartNode with a LabelAction (display name)
-        // but WITHOUT a ThreadNameAction (which marks parallel branch starts).
-        // A stage is considered passed if its start node has no ErrorAction.
-        def walker = new org.jenkinsci.plugins.workflow.graph.FlowGraphWalker(execution)
-
-        walker.each { flowNode ->
-            if (flowNode instanceof org.jenkinsci.plugins.workflow.cps.nodes.StepStartNode) {
-                // Filter: has a label (stage name) but is NOT a parallel branch
-                def label = flowNode.getAction(org.jenkinsci.plugins.workflow.actions.LabelAction)
-                def thread = flowNode.getAction(org.jenkinsci.plugins.workflow.actions.ThreadNameAction)
-                if (label && !thread) {
-                    def stageName = label.displayName
-                    def error = flowNode.getAction(org.jenkinsci.plugins.workflow.actions.ErrorAction)
-                    if (!error) {
-                        passed << stageName
-                    }
-                }
-            }
-        }
+        echo "Selective rerun: same commit ${curCommit.take(8)}, checking build #${prevRun.number} for passed stages"
+        passed = getPassedStagesFromBuild(prevRun)
     } catch (Exception e) {
-        // Fail-open: if anything goes wrong, return empty set and all stages run.
+        echo "Selective rerun: error (${e.message}), running all stages"
+        return [] as Set
     }
     return passed
 }
