@@ -609,6 +609,7 @@ int main(int argc, char** argv)
         for(int i = 0; i < iters; i++)
             launch(i);
         CHECK_HIP_ERROR(hipStreamEndCapture(stream, &graph));
+        CHECK_HIP_ERROR(hipStreamSynchronize(stream)); // drain warmup before timing (matches original)
 
         hipGraphExec_t graph_exec = NULL;
         CHECK_HIP_ERROR(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
@@ -622,11 +623,10 @@ int main(int argc, char** argv)
         CHECK_HIP_ERROR(
             hipEventElapsedTime(&gpu_time_ms, event_gpu_time_start, event_gpu_time_end));
         timing.median_us = timing.min_us = timing.mean_us
-            = (double(gpu_time_ms) * 1000.0) / (iters < 1 ? 1 : iters);
+            = (static_cast<double>(gpu_time_ms) * 1000.0) / (iters < 1 ? 1 : iters);
         timing.batch     = iters;
         timing.samples   = 1;
         timing.hot_iters = iters;
-        timing.converged = true;
     }
     else
     {
