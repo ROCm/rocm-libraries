@@ -839,7 +839,7 @@ class TestValidationStartupGate:
         config.engine_filter = None
         config.rtol = 1e-5
         config.atol = 1e-8
-        config.gpu_backend = "none"
+        config.timing_backend = "none"
         config.reference_provider = "definitely_not_registered"
         config.verbose = False
 
