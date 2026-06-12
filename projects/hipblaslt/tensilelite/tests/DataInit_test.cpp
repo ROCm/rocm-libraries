@@ -46,7 +46,7 @@ namespace
     // side independently. mxBlock==0 means "do NOT call setMXScale*", so the
     // problem's mxBlockA() / mxBlockB() stays 0 and isMXTensor returns
     // false on that side. This is exactly the lever needed to drive every
-    // branch of isMXProblem.
+    // branch of isMXProblemExceptF6.
     // -----------------------------------------------------------------------
     ContractionProblemGemm makeProblem(rocisa::DataType aType,
                                        rocisa::DataType bType,
@@ -134,12 +134,13 @@ INSTANTIATE_TEST_SUITE_P(
 );
 
 // =============================================================================
-//   Section 2 - TensileLite::Client::isMXProblem
+//   Section 2 - TensileLite::Client::isMXProblemExceptF6
 //
 //   Contract:
-//       isMXProblem(P)
-//         = isMXTensor(P.a, P.mxBlockA)
-//        || isMXTensor(P.b, P.mxBlockB)
+//       isMXProblemExceptF6(P)
+//         = !(isF6(P.a) || isF6(P.b))
+//        && (isMXTensor(P.a, P.mxBlockA)
+//            || isMXTensor(P.b, P.mxBlockB))
 // =============================================================================
 TEST(IsMXProblem, BothFP4)
 {
