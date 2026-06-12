@@ -51,15 +51,18 @@ mode. We aim to beat that on the same shape.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace as dc_replace
+from dataclasses import dataclass, field, replace as dc_replace
 from typing import Callable, List, Optional, Sequence, Tuple
 
 from ...core.ir import (
+    BF16,
     F16,
+    F32,
     I32,
     IRBuilder,
     KernelDef,
     PtrType,
+    Type,
     Value,
 )
 from ...helpers.atoms import MfmaAtom, mfma_atom
@@ -77,9 +80,37 @@ from ...helpers.tensor_view import (
 from ...helpers.transforms import TensorDescriptor, embed, pad, unmerge_magic
 
 
+_DTYPE_TO_IR: dict = {"f16": F16, "fp16": F16, "bf16": BF16, "fp32": F32}
+
+
+def _ir_dtype(dtype: str) -> Type:
+    """Map a dtype string (``"fp16"``, ``"bf16"``, ``"fp32"``) to an IR ``Type``."""
+    t = _DTYPE_TO_IR.get(dtype)
+    if t is None:
+        raise ValueError(f"unsupported conv dtype {dtype!r}; choose fp16, bf16, or fp32")
+    return t
+
+
 # ---------------------------------------------------------------------
 # Spec dataclasses
 # ---------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ConvDataSpec:
+    """Element / accumulator dtype choice for the conv kernel.
+
+    Layouts:
+      A: NHWC, dtype_a (input activations)
+      B: KRSC, dtype_b (weights)
+      D: NHWK, dtype_d (output)
+      accumulator: dtype_acc (always fp32)
+    """
+
+    dtype_a: str = "fp16"
+    dtype_b: str = "fp16"
+    dtype_d: str = "fp16"
+    dtype_acc: str = "fp32"
 
 
 @dataclass(frozen=True)
@@ -234,6 +265,7 @@ class ImplicitGemmConvSpec:
 
     problem: ConvProblem
     name: str = "conv_igemm"
+    data: ConvDataSpec = field(default_factory=ConvDataSpec)
 
     tile_m: int = 64
     tile_n: int = 64
@@ -310,7 +342,7 @@ class ImplicitGemmConvSpec:
 
     @property
     def atom(self) -> MfmaAtom:
-        return mfma_atom("f16", self.warp_tile_m, self.warp_tile_n, self.warp_tile_k)
+        return mfma_atom(self.data.dtype_a, self.warp_tile_m, self.warp_tile_n, self.warp_tile_k)
 
     def kernel_name(self) -> str:
         from ...helpers.spec import kernel_name_join
@@ -422,18 +454,18 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
             f"spec wave_size {spec.wave_size} != {arch} wave_size {target.wave_size}"
         )
 
-    # MMA atom must be in the target's catalog (f16 in/out fp32 acc).
+    # MMA atom must be in the target's catalog for the requested dtype.
     atom = (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)
     if not target.mma.has_shape(
         family=family,
-        a_dtype="f16",
-        b_dtype="f16",
+        a_dtype=spec.data.dtype_a,
+        b_dtype=spec.data.dtype_b,
         c_dtype="fp32",
         m=spec.warp_tile_m,
         n=spec.warp_tile_n,
         k=spec.warp_tile_k,
     ):
-        return False, f"unsupported f16 warp_tile {atom} on {arch}"
+        return False, f"unsupported {spec.data.dtype_a} warp_tile {atom} on {arch}"
 
     # WMMA (RDNA wave32) coverage mirrors the unified GEMM's narrow subset: the
     # 16x16x16 atom with the simple ``mem`` pipeline + ``default`` epilogue and
@@ -486,8 +518,8 @@ def _resolve_conv_op(spec: ImplicitGemmConvSpec, arch: str):
     target = ArchTarget.from_gfx(arch)
     op = target.mma.op_for_shape(
         family=_conv_mma_family(arch),
-        a_dtype="f16",
-        b_dtype="f16",
+        a_dtype=spec.data.dtype_a,
+        b_dtype=spec.data.dtype_b,
         c_dtype="fp32",
         m=spec.warp_tile_m,
         n=spec.warp_tile_n,
@@ -506,7 +538,9 @@ def _resolve_conv_op(spec: ImplicitGemmConvSpec, arch: str):
 # ---------------------------------------------------------------------
 
 
-def make_a_descriptor(p: ConvProblem, decompose_m: bool = True) -> TensorDescriptor:
+def make_a_descriptor(
+    p: ConvProblem, decompose_m: bool = True, dtype: str = "fp16"
+) -> TensorDescriptor:
     """Build the (m, k) -> NHWC linear-offset descriptor for the input.
 
     DAG:
@@ -571,12 +605,12 @@ def make_a_descriptor(p: ConvProblem, decompose_m: bool = True) -> TensorDescrip
     return TensorDescriptor.naive(
         "A_nhwc",
         lengths=[p.N, p.Hi, p.Wi, p.C],
-        dtype=F16,
+        dtype=_ir_dtype(dtype),
         coord_names=["n", "hi", "wi", "c"],
     ).transform(*transforms)
 
 
-def make_b_descriptor(p: ConvProblem) -> TensorDescriptor:
+def make_b_descriptor(p: ConvProblem, dtype: str = "fp16") -> TensorDescriptor:
     """Build the (n_gemm, k_gemm) -> KRSC linear-offset descriptor for the weight.
 
     KRSC is a flat row-major `[K, R, S, C]` layout, and the implicit-GEMM
@@ -604,7 +638,7 @@ def make_b_descriptor(p: ConvProblem) -> TensorDescriptor:
     return TensorDescriptor.naive(
         "B_krsc",
         lengths=[p.K, p.R, p.S, p.C],
-        dtype=F16,
+        dtype=_ir_dtype(dtype),
         coord_names=["k_out", "r", "s", "c"],
     ).transform(
         unmerge_magic(upper="k_gemm", into=["r", "s", "c"], dims=[p.R, p.S, p.C]),
@@ -613,7 +647,7 @@ def make_b_descriptor(p: ConvProblem) -> TensorDescriptor:
     )
 
 
-def make_d_descriptor(p: ConvProblem) -> TensorDescriptor:
+def make_d_descriptor(p: ConvProblem, dtype: str = "fp16") -> TensorDescriptor:
     """Build the (m, k_out) -> NHWK linear-offset descriptor for the output.
 
     naive(NHWK): (n, ho, wo, k_out)
@@ -622,7 +656,7 @@ def make_d_descriptor(p: ConvProblem) -> TensorDescriptor:
     return TensorDescriptor.naive(
         "D_nhwk",
         lengths=[p.N, p.Ho, p.Wo, p.K],
-        dtype=F16,
+        dtype=_ir_dtype(dtype),
         coord_names=["n", "ho", "wo", "k_out"],
     ).transform(
         unmerge_magic(upper="m", into=["n", "ho", "wo"], dims=[p.N, p.Ho, p.Wo]),
@@ -638,7 +672,19 @@ def _emit_mfma(b: IRBuilder, atom: MfmaAtom, a: Value, bv: Value, c: Value) -> V
     return atom.emit(b, a, bv, c)
 
 
-def _emit_smem_load(b: IRBuilder, smem: Value, row: Value, col: Value, n: int) -> Value:
+def _emit_smem_load(
+    b: IRBuilder,
+    smem: Value,
+    row: Value,
+    col: Value,
+    n: int,
+    *,
+    smem_dtype: Optional[Type] = None,
+) -> Value:
+    if smem_dtype is not None and smem_dtype is not F16:
+        vec = b.smem_load_vN(smem, row, col, dtype=smem_dtype, n=n)
+        # MFMA fp32 intrinsics take a scalar float, not a vector.
+        return b.vec_extract(vec, 0) if (smem_dtype is F32 and n == 1) else vec
     if n == 4:
         return b.smem_load_v4_f16(smem, row, col)
     return b.smem_load_vN_f16(smem, row, col, n=n)
@@ -697,6 +743,8 @@ def _emit_frag_smem_load(
     atom_mn_base: Value,
     k_tile_base: Value,
     frag_len: int,
+    *,
+    smem_dtype: Optional[Type] = None,
 ) -> Value:
     """Load one ``frag_len``-wide operand fragment from a row-major LDS tile.
 
@@ -711,10 +759,12 @@ def _emit_frag_smem_load(
     lds_row = b.add(atom_mn_base, mn_in_atom)
     lds_col = b.add(k_tile_base, k_in_atom)
     if frag_len <= 8:
-        return _emit_smem_load(b, src, lds_row, lds_col, frag_len)
+        return _emit_smem_load(b, src, lds_row, lds_col, frag_len, smem_dtype=smem_dtype)
     frag = None
     for off in range(0, frag_len, 8):
-        chunk = _emit_smem_load(b, src, lds_row, b.add(lds_col, b.const_i32(off)), 8)
+        chunk = _emit_smem_load(
+            b, src, lds_row, b.add(lds_col, b.const_i32(off)), 8, smem_dtype=smem_dtype
+        )
         frag = chunk if frag is None else b.vec_concat(frag, chunk)
     return frag
 
@@ -789,14 +839,17 @@ def build_implicit_gemm_conv(
     if not ok:
         raise ValueError(f"invalid conv_igemm spec for {arch}: {why}")
     p = spec.problem
+    ir_dtype_a = _ir_dtype(spec.data.dtype_a)
+    ir_dtype_b = _ir_dtype(spec.data.dtype_b)
+    ir_dtype_d = _ir_dtype(spec.data.dtype_d)
 
     b = IRBuilder(spec.kernel_name())
     if spec.waves_per_eu is not None:
         b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
 
-    A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    D = b.param("D", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    A = b.param("A", PtrType(ir_dtype_a, "global"), noalias=True, readonly=True, align=16)
+    Bp = b.param("B", PtrType(ir_dtype_b, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(ir_dtype_d, "global"), noalias=True, writeonly=True, align=16)
     extra_context = extra_params(b) if extra_params is not None else None
     A_bytes = b.param("A_bytes", I32)
     B_bytes = b.param("B_bytes", I32)
@@ -812,6 +865,11 @@ def build_implicit_gemm_conv(
     atom = spec.atom if op.family == "mma" else None
     a_per_lane = op.a_frag_len
     b_per_lane = op.b_frag_len
+    # LDS operand element type must match the MFMA operand type.
+    # bf16 → BF16, fp32 → F32; fp16 and fp8 go through the default f16 path.
+    _smem_dtype: Optional[Type] = (
+        BF16 if op.a_dtype == "bf16" else F32 if op.a_dtype == "fp32" else None
+    )
     c_per_lane = op.c_frag_len
 
     block_m, block_n, block_k = spec.tile_m, spec.tile_n, spec.tile_k
@@ -894,8 +952,8 @@ def build_implicit_gemm_conv(
     lds_layout = spec.effective_lds_layout()
     if spec.async_dma:
         lds_layout.validate_for_async()
-    A_smem = b.smem_alloc(F16, lds_layout.storage_shape(block_m), name_hint="A_smem")
-    B_smem = b.smem_alloc(F16, lds_layout.storage_shape(block_n), name_hint="B_smem")
+    A_smem = b.smem_alloc(ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem")
+    B_smem = b.smem_alloc(ir_dtype_b, lds_layout.storage_shape(block_n), name_hint="B_smem")
     # Async DMA only buys overlap when there is a second buffer to
     # write into while the MFMA phase reads from the first. Force
     # double-buffering whenever the pipeline opts into async DMA,
@@ -903,10 +961,10 @@ def build_implicit_gemm_conv(
     double_buffer = spec.pipeline == "compv4" or spec.async_dma or spec.unroll_k
     if double_buffer:
         A_smem2 = b.smem_alloc(
-            F16, lds_layout.storage_shape(block_m), name_hint="A_smem2"
+            ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem2"
         )
         B_smem2 = b.smem_alloc(
-            F16, lds_layout.storage_shape(block_n), name_hint="B_smem2"
+            ir_dtype_b, lds_layout.storage_shape(block_n), name_hint="B_smem2"
         )
     else:
         A_smem2 = A_smem
@@ -932,8 +990,8 @@ def build_implicit_gemm_conv(
     # The two descriptors used for global loads. The A descriptor is
     # the conv-coord-transform DAG; B is a simple naive (KRSC) +
     # unmerge for K_gemm.
-    A_desc = make_a_descriptor(p, decompose_m=(a_mhw_index_fn is None))
-    B_desc = make_b_descriptor(p)
+    A_desc = make_a_descriptor(p, decompose_m=(a_mhw_index_fn is None), dtype=spec.data.dtype_a)
+    B_desc = make_b_descriptor(p, dtype=spec.data.dtype_b)
 
     # CK Tile-style buffer views over A / B / D. ``make_buffer_resource``
     # wraps ``b.buffer_rsrc(ptr, num_bytes)`` and pre-binds a zero
@@ -1138,6 +1196,7 @@ def build_implicit_gemm_conv(
                         atom_row,
                         k_tile_base,
                         a_per_lane,
+                        smem_dtype=_smem_dtype,
                     )
                 )
             b_cols = []
@@ -1152,6 +1211,7 @@ def build_implicit_gemm_conv(
                         atom_row,
                         k_tile_base,
                         b_per_lane,
+                        smem_dtype=_smem_dtype,
                     )
                 )
             flat = 0
@@ -1214,7 +1274,7 @@ def build_implicit_gemm_conv(
                     )
                 else:
                     a_rows.append(
-                        _emit_smem_load(b, A_src, a_row, col_base, a_per_lane)
+                        _emit_smem_load(b, A_src, a_row, col_base, a_per_lane, smem_dtype=_smem_dtype)
                     )
 
             b_cols = []
@@ -1222,7 +1282,7 @@ def build_implicit_gemm_conv(
                 b_row = b.add(
                     warp_n_off, b.add(b.const_i32(ni * spec.warp_tile_n), n_in_atom)
                 )
-                b_cols.append(_emit_smem_load(b, B_src, b_row, col_base, b_per_lane))
+                b_cols.append(_emit_smem_load(b, B_src, b_row, col_base, b_per_lane, smem_dtype=_smem_dtype))
 
             flat = 0
             for mi in range(mfmas_m):
@@ -1390,7 +1450,7 @@ def _emit_direct_epilogue(
     grid: WarpGrid,
     d_rsrc: Value,
 ) -> None:
-    """Per-lane scalar-fp16 store driven by the D descriptor DAG.
+    """Per-lane scalar store driven by the D descriptor DAG.
 
     Delegates to :class:`ck_dsl.helpers.epilogues.DirectEpilogue`,
     which owns the per-(mi, ni)-atom + per-``c_per_lane``-slot lane
@@ -1400,7 +1460,7 @@ def _emit_direct_epilogue(
     coordinate-transform DAG.
     """
     p = spec.problem
-    D_desc = make_d_descriptor(p)
+    D_desc = make_d_descriptor(p, dtype=spec.data.dtype_d)
 
     def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
         return D_desc.offset(b_, m=m_val, k_out=n_val)
@@ -1445,7 +1505,7 @@ def _emit_direct_epilogue_wmma(
 
     c_M = b.const_i32(p.M)
     c_N = b.const_i32(p.N_gemm)
-    D_desc = make_d_descriptor(p)
+    D_desc = make_d_descriptor(p, dtype=spec.data.dtype_d)
     c_map = op.c_layout()
 
     flat = 0
@@ -1509,7 +1569,7 @@ def _emit_cshuffle_epilogue(
     coordinate-transform DAG.
     """
     p = spec.problem
-    D_desc = make_d_descriptor(p)
+    D_desc = make_d_descriptor(p, dtype=spec.data.dtype_d)
 
     def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
         return D_desc.offset(b_, m=m_val, k_out=n_val)

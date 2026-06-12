@@ -205,8 +205,6 @@ def main(argv: Optional[list[str]] = None) -> int:
             f"verify max_abs_diff={summary.max_abs_diff:.8g} "
             f"bad={summary.bad_count}/{summary.total}"
         )
-        if summary.bad_count:
-            return 1
     print(
         f"Perf: {summary.ms:.6g} ms, {summary.tflops:.6g} TFlops, {summary.gbps:.6g} GB/s"
     )
@@ -226,6 +224,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             }
         )
     )
+    if ns.verify and summary.bad_count:
+        return 1
     return 0
 
 

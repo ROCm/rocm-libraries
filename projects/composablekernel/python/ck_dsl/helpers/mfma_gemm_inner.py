@@ -228,6 +228,8 @@ def _ir_type_for_dtype(dtype_in: str):
         return F16
     if dtype_in == "bf16":
         return BF16
+    if dtype_in in ("f32", "fp32"):
+        return F32
     if dtype_in == "fp8e4m3":
         return FP8E4M3
     if dtype_in == "bf8e5m2":

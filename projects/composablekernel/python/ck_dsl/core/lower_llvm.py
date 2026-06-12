@@ -303,9 +303,24 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "<4 x half>, <4 x half>, <16 x float>, "
         "i32 immarg, i32 immarg, i32 immarg)"
     ),
+    "mfma.f32.32x32x8bf16.1k": (
+        "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x8bf16.1k("
+        "<4 x i16>, <4 x i16>, <16 x float>, "
+        "i32 immarg, i32 immarg, i32 immarg)"
+    ),
     "mfma.f32.32x32x16.f16": (
         "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.f16("
         "<8 x half>, <8 x half>, <16 x float>, "
+        "i32 immarg, i32 immarg, i32 immarg)"
+    ),
+    "mfma.f32.16x16x4f32": (
+        "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x4f32("
+        "float, float, <4 x float>, "
+        "i32 immarg, i32 immarg, i32 immarg)"
+    ),
+    "mfma.f32.32x32x2f32": (
+        "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x2f32("
+        "float, float, <16 x float>, "
         "i32 immarg, i32 immarg, i32 immarg)"
     ),
     "mfma.f32.4x4x4f16": (
@@ -1932,6 +1947,28 @@ class _Lowerer:
             f"i32 0, i32 0, i32 0)"
         )
 
+    def _op_tile_mfma_f32_16x16x4_f32(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._need("mfma.f32.16x16x4f32")
+        self._current().emit(
+            f"  {op.result.name} = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x4f32("
+            f"float {self._operand(a)}, "
+            f"float {self._operand(b)}, "
+            f"<4 x float> {self._operand(c)}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+
+    def _op_tile_mfma_f32_32x32x2_f32(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._need("mfma.f32.32x32x2f32")
+        self._current().emit(
+            f"  {op.result.name} = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x2f32("
+            f"float {self._operand(a)}, "
+            f"float {self._operand(b)}, "
+            f"<16 x float> {self._operand(c)}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+
     def _op_tile_mfma_f32_32x32x8_f16(self, op: Op) -> None:
         a, b, c = op.operands
         self._need("mfma.f32.32x32x8f16")
@@ -1939,6 +1976,25 @@ class _Lowerer:
             f"  {op.result.name} = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x8f16("
             f"<4 x half> {self._operand(a)}, "
             f"<4 x half> {self._operand(b)}, "
+            f"<16 x float> {self._operand(c)}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+
+    def _op_tile_mfma_f32_32x32x8_bf16(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._need("mfma.f32.32x32x8bf16.1k")
+        a_cast = self._fresh("mfma_a_i16")
+        b_cast = self._fresh("mfma_b_i16")
+        self._current().emit(
+            f"  {a_cast} = bitcast <4 x bfloat> {self._operand(a)} to <4 x i16>"
+        )
+        self._current().emit(
+            f"  {b_cast} = bitcast <4 x bfloat> {self._operand(b)} to <4 x i16>"
+        )
+        self._current().emit(
+            f"  {op.result.name} = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x8bf16.1k("
+            f"<4 x i16> {a_cast}, "
+            f"<4 x i16> {b_cast}, "
             f"<16 x float> {self._operand(c)}, "
             f"i32 0, i32 0, i32 0)"
         )

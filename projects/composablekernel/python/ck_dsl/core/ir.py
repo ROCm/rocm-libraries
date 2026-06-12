@@ -75,6 +75,8 @@ NON_TEMPORAL = 3  # GLC + SLC — bypass cache hierarchy entirely.
 # passes a bare op_id string; an ``MmaOp`` object always supplies its own
 # ``c_frag_len`` and bypasses this table.
 _MMA_C_FRAG_LEN: Dict[str, int] = {
+    "mfma_f32_16x16x4_f32": 4,
+    "mfma_f32_32x32x2_f32": 16,
     "mfma_f32_16x16x16_f16": 4,
     "mfma_f32_16x16x32_f16": 4,
     "mfma_f32_16x16x16_bf16": 4,
@@ -83,6 +85,7 @@ _MMA_C_FRAG_LEN: Dict[str, int] = {
     "mfma_f32_16x16x32_bf8": 4,
     "mfma_f32_32x32x8_f16": 16,
     "mfma_f32_32x32x16_f16": 16,
+    "mfma_f32_32x32x8_bf16": 16,
     "mfma_f32_32x32x16_bf16": 16,
     "mfma_f32_32x32x16_fp8": 16,
     "mfma_f32_32x32x16_bf8": 16,
