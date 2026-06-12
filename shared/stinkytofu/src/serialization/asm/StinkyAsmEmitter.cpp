@@ -745,6 +745,15 @@ static bool emitCustomOperands(std::ostream& os, const StinkyInstruction& inst) 
     }
 }
 
+// SMEM atomics signal return via glc, not th:, so they are excluded.
+static bool needThAtomicReturn(const StinkyInstruction& inst) {
+    if (!isFLATAtomic(inst) && !isMUBUFAtomic(inst)) return false;
+    for (const auto& d : inst.getDestRegs()) {
+        if (!isPseudoReg(d) && !isImplicitDest(d, inst)) return true;
+    }
+    return false;
+}
+
 static void emitTrailingModifiers(std::ostream& os, const StinkyInstruction& inst) {
 #define EMIT_TRAILING_MODIFIER(TYPE_ENUM, CLASS_PREFIX)                \
     case Modifier::Type::TYPE_ENUM:                                    \
@@ -769,14 +778,8 @@ static void emitTrailingModifiers(std::ostream& os, const StinkyInstruction& ins
     }
 #undef EMIT_TRAILING_MODIFIER
 
-    // Assembler requires th:TH_ATOMIC_RETURN on return-form atomics.
-    if (isGlobalMemAtomic(inst)) {
-        for (const auto& d : inst.getDestRegs()) {
-            if (!isPseudoReg(d) && !isImplicitDest(d, inst)) {
-                os << " th:TH_ATOMIC_RETURN";
-                break;
-            }
-        }
+    if (needThAtomicReturn(inst)) {
+        os << " th:TH_ATOMIC_RETURN";
     }
 }
 
