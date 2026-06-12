@@ -198,7 +198,7 @@ hipsparseStatus_t hipsparseDestroyHybMat(hipsparseHybMat_t hybA)
 }
 #endif
 
-#if CUDART_VERSION < 13000
+#if CUDART_VERSION < 14000
 hipsparseStatus_t hipsparseCreateBsrsv2Info(bsrsv2Info_t* info)
 {
     return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseCreateBsrsv2Info((bsrsv2Info_t*)info));
@@ -210,7 +210,7 @@ hipsparseStatus_t hipsparseDestroyBsrsv2Info(bsrsv2Info_t info)
 }
 #endif
 
-#if CUDART_VERSION < 13000
+#if CUDART_VERSION < 14000
 hipsparseStatus_t hipsparseCreateBsrsm2Info(bsrsm2Info_t* info)
 {
     return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseCreateBsrsm2Info((bsrsm2Info_t*)info));
@@ -222,7 +222,7 @@ hipsparseStatus_t hipsparseDestroyBsrsm2Info(bsrsm2Info_t info)
 }
 #endif
 
-#if CUDART_VERSION < 13000
+#if CUDART_VERSION < 14000
 hipsparseStatus_t hipsparseCreateBsrilu02Info(bsrilu02Info_t* info)
 {
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
@@ -272,7 +272,7 @@ hipsparseStatus_t hipsparseDestroyColorInfo(hipsparseColorInfo_t info)
 }
 #endif
 
-#if CUDART_VERSION < 13000
+#if CUDART_VERSION < 14000
 hipsparseStatus_t hipsparseCreateCsrilu02Info(csrilu02Info_t* info)
 {
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
