@@ -308,11 +308,13 @@ Tests:
 
 # per-batch alpha (rocblas_set_batch_alpha_stride) coverage, device pointer mode only
 # stride_c 1 is the densely packed alpha[batch] layout, stride_c 2 a strided layout
-- name: geru_stride_alpha
+- name: geruc_stride_alpha
   category: pre_checkin
   function:
     - geru_batched
     - geru_strided_batched
+    - gerc_batched
+    - gerc_strided_batched
   precision: *single_double_precisions_complex
   matrix_size: *small_matrix_size_range
   incx_incy: *incx_incy_range
