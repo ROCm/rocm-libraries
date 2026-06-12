@@ -5802,7 +5802,7 @@ namespace hipsparse
             handle, dirA, m, n, descrA, A, lda, nnzPerRowColumn, nnzTotalDevHostPtr);
     }
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 14000)
     template <>
     hipsparseStatus_t hipsparseXnnz_compress(hipsparseHandle_t         handle,
                                              int                       m,
