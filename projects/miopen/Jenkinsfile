@@ -414,7 +414,6 @@ def runAsanTests(String gpuLabel, String gfxFamily) {
                             -DGPU_TARGETS="${gfxFamily}:xnack+" \\
                             -DHIP_PLATFORM=amd \\
                             -DBUILD_TESTING=ON \\
-                            -DENABLE_ASAN_PACKAGING=ON \\
                             -DTHEROCK_SANITIZER=ASAN \\
                             ..
 
