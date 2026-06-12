@@ -43,14 +43,15 @@ cd hipBLASLt; cd build/release
 --verify |-v               Validate GPU results with CPU?
 --iters |-i <value>        Iterations to run inside timing loop                                                 (Default value is: 10)
 --cold_iters |-j <value>   Cold Iterations to run before entering the timing loop                               (Default value is: 2)
---adaptive                       Enable adaptive timing; not compatible with --iters / --cold_iters            (Default value is: false)
---adaptive_warmup_time <value>   Warm up until this many ms have elapsed; requires --adaptive                 (Default value is: 50 ms)
---adaptive_sample_time <value>   Wall-time of each timed sample = back-to-back batch size (>= measure_time gives one batch); requires --adaptive (Default value is: 1 ms)
---adaptive_measure_time <value>  Minimum total measurement time; requires --adaptive                         (Default value is: 200 ms)
---adaptive_max_measure_time <value> Measurement ceiling (0 = unbounded); requires --adaptive                  (Default value is: 1000 ms)
---adaptive_min_iters <value>     Floor on total timed iterations; requires --adaptive                        (Default value is: 10 iterations)
---adaptive_max_iters <value>     Ceiling on total timed iterations (0 = unbounded); requires --adaptive      (Default value is: 0 iterations)
---adaptive_noise_threshold <value> Convergence target: past the floor, keep running until the mean's relative standard error drops below this fraction or the ceiling is hit; 0 disables (run to the ceiling); requires --adaptive (Default value is: 0.01 = 1%)
+--adaptive                       Enable adaptive timing; not compatible with --iters / --cold_iters
+--adaptive_warmup_time <value>   Warm up (ms) until this much wall-time has elapsed; requires --adaptive
+--adaptive_sample_time <value>   Wall-time (ms) of each timed sample = back-to-back batch size (>= measure_time gives one batch); requires --adaptive
+--adaptive_measure_time <value>  Minimum total measurement time (ms); requires --adaptive
+--adaptive_max_measure_time <value> Measurement ceiling (ms, 0 = unbounded); requires --adaptive
+--adaptive_min_iters <value>     Floor on total timed iterations; requires --adaptive
+--adaptive_max_iters <value>     Ceiling on total timed iterations (0 = unbounded); requires --adaptive
+--adaptive_noise_threshold <value> Convergence target: past the floor, keep running until the mean's relative standard error drops below this fraction or the ceiling is hit; 0 disables (run to the ceiling); requires --adaptive
+(adaptive defaults are shown by --help / -h)
 --algo_method <value>      Use different algorithm search API. Options: heuristic, all, index.                  (Default value is: heuristic)
 --solution_index <value>   Used with --algo_method 2.  Specify solution index to use in benchmark.              (Default value is: -1)
 --requested_solution <value> Requested solution num. Set to -1 to get all solutions. Only valid when algo_method is set to heuristic.  (Default value is: 1)
@@ -144,10 +145,8 @@ The reported `us`/`Gflops` are the **mean**; extra columns expose the distributi
 (`converged` / `noisy` / `-`).
 
 `--adaptive` is the gate; the `--adaptive_*` options tune it and **require**
-`--adaptive` (passing one without it is an error). Defaults: `adaptive_warmup_time
-50` ms, `adaptive_measure_time 200` ms, `adaptive_sample_time 1` ms,
-`adaptive_max_measure_time 1000` ms, `adaptive_min_iters 10`,
-`adaptive_noise_threshold 0.01` — each shows in `--help`.
+`--adaptive` (passing one without it is an error). Run `--help` for their current
+default values.
 
 Under `--adaptive`, warmup and per-sample batch size are determined adaptively, so
 `--iters` and `--cold_iters` have no effect and **passing either with `--adaptive`
