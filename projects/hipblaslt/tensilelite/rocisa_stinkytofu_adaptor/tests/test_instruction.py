@@ -22,7 +22,8 @@
 #
 ################################################################################
 """Standalone tests for ``rocisa_stinkytofu_adaptor.instruction`` -- Step 3
-(``Instruction`` / ``CommonInstruction`` bases + the real ``VMovB32`` shim).
+(``Instruction`` / ``CommonInstruction`` bases + ``VMovB32`` / ``SMovB32`` /
+``SMovB64`` shims).
 
 Run from any working directory:
 
@@ -42,8 +43,9 @@ These tests pin:
   * ``to_stinky_logical()`` and the ``_to_stinky_register`` coercion
     table -- both register operands (via ``RegisterContainer.to_stinky``)
     and the int / float / str literal paths.
-  * Step-3 collector contract: ``VMovB32.to_stinky_logical`` is callable and,
-    when stinkytofu is built, is picked up by ``Module._collect_logical_insts``.
+  * Step-3 collector contract: ``VMovB32`` / ``SMovB32`` ``to_stinky_logical``
+    is callable and, when stinkytofu is built, is picked up by
+    ``Module._collect_logical_insts``.
     Dummy-only skip behaviour (e.g. ``SBarrier``) lives in
     ``test_code.TestCollectLogicalInsts``.
 
@@ -78,6 +80,8 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     CommonInstruction,
     Instruction,
     MacroInstruction,
+    SMovB32,
+    SMovB64,
     VMovB32,
     _to_stinky_register,
 )
@@ -615,27 +619,93 @@ class TestVMovB32Construction(unittest.TestCase):
 
 
 # ===========================================================================
+# SMovB32 / SMovB64 -- scalar moves (Phase A).
+# ===========================================================================
+
+
+class TestSMovB32Construction(unittest.TestCase):
+    def test_positional_dst_src(self):
+        d, s = sgpr(0), sgpr(1)
+        m = SMovB32(d, s)
+        self.assertIs(m.dst, d)
+        self.assertEqual(m.srcs, [s])
+        self.assertEqual(m.comment, "")
+        self.assertEqual(m.instStr, "s_mov_b32")
+        self.assertEqual(m.instType, InstType.INST_B32)
+
+    def test_str_sgpr_to_sgpr(self):
+        m = SMovB32(sgpr(0), sgpr(1), comment="probe")
+        text = str(m)
+        self.assertTrue(text.startswith("s_mov_b32 s0, s1"), text)
+        self.assertTrue(text.endswith(" // probe\n"), text)
+
+    def test_inherits_common_instruction(self):
+        m = SMovB32(sgpr(0), sgpr(1))
+        self.assertIsInstance(m, Instruction)
+        self.assertIsInstance(m, CommonInstruction)
+        self.assertIsInstance(m, SMovB32)
+
+    def test_deepcopy(self):
+        m = SMovB32(sgpr(0), sgpr(1), comment="x")
+        c = copy.deepcopy(m)
+        self.assertIsInstance(c, SMovB32)
+        self.assertEqual(str(c), str(m))
+
+
+class TestSMovB64Construction(unittest.TestCase):
+    def test_inst_type_b64(self):
+        m = SMovB64(sgpr(0, 2), sgpr(4, 2), comment="wide")
+        self.assertEqual(m.instStr, "s_mov_b64")
+        self.assertEqual(m.instType, InstType.INST_B64)
+
+    def test_str_contains_mnemonic(self):
+        m = SMovB64(sgpr(0, 2), sgpr(4, 2))
+        self.assertIn("s_mov_b64", str(m))
+
+
+# ===========================================================================
 # Step-3 contract: VMovB32 is picked up by Module._collect_logical_insts.
 # ===========================================================================
 
 
 class TestCollectLogicalIntegration(unittest.TestCase):
-    """``VMovB32`` instruction-side contract for ``_collect_logical_insts``.
+    """``VMovB32`` / ``SMovB32`` instruction-side contract for
+    ``_collect_logical_insts``.
 
     Collector walk semantics (fake leaves, TextBlock filter, dummy skip)
     are owned by ``test_code.TestCollectLogicalInsts`` -- this class only
-    pins that the real ``VMovB32`` shim exposes ``to_stinky_logical`` and
-    is actually collected when the stinkytofu binding is importable.
+    pins that the real shims expose ``to_stinky_logical`` and are actually
+    collected when the stinkytofu binding is importable.
     """
 
     def test_vmovb32_exposes_to_stinky_logical(self):
         v = VMovB32(vgpr(0), vgpr(1))
         self.assertTrue(callable(getattr(v, "to_stinky_logical", None)))
 
+    def test_smovb32_exposes_to_stinky_logical(self):
+        s = SMovB32(sgpr(0), sgpr(1))
+        self.assertTrue(callable(getattr(s, "to_stinky_logical", None)))
+
+    def test_smovb64_exposes_to_stinky_logical(self):
+        s = SMovB64(sgpr(0, 2), sgpr(4, 2))
+        self.assertTrue(callable(getattr(s, "to_stinky_logical", None)))
+
     @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
     def test_vmovb32_collected_by_module(self):
         m = Module()
         m.add(VMovB32(vgpr(0), vgpr(1)))
+        self.assertEqual(len(m._collect_logical_insts()), 1)
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_smovb32_collected_by_module(self):
+        m = Module()
+        m.add(SMovB32(sgpr(0), sgpr(1)))
+        self.assertEqual(len(m._collect_logical_insts()), 1)
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_smovb64_collected_by_module(self):
+        m = Module()
+        m.add(SMovB64(sgpr(0, 2), sgpr(4, 2)))
         self.assertEqual(len(m._collect_logical_insts()), 1)
 
 

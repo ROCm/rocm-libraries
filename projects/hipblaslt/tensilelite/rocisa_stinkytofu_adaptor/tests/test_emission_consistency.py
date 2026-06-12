@@ -485,5 +485,58 @@ class TestVMovB32_NamedRegister(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
+# ===========================================================================
+# SMovB32 / SMovB64 scenarios (Phase A scalar moves)
+# ===========================================================================
+
+
+class TestSMovB32_SgprToSgpr(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_mov_b32 s0, s1`` -- basic SGPR-to-SGPR move."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SMovB32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SMovB32(dst=sgpr(0), src=sgpr(1), comment="probe"))
+    """)
+
+
+class TestSMovB32_SgprToSgprNoComment(unittest.TestCase, _ThreePathEqualityCase):
+    """Empty-comment branch for ``s_mov_b32`` (no ``//`` suffix)."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SMovB32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SMovB32(dst=sgpr(0), src=sgpr(1)))
+    """)
+
+
+class TestSMovB32_HexImmediate(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_mov_b32 s0, 0x0`` -- string-immediate src."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SMovB32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SMovB32(dst=sgpr(0), src="0x0", comment="init zero"))
+    """)
+
+
+class TestSMovB64_PairToPair(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_mov_b64 s[0:1], s[4:5]`` -- 64-bit pair operands."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SMovB64
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SMovB64(dst=sgpr(0, 2), src=sgpr(4, 2), comment="wide"))
+    """)
+
+
 if __name__ == "__main__":
     unittest.main()

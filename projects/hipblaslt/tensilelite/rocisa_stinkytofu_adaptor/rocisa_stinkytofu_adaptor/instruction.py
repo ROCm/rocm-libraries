@@ -49,6 +49,13 @@ What it does (real):
       register operands and ``stinkytofu.Register(int/float/str)`` for
       immediate operands).
 
+    - ``SMovB32`` / ``SMovB64`` — scalar moves (Phase A). Same pattern as
+      ``VMovB32``; ``to_stinky_logical`` forwards to ``_stinkytofu.SMovB32``
+      / ``SMovB64``. Other Phase-A candidates (``SLoadB*``, ``SNop``,
+      ``SWaitCnt``, ``SEndpgm``, branch shims) remain dummies until matching
+      logical opcodes exist in the generated Python binding (see
+      ``PythonBindings_generated.inc`` from the stinkytofu build).
+
     - ``getMFMAIssueLatency`` / ``getSMFMAIssueLatency`` — workaround
       ports returning the C++ default-branch tuple
       ``(matrixInstM // divisor, latency)``. ISA-specific overrides in
@@ -56,7 +63,8 @@ What it does (real):
 
 Not yet done (dummy):
     - All other instruction classes (``Buffer*``, ``DS*``, ``Flat*``,
-      ``S*``, ``V*``, ``MFMA*`` / ``SMFMA*``, ...).
+      most ``S*`` / ``V*``, ``MFMA*`` / ``SMFMA*``, ...) except
+      ``VMovB32``, ``SMovB32``, ``SMovB64``, and ``MacroInstruction``.
     - ``CompositeInstruction`` still dummy (no concrete subclass
       promoted yet). ``MacroInstruction`` is real (KernelWriter emits
       it 16+ times via ``V_MAGIC_DIV`` / ``GLOBAL_OFFSET_*`` /
@@ -556,6 +564,68 @@ class VMovB32(CommonInstruction):
 
 
 # ==========================================================================
+# SMovB32 / SMovB64 -- scalar moves (Phase A; same pattern as VMovB32).
+# ==========================================================================
+#
+# source: rocisa/rocisa/include/instruction/common.hpp:1076-1117
+#         rocisa/rocisa/src/instruction/common.cpp:506-524
+# logicalIR: ``SMovB32`` / ``SMovB64`` in LogicalInstructionDefs.inc
+#         (generated ``_stinkytofu.SMovB32(dest, src0, comment)``).
+class SMovB32(CommonInstruction):
+    """``s_mov_b32 dst, src`` shim with stinkytofu left-path bridge."""
+
+    def __init__(self, dst: Any, src: Any, sdwa: Any = None,
+                 comment: str = "", dpp: Any = None):
+        super().__init__(
+            instType=InstType.INST_B32,
+            dst=dst,
+            srcs=[src],
+            dpp=dpp,
+            sdwa=sdwa,
+            vop3=None,
+            comment=comment,
+        )
+        self.setInst("s_mov_b32")
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        dst_reg = _to_stinky_register(self.dst)
+        src_reg = _to_stinky_register(self.srcs[0])
+        return _st.SMovB32(dst_reg, src_reg, self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+
+class SMovB64(CommonInstruction):
+    """``s_mov_b64 dst, src`` shim with stinkytofu left-path bridge."""
+
+    def __init__(self, dst: Any, src: Any, sdwa: Any = None,
+                 comment: str = "", dpp: Any = None):
+        super().__init__(
+            instType=InstType.INST_B64,
+            dst=dst,
+            srcs=[src],
+            dpp=dpp,
+            sdwa=sdwa,
+            vop3=None,
+            comment=comment,
+        )
+        self.setInst("s_mov_b64")
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        dst_reg = _to_stinky_register(self.dst)
+        src_reg = _to_stinky_register(self.srcs[0])
+        return _st.SMovB64(dst_reg, src_reg, self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+
+# ==========================================================================
 # Branch instructions
 # source: rocisa/rocisa/src/instruction/branch.cpp
 # ==========================================================================
@@ -759,10 +829,6 @@ SLShiftLeft3AddU32 = make_dummy_class(f"{_P}.SLShiftLeft3AddU32")
 SLShiftLeft4AddU32 = make_dummy_class(f"{_P}.SLShiftLeft4AddU32")
 # logicalIR: SSetMask  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 SSetMask = make_dummy_class(f"{_P}.SSetMask")
-# logicalIR: SMovB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-SMovB32 = make_dummy_class(f"{_P}.SMovB32")
-# logicalIR: SMovB64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-SMovB64 = make_dummy_class(f"{_P}.SMovB64")
 # logicalIR: SCMovB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 SCMovB32 = make_dummy_class(f"{_P}.SCMovB32")
 # logicalIR: SCMovB64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
