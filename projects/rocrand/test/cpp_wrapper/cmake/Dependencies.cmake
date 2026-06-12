@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -25,7 +25,7 @@ cmake_minimum_required(VERSION 3.16)
 # Dependencies
 
 # For downloading and building required dependencies
-include(FetchContent)
+include(cmake/FetchContentIsolated.cmake)
 
 # Google Test (https://github.com/google/googletest)
 # NOTE: Google Test has created a mess with legacy FindGTest.cmake and newer GTestConfig.cmake
@@ -42,13 +42,10 @@ endif()
 
 if(NOT TARGET GTest::GTest AND NOT TARGET GTest::gtest)
   message(STATUS "Google Test not found or force download on. Fetching...")
-  option(BUILD_GTEST "Builds the googletest subproject" ON)
-  option(BUILD_GMOCK "Builds the googlemock subproject" OFF)
-  option(INSTALL_GTEST "Enable installation of googletest" OFF)
-  FetchContent_Declare(
+  fetch_content_isolated(
     googletest
     GIT_REPOSITORY https://github.com/google/googletest.git
     GIT_TAG        v1.15.2
+    CMAKE_ARGS     -DBUILD_GTEST=ON -DBUILD_GMOCK=OFF -DINSTALL_GTEST=OFF
   )
-  FetchContent_MakeAvailable(googletest)
 endif()

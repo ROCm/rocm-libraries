@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Literal, NamedTuple, Optional
 
+from ..common import torch_support
 from ..metrics.arch import detect_arch
 from .statistics import BenchmarkStats
 
@@ -572,13 +573,14 @@ def collect_environment_info() -> Dict[str, Any]:
     hipdnn_version: Optional[str] = None
 
     try:
-        import torch
+        if torch_support.module_available():
+            import torch
 
-        if hasattr(torch.version, "hip"):
-            rocm_version = torch.version.hip
-        if torch.cuda.is_available():
-            gpu_model = torch.cuda.get_device_name(0)
-    except ImportError:
+            if hasattr(torch.version, "hip"):
+                rocm_version = torch.version.hip
+            if torch_support.gpu_available():
+                gpu_model = torch.cuda.get_device_name(0)
+    except Exception:
         pass
 
     try:
