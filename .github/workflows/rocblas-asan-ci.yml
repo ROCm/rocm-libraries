@@ -206,7 +206,7 @@ jobs:
 
   summary:
     name: "rocBLAS ASAN CI Summary"
-    if: always()
+    if: always() && (github.event.label.name == 'ci:asan' || github.event_name == 'workflow_dispatch')
     needs:
       - setup
       - build
