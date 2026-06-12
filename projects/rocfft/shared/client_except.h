@@ -1,4 +1,4 @@
-// Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,7 @@
 #define ROCFFT_CLIENT_EXCEPT_H
 
 #include <hip/hip_runtime_api.h>
+#include <hip/hiprtc.h>
 #include <string>
 
 // exception type to throw when we want to skip a problem
@@ -47,6 +48,17 @@ struct hip_runtime_error : public std::runtime_error
     }
 };
 
+// errors specifically from hiprtc APIs
+struct hiprtc_runtime_error : public std::runtime_error
+{
+    const hiprtcResult hiprtc_error;
+    hiprtc_runtime_error(const std::string& info, hiprtcResult hiprtc_status)
+        : std::runtime_error::runtime_error(info)
+        , hiprtc_error(hiprtc_status)
+    {
+    }
+};
+
 // catch exceptions that may occur in test cases
 extern int n_hip_failures;
 #define ROCFFT_CATCH_TEST_EXCEPTIONS                                                \
@@ -63,6 +75,10 @@ extern int n_hip_failures;
             GTEST_SKIP() << e.what() << "\nHIP error code: " << e.hip_error << "."; \
         else                                                                        \
             GTEST_FAIL() << e.what() << "\nHIP error code: " << e.hip_error << "."; \
+    }                                                                               \
+    catch(const hiprtc_runtime_error& e)                                            \
+    {                                                                               \
+        GTEST_FAIL() << e.what() << "\nHIPRTC error: " << e.hiprtc_error << ".";    \
     }                                                                               \
     catch(const HOSTBUF_MEM_USAGE& e)                                               \
     {                                                                               \

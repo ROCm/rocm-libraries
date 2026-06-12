@@ -432,18 +432,6 @@ public:
         if((store_cb_symbol && store_cb_func.empty())
            || (!store_cb_symbol && !store_cb_func.empty()))
             throw std::invalid_argument("missing store symbol/func");
-
-        // data might be empty if the callback doesn't need data
-        if(!load_cb_data.empty())
-        {
-            auto expected_load_cb_data_count = expected_callback_count(ifields);
-            check_callback_vec(&load_cb_data, expected_load_cb_data_count, false);
-        }
-        if(!store_cb_data.empty())
-        {
-            auto expected_store_cb_data_count = expected_callback_count(ofields);
-            check_callback_vec(&store_cb_data, expected_store_cb_data_count, false);
-        }
     }
 
     fft_status set_funcptr_callbacks(std::vector<void*>* load_cb_func,

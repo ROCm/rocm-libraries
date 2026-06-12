@@ -87,27 +87,21 @@ void get_rank_store_callbacks_funcptr(const fft_params&                         
                                       bool                                       round_trip_inverse,
                                       std::vector<gpubuf_t<callback_test_data>>& all_cb_data);
 
-// Collect JIT load callback function and data pointers for the given
-// params.  We'd expect N data pointers for N input bricks on the
-// current multi-processing rank.
-//
-// Data structs are allocated on the device in all_cb_data.
-void get_rank_load_callback_jit(const fft_params&                          params,
-                                std::vector<char>&                         load_cb_func,
-                                std::vector<void*>&                        load_cb_data,
-                                bool                                       round_trip_inverse,
-                                std::vector<gpubuf_t<callback_test_data>>& all_cb_data);
-
-// Collect JIT store callback function and data pointers for the given
-// params.  We'd expect N data pointers for N output bricks on the
-// current multi-processing rank.
-//
-// Data structs are allocated on the device in all_cb_data.
-void get_rank_store_callback_jit(const fft_params&                          params,
-                                 std::vector<char>&                         store_cb_func,
-                                 std::vector<void*>&                        store_cb_data,
-                                 bool                                       round_trip_inverse,
-                                 std::vector<gpubuf_t<callback_test_data>>& all_cb_data);
+// For the current rank, get a JIT callback and a vector of callback
+// data pointers.  cb_data has an element for each visible HIP
+// device, though pointers are only set for devices that could
+// participate in the param's transform.
+enum class get_rank_callback
+{
+    LOAD,
+    STORE,
+};
+void get_rank_callback_jit(const fft_params&                          params,
+                           std::vector<char>&                         cb_func,
+                           std::vector<void*>&                        cb_data,
+                           bool                                       round_trip_inverse,
+                           std::vector<gpubuf_t<callback_test_data>>& all_cb_data,
+                           get_rank_callback                          type);
 
 // Execute the load/store callback function on a host buffer, to
 // ensure that the reference host FFT is comparable to a device FFT
@@ -115,13 +109,11 @@ void get_rank_store_callback_jit(const fft_params&                          para
 void apply_load_callback(const fft_params& params, std::vector<hostbuf>& input);
 void apply_store_callback(const fft_params& params, std::vector<hostbuf>& output);
 
-// Compile a string of source code to SPIR-V bitcode.
+// Compile a string of source code for use as a JIT callback.  In
+// HIP, this results in a SPIR-V bitcode while on CUDA this
+// produces LTO-IR data.
 //
-// NOTE: when errors are returned by hiprtc API functions, this
-// function will throw std::runtime_error rather than
-// hip_runtime_error - normally we'd skip test cases when we hit HIP
-// runtime errors, but hiprtc errors more often indicate programmer
-// error and need to be more noticeable.
-std::vector<char> compile_to_spirv(const std::string& src);
+// Throws hiprtc_runtime_error when hiprtc APIs fail.
+std::vector<char> compile_jit_callback(const std::string& src);
 
 #endif

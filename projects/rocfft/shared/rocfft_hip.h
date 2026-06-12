@@ -1,4 +1,4 @@
-// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,14 @@ public:
         if(count == 0 && hipGetDeviceCount(&count) != hipSuccess)
             throw std::runtime_error("failed to get device count");
         return count;
+    }
+
+    static int current_device()
+    {
+        int currentDevice = hipInvalidDeviceId;
+        if(hipGetDevice(&currentDevice) != hipSuccess)
+            throw std::runtime_error("failed to get HIP device");
+        return currentDevice;
     }
 
     rocfft_scoped_device(int device)

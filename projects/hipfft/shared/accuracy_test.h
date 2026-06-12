@@ -351,11 +351,19 @@ inline void run_round_trip_inverse(Tparams&              params,
     if(params.run_callbacks == fft_callback_type_jit)
     {
         params.load_cb_symbol = "load_callback_round_trip_inverse";
-        get_rank_load_callback_jit(
-            params, params.load_cb_func, params.load_cb_data, true, all_cb_data);
+        get_rank_callback_jit(params,
+                              params.load_cb_func,
+                              params.load_cb_data,
+                              true,
+                              all_cb_data,
+                              get_rank_callback::LOAD);
         params.store_cb_symbol = "store_callback_round_trip_inverse";
-        get_rank_store_callback_jit(
-            params, params.store_cb_func, params.store_cb_data, true, all_cb_data);
+        get_rank_callback_jit(params,
+                              params.store_cb_func,
+                              params.store_cb_data,
+                              true,
+                              all_cb_data,
+                              get_rank_callback::STORE);
     }
 
     params.validate();
@@ -522,14 +530,20 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     std::vector<gpubuf_t<callback_test_data>> all_cb_data;
     if(params.run_callbacks == fft_callback_type_jit)
     {
-        // fail the test case if getting the callback fails, since that
-        // usually indicates a compile error or similar
         params.load_cb_symbol = "load_callback";
-        get_rank_load_callback_jit(
-            params, params.load_cb_func, params.load_cb_data, false, all_cb_data);
+        get_rank_callback_jit(params,
+                              params.load_cb_func,
+                              params.load_cb_data,
+                              false,
+                              all_cb_data,
+                              get_rank_callback::LOAD);
         params.store_cb_symbol = "store_callback";
-        get_rank_store_callback_jit(
-            params, params.store_cb_func, params.store_cb_data, false, all_cb_data);
+        get_rank_callback_jit(params,
+                              params.store_cb_func,
+                              params.store_cb_data,
+                              false,
+                              all_cb_data,
+                              get_rank_callback::STORE);
     }
 
     // Make sure that the parameters make sense:

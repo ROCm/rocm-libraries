@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -78,6 +78,7 @@ add_custom_command(
   COMMAND ${Python3_EXECUTABLE} ${callback_embed_command}
   --embed ${callback_embed_files} --output ${callback_embed_cpp}
   DEPENDS ${callback_embed_command} ${callback_embed_files}
+  VERBATIM
 )
 
 set( rocfft-test_source
