@@ -102,6 +102,9 @@ class GemmKernelConfig:
 
     gfx_arch: str = "gfx942"
     variant: str = "standard"
+    # Stream-K reduction strategy: "atomic" (default), "linear", or "tree".
+    # Only meaningful when variant == "stream_k".
+    reduction_strategy: str = "atomic"
 
     # ------------------------------------------------------------------ #
     # Derived string fragments
@@ -148,6 +151,10 @@ class GemmKernelConfig:
             name += "_preshuffle"
         elif self.variant == "stream_k":
             name += "_streamk"
+            # Atomic keeps the bare "_streamk" suffix (original parity); linear
+            # and tree are disambiguated, matching KernelNaming.generate.
+            if self.reduction_strategy != "atomic":
+                name += f"_{self.reduction_strategy}"
         return name
 
     # ------------------------------------------------------------------ #
@@ -160,7 +167,7 @@ class GemmKernelConfig:
         triple ``warp_*`` and the MFMA triple ``warp_tile_*``. We translate
         from dispatcher semantics here so the mapping cannot drift.
         """
-        return {
+        cfg: Dict[str, Any] = {
             "tile_config": {
                 "tile_m": [self.tile_m],
                 "tile_n": [self.tile_n],
@@ -184,6 +191,11 @@ class GemmKernelConfig:
                 "persistent": [self.persistent],
             },
         }
+        # Pin the single reduction strategy so stream-K codegen emits exactly this
+        # kernel (the generator otherwise expands all strategies in its default).
+        if self.variant == "stream_k":
+            cfg["streamk_config"] = {"reduction_strategy": [self.reduction_strategy]}
+        return cfg
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -202,6 +214,7 @@ class GemmKernelConfig:
             "persistent": self.persistent,
             "gfx_arch": self.gfx_arch,
             "variant": self.variant,
+            "reduction_strategy": self.reduction_strategy,
             "name": self.name,
         }
 
@@ -233,6 +246,7 @@ class GemmKernelConfig:
             pad_k=self.pad_k,
             gfx_arch=self.gfx_arch,
             variant=self.variant,
+            reduction_strategy=self.reduction_strategy,
         )
 
 
@@ -689,6 +703,14 @@ def expand_sweep(
     pad_ks = _expand_values(tr.get("pad_k"), [False])
     persistents = _expand_values(tr.get("persistent"), [False])
 
+    # Stream-K only: sweep reduction strategies (atomic/linear/tree). Other
+    # variants keep a single dummy value so the product is unaffected.
+    if variant == "stream_k":
+        sk = cfg.get("streamk_config", {})
+        reductions = _expand_values(sk.get("reduction_strategy"), ["atomic"])
+    else:
+        reductions = ["atomic"]
+
     la, lb, lc = layout[0], layout[1], layout[2]
 
     configs: List[GemmKernelConfig] = []
@@ -710,6 +732,7 @@ def expand_sweep(
         pn,
         pk,
         persist,
+        redux,
     ) in itertools.product(
         tile_ms,
         tile_ns,
@@ -727,6 +750,7 @@ def expand_sweep(
         pad_ns,
         pad_ks,
         persistents,
+        reductions,
     ):
         c = GemmKernelConfig(
             dtype_a=dtype,
@@ -753,6 +777,7 @@ def expand_sweep(
             persistent=bool(persist),
             gfx_arch=arch,
             variant=variant,
+            reduction_strategy=redux,
         )
         if c.name in seen:
             continue

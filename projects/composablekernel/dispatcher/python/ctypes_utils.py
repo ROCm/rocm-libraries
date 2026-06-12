@@ -1389,8 +1389,12 @@ class KernelConfig:
     gfx_arch: str = "gfx942"
 
     # GEMM variant (affects arch filter validation)
-    # "standard", "preshuffle", or "multi_d"
+    # "standard", "preshuffle", "multi_d", or "stream_k"
     variant: str = "standard"
+
+    # Stream-K reduction strategy ("atomic"/"linear"/"tree"); only used by the
+    # stream_k variant. Does not affect tile/arch validation.
+    reduction_strategy: str = "atomic"
 
     @property
     def layout(self) -> str:
