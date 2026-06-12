@@ -938,10 +938,18 @@ struct GroupedConvolutionBackwardWeightKernel
                      const index_t block_idx_m,
                      const index_t block_idx_n)
     {
+
+#if defined(__gfx1250__)
+        const auto& c_tensor_view = make_tensor_view<address_space_enum::global,
+                                                     DstInMemOp,
+                                                     amd_buffer_coherence_enum::CU_HT,
+                                                     LargeTensors>(c_ptr, kargs.c_grid_desc_m_n);
+#else
         const auto& c_tensor_view = make_tensor_view<address_space_enum::global,
                                                      DstInMemOp,
                                                      amd_buffer_coherence_enum::coherence_default,
                                                      LargeTensors>(c_ptr, kargs.c_grid_desc_m_n);
+#endif
 
         // For bf16_t and atomic_add global_atomic_add is used instead of buffer_atomic_add.
         // Add padding for not contiguous dim due to the lack of OOB check.

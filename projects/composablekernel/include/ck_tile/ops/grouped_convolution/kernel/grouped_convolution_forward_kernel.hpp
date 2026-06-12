@@ -1229,13 +1229,19 @@ struct GroupedConvolutionForwardKernel
     MakeBBlockWindow(const WeiDataType* b_ptr, const BDescType& b_desc, const index_t block_idx_n)
     {
         constexpr bool pad_not_contiguous_dim = LargeTensors;
-
+#if defined(__gfx1250__)
+        // Step 1: Create tensor view
+        const auto& b_tensor_view = make_tensor_view<address_space_enum::global,
+                                                     memory_operation_enum::set,
+                                                     amd_buffer_coherence_enum::CU_HT,
+                                                     LargeTensors>(b_ptr, b_desc);
+#else
         // Step 1: Create tensor view
         const auto& b_tensor_view = make_tensor_view<address_space_enum::global,
                                                      memory_operation_enum::set,
                                                      amd_buffer_coherence_enum::coherence_default,
                                                      LargeTensors>(b_ptr, b_desc);
-
+#endif
         // Step 2: Create padded view
         const auto& b_pad_view = pad_tensor_view(
             b_tensor_view,
