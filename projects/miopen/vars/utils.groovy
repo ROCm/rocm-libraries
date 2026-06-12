@@ -990,31 +990,26 @@ def makeShardedGtestCmd(String buildDir, String gtestFilter="*") {
 //   - the wfapi call fails for any reason (fail-open: run all stages)
 // ---------------------------------------------------------------------------
 
-// Walks the build chain to find the wfapi URL of the earliest prior build that
-// ran on the same GIT_COMMIT. Returns null if no match or if the matched build
-// fully succeeded (nothing to skip). Must be @NonCPS because it accesses
-// rawBuild. Does NOT call echo (echo is not reliable inside @NonCPS).
+// Returns the wfapi URL of the most recent prior build that failed or was
+// unstable, or null if the previous build succeeded or doesn't exist.
+// Must be @NonCPS because it accesses currentBuild.previousBuild.
+// Does NOT call echo (echo is not reliable inside @NonCPS).
+//
+// Note: GIT_COMMIT-based commit matching was removed because env.GIT_COMMIT is
+// set programmatically during the pipeline (in checkoutRepo), not in the initial
+// build environment. rawBuild.environment does not contain pipeline-set env vars,
+// so the commit was always null. The commit safety guard is unnecessary for the
+// primary use case ("Restart from Stage" always replays the same SCM checkout),
+// and on a normal new-commit build the previous build will have result SUCCESS
+// so we return null and all stages run.
 @NonCPS
 def findPreviousBuildWfapiUrl() {
     try {
-        def curCommit = currentBuild.rawBuild?.environment?.get('GIT_COMMIT')
-        if (!curCommit) return null
-
-        def buildsForCommit = []
         def prev = currentBuild.previousBuild
-        while (prev) {
-            def prevCommit = prev.rawBuild?.environment?.get('GIT_COMMIT')
-            if (prevCommit == curCommit) {
-                buildsForCommit << prev
-            } else if (buildsForCommit) {
-                break
-            }
-            prev = prev.previousBuild
-        }
-        if (!buildsForCommit) return null
-        def targetBuild = buildsForCommit[-1]
-        if (targetBuild.result == 'SUCCESS') return null
-        return "${targetBuild.absoluteUrl}wfapi/describe"
+        if (!prev) return null
+        // If the previous build fully succeeded, nothing to skip.
+        if (prev.result == 'SUCCESS') return null
+        return "${prev.absoluteUrl}wfapi/describe"
     } catch (Exception e) {
         return null
     }
