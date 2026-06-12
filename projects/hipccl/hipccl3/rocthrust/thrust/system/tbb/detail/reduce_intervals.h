@@ -32,8 +32,8 @@
 #include <thrust/system/tbb/detail/execution_policy.h>
 
 #include <cuda/std/__algorithm/min.h>
+#include <cuda/std/cassert>
 
-#include <cassert>
 #include <type_traits>
 
 #include <tbb/parallel_for.h>
