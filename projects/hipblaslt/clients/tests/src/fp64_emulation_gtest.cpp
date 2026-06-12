@@ -129,6 +129,14 @@ namespace
         EXPECT_FALSE(would_apply(HIP_R_64F, 4096, 4096, 4096, 1));
     }
 
+    // Enabled + EAGER intercepts small DGEMMs.
+    TEST_F(Fp64EmulationTest, WouldApply_EnabledEagerSmallF64)
+    {
+        set_enabled(true);
+        set_strategy(HIPBLASLT_EMULATION_STRATEGY_EAGER);
+        EXPECT_TRUE(would_apply(HIP_R_64F, 16, 16, 16, 1));
+    }
+
     // Enabled + EAGER bypasses the cost model, so a large FP64 GEMM is intercepted.
     TEST_F(Fp64EmulationTest, WouldApply_EnabledEagerLargeF64)
     {
