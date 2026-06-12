@@ -136,9 +136,16 @@ GBPS_BY_ARCH = {
     'gfx950': 8000,
 }
 
-def write_machine_spec_yaml(machine_spec_filename, device_number=0):
+def detect_cuda():
+    # Prefer ROCm when a real gfx agent is present, otherwise fall back to cuda.
+    if getspecs.getgfx(0, False) != 'N/A':
+        return False
+    success, cout = getspecs._subprocess_helper(["nvidia-smi", "-L"])
+    return success and bool(cout.strip())
+
+def write_machine_spec_yaml(machine_spec_filename, device_number=0, gbps=None):
     machine_spec_dict = {}
-    cuda = False
+    cuda = detect_cuda()
     machine_spec_dict['arch'] = getspecs.getgfx(device_number, cuda)
     if machine_spec_dict['arch'] == 'N/A':
         print("Unable to detect GPU architecture for device {}".format(device_number))
@@ -146,14 +153,15 @@ def write_machine_spec_yaml(machine_spec_filename, device_number=0):
         quit()
 
     arch = machine_spec_dict['arch']
-    if arch in GBPS_BY_ARCH:
-        GBps = GBPS_BY_ARCH[arch]
+    GBps = gbps if gbps is not None else GBPS_BY_ARCH.get(arch)
+    if GBps is not None:
         machine_spec_dict['GBps'] = GBps
         machine_spec_dict['theo_max'] = True
         machine_spec_dict.update(L1_theo_max(GBps))
         machine_spec_dict.update(L2_theo_max(GBps))
     else:
         print("Warning: unknown GBps for {}, theoretical max disabled".format(arch))
+        print("         pass --gbps <value> to enable theoretical max")
         machine_spec_dict['theo_max'] = False
 
     with open(machine_spec_filename, 'w') as outfile:
@@ -187,10 +195,11 @@ if __name__ =='__main__':
     parser.add_argument('-f', help='function names.', dest='function_names', required=True, action='append')
     parser.add_argument('-b', help='bench command.',  dest='bench_command',  default="../../../build/release/clients/staging/hipblas-bench")
     parser.add_argument('-d', help='GPU device number.', dest='device_number', type=int, default=0)
+    parser.add_argument('--gbps', help='memory bandwidth in GB/s for theoretical max; overrides built-in per-arch value.', dest='gbps', type=float, default=None)
 
     args = parser.parse_args()
 
-    cuda = False
+    cuda = detect_cuda()
     arch = getspecs.getgfx(args.device_number, cuda)
     if arch == 'N/A':
         print("Unable to detect GPU architecture for device {}".format(args.device_number))
@@ -208,7 +217,7 @@ if __name__ =='__main__':
 
     machine_spec_filename = os.path.join(args.level, args.tag, "machine_spec.yaml")
 
-    write_machine_spec_yaml(machine_spec_filename, args.device_number)
+    write_machine_spec_yaml(machine_spec_filename, args.device_number, args.gbps)
 
     for function_name in args.function_names:
 
