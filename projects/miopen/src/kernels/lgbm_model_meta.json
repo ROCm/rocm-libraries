@@ -333,6 +333,12 @@
       "ConvDirectNaiveConvBwd",
       "ConvDirectNaiveConvFwd",
       "ConvDirectNaiveConvWrw",
+      "ConvHipImplicitGemm3DGroupBwdXdlops",
+      "ConvHipImplicitGemm3DGroupFwdXdlops",
+      "ConvHipImplicitGemm3DGroupWrwXdlops",
+      "ConvHipImplicitGemmGroupBwdXdlops",
+      "ConvHipImplicitGemmGroupFwdXdlops",
+      "ConvHipImplicitGemmGroupWrwXdlops",
       "ConvWinoFuryRxS<2-3>",
       "GemmBwd1x1_stride1",
       "GemmBwd1x1_stride2",
@@ -352,6 +358,12 @@
       "ConvDirectNaiveConvBwd",
       "ConvDirectNaiveConvFwd",
       "ConvDirectNaiveConvWrw",
+      "ConvHipImplicitGemm3DGroupBwdXdlops",
+      "ConvHipImplicitGemm3DGroupFwdXdlops",
+      "ConvHipImplicitGemm3DGroupWrwXdlops",
+      "ConvHipImplicitGemmGroupBwdXdlops",
+      "ConvHipImplicitGemmGroupFwdXdlops",
+      "ConvHipImplicitGemmGroupWrwXdlops",
       "ConvWinoFuryRxS<2-3>",
       "GemmBwd1x1_stride1",
       "GemmBwd1x1_stride2",
@@ -370,6 +382,10 @@
       "ConvDirectNaiveConvBwd",
       "ConvDirectNaiveConvFwd",
       "ConvDirectNaiveConvWrw",
+      "ConvHipImplicitGemm3DGroupBwdXdlops",
+      "ConvHipImplicitGemm3DGroupFwdXdlops",
+      "ConvHipImplicitGemm3DGroupWrwXdlops",
+      "ConvHipImplicitGemmGroupFwdXdlops",
       "ConvWinoFuryRxS<2-3>",
       "GemmBwd1x1_stride1",
       "GemmBwd1x1_stride2",
@@ -389,6 +405,12 @@
       "ConvDirectNaiveConvBwd",
       "ConvDirectNaiveConvFwd",
       "ConvDirectNaiveConvWrw",
+      "ConvHipImplicitGemm3DGroupBwdXdlops",
+      "ConvHipImplicitGemm3DGroupFwdXdlops",
+      "ConvHipImplicitGemm3DGroupWrwXdlops",
+      "ConvHipImplicitGemmGroupBwdXdlops",
+      "ConvHipImplicitGemmGroupFwdXdlops",
+      "ConvHipImplicitGemmGroupWrwXdlops",
       "ConvWinoFuryRxS<2-3>",
       "GemmBwd1x1_stride1",
       "GemmBwd1x1_stride2",
@@ -653,6 +675,8 @@
   "triple_vocab": {
     "gfx1100|1|bf16": [
       "ConvDirectNaiveConvFwd",
+      "ConvHipImplicitGemm3DGroupFwdXdlops",
+      "ConvHipImplicitGemmGroupFwdXdlops",
       "GemmFwd1x1_0_1",
       "GemmFwd1x1_0_2",
       "GemmFwdRest"
@@ -662,6 +686,8 @@
       "ConvBinWinogradRxSf2x3g1",
       "ConvBinWinogradRxSf3x2",
       "ConvDirectNaiveConvFwd",
+      "ConvHipImplicitGemm3DGroupFwdXdlops",
+      "ConvHipImplicitGemmGroupFwdXdlops",
       "ConvWinoFuryRxS<2-3>",
       "GemmFwd1x1_0_1",
       "GemmFwd1x1_0_2",
@@ -678,8 +704,13 @@
       "GemmFwdRest",
       "fft"
     ],
+    "gfx1100|1|int8": [
+      "ConvHipImplicitGemmGroupFwdXdlops"
+    ],
     "gfx1100|2|bf16": [
       "ConvDirectNaiveConvBwd",
+      "ConvHipImplicitGemm3DGroupBwdXdlops",
+      "ConvHipImplicitGemmGroupBwdXdlops",
       "GemmBwd1x1_stride1",
       "GemmBwd1x1_stride2",
       "GemmBwdRest"
@@ -689,6 +720,8 @@
       "ConvBinWinogradRxSf2x3g1",
       "ConvBinWinogradRxSf3x2",
       "ConvDirectNaiveConvBwd",
+      "ConvHipImplicitGemm3DGroupBwdXdlops",
+      "ConvHipImplicitGemmGroupBwdXdlops",
       "ConvWinoFuryRxS<2-3>",
       "GemmBwd1x1_stride1",
       "GemmBwd1x1_stride2",
@@ -707,6 +740,8 @@
     ],
     "gfx1100|4|bf16": [
       "ConvDirectNaiveConvWrw",
+      "ConvHipImplicitGemm3DGroupWrwXdlops",
+      "ConvHipImplicitGemmGroupWrwXdlops",
       "GemmWrw1x1_stride1",
       "GemmWrwUniversal"
     ],
@@ -715,6 +750,8 @@
       "ConvBinWinogradRxSf2x3g1",
       "ConvBinWinogradRxSf3x2",
       "ConvDirectNaiveConvWrw",
+      "ConvHipImplicitGemm3DGroupWrwXdlops",
+      "ConvHipImplicitGemmGroupWrwXdlops",
       "ConvWinoFuryRxS<2-3>",
       "GemmWrw1x1_stride1",
       "GemmWrwUniversal"
@@ -729,6 +766,8 @@
     ],
     "gfx1101-v710|1|bf16": [
       "ConvDirectNaiveConvFwd",
+      "ConvHipImplicitGemm3DGroupFwdXdlops",
+      "ConvHipImplicitGemmGroupFwdXdlops",
       "GemmFwd1x1_0_1",
       "GemmFwd1x1_0_2",
       "GemmFwdRest"
@@ -738,6 +777,8 @@
       "ConvBinWinogradRxSf2x3g1",
       "ConvBinWinogradRxSf3x2",
       "ConvDirectNaiveConvFwd",
+      "ConvHipImplicitGemm3DGroupFwdXdlops",
+      "ConvHipImplicitGemmGroupFwdXdlops",
       "ConvWinoFuryRxS<2-3>",
       "GemmFwd1x1_0_1",
       "GemmFwd1x1_0_2",
@@ -755,10 +796,12 @@
     ],
     "gfx1101-v710|2|bf16": [
       "ConvDirectNaiveConvBwd",
+      "ConvHipImplicitGemm3DGroupBwdXdlops",
       "GemmBwdRest"
     ],
     "gfx1101-v710|2|fp16": [
       "ConvDirectNaiveConvBwd",
+      "ConvHipImplicitGemm3DGroupBwdXdlops",
       "GemmBwd1x1_stride1",
       "GemmBwdRest"
     ],
@@ -774,10 +817,12 @@
     ],
     "gfx1101-v710|4|bf16": [
       "ConvDirectNaiveConvWrw",
+      "ConvHipImplicitGemm3DGroupWrwXdlops",
       "GemmWrwUniversal"
     ],
     "gfx1101-v710|4|fp16": [
       "ConvDirectNaiveConvWrw",
+      "ConvHipImplicitGemm3DGroupWrwXdlops",
       "GemmWrw1x1_stride1",
       "GemmWrwUniversal"
     ],
@@ -787,6 +832,8 @@
     ],
     "gfx1101|1|bf16": [
       "ConvDirectNaiveConvFwd",
+      "ConvHipImplicitGemm3DGroupFwdXdlops",
+      "ConvHipImplicitGemmGroupFwdXdlops",
       "GemmFwd1x1_0_1",
       "GemmFwd1x1_0_2",
       "GemmFwdRest"
@@ -796,6 +843,7 @@
       "ConvBinWinogradRxSf2x3g1",
       "ConvBinWinogradRxSf3x2",
       "ConvDirectNaiveConvFwd",
+      "ConvHipImplicitGemmGroupFwdXdlops",
       "ConvWinoFuryRxS<2-3>",
       "GemmFwd1x1_0_1",
       "GemmFwd1x1_0_2",
@@ -810,6 +858,8 @@
     ],
     "gfx1101|2|bf16": [
       "ConvDirectNaiveConvBwd",
+      "ConvHipImplicitGemm3DGroupBwdXdlops",
+      "ConvHipImplicitGemmGroupBwdXdlops",
       "GemmBwd1x1_stride1",
       "GemmBwd1x1_stride2",
       "GemmBwdRest"
@@ -818,6 +868,7 @@
       "ConvBinWinogradRxSf2x3g1",
       "ConvBinWinogradRxSf3x2",
       "ConvDirectNaiveConvBwd",
+      "ConvHipImplicitGemmGroupBwdXdlops",
       "ConvWinoFuryRxS<2-3>",
       "GemmBwd1x1_stride1",
       "GemmBwd1x1_stride2",
@@ -826,11 +877,15 @@
     ],
     "gfx1101|4|bf16": [
       "ConvDirectNaiveConvWrw",
+      "ConvHipImplicitGemm3DGroupWrwXdlops",
+      "ConvHipImplicitGemmGroupWrwXdlops",
       "GemmWrw1x1_stride1",
       "GemmWrwUniversal"
     ],
     "gfx1102|1|bf16": [
       "ConvDirectNaiveConvFwd",
+      "ConvHipImplicitGemm3DGroupFwdXdlops",
+      "ConvHipImplicitGemmGroupFwdXdlops",
       "GemmFwd1x1_0_1",
       "GemmFwd1x1_0_2",
       "GemmFwdRest"
@@ -840,6 +895,8 @@
       "ConvBinWinogradRxSf2x3g1",
       "ConvBinWinogradRxSf3x2",
       "ConvDirectNaiveConvFwd",
+      "ConvHipImplicitGemm3DGroupFwdXdlops",
+      "ConvHipImplicitGemmGroupFwdXdlops",
       "ConvWinoFuryRxS<2-3>",
       "GemmFwd1x1_0_1",
       "GemmFwd1x1_0_2",
@@ -856,8 +913,13 @@
       "GemmFwdRest",
       "fft"
     ],
+    "gfx1102|1|int8": [
+      "ConvHipImplicitGemmGroupFwdXdlops"
+    ],
     "gfx1102|2|bf16": [
       "ConvDirectNaiveConvBwd",
+      "ConvHipImplicitGemm3DGroupBwdXdlops",
+      "ConvHipImplicitGemmGroupBwdXdlops",
       "GemmBwd1x1_stride1",
       "GemmBwd1x1_stride2",
       "GemmBwdRest"
@@ -867,6 +929,8 @@
       "ConvBinWinogradRxSf2x3g1",
       "ConvBinWinogradRxSf3x2",
       "ConvDirectNaiveConvBwd",
+      "ConvHipImplicitGemm3DGroupBwdXdlops",
+      "ConvHipImplicitGemmGroupBwdXdlops",
       "ConvWinoFuryRxS<2-3>",
       "GemmBwd1x1_stride1",
       "GemmBwd1x1_stride2",
@@ -885,6 +949,8 @@
     ],
     "gfx1102|4|bf16": [
       "ConvDirectNaiveConvWrw",
+      "ConvHipImplicitGemm3DGroupWrwXdlops",
+      "ConvHipImplicitGemmGroupWrwXdlops",
       "GemmWrw1x1_stride1",
       "GemmWrwUniversal"
     ],
@@ -893,6 +959,8 @@
       "ConvBinWinogradRxSf2x3g1",
       "ConvBinWinogradRxSf3x2",
       "ConvDirectNaiveConvWrw",
+      "ConvHipImplicitGemm3DGroupWrwXdlops",
+      "ConvHipImplicitGemmGroupWrwXdlops",
       "ConvWinoFuryRxS<2-3>",
       "GemmWrw1x1_stride1",
       "GemmWrwUniversal"
@@ -1792,5 +1860,5 @@
       "GemmWrwUniversal"
     ]
   },
-  "_note_v10": "v10_runtime_pure: 51 features, ALL GPU fields from hipDeviceProp_t + deploy/gpu_constants.h (gfx_id table). NO GPUInfo JSON / SKU reconciliation at runtime. Oracle val geomean 1.0068 top1 95.4%. 800 trees, gfx1151 descriptor backfilled for consistency."
+  "_note_v11": "v11_runtime: runtime-pure features (51, no spec_id/l3/peak_tflops) on CORRECT unfiltered data. The v9/v10 Xdlops filter was REVERTED - Xdlops solvers ARE applicable on RDNA3 via Composable Kernel (MIOpen IsApplicable has no arch gate). Oracle val geomean 1.0147 top1 94.5%."
 }
