@@ -125,7 +125,7 @@ The available CMake options are:
 
 * ``BACKEND``: Set to ``CPU`` for CPU-only builds. ``HIP`` by default.
 * ``CMAKE_BUILD_TYPE``: Set to ``Debug`` or ``Release``. ``Release`` by default.
-* ``RPP_AUDIO_SUPPORT``: Set to ``OFF`` to disable audio augmentations. ``ON`` by
+* ``RPP_AUDIO_SUPPORT``: Set to ``ON`` to disable audio augmentations. ``OFF`` by
   default.
 
 .. _verify-install:
