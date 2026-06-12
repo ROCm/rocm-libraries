@@ -45,7 +45,7 @@ using namespace hipsparse_test;
 template <typename I, typename J, typename T>
 void testing_sddmm_csr_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
+#if(!defined(CUDART_VERSION))
 
     int32_t              n         = 100;
     int32_t              m         = 100;
