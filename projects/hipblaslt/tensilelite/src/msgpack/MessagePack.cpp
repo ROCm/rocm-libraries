@@ -84,7 +84,6 @@ namespace TensileLite
         if(!in)
             return false;
 
-        // zlib inflate with unknown output size — grow buffer until done
         z_stream strm{};
         if(inflateInit(&strm) != Z_OK)
             return false;
@@ -92,32 +91,34 @@ namespace TensileLite
         strm.next_in  = compressed.data();
         strm.avail_in = static_cast<uInt>(compressed_size);
 
-        std::vector<uint8_t> decompressed(compressed_size * 4);
-        strm.next_out  = decompressed.data();
-        strm.avail_out = static_cast<uInt>(decompressed.size());
+        // Stream inflate output directly into msgpack::unpacker in chunks,
+        // mirroring the uncompressed path so decompress and parse overlap.
+        msgpack::unpacker unp;
+        constexpr size_t  buffer_size = 1 << 19;
+        bool              finished_parsing = false;
+        int               ret;
 
-        int ret;
         do
         {
-            ret = inflate(&strm, Z_NO_FLUSH);
-            if(ret == Z_OK && strm.avail_out == 0)
-            {
-                size_t used = decompressed.size();
-                decompressed.resize(used * 2);
-                strm.next_out  = decompressed.data() + used;
-                strm.avail_out = static_cast<uInt>(decompressed.size() - used);
-            }
-        } while(ret == Z_OK);
+            unp.reserve_buffer(buffer_size);
+            strm.next_out  = reinterpret_cast<uint8_t*>(unp.buffer());
+            strm.avail_out = static_cast<uInt>(buffer_size);
 
-        size_t decompressed_size = strm.total_out;
+            ret = inflate(&strm, Z_NO_FLUSH);
+            if(ret != Z_OK && ret != Z_STREAM_END)
+            {
+                inflateEnd(&strm);
+                return false;
+            }
+
+            size_t produced = buffer_size - strm.avail_out;
+            unp.buffer_consumed(produced);
+            finished_parsing = unp.next(result);
+        } while(!finished_parsing && ret == Z_OK);
+
         inflateEnd(&strm);
 
-        if(ret != Z_STREAM_END)
-            return false;
-
-        result = msgpack::unpack(reinterpret_cast<const char*>(decompressed.data()),
-                                 decompressed_size);
-        return true;
+        return finished_parsing;
     }
 
     inline bool fileToMsgObject(std::string const& filename, msgpack::object_handle& result)
