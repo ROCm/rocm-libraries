@@ -29,11 +29,12 @@
 namespace stinkytofu {
 class Pass;
 
-/// Strip every s_setreg* touching the SCHED_MODE hwreg and clear all six GPR
-/// hazard fields (va_vdst / vm_vsrc / va_sdst / va_ssrc / va_vcc / sa_sdst)
-/// on every s_wait_alu. s_wait_alu is deleted only when every field including
-/// hold_cnt is no-wait. Pre-pass for InsertWaitAluPass so existing mode1
-/// artifacts cannot mislead the new mode2 placement.
+/// Strip s_setreg* that write the DEP_MODE sub-field of SCHED_MODE
+/// (hwreg(26, offset=0, size=2)); other SCHED_MODE sub-fields are left intact.
+/// Also clear all six GPR hazard fields (va_vdst / vm_vsrc / va_sdst / va_ssrc
+/// / va_vcc / sa_sdst) on every s_wait_alu; s_wait_alu is deleted only when
+/// every field including hold_cnt is no-wait. Pre-pass for InsertWaitAluPass so
+/// existing mode1 artifacts cannot mislead the new mode2 placement.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createRemoveWaitAluPass();
 
 }  // namespace stinkytofu
