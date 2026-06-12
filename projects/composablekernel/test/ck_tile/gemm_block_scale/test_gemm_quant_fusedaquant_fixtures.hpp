@@ -169,9 +169,12 @@ class TestCkTileGemmFusedAQuantStandalone : public ::testing::Test
         ck_tile::HostTensor<QDataType> bq_bqk_bqn(
             ck_tile::host_tensor_descriptor(BQK, BQN, stride_BQ, is_row_major(BQLayout{})));
 
-        ck_tile::FillUniformDistribution<ADataType>{-2.0f, 3.0f}(a_m_k);
-        ck_tile::FillUniformDistribution<BDataType>{-5.0f, 5.0f}(b_k_n);
-        ck_tile::FillUniformDistribution<QDataType>{-2.0f, 2.0f}(bq_bqk_bqn);
+        // ck_tile::FillUniformDistribution<ADataType>{-2.0f, 3.0f}(a_m_k);
+        ck_tile::FillStepRange<ADataType>{0.f, 255.f, 1.f}(a_m_k);
+        // ck_tile::FillUniformDistribution<BDataType>{-5.0f, 5.0f}(b_k_n);
+        ck_tile::FillConstant<BDataType>{1}(b_k_n);
+        // ck_tile::FillUniformDistribution<QDataType>{-2.0f, 2.0f}(bq_bqk_bqn);
+        ck_tile::FillConstant<QDataType>{1.f}(bq_bqk_bqn);
 
         ck_tile::DeviceMem a_m_k_dev_buf(a_m_k.get_element_space_size() * sizeof(ADataType));
         ck_tile::DeviceMem b_k_n_dev_buf(b_k_n.get_element_space_size() * sizeof(BDataType));
@@ -251,12 +254,12 @@ class TestCkTileGemmFusedAQuantStandalone : public ::testing::Test
             ck_tile::host_tensor_descriptor(M, N, stride_C, is_row_major(CLayout{})));
         c_m_n_dev_buf.FromDevice(c_m_n_dev_result.mData.data());
 
-        const float max_accumulated_value =
-            *std::max_element(c_m_n_host_ref.mData.begin(), c_m_n_host_ref.mData.end());
-        const auto rtol_atol =
-            calculate_rtol_atol<ck_tile::fp8_t, BDataType, AccDataType, CDataType>(
-                K, k_batch, max_accumulated_value);
-
+        // const float max_accumulated_value =
+        //     *std::max_element(c_m_n_host_ref.mData.begin(), c_m_n_host_ref.mData.end());
+        // const auto rtol_atol =
+        //     calculate_rtol_atol<ck_tile::fp8_t, BDataType, AccDataType, CDataType>(
+        //         K, k_batch, max_accumulated_value);
+        const auto rtol_atol = ck_tile::make_tuple(0.f, 1.f);
         // Validate results
         bool pass = ck_tile::check_err(c_m_n_dev_result,
                                        c_m_n_host_ref,

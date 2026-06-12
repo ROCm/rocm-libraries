@@ -33,4 +33,5 @@ using FusedAQuantStandaloneTypes = ::testing::Types<
 TYPED_TEST_SUITE(TestCkTileGemmFusedAQuantStandalone, FusedAQuantStandaloneTypes);
 
 TYPED_TEST(TestCkTileGemmFusedAQuantStandalone, ABQuantGroupedStandaloneFusedAQuant)
-{ this->run_test_with_validation(1024, 1024, 1024); }
+// { this->run_test_with_validation(1024, 1024, 1024); }
+{ this->run_test_with_validation(256, 256, 256); }

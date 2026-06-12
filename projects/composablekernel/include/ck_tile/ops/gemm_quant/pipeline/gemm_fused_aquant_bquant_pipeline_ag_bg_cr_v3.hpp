@@ -303,6 +303,10 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
 
                 aq_block_tile.get_thread_buffer()[i] =
                     type_convert<AQDataType>(type_convert<float>(max_abs) * fp8_inv_max);
+                // if(threadIdx.x == 0)
+                // {
+                //     printf("%u:%f:%f\t", type_convert<unsigned int>(i), type_convert<float>(max_abs), aq_block_tile.get_thread_buffer()[i]);
+                // }
             });
 
             // Apply scales and convert data to the original block tile distribution
@@ -315,7 +319,10 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                 constexpr auto k_group_idx = aq_idx[number<1>{}];
 
                 const AQDataType scale_value = aq_block_tile(aq_idx);
-
+                if(threadIdx.x == 0)
+                {
+                    printf("sc:%f\t", scale_value);
+                }
                 static_for<0, AQuantGroupSize::kK, 1>{}([&](auto kk) {
                     constexpr auto k_idx =
                         tile_distributed_index<getIdx(k_group_idx) * AQuantGroupSize::kK +
@@ -324,6 +331,11 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
 
                     AQDataType raw_a_value = type_convert<AQDataType>(a_raw_tile(a_idx));
                     a_block_tile(a_idx)    = type_convert<fp8_t>(raw_a_value / scale_value);
+                    if(threadIdx.x == 0 && kk.value == 0)
+                    {
+                        printf("%u:%f", type_convert<unsigned int>(kk),
+                        type_convert<float>(a_block_tile(a_idx)));
+                    }
                 });
             });
         }
