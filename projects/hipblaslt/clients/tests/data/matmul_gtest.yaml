@@ -3431,27 +3431,6 @@ Tests:
   unit_check: 1
   norm_check: 1
 
-# Debug test - 1024x1024 using regular matmul with general batched (batch_mode=1)
-- name: matmul_general_batched_debug
-  category: quick
-  function: matmul
-  precision: *real_precisions
-  transA: N
-  transB: N
-  M: 1024
-  N: 1024
-  K: 256
-  lda: 1024
-  ldb: 256
-  ldc: 1024
-  ldd: 1024
-  batch_mode: 1
-  batch_count: 2
-  alpha: 1.0
-  beta: 1.0
-  unit_check: 1
-  norm_check: 1
-
 # Large offset test
 - name: matmul_batch_offset_large
   category: nightly
@@ -3468,14 +3447,10 @@ Tests:
   ldd: 1024
   batch_mode: 1
   batch_count: 4
-  batch_offset_a: [1024, 4096]
-  batch_offset_b: [512, 2048]
-  batch_offset_c: [1024, 4096]
-  batch_offset_d: [1024, 4096]
-  #batch_offset_a: 4096
-  #batch_offset_b: 2048
-  #batch_offset_c: 4096
-  #batch_offset_d: 4096
+  batch_offset_a: 4096
+  batch_offset_b: 2048
+  batch_offset_c: [4096, 1000000]
+  batch_offset_d: [4096, 500000]
   alpha: 1.0
   beta: 1.0
   unit_check: 1
