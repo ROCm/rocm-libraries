@@ -792,11 +792,32 @@ using CLayout = {ns_name}::CLayout;
         const dim3 blocks = StreamKGemmKernel::BlockSize();
         constexpr int kBlockPerCu = {config.k_block_per_cu};
 
-        // Atomic reduction accumulates into C, so reset buffers before each run.
+        // Atomic reduction accumulates into C, so reset it before every run.
+        // Zero only the used MxN region honoring the leading dimension
+        // (stride_E): a flat M*N memset would skip elements when C has a padded
+        // stride and corrupt the atomic accumulation. hipMemset2DAsync handles
+        // the pitched 2D extent and its status is checked, not discarded.
         auto reset_data_buffers = [&]() {{
             if constexpr (ReductionStrategy == ck_tile::StreamKReductionStrategy::Atomic) {{
-                (void)hipMemsetAsync(args.e_ptr, 0,
-                    args.M * args.N * sizeof(CDataType), stream.stream_id_);
+                constexpr size_t c_elem = sizeof(CDataType);
+                const size_t c_pitch = static_cast<size_t>(args.stride_E) * c_elem;
+                hipError_t memset_status;
+                if constexpr (std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor>) {{
+                    // Row-major C: M rows of N elements, row pitch = stride_E.
+                    memset_status = hipMemset2DAsync(args.e_ptr, c_pitch, 0,
+                        static_cast<size_t>(args.N) * c_elem,
+                        static_cast<size_t>(args.M), stream.stream_id_);
+                }} else {{
+                    // Column-major C: N columns of M elements, column pitch = stride_E.
+                    memset_status = hipMemset2DAsync(args.e_ptr, c_pitch, 0,
+                        static_cast<size_t>(args.M) * c_elem,
+                        static_cast<size_t>(args.N), stream.stream_id_);
+                }}
+                if(memset_status != hipSuccess) {{
+                    throw std::runtime_error(
+                        std::string("hipMemset2DAsync failed to zero C: ") +
+                        hipGetErrorString(memset_status));
+                }}
             }} else {{
                 workspace_dev.SetZero();
             }}
