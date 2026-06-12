@@ -170,13 +170,9 @@ def _disableRuntimeStaggerU(state):
 
 
 def _disableUnsupportedRuntimeStaggerU(state):
-  hasMxForStagger = state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]
-  usesTdmForStagger = state["enableTDMA"] or state["enableTDMB"]
-  usesDtlForStagger = state["DirectToLdsA"] or state["DirectToLdsB"]
-
+  # PAP+TDM StaggerU is not implemented (the staggered TDM descriptor isn't carried
+  # across the PAP persistent-tile handoff), so force runtime StaggerU off.
   if state["PrefetchAcrossPersistent"] and state["TDMInst"] == 3:
-    _disableRuntimeStaggerU(state)
-  if state["PrefetchAcrossPersistent"] and hasMxForStagger and not (usesTdmForStagger or usesDtlForStagger):
     _disableRuntimeStaggerU(state)
 
 
