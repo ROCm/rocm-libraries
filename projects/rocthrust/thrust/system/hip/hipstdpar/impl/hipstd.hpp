@@ -57,8 +57,49 @@
 
 namespace hipstd
 {
-// Emits a one-time stderr warning when HSA_XNACK is not set to "1" and the
-// interpose-alloc compiler flag was not active.  Without XNACK or managed
+namespace detail
+{
+// Returns true if the current active HIP device supports XNACK.
+// gcnArchName for XNACK-capable GPUs always contains the substring "xnack"
+// (e.g. "gfx90a:xnack+" or "gfx90a:xnack-"); non-XNACK architectures never do.
+inline bool current_device_supports_xnack() noexcept
+{
+  int device = 0;
+  if (::hipGetDevice(&device) != hipSuccess)
+  {
+    return false;
+  }
+
+  ::hipDeviceProp_t prop{};
+  if (::hipGetDeviceProperties(&prop, device) != hipSuccess)
+  {
+    return false;
+  }
+
+  // Substring search for "xnack" without pulling in <cstring>.
+  const char* arch   = prop.gcnArchName;
+  const char* needle = "xnack";
+  for (; *arch != '\0'; ++arch)
+  {
+    const char* a = arch;
+    const char* n = needle;
+    while (*n != '\0' && *a == *n)
+    {
+      ++a;
+      ++n;
+    }
+    if (*n == '\0')
+    {
+      return true;
+    }
+  }
+  return false;
+}
+} // namespace detail
+
+// Emits a one-time stderr warning when HSA_XNACK is not set to "1", the
+// interpose-alloc compiler flag was not active, and the current
+// device is from a XNACK-capable AMD GPU family.  Without XNACK or managed
 // memory, device-only allocations are not CPU-accessible and hipstdpar
 // algorithms may silently produce wrong results.
 // Suppressed when __HIPSTDPAR_INTERPOSE_ALLOC__ or __HIPSTDPAR_INTERPOSE_ALLOC_V1__
@@ -70,6 +111,10 @@ inline void warn_if_no_xnack() noexcept
 #    if defined(__linux__)
   static ::std::once_flag xnack_flag_;
   ::std::call_once(xnack_flag_, [] {
+    if (!::hipstd::detail::current_device_supports_xnack())
+    {
+      return;
+    }
     const char* val = ::std::getenv("HSA_XNACK");
     if (val == nullptr || val[0] != '1' || val[1] != '\0')
     {
