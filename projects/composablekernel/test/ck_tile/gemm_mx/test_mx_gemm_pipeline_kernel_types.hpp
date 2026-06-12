@@ -78,8 +78,8 @@ using KernelTypesMxGemmCompTDMWmma = ::testing::Types<
     std::tuple<    Row,     Col,     Row,      BF8,        F8,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32,        CompTDMV2,  I16>,
     std::tuple<    Row,     Row,     Row,      BF8,        F8,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32,        CompTDMV2,  I16>,  // RRR (non-RCR) layout
     // --- Scale32 cluster launch (from develop; ScaleBlockSize=I32 at idx 16, ClusterEnable at idx 17) ---
-    std::tuple<    Row,     Col,     Row,       F8,        F8,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32,        CompTDMV1,  I32, ClusterEnable>,
-    std::tuple<    Row,     Col,     Row,       F8,        F8,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32,        CompTDMV2,  I32, ClusterEnable>
+    std::tuple<    Row,     Col,     Row,       F8,        F8,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32,        CompTDMV1,  I32, std::false_type, ClusterEnable>,
+    std::tuple<    Row,     Col,     Row,       F8,        F8,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32,        CompTDMV2,  I32, std::false_type, ClusterEnable>
 >;
 
 using KernelTypesMxGemmCompAsync = ::testing::Types<
