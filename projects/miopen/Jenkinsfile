@@ -245,6 +245,10 @@ pipeline {
     }
     parameters {
         booleanParam(
+            name: "RUN_HIP_TIDY",
+            defaultValue: true,
+            description: "Enable the Hip Tidy (clang-analyze) stage in Full Tests")
+        booleanParam(
             name: "BUILD_DOCKER",
             defaultValue: true,
             description: "")
@@ -348,7 +352,6 @@ pipeline {
             defaultValue: false,
             description: "Nightly builds for non-critical hardware (gfx908, Navi 3.5) (default: OFF)")
 
-        booleanParam(name: "RUN_HIP_TIDY", defaultValue: true, description: "Enable the Hip Tidy (clang-analyze) stage in Full Tests")
     }
 
     environment{
