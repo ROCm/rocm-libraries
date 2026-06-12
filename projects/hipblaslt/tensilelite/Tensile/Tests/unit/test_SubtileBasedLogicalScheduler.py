@@ -2949,15 +2949,18 @@ class TestBuildTailloopPGR0:
 
 
 class TestPreferVgprGuard:
-    """Verify the pool-size guard on preferVgpr.
+    """Verify the VGPR/AGPR accumulator split policy for FP4 CDTile kernels.
 
-    For FP4 CDTile kernels, preferVgpr is only True when all D-tile
-    accumulator registers fit within the 256-VGPR hardware limit:
-        writer.vgprPool.size() + numMMATiles * numDword <= maxVgprBeforeAgpr (256)
+    preferVgpr is enabled for FP4-on-both-operands CDTile kernels. The number
+    of accumulators kept in VGPR is bounded by vgprAccLimit (the smaller of a
+    main-loop and a post-loop/epilogue ceiling); the remainder spills to AGPR.
 
-    When pool_size + totalDTileRegs > 256, preferVgpr must be False and
-    every tile must fall back to AGPR, preventing copy instructions from
-    referencing v[256+].
+    Invariants verified here:
+      * When the whole D-tile cannot fit below the VGPR ceiling, the allocation
+        is a *partial* split: some accumulators in VGPR, the rest in AGPR.
+      * No VGPR-backed accumulator may reference v[256+] (hardware limit).
+      * When the pre-allocated pool already exceeds the VGPR ceiling, every
+        accumulator falls back to AGPR.
     """
 
     def _make_writer(self, pre_alloc_vgprs, max_vgpr=256, physical_max_vgpr=512):
@@ -2995,22 +2998,43 @@ class TestPreferVgprGuard:
 
     @pytest.mark.parametrize("pre_alloc,mt0,mt1", [
         # MT256x256: 64 tiles × 4 DWORDs = 256 total accumulator registers.
-        # Any P > 0 pushes P+256 above the 256-VGPR limit.
+        # 256 (+pre_alloc) cannot all fit below the VGPR ceiling, so the
+        # allocation splits: some accumulators in VGPR, the rest in AGPR.
         (4, 256, 256),
         (1, 256, 256),
-        # MT128x128: 16 tiles × 4 DWORDs = 64 total.
-        # P=193 → 193+64=257 > 256 → overflow.
+    ])
+    def test_overflow_uses_partial_split(self, pre_alloc, mt0, mt1):
+        """When the whole D-tile cannot fit below the VGPR ceiling, the
+        accumulators are split across VGPR and AGPR, and no VGPR-backed
+        accumulator references v[256+]."""
+        writer = self._make_writer(pre_alloc)
+        dTileInfo = self._alloc_cdtile(writer, mt0, mt1)
+        assert len(dTileInfo.vgprTiles) > 0
+        vgpr_tiles = [t for t in dTileInfo.vgprTiles if t.regList.is_vgpr]
+        agpr_tiles = [t for t in dTileInfo.vgprTiles if not t.regList.is_vgpr]
+        assert vgpr_tiles, "Expected a partial split to place some accs in VGPR"
+        assert agpr_tiles, "Expected a partial split to spill some accs to AGPR"
+        # Safety invariant: VGPR-backed accumulators must stay inside the file.
+        max_vgpr_idx = max(idx for t in vgpr_tiles for idx in list(t))
+        assert max_vgpr_idx < 256, (
+            f"VGPR-backed accumulator references v{max_vgpr_idx} (>= 256) "
+            f"(pre_alloc={pre_alloc}, MT{mt0}x{mt1})"
+        )
+
+    @pytest.mark.parametrize("pre_alloc,mt0,mt1", [
+        # MT128x128: 16 tiles × 4 DWORDs = 64 total. P=193 leaves the pool
+        # already above the VGPR ceiling, so every accumulator must use AGPR.
         (193, 128, 128),
     ])
-    def test_overflow_forces_all_agpr(self, pre_alloc, mt0, mt1):
-        """When pool_size + totalDTileRegs > 256, preferVgpr must be False
-        and every CDTile tile must be allocated in AGPR."""
+    def test_pool_exhausted_forces_all_agpr(self, pre_alloc, mt0, mt1):
+        """When the pre-allocated pool already exceeds the VGPR ceiling, every
+        CDTile accumulator must be allocated in AGPR."""
         writer = self._make_writer(pre_alloc)
         dTileInfo = self._alloc_cdtile(writer, mt0, mt1)
         assert len(dTileInfo.vgprTiles) > 0
         vgpr_tiles = [t for t in dTileInfo.vgprTiles if t.regList.is_vgpr]
         assert vgpr_tiles == [], (
-            f"Expected all CDTile tiles in AGPR when pool overflows "
+            f"Expected all CDTile tiles in AGPR when pool is exhausted "
             f"(pre_alloc={pre_alloc}, MT{mt0}x{mt1}), "
             f"but {len(vgpr_tiles)} tile(s) landed in VGPR"
         )
