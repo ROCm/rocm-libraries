@@ -1000,10 +1000,22 @@ def makeShardedGtestCmd(String buildDir, String gtestFilter="*") {
 // the display names of all stages that completed without error.
 // Must be @NonCPS because it accesses rawBuild and iterates FlowNodes
 // (non-serializable Jenkins internal objects).
+//
+// Only returns a non-empty set when the CURRENT build was triggered by
+// "Restart from Stage" (RestartDeclarativePipelineCause). For any other
+// trigger (SCM change, manual Build, cron) the previous build may be for
+// a completely different commit, so we must not skip any stages.
 @NonCPS
 def getPassedStagesFromPreviousBuild() {
     def passed = [] as Set
     try {
+        // Guard: only skip stages on a "Restart from Stage" build.
+        // Any other trigger means this could be a new commit.
+        def isRestart = currentBuild.rawBuild?.getCauses()?.any { cause ->
+            cause.getClass().getName().contains('RestartDeclarativePipeline')
+        }
+        if (!isRestart) return passed
+
         def prev = currentBuild.previousBuild
         if (!prev) return passed
         if (prev.result == 'SUCCESS') return passed
@@ -1073,7 +1085,11 @@ def addStage(Map stagesMap, String name, Closure body) {
 
 def packageAndStaticCheckStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def withWorkingDirFn) {
     def passedStages = getPassedStagesFromPreviousBuild()
-    echo "passedStages (${passedStages.size()}): ${passedStages}"
+    if (passedStages) {
+        echo "Selective rerun: skipping ${passedStages.size()} previously passed stage(s): ${passedStages}"
+    } else {
+        echo "Running all stages (not a Restart from Stage, or no previous failed build)."
+    }
     def stages = [:]
 
     addStage(stages, 'HIP Package') {
@@ -1131,7 +1147,11 @@ def packageAndStaticCheckStages(def pipelineParams, def pipelineEnv, def rocmnod
 
 def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def withWorkingDirFn, def runDbSyncJobFn, def runBuildAndSingleGtestJobFn) {
     def passedStages = getPassedStagesFromPreviousBuild()
-    echo "passedStages (${passedStages.size()}): ${passedStages}"
+    if (passedStages) {
+        echo "Selective rerun: skipping ${passedStages.size()} previously passed stage(s): ${passedStages}"
+    } else {
+        echo "Running all stages (not a Restart from Stage, or no previous failed build)."
+    }
     def stages = [:]
 
     def Full_test    = pipelineEnv.Full_test
@@ -1369,7 +1389,11 @@ def nightlyTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def w
 
 def nonCriticalHWNightlyStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def withWorkingDirFn, def runDbSyncJobFn, def runBuildAndSingleGtestJobFn) {
     def passedStages = getPassedStagesFromPreviousBuild()
-    echo "passedStages (${passedStages.size()}): ${passedStages}"
+    if (passedStages) {
+        echo "Selective rerun: skipping ${passedStages.size()} previously passed stage(s): ${passedStages}"
+    } else {
+        echo "Running all stages (not a Restart from Stage, or no previous failed build)."
+    }
     def stages = [:]
 
     def Full_test       = pipelineEnv.Full_test
