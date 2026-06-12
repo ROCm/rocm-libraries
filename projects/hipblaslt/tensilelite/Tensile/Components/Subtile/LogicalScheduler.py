@@ -2643,8 +2643,12 @@ class LogicalScheduler:
                 # Allocate the full tile as a single contiguous block.
                 # emitSingleDsRead uses (baseVgpr + readIdx * 4) arithmetic,
                 # so the registers within a tile must be contiguous.
-                # Align to 4 (minimum for ds_load_b128 destination).
-                vstart = writer.vgprPool.checkOutAligned(numRegs, 4, tag="allocVgprTiles_vstart")
+                # Align to min(numRegs, 4): full b128 tiles get 4-register
+                # alignment, but smaller tiles (notably the common 1-register
+                # tiles) must not be force-aligned to 4 or each one wastes up to
+                # 3 registers, inflating peak VGPR usage and breaking occupancy.
+                align = min(numRegs, 4)
+                vstart = writer.vgprPool.checkOutAligned(numRegs, align, tag="allocVgprTiles_vstart")
                 for k in range(numRegs):
                     tile.append(vstart + k)
                 tiles.append(tile)
@@ -2816,7 +2820,9 @@ class LogicalScheduler:
             for _ in range(count):
                 tile = RegisterTileInfo(writer.vgprPool)
                 # Allocate contiguously (same rationale as allocVgprTiles).
-                vstart = writer.vgprPool.checkOutAligned(numRegs, 4, tag="reallocTailTilesFlat_vstart")
+                # Align to min(numRegs, 4) to avoid wasting registers on small tiles.
+                align = min(numRegs, 4)
+                vstart = writer.vgprPool.checkOutAligned(numRegs, align, tag="reallocTailTilesFlat_vstart")
                 for k in range(numRegs):
                     tile.append(vstart + k)
                 tiles.append(tile)
