@@ -3932,6 +3932,12 @@ void testing_matmul_with_bias(const Arguments& arg,
         const int benchEnqueuesPerSync = getEnvNonNegativeInt("HIPBLASLT_BENCH_EnqueuesPerSync", 5);
         if(benchEnqueuesPerSync <= 0)
             throw std::runtime_error("HIPBLASLT_BENCH_EnqueuesPerSync requires a positive value");
+        const auto warmupRotatingIndex = [&](int i) {
+            return i % block_count;
+        };
+        const auto timedRotatingIndex = [&](int i) {
+            return (i / benchEnqueuesPerSync) % block_count;
+        };
         const bool useBenchTimingWindows = arg.use_gpu_timer && arg.use_ext && !do_grouped_gemm
                                            && number_hot_calls > benchEnqueuesPerSync;
         const int timingWindows = useBenchTimingWindows
@@ -4014,7 +4020,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   ? event_gpu_time_end
                                   : nullptr;
                         CHECK_HIPBLASLT_ERROR(
-                            gemmVec[i % block_count].run(stream, startEvent, stopEvent));
+                            gemmVec[warmupRotatingIndex(i)].run(stream, startEvent, stopEvent));
                         if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
                             copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
                     }
@@ -4066,7 +4072,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                               ? event_gpu_time_end
                                                               : nullptr;
                                 CHECK_HIPBLASLT_ERROR(
-                                    gemmVec[i % block_count].run(stream, startEvent, stopEvent));
+                                    gemmVec[timedRotatingIndex(i)].run(stream, startEvent, stopEvent));
                                 if(arg.flush)
                                 {
                                     hipLaunchKernelGGL(
@@ -4112,7 +4118,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                        ? event_gpu_time_end
                                                        : nullptr;
                             CHECK_HIPBLASLT_ERROR(
-                                gemmVec[i % block_count].run(stream, startEvent, stopEvent));
+                                gemmVec[timedRotatingIndex(i)].run(stream, startEvent, stopEvent));
                             if(arg.flush)
                             {
                                 hipLaunchKernelGGL(
