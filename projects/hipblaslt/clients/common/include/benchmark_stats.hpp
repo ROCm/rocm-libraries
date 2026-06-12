@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,7 +38,6 @@ namespace hipblaslt_bench
     struct TimingConfig
     {
         int32_t iters = 10; // enqueues in the fixed-count sample; unused by the adaptive path
-        int32_t cold_iters = 0; // warmup enqueues run by the caller (informational)
         float   warmup_time = 0.0f; // warm up until this wall-time is reached
         float   sample_time = 0.0f; // target span per sample; 0 => one enqueue per sample
         float   measure_time = 0.0f; // minimum total measure time (floor)

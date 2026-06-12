@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,6 +35,7 @@
 #include <functional>
 #include <hip/hip_runtime.h>
 #include <limits>
+#include <numeric>
 #include <vector>
 
 // ============================================================================
@@ -56,10 +57,14 @@ namespace hipblaslt_bench
     {
         inline double mean_of(const std::vector<double>& v)
         {
-            double sum = 0.0;
-            for(double x : v)
-                sum += x;
-            return v.empty() ? 0.0 : sum / v.size();
+            return v.empty() ? 0.0 : std::accumulate(v.begin(), v.end(), 0.0) / v.size();
+        }
+
+        inline double sum_sq_dev(const std::vector<double>& v, double mean)
+        {
+            return std::accumulate(v.begin(), v.end(), 0.0, [mean](double acc, double x) {
+                return acc + (x - mean) * (x - mean);
+            });
         }
 
         // Relative standard error of the mean: (sample stddev / mean) / sqrt(n).
@@ -71,10 +76,7 @@ namespace hipblaslt_bench
             const double mean = mean_of(v);
             if(mean <= 0.0)
                 return 0.0;
-            double var = 0.0;
-            for(double x : v)
-                var += (x - mean) * (x - mean);
-            var /= (n - 1); // unbiased sample variance
+            const double var = sum_sq_dev(v, mean) / (n - 1); // unbiased sample variance
             return (std::sqrt(var) / mean) / std::sqrt(double(n));
         }
 
@@ -160,9 +162,9 @@ namespace hipblaslt_bench
         auto size_batch = [&](double per_iter_us) -> int32_t {
             if(cfg.sample_time <= 0.0f || per_iter_us <= 0.0)
                 return 1;
-            const double  want = std::ceil(double(cfg.sample_time) * 1000.0 / per_iter_us);
-            const int64_t b    = std::min<int64_t>(cap, std::max<int64_t>(1, int64_t(want)));
-            return int32_t(std::min<int64_t>(b, std::numeric_limits<int32_t>::max()));
+            const double want = std::ceil(double(cfg.sample_time) * 1000.0 / per_iter_us);
+            // cap <= INT32_MAX, so the clamped value always fits in int32_t.
+            return int32_t(std::clamp(int64_t(want), int64_t(1), cap));
         };
 
         // ---- Warmup: a 1-enqueue probe seeds the chunk size, then warm up in
@@ -234,12 +236,9 @@ namespace hipblaslt_bench
 
         std::vector<double> sorted(per_iter_samples);
         std::sort(sorted.begin(), sorted.end());
-        const size_t n  = sorted.size();
+        const size_t n    = sorted.size();
         const double mean = detail::mean_of(per_iter_samples);
-        double       var  = 0.0;
-        for(double x : per_iter_samples)
-            var += (x - mean) * (x - mean);
-        var /= n;
+        const double var  = detail::sum_sq_dev(per_iter_samples, mean) / n;
 
         out.min_us    = sorted.front();
         out.median_us = (n % 2) ? sorted[n / 2] : 0.5 * (sorted[n / 2 - 1] + sorted[n / 2]);

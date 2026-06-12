@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -563,7 +563,6 @@ int main(int argc, char** argv)
 
     hipblaslt_bench::TimingConfig timingCfg;
     timingCfg.iters         = iters;
-    timingCfg.cold_iters    = cold_iters;
     timingCfg.use_gpu_timer = rv.gs.use_gpu_timer;
     if(rv.gs.adaptive)
     {

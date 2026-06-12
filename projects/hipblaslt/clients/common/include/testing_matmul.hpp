@@ -5592,7 +5592,6 @@ void testing_matmul_with_bias(const Arguments& arg,
         // Adaptive timing is gated on --adaptive; the per-knob settings apply only then.
         hipblaslt_bench::TimingConfig timingCfg;
         timingCfg.iters         = number_hot_calls;
-        timingCfg.cold_iters    = number_cold_calls;
         timingCfg.use_gpu_timer = arg.use_gpu_timer;
         if(arg.adaptive)
         {
