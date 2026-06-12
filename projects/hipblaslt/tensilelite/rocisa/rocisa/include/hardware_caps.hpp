@@ -538,6 +538,8 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["HasSchedMode"]       = checkInList(isaVersion[0], {12});
     rv["HasAccCD"]           = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["ArchAccUnifiedRegs"] = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
+    // Max concurrent waves per SIMD: 8 for ArchAccUnifiedRegs (gfx90a/gfx942/gfx950), 10 otherwise.
+    rv["MaxWavesPerSimd"]    = rv["ArchAccUnifiedRegs"] ? 8 : 10;
     rv["CrosslaneWait"]      = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}});
     rv["TransOpWait"]        = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
     rv["SDWAWait"]           = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
