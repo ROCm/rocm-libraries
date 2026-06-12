@@ -54,7 +54,7 @@ def get_branch_name(){
 ///   * "Performance Dataset" is a performance test with a specified dataset.
 /// Target := { gfx908 | gfx90a | gfx942 } [ Xnack+ ]
 
-def utils = null
+utils = null
 
 def show_node_info() {
     sh """
