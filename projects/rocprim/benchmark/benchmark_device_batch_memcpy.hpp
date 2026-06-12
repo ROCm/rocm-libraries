@@ -51,8 +51,7 @@
 template<bool IsMemCpy,
          typename InputBufferItType,
          typename OutputBufferItType,
-         typename BufferSizeItType,
-         typename std::enable_if<IsMemCpy, int>::type = 0>
+         typename BufferSizeItType>
 void batch_copy(void*              temporary_storage,
                 size_t&            storage_size,
                 InputBufferItType  sources,
@@ -61,35 +60,26 @@ void batch_copy(void*              temporary_storage,
                 uint32_t           num_copies,
                 hipStream_t        stream)
 {
-    HIP_CHECK(rocprim::batch_memcpy(temporary_storage,
-                                    storage_size,
-                                    sources,
-                                    destinations,
-                                    sizes,
-                                    num_copies,
-                                    stream));
-}
-
-template<bool IsMemCpy,
-         typename InputBufferItType,
-         typename OutputBufferItType,
-         typename BufferSizeItType,
-         typename std::enable_if<!IsMemCpy, int>::type = 0>
-void batch_copy(void*              temporary_storage,
-                size_t&            storage_size,
-                InputBufferItType  sources,
-                OutputBufferItType destinations,
-                BufferSizeItType   sizes,
-                uint32_t           num_copies,
-                hipStream_t        stream)
-{
-    HIP_CHECK(rocprim::batch_copy(temporary_storage,
-                                  storage_size,
-                                  sources,
-                                  destinations,
-                                  sizes,
-                                  num_copies,
-                                  stream));
+    if constexpr(IsMemCpy)
+    {
+        HIP_CHECK(rocprim::batch_memcpy(temporary_storage,
+                                        storage_size,
+                                        sources,
+                                        destinations,
+                                        sizes,
+                                        num_copies,
+                                        stream));
+    }
+    else
+    {
+        HIP_CHECK(rocprim::batch_copy(temporary_storage,
+                                      storage_size,
+                                      sources,
+                                      destinations,
+                                      sizes,
+                                      num_copies,
+                                      stream));
+    }
 }
 
 template<typename ValueType, typename BufferSizeType>

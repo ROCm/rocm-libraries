@@ -7,6 +7,7 @@ import argparse
 from pathlib import Path
 from typing import Optional
 
+from ..common import torch_support
 from ..common.exceptions import GraphLoadError
 from ..config.benchmark_config import BenchmarkConfig
 from ..graph.loader import GraphLoader
@@ -33,9 +34,6 @@ def run_pytorch_benchmark(
     Returns:
         Exit code (0 for success, 1 for error).
     """
-    from ..execution.pytorch_buffer_manager import PyTorchCudaBufferManager
-    from ..execution.pytorch_executor import PyTorchCudaExecutor, PyTorchExecutionError
-
     try:
         loader = GraphLoader()
         graph_json = loader.load_json(config.graph_path)
@@ -49,52 +47,62 @@ def run_pytorch_benchmark(
             # PyTorch backend must be gated by PyTorch itself: CPU-only torch
             # cannot execute these GPU benchmarks even if ROCm management tools
             # can see a device.
-            import torch
-
-            if not torch.cuda.is_available():
+            if not torch_support.module_available():
+                reporter.print_error(
+                    "PyTorch not available. Install with: pip install torch"
+                )
+                return 1
+            if not torch_support.gpu_available():
                 reporter.print_error(
                     "PyTorch GPU not available. "
                     "Install PyTorch with CUDA or ROCm support."
                 )
                 return 1
-        except ImportError:
-            reporter.print_error(
-                "PyTorch not available. Install with: pip install torch"
-            )
+        except Exception as e:
+            reporter.print_error(f"PyTorch GPU availability check failed: {e}")
             return 1
 
-        executor = PyTorchCudaExecutor(graph_json, config, device=device)
-        executor.prepare()
+        from ..execution.pytorch_buffer_manager import PyTorchCudaBufferManager
+        from ..execution.pytorch_executor import (
+            PyTorchCudaExecutor,
+            PyTorchExecutionError,
+        )
 
-        reporter.print_init_time(executor.init_time_ms)
+        try:
+            executor = PyTorchCudaExecutor(graph_json, config, device=device)
+            executor.prepare()
 
-        with PyTorchCudaBufferManager(tensor_infos, device=device) as buffer_manager:
-            buffer_manager.allocate_all()
-            buffer_manager.fill_inputs_random(seed=seed)
-            buffer_manager.zero_outputs()
+            reporter.print_init_time(executor.init_time_ms)
 
-            tensors = buffer_manager.get_tensors()
+            with PyTorchCudaBufferManager(
+                tensor_infos, device=device
+            ) as buffer_manager:
+                buffer_manager.allocate_all()
+                buffer_manager.fill_inputs_random(seed=seed)
+                buffer_manager.zero_outputs()
 
-            executor.warmup(tensors)
+                tensors = buffer_manager.get_tensors()
 
-            result = executor.benchmark(tensors, graph_name=graph_name)
+                executor.warmup(tensors)
 
-            stats = CombinedBenchmarkStats.from_result(result)
-            reporter.print_combined_stats(stats)
+                result = executor.benchmark(tensors, graph_name=graph_name)
 
-            if output_path:
-                result.save_json(str(output_path))
-                reporter.print_results_exported(output_path)
+                stats = CombinedBenchmarkStats.from_result(result)
+                reporter.print_combined_stats(stats)
 
-        reporter.print_footer()
-        return 0
+                if output_path:
+                    result.save_json(str(output_path))
+                    reporter.print_results_exported(output_path)
+
+            reporter.print_footer()
+            return 0
+
+        except PyTorchExecutionError as e:
+            reporter.print_error(f"PyTorch execution error: {e}")
+            return 1
 
     except GraphLoadError as e:
         reporter.print_error(f"Graph load error: {e}")
-        return 1
-
-    except PyTorchExecutionError as e:
-        reporter.print_error(f"PyTorch execution error: {e}")
         return 1
 
     except Exception as e:

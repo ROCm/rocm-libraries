@@ -7,7 +7,11 @@ Benchmarking and validation tool for hipDNN graphs.
 > **Caution**: This tool is in early development and subject to change.
 > Do not use it in build workflows or CI pipelines.
 
-This tool loads serialized hipDNN graphs, executes them via installed hipDNN engine plugins, and captures performance metrics. PyTorch is optional but strongly recommended: when installed (ROCm or CUDA build) it provides GPU kernel-event timing and `torch.cuda.synchronize()` for accurate E2E timing. Without it, host-side E2E timings are still reported but may not capture full GPU execution.
+This tool loads serialized hipDNN graphs, executes them via installed hipDNN
+engine plugins, and captures performance metrics. GPU kernel timing and
+synchronized E2E timing use direct HIP runtime events exposed by
+`hipdnn_frontend`; PyTorch is only needed for the optional PyTorch executor and
+reference validation.
 
 ## Requirements
 
@@ -15,7 +19,10 @@ This tool loads serialized hipDNN graphs, executes them via installed hipDNN eng
 - numpy
 - hipdnn_frontend (installed hipDNN Python bindings)
 - AMD GPU with ROCm + hipDNN provider plugins for the graphs under test
-- PyTorch *(optional)* — ROCm or CUDA build enables GPU kernel-event timing, the `--backend pytorch` executor, and the `--validate pytorch` reference provider. Not listed in `pyproject.toml` because it must come from the ROCm/CUDA nightly index.
+- PyTorch *(optional)* — any usable PyTorch build enables the `--validate pytorch`
+  reference provider. A ROCm PyTorch build additionally enables the
+  `--backend pytorch` GPU executor. Not listed in `pyproject.toml` because torch
+  package selection depends on the target environment.
 
 ## Installation
 
@@ -23,26 +30,72 @@ This tool loads serialized hipDNN graphs, executes them via installed hipDNN eng
 
 Run the provided setup script from the `dnn-benchmarking` directory:
 
-```bash
-bash setup.sh
-source /workspace/.venv/bin/activate  # or $DNN_BENCH_WORKSPACE/.venv/bin/activate
-```
-
-This script handles everything automatically:
-1. Creates a virtual environment under `$DNN_BENCH_WORKSPACE` (defaults to `/workspace`)
-2. Detects the GPU architecture and installs ROCm-compatible PyTorch
-3. Builds hipDNN and the MIOpen, hipBLASLt, and hip-kernel providers when their installed artifacts are missing (or with `--force-build`)
-4. Installs the hipDNN Python bindings from the hipDNN source tree
-
-### CUDA Setup
+Requires Python 3.12 or newer.
 
 ```bash
-pip install torch --index-url https://download.pytorch.org/whl/cu124
-pip install -e .
+bash setup.sh --workspace .workspace
+source .workspace/.venv/bin/activate
 ```
 
-**Note**: hipDNN Python bindings (`hipdnn_frontend`) must be installed separately for hipDNN benchmarking.
-**Note**: PyTorch is optional. Without it the tool still runs and reports host-side E2E timings (may not capture full GPU execution); with a ROCm/CUDA build installed, GPU kernel-event timings, accurate E2E via `torch.cuda.synchronize()`, `--backend pytorch`, and `--validate pytorch` become available.
+By default, setup uses `/workspace` when it already exists and is writable;
+otherwise it uses `.workspace` under the `dnn-benchmarking` directory. Use
+`--workspace <path>` to place the virtual environment, Python bytecode cache,
+and runtime benchmark caches somewhere else:
+
+```bash
+bash setup.sh --workspace /tmp/dnn-bench
+source /tmp/dnn-bench/.venv/bin/activate
+```
+
+The default `--torch-mode rocm` flow assumes no system ROCm installation:
+1. Creates a virtual environment under the selected workspace (`--workspace`,
+   `$DNN_BENCH_WORKSPACE`, writable `/workspace`, or local `.workspace`)
+2. Detects the GPU architecture and installs the matching ROCm PyTorch nightly wheel
+3. Discovers ROCm libraries from the torch wheel's bundled ROCm SDK libraries
+4. Builds local hipDNN when CMake configs are absent from the selected prefix
+5. Builds the local MIOpen, hipBLASLt, and hip-kernel providers when their
+   installed artifacts are missing, using the bundled ROCm SDK devel wheel for
+   compiler/toolchain discovery when needed
+6. Installs the hipDNN Python bindings against the selected ROCm SDK libraries
+
+The selected prefix is printed as `Using hipDNN/ROCm prefix: ...`; activation
+sets `ROCM_PATH` to that prefix and prepends its `lib` directory to
+`LD_LIBRARY_PATH`. dnn-benchmarking infers plugins from
+`$ROCM_PATH/lib/hipdnn_plugins/engines`.
+If GPU architecture detection is unavailable on the setup host, pass
+`--gpu-arch gfx90a`, `--gpu-arch gfx942`, or `--gpu-arch gfx950`.
+
+### Testing/CI Setup with CPU-Only PyTorch
+
+When ROCm/hipDNN artifacts are installed by CI, install CPU-only PyTorch on top
+so Python reference validation can use torch without pulling conflicting ROCm
+torch wheels:
+
+```bash
+bash setup.sh --torch-mode cpu --rocm-prefix /opt/rocm
+source /workspace/.venv/bin/activate
+```
+
+CPU-only torch never enables the PyTorch execution backend; GPU execution paths still
+require a ROCm-enabled torch build and a visible GPU. Timing still comes from
+the HIP APIs bound through `hipdnn_frontend`, not from torch.
+
+Use `--torch-mode existing` to reuse torch already installed in the target
+virtual environment. Existing ROCm torch uses its bundled ROCm SDK libraries;
+existing CPU/non-ROCm torch builds the hipDNN bindings against `--rocm-prefix`,
+`$ROCM_PATH`, or `/opt/rocm`.
+
+### Non-ROCm PyTorch
+
+Direct HIP timing requires ROCm HIP runtime libraries and the hipDNN frontend
+bindings. Non-ROCm PyTorch wheels can be used only for CPU reference validation;
+they do not enable GPU benchmarking in this tool.
+
+**Note**: hipDNN Python bindings (`hipdnn_frontend`) must be installed separately
+for hipDNN benchmarking.
+**Note**: PyTorch is optional. CPU-only PyTorch enables `--validate pytorch`
+reference computation; ROCm PyTorch also enables `--backend pytorch`. GPU timing
+and E2E synchronization always use direct HIP APIs from `hipdnn_frontend`.
 
 ## Usage
 
@@ -101,11 +154,14 @@ Extracted 42 graph(s) from ./Workloads/conv_workloads.tar.gz
 
 ### Engine Comparison
 
-Run multiple engines by passing comma-separated engine IDs. Plugin paths may be
-a single shared directory or a comma-separated list matching `--engine` order.
+Run multiple engines by passing comma-separated engine IDs. By default,
+dnn-benchmarking infers the plugin directory from
+`$ROCM_PATH/lib/hipdnn_plugins/engines` when `ROCM_PATH` is set by `setup.sh`
+activation. Plugin paths may also be a single shared directory or a
+comma-separated list matching `--engine` order.
 
 ```bash
-# Compare two engines on the default plugin path
+# Compare two engines using ROCM_PATH from the activated setup environment
 python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json \
   --engine 1,2
 
@@ -151,13 +207,13 @@ python -m dnn_benchmarking --config sample_configs/config.toml.example --iters 5
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--validate` | Reference provider for correctness validation: `pytorch`, `cpu_plugin`, or `none`. `--validate pytorch` also reports a timed PyTorch reference row when PyTorch GPU execution is available. | `none` |
+| `--validate` | Reference provider for correctness validation: `pytorch` or `none`. `--validate pytorch` also reports a timed PyTorch reference row when PyTorch GPU execution is available. | `none` |
 
 #### Suite Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--plugin-path` | Plugin directory, or comma-separated plugin directories matching `--engine` order | None (system default) |
+| `--plugin-path` | Plugin directory, or comma-separated plugin directories matching `--engine` order. Overrides the plugin directory inferred from `ROCM_PATH`. | `$ROCM_PATH/lib/hipdnn_plugins/engines` if `ROCM_PATH` is set, otherwise system default |
 
 #### Comparison Options
 
@@ -287,42 +343,38 @@ source /workspace/.venv/bin/activate  # or $DNN_BENCH_WORKSPACE/.venv/bin/activa
 # All non-GPU tests (no hipDNN required)
 pytest -m "not gpu"
 
-# All tests including GPU (requires hipDNN bindings and ROCm libraries)
-LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest
+# All tests including GPU (activation sets LD_LIBRARY_PATH for setup workspaces)
+pytest
 
 # Only GPU tests
-LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest -m gpu
+pytest -m gpu
 
 # GPU tests with explicit hipDNN engine plugin directories
-LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest -m gpu \
-  --dnn-plugin-paths /path/to/hipdnn_plugins/engines
+pytest -m gpu --dnn-plugin-paths /path/to/hipdnn_plugins/engines
 ```
 
 ### GPU Tests
 
-GPU tests require hipDNN Python bindings and ROCm libraries:
+GPU tests require hipDNN Python bindings and ROCm libraries. When using
+`setup.sh`, activate the venv first; activation sets `ROCM_PATH` and prepends
+the selected prefix's `lib` directory to `LD_LIBRARY_PATH`:
 
 ```bash
 source /workspace/.venv/bin/activate  # or $DNN_BENCH_WORKSPACE/.venv/bin/activate
-
-# Run tests with ROCm libraries available
-LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest
+pytest -m gpu
 ```
 
-GPU tests auto-discover provider build-tree and `/opt/rocm` plugin installs. Use
-`--dnn-plugin-paths` with a comma-separated directory list when testing custom
-engine plugin builds.
-
-**Note:** Set `LD_LIBRARY_PATH=/opt/rocm/lib` when running GPU tests to ensure hipdnn_frontend can load ROCm libraries.
+GPU tests auto-discover provider build-tree, active-venv ROCm SDK, and
+`/opt/rocm` plugin installs. Use `--dnn-plugin-paths` with a comma-separated
+directory list when testing custom engine plugin builds.
 
 Strict profiling tests that require real profiler artifacts are skipped by
 default. Run them explicitly on a known-good profiling host:
 
 ```bash
-LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest --profiling-strict -m profiling_strict
+LD_LIBRARY_PATH=$HIPDNN_PREFIX/lib:$LD_LIBRARY_PATH pytest --profiling-strict -m profiling_strict
 ```
 
 ## Limitations
 
-- CPU reference validation is not yet implemented (CPU reference plugin not yet available in Python bindings)
-- Engine comparison and timed validation-provider rows are reported side by side. Reference rows are timing baselines and are not counted as hipDNN engine pass/fail combinations.
+- Engine comparison and timed validation-provider rows are reported side by side. Reference rows are timing baselines and are not counted as hipDNN engine pass/fail combinations; use `--validate` for reference-output correctness checks.
