@@ -739,7 +739,7 @@ Defaults:
   sample_time: 1.0
   measure_time: 200.0
   max_measure_time: 1000.0
-  noise_threshold: 0.005
+  noise_threshold: 0.01
   min_iters: 10
   max_iters: 0
   adaptive: false

@@ -61,7 +61,7 @@ namespace hipblaslt_bench
         constexpr float   max_measure_time = 1000.0f; // ms ceiling for convergence
         constexpr int32_t min_iters        = 10; // floor on total timed iterations
         constexpr int32_t max_iters        = 0; // unbounded
-        constexpr float   noise_threshold  = 0.005f; // 0.5% relative standard error
+        constexpr float   noise_threshold  = 0.01f; // 1% relative standard error
     }
 
     // Per-iteration statistics, in microseconds.

@@ -519,7 +519,7 @@ try
          value<float>(&arg.noise_threshold)->default_value(hipblaslt_bench::adaptive_defaults::noise_threshold),
          "Adaptive timing: convergence target. Past the floor (adaptive_min_iters and "
          "adaptive_measure_time) the run continues until the mean's relative standard error "
-         "(stddev/mean/sqrt(n)) falls below this fraction, e.g. 0.005 = 0.5%, or the ceiling "
+         "(stddev/mean/sqrt(n)) falls below this fraction, e.g. 0.01 = 1%, or the ceiling "
          "(adaptive_max_measure_time / adaptive_max_iters) is hit. 0 disables convergence: the "
          "run goes to the ceiling")
 
