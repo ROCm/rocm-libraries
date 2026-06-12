@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Integration tests for PyTorch GPU timing on NVIDIA devices."""
+"""Integration tests for PyTorch executor timing with direct HIP events."""
 
 from pathlib import Path
 
@@ -12,10 +12,10 @@ from dnn_benchmarking.execution.pytorch_buffer_manager import PyTorchCudaBufferM
 from dnn_benchmarking.execution.pytorch_executor import PyTorchCudaExecutor
 from dnn_benchmarking.graph.loader import GraphLoader
 
-pytestmark = [pytest.mark.gpu, pytest.mark.nvidia]
+pytestmark = [pytest.mark.gpu, pytest.mark.amd]
 
 
-def _skip_if_no_cuda() -> None:
+def _skip_if_no_rocm_torch() -> None:
     try:
         import torch
     except ImportError:
@@ -24,13 +24,21 @@ def _skip_if_no_cuda() -> None:
     if not torch.cuda.is_available():
         pytest.skip("PyTorch GPU not available")
 
-    if torch.version.hip is not None:
-        pytest.skip("ROCm build detected; skipping NVIDIA-only test")
+    if torch.version.hip is None:
+        pytest.skip("ROCm PyTorch build required for direct HIP timing")
+
+    try:
+        import hipdnn_frontend as hipdnn
+
+        if hipdnn.hip_get_device_count() <= 0:
+            pytest.skip("No HIP GPU available")
+    except Exception as e:
+        pytest.skip(f"hipdnn_frontend HIP bindings not available: {e}")
 
 
-def test_pytorch_gpu_timing_cuda() -> None:
-    """Validate E2E and kernel timings on NVIDIA GPUs."""
-    _skip_if_no_cuda()
+def test_pytorch_gpu_timing_rocm() -> None:
+    """Validate PyTorch executor E2E and kernel timings with HIP events."""
+    _skip_if_no_rocm_torch()
 
     graph_path = Path(__file__).parent.parent.parent / "graphs" / "sample_conv_fwd.json"
     if not graph_path.exists():
@@ -51,7 +59,7 @@ def test_pytorch_gpu_timing_cuda() -> None:
 
         tensors = buffer_manager.get_tensors()
         executor.warmup(tensors)
-        result = executor.benchmark(tensors, graph_name="cuda_timing")
+        result = executor.benchmark(tensors, graph_name="pytorch_hip_timing")
 
     assert result.kernel_timings is not None
     assert len(result.kernel_timings) == 3
@@ -65,4 +73,4 @@ def test_pytorch_gpu_timing_cuda() -> None:
 
     assert result.metadata is not None
     assert result.metadata.execution_backend == "pytorch"
-    assert result.metadata.gpu_backend == "torch"
+    assert result.metadata.timing_backend == "hip"

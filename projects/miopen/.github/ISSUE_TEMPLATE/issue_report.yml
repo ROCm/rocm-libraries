@@ -176,4 +176,3 @@ body:
     description: (Optional) Any additional information that is relevant, e.g. relevant environment variables, dockerfiles, log files, dmesg output (on Linux), etc.
   validations:
     required: false
-s

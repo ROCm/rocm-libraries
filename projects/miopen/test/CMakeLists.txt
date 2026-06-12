@@ -326,10 +326,10 @@ if (MIOPEN_TEST_GFX115X)
     list(APPEND SKIP_TESTS test_ctc)
 endif()
 
-# Skip conv2d tests to capture flaky behavior                                                                             
+# Skip conv2d tests to capture flaky behavior
 list(APPEND SKIP_TESTS test_conv2d test_conv2d_find2)
 
-# Skip test_immed_conv2d tests to capture flaky behavior                                                                             
+# Skip test_immed_conv2d tests to capture flaky behavior
 list(APPEND SKIP_TESTS test_immed_conv2d)
 
 

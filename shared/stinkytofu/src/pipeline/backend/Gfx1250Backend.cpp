@@ -38,6 +38,7 @@
 #include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
+#include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/LoopRegionRemarkPass.hpp"
@@ -135,6 +136,16 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
     }
 
     // -- kernel --
+
+    // Cluster-barrier insertion (kernel scope) — runs at every OptLevel when
+    // the module opts in. Must precede InsertVgprMsbPass so the new
+    // branches/labels are present when MSB configuration is materialized.
+    if (moduleOptions.ClusterBarrier) {
+        pm.addPass(createInsertClusterBarrierPass(/*isKernelScope=*/true,
+                                                  /*pgrValue=*/moduleOptions.PrefetchGlobalRead,
+                                                  /*plrValue=*/moduleOptions.PrefetchLocalRead));
+    }
+
     pm.addPass(createInsertVgprMsbPass());
     pm.addPass(createCFGBuilderPass());
     pm.addPass(createMemTokenConsistencyCheckPass());
