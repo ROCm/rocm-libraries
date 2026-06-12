@@ -3235,7 +3235,11 @@ class StreamKDynamic(StreamK):
         # If WG starts tile then set LocalEnd=ItersPerTile to skip fixup step, and set loopCounter to 0 to skip main loop
         # If WG does not start tile, skip to end of persistent loop to check for other SK tile
         # TODO verify alpha check is correct for dynamic + streamk
-        alphaLabel = Label("SKAlphaCheck", "")
+        # Use getNameInc (like the other SKAlphaCheck sites) so this label is
+        # unique: calculateLoopNumIterCommon also emits an "SKAlphaCheck" label
+        # in the same kernel, and a hardcoded name here collides with it
+        # ("symbol already defined") on the dynamic StreamK path.
+        alphaLabel = Label(writer.labels.getNameInc("SKAlphaCheck"), "")
         module.add(BranchIfNotZero("Alpha", kernel["ProblemType"]["ComputeDataType"].toEnum(), alphaLabel))
         # Skip to end if not doing the global write
         module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0, comment="does wg start tile?"))
