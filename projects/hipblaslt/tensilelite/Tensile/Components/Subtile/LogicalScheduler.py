@@ -156,7 +156,13 @@ class SchedulerConfig:
     # Single-int specs are rounded DOWN to an mn-multiple (smaller partition, less VGPR usage).
     # If no solution exists, we return [total] (single partition).
     @staticmethod
-    def _normalize_partition_sizes(spec: Union[int, List[int]], total: int, dim: str, mn: int = 1) -> List[int]:
+    def _data_tensors_multi_du(numUnroll: dict) -> bool:
+        """True when A/B use numUnroll > 1 (MX multi-DU data path)."""
+        return numUnroll.get('A', 1) > 1 or numUnroll.get('B', 1) > 1
+
+    @staticmethod
+    def _normalize_partition_sizes(spec: Union[int, List[int]], total: int, dim: str,
+                                   mn: int = 1, remainder_last: bool = False) -> List[int]:
         if isinstance(spec, (list, tuple)):
             assert sum(spec) == total, \
                 f"partition sizes for {dim} must sum to {total}, got {sum(spec)}"
@@ -177,16 +183,13 @@ class SchedulerConfig:
         remainder = total - num_full * s
         if remainder == 0:
             return [s] * num_full
-        # The remainder (short) partition must come LAST.  The subtile
-        # PGR=1 multi-DU codegen (GR pre-advance + uid>0 GRs placed in the
-        # last partition's last subIterK slot) assumes every partition before the last
-        # is the full size `s`; a short partition sitting *between* full
-        # partitions corrupts the per-partition pre-advance addressing and
-        # the kernel accumulates wrong values that grow with K iteration
-        # count (catastrophically so at extreme aspect ratios, e.g.
-        # MT384x160).  Placing the remainder last keeps this consistent with
-        # the num_full==1 case ([s, remainder]) and is the only ordering the
-        # codegen handles correctly.
+        if not remainder_last:
+            if num_full == 1:
+                return [s, remainder]
+            mid = num_full // 2
+            return [s] * mid + [remainder] + [s] * (num_full - mid)
+        # Multi-DU: remainder (short) partition must come LAST.  PGR=1 multi-DU
+        # codegen assumes every partition before the last is the full size `s`.
         return [s] * num_full + [remainder]
 
     @staticmethod
@@ -198,14 +201,6 @@ class SchedulerConfig:
 
     def __post_init__(self):
         assert self.pgr in (0, 1, 2), f"pgr must be 0, 1, or 2, got {self.pgr}"
-        mn_M = max((g.mn for g in (self.lrA, self.lrSA) if g is not None), default=1)
-        mn_N = max((g.mn for g in (self.lrB, self.lrSB) if g is not None), default=1)
-        self._partitionSizesM = self._normalize_partition_sizes(
-            self.partitionSizeM, self.numMFMATilesM, 'M', mn_M)
-        self._partitionSizesN = self._normalize_partition_sizes(
-            self.partitionSizeN, self.numMFMATilesN, 'N', mn_N)
-        self._prefixM = self._build_prefix(self._partitionSizesM)
-        self._prefixN = self._build_prefix(self._partitionSizesN)
 
         grans = {'A': self.grA, 'B': self.grB}
         if self.hasScale:
@@ -219,14 +214,32 @@ class SchedulerConfig:
         assert self.numSubIterK % maxGrK == 0 or maxGrK % self.numSubIterK == 0, \
             f"numSubIterK={self.numSubIterK} and max(grGran.k)={maxGrK} must be multiples of each other"
 
-        defaultReads = {t: self.numSubIterK // g.k for t, g in grans.items()}
-
-        self.numSubIterK = max(self.numSubIterK, maxGrK)
-
-        self.numUnroll = {}
+        original_numSubIterK = self.numSubIterK
+        defaultReads = {t: original_numSubIterK // g.k for t, g in grans.items()}
+        expanded_k = max(original_numSubIterK, maxGrK)
+        numUnroll = {}
         for t, g in grans.items():
-            reads = self.numSubIterK // g.k
-            self.numUnroll[t] = reads // (defaultReads[t] if defaultReads[t] != 0 else 1)
+            reads = expanded_k // g.k
+            numUnroll[t] = reads // (defaultReads[t] if defaultReads[t] != 0 else 1)
+
+        data_multi_du = self._data_tensors_multi_du(numUnroll)
+        if data_multi_du:
+            self.numSubIterK = expanded_k
+            self.numUnroll = numUnroll
+        else:
+            self.numSubIterK = original_numSubIterK
+            self.numUnroll = {t: 1 for t in grans}
+
+        mn_M = max((g.mn for g in (self.lrA, self.lrSA) if g is not None), default=1)
+        mn_N = max((g.mn for g in (self.lrB, self.lrSB) if g is not None), default=1)
+        self._partitionSizesM = self._normalize_partition_sizes(
+            self.partitionSizeM, self.numMFMATilesM, 'M', mn_M,
+            remainder_last=data_multi_du)
+        self._partitionSizesN = self._normalize_partition_sizes(
+            self.partitionSizeN, self.numMFMATilesN, 'N', mn_N,
+            remainder_last=data_multi_du)
+        self._prefixM = self._build_prefix(self._partitionSizesM)
+        self._prefixN = self._build_prefix(self._partitionSizesN)
 
         self.plr = 0 if self.pgr == 0 else 1
         self.offsetPartition = 1 if self.pgr >= 2 else 0
@@ -785,7 +798,12 @@ class LogicalScheduler:
         cfg = self.config
         if cfg.pgr == 0 or not cfg.hasScale:
             return False
-        return max(cfg.numUnroll.values()) > 1
+        return self._is_multi_du()
+
+    def _is_multi_du(self) -> bool:
+        """True when A/B use numUnroll > 1 (MX multi-DU data path)."""
+        cfg = self.config
+        return bool(cfg.numUnroll) and SchedulerConfig._data_tensors_multi_du(cfg.numUnroll)
 
     def assign_vgpr_tiles(self):
         """Assign physical vgprTileIds to all placements (A, B, SA, SB)."""
@@ -1599,6 +1617,16 @@ class LogicalScheduler:
 
             max_eo = max(_dep_exec_order(dep) for _, dep in lr_with_gr_deps)
             max_guaranteed = (max_eo[0] - 1, max_eo[1], max_eo[2], 0)
+
+            if not self._is_multi_du():
+                for lr, dep in lr_with_gr_deps:
+                    eo = _dep_exec_order(dep)
+                    if eo <= max_guaranteed:
+                        lr.deps.clear()
+                    else:
+                        max_guaranteed = eo
+                continue
+
             _, max_dep = max(lr_with_gr_deps, key=lambda item: _dep_exec_order(item[1]))
             guarantee_gr_order = _gr_schedule_order(max_dep.ref)
             use_wraparound = True
@@ -1825,6 +1853,57 @@ class LogicalScheduler:
 
         return dep
 
+    def _compute_inflight_loads_legacy(self, consumer_pi: int, consumer_slot: int,
+                                       tensor: str, dep_ref: Dep) -> WaitGRCounts:
+        """Develop single-DU inflight walk (unchanged formula)."""
+        numP = len(self._partitions)
+        numK = len(self._partitions[0])
+        flat_len = numP * numK
+
+        consumer_flat = consumer_pi * numK + consumer_slot
+        wraps_needed = abs(dep_ref.mt_offset)
+
+        dep_flat = None
+        for p_idx, pslots in enumerate(self._partitions):
+            for k_idx, slot in enumerate(pslots):
+                if any(gr is dep_ref.ref for gr in slot.grs):
+                    dep_flat = p_idx * numK + k_idx
+                    break
+            if dep_flat is not None:
+                break
+
+        if dep_flat is None:
+            return WaitGRCounts()
+
+        total_steps = wraps_needed * flat_len + consumer_flat - dep_flat
+        if total_steps <= 0:
+            assert wraps_needed == 0, (
+                f"_compute_inflight_loads: total_steps={total_steps} < 1 "
+                f"(wraps_needed={wraps_needed}, consumer_flat={consumer_flat}, dep_flat={dep_flat}); "
+                "unexpected negative total_steps with wraps_needed >= 1"
+            )
+            return WaitGRCounts()
+
+        counts = WaitGRCounts()
+        pos = consumer_flat
+        for step in range(total_steps):
+            pos = (pos - 1) % flat_len
+            pi = pos // numK
+            slot_k = pos % numK
+            slot = self._partitions[pi][slot_k]
+
+            is_final = (step == total_steps - 1)
+
+            sorted_grs = sorted(slot.grs, key=self._gr_sort_key, reverse=True)
+            for gr in sorted_grs:
+                if is_final and gr.tensor == tensor and gr is dep_ref.ref:
+                    return counts
+                atoms = self._count_gr_atoms(gr)
+                cur = getattr(counts, gr.tensor)
+                setattr(counts, gr.tensor, cur + atoms)
+
+        return counts
+
     def _compute_inflight_loads(self, consumer_pi: int, consumer_slot: int,
                                 tensor: str, dep_ref: Dep) -> WaitGRCounts:
         """Count inflight GR atomic loads between a dep GR and the consumer.
@@ -1841,6 +1920,10 @@ class LogicalScheduler:
 
         Returns per-tensor inflight load counts.
         """
+        if not self._is_multi_du():
+            return self._compute_inflight_loads_legacy(
+                consumer_pi, consumer_slot, tensor, dep_ref)
+
         numP = len(self._partitions)
         numK = len(self._partitions[0])
         flat_len = numP * numK
@@ -2001,38 +2084,29 @@ class LogicalScheduler:
                     lr.preOps = []
                     if gr_deps:
                         dep = gr_deps[0]
-                        wait_dep = self._wait_gr_dep_for_lr(lr, dep)
-                        is_cross = (wait_dep.ref.partition != pi
-                                    or wait_dep.ref.subIterK_slot != lr.subIterK_slot)
-                        counts = self._compute_inflight_loads(
-                            pi, lr.subIterK_slot, wait_dep.ref.tensor, wait_dep)
-                        # Residual StreamK wait_gr race fix: the exact
-                        # inflight-count walk in _compute_inflight_loads
-                        # under-counts the outstanding global-read tail for
-                        # WRAP-LRs (consumers that read an LDS buffer across a
-                        # body-iteration / MT-prefetch boundary) once the
-                        # StreamK grid assigns multiple partial tiles / wrap
-                        # iterations to a workgroup. The result is a too-weak
-                        # vmcnt so the ds_read can consume a buffer whose
-                        # producing buffer_load has not retired -> stale LDS,
-                        # non-deterministic verify failures that scale with the
-                        # output-tile grid. Several narrow per-config drains
-                        # were added (PRs that fixed MT256x256/MT192x256 small
-                        # cases) but grid-dependent configs remain uncovered.
-                        # For any wrap/cross-iter consumer in the multi-DU
-                        # subtile regime, force a full vmcnt(0) drain (a
-                        # superset of those per-config drains) so LDS is fully
-                        # written before it is read.
-                        any_wrap = (lr.mtIteration > 0
-                                    or any(d.mt_offset != 0 for d in gr_deps))
-                        multiDU = (self.config.numUnroll
-                                   and max(self.config.numUnroll.values()) > 1
-                                   and self.config.pgr == 1)
-                        if multiDU and any_wrap:
-                            counts = WaitGRCounts()
-                        lr.preOps.append(WaitGROp(wait_gr_counts=counts,
-                                                  has_sync=True,
-                                                  adjustVmcnt=is_cross))
+                        if self._is_multi_du():
+                            wait_dep = self._wait_gr_dep_for_lr(lr, dep)
+                            is_cross = (wait_dep.ref.partition != pi
+                                        or wait_dep.ref.subIterK_slot != lr.subIterK_slot)
+                            counts = self._compute_inflight_loads(
+                                pi, lr.subIterK_slot, wait_dep.ref.tensor, wait_dep)
+                            # StreamK wrap-LR race fix (multi-DU only): force
+                            # vmcnt(0) for cross-iter consumers.
+                            any_wrap = (lr.mtIteration > 0
+                                        or any(d.mt_offset != 0 for d in gr_deps))
+                            if self.config.pgr == 1 and any_wrap:
+                                counts = WaitGRCounts()
+                            lr.preOps.append(WaitGROp(wait_gr_counts=counts,
+                                                      has_sync=True,
+                                                      adjustVmcnt=is_cross))
+                        else:
+                            cross_set = set(id(d) for d in cross)
+                            is_cross = id(dep) in cross_set
+                            counts = self._compute_inflight_loads(
+                                pi, lr.subIterK_slot, dep.ref.tensor, dep)
+                            lr.preOps.append(WaitGROp(wait_gr_counts=counts,
+                                                      has_sync=True,
+                                                      adjustVmcnt=is_cross))
 
                 # ── GRs ──
                 for gr in slot.grs:
@@ -2073,8 +2147,7 @@ class LogicalScheduler:
         last_gr = {}  # (tensor, unrollId) -> globally last GR placement seen
         lr_inc_tensors = set()  # tensors that already received lr_inc via MT transition
 
-        maxUnroll = max(self.config.numUnroll.values()) if self.config.numUnroll else 1
-        multiDU = maxUnroll > 1 and self.config.pgr == 1
+        multiDU = self._is_multi_du() and self.config.pgr == 1
 
         for pi, slots in enumerate(self._partitions):
             for slot in slots:
@@ -2135,8 +2208,7 @@ class LogicalScheduler:
                 if tensor not in lr_inc_tensors:
                     lr.preOps.append(LRIncOp(tensor=tensor))
 
-            maxUnroll = max(self.config.numUnroll.values()) if self.config.numUnroll else 1
-            if maxUnroll > 1:
+            if self._is_multi_du():
                 for tensor, lr in first_lr.items():
                     per_uid_k = self._per_uid_k(tensor)
                     first_uid = lr.tiles.subIterK_start // per_uid_k
@@ -2201,13 +2273,20 @@ class LogicalScheduler:
         result = []
         if wait_gr_by_lr:
             merged_counts = WaitGRCounts()
-            for t in ('A', 'B', 'SA', 'SB'):
-                vals = [
-                    getattr(op.wait_gr_counts, t)
-                    for op, _ in wait_gr_by_lr
-                    if getattr(op.wait_gr_counts, t) > 0]
-                setattr(merged_counts, t, min(vals) if vals else 0)
-            adjust = all(op.adjustVmcnt for op, _ in wait_gr_by_lr)
+            if lr_tensors is None:
+                wait_gr_ops_full = [op for op, _ in wait_gr_by_lr]
+                for t in ('A', 'B', 'SA', 'SB'):
+                    setattr(merged_counts, t,
+                            min(getattr(op.wait_gr_counts, t) for op in wait_gr_ops_full))
+                adjust = all(op.adjustVmcnt for op in wait_gr_ops_full)
+            else:
+                for t in ('A', 'B', 'SA', 'SB'):
+                    vals = [
+                        getattr(op.wait_gr_counts, t)
+                        for op, _ in wait_gr_by_lr
+                        if getattr(op.wait_gr_counts, t) > 0]
+                    setattr(merged_counts, t, min(vals) if vals else 0)
+                adjust = all(op.adjustVmcnt for op, _ in wait_gr_by_lr)
             result.append(WaitGROp(wait_gr_counts=merged_counts,
                                    has_sync=has_wait_gr_sync,
                                    adjustVmcnt=adjust))
@@ -2248,9 +2327,11 @@ class LogicalScheduler:
 
                 if len(ordered_lrs) > 1:
                     # Merge preOps onto first LR
+                    lr_tensors = ([lr.tensor for lr in ordered_lrs]
+                                  if self._is_multi_du() else None)
                     merged = self._merge_preops(
                         [lr.preOps for lr in ordered_lrs],
-                        [lr.tensor for lr in ordered_lrs])
+                        lr_tensors)
                     ordered_lrs[0].preOps = merged
                     for lr in ordered_lrs[1:]:
                         lr.preOps = []
@@ -2411,7 +2492,7 @@ class LogicalScheduler:
         """
         self._ensure_pass(Pass.REMOVE_WAIT_LR_SYNC)
 
-        if self.config.numPartitions <= 1:
+        if not self._is_multi_du() or self.config.numPartitions <= 1:
             self._completed.add(Pass.REMOVE_WAIT_GR_SYNC)
             return
 
@@ -2661,7 +2742,8 @@ class LogicalScheduler:
                         # PGR=1: keep gr_inc — it advances SRD + swaps LW for
                         # tail entry (PRELOOP's single GR did neither).
                         removed.add(em.moduleId)
-                    elif em.opType == 'lr_inc' and not src.isUnrollSwap:
+                    elif (em.opType == 'lr_inc' and not src.isUnrollSwap
+                          and self._is_multi_du()):
                         removed.add(em.moduleId)
 
                 has_lr = any(em.opType == 'lr' and em.moduleId not in removed
@@ -3134,7 +3216,7 @@ class LogicalScheduler:
                 has_mfma = any(em.opType == 'mfma' for em in em_list)
 
                 if schedule and em_list and has_mfma:
-                    scheduled = instructionSchedule(em_list)
+                    scheduled = instructionSchedule(em_list, multiDU=self._is_multi_du())
                     module.add(scheduled)
                 else:
                     for em in em_list:

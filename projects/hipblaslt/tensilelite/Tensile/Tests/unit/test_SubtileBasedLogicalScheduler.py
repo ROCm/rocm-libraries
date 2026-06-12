@@ -2439,16 +2439,20 @@ class TestNormalizePartitionSizes:
         assert self.norm(22, 23, 'N') == [22, 1]
 
     def test_remainder_placed_last(self):
-        # The short (remainder) partition must come LAST so the subtile
-        # PGR=1 multi-DU codegen sees only full-size partitions before it.
+        # Multi-DU path: short partition must come LAST.
         # num_full=2, remainder=4 → [s, s, rem]
-        assert self.norm(8, 20, 'N') == [8, 8, 4]
+        assert self.norm(8, 20, 'N', 1, remainder_last=True) == [8, 8, 4]
         # num_full=2, remainder=7 → [8,8,7]
-        assert self.norm(8, 23, 'N') == [8, 8, 7]
+        assert self.norm(8, 23, 'N', 1, remainder_last=True) == [8, 8, 7]
         # num_full=5, remainder=3 → [4,4,4,4,4,3]
-        assert self.norm(4, 23, 'N') == [4, 4, 4, 4, 4, 3]
+        assert self.norm(4, 23, 'N', 1, remainder_last=True) == [4, 4, 4, 4, 4, 3]
         # num_full=3, remainder=2 → [4,4,4,2]
-        assert self.norm(4, 14, 'N') == [4, 4, 4, 2]
+        assert self.norm(4, 14, 'N', 1, remainder_last=True) == [4, 4, 4, 2]
+
+    def test_remainder_placed_middle_by_default(self):
+        # Single-DU / develop: remainder bracketed in the middle.
+        assert self.norm(8, 20, 'N') == [8, 4, 8]
+        assert self.norm(8, 23, 'N') == [8, 7, 8]
 
     def test_spec_one(self):
         assert self.norm(1, 4, 'N') == [1, 1, 1, 1]
@@ -2494,27 +2498,27 @@ class TestNormalizePartitionSizes:
     # ── mn-aware behavior ────────────────────────────────────
 
     def test_mn_default_is_one(self):
-        # Default mn=1: behavior identical to the pre-mn algorithm.
-        assert self.norm(8, 23, 'N') == [8, 8, 7]
+        # Default mn=1, single-DU: remainder in the middle.
+        assert self.norm(8, 23, 'N') == [8, 7, 8]
 
     def test_mn_already_aligned_passthrough(self):
         assert self.norm(8, 16, 'N', 2) == [8, 8]
         assert self.norm(8, 24, 'N', 4) == [8, 8, 8]
 
     def test_mn_snaps_spec_down(self):
-        # 7 snaps down to 6 (largest mn-multiple <= 7), then split as usual
-        # with the remainder partition placed last.
-        assert self.norm(7, 16, 'N', 2) == [6, 6, 4]
+        # 7 snaps down to 6 (largest mn-multiple <= 7), then split with
+        # remainder in the middle for single-DU.
+        assert self.norm(7, 16, 'N', 2) == [6, 4, 6]
 
     def test_mn_snaps_spec_clamped_to_mn(self):
         # spec=1 with mn=2 snaps up to mn (the floor of valid sizes).
         assert self.norm(1, 16, 'N', 2) == [2] * 8
 
     def test_mn_remainder_stays_aligned(self):
-        # total=22, s=8 → num_full=2, remainder=6 (even), placed last → [8,8,6].
-        assert self.norm(8, 22, 'N', 2) == [8, 8, 6]
-        # total=20, s=8 → [8,8,4]; remainder 4 is mn-aligned.
-        assert self.norm(8, 20, 'N', 4) == [8, 8, 4]
+        # total=22, s=8 → num_full=2, remainder=6 (even), placed middle → [8,6,8].
+        assert self.norm(8, 22, 'N', 2) == [8, 6, 8]
+        # total=20, s=8 → [8,4,8]; remainder 4 is mn-aligned.
+        assert self.norm(8, 20, 'N', 4) == [8, 4, 8]
 
     def test_mn_zero_spec_uses_full_dim(self):
         # spec=0 means "one partition for the whole dim"; if the whole dim

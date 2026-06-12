@@ -108,7 +108,8 @@ class _SlotPlacer:
         if self._onPlace:
             self._onPlace(self, pos, item[1])
 
-    def placePath(self, pathInsts: List[Tuple[int, object]], reverse: bool = False):
+    def placePath(self, pathInsts: List[Tuple[int, object]], reverse: bool = False,
+                  multiDU: bool = False):
         """Place a sequence of (moduleId, instruction) items into slots.
 
         Walks pathInsts in order, applying adjusters (forward only) and
@@ -116,10 +117,23 @@ class _SlotPlacer:
         the closest valid position respecting dependencies (allowing >2
         items per slot).
 
-        wait_gr immediately followed by barrier is placed as an atomic pair
-        in the same slot so other paths cannot insert m0 setup between them.
+        When multiDU is True, wait_gr immediately followed by barrier is
+        placed as an atomic pair in the same slot so other paths cannot
+        insert m0 setup between them.
         """
         limit = (self.totalSlots - 1) if reverse else 0
+        if not multiDU:
+            for item in pathInsts:
+                mid, inst = item
+                if not reverse:
+                    limit = self.adjustLimit(limit, inst)
+                pos = self.findSlot(mid, inst, limit, reverse=reverse)
+                if pos is None:
+                    pos = self._forceSlot(mid, limit, reverse)
+                self.place(pos, item, reverse=reverse)
+                limit = (pos - 1) if reverse else (pos + 1)
+            return
+
         idx = 0
         while idx < len(pathInsts):
             item = pathInsts[idx]
@@ -433,21 +447,25 @@ def extractPathsFromBeforeDeps(emittedModules) -> Tuple[int, List[List[int]], Li
     return mfmaIdx, regularPaths, preMfmaPaths
 
 
-def instructionSchedule(emittedModules):
+def instructionSchedule(emittedModules, multiDU: bool = False):
     """Interleave non-MFMA instructions between MFMAs using 2 slots/interval.
 
-    Rules:
+    Rules (shared):
       - MFMA order is preserved.
       - Between two adjacent MFMAs there are 2 placement slots.
       - At most one ds_read (LocalReadInstruction) per interval.
       - Before dependencies are respected at module order level.
       - Minimm distance between ds_read and it waitcnt (hardcoded for now)
       - Module-internal instruction order is preserved.
-      - LR path containing a WAIT_GR is placed forward (wait_gr → sync → LR insts) so GR
-        waits complete before that path's ds_reads.
-      - GR path is spread as much as possible across remaining valid slots. No backwards here as we want GRs to be done as early as possible.
-      - After a wait_gr path, GR m0/buffer_load must not be scheduled between the
-        wait_gr+barrier and that path's post-barrier ds_reads (LR before GR).
+      - GR path is spread as much as possible across remaining valid slots.
+
+    When multiDU is False (single-DU / legacy path):
+      - LR path containing a WAIT_GR is packed from the end backwards.
+
+    When multiDU is True (MX multi-DU path):
+      - LR path containing a WAIT_GR is placed forward (wait_gr → sync → LR insts).
+      - wait_gr+barrier stay contiguous; GR m0/buffer_load defer until that path's
+        post-barrier ds_reads complete.
 
       TODO : To be tested on multi-partition setup.
     """
@@ -480,22 +498,28 @@ def instructionSchedule(emittedModules):
 
     paths = _classifyPaths(pathOrders, emittedModules)
     rules = _SchedulingRules(totalSlots=(len(mfmas) - 1) * 2)
+    base_validators = [rules.oneDsReadPerInterval, rules.minGapDsReadBeforeWait,
+                       rules.minGapDsReadToWait, rules.noM0WithBufferLoad]
+    base_adjusters = [rules.spreadBufferLoads]
+    if multiDU:
+        base_validators.append(rules.grAfterWaitGrDsReads)
+        base_adjusters.insert(0, rules.deferGrAfterWaitGrDsReads)
     placer = _SlotPlacer(
         len(mfmas) - 1, n, pathOrders,
-        validators=[rules.oneDsReadPerInterval, rules.minGapDsReadBeforeWait, rules.minGapDsReadToWait,
-                    rules.noM0WithBufferLoad, rules.grAfterWaitGrDsReads],
-        adjusters=[rules.deferGrAfterWaitGrDsReads, rules.spreadBufferLoads],
+        validators=base_validators,
+        adjusters=base_adjusters,
         onPlace=rules.trackPlacement)
 
-    for path_idx, (order, hasWaitGR) in enumerate(paths):
+    for order, hasWaitGR in paths:
         if not order:
             continue
-        pathInsts = _flattenPath(order, emittedModules, reverse=False)
+        reverse = (not multiDU) and hasWaitGR
+        pathInsts = _flattenPath(order, emittedModules, reverse=reverse)
         rules.resetPath()
         if not hasWaitGR:
             rules.setupBufLoadSpreading(placer, pathInsts, order)
-        placer.placePath(pathInsts, reverse=False)
-        if hasWaitGR:
+        placer.placePath(pathInsts, reverse=reverse, multiDU=multiDU)
+        if multiDU and hasWaitGR:
             rules.setPostWaitGrDsReadFence(placer)
 
     scheduled = Module()
