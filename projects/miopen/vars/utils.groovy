@@ -1044,7 +1044,7 @@ def getPassedStagesFromPreviousBuild() {
 
         // Guard 2: only skip stages if both builds are for the same commit.
         // If SCM commit hash lookup fails (returns null), skip the guard and
-        // proceed — fail-open so a missing SCMRevisionAction doesn't silently
+        // proceed - fail-open so a missing SCMRevisionAction doesn't silently
         // defeat the entire feature.
         def curCommit = getScmCommitHash(currentBuild.rawBuild)
         def prevCommit = getScmCommitHash(prev.rawBuild)
