@@ -26,12 +26,15 @@
 
 #pragma once
 
+#include <hipblaslt/hipblaslt.h>
+#include <hipblaslt/hipblaslt-ext-op.h>
+#include <hipblaslt/hipblaslt-ext.hpp> // Add check for hipblaslt-ext
+#include "hipblaslt_test.hpp"
 #include "flops.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_init.hpp"
 #include "hipblaslt_math.hpp"
 #include "hipblaslt_random.hpp"
-#include "hipblaslt_test.hpp"
 #include "hipblaslt_vector.hpp"
 #ifdef CODE_COVERAGE
 #include "check_numerics_matrix.hpp"
@@ -44,9 +47,6 @@
 #endif
 #include "unit.hpp"
 #include "utility.hpp"
-#include <hipblaslt/hipblaslt-ext-op.h>
-#include <hipblaslt/hipblaslt-ext.hpp> // Add check for hipblaslt-ext
-#include <hipblaslt/hipblaslt.h>
 
 void testing_aux_handle_init_bad_arg(const Arguments& arg)
 {
@@ -4200,9 +4200,9 @@ namespace hipblaslt_sk5_test
 
     // Create a handle, locate an SK5 heuristic algo for MxNxK, or GTEST_SKIP.
     // Caller must hipblasLtDestroy(handle) after use.
-    inline Sk5PreparedSetup prepareSk5OrSkip(int m, int n, int k)
+    inline void prepareSk5OrSkip(int m, int n, int k, Sk5PreparedSetup& setup)
     {
-        Sk5PreparedSetup setup;
+        setup = Sk5PreparedSetup{};
         ASSERT_EQ(hipblasLtCreate(&setup.handle), HIPBLAS_STATUS_SUCCESS);
 
         hipblasLtMatrixLayout_t layoutA = nullptr, layoutB = nullptr;
@@ -4232,7 +4232,5 @@ namespace hipblaslt_sk5_test
             GTEST_SKIP() << "No StreamK=5 kernel in loaded device library for "
                          << m << "x" << n << "x" << k;
         }
-
-        return setup;
     }
 } // namespace hipblaslt_sk5_test

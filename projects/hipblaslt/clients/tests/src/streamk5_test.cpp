@@ -59,7 +59,8 @@ namespace
             GTEST_SKIP() << "No GPU available";
 
         const auto [m, n, k] = GetParam();
-        auto       setup     = prepareSk5OrSkip(m, n, k);
+        hipblaslt_sk5_test::Sk5PreparedSetup setup{};
+        prepareSk5OrSkip(m, n, k, setup);
 
         std::vector<float> hA(size_t(m) * k);
         std::vector<float> hB(size_t(k) * n);
@@ -143,7 +144,8 @@ namespace
             GTEST_SKIP() << "No GPU available";
 
         constexpr int M = 256, N = 256, K = 256;
-        auto          setup = prepareSk5OrSkip(M, N, K);
+        hipblaslt_sk5_test::Sk5PreparedSetup setup{};
+        prepareSk5OrSkip(M, N, K, setup);
 
         std::vector<float> hA(size_t(M) * K);
         std::vector<float> hB(size_t(K) * N);
@@ -175,7 +177,8 @@ namespace
             GTEST_SKIP() << "No GPU available";
 
         constexpr int M = 8192, N = 8192, K = 64;
-        auto          setup = prepareSk5OrSkip(M, N, K);
+        hipblaslt_sk5_test::Sk5PreparedSetup setup{};
+        prepareSk5OrSkip(M, N, K, setup);
 
         std::vector<float> hA(size_t(M) * K);
         std::vector<float> hB(size_t(K) * N);
