@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include <cstdlib>
 #include <functional>
 #include <vector>
 
@@ -33,8 +34,10 @@
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
+#include "stinkytofu/transforms/asm/LongBranchLoweringPass.hpp"
 #include "stinkytofu/transforms/asm/LoopRegionRemarkPass.hpp"
 #include "stinkytofu/transforms/asm/MemTokenConsistencyCheckPass.hpp"
 #include "stinkytofu/transforms/asm/PeepholeOptimizationPass.hpp"
@@ -85,6 +88,17 @@ const std::vector<PassInfo> availablePasses = {
     {"MemTokenConsistencyCheckPass", []() { return createMemTokenConsistencyCheckPass(); }},
     {"RaiseVgprMsbPass", []() { return createRaiseVgprMsbPass(); }},
     {"InsertVgprMsbPass", []() { return createInsertVgprMsbPass(); }},
+    {"LongBranchLoweringPass", []() { return createLongBranchLoweringPass(); }},
+    {"CFGBuilderPass", []() { return createCFGBuilderPass(); }},
+    {"InsertClusterBarrierPass",
+     []() {
+         auto geti = [](const char* k, int d) {
+             const char* v = std::getenv(k);
+             return v != nullptr ? std::atoi(v) : d;
+         };
+         return createInsertClusterBarrierPass(
+             /*isKernelScope=*/true, geti("PrefetchGlobalRead", 1), geti("PrefetchLocalRead", 1));
+     }},
 };
 
 /**

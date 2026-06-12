@@ -45,21 +45,27 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_strict)
 
 
-class DummyTorchTimer(GpuTimerInterface):
+class DummyHipTimer(GpuTimerInterface):
     """Minimal timer implementation for factory tests.
 
     This is a test fixture that can be used to mock GPU timing
     without requiring actual GPU hardware.
     """
 
+    def __init__(self, stream: int = 0) -> None:
+        self.stream = stream
+
     @property
     def backend_name(self) -> str:
-        return "torch"
+        return "hip"
 
     def start(self) -> None:
         pass
 
     def stop(self) -> None:
+        pass
+
+    def synchronize(self) -> None:
         pass
 
     def elapsed_ms(self) -> float:
@@ -219,6 +225,30 @@ def _parse_plugin_paths(raw_paths: str) -> List[Path]:
     return paths
 
 
+def _venv_rocm_sdk_plugin_dirs() -> list[Path]:
+    """Return ROCm SDK wheel plugin directories from the active venv only."""
+    import sys
+    import sysconfig
+
+    venv_root = Path(sys.prefix).resolve()
+    dirs: list[Path] = []
+    for key in ("purelib", "platlib"):
+        value = sysconfig.get_path(key)
+        if not value:
+            continue
+        site_dir = Path(value).resolve()
+        if site_dir != venv_root and venv_root not in site_dir.parents:
+            continue
+        if not site_dir.is_dir():
+            continue
+        dirs.extend(
+            child / "lib" / "hipdnn_plugins" / "engines"
+            for child in site_dir.iterdir()
+            if child.is_dir() and child.name.startswith("_rocm_sdk_libraries_")
+        )
+    return dirs
+
+
 def _find_plugin_paths(pytestconfig) -> Optional[List[str]]:
     """Find hipDNN engine plugin directories.
 
@@ -239,6 +269,7 @@ def _find_plugin_paths(pytestconfig) -> Optional[List[str]]:
         / "lib"
         / "hipdnn_plugins"
         / "engines",
+        *_venv_rocm_sdk_plugin_dirs(),
         # System install
         Path("/opt/rocm/lib/hipdnn_plugins/engines"),
     ]

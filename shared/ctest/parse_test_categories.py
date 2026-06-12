@@ -156,6 +156,38 @@ def gpu_arch_matches(specific_arch, pattern_arch):
     return specific_arch.startswith(prefix)
 
 
+# Recognised key shapes:
+#   exclude_gpu_<arch>             -> OS-agnostic
+#   exclude_gpu_<arch>_windows     -> only when configuring on Windows
+#   exclude_gpu_<arch>_linux       -> only when configuring on Linux
+_EXCLUDE_GPU_KEY_RE = re.compile(r"^exclude_gpu_(gfx\w+?)(?:_(windows|linux))?$")
+
+
+def parse_exclude_gpu_key(key):
+    """Return (gpu_arch, os_suffix) for a YAML key under ``exclude_gpu``.
+
+    ``os_suffix`` is one of ``"windows"``, ``"linux"`` or ``None``.
+    Returns ``(None, None)`` if the key does not match the expected shape.
+    """
+    m = _EXCLUDE_GPU_KEY_RE.match(key)
+    if not m:
+        return None, None
+    return m.group(1), m.group(2)
+
+
+def exclude_gpu_key_applies(os_suffix, is_windows, is_linux):
+    """Return True if a key with the given OS suffix should be honoured on the
+    current host. ``None`` means OS-agnostic and always applies. eg component: rocprim
+    """
+    if os_suffix is None:
+        return True
+    if os_suffix == "windows":
+        return is_windows
+    if os_suffix == "linux":
+        return is_linux
+    return False
+
+
 def load_yaml(yaml_file):
     """Load and parse a YAML file, exiting with a descriptive error on failure."""
     try:
@@ -375,12 +407,16 @@ def main():
 
         ex_gpu_labels_to_process = set()
         for gpu_key, gpu_config in exclude_gpu_config.items():
-            match = re.match(r"exclude_gpu_(gfx\w+)", gpu_key)
-            if match:
-                gpu_labels = gpu_config.get("labels", [])
-                for label in gpu_labels:
-                    if label.startswith("ex_gpu_"):
-                        ex_gpu_labels_to_process.add(label)
+            arch, os_suffix = parse_exclude_gpu_key(gpu_key)
+            if arch is None:
+                continue
+            if not exclude_gpu_key_applies(os_suffix, is_windows, is_linux):
+                print(f"# Skipping {gpu_key}: not applicable on {platform.system()}")
+                continue
+            gpu_labels = gpu_config.get("labels", [])
+            for label in gpu_labels:
+                if label.startswith("ex_gpu_"):
+                    ex_gpu_labels_to_process.add(label)
 
         # For each unique ex_gpu label, create tests with hierarchical pattern matching
         # Sort to ensure consistent test order
@@ -394,11 +430,11 @@ def main():
             all_applicable_categories = set()
 
             for gpu_key, gpu_config in exclude_gpu_config.items():
-                match = re.match(r"exclude_gpu_(gfx\w+)", gpu_key)
-                if not match:
+                config_arch, os_suffix = parse_exclude_gpu_key(gpu_key)
+                if config_arch is None:
                     continue
-
-                config_arch = match.group(1)
+                if not exclude_gpu_key_applies(os_suffix, is_windows, is_linux):
+                    continue
 
                 # Check if this config applies to our target GPU architecture
                 if gpu_arch_matches(gpu_arch, config_arch):
