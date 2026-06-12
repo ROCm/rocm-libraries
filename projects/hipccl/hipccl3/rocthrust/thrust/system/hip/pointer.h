@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2020 NVIDIA Corporation
- *  Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ *  Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -88,7 +88,7 @@ using pointer = thrust::pointer<T, thrust::hip_rocprim::tag, thrust::tagged_refe
  *  \see raw_pointer_cast
  */
 template <typename T>
-using universal_pointer = thrust::pointer<T, thrust::hip_rocprim::tag, typename std::add_lvalue_reference<T>::type>;
+using universal_pointer = thrust::pointer<T, thrust::hip_rocprim::tag, _THRUST_STD::add_lvalue_reference_t<T>>;
 
 /*! \p hip::reference is a wrapped reference to an object stored in memory
  *  accessible by the \p hip system. \p hip::reference is the type of the
