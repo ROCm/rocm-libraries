@@ -32,6 +32,29 @@ def _vgprIndices(container):
   return range(container.regIdx, container.regIdx + container.regNum)
 
 
+def setMatrixAReuse(module, writer, kernel):
+  """Enable the gfx1250 WMMA matrix-A reuse hint where it is safe.
+
+  For plain (non load-scale) WMMA the hint means the A source is already cached
+  from the PREVIOUS, identical WMMA, so it may be reused instead of re-read.  Per
+  the ISA it is only valid when "the current instruction is the same as the
+  previous instruction", so it is set on MMA[i] when the preceding MMA in the
+  final stream reads the exact same A operand VGPRs -- never on the first MMA of
+  a constant-A run.  Operates on the post-schedule order so "previous MMA"
+  matches what the hardware sees.
+
+  No-op unless gfx1250 (HasWmmaArbStallBit).  Mutates instructions in place.
+  """
+  if not writer.states.archCaps.get("HasWmmaArbStallBit", False):
+    return module
+
+  mmas = [inst for inst in module.flatitems() if _isMMA(inst)]
+  for prev, cur in zip(mmas, mmas[1:]):
+    if tuple(_vgprIndices(cur.a)) and _vgprIndices(cur.a) == _vgprIndices(prev.a):
+      cur.reuseA = True
+  return module
+
+
 def insertLRSwapWaitAlu(module, writer, kernel):
   """Guard the LR offset-swap -> ds_read RAW hazard.
 
