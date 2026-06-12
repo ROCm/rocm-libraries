@@ -279,11 +279,6 @@ namespace TensileLite
                 }
             }
 
-            // for(int i = 0; i < m_sizes.size(); i++)
-            // {
-            //     std::cout << m_name << ": m_strides[" << i << "] = " << m_strides[i] << std::endl;
-            // }
-
             m_totalAllocatedElements = 1;
             for(int i = 0; i < m_sizes.size(); i++)
                 m_totalAllocatedElements += m_strides[i] * (m_sizes[i] - 1);
