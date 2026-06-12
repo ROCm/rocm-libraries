@@ -1101,15 +1101,15 @@ def getPassedStagesFromPreviousBuild() {
 //     env.STAGE_NAME to the sub-stage name. This is required for correct GitHub
 //     status reporting (buildHipClangJob reads env.STAGE_NAME) and for the wfapi
 //     to record the sub-stage name that getPassedStagesFromPreviousBuild() checks.
-//   - addStage(map, name, body) is a local helper that adds map[name] = { stage(name){ body() } }
-//     to avoid repeating the name string as both the map key and stage() argument.
+//   - addStageIf(map, condition, name, body) adds map[name] = { stage(name){ body() } } only
+//     when condition is true, preventing false green checkmarks for disabled stages.
 // ---------------------------------------------------------------------------
 
-// Adds a parallel-map entry whose closure wraps body in stage(name){}.
-// Using this helper avoids repeating the stage name as both the map key and
-// the stage() argument, which would be an easy source of typo bugs.
-def addStage(Map stagesMap, String name, Closure body) {
-    stagesMap[name] = { stage(name) { body() } }
+// Only adds the stage if condition is true. Avoids repeating the stage name
+// as both the map key and stage() argument, and prevents false green checkmarks
+// in CI for disabled stages.
+def addStageIf(Map stagesMap, boolean condition, String name, Closure body) {
+    if (condition) stagesMap[name] = { stage(name) { body() } }
 }
 
 def packageAndStaticCheckStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def withWorkingDirFn) {
@@ -1117,53 +1117,49 @@ def packageAndStaticCheckStages(def pipelineParams, def pipelineEnv, def rocmnod
     echo "Selective rerun: passedStages (${passedStages.size()}): ${passedStages}"
     def stages = [:]
 
-    addStage(stages, 'HIP Package') {
-        if (!passedStages.contains('HIP Package')) {
-            node(rocmnodeFn("nogpu")) {
-                try {
-                    withWorkingDirFn {
-                        buildHipClangJob(package_build: true, needs_gpu: false, gpu_family: "ci")
-                    }
-                } finally { cleanWs() }
-            }
+    def hipPackage = 'HIP Package'
+    addStageIf(stages, !passedStages.contains(hipPackage), hipPackage) {
+        node(rocmnodeFn("nogpu")) {
+            try {
+                withWorkingDirFn {
+                    buildHipClangJob(package_build: true, needs_gpu: false, gpu_family: "ci")
+                }
+            } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'HipNoGPU Debug Build Test') {
-        if (pipelineParams.TARGET_NOGPU && !passedStages.contains('HipNoGPU Debug Build Test')) {
-            node(rocmnodeFn("nogpu")) {
-                try {
-                    withWorkingDirFn {
-                        def hipNoGpuFlags = "-DMIOPEN_BACKEND=HIPNOGPU -DMIOPEN_INSTALL_CXX_HEADERS=On"
-                        def buildCmd = "make -j\$(nproc)"
-                        buildHipClangJob(build_type: 'debug', setup_flags: hipNoGpuFlags, build_cmd: buildCmd, needs_gpu: false, gpu_family: "ci")
-                    }
-                } finally { cleanWs() }
-            }
+    def hipNoGpuDebug = 'HipNoGPU Debug Build Test'
+    addStageIf(stages, pipelineParams.TARGET_NOGPU && !passedStages.contains(hipNoGpuDebug), hipNoGpuDebug) {
+        node(rocmnodeFn("nogpu")) {
+            try {
+                withWorkingDirFn {
+                    def hipNoGpuFlags = "-DMIOPEN_BACKEND=HIPNOGPU -DMIOPEN_INSTALL_CXX_HEADERS=On"
+                    def buildCmd = "make -j\$(nproc)"
+                    buildHipClangJob(build_type: 'debug', setup_flags: hipNoGpuFlags, build_cmd: buildCmd, needs_gpu: false, gpu_family: "ci")
+                }
+            } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'Tuna Fin Build Test') {
-        if (!passedStages.contains('Tuna Fin Build Test')) {
-            node(rocmnodeFn("nogpu")) {
-                try {
-                    withWorkingDirFn {
-                        buildHipClangJob(setup_flags: "-DMIOPEN_BACKEND=HIPNOGPU", make_targets: "all", build_fin: "ON", needs_gpu: false, build_install: true, gpu_family: "ci")
-                    }
-                } finally { cleanWs() }
-            }
+    def tunaFinBuild = 'Tuna Fin Build Test'
+    addStageIf(stages, !passedStages.contains(tunaFinBuild), tunaFinBuild) {
+        node(rocmnodeFn("nogpu")) {
+            try {
+                withWorkingDirFn {
+                    buildHipClangJob(setup_flags: "-DMIOPEN_BACKEND=HIPNOGPU", make_targets: "all", build_fin: "ON", needs_gpu: false, build_install: true, gpu_family: "ci")
+                }
+            } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'Fp32 Hip Debug NOCK Build-Only') {
-        if (!passedStages.contains('Fp32 Hip Debug NOCK Build-Only')) {
-            node(rocmnodeFn("nogpu")) {
-                try {
-                    withWorkingDirFn {
-                        buildHipClangJob(build_type: 'debug', setup_flags: "-DMIOPEN_USE_COMPOSABLEKERNEL=Off", make_targets: "", build_install: true, needs_gpu: false, gpu_family: "ci")
-                    }
-                } finally { cleanWs() }
-            }
+    def fp32NockBuild = 'Fp32 Hip Debug NOCK Build-Only'
+    addStageIf(stages, !passedStages.contains(fp32NockBuild), fp32NockBuild) {
+        node(rocmnodeFn("nogpu")) {
+            try {
+                withWorkingDirFn {
+                    buildHipClangJob(build_type: 'debug', setup_flags: "-DMIOPEN_USE_COMPOSABLEKERNEL=Off", make_targets: "", build_install: true, needs_gpu: false, gpu_family: "ci")
+                }
+            } finally { cleanWs() }
         }
     }
 
@@ -1184,108 +1180,96 @@ def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def with
     def gfx1101_flags = pipelineEnv.gfx1101_flags
     def Build_timeout_minutes = pipelineEnv.Build_timeout_minutes as Integer
 
-    addStage(stages, 'Hip Tidy') {
-        if (pipelineParams.RUN_HIP_TIDY && !passedStages.contains('Hip Tidy')) {
-            node(rocmnodeFn("nogpu")) {
-                try {
-                    withWorkingDirFn {
-                        def setupCmd = "CXX='/opt/rocm/llvm/bin/clang++' cmake -DCMAKE_PREFIX_PATH=/opt/rocm -DMIOPEN_BACKEND=HIP -DBUILD_DEV=On .. "
-                        def buildCmd = "make -j\$(nproc) -k analyze"
-                        buildHipClangJob(setup_cmd: setupCmd, build_cmd: buildCmd, needs_gpu: false, gpu_family: "ci")
-                    }
-                } finally { cleanWs() }
-            }
+    def hipTidy = 'Hip Tidy'
+    addStageIf(stages, pipelineParams.RUN_HIP_TIDY && !passedStages.contains(hipTidy), hipTidy) {
+        node(rocmnodeFn("nogpu")) {
+            try {
+                withWorkingDirFn {
+                    def setupCmd = "CXX='/opt/rocm/llvm/bin/clang++' cmake -DCMAKE_PREFIX_PATH=/opt/rocm -DMIOPEN_BACKEND=HIP -DBUILD_DEV=On .. "
+                    def buildCmd = "make -j\$(nproc) -k analyze"
+                    buildHipClangJob(setup_cmd: setupCmd, build_cmd: buildCmd, needs_gpu: false, gpu_family: "ci")
+                }
+            } finally { cleanWs() }
         }
     }
 
     // GFX90A Tests
-    addStage(stages, 'Dbsync gfx90a') {
-        if (pipelineParams.DBSYNC_TEST && pipelineParams.TARGET_GFX90A && !passedStages.contains('Dbsync gfx90a')) {
-            node(rocmnodeFn("gfx90a")) {
-                try { runDbSyncJobFn(gfx90a_flags, "ci") } finally { cleanWs() }
-            }
+    def dbsyncGfx90a = 'Dbsync gfx90a'
+    addStageIf(stages, pipelineParams.DBSYNC_TEST && pipelineParams.TARGET_GFX90A && !passedStages.contains(dbsyncGfx90a), dbsyncGfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try { runDbSyncJobFn(gfx90a_flags, "ci") } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'Bf16 Hip Install All gfx90a') {
-        if (pipelineParams.TARGET_GFX90A && pipelineParams.DATATYPE_BF16 && !passedStages.contains('Bf16 Hip Install All gfx90a')) {
-            node(rocmnodeFn("gfx90a")) {
-                try { runBuildAndSingleGtestJobFn(flags: Full_test + Bf16_flags + gfx90a_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
-            }
+    def bf16Gfx90a = 'Bf16 Hip Install All gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A && pipelineParams.DATATYPE_BF16 && !passedStages.contains(bf16Gfx90a), bf16Gfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try { runBuildAndSingleGtestJobFn(flags: Full_test + Bf16_flags + gfx90a_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'Fp16 Hip Install All gfx90a') {
-        if (pipelineParams.TARGET_GFX90A && pipelineParams.DATATYPE_FP16 && !passedStages.contains('Fp16 Hip Install All gfx90a')) {
-            node(rocmnodeFn("gfx90a")) {
-                try { runBuildAndSingleGtestJobFn(flags: Full_test + Fp16_flags + gfx90a_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
-            }
+    def fp16Gfx90a = 'Fp16 Hip Install All gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A && pipelineParams.DATATYPE_FP16 && !passedStages.contains(fp16Gfx90a), fp16Gfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try { runBuildAndSingleGtestJobFn(flags: Full_test + Fp16_flags + gfx90a_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'Fp32 Hip Install All gfx90a') {
-        if (pipelineParams.TARGET_GFX90A && pipelineParams.DATATYPE_FP32 && !passedStages.contains('Fp32 Hip Install All gfx90a')) {
-            node(rocmnodeFn("gfx90a")) {
-                try { runBuildAndSingleGtestJobFn(flags: Full_test + gfx90a_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
-            }
+    def fp32Gfx90a = 'Fp32 Hip Install All gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A && pipelineParams.DATATYPE_FP32 && !passedStages.contains(fp32Gfx90a), fp32Gfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try { runBuildAndSingleGtestJobFn(flags: Full_test + gfx90a_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
         }
     }
 
     // GFX942 Tests
-    addStage(stages, 'Dbsync gfx942') {
-        if (pipelineParams.DBSYNC_TEST && pipelineParams.TARGET_GFX942 && !passedStages.contains('Dbsync gfx942')) {
-            node(rocmnodeFn("gfx942")) {
-                try { runDbSyncJobFn(gfx942_flags, "ci") } finally { cleanWs() }
-            }
+    def dbsyncGfx942 = 'Dbsync gfx942'
+    addStageIf(stages, pipelineParams.DBSYNC_TEST && pipelineParams.TARGET_GFX942 && !passedStages.contains(dbsyncGfx942), dbsyncGfx942) {
+        node(rocmnodeFn("gfx942")) {
+            try { runDbSyncJobFn(gfx942_flags, "ci") } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'Bf16 Hip Install All gfx942') {
-        if (pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_BF16 && !passedStages.contains('Bf16 Hip Install All gfx942')) {
-            node(rocmnodeFn("gfx942")) {
-                try { runBuildAndSingleGtestJobFn(flags: Full_test + Bf16_flags + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
-            }
+    def bf16Gfx942 = 'Bf16 Hip Install All gfx942'
+    addStageIf(stages, pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_BF16 && !passedStages.contains(bf16Gfx942), bf16Gfx942) {
+        node(rocmnodeFn("gfx942")) {
+            try { runBuildAndSingleGtestJobFn(flags: Full_test + Bf16_flags + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'Fp16 Hip Install All gfx942') {
-        if (pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_FP16 && !passedStages.contains('Fp16 Hip Install All gfx942')) {
-            node(rocmnodeFn("gfx942")) {
-                try { runBuildAndSingleGtestJobFn(flags: Full_test + Fp16_flags + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
-            }
+    def fp16Gfx942 = 'Fp16 Hip Install All gfx942'
+    addStageIf(stages, pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_FP16 && !passedStages.contains(fp16Gfx942), fp16Gfx942) {
+        node(rocmnodeFn("gfx942")) {
+            try { runBuildAndSingleGtestJobFn(flags: Full_test + Fp16_flags + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'Fp32 Hip Install All gfx942') {
-        if (pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_FP32 && !passedStages.contains('Fp32 Hip Install All gfx942')) {
-            node(rocmnodeFn("gfx942")) {
-                try { runBuildAndSingleGtestJobFn(flags: Full_test + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
-            }
+    def fp32Gfx942 = 'Fp32 Hip Install All gfx942'
+    addStageIf(stages, pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_FP32 && !passedStages.contains(fp32Gfx942), fp32Gfx942) {
+        node(rocmnodeFn("gfx942")) {
+            try { runBuildAndSingleGtestJobFn(flags: Full_test + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'TF32 Hip Install All gfx942') {
-        if (pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_TF32 && !passedStages.contains('TF32 Hip Install All gfx942')) {
-            node(rocmnodeFn("gfx942")) {
-                try { runBuildAndSingleGtestJobFn(flags: Full_test + Tf32_flags + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
-            }
+    def tf32Gfx942 = 'TF32 Hip Install All gfx942'
+    addStageIf(stages, pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_TF32 && !passedStages.contains(tf32Gfx942), tf32Gfx942) {
+        node(rocmnodeFn("gfx942")) {
+            try { runBuildAndSingleGtestJobFn(flags: Full_test + Tf32_flags + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
         }
     }
 
     // GFX1101 Tests
-    addStage(stages, 'Fp16 Hip Install All gfx1101') {
-        if (pipelineParams.TARGET_NAVI32 && pipelineParams.DATATYPE_FP16 && !passedStages.contains('Fp16 Hip Install All gfx1101')) {
-            node(rocmnodeFn("navi32")) {
-                try { runBuildAndSingleGtestJobFn(flags: Full_test + Fp16_flags + gfx1101_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
-            }
+    def fp16Gfx1101 = 'Fp16 Hip Install All gfx1101'
+    addStageIf(stages, pipelineParams.TARGET_NAVI32 && pipelineParams.DATATYPE_FP16 && !passedStages.contains(fp16Gfx1101), fp16Gfx1101) {
+        node(rocmnodeFn("navi32")) {
+            try { runBuildAndSingleGtestJobFn(flags: Full_test + Fp16_flags + gfx1101_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'Fp32 Hip Install All gfx1101') {
-        if (pipelineParams.TARGET_NAVI32 && pipelineParams.DATATYPE_FP32 && !passedStages.contains('Fp32 Hip Install All gfx1101')) {
-            node(rocmnodeFn("navi32")) {
-                try { runBuildAndSingleGtestJobFn(flags: Full_test + gfx1101_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
-            }
+    def fp32Gfx1101 = 'Fp32 Hip Install All gfx1101'
+    addStageIf(stages, pipelineParams.TARGET_NAVI32 && pipelineParams.DATATYPE_FP32 && !passedStages.contains(fp32Gfx1101), fp32Gfx1101) {
+        node(rocmnodeFn("navi32")) {
+            try { runBuildAndSingleGtestJobFn(flags: Full_test + gfx1101_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
         }
     }
 
@@ -1300,7 +1284,7 @@ def nightlyTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def w
     def NOMLIR_flags  = pipelineEnv.NOMLIR_flags
     def Smoke_targets = pipelineEnv.Smoke_targets
 
-    addStage(stages, 'Mark Build As Nightly') {
+    addStageIf(stages, true, 'Mark Build As Nightly') {
         node(rocmnodeFn("nogpu")) {
             try {
                 withWorkingDirFn { currentBuild.description = "Nightly Build" }
@@ -1308,100 +1292,92 @@ def nightlyTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def w
         }
     }
 
-    addStage(stages, 'Fp32 Hip Debug NOMLIR gfx90a') {
-        if (pipelineParams.TARGET_GFX90A) {
-            node(rocmnodeFn("gfx90a")) {
-                try {
-                    withWorkingDirFn {
-                        def nomlirBuildCmd = "CTEST_PARALLEL_LEVEL=4 MIOPEN_LOG_LEVEL=5 make -j\$(nproc) check"
-                        buildHipClangJob(build_type: 'debug', setup_flags: NOMLIR_flags + gfx90a_flags, build_cmd: nomlirBuildCmd, test_flags: ' --verbose ', build_install: true, gpu_family: "ci")
-                    }
-                } finally { cleanWs() }
-            }
+    def fp32NomlirGfx90a = 'Fp32 Hip Debug NOMLIR gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A, fp32NomlirGfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try {
+                withWorkingDirFn {
+                    def nomlirBuildCmd = "CTEST_PARALLEL_LEVEL=4 MIOPEN_LOG_LEVEL=5 make -j\$(nproc) check"
+                    buildHipClangJob(build_type: 'debug', setup_flags: NOMLIR_flags + gfx90a_flags, build_cmd: nomlirBuildCmd, test_flags: ' --verbose ', build_install: true, gpu_family: "ci")
+                }
+            } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'Fp32 Hip Static gfx90a') {
-        if (pipelineParams.TARGET_GFX90A) {
-            node(rocmnodeFn("gfx90a")) {
-                try {
-                    withWorkingDirFn {
-                        buildHipClangJob(setup_flags: "-DBUILD_SHARED_LIBS=Off" + gfx90a_flags, mlir_build: 'OFF', build_install: true, gpu_family: "ci")
-                    }
-                } finally { cleanWs() }
-            }
+    def fp32StaticGfx90a = 'Fp32 Hip Static gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A, fp32StaticGfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try {
+                withWorkingDirFn {
+                    buildHipClangJob(setup_flags: "-DBUILD_SHARED_LIBS=Off" + gfx90a_flags, mlir_build: 'OFF', build_install: true, gpu_family: "ci")
+                }
+            } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'Fp32 Hip Normal-Find gfx90a') {
-        if (pipelineParams.TARGET_GFX90A) {
-            node(rocmnodeFn("gfx90a")) {
-                try {
-                    withWorkingDirFn {
-                        buildHipClangJob(setup_flags: gfx90a_flags, make_targets: "test_conv2d", execute_cmd: "bin/test_conv2d --disable-verification-cache", find_mode: "Normal", build_install: true, gpu_family: "ci")
-                    }
-                } finally { cleanWs() }
-            }
+    def fp32NormalFindGfx90a = 'Fp32 Hip Normal-Find gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A, fp32NormalFindGfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try {
+                withWorkingDirFn {
+                    buildHipClangJob(setup_flags: gfx90a_flags, make_targets: "test_conv2d", execute_cmd: "bin/test_conv2d --disable-verification-cache", find_mode: "Normal", build_install: true, gpu_family: "ci")
+                }
+            } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'Fp32 Hip Fast-Find gfx90a') {
-        if (pipelineParams.TARGET_GFX90A) {
-            node(rocmnodeFn("gfx90a")) {
-                try {
-                    withWorkingDirFn {
-                        buildHipClangJob(setup_flags: gfx90a_flags, make_targets: "test_conv2d", execute_cmd: "MIOPEN_FIND_MODE=2 CTEST_PARALLEL_LEVEL=4 bin/test_conv2d --disable-verification-cache", build_install: true, gpu_family: "ci")
-                    }
-                } finally { cleanWs() }
-            }
+    def fp32FastFindGfx90a = 'Fp32 Hip Fast-Find gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A, fp32FastFindGfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try {
+                withWorkingDirFn {
+                    buildHipClangJob(setup_flags: gfx90a_flags, make_targets: "test_conv2d", execute_cmd: "MIOPEN_FIND_MODE=2 CTEST_PARALLEL_LEVEL=4 bin/test_conv2d --disable-verification-cache", build_install: true, gpu_family: "ci")
+                }
+            } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'Fp32 Hip SqlitePerfdb gfx90a') {
-        if (pipelineParams.TARGET_GFX90A) {
-            node(rocmnodeFn("gfx90a")) {
-                try {
-                    withWorkingDirFn {
-                        buildHipClangJob(make_targets: Smoke_targets, setup_flags: "-DMIOPEN_USE_SQLITE_PERF_DB=On" + gfx90a_flags, build_install: true, gpu_family: "ci")
-                    }
-                } finally { cleanWs() }
-            }
+    def fp32SqlitePerfdbGfx90a = 'Fp32 Hip SqlitePerfdb gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A, fp32SqlitePerfdbGfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try {
+                withWorkingDirFn {
+                    buildHipClangJob(make_targets: Smoke_targets, setup_flags: "-DMIOPEN_USE_SQLITE_PERF_DB=On" + gfx90a_flags, build_install: true, gpu_family: "ci")
+                }
+            } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'Fp32 Hip Fin Interface gfx90a') {
-        if (pipelineParams.TARGET_GFX90A) {
-            node(rocmnodeFn("gfx90a")) {
-                try {
-                    withWorkingDirFn {
-                        buildHipClangJob(setup_flags: "-DMIOPEN_ENABLE_FIN_INTERFACE=On" + gfx90a_flags, make_targets: "test_unit_FinInterface", execute_cmd: "bin/test_unit_FinInterface", gpu_family: "ci")
-                    }
-                } finally { cleanWs() }
-            }
+    def fp32FinInterfaceGfx90a = 'Fp32 Hip Fin Interface gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A, fp32FinInterfaceGfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try {
+                withWorkingDirFn {
+                    buildHipClangJob(setup_flags: "-DMIOPEN_ENABLE_FIN_INTERFACE=On" + gfx90a_flags, make_targets: "test_unit_FinInterface", execute_cmd: "bin/test_unit_FinInterface", gpu_family: "ci")
+                }
+            } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'Fp32 Hip Debug gfx90a') {
-        if (pipelineParams.TARGET_GFX90A) {
-            node(rocmnodeFn("gfx90a")) {
-                try {
-                    withWorkingDirFn {
-                        buildHipClangJob(setup_flags: gfx90a_flags, build_type: 'debug', make_targets: Smoke_targets, build_install: true, gpu_family: "ci")
-                    }
-                } finally { cleanWs() }
-            }
+    def fp32DebugGfx90a = 'Fp32 Hip Debug gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A, fp32DebugGfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try {
+                withWorkingDirFn {
+                    buildHipClangJob(setup_flags: gfx90a_flags, build_type: 'debug', make_targets: Smoke_targets, build_install: true, gpu_family: "ci")
+                }
+            } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'Fp32 Hip Debug gfx942') {
-        if (pipelineParams.TARGET_GFX942) {
-            node(rocmnodeFn("gfx942")) {
-                try {
-                    withWorkingDirFn {
-                        buildHipClangJob(setup_flags: gfx942_flags, build_type: 'debug', make_targets: Smoke_targets, build_install: true, gpu_family: "ci")
-                    }
-                } finally { cleanWs() }
-            }
+    def fp32DebugGfx942 = 'Fp32 Hip Debug gfx942'
+    addStageIf(stages, pipelineParams.TARGET_GFX942, fp32DebugGfx942) {
+        node(rocmnodeFn("gfx942")) {
+            try {
+                withWorkingDirFn {
+                    buildHipClangJob(setup_flags: gfx942_flags, build_type: 'debug', make_targets: Smoke_targets, build_install: true, gpu_family: "ci")
+                }
+            } finally { cleanWs() }
         }
     }
 
@@ -1421,7 +1397,7 @@ def nonCriticalHWNightlyStages(def pipelineParams, def pipelineEnv, def rocmnode
     def Smoke_targets   = pipelineEnv.Smoke_targets
     def Build_timeout_minutes = pipelineEnv.Build_timeout_minutes as Integer
 
-    addStage(stages, 'Mark Build As Nightly') {
+    addStageIf(stages, true, 'Mark Build As Nightly') {
         node(rocmnodeFn("nogpu")) {
             try {
                 withWorkingDirFn { currentBuild.description = "Non-Critical HW Nightly Build" }
@@ -1430,72 +1406,64 @@ def nonCriticalHWNightlyStages(def pipelineParams, def pipelineEnv, def rocmnode
     }
 
     // GFX908 Tests
-    addStage(stages, 'Dbsync gfx908') {
-        if (pipelineParams.DBSYNC_TEST && pipelineParams.TARGET_GFX908 && !passedStages.contains('Dbsync gfx908')) {
-            node(rocmnodeFn("gfx908")) {
-                try { runDbSyncJobFn(gfx908_flags, "ci") } finally { cleanWs() }
-            }
+    def dbsyncGfx908 = 'Dbsync gfx908'
+    addStageIf(stages, pipelineParams.DBSYNC_TEST && pipelineParams.TARGET_GFX908 && !passedStages.contains(dbsyncGfx908), dbsyncGfx908) {
+        node(rocmnodeFn("gfx908")) {
+            try { runDbSyncJobFn(gfx908_flags, "ci") } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'Bf16 Hip Install All gfx908') {
-        if (pipelineParams.TARGET_GFX908 && pipelineParams.DATATYPE_BF16 && !passedStages.contains('Bf16 Hip Install All gfx908')) {
-            node(rocmnodeFn("gfx908")) {
-                try { runBuildAndSingleGtestJobFn(flags: Full_test + Bf16_flags + gfx908_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
-            }
+    def bf16Gfx908 = 'Bf16 Hip Install All gfx908'
+    addStageIf(stages, pipelineParams.TARGET_GFX908 && pipelineParams.DATATYPE_BF16 && !passedStages.contains(bf16Gfx908), bf16Gfx908) {
+        node(rocmnodeFn("gfx908")) {
+            try { runBuildAndSingleGtestJobFn(flags: Full_test + Bf16_flags + gfx908_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'Fp16 Hip Install All gfx908') {
-        if (pipelineParams.TARGET_GFX908 && pipelineParams.DATATYPE_FP16 && !passedStages.contains('Fp16 Hip Install All gfx908')) {
-            node(rocmnodeFn("gfx908")) {
-                try { runBuildAndSingleGtestJobFn(flags: Full_test + Fp16_flags + gfx908_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
-            }
+    def fp16Gfx908 = 'Fp16 Hip Install All gfx908'
+    addStageIf(stages, pipelineParams.TARGET_GFX908 && pipelineParams.DATATYPE_FP16 && !passedStages.contains(fp16Gfx908), fp16Gfx908) {
+        node(rocmnodeFn("gfx908")) {
+            try { runBuildAndSingleGtestJobFn(flags: Full_test + Fp16_flags + gfx908_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'Fp32 Hip Install All gfx908') {
-        if (pipelineParams.TARGET_GFX908 && pipelineParams.DATATYPE_FP32 && !passedStages.contains('Fp32 Hip Install All gfx908')) {
-            node(rocmnodeFn("gfx908")) {
-                try { runBuildAndSingleGtestJobFn(flags: Full_test + gfx908_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
-            }
+    def fp32Gfx908 = 'Fp32 Hip Install All gfx908'
+    addStageIf(stages, pipelineParams.TARGET_GFX908 && pipelineParams.DATATYPE_FP32 && !passedStages.contains(fp32Gfx908), fp32Gfx908) {
+        node(rocmnodeFn("gfx908")) {
+            try { runBuildAndSingleGtestJobFn(flags: Full_test + gfx908_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'Fp32 Hip Debug gfx908') {
-        if (pipelineParams.TARGET_GFX908 && !passedStages.contains('Fp32 Hip Debug gfx908')) {
-            node(rocmnodeFn("gfx908")) {
-                try {
-                    withWorkingDirFn {
-                        buildHipClangJob(setup_flags: gfx908_flags, build_type: 'debug', make_targets: Smoke_targets, build_install: true, gpu_family: "ci")
-                    }
-                } finally { cleanWs() }
-            }
+    def fp32DebugGfx908 = 'Fp32 Hip Debug gfx908'
+    addStageIf(stages, pipelineParams.TARGET_GFX908 && !passedStages.contains(fp32DebugGfx908), fp32DebugGfx908) {
+        node(rocmnodeFn("gfx908")) {
+            try {
+                withWorkingDirFn {
+                    buildHipClangJob(setup_flags: gfx908_flags, build_type: 'debug', make_targets: Smoke_targets, build_install: true, gpu_family: "ci")
+                }
+            } finally { cleanWs() }
         }
     }
 
     // GFX115X Strix Halo Tests
-    addStage(stages, 'Bf16 Hip Install All gfx115X') {
-        if (pipelineParams.TARGET_NAVI35 && pipelineParams.DATATYPE_BF16 && !passedStages.contains('Bf16 Hip Install All gfx115X')) {
-            node(rocmnodeFn("strix")) {
-                try { runBuildAndSingleGtestJobFn(flags: " -DMIOPEN_TEST_GFX115X=On " + Full_test + Bf16_flags + gfx1151_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
-            }
+    def bf16Gfx115X = 'Bf16 Hip Install All gfx115X'
+    addStageIf(stages, pipelineParams.TARGET_NAVI35 && pipelineParams.DATATYPE_BF16 && !passedStages.contains(bf16Gfx115X), bf16Gfx115X) {
+        node(rocmnodeFn("strix")) {
+            try { runBuildAndSingleGtestJobFn(flags: " -DMIOPEN_TEST_GFX115X=On " + Full_test + Bf16_flags + gfx1151_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'Fp16 Hip Install All gfx115X') {
-        if (pipelineParams.TARGET_NAVI35 && pipelineParams.DATATYPE_FP16 && !passedStages.contains('Fp16 Hip Install All gfx115X')) {
-            node(rocmnodeFn("strix")) {
-                try { runBuildAndSingleGtestJobFn(flags: " -DMIOPEN_TEST_GFX115X=On " + Full_test + Fp16_flags + gfx1151_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
-            }
+    def fp16Gfx115X = 'Fp16 Hip Install All gfx115X'
+    addStageIf(stages, pipelineParams.TARGET_NAVI35 && pipelineParams.DATATYPE_FP16 && !passedStages.contains(fp16Gfx115X), fp16Gfx115X) {
+        node(rocmnodeFn("strix")) {
+            try { runBuildAndSingleGtestJobFn(flags: " -DMIOPEN_TEST_GFX115X=On " + Full_test + Fp16_flags + gfx1151_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
         }
     }
 
-    addStage(stages, 'Fp32 Hip Install All gfx115X') {
-        if (pipelineParams.TARGET_NAVI35 && pipelineParams.DATATYPE_FP32 && !passedStages.contains('Fp32 Hip Install All gfx115X')) {
-            node(rocmnodeFn("strix")) {
-                try { runBuildAndSingleGtestJobFn(flags: " -DMIOPEN_TEST_GFX115X=On " + Full_test + gfx1151_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
-            }
+    def fp32Gfx115X = 'Fp32 Hip Install All gfx115X'
+    addStageIf(stages, pipelineParams.TARGET_NAVI35 && pipelineParams.DATATYPE_FP32 && !passedStages.contains(fp32Gfx115X), fp32Gfx115X) {
+        node(rocmnodeFn("strix")) {
+            try { runBuildAndSingleGtestJobFn(flags: " -DMIOPEN_TEST_GFX115X=On " + Full_test + gfx1151_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") } finally { cleanWs() }
         }
     }
 
