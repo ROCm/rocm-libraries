@@ -131,14 +131,16 @@ struct CKArgs
         }
     }
 
-    // CK WRW interface accepts int32 arrays only; lazy-populate so narrowing
-    // only runs for kernels that survived the RequiresLargeTensorCKInstance
-    // filter (FillValidKernelsIDs constructs CKArgs unconditionally, before
+    // Sub-INT_MAX narrowing path: the int32 CK MakeArgumentPointer overload
+    // accepts ck::index_t arrays only. Lazy-populate so narrowing runs only
+    // for kernels that survived the RequiresLargeTensorCKInstance filter
+    // (FillValidKernelsIDs constructs CKArgs unconditionally, before
     // filtering -- narrowing here on overflow shapes would assert even when
     // no kernel is ultimately selected). The bundle is a mutable member so
     // its arrays outlive any arg_ptr that captures references to them.
-    // Safe because no WRW large-tensor registrations exist, so MakeArgPtr
-    // is never reached on >INT_MAX inputs.
+    // Large-tensor (>INT_MAX) shapes never reach here: MakeDefaultArgPtr
+    // binds CK's int64 long_index_t overload directly for those instances,
+    // and the Bilinear/Scale MultipleD ops are int32-only and filtered out.
     const NarrowedCKArrays3D& NarrowedArrays() const
     {
         narrowed = NarrowedCKArrays3D{
@@ -223,6 +225,33 @@ struct CKArgs
     auto MakeDefaultArgPtr(
         const ConvPtr& conv_ptr, ConstData_t x, Data_t dw, ConstData_t dy, int split_k) const
     {
+        // Large-tensor (>INT_MAX element stride) instances expose CK's int64
+        // long_index_t MakeArgumentPointer overload; bind it with the int64
+        // member arrays directly (they outlive the returned arg_ptr). This
+        // mirrors the FWD path in ck_grouped_conv_fwd_impl.cpp. Only the
+        // single-D Default device op (DeviceOpGBwdWeightDefault) exposes the
+        // int64 overload; the Bilinear/Scale MultipleD ops are int32-only and
+        // unreachable on overflow shapes (RequiresLargeTensorCKInstance).
+        if(miopen::solver::IsLargeTensorCKInstance(conv_ptr))
+        {
+            return conv_ptr->MakeArgumentPointer(x,
+                                                 dw,
+                                                 dy,
+                                                 in_lengths,
+                                                 in_strides,
+                                                 wei_lengths,
+                                                 wei_strides,
+                                                 out_lengths,
+                                                 out_strides,
+                                                 filter_strides,
+                                                 filter_dilations,
+                                                 lPadding,
+                                                 rPadding,
+                                                 PassThrough{},
+                                                 PassThrough{},
+                                                 PassThrough{},
+                                                 split_k);
+        }
         const auto& a = NarrowedArrays();
         return conv_ptr->MakeArgumentPointer(x,
                                              dw,

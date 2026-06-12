@@ -20,15 +20,15 @@
 // ---------------------------------------------------------------------------
 // ToCKIndexArray — narrow a long_index_t array to a ck::index_t (int32) array.
 //
-// Used at the BWD/WRW MakeArgPtr boundary because the installed CK BWD/WRW
-// MakeArgumentPointer interface (e.g.
-// device_grouped_conv_bwd_data_multiple_d.hpp) only accepts int32 length /
-// stride arrays. Narrowing here is safe because RequiresLargeTensorCKInstance
-// (implicitgemm_ck_util.hpp) blocks BWD/WRW selection when any stride exceeds
-// INT_MAX -- under that guard the candidate set for those directions is empty
-// (no BWD/WRW large-tensor CK instances are registered) and the narrowing
-// path is never reached on overflow shapes. For sub-INT_MAX shapes the
-// narrowing is exact.
+// Used on the sub-INT_MAX BWD/WRW MakeArgPtr path, where CK's int32
+// MakeArgumentPointer overload (e.g. device_grouped_conv_bwd_data_multiple_d.hpp)
+// accepts ck::index_t length / stride arrays only. For those shapes the
+// narrowing is exact. Large-tensor (>INT_MAX) shapes never reach this helper:
+// MakeArgPtr detects a large-tensor CK instance (IsLargeTensorCKInstance) and
+// binds CK's int64 long_index_t overload with the un-narrowed members instead.
+// The assert below therefore guards the contract -- if a >INT_MAX value is ever
+// narrowed here, the large-tensor branch was bypassed and the result would be
+// silently wrong.
 // ---------------------------------------------------------------------------
 template <typename T, std::size_t N>
 constexpr std::array<ck::index_t, N> ToCKIndexArray(const std::array<T, N>& src)
@@ -46,9 +46,9 @@ constexpr std::array<ck::index_t, N> ToCKIndexArray(const std::array<T, N>& src)
 
 // ---------------------------------------------------------------------------
 // NarrowedCKArrays3D / NarrowedCKArrays2D — bundles of int32-narrowed
-// length/stride arrays handed to CK's int32 MakeArgumentPointer overload.
-// Same caveat as ToCKIndexArray: only safe when RequiresLargeTensorCKInstance
-// is filtering out >INT_MAX shapes.
+// length/stride arrays handed to CK's int32 MakeArgumentPointer overload on
+// the sub-INT_MAX path. Large-tensor (>INT_MAX) shapes bypass these bundles
+// and bind CK's int64 long_index_t overload directly (see ToCKIndexArray).
 //
 // These bundles MUST be stored as members of the owning CKArgs (not as
 // function-local temporaries), because CK's MakeArgumentPointer captures
