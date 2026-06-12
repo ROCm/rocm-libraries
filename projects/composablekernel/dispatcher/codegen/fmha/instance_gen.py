@@ -1593,6 +1593,7 @@ def expand_sweep(
                     allowed_biases,
                     restrict_hdims=restrict_hdims,
                     allowed_qscale=allowed_qscale,
+                    block_per_cu_values=block_per_cu_values,
                 )
         else:
             raise ValueError(f"Exhaustive mode not supported for variant {variant!r}")
@@ -1646,6 +1647,7 @@ def expand_sweep(
             allowed_biases,
             restrict_hdims=restrict_hdims,
             allowed_qscale=allowed_qscale,
+            block_per_cu_values=block_per_cu_values,
         )
     elif variant == "bwd":
         configs = _expand_bwd(
@@ -2387,7 +2389,10 @@ def _expand_batch_prefill(
     allowed_biases,
     restrict_hdims=None,
     allowed_qscale=None,
+    block_per_cu_values=None,
 ):
+    if block_per_cu_values is None:
+        block_per_cu_values = [-1]
     configs = []
     page_sizes = [1, 16, 1024]
 
@@ -2419,49 +2424,51 @@ def _expand_batch_prefill(
                             continue
                         if spec.qscale == "kv_blockscale" and ps < tc.bn0:
                             continue
-                        configs.append(
-                            FmhaKernelConfig(
-                                family="batch_prefill",
-                                data_type=dtype,
-                                mode="group",
-                                hdim_q=hq,
-                                hdim_v=hv,
-                                pipeline="qr_async",
-                                tile_m0=tc.bm0,
-                                tile_n0=tc.bn0,
-                                tile_k0=tc.bk0,
-                                tile_n1=tc.bn1,
-                                tile_k1=bk1,
-                                tile_k0max=tc.bk0max,
-                                wave_m0=tc.rm0,
-                                wave_n0=1,
-                                wave_k0=1,
-                                wave_m1=tc.rm0,
-                                wave_n1=1,
-                                wave_k1=1,
-                                warp_m0=tc.wm0,
-                                warp_n0=tc.wn0,
-                                warp_k0=tc.wk0,
-                                warp_m1=tc.wm1,
-                                warp_n1=tc.wn1,
-                                warp_k1=tc.wk1,
-                                pad_s=1,
-                                pad_sk=1,
-                                pad_d=1,
-                                pad_dv=1,
-                                mask=mm,
-                                bias=mb,
-                                lse=(spec.lse == "t"),
-                                dropout=(spec.dropout == "t"),
-                                logits=(spec.logits == "t"),
-                                paged_kv=True,
-                                page_size=ps,
-                                kv_memory_layout=spec.kv_memory_layout,
-                                kv_lookup_table=spec.kv_lookup_table,
-                                qscale=spec.qscale,
-                                gfx_arch=arch,
+                        for bpc in block_per_cu_values:
+                            configs.append(
+                                FmhaKernelConfig(
+                                    family="batch_prefill",
+                                    data_type=dtype,
+                                    mode="group",
+                                    hdim_q=hq,
+                                    hdim_v=hv,
+                                    pipeline="qr_async",
+                                    tile_m0=tc.bm0,
+                                    tile_n0=tc.bn0,
+                                    tile_k0=tc.bk0,
+                                    tile_n1=tc.bn1,
+                                    tile_k1=bk1,
+                                    tile_k0max=tc.bk0max,
+                                    wave_m0=tc.rm0,
+                                    wave_n0=1,
+                                    wave_k0=1,
+                                    wave_m1=tc.rm0,
+                                    wave_n1=1,
+                                    wave_k1=1,
+                                    warp_m0=tc.wm0,
+                                    warp_n0=tc.wn0,
+                                    warp_k0=tc.wk0,
+                                    warp_m1=tc.wm1,
+                                    warp_n1=tc.wn1,
+                                    warp_k1=tc.wk1,
+                                    pad_s=1,
+                                    pad_sk=1,
+                                    pad_d=1,
+                                    pad_dv=1,
+                                    mask=mm,
+                                    bias=mb,
+                                    lse=(spec.lse == "t"),
+                                    dropout=(spec.dropout == "t"),
+                                    logits=(spec.logits == "t"),
+                                    paged_kv=True,
+                                    page_size=ps,
+                                    kv_memory_layout=spec.kv_memory_layout,
+                                    kv_lookup_table=spec.kv_lookup_table,
+                                    qscale=spec.qscale,
+                                    block_per_cu=bpc,
+                                    gfx_arch=arch,
+                                )
                             )
-                        )
     return configs
 
 
