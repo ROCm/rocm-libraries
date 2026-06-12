@@ -103,13 +103,20 @@ class GeneratedTileKernelInstance : public KernelInstance
                                    problem.N        // stride_E/C (row-major C: stride = N)
         );
 
-        // Benchmark parameters. Defaults match old Tile Engine
-        // (gemm_common.hpp: warmup=50, repeat=100, flush_cache=true,
-        // rotating_count=1000) so bridge-vs-old-TE comparisons are
-        // apples-to-apples and a too-small warmup can't leave the GPU clock
-        // un-ramped (the transient that produced PR #8123's spurious 2048^3 dip).
-        // Each is overridable at run time via env var so a caller can match a
-        // different harness without recompiling.
+        // Benchmark parameters. Defaults mirror old Tile Engine's
+        // gemm_common.hpp (warmup=50, repeat=100, flush_cache=true,
+        // rotating_count=1000), and a generous warmup keeps the GPU clock
+        // ramped. NOTE: matching these knobs does NOT by itself make
+        // bridge-vs-old-TE numbers comparable -- the byte-identical kernel
+        // measures ~18-20% faster here than through old TE's *standalone
+        // benchmark binary* at e.g. 1024^3/compv4, purely because that
+        // separate process runs the kernel at a lower sustained SCLK (+ more
+        // memory-stall cycles), not because of any bench knob, compiler, or
+        // kernel difference (rocprof-confirmed). For an honest A/B, measure
+        // BOTH kernels through the SAME harness (build the old-TE kernel into a
+        // .so and run it via run_one_gemm_kernel.py) -- the gap then collapses
+        // to ~1%. Each knob is env-overridable so a caller can match another
+        // harness without recompiling.
         const bool bench = this->benchmarking_;
         ck_tile::stream_config stream_cfg;
         stream_cfg.stream_id_      = reinterpret_cast<hipStream_t>(stream);
