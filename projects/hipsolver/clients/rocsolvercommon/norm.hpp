@@ -45,7 +45,7 @@ double dlange_(const char*   norm_type,
                const int*    n,
                const double* A,
                const int*    lda,
-               double*       rand);
+               double*       rwork);
 float  clange_(const char*                  norm_type,
                const int*                   m,
                const int*                   n,
