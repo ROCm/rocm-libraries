@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <iostream>
 #include <memory>
 
 #include <hip/hip_runtime.h>
@@ -296,19 +295,9 @@ TEST(StreamKForceDPOnlyTest, DoesNotRequestPartialWorkspace)
     EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), 0);
 }
 
-// ===========================================================================
-// StreamK5HybridModeTest -- the SK5 hybrid kernel must size its launch grid
-// per the *effective* sub-mode: OFF/static borrows the SK3 grid, ON/dynamic
-// borrows the SK4 persistent grid. The grid sizing (getSKGrid) and the
-// kernel-arg packing (generateSingleCall) share streamK5EffectiveDynamic as
-// the single source of truth; these tests lock that resolution so SK5-off
-// can never silently launch the SK4 grid again (the original regression where
-// SK5-off matched SK4's grid_size=256 instead of SK3's tile-count grid).
-// AUTO (mode 2) routes through origami::streamk::select_hybrid_mode and
-// requires HipAMDGPU::analyticalHardware; see the AUTO smoke test below
-// (mock analytical hardware, no GPU required). Threshold and smCountTarget
-// cases are covered by origami/tests/test_streamk.cpp.
-// ===========================================================================
+// StreamK5HybridModeTest -- streamK5EffectiveDynamic drives grid sizing and
+// host arg packing. AUTO (2) uses origami::streamk::select_hybrid_mode;
+// threshold/smCountTarget cases live in origami/tests/test_streamk.cpp.
 
 namespace
 {
@@ -411,8 +400,6 @@ namespace
 
         pack.grid = solution.getSKGrid(problem, hardware, pack.tiles, pack.reduction);
 
-        // Mirror the tree (non-parallel) SK3 arg branch used by both native SK3
-        // and the SK5 static sub-path in ContractionSolution.cpp.
         if(pack.reduction == origami::reduction_t::parallel)
         {
             uint32_t skSplit      = static_cast<uint32_t>(pack.grid / pack.tiles);
@@ -451,15 +438,6 @@ namespace
         solution.sizeMapping.CUOccupancy        = -1;
         solution.sizeMapping.streamKForceDPOnly = 0;
         solution.sizeMapping.streamKAtomic      = 0;
-    }
-
-    void printStreamKHostPack(char const* label, StreamKHostPack const& pack)
-    {
-        std::cout << label << ": tiles=" << pack.tiles << " itersPerTile=" << pack.itersPerTile
-                  << " reduction=" << static_cast<int>(pack.reduction)
-                  << " effectiveDynamic=" << (pack.effectiveDynamic ? "true" : "false")
-                  << " grid=" << pack.grid << " skTiles=" << pack.skTiles
-                  << " SKItersPerWG=" << pack.skItersPerWG << std::endl;
     }
 } // namespace
 
@@ -563,11 +541,6 @@ INSTANTIATE_TEST_SUITE_P(
 
 // smCountTarget AUTO behavior is covered by origami/tests/test_streamk.cpp.
 
-// ===========================================================================
-// Sk3Sk5OffPartition512Test -- dump and compare host partition state for the
-// Equality MT64x64x16 kernel at 512^3 NN on the live device (MI355X/gfx950).
-// ===========================================================================
-
 TEST(Sk3Sk5OffPartition512Test, NativeSk3MatchesSk5OffHostPack)
 {
     int deviceCount = 0;
@@ -592,9 +565,6 @@ TEST(Sk3Sk5OffPartition512Test, NativeSk3MatchesSk5OffHostPack)
     auto sk3Pack = computeStreamKHostPack(sk3Solution, problemSk3, *hardware);
     auto sk5OffPack = computeStreamKHostPack(sk5Solution, problemSk5, *hardware);
 
-    printStreamKHostPack("native SK3", sk3Pack);
-    printStreamKHostPack("SK5-off", sk5OffPack);
-
     EXPECT_FALSE(sk5OffPack.effectiveDynamic);
     EXPECT_EQ(sk3Pack.reduction, sk5OffPack.reduction);
     EXPECT_EQ(sk3Pack.grid, sk5OffPack.grid);
@@ -604,7 +574,6 @@ TEST(Sk3Sk5OffPartition512Test, NativeSk3MatchesSk5OffHostPack)
     // Contrast: SK5-on (dynamic) should diverge at 512^3 when tiles < grid.
     problemSk5.setParams().setStreamKTileSchedulingMode(1);
     auto sk5OnPack = computeStreamKHostPack(sk5Solution, problemSk5, *hardware);
-    printStreamKHostPack("SK5-on (contrast)", sk5OnPack);
     EXPECT_TRUE(sk5OnPack.effectiveDynamic);
     if(sk3Pack.grid > sk3Pack.tiles)
         EXPECT_NE(sk3Pack.grid, sk5OnPack.grid)
