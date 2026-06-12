@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -59,8 +59,9 @@ function(add_relative_test test_name test_target resource_group)
     file(APPEND "${INSTALL_TEST_FILE}" "add_test(${test_name} \"../${EXE_NAME}\")\n")
     # Set the resource group for the test. This must correspond to a GPU resource present in resources.json.
     file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(${test_name} PROPERTIES RESOURCE_GROUPS \"1,${resource_group}:1\")\n")
-    # Record this target so the test-categories pass can attach gtest-filter labels later.
-    set_property(GLOBAL APPEND PROPERTY ROCPRIM_TEST_TARGETS "${test_target}")
+    # Record this (test_target, resource_group) pair so the test-categories pass can later attach gtest-filter
+    # labels to each test while inheriting the same RESOURCE_GROUPS pinning.
+    set_property(GLOBAL APPEND PROPERTY ROCPRIM_TEST_TARGET_RESOURCE_PAIRS "${test_target}|${resource_group}")
 endfunction()
 
 function(add_hip_test TEST_NAME TEST_SOURCES)
@@ -161,12 +162,16 @@ if(EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
     include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
 
     message(STATUS "Applying test categories for rocprim")
-    get_property(_rp_test_targets GLOBAL PROPERTY ROCPRIM_TEST_TARGETS)
-    foreach(_rp_t IN LISTS _rp_test_targets)
+    get_property(_rp_pairs GLOBAL PROPERTY ROCPRIM_TEST_TARGET_RESOURCE_PAIRS)
+    list(REMOVE_DUPLICATES _rp_pairs)
+    foreach(_rp_pair IN LISTS _rp_pairs)
+        string(REPLACE "|" ";" _rp_parts "${_rp_pair}")
+        list(GET _rp_parts 0 _rp_t)
+        list(GET _rp_parts 1 _rp_rg)
         get_target_property(_rp_dir ${_rp_t} RUNTIME_OUTPUT_DIRECTORY)
         apply_test_category_labels(${_rp_t}
             "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
-            "${_rp_dir}" "${INSTALL_TEST_FILE}")
+            "${_rp_dir}" "${INSTALL_TEST_FILE}" "${_rp_rg}")
     endforeach()
 
 else()
