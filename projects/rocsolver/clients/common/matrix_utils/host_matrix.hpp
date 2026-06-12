@@ -39,6 +39,7 @@
 
 #include "matrix_interface.hpp"
 #include "matrix_utils_detail.hpp"
+#include "rocblas_utility.hpp"
 
 namespace matxu
 {
