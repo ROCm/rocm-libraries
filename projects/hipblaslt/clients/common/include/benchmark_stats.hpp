@@ -55,9 +55,7 @@ namespace hipblaslt_bench
     };
 
     // Default values for the --adaptive preset, used as the CLI/YAML defaults so they
-    // appear directly in --help. Warmup/measure budgets are in the range of the
-    // benchmarking tool's cold/hot targets; the ceiling gives convergence headroom.
-    // Keep hipblaslt_common.yaml's Defaults block in sync with these.
+    // appear directly in --help. Keep hipblaslt_common.yaml's Defaults block in sync.
     namespace adaptive_defaults
     {
         constexpr float   warmup_time      = 50.0f; // ms warmup budget
@@ -67,11 +65,9 @@ namespace hipblaslt_bench
         constexpr int32_t min_iters        = 10; // floor on total timed iterations
         constexpr int32_t max_iters        = 0; // unbounded
         constexpr float   noise_threshold  = 0.01f; // 1% relative standard error
-        // Noise-plateau fallback (see TimingConfig): threshold anchored to nvbench's stability
-        // check; the look-back (window * interval = 512 samples) is sized so the fallback can
-        // only fire ~512 samples past the measure_time floor -- after typical convergence has
-        // had its chance -- reserving "stable" for kernels that genuinely cannot pin the mean
-        // within the budget (tuned on gfx950, TN/fp16).
+        // Noise-plateau fallback (see TimingConfig). window * interval = 512-sample look-back,
+        // so the fallback can only fire ~512 samples past the measure_time floor: kernels that
+        // converge first report "converged", only those that cannot report "stable".
         constexpr float   stability_threshold = 0.05f; // 5% rel. spread over the window
         constexpr int32_t stability_window    = 32; // readings tested (512-sample look-back)
         constexpr int32_t stability_interval  = 16; // a reading every 16 samples

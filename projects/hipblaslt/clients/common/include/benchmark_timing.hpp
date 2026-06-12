@@ -70,21 +70,34 @@ namespace hipblaslt_bench
             });
         }
 
-        // Relative standard error of the mean: (sample stddev / mean) / sqrt(n).
-        inline double relative_std_error(const std::vector<double>& v)
+        // Incremental mean/variance via Welford's recurrence: O(1) per sample, numerically
+        // stable for low-cv samples.
+        struct running_stats
         {
-            const size_t n = v.size();
-            if(n < 2)
-                return std::numeric_limits<double>::infinity();
-            const double mean = mean_of(v);
-            if(mean <= 0.0)
-                return std::numeric_limits<double>::infinity(); // degenerate: treat as not converged
-            const double var = sum_sq_dev(v, mean) / (n - 1); // unbiased sample variance
-            return (std::sqrt(var) / mean) / std::sqrt(static_cast<double>(n));
-        }
+            int64_t count = 0;
+            double  mean  = 0.0;
+            double  m2    = 0.0; // sum of squared deviations from the running mean
+
+            void add(double x)
+            {
+                ++count;
+                const double delta = x - mean;
+                mean += delta / static_cast<double>(count);
+                m2 += delta * (x - mean); // second delta uses the updated mean
+            }
+
+            // Relative standard error of the mean: (sample stddev / mean) / sqrt(n).
+            double relative_std_error() const
+            {
+                if(count < 2 || mean <= 0.0)
+                    return std::numeric_limits<double>::infinity(); // too few / degenerate
+                const double var = m2 / static_cast<double>(count - 1); // unbiased variance
+                return (std::sqrt(var) / mean) / std::sqrt(static_cast<double>(count));
+            }
+        };
 
         // Minimum samples before the convergence test is trusted; a stddev from fewer
-        // is unreliable. Matches nvbench's min-samples default.
+        // is unreliable.
         inline constexpr int min_samples_for_convergence = 10;
 
         // Linear-interpolated quantile of a sorted, non-empty vector (q in [0, 1]).
@@ -96,24 +109,18 @@ namespace hipblaslt_bench
             return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - static_cast<double>(lo));
         }
 
-        // Robust relative dispersion (IQR / median) over all samples so far. Quartiles
-        // are order statistics, so unlike cv this is insensitive to the outlier tail.
-        inline double cumulative_rel_iqr(const std::vector<double>& samples)
+        // Robust relative dispersion (IQR / median) over all samples so far -- quartiles are
+        // order statistics, so unlike cv this is insensitive to the outlier tail. Sorts
+        // `samples` in place: callers must not rely on its order (nothing does -- mean/variance
+        // come from running_stats and fill_distribution sorts its own view). Caller ensures
+        // samples is non-empty.
+        inline double cumulative_rel_iqr(std::vector<double>& samples)
         {
-            std::vector<double> sorted(samples);
-            std::sort(sorted.begin(), sorted.end());
-            const double median = quantile(sorted, 0.5);
-            const double iqr    = quantile(sorted, 0.75) - quantile(sorted, 0.25);
+            std::sort(samples.begin(), samples.end());
+            const double median = quantile(samples, 0.5);
+            const double iqr    = quantile(samples, 0.75) - quantile(samples, 0.25);
             return median > 0.0 ? iqr / median : 0.0;
         }
-
-        // Stability fallback: a rel_iqr reading is appended every cfg.stability_interval
-        // samples; the run is "stable" once the last cfg.stability_window readings vary by
-        // less than cfg.stability_threshold (relative). This mirrors nvbench's noise-stability
-        // escape, but on the robust estimator so a heavy tail can't keep it from settling. The
-        // headline mean's precision is still gated separately by relative_std_error, so this
-        // only ends runs that would otherwise hit the ceiling. cfg.stability_threshold <= 0
-        // disables the fallback entirely.
 
         // Whether the rel_iqr trajectory has flattened: the last `window` readings have a
         // relative standard deviation below `threshold`. A window < 2 has no spread to test.
@@ -232,9 +239,10 @@ namespace hipblaslt_bench
         // <= 0 disables both checks (so the run goes to the ceiling), and both need enough
         // samples for their estimates to be trustworthy. `iqr_history` accumulates the throttled
         // rel_iqr trajectory the plateau check reads.
-        inline bool reached_target(const TimingConfig&        cfg,
-                                   const std::vector<double>& samples,
-                                   std::vector<double>&       iqr_history,
+        inline bool reached_target(const TimingConfig&  cfg,
+                                   std::vector<double>& samples, // reordered in place by the rel_iqr check
+                                   const running_stats& stats,
+                                   std::vector<double>& iqr_history,
                                    int64_t                    total_iters,
                                    double                     total_us,
                                    const measure_bounds&      bounds,
@@ -245,7 +253,7 @@ namespace hipblaslt_bench
             const int  n         = static_cast<int>(samples.size());
             if(floor_met && cfg.noise_threshold > 0.0f && n >= min_samples_for_convergence)
             {
-                converged = relative_std_error(samples) < cfg.noise_threshold;
+                converged = stats.relative_std_error() < cfg.noise_threshold;
                 const bool fallback_on = cfg.stability_threshold > 0.0f
                                          && cfg.stability_interval >= 1 && cfg.stability_window >= 2;
                 if(!converged && fallback_on && n % cfg.stability_interval == 0)
@@ -321,10 +329,9 @@ namespace hipblaslt_bench
                 detail::time_batch(
                     launch, chunk, global_index, cfg.use_gpu_timer, events, chunk_us);
                 warm_us += chunk_us;
-                // Refine the estimate from a real measurement. If the span came back below the
-                // timer's resolution (chunk_us == 0), warm_us cannot advance and a per-iter
-                // estimate of 0 would re-size the batch to 1 -- so instead grow the batch until
-                // it clears the timer floor, and stop if even the max batch still reads as zero.
+                // Refine the estimate from each chunk. A chunk below timer resolution
+                // (chunk_us == 0) can't advance warm_us, so grow the batch instead; give up if
+                // even the max batch still reads as zero.
                 if(chunk_us > 0.0)
                 {
                     per_iter_est = chunk_us / chunk;
@@ -347,23 +354,26 @@ namespace hipblaslt_bench
                                             static_cast<double>(cfg.measure_time) * 1000.0,
                                             static_cast<double>(cfg.max_measure_time) * 1000.0};
 
-        std::vector<double> samples;
-        std::vector<double> iqr_history; // throttled rel_iqr trajectory for the plateau check
-        double              total_us    = 0.0;
-        int64_t             total_iters = 0;
-        bool                converged   = false;
-        bool                stable      = false;
+        std::vector<double>  samples;
+        std::vector<double>  iqr_history; // throttled rel_iqr trajectory for the plateau check
+        detail::running_stats stats; // incremental mean/variance for the convergence test
+        double               total_us    = 0.0;
+        int64_t              total_iters = 0;
+        bool                 converged   = false;
+        bool                 stable      = false;
 
         global_index = 0; // restart rotation for the timed phase
         while(!detail::aborted(should_abort))
         {
             double batch_us = 0.0;
             detail::time_batch(launch, batch, global_index, cfg.use_gpu_timer, events, batch_us);
-            samples.push_back(batch_us / batch);
+            const double per_iter = batch_us / batch;
+            samples.push_back(per_iter);
+            stats.add(per_iter);
             total_us += batch_us;
             total_iters += batch;
             if(detail::reached_target(
-                   cfg, samples, iqr_history, total_iters, total_us, bounds, converged, stable))
+                   cfg, samples, stats, iqr_history, total_iters, total_us, bounds, converged, stable))
                 break;
         }
 
