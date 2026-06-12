@@ -3945,5 +3945,3 @@ void testing_aux_check_numerics_func(const Arguments& arg)
     reset_env();
 }
 #endif // CODE_COVERAGE
-
-#include "testing_sk5.hpp"
