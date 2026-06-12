@@ -402,6 +402,14 @@ int main(int argc, char** argv)
     llvm::yaml::Input yin((*inputFile)->getMemBufferRef());
     yin >> rv;
 
+    // Under Adaptive, a ceiling is required so a non-converging run stays bounded.
+    if(rv.gs.adaptive && rv.gs.max_measure_time <= 0.0f && rv.gs.max_iters <= 0)
+    {
+        std::cerr << "error: Adaptive requires AdaptiveMaxMeasureTime or AdaptiveMaxIters > 0"
+                  << std::endl;
+        return 1;
+    }
+
     uint32_t rotating           = rv.gs.rotating * 1024 * 1024;
     int32_t  cold_iters         = rv.gs.cold_iters;
     int32_t  iters              = rv.gs.iters;

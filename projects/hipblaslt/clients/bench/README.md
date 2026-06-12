@@ -133,10 +133,11 @@ The run lasts **at least** the floor — `--adaptive_min_iters` and
 collecting samples until the mean's relative standard error (stddev / mean / sqrt(n))
 falls below `--adaptive_noise_threshold` (**converged**, `status=converged`) or the
 ceiling is reached (`status=noisy`). With `--adaptive_noise_threshold 0` convergence
-is disabled, so the run goes to the ceiling and `status` is `-`. (To run a fixed
-budget, set the floor and ceiling equal, e.g. `--adaptive_measure_time 200
---adaptive_max_measure_time 200`. If no ceiling is set at all, a default safety
-ceiling bounds the run.)
+is disabled, so the run goes to the ceiling and `status` is `-`. A ceiling is
+required — at least one of `--adaptive_max_measure_time` / `--adaptive_max_iters`
+must be > 0 (it is by default), otherwise the run is rejected — so a non-converging
+run is always bounded. (To run a fixed budget, set the floor and ceiling equal, e.g.
+`--adaptive_measure_time 200 --adaptive_max_measure_time 200`.)
 
 The reported `us`/`Gflops` are the **mean**; extra columns expose the distribution:
 `batch`, `samples`, `hot_iters`, `median_us`, `min_us`, `cv`, and `status`
@@ -156,9 +157,7 @@ to influence the batch). Without `--adaptive`, timing is the fixed-count
 
 Note on the statistic: the **mean** is reported because it is the more reproducible
 estimator for launch-bound / symmetric-jitter kernels. The **median** is kept as a
-column for outlier-robust comparison on larger kernels. Run-to-run stability on very
-large kernels is dominated by GPU clock/thermal state, which
-`--adaptive_noise_threshold` cannot remove — lock clocks for that.
+column for outlier-robust comparison on larger kernels.
 
 ```
 ./clients/hipblaslt-bench -m 4096 -n 4096 -k 4096 --transA N --transB T \

@@ -734,6 +734,14 @@ try
                 return EXIT_FAILURE;
             }
         }
+        // A ceiling is required so a run that never converges is still bounded.
+        if(arg.max_measure_time <= 0.0f && arg.max_iters <= 0)
+        {
+            hipblaslt_cerr << "error: --adaptive requires a ceiling: set "
+                              "--adaptive_max_measure_time or --adaptive_max_iters > 0"
+                           << std::endl;
+            return EXIT_FAILURE;
+        }
     }
 
     hipblaslt_print_version();

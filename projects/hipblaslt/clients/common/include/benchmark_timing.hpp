@@ -189,14 +189,11 @@ namespace hipblaslt_bench
         const int32_t batch = size_batch(per_iter_est);
 
         // ---- Measure: run at least the floor, then until convergence or the ceiling ----
+        // Precondition: a ceiling must be set (max_measure_time or max_iters > 0); the
+        // caller validates this. Without it, a run that never converges has no bound.
         const double  measure_min_us = double(cfg.measure_time) * 1000.0;
-        double        measure_max_us = double(cfg.max_measure_time) * 1000.0;
+        const double  measure_max_us = double(cfg.max_measure_time) * 1000.0;
         const int64_t min_iters      = std::max(1, cfg.min_iters);
-
-        // A run with no explicit ceiling must still be bounded (convergence may be
-        // disabled, or never reached on noisy hardware).
-        if(measure_max_us <= 0.0 && cfg.max_iters <= 0)
-            measure_max_us = std::max(2.0e6, measure_min_us * 5.0);
 
         std::vector<double> per_iter_samples;
         double              total_us    = 0.0;
