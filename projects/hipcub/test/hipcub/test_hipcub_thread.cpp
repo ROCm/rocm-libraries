@@ -50,7 +50,7 @@ struct params
 };
 
 template<class Params>
-class HipcubThreadOperationTests : public ::testing::Test
+class HipcubThreadOperationTests : public test_controller::ControlledTest<>
 {
 public:
     using type = typename Params::type;
@@ -132,6 +132,7 @@ TYPED_TEST(HipcubThreadOperationTests, Load)
     constexpr uint32_t block_size = 256;
     constexpr uint32_t grid_size = 128;
     constexpr uint32_t size = block_size * grid_size;
+	CHECK_SIZE_ENABLEMENT(static_cast<size_t>(size));
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -221,6 +222,7 @@ TYPED_TEST(HipcubThreadOperationTests, Unrolled)
     constexpr uint32_t grid_size      = 128;
     constexpr uint32_t ItemsPerThread = 4;
     constexpr uint32_t size           = block_size * grid_size * ItemsPerThread;
+	CHECK_SIZE_ENABLEMENT(static_cast<size_t>(size));
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -331,6 +333,7 @@ TYPED_TEST(HipcubThreadOperationTests, Store)
     constexpr uint32_t block_size = 256;
     constexpr uint32_t grid_size = 128;
     constexpr uint32_t size = block_size * grid_size;
+	CHECK_SIZE_ENABLEMENT(static_cast<size_t>(size));
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -421,6 +424,7 @@ TYPED_TEST(HipcubThreadOperationTests, IterateStore)
     constexpr uint32_t grid_size  = 128;
     constexpr uint32_t ipt        = 4;
     constexpr uint32_t size       = block_size * grid_size * ipt;
+	CHECK_SIZE_ENABLEMENT(static_cast<size_t>(size));
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -502,6 +506,8 @@ TYPED_TEST(HipcubThreadOperationTests, Reduction)
     constexpr uint32_t block_size = 128 / length;
     constexpr uint32_t grid_size = 128;
     constexpr uint32_t size = block_size * grid_size * length;
+	CHECK_SIZE_ENABLEMENT(static_cast<size_t>(size));
+	
     sum_op operation;
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -599,6 +605,8 @@ TYPED_TEST(HipcubThreadOperationTests, Scan)
     constexpr uint32_t block_size = 128 / length;
     constexpr uint32_t grid_size = 128;
     constexpr uint32_t size = block_size * grid_size * length;
+	CHECK_SIZE_ENABLEMENT(static_cast<size_t>(size));
+	
     sum_op operation;
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -713,6 +721,7 @@ TYPED_TEST(HipcubThreadOperationTests, Bounds)
         T val = test_utils::convert_to_device<T>(test_utils::get_random_value(2, 100, seed_value));
 
         uint32_t size = block_size * grid_size * num_items;
+		CHECK_SIZE_ENABLEMENT_WITH_CONTINUE(static_cast<size_t>(size));
 
         // Generate data
         std::vector<T> input = test_utils::get_random_data<T>(size, 2, 100, seed_value);

@@ -176,7 +176,7 @@ struct SinglePassScanParams
 };
 
 template<class Params>
-class HipcubSinglePassScanTest : public ::testing::Test
+class HipcubSinglePassScanTest : public test_controller::ControlledTest<>
 {
 public:
     using params = Params;
@@ -205,7 +205,7 @@ TYPED_TEST_SUITE(HipcubSinglePassScanTest, HipcubSinglePassScanTestParams);
 TYPED_TEST(HipcubSinglePassScanTest, IntSum)
 {
     // We want to test multiple number of tiles
-    const std::vector<int> num_tiles_to_test = {1, 2, 63, 64, 65};
+    std::vector<size_t> num_tiles_to_test = {1, 2, 63, 64, 65};
 
     // Get the type to test
     using value_type      = typename TestFixture::params::type;
@@ -216,7 +216,7 @@ TYPED_TEST(HipcubSinglePassScanTest, IntSum)
     // and template instantiation.
     SinglePassScanRunner<value_type, scan_tile_state, HIPCUB_WARP_SIZE_64, scan_op> runner{};
 
-    for(const auto num_tiles : num_tiles_to_test)
+    for(const auto num_tiles : CHECK_SIZE_FILTERS(num_tiles_to_test))
     {
         for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
@@ -299,7 +299,7 @@ struct RunningPrefixParams
 };
 
 template<class Params>
-class HipcubRunningPrefixTest : public ::testing::Test
+class HipcubRunningPrefixTest : public test_controller::ControlledTest<>
 {
 public:
     using params = Params;
