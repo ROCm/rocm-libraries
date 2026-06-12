@@ -434,6 +434,9 @@ TEST(CPU_CkImplLoader_NONE, IsDeterministicSplitKValid)
     // Deterministic mode with parse failures: invalid
     EXPECT_FALSE(IsDeterministicSplitKValid("Kernel+abc", true));
     EXPECT_FALSE(IsDeterministicSplitKValid("Kernel+", true));
+
+    // Intentional failure to test gtest summary reporting
+    EXPECT_TRUE(false) << "Deliberate failure: testing gtest failure summary in CI";
 }
 
 // -- Error infrastructure tests (CPU, no GPU required) ------------------------
