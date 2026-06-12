@@ -81,8 +81,6 @@ class ConstValues():
   initSgprValue:int = 0x0  # Value to use for Sgpr Init, if enabled
   initVgprValue:int = 0xFFFFFFFF  # Value to use for Vgpr Init, if enabled
 
-  maxOccupancy: int = 10
-
   ldsOOB: int       = 0xF00000
 
 @dataclass
@@ -460,7 +458,6 @@ class CodeModules:
   perIterGlobalRead: Optional[List[Module]]                           = None
   perIterLocalWrite: Optional[List[Tuple[List[int], Module]]]         = None
   perIterLocalWriteCodeNGLL: Optional[List[Tuple[List[int], Module]]] = None
-  clusterBarrier: Optional[List[Module]]                              = None
 
 @dataclass
 class ExternClasses:
@@ -657,9 +654,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if skipGlobalReadInc:
       globalReadIncACode  = Module()
       globalReadIncBCode  = Module()
-
-    if kernel["ClusterBarrier"]:
-      self.codes.clusterBarrier = [ Module() for i in range (kernel["LoopIters"]) ]
 
     siaComponent = Component.SIA.find(self)
     if siaComponent:
@@ -870,8 +864,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     globalReadCode       = deepcopy(self.codes.perIterGlobalRead[iteration])
     localWriteCodeCounts = self.codes.perIterLocalWrite[iteration][0]
     localWriteCode       = self.codes.perIterLocalWrite[iteration][1]
-    if kernel["ClusterBarrier"]:
-      clusterBarrierCode   = self.codes.clusterBarrier[iteration]
     isBarrier            = kernel["LoopIters"] - self.states.numItersPLR
     if self.states.doFullPackCodePrefetch and kernel["ForceUnrollSubIter"]:
       # hack for doFullPackCodePrefetch and SubIter
@@ -888,8 +880,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["HalfPLR"]:
         assert len(packCode.flatitems()) == 0, "Pack code should be empty for half PLR case"
         if kernel["PrefetchGlobalRead"] < 2: 
-          if kernel["ClusterBarrier"]:
-            iterCode.add(clusterBarrierCode)
           iterCode.add(globalReadCode)
         iterCode.add(waitLWCode)
         iterCode.add(syncCode)
@@ -917,9 +907,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           macItems = []
         iterCode.add(pointerLWCode)
         iterCode.add(pointerLRCode)
-        if kernel["PrefetchGlobalRead"] >= 2:
-          if kernel["ClusterBarrier"]:
-            iterCode.add(clusterBarrierCode)
+        if kernel["PrefetchGlobalRead"] >= 2: 
           iterCode.add(globalReadCode)
         # add rest of the mac here
         iterCode.addItems(macItems)
@@ -935,20 +923,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # self-wave WAR (ds_load vs tensor_load_to_lds/DTL on the same buffer).
           if not self.states.numItersPLR and kernel["NoLdsWriteCode"]:
             iterCode.add(waitCode)
-            if kernel["ClusterBarrier"]:
-              iterCode.add(clusterBarrierCode)
             iterCode.add(globalReadCode)
           else:
-            if kernel["ClusterBarrier"]:
-              iterCode.add(clusterBarrierCode)
             iterCode.add(globalReadCode)
             iterCode.add(waitCode)
           # iterCode.add(packPreCode)
           iterCode.add(packCode)
           iterCode.add(macIterCode)
         else:
-          if kernel["ClusterBarrier"]:
-            iterCode.add(clusterBarrierCode)
           iterCode.add(globalReadCode)
           iterCode.add(waitLWCode)
           iterCode.add(syncCode)
@@ -1112,7 +1094,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               curPackIdx += 1
         if i == 0:
           if not packItems:
-            tmpVgpr = self.vgprPool.checkOut(1)
+            tmpVgpr = self.vgprPool.checkOut(1, tag="_makeSubIterSchedule_tmpVgpr")
             iterCode.add(VMovB32(dst=vgpr(tmpVgpr), src="0x0", comment="valu operation to have different priority"))
             self.vgprPool.checkIn(tmpVgpr)
           iterCode.add(SSetPrior(prior=3, comment="Raise priority while processing macs"))
@@ -2686,9 +2668,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.addComment1("global read addresses: tile offset assignment b")
         module.add(self.graTileAssignment(kernel, tensorParametersB))
 
-      if kernel["ClusterBarrier"]:
-        module.add(self.clusterBarrierPreSignal(kernel))
-
       # Unroll assignment A(MXSA)
       if not tdmA:
         module.addComment1("global read addresses: unroll assignment a")
@@ -2989,9 +2968,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
         moduleTmp = self.directToLdsM0Update(kernel, 0, tensorParameters1st)
         module.add(replaceHolder(moduleTmp, 0))
 
-        if kernel["ClusterBarrier"]:
-          module.add(SBarrier(True, True, True, "cluster_barrier wait"))
-
         module.add(self.globalReadDo(kernel, 0, tensorParameters1st, tPM=tPM))
         if "MX" in tensorParameters1st:
           moduleTmp = self.directToLdsM0Update(kernel, 0, tensorParameters1st["MX"], skipWait=True)
@@ -3090,8 +3066,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if isNGLL:
       self.codes.perIterGlobalRead = [ Module() for i in range (kernel["LoopIters"]) ]
-      if kernel["ClusterBarrier"]:
-        self.codes.clusterBarrier = [ Module() for i in range (kernel["LoopIters"]) ]
 
     for uIdx in range(0, kernel["LoopIters"]):
       u = uIdx % kernel["LoopIters"]    #   u: index in compute loop (in contrast to the notion of global read loop)
@@ -3990,10 +3964,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self.codes.localWriteB = Module()
 
         if not unrollLoopHeaderCodeScheduled:
-          if kernel["PrefetchGlobalRead"] != 2 and kernel["ClusterBarrier"]:
-            module.add(SBarrier(comment="sync within cluster before cluster barrier"))
-            module.add(SBarrier(True, True, True, "cluster_barrier wait"))
-            module.add(self.clusterBarrierPreSignal(kernel))
           self.makeSchedule(kernel, tensorParametersA, tensorParametersB, localWriteEndIter, firstIter=firstIter, lastLoop=False, lastLc=(lc==loopCopies-1))
           module.add(self.codes.unrollLoopHeader)
 
@@ -4228,11 +4198,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
             LRCodeBAllIters[uIdx].add(localReadCodeB)
             PackCodeBAllIters[uIdx].add(packPreB)
             PackCodeBAllIters[uIdx].add(packCodeB)
-
-        if kernel["ClusterBarrier"] and u == 0 and kernel["PrefetchGlobalRead"] == 2:
-          self.codes.clusterBarrier[u].add(SBarrier(comment="sync within cluster before cluster barrier"))
-          self.codes.clusterBarrier[u].add(SBarrier(True, True, True, "cluster_barrier wait"))
-          self.codes.clusterBarrier[u].add(self.clusterBarrierPreSignal(kernel))
 
         # Don't increment the LRO if we are going to reset them below:
         if not isResetLroIter or iui != kernel["InnerUnroll"]-1:
@@ -4470,8 +4435,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   def createNegIdentityMatrix(self, kernel):
     module = Module("NegIdentityMatrix")
-    tmp = self.vgprPool.checkOut(1)
-    lane4 = self.vgprPool.checkOut(1)
+    tmp = self.vgprPool.checkOut(1, tag="createNegIdentityMatrix_tmpVgpr")
+    lane4 = self.vgprPool.checkOut(1, tag="createNegIdentityMatrix_lane4")
     mfmaHigh = vgpr(self.states.startVgprIdentityMatrix)
     mfmaLow = vgpr(self.states.startVgprIdentityMatrix+1)
 
@@ -4716,7 +4681,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["UseSubtileImpl"] and kernel["MIArchVgpr"] and self._subtileDtileBaseVgpr is not None:
         self.states.c.startVgprValu = self._subtileDtileBaseVgpr
       else:
-        self.states.c.startVgprValu = self.vgprPool.checkOutAligned(1, 4)
+        self.states.c.startVgprValu = self.vgprPool.checkOutAligned(1, 4, tag="postLoop_startVgprValu")
 
       module.addComment0("ValuC range: [%u-%u), %s"%(self.states.c.startVgprValu, self.states.c.startVgprValu+self.states.c.numVgprValu, \
                              "serializedStore enabled" if self.states.serializedStore else ""))
@@ -4768,7 +4733,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(loopComponent.closePersistentLoop(self, kernel))
       # After persistent loop exits, skip over all deferred blocks
       kernelEndLabel = Label("KernelEnd", "")
-      with self.allocTmpSgpr(3) as tmpSgprInfo:
+      with self.allocTmpSgpr(3, tag="kernelBodySubtile_tmpSgprInfo") as tmpSgprInfo:
         module.add(SLongBranchPositive(kernelEndLabel, tmpSgprInfo, comment="persistent loop done, skip deferred blocks"))
       module.addComment0("#" * 60)
       module.addComment0("#" * 60)
@@ -5113,8 +5078,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(self._syncThreads(kernel, "LW to PLR, sync"))
 
         usePLRPack = self.states.doFullPackCodePrefetch or (kernel["UseCustomMainLoopSchedule"] and kernel["UsePLRPack"])
-      if kernel["ClusterBarrier"]:
-        module.add(self.clusterBarrierPreSignal(kernel, True))
 
       # prefetch-local
       if self.states.numItersPLR:
@@ -6149,6 +6112,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
     passResult = rocIsaPass(moduleKernelBody, ripo)
     kernel["MathClocksUnrolledLoop"] = passResult.cycles
 
+    # Post-rocIsaPass: rescan actual register usage and update kernel descriptor
+    # + CUOccupancy for ArchAccUnifiedRegs ISAs where removeDuplicateAssignment
+    # may have reduced the instruction-level VGPR count below the pool estimate.
+    self.updateOccupancyFromScan(kernel, moduleKernelBody)
+
     # Initialize stModule as None (will be set for supported architectures)
     stModule = None
 
@@ -6186,6 +6154,21 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                "UseSgprForGRO": kernel["_UseSgprForGRO"],
                                # -1 disables SwInstructionPrefetch in Gfx1250Backend; else scratch pool index
                                "SwPrefetchScratchSgpr": int(self.sgprs.get("SwPrefetchScratch", -1)),
+                               # Cluster-barrier handshake insertion in Gfx1250Backend
+                               # (kernel-scope at every OptLevel when set).
+                               "ClusterBarrier": bool(kernel.get("ClusterBarrier", False)),
+                               # PrefetchGlobalRead (PGR) passed to InsertClusterBarrierPass.
+                               # Gates Rule 3 (`LCL <= PGR` skip) and Rule 4 (`LCL == PGR+1`
+                               # skip in fresh-gate mode; inherits upstream `LCL == PGR` cmp
+                               # in inherited-SCC mode). Rule 1 uses `LCL == 0`, not PGR.
+                               # Defaults to 1 when unset.
+                               "PrefetchGlobalRead": int(kernel.get("PrefetchGlobalRead", 1)),
+                               # PrefetchLocalRead (PLR) passed to InsertClusterBarrierPass.
+                               # When PLR == 0, enables Rule 3 anchor mode (b): if no
+                               # `s_barrier_wait -1` precedes `label_openLoopL:`, synthesize
+                               # a workgroup sync inside the LCL-gated signal block.
+                               # Defaults to 1 (fallback off) when unset.
+                               "PrefetchLocalRead": int(kernel.get("PrefetchLocalRead", 1)),
                               }
 
       print2(f"StinkyTofu module options: {stinky_module_options}")
@@ -8659,7 +8642,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       # Safe guard for preload arguments
       while(1):
-        tmpSgpr = self.sgprPool.checkOut(1, preventOverflow=False)
+        tmpSgpr = self.sgprPool.checkOut(1, tag="preloadGuard_tmpSgpr", preventOverflow=False)
         if tmpSgpr >= self.states.archCaps["MaxSgprPreload"]:
           self.sgprPool.checkIn(tmpSgpr)
           break
@@ -9257,6 +9240,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def removeGROffsetsVariableSgprsFromPool(self, kernel):
     return ""
+
+  def updateOccupancyFromScan(self, kernel, mkb) -> None:
+    """Override in KernelWriterAssembly to rescan actual register usage after
+    rocIsaPass optimizations and correct kernel["CUOccupancy"] + the kernel
+    descriptor's next_free_vgpr for ArchAccUnifiedRegs ISAs."""
+    pass
 
   ##############################################################################
   # Check Resources
@@ -10031,25 +10020,25 @@ class KernelWriter(metaclass=abc.ABCMeta):
       _placeholder.name = "Branch_%s"%_target.getLabelName()
       if _operation == "SCBranchSCC0":
         if currentInstLength - count + 1 >= self.states.asmCaps["ShortBranchMaxLength"]:
-          with self.allocTmpSgpr(3) as tmpSgprInfo:
+          with self.allocTmpSgpr(3, tag="updateBranchPlaceHolder_tmpSgprInfo") as tmpSgprInfo:
               _placeholder.add(self.longBranchScc0(_target, 1, tmpSgprInfo))
         else:
           _placeholder.add(SCBranchSCC0(labelName=_target.getLabelName()))
       elif _operation == "SCBranchSCC1":
         if currentInstLength - count + 1 >= self.states.asmCaps["ShortBranchMaxLength"]:
-          with self.allocTmpSgpr(3) as tmpSgprInfo:
+          with self.allocTmpSgpr(3, tag="updateBranchPlaceHolder_tmpSgprInfo2") as tmpSgprInfo:
               _placeholder.add(self.longBranchScc1(_target, 1, tmpSgprInfo))
         else:
           _placeholder.add(SCBranchSCC1(labelName=_target.getLabelName()))
       elif _operation == "SCBranchVCCNZ":
         if currentInstLength - count + 1 >= self.states.asmCaps["ShortBranchMaxLength"]:
-          with self.allocTmpSgpr(3) as tmpSgprInfo:
+          with self.allocTmpSgpr(3, tag="updateBranchPlaceHolder_tmpSgprInfo3") as tmpSgprInfo:
               _placeholder.add(self.longBranchVccnz(_target, 1, tmpSgprInfo))
         else:
           _placeholder.add(SCBranchVCCNZ(labelName=_target.getLabelName()))
       elif _operation == "SBranch":
         if currentInstLength - count + 1 >= self.states.asmCaps["ShortBranchMaxLength"]:
-          with self.allocTmpSgpr(3) as tmpSgprInfo:
+          with self.allocTmpSgpr(3, tag="updateBranchPlaceHolder_tmpSgprInfo4") as tmpSgprInfo:
             _placeholder.add(SLongBranchPositive(_target, tmpSgprInfo))
         else:
           _placeholder.add(SBranch(labelName=_target.getLabelName()))

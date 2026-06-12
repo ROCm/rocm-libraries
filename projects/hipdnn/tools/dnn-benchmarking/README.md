@@ -7,7 +7,11 @@ Benchmarking and validation tool for hipDNN graphs.
 > **Caution**: This tool is in early development and subject to change.
 > Do not use it in build workflows or CI pipelines.
 
-This tool loads serialized hipDNN graphs, executes them via installed hipDNN engine plugins, and captures performance metrics. PyTorch is optional but strongly recommended: when installed (ROCm or CUDA build) it provides GPU kernel-event timing and `torch.cuda.synchronize()` for accurate E2E timing. Without it, host-side E2E timings are still reported but may not capture full GPU execution.
+This tool loads serialized hipDNN graphs, executes them via installed hipDNN
+engine plugins, and captures performance metrics. GPU kernel timing and
+synchronized E2E timing use direct HIP runtime events exposed by
+`hipdnn_frontend`; PyTorch is only needed for the optional PyTorch executor and
+reference validation.
 
 ## Requirements
 
@@ -15,7 +19,10 @@ This tool loads serialized hipDNN graphs, executes them via installed hipDNN eng
 - numpy
 - hipdnn_frontend (installed hipDNN Python bindings)
 - AMD GPU with ROCm + hipDNN provider plugins for the graphs under test
-- PyTorch *(optional)* — ROCm or CUDA build enables GPU kernel-event timing, the `--backend pytorch` executor, and the `--validate pytorch` reference provider. Not listed in `pyproject.toml` because it must come from the ROCm/CUDA nightly index.
+- PyTorch *(optional)* — any usable PyTorch build enables the `--validate pytorch`
+  reference provider. A ROCm PyTorch build additionally enables the
+  `--backend pytorch` GPU executor. Not listed in `pyproject.toml` because torch
+  package selection depends on the target environment.
 
 ## Installation
 
@@ -69,24 +76,26 @@ bash setup.sh --torch-mode cpu --rocm-prefix /opt/rocm
 source /workspace/.venv/bin/activate
 ```
 
-CPU-only torch never enables PyTorch GPU kernel timing or the PyTorch GPU
-backend; those paths still require a ROCm/CUDA-enabled torch build and a
-visible GPU.
+CPU-only torch never enables the PyTorch execution backend; GPU execution paths still
+require a ROCm-enabled torch build and a visible GPU. Timing still comes from
+the HIP APIs bound through `hipdnn_frontend`, not from torch.
 
 Use `--torch-mode existing` to reuse torch already installed in the target
 virtual environment. Existing ROCm torch uses its bundled ROCm SDK libraries;
 existing CPU/non-ROCm torch builds the hipDNN bindings against `--rocm-prefix`,
 `$ROCM_PATH`, or `/opt/rocm`.
 
-### CUDA Setup
+### Non-ROCm PyTorch
 
-```bash
-pip install torch --index-url https://download.pytorch.org/whl/cu124
-pip install -e .
-```
+Direct HIP timing requires ROCm HIP runtime libraries and the hipDNN frontend
+bindings. Non-ROCm PyTorch wheels can be used only for CPU reference validation;
+they do not enable GPU benchmarking in this tool.
 
-**Note**: hipDNN Python bindings (`hipdnn_frontend`) must be installed separately for hipDNN benchmarking.
-**Note**: PyTorch is optional. Without it the tool still runs and reports host-side E2E timings (may not capture full GPU execution); CPU-only PyTorch enables `--validate pytorch` reference computation, while ROCm/CUDA PyTorch also enables GPU kernel-event timings, accurate E2E via `torch.cuda.synchronize()`, and `--backend pytorch`.
+**Note**: hipDNN Python bindings (`hipdnn_frontend`) must be installed separately
+for hipDNN benchmarking.
+**Note**: PyTorch is optional. CPU-only PyTorch enables `--validate pytorch`
+reference computation; ROCm PyTorch also enables `--backend pytorch`. GPU timing
+and E2E synchronization always use direct HIP APIs from `hipdnn_frontend`.
 
 ## Usage
 

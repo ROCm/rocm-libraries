@@ -132,12 +132,12 @@ def _emitGROffset_TLU0(tag, tile, ti, writer, kernel):
   numRowsPerWave    = wavesize // blockSize
   numRowsPerLDSBanks = ldsRowBankSize // subIterKBytes
 
-  tmpVgpr = writer.vgprPool.checkOut(4)
+  tmpVgpr = writer.vgprPool.checkOut(4, tag="_emitGROffset_TLU0_tmpVgpr")
   colId     = tmpVgpr
   rowId     = tmpVgpr + 1
   waveId    = tmpVgpr + 2
   localRow  = tmpVgpr + 3
-  tmpSgpr   = writer.sgprPool.checkOut(1, preventOverflow=False)
+  tmpSgpr   = writer.sgprPool.checkOut(1, tag="_emitGROffset_TLU0_tmpSgpr", preventOverflow=False)
 
   # --- 1. waveId, laneId, colId, rowId ---
   module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(wavesize.bit_length()-1),
@@ -150,7 +150,7 @@ def _emitGROffset_TLU0(tag, tile, ti, writer, kernel):
              src=vgpr(localRow), comment=f"{tc}: rowId within wave"))
 
   # --- 2. Swizzle: DPP quad_perm swap colId pairs on even LDS rows ---
-  tmpSwz = writer.vgprPool.checkOut(2)
+  tmpSwz = writer.vgprPool.checkOut(2, tag="_emitGROffset_TLU0_tmpSwz")
   ldsRowId     = tmpSwz
   swzTmp       = tmpSwz + 1
 
@@ -177,7 +177,7 @@ def _emitGROffset_TLU0(tag, tile, ti, writer, kernel):
 
   # --- 4. Inter-wave rotation (when waves cooperate on a subtile) ---
   if waves_coop > 1:
-    waveRotation = writer.vgprPool.checkOut(1)
+    waveRotation = writer.vgprPool.checkOut(1, tag="_emitGROffset_TLU0_waveRotation")
     module.addComment0(f"{tc}: Inter-wave rotation")
     module.add(VAndB32(dst=vgpr(waveRotation), src0=vgpr(waveId), src1=hex(1)))
     module.add(VLShiftLeftB32(dst=vgpr(waveRotation),
@@ -193,7 +193,7 @@ def _emitGROffset_TLU0(tag, tile, ti, writer, kernel):
   writer.vgprPool.checkIn(tmpSwz)
 
   # --- 5. Unified wave partition ---
-  rowOffset = writer.vgprPool.checkOut(1)
+  rowOffset = writer.vgprPool.checkOut(1, tag="_emitGROffset_TLU0_rowOffset")
   partitionStride = ti.mmaTileShape[0] * int(ti.localSubtileGrid[0])
   waves_coop_shift = max(0, waves_coop.bit_length() - 1) if waves_coop > 0 else 0
   module.add(VAndB32(dst=vgpr(localRow), src0=hex(waves_coop - 1), src1=vgpr(waveId),
@@ -212,13 +212,13 @@ def _emitGROffset_TLU0(tag, tile, ti, writer, kernel):
              comment=f"{tc}: + lane rowId"))
 
   # --- 6. Compute byte offsets for each GR load ---
-  tmpVgpr2 = writer.vgprPool.checkOut(2)
+  tmpVgpr2 = writer.vgprPool.checkOut(2, tag="_emitGROffset_TLU0_tmpVgpr2")
   colBytes = tmpVgpr2 + 1
   for i in range(ti.numGRPerSubtile):
     useColId = colId
     # For numGRPerSubtile > 1 with single-wave subtiles: rotate colId between loads
     if i > 0 and waves_coop == 1 and ti.numGRPerSubtile > 1:
-      rotatedCol = writer.vgprPool.checkOut(1)
+      rotatedCol = writer.vgprPool.checkOut(1, tag="_emitGROffset_TLU0_rotatedCol")
       colRotation = blockSize // 2
       module.add(VAddU32(dst=vgpr(rotatedCol), src0=colRotation, src1=vgpr(colId),
                  comment=f"{tc}: rotate col for GR {i}"))
@@ -257,7 +257,7 @@ def _emitGROffset_TLU0(tag, tile, ti, writer, kernel):
       module.add(SMulI32(dst=rl.ref(0), src0=hex(s_stride_bpe * reg_idx),
                  src1=sgpr(strideRef), comment=f"{tc}: subtile row {reg_idx} soffset"))
     else:
-      stmp = writer.sgprPool.checkOut(1)
+      stmp = writer.sgprPool.checkOut(1, tag="_emitGROffset_TLU0_stmp")
       for i, reg in enumerate(rl):
         module.add(SMulI32(dst=sgpr(stmp), src0=hex(s_stride_bpe * reg_idx),
                    src1=sgpr(strideRef), comment=f"{tc}: subtile row {reg_idx} soffset"))
@@ -305,7 +305,7 @@ def _allocGROffsetRegs_TLU0(tag, tile, ti, writer, kernel):
   # Per-lane byte offsets: one VGPR per GR load within a subtile
   tile.sharedVgprGROffset = []
   for i in range(ti.numGRPerSubtile):
-    tile.sharedVgprGROffset.append(writer.vgprPool.checkOut(1))
+    tile.sharedVgprGROffset.append(writer.vgprPool.checkOut(1, tag="_allocGROffsetRegs_TLU0_sharedVgprGROffset"))
 
   # Per-subtile-row soffset registers.
   # perpDimSize = how many GR subtile shapes tile the perpendicular (M) dimension
@@ -450,8 +450,8 @@ def _emitDTLInit_TLU0(tag, tile, ti, writer, kernel):
   numWaves = ti.numWaves
   waves_coop = numWaves // wg_m
 
-  vgprWaveId = writer.vgprPool.checkOut(1)
-  rowOffset  = writer.vgprPool.checkOut(1)
+  vgprWaveId = writer.vgprPool.checkOut(1, tag="_emitDTLInit_TLU0_vgprWaveId")
+  rowOffset  = writer.vgprPool.checkOut(1, tag="_emitDTLInit_TLU0_rowOffset")
 
   module.add(VLShiftRightB32(dst=vgpr(vgprWaveId), shiftHex=hex(wavesize.bit_length()-1),
              src=vgpr("Serial"), comment=f"{tc}: waveId"))
@@ -463,7 +463,7 @@ def _emitDTLInit_TLU0(tag, tile, ti, writer, kernel):
 
   module.add(VLShiftRightB32(dst=vgpr(rowOffset), shiftHex=hex(waves_coop_shift),
              src=vgpr(vgprWaveId), comment=f"{tc}: partitionRow = waveId // {waves_coop}"))
-  tmpSgpr = writer.sgprPool.checkOut(1, preventOverflow=False)
+  tmpSgpr = writer.sgprPool.checkOut(1, tag="_emitDTLInit_TLU0_tmpSgpr", preventOverflow=False)
   module.add(SMovB32(dst=sgpr(tmpSgpr), src=partitionStride))
   module.add(VMulLOU32(dst=vgpr(rowOffset), src0=sgpr(tmpSgpr), src1=vgpr(rowOffset),
              comment=f"{tc}: partition row offset"))
@@ -566,7 +566,7 @@ def _grComputeOffset(module, writer, tileInfo, colId, rowId, output):
   tc = tileInfo.tc
   bpeBits = int(8*tileInfo.bpe)
 
-  tmpVgpr = writer.vgprPool.checkOut(2)
+  tmpVgpr = writer.vgprPool.checkOut(2, tag="_grComputeOffset_tmpVgpr")
   colBytes = tmpVgpr + 1
   loadWidth = tileInfo.loadWidthGR
 
@@ -599,7 +599,7 @@ def _grComputeSubtileOffsets(writer, module, tileInfo):
       if rl.is_sgpr:
         module.add(SMulI32(dst=sgpr(reg), src0=hex(s_stride * regId), src1=sgpr(strideRef), comment="%s: %u rows offset, stride %u, %u"%(tc, rowOffset, s_stride, regId)))
       else:
-        stmp = writer.sgprPool.checkOut(1)
+        stmp = writer.sgprPool.checkOut(1, tag="_grComputeSubtileOffsets_stmp")
         module.add(SMulI32(dst=sgpr(stmp), src0=hex(s_stride * regId), src1=sgpr(strideRef), comment="%s: %u rows offset, stride %u, %u"%(tc, rowOffset, s_stride, regId)))
         module.add(VAddU32(dst=vgpr(reg), src0=vgpr(tileInfo.sharedVgprGROffset[i]), src1=sgpr(stmp)))
         writer.sgprPool.checkIn(stmp)
@@ -612,8 +612,8 @@ def _grComputeRowPartition(module, kernel, writer, tileInfo, waveId, rowOffset):
   loadWidth = tileInfo.loadWidthGR
   numRowsPerWave = wavesize // (subIterKBytes // loadWidth)
   tc = tileInfo.tc
-  tmpVgpr = writer.vgprPool.checkOut(2)
-  tmpSgpr = writer.sgprPool.checkOut(1, preventOverflow=False)
+  tmpVgpr = writer.vgprPool.checkOut(2, tag="_grComputeRowPartition_tmpVgpr")
+  tmpSgpr = writer.sgprPool.checkOut(1, tag="_grComputeRowPartition_tmpSgpr", preventOverflow=False)
   localRow = tmpVgpr
   partitionRow = tmpVgpr+1
   partitionOffset = tileInfo.mmaTileShape[0]*tileInfo.localSubtileGrid[0]
@@ -651,7 +651,7 @@ def _grComputeAllOffsets(module, writer, tileInfo, colId, rowId, rowOffset):
     module.add(VAddU32(dst=vgpr(rowOffset), src0=offset, src1=vgpr(rowOffset), comment="%s: advance row for GR offset %u"%(tileInfo.tc, i)))
 
     # Apply Rotation on entire wave. Only applies to 4x case as a subtile is loaded by a single wave in 2 steps. (waveId rotation not applied)
-    rotatedcolId = writer.vgprPool.checkOut(1)
+    rotatedcolId = writer.vgprPool.checkOut(1, tag="_grComputeAllOffsets_rotatedcolId")
     loadWidth = tileInfo.loadWidthGR
     if tileInfo.loadRatioGR == 0.5:
       blockSize = tileInfo.subIterKBytes // loadWidth
@@ -688,7 +688,7 @@ def graTileAssignment(writer, kernel, useSwizzling=True):
 def _grComputeOffset_legacy(module, writer, tileInfo, colId, rowId, output):
   tc = tileInfo.tc
   bpeBits = int(8*tileInfo.bpe)
-  tmpVgpr = writer.vgprPool.checkOut(2)
+  tmpVgpr = writer.vgprPool.checkOut(2, tag="_grComputeOffset_legacy_tmpVgpr")
   colBytes = tmpVgpr + 1
   loadWidth = tileInfo.loadWidthGR
   module.add(VLShiftLeftB32(dst=vgpr(colBytes), shiftHex=hex(loadWidth.bit_length()-1), src=vgpr(colId), comment="scale col_id by load_width"))
@@ -711,7 +711,7 @@ def _grComputeSubtileOffsets_legacy(writer, module, tileInfo):
       if rl.is_sgpr:
         module.add(SMulI32(dst=sgpr(reg), src0=hex(s_stride * regId), src1=sgpr(strideRef), comment="%s: %u rows offset, stride %u, %u"%(tc, rowOffset, s_stride, regId)))
       else:
-        stmp = writer.sgprPool.checkOut(1)
+        stmp = writer.sgprPool.checkOut(1, tag="_grComputeSubtileOffsets_legacy_stmp")
         module.add(SMulI32(dst=sgpr(stmp), src0=hex(s_stride * regId), src1=sgpr(strideRef), comment="%s: %u rows offset, stride %u, %u"%(tc, rowOffset, s_stride, regId)))
         module.add(VAddU32(dst=vgpr(reg), src0=vgpr(tileInfo.sharedVgprGROffset[i]), src1=sgpr(stmp)))
         writer.sgprPool.checkIn(stmp)
@@ -722,8 +722,8 @@ def _grComputeRowPartition_legacy(module, kernel, writer, tileInfo, waveId, rowO
   loadWidth = tileInfo.loadWidthGR
   numRowsPerWave = wavesize // (subIterKBytes // loadWidth)
   tc = tileInfo.tc
-  tmpVgpr = writer.vgprPool.checkOut(2)
-  tmpSgpr = writer.sgprPool.checkOut(1, preventOverflow=False)
+  tmpVgpr = writer.vgprPool.checkOut(2, tag="_grComputeRowPartition_legacy_tmpVgpr")
+  tmpSgpr = writer.sgprPool.checkOut(1, tag="_grComputeRowPartition_legacy_tmpSgpr", preventOverflow=False)
   localRow = tmpVgpr
   partitionRow = tmpVgpr+1
   partitionOffset = tileInfo.mmaTileShape[0]*tileInfo.localSubtileGrid[0]
@@ -752,11 +752,11 @@ def _grComputeAllOffsets_legacy(module, writer, tileInfo, colId, rowId, rowOffse
     subtileSize = tileInfo.subtileShape[0] * tileInfo.mmaTileShape[0]
     offset = math.ceil(subtileSize * tileInfo.loadRatioGR)
     module.add(VAddU32(dst=vgpr(rowOffset), src0=offset, src1=vgpr(rowOffset), comment="%s: advance row for GR offset %u"%(tileInfo.tc, i)))
-    rotatedcolId = writer.vgprPool.checkOut(1)
+    rotatedcolId = writer.vgprPool.checkOut(1, tag="_grComputeAllOffsets_legacy_rotatedcolId")
     loadWidth = tileInfo.loadWidthGR
     if tileInfo.loadRatioGR == 0.5:
       if tileInfo.bpe == 1:  # FP8: intra-block K_group +2 rotation, preserving block bit
-        tmpBlock = writer.vgprPool.checkOut(1)
+        tmpBlock = writer.vgprPool.checkOut(1, tag="_grComputeAllOffsets_legacy_tmpBlock")
         module.add(VAndB32(dst=vgpr(tmpBlock), src0=vgpr(colId), src1=hex(4), comment="%s: block_bit = colId & 4"%tileInfo.tc))
         module.add(VAndB32(dst=vgpr(rotatedcolId), src0=vgpr(colId), src1=hex(3), comment="%s: K_group = colId & 3"%tileInfo.tc))
         module.add(VAddU32(dst=vgpr(rotatedcolId), src0=vgpr(rotatedcolId), src1=hex(2), comment="%s: K_group + 2"%tileInfo.tc))
@@ -775,7 +775,7 @@ def _grComputeAllOffsets_legacy(module, writer, tileInfo, colId, rowId, rowOffse
 
 def _grSwizzleColIds_legacy(module, writer, tileInfoA, tileInfoB, blockSize, numRowsPerLDSBanks,
                             laneId, colIdA, colIdB, waveId):
-  tmpVgpr = writer.vgprPool.checkOut(3)
+  tmpVgpr = writer.vgprPool.checkOut(3, tag="_grSwizzleColIds_legacy_tmpVgpr")
   ldsRowId = tmpVgpr
   tmp = tmpVgpr + 1
   waveRotation = tmpVgpr + 2
@@ -836,7 +836,7 @@ def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
   assert subIterKBytes <= ldsRowBankSize
   blockSize = subIterKBytes // loadWidth
   numRowsPerLDSBanks = ldsRowBankSize // subIterKBytes
-  tmpVgpr = writer.vgprPool.checkOut(7)
+  tmpVgpr = writer.vgprPool.checkOut(7, tag="_graTileAssignment_legacy_tmpVgpr")
   colIdA = tmpVgpr
   colIdB = tmpVgpr + 1
   rowId = tmpVgpr + 2
@@ -949,10 +949,10 @@ def _globalReadDTLInitCommonSgpr_legacy(writer, kernel):
   tileInfoA = writer.states.a.tileInfo
   tileInfoB = writer.states.b.tileInfo
   wavesize = kernel["WavefrontSize"]
-  vgprWaveId = writer.vgprPool.checkOut(1)
+  vgprWaveId = writer.vgprPool.checkOut(1, tag="_globalReadDTLInitCommonSgpr_legacy_vgprWaveId")
   module.addComment0("Compute shared offsets used by m0 in DTL loads")
   module.add(VLShiftRightB32(dst=vgpr(vgprWaveId), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="Wave Id"))
-  tmpVgpr = writer.vgprPool.checkOut(2)
+  tmpVgpr = writer.vgprPool.checkOut(2, tag="_globalReadDTLInitCommonSgpr_legacy_tmpVgpr")
   rowOffsetA = tmpVgpr
   rowOffsetB = tmpVgpr + 1
   _grComputeRowPartition_legacy(module, kernel, writer, tileInfoA, vgprWaveId, rowOffsetA)

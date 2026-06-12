@@ -484,6 +484,7 @@ namespace TensileLite
                 config.attrs = attribute;
                 config.numAttrs = 1;
                 config.sharedMemBytes = kernel.sharedMemBytes;
+                config.hStream = stream;
 
                 const HIP_LAUNCH_CONFIG *pConfig = &config;
                 HIP_CHECK_RETURN_WITH_LOG(hipDrvLaunchKernelEx(pConfig,

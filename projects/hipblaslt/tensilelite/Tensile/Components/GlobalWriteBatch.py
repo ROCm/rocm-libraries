@@ -890,11 +890,11 @@ class GlobalWriteBatchWriter:
 
     if self.kernel["ProblemType"]["StochasticRounding"]:
       if self.parentWriter.states.asmCaps["v_prng_b32"]:
-        vgprRND = self.parentWriter.vgprPool.checkOut(1)
+        vgprRND = self.parentWriter.vgprPool.checkOut(1, tag="_emitNonatomicAdd_vgprRND")
       else:
         # legacy PRNG approach needs extra 2 VGPRs
         # Ref.: Module("StochasticRoundingCvt")
-        vgprRND = self.parentWriter.vgprPool.checkOut(3)
+        vgprRND = self.parentWriter.vgprPool.checkOut(3, tag="_emitNonatomicAdd_vgprRND2")
 
     module.addComment1("apply mask, calc new C and issue writes")
     # module.add(self.getBomb()) # can see store addresses just before the store inst
@@ -939,7 +939,7 @@ class GlobalWriteBatchWriter:
       module.add(VPermlane16SwapB32(dst=vgpr(vTmp), src=vgpr(vTmp), comment="lane XOR 16 swap"))
       # Exec mask: lanes where both XOR swaps changed the value (i.e., the 'first' half of each pair)
       # selects lanes 0-15 and 32-47 within the wave.
-      stmp = self.parentWriter.sgprPool.checkOutAligned(2,2)
+      stmp = self.parentWriter.sgprPool.checkOutAligned(2,2, tag="_emitNonatomicAdd_stmp")
       module.add(SMovB32(dst=sgpr(stmp), src="0x0000ffff", comment="select lanes 0-15, 32-47"))
       module.add(SMovB32(dst=sgpr(stmp+1), src="0xffff0000"))
       module.add(VCndMaskB32(dst=vgpr(vTmp), src0=vgpr(vTmp), src1=vgpr(vPermAddr), src2=sgpr(stmp,2), comment="restore original lane_id for selected lanes"))
@@ -2478,7 +2478,7 @@ class GlobalWriteBatchWriter:
         # single precision complex
         elif kernel["ProblemType"]["ComputeDataType"].isSingleComplex():
           newSumIdx = sumIdxV * 2 - self.parentWriter.states.c.startVgprValu
-          tmpVgpr = self.parentWriter.vgprPool.checkOut(1)
+          tmpVgpr = self.parentWriter.vgprPool.checkOut(1, tag="_applyAlpha_tmpVgpr")
           module.add(VMovB32(dst=vgpr(tmpVgpr), src=vgpr("ValuC+%u"%(newSumIdx)), comment="store Cr"))
           module.add(VMulF32(dst=vgpr("ValuC+%u"%(newSumIdx)), src0=sgpr("Alpha"), src1=vgpr("ValuC+%u"%(newSumIdx)), comment="*= alpha ( Cr = Ar * Cr)"))
           module.add(VMacF32(dst=vgpr("ValuC+%u"%(newSumIdx)), src0=(sgpr("Alpha+1").getMinus()), src1=vgpr("ValuC+%u"%(newSumIdx+1)), comment="*= alpha ( Cr += -Ai * Ci )"))
@@ -2496,8 +2496,8 @@ class GlobalWriteBatchWriter:
         # double precision complex
         elif kernel["ProblemType"]["ComputeDataType"].isDoubleComplex():
           newSumIdx = sumIdxV * 4 - self.parentWriter.states.c.startVgprValu
-          vtmp1 = self.parentWriter.vgprPool.checkOutAligned(2, 2)
-          vtmp2 = self.parentWriter.vgprPool.checkOutAligned(2, 2)
+          vtmp1 = self.parentWriter.vgprPool.checkOutAligned(2, 2, tag="_applyAlpha_vtmp1")
+          vtmp2 = self.parentWriter.vgprPool.checkOutAligned(2, 2, tag="_applyAlpha_vtmp2")
           # tmp1 = a.real * b.real (t1 = Ar*Cr)
           module.add(VMulF64(dst=vgpr(vtmp1,2), src0=sgpr("Alpha+0",2), src1=vgpr("ValuC+%u"%(newSumIdx+0),2)))
           # tmp2 = a.imag * b.real (t2 = Ai*Cr)

@@ -45,21 +45,27 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_strict)
 
 
-class DummyTorchTimer(GpuTimerInterface):
+class DummyHipTimer(GpuTimerInterface):
     """Minimal timer implementation for factory tests.
 
     This is a test fixture that can be used to mock GPU timing
     without requiring actual GPU hardware.
     """
 
+    def __init__(self, stream: int = 0) -> None:
+        self.stream = stream
+
     @property
     def backend_name(self) -> str:
-        return "torch"
+        return "hip"
 
     def start(self) -> None:
         pass
 
     def stop(self) -> None:
+        pass
+
+    def synchronize(self) -> None:
         pass
 
     def elapsed_ms(self) -> float:
