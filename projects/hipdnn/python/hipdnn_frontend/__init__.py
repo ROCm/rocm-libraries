@@ -121,4 +121,7 @@ __all__ = [
     "destroy_handle",
     "set_stream",
     "get_stream",
+    "HipEvent",
+    "hip_stream_synchronize",
+    "hip_get_device_count",
 ]

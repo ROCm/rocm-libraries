@@ -104,6 +104,13 @@ and :doc:`Performance database <../conceptual/perfdb>`.
       - | 1: Enable
         | 0 or unset: Disable
 
+    * - | ``MIOPEN_NAIVE_DISABLE_IF_ALT``
+        | Skips naive convolution solvers during find when at least one
+        | non-naive solver succeeds across any algorithm. Naive solvers
+        | are still used as a fallback when no non-naive solver succeeds.
+      - | 1 or unset: Enable (default)
+        | 0: Disable
+
     * - | ``MIOPEN_DEBUG_DISABLE_FIND_DB``
         | Disables FindDb functionality.
       - | 1: Disable FindDb
