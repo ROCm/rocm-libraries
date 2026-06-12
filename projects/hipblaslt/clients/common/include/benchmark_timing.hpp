@@ -124,15 +124,17 @@ namespace hipblaslt_bench
 
         // Whether the rel_iqr trajectory has flattened: the last `window` readings have a
         // relative standard deviation below `threshold`. A window < 2 has no spread to test.
-        inline bool noise_plateaued(const std::vector<double>& iqr_history, int window, double threshold)
+        inline bool
+            noise_plateaued(const std::vector<double>& iqr_history, int window, double threshold)
         {
             if(window < 2 || static_cast<int>(iqr_history.size()) < window)
                 return false;
             const std::vector<double> recent(iqr_history.end() - window, iqr_history.end());
-            const double mean = mean_of(recent);
+            const double              mean = mean_of(recent);
             if(mean <= 0.0)
                 return false;
-            const double rel_spread = std::sqrt(sum_sq_dev(recent, mean) / (recent.size() - 1)) / mean;
+            const double rel_spread
+                = std::sqrt(sum_sq_dev(recent, mean) / (recent.size() - 1)) / mean;
             return rel_spread < threshold;
         }
 
@@ -239,23 +241,25 @@ namespace hipblaslt_bench
         // <= 0 disables both checks (so the run goes to the ceiling), and both need enough
         // samples for their estimates to be trustworthy. `iqr_history` accumulates the throttled
         // rel_iqr trajectory the plateau check reads.
-        inline bool reached_target(const TimingConfig&  cfg,
-                                   std::vector<double>& samples, // reordered in place by the rel_iqr check
-                                   const running_stats& stats,
-                                   std::vector<double>& iqr_history,
-                                   int64_t                    total_iters,
-                                   double                     total_us,
-                                   const measure_bounds&      bounds,
-                                   bool&                      converged,
-                                   bool&                      stable)
+        inline bool
+            reached_target(const TimingConfig&   cfg,
+                           std::vector<double>&  samples, // reordered in place by the rel_iqr check
+                           const running_stats&  stats,
+                           std::vector<double>&  iqr_history,
+                           int64_t               total_iters,
+                           double                total_us,
+                           const measure_bounds& bounds,
+                           bool&                 converged,
+                           bool&                 stable)
         {
             const bool floor_met = total_iters >= bounds.min_iters && total_us >= bounds.min_us;
             const int  n         = static_cast<int>(samples.size());
             if(floor_met && cfg.noise_threshold > 0.0f && n >= min_samples_for_convergence)
             {
-                converged = stats.relative_std_error() < cfg.noise_threshold;
+                converged              = stats.relative_std_error() < cfg.noise_threshold;
                 const bool fallback_on = cfg.stability_threshold > 0.0f
-                                         && cfg.stability_interval >= 1 && cfg.stability_window >= 2;
+                                         && cfg.stability_interval >= 1
+                                         && cfg.stability_window >= 2;
                 if(!converged && fallback_on && n % cfg.stability_interval == 0)
                 {
                     iqr_history.push_back(cumulative_rel_iqr(samples));
@@ -354,13 +358,13 @@ namespace hipblaslt_bench
                                             static_cast<double>(cfg.measure_time) * 1000.0,
                                             static_cast<double>(cfg.max_measure_time) * 1000.0};
 
-        std::vector<double>  samples;
-        std::vector<double>  iqr_history; // throttled rel_iqr trajectory for the plateau check
+        std::vector<double>   samples;
+        std::vector<double>   iqr_history; // throttled rel_iqr trajectory for the plateau check
         detail::running_stats stats; // incremental mean/variance for the convergence test
-        double               total_us    = 0.0;
-        int64_t              total_iters = 0;
-        bool                 converged   = false;
-        bool                 stable      = false;
+        double                total_us    = 0.0;
+        int64_t               total_iters = 0;
+        bool                  converged   = false;
+        bool                  stable      = false;
 
         global_index = 0; // restart rotation for the timed phase
         while(!detail::aborted(should_abort))
@@ -372,8 +376,15 @@ namespace hipblaslt_bench
             stats.add(per_iter);
             total_us += batch_us;
             total_iters += batch;
-            if(detail::reached_target(
-                   cfg, samples, stats, iqr_history, total_iters, total_us, bounds, converged, stable))
+            if(detail::reached_target(cfg,
+                                      samples,
+                                      stats,
+                                      iqr_history,
+                                      total_iters,
+                                      total_us,
+                                      bounds,
+                                      converged,
+                                      stable))
                 break;
         }
 
