@@ -7503,27 +7503,8 @@ class KernelWriterAssembly(KernelWriter):
             # PGR=2 and EPS and no SuppressNoLoadLoop case, need to jump to EvenExit
             jumpLabel = Label("LoopEnd%s_evenexit%s%s"%(loopChar, strNta, strNtb), "" )
 
-        if kernel["ClusterBarrier"]:
-          # jump to label_skipClusterWaitInitC not label_LoopBeginL
-          # label_skipClusterWaitInitC:
-          # /* initC wmma section */
-          # label_LoopBeginL:
-          # /* unrolled loop section */
-          if beforeInitCIter:
-            skipClusterWaitLabel = Label(self.labels.getNameInc("skipClusterWaitInitC"), "")
-            module.add(SCBranchSCC0(skipClusterWaitLabel.getLabelName(), "skip cluster wait if LoopCounterL > endCounter"))
-            module.add(SBarrier(True, True, True, "cluster_barrier wait"))
-            module.add(SBranch(labelName=jumpLabel.getLabelName(), \
-                      comment="do not enter Loop%s"%loopChar ))
-            module.add(skipClusterWaitLabel)
-          else:
-            module.add(SCBranchSCC0(loopLabelBegin.getLabelName(), "skip cluster wait if LoopCounterL > 1"))
-            module.add(SBarrier(True, True, True, "cluster_barrier wait"))
-            module.add(SBranch(labelName=jumpLabel.getLabelName(), \
-                      comment="do not enter Loop%s"%loopChar ))
-        else:
-          module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
-                    comment="do not enter Loop%s"%loopChar ))
+        module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
+                  comment="do not enter Loop%s"%loopChar ))
 
       if kernel["ExpertSchedulingMode"] > 0:
         enableESMInstr = SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=int(kernel["ExpertSchedulingMode"]), comment="enable expert scheduling mode")
@@ -7767,8 +7748,6 @@ class KernelWriterAssembly(KernelWriter):
         evenIterCode = Module()
         if not kernel["SuppressNoLoadLoop"] and kernel["ExpandPointerSwap"]:
           oddIterPreCode.add(loopLabelEndOddExit)
-          if kernel["ClusterBarrier"]:
-            oddIterPreCode.add(SBarrier(True, True, True, "cluster_barrier wait"))
           # In this case we kept the 'no-load' loop which has LDS offsets assuming first bank of LDS
           # if we exit the main loop at an odd iter - need to swap LDS read pointers
           # so the ds_reads read from the 'high' buffer of LDS
@@ -7798,8 +7777,6 @@ class KernelWriterAssembly(KernelWriter):
               oddIterCode.add(self.localReadSwapOffsets(kernel, False, tPM))
 
           evenIterPreCode.add(loopLabelEndEvenExit)
-          if kernel["ClusterBarrier"]:
-            evenIterPreCode.add(SBarrier(True, True, True, "cluster_barrier wait"))
           # generate even code here (so far, for PrefetchGlobalRead>=2 only)
           if kernel["PrefetchGlobalRead"]>=2:
             if not kernel["DirectToVgprA"] or not kernel["DirectToVgprB"]:
@@ -7826,9 +7803,6 @@ class KernelWriterAssembly(KernelWriter):
             #swap local write memory token
             self.states.ldsWriteTokenIdx = \
               self.states.memTokenLdsBuffer1 if self.states.ldsWriteTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
-        else:
-          if kernel["ClusterBarrier"]:
-            evenIterPreCode.add(SBarrier(True, True, True, "cluster_barrier wait"))
 
         # generate even, odd exit code
         # not oddLabel case, order is even -> odd
@@ -18770,23 +18744,6 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
     #TODO: should not directly use GRIA and GRIB
     mod.add(SCSelectB32(sgpr(incSgprName), sgpr(f"GlobalReadIncs{tcB}"), sgpr(f"GlobalReadIncs{tcA}")))
-    return mod
-
-  def clusterBarrierPreSignal(self, kernel, handleSkipPGR2=False) -> Module:
-    mod = Module()
-    skipClusterBarrierPreSignal = Label(self.labels.getUniqueNamePrefix("skipCBPreSignal"), "")
-    if handleSkipPGR2 and kernel["PrefetchGlobalRead"] == 2:
-      loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
-      endCounter = 1 if kernel["SuppressNoLoadLoop"] else 2
-      mod.add(SCmpEQU32(src0=loopCounter, src1=hex(endCounter - 1),
-                        comment="LoopCounter == endCounter-1 ? (PGR=2 but only 1 unroll iter)"))
-      mod.add(SCBranchSCC1(skipClusterBarrierPreSignal.getLabelName(), \
-                           "skip cluster barrier pre-signal if PGR=2 but only 1 loop"))
-    mod.add(SCmpEQU32(sgpr("WaveIdx"), 0x0, "Check for waveID 0"))
-    mod.add(SCBranchSCC0(skipClusterBarrierPreSignal.getLabelName(), "Execute cluster barrier signal for waveID 0"))
-    mod.add(SBarrier(True, False, True, "cluster_barrier signal"))
-    mod.add(skipClusterBarrierPreSignal)
-
     return mod
 
   def resetTDMDescriptorForTail(self, kernel: Mapping, tP: Mapping, tmpSgprWaveOffset = None) -> Module:
