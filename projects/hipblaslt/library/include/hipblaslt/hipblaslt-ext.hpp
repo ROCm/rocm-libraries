@@ -88,13 +88,15 @@ namespace hipblaslt_ext
          *  ``hipblasLt`` C API. The ``mode`` argument is one of
          *  ``hipblasLtStreamKTileSchedulingMode_t``:
          *
-         *    - ``HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF`` — force the SK3 static sub-path.
+         *    - ``HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF`` (default) — SK3 static
+         *      sub-path; when ``sm_count_target`` > 0 the library heuristic
+         *      still runs per launch to pick SK4 when appropriate.
          *    - ``HIPBLASLT_STREAMK_TILE_SCHEDULING_ON``  — always request the SK4 dynamic sub-path when the chosen kernel supports it.
-         *    - ``HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO`` (default) — delegate to the library heuristic per launch.
+         *    - ``HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO`` — always delegate to the library heuristic per launch.
          *
-         *  The mode is tri-state: a caller can force the SK3 static
-         *  sub-path (``OFF``), force the SK4 dynamic sub-path (``ON``),
-         *  or defer to the library heuristic (``AUTO``, the default)
+         *  The mode is tri-state: a caller can use the SK3 static
+         *  sub-path by default (``OFF``), force the SK4 dynamic sub-path (``ON``),
+         *  or always defer to the library heuristic (``AUTO``)
          *  for the chosen kernel.
          *
          *  See ``hipblasLtSetSmCountTarget`` (non-ext) for the analogous
@@ -115,7 +117,7 @@ namespace hipblaslt_ext
         /*! \ingroup library_module
          *  \brief Return the StreamK tile scheduling mode set via
          *  ``setStreamKTileSchedulingMode``. Defaults to
-         *  ``HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO``.
+         *  ``HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF``.
          */
         HIPBLASLT_EXPORT hipblasLtStreamKTileSchedulingMode_t getStreamKTileSchedulingMode() const;
 
@@ -593,7 +595,7 @@ namespace hipblaslt_ext
         std::shared_ptr<void> m_data;
 
         size_t  m_workspace_bytes        = 0;
-        int32_t m_streamk_tile_scheduling_mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO;
+        int32_t m_streamk_tile_scheduling_mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF;
     };
 
     /*! \ingroup types_module

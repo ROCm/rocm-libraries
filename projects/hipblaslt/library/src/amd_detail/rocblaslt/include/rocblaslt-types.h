@@ -590,11 +590,11 @@ struct RocblasltContractionProblem
     // into ContractionProblemParameters::setStreamKTileSchedulingMode by
     // tensile_host.cpp so that ContractionSolution::solve can populate
     // StreamKSettings::streamKTileSchedulingMode. Tri-state:
-    //   0 = OFF  (force SK3 static path on SK5 kernels),
+    //   0 = OFF  (default; SK3 static unless sm_count_target > 0),
     //   1 = ON   (SK4 dynamic per-XCD work-queue on SK5 kernels),
-    //   2 = AUTO (default; delegate to origami::streamk::select_hybrid_mode).
+    //   2 = AUTO (always delegate to origami::streamk::select_hybrid_mode).
     // Ignored for non-StreamK=5 solutions.
-    int32_t streamk_tile_scheduling_ext = 2;
+    int32_t streamk_tile_scheduling_ext = 0;
     // Effective sm_count_target after the (pref > desc > handle)
     // precedence resolution. 0 = "use all CUs the device exposes".
     int32_t sm_count_target = 0;
@@ -661,7 +661,7 @@ struct RocblasltContractionProblem
                                 bool                   swizzleB,
                                 hipblasLtBatchMode_t   batchMode,
                                 int32_t                bias_stride,
-                                int32_t                streamk_tile_scheduling_ext = 2,
+                                int32_t                streamk_tile_scheduling_ext = 0,
                                 int32_t                sm_count_target         = 0);
 };
 

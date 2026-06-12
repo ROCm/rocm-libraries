@@ -44,7 +44,7 @@ namespace hipblaslt_ext
     {
     public:
         size_t                           workspace_bytes          = 0;
-        hipblasLtStreamKTileSchedulingMode_t streamk_tile_scheduling_mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO;
+        hipblasLtStreamKTileSchedulingMode_t streamk_tile_scheduling_mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF;
     };
 
     GemmPreference::GemmPreference()
@@ -88,7 +88,7 @@ namespace hipblaslt_ext
             pimpl->streamk_tile_scheduling_mode = mode;
             break;
         default:
-            pimpl->streamk_tile_scheduling_mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO;
+            pimpl->streamk_tile_scheduling_mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF;
             break;
         }
     }

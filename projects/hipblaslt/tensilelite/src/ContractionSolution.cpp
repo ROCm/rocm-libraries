@@ -3795,10 +3795,12 @@ namespace TensileLite
         const int requestedMode = problem.getParams().streamKTileSchedulingMode();
         switch(requestedMode)
         {
-        case 0: // OFF  -> static (SK3) path
-            return false;
-        case 1: // ON   -> dynamic (SK4) path
+        case 1: // ON -> dynamic (SK4) path
             return true;
+        case 0: // OFF -> static (SK3) unless sm_count_target engages heuristic
+            if(problem.getParams().smCountTarget() <= 0)
+                return false;
+            [[fallthrough]];
         case 2: // AUTO -> origami hybrid-mode heuristic
         {
             size_t x = 1, y = 1, z = 1, batchSz = 1;

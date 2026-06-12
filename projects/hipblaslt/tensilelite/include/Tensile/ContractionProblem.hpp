@@ -158,9 +158,10 @@ namespace TensileLite
 
         // StreamK=5 hybrid-mode toggle. Forwarded by the host into
         // StreamKSettings::streamKTileSchedulingMode at solve time. Values:
-        //   0 = OFF  (SK3 static work-assignment),
+        //   0 = OFF  (default; SK3 static unless smCountTarget() > 0, then
+        //             the origami hybrid heuristic runs like AUTO),
         //   1 = ON   (SK4 dynamic per-XCD work-queue),
-        //   2 = AUTO (default; delegate to origami::streamk::select_hybrid_mode).
+        //   2 = AUTO (always delegate to origami::streamk::select_hybrid_mode).
         // Ignored when the chosen solution is not a StreamK=5 hybrid kernel.
         void setStreamKTileSchedulingMode(int streamKTileSchedulingMode)
         {
@@ -193,7 +194,7 @@ namespace TensileLite
         int              m_factorDim      = 0;
         ActivationType   m_activationType = ActivationType::None;
         bool             m_fallbackStatus = false; // default value
-        int              m_streamKTileSchedulingMode = 2; // SK5 hybrid mode tri-state (AUTO default)
+        int              m_streamKTileSchedulingMode = 0; // SK5 hybrid mode tri-state (OFF default)
         int              m_smCountTarget = 0;
     };
 

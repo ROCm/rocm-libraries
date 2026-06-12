@@ -502,10 +502,10 @@ TEST(aux_handle_test, get_sm_count_target_rejects_null_handle)
     ASSERT_EQ(hipblasLtGetSmCountTarget(nullptr, &value), HIPBLAS_STATUS_NOT_INITIALIZED);
 }
 
-TEST(aux_ext_test, gemm_preference_streamk_tile_scheduling_mode_default_is_auto)
+TEST(aux_ext_test, gemm_preference_streamk_tile_scheduling_mode_default_is_off)
 {
     hipblaslt_ext::GemmPreference pref;
-    ASSERT_EQ(pref.getStreamKTileSchedulingMode(), HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO);
+    ASSERT_EQ(pref.getStreamKTileSchedulingMode(), HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF);
 }
 
 TEST(aux_ext_test, gemm_preference_streamk_tile_scheduling_mode_round_trip)

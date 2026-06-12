@@ -250,6 +250,7 @@ TEST(StreamKForceDPOnlyTest, UsesHardwareCuCount)
 
     auto problem = dummyProblem();
     auto device  = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    device.skDynamicGrid = 0;
     auto tiles   = problem.getNumTiles(solution.sizeMapping, 1);
 
     EXPECT_EQ(solution.getSKReduction(problem, device), origami::reduction_t::tree);
@@ -268,6 +269,7 @@ TEST(StreamKForceDPOnlyTest, FixedGridOverridesForceDPOnlyGrid)
 
     auto problem       = dummyProblem();
     auto device        = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    device.skDynamicGrid = 0;
     device.skFixedGrid = 17;
     auto tiles         = problem.getNumTiles(solution.sizeMapping, 1);
 
@@ -289,6 +291,7 @@ TEST(StreamKForceDPOnlyTest, DoesNotRequestPartialWorkspace)
 
     auto problem = dummyProblem();
     auto device  = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    device.skDynamicGrid = 0;
     auto tiles   = problem.getNumTiles(solution.sizeMapping, 1);
 
     ASSERT_NE(tiles % _CPX_CU, 0);
@@ -296,7 +299,8 @@ TEST(StreamKForceDPOnlyTest, DoesNotRequestPartialWorkspace)
 }
 
 // StreamK5HybridModeTest -- streamK5EffectiveDynamic drives grid sizing and
-// host arg packing. AUTO (2) uses origami::streamk::select_hybrid_mode;
+// host arg packing. OFF (0, default) is static unless smCountTarget()>0;
+// AUTO (2) always uses origami::streamk::select_hybrid_mode;
 // threshold/smCountTarget cases live in origami/tests/test_streamk.cpp.
 
 namespace
@@ -349,22 +353,27 @@ namespace
         return device;
     }
 
-    ContractionSolution makeStreamK5Solution()
+    void initStreamK5Solution(ContractionSolution& solution)
     {
-        ContractionSolution solution;
         solution.sizeMapping.streamK           = 5;
         solution.sizeMapping.macroTile         = TensileLite::dim3(128, 128, 1);
         solution.sizeMapping.depthU            = 64;
         solution.sizeMapping.matrixInstruction = {16, 16, 32, 1};
         solution.sizeMapping.CUOccupancy       = 1;
-        return solution;
     }
 
     struct StreamK5AnalyticalEnv
     {
-        ContractionSolution solution = makeStreamK5Solution();
-        origami::hardware_t hw       = makeGfx950AnalyticalHardware();
-        hip::HipAMDGPU      device   = makeHipDeviceWithAnalytical(hw);
+        StreamK5AnalyticalEnv()
+            : hw(makeGfx950AnalyticalHardware())
+            , device(makeHipDeviceWithAnalytical(hw))
+        {
+            initStreamK5Solution(solution);
+        }
+
+        ContractionSolution solution;
+        origami::hardware_t hw;
+        hip::HipAMDGPU      device;
     };
 
     ContractionProblemGemm makeGemmProblem(size_t m, size_t n, size_t k)
@@ -441,11 +450,11 @@ namespace
     }
 } // namespace
 
-TEST(StreamK5HybridModeTest, ProblemParamsDefaultToAuto)
+TEST(StreamK5HybridModeTest, ProblemParamsDefaultToOff)
 {
     auto problem = dummyProblem();
-    EXPECT_EQ(problem.getParams().streamKTileSchedulingMode(), 2)
-        << "StreamK=5 hybrid mode should default to AUTO (2)";
+    EXPECT_EQ(problem.getParams().streamKTileSchedulingMode(), 0)
+        << "StreamK=5 hybrid mode should default to OFF (0)";
     EXPECT_EQ(problem.getParams().smCountTarget(), 0)
         << "smCountTarget should default to 0 (use all device CUs)";
 }
@@ -472,7 +481,8 @@ class StreamK5ExplicitModeTest : public ::testing::TestWithParam<StreamK5Explici
 TEST_P(StreamK5ExplicitModeTest, ResolvesEffectiveSubPath)
 {
     auto const& param = GetParam();
-    auto        solution = makeStreamK5Solution();
+    ContractionSolution solution;
+    initStreamK5Solution(solution);
     auto        problem  = dummyProblem();
     auto        device   = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
     problem.setParams().setStreamKTileSchedulingMode(param.mode);
@@ -492,7 +502,8 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST(StreamK5HybridModeTest, TriStateAutoRequiresAnalyticalHardware)
 {
-    auto solution = makeStreamK5Solution();
+    ContractionSolution solution;
+    initStreamK5Solution(solution);
     auto device   = makeHipDeviceWithoutAnalytical();
     auto problem  = makeGemmProblem(4096, 4096, 64);
     problem.setParams().setStreamKTileSchedulingMode(2);
@@ -539,7 +550,42 @@ INSTANTIATE_TEST_SUITE_P(
         return info.param.suffix;
     });
 
-// smCountTarget AUTO behavior is covered by origami/tests/test_streamk.cpp.
+TEST(StreamK5HybridModeTest, OffWithSmCountTargetEngagesHeuristic)
+{
+    StreamK5AnalyticalEnv env;
+
+    auto problemOffNoTarget = makeGemmProblem(4096, 4096, 64);
+    problemOffNoTarget.setParams().setStreamKTileSchedulingMode(0);
+    problemOffNoTarget.setParams().setSmCountTarget(0);
+    EXPECT_FALSE(env.solution.streamK5EffectiveDynamic(problemOffNoTarget, env.device))
+        << "OFF with smCountTarget=0 must stay on the static (SK3) sub-path";
+
+    auto problemOffWithTarget = makeGemmProblem(4096, 4096, 64);
+    problemOffWithTarget.setParams().setStreamKTileSchedulingMode(0);
+    problemOffWithTarget.setParams().setSmCountTarget(128);
+
+    auto problemAuto = makeGemmProblem(4096, 4096, 64);
+    problemAuto.setParams().setStreamKTileSchedulingMode(2);
+    problemAuto.setParams().setSmCountTarget(128);
+
+    EXPECT_EQ(env.solution.streamK5EffectiveDynamic(problemOffWithTarget, env.device),
+              env.solution.streamK5EffectiveDynamic(problemAuto, env.device))
+        << "OFF + smCountTarget>0 must match AUTO heuristic for the same problem";
+    EXPECT_TRUE(env.solution.streamK5EffectiveDynamic(problemOffWithTarget, env.device))
+        << "4096x4096 with CU budget should select the dynamic (SK4) sub-path";
+
+    auto problemOffLow = makeGemmProblem(2560, 2560, 64);
+    problemOffLow.setParams().setStreamKTileSchedulingMode(0);
+    problemOffLow.setParams().setSmCountTarget(128);
+    auto problemAutoLow = makeGemmProblem(2560, 2560, 64);
+    problemAutoLow.setParams().setStreamKTileSchedulingMode(2);
+    problemAutoLow.setParams().setSmCountTarget(128);
+    EXPECT_EQ(env.solution.streamK5EffectiveDynamic(problemOffLow, env.device),
+              env.solution.streamK5EffectiveDynamic(problemAutoLow, env.device))
+        << "OFF + smCountTarget>0 must match AUTO heuristic for the same problem";
+}
+
+// smCountTarget heuristic threshold behavior is covered by origami/tests/test_streamk.cpp.
 
 TEST(Sk3Sk5OffPartition512Test, NativeSk3MatchesSk5OffHostPack)
 {

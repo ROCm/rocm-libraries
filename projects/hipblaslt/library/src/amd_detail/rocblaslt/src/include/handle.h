@@ -214,9 +214,9 @@ struct _rocblaslt_matmul_desc
 
     // StreamK tile scheduling mode (hybrid SK3/SK4 tile scheduling for SK5).
     // Exposed via the _EXT attribute namespace (no equivalent in the base C API).
-    // Tri-state: 0 = OFF (force SK3 static), 1 = ON (force SK4 dynamic),
-    // 2 = AUTO (default; heuristic picks per launch).
-    int32_t streamk_tile_scheduling_ext = 2;
+    // Tri-state: 0 = OFF (default; static SK3 unless sm_count_target > 0),
+    // 1 = ON (force SK4 dynamic), 2 = AUTO (heuristic picks per launch).
+    int32_t streamk_tile_scheduling_ext = 0;
 
     // Added this new bias_stride parameter to capture the stride in bias vector to get unique bias vector for each batch in strided batch case. 
     // Default value is 0 which means same bias vector will be used across all batches (broadcast).
