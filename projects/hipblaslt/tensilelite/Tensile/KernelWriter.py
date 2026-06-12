@@ -6134,10 +6134,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                "DebugPass": str(globalParameters.get("StinkyTofuDebugPass") or ""),
                                "PassOrderSnapshotJson": str(globalParameters.get("StinkyTofuPassOrderSnapshotJson") or ""),
                                "EnableWaitCntInsertion": True if stinky_opt_level != 0 else not globalParameters.get("DisableSTWaitCnt", True),
-                               # DEBUG knob: force the expertScheduleMode2 region (RemoveDelayAlu/
-                               # RemoveWaitAlu + InsertWaitAlu) to run even when the scheduler is off,
-                               # so ESM2 can be tested under SIA0. Hardcoded false; flip to True to debug.
-                               "EnableESM2": False,
+                               # True: expert scheduling mode2; False: mode 0. Independent of ScheduleIterAlg/OptLevel.
+                               "EnableESM2": kernel["EnableStinkyTofuESM2"],
                                "TileA0": kernel["ThreadTile0"],
                                "TileB0": kernel["ThreadTile1"],
                                "TileM0": kernel["MacroTile0"],
