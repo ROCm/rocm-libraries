@@ -1033,16 +1033,28 @@ def getPassedStagesFromPreviousBuild() {
         def isRestart = currentBuild.rawBuild?.getCauses()?.any { cause ->
             cause.getClass().getName().contains('RestartDeclarativePipeline')
         }
-        if (!isRestart) return passed
+        if (!isRestart) {
+            echo "Selective rerun: not a restart build, running all stages"
+            return passed
+        }
 
         def prev = currentBuild.previousBuild
         if (!prev) return passed
         if (prev.result == 'SUCCESS') return passed
 
         // Guard 2: only skip stages if both builds are for the same commit.
+        // If SCM commit hash lookup fails (returns null), skip the guard and
+        // proceed — fail-open so a missing SCMRevisionAction doesn't silently
+        // defeat the entire feature.
         def curCommit = getScmCommitHash(currentBuild.rawBuild)
         def prevCommit = getScmCommitHash(prev.rawBuild)
-        if (!curCommit || !prevCommit || curCommit != prevCommit) return passed
+        if (curCommit && prevCommit && curCommit != prevCommit) {
+            echo "Selective rerun: commit hash mismatch (cur=${curCommit?.take(8)} prev=${prevCommit?.take(8)}), running all stages"
+            return passed
+        }
+        if (!curCommit || !prevCommit) {
+            echo "Selective rerun: SCM commit hash unavailable, proceeding without commit guard"
+        }
 
         def prevRun = prev.rawBuild
         if (!prevRun) return passed
@@ -1109,9 +1121,7 @@ def addStage(Map stagesMap, String name, Closure body) {
 
 def packageAndStaticCheckStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def withWorkingDirFn) {
     def passedStages = getPassedStagesFromPreviousBuild()
-    if (passedStages) {
-        echo "Selective rerun: skipping ${passedStages.size()} previously passed stage(s): ${passedStages}"
-    }
+    echo "Selective rerun: passedStages (${passedStages.size()}): ${passedStages}"
     def stages = [:]
 
     addStage(stages, 'HIP Package') {
@@ -1169,9 +1179,7 @@ def packageAndStaticCheckStages(def pipelineParams, def pipelineEnv, def rocmnod
 
 def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def withWorkingDirFn, def runDbSyncJobFn, def runBuildAndSingleGtestJobFn) {
     def passedStages = getPassedStagesFromPreviousBuild()
-    if (passedStages) {
-        echo "Selective rerun: skipping ${passedStages.size()} previously passed stage(s): ${passedStages}"
-    }
+    echo "Selective rerun: passedStages (${passedStages.size()}): ${passedStages}"
     def stages = [:]
 
     def Full_test    = pipelineEnv.Full_test
@@ -1409,9 +1417,7 @@ def nightlyTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def w
 
 def nonCriticalHWNightlyStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def withWorkingDirFn, def runDbSyncJobFn, def runBuildAndSingleGtestJobFn) {
     def passedStages = getPassedStagesFromPreviousBuild()
-    if (passedStages) {
-        echo "Selective rerun: skipping ${passedStages.size()} previously passed stage(s): ${passedStages}"
-    }
+    echo "Selective rerun: passedStages (${passedStages.size()}): ${passedStages}"
     def stages = [:]
 
     def Full_test       = pipelineEnv.Full_test
