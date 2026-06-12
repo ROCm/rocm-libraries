@@ -518,10 +518,28 @@ try
         ("adaptive_noise_threshold",
          value<float>(&arg.noise_threshold)->default_value(hipblaslt_bench::adaptive_defaults::noise_threshold),
          "Adaptive timing: convergence target. Past the floor (adaptive_min_iters and "
-         "adaptive_measure_time) the run continues until the mean's relative standard error "
-         "(stddev/mean/sqrt(n)) falls below this fraction, e.g. 0.01 = 1%, or the ceiling "
-         "(adaptive_max_measure_time / adaptive_max_iters) is hit. 0 disables convergence: the "
-         "run goes to the ceiling")
+         "adaptive_measure_time) the run stops when the mean's relative standard error "
+         "(stddev/mean/sqrt(n)) falls below this fraction, e.g. 0.01 = 1% (status converged); "
+         "or, if it cannot, when the robust spread (IQR/median) plateaus (status stable); else "
+         "at the ceiling (adaptive_max_measure_time / adaptive_max_iters, status noisy). "
+         "0 disables both checks: the run goes to the ceiling")
+
+        ("adaptive_stability_threshold",
+         value<float>(&arg.stability_threshold)->default_value(hipblaslt_bench::adaptive_defaults::stability_threshold),
+         "Adaptive timing: noise-plateau fallback. When the precision target cannot be met, "
+         "stop anyway (status stable) once the robust spread (IQR/median) settles -- i.e. the "
+         "last adaptive_stability_window readings vary by less than this fraction. 0 disables "
+         "the fallback (a non-converging run then goes to the ceiling, status noisy)")
+
+        ("adaptive_stability_window",
+         value<int32_t>(&arg.stability_window)->default_value(hipblaslt_bench::adaptive_defaults::stability_window),
+         "Adaptive timing: number of recent rel_iqr readings the stability fallback tests "
+         "for a plateau (>= 2)")
+
+        ("adaptive_stability_interval",
+         value<int32_t>(&arg.stability_interval)->default_value(hipblaslt_bench::adaptive_defaults::stability_interval),
+         "Adaptive timing: record one rel_iqr reading for the stability fallback every N "
+         "samples (>= 1)")
 
         ("algo_method",
          value<std::string>(&algo_method_str)->default_value("heuristic"),
@@ -713,7 +731,10 @@ try
                                "adaptive_max_measure_time",
                                "adaptive_min_iters",
                                "adaptive_max_iters",
-                               "adaptive_noise_threshold"})
+                               "adaptive_noise_threshold",
+                               "adaptive_stability_threshold",
+                               "adaptive_stability_window",
+                               "adaptive_stability_interval"})
         {
             if(vm.count(opt) && !vm[opt].defaulted())
             {
@@ -739,6 +760,16 @@ try
         {
             hipblaslt_cerr << "error: --adaptive requires a ceiling: set "
                               "--adaptive_max_measure_time or --adaptive_max_iters > 0"
+                           << std::endl;
+            return EXIT_FAILURE;
+        }
+        // If the stability fallback is enabled, its window/interval must be in range; an
+        // out-of-range value would silently disable the fallback instead.
+        if(arg.stability_threshold > 0.0f && (arg.stability_window < 2 || arg.stability_interval < 1))
+        {
+            hipblaslt_cerr << "error: with --adaptive_stability_threshold > 0, "
+                              "--adaptive_stability_window must be >= 2 and "
+                              "--adaptive_stability_interval >= 1"
                            << std::endl;
             return EXIT_FAILURE;
         }

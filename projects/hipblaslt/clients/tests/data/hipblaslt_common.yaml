@@ -606,6 +606,9 @@ Arguments:
   - noise_threshold: c_float
   - min_iters: c_int32
   - max_iters: c_int32
+  - stability_threshold: c_float
+  - stability_window: c_int32
+  - stability_interval: c_int32
   - adaptive: c_bool
   - algo: c_uint32
   - solution_index: c_int32
@@ -737,11 +740,14 @@ Defaults:
   # hipblaslt_bench::adaptive_defaults in benchmark_stats.hpp.
   warmup_time: 50.0
   sample_time: 1.0
-  measure_time: 200.0
-  max_measure_time: 1000.0
+  measure_time: 500.0
+  max_measure_time: 2000.0
   noise_threshold: 0.01
   min_iters: 10
   max_iters: 0
+  stability_threshold: 0.05
+  stability_window: 32
+  stability_interval: 16
   adaptive: false
   algo: 0
   solution_index: -1

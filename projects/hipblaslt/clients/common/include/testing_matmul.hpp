@@ -5600,9 +5600,12 @@ void testing_matmul_with_bias(const Arguments& arg,
             timingCfg.sample_time      = arg.sample_time;
             timingCfg.measure_time     = arg.measure_time;
             timingCfg.max_measure_time = arg.max_measure_time;
-            timingCfg.min_iters        = arg.min_iters;
-            timingCfg.max_iters        = arg.max_iters;
-            timingCfg.noise_threshold  = arg.noise_threshold;
+            timingCfg.min_iters          = arg.min_iters;
+            timingCfg.max_iters          = arg.max_iters;
+            timingCfg.noise_threshold    = arg.noise_threshold;
+            timingCfg.stability_threshold = arg.stability_threshold;
+            timingCfg.stability_window    = arg.stability_window;
+            timingCfg.stability_interval  = arg.stability_interval;
         }
         hipblaslt_bench::TimingResult timing;
         // Stop the sample loop if a launch hits a gtest fatal failure.
@@ -5646,6 +5649,9 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         for(size_t sol = 0; sol < heuristicResult.size(); sol++)
         {
+            // Reset per-solution so an aborted/empty measurement can't report the prior
+            // solution's stats (run_measurement leaves `out` untouched on early return).
+            timing = {};
             if((arg.unit_check || arg.norm_check || arg.allclose_check) && arg.c_equal_d)
             {
                 if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
@@ -5921,7 +5927,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 // gpu time is reported per hot call; log_perf divides by hot_calls,
                 // so scale the mean back up to a total here.
-                gpu_time_used = timing.mean_us * (number_hot_calls < 1 ? 1 : number_hot_calls);
+                gpu_time_used = timing.median_us * (number_hot_calls < 1 ? 1 : number_hot_calls);
                 perf_monitor->stop();
             }
             else
@@ -5991,7 +5997,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         timing,
                         timingAbort);
                     gpu_time_used
-                        = timing.mean_us * (number_hot_calls < 1 ? 1 : number_hot_calls);
+                        = timing.median_us * (number_hot_calls < 1 ? 1 : number_hot_calls);
                     perf_monitor->stop();
                 }
                 else
@@ -6050,7 +6056,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         timing,
                         timingAbort);
                     gpu_time_used
-                        = timing.mean_us * (number_hot_calls < 1 ? 1 : number_hot_calls);
+                        = timing.median_us * (number_hot_calls < 1 ? 1 : number_hot_calls);
                     perf_monitor->stop();
                 }
             }

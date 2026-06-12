@@ -266,6 +266,9 @@ public:
     float    noise_threshold    = hipblaslt_bench::adaptive_defaults::noise_threshold;
     int32_t  min_iters          = hipblaslt_bench::adaptive_defaults::min_iters;
     int32_t  max_iters          = hipblaslt_bench::adaptive_defaults::max_iters;
+    float    stability_threshold = hipblaslt_bench::adaptive_defaults::stability_threshold;
+    int32_t  stability_window    = hipblaslt_bench::adaptive_defaults::stability_window;
+    int32_t  stability_interval  = hipblaslt_bench::adaptive_defaults::stability_interval;
     bool     use_gpu_timer      = true;
     bool     adaptive           = false;
 };
@@ -303,6 +306,9 @@ namespace llvm
                 io.mapOptional("AdaptiveNoiseThreshold", lc.noise_threshold);
                 io.mapOptional("AdaptiveMinIters", lc.min_iters);
                 io.mapOptional("AdaptiveMaxIters", lc.max_iters);
+                io.mapOptional("AdaptiveStabilityThreshold", lc.stability_threshold);
+                io.mapOptional("AdaptiveStabilityWindow", lc.stability_window);
+                io.mapOptional("AdaptiveStabilityInterval", lc.stability_interval);
             }
         };
         template <>
@@ -406,6 +412,16 @@ int main(int argc, char** argv)
     if(rv.gs.adaptive && rv.gs.max_measure_time <= 0.0f && rv.gs.max_iters <= 0)
     {
         std::cerr << "error: Adaptive requires AdaptiveMaxMeasureTime or AdaptiveMaxIters > 0"
+                  << std::endl;
+        return 1;
+    }
+    // An enabled stability fallback needs an in-range window/interval, else it silently
+    // disables instead.
+    if(rv.gs.adaptive && rv.gs.stability_threshold > 0.0f
+       && (rv.gs.stability_window < 2 || rv.gs.stability_interval < 1))
+    {
+        std::cerr << "error: with AdaptiveStabilityThreshold > 0, AdaptiveStabilityWindow must "
+                     "be >= 2 and AdaptiveStabilityInterval >= 1"
                   << std::endl;
         return 1;
     }
@@ -571,9 +587,12 @@ int main(int argc, char** argv)
         timingCfg.sample_time      = rv.gs.sample_time;
         timingCfg.measure_time     = rv.gs.measure_time;
         timingCfg.max_measure_time = rv.gs.max_measure_time;
-        timingCfg.min_iters        = rv.gs.min_iters;
-        timingCfg.max_iters        = rv.gs.max_iters;
-        timingCfg.noise_threshold  = rv.gs.noise_threshold;
+        timingCfg.min_iters          = rv.gs.min_iters;
+        timingCfg.max_iters          = rv.gs.max_iters;
+        timingCfg.noise_threshold    = rv.gs.noise_threshold;
+        timingCfg.stability_threshold = rv.gs.stability_threshold;
+        timingCfg.stability_window    = rv.gs.stability_window;
+        timingCfg.stability_interval  = rv.gs.stability_interval;
     }
 
     // One enqueue of the whole layer sequence for a given (rotating) index.
@@ -634,14 +653,15 @@ int main(int argc, char** argv)
             launch, timingCfg, event_gpu_time_start, event_gpu_time_end, stream, timing);
     }
 
-    std::cout << "Time: " << timing.mean_us << std::endl;
+    std::cout << "Time: " << timing.median_us << std::endl;
     if(timing.samples > 1)
-        std::cout << "  mean over " << timing.samples << " samples, batch " << timing.batch
-                  << ", median " << timing.median_us << " us, min " << timing.min_us
-                  << " us, cv " << timing.cv
-                  << (timing.noise_active
-                          ? (timing.converged ? ", converged" : ", noisy")
-                          : "")
+        std::cout << "  median over " << timing.samples << " samples, batch " << timing.batch
+                  << ", mean " << timing.mean_us << " us, min " << timing.min_us << " us, cv "
+                  << timing.cv
+                  << (timing.noise_active ? (timing.converged ? ", converged"
+                                             : timing.stable   ? ", stable"
+                                                               : ", noisy")
+                                          : "")
                   << std::endl;
 
     // Print kernel info

@@ -44,11 +44,14 @@
 // A *sample* is one event span over `batch` back-to-back enqueues, yielding one
 // per-iteration throughput number. The batch is sized from a warmup so each sample
 // spans ~sample_time. Samples are collected for at least the floor (min_iters and
-// measure_time); past the floor the run continues until the mean's relative standard
-// error drops below noise_threshold (converged) or the max_measure_time / max_iters
-// ceiling is reached. noise_threshold <= 0 disables convergence, so the run goes to
-// the ceiling. The mean is the headline statistic; median, min and cv are also
-// returned. With no adaptive knob set, a single fixed-count sample of `iters` is taken.
+// measure_time); past the floor the run stops when either (a) the mean's relative
+// standard error drops below noise_threshold (converged), or (b) the robust spread
+// (rel_iqr) has plateaued, so more samples will not change the picture (stable) --
+// a fallback for heavy-tailed/unlocked-clock kernels that never hit the precision
+// target. Otherwise it runs to the max_measure_time / max_iters ceiling (noisy).
+// noise_threshold <= 0 disables both checks, so the run goes to the ceiling. The
+// median is the headline statistic; mean, min, cv and rel_iqr are also returned.
+// With no adaptive knob set, a single fixed-count sample of `iters` is taken.
 // ============================================================================
 
 namespace hipblaslt_bench
@@ -75,7 +78,7 @@ namespace hipblaslt_bench
                 return std::numeric_limits<double>::infinity();
             const double mean = mean_of(v);
             if(mean <= 0.0)
-                return 0.0;
+                return std::numeric_limits<double>::infinity(); // degenerate: treat as not converged
             const double var = sum_sq_dev(v, mean) / (n - 1); // unbiased sample variance
             return (std::sqrt(var) / mean) / std::sqrt(static_cast<double>(n));
         }
@@ -91,6 +94,39 @@ namespace hipblaslt_bench
             const size_t lo  = static_cast<size_t>(std::floor(pos));
             const size_t hi  = static_cast<size_t>(std::ceil(pos));
             return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - static_cast<double>(lo));
+        }
+
+        // Robust relative dispersion (IQR / median) over all samples so far. Quartiles
+        // are order statistics, so unlike cv this is insensitive to the outlier tail.
+        inline double cumulative_rel_iqr(const std::vector<double>& samples)
+        {
+            std::vector<double> sorted(samples);
+            std::sort(sorted.begin(), sorted.end());
+            const double median = quantile(sorted, 0.5);
+            const double iqr    = quantile(sorted, 0.75) - quantile(sorted, 0.25);
+            return median > 0.0 ? iqr / median : 0.0;
+        }
+
+        // Stability fallback: a rel_iqr reading is appended every cfg.stability_interval
+        // samples; the run is "stable" once the last cfg.stability_window readings vary by
+        // less than cfg.stability_threshold (relative). This mirrors nvbench's noise-stability
+        // escape, but on the robust estimator so a heavy tail can't keep it from settling. The
+        // headline mean's precision is still gated separately by relative_std_error, so this
+        // only ends runs that would otherwise hit the ceiling. cfg.stability_threshold <= 0
+        // disables the fallback entirely.
+
+        // Whether the rel_iqr trajectory has flattened: the last `window` readings have a
+        // relative standard deviation below `threshold`. A window < 2 has no spread to test.
+        inline bool noise_plateaued(const std::vector<double>& iqr_history, int window, double threshold)
+        {
+            if(window < 2 || static_cast<int>(iqr_history.size()) < window)
+                return false;
+            const std::vector<double> recent(iqr_history.end() - window, iqr_history.end());
+            const double mean = mean_of(recent);
+            if(mean <= 0.0)
+                return false;
+            const double rel_spread = std::sqrt(sum_sq_dev(recent, mean) / (recent.size() - 1)) / mean;
+            return rel_spread < threshold;
         }
 
         inline bool aborted(const std::function<bool()>& should_abort)
@@ -190,23 +226,38 @@ namespace hipblaslt_bench
             double  max_us; // ceiling: maximum total measured time (0 = none)
         };
 
-        // Whether the measure loop should stop after the latest sample, updating `converged`.
-        // noise_threshold <= 0 disables convergence (so the run goes to the ceiling),
-        // and convergence needs enough samples for the stddev to be trustworthy.
+        // Whether the measure loop should stop after the latest sample, updating `converged`
+        // and `stable`. Past the floor, the run ends on convergence (mean precise enough) or
+        // on the robust-dispersion plateau (the fallback), else at the ceiling. noise_threshold
+        // <= 0 disables both checks (so the run goes to the ceiling), and both need enough
+        // samples for their estimates to be trustworthy. `iqr_history` accumulates the throttled
+        // rel_iqr trajectory the plateau check reads.
         inline bool reached_target(const TimingConfig&        cfg,
                                    const std::vector<double>& samples,
+                                   std::vector<double>&       iqr_history,
                                    int64_t                    total_iters,
                                    double                     total_us,
                                    const measure_bounds&      bounds,
-                                   bool&                      converged)
+                                   bool&                      converged,
+                                   bool&                      stable)
         {
             const bool floor_met = total_iters >= bounds.min_iters && total_us >= bounds.min_us;
-            if(floor_met && cfg.noise_threshold > 0.0f
-               && static_cast<int>(samples.size()) >= min_samples_for_convergence)
+            const int  n         = static_cast<int>(samples.size());
+            if(floor_met && cfg.noise_threshold > 0.0f && n >= min_samples_for_convergence)
+            {
                 converged = relative_std_error(samples) < cfg.noise_threshold;
+                const bool fallback_on = cfg.stability_threshold > 0.0f
+                                         && cfg.stability_interval >= 1 && cfg.stability_window >= 2;
+                if(!converged && fallback_on && n % cfg.stability_interval == 0)
+                {
+                    iqr_history.push_back(cumulative_rel_iqr(samples));
+                    stable = noise_plateaued(
+                        iqr_history, cfg.stability_window, cfg.stability_threshold);
+                }
+            }
             const bool ceiling = (bounds.max_us > 0.0 && total_us >= bounds.max_us)
                                  || (cfg.max_iters > 0 && total_iters >= cfg.max_iters);
-            return (floor_met && converged) || ceiling;
+            return (floor_met && (converged || stable)) || ceiling;
         }
 
     } // namespace detail
@@ -215,8 +266,8 @@ namespace hipblaslt_bench
     // enqueue for a monotonically increasing global index `i` (the callee handles any
     // `i % block_count` rotation and per-iteration icache flush). Fixed-count mode times one
     // batch of cfg.iters; adaptive mode self-sizes the batch and collects samples until the
-    // mean converges or a ceiling is hit. Precondition (adaptive): a ceiling is set
-    // (max_measure_time or max_iters > 0) -- the caller validates this.
+    // mean converges, the robust spread plateaus, or a ceiling is hit. Precondition (adaptive):
+    // a ceiling is set (max_measure_time or max_iters > 0) -- the caller validates this.
     template <typename Launch>
     inline void run_measurement(Launch&&                     launch,
                                 const TimingConfig&          cfg,
@@ -263,14 +314,26 @@ namespace hipblaslt_bench
             per_iter_est             = probe_us;
             const double warm_min_us = static_cast<double>(cfg.warmup_time) * 1000.0;
             double       warm_us     = 0.0; // exclude the cold probe from the warmup budget
+            int32_t      chunk       = detail::batch_size(cfg, per_iter_est, cap);
             while(warm_us < warm_min_us && !detail::aborted(should_abort))
             {
-                const int32_t chunk    = detail::batch_size(cfg, per_iter_est, cap);
-                double        chunk_us = 0.0;
+                double chunk_us = 0.0;
                 detail::time_batch(
                     launch, chunk, global_index, cfg.use_gpu_timer, events, chunk_us);
                 warm_us += chunk_us;
-                per_iter_est = chunk_us / chunk;
+                // Refine the estimate from a real measurement. If the span came back below the
+                // timer's resolution (chunk_us == 0), warm_us cannot advance and a per-iter
+                // estimate of 0 would re-size the batch to 1 -- so instead grow the batch until
+                // it clears the timer floor, and stop if even the max batch still reads as zero.
+                if(chunk_us > 0.0)
+                {
+                    per_iter_est = chunk_us / chunk;
+                    chunk        = detail::batch_size(cfg, per_iter_est, cap);
+                }
+                else if(chunk < cap)
+                    chunk = static_cast<int32_t>(std::min<int64_t>(cap, int64_t{chunk} * 2));
+                else
+                    break;
             }
         }
         if(detail::aborted(should_abort))
@@ -285,9 +348,11 @@ namespace hipblaslt_bench
                                             static_cast<double>(cfg.max_measure_time) * 1000.0};
 
         std::vector<double> samples;
+        std::vector<double> iqr_history; // throttled rel_iqr trajectory for the plateau check
         double              total_us    = 0.0;
         int64_t             total_iters = 0;
         bool                converged   = false;
+        bool                stable      = false;
 
         global_index = 0; // restart rotation for the timed phase
         while(!detail::aborted(should_abort))
@@ -297,7 +362,8 @@ namespace hipblaslt_bench
             samples.push_back(batch_us / batch);
             total_us += batch_us;
             total_iters += batch;
-            if(detail::reached_target(cfg, samples, total_iters, total_us, bounds, converged))
+            if(detail::reached_target(
+                   cfg, samples, iqr_history, total_iters, total_us, bounds, converged, stable))
                 break;
         }
 
@@ -310,5 +376,6 @@ namespace hipblaslt_bench
         out.adaptive     = true;
         out.noise_active = cfg.noise_threshold > 0.0f;
         out.converged    = converged;
+        out.stable       = stable;
     }
 } // namespace hipblaslt_bench

@@ -46,7 +46,12 @@ namespace hipblaslt_bench
         int32_t min_iters = 0; // floor on total timed iterations (0 in the fixed-count fast path)
         int32_t max_iters = 0; // ceiling on total timed iterations; 0 => unbounded
         float   noise_threshold = 0.0f; // rel. std error convergence target; 0 => disabled
-        bool    use_gpu_timer   = false; // hipEvent timing vs CPU wall clock
+        // Noise-plateau fallback: past the floor, end the run if convergence cannot be
+        // reached but the robust spread (rel_iqr) has settled. 0 threshold disables it.
+        float   stability_threshold = 0.0f; // max rel. spread of recent rel_iqr readings to stop
+        int32_t stability_window    = 0; // rel_iqr readings tested for the plateau (>= 2)
+        int32_t stability_interval  = 0; // record a rel_iqr reading every N samples (>= 1)
+        bool    use_gpu_timer       = false; // hipEvent timing vs CPU wall clock
     };
 
     // Default values for the --adaptive preset, used as the CLI/YAML defaults so they
@@ -57,11 +62,19 @@ namespace hipblaslt_bench
     {
         constexpr float   warmup_time      = 50.0f; // ms warmup budget
         constexpr float   sample_time      = 1.0f; // ms span per timed sample
-        constexpr float   measure_time     = 200.0f; // ms measurement floor
-        constexpr float   max_measure_time = 1000.0f; // ms ceiling for convergence
+        constexpr float   measure_time     = 500.0f; // ms measurement floor
+        constexpr float   max_measure_time = 2000.0f; // ms ceiling for convergence
         constexpr int32_t min_iters        = 10; // floor on total timed iterations
         constexpr int32_t max_iters        = 0; // unbounded
         constexpr float   noise_threshold  = 0.01f; // 1% relative standard error
+        // Noise-plateau fallback (see TimingConfig): threshold anchored to nvbench's stability
+        // check; the look-back (window * interval = 512 samples) is sized so the fallback can
+        // only fire ~512 samples past the measure_time floor -- after typical convergence has
+        // had its chance -- reserving "stable" for kernels that genuinely cannot pin the mean
+        // within the budget (tuned on gfx950, TN/fp16).
+        constexpr float   stability_threshold = 0.05f; // 5% rel. spread over the window
+        constexpr int32_t stability_window    = 32; // readings tested (512-sample look-back)
+        constexpr int32_t stability_interval  = 16; // a reading every 16 samples
     }
 
     // Per-iteration statistics, in microseconds.
@@ -77,6 +90,8 @@ namespace hipblaslt_bench
         int64_t hot_iters    = 0; // total timed enqueues (B*K)
         bool    adaptive     = false; // the adaptive path ran (vs the fixed-count fast path)
         bool    noise_active = false; // convergence checking was enabled (noise_threshold > 0)
-        bool    converged    = false; // noise target met (meaningful only when noise_active)
+        bool    converged    = false; // precision target met (meaningful only when noise_active)
+        bool    stable       = false; // robust-dispersion (rel_iqr) plateau reached: the
+        // distribution is characterized though the precision target was not met (fallback exit)
     };
 } // namespace hipblaslt_bench

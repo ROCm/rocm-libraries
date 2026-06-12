@@ -50,7 +50,10 @@ cd hipBLASLt; cd build/release
 --adaptive_max_measure_time <value> Measurement ceiling (ms, 0 = unbounded); requires --adaptive
 --adaptive_min_iters <value>     Floor on total timed iterations; requires --adaptive
 --adaptive_max_iters <value>     Ceiling on total timed iterations (0 = unbounded); requires --adaptive
---adaptive_noise_threshold <value> Convergence target: past the floor, keep running until the mean's relative standard error drops below this fraction or the ceiling is hit; 0 disables (run to the ceiling); requires --adaptive
+--adaptive_noise_threshold <value> Convergence target: past the floor, keep running until the mean's relative standard error drops below this fraction (converged), or the robust spread plateaus (stable), or the ceiling is hit (noisy); 0 disables both (run to the ceiling); requires --adaptive
+--adaptive_stability_threshold <value> Noise-plateau fallback: stop with status=stable once the recent rel_iqr readings vary by less than this fraction; 0 disables the fallback (a non-converging run then goes to the ceiling, status=noisy); requires --adaptive
+--adaptive_stability_window <value> Number of recent rel_iqr readings the stability fallback tests for a plateau (>= 2); requires --adaptive
+--adaptive_stability_interval <value> Record one rel_iqr reading for the stability fallback every N samples (>= 1); requires --adaptive
 (adaptive defaults are shown by --help / -h)
 --algo_method <value>      Use different algorithm search API. Options: heuristic, all, index.                  (Default value is: heuristic)
 --solution_index <value>   Used with --algo_method 2.  Specify solution index to use in benchmark.              (Default value is: -1)
@@ -130,21 +133,27 @@ each sample spans roughly `--adaptive_sample_time` ms.
 
 The run lasts **at least** the floor — `--adaptive_min_iters` and
 `--adaptive_measure_time` — and **at most** the ceiling —
-`--adaptive_max_measure_time` and `--adaptive_max_iters`. Past the floor, it keeps
-collecting samples until the mean's relative standard error (stddev / mean / sqrt(n))
-falls below `--adaptive_noise_threshold` (**converged**, `status=converged`) or the
-ceiling is reached (`status=noisy`). With `--adaptive_noise_threshold 0` convergence
-is disabled, so the run goes to the ceiling and `status` is `-`. A ceiling is
-required — at least one of `--adaptive_max_measure_time` / `--adaptive_max_iters`
-must be > 0 (it is by default), otherwise the run is rejected — so a non-converging
-run is always bounded. (To run a fixed budget, set the floor and ceiling equal, e.g.
-`--adaptive_measure_time 200 --adaptive_max_measure_time 200`.)
+`--adaptive_max_measure_time` and `--adaptive_max_iters`. Past the floor, it stops on
+the first of: the mean's relative standard error (stddev / mean / sqrt(n)) falling
+below `--adaptive_noise_threshold` (**converged**, `status=converged`); or, when that
+target cannot be met, the robust spread (IQR / median) flattening out so more samples
+will not change the result (**stable**, `status=stable`) — a fallback for heavy-tailed
+or unlocked-clock kernels; otherwise the ceiling (`status=noisy`). The stable fallback
+is tuned by `--adaptive_stability_window` / `--adaptive_stability_interval` and can be
+turned off with `--adaptive_stability_threshold 0` (a non-converging run then runs to
+the ceiling and reports `noisy`). With `--adaptive_noise_threshold 0` both the
+convergence check and the fallback are disabled, so the run goes to the ceiling and
+`status` is `-`. A ceiling is required — at least one of
+`--adaptive_max_measure_time` / `--adaptive_max_iters` must be > 0 (it is by default),
+otherwise the run is rejected — so a non-converging run is always bounded. (To run a
+fixed budget, set the floor and ceiling equal, e.g. `--adaptive_measure_time 200
+--adaptive_max_measure_time 200`.)
 
-The reported `us`/`Gflops` are the **mean**; extra columns expose the distribution:
-`batch`, `samples`, `hot_iters`, `median_us`, `min_us`, `cv` (stddev/mean), `rel_iqr`
+The reported `us`/`Gflops` are the **median**; extra columns expose the distribution:
+`batch`, `samples`, `hot_iters`, `mean_us`, `min_us`, `cv` (stddev/mean), `rel_iqr`
 (interquartile range / median — a drift-robust dispersion measure), and `status`
-(`converged` / `noisy` / `-`). Convergence requires at least 10 samples so the
-stddev is trustworthy.
+(`converged` / `stable` / `noisy` / `-`). Convergence requires at least 10 samples so
+the stddev is trustworthy.
 
 `--adaptive` is the gate; the `--adaptive_*` options tune it and **require**
 `--adaptive` (passing one without it is an error). Run `--help` for their current
@@ -156,9 +165,10 @@ is an error** (use `--adaptive_warmup_time` for warmup and `--adaptive_sample_ti
 to influence the batch). Without `--adaptive`, timing is the fixed-count
 `--cold_iters` / `--iters` path and no distribution columns are printed.
 
-Note on the statistic: the **mean** is reported because it is the more reproducible
-estimator for launch-bound / symmetric-jitter kernels. The **median** is kept as a
-column for outlier-robust comparison on larger kernels.
+Note on the statistic: the **median** is reported as the headline because it is
+robust to the occasional slow sample (OS/power jitter, clock dips) that inflates the
+mean on an unlocked GPU. The **mean** is kept as a column for comparison and matches
+the fixed-count number exactly (where median, mean and min coincide).
 
 ```
 ./clients/hipblaslt-bench -m 4096 -n 4096 -k 4096 --transA N --transB T \

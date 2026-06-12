@@ -80,7 +80,10 @@ void Arguments::init()
     noise_threshold  = hipblaslt_bench::adaptive_defaults::noise_threshold;
     min_iters        = hipblaslt_bench::adaptive_defaults::min_iters;
     max_iters        = hipblaslt_bench::adaptive_defaults::max_iters;
-    adaptive         = false;
+    stability_threshold = hipblaslt_bench::adaptive_defaults::stability_threshold;
+    stability_window    = hipblaslt_bench::adaptive_defaults::stability_window;
+    stability_interval  = hipblaslt_bench::adaptive_defaults::stability_interval;
+    adaptive            = false;
 
     algo                   = 0;
     solution_index         = -1;

@@ -286,18 +286,19 @@ public:
                      atol,
                      rtol);
 
-        // Adaptive-timing distribution columns ("us"/Gflops above are the mean).
+        // Adaptive-timing distribution columns ("us"/Gflops above are the median).
         // Emitted only when the adaptive path ran, so the fixed-count line carries
         // no trailing columns.
         if(arg.timing && timing.adaptive)
         {
-            const char* status = timing.noise_active
-                                     ? (timing.converged ? "converged" : "noisy")
-                                     : "-";
+            const char* status = !timing.noise_active ? "-"
+                                 : timing.converged   ? "converged"
+                                 : timing.stable      ? "stable"
+                                                      : "noisy";
             print("batch", timing.batch);
             print("samples", timing.samples);
             print("hot_iters", timing.hot_iters);
-            print("median_us", timing.median_us);
+            print("mean_us", timing.mean_us);
             print("min_us", timing.min_us);
             print("cv", timing.cv);
             print("rel_iqr", timing.rel_iqr);
