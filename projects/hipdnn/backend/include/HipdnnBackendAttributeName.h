@@ -160,6 +160,9 @@ typedef enum
     /** @brief UIDs of tensors required by this plan */
     HIPDNN_ATTR_EXECUTION_PLAN_TENSOR_UIDS_EXT = 308,
 
+    /** @brief Global index of the engine backing this finalized execution plan (read-only) */
+    HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT = 309,
+
     /** @} */
 
     /**

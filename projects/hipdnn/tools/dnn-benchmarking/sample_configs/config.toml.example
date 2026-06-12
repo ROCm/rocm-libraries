@@ -33,10 +33,12 @@ verbose = false
 # Correctness validation tolerances and provider.
 rtol = 1e-5
 atol = 1e-8
-validate = "none"  # "none", "pytorch", or "cpu_plugin"
+validate = "none"  # "none" or "pytorch"
 
-# Plugin discovery directory. A single top-level path applies to all selected or discovered engines.
-plugin_path = "/opt/rocm/lib/hipdnn_plugins/engines"
+# Optional plugin discovery directory. setup.sh prints the selected prefix; pass
+# <selected-prefix>/lib/hipdnn_plugins/engines when plugin discovery is not
+# already configured by the runtime environment.
+# plugin_path = "<selected-prefix>/lib/hipdnn_plugins/engines"
 
 # Always-on metrics tier: "basic" or "off".
 metrics_tier = "basic"
@@ -61,7 +63,7 @@ profiling_timeout = 600
 #
 # [[engines]]
 # id = 1
-# plugin_path = "/opt/rocm/lib/hipdnn_plugins/engines"
+# plugin_path = "<selected-prefix>/lib/hipdnn_plugins/engines"
 #
 # [[engines]]
 # id = 2

@@ -1686,6 +1686,41 @@ struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwd final : ConvOclDirectFwdLegacyEx
                                   const LegacyPerformanceConfig&) const override;
 };
 
+struct MIOPEN_INTERNALS_EXPORT ConvHipDirectFwdLegacyExhaustiveSearch
+    : ConvTunableSolver<LegacyPerformanceConfig>
+{
+    LegacyPerformanceConfig
+    GetDefaultPerformanceConfig(const ExecutionContext&,
+                                const miopen::conv::ProblemDescription&) const override;
+    LegacyPerformanceConfig Search(const ExecutionContext&,
+                                   const miopen::conv::ProblemDescription&,
+                                   const AnyInvokeParams& invoke_ctx) const override;
+
+private:
+    template <typename Tgpu>
+    LegacyPerformanceConfig SearchImpl(const ExecutionContext&,
+                                       const miopen::conv::ProblemDescription&,
+                                       const AnyInvokeParams& invoke_ctx) const;
+};
+
+struct MIOPEN_INTERNALS_EXPORT ConvHipDirectFwd final : ConvHipDirectFwdLegacyExhaustiveSearch
+{
+    const std::string& SolverDbId() const override { return GetSolverDbId<ConvHipDirectFwd>(); }
+
+    static ConvSolution BaseGetSolution(const ExecutionContext&,
+                                        const miopen::conv::ProblemDescription&,
+                                        const LegacyPerformanceConfig&);
+
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&,
+                             const LegacyPerformanceConfig&) const override;
+    bool IsValidPerformanceConfig(const ExecutionContext&,
+                                  const miopen::conv::ProblemDescription&,
+                                  const LegacyPerformanceConfig&) const override;
+};
+
 struct MIOPEN_INTERNALS_EXPORT ConvBinWinograd3x3U final : ConvSolver
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<ConvBinWinograd3x3U>(); }
