@@ -147,11 +147,13 @@ rocfft_rccl_comm_t rocfft_rccl_comm_t::create(const std::set<int>& devices)
 
         group.end();
     }
-    catch(const rocfft_rccl_exception_t&)
-    {
-        // already logged by rocfft_rccl_group_t; fall back
-        return {};
-    }
+        catch(const rocfft_rccl_exception_t& e)
+        {
+            // swallowed here (fall back to P2P/A2A), so log it - the
+            // general handler never sees it
+            log_trace(__func__, "RCCL communicator setup failed", e.what());
+            return {};
+        }
 
     comm_cache[devices] = std::move(new_comm);
 
@@ -214,7 +216,8 @@ rocfft_rccl_group_t::rocfft_rccl_group_t()
     ncclResult_t result = ncclGroupStart();
     if(result != ncclSuccess)
     {
-        log_trace(__func__, "ncclGroupStart failed", result);
+        // not logged here to avoid duplicate traces; the exception carries
+        // the code and is logged where it is caught (or by the general handler)
         throw rocfft_rccl_exception_t("ncclGroupStart failed", result);
     }
     needs_ending = true;
@@ -231,7 +234,7 @@ void rocfft_rccl_group_t::end()
     needs_ending = false;
     if(result != ncclSuccess)
     {
-        log_trace(__func__, "ncclGroupEnd failed", result);
+        // not logged here to avoid duplicate traces; logged where caught
         throw rocfft_rccl_exception_t("ncclGroupEnd failed", result);
     }
 }
