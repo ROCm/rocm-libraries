@@ -166,7 +166,10 @@ def runBuildAndSingleGtestJob(Map conf=[:])
             utils.buildHipClangJob(
                 setup_flags: single_gtest_flags + flags,
                 build_cmd: """
-                    LLVM_PATH=/opt/rocm/llvm CTEST_PARALLEL_LEVEL=4 make -j\$(nproc) install miopen_gtest check 2>&1 | tee ${gtestLog}; BUILD_RC=\${PIPESTATUS[0]}
+                    RC_FILE="${gtestLog}.rc"
+                    { LLVM_PATH=/opt/rocm/llvm CTEST_PARALLEL_LEVEL=4 make -j\$(nproc) install miopen_gtest check 2>&1; echo \$? >"\$RC_FILE"; } | tee ${gtestLog}
+                    BUILD_RC=\$(cat "\$RC_FILE")
+                    rm -f "\$RC_FILE"
                     echo ''
                     echo '===== GTEST FAILURE SUMMARY ====='
                     FAILURES=\$(grep -E '^\\[  FAILED  \\]' ${gtestLog} | grep -v 'tests, listed below' || true)
