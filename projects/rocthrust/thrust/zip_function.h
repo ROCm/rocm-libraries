@@ -73,7 +73,7 @@ THRUST_HOST_DEVICE decltype(auto) apply_impl(Function&& func, Tuple&& args, inde
 template <typename Function, typename Tuple>
 THRUST_HOST_DEVICE decltype(auto) apply(Function&& func, Tuple&& args)
 {
-  constexpr auto tuple_size = thrust::tuple_size<typename std::decay<Tuple>::type>::value;
+  constexpr auto tuple_size = thrust::tuple_size<_THRUST_STD::decay_t<Tuple>>::value;
   return apply_impl(THRUST_FWD(func), THRUST_FWD(args), make_index_sequence<tuple_size>{});
 }
 
@@ -180,9 +180,9 @@ private:
  *  \see zip_function
  */
 template <typename Function>
-THRUST_HOST_DEVICE zip_function<typename std::decay<Function>::type> make_zip_function(Function&& fun)
+THRUST_HOST_DEVICE zip_function<_THRUST_STD::decay_t<Function>> make_zip_function(Function&& fun)
 {
-  using func_t = typename std::decay<Function>::type;
+  using func_t = _THRUST_STD::decay_t<Function>;
   return zip_function<func_t>(THRUST_FWD(fun));
 }
 
