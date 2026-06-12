@@ -854,6 +854,64 @@ def sendTeamsFailureNotification(Map conf=[:]) {
 }
 
 // ---------------------------------------------------------------------------
+// Shard-aware gtest runner
+//
+// Replaces the CTest 'make check' invocation for the single-gtest-binary
+// sharded builds.  Runs all 4 miopen_gtest shards in parallel as background
+// shell processes, prefixes every output line with [ShardN], waits for all
+// shards, then prints a consolidated failure summary and exits non-zero if
+// any shard failed.
+//
+// Usage: pass the returned string as the 'build_cmd' when calling
+// buildHipClangJob(), replacing the 'make check' portion.
+// ---------------------------------------------------------------------------
+
+def makeShardedGtestCmd(String buildDir, int numShards=4, String gtestFilter="*") {
+    return """
+        set +e
+        SHARD_FAILED=0
+        declare -a PIDS
+        declare -a LOGS
+
+        for SHARD_IDX in \$(seq 0 ${numShards - 1}); do
+            LOG_FILE="/tmp/gtest_shard_\${SHARD_IDX}_\$\$.log"
+            LOGS[\$SHARD_IDX]="\$LOG_FILE"
+            (
+                GTEST_TOTAL_SHARDS=${numShards} \\
+                GTEST_SHARD_INDEX=\$SHARD_IDX \\
+                MIOPEN_USER_DB_PATH=${buildDir} \\
+                MIOPEN_INVOKED_FROM_CTEST=1 \\
+                ${buildDir}/bin/miopen_gtest --gtest_filter="${gtestFilter}" 2>&1 \\
+                | sed "s/^/[Shard\${SHARD_IDX}] /"
+            ) > "\$LOG_FILE" 2>&1 &
+            PIDS[\$SHARD_IDX]=\$!
+        done
+
+        for SHARD_IDX in \$(seq 0 ${numShards - 1}); do
+            wait \${PIDS[\$SHARD_IDX]}
+            RC=\$?
+            cat "\${LOGS[\$SHARD_IDX]}"
+            if [ \$RC -ne 0 ]; then SHARD_FAILED=1; fi
+        done
+
+        echo ""
+        echo "===== GTEST SHARD FAILURE SUMMARY ====="
+        for SHARD_IDX in \$(seq 0 ${numShards - 1}); do
+            FAILURES=\$(grep -E "\\[ *FAILED *\\]" "\${LOGS[\$SHARD_IDX]}" || true)
+            if [ -n "\$FAILURES" ]; then
+                echo "[Shard\${SHARD_IDX}] FAILED TESTS:"
+                echo "\$FAILURES"
+            else
+                echo "[Shard\${SHARD_IDX}] All tests passed"
+            fi
+            rm -f "\${LOGS[\$SHARD_IDX]}"
+        done
+        echo "========================================"
+        exit \$SHARD_FAILED
+    """.stripIndent()
+}
+
+// ---------------------------------------------------------------------------
 // Parallel-stage factory methods
 //
 // Each method returns a Map<String, Closure> suitable for passing directly to

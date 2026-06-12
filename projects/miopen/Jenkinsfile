@@ -151,9 +151,11 @@ def runBuildAndSingleGtestJob(Map conf=[:])
     script {
         withWorkingDir {
             def single_gtest_flags = " -DMIOPEN_TEST_DISCRETE=OFF -DGTEST_PARALLEL_LEVEL=4 "
+            def buildDir = "${env.WORKSPACE}/${env.MIOPEN_DIR}/build"
+            def shardCmd = utils.makeShardedGtestCmd(buildDir)
             utils.buildHipClangJob(
                 setup_flags: single_gtest_flags + flags,
-                build_cmd: "LLVM_PATH=/opt/rocm/llvm CTEST_PARALLEL_LEVEL=4 make -j\$(nproc) install miopen_gtest check",
+                build_cmd: "LLVM_PATH=/opt/rocm/llvm make -j\$(nproc) install miopen_gtest && " + shardCmd,
                 build_install:true,
                 build_timeout:build_timeout_minutes,
                 gpu_family: gpu_family)
