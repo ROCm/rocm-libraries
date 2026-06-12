@@ -520,24 +520,11 @@ def getDockerImage(Map conf=[:])
 
     def dockerImage
     try{
-        // Check if the exact image is already present locally before hitting the registry.
-        // docker inspect exits 0 only when the image exists in the local daemon cache.
-        def localExists = sh(
-            script: "docker inspect --format '{{.Id}}' ${image} > /dev/null 2>&1",
-            returnStatus: true
-        ) == 0
-
-        if (localExists) {
-            echo "Image ${image} found in local daemon cache - skipping registry pull."
-            dockerImage = docker.image("${image}")
-        } else {
-            echo "Pulling down image: ${image}"
-            dockerImage = docker.image("${image}")
-            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-                dockerImage.pull()
-            }
+        echo "Pulling down image: ${image}"
+        dockerImage = docker.image("${image}")
+        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            dockerImage.pull()
         }
-
         def embeddedTheRockHash = sh(
             script: "docker inspect --format '{{ index .Config.Labels \"therock.git.hash\" }}' ${image} 2>/dev/null || true",
             returnStdout: true
@@ -598,20 +585,10 @@ def getDockerImage(Map conf=[:])
         image = image + "_perfTest"
 
         try{
-            def localPerfExists = sh(
-                script: "docker inspect --format '{{.Id}}' ${image} > /dev/null 2>&1",
-                returnStatus: true
-            ) == 0
-
-            if (localPerfExists) {
-                echo "Perf test image ${image} found in local daemon cache - skipping registry pull."
-                dockerImage = docker.image("${image}")
-            } else {
-                echo "Pulling down perf test image: ${image}"
-                dockerImage = docker.image("${image}")
-                withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-                    dockerImage.pull()
-                }
+            echo "Pulling down perf test image: ${image}"
+            dockerImage = docker.image("${image}")
+            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                dockerImage.pull()
             }
         }
         catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
