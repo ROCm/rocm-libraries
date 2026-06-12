@@ -245,10 +245,6 @@ pipeline {
     }
     parameters {
         booleanParam(
-            name: "RUN_HIP_TIDY",
-            defaultValue: true,
-            description: "Enable the Hip Tidy (clang-analyze) stage in Full Tests")
-        booleanParam(
             name: "BUILD_DOCKER",
             defaultValue: true,
             description: "")
@@ -257,21 +253,13 @@ pipeline {
             defaultValue: false,
             description: "")
         booleanParam(
-            name: "BUILD_SMOKE_FP32",
-            defaultValue: true,
-            description: "")
-        booleanParam(
-            name: "BUILD_SMOKE_AUX1",
-            defaultValue: true,
-            description: "")
-        booleanParam(
-            name: "BUILD_SMOKE_FP16_BF16_INT8",
-            defaultValue: true,
-            description: "")
-        booleanParam(
             name: "BUILD_FULL_TESTS",
             defaultValue: true,
             description: "")
+        booleanParam(
+            name: "RUN_HIP_TIDY",
+            defaultValue: true,
+            description: "Enable the Hip Tidy (clang-analyze) stage in Full Tests")
         booleanParam(
             name: "BUILD_PACKAGE_AND_CHECKS",
             defaultValue: true,
@@ -325,19 +313,11 @@ pipeline {
             defaultValue: true,
             description: "")
         booleanParam(
-            name: "DATATYPE_INT8",
-            defaultValue: true,
-            description: "")
-        booleanParam(
             name: "DBSYNC_TEST",
             defaultValue: true,
             description: "Enable database synchronization testing stages")
         string(name: "DOCKER_IMAGE_OVERRIDE",
             defaultValue: '',
-            description: "")
-        booleanParam(
-            name: "WORKAROUND__TARGET_GFX942_MINIMUM_TEST_ENABLE",
-            defaultValue: false,
             description: "")
         booleanParam(
             name: "USE_SCCACHE_DOCKER",

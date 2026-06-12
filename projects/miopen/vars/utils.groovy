@@ -1095,7 +1095,7 @@ def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def with
 
     // GFX942 Tests
     stages['Dbsync gfx942'] = {
-        if (pipelineParams.DBSYNC_TEST && (pipelineParams.TARGET_GFX942 || pipelineParams.WORKAROUND__TARGET_GFX942_MINIMUM_TEST_ENABLE) && !passedStages.contains('Dbsync gfx942')) {
+        if (pipelineParams.DBSYNC_TEST && pipelineParams.TARGET_GFX942 && !passedStages.contains('Dbsync gfx942')) {
             node(rocmnodeFn("gfx942")) {
                 try { runDbSyncJobFn(gfx942_flags, "ci") } finally { cleanWs() }
             }
@@ -1256,7 +1256,7 @@ def nightlyTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def w
     }
 
     stages['Fp32 Hip Debug gfx942'] = {
-        if (pipelineParams.TARGET_GFX942 || pipelineParams.WORKAROUND__TARGET_GFX942_MINIMUM_TEST_ENABLE) {
+        if (pipelineParams.TARGET_GFX942) {
             node(rocmnodeFn("gfx942")) {
                 try {
                     withWorkingDirFn {
