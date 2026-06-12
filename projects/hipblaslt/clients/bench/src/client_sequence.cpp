@@ -578,7 +578,7 @@ int main(int argc, char** argv)
 
     // One enqueue of the whole layer sequence for a given (rotating) index.
     auto launch = [&](int64_t idx) {
-        int b = int(idx % block_count);
+        int b = static_cast<int>(idx % block_count);
         for(size_t gemmIdx = 0; gemmIdx < layer.size(); gemmIdx++)
         {
             switch(layer[gemmIdx].type)

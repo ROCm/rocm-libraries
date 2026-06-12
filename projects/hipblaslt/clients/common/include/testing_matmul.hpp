@@ -5708,7 +5708,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     perf_monitor->start();
                     hipblaslt_bench::run_measurement(
                         [&](int64_t i) {
-                            int b = int(i % block_count);
+                            int b = static_cast<int>(i % block_count);
                             CHECK_HIPBLASLT_ERROR(gemmVec[b].run(stream));
                             if(arg.flush)
                                 hipLaunchKernelGGL(
@@ -5785,7 +5785,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     perf_monitor->start();
                     hipblaslt_bench::run_measurement(
                         [&](int64_t i) {
-                            int  b          = int(i % block_count);
+                            int  b          = static_cast<int>(i % block_count);
                             auto ptr_matmul = matmul[b][0];
                             auto ptr_alpha  = arg.scaleAlpha_vector
                                                   ? (dScaleAlphaVec[0].as<char>())
@@ -5883,7 +5883,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     perf_monitor->start();
                     hipblaslt_bench::run_measurement(
                         [&](int64_t i) {
-                            int  b          = int(i % block_count);
+                            int  b          = static_cast<int>(i % block_count);
                             auto ptr_matmul = matmul[b][0];
                             auto ptr_alpha  = arg.scaleAlpha_vector
                                                   ? (dScaleAlphaVec[0].as<char>())
@@ -5980,7 +5980,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     perf_monitor->start();
                     hipblaslt_bench::run_measurement(
                         [&](int64_t i) {
-                            int b = int(i % block_count);
+                            int b = static_cast<int>(i % block_count);
                             CHECK_HIPBLASLT_ERROR(
                                 groupedGemmVec[b].run(d_userArgsVec[b], stream));
                         },
@@ -6040,7 +6040,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     perf_monitor->start();
                     hipblaslt_bench::run_measurement(
                         [&](int64_t i) {
-                            int b = int(i % block_count);
+                            int b = static_cast<int>(i % block_count);
                             CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].run(stream));
                         },
                         timingCfg,
