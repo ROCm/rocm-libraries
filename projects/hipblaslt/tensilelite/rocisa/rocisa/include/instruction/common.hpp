@@ -4094,6 +4094,65 @@ namespace rocisa
         bool addDstToSrc;
     };
 
+    // RDNA3/3.5/4 VOPD dual-issue FMA: issues two independent v_fmac_f32 in one slot.
+    //   dstX = src0X*src1X + dstX  ::  dstY = src0Y*src1Y + dstY
+    // The caller must satisfy the VOPD constraints (dst parity differs; src0/src1 on
+    // different VGPR banks); the assembler rejects illegal pairings.
+    struct VDualFMACF32 : public CommonInstruction
+    {
+        VDualFMACF32(const std::shared_ptr<Container>& dstX,
+                     const InstructionInput&           src0X,
+                     const InstructionInput&           src1X,
+                     const std::shared_ptr<Container>& dstY,
+                     const InstructionInput&           src0Y,
+                     const InstructionInput&           src1Y,
+                     const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_F32,
+                                dstX,
+                                {src0X, src1X, src0Y, src1Y},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            this->dst1 = dstY; // second VOPD destination (tracked as written by passes)
+            setInst("v_dual_fmac_f32");
+        }
+
+        std::string getArgStr() const override
+        {
+            // dstX, src0X, src1X :: v_dual_fmac_f32 dstY, src0Y, src1Y
+            std::string kStr = dst->toString();
+            kStr += ", " + InstructionInputToString(srcs[0]);
+            kStr += ", " + InstructionInputToString(srcs[1]);
+            kStr += " :: v_dual_fmac_f32 " + dst1->toString();
+            kStr += ", " + InstructionInputToString(srcs[2]);
+            kStr += ", " + InstructionInputToString(srcs[3]);
+            return kStr;
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            // both dsts are also read (FMAC accumulate): dst = src0*src1 + dst
+            auto params = CommonInstruction::getSrcParams();
+            if(dst)
+                params.push_back(dst);
+            if(dst1)
+                params.push_back(dst1);
+            return params;
+        }
+
+        VDualFMACF32(const VDualFMACF32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VDualFMACF32>(*this);
+        }
+    };
+
     struct VDot2CF32F16 : public CommonInstruction
     {
         VDot2CF32F16(const std::shared_ptr<Container>& dst,
