@@ -41,15 +41,6 @@ if(DEFINED BUILD_SHARED_LIBS)
 endif()
 set(USER_ROCM_WARN_TOOLCHAIN_VAR ${ROCM_WARN_TOOLCHAIN_VAR})
 
-# Suppress ROCmChecks warnings for local toolchain modifications.
-set(ROCM_WARN_TOOLCHAIN_VAR OFF)
-
-# Force older versions of option() in googletest to respect the local variable setting.
-set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
-
-# Resolve Ninja generator errors regarding RPATH relinking during the install phase for merged subprojects.
-set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
-
 set(ROCM_WARN_TOOLCHAIN_VAR OFF CACHE BOOL "")
 # Turn off warnings and errors for all warnings in dependencies
 separate_arguments(CXX_FLAGS_LIST NATIVE_COMMAND ${CMAKE_CXX_FLAGS})
@@ -68,7 +59,10 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "Global flag to cause add_library() to crea
 # HIP dependency is handled earlier in the project cmake file
 # when VerifyCompiler.cmake is included.
 
-include(cmake/FetchContentIsolated.cmake)
+include(FetchContent)
+
+# For downloading, building, and installing required dependencies
+include(cmake/DownloadProject.cmake)
 
 # Test dependencies
 if(BUILD_TEST)
@@ -96,23 +90,24 @@ if(BUILD_TEST)
       find_package(GTest QUIET)
     endif()
   endif()
-if(NOT TARGET GTest::GTest AND NOT TARGET GTest::gtest)
+  if(NOT TARGET GTest::GTest AND NOT TARGET GTest::gtest)
+    option(BUILD_GTEST "Builds the googletest subproject" ON)
+    option(BUILD_GMOCK "Builds the googlemock subproject" OFF)
+    option(INSTALL_GTEST "Enable installation of googletest." OFF)
     if(EXISTS /usr/src/googletest AND NOT DEPENDENCIES_FORCE_DOWNLOAD)
-      set(GTEST_FETCH_ARGS SOURCE_DIR /usr/src/googletest)
+      FetchContent_Declare(
+        googletest
+        SOURCE_DIR /usr/src/googletest
+      )
     else()
       message(STATUS "Google Test not found. Fetching...")
-      set(GTEST_FETCH_ARGS 
+      FetchContent_Declare(
+        googletest
         GIT_REPOSITORY https://github.com/google/googletest.git
         GIT_TAG        e2239ee6043f73722e7aa812a459f54a28552929 # release-1.11.0
       )
     endif()
-
-    fetch_content_isolated(
-      googletest
-      ${GTEST_FETCH_ARGS}
-      CMAKE_ARGS -DBUILD_GTEST=ON -DBUILD_GMOCK=OFF -DINSTALL_GTEST=OFF
-    )
-
+    FetchContent_MakeAvailable(googletest)
     add_library(GTest::GTest ALIAS gtest)
     add_library(GTest::Main  ALIAS gtest_main)
   else()
@@ -137,24 +132,27 @@ if(NOT ROCmCMakeBuildTools_FOUND)
     set(SOURCE_SUBDIR_ARG)
   endif()
   set(rocm_cmake_tag "master" CACHE STRING "rocm-cmake tag to download")
-
-  fetch_content_isolated(
+  FetchContent_Declare(
     rocm-cmake
     GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
     GIT_TAG        rocm-6.4.4
     ${SOURCE_SUBDIR_ARG}
   )
-
-  message("Populated: ${rocm-cmake_SOURCE_DIR}")
-  # rocm-cmake 0.12.0 and higher needs to built from source
-  execute_process(
-    WORKING_DIRECTORY ${rocm-cmake_SOURCE_DIR}
-    COMMAND ${CMAKE_COMMAND} ${rocm-cmake_SOURCE_DIR} -DCMAKE_INSTALL_PREFIX=.
-  )
-  execute_process(
-    WORKING_DIRECTORY ${rocm-cmake_SOURCE_DIR}
-    COMMAND ${CMAKE_COMMAND} --build ${rocm-cmake_SOURCE_DIR} --target install
-  )
+  FetchContent_GetProperties(rocm-cmake)
+  if(NOT rocm-cmake_POPULATED)
+    # rocm-cmake 0.12.0 and higher needs to built from source
+    FetchContent_Populate(rocm-cmake)
+    message("Populated: ${rocm-cmake_SOURCE_DIR}")
+    execute_process(
+      WORKING_DIRECTORY ${rocm-cmake_SOURCE_DIR}
+      COMMAND ${CMAKE_COMMAND} ${rocm-cmake_SOURCE_DIR} -DCMAKE_INSTALL_PREFIX=.
+    )
+    execute_process(
+      WORKING_DIRECTORY ${rocm-cmake_SOURCE_DIR}
+      COMMAND ${CMAKE_COMMAND} --build ${rocm-cmake_SOURCE_DIR} --target install
+    )
+  endif()
+  FetchContent_MakeAvailable(rocm-cmake)
   find_package(ROCmCMakeBuildTools CONFIG REQUIRED NO_DEFAULT_PATH PATHS "${rocm-cmake_SOURCE_DIR}")
 else()
   find_package(ROCmCMakeBuildTools 0.11.0 CONFIG REQUIRED PATHS "${ROCM_ROOT}")
@@ -167,18 +165,33 @@ if(WITH_ROCRAND)
 endif()
 if(WITH_ROCRAND AND NOT rocrand_FOUND)
   message(STATUS "Downloading and building rocrand.")
-  set(rocrand_LOCAL_DIR ${CMAKE_CURRENT_BINARY_DIR}/deps/rocrand CACHE PATH "")
+  set(ROCRAND_ROOT ${CMAKE_CURRENT_BINARY_DIR}/deps/rocrand CACHE PATH "")
 
-  fetch_content_isolated(
-    rocrand
+  set(EXTRA_CMAKE_ARGS "-DGPU_TARGETS=${GPU_TARGETS}")
+  # CMAKE_ARGS of download_project (or ExternalProject_Add) can't contain ; so another separator
+  # is needed and LIST_SEPARATOR is passed to download_project()
+  string(REPLACE ";" "|" EXTRA_CMAKE_ARGS "${EXTRA_CMAKE_ARGS}")
+  # Pass launcher so sccache can be used to speed up building rocRAND
+  if(CMAKE_CXX_COMPILER_LAUNCHER)
+    set(EXTRA_CMAKE_ARGS "${EXTRA_CMAKE_ARGS} -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}")
+  endif()
+  download_project(
+    PROJ                  rocrand
     GIT_REPOSITORY        https://github.com/ROCmSoftwarePlatform/rocRAND.git
     GIT_TAG               develop
     GIT_SHALLOW           TRUE
-    CMAKE_ARGS            -DCMAKE_CXX_COMPILER=hipcc -DBUILD_TEST=OFF "-DGPU_TARGETS=${GPU_TARGETS}" -DCMAKE_PREFIX_PATH=/opt/rocm
+    INSTALL_DIR           ${ROCRAND_ROOT}
+    LIST_SEPARATOR        |
+    CMAKE_ARGS            -DCMAKE_CXX_COMPILER=hipcc -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm ${EXTRA_CMAKE_ARGS}
+    LOG_DOWNLOAD          TRUE
+    LOG_CONFIGURE         TRUE
+    LOG_BUILD             TRUE
+    LOG_INSTALL           TRUE
+    LOG_OUTPUT_ON_FAILURE TRUE
+    BUILD_PROJECT         TRUE
     UPDATE_DISCONNECTED   TRUE
   )
-
-  find_package(rocrand REQUIRED CONFIG PATHS ${rocrand_LOCAL_DIR})
+  find_package(rocrand REQUIRED CONFIG PATHS ${ROCRAND_ROOT})
 endif()
 
 

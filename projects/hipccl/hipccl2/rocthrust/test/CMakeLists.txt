@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2026 Advanced Micro Devices, Inc.
+# Copyright 2019-2025 Advanced Micro Devices, Inc.
 # ########################################################################
 
 set(INSTALL_TEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
@@ -380,7 +380,6 @@ rocm_install(
 
 # Build the executable used for generating the resource spec file.
 add_executable(generate_resource_spec ${CMAKE_SOURCE_DIR}/test/generate_resource_spec.cpp)
-target_compile_options(generate_resource_spec PRIVATE -Wno-unused-command-line-argument)
 set_target_properties(generate_resource_spec PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 target_link_libraries(generate_resource_spec PRIVATE hip::host)
 

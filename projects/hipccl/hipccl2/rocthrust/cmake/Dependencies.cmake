@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2026 Advanced Micro Devices, Inc.
+# Copyright 2019-2025 Advanced Micro Devices, Inc.
 # ########################################################################
 
 # ###########################
@@ -10,17 +10,16 @@
 # when VerifyCompiler.cmake is included.
 
 # For downloading, building, and installing required dependencies
-include(cmake/FetchContentIsolated.cmake)
+include(cmake/DownloadProject.cmake)
+include(FetchContent)
 
-# Suppress ROCmChecks warnings for local toolchain modifications.
-set(ROCM_WARN_TOOLCHAIN_VAR OFF)
-
-# Force older versions of option() in googletest to respect the local variable setting.
-set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
-
-# Resolve Ninja generator errors regarding RPATH relinking during the install phase for
-# merged subprojects.
-set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
+# Suppress ROCMChecks WARNING on third-party dependencies that modify CMAKE_CXX_FLAGS
+set(_ROCTHRUST_DISABLE_ROCM_CHECKS FALSE)
+macro(rocm_check_toolchain_var var access value list_file)
+  if(NOT _ROCTHRUST_DISABLE_ROCM_CHECKS)
+    _rocm_check_toolchain_var("${var}" "${access}" "${value}" "${list_file}")
+  endif()
+endmacro()
 
 # The option of using the SQLite provided by the system, instead of downloading a copy
 option( SQLITE_USE_SYSTEM_PACKAGE "Use SQLite3 from find_package" OFF )
@@ -251,11 +250,16 @@ if(${LINK_HIP_DEVICE_LIBS})
   if(${ROCPRIM_FETCH_METHOD} STREQUAL "DOWNLOAD" OR ${ROCPRIM_FETCH_METHOD} STREQUAL "MONOREPO")
     # The fetch_dep call above should have downloaded/located the source. We just need to make it available.
     message(STATUS "Configuring rocPRIM")
-    fetch_content_isolated(
+    FetchContent_Declare(
       prim
       SOURCE_DIR    ${ROCPRIM_PATH}
-      CMAKE_ARGS    -DBUILD_TEST=OFF -DCMAKE_PREFIX_PATH=/opt/rocm
+      INSTALL_DIR   ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim
+      CMAKE_ARGS    -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
+      LOG_CONFIGURE TRUE
+      LOG_BUILD     TRUE
+      LOG_INSTALL   TRUE
     )
+    FetchContent_MakeAvailable(prim)
     if(NOT TARGET roc::rocprim)
       add_library(roc::rocprim ALIAS rocprim)
     endif()
@@ -280,19 +284,21 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
     option(BUILD_GMOCK "Builds the googlemock subproject" OFF)
     option(INSTALL_GTEST "Enable installation of googletest." OFF)
     if(EXISTS /usr/src/googletest AND NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
-      set(GTEST_FETCH_ARGS SOURCE_DIR /usr/src/googletest)
+      FetchContent_Declare(
+        googletest
+        SOURCE_DIR /usr/src/googletest
+      )
     else()
       message(STATUS "Google Test not found. Fetching...")
-      set(GTEST_FETCH_ARGS 
+      FetchContent_Declare(
+        googletest
         GIT_REPOSITORY https://github.com/google/googletest.git
         GIT_TAG        release-1.11.0
       )
     endif()
-    fetch_content_isolated(
-      googletest
-      ${GTEST_FETCH_ARGS}
-      CMAKE_ARGS -DBUILD_GTEST=ON -DBUILD_GMOCK=OFF -DINSTALL_GTEST=OFF
-    )
+    set(_ROCTHRUST_DISABLE_ROCM_CHECKS TRUE)
+    FetchContent_MakeAvailable(googletest)
+    set(_ROCTHRUST_DISABLE_ROCM_CHECKS FALSE)
     add_library(GTest::GTest ALIAS gtest)
     add_library(GTest::Main  ALIAS gtest_main)
   endif()
@@ -301,12 +307,17 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
     message(STATUS "TBB not found or force download TBB on. Downloading and building TBB.")
     set(TBB_ROOT ${CMAKE_CURRENT_BINARY_DIR}/deps/tbb CACHE PATH "" FORCE)
 
-    fetch_content_isolated(
+    FetchContent_Declare(
       TBB
       GIT_REPOSITORY      https://github.com/oneapi-src/oneTBB.git
       GIT_TAG             1c4c93fc5398c4a1acb3492c02db4699f3048dea # v2021.13.0
-      CMAKE_ARGS          -DTBB_TEST=OFF -DTBB_BUILD=ON -DTBB_INSTALL=ON -DTBBMALLOC_PROXY_BUILD=OFF
+      INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}/deps/tbb
+      CMAKE_ARGS          -DCMAKE_CXX_COMPILER=g++ -DTBB_TEST=OFF -DTBB_BUILD=ON -DTBB_INSTALL=ON -DTBBMALLOC_PROXY_BUILD=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
+      LOG_CONFIGURE       TRUE
+      LOG_BUILD           TRUE
+      LOG_INSTALL         TRUE
     )
+    FetchContent_MakeAvailable(TBB)
     if(NOT TARGET TBB::tbb)
       add_library(TBB::tbb)
     endif()
@@ -337,10 +348,11 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
     endif()
 
     message("Downloading SQLite.")
-    fetch_content_isolated(sqlite_local
+    FetchContent_Declare(sqlite_local
       URL ${SQLITE_3_50_2_SRC_URL}
       URL_HASH SHA3_256=${SQLITE_SRC_3_50_2_SHA3_256}
     )
+    FetchContent_MakeAvailable(sqlite_local)
 
     add_library(sqlite3 OBJECT ${sqlite_local_SOURCE_DIR}/sqlite3.c)
     target_include_directories(sqlite3 PUBLIC ${sqlite_local_SOURCE_DIR})
@@ -375,23 +387,45 @@ if(BUILD_BENCHMARK)
 
   if(NOT benchmark_FOUND)
     message(STATUS "Google Benchmark not found or force download Google Benchmark on. Downloading and building Google Benchmark.")
+    if(CMAKE_CONFIGURATION_TYPES)
+      message(FATAL_ERROR "DownloadProject.cmake doesn't support multi-configuration generators.")
+    endif()
     set(GOOGLEBENCHMARK_ROOT ${CMAKE_CURRENT_BINARY_DIR}/deps/googlebenchmark CACHE PATH "")
-    set(BENCHMARK_CMAKE_ARGS -DBENCHMARK_ENABLE_TESTING=OFF
-                             -DBENCHMARK_ENABLE_INSTALL=OFF
-                             -DHAVE_STD_REGEX=ON
-                             -DRUN_HAVE_STD_REGEX=1)
+    if(NOT (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
+      if(WIN32)
+        get_filename_component(CXX_DIRNAME ${CMAKE_CXX_COMPILER} DIRECTORY)
+        set(COMPILER_OVERRIDE "-DCMAKE_CXX_COMPILER=${CXX_DIRNAME}/clang++.exe")
+      else()
+        set(COMPILER_OVERRIDE "-DCMAKE_CXX_COMPILER=g++")
+      endif()
+    endif()
 
     message(STATUS "Google Benchmark not found. Fetching...")
-
-    fetch_content_isolated(
+    option(BENCHMARK_ENABLE_TESTING "Enable testing of the benchmark library." OFF)
+    option(BENCHMARK_ENABLE_INSTALL "Enable installation of benchmark." OFF)
+    FetchContent_Declare(
       googlebench
       GIT_REPOSITORY https://github.com/google/benchmark.git
       GIT_TAG        v${BENCHMARK_VERSION}
-      CMAKE_ARGS     ${BENCHMARK_CMAKE_ARGS}
     )
-    if(NOT TARGET benchmark::benchmark)
-      add_library(benchmark::benchmark ALIAS benchmark)
-    endif()
+    set(HAVE_STD_REGEX ON)
+    set(RUN_HAVE_STD_REGEX 1)
+    set(_ROCTHRUST_DISABLE_ROCM_CHECKS TRUE)
+    FetchContent_MakeAvailable(googlebench)
+    set(_ROCTHRUST_DISABLE_ROCM_CHECKS FALSE)
+	# Clang on Windows throws the following warnings with Googlebenchmark v1.9.5 (along with Werror):
+    # googlebench-src/src/string_util.cc:158:34: error: format string is not a string literal [-Werror,-Wformat-nonliteral]
+	if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND WIN32)  
+	  if(TARGET benchmark)  
+	    target_compile_options(benchmark PRIVATE -Wno-format-nonliteral -Wno-missing-format-attribute -Wno-unused-command-line-argument)  
+	  endif()  
+	  if(TARGET benchmark_main)  
+	    target_compile_options(benchmark_main PRIVATE -Wno-format-nonliteral -Wno-missing-format-attribute -Wno-unused-command-line-argument)	
+	  endif()
+      if(NOT TARGET benchmark::benchmark)
+        add_library(benchmark::benchmark ALIAS benchmark)
+      endif()
+	endif()
   endif()
 
   # rocRAND (https://github.com/ROCm/rocm-libraries)
@@ -401,14 +435,25 @@ if(BUILD_BENCHMARK)
   # The path to the repo will is stored in ${ROCRAND_PATH}.
   if(${ROCRAND_FETCH_METHOD} STREQUAL "MONOREPO" OR ${ROCRAND_FETCH_METHOD} STREQUAL "DOWNLOAD")
     message(STATUS "Downloading and building rocrand.")
-
-    fetch_content_isolated(
+    set(EXTRA_CMAKE_ARGS "-DGPU_TARGETS=${GPU_TARGETS}")
+    # CMAKE_ARGS of FetchContent_Declare (or ExternalProject_Add) can't contain ; so another separator
+    # is needed and LIST_SEPARATOR is passed to FetchContent_Declare()
+    string(REPLACE ";" "|" EXTRA_CMAKE_ARGS "${EXTRA_CMAKE_ARGS}")
+    # Pass launcher so sccache can be used to speed up building rocRAND
+    if(CMAKE_CXX_COMPILER_LAUNCHER)
+      set(EXTRA_CMAKE_ARGS "${EXTRA_CMAKE_ARGS} -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}")
+    endif()
+    
+    FetchContent_Declare(
       rocrand
       SOURCE_DIR    ${ROCRAND_PATH}
-      CMAKE_ARGS    -DBUILD_TEST=OFF
-                    "-DGPU_TARGETS=${GPU_TARGETS}"
-                    -DCMAKE_PREFIX_PATH=/opt/rocm
+      INSTALL_DIR   ${CMAKE_CURRENT_BINARY_DIR}/deps/rocrand
+      CMAKE_ARGS    -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm ${EXTRA_CMAKE_ARGS}
+      LOG_CONFIGURE TRUE
+      LOG_BUILD     TRUE
+      LOG_INSTALL   TRUE
     )
+    FetchContent_MakeAvailable(rocrand)
     if(NOT TARGET roc::rocrand)
       add_library(roc::rocrand ALIAS rocrand)
     endif()
