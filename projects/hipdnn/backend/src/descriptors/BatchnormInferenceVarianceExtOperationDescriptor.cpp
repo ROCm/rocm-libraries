@@ -290,7 +290,7 @@ std::string BatchnormInferenceVarianceExtOperationDescriptor::toString() const
     str += ", epsilon_uid=" + std::to_string(_data.epsilon_tensor_uid);
     str += ", compute_data_type=";
     str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
-    str += "}";
+    str += '}';
     return str;
 }
 

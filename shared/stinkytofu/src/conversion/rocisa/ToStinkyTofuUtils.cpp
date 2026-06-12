@@ -97,6 +97,33 @@ stinkytofu::MUBUFScope convertMUBUFScope(rocisa::CacheScope scope) {
     }
 }
 
+// rocisa and StinkyTofu use the same ISA TH[2:0] encoding, but keep distinct enum
+// types; map explicitly rather than static_cast so the two stay decoupled. Note
+// TH_WB aliases TH_LU and TH_NT_WB aliases TH_RESERVED (same encoding), so only the
+// canonical labels appear here.
+stinkytofu::TemporalHint convertTemporalHint(rocisa::TemporalHint th) {
+    switch (th) {
+        case rocisa::TemporalHint::TH_RT:
+            return stinkytofu::TemporalHint::TH_RT;
+        case rocisa::TemporalHint::TH_NT:
+            return stinkytofu::TemporalHint::TH_NT;
+        case rocisa::TemporalHint::TH_HT:
+            return stinkytofu::TemporalHint::TH_HT;
+        case rocisa::TemporalHint::TH_LU:
+            return stinkytofu::TemporalHint::TH_LU;
+        case rocisa::TemporalHint::TH_NT_RT:
+            return stinkytofu::TemporalHint::TH_NT_RT;
+        case rocisa::TemporalHint::TH_RT_NT:
+            return stinkytofu::TemporalHint::TH_RT_NT;
+        case rocisa::TemporalHint::TH_NT_HT:
+            return stinkytofu::TemporalHint::TH_NT_HT;
+        case rocisa::TemporalHint::TH_RESERVED:
+            return stinkytofu::TemporalHint::TH_RESERVED;
+        default:
+            return stinkytofu::TemporalHint::TH_NONE;
+    }
+}
+
 stinkytofu::MUBUFModifiers convertMUBUFModifiers(const rocisa::MUBUFModifiers& rocMod,
                                                  const std::map<std::string, int>& asmCaps) {
     bool hasMUBUFConst = asmCaps.count("HasMUBUFConst") && asmCaps.at("HasMUBUFConst");
@@ -246,6 +273,16 @@ Legalized legalizeInstruction(StinkyInstruction* inst, rocisa::Instruction* roci
         rocisa::BranchInstruction* branchInst =
             dynamic_cast<rocisa::BranchInstruction*>(rocisaInst);
         assert(branchInst != nullptr && "This should be a rocisa Branch.");
+
+        // SSetPCB64 records its long-branch target in a dedicated longBranchLabel
+        // field (populated by the SLongBranch* helpers in rocisa extension.hpp)
+        if (auto* setpc = dynamic_cast<rocisa::SSetPCB64*>(rocisaInst)) {
+            if (!setpc->longBranchLabel.empty()) {
+                inst->addModifier<LabelData>(LabelData{setpc->longBranchLabel});
+            }
+            return {nullptr, nullptr};
+        }
+
         inst->addModifier<LabelData>(LabelData{branchInst->labelName});
         return {nullptr, nullptr};
     }
@@ -483,6 +520,23 @@ void handleSMFMAModifiers(StinkyInstruction* stinkyInst, const std::string& inst
     stinkyInst->addModifier<MFMAModifiers>(mod);
 }
 
+/// Helper to handle global_prefetch_b8 (gl2-prefetch) temporal-hint / cache-scope
+/// modifiers. Read directly from rocisa's GLOBALModifiers (via getModifier()).
+void handleGlobalPrefetchModifier(StinkyInstruction* stinkyInst,
+                                  const rocisa::GlobalPrefetchB8* inst) {
+    const std::optional<rocisa::GLOBALModifiers>& gm = inst->getModifier();
+    if (!gm) return;
+
+    stinkytofu::TemporalHint th = convertTemporalHint(gm->th);
+    stinkytofu::MUBUFScope scope = convertMUBUFScope(gm->scope);
+    if (th == stinkytofu::TemporalHint::TH_NONE && scope == stinkytofu::MUBUFScope::SCOPE_NONE &&
+        gm->offset == 0) {
+        return;
+    }
+    stinkyInst->addModifier<stinkytofu::GLOBALModifiers>(
+        stinkytofu::GLOBALModifiers(gm->offset, th, scope));
+}
+
 /// Helper to handle SWaitCnt instruction modifiers
 void handleSWaitCntModifiers(StinkyInstruction* stinkyInst, const rocisa::SWaitCnt* waitCntInst,
                              const std::map<std::string, int>& asmCaps) {
@@ -634,6 +688,10 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
                                 stinkyInst->addModifier<stinkytofu::CacheScopeModifiers>(
                                     stinkytofu::CacheScopeModifiers(
                                         convertMUBUFScope(typedInst->scope))))
+
+            // global_prefetch_b8 (gl2-prefetch): temporal hint + cache scope.
+            else HANDLE_INST_TYPE(rocisa::GlobalPrefetchB8,
+                                handleGlobalPrefetchModifier(stinkyInst, typedInst))
         }
     // clang-format on
 
@@ -1101,6 +1159,18 @@ std::array<int, 3> convertArch(nb::object arch_obj) {
 ///
 /// \param m The nanobind module to add bindings to
 void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
+    // Pipeline extension point enum
+    nb::enum_<PipelineExtensionPoint>(m, "PipelineExtensionPoint")
+        .value("BeforeRegionPasses", PipelineExtensionPoint::BeforeRegionPasses)
+        .value("InnerRegionBegin", PipelineExtensionPoint::InnerRegionBegin)
+        .value("InnerRegionEnd", PipelineExtensionPoint::InnerRegionEnd)
+        .value("AfterRegionPasses", PipelineExtensionPoint::AfterRegionPasses);
+
+    m.def("loadPlugin", &PassBuilder::loadPlugin, nb::arg("path"),
+          "Load a plugin shared library (.so/.dll) that exports registerPlugin()");
+    m.def("loadPluginsFromDirectory", &PassBuilder::loadPluginsFromDirectory, nb::arg("dirPath"),
+          "Load all plugin shared libraries (.so/.dll) from a directory");
+
     // Bind isSupportedByStinkyTofu to check if the architecture is supported by StinkyTofu
     m.def(
         "isSupportedByStinkyTofu",
@@ -1160,6 +1230,29 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             return result;
         }
 
+        // Plugin data forwarding
+        void setPluginDataI64(const std::string& key, int64_t value) {
+            module_->setPluginDataI64(key, value);
+        }
+        int64_t getPluginDataI64(const std::string& key, int64_t defaultVal = 0) const {
+            return module_->getPluginDataI64(key, defaultVal);
+        }
+        void setPluginDataStr(const std::string& key, const std::string& value) {
+            module_->setPluginDataStr(key, value);
+        }
+        std::string getPluginDataStr(const std::string& key,
+                                     const std::string& defaultVal = "") const {
+            return module_->getPluginDataStr(key, defaultVal);
+        }
+
+        void registerPassAtExtensionPoint(PipelineExtensionPoint ep, const std::string& passName) {
+            module_->getPassBuilder().registerAtExtensionPoint(
+                ep, [passName](PassManager& PM, StinkyAsmModule& module) {
+                    auto pass = PassBuilder::createPassByName(passName, module);
+                    if (pass) PM.addPass(std::move(pass));
+                });
+        }
+
         // Provide access to underlying module if needed
         std::shared_ptr<StinkyAsmModule> getModule() const {
             return module_;
@@ -1178,7 +1271,18 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
              "Set output dir for cost file: comparison_output/<yaml_name>; file at "
              "<dir>/<kernel_name>/aggregated_instruction_cost.txt")
         .def("getOutputDir", &StinkyAsmModuleWithSignature::getOutputDir)
-        .def("getModule", &StinkyAsmModuleWithSignature::getModule);
+        .def("getModule", &StinkyAsmModuleWithSignature::getModule)
+        .def("setPluginDataI64", &StinkyAsmModuleWithSignature::setPluginDataI64, nb::arg("key"),
+             nb::arg("value"), "Set an integer plugin data value accessible by plugin passes")
+        .def("getPluginDataI64", &StinkyAsmModuleWithSignature::getPluginDataI64, nb::arg("key"),
+             nb::arg("defaultVal") = 0, "Get an integer plugin data value")
+        .def("setPluginDataStr", &StinkyAsmModuleWithSignature::setPluginDataStr, nb::arg("key"),
+             nb::arg("value"), "Set a string plugin data value accessible by plugin passes")
+        .def("getPluginDataStr", &StinkyAsmModuleWithSignature::getPluginDataStr, nb::arg("key"),
+             nb::arg("defaultVal") = "", "Get a string plugin data value")
+        .def("registerPassAtExtensionPoint",
+             &StinkyAsmModuleWithSignature::registerPassAtExtensionPoint, nb::arg("extensionPoint"),
+             nb::arg("passName"), "Register a named C++ pass at a pipeline extension point");
 
     // Bind toStinkyTofuModule with signature support
     m.def(
@@ -1220,6 +1324,11 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
 
             // Convert signature to StinkyTofu format, using the wavefrontSize passed from Python
             auto stinkySig = toStinkySignature(signature, archArray, moduleOptions.wavefrontSize);
+
+            // Expose per-wave VGPR allocation on the Function.
+            stinkyModule->getFunction().setMetaData(
+                kSigTotalVgprsMetaKey,
+                static_cast<uint64_t>(stinkySig->kernelDescriptor.totalVgprs));
 
             // Set optimization config
             std::array<int, 2> tt = {moduleOptions.TileA0, moduleOptions.TileB0};

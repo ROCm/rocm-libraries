@@ -35,6 +35,7 @@
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
+#include "stinkytofu/transforms/asm/LongBranchLoweringPass.hpp"
 #include "stinkytofu/transforms/asm/LoopRegionRemarkPass.hpp"
 #include "stinkytofu/transforms/asm/MemTokenConsistencyCheckPass.hpp"
 #include "stinkytofu/transforms/asm/PeepholeOptimizationPass.hpp"
@@ -85,6 +86,8 @@ const std::vector<PassInfo> availablePasses = {
     {"MemTokenConsistencyCheckPass", []() { return createMemTokenConsistencyCheckPass(); }},
     {"RaiseVgprMsbPass", []() { return createRaiseVgprMsbPass(); }},
     {"InsertVgprMsbPass", []() { return createInsertVgprMsbPass(); }},
+    {"LongBranchLoweringPass", []() { return createLongBranchLoweringPass(); }},
+    {"CFGBuilderPass", []() { return createCFGBuilderPass(); }},
 };
 
 /**
@@ -109,12 +112,4 @@ stinkytofu::PassFeatureConfig getPassFeatureConfig() {
     config.loopConfig.unrollGemm = true;
     config.dagFeatures.distributeGlobalRead = true;
     return config;
-}
-
-/**
- * Set default kernel configuration for the PassManager.
- */
-void setKernelConfig(stinkytofu::PassManager& passManager, const std::array<int, 3>& arch) {
-    passManager.setKernelConfig(arch /* arch */, 0 /* ta0 */, 0 /* tb0 */, 0 /* tm0 */,
-                                0 /* nGRA */, 0 /* nGRB */, 0 /* nGRM */, 0 /* numWaves */);
 }

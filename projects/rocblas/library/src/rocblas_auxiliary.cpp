@@ -127,6 +127,86 @@ catch(...)
 }
 
 /*******************************************************************************
+ * ! \brief get alpha stride
+ ******************************************************************************/
+extern "C" rocblas_status rocblas_get_batch_alpha_stride(rocblas_handle  handle,
+                                                         rocblas_stride* alpha_stride)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+    *alpha_stride = handle->get_stride_alpha();
+    rocblas_internal_logger logger;
+    if(handle->layer_mode & rocblas_layer_mode_log_trace)
+        logger.log_trace(handle, "rocblas_get_batch_alpha_stride", *alpha_stride);
+    return rocblas_status_success;
+}
+catch(...)
+{
+    return exception_to_rocblas_status();
+}
+
+/*******************************************************************************
+ * ! \brief set alpha stride
+ ******************************************************************************/
+extern "C" rocblas_status rocblas_set_batch_alpha_stride(rocblas_handle handle,
+                                                         rocblas_stride alpha_stride)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+    rocblas_internal_logger logger;
+    if(handle->layer_mode & rocblas_layer_mode_log_trace)
+        logger.log_trace(handle, "rocblas_set_batch_alpha_stride", alpha_stride);
+    handle->set_stride_alpha(alpha_stride);
+    return rocblas_status_success;
+}
+catch(...)
+{
+    return exception_to_rocblas_status();
+}
+
+/*******************************************************************************
+ * ! \brief get beta stride
+ ******************************************************************************/
+extern "C" rocblas_status rocblas_get_batch_beta_stride(rocblas_handle  handle,
+                                                        rocblas_stride* beta_stride)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+    *beta_stride = handle->get_stride_beta();
+    rocblas_internal_logger logger;
+    if(handle->layer_mode & rocblas_layer_mode_log_trace)
+        logger.log_trace(handle, "rocblas_get_batch_beta_stride", *beta_stride);
+    return rocblas_status_success;
+}
+catch(...)
+{
+    return exception_to_rocblas_status();
+}
+
+/*******************************************************************************
+ * ! \brief set beta stride
+ ******************************************************************************/
+extern "C" rocblas_status rocblas_set_batch_beta_stride(rocblas_handle handle,
+                                                        rocblas_stride beta_stride)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+    rocblas_internal_logger logger;
+    if(handle->layer_mode & rocblas_layer_mode_log_trace)
+        logger.log_trace(handle, "rocblas_set_batch_beta_stride", beta_stride);
+    handle->set_stride_beta(beta_stride);
+    return rocblas_status_success;
+}
+catch(...)
+{
+    return exception_to_rocblas_status();
+}
+
+/*******************************************************************************
  * ! \brief get math mode
  ******************************************************************************/
 extern "C" rocblas_status rocblas_get_math_mode(rocblas_handle handle, rocblas_math_mode* mode)
