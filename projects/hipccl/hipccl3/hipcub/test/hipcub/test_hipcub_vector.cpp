@@ -33,7 +33,7 @@ struct params
 };
 
 template<class Params>
-class HipcubVector : public ::testing::Test
+class HipcubVector : public test_controller::ControlledTest<>
 {
 public:
     using params = Params;
@@ -89,6 +89,7 @@ void run_vector_test()
     using Vector                      = hipcub::CubVector<T, vec_size>;
     constexpr unsigned int size       = 128;
     constexpr unsigned int block_size = 16;
+	CHECK_SIZE_ENABLEMENT(static_cast<size_t>(size));
 
     Vector* device_input;
     HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, size * sizeof(Vector)));
@@ -154,7 +155,11 @@ TYPED_TEST(HipcubVector, Vector4)
     run_vector_test<typename TestFixture::params::value_type, 4>();
 }
 
-TEST(HipcubVectorCustomType, VectorCustomType)
+class HipcubVectorCustomType : public test_controller::ControlledTest<>
+{	
+};
+
+TEST_F(HipcubVectorCustomType, VectorCustomType)
 {
     // Custom types do not support operators
     int device_id = test_common_utils::obtain_device_from_ctest();
