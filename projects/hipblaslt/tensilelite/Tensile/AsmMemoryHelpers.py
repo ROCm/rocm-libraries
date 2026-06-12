@@ -43,8 +43,8 @@ def dsStore(bps, dstAddr, src, ds, comment="", memToken=None):
     """
     bps_int = int(bps)
     if bps_int == 32:
-        srcLo = _halfWidthVgpr(str(src), shift=0)
-        srcHi = _halfWidthVgpr(str(src), shift=4)
+        srcLo = _halfWidthVgpr(src, shift=0)
+        srcHi = _halfWidthVgpr(src, shift=4)
         dsLoOffset = ds.offset if ds is not None else 0
         dsHiOffset = dsLoOffset + 16
         dsLo = DSModifiers(offset=dsLoOffset)
@@ -68,23 +68,29 @@ def dsStore(bps, dstAddr, src, ds, comment="", memToken=None):
     return inst
 
 
-def _halfWidthVgpr(srcStr, shift):
-    """Parse a vgpr range string ("v[A+B:A+B+7]" or "v[N:N+7]") and return a
-    new 4-dword (B128) vgpr whose start is shifted by `shift` from the
-    original start. Used by dsStore() to split a B256 source into B128 halves.
+def _halfWidthVgpr(src, shift):
+    """Return a 4-dword (B128) vgpr whose start is shifted by `shift` dwords from
+    `src`'s start. Used by dsStore() to split a B256 source into B128 halves.
+
+    Works directly off the rocisa RegisterContainer fields (regIdx / regName)
+    rather than parsing str(src). This avoids display-only artifacts of
+    RegisterContainer.toString() that string parsing would trip on:
+      - HasVgprMSB compensation suffix, e.g. "v[300-256:...]"
+      - the "vgpr" prefix toString prepends to named registers, e.g.
+        "v[vgprFoo+4:...]" (the stored regName.name is the bare "Foo"), which
+        would double-prefix to "vgprvgprFoo" if fed back through vgpr().
     """
-    inner = srcStr.strip()
-    assert inner.startswith("v[") and inner.endswith("]"), \
-        f"_halfWidthVgpr: unexpected vgpr format: {srcStr}"
-    leftStr = inner[2:-1].split(":", 1)[0]
-    try:
-        return vgpr(int(leftStr) + shift, 4)
-    except ValueError:
-        pass
-    if "+" in leftStr:
-        name, idxStr = leftStr.rsplit("+", 1)
-        return vgpr(f"{name}+{int(idxStr) + shift}", 4)
-    return vgpr(f"{leftStr}+{shift}", 4) if shift else vgpr(leftStr, 4)
+    regName = getattr(src, "regName", None)
+    assert regName is not None or hasattr(src, "regIdx"), \
+        f"_halfWidthVgpr: expected a rocisa RegisterContainer, got {type(src)!r}"
+    if regName is not None:
+        # Named register: bare base name + offset list (no display prefix).
+        base = regName.name
+        total = sum(regName.getOffsets()) + shift
+        nameStr = base if total == 0 else f"{base}+{total}"
+        return vgpr(nameStr, 4)
+    # Numeric register: regIdx is the true (logical) index, no MSB artifact.
+    return vgpr(int(src.regIdx) + shift, 4)
 
 def dsLoad(bpl, dst, src, ds, comment="", memToken=None):
     """Select and return a DSLoad instruction by byte width (2/4/8/16)."""

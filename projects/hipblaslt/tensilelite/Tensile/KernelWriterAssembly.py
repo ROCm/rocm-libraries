@@ -13756,8 +13756,12 @@ class KernelWriterAssembly(KernelWriter):
     ds     = DSModifiers(offset=offset)
 
     numRegs = int(max(1, rpv))
+    # Attach LDS mem token (same bucket as bias/SAV loads + GSU ds_store in this
+    # epilogue store BB) so the rocisa MemTokenConsistencyCheck pass doesn't abort
+    # on a BB that mixes tokened and un-tokened LDS ops when SRVW != 0.
     module.add(dsStore(bps, dstAddr=addr0, src=vgpr(srcVgpr, numRegs), \
-              ds=ds, comment="storeRemap lw"))
+              ds=ds, comment="storeRemap lw",
+              memToken=MemTokenData([self.states.memTokenLdsBuffer0])))
 
     return module
 
@@ -13792,7 +13796,10 @@ class KernelWriterAssembly(KernelWriter):
       offset = self.storeRemapLrOffset * bpe * (i//gwvw)
       ds  = DSModifiers(offset=offset)
       dst = vgpr(storeRegs[rIdx], rpv)
-      module.add(dsLoad(bps, dst=dst, src=src, ds=ds, comment="storeRemap lr"))
+      # Match the storeRemap lw token so the whole epilogue store BB is consistent
+      # for the rocisa MemTokenConsistencyCheck pass (avoids abort when SRVW != 0).
+      module.add(dsLoad(bps, dst=dst, src=src, ds=ds, comment="storeRemap lr",
+                memToken=MemTokenData([self.states.memTokenLdsBuffer0])))
 
     module.addSpaceLine()
 
