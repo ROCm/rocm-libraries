@@ -52,7 +52,7 @@
 #  include <thrust/system/hip/detail/uninitialized_copy.h>
 #  include <thrust/system/hip/detail/util.h>
 
-#  include <cstdint>
+#  include _THRUST_STD_INCLUDE(cstdint)
 
 // rocprim include
 #  include <rocprim/rocprim.hpp>

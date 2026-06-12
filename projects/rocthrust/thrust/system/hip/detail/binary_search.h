@@ -36,7 +36,7 @@
 #  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/execution_policy.h>
 
-#  include <cstdint>
+#  include _THRUST_STD_INCLUDE(cstdint)
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
