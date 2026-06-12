@@ -348,34 +348,7 @@ pipeline {
             defaultValue: false,
             description: "Nightly builds for non-critical hardware (gfx908, Navi 3.5) (default: OFF)")
 
-        // ---------------------------------------------------------------------------
-        // Per-stage skip parameters for selective rerun.
-        // Set a SKIP_* flag to true on a re-triggered build to bypass a stage that
-        // already passed, saving time and runner resources.
-        // ---------------------------------------------------------------------------
-        // Full Tests
-        booleanParam(name: "RUN_HIP_TIDY",       defaultValue: true,  description: "Enable the Hip Tidy (clang-analyze) stage in Full Tests")
-        booleanParam(name: "SKIP_HIP_TIDY",       defaultValue: false, description: "Skip Hip Tidy on rerun if it passed previously")
-        booleanParam(name: "SKIP_DBSYNC_GFX90A",  defaultValue: false, description: "Skip Dbsync gfx90a on rerun if it passed previously")
-        booleanParam(name: "SKIP_BF16_GFX90A",    defaultValue: false, description: "Skip Bf16 gfx90a on rerun if it passed previously")
-        booleanParam(name: "SKIP_FP16_GFX90A",    defaultValue: false, description: "Skip Fp16 gfx90a on rerun if it passed previously")
-        booleanParam(name: "SKIP_FP32_GFX90A",    defaultValue: false, description: "Skip Fp32 gfx90a on rerun if it passed previously")
-        booleanParam(name: "SKIP_DBSYNC_GFX942",  defaultValue: false, description: "Skip Dbsync gfx942 on rerun if it passed previously")
-        booleanParam(name: "SKIP_BF16_GFX942",    defaultValue: false, description: "Skip Bf16 gfx942 on rerun if it passed previously")
-        booleanParam(name: "SKIP_FP16_GFX942",    defaultValue: false, description: "Skip Fp16 gfx942 on rerun if it passed previously")
-        booleanParam(name: "SKIP_FP32_GFX942",    defaultValue: false, description: "Skip Fp32 gfx942 on rerun if it passed previously")
-        booleanParam(name: "SKIP_TF32_GFX942",    defaultValue: false, description: "Skip TF32 gfx942 on rerun if it passed previously")
-        booleanParam(name: "SKIP_FP16_GFX1101",   defaultValue: false, description: "Skip Fp16 gfx1101 on rerun if it passed previously")
-        booleanParam(name: "SKIP_FP32_GFX1101",   defaultValue: false, description: "Skip Fp32 gfx1101 on rerun if it passed previously")
-        // Non-Critical HW Nightly Tests
-        booleanParam(name: "SKIP_DBSYNC_GFX908",  defaultValue: false, description: "Skip Dbsync gfx908 on rerun if it passed previously")
-        booleanParam(name: "SKIP_BF16_GFX908",    defaultValue: false, description: "Skip Bf16 gfx908 on rerun if it passed previously")
-        booleanParam(name: "SKIP_FP16_GFX908",    defaultValue: false, description: "Skip Fp16 gfx908 on rerun if it passed previously")
-        booleanParam(name: "SKIP_FP32_GFX908",    defaultValue: false, description: "Skip Fp32 gfx908 on rerun if it passed previously")
-        booleanParam(name: "SKIP_DEBUG_GFX908",   defaultValue: false, description: "Skip Fp32 Debug gfx908 on rerun if it passed previously")
-        booleanParam(name: "SKIP_BF16_GFX115X",   defaultValue: false, description: "Skip Bf16 gfx115X on rerun if it passed previously")
-        booleanParam(name: "SKIP_FP16_GFX115X",   defaultValue: false, description: "Skip Fp16 gfx115X on rerun if it passed previously")
-        booleanParam(name: "SKIP_FP32_GFX115X",   defaultValue: false, description: "Skip Fp32 gfx115X on rerun if it passed previously")
+        booleanParam(name: "RUN_HIP_TIDY", defaultValue: true, description: "Enable the Hip Tidy (clang-analyze) stage in Full Tests")
     }
 
     environment{
