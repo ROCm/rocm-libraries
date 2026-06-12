@@ -61,7 +61,7 @@ public:
     rocblas_int profile_kernels = 0;
     rocblas_int batch_count = 1;
     rocblas_int verbose = 0;
-    std::string matrix = "rands";
+    std::string matrix = "randint";
 
     // get and set function arguments
     template <typename T>

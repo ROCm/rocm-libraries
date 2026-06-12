@@ -145,9 +145,13 @@ void geql2_geqlf_initData(const rocblas_handle handle,
                     for(rocblas_int i = 0; i < m; i++)
                         hA[b][i + j * lda] = (i == j ? T(1) : T(0));
         }
-        else
+        else if (matrix == "randint")
         {
             rocblas_init<T>(hA, true);
+        }
+        else
+        {
+            throw std::runtime_error("unknown matrix type: " + matrix);
         }
     }
 
@@ -456,7 +460,7 @@ void testing_geql2_geqlf(Arguments& argus)
     rocblas_int lda = argus.get<rocblas_int>("lda", m);
     rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
     rocblas_stride stP = argus.get<rocblas_stride>("strideP", min(m, n));
-    std::string matrix = argus.get<std::string>("matrix", "default");
+    std::string matrix = argus.get<std::string>("matrix", "randint");
 
     rocblas_int bc = argus.batch_count;
     rocblas_int hot_calls = argus.iters;

@@ -556,9 +556,13 @@ void syevd_heevd_initData(const rocblas_handle handle,
     {
         syevd_heevd_toeplitz_initData<CPU, GPU>(handle, evect, n, dA, lda, bc, hA, A, test);
     }
-    else
+    else if(matrix == "randint")
     {
         syevd_heevd_default_initData<CPU, GPU>(handle, evect, n, dA, lda, bc, hA, A, test);
+    }
+    else
+    {
+        throw std::runtime_error("unknown matrix type: " + matrix);
     }
 }
 
@@ -793,7 +797,7 @@ void testing_syevd_heevd(Arguments& argus)
     rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
     rocblas_stride stD = argus.get<rocblas_stride>("strideD", n);
     rocblas_stride stE = argus.get<rocblas_stride>("strideE", n);
-    std::string matrix = argus.get<std::string>("matrix", "default");
+    std::string matrix = argus.get<std::string>("matrix", "randint");
 
     rocblas_evect evect = char2rocblas_evect(evectC);
     rocblas_fill uplo = char2rocblas_fill(uploC);

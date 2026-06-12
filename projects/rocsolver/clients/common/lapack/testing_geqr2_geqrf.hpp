@@ -152,9 +152,13 @@ void geqr2_geqrf_initData(const rocblas_handle handle,
                 }
             }
         }
-        else
+        else if (matrix == "randint")
         {
             rocblas_init<T>(hA, true);
+        }
+        else
+        {
+            throw std::runtime_error("unknown matrix type: " + matrix);
         }
     }
 
@@ -451,7 +455,7 @@ void testing_geqr2_geqrf(Arguments& argus)
     I lda = argus.get<I>("lda", m);
     rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
     rocblas_stride stP = argus.get<rocblas_stride>("strideP", min(m, n));
-    std::string matrix = argus.get<std::string>("matrix", "default");
+    std::string matrix = argus.get<std::string>("matrix", "randint");
 
     I bc = argus.batch_count;
     rocblas_int hot_calls = argus.iters;
