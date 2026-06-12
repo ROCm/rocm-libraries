@@ -111,7 +111,7 @@ template <typename Problem>
 struct MxGemmPipelineTypeSelector<MxGemmPipelineType::CompEightWaves, Problem>
 {
     using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompV3<Problem>;
-    using pipeline      = ck_tile::MXGemmPipelineAgBgCrCompAsyncEightWaves<Problem>;
+    using pipeline      = ck_tile::GemmPipelineAgBgCrCompAsyncEightWaves<Problem>;
 
     static constexpr auto GetName() { return "GemmPipelineAgBgCrCompEightWaves"; }
 };
