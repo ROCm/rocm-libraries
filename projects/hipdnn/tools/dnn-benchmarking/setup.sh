@@ -620,8 +620,8 @@ build_provider() {
     fi
 
     if [ ! -d "$provider_dir" ]; then
-        echo "Error: $name not found at $provider_dir" >&2
-        exit 1
+        echo "Warning: $name not found at $provider_dir" >&2
+        return 1
     fi
 
     echo "Building and installing $name to $install_prefix..."
@@ -635,9 +635,9 @@ build_provider() {
         -DROCM_PATH="$toolchain_prefix" \
         -DENABLE_CLANG_FORMAT=OFF \
         -DENABLE_CLANG_TIDY=OFF \
-        "$@"
-    cmake --build "$build_dir"
-    cmake --install "$build_dir"
+        "$@" &&
+        cmake --build "$build_dir" &&
+        cmake --install "$build_dir"
 }
 
 build_miopen_provider() {
@@ -647,7 +647,7 @@ build_miopen_provider() {
         "$MIOPEN_BUILD_DIR" \
         "$1" \
         "$2" \
-        -DMIOPENPROVIDER_SKIP_TESTS=ON
+        -DMIOPENPROVIDER_SKIP_TESTS=ON || return $?
     echo ""
     echo "MIOpen plugin installed to: $1/lib/hipdnn_plugins/engines/"
 }
@@ -659,7 +659,7 @@ build_hipblaslt_provider() {
         "$HIPBLASLT_BUILD_DIR" \
         "$1" \
         "$2" \
-        -DHIPDNN_SKIP_TESTS=ON
+        -DHIPDNN_SKIP_TESTS=ON || return $?
 }
 
 build_hip_kernel_provider() {
@@ -670,7 +670,39 @@ build_hip_kernel_provider() {
         "$1" \
         "$2" \
         -DHIPKERNELPROVIDER_ENABLE_TESTS=OFF \
-        -DENABLE_ASM_SDPA_ENGINE=ON
+        -DENABLE_ASM_SDPA_ENGINE=ON || return $?
+}
+
+try_build_optional_provider() {
+    local name="$1"
+    shift
+
+    if "$@"; then
+        return 0
+    fi
+
+    echo "Warning: $name plugin build failed; continuing with any available providers." >&2
+    return 1
+}
+
+has_engine_plugins() {
+    local plugin_dir="$1"
+    local plugins=()
+
+    if [ ! -d "$plugin_dir" ]; then
+        return 1
+    fi
+
+    plugins=("$plugin_dir"/*.so)
+    [ -e "${plugins[0]}" ]
+}
+
+warn_no_native_engine_plugins() {
+    local plugin_dir="$1"
+
+    echo "Warning: no native hipDNN engine plugins were found in $plugin_dir." >&2
+    echo "Setup will still finish, but default hipDNN benchmark runs need engine plugins." >&2
+    echo "Pass --plugin-path or config plugin_path to use custom provider plugins." >&2
 }
 
 FORCE_BUILD_PREFIX=$(resolve_installed_rocm_prefix)
@@ -772,18 +804,43 @@ if [ "$FORCE_BUILD" -eq 1 ] || [ "$BUILT_HIPDNN" -eq 1 ] || \
     fi
 fi
 
+PROVIDER_BUILD_FAILED=0
 if [ "$FORCE_BUILD" -eq 1 ] || [ "$BUILT_HIPDNN" -eq 1 ] || [ ! -f "$MIOPEN_PLUGIN" ]; then
-    build_miopen_provider "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX"
+    try_build_optional_provider \
+        "MIOpen provider" \
+        build_miopen_provider "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX" ||
+        PROVIDER_BUILD_FAILED=1
 fi
 if [ "$FORCE_BUILD" -eq 1 ] || [ "$BUILT_HIPDNN" -eq 1 ] || [ ! -f "$HIPBLASLT_PLUGIN" ]; then
-    build_hipblaslt_provider "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX"
+    try_build_optional_provider \
+        "hipBLASLt provider" \
+        build_hipblaslt_provider "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX" ||
+        PROVIDER_BUILD_FAILED=1
 fi
 if [ "$FORCE_BUILD" -eq 1 ] || [ "$BUILT_HIPDNN" -eq 1 ] || [ ! -f "$HIP_KERNEL_PLUGIN" ]; then
-    build_hip_kernel_provider "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX"
+    try_build_optional_provider \
+        "hip-kernel-provider" \
+        build_hip_kernel_provider "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX" ||
+        PROVIDER_BUILD_FAILED=1
+fi
+
+NATIVE_ENGINE_PLUGINS_AVAILABLE=1
+if ! has_engine_plugins "$PLUGIN_DIR"; then
+    NATIVE_ENGINE_PLUGINS_AVAILABLE=0
+    warn_no_native_engine_plugins "$PLUGIN_DIR"
+fi
+
+if [ "$PROVIDER_BUILD_FAILED" -ne 0 ]; then
+    echo "Warning: one or more provider plugins failed to build." >&2
+    echo "Continuing with available or user-specified plugins." >&2
 fi
 
 echo ""
-echo "hipDNN plugins installed to: $PLUGIN_DIR/"
+if [ "$NATIVE_ENGINE_PLUGINS_AVAILABLE" -eq 1 ]; then
+    echo "hipDNN plugins available at: $PLUGIN_DIR/"
+else
+    echo "hipDNN plugin search path: $PLUGIN_DIR/ (no .so files found)"
+fi
 ROCM_PATH="$BINDING_PREFIX"
 export ROCM_PATH
 prepend_ld_library_path "$BINDING_PREFIX/lib"
