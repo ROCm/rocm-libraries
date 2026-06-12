@@ -41,11 +41,12 @@
 
 #include _THRUST_STD_INCLUDE(utility)
 
-#include <initializer_list>
 #include <vector>
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
+
+#include _THRUST_STD_INCLUDE(initializer_list)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -144,18 +145,18 @@ public:
   /*! This constructor builds a \p vector_base from an intializer_list.
    *  \param il The intializer_list.
    */
-  vector_base(std::initializer_list<T> il);
+  vector_base(_THRUST_STD::initializer_list<T> il);
 
   /*! This constructor builds a \p vector_base from an intializer_list.
    *  \param il The intializer_list.
    *  \param alloc The allocator to use by this device_vector.
    */
-  vector_base(std::initializer_list<T> il, const Alloc& alloc);
+  vector_base(_THRUST_STD::initializer_list<T> il, const Alloc& alloc);
 
   /*! Assign operator copies from an initializer_list
    *  \param il The initializer_list.
    */
-  vector_base& operator=(std::initializer_list<T> il);
+  vector_base& operator=(_THRUST_STD::initializer_list<T> il);
 
   /*! Copy constructor copies from an exemplar vector_base with different
    *  type.
