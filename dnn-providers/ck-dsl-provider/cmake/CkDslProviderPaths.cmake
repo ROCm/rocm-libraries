@@ -229,7 +229,7 @@ endfunction()
 
 # Resolve the absolute path of the in-tree LightGBM model for the
 # fp16/gfx942 implicit-GEMM conv-forward scorer
-# (projects/composablekernel/dispatcher/heuristics/models/
+# (dnn-providers/ck-dsl-provider/heuristics/models/
 #  grouped_conv_forward_fp16_gfx942/model_tflops.lgbm).
 #
 # Same walk-up search as the other resolvers. The model ships gzipped
@@ -243,7 +243,7 @@ function(ck_dsl_provider_resolve_grouped_conv_fwd_fp16_gfx942_model)
     get_filename_component(_searchDir "${_searchDir}" ABSOLUTE)
 
     set(_modelRelPath
-        "projects/composablekernel/dispatcher/heuristics/models/grouped_conv_forward_fp16_gfx942/model_tflops.lgbm")
+        "dnn-providers/ck-dsl-provider/heuristics/models/grouped_conv_forward_fp16_gfx942/model_tflops.lgbm")
     set(_resolvedModelPath "")
 
     while(NOT _resolvedModelPath AND NOT _searchDir STREQUAL "/")
@@ -264,7 +264,8 @@ function(ck_dsl_provider_resolve_grouped_conv_fwd_fp16_gfx942_model)
             "fp16/gfx942 LightGBM model. Walked up from "
             "${CMAKE_CURRENT_LIST_DIR}/.. looking for ${_modelRelPath}. "
             "The model ships gzipped in-tree; decompress with "
-            "`gunzip -k ${_modelRelPath}.gz`. Set "
+            "`gunzip -k dnn-providers/ck-dsl-provider/heuristics/models/"
+            "grouped_conv_forward_fp16_gfx942/model_tflops.lgbm.gz`. Set "
             "CK_DSL_GROUPED_CONV_FWD_FP16_GFX942_MODEL_PATH explicitly to override the search.")
     endif()
 
