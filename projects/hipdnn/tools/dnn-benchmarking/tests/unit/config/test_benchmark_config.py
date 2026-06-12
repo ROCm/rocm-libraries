@@ -7,7 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from dnn_benchmarking.config import BenchmarkConfig, SuiteConfig, ValidationConfig
+from dnn_benchmarking.config import (
+    BenchmarkConfig,
+    ExecutionBackendName,
+    SuiteConfig,
+    TimingBackendName,
+    ValidationConfig,
+)
 
 
 class TestBenchmarkConfig:
@@ -203,14 +209,14 @@ class TestSuiteConfigBackend:
     """SuiteConfig execution backend validation."""
 
     def test_default_backend_is_hipdnn(self) -> None:
-        assert SuiteConfig().backend == "hipdnn"
+        assert SuiteConfig().backend is ExecutionBackendName.HIPDNN
 
     def test_pytorch_backend_accepted(self) -> None:
-        assert SuiteConfig(backend="pytorch").backend == "pytorch"
+        assert SuiteConfig(backend="pytorch").backend is ExecutionBackendName.PYTORCH
 
     def test_unknown_backend_rejected(self) -> None:
         with pytest.raises(ValueError, match="Invalid backend"):
             SuiteConfig(backend="tensorflow")
 
-    def test_torch_timing_backend_accepted(self) -> None:
-        assert SuiteConfig(timing_backend="torch").timing_backend == "torch"
+    def test_timing_backend_enum_values(self) -> None:
+        assert TimingBackendName.TORCH.value == "torch"

@@ -11,7 +11,7 @@ from typing import Any, List
 
 import pytest
 
-from dnn_benchmarking.config.benchmark_config import BenchmarkConfig
+from dnn_benchmarking.config.benchmark_config import BenchmarkConfig, TimingBackendName
 
 
 class FakeStream:
@@ -97,12 +97,18 @@ class FakeHipTimer:
 def _load_executor_module(
     monkeypatch: pytest.MonkeyPatch, fake_cuda: FakeCuda, is_rocm: bool = True
 ):
-    fake_torch = types.SimpleNamespace(
-        Tensor=object,
-        cuda=fake_cuda,
-        device=lambda device: device,
-    )
+    fake_torch = types.ModuleType("torch")
+    fake_torch.__path__ = []  # mark as package for torch.nn.functional imports
+    fake_torch.Tensor = object
+    fake_torch.cuda = fake_cuda
+    fake_torch.device = lambda device: device
+    fake_nn = types.ModuleType("torch.nn")
+    fake_functional = types.ModuleType("torch.nn.functional")
+    fake_nn.functional = fake_functional
+    fake_torch.nn = fake_nn
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setitem(sys.modules, "torch.nn", fake_nn)
+    monkeypatch.setitem(sys.modules, "torch.nn.functional", fake_functional)
 
     module_name = "dnn_benchmarking.execution.pytorch_executor"
     old_module = sys.modules.pop(module_name, None)
@@ -147,13 +153,13 @@ def pytorch_executor_module(monkeypatch: pytest.MonkeyPatch):
     yield from _load_executor_module(monkeypatch, fake_cuda)
 
 
-def _make_executor(module: Any, timing_backend: str = "hip"):
+def _make_executor(module: Any, collect_kernel_timing: bool = True):
     config = BenchmarkConfig(graph_path="test.json", warmup_iters=2, benchmark_iters=2)
     executor = module.PyTorchCudaExecutor(
         graph_json={"nodes": []},
         config=config,
         device="cuda:1",
-        timing_backend=timing_backend,
+        collect_kernel_timing=collect_kernel_timing,
     )
     return executor
 
@@ -162,7 +168,7 @@ def test_prepare_creates_stream_timer_on_requested_device(
     pytorch_executor_module,
 ) -> None:
     module = pytorch_executor_module
-    executor = _make_executor(module, timing_backend="none")
+    executor = _make_executor(module, collect_kernel_timing=False)
 
     executor.prepare()
 
@@ -173,7 +179,7 @@ def test_prepare_creates_stream_timer_on_requested_device(
     assert all(device == "cuda:1" for device in fake_cuda.device_entries)
 
 
-def test_timing_backend_none_uses_stream_sync_only(
+def test_no_kernel_timing_uses_stream_sync_only(
     pytorch_executor_module, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     module = pytorch_executor_module
@@ -183,7 +189,7 @@ def test_timing_backend_none_uses_stream_sync_only(
         "execute_graph",
         lambda graph, tensors: executed.append("execute"),
     )
-    executor = _make_executor(module, timing_backend="none")
+    executor = _make_executor(module, collect_kernel_timing=False)
     executor.prepare()
 
     result = executor.benchmark(tensors={}, graph_name="pytorch_none")
@@ -198,14 +204,14 @@ def test_timing_backend_none_uses_stream_sync_only(
     assert FakeHipTimer.sync_calls == 2
 
 
-def test_timing_backend_hip_collects_kernel_timings(
+def test_collect_kernel_timing_collects_kernel_timings(
     pytorch_executor_module, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     module = pytorch_executor_module
     monkeypatch.setattr(
         module.pytorch_ops, "execute_graph", lambda graph, tensors: None
     )
-    executor = _make_executor(module, timing_backend="hip")
+    executor = _make_executor(module, collect_kernel_timing=True)
     executor.prepare()
 
     result = executor.benchmark(tensors={}, graph_name="pytorch_hip")
@@ -229,7 +235,7 @@ def test_warmup_and_execute_once_use_stream_sync(
         "execute_graph",
         lambda graph, tensors: executed.append("execute"),
     )
-    executor = _make_executor(module, timing_backend="none")
+    executor = _make_executor(module, collect_kernel_timing=False)
     executor.prepare()
 
     executor.warmup(tensors={})
@@ -257,7 +263,7 @@ def test_prepare_without_hip_skips_hip_sync_timer(
     pytorch_executor_module_no_hip,
 ) -> None:
     module = pytorch_executor_module_no_hip
-    executor = _make_executor(module, timing_backend="auto")
+    executor = _make_executor(module, collect_kernel_timing=True)
 
     executor.prepare()
 
@@ -274,7 +280,7 @@ def test_no_hip_synchronizes_through_torch_stream(
         "execute_graph",
         lambda graph, tensors: executed.append("execute"),
     )
-    executor = _make_executor(module, timing_backend="none")
+    executor = _make_executor(module, collect_kernel_timing=False)
     executor.prepare()
 
     result = executor.benchmark(tensors={}, graph_name="pytorch_cuda")
@@ -321,59 +327,15 @@ def test_auto_on_cuda_build_requests_torch_not_hip(
     monkeypatch.setattr(
         module.pytorch_ops, "execute_graph", lambda graph, tensors: None
     )
-    executor = _make_executor(module, timing_backend="auto")
+    executor = _make_executor(module, collect_kernel_timing=True)
     executor.prepare()
 
     result = executor.benchmark(tensors={}, graph_name="pytorch_mixed_host")
 
     # Resolved to torch despite the factory preferring HIP when available.
-    assert requested == ["torch"]
+    assert requested == [TimingBackendName.TORCH]
     # No HIP sync timer created in prepare() either.
     assert FakeHipTimer.created_streams == []
     assert result.metadata is not None
     assert result.metadata.timing_backend == "torch"
 
-
-def test_torch_timing_backend_requests_torch_timer(
-    pytorch_executor_module, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Explicit torch timing skips HIP sync even when HIP is available."""
-    module = pytorch_executor_module
-    requested = []
-
-    class FakeTorchTimer:
-        backend_name = "torch"
-
-        def __init__(self, stream) -> None:
-            self.stream = stream
-
-        def start(self) -> None:
-            pass
-
-        def stop(self) -> None:
-            pass
-
-        def elapsed_ms(self) -> float:
-            return 0.75
-
-    monkeypatch.setattr(
-        module,
-        "create_gpu_timer",
-        lambda backend, stream=0, torch_stream=None: requested.append(
-            (backend, torch_stream)
-        )
-        or FakeTorchTimer(torch_stream),
-    )
-    monkeypatch.setattr(
-        module.pytorch_ops, "execute_graph", lambda graph, tensors: None
-    )
-    executor = _make_executor(module, timing_backend="torch")
-    executor.prepare()
-
-    result = executor.benchmark(tensors={}, graph_name="pytorch_torch")
-
-    assert FakeHipTimer.created_streams == []
-    assert requested == [("torch", module.torch.cuda.default_stream_obj)]
-    assert result.kernel_timings == [0.75, 0.75]
-    assert result.metadata is not None
-    assert result.metadata.timing_backend == "torch"

@@ -51,7 +51,7 @@ def test_hipdnn_gpu_timing_rocm(plugin_paths: List[str]) -> None:
     import hipdnn_frontend as hipdnn
 
     handle = hipdnn.Handle()
-    executor = Executor(graph_json_str, config, timing_backend="hip")
+    executor = Executor(graph_json_str, config)
     executor.prepare(handle)
 
     with BufferManager(tensor_infos) as buffer_manager:

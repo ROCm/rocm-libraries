@@ -27,9 +27,10 @@ stream. ``TorchGpuTimer`` records events on the provided torch stream
 import time
 from abc import ABC, abstractmethod
 from types import TracebackType
-from typing import Any, List, Literal, Optional, Type
+from typing import Any, List, Optional, Type
 
 from ..common import torch_support
+from ..config.benchmark_config import TimingBackendName
 
 
 _HIP_EVENT_API = ("HipEvent", "hip_get_device_count")
@@ -90,9 +91,9 @@ def get_available_backends() -> List[str]:
     """Return list of available GPU timer backends."""
     backends: List[str] = []
     if _is_hip_available():
-        backends.append("hip")
+        backends.append(TimingBackendName.HIP.value)
     if torch_support.gpu_available():
-        backends.append("torch")
+        backends.append(TimingBackendName.TORCH.value)
     return backends
 
 
@@ -158,7 +159,7 @@ class HipGpuTimer(GpuTimerInterface):
     @property
     def backend_name(self) -> str:
         """Return 'hip' as the backend name."""
-        return "hip"
+        return TimingBackendName.HIP.value
 
     def __init__(self, stream: int = 0) -> None:
         """Initialize GPU timer with HIP events.
@@ -218,7 +219,7 @@ class TorchGpuTimer(GpuTimerInterface):
     @property
     def backend_name(self) -> str:
         """Return 'torch' as the backend name."""
-        return "torch"
+        return TimingBackendName.TORCH.value
 
     def __init__(self, stream: Optional[Any] = None) -> None:
         """Initialize GPU timer with torch CUDA events.
@@ -266,18 +267,15 @@ class TorchGpuTimer(GpuTimerInterface):
 
 
 def create_gpu_timer(
-    backend: Optional[Literal["hip", "torch", "auto"]] = "auto",
+    backend: TimingBackendName = TimingBackendName.AUTO,
     stream: int = 0,
     torch_stream: Optional[Any] = None,
 ) -> Optional[GpuTimerInterface]:
     """Create a GPU timer for the specified or detected backend.
 
-    Args:
-        backend: Timer backend to use:
-            - "hip": Force direct HIP event timing
-            - "torch": Force torch.cuda event timing
-            - "auto": Prefer direct HIP event timing; fall back to torch
-              event timing only when ``torch_stream`` is provided
+        backend: Timer backend enum to use. ``AUTO`` prefers direct HIP
+            event timing and falls back to torch event timing only when
+            ``torch_stream`` is provided.
         stream: HIP stream pointer encoded as an integer (hip backend).
         torch_stream: torch.cuda.Stream for the torch backend. ``auto``
             only falls back to torch timing when this is set, because
@@ -289,20 +287,26 @@ def create_gpu_timer(
 
     Raises:
         RuntimeError: If a requested backend is not available.
-        ValueError: If invalid backend is specified.
+        TypeError: If backend is not a TimingBackendName.
     """
-    if backend == "auto" or backend is None:
+    if not isinstance(backend, TimingBackendName):
+        raise TypeError("backend must be a TimingBackendName")
+
+    if backend is TimingBackendName.AUTO:
         if _is_hip_available():
             return HipGpuTimer(stream)
         if torch_stream is not None and torch_support.gpu_available():
             return TorchGpuTimer(torch_stream)
         return None
 
-    if backend == "hip":
+    if backend is TimingBackendName.HIP:
         return HipGpuTimer(stream)
 
-    if backend == "torch":
+    if backend is TimingBackendName.TORCH:
         return TorchGpuTimer(torch_stream)
+
+    if backend is TimingBackendName.NONE:
+        return None
 
     raise ValueError(f"Unknown backend: {backend}")
 

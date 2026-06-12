@@ -92,7 +92,6 @@ def run_internal_profiling(args: argparse.Namespace) -> int:
         benchmark_iters=args.iters,
         seed=args.seed,
         engine_filter=[engine_id],
-        timing_backend="auto",
         reference_provider=ReferenceProviderName.NONE.value,
         verbose=False,
         metrics=MetricsConfig(tier="off"),

@@ -16,7 +16,7 @@ import pytest
 
 from dnn_benchmarking.cli.parser import create_parser
 from dnn_benchmarking.cli.suite_runner_cli import run_suite_benchmark
-from dnn_benchmarking.config.benchmark_config import SuiteConfig
+from dnn_benchmarking.config.benchmark_config import ExecutionBackendName, SuiteConfig
 from dnn_benchmarking.reporting.reporter import Reporter
 from dnn_benchmarking.reporting.suite_results import (
     CorrectnessResult,
@@ -510,7 +510,7 @@ class TestRunSuiteWorkflow:
             paths.append(p)
         return paths
 
-    @patch("dnn_benchmarking.cli.suite_runner_cli.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.hipdnn_suite_runner.run_graph_all_providers")
     @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
     @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_all_pass_returns_zero_exit_code(
@@ -540,7 +540,7 @@ class TestRunSuiteWorkflow:
 
         assert result == 0
 
-    @patch("dnn_benchmarking.cli.suite_runner_cli.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.hipdnn_suite_runner.run_graph_all_providers")
     @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
     @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_one_failure_still_processes_second(
@@ -571,7 +571,7 @@ class TestRunSuiteWorkflow:
         assert mock_run.call_count == 2
         assert result == 1
 
-    @patch("dnn_benchmarking.cli.suite_runner_cli.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.hipdnn_suite_runner.run_graph_all_providers")
     @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
     @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_correctness_failure_returns_two(
@@ -615,7 +615,7 @@ class TestRunSuiteWorkflow:
 
         assert result == 2
 
-    @patch("dnn_benchmarking.cli.suite_runner_cli.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.hipdnn_suite_runner.run_graph_all_providers")
     @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
     @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_json_output_written_when_output_specified(
@@ -646,7 +646,7 @@ class TestRunSuiteWorkflow:
             assert "metadata" in data
             assert "graphs" in data
 
-    @patch("dnn_benchmarking.cli.suite_runner_cli.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.hipdnn_suite_runner.run_graph_all_providers")
     @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
     @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_no_json_output_when_output_not_specified(
@@ -678,7 +678,7 @@ class TestRunSuiteWorkflow:
             new_files = inputs_after - inputs_before
             assert new_files == set(), f"Unexpected JSON files written: {new_files}"
 
-    @patch("dnn_benchmarking.cli.suite_runner_cli.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.hipdnn_suite_runner.run_graph_all_providers")
     @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
     @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_warmup_iters_passed_per_graph(
@@ -709,7 +709,7 @@ class TestRunSuiteWorkflow:
             assert passed_config.warmup_iters == 20
             assert passed_config.benchmark_iters == 200
 
-    @patch("dnn_benchmarking.cli.suite_runner_cli.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.hipdnn_suite_runner.run_graph_all_providers")
     @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
     @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_empty_nodes_graph_records_error_and_continues(
@@ -744,7 +744,7 @@ class TestRunSuiteWorkflow:
         assert mock_run.call_count == 1
         assert result == 1
 
-    @patch("dnn_benchmarking.cli.suite_runner_cli.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.hipdnn_suite_runner.run_graph_all_providers")
     @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
     @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_graph_load_error_continues_to_next(
@@ -855,7 +855,7 @@ class TestValidationStartupGate:
     """--validate is a hard gate. If the reference provider isn't registered
     or available, the orchestrator returns 1 before iterating any graph."""
 
-    @patch("dnn_benchmarking.cli.suite_runner_cli.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.hipdnn_suite_runner.run_graph_all_providers")
     def test_unregistered_reference_provider_fails_at_startup(
         self, mock_run: MagicMock
     ) -> None:
@@ -869,9 +869,11 @@ class TestValidationStartupGate:
         config.engine_filter = None
         config.rtol = 1e-5
         config.atol = 1e-8
-        config.timing_backend = "none"
         config.reference_provider = "definitely_not_registered"
         config.verbose = False
+        config.metrics = MagicMock()
+        config.metrics.extra_runs_per_engine = 0
+        config.backend = ExecutionBackendName.HIPDNN
 
         with tempfile.TemporaryDirectory() as tmpdir:
             graph = Path(tmpdir) / "g.json"
@@ -888,7 +890,7 @@ class TestValidationStartupGate:
         mock_run.assert_not_called()
 
     @patch("dnn_benchmarking.cli.suite_runner_cli.ReferenceProviderRegistry")
-    @patch("dnn_benchmarking.cli.suite_runner_cli.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.hipdnn_suite_runner.run_graph_all_providers")
     def test_unavailable_reference_provider_fails_at_startup(
         self, mock_run: MagicMock, mock_registry: MagicMock
     ) -> None:
@@ -913,7 +915,7 @@ class TestValidationStartupGate:
         mock_run.assert_not_called()
 
     @patch("dnn_benchmarking.cli.suite_runner_cli.ReferenceProviderRegistry")
-    @patch("dnn_benchmarking.cli.suite_runner_cli.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.hipdnn_suite_runner.run_graph_all_providers")
     @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
     @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_available_reference_provider_proceeds_to_graph_iteration(

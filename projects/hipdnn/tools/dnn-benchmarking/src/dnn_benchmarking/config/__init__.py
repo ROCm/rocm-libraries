@@ -5,20 +5,28 @@
 
 from .benchmark_config import (
     BenchmarkConfig,
+    EXECUTION_BACKEND_CHOICES,
     EngineSelection,
+    ExecutionBackendName,
     MetricsConfig,
     REFERENCE_PROVIDER_CHOICES,
     ReferenceProviderName,
     SuiteConfig,
+    TimingBackendName,
     ValidationConfig,
+    normalize_execution_backend,
 )
 
 __all__ = [
     "BenchmarkConfig",
+    "EXECUTION_BACKEND_CHOICES",
     "EngineSelection",
+    "ExecutionBackendName",
     "MetricsConfig",
     "REFERENCE_PROVIDER_CHOICES",
     "ReferenceProviderName",
     "SuiteConfig",
+    "TimingBackendName",
     "ValidationConfig",
+    "normalize_execution_backend",
 ]

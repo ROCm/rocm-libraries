@@ -10,6 +10,7 @@ import types
 import pytest
 
 import dnn_benchmarking.execution.timing as timing_module
+from dnn_benchmarking.config.benchmark_config import TimingBackendName
 from dnn_benchmarking.execution.timing import (
     GpuTimer,
     GpuTimerInterface,
@@ -180,10 +181,10 @@ class TestBackendDetection:
 class TestFactoryFunction:
     """Tests for create_gpu_timer factory."""
 
-    def test_invalid_backend_raises_error(self) -> None:
-        """Test that invalid backend name raises ValueError."""
-        with pytest.raises(ValueError, match="Unknown backend"):
-            create_gpu_timer("invalid")  # type: ignore
+    def test_string_backend_raises_type_error(self) -> None:
+        """Timer factory requires TimingBackendName values."""
+        with pytest.raises(TypeError, match="TimingBackendName"):
+            create_gpu_timer("hip")  # type: ignore[arg-type]
 
     def test_hip_backend_unavailable_raises_error(self, monkeypatch) -> None:
         """Test that requesting unavailable HIP backend raises RuntimeError."""
@@ -193,18 +194,18 @@ class TestFactoryFunction:
 
         monkeypatch.setattr(timing_module, "_require_hip_runtime", raise_unavailable)
         with pytest.raises(RuntimeError, match="HIP GPU timing not available"):
-            create_gpu_timer("hip")
+            create_gpu_timer(TimingBackendName.HIP)
 
     def test_auto_no_backend_returns_none(self, monkeypatch) -> None:
         """Test that auto with no backends returns None (graceful fallback)."""
         monkeypatch.setattr(timing_module, "_is_hip_available", lambda: False)
-        assert create_gpu_timer("auto") is None
+        assert create_gpu_timer(TimingBackendName.AUTO) is None
 
     def test_auto_creates_timer_when_available(self, monkeypatch) -> None:
         """Test auto-detection creates a timer when available."""
         monkeypatch.setattr(timing_module, "_is_hip_available", lambda: True)
         monkeypatch.setattr(timing_module, "HipGpuTimer", DummyHipTimer)
-        timer = create_gpu_timer("auto")
+        timer = create_gpu_timer(TimingBackendName.AUTO)
         assert isinstance(timer, GpuTimerInterface)
         assert timer.backend_name == "hip"
 
@@ -213,7 +214,7 @@ class TestFactoryFunction:
         _install_fake_torch(monkeypatch)
         monkeypatch.setattr(timing_module, "_is_hip_available", lambda: False)
 
-        timer = create_gpu_timer("auto", torch_stream="graph-stream")
+        timer = create_gpu_timer(TimingBackendName.AUTO, torch_stream="graph-stream")
 
         assert isinstance(timer, TorchGpuTimer)
         assert timer.backend_name == "torch"
@@ -223,14 +224,14 @@ class TestFactoryFunction:
         _install_fake_torch(monkeypatch)
         monkeypatch.setattr(timing_module, "_is_hip_available", lambda: False)
 
-        assert create_gpu_timer("auto") is None
+        assert create_gpu_timer(TimingBackendName.AUTO) is None
 
     def test_torch_backend_unavailable_raises_error(self, monkeypatch) -> None:
         """Requesting torch timing without a usable GPU raises RuntimeError."""
         _install_fake_torch(monkeypatch, gpu_available=False)
 
         with pytest.raises(RuntimeError, match="Torch GPU timing not available"):
-            create_gpu_timer("torch")
+            create_gpu_timer(TimingBackendName.TORCH)
 
 
 class TestHipGpuTimerBackwardCompat:

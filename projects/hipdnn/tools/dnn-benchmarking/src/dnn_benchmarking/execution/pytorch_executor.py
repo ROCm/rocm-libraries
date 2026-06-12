@@ -3,13 +3,17 @@
 
 """PyTorch GPU executor for graph benchmarking."""
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional
 
 import torch
 
 from ..common import torch_support
 
-from ..config.benchmark_config import BenchmarkConfig
+from ..config.benchmark_config import (
+    BenchmarkConfig,
+    ExecutionBackendName,
+    TimingBackendName,
+)
 from ..reporting.statistics import BenchmarkMetadata, BenchmarkResult
 from . import pytorch_ops
 from .timing import (
@@ -42,7 +46,7 @@ class PyTorchCudaExecutor:
         graph_json: Dict[str, Any],
         config: BenchmarkConfig,
         device: str = "cuda:0",
-        timing_backend: Optional[Literal["hip", "torch", "auto", "none"]] = "auto",
+        collect_kernel_timing: bool = True,
     ) -> None:
         """Initialize executor with graph JSON and configuration.
 
@@ -50,11 +54,9 @@ class PyTorchCudaExecutor:
             graph_json: The graph as a parsed JSON dictionary.
             config: Benchmark configuration.
             device: CUDA/ROCm device to use (e.g., "cuda:0").
-            timing_backend: GPU timer backend to use:
-                - "hip": Force direct HIP event timing
-                - "torch": Force torch.cuda event timing
-                - "auto": Prefer direct HIP timing, fall back to torch timing
-                - "none": Disable GPU kernel timing, use synchronized E2E timing
+            collect_kernel_timing: When True, record per-iteration GPU kernel
+                timings (HIP events on ROCm torch, torch.cuda events on CUDA
+                torch); otherwise collect only E2E timing with stream sync.
 
         Raises:
             PyTorchExecutionError: If PyTorch GPU is not available.
@@ -64,19 +66,10 @@ class PyTorchCudaExecutor:
                 "PyTorch GPU not available. Install PyTorch with CUDA or ROCm support."
             )
 
-        if timing_backend is None:
-            timing_backend = "auto"
-        valid_timing_backends = {"hip", "torch", "auto", "none"}
-        if timing_backend not in valid_timing_backends:
-            raise ValueError(
-                f"Invalid timing_backend: '{timing_backend}'. "
-                f"Valid options: {valid_timing_backends}"
-            )
-
         self._graph_json = graph_json
         self._config = config
         self._device = torch.device(device)
-        self._timing_backend = timing_backend
+        self._collect_kernel_timing = collect_kernel_timing
         self._init_time_ms: float = 0.0
         self._prepared = False
         self._stream: Optional[Any] = None
@@ -175,7 +168,7 @@ class PyTorchCudaExecutor:
         gpu_timer: Optional[GpuTimerInterface] = None
         timing_backend_name = ""
         with torch.cuda.device(self._device):
-            if self._timing_backend != "none":
+            if self._collect_kernel_timing:
                 try:
                     gpu_timer = create_gpu_timer(
                         self._resolve_timing_backend(),
@@ -215,7 +208,7 @@ class PyTorchCudaExecutor:
             benchmark_iters=self._config.benchmark_iters,
             engine_id=self._config.engine_id,
             timing_backend=timing_backend_name,
-            execution_backend="pytorch",
+            execution_backend=ExecutionBackendName.PYTORCH.value,
         )
 
         return BenchmarkResult(
@@ -224,18 +217,20 @@ class PyTorchCudaExecutor:
             metadata=metadata,
         )
 
-    def _resolve_timing_backend(self) -> Literal["hip", "torch"]:
-        """Resolve the timing backend for this run to a concrete choice.
+    def _resolve_timing_backend(self) -> TimingBackendName:
+        """Resolve the GPU timer backend for this run.
 
-        Explicit "hip"/"torch" pass through. "auto"/"none" resolve from the
-        torch runtime driving the stream, not from raw HIP device visibility:
-        ROCm torch uses HIP events, CUDA torch must use torch.cuda events.
-        Resolving from torch_support avoids recording HIP events on a CUDA
-        stream pointer on a mixed host (CUDA torch with visible ROCm/hipDNN).
+        Resolve from the torch runtime driving the stream, not from raw HIP
+        device visibility: ROCm torch uses HIP events, CUDA torch must use
+        torch.cuda events. Resolving from torch_support avoids recording HIP
+        events on a CUDA stream pointer on a mixed host (CUDA torch with
+        visible ROCm/hipDNN).
         """
-        if self._timing_backend in ("hip", "torch"):
-            return self._timing_backend
-        return "hip" if torch_support.is_rocm_build() else "torch"
+        return (
+            TimingBackendName.HIP
+            if torch_support.is_rocm_build()
+            else TimingBackendName.TORCH
+        )
 
     def _hip_sync_selected(self) -> bool:
         """Return True when stream synchronization should use HIP events.
@@ -243,7 +238,7 @@ class PyTorchCudaExecutor:
         Mirrors :meth:`_resolve_timing_backend`: HIP sync is used only when
         the resolved backend is "hip" (explicit, or auto/none on ROCm torch).
         """
-        return self._resolve_timing_backend() == "hip"
+        return self._resolve_timing_backend() is TimingBackendName.HIP
 
     def _get_stream(self) -> Any:
         """Return the PyTorch stream used by all graph execution."""

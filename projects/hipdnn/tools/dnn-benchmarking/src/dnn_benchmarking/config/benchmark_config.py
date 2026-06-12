@@ -16,6 +16,37 @@ class ReferenceProviderName(str, Enum):
     PYTORCH = "pytorch"
 
 
+class TimingBackendName(str, Enum):
+    """Supported GPU timing backend names."""
+
+    HIP = "hip"
+    TORCH = "torch"
+    AUTO = "auto"
+    NONE = "none"
+
+
+class ExecutionBackendName(str, Enum):
+    """Supported execution backend names."""
+
+    HIPDNN = "hipdnn"
+    PYTORCH = "pytorch"
+
+
+EXECUTION_BACKEND_CHOICES = frozenset(backend.value for backend in ExecutionBackendName)
+
+
+def normalize_execution_backend(
+    value: str | ExecutionBackendName,
+) -> ExecutionBackendName:
+    """Return an ExecutionBackendName for public string/enum inputs."""
+    try:
+        return ExecutionBackendName(value)
+    except ValueError as e:
+        raise ValueError(
+            f"Invalid backend: '{value}'. Valid options: {EXECUTION_BACKEND_CHOICES}"
+        ) from e
+
+
 REFERENCE_PROVIDER_CHOICES = frozenset(
     provider.value for provider in ReferenceProviderName
 )
@@ -262,14 +293,12 @@ class SuiteConfig:
             used for both. If neither is set, validation uses dtype-aware
             defaults.
         atol: Optional absolute tolerance override for correctness comparison.
-        timing_backend: GPU timer backend to use ("hip", "torch", "auto",
-            "none"). "torch" applies only to the PyTorch execution backend.
         reference_provider: Reference provider name for correctness checking.
         verbose: If True, print rich per-engine block per graph instead of summary.
         metrics: Metric collection configuration. Defaults to ``basic`` tier
             (always-on probes, no extra runs).
-        backend: Execution backend ("hipdnn" runs discovered engine plugins,
-            "pytorch" runs the graph through the PyTorch executor as a single
+        backend: Execution backend (``hipdnn`` runs discovered engine plugins,
+            ``pytorch`` runs the graph through the PyTorch executor as a single
             engine row per graph).
     """
 
@@ -279,12 +308,11 @@ class SuiteConfig:
     engine_filter: Optional[List[int]] = None
     rtol: Optional[float] = None
     atol: Optional[float] = None
-    timing_backend: str = "auto"
     reference_provider: str = ReferenceProviderName.NONE.value
     verbose: bool = False
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
     plugin_paths: Optional[List[Path]] = None
-    backend: str = "hipdnn"
+    backend: ExecutionBackendName = ExecutionBackendName.HIPDNN
 
     def __post_init__(self) -> None:
         """Validate configuration values."""
@@ -314,23 +342,12 @@ class SuiteConfig:
                     raise ValueError(
                         "--plugin-path entry count must be 1 or match --engine count"
                     )
-        valid_timing_backends = {"hip", "torch", "auto", "none"}
-        if self.timing_backend not in valid_timing_backends:
-            raise ValueError(
-                f"Invalid timing_backend: '{self.timing_backend}'. "
-                f"Valid options: {valid_timing_backends}"
-            )
         if self.reference_provider not in REFERENCE_PROVIDER_CHOICES:
             raise ValueError(
                 f"Invalid reference_provider: '{self.reference_provider}'. "
                 f"Valid options: {REFERENCE_PROVIDER_CHOICES}"
             )
-        valid_backends = {"hipdnn", "pytorch"}
-        if self.backend not in valid_backends:
-            raise ValueError(
-                f"Invalid backend: '{self.backend}'. "
-                f"Valid options: {valid_backends}"
-            )
+        self.backend = normalize_execution_backend(self.backend)
 
     @property
     def tolerance_override(self) -> Optional[tuple[float, float]]:
