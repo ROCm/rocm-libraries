@@ -125,10 +125,10 @@ struct TileConstantsBase
     {
         using Shared = typename SharedDescriptors<TileConstantsBase<cfg>>::Input;
 
-        static CK_TILE_DEVICE auto MakeDramReadDescriptor(
-            int hi, int wi, int C_total, int px, int py, int dx, int dy, int sx, int sy)
+        static CK_TILE_DEVICE auto
+        MakeDramReadDescriptor(int hi, int wi, int C_total, int px, int py)
         {
-            return Shared::MakeDramReadDescriptor(hi, wi, C_total, px, py, dx, dy, sx, sy);
+            return Shared::MakeDramReadDescriptor(hi, wi, C_total, px, py);
         }
         static constexpr auto MakeDramReadTileDistribution()
         {
@@ -138,19 +138,11 @@ struct TileConstantsBase
         static constexpr auto MakeLdsReadDescriptor() { return Shared::MakeLdsReadDescriptor(); }
 
         template <int VectorSize>
-        static CK_TILE_DEVICE auto MakeDramReadDescriptorPadded(int hi,
-                                                                int wi,
-                                                                int C_in,
-                                                                int c_per_group,
-                                                                int px,
-                                                                int py,
-                                                                int dx,
-                                                                int dy,
-                                                                int sx,
-                                                                int sy)
+        static CK_TILE_DEVICE auto
+        MakeDramReadDescriptorPadded(int hi, int wi, int C_in, int c_per_group, int px, int py)
         {
             return Shared::template MakeDramReadDescriptorPadded<VectorSize>(
-                hi, wi, C_in, c_per_group, px, py, dx, dy, sx, sy);
+                hi, wi, C_in, c_per_group, px, py);
         }
     };
 
@@ -361,12 +353,12 @@ CK_TILE_DEVICE void weight_read_fprop(WeightAccessorT& wa, uint4* weight_lds)
     ck_tile::static_for<0, TC::KH_KW, 1>{}([&](auto khw) { wa.weights[khw.value] = vec_buf[khw]; });
 }
 
-// ======================================================================
-// is_applicable_base — layout and geometry checks shared by all
-// grouped-conv variants.  Each variant additionally checks
+// ========================================================================
+// is_applicable_base — layout and geometry checks shared by all variants.
+// Each variant additionally checks
 // channels_per_group() and c_tot alignment.
 // Data type checks are done by make_variant<DT>().
-// ======================================================================
+// ========================================================================
 inline bool is_applicable_base(const Conv2dParams& par)
 {
     if(par.order != TensorOrder::NHWC)

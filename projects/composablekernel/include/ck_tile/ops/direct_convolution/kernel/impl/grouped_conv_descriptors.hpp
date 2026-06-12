@@ -27,8 +27,9 @@ struct SharedDescriptors
     struct Input
     {
         // DRAM read descriptor: [hi_padded, wi_padded, BLOCK_C8, 8] with optional XOR.
-        static CK_TILE_DEVICE auto MakeDramReadDescriptor(
-            int hi, int wi, int C_total, int px, int py, int dx, int dy, int sx, int sy)
+        // TODO: implement the striding and dilation.
+        static CK_TILE_DEVICE auto
+        MakeDramReadDescriptor(int hi, int wi, int C_total, int px, int py)
         {
             const int hi_padded_size = hi + 2 * py;
             const int wi_padded_size = wi + 2 * px;
@@ -55,11 +56,6 @@ struct SharedDescriptors
                                     ck_tile::sequence<1>{},
                                     ck_tile::sequence<2>{},
                                     ck_tile::sequence<3>{}));
-
-            if(sx != 1 || sy != 1 || dx != 1 || dy != 1)
-            {
-                // TODO: implement the striding and dilation.
-            }
 
             if constexpr(TC::SWIZZLE_TYPE == SwizzleType::XOR)
             {
@@ -110,17 +106,11 @@ struct SharedDescriptors
         //
         // The buffer base pointer must be set to:
         //   in + block_n * hi * wi * C_in + block_k_in
+        //
+        // TODO: implement the striding and dilation.
         template <int GuaranteedVectorLoadSize = 1>
-        static CK_TILE_DEVICE auto MakeDramReadDescriptorPadded(int hi,
-                                                                int wi,
-                                                                int C_in,
-                                                                int c_per_group,
-                                                                int px,
-                                                                int py,
-                                                                int dx,
-                                                                int dy,
-                                                                int sx,
-                                                                int sy)
+        static CK_TILE_DEVICE auto
+        MakeDramReadDescriptorPadded(int hi, int wi, int C_in, int c_per_group, int px, int py)
         {
             constexpr int GROUP_SIZE   = TC::GROUP_SIZE;
             constexpr int BLOCK_GROUPS = TC::BLOCK_GROUPS;
@@ -153,11 +143,6 @@ struct SharedDescriptors
                                     ck_tile::sequence<1>{},
                                     ck_tile::sequence<2>{},
                                     ck_tile::sequence<3>{}));
-
-            if(sx != 1 || sy != 1 || dx != 1 || dy != 1)
-            {
-                // TODO: implement the striding and dilation.
-            }
 
             // Step 4: merge channel dims → [hi_padded, wi_padded, BLOCK_C].
             const auto desc_merged = ck_tile::transform_tensor_descriptor(

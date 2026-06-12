@@ -68,7 +68,7 @@ CK_TILE_DEVICE void buffer_load16_to_lds(CK_TILE_LDS_ADDR ElementType* lds_dest,
 //   cfg — Config value providing kw and other kernel parameters.
 //
 // TC must provide:
-//   TC::Input::MakeDramReadDescriptor(hi, wi, C_total, px, py, dx, dy, sx, sy)
+//   TC::Input::MakeDramReadDescriptor(hi, wi, C_total, px, py)
 //   TC::Input::MakeDramReadTileDistribution()
 //   TC::Input::MakeLdsWriteDescriptor()
 //   TC::Input::MakeLdsReadDescriptor()
@@ -89,8 +89,7 @@ struct InputLoader
     using InputDramWindowType = decltype(ck_tile::make_tile_window(
         ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
             static_cast<const ElementType*>(nullptr),
-            TC::Input::MakeDramReadDescriptor(
-                int{}, int{}, int{}, int{}, int{}, int{}, int{}, int{}, int{})),
+            TC::Input::MakeDramReadDescriptor(int{}, int{}, int{}, int{}, int{})),
         ck_tile::make_tuple(ck_tile::number<1>{},
                             ck_tile::number<TC::TOTAL_SPATIAL>{},
                             ck_tile::number<TC::BLOCK_C8>{},
@@ -155,10 +154,10 @@ struct InputLoader
                                int wi,
                                int px,
                                int py,
-                               int dx,
-                               int dy,
-                               int sx,
-                               int sy,
+                               int, // dx
+                               int, // dy
+                               int, // sx
+                               int, // sy
                                int c_per_group        = TC::GROUP_SIZE,
                                bool init_mfma_offsets = true)
         : input_lds_ptr(input_lds)
@@ -195,8 +194,7 @@ struct InputLoader
         // both the Padded=true (but c_per_group==GROUP_SIZE at runtime) case
         // and the Padded=false case without code duplication. ----
         auto init_unpadded = [&]() {
-            const auto input_dram_desc =
-                TC::Input::MakeDramReadDescriptor(hi, wi, bc.C, px, py, dx, dy, sx, sy);
+            const auto input_dram_desc = TC::Input::MakeDramReadDescriptor(hi, wi, bc.C, px, py);
             const ElementType* input_base =
                 in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C + bc.block_k;
             const auto input_dram_view =
@@ -257,10 +255,6 @@ struct InputLoader
                 padded_state_.c_per_group_ = c_per_group;
                 padded_state_.px_          = px;
                 padded_state_.py_          = py;
-                padded_state_.dx_          = dx;
-                padded_state_.dy_          = dy;
-                padded_state_.sx_          = sx;
-                padded_state_.sy_          = sy;
                 padded_state_.current_row_ = 0;
                 padded_state_.block_q_     = bc.block_q;
                 padded_state_.input_base_padded_ =
@@ -270,7 +264,7 @@ struct InputLoader
                 {
                     const auto padded_desc =
                         TC::Input::template MakeDramReadDescriptorPadded<cfg.vector_size>(
-                            hi, wi, bc.C_in, c_per_group, px, py, dx, dy, sx, sy);
+                            hi, wi, bc.C_in, c_per_group, px, py);
                     auto padded_view =
                         ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
                             padded_state_.input_base_padded_, padded_desc);
@@ -398,11 +392,7 @@ struct InputLoader
                 padded_state_.C_in_,
                 padded_state_.c_per_group_,
                 padded_state_.px_,
-                padded_state_.py_,
-                padded_state_.dx_,
-                padded_state_.dy_,
-                padded_state_.sx_,
-                padded_state_.sy_);
+                padded_state_.py_);
 
         auto padded_dram_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
             padded_state_.input_base_padded_, padded_dram_desc);
