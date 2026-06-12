@@ -38,15 +38,15 @@ namespace hipblaslt_bench
     struct TimingConfig
     {
         bool    adaptive = false; // false => fixed-count fast path (uses iters); true => adaptive
-        int32_t iters = 10; // enqueues in the fixed-count sample; unused by the adaptive path
-        float   warmup_time = 0.0f; // warm up until this wall-time is reached
-        float   sample_time = 0.0f; // target span per sample; 0 => one enqueue per sample
-        float   measure_time = 0.0f; // minimum total measure time (floor)
+        int32_t iters    = 10; // enqueues in the fixed-count sample; unused by the adaptive path
+        float   warmup_time      = 0.0f; // warm up until this wall-time is reached
+        float   sample_time      = 0.0f; // target span per sample; 0 => one enqueue per sample
+        float   measure_time     = 0.0f; // minimum total measure time (floor)
         float   max_measure_time = 0.0f; // measure ceiling; 0 => unbounded
         int32_t min_iters = 0; // floor on total timed iterations (0 in the fixed-count fast path)
         int32_t max_iters = 0; // ceiling on total timed iterations; 0 => unbounded
         float   noise_threshold = 0.0f; // rel. std error convergence target; 0 => disabled
-        bool    use_gpu_timer = false; // hipEvent timing vs CPU wall clock
+        bool    use_gpu_timer   = false; // hipEvent timing vs CPU wall clock
     };
 
     // Default values for the --adaptive preset, used as the CLI/YAML defaults so they
@@ -67,11 +67,11 @@ namespace hipblaslt_bench
     // Per-iteration statistics, in microseconds.
     struct TimingResult
     {
-        double  median_us = 0.0;
-        double  min_us    = 0.0;
-        double  mean_us   = 0.0;
-        double  cv        = 0.0; // coefficient of variation across samples (stddev/mean, n-1)
-        double  rel_iqr   = 0.0; // robust dispersion: interquartile range / median
+        double  median_us    = 0.0;
+        double  min_us       = 0.0;
+        double  mean_us      = 0.0;
+        double  cv           = 0.0; // coefficient of variation across samples (stddev/mean, n-1)
+        double  rel_iqr      = 0.0; // robust dispersion: interquartile range / median
         int32_t batch        = 0; // enqueues per sample (B)
         int32_t samples      = 0; // number of samples collected (K)
         int64_t hot_iters    = 0; // total timed enqueues (B*K)
