@@ -996,21 +996,40 @@ def makeShardedGtestCmd(String buildDir, String gtestFilter="*") {
 //   - the FlowNode walk fails for any reason (fail-open: run all stages)
 // ---------------------------------------------------------------------------
 
+// Reads the SCM commit hash from a build's SCMRevisionAction. This is recorded
+// by the SCM plugin before the pipeline starts, so it is available on both
+// current and previous builds without relying on pipeline-set env vars.
+// Returns null if the action is not present.
+@NonCPS
+def getScmCommitHash(def rawBuild) {
+    def scmAction = rawBuild?.actions?.find { action ->
+        action instanceof jenkins.scm.api.SCMRevisionAction
+    }
+    if (scmAction?.revision instanceof org.jenkinsci.plugins.github_branch_source.PullRequestSCMRevision) {
+        return scmAction.revision.pullHash
+    } else if (scmAction?.revision instanceof jenkins.plugins.git.AbstractGitSCMSource$SCMRevisionImpl) {
+        return scmAction.revision.hash
+    }
+    return null
+}
+
 // Walks the FlowNode execution graph of the previous build and collects
 // the display names of all stages that completed without error.
 // Must be @NonCPS because it accesses rawBuild and iterates FlowNodes
 // (non-serializable Jenkins internal objects).
 //
-// Only returns a non-empty set when the CURRENT build was triggered by
-// "Restart from Stage" (RestartDeclarativePipelineCause). For any other
-// trigger (SCM change, manual Build, cron) the previous build may be for
-// a completely different commit, so we must not skip any stages.
+// Guards:
+// 1. Only runs when the current build was triggered by "Restart from Stage"
+//    (RestartDeclarativePipelineCause). For any other trigger the previous
+//    build may be for a different commit.
+// 2. Compares SCM commit hashes (via SCMRevisionAction) between current and
+//    previous build. If they differ, returns empty so all stages run. This
+//    prevents skipping stages when a new commit is pushed between builds.
 @NonCPS
 def getPassedStagesFromPreviousBuild() {
     def passed = [] as Set
     try {
-        // Guard: only skip stages on a "Restart from Stage" build.
-        // Any other trigger means this could be a new commit.
+        // Guard 1: only skip stages on a "Restart from Stage" build.
         def isRestart = currentBuild.rawBuild?.getCauses()?.any { cause ->
             cause.getClass().getName().contains('RestartDeclarativePipeline')
         }
@@ -1019,6 +1038,11 @@ def getPassedStagesFromPreviousBuild() {
         def prev = currentBuild.previousBuild
         if (!prev) return passed
         if (prev.result == 'SUCCESS') return passed
+
+        // Guard 2: only skip stages if both builds are for the same commit.
+        def curCommit = getScmCommitHash(currentBuild.rawBuild)
+        def prevCommit = getScmCommitHash(prev.rawBuild)
+        if (!curCommit || !prevCommit || curCommit != prevCommit) return passed
 
         def prevRun = prev.rawBuild
         if (!prevRun) return passed
@@ -1087,8 +1111,6 @@ def packageAndStaticCheckStages(def pipelineParams, def pipelineEnv, def rocmnod
     def passedStages = getPassedStagesFromPreviousBuild()
     if (passedStages) {
         echo "Selective rerun: skipping ${passedStages.size()} previously passed stage(s): ${passedStages}"
-    } else {
-        echo "Running all stages (not a Restart from Stage, or no previous failed build)."
     }
     def stages = [:]
 
@@ -1149,8 +1171,6 @@ def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def with
     def passedStages = getPassedStagesFromPreviousBuild()
     if (passedStages) {
         echo "Selective rerun: skipping ${passedStages.size()} previously passed stage(s): ${passedStages}"
-    } else {
-        echo "Running all stages (not a Restart from Stage, or no previous failed build)."
     }
     def stages = [:]
 
@@ -1391,8 +1411,6 @@ def nonCriticalHWNightlyStages(def pipelineParams, def pipelineEnv, def rocmnode
     def passedStages = getPassedStagesFromPreviousBuild()
     if (passedStages) {
         echo "Selective rerun: skipping ${passedStages.size()} previously passed stage(s): ${passedStages}"
-    } else {
-        echo "Running all stages (not a Restart from Stage, or no previous failed build)."
     }
     def stages = [:]
 
