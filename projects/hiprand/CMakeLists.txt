@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -32,6 +32,9 @@ set(MIN_ROCRAND_PACKAGE_VERSION "4.0.0" CACHE STRING "Minimum version of rocRAND
 # Set download branch for dependency rocPRIM
 set(ROCM_DEP_RELEASE_BRANCH "release/therock-7.13" CACHE STRING "Download branch for ROCm dependencies")
 # --------------------------------------
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
 
 if(DEFINED ENV{ROCM_PATH})
   set (ROCM_PATH "$ENV{ROCM_PATH}" CACHE PATH "The path to the ROCm installation.")
@@ -88,10 +91,10 @@ check_fetch_method(ROCRAND_FETCH_METHOD)
 if (BUILD_WITH_LIB STREQUAL "CUDA")
   # Not relevant for CUDA builds
   set(ROCRAND_PATH "" CACHE INTERNAL "")
-  set(ROCRAND_ROOT "" CACHE INTERNAL "")
+  set(rocrand_LOCAL_DIR "" CACHE INTERNAL "")
 else()
   set(ROCRAND_PATH "" CACHE PATH "Path to rocRAND install.")
-  set(ROCRAND_ROOT "${CMAKE_CURRENT_BINARY_DIR}/deps/rocrand" CACHE PATH "Path to downloaded rocRAND install.")
+  set(rocrand_LOCAL_DIR "${CMAKE_CURRENT_BINARY_DIR}/deps/rocrand" CACHE PATH "Path to downloaded rocRAND install.")
 endif()
 
 set(HIPRAND_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")

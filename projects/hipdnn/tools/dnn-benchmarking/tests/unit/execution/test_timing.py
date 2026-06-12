@@ -3,7 +3,9 @@
 
 """Tests for Timer and GPU timing utilities."""
 
+import sys
 import time
+import types
 
 import pytest
 
@@ -11,15 +13,15 @@ import dnn_benchmarking.execution.timing as timing_module
 from dnn_benchmarking.execution.timing import (
     GpuTimer,
     GpuTimerInterface,
+    HipGpuTimer,
     Timer,
-    TorchGpuTimer,
     create_gpu_timer,
     get_available_backends,
     is_gpu_timing_available,
 )
 
 # Import shared test fixture
-from tests.conftest import DummyTorchTimer
+from tests.conftest import DummyHipTimer
 
 
 class TestTimer:
@@ -89,6 +91,7 @@ class TestGpuTimerInterface:
         assert hasattr(GpuTimerInterface, "start")
         assert hasattr(GpuTimerInterface, "stop")
         assert hasattr(GpuTimerInterface, "elapsed_ms")
+        assert hasattr(GpuTimerInterface, "synchronize")
         assert hasattr(GpuTimerInterface, "backend_name")
 
     def test_interface_has_context_manager_protocol(self) -> None:
@@ -107,15 +110,28 @@ class TestBackendDetection:
 
     def test_get_available_backends_only_valid_values(self, monkeypatch) -> None:
         """Test that only valid backend names are returned."""
-        monkeypatch.setattr(timing_module, "_is_torch_available", lambda: True)
+        monkeypatch.setattr(timing_module, "_is_hip_available", lambda: True)
         backends = get_available_backends()
-        assert backends == ["torch"]
+        assert backends == ["hip"]
 
     def test_is_gpu_timing_available_matches_backends(self, monkeypatch) -> None:
         """Test consistency between availability functions."""
-        monkeypatch.setattr(timing_module, "_is_torch_available", lambda: True)
+        monkeypatch.setattr(timing_module, "_is_hip_available", lambda: True)
         backends = get_available_backends()
         assert is_gpu_timing_available() == (len(backends) > 0)
+
+    def test_cpu_only_torch_does_not_enable_gpu_timing(self, monkeypatch) -> None:
+        """CPU-only torch is importable but must not enable GPU timers."""
+        fake_torch = types.SimpleNamespace(
+            cuda=types.SimpleNamespace(is_available=lambda: False)
+        )
+        monkeypatch.setitem(sys.modules, "torch", fake_torch)
+        monkeypatch.setattr(timing_module, "_is_hip_available", lambda: False)
+
+        assert timing_module.torch_support.module_available() is True
+        assert timing_module.torch_support.gpu_available() is False
+        assert get_available_backends() == []
+        assert is_gpu_timing_available() is False
 
 
 class TestFactoryFunction:
@@ -126,32 +142,36 @@ class TestFactoryFunction:
         with pytest.raises(ValueError, match="Unknown backend"):
             create_gpu_timer("invalid")  # type: ignore
 
-    def test_torch_backend_unavailable_raises_error(self, monkeypatch) -> None:
-        """Test that requesting unavailable torch backend raises RuntimeError."""
-        monkeypatch.setattr(timing_module, "_is_torch_available", lambda: False)
-        with pytest.raises(RuntimeError, match="PyTorch GPU not available"):
-            create_gpu_timer("torch")
+    def test_hip_backend_unavailable_raises_error(self, monkeypatch) -> None:
+        """Test that requesting unavailable HIP backend raises RuntimeError."""
+
+        def raise_unavailable():
+            raise RuntimeError("HIP GPU timing not available")
+
+        monkeypatch.setattr(timing_module, "_require_hip_runtime", raise_unavailable)
+        with pytest.raises(RuntimeError, match="HIP GPU timing not available"):
+            create_gpu_timer("hip")
 
     def test_auto_no_backend_returns_none(self, monkeypatch) -> None:
         """Test that auto with no backends returns None (graceful fallback)."""
-        monkeypatch.setattr(timing_module, "_is_torch_available", lambda: False)
+        monkeypatch.setattr(timing_module, "_is_hip_available", lambda: False)
         assert create_gpu_timer("auto") is None
 
     def test_auto_creates_timer_when_available(self, monkeypatch) -> None:
         """Test auto-detection creates a timer when available."""
-        monkeypatch.setattr(timing_module, "_is_torch_available", lambda: True)
-        monkeypatch.setattr(timing_module, "TorchGpuTimer", DummyTorchTimer)
+        monkeypatch.setattr(timing_module, "_is_hip_available", lambda: True)
+        monkeypatch.setattr(timing_module, "HipGpuTimer", DummyHipTimer)
         timer = create_gpu_timer("auto")
         assert isinstance(timer, GpuTimerInterface)
-        assert timer.backend_name == "torch"
+        assert timer.backend_name == "hip"
 
 
-class TestTorchGpuTimerBackwardCompat:
+class TestHipGpuTimerBackwardCompat:
     """Tests for backward compatibility aliases."""
 
     def test_gputimer_alias(self) -> None:
-        """Test that GpuTimer is alias for TorchGpuTimer."""
-        assert GpuTimer is TorchGpuTimer
+        """Test that GpuTimer is alias for HipGpuTimer."""
+        assert GpuTimer is HipGpuTimer
 
 
 class TestGpuTimerContextManager:
@@ -171,6 +191,9 @@ class TestGpuTimerContextManager:
 
             def stop(self) -> None:
                 call_order.append("stop")
+
+            def synchronize(self) -> None:
+                pass
 
             def elapsed_ms(self) -> float:
                 return 1.0
@@ -197,6 +220,9 @@ class TestGpuTimerContextManager:
                 nonlocal stop_called
                 stop_called = True
 
+            def synchronize(self) -> None:
+                pass
+
             def elapsed_ms(self) -> float:
                 return 1.0
 
@@ -208,22 +234,112 @@ class TestGpuTimerContextManager:
         assert stop_called is True
 
 
+class TestDirectHipTimers:
+    """Tests for direct hipdnn_frontend HIP API usage."""
+
+    def test_hip_gpu_timer_uses_bound_hip_events(self, monkeypatch) -> None:
+        calls = []
+        events = []
+
+        class FakeEvent:
+            def __init__(self) -> None:
+                events.append(self)
+                calls.append(("create", self))
+
+            def record(self, stream: int) -> None:
+                calls.append(("record", self, stream))
+
+            def synchronize(self) -> None:
+                calls.append(("synchronize", self))
+
+            def elapsed_time(self, stop) -> float:
+                calls.append(("elapsed", self, stop))
+                return 1.25
+
+        class FakeHipdnn:
+            @staticmethod
+            def hip_get_device_count() -> int:
+                return 1
+
+            HipEvent = FakeEvent
+
+        monkeypatch.setattr(timing_module, "hipdnn", FakeHipdnn)
+
+        timer = HipGpuTimer(stream=123)
+        timer.start()
+        timer.stop()
+        timer.synchronize()
+
+        assert timer.elapsed_ms() == 1.25
+        assert len(events) == 2
+        assert calls == [
+            ("create", events[0]),
+            ("create", events[1]),
+            ("record", events[0], 123),
+            ("record", events[1], 123),
+            ("synchronize", events[1]),
+            ("synchronize", events[1]),
+            ("elapsed", events[0], events[1]),
+        ]
+
+    def test_hip_gpu_timer_synchronize_stream_records_event_on_stream(
+        self, monkeypatch
+    ) -> None:
+        calls = []
+        events = []
+
+        class FakeEvent:
+            def __init__(self) -> None:
+                events.append(self)
+                calls.append(("create", self))
+
+            def record(self, stream: int) -> None:
+                calls.append(("record", self, stream))
+
+            def synchronize(self) -> None:
+                calls.append(("synchronize", self))
+
+            def elapsed_time(self, stop) -> float:
+                return 0.0
+
+        class FakeHipdnn:
+            @staticmethod
+            def hip_get_device_count() -> int:
+                return 1
+
+            HipEvent = FakeEvent
+
+        monkeypatch.setattr(timing_module, "hipdnn", FakeHipdnn)
+
+        timer = HipGpuTimer(stream=456)
+        timer.synchronize_stream()
+
+        assert len(events) == 2
+        assert calls == [
+            ("create", events[0]),
+            ("create", events[1]),
+            ("record", events[1], 456),
+            ("synchronize", events[1]),
+        ]
+
+
 class TestTimingSanity:
     """Sanity tests for timing behavior."""
 
     def test_dummy_timer_implements_interface(self) -> None:
-        """Test that DummyTorchTimer properly implements the interface."""
-        timer = DummyTorchTimer()
+        """Test that DummyHipTimer properly implements the interface."""
+        timer = DummyHipTimer()
 
         # Verify all interface methods work
-        assert timer.backend_name == "torch"
+        assert timer.backend_name == "hip"
         timer.start()
         timer.stop()
+        timer.synchronize()
         assert timer.elapsed_ms() == 0.0
 
     def test_dummy_timer_context_manager(self) -> None:
-        """Test that DummyTorchTimer works as context manager."""
-        timer = DummyTorchTimer()
+        """Test that DummyHipTimer works as context manager."""
+        timer = DummyHipTimer()
         with timer:
             pass
         assert timer.elapsed_ms() == 0.0

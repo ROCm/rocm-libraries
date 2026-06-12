@@ -35,7 +35,9 @@ else( )
     "Install path prefix, prepended onto install directories" )
 endif( )
 
-
+if( NOT DEFINED ROCM_LIBRARIES_ROOT )
+  set( ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." )
+endif()
 
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user
@@ -258,6 +260,7 @@ if( BUILD_CLIENTS_SAMPLES
     set( HIPRAND_DEP hiprand )
   endif()
   if(BUILD_CLIENTS_TESTS)
+    enable_testing()
     rocm_package_setup_client_component(
       tests
       DEPENDS
