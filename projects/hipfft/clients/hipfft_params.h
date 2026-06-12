@@ -258,9 +258,12 @@ public:
                                          "vram-probing purposes, error code: "
                                          + std::to_string(plan_status) + ")");
             }
-
-            std::vector<size_t> required_worksizes(temp_copy.get_num_used_gpus(),
-                                                   absurd_init_worksize_estimate);
+            std::vector<size_t> required_worksizes(temp_copy.get_num_used_gpus());
+            required_worksizes[0] = absurd_init_worksize_estimate;
+            // replace the above by
+            //std::vector<size_t> required_worksizes(temp_copy.get_num_used_gpus(),
+            //                                       absurd_init_worksize_estimate);
+            // when hipFFT's mGPU workspace size query is fixed for multi-GPU
             auto get_size_ret = hipfftGetSize(temp_copy.plan, required_worksizes.data());
             if(get_size_ret != HIPFFT_SUCCESS)
             {
