@@ -556,13 +556,6 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
   std::vector<prediction_result_wrapper_t> latencies_configs;
   latencies_configs.reserve(configs.size());
 
-  OLOG_DEBUG("[rank_configs] Model type: " << (model == model_t::attention ? "attention" : "gemm"));
-
-  OLOG_DEBUG("=== rank_configs START ===");
-  OLOG_DEBUG("Ranking " << configs.size() << " configs for problem M="
-             << problem.size.m << " N=" << problem.size.n << " K=" << problem.size.k
-             << " batch=" << problem.batch << " q_heads=" << problem.q_heads);
-
   for (auto& config : configs) {
     // Use appropriate capacity checks and latency computation based on model type
     bool fits_in_rf;
