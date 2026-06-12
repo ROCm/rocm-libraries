@@ -96,7 +96,6 @@ EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& feat
 
 /// Expands metadata-ordered encoded kernel params into the vector consumed by the
 /// kernel_config_encoder submodel (one-hot + raw numerical + derived features).
-/// Matches ConvKernConfigPreprocessor in models.py.
 MIOPEN_INTERNALS_EXPORT std::vector<float>
 EngineerCandidateSelectionKernelConfigFeatures(const std::vector<float>& raw_config_features,
                                                const CandidateSelectionMetadata& metadata);

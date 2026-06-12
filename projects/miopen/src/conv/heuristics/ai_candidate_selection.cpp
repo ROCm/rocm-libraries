@@ -550,7 +550,8 @@ std::vector<std::string> ActiveOutputParams(const CandidateSelectionMetadata& me
     return active;
 }
 
-// Derived feature count from ConvKernConfigPreprocessor::_count_derived_features (models.py).
+// Number of derived kernel-config features appended below (see the derived-feature block in
+// EngineerCandidateSelectionKernelConfigFeatures).
 constexpr std::size_t kKernelConfigDerivedFeatureCount = 10;
 
 std::size_t ComputeKernelConfigPreprocessorOutputDim(const CandidateSelectionMetadata& metadata)
