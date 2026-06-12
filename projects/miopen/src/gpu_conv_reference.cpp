@@ -48,8 +48,7 @@ std::string RefKernelName(const std::string& direction,
     case miopenDouble:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
-    case miopenInt64:
-    default: MIOPEN_THROW("GpuConvReference: unsupported input data type");
+    case miopenInt64: MIOPEN_THROW("GpuConvReference: unsupported input data type");
     }
 
     // Accumulator type: always double for reference (int32 for int8)
@@ -69,8 +68,7 @@ std::string RefKernelName(const std::string& direction,
     case miopenDouble:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
-    case miopenInt64:
-    default: MIOPEN_THROW("GpuConvReference: unsupported output data type");
+    case miopenInt64: MIOPEN_THROW("GpuConvReference: unsupported output data type");
     }
 
     // TF32 flag: always 0 for reference
