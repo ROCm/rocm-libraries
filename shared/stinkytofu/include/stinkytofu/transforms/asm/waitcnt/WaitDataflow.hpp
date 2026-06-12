@@ -207,7 +207,14 @@ class WaitDataflow {
     /// predecessor, including self-preds (back-edges): at the fixed point a
     /// back-edge's exit is the loop body's true exit, which is what the
     /// header must see. Identical (pred, ops) queues are deduplicated.
+    ///
+    /// The overload taking an explicit `exitState` map lets finalizePlan
+    /// re-propagate against its own recomputed exit states instead of the
+    /// solver's; the no-arg form merges from the solver's exit states.
     DataflowState mergeFromPredecessors(BasicBlock& bb) const;
+    DataflowState mergeFromPredecessors(
+        BasicBlock& bb,
+        const std::unordered_map<const BasicBlock*, DataflowState>& exitState) const;
 
     /// Walk BB in program order, mutating STATE. Per-pred queues are kept
     /// (not collapsed) at exit; each is capped at kMaxInFlight.

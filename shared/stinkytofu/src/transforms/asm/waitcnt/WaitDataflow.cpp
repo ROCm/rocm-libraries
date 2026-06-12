@@ -164,6 +164,11 @@ void WaitDataflow::setRawNeedsWait(CounterKind c, RawWaitPredicate pred) {
 }
 
 DataflowState WaitDataflow::mergeFromPredecessors(BasicBlock& bb) const {
+    return mergeFromPredecessors(bb, result.exitState);
+}
+
+DataflowState WaitDataflow::mergeFromPredecessors(
+    BasicBlock& bb, const std::unordered_map<const BasicBlock*, DataflowState>& exitState) const {
     DataflowState entry;
     const auto& preds = bb.getPredecessors();
 
@@ -179,8 +184,8 @@ DataflowState WaitDataflow::mergeFromPredecessors(BasicBlock& bb) const {
     // during fixed-point iteration), keep the strictest (min) wait per
     // counter so the consumer stays safe.
     for (BasicBlock* p : preds) {
-        auto it = result.exitState.find(p);
-        if (it == result.exitState.end()) continue;
+        auto it = exitState.find(p);
+        if (it == exitState.end()) continue;
         const auto& predState = it->second;
         for (int c = 0; c < CK_Count; ++c) {
             for (const auto& predQ : predState.queues[c]) {
@@ -242,8 +247,8 @@ DataflowState WaitDataflow::mergeFromPredecessors(BasicBlock& bb) const {
         for (size_t j = 0; j < preds.size() && j < srcs.size(); ++j) {
             StinkyInstruction* src = srcs[j];
             if (src == nullptr) continue;
-            auto pit = result.exitState.find(preds[j]);
-            if (pit == result.exitState.end()) continue;
+            auto pit = exitState.find(preds[j]);
+            if (pit == exitState.end()) continue;
             const auto& predState = pit->second;
 
             if (isPhi(*src)) {
@@ -409,27 +414,6 @@ DataflowState adjustedEntry(BasicBlock& bb, const WaitInsertionPlan& plan,
         }
     }
     return state;
-}
-
-bool isWaitAnchorCandidate(const StinkyInstruction& inst,
-                           const std::array<WaitDataflow::RawWaitPredicate, CK_Count>& preds) {
-    for (int c = 0; c < CK_Count; ++c) {
-        if (preds[c](inst)) return true;
-    }
-    return false;
-}
-
-bool blockNeedsFinalize(BasicBlock& bb, const WaitInsertionPlan& plan,
-                        const std::array<WaitDataflow::RawWaitPredicate, CK_Count>& preds) {
-    int candidates = 0;
-    for (IRBase& ir : bb) {
-        auto* inst = dyn_cast<StinkyInstruction>(&ir);
-        if (inst == nullptr) continue;
-        if (isPhi(*inst)) continue;
-        if (plan.anchorWaits.find(inst) != plan.anchorWaits.end()) return true;
-        if (isWaitAnchorCandidate(*inst, preds)) ++candidates;
-    }
-    return candidates >= 2;
 }
 
 WaitCountSpec mergePlanAndComputed(const WaitInsertionPlan& plan, StinkyInstruction* inst,
@@ -782,49 +766,80 @@ bool WaitDataflow::solve() {
 }
 
 void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
-    // The conservative solver trims queues with pre-optimizer wait values.
-    // After WaitPlanOptimizer(s) relax anchors or add tail drains, replay
-    // affected blocks with the final plan so later anchors on any counter
-    // see the correct residual FIFO and redundant waits are dropped.
-    for (BasicBlock* bb : rpo) {
-        if (!blockNeedsFinalize(*bb, plan, rawNeedsWait)) continue;
+    // The conservative solver trims queues with PRE-optimizer wait values.
+    // A WaitPlanOptimizer (e.g. ShallowPredPromotion) may then RELAX an
+    // anchor's wait -- which leaves additional same-counter ops in flight
+    // past that anchor than the conservative drain did. Those extra ops
+    // must reach the successors so a downstream consumer can re-derive the
+    // wait it now needs.
+    //
+    // Replaying each block in isolation from the solver's entry state
+    // cannot see this: the solver's residual was computed with the
+    // (deeper) conservative waits, so a relaxed dominating anchor would
+    // silently drop the wait a dominated consumer requires (e.g. a tensor
+    // load whose only producer is a conditional pred, consumed by a loop
+    // header barrier). Instead, re-run the forward dataflow to a fixed
+    // point using the FINAL plan's waits to drive the per-counter trims,
+    // so the post-optimizer residual propagates across the CFG.
+    //
+    // The optimizer's anchor waits are the floor we must still emit;
+    // finalize only ADDS waits that the relaxed residual now requires and
+    // DROPS waits made redundant. Snapshot them before we rebuild.
+    const WaitInsertionPlan optimizerPlan = plan;
 
-        auto entryIt = result.entryState.find(bb);
-        if (entryIt == result.entryState.end()) continue;
+    std::unordered_map<const BasicBlock*, DataflowState> finalExit;
+    std::unordered_map<StinkyInstruction*, WaitCountSpec> newAnchors;
 
-        DataflowState state = adjustedEntry(*bb, plan, entryIt->second);
-        CounterEmitState emit[CK_Count];
+    for (unsigned iter = 0; iter < iterationCap; ++iter) {
+        bool changed = false;
+        newAnchors.clear();
 
-        for (IRBase& ir : *bb) {
-            auto* inst = dyn_cast<StinkyInstruction>(&ir);
-            if (inst == nullptr) continue;
-            if (isPhi(*inst)) continue;
+        for (BasicBlock* bb : rpo) {
+            // Entry = merge of recomputed predecessor exits (back-edges
+            // start at bottom and tighten over iterations), then apply the
+            // optimizer's predecessor tail drains.
+            DataflowState state = mergeFromPredecessors(*bb, finalExit);
+            state = adjustedEntry(*bb, optimizerPlan, state);
+            CounterEmitState emit[CK_Count];
 
-            int computed[CK_Count];
-            computeRequiredWaits(inst, state, rawNeedsWait, computed);
+            for (IRBase& ir : *bb) {
+                auto* inst = dyn_cast<StinkyInstruction>(&ir);
+                if (inst == nullptr) continue;
+                if (isPhi(*inst)) continue;
 
-            const bool inPlan = plan.anchorWaits.find(inst) != plan.anchorWaits.end();
-            WaitCountSpec applySpec = mergePlanAndComputed(plan, inst, computed, emit);
+                int computed[CK_Count];
+                computeRequiredWaits(inst, state, rawNeedsWait, computed);
 
-            for (int c = 0; c < CK_Count; ++c) {
-                int w = getCounterField(applySpec, static_cast<CounterKind>(c));
-                if (w == WaitCountSpec::kUnused) continue;
-                trimQueues(state.queues[c], w);
+                // Emit the optimizer's planned wait where present (floor),
+                // else the freshly recomputed requirement.
+                WaitCountSpec applySpec = mergePlanAndComputed(optimizerPlan, inst, computed, emit);
+
+                for (int c = 0; c < CK_Count; ++c) {
+                    int w = getCounterField(applySpec, static_cast<CounterKind>(c));
+                    if (w == WaitCountSpec::kUnused) continue;
+                    trimQueues(state.queues[c], w);
+                }
+
+                if (applySpec.isValid()) newAnchors[inst] = applySpec;
+
+                CounterKind self = classifyMemOp(*inst);
+                if (self != CK_Count) {
+                    appendToAllPaths(state.queues[self], inst);
+                    emit[self].recordNewOp();
+                }
             }
 
-            if (applySpec.isValid()) {
-                plan.anchorWaits[inst] = applySpec;
-            } else if (inPlan) {
-                plan.anchorWaits.erase(inst);
-            }
-
-            CounterKind self = classifyMemOp(*inst);
-            if (self != CK_Count) {
-                appendToAllPaths(state.queues[self], inst);
-                emit[self].recordNewOp();
+            auto it = finalExit.find(bb);
+            if (it == finalExit.end() || !(it->second == state)) {
+                finalExit[bb] = std::move(state);
+                changed = true;
             }
         }
+
+        if (!changed) break;
     }
+
+    plan.anchorWaits = std::move(newAnchors);
 }
 
 WaitInsertionPlan WaitDataflow::materializePlan() const {
