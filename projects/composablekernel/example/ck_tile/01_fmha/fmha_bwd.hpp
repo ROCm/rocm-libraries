@@ -665,8 +665,12 @@ struct fmha_bwd_launcher
 
     // Stream-async: zero dq_acc, D2H seqstart, host-pack metadata, H2D into device_ws.
     //
-    // `pinned_host_alloc` returns a shared_ptr to a pinned host buffer; its deleter
-    // is invoked on the stream tail after the H2D completes.
+    // `pinned_host_alloc` returns a shared_ptr to a pinned host buffer.
+    //
+    // **Deleter behavior differs by mode**:
+    // - Normal mode: deleter is invoked on the stream tail after H2D completes.
+    // - Graph capture mode: deleter is NOT invoked; caller must keep buffer alive
+    //   until hipGraphDestroy (see precondition #2 below).
     //
     // REQUIRED PRECONDITIONS for `pinned_host_alloc`:
     //
