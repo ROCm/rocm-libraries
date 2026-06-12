@@ -164,14 +164,17 @@ class GeneratedTileKernelInstance : public KernelInstance
         return static_cast<int>(out);
     }
 
-    // Read a boolean benchmark knob ("0"/"false"/"off" => false, else true).
+    // Read a boolean benchmark knob ("0"/"false"/"off", any case => false, else true).
     static bool env_bool(const char* name, bool fallback)
     {
         const char* v = std::getenv(name);
         if(v == nullptr || *v == '\0')
             return fallback;
         std::string s(v);
-        return !(s == "0" || s == "false" || s == "FALSE" || s == "off" || s == "OFF");
+        for(char& c : s)
+            if(c >= 'A' && c <= 'Z')
+                c = static_cast<char>(c - 'A' + 'a');
+        return !(s == "0" || s == "false" || s == "off");
     }
 
     KernelKey key_;

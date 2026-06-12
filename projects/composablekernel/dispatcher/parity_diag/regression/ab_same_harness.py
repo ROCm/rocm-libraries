@@ -24,23 +24,25 @@ Usage:
 """
 import json
 import os
-import statistics
 import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path("/home/AMD/muozturk/New_project/rocm-libraries/projects/composablekernel")
+# composablekernel root: .../composablekernel/dispatcher/parity_diag/regression/<this>
+ROOT = Path(__file__).resolve().parents[3]
 DISP = ROOT / "dispatcher"
 GEN = DISP / "build" / "generated_kernels"
 SRC = DISP / "bindings" / "ctypes" / "gemm_ctypes_lib.cpp"
 STATIC = DISP / "build" / "libck_tile_dispatcher.a"
 BR_SO_DIR = DISP / "build" / "examples"
 WORKER = ROOT / "tile_engine/ops/gemm/run_one_gemm_kernel.py"
-# old-TE generated single-kernel headers (develop-parity worktree)
-OLD_GEN = Path(
-    "/home/AMD/muozturk/New_project/rocm-libraries/.claude/worktrees/develop-parity"
-    "/projects/composablekernel/build/tile_engine/ops/gemm/gemm_universal/fp16/rcr"
-)
+# old-TE generated single-kernel headers. Override with OLD_TE_GEN; the default
+# points at a sibling develop-parity worktree under the rocm-libraries root.
+OLD_GEN = Path(os.environ.get(
+    "OLD_TE_GEN",
+    str(ROOT.parents[1] / ".claude/worktrees/develop-parity"
+        "/projects/composablekernel/build/tile_engine/ops/gemm/gemm_universal/fp16/rcr"),
+))
 OUT = DISP / "parity_diag" / "regression" / "_ab_same_harness_build"
 ARCH = os.environ.get("GFX_ARCH", "gfx942")
 DEVICE = os.environ.get("PARITY_DEVICE", "0")

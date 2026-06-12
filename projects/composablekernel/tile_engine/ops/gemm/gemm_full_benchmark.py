@@ -115,8 +115,9 @@ def detect_devices():
 def resolve_devices(spec):
     """Resolve --devices into a concrete list of device id strings.
 
-    spec is None (auto: all visible), an int count, a comma-list of ids, or a
-    single id.
+    spec is None (auto: all visible), an int count, or a comma-list of ids.
+    A bare digit is a *count*, not an id; to target one specific id use the
+    comma form, e.g. "5,".
     """
     detected = detect_devices()
     if spec is None:
@@ -304,7 +305,8 @@ def main():
         "--devices",
         default=None,
         help="GPUs to use: int count (e.g. 4) or comma-list of ids (e.g. 0,2,5); "
-        "default auto-detects all visible",
+        "for one specific id use the comma form (e.g. 5,) since a bare digit is "
+        "a count; default auto-detects all visible",
     )
     parser.add_argument(
         "--batch-size",
