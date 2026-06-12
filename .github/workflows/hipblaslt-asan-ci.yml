@@ -1,13 +1,14 @@
 name: hipBLASLt ASAN CI
 
-# ASAN build + test of hipBLASLt on gfx90a. Runs on every hipBLASLt PR (path
-# filter) and gates: the summary job fails if the build or tests fail.
+# ASAN build + test of hipBLASLt on gfx90a and gfx942. Runs on every hipBLASLt
+# PR (path filter) and gates: the summary job fails if the build or tests fail.
 # Downstream BLAS/SOLVER consumers are covered separately by
 # blas-downstream-asan-ci.yml (label / per-component opt-in). Scope:
 #
-#   - gfx90a only (host-side ASAN; device xnack+ is gfx942/gfx950 only)
-#   - hipBLASLt only (`-DhipBLASLt_SANITIZER=ASAN`); everything else compiles
-#     with normal flags (shared-cache ccache hits)
+#   - gfx90a and gfx942 (matrix), to mirror the TheRock multi-arch ASAN nightly
+#   - HOST_ASAN mode (`-DhipBLASLt_SANITIZER=HOST_ASAN`), matching the nightly's
+#     global THEROCK_SANITIZER=HOST_ASAN; only hipBLASLt is sanitized, everything
+#     else compiles with normal flags (shared-cache ccache hits)
 #   - pre_checkin hipblaslt-test (TEST_TYPE=pre_checkin)
 #   - full ASAN checks (ODR/leak/new-delete); only HSA-runtime teardown leaks
 #     are suppressed via test/therock/lsan.supp
@@ -50,21 +51,27 @@ jobs:
         uses: ./.github/actions/ci-env
 
   build:
-    name: "Build (hipBLASLt | gfx90a | ASAN)"
+    name: "Build (hipBLASLt | ${{ matrix.family }} | HOST_ASAN)"
     needs: setup
     runs-on: ${{ needs.setup.outputs.build_runs_on }}
     permissions:
       id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - family: gfx90a
+          - family: gfx942
     container:
       image: ${{ needs.setup.outputs.docker_image }}
       options: -v /runner/config:/home/awsconfig/
     env:
       CACHE_DIR: ${{ github.workspace }}/.container-cache
       CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
-      AMDGPU_FAMILIES: gfx90a
+      AMDGPU_FAMILIES: ${{ matrix.family }}
       TEATIME_FORCE_INTERACTIVE: 0
       AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
-      ARTIFACT_GROUP: gfx90a-asan
+      ARTIFACT_GROUP: ${{ matrix.family }}-asan
     steps:
       - name: "Check out rocm-libraries"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -114,11 +121,13 @@ jobs:
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
-          # Per-subproject `hipBLASLt_SANITIZER=ASAN` instruments only hipBLASLt
-          # at the toolchain level (TheRock cmake/therock_sanitizers.cmake); all
-          # other subprojects keep normal flags. rocprofiler-sdk test build is
-          # disabled (its test kernel needs a HIP runtime not staged on this path).
-          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ -DhipBLASLt_SANITIZER=ASAN -Drocprofiler-sdk_CMAKE_ARGS=-DROCPROFILER_BUILD_TESTS=OFF"
+          # Per-subproject `hipBLASLt_SANITIZER=HOST_ASAN` matches the TheRock
+          # multi-arch ASAN nightly (global THEROCK_SANITIZER=HOST_ASAN): host-side
+          # instrumentation only, device GPU_TARGETS left unchanged (no xnack+
+          # rewrite). Only hipBLASLt is sanitized; other subprojects keep normal
+          # flags. rocprofiler-sdk test build is disabled (its test kernel needs a
+          # HIP runtime not staged on this path).
+          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ -DhipBLASLt_SANITIZER=HOST_ASAN -Drocprofiler-sdk_CMAKE_ARGS=-DROCPROFILER_BUILD_TESTS=OFF"
           BUILD_DIR: build
         run: |
           python3 TheRock/build_tools/github_actions/build_configure.py
@@ -161,15 +170,15 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
-          name: asan-trees-hipblaslt
+          name: asan-trees-hipblaslt-${{ matrix.family }}
           path: upload/hipblaslt/*.tar.gz
           if-no-files-found: warn
           retention-days: 7
 
   test:
-    name: "Test hipBLASLt ASAN (pre_checkin)"
+    name: "Test hipBLASLt HOST_ASAN | ${{ matrix.family }} (pre_checkin)"
     needs: [setup, build]
-    runs-on: linux-gfx90a-gpu-rocm
+    runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 210
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
@@ -184,7 +193,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1]
+        include:
+          - family: gfx90a
+            runs_on: linux-gfx90a-gpu-rocm
+          - family: gfx942
+            runs_on: linux-gfx942-1gpu-core42-ossci-rocm
     defaults:
       run:
         shell: bash
@@ -194,8 +207,8 @@ jobs:
       OUTPUT_ARTIFACTS_DIR: "./build"
       THEROCK_BIN_DIR: "./build/bin"
       THEROCK_DIR: ${{ github.workspace }}
-      AMDGPU_FAMILIES: gfx90a
-      ARTIFACT_GROUP: gfx90a-asan
+      AMDGPU_FAMILIES: ${{ matrix.family }}
+      ARTIFACT_GROUP: ${{ matrix.family }}-asan
       TEST_COMPONENT: hipblaslt
     steps:
       - name: Checkout TheRock repository
@@ -212,7 +225,7 @@ jobs:
       - name: Download hipBLASLt ASAN trees
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: asan-trees-hipblaslt
+          name: asan-trees-hipblaslt-${{ matrix.family }}
           path: asan-trees
 
       - name: Assemble runnable tree from dist (+ stage overlay)
@@ -252,7 +265,7 @@ jobs:
       - name: Test hipBLASLt (pre_checkin)
         timeout-minutes: 180
         env:
-          SHARD_INDEX: ${{ matrix.shard }}
+          SHARD_INDEX: 1
           TOTAL_SHARDS: 1
           TEST_TYPE: pre_checkin
         run: |
