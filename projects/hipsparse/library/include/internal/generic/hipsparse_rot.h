@@ -82,8 +82,8 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p c_coeff, \p s_coeff, \p vecX, or \p vecY is nullptr,
 *          or the vector sizes or data types are incompatible.
 */
-#if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11000 && CUDART_VERSION < 13000))
-DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
+#if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11000 && CUDART_VERSION < 14000))
+DEPRECATED_CUDA_12000("The routine will be removed in a future CUDA release")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseRot(hipsparseHandle_t     handle,
                                const void*           c_coeff,

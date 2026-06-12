@@ -28,7 +28,7 @@
 
 #include "../utility.h"
 
-#if(CUDART_VERSION >= 11000 && CUDART_VERSION < 13000)
+#if(CUDART_VERSION >= 11000 && CUDART_VERSION < 14000)
 hipsparseStatus_t hipsparseRot(hipsparseHandle_t     handle,
                                const void*           c_coeff,
                                const void*           s_coeff,
