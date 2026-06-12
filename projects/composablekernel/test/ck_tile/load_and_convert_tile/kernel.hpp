@@ -126,17 +126,7 @@ struct LoadAndConvertKernel
 
     static constexpr index_t kBlockSize = Problem::BlockShape::BlockSize;
 
-    CK_TILE_HOST static auto BlockSize()
-    {
-        if(ck_tile::is_wave32())
-        {
-            return kBlockSize / 2;
-        }
-        else
-        {
-            return kBlockSize;
-        }
-    }
+    CK_TILE_HOST static auto BlockSize() { return kBlockSize; }
 
     private:
     CK_TILE_DEVICE static constexpr auto get_block_dims()

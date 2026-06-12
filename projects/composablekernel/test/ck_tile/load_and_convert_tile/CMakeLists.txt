@@ -3,8 +3,13 @@
 
 if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx11|gfx12")
     set(LOAD_AND_CONVERT_TILE_COMPILE_OPTIONS)
+
     if(CK_USE_OCP_FP8)
         list(APPEND LOAD_AND_CONVERT_TILE_COMPILE_OPTIONS -DCK_TILE_USE_OCP_FP8)
+    endif()
+
+    if(GPU_TARGETS MATCHES "gfx11|gfx12")
+        list(APPEND LOAD_AND_CONVERT_TILE_COMPILE_OPTIONS -DCK_TILE_USE_LAUNCH_BOUNDS=0)
     endif()
 
     add_gtest_executable(test_load_and_convert_tile_no_transpose test_load_and_convert_tile_no_transpose.cpp)
