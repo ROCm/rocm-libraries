@@ -918,12 +918,12 @@ def makeShardedGtestCmd(String buildDir, int numShards=4, String gtestFilter="*"
 // replays the pipeline from that stage.  This helper reads the previous
 // build's per-stage results via the Pipeline: Stage View wfapi endpoint and
 // returns the set of sub-stage names that already passed, so the factory
-// methods below can skip them automatically — no manual flags needed.
+// methods below can skip them automatically - no manual flags needed.
 //
 // Return value: Set<String> of stage display names with status SUCCESS.
 // Returns an empty set when:
 //   - there is no previous build (first run)
-//   - the previous build fully succeeded (nothing to skip — rerun everything)
+//   - the previous build fully succeeded (nothing to skip - rerun everything)
 //   - the wfapi call fails for any reason (fail-open: run all stages)
 // ---------------------------------------------------------------------------
 
@@ -933,7 +933,7 @@ def getPassedStagesFromPreviousBuild() {
     try {
         def prev = currentBuild.previousBuild
         // Only skip stages when the previous run genuinely failed/was unstable.
-        // If it fully succeeded there is nothing to "resume" — run everything.
+        // If it fully succeeded there is nothing to "resume" - run everything.
         if (!prev || prev.result == 'SUCCESS') return passed
 
         // Safety check: only reuse results from the same commit.
