@@ -1847,16 +1847,6 @@ double compute_total_latency(const problem_t& problem,
                              size_t max_cus) {
   assert(config.is_valid());
 
-  OLOG_DEBUG("[GEMM] compute_total_latency called, Logger enabled="
-            << Logger::instance().is_enabled());
-
-  OLOG_DEBUG("=== GEMM compute_total_latency START ===");
-  OLOG_DEBUG("Problem: M=" << problem.size.m << " N=" << problem.size.n
-             << " K=" << problem.size.k << " batch=" << problem.batch);
-  OLOG_DEBUG("Config MT: M=" << config.mt.m << " N=" << config.mt.n
-             << " K=" << config.mt.k);
-  OLOG_DEBUG("Hardware: N_CU=" << hardware.N_CU << " max_cus=" << max_cus);
-
   // Use Formocast simulation model if prediction_mode is set to simulation
   if (config.prediction_mode == prediction_modes_t::simulation) {
     return compute_formocast_latency(problem, hardware, config);
