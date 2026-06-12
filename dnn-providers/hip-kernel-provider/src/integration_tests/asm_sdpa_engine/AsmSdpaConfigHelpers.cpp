@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "AsmSdpaConfigHelpers.hpp"
+#include "../../engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/SdpaConfigConstants.hpp"
 #include "hip_kernel_provider_common/SdpaConfigEnumerations.hpp"
 
@@ -12,6 +13,7 @@ namespace asm_sdpa_engine
 {
 using namespace hipdnn_frontend;
 using namespace hip_kernel_provider_common;
+using plan_utils::MaskType;
 
 static DataType toDataType(const std::string& configDataType)
 {
@@ -66,7 +68,7 @@ GraphTestCase configToCompatibleGraphTestCase(const fmha_v3_fwdConfig& config)
     const int64_t batch = 2;
     const int64_t numHeads = 4;
     const int64_t seqQ = 256;
-    const int64_t seqKv = 256;
+    const int64_t seqKv = 128;
 
     // Determine data type
     const DataType dataType = toDataType(config.dtype);

@@ -34,7 +34,7 @@ class ReferenceProvider(ABC):
     """Abstract base for reference computation backends.
 
     Implementations compute reference outputs for hipDNN graphs using
-    alternative backends (e.g., PyTorch, CPU reference plugin).
+    alternative backends such as PyTorch.
     """
 
     @property

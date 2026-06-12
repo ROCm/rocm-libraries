@@ -99,9 +99,6 @@ function(add_rocthrust_test TEST)
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test/"
     )
 
-    # Track test target globally for category labels
-    set_property(GLOBAL APPEND PROPERTY ROCTHRUST_TEST_TARGETS ${TEST_TARGET})
-
     if(AMDGPU_TEST_TARGETS)
         foreach(AMDGPU_TARGET IN LISTS AMDGPU_TEST_TARGETS)
             add_test("${AMDGPU_TARGET}-${TEST_TARGET}" ${TEST_TARGET})
@@ -110,6 +107,9 @@ function(add_rocthrust_test TEST)
                     RESOURCE_GROUPS "1,${AMDGPU_TARGET}:1"
                     LABELS "hip;${AMDGPU_TARGET}"
             )
+            # Pair the target with this resource so the shared CTest
+            # categorization can pin its category suites to the same GPU.
+            set_property(GLOBAL APPEND PROPERTY ROCTHRUST_TEST_TARGET_RESOURCE_PAIRS "${TEST_TARGET}|${AMDGPU_TARGET}")
         endforeach()
     else()
         add_relative_test(${TEST_TARGET} ${TEST_TARGET} ${DEFAULT_GPU_RESOURCE})
@@ -118,6 +118,7 @@ function(add_rocthrust_test TEST)
                 RESOURCE_GROUPS "1,${DEFAULT_GPU_RESOURCE}:1"
                 LABELS "hip"
         )
+        set_property(GLOBAL APPEND PROPERTY ROCTHRUST_TEST_TARGET_RESOURCE_PAIRS "${TEST_TARGET}|${DEFAULT_GPU_RESOURCE}")
     endif()
     rocm_install(TARGETS ${TEST_TARGET} COMPONENT tests)
     if (WIN32 AND NOT DEFINED DLLS_COPIED)
@@ -355,12 +356,16 @@ if(EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
     include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
 
     message(STATUS "Applying test categories for rocthrust")
-    get_property(_rt_test_targets GLOBAL PROPERTY ROCTHRUST_TEST_TARGETS)
-    foreach(_rt_t IN LISTS _rt_test_targets)
+    get_property(_rt_pairs GLOBAL PROPERTY ROCTHRUST_TEST_TARGET_RESOURCE_PAIRS)
+    list(REMOVE_DUPLICATES _rt_pairs)
+    foreach(_rt_pair IN LISTS _rt_pairs)
+        string(REPLACE "|" ";" _rt_parts "${_rt_pair}")
+        list(GET _rt_parts 0 _rt_t)
+        list(GET _rt_parts 1 _rt_rg)
         get_target_property(_rt_dir ${_rt_t} RUNTIME_OUTPUT_DIRECTORY)
         apply_test_category_labels(${_rt_t}
             "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
-            "${_rt_dir}" "${INSTALL_TEST_FILE}")
+            "${_rt_dir}" "${INSTALL_TEST_FILE}" "${_rt_rg}")
     endforeach()
 else()
     message(

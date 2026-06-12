@@ -1,0 +1,209 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# TheRock CI builds and tests MIOpen in a single configuration (HIP backend,
+# optional CK, against TheRock's full ROCm stack). This workflow covers the
+# additional build configurations that MIOpen must support but TheRock CI does
+# not exercise: the HIPNOGPU backend (used for offline kernel tuning without
+# GPU hardware), the Tuna Fin subproject (offline tuning infrastructure), a
+# no-CK UBSan debug build, and gtest binary naming convention validation.
+
+name: MIOpen CI
+
+on:
+  push:
+    branches:
+      - develop
+      - release/therock-*
+    paths:
+      - 'projects/miopen/**'
+      - '.github/workflows/miopen-ci.yml'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'projects/miopen/**'
+      - '.github/workflows/miopen-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  LLVM_PATH: /opt/rocm/llvm
+
+jobs:
+  miopen-build:
+    name: ${{ matrix.name }}
+    permissions:
+      id-token: write
+    container:
+      image: rocm/miopen-dev:latest
+      options: -v /runner/config:/home/awsconfig/
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: MIOpen Hip Debug NOCK Build-Only
+            job_id: no-ck-build
+            cmake_extra_flags: >-
+              -DCMAKE_BUILD_TYPE=debug
+              -DCMAKE_CXX_FLAGS_DEBUG='-g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=undefined -Wno-option-ignored '
+              -DBUILD_DEV=OFF
+              -DMIOPEN_USE_MLIR=OFF
+              -DMIOPEN_GPU_SYNC=OFF
+              -DMIOPEN_USE_COMPOSABLEKERNEL=OFF
+              -DCMAKE_INSTALL_PREFIX=$(pwd)/projects/miopen/install
+              -DCMAKE_PREFIX_PATH=/opt/rocm
+              -DGPU_TARGETS="gfx942"
+            build_target: --target install
+
+          # Builds the HIP package and runs miopen_gtest_check via rocjitsu KMD interposer
+          # to validate the gtest binary and test naming conventions without a physical GPU.
+          - name: MIOpen Build Hip Package
+            job_id: hip-package-build
+            cmake_extra_flags: >-
+              -DCMAKE_BUILD_TYPE=release
+              -DBUILD_DEV=OFF
+              -DMIOPEN_TEST_DISCRETE=OFF
+              -DMIOPEN_USE_MLIR=ON
+              -DMIOPEN_GPU_SYNC=OFF
+              -DCMAKE_PREFIX_PATH=/opt/rocm
+              -DGPU_TARGETS="gfx942"
+            build_target: --target miopen_gtest --target package
+
+          - name: MIOpen HipNoGPU Debug Build-Only
+            job_id: no-gpu-debug-build
+            cmake_extra_flags: >-
+              -DCMAKE_BUILD_TYPE=debug
+              -DCMAKE_CXX_FLAGS_DEBUG='-g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=undefined -Wno-option-ignored '
+              -DBUILD_DEV=ON
+              -DMIOPEN_USE_MLIR=OFF
+              -DMIOPEN_GPU_SYNC=OFF
+              -DMIOPEN_BACKEND=HIPNOGPU
+              -DMIOPEN_INSTALL_CXX_HEADERS=ON
+              -DCMAKE_PREFIX_PATH=/opt/rocm
+            build_target: ""
+
+          - name: MIOpen Tuna Fin Build-Only
+            job_id: tuna-fin-build
+            cmake_extra_flags: >-
+              -DCMAKE_BUILD_TYPE=release
+              -DBUILD_DEV=OFF
+              -DMIOPEN_INSTALL_CXX_HEADERS=ON
+              -DCMAKE_INSTALL_PREFIX=$(pwd)/projects/miopen/install
+              -DMIOPEN_USE_MLIR=ON
+              -DMIOPEN_GPU_SYNC=OFF
+              -DMIOPEN_BACKEND=HIPNOGPU
+              -DCMAKE_PREFIX_PATH=/opt/rocm
+              -DGPU_TARGETS="gfx942"
+            build_target: --target install --target all
+
+    runs-on: azure-linux-scale-rocm
+    steps:
+      - name: Runner health status
+        run: |
+          echo "=== OS ==="
+          head -2 /etc/os-release
+          echo "=== CPU ==="
+          lscpu | grep -E 'Model name|^CPU\(s\)'
+          echo "=== Memory ==="
+          free -h | grep Mem
+          echo "=== Disk ==="
+          df -h /
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          sparse-checkout: |
+            .dvc
+            .github
+            cmake
+            projects/miopen
+            shared/ctest
+
+      - name: Pull DVC files for rocm-libraries # LOGNAME details here https://github.com/ROCm/rocm-libraries/pull/1617
+        run: |
+          if command -v dvc &> /dev/null; then
+            echo "dvc detected"
+          else
+            echo "Warning, dvc not detected!"
+          fi
+          LOGNAME=github-runner dvc pull -v
+
+      - name: Checkout rocjitsu
+        if: matrix.job_id == 'hip-package-build'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/rocm-systems
+          ref: 481982dfe23e181a302006747c561e7cf43e35ba # 2026-06-04
+          path: rocm-systems
+          sparse-checkout: |
+            emulation/rocjitsu
+
+      - name: Build rocjitsu KMD
+        if: matrix.job_id == 'hip-package-build'
+        run: |
+          apt-get update && apt-get install -y libdrm-dev
+          cmake -S rocm-systems/emulation/rocjitsu -B rocjitsu-build \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build rocjitsu-build --target rocjitsu_kmd_shim -j$(nproc)
+
+      - name: Configure build
+        run: |
+          export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+          export CXX=/opt/rocm/llvm/bin/clang++
+          export CXXFLAGS=-Werror
+          rm -rf projects/miopen/install
+          mkdir projects/miopen/install
+          cmake -S projects/miopen -B build \
+          -DMIOPEN_TEST_FLAGS=' --disable-verification-cache ' \
+          ${{ matrix.cmake_extra_flags }}
+
+      - name: Build
+        run: cmake --build build ${{ matrix.build_target }} -j$(nproc)
+
+      - name: Configure Tuna Fin
+        if: matrix.job_id == 'tuna-fin-build'
+        run: |
+          export CXX=/opt/rocm/llvm/bin/clang++
+          cmake -S projects/miopen/fin -B build-fin \
+            -DCMAKE_PREFIX_PATH=$(pwd)/projects/miopen/install \
+            -DCMAKE_INSTALL_PREFIX=$(pwd)/projects/miopen/install \
+            -DCMAKE_BUILD_TYPE=release
+
+      - name: Build Tuna Fin
+        if: matrix.job_id == 'tuna-fin-build'
+        run: cmake --build build-fin --target install -j$(nproc)
+
+      - name: Run miopen_gtest_check (rocjitsu)
+        if: matrix.job_id == 'hip-package-build'
+        run: |
+          export RJ_CONFIG=$(pwd)/rocm-systems/emulation/rocjitsu/configs/amdgpu_cdna3_kmd.json
+          LD_PRELOAD=$(pwd)/rocjitsu-build/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so \
+            ./build/bin/miopen_gtest --gtest_list_tests > test_list
+          python3 projects/miopen/test/gtest/check_names.py --list test_list
+
+  miopen_build_summary:
+    name: MIOpen CI Summary
+    if: always()
+    needs:
+      - miopen-build
+
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Report results
+        run: |
+          echo '${{ toJson(needs) }}'
+          FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
+            | jq --raw-output \
+            'map_values(select(.result!="success" and .result!="skipped")) | keys | join(",")' \
+          )"
+          if [[ "${FAILED_JOBS}" != "" ]]; then
+            echo "Failed jobs: ${FAILED_JOBS}"
+            exit 1
+          fi

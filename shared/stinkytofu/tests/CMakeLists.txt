@@ -58,6 +58,9 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/ReadWriteOperandTest.cpp
     unit/asm/BarrierTest.cpp
     unit/asm/LoopRegionRemarkPassTest.cpp
+    unit/asm/BranchHelpersTest.cpp
+    unit/asm/SetpcSwappcCfgTest.cpp
+    unit/asm/LongBranchLoweringTest.cpp
 )
 
 # High-Level IR Tests
