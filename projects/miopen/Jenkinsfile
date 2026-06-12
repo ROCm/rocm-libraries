@@ -162,11 +162,24 @@ def runBuildAndSingleGtestJob(Map conf=[:])
     script {
         withWorkingDir {
             def single_gtest_flags = " -DMIOPEN_TEST_DISCRETE=OFF -DGTEST_PARALLEL_LEVEL=4 "
-            def buildDir = "${env.WORKSPACE}/${env.MIOPEN_DIR}/build"
-            def shardCmd = utils.makeShardedGtestCmd(buildDir)
+            def gtestLog = "/tmp/miopen_gtest_\${BUILD_NUMBER}_\${STAGE_NAME?.replaceAll('[^a-zA-Z0-9]','_')}.log"
             utils.buildHipClangJob(
                 setup_flags: single_gtest_flags + flags,
-                build_cmd: "LLVM_PATH=/opt/rocm/llvm make -j\$(nproc) install miopen_gtest && " + shardCmd,
+                build_cmd: """
+                    LLVM_PATH=/opt/rocm/llvm CTEST_PARALLEL_LEVEL=4 make -j\$(nproc) install miopen_gtest check 2>&1 | tee ${gtestLog}; BUILD_RC=\${PIPESTATUS[0]}
+                    echo ''
+                    echo '===== GTEST FAILURE SUMMARY ====='
+                    FAILURES=\$(grep -E '^\\[  FAILED  \\]' ${gtestLog} | grep -v 'tests, listed below' || true)
+                    if [ -n "\$FAILURES" ]; then
+                        echo "\$FAILURES"
+                    else
+                        echo 'No gtest failures found in output.'
+                    fi
+                    echo 'Note: this summary only captures gtest failures. On any failure, also inspect the full log for other failures.'
+                    echo '=================================='
+                    rm -f ${gtestLog}
+                    exit \$BUILD_RC
+                """.stripIndent(),
                 build_install:true,
                 build_timeout:build_timeout_minutes,
                 gpu_family: gpu_family)

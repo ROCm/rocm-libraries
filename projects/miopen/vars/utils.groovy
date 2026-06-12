@@ -916,65 +916,6 @@ def sendTeamsFailureNotification(Map conf=[:]) {
 }
 
 // ---------------------------------------------------------------------------
-// Shard-aware gtest runner
-//
-// Replaces the CTest 'make check' invocation for the single-gtest-binary
-// sharded builds.  Runs all 4 miopen_gtest shards in parallel as background
-// shell processes, prefixes every output line with [ShardN], waits for all
-// shards, then prints a consolidated failure summary and exits non-zero if
-// any shard failed.
-//
-// Usage: pass the returned string as the 'build_cmd' when calling
-// buildHipClangJob(), replacing the 'make check' portion.
-// ---------------------------------------------------------------------------
-
-// Runs 4 miopen_gtest shards in parallel using only POSIX sh constructs
-// (no bash arrays or declare, since the Docker container uses dash as /bin/sh).
-// Each shard writes to a temp file; output is prefixed [ShardN] and a failure
-// summary is printed at the end.
-def makeShardedGtestCmd(String buildDir, String gtestFilter="*") {
-    def bin = "${buildDir}/bin/miopen_gtest"
-    return """
-        set +e
-        SHARD_FAILED=0
-        LOG0="/tmp/gtest_shard_0_\$\$.log"
-        LOG1="/tmp/gtest_shard_1_\$\$.log"
-        LOG2="/tmp/gtest_shard_2_\$\$.log"
-        LOG3="/tmp/gtest_shard_3_\$\$.log"
-
-        ( GTEST_TOTAL_SHARDS=4 GTEST_SHARD_INDEX=0 MIOPEN_USER_DB_PATH=${buildDir} MIOPEN_INVOKED_FROM_CTEST=1 ${bin} --gtest_filter="${gtestFilter}" 2>&1 | sed 's/^/[Shard0] /' ) > "\$LOG0" 2>&1 &
-        PID0=\$!
-        ( GTEST_TOTAL_SHARDS=4 GTEST_SHARD_INDEX=1 MIOPEN_USER_DB_PATH=${buildDir} MIOPEN_INVOKED_FROM_CTEST=1 ${bin} --gtest_filter="${gtestFilter}" 2>&1 | sed 's/^/[Shard1] /' ) > "\$LOG1" 2>&1 &
-        PID1=\$!
-        ( GTEST_TOTAL_SHARDS=4 GTEST_SHARD_INDEX=2 MIOPEN_USER_DB_PATH=${buildDir} MIOPEN_INVOKED_FROM_CTEST=1 ${bin} --gtest_filter="${gtestFilter}" 2>&1 | sed 's/^/[Shard2] /' ) > "\$LOG2" 2>&1 &
-        PID2=\$!
-        ( GTEST_TOTAL_SHARDS=4 GTEST_SHARD_INDEX=3 MIOPEN_USER_DB_PATH=${buildDir} MIOPEN_INVOKED_FROM_CTEST=1 ${bin} --gtest_filter="${gtestFilter}" 2>&1 | sed 's/^/[Shard3] /' ) > "\$LOG3" 2>&1 &
-        PID3=\$!
-
-        wait \$PID0; RC0=\$?; cat "\$LOG0"; [ \$RC0 -ne 0 ] && SHARD_FAILED=1
-        wait \$PID1; RC1=\$?; cat "\$LOG1"; [ \$RC1 -ne 0 ] && SHARD_FAILED=1
-        wait \$PID2; RC2=\$?; cat "\$LOG2"; [ \$RC2 -ne 0 ] && SHARD_FAILED=1
-        wait \$PID3; RC3=\$?; cat "\$LOG3"; [ \$RC3 -ne 0 ] && SHARD_FAILED=1
-
-        echo ""
-        echo "===== GTEST SHARD FAILURE SUMMARY ====="
-        for IDX in 0 1 2 3; do
-            eval LOG="\\\$LOG\$IDX"
-            FAILURES=\$(grep -E "\\[ *FAILED *\\]" "\$LOG" 2>/dev/null || true)
-            if [ -n "\$FAILURES" ]; then
-                echo "[Shard\$IDX] FAILED TESTS:"
-                echo "\$FAILURES"
-            else
-                echo "[Shard\$IDX] All tests passed"
-            fi
-            rm -f "\$LOG"
-        done
-        echo "========================================"
-        exit \$SHARD_FAILED
-    """.stripIndent()
-}
-
-// ---------------------------------------------------------------------------
 // Auto-skip helper for "Restart from Stage" reruns
 //
 // When a user clicks "Restart Full Tests" (or any other stage) Jenkins
