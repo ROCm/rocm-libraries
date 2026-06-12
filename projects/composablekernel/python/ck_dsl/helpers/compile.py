@@ -253,3 +253,82 @@ def compile_kernel_via_hipcc(
         pass_stats=PassStats(),
         isa=isa,
     )
+
+
+def emit_device_llvm_ir_via_hipcc(
+    kernel: KernelDef,
+    *,
+    arch: str = "gfx950",
+    extra_flags: Optional[List[str]] = None,
+    timeout_s: int = 120,
+) -> str:
+    """Lower ``kernel`` to HIP C++, then emit device LLVM IR via hipcc.
+
+    This is the **ground-truth datalayout oracle**: it asks the project's
+    own ``hipcc --offload-arch=<arch>`` to emit textual LLVM IR
+    (``-S -emit-llvm --cuda-device-only``) instead of HSACO. The returned
+    IR carries the authoritative ``target datalayout`` and intrinsic
+    signatures for whatever ROCm/clang version is installed — exactly what
+    ``compile_kernel_via_hipcc`` feeds to the backend when compiling real
+    kernels. Use this in drift-guard tests to assert ck_dsl's hardcoded
+    constants (``_DATALAYOUT_LLVM20`` / ``_DATALAYOUT_LLVM22``) match the
+    toolchain byte-for-byte.
+
+    Args:
+        kernel: The kernel to lower.
+        arch: Target architecture (e.g., ``"gfx950"``).
+        extra_flags: Optional hipcc flags appended to the default ``["-O3"]``.
+        timeout_s: Timeout in seconds (default 120).
+
+    Returns:
+        The device LLVM IR text emitted by hipcc. If hipcc produces
+        multiple ``.ll`` files (rare), this concatenates them with a
+        separator comment.
+
+    Raises:
+        RuntimeError: If hipcc is not in PATH or the compile fails.
+        FileNotFoundError: If hipcc cannot be located.
+    """
+    hip_src = lower_kernel_to_hip(kernel, arch=arch)
+    flags = ["-O3"]
+    if extra_flags:
+        flags.extend(extra_flags)
+    with tempfile.TemporaryDirectory() as td:
+        stem = kernel.name.replace(".", "_")[:80] or "kernel"
+        src_path = Path(td) / f"{stem}.hip"
+        ll_path = Path(td) / f"{stem}.ll"
+        src_path.write_text(hip_src, encoding="utf-8")
+        proc = subprocess.run(
+            [
+                "hipcc",
+                f"--offload-arch={arch}",
+                "-S",
+                "-emit-llvm",
+                "--cuda-device-only",
+                *flags,
+                str(src_path),
+                "-o",
+                str(ll_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"hipcc -emit-llvm failed for kernel '{kernel.name}' (arch={arch}):\n"
+                f"--- stdout ---\n{proc.stdout[-2000:]}\n"
+                f"--- stderr ---\n{proc.stderr[-2000:]}"
+            )
+        # hipcc may emit multiple .ll files (per-arch or per-module splits);
+        # collect all of them.
+        ll_files = sorted(Path(td).glob("*.ll"))
+        if not ll_files:
+            raise RuntimeError(
+                f"hipcc -emit-llvm produced no .ll files in {td} (expected at least one)"
+            )
+        parts = []
+        for f in ll_files:
+            parts.append(f"; ===== {f.name} =====\n")
+            parts.append(f.read_text(encoding="utf-8"))
+        return "".join(parts)
