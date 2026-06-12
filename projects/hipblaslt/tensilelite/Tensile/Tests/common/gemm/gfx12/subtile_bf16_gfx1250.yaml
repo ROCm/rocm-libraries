@@ -51,6 +51,8 @@ BenchmarkProblems:
           - [16, 16, 32, 1,  1, 8, 8,  2, 2]  # MT 256x256 WG 2x2
           - [16, 16, 32, 1,  1, 8, 1,  2, 2]  # MT 256x32  WG 2x2
           - [16, 16, 32, 1,  1, 1, 8,  2, 2]  # MT 32x256  WG 2x2
+          - [16, 16, 32, 1,  1, 9, 8,  2, 2]  # MT 288x256 WG 2x2
+          - [16, 16, 32, 1,  1, 10, 8,  2, 2]  # MT 320x256 WG 2x2
         - DepthU: [64, 128]
         - WavefrontSize: [32]
         - PrefetchGlobalRead: [2]
@@ -77,6 +79,8 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 128]
           - Exact: [128, 128, 1, 256]
           - Exact: [256, 256, 1, 256]
+          - Exact: [288, 256, 1, 256]   # MT 288x256
+          - Exact: [320, 256, 1, 256]   # MT 320x256
           # Mult-of-32 edges: M,N not multiples of macro tile
           - Exact: [96,  96,  1, 128]   # 3*32, edge for MT >= 128
           - Exact: [160, 160, 1, 128]   # 5*32, edge for MT >= 192
@@ -102,3 +106,57 @@ BenchmarkProblems:
           - Exact: [161, 159, 1, 128]
           - Exact: [33,  127, 1, 128]
           - Exact: [129, 33,  1, 256]
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          # Large macro-tiles: DepthU restricted to 64 (LDS capacity)
+          - [16, 16, 32, 1,  1, 11, 8,  2, 2]  # MT 352x256 WG 2x2
+          - [16, 16, 32, 1,  1, 12, 8,  2, 2]  # MT 384x256 WG 2x2
+          - [16, 16, 32, 1,  1, 10, 10,  2, 2]  # MT 320x320 WG 2x2
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - UseSubtileImpl: [1]
+        - StreamK: [3]
+        - TDMInst: [3]
+        - StaggerU: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - GlobalSplitU: [1]
+        - PreloadKernArgs: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # Full macro-tile multiples
+          - Exact: [352, 256, 1, 256]   # MT 352x256
+          - Exact: [384, 256, 1, 256]   # MT 384x256
+          - Exact: [320, 320, 1, 256]   # MT 320x320
+          # Mult-of-32 edges
+          - Exact: [352, 256, 1, 64]
+          - Exact: [384, 256, 1, 128]
+          - Exact: [320, 320, 1, 128]
+          # Odd (non-aligned) M and N
+          - Exact: [351, 257, 1, 64]
+          - Exact: [383, 255, 1, 128]
+          - Exact: [319, 321, 1, 64]
