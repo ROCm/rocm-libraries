@@ -127,6 +127,70 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
             return num_access_b;
     }
 
+    template <typename Problem, index_t MNPerBlock, index_t K2>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeXorSwizzleABDramTileDistribution()
+    {
+        using BlockGemmShape = typename Problem::BlockGemmShape;
+        using BlockWarps     = typename BlockGemmShape::BlockWarps;
+        using WarpTile       = typename BlockGemmShape::WarpTile;
+
+        constexpr index_t BlockSize = Problem::kBlockSize;
+        constexpr index_t KPerBlock = BlockGemmShape::kK;
+        constexpr index_t KWarps    = BlockWarps::at(I2);
+        constexpr index_t K1        = WarpTile::at(I2) / K2;
+        constexpr index_t K0        = KPerBlock / (KWarps * K1 * K2);
+
+        constexpr index_t warp_size = get_warp_size();
+        constexpr index_t warp_num  = BlockSize / warp_size;
+
+        static_assert(KWarps == 1, "MX XOR swizzle currently supports KWarps == 1");
+        static_assert(KWarps * K0 * K1 * K2 == KPerBlock, "Wrong!");
+
+        constexpr index_t M2 = warp_size / K1;
+        constexpr index_t M1 = warp_num / Problem::NumWaveGroups;
+        constexpr index_t M0 = MNPerBlock / (M1 * M2);
+
+        static_assert(M0 * M1 * M2 == MNPerBlock, "Wrong!");
+
+        return make_static_tile_distribution(
+            tile_distribution_encoding<sequence<1>,
+                                       tuple<sequence<M0, M1, M2>, sequence<K0, K1, K2>>,
+                                       tuple<sequence<1>, sequence<1, 2>>,
+                                       tuple<sequence<1>, sequence<2, 1>>,
+                                       sequence<1, 2, 2>,
+                                       sequence<0, 0, 2>>{});
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeADramTileDistribution()
+    {
+        if constexpr(UseXorSwizzle<Problem>)
+        {
+            constexpr index_t MPerBlock = Problem::BlockGemmShape::kM;
+            constexpr index_t KPack     = Base::template GetSmemPackA<Problem>();
+            return MakeXorSwizzleABDramTileDistribution<Problem, MPerBlock, KPack>();
+        }
+        else
+        {
+            return Base::template MakeADramTileDistribution<Problem>();
+        }
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeBDramTileDistribution()
+    {
+        if constexpr(UseXorSwizzle<Problem>)
+        {
+            constexpr index_t NPerBlock = Problem::BlockGemmShape::kN;
+            constexpr index_t KPack     = Base::template GetSmemPackB<Problem>();
+            return MakeXorSwizzleABDramTileDistribution<Problem, NPerBlock, KPack>();
+        }
+        else
+        {
+            return Base::template MakeBDramTileDistribution<Problem>();
+        }
+    }
+
     template <typename Problem,
               index_t MNPerBlock,
               index_t WarpTileMN,
@@ -425,6 +489,95 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         }
     }
 
+    // XdlPack: how many e8m0_t scale values are packed into one int32_t per dimension
+    // Host packs MXdlPack * KXdlPack e8m0_t into one int32_t for A scales
+    // Host packs NXdlPack * KXdlPack e8m0_t into one int32_t for B scales
+    static constexpr int MXdlPack = 2;
+    static constexpr int NXdlPack = 2;
+    static constexpr int KXdlPack = 2;
+
+    // MX Scale tile distributions for loading pre-packed int32_t from global memory
+    // Packed layout: [M/MXdlPack, K/32/KXdlPack] of int32_t
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeMX_ScaleA_DramTileDistribution()
+    {
+        using BlockGemmShape = typename Problem::BlockGemmShape;
+        using BlockWarps     = typename BlockGemmShape::BlockWarps;
+        using WarpTile       = typename BlockGemmShape::WarpTile;
+
+        constexpr index_t ScaleGranularityK = 32;
+
+        constexpr index_t MPerBlock = Problem::BlockGemmShape::kM;
+        constexpr index_t MWarp     = BlockWarps::at(number<0>{});
+        constexpr index_t NWarp     = BlockWarps::at(number<1>{});
+        constexpr index_t MPerXdl   = WarpTile::at(number<0>{});
+        constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
+
+        constexpr index_t K_Lane       = get_warp_size() / MPerXdl;
+        constexpr index_t MIterPerWarp = MPerBlock / (MWarp * MPerXdl);
+        constexpr index_t KPerXdl      = WarpTile::at(number<2>{});
+        constexpr index_t KIterPerWarp = KPerBlock / KPerXdl;
+        constexpr index_t KPerLane     = KPerXdl / ScaleGranularityK / K_Lane;
+
+        // Effective pack sizes: fall back to 1 when iteration count < pack size
+        constexpr index_t MXdlPackEff =
+            (MIterPerWarp >= MXdlPack && MIterPerWarp % MXdlPack == 0) ? MXdlPack : 1;
+        constexpr index_t KXdlPackEff =
+            (KIterPerWarp >= KXdlPack && KIterPerWarp % KXdlPack == 0) ? KXdlPack : 1;
+
+        constexpr index_t MIterPerWarp_packed = MIterPerWarp / MXdlPackEff;
+        constexpr index_t KIterPerWarp_packed = KIterPerWarp / KXdlPackEff;
+
+        return make_static_tile_distribution(
+            tile_distribution_encoding<sequence<NWarp>,
+                                       tuple<sequence<MWarp, MIterPerWarp_packed, MPerXdl>,
+                                             sequence<KIterPerWarp_packed, K_Lane, KPerLane>>,
+                                       tuple<sequence<1, 0>, sequence<2, 1>>,
+                                       tuple<sequence<0, 0>, sequence<1, 2>>,
+                                       sequence<2, 1, 2>,
+                                       sequence<0, 1, 2>>{});
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeMX_ScaleB_DramTileDistribution()
+    {
+        using BlockGemmShape = typename Problem::BlockGemmShape;
+        using BlockWarps     = typename BlockGemmShape::BlockWarps;
+        using WarpTile       = typename BlockGemmShape::WarpTile;
+
+        constexpr index_t ScaleGranularityK = 32;
+
+        constexpr index_t NPerBlock    = Problem::BlockGemmShape::kN;
+        constexpr index_t MWarp        = BlockWarps::at(number<0>{});
+        constexpr index_t NWarp        = BlockWarps::at(number<1>{});
+        constexpr index_t NPerXdl      = WarpTile::at(number<1>{});
+        constexpr index_t KPerBlock    = Problem::BlockGemmShape::kK;
+        constexpr index_t K_Lane       = get_warp_size() / NPerXdl;
+        constexpr index_t NIterPerWarp = NPerBlock / (NWarp * NPerXdl);
+
+        constexpr index_t KPerXdl      = WarpTile::at(number<2>{});
+        constexpr index_t KIterPerWarp = KPerBlock / KPerXdl;
+        constexpr index_t KPerLane     = KPerXdl / ScaleGranularityK / K_Lane;
+
+        // Effective pack sizes: fall back to 1 when iteration count < pack size
+        constexpr index_t NXdlPackEff =
+            (NIterPerWarp >= NXdlPack && NIterPerWarp % NXdlPack == 0) ? NXdlPack : 1;
+        constexpr index_t KXdlPackEff =
+            (KIterPerWarp >= KXdlPack && KIterPerWarp % KXdlPack == 0) ? KXdlPack : 1;
+
+        constexpr index_t NIterPerWarp_packed = NIterPerWarp / NXdlPackEff;
+        constexpr index_t KIterPerWarp_packed = KIterPerWarp / KXdlPackEff;
+
+        return make_static_tile_distribution(
+            tile_distribution_encoding<sequence<MWarp>,
+                                       tuple<sequence<NWarp, NIterPerWarp_packed, NPerXdl>,
+                                             sequence<KIterPerWarp_packed, K_Lane, KPerLane>>,
+                                       tuple<sequence<0, 1>, sequence<2, 1>>,
+                                       tuple<sequence<0, 0>, sequence<1, 2>>,
+                                       sequence<2, 1, 2>,
+                                       sequence<0, 1, 2>>{});
+    }
+
     template <typename Problem>
     CK_TILE_DEVICE static constexpr auto GetEstimatedVgprCount()
     {
@@ -479,7 +632,7 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         return number<sub_tile_num>{};
     }
 
-    template <typename Problem>
+    template <typename Problem, bool PackMNIter = false>
     CK_TILE_HOST_DEVICE static constexpr auto GetBlockGemm()
     {
         using BlockWarps = typename Problem::BlockGemmShape::BlockWarps;
@@ -506,7 +659,8 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
                                                                     typename Problem::CDataType,
                                                                     BlockWarps,
                                                                     WarpGemm,
-                                                                    sub_tile_num>;
+                                                                    sub_tile_num,
+                                                                    PackMNIter>;
 
         return BlockGemmARegBRegCRegV1<Problem, BlockGemmPolicy>{};
     }

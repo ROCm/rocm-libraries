@@ -101,8 +101,8 @@ struct MxGemmPipelineTypeSelector<MxGemmPipelineType::CompTDMV2, Problem>
 template <typename Problem>
 struct MxGemmPipelineTypeSelector<MxGemmPipelineType::CompAsync, Problem>
 {
-    using base_pipeline = ck_tile::BaseMXGemmPipelineAgBgCrCompAsync<Problem>;
-    using pipeline      = ck_tile::MXGemmPipelineAgBgCrCompAsync<Problem>;
+    using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompAsync<Problem>;
+    using pipeline      = ck_tile::GemmPipelineAgBgCrCompAsync<Problem>;
 
     static constexpr auto GetName() { return "GemmPipelineAgBgCrCompAsync"; }
 };

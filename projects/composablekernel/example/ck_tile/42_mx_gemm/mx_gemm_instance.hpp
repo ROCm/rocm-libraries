@@ -5,7 +5,7 @@
 
 #include "ck_tile/host.hpp"
 #include "mx_gemm.hpp"
-#include "ck_tile/ops/gemm_mx/pipeline/gemm_pipeline_ag_bg_cr_comp_async.hpp"
+#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_async.hpp"
 #include "ck_tile/ops/gemm_mx/pipeline/gemm_pipeline_ag_bg_cr_comp_async_eight_waves.hpp"
 #include "ck_tile/ops/gemm_mx/pipeline/wp_pipeline_agmem_bgmem_creg_v1.hpp"
 
@@ -73,7 +73,7 @@ float mx_gemm_calc(const ck_tile::MxGemmHostArgs<1, 1, 0>& args, const ck_tile::
         ck_tile::MXGemmPreshufflePipelineAGmemBGmemCRegV1<MXPipelineProblem>,
         std::conditional_t<IsEightWave,
                            ck_tile::MXGemmPipelineAgBgCrCompAsyncEightWaves<MXPipelineProblem>,
-                           ck_tile::MXGemmPipelineAgBgCrCompAsync<MXPipelineProblem>>>;
+                           ck_tile::GemmPipelineAgBgCrCompAsync<MXPipelineProblem>>>;
 
     using TilePartitioner =
         ck_tile::GemmSpatiallyLocalTilePartitioner<GemmShape,
