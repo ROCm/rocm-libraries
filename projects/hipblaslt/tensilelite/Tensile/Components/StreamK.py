@@ -3454,18 +3454,32 @@ class StreamKDynamic(StreamK):
 
         return module
 
+def _extract_hybrid_mode():
+    """Extract SK5 mode bit 30 into StreamKHybridMode; clear it in MagicShiftItersPerTile."""
+    module = Module("SK5 mode extraction")
+    module.add(SLShiftRightB32(dst=sgpr("StreamKHybridMode"),
+                               src=sgpr("MagicShiftItersPerTile"),
+                               shiftHex=hex(30),
+                               comment="SK5: shift mode bit (bit 30) down"))
+    module.add(SAndB32(dst=sgpr("StreamKHybridMode"),
+                       src0=sgpr("StreamKHybridMode"),
+                       src1=hex(0x1),
+                       comment="SK5: isolate mode bit -> StreamKHybridMode"))
+    module.add(SAndB32(dst=sgpr("MagicShiftItersPerTile"),
+                       src0=sgpr("MagicShiftItersPerTile"),
+                       src1=hex(0xBFFFFFFF),
+                       comment="SK5: clear bit 30; keep shift bits and magic add bit"))
+    return module
+
 class StreamKHybrid(StreamK):
     """
     Hybrid SK3 + SK4: emits both the static (TwoTileDPFirst) and dynamic
     (Dynamic work-queue) code paths in a single kernel. A runtime mode bit
     packed into bit 30 of the MagicShiftItersPerTile kernel arg selects
-    which path executes. Bit 31 of that slot is unavailable because
-    magicNumberAlg2 uses it as the magic-division "add" indicator (set for
-    any non-power-of-two itersPerTile); a mode bit there would make static
-    problems read as dynamic and deadlock in the fixup flag-wait loop. The
-    bit is extracted once at preLoop entry into the StreamKHybridMode SGPR;
-    every divergent SK3-vs-SK4 callsite emits both fragments back-to-back
-    gated by an s_cmp_eq_u32 + s_cbranch on that single SGPR.
+    which path executes. The bit is extracted once at preLoop entry into
+    the StreamKHybridMode SGPR; every divergent SK3-vs-SK4 callsite emits
+    both fragments back-to-back gated by an s_cmp_eq_u32 + s_cbranch on
+    that single SGPR.
 
     Kernel-argument layout (see Tensile/Components/Signature.py SK5 branch
     and tensilelite/src/ContractionSolution.cpp SK5 branch):
@@ -3496,21 +3510,7 @@ class StreamKHybrid(StreamK):
     # Helpers
     # ------------------------------------------------------------------
     def _emitModeExtraction(self, writer, kernel):
-        """Extract mode bit 30 into StreamKHybridMode; clear it in place."""
-        module = Module("SK5 mode extraction")
-        module.add(SLShiftRightB32(dst=sgpr("StreamKHybridMode"),
-                                   src=sgpr("MagicShiftItersPerTile"),
-                                   shiftHex=hex(30),
-                                   comment="SK5: shift mode bit (bit 30) down"))
-        module.add(SAndB32(dst=sgpr("StreamKHybridMode"),
-                           src0=sgpr("StreamKHybridMode"),
-                           src1=hex(0x1),
-                           comment="SK5: isolate mode bit -> StreamKHybridMode (0=static SK3, 1=dynamic SK4); bit 31 (magic add bit) ignored"))
-        module.add(SAndB32(dst=sgpr("MagicShiftItersPerTile"),
-                           src0=sgpr("MagicShiftItersPerTile"),
-                           src1=hex(0xBFFFFFFF),
-                           comment="SK5: clear only bit 30 (mode); keep bits 0-4 shift and bit 31 magic add bit"))
-        return module
+        return _extract_hybrid_mode()
 
     def _emitSk3Sk4Branch(self, writer, module, tag, emitDynamic, emitStatic):
         """Emit mode-gated dual path: dynamic (SK4) first, static (SK3) second."""

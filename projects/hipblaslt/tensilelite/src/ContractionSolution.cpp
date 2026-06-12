@@ -821,10 +821,8 @@ namespace TensileLite
                     uint32_t sk4_totalItems
                         = (sk3_tiles - sk4_skTiles) + sk4_skTiles * sk4_skSplit;
 
-                    // Mode bit in bit 30; bit 31 is the SK3 magic-division "add" bit.
                     TENSILE_ASSERT_EXC((sk4_skTiles & 0xC0000000u) == 0u
-                                       && "SK5 SK4 skTiles must not collide with mode bit "
-                                          "(bit 30) or magic add bit (bit 31)");
+                                       && "SK5 SK4 skTiles collides with mode/magic bits");
                     uint32_t packedSkTiles = sk4_skTiles | 0x40000000u;
 
                     args.template append<uint32_t>("ItersPerTile",
@@ -845,8 +843,7 @@ namespace TensileLite
                     uint32_t magicShiftItersPerTile;
                     magicNumberItersPerTile = magicNumber(
                         2, sk3_itersPerTile, &magicShiftItersPerTile);
-                    assert((magicShiftItersPerTile & 0x40000000u) == 0u
-                           && "SK5 magic shift must leave mode bit (bit 30) clear");
+                    assert((magicShiftItersPerTile & 0x40000000u) == 0u);
 
                     uint32_t sk3_skItersPerWG;
                     uint32_t sk3_skTiles;
