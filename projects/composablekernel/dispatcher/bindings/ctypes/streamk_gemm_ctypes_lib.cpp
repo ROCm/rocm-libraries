@@ -32,6 +32,7 @@
 
 #include <hip/hip_runtime.h>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <string>
@@ -46,6 +47,33 @@
 #endif
 
 static bool g_initialized = false;
+
+// Read an integer benchmark knob from the environment, falling back to
+// `fallback` when unset or unparseable.
+static int env_int(const char* name, int fallback)
+{
+    const char* v = std::getenv(name);
+    if(v == nullptr || *v == '\0')
+        return fallback;
+    char* end      = nullptr;
+    const long out = std::strtol(v, &end, 10);
+    if(end == v)
+        return fallback;
+    return static_cast<int>(out);
+}
+
+// Read a boolean benchmark knob ("0"/"false"/"off", any case => false, else true).
+static bool env_bool(const char* name, bool fallback)
+{
+    const char* v = std::getenv(name);
+    if(v == nullptr || *v == '\0')
+        return fallback;
+    std::string s(v);
+    for(char& c : s)
+        if(c >= 'A' && c <= 'Z')
+            c = static_cast<char>(c - 'A' + 'a');
+    return !(s == "0" || s == "false" || s == "off");
+}
 
 extern "C" {
 
@@ -150,15 +178,29 @@ int dispatcher_run_gemm(
                                   /*stride_B=*/static_cast<ck_tile::index_t>(K),
                                   /*stride_C=*/static_cast<ck_tile::index_t>(N));
 
+    // Benchmark parameters. warmup/repeat default to old Tile Engine's values
+    // (warmup=50, repeat=100); a generous warmup keeps the GPU clock ramped, and
+    // 100 timed iterations give a stable median. These were the knobs behind the
+    // regular bridge's spurious "perf gap" (#8123): the old default of warmup=3/
+    // repeat=10 measured a cold, un-ramped clock. Each knob is env-overridable so
+    // a caller can match another harness without recompiling.
+    //
+    // Divergence from the regular path (generated_tile_backend.hpp): flush_cache_
+    // and rotating_count_ default OFF here. The Stream-K Atomic reduction
+    // accumulates into C, and the generated launch's launch_kernel_time_mask
+    // preprocess re-zeros only the original args.e_ptr -- rotating C across
+    // multiple buffers would leave the rotated copies un-zeroed and corrupt the
+    // accumulation. Leave rotating_count_=1 unless a caller knows the kernel
+    // re-zeros every rotated buffer.
     ck_tile::stream_config stream_cfg;
     stream_cfg.stream_id_      = nullptr;
     stream_cfg.time_kernel_    = true;
     stream_cfg.log_level_      = 0;
-    stream_cfg.cold_niters_    = 3;
-    stream_cfg.nrepeat_        = 10;
+    stream_cfg.cold_niters_    = env_int("CK_TILE_BENCH_WARMUP", 50);
+    stream_cfg.nrepeat_        = env_int("CK_TILE_BENCH_REPEAT", 100);
     stream_cfg.is_gpu_timer_   = true;
-    stream_cfg.flush_cache_    = false;
-    stream_cfg.rotating_count_ = 1;
+    stream_cfg.flush_cache_    = env_bool("CK_TILE_BENCH_FLUSH", false);
+    stream_cfg.rotating_count_ = env_int("CK_TILE_BENCH_ROTATING", 1);
 
     float exec_time = 0.0f;
     try
