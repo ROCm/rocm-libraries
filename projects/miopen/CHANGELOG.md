@@ -4,6 +4,9 @@
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
 
 ## MIOpen 3.5.2 for ROCm 7.14.0
+### Changed
+* [Conv] Naive convolution solvers are now skipped by default during find when any non-naive solver succeeds across any algorithm. Set `MIOPEN_NAIVE_DISABLE_IF_ALT=0` to restore the previous behavior.
+
 ### Resolved Issues
 * [RNN] Fix RNN workspace tensor descriptor int overflow
 

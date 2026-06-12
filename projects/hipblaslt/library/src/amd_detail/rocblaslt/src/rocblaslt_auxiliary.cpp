@@ -2149,18 +2149,6 @@ rocblaslt_status
 
             log_api(__func__, "OverrideAlgoCount", override_success ? 1 : 0);
         }
-        if(heuristicResultsArray[0].algo.data[0] != 0)
-        {
-            std::vector<rocblaslt_matmul_heuristic_result> allSolutionsResults;
-            size_t required_workspace_size = 0;
-            if(rocblaslt_status_success
-               == isSolutionSupported(handle,
-                                      prob,
-                                      tensile_data,
-                                      &heuristicResultsArray[0].algo,
-                                      &heuristicResultsArray[0].workspaceSize))                    
-                return rocblaslt_status_success;    
-        }
         if(requestedAlgoCount > 0)
         {
             status = getBestSolutions(prob,
@@ -2604,6 +2592,15 @@ std::optional<std::filesystem::path> rocblaslt_find_library_relative_path(
     const std::optional<std::filesystem::path>& relpath,
     const std::optional<std::filesystem::path>& default_lib_dir)
 {
+    // Strict semantics:
+    //   - When relpath is supplied, the probe MUST resolve to the full file path
+    //     (lib_dir / relpath) and that path MUST exist. We never silently fall back
+    //     to returning a bare directory when the requested file is missing — that
+    //     mode masked file-not-found behind callers that then appended a filename
+    //     to a wrong root, producing /opt/rocm/lib/hipblaslt/library/* fallback
+    //     loads under the per-base layout.
+    //   - When relpath is not supplied, callers want the library root itself; we
+    //     return the first candidate directory that exists.
     auto pathIfExists
         = [&](const std::filesystem::path& p) -> std::optional<std::filesystem::path> {
         if(relpath)
@@ -2611,6 +2608,7 @@ std::optional<std::filesystem::path> rocblaslt_find_library_relative_path(
             auto full_path = p / (*relpath);
             if(std::filesystem::exists(full_path))
                 return full_path;
+            return {};
         }
 
         if(std::filesystem::exists(p))

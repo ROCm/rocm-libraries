@@ -247,6 +247,82 @@ namespace rocisa
         }
     };
 
+    struct _SAddU64 : public CommonInstruction
+    {
+        _SAddU64(const std::shared_ptr<Container>& dst,
+                 const InstructionInput&           src0,
+                 const InstructionInput&           src1,
+                 const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_U64, dst, {src0, src1}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("s_add_u64");
+        }
+
+        _SAddU64(const std::shared_ptr<Container>&    dst,
+                 const std::vector<InstructionInput>& srcs,
+                 const std::string&                   comment = "")
+            : CommonInstruction(
+                InstType::INST_U64, dst, srcs, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("s_add_u64");
+        }
+
+        _SAddU64(const _SAddU64& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<_SAddU64>(*this);
+        }
+    };
+
+    struct SAddU64 : public CompositeInstruction
+    {
+        SAddU64(const std::shared_ptr<Container>& dst,
+                const InstructionInput&           src0,
+                const InstructionInput&           src1,
+                const std::string&                comment = "")
+            : CompositeInstruction(InstType::INST_U64, dst, {src0, src1}, comment)
+        {
+            setInst("s_add_u64");
+        }
+
+        std::vector<std::shared_ptr<Instruction>> setupInstructions() const override
+        {
+            std::vector<std::shared_ptr<Instruction>> instructions;
+            if(getAsmCaps()["s_add_u64"])
+            {
+                instructions = {std::make_shared<_SAddU64>(dst, srcs, comment)};
+            }
+            else
+            {
+                auto [dst1, dst2]
+                    = std::dynamic_pointer_cast<RegisterContainer>(dst)->splitRegContainer();
+                std::vector<InstructionInput> srcs1;
+                std::vector<InstructionInput> srcs2;
+                splitSrcs(srcs, srcs1, srcs2);
+                // s_add_u32 sets SCC, s_addc_u32 consumes it (carry is implicit).
+                instructions
+                    = {std::make_shared<SAddU32>(dst1, srcs1[0], srcs1[1], comment),
+                       std::make_shared<SAddCU32>(dst2, srcs2[0], srcs2[1], comment)};
+            }
+            return std::move(instructions);
+        }
+
+        SAddU64(const SAddU64& other)
+            : CompositeInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SAddU64>(*this);
+        }
+    };
+
     struct SMulI32 : public CommonInstruction
     {
         SMulI32(const std::shared_ptr<RegisterContainer>& dst,
@@ -3107,6 +3183,88 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VAddCCOU32>(*this);
+        }
+    };
+
+    struct _VAddNCU64 : public CommonInstruction
+    {
+        _VAddNCU64(const std::shared_ptr<Container>& dst,
+                   const InstructionInput&           src0,
+                   const InstructionInput&           src1,
+                   const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_U64, dst, {src0, src1}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_add_nc_u64");
+        }
+
+        _VAddNCU64(const std::shared_ptr<Container>&    dst,
+                   const std::vector<InstructionInput>& srcs,
+                   const std::string&                   comment = "")
+            : CommonInstruction(
+                InstType::INST_U64, dst, srcs, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_add_nc_u64");
+        }
+
+        _VAddNCU64(const _VAddNCU64& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<_VAddNCU64>(*this);
+        }
+    };
+
+    struct VAddNCU64 : public CompositeInstruction
+    {
+        VAddNCU64(const std::shared_ptr<Container>& dst,
+                  const InstructionInput&           src0,
+                  const InstructionInput&           src1,
+                  const std::string&                comment = "")
+            : CompositeInstruction(InstType::INST_U64, dst, {src0, src1}, comment)
+        {
+            setInst("v_add_nc_u64");
+        }
+
+        std::vector<std::shared_ptr<Instruction>> setupInstructions() const override
+        {
+            std::vector<std::shared_ptr<Instruction>> instructions;
+            if(getAsmCaps()["v_add_nc_u64"])
+            {
+                instructions = {std::make_shared<_VAddNCU64>(dst, srcs, comment)};
+            }
+            else
+            {
+                auto [dst1, dst2]
+                    = std::dynamic_pointer_cast<RegisterContainer>(dst)->splitRegContainer();
+                std::vector<InstructionInput> srcs1;
+                std::vector<InstructionInput> srcs2;
+                splitSrcs(srcs, srcs1, srcs2);
+                auto vcc = std::make_shared<VCC>();
+                instructions
+                    = {std::make_shared<VAddCOU32>(dst1, vcc, srcs1[0], srcs1[1], comment),
+                       std::make_shared<VAddCCOU32>(
+                           dst2,
+                           vcc,
+                           srcs2[0],
+                           srcs2[1],
+                           InstructionInput(std::static_pointer_cast<Container>(vcc)),
+                           comment)};
+            }
+            return std::move(instructions);
+        }
+
+        VAddNCU64(const VAddNCU64& other)
+            : CompositeInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VAddNCU64>(*this);
         }
     };
 
