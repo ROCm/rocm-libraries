@@ -900,8 +900,8 @@ static std::vector<float> ExtractTunaNetND2dFeatures(const conv::ProblemDescript
     const std::size_t K_h   = problem.GetWeightsHeight();
     const std::size_t K_w   = problem.GetWeightsWidth();
     std::size_t groups      = problem.GetGroupCount();
-    const std::size_t num_cu =
-        254; // ctx.GetStream().GetMaxComputeUnits(); // should this be fixed?
+    // CU count the model was trained with, for the hardware-aware derived features.
+    const std::size_t num_cu = metadata.GetNumCu();
 
     const std::vector<int> in_layout =
         common::OneHot(metadata.EncodeInLayout(problem.GetInLayout()), 2);

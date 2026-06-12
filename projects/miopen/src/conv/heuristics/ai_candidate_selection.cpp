@@ -94,6 +94,10 @@ CandidateSelectionMetadata::CandidateSelectionMetadata(const std::string& arch,
         MIOPEN_THROW("Metadata file does not contain 'encodings' section");
     }
 
+    // Compute-unit count the model was trained with; normalizes hardware-aware derived features.
+    if(metadata.contains("gpu") && metadata["gpu"].contains("num_cu"))
+        num_cu_ = metadata["gpu"]["num_cu"].get<std::size_t>();
+
     if(metadata.contains("decodings") && metadata["decodings"].contains("outputs"))
     {
         // Decoding values may be serialized as numbers (e.g. NumGroupsToMerge: {"0": 1, ...}) or
@@ -343,6 +347,25 @@ std::size_t CandidateSelectionMetadata::GetInputEncodingClassCount(const std::st
 }
 
 MIOPEN_INTERNALS_EXPORT
+std::size_t CandidateSelectionMetadata::GetInputEncodingIndex(const std::string& feature,
+                                                              const std::string& key) const
+{
+    const auto enc_it = feature_encodings_.find(feature);
+    if(enc_it != feature_encodings_.end())
+    {
+        const auto key_it = enc_it->second.find(key);
+        if(key_it != enc_it->second.end())
+            return static_cast<std::size_t>(key_it->second);
+    }
+    // Absent value/feature: return an out-of-range index (== class count) so callers fall back
+    // rather than collide with a valid class.
+    return GetInputEncodingClassCount(feature);
+}
+
+MIOPEN_INTERNALS_EXPORT
+std::size_t CandidateSelectionMetadata::GetNumCu() const { return num_cu_; }
+
+MIOPEN_INTERNALS_EXPORT
 const ConditionalLayout*
 CandidateSelectionMetadata::GetConditionalLayout(const std::string& kernel_name) const
 {
@@ -354,12 +377,10 @@ CandidateSelectionMetadata::GetConditionalLayout(const std::string& kernel_name)
 
 namespace {
 
-// Width of the engineered input vector excluding the precision one-hot. The precision one-hot
-// width is metadata-driven (3 classes without INT8, 4 with) so the total is base + precision
-// classes (e.g. 40 + 3 = 43 for Wrw/Bwd, 40 + 4 = 44 for Fwd with INT8). Direction one-hot is
-// omitted here (direction is a constant in CandidateSelection metadata, unlike the TunaNet path).
-constexpr std::size_t kCandidateSelectionEncoderInputSizeNoPrecision = 40;
-constexpr std::size_t kDefaultPrecisionClassCount                    = 3;
+// Fallback precision one-hot width when the metadata has no "precision" encoding (3 classes:
+// BF16/FP16/FP32, i.e. the no-INT8 case). The engineered width is otherwise derived from the
+// per-feature one-hot sizes in the metadata.
+constexpr std::size_t kDefaultPrecisionClassCount = 3;
 
 float FeatureAt(const std::map<std::string, float>& features, const std::string& key)
 {
@@ -369,21 +390,19 @@ float FeatureAt(const std::map<std::string, float>& features, const std::string&
     return it->second;
 }
 
-std::size_t EncodePrecisionLabel(float precision_feature)
+// Canonical metadata key for a datatype. This datatype->name mapping is a stable property of the
+// MIOpen C API; the name->index mapping (which can change per retrain) is read from the metadata.
+const char* DataTypeToEncodingKey(miopenDataType_t data_type)
 {
-    // Indices must match the "precision" input encoding in the metadata:
-    // {BF16:0, FP16:1, FP32:2, INT8:3}.
-    const auto data_type = static_cast<miopenDataType_t>(static_cast<int>(precision_feature));
     if(data_type == miopenBFloat16)
-        return 0;
+        return "BF16";
     if(data_type == miopenHalf)
-        return 1;
+        return "FP16";
     if(data_type == miopenFloat)
-        return 2;
+        return "FP32";
     if(data_type == miopenInt8)
-        return 3;
-    MIOPEN_LOG_W("EngineerCandidateSelectionInputFeatures: unsupported precision, defaulting to 0");
-    return 0;
+        return "INT8";
+    return nullptr;
 }
 
 // True when this model targets 2D convolutions, per the spatial_dim constant in its metadata.
@@ -399,13 +418,8 @@ bool IsTwoDimensional(const CandidateSelectionMetadata& metadata)
 MIOPEN_INTERNALS_EXPORT
 std::vector<float>
 EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& features_by_name,
-                                        std::size_t precision_class_count)
+                                        const CandidateSelectionMetadata& metadata)
 {
-    // The number of precision one-hot classes is metadata-driven so the engineered width matches
-    // the trained model (3 classes for Wrw/Bwd, 4 when INT8 is present, e.g. Fwd).
-    if(precision_class_count == 0)
-        precision_class_count = kDefaultPrecisionClassCount;
-
     // Callers gate this 2D-only path via IsTwoDimensional(metadata); no runtime spatial_dim check
     // here so a model whose feature map omits/differs on spatial_dim still engineers correctly.
     MIOPEN_LOG_I2("Using engineered 2d features for Candidate Selection");
@@ -431,44 +445,58 @@ EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& feat
         is_fwd ? FeatureAt(features_by_name, "out_h") : FeatureAt(features_by_name, "in_h"));
     const std::size_t W_out = static_cast<std::size_t>(
         is_fwd ? FeatureAt(features_by_name, "out_w") : FeatureAt(features_by_name, "in_w"));
-    const std::size_t K_h    = static_cast<std::size_t>(FeatureAt(features_by_name, "fil_h"));
-    const std::size_t K_w    = static_cast<std::size_t>(FeatureAt(features_by_name, "fil_w"));
-    std::size_t groups       = static_cast<std::size_t>(FeatureAt(features_by_name, "group_count"));
-    const std::size_t num_cu = 254;
+    const std::size_t K_h = static_cast<std::size_t>(FeatureAt(features_by_name, "fil_h"));
+    const std::size_t K_w = static_cast<std::size_t>(FeatureAt(features_by_name, "fil_w"));
+    std::size_t groups    = static_cast<std::size_t>(FeatureAt(features_by_name, "group_count"));
+    // CU count the model was trained with, for the hardware-aware derived features.
+    const std::size_t num_cu = metadata.GetNumCu();
 
+    // Layout one-hot widths come from the metadata encodings (binary NCHW/NHWC fallback when the
+    // model has no such encoding). The layout value in the feature map is already its class index.
+    const auto layout_width = [&](const std::string& feature) {
+        const auto width = metadata.GetInputEncodingClassCount(feature);
+        return width == 0 ? std::size_t{2} : width;
+    };
     const auto in_layout =
-        common::OneHot(static_cast<long long>(FeatureAt(features_by_name, "in_layout")), 2);
+        common::OneHot(static_cast<long long>(FeatureAt(features_by_name, "in_layout")),
+                       layout_width("in_layout"));
     const auto fil_layout =
-        common::OneHot(static_cast<long long>(FeatureAt(features_by_name, "fil_layout")), 2);
+        common::OneHot(static_cast<long long>(FeatureAt(features_by_name, "fil_layout")),
+                       layout_width("fil_layout"));
     const auto out_layout =
-        common::OneHot(static_cast<long long>(FeatureAt(features_by_name, "out_layout")), 2);
-    const auto precision_label = EncodePrecisionLabel(FeatureAt(features_by_name, "precision"));
-    if(precision_label >= precision_class_count)
+        common::OneHot(static_cast<long long>(FeatureAt(features_by_name, "out_layout")),
+                       layout_width("out_layout"));
+
+    // Precision: the datatype->name mapping is a stable API fact; the name->index and one-hot width
+    // come from the metadata so they track the trained model.
+    std::size_t precision_class_count = metadata.GetInputEncodingClassCount("precision");
+    if(precision_class_count == 0)
+        precision_class_count = kDefaultPrecisionClassCount;
+    const auto data_type =
+        static_cast<miopenDataType_t>(static_cast<int>(FeatureAt(features_by_name, "precision")));
+    const char* precision_key = DataTypeToEncodingKey(data_type);
+    const std::size_t precision_index =
+        precision_key == nullptr ? precision_class_count
+                                 : metadata.GetInputEncodingIndex("precision", precision_key);
+    if(precision_index >= precision_class_count)
     {
         // The problem's precision isn't one this model was trained on (e.g. INT8 on a model with
         // only 3 precision classes). Throw so the caller falls back to the non-AI heuristic rather
         // than feeding an all-zero precision one-hot (a silently degraded prediction).
-        MIOPEN_THROW("EngineerCandidateSelectionInputFeatures: precision class " +
-                     std::to_string(precision_label) + " not supported by this model (" +
-                     std::to_string(precision_class_count) + " precision classes)");
+        MIOPEN_THROW("EngineerCandidateSelectionInputFeatures: precision '" +
+                     std::string(precision_key == nullptr ? "unknown" : precision_key) +
+                     "' not supported by this model (" + std::to_string(precision_class_count) +
+                     " precision classes)");
     }
     const auto precision =
-        common::OneHot(static_cast<long long>(precision_label), precision_class_count);
+        common::OneHot(static_cast<long long>(precision_index), precision_class_count);
     // Direction one-hot is present in ExtractTunaNetND2dFeatures but omitted here because
     // CandidateSelection metadata holds direction as a constant input.
 
-    std::vector<float> engineered = {
-        static_cast<float>(in_layout[0]),
-        static_cast<float>(in_layout[1]),
-        static_cast<float>(fil_layout[0]),
-        static_cast<float>(fil_layout[1]),
-        static_cast<float>(out_layout[0]),
-        static_cast<float>(out_layout[1]),
-    };
-
-    // Precision one-hot (width is metadata-driven: 3 or 4 classes).
-    for(const auto bit : precision)
-        engineered.push_back(static_cast<float>(bit));
+    std::vector<float> engineered;
+    for(const auto* one_hot : {&in_layout, &fil_layout, &out_layout, &precision})
+        for(const auto bit : *one_hot)
+            engineered.push_back(static_cast<float>(bit));
 
     // Raw passthrough features.
     const std::vector<float> raw_tail = {
@@ -496,8 +524,8 @@ EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& feat
         N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu);
     engineered.insert(engineered.end(), derived.begin(), derived.end());
 
-    const std::size_t expected_size =
-        kCandidateSelectionEncoderInputSizeNoPrecision + precision_class_count;
+    const std::size_t expected_size = in_layout.size() + fil_layout.size() + out_layout.size() +
+                                      precision.size() + raw_tail.size() + derived.size();
     if(engineered.size() != expected_size)
     {
         MIOPEN_THROW("EngineerCandidateSelectionInputFeatures: expected " +
@@ -714,8 +742,8 @@ CandidateSelectionModel::EncodeInputFeatures(const std::map<std::string, float>&
     // dimensionality is declared by the spatial_dim constant in the metadata.
     if(IsTwoDimensional(metadata_))
     {
-        const auto engineered_features = EngineerCandidateSelectionInputFeatures(
-            features, metadata_.GetInputEncodingClassCount("precision"));
+        const auto engineered_features =
+            EngineerCandidateSelectionInputFeatures(features, metadata_);
         return EncodeInputFeaturesWithFdeep(engineered_features, arch_, solver_);
     }
     return EncodeInputFeaturesWithFdeep(filtered_features, arch_, solver_);

@@ -88,11 +88,11 @@ EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_cand
 /// Produces the same 2D engineered features as ExtractTunaNetND2dFeatures (ai_heuristics.cpp) --
 /// they share the derived-feature math via common::EngineeredConvFeatures -- except the direction
 /// one-hot is omitted here when direction is a CandidateSelection constant.
-/// precision_class_count is the metadata-driven width of the precision one-hot (3 without INT8,
-/// 4 with); pass 0 to default to 3.
+/// All metadata-driven quantities (precision/layout one-hot encodings and widths, and num_cu for
+/// the derived block) are read from `metadata`.
 MIOPEN_INTERNALS_EXPORT std::vector<float>
 EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& features_by_name,
-                                        std::size_t precision_class_count);
+                                        const CandidateSelectionMetadata& metadata);
 
 /// Expands metadata-ordered encoded kernel params into the vector consumed by the
 /// kernel_config_encoder submodel (one-hot + raw numerical + derived features).
@@ -134,6 +134,15 @@ public:
     // Number of one-hot classes for an input feature (e.g. "precision"), from the metadata's
     // input encodings. Returns 0 when the feature has no encoding (i.e. is not categorical).
     MIOPEN_INTERNALS_EXPORT std::size_t GetInputEncodingClassCount(const std::string& name) const;
+    // One-hot index of a categorical input value (e.g. feature "precision", key "FP32"), from the
+    // metadata's input encodings. Returns GetInputEncodingClassCount(feature) (an out-of-range
+    // index) when the value is absent, so an unsupported value degrades cleanly rather than
+    // colliding with a valid class.
+    MIOPEN_INTERNALS_EXPORT std::size_t GetInputEncodingIndex(const std::string& feature,
+                                                              const std::string& key) const;
+    // Compute-unit count the model was trained with, from the metadata's "gpu.num_cu". Used to
+    // normalize hardware-aware derived features. Returns 0 when absent.
+    MIOPEN_INTERNALS_EXPORT std::size_t GetNumCu() const;
     // Conditional/packed layout for a kernel, or nullptr when the kernel is fully static (the
     // common case). Loaded from the metadata's "conditional_layouts" section.
     MIOPEN_INTERNALS_EXPORT const ConditionalLayout*
@@ -154,6 +163,7 @@ private:
     float missing_value_token_;
     std::vector<int> split_k_values_;
     std::map<std::string, ConditionalLayout> conditional_layouts_;
+    std::size_t num_cu_ = 0;
 };
 
 class CandidateSelectionModel

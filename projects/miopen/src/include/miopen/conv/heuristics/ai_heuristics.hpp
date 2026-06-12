@@ -166,6 +166,7 @@ private:
     size_t num_inputs;
     size_t num_outputs;
     size_t num_solvers;
+    size_t num_cu_3d = 0; // "gpu.num_cu" the model was trained with (0 when absent)
     std::unordered_map<size_t, std::string> solver_map;
     std::vector<float> features_mean;
     std::vector<float> features_std;
@@ -181,6 +182,7 @@ private:
     static std::optional<int> LoadSpatialDim(const std::string& arch);
     static std::optional<std::vector<std::string>> LoadFeatures(const std::string& arch);
     static std::optional<size_t> LoadNumInputs(const std::string& arch);
+    static std::optional<size_t> LoadNumCu(const std::string& arch);
     static std::optional<size_t> LoadNumOutputs(const std::string& arch);
     static std::optional<size_t> LoadNumSolvers(const std::string& arch);
     static std::optional<std::unordered_map<size_t, std::string>>
@@ -239,6 +241,12 @@ public:
      * @return Number of inputs
      */
     size_t GetNumInputs() const { return num_inputs; }
+
+    /**
+     * @brief Compute-unit count the model was trained with (from "gpu.num_cu"), used to normalize
+     *        hardware-aware derived features. Returns 0 when absent.
+     */
+    size_t GetNumCu() const { return num_cu_3d; }
 
     /**
      * @brief Get number of output features

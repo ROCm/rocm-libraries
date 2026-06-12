@@ -112,6 +112,23 @@ std::optional<size_t> MetadataND::LoadNumInputs(const std::string& arch)
     }
 }
 
+std::optional<size_t> MetadataND::LoadNumCu(const std::string& arch)
+{
+    auto json_opt = LoadJSONSafe(arch);
+    if(!json_opt)
+        return std::nullopt;
+
+    try
+    {
+        return json_opt->at("gpu").at("num_cu").get<size_t>();
+    }
+    catch(const std::exception& e)
+    {
+        MIOPEN_LOG_I2("Failed to load gpu.num_cu for " << arch << ": " << e.what());
+        return std::nullopt;
+    }
+}
+
 std::optional<size_t> MetadataND::LoadNumOutputs(const std::string& arch)
 {
     auto json_opt = LoadJSONSafe(arch);
@@ -367,6 +384,9 @@ MetadataND::MetadataND(const std::string& device, const int& dim)
     in_layout_encodings    = std::move(*in_layout_encodings_opt);
     fil_layout_encodings   = std::move(*fil_layout_encodings_opt);
     out_layout_encodings   = std::move(*out_layout_encodings_opt);
+    // num_cu is optional (only the engineered 2D feature path needs it); absence leaves it 0.
+    if(auto num_cu_opt = LoadNumCu(model_prefix))
+        num_cu_3d = *num_cu_opt;
     // Mark as valid after successful loading
     is_valid = true;
 

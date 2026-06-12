@@ -26,6 +26,7 @@
 #include <gtest/gtest.h>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
 #include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
+#include <miopen/conv/heuristics/ai_heuristics.hpp> // common::EngineeredConvFeatures
 #include <miopen/db_path.hpp>
 #include <miopen/filesystem.hpp>
 #include <miopen/handle.hpp>
@@ -656,44 +657,89 @@ TEST_P(GPU_CandidateSelection_FP32, EncodeFailureSkipsCandidate_Test)
     EXPECT_EQ(encoded[0].size(), encoded[1].size()) << "sentinel width must match a normal row";
 }
 
-// A precision the model wasn't trained on (e.g. INT8 on a 3-class Wrw/Bwd model) must throw so the
-// caller falls back to the non-AI heuristic, rather than encoding an all-zero precision one-hot.
-// (Param-independent; uses the existing fixture only to stay in its registered test category.)
+// A precision the model wasn't trained on (e.g. INT8 on a model whose precision encoding lacks it,
+// such as the 3-class Wrw/Bwd models) must throw so the caller falls back to the non-AI heuristic,
+// rather than encoding an all-zero precision one-hot.
 TEST_P(GPU_CandidateSelection_FP32, UnsupportedPrecisionThrows_Test)
 {
+    const auto& params = GetParam();
+    CandidateSelectionMetadata meta(params.arch, params.solver);
+    const auto spatial_dim = meta.GetInputConstant("spatial_dim");
+    if(!spatial_dim.has_value() || *spatial_dim != "2")
+        GTEST_SKIP() << "Engineered input features are 2D-only; " << params.solver << " is not 2D";
+
     auto feats = MakeFullInputFeatureMap();
 
-    feats["precision"] = static_cast<float>(miopenInt8);
-    // 4-class model (e.g. Fwd) represents INT8 -> no throw (also proves the feature map is
-    // complete).
-    EXPECT_NO_THROW(EngineerCandidateSelectionInputFeatures(feats, /*precision_class_count=*/4));
-    // 3-class model (e.g. Wrw/Bwd) cannot represent INT8 -> throw -> caller falls back.
-    EXPECT_ANY_THROW(EngineerCandidateSelectionInputFeatures(feats, /*precision_class_count=*/3));
-
-    // A supported precision must not throw on the 3-class model.
+    // A supported precision (FP32) never throws (also proves the feature map is complete).
     feats["precision"] = static_cast<float>(miopenFloat);
-    EXPECT_NO_THROW(EngineerCandidateSelectionInputFeatures(feats, /*precision_class_count=*/3));
+    EXPECT_NO_THROW(EngineerCandidateSelectionInputFeatures(feats, meta));
+
+    // INT8 throws iff this model's precision encoding cannot represent it.
+    feats["precision"]     = static_cast<float>(miopenInt8);
+    const bool int8_in_enc = meta.GetInputEncodingIndex("precision", "INT8") <
+                             meta.GetInputEncodingClassCount("precision");
+    if(int8_in_enc)
+        EXPECT_NO_THROW(EngineerCandidateSelectionInputFeatures(feats, meta));
+    else
+        EXPECT_ANY_THROW(EngineerCandidateSelectionInputFeatures(feats, meta));
 }
 
-// Golden vector: the engineered input features for a fixed problem must stay byte-stable across
-// refactors. This pins the feature math (one-hots, raw passthrough, and the derived block shared
-// with the TunaNet path) so an accidental change to either path is caught.
+// The engineered input vector must stay stable across refactors. This pins the assembly order and
+// the metadata-driven quantities (layout/precision one-hot widths and indices, and num_cu in the
+// derived block) by composing the expected vector from its components; the derived-feature math
+// itself is pinned deterministically by CPU_ConvAiEngineeredConvFeatures_NONE.Golden.
 TEST_P(GPU_CandidateSelection_FP32, EngineeredInputGolden_Test)
 {
-    auto feats         = MakeFullInputFeatureMap();
-    feats["precision"] = static_cast<float>(miopenFloat); // FP32 -> precision class 2 of 4
-    const std::vector<float> expected = {
-        0.0f,        1.0f,        0.0f,        1.0f,           0.0f,  1.0f, // layout one-hots
-        0.0f,        0.0f,        1.0f,        0.0f,                        // precision one-hot
-        64.0f,       56.0f,       56.0f,       64.0f,          56.0f, 56.0f,       3.0f,
-        3.0f, // dims
-        1.0f,        1.0f,        1.0f,        1.0f,           1.0f,  1.0f,        1.0f,
-        1.0f, // pad..group
-        19.2588406f, 8.05102253f, 4.17438745f, 6.35784245f,    49.0f, 5.44444466f, 0.111111112f,
-        18.5656948f, 6.67351675f, 1.0f,        0.00286989799f, 1.0f,  0.015625f,   4.04305124f,
-        4.04305124f, 4.17438745f, 4.17438745f, 0.693147182f};
+    const auto& params = GetParam();
+    CandidateSelectionMetadata meta(params.arch, params.solver);
+    const auto spatial_dim = meta.GetInputConstant("spatial_dim");
+    if(!spatial_dim.has_value() || *spatial_dim != "2")
+        GTEST_SKIP() << "Engineered input features are 2D-only; " << params.solver << " is not 2D";
 
-    const auto engineered = EngineerCandidateSelectionInputFeatures(feats, 4);
+    auto feats         = MakeFullInputFeatureMap();
+    feats["precision"] = static_cast<float>(miopenFloat); // FP32
+
+    const auto engineered = EngineerCandidateSelectionInputFeatures(feats, meta);
+
+    std::vector<float> expected;
+    // Layout one-hots: in/fil/out, each set to class index 1 (NHWC) by MakeFullInputFeatureMap.
+    const std::size_t layout_w = meta.GetInputEncodingClassCount("in_layout");
+    for(int l = 0; l < 3; ++l)
+    {
+        std::vector<float> one_hot(layout_w, 0.0f);
+        one_hot.at(1) = 1.0f;
+        expected.insert(expected.end(), one_hot.begin(), one_hot.end());
+    }
+    // Precision one-hot: FP32, width and index from the metadata.
+    {
+        std::vector<float> one_hot(meta.GetInputEncodingClassCount("precision"), 0.0f);
+        one_hot.at(meta.GetInputEncodingIndex("precision", "FP32")) = 1.0f;
+        expected.insert(expected.end(), one_hot.begin(), one_hot.end());
+    }
+    // Raw passthrough: C_in,H_in,W_in,C_out,H_out,W_out,K_h,K_w then
+    // pad/stride/dilation/batch/group.
+    const std::vector<float> raw = {64.0f,
+                                    56.0f,
+                                    56.0f,
+                                    64.0f,
+                                    56.0f,
+                                    56.0f,
+                                    3.0f,
+                                    3.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f};
+    expected.insert(expected.end(), raw.begin(), raw.end());
+    // Derived block (shared math), normalized with the metadata's num_cu.
+    const auto derived = miopen::ai::common::EngineeredConvFeatures(
+        1, 64, 64, 56, 56, 56, 56, 3, 3, 1, meta.GetNumCu());
+    expected.insert(expected.end(), derived.begin(), derived.end());
+
     ASSERT_EQ(engineered.size(), expected.size());
     for(std::size_t i = 0; i < expected.size(); ++i)
         EXPECT_FLOAT_EQ(engineered[i], expected[i]) << "engineered feature mismatch at index " << i;
