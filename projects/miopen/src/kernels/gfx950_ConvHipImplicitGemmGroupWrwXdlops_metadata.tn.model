@@ -1,5 +1,5 @@
 {
-    "generated_on": "11 Jun 2026, 07:57:34",
+    "generated_on": "11 Jun 2026, 12:40:56",
     "gpu": {
         "num_cu": 256,
         "arch": "gfx950"
@@ -105,6 +105,28 @@
             "14": "023_CShuffleNXdlPerWavePerShuffle",
             "15": "024_CBlockTransferScalarPerVector_NWaveNPerXdl"
         },
+        "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_Large_Tensor": {
+            "0": "000_kernel_name",
+            "1": "002_BlockSize",
+            "2": "003_MPerBlock",
+            "3": "004_NPerBlock",
+            "4": "005_KPerBlock",
+            "7": "008_MXdlPerWave",
+            "8": "009_NXdlPerWave",
+            "9": "010_ABlockTransferSrcScalarPerVector",
+            "11": "011_BBlockTransferSrcScalarPerVector",
+            "17": "012_BlkGemmPipelineScheduler",
+            "18": "013_BlkGemmPipelineVersion",
+            "19": "015_SplitK",
+            "5": "018_ConvBackwardWeightSpecialization",
+            "6": "019_K1",
+            "10": "020_ABlockTransferDstScalarPerVector_K1",
+            "12": "021_BBlockTransferDstScalarPerVector_K1",
+            "13": "022_CShuffleMXdlPerWavePerShuffle",
+            "14": "023_CShuffleNXdlPerWavePerShuffle",
+            "15": "024_CBlockTransferScalarPerVector_NWaveNPerXdl",
+            "16": "025_NumGroupsToMerge"
+        },
         "DeviceGroupedConvBwdWeight_Explicit_Xdl": {
             "0": "000_kernel_name",
             "1": "001_GemmSpecialization_layout",
@@ -163,25 +185,6 @@
             "16": "025_NumGroupsToMerge"
         },
         "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_DirectLoad": {
-            "0": "000_kernel_name",
-            "1": "002_BlockSize",
-            "2": "003_MPerBlock",
-            "3": "004_NPerBlock",
-            "4": "005_KPerBlock",
-            "7": "008_MXdlPerWave",
-            "8": "009_NXdlPerWave",
-            "9": "010_ABlockTransferSrcScalarPerVector",
-            "11": "011_BBlockTransferSrcScalarPerVector",
-            "16": "015_SplitK",
-            "5": "018_ConvBackwardWeightSpecialization",
-            "6": "019_K1",
-            "10": "020_ABlockTransferDstScalarPerVector_K1",
-            "12": "021_BBlockTransferDstScalarPerVector_K1",
-            "13": "022_CShuffleMXdlPerWavePerShuffle",
-            "14": "023_CShuffleNXdlPerWavePerShuffle",
-            "15": "024_CBlockTransferScalarPerVector_NWaveNPerXdl"
-        },
-        "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_Large_Tensor": {
             "0": "000_kernel_name",
             "1": "002_BlockSize",
             "2": "003_MPerBlock",
