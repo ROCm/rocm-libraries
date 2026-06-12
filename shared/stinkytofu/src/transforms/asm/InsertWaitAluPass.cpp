@@ -58,10 +58,10 @@ enum CounterType : uint8_t {
 };
 
 enum WaitEventType : uint8_t {
-    // VA_VDST events
-    EV_VGPR_CSMACC_WRITE = 0,  // core/side-MACC VALU (v_add, v_mul, v_mfma, ...)
-    EV_VGPR_DPMACC_WRITE,      // DPMACC VALU (f64 transcendental: v_rcp/rsq/sqrt_f64)
-    EV_VGPR_TRANS_WRITE,       // 32-bit transcendental VALU (v_rcp_f32, v_sin_f32, ...)
+    // VA_VDST events: VALU VGPR-dest writes.
+    EV_VGPR_CSMACC_WRITE = 0,  // core/side-MACC VALU (v_add_f32, v_mul_f32, v_mfma, ...)
+    EV_VGPR_DPMACC_WRITE,      // double-precision MACC (v_add/mul/fma_f64, f64 cmp, v_cvt_u32_f64)
+    EV_VGPR_TRANS_WRITE,       // transcendental VALU, 32- and 64-bit (v_rcp_f32, v_rcp_f64, ...)
     EV_VGPR_XDL_WRITE,         // XDL WMMA / SWMMAC
     // VM_VSRC events
     EV_VGPR_LDS_READ,   // ds_read / ds_write reading a VGPR source
@@ -173,12 +173,14 @@ inline std::string pendingEventsStr(WaitEventSet ev) {
 
 // Map an instruction to its (single) mode2 event class, or none if it is
 // neither a VALU producer nor a VMEM/LDS/FLAT consumer.
+// VALU completion-class order: XDL -> TRANS -> DPMACC -> CSMACC. f64
+// transcendentals carry both the TRANS and DPMACC properties; TRANS is matched
+// first so they classify as TRANS.
 std::optional<WaitEventType> classifyEvent(const StinkyInstruction& inst) {
     if (isVectorALU(inst) || isTranscendental(inst) || isMatrixInstruction(inst)) {
         if (isXDLWMMA(inst)) return EV_VGPR_XDL_WRITE;
-        // Order matters: isTrans64 is a subset of isTranscendental — check it first.
-        if (isTrans64(inst)) return EV_VGPR_DPMACC_WRITE;
-        if (isTranscendental(inst)) return EV_VGPR_TRANS_WRITE;
+        if (isTranscendental(inst)) return EV_VGPR_TRANS_WRITE;  // 32- and 64-bit
+        if (isDPMACC(inst)) return EV_VGPR_DPMACC_WRITE;
         return EV_VGPR_CSMACC_WRITE;
     }
     if (isDSRead(inst) || isDSWrite(inst) || isDSAtomic(inst)) return EV_VGPR_LDS_READ;
