@@ -33,10 +33,11 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     else
         std::cout << " [BATCH_STATS_ONLY mode]...\n";
 
-    auto n = config.dims.size() > 0 ? config.dims[0] : 16;
-    auto c = config.dims.size() > 1 ? config.dims[1] : 16;
-    auto h = config.dims.size() > 2 ? config.dims[2] : 16;
-    auto w = config.dims.size() > 3 ? config.dims[3] : 16;
+    // Input dimensions
+    const int64_t n = config.dims.size() > 0 ? config.dims[0] : 16; // BATCH SIZE
+    const int64_t c = config.dims.size() > 1 ? config.dims[1] : 16; // CHANNELS (FEATURES)
+    const int64_t h = config.dims.size() > 2 ? config.dims[2] : 16; // HEIGHT (SPATIAL DIMENSION)
+    const int64_t w = config.dims.size() > 3 ? config.dims[3] : 16; // WIDTH (SPATIAL DIMENSION)
 
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
@@ -191,10 +192,10 @@ bool SampleRunner::operator()(const TensorLayout& layout)
                     static_cast<IntermediateType>(tolerance),
                     static_cast<IntermediateType>(tolerance));
 
-            bool yValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
+            std::cout << "CPU reference validation:\n";
+            const bool yValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
                 std::cout, "y", yValidator, yRefTensor, yTensor, floatTolerance, floatTolerance);
-
-            bool meanValid = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
+            const bool meanValid = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
                 std::cout,
                 "saved_mean",
                 statsValidator,
@@ -202,33 +203,33 @@ bool SampleRunner::operator()(const TensorLayout& layout)
                 savedMeanTensor,
                 floatTolerance,
                 floatTolerance);
-
-            bool invVarValid = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
-                std::cout,
-                "saved_inv_variance",
-                statsValidator,
-                savedInvVarRefTensor,
-                savedInvVarTensor,
-                floatTolerance,
-                floatTolerance);
-
-            bool nextMeanValid = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
-                std::cout,
-                "next_running_mean",
-                statsValidator,
-                nextMeanRefTensor,
-                nextMeanTensor,
-                floatTolerance,
-                floatTolerance);
-
-            bool nextVarValid = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
-                std::cout,
-                "next_running_var",
-                statsValidator,
-                nextVarRefTensor,
-                nextVarTensor,
-                floatTolerance,
-                floatTolerance);
+            const bool invVarValid
+                = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
+                    std::cout,
+                    "saved_inv_variance",
+                    statsValidator,
+                    savedInvVarRefTensor,
+                    savedInvVarTensor,
+                    floatTolerance,
+                    floatTolerance);
+            const bool nextMeanValid
+                = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
+                    std::cout,
+                    "next_running_mean",
+                    statsValidator,
+                    nextMeanRefTensor,
+                    nextMeanTensor,
+                    floatTolerance,
+                    floatTolerance);
+            const bool nextVarValid
+                = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
+                    std::cout,
+                    "next_running_var",
+                    statsValidator,
+                    nextVarRefTensor,
+                    nextVarTensor,
+                    floatTolerance,
+                    floatTolerance);
 
             validationPassed = yValid && meanValid && invVarValid && nextMeanValid && nextVarValid;
         }
@@ -261,10 +262,10 @@ bool SampleRunner::operator()(const TensorLayout& layout)
                     static_cast<IntermediateType>(tolerance),
                     static_cast<IntermediateType>(tolerance));
 
-            bool yValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
+            std::cout << "CPU reference validation:\n";
+            const bool yValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
                 std::cout, "y", yValidator, yRefTensor, yTensor, floatTolerance, floatTolerance);
-
-            bool meanValid = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
+            const bool meanValid = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
                 std::cout,
                 "saved_mean",
                 statsValidator,
@@ -272,15 +273,15 @@ bool SampleRunner::operator()(const TensorLayout& layout)
                 savedMeanTensor,
                 floatTolerance,
                 floatTolerance);
-
-            bool invVarValid = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
-                std::cout,
-                "saved_inv_variance",
-                statsValidator,
-                savedInvVarRefTensor,
-                savedInvVarTensor,
-                floatTolerance,
-                floatTolerance);
+            const bool invVarValid
+                = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
+                    std::cout,
+                    "saved_inv_variance",
+                    statsValidator,
+                    savedInvVarRefTensor,
+                    savedInvVarTensor,
+                    floatTolerance,
+                    floatTolerance);
 
             validationPassed = yValid && meanValid && invVarValid;
         }
@@ -328,7 +329,7 @@ int main(int argc, char* argv[])
         auto [handle, handleError] = createHipdnnHandle();
         HIPDNN_FE_CHECK(handleError);
 
-    bool allPassed = run(SampleRunner{*handle, config}, config);
+        const bool allPassed = run(SampleRunner{*handle, config});
 
         if(allPassed)
         {

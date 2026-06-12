@@ -31,10 +31,11 @@ bool SampleRunner::operator()(const TensorLayout& layout)
               << " [" << layout << "]" << (config.cpuValidation ? " (with CPU validation)" : "")
               << "...\n";
 
-    auto n = config.dims.size() > 0 ? config.dims[0] : 16; // BATCH SIZE
-    auto c = config.dims.size() > 1 ? config.dims[1] : 16; // CHANNELS (FEATURES)
-    auto h = config.dims.size() > 2 ? config.dims[2] : 16; // HEIGHT (SPATIAL DIMENSION)
-    auto w = config.dims.size() > 3 ? config.dims[3] : 16; // WIDTH (SPATIAL DIMENSION)
+    // Input dimensions
+    const int64_t n = config.dims.size() > 0 ? config.dims[0] : 16; // BATCH SIZE
+    const int64_t c = config.dims.size() > 1 ? config.dims[1] : 16; // CHANNELS (FEATURES)
+    const int64_t h = config.dims.size() > 2 ? config.dims[2] : 16; // HEIGHT (SPATIAL DIMENSION)
+    const int64_t w = config.dims.size() > 3 ? config.dims[3] : 16; // WIDTH (SPATIAL DIMENSION)
 
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
@@ -166,7 +167,7 @@ int main(int argc, char* argv[])
         auto [handle, handleError] = createHipdnnHandle();
         HIPDNN_FE_CHECK(handleError);
 
-    bool allPassed = run(SampleRunner{*handle, config}, config);
+        const bool allPassed = run(SampleRunner{*handle, config});
 
         if(allPassed)
         {

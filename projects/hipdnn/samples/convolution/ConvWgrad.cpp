@@ -27,30 +27,37 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     std::cout << "Running convolution backward weights graph " << inputType << " [" << layout << "]"
               << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
-    auto n = config.dims.size() > 0 ? config.dims[0] : 16;
-    auto c = config.dims.size() > 1 ? config.dims[1] : 16;
-    auto h = config.dims.size() > 2 ? config.dims[2] : 16;
-    auto w = config.dims.size() > 3 ? config.dims[3] : 16;
+    // Input (x)
+    const int64_t n = config.dims.size() > 0 ? config.dims[0] : 16; // Batch size
+    const int64_t c = config.dims.size() > 1 ? config.dims[1] : 16; // Channels
+    const int64_t h = config.dims.size() > 2 ? config.dims[2] : 16; // Height
+    const int64_t w = config.dims.size() > 3 ? config.dims[3] : 16; // Width
 
-    auto k = config.filter.size() > 0 ? config.filter[0] : 16;
-    auto r = config.filter.size() > 0 ? config.filter[0] : 3;
-    auto s = config.filter.size() > 1 ? config.filter[1] : 3;
+    // Filter (dw)
+    const int64_t k = config.filter.size() > 0 ? config.filter[0] : 16; // Output channels
+    const int64_t r = config.filter.size() > 1 ? config.filter[1] : 3; // Filter height
+    const int64_t s = config.filter.size() > 2 ? config.filter[2] : 3; // Filter width
 
-    auto u = config.stride.size() > 0 ? config.stride[0] : 1;
-    auto v = config.stride.size() > 1 ? config.stride[1] : 1;
+    // Stride
+    const int64_t u = config.stride.size() > 0 ? config.stride[0] : 1;
+    const int64_t v = config.stride.size() > 1 ? config.stride[1] : 1;
 
-    auto padH = config.padding.size() > 0 ? config.padding[0] : 1;
-    auto padW = config.padding.size() > 1 ? config.padding[1] : 1;
+    // Padding
+    const int64_t padH = config.padding.size() > 0 ? config.padding[0] : 1;
+    const int64_t padW = config.padding.size() > 1 ? config.padding[1] : 1;
 
-    auto dilH = config.dilation.size() > 0 ? config.dilation[0] : 1;
-    auto dilW = config.dilation.size() > 1 ? config.dilation[1] : 1;
+    // Dilation
+    const int64_t dilH = config.dilation.size() > 0 ? config.dilation[0] : 1;
+    const int64_t dilW = config.dilation.size() > 1 ? config.dilation[1] : 1;
 
+    // Output gradient (dy dimensions)
     const int64_t outH = (h + 2 * padH - dilH * (r - 1) - 1) / u + 1;
     const int64_t outW = (w + 2 * padW - dilW * (s - 1) - 1) / v + 1;
 
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType).set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
+    // Preserve feature
     if(config.engine_id != -1)
     {
         graph->set_preferred_engine_id_ext(config.engine_id);
@@ -118,20 +125,21 @@ bool SampleRunner::operator()(const TensorLayout& layout)
             calculateConvWrwTolerance<InputType, InputType, float>(
                 0.0, 1.0, 0.0, 1.0, dyAttr->get_dim());
 
-        constexpr float relativeTolerance = 0.01f;
+        constexpr float RELATIVE_TOLERANCE = 0.01f;
 
         auto dwValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(
             absoluteTolerance, RELATIVE_TOLERANCE);
 
         std::cout << "CPU reference validation:\n";
 
-        bool dwValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(std::cout,
-                                                                                "dw",
-                                                                                dwValidator,
-                                                                                dwRefTensor,
-                                                                                dwTensor,
-                                                                                absoluteTolerance,
-                                                                                relativeTolerance);
+        const bool dwValid
+            = hipdnn_test_sdk::utilities::validateAndReport<InputType>(std::cout,
+                                                                       "dw",
+                                                                       dwValidator,
+                                                                       dwRefTensor,
+                                                                       dwTensor,
+                                                                       absoluteTolerance,
+                                                                       RELATIVE_TOLERANCE);
 
         validationPassed = dwValid;
     }
@@ -151,13 +159,14 @@ int main(int argc, char* argv[])
         auto [handle, handleError] = createHipdnnHandle();
         HIPDNN_FE_CHECK(handleError);
 
-    bool allPassed = run(SampleRunner{*handle, config}, config);
+        const bool allPassed = run(SampleRunner{*handle, config});
 
         if(allPassed)
         {
             std::cout << "All convolution backward weights runs completed successfully.\n";
             return 0;
         }
+
         std::cout << "One or more convolution backward weights runs failed validation.\n";
         return 1;
     }

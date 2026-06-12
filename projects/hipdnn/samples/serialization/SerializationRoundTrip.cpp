@@ -215,7 +215,7 @@ int main(int argc, char* argv[])
         auto [handle, handleError] = createHipdnnHandle();
         HIPDNN_FE_CHECK(handleError);
 
-    bool allPassed = run(SampleRunner{*handle, config}, config);
+        const bool allPassed = run(SampleRunner{*handle, config});
 
         if(allPassed)
         {

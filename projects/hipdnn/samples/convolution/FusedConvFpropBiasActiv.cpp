@@ -30,23 +30,28 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     std::cout << "Running fused convolution fprop + bias + activ graph " << inputType << " ["
               << layout << "]" << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
-    auto n = config.dims.size() > 0 ? config.dims[0] : 16;
-    auto c = config.dims.size() > 1 ? config.dims[1] : 16;
-    auto h = config.dims.size() > 2 ? config.dims[2] : 16;
-    auto w = config.dims.size() > 3 ? config.dims[3] : 16;
+    // Input
+    const int64_t n = config.dims.size() > 0 ? config.dims[0] : 16; // Batch size
+    const int64_t c = config.dims.size() > 1 ? config.dims[1] : 16; // Channels
+    const int64_t h = config.dims.size() > 2 ? config.dims[2] : 16; // Height
+    const int64_t w = config.dims.size() > 3 ? config.dims[3] : 16; // Width
 
-    auto k = config.filter.size() > 0 ? config.filter[0] : 16;
-    auto r = config.filter.size() > 0 ? config.filter[0] : 3;
-    auto s = config.filter.size() > 1 ? config.filter[1] : 3;
+    // Filter
+    const int64_t k = config.filter.size() > 0 ? config.filter[0] : 16; // Output channels
+    const int64_t r = config.filter.size() > 1 ? config.filter[1] : 3; // Filter height
+    const int64_t s = config.filter.size() > 2 ? config.filter[2] : 3; // Filter width
 
-    auto u = config.stride.size() > 0 ? config.stride[0] : 1;
-    auto v = config.stride.size() > 1 ? config.stride[1] : 1;
+    // Stride
+    const int64_t u = config.stride.size() > 0 ? config.stride[0] : 1;
+    const int64_t v = config.stride.size() > 1 ? config.stride[1] : 1;
 
-    auto padH = config.padding.size() > 0 ? config.padding[0] : 1;
-    auto padW = config.padding.size() > 1 ? config.padding[1] : 1;
+    // Padding
+    const int64_t padH = config.padding.size() > 0 ? config.padding[0] : 1;
+    const int64_t padW = config.padding.size() > 1 ? config.padding[1] : 1;
 
-    auto dilH = config.dilation.size() > 0 ? config.dilation[0] : 1;
-    auto dilW = config.dilation.size() > 1 ? config.dilation[1] : 1;
+    // Dilation
+    const int64_t dilH = config.dilation.size() > 0 ? config.dilation[0] : 1;
+    const int64_t dilW = config.dilation.size() > 1 ? config.dilation[1] : 1;
 
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
@@ -68,6 +73,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     convAttributes.set_dilation({DIL_H, DIL_W});
 
     auto convOutAttr = graph->conv_fprop(xAttr, wAttr, convAttributes);
+    // Explicitly set output dimensions and strides so we can derive the bias shape.
+    // The output dimensions aren't automatically populated until after graph->build_operation_graph(),
+    // but we need them now to create the bias tensor with the correct per-channel shape.
     convOutAttr->set_dim({n, k, h, w});
     convOutAttr->set_stride(utilities::generateStrides({n, k, h, w}, layout.strideOrder));
 
@@ -154,8 +162,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
         std::cout << "CPU reference validation:\n";
-
-        bool outValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
+        const bool outValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
             std::cout, "output", outValidator, yRefTensor, yTensor, tolerance, tolerance);
 
         validationPassed = outValid;
@@ -176,7 +183,7 @@ int main(int argc, char* argv[])
         auto [handle, handleError] = createHipdnnHandle();
         HIPDNN_FE_CHECK(handleError);
 
-    bool allPassed = run(SampleRunner{*handle, config}, config);
+        const bool allPassed = run(SampleRunner{*handle, config});
 
         if(allPassed)
         {

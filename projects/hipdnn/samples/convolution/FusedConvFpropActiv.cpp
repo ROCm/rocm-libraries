@@ -29,29 +29,35 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     std::cout << "Running fused convolution fprop + activ graph " << inputType << " [" << layout
               << "]" << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
-    auto n = config.dims.size() > 0 ? config.dims[0] : 16;
-    auto c = config.dims.size() > 1 ? config.dims[1] : 16;
-    auto h = config.dims.size() > 2 ? config.dims[2] : 16;
-    auto w = config.dims.size() > 3 ? config.dims[3] : 16;
+    // Input
+    const int64_t n = config.dims.size() > 0 ? config.dims[0] : 16; // Batch size
+    const int64_t c = config.dims.size() > 1 ? config.dims[1] : 16; // Channels
+    const int64_t h = config.dims.size() > 2 ? config.dims[2] : 16; // Height
+    const int64_t w = config.dims.size() > 3 ? config.dims[3] : 16; // Width
 
-    auto k = config.filter.size() > 0 ? config.filter[0] : 16;
-    auto r = config.filter.size() > 0 ? config.filter[0] : 3;
-    auto s = config.filter.size() > 1 ? config.filter[1] : 3;
+    // Filter
+    const int64_t k = config.filter.size() > 0 ? config.filter[0] : 16; // Output channels
+    const int64_t r = config.filter.size() > 1 ? config.filter[1] : 3; // Filter height
+    const int64_t s = config.filter.size() > 2 ? config.filter[2] : 3; // Filter width
 
-    auto u = config.stride.size() > 0 ? config.stride[0] : 1;
-    auto v = config.stride.size() > 1 ? config.stride[1] : 1;
+    // Stride
+    const int64_t u = config.stride.size() > 0 ? config.stride[0] : 1;
+    const int64_t v = config.stride.size() > 1 ? config.stride[1] : 1;
 
-    auto padH = config.padding.size() > 0 ? config.padding[0] : 1;
-    auto padW = config.padding.size() > 1 ? config.padding[1] : 1;
+    // Padding
+    const int64_t padH = config.padding.size() > 0 ? config.padding[0] : 1;
+    const int64_t padW = config.padding.size() > 1 ? config.padding[1] : 1;
 
-    auto dilH = config.dilation.size() > 0 ? config.dilation[0] : 1;
-    auto dilW = config.dilation.size() > 1 ? config.dilation[1] : 1;
+    // Dilation
+    const int64_t dilH = config.dilation.size() > 0 ? config.dilation[0] : 1;
+    const int64_t dilW = config.dilation.size() > 1 ? config.dilation[1] : 1;
 
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT);
 
+    // Preserve engine_id feature
     if(config.engine_id != -1)
     {
         graph->set_preferred_engine_id_ext(config.engine_id);
@@ -70,7 +76,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     yAttr->set_output(false);
 
     graph::PointwiseAttributes pointwiseAttributes;
-    pointwiseAttributes.set_mode(hipdnn_frontend::PointwiseMode::RELU_FWD);
+    pointwiseAttributes.set_mode(PointwiseMode::RELU_FWD);
     pointwiseAttributes.set_relu_lower_clip(0.2f);
     pointwiseAttributes.set_relu_upper_clip(0.7f);
 
@@ -78,7 +84,6 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     pointwiseOutAttr->set_output(true);
 
     HIPDNN_FE_CHECK(graph->build(handle));
-
     std::cout << "Graph build successful.\n";
 
     utilities::Tensor<InputType> xTensor(xAttr->get_dim(), layout);
@@ -101,10 +106,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     HIPDNN_FE_CHECK(graph->execute(handle, variantPack, workspace.get()));
 
     pointwiseOutTensor.memory().markDeviceModified();
-
     auto pointwiseOutHostPtr = pointwiseOutTensor.memory().hostData();
 
-    std::cout << "First 10 y values: ";
+    std::cout << "First 10 pointwise out values: ";
     for(int i = 0; i < 10; ++i)
     {
         std::cout << static_cast<float>(pointwiseOutHostPtr[i]) << " ";
@@ -138,7 +142,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
         std::cout << "CPU reference validation:\n";
 
-        bool outValid
+        const bool outValid
             = hipdnn_test_sdk::utilities::validateAndReport<InputType>(std::cout,
                                                                        "pointwise out",
                                                                        outValidator,
@@ -165,13 +169,14 @@ int main(int argc, char* argv[])
         auto [handle, handleError] = createHipdnnHandle();
         HIPDNN_FE_CHECK(handleError);
 
-    bool allPassed = run(SampleRunner{*handle, config}, config);
+        const bool allPassed = run(SampleRunner{*handle, config});
 
         if(allPassed)
         {
             std::cout << "All fused Conv fwd + Activation runs completed successfully.\n";
             return 0;
         }
+
         std::cout << "One or more fused Conv fwd + Activation runs failed validation.\n";
         return 1;
     }

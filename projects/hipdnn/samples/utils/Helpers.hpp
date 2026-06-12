@@ -14,15 +14,15 @@
 #include <memory>
 #include <numeric>
 #include <random>
-#include <sstream> // added
+#include <sstream>
 #include <vector>
 
 // NOLINTBEGIN(google-global-names-in-headers)
 using hipdnn_data_sdk::utilities::TensorLayout;
 
-// Use portable custom types instead of HIP types (works with any C++ compiler)
 using hipdnn_data_sdk::types::bfloat16;
 using hipdnn_data_sdk::types::half;
+// NOLINTEND(google-global-names-in-headers)
 
 // ERROR MACROS
 
@@ -60,13 +60,15 @@ using hipdnn_data_sdk::types::half;
         }                                                                                 \
     } while(0)
 
-// CLI HELP
+// SAMPLE TYPES
 
 enum class SampleType
 {
     GENERIC,
     BN_TRAINING
 };
+
+// HELP MESSAGE
 
 inline void printSampleHelp(const std::string& sampleName,
                             SampleType sampleType = SampleType::GENERIC)
@@ -89,7 +91,7 @@ inline void printSampleHelp(const std::string& sampleName,
                   << "  --full-training             Use running statistics\n";
     }
 
-    std::cout << "  --help, -h                  Show help\n";
+    std::cout << "  --help, -h                  Show this help message\n\n";
 }
 
 // CONFIG
@@ -99,7 +101,6 @@ struct Config
     bool cpuValidation = false;
     bool useRunningStats = false;
 
-    // NEW CLI fields
     int engine_id = -1;
     std::string dtype;
     std::string layout;
@@ -120,9 +121,7 @@ inline std::vector<int64_t> parseList(const std::string& str)
     std::string item;
 
     while(std::getline(ss, item, ','))
-    {
         result.push_back(std::stoll(item));
-    }
 
     return result;
 }
@@ -132,7 +131,7 @@ inline std::vector<int64_t> parseList(const std::string& str)
 inline Config
     parseCommandLineArgs(int argc, char** argv, SampleType sampleType = SampleType::GENERIC)
 {
-    auto config = Config{};
+    Config config;
 
     for(int i = 1; i < argc; ++i)
     {
@@ -150,42 +149,94 @@ inline Config
         {
             config.useRunningStats = true;
         }
-
-        // NEW FLAGS
-
         else if(arg == "--engine-id")
         {
+            if(i + 1 >= argc)
+            {
+                std::cerr << "--engine-id requires a value\n";
+                exit(EXIT_FAILURE);
+            }
             config.engine_id = std::stoi(argv[++i]);
         }
         else if(arg == "--dtype")
         {
+            if(i + 1 >= argc)
+            {
+                std::cerr << "--dtype requires a value\n";
+                exit(EXIT_FAILURE);
+            }
+
             config.dtype = argv[++i];
+
+            if(config.dtype != "fp32" && config.dtype != "fp16" && config.dtype != "bf16")
+            {
+                std::cerr << "Invalid value for --dtype: " << config.dtype
+                          << " (expected: fp32, fp16, bf16)\n";
+                exit(EXIT_FAILURE);
+            }
         }
         else if(arg == "--layout")
         {
+            if(i + 1 >= argc)
+            {
+                std::cerr << "--layout requires a value\n";
+                exit(EXIT_FAILURE);
+            }
+
             config.layout = argv[++i];
+
+            if(config.layout != "nchw" && config.layout != "nhwc")
+            {
+                std::cerr << "Invalid value for --layout: " << config.layout
+                          << " (expected: nchw, nhwc)\n";
+                exit(EXIT_FAILURE);
+            }
         }
         else if(arg == "--dims")
         {
+            if(i + 1 >= argc)
+            {
+                std::cerr << "--dims requires a value\n";
+                exit(EXIT_FAILURE);
+            }
             config.dims = parseList(argv[++i]);
         }
         else if(arg == "--filter")
         {
+            if(i + 1 >= argc)
+            {
+                std::cerr << "--filter requires a value\n";
+                exit(EXIT_FAILURE);
+            }
             config.filter = parseList(argv[++i]);
         }
         else if(arg == "--stride")
         {
+            if(i + 1 >= argc)
+            {
+                std::cerr << "--stride requires a value\n";
+                exit(EXIT_FAILURE);
+            }
             config.stride = parseList(argv[++i]);
         }
         else if(arg == "--padding")
         {
+            if(i + 1 >= argc)
+            {
+                std::cerr << "--padding requires a value\n";
+                exit(EXIT_FAILURE);
+            }
             config.padding = parseList(argv[++i]);
         }
         else if(arg == "--dilation")
         {
+            if(i + 1 >= argc)
+            {
+                std::cerr << "--dilation requires a value\n";
+                exit(EXIT_FAILURE);
+            }
             config.dilation = parseList(argv[++i]);
         }
-
         else if(arg == "--help" || arg == "-h")
         {
             printSampleHelp(argv[0], sampleType);
@@ -201,28 +252,15 @@ inline Config
 
     return config;
 }
-
-// RUN FUNCTION
+// RUN FUNCTION (MATCHES DEVELOP API)
 
 template <typename F>
-bool run(F&& f, const Config& config)
+bool run(F&& f)
 {
     bool allPassed = true;
 
-    std::vector<std::string> dtypes;
-    std::vector<TensorLayout> layouts;
-
-    // dtype selection
-    if(!config.dtype.empty())
-        dtypes.push_back(config.dtype);
-    else
-        dtypes = {"fp32", "fp16", "bf16"};
-
-    // layout selection
-    if(!config.layout.empty())
-        layouts.push_back(config.layout == "nhwc" ? TensorLayout::NHWC : TensorLayout::NCHW);
-    else
-        layouts = {TensorLayout::NCHW, TensorLayout::NHWC};
+    std::vector<std::string> dtypes = {"fp32", "fp16", "bf16"};
+    std::vector<TensorLayout> layouts = {TensorLayout::NCHW, TensorLayout::NHWC};
 
     for(const auto& dt : dtypes)
     {
@@ -258,9 +296,8 @@ inline int64_t
 {
     int64_t count = 1;
     for(auto dim : tensor->get_dim())
-    {
         count *= dim;
-    }
+
     return count;
 }
 
