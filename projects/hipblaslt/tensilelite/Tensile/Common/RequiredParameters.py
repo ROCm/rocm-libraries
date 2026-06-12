@@ -110,6 +110,7 @@ def getRequiredParametersMin() -> set:
         'ScheduleIterAlg',
         'ScheduleGROverBarrier',
         'SourceSwap',
+        'UseDualFMAC',
         'SpaceFillingAlgo',
         'StorePriorityOpt',
         'StoreRemapVectorWidth',

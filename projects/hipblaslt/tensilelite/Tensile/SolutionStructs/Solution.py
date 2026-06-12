@@ -823,6 +823,17 @@ class Solution(collections.abc.Mapping):
         state["UseMFMAF32XEmulation"] = True # MFMA version for gfx950 etc.
 
     state["MfmaInitCVgprs"] = False
+
+    # UseDualFMAC (VOPD v_dual_fmac_f32) applies only to f32 source/MAC (non-MFMA) kernels on
+    # archs whose assembler accepts the dual-issue form (gfx11/gfx12). Auto-disable elsewhere
+    # so a config may enable it broadly without rejecting unrelated solutions.
+    if state["UseDualFMAC"] and (
+        state["KernelLanguage"] != "Assembly"
+        or EnableMatrixInstruction
+        or not state["ProblemType"]["DataType"].isSingle()
+        or not isaInfoMap[state["ISA"]].asmCaps.get("v_dual_fmac_f32", False)):
+      state["UseDualFMAC"] = False
+
     # Enable UseSubtileImpl on gfx950 and gfx1250; ignore user request on other ISAs.
     isa = tuple(state["ISA"])
     isgfx950 = isa[:2] == (9, 5)

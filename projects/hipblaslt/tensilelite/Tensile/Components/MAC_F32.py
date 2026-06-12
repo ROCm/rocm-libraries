@@ -25,7 +25,7 @@
 from rocisa.code import Module
 from rocisa.container import vgpr
 from rocisa.enum import DataTypeEnum
-from rocisa.instruction import VMacF32, SSetPrior
+from rocisa.instruction import VMacF32, SSetPrior, VDualFMACF32
 from ..Common.DataType import DataType
 from ..Component import MAC
 
@@ -45,6 +45,13 @@ class MAC_F32_Plain(MAC):
 
         module = Module("MAC_F32_Plain")
         module.addComment(self.commentHeader())
+
+        # UseDualFMAC: emit RDNA3/3.5/4 VOPD v_dual_fmac_f32 pairs instead of single-issue
+        # v_fmac_f32, ~doubling the FMA issue rate.  The parameter is validated/auto-disabled
+        # in SolutionStructs to f32 source (non-MFMA) kernels on gfx11/gfx12.
+        if kernel["UseDualFMAC"]:
+            return self._callVopd(module, tPB, m, innerUnroll,
+                                  kernel["ThreadTile0"], kernel["ThreadTile1"])
 
         vars = {}
         vars["m"] = m
@@ -69,6 +76,93 @@ class MAC_F32_Plain(MAC):
                     if (idx1 == 0) and (idx0 == 0) and (iui == 0):
                         module.add(SSetPrior(prior=1, comment="Raise priority while processing macs"))
 
+        module.add(SSetPrior(prior=0, comment="Reset priority after macs"))
+
+        return module
+
+    @staticmethod
+    def _vopdOk(x, y):
+        # VOPD v_dual_fmac_f32 constraints enforced by llvm-mc (gfx11/12), base-independent
+        # in offset terms: dst parity must differ, and src0 (ValuA) / src1 (ValuB) of the
+        # two ops must be on different VGPR banks (reg % 4).
+        return (((x[0] - y[0]) % 2) == 1 and
+                ((x[1] - y[1]) % 4) != 0 and
+                ((x[2] - y[2]) % 4) != 0)
+
+    @classmethod
+    def _vopdMatch(cls, ops):
+        # Maximum (near-perfect) matching of MACs into VOPD-legal pairs: greedy then
+        # length-3 augmenting paths to a fixpoint.  Reaches 100% pairing for all even
+        # ThreadTiles.
+        n = len(ops)
+        adj = [[k for k in range(n) if k != i and cls._vopdOk(ops[i], ops[k])]
+               for i in range(n)]
+        mate = [-1] * n
+        for i in range(n):
+            if mate[i] == -1:
+                for k in adj[i]:
+                    if mate[k] == -1:
+                        mate[i] = k; mate[k] = i; break
+        improved = True
+        while improved:
+            improved = False
+            for u in range(n):
+                if mate[u] != -1:
+                    continue
+                done = False
+                for a in adj[u]:
+                    b = mate[a]
+                    if b == -1:
+                        mate[u] = a; mate[a] = u; improved = done = True; break
+                    for w in adj[b]:
+                        if w != u and mate[w] == -1:
+                            mate[u] = a; mate[a] = u; mate[b] = w; mate[w] = b
+                            improved = done = True; break
+                    if done:
+                        break
+        return mate
+
+    def _callVopd(self, module, tPB, m, innerUnroll, TT0, TT1):
+        tile01 = tPB["tile01Idx"]
+        items = []
+        for iui in range(0, innerUnroll):
+            # ops for this iui as (cOff, aOff, bOff); different iui accumulate into the
+            # same ValuC, so they are kept in separate sequential blocks.
+            ops = []
+            for idx1 in range(0, TT1):
+                for idx0 in range(0, TT0):
+                    a = idx0 if tile01 else idx1
+                    b = idx1 if tile01 else idx0
+                    ops.append((idx0 + idx1 * TT0, a, b))
+
+            mate = self._vopdMatch(ops)
+            for i in range(len(ops)):
+                if mate[i] != -1 and mate[i] < i:
+                    continue  # already emitted as the X-op of its pair
+                if mate[i] > i:
+                    j = mate[i]
+                    cX, aX, bX = ops[i]
+                    cY, aY, bY = ops[j]
+                    items.append(VDualFMACF32(
+                        dstX=vgpr("ValuC+%d" % cX),
+                        src0X=vgpr("ValuA_X%d_I%d+%d" % (m, iui, aX)),
+                        src1X=vgpr("ValuB_X%d_I%d+%d" % (m, iui, bX)),
+                        dstY=vgpr("ValuC+%d" % cY),
+                        src0Y=vgpr("ValuA_X%d_I%d+%d" % (m, iui, aY)),
+                        src1Y=vgpr("ValuB_X%d_I%d+%d" % (m, iui, bY)),
+                        comment="VOPD dual-issue FMA"))
+                else:
+                    c, a, b = ops[i]
+                    items.append(VMacF32(dst=vgpr("ValuC+%d" % c),
+                                         src0=vgpr("ValuA_X%d_I%d+%d" % (m, iui, a)),
+                                         src1=vgpr("ValuB_X%d_I%d+%d" % (m, iui, b))))
+
+        # Raise priority on the first mac and reset after the block, matching the
+        # single-issue path above.
+        for n, it in enumerate(items):
+            module.add(it)
+            if n == 0:
+                module.add(SSetPrior(prior=1, comment="Raise priority while processing macs"))
         module.add(SSetPrior(prior=0, comment="Reset priority after macs"))
 
         return module

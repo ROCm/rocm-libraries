@@ -511,6 +511,7 @@ defaultBenchmarkCommonParameters = [
     {"NoReject": [False]},
     {"StoreRemapVectorWidth": [0]},
     {"SourceSwap": [False]},
+    {"UseDualFMAC": [False]},
     {"StorePriorityOpt": [False]},
     {"NumElementsPerBatchStore": [0]},
     {"StoreSyncOpt": [0]},
