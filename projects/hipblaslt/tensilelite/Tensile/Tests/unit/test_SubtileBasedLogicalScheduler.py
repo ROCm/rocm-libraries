@@ -944,7 +944,7 @@ class TestAssignVgprTiles:
         (6, 12, [6, 6]),
         (4, 8,  [4, 4, 4]),
         (3, 6,  [3, 3, 3, 3]),
-        (5, 10, [5, 5, 2]),
+        (5, 10, [5, 2, 5]),
     ])
     def test_bf16_partition_256x384(self, partSizeN, expected_peak_B, expected_partN):
         """BF16 256x384 (tilesN=12) with partitions along N."""
@@ -959,8 +959,8 @@ class TestAssignVgprTiles:
         self._assert_no_conflict_and_unrolling(sched)
 
     @pytest.mark.parametrize("partSizeN,expected_peak_B,expected_partN", [
-        (4, 8,  [4, 4, 3]),
-        (3, 6,  [3, 3, 3, 2]),
+        (4, 8,  [4, 3, 4]),
+        (3, 6,  [3, 2, 3, 3]),
         (6, 12, [6, 5]),
     ])
     def test_bf16_partition_256x352(self, partSizeN, expected_peak_B, expected_partN):
@@ -976,9 +976,9 @@ class TestAssignVgprTiles:
         self._assert_no_conflict_and_unrolling(sched)
 
     @pytest.mark.parametrize("partSizeN,expected_peak_B,expected_partN", [
-        (4, 8,  [4, 4, 4, 4, 4, 3]),
-        (6, 12, [6, 6, 6, 5]),
-        (8, 16, [8, 8, 7]),
+        (4, 8,  [4, 4, 3, 4, 4, 4]),
+        (6, 12, [6, 5, 6, 6]),
+        (8, 16, [8, 7, 8]),
     ])
     def test_bf16_partition_256x368(self, partSizeN, expected_peak_B, expected_partN):
         """BF16 256x368 miWaveGroup=[4,1] (tilesM=4, tilesN=23) with partitions along N."""
@@ -1495,15 +1495,15 @@ class TestRemoveCrossDeps:
 
         # LR A @s1: wait_gr_sync with counts
         lr_a1 = _get_lr(s1, 'A')
-        assert _preop_kinds(lr_a1) == [('wait_gr', True, {'A': 8, 'B': 9, 'SA': 0, 'SB': 0})]
+        assert _preop_kinds(lr_a1) == [('wait_gr', True, {'A': 8, 'B': 9, 'SA': 1, 'SB': 1})]
 
         # LR B @s1: wait_gr with has_sync
         lr_b1 = _get_lr(s1, 'B')
-        assert _preop_kinds(lr_b1) == [('wait_gr', True, {'A': 8, 'B': 1, 'SA': 0, 'SB': 0})]
+        assert _preop_kinds(lr_b1) == [('wait_gr', True, {'A': 8, 'B': 1, 'SA': 1, 'SB': 1})]
 
         # LR SA @s1
         lr_sa1 = _get_lr(s1, 'SA')
-        assert _preop_kinds(lr_sa1) == [('wait_gr', True, {'A': 8, 'B': 1, 'SA': 0, 'SB': 0})]
+        assert _preop_kinds(lr_sa1) == [('wait_gr', True, {'A': 8, 'B': 1, 'SA': 0, 'SB': 1})]
 
         # LR SB @s1
         lr_sb1 = _get_lr(s1, 'SB')
@@ -1530,14 +1530,14 @@ class TestRemoveCrossDeps:
 
         # LR A @P3:s3: wait_gr_sync — forward span from re-anchored GR dep
         lr_a_p3_s3 = _get_lr(parts[3][3], 'A')
-        assert lr_a_p3_s3.preOps[0].wait_gr_counts.A == 4
+        assert lr_a_p3_s3.preOps[0].wait_gr_counts.A == 20
 
         # LR SA @P3:s2: wait_gr_sync with SA=1
         lr_sa_p3_s2 = _get_lr(parts[3][2], 'SA')
         assert lr_sa_p3_s2.preOps[0].wait_gr_counts.SA == 1
 
     def test_320x256_5part_reanchor_pi1(self):
-        """Asymmetric 5-partition MT: LR @ pi=1 k=1 uses same-partition sk=0 walk."""
+        """Single-DU 5-partition: wait_gr counts match develop legacy inflight walk."""
         kernel = create_kernel(320, 256, fp4=True, depthU=256, miWaveGroup=[2, 2])
         tiA = makeTileInfo('A', kernel)
         tiB = makeTileInfo('B', kernel)
@@ -1564,14 +1564,14 @@ class TestRemoveCrossDeps:
         c = wait.wait_gr_counts
         assert c.A + c.B + c.SA + c.SB <= 10, (
             f"pi=1 k=1 wait_gr inflated: A={c.A} B={c.B} SA={c.SA} SB={c.SB}")
-        assert c.A == 0 and c.B == 2, (
+        assert c.A == 6 and c.B == 4, (
             f"expected same-partition sk=0 anchor: A={c.A} B={c.B}")
         sched.remove_unnecessary_wait_gr_sync()
         sched.emit()
-        assert len([e for e in sched._emitted[1][1] if e.opType == 'wait_gr']) == 0
+        assert len([e for e in sched._emitted[1][1] if e.opType == 'wait_gr']) == 1
 
     def test_320x256_5part_mt_off_same_partition_sk1(self):
-        """LR @ pi=2 k=1 with mt_off=-1 dep on same-partition k=0 must not ring-wrap."""
+        """Single-DU: same-partition sk=1 dep uses develop ring walk (not multi-DU re-anchor)."""
         kernel = create_kernel(320, 256, fp4=True, depthU=256, miWaveGroup=[2, 2])
         tiA = makeTileInfo('A', kernel)
         tiB = makeTileInfo('B', kernel)
@@ -1597,14 +1597,14 @@ class TestRemoveCrossDeps:
         c = wait.wait_gr_counts
         assert c.A + c.B + c.SA + c.SB <= 12, (
             f"pi=2 k=1 wait_gr inflated: A={c.A} B={c.B} SA={c.SA} SB={c.SB}")
-        assert c.A == 0 and c.B == 2, (
+        assert c.A == 2 and c.B == 8, (
             f"expected same-partition sk=0 walk (not ring wrap): A={c.A} B={c.B}")
         sched.remove_unnecessary_wait_gr_sync()
         sched.emit()
-        assert len([e for e in sched._emitted[2][1] if e.opType == 'wait_gr']) == 0
+        assert len([e for e in sched._emitted[2][1] if e.opType == 'wait_gr']) == 1
 
     def test_320x256_5part_mt_off_cross_partition_sk1(self):
-        """LR @ pi=3 k=1 with mt_off=-1 dep at pi=2 k=0 must not ring-wrap."""
+        """Single-DU: cross-partition sk=1 has no wait_gr (develop has no re-anchor path)."""
         kernel = create_kernel(320, 256, fp4=True, depthU=256, miWaveGroup=[2, 2])
         tiA = makeTileInfo('A', kernel)
         tiB = makeTileInfo('B', kernel)
@@ -1626,18 +1626,15 @@ class TestRemoveCrossDeps:
         sched = LogicalScheduler(cfg)
         sched.remove_unnecessary_wait_lr_sync()
         lr_a1 = _get_lr(sched._partitions[3][1], 'A')
-        wait = next(op for op in lr_a1.preOps if op.kind == 'wait_gr')
-        c = wait.wait_gr_counts
-        assert c.A + c.B + c.SA + c.SB <= 12, (
-            f"pi=3 k=1 wait_gr inflated: A={c.A} B={c.B} SA={c.SA} SB={c.SB}")
-        assert c.A == 2 and c.B == 0, (
-            f"expected forward-span inflight (not ring wrap): A={c.A} B={c.B}")
+        assert not any(op.kind == 'wait_gr' for op in lr_a1.preOps), (
+            f"pi=3 k=1 should not need wait_gr (no ring-wrap inflation): "
+            f"preOps={_preop_kinds(lr_a1)}")
         sched.remove_unnecessary_wait_gr_sync()
         sched.emit()
         assert len([e for e in sched._emitted[3][1] if e.opType == 'wait_gr']) == 0
 
     def test_320x256_5part_same_partition_s0_anchor_p4_sk1(self):
-        """LR A @ pi=4 k=1 must re-anchor on pi=4 k=0 GR, not pi=0 k=0."""
+        """Single-DU: pi=4 k=1 wait_gr A=8 matches develop emit output."""
         kernel = create_kernel(320, 256, fp4=True, depthU=256, miWaveGroup=[2, 2])
         tiA = makeTileInfo('A', kernel)
         tiB = makeTileInfo('B', kernel)
@@ -1662,7 +1659,7 @@ class TestRemoveCrossDeps:
         c = em.source.wait_gr_counts
         assert c.A + c.B + c.SA + c.SB <= 8, (
             f"pi=4 k=1 wait_gr inflated: A={c.A} B={c.B} SA={c.SA} SB={c.SB}")
-        assert c.A == 4, (
+        assert c.A == 8, (
             f"expected same-partition s0 anchor for LR A: A={c.A} B={c.B}")
 
     def test_256x256_2part_multi_gr_sk1_wrap_drain(self):
@@ -1871,7 +1868,7 @@ class TestComputeInflightLoads:
         lr_b1 = _get_lr(s1, 'B')
         assert lr_b1.preOps[0].wait_gr_counts.A == 8
         assert lr_b1.preOps[0].wait_gr_counts.B == 1
-        assert lr_b1.preOps[0].wait_gr_counts.SA == 0
+        assert lr_b1.preOps[0].wait_gr_counts.SA == 1
 
         # LR SA @s1: counts
         lr_sa1 = _get_lr(s1, 'SA')
@@ -1882,8 +1879,8 @@ class TestComputeInflightLoads:
         lr_a1 = _get_lr(s1, 'A')
         assert lr_a1.preOps[0].wait_gr_counts.A == 8
         assert lr_a1.preOps[0].wait_gr_counts.B == 9
-        assert lr_a1.preOps[0].wait_gr_counts.SA == 0
-        assert lr_a1.preOps[0].wait_gr_counts.SB == 0
+        assert lr_a1.preOps[0].wait_gr_counts.SA == 1
+        assert lr_a1.preOps[0].wait_gr_counts.SB == 1
 
     def test_fp8_DU128_asymmetric_A_lt_B(self):
         """FP8 DU=128, MT=128x192, waveGroup=(2,2), PGR=2.
@@ -1973,6 +1970,9 @@ class TestComputeInflightLoads:
                             found_force_drain = True
                             continue
                         c = wait.wait_gr_counts
+                        # Multi-DU PGR=1 wrap LRs use empty counts (vmcnt drain).
+                        if cfg.pgr == 1 and lr.mtIteration > 0:
+                            continue
                         has_nonzero = c.A > 0 or c.B > 0 or c.SA > 0 or c.SB > 0
                         assert has_nonzero, (
                             f"pi={pi} slot={slot.subIterK} lr={lr.tensor} "
@@ -2438,6 +2438,17 @@ class TestNormalizePartitionSizes:
         assert self.norm(8, 12, 'N') == [8, 4]
         assert self.norm(22, 23, 'N') == [22, 1]
 
+    def test_remainder_placed_in_middle(self):
+        """Single-DU / develop: remainder bracketed in the middle."""
+        # num_full=2, remainder=4, mid=1 → [s, rem, s]
+        assert self.norm(8, 20, 'N') == [8, 4, 8]
+        # num_full=2, remainder=7, mid=1 → [8,7,8]
+        assert self.norm(8, 23, 'N') == [8, 7, 8]
+        # num_full=5, remainder=3, mid=2 → [4,4,3,4,4,4]
+        assert self.norm(4, 23, 'N') == [4, 4, 3, 4, 4, 4]
+        # num_full=3, remainder=2, mid=1 → [4,2,4,4]
+        assert self.norm(4, 14, 'N') == [4, 2, 4, 4]
+
     def test_remainder_placed_last(self):
         # Multi-DU path: short partition must come LAST.
         # num_full=2, remainder=4 → [s, s, rem]
@@ -2448,11 +2459,6 @@ class TestNormalizePartitionSizes:
         assert self.norm(4, 23, 'N', 1, remainder_last=True) == [4, 4, 4, 4, 4, 3]
         # num_full=3, remainder=2 → [4,4,4,2]
         assert self.norm(4, 14, 'N', 1, remainder_last=True) == [4, 4, 4, 2]
-
-    def test_remainder_placed_middle_by_default(self):
-        # Single-DU / develop: remainder bracketed in the middle.
-        assert self.norm(8, 20, 'N') == [8, 4, 8]
-        assert self.norm(8, 23, 'N') == [8, 7, 8]
 
     def test_spec_one(self):
         assert self.norm(1, 4, 'N') == [1, 1, 1, 1]
@@ -2498,7 +2504,7 @@ class TestNormalizePartitionSizes:
     # ── mn-aware behavior ────────────────────────────────────
 
     def test_mn_default_is_one(self):
-        # Default mn=1, single-DU: remainder in the middle.
+        # Default mn=1: behavior identical to develop (remainder in the middle).
         assert self.norm(8, 23, 'N') == [8, 7, 8]
 
     def test_mn_already_aligned_passthrough(self):
