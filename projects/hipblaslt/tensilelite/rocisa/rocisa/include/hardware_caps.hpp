@@ -219,6 +219,16 @@ inline std::map<std::string, int>
                                         "v_wmma_f32_16x16x128_f8f6f4 v[0:7], v[16:31], v[16:31], v[0:7]",
                                         isDebug);
 
+    // InitCIterWmma replaces the v_mov initC with a WMMA using src C = immediate 0
+    rv["HasWMMA_AccImmZero"] = tryAssembler(isaVersion,
+                                            assemblerPath,
+                                            "v_wmma_f32_16x16x32_bf16 v[0:7], v[8:15], v[8:15], 0",
+                                            isDebug)
+                                && tryAssembler(isaVersion,
+                                                assemblerPath,
+                                                "v_wmma_f32_16x16x4_f32 v[0:7], v[8:9], v[8:9], 0",
+                                                isDebug);
+
     rv["HasAdd_PC_i64"] = false;
 
     rv["HasSWMMAC"] = tryAssembler(isaVersion, 
@@ -299,6 +309,9 @@ inline std::map<std::string, int>
     rv["v_mov_b64"] = tryAssembler(isaVersion, assemblerPath, "v_mov_b64 v[0:1], v[2:3]", isDebug);
     rv["s_sub_u64"]
         = tryAssembler(isaVersion, assemblerPath, "s_sub_u64 s[0:1], s[0:1], s[2:3]", isDebug);
+    rv["s_add_u64"]
+        = tryAssembler(isaVersion, assemblerPath, "s_add_u64 s[0:1], s[0:1], s[2:3]", isDebug);
+    rv["v_add_nc_u64"] = tryAssembler(isaVersion, assemblerPath, "v_add_nc_u64 v[0:1], v[2:3], v[4:5]", isDebug);
 
     rv["HasBF16CVT"] = tryAssembler(isaVersion, assemblerPath, "v_cvt_f32_bf16 v0, v1", isDebug);
 
@@ -411,6 +424,31 @@ inline std::map<std::string, int>
                        "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0, offen offset:0, nt",
                        isDebug);
 
+    // gfx1250 replaces the bare 'nt' bit with a 3-bit Temporal Hint
+    // (th:TH_LOAD_*/TH_STORE_*) and adds a per-op Non-Volatile (nv) bit.
+    // (Volatile and Non-Volatile Memory Access).  Probe both with the buffer_*
+    // form because gfx12 supports the same modifier syntax for buffer / global / flat.
+    rv["HasTHModifier"]
+        = tryAssembler(
+              isaVersion,
+              assemblerPath,
+              "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0 offen offset:0 th:TH_LOAD_NT",
+              isDebug)
+          || tryAssembler(
+              isaVersion,
+              assemblerPath,
+              "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null offen offset:0 th:TH_LOAD_NT",
+              isDebug);
+    rv["HasNVModifier"]
+        = tryAssembler(isaVersion,
+                       assemblerPath,
+                       "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0 offen offset:0 nv",
+                       isDebug)
+          || tryAssembler(isaVersion,
+                          assemblerPath,
+                          "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null offen offset:0 nv",
+                          isDebug);
+
     rv["HasNewBarrier"] = tryAssembler(isaVersion, assemblerPath, "s_barrier_wait -1", isDebug);
     rv["HasClusterBarrier"] = tryAssembler(isaVersion, assemblerPath, "s_barrier_wait -3", isDebug);
     rv["HasTDM"] = tryAssembler(isaVersion, assemblerPath, "tensor_load_to_lds s[0:3], s[4:11]", isDebug);
@@ -429,6 +467,7 @@ inline std::map<std::string, int>
 
     rv["SeparateVscnt"]
         = tryAssembler(isaVersion, assemblerPath, "s_waitcnt_vscnt null 0", isDebug);
+    rv["HasGlobalPrefetch"] = tryAssembler(isaVersion, assemblerPath, "global_prefetch_b8 v[0:1], off scope:SCOPE_SE th:TH_LOAD_NT", isDebug);
 
     rv["SeparateLGKMcnt"] = tryAssembler(isaVersion, assemblerPath, "s_wait_dscnt 0", isDebug)
                             && tryAssembler(isaVersion, assemblerPath, "s_wait_kmcnt 0", isDebug);
@@ -550,6 +589,7 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
     rv["PhysicalMaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 512;
     rv["PhysicalMaxSgpr"]   = 800;
     rv["maxLDSConstOffset"] = 65536;
+    rv["GlobalPrefetchSize"] = 256;
 
     if(isaVersion[0] == 10)
         rv["PhysicalMaxVgprCU"] = 1024 * 32;

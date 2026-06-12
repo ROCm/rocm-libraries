@@ -639,6 +639,22 @@ hipsparseStatus_t
                                       hipsparseLtMatmulAlg_t               alg);
 
 /*! \ingroup matmul_algo_module
+ *  \brief Destroy the algorithm selection descriptor.
+ *  \details
+ *  \p hipsparseLtMatmulAlgSelectionDestroy releases the resources used by an instance
+ *  of the algorithm selection. This function is the last call with a specific algorithm selection
+ *  instance.
+ *
+ *  @param[in]
+ *  algSelection  the algorithm selection descriptor
+ *
+ *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p algSelection is invalid.
+ */
+HIPSPARSELT_EXPORT
+hipsparseStatus_t hipsparseLtMatmulAlgSelectionDestroy(const hipsparseLtMatmulAlgSelection_t* algSelection);
+
+/*! \ingroup matmul_algo_module
  *  \brief Specify the algorithm attribute of a algorithm selection descriptor.
  *
  *  \details
