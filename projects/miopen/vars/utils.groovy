@@ -519,35 +519,23 @@ def getDockerImage(Map conf=[:])
     echo "Docker Args: ${dockerArgs}"
 
     def dockerImage
-    try{
-        echo "Pulling down image: ${image}"
+    // Check if the image already exists in the remote registry without pulling it.
+    // docker manifest inspect contacts the registry and exits 0 only when the
+    // exact tag is present; it downloads no image layers.
+    def remoteExists = withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+        sh(script: "docker manifest inspect ${image} > /dev/null 2>&1", returnStatus: true) == 0
+    }
+
+    if (remoteExists) {
+        echo "Image ${image} already exists in registry - skipping pull/build."
         dockerImage = docker.image("${image}")
-        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-            dockerImage.pull()
-        }
-        def embeddedTheRockHash = sh(
-            script: "docker inspect --format '{{ index .Config.Labels \"therock.git.hash\" }}' ${image} 2>/dev/null || true",
-            returnStdout: true
-        ).trim()
-        def embeddedCkHash = sh(
-            script: "docker inspect --format '{{ index .Config.Labels \"ck.git.hash\" }}' ${image} 2>/dev/null || true",
-            returnStdout: true
-        ).trim()
-        echo "CI image TheRock hash: ${embeddedTheRockHash ?: 'not set'} | CK hash: ${embeddedCkHash ?: 'not set'}"
-    }
-    catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
-        echo "The job was cancelled or aborted"
-        throw e
-    }
-    catch(Exception ex)
-    {
+    } else {
         echo "Building image..."
         def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
         def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=max,registry.insecure=true " +
                               "--cache-from type=registry,ref=${cacheRef},registry.insecure=true "
 
         try {
-
             withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
                 sh """
                     docker buildx rm ci-builder || true
@@ -584,19 +572,13 @@ def getDockerImage(Map conf=[:])
         image = getDockerImageName(dockerArgs)
         image = image + "_perfTest"
 
-        try{
-            echo "Pulling down perf test image: ${image}"
+        def remotePerfExists = withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            sh(script: "docker manifest inspect ${image} > /dev/null 2>&1", returnStatus: true) == 0
+        }
+        if (remotePerfExists) {
+            echo "Perf test image ${image} already exists in registry - skipping pull/build."
             dockerImage = docker.image("${image}")
-            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-                dockerImage.pull()
-            }
-        }
-        catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
-            echo "The job was cancelled or aborted"
-            throw e
-        }
-        catch(Exception ex)
-        {
+        } else {
             dockerImage = docker.build("${image}", "${dockerArgs} -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile ")
             withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
                 dockerImage.push()
