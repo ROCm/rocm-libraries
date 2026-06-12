@@ -28,7 +28,7 @@
 
 #include "../utility.h"
 
-#if CUDART_VERSION < 13000
+#if CUDART_VERSION < 14000
 hipsparseStatus_t hipsparseSnnz_compress(hipsparseHandle_t         handle,
                                          int                       m,
                                          const hipsparseMatDescr_t descrA,

@@ -903,7 +903,7 @@ namespace hipsparse
                                     int*                      nnzPerRowColumn,
                                     int*                      nnzTotalDevHostPtr);
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 14000)
     template <typename T>
     hipsparseStatus_t hipsparseXnnz_compress(hipsparseHandle_t         handle,
                                              int                       m,

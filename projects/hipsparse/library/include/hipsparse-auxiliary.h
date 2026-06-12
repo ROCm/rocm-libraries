@@ -356,7 +356,7 @@ HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDestroyBsrilu02Info(bsrilu02Info_t info);
 #endif
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 14000)
 /* Info structures */
 /*! \ingroup aux_module
  *  \brief Create a bsric02 info structure.
@@ -366,19 +366,19 @@ hipsparseStatus_t hipsparseDestroyBsrilu02Info(bsrilu02Info_t info);
  *  that is gathered during the analysis routines. It should be destroyed
  *  at the end using hipsparseDestroyBsric02Info().
  */
-DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
+DEPRECATED_CUDA_12000("The routine will be removed in a future CUDA release")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateBsric02Info(bsric02Info_t* info);
 #endif
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 14000)
 /*! \ingroup aux_module
  *  \brief Destroy a bsric02 info structure.
  *
  *  \details
  *  \p hipsparseDestroyBsric02Info destroys a bsric02 info structure.
  */
-DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
+DEPRECATED_CUDA_12000("The routine will be removed in a future CUDA release")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDestroyBsric02Info(bsric02Info_t info);
 #endif
@@ -458,7 +458,7 @@ HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDestroyCsrilu02Info(csrilu02Info_t info);
 #endif
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 14000)
 /* Info structures */
 /*! \ingroup aux_module
  *  \brief Create a csric02 info structure.
@@ -468,19 +468,19 @@ hipsparseStatus_t hipsparseDestroyCsrilu02Info(csrilu02Info_t info);
  *  that is gathered during the analysis routines. It should be destroyed
  *  at the end using hipsparseDestroyCsric02Info().
  */
-DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
+DEPRECATED_CUDA_12000("The routine will be removed in a future CUDA release")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateCsric02Info(csric02Info_t* info);
 #endif
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 14000)
 /*! \ingroup aux_module
  *  \brief Destroy a csric02 info structure.
  *
  *  \details
  *  \p hipsparseDestroyCsric02Info destroys a csric02 info structure.
  */
-DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
+DEPRECATED_CUDA_12000("The routine will be removed in a future CUDA release")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDestroyCsric02Info(csric02Info_t info);
 #endif
@@ -558,7 +558,7 @@ HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDestroyCsrgemm2Info(csrgemm2Info_t info);
 #endif
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 14000)
 /* Info structures */
 /*! \ingroup aux_module
  *  \brief Create a prune info structure.
@@ -568,19 +568,19 @@ hipsparseStatus_t hipsparseDestroyCsrgemm2Info(csrgemm2Info_t info);
  *  that is gathered during the analysis routines. It should be destroyed
  *  at the end using hipsparseDestroyPruneInfo().
  */
-DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
+DEPRECATED_CUDA_12000("The routine will be removed in a future CUDA release")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreatePruneInfo(pruneInfo_t* info);
 #endif
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 14000)
 /*! \ingroup aux_module
  *  \brief Destroy a prune info structure
  *
  *  \details
  *  \p hipsparseDestroyPruneInfo destroys a prune info structure.
  */
-DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
+DEPRECATED_CUDA_12000("The routine will be removed in a future CUDA release")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDestroyPruneInfo(pruneInfo_t info);
 #endif
