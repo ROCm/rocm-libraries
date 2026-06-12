@@ -28,9 +28,8 @@
 #endif // no system header
 #include <thrust/detail/type_deduction.h>
 
+#include _THRUST_STD_INCLUDE(limits)
 #include _THRUST_STD_INCLUDE(type_traits)
-
-#include <limits>
 
 THRUST_NAMESPACE_BEGIN
 namespace detail

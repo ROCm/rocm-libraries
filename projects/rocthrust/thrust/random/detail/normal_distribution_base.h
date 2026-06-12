@@ -36,8 +36,8 @@
 #include <thrust/pair.h>
 #include <thrust/random/uniform_real_distribution.h>
 
-#include <cmath>
-#include <limits>
+#include _THRUST_STD_INCLUDE(cmath)
+#include _THRUST_STD_INCLUDE(limits)
 
 #if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/random/detail/erfcinv.h>
@@ -119,10 +119,10 @@ protected:
   {
     // implementation from Boost
     // allow for Koenig lookup
-    using std::cos;
-    using std::log;
-    using std::sin;
-    using std::sqrt;
+    using _THRUST_STD::cos;
+    using _THRUST_STD::log;
+    using _THRUST_STD::sin;
+    using _THRUST_STD::sqrt;
 
     if (!m_valid)
     {
