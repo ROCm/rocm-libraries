@@ -14,7 +14,6 @@ from .benchmark_config import (
     SuiteConfig,
     TimingBackendName,
     ValidationConfig,
-    normalize_execution_backend,
 )
 
 __all__ = [
@@ -28,5 +27,4 @@ __all__ = [
     "SuiteConfig",
     "TimingBackendName",
     "ValidationConfig",
-    "normalize_execution_backend",
 ]

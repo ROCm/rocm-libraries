@@ -14,6 +14,7 @@ from ..config.benchmark_config import (
     MetricsConfig,
     ReferenceProviderName,
     SuiteConfig,
+    ValidationConfig,
 )
 from ..graph.loader import GraphLoader
 from ..reporting.reporter import Reporter
@@ -114,18 +115,17 @@ def _run_suite_graphs_after_startup(
 
 
 def _reference_provider_available(config: SuiteConfig, reporter: Reporter) -> bool:
-    if config.reference_provider == ReferenceProviderName.NONE.value:
+    if not config.validation.enabled:
         return True
+    provider_name = config.validation.provider.value
     try:
-        ref = ReferenceProviderRegistry.get_provider(config.reference_provider)
+        ref = ReferenceProviderRegistry.get_provider(provider_name)
     except ValueError:
-        reporter.print_error(
-            f"Reference provider '{config.reference_provider}' is not registered."
-        )
+        reporter.print_error(f"Reference provider '{provider_name}' is not registered.")
         return False
     if not ref.is_available():
         reporter.print_error(
-            f"Reference provider '{config.reference_provider}' is not available "
+            f"Reference provider '{provider_name}' is not available "
             "(check that its dependencies are installed)."
         )
         return False
@@ -173,6 +173,12 @@ def run_suite_cli(
 ) -> int:
     """Validate suite CLI args, build config, and delegate to run_suite_benchmark."""
     try:
+        backend = ExecutionBackendName(args.backend)
+        validation = ValidationConfig(
+            provider=args.validate,
+            rtol=args.rtol,
+            atol=args.atol,
+        )
         metrics_config = MetricsConfig(
             tier=args.metrics_tier,
             emit_trace=args.emit_trace,
@@ -183,7 +189,7 @@ def run_suite_cli(
             profiling_output_dir=args.profiling_output_dir,
             profiling_timeout_s=args.profiling_timeout,
         )
-        if args.backend == ExecutionBackendName.PYTORCH.value:
+        if backend is ExecutionBackendName.PYTORCH:
             if args.engine:
                 reporter.print_error("--engine is not supported with --backend pytorch")
                 return 1
@@ -192,7 +198,7 @@ def run_suite_cli(
                     "--plugin-path is not supported with --backend pytorch"
                 )
                 return 1
-            if args.validate == ReferenceProviderName.PYTORCH.value:
+            if validation.provider is ReferenceProviderName.PYTORCH:
                 reporter.print_error(
                     "--validate pytorch is not supported with --backend pytorch "
                     "(the backend would validate against itself)"
@@ -218,20 +224,18 @@ def run_suite_cli(
                 "--roofline); the directory will not be written to"
             )
         plugin_paths = None
-        if args.backend != ExecutionBackendName.PYTORCH.value:
+        if backend is not ExecutionBackendName.PYTORCH:
             plugin_paths = args.plugin_path or _plugin_paths_from_environment()
         config = SuiteConfig(
             warmup_iters=args.warmup,
             benchmark_iters=args.iters,
             seed=args.seed,
             engine_filter=args.engine,
-            rtol=args.rtol,
-            atol=args.atol,
-            reference_provider=args.validate,
             verbose=args.verbose,
             metrics=metrics_config,
+            validation=validation,
             plugin_paths=plugin_paths,
-            backend=args.backend,
+            backend=backend,
         )
     except ValueError as e:
         reporter.print_error(f"Suite configuration error: {e}")

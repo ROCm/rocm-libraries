@@ -11,7 +11,11 @@ import numpy as np
 import pytest
 
 from dnn_benchmarking.config import BenchmarkConfig
-from dnn_benchmarking.config.benchmark_config import MetricsConfig, SuiteConfig
+from dnn_benchmarking.config.benchmark_config import (
+    MetricsConfig,
+    SuiteConfig,
+    ValidationConfig,
+)
 from dnn_benchmarking.execution import BufferManager, Executor
 from dnn_benchmarking.execution.suite_runner import run_graph_all_providers
 from dnn_benchmarking.graph import GraphLoader
@@ -496,7 +500,7 @@ class TestPyTorchReferenceValidation:
             warmup_iters=1,
             benchmark_iters=1,
             seed=42,
-            reference_provider="pytorch",
+            validation=ValidationConfig(provider="pytorch"),
             metrics=MetricsConfig(tier="off"),
         )
 
@@ -539,7 +543,7 @@ class TestPyTorchReferenceValidation:
             warmup_iters=1,
             benchmark_iters=1,
             seed=42,
-            reference_provider="pytorch",
+            validation=ValidationConfig(provider="pytorch"),
             metrics=MetricsConfig(tier="off"),
         )
 
@@ -580,7 +584,7 @@ class TestPyTorchReferenceValidation:
             warmup_iters=1,
             benchmark_iters=2,
             seed=42,
-            reference_provider="pytorch",
+            validation=ValidationConfig(provider="pytorch"),
             metrics=MetricsConfig(tier="off"),
         )
 

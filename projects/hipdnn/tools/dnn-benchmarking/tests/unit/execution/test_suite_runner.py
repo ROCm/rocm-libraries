@@ -18,7 +18,12 @@ from dnn_benchmarking.execution.suite_runner import (
     _run_timed_pytorch_row,
     set_plugin_path,
 )
-from dnn_benchmarking.config.benchmark_config import MetricsConfig, SuiteConfig
+from dnn_benchmarking.config.benchmark_config import (
+    MetricsConfig,
+    ReferenceProviderName,
+    SuiteConfig,
+    ValidationConfig,
+)
 from dnn_benchmarking.common.exceptions import ExecutionError, UnsupportedGraphError
 from dnn_benchmarking.reporting.statistics import BenchmarkStats
 from dnn_benchmarking.reporting.suite_results import (
@@ -437,10 +442,10 @@ class TestSuiteConfigValidation:
         assert config.warmup_iters == 5
         assert config.benchmark_iters == 10
         assert config.engine_filter is None
-        assert config.rtol is None
-        assert config.atol is None
-        assert config.tolerance_override is None
-        assert config.reference_provider == "none"
+        assert config.validation.rtol is None
+        assert config.validation.atol is None
+        assert config.validation.tolerance_override is None
+        assert config.validation.provider is ReferenceProviderName.NONE
 
     def test_negative_warmup_raises(self):
         with pytest.raises(ValueError, match="warmup_iters"):
@@ -473,9 +478,9 @@ class TestSuiteConfigValidation:
 
     def test_default_reference_provider_accepted(self):
         config = SuiteConfig()
-        assert config.reference_provider == "none"
+        assert config.validation.provider is ReferenceProviderName.NONE
         for provider in ("none", "pytorch"):
-            SuiteConfig(reference_provider=provider)
+            SuiteConfig(validation=ValidationConfig(provider=provider))
 
 
 class TestEngineFilter:
@@ -757,7 +762,7 @@ class TestCorrectnessChecking:
             graph_path=Path("test.json"),
             graph_json=_make_graph_json(),
             tensor_infos=[_make_tensor_info(1)],
-            config=_make_config(reference_provider="pytorch"),
+            config=_make_config(validation=ValidationConfig(provider="pytorch")),
             handle=MagicMock(),
         )
 
@@ -848,7 +853,7 @@ class TestCorrectnessChecking:
             graph_path=Path("test.json"),
             graph_json=_make_graph_json(),
             tensor_infos=[_make_tensor_info(1), _make_tensor_info(2, is_output=True)],
-            config=_make_config(reference_provider="pytorch"),
+            config=_make_config(validation=ValidationConfig(provider="pytorch")),
             handle=MagicMock(),
         )
 
@@ -906,7 +911,7 @@ class TestCorrectnessChecking:
             graph_path=Path("test.json"),
             graph_json=_make_graph_json(),
             tensor_infos=[_make_tensor_info(1), _make_tensor_info(2, is_output=True)],
-            config=_make_config(reference_provider="pytorch"),
+            config=_make_config(validation=ValidationConfig(provider="pytorch")),
             handle=MagicMock(),
         )
 
@@ -943,7 +948,7 @@ class TestCorrectnessChecking:
             graph_name="test_graph",
             tensor_infos=[],
             config=_make_config(
-                reference_provider="pytorch",
+                validation=ValidationConfig(provider="pytorch"),
                 metrics=MetricsConfig(tier="off"),
             ),
             input_data={},
@@ -965,7 +970,7 @@ class TestCheckCorrectnessOutputCount:
         bm = MagicMock()
         bm.get_output_data.return_value = None
 
-        config = SuiteConfig(reference_provider="pytorch")
+        config = SuiteConfig(validation=ValidationConfig(provider="pytorch"))
         result = _check_correctness(
             buffer_manager=bm,
             tensor_infos=[],
@@ -996,7 +1001,7 @@ class TestCheckCorrectnessOutputCount:
             },
             ref_outputs={},
             reference_provider_name="pytorch",
-            config=SuiteConfig(reference_provider="pytorch"),
+            config=SuiteConfig(validation=ValidationConfig(provider="pytorch")),
         )
 
         assert result.tolerance_match is False
@@ -1028,7 +1033,7 @@ class TestCheckCorrectnessOutputCount:
             },
             ref_outputs=ref_outputs,
             reference_provider_name="pytorch",
-            config=SuiteConfig(reference_provider="pytorch"),
+            config=SuiteConfig(validation=ValidationConfig(provider="pytorch")),
         )
 
         assert result.tolerance_match is False
@@ -1056,7 +1061,7 @@ class TestCheckCorrectnessOutputCount:
             },
             ref_outputs=ref_outputs,
             reference_provider_name="pytorch",
-            config=SuiteConfig(reference_provider="pytorch"),
+            config=SuiteConfig(validation=ValidationConfig(provider="pytorch")),
         )
 
         assert result.tolerance_match is False
@@ -1086,7 +1091,7 @@ class TestCheckCorrectnessOutputCount:
             },
             ref_outputs=ref_outputs,
             reference_provider_name="pytorch",
-            config=SuiteConfig(reference_provider="pytorch", rtol=0.25),
+            config=SuiteConfig(validation=ValidationConfig(provider="pytorch", rtol=0.25)),
         )
 
         assert result.tolerance_match is True

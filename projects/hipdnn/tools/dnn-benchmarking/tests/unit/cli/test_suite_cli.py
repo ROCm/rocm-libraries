@@ -16,7 +16,7 @@ import pytest
 
 from dnn_benchmarking.cli.parser import create_parser
 from dnn_benchmarking.cli.suite_runner_cli import run_suite_benchmark
-from dnn_benchmarking.config.benchmark_config import ExecutionBackendName, SuiteConfig
+from dnn_benchmarking.config.benchmark_config import SuiteConfig, ValidationConfig
 from dnn_benchmarking.reporting.reporter import Reporter
 from dnn_benchmarking.reporting.suite_results import (
     CorrectnessResult,
@@ -855,25 +855,13 @@ class TestValidationStartupGate:
     """--validate is a hard gate. If the reference provider isn't registered
     or available, the orchestrator returns 1 before iterating any graph."""
 
+    @patch("dnn_benchmarking.cli.suite_runner_cli.ReferenceProviderRegistry")
     @patch("dnn_benchmarking.cli.hipdnn_suite_runner.run_graph_all_providers")
     def test_unregistered_reference_provider_fails_at_startup(
-        self, mock_run: MagicMock
+        self, mock_run: MagicMock, mock_registry: MagicMock
     ) -> None:
-
-        config = SuiteConfig.__new__(SuiteConfig)
-        # Bypass the SuiteConfig validator (which restricts reference_provider
-        # to the known set) so we can simulate an unregistered name.
-        config.warmup_iters = 1
-        config.benchmark_iters = 1
-        config.seed = None
-        config.engine_filter = None
-        config.rtol = 1e-5
-        config.atol = 1e-8
-        config.reference_provider = "definitely_not_registered"
-        config.verbose = False
-        config.metrics = MagicMock()
-        config.metrics.extra_runs_per_engine = 0
-        config.backend = ExecutionBackendName.HIPDNN
+        mock_registry.get_provider.side_effect = ValueError("unknown")
+        config = SuiteConfig(validation=ValidationConfig(provider="pytorch"))
 
         with tempfile.TemporaryDirectory() as tmpdir:
             graph = Path(tmpdir) / "g.json"
@@ -899,7 +887,7 @@ class TestValidationStartupGate:
         provider_mock.is_available.return_value = False
         mock_registry.get_provider.return_value = provider_mock
 
-        config = SuiteConfig(reference_provider="pytorch")
+        config = SuiteConfig(validation=ValidationConfig(provider="pytorch"))
 
         with tempfile.TemporaryDirectory() as tmpdir:
             graph = Path(tmpdir) / "g.json"
@@ -955,7 +943,7 @@ class TestValidationStartupGate:
             ],
         )
 
-        config = SuiteConfig(reference_provider="pytorch")
+        config = SuiteConfig(validation=ValidationConfig(provider="pytorch"))
 
         with tempfile.TemporaryDirectory() as tmpdir:
             graph = Path(tmpdir) / "g.json"

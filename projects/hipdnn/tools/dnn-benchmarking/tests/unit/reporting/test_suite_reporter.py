@@ -6,7 +6,7 @@
 import io
 from unittest.mock import patch
 
-from dnn_benchmarking.config.benchmark_config import SuiteConfig
+from dnn_benchmarking.config.benchmark_config import SuiteConfig, ValidationConfig
 from dnn_benchmarking.reporting.reporter import Reporter
 from dnn_benchmarking.reporting.statistics import BenchmarkStats
 from dnn_benchmarking.reporting.suite_results import (
@@ -253,7 +253,7 @@ class TestVerboseReporter:
             results=[_make_pe_success(correctness=correctness)],
         )
         reporter.print_verbose_graph_result(
-            gr, SuiteConfig(reference_provider="pytorch")
+            gr, SuiteConfig(validation=ValidationConfig(provider="pytorch"))
         )
         out = output.getvalue()
         assert "Reference Validation: PASSED" in out
@@ -276,7 +276,7 @@ class TestVerboseReporter:
             results=[_make_pe_success(correctness=correctness)],
         )
         reporter.print_verbose_graph_result(
-            gr, SuiteConfig(reference_provider="pytorch")
+            gr, SuiteConfig(validation=ValidationConfig(provider="pytorch"))
         )
         out = output.getvalue()
         assert "Reference Validation: FAILED" in out
@@ -299,7 +299,7 @@ class TestVerboseReporter:
             results=[_make_pe_success(correctness=correctness)],
         )
         reporter.print_verbose_graph_result(
-            gr, SuiteConfig(reference_provider="pytorch")
+            gr, SuiteConfig(validation=ValidationConfig(provider="pytorch"))
         )
         out = output.getvalue()
         assert "Reference Validation: SKIPPED" in out
@@ -377,7 +377,7 @@ class TestVerboseReporter:
         gr.results[0].role = "reference"
 
         reporter.print_verbose_graph_result(
-            gr, SuiteConfig(reference_provider="pytorch")
+            gr, SuiteConfig(validation=ValidationConfig(provider="pytorch"))
         )
         out = output.getvalue()
 

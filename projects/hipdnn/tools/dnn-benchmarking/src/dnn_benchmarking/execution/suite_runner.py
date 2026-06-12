@@ -88,7 +88,7 @@ def _default_tolerance_for_output(
 
 def _fallback_tolerance_for_config(config: SuiteConfig) -> tuple[float, float]:
     """Return explicit tolerances, or the default float tolerance for reporting."""
-    return config.tolerance_override or (_DEFAULT_RTOL, _DEFAULT_ATOL)
+    return config.validation.tolerance_override or (_DEFAULT_RTOL, _DEFAULT_ATOL)
 
 
 def _tolerance_for_output(
@@ -96,7 +96,7 @@ def _tolerance_for_output(
     tensor_info: Any,
     output_node_type: Optional[str],
 ) -> tuple[float, float]:
-    override = config.tolerance_override
+    override = config.validation.tolerance_override
     if override is not None:
         return override
     return _default_tolerance_for_output(tensor_info, output_node_type)
@@ -177,36 +177,36 @@ def _get_reference_provider(
     """Attempt to get and validate a reference provider for this graph.
 
     Args:
-        config: Suite configuration with reference_provider name.
+        config: Suite configuration with validation settings.
         graph_json: Parsed graph JSON dictionary.
 
     Returns:
         ReferenceProvider instance if available and supports the graph,
-        None if validation was not requested (``config.reference_provider``
-        is ``"none"``) or if the provider is unavailable/unsupported.
+        None if validation was not requested (``config.validation`` is
+        disabled) or if the provider is unavailable/unsupported.
     """
-    if config.reference_provider == ReferenceProviderName.NONE.value:
+    if not config.validation.enabled:
         return None
 
     try:
-        provider = ReferenceProviderRegistry.get_provider(config.reference_provider)
+        provider = ReferenceProviderRegistry.get_provider(config.validation.provider.value)
     except ValueError:
         print(
-            f"Reference provider '{config.reference_provider}' not registered",
+            f"Reference provider '{config.validation.provider.value}' not registered",
             file=sys.stderr,
         )
         return None
 
     if not provider.is_available():
         print(
-            f"Reference provider '{config.reference_provider}' not available",
+            f"Reference provider '{config.validation.provider.value}' not available",
             file=sys.stderr,
         )
         return None
 
     if not provider.supports_graph(graph_json):
         print(
-            f"Reference provider '{config.reference_provider}' "
+            f"Reference provider '{config.validation.provider.value}' "
             "does not support this graph",
             file=sys.stderr,
         )
@@ -529,7 +529,7 @@ def run_graph_all_providers(
     graph_name = graph_json.get("name", graph_path.stem)
     graph_json_str = json.dumps(graph_json)
 
-    validation_requested = config.reference_provider != ReferenceProviderName.NONE.value
+    validation_requested = config.validation.enabled
 
     if config.engine_filter is not None:
         # Explicit --engine is a selection, not a post-discovery filter. Keep the
@@ -643,7 +643,7 @@ def run_graph_all_providers(
     pe_results: List[ProviderEngineResult] = []
     if (
         ref_provider is not None
-        and config.reference_provider == ReferenceProviderName.PYTORCH.value
+        and config.validation.provider is ReferenceProviderName.PYTORCH
     ):
         if reporter is not None:
             reporter.print_engine_start("pytorch reference")
@@ -1002,12 +1002,12 @@ def run_single_provider_engine(
                     tensor_infos,
                     graph_json,
                     reference_outputs,
-                    config.reference_provider,
+                    config.validation.provider.value,
                     config,
                 )
             elif validation_requested:
                 error_message = reference_error or (
-                    f"Reference provider '{config.reference_provider}' "
+                    f"Reference provider '{config.validation.provider.value}' "
                     f"does not support this graph"
                 )
                 # User asked for validation but no reference output was usable.

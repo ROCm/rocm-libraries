@@ -724,13 +724,13 @@ class Reporter:
         if correctness.tolerance_match is None:
             reason = correctness.error_message or "no reference comparison performed"
             self._print(f"Reference Validation: SKIPPED ({reason})")
-            self._print(f"  Provider: {suite_config.reference_provider}")
+            self._print(f"  Provider: {suite_config.validation.provider.value}")
             self._print("")
             return
 
         status = "PASSED" if correctness.tolerance_match else "FAILED"
         self._print(f"Reference Validation: {status}")
-        self._print(f"  Provider: {suite_config.reference_provider}")
+        self._print(f"  Provider: {suite_config.validation.provider.value}")
         self._print(f"  (rtol={correctness.rtol:.0e}, atol={correctness.atol:.0e})")
         if not correctness.tolerance_match:
             if correctness.max_abs_diff is not None:
