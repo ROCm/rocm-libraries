@@ -20,14 +20,13 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
   and persistent-grid sizing — useful when another kernel (e.g. RCCL)
   is co-running on the device or when a persistent grid should be sized
   for a known CU budget. (This is a hint, not a CU reservation.)
-* `HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT` now accepts the
-  tri-state `hipblasLtStreamKTileSchedulingMode_t` enum (OFF=0 static SK3,
-  ON=1 dynamic SK4, AUTO=2 library default via origami). Invalid values
-  return `HIPBLAS_STATUS_INVALID_VALUE` (previously non-zero was clamped
-  to 1). Matching ext API:
-  `setStreamKTileSchedulingMode()` / `getStreamKTileSchedulingMode()`.
-* `hipblaslt-bench` `--sm_count_target` and `--streamk_tile_scheduling` forward
-  into the matmul descriptor (see `clients/bench/README.md`).
+* `HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT` and matching ext API
+  (`setStreamKTileSchedulingMode()` / `getStreamKTileSchedulingMode()`) accept
+  the tri-state `hipblasLtStreamKTileSchedulingMode_t` enum (OFF=0 static SK3,
+  ON=1 dynamic SK4, AUTO=2 origami default). Invalid values return
+  `HIPBLAS_STATUS_INVALID_VALUE`. `hipblaslt-bench` `--streamk_tile_scheduling`
+  and `--sm_count_target` forward into the matmul descriptor
+  (see `clients/bench/README.md`).
 
 ## hipBLASLt 1.3.0
 
