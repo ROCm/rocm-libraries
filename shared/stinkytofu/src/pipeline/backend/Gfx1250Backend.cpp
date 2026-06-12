@@ -38,6 +38,7 @@
 #include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
+#include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/LoopRegionRemarkPass.hpp"
@@ -86,7 +87,7 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
 /// TODO: EnableWaitCntInsertion is a per-pass toggle for the
 /// bring-up phase. Once the pipeline stabilizes, pass selection should
 /// be controlled by OptLevel.
-bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBuilder& PB) {
+bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
     const auto& moduleOptions = module.getModuleOptions();
     const OptLevel optLevel = static_cast<OptLevel>(
         std::max(0, std::min(moduleOptions.OptLevel, static_cast<int>(OptLevel::O3))));
@@ -100,7 +101,6 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
         // strip delay_alu before scheduling
         pm.addPass(createRemoveDelayAluPass());
     }
-    PB.applyExtensionPoint(PipelineExtensionPoint::BeforeRegionPasses, pm, module);
 
     // -- region: loopWithPrefetch + noLoadLoopBody --
     // Both the DAG scheduler (O3) and waitcnt insertion need the region-scoped CFG, so they
@@ -126,10 +126,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
         }
         configureDebugOutput(innerPM, moduleOptions, "loopWithPrefetch+noLoadLoopBody",
                              debugStreams);
-        PB.applyExtensionPoint(PipelineExtensionPoint::InnerRegionBegin, innerPM, module);
         addGfx1250RegionPasses(innerPM, module, optLevel, moduleOptions.EnableWaitCntInsertion,
                                runScheduler);
-        PB.applyExtensionPoint(PipelineExtensionPoint::InnerRegionEnd, innerPM, module);
         if (moduleOptions.EnableWaitCntInsertion) {
             innerPM.addPass(createStinkyWaitCntInsertionPass());
         }
@@ -137,9 +135,17 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
                                                     std::move(innerPM)));
     }
 
-    PB.applyExtensionPoint(PipelineExtensionPoint::AfterRegionPasses, pm, module);
-
     // -- kernel --
+
+    // Cluster-barrier insertion (kernel scope) — runs at every OptLevel when
+    // the module opts in. Must precede InsertVgprMsbPass so the new
+    // branches/labels are present when MSB configuration is materialized.
+    if (moduleOptions.ClusterBarrier) {
+        pm.addPass(createInsertClusterBarrierPass(/*isKernelScope=*/true,
+                                                  /*pgrValue=*/moduleOptions.PrefetchGlobalRead,
+                                                  /*plrValue=*/moduleOptions.PrefetchLocalRead));
+    }
+
     pm.addPass(createInsertVgprMsbPass());
     pm.addPass(createCFGBuilderPass());
     pm.addPass(createMemTokenConsistencyCheckPass());
