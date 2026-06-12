@@ -218,7 +218,7 @@ For each, the backend assembles CK Tile-style C++:
 Current scope is narrow on purpose:
 
 - GEMM is fp16 in/out + fp32 acc with a three-character `R`/`C` layout string;
-- conv is fp16 NHWC/KRSC/NHWK, 2D spatial;
+- conv is fp16 NHWC/KYXC/NHWK, 2D spatial;
 - unsupported pipeline/scheduler/epilogue choices raise.
 
 Do not build new production features only in this backend.

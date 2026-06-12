@@ -12,8 +12,8 @@ Two convolution strategies:
 
 ```text
 Implicit GEMM:
-  NHWC x KRSC -> NHWK expressed as a GEMM (m, n, k) on the implicit shape
-  (m = N*Ho*Wo, n = K, k = R*S*C)
+  NHWC x KYXC -> NHWK expressed as a GEMM (m, n, k) on the implicit shape
+  (m = N*Ho*Wo, n = K, k = Y*X*C)
 
 Direct grouped:
   Specialized streaming kernels for grouped small-channel cases (16c, 4c)
@@ -27,7 +27,7 @@ Source: `instances/conv_implicit_gemm.py`.
 
 ```text
 A: NHWC fp16,   [N, Hi, Wi, C]
-B: KRSC fp16,   [K, R, S, C]
+B: KYXC fp16,  [K, Y, X, C]
 D: NHWK fp16,   [N, Ho, Wo, K]
 ```
 
@@ -36,7 +36,7 @@ Implicit GEMM mapping:
 ```text
 M_gemm = N * Ho * Wo
 N_gemm = K
-K_gemm = R * S * C
+K_gemm = Y * X * C
 ```
 
 Kernel ABI (`conv_args_signature()`):
@@ -55,11 +55,11 @@ The `*_bytes` args drive the AMDGPU buffer descriptor `num_records` field (DW2).
 ### Output Shape
 
 ```text
-Ho = (Hi + 2*pH - dH*(R - 1) - 1) // sH + 1
-Wo = (Wi + 2*pW - dW*(S - 1) - 1) // sW + 1
+Ho = (Hi + 2*pH - dH*(Y - 1) - 1) // sH + 1
+Wo = (Wi + 2*pW - dW*(X - 1) - 1) // sW + 1
 ```
 
-`ConvProblem.Ho`, `Wo`, `M`, `N_gemm`, `K_gemm`, `flops` are derived properties; `.short()` returns `"N8H56W56C64_K64R3S3"`.
+`ConvProblem.Ho`, `Wo`, `M`, `N_gemm`, `K_gemm`, `flops` are derived properties; `.short()` returns `"N8H56W56C64_K64Y3X3"`.
 
 ### Spec Defaults
 
@@ -67,7 +67,7 @@ Wo = (Wi + 2*pW - dW*(S - 1) - 1) // sW + 1
 @dataclass(frozen=True)
 class ConvProblem:
     N: int; Hi: int; Wi: int; C: int
-    K: int; R: int; S: int
+    K: int; Y: int; X: int
     sH: int = 1; sW: int = 1
     pH: int = 0; pW: int = 0
     dH: int = 1; dW: int = 1
@@ -123,18 +123,18 @@ and was validated end-to-end at ~230 TFLOPS (per-launch, MI355X / gfx950) during
 
 The cleanest part of the implicit-GEMM authoring surface; the transform DAG maps the implicit-GEMM (m, k) row/column to the NHWC linear offset and emits the padding validity predicate.
 
-`make_a_descriptor(N, Hi, Wi, C, K, R, S, Ho, Wo, sH, sW, pH, pW, dH, dW)`:
+`make_a_descriptor(N, Hi, Wi, C, K, Y, X, Ho, Wo, sH, sW, pH, pW, dH, dW)`:
 
 ```python
 TensorDescriptor.naive("A_nhwc", lengths=[N, Hi, Wi, C],
                        coord_names=["n", "hi", "wi", "c"])
   .transform(
       unmerge("m",  into=["n", "ho", "wo"], dims=[N, Ho, Wo]),
-      embed (["ho", "r"], "hi", strides=[sH, dH], offset=-pH, lo=0, hi=Hi),
-      embed (["wo", "s"], "wi", strides=[sW, dW], offset=-pW, lo=0, hi=Wi),
-      unmerge("k",  into=["r", "s", "c"],   dims=[R, S, C]),
-      pad   ("r", lo=0, hi=R),
-      pad   ("s", lo=0, hi=S),
+      embed (["ho", "y"], "hi", strides=[sH, dH], offset=-pH, lo=0, hi=Hi),
+      embed (["wo", "x"], "wi", strides=[sW, dW], offset=-pW, lo=0, hi=Wi),
+      unmerge("k",  into=["y", "x", "c"],   dims=[Y, X, C]),
+      pad   ("y", lo=0, hi=Y),
+      pad   ("x", lo=0, hi=X),
   )
 ```
 
@@ -147,14 +147,14 @@ safe = b.select(valid, off_bytes, b.const_i32((1 << 31) - 1))
 v = b.buffer_load_vN_f16(a_rsrc, safe, c0, dwords=2)
 ```
 
-`pad("r")` and `pad("s")` matter when `K_gemm` does not cleanly divide the K-tile: without them, the unmerge would compute valid-looking offsets outside the intended filter slice.
+`pad("y")` and `pad("x")` matter when `K_gemm` does not cleanly divide the K-tile: without them, the unmerge would compute valid-looking offsets outside the intended filter slice.
 
 ### B and D Descriptors
 
-`make_b_descriptor` maps `(k_out, k_gemm) -> KRSC`:
+`make_b_descriptor` maps `(k_out, k_gemm) -> KYXC`:
 
 ```text
-unmerge(k_gemm -> r, s, c), pad(r), pad(s)
+unmerge(k_gemm -> y, x, c), pad(y), pad(x)
 ```
 
 `make_d_descriptor` maps `(m, k_out) -> NHWK`:
@@ -319,7 +319,7 @@ Contract:
 
 ```text
 cpg = 16, kpg = 16
-A NHWC, B KRSC (grouped), D NHWK
+A NHWC, B KYXC (grouped), D NHWK
 ```
 
 Grid:
@@ -460,7 +460,7 @@ Grid: `ceil_div(total_output_elements, block_size)`.
 
 ## Convolution Failure Modes
 
-- Missing `pad("r")` / `pad("s")` in implicit K tails: numerically valid-looking but cross-slice offsets.
+- Missing `pad("y")` / `pad("x")` in implicit K tails: numerically valid-looking but cross-slice offsets.
 - Descriptor returns element offsets but buffer op expects byte offsets: shift left by 1 for fp16, by 2 for bf16, etc.
 - False lanes are masked **after** a faulting pointer load — use the buffer-rsrc sentinel pattern instead.
 - Async loader writes lane-contiguous LDS but consumer assumes padded / swizzled physical layout.

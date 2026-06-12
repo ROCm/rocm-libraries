@@ -415,9 +415,9 @@ def lower_implicit_gemm_conv_to_cktile(
     the runtime path -- compilable HIP C++ that links against the CK Tile
     headers and reaches the same kernel composition.
 
-    v1 supports the NHWC × KRSC -> NHWK implicit-GEMM family (single
+    v1 supports the NHWC × KYXC -> NHWK implicit-GEMM family (single
     spatial group, fp16 in/out, fp32 acc). The conv-specific spatial
-    parameters (R, S, stride, pad, dilation) live in :class:`ConvProblem`
+    parameters (Y, X, stride, pad, dilation) live in :class:`ConvProblem`
     and are passed to the launcher at runtime via
     ``ck_tile::GroupedConvFwdHostArgs``.
     """

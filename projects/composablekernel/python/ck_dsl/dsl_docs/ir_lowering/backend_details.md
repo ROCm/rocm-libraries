@@ -158,7 +158,7 @@ Use HIP output as a debugging lens, not as a guarantee that production LLVM lowe
 `core/lower_cktile.py` is spec-to-C++, not IR-to-C++. Coverage is narrow:
 
 - `UniversalGemmSpec`: fp16 in/out, fp32 acc, `RCR` layout;
-- `ImplicitGemmConvSpec`: fp16 NHWC/KRSC/NHWK, 2D spatial.
+- `ImplicitGemmConvSpec`: fp16 NHWC/KYXC/NHWK, 2D spatial.
 
 Unsupported pipeline / scheduler / epilogue / spec types raise `NotImplementedError`. Keep this backend as parity/reference glue.
 

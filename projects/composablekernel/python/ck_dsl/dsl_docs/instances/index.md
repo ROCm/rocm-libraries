@@ -27,12 +27,12 @@ Pipelines: `mem`, `compv3`, `compv4`. Epilogues: `default`, `cshuffle`. Layout: 
 
 ABI: `(A, B, D, A_bytes, B_bytes, D_bytes)` for implicit-GEMM / direct grouped conv. Img2col writes `Y`. Pooling reads `X` and writes `Y`.
 
-Layouts: NHWC input, KRSC weight, NHWK output for conv. Grouping via `cpg`/`kpg`.
+Layouts: NHWC input, KYXC weight, NHWK output for conv. Grouping via `cpg`/`kpg`.
 
 Bake-off results (per `runbook_compliance.md`):
 
 ```text
-Implicit-GEMM conv (N=8 H=W=56 C=K=64 R=S=3):
+Implicit-GEMM conv (N=8 H=W=56 C=K=64 Y=X=3):
  111 TFLOPS -> 280 TFLOPS by applying 5 runbook levers in series.
 
 Direct grouped 16c (N=32 H=W=200 R=S=3 pad=1):

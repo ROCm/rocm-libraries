@@ -368,7 +368,7 @@ non-trivial kernel.
 
 **Shape:** the bake-off shape from
 `projects/composablekernel/python/ck_dsl/examples/bake_off_implicit_gemm.py`
-— `N=8, H=W=56, C=64, K=64, R=S=3, stride=1, pad=1, dilation=1`, FP16,
+— `N=8, H=W=56, C=64, K=64, Y=X=3, stride=1, pad=1, dilation=1`, FP16,
 NHWC. This is the smallest shape we know already compiles cleanly; the
 example documents `248 TFLOPS per-launch / 280 TFLOPS graph 5×200` on
 MI300X (`bake_off_implicit_gemm.py:70–71`).
@@ -393,7 +393,7 @@ more) = 36 total. The C++ mirror struct `ConvImplicitGemmSpec` carries
 all 36 so the on-wire payload to Python stays exhaustive, but only ~15
 are touched by the adapter from the graph:
 
-- From `ConvProblem`: `N, Hi, Wi, C, K, R, S, sH, sW, pH, pW, dH, dW`
+- From `ConvProblem`: `N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW`
 - From the top-level spec: `dtype` (derived from graph tensor dtype),
   `name` (derived from a hash for cache-key stability)
 
@@ -423,8 +423,8 @@ expressed by giving NCHW-ordered logical `dims` with channel-last
 
 The integration test therefore wraps the DSL's NHWC input/output device
 buffers in `Tensor<T>` with logical dims `{N, C, H, W}` and physical
-NHWC strides, wraps the KRSC weight buffer with logical dims
-`{K, C, R, S}` and KRSC strides, and hands them directly to
+NHWC strides, wraps the KYXC weight buffer with logical dims
+`{K, C, Y, X}` and KYXC strides, and hands them directly to
 `fprop(...)`. No data movement, no transpose.
 
 ### Performance measurement
@@ -574,7 +574,7 @@ simplicity.
   test that constructs a `Tensor<T>` over a hand-filled NHWC buffer
   with `dims = {N, C, H, W}` and NHWC physical strides, then asserts
   `getHostValue({n, c, h, w})` returns the expected value for a few
-  hand-picked positions. Repeat for KRSC weights. This is cheap
+  hand-picked positions. Repeat for KYXC weights. This is cheap
   (~30 lines) but locks down the stride math before the integration
   test depends on it.
 - **P-7.** Decide perf measurement protocol: how many warmup iters,
@@ -641,14 +641,14 @@ simplicity.
 
 9. **I-9. PerfMeasurement helper.** hipEvent-based warmup-and-iterate
    over `plan.execute()`. Computes TFLOPS from the spec's
-   `2·N·Ho·Wo·K·C·R·S` arithmetic-intensity. Logs results in a
+   `2·N·Ho·Wo·K·C·Y·X` arithmetic-intensity. Logs results in a
    consistent format. **No perf assertions.**
 
 10. **I-10. Integration test.** `IntegrationGpuCkDslConvFp16` builds
     the conv-fwd graph via the hipDNN frontend (model the file on
     `miopen-provider/integration_tests/IntegrationGpuConvForward.cpp`),
-    runs through the harness, wraps the DSL's NHWC/KRSC device buffers
-    in `Tensor<T>` with NCHW-ordered logical dims + NHWC/KRSC physical
+    runs through the harness, wraps the DSL's NHWC/KYXC device buffers
+    in `Tensor<T>` with NCHW-ordered logical dims + NHWC/KYXC physical
     strides, calls `CpuFpReferenceConvolution::fprop` directly,
     compares within tolerance, calls `PerfMeasurement` to log timing
     and TFLOPS.
