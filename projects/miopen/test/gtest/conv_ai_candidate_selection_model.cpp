@@ -188,7 +188,10 @@ TEST_P(GPU_CandidateSelection_FP32, EncodeKernelConfigs_Test)
     CandidateSelectionModel model(params.arch, params.solver);
     CandidateSelectionMetadata meta(params.arch, params.solver);
     size_t feature_size = meta.output_params().size() - meta.GetConstantOutputIndices().size();
-    std::vector<std::vector<float>> encoded_candidates(100, std::vector<float>(feature_size, 2.0f));
+    // Fill with class index 0, which is in range for every categorical output encoding (and is not
+    // the -1 missing-value token). A categorical value >= its class count is rejected by
+    // AppendKernelConfigOneHot, so an arbitrary fill like 2.0 would (correctly) throw.
+    std::vector<std::vector<float>> encoded_candidates(100, std::vector<float>(feature_size, 0.0f));
     auto encoded = model.EncodeKernelConfigs(encoded_candidates);
     ASSERT_FALSE(encoded.empty()) << "EncodeKernelConfigs returned empty vector!";
     for(const auto& vec : encoded)
@@ -743,6 +746,74 @@ TEST_P(GPU_CandidateSelection_FP32, EngineeredInputGolden_Test)
     ASSERT_EQ(engineered.size(), expected.size());
     for(std::size_t i = 0; i < expected.size(); ++i)
         EXPECT_FLOAT_EQ(engineered[i], expected[i]) << "engineered feature mismatch at index " << i;
+}
+
+// Hardcoded counterpart to EngineeredInputGolden_Test: the one-hot widths/indices and num_cu are
+// written as literals rather than re-derived from the metadata, so a retrain that silently changes
+// the encoding class counts or num_cu is caught here (the golden test above composes its expected
+// vector from the same metadata accessors and so cannot catch such drift).
+TEST_P(GPU_CandidateSelection_FP32, EngineeredInputHardcoded_Test)
+{
+    const auto& params = GetParam();
+    CandidateSelectionMetadata meta(params.arch, params.solver);
+    const auto spatial_dim = meta.GetInputConstant("spatial_dim");
+    if(!spatial_dim.has_value() || *spatial_dim != "2")
+        GTEST_SKIP() << "Engineered input features are 2D-only; " << params.solver << " is not 2D";
+
+    // Contract of the shipped 2D candidate-selection metadata, as literals. The Fwd input encoder
+    // carries an extra INT8 precision class (4 vs 3); FP32 is index 2 in both.
+    const bool is_fwd                      = params.solver.find("Fwd") != std::string::npos;
+    const std::size_t expected_precision_w = is_fwd ? 4u : 3u;
+    const std::size_t expected_num_cu      = (params.arch == "gfx942") ? 304u : 256u;
+    ASSERT_EQ(meta.GetInputEncodingClassCount("in_layout"), 2u); // NCHW, NHWC
+    ASSERT_EQ(meta.GetInputEncodingClassCount("fil_layout"), 2u);
+    ASSERT_EQ(meta.GetInputEncodingClassCount("out_layout"), 2u);
+    ASSERT_EQ(meta.GetInputEncodingClassCount("precision"), expected_precision_w);
+    ASSERT_EQ(meta.GetInputEncodingIndex("precision", "FP32"), 2u);
+    ASSERT_EQ(meta.GetNumCu(), expected_num_cu);
+
+    auto feats            = MakeFullInputFeatureMap();
+    feats["precision"]    = static_cast<float>(miopenFloat); // FP32
+    const auto engineered = EngineerCandidateSelectionInputFeatures(feats, meta);
+
+    // MakeFullInputFeatureMap sets all layouts to NHWC (index 1 of 2); FP32 is index 2.
+    std::vector<float> expected = {
+        0.0f,
+        1.0f, // in_layout  NHWC
+        0.0f,
+        1.0f, // fil_layout NHWC
+        0.0f,
+        1.0f, // out_layout NHWC
+    };
+    std::vector<float> precision_one_hot(expected_precision_w, 0.0f);
+    precision_one_hot.at(2) = 1.0f; // FP32
+    expected.insert(expected.end(), precision_one_hot.begin(), precision_one_hot.end());
+
+    const std::vector<float> raw = {64.0f,
+                                    56.0f,
+                                    56.0f,
+                                    64.0f,
+                                    56.0f,
+                                    56.0f,
+                                    3.0f,
+                                    3.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f};
+    expected.insert(expected.end(), raw.begin(), raw.end());
+    const auto derived = miopen::ai::common::EngineeredConvFeatures(
+        1, 64, 64, 56, 56, 56, 56, 3, 3, 1, expected_num_cu);
+    expected.insert(expected.end(), derived.begin(), derived.end());
+
+    ASSERT_EQ(engineered.size(), expected.size());
+    for(std::size_t i = 0; i < expected.size(); ++i)
+        EXPECT_FLOAT_EQ(engineered[i], expected[i])
+            << "hardcoded engineered feature mismatch at index " << i;
 }
 
 // The conditional-layout descriptor is loaded from metadata: present for the Wavelet kernel,

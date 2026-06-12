@@ -56,6 +56,13 @@ namespace common {
 // Defined in ai_heuristics.cpp.
 std::vector<int> OneHot(long long label, std::size_t num_classes);
 
+// Canonical metadata key for a datatype (e.g. miopenFloat -> "FP32"). The datatype->name mapping is
+// a stable property of the MIOpen C API; the name->index mapping (which can change per retrain) is
+// read from each model's metadata. Returns nullptr for a datatype no model encodes. Single source
+// of truth for all precision encoders (Metadata/MetadataND::EncodePrecision and candidate
+// selection). Defined in ai_heuristics.cpp.
+const char* DataTypeToEncodingKey(miopenDataType_t data_type);
+
 // Derived 2D-convolution feature block shared by the TunaNet (ExtractTunaNetND2dFeatures) and
 // candidate-selection (EngineerCandidateSelectionInputFeatures) input encoders. Given the problem
 // dimensions it returns the engineered tail (log-transformed FLOPs/GEMM sizes, utilization and

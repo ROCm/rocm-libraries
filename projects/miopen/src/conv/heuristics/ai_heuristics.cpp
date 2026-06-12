@@ -62,6 +62,23 @@ std::vector<int> OneHot(long long label, std::size_t num_classes)
     return out;
 }
 
+// Stable datatype->name mapping; declared in ai_heuristics.hpp. The name->index mapping is read
+// from each model's metadata, so all precision encoders share this single source of truth.
+const char* DataTypeToEncodingKey(miopenDataType_t data_type)
+{
+    // if-chain rather than switch: -Wswitch-enum would flag the many miopenDataType_t values no
+    // model encodes.
+    if(data_type == miopenBFloat16)
+        return "BF16";
+    if(data_type == miopenHalf)
+        return "FP16";
+    if(data_type == miopenFloat)
+        return "FP32";
+    if(data_type == miopenInt8)
+        return "INT8";
+    return nullptr;
+}
+
 MIOPEN_INTERNALS_EXPORT std::vector<float> EngineeredConvFeatures(std::size_t N,
                                                                   std::size_t C_in,
                                                                   std::size_t C_out,
@@ -177,12 +194,16 @@ size_t Metadata::EncodeDirection(miopen::conv::Direction dir) const
 
 size_t Metadata::EncodePrecision(miopenDataType_t data_type) const
 {
-    if(data_type == miopenBFloat16)
-        return precision_encodings.at("BF16");
-    else if(data_type == miopenHalf)
-        return precision_encodings.at("FP16");
-    else if(data_type == miopenFloat)
-        return precision_encodings.at("FP32");
+    const char* key = common::DataTypeToEncodingKey(data_type);
+    if(key != nullptr)
+    {
+        const auto it = precision_encodings.find(key);
+        if(it != precision_encodings.end())
+            return it->second;
+    }
+    // Unsupported datatype, or a precision this model wasn't trained on: throw a miopen::Exception
+    // so the caller falls back to the non-AI heuristic rather than feeding a degraded feature
+    // vector.
     MIOPEN_THROW("Unsupported data type passed to TunaNet");
 }
 

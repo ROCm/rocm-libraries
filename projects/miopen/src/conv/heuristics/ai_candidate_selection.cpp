@@ -97,6 +97,10 @@ CandidateSelectionMetadata::CandidateSelectionMetadata(const std::string& arch,
     // Compute-unit count the model was trained with; normalizes hardware-aware derived features.
     if(metadata.contains("gpu") && metadata["gpu"].contains("num_cu"))
         num_cu_ = metadata["gpu"]["num_cu"].get<std::size_t>();
+    else
+        MIOPEN_LOG_W(
+            "CandidateSelectionMetadata: no gpu.num_cu in metadata; hardware-aware derived "
+            "features will use num_cu=0 (degraded 2D predictions)");
 
     if(metadata.contains("decodings") && metadata["decodings"].contains("outputs"))
     {
@@ -377,32 +381,12 @@ CandidateSelectionMetadata::GetConditionalLayout(const std::string& kernel_name)
 
 namespace {
 
-// Fallback precision one-hot width when the metadata has no "precision" encoding (3 classes:
-// BF16/FP16/FP32, i.e. the no-INT8 case). The engineered width is otherwise derived from the
-// per-feature one-hot sizes in the metadata.
-constexpr std::size_t kDefaultPrecisionClassCount = 3;
-
 float FeatureAt(const std::map<std::string, float>& features, const std::string& key)
 {
     const auto it = features.find(key);
     if(it == features.end())
         MIOPEN_THROW("EngineerCandidateSelectionInputFeatures: missing feature '" + key + "'");
     return it->second;
-}
-
-// Canonical metadata key for a datatype. This datatype->name mapping is a stable property of the
-// MIOpen C API; the name->index mapping (which can change per retrain) is read from the metadata.
-const char* DataTypeToEncodingKey(miopenDataType_t data_type)
-{
-    if(data_type == miopenBFloat16)
-        return "BF16";
-    if(data_type == miopenHalf)
-        return "FP16";
-    if(data_type == miopenFloat)
-        return "FP32";
-    if(data_type == miopenInt8)
-        return "INT8";
-    return nullptr;
 }
 
 // True when this model targets 2D convolutions, per the spatial_dim constant in its metadata.
@@ -469,12 +453,17 @@ EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& feat
 
     // Precision: the datatype->name mapping is a stable API fact; the name->index and one-hot width
     // come from the metadata so they track the trained model.
-    std::size_t precision_class_count = metadata.GetInputEncodingClassCount("precision");
+    const std::size_t precision_class_count = metadata.GetInputEncodingClassCount("precision");
     if(precision_class_count == 0)
-        precision_class_count = kDefaultPrecisionClassCount;
+    {
+        // A 2D model with no precision encoding is malformed; throw so the caller falls back to the
+        // non-AI heuristic rather than guessing a width/index.
+        MIOPEN_THROW(
+            "EngineerCandidateSelectionInputFeatures: metadata has no 'precision' encoding");
+    }
     const auto data_type =
         static_cast<miopenDataType_t>(static_cast<int>(FeatureAt(features_by_name, "precision")));
-    const char* precision_key = DataTypeToEncodingKey(data_type);
+    const char* precision_key = common::DataTypeToEncodingKey(data_type);
     const std::size_t precision_index =
         precision_key == nullptr ? precision_class_count
                                  : metadata.GetInputEncodingIndex("precision", precision_key);
@@ -554,9 +543,9 @@ std::vector<std::string> ActiveOutputParams(const CandidateSelectionMetadata& me
 // EngineerCandidateSelectionKernelConfigFeatures).
 constexpr std::size_t kKernelConfigDerivedFeatureCount = 10;
 
-std::size_t ComputeKernelConfigPreprocessorOutputDim(const CandidateSelectionMetadata& metadata)
+std::size_t ComputeKernelConfigPreprocessorOutputDim(const CandidateSelectionMetadata& metadata,
+                                                     const std::vector<std::string>& active_params)
 {
-    const auto active_params           = ActiveOutputParams(metadata);
     const auto& sequence_encodings     = metadata.sequence_encodings();
     std::size_t onehot_features        = 0;
     std::size_t raw_numerical_features = 0;
@@ -609,21 +598,29 @@ void AppendKernelConfigOneHot(std::vector<float>& engineered,
     }
 
     const int index = static_cast<int>(encoded_value);
+    if(index < 0 || static_cast<std::size_t>(index) >= num_categories)
+    {
+        // The encoded value indexes outside the metadata's class list (e.g. non-contiguous encoding
+        // indices). Throw rather than emit a silent all-zero one-hot, so the caller falls back to
+        // the non-AI heuristic instead of ranking on a degraded feature vector.
+        MIOPEN_THROW("AppendKernelConfigOneHot: encoded index " + std::to_string(index) +
+                     " out of range for " + std::to_string(num_categories) + " classes");
+    }
     for(std::size_t c = 0; c < num_categories; ++c)
         engineered.push_back(c == static_cast<std::size_t>(index) ? 1.0f : 0.0f);
 }
 
-} // namespace
-
-MIOPEN_INTERNALS_EXPORT
-std::vector<float>
-EngineerCandidateSelectionKernelConfigFeatures(const std::vector<float>& raw_config_features,
-                                               const CandidateSelectionMetadata& metadata)
+// Engineering implementation shared by the public entry point and the per-candidate loop in
+// EncodeKernelConfigs. active_params and expected_output_dim depend only on the metadata, so a
+// caller engineering many candidates derives them once and passes them in rather than re-deriving
+// per candidate (ActiveOutputParams is otherwise recomputed for every candidate).
+std::vector<float> EngineerKernelConfigFeaturesImpl(const std::vector<float>& raw_config_features,
+                                                    const CandidateSelectionMetadata& metadata,
+                                                    const std::vector<std::string>& active_params,
+                                                    std::size_t expected_output_dim)
 {
-    const auto active_params              = ActiveOutputParams(metadata);
-    const auto& sequence_encodings        = metadata.sequence_encodings();
-    const float missing_token             = metadata.GetMissingValueToken();
-    const std::size_t expected_output_dim = ComputeKernelConfigPreprocessorOutputDim(metadata);
+    const auto& sequence_encodings = metadata.sequence_encodings();
+    const float missing_token      = metadata.GetMissingValueToken();
 
     if(raw_config_features.size() != active_params.size())
     {
@@ -702,6 +699,20 @@ EngineerCandidateSelectionKernelConfigFeatures(const std::vector<float>& raw_con
     return engineered;
 }
 
+} // namespace
+
+MIOPEN_INTERNALS_EXPORT
+std::vector<float>
+EngineerCandidateSelectionKernelConfigFeatures(const std::vector<float>& raw_config_features,
+                                               const CandidateSelectionMetadata& metadata)
+{
+    const auto active_params = ActiveOutputParams(metadata);
+    const auto expected_output_dim =
+        ComputeKernelConfigPreprocessorOutputDim(metadata, active_params);
+    return EngineerKernelConfigFeaturesImpl(
+        raw_config_features, metadata, active_params, expected_output_dim);
+}
+
 // --- CandidateSelectionModel ------------------------------------------------
 
 MIOPEN_INTERNALS_EXPORT
@@ -759,12 +770,18 @@ std::vector<std::vector<float>> CandidateSelectionModel::EncodeKernelConfigs(
     if(!IsTwoDimensional(metadata_))
         return EncodeKernelConfigsWithFdeep(encoded_candidates, arch_, solver_);
 
+    // active_params and the output dim are metadata-derived (candidate-independent), so derive them
+    // once here rather than per candidate inside the loop.
+    const auto active_params = ActiveOutputParams(metadata_);
+    const auto expected_output_dim =
+        ComputeKernelConfigPreprocessorOutputDim(metadata_, active_params);
+
     std::vector<std::vector<float>> engineered_candidates;
     engineered_candidates.reserve(encoded_candidates.size());
     for(const auto& candidate : encoded_candidates)
     {
-        engineered_candidates.push_back(
-            EngineerCandidateSelectionKernelConfigFeatures(candidate, metadata_));
+        engineered_candidates.push_back(EngineerKernelConfigFeaturesImpl(
+            candidate, metadata_, active_params, expected_output_dim));
     }
     return EncodeKernelConfigsWithFdeep(engineered_candidates, arch_, solver_);
 }

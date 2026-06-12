@@ -384,9 +384,14 @@ MetadataND::MetadataND(const std::string& device, const int& dim)
     in_layout_encodings    = std::move(*in_layout_encodings_opt);
     fil_layout_encodings   = std::move(*fil_layout_encodings_opt);
     out_layout_encodings   = std::move(*out_layout_encodings_opt);
-    // num_cu is optional (only the engineered 2D feature path needs it); absence leaves it 0.
+    // num_cu is only consumed by the engineered 2D feature path. Absence leaves it 0, which zeroes
+    // the hardware-aware derived features (a degraded 2D prediction), so warn rather than fail.
     if(auto num_cu_opt = LoadNumCu(model_prefix))
         num_cu_3d = *num_cu_opt;
+    else
+        MIOPEN_LOG_W("TunaNet ND metadata for "
+                     << model_prefix
+                     << " has no gpu.num_cu; engineered 2D features will use num_cu=0");
     // Mark as valid after successful loading
     is_valid = true;
 
@@ -427,31 +432,17 @@ size_t MetadataND::EncodePrecision(miopenDataType_t data_type) const
     if(!is_valid)
         return 0;
 
-    const char* key = nullptr;
-    if(data_type == miopenBFloat16)
-        key = "BF16";
-    else if(data_type == miopenHalf)
-        key = "FP16";
-    else if(data_type == miopenFloat)
-        key = "FP32";
-    else if(data_type == miopenInt8)
-        key = "INT8";
-
-    // An unsupported data type, or a precision absent from this model's encoding map, returns an
-    // out-of-range index (one past the last class). For a correctly-sized one-hot this yields an
-    // all-zero precision rather than silently colliding with a valid class such as BF16 (index 0).
-    if(key == nullptr)
+    const char* key = common::DataTypeToEncodingKey(data_type);
+    if(key != nullptr)
     {
-        MIOPEN_LOG_W("Unsupported data type in ND metadata precision encoding");
-        return precision_encodings_3d.size();
+        const auto it = precision_encodings_3d.find(key);
+        if(it != precision_encodings_3d.end())
+            return it->second;
     }
-    const auto it = precision_encodings_3d.find(key);
-    if(it == precision_encodings_3d.end())
-    {
-        MIOPEN_LOG_W("Precision '" << key << "' not present in ND metadata precision encoding");
-        return precision_encodings_3d.size();
-    }
-    return it->second;
+    // Unsupported datatype, or a precision this model wasn't trained on: throw so the caller falls
+    // back to the non-AI heuristic. Returning an out-of-range index here would feed an all-zero
+    // precision one-hot into the model -- a silently degraded prediction, which we want to avoid.
+    MIOPEN_THROW("Precision not supported by this TunaNet ND model");
 }
 
 MIOPEN_INTERNALS_EXPORT
