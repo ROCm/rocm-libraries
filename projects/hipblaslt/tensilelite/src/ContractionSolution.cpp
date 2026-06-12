@@ -3044,11 +3044,11 @@ namespace TensileLite
     namespace
     {
         size_t getSKGridImpl(ContractionSolution const& self,
-                             Problem const&             problem,
-                             Hardware const&            hardware,
-                             size_t                     tiles,
-                             origami::reduction_t       reductionStrat,
-                             bool const*                sk5EffectiveDynamic);
+                             ContractionProblemGemm const& problem,
+                             Hardware const&               hardware,
+                             size_t                        tiles,
+                             origami::reduction_t          reductionStrat,
+                             bool const*                   sk5EffectiveDynamic);
     }
 
     std::vector<KernelInvocation>
@@ -3842,11 +3842,11 @@ namespace TensileLite
     namespace
     {
         size_t getSKGridImpl(ContractionSolution const& self,
-                             Problem const&             problem,
-                             Hardware const&            hardware,
-                             size_t                     tiles,
-                             origami::reduction_t       reductionStrat,
-                             bool const*                sk5EffectiveDynamic)
+                             ContractionProblemGemm const& problem,
+                             Hardware const&               hardware,
+                             size_t                        tiles,
+                             origami::reduction_t          reductionStrat,
+                             bool const*                   sk5EffectiveDynamic)
         {
             size_t     skGrid    = tiles; // Fallback
             const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
