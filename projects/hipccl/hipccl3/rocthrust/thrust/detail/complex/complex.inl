@@ -49,8 +49,9 @@ THRUST_HOST_DEVICE complex<T>::complex(const complex<U>& z)
     : data{T(z.real()), T(z.imag())}
 {}
 
+#if !THRUST_COMPILER(NVRTC)
 template <typename T>
-THRUST_HOST THRUST_STD_COMPLEX_DEVICE complex<T>::complex(const std::complex<T>& z)
+THRUST_HOST THRUST_STD_COMPLEX_DEVICE complex<T>::complex(const ::std::complex<T>& z)
     // Initialize the storage in the member initializer list using C++ unicorn
     // initialization. This allows `complex<T const>` to work.
     : data{THRUST_STD_COMPLEX_REAL(z), THRUST_STD_COMPLEX_IMAG(z)}
@@ -58,12 +59,13 @@ THRUST_HOST THRUST_STD_COMPLEX_DEVICE complex<T>::complex(const std::complex<T>&
 
 template <typename T>
 template <typename U>
-THRUST_HOST THRUST_STD_COMPLEX_DEVICE complex<T>::complex(const std::complex<U>& z)
+THRUST_HOST THRUST_STD_COMPLEX_DEVICE complex<T>::complex(const ::std::complex<U>& z)
     // Initialize the storage in the member initializer list using C++ unicorn
     // initialization. This allows `complex<T const>` to work.
     // We do a functional-style cast here to suppress conversion warnings.
     : data{T(THRUST_STD_COMPLEX_REAL(z)), T(THRUST_STD_COMPLEX_IMAG(z))}
 {}
+#endif // !THRUST_COMPILER(NVRTC)
 
 /* --- Assignment Operators --- */
 
@@ -84,8 +86,9 @@ THRUST_HOST_DEVICE complex<T>& complex<T>::operator=(const complex<U>& z)
   return *this;
 }
 
+#if !THRUST_COMPILER(NVRTC)
 template <typename T>
-THRUST_HOST THRUST_STD_COMPLEX_DEVICE complex<T>& complex<T>::operator=(const std::complex<T>& z)
+THRUST_HOST THRUST_STD_COMPLEX_DEVICE complex<T>& complex<T>::operator=(const ::std::complex<T>& z)
 {
   real(THRUST_STD_COMPLEX_REAL(z));
   imag(THRUST_STD_COMPLEX_IMAG(z));
@@ -94,12 +97,13 @@ THRUST_HOST THRUST_STD_COMPLEX_DEVICE complex<T>& complex<T>::operator=(const st
 
 template <typename T>
 template <typename U>
-THRUST_HOST THRUST_STD_COMPLEX_DEVICE complex<T>& complex<T>::operator=(const std::complex<U>& z)
+THRUST_HOST THRUST_STD_COMPLEX_DEVICE complex<T>& complex<T>::operator=(const ::std::complex<U>& z)
 {
   real(T(THRUST_STD_COMPLEX_REAL(z)));
   imag(T(THRUST_STD_COMPLEX_IMAG(z)));
   return *this;
 }
+#endif // !THRUST_COMPILER(NVRTC)
 
 /* --- Compound Assignment Operators --- */
 
@@ -175,17 +179,19 @@ THRUST_HOST_DEVICE bool operator==(const complex<T0>& x, const complex<T1>& y)
   return x.real() == y.real() && x.imag() == y.imag();
 }
 
+#if !THRUST_COMPILER(NVRTC)
 template <typename T0, typename T1>
-THRUST_HOST THRUST_STD_COMPLEX_DEVICE bool operator==(const complex<T0>& x, const std::complex<T1>& y)
+THRUST_HOST THRUST_STD_COMPLEX_DEVICE bool operator==(const complex<T0>& x, const ::std::complex<T1>& y)
 {
   return x.real() == THRUST_STD_COMPLEX_REAL(y) && x.imag() == THRUST_STD_COMPLEX_IMAG(y);
 }
 
 template <typename T0, typename T1>
-THRUST_HOST THRUST_STD_COMPLEX_DEVICE bool operator==(const std::complex<T0>& x, const complex<T1>& y)
+THRUST_HOST THRUST_STD_COMPLEX_DEVICE bool operator==(const ::std::complex<T0>& x, const complex<T1>& y)
 {
   return THRUST_STD_COMPLEX_REAL(x) == y.real() && THRUST_STD_COMPLEX_IMAG(x) == y.imag();
 }
+#endif // !THRUST_COMPILER(NVRTC)
 
 template <typename T0, typename T1>
 THRUST_HOST_DEVICE bool operator==(const T0& x, const complex<T1>& y)
@@ -205,17 +211,19 @@ THRUST_HOST_DEVICE bool operator!=(const complex<T0>& x, const complex<T1>& y)
   return !(x == y);
 }
 
+#if !THRUST_COMPILER(NVRTC)
 template <typename T0, typename T1>
-THRUST_HOST THRUST_STD_COMPLEX_DEVICE bool operator!=(const complex<T0>& x, const std::complex<T1>& y)
+THRUST_HOST THRUST_STD_COMPLEX_DEVICE bool operator!=(const complex<T0>& x, const ::std::complex<T1>& y)
 {
   return !(x == y);
 }
 
 template <typename T0, typename T1>
-THRUST_HOST THRUST_STD_COMPLEX_DEVICE bool operator!=(const std::complex<T0>& x, const complex<T1>& y)
+THRUST_HOST THRUST_STD_COMPLEX_DEVICE bool operator!=(const ::std::complex<T0>& x, const complex<T1>& y)
 {
   return !(x == y);
 }
+#endif // !THRUST_COMPILER(NVRTC)
 
 template <typename T0, typename T1>
 THRUST_HOST_DEVICE bool operator!=(const T0& x, const complex<T1>& y)
