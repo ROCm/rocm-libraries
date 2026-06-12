@@ -97,6 +97,26 @@ template <typename T>
     return {};
 }
 
+/// Returns the global index of the engine backing a finalized execution-plan
+/// descriptor, or std::nullopt if the backend cannot report it. Lets callers
+/// recover the engine of a plan attached via deserialize so a later
+/// serialize() can re-query that engine's plan-serialization capability.
+[[nodiscard]] inline std::optional<int64_t>
+    getExecutionPlanEngineId(hipdnnBackendDescriptor_t planDesc)
+{
+    int64_t engineId = 0;
+    if(getDescriptorAttrScalar<int64_t>(planDesc,
+                                        HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT,
+                                        HIPDNN_TYPE_INT64,
+                                        engineId,
+                                        "execution plan engine global index")
+           .is_bad())
+    {
+        return std::nullopt;
+    }
+    return engineId;
+}
+
 /// Gets a string attribute (char array) from a backend descriptor.
 /// Queries the character count first, then retrieves the string value.
 /// If the attribute is not supported or the string is empty, sets value to empty and returns

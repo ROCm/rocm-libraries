@@ -19,6 +19,7 @@ NB_MODULE(hipdnn_frontend_python, m) // NOLINT(modernize-avoid-c-arrays)
     typesBindings(m); // Types and enums first
     handleBindings(m); // Handle management
     memoryBindings(m); // Memory management
+    hipBindings(m); // Direct HIP runtime wrappers used by benchmarking
     tensorBindings(m); // Then tensor attributes
     attributesBindings(m); // Then node attributes
     graphBindings(m); // Finally graph which uses all of the above

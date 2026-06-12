@@ -389,7 +389,9 @@ def _run_timed_pytorch_reference(
                 benchmark_iters=config.benchmark_iters,
                 engine_id=0,
             )
-            executor = PyTorchCudaExecutor(graph_json, bench_config)
+            executor = PyTorchCudaExecutor(
+                graph_json, bench_config, timing_backend=config.timing_backend
+            )
             executor.prepare()
             result.cpu_build_time_ms = executor.init_time_ms
 
@@ -495,7 +497,7 @@ def run_graph_all_providers(
             discovery_executor = Executor(
                 graph_json_str=graph_json_str,
                 config=discovery_config,
-                gpu_backend=config.gpu_backend,
+                timing_backend=config.timing_backend,
             )
             engine_ids = discovery_executor.discover_engines(handle)
         except UnsupportedGraphError as e:
@@ -795,7 +797,7 @@ def run_single_provider_engine(
         executor = Executor(
             graph_json_str=graph_json_str,
             config=bench_config,
-            gpu_backend=config.gpu_backend,
+            timing_backend=config.timing_backend,
         )
         executor.prepare(handle, engine_id=engine_id)
         result.cpu_build_time_ms = executor.init_time_ms
