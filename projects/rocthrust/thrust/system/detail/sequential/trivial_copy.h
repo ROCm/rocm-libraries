@@ -32,7 +32,7 @@
 #endif // no system header
 #include <thrust/system/detail/sequential/general_copy.h>
 
-#include <cstring>
+#include _THRUST_STD_INCLUDE(cstring)
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -48,18 +48,12 @@ THRUST_HOST_DEVICE T* trivial_copy_n(const T* first, std::ptrdiff_t n, T* result
   if (n == 0)
   {
     // If `first` or `result` is an invalid pointer,
-    // the behavior of `std::memmove` is undefined, even if `n` is zero.
+    // the behavior of `_THRUST_STD::memmove` is undefined, even if `n` is zero.
     return result;
   }
 
-  T* return_value = nullptr;
-
-  _THRUST_IF_TARGET(_THRUST_IS_HOST,
-                    (std::memmove(result, first, n * sizeof(T)); return_value = result + n;),
-                    ( // _THRUST_IS_DEVICE:
-                      return_value = thrust::system::detail::sequential::general_copy_n(first, n, result);));
-
-  return return_value;
+  _THRUST_STD::memmove(result, first, n * sizeof(T));
+  return result + n;
 } // end trivial_copy_n()
 
 } // end namespace sequential

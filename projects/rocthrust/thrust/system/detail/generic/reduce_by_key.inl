@@ -42,7 +42,7 @@
 #  include _THRUST_STD_INCLUDE(iterator)
 #endif
 
-#include <limits>
+#include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
 namespace system

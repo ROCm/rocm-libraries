@@ -59,7 +59,7 @@
 #    include _THRUST_STD_INCLUDE(iterator)
 #  endif
 
-#  include <cstdint>
+#  include _THRUST_STD_INCLUDE(cstdint)
 
 // rocprim include
 #  include <rocprim/rocprim.hpp>

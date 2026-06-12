@@ -48,7 +48,7 @@
 #  include <thrust/system/hip/detail/util.h>
 #  include <thrust/zip_function.h>
 
-#  include <cstdint>
+#  include _THRUST_STD_INCLUDE(cstdint)
 
 THRUST_NAMESPACE_BEGIN
 
