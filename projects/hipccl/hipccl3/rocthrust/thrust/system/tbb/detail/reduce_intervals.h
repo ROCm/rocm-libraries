@@ -33,11 +33,11 @@
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_STD_INCLUDE(__algorithm/min.h)
+#  include _THRUST_STD_INCLUDE(cassert)
 #else
 #  include <thrust/detail/algorithm_wrapper.h>
 #endif
 
-#include <cassert>
 #include <type_traits>
 
 #include <tbb/parallel_for.h>
