@@ -250,7 +250,7 @@ struct pad : public base_transform<1, 1>
     // Pad is a 1:1 transform that simply shifts the index; the physical
     // stride is unchanged, so vector properties propagate as-is.
     // (Callers must still ensure that any vectorized access does not
-    //  cross a pad boundary — the runtime validity check handles that.)
+    //  cross a pad boundary - the runtime validity check handles that.)
     template <typename LowVectorLengths, typename LowVectorStrides>
     CK_TILE_HOST_DEVICE static constexpr auto
     calculate_upper_dimension_safe_vector_length_strides(const LowVectorLengths& low_vector_lengths,

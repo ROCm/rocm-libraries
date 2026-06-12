@@ -74,7 +74,7 @@ __global__ void test_chunked_prefetch_kernel(const _Float16* __restrict__ in,
     }
     __syncthreads();
 
-    // C_in is the kernel's "C" — full input channel count.
+    // C_in is the kernel's "C" -- full input channel count.
     BlockCoords bc(C, /*K_total=*/cfg.block_k_size());
     if(bc.block_n >= N)
         return;
@@ -235,7 +235,7 @@ TEST_F(ConvInputLoaderChunkedTest, Cfg49_Pad1_Hi8_Wi8_Row0)
     run_and_verify<CFG_CSPW2_FPROP>(/*hi=*/8, /*wi=*/8, /*px=*/1, /*target_y=*/0);
 }
 
-// Row 7 (last input row) — this is where the end-to-end suite first sees
+// Row 7 (last input row) -- this is where the end-to-end suite first sees
 // the chunk-1 boundary bug, after the loader has advanced through 7 row
 // strides.
 TEST_F(ConvInputLoaderChunkedTest, Cfg49_Pad1_Hi8_Wi8_Row7)
@@ -243,7 +243,7 @@ TEST_F(ConvInputLoaderChunkedTest, Cfg49_Pad1_Hi8_Wi8_Row7)
     run_and_verify<CFG_CSPW2_FPROP>(/*hi=*/8, /*wi=*/8, /*px=*/1, /*target_y=*/7);
 }
 
-// Same shape without padding — exercises a different w_actual mapping.
+// Same shape without padding -- exercises a different w_actual mapping.
 TEST_F(ConvInputLoaderChunkedTest, Cfg49_NoPad_Hi8_Wi8_Row0)
 {
     run_and_verify<CFG_CSPW2_FPROP>(/*hi=*/8, /*wi=*/8, /*px=*/0, /*target_y=*/0);
@@ -254,7 +254,7 @@ TEST_F(ConvInputLoaderChunkedTest, Cfg49_NoPad_Hi8_Wi8_Row7)
     run_and_verify<CFG_CSPW2_FPROP>(/*hi=*/8, /*wi=*/8, /*px=*/0, /*target_y=*/7);
 }
 
-// Slightly larger spatial — confirms the boundary issue isn't tied to the
+// Slightly larger spatial -- confirms the boundary issue isn't tied to the
 // exact wi=8 case.
 TEST_F(ConvInputLoaderChunkedTest, Cfg49_Pad1_Hi16_Wi16_Row0)
 {

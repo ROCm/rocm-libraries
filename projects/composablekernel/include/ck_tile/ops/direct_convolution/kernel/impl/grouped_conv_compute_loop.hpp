@@ -19,14 +19,14 @@ namespace direct_conv {
 // embedded in the MFMA K dimension).
 //
 // Template parameters:
-//   TC             — TileConstants type
-//   cfg            — Config value (kh, kw, direction, epilogue, etc.)
-//   MfmaFn         — callable: mfma(weight, input, acc) -> fp32x4_t
-//   BlockCoordsT   — variant-specific BlockCoords type
-//   InputLoaderT   — InputLoader type (shared or alias)
-//   WeightLoaderT  — WeightLoader type (variant-specific, has read_from_lds)
-//   OutputWriterT  — OutputWriter or OutputWriterLds type (shared)
-//   INNER_KW       — inner loop width (defaults to cfg.kw; set to 1 for Toeplitz)
+//   TC             -- TileConstants type
+//   cfg            -- Config value (kh, kw, direction, epilogue, etc.)
+//   MfmaFn         -- callable: mfma(weight, input, acc) -> fp32x4_t
+//   BlockCoordsT   -- variant-specific BlockCoords type
+//   InputLoaderT   -- InputLoader type (shared or alias)
+//   WeightLoaderT  -- WeightLoader type (variant-specific, has read_from_lds)
+//   OutputWriterT  -- OutputWriter or OutputWriterLds type (shared)
+//   INNER_KW       -- inner loop width (defaults to cfg.kw; set to 1 for Toeplitz)
 template <typename TC,
           auto cfg,
           bool Padded,
@@ -80,7 +80,7 @@ CK_TILE_DEVICE void grouped_conv_compute_loop(const ElementType* __restrict__ in
     //   in  = output gradient (K channels per group)
     //   out = input gradient  (C channels per group)
     // So the "input" channel count is k_per_group and the "output" channel
-    // count is c_per_group — the reverse of Fprop.  The weight tensor is
+    // count is c_per_group -- the reverse of Fprop.  The weight tensor is
     // not swapped (always GKYXC), so the weight loader keeps the original
     // c_per_group / k_per_group.
     constexpr bool is_dgrad = (cfg.direction == Direction::Dgrad);

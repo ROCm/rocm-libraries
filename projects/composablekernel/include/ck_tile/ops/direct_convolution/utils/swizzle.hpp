@@ -85,10 +85,10 @@ struct SwizzleXOR
 
     static_assert(is_power_of_two_integer(C8), "C_ / 8 must be power of 2 in SwizzleXOR");
 
-    // Map (x, c8) → flat uint4 LDS offset.
+    // Map (x, c8) -> flat uint4 LDS offset.
     static constexpr int offset_uint4(int x, int c8) { return x * C8 + (c8 ^ (x % C8)); }
 
-    // Map (x, c4) → flat uint2 LDS offset.
+    // Map (x, c4) -> flat uint2 LDS offset.
     static constexpr int offset_uint2(int x, int c4)
     {
         const int c8    = c4 / 2;
@@ -96,10 +96,10 @@ struct SwizzleXOR
         return x * C4 + c8_sw * 2 + (c4 % 2);
     }
 
-    // Inverse: flat uint4 offset → x
+    // Inverse: flat uint4 offset -> x
     static constexpr int x(int off) { return off / C8; }
 
-    // Inverse: flat uint4 offset → c8
+    // Inverse: flat uint4 offset -> c8
     // c8_sw = off % C8,  c8_sw = c8 ^ (x % C8)  =>  c8 = c8_sw ^ (x % C8)
     static constexpr int c8(int off)
     {

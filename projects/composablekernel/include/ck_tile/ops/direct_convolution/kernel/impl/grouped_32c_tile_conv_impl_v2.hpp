@@ -8,8 +8,8 @@
 // wave_half=1 handles K[16:31]).
 //
 // v2 uses CK Tile abstractions for all data movement:
-//   - Input DRAM→LDS: shared InputLoader with CK Tile descriptors
-//   - Weight DRAM→LDS: shared weight_load_to_lds
+//   - Input DRAM -> LDS: shared InputLoader with CK Tile descriptors
+//   - Weight DRAM -> LDS: shared weight_load_to_lds
 //   - Output writes: shared OutputWriter (direct DRAM) or OutputWriterLds (LDS-staged)
 //   - Swizzle support: None / XOR / CyclicShift via descriptor transforms
 
@@ -133,7 +133,7 @@ inline LaunchParams get_launch_params(const Conv2dParams& par)
 }
 
 // -----------------------------------------------------------------------
-// TileConstants — inherits all shared constants from TileConstantsBase.
+// TileConstants -- inherits all shared constants from TileConstantsBase.
 // Only adds the three variant-specific tile distributions:
 //   Mfma::MakeAccTileDistribution       (mfma_f32_16x16x32_f16 lane layout)
 //   Weight::MakeLdsReadTileDistribution (Fprop weight read from LDS)
@@ -148,22 +148,22 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
     static constexpr int KH_KW_       = cfg.kh * cfg.kw;
 
     // -----------------------------------------------------------------------
-    // Mfma — tile distribution for mfma_f32_16x16x32_f16 results.
+    // Mfma -- tile distribution for mfma_f32_16x16x32_f16 results.
     //
     // mfma_f32_16x16x32_f16 lane mapping (64-lane wave):
-    //   lane_q   = lane % 16 → Q column (16 output cols)
-    //   lane_c4  = lane / 16 → C4 group (4 groups of fp32x4)
+    //   lane_q   = lane % 16 -> Q column (16 output cols)
+    //   lane_c4  = lane / 16 -> C4 group (4 groups of fp32x4)
     //
     // For 32c: the GROUP_SIZE_4 = 8, so BLOCK_C4 = waves_per_wg * 8.
     // Each group uses 2 waves, so wave_half = wave_within_group % 2.
-    // wave_half=0 → K[0:15], wave_half=1 → K[16:31].
+    // wave_half=0 -> K[0:15], wave_half=1 -> K[16:31].
     // The result layout is the same as 16c (16x16 output tile per MFMA),
     // but across twice as many waves per group.
     //
     // 3D tile: [BLOCK_Q=16, BLOCK_C4, 4]
-    //   X0 = 16 [16]: lane_q → P1 factor 1
-    //   X1 = BLOCK_C4 [WAVES_PER_WG, 4]: warp_id → P0, lane_c4 → P1 factor 0
-    //   X2 = 4: vectorization → Y0
+    //   X0 = 16 [16]: lane_q -> P1 factor 1
+    //   X1 = BLOCK_C4 [WAVES_PER_WG, 4]: warp_id -> P0, lane_c4 -> P1 factor 0
+    //   X2 = 4: vectorization -> Y0
     // -----------------------------------------------------------------------
     struct Mfma
     {
@@ -183,18 +183,18 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
     };
 
     // -----------------------------------------------------------------------
-    // Weight — adds the Fprop LDS read tile distribution.
+    // Weight -- adds the Fprop LDS read tile distribution.
     //
     // mfma_f32_16x16x32_f16 B operand:
-    //   lane_k   = lane % 16 → K-column (outer-product dim of B)
-    //   lane_c8  = lane / 16 → C-reduction group (4 groups, each 8 fp16)
+    //   lane_k   = lane % 16 -> K-column (outer-product dim of B)
+    //   lane_c8  = lane / 16 -> C-reduction group (4 groups, each 8 fp16)
     //
     // 3D tile: [block_c, kh*kw, GROUP_SIZE=32]
-    //   X0 = block_c [WAVES_PER_WG, 16]: warp_id → P0, lane_k → P1 factor 1
-    //   X1 = kh*kw → Y0 (filter positions)
-    //   X2 = GROUP_SIZE [4, 8]: lane_c8 → P1 factor 0, sub-channel → Y1
+    //   X0 = block_c [WAVES_PER_WG, 16]: warp_id -> P0, lane_k -> P1 factor 1
+    //   X1 = kh*kw -> Y0 (filter positions)
+    //   X2 = GROUP_SIZE [4, 8]: lane_c8 -> P1 factor 0, sub-channel -> Y1
     //
-    // P1 merge = {4, 16}: factor 0 = lane/16 → X2 factor 0, factor 1 = lane%16 → X0 factor 1
+    // P1 merge = {4, 16}: factor 0 = lane/16 -> X2 factor 0, factor 1 = lane%16 -> X0 factor 1
     // -----------------------------------------------------------------------
     struct Weight : Base::Weight
     {
@@ -213,7 +213,7 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
         }
 
         // Dgrad distribution: single-warp [32, 16] encoding.
-        // Each warp independently reads 32 K_out rows × 16 C columns
+        // Each warp independently reads 32 K_out rows x 16 C columns
         // from the per-warp base pointer.
         //
         // Output (post-transpose): [C=16, K_out=32]
@@ -221,7 +221,7 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
         //     - X1[0] = 4: P-mapped via lane/16 (selects K_out quarter)
         //     - X1[1] = 2: Y-mapped (2 ds_read calls per filter position)
         //     - X1[2] = 4: Y-mapped (4 fp16 per ds_read, vectorized)
-        //   P merge{4,16}: factor 0 (lane/16) → X1[0], factor 1 (lane%16) → X0[0]
+        //   P merge{4,16}: factor 0 (lane/16) -> X1[0], factor 1 (lane%16) -> X0[0]
         //   Y dims: X1 factor 1 (size 2) and X1 factor 2 (size 4)
         //
         // InputTileDistributionTraits derives the pre-transpose input encoding.
@@ -244,13 +244,13 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
     };
 
     // -----------------------------------------------------------------------
-    // Output — adds the narrow DRAM write tile distribution.
+    // Output -- adds the narrow DRAM write tile distribution.
     //
     // 4D tile: [1, BLOCK_Q=16, BLOCK_C4, 4]
-    //   X0 = 1 (row) → Y0
-    //   X1 = 16 (Q) → P1 factor 1
-    //   X2 = BLOCK_C4 [WAVES_PER_WG, 4]: warp_id → P0, lane_c4 → P1 factor 0
-    //   X3 = 4 → Y1
+    //   X0 = 1 (row) -> Y0
+    //   X1 = 16 (Q) -> P1 factor 1
+    //   X2 = BLOCK_C4 [WAVES_PER_WG, 4]: warp_id -> P0, lane_c4 -> P1 factor 0
+    //   X3 = 4 -> Y1
     // -----------------------------------------------------------------------
     struct Output : direct_conv::TileConstantsBase<cfg>::Output
     {
@@ -276,18 +276,18 @@ template <auto cfg>
 using BlockCoords = direct_conv::BlockCoords<cfg>;
 
 // ===================================================================
-// InputLoader32c — shared DRAM→LDS, 32c-specific LDS→register read.
+// InputLoader32c -- shared DRAM -> LDS, 32c-specific LDS -> register read.
 //
-// Reuses the shared InputLoader for DRAM→LDS (async buffer_load_lds with
+// Reuses the shared InputLoader for DRAM -> LDS (async buffer_load_lds with
 // CK Tile pad/XOR/CyclicShift transforms, OOB checking, double buffering).
-// The LDS→register read returns fp16x8_t (8 fp16 = one uint4) instead of
+// The LDS -> register read returns fp16x8_t (8 fp16 = one uint4) instead of
 // fp16x4_t, matching the mfma_f32_16x16x32_f16 operand size.
 //
 // Lane mapping for LDS reads:
-//   lane_q  = lane % 16 → spatial position (0..15)
-//   lane_c8 = lane / 16 → C8 slice within group (0..3)
-//   wave_group = wave / 2 → which group
-//   wave_half  = wave % 2 → which half (0: K[0:15], 1: K[16:31])
+//   lane_q  = lane % 16 -> spatial position (0..15)
+//   lane_c8 = lane / 16 -> C8 slice within group (0..3)
+//   wave_group = wave / 2 -> which group
+//   wave_half  = wave % 2 -> which half (0: K[0:15], 1: K[16:31])
 //
 // LDS read offset:
 //   (lane_q, wave_group * GROUP_SIZE_8 + wave_half * (GROUP_SIZE_8/2) + lane_c8)
@@ -369,7 +369,7 @@ struct InputLoader32c
 };
 
 // ===================================================================
-// WeightLoader — shared DRAM→LDS, 32c-specific LDS→register read.
+// WeightLoader -- shared DRAM -> LDS, 32c-specific LDS -> register read.
 //
 // The 32c kernel stores fp16x8_t weights[kh*kw] (one per filter position).
 // Dgrad uses shared weight_read_dgrad with WavesPerGroup=2 and 2
@@ -447,11 +447,11 @@ CK_TILE_DEVICE void weight_read_fprop_32c(auto& wa, uint4* weight_lds)
     ck_tile::static_for<0, TC::KH_KW, 1>{}([&](auto khw) { wa.weights[khw.value] = vec_buf[khw]; });
 }
 
-// OutputWriter — direct DRAM writes (RegistersToGlobalMemory epilogue).
+// OutputWriter -- direct DRAM writes (RegistersToGlobalMemory epilogue).
 template <auto cfg, bool Padded = true>
 using OutputWriter = direct_conv::OutputWriter<TileConstants<cfg>, Padded, ToType<cfg.data_type>>;
 
-// OutputWriterLds — LDS-staged writes (RegistersToLdsToGlobalMemory).
+// OutputWriterLds -- LDS-staged writes (RegistersToLdsToGlobalMemory).
 template <auto cfg, bool Padded = true>
 using OutputWriterLds =
     direct_conv::OutputWriterLds<TileConstants<cfg>, Padded, ToType<cfg.data_type>>;

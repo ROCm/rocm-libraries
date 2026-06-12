@@ -39,13 +39,13 @@ template <DataType DT = DataType::fp16>
 struct Config
 {
     static constexpr DataType data_type = DT;
-    // waves_c64 — channel (group) dimension
+    // waves_c64 -- channel (group) dimension
     // Each wave computes outputs for 64 input channels worth of groups.
     // If each group has, e.g., exactly 4 channels, 64 channels -> 16 groups per workgroup.
     // This number tells many waves of 64 channels are processed by one workgroup (thread block).
     int waves_c64;
 
-    // waves_q4 — spatial output column dimension
+    // waves_q4 -- spatial output column dimension
     // Each wave handles 4 output columns (WARP_Q = 4)
     // This number tells how many waves of 4 ouput columns are processed by one workgroup (thread
     // block).
@@ -148,7 +148,7 @@ inline LaunchParams get_launch_params(const Conv2dParams& par)
 }
 
 // -----------------------------------------------------------------------
-// TileConstants — inherits all shared constants from TileConstantsBase.
+// TileConstants -- inherits all shared constants from TileConstantsBase.
 // Only adds the three variant-specific tile distributions:
 //   Mfma::MakeAccTileDistribution       (mfma_f32_4x4x4f16 lane layout)
 //   Weight::MakeLdsReadTileDistribution (Fprop weight read from LDS)
@@ -167,21 +167,21 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
     static constexpr int WAVES_C64 = cfg.waves_c64;
 
     // -----------------------------------------------------------------------
-    // Mfma — tile distribution for mfma_f32_4x4x4f16 operands and results.
+    // Mfma -- tile distribution for mfma_f32_4x4x4f16 operands and results.
     //
     // Maps (P0=warp_id, P1=lane_id) to a 3D tile coordinate
     //   (q_local, c4_local, c_sub) where:
-    //   q_local  = warp_q * WARP_Q + lane_col  ∈ [0, block_q)
-    //   c4_local = warp_c64 * 16 + lane_batch  ∈ [0, BLOCK_C4)
-    //   c_sub    ∈ [0, 4) — vectorization (Y dimension)
+    //   q_local  = warp_q * WARP_Q + lane_col  in [0, block_q)
+    //   c4_local = warp_c64 * 16 + lane_batch  in [0, BLOCK_C4)
+    //   c_sub    in [0, 4) -- vectorization (Y dimension)
     //
     // mfma_f32_4x4x4f16 lane layout (64-lane wave):
-    //   lane_col   = (lane % 4)       → Q column within warp (4 output cols)
-    //   lane_batch = (lane / 4) % 16  → C4 group within warp (16 groups of 4)
+    //   lane_col   = (lane % 4)       -> Q column within warp (4 output cols)
+    //   lane_batch = (lane / 4) % 16  -> C4 group within warp (16 groups of 4)
     //
-    // P0 merge = {waves_q4, waves_c64}: warp_q → X0 factor 0, warp_c64 → X1 factor 0
-    // P1 merge = {16, 4}:               lane_batch → X1 factor 1, lane_col → X0 factor 1
-    // Y0 (length 4) → X2 (vectorization)
+    // P0 merge = {waves_q4, waves_c64}: warp_q -> X0 factor 0, warp_c64 -> X1 factor 0
+    // P1 merge = {16, 4}:               lane_batch -> X1 factor 1, lane_col -> X0 factor 1
+    // Y0 (length 4) -> X2 (vectorization)
     // -----------------------------------------------------------------------
     struct Mfma
     {
@@ -201,15 +201,15 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
     };
 
     // -----------------------------------------------------------------------
-    // Weight — adds the Fprop LDS read tile distribution.
+    // Weight -- adds the Fprop LDS read tile distribution.
     //
     // P0 merge = {waves_q4, waves_c64}:
-    //   factor 0 (waves_q4)  → R dim (replicated across Q-waves)
-    //   factor 1 (waves_c64) → X0 factor 0 (K-channel wave group)
+    //   factor 0 (waves_q4)  -> R dim (replicated across Q-waves)
+    //   factor 1 (waves_c64) -> X0 factor 0 (K-channel wave group)
     // P1 merge = {16, 4}:
-    //   factor 0 (16 = lane_batch) → X0 factor 1
-    //   factor 1 (4  = lane_col)   → X0 factor 2
-    // Y0 (kh*kw) → X1, Y1 (GROUP_SIZE=4) → X2
+    //   factor 0 (16 = lane_batch) -> X0 factor 1
+    //   factor 1 (4  = lane_col)   -> X0 factor 2
+    // Y0 (kh*kw) -> X1, Y1 (GROUP_SIZE=4) -> X2
     // R = [waves_q4]: all Q-waves read the same weights (replication).
     // -----------------------------------------------------------------------
     struct Weight : Base::Weight
@@ -230,16 +230,16 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
     };
 
     // -----------------------------------------------------------------------
-    // Output — adds the narrow DRAM write tile distribution.
+    // Output -- adds the narrow DRAM write tile distribution.
     //
     // 4D tile: [1, block_q, BLOCK_C4, 4]
     // P0 merge = {waves_q4, waves_c64}:
-    //   factor 0 (waves_q4)  → X1 factor 0 (Q wave group)
-    //   factor 1 (waves_c64) → X2 factor 0 (C wave group)
+    //   factor 0 (waves_q4)  -> X1 factor 0 (Q wave group)
+    //   factor 1 (waves_c64) -> X2 factor 0 (C wave group)
     // P1 merge = {16, 4}:
-    //   factor 0 (16=batch) → X2 factor 1
-    //   factor 1 (4=col)    → X1 factor 1
-    // Y0 (1) → X0 (trivial row), Y1 (4) → X3 (vectorization)
+    //   factor 0 (16=batch) -> X2 factor 1
+    //   factor 1 (4=col)    -> X1 factor 1
+    // Y0 (1) -> X0 (trivial row), Y1 (4) -> X3 (vectorization)
     // -----------------------------------------------------------------------
     struct Output : Base::Output
     {
@@ -275,7 +275,7 @@ using InputLoader =
                              Padded,
                              ToType<cfg.data_type>>;
 
-// Handles weight loading (DRAM → LDS → registers) and provides
+// Handles weight loading (DRAM -> LDS -> registers) and provides
 // register-resident weight access via inherited WeightAccessor.
 template <auto cfg>
 struct WeightLoader : direct_conv::WeightAccessor<

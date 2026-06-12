@@ -39,10 +39,9 @@ using namespace grouped_4c_tile::v3;
 // ============================================================================
 // Config indices used by the tests
 //
-// KernelConfigurations<>::configs_map.get(9)  — Fprop, vector_size=8 (default, full GROUP_SIZE)  →
-// unpadded KernelConfigurations<>::configs_map.get(46) — Fprop, CyclicShift, vector_size=2 → c%2==0
-// KernelConfigurations<>::configs_map.get(47) — Fprop, CyclicShift, vector_size=1               →
-// any c
+// KernelConfigurations<>::configs_map.get(9)  -- Fprop, vector_size=8 (default, full GROUP_SIZE) ->
+// unpadded KernelConfigurations<>::configs_map.get(46) -- Fprop, CyclicShift, vector_size=2 ->
+// c%2==0 KernelConfigurations<>::configs_map.get(47) -- Fprop, CyclicShift, vector_size=1 -> any c
 // ============================================================================
 static constexpr int CFG_UNPADDED = 9;
 static constexpr int CFG_VEC2     = 46;
@@ -92,7 +91,7 @@ class WeightLoaderTest : public ::testing::Test
     static constexpr int KW         = KernelConfigurations<>::configs_map.get(CFG_VEC1).kw;
     static constexpr int GROUP_SIZE = 4; // fixed for 4c kernel
 
-    // All padded configs share the same block_groups (waves_c64=2 → 32 groups).
+    // All padded configs share the same block_groups (waves_c64=2 -> 32 groups).
     static constexpr int BLOCK_GROUPS =
         KernelConfigurations<>::configs_map.get(CFG_VEC1).block_groups();
 
@@ -128,8 +127,8 @@ class WeightLoaderTest : public ::testing::Test
         constexpr int BLOCK_SIZE = KernelConfigurations<>::configs_map.get(CfgIdx).block_size();
 
         // Use the config-specific block_groups, not the fixture constant.
-        // Config 9 (unpadded) has waves_c64=1 → block_groups()=16,
-        // while configs 47-49 have waves_c64=2 → block_groups()=32.
+        // Config 9 (unpadded) has waves_c64=1 -> block_groups()=16,
+        // while configs 47-49 have waves_c64=2 -> block_groups()=32.
         constexpr int groups = KernelConfigurations<>::configs_map.get(CfgIdx).block_groups();
         auto wei_host        = make_weight_tensor(groups, k_per_group, c_per_group);
 
@@ -175,7 +174,7 @@ class WeightLoaderTest : public ::testing::Test
 };
 
 // ============================================================================
-// Correctness tests — weight loading
+// Correctness tests -- weight loading
 // ============================================================================
 
 // Unpadded path (config 9, vector_size=8): c==GROUP_SIZE, k==GROUP_SIZE.
@@ -203,7 +202,7 @@ TEST_F(WeightLoaderTest, Vec1_C1_K2) { run_and_verify<CFG_VEC1>(1, 2); }
 TEST_F(WeightLoaderTest, Vec1_C3_K2) { run_and_verify<CFG_VEC1>(3, 2); }
 
 // ============================================================================
-// Validity tests — is_valid_config gates configs by vector_size vs c_per_group
+// Validity tests -- is_valid_config gates configs by vector_size vs c_per_group
 // ============================================================================
 
 class ValidConfigTest : public ::testing::Test
@@ -215,7 +214,7 @@ class ValidConfigTest : public ::testing::Test
         // groups must be a multiple of block_groups() for any of the padded configs.
         const int groups = KernelConfigurations<>::configs_map.get(CFG_VEC1).block_groups();
         // Spatial dims must be >= block_q() for the largest waves_q4 config.
-        // configs 47-49 have waves_q4=8 → block_q()=32, so use q=w=32.
+        // configs 47-49 have waves_q4=8 -> block_q()=32, so use q=w=32.
         Conv2dParams p;
         p.direction = Direction::Fprop;
         p.n         = 1;
@@ -240,7 +239,7 @@ TEST_F(ValidConfigTest, C4_valid_all)
     EXPECT_TRUE(is_valid_config(p, KernelConfigurations<>::configs_map.get(CFG_VEC1)));
 }
 
-// c==3: not divisible by 2 or 4 → only vec1 valid.
+// c==3: not divisible by 2 or 4 -> only vec1 valid.
 TEST_F(ValidConfigTest, C3_only_vec1)
 {
     auto p = make_params(3);
@@ -249,7 +248,7 @@ TEST_F(ValidConfigTest, C3_only_vec1)
     EXPECT_TRUE(is_valid_config(p, KernelConfigurations<>::configs_map.get(CFG_VEC1)));
 }
 
-// c==2: divisible by 2 → vec2 and vec1 valid, vec4 invalid.
+// c==2: divisible by 2 -> vec2 and vec1 valid, vec4 invalid.
 TEST_F(ValidConfigTest, C2_vec2_and_vec1)
 {
     auto p = make_params(2);
@@ -324,9 +323,9 @@ TEST_F(ValidConfigTest, C1_K3_only_vec1)
 namespace ns_16c = ck_tile::direct_conv::grouped_16c_tile::v2;
 
 // Config indices for 16c kernel:
-//   9  — Fprop, no swizzle, vector_size=16 (unpadded)
-//   81 — Fprop, CyclicShift, vector_size=4 (padded, c%4==0)
-//   83 — Fprop, CyclicShift, vector_size=1 (padded, any c)
+//   9  -- Fprop, no swizzle, vector_size=16 (unpadded)
+//   81 -- Fprop, CyclicShift, vector_size=4 (padded, c%4==0)
+//   83 -- Fprop, CyclicShift, vector_size=1 (padded, any c)
 static constexpr int CFG_16C_UNPADDED = 9;
 static constexpr int CFG_16C_VEC4     = 81;
 static constexpr int CFG_16C_VEC1     = 83;
@@ -472,9 +471,9 @@ TEST_F(WeightLoader16cTest, Vec1_C9_K16_asym) { run_and_verify<CFG_16C_VEC1>(9, 
 namespace ns_8c = ck_tile::direct_conv::grouped_8c_tile::v2;
 
 // Config indices for 8c kernel:
-//   9  — Fprop, no swizzle, vector_size=8 (unpadded)
-//   79 — Fprop, CyclicShift, vector_size=4 (padded, c%4==0)
-//   81 — Fprop, CyclicShift, vector_size=1 (padded, any c)
+//   9  -- Fprop, no swizzle, vector_size=8 (unpadded)
+//   79 -- Fprop, CyclicShift, vector_size=4 (padded, c%4==0)
+//   81 -- Fprop, CyclicShift, vector_size=1 (padded, any c)
 static constexpr int CFG_8C_UNPADDED = 9;
 static constexpr int CFG_8C_VEC4     = 79;
 static constexpr int CFG_8C_VEC1     = 81;

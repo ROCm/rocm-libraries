@@ -29,7 +29,7 @@ struct TileConv32cKernelTraits
 // =============================================================================
 // V2 Group 0 tests: No swizzle, direct DRAM epilogue
 // Dgrad indices 0-7, Fprop indices 8-15
-// waves_per_wg: 16,14,12,10,8,6,4,2 → block_groups: 8,7,6,5,4,3,2,1
+// waves_per_wg: 16,14,12,10,8,6,4,2 -> block_groups: 8,7,6,5,4,3,2,1
 // =============================================================================
 
 class DirectConvGrouped32cFp16TileConvV2Test
@@ -66,31 +66,31 @@ TEST_F(DirectConvGrouped32cFp16TileConvV2Test, Fprop_Config15_Groups8)
 
 TEST_F(DirectConvGrouped32cFp16TileConvV2Test, Fprop_Config14_Groups2)
 {
-    // waves_per_wg=4, block_groups=2 → needs groups%2==0
+    // waves_per_wg=4, block_groups=2 -> needs groups%2==0
     ASSERT_TRUE((RunFprop<14>(1, 8, 8, 2, 32, 32, 3, 3, 1, 1)));
 }
 
 TEST_F(DirectConvGrouped32cFp16TileConvV2Test, Fprop_Config13_Groups3_LargerSpatial)
 {
-    // waves_per_wg=6, block_groups=3 → needs groups%3==0
+    // waves_per_wg=6, block_groups=3 -> needs groups%3==0
     ASSERT_TRUE((RunFprop<13>(4, 16, 16, 3, 32, 32, 3, 3, 1, 1)));
 }
 
 TEST_F(DirectConvGrouped32cFp16TileConvV2Test, Fprop_Config12_Groups8_LargerSpatial)
 {
-    // waves_per_wg=8, block_groups=4 → needs groups%4==0
+    // waves_per_wg=8, block_groups=4 -> needs groups%4==0
     ASSERT_TRUE((RunFprop<12>(4, 16, 16, 8, 32, 32, 3, 3, 1, 1)));
 }
 
 TEST_F(DirectConvGrouped32cFp16TileConvV2Test, Fprop_Config11_Groups5_LargerSpatial)
 {
-    // waves_per_wg=10, block_groups=5 → needs groups%5==0
+    // waves_per_wg=10, block_groups=5 -> needs groups%5==0
     ASSERT_TRUE((RunFprop<11>(4, 16, 16, 5, 32, 32, 3, 3, 1, 1)));
 }
 
 TEST_F(DirectConvGrouped32cFp16TileConvV2Test, Fprop_Config10_Groups6_LargerSpatial)
 {
-    // waves_per_wg=12, block_groups=6 → needs groups%6==0
+    // waves_per_wg=12, block_groups=6 -> needs groups%6==0
     ASSERT_TRUE((RunFprop<10>(4, 16, 16, 6, 32, 32, 3, 3, 1, 1)));
 }
 
@@ -128,25 +128,25 @@ TEST_F(DirectConvGrouped32cFp16TileConvV2Test, Dgrad_Config6_Groups2)
 
 TEST_F(DirectConvGrouped32cFp16TileConvV2Test, Dgrad_Config5_Groups3_LargerSpatial)
 {
-    // waves_per_wg=6, block_groups=3 → needs groups%3==0
+    // waves_per_wg=6, block_groups=3 -> needs groups%3==0
     ASSERT_TRUE((RunDgrad<5>(4, 16, 16, 3, 32, 32, 3, 3, 1, 1)));
 }
 
 TEST_F(DirectConvGrouped32cFp16TileConvV2Test, Dgrad_Config4_Groups8_LargerSpatial)
 {
-    // waves_per_wg=8, block_groups=4 → needs groups%4==0
+    // waves_per_wg=8, block_groups=4 -> needs groups%4==0
     ASSERT_TRUE((RunDgrad<4>(4, 16, 16, 8, 32, 32, 3, 3, 1, 1)));
 }
 
 TEST_F(DirectConvGrouped32cFp16TileConvV2Test, Dgrad_Config3_Groups5_LargerSpatial)
 {
-    // waves_per_wg=10, block_groups=5 → needs groups%5==0
+    // waves_per_wg=10, block_groups=5 -> needs groups%5==0
     ASSERT_TRUE((RunDgrad<3>(4, 16, 16, 5, 32, 32, 3, 3, 1, 1)));
 }
 
 TEST_F(DirectConvGrouped32cFp16TileConvV2Test, Dgrad_Config2_Groups6_LargerSpatial)
 {
-    // waves_per_wg=12, block_groups=6 → needs groups%6==0
+    // waves_per_wg=12, block_groups=6 -> needs groups%6==0
     ASSERT_TRUE((RunDgrad<2>(4, 16, 16, 6, 32, 32, 3, 3, 1, 1)));
 }
 
@@ -215,7 +215,7 @@ class DirectConvGrouped32cFp16TileConvV2XorTest
 {
 };
 
-// --- Group 2 Fprop (indices 40-47): use configs with block_groups ∈ {1,2,4} ---
+// --- Group 2 Fprop (indices 40-47): use configs with block_groups in {1,2,4} ---
 
 TEST_F(DirectConvGrouped32cFp16TileConvV2XorTest, Fprop_Config47_Groups1_Pad1)
 {

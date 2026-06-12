@@ -399,7 +399,7 @@ def generate_chunked_registration(headers, output_dir, variant, op_enum,
         chunk_cpp = output_dir / f"register_{variant}_chunk_{chunk_idx}.cpp"
 
         lines = [
-            "// Auto-generated — do not edit",
+            "// Auto-generated - do not edit",
             f"// Registration chunk {chunk_idx} for {variant} kernels ({len(chunk_headers)} kernels).",
             "",
             "#pragma clang diagnostic push",
@@ -440,7 +440,7 @@ def generate_chunked_registration(headers, output_dir, variant, op_enum,
     # Generate the thin register_all .cpp that calls all chunks
     all_cpp = output_dir / "register_all_grouped_conv_kernels.cpp"
     lines = [
-        "// Auto-generated — do not edit",
+        "// Auto-generated - do not edit",
         f"// Top-level registration that calls {len(chunks)} chunk functions.",
         "",
         '#include "ck_tile/dispatcher/grouped_conv_registry.hpp"',

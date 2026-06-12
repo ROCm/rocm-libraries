@@ -10,14 +10,14 @@ namespace ck_tile {
 namespace direct_conv {
 
 // -----------------------------------------------------------------------
-// WeightAccessor — register-resident filter weight buffer with 2D
+// WeightAccessor -- register-resident filter weight buffer with 2D
 // (R, S) coordinate access via CK Tile tensor descriptor.
 //
 // Template parameters:
-//   KH, KW — filter height and width (compile-time constants).
+//   KH, KW -- filter height and width (compile-time constants).
 //
 // The underlying storage is a flat fp16x4_t[KH*KW] array. Each element
-// holds one fp16x4_t (4 fp16 values) per filter position — the MFMA
+// holds one fp16x4_t (4 fp16 values) per filter position -- the MFMA
 // B-operand for a single (R, S) coordinate.
 //
 // Access methods use make_tensor_coordinate with a packed 2D [KH, KW]
@@ -51,11 +51,11 @@ struct WeightAccessor
 };
 
 // -----------------------------------------------------------------------
-// WeightAccessor8 — register-resident filter weight buffer with 8-element
+// WeightAccessor8 -- register-resident filter weight buffer with 8-element
 // vector per filter position. Used by 8c (Toeplitz) and 32c kernels where
 // the MFMA B-operand is fp16x8_t/bf16x8_t (mfma_f32_16x16x32).
 //
-// Note: WeightAccessor8 is a convenience alias — WeightAccessor with an
+// Note: WeightAccessor8 is a convenience alias -- WeightAccessor with an
 // 8-element VecType provides the same functionality. This alias is kept
 // for readability at call sites that distinguish 4-element vs 8-element.
 // -----------------------------------------------------------------------
@@ -101,10 +101,10 @@ CK_TILE_DEVICE void weight_load_to_lds(const BlockCoords_& bc,
             // MakeDramReadDescriptorPadded returns a 2D [WEIGHT_LDS_PADDED_UINT4, 8]
             // descriptor (same shape as MakeDramReadDescriptor) built by:
             //   1. 4D raw DRAM view: [BLOCK_GROUPS, k_per_group, KH_KW, c_per_group]
-            //   2. Pad K → GROUP_SIZE, pad C → GROUP_SIZE (OOB reads as zero)
-            //   3. Merge all 4 dims → flat 1D
-            //   4. Unmerge → [WEIGHT_LDS_SIZE_UINT4, 8]
-            //   5. Pad rows → [WEIGHT_LDS_PADDED_UINT4, 8]
+            //   2. Pad K -> GROUP_SIZE, pad C -> GROUP_SIZE (OOB reads as zero)
+            //   3. Merge all 4 dims -> flat 1D
+            //   4. Unmerge -> [WEIGHT_LDS_SIZE_UINT4, 8]
+            //   5. Pad rows -> [WEIGHT_LDS_PADDED_UINT4, 8]
             //
             // The buffer base is offset to bc.block_group so the BLOCK_GROUPS
             // dimension covers exactly this block's groups.
@@ -220,7 +220,7 @@ CK_TILE_DEVICE void weight_load_to_lds(const BlockCoords_& bc,
 // and C-stride factors in a single flat dimension.
 //
 // The LDS layout is [K_total][KH*KW][C]. The per-warp descriptor views
-// a [16, 16] slice (16 K rows × 16 C cols) with strides [KH_KW*GROUP_SIZE, 1].
+// a [16, 16] slice (16 K rows x 16 C cols) with strides [KH_KW*GROUP_SIZE, 1].
 // After transpose, each thread holds the MFMA B-operand for its K position.
 //
 // For 16c (fp16x4_t): one transpose read per filter position.
@@ -228,17 +228,17 @@ CK_TILE_DEVICE void weight_load_to_lds(const BlockCoords_& bc,
 // reading from K rows offset by 16 (covering K[16:31] within the group).
 //
 // TC must provide:
-//   TC::Weight::MakeLdsReadDescriptorDgrad()   — per-warp 2D [16, 16] descriptor
-//   TC::Weight::MakeLdsReadTileDistributionDgrad() — per-warp input distribution
+//   TC::Weight::MakeLdsReadDescriptorDgrad()   -- per-warp 2D [16, 16] descriptor
+//   TC::Weight::MakeLdsReadTileDistributionDgrad() -- per-warp input distribution
 //   TC::GROUP_SIZE, TC::KH_KW
-//   TC::BLOCK_GROUPS — number of conv groups per workgroup
+//   TC::BLOCK_GROUPS -- number of conv groups per workgroup
 //
 // WavesPerGroup: number of waves per conv group (1 for 16c, 2 for 32c).
 //   For 32c, wave_half selects which 16 C columns to read.
 //
 // WeightAccessorT must provide:
-//   value_type — fp16x4_t (16c) or fp16x8_t (32c)
-//   weights[]  — register array indexed by filter position
+//   value_type -- fp16x4_t (16c) or fp16x8_t (32c)
+//   weights[]  -- register array indexed by filter position
 template <typename TC,
           int KH,
           int KW,
@@ -279,7 +279,7 @@ CK_TILE_DEVICE void weight_read_dgrad(WeightAccessorT& wa, uint4* weight_lds)
     constexpr DgradDist dgrad_dist = TC::Weight::MakeLdsReadTileDistributionDgrad();
 
     // Window dimensions match the descriptor: [GROUP_SIZE, GROUP_SIZE] for 16c,
-    // [32, 16] for 32c (where each wave_half reads 32 K_out × 16 C).
+    // [32, 16] for 32c (where each wave_half reads 32 K_out x 16 C).
     using VecType = typename std::remove_reference_t<WeightAccessorT>::value_type;
     // Distinguish 16c (4-element vec, 8 bytes) from 32c (8-element vec, 16 bytes).
     constexpr int WIN_DIM0 = (sizeof(VecType) == 4 * sizeof(ElementType)) ? TC::GROUP_SIZE : 32;

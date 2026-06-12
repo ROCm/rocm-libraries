@@ -11,8 +11,8 @@ Both codegen and instance_builder import from here to ensure consistency.
 
 Architecture:
   grouped_conv_tile_configs.py  (SOURCE OF TRUTH)
-      ├── Used by unified_grouped_conv_codegen.py
-      └── Used by grouped_conv_instance_builder.py
+      - Used by unified_grouped_conv_codegen.py
+      - Used by grouped_conv_instance_builder.py
 """
 
 from typing import Dict, List, Tuple
@@ -23,24 +23,24 @@ from typing import Dict, List, Tuple
 
 # Common tile configurations used across variants
 # Format: (tile_m, tile_n, tile_k)
-# CRITICAL: tile_m MUST equal wave_m × warp_tile_m (TileGemmShape constraint)
+# CRITICAL: tile_m MUST equal wave_m x warp_tile_m (TileGemmShape constraint)
 # Only tiles that successfully compile are included
 COMMON_TILES: List[Tuple[int, int, int]] = [
-    # Using warp_tile [16,16,16]: tile_m = wave_m × 16
-    (16, 64, 64),  # 1 × 16 = 16, wave=(1,4,1)
-    (32, 64, 64),  # 2 × 16 = 32, wave=(2,2,1)
-    (64, 64, 64),  # 4 × 16 = 64, wave=(4,1,1)
-    # (128, 64, 64),  # 8 × 16 = 128, wave=(8,2,1) - EXCLUDED: Compile error
-    # Using warp_tile [32,32,16]: tile_m = wave_m × 32
-    (32, 128, 64),  # 1 × 32 = 32, wave=(1,4,1)
-    (64, 128, 64),  # 2 × 32 = 64, wave=(2,2,1)
-    (128, 128, 64),  # 4 × 32 = 128, wave=(4,4,1) - NEW!
+    # Using warp_tile [16,16,16]: tile_m = wave_m x 16
+    (16, 64, 64),  # 1 x 16 = 16, wave=(1,4,1)
+    (32, 64, 64),  # 2 x 16 = 32, wave=(2,2,1)
+    (64, 64, 64),  # 4 x 16 = 64, wave=(4,1,1)
+    # (128, 64, 64),  # 8 x 16 = 128, wave=(8,2,1) - EXCLUDED: Compile error
+    # Using warp_tile [32,32,16]: tile_m = wave_m x 32
+    (32, 128, 64),  # 1 x 32 = 32, wave=(1,4,1)
+    (64, 128, 64),  # 2 x 32 = 64, wave=(2,2,1)
+    (128, 128, 64),  # 4 x 32 = 128, wave=(4,4,1) - NEW!
     # Note: 256x64x64 excluded - compilation issues
-    # Using warp_tile [16,16,32]: tile_m = wave_m × 16
-    (16, 64, 128),  # 1 × 16 = 16, wave=(1,4,1)
-    (32, 64, 128),  # 2 × 16 = 32, wave=(2,2,1)
-    (64, 64, 128),  # 4 × 16 = 64, wave=(4,1,1)
-    (128, 64, 128),  # 8 × 16 = 128, wave=(8,2,1) - NEW!
+    # Using warp_tile [16,16,32]: tile_m = wave_m x 16
+    (16, 64, 128),  # 1 x 16 = 16, wave=(1,4,1)
+    (32, 64, 128),  # 2 x 16 = 32, wave=(2,2,1)
+    (64, 64, 128),  # 4 x 16 = 64, wave=(4,1,1)
+    (128, 64, 128),  # 8 x 16 = 128, wave=(8,2,1) - NEW!
     # Note: Excluded tiles:
     # - 128x64x64: wave=8x2x1, warp=16x16x16 - compile error
     # - 32x128x128, 64x128x128, 128x128x128, 256x128x128 (warp_tile 32x32x32) - compv4 issues
@@ -49,7 +49,7 @@ COMMON_TILES: List[Tuple[int, int, int]] = [
 
 # Wave configurations per tile
 # Key: (tile_m, tile_n, tile_k) -> (wave_m, wave_n, wave_k)
-# Constraint: tile_m == wave_m × warp_tile_m
+# Constraint: tile_m == wave_m x warp_tile_m
 # Only use approved wave configs from arch_specs.json: [1,4,1], [2,2,1], [4,1,1], [8,2,1], [4,4,1]
 TILE_TO_WAVE: Dict[Tuple[int, int, int], Tuple[int, int, int]] = {
     # warp_tile [16,16,16]
@@ -110,7 +110,7 @@ TILE_TO_VECTOR: Dict[Tuple[int, int, int], Tuple[int, int, int]] = {
 #   has_dsb:   1 if "_dsb" suffix present (double smem buffer), else 0
 #   has_si:    1 if "_si"  suffix present (store immediate),    else 0
 PIPELINE_VARIANTS: List[Tuple[str, str, int, int]] = [
-    # basic_v1: both intra/inter × {∅, dsb, si, dsb_si} = 8 combos
+    # basic_v1: both intra/inter x {{}, dsb, si, dsb_si} = 8 combos
     ("basic_v1", "intrawave", 0, 0),
     ("basic_v1", "intrawave", 1, 0),
     ("basic_v1", "intrawave", 0, 1),
@@ -119,25 +119,25 @@ PIPELINE_VARIANTS: List[Tuple[str, str, int, int]] = [
     ("basic_v1", "interwave", 1, 0),
     ("basic_v1", "interwave", 0, 1),
     ("basic_v1", "interwave", 1, 1),
-    # compv3: intrawave × {∅, dsb, si, dsb_si} = 4 combos
+    # compv3: intrawave x {{}, dsb, si, dsb_si} = 4 combos
     ("compv3", "intrawave", 0, 0),
     ("compv3", "intrawave", 1, 0),
     ("compv3", "intrawave", 0, 1),
     ("compv3", "intrawave", 1, 1),
-    # compv4: intrawave × {dsb, dsb_si} only = 2 combos
+    # compv4: intrawave x {dsb, dsb_si} only = 2 combos
     ("compv4", "intrawave", 1, 0),
     ("compv4", "intrawave", 1, 1),
-    # compv5: intrawave × {∅, dsb, si, dsb_si} = 4 combos
+    # compv5: intrawave x {{}, dsb, si, dsb_si} = 4 combos
     ("compv5", "intrawave", 0, 0),
     ("compv5", "intrawave", 1, 0),
     ("compv5", "intrawave", 0, 1),
     ("compv5", "intrawave", 1, 1),
-    # compv6: intrawave × {∅, dsb, si, dsb_si} = 4 combos
+    # compv6: intrawave x {{}, dsb, si, dsb_si} = 4 combos
     ("compv6", "intrawave", 0, 0),
     ("compv6", "intrawave", 1, 0),
     ("compv6", "intrawave", 0, 1),
     ("compv6", "intrawave", 1, 1),
-    # mem: both intra/inter × {∅, dsb, si, dsb_si} = 8 combos
+    # mem: both intra/inter x {{}, dsb, si, dsb_si} = 8 combos
     ("mem", "intrawave", 0, 0),
     ("mem", "intrawave", 1, 0),
     ("mem", "intrawave", 0, 1),
@@ -394,13 +394,13 @@ def print_summary():
     print(f"Total tiles: {len(COMMON_TILES)}")
     print(f"Backward weight tiles: {len(BWD_WEIGHT_TILES)}")
     print()
-    print("Tile sizes (M×N×K):")
+    print("Tile sizes (MxNxK):")
     for tile in COMMON_TILES:
         m, n, k = tile
         wave = TILE_TO_WAVE[tile]
         warp = TILE_TO_WARP[tile]
         print(
-            f"  {m:3}×{n:3}×{k:3}  wave={wave[0]}×{wave[1]}×{wave[2]}  warp={warp[0]}×{warp[1]}×{warp[2]}"
+            f"  {m:3}x{n:3}x{k:3}  wave={wave[0]}x{wave[1]}x{wave[2]}  warp={warp[0]}x{warp[1]}x{warp[2]}"
         )
     print("=" * 80)
 

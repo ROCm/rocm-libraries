@@ -4,8 +4,8 @@
 // CK Tile v3 implementation of non-grouped (standard) convolution with
 // cross-wave LDS reduction. Supports two MFMA shapes:
 //
-//   mfma_f32_16x16x32: 16 spatial × 16 K-output, 32-ch C-reduction
-//   mfma_f32_32x32x16: 32 spatial × 32 K-output, 16-ch C-reduction
+//   mfma_f32_16x16x32: 16 spatial x 16 K-output, 32-ch C-reduction
+//   mfma_f32_32x32x16: 32 spatial x 32 K-output, 16-ch C-reduction
 //
 // Splits the C-reduction across waves within the same workgroup. Each wave
 // handles one channels_per_group C-slice, all producing partial sums for
@@ -53,7 +53,7 @@ enum class MfmaShape
 };
 
 // ===================================================================
-// Config — kernel configuration for v3 cross-wave LDS reduction.
+// Config -- kernel configuration for v3 cross-wave LDS reduction.
 //
 // Parameters:
 //   mfma_shape: M16N16K32 or M32N32K16
@@ -66,13 +66,13 @@ enum class MfmaShape
 //   c_local_count() = waves_per_wg (one cpg slice per wave)
 //
 // MFMA dimension convention (matches hardware lane mapping):
-//   weight operand = A: 16 (or 32) rows × K reduction
-//                    → row index = mfma_m → K-output channel (Fprop) or
+//   weight operand = A: 16 (or 32) rows x K reduction
+//                    -> row index = mfma_m -> K-output channel (Fprop) or
 //                                            C-input channel (Dgrad)
-//   input  operand = B: K reduction × 16 (or 32) columns
-//                    → column index = mfma_n → spatial output position
-//   accumulator    = C: rows × columns
-//                    → lane % 16 selects N (column = spatial),
+//   input  operand = B: K reduction x 16 (or 32) columns
+//                    -> column index = mfma_n -> spatial output position
+//   accumulator    = C: rows x columns
+//                    -> lane % 16 selects N (column = spatial),
 //                      4 values per lane span M (rows = K-output).
 // ===================================================================
 template <DataType DT = DataType::fp16>
@@ -107,7 +107,7 @@ struct Config
     constexpr int num_waves() const { return waves_per_wg; }
     // Channels in a single in-flight LDS chunk = one input double-buffer
     // entry = one prologue iteration's weight LDS region.
-    // INVARIANT: block_c() must not scale with c_slices_per_wave — it is
+    // INVARIANT: block_c() must not scale with c_slices_per_wave -- it is
     // consumed by TileConstantsBase (BLOCK_C8, INPUT_LDS_BUFFER_SIZE_*) and
     // Weight::WEIGHT_LDS_READ_K, which must stay fixed-size when N grows.
     constexpr int block_c() const { return channels_per_group() * block_groups(); }
@@ -164,7 +164,7 @@ struct Config
 };
 
 // ===================================================================
-// weight_load_to_lds_kyxc — load one c_slice of KYXC weights to LDS.
+// weight_load_to_lds_kyxc -- load one c_slice of KYXC weights to LDS.
 //
 // Loads weight[block_k_start : +block_k_size, :, c_slice*cpg : +cpg]
 // from KYXC DRAM layout into contiguous [block_k_size, KH_KW, cpg] LDS.
@@ -208,7 +208,7 @@ CK_TILE_DEVICE void weight_load_to_lds_kyxc(uint4* weight_lds,
 }
 
 // ===================================================================
-// weight_load_to_lds_kyxc_dgrad — load one k_slice of KYXC weights
+// weight_load_to_lds_kyxc_dgrad -- load one k_slice of KYXC weights
 // for Dgrad into LDS.
 //
 // Loads weight[k_slice_start : +cpg, :, block_c_start : +block_k_size]
@@ -255,7 +255,7 @@ CK_TILE_DEVICE void weight_load_to_lds_kyxc_dgrad(uint4* weight_lds,
 }
 
 // ===================================================================
-// swizzle_c8_forward / swizzle_c8_inverse — tile-local LDS swizzle.
+// swizzle_c8_forward / swizzle_c8_inverse -- tile-local LDS swizzle.
 //
 // Forward: maps logical c8 to permuted c8 for DRAM reads.
 // Inverse: maps permuted c8 back to logical c8 for LDS reads.
@@ -287,7 +287,7 @@ CK_TILE_DEVICE int swizzle_c8_inverse(int spatial, int c8)
 }
 
 // ===================================================================
-// is_valid_config — config compatibility check for v3.
+// is_valid_config -- config compatibility check for v3.
 // ===================================================================
 template <DataType DT = DataType::fp16>
 inline bool is_valid_config(const Conv2dParams& par, const Config<DT>& cfg)
@@ -347,10 +347,10 @@ inline LaunchParams get_launch_params(const Conv2dParams& par)
 }
 
 // ===================================================================
-// TileConstants — extends TileConstantsBase for v3.
+// TileConstants -- extends TileConstantsBase for v3.
 //
-// Weight LDS is sized for [block_k_size, KH*KW, cpg] — one c_slice.
-// block_k_size × cpg = 512 for both MFMA shapes.
+// Weight LDS is sized for [block_k_size, KH*KW, cpg] -- one c_slice.
+// block_k_size x cpg = 512 for both MFMA shapes.
 // ===================================================================
 template <auto cfg>
 struct TileConstants : direct_conv::TileConstantsBase<cfg>
@@ -374,7 +374,7 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
     // Per-wave parallel loading: each wave owns its own LDS region.
     static constexpr int WEIGHT_LDS_ALL_WAVES = WEIGHT_LDS_SIZE_UINT4 * cfg.waves_per_wg;
 
-    // Mfma distribution — needed by InputLoader's static type declarations.
+    // Mfma distribution -- needed by InputLoader's static type declarations.
     // Not used at runtime (ConvInputLoader passes init_mfma_offsets=false).
     // The distribution must be well-formed for type deduction to compile.
     // Input is the MFMA B operand: spatial position = N (columns of B/C).
@@ -397,7 +397,7 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
         }
     };
 
-    // Weight — only LDS sizing overrides needed. Weight reads use manual
+    // Weight -- only LDS sizing overrides needed. Weight reads use manual
     // addressing (not tile distributions).
     struct Weight : Base::Weight
     {
@@ -405,13 +405,13 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
 };
 
 // ===================================================================
-// BlockCoords — reuse non-grouped BlockCoords from v1.
+// BlockCoords -- reuse non-grouped BlockCoords from v1.
 // ===================================================================
 template <auto cfg>
 using ConvBlockCoordsT = direct_conv::BlockCoordsNonGrouped<cfg>;
 
 // ===================================================================
-// ConvInputLoader — extends InputLoader.
+// ConvInputLoader -- extends InputLoader.
 //
 // Key properties:
 //   1. wave_group = wave (not wave / 2): each wave is its own C-group.
@@ -499,7 +499,7 @@ struct ConvInputLoader
         // single chunk's worth of channels at the last (h, w), so any
         // chunk CS > 0 load that targets the LAST real input column gets
         // zeroed by the OOB clamp. Re-make the rsrc to span the full
-        // per-batch input tensor (N batches × hi × wi × C), which is the
+        // per-batch input tensor (N batches x hi x wi x C), which is the
         // largest extent any chunk's voffset can reach.
         //
         // We also bypass this re-make when N == 1 (no chunks beyond CS=0,
@@ -516,8 +516,8 @@ struct ConvInputLoader
         const int lane = static_cast<int>(threadIdx.x) % WAVE_SIZE;
         const int wave = static_cast<int>(threadIdx.x) / WAVE_SIZE;
 
-        // Input = MFMA B operand: lane % mfma_n → column (spatial position),
-        // lane / mfma_n → K-reduction group.
+        // Input = MFMA B operand: lane % mfma_n -> column (spatial position),
+        // lane / mfma_n -> K-reduction group.
         constexpr int MFMA_N = cfg.mfma_n();
         const int lane_q     = lane % MFMA_N;
         const int lane_c8    = lane / MFMA_N;
@@ -615,13 +615,13 @@ struct ConvInputLoader
 };
 
 // ===================================================================
-// WeightLoader — weight accessor for v3.
+// WeightLoader -- weight accessor for v3.
 //
 // Weight LDS layout for one c_slice: [16_K, KH_KW, 32_C].
 // All waves read the same weight data from LDS (same 16 K-channels),
 // but each wave's MFMA pairs these with a different C-section of input.
 //
-// The DRAM→LDS load functions are reused from v1 unchanged.
+// The DRAM -> LDS load functions are reused from v1 unchanged.
 // ===================================================================
 template <auto cfg>
 struct WeightLoader : direct_conv::WeightAccessor8<
@@ -759,8 +759,8 @@ struct WeightLoader : direct_conv::WeightAccessor8<
             // Each thread reads 8 K-reduction values per filter position.
             //
             // MFMA A operand mapping:
-            //   k_group = lane / mfma_m → selects which 8 K-reduction values
-            //   c_lane  = lane % mfma_m → C-output position
+            //   k_group = lane / mfma_m -> selects which 8 K-reduction values
+            //   c_lane  = lane % mfma_m -> C-output position
             constexpr int BLOCK_C = cfg.block_k_size();
             constexpr int MFMA_M  = cfg.mfma_m();
 
@@ -783,8 +783,8 @@ struct WeightLoader : direct_conv::WeightAccessor8<
             // Fprop: LDS layout is [block_k_size_K, KH_KW, cpg_C], C innermost.
             //
             // MFMA A operand mapping (weight is A; row index = M dimension):
-            //   k_out = lane % mfma_m → K-output channel (row of A)
-            //   c_grp = lane / mfma_m → C-reduction group (each has 8 values)
+            //   k_out = lane % mfma_m -> K-output channel (row of A)
+            //   c_grp = lane / mfma_m -> C-reduction group (each has 8 values)
             //
             // Each thread reads 8 C values per filter position:
             //   vals[j] = weight[k_out, f, c_grp*8 + j]
@@ -812,20 +812,20 @@ struct WeightLoader : direct_conv::WeightAccessor8<
 };
 
 // ===================================================================
-// OutputWriterV3 — manual offset computation for v3.
+// OutputWriterV3 -- manual offset computation for v3.
 //
 // In v3, all waves share the same block_k_size K-channels. Only wave 0
 // writes the output after cross-wave LDS reduction.
 //
-// M16N16K32: lane % 16 → spatial, lane / 16 → K-group (4 groups × 4 K).
+// M16N16K32: lane % 16 -> spatial, lane / 16 -> K-group (4 groups x 4 K).
 //   Single 8B DRAM write per thread.
 //
-// M32N32K16: lane % 32 → spatial, lane / 32 → K-block (0 or 1).
+// M32N32K16: lane % 32 -> spatial, lane / 32 -> K-block (0 or 1).
 //   16 accumulator values map to 4 groups of 4 contiguous K values:
-//     acc[0..3]   → K = g*8 + m_block*4 + {0..3} for g=0
-//     acc[4..7]   → K = g*8 + m_block*4 + {0..3} for g=1
-//     acc[8..11]  → K = g*8 + m_block*4 + {0..3} for g=2
-//     acc[12..15] → K = g*8 + m_block*4 + {0..3} for g=3
+//     acc[0..3]   -> K = g*8 + m_block*4 + {0..3} for g=0
+//     acc[4..7]   -> K = g*8 + m_block*4 + {0..3} for g=1
+//     acc[8..11]  -> K = g*8 + m_block*4 + {0..3} for g=2
+//     acc[12..15] -> K = g*8 + m_block*4 + {0..3} for g=3
 //   where m_block = lane / 32. Four 8B DRAM writes per thread.
 // ===================================================================
 template <auto cfg>
@@ -910,26 +910,26 @@ struct OutputWriterV3
 };
 
 // ===================================================================
-// OutputWriterV3Lds — LDS-staged epilogue for 16B DRAM writes.
+// OutputWriterV3Lds -- LDS-staged epilogue for 16B DRAM writes.
 //
 // After cross-wave LDS reduction, wave 0 writes the fp16-converted
 // accumulator to a staging LDS buffer. All threads then participate
 // in barriers. Active threads read 16B (uint4) from the staging
-// buffer and write 16B to DRAM — doubling throughput vs the 8B
+// buffer and write 16B to DRAM -- doubling throughput vs the 8B
 // writes of OutputWriterV3.
 //
 // The staging buffer reuses the cross-wave reduction LDS region
 // (reduce_lds), which is dead after cross_wave_reduce completes.
 //
 // Staging LDS layout: [BLOCK_Q, BLOCK_K] contiguous fp16.
-//   M16N16K32: 16 × 16 = 256 fp16 = 512B = 32 uint4
-//   M32N32K16: 32 × 32 = 1024 fp16 = 2048B = 128 uint4
+//   M16N16K32: 16 x 16 = 256 fp16 = 512B = 32 uint4
+//   M32N32K16: 32 x 32 = 1024 fp16 = 2048B = 128 uint4
 //
 // DRAM store: tid-based linear mapping.
 //   Each active thread reads one uint4 (8 fp16) from staging LDS
-//   and writes it to DRAM. Active threads: BLOCK_Q × BLOCK_K8.
-//     M16N16K32: 16 × 2 = 32 active threads
-//     M32N32K16: 32 × 4 = 128 active threads
+//   and writes it to DRAM. Active threads: BLOCK_Q x BLOCK_K8.
+//     M16N16K32: 16 x 2 = 32 active threads
+//     M32N32K16: 32 x 4 = 128 active threads
 // ===================================================================
 template <auto cfg>
 struct OutputWriterV3Lds
@@ -1149,7 +1149,7 @@ struct Conv32cV3Kernel
 };
 
 // ===================================================================
-// is_applicable — checks whether a Conv2dParams is suitable for v3.
+// is_applicable -- checks whether a Conv2dParams is suitable for v3.
 // ===================================================================
 template <DataType DT = DataType::fp16>
 inline bool is_applicable(const Conv2dParams& par)
@@ -1170,7 +1170,7 @@ inline bool is_applicable(const Conv2dParams& par)
     }
 
     // Fprop: C_in=c_tot must be %32 (MFMA reduction), K_out=k_tot must be %16 (MFMA output).
-    // Dgrad: roles swap — C_in=k_tot must be %32, K_out=c_tot must be %16.
+    // Dgrad: roles swap -- C_in=k_tot must be %32, K_out=c_tot must be %16.
     // The stricter requirement (C_in == block_c = waves*32 exactly) is
     // checked per-config in is_valid_config.
     if(par.direction == Direction::Fprop)
@@ -1208,7 +1208,7 @@ inline bool is_applicable(const Conv2dParams& par)
 }
 
 // ===================================================================
-// launch_kernel — compile-time config dispatch for v3.
+// launch_kernel -- compile-time config dispatch for v3.
 // ===================================================================
 template <auto cfg, DataType DT = DataType::fp16>
 inline void launch_kernel(const LaunchParams& lp,

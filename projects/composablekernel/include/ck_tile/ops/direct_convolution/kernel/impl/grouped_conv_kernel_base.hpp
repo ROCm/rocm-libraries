@@ -5,7 +5,7 @@
 
 // Shared boilerplate for grouped convolution CK Tile kernel variants.
 //
-// Each variant (4c v3, 16c v2, …) provides:
+// Each variant (4c v3, 16c v2, ...) provides:
 //   - A Config struct with variant-specific wave-count fields; all common
 //     fields (kh, kw, n_fold, direction, swizzle_type, epilogue, group_size())
 //     are inherited from ConfigBase.
@@ -13,7 +13,7 @@
 //     adds only the variant-specific tile distributions (Mfma,
 //     Weight::MakeLdsReadTileDistribution,
 //     Output::MakeDramWriteTileDistributionNarrow).
-//   - A WeightLoader struct — only the Dgrad TransposeLayout<> specialisation
+//   - A WeightLoader struct -- only the Dgrad TransposeLayout<> specialisation
 //     differs; the Fprop path is provided by weight_read_fprop<TC>() here.
 //
 // Everything else lives here and is shared verbatim.
@@ -33,7 +33,7 @@
 namespace ck_tile::direct_conv {
 
 // ======================================================================
-// TileConstantsBase — all constexpr members derivable from cfg.
+// TileConstantsBase -- all constexpr members derivable from cfg.
 //
 // cfg must provide: block_c(), block_q(), num_waves(), block_size(),
 //                   group_size(), block_groups(), kh, kw, swizzle_type.
@@ -81,7 +81,7 @@ struct TileConstantsBase
     static constexpr SwizzleType SWIZZLE_TYPE = cfg.swizzle_type;
 
     // -----------------------------------------------------------------------
-    // Weight — LDS sizing and descriptor factories (shared formula).
+    // Weight -- LDS sizing and descriptor factories (shared formula).
     // The variant-specific MakeLdsReadTileDistribution() is added by the
     // derived TileConstants.
     // -----------------------------------------------------------------------
@@ -119,7 +119,7 @@ struct TileConstantsBase
     };
 
     // -----------------------------------------------------------------------
-    // Input — fully delegated to SharedDescriptors.
+    // Input -- fully delegated to SharedDescriptors.
     // -----------------------------------------------------------------------
     struct Input
     {
@@ -147,7 +147,7 @@ struct TileConstantsBase
     };
 
     // -----------------------------------------------------------------------
-    // Output — shared descriptors; variant-specific distributions added below.
+    // Output -- shared descriptors; variant-specific distributions added below.
     // -----------------------------------------------------------------------
     struct Output
     {
@@ -208,7 +208,7 @@ struct TileConstantsBase
 };
 
 // ======================================================================
-// BlockCoords — workgroup-level coordinates (shared by all variants).
+// BlockCoords -- workgroup-level coordinates (shared by all variants).
 // ======================================================================
 template <auto cfg>
 struct BlockCoords
@@ -246,7 +246,7 @@ struct BlockCoords
 };
 
 // ======================================================================
-// BlockCoordsNonGrouped — workgroup-level coordinates for non-grouped conv.
+// BlockCoordsNonGrouped -- workgroup-level coordinates for non-grouped conv.
 //
 // Maps blockIdx.y to K-tile ranges (instead of conv groups).
 // Each wave independently handles 16 output channels (one K-tile).
@@ -262,7 +262,7 @@ struct BlockCoordsNonGrouped
     int C_in;  // = C_total
     int C_out; // = K_total
 
-    // Channel offsets — block_k_in is mutable for c_block iteration.
+    // Channel offsets -- block_k_in is mutable for c_block iteration.
     int block_k_in;  // input channel offset (set per c_block)
     int block_k_out; // output channel offset (= block_k_start)
 
@@ -297,10 +297,10 @@ struct BlockCoordsNonGrouped
 };
 
 // ======================================================================
-// get_launch_params_non_grouped — launch-parameter computation for non-grouped conv.
+// get_launch_params_non_grouped -- launch-parameter computation for non-grouped conv.
 //
-// For Fprop: Grid.y = ceil(K / block_k_size) — tile over output channels.
-// For Dgrad: Grid.y = ceil(C / block_k_size) — tile over input gradient channels.
+// For Fprop: Grid.y = ceil(K / block_k_size) -- tile over output channels.
+// For Dgrad: Grid.y = ceil(C / block_k_size) -- tile over input gradient channels.
 // ======================================================================
 template <typename Config>
 LaunchParams get_launch_params_non_grouped(const Config& cfg, const Conv2dParams& par)
@@ -321,7 +321,7 @@ LaunchParams get_launch_params_non_grouped(const Config& cfg, const Conv2dParams
 }
 
 // ======================================================================
-// weight_read_fprop<TC> — shared Fprop weight-register read from LDS.
+// weight_read_fprop<TC> -- shared Fprop weight-register read from LDS.
 //
 // Loads the weight tile via load_tile() and stores each filter position's
 // fp16x4_t into the WeightAccessor using get_as<fp16x4_t>() which
@@ -346,7 +346,7 @@ CK_TILE_DEVICE void weight_read_fprop(WeightAccessorT& wa, uint4* weight_lds)
     const auto weight_tile = ck_tile::load_tile(weight_lds_read_window);
 
     // get_as<VecType>() reinterprets the thread_buffer<ElementType, KH_KW*4>
-    // as thread_buffer<VecType, KH_KW> — a zero-copy view where each
+    // as thread_buffer<VecType, KH_KW> -- a zero-copy view where each
     // element is one VecType (e.g. fp16x4_t or bf16x4_t) per filter position.
     using VecType       = typename std::remove_reference_t<WeightAccessorT>::value_type;
     const auto& vec_buf = weight_tile.get_thread_buffer().template get_as<VecType>();
@@ -354,7 +354,7 @@ CK_TILE_DEVICE void weight_read_fprop(WeightAccessorT& wa, uint4* weight_lds)
 }
 
 // ========================================================================
-// is_applicable_base — layout and geometry checks shared by all variants.
+// is_applicable_base -- layout and geometry checks shared by all variants.
 // Each variant additionally checks
 // channels_per_group() and c_tot alignment.
 // Data type checks are done by make_variant<DT>().
@@ -375,7 +375,7 @@ inline bool is_applicable_base(const Conv2dParams& par)
 }
 
 // ======================================================================
-// get_launch_params_impl — shared launch-parameter computation.
+// get_launch_params_impl -- shared launch-parameter computation.
 // ======================================================================
 template <typename Config>
 LaunchParams get_launch_params_impl(const Config& cfg, const Conv2dParams& par)
@@ -393,7 +393,7 @@ LaunchParams get_launch_params_impl(const Config& cfg, const Conv2dParams& par)
 }
 
 // ======================================================================
-// xor_config_valid — shared XOR swizzle alignment check.
+// xor_config_valid -- shared XOR swizzle alignment check.
 // ======================================================================
 template <typename Config>
 bool xor_config_valid(const Config& cfg, const Conv2dParams& par)
@@ -401,7 +401,7 @@ bool xor_config_valid(const Config& cfg, const Conv2dParams& par)
     // XOR swizzle constraint: BLOCK_Q must be a multiple of BLOCK_C8 for
     // multi-tile spatial decomposition. BLOCK_C8 = waves_per_wg * 2.
     // BLOCK_Q = 16 is divisible by BLOCK_C8 only when waves_per_wg divides 8
-    // (i.e., waves_per_wg ∈ {1,2,4,8}). For other values, XOR is only valid
+    // (i.e., waves_per_wg in {1,2,4,8}). For other values, XOR is only valid
     // when the output fits in a single spatial tile.
     const int block_c8 = cfg.block_c() / 8;
     const int out_q    = (par.direction == Direction::Dgrad) ? par.w : par.q;

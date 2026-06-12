@@ -17,7 +17,7 @@ namespace ck_tile::direct_conv::grouped_16c_tile::v2 {
 
 // All instantiated configurations.
 //
-// Layout: 4 variant groups × 18 configs each = 72 configs total.
+// Layout: 4 variant groups x 18 configs each = 72 configs total.
 // Each group has 9 Dgrad + 9 Fprop configs:
 //   waves_per_wg = 16,8,7,6,5,4,3,2,1
 //

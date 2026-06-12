@@ -40,8 +40,8 @@ using namespace grouped_4c_tile::v3;
 // ============================================================================
 // Config indices
 //
-// KernelConfigurations<>::configs_map.get(9)  — Fprop, no swizzle, direct DRAM (OutputWriter)
-// KernelConfigurations<>::configs_map.get(49) — Fprop, CyclicShift, vector_size=1, direct DRAM
+// KernelConfigurations<>::configs_map.get(9)  -- Fprop, no swizzle, direct DRAM (OutputWriter)
+// KernelConfigurations<>::configs_map.get(49) -- Fprop, CyclicShift, vector_size=1, direct DRAM
 // (OutputWriter)
 // ============================================================================
 static constexpr int CFG_DIRECT = 9;
@@ -221,7 +221,7 @@ class OutputWriterTest : public ::testing::Test
 };
 
 // ============================================================================
-// Correctness tests — output writing
+// Correctness tests -- output writing
 // ============================================================================
 
 // Unpadded path: k_per_group == GROUP_SIZE.
@@ -270,9 +270,9 @@ TEST_F(OutputWriterTest, Direct_C1_K4) { run_and_verify<CFG_DIRECT>(4, 1); }
 namespace ns_16c = ck_tile::direct_conv::grouped_16c_tile::v2;
 
 // Config indices for 16c kernel:
-//   9  — Fprop, no swizzle, direct DRAM (unpadded)
-//   83 — Fprop, CyclicShift, LDS epilogue, vector_size=1 (padded, any k)
-//   81 — Fprop, CyclicShift, LDS epilogue, vector_size=4 (padded, k%4==0)
+//   9  -- Fprop, no swizzle, direct DRAM (unpadded)
+//   83 -- Fprop, CyclicShift, LDS epilogue, vector_size=1 (padded, any k)
+//   81 -- Fprop, CyclicShift, LDS epilogue, vector_size=4 (padded, k%4==0)
 static constexpr int CFG_16C_DIRECT = 9;
 static constexpr int CFG_16C_VEC4   = 81;
 static constexpr int CFG_16C_VEC1   = 83;
@@ -421,9 +421,9 @@ TEST_F(OutputWriter16cTest, Direct_C9_K16) { run_and_verify<CFG_16C_DIRECT>(16, 
 namespace ns_8c = ck_tile::direct_conv::grouped_8c_tile::v2;
 
 // Config indices for 8c kernel:
-//   9  — Fprop, no swizzle, direct DRAM (unpadded)
-//   81 — Fprop, CyclicShift, LDS epilogue, vector_size=1 (padded, any k)
-//   79 — Fprop, CyclicShift, LDS epilogue, vector_size=4 (padded, k%4==0)
+//   9  -- Fprop, no swizzle, direct DRAM (unpadded)
+//   81 -- Fprop, CyclicShift, LDS epilogue, vector_size=1 (padded, any k)
+//   79 -- Fprop, CyclicShift, LDS epilogue, vector_size=4 (padded, k%4==0)
 static constexpr int CFG_8C_DIRECT = 9;
 static constexpr int CFG_8C_VEC4   = 79;
 static constexpr int CFG_8C_VEC1   = 81;

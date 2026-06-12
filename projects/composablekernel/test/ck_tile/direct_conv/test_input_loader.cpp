@@ -39,8 +39,8 @@ using namespace grouped_4c_tile::v3;
 // ============================================================================
 // Config indices used by the tests
 //
-// KernelConfigurations<>::configs_map.get(9)  — Fprop, vector_size=8, waves_c64=1 (unpadded
-// baseline) KernelConfigurations<>::configs_map.get(49) — Fprop, CyclicShift, vector_size=1,
+// KernelConfigurations<>::configs_map.get(9)  -- Fprop, vector_size=8, waves_c64=1 (unpadded
+// baseline) KernelConfigurations<>::configs_map.get(49) -- Fprop, CyclicShift, vector_size=1,
 // waves_c64=2 (any c)
 // ============================================================================
 static constexpr int CFG_UNPADDED = 9;
@@ -232,7 +232,7 @@ class InputLoaderTest : public ::testing::Test
 };
 
 // ============================================================================
-// Correctness tests — input loading
+// Correctness tests -- input loading
 // ============================================================================
 
 // Unpadded path: c_per_group == GROUP_SIZE.
@@ -279,9 +279,9 @@ TEST_F(InputLoaderTest, Vec1_C1_K4_px1) { run_and_verify<CFG_VEC1>(1, 1, 4); }
 namespace ns_16c = ck_tile::direct_conv::grouped_16c_tile::v2;
 
 // Config indices for 16c kernel:
-//   17 — Fprop, no swizzle, vector_size=8 (unpadded)
-//   83 — Fprop, CyclicShift, vector_size=1 (padded, any c)
-//   81 — Fprop, CyclicShift, vector_size=4 (padded, c%4==0)
+//   17 -- Fprop, no swizzle, vector_size=8 (unpadded)
+//   83 -- Fprop, CyclicShift, vector_size=1 (padded, any c)
+//   81 -- Fprop, CyclicShift, vector_size=4 (padded, c%4==0)
 static constexpr int CFG_16C_UNPADDED = 17;
 static constexpr int CFG_16C_VEC4     = 81;
 static constexpr int CFG_16C_VEC1     = 83;
@@ -451,9 +451,9 @@ TEST_F(InputLoader16cTest, Vec1_C12_K9) { run_and_verify<CFG_16C_VEC1>(12, 0, 9)
 namespace ns_8c = ck_tile::direct_conv::grouped_8c_tile::v2;
 
 // Config indices for 8c kernel:
-//   17 — Fprop, no swizzle, vector_size=8 (unpadded)
-//   81 — Fprop, CyclicShift, vector_size=1 (padded, any c)
-//   79 — Fprop, CyclicShift, vector_size=4 (padded, c%4==0)
+//   17 -- Fprop, no swizzle, vector_size=8 (unpadded)
+//   81 -- Fprop, CyclicShift, vector_size=1 (padded, any c)
+//   79 -- Fprop, CyclicShift, vector_size=4 (padded, c%4==0)
 static constexpr int CFG_8C_UNPADDED = 17;
 static constexpr int CFG_8C_VEC4     = 79;
 static constexpr int CFG_8C_VEC1     = 81;

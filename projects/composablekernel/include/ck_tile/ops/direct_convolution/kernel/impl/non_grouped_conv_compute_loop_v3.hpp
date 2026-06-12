@@ -14,7 +14,7 @@
 //
 // Structure per input row:
 //   s_waitcnt + __syncthreads
-//   prefetch next input row → LDS[tic]
+//   prefetch next input row -> LDS[tic]
 //   for S in 0..kw:
 //     each wave reads its own C-section from LDS
 //     for R in 0..kh:
@@ -257,7 +257,7 @@ CK_TILE_DEVICE void conv_compute_loop_v3(const ElementType* __restrict__ in,
             });
 
             // Flush completed output row via cross-wave LDS reduction
-            // — once per input row, after all N chunks contributed.
+            // -- once per input row, after all N chunks contributed.
             constexpr int P_IDX_FLUSH = (Y_LOCAL + 1) % cfg.kh;
             int p_out                 = y + py - (cfg.kh - 1);
             if(p_out >= 0 && p_out < ho)

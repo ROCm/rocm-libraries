@@ -125,7 +125,7 @@ inline LaunchParams get_launch_params(const Conv2dParams& par)
 }
 
 // -----------------------------------------------------------------------
-// TileConstants — inherits all shared constants from TileConstantsBase.
+// TileConstants -- inherits all shared constants from TileConstantsBase.
 // Only adds the three variant-specific tile distributions:
 //   Mfma::MakeAccTileDistribution       (mfma_f32_16x16x16f16 lane layout)
 //   Weight::MakeLdsReadTileDistribution (Fprop weight read from LDS)
@@ -142,21 +142,21 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
     static constexpr int KH_KW_       = cfg.kh * cfg.kw; // alias: Base::KH_KW inaccessible in Mfma
 
     // -----------------------------------------------------------------------
-    // Mfma — tile distribution for mfma_f32_16x16x16f16 operands and results.
+    // Mfma -- tile distribution for mfma_f32_16x16x16f16 operands and results.
     //
     // mfma_f32_16x16x16f16 lane mapping (64-lane wave):
-    //   lane_q   = lane % 16 → Q column (16 output cols)
-    //   lane_c4  = lane / 16 → C4 group (4 groups of fp32x4)
+    //   lane_q   = lane % 16 -> Q column (16 output cols)
+    //   lane_c4  = lane / 16 -> C4 group (4 groups of fp32x4)
     //
     // 3D tile: [BLOCK_Q=16, BLOCK_C4, 4]
-    //   X0 = 16 [16]: lane_q → P1 factor 1
-    //   X1 = BLOCK_C4 [WAVES_PER_WG, 4]: warp_id → P0, lane_c4 → P1 factor 0
-    //   X2 = 4: vectorization → Y0
+    //   X0 = 16 [16]: lane_q -> P1 factor 1
+    //   X1 = BLOCK_C4 [WAVES_PER_WG, 4]: warp_id -> P0, lane_c4 -> P1 factor 0
+    //   X2 = 4: vectorization -> Y0
     //
-    // P0 (warp_id = WAVES_PER_WG) → X1 factor 0
+    // P0 (warp_id = WAVES_PER_WG) -> X1 factor 0
     // P1 (lane_id = 64, merge {4, 16}):
-    //   factor 0 (4 = lane/16) → X1 factor 1
-    //   factor 1 (16 = lane%16) → X0 factor 0
+    //   factor 0 (4 = lane/16) -> X1 factor 1
+    //   factor 1 (16 = lane%16) -> X0 factor 0
     // -----------------------------------------------------------------------
     struct Mfma
     {
@@ -176,19 +176,19 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
     };
 
     // -----------------------------------------------------------------------
-    // Weight — adds the Fprop LDS read tile distribution.
+    // Weight -- adds the Fprop LDS read tile distribution.
     //
     // mfma_f32_16x16x16f16 B operand:
-    //   lane_k   = lane % 16 → K-column (outer-product dim of B)
-    //   lane_c4  = lane / 16 → C-reduction group (4 groups, each 4 fp16)
+    //   lane_k   = lane % 16 -> K-column (outer-product dim of B)
+    //   lane_c4  = lane / 16 -> C-reduction group (4 groups, each 4 fp16)
     //
     // 3D tile: [block_c, kh*kw, GROUP_SIZE=16]
-    //   X0 = block_c [WAVES_PER_WG, 16]: warp_id → P0, lane_k → P1 factor 1
-    //   X1 = kh*kw → Y0 (filter positions)
-    //   X2 = GROUP_SIZE [4, 4]: lane_c4 → P1 factor 0, sub-channel → Y1
+    //   X0 = block_c [WAVES_PER_WG, 16]: warp_id -> P0, lane_k -> P1 factor 1
+    //   X1 = kh*kw -> Y0 (filter positions)
+    //   X2 = GROUP_SIZE [4, 4]: lane_c4 -> P1 factor 0, sub-channel -> Y1
     //
-    // P1 merge = {4, 16}: factor 0 = lane/16 → X2 factor 0, factor 1 = lane%16 → X0 factor 1
-    // No R dimension — all Q positions come from within a single wave.
+    // P1 merge = {4, 16}: factor 0 = lane/16 -> X2 factor 0, factor 1 = lane%16 -> X0 factor 1
+    // No R dimension -- all Q positions come from within a single wave.
     // -----------------------------------------------------------------------
     struct Weight : Base::Weight
     {
@@ -216,9 +216,9 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
         //   X0=[16] (K, kBNLane), X1=[4, 4] (C, kABKLane * kABKPerLane)
         //
         // P0 (lane_id merge{4, 16}):
-        //   factor 0 (lane/16) → X1 factor 0 (kABKLane=4)
-        //   factor 1 (lane%16) → X0 factor 0 (kBNLane=16)
-        // Y → X1 factor 1 (kABKPerLane=4, vectorization)
+        //   factor 0 (lane/16) -> X1 factor 0 (kABKLane=4)
+        //   factor 1 (lane%16) -> X0 factor 0 (kBNLane=16)
+        // Y -> X1 factor 1 (kABKPerLane=4, vectorization)
         //
         // InputTileDistributionTraits derives the transposed input
         // distribution on [16, 16] that load_tile_transpose requires.
@@ -241,13 +241,13 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
     };
 
     // -----------------------------------------------------------------------
-    // Output — adds the narrow DRAM write tile distribution.
+    // Output -- adds the narrow DRAM write tile distribution.
     //
     // 4D tile: [1, BLOCK_Q=16, BLOCK_C4, 4]
-    //   X0 = 1 (row) → Y0
-    //   X1 = 16 (Q) → P1 factor 1
-    //   X2 = BLOCK_C4 [WAVES_PER_WG, 4]: warp_id → P0, lane_c4 → P1 factor 0
-    //   X3 = 4 → Y1
+    //   X0 = 1 (row) -> Y0
+    //   X1 = 16 (Q) -> P1 factor 1
+    //   X2 = BLOCK_C4 [WAVES_PER_WG, 4]: warp_id -> P0, lane_c4 -> P1 factor 0
+    //   X3 = 4 -> Y1
     // -----------------------------------------------------------------------
     struct Output : direct_conv::TileConstantsBase<cfg>::Output
     {
@@ -272,7 +272,7 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
 template <auto cfg>
 using BlockCoords = direct_conv::BlockCoords<cfg>;
 
-// InputLoader — DRAM→LDS async load, double-buffered, MFMA reads.
+// InputLoader -- DRAM -> LDS async load, double-buffered, MFMA reads.
 template <auto cfg, bool Padded = true>
 using InputLoader =
     direct_conv::InputLoader<TileConstants<cfg>,
@@ -283,7 +283,7 @@ using InputLoader =
                              Padded,
                              ToType<cfg.data_type>>;
 
-// WeightLoader — async weight loads to LDS, then register reads.
+// WeightLoader -- async weight loads to LDS, then register reads.
 template <auto cfg>
 struct WeightLoader : direct_conv::WeightAccessor<
                           cfg.kh,
@@ -316,11 +316,11 @@ struct WeightLoader : direct_conv::WeightAccessor<
     }
 };
 
-// OutputWriter — direct DRAM writes (RegistersToGlobalMemory epilogue).
+// OutputWriter -- direct DRAM writes (RegistersToGlobalMemory epilogue).
 template <auto cfg, bool Padded = true>
 using OutputWriter = direct_conv::OutputWriter<TileConstants<cfg>, Padded, ToType<cfg.data_type>>;
 
-// OutputWriterLds — LDS-staged writes (RegistersToLdsToGlobalMemory).
+// OutputWriterLds -- LDS-staged writes (RegistersToLdsToGlobalMemory).
 template <auto cfg, bool Padded = true>
 using OutputWriterLds =
     direct_conv::OutputWriterLds<TileConstants<cfg>, Padded, ToType<cfg.data_type>>;

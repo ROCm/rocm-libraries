@@ -17,7 +17,7 @@
 namespace ck_tile::direct_conv::conv_32c_tile::v3 {
 
 // ===================================================================
-// KernelConfigurations — v3 configs.
+// KernelConfigurations -- v3 configs.
 // Direct DRAM epilogue only (no LDS epilogue needed since cross-wave
 // reduction uses LDS for the reduction itself).
 // ===================================================================

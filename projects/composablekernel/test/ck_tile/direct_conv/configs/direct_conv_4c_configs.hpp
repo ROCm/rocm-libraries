@@ -17,7 +17,7 @@ namespace ck_tile::direct_conv::grouped_4c_tile::v3 {
 
 // All instantiated configurations. The first valid config is expected to be the fastest.
 //
-// Layout: 4 variant groups × 10 configs each = 40 configs total.
+// Layout: 4 variant groups x 10 configs each = 40 configs total.
 // Each group has 5 Dgrad (indices 0-4) + 5 Fprop (indices 5-9) configs:
 //   waves_c64=2,waves_q4=8 / waves_c64=2,waves_q4=4 / waves_c64=2,waves_q4=2 /
 //   waves_c64=2,waves_q4=1 / waves_c64=1,waves_q4=1

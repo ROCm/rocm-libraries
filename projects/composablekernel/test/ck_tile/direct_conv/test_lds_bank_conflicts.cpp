@@ -170,7 +170,7 @@ class LdsBankConflictTest : public ::testing::Test
 // ============================================================================
 // Config index reference (verified from configs[] array in source):
 //
-// 4c v3 (40 configs, 4 groups × 10: 5 Dgrad + 5 Fprop each):
+// 4c v3 (40 configs, 4 groups x 10: 5 Dgrad + 5 Fprop each):
 //   Each group has the same wave configs in order:
 //     w2q8, w2q4, w2q2, w2q1, w1q1
 //   Fprop indices within each group: +5 offset from Dgrad
@@ -183,7 +183,7 @@ class LdsBankConflictTest : public ::testing::Test
 //     w2q2: None=7,  XOR=27
 //     w1q1: None=9,  XOR=29
 //
-// 16c v2 (72 configs, 4 groups × 18: 9 Dgrad + 9 Fprop each):
+// 16c v2 (72 configs, 4 groups x 18: 9 Dgrad + 9 Fprop each):
 //   Each group has waves_per_wg in order: 16,8,7,6,5,4,3,2,1
 //   Fprop indices within each group: +9 offset from Dgrad
 //

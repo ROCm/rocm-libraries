@@ -12,10 +12,10 @@
 namespace ck_tile::direct_conv {
 
 // ============================================================================
-// Variant accessor struct — 32c dense (non-grouped)
+// Variant accessor struct - 32c dense (non-grouped)
 // ============================================================================
 
-// Non-grouped (standard) conv — 32c MFMA with C-reduction (v3 cross-wave LDS reduction)
+// Non-grouped (standard) conv - 32c MFMA with C-reduction (v3 cross-wave LDS reduction)
 template <Version V, DataType DT = DataType::fp16>
 struct TileConvVariant32cDense;
 
@@ -52,7 +52,7 @@ struct TileConvVariant32cDense<Version::v3, DT>
 };
 
 // ============================================================================
-// Concrete kernel wrappers — 32c dense (non-grouped)
+// Concrete kernel wrappers - 32c dense (non-grouped)
 // ============================================================================
 
 template <auto Cfg, Version Ver = Version::v3, DataType DT = DataType::fp16>

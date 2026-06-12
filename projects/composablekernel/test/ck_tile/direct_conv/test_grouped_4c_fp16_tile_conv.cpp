@@ -32,7 +32,7 @@ class DirectConvGrouped4cFp16TileConvTestV3
 };
 
 // =============================================================================
-// V3 Config index reference (40 configs total, 4 groups × 10):
+// V3 Config index reference (40 configs total, 4 groups x 10):
 //
 // Group 0 (No swizzle, DRAM epilogue):
 //   Dgrad: 0 (wc64=2,wq4=8), 1 (2,4), 2 (2,2), 3 (2,1), 4 (1,1)
@@ -372,8 +372,8 @@ TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_LdsEpilogue_Config10_Grou
 //
 // XOR swizzle constraint: block_q must be aligned to BLOCK_C8 (= block_c/8).
 // For waves_c64=2: BLOCK_C8=16, so block_q must be multiple of 16.
-//   Config 25/20 (wq4=8, block_q=32): aligned ✓  multi-tile OK
-//   Config 26/21 (wq4=4, block_q=16): aligned ✓  multi-tile OK
+//   Config 25/20 (wq4=8, block_q=32): aligned (OK)  multi-tile OK
+//   Config 26/21 (wq4=4, block_q=16): aligned (OK)  multi-tile OK
 //   Config 27/22 (wq4=2, block_q=8):  NOT aligned, single-tile only (out_w<=8)
 //   Config 28/23 (wq4=1, block_q=4):  NOT aligned, single-tile only (out_w<=4)
 // For waves_c64=1: BLOCK_C8=8, so block_q must be multiple of 8.
@@ -425,7 +425,7 @@ TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Fprop_V3_XOR_Config29_Groups32)
 
 TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Fprop_V3_XOR_Config25_LargerSpatial)
 {
-    // Config 25: waves_q4=8, block_q=32 — need out_q >= 32
+    // Config 25: waves_q4=8, block_q=32 -- need out_q >= 32
     ASSERT_TRUE((RunFprop<25>(4, 34, 34, 32, 4, 4, 3, 3, 1, 1)));
 }
 
@@ -498,7 +498,7 @@ TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_XOR_Config24_Groups32)
 
 TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_XOR_Config20_LargerSpatial)
 {
-    // Config 20: waves_q4=8, block_q=32 — need out_w >= 32
+    // Config 20: waves_q4=8, block_q=32 -- need out_w >= 32
     ASSERT_TRUE((RunDgrad<20>(4, 34, 34, 32, 4, 4, 3, 3, 1, 1)));
 }
 
@@ -559,7 +559,7 @@ TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Fprop_V3_XOR_LdsEpilogue_Config39_
 
 TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Fprop_V3_XOR_LdsEpilogue_Config35_LargerSpatial)
 {
-    // Config 35: waves_q4=8, block_q=32 — need out_q >= 32
+    // Config 35: waves_q4=8, block_q=32 -- need out_q >= 32
     ASSERT_TRUE((RunFprop<35>(4, 34, 34, 32, 4, 4, 3, 3, 1, 1)));
 }
 
@@ -622,7 +622,7 @@ TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_XOR_LdsEpilogue_Config34_
 
 TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_XOR_LdsEpilogue_Config30_LargerSpatial)
 {
-    // Config 30: waves_q4=8, block_q=32 — need out_w >= 32
+    // Config 30: waves_q4=8, block_q=32 -- need out_w >= 32
     ASSERT_TRUE((RunDgrad<30>(4, 34, 34, 32, 4, 4, 3, 3, 1, 1)));
 }
 

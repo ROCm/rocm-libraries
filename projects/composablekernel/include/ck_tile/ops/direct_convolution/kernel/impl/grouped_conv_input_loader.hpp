@@ -19,7 +19,7 @@ namespace direct_conv {
 // To support gfx942 we fall back to a regular 16-byte buffer load into a
 // register followed by an LDS store. This produces a byte-for-byte identical
 // LDS layout (8 contiguous elements per thread at `lds_dest`) as the async
-// path, so all downstream LDS reads are unchanged — only the staging path
+// path, so all downstream LDS reads are unchanged -- only the staging path
 // differs. The fallback costs an extra register round-trip versus the gfx950
 // async copy.
 //
@@ -64,8 +64,8 @@ CK_TILE_DEVICE void buffer_load16_to_lds(CK_TILE_LDS_ADDR ElementType* lds_dest,
 // distribution machinery, then immediately discarded.
 //
 // Template parameters:
-//   TC  — TileConstants type providing Input/Mfma descriptors and distributions.
-//   cfg — Config value providing kw and other kernel parameters.
+//   TC  -- TileConstants type providing Input/Mfma descriptors and distributions.
+//   cfg -- Config value providing kw and other kernel parameters.
 //
 // TC must provide:
 //   TC::Input::MakeDramReadDescriptor(hi, wi, C_total, px, py)
@@ -112,7 +112,7 @@ struct InputLoader
         {0, 0, 0},
         mfma_dist));
 
-    // Persistent members — scalar state only, no tile_window objects.
+    // Persistent members -- scalar state only, no tile_window objects.
     __amdgpu_buffer_rsrc_t input_rsrc; // buffer resource for DRAM async loads
     ck_tile::index_t input_voffset;    // per-thread DRAM byte offset (advances per row)
     CK_TILE_LDS_ADDR ElementType*
@@ -174,7 +174,7 @@ struct InputLoader
         //
         // Additionally, the tile distribution decomposes lane_id as
         // {BLOCK_C8, LANES_PER_ROW}. When BLOCK_C8 * LANES_PER_ROW < 64
-        // (i.e. 64 % BLOCK_C8 != 0, e.g. waves_per_wg=6 → BLOCK_C8=24),
+        // (i.e. 64 % BLOCK_C8 != 0, e.g. waves_per_wg=6 -> BLOCK_C8=24),
         // excess lanes beyond the mapped range have undefined tile-distribution
         // coordinates and must not issue loads.
         auto compute_load_active = [&](const auto& dram_window) {
@@ -293,7 +293,7 @@ struct InputLoader
         }
 
         // Precompute per-thread MFMA LDS read offsets for each kw slice.
-        // Shared between padded and unpadded paths — LDS layout is identical.
+        // Shared between padded and unpadded paths -- LDS layout is identical.
         if(init_mfma_offsets)
         {
             auto mfma_buf_tmp =
@@ -444,7 +444,7 @@ struct InputLoader
     // Within each c_block, each wave iterates over all C-sections (c_local = 0..c_local_max),
     // reading from section c_local rather than the wave's own section.
     //
-    // c_section_delta_elements: (c_local - wave_group) * 32 — the signed offset in fp16
+    // c_section_delta_elements: (c_local - wave_group) * 32 -- the signed offset in fp16
     // elements from the wave's own C-section to the target c_local section.
     CK_TILE_DEVICE void read_from_lds_at_section(InputType& input_reg,
                                                  int slice,

@@ -12,7 +12,7 @@
 namespace ck_tile::direct_conv {
 
 // ============================================================================
-// Variant accessor structs — 16c
+// Variant accessor structs - 16c
 // ============================================================================
 
 template <Version V, DataType DT = DataType::fp16>
@@ -51,7 +51,7 @@ struct TileConvVariant16c<Version::v2, DT>
 };
 
 // ============================================================================
-// Concrete kernel wrappers — 16c
+// Concrete kernel wrappers - 16c
 // ============================================================================
 
 template <auto Cfg, Version Ver = Version::v2, DataType DT = DataType::fp16>

@@ -204,7 +204,7 @@ class DirectConvGrouped16cFp16TileConvV2XorTest
 {
 };
 
-// --- Group 2 Fprop (indices 45-53): use waves_per_wg ∈ {1,2,4,8} ---
+// --- Group 2 Fprop (indices 45-53): use waves_per_wg in {1,2,4,8} ---
 
 TEST_F(DirectConvGrouped16cFp16TileConvV2XorTest, Fprop_Config53_Groups1_Pad1)
 {

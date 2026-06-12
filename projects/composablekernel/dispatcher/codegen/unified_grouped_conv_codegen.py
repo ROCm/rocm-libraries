@@ -2149,14 +2149,14 @@ def direct_conv_supported_on_arch(
     of them rely on CDNA4-only hardware features that are unavailable on gfx942
     (CDNA3) and other architectures:
 
-      * 16-byte buffer-load-to-LDS (dwordx4 async copy) — used by every variant
+      * 16-byte buffer-load-to-LDS (dwordx4 async copy) - used by every variant
         for input staging. The kernel impls fall back to a portable
         load+store register round-trip on non-gfx950.
-      * MFMA 16x16x32 (gfx950-insts) — used by the 8c (Toeplitz) and 32c
+      * MFMA 16x16x32 (gfx950-insts) - used by the 8c (Toeplitz) and 32c
         kernels. No CDNA3 equivalent, so 8c/32c variants cannot be compiled for gfx942.
-      * ds_read_b64_tr_b16 transpose read — used by bwd_data (Dgrad). CDNA4
+      * ds_read_b64_tr_b16 transpose read - used by bwd_data (Dgrad). CDNA4
         only, so all bwd_data direct-conv instances are gfx950-only.
-      * LDS footprint > 64KB — the 16c kernel needs 72KB, exceeding gfx942's
+      * LDS footprint > 64KB - the 16c kernel needs 72KB, exceeding gfx942's
         64KB per-workgroup limit.
 
     The verified gfx942-capable subset is 4c forward (fp16/bf16).

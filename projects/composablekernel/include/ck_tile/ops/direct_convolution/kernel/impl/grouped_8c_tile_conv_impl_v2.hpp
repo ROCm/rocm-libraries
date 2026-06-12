@@ -5,11 +5,11 @@
 //
 // This kernel uses mfma_f32_16x16x32_f16 with the S-dimension embedded in the MFMA's
 // K=32 dimension via a block-Toeplitz matrix, achieving 75% MFMA utilization.
-// No explicit S-loop is needed — only the R (filter height) loop.
+// No explicit S-loop is needed -- only the R (filter height) loop.
 //
 // v2 replaces manual low-level intrinsics from v1 with CK Tile abstractions:
-//   - Input DRAM→LDS: shared InputLoader with CK Tile descriptors
-//   - Weight DRAM→LDS: shared weight_load_to_lds
+//   - Input DRAM -> LDS: shared InputLoader with CK Tile descriptors
+//   - Weight DRAM -> LDS: shared weight_load_to_lds
 //   - Output writes: shared OutputWriter (direct DRAM) or OutputWriterLds (LDS-staged)
 //   - Swizzle support: None / XOR / CyclicShift via descriptor transforms
 //
@@ -168,7 +168,7 @@ inline LaunchParams get_launch_params(const Conv2dParams& par)
 }
 
 // ===================================================================
-// Tile constants — inherits shared base, adds 8c-specific distributions.
+// Tile constants -- inherits shared base, adds 8c-specific distributions.
 // ===================================================================
 template <auto cfg>
 struct TileConstants : direct_conv::TileConstantsBase<cfg>
@@ -184,7 +184,7 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
     using Base::TOTAL_SPATIAL;
 
     // -----------------------------------------------------------------------
-    // Mfma — tile distribution for MFMA 16x16x32 results (8c-specific).
+    // Mfma -- tile distribution for MFMA 16x16x32 results (8c-specific).
     //
     // mfma_f32_16x16x32_f16 result layout:
     //   m = 4*(lane/16) + vec_idx  (0..15)
@@ -195,14 +195,14 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
     //   c4_within_group = (m/4) % 2 = (lane/16) % 2
     //
     // 3D tile: [BLOCK_Q=32, BLOCK_C4=2*NUM_WAVES, 4]
-    //   X0 = BLOCK_Q [16, 2]: result_n(16) × GT::q(2)
-    //   X1 = BLOCK_C4 [NUM_WAVES, 2]: wave_id(NUM_WAVES) × c4(2)
+    //   X0 = BLOCK_Q [16, 2]: result_n(16) x GT::q(2)
+    //   X1 = BLOCK_C4 [NUM_WAVES, 2]: wave_id(NUM_WAVES) x c4(2)
     //   X2 = 4: vectorization
     //
     // P1 merge = {2, 2, 16}:
-    //   factor 0 = lane/32 (GT::q) → X0 factor 1
-    //   factor 1 = (lane/16)%2 (c4) → X1 factor 1
-    //   factor 2 = lane%16 (result_n) → X0 factor 0
+    //   factor 0 = lane/32 (GT::q) -> X0 factor 1
+    //   factor 1 = (lane/16)%2 (c4) -> X1 factor 1
+    //   factor 2 = lane%16 (result_n) -> X0 factor 0
     // -----------------------------------------------------------------------
     struct Mfma
     {
@@ -215,27 +215,27 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
                                    ck_tile::sequence<NUM_WAVES, 2>, // X1: C4 = [NUM_WAVES wave, 2
                                                                     // c4]
                                    ck_tile::sequence<4>>,           // X2: vectorization
-                    ck_tile::tuple<ck_tile::sequence<2>,            // P0 → X1
-                                   ck_tile::sequence<1, 2, 1>>,     // P1 → X0, X1, X0
+                    ck_tile::tuple<ck_tile::sequence<2>,            // P0 -> X1
+                                   ck_tile::sequence<1, 2, 1>>,     // P1 -> X0, X1, X0
                     ck_tile::tuple<ck_tile::sequence<0>,            // P0 minor: X1 factor 0
                                    ck_tile::sequence<1, 1, 0>>,     // P1 minor: X0:1, X1:1, X0:0
-                    ck_tile::sequence<3>,                           // Y0 → X2
+                    ck_tile::sequence<3>,                           // Y0 -> X2
                     ck_tile::sequence<0>>{});
         }
     };
 
     // -----------------------------------------------------------------------
-    // Output — inherits base; overrides narrow write distribution (8c-specific).
+    // Output -- inherits base; overrides narrow write distribution (8c-specific).
     // -----------------------------------------------------------------------
     struct Output : Base::Output
     {
         // Tile distribution for DRAM output writes (Toeplitz-specific).
         //
         // 4D: [1, BLOCK_Q=32, BLOCK_C4=2*NUM_WAVES, 4]
-        //   X0 = 1 (row) → Y0
-        //   X1 = 32 [16, 2]: result_n(16) × GT::q(2)
-        //   X2 = BLOCK_C4 [NUM_WAVES, 2]: wave_id × c4_within_group
-        //   X3 = 4 → Y1
+        //   X0 = 1 (row) -> Y0
+        //   X1 = 32 [16, 2]: result_n(16) x GT::q(2)
+        //   X2 = BLOCK_C4 [NUM_WAVES, 2]: wave_id x c4_within_group
+        //   X3 = 4 -> Y1
         //
         // P1 merge = {2, 2, 16}: same factorization as Mfma distribution.
         static constexpr auto MakeDramWriteTileDistributionNarrow()
@@ -247,28 +247,28 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
                                    ck_tile::sequence<16, 2>,
                                    ck_tile::sequence<NUM_WAVES, 2>,
                                    ck_tile::sequence<4>>,
-                    ck_tile::tuple<ck_tile::sequence<3>,        // P0 → X2
-                                   ck_tile::sequence<2, 3, 2>>, // P1 → X1, X2, X1
+                    ck_tile::tuple<ck_tile::sequence<3>,        // P0 -> X2
+                                   ck_tile::sequence<2, 3, 2>>, // P1 -> X1, X2, X1
                     ck_tile::tuple<ck_tile::sequence<0>,        // P0 minor: X2 factor 0
                                    ck_tile::sequence<1, 1, 0>>, // P1 minor: X1:1, X2:1, X1:0
-                    ck_tile::sequence<1, 4>,                    // Y0→X0, Y1→X3
+                    ck_tile::sequence<1, 4>,                    // Y0->X0, Y1->X3
                     ck_tile::sequence<0, 0>>{});
         }
     };
 };
 
 // ===================================================================
-// Workgroup-level coordinates — shared with all variants.
+// Workgroup-level coordinates -- shared with all variants.
 // ===================================================================
 template <auto cfg>
 using BlockCoords = direct_conv::BlockCoords<cfg>;
 
 // ===================================================================
-// InputLoader — shared DRAM→LDS, Toeplitz-specific LDS→register read.
+// InputLoader -- shared DRAM -> LDS, Toeplitz-specific LDS -> register read.
 //
-// Reuses the shared InputLoader for DRAM→LDS (async buffer_load_lds with
+// Reuses the shared InputLoader for DRAM -> LDS (async buffer_load_lds with
 // CK Tile pad/XOR/CyclicShift transforms, OOB checking, double buffering).
-// The LDS→register read is custom for the Toeplitz structure because:
+// The LDS -> register read is custom for the Toeplitz structure because:
 //   - The shared loader reads fp16x4_t at MFMA-distribution offsets (with S-loop)
 //   - The Toeplitz kernel needs fp16x8_t at input_x = 2*(lane%16) + lane/16 (no S-loop)
 //
@@ -283,7 +283,7 @@ struct InputLoaderToeplitz
 
     using TC = TileConstants<cfg>;
 
-    // Inherit the shared InputLoader for DRAM→LDS infrastructure.
+    // Inherit the shared InputLoader for DRAM -> LDS infrastructure.
     direct_conv::InputLoader<
         TC,
         cfg,
@@ -364,7 +364,7 @@ struct InputLoaderToeplitz
 
     // Read Toeplitz input from LDS: single fp16x8_t (no S-loop needed).
     // The S parameter is accepted for interface compatibility with the shared
-    // compute loop but is ignored — the Toeplitz kernel uses INNER_KW=1.
+    // compute loop but is ignored -- the Toeplitz kernel uses INNER_KW=1.
     CK_TILE_DEVICE void read_from_lds(input_type& input_reg, int /*S*/, int lds_buffer_index) const
     {
         const ToType<cfg.data_type>* base =
@@ -375,10 +375,10 @@ struct InputLoaderToeplitz
 };
 
 // ===================================================================
-// WeightLoader — shared DRAM→LDS, Toeplitz-specific LDS→register read.
+// WeightLoader -- shared DRAM->LDS, Toeplitz-specific LDS -> register read.
 //
 // Instance-based: weights are stored in member array for access via
-// get<R,S>() / get_transposed<R,S>() (S is ignored — Toeplitz has no S-loop).
+// get<R,S>() / get_transposed<R,S>() (S is ignored -- Toeplitz has no S-loop).
 // ===================================================================
 template <auto cfg>
 struct WeightLoader
@@ -474,20 +474,20 @@ struct WeightLoader
 };
 
 // ===================================================================
-// OutputWriter — direct DRAM writes (RegistersToGlobalMemory epilogue).
+// OutputWriter -- direct DRAM writes (RegistersToGlobalMemory epilogue).
 // ===================================================================
 template <auto cfg, bool Padded = true>
 using OutputWriter8c = direct_conv::OutputWriter<TileConstants<cfg>, Padded, ToType<cfg.data_type>>;
 
 // ===================================================================
-// OutputWriterLds — LDS-staged writes (RegistersToLdsToGlobalMemory).
+// OutputWriterLds -- LDS-staged writes (RegistersToLdsToGlobalMemory).
 // ===================================================================
 template <auto cfg, bool Padded = true>
 using OutputWriterLds8c =
     direct_conv::OutputWriterLds<TileConstants<cfg>, Padded, ToType<cfg.data_type>>;
 
 // ===================================================================
-// Main device function — delegates to the shared compute loop with
+// Main device function -- delegates to the shared compute loop with
 // INNER_KW=1 (Toeplitz: S embedded in MFMA K=32, no explicit S-loop).
 // ===================================================================
 template <auto cfg, bool Padded = true>

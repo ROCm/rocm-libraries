@@ -25,10 +25,10 @@ struct SwizzleParam
 
 // Instantiation list: (swizzle type, #rows to test over)
 using SwizzleTypes =
-    ::testing::Types<SwizzleParam<SwizzleT<64>, 10>,   // C8=8,  NRows=10 > C8 → x%C8 wraps
-                     SwizzleParam<SwizzleT<128>, 20>,  // C8=16, NRows=20 > C8 → x%C8 wraps
-                     SwizzleParam<SwizzleXOR<64>, 10>, // C8=8,  NRows=10 > C8 → x%C8 wraps
-                     SwizzleParam<SwizzleXOR<128>, 20> // C8=16, NRows=20 > C8 → x%C8 wraps
+    ::testing::Types<SwizzleParam<SwizzleT<64>, 10>,   // C8=8,  NRows=10 > C8 -> x%C8 wraps
+                     SwizzleParam<SwizzleT<128>, 20>,  // C8=16, NRows=20 > C8 -> x%C8 wraps
+                     SwizzleParam<SwizzleXOR<64>, 10>, // C8=8,  NRows=10 > C8 -> x%C8 wraps
+                     SwizzleParam<SwizzleXOR<128>, 20> // C8=16, NRows=20 > C8 -> x%C8 wraps
                      >;
 
 template <typename P>

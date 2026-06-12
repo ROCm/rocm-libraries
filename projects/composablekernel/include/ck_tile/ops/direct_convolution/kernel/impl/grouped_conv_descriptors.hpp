@@ -22,7 +22,7 @@ template <typename TC>
 struct SharedDescriptors
 {
     // ===================================================================
-    // Input — descriptors and distributions for input activation tensor.
+    // Input -- descriptors and distributions for input activation tensor.
     // ===================================================================
     struct Input
     {
@@ -98,7 +98,7 @@ struct SharedDescriptors
         // Transform chain:
         //   1. Raw DRAM: [hi, wi, BLOCK_GROUPS, c_per_group] with real strides.
         //   2. Pad spatial (hi, wi): [hi + 2 * py, wi + 2 * px, BLOCK_GROUPS, c_per_group].
-        //   3. Pad channel (c_per_group → GROUP_SIZE):
+        //   3. Pad channel (c_per_group -> GROUP_SIZE):
         //      [hi_padded, wi_padded, BLOCK_GROUPS, GROUP_SIZE] (OOB reads as zero).
         //   4. Merge channel dims: [hi_padded, wi_padded, BLOCK_C].
         //   5. Unmerge to C8 layout: [hi_padded, wi_padded, BLOCK_C8, 8].
@@ -125,7 +125,7 @@ struct SharedDescriptors
                 ck_tile::number<GuaranteedVectorLoadSize>{},
                 ck_tile::number<1>{});
 
-            // Step 2+3: pad spatial + pad channel → GROUP_SIZE.
+            // Step 2+3: pad spatial + pad channel -> GROUP_SIZE.
             const auto desc_padded_4d = ck_tile::transform_tensor_descriptor(
                 desc_raw,
                 ck_tile::make_tuple(
@@ -144,7 +144,7 @@ struct SharedDescriptors
                                     ck_tile::sequence<2>{},
                                     ck_tile::sequence<3>{}));
 
-            // Step 4: merge channel dims → [hi_padded, wi_padded, BLOCK_C].
+            // Step 4: merge channel dims -> [hi_padded, wi_padded, BLOCK_C].
             const auto desc_merged = ck_tile::transform_tensor_descriptor(
                 desc_padded_4d,
                 ck_tile::make_tuple(
@@ -157,7 +157,7 @@ struct SharedDescriptors
                 ck_tile::make_tuple(
                     ck_tile::sequence<0>{}, ck_tile::sequence<1>{}, ck_tile::sequence<2>{}));
 
-            // Step 5: unmerge → [hi_padded, wi_padded, BLOCK_C8, 8].
+            // Step 5: unmerge -> [hi_padded, wi_padded, BLOCK_C8, 8].
             const auto desc_4d = ck_tile::transform_tensor_descriptor(
                 desc_merged,
                 ck_tile::make_tuple(ck_tile::make_pass_through_transform(hi_padded_size),
@@ -300,7 +300,7 @@ struct SharedDescriptors
     };
 
     // ===================================================================
-    // Weight — descriptors and distributions for filter weight tensor.
+    // Weight -- descriptors and distributions for filter weight tensor.
     // ===================================================================
     struct Weight
     {
@@ -337,12 +337,12 @@ struct SharedDescriptors
         // The chain of transforms is:
         //   1. Raw DRAM: [BLOCK_GROUPS, k_per_group, KH_KW, c_per_group] with real strides.
         //   2. Pad K: [BLOCK_GROUPS, GROUP_SIZE, KH_KW, c_per_group]
-        //      (k ∈ [k_per_group, GROUP_SIZE) → OOB, reads as zero).
+        //      (k in [k_per_group, GROUP_SIZE) -> OOB, reads as zero).
         //   3. Pad C: [BLOCK_GROUPS, GROUP_SIZE, KH_KW, GROUP_SIZE]
-        //      (c ∈ [c_per_group, GROUP_SIZE) → OOB, reads as zero).
-        //   4. Merge all 4 dims → [BLOCK_GROUPS * GROUP_SIZE * KH_KW * GROUP_SIZE].
-        //   5. Unmerge → [WEIGHT_LDS_SIZE_UINT4, 8].
-        //   6. Pad rows → [WEIGHT_LDS_PADDED_UINT4, 8].
+        //      (c in [c_per_group, GROUP_SIZE) -> OOB, reads as zero).
+        //   4. Merge all 4 dims -> [BLOCK_GROUPS * GROUP_SIZE * KH_KW * GROUP_SIZE].
+        //   5. Unmerge -> [WEIGHT_LDS_SIZE_UINT4, 8].
+        //   6. Pad rows -> [WEIGHT_LDS_PADDED_UINT4, 8].
         //
         // The buffer base pointer must be set to the start of bc.block_group in the
         // global weight tensor (see weight_load_to_lds).
@@ -371,7 +371,7 @@ struct SharedDescriptors
                 ck_tile::number<GuaranteedVectorLoadSize>{},
                 ck_tile::number<1>{});
 
-            // Step 2+3: pad K → GROUP_SIZE, pad C → GROUP_SIZE.
+            // Step 2+3: pad K -> GROUP_SIZE, pad C -> GROUP_SIZE.
             // Use number<0>{} for left pads and compute right pads as
             // number<GROUP_SIZE> - runtime length, expressed via make_pad_transform
             // with the target upper length number<GROUP_SIZE>{}.
@@ -394,7 +394,7 @@ struct SharedDescriptors
                                     ck_tile::sequence<2>{},
                                     ck_tile::sequence<3>{}));
 
-            // Step 4: merge all 4 dims → [BLOCK_GROUPS * GROUP_SIZE * KH_KW * GROUP_SIZE].
+            // Step 4: merge all 4 dims -> [BLOCK_GROUPS * GROUP_SIZE * KH_KW * GROUP_SIZE].
             const auto desc_merged = ck_tile::transform_tensor_descriptor(
                 desc_padded_4d,
                 ck_tile::make_tuple(ck_tile::make_merge_transform(
@@ -405,7 +405,7 @@ struct SharedDescriptors
                 ck_tile::make_tuple(ck_tile::sequence<0, 1, 2, 3>{}),
                 ck_tile::make_tuple(ck_tile::sequence<0>{}));
 
-            // Step 5: unmerge → [WEIGHT_LDS_SIZE_UINT4, 8].
+            // Step 5: unmerge -> [WEIGHT_LDS_SIZE_UINT4, 8].
             const auto desc_2d = ck_tile::transform_tensor_descriptor(
                 desc_merged,
                 ck_tile::make_tuple(ck_tile::make_unmerge_transform(
@@ -413,7 +413,7 @@ struct SharedDescriptors
                 ck_tile::make_tuple(ck_tile::sequence<0>{}),
                 ck_tile::make_tuple(ck_tile::sequence<0, 1>{}));
 
-            // Step 6: pad rows → [WEIGHT_LDS_PADDED_UINT4, 8].
+            // Step 6: pad rows -> [WEIGHT_LDS_PADDED_UINT4, 8].
             const auto desc_final = ck_tile::transform_tensor_descriptor(
                 desc_2d,
                 ck_tile::make_tuple(ck_tile::make_pad_transform(
@@ -425,7 +425,7 @@ struct SharedDescriptors
             return desc_final;
         }
 
-        // Tile distribution for weight async loads: linear tid → row.
+        // Tile distribution for weight async loads: linear tid -> row.
         static constexpr auto MakeDramReadTileDistribution()
         {
             return ck_tile::make_static_tile_distribution(
@@ -491,7 +491,7 @@ struct SharedDescriptors
     };
 
     // ===================================================================
-    // Output — descriptors for output activation tensor.
+    // Output -- descriptors for output activation tensor.
     // ===================================================================
     struct Output
     {
@@ -666,7 +666,7 @@ struct SharedDescriptors
         // Transform chain:
         //   1. Raw: [ho, wo, BLOCK_GROUPS, k_per_group] with real strides.
         //   2. Pad spatial: [ho, wo_padded, BLOCK_GROUPS, k_per_group].
-        //   3. Pad channel (k_per_group → GROUP_SIZE): OOB for invalid k.
+        //   3. Pad channel (k_per_group -> GROUP_SIZE): OOB for invalid k.
         //   4. Merge channel: [ho, wo_padded, BLOCK_C].
         //   5. Unmerge to C4: [ho, wo_padded, BLOCK_C4, 4].
         template <int VectorSize = 1>
@@ -685,7 +685,7 @@ struct SharedDescriptors
                 ck_tile::number<VectorSize>{},
                 ck_tile::number<1>{});
 
-            // Step 2+3: pad spatial + pad channel → GROUP_SIZE.
+            // Step 2+3: pad spatial + pad channel -> GROUP_SIZE.
             const auto desc_padded_4d = ck_tile::transform_tensor_descriptor(
                 desc_raw,
                 ck_tile::make_tuple(
@@ -704,7 +704,7 @@ struct SharedDescriptors
                                     ck_tile::sequence<2>{},
                                     ck_tile::sequence<3>{}));
 
-            // Step 4: merge channel → [ho, wo_padded, BLOCK_C].
+            // Step 4: merge channel -> [ho, wo_padded, BLOCK_C].
             const auto desc_merged = ck_tile::transform_tensor_descriptor(
                 desc_padded_4d,
                 ck_tile::make_tuple(
@@ -717,7 +717,7 @@ struct SharedDescriptors
                 ck_tile::make_tuple(
                     ck_tile::sequence<0>{}, ck_tile::sequence<1>{}, ck_tile::sequence<2>{}));
 
-            // Step 5: unmerge to C4 → [ho, wo_padded, BLOCK_C4, 4].
+            // Step 5: unmerge to C4 -> [ho, wo_padded, BLOCK_C4, 4].
             return ck_tile::transform_tensor_descriptor(
                 desc_merged,
                 ck_tile::make_tuple(ck_tile::make_pass_through_transform(ho),
@@ -764,7 +764,7 @@ struct SharedDescriptors
                 ck_tile::make_tuple(
                     ck_tile::sequence<0>{}, ck_tile::sequence<1>{}, ck_tile::sequence<2>{}));
 
-            // Step 4: merge channel → [wo_padded, BLOCK_C].
+            // Step 4: merge channel -> [wo_padded, BLOCK_C].
             const auto desc_merged = ck_tile::transform_tensor_descriptor(
                 desc_padded,
                 ck_tile::make_tuple(
@@ -774,7 +774,7 @@ struct SharedDescriptors
                 ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{}),
                 ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}));
 
-            // Step 5: unmerge to C8 → [wo_padded, BLOCK_C8, 8].
+            // Step 5: unmerge to C8 -> [wo_padded, BLOCK_C8, 8].
             return ck_tile::transform_tensor_descriptor(
                 desc_merged,
                 ck_tile::make_tuple(ck_tile::make_pass_through_transform(wo + right_pad_w),

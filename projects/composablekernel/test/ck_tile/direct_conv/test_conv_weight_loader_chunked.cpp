@@ -51,7 +51,7 @@ __global__ void test_chunked_weight_kernel(const _Float16* __restrict__ wei,
     constexpr int KH_KW  = cfg.kh * cfg.kw;
     constexpr int SLOTS  = KH_KW * N_CSPW;
 
-    // Per-wave private LDS region — same shape as the production prologue.
+    // Per-wave private LDS region -- same shape as the production prologue.
     constexpr int WEIGHT_SLICE_UINT4 = TC::WEIGHT_LDS_SIZE_UINT4;
     __shared__ uint4 lds_buf[WEIGHT_SLICE_UINT4 * cfg.waves_per_wg];
 
@@ -110,7 +110,7 @@ class ConvWeightLoaderChunkedTest : public ::testing::Test
 {
     protected:
     // KYXC layout: weight[K, R, S, C].
-    // Stride: K → kh*kw*C, R → kw*C, S → C, C → 1.
+    // Stride: K -> kh*kw*C, R -> kw*C, S -> C, C -> 1.
     static std::vector<_Float16> make_weights(int K, int kh, int kw, int C)
     {
         const int total = K * kh * kw * C;

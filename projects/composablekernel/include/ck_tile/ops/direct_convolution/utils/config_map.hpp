@@ -15,7 +15,7 @@ struct ConfigEntry
 
 /// Compile-time map from integer key to Config.
 ///
-/// Backed by a fixed-size array of ConfigEntry; lookup is a linear scan —
+/// Backed by a fixed-size array of ConfigEntry; lookup is a linear scan --
 /// acceptable because N is small and all lookups are in constexpr / template
 /// instantiation contexts (zero runtime cost when ConfigIdx is a template parameter).
 ///

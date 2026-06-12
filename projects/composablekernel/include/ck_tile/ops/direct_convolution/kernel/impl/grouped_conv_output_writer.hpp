@@ -39,7 +39,7 @@ struct OutputWriter
         {0, 0, 0, 0},
         TC::Output::MakeDramWriteTileDistributionNarrow()))>;
 
-    // Persistent members — scalar state only.
+    // Persistent members -- scalar state only.
     ElementType* output_base;            // base output pointer for this block
     ck_tile::index_t output_elem_offset; // per-thread element offset (within-tile spatial+channel)
     ck_tile::index_t row_stride_elems;   // elements per output row (wo * C)
@@ -207,7 +207,7 @@ struct OutputWriterLds
         buffer_view<ck_tile::address_space_enum::global, ElementType, ck_tile::index_t, true>;
     using StoreDramView = ck_tile::tensor_view<StoreDramBuf, StoreDramDesc>;
 
-    // Persistent members — scalar state only.
+    // Persistent members -- scalar state only.
     ElementType* output_base;            // base output pointer for this block
     ElementType* lds_base;               // LDS buffer base pointer
     ck_tile::index_t lds_write_offset;   // per-thread LDS write element offset (MFMA distribution)
@@ -237,7 +237,7 @@ struct OutputWriterLds
             ck_tile::max(TC::Weight::WEIGHT_LDS_SIZE_UINT4, TC::Output::OUTPUT_LDS_BUFFER_SIZE) *
             (sizeof(uint4) / sizeof(ElementType)));
 
-        // LDS write offset (MFMA distribution → swizzled LDS layout).
+        // LDS write offset (MFMA distribution -> swizzled LDS layout).
         {
             auto lds_buf                  = OutputLdsBuf{lds_base, lds_buf_size};
             constexpr auto lds_write_desc = TC::Output::MakeLdsWriteDescriptor();
@@ -255,7 +255,7 @@ struct OutputWriterLds
                     .get_offset();
         }
 
-        // LDS read offset (store distribution → swizzled LDS layout).
+        // LDS read offset (store distribution -> swizzled LDS layout).
         // The store distribution maps all threads to [STORE_Q, BLOCK_C8, 8].
         // The descriptor applies the same swizzle as the write descriptor.
         {
@@ -276,12 +276,12 @@ struct OutputWriterLds
                     .get_offset();
         }
 
-        // DRAM store offset and validity (store distribution → padded DRAM layout).
+        // DRAM store offset and validity (store distribution -> padded DRAM layout).
         // The pad transform marks threads with Q >= wo as invalid (store_valid).
         // Thread activity is a separate, simpler gate: the store distribution maps
         // all block_size threads onto [STORE_Q, BLOCK_C8, 8], but only the first
         // STORE_VECS threads carry meaningful coordinates. store_active marks the
-        // rest inactive — mirroring load_active in the input loader.
+        // rest inactive -- mirroring load_active in the input loader.
         store_active = ck_tile::get_thread_id() < TC::STORE_VECS;
         {
             constexpr auto store_dist = TC::Output::MakeDramWriteTileDistributionWide();

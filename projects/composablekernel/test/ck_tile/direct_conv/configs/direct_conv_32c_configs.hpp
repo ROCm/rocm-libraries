@@ -17,7 +17,7 @@ namespace ck_tile::direct_conv::grouped_32c_tile::v2 {
 
 // All instantiated configurations.
 //
-// Layout: 4 variant groups × 16 configs each = 64 configs total.
+// Layout: 4 variant groups x 16 configs each = 64 configs total.
 // Each group has 8 Dgrad + 8 Fprop configs:
 //   waves_per_wg = 16,14,12,10,8,6,4,2  (must be even)
 //
@@ -206,7 +206,7 @@ struct KernelConfigurations
           .swizzle_type = SwizzleType::CyclicShift,
           .epilogue     = EpilogueType::RegistersToGlobalMemory}},
         // ---- Group 4: CyclicShift, small vector sizes for padding cases ----
-        // Dgrad CyclicShift (keys 68-72) — TODO: Remove vec_size 16 and 8
+        // Dgrad CyclicShift (keys 68-72) -- TODO: Remove vec_size 16 and 8
         {68,
          {.waves_per_wg = 8,
           .direction    = Direction::Dgrad,
@@ -237,7 +237,7 @@ struct KernelConfigurations
           .swizzle_type = SwizzleType::CyclicShift,
           .epilogue     = EpilogueType::RegistersToLdsToGlobalMemory,
           .vector_size  = 1}},
-        // Fprop CyclicShift (keys 73-77) — TODO: Remove vec_size 16 and 8
+        // Fprop CyclicShift (keys 73-77) -- TODO: Remove vec_size 16 and 8
         {73,
          {.waves_per_wg = 8,
           .swizzle_type = SwizzleType::CyclicShift,
