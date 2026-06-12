@@ -29,7 +29,7 @@
 #include <thrust/system/cpp/memory.h>
 #include <thrust/system/omp/memory.h>
 
-#include <limits>
+#include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
 namespace system

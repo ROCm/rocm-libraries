@@ -64,7 +64,7 @@
 
 #  include <rocprim/config.hpp>
 
-#  include <cstdint>
+#  include _THRUST_STD_INCLUDE(cstdint)
 
 THRUST_NAMESPACE_BEGIN
 
