@@ -46,6 +46,8 @@
 
 #include <vector>
 
+#include _THRUST_STD_INCLUDE(initializer_list)
+
 THRUST_NAMESPACE_BEGIN
 
 struct default_init_t
