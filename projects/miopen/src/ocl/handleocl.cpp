@@ -441,6 +441,20 @@ std::size_t Handle::GetGlobalMemorySize() const
     return miopen::GetDeviceInfo<CL_DEVICE_GLOBAL_MEM_SIZE>(miopen::GetDevice(this->GetStream()));
 }
 
+std::size_t Handle::GetL2CacheSize() const
+{
+    return miopen::GetDeviceInfo<CL_DEVICE_GLOBAL_MEM_CACHE_SIZE>(
+        miopen::GetDevice(this->GetStream()));
+}
+
+std::size_t Handle::GetClockRateKhz() const
+{
+    // CL reports max clock in MHz; convert to kHz to match the HIP backend.
+    return miopen::GetDeviceInfo<CL_DEVICE_MAX_CLOCK_FREQUENCY>(
+               miopen::GetDevice(this->GetStream())) *
+           1000;
+}
+
 std::string Handle::GetDeviceNameImpl() const { return this->impl->get_device_name(); }
 
 std::string Handle::GetDeviceName() const { return this->GetTargetProperties().Name(); }

@@ -2,10 +2,10 @@
     "target": "lgbm_rank",
     "sources": [{
             "name": "main",
-            "length": 42
+            "length": 41
         }, {
             "name": "quantize",
-            "length": 1032
+            "length": 1027
         }, {
             "name": "tu0",
             "length": 25404
@@ -29,6 +29,6 @@
             "length": 25404
         }, {
             "name": "tu7",
-            "length": 24896
+            "length": 25150
         }]
 }

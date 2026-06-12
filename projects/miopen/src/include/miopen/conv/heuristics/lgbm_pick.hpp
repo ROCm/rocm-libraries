@@ -6,6 +6,9 @@
 
 #include <miopen/solver_id.hpp>
 
+#include <string>
+#include <vector>
+
 namespace miopen {
 struct Handle;
 namespace conv {
@@ -15,19 +18,20 @@ struct ProblemDescription;
 namespace ai {
 namespace lgbm {
 
-// Score the LGBM rank + applicability models against `problem` for the GPU
-// described by `handle`. Returns the chosen solver's Id on success, or an
+// Score the v10 rank model over the full solver vocabulary for `problem` on the
+// GPU described by `handle`, and return the argmax solver's Id. Returns an
 // invalid Id (== abstain) when:
-//   - the GPU's spec_id is not in the trained vocab,
-//   - the rank model's top pick is too close to the runner-up (margin gate),
-//   - the applicability model VETOes the top pick,
-//   - the model recommends a solver name MIOpen doesn't recognize.
+//   - the metadata failed to load,
+//   - the GPU's gfx_id is not in the trained vocab / arch-constants table,
+//   - the model recommends a solver name this MIOpen build doesn't recognize.
 solver::Id PickSolver(const conv::ProblemDescription& problem, const Handle& handle);
 
-// Test-only overload that bypasses GPU resolution and uses the supplied
-// spec_id index directly (must be in [0, kNumSpecIds)). Lets gtest fixtures
-// drive the picker without a real GPU.
-solver::Id PickSolverForSpec(const conv::ProblemDescription& problem, int spec_id_code);
+// Test seam: score a pre-built 51-feature row (solver_name column is
+// overwritten internally per candidate) over the full vocab and return the
+// argmax solver name. Lets gtest fixtures validate the scoring + argmax path
+// against the reference feature matrix without a GPU. Returns "" if metadata
+// is unavailable.
+std::string ScoreRowArgmaxForTest(const std::vector<double>& feature_row);
 
 } // namespace lgbm
 } // namespace ai

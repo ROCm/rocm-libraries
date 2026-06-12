@@ -2,8 +2,7 @@
 #include "header.h"
 
 const unsigned char is_categorical[] = {  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
-  0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
-  0, 1, 1, 1, 1, 1, 1, };
+  0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, };
 static const int32_t num_class[] = {  1, };
 
 int32_t get_num_target(void) {
@@ -15,7 +14,7 @@ void get_num_class(int32_t* out) {
   }
 }
 int32_t get_num_feature(void) {
-  return 59;
+  return 51;
 }
 const char* get_threshold_type(void) {
   return "float64";
@@ -27,7 +26,7 @@ const char* get_leaf_output_type(void) {
 void predict(union Entry* data, int pred_margin, double* result) {
   
   // Quantize data
-  for (int i = 0; i < 59; ++i) {
+  for (int i = 0; i < 51; ++i) {
     if (data[i].missing != -1 && !is_categorical[i]) {
       data[i].qvalue = quantize(data[i].fvalue, i);
     }

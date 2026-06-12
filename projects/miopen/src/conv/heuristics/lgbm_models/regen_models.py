@@ -12,10 +12,11 @@ Outputs into ./rank/:
 These files are checked into the MIOpen tree. Only re-run when the source
 LightGBM .txt model changes. Requires `treelite>=4` and `tl2cgen>=1`.
 
-v5 (2026-06-09): rank-only. The applicability model was dropped in v4
-(threshold -> 0 with no quality loss under the 3x cost model), and the
-rank feature set was pruned 69 -> 59 in v5. Source model is
-model_rank_pruned59_t800.txt.
+v10 (2026-06-12): runtime-pure, rank-only. The applicability model was
+dropped in v4, the feature set pruned 69 -> 59 in v5, and v10 dropped the
+JSON-only GPU fields (spec_id, l3_infinity_cache_kb, peak_tflops_*) for a
+51-feature model whose GPU inputs come from hipDeviceProp_t + the
+gpu_constants.h arch table. Source model is model_rank_v10_pure_final.txt.
 """
 from __future__ import annotations
 
@@ -34,7 +35,9 @@ HERE = Path(__file__).resolve().parent
 
 MODELS = [
     # (subdir, libname, source .txt model)
-    ("rank", "lgbm_rank", "model_rank_pruned59_t800.txt"),
+    # v10 runtime-pure: 51 features, GPU values sourced from hipDeviceProp_t +
+    # gpu_constants.h (no GPUInfo JSON / spec_id).
+    ("rank", "lgbm_rank", "model_rank_v10_pure_final.txt"),
 ]
 
 

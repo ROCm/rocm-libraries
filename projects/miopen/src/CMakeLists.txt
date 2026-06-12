@@ -325,15 +325,14 @@ endif()
 if(MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     list(APPEND MIOpen_Source
         conv/heuristics/lgbm_pick.cpp
-        conv/heuristics/lgbm_metadata.cpp
-        conv/heuristics/lgbm_gpu_table.cpp)
+        conv/heuristics/lgbm_metadata.cpp)
     file(GLOB LGBM_RANK_SRCS conv/heuristics/lgbm_models/rank/*.c)
     list(APPEND MIOpen_Source ${LGBM_RANK_SRCS})
     # Generated C: silence machine-generated warnings, and rename every
     # exported symbol with an lgbm_rank_ prefix. The prefixing keeps these
     # generic Treelite names (predict, quantize, predict_unit0..7, the
     # metadata accessors, the is_categorical global) out of MIOpen's global
-    # namespace. (v5 is rank-only; the applicability model was dropped in v4.)
+    # namespace. (v10 is rank-only; the applicability model was dropped in v4.)
     set(LGBM_EXPORT_SYMS
         predict postprocess quantize
         predict_unit0 predict_unit1 predict_unit2 predict_unit3
@@ -978,8 +977,7 @@ if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     endif()
     file(GLOB MODEL_FILES CONFIGURE_DEPENDS
         kernels/*.model
-        kernels/lgbm_model_meta.json
-        kernels/lgbm_per_spec_thresh.json)
+        kernels/lgbm_model_meta.json)
     if(NOT ENABLE_ASAN_PACKAGING )
         install(FILES ${MODEL_FILES} DESTINATION ${DATABASE_INSTALL_DIR})
     endif()
