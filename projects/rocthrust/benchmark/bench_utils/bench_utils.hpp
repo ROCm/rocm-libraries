@@ -26,10 +26,11 @@
 // Utils
 #include <thrust/execution_policy.h>
 
-#include "cmdparser.hpp"
-#include "common/types.hpp"
-#include "custom_reporter.hpp"
-#include "generation_utils.hpp"
+#include "cmdparser.hpp" // IWYU pragma: export
+#include "common/types.hpp" // IWYU pragma: export
+#include "custom_reporter.hpp" // IWYU pragma: export
+#include "generation_utils.hpp" // IWYU pragma: export
+#include "thrust_compat.hpp" // IWYU pragma: export
 
 // HIP/CUDA
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
@@ -57,7 +58,7 @@
 
 namespace bench_utils
 {
-#if (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP)
+#if (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP) || (THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA)
 
 #  define HIP_CHECK(condition)                                                     \
     {                                                                              \

@@ -10,7 +10,9 @@ target_include_directories(testing_common
         $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}>
 )
 
-if(USE_SYSTEM_LIB)
+if(GRAFT_THRUST_ONTO_BINARIES)
+    target_link_libraries(testing_common INTERFACE CCCL::CCCL)
+elseif(USE_SYSTEM_LIB)
     target_link_libraries(testing_common INTERFACE roc::rocthrust)
 else()
     target_link_libraries(testing_common

@@ -25,11 +25,15 @@ function(add_thrust_benchmark BENCHMARK_NAME BENCHMARK_SOURCE NOT_INTERNAL)
     add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
 
     target_compile_options(${BENCHMARK_TARGET} PRIVATE ${COMPILE_OPTIONS})
-    target_link_libraries(${BENCHMARK_TARGET}
-        PRIVATE
-            rocthrust
-            roc::rocprim_hip
-    )
+    if(GRAFT_THRUST_ONTO_BINARIES)
+        target_link_libraries(${BENCHMARK_TARGET} INTERFACE CCCL::CCCL)
+    else()
+        target_link_libraries(${BENCHMARK_TARGET}
+          PRIVATE
+              rocthrust
+              roc::rocprim_hip
+        )
+    endif()
     # Internal benchmark does not use Google Benchmark nor rocRAND.
     # This can be omited when that benchmark is removed.
     if(NOT_INTERNAL)

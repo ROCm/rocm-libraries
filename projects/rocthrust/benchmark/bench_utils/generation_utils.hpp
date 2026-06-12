@@ -46,9 +46,6 @@
 #include <thrust/sequence.h>
 #include <thrust/tuple.h>
 
-// rocPRIM
-#include <rocprim/rocprim.hpp>
-
 // rocRAND
 #include <rocrand/rocrand.h>
 

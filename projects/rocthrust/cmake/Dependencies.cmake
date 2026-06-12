@@ -244,7 +244,7 @@ function(fetch_dep method repo_name repo_path download_branch)
   endif()
 endfunction()
 
-if(${LINK_HIP_DEVICE_LIBS})
+if(${LINK_HIP_DEVICE_LIBS} AND NOT GRAFT_THRUST_ONTO_BINARIES)
   fetch_dep(ROCPRIM_FETCH_METHOD rocprim ROCPRIM_PATH ROCM_DEP_RELEASE_BRANCH)
 
   if(${ROCPRIM_FETCH_METHOD} STREQUAL "DOWNLOAD" OR ${ROCPRIM_FETCH_METHOD} STREQUAL "MONOREPO")
@@ -254,7 +254,7 @@ if(${LINK_HIP_DEVICE_LIBS})
       prim
       SOURCE_DIR    ${ROCPRIM_PATH}
       INSTALL_DIR   ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim
-      CMAKE_ARGS    -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
+      CMAKE_ARGS    -DBUILD_TEST=OFF -DBUILD_BENCHMARK=OFF -DBUILD_EXAMPLE=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
       LOG_CONFIGURE TRUE
       LOG_BUILD     TRUE
       LOG_INSTALL   TRUE
@@ -415,12 +415,12 @@ if(BUILD_BENCHMARK)
     set(_ROCTHRUST_DISABLE_ROCM_CHECKS FALSE)
 	# Clang on Windows throws the following warnings with Googlebenchmark v1.9.5 (along with Werror):
     # googlebench-src/src/string_util.cc:158:34: error: format string is not a string literal [-Werror,-Wformat-nonliteral]
-	if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND WIN32)  
-	  if(TARGET benchmark)  
-	    target_compile_options(benchmark PRIVATE -Wno-format-nonliteral -Wno-missing-format-attribute -Wno-unused-command-line-argument)  
-	  endif()  
-	  if(TARGET benchmark_main)  
-	    target_compile_options(benchmark_main PRIVATE -Wno-format-nonliteral -Wno-missing-format-attribute -Wno-unused-command-line-argument)	
+	if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND WIN32)
+	  if(TARGET benchmark)
+	    target_compile_options(benchmark PRIVATE -Wno-format-nonliteral -Wno-missing-format-attribute -Wno-unused-command-line-argument)
+	  endif()
+	  if(TARGET benchmark_main)
+	    target_compile_options(benchmark_main PRIVATE -Wno-format-nonliteral -Wno-missing-format-attribute -Wno-unused-command-line-argument)
 	  endif()
       if(NOT TARGET benchmark::benchmark)
         add_library(benchmark::benchmark ALIAS benchmark)
@@ -443,12 +443,12 @@ if(BUILD_BENCHMARK)
     if(CMAKE_CXX_COMPILER_LAUNCHER)
       set(EXTRA_CMAKE_ARGS "${EXTRA_CMAKE_ARGS} -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}")
     endif()
-    
+
     FetchContent_Declare(
       rocrand
       SOURCE_DIR    ${ROCRAND_PATH}
       INSTALL_DIR   ${CMAKE_CURRENT_BINARY_DIR}/deps/rocrand
-      CMAKE_ARGS    -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm ${EXTRA_CMAKE_ARGS}
+      CMAKE_ARGS    -DBUILD_BENCHMARK=OFF -DBUILD_TEST=OFF -DBUILD_EXAMPLE=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm ${EXTRA_CMAKE_ARGS}
       LOG_CONFIGURE TRUE
       LOG_BUILD     TRUE
       LOG_INSTALL   TRUE
