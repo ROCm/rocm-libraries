@@ -177,7 +177,7 @@ typedef enum {
   /** Matrix Offset.
    *
    * For ``General Batched GEMM``, we can support for users to access a sub-matrix of
-   * the original matrix by adding an ``offset`` value from the base address.
+   * the original matrix by adding an ``offset`` value (in elements) from the base address.
    * Note that for non-batched or Strided Batch GEMM case, we can directly apply
    * the offset value by using the strided-offset value.
    */

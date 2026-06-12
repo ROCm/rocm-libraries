@@ -229,6 +229,19 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
         return rocblaslt_status_invalid_size;
     }
 
+    // Batch offsets are expressed in elements and converted to bytes; sub-byte
+    // (MX) data types are not byte-addressable, so a nonzero offset is unsupported.
+    if((batch_offset_a != 0 && hip_datatype_is_mxtype(type_a))
+       || (batch_offset_b != 0 && hip_datatype_is_mxtype(type_b))
+       || (batch_offset_c != 0 && hip_datatype_is_mxtype(type_c))
+       || (batch_offset_d != 0 && hip_datatype_is_mxtype(type_d)))
+    {
+#ifndef CODE_COVERAGE
+        std::cerr << "matrix offset is not supported for sub-byte (MX) data types" << std::endl;
+#endif
+        return rocblaslt_status_not_implemented;
+    }
+
     // number of batches of matrics A,B,C,D must be the same and positive
     if(num_batches_a != num_batches_b || num_batches_a != num_batches_c
        || num_batches_a != num_batches_d || num_batches_a < 1)

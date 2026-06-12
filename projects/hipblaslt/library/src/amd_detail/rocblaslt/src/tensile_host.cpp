@@ -2424,11 +2424,22 @@ namespace
         inputs.batchC = reinterpret_cast<void const* const*>(prob.batch_C);
         inputs.batchD = reinterpret_cast<void* const*>(prob.batch_D);
 
-        // set the batched offset of A, B, C, and D.
-        inputs.batchOffsetA = prob.batch_offset_a;
-        inputs.batchOffsetB = prob.batch_offset_b;
-        inputs.batchOffsetC = prob.batch_offset_c;
-        inputs.batchOffsetD = prob.batch_offset_d;
+        // The batch offsets are specified by the user in elements; convert them to
+        // bytes here so the kernel/assembly can add them straight to byte addresses.
+        // Only data types whose element size is at least one byte are supported
+        // (sub-byte types such as fp4/fp6 are rejected during argument validation).
+        inputs.batchOffsetA
+            = prob.batch_offset_a
+              * size_t(TensileLite::DataTypeInfo::Get(hip2TensileType(prob.a_type)).elementSize);
+        inputs.batchOffsetB
+            = prob.batch_offset_b
+              * size_t(TensileLite::DataTypeInfo::Get(hip2TensileType(prob.b_type)).elementSize);
+        inputs.batchOffsetC
+            = prob.batch_offset_c
+              * size_t(TensileLite::DataTypeInfo::Get(hip2TensileType(prob.c_type)).elementSize);
+        inputs.batchOffsetD
+            = prob.batch_offset_d
+              * size_t(TensileLite::DataTypeInfo::Get(hip2TensileType(prob.d_type)).elementSize);
 
         // Set the GSU workspace
         inputs.ws            = prob.workspace;

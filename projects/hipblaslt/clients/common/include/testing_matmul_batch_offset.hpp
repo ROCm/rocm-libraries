@@ -62,7 +62,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
 
     int32_t batch_count = arg.batch_count;
 
-    // Batch offsets (from YAML - assumed to be in BYTES)
+    // Batch offsets (from YAML - in ELEMENTS)
     int64_t offset_a = arg.batch_offset_a;
     int64_t offset_b = arg.batch_offset_b;
     int64_t offset_c = arg.batch_offset_c;
@@ -86,22 +86,16 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     size_t size_C_sub = size_t(ldc) * size_t(N);
     size_t size_D_sub = size_t(ldd) * size_t(N);
 
-    // Convert byte offsets to element offsets
-    // Note: offsets must be aligned to element size
-    size_t offset_a_elem = offset_a / sizeof(Ti);
-    size_t offset_b_elem = offset_b / sizeof(Ti);
-    size_t offset_c_elem = offset_c / sizeof(To);
-    size_t offset_d_elem = offset_d / sizeof(To);
-
     // Full buffer sizes: [offset padding] + [matrix data]
     // The offset padding comes FIRST because:
     // - Pointer array points to buffer BASE
     // - Kernel adds offset to BASE to get actual data location
     // - So actual data is at BASE + offset
-    size_t size_A_full = offset_a_elem + size_A_sub;
-    size_t size_B_full = offset_b_elem + size_B_sub;
-    size_t size_C_full = offset_c_elem + size_C_sub;
-    size_t size_D_full = offset_d_elem + size_D_sub;
+    // Offsets are already in elements (the API takes element offsets).
+    size_t size_A_full = offset_a + size_A_sub;
+    size_t size_B_full = offset_b + size_B_sub;
+    size_t size_C_full = offset_c + size_C_sub;
+    size_t size_D_full = offset_d + size_D_sub;
 
     // Allocate host memory for full buffers
     host_vector<Ti> h_A_full(size_A_full * batch_count);
@@ -116,9 +110,9 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     for(int b = 0; b < batch_count; b++)
     {
         // Initialize each batch's sub-matrix at the offset location
-        Ti* A_batch = h_A_full.data() + b * size_A_full + offset_a_elem;
-        Ti* B_batch = h_B_full.data() + b * size_B_full + offset_b_elem;
-        To* C_batch = h_C_full.data() + b * size_C_full + offset_c_elem;
+        Ti* A_batch = h_A_full.data() + b * size_A_full + offset_a;
+        Ti* B_batch = h_B_full.data() + b * size_B_full + offset_b;
+        To* C_batch = h_C_full.data() + b * size_C_full + offset_c;
 
         // Simple initialization: A and B with small integers
         for(int64_t j = 0; j < A_col; j++)
@@ -308,9 +302,9 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     for(int b = 0; b < batch_count; b++)
     {
         // Get pointers to sub-matrices (with element offset applied)
-        Ti* A_sub = h_A_full.data() + b * size_A_full + offset_a_elem;
-        Ti* B_sub = h_B_full.data() + b * size_B_full + offset_b_elem;
-        To* C_sub = h_C_full.data() + b * size_C_full + offset_c_elem;
+        Ti* A_sub = h_A_full.data() + b * size_A_full + offset_a;
+        Ti* B_sub = h_B_full.data() + b * size_B_full + offset_b;
+        To* C_sub = h_C_full.data() + b * size_C_full + offset_c;
         To* D_sub = h_D_gold.data() + b * size_D_sub;
 
         // Simple GEMM: D = alpha * A * B + beta * C
@@ -346,7 +340,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     for(int b = 0; b < batch_count; b++)
     {
         // GPU result is at (base + offset) within each batch's buffer
-        To* result_gpu = h_D_full.data() + b * size_D_full + offset_d_elem;
+        To* result_gpu = h_D_full.data() + b * size_D_full + offset_d;
         To* result_cpu = h_D_gold.data() + b * size_D_sub;
 
         for(size_t i = 0; i < size_D_sub; i++)
