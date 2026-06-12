@@ -1,0 +1,30 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=2 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# StinkyWaitCntInsertionPass (gfx1250): when NumWaves != 1, only barriers are
+# tensor-wait anchors. A pending tensor_load_to_lds with overlapping MemTokenData
+# must not drain before a ds_read, but must still drain before a barrier. The
+# barrier also conflicts with the outstanding ds_read on token [0], so both
+# s_wait_tensorcnt and s_wait_dscnt are inserted before the barrier.
+#
+# IR (single block):
+#   tensor_load_to_lds   tokens=[0]
+#   ds_load_b64          tokens=[0]   (no consumer of v[0:1])
+#   s_barrier            tokens=[0]
+#
+# CHECK-LABEL: @waitcnt_insertion_tensor_anchor_ds_read_num_waves_multi
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# CHECK-NEXT: ds_load_b64
+# CHECK-SAME: tokens = [0]
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 0
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-SAME: dlcnt = 0
+# CHECK-NEXT: s_barrier
+
+st.func @waitcnt_insertion_tensor_anchor_ds_read_num_waves_multi() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.s_barrier"() { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+}

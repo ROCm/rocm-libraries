@@ -28,34 +28,14 @@ def _require_gpu():
         pytest.skip(f"PyTorch not available: {e}")
 
 
-def _find_plugin_path():
-    """Find the hipDNN engine plugin directory."""
-    project_root = Path(__file__).parent.parent.parent
-    candidates = [
-        project_root.parent.parent.parent.parent
-        / "dnn-providers"
-        / "miopen-provider"
-        / "build"
-        / "lib"
-        / "hipdnn_plugins"
-        / "engines",
-        Path("/opt/rocm/lib/hipdnn_plugins/engines"),
-    ]
-    for p in candidates:
-        if p.is_dir() and any(p.glob("*.so")):
-            return str(p)
-    return None
-
-
-def _require_hipdnn():
+def _require_hipdnn(plugin_paths: List[str]):
     """Skip if hipdnn_frontend is not importable or no GPU handle can be created."""
     try:
         import hipdnn_frontend
 
-        plugin_path = _find_plugin_path()
-        if plugin_path is not None:
-            hipdnn_frontend.set_engine_plugin_paths([plugin_path])
-
+        hipdnn_frontend.set_engine_plugin_paths(
+            plugin_paths, hipdnn_frontend.PluginLoadingMode.ABSOLUTE
+        )
         hipdnn_frontend.Handle()
         return hipdnn_frontend
     except ImportError:
@@ -69,10 +49,10 @@ class TestSuiteRunnerIntegration:
     """Integration tests for suite_runner.run_graph_all_providers on real GPU."""
 
     @pytest.fixture
-    def hipdnn(self):
+    def hipdnn(self, plugin_paths: List[str]):
         """Get hipdnn_frontend module or skip."""
         _require_gpu()
-        return _require_hipdnn()
+        return _require_hipdnn(plugin_paths)
 
     @pytest.fixture
     def conv_graph(self) -> Dict[str, Any]:
@@ -275,22 +255,19 @@ class TestSuiteCLIIntegration:
     """Integration tests for suite mode via CLI (subprocess)."""
 
     @pytest.fixture(autouse=True)
-    def check_deps(self):
+    def check_deps(self, plugin_paths: List[str]):
         """Skip all tests if GPU or hipdnn not available."""
         _require_gpu()
-        _require_hipdnn()
+        _require_hipdnn(plugin_paths)
 
     @pytest.fixture
     def project_root(self) -> Path:
         return Path(__file__).parent.parent.parent
 
     @pytest.fixture
-    def cli_plugin_args(self) -> List[str]:
-        """Return --plugin-path args for CLI, or empty list."""
-        path = _find_plugin_path()
-        if path is None:
-            return []
-        return ["--plugin-path", path]
+    def cli_plugin_args(self, plugin_paths: List[str]) -> List[str]:
+        """Return CLI args for --plugin-path using the first resolved plugin path."""
+        return ["--plugin-path", plugin_paths[0]]
 
     @pytest.fixture
     def graph_paths(self) -> List[Path]:

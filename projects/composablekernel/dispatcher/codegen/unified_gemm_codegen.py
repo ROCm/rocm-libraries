@@ -1113,9 +1113,15 @@ class UnifiedGemmCodegen:
         trait_configs = self._get_trait_configs()
 
         for tile, trait in itertools.product(tile_configs, trait_configs):
-            # Perform variant-specific architecture validation
+            # Perform variant-specific architecture validation against the
+            # trait's ACTUAL pipeline/scheduler (not a hard-coded compv4).
             if self.arch_filter and HAS_ARCH_FILTER:
-                if not self._is_tile_arch_valid(tile, variant):
+                if not self._is_tile_arch_valid(
+                    tile,
+                    variant,
+                    pipeline=trait.pipeline,
+                    scheduler=trait.scheduler,
+                ):
                     continue
 
             if variant == GemmVariant.STANDARD:
@@ -1196,9 +1202,21 @@ class UnifiedGemmCodegen:
                 rejected_count += 1
                 continue
 
-            # Architecture-specific validation
+            # Architecture-specific validation. This is a pre-filter run before
+            # tiles are paired with traits, so keep a tile if it is legal under
+            # ANY configured pipeline/scheduler; the precise per-trait check
+            # happens later in _get_configs_for_variant. Filtering here with a
+            # single hard-coded pipeline (compv4) wrongly dropped tiles that are
+            # legal under mem/compv3.
             if self.arch_filter and HAS_ARCH_FILTER:
-                if not self._is_tile_arch_valid(tile):
+                trait_cfg = self.config.get("trait_config", {})
+                pipelines = trait_cfg.get("pipeline") or ["compv4"]
+                schedulers = trait_cfg.get("scheduler") or ["intrawave"]
+                if not any(
+                    self._is_tile_arch_valid(tile, pipeline=pl, scheduler=sc)
+                    for pl in pipelines
+                    for sc in schedulers
+                ):
                     rejected_count += 1
                     continue
 
@@ -1210,13 +1228,23 @@ class UnifiedGemmCodegen:
         return configs
 
     def _is_tile_arch_valid(
-        self, tile: TileConfig, variant: GemmVariant = None
+        self,
+        tile: TileConfig,
+        variant: GemmVariant = None,
+        pipeline: str = None,
+        scheduler: str = None,
     ) -> bool:
         """Check if tile configuration is valid for target architecture
 
         Args:
             tile: Tile configuration to validate
             variant: GEMM variant (affects operator-specific constraints)
+            pipeline: Trait pipeline to validate against. Pass the config's
+                actual pipeline -- omitting it falls back to ``compv4``, whose
+                MFMA constraints are stricter than ``mem``/``compv3`` and would
+                wrongly reject tiles that are legal under those pipelines.
+            scheduler: Trait scheduler to validate against (defaults to
+                ``intrawave`` for the same reason).
         """
         if not self.arch_filter or not HAS_ARCH_FILTER:
             return True
@@ -1237,8 +1265,10 @@ class UnifiedGemmCodegen:
 
         # Map GEMM variant to operator type for validation
         operator = None
-        pipeline = "compv4"  # Default
-        scheduler = "intrawave"  # Default
+        if pipeline is None:
+            pipeline = "compv4"  # Default (representative compute pipeline)
+        if scheduler is None:
+            scheduler = "intrawave"  # Default
 
         if OperatorType is not None and variant is not None:
             variant_to_operator = {

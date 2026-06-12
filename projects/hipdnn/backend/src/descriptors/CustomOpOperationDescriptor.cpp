@@ -243,7 +243,7 @@ std::string CustomOpOperationDescriptor::toString() const
     str += ", data_size=" + std::to_string(_data.data.size());
     str += ", compute_data_type=";
     str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
-    str += "}";
+    str += '}';
     return str;
 }
 
