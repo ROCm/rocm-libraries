@@ -71,51 +71,6 @@ endif()
 set(CMAKE_C_COMPILER "${ROCM_LLVM_BIN_DIR}/clang${_ROCM_COMPILER_EXTENSION}" CACHE FILEPATH "C compiler")
 set(CMAKE_CXX_COMPILER "${ROCM_LLVM_BIN_DIR}/clang++${_ROCM_COMPILER_EXTENSION}" CACHE FILEPATH "C++/HIP compiler")
 
-# Windows components (e.g. hipDNN) embed a VERSIONINFO resource (backend.rc) into their DLLs, which
-# requires a resource compiler. The ROCm clang/wheel toolchain does not ship llvm-rc, so detect one:
-# prefer llvm-rc (clang ecosystem) from the ROCm LLVM bin or PATH, then fall back to the newest
-# Windows SDK rc.exe. If neither is found, disable RC (NOTREQUIRED) so components without resource
-# sources still configure.
-if(WIN32 AND (NOT DEFINED CMAKE_RC_COMPILER OR CMAKE_RC_COMPILER MATCHES "NOTREQUIRED$"))
-    find_program(ROCM_RC_COMPILER NAMES llvm-rc PATHS "${ROCM_LLVM_BIN_DIR}" ENV PATH)
-    if(ROCM_RC_COMPILER)
-        set(CMAKE_RC_COMPILER "${ROCM_RC_COMPILER}")
-        message(STATUS "ROCm toolchain: using llvm-rc resource compiler: ${CMAKE_RC_COMPILER}")
-    else()
-        # CMake cannot parse "(x86)" inside an $ENV{} reference, so search the standard roots.
-        foreach(_winsdk_root "C:/Program Files (x86)/Windows Kits/10"
-                             "C:/Program Files/Windows Kits/10"
-        )
-            file(GLOB _sdk_ver_dirs LIST_DIRECTORIES true "${_winsdk_root}/bin/10.*")
-            list(SORT _sdk_ver_dirs)
-            list(REVERSE _sdk_ver_dirs)
-            foreach(_ver_dir IN LISTS _sdk_ver_dirs)
-                if(EXISTS "${_ver_dir}/x64/rc.exe")
-                    get_filename_component(_sdk_ver "${_ver_dir}" NAME)
-                    set(CMAKE_RC_COMPILER "${_ver_dir}/x64/rc.exe")
-                    # MS rc.exe does not auto-discover SDK headers (winresrc.h); pass them explicitly.
-                    set(CMAKE_RC_FLAGS_INIT
-                        "/I \"${_winsdk_root}/Include/${_sdk_ver}/um\" /I \"${_winsdk_root}/Include/${_sdk_ver}/shared\""
-                    )
-                    message(
-                        STATUS "ROCm toolchain: using Windows SDK resource compiler: ${CMAKE_RC_COMPILER}"
-                    )
-                    break()
-                endif()
-            endforeach()
-            if(CMAKE_RC_COMPILER AND NOT CMAKE_RC_COMPILER MATCHES "NOTREQUIRED$")
-                break()
-            endif()
-        endforeach()
-    endif()
-    if(NOT CMAKE_RC_COMPILER OR CMAKE_RC_COMPILER MATCHES "NOTREQUIRED$")
-        set(CMAKE_RC_COMPILER "CMAKE_RC_COMPILER-NOTREQUIRED")
-        message(
-            STATUS "ROCm toolchain: no resource compiler found; Windows VERSIONINFO will be skipped"
-        )
-    endif()
-endif()
-
 # Cache ROCM_PATH and add to CMAKE_PREFIX_PATH for find_package(hip)
 set(ROCM_PATH "${ROCM_PATH}" CACHE PATH "Path to ROCm installation")
 if(NOT "${ROCM_PATH}" IN_LIST CMAKE_PREFIX_PATH)

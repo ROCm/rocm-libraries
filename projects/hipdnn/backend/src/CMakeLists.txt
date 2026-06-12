@@ -100,6 +100,10 @@ hipdnn_generate_version_header(hipdnn_backend)
 
 # Embed Windows VERSIONINFO into the DLL
 if(WIN32)
+    string(TIMESTAMP HIPDNN_COPYRIGHT_YEAR "%Y")
+    set(HIPDNN_PRODUCT_VERSION_DISPLAY
+        "${HIPDNN_BACKEND_VERSION_MAJOR}.${HIPDNN_BACKEND_VERSION_MINOR}"
+    )
     configure_file(
         "${CMAKE_CURRENT_LIST_DIR}/../backend.rc.in"
         "${CMAKE_CURRENT_BINARY_DIR}/backend.rc"
