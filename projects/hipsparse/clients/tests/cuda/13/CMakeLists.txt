@@ -30,10 +30,10 @@ set(HIPSPARSE_TEST_SOURCES
     test_spmm_batched_csc.cpp
     test_spmm_batched_csr.cpp
     test_spmm_bell.cpp
+    test_spmm_bsr.cpp
     test_spmm_coo.cpp
     test_spmm_csc.cpp
     test_spmm_csr.cpp
-    test_spmm_bsr.cpp
     test_spmv_coo.cpp
     test_spmv_coo_aos.cpp
     test_spmv_csr.cpp
@@ -70,10 +70,10 @@ set(HIPSPARSE_TEST_YAMLS
     cuda/13/test_spmm_batched_coo.yaml
     cuda/13/test_spmm_batched_csc.yaml
     cuda/13/test_spmm_batched_csr.yaml
+    cuda/13/test_spmm_bsr.yaml
     cuda/13/test_spmm_coo.yaml
     cuda/13/test_spmm_csc.yaml
     cuda/13/test_spmm_csr.yaml
-    cuda/13/test_spmm_bsr.yaml
     cuda/13/test_spmv_coo.yaml
     cuda/13/test_spmv_coo_aos.yaml
     cuda/13/test_spmv_csr.yaml
