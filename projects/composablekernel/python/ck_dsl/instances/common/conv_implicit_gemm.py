@@ -1051,12 +1051,14 @@ def build_implicit_gemm_conv(
             tile_cols=block_k,
             block_size=threads,
             wave_size=spec.wave_size,
+            elem_dtype=ir_dtype_a,
         )
         b_loader = AsyncTileLoader.from_tile(
             tile_rows=block_n,
             tile_cols=block_k,
             block_size=threads,
             wave_size=spec.wave_size,
+            elem_dtype=ir_dtype_b,
         )
         a_sync_loader = None
         b_sync_loader = None
@@ -1076,12 +1078,14 @@ def build_implicit_gemm_conv(
             tile_cols=block_k,
             block_size=threads,
             load_vec=load_vec,
+            elem_dtype=ir_dtype_a,
         )
         b_sync_loader = CoalescedTileLoader(
             tile_rows=block_n,
             tile_cols=block_k,
             block_size=threads,
             load_vec=load_vec,
+            elem_dtype=ir_dtype_b,
         )
 
     schedule = SchedulePolicy.for_pipeline(

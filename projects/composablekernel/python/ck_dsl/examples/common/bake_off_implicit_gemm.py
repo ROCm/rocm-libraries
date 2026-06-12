@@ -124,7 +124,7 @@ def main() -> int:
     # while degrading cleanly to the narrow atom on gfx942 (no comgr crash).
     dtype = args.dtype
     atom = target.mma.select_largest_k(
-        a_dtype=dtype, b_dtype=dtype, c_dtype="fp32", m=args.warp_tile_m, n=args.warp_tile_n, k_max = args.tile_k
+        a_dtype=dtype, b_dtype=dtype, c_dtype="fp32", m=args.warp_tile_m, n=args.warp_tile_n, k_max=args.tile_k
     )
     if atom is None:
         print(f"no {dtype} {args.warp_tile_m}x{args.warp_tile_n} MFMA atom for {arch}", file=sys.stderr)
@@ -190,6 +190,7 @@ def main() -> int:
         groups=1,
         cpg=p.C,
         kpg=p.K,
+        dtype=dtype,
         conv_layout="implicit_gemm",
         # The kernel reads block_id.x as the N-tile index and
         # block_id.y as the M-tile index (mirrors gemm_universal).
@@ -199,7 +200,7 @@ def main() -> int:
         grid_order="NM",
         warmup_iters=5,
         timed_iters=100,
-        atoms=[f"tile.mfma_f32_32x32x{warp_tile_k}_f16"],
+        atoms=[f"tile.mfma_f32_32x32x{warp_tile_k}_{dtype}"],
         notes=(
             "Bake-off 1: implicit-GEMM conv via the coord-transform "
             "DAG (ck_dsl.helpers.transforms.TensorDescriptor). A's address is "

@@ -140,7 +140,7 @@ def run_manifest(
         make_args, grid, block, flop, bytes_xfer, check = (
             run_batched_gemm_manifest_problem(manifest, shape, verify)
         )
-    elif kind == "conv_fp16":
+    elif kind in ("conv_fp16", "conv_bf16", "conv_fp32"):
         make_args, grid, block, flop, bytes_xfer, check = run_conv_manifest_problem(
             manifest, shape, verify
         )
