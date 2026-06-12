@@ -182,6 +182,33 @@ namespace hipblaslt_bench
             out.samples   = static_cast<int32_t>(n);
         }
 
+        // Floor and ceiling for the adaptive measure loop.
+        struct measure_bounds
+        {
+            int64_t min_iters; // floor: minimum total timed iterations
+            double  min_us; // floor: minimum total measured time
+            double  max_us; // ceiling: maximum total measured time (0 = none)
+        };
+
+        // Whether the measure loop should stop after the latest sample, updating `converged`.
+        // noise_threshold <= 0 disables convergence (so the run goes to the ceiling),
+        // and convergence needs enough samples for the stddev to be trustworthy.
+        inline bool reached_target(const TimingConfig&        cfg,
+                                   const std::vector<double>& samples,
+                                   int64_t                    total_iters,
+                                   double                     total_us,
+                                   const measure_bounds&      bounds,
+                                   bool&                      converged)
+        {
+            const bool floor_met = total_iters >= bounds.min_iters && total_us >= bounds.min_us;
+            if(floor_met && cfg.noise_threshold > 0.0f
+               && static_cast<int>(samples.size()) >= min_samples_for_convergence)
+                converged = relative_std_error(samples) < cfg.noise_threshold;
+            const bool ceiling = (bounds.max_us > 0.0 && total_us >= bounds.max_us)
+                                 || (cfg.max_iters > 0 && total_iters >= cfg.max_iters);
+            return (floor_met && converged) || ceiling;
+        }
+
     } // namespace detail
 
     // Run `launch(i)` and fill `out` with timing statistics. `launch` performs exactly one
@@ -227,7 +254,12 @@ namespace hipblaslt_bench
         double        per_iter_est = 0.0;
         {
             double probe_us = 0.0;
-            detail::time_batch(launch, 1, global_index, cfg.use_gpu_timer, events, probe_us); // cold probe, discarded
+            detail::time_batch(launch,
+                               1,
+                               global_index,
+                               cfg.use_gpu_timer,
+                               events,
+                               probe_us); // cold probe, discarded
             per_iter_est             = probe_us;
             const double warm_min_us = static_cast<double>(cfg.warmup_time) * 1000.0;
             double       warm_us     = 0.0; // exclude the cold probe from the warmup budget
@@ -235,7 +267,8 @@ namespace hipblaslt_bench
             {
                 const int32_t chunk    = detail::batch_size(cfg, per_iter_est, cap);
                 double        chunk_us = 0.0;
-                detail::time_batch(launch, chunk, global_index, cfg.use_gpu_timer, events, chunk_us);
+                detail::time_batch(
+                    launch, chunk, global_index, cfg.use_gpu_timer, events, chunk_us);
                 warm_us += chunk_us;
                 per_iter_est = chunk_us / chunk;
             }
@@ -247,9 +280,9 @@ namespace hipblaslt_bench
 
         // ---- Measure: run at least the floor (min_iters AND measure_time), then until the
         //      mean converges or the ceiling (max_measure_time / max_iters) is hit. ----
-        const double  measure_min_us = static_cast<double>(cfg.measure_time) * 1000.0;
-        const double  measure_max_us = static_cast<double>(cfg.max_measure_time) * 1000.0;
-        const int64_t min_iters      = std::max(1, cfg.min_iters);
+        const detail::measure_bounds bounds{std::max<int64_t>(1, cfg.min_iters),
+                                            static_cast<double>(cfg.measure_time) * 1000.0,
+                                            static_cast<double>(cfg.max_measure_time) * 1000.0};
 
         std::vector<double> samples;
         double              total_us    = 0.0;
@@ -264,19 +297,7 @@ namespace hipblaslt_bench
             samples.push_back(batch_us / batch);
             total_us += batch_us;
             total_iters += batch;
-
-            const bool floor_met = total_iters >= min_iters && total_us >= measure_min_us;
-
-            // Need enough samples for the stddev (hence the convergence test) to be
-            // trustworthy; noise_threshold <= 0 disables convergence (runs to the ceiling).
-            if(floor_met && cfg.noise_threshold > 0.0f
-               && static_cast<int>(samples.size()) >= detail::min_samples_for_convergence)
-                converged = detail::relative_std_error(samples) < cfg.noise_threshold;
-
-            const bool ceiling = (measure_max_us > 0.0 && total_us >= measure_max_us)
-                                 || (cfg.max_iters > 0 && total_iters >= cfg.max_iters);
-
-            if((floor_met && converged) || ceiling)
+            if(detail::reached_target(cfg, samples, total_iters, total_us, bounds, converged))
                 break;
         }
 
