@@ -95,7 +95,7 @@ typedef enum {
  *  \brief Mantissa precision control for FP64 fixed-point emulation.
  */
 typedef enum {
-    HIPBLAS_EMULATION_MANTISSA_CONTROL_DYNAMIC = 0, /**<Automatically choose the number of INT8 GEMMs (ADP; default). */
+    HIPBLAS_EMULATION_MANTISSA_CONTROL_DYNAMIC = 0, /**<Use dynamic mantissa control. Runtime ADP is not enabled yet; current builds use the existing default emulation precision. */
     HIPBLAS_EMULATION_MANTISSA_CONTROL_FIXED   = 1, /**<Use the fixed bit count set by hipblasLtSetFixedPointEmulationMaxMantissaBitCount(). */
 } hipblasEmulationMantissaControl_t;
 
@@ -1160,10 +1160,13 @@ hipblasStatus_t hipblasLtSetEmulationEnabled(hipblasLtHandle_t handle, bool enab
  *  Controls whether FP64 GEMM emulation via Ozaki Scheme II is applied only
  *  when it is projected to be faster than native FP64 (``PERFORMANT``) or
  *  for every supported call regardless of problem size (``EAGER``).  The
- *  ``DEFAULT`` value defers to the ``HIPBLASLT_EMULATION_STRATEGY``
- *  environment variable (default: ``PERFORMANT``).
+ *  ``DEFAULT`` value selects ``PERFORMANT`` unless the
+ *  ``HIPBLASLT_EMULATION_STRATEGY`` environment variable is set.
  *
- *  Handle settings take precedence over environment variables.
+ *  To match the cuBLAS environment-variable contract, an explicitly set
+ *  ``HIPBLASLT_EMULATION_STRATEGY`` environment variable takes precedence
+ *  over this handle setting. Invalid FP64 emulation environment-variable
+ *  values cause affected matmul calls to return an invalid-value status.
  *
  *  \retval HIPBLAS_STATUS_SUCCESS         Setting applied successfully.
  *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p handle is NULL or \p strategy
@@ -1187,8 +1190,9 @@ hipblasStatus_t hipblasLtGetEmulationStrategy(hipblasLtHandle_t             hand
  *  \brief Set the mantissa precision control mode for FP64 emulation.
  *
  *  \details
- *  ``DYNAMIC`` (default): the library automatically selects the minimum
- *  number of INT8 GEMMs needed to achieve the requested precision level.
+ *  ``DYNAMIC`` (default): use dynamic mantissa control. Runtime ADP is not
+ *  enabled yet; current builds use the existing default emulation precision
+ *  and emit a one-time process warning when this temporary path is used.
  *  ``FIXED``: use the bit count set by
  *  hipblasLtSetFixedPointEmulationMaxMantissaBitCount().
  *
@@ -1207,15 +1211,13 @@ hipblasStatus_t hipblasLtSetFixedPointEmulationMantissaControl(
  *  Specifies the total CRT capacity in bits (sum of log2 of all moduli used).
  *  The library selects the minimum number of moduli s such that
  *  CRT_capacity(s) >= maxBits.  Notable values: 16→3 GEMMs, 55→7 GEMMs,
- *  79→10 GEMMs, 110→14 GEMMs (default maximum).  Use 0 or 1 to select the
- *  minimum of 2 moduli.
+ *  110→14 GEMMs.  Use 0 or 1 to select the minimum of 2 moduli.
  *
- *  Set to -1 to revert to the process-wide env var default.  Any
- *  non-negative value is accepted; values exceeding the maximum supported
- *  CRT capacity will silently clamp to the maximum number of moduli.
+ *  Set to -1 to revert to the process-wide env var default. Values exceeding
+ *  the maximum supported CRT capacity are rejected.
  *
  *  \retval HIPBLAS_STATUS_SUCCESS         Setting applied successfully.
- *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p handle is NULL or \p maxBits < -1.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p handle is NULL or \p maxBits is out of range.
  */
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtSetFixedPointEmulationMaxMantissaBitCount(hipblasLtHandle_t handle,
@@ -1229,7 +1231,12 @@ hipblasStatus_t hipblasLtSetFixedPointEmulationMaxMantissaBitCount(hipblasLtHand
  *  Bit 1: NaN detection enabled (fall back to native FP64 if NaN found).
  *  Default (both bits set): fall back for any non-finite input.
  *  Set to 0 to disable all detection (faster for guaranteed-clean inputs).
- *  Set to -1 (all bits) to use the environment variable default.
+ *
+ *  To match the cuBLAS environment-variable contract, an explicitly set
+ *  ``HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_MASK`` environment variable
+ *  takes precedence over this handle setting. Invalid FP64 emulation
+ *  environment-variable values cause affected matmul calls to return an
+ *  invalid-value status.
  *
  *  \retval HIPBLAS_STATUS_SUCCESS         Setting applied successfully.
  *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p handle is NULL.
@@ -1254,7 +1261,7 @@ hipblasStatus_t hipblasLtSetEmulationSpecialValuesSupport(hipblasLtHandle_t hand
  *  @param[in]  m           Number of rows of op(A) and D.
  *  @param[in]  n           Number of columns of op(B) and D.
  *  @param[in]  k           Shared dimension of op(A) and op(B).
- *  @param[in]  num_moduli  Number of CRT moduli (2..20); clamped to that range.
+ *  @param[in]  num_moduli  Number of CRT moduli (2..18); clamped to that range.
  *
  *  \retval  Workspace size in bytes, or 0 on error.
  */

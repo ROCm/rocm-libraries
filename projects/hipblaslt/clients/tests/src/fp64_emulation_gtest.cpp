@@ -83,6 +83,86 @@ namespace
         EXPECT_GE(ws16, ws8);
     }
 
+    TEST_F(Fp64EmulationHostTest, ParseEnabledEnv)
+    {
+        EXPECT_EQ(fp64EmulationParseEnabledEnv(nullptr).state, FP64_EMULATION_ENV_UNSET);
+
+        auto on = fp64EmulationParseEnabledEnv("1");
+        EXPECT_EQ(on.state, FP64_EMULATION_ENV_VALID);
+        EXPECT_EQ(on.value, 1u);
+
+        auto off = fp64EmulationParseEnabledEnv("0");
+        EXPECT_EQ(off.state, FP64_EMULATION_ENV_VALID);
+        EXPECT_EQ(off.value, 0u);
+
+        EXPECT_EQ(fp64EmulationParseEnabledEnv("true").state, FP64_EMULATION_ENV_INVALID);
+        EXPECT_EQ(fp64EmulationParseEnabledEnv("").state, FP64_EMULATION_ENV_INVALID);
+    }
+
+    TEST_F(Fp64EmulationHostTest, ParseStrategyEnv)
+    {
+        EXPECT_EQ(fp64EmulationParseStrategyEnv(nullptr).state, FP64_EMULATION_ENV_UNSET);
+
+        auto performant = fp64EmulationParseStrategyEnv("performant");
+        EXPECT_EQ(performant.state, FP64_EMULATION_ENV_VALID);
+        EXPECT_EQ(performant.value,
+                  static_cast<unsigned>(HIPBLASLT_EMULATION_STRATEGY_PERFORMANT));
+
+        auto eager = fp64EmulationParseStrategyEnv("eager");
+        EXPECT_EQ(eager.state, FP64_EMULATION_ENV_VALID);
+        EXPECT_EQ(eager.value, static_cast<unsigned>(HIPBLASLT_EMULATION_STRATEGY_EAGER));
+
+        EXPECT_EQ(fp64EmulationParseStrategyEnv("default").state, FP64_EMULATION_ENV_INVALID);
+        EXPECT_EQ(fp64EmulationParseStrategyEnv("EAGER").state, FP64_EMULATION_ENV_INVALID);
+    }
+
+    TEST_F(Fp64EmulationHostTest, ParseSpecialValuesMaskEnv)
+    {
+        auto unset = fp64EmulationParseSpecialValuesMaskEnv(nullptr);
+        EXPECT_EQ(unset.state, FP64_EMULATION_ENV_UNSET);
+        EXPECT_EQ(unset.value, 0x3u);
+
+        auto hex = fp64EmulationParseSpecialValuesMaskEnv("0x3");
+        EXPECT_EQ(hex.state, FP64_EMULATION_ENV_VALID);
+        EXPECT_EQ(hex.value, 0x3u);
+
+        auto zero = fp64EmulationParseSpecialValuesMaskEnv("0");
+        EXPECT_EQ(zero.state, FP64_EMULATION_ENV_VALID);
+        EXPECT_EQ(zero.value, 0u);
+
+        EXPECT_EQ(fp64EmulationParseSpecialValuesMaskEnv("-1").state, FP64_EMULATION_ENV_INVALID);
+        EXPECT_EQ(fp64EmulationParseSpecialValuesMaskEnv("3x").state, FP64_EMULATION_ENV_INVALID);
+    }
+
+    TEST_F(Fp64EmulationHostTest, ParseMantissaBitCountEnv)
+    {
+        EXPECT_EQ(fp64EmulationParseMantissaBitCountEnv(nullptr).state, FP64_EMULATION_ENV_UNSET);
+
+        auto bits55 = fp64EmulationParseMantissaBitCountEnv("55");
+        EXPECT_EQ(bits55.state, FP64_EMULATION_ENV_VALID);
+        EXPECT_EQ(bits55.value, 55u);
+
+        auto bits140 = fp64EmulationParseMantissaBitCountEnv("140");
+        EXPECT_EQ(bits140.state, FP64_EMULATION_ENV_VALID);
+        EXPECT_EQ(bits140.value, 140u);
+
+        EXPECT_EQ(fp64EmulationParseMantissaBitCountEnv("141").state,
+                  FP64_EMULATION_ENV_INVALID);
+        EXPECT_EQ(fp64EmulationParseMantissaBitCountEnv("-1").state,
+                  FP64_EMULATION_ENV_INVALID);
+        EXPECT_EQ(fp64EmulationParseMantissaBitCountEnv("55.0").state,
+                  FP64_EMULATION_ENV_INVALID);
+    }
+
+    TEST_F(Fp64EmulationHostTest, MantissaBitCountRange)
+    {
+        EXPECT_TRUE(fp64EmulationIsValidMantissaBitCount(-1));
+        EXPECT_TRUE(fp64EmulationIsValidMantissaBitCount(0));
+        EXPECT_TRUE(fp64EmulationIsValidMantissaBitCount(140));
+        EXPECT_FALSE(fp64EmulationIsValidMantissaBitCount(-2));
+        EXPECT_FALSE(fp64EmulationIsValidMantissaBitCount(141));
+    }
+
     // -----------------------------------------------------------------------
     // Handle fixture: isolated setup/teardown, reusable by future tests.
     // -----------------------------------------------------------------------
@@ -115,7 +195,10 @@ namespace
 
         bool would_apply(hipDataType t, int64_t m, int64_t n, int64_t k, int batch)
         {
-            return fp64EmulationWouldApply(m_roc, t, m, n, k, batch);
+            const Fp64EmulationDecision decision =
+                fp64EmulationDecision(m_roc, t, m, n, k, batch);
+            EXPECT_EQ(decision.status, rocblaslt_status_success);
+            return decision.apply;
         }
 
         hipblasLtHandle_t        m_handle = nullptr;
@@ -159,6 +242,49 @@ namespace
         set_enabled(true);
         set_strategy(HIPBLASLT_EMULATION_STRATEGY_EAGER);
         EXPECT_FALSE(would_apply(HIP_R_64F, 4096, 4096, 4096, 2));
+    }
+
+    TEST_F(Fp64EmulationTest, ApiValidationRejectsInvalidMantissaControl)
+    {
+        EXPECT_EQ(hipblasLtSetFixedPointEmulationMantissaControl(
+                      m_handle, static_cast<hipblasEmulationMantissaControl_t>(-1)),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(hipblasLtSetFixedPointEmulationMantissaControl(
+                      m_handle, static_cast<hipblasEmulationMantissaControl_t>(2)),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(hipblasLtSetFixedPointEmulationMantissaControl(
+                      m_handle, HIPBLAS_EMULATION_MANTISSA_CONTROL_DYNAMIC),
+                  HIPBLAS_STATUS_SUCCESS);
+    }
+
+    TEST_F(Fp64EmulationTest, ApiValidationRejectsInvalidMantissaBitCount)
+    {
+        EXPECT_EQ(hipblasLtSetFixedPointEmulationMaxMantissaBitCount(m_handle, -2),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(hipblasLtSetFixedPointEmulationMaxMantissaBitCount(m_handle, 141),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(hipblasLtSetFixedPointEmulationMaxMantissaBitCount(m_handle, -1),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(hipblasLtSetFixedPointEmulationMaxMantissaBitCount(m_handle, 0),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(hipblasLtSetFixedPointEmulationMaxMantissaBitCount(m_handle, 140),
+                  HIPBLAS_STATUS_SUCCESS);
+    }
+
+    TEST_F(Fp64EmulationTest, DefaultDynamicDecisionUsesCurrentSixteenModuliPath)
+    {
+        set_enabled(true);
+        set_strategy(HIPBLASLT_EMULATION_STRATEGY_EAGER);
+        ASSERT_EQ(hipblasLtSetFixedPointEmulationMantissaControl(
+                      m_handle, HIPBLAS_EMULATION_MANTISSA_CONTROL_DYNAMIC),
+                  HIPBLAS_STATUS_SUCCESS);
+
+        const Fp64EmulationDecision decision =
+            fp64EmulationDecision(m_roc, HIP_R_64F, 4096, 4096, 4096, 1);
+        ASSERT_EQ(decision.status, rocblaslt_status_success);
+        ASSERT_TRUE(decision.apply);
+        EXPECT_TRUE(decision.dynamic_mode);
+        EXPECT_EQ(decision.num_moduli, 16u);
     }
 
     // End-to-end smoke test of the emulated GEMM. Column-major

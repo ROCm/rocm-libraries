@@ -24,8 +24,27 @@
 #include <hip/hip_runtime_api.h>
 
 
+enum Fp64EmulationEnvState {
+    FP64_EMULATION_ENV_UNSET = 0,
+    FP64_EMULATION_ENV_VALID = 1,
+    FP64_EMULATION_ENV_INVALID = 2,
+};
+
+struct Fp64EmulationEnvValue {
+    Fp64EmulationEnvState state;
+    unsigned int          value;
+};
+
+/* Pure parsers used by tests and by the cached runtime readers below. */
+Fp64EmulationEnvValue fp64EmulationParseEnabledEnv(const char* value);
+Fp64EmulationEnvValue fp64EmulationParseStrategyEnv(const char* value);
+Fp64EmulationEnvValue fp64EmulationParseSpecialValuesMaskEnv(const char* value);
+Fp64EmulationEnvValue fp64EmulationParseMantissaBitCountEnv(const char* value);
+bool                 fp64EmulationIsValidMantissaBitCount(int value);
+
 /* Returns true when HIPBLASLT_EMULATE_DOUBLE_PRECISION=1 is set.
- * The environment variable is read once and cached. */
+ * The environment variable is read once and cached. Invalid values are reported
+ * through fp64EmulationDecision(), not through this legacy bool helper. */
 bool fp64EmulationIsEnabled();
 
 /* Returns true when the emulation is estimated to be at least as fast as
@@ -34,7 +53,8 @@ bool fp64EmulationIsEnabled();
 bool fp64EmulationPerformanceCheck(int64_t m, int64_t n, int64_t k, unsigned num_moduli);
 
 /* Returns true when HIPBLASLT_EMULATION_STRATEGY=eager is set.
- * In eager mode emulation is used regardless of arithmetic intensity. */
+ * In eager mode emulation is used regardless of arithmetic intensity.
+ * The environment variable is read once and cached. */
 bool fp64EmulationIsEager();
 
 /* Returns the special-values support mask from
@@ -47,7 +67,8 @@ uint32_t fp64EmulationSpecialValuesMask();
 /* Returns the number of INT8 GEMMs (moduli) to use, in the range [2, 18].
  * Reads HIPBLASLT_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT; maps the
  * requested precision in bits to the minimum number of moduli required.
- * Default (env var absent or 0): 16 moduli (~125 bits of CRT capacity).
+ * Default (env var absent): 16 moduli (~125 bits of CRT capacity).
+ * A set env var is validated strictly; 0 or 1 selects the minimum of 2 moduli.
  * Maximum supported: 18 moduli (~140 bits of CRT capacity).
  * Notable values: 55 bits → 7 GEMMs, 79 bits → 10 GEMMs, 110 bits → 14 GEMMs. */
 unsigned fp64EmulationNumModuli();
@@ -60,24 +81,34 @@ size_t fp64EmulationWorkspaceSize(int64_t m, int64_t n, int64_t k, unsigned num_
  * definition.  Declared here so the two helpers below can use the type.     */
 struct _rocblaslt_handle;
 
-/* Returns true when FP64 emulation would intercept a GEMM with these parameters.
- * Checks: emulation enabled for the handle, FP64 data type, non-batched, and the
- * arithmetic-intensity heuristic (or EAGER strategy).  Does NOT check epilogue-
- * specific conditions (bias, scaleAlpha, E, pointermode) — those remain the
- * caller's responsibility.                                                   */
-bool fp64EmulationWouldApply(const _rocblaslt_handle* h,
-                              hipDataType              type_a,
-                              int64_t                  m,
-                              int64_t                  n,
-                              int64_t                  k,
-                              int                      batch_count);
+struct Fp64EmulationDecision {
+    rocblaslt_status status;
+    bool             apply;
+    unsigned int     num_moduli;
+    unsigned int     sv_mask;
+    bool             dynamic_mode;
+};
+
+/* Status-returning FP64 emulation gate. Invalid env-var values return
+ * rocblaslt_status_invalid_value so callers do not silently fall back to
+ * native FP64. On success, apply=false means the native path should be used
+ * without error. */
+Fp64EmulationDecision fp64EmulationDecision(const _rocblaslt_handle* h,
+                                            hipDataType              type_a,
+                                            int64_t                  m,
+                                            int64_t                  n,
+                                            int64_t                  k,
+                                            int                      batch_count);
+
+void fp64EmulationWarnDynamicTemporary();
 
 /* Returns the effective number of CRT moduli (2..18) given the handle's emulation
  * settings.
  *   FIXED mode (mantissa_control=1, max_mantissa_bits≥0): maps the bit count to
  *     the minimum s whose CRT capacity ≥ max_mantissa_bits.
- *   DYNAMIC mode or max_mantissa_bits<0: defers to fp64EmulationNumModuli()
- *     (process-wide env var / default = 16).                                 */
+ *   Default/env mode with HIPBLASLT_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT:
+ *     forces FIXED at the requested bit count.
+ *   DYNAMIC mode or no precision hint: uses the current non-ADP 16-moduli path. */
 unsigned fp64EmulationEffectiveNumModuli(const _rocblaslt_handle* h);
 
 /* Per-call emulation settings.
@@ -86,6 +117,7 @@ unsigned fp64EmulationEffectiveNumModuli(const _rocblaslt_handle* h);
 struct Fp64EmulationSettings {
     unsigned int      num_moduli;      /* 2..18; 0 = derive from env var          */
     unsigned int      sv_mask;         /* special-values mask; ~0u = env var      */
+    bool              dynamic_mode;    /* current temporary DYNAMIC path selected */
     void*             workspace;       /* caller workspace; nullptr = allocate     */
     size_t            workspace_bytes; /* size of caller workspace                */
     hipblasLtHandle_t handle;          /* caller handle for INT8 GEMMs             */
