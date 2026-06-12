@@ -35,9 +35,12 @@
 #include <thrust/detail/type_traits.h>
 #include <thrust/type_traits/is_trivially_relocatable.h>
 
-#include <cmath>
-#include <complex>
-#include <sstream>
+#include _THRUST_STD_INCLUDE(cmath)
+#if !THRUST_COMPILER(NVRTC)
+#  include <complex>
+#  include <sstream>
+#endif // !THRUST_COMPILER(NVRTC)
+
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
@@ -117,12 +120,13 @@ public:
   template <typename U>
   THRUST_HOST_DEVICE complex(const complex<U>& z);
 
+#if !THRUST_COMPILER(NVRTC)
   /*! This converting copy constructor copies from a <tt>std::complex</tt> with
    *  a type that is convertible to this \p complex's \c value_type.
    *
    *  \param z The \p complex to copy from.
    */
-  THRUST_HOST THRUST_STD_COMPLEX_DEVICE complex(const std::complex<T>& z);
+  THRUST_HOST THRUST_STD_COMPLEX_DEVICE complex(const ::std::complex<T>& z);
 
   /*! This converting copy constructor copies from a <tt>std::complex</tt> with
    *  a type that is convertible to this \p complex's \c value_type.
@@ -132,7 +136,8 @@ public:
    *  \tparam U is convertible to \c value_type.
    */
   template <typename U>
-  THRUST_HOST THRUST_STD_COMPLEX_DEVICE complex(const std::complex<U>& z);
+  THRUST_HOST THRUST_STD_COMPLEX_DEVICE complex(const ::std::complex<U>& z);
+#endif // !THRUST_COMPILER(NVRTC)
 
   /* --- Assignment Operators --- */
 
@@ -160,12 +165,13 @@ public:
   template <typename U>
   THRUST_HOST_DEVICE complex& operator=(const complex<U>& z);
 
+#if !THRUST_COMPILER(NVRTC)
   /*! Assign `z.real()` and `z.imag()` to the real and imaginary parts of this
    *  \p complex respectively.
    *
    *  \param z The \p complex to copy from.
    */
-  THRUST_HOST THRUST_STD_COMPLEX_DEVICE complex& operator=(const std::complex<T>& z);
+  THRUST_HOST THRUST_STD_COMPLEX_DEVICE complex& operator=(const ::std::complex<T>& z);
 
   /*! Assign `z.real()` and `z.imag()` to the real and imaginary parts of this
    *  \p complex respectively.
@@ -175,7 +181,8 @@ public:
    *  \tparam U is convertible to \c value_type.
    */
   template <typename U>
-  THRUST_HOST THRUST_STD_COMPLEX_DEVICE complex& operator=(const std::complex<U>& z);
+  THRUST_HOST THRUST_STD_COMPLEX_DEVICE complex& operator=(const ::std::complex<U>& z);
+#endif // !THRUST_COMPILER(NVRTC)
 
   /* --- Compound Assignment Operators --- */
 
@@ -333,14 +340,16 @@ public:
     data.y = im;
   }
 
+#if !THRUST_COMPILER(NVRTC)
   /* --- Casting functions --- */
 
   /*! Casts this \p complex to a <tt>std::complex</tt> of the same type.
    */
-  THRUST_HOST operator std::complex<T>() const
+  THRUST_HOST operator ::std::complex<T>() const
   {
-    return std::complex<T>(real(), imag());
+    return ::std::complex<T>(real(), imag());
   }
+#endif // !THRUST_COMPILER(NVRTC)
 
 private:
   struct alignas(sizeof(T) * 2) storage
@@ -722,6 +731,7 @@ THRUST_HOST_DEVICE complex<T> asinh(const complex<T>& z);
 template <typename T>
 THRUST_HOST_DEVICE complex<T> atanh(const complex<T>& z);
 
+#if !THRUST_COMPILER(NVRTC)
 /* --- Stream Operators --- */
 
 /*! Writes to an output stream a \p complex number in the form (real, imaginary).
@@ -745,7 +755,8 @@ std::basic_ostream<CharT, Traits>& operator<<(std::basic_ostream<CharT, Traits>&
  *  \param z The \p complex number to set.
  */
 template <typename T, typename CharT, typename Traits>
-THRUST_HOST std::basic_istream<CharT, Traits>& operator>>(std::basic_istream<CharT, Traits>& is, complex<T>& z);
+THRUST_HOST ::std::basic_istream<CharT, Traits>& operator>>(std::basic_istream<CharT, Traits>& is, complex<T>& z);
+#endif // !THRUST_COMPILER(NVRTC)
 
 /* --- Equality Operators --- */
 
@@ -757,6 +768,7 @@ THRUST_HOST std::basic_istream<CharT, Traits>& operator>>(std::basic_istream<Cha
 template <typename T0, typename T1>
 THRUST_HOST_DEVICE bool operator==(const complex<T0>& x, const complex<T1>& y);
 
+#if !THRUST_COMPILER(NVRTC)
 /*! Returns true if two \p complex numbers are equal and false otherwise.
  *
  *  \param x The first \p complex.
@@ -771,7 +783,8 @@ THRUST_HOST THRUST_STD_COMPLEX_DEVICE bool operator==(const complex<T0>& x, cons
  *  \param y The second \p complex.
  */
 template <typename T0, typename T1>
-THRUST_HOST THRUST_STD_COMPLEX_DEVICE bool operator==(const std::complex<T0>& x, const complex<T1>& y);
+THRUST_HOST THRUST_STD_COMPLEX_DEVICE bool operator==(const ::std::complex<T0>& x, const complex<T1>& y);
+#endif // !THRUST_COMPILER(NVRTC)
 
 /*! Returns true if the imaginary part of the \p complex number is zero and
  *  the real part is equal to the scalar. Returns false otherwise.
@@ -791,6 +804,7 @@ THRUST_HOST_DEVICE bool operator==(const T0& x, const complex<T1>& y);
 template <typename T0, typename T1>
 THRUST_HOST_DEVICE bool operator==(const complex<T0>& x, const T1& y);
 
+#if !THRUST_COMPILER(NVRTC)
 /*! Returns true if two \p complex numbers are different and false otherwise.
  *
  *  \param x The first \p complex.
@@ -805,7 +819,7 @@ THRUST_HOST_DEVICE bool operator!=(const complex<T0>& x, const complex<T1>& y);
  *  \param y The second \p complex.
  */
 template <typename T0, typename T1>
-THRUST_HOST THRUST_STD_COMPLEX_DEVICE bool operator!=(const complex<T0>& x, const std::complex<T1>& y);
+THRUST_HOST THRUST_STD_COMPLEX_DEVICE bool operator!=(const complex<T0>& x, const ::std::complex<T1>& y);
 
 /*! Returns true if two \p complex numbers are different and false otherwise.
  *
@@ -813,7 +827,8 @@ THRUST_HOST THRUST_STD_COMPLEX_DEVICE bool operator!=(const complex<T0>& x, cons
  *  \param y The second \p complex.
  */
 template <typename T0, typename T1>
-THRUST_HOST THRUST_STD_COMPLEX_DEVICE bool operator!=(const std::complex<T0>& x, const complex<T1>& y);
+THRUST_HOST THRUST_STD_COMPLEX_DEVICE bool operator!=(const ::std::complex<T0>& x, const complex<T1>& y);
+#endif // !THRUST_COMPILER(NVRTC)
 
 /*! Returns true if the imaginary part of the \p complex number is not zero or
  *  the real part is different from the scalar. Returns false otherwise.

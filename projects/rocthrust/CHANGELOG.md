@@ -9,7 +9,7 @@ Documentation for rocThrust available at
 
 ### Changed
 
-* Replaced cassert, cfloat, cmath, cstddef, cstdint, cstring, initializer_list, limits and move operators to `hip::std` operators.
+* Replaced cassert, cfloat, cmath, complex, cstddef, cstdint, cstring, initializer_list, limits and move operators to `hip::std` operators.
 
 ### Removed
 
