@@ -126,6 +126,17 @@ def withWorkingDir(Closure body) {
     }
 }
 
+// Ensures utils is loaded without a full checkout. Used in stage steps{} blocks
+// that call utils.*Stages() directly, where a "Restart from Stage" may have
+// skipped all earlier stages so withWorkingDir was never called.
+def ensureUtils() {
+    if (utils == null) {
+        node(rocmnode("nogpu")) {
+            withWorkingDir {}
+        }
+    }
+}
+
 def runDbSyncJob(def flags, def gpu_family)
 {
     script {
@@ -395,6 +406,7 @@ pipeline {
             }
             steps {
                 script {
+                    ensureUtils()
                     parallel utils.packageAndStaticCheckStages(params, env, this.&rocmnode, this.&withWorkingDir)
                 }
             }
@@ -407,6 +419,7 @@ pipeline {
             }
             steps {
                 script {
+                    ensureUtils()
                     parallel utils.fullTestStages(params, env, this.&rocmnode, this.&withWorkingDir, this.&runDbSyncJob, this.&runBuildAndSingleGtestJob)
                 }
             }
@@ -441,6 +454,7 @@ pipeline {
             }
             steps {
                 script {
+                    ensureUtils()
                     parallel utils.nightlyTestStages(params, env, this.&rocmnode, this.&withWorkingDir)
                 }
             }
@@ -451,6 +465,7 @@ pipeline {
             }
             steps {
                 script {
+                    ensureUtils()
                     parallel utils.nonCriticalHWNightlyStages(params, env, this.&rocmnode, this.&withWorkingDir, this.&runDbSyncJob, this.&runBuildAndSingleGtestJob)
                 }
             }
