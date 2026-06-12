@@ -93,7 +93,7 @@ BenchmarkProblems:
         - PrefetchAcrossPersistent: [1]
         - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [0]
         - SourceSwap: [True]
         - StoreRemapVectorWidth: [0]
         - TransposeLDS: [0]

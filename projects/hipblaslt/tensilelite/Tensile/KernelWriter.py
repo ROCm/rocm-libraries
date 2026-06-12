@@ -5202,7 +5202,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
   def acquireStreamKConstSgpr(self, kernel, name):
     if self.isStreamKConstantsToVgprEnabled(kernel):
-      return self.sgprPool.checkOut(1, name, preventOverflow=False)
+      idx = self.sgprPool.checkOut(1, name, preventOverflow=False)
+      if idx + 1 > self.states.regCaps["MaxSgpr"]:
+        self.states.overflowedResources = 2
+      return idx
     return name
 
   def releaseStreamKConstSgpr(self, nameOrIdx):
