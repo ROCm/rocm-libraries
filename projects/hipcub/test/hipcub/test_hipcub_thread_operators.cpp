@@ -242,8 +242,8 @@ TYPED_TEST(HipcubNCThreadOperatorsTests, SwizzleScanOp)
     using output_type = typename TestFixture::output_type;
 
     // Generate input data.
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto input_size : sizes)
+    std::vector<size_t> sizes = get_sizes();
+    for(auto input_size : CHECK_SIZE_FILTERS(sizes))
     {
         SCOPED_TRACE(testing::Message() << "with size = " << input_size);
 
@@ -272,8 +272,8 @@ TYPED_TEST(HipcubNCThreadOperatorsTests, ReduceBySegmentOp)
     using output_type = input_type;
     using pair_type   = hipcub::KeyValuePair<key_type, input_type>;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto segment_size : sizes)
+    std::vector<size_t> sizes = get_sizes();
+    for(auto segment_size : CHECK_SIZE_FILTERS(sizes))
     {
         constexpr size_t segment_count = 2;
         const size_t     input_size    = segment_count * segment_size;
@@ -360,8 +360,8 @@ TYPED_TEST(HipcubNCThreadOperatorsTests, ReduceByKeyOp)
 
     hipStream_t stream = 0;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto input_size : sizes)
+    std::vector<size_t> sizes = get_sizes();
+    for(auto input_size : CHECK_SIZE_FILTERS(sizes))
     {
         const size_t h_unique_keys = input_size / 2 + (input_size % 2);
 
@@ -499,7 +499,7 @@ TYPED_TEST(HipcubNCThreadOperatorsTests, CastOp)
         = test_utils::transform_iterator<input_type*, hipcub::CastOp<output_type>, output_type>;
 
     const std::vector<size_t> sizes = get_sizes();
-    for(auto input_size : sizes)
+    for(auto input_size : CHECK_SIZE_FILTERS(sizes))
     {
         // Generate data.
         std::vector<input_type> input(input_size);
