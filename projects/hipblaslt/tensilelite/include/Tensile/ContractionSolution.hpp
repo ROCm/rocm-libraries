@@ -630,7 +630,8 @@ namespace TensileLite
                                    size_t                              autoStaggerUMapping,
                                    size_t                              autoStaggerU,
                                    size_t                              autoStaggerUStrideShift,
-                                   uint32_t                            autoGsuVal) const;
+                                   uint32_t                            autoGsuVal,
+                                   AdaptiveGemmNTAB                    ntab) const;
 
         // Common kernel related arguments (e.g. gemm_count, arg type, MT, GSU...)
         template <bool T_Debug, bool Legacy, typename KA>

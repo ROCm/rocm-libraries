@@ -1599,7 +1599,8 @@ namespace TensileLite
                                                     size_t                              autoStaggerUMapping,
                                                     size_t                              autoStaggerU,
                                                     size_t                              autoStaggerUStrideShift,
-                                                    uint32_t                            autoGsuVal) const
+                                                    uint32_t                            autoGsuVal,
+                                                    AdaptiveGemmNTAB                    ntab) const
     {
         uint32_t       gsu                 = param.gsu() > 0 ? param.gsu() : autoGsuVal;
         bool           gsuc                = false; // initialized false
@@ -1742,8 +1743,9 @@ namespace TensileLite
                                          size_t                              autoWGMXCCCHUNK,
                                          size_t                              autoStaggerUMapping,
                                          size_t                              autoStaggerU,
-                                         size_t   autoStaggerUStrideShift,
-                                         uint32_t autoGsuVal) const
+                                         size_t                              autoStaggerUStrideShift,
+                                         uint32_t                            autoGsuVal,
+                                         AdaptiveGemmNTAB                    ntab) const
     {
         if constexpr(!Legacy)
         {
@@ -1755,7 +1757,7 @@ namespace TensileLite
 
         uint32_t internalArg0;
         uint32_t internalArg1;
-        calculateInternalArgs<T_Debug>(internalArg0, internalArg1, hardware, param, autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift, autoGsuVal);
+        calculateInternalArgs<T_Debug>(internalArg0, internalArg1, hardware, param, autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift, autoGsuVal, ntab);
 
         args.template append<uint32_t>("internalArgs", internalArg0);
 
@@ -1955,7 +1957,7 @@ namespace TensileLite
                     dim = tiles.x * tiles.y * tiles.z * (gsu > 0 ? gsu : 1);
                     break;
                 case CustomGridSize::StreamKWithBatch:
-                    dim = sk.grid * tiles.z;
+                    dim = customKernel.generated ? sk.grid : sk.grid * tiles.z;
                     break;
                 case CustomGridSize::StreamKNoBatch:
                     dim = sk.grid;
@@ -1996,9 +1998,10 @@ namespace TensileLite
 
         auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK] = calculateAutoWGM(problem, &hardware, sk.grid);
         auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift] = calculateAutoStaggerU(problem, &hardware, sk.grid, autoWGM);
+        AdaptiveGemmNTAB ntab = calculateAdaptiveGemmNTAB(problem, &hardware);
         uint32_t internalArg0 = 0;
         uint32_t internalArg1 = 0;
-        calculateInternalArgs<T_Debug>(internalArg0, internalArg1, &hardware, problem.getParams(), autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift, autoGsuVal);
+        calculateInternalArgs<T_Debug>(internalArg0, internalArg1, &hardware, problem.getParams(), autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift, autoGsuVal, ntab);
 
         uint32_t debugPattern = 0xDB000001;
         bool appendedInternalArgs = false;
@@ -2339,7 +2342,7 @@ namespace TensileLite
                                              &hardware, problem.getParams(),
                                              autoWGM, autoWGMXCC, autoWGMXCCCHUNK,
                                              autoStaggerUMapping, autoStaggerU,
-                                             autoStaggerUStrideShift, autoGsuVal);
+                                             autoStaggerUStrideShift, autoGsuVal, ntab);
                     appendedInternalArgs = true;
                     break;
                 }
@@ -4179,6 +4182,7 @@ namespace TensileLite
                 gsu = 1;
             }
             const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
+            const bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
             size_t tiles = 0;
             if (useLegacyWorkspaceLogic)
                 tiles = problem.getNumTiles(sizeMapping, 1);
@@ -4189,8 +4193,6 @@ namespace TensileLite
                 tiles = dimTiles.x * dimTiles.y * dimTiles.z;
             }
 
-            const bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
-            auto       tiles     = problem.getNumTiles(sizeMapping, 1);
             if(tiles > 0) // Grouped GEMM reports 0 tiles
             {
                 auto reductionStrat = origami::reduction_t::tree;
