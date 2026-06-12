@@ -191,7 +191,7 @@ vector_base<T, Alloc>& vector_base<T, Alloc>::operator=(const std::vector<OtherT
 } // end vector_base::operator=()
 
 template <typename T, typename Alloc>
-vector_base<T, Alloc>::vector_base(std::initializer_list<T> il)
+vector_base<T, Alloc>::vector_base(_THRUST_STD::initializer_list<T> il)
     : m_storage()
     , m_size(0)
 {
@@ -199,7 +199,7 @@ vector_base<T, Alloc>::vector_base(std::initializer_list<T> il)
 } // end vector_base::vector_base()
 
 template <typename T, typename Alloc>
-vector_base<T, Alloc>::vector_base(std::initializer_list<T> il, const Alloc& alloc)
+vector_base<T, Alloc>::vector_base(_THRUST_STD::initializer_list<T> il, const Alloc& alloc)
     : m_storage(alloc)
     , m_size(0)
 {
@@ -207,7 +207,7 @@ vector_base<T, Alloc>::vector_base(std::initializer_list<T> il, const Alloc& all
 } // end vector_base::vector_base()
 
 template <typename T, typename Alloc>
-vector_base<T, Alloc>& vector_base<T, Alloc>::operator=(std::initializer_list<T> il)
+vector_base<T, Alloc>& vector_base<T, Alloc>::operator=(_THRUST_STD::initializer_list<T> il)
 {
   assign(il.begin(), il.end());
 

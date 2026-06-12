@@ -9,7 +9,7 @@ Documentation for rocThrust available at
 
 ### Changed
 
-* Replaced cmath, cfloat, cstdint, cstddef, cstring, move, limits operators to `hip::std` operators.
+* Replaced cfloat, cmath, cstddef, cstdint, cstring, initializer_list, limits and move operators to `hip::std` operators.
 
 ### Removed
 
