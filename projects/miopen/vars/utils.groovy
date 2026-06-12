@@ -927,6 +927,15 @@ def makeShardedGtestCmd(String buildDir, int numShards=4, String gtestFilter="*"
 //   - the wfapi call fails for any reason (fail-open: run all stages)
 // ---------------------------------------------------------------------------
 
+// Recursively walk a wfapi stage node and collect names of all SUCCESS stages
+// at any nesting depth. Parallel sub-stages are nested under their parent in
+// the 'stages' array of each stage node.
+@NonCPS
+def collectPassedStages(def stageNode, Set passed) {
+    if (stageNode.status == 'SUCCESS') passed << stageNode.name
+    stageNode.stages?.each { child -> collectPassedStages(child, passed) }
+}
+
 @NonCPS
 def getPassedStagesFromPreviousBuild() {
     def passed = [] as Set
@@ -948,9 +957,10 @@ def getPassedStagesFromPreviousBuild() {
 
         def url = "${prev.absoluteUrl}wfapi/describe"
         def json = new groovy.json.JsonSlurperClassic().parseText(url.toURL().text)
-        json.stages?.each { stage ->
-            if (stage.status == 'SUCCESS') passed << stage.name
-        }
+        // Walk all nesting levels: top-level sequential stages contain parallel
+        // sub-stages in their own 'stages' array. A flat iteration of json.stages
+        // only sees the outer stages, missing the parallel branches entirely.
+        json.stages?.each { stage -> collectPassedStages(stage, passed) }
         if (passed) echo "Auto-skipping ${passed.size()} stage(s) that passed in build #${prev.number}: ${passed}"
     } catch (Exception e) {
         echo "WARNING: Could not read previous build stage results (${e.message}). Running all stages."
