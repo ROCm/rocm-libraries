@@ -990,27 +990,16 @@ def makeShardedGtestCmd(String buildDir, String gtestFilter="*") {
 //   - the wfapi call fails for any reason (fail-open: run all stages)
 // ---------------------------------------------------------------------------
 
-// Walk the build chain backwards to find the most recent build that ran on the
-// same GIT_COMMIT as the current build, regardless of how many "Restart from
-// Stage" rebuilds have happened in between.
-//
-// Why not just previousBuild? On a restart Jenkins creates a new build number.
-// previousBuild on build #7 points to build #6 (itself a restart of #5), whose
-// wfapi only contains stages from the restart point onward. Walking back to the
-// earliest build for this commit gives us the full stage result picture.
-//
-// The search stops at the first build for this commit. If that build fully
-// succeeded, return empty (nothing to skip - run everything). If the commit
-// doesn't match any prior build, return empty (first run for this commit).
+// Walks the build chain to find the wfapi URL of the earliest prior build that
+// ran on the same GIT_COMMIT. Returns null if no match or if the matched build
+// fully succeeded (nothing to skip). Must be @NonCPS because it accesses
+// rawBuild. Does NOT call echo (echo is not reliable inside @NonCPS).
 @NonCPS
-def getPassedStagesFromPreviousBuild() {
-    def passed = [] as Set
+def findPreviousBuildWfapiUrl() {
     try {
         def curCommit = currentBuild.rawBuild?.environment?.get('GIT_COMMIT')
-        if (!curCommit) return passed
+        if (!curCommit) return null
 
-        // Walk back through all prior builds looking for any that ran on this commit.
-        // Collect all of them; we'll use the earliest one (most stages recorded).
         def buildsForCommit = []
         def prev = currentBuild.previousBuild
         while (prev) {
@@ -1018,29 +1007,47 @@ def getPassedStagesFromPreviousBuild() {
             if (prevCommit == curCommit) {
                 buildsForCommit << prev
             } else if (buildsForCommit) {
-                // We've gone past the commit range - stop searching
                 break
             }
             prev = prev.previousBuild
         }
-
-        if (!buildsForCommit) return passed  // no prior build for this commit
-
-        // Use the earliest build for this commit - it has the most complete stage data
-        // (the original run before any restarts that may have only run partial stages).
+        if (!buildsForCommit) return null
         def targetBuild = buildsForCommit[-1]
+        if (targetBuild.result == 'SUCCESS') return null
+        return "${targetBuild.absoluteUrl}wfapi/describe"
+    } catch (Exception e) {
+        return null
+    }
+}
 
-        // If the earliest run fully succeeded there is nothing to skip.
-        if (targetBuild.result == 'SUCCESS') return passed
+// CPS-compatible method that fetches the wfapi JSON via sh/curl (not URL.text
+// which can fail silently in @NonCPS) and parses the result.
+// Uses its own node() for the curl call since the factory methods that call
+// this may not have an active agent yet.
+def getPassedStagesFromPreviousBuild() {
+    def passed = [] as Set
+    def wfapiUrl = findPreviousBuildWfapiUrl()
+    if (!wfapiUrl) {
+        echo "No previous failed build found for this commit - running all stages."
+        return passed
+    }
 
-        def url = "${targetBuild.absoluteUrl}wfapi/describe"
-        def json = new groovy.json.JsonSlurperClassic().parseText(url.toURL().text)
-        // Parallel sub-stages wrapped in stage('Name'){} appear as flat entries
-        // in json.stages[] - not nested under their parent stage.
+    echo "Fetching wfapi from: ${wfapiUrl}"
+    try {
+        def jsonText = ""
+        node {
+            jsonText = sh(
+                script: "curl -s '${wfapiUrl}'",
+                returnStdout: true
+            ).trim()
+        }
+        echo "wfapi response (first 2000 chars): ${jsonText.take(2000)}"
+        def json = new groovy.json.JsonSlurperClassic().parseText(jsonText)
         json.stages?.each { s ->
+            echo "  Stage: '${s.name}' -> ${s.status}"
             if (s.status == 'SUCCESS') passed << s.name
         }
-        if (passed) echo "Auto-skipping ${passed.size()} stage(s) that passed in build #${targetBuild.number}: ${passed}"
+        echo "Stages to skip (${passed.size()}): ${passed}"
     } catch (Exception e) {
         echo "WARNING: Could not read previous build stage results (${e.message}). Running all stages."
     }
