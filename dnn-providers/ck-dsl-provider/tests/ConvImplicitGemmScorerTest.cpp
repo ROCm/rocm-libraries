@@ -108,7 +108,7 @@ TEST(ConvImplicitGemmScorer, PredictReturnsFiniteValueForSampleCandidate) {
     ASSERT_TRUE(scorer.isLoaded());
 
     const ConvSelectionProblem problem = makeReferenceProblem();
-    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem);
+    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem, "gfx950");
     ASSERT_FALSE(candidates.empty());
 
     const double pred = scorer.predict(problem, candidates.front());
@@ -120,7 +120,7 @@ TEST(ConvImplicitGemmScorer, PredictIsFiniteForEveryEnumeratedCandidate) {
     ASSERT_TRUE(scorer.isLoaded());
 
     const ConvSelectionProblem problem = makeReferenceProblem();
-    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem);
+    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem, "gfx950");
     ASSERT_FALSE(candidates.empty());
 
     for (const auto& k : candidates) {
@@ -140,7 +140,7 @@ TEST(ConvImplicitGemmScorer, LoadedSelectionIsDeterministic) {
     ASSERT_TRUE(scorer.isLoaded());
 
     const ConvSelectionProblem problem = makeReferenceProblem();
-    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem);
+    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem, "gfx950");
     ASSERT_FALSE(candidates.empty());
 
     const ConvImplicitGemmPerfKnobs first = selectPerfKnobs(problem, candidates, &scorer);
@@ -154,7 +154,7 @@ TEST(ConvImplicitGemmScorer, LoadedSelectionPicksAnEnumeratedCandidate) {
     ASSERT_TRUE(scorer.isLoaded());
 
     const ConvSelectionProblem problem = makeReferenceProblem();
-    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem);
+    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem, "gfx950");
     ASSERT_FALSE(candidates.empty());
 
     const ConvImplicitGemmPerfKnobs chosen = selectPerfKnobs(problem, candidates, &scorer);
@@ -177,7 +177,7 @@ TEST(ConvImplicitGemmScorer, DoesNotCollapseToSmallestTile) {
     ASSERT_TRUE(scorer.isLoaded());
 
     const ConvSelectionProblem problem = makeLargeProblem();
-    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem);
+    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem, "gfx950");
     ASSERT_FALSE(candidates.empty());
 
     const ConvImplicitGemmPerfKnobs chosen = selectPerfKnobs(problem, candidates, &scorer);
@@ -200,7 +200,7 @@ TEST(ConvImplicitGemmScorer, Fp16OnNonOracleArchFallsBackToAnalytic) {
     // fp16+gfx950 has no registry entry: the plan builder passes nullptr.
     // Verify selectPerfKnobs produces the same result as the analytic fallback.
     const ConvSelectionProblem problem = makeFp16Problem();  // dtype=fp16
-    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem);
+    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem, "gfx950");
     ASSERT_FALSE(candidates.empty());
 
     const ConvImplicitGemmPerfKnobs viaSelect =
@@ -218,7 +218,7 @@ TEST(ConvImplicitGemmScorer, Fp16OnNonOracleArchFallsBackToAnalytic) {
 TEST(ConvImplicitGemmScorer, NonOracleArchFallsBackToAnalytic) {
     // bf16+gfx1151 has no registry entry: the plan builder passes nullptr.
     const ConvSelectionProblem problem = makeReferenceProblem();  // bf16
-    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem);
+    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem, "gfx1151");
     ASSERT_FALSE(candidates.empty());
 
     const ConvImplicitGemmPerfKnobs viaSelect =
@@ -249,7 +249,7 @@ TEST(ConvImplicitGemmScorer, Fp16Gfx942ScorerActivatesOnOraclePair) {
     ASSERT_TRUE(scorer.isLoaded());
 
     const ConvSelectionProblem problem = makeFp16Problem();
-    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem);
+    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem, "gfx942");
     ASSERT_FALSE(candidates.empty());
 
     const double pred = scorer.predict(problem, candidates.front());
@@ -263,7 +263,7 @@ TEST(ConvImplicitGemmScorer, Fp16Gfx942SelectionIsDeterministic) {
     ASSERT_TRUE(scorer.isLoaded());
 
     const ConvSelectionProblem problem = makeFp16Problem();
-    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem);
+    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem, "gfx942");
     ASSERT_FALSE(candidates.empty());
 
     const ConvImplicitGemmPerfKnobs first = selectPerfKnobs(problem, candidates, &scorer);
@@ -286,7 +286,7 @@ TEST(ConvImplicitGemmScorer, MissingModelFallsBackToAnalyticPolicy) {
     ASSERT_FALSE(bad.isLoaded());
 
     const ConvSelectionProblem problem = makeReferenceProblem();
-    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem);
+    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem, "gfx950");
     ASSERT_FALSE(candidates.empty());
 
     const ConvImplicitGemmPerfKnobs viaSelect =

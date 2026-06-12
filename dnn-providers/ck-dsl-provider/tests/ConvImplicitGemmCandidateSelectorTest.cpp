@@ -68,10 +68,10 @@ bool sameKnobs(const ConvImplicitGemmPerfKnobs& a, const ConvImplicitGemmPerfKno
 
 TEST(ConvImplicitGemmEnumerator, EveryEmittedComboIsSupported) {
     const ConvSelectionProblem problem = makeReferenceProblem();
-    const auto combos = enumerateCandidates(problem);
+    const auto combos = enumerateCandidates(problem, "gfx950");
     ASSERT_FALSE(combos.empty());
     for (const auto& k : combos) {
-        const auto result = supportsImplicitGemm(problem, k);
+        const auto result = supportsImplicitGemm(problem, k, "gfx950");
         EXPECT_TRUE(result.supported)
             << "enumerated combo tile=(" << k.tile_m << "," << k.tile_n << "," << k.tile_k
             << ") pipeline=" << k.pipeline << " rejected: " << result.reason;
@@ -84,13 +84,13 @@ TEST(ConvImplicitGemmEnumerator, EmitsAllForwardPipelinesForCompatibleTiles) {
     // [32,32,16-atom] tile and the (128,64,128) [wave 8x2x1] tile. So we
     // expect 80 - 2 = 78 buildable candidates.
     const ConvSelectionProblem problem = makeReferenceProblem();
-    const auto combos = enumerateCandidates(problem);
+    const auto combos = enumerateCandidates(problem, "gfx950");
     EXPECT_EQ(combos.size(), 78u);
 }
 
 TEST(ConvImplicitGemmEnumerator, Compv4NeverPairsWithIncompatibleTiles) {
     const ConvSelectionProblem problem = makeReferenceProblem();
-    const auto combos = enumerateCandidates(problem);
+    const auto combos = enumerateCandidates(problem, "gfx950");
     for (const auto& k : combos) {
         if (k.pipeline == "compv4") {
             // COMPV4_COMPATIBLE_TILES: warp_tile [16,16,*] only -- the
@@ -108,8 +108,8 @@ TEST(ConvImplicitGemmEnumerator, Compv4NeverPairsWithIncompatibleTiles) {
 
 TEST(ConvImplicitGemmEnumerator, EnumerationOrderIsDeterministic) {
     const ConvSelectionProblem problem = makeReferenceProblem();
-    const auto a = enumerateCandidates(problem);
-    const auto b = enumerateCandidates(problem);
+    const auto a = enumerateCandidates(problem, "gfx950");
+    const auto b = enumerateCandidates(problem, "gfx950");
     ASSERT_EQ(a.size(), b.size());
     for (size_t i = 0; i < a.size(); ++i) {
         EXPECT_TRUE(sameKnobs(a[i], b[i])) << "enumeration drift at index " << i;
@@ -124,7 +124,7 @@ TEST(ConvImplicitGemmEnumerator, TileTripleMatchesTableEntry) {
     // warp_tile=32,32,16) and a 16x16x32-atom tile (64,64,128) ->
     // (warp_m=4, warp_n=1, warp_tile=16,16,32).
     const ConvSelectionProblem problem = makeReferenceProblem();
-    const auto combos = enumerateCandidates(problem);
+    const auto combos = enumerateCandidates(problem, "gfx950");
     bool sawA = false, sawB = false;
     for (const auto& k : combos) {
         if (k.tile_m == 64 && k.tile_n == 128 && k.tile_k == 64) {
@@ -164,7 +164,7 @@ TEST(ConvImplicitGemmSupports, OffTableTileRejected) {
     k.warp_tile_n = 32;
     k.warp_tile_k = 16;
     k.pipeline = "mem";
-    const auto r = supportsImplicitGemm(problem, k);
+    const auto r = supportsImplicitGemm(problem, k, "gfx950");
     EXPECT_FALSE(r.supported);
 }
 
@@ -180,7 +180,7 @@ TEST(ConvImplicitGemmSupports, MismatchedWaveGridRejected) {
     k.warp_tile_n = 16;
     k.warp_tile_k = 16;
     k.pipeline = "mem";
-    const auto r = supportsImplicitGemm(problem, k);
+    const auto r = supportsImplicitGemm(problem, k, "gfx950");
     EXPECT_FALSE(r.supported);
 }
 
@@ -196,7 +196,7 @@ TEST(ConvImplicitGemmSupports, UnknownPipelineRejected) {
     k.warp_tile_n = 16;
     k.warp_tile_k = 16;
     k.pipeline = "not_a_real_pipeline";
-    const auto r = supportsImplicitGemm(problem, k);
+    const auto r = supportsImplicitGemm(problem, k, "gfx950");
     EXPECT_FALSE(r.supported);
 }
 
@@ -212,7 +212,7 @@ TEST(ConvImplicitGemmSupports, Compv4WithIncompatibleTileRejected) {
     k.warp_tile_n = 32;
     k.warp_tile_k = 16;
     k.pipeline = "compv4";
-    const auto r = supportsImplicitGemm(problem, k);
+    const auto r = supportsImplicitGemm(problem, k, "gfx950");
     EXPECT_FALSE(r.supported);
 }
 
@@ -258,7 +258,7 @@ TEST(ConvImplicitGemmSupports, BuildSelectionProblemCopiesShapeFields) {
 
 TEST(ConvImplicitGemmSelection, FlatScorePrefersLargerAtomTieBreak) {
     const ConvSelectionProblem problem = makeReferenceProblem();
-    const auto combos = enumerateCandidates(problem);
+    const auto combos = enumerateCandidates(problem, "gfx950");
     ASSERT_FALSE(combos.empty());
 
     auto flat = [](const ConvImplicitGemmPerfKnobs&) { return 5.0; };
@@ -285,7 +285,7 @@ TEST(ConvImplicitGemmSelection, FlatScorePrefersLargerAtomTieBreak) {
 
 TEST(ConvImplicitGemmSelection, ArgmaxReturnsScorePeak) {
     const ConvSelectionProblem problem = makeReferenceProblem();
-    const auto combos = enumerateCandidates(problem);
+    const auto combos = enumerateCandidates(problem, "gfx950");
     ASSERT_GE(combos.size(), 2u);
 
     // Reward the middle combo specifically.
@@ -319,8 +319,8 @@ TEST(ConvImplicitGemmSelection, DistinctShapesCanProduceDistinctPicks) {
     big.Wi = 112;
     big.K = 512;
 
-    const auto combosSmall = enumerateCandidates(small);
-    const auto combosBig = enumerateCandidates(big);
+    const auto combosSmall = enumerateCandidates(small, "gfx950");
+    const auto combosBig = enumerateCandidates(big, "gfx950");
     ASSERT_FALSE(combosSmall.empty());
     ASSERT_FALSE(combosBig.empty());
 
@@ -341,7 +341,7 @@ TEST(ConvImplicitGemmSelection, DistinctShapesCanProduceDistinctPicks) {
 
 TEST(ConvImplicitGemmFallback, MidSizedShapePicksDefaultTileAndMemPipeline) {
     const ConvSelectionProblem problem = makeReferenceProblem();
-    const auto combos = enumerateCandidates(problem);
+    const auto combos = enumerateCandidates(problem, "gfx950");
     ASSERT_FALSE(combos.empty());
     const auto pick = selectAnalyticFallback(problem, combos);
     // analyticTarget returns (64,64,64,mem) for this gemm_m / gemm_n window.
@@ -361,7 +361,7 @@ TEST(ConvImplicitGemmFallback, TinyShapeShrinksTileM) {
     problem.pH = 0;
     problem.pW = 0;
     // gemm_m = 1 * 4 * 4 = 16 -> the "very small M" branch in analyticTarget.
-    const auto combos = enumerateCandidates(problem);
+    const auto combos = enumerateCandidates(problem, "gfx950");
     ASSERT_FALSE(combos.empty());
     const auto pick = selectAnalyticFallback(problem, combos);
     EXPECT_EQ(pick.tile_m, 16);
@@ -378,7 +378,7 @@ TEST(ConvImplicitGemmFallback, LargeShapeOpensTileN) {
     problem.pW = 1;
     problem.K = 256;
     // gemm_m >> 4096 and gemm_n >= 128 -> opens to tile_n=128.
-    const auto combos = enumerateCandidates(problem);
+    const auto combos = enumerateCandidates(problem, "gfx950");
     ASSERT_FALSE(combos.empty());
     const auto pick = selectAnalyticFallback(problem, combos);
     EXPECT_EQ(pick.tile_n, 128);
@@ -386,7 +386,7 @@ TEST(ConvImplicitGemmFallback, LargeShapeOpensTileN) {
 
 TEST(ConvImplicitGemmFallback, IsDeterministic) {
     const ConvSelectionProblem problem = makeReferenceProblem();
-    const auto combos = enumerateCandidates(problem);
+    const auto combos = enumerateCandidates(problem, "gfx950");
     ASSERT_FALSE(combos.empty());
     const auto a = selectAnalyticFallback(problem, combos);
     const auto b = selectAnalyticFallback(problem, combos);

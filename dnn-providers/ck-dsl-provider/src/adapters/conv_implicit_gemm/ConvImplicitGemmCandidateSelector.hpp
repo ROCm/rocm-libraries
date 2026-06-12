@@ -83,7 +83,7 @@ struct ConvSupportsResult {
     std::string reason;
 };
 
-/// Validity gate for a (problem, knobs) pair against the ck_dsl
+/// Validity gate for a (problem, knobs, arch) triple against the ck_dsl
 /// implicit-GEMM kernel and the trained-data envelope.
 ///
 /// Mirrors the ck_dsl ``is_valid_spec`` predicate (the Python bridge
@@ -94,28 +94,32 @@ struct ConvSupportsResult {
 /// match that triple's table entry. Pipelines outside
 /// ``VARIANT_PIPELINES["forward"]`` are rejected. ``compv4`` additionally
 /// requires the tile triple to be in ``COMPV4_COMPATIBLE_TILES``.
+/// The warp_tile atom must be present in the f16 MMA catalog for ``arch``
+/// (same check as ``is_valid_spec`` in the Python DSL).
 ///
 /// Used by ``enumerateCandidates`` to keep the emitted set buildable; a
 /// post-enum re-validation can use the same predicate as a guard.
 [[nodiscard]] ConvSupportsResult supportsImplicitGemm(const ConvSelectionProblem& problem,
-                                                      const ConvImplicitGemmPerfKnobs& knobs);
+                                                      const ConvImplicitGemmPerfKnobs& knobs,
+                                                      const std::string& arch);
 
-/// Enumerate kernel-knob combos for the problem, pre-filtered by
-/// ``supportsImplicitGemm``. Only buildable combos are returned.
+/// Enumerate kernel-knob combos for the problem on ``arch``, pre-filtered
+/// by ``supportsImplicitGemm``. Every returned candidate is guaranteed to
+/// pass ``isApplicable`` on that arch -- the contract that makes the
+/// ranked list's top pick always buildable.
 ///
 /// The enumeration walks the 10 trained tile triples (TILE_TO_WAVE keys)
 /// and the 8 forward pipelines (VARIANT_PIPELINES["forward"]) for a max
-/// of 80 raw candidates, drops the compv4 tiles that aren't in
+/// of 80 raw candidates, drops tiles whose warp_tile atom is absent from
+/// the arch's f16 MMA catalog, drops the compv4 tiles that aren't in
 /// COMPV4_COMPATIBLE_TILES, and pins the wave grid + MFMA atom from the
-/// TILE_TO_WAVE / TILE_TO_WARP tables. Phase 2 will add the wave_mode /
-/// has_dsb / has_si dimensions (10 * 30 = 300 candidates per the
-/// PIPELINE_VARIANTS table) once ck_dsl exposes those spec fields.
+/// TILE_TO_WAVE / TILE_TO_WARP tables.
 ///
 /// The enumeration order is deterministic (tiles in TILE_TO_WAVE
 /// insertion order, then pipelines in VARIANT_PIPELINES["forward"]
 /// order), which fixes the tie-break order used by ``selectArgmax``.
 [[nodiscard]] std::vector<ConvImplicitGemmPerfKnobs> enumerateCandidates(
-    const ConvSelectionProblem& problem);
+    const ConvSelectionProblem& problem, const std::string& arch);
 
 /// Argmax selection over a set of candidate knob combos using an
 /// injected score callable. The callable receives the candidate's

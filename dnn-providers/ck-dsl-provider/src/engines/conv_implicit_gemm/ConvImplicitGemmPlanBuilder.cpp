@@ -225,7 +225,7 @@ void ConvImplicitGemmPlanBuilder::buildPlan(
     // chosen knobs are folded into the cache key. Mutating spec here
     // keeps the key and the loader's payload in lock-step.
     const ConvSelectionProblem selProblem = buildSelectionProblem(spec, spec.dtype);
-    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(selProblem);
+    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(selProblem, arch);
     if (candidates.empty()) {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,

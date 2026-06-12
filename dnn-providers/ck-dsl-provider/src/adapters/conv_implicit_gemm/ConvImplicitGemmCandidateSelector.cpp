@@ -49,6 +49,30 @@ constexpr std::array<TileEntry, 10> kTileTable{{
     {128, 64, 128, 8, 2, 16, 16, 32},
 }};
 
+// Per-arch f16 MFMA atom availability. Mirrors the `mma` entries for
+// a_dtype=fp16/b_dtype=fp16 in arch_specs.json (ck_dsl/core/arch/data/).
+// The warp_tile triple (warp_tile_m, warp_tile_n, warp_tile_k) maps
+// directly to the (m, n, k) of the MFMA instruction. A tile absent from
+// this table will fail is_valid_spec on the Python side; enumerating it
+// only to have isApplicable reject it wastes scoring time and makes the
+// oracle test's top-1 pick meaningless.
+//
+// gfx942 (MI300A): 16x16x16 + 32x32x8 only -- no 16x16x32 or 32x32x16.
+// gfx950 (MI350):  16x16x16 + 32x32x8 + 16x16x32 + 32x32x16.
+// Unknown arch: conservatively allow only the universal 16x16x16 atom.
+bool archSupportsF16WarpTile(const std::string& arch,
+                             std::int32_t wtm, std::int32_t wtn, std::int32_t wtk) {
+    // 16x16x16 is universal across all trained arches.
+    if (wtm == 16 && wtn == 16 && wtk == 16) return true;
+    // 32x32x8: present on both gfx942 and gfx950 but not in kTileTable
+    // (no trained tile uses it), so this branch is dead for now.
+    if (wtm == 32 && wtn == 32 && wtk == 8) return true;
+    // Wider atoms require gfx950+.
+    if (wtm == 16 && wtn == 16 && wtk == 32) return arch == "gfx950";
+    if (wtm == 32 && wtn == 32 && wtk == 16) return arch == "gfx950";
+    return false;
+}
+
 // VARIANT_PIPELINES["forward"] -- the 8 forward pipelines the codegen
 // reports as universally buildable. comp_async / basic_async_v1 collapse
 // onto compv3 in the scoring (PIPELINE_MAP default = 0), so they share
@@ -119,7 +143,8 @@ ConvSelectionProblem buildSelectionProblem(const ConvImplicitGemmSpec& spec,
 }
 
 ConvSupportsResult supportsImplicitGemm(const ConvSelectionProblem& problem,
-                                        const ConvImplicitGemmPerfKnobs& knobs) {
+                                        const ConvImplicitGemmPerfKnobs& knobs,
+                                        const std::string& arch) {
     // Structural: dtype gate -- trained envelopes exist for bf16/gfx950
     // and fp16/gfx942. fp32 passes through here (the kernel itself may
     // build), but the scorer-driven path bails to the analytic fallback
@@ -148,6 +173,18 @@ ConvSupportsResult supportsImplicitGemm(const ConvSelectionProblem& problem,
         return {false, "implicit-GEMM: MFMA atom does not match TILE_TO_WARP for tile"};
     }
 
+    // The tile's warp_tile (MFMA atom) must be present in the target
+    // arch's f16 MMA catalog. This mirrors the is_valid_spec check in
+    // the Python DSL and ensures enumerateCandidates only returns tiles
+    // that isApplicable will accept -- the contract that makes the ranked
+    // list's top pick meaningful on any arch.
+    if (!archSupportsF16WarpTile(arch, knobs.warp_tile_m, knobs.warp_tile_n, knobs.warp_tile_k)) {
+        return {false, "implicit-GEMM: f16 warp_tile (" +
+                           std::to_string(knobs.warp_tile_m) + "," +
+                           std::to_string(knobs.warp_tile_n) + "," +
+                           std::to_string(knobs.warp_tile_k) + ") not in MMA catalog for " + arch};
+    }
+
     // Pipeline must be in VARIANT_PIPELINES["forward"].
     if (!isForwardPipeline(knobs.pipeline)) {
         return {false,
@@ -168,7 +205,8 @@ ConvSupportsResult supportsImplicitGemm(const ConvSelectionProblem& problem,
     return {true, ""};
 }
 
-std::vector<ConvImplicitGemmPerfKnobs> enumerateCandidates(const ConvSelectionProblem& problem) {
+std::vector<ConvImplicitGemmPerfKnobs> enumerateCandidates(const ConvSelectionProblem& problem,
+                                                            const std::string& arch) {
     std::vector<ConvImplicitGemmPerfKnobs> out;
     out.reserve(kTileTable.size() * kForwardPipelines.size());
 
@@ -186,7 +224,7 @@ std::vector<ConvImplicitGemmPerfKnobs> enumerateCandidates(const ConvSelectionPr
             k.pipeline = pipeline;
             k.wave_size = 64;
 
-            if (supportsImplicitGemm(problem, k).supported) {
+            if (supportsImplicitGemm(problem, k, arch).supported) {
                 out.push_back(std::move(k));
             }
         }
