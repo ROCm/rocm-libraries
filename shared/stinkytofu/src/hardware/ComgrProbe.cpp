@@ -172,6 +172,20 @@ bool hasComgrSupport() {
 #endif
 }
 
+bool comgrSupportsIsa(const std::string& isaName) {
+#ifdef _WIN32
+    if (!isRocmPathSet()) return false;
+#endif
+    size_t count = 0;
+    if (amd_comgr_get_isa_count(&count) != AMD_COMGR_STATUS_SUCCESS) return false;
+    for (size_t i = 0; i < count; ++i) {
+        const char* name = nullptr;
+        if (amd_comgr_get_isa_name(i, &name) != AMD_COMGR_STATUS_SUCCESS) continue;
+        if (name && isaName == name) return true;
+    }
+    return false;
+}
+
 #else  // !STINKYTOFU_HAS_COMGR
 
 bool tryAssembleWithComgr(const std::string& /*asmString*/, const std::string& /*isaName*/,
@@ -180,6 +194,10 @@ bool tryAssembleWithComgr(const std::string& /*asmString*/, const std::string& /
 }
 
 bool hasComgrSupport() {
+    return false;
+}
+
+bool comgrSupportsIsa(const std::string& /*isaName*/) {
     return false;
 }
 

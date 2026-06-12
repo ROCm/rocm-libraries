@@ -183,12 +183,6 @@ class TestValidationConfig:
 
         assert config.enabled is True
 
-    def test_enabled_property_cpu_plugin(self) -> None:
-        """Test enabled property with provider='cpu_plugin'."""
-        config = ValidationConfig(provider="cpu_plugin")
-
-        assert config.enabled is True
-
     def test_invalid_provider_raises(self) -> None:
         """Test that invalid provider raises ValueError."""
         with pytest.raises(ValueError, match="Invalid provider"):

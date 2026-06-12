@@ -273,6 +273,16 @@ Legalized legalizeInstruction(StinkyInstruction* inst, rocisa::Instruction* roci
         rocisa::BranchInstruction* branchInst =
             dynamic_cast<rocisa::BranchInstruction*>(rocisaInst);
         assert(branchInst != nullptr && "This should be a rocisa Branch.");
+
+        // SSetPCB64 records its long-branch target in a dedicated longBranchLabel
+        // field (populated by the SLongBranch* helpers in rocisa extension.hpp)
+        if (auto* setpc = dynamic_cast<rocisa::SSetPCB64*>(rocisaInst)) {
+            if (!setpc->longBranchLabel.empty()) {
+                inst->addModifier<LabelData>(LabelData{setpc->longBranchLabel});
+            }
+            return {nullptr, nullptr};
+        }
+
         inst->addModifier<LabelData>(LabelData{branchInst->labelName});
         return {nullptr, nullptr};
     }

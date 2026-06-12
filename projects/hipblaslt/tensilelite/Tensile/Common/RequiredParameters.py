@@ -116,6 +116,7 @@ def getRequiredParametersMin() -> set:
         'StoreSyncOpt',
         'StoreVectorWidth',
         'StreamK',
+        'StreamKForceDPOnly',
         'StreamKXCCMapping',
         'StreamKFixupTreeReduction',
         'SuppressNoLoadLoop',
@@ -156,6 +157,5 @@ def getRequiredParametersMin() -> set:
         'MinGRIncPerMfma',
         'UsePLRPack',
         'UseSubtileImpl',
-        'ClusterBarrier',
         'ClusterDim',
     })
