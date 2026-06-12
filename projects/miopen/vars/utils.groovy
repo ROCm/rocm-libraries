@@ -979,72 +979,63 @@ def makeShardedGtestCmd(String buildDir, String gtestFilter="*") {
 //
 // When a user clicks "Restart Full Tests" (or any other stage) Jenkins
 // replays the pipeline from that stage.  This helper reads the previous
-// build's per-stage results via the Pipeline: Stage View wfapi endpoint and
-// returns the set of sub-stage names that already passed, so the factory
-// methods below can skip them automatically - no manual flags needed.
+// build's per-stage results using the Jenkins FlowNode Java API and returns
+// the set of sub-stage names that already passed, so the factory methods
+// below can skip them automatically - no manual flags needed.
+//
+// Why FlowNode instead of wfapi? The wfapi /describe endpoint only returns
+// top-level declarative stages in its stages[] array. Parallel sub-stages
+// created by stage('Name'){} inside parallel(Map) closures are nested in
+// stageFlowNodes and never appear at the top level. The FlowNode API walks
+// the full execution graph and sees every stage regardless of nesting.
 //
 // Return value: Set<String> of stage display names with status SUCCESS.
 // Returns an empty set when:
 //   - there is no previous build (first run)
 //   - the previous build fully succeeded (nothing to skip - rerun everything)
-//   - the wfapi call fails for any reason (fail-open: run all stages)
+//   - the FlowNode walk fails for any reason (fail-open: run all stages)
 // ---------------------------------------------------------------------------
 
-// Returns the wfapi URL of the most recent prior build that failed or was
-// unstable, or null if the previous build succeeded or doesn't exist.
-// Must be @NonCPS because it accesses currentBuild.previousBuild.
-// Does NOT call echo (echo is not reliable inside @NonCPS).
-//
-// Note: GIT_COMMIT-based commit matching was removed because env.GIT_COMMIT is
-// set programmatically during the pipeline (in checkoutRepo), not in the initial
-// build environment. rawBuild.environment does not contain pipeline-set env vars,
-// so the commit was always null. The commit safety guard is unnecessary for the
-// primary use case ("Restart from Stage" always replays the same SCM checkout),
-// and on a normal new-commit build the previous build will have result SUCCESS
-// so we return null and all stages run.
+// Walks the FlowNode execution graph of the previous build and collects
+// the display names of all stages that completed without error.
+// Must be @NonCPS because it accesses rawBuild and iterates FlowNodes
+// (non-serializable Jenkins internal objects).
 @NonCPS
-def findPreviousBuildWfapiUrl() {
-    try {
-        def prev = currentBuild.previousBuild
-        if (!prev) return null
-        // If the previous build fully succeeded, nothing to skip.
-        if (prev.result == 'SUCCESS') return null
-        return "${prev.absoluteUrl}wfapi/describe"
-    } catch (Exception e) {
-        return null
-    }
-}
-
-// CPS-compatible method that fetches the wfapi JSON via sh/curl (not URL.text
-// which can fail silently in @NonCPS) and parses the result.
-// Uses its own node() for the curl call since the factory methods that call
-// this may not have an active agent yet.
 def getPassedStagesFromPreviousBuild() {
     def passed = [] as Set
-    def wfapiUrl = findPreviousBuildWfapiUrl()
-    if (!wfapiUrl) {
-        echo "No previous failed build found for this commit - running all stages."
-        return passed
-    }
-
-    echo "Fetching wfapi from: ${wfapiUrl}"
     try {
-        def jsonText = ""
-        node {
-            jsonText = sh(
-                script: "curl -s '${wfapiUrl}'",
-                returnStdout: true
-            ).trim()
+        def prev = currentBuild.previousBuild
+        if (!prev) return passed
+        if (prev.result == 'SUCCESS') return passed
+
+        def prevRun = prev.rawBuild
+        if (!prevRun) return passed
+
+        def execution = prevRun.execution
+        if (!execution) return passed
+
+        // Walk every FlowNode in the previous build's execution graph.
+        // Stage blocks appear as StepStartNode with a LabelAction (display name)
+        // but WITHOUT a ThreadNameAction (which marks parallel branch starts).
+        // A stage is considered passed if its start node has no ErrorAction.
+        def walker = new org.jenkinsci.plugins.workflow.graph.FlowGraphWalker(execution)
+
+        walker.each { flowNode ->
+            if (flowNode instanceof org.jenkinsci.plugins.workflow.cps.nodes.StepStartNode) {
+                // Filter: has a label (stage name) but is NOT a parallel branch
+                def label = flowNode.getAction(org.jenkinsci.plugins.workflow.actions.LabelAction)
+                def thread = flowNode.getAction(org.jenkinsci.plugins.workflow.actions.ThreadNameAction)
+                if (label && !thread) {
+                    def stageName = label.displayName
+                    def error = flowNode.getAction(org.jenkinsci.plugins.workflow.actions.ErrorAction)
+                    if (!error) {
+                        passed << stageName
+                    }
+                }
+            }
         }
-        echo "wfapi response (first 2000 chars): ${jsonText.take(2000)}"
-        def json = new groovy.json.JsonSlurperClassic().parseText(jsonText)
-        json.stages?.each { s ->
-            echo "  Stage: '${s.name}' -> ${s.status}"
-            if (s.status == 'SUCCESS') passed << s.name
-        }
-        echo "Stages to skip (${passed.size()}): ${passed}"
     } catch (Exception e) {
-        echo "WARNING: Could not read previous build stage results (${e.message}). Running all stages."
+        // Fail-open: if anything goes wrong, return empty set and all stages run.
     }
     return passed
 }
@@ -1082,6 +1073,7 @@ def addStage(Map stagesMap, String name, Closure body) {
 
 def packageAndStaticCheckStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def withWorkingDirFn) {
     def passedStages = getPassedStagesFromPreviousBuild()
+    echo "passedStages (${passedStages.size()}): ${passedStages}"
     def stages = [:]
 
     addStage(stages, 'HIP Package') {
@@ -1139,6 +1131,7 @@ def packageAndStaticCheckStages(def pipelineParams, def pipelineEnv, def rocmnod
 
 def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def withWorkingDirFn, def runDbSyncJobFn, def runBuildAndSingleGtestJobFn) {
     def passedStages = getPassedStagesFromPreviousBuild()
+    echo "passedStages (${passedStages.size()}): ${passedStages}"
     def stages = [:]
 
     def Full_test    = pipelineEnv.Full_test
@@ -1376,6 +1369,7 @@ def nightlyTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def w
 
 def nonCriticalHWNightlyStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def withWorkingDirFn, def runDbSyncJobFn, def runBuildAndSingleGtestJobFn) {
     def passedStages = getPassedStagesFromPreviousBuild()
+    echo "passedStages (${passedStages.size()}): ${passedStages}"
     def stages = [:]
 
     def Full_test       = pipelineEnv.Full_test
