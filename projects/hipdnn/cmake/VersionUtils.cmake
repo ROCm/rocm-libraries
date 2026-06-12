@@ -52,47 +52,6 @@ function(hipdnn_setup_version COMPONENT_NAME)
     set(${COMPONENT_NAME_UPPER}_VERSION ${${COMPONENT_NAME_UPPER}_VERSION} PARENT_SCOPE)
 endfunction()
 
-# Function to set up versioning for product components (backend, frontend) from
-# the single global HIPDNN_VERSION instead of a per-component version.json. Sets
-# the same ${UPPER}_VERSION* variables as hipdnn_setup_version so version.h.in
-# and project() consume them identically. SDK components keep hipdnn_setup_version.
-function(hipdnn_setup_product_version COMPONENT_NAME)
-    string(TOUPPER ${COMPONENT_NAME} COMPONENT_NAME_UPPER)
-
-    # Parse version components from the global HIPDNN_VERSION
-    string(REPLACE "." ";" _version_list ${HIPDNN_VERSION})
-    list(GET _version_list 0 ${COMPONENT_NAME_UPPER}_VERSION_MAJOR)
-    list(GET _version_list 1 ${COMPONENT_NAME_UPPER}_VERSION_MINOR)
-    list(GET _version_list 2 ${COMPONENT_NAME_UPPER}_VERSION_PATCH)
-
-    # Get git commit hash for tweak version
-    execute_process(
-        COMMAND git rev-parse --short HEAD
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-        OUTPUT_VARIABLE ${COMPONENT_NAME_UPPER}_VERSION_TWEAK
-        RESULT_VARIABLE GIT_RESULT
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET
-    )
-
-    if(NOT GIT_RESULT EQUAL 0 OR ${COMPONENT_NAME_UPPER}_VERSION_TWEAK STREQUAL "")
-        set(${COMPONENT_NAME_UPPER}_VERSION_TWEAK "unknown")
-    endif()
-
-    # Full version string
-    set(${COMPONENT_NAME_UPPER}_VERSION_STRING "${HIPDNN_VERSION}.${${COMPONENT_NAME_UPPER}_VERSION_TWEAK}")
-
-    message(STATUS "${COMPONENT_NAME} version: ${${COMPONENT_NAME_UPPER}_VERSION_STRING}")
-
-    # Propagate version variables to parent scope
-    set(${COMPONENT_NAME_UPPER}_VERSION_MAJOR ${${COMPONENT_NAME_UPPER}_VERSION_MAJOR} PARENT_SCOPE)
-    set(${COMPONENT_NAME_UPPER}_VERSION_MINOR ${${COMPONENT_NAME_UPPER}_VERSION_MINOR} PARENT_SCOPE)
-    set(${COMPONENT_NAME_UPPER}_VERSION_PATCH ${${COMPONENT_NAME_UPPER}_VERSION_PATCH} PARENT_SCOPE)
-    set(${COMPONENT_NAME_UPPER}_VERSION_TWEAK ${${COMPONENT_NAME_UPPER}_VERSION_TWEAK} PARENT_SCOPE)
-    set(${COMPONENT_NAME_UPPER}_VERSION_STRING ${${COMPONENT_NAME_UPPER}_VERSION_STRING} PARENT_SCOPE)
-    set(${COMPONENT_NAME_UPPER}_VERSION ${HIPDNN_VERSION} PARENT_SCOPE)
-endfunction()
-
 # Function to generate the version header
 function(hipdnn_generate_version_header COMPONENT_NAME)
 

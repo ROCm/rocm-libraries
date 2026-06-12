@@ -60,14 +60,7 @@ if(NOT CMAKE_TOOLCHAIN_FILE)
         CACHE FILEPATH "Toolchain file"
     )
 endif()
-# Single source of truth for the hipDNN product version (backend, frontend,
-# Python bindings). TheRock controls the shipped version for ROCm releases by
-# passing -DHIPDNN_VERSION; that override wins over the literal below (CACHE
-# STRING). The literal here is only the default for local/standalone builds when
-# no packager override is supplied.
-set(HIPDNN_VERSION "0.0.1" CACHE STRING
-    "hipDNN product version; controlled by TheRock via -DHIPDNN_VERSION for releases"
-)
+set(HIPDNN_VERSION "0.2.0")
 
 project(hipdnn VERSION ${HIPDNN_VERSION} LANGUAGES CXX)
 
@@ -210,6 +203,10 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL
 )
 
 include(cmake/Dependencies.cmake)
+# rocm-cmake provides rocm_setup_version, used by the product components
+# (backend, frontend) to parse HIPDNN_VERSION into MAJOR/MINOR/PATCH.
+find_package(ROCmCMakeBuildTools CONFIG REQUIRED)
+include(ROCMSetupVersion)
 include(cmake/VersionUtils.cmake)
 include(cmake/CheckToolVersion.cmake)
 include(cmake/ClangCheck.cmake)

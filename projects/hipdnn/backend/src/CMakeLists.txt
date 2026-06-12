@@ -3,11 +3,10 @@
 
 include(CMakePackageConfigHelpers)
 
-# Version handling
-hipdnn_setup_product_version(hipdnn_backend)
-
-# Set project with version
-project(hipdnn_backend VERSION ${HIPDNN_BACKEND_VERSION} LANGUAGES CXX)
+# Set project, then derive version components from the single product version
+# via rocm-cmake (sets PROJECT_VERSION{,_MAJOR,_MINOR,_PATCH,_TWEAK}).
+project(hipdnn_backend LANGUAGES CXX)
+rocm_setup_version(VERSION ${HIPDNN_VERSION} NO_GIT_TAG_VERSION)
 
 find_package(hip REQUIRED)
 
@@ -102,7 +101,7 @@ hipdnn_generate_version_header(hipdnn_backend)
 if(WIN32)
     string(TIMESTAMP HIPDNN_COPYRIGHT_YEAR "%Y")
     set(HIPDNN_PRODUCT_VERSION_DISPLAY
-        "${HIPDNN_BACKEND_VERSION_MAJOR}.${HIPDNN_BACKEND_VERSION_MINOR}"
+        "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}"
     )
     configure_file(
         "${CMAKE_CURRENT_LIST_DIR}/../backend.rc.in"
@@ -184,7 +183,7 @@ configure_package_config_file(
 # Generate package version file for find_package version checking
 write_basic_package_version_file(
     "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend/hipdnn_backendConfigVersion.cmake"
-    VERSION ${HIPDNN_BACKEND_VERSION}
+    VERSION ${PROJECT_VERSION}
     COMPATIBILITY SameMajorVersion
 )
 
