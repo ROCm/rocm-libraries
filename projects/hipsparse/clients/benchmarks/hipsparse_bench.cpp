@@ -146,7 +146,7 @@ void hipsparse_bench::info_devices(std::ostream& out_) const
     std::cout << "Query device success: there are " << devs << " devices" << std::endl;
     for(int i = 0; i < devs; ++i)
     {
-        hipDeviceProp_t prop;
+        hipDeviceProp_t prop{};
         if(hipGetDeviceProperties(&prop, i) != hipSuccess)
         {
             std::cerr << "hipsparse_bench error: cannot get device properties" << std::endl;
@@ -162,7 +162,7 @@ void hipsparse_bench::info_devices(std::ostream& out_) const
     // Print header.
     {
         int             device_id = this->get_device_id();
-        hipDeviceProp_t prop;
+        hipDeviceProp_t prop{};
         if(hipGetDeviceProperties(&prop, device_id) != hipSuccess)
         {
             std::cerr << "hipsparse_bench error: cannot get device properties" << std::endl;
