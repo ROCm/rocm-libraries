@@ -6,13 +6,13 @@ import shutil
 import sys
 from pathlib import Path
 
-# Add dispatcher/codegen to path for shared validation rules
+# Add dispatcher/codegen/grouped_conv to path for shared validation rules
 _THIS_DIR = Path(__file__).resolve().parent
-_DISPATCHER_CODEGEN = _THIS_DIR.parents[1] / "dispatcher" / "codegen"
+_DISPATCHER_CODEGEN = _THIS_DIR.parents[1] / "dispatcher" / "codegen" / "grouped_conv"
 if str(_DISPATCHER_CODEGEN) not in sys.path:
     sys.path.insert(0, str(_DISPATCHER_CODEGEN))
 
-from grouped_config_rules import (  # noqa E402
+from grouped_config_rules_default import (  # noqa E402
     check_vectors as _shared_check_vectors,
     check_warp_coverage,
     check_bwd_data_vec_coverage,

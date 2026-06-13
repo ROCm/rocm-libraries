@@ -55,6 +55,7 @@ from grouped_conv.grouped_config_rules_default import (
     check_wmma_instance,
     check_wmma_native_warp_tile,
     get_warp_size,
+    check_tile_coverage,
 )
 
 
@@ -369,6 +370,14 @@ class GroupedConvKernelConfig:
             k_per_xdl=t.warp_tile_k,
             m_per_xdl=t.warp_tile_m,
             dtype=self.datatype if self.datatype is not None else "float",
+        ):
+            return False
+        
+        block_size = warp_size * t.warp_k * t.warp_m * t.warp_n
+        if not check_tile_coverage(
+            tile_m=t.tile_m, tile_n=t.tile_n, tile_k=t.tile_k,
+            vec_a = self.vector_size_a, vec_b = self.vector_size_b, pipeline_version=tr.pipeline,
+            block_size=block_size,
         ):
             return False
 

@@ -280,6 +280,26 @@ def check_warp_coverage(
         return False
     return True
 
+def check_tile_coverage(
+    tile_m: int, tile_n: int, tile_k: int,
+    vec_a: int, vec_b: int, pipeline_version: str,
+    block_size: int = 64,
+) -> bool:
+    """Check if each thread has some data to read.
+
+    Return false when there is more threads than data to read.
+    """
+    if pipeline_version == "compv6":
+        if tile_k < 64:
+            return False
+        # V6 pipeline computes A/B_Buffer_Load_Inst_Num as integer division;
+        # if either is 0 the scheduler divides by zero at compile time.
+        if (tile_m * tile_k) // (block_size * vec_a) < 1:
+            return False
+        if (tile_n * tile_k) // (block_size * vec_b) < 1:
+            return False
+    return True
+
 
 def get_warp_size(gpu_target: str) -> int:
     """Return warp size for the given GPU target.
