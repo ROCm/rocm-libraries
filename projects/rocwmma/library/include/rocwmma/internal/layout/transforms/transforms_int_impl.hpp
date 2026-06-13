@@ -334,10 +334,23 @@ namespace rocwmma
                             return unpackLoHi16(extractLo(v), extractHi(v));
                         });
 
-                    // Perform combined interleave on full vector
-                    using interleave_idx0 = interleave_idx<1u, 4u, AccVecSize>;
-                    using interleave_idx1 = interleave_idx<1u, 8u, VecTraits::size()>;
-                    return interleave_combine<interleave_idx0, interleave_idx1>(result);
+                    // Perform combined interleave on full vector.
+                    // gfx11's fp16 accumulator uses VecSize=8 (so 8==8 is a NOP).
+                    // gfx103's software WMMA uses VecSize=4 (so both indices are
+                    // NOPs for AccVecSize=4), and the interleave_idx<1,8,4> form
+                    // would fail the IsValid constraint (ElementStride>ElementCount).
+                    // Branch on VecSize to use the right index.
+                    if constexpr(VecTraits::size() >= 8u)
+                    {
+                        using interleave_idx0 = interleave_idx<1u, 4u, AccVecSize>;
+                        using interleave_idx1 = interleave_idx<1u, 8u, VecTraits::size()>;
+                        return interleave_combine<interleave_idx0, interleave_idx1>(result);
+                    }
+                    else
+                    {
+                        // For small VecSize both interleave indices are NOPs anyway.
+                        return result;
+                    }
                 }
             }
             else if constexpr((bool)ROCWMMA_ARCH_GFX12)

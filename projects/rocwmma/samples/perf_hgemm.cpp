@@ -247,7 +247,7 @@ namespace gfx103Params
         BLOCKS_M  = 4u,
         BLOCKS_N  = 2u,
         TBLOCK_X  = 64u,
-        TBLOCK_Y  = 4u,
+        TBLOCK_Y  = 2u,
         WARP_SIZE = Constants::AMDGCN_WAVE_SIZE_32
     };
 }
