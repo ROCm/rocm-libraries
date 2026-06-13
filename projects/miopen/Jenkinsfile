@@ -170,14 +170,9 @@ def runBuildAndSingleGtestJob(Map conf=[:])
                 setup_flags: single_gtest_flags + flags,
                 build_cmd: """
                     GTEST_LOG="${gtestLogBase}_\$\$.log"
-                    RC_FILE="\${GTEST_LOG}.rc"
-                    trap 'rm -f "\$GTEST_LOG" "\$RC_FILE"' EXIT INT TERM
-                    { LLVM_PATH=/opt/rocm/llvm CTEST_PARALLEL_LEVEL=4 make -j\$(nproc) install miopen_gtest check 2>&1; echo \$? >"\$RC_FILE"; } | tee "\$GTEST_LOG"
-                    BUILD_RC=\$(cat "\$RC_FILE" 2>/dev/null)
-                    if [ -z "\$BUILD_RC" ]; then
-                        echo "ERROR: could not read build exit code from \$RC_FILE — treating as failure"
-                        BUILD_RC=1
-                    fi
+                    trap 'rm -f "\$GTEST_LOG"' EXIT INT TERM
+                    MAKE_RC=0
+                    LLVM_PATH=/opt/rocm/llvm CTEST_PARALLEL_LEVEL=4 make -j\$(nproc) install miopen_gtest check 2>&1 | tee "\$GTEST_LOG" || MAKE_RC=\$?
                     echo ''
                     echo '===== GTEST FAILURE SUMMARY ====='
                     FAILURES=\$(grep -E '^\\[  FAILED  \\]' "\$GTEST_LOG" | grep -v 'tests, listed below' || true)
@@ -188,7 +183,7 @@ def runBuildAndSingleGtestJob(Map conf=[:])
                     fi
                     echo 'Note: this summary only captures gtest failures. On any failure, also inspect the full log for other failures.'
                     echo '=================================='
-                    exit \$BUILD_RC
+                    exit \$MAKE_RC
                 """.stripIndent(),
                 build_install:true,
                 build_timeout:build_timeout_minutes,
