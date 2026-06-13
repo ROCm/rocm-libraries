@@ -162,41 +162,18 @@ def runBuildAndSingleGtestJob(Map conf=[:])
     script {
         withWorkingDir {
             def single_gtest_flags = " -DMIOPEN_TEST_DISCRETE=OFF -DGTEST_PARALLEL_LEVEL=4 "
-            def stageSuffix = (env.STAGE_NAME ?: 'unknown').replaceAll('[^a-zA-Z0-9]+', '_')
-            // Include shell PID ($$) in the filename to prevent collisions between
-            // parallel stages that may resolve to the same STAGE_NAME inside Docker.
-            def gtestLogBase = "/tmp/miopen_gtest_${env.BUILD_NUMBER}_${stageSuffix}"
             utils.buildHipClangJob(
                 setup_flags: single_gtest_flags + flags,
-                build_cmd: """
-                    GTEST_LOG="${gtestLogBase}_\$\$.log"
-                    RC_FILE="\${GTEST_LOG}.rc"
-                    trap 'rm -f "\$GTEST_LOG" "\$RC_FILE"' EXIT INT TERM
-                    set +e
-                    { LLVM_PATH=/opt/rocm/llvm CTEST_PARALLEL_LEVEL=4 make -j\$(nproc) install miopen_gtest check 2>&1; echo \$? >"\$RC_FILE"; } | tee "\$GTEST_LOG"
-                    set -e
-                    MAKE_RC=\$(cat "\$RC_FILE" 2>/dev/null)
-                    if [ -z "\$MAKE_RC" ]; then
-                        echo "ERROR: could not read build exit code — treating as failure"
-                        MAKE_RC=1
-                    fi
-                    echo ''
-                    echo '===== GTEST FAILURE SUMMARY ====='
-                    FAILURES=\$(grep -E '^\\[  FAILED  \\]' "\$GTEST_LOG" | grep -Ev '([0-9]+ ms\\)|tests?, listed below)' || true)
-                    if [ -n "\$FAILURES" ]; then
-                        echo "\$FAILURES"
-                    else
-                        echo 'No gtest failures found in output.'
-                    fi
-                    echo 'Note: this summary only captures gtest failures. On any failure, also inspect the full log for other failures.'
-                    echo '=================================='
-                    exit \$MAKE_RC
-                """.stripIndent(),
+                build_cmd: "LLVM_PATH=/opt/rocm/llvm CTEST_PARALLEL_LEVEL=4 make -j\$(nproc) install miopen_gtest check",
                 build_install:true,
                 build_timeout:build_timeout_minutes,
                 gpu_family: gpu_family)
         }
     }
+
+    // Collect per-shard JUnit XML reports written by --gtest_output in the cmake test registration.
+    // 'allowEmptyResults' handles the case where the build failed before tests ran.
+    junit allowEmptyResults: true, testResults: "${env.MIOPEN_DIR}/build/test_results/miopen_gtest_shard*.xml"
 }
 
 def runDockerBuild(String gpuFamily) {
