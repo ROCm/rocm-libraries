@@ -4,6 +4,7 @@
 #include "origami/streamk.hpp"
 #include "origami/gemm.hpp"
 #include "origami/hardware.hpp"
+#include "origami/heuristics.hpp"
 #include "origami/math.hpp"
 #include "origami/types.hpp"
 
@@ -468,15 +469,24 @@ hybrid_mode_t select_hybrid_mode(const problem_t& problem,
                                  const hardware_t& hardware,
                                  const config_t& config,
                                  size_t sm_count_target) {
-  size_t available_cus = (sm_count_target > 0)
-                             ? std::min<size_t>(sm_count_target, hardware.N_CU)
-                             : hardware.N_CU;
-  if (available_cus == 0) available_cus = hardware.N_CU;
+  // The hybrid-mode thresholds were derived from a regression over random
+  // problems on MI350X (gfx950). Other architectures keep the static (SK3)
+  // sub-path until they are tuned in a follow-up PR.
+  if (hardware.arch != hardware_t::architecture_t::gfx950)
+    return hybrid_mode_t::static_;
 
   const size_t MT_M = config.mt.m;
   const size_t MT_N = config.mt.n;
 
+  // Small macrotiles always use the static sub-path: dynamic per-XCD work
+  // queueing is not beneficial at these tile sizes.
   if (MT_M == 16 && MT_N == 16) return hybrid_mode_t::static_;
+  if (MT_M == 32 && MT_N == 32) return hybrid_mode_t::static_;
+
+  size_t available_cus = (sm_count_target > 0)
+                             ? std::min<size_t>(sm_count_target, hardware.N_CU)
+                             : hardware.N_CU;
+  if (available_cus == 0) available_cus = hardware.N_CU;
 
   const size_t batch = std::max<size_t>(problem.batch, 1);
   const size_t tiles = compute_number_of_output_tiles(
@@ -485,12 +495,11 @@ hybrid_mode_t select_hybrid_mode(const problem_t& problem,
       static_cast<double>(tiles) / static_cast<double>(available_cus);
 
   double threshold;
-  if      (MT_M ==  32 && MT_N ==  32) threshold = 256.4;
-  else if (MT_M ==  64 && MT_N ==  64) threshold =   7.22;
-  else if (MT_M == 128 && MT_N == 128) threshold =   2.08;
-  else if (MT_M == 128 && MT_N == 256) threshold =   2.58;
-  else if (MT_M == 256 && MT_N == 128) threshold =   0.87;
-  else                                 threshold =   2.0;
+  if      (MT_M ==  64 && MT_N ==  64) threshold = streamk_hybrid_defaults_t::THRESHOLD_MT_64X64;
+  else if (MT_M == 128 && MT_N == 128) threshold = streamk_hybrid_defaults_t::THRESHOLD_MT_128X128;
+  else if (MT_M == 128 && MT_N == 256) threshold = streamk_hybrid_defaults_t::THRESHOLD_MT_128X256;
+  else if (MT_M == 256 && MT_N == 128) threshold = streamk_hybrid_defaults_t::THRESHOLD_MT_256X128;
+  else                                 threshold = streamk_hybrid_defaults_t::THRESHOLD_DEFAULT;
 
   return (tiles_per_cu < threshold) ? hybrid_mode_t::static_
                                     : hybrid_mode_t::dynamic;

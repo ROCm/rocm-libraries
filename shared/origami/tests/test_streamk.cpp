@@ -39,8 +39,10 @@ TEST_CASE("Origami streamk: select_hybrid_mode 16x16 short-circuits to static_",
   }
 }
 
-TEST_CASE("Origami streamk: select_hybrid_mode 32x32 threshold (256.4)",
+TEST_CASE("Origami streamk: select_hybrid_mode 32x32 always static",
           "[origami][streamk][hybrid]") {
+  // 32x32 macrotiles always use the static sub-path on gfx950, regardless of
+  // tiles_per_cu.
   auto hardware = make_hardware(950);
   auto config   = make_config(32, 32, 64);
   auto small = make_problem_for_tiles_per_cu(32, 32, 200.0, hardware.N_CU);
@@ -48,7 +50,7 @@ TEST_CASE("Origami streamk: select_hybrid_mode 32x32 threshold (256.4)",
           == origami::hybrid_mode_t::static_);
   auto big = make_problem_for_tiles_per_cu(32, 32, 500.0, hardware.N_CU);
   REQUIRE(origami::streamk::select_hybrid_mode(big, hardware, config, 0)
-          == origami::hybrid_mode_t::dynamic);
+          == origami::hybrid_mode_t::static_);
 }
 
 TEST_CASE("Origami streamk: select_hybrid_mode 64x64 threshold (7.22)",
@@ -73,6 +75,22 @@ TEST_CASE("Origami streamk: select_hybrid_mode 128x128 threshold (2.08)",
   auto big = make_problem_for_tiles_per_cu(128, 128, 8.0, hardware.N_CU);
   REQUIRE(origami::streamk::select_hybrid_mode(big, hardware, config, 0)
           == origami::hybrid_mode_t::dynamic);
+}
+
+TEST_CASE("Origami streamk: select_hybrid_mode non-gfx950 always static",
+          "[origami][streamk][hybrid]") {
+  // A 128x128 problem with a large tiles_per_cu would select dynamic on gfx950,
+  // but the architecture guard forces static_ on non-gfx950 hardware.
+  auto config = make_config(128, 128, 32);
+  auto big    = make_problem_for_tiles_per_cu(128, 128, 8.0, make_hardware(950).N_CU);
+
+  auto hardware_gfx950 = make_hardware(950);
+  REQUIRE(origami::streamk::select_hybrid_mode(big, hardware_gfx950, config, 0)
+          == origami::hybrid_mode_t::dynamic);
+
+  auto hardware_gfx942 = make_hardware(942);
+  REQUIRE(origami::streamk::select_hybrid_mode(big, hardware_gfx942, config, 0)
+          == origami::hybrid_mode_t::static_);
 }
 
 TEST_CASE("Origami streamk: select_hybrid_mode 128x256 threshold (2.58)",
