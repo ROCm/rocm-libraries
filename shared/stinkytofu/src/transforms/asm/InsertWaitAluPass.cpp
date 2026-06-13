@@ -752,6 +752,7 @@ class InsertWaitAluPassImpl : public Pass {
                     bbsWithExitDisable.insert(&bb);
                 } else if (isCall(*inst)) {
                     work.push_back({&bb, inst, /*value=*/0, /*insertAfter=*/false});
+                    bbsWithExitDisable.insert(&bb);
                 }
             }
         }
