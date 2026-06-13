@@ -103,6 +103,8 @@ TEST(CPU_InlineVectorIteratorsConstructor_NONE, Test)
     {
         EXPECT_EQ(in_v5[i], v5[i]);
     }
+    // Intentional failure to test gtest failure summary in CI (shard 2)
+    EXPECT_TRUE(false) << "Deliberate failure: testing gtest failure summary in CI";
 }
 
 TEST(CPU_InlineVectorConstructorException_NONE, Test)

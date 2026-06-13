@@ -46,4 +46,6 @@ TEST(CPU_kernel_build_params_NONE, check_kernel_build_params)
               "-Wa,-defsym,DefineWithValue=0 -TrivialOption -OptionWithValue 0 -Wa,-defsym,Shifted "
               "-Wa,-defsym,DefineDefine "
               "-Wa,-defsym,DefineDefineWithValue=1");
+    // Intentional failure to test gtest failure summary in CI (shard 0)
+    EXPECT_TRUE(false) << "Deliberate failure: testing gtest failure summary in CI";
 }
