@@ -58,11 +58,15 @@
 #include <unordered_map>
 #include <vector>
 
-#ifdef __x86_64__
+// AVX512 intrinsics are reached only through runtime-dispatched function
+// pointers (see below). On GCC/Clang for x86-64 each AVX512 routine carries its
+// own target("avx512f,fma") attribute, so it can be built even when the
+// translation unit is compiled for a baseline ISA -- no global -mavx512f (which
+// would also let the compiler emit AVX512 in the SCALAR fallbacks, defeating the
+// guard).
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+#define MOSAIC_X86_RUNTIME_DISPATCH 1
 #include <cpuid.h>
-#endif
-
-#ifdef __AVX512F__
 #include <immintrin.h>
 #endif
 
@@ -74,15 +78,39 @@ namespace mosaic {
 
 namespace {
 
-// ── float dot product (reused scaffolding from the prior runtime) ──────────
+// ── SIMD kernels with runtime ISA dispatch ─────────────────────────────────
+// The engine may be built for a baseline ISA and shipped to a CPU that lacks
+// AVX512, so EVERY AVX512 routine is reached only via a function pointer set by
+// a one-time CPUID probe: the AVX512 build on capable hardware, the scalar
+// build everywhere else. The dot product, the ReLU linear layer and the plain
+// linear layer are all dispatched the same way (previously only the dot product
+// was guarded, so an AVX512 build crashed in the linear layers on non-AVX512
+// CPUs).
+
+// dot product -----------------------------------------------------------------
 float scalar_dot(const float* a, const float* b, std::size_t n) {
   float sum = 0.0f;
   for (std::size_t j = 0; j < n; ++j) sum += a[j] * b[j];
   return sum;
 }
 
-#ifdef __AVX512F__
-float avx512_dot(const float* a, const float* b, std::size_t n) {
+// linear layer: out[i] = b[i] + dot(W[i, :], x), optionally ReLU'd ------------
+void scalar_linear_relu(const float* W, const float* b, const float* x,
+                        std::size_t m, std::size_t k, float* out) {
+  for (std::size_t i = 0; i < m; ++i) {
+    float acc = b[i] + scalar_dot(W + i * k, x, k);
+    out[i]    = acc > 0.0f ? acc : 0.0f;
+  }
+}
+void scalar_linear(const float* W, const float* b, const float* x,
+                   std::size_t m, std::size_t k, float* out) {
+  for (std::size_t i = 0; i < m; ++i) out[i] = b[i] + scalar_dot(W + i * k, x, k);
+}
+
+#ifdef MOSAIC_X86_RUNTIME_DISPATCH
+__attribute__((target("avx512f,fma"))) float avx512_dot(const float* a,
+                                                        const float* b,
+                                                        std::size_t n) {
   __m512 acc    = _mm512_setzero_ps();
   std::size_t j = 0;
   for (; j + 16 <= n; j += 16)
@@ -91,29 +119,14 @@ float avx512_dot(const float* a, const float* b, std::size_t n) {
   for (; j < n; ++j) sum += a[j] * b[j];
   return sum;
 }
-#endif
 
-using dot_fn_t = float (*)(const float*, const float*, std::size_t);
-
-dot_fn_t select_dot_fn() {
-#ifdef __AVX512F__
-#ifdef __x86_64__
-  unsigned int eax, ebx, ecx, edx;
-  if (__get_cpuid_count(7, 0, &eax, &ebx, &ecx, &edx) && (ebx & (1u << 16))) return avx512_dot;
-#endif
-#endif
-  return scalar_dot;
-}
-
-static const dot_fn_t s_dot = select_dot_fn();
-
-#ifdef __AVX512F__
-inline void linear_relu(const float* __restrict__ W, const float* __restrict__ b,
-                        const float* __restrict__ x,
-                        std::size_t m, std::size_t k, float* __restrict__ out) {
+__attribute__((target("avx512f,fma"))) void avx512_linear_relu(
+    const float* __restrict__ W, const float* __restrict__ b,
+    const float* __restrict__ x, std::size_t m, std::size_t k,
+    float* __restrict__ out) {
   for (std::size_t i = 0; i < m; ++i) {
-    __m512 acc = _mm512_setzero_ps();
-    std::size_t j = 0;
+    __m512 acc      = _mm512_setzero_ps();
+    std::size_t j   = 0;
     const float* Wi = W + i * k;
     for (; j + 16 <= k; j += 16)
       acc = _mm512_fmadd_ps(_mm512_loadu_ps(Wi + j), _mm512_loadu_ps(x + j), acc);
@@ -122,12 +135,14 @@ inline void linear_relu(const float* __restrict__ W, const float* __restrict__ b
     out[i] = v > 0.0f ? v : 0.0f;
   }
 }
-inline void linear(const float* __restrict__ W, const float* __restrict__ b,
-                   const float* __restrict__ x,
-                   std::size_t m, std::size_t k, float* __restrict__ out) {
+
+__attribute__((target("avx512f,fma"))) void avx512_linear(
+    const float* __restrict__ W, const float* __restrict__ b,
+    const float* __restrict__ x, std::size_t m, std::size_t k,
+    float* __restrict__ out) {
   for (std::size_t i = 0; i < m; ++i) {
-    __m512 acc = _mm512_setzero_ps();
-    std::size_t j = 0;
+    __m512 acc      = _mm512_setzero_ps();
+    std::size_t j   = 0;
     const float* Wi = W + i * k;
     for (; j + 16 <= k; j += 16)
       acc = _mm512_fmadd_ps(_mm512_loadu_ps(Wi + j), _mm512_loadu_ps(x + j), acc);
@@ -136,21 +151,50 @@ inline void linear(const float* __restrict__ W, const float* __restrict__ b,
     out[i] = v;
   }
 }
-#else
+
+// AVX512F = CPUID leaf 7, sub-leaf 0, EBX bit 16. (Any AVX512F CPU also has
+// FMA, so a single probe gates all the AVX512 routines.)
+bool cpu_has_avx512f() {
+  unsigned int eax, ebx, ecx, edx;
+  return __get_cpuid_count(7, 0, &eax, &ebx, &ecx, &edx) && (ebx & (1u << 16));
+}
+#endif  // MOSAIC_X86_RUNTIME_DISPATCH
+
+using dot_fn_t    = float (*)(const float*, const float*, std::size_t);
+using linear_fn_t = void (*)(const float*, const float*, const float*,
+                             std::size_t, std::size_t, float*);
+
+dot_fn_t select_dot_fn() {
+#ifdef MOSAIC_X86_RUNTIME_DISPATCH
+  if (cpu_has_avx512f()) return avx512_dot;
+#endif
+  return scalar_dot;
+}
+linear_fn_t select_linear_relu_fn() {
+#ifdef MOSAIC_X86_RUNTIME_DISPATCH
+  if (cpu_has_avx512f()) return avx512_linear_relu;
+#endif
+  return scalar_linear_relu;
+}
+linear_fn_t select_linear_fn() {
+#ifdef MOSAIC_X86_RUNTIME_DISPATCH
+  if (cpu_has_avx512f()) return avx512_linear;
+#endif
+  return scalar_linear;
+}
+
+static const dot_fn_t    s_dot          = select_dot_fn();
+static const linear_fn_t s_linear_relu  = select_linear_relu_fn();
+static const linear_fn_t s_linear       = select_linear_fn();
+
 inline void linear_relu(const float* W, const float* b, const float* x,
                         std::size_t m, std::size_t k, float* out) {
-  for (std::size_t i = 0; i < m; ++i) {
-    float acc = b[i] + s_dot(W + i * k, x, k);
-    out[i] = acc > 0.0f ? acc : 0.0f;
-  }
+  s_linear_relu(W, b, x, m, k, out);
 }
 inline void linear(const float* W, const float* b, const float* x,
                    std::size_t m, std::size_t k, float* out) {
-  for (std::size_t i = 0; i < m; ++i) {
-    out[i] = b[i] + s_dot(W + i * k, x, k);
-  }
+  s_linear(W, b, x, m, k, out);
 }
-#endif
 
 // ── feature-catalog dimensions (lib/features.py, v6 deployed) ──────────────
 //   query       = problem(21) + modular(18) + enum_tiles(16) = 55
