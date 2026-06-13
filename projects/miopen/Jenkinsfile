@@ -162,18 +162,25 @@ def runBuildAndSingleGtestJob(Map conf=[:])
     script {
         withWorkingDir {
             def single_gtest_flags = " -DMIOPEN_TEST_DISCRETE=OFF -DGTEST_PARALLEL_LEVEL=4 "
-            def stageSuffix = (env.STAGE_NAME ?: 'unknown').replaceAll('[^a-zA-Z0-9]', '_')
-            def gtestLog = "/tmp/miopen_gtest_${env.BUILD_NUMBER}_${stageSuffix}.log"
+            def stageSuffix = (env.STAGE_NAME ?: 'unknown').replaceAll('[^a-zA-Z0-9]+', '_')
+            // Include shell PID ($$) in the filename to prevent collisions between
+            // parallel stages that may resolve to the same STAGE_NAME inside Docker.
+            def gtestLogBase = "/tmp/miopen_gtest_${env.BUILD_NUMBER}_${stageSuffix}"
             utils.buildHipClangJob(
                 setup_flags: single_gtest_flags + flags,
                 build_cmd: """
-                    RC_FILE="${gtestLog}.rc"
-                    { LLVM_PATH=/opt/rocm/llvm CTEST_PARALLEL_LEVEL=4 make -j\$(nproc) install miopen_gtest check 2>&1; echo \$? >"\$RC_FILE"; } | tee ${gtestLog}
-                    BUILD_RC=\$(cat "\$RC_FILE")
-                    rm -f "\$RC_FILE"
+                    GTEST_LOG="${gtestLogBase}_\$\$.log"
+                    RC_FILE="\${GTEST_LOG}.rc"
+                    trap 'rm -f "\$GTEST_LOG" "\$RC_FILE"' EXIT INT TERM
+                    { LLVM_PATH=/opt/rocm/llvm CTEST_PARALLEL_LEVEL=4 make -j\$(nproc) install miopen_gtest check 2>&1; echo \$? >"\$RC_FILE"; } | tee "\$GTEST_LOG"
+                    BUILD_RC=\$(cat "\$RC_FILE" 2>/dev/null)
+                    if [ -z "\$BUILD_RC" ]; then
+                        echo "ERROR: could not read build exit code from \$RC_FILE — treating as failure"
+                        BUILD_RC=1
+                    fi
                     echo ''
                     echo '===== GTEST FAILURE SUMMARY ====='
-                    FAILURES=\$(grep -E '^\\[  FAILED  \\]' ${gtestLog} | grep -v 'tests, listed below' || true)
+                    FAILURES=\$(grep -E '^\\[  FAILED  \\]' "\$GTEST_LOG" | grep -v 'tests, listed below' || true)
                     if [ -n "\$FAILURES" ]; then
                         echo "\$FAILURES"
                     else
@@ -181,7 +188,6 @@ def runBuildAndSingleGtestJob(Map conf=[:])
                     fi
                     echo 'Note: this summary only captures gtest failures. On any failure, also inspect the full log for other failures.'
                     echo '=================================='
-                    rm -f ${gtestLog}
                     exit \$BUILD_RC
                 """.stripIndent(),
                 build_install:true,
