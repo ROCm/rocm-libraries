@@ -53,13 +53,19 @@ target_include_directories(mosaic PUBLIC
 )
 target_link_libraries(mosaic PUBLIC roc::mosaic-headers)
 
-# The engine is hot CPU inference code: aggressive flags for the scoring loop.
-# AVX512 paths are guarded by __AVX512F__ so the scalar fallback is used where
-# the ISA is unavailable.
+# The engine is hot CPU inference code. The AVX512 micro-kernels in model.cpp
+# carry their OWN function-level target attribute and are selected at RUNTIME
+# via CPUID, so the TU must NOT be built with -march=native / -mavx512f: doing
+# so would let the compiler emit AVX512 in the scalar fallback (and in the
+# double feature math), which would SIGILL on CPUs lacking AVX512 and defeat the
+# runtime dispatch. -ffast-math is likewise omitted: the engine's correctness
+# bar is byte-for-byte parity with the Python pipeline (math in double, then
+# cast to float), and -ffast-math's reassociation/contraction would undermine
+# that determinism. Keep only portable optimization flags here.
 set_source_files_properties(
     "${CMAKE_CURRENT_SOURCE_DIR}/src/mosaic/model.cpp"
     PROPERTIES COMPILE_OPTIONS
-    "-O3;-march=native;-mavx512f;-mavx512bw;-mfma;-ffast-math;-funroll-loops;-fopenmp-simd"
+    "-O3;-funroll-loops"
 )
 
 target_sources(
