@@ -30,8 +30,14 @@ target_link_libraries(mosaic-tests PRIVATE roc::mosaic Catch2::Catch2WithMain)
 # Inject the in-tree default weights path so the test can locate the .bin
 # without an explicit MOSAIC_WEIGHTS env override, and the bundled real-kernel
 # fixture (actual Tensile UserArgs.yaml params) for the ranking test.
+#
+# This must name a weights file that actually ships in backends/hipblaslt/data
+# (see mosaic_index). The BB_BB (BBS_TN, bf16) model -- which the bf16 8192^3 TN
+# test problem routes through -- is deployed as the file below; the per-library
+# rename dropped the old "TensileLibrary_BB_BB_...mosaic.bin" name, so pointing at
+# it left every weights-dependent assertion silently skipped.
 target_compile_definitions(mosaic-tests PRIVATE
-    MOSAIC_TEST_WEIGHTS="${CMAKE_CURRENT_SOURCE_DIR}/../backends/hipblaslt/data/TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_ID75a0_gfx950.mosaic.bin"
+    MOSAIC_TEST_WEIGHTS="${CMAKE_CURRENT_SOURCE_DIR}/../backends/hipblaslt/data/gfx950_Cijk_Alik_Bljk_BBS_BH_BiasSB_HAS_SAV_UserArgs.mosaic.bin"
     MOSAIC_TEST_KERNELS="${CMAKE_CURRENT_SOURCE_DIR}/data/sample_kernels.tsv"
 )
 
