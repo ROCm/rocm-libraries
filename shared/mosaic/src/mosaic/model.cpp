@@ -1088,8 +1088,13 @@ std::vector<Result> rank_configs_impl(const LoadedModel& model, const Problem& p
 
   if (configs.empty()) return fallback_all();
 
-  int cell_idx = resolve_model_cell_index(model, problem);
-  if (cell_idx < 0) return fallback_all();
+  // Route via route_impl so ranking honors the MOSAIC_FORCE_CELL debug override
+  // consistently with route() (previously this called resolve_model_cell_index
+  // directly and silently ignored the override). Bounds-check the result: a
+  // bogus forced index must not index past cells[] (out-of-bounds read).
+  int cell_idx = route_impl(model, problem);
+  if (cell_idx < 0 || static_cast<std::size_t>(cell_idx) >= model.cells.size())
+    return fallback_all();
   const CellModel& cm = model.cells[static_cast<std::size_t>(cell_idx)];
 
   const HwView hw = hw_view(hardware);
