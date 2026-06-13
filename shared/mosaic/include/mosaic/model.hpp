@@ -35,7 +35,7 @@ bool weights_loaded();
 
 // Route a problem to its leaf model-cell index, lazily loading weights if
 // needed. Returns the cells[] index, or -1 when no weights are loaded or no
-// trained ancestor cell exists. (Honors the ML_FORCE_CLUSTER override.)
+// trained ancestor cell exists. (Honors the MOSAIC_FORCE_CELL override.)
 int route(const Problem& p);
 
 // Rank candidate configs for a problem using the per-cell two-tower scorer.
