@@ -67,6 +67,18 @@ def skip_if_no_gpu_torch() -> None:
     if not torch.cuda.is_available():
         pytest.skip("PyTorch GPU not available")
 
+    # The executor picks the timing backend per platform (HIP on ROCm,
+    # torch.cuda on CUDA). HIP timing lazily imports hipdnn_frontend, so a
+    # ROCm-torch host without those bindings would error mid-benchmark rather
+    # than skip. Require the backend the executor will actually use.
+    from dnn_benchmarking.execution import timing
+
+    if expected_timing_backend() not in timing.get_available_backends():
+        pytest.skip(
+            "resolved GPU timing backend unavailable "
+            "(e.g. hipdnn_frontend HIP bindings missing)"
+        )
+
 
 def skip_if_no_rocm_torch() -> None:
     """Skip unless this is a ROCm torch build with usable HIP bindings."""
