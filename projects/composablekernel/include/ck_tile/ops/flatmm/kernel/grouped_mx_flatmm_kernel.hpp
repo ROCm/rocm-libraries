@@ -77,7 +77,8 @@ struct GroupedMXFlatmmKernel
         const int persistent_block_size = prop.multiProcessorCount * maxActiveBlocksPerCU;
 
         if(kernelArgs.k_batch != 1)
-            throw std::runtime_error("Wrong! k_batch != 1 not supported in persistent kernel");
+            throw std::runtime_error(
+                "GroupedMXFlatmmKernel only supports k_batch == 1 (Split-K is not supported).");
         return dim3(persistent_block_size, 1, kernelArgs.k_batch);
     }
 
