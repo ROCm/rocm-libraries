@@ -79,6 +79,7 @@ from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig
 from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout
+from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection
 from Tensile.Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal
@@ -99,6 +100,7 @@ def _temporalHint(kernel, tc):
 def _nonVolatile(kernel, tc):
   return NonVolatile(kernel.get("NonVolatile%s"%_cacheHintTensor(tc), 0))
 
+import re
 from math import ceil, floor, log, prod
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -177,8 +179,44 @@ class KernelWriterAssembly(KernelWriter):
       self.language = "ASM"
       return (0, "") # should this be an non zero number
 
+    isCustom = isCustomKernelConfig(kernel)
     try:
-      code = self._getCustomKernelSource(kernel, CUSTOM_KERNEL_PATH) if isCustomKernelConfig(kernel) else self._getKernelSource(kernel)
+      if isCustom:
+        code = self._getCustomKernelSource(kernel, CUSTOM_KERNEL_PATH)
+        # The occupancy formula in compute_occupancy_from_resources is
+        # gfx9/wave64-specific; only override CUOccupancy for gfx9 custom
+        # kernels.  Non-gfx9 (gfx10/11/12, wave32) custom kernels leave
+        # CUOccupancy at its default (-1) rather than emit a wrong value (Fix #2).
+        _isa = kernel.get("ISA", [9, 0, 8])
+        if _isa[0] == 9:
+          # Use live rocisa caps so custom-kernel occupancy matches the codegen path.
+          # For custom kernels, setRocIsa() is called (not setKernel()), so
+          # self.states.regCaps/archCaps are not initialized — query the singleton directly.
+          _ti = rocIsa.getInstance()
+          _regCaps = _ti.getRegCaps()
+          _archCaps = _ti.getArchCaps()
+          # Some codegen paths (e.g. grouped_gemm_ck custom kernels) reach here with
+          # a rocisa singleton whose getRegCaps()/getArchCaps() return an incomplete or
+          # empty dict (setKernel was never called for this ISA in that context).
+          # Accessing missing keys would raise KeyError and break codegen.  Guard:
+          # try the live singleton caps first; on any KeyError/AttributeError fall back
+          # to the static hardware table.  If neither source has the caps, skip the
+          # override and leave CUOccupancy at its default (-1).
+          try:
+            _rocisa_caps = (
+                _regCaps["MaxVgpr"] * (2 if _archCaps.get("ArchAccUnifiedRegs") else 1),
+                _regCaps["PhysicalMaxSgpr"],
+                _archCaps["DeviceLDS"],
+                _archCaps["MaxWavesPerSimd"],
+            )
+          except (KeyError, AttributeError):
+            # Singleton caps incomplete: fall back to static table (or None → skip).
+            _rocisa_caps = _arch_caps_for_kernel(kernel)
+          occ = compute_occupancy_from_asm_source(kernel, code, arch_caps=_rocisa_caps)
+          if occ is not None:
+            kernel["CUOccupancy"] = occ
+      else:
+        code = self._getKernelSource(kernel)
       errcode = 0
     except RuntimeError as e:
       printWarning(f"Failed to generate assembly source code for {kernel}: {e}")
@@ -191,7 +229,7 @@ class KernelWriterAssembly(KernelWriter):
 
   def getVgprOccupancy(self, numThreads, vgprs, doubleVgpr=False):
     multiplier = int(ceil(max(numThreads, 256) / 256.0)) # example: wg=512 multiplier=2, 1024=4
-    maxOccupancy = self.consts.maxOccupancy//multiplier
+    maxOccupancy = self.states.archCaps["MaxWavesPerSimd"]//multiplier
 
     vgprAllocateAligned = 4    if not doubleVgpr else 8
     totalVgprs = self.states.regCaps["MaxVgpr"] if not doubleVgpr else self.states.regCaps["MaxVgpr"]*2
@@ -245,6 +283,10 @@ class KernelWriterAssembly(KernelWriter):
 
   @staticmethod
   def getLdsLimitedOccupancy(deviceLdsSize, ldsSize):
+    if ldsSize == 0:
+      # No LDS usage: LDS is not the binding constraint.
+      # Return a large sentinel so other limits (VGPR, wave cap) win in min().
+      return deviceLdsSize // 256
     # As ldsSize gets large, rounding might push us slightly higher than deviceLdsSize.
     # Clamp at deviceLdsSize
     ldsSize = min(ldsSize + 255, deviceLdsSize) & 0xffffff00 # 256-byte granularity
@@ -2011,6 +2053,61 @@ class KernelWriterAssembly(KernelWriter):
           self.vgprPool.size(), self.sgprPool.size()))
       mkb.body.add(SEndpgm(comment="overflowed resources"), 0)
       mkb.body.add(ValueIf(value="0"), 1)
+
+  ##############################################################################
+  # updateOccupancyFromScan
+  ##############################################################################
+  def updateOccupancyFromScan(self, kernel, mkb) -> None:
+    """Rescan instruction body for actual VGPR/AGPR usage after rocIsaPass.
+
+    rocIsaPass removeDuplicateAssignment can eliminate high-indexed VGPR copies,
+    reducing the instruction-level register count below the pool high-water mark
+    from checkResources.  When a lower count is found, update the kernel descriptor
+    and kernel["CUOccupancy"] so .amdhsa_next_free_vgpr reflects actual usage.
+    Only runs on ArchAccUnifiedRegs ISAs (gfx90a/gfx942/gfx950).
+    """
+    if not self.states.archCaps.get("ArchAccUnifiedRegs"):
+      return
+
+    body_text = str(mkb.body)
+
+    # Guard: if any symbolic vgpr/agpr tokens survive rocIsaPass (e.g. vgprValuA,
+    # agprAccum) the numeric scan under-counts actual register usage and would
+    # wrongly raise occupancy.  Only proceed when the body is confirmed fully
+    # lowered to numeric v[N]/a[N] form (Fix #3).
+    if re.search(r'\bvgpr[A-Za-z_]', body_text) or re.search(r'\bagpr[A-Za-z_]', body_text):
+      return
+
+    vgpr_refs: set = set()
+    agpr_refs: set = set()
+
+    vgpr_refs.update(int(m) for m in re.findall(r'\bv(\d+)\b', body_text))
+    agpr_refs.update(int(m) for m in re.findall(r'\ba(\d+)\b', body_text))
+    for start, end in re.findall(r'\bv\[(\d+):(\d+)\]', body_text):
+      vgpr_refs.update(range(int(start), int(end) + 1))
+    for start, end in re.findall(r'\ba\[(\d+):(\d+)\]', body_text):
+      agpr_refs.update(range(int(start), int(end) + 1))
+
+    if not vgpr_refs:
+      return
+
+    scanned_vgprs = max(vgpr_refs) + 1
+    # Acc VGPRs are always fully populated by MFMA; cap at pool size.
+    scanned_agprs = (max(agpr_refs) + 1) if agpr_refs else self.agprPool.size()
+    scanned_agprs = min(scanned_agprs, self.agprPool.size())
+
+    pool_total    = int(ceil(self.vgprPool.size() / 8.0)) * 8 + self.agprPool.size()
+    scanned_total = int(ceil(scanned_vgprs       / 8.0)) * 8 + scanned_agprs
+
+    if scanned_total >= pool_total:
+      return
+
+    mkb.setGprs(totalVgprs=scanned_vgprs, totalAgprs=scanned_agprs,
+                totalSgprs=self.sgprPool.size())
+
+    kernel["CUOccupancy"] = self.getOccupancy(
+      kernel["NumThreads"], scanned_vgprs, self.sgprPool.size(),
+      self.getLdsSize(kernel), scanned_agprs, self.states.doubleVgpr)
 
   ##############################################################################
   # code phrase for load batched address from array of buffer pointer
@@ -7503,27 +7600,8 @@ class KernelWriterAssembly(KernelWriter):
             # PGR=2 and EPS and no SuppressNoLoadLoop case, need to jump to EvenExit
             jumpLabel = Label("LoopEnd%s_evenexit%s%s"%(loopChar, strNta, strNtb), "" )
 
-        if kernel["ClusterBarrier"]:
-          # jump to label_skipClusterWaitInitC not label_LoopBeginL
-          # label_skipClusterWaitInitC:
-          # /* initC wmma section */
-          # label_LoopBeginL:
-          # /* unrolled loop section */
-          if beforeInitCIter:
-            skipClusterWaitLabel = Label(self.labels.getNameInc("skipClusterWaitInitC"), "")
-            module.add(SCBranchSCC0(skipClusterWaitLabel.getLabelName(), "skip cluster wait if LoopCounterL > endCounter"))
-            module.add(SBarrier(True, True, True, "cluster_barrier wait"))
-            module.add(SBranch(labelName=jumpLabel.getLabelName(), \
-                      comment="do not enter Loop%s"%loopChar ))
-            module.add(skipClusterWaitLabel)
-          else:
-            module.add(SCBranchSCC0(loopLabelBegin.getLabelName(), "skip cluster wait if LoopCounterL > 1"))
-            module.add(SBarrier(True, True, True, "cluster_barrier wait"))
-            module.add(SBranch(labelName=jumpLabel.getLabelName(), \
-                      comment="do not enter Loop%s"%loopChar ))
-        else:
-          module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
-                    comment="do not enter Loop%s"%loopChar ))
+        module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
+                  comment="do not enter Loop%s"%loopChar ))
 
       if kernel["ExpertSchedulingMode"] > 0:
         enableESMInstr = SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=int(kernel["ExpertSchedulingMode"]), comment="enable expert scheduling mode")
@@ -7767,8 +7845,6 @@ class KernelWriterAssembly(KernelWriter):
         evenIterCode = Module()
         if not kernel["SuppressNoLoadLoop"] and kernel["ExpandPointerSwap"]:
           oddIterPreCode.add(loopLabelEndOddExit)
-          if kernel["ClusterBarrier"]:
-            oddIterPreCode.add(SBarrier(True, True, True, "cluster_barrier wait"))
           # In this case we kept the 'no-load' loop which has LDS offsets assuming first bank of LDS
           # if we exit the main loop at an odd iter - need to swap LDS read pointers
           # so the ds_reads read from the 'high' buffer of LDS
@@ -7798,8 +7874,6 @@ class KernelWriterAssembly(KernelWriter):
               oddIterCode.add(self.localReadSwapOffsets(kernel, False, tPM))
 
           evenIterPreCode.add(loopLabelEndEvenExit)
-          if kernel["ClusterBarrier"]:
-            evenIterPreCode.add(SBarrier(True, True, True, "cluster_barrier wait"))
           # generate even code here (so far, for PrefetchGlobalRead>=2 only)
           if kernel["PrefetchGlobalRead"]>=2:
             if not kernel["DirectToVgprA"] or not kernel["DirectToVgprB"]:
@@ -7826,9 +7900,6 @@ class KernelWriterAssembly(KernelWriter):
             #swap local write memory token
             self.states.ldsWriteTokenIdx = \
               self.states.memTokenLdsBuffer1 if self.states.ldsWriteTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
-        else:
-          if kernel["ClusterBarrier"]:
-            evenIterPreCode.add(SBarrier(True, True, True, "cluster_barrier wait"))
 
         # generate even, odd exit code
         # not oddLabel case, order is even -> odd
@@ -18770,23 +18841,6 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
     #TODO: should not directly use GRIA and GRIB
     mod.add(SCSelectB32(sgpr(incSgprName), sgpr(f"GlobalReadIncs{tcB}"), sgpr(f"GlobalReadIncs{tcA}")))
-    return mod
-
-  def clusterBarrierPreSignal(self, kernel, handleSkipPGR2=False) -> Module:
-    mod = Module()
-    skipClusterBarrierPreSignal = Label(self.labels.getUniqueNamePrefix("skipCBPreSignal"), "")
-    if handleSkipPGR2 and kernel["PrefetchGlobalRead"] == 2:
-      loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
-      endCounter = 1 if kernel["SuppressNoLoadLoop"] else 2
-      mod.add(SCmpEQU32(src0=loopCounter, src1=hex(endCounter - 1),
-                        comment="LoopCounter == endCounter-1 ? (PGR=2 but only 1 unroll iter)"))
-      mod.add(SCBranchSCC1(skipClusterBarrierPreSignal.getLabelName(), \
-                           "skip cluster barrier pre-signal if PGR=2 but only 1 loop"))
-    mod.add(SCmpEQU32(sgpr("WaveIdx"), 0x0, "Check for waveID 0"))
-    mod.add(SCBranchSCC0(skipClusterBarrierPreSignal.getLabelName(), "Execute cluster barrier signal for waveID 0"))
-    mod.add(SBarrier(True, False, True, "cluster_barrier signal"))
-    mod.add(skipClusterBarrierPreSignal)
-
     return mod
 
   def resetTDMDescriptorForTail(self, kernel: Mapping, tP: Mapping, tmpSgprWaveOffset = None) -> Module:

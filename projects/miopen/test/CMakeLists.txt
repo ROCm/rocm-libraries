@@ -326,10 +326,10 @@ if (MIOPEN_TEST_GFX115X)
     list(APPEND SKIP_TESTS test_ctc)
 endif()
 
-# Skip conv2d tests to capture flaky behavior                                                                             
+# Skip conv2d tests to capture flaky behavior
 list(APPEND SKIP_TESTS test_conv2d test_conv2d_find2)
 
-# Skip test_immed_conv2d tests to capture flaky behavior                                                                             
+# Skip test_immed_conv2d tests to capture flaky behavior
 list(APPEND SKIP_TESTS test_immed_conv2d)
 
 
@@ -689,7 +689,7 @@ function(add_custom_test NAME)
     bool_or_f(${is_full_check} ${MIOPEN_TEST_ALL} is_full_check)
 
     add_custom_target(${NAME} ${PARSE_UNPARSED_ARGUMENTS})
-    add_test(NAME ${NAME} COMMAND ${CMAKE_COMMAND} --build ${CMAKE_CURRENT_BINARY_DIR} --target ${NAME})
+    add_test(NAME ${NAME} COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target ${NAME})
     foreach(__environment ${PARSE_ENVIRONMENT})
         set_tests_properties(${NAME} PROPERTIES ENVIRONMENT "${__environment}")
     endforeach()
