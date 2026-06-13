@@ -425,16 +425,21 @@ WaitCountSpec mergePlanAndComputed(const WaitInsertionPlan& plan, StinkyInstruct
     for (int ci = 0; ci < CK_Count; ++ci) {
         CounterKind c = static_cast<CounterKind>(ci);
         int planned = inPlan ? getCounterField(pit->second, c) : WaitCountSpec::kUnused;
-        int w = WaitCountSpec::kUnused;
+        int comp = computed[ci];
 
-        if (planned != WaitCountSpec::kUnused) {
-            if (!emit[c].needsNewWait(planned)) continue;
-            w = planned;
-        } else if (computed[ci] != WaitCountSpec::kUnused && emit[c].needsNewWait(computed[ci])) {
-            w = computed[ci];
-        }
+        // The optimizer's planned wait is a FLOOR (we must emit at least
+        // that strong a drain), but the freshly recomputed requirement may
+        // be STRICTER (a smaller count drains deeper). Take the strictest
+        // (smallest) of the two so a relaxed planned value can never mask a
+        // tighter residual the consumer actually needs -- otherwise the
+        // drain slips to a later instruction and the first consumer of a
+        // freshly produced operand runs unguarded.
+        int w = WaitCountSpec::kUnused;
+        if (planned != WaitCountSpec::kUnused) w = planned;
+        if (comp != WaitCountSpec::kUnused && (w == WaitCountSpec::kUnused || comp < w)) w = comp;
 
         if (w == WaitCountSpec::kUnused) continue;
+        if (!emit[c].needsNewWait(w)) continue;
 
         setCounterField(applySpec, c, w);
         emit[c].recordEmittedWait(w);
