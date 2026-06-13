@@ -671,6 +671,9 @@ struct CellModel {
   std::vector<float> x_w0, x_b0, x_w2, x_b2;
   // smart_K signature whitelist: 8-tuples (mt_m,mt_n,mt_k,mi_m,mi_n,mi_k,cha,chb)
   std::vector<std::array<int, 8>> smart_k_signatures;
+  // Sorted copy of smart_k_signatures for O(log S) membership tests (the order
+  // of smart_k_signatures itself is irrelevant -- it is only used as a set).
+  std::vector<std::array<int, 8>> smart_k_sorted;
 };
 
 // ── one node of the cumulative split tree (lib/subcells.SplitRule) ─────────
@@ -856,6 +859,8 @@ bool load_binary_stream(std::istream& f, LoadedModel* out) {
       if (f.gcount() != static_cast<std::streamsize>(sizeof(sig))) return false;
       for (int t = 0; t < 8; ++t) cm.smart_k_signatures[s][t] = static_cast<int>(sig[t]);
     }
+    cm.smart_k_sorted = cm.smart_k_signatures;
+    std::sort(cm.smart_k_sorted.begin(), cm.smart_k_sorted.end());
 
     const std::uint32_t qd = out->q_dim, id = out->i_dim, xd = out->x_dim;
     const std::uint32_t hd = cm.hidden_dim, ed = cm.embed_dim, ih = cm.inter_hidden;
@@ -1138,9 +1143,7 @@ std::vector<Result> rank_configs_impl(const LoadedModel& model, const Problem& p
   const bool have_sk = !cm.smart_k_signatures.empty();
 
   auto sig_in_set = [&](const std::array<int, 8>& s) -> bool {
-    for (const auto& w : cm.smart_k_signatures)
-      if (w == s) return true;
-    return false;
+    return std::binary_search(cm.smart_k_sorted.begin(), cm.smart_k_sorted.end(), s);
   };
 
   // Two-pass survivor scan (LDS gate -> is_kernel_feasible -> optional
