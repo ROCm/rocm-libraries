@@ -56,6 +56,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 // AVX512 intrinsics are reached only through runtime-dispatched function
@@ -927,16 +928,19 @@ void compute_qe(const CellModel& cm, const float* q_feat, std::size_t q_dim,
          cm.embed_dim, cm.hidden_dim, q_emb_out.data());
 }
 
-// Whiten then run i_proj (Linear,ReLU,Linear) -> item embedding.
+// Whiten then run i_proj (Linear,ReLU,Linear) -> item embedding. `norm` is a
+// caller-owned scratch buffer reused across candidates to avoid a per-call heap
+// allocation in the scoring loop.
 void compute_ie(const CellModel& cm, const float* i_feat, std::size_t i_dim,
-                std::vector<float>& scratch, std::vector<float>& i_emb_out) {
-  std::vector<float> i_norm(i_dim);
+                std::vector<float>& norm, std::vector<float>& scratch,
+                std::vector<float>& i_emb_out) {
+  norm.resize(i_dim);
   for (std::size_t j = 0; j < i_dim; ++j) {
     float s = (cm.i_std[j] < 1e-6f) ? 1.0f : cm.i_std[j];
-    i_norm[j] = (i_feat[j] - cm.i_mean[j]) / s;
+    norm[j] = (i_feat[j] - cm.i_mean[j]) / s;
   }
   scratch.assign(cm.hidden_dim, 0.0f);
-  linear_relu(cm.i_w0.data(), cm.i_b0.data(), i_norm.data(),
+  linear_relu(cm.i_w0.data(), cm.i_b0.data(), norm.data(),
               cm.hidden_dim, i_dim, scratch.data());
   i_emb_out.assign(cm.embed_dim, 0.0f);
   linear(cm.i_w2.data(), cm.i_b2.data(), scratch.data(),
@@ -948,11 +952,11 @@ void compute_ie(const CellModel& cm, const float* i_feat, std::size_t i_dim,
 // candidate rather than cache by signature -- correctness over speed, since
 // the parity bar is exact. Kept as a named entry point per the deployed API.
 void get_or_compute_ie(const CellModel& cm, const Config& cfg, const MlParams& ml,
-                       std::size_t i_dim, std::vector<float>& scratch,
-                       std::vector<float>& i_emb_out) {
+                       std::size_t i_dim, std::vector<float>& norm,
+                       std::vector<float>& scratch, std::vector<float>& i_emb_out) {
   std::array<float, kItemDim> item_feat;
   build_item_features(cfg, ml, item_feat.data());
-  compute_ie(cm, item_feat.data(), i_dim, scratch, i_emb_out);
+  compute_ie(cm, item_feat.data(), i_dim, norm, scratch, i_emb_out);
 }
 
 // score = dot(query_embed, item_embed) / temperature   (the embedding term;
@@ -966,15 +970,16 @@ float score_from_embeds(const CellModel& cm, const float* q_emb, const float* i_
 }
 
 // Whiten interaction features then run inter_mlp (Linear,ReLU,Linear) -> scalar.
+// `norm` is a caller-owned scratch buffer reused across candidates.
 float compute_inter_score(const CellModel& cm, const float* x_feat, std::size_t x_dim,
-                          std::vector<float>& scratch) {
-  std::vector<float> x_norm(x_dim);
+                          std::vector<float>& norm, std::vector<float>& scratch) {
+  norm.resize(x_dim);
   for (std::size_t j = 0; j < x_dim; ++j) {
     float s = (cm.x_std[j] < 1e-6f) ? 1.0f : cm.x_std[j];
-    x_norm[j] = (x_feat[j] - cm.x_mean[j]) / s;
+    norm[j] = (x_feat[j] - cm.x_mean[j]) / s;
   }
   scratch.assign(cm.inter_hidden, 0.0f);
-  linear_relu(cm.x_w0.data(), cm.x_b0.data(), x_norm.data(),
+  linear_relu(cm.x_w0.data(), cm.x_b0.data(), norm.data(),
               cm.inter_hidden, x_dim, scratch.data());
   return cm.x_b2[0] + s_dot(cm.x_w2.data(), scratch.data(), cm.inter_hidden);
 }
@@ -1088,6 +1093,19 @@ std::array<int, 8> sig_of(const Config& c) {
           c.cache_hints_a, c.cache_hints_b};
 }
 
+// FNV-1a hash over the 8-int kernel signature so the smart_K whitelist can be a
+// hash set (O(1) membership) instead of a per-candidate linear scan.
+struct SigHash {
+  std::size_t operator()(const std::array<int, 8>& a) const noexcept {
+    std::size_t h = 1469598103934665603ull;
+    for (int v : a) {
+      h ^= static_cast<std::size_t>(static_cast<unsigned int>(v));
+      h *= 1099511628211ull;
+    }
+    return h;
+  }
+};
+
 // ── model-agnostic scoring core ────────────────────────────────────────────
 // These operate on ANY LoadedModel (const after load), so both the singleton
 // and the handle API funnel through the SAME math. The singleton path is
@@ -1144,10 +1162,13 @@ std::vector<Result> rank_configs_impl(const LoadedModel& model, const Problem& p
   // smart_K signature whitelist for this cell (may be empty -> no filter).
   const bool have_sk = !cm.smart_k_signatures.empty();
 
+  // Hash the whitelist once so membership is O(1) per candidate (the scan can
+  // run twice over every config, so a linear scan here was O(configs * sigs)).
+  std::unordered_set<std::array<int, 8>, SigHash> sk_set;
+  if (have_sk) sk_set.insert(cm.smart_k_signatures.begin(), cm.smart_k_signatures.end());
+
   auto sig_in_set = [&](const std::array<int, 8>& s) -> bool {
-    for (const auto& w : cm.smart_k_signatures)
-      if (w == s) return true;
-    return false;
+    return sk_set.find(s) != sk_set.end();
   };
 
   // Two-pass survivor scan (LDS gate -> is_kernel_feasible -> optional
@@ -1180,18 +1201,20 @@ std::vector<Result> rank_configs_impl(const LoadedModel& model, const Problem& p
   std::vector<float> scratch, q_emb;
   compute_qe(cm, q_feat.data(), q_dim, scratch, q_emb);
 
-  // Score every survivor.  total = dot(qe, ie)/temp + inter_mlp(x).
+  // Score every survivor.  total = dot(qe, ie)/temp + inter_mlp(x). The norm
+  // and embedding buffers are reused across candidates to keep the hot loop
+  // allocation-free.
   std::vector<std::pair<std::uint32_t, float>> scored;
   scored.reserve(cand.size());
-  std::vector<float> i_emb;
+  std::vector<float> i_emb, i_norm, x_norm;
   std::array<float, kInterDim> x_feat;
   for (std::uint32_t ci : cand) {
     const Config& cc = configs[ci];
     MlParams ml = ml_from(cc);
-    get_or_compute_ie(cm, cc, ml, i_dim, scratch, i_emb);
+    get_or_compute_ie(cm, cc, ml, i_dim, i_norm, scratch, i_emb);
     float emb_score = score_from_embeds(cm, q_emb.data(), i_emb.data(), cm.embed_dim);
     build_inter_features(problem, cc, ml, hw, x_feat.data());
-    float inter_score = compute_inter_score(cm, x_feat.data(), x_dim, scratch);
+    float inter_score = compute_inter_score(cm, x_feat.data(), x_dim, x_norm, scratch);
     scored.emplace_back(ci, emb_score + inter_score);
   }
 
