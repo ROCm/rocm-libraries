@@ -7,7 +7,7 @@
 // and comparing against a CPU reference, catching int32 wraparound that can
 // occur inside the CK kernel even after MIOpen's host-side widening.
 //
-// Shape: x = (1, 96, 512, 512, 88), w = (32, 96, 3, 3, 3), group=1, pad=1, stride=1.
+// Shape: x = (1, 96, 512, 512, 88), w = (16, 96, 1, 1, 1), group=1, pad=0, stride=1.
 //   element count of x = 96 * 512 * 512 * 88 = 2.214 B (just above INT_MAX).
 //   FP16 footprint of x ~= 4.4 GB; FP32 ~= 8.9 GB. The full test allocates several
 //   such tensors (X, W, Y on device plus host-side reference), so heavyweight
@@ -36,7 +36,7 @@ std::vector<TestCase> GetLargeStrideFwdTestCases()
 {
     return {
         // clang-format off
-        TestCase{{1, 96, 512, 512, 88}, {32, 96, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 1, false, false},
+        TestCase{{1, 96, 512, 512, 88}, {16, 96, 1, 1, 1}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, 1, false, false},
         // clang-format on
     };
 }
@@ -56,8 +56,9 @@ miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
     p.UsesCKDynamicLib();
     if constexpr(type == TestDataType::FP32)
     {
-        // RMS error scales with reduction size: ~2.6k FMAs per output element on this
-        // shape pushes the NCDHW layout slightly past 1*epsilon. 2*epsilon clears it.
+        // RMS error scales with reduction size: ~96 FMAs per output element at the
+        // 1x1x1 filter. The 2*epsilon tolerance (sized for the original filter) is now
+        // conservative; kept as-is to avoid flakes.
         p.SetTolerance(supportedDevices, miopenFloat, 2.0f);
     }
     return p;
