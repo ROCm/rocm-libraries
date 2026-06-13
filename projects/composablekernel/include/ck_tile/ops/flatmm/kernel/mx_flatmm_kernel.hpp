@@ -401,7 +401,12 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
             // async writes (`asynccnt`) are not ordered against in-flight
             // `ds_read`s (`dscnt`), so without this barrier the next tile's
             // prefetch races and clobbers bytes a lagging wave is still reading.
-            // The first iteration's barrier is a harmless no-op.
+            //
+            // This barrier is redundant on the very first tile of the persistent loop, where no
+            // prior tile's reads are in flight. It is important on
+            // every call of the non-persistent path: `GroupedMXFlatmmKernel`
+            // (Persistent=false) invokes this `operator()` once per tile while
+            // reusing the same workgroup smem.
             block_sync_lds();
             const auto [iM, iN] =
                 TilePartitioner{kargs.M, kargs.N}.GetOutputTileIndex(partition_idx);
