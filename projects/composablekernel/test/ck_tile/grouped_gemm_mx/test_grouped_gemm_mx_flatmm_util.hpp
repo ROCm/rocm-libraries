@@ -110,6 +110,10 @@ class TestGroupedGemmMXFlatmm : public ::testing::Test
         }
         else
         {
+            // Only relevant for fp6x16_t -> fp6_t conversion.
+            // size of fp6x16_t is 96 bits, size of fp6_t is 128 bits.
+            static_assert(sizeof(DstType) <= sizeof(SrcType),
+                          "DstType must be smaller or equal to SrcType");
             const auto n = dst.get_element_space_size();
             for(std::size_t i = 0; i < n; ++i)
             {
