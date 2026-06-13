@@ -9,7 +9,7 @@ What is rocWMMA?
 =================
 
 rocWMMA is a C++ header library for accelerating mixed-precision matrix multiply-accumulate operations
-that leverage specialized GPU matrix cores on the latest AMD discrete GPUs. "roc" indicates rocWMMA is an AMD-specific
+that map to native GPU matrix instructions where available and optimized software implementations otherwise. "roc" indicates rocWMMA is an AMD-specific
 component belonging to the ROCm ecosystem, while WMMA stands for Wavefront Mixed precision Multiply Accumulate.
 
 rocWMMA leverages modern C++ techniques, is templated for modularity,
@@ -19,7 +19,7 @@ supported CDNA and RDNA architectures. The API also offers a high degree of
 compatibility with common CUDA WMMA library interfaces, simplifying the migration
 of existing code to the AMD platform.
 
-The API is implemented as GPU device code which empowers you to directly use GPU matrix cores
+The API is implemented as GPU device code which empowers you to directly use matrix-accumulate operations
 right from your kernel code.
 Major benefits include kernel-level control, which allows authoring flexibility and accessibility,
 and compiler optimization passes in-situ
@@ -41,4 +41,3 @@ functionality supports mixed-precision inputs and outputs with native fixed-prec
 Supporting code is required for GPU device management and kernel invocation.
 The kernel code samples and tests provided are built and launched using
 :doc:`HIP <hip:index>` as part of the ROCm ecosystem.
-

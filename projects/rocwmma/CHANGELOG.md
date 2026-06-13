@@ -11,6 +11,9 @@ Documentation for rocWMMA is available at
   * `simple_gemm_silu`: demonstrates a GEMM + SiLU fused operator using the rocWMMA API
   * `simple_gemm_fusion`: demonstrates block-tile-level dual-GEMM fusion using the rocWMMA API
   * `simple_gemm_swiglu`: demonstrates a SwiGLU fused dual-GEMM kernel (LLaMA/Mistral FFN gate layer) using the rocWMMA API
+* Added support for gfx103 (RDNA2: gfx1030, gfx1031, gfx1032) targets for the `f16` x `f16` -> `f32` 16x16x16 wave32 WMMA path via an optimized software fallback using `v_dot2c_f32_f16` with DPP8
+* Added support for gfx103 (RDNA2) `int8` x `int8` -> `int32` 16x16x16 and 16x16x8 wave32 WMMA paths via a software fallback using `v_dot4c_i32_i8` with DPP8 (hardware path returns zeros on this silicon)
+* Added support for gfx103 (RDNA2) `bf16` x `bf16` -> `f32` 16x16x16, 16x16x8, and 16x16x4 wave32 WMMA paths via a software fallback using scalar `v_fmac_f32` with DPP8 (hardware path returns zeros on this silicon; `v_dot2c_f32_bf16` is absent from the ISA)
 
 ### Changed
 

@@ -41,7 +41,7 @@ namespace Transforms
     template <uint32_t InputBlockSize, typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) soa_int_to_wmma_input_gfx11(VecT&& v)
     {
-        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
         {
             // Create a double-sized buffer
             using VecTraits = VecTraits<decay_t<VecT>>;
@@ -74,7 +74,7 @@ namespace Transforms
     template <uint32_t DimPerThread, uint32_t InputBlockSize, typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) aos_int_to_wmma_input_gfx11(VecT&& v)
     {
-        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
         {
             // Step 1: Transform from aos_int -> soa_int
             // Step 2: Transform to wmma_input.
@@ -90,7 +90,7 @@ namespace Transforms
     template <uint32_t InputBlockSize, typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) wmma_input_gfx11_to_soa_int(VecT&& v)
     {
-        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
         {
             // Half-size buffer
             using VecTraits = VecTraits<decay_t<VecT>>;
@@ -122,7 +122,7 @@ namespace Transforms
     template <uint32_t KPerThread, uint32_t InputBlockSize, typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) wmma_input_gfx11_to_aos_int(VecT&& v)
     {
-        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
         {
             // First need to remove duplicate data
             // Then transform from soa_int to aos_int.
@@ -138,7 +138,7 @@ namespace Transforms
     template <typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) mma_acc_int_a_major_to_wmma_acc_gfx11(VecT&& v)
     {
-        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
         {
             return Transforms::to_wmma_acc_gfx11(forward<VecT>(v));
         }
@@ -151,7 +151,7 @@ namespace Transforms
     template <typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) wmma_acc_gfx11_to_mma_acc_int_a_major(VecT&& v)
     {
-        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
         {
             return Transforms::from_wmma_acc_gfx11(forward<VecT>(v));
         }
@@ -164,7 +164,7 @@ namespace Transforms
     template <uint32_t AccVecSize, uint32_t MmaBlocksA, uint32_t AccMaxVW, uint32_t MmaDim, typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) soa_int_to_wmma_acc_gfx11(VecT&& v)
     {
-        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
         {
             // Step1: soa_int             -> mma_acc_int_a_major
             // Step2: mma_acc_int_a_major -> wmma_acc_gfx11
@@ -180,7 +180,7 @@ namespace Transforms
     template <uint32_t AccVecSize, uint32_t MmaBlocksA, uint32_t MmaBlocksB, uint32_t AccMaxVW, uint32_t MmaDim, typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) aos_int_to_wmma_acc_gfx11(VecT&& v)
     {
-        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
         {
             // Step1: aos_int             -> mma_acc_int_a_major
             // Step2: mma_acc_int_a_major -> wmma_acc_gfx11
@@ -197,7 +197,7 @@ namespace Transforms
     template <uint32_t AccVecSize, uint32_t MmaBlocksB, uint32_t AccMaxVW, uint32_t MmaDim, typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) wmma_acc_gfx11_to_soa_int(VecT&& v)
     {
-        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
         {
             // Step1: wmma_acc_gfx11      -> mma_acc_int_a_major
             // Step2: mma_acc_int_a_major -> soa_int
@@ -213,7 +213,7 @@ namespace Transforms
     template <uint32_t AccVecSize, uint32_t AccMaxVW, uint32_t MmaDim, typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) wmma_acc_gfx11_to_aos_int(VecT&& v)
     {
-        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
         {
             // Step1: wmma_acc_gfx11      -> mma_acc_int_a_major
             // Step2: mma_acc_int_a_major -> aos_int

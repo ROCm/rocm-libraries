@@ -40,7 +40,7 @@ namespace Transforms
     template<typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) to_wmma_input_gfx11(VecT&& v)
     {
-        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
         {
             // Swap + concat
             // v is unpacked
@@ -64,7 +64,7 @@ namespace Transforms
     template<typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) from_wmma_input_gfx11(VecT&& v)
     {
-        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
         {
             // Discard the swapped dups
             return extractLo(v);
@@ -78,7 +78,7 @@ namespace Transforms
     template<typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) to_wmma_acc_gfx11(VecT&& v)
     {
-        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
         {
             using VecTraits = VecTraits<decay_t<VecT>>;
 
@@ -98,7 +98,7 @@ namespace Transforms
     template<typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) from_wmma_acc_gfx11(VecT&& v)
     {
-        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
         {
             using VecTraits = VecTraits<decay_t<VecT>>;
 
@@ -117,7 +117,7 @@ namespace Transforms
     template <typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) soa_to_wmma_input_gfx11(VecT&& v)
     {
-        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
         {
             return to_wmma_input_gfx11(forward<VecT>(v));
         }
@@ -130,7 +130,7 @@ namespace Transforms
     template<uint32_t BlockDim, uint32_t MaxVectorWidth, typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) aos_to_wmma_input_gfx11(VecT&& v)
     {
-        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
         {
             // Step 1: Transform from aos_int -> soa_int
             // Step 2: Transform to wmma_input.
@@ -145,7 +145,7 @@ namespace Transforms
     template <typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) wmma_input_gfx11_to_soa(VecT&& v)
     {
-        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
         {
             return from_wmma_acc_gfx11(forward<VecT>(v));
         }
@@ -158,7 +158,7 @@ namespace Transforms
     template<uint32_t BlockDim, uint32_t MaxVectorWidth, typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) wmma_input_gfx11_to_aos(VecT&& v)
     {
-        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
         {
             // Step 1: Transform from wmma_input_gfx11 -> soa
             // Step 2: Transform from soa -> aos
@@ -173,7 +173,7 @@ namespace Transforms
     template <typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) soa_to_wmma_acc_gfx11(VecT&& v)
     {
-        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
         {
             return to_wmma_acc_gfx11(forward<VecT>(v));
         }
@@ -186,7 +186,7 @@ namespace Transforms
     template<uint32_t BlockDim, uint32_t MaxVectorWidth, typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) aos_to_wmma_acc_gfx11(VecT&& v)
     {
-        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
         {
             // Step 1: Transform from aos -> soa
             // Then transform to wmma_input.
@@ -201,7 +201,7 @@ namespace Transforms
     template <typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) wmma_acc_gfx11_to_soa(VecT&& v)
     {
-        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
         {
             return from_wmma_acc_gfx11(forward<VecT>(v));
         }
@@ -214,7 +214,7 @@ namespace Transforms
     template<uint32_t BlockDim, uint32_t MaxVectorWidth, typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) wmma_acc_gfx11_to_aos(VecT&& v)
     {
-        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
         {
             // First need to transform from aos_int -> soa_int
             // Then transform to wmma_input.

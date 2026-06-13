@@ -98,6 +98,21 @@ bool isGfx11()
             || (deviceName.find("gfx1153") != std::string::npos));
 }
 
+bool isGfx103()
+{
+    hipDevice_t     mHandle;
+    hipDeviceProp_t mProps;
+
+    CHECK_HIP_ERROR(hipGetDevice(&mHandle));
+    CHECK_HIP_ERROR(hipGetDeviceProperties(&mProps, mHandle));
+
+    std::string deviceName(mProps.gcnArchName);
+
+    return ((deviceName.find("gfx1030") != std::string::npos)
+            || (deviceName.find("gfx1031") != std::string::npos)
+            || (deviceName.find("gfx1032") != std::string::npos));
+}
+
 bool isGfx12()
 {
     hipDevice_t     mHandle;

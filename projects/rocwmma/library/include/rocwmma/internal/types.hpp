@@ -114,6 +114,21 @@ namespace rocwmma
 
     using xfloat32_t = rocwmma_xfloat32;
 
+    template <typename T>
+    struct wmma_native_type
+    {
+        using type = T;
+    };
+
+    template <>
+    struct wmma_native_type<__half>
+    {
+        using type = float16_t;
+    };
+
+    template <typename T>
+    using wmma_native_type_t = typename wmma_native_type<T>::type;
+
     /** @}*/
 
 } // namespace rocwmma

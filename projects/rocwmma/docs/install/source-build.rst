@@ -53,8 +53,17 @@ rocWMMA is supported on the following GPUs.
 
       ``F8`` and ``BF8`` data type support requires the gfx942 or gfx950.
 
+*  AMD RDNA2 class GPUs, including the gfx1030, gfx1031, and gfx1032 GPUs
+   (collectively known as gfx103) for the ``f16`` x ``f16`` -> ``f32``
+   16x16x16 wave32 WMMA path via an optimized software fallback.
+
+   .. note::
+
+      On gfx103 targets, rocWMMA uses its internal software implementation for this path instead of relying on hardware WMMA execution.
+
 *  AMD RDNA class GPUs featuring AI acceleration support, including the
-   gfx1100, gfx1101, and gfx1102 (collectively known as gfx11), and the gfx1200 and gfx1201 (collectively known as gfx12).
+   gfx1100, gfx1101, and gfx1102 GPUs (collectively known as gfx11), and the
+   gfx1200, gfx1201, and gfx1250 GPUs (collectively known as gfx12).
 
    .. note::
 
@@ -152,7 +161,7 @@ Here are the available options to build the rocWMMA library, with or without cli
         -   **Default value**
     *   -   ``GPU_TARGETS``
         -   Build code for specific GPU target(s)
-        -   ``gfx908``; ``gfx90a``; ``gfx942``; ``gfx950``; ``gfx1100``; ``gfx1101``; ``gfx1102``; ``gfx1200``; ``gfx1201``
+        -   ``gfx908``; ``gfx90a``; ``gfx942``; ``gfx950``; ``gfx1030``; ``gfx1031``; ``gfx1032``; ``gfx1100``; ``gfx1101``; ``gfx1102``; ``gfx1150``; ``gfx1151``; ``gfx1152``; ``gfx1153``; ``gfx1200``; ``gfx1201``; ``gfx1250``
     *   -   ``ROCWMMA_BUILD_TESTS``
         -   Build the tests
         -   ``ON``

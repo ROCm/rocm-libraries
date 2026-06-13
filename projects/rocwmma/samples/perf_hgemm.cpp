@@ -201,19 +201,25 @@ using namespace rocwmma;
 *|  GFX_9  |    32     |    32     |    16     |    2     |    2     |   128    |    2     |
 *|_________|___________|___________|___________|__________|__________|__________|__________|
 *|         |           |           |           |          |          |          |          |
-*|  GFX_11 |    16     |    16     |    16     |    4     |    2     |    64    |    4     |
+*|  GFX103 |    16     |    16     |    16     |    4     |    2     |    64    |    4     |
+*|_________|___________|___________|___________|__________|__________|__________|__________|
+*|         |           |           |           |          |          |          |          |
+*|  GFX_11 |    16     |    16     |    16     |    4     |    2     |    64    |    2     |
 *|_________|___________|___________|___________|__________|__________|__________|__________|
 *
-* __________________________________________
-*|         |                                |
-*|         |           WARP_SIZE            |
-*|_________|________________________________|
-*|         |                                |
-*|  GFX_9  | Constants::AMDGCN_WAVE_SIZE_64 |
-*|_________|________________________________|
-*|         |                                |
-*|  GFX_11 | Constants::AMDGCN_WAVE_SIZE_32 |
-*|_________|________________________________|
+* ___________________________________________
+*|         |                                 |
+*|         |           WARP_SIZE             |
+*|_________|_________________________________|
+*|         |                                 |
+*|  GFX_9  | Constants::AMDGCN_WAVE_SIZE_64  |
+*|_________|_________________________________|
+*|         |                                 |
+*| GFX103  | Constants::AMDGCN_WAVE_SIZE_32  |
+*|_________|_________________________________|
+*|         |                                 |
+*|  GFX_11 | Constants::AMDGCN_WAVE_SIZE_32  |
+*|_________|_________________________________|
 */
 
 namespace gfx9Params
@@ -228,6 +234,21 @@ namespace gfx9Params
         TBLOCK_X  = 128u,
         TBLOCK_Y  = 2u,
         WARP_SIZE = Constants::AMDGCN_WAVE_SIZE_64
+    };
+}
+
+namespace gfx103Params
+{
+    enum kernelParams : uint32_t
+    {
+        ROCWMMA_M = 16u,
+        ROCWMMA_N = 16u,
+        ROCWMMA_K = 16u,
+        BLOCKS_M  = 4u,
+        BLOCKS_N  = 2u,
+        TBLOCK_X  = 64u,
+        TBLOCK_Y  = 4u,
+        WARP_SIZE = Constants::AMDGCN_WAVE_SIZE_32
     };
 }
 
@@ -246,11 +267,13 @@ namespace gfx11Params
     };
 }
 
-#if(ROCWMMA_ARCH_GFX9)
+#if (ROCWMMA_ARCH_GFX9)
 using namespace gfx9Params;
+#elif (ROCWMMA_ARCH_GFX103)
+using namespace gfx103Params;
 #else
 using namespace gfx11Params;
-#endif // defined(ROCWMMA_ARCH_GFX9)
+#endif // ROCWMMA_ARCH_GFX9 / ROCWMMA_ARCH_GFX103 / gfx11 fallback
 
 // Types and Data Layouts
 using InputT   = float16_t;
@@ -286,19 +309,19 @@ using MmaFragAcc = fragment<accumulator, WARP_TILE_M, WARP_TILE_N, WARP_TILE_K, 
 // Global read (macro tile), cooperative
 using CoopScheduler = fragment_scheduler::coop_row_major_2d<TBLOCK_X, TBLOCK_Y>;
 using GRFragA       = fragment<matrix_a,
-                         MACRO_TILE_M,
-                         MACRO_TILE_N,
-                         MACRO_TILE_K,
-                         InputT,
-                         DataLayoutA,
-                         CoopScheduler>;
+                               MACRO_TILE_M,
+                               MACRO_TILE_N,
+                               MACRO_TILE_K,
+                               InputT,
+                               DataLayoutA,
+                               CoopScheduler>;
 using GRFragB       = fragment<matrix_b,
-                         MACRO_TILE_M,
-                         MACRO_TILE_N,
-                         MACRO_TILE_K,
-                         InputT,
-                         DataLayoutB,
-                         CoopScheduler>;
+                               MACRO_TILE_M,
+                               MACRO_TILE_N,
+                               MACRO_TILE_K,
+                               InputT,
+                               DataLayoutB,
+                               CoopScheduler>;
 
 // Local write of global buffers (macro tile)
 // - Must match Lds data layout.
@@ -307,11 +330,13 @@ using LWFragA = apply_data_layout_t<GRFragA, DataLayoutLds>;
 using LWFragB = apply_data_layout_t<apply_transpose_t<GRFragB>, DataLayoutLds>;
 
 // Transform helpers
-ROCWMMA_DEVICE auto transformGRFragAToLWFragA(GRFragA const& grFragA) {
+ROCWMMA_DEVICE auto transformGRFragAToLWFragA(GRFragA const& grFragA)
+{
     return apply_data_layout<DataLayoutLds>(grFragA);
 }
 
-ROCWMMA_DEVICE auto transformGRFragBToLWFragB(GRFragB const& grFragB) {
+ROCWMMA_DEVICE auto transformGRFragBToLWFragB(GRFragB const& grFragB)
+{
     return apply_data_layout<DataLayoutLds>(apply_transpose(grFragB));
 }
 
@@ -322,11 +347,13 @@ using LRFragA = apply_data_layout_t<MmaFragA, DataLayoutLds>;
 using LRFragB = apply_data_layout_t<apply_transpose_t<MmaFragB>, DataLayoutLds>;
 
 // Transform helpers
-ROCWMMA_DEVICE auto transformLRFragAToMmaFragA(LRFragA const& lrFragA) {
+ROCWMMA_DEVICE auto transformLRFragAToMmaFragA(LRFragA const& lrFragA)
+{
     return apply_data_layout<DataLayoutA>(lrFragA);
 }
 
-ROCWMMA_DEVICE auto transformLRFragBToMmaFragB(LRFragB const& lrFragB) {
+ROCWMMA_DEVICE auto transformLRFragBToMmaFragB(LRFragB const& lrFragB)
+{
     return apply_data_layout<DataLayoutB>(apply_transpose(lrFragB));
 }
 
@@ -512,13 +539,44 @@ ROCWMMA_KERNEL void __launch_bounds__(256) gemm_rocwmma_d(uint32_t       m,
 ROCWMMA_HOST void gemm_test(uint32_t m, uint32_t n, uint32_t k, ComputeT alpha, ComputeT beta)
 {
     // Runtime checks for host parameters
-    uint32_t hTBLOCK_X    = isGfx9() ? gfx9Params::TBLOCK_X : gfx11Params::TBLOCK_X;
-    uint32_t hTBLOCK_Y    = isGfx9() ? gfx9Params::TBLOCK_Y : gfx11Params::TBLOCK_Y;
-    uint32_t hBLOCKS_M    = isGfx9() ? gfx9Params::BLOCKS_M : gfx11Params::BLOCKS_M;
-    uint32_t hBLOCKS_N    = isGfx9() ? gfx9Params::BLOCKS_N : gfx11Params::BLOCKS_N;
-    uint32_t hROCWMMA_M   = isGfx9() ? gfx9Params::ROCWMMA_M : gfx11Params::ROCWMMA_M;
-    uint32_t hROCWMMA_N   = isGfx9() ? gfx9Params::ROCWMMA_N : gfx11Params::ROCWMMA_N;
-    uint32_t hROCWMMA_K   = isGfx9() ? gfx9Params::ROCWMMA_K : gfx11Params::ROCWMMA_K;
+    uint32_t hTBLOCK_X;
+    uint32_t hTBLOCK_Y;
+    uint32_t hBLOCKS_M;
+    uint32_t hBLOCKS_N;
+    uint32_t hROCWMMA_M;
+    uint32_t hROCWMMA_N;
+    uint32_t hROCWMMA_K;
+
+    if(isGfx9())
+    {
+        hTBLOCK_X  = gfx9Params::TBLOCK_X;
+        hTBLOCK_Y  = gfx9Params::TBLOCK_Y;
+        hBLOCKS_M  = gfx9Params::BLOCKS_M;
+        hBLOCKS_N  = gfx9Params::BLOCKS_N;
+        hROCWMMA_M = gfx9Params::ROCWMMA_M;
+        hROCWMMA_N = gfx9Params::ROCWMMA_N;
+        hROCWMMA_K = gfx9Params::ROCWMMA_K;
+    }
+    else if(isGfx103())
+    {
+        hTBLOCK_X  = gfx103Params::TBLOCK_X;
+        hTBLOCK_Y  = gfx103Params::TBLOCK_Y;
+        hBLOCKS_M  = gfx103Params::BLOCKS_M;
+        hBLOCKS_N  = gfx103Params::BLOCKS_N;
+        hROCWMMA_M = gfx103Params::ROCWMMA_M;
+        hROCWMMA_N = gfx103Params::ROCWMMA_N;
+        hROCWMMA_K = gfx103Params::ROCWMMA_K;
+    }
+    else
+    {
+        hTBLOCK_X  = gfx11Params::TBLOCK_X;
+        hTBLOCK_Y  = gfx11Params::TBLOCK_Y;
+        hBLOCKS_M  = gfx11Params::BLOCKS_M;
+        hBLOCKS_N  = gfx11Params::BLOCKS_N;
+        hROCWMMA_M = gfx11Params::ROCWMMA_M;
+        hROCWMMA_N = gfx11Params::ROCWMMA_N;
+        hROCWMMA_K = gfx11Params::ROCWMMA_K;
+    }
     uint32_t hWARP_TILE_M = hBLOCKS_M * hROCWMMA_M;
     uint32_t hWARP_TILE_N = hBLOCKS_N * hROCWMMA_N;
 
@@ -528,7 +586,7 @@ ROCWMMA_HOST void gemm_test(uint32_t m, uint32_t n, uint32_t k, ComputeT alpha, 
         = rocwmma::make_coord2d(hTBLOCK_X / warpSize * hWARP_TILE_M, hTBLOCK_Y * hWARP_TILE_N);
 
     // Device check for supported block and wave sizes
-    if((isGfx11() || isGfx12()) && (hROCWMMA_M != 16 || hROCWMMA_N != 16))
+    if((isGfx103() || isGfx11() || isGfx12()) && (hROCWMMA_M != 16 || hROCWMMA_N != 16))
     {
         std::cout << "Unsupported block size!\n";
         return;
@@ -540,7 +598,7 @@ ROCWMMA_HOST void gemm_test(uint32_t m, uint32_t n, uint32_t k, ComputeT alpha, 
         return;
     }
 
-    if((isGfx11() || isGfx12()) && getWarpSize() != Constants::AMDGCN_WAVE_SIZE_32)
+    if((isGfx103() || isGfx11() || isGfx12()) && getWarpSize() != Constants::AMDGCN_WAVE_SIZE_32)
     {
         std::cout << "Unsupported wave size!\n";
         return;
@@ -605,7 +663,7 @@ ROCWMMA_HOST void gemm_test(uint32_t m, uint32_t n, uint32_t k, ComputeT alpha, 
 
     auto blockDim = dim3(hTBLOCK_X, hTBLOCK_Y);
     auto gridDim  = dim3(rocwmma::ceil_div(m, get<0>(macroTileSize)),
-                        rocwmma::ceil_div(n, get<1>(macroTileSize)));
+                         rocwmma::ceil_div(n, get<1>(macroTileSize)));
 
     std::cout << "Launching GEMM kernel..." << std::endl;
     std::cout << "gridDim (" << gridDim.x << " " << gridDim.y << ")"

@@ -1,7 +1,7 @@
 # rocWMMA
 
 Welcome! rocWMMA is a C++ library for accelerating mixed-precision matrix multiply-accumulate (MMA)
-operations leveraging AMD GPU hardware. rocWMMA makes it easier to break down MMA problems
+operations on AMD GPUs. rocWMMA makes it easier to break down MMA problems
 into fragments and distribute block-wise MMA operations in parallel across GPU wavefronts. The API
 consists of a header library, that can be used to compile MMA acceleration directly into GPU kernel
 device code. This can benefit from compiler optimization in the generation of kernel assembly, and
@@ -24,7 +24,10 @@ The test suite includes validation and benchmarking projects that focus on unit 
 rocWMMA currently supports the following AMD GPU architectures:
 
 * CDNA class GPU featuring matrix core support: gfx908, gfx90a, gfx942, gfx950 as 'gfx9'
-* RDNA class GPU featuring AI acceleration support: gfx1100, gfx1101, gfx1102, gfx1150, gfx1151, gfx1152, gfx1153 as 'gfx11'; gfx1200, gfx1201 as 'gfx12'
+* RDNA2 class GPU: gfx1030, gfx1031, gfx1032 as 'gfx103' for the `f16` x `f16` -> `f32` 16x16x16 wave32 WMMA path via an optimized software fallback
+* RDNA class GPU featuring AI acceleration support: gfx1100, gfx1101, gfx1102, gfx1150, gfx1151, gfx1152, gfx1153 as 'gfx11'; gfx1200, gfx1201, gfx1250 as 'gfx12'
+
+On gfx103 targets, rocWMMA does not rely on hardware WMMA execution for this path and instead uses the internal software implementation.
 
 Dependencies:
 
@@ -51,8 +54,8 @@ For more detailed information, please refer to the [rocWMMA installation guide](
 
 |Option|Description|Default value|
 |---|---|---|
-|GPU_TARGETS|Build code for specific GPU target(s)|gfx908;gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201|
-|AMDGPU_TARGETS|(Deprecated) Build code for specific GPU target(s)|gfx908;gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201|
+|GPU_TARGETS|Build code for specific GPU target(s)|gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1031;gfx1032;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250|
+|AMDGPU_TARGETS|(Deprecated) Build code for specific GPU target(s)|gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1031;gfx1032;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250|
 |ROCWMMA_BUILD_TESTS|Build Tests|ON|
 |ROCWMMA_BUILD_SAMPLES|Build Samples|ON|
 |ROCWMMA_BUILD_COMMUNITY_SAMPLES|Build community-contributed samples|OFF|

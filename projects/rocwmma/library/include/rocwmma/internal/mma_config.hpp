@@ -157,22 +157,26 @@ namespace rocwmma
         // Ensure to use padded tiles if necessary
         using IOTile = IOTile<FragM, FragN, FragK, InputTA>;
 
+        using NativeInputTA  = wmma_native_type_t<InputTA>;
+        using NativeInputTB  = wmma_native_type_t<InputTB>;
+        using NativeComputeT = wmma_native_type_t<ComputeT>;
+
         // Gfx9 uses MFMA, gfx11/12 uses WMMA
         using Mma = conditional_t<(bool)ROCWMMA_ARCH_GFX9,
                                   Mfma<IOTile::BlockM,
                                        IOTile::BlockN,
                                        IOTile::BlockK,
-                                       InputTA,
-                                       InputTB,
-                                       ComputeT,
+                                       NativeInputTA,
+                                       NativeInputTB,
+                                       NativeComputeT,
                                        MmaDimM,
                                        MmaDimN>,
                                   Wmma<IOTile::BlockM,
                                        IOTile::BlockN,
                                        IOTile::BlockK,
-                                       InputTA,
-                                       InputTB,
-                                       ComputeT,
+                                       NativeInputTA,
+                                       NativeInputTB,
+                                       NativeComputeT,
                                        MmaDimM,
                                        MmaDimN>>;
     };

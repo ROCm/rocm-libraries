@@ -112,7 +112,7 @@ namespace rocwmma
             constexpr static uint32_t Result
                 = (bool)ROCWMMA_ARCH_GFX12
                       ? 8u
-                      : ((is_same_v<DataT, float64_t> || (bool)ROCWMMA_ARCH_GFX11) ? 1u : 4u);
+                      : ((is_same_v<DataT, float64_t> || (bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11)) ? 1u : 4u);
         };
 
         // Fallback case for bad test. Stay safe to VW=1
@@ -209,7 +209,7 @@ namespace rocwmma
         using MmaLayout = RegisterLayout::MmaInput<MmaDim,
                                                    DataT,
                                                    false,
-                                                   (bool)ROCWMMA_ARCH_GFX11
+                                                   (bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11)
                                                        ? RegisterLayout::Format::WMMA_INPUT_GFX11
                                                        : RegisterLayout::Format::SOA>;
 
@@ -278,7 +278,7 @@ namespace rocwmma
         using MmaLayout = RegisterLayout::MmaInput<MmaDim,
                                                    DataT,
                                                    false,
-                                                   (bool)ROCWMMA_ARCH_GFX11
+                                                   (bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11)
                                                        ? RegisterLayout::Format::WMMA_INPUT_GFX11
                                                        : RegisterLayout::Format::SOA>;
 
@@ -329,7 +329,7 @@ namespace rocwmma
         using MmaLayout = RegisterLayout::MmaAcc<MmaDim,
                                                  DataT,
                                                  false,
-                                                 (bool)ROCWMMA_ARCH_GFX11
+                                                 (bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11)
                                                      ? RegisterLayout::Format::WMMA_ACC_GFX11
                                                      : RegisterLayout::Format::SOA>;
 
@@ -351,7 +351,7 @@ namespace rocwmma
         using MmaLayout = RegisterLayout::MmaAcc<MmaDim,
                                                  DataT,
                                                  false,
-                                                 (bool)ROCWMMA_ARCH_GFX11
+                                                 (bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11)
                                                      ? RegisterLayout::Format::WMMA_ACC_GFX11
                                                      : RegisterLayout::Format::SOA>;
 
@@ -460,7 +460,7 @@ namespace rocwmma
         using MmaLayout = RegisterLayout::MmaInput<MmaDim,
                                                    DataT,
                                                    true,
-                                                   (bool)ROCWMMA_ARCH_GFX11
+                                                   (bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11)
                                                        ? RegisterLayout::Format::WMMA_INPUT_GFX11
                                                        : RegisterLayout::Format::SOA_INT>;
 
@@ -510,7 +510,7 @@ namespace rocwmma
         using MmaLayout = RegisterLayout::MmaInput<MmaDim,
                                                    DataT,
                                                    true,
-                                                   (bool)ROCWMMA_ARCH_GFX11
+                                                   (bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11)
                                                        ? RegisterLayout::Format::WMMA_INPUT_GFX11
                                                        : RegisterLayout::Format::SOA_INT>;
         // Fragments will keep storage register layout.
@@ -559,7 +559,7 @@ namespace rocwmma
         using MmaLayout = RegisterLayout::MmaAcc<MmaDim,
                                                  DataT,
                                                  true,
-                                                 (bool)ROCWMMA_ARCH_GFX11
+                                                 (bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11)
                                                      ? RegisterLayout::Format::WMMA_ACC_GFX11
                                                      : RegisterLayout::Format::ACC_INT_A_MAJOR>;
 
@@ -586,7 +586,7 @@ namespace rocwmma
         using MmaLayout = RegisterLayout::MmaAcc<MmaDim,
                                                  DataT,
                                                  true,
-                                                 (bool)ROCWMMA_ARCH_GFX11
+                                                 (bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11)
                                                      ? RegisterLayout::Format::WMMA_ACC_GFX11
                                                      : RegisterLayout::Format::ACC_INT_A_MAJOR>;
 

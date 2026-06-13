@@ -282,7 +282,7 @@ namespace rocwmma
 
 // GPU exclusion for unsupported targets, but assume host is valid
 // for testing purposes.
-#if !ROCWMMA_ARCH_GFX11 && !ROCWMMA_ARCH_GFX12 // + Host
+#if !ROCWMMA_ARCH_GFX11 && !ROCWMMA_ARCH_GFX12 && !ROCWMMA_ARCH_GFX103 // + Host
 
             template <uint32_t ShiftDir>
             struct WaveShift1
@@ -362,7 +362,7 @@ namespace rocwmma
                 }
             };
 
-#else // ROCWMMA_ARCH_GFX11 || ROCWMMA_ARCH_GFX12
+#else // ROCWMMA_ARCH_GFX11 || ROCWMMA_ARCH_GFX12 || ROCWMMA_ARCH_GFX103
 
             template <uint32_t ShiftDir>
             struct WaveShift1

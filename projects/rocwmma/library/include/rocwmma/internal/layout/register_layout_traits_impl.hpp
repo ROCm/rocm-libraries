@@ -189,7 +189,7 @@ namespace rocwmma
 
             if constexpr(traits::is_mma_input)
             {
-                if constexpr((bool)ROCWMMA_ARCH_GFX11)
+                if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
                 {
                     return traits::Format == Format::WMMA_INPUT_GFX11;
                 }
@@ -205,7 +205,7 @@ namespace rocwmma
             }
             else if constexpr(traits::is_mma_acc)
             {
-                if constexpr((bool)ROCWMMA_ARCH_GFX11)
+                if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11))
                 {
                     return (traits::Format == Format::WMMA_ACC_GFX11)
                            || (!traits::is_interleaved
@@ -422,7 +422,7 @@ namespace rocwmma
                     // Acc layout architecture quirks
                     constexpr uint32_t ExpectedAccMaxVW
                         = ((bool)ROCWMMA_ARCH_GFX12) ? 8u
-                          : ((bool)ROCWMMA_ARCH_GFX11
+                          : ((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11)
                              || is_same<typename storage_traits::DataT, float64_t>::value)
                               ? 1u
                               : 4u;
@@ -467,7 +467,7 @@ namespace rocwmma
                     = conditional_t<traits_lhs::is_storage, traits_lhs, traits_rhs>;
 
                 // Gfx11 MmaInput requires some additional transforms
-                if constexpr((bool)ROCWMMA_ARCH_GFX11
+                if constexpr((bool)(ROCWMMA_ARCH_GFX103 || ROCWMMA_ARCH_GFX11)
                              && (traits_lhs::is_mma_input || traits_rhs::is_mma_input))
                 {
                     return TestCompatibleParams && TestFormatMatch;
