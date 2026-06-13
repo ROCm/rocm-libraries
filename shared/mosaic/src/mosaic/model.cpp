@@ -865,36 +865,42 @@ bool load_binary(const char* path, LoadedModel* out) {
 // ── two-tower helpers (map to GenericTwoTower q_proj / i_proj / inter_mlp) ──
 
 // Whiten then run q_proj (Linear,ReLU,Linear,ReLU,Linear) -> query embedding.
+// `norm`/`h0`/`h2` are caller-owned scratch reused across calls (resized, then
+// fully overwritten by the loop / linear*); no zero-init is needed.
 void compute_qe(const CellModel& cm, const float* q_feat, std::size_t q_dim,
-                std::vector<float>& scratch, std::vector<float>& q_emb_out) {
-  std::vector<float> q_norm(q_dim);
+                std::vector<float>& norm, std::vector<float>& h0,
+                std::vector<float>& h2, std::vector<float>& q_emb_out) {
+  norm.resize(q_dim);
   for (std::size_t j = 0; j < q_dim; ++j) {
     float s = (cm.q_std[j] < 1e-6f) ? 1.0f : cm.q_std[j];
-    q_norm[j] = (q_feat[j] - cm.q_mean[j]) / s;
+    norm[j] = (q_feat[j] - cm.q_mean[j]) / s;
   }
-  std::vector<float> h0(cm.hidden_dim), h2(cm.hidden_dim);
-  scratch.assign(cm.hidden_dim, 0.0f);
-  linear_relu(cm.q_w0.data(), cm.q_b0.data(), q_norm.data(),
+  h0.resize(cm.hidden_dim);
+  h2.resize(cm.hidden_dim);
+  linear_relu(cm.q_w0.data(), cm.q_b0.data(), norm.data(),
               cm.hidden_dim, q_dim, h0.data());
   linear_relu(cm.q_w2.data(), cm.q_b2.data(), h0.data(),
               cm.hidden_dim, cm.hidden_dim, h2.data());
-  q_emb_out.assign(cm.embed_dim, 0.0f);
+  q_emb_out.resize(cm.embed_dim);
   linear(cm.q_w4.data(), cm.q_b4.data(), h2.data(),
          cm.embed_dim, cm.hidden_dim, q_emb_out.data());
 }
 
 // Whiten then run i_proj (Linear,ReLU,Linear) -> item embedding.
+// `norm`/`scratch`/`i_emb_out` are caller-owned scratch reused across the
+// per-candidate scoring loop (resized then fully overwritten).
 void compute_ie(const CellModel& cm, const float* i_feat, std::size_t i_dim,
-                std::vector<float>& scratch, std::vector<float>& i_emb_out) {
-  std::vector<float> i_norm(i_dim);
+                std::vector<float>& norm, std::vector<float>& scratch,
+                std::vector<float>& i_emb_out) {
+  norm.resize(i_dim);
   for (std::size_t j = 0; j < i_dim; ++j) {
     float s = (cm.i_std[j] < 1e-6f) ? 1.0f : cm.i_std[j];
-    i_norm[j] = (i_feat[j] - cm.i_mean[j]) / s;
+    norm[j] = (i_feat[j] - cm.i_mean[j]) / s;
   }
-  scratch.assign(cm.hidden_dim, 0.0f);
-  linear_relu(cm.i_w0.data(), cm.i_b0.data(), i_norm.data(),
+  scratch.resize(cm.hidden_dim);
+  linear_relu(cm.i_w0.data(), cm.i_b0.data(), norm.data(),
               cm.hidden_dim, i_dim, scratch.data());
-  i_emb_out.assign(cm.embed_dim, 0.0f);
+  i_emb_out.resize(cm.embed_dim);
   linear(cm.i_w2.data(), cm.i_b2.data(), scratch.data(),
          cm.embed_dim, cm.hidden_dim, i_emb_out.data());
 }
@@ -904,11 +910,11 @@ void compute_ie(const CellModel& cm, const float* i_feat, std::size_t i_dim,
 // candidate rather than cache by signature -- correctness over speed, since
 // the parity bar is exact. Kept as a named entry point per the deployed API.
 void get_or_compute_ie(const CellModel& cm, const Config& cfg, const MlParams& ml,
-                       std::size_t i_dim, std::vector<float>& scratch,
-                       std::vector<float>& i_emb_out) {
+                       std::size_t i_dim, std::vector<float>& norm,
+                       std::vector<float>& scratch, std::vector<float>& i_emb_out) {
   std::array<float, kItemDim> item_feat;
   build_item_features(cfg, ml, item_feat.data());
-  compute_ie(cm, item_feat.data(), i_dim, scratch, i_emb_out);
+  compute_ie(cm, item_feat.data(), i_dim, norm, scratch, i_emb_out);
 }
 
 // score = dot(query_embed, item_embed) / temperature   (the embedding term;
@@ -922,15 +928,17 @@ float score_from_embeds(const CellModel& cm, const float* q_emb, const float* i_
 }
 
 // Whiten interaction features then run inter_mlp (Linear,ReLU,Linear) -> scalar.
+// `norm`/`scratch` are caller-owned scratch reused across the per-candidate
+// scoring loop (resized then fully overwritten).
 float compute_inter_score(const CellModel& cm, const float* x_feat, std::size_t x_dim,
-                          std::vector<float>& scratch) {
-  std::vector<float> x_norm(x_dim);
+                          std::vector<float>& norm, std::vector<float>& scratch) {
+  norm.resize(x_dim);
   for (std::size_t j = 0; j < x_dim; ++j) {
     float s = (cm.x_std[j] < 1e-6f) ? 1.0f : cm.x_std[j];
-    x_norm[j] = (x_feat[j] - cm.x_mean[j]) / s;
+    norm[j] = (x_feat[j] - cm.x_mean[j]) / s;
   }
-  scratch.assign(cm.inter_hidden, 0.0f);
-  linear_relu(cm.x_w0.data(), cm.x_b0.data(), x_norm.data(),
+  scratch.resize(cm.inter_hidden);
+  linear_relu(cm.x_w0.data(), cm.x_b0.data(), norm.data(),
               cm.inter_hidden, x_dim, scratch.data());
   return cm.x_b2[0] + s_dot(cm.x_w2.data(), scratch.data(), cm.inter_hidden);
 }
@@ -1130,11 +1138,14 @@ std::vector<Result> rank_configs_impl(const LoadedModel& model, const Problem& p
 
   if (cand.empty()) return fallback_all();
 
-  // Query tower (problem-only) computed once.
+  // Query tower (problem-only) computed once. Reusable scratch buffers below
+  // are hoisted out of the per-candidate loop so scoring does no per-config
+  // heap allocation (the math/order is unchanged -> picks stay bit-identical).
+  std::vector<float> norm, hidden, hidden2;
   std::array<float, kQueryDim> q_feat;
   build_query_features(problem, hw, q_feat.data());
-  std::vector<float> scratch, q_emb;
-  compute_qe(cm, q_feat.data(), q_dim, scratch, q_emb);
+  std::vector<float> q_emb;
+  compute_qe(cm, q_feat.data(), q_dim, norm, hidden, hidden2, q_emb);
 
   // Score every survivor.  total = dot(qe, ie)/temp + inter_mlp(x).
   std::vector<std::pair<std::uint32_t, float>> scored;
@@ -1144,10 +1155,10 @@ std::vector<Result> rank_configs_impl(const LoadedModel& model, const Problem& p
   for (std::uint32_t ci : cand) {
     const Config& cc = configs[ci];
     MlParams ml = ml_from(cc);
-    get_or_compute_ie(cm, cc, ml, i_dim, scratch, i_emb);
+    get_or_compute_ie(cm, cc, ml, i_dim, norm, hidden, i_emb);
     float emb_score = score_from_embeds(cm, q_emb.data(), i_emb.data(), cm.embed_dim);
     build_inter_features(problem, cc, ml, hw, x_feat.data());
-    float inter_score = compute_inter_score(cm, x_feat.data(), x_dim, scratch);
+    float inter_score = compute_inter_score(cm, x_feat.data(), x_dim, norm, hidden);
     scored.emplace_back(ci, emb_score + inter_score);
   }
 
