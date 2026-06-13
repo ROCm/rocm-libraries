@@ -243,6 +243,7 @@ struct MFMAIssueConfig {
 
 struct WMMAIssueConfig {
     int latency = 0;      // WMMA latencyCycles (for barrier threshold math)
+    int issueCycles = 1;  // single-WMMA issue cycles
     int issuedCount = 0;  // WMMA count in region (for barrier threshold math)
 };
 }  // namespace

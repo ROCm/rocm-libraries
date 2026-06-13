@@ -19,18 +19,13 @@ pytestmark = [pytest.mark.gpu, pytest.mark.amd]
 
 def _skip_if_no_rocm(plugin_paths: List[str]) -> None:
     try:
-        import torch
-    except ImportError:
-        pytest.skip("PyTorch not available")
-
-    if not torch.cuda.is_available():
-        pytest.skip("PyTorch GPU not available")
-
-    if torch.version.hip is None:
-        pytest.skip("CUDA build detected; skipping AMD-only test")
+        import hipdnn_frontend as hipdnn
+    except Exception as e:
+        pytest.skip(f"hipdnn_frontend not available: {e}")
 
     try:
-        import hipdnn_frontend as hipdnn
+        if hipdnn.hip_get_device_count() <= 0:
+            pytest.skip("No HIP GPU available")
 
         hipdnn.set_engine_plugin_paths(plugin_paths, hipdnn.PluginLoadingMode.ABSOLUTE)
         hipdnn.Handle()
@@ -56,7 +51,7 @@ def test_hipdnn_gpu_timing_rocm(plugin_paths: List[str]) -> None:
     import hipdnn_frontend as hipdnn
 
     handle = hipdnn.Handle()
-    executor = Executor(graph_json_str, config, gpu_backend="torch")
+    executor = Executor(graph_json_str, config, timing_backend="hip")
     executor.prepare(handle)
 
     with BufferManager(tensor_infos) as buffer_manager:
@@ -80,4 +75,4 @@ def test_hipdnn_gpu_timing_rocm(plugin_paths: List[str]) -> None:
         assert e2e_ms + tolerance_ms >= kernel_ms
 
     assert result.metadata is not None
-    assert result.metadata.gpu_backend == "torch"
+    assert result.metadata.timing_backend == "hip"

@@ -27,7 +27,7 @@ import math
 import sys
 
 from enum import Enum
-from typing import List, Dict, Literal
+from typing import List, Dict, Literal, Tuple
 
 from Tensile.AsmStoreState import VectorDataTypes
 from Tensile.Activation import ActivationType
@@ -159,6 +159,17 @@ def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printR
              "MXScaleFormat=NoSwizzle is not supported on gfx1250")
       return False
 
+  return True
+
+
+def _validateStreamKForceDPOnly(state, printRejectionReason):
+  if state["StreamKForceDPOnly"]:
+    if state["StreamK"] != 3:
+      reject(state, printRejectionReason, "StreamKForceDPOnly requires DP-first two-tile Stream-K")
+      return False
+    if state["StreamKAtomic"] == 1:
+      reject(state, printRejectionReason, "StreamKForceDPOnly does not support atomic Stream-K")
+      return False
   return True
 
 
@@ -671,6 +682,8 @@ class Solution(collections.abc.Mapping):
       if (state["NumThreads"] % state['WavefrontSize']) != 0:
         reject(state, printRejectionReason, f"size of WorkGroup {state['NumThreads']} should be multiple of WavefrontSize {state['WavefrontSize']}")
 
+      state["NumWaves"] = state["NumThreads"] // state['WavefrontSize']
+
     # macro tile sizes
     if "SubGroup0" in state and "ThreadTile0" in state:
       state["MacroTile0"] = state["SubGroup0"]*state["ThreadTile0"]
@@ -810,9 +823,11 @@ class Solution(collections.abc.Mapping):
         state["UseMFMAF32XEmulation"] = True # MFMA version for gfx950 etc.
 
     state["MfmaInitCVgprs"] = False
-    # Only enable UseSubtileImpl on gfx950; ignore user request on other ISAs.
-    isgfx950 = state["ISA"] == IsaVersion(9,5,0)
-    state["UseSubtileImpl"] = state["UseSubtileImpl"] and isgfx950
+    # Enable UseSubtileImpl on gfx950 and gfx1250; ignore user request on other ISAs.
+    isa = tuple(state["ISA"])
+    isgfx950 = isa[:2] == (9, 5)
+    isgfx1250 = isa[:2] == (12, 5)
+    state["UseSubtileImpl"] = state["UseSubtileImpl"] and (isgfx950 or isgfx1250)
 
     if isgfx950 and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) and not state["UseSubtileImpl"]:
         reject(state, printRejectionReason, "gfx950 MX requires UseSubtileImpl")
@@ -849,7 +864,10 @@ class Solution(collections.abc.Mapping):
             reject(state, printRejectionReason, f"No TLU=1 subtile geometry for dtype {dtype}")
             return
         elif dtype.isBFloat16() or dtype.isHalf():
-          state[f"_ABTilePair{tc}"] = "AB_B16"
+          if state["WavefrontSize"] == 32:
+            state[f"_ABTilePair{tc}"] = "AB_B16_W32"
+          else:
+            state[f"_ABTilePair{tc}"] = "AB_B16"
         elif dtype.is8bitFloat():
           state[f"_ABTilePair{tc}"] = "AB_B8"
         elif dtype.is6bitFloat() or dtype.isFloat4():
@@ -894,24 +912,12 @@ class Solution(collections.abc.Mapping):
         return
 
     state["Multicast"] = False
+    state["ClusterBarrier"] = False
     if state["ClusterDim"] != [1, 1]:
       state["Multicast"] = True
-    else:
-      if state["ClusterBarrier"] == True:
-        reject(state, printRejectionReason, "ClusterDim can't be [1, 1] if ClusterBarrier enabled.")
-
-    # ClusterBarrier emits SCmp/branch on sgpr("WaveIdx"), which is only allocated
-    # when TDM is enabled.
-    if state["ClusterBarrier"] == True and state["TDMInst"] == 0:
-      reject(state, printRejectionReason, "ClusterBarrier requires TDMInst != 0 (TDMA or TDMB enabled).")
-
-    # ClusterBarrier codegen emits s_barrier_signal/wait -3, which require the
-    # HasClusterBarrier assembler capability. Otherwise rocisa::SBarrier silently
-    # falls back to code -1 and produces incorrect cluster-scope synchronization.
-    if state["ClusterBarrier"] == True \
-       and not isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
-      reject(state, printRejectionReason,
-             "ClusterBarrier requires asmCaps['HasClusterBarrier'] (s_barrier_wait -3 support).")
+      # ClusterBarrier emits SCmp/branch on sgpr("WaveIdx"), which is only allocated when TDM is enabled.
+      if state["TDMInst"] != 0 and isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
+        state["ClusterBarrier"] = True
 
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
@@ -1533,6 +1539,7 @@ class Solution(collections.abc.Mapping):
         and state["PrefetchGlobalRead"] in (1, 2)
       if state["_ScheduleIterAlg"] not in (2, 3) and not isSia0TdmPgr:
         reject(state, printRejectionReason, "ScheduleIterAlg not supported with Stream-K")
+      _validateStreamKForceDPOnly(state, printRejectionReason)
       if state["StreamKAtomic"] == 1:
         if state["StreamK"] == 4:
           reject(state, printRejectionReason, "Atomic Stream-K is not supported with dynamic work queue mode")
@@ -1552,6 +1559,7 @@ class Solution(collections.abc.Mapping):
         return
     else:
       # If not using StreamK, clear other stream-k settings to avoid duplicate kernels
+      state["StreamKForceDPOnly"] = 0
       state["StreamKAtomic"] = 0
       state["StreamKXCCMapping"] = 0
       state["StreamKFixupTreeReduction"] = 0
@@ -1757,7 +1765,7 @@ class Solution(collections.abc.Mapping):
         if state["EnableMatrixInstruction"]:
           state["MIWaveTileMetadata"] = state["MIWaveTileB"]
         if state["DirectToLdsMetadata"] and not state["DirectToLdsB"]:
-          state["DirectToLdsMetadata"] = False
+          state["DirectToLdsMetadata"] = 0
       else:
         if not state["DirectToVgprSparseMetadata"]:
           state["ThreadTileMetadata"] = state["ThreadTileA"]
@@ -1769,10 +1777,10 @@ class Solution(collections.abc.Mapping):
         if state["EnableMatrixInstruction"]:
           state["MIWaveTileMetadata"] = state["MIWaveTileA"]
         if state["DirectToLdsMetadata"] and not state["DirectToLdsA"]:
-          state["DirectToLdsMetadata"] = False
+          state["DirectToLdsMetadata"] = 0
     elif not state["ProblemType"]["Sparse"]:
       state["DirectToVgprSparseMetadata"] = False
-      state["DirectToLdsMetadata"] = False
+      state["DirectToLdsMetadata"] = 0
       state["MIWaveTileMetadata"] = 0
 
     if state["NonTemporal"] != -1:
@@ -2302,9 +2310,9 @@ class Solution(collections.abc.Mapping):
     # numComp = numWaves//2 to be a power of two; equivalently, numWaves
     # itself must be a power of two (>= 2).
     if state["enableTDMA"] and state["enableTDMB"]:
-      numWaves = state["MIWaveGroup"][0] * state["MIWaveGroup"][1]
+      numWaves: int = state["NumWaves"]
       if numWaves > 1 and (numWaves & (numWaves - 1)) != 0:
-        reject(state, printRejectionReason, f"Wave-separated TDM requires prod(MIWaveGroup)={numWaves} to be a power of two")
+        reject(state, printRejectionReason, f"Wave-separated TDM requires NumWaves={numWaves} to be a power of two")
         return
 
     # DepthU == -1?
@@ -2711,8 +2719,11 @@ class Solution(collections.abc.Mapping):
 
       state["_staggerStrideShift"] = (int)(math.ceil(math.log(state["StaggerUStride"] / (state["DepthU"] * bpeAB), 2)))
 
-      def calcLdsPad(isaInfoMap: Dict[str, IsaInfo]) -> int:
-        # SubtileImpl does not need LDS padding.
+      def calcLdsPad(isaInfoMap: Dict[str, IsaInfo]) -> Tuple[int, int, int, int, int]:
+        # SubtileImpl: LDS padding is disabled.
+        # gfx950 subtile uses software swizzle+rotation for bank conflict avoidance instead.
+        # gfx1250 subtile (TDM) currently has no bank conflict mitigation -- TDM hardware
+        # padding could be enabled here in the future by computing non-zero LdsPad values.
         if state["UseSubtileImpl"]:
           return 0, 0, 0, 0, 0
         numBytesA = state["ProblemType"]["MacDataTypeA"].numBytes()
@@ -4063,10 +4074,10 @@ class Solution(collections.abc.Mapping):
       grvwm = state["GlobalReadVectorWidthMetadata"]
       grvwmCheck = (grvwm == 4) or (grvwm == 16 and isaInfoMap[state["ISA"]].asmCaps["HasDirectToLdsx4"])
       if state["DirectToLds%s"%sparseTc] and (not state["DirectToVgprSparseMetadata"]) and grvwmCheck:
-        state["DirectToLdsMetadata"] = True
+        state["DirectToLdsMetadata"] = 1
         state["LocalWriteUseSgprMetadata"] = True
       else:
-        state["DirectToLdsMetadata"] = False
+        state["DirectToLdsMetadata"] = 0
         state["LocalWriteUseSgprMetadata"] = False
 
     # Update parent variable so kernel display is accurate
@@ -4738,12 +4749,13 @@ class Solution(collections.abc.Mapping):
                         and not state["ForceUnrollSubIter"] \
                         and not state["ProblemType"]["DataType"].isComplex() \
                         and not state["ProblemType"]["Sparse"] \
-                        and isaInfoMap[isa].asmCaps.get("HasWMMA_AccImmZero", False)
+                        and isaInfoMap[isa].asmCaps.get("HasWMMA_AccImmZero", False) \
+                        and state["ScheduleIterAlg"] != 4
     if state["InitCIterWmma"] == -1:
       state["InitCIterWmma"] = 1 if autoInitCIterWmma else 0
     elif state["InitCIterWmma"] == 1 and not autoInitCIterWmma:
       reject(state, printRejectionReason,
-             "InitCIterWmma=1 requires EnableMatrixInstruction/HasWMMA_AccImmZero, and not LdsInitCVgprs/ForceUnrollSubIter/Complex/Sparse")
+             "InitCIterWmma=1 requires EnableMatrixInstruction/HasWMMA_AccImmZero, and not LdsInitCVgprs/ForceUnrollSubIter/Complex/Sparse, and SIA!=4")
       return
 
     # force MIArchVgpr when using WMMA

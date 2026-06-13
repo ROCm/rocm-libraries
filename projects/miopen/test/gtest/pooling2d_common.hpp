@@ -96,7 +96,6 @@ inline size_t GetIndexMax(miopenIndexType_t index_type)
     case miopenIndexUint16: return std::numeric_limits<uint16_t>::max();
     case miopenIndexUint32: return std::numeric_limits<uint32_t>::max();
     case miopenIndexUint64: return std::numeric_limits<uint64_t>::max();
-    default: return SIZE_MAX;
     }
 }
 
@@ -464,27 +463,13 @@ void RunPooling2dTest(const PoolingTestCase& test_case)
         // Dispatch to the appropriate index type template
         switch(test_case.index_type)
         {
-        case miopenIndexUint8: {
-            RunPooling2dTestWithIndexType<T, uint8_t>(test_case);
-            break;
+        case miopenIndexUint8: return RunPooling2dTestWithIndexType<T, uint8_t>(test_case);
+        case miopenIndexUint16: return RunPooling2dTestWithIndexType<T, uint16_t>(test_case);
+        case miopenIndexUint32: return RunPooling2dTestWithIndexType<T, uint32_t>(test_case);
+        case miopenIndexUint64: return RunPooling2dTestWithIndexType<T, uint64_t>(test_case);
         }
-        case miopenIndexUint16: {
-            RunPooling2dTestWithIndexType<T, uint16_t>(test_case);
-            break;
-        }
-        case miopenIndexUint32: {
-            RunPooling2dTestWithIndexType<T, uint32_t>(test_case);
-            break;
-        }
-        case miopenIndexUint64: {
-            RunPooling2dTestWithIndexType<T, uint64_t>(test_case);
-            break;
-        }
-        default: {
-            GTEST_FAIL() << "Unsupported index type: " << test_case.index_type;
-            break;
-        }
-        }
+
+        GTEST_FAIL() << "Unsupported index type: " << test_case.index_type;
     }
     catch(const std::exception& e)
     {
