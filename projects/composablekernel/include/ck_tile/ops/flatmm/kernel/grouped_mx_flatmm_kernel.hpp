@@ -104,14 +104,6 @@ struct GroupedMXFlatmmKernel
 
             while(block_linear_idx < group_block_cnt)
             {
-                // Drain the prior tile's in-flight LDS reads (the epilogue's
-                // final `ds_read`) before the next tile's pipeline issues
-                // `async_load_tile_` writes into the same shared smem. On
-                // gfx1250 async writes (`asynccnt`) are not ordered against
-                // in-flight `ds_read`s (`dscnt`), so without this barrier the
-                // next tile's prefetch races and clobbers bytes a lagging wave
-                // is still reading.
-                block_sync_lds();
                 FlatmmKernelArgs<ScaleM, ScaleN, NumDTensor_> impl_kargs{
                     kargs.a_ptr[group_idx],
                     kargs.b_shuffle_ptr[group_idx],
