@@ -158,7 +158,9 @@ namespace
                                "stride_a",
                                strideA,
                                "batch_count",
-                               batch_count);
+                               batch_count,
+                               "stride_alpha",
+                               handle->get_stride_alpha());
 
         rocblas_status arg_status = rocblas_ger_arg_check<API_INT, CONJ, T>(handle,
                                                                             m,

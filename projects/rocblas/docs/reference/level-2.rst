@@ -140,8 +140,8 @@ The ``ger``, ``geru``, and ``gerc`` functions support the ``_64`` interface.  Se
    :outline:
 .. doxygenfunction:: rocblas_zgerc_batched
 
-The ``ger``, ``geru``, and ``gerc_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
-The ``ger_batched`` and ``geru_batched`` functions support ``rocblas_set_batch_alpha_stride`` when the ``rocblas_handle`` is
+The ``ger_batched``, ``geru_batched``, and ``gerc_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
+The ``ger_batched``, ``geru_batched``, and ``gerc_batched`` functions support ``rocblas_set_batch_alpha_stride`` when the ``rocblas_handle`` is
 in mode ``rocblas_pointer_mode_device``.
 
 .. doxygenfunction:: rocblas_sger_strided_batched

@@ -5,6 +5,10 @@ rocBLAS documentation is available at
 
 ## rocBLAS 5.5.0
 
+### Added
+* Per-batch `alpha`/`beta` support for Level 2 batched and strided-batched `gemv` via `rocblas_set_batch_alpha_stride` and `rocblas_set_batch_beta_stride` (device pointer mode).
+* Per-batch `alpha` support for Level 2 batched and strided-batched `ger`, `geru`, and `gerc` via `rocblas_set_batch_alpha_stride` (device pointer mode).
+
 ## rocBLAS 5.4.0
 
 ### Added

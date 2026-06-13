@@ -363,7 +363,7 @@ Tests:
   pointer_mode_host: false
 
 # large-m single-precision case exercises the gfx942 sger kernel (is_float && m > 1024)
-- name: ger_stride_alpha
+- name: ger_stride_alpha_gfx942_large_m
   category: pre_checkin
   function:
     - ger_batched
