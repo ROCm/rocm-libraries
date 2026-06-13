@@ -19,14 +19,14 @@
 #include <variant>
 
 // Function pointer type for workspace packing (no captures, points to code segment)
-using PrepareWorkspaceHostFunc = void (*)(void*,      // host_ws
-                                          int,        // batch
-                                          int,        // hdim_q
-                                          int,        // nhead_q
-                                          int,        // seqlen_q
-                                          int,        // seqlen_k
-                                          const int*, // seqstart_q
-                                          const int*  // seqstart_k
+using PrepareWorkspaceHostFunc = size_t (*)(void*,                   // host_ws
+                                            ck_tile::index_t,        // batch
+                                            ck_tile::index_t,        // hdim_q
+                                            ck_tile::index_t,        // nhead_q
+                                            ck_tile::index_t,        // seqlen_q
+                                            ck_tile::index_t,        // seqlen_k
+                                            const ck_tile::index_t*, // seqstart_q
+                                            const ck_tile::index_t*  // seqstart_k
 );
 
 struct FmhaBwdFp32
@@ -604,13 +604,13 @@ struct fmha_bwd_launcher
     {
         PrepareWorkspaceHostFunc func_ptr;
         void* pin_w_ptr;
-        const int* seqstart_q_ptr;
-        const int* seqstart_k_ptr;
-        int batch;
-        int hdim_q;
-        int nhead_q;
-        int seqlen_q;
-        int seqlen_k;
+        const ck_tile::index_t* seqstart_q_ptr;
+        const ck_tile::index_t* seqstart_k_ptr;
+        ck_tile::index_t batch;
+        ck_tile::index_t hdim_q;
+        ck_tile::index_t nhead_q;
+        ck_tile::index_t seqlen_q;
+        ck_tile::index_t seqlen_k;
 
         static void invoke(void* ud)
         {
@@ -736,12 +736,14 @@ struct fmha_bwd_launcher
                                            workspace_size - host_ws_size_,
                                            stream));
 
-        char* base                   = static_cast<char*>(pin_base.get());
-        int* pin_q                   = reinterpret_cast<int*>(base);
-        int* pin_k                   = reinterpret_cast<int*>(base + seqstart_stride);
-        void* pin_w                  = base + pin_w_offset;
-        const int* seqstart_q_pinned = traits_.is_group_mode ? pin_q : nullptr;
-        const int* seqstart_k_pinned = traits_.is_group_mode ? pin_k : nullptr;
+        char* base  = static_cast<char*>(pin_base.get());
+        int* pin_q  = reinterpret_cast<int*>(base);
+        int* pin_k  = reinterpret_cast<int*>(base + seqstart_stride);
+        void* pin_w = base + pin_w_offset;
+        const ck_tile::index_t* seqstart_q_pinned =
+            traits_.is_group_mode ? reinterpret_cast<const ck_tile::index_t*>(pin_q) : nullptr;
+        const ck_tile::index_t* seqstart_k_pinned =
+            traits_.is_group_mode ? reinterpret_cast<const ck_tile::index_t*>(pin_k) : nullptr;
 
         if(traits_.is_group_mode)
         {
@@ -799,11 +801,11 @@ struct fmha_bwd_launcher
     PrepareWorkspaceHostFunc prepare_ws_func_ = nullptr;
 
     // Captured data (copied to closure in graph mode)
-    int batch_    = 0;
-    int hdim_q_   = 0;
-    int nhead_q_  = 0;
-    int seqlen_q_ = 0;
-    int seqlen_k_ = 0;
+    ck_tile::index_t batch_    = 0;
+    ck_tile::index_t hdim_q_   = 0;
+    ck_tile::index_t nhead_q_  = 0;
+    ck_tile::index_t seqlen_q_ = 0;
+    ck_tile::index_t seqlen_k_ = 0;
 
     std::shared_ptr<void> pin_staging_;
     hipStream_t release_stream_ = nullptr;
@@ -851,18 +853,8 @@ struct fmha_bwd_launcher
             device_ws_size = fmha_bwd_dq_dk_dv_dq_ws_device_upper_bound_<T1, Arch>(
                 t.batch, t.hdim_q, t.nhead_q, total_seqlen_q_padded, t.max_seqlen_k);
 
-            // Store function pointer (no-capture lambda converts to function pointer)
-            prepare_ws_func_ = [](void* host_ws,
-                                  int batch,
-                                  int hdim_q,
-                                  int nhead_q,
-                                  int seqlen_q,
-                                  int seqlen_k,
-                                  const int* seqstart_q,
-                                  const int* seqstart_k) {
-                fmha_bwd_dq_dk_dv_dq_prepare_ws_host_<T1, Arch>(
-                    host_ws, batch, hdim_q, nhead_q, seqlen_q, seqlen_k, seqstart_q, seqstart_k);
-            };
+            // Store function pointer (directly assign template-instantiated function)
+            prepare_ws_func_ = &fmha_bwd_dq_dk_dv_dq_prepare_ws_host_<T1, Arch>;
 
             // Store captured data as member variables
             batch_    = t.batch;
