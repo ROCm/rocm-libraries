@@ -162,7 +162,8 @@ def runBuildAndSingleGtestJob(Map conf=[:])
     script {
         withWorkingDir {
             def single_gtest_flags = " -DMIOPEN_TEST_DISCRETE=OFF -DGTEST_PARALLEL_LEVEL=4 "
-            def gtestLog = "/tmp/miopen_gtest_\${BUILD_NUMBER}_\${STAGE_NAME?.replaceAll('[^a-zA-Z0-9]','_')}.log"
+            def stageSuffix = (env.STAGE_NAME ?: 'unknown').replaceAll('[^a-zA-Z0-9]', '_')
+            def gtestLog = "/tmp/miopen_gtest_${env.BUILD_NUMBER}_${stageSuffix}.log"
             utils.buildHipClangJob(
                 setup_flags: single_gtest_flags + flags,
                 build_cmd: """
