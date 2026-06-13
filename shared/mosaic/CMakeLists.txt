@@ -54,12 +54,29 @@ target_include_directories(mosaic PUBLIC
 target_link_libraries(mosaic PUBLIC roc::mosaic-headers)
 
 # The engine is hot CPU inference code: aggressive flags for the scoring loop.
-# AVX512 paths are guarded by __AVX512F__ so the scalar fallback is used where
-# the ISA is unavailable.
+#
+# IMPORTANT (portability): the AVX512 code paths in model.cpp are guarded by the
+# __AVX512F__ predefined macro and the runtime CPUID dispatch in select_dot_fn()
+# is meant to fall back to scalar code on CPUs without AVX512. That contract is
+# only honest if we do NOT *force* AVX512 codegen here: an unconditional
+# `-mavx512f` makes __AVX512F__ true and emits AVX512 instructions in EVERY
+# function (including the scalar fallbacks the compiler may auto-vectorize), so
+# the resulting object requires AVX512 to run and SIGILLs (illegal instruction)
+# on any non-AVX512 host -- e.g. Zen2/Zen3 EPYC servers commonly paired with the
+# GPUs hipBLASLt targets. We therefore let `-march=native` decide the ISA from
+# the build host: it enables AVX512 (and FMA) exactly when the host supports it,
+# keeping the scalar path for hosts that don't. This mirrors how the rest of the
+# repo (e.g. composablekernel) gates -mavx512f behind a host-capability check.
+#
+# NOTE (parity): -ffast-math relaxes IEEE float semantics (reassociation, FMA
+# contraction, finite-math). It is kept here because the deployed weights' C++
+# <-> Python parity was validated with it, but it technically conflicts with the
+# byte-exact parity contract documented in model.cpp; re-validate parity
+# (deploy stage07) if this flag set changes.
 set_source_files_properties(
     "${CMAKE_CURRENT_SOURCE_DIR}/src/mosaic/model.cpp"
     PROPERTIES COMPILE_OPTIONS
-    "-O3;-march=native;-mavx512f;-mavx512bw;-mfma;-ffast-math;-funroll-loops;-fopenmp-simd"
+    "-O3;-march=native;-ffast-math;-funroll-loops;-fopenmp-simd"
 )
 
 target_sources(
