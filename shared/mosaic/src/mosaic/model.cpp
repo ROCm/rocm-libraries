@@ -1087,7 +1087,10 @@ int route_impl(const LoadedModel& model, const Problem& problem) {
   const char* env = std::getenv("MOSAIC_FORCE_CELL");
   if (env) {
     int forced = std::atoi(env);
-    if (forced >= 0) return forced;
+    // Only honor an in-range forced index; an out-of-range value would index
+    // past model.cells in rank_configs_impl, so fall through to real routing.
+    if (forced >= 0 && static_cast<std::size_t>(forced) < model.cells.size())
+      return forced;
   }
   return resolve_model_cell_index(model, problem);
 }
@@ -1119,7 +1122,10 @@ std::vector<Result> rank_configs_impl(const LoadedModel& model, const Problem& p
 
   if (configs.empty()) return fallback_all();
 
-  int cell_idx = resolve_model_cell_index(model, problem);
+  // Route through route_impl so ranking honors the MOSAIC_FORCE_CELL override
+  // exactly like route() does (kept consistent; the override is bounds-checked
+  // there against model.cells).
+  int cell_idx = route_impl(model, problem);
   if (cell_idx < 0) return fallback_all();
   const CellModel& cm = model.cells[static_cast<std::size_t>(cell_idx)];
 
