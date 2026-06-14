@@ -4677,7 +4677,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 "wait for local read before cross-wave TDM swap sync"))
             pointerLWCode.add(self._syncThreads(
               kernel,
-              "Waiting current LR finish for next GR(TDM), sync"))
+              "Waiting current LR finish for next GR(TDM), sync",
+              forceWaitcnt0=(not self.states.numItersPLR)))
           # local write for next iter, used to have local writes here
           # Swap offsets A(MXSA)
           if kernel["enableTDMA"]:
@@ -10341,9 +10342,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   # SyncThreads
   ##############################################################################
-  def _syncThreads(self, kernel, comment="", skipForceWaitcnt0=False, memoryToken=None):
+  def _syncThreads(self, kernel, comment="", skipForceWaitcnt0=False, memoryToken=None, forceWaitcnt0=False):
     if self.do["Sync"]:
-      return syncThreads(kernel, self.states.archCaps, self.states.asmCaps, comment, skipForceWaitcnt0=skipForceWaitcnt0, memoryToken=memoryToken)
+      return syncThreads(kernel, self.states.archCaps, self.states.asmCaps, comment, skipForceWaitcnt0=skipForceWaitcnt0, memoryToken=memoryToken, forceWaitcnt0=forceWaitcnt0)
     return Module("SyncThreads (Empty)")
 
   ##############################################################################

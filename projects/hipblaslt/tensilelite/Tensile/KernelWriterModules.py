@@ -135,10 +135,12 @@ def wait(states, kernel, tPA, tPB, skipGlobalRead, skipLocalWrite, \
 ##############################################################################
 # SyncThreads
 ##############################################################################
-def syncThreads(kernel, archCaps, asmCaps, comment="", skipForceWaitcnt0=False, memoryToken=None):
+def syncThreads(kernel, archCaps, asmCaps, comment="", skipForceWaitcnt0=False, memoryToken=None, forceWaitcnt0=False):
     imod = Module("syncThreads")
     if kernel["NumThreads"] > kernel["WavefrontSize"]:
-        if asmCaps["SeparateVscnt"]:
+        if forceWaitcnt0:
+            imod.add(SWaitCnt(dscnt=0, comment="wait local read done before next GR(TDM) overwrites LDS"))
+        elif asmCaps["SeparateVscnt"]:
             imod.add(SWaitCnt(dscnt=0, comment="extra navi wait"))
         elif kernel["_ScheduleIterAlg"] == 2 \
           or kernel["PrefetchGlobalRead"] >= 2 \

@@ -460,6 +460,62 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [4096, 8192, 1, 128]
   -
+    - # ProblemType, NN, PGR2 + PLR0
+      OperationType: GEMM
+      DataType: h
+      DataTypeA: h
+      DestDataType: s
+      ComputeDataType: S
+      HighPrecisionAccumulate: True #HPA
+      TransposeA: False
+      TransposeB: False
+      GroupedGemm: False
+      UseBeta: True
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+      UseScaleAB: "" #"Scalar"
+      UseScaleCD: False
+      StochasticRounding : False
+      UseScaleAlphaVec: 1
+      UseBias: 1
+      BiasDataTypeList: [s, h]
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  1, 1, 2, 2]
+          - [16, 16, 32, 1,  1,  2, 2, 2, 2]
+          - [16, 16, 32, 1,  1,  4, 2, 2, 2]
+        - DepthU: [ 64, 256 ]
+        - TDMInst: [3]
+        - ScheduleIterAlg: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [0]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - ExpandPointerSwap: [False]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - WorkGroupMappingXCC: [8]
+        - WavefrontSize: [32]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512,  512,  1, 2048]
+          - Exact: [513,  513,  1, 2056]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+
+  -
     - # ProblemType, TN
       OperationType: GEMM
       DataType: s
