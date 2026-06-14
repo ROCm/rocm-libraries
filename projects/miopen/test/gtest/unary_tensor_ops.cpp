@@ -82,6 +82,7 @@ protected:
         auto result = handle.Read<T>(super_dev, dataSize);
 
         operate_over_subtensor(dataOp, superCpu, subDesc, offset);
+        superCpu[0] = superCpu[0] * T{2} + T{1};
 
         auto mismatch_index = miopen::mismatch_idx(superCpu, result, miopen::float_equal);
 
