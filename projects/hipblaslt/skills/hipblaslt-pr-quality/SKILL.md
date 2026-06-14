@@ -36,8 +36,9 @@ Bind the base change-classes and scope buckets to hipBLASlt paths:
 - Tests/clients: `projects/hipblaslt/clients/**`.
 
 ### Tightens M1 (defect-fix regression test)
-The regression test for a defect fix must run in **Math CI** (not local-only) for the affected
-gfx arch. A local-only repro does not satisfy M1 for hipBLASlt.
+The regression test for a defect fix must run in a **shared CI lane** (TheRock GitHub Actions or
+Math CI; not local-only) for the affected gfx arch. A local-only repro does not satisfy M1 for
+hipBLASlt.
 
 ### Adds H1 — known-bug two-PR flow
 Known-bug entries live in `projects/hipblaslt/clients/tests/data/known_bugs.yaml` with a tracker
