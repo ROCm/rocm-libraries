@@ -24,7 +24,7 @@
 ################################################################################
 """Unit tests for Tensile.LibraryIO.writeMsgPack."""
 
-import zlib
+import gzip
 import msgpack
 import pytest
 
@@ -49,16 +49,16 @@ def test_writeMsgPack_roundtrips_data(tmp_path):
 
     writeMsgPack(dest, data)
 
-    raw = zlib.decompress((tmp_path / "library.dat.gz").read_bytes())
+    raw = gzip.decompress((tmp_path / "library.dat.gz").read_bytes())
     assert msgpack.unpackb(raw) == data
 
 
-def test_writeMsgPack_uses_zlib_compression(tmp_path):
-    """Output is valid zlib (not raw msgpack)."""
+def test_writeMsgPack_uses_gzip_compression(tmp_path):
+    """Output is valid gzip (not raw msgpack)."""
     dest = str(tmp_path / "library.dat")
     writeMsgPack(dest, {"x": list(range(100))})
 
     gz_bytes = (tmp_path / "library.dat.gz").read_bytes()
-    # zlib.decompress raises if the bytes are not valid zlib
-    decompressed = zlib.decompress(gz_bytes)
+    # gzip.decompress raises if the bytes are not valid gzip
+    decompressed = gzip.decompress(gz_bytes)
     assert len(decompressed) > 0

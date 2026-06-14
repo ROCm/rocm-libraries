@@ -85,7 +85,7 @@ namespace TensileLite
             return false;
 
         z_stream strm{};
-        if(inflateInit(&strm) != Z_OK)
+        if(inflateInit2(&strm, 15 + 32) != Z_OK)
             return false;
 
         strm.next_in  = compressed.data();
@@ -121,7 +121,7 @@ namespace TensileLite
         return finished_parsing;
     }
 
-    inline bool fileToMsgObject(std::string const& filename, msgpack::object_handle& result)
+    bool fileToMsgObject(std::string const& filename, msgpack::object_handle& result)
     {
         try
         {

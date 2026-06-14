@@ -79,9 +79,13 @@ def _library_root(install_root: Path) -> Optional[Path]:
 
 
 def _has_required_file(entries: Set[str], template: str, arch: str) -> bool:
-    """Check if entries contains the required file or its .gz variant."""
+    """Check if entries contains the required file or its .gz variant (for .dat only)."""
     wanted = template.format(arch=arch)
-    return wanted in entries or (wanted + ".gz") in entries
+    if wanted in entries:
+        return True
+    if wanted.endswith(".dat"):
+        return (wanted + ".gz") in entries
+    return False
 
 
 def validate(install_root: Path) -> List[str]:
