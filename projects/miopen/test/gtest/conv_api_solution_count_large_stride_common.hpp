@@ -7,11 +7,6 @@
 // The two sweeps differ only in shape rank and per-dimension data; the
 // descriptor lifecycle, gtest plumbing, and the GTEST_SKIP pattern below are
 // identical, so they live here.
-//
-// WrappingPrinter: gtest's default summary lists SKIPPED test names without
-// their GTEST_SKIP() messages. We wrap the default pretty-printer and replace
-// only OnTestIterationEnd so the summary appends each reason inline:
-//   [  SKIPPED ] Suite.Test -- <solver> known-failing (CK applicability gap)
 
 #pragma once
 
@@ -19,146 +14,10 @@
 #include <miopen/solver_id.hpp>
 #include <gtest/gtest.h>
 #include <cstdint>
-#include <cstdio>
-#include <memory>
-#include <string>
 
 #include "gtest_common.hpp"
 
 namespace miopen_test_large_stride {
-
-// Wraps gtest's default pretty-printer so the end-of-run summary appends each
-// SKIPPED test's GTEST_SKIP() message inline:
-//   [  SKIPPED ] Suite.Test -- <solver> known-failing (CK applicability gap)
-// All other listener events are forwarded unchanged to the default printer, so
-// per-test [ RUN ] / [  OK  ] / [  SKIPPED ] / [ FAILED ] output is unaffected.
-class WrappingPrinter : public ::testing::EmptyTestEventListener
-{
-public:
-    explicit WrappingPrinter(::testing::TestEventListener* inner) : inner_(inner) {}
-
-    void OnTestProgramStart(const ::testing::UnitTest& u) override
-    {
-        inner_->OnTestProgramStart(u);
-    }
-    void OnTestIterationStart(const ::testing::UnitTest& u, int i) override
-    {
-        inner_->OnTestIterationStart(u, i);
-    }
-    void OnEnvironmentsSetUpStart(const ::testing::UnitTest& u) override
-    {
-        inner_->OnEnvironmentsSetUpStart(u);
-    }
-    void OnEnvironmentsSetUpEnd(const ::testing::UnitTest& u) override
-    {
-        inner_->OnEnvironmentsSetUpEnd(u);
-    }
-    void OnTestSuiteStart(const ::testing::TestSuite& s) override { inner_->OnTestSuiteStart(s); }
-    void OnTestStart(const ::testing::TestInfo& t) override { inner_->OnTestStart(t); }
-    void OnTestPartResult(const ::testing::TestPartResult& r) override
-    {
-        inner_->OnTestPartResult(r);
-    }
-    void OnTestEnd(const ::testing::TestInfo& t) override { inner_->OnTestEnd(t); }
-    void OnTestSuiteEnd(const ::testing::TestSuite& s) override { inner_->OnTestSuiteEnd(s); }
-    void OnEnvironmentsTearDownStart(const ::testing::UnitTest& u) override
-    {
-        inner_->OnEnvironmentsTearDownStart(u);
-    }
-    void OnEnvironmentsTearDownEnd(const ::testing::UnitTest& u) override
-    {
-        inner_->OnEnvironmentsTearDownEnd(u);
-    }
-    void OnTestIterationEnd(const ::testing::UnitTest& u, int /*i*/) override
-    {
-        // Replaces the default's summary so SKIPPED lines carry their reason.
-        PrintEnhancedSummary(u);
-    }
-    void OnTestProgramEnd(const ::testing::UnitTest& u) override { inner_->OnTestProgramEnd(u); }
-
-private:
-    std::unique_ptr<::testing::TestEventListener> inner_;
-
-    static std::string GetSkipReason(const ::testing::TestInfo& info)
-    {
-        const auto& result = *info.result();
-        for(int k = 0; k < result.total_part_count(); ++k)
-        {
-            const auto& part = result.GetTestPartResult(k);
-            if(part.skipped())
-            {
-                std::string reason = part.message();
-                if(auto nl = reason.find('\n'); nl != std::string::npos)
-                    reason.resize(nl);
-                return reason;
-            }
-        }
-        return {};
-    }
-
-    static void PrintEnhancedSummary(const ::testing::UnitTest& u)
-    {
-        std::printf("[==========] %d tests from %d test suites ran. (%lld ms total)\n",
-                    u.test_to_run_count(),
-                    u.test_suite_to_run_count(),
-                    static_cast<long long>(u.elapsed_time()));
-        std::printf("[  PASSED  ] %d tests.\n", u.successful_test_count());
-
-        const int skipped = u.skipped_test_count();
-        if(skipped > 0)
-        {
-            std::printf("[  SKIPPED ] %d tests, listed below:\n", skipped);
-            for(int i = 0; i < u.total_test_suite_count(); ++i)
-            {
-                const auto* suite = u.GetTestSuite(i);
-                for(int j = 0; j < suite->total_test_count(); ++j)
-                {
-                    const auto* info = suite->GetTestInfo(j);
-                    if(!info->result()->Skipped())
-                        continue;
-                    const std::string reason = GetSkipReason(*info);
-                    if(reason.empty())
-                        std::printf("[  SKIPPED ] %s.%s\n", info->test_suite_name(), info->name());
-                    else
-                        std::printf("[  SKIPPED ] %s.%s -- %s\n",
-                                    info->test_suite_name(),
-                                    info->name(),
-                                    reason.c_str());
-                }
-            }
-        }
-
-        const int failed = u.failed_test_count();
-        if(failed > 0)
-        {
-            std::printf("[  FAILED  ] %d tests, listed below:\n", failed);
-            for(int i = 0; i < u.total_test_suite_count(); ++i)
-            {
-                const auto* suite = u.GetTestSuite(i);
-                for(int j = 0; j < suite->total_test_count(); ++j)
-                {
-                    const auto* info = suite->GetTestInfo(j);
-                    if(!info->result()->Failed())
-                        continue;
-                    std::printf("[  FAILED  ] %s.%s\n", info->test_suite_name(), info->name());
-                }
-            }
-            std::printf("\n%2d FAILED TEST%s\n", failed, failed == 1 ? "" : "S");
-        }
-    }
-};
-
-inline bool RegisterWrappingPrinter()
-{
-    auto& listeners       = ::testing::UnitTest::GetInstance()->listeners();
-    auto* default_printer = listeners.Release(listeners.default_result_printer());
-    listeners.Append(new WrappingPrinter(default_printer));
-    return true;
-}
-
-// Static initializer -- runs once per binary that #includes this header.
-// Inline variable (C++17) ensures a single definition across translation units.
-inline const bool g_wrapping_printer_registered = RegisterWrappingPrinter();
 
 struct Descriptors
 {
