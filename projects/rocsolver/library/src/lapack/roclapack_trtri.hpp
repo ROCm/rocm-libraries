@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,6 +32,7 @@
 
 #pragma once
 
+#include "common_host_helpers.hpp"
 #include "lapack_device_functions.hpp"
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
@@ -136,7 +137,10 @@ void rocsolver_trtri_getMemorySize(const rocblas_diagonal diag,
     // requirements for TRTI2
     rocblas_int nn = (blk == 1) ? n : blk;
 #ifdef OPTIMAL
-    if(nn <= TRTRI_MAX_COLS)
+    // the optimized small-size kernel is warp-synchronous, so it is only valid for n <= wavefront
+    // size (no handle here for the cached device props, so query the warp size directly)
+    const rocblas_int wavefront = get_device_warp_size();
+    if(nn <= std::min(TRTRI_MAX_COLS, wavefront))
     {
         // if very small size, no workspace needed
         w1a = 0;
@@ -232,8 +236,10 @@ void trti2(rocblas_handle handle,
            T* alphas)
 {
 #ifdef OPTIMAL
-    // if very small size, use optimized kernel
-    if(n <= TRTRI_MAX_COLS)
+    // if very small size, use optimized kernel (warp-synchronous, so only valid for n <= wavefront);
+    // device props are cached in the handle
+    const rocblas_int wavefront = rocblas_internal_get_device_prop(handle)->warpSize;
+    if(n <= std::min(TRTRI_MAX_COLS, wavefront))
     {
         trti2_run_small<T>(handle, uplo, diag, n, A, shiftA, lda, strideA, batch_count);
         return;

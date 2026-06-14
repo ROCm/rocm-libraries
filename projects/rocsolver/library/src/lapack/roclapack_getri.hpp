@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,6 +32,7 @@
 
 #pragma once
 
+#include "common_host_helpers.hpp"
 #include "lapack_device_functions.hpp"
 #include "rocblas.hpp"
 #include "roclapack_trtri.hpp"
@@ -192,8 +193,12 @@ void rocsolver_getri_getMemorySize(const rocblas_int n,
     static constexpr bool ISBATCHED = BATCHED || STRIDED;
 
 #ifdef OPTIMAL
+    // the optimized small/tiny kernels are warp-synchronous, so they are only valid for
+    // n <= wavefront size (no handle here for the cached props, so query the warp size directly)
+    const rocblas_int wavefront = get_device_warp_size();
     // if tiny size, no workspace needed
-    if((n <= GETRI_TINY_SIZE && !ISBATCHED) || (n <= GETRI_BATCH_TINY_SIZE && ISBATCHED))
+    if((n <= std::min(GETRI_TINY_SIZE, wavefront) && !ISBATCHED)
+       || (n <= std::min(GETRI_BATCH_TINY_SIZE, wavefront) && ISBATCHED))
     {
         *size_work1 = 0;
         *size_work2 = 0;
@@ -221,7 +226,7 @@ void rocsolver_getri_getMemorySize(const rocblas_int n,
 
 #ifdef OPTIMAL
     // if small size nothing else is needed
-    if(n <= TRTRI_MAX_COLS)
+    if(n <= std::min(TRTRI_MAX_COLS, wavefront))
     {
         *size_work1 = w1b;
         *size_work2 = w2b;
@@ -330,7 +335,11 @@ rocblas_status rocsolver_getri_template(rocblas_handle handle,
     static constexpr bool ISBATCHED = BATCHED || STRIDED;
 
 #ifdef OPTIMAL
-    if((n <= GETRI_TINY_SIZE && !ISBATCHED) || (n <= GETRI_BATCH_TINY_SIZE && ISBATCHED))
+    // the optimized small/tiny kernels are warp-synchronous, so they are only valid for
+    // n <= wavefront size; device props are cached in the handle
+    const rocblas_int wavefront = rocblas_internal_get_device_prop(handle)->warpSize;
+    if((n <= std::min(GETRI_TINY_SIZE, wavefront) && !ISBATCHED)
+       || (n <= std::min(GETRI_BATCH_TINY_SIZE, wavefront) && ISBATCHED))
     {
         return getri_run_small<T>(handle, n, A, shiftA, lda, strideA, ipiv, shiftP, strideP, info,
                                   batch_count, true, pivot);
@@ -347,7 +356,7 @@ rocblas_status rocsolver_getri_template(rocblas_handle handle,
 
 #ifdef OPTIMAL
     // if small size, use optimized kernel for stage 2
-    if(n <= TRTRI_MAX_COLS)
+    if(n <= std::min(TRTRI_MAX_COLS, wavefront))
     {
         return getri_run_small<T>(handle, n, A, shiftA, lda, strideA, ipiv, shiftP, strideP, info,
                                   batch_count, false, pivot);
