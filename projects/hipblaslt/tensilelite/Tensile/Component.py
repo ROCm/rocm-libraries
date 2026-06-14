@@ -218,13 +218,21 @@ class LocalRead(Component):
     """
     Local read block.
     """
-    def _getLdsReadMemToken(self, writer, kernel, tP):
+    def _getLdsReadMemToken(self, writer, kernel, tP, ldsByteOffset=None):
         from rocisa.container import MemTokenData
-        tok = writer.states.ldsReadTokenIdx
+        useSplit = (kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]
+                    and ldsByteOffset is not None and not tP.get("isM", False))
+        if useSplit:
+            parity = writer.states.ldsReadTokenIdx
+            inBuf  = ldsByteOffset - tP["localReadSwapByteOffset"]
+            half   = 1 if inBuf >= writer.tdmSplitLdsBoundary(kernel, tP) else 0
+            tok    = writer.states.memTokenLdsSplit[parity][half]
+        else:
+            tok = writer.states.ldsReadTokenIdx
         return MemTokenData([tok]), tok
 
-    def _emitLdsRead(self, writer, kernel, tP, LocalReadX, dst, src, ds, module, comment=""):
-        ldsMemToken, ldsMemTokenIdx = self._getLdsReadMemToken(writer, kernel, tP)
+    def _emitLdsRead(self, writer, kernel, tP, LocalReadX, dst, src, ds, module, comment="", ldsByteOffset=None):
+        ldsMemToken, ldsMemTokenIdx = self._getLdsReadMemToken(writer, kernel, tP, ldsByteOffset)
         fullComment = "%s sync LDS%u" % (comment, ldsMemTokenIdx) if comment else "sync LDS%u" % ldsMemTokenIdx
         inst = LocalReadX(dst=dst, src=src, ds=ds, comment=fullComment)
         inst.setMemToken(ldsMemToken)
