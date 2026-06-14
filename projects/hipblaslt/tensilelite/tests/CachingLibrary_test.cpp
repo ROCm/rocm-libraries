@@ -46,6 +46,26 @@
 //     solution -> the EXPECT below fails.
 //   * On the fixed (MyProblem-keyed) code the cache correctly misses for the second,
 //     distinct problem and the sub-library supplies the right solution -> it passes.
+//
+// Defect category (why these are unit, not integration, tests):
+// This is a "lossy memoization key" defect -- a cache keyed on a hash (lossy)
+// instead of the value (lossless) can serve a wrong cached result whenever two
+// distinct inputs collide. Such a collision cannot be reliably reproduced by an
+// end-to-end GEMM test: a real 64-bit hash collision between two specific configs
+// is rare, only manifests once BOTH colliding configs run in one process against
+// the shared cache, and is invisible to any suite that doesn't happen to run the
+// exact colliding pair (which is why this surfaced in the large, fixed rocBLAS
+// pre-checkin set but not in isolated hipBLASLt tests). The robust guard is to
+// FORCE a collision at the unit level and assert collision-safety for EVERY cache
+// CachingLibrary owns:
+//   * findBestSolution (m_cache)                         -- #7754 made it size_t-keyed; this
+//   * findTopSolutions (m_caches / m_cachesAllSolutions) -- test FAILS on #7754, PASSES on the fix.
+//   * findTopSolutionsGroupedGemm (m_cachesGroupedGemm)  -- this cache was NOT changed by #7754
+//        (it stayed keyed on the full std::vector<MyProblem>); the test below is therefore a
+//        PREVENTIVE guard that PASSES on both, ensuring this last cache is never regressed into
+//        the same lossy-key class. This is the "category, not just the instance" coverage.
+// findAllSolutions / findAllSolutionsGroupedGemm are not cached (they delegate
+// straight to the sub-library) and so carry no collision risk.
 
 #include <gtest/gtest.h>
 
@@ -109,8 +129,9 @@ namespace
     // problem, and counts how many times it was consulted (to prove caching works).
     struct MockSubLibrary : public SolutionLibrary<MockProblem, MockSolution>
     {
-        mutable int findBestCalls = 0;
-        mutable int findTopCalls  = 0;
+        mutable int findBestCalls     = 0;
+        mutable int findTopCalls      = 0;
+        mutable int findTopGroupCalls = 0;
 
         std::shared_ptr<MockSolution> makeSolution(int id) const
         {
@@ -155,6 +176,13 @@ namespace
         {
             ++findTopCalls;
             return {makeSolution(problem.id)};
+        }
+
+        SolutionVector<MockSolution> findTopSolutionsGroupedGemm(
+            std::vector<MockProblem> const& problems, Hardware const&, int) const override
+        {
+            ++findTopGroupCalls;
+            return {makeSolution(problems.empty() ? 0 : problems.front().id)};
         }
 
         std::string type() const override
@@ -246,4 +274,39 @@ TEST(CachingLibraryCollision, FindTopSolutionsDistinguishesCollidingProblems)
     EXPECT_EQ(topB[0]->id, 2)
         << "ROCM-25647: CachingLibrary::findTopSolutions returned the wrong, hash-colliding "
            "problem's cached solutions (size_t-hash-keyed cache from PR #7754).";
+}
+
+// findTopSolutionsGroupedGemm path: the grouped-GEMM cache is keyed on the full
+// std::vector<MyProblem>. Unlike the other caches, #7754 did NOT make this one
+// size_t-keyed, so this test PASSES on both the buggy and fixed code. It is a
+// PREVENTIVE guard: it documents and enforces that this cache stays value-keyed
+// (collision-safe), so a future "optimization" cannot quietly reintroduce the
+// ROCM-25647 lossy-key class here. (To confirm it has teeth, temporarily change
+// the key to a size_t hash and it fails like the others.)
+TEST(CachingLibraryCollision, FindTopSolutionsGroupedGemmDistinguishesCollidingProblems)
+{
+    std::vector<MockProblem> groupA{MockProblem{1}};
+    std::vector<MockProblem> groupB{MockProblem{2}};
+
+    // Distinct problem groups that share a hash bucket.
+    ASSERT_FALSE(groupA == groupB);
+    ASSERT_EQ(std::hash<std::vector<MockProblem>>{}(groupA),
+              std::hash<std::vector<MockProblem>>{}(groupB));
+
+    auto                                      sub = std::make_shared<MockSubLibrary>();
+    CachingLibrary<MockProblem, MockSolution> library(sub);
+    auto                                      gpu = makeGpu();
+
+    auto topA = library.findTopSolutionsGroupedGemm(groupA, gpu, 1);
+    ASSERT_EQ(topA.size(), 1u);
+    ASSERT_NE(topA[0], nullptr);
+    EXPECT_EQ(topA[0]->id, 1);
+
+    auto topB = library.findTopSolutionsGroupedGemm(groupB, gpu, 1);
+    ASSERT_EQ(topB.size(), 1u);
+    ASSERT_NE(topB[0], nullptr);
+    EXPECT_EQ(topB[0]->id, 2)
+        << "ROCM-25647 (preventive): CachingLibrary::findTopSolutionsGroupedGemm returned the "
+           "wrong, hash-colliding problem group's cached solutions. The grouped-GEMM cache must "
+           "stay keyed on the full std::vector<MyProblem>, not a lossy hash.";
 }
