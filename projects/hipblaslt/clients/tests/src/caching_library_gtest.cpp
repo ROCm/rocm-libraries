@@ -53,10 +53,11 @@
 //
 // CachingLibrary is TensileLite-host code, so tensilelite/tests/ is its natural
 // conceptual home -- but that C++ gtest suite (the `tensilelite-tests` target) is
-// NOT built or run by TheRock GitHub Actions CI: TheRock configures hipBLASLt with
-// -DTENSILELITE_BUILD_TESTING=OFF (math-libs/BLAS/CMakeLists.txt) and does not
-// package the binary, and there is no CI job that runs it. The only C++ test binary
-// TheRock builds, ships, and runs for hipBLASLt is this client `hipblaslt-test`
+// NOT built or run by TheRock GitHub Actions CI: TENSILELITE_BUILD_TESTING defaults
+// OFF (projects/hipblaslt/CMakeLists.txt) and the TheRock superproject build leaves
+// it off and does not package the binary, and there is no CI job that runs it. The
+// only C++ test binary TheRock builds, ships, and runs for hipBLASLt is this client
+// `hipblaslt-test`
 // (HIPBLASLT_BUILD_TESTING), executed by test/therock/test_hipblaslt.py. Because
 // hipblaslt-test already links tensilelite::tensilelite-host (via
 // hipblaslt-clients-common), this white-box unit test can include
