@@ -540,6 +540,16 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return SMovB32(sgpr(0), sgpr(1));
         case logical::SMovB64:
             return SMovB64(sgpr(0), sgpr(1));
+        case logical::SLoadB32:
+            return SLoadB32(sgpr(0), sgpr(2, 2), literal(0));
+        case logical::SLoadB64:
+            return SLoadB64(sgpr(0, 2), sgpr(4, 2), literal(0));
+        case logical::SLoadB128:
+            return SLoadB128(sgpr(0, 4), sgpr(8, 2), literal(0));
+        case logical::SLoadB256:
+            return SLoadB256(sgpr(0, 8), sgpr(16, 2), literal(0));
+        case logical::SLoadB512:
+            return SLoadB512(sgpr(0, 16), sgpr(32, 2), literal(0));
         case logical::SCMovB32:
             return SCMovB32(sgpr(0), sgpr(1));
         case logical::SCMovB64:
@@ -614,6 +624,11 @@ static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX1250 = {
     {logical::GlobalAtomicIncU32Saddr, "global_atomic_inc_u32"},
     {logical::DSLoadB32, "ds_load_b32"},
     {logical::DSLoadB64, "ds_load_b64"},
+    {logical::SLoadB32, "s_load_b32"},
+    {logical::SLoadB64, "s_load_b64"},
+    {logical::SLoadB128, "s_load_b128"},
+    {logical::SLoadB256, "s_load_b256"},
+    {logical::SLoadB512, "s_load_b512"},
     {logical::DSStoreB32, "ds_store_b32"},
     {logical::DSStoreB64, "ds_store_b64"},
     // Add more: {logical::YourOpcode, "expected_mnemonic"},

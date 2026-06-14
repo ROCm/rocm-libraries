@@ -23,7 +23,7 @@
 ################################################################################
 """Standalone tests for ``rocisa_stinkytofu_adaptor.instruction`` -- Step 3
 (``Instruction`` / ``CommonInstruction`` bases + ``VMovB32`` / ``SMovB32`` /
-``SMovB64`` shims).
+``SMovB64`` / ``SMemLoadInstruction`` / ``SLoadB*`` shims).
 
 Run from any working directory:
 
@@ -72,6 +72,7 @@ if _PKG_PARENT not in sys.path:
 from rocisa_stinkytofu_adaptor.code import Module  # noqa: E402
 from rocisa_stinkytofu_adaptor.container import (  # noqa: E402
     RegisterContainer,
+    SMEMModifiers,
     sgpr,
     vgpr,
 )
@@ -82,6 +83,9 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     MacroInstruction,
     SMovB32,
     SMovB64,
+    SLoadB32,
+    SLoadB64,
+    SMemLoadInstruction,
     VMovB32,
     _to_stinky_register,
 )
@@ -664,6 +668,52 @@ class TestSMovB64Construction(unittest.TestCase):
 
 
 # ===========================================================================
+# SMemLoadInstruction / SLoadB32 / SLoadB64
+# ===========================================================================
+
+
+class TestSLoadB32Construction(unittest.TestCase):
+    def test_is_smem_load_not_common(self):
+        m = SLoadB32(sgpr(0), sgpr(2, 2), 0, comment="k")
+        self.assertIsInstance(m, Instruction)
+        self.assertIsInstance(m, SMemLoadInstruction)
+        self.assertIsInstance(m, SLoadB32)
+        self.assertNotIsInstance(m, CommonInstruction)
+
+    def test_str_basic(self):
+        m = SLoadB32(sgpr(0), sgpr(2, 2), 0, comment="probe")
+        text = str(m)
+        self.assertTrue(text.startswith("s_load_b32 s0, s[2:3], 0"), text)
+        self.assertTrue(text.endswith(" // probe\n"), text)
+
+    def test_get_params_order(self):
+        d, b = sgpr(0), sgpr(2, 2)
+        m = SLoadB32(d, b, 4)
+        p = m.getParams()
+        self.assertEqual(len(p), 3)
+        self.assertIs(p[0], d)
+        self.assertIs(p[1], b)
+        self.assertEqual(p[2], 4)
+
+    def test_smem_modifier_raises_on_logical_bridge(self):
+        m = SLoadB32(sgpr(0), sgpr(2, 2), 0, smem=SMEMModifiers(offset=4))
+        with self.assertRaises(NotImplementedError):
+            m.to_stinky_logical()
+
+    def test_deepcopy(self):
+        m = SLoadB32(sgpr(0), sgpr(2, 2), 0, comment="x")
+        c = copy.deepcopy(m)
+        self.assertIsInstance(c, SLoadB32)
+        self.assertEqual(str(c), str(m))
+
+
+class TestSLoadB64Construction(unittest.TestCase):
+    def test_prestr_b64(self):
+        m = SLoadB64(sgpr(0, 2), sgpr(4, 2), 0)
+        self.assertIn("s_load_b64", str(m))
+
+
+# ===========================================================================
 # Step-3 contract: VMovB32 is picked up by Module._collect_logical_insts.
 # ===========================================================================
 
@@ -703,9 +753,9 @@ class TestCollectLogicalIntegration(unittest.TestCase):
         self.assertEqual(len(m._collect_logical_insts()), 1)
 
     @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
-    def test_smovb64_collected_by_module(self):
+    def test_sloadb32_collected_by_module(self):
         m = Module()
-        m.add(SMovB64(sgpr(0, 2), sgpr(4, 2)))
+        m.add(SLoadB32(sgpr(0), sgpr(2, 2), 0))
         self.assertEqual(len(m._collect_logical_insts()), 1)
 
 

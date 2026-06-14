@@ -51,10 +51,16 @@ What it does (real):
 
     - ``SMovB32`` / ``SMovB64`` — scalar moves (Phase A). Same pattern as
       ``VMovB32``; ``to_stinky_logical`` forwards to ``_stinkytofu.SMovB32``
-      / ``SMovB64``. Other Phase-A candidates (``SLoadB*``, ``SNop``,
-      ``SWaitCnt``, ``SEndpgm``, branch shims) remain dummies until matching
-      logical opcodes exist in the generated Python binding (see
-      ``PythonBindings_generated.inc`` from the stinkytofu build).
+      / ``SMovB64``.
+    - ``SMemLoadInstruction`` / ``SLoadB32`` … ``SLoadB512`` — scalar
+      memory loads; ``to_stinky_logical`` calls ``_stinkytofu.SLoadB*`` after
+      ``LogicalInstructionDefs.inc`` + tablegen regenerate the Python binding.
+      Non-``None`` ``SMEMModifiers`` are rejected until logical IR carries
+      SMEM modifier data through the binding.
+    - Other Phase-A candidates (``SNop``, ``SWaitCnt``, ``SEndpgm``, branch
+      shims) remain dummies until matching logical opcodes exist in the
+      generated Python binding (see ``PythonBindings_generated.inc`` from the
+      stinkytofu build).
 
     - ``getMFMAIssueLatency`` / ``getSMFMAIssueLatency`` — workaround
       ports returning the C++ default-branch tuple
@@ -64,7 +70,8 @@ What it does (real):
 Not yet done (dummy):
     - All other instruction classes (``Buffer*``, ``DS*``, ``Flat*``,
       most ``S*`` / ``V*``, ``MFMA*`` / ``SMFMA*``, ...) except
-      ``VMovB32``, ``SMovB32``, ``SMovB64``, and ``MacroInstruction``.
+      ``VMovB32``, ``SMovB32``, ``SMovB64``, ``SMemLoadInstruction`` /
+      ``SLoadB32`` … ``SLoadB512``, and ``MacroInstruction``.
     - ``CompositeInstruction`` still dummy (no concrete subclass
       promoted yet). ``MacroInstruction`` is real (KernelWriter emits
       it 16+ times via ``V_MAGIC_DIV`` / ``GLOBAL_OFFSET_*`` /
@@ -488,6 +495,33 @@ def _to_stinky_register(arg: Any) -> Any:
     )
 
 
+# gfx12+ style suffix on ``s_load_*`` (matches rocisa ``ReadWriteInstruction``
+# ``typeConvert`` for ``RW_TYPE0`` when ISA major >= 11).
+_SMEM_LOAD_TYPE_SUFFIX = {
+    InstType.INST_B32: "b32",
+    InstType.INST_B64: "b64",
+    InstType.INST_B128: "b128",
+    InstType.INST_B256: "b256",
+    InstType.INST_B512: "b512",
+}
+
+
+def _smem_load_type_suffix(inst_type: Any) -> str:
+    try:
+        return _SMEM_LOAD_TYPE_SUFFIX[inst_type]
+    except KeyError as e:
+        raise ValueError(f"unsupported InstType for s_load: {inst_type!r}") from e
+
+
+_ST_SLOAD_LOGICAL_BY_INST_TYPE = {
+    InstType.INST_B32: "SLoadB32",
+    InstType.INST_B64: "SLoadB64",
+    InstType.INST_B128: "SLoadB128",
+    InstType.INST_B256: "SLoadB256",
+    InstType.INST_B512: "SLoadB512",
+}
+
+
 # ==========================================================================
 # VMovB32 -- first real instruction shim (Step-3 vertical slice).
 # ==========================================================================
@@ -623,6 +657,189 @@ class SMovB64(CommonInstruction):
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
+
+
+# ==========================================================================
+# SMemLoadInstruction / SLoadB* -- scalar memory loads (Phase A).
+# ==========================================================================
+#
+# source: rocisa/rocisa/include/instruction/mem.hpp:514-573
+# logicalIR: ``SLoadB32`` … ``SLoadB512`` in LogicalInstructionDefs.inc
+#         (auto-generated ``_stinkytofu.SLoadB32(dest, src0, src1, comment)``).
+#
+# ``SMEMModifiers`` on the logical-IR Python binding is not wired yet;
+# ``to_stinky_logical`` raises if ``smem`` is not ``None``.
+
+
+class SMemLoadInstruction(Instruction):
+    """``s_load_<b*> dst, base, soffset`` base (rocisa ``SMemLoadInstruction``)."""
+
+    __slots__ = ("dst", "base", "soffset", "smem")
+
+    def __init__(
+        self,
+        inst_type: Any,
+        dst: Any = None,
+        base: Any = None,
+        soffset: Any = None,
+        smem: Any = None,
+        comment: str = "",
+        **kwargs: Any,
+    ):
+        _ = kwargs  # rocisa binding may forward ignored kwargs
+        super().__init__(inst_type, comment)
+        self.dst = dst
+        self.base = base
+        self.soffset = soffset
+        self.smem = smem
+        self.setInst("s_load_")
+
+    def preStr(self) -> str:
+        return self.instStr + _smem_load_type_suffix(self.instType)
+
+    def getArgStr(self) -> str:
+        parts: List[str] = []
+        if self.dst is not None:
+            parts.append(
+                self.dst.toString() if hasattr(self.dst, "toString") else str(self.dst))
+        if self.base is not None:
+            parts.append(
+                self.base.toString() if hasattr(self.base, "toString") else str(self.base))
+        parts.append(_input_to_str(self.soffset))
+        return ", ".join(parts)
+
+    def toString(self) -> str:
+        kstr = self.preStr() + " " + self.getArgStr()
+        if self.smem is not None and hasattr(self.smem, "toString"):
+            kstr += self.smem.toString()
+        return self.formatWithComment(kstr)
+
+    def getParams(self):
+        return [self.dst, self.base, self.soffset]
+
+    def getDstParams(self):
+        return [self.dst] if self.dst is not None else []
+
+    def getSrcParams(self):
+        return [self.base, self.soffset]
+
+    def to_stinky_logical(self) -> Any:
+        if self.smem is not None:
+            raise NotImplementedError(
+                "rocisa_stinkytofu_adaptor: SMemLoad with non-None SMEMModifiers "
+                "is not yet supported on the stinkytofu logical-IR path.",
+            )
+        import stinkytofu as _st  # noqa: WPS433
+
+        try:
+            fac_name = _ST_SLOAD_LOGICAL_BY_INST_TYPE[self.instType]
+        except KeyError as e:
+            raise ValueError(f"SMemLoad: unsupported instType {self.instType!r}") from e
+        factory = getattr(_st, fac_name, None)
+        if factory is None:
+            raise ImportError(
+                f"stinkytofu binding has no factory {fac_name!r}; rebuild stinkytofu "
+                f"(tablegen) after adding SLoad* to LogicalInstructionDefs.inc.",
+            )
+        return factory(
+            _to_stinky_register(self.dst),
+            _to_stinky_register(self.base),
+            _to_stinky_register(self.soffset),
+            self.comment,
+        )
+
+    def __deepcopy__(self, memo):
+        clone = self.__class__.__new__(self.__class__)
+        memo[id(self)] = clone
+        Instruction.__init__(clone, self.instType, self.comment)
+        clone.outputInlineAsm = self.outputInlineAsm
+        clone.instStr = self.instStr
+        clone.m_memToken = (
+            _deepcopy(self.m_memToken, memo) if self.m_memToken is not None else None
+        )
+        clone.dst = _deepcopy(self.dst, memo) if self.dst is not None else None
+        clone.base = _deepcopy(self.base, memo) if self.base is not None else None
+        if isinstance(self.soffset, (int, float, str, bool)):
+            clone.soffset = self.soffset
+        else:
+            clone.soffset = _deepcopy(self.soffset, memo)
+        clone.smem = _deepcopy(self.smem, memo) if self.smem is not None else None
+        return clone
+
+
+class SLoadB32(SMemLoadInstruction):
+    """``s_load_b32`` shim."""
+
+    def __init__(
+        self,
+        dst: Any = None,
+        base: Any = None,
+        soffset: Any = None,
+        smem: Any = None,
+        comment: str = "",
+        **kwargs: Any,
+    ):
+        super().__init__(InstType.INST_B32, dst, base, soffset, smem, comment, **kwargs)
+
+
+class SLoadB64(SMemLoadInstruction):
+    """``s_load_b64`` shim."""
+
+    def __init__(
+        self,
+        dst: Any = None,
+        base: Any = None,
+        soffset: Any = None,
+        smem: Any = None,
+        comment: str = "",
+        **kwargs: Any,
+    ):
+        super().__init__(InstType.INST_B64, dst, base, soffset, smem, comment, **kwargs)
+
+
+class SLoadB128(SMemLoadInstruction):
+    """``s_load_b128`` shim."""
+
+    def __init__(
+        self,
+        dst: Any = None,
+        base: Any = None,
+        soffset: Any = None,
+        smem: Any = None,
+        comment: str = "",
+        **kwargs: Any,
+    ):
+        super().__init__(InstType.INST_B128, dst, base, soffset, smem, comment, **kwargs)
+
+
+class SLoadB256(SMemLoadInstruction):
+    """``s_load_b256`` shim."""
+
+    def __init__(
+        self,
+        dst: Any = None,
+        base: Any = None,
+        soffset: Any = None,
+        smem: Any = None,
+        comment: str = "",
+        **kwargs: Any,
+    ):
+        super().__init__(InstType.INST_B256, dst, base, soffset, smem, comment, **kwargs)
+
+
+class SLoadB512(SMemLoadInstruction):
+    """``s_load_b512`` shim."""
+
+    def __init__(
+        self,
+        dst: Any = None,
+        base: Any = None,
+        soffset: Any = None,
+        smem: Any = None,
+        comment: str = "",
+        **kwargs: Any,
+    ):
+        super().__init__(InstType.INST_B512, dst, base, soffset, smem, comment, **kwargs)
 
 
 # ==========================================================================
@@ -1136,7 +1353,7 @@ MUBUFReadInstruction = make_dummy_class(f"{_P}.MUBUFReadInstruction")
 AtomicReadWriteInstruction = make_dummy_class(f"{_P}.AtomicReadWriteInstruction")
 SMemAtomicIncInstruction = make_dummy_class(f"{_P}.SMemAtomicIncInstruction")
 SMemAtomicDecInstruction = make_dummy_class(f"{_P}.SMemAtomicDecInstruction")
-SMemLoadInstruction = make_dummy_class(f"{_P}.SMemLoadInstruction")
+# SMemLoadInstruction / SLoadB* — real classes (see above after SMovB64).
 GlobalWriteInstruction = make_dummy_class(f"{_P}.GlobalWriteInstruction")
 SMemStoreInstruction = make_dummy_class(f"{_P}.SMemStoreInstruction")
 FLATStoreInstruction = make_dummy_class(f"{_P}.FLATStoreInstruction")
@@ -1264,11 +1481,7 @@ DSStore2B64 = make_dummy_class(f"{_P}.DSStore2B64")
 DSBPermuteB32 = make_dummy_class(f"{_P}.DSBPermuteB32")
 SAtomicInc = make_dummy_class(f"{_P}.SAtomicInc")
 SAtomicDec = make_dummy_class(f"{_P}.SAtomicDec")
-SLoadB32 = make_dummy_class(f"{_P}.SLoadB32")
-SLoadB64 = make_dummy_class(f"{_P}.SLoadB64")
-SLoadB128 = make_dummy_class(f"{_P}.SLoadB128")
-SLoadB256 = make_dummy_class(f"{_P}.SLoadB256")
-SLoadB512 = make_dummy_class(f"{_P}.SLoadB512")
+# SLoadB32 … SLoadB512 — real classes (``SMemLoadInstruction`` subclasses).
 SStoreB32 = make_dummy_class(f"{_P}.SStoreB32")
 SStoreB64 = make_dummy_class(f"{_P}.SStoreB64")
 SStoreB128 = make_dummy_class(f"{_P}.SStoreB128")

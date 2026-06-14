@@ -73,10 +73,13 @@ Notes:
     - Each test method spawns 2 or 3 fresh Python subprocesses (one per
       path). They inherit ``PYTHONPATH`` from the parent runner. Backend
       selection is via the ``ROCISA_BACKEND`` env var only.
-    - We always call ``rocIsa.getInstance().init((12,5,0), "")`` in the
-      preamble so all three paths see a populated asm caps snapshot. This
-      is required for path (2) (internal ``getAsmCaps()`` queries) and
-      harmless for (1) and (3).
+    - We always call ``rocIsa.getInstance().init(arch, "")`` then
+      ``setKernel(arch, 64)`` in the preamble. ``init`` alone registers ISA
+      metadata (caps); ``setKernel`` installs the per-thread ``KernelInfo``
+      whose ``isaVersion`` ``ReadWriteInstruction::typeConvert()`` uses for
+      gfx11+ mnemonic suffixes (e.g. ``s_load_b64`` vs legacy ``s_load_dwordx2``).
+      Path (2) still needs caps for ``getAsmCaps()``; paths (1) and (3) need
+      the active ISA for byte-identical ``toString`` / lowering.
     - ``s_set_vgpr_msb`` (gfx1250 VGPR-MSB workaround) is *not* triggered
       under the current gfx1250 caps snapshot for VGPR indices < 256.
       Once we promote tests that touch VGPRs >= 256 OR enable the
@@ -174,11 +177,15 @@ def _run_in_subproc(script: str, *, backend, timeout: float = 30) -> str:
     return proc.stdout[start + len(_BEGIN):end]
 
 
-# Shared preamble: initialise rocIsa for the target arch so path (2)'s
-# internal ``getAsmCaps()`` queries succeed. Harmless on paths (1) and (3).
+# Shared preamble: ``init`` loads caps for ``arch_tuple``; ``setKernel`` binds
+# that ISA to this thread so ``Item::kernel().isaVersion`` (used by native
+# ``toString`` type suffixes) matches ``arch_tuple`` — same as real KernelWriter
+# flows (see ``KernelWriter`` / unit tests calling ``setKernel`` after ``init``).
 _INIT_PREAMBLE = textwrap.dedent("""\
     import rocisa
-    rocisa.rocIsa.getInstance().init({arch_tuple}, "", False)
+    _ri = rocisa.rocIsa.getInstance()
+    _ri.init({arch_tuple}, "", False)
+    _ri.setKernel({arch_tuple}, 64)
 """)
 
 
@@ -535,6 +542,32 @@ class TestSMovB64_PairToPair(unittest.TestCase, _ThreePathEqualityCase):
         from rocisa.container import sgpr
         module = Module("k")
         module.add(SMovB64(dst=sgpr(0, 2), src=sgpr(4, 2), comment="wide"))
+    """)
+
+
+class TestSLoadB32_BaseImmOffset(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_load_b32 s0, s[2:3], 0`` -- minimal SMEM load (no modifiers)."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SLoadB32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SLoadB32(dst=sgpr(0), base=sgpr(2, 2), soffset=0,
+                            comment="smem"))
+    """)
+
+
+class TestSLoadB64_WideDst(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_load_b64 s[0:1], s[4:5], 0``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SLoadB64
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SLoadB64(dst=sgpr(0, 2), base=sgpr(4, 2), soffset=0,
+                            comment="wide load"))
     """)
 
 
