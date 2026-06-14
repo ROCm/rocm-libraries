@@ -178,8 +178,21 @@ def runBuildAndSingleGtestJob(Map conf=[:])
 
     // Collect per-shard JUnit XML reports always — even when the build failed.
     // gtest writes these via --gtest_output registered in the cmake test definition.
+    //
+    // Each parallel stage runs the same gtest binary, so without namespacing the
+    // XML the testsuite names would be identical across stages and Jenkins would
+    // silently overwrite earlier results with later ones in the aggregated view.
+    // We prefix the classname attribute in each XML with the stage name so Jenkins
+    // can distinguish "Bf16 gfx90a > CPU_sequence_NONE.Foo" from "Fp32 gfx942 > CPU_sequence_NONE.Foo".
+    def stageName = (env.STAGE_NAME ?: 'unknown').replaceAll('[^a-zA-Z0-9]+', '_')
+    def resultsDir = "${env.WORKSPACE}/${env.MIOPEN_DIR}/build/test_results"
+    sh """
+        for f in ${resultsDir}/miopen_gtest_shard*.xml; do
+            [ -f "\$f" ] || continue
+            sed -i 's|classname="|classname="${stageName}.|g' "\$f"
+        done
+    """
     def xmlGlob = "${env.MIOPEN_DIR}/build/test_results/miopen_gtest_shard*.xml"
-    sh "echo 'JUnit XML files found:'; ls ${env.WORKSPACE}/${xmlGlob} 2>/dev/null || echo '  (none)'"
     junit allowEmptyResults: true, testResults: xmlGlob
 
     if (buildException) throw buildException
