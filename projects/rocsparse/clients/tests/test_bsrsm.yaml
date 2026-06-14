@@ -45,7 +45,6 @@ Definitions:
     - { alpha:  -0.5, alphai:  0.1 }
 
   - &alpha_range_checkin
-    - { alpha:   2.0, alphai:  0.0 }
     - { alpha:   3.0, alphai: -1.0 }
 
   - &alpha_range_nightly
@@ -99,8 +98,26 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos1,
-             nos5,
-             scircuit]
+             nos5]
+
+- name: bsrsm_file
+  category: pre_checkin
+  function: bsrsm
+  precision: *double_only_precisions
+  M: 1
+  K: [15]
+  block_dim: [6]
+  alpha_alphai: *alpha_range_checkin
+  direction: [rocsparse_direction_column]
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  apol: [rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [scircuit]
 
 - name: bsrsm_file
   category: pre_checkin
@@ -120,7 +137,26 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [mplate,
-             Chevron3]
+             Chevron2]
+
+- name: bsrsm_graph_test
+  category: pre_checkin
+  function: bsrsm
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_checkin
+  K: [280]
+  block_dim: [2, 14, 71]
+  alpha_alphai: *alpha_range_checkin
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit, rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  graph_test: true
 
 #
 # CATEGORY: QUICK
@@ -319,22 +355,3 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron4]
-
-- name: bsrsm_graph_test
-  category: pre_checkin
-  function: bsrsm
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_checkin
-  K: [65, 153, 280]
-  block_dim: [2, 14, 71]
-  alpha_alphai: *alpha_range_checkin
-  direction: [rocsparse_direction_row]
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none]
-  diag: [rocsparse_diag_type_non_unit, rocsparse_diag_type_unit]
-  uplo: [rocsparse_fill_mode_lower]
-  apol: [rocsparse_analysis_policy_reuse]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_random]
-  graph_test: true

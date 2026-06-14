@@ -57,6 +57,10 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/HwInstDescTest.cpp
     unit/asm/ReadWriteOperandTest.cpp
     unit/asm/BarrierTest.cpp
+    unit/asm/LoopRegionRemarkPassTest.cpp
+    unit/asm/BranchHelpersTest.cpp
+    unit/asm/SetpcSwappcCfgTest.cpp
+    unit/asm/LongBranchLoweringTest.cpp
 )
 
 # High-Level IR Tests
@@ -77,6 +81,7 @@ set(UNIT_LOGICAL_TEST_FILES
 set(UNIT_CORE_TEST_FILES
     unit/core/AnalysisManagerTest.cpp
     unit/core/BackendRegistryTest.cpp
+    unit/core/ComgrProbeTest.cpp
 )
 
 # Common/Shared Tests

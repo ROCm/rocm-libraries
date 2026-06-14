@@ -68,11 +68,11 @@ class ComputeStoreVgprsVALU(ComputeStoreVgprs):
             writer.vgprs.cinRowPtr  = writer.vgprPool.checkOut(1, "cinRowPtr")
             writer.vgprs.coutRowPtrD = writer.vgprPool.checkOut(1, "coutRowPtrD")
 
-        with writer.allocTmpSgpr(3) as tmpSgprInfo:
+        with writer.allocTmpSgpr(3, tag="ComputeStoreVgprsVALU_tmpSgprInfo") as tmpSgprInfo:
             tmpS0 = tmpSgprInfo.idx
             tmpS1 = tmpS0+1
             wgMT1 = tmpS0+2
-            tmpVgpr = writer.vgprPool.checkOutAligned(2,2,"tmpVgpr")
+            tmpVgpr = writer.vgprPool.checkOutAligned(2,2, tag="ComputeStoreVgprsVALU_tmpVgpr")
             tmpVgprRes = ContinuousRegister(tmpVgpr, 2)
             # dot2: consecutive NumWaveSplitK threads compute the same element, divide it first before computing tile indices
             if kernel["NumWaveSplitK"] > 1:
@@ -170,7 +170,7 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
         tmpVgpr1Res = ContinuousRegister(tmpVgpr1, 2)
         dummy    = writer.vgprPool.checkOut(1,"dummy")
 
-        with writer.allocTmpSgpr(1) as tmpSgprInfo:
+        with writer.allocTmpSgpr(1, tag="ComputeStoreVgprsMFMA_tmpSgprInfo") as tmpSgprInfo:
             tmpSgpr = tmpSgprInfo.idx
 
             # constant
@@ -296,7 +296,7 @@ class ComputeStoreVgprsMFMASwap(ComputeStoreVgprs):
         tmpVgpr1Res = ContinuousRegister(tmpVgpr1, 2)
         dummy    = writer.vgprPool.checkOut(1,"dummy")
 
-        with writer.allocTmpSgpr(1) as tmpSgprInfo:
+        with writer.allocTmpSgpr(1, tag="ComputeStoreVgprsMFMASwap_tmpSgprInfo") as tmpSgprInfo:
             tmpSgpr = tmpSgprInfo.idx
 
             # constant

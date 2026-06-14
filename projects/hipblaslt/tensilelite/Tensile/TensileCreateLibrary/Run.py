@@ -70,6 +70,7 @@ from Tensile.KernelWriterBase import (
 from Tensile.SolutionLibrary import MasterSolutionLibrary, PlaceholderLibrary
 from Tensile.SolutionStructs import Solution
 from Tensile.SolutionStructs.Solution import mergeTypeMismatchCollector, printTypeMismatchSummary
+from Tensile.verify_stinky_comment_vs_elf_text import verify_stinky_paths
 from Tensile.Toolchain.Assembly import makeAssemblyToolchain, buildAssemblyCodeObjectFiles
 from Tensile.Toolchain.Source import makeSourceToolchain, buildSourceCodeObjectFiles
 from Tensile.Toolchain.Validators import (
@@ -83,17 +84,49 @@ from Tensile.Utilities.Decorators.Timing import timing
 from .ParseArguments import parseArguments
 
 
-def libraryDir(outputPath: Union[str, Path], archs: Collection[str]) -> Path:
-    """Return the library output/input directory for the given target archs.
+def libraryRoot(outputPath: Union[str, Path]) -> Path:
+    """The library/ root directory under outputPath.
 
-    Single arch  → <outputPath>/library/<arch>/   (TheRock shard overlay safe)
-    Zero or multiple archs → <outputPath>/library/ (flat)
+    Used as the dispatch root by builders that fan kernels out into per-base
+    subdirectories at write time.
     """
-    path = Path(outputPath)
-    archs = list(archs)
-    if len(archs) == 1:
-        return path / "library" / archs[0]
-    return path / "library"
+    return Path(outputPath) / "library"
+
+
+def libraryDir(outputPath: Union[str, Path], arch: str) -> Path:
+    """The per-base-arch library subdirectory: <outputPath>/library/<base>/.
+
+    Target features (xnack+/xnack-, sramecc, etc.) are stripped from the path —
+    variants of one base co-locate in one directory, disambiguated by kernel
+    filename suffix. Layout matches the runtime probe in tensile_host.cpp which
+    strips at the first colon before looking up the subdirectory.
+    """
+    return libraryRoot(outputPath) / arch.split(":")[0]
+
+
+def _baseArchs(archs: Collection[str]) -> List[str]:
+    """Unique base archs (xnack/sramecc stripped), sorted for determinism."""
+    return sorted({a.split(":")[0] for a in archs})
+
+
+def tensileLibraryFile(outputPath: Union[str, Path], arch: str, library_format: str = "msgpack") -> Path:
+    """The canonical TensileLibrary path for one base arch under outputPath.
+
+    Composes ``<outputPath>/library/<base>/TensileLibrary.<ext>`` where ``ext``
+    is ``.yaml`` for the YAML format and ``.dat`` for msgpack. The base arch
+    is derived from ``arch`` via the same colon-strip rule as ``libraryDir``,
+    so cooked variants like ``gfx942:sramecc+:xnack+`` resolve to the same
+    file as the bare ``gfx942`` arch.
+
+    This is the file that ``writeClientConfigIni``'s ``libraryFile`` argument
+    must point to under the per-base layout. Callers (BenchmarkProblems'
+    cache-hit branch, ClientWriter's benchmark-parameters helper) reach for
+    it from different parts of the pipeline; the helper keeps the
+    "library/<base>/TensileLibrary.<ext>" naming convention in one place so
+    future format/extension changes touch a single call site.
+    """
+    ext = ".yaml" if library_format == "yaml" else ".dat"
+    return libraryDir(outputPath, arch) / f"TensileLibrary{ext}"
 
 
 class KernelCodeGenResult(NamedTuple):
@@ -113,6 +146,66 @@ class KernelMinResult(NamedTuple):
     cuoccupancy: int
     pgr: int
     mathclk: int
+
+
+def _stinky_asm_verify_wanted(isa: IsaVersion) -> bool:
+    """Return True if asm/.o Stinky size check should run for this kernel.
+
+    Requires ``CheckASMCodeSize`` and gfx1250. When True, callers should avoid joblib for
+    write+assemble so logs stay on one process.
+    """
+    return bool(globalParameters["CheckASMCodeSize"]) and isaToGfx(isa) == "gfx1250"
+
+
+def _stinky_out(msg: str) -> None:
+    """Emit one user-visible log line for Stinky verify.
+
+    Writes to stderr via ``os.write(2, ...)``. Under pytest-xdist, worker stdout may be
+    hidden; stderr often still appears in the terminal.
+    """
+    try:
+        os.write(2, (msg + "\n").encode("utf-8", errors="replace"))
+    except OSError:
+        pass
+
+
+def _verify_stinky_asm_comment_vs_elf_text(s_path: Path, o_path: Path, kernel_base: str) -> None:
+    """After assembling ``s_path`` → ``o_path``, verify Stinky vs ELF ``.text``.
+
+    Call only when ``_stinky_asm_verify_wanted(isa)`` is True. Uses ``verify_stinky_comment_vs_elf_text``
+    (``readelf`` / ``llvm-readelf``; ``ROCM_PATH``, ``LLVM_BIN``, or ``PATH``). Forwards messages
+    through ``_stinky_out``. Exits via ``printExit`` on mismatch (1) or tool/readelf error (2).
+
+    Args:
+        s_path: Path to the generated ``.s`` file.
+        o_path: Path to the assembled ``.o`` file.
+        kernel_base: Short name for messages (usually the asm stem).
+    """
+    _stinky_out(f"CheckASMCodeSize: running verify for {kernel_base}")
+    try:
+        code, out_s, err_s = verify_stinky_paths(s_path, o_path)
+    except Exception as ex:
+        printExit(f"CheckASMCodeSize: could not run verifier for {kernel_base}: {ex}")
+    if out_s:
+        for line in out_s.splitlines():
+            _stinky_out(line)
+    if err_s:
+        for line in err_s.splitlines():
+            _stinky_out(line)
+    if code == 2:
+        printExit(f"CheckASMCodeSize: verifier error for {kernel_base}")
+    if code == 1:
+        printExit(
+            f"CheckASMCodeSize: STINKY_TOTAL_INST_BYTES vs ELF .text mismatch for {kernel_base}"
+        )
+    if code == 0:
+        out = (out_s or "") + (err_s or "")
+        matched = "OK STINKY" in out
+        if matched:
+            _stinky_out(
+                f"CheckASMCodeSize: OK STINKY_TOTAL_INST_BYTES vs ELF .text match for {kernel_base}"
+            )
+
 
 def memCompress(obj):
     return zlib.compress(pickle.dumps(obj))
@@ -134,9 +227,15 @@ def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel
     header = kernelWriter.getHeaderFileString(kernel)
     objFilename = kernel._state.get("codeObjectFile", None)
     pgr = int(kernel["PrefetchGlobalRead"])
+    cuocc = kernel["CUOccupancy"]
+    if cuocc <= 0 and getVerbosity() >= 2:
+        print2(
+            f"[codegen] CUOccupancy={cuocc} (<=0) after codegen for kernel {asmFilename}; "
+            f"runtime will clamp to 1."
+        )
     return KernelCodeGenResult(
         err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]), \
-        kernel["WavefrontSize"], kernel["CUOccupancy"], \
+        kernel["WavefrontSize"], cuocc, \
         pgr, kernel["MathClocksUnrolledLoop"]
     )
 
@@ -223,6 +322,7 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
                     sol.sizeMapping.PrefetchGlobalRead = sol.originalSolution._state['PrefetchGlobalRead']
                     sol.sizeMapping.NonTemporalA = sol.originalSolution._state['NonTemporalA']
                     sol.sizeMapping.NonTemporalB = sol.originalSolution._state['NonTemporalB']
+                    sol.sizeMapping.adaptiveGemmNTAB = sol.originalSolution._state.get('AdaptiveGemmNTAB', 0)
                     sol.sizeMapping.NonTemporalD = sol.originalSolution._state['NonTemporalD']
                     sol.sizeMapping.WaveSeparateGlobalReadA = sol.originalSolution._state['WaveSeparateGlobalReadA']
                     sol.sizeMapping.WaveSeparateGlobalReadB = sol.originalSolution._state['WaveSeparateGlobalReadB']
@@ -252,6 +352,7 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
                         sol.sizeMapping.PrefetchGlobalRead = sol.originalSolution._state['PrefetchGlobalRead']
                         sol.sizeMapping.NonTemporalA = sol.originalSolution._state['NonTemporalA']
                         sol.sizeMapping.NonTemporalB = sol.originalSolution._state['NonTemporalB']
+                        sol.sizeMapping.adaptiveGemmNTAB = sol.originalSolution._state.get('AdaptiveGemmNTAB', 0)
                         sol.sizeMapping.NonTemporalD = sol.originalSolution._state['NonTemporalD']
                         sol.sizeMapping.WaveSeparateGlobalReadA = sol.originalSolution._state['WaveSeparateGlobalReadA']
                         sol.sizeMapping.WaveSeparateGlobalReadB = sol.originalSolution._state['WaveSeparateGlobalReadB']
@@ -340,9 +441,11 @@ def writeSolutionsAndKernels(
 
     with timing_context("python_kernel_setup"):
         outputPath = Path(outputPath)
-        destLibPath = ensurePath(
-            libraryDir(outputPath, cmdlineArchs)
-        )  # Destination for code object library files (.co)
+        # Builders fan out into <destRoot>/<base-arch>/ at the moment of write.
+        # Pre-create the per-base subdirs so concurrent emit doesn't race mkdir.
+        destRoot = ensurePath(libraryRoot(outputPath))
+        for base in _baseArchs(cmdlineArchs):
+            ensurePath(libraryDir(outputPath, base))
         buildTmpPath = ensurePath(outputPath / "build_tmp" / outputPath.stem.upper())  #
         assemblyTmpPath = ensurePath(
             buildTmpPath / "assembly"
@@ -391,7 +494,10 @@ def writeSolutionsAndKernels(
 
     def assemble(ret):
         p, isa, wavefrontsize, _ = ret
-        asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(p.with_suffix(".o")))
+        o_path = p.with_suffix(".o")
+        asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(o_path))
+        if _stinky_asm_verify_wanted(isa):
+            _verify_stinky_asm_comment_vs_elf_text(p, o_path, p.stem)
         if removeTemporaries:
             p.unlink()
 
@@ -425,7 +531,7 @@ def writeSolutionsAndKernels(
                 asmToolchain.linker,
                 asmToolchain.bundler,
                 asmKernels,
-                destLibPath,
+                destRoot,
                 assemblyTmpPath,
                 compress,
             )
@@ -434,7 +540,7 @@ def writeSolutionsAndKernels(
             buildSourceCodeObjectFiles(
                 srcToolchain.compiler,
                 srcToolchain.bundler,
-                destLibPath,
+                destRoot,
                 objectTmpPath,
                 outputPath,
                 srcKernelFile,
@@ -463,7 +569,11 @@ def writeSolutionsAndKernelsTCL(
     removeTemporaries: bool=True
 ):
     outputPath = Path(outputPath)
-    destLibPath = ensurePath(libraryDir(outputPath, cmdlineArchs))
+    # Builders fan out into <destRoot>/<base-arch>/ at the moment of write.
+    # Pre-create the per-base subdirs so concurrent emit doesn't race mkdir.
+    destRoot = ensurePath(libraryRoot(outputPath))
+    for base in _baseArchs(cmdlineArchs):
+        ensurePath(libraryDir(outputPath, base))
     buildTmpPath = ensurePath(outputPath / "build_tmp" / outputPath.stem.upper())
     assemblyTmpPath = ensurePath(
         buildTmpPath / "assembly"
@@ -490,7 +600,10 @@ def writeSolutionsAndKernelsTCL(
 
     def assemble(ret, removeTemporaries: bool):
         asmPath, isa, wavefrontsize, result = ret
-        asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(asmPath), str(asmPath.with_suffix(".o")))
+        o_path = asmPath.with_suffix(".o")
+        asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(asmPath), str(o_path))
+        if _stinky_asm_verify_wanted(isa):
+            _verify_stinky_asm_comment_vs_elf_text(asmPath, o_path, asmPath.stem)
         if removeTemporaries:
             asmPath.unlink()
         return result
@@ -531,7 +644,7 @@ def writeSolutionsAndKernelsTCL(
         asmToolchain.linker,
         asmToolchain.bundler,
         asmKernels,
-        destLibPath,
+        destRoot,
         assemblyTmpPath,
         compress,
     )
@@ -542,7 +655,7 @@ def writeSolutionsAndKernelsTCL(
     buildSourceCodeObjectFiles(
         srcToolchain.compiler,
         srcToolchain.bundler,
-        destLibPath,
+        destRoot,
         objectTmpPath,
         outputPath,
         srcKernelFile,
@@ -941,7 +1054,11 @@ def run():
         for arch in targetIsas
         if isaInfoMap[arch].asmCaps["SupportedISA"]
     ]
-    newLibraryDir = ensurePath(libraryDir(outputPath, archs))
+    # Per-base subdirs are created here (idempotent if writeSolutionsAndKernels*
+    # already created them above). Each per-arch write below routes to its own
+    # libraryDir(outputPath, archName).
+    for base in _baseArchs(archs):
+        ensurePath(libraryDir(outputPath, base))
     splitGSU = False
 
     start_pki = timer()
@@ -957,17 +1074,12 @@ def run():
             if kName not in solDict:
                 solDict["%s"%kName] = kernel
 
-    def writeMsl(name, lib):
-        filename = os.path.join(newLibraryDir, name)
-        lib.applyNaming(splitGSU)
-        LibraryIO.write(filename, state(lib), arguments["LibraryFormat"])
-
-    # Split libraryMapping per arch and write one mapping file per arch.
-    # Every value ends in "_<arch>" because tuned entries carry the arch
-    # natively and renameFallbacksPerArch arch-suffixed every fallback entry
-    # before this point. Filtering on that suffix keeps each arch's Mapping
-    # complete while letting single-arch builds produce non-colliding mapping
-    # artifacts that survive overlay-style installs (kpack shards).
+    # Split libraryMapping per arch and write one mapping file per arch into
+    # that arch's per-base subdirectory. Every value ends in "_<arch>" because
+    # tuned entries carry the arch natively and renameFallbacksPerArch
+    # arch-suffixed every fallback entry before this point. Filtering on that
+    # suffix keeps each arch's Mapping complete while letting builds produce
+    # non-colliding mapping artifacts that survive overlay-style installs.
     for archName in archs:
         archMapping = {
             idx: name
@@ -975,18 +1087,25 @@ def run():
             if name.endswith("_" + archName)
         }
         if archMapping:
+            archDir = libraryDir(outputPath, archName)
             archMappingFile = os.path.join(
-                newLibraryDir, "TensileLiteLibrary_lazy_" + archName + "_Mapping"
+                archDir, "TensileLiteLibrary_lazy_" + archName + "_Mapping"
             )
             LibraryIO.write(archMappingFile, archMapping, "msgpack")
 
     start_msl = timer()
     for archName, newMasterLibrary in masterLibraries.items():
         if archName in archs:
+            archDir = libraryDir(outputPath, archName)
+            def writeMsl(name, lib, archDir=archDir):
+                filename = os.path.join(archDir, name)
+                lib.applyNaming(splitGSU)
+                LibraryIO.write(filename, state(lib), arguments["LibraryFormat"])
+
             if arguments["LazyLibraryLoading"]:
-                masterFile = os.path.join(newLibraryDir, "TensileLibrary_lazy_" + archName)
+                masterFile = os.path.join(archDir, "TensileLibrary_lazy_" + archName)
             else:
-                masterFile = os.path.join(newLibraryDir, "TensileLibrary_" + archName)
+                masterFile = os.path.join(archDir, "TensileLibrary_" + archName)
             newMasterLibrary.applyNaming(splitGSU)
             LibraryIO.write(masterFile, state(newMasterLibrary), arguments["LibraryFormat"])
 
