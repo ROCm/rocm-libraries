@@ -7,17 +7,20 @@ import json
 import sys
 from pathlib import Path
 
+
 def is_executable(file_path: Path) -> bool:
     """Check if a file is an executable (not a directory)."""
     return (
         file_path.is_file()
         and os.access(file_path, os.X_OK)
-        and not file_path.name.startswith('.')  # skip hidden files
+        and not file_path.name.startswith(".")  # skip hidden files
     )
+
 
 def disable_core_dump():
     """Disable core dump generation."""
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
 
 def list_gtest_fixtures(executable: Path):
     """Run the executable with --gtest_list_tests and return fixture names."""
@@ -33,15 +36,20 @@ def list_gtest_fixtures(executable: Path):
             stderr=subprocess.PIPE,
             text=True,
             timeout=10,  # prevent hanging
-            preexec_fn=disable_core_dump
+            preexec_fn=disable_core_dump,
         )
         if result.returncode != 0:
-            print(f"Warning: Skipping '{executable}' due to non-zero exit code. Not a gtest..?", file=sys.stderr)
+            print(
+                f"Warning: Skipping '{executable}' due to non-zero exit code. Not a gtest..?",
+                file=sys.stderr,
+            )
             return []
 
         fixtures = []
         for line in result.stdout.splitlines():
-            if line.strip() and not line.startswith(" ") and line.endswith("."):  # non-indented = fixture name
+            if (
+                line.strip() and not line.startswith(" ") and line.endswith(".")
+            ):  # non-indented = fixture name
                 fixtures.append(line.strip())
         return fixtures
 
@@ -51,6 +59,7 @@ def list_gtest_fixtures(executable: Path):
     except Exception as e:
         print(f"Error running {executable}: {e}", file=sys.stderr)
         return []
+
 
 def main(directory: str, output_file: str):
     dir_path = Path(directory)
@@ -72,9 +81,12 @@ def main(directory: str, output_file: str):
     try:
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(results, f, indent=4)
-        print(f"List of {fixture_count} fixtures from {len(results)} files written to {output_file}")
+        print(
+            f"List of {fixture_count} fixtures from {len(results)} files written to {output_file}"
+        )
     except Exception as e:
         print(f"Error writing JSON file: {e}", file=sys.stderr)
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

@@ -99,7 +99,7 @@ test_categories:
       - "gtest/log_test.cpp"
       - "gtest/test_errors.cpp"
       - "gtest/pooling2d_asymmetric.cpp"
-    
+
     labels:
       - "quick"
       - "pre-commit"
@@ -279,7 +279,7 @@ test_categories:
       # All test files in the suite
       - "*.cpp"
       - "gtest/*.cpp"
-      
+
     exclude:
       # Excluding slower tests for faster PR validation
       - "*DeepBench*"
@@ -361,7 +361,7 @@ exclude_gpu:
       - "ex_gpu_gfx120X"
 
   exclude_gpu_gfx110X:
-    test_patterns: 
+    test_patterns:
       - *gfx11_common_patterns
       - "*/GPU_MIOpenDriver*"
       - "Smoke/CPU_Handle_NONE*"
@@ -374,7 +374,7 @@ exclude_gpu:
       - "ex_gpu_gfx110X"
 
   exclude_gpu_gfx115X:
-  #Negative patterns for gfx1150 and gfx1151 will be covered here. 
+  #Negative patterns for gfx1150 and gfx1151 will be covered here.
   #Add exclude_gpu_gfx1150/gfx1151 separately only if they have unique patterns.
     test_patterns: *gfx11_common_patterns
     labels:
@@ -398,7 +398,7 @@ execution_settings:
   default_timeout: 300  # 5 minutes per test
   timeout_multiplier: 2 # Multiplier for all timeouts (1, 1.5, 1.75, 2, etc.)
   category_timeouts:
-    quick: 300          # 5 minutes 
-    standard: 1800      # 30 minutes 
-    comprehensive: 7200 # 2 hours 
-    full: 14400         # 4 hours         
+    quick: 300          # 5 minutes
+    standard: 1800      # 30 minutes
+    comprehensive: 7200 # 2 hours
+    full: 14400         # 4 hours

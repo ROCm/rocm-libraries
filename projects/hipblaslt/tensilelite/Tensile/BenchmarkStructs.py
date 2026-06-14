@@ -296,11 +296,16 @@ class BenchmarkProcess:
 
 class constructForkPermutations():
     def __init__(self, forkParams, paramGroups):
-        totalPermutations = 1
-        for values in forkParams.values():
-            totalPermutations *= len(values)
-        for group in paramGroups:
-            totalPermutations *= len(group)
+        totalPermutations = 0
+        for groups in itertools.product(*paramGroups):
+            group = set()
+            for g in groups:
+                group.update(g.keys())
+            groupPermutations = 1
+            for name, values in forkParams.items():
+                if name not in group:
+                    groupPermutations *= len(values)
+            totalPermutations += groupPermutations
 
         self.forkParams = forkParams
         self.paramGroups = paramGroups
@@ -322,23 +327,21 @@ class constructForkPermutations():
 def constructLazyForkPermutations(forkParams, paramGroups):
     """Constructs cartesian product of parameter values in forkParams and paramGroups"""
 
-    params_list = []
-    for name, values in forkParams.items():
-        params_list.append((name, values, False))
+    for groups in itertools.product(*paramGroups):
+        group = {}
+        for g in groups:
+            group.update(g)
+        params_list = list(forkParams)
+        for name in group:
+            if name not in forkParams:
+                params_list.append(name)
+        values = []
+        for name in params_list:
+            values.append([group[name]] if name in group else forkParams[name])
+        for combination in itertools.product(*reversed(values)):
+            permutation = dict(zip(params_list, reversed(combination)))
+            yield permutation
 
-    for i, group in enumerate(paramGroups):
-        params_list.append((f"_group{i}", group, True))
-
-    params_list_reversed = list(reversed(params_list))
-    values_reversed = [values for _, values, _ in params_list_reversed]
-    for combination in itertools.product(*values_reversed):
-        permutation = {}
-        for (name, _, isgroup), value in zip(params_list, reversed(combination)):
-            if isgroup:
-                permutation.update(value)
-            else:
-                permutation[name] = value
-        yield permutation
 
 class BenchmarkStep:
     """A single benchmark step which consists of constant and fork parameters and a set of sizes"""

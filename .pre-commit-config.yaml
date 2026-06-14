@@ -26,7 +26,6 @@ exclude: |
     projects/hipsparse/.*|
     projects/hipsparselt/.*|
     projects/hiptensor/.*|
-    projects/miopen/.*|
     projects/rocblas/.*|
     projects/rocfft/.*|
     projects/rocprim/.*|
@@ -51,7 +50,11 @@ exclude: |
     dnn-providers/integration-tests/golden_reference_data/.*|
     # Generated files (see rocrand/tools/ _generator.cpp files)
     projects/rocrand/library/.*constants\.(cpp|h)|
-    projects/rocrand/library/.*precomputed\.(cpp|h)
+    projects/rocrand/library/.*precomputed\.(cpp|h)|
+    # MIOpen exclusion list
+    projects/miopen/.*\.s$|
+    projects/miopen/.*\.inc$|
+    projects/miopen/.*\.model$
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -63,6 +66,7 @@ repos:
         exclude: |
           (?x)
           ^projects/hipdnn/\.clang-format$|
+          ^projects/miopen/\.clang-format$|
           ^dnn-providers/miopen-provider/\.clang-format$|
           ^dnn-providers/hipblaslt-provider/\.clang-format$|
           ^dnn-providers/hip-kernel-provider/\.clang-format$|
@@ -81,7 +85,7 @@ repos:
       - id: clang-format
         name: clang-format (C/C++/ObjC)
         entry: clang-format -i -style=file
-        files: '\.(c|cpp|cc|h|hpp|m|mm)$'
+        files: '\.(c|cpp|cc|h|hpp|m|mm|cl)$|\.(h|hpp|cpp)\.in$'
 
   - repo: local
     hooks:
@@ -92,10 +96,19 @@ repos:
         files: ^projects/hipdnn/(data_sdk|flatbuffers_sdk)/schemas/.*\.fbs$
         pass_filenames: true
 
+      - id: gtest-format-miopen
+        name: GTest naming conventions (MIOpen)
+        entry: python projects/miopen/test/utils/gtest_formating_checks.py
+        language: python
+        files: ^projects/miopen/test/gtest/.*\.cpp$
+        pass_filenames: false
+
   - repo: https://github.com/cheshirekow/cmake-format-precommit
     rev: v0.6.10
     hooks:
       - id: cmake-lint
+        # MIOpen CMake files have not been audited for cmake-lint compliance yet.
+        exclude: ^projects/miopen/.*
       # cmake-format is disabled due to undesirable formatting.
       # We can investigate changing the configuration before re-enabling or using an alternative tool.
       # - id: cmake-format

@@ -33,10 +33,11 @@ def run_selective_test_filter(args):
 
 def get_git_sha(command):
     try:
-        commit_sha = subprocess.check_output(
-            command,
-            stderr=subprocess.DEVNULL
-        ).decode("utf-8").strip()
+        commit_sha = (
+            subprocess.check_output(command, stderr=subprocess.DEVNULL)
+            .decode("utf-8")
+            .strip()
+        )
         return commit_sha
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
@@ -65,8 +66,16 @@ def main():
         "select", help="Selective test filtering between git refs"
     )
     parser_test.add_argument("depmap_json", help="Path to dependency mapping JSON")
-    parser_test.add_argument("--base-sha", help="git base sha", default=get_git_sha(["git", "merge-base", "HEAD", "develop"]))
-    parser_test.add_argument("--feature-sha", help="git feature sha", default=get_git_sha(["git", "rev-parse", "HEAD"]))
+    parser_test.add_argument(
+        "--base-sha",
+        help="git base sha",
+        default=get_git_sha(["git", "merge-base", "HEAD", "develop"]),
+    )
+    parser_test.add_argument(
+        "--feature-sha",
+        help="git feature sha",
+        default=get_git_sha(["git", "rev-parse", "HEAD"]),
+    )
     parser_test.add_argument(
         "--all", action="store_true", help="Include all executables"
     )
@@ -79,10 +88,14 @@ def main():
         "--output", help="Output JSON file", default="miopen_dapper_tests.json"
     )
     parser_test.add_argument(
-        "--fixturemap", help="Optional path to file containing the test <-> gtest fixture mapping", default=""
+        "--fixturemap",
+        help="Optional path to file containing the test <-> gtest fixture mapping",
+        default="",
     )
     parser_test.add_argument(
-        "--shardsfile", help="Optional path to file containing a list of gtest shard output files", default=""
+        "--shardsfile",
+        help="Optional path to file containing a list of gtest shard output files",
+        default="",
     )
 
     # Code auditing

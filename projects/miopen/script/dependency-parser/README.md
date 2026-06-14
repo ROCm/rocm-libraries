@@ -108,7 +108,7 @@ python main.py parse examples/build-ninja/build.ninja --workspace-root /path/to/
 # Selective test filtering
 python main.py select miopen_dapper_mapping.json [<ref1> <ref2>] [--all | --test-prefix] [--output <output_json>]
 
-# 
+#
 
 # Code auditing
 python main.py audit miopen_dapper_mapping.json

@@ -37,11 +37,16 @@ def get_changed_files(ref1, ref2, path_to_folder):
         args += ["--", path_to_folder]
     try:
         result = subprocess.run(args, capture_output=True, text=True, check=True)
-        files = set(str(Path(*Path(line).parts[2:])).strip() for line in result.stdout.splitlines() if line.strip())
+        files = set(
+            str(Path(*Path(line).parts[2:])).strip()
+            for line in result.stdout.splitlines()
+            if line.strip()
+        )
         return files
     except subprocess.CalledProcessError as e:
         print(f"Error running git diff: {e}")
         sys.exit(1)
+
 
 def load_depmap(depmap_json):
     """Load the dependency mapping JSON."""
@@ -52,15 +57,17 @@ def load_depmap(depmap_json):
         return depmap["file_to_executables"]
     return depmap
 
+
 def load_fixturemap(fixturemap_json):
     """Load the dependency mapping JSON."""
     with open(fixturemap_json, "r") as f:
         fixturemap = json.load(f)
     for test, fixtures in fixturemap.items():
         for i, fixture in enumerate(fixtures):
-            if not fixture.endswith('*'):
-                fixtures[i] = fixture + '*'
+            if not fixture.endswith("*"):
+                fixtures[i] = fixture + "*"
     return fixturemap
+
 
 def select_tests(file_to_executables, changed_files, filter_mode):
     """Return a set of test executables affected by changed files."""
@@ -77,6 +84,7 @@ def select_tests(file_to_executables, changed_files, filter_mode):
                     affected.add(exe)
     return sorted(affected)
 
+
 def create_gtest_filter(tests_to_run, fixturemap_json):
     gtest_filter = ""
     if fixturemap_json:
@@ -88,6 +96,7 @@ def create_gtest_filter(tests_to_run, fixturemap_json):
     else:
         gtest_filter = "*"
     return gtest_filter
+
 
 def main():
     if "--audit" in sys.argv:
@@ -106,7 +115,9 @@ def main():
 
     if "--optimize-build" in sys.argv:
         if len(sys.argv) < 3:
-            print("Usage: python selective_test_filter.py <depmap_json> --optimize-build <changed_file1> [<changed_file2> ...]")
+            print(
+                "Usage: python selective_test_filter.py <depmap_json> --optimize-build <changed_file1> [<changed_file2> ...]"
+            )
             sys.exit(1)
         depmap_json = sys.argv[1]
         changed_files = set(sys.argv[sys.argv.index("--optimize-build") + 1 :])
@@ -125,7 +136,9 @@ def main():
         sys.exit(0)
 
     if len(sys.argv) < 4:
-        print("Usage: python selective_test_filter.py <depmap_json> <ref1> <ref2> [--all | --test-prefix] [--output <output_json>] [--folder <path_to_folder>]")
+        print(
+            "Usage: python selective_test_filter.py <depmap_json> <ref1> <ref2> [--all | --test-prefix] [--output <output_json>] [--folder <path_to_folder>]"
+        )
         sys.exit(1)
 
     depmap_json = sys.argv[1]
@@ -176,9 +189,19 @@ def main():
             gtest_shards = open(shardsfile).read().splitlines()
 
     with open(output_json, "w") as f:
-        json.dump({"tests_to_run": tests, "dapper_filter": gtest_filter, "changed_files": sorted(changed_files), "gtest_shards": gtest_shards}, f, indent=2)
+        json.dump(
+            {
+                "tests_to_run": tests,
+                "dapper_filter": gtest_filter,
+                "changed_files": sorted(changed_files),
+                "gtest_shards": gtest_shards,
+            },
+            f,
+            indent=2,
+        )
 
     print(f"Exported {len(tests)} test fixtures to run to {output_json}")
+
 
 if __name__ == "__main__":
     main()

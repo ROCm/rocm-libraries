@@ -10,6 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+
 def preprocess_and_find_gtests(gtest):
     pp_folder = "test/gtest/pp"
     build_command = shlex.split(gtest)
@@ -25,17 +26,16 @@ def preprocess_and_find_gtests(gtest):
             flagged = True
         elif token == "-o":
             skip = index + 1
-            outfile = pp_folder + "/" + Path(build_command[index+1]).with_suffix(".i").name
+            outfile = (
+                pp_folder + "/" + Path(build_command[index + 1]).with_suffix(".i").name
+            )
 
         if index > skip:
             preprocess_command.append(token)
 
     try:
         result = subprocess.run(
-            preprocess_command, 
-            capture_output=True, 
-            text=True, 
-            check=True
+            preprocess_command, capture_output=True, text=True, check=True
         )
 
     except subprocess.CalledProcessError as e:
@@ -45,26 +45,32 @@ def preprocess_and_find_gtests(gtest):
         print(f"Compiler Error Messages:\n{e.stderr}", file=sys.stderr)
         sys.exit(e.returncode)
 
-    new_fixtures = re.findall(r"\b(?:TEST_F|TEST_P|TYPED_TEST)\s*\(\s*(\w+)", result.stdout)
+    new_fixtures = re.findall(
+        r"\b(?:TEST_F|TEST_P|TYPED_TEST)\s*\(\s*(\w+)", result.stdout
+    )
 
     return new_fixtures
+
 
 def extract_gtext_fixtures(json_path: str, output_file: str, pp_folder: str):
     exes = []
     gtests = []
 
     try:
-        with open(json_path, 'r', encoding='utf-8') as f:
+        with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
             for entry in data:
-                file_path = Path(entry.get('file', ''))
+                file_path = Path(entry.get("file", ""))
                 parts = file_path.parts
 
                 # Check if the file is located in the test/gtest folder
-                if any(parts[i] == "test" and parts[i+1] == "gtest" for i in range(len(parts) - 1)):
+                if any(
+                    parts[i] == "test" and parts[i + 1] == "gtest"
+                    for i in range(len(parts) - 1)
+                ):
                     exes.append(f"bin/test_{file_path.stem}")
-                    gtests.append(entry.get('command'))
+                    gtests.append(entry.get("command"))
 
     except FileNotFoundError:
         print(f"Error: {json_path} not found.")
@@ -91,9 +97,12 @@ def extract_gtext_fixtures(json_path: str, output_file: str, pp_folder: str):
     try:
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(results, f, indent=4)
-        print(f"List of {fixture_count} fixtures from {len(results)} files written to {output_file}")
+        print(
+            f"List of {fixture_count} fixtures from {len(results)} files written to {output_file}"
+        )
     except Exception as e:
         print(f"Error writing JSON file: {e}", file=sys.stderr)
+
 
 def main():
     if len(sys.argv) < 2:
@@ -103,7 +112,10 @@ def main():
 
     compile_commands_path = Path(compile_commands)
     if not compile_commands_path.is_file():
-        print(f"Usage: {sys.argv[0]} [<path_to_compile_commands.json> [<path_to_miopen_dapper_fixtures.json>]]", file=sys.stderr)
+        print(
+            f"Usage: {sys.argv[0]} [<path_to_compile_commands.json> [<path_to_miopen_dapper_fixtures.json>]]",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     if len(sys.argv) < 3:
@@ -114,6 +126,6 @@ def main():
     pp_folder = "test/gtest/pp"
     extract_gtext_fixtures(compile_commands, output_file, pp_folder)
 
+
 if __name__ == "__main__":
     main()
-
