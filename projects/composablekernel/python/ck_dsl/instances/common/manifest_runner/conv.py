@@ -40,8 +40,19 @@ def run_conv_manifest_problem(
         np_dtype = np.float16
 
     rng = np.random.default_rng(1234)
-    A = (rng.random((N, H, W, C), dtype=np.float32) * 0.04 - 0.02).astype(np_dtype)
-    B = (rng.random((K, R, S, cpg), dtype=np.float32) * 0.04 - 0.02).astype(np_dtype)
+    if dtype == "bf16":
+        # Generate as float32, then take the upper 2 bytes of each f32 word as
+        # bf16 bits (little-endian: bytes [2:4]). This produces valid bf16-encoded
+        # values rather than integer bit patterns (.astype(uint16) would truncate
+        # the float to an integer first, giving garbage — often zeros or NaNs).
+        def _to_bf16(x):
+            f32 = np.ascontiguousarray(x, dtype=np.float32)
+            return f32.view(np.uint8).reshape(-1, 4)[:, 2:].copy().view(np.uint16).reshape(x.shape)
+        A = _to_bf16(rng.random((N, H, W, C), dtype=np.float32) * 0.04 - 0.02)
+        B = _to_bf16(rng.random((K, R, S, cpg), dtype=np.float32) * 0.04 - 0.02)
+    else:
+        A = (rng.random((N, H, W, C), dtype=np.float32) * 0.04 - 0.02).astype(np_dtype)
+        B = (rng.random((K, R, S, cpg), dtype=np.float32) * 0.04 - 0.02).astype(np_dtype)
     Ho = (H + 2 * pH - dH * (R - 1) - 1) // sH + 1
     Wo = (W + 2 * pW - dW * (S - 1) - 1) // sW + 1
     D = np.empty((N, Ho, Wo, K), dtype=np_dtype)
