@@ -1,4 +1,0 @@
-interface:
-  display_name: "RFC Review: Security"
-  short_description: "Security review of an RFC"
-  default_prompt: "Use $rfc-review-security for a deep security review of a technical RFC — threat model, trust boundaries, attack surface, input validation, crypto, authN/authZ, secrets, supply chain, privacy, and audit — and write a focused review report."

@@ -1,1 +1,0 @@
-../../../rocprim/scripts/code-format/check-format.sh

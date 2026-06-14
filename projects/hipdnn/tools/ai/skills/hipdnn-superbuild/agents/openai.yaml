@@ -1,4 +1,0 @@
-interface:
-  display_name: "hipDNN Superbuild"
-  short_description: "Build hipDNN with providers"
-  default_prompt: "Use $hipdnn-superbuild to configure and build hipDNN with providers through the rocm-libraries superbuild."

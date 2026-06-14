@@ -1,7 +1,0 @@
-{
-  "_comment": "Copy this file to config.json (gitignored) or let /rfc-backlog create it for you. These values pre-fill the prompts in Step 7 and are updated whenever you confirm new answers.",
-  "projectKey": "",
-  "defaultComponent": "",
-  "defaultEpic": "",
-  "defaultLabels": []
-}

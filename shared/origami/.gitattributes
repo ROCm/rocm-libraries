@@ -1,3 +1,0 @@
-# Enforce LF line endings for all text files in origami.
-# Git normalizes to LF on commit and checkout, so future PRs cannot change format.
-* text=auto eol=lf

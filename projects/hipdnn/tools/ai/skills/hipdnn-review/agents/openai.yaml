@@ -1,4 +1,0 @@
-interface:
-  display_name: "hipDNN Review"
-  short_description: "Review hipDNN diffs and PRs"
-  default_prompt: "Use $hipdnn-review to review a hipDNN pull request, branch, or local diff for correctness, compatibility, resource ownership, provider behavior, ASIC/multi-arch coverage, and testing quality."

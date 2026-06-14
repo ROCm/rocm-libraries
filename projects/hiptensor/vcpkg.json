@@ -1,6 +1,0 @@
-{
-  "dependencies": [
-    "zlib",
-    "zstd"
-  ]
-}
