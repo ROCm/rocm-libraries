@@ -9,7 +9,6 @@
 // shapes in order to test a wide range of shapes quickly.
 
 #include "conv_api_solution_count_large_stride_common.hpp"
-#include <array>
 #include <vector>
 
 namespace {
@@ -28,16 +27,27 @@ struct Shape3D
 // Mirrors the PyTorch reproducer in ROCM-23997.
 //   torch.nn.Conv3d(96, 32, kernel_size=3, padding=1)
 //   x = torch.empty((1, 96, Nx, Ny, Z))
+// Boundary-bracketing set rather than a full spatial_xy×z cross-product: the
+// element count 96*nxy^2*z determines whether x's strides cross INT_MAX
+// (2,147,483,647), so most cross-product cells are redundant. This list keeps a
+// below/above control at each spatial size plus the fine bracket at nxy=512
+// {84(below),86,88(above)} where the boundary actually falls.
 std::vector<Shape3D> ReproducerShapes()
 {
-    constexpr std::array<int, 5> spatial_xy = {64, 128, 256, 512, 1024};
-    constexpr std::array<int, 10> z_values  = {16, 32, 64, 84, 86, 88, 128, 256, 512, 1024};
-    std::vector<Shape3D> out;
-    out.reserve(spatial_xy.size() * z_values.size());
-    for(int nxy : spatial_xy)
-        for(int z : z_values)
-            out.push_back({1, 96, nxy, nxy, z});
-    return out;
+    return {
+        // {n, c, d, h, w}; boundary = 96*nxy^2*z vs INT_MAX (2,147,483,647)
+        {1, 96, 64, 64, 64},      // below  (control, small spatial)
+        {1, 96, 128, 128, 128},   // below  (control)
+        {1, 96, 256, 256, 64},    // below  (control, mid spatial)
+        {1, 96, 256, 256, 512},   // above
+        {1, 96, 256, 256, 1024},  // above
+        {1, 96, 512, 512, 84},    // below  } fine boundary
+        {1, 96, 512, 512, 86},    // above  } bracket at
+        {1, 96, 512, 512, 88},    // above  } nxy=512
+        {1, 96, 1024, 1024, 16},  // below  (large spatial control)
+        {1, 96, 1024, 1024, 32},  // above
+        {1, 96, 1024, 1024, 1024} // above  (largest)
+    };
 }
 
 ::testing::AssertionResult
