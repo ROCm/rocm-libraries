@@ -2,6 +2,13 @@
 # Time-based test organization for CI/CD pipeline efficiency
 # This file defines test categories by execution time and criticality
 
+# Some information is not available at configure time. For example, the
+# list of all gtest fixtures must be extracted from the binaries. Defining
+# 'gtest_runner' informs CMake to have the target run the given script
+# of running the gtest command directly.
+# The path is relative to ${PROJECT_SOURCE_DIR}.
+gtest_runner: scripts/run_miopen_gtest.py
+
 # Common comprehensive patterns - used by both standard and comprehensive
 # Standard applies exclude list to filter out slower tests
 # Comprehensive runs all patterns without exclusion
@@ -100,6 +107,8 @@ test_categories:
 
   standard:
     description: "Core functionality - Run on every PR (target: < 30 min)"
+    enable_dapper: "yep"
+    dapper_json_file: ""
     test_patterns: *positive_patterns
 
     exclude:

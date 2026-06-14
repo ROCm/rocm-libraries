@@ -51,7 +51,7 @@ public:
     }
 
 protected:
-    const T alpha = static_cast<T>(2.048);
+    const T alpha = static_cast<T>(2.0480);
     size_t dataSize;
     miopen::TensorDescriptor subDesc;
 

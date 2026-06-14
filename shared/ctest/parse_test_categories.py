@@ -209,6 +209,90 @@ def load_yaml(yaml_file):
     sys.exit(1)
 
 
+def get_unfiltered_category_name(category_name):
+    return f"unfiltered_{category_name}"
+
+
+def add_categorized_targets(
+        target_name,
+        dapper_json_file,
+        category_name,
+        gpu_arch,
+        pattern_string,
+        working_dir,
+        label_string,
+        timeout,
+        install_file_handle):
+
+    command_name = ""
+    nice_dapper_json_file = ""
+
+    if dapper_json_file:
+        # Add the unfiltered category, primarily for debugging so none of the standard labels
+        add_categorized_targets(
+            target_name,
+            "",
+            get_unfiltered_category_name(category_name),
+            gpu_arch,
+            pattern_string,
+            working_dir,
+            "unfiltered",
+            timeout,
+            install_file_handle)
+
+        command_name = f"${{Python3_EXECUTABLE}} -m {target_name}_runner.py "
+        nice_dapper_json_file = f" {dapper_json_file.strip('')} "
+    else:
+        pattern_string = f"--gtest_filter={pattern_string}"
+
+    gpu_arch = f"_{gpu_arch}" if gpu_arch else ""
+    target_suite_name = f"{target_name}_{category_name}{gpu_arch}_suite"
+
+    print(f"add_test(")
+    print(f"  NAME {target_suite_name}")
+    print(f"  COMMAND {command_name}{target_name}{nice_dapper_json_file} {pattern_string}")
+    print(f"  WORKING_DIRECTORY {working_dir}")
+    print(f")")
+    print(f"set_tests_properties({target_suite_name} PROPERTIES")
+    print(f"  LABELS {label_string}")
+    print(f"  TIMEOUT {timeout}")
+    print(f")")
+    print()
+
+    # Write install-time test with relative path if install file is provided
+    if install_file_handle:
+        try:
+            install_command_name = f"${{Python3_EXECUTABLE}} -m ../{target_name}_runner.py " if command_name else ""
+            install_dapper_json_file = f" ../{dapper_json_file.strip()} " if dapper_json_file else ""
+            install_file_handle.write(
+                f'add_test({target_suite_name} {install_command_name}../{target_name} {install_dapper_json_file} {pattern_string})\n'
+            )
+            install_file_handle.write(
+                f"set_tests_properties({target_suite_name} PROPERTIES LABELS {label_string} TIMEOUT {timeout})\n\n"
+            )
+            install_file_handle.flush()
+        except OSError as e:
+            print(
+                f"Warning: I/O error writing category {category_name} to install test file: {e}",
+                file=sys.stderr,
+            )
+        except Exception as e:
+            print(
+                f"Warning: Unexpected error writing category {category_name} to install test file: {type(e).__name__}: {e}",
+                file=sys.stderr,
+            )
+
+
+def get_dapper_json_file(category_info):
+    dapper_json_file = ""
+    enable_dapper = category_info.get("enable_dapper")
+    if enable_dapper:
+        dapper_json_file = category_info.get("dapper_json_file", "")
+        if not dapper_json_file:
+            dapper_json_file = "tests_to_run.json"
+    return enable_dapper, dapper_json_file
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Parse test_categories.yaml and generate CMake test definitions"
@@ -259,6 +343,10 @@ def main():
             open(install_test_file, "a", buffering=1)
             if install_test_file
             else contextlib.nullcontext()
+        )
+        print(
+            f"Info: Opened install test file {install_test_file}",
+            file=sys.stderr,
         )
     except OSError as e:
         print(
@@ -313,6 +401,7 @@ def main():
         category_data = {}
 
         for category_name, category_info in categories.items():
+            enable_dapper, dapper_json_file = get_dapper_json_file(category_info)
             patterns = category_info.get("test_patterns", [])
             if not patterns:
                 print(
@@ -320,6 +409,7 @@ def main():
                     file=sys.stderr,
                 )
                 continue
+
             labels = category_info.get("labels", [])
             exclude = category_info.get("exclude", [])
             if exclude is None:
@@ -341,6 +431,11 @@ def main():
             timeout = int(base_timeout * timeout_multiplier)
             print(f"# Category: {category_name}")
             print(f'# Description: {category_info.get("description", "")}')
+            if dapper_json_file:
+                print(f'# Dependency Parser (dapper) is enabled for {category_name}, writing to {dapper_json_file}')
+                print(f"# The unfiltered category can be ran via the '{target_name}_{get_unfiltered_category_name(category_name)}_suite' target")
+            else:
+                print(f'# Dependency Parser (dapper) is NOT enabled for {category_name}')
 
             # Build positive pattern string and exclude string
             positive_string = ":".join(patterns)
@@ -348,6 +443,8 @@ def main():
 
             # Store positive and exclude strings separately for GPU exclusion processing
             category_data[category_name] = {
+                "enable_dapper": enable_dapper,
+                "dapper_json_file": dapper_json_file,
                 "positive_string": positive_string,
                 "exclude_string": exclude_string,
                 "labels": labels[:],  # Make a copy
@@ -358,7 +455,7 @@ def main():
             }
             extra_args_string = _format_extra_args(extra_args)
 
-            # Build complete pattern string for this category test
+        # Build complete pattern string for this category test
             if exclude_string:
                 pattern_string = positive_string + "-" + exclude_string
             else:
@@ -367,49 +464,18 @@ def main():
             label_string = '"' + ";".join(labels) + '"'
 
             # =======================================================================
-            # Write category test to CMake file and install file.
+            # Write category test(s) to CMake file and install file.
             # =======================================================================
-            print("add_test(")
-            print(f"  NAME {name_prefix}_{category_name}_suite")
-            print(
-                f"  COMMAND {target_name} --gtest_filter={pattern_string}{extra_args_string}"
-            )
-            print(f"  WORKING_DIRECTORY {working_dir}")
-            print(")")
-
-            print(
-                f"set_tests_properties({name_prefix}_{category_name}_suite PROPERTIES"
-            )
-            print(f"  LABELS {label_string}")
-            print(f"  TIMEOUT {timeout}")
-            if env_string:
-                print(f'  ENVIRONMENT "{env_string}"')
-            if resource_group:
-                print(f'  RESOURCE_GROUPS "1,{resource_group}:1"')
-            print(")")
-            print()
-
-            # Write install-time test with relative path if install file is provided
-            if install_file_handle:
-                try:
-                    install_file_handle.write(
-                        f'add_test({name_prefix}_{category_name}_suite "../{target_name}" --gtest_filter={pattern_string}{extra_args_string})\n'
-                    )
-                    env_prop = f' ENVIRONMENT "{env_string}"' if env_string else ""
-                    install_file_handle.write(
-                        f"set_tests_properties({name_prefix}_{category_name}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop}{resource_groups_prop})\n\n"
-                    )
-                    install_file_handle.flush()
-                except OSError as e:
-                    print(
-                        f"Warning: I/O error writing category {category_name} to install test file: {e}",
-                        file=sys.stderr,
-                    )
-                except Exception as e:
-                    print(
-                        f"Warning: Unexpected error writing category {category_name} to install test file: {type(e).__name__}: {e}",
-                        file=sys.stderr,
-                    )
+            add_categorized_targets(
+                target_name,
+                dapper_json_file,
+                category_name,
+                "",
+                pattern_string + extra_args_string,
+                working_dir,
+                label_string,
+                timeout,
+                install_file_handle)
 
         # ========================================================================
         # GPU Exclusion Tests with Hierarchical Pattern Matching
@@ -490,6 +556,7 @@ def main():
             # Create one test for each applicable category
             for category_name in all_applicable_categories:
                 cat_data = category_data[category_name]
+                enable_dapper, dapper_json_file = get_dapper_json_file(cat_data)
                 positive_string = cat_data["positive_string"]
                 cat_exclude_string = cat_data["exclude_string"]
                 cat_labels = cat_data["labels"]
@@ -515,47 +582,16 @@ def main():
                 # Write GPU exclusion tests to CMake file and install file.
                 # =======================================================================
                 print(f"# GPU exclusion for {gpu_arch} - {category_name} category")
-                print("add_test(")
-                print(f"  NAME {name_prefix}_{category_name}_{gpu_arch}_suite")
-                print(
-                    f"  COMMAND {target_name} --gtest_filter={pattern_string}{cat_extra_args_string}"
-                )
-                print(f"  WORKING_DIRECTORY {working_dir}")
-                print(")")
-
-                print(
-                    f"set_tests_properties({name_prefix}_{category_name}_{gpu_arch}_suite PROPERTIES"
-                )
-                print(f"  LABELS {label_string}")
-                print(f"  TIMEOUT {timeout}")
-                if env_string:
-                    print(f'  ENVIRONMENT "{env_string}"')
-                if resource_group:
-                    print(f'  RESOURCE_GROUPS "1,{resource_group}:1"')
-                print(")")
-                print()
-
-                # Write install-time test with relative path if install file is provided
-                if install_file_handle:
-                    try:
-                        install_file_handle.write(
-                            f'add_test({name_prefix}_{category_name}_{gpu_arch}_suite "../{target_name}" --gtest_filter={pattern_string}{cat_extra_args_string})\n'
-                        )
-                        env_prop = f' ENVIRONMENT "{env_string}"' if env_string else ""
-                        install_file_handle.write(
-                            f"set_tests_properties({name_prefix}_{category_name}_{gpu_arch}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop}{resource_groups_prop})\n\n"
-                        )
-                        install_file_handle.flush()
-                    except OSError as e:
-                        print(
-                            f"Warning: I/O error writing GPU exclude {category_name}_{gpu_arch} to install test file: {e}",
-                            file=sys.stderr,
-                        )
-                    except Exception as e:
-                        print(
-                            f"Warning: Unexpected error writing GPU exclude {category_name}_{gpu_arch} to install test file: {type(e).__name__}: {e}",
-                            file=sys.stderr,
-                        )
+                add_categorized_targets(
+                    target_name,
+                    dapper_json_file,
+                    category_name,
+                    gpu_arch,
+                    pattern_string + cat_extra_args_string,
+                    working_dir,
+                    label_string,
+                    timeout,
+                    install_file_handle)
 
 
 if __name__ == "__main__":

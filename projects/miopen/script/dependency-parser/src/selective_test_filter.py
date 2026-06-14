@@ -12,7 +12,7 @@ Usage:
   python selective_test_filter.py <depmap_json> <ref1> <ref2> [--all | --test-prefix] [--output <output_json>]
 
 Arguments:
-  <depmap_json>   Path to enhanced_dependency_mapping.json
+  <depmap_json>   Path to miopen_dapper_mapping.json
   <ref1>          Source git ref (branch or commit)
   <ref2>          Target git ref (branch or commit)
 
@@ -23,10 +23,11 @@ Options:
   --folder        Relative path to comparing folder
 """
 
-import sys
-import subprocess
 import json
 import os
+from pathlib import Path
+import sys
+import subprocess
 
 
 def get_changed_files(ref1, ref2, path_to_folder):
@@ -36,7 +37,11 @@ def get_changed_files(ref1, ref2, path_to_folder):
         args += ["--", path_to_folder]
     try:
         result = subprocess.run(args, capture_output=True, text=True, check=True)
-        files = set(line.strip() for line in result.stdout.splitlines() if line.strip())
+        files = set(
+            str(Path(*Path(line).parts[2:])).strip()
+            for line in result.stdout.splitlines()
+            if line.strip()
+        )
         return files
     except subprocess.CalledProcessError as e:
         print(f"Error running git diff: {e}")
@@ -46,24 +51,51 @@ def get_changed_files(ref1, ref2, path_to_folder):
 def load_depmap(depmap_json):
     """Load the dependency mapping JSON."""
     with open(depmap_json, "r") as f:
-        data = json.load(f)
-    # Support both old and new formats
-    if "file_to_executables" in data:
-        return data["file_to_executables"]
-    return data
+        depmap = json.load(f)
+    # TODO: remove old format
+    if "file_to_executables" in depmap:
+        return depmap["file_to_executables"]
+    return depmap
+
+
+def load_fixturemap(fixturemap_json):
+    """Load the dependency mapping JSON."""
+    with open(fixturemap_json, "r") as f:
+        fixturemap = json.load(f)
+    for test, fixtures in fixturemap.items():
+        for i, fixture in enumerate(fixtures):
+            if not fixture.endswith("*"):
+                fixtures[i] = fixture + "*"
+    return fixturemap
 
 
 def select_tests(file_to_executables, changed_files, filter_mode):
     """Return a set of test executables affected by changed files."""
     affected = set()
     for f in changed_files:
+        print(f"File {f} modified")
         if f in file_to_executables:
+            print(f"     {f} found in file_to_executables")
             for exe in file_to_executables[f]:
                 if filter_mode == "all":
                     affected.add(exe)
-                elif filter_mode == "test_prefix" and exe.startswith("test_"):
+                elif filter_mode == "test_prefix" and exe.startswith("bin/test_"):
+                    print(f"     {f} requires {exe} to be tested")
                     affected.add(exe)
     return sorted(affected)
+
+
+def create_gtest_filter(tests_to_run, fixturemap_json):
+    gtest_filter = ""
+    if fixturemap_json:
+        fixturemap = load_fixturemap(fixturemap_json)
+        for file in tests_to_run:
+            for test in fixturemap[file]:
+                gtest_filter += test + ":"
+        gtest_filter = gtest_filter[:-1]
+    else:
+        gtest_filter = "*"
+    return gtest_filter
 
 
 def main():
@@ -112,9 +144,12 @@ def main():
     depmap_json = sys.argv[1]
     ref1 = sys.argv[2]
     ref2 = sys.argv[3]
-    filter_mode = "all"
+    filter_mode = "test_prefix"
     output_json = "tests-to-run.json"
     path_to_folder = ""
+    fixturemap_json = ""
+    shardsfile = ""
+    gtest_shards = []
 
     if "--test-prefix" in sys.argv:
         filter_mode = "test_prefix"
@@ -128,6 +163,14 @@ def main():
         idx = sys.argv.index("--folder")
         if idx + 1 < len(sys.argv):
             path_to_folder = sys.argv[idx + 1]
+    if "--fixturemap" in sys.argv:
+        idx = sys.argv.index("--fixturemap")
+        if idx + 1 < len(sys.argv):
+            fixturemap_json = sys.argv[idx + 1]
+    if "--shardsfile" in sys.argv:
+        idx = sys.argv.index("--shardsfile")
+        if idx + 1 < len(sys.argv):
+            shardsfile = sys.argv[idx + 1]
 
     if not os.path.exists(depmap_json):
         print(f"Dependency map JSON not found: {depmap_json}")
@@ -137,16 +180,27 @@ def main():
     if not changed_files:
         print("No changed files detected.")
         tests = []
+        gtest_filter = ""
     else:
         file_to_executables = load_depmap(depmap_json)
         tests = select_tests(file_to_executables, changed_files, filter_mode)
+        gtest_filter = create_gtest_filter(tests, fixturemap_json)
+        if shardsfile:
+            gtest_shards = open(shardsfile).read().splitlines()
 
     with open(output_json, "w") as f:
         json.dump(
-            {"tests_to_run": tests, "changed_files": sorted(changed_files)}, f, indent=2
+            {
+                "tests_to_run": tests,
+                "dapper_filter": gtest_filter,
+                "changed_files": sorted(changed_files),
+                "gtest_shards": gtest_shards,
+            },
+            f,
+            indent=2,
         )
 
-    print(f"Exported {len(tests)} tests to run to {output_json}")
+    print(f"Exported {len(tests)} test fixtures to run to {output_json}")
 
 
 if __name__ == "__main__":

@@ -29,6 +29,10 @@
 #include "adam.hpp"
 #include "test_parameter_name_generator.hpp"
 
+// #undef TEST_P
+// #undef TEST_F
+// #undef TYPED_TEST
+
 namespace adam {
 
 /////////////////////////////////////////////////////////

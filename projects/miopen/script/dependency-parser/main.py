@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """
 Unified CLI for Ninja Dependency Analysis and Selective Testing
 
@@ -10,8 +13,8 @@ Features:
 """
 
 import argparse
+import subprocess
 import sys
-import os
 
 
 def run_dependency_parser(args):
@@ -26,6 +29,18 @@ def run_selective_test_filter(args):
 
     sys.argv = ["selective_test_filter.py"] + args
     filter_main()
+
+
+def get_git_sha(command):
+    try:
+        commit_sha = (
+            subprocess.check_output(command, stderr=subprocess.DEVNULL)
+            .decode("utf-8")
+            .strip()
+        )
+        return commit_sha
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
 
 
 def main():
@@ -51,8 +66,16 @@ def main():
         "select", help="Selective test filtering between git refs"
     )
     parser_test.add_argument("depmap_json", help="Path to dependency mapping JSON")
-    parser_test.add_argument("ref1", help="Source git ref")
-    parser_test.add_argument("ref2", help="Target git ref")
+    parser_test.add_argument(
+        "--base-sha",
+        help="git base sha",
+        default=get_git_sha(["git", "merge-base", "HEAD", "develop"]),
+    )
+    parser_test.add_argument(
+        "--feature-sha",
+        help="git feature sha",
+        default=get_git_sha(["git", "rev-parse", "HEAD"]),
+    )
     parser_test.add_argument(
         "--all", action="store_true", help="Include all executables"
     )
@@ -62,10 +85,17 @@ def main():
         help="Only include executables starting with 'test_'",
     )
     parser_test.add_argument(
-        "--output", help="Output JSON file", default="tests-to-run.json"
+        "--output", help="Output JSON file", default="miopen_dapper_tests.json"
     )
     parser_test.add_argument(
-        "--folder", help="Relative path to comparing folder", default="projects/miopen"
+        "--fixturemap",
+        help="Optional path to file containing the test <-> gtest fixture mapping",
+        default="",
+    )
+    parser_test.add_argument(
+        "--shardsfile",
+        help="Optional path to file containing a list of gtest shard output files",
+        default="",
     )
 
     # Code auditing
@@ -89,15 +119,18 @@ def main():
             parse_args.append(args.workspace_root)
         run_dependency_parser(parse_args)
     elif args.command == "select":
-        filter_args = [args.depmap_json, args.ref1, args.ref2]
+        filter_args = [args.depmap_json, args.base_sha, args.feature_sha]
         if args.test_prefix:
             filter_args.append("--test-prefix")
         if args.all:
             filter_args.append("--all")
         if args.output:
             filter_args += ["--output", args.output]
-        if args.folder:
-            filter_args += ["--folder", args.folder]
+        if args.fixturemap:
+            filter_args += ["--fixturemap", args.fixturemap]
+        if args.shardsfile:
+            print(f"ADDED SHARDSFILE: {args.shardsfile}")
+            filter_args += ["--shardsfile", args.shardsfile]
         run_selective_test_filter(filter_args)
     elif args.command == "audit":
         run_selective_test_filter([args.depmap_json, "--audit"])

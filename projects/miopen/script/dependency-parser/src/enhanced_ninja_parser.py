@@ -166,9 +166,14 @@ class EnhancedNinjaDependencyParser:
                 # Add all dependencies of this object file
                 if obj_file in self.object_to_all_deps:
                     for dep_file in self.object_to_all_deps[obj_file]:
+                        project_dep_file = (
+                            dep_file[dep_file.find("miopen") + len("miopen/") :]
+                            if "miopen" in dep_file
+                            else dep_file
+                        )
                         # Filter out system files and focus on project files
                         if self._is_project_file(dep_file):
-                            self.file_to_executables[dep_file].add(exe)
+                            self.file_to_executables[project_dep_file].add(exe)
 
         print(f"Built mapping for {len(self.file_to_executables)} files")
 
@@ -331,7 +336,7 @@ def main():
     # Export results
     output_dir = os.path.dirname(build_file)
     csv_file = os.path.join(output_dir, "enhanced_file_executable_mapping.csv")
-    json_file = os.path.join(output_dir, "enhanced_dependency_mapping.json")
+    json_file = os.path.join(output_dir, "miopen_dapper_mapping.json")
 
     parser.export_to_csv(csv_file)
     parser.export_to_json(json_file)
