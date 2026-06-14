@@ -47,6 +47,31 @@
 //   * On the fixed (MyProblem-keyed) code the cache correctly misses for the second,
 //     distinct problem and the sub-library supplies the right solution -> it passes.
 //
+// ---------------------------------------------------------------------------
+// Why this CachingLibrary (TensileLite-host) unit test lives in the hipBLASLt
+// *client* test binary (hipblaslt-test), not in tensilelite/tests:
+//
+// CachingLibrary is TensileLite-host code, so tensilelite/tests/ is its natural
+// conceptual home -- but that C++ gtest suite (the `tensilelite-tests` target) is
+// NOT built or run by TheRock GitHub Actions CI: TheRock configures hipBLASLt with
+// -DTENSILELITE_BUILD_TESTING=OFF (math-libs/BLAS/CMakeLists.txt) and does not
+// package the binary, and there is no CI job that runs it. The only C++ test binary
+// TheRock builds, ships, and runs for hipBLASLt is this client `hipblaslt-test`
+// (HIPBLASLT_BUILD_TESTING), executed by test/therock/test_hipblaslt.py. Because
+// hipblaslt-test already links tensilelite::tensilelite-host (via
+// hipblaslt-clients-common), this white-box unit test can include
+// <Tensile/CachingLibrary.hpp> directly and run with no new build dependency.
+// Placing the regression here is what makes it actually execute in CI and guard
+// ROCM-25647. (If the tensilelite-tests suite is ever CI-enabled, consider moving
+// this back alongside its siblings.)
+//
+// Smoke tier: PR CI runs hipBLASLt with TEST_TYPE=quick, which selects
+// `--gtest_filter=*smoke*` (test/therock/test_hipblaslt.py). The test names below
+// therefore carry the `smoke` category token (the hipBLASLt convention of encoding
+// the test category in the test name) so this fast, host-only guard runs on the PR
+// gate -- not only in the full/nightly lane.
+// ---------------------------------------------------------------------------
+//
 // Defect category (why these are unit, not integration, tests):
 // This is a "lossy memoization key" defect -- a cache keyed on a hash (lossy)
 // instead of the value (lossless) can serve a wrong cached result whenever two
@@ -203,7 +228,7 @@ namespace
 
 // findBestSolution path: a hash collision must not return a different problem's
 // cached solution.
-TEST(CachingLibraryCollision, FindBestSolutionDistinguishesCollidingProblems)
+TEST(CachingLibraryCollision, smoke_FindBestSolutionDistinguishesCollidingProblems)
 {
     MockProblem a{1};
     MockProblem b{2};
@@ -233,7 +258,7 @@ TEST(CachingLibraryCollision, FindBestSolutionDistinguishesCollidingProblems)
 // The cache must still actually cache: a repeated lookup of the same problem must
 // not re-consult the sub-library. (Guards against a "fix" that simply disables
 // caching, which would make the collision test pass vacuously.)
-TEST(CachingLibraryCollision, RepeatedLookupIsCached)
+TEST(CachingLibraryCollision, smoke_RepeatedLookupIsCached)
 {
     MockProblem a{7};
 
@@ -251,7 +276,7 @@ TEST(CachingLibraryCollision, RepeatedLookupIsCached)
 
 // findTopSolutions path: #7754 also merged the top-solutions caches into a single
 // size_t-keyed map, so exercise that path too.
-TEST(CachingLibraryCollision, FindTopSolutionsDistinguishesCollidingProblems)
+TEST(CachingLibraryCollision, smoke_FindTopSolutionsDistinguishesCollidingProblems)
 {
     MockProblem a{1};
     MockProblem b{2};
@@ -283,7 +308,7 @@ TEST(CachingLibraryCollision, FindTopSolutionsDistinguishesCollidingProblems)
 // (collision-safe), so a future "optimization" cannot quietly reintroduce the
 // ROCM-25647 lossy-key class here. (To confirm it has teeth, temporarily change
 // the key to a size_t hash and it fails like the others.)
-TEST(CachingLibraryCollision, FindTopSolutionsGroupedGemmDistinguishesCollidingProblems)
+TEST(CachingLibraryCollision, smoke_FindTopSolutionsGroupedGemmDistinguishesCollidingProblems)
 {
     std::vector<MockProblem> groupA{MockProblem{1}};
     std::vector<MockProblem> groupB{MockProblem{2}};
