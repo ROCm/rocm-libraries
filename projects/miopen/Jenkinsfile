@@ -173,7 +173,9 @@ def runBuildAndSingleGtestJob(Map conf=[:])
 
     // Collect per-shard JUnit XML reports written by --gtest_output in the cmake test registration.
     // 'allowEmptyResults' handles the case where the build failed before tests ran.
-    junit allowEmptyResults: true, testResults: "${env.MIOPEN_DIR}/build/test_results/miopen_gtest_shard*.xml"
+    def xmlGlob = "${env.MIOPEN_DIR}/build/test_results/miopen_gtest_shard*.xml"
+    sh "echo 'JUnit XML files found:'; ls ${env.WORKSPACE}/${xmlGlob} 2>/dev/null || echo '  (none)'"
+    junit allowEmptyResults: true, testResults: xmlGlob
 }
 
 def runDockerBuild(String gpuFamily) {
