@@ -85,6 +85,42 @@ struct NarrowedCKArrays2D
 };
 
 // ---------------------------------------------------------------------------
+// MakeNarrowedCKArrays — build a NarrowedCKArrays2D/3D bundle by int32-narrowing
+// each int64 length/stride array via ToCKIndexArray. The 2D and 3D bundles
+// share field names, so a single Bundle-parameterized helper deduplicates the
+// identical field mapping across all five narrowing accessors (2D FWD, the
+// CKArgsSplitK base, and 3D FWD/BWD/WRW). Callers pass their own member arrays
+// positionally, which differ in name (2D uses input/output/weight/strides/
+// dilation; 3D uses in_lengths/out_lengths/wei_lengths/filter_strides/
+// filter_dilations) but not in meaning or order.
+// ---------------------------------------------------------------------------
+template <typename Bundle, typename LenArr, typename FilterArr>
+Bundle MakeNarrowedCKArrays(const LenArr& in_lengths,
+                            const LenArr& in_strides,
+                            const LenArr& out_lengths,
+                            const LenArr& out_strides,
+                            const LenArr& wei_lengths,
+                            const LenArr& wei_strides,
+                            const FilterArr& filter_strides,
+                            const FilterArr& filter_dilations,
+                            const FilterArr& lPadding,
+                            const FilterArr& rPadding)
+{
+    return Bundle{
+        .in_l             = ToCKIndexArray(in_lengths),
+        .in_s             = ToCKIndexArray(in_strides),
+        .out_l            = ToCKIndexArray(out_lengths),
+        .out_s            = ToCKIndexArray(out_strides),
+        .wei_l            = ToCKIndexArray(wei_lengths),
+        .wei_s            = ToCKIndexArray(wei_strides),
+        .filter_strides   = ToCKIndexArray(filter_strides),
+        .filter_dilations = ToCKIndexArray(filter_dilations),
+        .lPadding         = ToCKIndexArray(lPadding),
+        .rPadding         = ToCKIndexArray(rPadding),
+    };
+}
+
+// ---------------------------------------------------------------------------
 // CKArgsSplitK — CRTP base for BWD and WRW CKArgs.
 //
 // Contains all shared members, the constructor (dimension extraction, NHWC
@@ -167,18 +203,16 @@ struct CKArgsSplitK
     // >INT_MAX shapes even though no kernel is ultimately selected.
     const NarrowedCKArrays2D& GetNarrowedArrays() const
     {
-        narrowed = NarrowedCKArrays2D{
-            .in_l             = ToCKIndexArray(input),
-            .in_s             = ToCKIndexArray(in_strides),
-            .out_l            = ToCKIndexArray(output),
-            .out_s            = ToCKIndexArray(out_strides),
-            .wei_l            = ToCKIndexArray(weight),
-            .wei_s            = ToCKIndexArray(wei_strides),
-            .filter_strides   = ToCKIndexArray(strides),
-            .filter_dilations = ToCKIndexArray(dilation),
-            .lPadding         = ToCKIndexArray(lPadding),
-            .rPadding         = ToCKIndexArray(rPadding),
-        };
+        narrowed = MakeNarrowedCKArrays<NarrowedCKArrays2D>(input,
+                                                            in_strides,
+                                                            output,
+                                                            out_strides,
+                                                            weight,
+                                                            wei_strides,
+                                                            strides,
+                                                            dilation,
+                                                            lPadding,
+                                                            rPadding);
         return narrowed;
     }
 

@@ -212,18 +212,16 @@ struct CKArgs
     // -- see commit 23059ecb41b).
     const NarrowedCKArrays3D& NarrowedArrays() const
     {
-        narrowed = NarrowedCKArrays3D{
-            .in_l             = ToCKIndexArray(in_lengths),
-            .in_s             = ToCKIndexArray(in_strides),
-            .out_l            = ToCKIndexArray(out_lengths),
-            .out_s            = ToCKIndexArray(out_strides),
-            .wei_l            = ToCKIndexArray(wei_lengths),
-            .wei_s            = ToCKIndexArray(wei_strides),
-            .filter_strides   = ToCKIndexArray(filter_strides),
-            .filter_dilations = ToCKIndexArray(filter_dilations),
-            .lPadding         = ToCKIndexArray(lPadding),
-            .rPadding         = ToCKIndexArray(rPadding),
-        };
+        narrowed = MakeNarrowedCKArrays<NarrowedCKArrays3D>(in_lengths,
+                                                            in_strides,
+                                                            out_lengths,
+                                                            out_strides,
+                                                            wei_lengths,
+                                                            wei_strides,
+                                                            filter_strides,
+                                                            filter_dilations,
+                                                            lPadding,
+                                                            rPadding);
         return narrowed;
     }
 
@@ -235,28 +233,10 @@ struct CKArgs
                             float alpha,
                             float beta) const
     {
-        if(miopen::solver::IsLargeTensorCKInstance(conv_ptr))
-        {
-            return conv_ptr->MakeArgumentPointer(in,
-                                                 w,
-                                                 {out},
-                                                 out,
-                                                 in_lengths,
-                                                 in_strides,
-                                                 wei_lengths,
-                                                 wei_strides,
-                                                 {out_lengths},
-                                                 {out_strides},
-                                                 out_lengths,
-                                                 out_strides,
-                                                 filter_strides,
-                                                 filter_dilations,
-                                                 lPadding,
-                                                 rPadding,
-                                                 PassThrough{},
-                                                 PassThrough{},
-                                                 Bilinear{alpha, beta});
-        }
+        // Bilinear is a MultipleD device op; CK ships no Large_Tensor instance
+        // for it, so an overflow (>INT_MAX) shape is filtered out upstream by
+        // RequiresLargeTensorCKInstance and never reaches this builder. Always
+        // narrow to the int32 overload (mirrors the 3D WRW reference path).
         const auto& a = NarrowedArrays();
         return conv_ptr->MakeArgumentPointer(in,
                                              w,
@@ -283,28 +263,10 @@ struct CKArgs
     auto MakeScaleArgPtr(
         const ConvPtr& conv_ptr, ConstData_t in, ConstData_t w, Data_t out, float alpha) const
     {
-        if(miopen::solver::IsLargeTensorCKInstance(conv_ptr))
-        {
-            return conv_ptr->MakeArgumentPointer(in,
-                                                 w,
-                                                 {},
-                                                 out,
-                                                 in_lengths,
-                                                 in_strides,
-                                                 wei_lengths,
-                                                 wei_strides,
-                                                 {},
-                                                 {},
-                                                 out_lengths,
-                                                 out_strides,
-                                                 filter_strides,
-                                                 filter_dilations,
-                                                 lPadding,
-                                                 rPadding,
-                                                 PassThrough{},
-                                                 PassThrough{},
-                                                 Scale{alpha});
-        }
+        // Scale is a MultipleD device op; CK ships no Large_Tensor instance for
+        // it, so an overflow (>INT_MAX) shape is filtered out upstream by
+        // RequiresLargeTensorCKInstance and never reaches this builder. Always
+        // narrow to the int32 overload (mirrors the 3D WRW reference path).
         const auto& a = NarrowedArrays();
         return conv_ptr->MakeArgumentPointer(in,
                                              w,

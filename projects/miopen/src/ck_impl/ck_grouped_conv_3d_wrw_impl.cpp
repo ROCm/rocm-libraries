@@ -143,18 +143,16 @@ struct CKArgs
     // and the Bilinear/Scale MultipleD ops are int32-only and filtered out.
     const NarrowedCKArrays3D& NarrowedArrays() const
     {
-        narrowed = NarrowedCKArrays3D{
-            .in_l             = ToCKIndexArray(in_lengths),
-            .in_s             = ToCKIndexArray(in_strides),
-            .out_l            = ToCKIndexArray(out_lengths),
-            .out_s            = ToCKIndexArray(out_strides),
-            .wei_l            = ToCKIndexArray(wei_lengths),
-            .wei_s            = ToCKIndexArray(wei_strides),
-            .filter_strides   = ToCKIndexArray(filter_strides),
-            .filter_dilations = ToCKIndexArray(filter_dilations),
-            .lPadding         = ToCKIndexArray(lPadding),
-            .rPadding         = ToCKIndexArray(rPadding),
-        };
+        narrowed = MakeNarrowedCKArrays<NarrowedCKArrays3D>(in_lengths,
+                                                            in_strides,
+                                                            out_lengths,
+                                                            out_strides,
+                                                            wei_lengths,
+                                                            wei_strides,
+                                                            filter_strides,
+                                                            filter_dilations,
+                                                            lPadding,
+                                                            rPadding);
         return narrowed;
     }
 
