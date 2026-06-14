@@ -55,7 +55,7 @@ BenchmarkProblems:
       DataTypeMXSA: e8
       DataTypeMXSB: e8
 
-    - # BenchmarkProblemSizeGroup - Standard
+    - # BenchmarkProblemSizeGroup - 1a:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -82,7 +82,63 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - StoreRemapVectorWidth: [0]
-        - GlobalSplitU: [1,2,4,8]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [0]
+        - DirectToVgprSparseMetadata: [0]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [0]
+        - AssertSummationElementMultiple: [ 16 ]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 768]
+          - Exact: [256, 256, 1, 832] #tail
+          - Exact: [257, 256, 1, 768] #edge-m
+          - Exact: [256, 257, 1, 768] #edge-n
+        - ActivationArgs:
+          - [Enum: none]
+
+    - # BenchmarkProblemSizeGroup - 1b: GSU
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [1]
+        - Groups:
+          -
+            - MatrixInstruction: [16, 16, 128, 1,  1,  4, 4,  2, 1]
+              WorkGroup: [16, 16, 2]
+            - MatrixInstruction: [16, 16, 128, 1,  1,  8, 4,  2, 2]
+        - DepthU: [256]
+        - TDMInst: [3]
+        - TDMIterateMode: [0, 3]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [0]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [2,4,8]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
@@ -110,6 +166,7 @@ BenchmarkProblems:
           - Exact: [256, 257, 1, 2048] #edge-n
         - ActivationArgs:
           - [Enum: none]
+
   #######################################
   # TN - standard, MXF8SS Block32, E8
   #######################################
@@ -132,7 +189,7 @@ BenchmarkProblems:
       DataTypeMXSA: e8
       DataTypeMXSB: e8
 
-    - # BenchmarkProblemSizeGroup - Standard
+    - # BenchmarkProblemSizeGroup - 2a: MI x TDMIterateMode x TDMSplit (TDM load paths)
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -142,7 +199,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  8, 4,  2, 2]
           - [16, 16, 128, 1,  1,  8, 8,  2, 2]
-        - HalfPLR: [0,1,2,3]
+        - HalfPLR: [0,3]
         - DepthU: [256]
         - TDMInst: [3]
         - TDMIterateMode: [-1,0,1,2,3]
@@ -157,9 +214,65 @@ BenchmarkProblems:
         - StaggerU: [0]
         - ScheduleIterAlg: [0]
         - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [0]
+        - DirectToVgprSparseMetadata: [0]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [0]
+        - AssertSummationElementMultiple: [ 32 ]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 512]
+          - Exact: [256, 256, 1, 576] #tail
+          - Exact: [257, 256, 1, 512] #edge-m
+          - Exact: [256, 257, 1, 512] #edge-n
+        - ActivationArgs:
+          - [Enum: none]
+
+    - # BenchmarkProblemSizeGroup - 2b: MI x HalfPLR x PGR x GSU (K-path + local-read)
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [1]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  8, 4,  2, 2]
+          - [16, 16, 128, 1,  1,  8, 8,  2, 2]
+        - HalfPLR: [0,1,2,3]
+        - DepthU: [256]
+        - TDMInst: [3]
+        - TDMIterateMode: [0]
+        - TDMSplit: [False]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [0]
+        - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [1,2]
         - StoreRemapVectorWidth: [0]
-        - GlobalSplitU: [1,2,4,8]
+        - GlobalSplitU: [2,4,8]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
@@ -181,10 +294,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [256, 256, 1, 128]
-          - Exact: [256, 256, 1, 384]
           - Exact: [256, 256, 1, 640]
-          - Exact: [256, 256, 1, 896]
           - Exact: [256, 256, 1, 2048]
           - Exact: [256, 256, 1, 2080] #tail
           - Exact: [257, 256, 1, 2048] #edge-m
