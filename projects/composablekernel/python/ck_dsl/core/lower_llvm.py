@@ -338,9 +338,24 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "<4 x half>, <4 x half>, <16 x float>, "
         "i32 immarg, i32 immarg, i32 immarg)"
     ),
+    "mfma.f32.32x32x8bf16.1k": (
+        "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x8bf16.1k("
+        "<4 x i16>, <4 x i16>, <16 x float>, "
+        "i32 immarg, i32 immarg, i32 immarg)"
+    ),
     "mfma.f32.32x32x16.f16": (
         "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.f16("
         "<8 x half>, <8 x half>, <16 x float>, "
+        "i32 immarg, i32 immarg, i32 immarg)"
+    ),
+    "mfma.f32.16x16x4f32": (
+        "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x4f32("
+        "float, float, <4 x float>, "
+        "i32 immarg, i32 immarg, i32 immarg)"
+    ),
+    "mfma.f32.32x32x2f32": (
+        "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x2f32("
+        "float, float, <16 x float>, "
         "i32 immarg, i32 immarg, i32 immarg)"
     ),
     "mfma.f32.4x4x4f16": (
@@ -1967,6 +1982,28 @@ class _Lowerer:
             f"i32 0, i32 0, i32 0)"
         )
 
+    def _op_tile_mfma_f32_16x16x4_f32(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._need("mfma.f32.16x16x4f32")
+        self._current().emit(
+            f"  {op.result.name} = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x4f32("
+            f"float {self._operand(a)}, "
+            f"float {self._operand(b)}, "
+            f"<4 x float> {self._operand(c)}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+
+    def _op_tile_mfma_f32_32x32x2_f32(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._need("mfma.f32.32x32x2f32")
+        self._current().emit(
+            f"  {op.result.name} = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x2f32("
+            f"float {self._operand(a)}, "
+            f"float {self._operand(b)}, "
+            f"<16 x float> {self._operand(c)}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+
     def _op_tile_mfma_f32_32x32x8_f16(self, op: Op) -> None:
         a, b, c = op.operands
         self._need("mfma.f32.32x32x8f16")
@@ -1974,6 +2011,25 @@ class _Lowerer:
             f"  {op.result.name} = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x8f16("
             f"<4 x half> {self._operand(a)}, "
             f"<4 x half> {self._operand(b)}, "
+            f"<16 x float> {self._operand(c)}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+
+    def _op_tile_mfma_f32_32x32x8_bf16(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._need("mfma.f32.32x32x8bf16.1k")
+        a_cast = self._fresh("mfma_a_i16")
+        b_cast = self._fresh("mfma_b_i16")
+        self._current().emit(
+            f"  {a_cast} = bitcast <4 x bfloat> {self._operand(a)} to <4 x i16>"
+        )
+        self._current().emit(
+            f"  {b_cast} = bitcast <4 x bfloat> {self._operand(b)} to <4 x i16>"
+        )
+        self._current().emit(
+            f"  {op.result.name} = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x8bf16.1k("
+            f"<4 x i16> {a_cast}, "
+            f"<4 x i16> {b_cast}, "
             f"<16 x float> {self._operand(c)}, "
             f"i32 0, i32 0, i32 0)"
         )
@@ -3054,6 +3110,84 @@ class _Lowerer:
             f"i32 0)"
         )
         self._current().emit(f"  {op.result.name} = bitcast i16 {tmp} to half")
+
+    def _op_tile_buffer_load_vN(self, op: Op) -> None:
+        """Dtype-generic vectorised buffer load.
+
+        Loads `<dwords x i32>` via the matching intrinsic and bitcasts
+        to `<n x elem_type>`.  Handles f16/bf16 (2-byte) and f32/i32
+        (4-byte) elements.
+        """
+        rsrc, voffset, soffset = op.operands
+        dwords = int(op.attrs["dwords"])
+        elem_type = op.attrs["elem_type"]
+        n = op.result.type.count  # elements in the result vector
+        _LLVM_ELEM = {"f16": "half", "bf16": "bfloat", "f32": "float", "i32": "i32"}
+        llvm_elem = _LLVM_ELEM[elem_type]
+        if dwords == 1:
+            self._need("raw.ptr.buffer.load.i32")
+            tmp = self._fresh("bli32")
+            self._current().emit(
+                f"  {tmp} = call i32 @llvm.amdgcn.raw.ptr.buffer.load.i32("
+                f"ptr addrspace(8) {self._operand(rsrc)}, "
+                f"i32 {self._operand(voffset)}, "
+                f"i32 {self._operand(soffset)}, "
+                f"i32 0)"
+            )
+            self._current().emit(
+                f"  {op.result.name} = bitcast i32 {tmp} to <{n} x {llvm_elem}>"
+            )
+        else:
+            intr = f"raw.ptr.buffer.load.v{dwords}i32"
+            self._need(intr)
+            tmp = self._fresh(f"blv{dwords}")
+            self._current().emit(
+                f"  {tmp} = call <{dwords} x i32> @llvm.amdgcn.raw.ptr.buffer.load.v{dwords}i32("
+                f"ptr addrspace(8) {self._operand(rsrc)}, "
+                f"i32 {self._operand(voffset)}, "
+                f"i32 {self._operand(soffset)}, "
+                f"i32 0)"
+            )
+            self._current().emit(
+                f"  {op.result.name} = bitcast <{dwords} x i32> {tmp} to <{n} x {llvm_elem}>"
+            )
+
+    def _op_tile_buffer_load(self, op: Op) -> None:
+        """Dtype-generic scalar buffer load (single element, OOB-clamped).
+
+        2-byte types (f16, bf16) use the i16 intrinsic; 4-byte types
+        (f32, i32) use the i32 intrinsic.
+        """
+        rsrc, voffset, soffset = op.operands
+        elem_type = op.attrs["elem_type"]
+        _LLVM_ELEM = {"f16": "half", "bf16": "bfloat", "f32": "float", "i32": "i32"}
+        llvm_elem = _LLVM_ELEM[elem_type]
+        if elem_type in ("f16", "bf16"):
+            self._need("raw.ptr.buffer.load.i16")
+            tmp = self._fresh("blu16")
+            self._current().emit(
+                f"  {tmp} = call i16 @llvm.amdgcn.raw.ptr.buffer.load.i16("
+                f"ptr addrspace(8) {self._operand(rsrc)}, "
+                f"i32 {self._operand(voffset)}, "
+                f"i32 {self._operand(soffset)}, "
+                f"i32 0)"
+            )
+            self._current().emit(
+                f"  {op.result.name} = bitcast i16 {tmp} to {llvm_elem}"
+            )
+        else:
+            self._need("raw.ptr.buffer.load.i32")
+            tmp = self._fresh("bli32")
+            self._current().emit(
+                f"  {tmp} = call i32 @llvm.amdgcn.raw.ptr.buffer.load.i32("
+                f"ptr addrspace(8) {self._operand(rsrc)}, "
+                f"i32 {self._operand(voffset)}, "
+                f"i32 {self._operand(soffset)}, "
+                f"i32 0)"
+            )
+            self._current().emit(
+                f"  {op.result.name} = bitcast i32 {tmp} to {llvm_elem}"
+            )
 
     def _op_tile_buffer_store_vN_f16(self, op: Op) -> None:
         """raw_ptr_buffer_store of <2*dwords x half> via bitcast to

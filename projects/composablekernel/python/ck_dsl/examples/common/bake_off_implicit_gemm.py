@@ -34,6 +34,7 @@ from pathlib import Path
 from ck_dsl.core.arch import ArchTarget
 from ck_dsl.helpers import compile_kernel, make_conv_manifest, write_artifact
 from ck_dsl.instances.common.conv_implicit_gemm import (
+    ConvDataSpec,
     ConvProblem,
     ImplicitGemmConvSpec,
     build_implicit_gemm_conv,
@@ -41,7 +42,9 @@ from ck_dsl.instances.common.conv_implicit_gemm import (
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="DSL example: implicit-GEMM convolution bake-off"
+    )
     parser.add_argument(
         "--output-dir",
         default=str(Path(__file__).parent / "output" / "bake_off_implicit_gemm"),
@@ -54,6 +57,59 @@ def main() -> int:
         default=None,
         help="raw comgr triple; overrides --arch when set",
     )
+    parser.add_argument(
+        "--dtype",
+        default="fp16",
+        choices=["fp16", "bf16", "fp32"],
+        help="data type for A/B/D tensors (default: fp16)",
+    )
+
+    # ConvProblem parameters
+    conv = parser.add_argument_group("ConvProblem", "convolution shape parameters")
+    conv.add_argument("--N", type=int, default=8, help="batch size")
+    conv.add_argument("--Hi", type=int, default=56, help="input height")
+    conv.add_argument("--Wi", type=int, default=56, help="input width")
+    conv.add_argument("--C", type=int, default=64, help="input channels")
+    conv.add_argument("--K", type=int, default=64, help="output channels / filters")
+    conv.add_argument("--R", type=int, default=3, help="filter height")
+    conv.add_argument("--S", type=int, default=3, help="filter width")
+    conv.add_argument("--sH", type=int, default=1, help="vertical stride")
+    conv.add_argument("--sW", type=int, default=1, help="horizontal stride")
+    conv.add_argument("--pH", type=int, default=1, help="vertical padding")
+    conv.add_argument("--pW", type=int, default=1, help="horizontal padding")
+    conv.add_argument("--dH", type=int, default=1, help="vertical dilation")
+    conv.add_argument("--dW", type=int, default=1, help="horizontal dilation")
+
+    # ImplicitGemmConvSpec parameters
+    spec_grp = parser.add_argument_group(
+        "ImplicitGemmConvSpec", "kernel tile / pipeline configuration"
+    )
+    spec_grp.add_argument("--tile-m", type=int, default=64, help="block tile M")
+    spec_grp.add_argument("--tile-n", type=int, default=64, help="block tile N")
+    spec_grp.add_argument("--tile-k", type=int, default=64, help="block tile K")
+    spec_grp.add_argument("--warp-m", type=int, default=2, help="warp grid M")
+    spec_grp.add_argument("--warp-n", type=int, default=2, help="warp grid N")
+    spec_grp.add_argument("--warp-tile-m", type=int, default=32, help="MFMA atom M")
+    spec_grp.add_argument("--warp-tile-n", type=int, default=32, help="MFMA atom N")
+    spec_grp.add_argument(
+        "--warp-tile-k",
+        type=int,
+        default=None,
+        help="MFMA atom K (default: largest legal K for the target atom)",
+    )
+    spec_grp.add_argument(
+        "--pipeline",
+        default="mem",
+        choices=["mem", "compv3", "compv4"],
+        help="pipeline variant",
+    )
+    spec_grp.add_argument(
+        "--epilogue",
+        default="cshuffle",
+        choices=["default", "cshuffle"],
+        help="epilogue variant",
+    )
+
     args = parser.parse_args()
 
     arch = args.arch
@@ -66,28 +122,29 @@ def main() -> int:
     # gfx950 (CDNA4) carries the wide 32x32x16 atom, gfx942 (CDNA3) only the
     # 32x32x8 atom. Sourcing K from the catalog keeps gfx950 output unchanged
     # while degrading cleanly to the narrow atom on gfx942 (no comgr crash).
+    dtype = args.dtype
     atom = target.mma.select_largest_k(
-        a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", m=32, n=32
+        a_dtype=dtype, b_dtype=dtype, c_dtype="fp32", m=args.warp_tile_m, n=args.warp_tile_n, k_max=args.tile_k
     )
     if atom is None:
-        print(f"no fp16 32x32 MFMA atom for {arch}", file=sys.stderr)
+        print(f"no {dtype} {args.warp_tile_m}x{args.warp_tile_n} MFMA atom for {arch}", file=sys.stderr)
         return 2
-    warp_tile_k = atom.k
+    warp_tile_k = args.warp_tile_k if args.warp_tile_k is not None else atom.k
 
     problem = ConvProblem(
-        N=8,
-        Hi=56,
-        Wi=56,
-        C=64,
-        K=64,
-        R=3,
-        S=3,
-        sH=1,
-        sW=1,
-        pH=1,
-        pW=1,
-        dH=1,
-        dW=1,
+        N=args.N,
+        Hi=args.Hi,
+        Wi=args.Wi,
+        C=args.C,
+        K=args.K,
+        R=args.R,
+        S=args.S,
+        sH=args.sH,
+        sW=args.sW,
+        pH=args.pH,
+        pW=args.pW,
+        dH=args.dH,
+        dW=args.dW,
     )
     # Winning config from the sweep in `instances.conv_implicit_gemm`:
     #   tile (64, 64, 64)
@@ -103,16 +160,17 @@ def main() -> int:
     spec = ImplicitGemmConvSpec(
         problem=problem,
         name="ck_dsl_ex08_bake_off_implicit_gemm",
-        tile_m=64,
-        tile_n=64,
-        tile_k=64,
-        warp_m=2,
-        warp_n=2,
-        warp_tile_m=32,
-        warp_tile_n=32,
+        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+        tile_m=args.tile_m,
+        tile_n=args.tile_n,
+        tile_k=args.tile_k,
+        warp_m=args.warp_m,
+        warp_n=args.warp_n,
+        warp_tile_m=args.warp_tile_m,
+        warp_tile_n=args.warp_tile_n,
         warp_tile_k=warp_tile_k,
-        pipeline="mem",
-        epilogue="cshuffle",
+        pipeline=args.pipeline,
+        epilogue=args.epilogue,
     )
 
     kernel = build_implicit_gemm_conv(spec)
@@ -132,6 +190,7 @@ def main() -> int:
         groups=1,
         cpg=p.C,
         kpg=p.K,
+        dtype=dtype,
         conv_layout="implicit_gemm",
         # The kernel reads block_id.x as the N-tile index and
         # block_id.y as the M-tile index (mirrors gemm_universal).
@@ -141,7 +200,7 @@ def main() -> int:
         grid_order="NM",
         warmup_iters=5,
         timed_iters=100,
-        atoms=[f"tile.mfma_f32_32x32x{warp_tile_k}_f16"],
+        atoms=[f"tile.mfma_f32_32x32x{warp_tile_k}_{dtype}"],
         notes=(
             "Bake-off 1: implicit-GEMM conv via the coord-transform "
             "DAG (ck_dsl.helpers.transforms.TensorDescriptor). A's address is "
@@ -153,6 +212,7 @@ def main() -> int:
             "coordinate-transform algebra instead of inline arithmetic."
         ),
         extra={
+            "dtype": dtype,
             "default_shape": [p.M, p.N_gemm, p.K_gemm],
             "transform_dag": {
                 "A_nhwc": [

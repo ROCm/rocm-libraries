@@ -75,6 +75,8 @@ NON_TEMPORAL = 3  # GLC + SLC — bypass cache hierarchy entirely.
 # passes a bare op_id string; an ``MmaOp`` object always supplies its own
 # ``c_frag_len`` and bypasses this table.
 _MMA_C_FRAG_LEN: Dict[str, int] = {
+    "mfma_f32_16x16x4_f32": 4,
+    "mfma_f32_32x32x2_f32": 16,
     "mfma_f32_16x16x16_f16": 4,
     "mfma_f32_16x16x32_f16": 4,
     "mfma_f32_16x16x16_bf16": 4,
@@ -83,6 +85,7 @@ _MMA_C_FRAG_LEN: Dict[str, int] = {
     "mfma_f32_16x16x32_bf8": 4,
     "mfma_f32_32x32x8_f16": 16,
     "mfma_f32_32x32x16_f16": 16,
+    "mfma_f32_32x32x8_bf16": 16,
     "mfma_f32_32x32x16_bf16": 16,
     "mfma_f32_32x32x16_fp8": 16,
     "mfma_f32_32x32x16_bf8": 16,
@@ -2673,6 +2676,38 @@ class IRBuilder:
             result_name_hint="rsrc",
         ).result
 
+    def buffer_load_vN(
+        self, rsrc: Value, voffset: Value, soffset: Value, dtype: "Type", n: int
+    ) -> Value:
+        """Dtype-generic vectorised `raw_ptr_buffer_load` of N elements.
+
+        Supported dtypes and widths:
+          - f16 / bf16 (2-byte): n in {2, 4, 8} → dwords = n // 2
+          - f32 / i32  (4-byte): n in {1, 2, 4} → dwords = n
+
+        The raw `<dwords x i32>` payload is bitcast to `<n x dtype>` so
+        the returned Value has the correct IR type for the smem store.
+        Bounds-checked: an out-of-range voffset returns 0 (the
+        runbook §6.1 lever for tail-safe loads).
+        """
+        _elem_bytes = {"f16": 2, "bf16": 2, "f32": 4, "i32": 4}
+        eb = _elem_bytes.get(dtype.name)
+        if eb is None:
+            raise ValueError(f"buffer_load_vN: unsupported dtype {dtype.name!r}")
+        dwords = (n * eb) // 4
+        if dwords not in (1, 2, 4):
+            raise ValueError(
+                f"buffer_load_vN: n={n} dtype={dtype.name} → dwords={dwords} "
+                "must be 1, 2, or 4"
+            )
+        return self._op(
+            "tile.buffer_load_vN",
+            [rsrc, voffset, soffset],
+            [VectorType(dtype, n)],
+            attrs={"dwords": int(dwords), "elem_type": dtype.name},
+            result_name_hint=f"bl{n}",
+        ).result
+
     def buffer_load_vN_f16(
         self, rsrc: Value, voffset: Value, soffset: Value, dwords: int
     ) -> Value:
@@ -2689,6 +2724,25 @@ class IRBuilder:
             [VectorType(F16, halves)],
             attrs={"dwords": int(dwords)},
             result_name_hint=f"bl{halves}",
+        ).result
+
+    def buffer_load(
+        self, rsrc: Value, voffset: Value, soffset: Value, dtype: "Type"
+    ) -> Value:
+        """Dtype-generic scalar buffer load (single element, OOB-clamped).
+
+        Supported dtypes: f16, bf16 (2-byte → i16 intrinsic),
+        f32 / i32 (4-byte → i32 intrinsic).
+        """
+        _elem_bytes = {"f16": 2, "bf16": 2, "f32": 4, "i32": 4}
+        if dtype.name not in _elem_bytes:
+            raise ValueError(f"buffer_load: unsupported dtype {dtype.name!r}")
+        return self._op(
+            "tile.buffer_load",
+            [rsrc, voffset, soffset],
+            [dtype],
+            attrs={"elem_type": dtype.name},
+            result_name_hint="bl1",
         ).result
 
     def buffer_load_f16(self, rsrc: Value, voffset: Value, soffset: Value) -> Value:

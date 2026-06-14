@@ -272,6 +272,54 @@ def _mfma_b_16x16(builder, lane, slot):
     return k, n_in_atom
 
 
+def _mfma_a_16x16x4_f32(builder, lane, slot):
+    """MFMA 16x16x4 fp32 A operand: each lane holds one fp32 scalar.
+
+    row = lane % 16, k = lane // 16 (slot is always 0 — a_frag_len == 1).
+    Returns ``(row, k)``.
+    """
+    c16 = builder.const_i32(16)
+    m_in_atom = builder.mod(lane, c16)
+    k = builder.div(lane, c16)
+    return m_in_atom, k
+
+
+def _mfma_b_16x16x4_f32(builder, lane, slot):
+    """MFMA 16x16x4 fp32 B operand: each lane holds one fp32 scalar.
+
+    col = lane % 16, k = lane // 16 (slot is always 0 — b_frag_len == 1).
+    Returns ``(k, col)``.
+    """
+    c16 = builder.const_i32(16)
+    n_in_atom = builder.mod(lane, c16)
+    k = builder.div(lane, c16)
+    return k, n_in_atom
+
+
+def _mfma_a_32x32x2_f32(builder, lane, slot):
+    """MFMA 32x32x2 fp32 A operand: each lane holds one fp32 scalar.
+
+    row = lane % 32, k = lane // 32 (slot is always 0 — a_frag_len == 1).
+    Returns ``(row, k)``.
+    """
+    c32 = builder.const_i32(32)
+    m_in_atom = builder.mod(lane, c32)
+    k = builder.div(lane, c32)
+    return m_in_atom, k
+
+
+def _mfma_b_32x32x2_f32(builder, lane, slot):
+    """MFMA 32x32x2 fp32 B operand: each lane holds one fp32 scalar.
+
+    col = lane % 32, k = lane // 32 (slot is always 0 — b_frag_len == 1).
+    Returns ``(k, col)``.
+    """
+    c32 = builder.const_i32(32)
+    n_in_atom = builder.mod(lane, c32)
+    k = builder.div(lane, c32)
+    return k, n_in_atom
+
+
 def _mfma_a_32x32x8(builder, lane, slot):
     """MFMA 32x32x8 A operand: row ``lane % 32``, K ``k_blk*4 + slot``.
 
@@ -427,6 +475,15 @@ class _FragInfo:
 # layout-map functions are populated for the atoms whose lane math is verified.
 # Adding a new atom is one row here.
 _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
+    # --- MFMA fp32 (wave64) -----------------------------------------------
+    # A/B are scalar float per lane (a_frag_len=b_frag_len=1); accumulator
+    # shares the standard 16x16 / 32x32 layout (c_frag_len=4 / 16).
+    "mfma_f32_16x16x4_f32": _FragInfo(
+        1, 1, 4, 64, _mfma_a_16x16x4_f32, _mfma_b_16x16x4_f32, _mfma_acc_16x16
+    ),
+    "mfma_f32_32x32x2_f32": _FragInfo(
+        1, 1, 16, 64, _mfma_a_32x32x2_f32, _mfma_b_32x32x2_f32, _mfma_acc_32x32
+    ),
     # --- MFMA f16 (wave64) ------------------------------------------------
     "mfma_f32_16x16x16_f16": _FragInfo(
         4, 4, 4, 64, _mfma_a_16x16, _mfma_b_16x16, _mfma_acc_16x16
@@ -442,6 +499,7 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         4, 4, 4, 64, _mfma_a_16x16, _mfma_b_16x16, _mfma_acc_16x16
     ),
     "mfma_f32_16x16x32_bf16": _FragInfo(8, 8, 4, 64, c_fn=_mfma_acc_16x16),
+    "mfma_f32_32x32x8_bf16": _FragInfo(4, 4, 16, 64, _mfma_a_32x32x8, _mfma_b_32x32x8, _mfma_acc_32x32),
     "mfma_f32_32x32x16_bf16": _FragInfo(8, 8, 16, 64, c_fn=_mfma_acc_32x32),
     # --- MFMA fp8 / bf8 (wave64) -----------------------------------------
     "mfma_f32_16x16x32_fp8": _FragInfo(8, 8, 4, 64, c_fn=_mfma_acc_16x16),
