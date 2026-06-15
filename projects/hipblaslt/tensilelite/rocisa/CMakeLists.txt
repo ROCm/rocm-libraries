@@ -125,7 +125,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     )
 
     if(ROCISA_ENABLE_COVERAGE)
-        target_compile_options(_rocisa PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+        target_compile_options(_rocisa PRIVATE -fprofile-instr-generate -fcoverage-mapping)
         target_link_options(_rocisa PRIVATE -fprofile-instr-generate)
     endif()
 
