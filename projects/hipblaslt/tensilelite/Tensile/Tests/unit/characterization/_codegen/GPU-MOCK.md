@@ -72,11 +72,20 @@ Consequences:
   order, not performance. The output `*.yaml` is structurally valid but
   perf-meaningless.
 
-For this reason `--cpu-only` must never silently drive a real `LibraryLogic`
-generation step. `Tensile.py` already declines the efficiency-based path under
-`CpuOnly`; a louder guard against synthetic perf reaching real tuning output is
-tracked as a follow-up (work-plan WP-1.2). Always treat `--cpu-only` runs as
-CI/coverage artifacts, not tuning results.
+For this reason `--cpu-only` must never *silently* drive a real `LibraryLogic`
+generation step. Two protections exist:
+
+- `Tensile.py` declines the efficiency-based (`UseEffLike`) frequency path under
+  `CpuOnly`.
+- `Tensile.warnIfCpuOnlyWithLibraryLogic(config)` emits an unmistakable warning
+  whenever `--cpu-only` is combined with a `LibraryLogic` generation step, so a
+  synthetic run can never be mistaken for a real tuning run. It warns rather than
+  aborts on purpose: the GPU-less coverage/CI path deliberately exercises
+  LibraryLogic generation, so the goal is to surface the synthetic provenance,
+  not to block the run. (Pinned by
+  `characterization/ClientPath/test_cpu_only_guard_char.py`.)
+
+Always treat `--cpu-only` runs as CI/coverage artifacts, not tuning results.
 
 ## Golden / determinism note
 
