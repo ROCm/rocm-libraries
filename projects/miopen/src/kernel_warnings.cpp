@@ -103,11 +103,7 @@ static std::string MakeKernelWarningsString(const std::vector<std::string>& kern
 
 const std::string& OclKernelWarningsString()
 {
-#if MIOPEN_BACKEND_OPENCL
-    const std::string prefix = " -Wf,";
-#else
     const std::string prefix = " ";
-#endif
 
     static const std::string result = MakeKernelWarningsString(OclKernelWarnings(), prefix);
     return result;

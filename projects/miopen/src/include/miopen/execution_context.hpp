@@ -87,7 +87,6 @@ struct ExecutionContext
     bool db_update               = false;
     bool use_asm_kernels         = false;
     bool use_hip_kernels         = true;
-    bool use_opencl_convolutions = true;
     rocm_meta_version rmv        = rocm_meta_version::Default;
     bool disable_search_enforce  = false;
     // Skip perf-db reads and use the default performance configuration. This is used, for example,
