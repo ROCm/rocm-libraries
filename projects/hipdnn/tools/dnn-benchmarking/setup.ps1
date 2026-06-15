@@ -6,39 +6,66 @@
 .DESCRIPTION
     Installs dnn-benchmark into an existing Python env (the active venv or
     -PythonExe; on Windows this should be the ROCm-wheel env). Optionally builds
-    hipDNN + the Python bindings and the MIOpen provider from source (-FullBuild),
-    wires the bindings onto the env via a .pth, installs the tool (editable) plus
-    CPU PyTorch, and verifies the result.
+    hipDNN + the Python bindings and the MIOpen provider from source (-ForceBuild),
+    wires the bindings onto the env via a .pth, installs the tool (editable) and
+    PyTorch per -TorchMode, then verifies the result.
+
+    Parameters mirror setup.sh where they apply on Windows. setup.sh's venv
+    management (--reuse-venv / --workspace) is omitted: this script installs into
+    an env you select rather than creating one. --torch-mode's rocm/cuda values
+    are omitted too (ROCm torch isn't available on Windows).
 
 .PARAMETER PythonExe
     Python interpreter to install into. Default: the active venv, else 'python' on
     PATH. Recommended: the ROCm wheel env's python (rocm_sdk + _rocm_sdk_devel).
 
-.PARAMETER FullBuild
+.PARAMETER TorchMode
+    How torch is provided (setup.sh --torch-mode, Windows subset). Default: cpu.
+      cpu:      install CPU-only torch (from -TorchIndexUrl or the PyTorch CPU index).
+      existing: reuse torch already installed in the env (error if absent).
+      none:     leave torch uninstalled.
+
+.PARAMETER TorchIndexUrl
+    Override the pip index URL used for torch (setup.sh --torch-index-url).
+
+.PARAMETER ForceBuild
     Build hipDNN (with bindings) and the MIOpen provider from source, then install
-    them to -InstallDir. Needs the MSVC toolchain and the _rocm_sdk_devel wheel.
+    them to -InstallDir (setup.sh --force-build). Needs the MSVC toolchain and a
+    ROCm devel prefix (the _rocm_sdk_devel wheel, or -RocmPrefix).
+
+.PARAMETER RocmPrefix
+    Explicit ROCm/hipDNN prefix for the binding/provider build (setup.sh
+    --rocm-prefix). Takes precedence over _rocm_sdk_devel wheel discovery.
 
 .PARAMETER InstallDir
-    Install prefix for -FullBuild. Default: <hipdnn>/install.
+    Install prefix for -ForceBuild. Default: <hipdnn>/install.
 
-.PARAMETER GpuTargets
-    GPU architecture(s) to build for. Default: gfx1150.
+.PARAMETER GpuArch
+    GPU architecture to build for, i.e. GPU_TARGETS (setup.sh --gpu-arch).
+    Default: gfx1150.
 
 .PARAMETER Force
-    Clean reconfigure: wipe build dirs before -FullBuild, and rewrite the .pth wiring.
+    Clean reconfigure: wipe build dirs before -ForceBuild, and rewrite the .pth.
 
 .EXAMPLE
     pwsh ./setup.ps1 -PythonExe C:/develop/latest_wheels/Scripts/python.exe
 
 .EXAMPLE
-    pwsh ./setup.ps1 -PythonExe C:/develop/latest_wheels/Scripts/python.exe -FullBuild
+    pwsh ./setup.ps1 -PythonExe C:/develop/latest_wheels/Scripts/python.exe -ForceBuild
+
+.EXAMPLE
+    pwsh ./setup.ps1 -TorchMode existing
 #>
 [CmdletBinding()]
 param(
     [string]$PythonExe,
-    [switch]$FullBuild,
+    [ValidateSet('cpu', 'existing', 'none')]
+    [string]$TorchMode = 'cpu',
+    [string]$TorchIndexUrl,
+    [switch]$ForceBuild,
+    [string]$RocmPrefix,
     [string]$InstallDir,
-    [string]$GpuTargets = 'gfx1150',
+    [string]$GpuArch = 'gfx1150',
     [switch]$Force
 )
 
@@ -67,6 +94,26 @@ function Invoke-Native {
     if ($LASTEXITCODE -ne 0) {
         throw "$Exe $($Arguments -join ' ') failed (exit $LASTEXITCODE)"
     }
+}
+
+function Get-TorchMode {
+    # Mirror setup.sh get_torch_mode: rocm / cuda / cpu / missing.
+    $code = @'
+try:
+    import torch
+except Exception:
+    print("missing")
+else:
+    if getattr(torch.version, "hip", None):
+        print("rocm")
+    elif getattr(torch.version, "cuda", None):
+        print("cuda")
+    else:
+        print("cpu")
+'@
+    $mode = (& $Python -c $code 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not $mode) { return 'missing' }
+    return $mode.Trim()
 }
 
 function Invoke-ToolchainBuild {
@@ -137,13 +184,19 @@ if (-not $rocmOk) {
 }
 
 # --- 3. Build from source --------------------------------------------------
-if ($FullBuild) {
-    # ROCm devel wheel: provides clang++, hipcc, and the CMake configs.
-    $Wheel = (& $Python -c "import os,_rocm_sdk_devel as d; print(os.path.dirname(d.__file__))" 2>$null)
-    if ($LASTEXITCODE -ne 0 -or -not $Wheel) {
-        throw "-FullBuild needs the ROCm devel wheel (_rocm_sdk_devel) in $Python's env."
+if ($ForceBuild) {
+    # ROCm devel prefix: provides clang++, hipcc, and the CMake configs. Prefer
+    # -RocmPrefix, else discover the _rocm_sdk_devel wheel in the env.
+    if ($RocmPrefix) {
+        $Wheel = $RocmPrefix
     }
-    $Wheel = $Wheel.Trim()
+    else {
+        $Wheel = (& $Python -c "import os,_rocm_sdk_devel as d; print(os.path.dirname(d.__file__))" 2>$null)
+        if ($LASTEXITCODE -ne 0 -or -not $Wheel) {
+            throw "-ForceBuild needs the ROCm devel wheel (_rocm_sdk_devel) in $Python's env, or pass -RocmPrefix."
+        }
+        $Wheel = $Wheel.Trim()
+    }
 
     $CMakeExe = (Get-Command cmake -ErrorAction SilentlyContinue)?.Source
     if (-not $CMakeExe) { throw "cmake not found on PATH." }
@@ -171,7 +224,7 @@ if ($FullBuild) {
 
     Write-Step "Toolchain: cmake=$CMakeExe ninja=$NinjaExe"
     Write-Host  "           vcvars=$VcVars  winsdk=$WinSdkVersion"
-    Write-Host  "           wheel=$Wheel  gpu=$GpuTargets  install=$InstallDir"
+    Write-Host  "           rocm=$Wheel  gpu=$GpuArch  install=$InstallDir"
 
     $ProviderDir   = (Resolve-Path $ProviderDir -ErrorAction SilentlyContinue)?.Path
     $ProviderBuild = if ($ProviderDir) { Join-Path $ProviderDir 'build' } else { $null }
@@ -183,7 +236,7 @@ if ($FullBuild) {
 
     # hipDNN: configure -> build -> install (bindings included).
     $hipdnnCfg = '"{0}" -S "{1}" -B "{2}" -GNinja -DCMAKE_BUILD_TYPE={3} -DCMAKE_CXX_COMPILER="{4}/lib/llvm/bin/clang++.exe" -DCMAKE_MAKE_PROGRAM="{5}" -DCMAKE_PREFIX_PATH="{4}" -DROCM_CMAKE_PATH="{4}" -DPython_EXECUTABLE="{6}" -DGPU_TARGETS={7} -DENABLE_CLANG_FORMAT=OFF -DHIPDNN_SKIP_TESTS=ON -DHIPDNN_BUILD_PYTHON_BINDINGS=ON -DCMAKE_INSTALL_PREFIX="{8}"' -f `
-        $CMakeExe, (Fwd $HipdnnRoot), (Fwd $BuildDir), $BuildType, (Fwd $Wheel), (Fwd $NinjaExe), (Fwd $Python), $GpuTargets, (Fwd $InstallDir)
+        $CMakeExe, (Fwd $HipdnnRoot), (Fwd $BuildDir), $BuildType, (Fwd $Wheel), (Fwd $NinjaExe), (Fwd $Python), $GpuArch, (Fwd $InstallDir)
     $hipdnnBuild   = '"{0}" --build "{1}"'   -f $CMakeExe, (Fwd $BuildDir)
     $hipdnnInstall = '"{0}" --install "{1}"' -f $CMakeExe, (Fwd $BuildDir)
     Invoke-ToolchainBuild -Title "Building + installing hipDNN (with Python bindings)" `
@@ -192,7 +245,7 @@ if ($FullBuild) {
     # MIOpen provider: built against the freshly installed hipDNN (best-effort).
     if ($ProviderDir) {
         $provCfg = '"{0}" -S "{1}" -B "{2}" -GNinja -DCMAKE_BUILD_TYPE={3} -DCMAKE_MAKE_PROGRAM="{4}" -DCMAKE_PREFIX_PATH="{5};{6}" -DROCM_CMAKE_PATH="{6}" -DROCM_PATH="{6}" -DGPU_TARGETS={7} -DMIOPENPROVIDER_SKIP_TESTS=ON -DCMAKE_INSTALL_PREFIX="{5}"' -f `
-            $CMakeExe, (Fwd $ProviderDir), (Fwd $ProviderBuild), $BuildType, (Fwd $NinjaExe), (Fwd $InstallDir), (Fwd $Wheel), $GpuTargets
+            $CMakeExe, (Fwd $ProviderDir), (Fwd $ProviderBuild), $BuildType, (Fwd $NinjaExe), (Fwd $InstallDir), (Fwd $Wheel), $GpuArch
         $provBuild   = '"{0}" --build "{1}"'   -f $CMakeExe, (Fwd $ProviderBuild)
         $provInstall = '"{0}" --install "{1}"' -f $CMakeExe, (Fwd $ProviderBuild)
         $ok = Invoke-ToolchainBuild -Title "Building + installing MIOpen provider" `
@@ -223,17 +276,38 @@ elseif ($builtPyd) {
 }
 else {
     Write-Warn ("hipdnn_frontend is not importable and no compiled extension was found " +
-                "under $BindingsLib. Re-run with -FullBuild, or pip-install the bindings " +
+                "under $BindingsLib. Re-run with -ForceBuild, or pip-install the bindings " +
                 "from $BindingsPkg (see python/README.md).")
 }
 
 # --- 5. Install the dnn-benchmark package + PyTorch ------------------------
-# torch is optional (not in pyproject.toml); the default PyPI wheel on Windows is
-# the CPU build, which backs --backend pytorch / --validate pytorch.
+# torch is omitted from pyproject.toml so pip never replaces the selected wheel;
+# install it explicitly per -TorchMode.
 Write-Step "Installing dnn-benchmark (editable) and its PyPI dependencies"
 Invoke-Native $Python @('-m', 'pip', 'install', '-e', $ScriptDir)
-Write-Step "Installing PyTorch (CPU)"
-Invoke-Native $Python @('-m', 'pip', 'install', 'torch')
+
+$installedTorch = Get-TorchMode
+switch ($TorchMode) {
+    'none' {
+        Write-Step "Torch mode 'none': leaving torch uninstalled."
+    }
+    'existing' {
+        if ($installedTorch -eq 'missing') {
+            throw "-TorchMode existing requires torch already installed in the selected env."
+        }
+        Write-Step "Torch mode 'existing': using installed torch ($installedTorch)."
+    }
+    'cpu' {
+        if ($installedTorch -ne 'missing') {
+            Write-Step "Torch mode 'cpu': torch already present ($installedTorch); leaving as-is."
+        }
+        else {
+            $idx = if ($TorchIndexUrl) { $TorchIndexUrl } else { 'https://download.pytorch.org/whl/cpu' }
+            Write-Step "Installing CPU PyTorch from $idx"
+            Invoke-Native $Python @('-m', 'pip', 'install', 'torch', '--index-url', $idx)
+        }
+    }
+}
 
 # --- 6. Best-effort amdsmi (powers the GPU SMI snapshot) -------------------
 # Ships with the HIP SDK (not on PyPI); metrics degrade gracefully if absent.
@@ -265,7 +339,7 @@ Write-Host ""
 Write-Step "Setup complete."
 Write-Host "  Run benchmarks with:" -ForegroundColor Green
 Write-Host "    & '$Python' -m dnn_benchmarking --graph <graph.json>"
-if ($FullBuild) {
+if ($ForceBuild) {
     Write-Host "    & '$Python' -m dnn_benchmarking --graph <graph.json> ``"
     Write-Host "        --plugin-path '$InstallDir\lib\hipdnn_plugins\engines'"
 }
