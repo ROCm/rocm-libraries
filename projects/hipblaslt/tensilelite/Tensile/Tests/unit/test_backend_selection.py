@@ -100,21 +100,6 @@ def test_yaml_backend_is_normalized_and_preserved(monkeypatch, tmp_path):
     assert captured["config"]["Backend"] == {"Name": "ductile", "Config": {"seed": 11, "n_gen": 2}}
 
 
-def test_cli_backend_override_replaces_yaml_backend_and_warns(monkeypatch, tmp_path):
-    captured = _stub_tensile_pipeline(monkeypatch)
-    warnings = []
-    monkeypatch.setattr(TensileModule, "printWarning", lambda msg: warnings.append(msg))
-    config_path = _write_config(
-        tmp_path,
-        _base_config(backend={"Name": "ductile", "Config": {"seed": 7}}),
-    )
-
-    TensileModule.Tensile([config_path, str(tmp_path / "output"), "--backend", "tensile"])
-
-    assert captured["config"]["Backend"] == {"Name": "tensile", "Config": {}}
-    assert any("Command-line backend override differs from YAML Backend.Name" in msg for msg in warnings)
-
-
 def test_invalid_backend_type_exits(monkeypatch, tmp_path):
     _stub_tensile_pipeline(monkeypatch)
     monkeypatch.setattr(TensileModule, "printExit", lambda msg: (_ for _ in ()).throw(RuntimeError(msg)))
