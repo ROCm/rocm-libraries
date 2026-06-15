@@ -36,6 +36,10 @@ endif()
 #
 # Set the library version
 set(VERSION_STRING "4.4.0")
+# Set the CCCL-compatible version.
+set(HIPCUB_CCCL_VERSION_MAJOR 2)
+set(HIPCUB_CCCL_VERSION_MINOR 8)
+set(HIPCUB_CCCL_VERSION_PATCH 2)
 # Set the minimum required rocPRIM version
 set(MIN_ROCPRIM_PACKAGE_VERSION "4.1.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
 # Set download branch for dependency rocPRIM
@@ -177,6 +181,7 @@ endif()
 # Setup the library version
 rocm_setup_version(VERSION ${VERSION_STRING})
 math(EXPR hipcub_VERSION_NUMBER "${hipcub_VERSION_MAJOR} * 100000 + ${hipcub_VERSION_MINOR} * 100 + ${hipcub_VERSION_PATCH}")
+math(EXPR HIPCUB_CCCL_VERSION_NUMBER "${HIPCUB_CCCL_VERSION_MAJOR} * 100000 + ${HIPCUB_CCCL_VERSION_MINOR} * 100 + ${HIPCUB_CCCL_VERSION_PATCH}")
 
 # Find and verify HIP.
 include(VerifyCompiler)
@@ -192,7 +197,7 @@ endif()
 include(CheckCXXCompilerFlag)
 
 if(BUILD_OFFLOAD_COMPRESS)
-  # We need to pass '-x hip' since check_cxx_compiler_flag assumes c++ and not HIP. 
+  # We need to pass '-x hip' since check_cxx_compiler_flag assumes c++ and not HIP.
   check_cxx_compiler_flag("--offload-compress -x hip" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
   if(CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --offload-compress")
