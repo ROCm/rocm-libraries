@@ -73,7 +73,8 @@ _CACHE_FIELDS = {
 # Deterministic synthetic GFlops value emitted per (problem size, solution) cell in the
 # --cpu-only results CSV. Fixed (never random / never timestamped) so the file is
 # byte-identical across runs (T8) and the value is large enough that addFromCSV's winner
-# selection has a well-defined winner. See the CSV-fidelity caveat in GPU-MOCK-PR.md.
+# selection has a well-defined winner. See the synthetic-perf caveat in
+# Tensile/Tests/unit/characterization/_codegen/GPU-MOCK.md.
 _CPU_ONLY_SYNTHETIC_GFLOPS = 1000.0
 
 

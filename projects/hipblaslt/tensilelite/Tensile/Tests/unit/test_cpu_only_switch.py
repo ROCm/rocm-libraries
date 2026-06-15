@@ -22,7 +22,8 @@
 
 """Unit tests for the GPU-less ``--cpu-only`` switch (P0.5 prerequisite).
 
-This file accumulates the T1-T12 rigor-gate suite from GPU-MOCK-PR.md. This commit
+This file accumulates the T1-T12 rigor-gate suite from
+characterization/_codegen/GPU-MOCK.md. This commit
 covers the flag-plumbing tier:
 
 * T1 ``test_flag_default_off`` - the CLI flag parses correctly (absent->False,
