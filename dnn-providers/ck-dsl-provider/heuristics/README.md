@@ -42,33 +42,37 @@ format expected by the shared `convert_csv_to_parquet.py`.
 
 ## How the model is used at runtime
 
-The CMake resolver `ck_dsl_provider_resolve_grouped_conv_fwd_fp16_gfx942_model()`
-in `cmake/CkDslProviderPaths.cmake` walks up from the provider source directory
-until it finds:
+`DslMlHeuristic` loads models from the directory pointed to by the
+`CK_DSL_ML_MODEL_DIR` environment variable. The expected layout is:
 
 ```
-dnn-providers/ck-dsl-provider/heuristics/models/
-  grouped_conv_forward_fp16_gfx942/model_tflops.lgbm
+$CK_DSL_ML_MODEL_DIR/
+  conv/model_tflops.lgbm    ← conv-forward model (decompressed)
+  gemm/model_tflops.lgbm   ← GEMM model (optional)
+  fmha/model_tflops.lgbm   ← FMHA model (optional)
 ```
 
-The model is stored compressed (`.lgbm.gz`). Decompress before building:
+The in-repo model is stored compressed. Decompress before use:
 
 ```bash
 gunzip -k dnn-providers/ck-dsl-provider/heuristics/models/grouped_conv_forward_fp16_gfx942/model_tflops.lgbm.gz
+# then set:
+export CK_DSL_ML_MODEL_DIR=/path/to/dir-containing-conv-gemm-fmha-subdirs
 ```
 
 The decompressed `.lgbm` is excluded from git via `models/.gitignore`.
 
 ## How the candidate sweep works
 
-`ConvCandidateSweep.cpp` calls `enumerateCandidates(problem, arch)` — the same
-function the production dispatcher uses — to get the complete candidate set
-for a given shape. For each candidate it invokes `CompileServiceBridge` to
-compile the kernel via the DSL Python codegen, loads the HIP module, and
-times it on-device with `PerfMeasurement`. The measured result for every
-successful candidate is written to the training CSV. There is no manually
-curated config file; the sweep and the dispatcher share the same enumeration
-code, so training data coverage is correct by construction.
+`ConvCandidateSweep.cpp` enumerates all DSL conv candidates for a given shape,
+compiles each via the DSL Python codegen (`CompileServiceBridge`), loads the
+HIP module, and times it on-device with `PerfMeasurement`. The measured result
+for every successful candidate is written to the training CSV.
+
+Note: the sweep uses the Python codegen path (pybind11 / `CompileServiceBridge`)
+intentionally — it is an offline oracle tool that must compile and time every
+candidate from scratch. The production C++ dispatcher uses pre-compiled `.hsaco`
+kernels from the `ArtifactStore` manifest and does not share this enumeration path.
 
 Arguments:
 

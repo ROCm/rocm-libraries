@@ -84,7 +84,7 @@ ck_dsl::Problem buildProblem(const ParsedConvParams& p, const std::string& arch)
     prob.conv_N = p.N;
     prob.conv_C = p.C;
     prob.conv_K = p.K;
-    prob.conv_G = 1;
+    prob.conv_G = 1;  // hipDNN ConvolutionFwdAttributes has no group field; G>1 unsupported
     prob.Hi = p.Hi;
     prob.Wi = p.Wi;
     prob.Y = p.R;

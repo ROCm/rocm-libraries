@@ -386,7 +386,7 @@ struct ConvHwProfile {
     }
     static ConvHwProfile for_arch(const std::string& arch) {
         if (arch == "gfx942") {
-            // MI300A: 228 CUs, 28 shader engines, 2100 MHz
+            // MI300X: 228 CUs, 28 shader engines, 2100 MHz
             ConvHwProfile p;
             p.num_cus = 228;
             p.simds_per_cu = 4;
