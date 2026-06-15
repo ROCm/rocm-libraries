@@ -819,6 +819,8 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
         if (fields.contains("slc") || fields.contains("sc1")) modFields["slc"] = "true";
         if (fields.contains("nt")) modFields["nt"] = "true";
         if (fields.contains("lds")) modFields["lds"] = "true";
+        if (fields.contains("scope")) modFields["scope"] = fields["scope"];
+        if (fields.contains("th")) modFields["th"] = fields["th"];
 
     } else if (modKey == "mod.flat") {
         if (fields.contains("offset")) modFields["offset12"] = fields["offset"];
@@ -828,6 +830,8 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
 
     } else if (modKey == "mod.global") {
         if (fields.contains("offset")) modFields["offset"] = fields["offset"];
+        if (fields.contains("th")) modFields["th"] = fields["th"];
+        if (fields.contains("scope")) modFields["scope"] = fields["scope"];
 
     } else if (modKey == "mod.smem") {
         if (fields.contains("offset")) modFields["offset"] = fields["offset"];

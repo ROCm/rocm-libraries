@@ -424,7 +424,7 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_csr_row_split]
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_row]
-  filename: [Chevron3]
+  filename: [Chevron2]
 
 - name: spmm_csr_file
   category: pre_checkin
@@ -498,7 +498,7 @@ Tests:
   orderC: [rocsparse_order_row]
   filename: [nos3,
              nos4,
-             mac_econ_fwd500]
+             nos5]
   rand_gen_min: -128.0
   rand_gen_max: 127.0
   convert_to_int: true
