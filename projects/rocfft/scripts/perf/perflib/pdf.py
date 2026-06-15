@@ -214,7 +214,7 @@ def make_tex(figs,
     # Data frames for significant speedups and slowdowns
     df_all_good = pandas.DataFrame()
     df_all_bad = pandas.DataFrame()
-    
+
     # We need a list of speedups to compute the geometric mean via
     # sicpy.stats; the naive calculation suffers from issues with
     # finite precision.
@@ -242,11 +242,11 @@ def make_tex(figs,
                 speedups.append(row.speedup)
 
             total_compared += len(df)
-                
+
             # Significant results:
             df_sig = df.loc[df['speedup_pval'] <= significance]
             total_significant += len(df_sig)
-            
+
             # Significant results that are good or bad:
             df_good = df_sig.loc[df_sig['speedup'] > 1]
             df_bad = df_sig.loc[df_sig['speedup'] < 1]
@@ -318,7 +318,11 @@ def make_tex(figs,
             " " * max(len(label[1]) - len(label[0]), 0), nslowdown)
         tex += "Geometric mean overall cases: " + str(globalgeomean) + "\n"
         tex += "\\\\"
-        tex += "There were " + str(total_significant) + " statistically significant cases out of a total of " + str(total_compared)  + " transforms (" + '{0:.3f}'.format(100 * total_significant / total_compared) +  "\\%).\n"
+        tex += "There were " + str(
+            total_significant
+        ) + " statistically significant cases out of a total of " + str(
+            total_compared) + " transforms (" + '{0:.3f}'.format(
+                100 * total_significant / total_compared) + "\\%).\n"
 
         if ncompare > 0:
             geometric_mean = 1.0
@@ -390,16 +394,16 @@ def make_tex(figs,
             tex += '''}
             \\caption{''' + "Histogram of significant performance changes" + '''}\n\\end{figure}'''
             tex += "\\clearpage\n"
-                
+
         # Histogram for all speedups (not just significant ones)
-        if(len(speedups) > 1):
+        if (len(speedups) > 1):
             allhistogramdat = []
             for speedup in speedups:
                 if speedup >= 1:
                     allhistogramdat.append(100 * (speedup - 1))
                 if speedup < 1:
                     allhistogramdat.append(100 * (1 - (1 / speedup)))
-                    
+
             allhistdatname = os.path.join(docdir, "histogramall.dat")
 
             with open(allhistdatname, 'w') as f:
@@ -441,7 +445,7 @@ def make_tex(figs,
             tex += '''}
             \\caption{''' + "Histogram of all performance changes" + '''}\n\\end{figure}'''
             tex += "\\clearpage\n"
-        
+
     tex += figtex
 
     if nspeedup > 0:
