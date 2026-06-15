@@ -126,6 +126,11 @@ namespace rocRoller
         return false;
     }
 
+    inline bool GPUArchitecture::isSupportedConstantValue(TDM value) const
+    {
+        return false;
+    }
+
     template <std::integral T>
     bool GPUArchitecture::isSupportedConstantValue(T value) const
     {
@@ -149,10 +154,11 @@ namespace rocRoller
     template <std::floating_point T>
     std::unordered_set<T> GPUArchitecture::supportedConstantValues() const
     {
-        static_assert(CIsAnyOf<T, float, double, Half, BFloat16, FP8, BF8, FP6, BF6, FP4, E8M0>,
-                      "Unsupported floating point type");
+        static_assert(
+            CIsAnyOf<T, float, double, Half, BFloat16, FP8, BF8, FP6, BF6, FP4, E8M0, E5M3, E4M3>,
+            "Unsupported floating point type");
 
-        if constexpr(CIsAnyOf<T, BFloat16, FP8, BF8, FP6, BF6, FP4, E8M0>)
+        if constexpr(CIsAnyOf<T, BFloat16, FP8, BF8, FP6, BF6, FP4, E8M0, E5M3, E4M3>)
         {
             return {};
         }
@@ -193,7 +199,8 @@ namespace rocRoller
 
     inline bool GPUArchitecture::isSupportedScaleBlockSize(int size) const
     {
-        return m_capabilities.contains(GPUCapability::HasBlockScaling32) && (size == 32);
+        return (m_capabilities.contains(GPUCapability::HasBlockScaling32) && (size == 32))
+               || (m_capabilities.contains(GPUCapability::HasBlockScaling16) && (size == 16));
     }
 
     inline bool GPUArchitecture::isSupportedScaleType(DataType type) const
@@ -202,6 +209,10 @@ namespace rocRoller
         {
         case DataType::E8M0:
             return m_capabilities.contains(GPUCapability::HasE8M0Scale);
+        case DataType::E5M3:
+            return m_capabilities.contains(GPUCapability::HasE5M3Scale);
+        case DataType::E4M3:
+            return m_capabilities.contains(GPUCapability::HasE4M3Scale);
         default:
             return false;
         }

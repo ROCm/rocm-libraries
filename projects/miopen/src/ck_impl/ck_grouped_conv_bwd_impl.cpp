@@ -48,22 +48,30 @@ struct CKArgs : CKArgsSplitK<CKArgs>
     {
         (void)alpha;
         (void)beta;
+        // CK BWD interface accepts int32 arrays only; narrow at the boundary.
+        // The narrowed bundle is a mutable member of CKArgs (populated by
+        // GetNarrowedArrays) so its arrays outlive any arg_ptr referencing
+        // them -- CK's MakeArgumentPointer captures references into the
+        // bundle. Safe because RequiresLargeTensorCKInstance blocks overflow
+        // shapes from selecting any BWD instance (no BWD large-tensor
+        // registrations), so MakeArgPtr is never reached on >INT_MAX inputs.
+        const auto& a = this->GetNarrowedArrays();
         return conv_ptr->MakeArgumentPointer(out,
                                              w,
                                              {},
                                              in,
-                                             output,
-                                             out_strides,
-                                             weight,
-                                             wei_strides,
+                                             a.out_l,
+                                             a.out_s,
+                                             a.wei_l,
+                                             a.wei_s,
                                              {},
                                              {},
-                                             input,
-                                             in_strides,
-                                             strides,
-                                             dilation,
-                                             lPadding,
-                                             rPadding,
+                                             a.in_l,
+                                             a.in_s,
+                                             a.filter_strides,
+                                             a.filter_dilations,
+                                             a.lPadding,
+                                             a.rPadding,
                                              {},
                                              {},
                                              {},

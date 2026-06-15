@@ -263,6 +263,16 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, MetadataND_EncodePrecision)
     EXPECT_NE(fp16_encoded, bf16_encoded);
 }
 
+TEST_P(GPU_ConvNDAIHeuristics_FP32, MetadataND_EncodePrecisionUnsupportedThrows)
+{
+    immed_mode::MetadataND metadata(device_name, spatial_dim);
+    ASSERT_TRUE(metadata.IsValid());
+    // A datatype no model encodes (here miopenInt32) must throw so the caller falls back to the
+    // non-AI heuristic, rather than silently returning an out-of-range index that would feed an
+    // all-zero precision one-hot into the model.
+    EXPECT_ANY_THROW(metadata.EncodePrecision(miopenInt32));
+}
+
 TEST_P(GPU_ConvNDAIHeuristics_FP32, MetadataND_EncodeLayouts)
 {
     immed_mode::MetadataND metadata(device_name, spatial_dim);
@@ -433,6 +443,144 @@ std::vector<ConvNDParams> GenerateConvNDParams()
     };
 }
 
+// The TunaNet 2D engineered input vector must stay stable across refactors. This pins the assembly
+// order and the metadata-driven one-hot widths/indices (layouts, precision, direction) and num_cu,
+// by composing the expected vector from the metadata; the derived-feature math is pinned
+// deterministically by CPU_ConvAiEngineeredConvFeatures_NONE.Golden.
+TEST_P(GPU_ConvNDAIHeuristics_FP32, ExtractTunaNet2dFeaturesGolden)
+{
+    if(spatial_dim != 2)
+        GTEST_SKIP() << "Engineered input features are 2D-only";
+
+    immed_mode::MetadataND metadata(device_name, spatial_dim);
+    ASSERT_TRUE(metadata.IsValid());
+
+    // Fixed 2D forward problem (NCHW, FP32): out dims equal in dims for 3x3, pad 1, stride 1.
+    const auto problem = Create2DProblem(
+        1, 64, 56, 56, 64, 3, 3, 1, 1, 1, 1, 1, 1, miopen::conv::Direction::Forward, miopenFloat);
+
+    const auto features = immed_mode::ExtractTunaNetND2dFeatures(problem, /*isFwd=*/true, metadata);
+
+    std::vector<float> expected;
+    const auto append_one_hot = [&](size_t index, size_t width) {
+        std::vector<float> one_hot(width, 0.0f);
+        if(index < width)
+            one_hot.at(index) = 1.0f;
+        expected.insert(expected.end(), one_hot.begin(), one_hot.end());
+    };
+    append_one_hot(metadata.EncodeInLayout(problem.GetInLayout()),
+                   metadata.GetInLayoutClassCount());
+    append_one_hot(metadata.EncodeFilLayout(problem.GetWeightsLayout()),
+                   metadata.GetFilLayoutClassCount());
+    append_one_hot(metadata.EncodeOutLayout(problem.GetOutLayout()),
+                   metadata.GetOutLayoutClassCount());
+    append_one_hot(metadata.EncodePrecision(problem.GetInDataType()),
+                   metadata.GetPrecisionClassCount());
+    append_one_hot(metadata.EncodeDirection(problem.GetDirection()),
+                   metadata.GetDirectionClassCount());
+
+    // Raw passthrough: C_in,H_in,W_in,C_out,H_out,W_out,K_h,K_w then
+    // pad/stride/dilation/batch/group.
+    const std::vector<float> raw = {64.0f,
+                                    56.0f,
+                                    56.0f,
+                                    64.0f,
+                                    56.0f,
+                                    56.0f,
+                                    3.0f,
+                                    3.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f};
+    expected.insert(expected.end(), raw.begin(), raw.end());
+
+    const auto derived =
+        common::EngineeredConvFeatures(1, 64, 64, 56, 56, 56, 56, 3, 3, 1, metadata.GetNumCu());
+    expected.insert(expected.end(), derived.begin(), derived.end());
+
+    ASSERT_EQ(features.size(), expected.size());
+    for(size_t i = 0; i < expected.size(); ++i)
+        EXPECT_FLOAT_EQ(features[i], expected[i]) << "TunaNet feature mismatch at index " << i;
+}
+
+// Hardcoded counterpart to ExtractTunaNet2dFeaturesGolden: the one-hot widths/indices and num_cu
+// are written as literals rather than re-derived from the metadata, so a retrain that silently
+// changes the precision class count (e.g. dropping INT8: 4 -> 3) or num_cu is caught here -- the
+// golden test above cannot catch it because it composes the expected vector from the same metadata
+// accessors.
+TEST_P(GPU_ConvNDAIHeuristics_FP32, ExtractTunaNet2dFeaturesHardcoded)
+{
+    if(spatial_dim != 2)
+        GTEST_SKIP() << "Engineered input features are 2D-only";
+    if(device_name != "gfx942" && device_name != "gfx950")
+        GTEST_SKIP() << "Hardcoded TunaNet 2D metadata contract is gfx942/gfx950 only";
+
+    immed_mode::MetadataND metadata(device_name, spatial_dim);
+    ASSERT_TRUE(metadata.IsValid());
+
+    // Contract of the shipped gfx942/gfx950 TunaNet 2D metadata, as literals.
+    ASSERT_EQ(metadata.GetInLayoutClassCount(), 2u); // NCHW, NHWC
+    ASSERT_EQ(metadata.GetFilLayoutClassCount(), 2u);
+    ASSERT_EQ(metadata.GetOutLayoutClassCount(), 2u);
+    ASSERT_EQ(metadata.GetPrecisionClassCount(), 4u); // BF16, FP16, FP32, INT8
+    ASSERT_EQ(metadata.GetDirectionClassCount(), 3u); // B, F, W
+    const size_t expected_num_cu = (device_name == "gfx942") ? 304u : 256u;
+    ASSERT_EQ(metadata.GetNumCu(), expected_num_cu);
+
+    const auto problem = Create2DProblem(
+        1, 64, 56, 56, 64, 3, 3, 1, 1, 1, 1, 1, 1, miopen::conv::Direction::Forward, miopenFloat);
+    const auto features = immed_mode::ExtractTunaNetND2dFeatures(problem, /*isFwd=*/true, metadata);
+
+    // Categorical one-hots for an NCHW / FP32 / Forward problem, written out by hand:
+    //   in/fil/out layout = NCHW (index 0 of 2); precision = FP32 (index 2 of 4);
+    //   direction = Forward 'F' (index 1 of 3).
+    std::vector<float> expected = {
+        1.0f,
+        0.0f, // in_layout  NCHW
+        1.0f,
+        0.0f, // fil_layout NCHW
+        1.0f,
+        0.0f, // out_layout NCHW
+        0.0f,
+        0.0f,
+        1.0f,
+        0.0f, // precision  FP32
+        0.0f,
+        1.0f,
+        0.0f, // direction  Forward
+    };
+    const std::vector<float> raw = {64.0f,
+                                    56.0f,
+                                    56.0f,
+                                    64.0f,
+                                    56.0f,
+                                    56.0f,
+                                    3.0f,
+                                    3.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f,
+                                    1.0f};
+    expected.insert(expected.end(), raw.begin(), raw.end());
+    const auto derived =
+        common::EngineeredConvFeatures(1, 64, 64, 56, 56, 56, 56, 3, 3, 1, expected_num_cu);
+    expected.insert(expected.end(), derived.begin(), derived.end());
+
+    ASSERT_EQ(features.size(), expected.size());
+    for(size_t i = 0; i < expected.size(); ++i)
+        EXPECT_FLOAT_EQ(features[i], expected[i])
+            << "TunaNet hardcoded feature mismatch at index " << i;
+}
+
 // Test name generator
 std::string ConvNDParamName(const ::testing::TestParamInfo<ConvNDParams>& info)
 {
@@ -444,6 +592,47 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_ConvNDAIHeuristics_FP32,
                          ::testing::ValuesIn(GenerateConvNDParams()),
                          ConvNDParamName);
+
+// Golden vector for the derived-feature block shared by the TunaNet (ExtractTunaNetND2dFeatures)
+// and candidate-selection input encoders via common::EngineeredConvFeatures. Pins the shared math
+// so a hasty change on either path is caught. The values match the derived tail of the
+// candidate-selection EngineeredInputGolden_Test for the same dimensions, anchoring both consumers
+// to one source. Pure CPU math -- no model files or device required.
+TEST(CPU_ConvAiEngineeredConvFeatures_NONE, Golden)
+{
+    const auto derived                = common::EngineeredConvFeatures(/*N=*/1,
+                                                        /*C_in=*/64,
+                                                        /*C_out=*/64,
+                                                        /*H_in=*/56,
+                                                        /*W_in=*/56,
+                                                        /*H_out=*/56,
+                                                        /*W_out=*/56,
+                                                        /*K_h=*/3,
+                                                        /*K_w=*/3,
+                                                        /*groups=*/1,
+                                                        /*num_cu=*/254);
+    const std::vector<float> expected = {19.2588406f,
+                                         8.05102253f,
+                                         4.17438745f,
+                                         6.35784245f,
+                                         49.0f,
+                                         5.44444466f,
+                                         0.111111112f,
+                                         18.5656948f,
+                                         6.67351675f,
+                                         1.0f,
+                                         0.00286989799f,
+                                         1.0f,
+                                         0.015625f,
+                                         4.04305124f,
+                                         4.04305124f,
+                                         4.17438745f,
+                                         4.17438745f,
+                                         0.693147182f};
+    ASSERT_EQ(derived.size(), expected.size());
+    for(std::size_t i = 0; i < expected.size(); ++i)
+        EXPECT_FLOAT_EQ(derived[i], expected[i]) << "derived feature mismatch at index " << i;
+}
 
 } // namespace
 

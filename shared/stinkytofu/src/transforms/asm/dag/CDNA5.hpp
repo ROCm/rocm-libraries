@@ -614,9 +614,24 @@ std::unordered_map<StinkyInstruction*, int> CDNA5ReadyQueue::computeBarrierBefor
         // Step 4: beforeN = (residualCycles / wmmaIssueConfig.latency) + 1
         int beforeN = (residualCycles / (int)wmmaIssueConfig.latency) + 1;
         int maxFinalWmmaIdx = targetDSLoadLatency / (int)wmmaIssueConfig.latency;
+        // Step 4.1: Consider the number of ds_load to be issued in this range.
+        int numDsLoad = matchingDSReads.size();
+        int maxDsPerWmmaWindow =
+            ((int)wmmaIssueConfig.latency - (int)wmmaIssueConfig.issueCycles) / 2;
+        int wmmaWindowsNeeded = (numDsLoad + maxDsPerWmmaWindow - 1) / maxDsPerWmmaWindow;
+        // WMMA issue count that forces the barrier early enough for all dependent ds_reads.
+        // Take the latest of three constraints, then subtract from total WMMAs in the region:
+        //   beforeN — remaining latency after the last consumer WMMA
+        //   maxFinalWmmaIdx — absolute cap after the 1st ds_load (DS load latency / WMMA latency)
+        //   wmmaWindowsNeeded — DS issue bandwidth (enough WMMA windows for all ds_loads)
         int beforeThreshold =
-            std::max(0, wmmaIssueConfig.issuedCount - (beforeN + maxFinalWmmaIdx));
+            std::max(0, wmmaIssueConfig.issuedCount -
+                            std::max(beforeN, std::max(maxFinalWmmaIdx, wmmaWindowsNeeded)));
         result[be.barrier] = beforeThreshold;
+        PASS_DEBUG(std::cerr << "[CDNA5 computeBarrierBeforeThresholds] barrier="
+                             << " beforeThreshold=" << beforeThreshold << " beforeN=" << beforeN
+                             << " maxFinalWmmaIdx=" << maxFinalWmmaIdx
+                             << " wmmaWindowsNeeded=" << wmmaWindowsNeeded << "\n");
     }
 
     return result;
@@ -789,7 +804,7 @@ bool CDNA5ReadyQueue::empty() const {
 }
 
 // Per-BB init. Rule (5): cross-BB loop tail WMMA detection.
-// Resets co-issue timeline. Sets wmmaIssueConfig.latency from first WMMA in block.
+// Resets co-issue timeline. Sets WMMA issue config from first WMMA in block.
 void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regionEnd) {
     deferFirstHeadWmmaActive_ = false;
     deferHeadBalanceThisRegion_ = false;
@@ -808,11 +823,13 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     }
 
     wmmaIssueConfig.latency = 0;
+    wmmaIssueConfig.issueCycles = 1;
     for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
         auto* instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (!instPtr) continue;
         if (isMatrixInstruction(*instPtr)) {
             wmmaIssueConfig.latency = instPtr->latencyCycles;
+            wmmaIssueConfig.issueCycles = instPtr->issueCycles;
             break;
         }
     }
