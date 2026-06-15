@@ -4,11 +4,12 @@ Documentation for hipSPARSE is available at
 [https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/).
 
 
-## Since last release ROCm 7.13
+## Since last release (ROCm 7.13)
 
 ### Added
-* Add `hipsparseCreateBsr` and `hipsparseCreateConstBsr` in order to enable BSR format support in generic routines.
-* Add BSR format support to `hipsparseSpMV`.
+* Added `hipsparseCreateBsr` and `hipsparseCreateConstBsr` in order to enable BSR format support in generic routines.
+* Added BSR format support to `hipsparseSpMV`.
+* Added BSR format support to `hipsparseSpMM`.
 
 ### Resolved issues
 * Fixed an issue where calling `hipsparseSpMV` multiple times with different `hipsparseOperation_t`, `hipsparseSpMVAlg_t`, or compute-datatypes using the same sparse matrix descriptor resulted in errors.

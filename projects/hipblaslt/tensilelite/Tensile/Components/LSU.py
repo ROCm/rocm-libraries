@@ -184,7 +184,7 @@ class LSUOn(LSU):
 
         lsu_id = writer.vgprPool.checkOut(1,"lsu_id")
         wave_id = writer.vgprPool.checkOut(1,"wave_id")
-        tmpVgpr = writer.vgprPool.checkOutAligned(2, 2, "tmpVgpr")
+        tmpVgpr = writer.vgprPool.checkOutAligned(2, 2, tag="LSUOn_writeReadReduction_tmpVgpr")
         tmpVgprRes = ContinuousRegister(tmpVgpr, 2)
 
         module.add(vectorStaticDivide(wave_id, "Serial", \
@@ -256,7 +256,7 @@ class LSUOn(LSU):
             maxOffset = (kernel["LocalSplitU"] -1) * ldsStride + ((numVgprPerLSU // regsPerVector -1) * numInstPerVW + (numInstPerVW -1)) * regsPerStore * (bpr * kernel["WavefrontSize"])
             numAddr = maxOffset // maxLDSConstOffset + 1
             addr = writer.vgprPool.checkOut(numAddr,"addr")
-            with writer.allocTmpSgpr(1) as tmpSgprInfo:
+            with writer.allocTmpSgpr(1, tag="LSUOn_writeReadReduction_tmpSgprInfo") as tmpSgprInfo:
                 tmpSgpr = tmpSgprInfo.idx
                 module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(dataPerWave), \
                     comment="dataPerWave (%d)"%dataPerWave))
@@ -300,7 +300,7 @@ class LSUOn(LSU):
             module.addComment1("LocalSplitU: local read %d/%d"%(reUseIdx+1,kernel["LocalSplitUReuseLDS"]))
 
             # Calculate offset for wave id and lsu id
-            with writer.allocTmpSgpr(1) as tmpSgprInfo:
+            with writer.allocTmpSgpr(1, tag="LSUOn_writeReadReduction_tmpSgprInfo2") as tmpSgprInfo:
                 tmpSgpr = tmpSgprInfo.idx
                 module.add(VAndB32(vgpr(addr), hex(kernel["WavefrontSize"]-1), vgpr("Serial"), \
                     comment="initial addr"))
@@ -426,7 +426,7 @@ class LSUOn(LSU):
         numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
         module.add(vectorStaticDivide(wave_id, wave_id, numWaves, tmpVgpr1Res))
 
-        with writer.allocTmpSgpr(1) as tmpSgprInfo:
+        with writer.allocTmpSgpr(1, tag="LSUOn_globalWriteIndices_tmpSgprInfo") as tmpSgprInfo:
             tmpSgpr = tmpSgprInfo.idx
             if self.LSUValidOffset0 > 0:
                 module.add(SMovB32(dst=sgpr(tmpSgpr), \
@@ -474,7 +474,7 @@ class LSUOn(LSU):
             writer.vgprs.addrScaleBVec     = -1
             writer.vgprs.addrScaleAlphaVec = -1
         else:
-            writer.vgprs.addrD = writer.vgprPool.checkOut(2)
+            writer.vgprs.addrD = writer.vgprPool.checkOut(2, tag="LSUOn_globalWriteIndices_addrD")
             module.add(VMovB32(
                     dst=vgpr(writer.vgprs.addrD+0), \
                     src=sgpr("AddressD+0"), \
@@ -483,7 +483,7 @@ class LSUOn(LSU):
                     dst=vgpr(writer.vgprs.addrD+1), \
                     src=sgpr("AddressD+1"), \
                     comment="sgpr -> vgpr"))
-            writer.vgprs.addrC = writer.vgprPool.checkOut(2)
+            writer.vgprs.addrC = writer.vgprPool.checkOut(2, tag="LSUOn_globalWriteIndices_addrC")
             module.add(VMovB32(
                     dst=vgpr(writer.vgprs.addrC+0), \
                     src=sgpr("AddressC+0"), \
@@ -495,7 +495,7 @@ class LSUOn(LSU):
 
             if kernel["GlobalSplitU"] != 0:
                 gsuLabel = Label(label=writer.labels.getNameInc("GSU"), comment="")
-                with writer.allocTmpSgpr(1) as tmpSgprGSU:
+                with writer.allocTmpSgpr(1, tag="LSUOn_globalWriteIndices_tmpSgprGSU") as tmpSgprGSU:
                     module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
                     module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
                 module.add(SCBranchSCC0(labelName=gsuLabel.getLabelName(), comment="branch if GSU != 1"))

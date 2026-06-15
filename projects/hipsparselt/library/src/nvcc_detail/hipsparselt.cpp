@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -697,12 +697,33 @@ hipsparseStatus_t
                                          HIPMatmulAlgToCuSparseLtMatmulAlg(alg)));
 }
 
+hipsparseStatus_t hipsparseLtMatmulAlgSelectionDestroy(const hipsparseLtMatmulAlgSelection_t* algSelection)
+{
+    return hipCUSPARSEStatusToHIPStatus(
+        cusparseLtMatmulAlgSelectionDestroy((const cusparseLtMatmulAlgSelection_t*)algSelection));
+}
+
 hipsparseStatus_t hipsparseLtMatmulAlgSetAttribute(const hipsparseLtHandle_t*       handle,
                                                    hipsparseLtMatmulAlgSelection_t* algSelection,
                                                    hipsparseLtMatmulAlgAttribute_t  attribute,
                                                    const void*                      data,
                                                    size_t                           dataSize)
 {
+    if(attribute == HIPSPARSELT_MATMUL_SPLIT_K_MODE)
+    {
+        if(dataSize < sizeof(cusparseLtSplitKMode_t))
+            return HIPSPARSE_STATUS_INVALID_VALUE;
+
+        auto mode = *(reinterpret_cast<const hipsparseLtSplitKMode_t*>(data));
+        auto cmode = HIPSplitKModeToCuSparseLtSplitKMode(mode);
+        return hipCUSPARSEStatusToHIPStatus(
+            cusparseLtMatmulAlgSetAttribute((const cusparseLtHandle_t*)handle,
+                                            (cusparseLtMatmulAlgSelection_t*)algSelection,
+                                            HIPMatmulAlgAttributeToCuSparseLtAlgAttribute(attribute),
+                                            &cmode,
+                                            dataSize));
+    }
+
     return hipCUSPARSEStatusToHIPStatus(
         cusparseLtMatmulAlgSetAttribute((const cusparseLtHandle_t*)handle,
                                         (cusparseLtMatmulAlgSelection_t*)algSelection,
@@ -718,12 +739,18 @@ hipsparseStatus_t
                                      void*                                  data,
                                      size_t                                 dataSize)
 {
-    return hipCUSPARSEStatusToHIPStatus(
-        cusparseLtMatmulAlgGetAttribute((const cusparseLtHandle_t*)handle,
-                                        (const cusparseLtMatmulAlgSelection_t*)algSelection,
+    auto status = hipCUSPARSEStatusToHIPStatus(
+        cusparseLtMatmulAlgSetAttribute((const cusparseLtHandle_t*)handle,
+                                        (cusparseLtMatmulAlgSelection_t*)algSelection,
                                         HIPMatmulAlgAttributeToCuSparseLtAlgAttribute(attribute),
                                         data,
                                         dataSize));
+    if(attribute == HIPSPARSELT_MATMUL_SPLIT_K_MODE && status == HIPSPARSE_STATUS_SUCCESS)
+    {
+        auto cmode = *(reinterpret_cast<cusparseLtSplitKMode_t*>(data));
+        auto mode = CuSparseLtSplitKModeToHIPSplitKMode(cmode);
+        *(reinterpret_cast<hipsparseLtSplitKMode_t*>(data)) = mode;
+    }
 }
 
 /* matmul plan */

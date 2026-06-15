@@ -4,8 +4,21 @@
 """Benchmark configuration dataclasses."""
 
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Literal, Optional
+
+
+class ReferenceProviderName(str, Enum):
+    """Supported reference provider names."""
+
+    NONE = "none"
+    PYTORCH = "pytorch"
+
+
+REFERENCE_PROVIDER_CHOICES = frozenset(
+    provider.value for provider in ReferenceProviderName
+)
 
 
 @dataclass
@@ -46,22 +59,21 @@ class ValidationConfig:
     """Configuration for reference validation.
 
     Attributes:
-        provider: Reference provider name ("pytorch", "cpu_plugin", or "none").
+        provider: Reference provider name ("pytorch" or "none").
         rtol: Relative tolerance for comparison.
         atol: Absolute tolerance for comparison.
     """
 
-    provider: str = "none"
+    provider: str = ReferenceProviderName.NONE.value
     rtol: float = 1e-5
     atol: float = 1e-8
 
     def __post_init__(self) -> None:
         """Validate configuration values."""
-        valid_providers = {"none", "pytorch", "cpu_plugin"}
-        if self.provider not in valid_providers:
+        if self.provider not in REFERENCE_PROVIDER_CHOICES:
             raise ValueError(
                 f"Invalid provider: '{self.provider}'. "
-                f"Valid options: {valid_providers}"
+                f"Valid options: {REFERENCE_PROVIDER_CHOICES}"
             )
         if self.rtol < 0:
             raise ValueError("rtol must be non-negative")
@@ -71,7 +83,7 @@ class ValidationConfig:
     @property
     def enabled(self) -> bool:
         """Check if validation is enabled."""
-        return self.provider != "none"
+        return self.provider != ReferenceProviderName.NONE.value
 
 
 @dataclass
@@ -250,7 +262,7 @@ class SuiteConfig:
             used for both. If neither is set, validation uses dtype-aware
             defaults.
         atol: Optional absolute tolerance override for correctness comparison.
-        gpu_backend: GPU timer backend to use.
+        timing_backend: GPU timer backend to use ("hip", "auto", "none").
         reference_provider: Reference provider name for correctness checking.
         verbose: If True, print rich per-engine block per graph instead of summary.
         metrics: Metric collection configuration. Defaults to ``basic`` tier
@@ -263,8 +275,8 @@ class SuiteConfig:
     engine_filter: Optional[List[int]] = None
     rtol: Optional[float] = None
     atol: Optional[float] = None
-    gpu_backend: str = "auto"
-    reference_provider: str = "none"
+    timing_backend: str = "auto"
+    reference_provider: str = ReferenceProviderName.NONE.value
     verbose: bool = False
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
     plugin_paths: Optional[List[Path]] = None
@@ -297,17 +309,16 @@ class SuiteConfig:
                     raise ValueError(
                         "--plugin-path entry count must be 1 or match --engine count"
                     )
-        valid_gpu_backends = {"torch", "auto", "none"}
-        if self.gpu_backend not in valid_gpu_backends:
+        valid_timing_backends = {"hip", "auto", "none"}
+        if self.timing_backend not in valid_timing_backends:
             raise ValueError(
-                f"Invalid gpu_backend: '{self.gpu_backend}'. "
-                f"Valid options: {valid_gpu_backends}"
+                f"Invalid timing_backend: '{self.timing_backend}'. "
+                f"Valid options: {valid_timing_backends}"
             )
-        valid_reference_providers = {"none", "pytorch", "cpu_plugin"}
-        if self.reference_provider not in valid_reference_providers:
+        if self.reference_provider not in REFERENCE_PROVIDER_CHOICES:
             raise ValueError(
                 f"Invalid reference_provider: '{self.reference_provider}'. "
-                f"Valid options: {valid_reference_providers}"
+                f"Valid options: {REFERENCE_PROVIDER_CHOICES}"
             )
 
     @property
