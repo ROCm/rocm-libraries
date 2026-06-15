@@ -12,26 +12,13 @@ gracefully: on any failure they yield ``None`` values rather than raising.
 
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from ._diagnostic import warn_once
 
 
-@dataclass
-class CpuTimeSample:
-    """A single CPU-time reading for the calling process, in seconds.
-
-    Attributes:
-        user_time: User-space CPU time in seconds.
-        kernel_time: Kernel/system CPU time in seconds.
-    """
-
-    user_time: float
-    kernel_time: float
-
-
-def _process_cpu_times() -> Optional[CpuTimeSample]:
-    """Return a ``CpuTimeSample`` for the calling process.
+def _process_cpu_times() -> Optional[Tuple[float, float]]:
+    """Return ``(user, kernel)`` CPU time for the calling process, in seconds.
 
     Uses ``os.times``, the cross-platform stdlib accessor (backed by
     ``GetProcessTimes`` on Windows). The probe wraps the whole benchmark
@@ -41,7 +28,7 @@ def _process_cpu_times() -> Optional[CpuTimeSample]:
     """
     try:
         times = os.times()
-        return CpuTimeSample(user_time=times.user, kernel_time=times.system)
+        return (times.user, times.system)
     except (AttributeError, OSError) as e:
         warn_once("cpu_time", f"os.times() failed: {e}")
         return None
@@ -71,7 +58,7 @@ class CpuTimeProbe:
     """
 
     def __init__(self) -> None:
-        self._start: Optional[CpuTimeSample] = None
+        self._start: Optional[Tuple[float, float]] = None
         self.delta: Optional[CpuTimeDelta] = None
 
     def __enter__(self) -> "CpuTimeProbe":
@@ -84,9 +71,11 @@ class CpuTimeProbe:
         end = _process_cpu_times()
         if end is None:
             return
+        start_user, start_kernel = self._start
+        end_user, end_kernel = end
         self.delta = CpuTimeDelta(
-            user_time_ms=(end.user_time - self._start.user_time) * 1000.0,
-            kernel_time_ms=(end.kernel_time - self._start.kernel_time) * 1000.0,
+            user_time_ms=(end_user - start_user) * 1000.0,
+            kernel_time_ms=(end_kernel - start_kernel) * 1000.0,
         )
 
 
