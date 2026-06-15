@@ -11,7 +11,6 @@
 
 #include "HipdnnEnginePluginHandle.hpp"
 #include "engines/plans/HipblasltMxMatmulPlanBuilder.hpp"
-#include "engines/plans/MxMatmulGraphTestUtils.hpp"
 
 using namespace hipblaslt_plugin;
 using namespace hipdnn_plugin_sdk;
@@ -19,9 +18,123 @@ using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace hipdnn_test_sdk::utilities;
 
 using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
-using hipblaslt_plugin::test::createMxMatmulGraph;
-using hipblaslt_plugin::test::ScaleOverride;
-using hipblaslt_plugin::test::VirtualOverride;
+
+namespace
+{
+
+enum class MxTensor
+{
+    XA, // A input — should be non-virtual
+    SCALE_A, // A scale — should be non-virtual
+    YA, // A dequant output — should be virtual
+    XB, // B input — should be non-virtual
+    SCALE_B, // B scale — should be non-virtual
+    YB, // B dequant output — should be virtual
+    C, // matmul output — should be non-virtual
+};
+
+// Builds an otherwise-valid canonical MX graph with the given tensor's is_virtual
+// flag flipped from its required value, to exercise the builder's virtuality checks.
+flatbuffers::FlatBufferBuilder createMxGraphWithWrongVirtual(MxTensor target)
+{
+    // Returns the is_virtual flag for a tensor, flipped from its valid value when it
+    // is the corruption target.
+    const auto flag
+        = [target](MxTensor self, bool valid) { return (self == target) ? !valid : valid; };
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
+        tensors;
+
+    const std::vector<int64_t> xADims = {32, 128};
+    const std::vector<int64_t> xAStrides = {1, 32}; // col-major (opA=T)
+    const std::vector<int64_t> scaleADims = {32, 4};
+    const std::vector<int64_t> scaleAStrides = {4, 1};
+    const std::vector<int64_t> yADims = {32, 128};
+    const std::vector<int64_t> yAStrides = {128, 1};
+    const std::vector<int64_t> xBDims = {128, 32};
+    const std::vector<int64_t> xBStrides = {32, 1}; // row-major (opB=N)
+    const std::vector<int64_t> scaleBDims = {4, 32};
+    const std::vector<int64_t> scaleBStrides = {32, 1};
+    const std::vector<int64_t> yBDims = {128, 32};
+    const std::vector<int64_t> yBStrides = {32, 1};
+    const std::vector<int64_t> cDims = {32, 32};
+    const std::vector<int64_t> cStrides = {32, 1};
+
+    const int64_t xAUid = 1;
+    const int64_t scaleAUid = 2;
+    const int64_t yAUid = 3;
+    const int64_t xBUid = 4;
+    const int64_t scaleBUid = 5;
+    const int64_t yBUid = 6;
+    const int64_t cUid = 7;
+
+    tensors.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, xAUid, "x_a", DT::FP8_E4M3, &xAStrides, &xADims, flag(MxTensor::XA, false)));
+    tensors.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        scaleAUid,
+        "scale_a",
+        DT::FP8_E8M0,
+        &scaleAStrides,
+        &scaleADims,
+        flag(MxTensor::SCALE_A, false)));
+    tensors.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, yAUid, "y_a", DT::FLOAT, &yAStrides, &yADims, flag(MxTensor::YA, true)));
+    tensors.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, xBUid, "x_b", DT::FP8_E4M3, &xBStrides, &xBDims, flag(MxTensor::XB, false)));
+    tensors.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        scaleBUid,
+        "scale_b",
+        DT::FP8_E8M0,
+        &scaleBStrides,
+        &scaleBDims,
+        flag(MxTensor::SCALE_B, false)));
+    tensors.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, yBUid, "y_b", DT::FLOAT, &yBStrides, &yBDims, flag(MxTensor::YB, true)));
+    tensors.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, cUid, "c", DT::HALF, &cStrides, &cDims, flag(MxTensor::C, false)));
+
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    const std::vector<int32_t> blockSizeVec = {32};
+
+    auto deqAttrA
+        = hipdnn_flatbuffers_sdk::data_objects::CreateBlockScaleDequantizeAttributesDirect(
+            builder, xAUid, scaleAUid, yAUid, &blockSizeVec, false);
+    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "deq_a",
+        DT::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BlockScaleDequantizeAttributes,
+        deqAttrA.Union()));
+
+    auto deqAttrB
+        = hipdnn_flatbuffers_sdk::data_objects::CreateBlockScaleDequantizeAttributesDirect(
+            builder, xBUid, scaleBUid, yBUid, &blockSizeVec, false);
+    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "deq_b",
+        DT::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BlockScaleDequantizeAttributes,
+        deqAttrB.Union()));
+
+    auto matmulAttr
+        = hipdnn_flatbuffers_sdk::data_objects::CreateMatmulAttributes(builder, yAUid, yBUid, cUid);
+    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "matmul",
+        DT::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MatmulAttributes,
+        matmulAttr.Union()));
+
+    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+        builder, "mx_virtual_test", DT::FLOAT, DT::HALF, DT::BFLOAT16, &tensors, &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+} // namespace
 
 // ===========================================================================
 // Fixtures
@@ -66,21 +179,39 @@ protected:
 
 TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableE4M3OutputHalf)
 {
-    auto fb = createMxMatmulGraph(32, 128, 32, DT::FP8_E4M3, DT::HALF);
+    auto fb = createValidMxMatmulGraph();
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_TRUE(_builder.isApplicable(_handle, graph));
 }
 
 TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableE5M2OutputBf16)
 {
-    auto fb = createMxMatmulGraph(32, 128, 32, DT::FP8_E5M2, DT::BFLOAT16);
+    auto fb = createValidMxMatmulGraph({32, 128},
+                                       {1, 32},
+                                       {128, 32},
+                                       {32, 1},
+                                       {32, 32},
+                                       {32, 1},
+                                       {32, 4},
+                                       {4, 32},
+                                       DT::FP8_E5M2,
+                                       DT::BFLOAT16);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_TRUE(_builder.isApplicable(_handle, graph));
 }
 
 TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableE4M3OutputFp32)
 {
-    auto fb = createMxMatmulGraph(32, 128, 32, DT::FP8_E4M3, DT::FLOAT);
+    auto fb = createValidMxMatmulGraph({32, 128},
+                                       {1, 32},
+                                       {128, 32},
+                                       {32, 1},
+                                       {32, 32},
+                                       {32, 1},
+                                       {32, 4},
+                                       {4, 32},
+                                       DT::FP8_E4M3,
+                                       DT::FLOAT);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_TRUE(_builder.isApplicable(_handle, graph));
 }
@@ -89,8 +220,22 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableE4M3OutputFp32)
 // resolved by matching dequant Y outputs to matmul inputs, not by node position.
 TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableHandlesSwappedDequantOrder)
 {
-    auto fb = createMxMatmulGraph(
-        32, 128, 32, DT::FP8_E4M3, DT::HALF, 32, true, true, 1, false, true /*swapDequantOrder*/);
+    auto fb = createValidMxMatmulGraph({32, 128},
+                                       {1, 32},
+                                       {128, 32},
+                                       {32, 1},
+                                       {32, 32},
+                                       {32, 1},
+                                       {32, 4},
+                                       {4, 32},
+                                       DT::FP8_E4M3,
+                                       DT::HALF,
+                                       DT::FP8_E8M0,
+                                       DT::FP8_E8M0,
+                                       DT::FLOAT,
+                                       32,
+                                       false,
+                                       true /*swapDequantOrder*/);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_TRUE(_builder.isApplicable(_handle, graph));
 }
@@ -125,14 +270,32 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsWrongNodeCount4)
 // Non-FP8 input types
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonFp8Input)
 {
-    auto fb = createMxMatmulGraph(32, 128, 32, DT::HALF, DT::HALF);
+    auto fb = createValidMxMatmulGraph({32, 128},
+                                       {1, 32},
+                                       {128, 32},
+                                       {32, 1},
+                                       {32, 32},
+                                       {32, 1},
+                                       {32, 4},
+                                       {4, 32},
+                                       DT::HALF,
+                                       DT::HALF);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonFp8InputFloat)
 {
-    auto fb = createMxMatmulGraph(32, 128, 32, DT::FLOAT, DT::HALF);
+    auto fb = createValidMxMatmulGraph({32, 128},
+                                       {1, 32},
+                                       {128, 32},
+                                       {32, 1},
+                                       {32, 32},
+                                       {32, 1},
+                                       {32, 4},
+                                       {4, 32},
+                                       DT::FLOAT,
+                                       DT::HALF);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
@@ -140,14 +303,32 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonFp8InputFloat)
 // FP8 output type not allowed
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsFp8Output)
 {
-    auto fb = createMxMatmulGraph(32, 128, 32, DT::FP8_E4M3, DT::FP8_E4M3);
+    auto fb = createValidMxMatmulGraph({32, 128},
+                                       {1, 32},
+                                       {128, 32},
+                                       {32, 1},
+                                       {32, 32},
+                                       {32, 1},
+                                       {32, 4},
+                                       {4, 32},
+                                       DT::FP8_E4M3,
+                                       DT::FP8_E4M3);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsFp8E8M0Output)
 {
-    auto fb = createMxMatmulGraph(32, 128, 32, DT::FP8_E4M3, DT::FP8_E8M0);
+    auto fb = createValidMxMatmulGraph({32, 128},
+                                       {1, 32},
+                                       {128, 32},
+                                       {32, 1},
+                                       {32, 32},
+                                       {32, 1},
+                                       {32, 4},
+                                       {4, 32},
+                                       DT::FP8_E4M3,
+                                       DT::FP8_E8M0);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
@@ -155,7 +336,8 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsFp8E8M0Output)
 // m not divisible by 16
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsMNotDiv16)
 {
-    auto fb = createMxMatmulGraph(33, 128, 32, DT::FP8_E4M3, DT::HALF);
+    auto fb = createValidMxMatmulGraph(
+        {33, 128}, {1, 33}, {128, 32}, {32, 1}, {33, 32}, {32, 1}, {33, 4}, {4, 32});
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
@@ -163,7 +345,8 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsMNotDiv16)
 // n not divisible by 16
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNNotDiv16)
 {
-    auto fb = createMxMatmulGraph(32, 128, 33, DT::FP8_E4M3, DT::HALF);
+    auto fb = createValidMxMatmulGraph(
+        {32, 128}, {1, 32}, {128, 33}, {33, 1}, {32, 33}, {33, 1}, {32, 4}, {4, 33});
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
@@ -171,7 +354,8 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNNotDiv16)
 // K not divisible by 128 (96 is block-aligned at 32 but not 128-aligned)
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsKNotDiv128)
 {
-    auto fb = createMxMatmulGraph(32, 96, 32, DT::FP8_E4M3, DT::HALF);
+    auto fb = createValidMxMatmulGraph(
+        {32, 96}, {1, 32}, {96, 32}, {32, 1}, {32, 32}, {32, 1}, {32, 3}, {3, 32});
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
@@ -179,23 +363,38 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsKNotDiv128)
 // block_size != 32
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsWrongBlockSize)
 {
-    auto fb = createMxMatmulGraph(32, 128, 32, DT::FP8_E4M3, DT::HALF, 16);
+    auto fb = createValidMxMatmulGraph({32, 128},
+                                       {1, 32},
+                                       {128, 32},
+                                       {32, 1},
+                                       {32, 32},
+                                       {32, 1},
+                                       {32, 4},
+                                       {4, 32},
+                                       DT::FP8_E4M3,
+                                       DT::HALF,
+                                       DT::FP8_E8M0,
+                                       DT::FP8_E8M0,
+                                       DT::FLOAT,
+                                       16 /*blockSize*/);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
-// opA != T (A must be col-major for MX)
+// opA != T (A must be col-major for MX) — pass row-major A strides
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsOpANotT)
 {
-    auto fb = createMxMatmulGraph(32, 128, 32, DT::FP8_E4M3, DT::HALF, 32, false, true);
+    auto fb = createValidMxMatmulGraph(
+        {32, 128}, {128, 1}, {128, 32}, {32, 1}, {32, 32}, {32, 1}, {32, 4}, {4, 32});
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
-// opB != N (B must be row-major for MX)
+// opB != N (B must be row-major for MX) — pass col-major B strides
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsOpBNotN)
 {
-    auto fb = createMxMatmulGraph(32, 128, 32, DT::FP8_E4M3, DT::HALF, 32, true, false);
+    auto fb = createValidMxMatmulGraph(
+        {32, 128}, {1, 32}, {128, 32}, {1, 128}, {32, 32}, {32, 1}, {32, 4}, {4, 32});
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
@@ -208,10 +407,18 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsBatchnormGraph)
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
-// batch > 1 (hipBLASLt requires B==1 for VEC32_UE8M0) — leading batch dim of 2 must be rejected
+// batch > 1 (hipBLASLt requires B==1 for VEC32_UE8M0) — leading batch dim of 2 must
+// be rejected. All tensors carry a rank-3 leading batch dim.
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsBatchGreaterThan1)
 {
-    auto fb = createMxMatmulGraph(32, 128, 32, DT::FP8_E4M3, DT::HALF, 32, true, true, 2);
+    auto fb = createValidMxMatmulGraph({2, 32, 128},
+                                       {4096, 1, 32},
+                                       {2, 128, 32},
+                                       {4096, 32, 1},
+                                       {2, 32, 32},
+                                       {1024, 32, 1},
+                                       {2, 32, 4},
+                                       {2, 4, 32});
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
@@ -219,8 +426,21 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsBatchGreaterThan1)
 // Fused epilogue (4th Pointwise node) is not allowed — extra node → not 3 nodes
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsEpilogue)
 {
-    auto fb = createMxMatmulGraph(
-        32, 128, 32, DT::FP8_E4M3, DT::HALF, 32, true, true, 1, true /*withEpilogue*/);
+    auto fb = createValidMxMatmulGraph({32, 128},
+                                       {1, 32},
+                                       {128, 32},
+                                       {32, 1},
+                                       {32, 32},
+                                       {32, 1},
+                                       {32, 4},
+                                       {4, 32},
+                                       DT::FP8_E4M3,
+                                       DT::HALF,
+                                       DT::FP8_E8M0,
+                                       DT::FP8_E8M0,
+                                       DT::FLOAT,
+                                       32,
+                                       true /*withEpilogue*/);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
@@ -228,270 +448,138 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsEpilogue)
 // Matmul node compute data type must be FP32 (mirrors the plain matmul builder)
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonFloatComputeType)
 {
-    auto fb = createMxMatmulGraph(32,
-                                  128,
-                                  32,
-                                  DT::FP8_E4M3,
-                                  DT::HALF,
-                                  32,
-                                  true,
-                                  true,
-                                  1,
-                                  false,
-                                  false,
-                                  DT::HALF /*matmulComputeType*/);
+    auto fb = createValidMxMatmulGraph({32, 128},
+                                       {1, 32},
+                                       {128, 32},
+                                       {32, 1},
+                                       {32, 32},
+                                       {32, 1},
+                                       {32, 4},
+                                       {4, 32},
+                                       DT::FP8_E4M3,
+                                       DT::HALF,
+                                       DT::FP8_E8M0,
+                                       DT::FP8_E8M0,
+                                       DT::HALF /*computeType*/);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
-// Input shapes must be consistent with the output: D's N-dim (48) differs from
+// Input shapes must be consistent with the output: C's N-dim (48) differs from
 // B's N-dim (32) here. 48 is 16-aligned, so this fails the shape check, not the
 // hipBLASLt alignment check.
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsShapeMismatch)
 {
-    auto fb = createMxMatmulGraph(32,
-                                  128,
-                                  32,
-                                  DT::FP8_E4M3,
-                                  DT::HALF,
-                                  32,
-                                  true,
-                                  true,
-                                  1,
-                                  false,
-                                  false,
-                                  DT::FLOAT,
-                                  48 /*dnOverride*/);
+    auto fb = createValidMxMatmulGraph(
+        {32, 128}, {1, 32}, {128, 32}, {32, 1}, {32, 48}, {48, 1}, {32, 4}, {4, 32});
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
-// Virtual/non-virtual contract: the FP8 inputs, their scales, and D are real
-// device buffers (must be non-virtual); the dequant Y outputs are fused
-// intermediates (must be virtual). Each override flips exactly one flag.
+// Virtual/non-virtual contract: the inputs, their scales, and C are real device
+// buffers (must be non-virtual); the dequant Y outputs are fused intermediates
+// (must be virtual). Each case flips exactly one flag.
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsVirtualFp8InputA)
 {
-    auto fb = createMxMatmulGraph(32,
-                                  128,
-                                  32,
-                                  DT::FP8_E4M3,
-                                  DT::HALF,
-                                  32,
-                                  true,
-                                  true,
-                                  1,
-                                  false,
-                                  false,
-                                  DT::FLOAT,
-                                  0,
-                                  VirtualOverride::XA_VIRTUAL);
+    auto fb = createMxGraphWithWrongVirtual(MxTensor::XA);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsVirtualFp8InputB)
 {
-    auto fb = createMxMatmulGraph(32,
-                                  128,
-                                  32,
-                                  DT::FP8_E4M3,
-                                  DT::HALF,
-                                  32,
-                                  true,
-                                  true,
-                                  1,
-                                  false,
-                                  false,
-                                  DT::FLOAT,
-                                  0,
-                                  VirtualOverride::XB_VIRTUAL);
+    auto fb = createMxGraphWithWrongVirtual(MxTensor::XB);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsVirtualScaleA)
 {
-    auto fb = createMxMatmulGraph(32,
-                                  128,
-                                  32,
-                                  DT::FP8_E4M3,
-                                  DT::HALF,
-                                  32,
-                                  true,
-                                  true,
-                                  1,
-                                  false,
-                                  false,
-                                  DT::FLOAT,
-                                  0,
-                                  VirtualOverride::SCALE_A_VIRTUAL);
+    auto fb = createMxGraphWithWrongVirtual(MxTensor::SCALE_A);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsVirtualScaleB)
 {
-    auto fb = createMxMatmulGraph(32,
-                                  128,
-                                  32,
-                                  DT::FP8_E4M3,
-                                  DT::HALF,
-                                  32,
-                                  true,
-                                  true,
-                                  1,
-                                  false,
-                                  false,
-                                  DT::FLOAT,
-                                  0,
-                                  VirtualOverride::SCALE_B_VIRTUAL);
+    auto fb = createMxGraphWithWrongVirtual(MxTensor::SCALE_B);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonVirtualDequantOutputA)
 {
-    auto fb = createMxMatmulGraph(32,
-                                  128,
-                                  32,
-                                  DT::FP8_E4M3,
-                                  DT::HALF,
-                                  32,
-                                  true,
-                                  true,
-                                  1,
-                                  false,
-                                  false,
-                                  DT::FLOAT,
-                                  0,
-                                  VirtualOverride::YA_NON_VIRTUAL);
+    auto fb = createMxGraphWithWrongVirtual(MxTensor::YA);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonVirtualDequantOutputB)
 {
-    auto fb = createMxMatmulGraph(32,
-                                  128,
-                                  32,
-                                  DT::FP8_E4M3,
-                                  DT::HALF,
-                                  32,
-                                  true,
-                                  true,
-                                  1,
-                                  false,
-                                  false,
-                                  DT::FLOAT,
-                                  0,
-                                  VirtualOverride::YB_NON_VIRTUAL);
+    auto fb = createMxGraphWithWrongVirtual(MxTensor::YB);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
-TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsVirtualOutputD)
+TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsVirtualOutputC)
 {
-    auto fb = createMxMatmulGraph(32,
-                                  128,
-                                  32,
-                                  DT::FP8_E4M3,
-                                  DT::HALF,
-                                  32,
-                                  true,
-                                  true,
-                                  1,
-                                  false,
-                                  false,
-                                  DT::FLOAT,
-                                  0,
-                                  VirtualOverride::D_VIRTUAL);
+    auto fb = createMxGraphWithWrongVirtual(MxTensor::C);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
 // Scale-tensor contract: VEC32_UE8M0 requires the scales to be FP8_E8M0 and to
 // declare exactly one element per 32-element operand block (M*(K/32) for A,
-// (K/32)*N for B). Each override corrupts exactly one scale's dtype or shape.
+// (K/32)*N for B). Each case corrupts exactly one scale's dtype or shape.
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsWrongScaleTypeA)
 {
-    auto fb = createMxMatmulGraph(32,
-                                  128,
-                                  32,
-                                  DT::FP8_E4M3,
-                                  DT::HALF,
-                                  32,
-                                  true,
-                                  true,
-                                  1,
-                                  false,
-                                  false,
-                                  DT::FLOAT,
-                                  0,
-                                  VirtualOverride::NONE,
-                                  ScaleOverride::A_WRONG_TYPE);
+    auto fb = createValidMxMatmulGraph({32, 128},
+                                       {1, 32},
+                                       {128, 32},
+                                       {32, 1},
+                                       {32, 32},
+                                       {32, 1},
+                                       {32, 4},
+                                       {4, 32},
+                                       DT::FP8_E4M3,
+                                       DT::HALF,
+                                       DT::FLOAT /*scaleAType*/);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsWrongScaleTypeB)
 {
-    auto fb = createMxMatmulGraph(32,
-                                  128,
-                                  32,
-                                  DT::FP8_E4M3,
-                                  DT::HALF,
-                                  32,
-                                  true,
-                                  true,
-                                  1,
-                                  false,
-                                  false,
-                                  DT::FLOAT,
-                                  0,
-                                  VirtualOverride::NONE,
-                                  ScaleOverride::B_WRONG_TYPE);
+    auto fb = createValidMxMatmulGraph({32, 128},
+                                       {1, 32},
+                                       {128, 32},
+                                       {32, 1},
+                                       {32, 32},
+                                       {32, 1},
+                                       {32, 4},
+                                       {4, 32},
+                                       DT::FP8_E4M3,
+                                       DT::HALF,
+                                       DT::FP8_E8M0,
+                                       DT::FLOAT /*scaleBType*/);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsWrongScaleShapeA)
 {
-    auto fb = createMxMatmulGraph(32,
-                                  128,
-                                  32,
-                                  DT::FP8_E4M3,
-                                  DT::HALF,
-                                  32,
-                                  true,
-                                  true,
-                                  1,
-                                  false,
-                                  false,
-                                  DT::FLOAT,
-                                  0,
-                                  VirtualOverride::NONE,
-                                  ScaleOverride::A_WRONG_SHAPE);
+    // scale_a inner dim 5 instead of K/32 = 4
+    auto fb = createValidMxMatmulGraph(
+        {32, 128}, {1, 32}, {128, 32}, {32, 1}, {32, 32}, {32, 1}, {32, 5}, {4, 32});
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsWrongScaleShapeB)
 {
-    auto fb = createMxMatmulGraph(32,
-                                  128,
-                                  32,
-                                  DT::FP8_E4M3,
-                                  DT::HALF,
-                                  32,
-                                  true,
-                                  true,
-                                  1,
-                                  false,
-                                  false,
-                                  DT::FLOAT,
-                                  0,
-                                  VirtualOverride::NONE,
-                                  ScaleOverride::B_WRONG_SHAPE);
+    // scale_b outer dim 5 instead of K/32 = 4
+    auto fb = createValidMxMatmulGraph(
+        {32, 128}, {1, 32}, {128, 32}, {32, 1}, {32, 32}, {32, 1}, {32, 4}, {5, 32});
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
@@ -501,42 +589,17 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsWrongScaleShapeB)
 // would accept this and then compute silently-wrong results on the GPU.
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsTransposedScaleA)
 {
-    auto fb = createMxMatmulGraph(32,
-                                  128,
-                                  32,
-                                  DT::FP8_E4M3,
-                                  DT::HALF,
-                                  32,
-                                  true,
-                                  true,
-                                  1,
-                                  false,
-                                  false,
-                                  DT::FLOAT,
-                                  0,
-                                  VirtualOverride::NONE,
-                                  ScaleOverride::A_TRANSPOSED_SHAPE);
+    auto fb = createValidMxMatmulGraph(
+        {32, 128}, {1, 32}, {128, 32}, {32, 1}, {32, 32}, {32, 1}, {4, 32}, {4, 32});
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsTransposedScaleB)
 {
-    auto fb = createMxMatmulGraph(32,
-                                  128,
-                                  32,
-                                  DT::FP8_E4M3,
-                                  DT::HALF,
-                                  32,
-                                  true,
-                                  true,
-                                  1,
-                                  false,
-                                  false,
-                                  DT::FLOAT,
-                                  0,
-                                  VirtualOverride::NONE,
-                                  ScaleOverride::B_TRANSPOSED_SHAPE);
+    // scale_b as [N, K/32] instead of [K/32, N]
+    auto fb = createValidMxMatmulGraph(
+        {32, 128}, {1, 32}, {128, 32}, {32, 1}, {32, 32}, {32, 1}, {32, 4}, {32, 4});
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
@@ -547,7 +610,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsTransposedScaleB)
 
 TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, GetWorkspaceSizeValid)
 {
-    auto fb = createMxMatmulGraph(32, 128, 32, DT::FP8_E4M3, DT::HALF);
+    auto fb = createValidMxMatmulGraph();
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_NO_THROW(_builder.getWorkspaceSize(_handle, graph));
 }
@@ -565,7 +628,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, GetWorkspaceSizeThrowsOnInvalidGraph)
 
 TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, BuildPlanValid)
 {
-    auto fb = createMxMatmulGraph(32, 128, 32, DT::FP8_E4M3, DT::HALF);
+    auto fb = createValidMxMatmulGraph();
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
     EXPECT_NO_THROW(_builder.buildPlan(_handle, graph, ctx));

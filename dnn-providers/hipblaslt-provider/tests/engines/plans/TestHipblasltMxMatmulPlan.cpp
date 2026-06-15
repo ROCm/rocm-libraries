@@ -7,11 +7,11 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/matmul_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
 #include "engines/plans/HipblasltMxMatmulPlan.hpp"
-#include "engines/plans/MxMatmulGraphTestUtils.hpp"
 
 using namespace hipblaslt_plugin;
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
@@ -20,11 +20,11 @@ namespace
 {
 
 using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
-using hipblaslt_plugin::test::createMxMatmulGraph;
+using hipdnn_test_sdk::utilities::createValidMxMatmulGraph;
 
 /// Borrowed references to the three node attribute tables of an MX graph.
 /// node 0 → dequant A, node 1 → dequant B, node 2 → matmul (emission order of
-/// createMxMatmulGraph with swapDequantOrder=false).
+/// createValidMxMatmulGraph with swapDequantOrder=false).
 struct MxNodeAttrs
 {
     const hipdnn_flatbuffers_sdk::data_objects::BlockScaleDequantizeAttributes& deqA;
@@ -67,7 +67,7 @@ T getDescAttribute(const HipblasltMatmulDesc& desc, hipblasLtMatmulDescAttribute
 // exact tensors.
 TEST(TestMxMatmulParams, LayoutUidsMatchInputTensors)
 {
-    auto fb = createMxMatmulGraph(32, 128, 32, DT::FP8_E4M3, DT::HALF);
+    auto fb = createValidMxMatmulGraph();
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
@@ -82,7 +82,7 @@ TEST(TestMxMatmulParams, LayoutUidsMatchInputTensors)
 // modes must be set to VEC32_UE8M0 (the OCP MX block-scale mode).
 TEST(TestMxMatmulParams, ScaleUidsAndModeWiring)
 {
-    auto fb = createMxMatmulGraph(32, 128, 32, DT::FP8_E4M3, DT::HALF);
+    auto fb = createValidMxMatmulGraph();
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
@@ -105,7 +105,7 @@ TEST(TestMxMatmulParams, ScaleUidsAndModeWiring)
 // (transA=getTrans(B), transB=getTrans(A)) → (OP_N, OP_T).
 TEST(TestMxMatmulParams, TransposeInferenceDefault)
 {
-    auto fb = createMxMatmulGraph(32, 128, 32, DT::FP8_E4M3, DT::HALF);
+    auto fb = createValidMxMatmulGraph();
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
@@ -122,7 +122,9 @@ TEST(TestMxMatmulParams, TransposeInferenceDefault)
 // unchanged.
 TEST(TestMxMatmulParams, TransposeInferenceRowMajorA)
 {
-    auto fb = createMxMatmulGraph(32, 128, 32, DT::FP8_E4M3, DT::HALF, 32, false /*opAIsT*/, true);
+    // Row-major A (strides {128,1}) instead of the default col-major {1,32}.
+    auto fb = createValidMxMatmulGraph(
+        {32, 128}, {128, 1}, {128, 32}, {32, 1}, {32, 32}, {32, 1}, {32, 4}, {4, 32});
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
@@ -139,7 +141,9 @@ TEST(TestMxMatmulParams, TransposeInferenceRowMajorA)
 // unchanged.
 TEST(TestMxMatmulParams, TransposeInferenceColMajorB)
 {
-    auto fb = createMxMatmulGraph(32, 128, 32, DT::FP8_E4M3, DT::HALF, 32, true, false /*opBIsN*/);
+    // Col-major B (strides {1,128}) instead of the default row-major {32,1}.
+    auto fb = createValidMxMatmulGraph(
+        {32, 128}, {1, 32}, {128, 32}, {1, 128}, {32, 32}, {32, 1}, {32, 4}, {4, 32});
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
@@ -177,7 +181,7 @@ protected:
 
 TEST_F(TestGpuMxMatmulPlan, CreatesPlanWithValidGraph)
 {
-    auto fb = createMxMatmulGraph(32, 128, 32, DT::FP8_E4M3, DT::HALF);
+    auto fb = createValidMxMatmulGraph();
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
@@ -188,7 +192,7 @@ TEST_F(TestGpuMxMatmulPlan, CreatesPlanWithValidGraph)
 
 TEST_F(TestGpuMxMatmulPlan, PlanReturnsValidWorkspaceSize)
 {
-    auto fb = createMxMatmulGraph(32, 128, 32, DT::FP8_E4M3, DT::HALF);
+    auto fb = createValidMxMatmulGraph();
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
