@@ -404,7 +404,7 @@ def promoteTheRockDockerImage(String hashedImage, String fullHash)
 
 
 // Appends TheRock and CK label args to dockerArgs. Only call when actually building
-// the CI image — not when the image already exists in the registry.
+// the CI image, not when the image already exists in the registry.
 private def embedBuildMetadata(String dockerArgs) {
     try {
         withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
