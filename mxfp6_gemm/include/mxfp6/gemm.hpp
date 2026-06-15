@@ -19,7 +19,9 @@ enum class OutType { F32, F16, BF16 };
 
 // Tile chosen for (M,N). MPW/NPW = per-wave 32-block counts (2x2 waves); the host scale
 // tiling (tile_scale) must use these for A and B respectively.
-struct TileChoice { int MT, NT, MPW, NPW; };
+struct TileChoice {
+    int MT, NT, MPW, NPW;
+};
 TileChoice choose_tile(int M, int N);
 
 // D[M,N] = A[M,K] * B[K,N], MXFP6 E2M3 inputs + per-32-block E8M0 scales.
@@ -27,8 +29,7 @@ TileChoice choose_tile(int M, int N);
 //   dBsh : preshuffled MXFP6 B (preshuffle_B layout)
 //   dsA  : tiled A scales (tile_scale with MPW)   dsB: tiled B scales (tile_scale with NPW)
 //   dD   : output buffer of element type `ot` (float / __half / __hip_bfloat16)
-void gemm(OutType ot, int M, int N, int Kp,
-          const void* dA, const void* dBsh, const uint8_t* dsA, const uint8_t* dsB,
-          void* dD, int A_row_bytes, int B_row_bytes);
+void gemm(OutType ot, int M, int N, int Kp, const void* dA, const void* dBsh, const uint8_t* dsA,
+          const uint8_t* dsB, void* dD, int A_row_bytes, int B_row_bytes);
 
-} // namespace mxfp6
+}  // namespace mxfp6

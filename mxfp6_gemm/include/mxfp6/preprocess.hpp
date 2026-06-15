@@ -1,9 +1,10 @@
 #pragma once
-#include "mxfp6/types.hpp"
-#include <vector>
+#include <cassert>
 #include <cmath>
 #include <cstring>
-#include <cassert>
+#include <vector>
+
+#include "mxfp6/types.hpp"
 
 namespace mxfp6 {
 
@@ -13,8 +14,8 @@ struct QuantizedMatrix {
     std::vector<uint8_t> packed_data;  // [rows * fp6_packed_bytes(cols)]
     std::vector<uint8_t> scales;       // [rows * (cols/32)]
     int rows, cols;
-    int packed_row_bytes;              // fp6_packed_bytes(cols)
-    int scale_cols;                    // cols / 32
+    int packed_row_bytes;  // fp6_packed_bytes(cols)
+    int scale_cols;        // cols / 32
 };
 
 // Quantize float matrix → MXFP6.
@@ -45,7 +46,10 @@ inline QuantizedMatrix quantize_to_mxfp6(const float* mat, int rows, int cols) {
                 int exp;
                 frexpf(needed, &exp);
                 float candidate = ldexpf(1.0f, exp - 1);
-                if (candidate < needed) { /* use 2^exp */ } else { exp -= 1; }
+                if (candidate < needed) { /* use 2^exp */
+                } else {
+                    exp -= 1;
+                }
                 scale_code = (uint8_t)std::clamp(exp + 127, 0, 254);
             }
 
@@ -80,8 +84,7 @@ inline QuantizedMatrix preprocess_B(const float* B, int K, int N) {
     assert(K % 32 == 0);
     std::vector<float> B_T(N * K);
     for (int k = 0; k < K; k++)
-        for (int n = 0; n < N; n++)
-            B_T[n * K + k] = B[k * N + n];
+        for (int n = 0; n < N; n++) B_T[n * K + k] = B[k * N + n];
     return quantize_to_mxfp6(B_T.data(), N, K);
 }
 
@@ -97,8 +100,8 @@ inline QuantizedMatrix preprocess_B(const float* B, int K, int N) {
 struct PreprocessedScale {
     std::vector<uint8_t> data;
     int dim, K;
-    int num_tiles;   // dim / 32
-    int k64_iters;   // K / 64
+    int num_tiles;  // dim / 32
+    int k64_iters;  // K / 64
 };
 
 inline PreprocessedScale preprocess_scale(const uint8_t* scales, int dim, int K) {
@@ -119,9 +122,9 @@ inline PreprocessedScale preprocess_scale(const uint8_t* scales, int dim, int K)
             uint8_t* out = ps.data.data() + (tile * ps.k64_iters + k64) * 64;
 
             for (int i = 0; i < 16; i++) {
-                out[i]      = scales[(row_base + i)      * scale_cols + kg0];
+                out[i] = scales[(row_base + i) * scale_cols + kg0];
                 out[16 + i] = scales[(row_base + 16 + i) * scale_cols + kg0];
-                out[32 + i] = scales[(row_base + i)      * scale_cols + kg1];
+                out[32 + i] = scales[(row_base + i) * scale_cols + kg1];
                 out[48 + i] = scales[(row_base + 16 + i) * scale_cols + kg1];
             }
         }
@@ -141,7 +144,7 @@ inline PreprocessedScale preprocess_scale(const uint8_t* scales, int dim, int K)
 // Thread tid maps to: n = tid%32 (N-column), khalf = tid/32 (K-half 0 or 1).
 // Original data at: B_q.packed_data[n * packed_row_bytes + khalf * 24], 24 bytes.
 struct PreshuffledB {
-    std::vector<uint8_t> data;    // [n_tiles * k64_iters * 1536]
+    std::vector<uint8_t> data;  // [n_tiles * k64_iters * 1536]
     int N, K;
     int n_tiles;    // N / 32
     int k64_iters;  // K / 64
@@ -165,10 +168,9 @@ inline PreshuffledB preshuffle_B(const QuantizedMatrix& B_q) {
                 int n = nt * 32 + (tid % 32);
                 int khalf = tid / 32;
                 int k_byte_off = ki * 48 + khalf * 24;  // 48 = fp6_packed_bytes(64)
-                const uint8_t* src = B_q.packed_data.data()
-                                   + n * B_q.packed_row_bytes + k_byte_off;
-                memcpy(tile + tid * 16,        src,      16);  // section 0
-                memcpy(tile + 1024 + tid * 8,  src + 16,  8);  // section 1
+                const uint8_t* src = B_q.packed_data.data() + n * B_q.packed_row_bytes + k_byte_off;
+                memcpy(tile + tid * 16, src, 16);            // section 0
+                memcpy(tile + 1024 + tid * 8, src + 16, 8);  // section 1
             }
         }
     }
@@ -194,10 +196,10 @@ struct CoalescedScale {
 inline CoalescedScale preshuffle_scale(const PreprocessedScale& ps, int group) {
     assert(group > 0 && ps.num_tiles % group == 0);
     CoalescedScale cs;
-    cs.group     = group;
+    cs.group = group;
     cs.group_pad = (group + 3) / 4 * 4;
     cs.num_groups = ps.num_tiles / group;
-    cs.k64_iters  = ps.k64_iters;
+    cs.k64_iters = ps.k64_iters;
     cs.data.assign((size_t)cs.num_groups * ps.k64_iters * 64 * cs.group_pad, 0);
 
     for (int tile = 0; tile < ps.num_tiles; tile++) {
@@ -216,7 +218,9 @@ inline CoalescedScale preshuffle_scale(const PreprocessedScale& ps, int group) {
 // k64 sub-slabs of one K-tile become contiguous per lane, so the kernel fetches a whole
 // K-tile's scales in ONE dwordx{subs} load. Layout:
 //   out[(((g*k_tiles+kt)*64 + lane)*subs + sub)*group_pad + j] = scale(block g*group+j, k64)
-struct TiledScale { std::vector<uint8_t> data; };
+struct TiledScale {
+    std::vector<uint8_t> data;
+};
 inline TiledScale tile_scale(const PreprocessedScale& ps, int group, int subs) {
     int group_pad = (group + 3) / 4 * 4;
     int k_tiles = ps.k64_iters / subs;
@@ -229,10 +233,11 @@ inline TiledScale tile_scale(const PreprocessedScale& ps, int group, int subs) {
                 for (int sub = 0; sub < subs; sub++)
                     for (int j = 0; j < group; j++) {
                         int k64 = kt * subs + sub, tile = g * group + j;
-                        ts.data[(((size_t)(g * k_tiles + kt) * 64 + lane) * subs + sub) * group_pad + j] =
-                            ps.data[(size_t)(tile * ps.k64_iters + k64) * 64 + lane];
+                        ts.data[(((size_t)(g * k_tiles + kt) * 64 + lane) * subs + sub) *
+                                    group_pad +
+                                j] = ps.data[(size_t)(tile * ps.k64_iters + k64) * 64 + lane];
                     }
     return ts;
 }
 
-} // namespace mxfp6
+}  // namespace mxfp6

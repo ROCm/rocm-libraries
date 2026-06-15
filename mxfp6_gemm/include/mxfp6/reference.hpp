@@ -1,8 +1,9 @@
 #pragma once
-#include "mxfp6/types.hpp"
-#include "mxfp6/preprocess.hpp"
-#include <vector>
 #include <cassert>
+#include <vector>
+
+#include "mxfp6/preprocess.hpp"
+#include "mxfp6/types.hpp"
 
 namespace mxfp6 {
 
@@ -10,11 +11,8 @@ namespace mxfp6 {
 //
 // A_q: quantized A[M][K]
 // B_q: quantized B^T[N][K]  (from preprocess_B)
-inline void mxfp6_gemm_ref(
-    const QuantizedMatrix& A_q,
-    const QuantizedMatrix& B_q,
-    float* D, int M, int K, int N)
-{
+inline void mxfp6_gemm_ref(const QuantizedMatrix& A_q, const QuantizedMatrix& B_q, float* D, int M,
+                           int K, int N) {
     assert(A_q.rows == M && A_q.cols == K);
     assert(B_q.rows == N && B_q.cols == K);
 
@@ -25,10 +23,9 @@ inline void mxfp6_gemm_ref(
     for (int m = 0; m < M; m++)
         for (int n = 0; n < N; n++) {
             float acc = 0.0f;
-            for (int k = 0; k < K; k++)
-                acc += A_deq[m * K + k] * B_deq[n * K + k];
+            for (int k = 0; k < K; k++) acc += A_deq[m * K + k] * B_deq[n * K + k];
             D[m * N + n] = acc;
         }
 }
 
-} // namespace mxfp6
+}  // namespace mxfp6

@@ -1,7 +1,8 @@
 #pragma once
-#include <hip/hip_runtime.h>
-#include <hip/hip_fp16.h>
 #include <hip/hip_bf16.h>
+#include <hip/hip_fp16.h>
+#include <hip/hip_runtime.h>
+
 #include <cstdint>
 #include <type_traits>
 
@@ -9,28 +10,38 @@ namespace mxfp6 {
 
 // ---- Vector types ----
 
-using v3i  = __attribute__((__vector_size__(3 * 4))) int;
-using v4i  = __attribute__((__vector_size__(4 * 4))) int;
-using v6i  = __attribute__((__vector_size__(6 * 4))) int;
-using v8i  = __attribute__((__vector_size__(8 * 4))) int;
+using v3i = __attribute__((__vector_size__(3 * 4))) int;
+using v4i = __attribute__((__vector_size__(4 * 4))) int;
+using v6i = __attribute__((__vector_size__(6 * 4))) int;
+using v8i = __attribute__((__vector_size__(8 * 4))) int;
 using v16f = __attribute__((__vector_size__(16 * 4))) float;
 
 // ---- Wait helpers ----
 
 __device__ __forceinline__ void wait_vmcnt(int n) {
-    if      (n == 0) asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
-    else if (n == 1) asm volatile("s_waitcnt vmcnt(1)" ::: "memory");
-    else if (n == 2) asm volatile("s_waitcnt vmcnt(2)" ::: "memory");
-    else if (n == 3) asm volatile("s_waitcnt vmcnt(3)" ::: "memory");
-    else if (n == 4) asm volatile("s_waitcnt vmcnt(4)" ::: "memory");
+    if (n == 0)
+        asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
+    else if (n == 1)
+        asm volatile("s_waitcnt vmcnt(1)" ::: "memory");
+    else if (n == 2)
+        asm volatile("s_waitcnt vmcnt(2)" ::: "memory");
+    else if (n == 3)
+        asm volatile("s_waitcnt vmcnt(3)" ::: "memory");
+    else if (n == 4)
+        asm volatile("s_waitcnt vmcnt(4)" ::: "memory");
 }
 
 __device__ __forceinline__ void wait_lgkmcnt(int n) {
-    if      (n == 0) asm volatile("s_waitcnt lgkmcnt(0)" ::: "memory");
-    else if (n == 1) asm volatile("s_waitcnt lgkmcnt(1)" ::: "memory");
-    else if (n == 2) asm volatile("s_waitcnt lgkmcnt(2)" ::: "memory");
-    else if (n == 3) asm volatile("s_waitcnt lgkmcnt(3)" ::: "memory");
-    else if (n == 4) asm volatile("s_waitcnt lgkmcnt(4)" ::: "memory");
+    if (n == 0)
+        asm volatile("s_waitcnt lgkmcnt(0)" ::: "memory");
+    else if (n == 1)
+        asm volatile("s_waitcnt lgkmcnt(1)" ::: "memory");
+    else if (n == 2)
+        asm volatile("s_waitcnt lgkmcnt(2)" ::: "memory");
+    else if (n == 3)
+        asm volatile("s_waitcnt lgkmcnt(3)" ::: "memory");
+    else if (n == 4)
+        asm volatile("s_waitcnt lgkmcnt(4)" ::: "memory");
 }
 
 // ---- GLOBAL_LOAD_LDS_DWORDX4: async HBM → LDS (zero VGPR) ----
@@ -40,31 +51,24 @@ __device__ __forceinline__ void set_m0(uint32_t val) {
     asm volatile("s_mov_b32 m0, %0" : : "s"(val));
 }
 
-__device__ __forceinline__ void async_load_lds_b128(
-    void* smem_anchor, const void* gaddr)
-{
-    asm volatile(
-        "global_load_lds_dwordx4 %1, off offset:0"
-        : "=r"(smem_anchor)
-        : "v"(gaddr)
-        : "memory"
-    );
+__device__ __forceinline__ void async_load_lds_b128(void* smem_anchor, const void* gaddr) {
+    asm volatile("global_load_lds_dwordx4 %1, off offset:0"
+                 : "=r"(smem_anchor)
+                 : "v"(gaddr)
+                 : "memory");
 }
 
 // ---- DS_READ for FP6: read 24 bytes (32 FP6 values) ----
 //
 // Split into issue/complete so the caller can hide LDS latency.
 
-__device__ __forceinline__ void ds_read_fp6x32_issue(
-    uint32_t lds_byte_offset, v3i& lo, v3i& hi)
-{
+__device__ __forceinline__ void ds_read_fp6x32_issue(uint32_t lds_byte_offset, v3i& lo, v3i& hi) {
     asm volatile(
         "ds_read_b96 %0, %2 offset:0\n"
         "ds_read_b96 %1, %2 offset:12"
         : "=v"(lo), "=v"(hi)
         : "v"(lds_byte_offset)
-        : "memory"
-    );
+        : "memory");
 }
 
 __device__ __forceinline__ v8i ds_read_fp6x32_complete(v3i lo, v3i hi) {
@@ -74,9 +78,7 @@ __device__ __forceinline__ v8i ds_read_fp6x32_complete(v3i lo, v3i hi) {
         "v_mov_b32 %0, %6\n v_mov_b32 %1, %7\n v_mov_b32 %2, %8\n"
         "v_mov_b32 %3, %9\n v_mov_b32 %4, %10\n v_mov_b32 %5, %11"
         : "=&v"(d0), "=&v"(d1), "=&v"(d2), "=&v"(d3), "=&v"(d4), "=&v"(d5)
-        : "v"(lo[0]), "v"(lo[1]), "v"(lo[2]),
-          "v"(hi[0]), "v"(hi[1]), "v"(hi[2])
-    );
+        : "v"(lo[0]), "v"(lo[1]), "v"(lo[2]), "v"(hi[0]), "v"(hi[1]), "v"(hi[2]));
     return v8i{d0, d1, d2, d3, d4, d5, 0, 0};
 }
 
@@ -97,9 +99,7 @@ __device__ __forceinline__ v8i ds_read_fp6x32(uint32_t lds_byte_offset) {
 // constraint is satisfiable without scalar reconstruction. Building a v8i from
 // 6 scalars lets the allocator scatter the two b96 reads into non-adjacent regs
 // and skip the gather — corrupting the MFMA operand (HANDOFF 问题 #2).
-__device__ __forceinline__ v6i ds_read_fp6x32_plain(
-    const void* lds, uint32_t lds_byte_offset)
-{
+__device__ __forceinline__ v6i ds_read_fp6x32_plain(const void* lds, uint32_t lds_byte_offset) {
     using v6i_a = int __attribute__((__vector_size__(24), __aligned__(4)));
     const char* p = reinterpret_cast<const char*>(lds) + lds_byte_offset;
     v6i_a x = *reinterpret_cast<const v6i_a*>(p);
@@ -108,9 +108,7 @@ __device__ __forceinline__ v6i ds_read_fp6x32_plain(
 
 // ---- DS_WRITE, COMPILER-MANAGED ----
 // Plain typed LDS store so the compiler tracks the lgkmcnt for __syncthreads.
-__device__ __forceinline__ void ds_write_b128_plain(
-    void* lds, uint32_t lds_byte_offset, v4i data)
-{
+__device__ __forceinline__ void ds_write_b128_plain(void* lds, uint32_t lds_byte_offset, v4i data) {
     using v4i_a = int __attribute__((__vector_size__(16), __aligned__(4)));
     char* p = reinterpret_cast<char*>(lds) + lds_byte_offset;
     *reinterpret_cast<v4i_a*>(p) = v4i_a{data[0], data[1], data[2], data[3]};
@@ -119,10 +117,7 @@ __device__ __forceinline__ void ds_write_b128_plain(
 // ---- DS_WRITE: VGPR → LDS ----
 
 __device__ __forceinline__ void ds_write_b128(uint32_t lds_byte_offset, v4i data) {
-    asm volatile(
-        "ds_write_b128 %0, %1"
-        : : "v"(lds_byte_offset), "v"(data) : "memory"
-    );
+    asm volatile("ds_write_b128 %0, %1" : : "v"(lds_byte_offset), "v"(data) : "memory");
 }
 
 // ---- v8i ↔ v6i conversion ----
@@ -148,40 +143,42 @@ __device__ __forceinline__ v6i to_v6i(v8i x) {
 // Data stores (global_store) can read from either register file.
 // → No explicit cross-file moves needed in the data path.
 
-struct alignas(64) AccTileV { v16f vec; };
-struct alignas(64) AccTileA { v16f vec; };
+struct alignas(64) AccTileV {
+    v16f vec;
+};
+struct alignas(64) AccTileA {
+    v16f vec;
+};
 
 using AccTile = AccTileV;
 
-__device__ __forceinline__ void clear_acc(AccTileV& acc) { acc.vec = v16f{}; }
-__device__ __forceinline__ void clear_acc(AccTileA& acc) { acc.vec = v16f{}; }
+__device__ __forceinline__ void clear_acc(AccTileV& acc) {
+    acc.vec = v16f{};
+}
+__device__ __forceinline__ void clear_acc(AccTileA& acc) {
+    acc.vec = v16f{};
+}
 
 // MFMA: A/B in Arch VGPR, accumulator in Arch VGPR
 template <int BYTE_SEL>
-__device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6(
-    AccTileV& acc, v8i a, v8i b, int scale_a, int scale_b)
-{
+__device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6(AccTileV& acc, v8i a, v8i b,
+                                                            int scale_a, int scale_b) {
     static_assert(BYTE_SEL == 0, "only BYTE_SEL=0 supported for now");
     v6i b6 = to_v6i(b), a6 = to_v6i(a);
-    asm volatile(
-        "v_mfma_scale_f32_32x32x64_f8f6f4 %0, %1, %2, %0, %3, %4 cbsz:2 blgp:2"
-        : "+v"(acc.vec)
-        : "v"(b6), "v"(a6), "v"(scale_b), "v"(scale_a)
-    );
+    asm volatile("v_mfma_scale_f32_32x32x64_f8f6f4 %0, %1, %2, %0, %3, %4 cbsz:2 blgp:2"
+                 : "+v"(acc.vec)
+                 : "v"(b6), "v"(a6), "v"(scale_b), "v"(scale_a));
 }
 
 // MFMA: A/B in Arch VGPR, accumulator in AccVGPR
 template <int BYTE_SEL>
-__device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6(
-    AccTileA& acc, v8i a, v8i b, int scale_a, int scale_b)
-{
+__device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6(AccTileA& acc, v8i a, v8i b,
+                                                            int scale_a, int scale_b) {
     static_assert(BYTE_SEL == 0, "only BYTE_SEL=0 supported for now");
     v6i b6 = to_v6i(b), a6 = to_v6i(a);
-    asm volatile(
-        "v_mfma_scale_f32_32x32x64_f8f6f4 %0, %1, %2, %0, %3, %4 cbsz:2 blgp:2"
-        : "+a"(acc.vec)
-        : "v"(b6), "v"(a6), "v"(scale_b), "v"(scale_a)
-    );
+    asm volatile("v_mfma_scale_f32_32x32x64_f8f6f4 %0, %1, %2, %0, %3, %4 cbsz:2 blgp:2"
+                 : "+a"(acc.vec)
+                 : "v"(b6), "v"(a6), "v"(scale_b), "v"(scale_a));
 }
 
 // MFMA with SWAPPED operands: src0=A, src1=B (vs the stock src0=B,src1=A "TransposeC").
@@ -191,22 +188,18 @@ __device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6(
 // LDS-transpose / no barrier / no extra LDS is needed, and it works for any OutT (F16/BF16/F32).
 // Operands are symmetric (both are "lane holds 32 K-values"), so swapping src0/src1 is valid;
 // each operand keeps its own scale (scale0=scale_a with src0=a, scale1=scale_b with src1=b).
-__device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6_swapC(
-    AccTileA& acc, v6i a, v6i b, int scale_a, int scale_b)
-{
-    asm volatile(
-        "v_mfma_scale_f32_32x32x64_f8f6f4 %0, %1, %2, %0, %3, %4 cbsz:2 blgp:2"
-        : "+a"(acc.vec)
-        : "v"(a), "v"(b), "v"(scale_a), "v"(scale_b)
-    );
+__device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6_swapC(AccTileA& acc, v6i a, v6i b,
+                                                                  int scale_a, int scale_b) {
+    asm volatile("v_mfma_scale_f32_32x32x64_f8f6f4 %0, %1, %2, %0, %3, %4 cbsz:2 blgp:2"
+                 : "+a"(acc.vec)
+                 : "v"(a), "v"(b), "v"(scale_a), "v"(scale_b));
 }
 
 // MFMA: v6i operands (already 6 contiguous VGPRs from plain loads).
 // No to_v6i round-trip → no scalar reconstruction → operand stays contiguous.
 template <int BYTE_SEL>
-__device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6(
-    AccTileA& acc, v6i a, v6i b, int scale_a, int scale_b)
-{
+__device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6(AccTileA& acc, v6i a, v6i b,
+                                                            int scale_a, int scale_b) {
     static_assert(BYTE_SEL == 0, "only BYTE_SEL=0 supported for now");
 #ifdef USE_BUILTIN_MFMA
     // Intrinsic path (gfx950): emits the SAME v_mfma_scale instruction but as a
@@ -216,14 +209,12 @@ __device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6(
     // zero-padded to int32x8. cbsz=blgp=2 (FP6 E2M3). opsel=0 (scale byte 0).
     v8i b8{b[0], b[1], b[2], b[3], b[4], b[5], 0, 0};
     v8i a8{a[0], a[1], a[2], a[3], a[4], a[5], 0, 0};
-    acc.vec = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
-        b8, a8, acc.vec, 2, 2, 0, scale_b, 0, scale_a);
+    acc.vec = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(b8, a8, acc.vec, 2, 2, 0, scale_b, 0,
+                                                              scale_a);
 #else
-    asm volatile(
-        "v_mfma_scale_f32_32x32x64_f8f6f4 %0, %1, %2, %0, %3, %4 cbsz:2 blgp:2"
-        : "+a"(acc.vec)
-        : "v"(b), "v"(a), "v"(scale_b), "v"(scale_a)
-    );
+    asm volatile("v_mfma_scale_f32_32x32x64_f8f6f4 %0, %1, %2, %0, %3, %4 cbsz:2 blgp:2"
+                 : "+a"(acc.vec)
+                 : "v"(b), "v"(a), "v"(scale_b), "v"(scale_a));
 #endif
 }
 
@@ -231,15 +222,12 @@ __device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6(
 // Mirror of the AccTileA v6i overload — lets a tile mix AGPR + Arch-VGPR
 // accumulators so a single wave can hold more than 256 AGPR worth of acc.
 template <int BYTE_SEL>
-__device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6(
-    AccTileV& acc, v6i a, v6i b, int scale_a, int scale_b)
-{
+__device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6(AccTileV& acc, v6i a, v6i b,
+                                                            int scale_a, int scale_b) {
     static_assert(BYTE_SEL == 0, "only BYTE_SEL=0 supported for now");
-    asm volatile(
-        "v_mfma_scale_f32_32x32x64_f8f6f4 %0, %1, %2, %0, %3, %4 cbsz:2 blgp:2"
-        : "+v"(acc.vec)
-        : "v"(b), "v"(a), "v"(scale_b), "v"(scale_a)
-    );
+    asm volatile("v_mfma_scale_f32_32x32x64_f8f6f4 %0, %1, %2, %0, %3, %4 cbsz:2 blgp:2"
+                 : "+v"(acc.vec)
+                 : "v"(b), "v"(a), "v"(scale_b), "v"(scale_a));
 }
 
 // ---- Epilogue: store 32×32 AccTile to global ----
@@ -251,37 +239,35 @@ __device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6(
 // On gfx950, global_store can read directly from AccVGPR,
 // so both AccTileV and AccTileA use the same store logic.
 
-__device__ __forceinline__ void store_acc_f32(
-    float* __restrict__ D, int D_stride, const AccTileV& acc,
-    int m_tile_base, int n_tile_base)
-{
+__device__ __forceinline__ void store_acc_f32(float* __restrict__ D, int D_stride,
+                                              const AccTileV& acc, int m_tile_base,
+                                              int n_tile_base) {
     int lane = threadIdx.x % 64;
     int m = m_tile_base + (lane % 32);
     int m_half = lane / 32;
     float* row = &D[m * D_stride + n_tile_base];
 
-    #pragma unroll
+#pragma unroll
     for (int g = 0; g < 4; g++) {
         int n = g * 8 + m_half * 4;
         *reinterpret_cast<float4*>(&row[n]) =
-            make_float4(acc.vec[g*4], acc.vec[g*4+1], acc.vec[g*4+2], acc.vec[g*4+3]);
+            make_float4(acc.vec[g * 4], acc.vec[g * 4 + 1], acc.vec[g * 4 + 2], acc.vec[g * 4 + 3]);
     }
 }
 
-__device__ __forceinline__ void store_acc_f32(
-    float* __restrict__ D, int D_stride, const AccTileA& acc,
-    int m_tile_base, int n_tile_base)
-{
+__device__ __forceinline__ void store_acc_f32(float* __restrict__ D, int D_stride,
+                                              const AccTileA& acc, int m_tile_base,
+                                              int n_tile_base) {
     int lane = threadIdx.x % 64;
     int m = m_tile_base + (lane % 32);
     int m_half = lane / 32;
     float* row = &D[m * D_stride + n_tile_base];
 
-    #pragma unroll
+#pragma unroll
     for (int g = 0; g < 4; g++) {
         int n = g * 8 + m_half * 4;
         *reinterpret_cast<float4*>(&row[n]) =
-            make_float4(acc.vec[g*4], acc.vec[g*4+1], acc.vec[g*4+2], acc.vec[g*4+3]);
+            make_float4(acc.vec[g * 4], acc.vec[g * 4 + 1], acc.vec[g * 4 + 2], acc.vec[g * 4 + 3]);
     }
 }
 
@@ -292,32 +278,31 @@ __device__ __forceinline__ void store_acc_f32(
 // (int2) store. Works for both AccTileV and AccTileA (gfx950 global_store reads either
 // register file), taking acc.vec directly.
 template <typename OutT>
-__device__ __forceinline__ void store_acc_t(
-    OutT* __restrict__ D, int D_stride, const v16f& acc,
-    int m_tile_base, int n_tile_base)
-{
+__device__ __forceinline__ void store_acc_t(OutT* __restrict__ D, int D_stride, const v16f& acc,
+                                            int m_tile_base, int n_tile_base) {
     int lane = threadIdx.x % 64;
     int m = m_tile_base + (lane % 32);
     int m_half = lane / 32;
     OutT* row = &D[(size_t)m * D_stride + n_tile_base];
 
-    #pragma unroll
+#pragma unroll
     for (int g = 0; g < 4; g++) {
         int n = g * 8 + m_half * 4;
         if constexpr (std::is_same<OutT, float>::value) {
             *reinterpret_cast<float4*>(&row[n]) =
-                make_float4(acc[g*4], acc[g*4+1], acc[g*4+2], acc[g*4+3]);
+                make_float4(acc[g * 4], acc[g * 4 + 1], acc[g * 4 + 2], acc[g * 4 + 3]);
         } else if constexpr (std::is_same<OutT, __half>::value) {
             // Packed F32->F16 (v_cvt_pk_fp16): two halfs/instr, no stack array.
-            *reinterpret_cast<__half2*>(&row[n])     = __floats2half2_rn(acc[g*4],   acc[g*4+1]);
-            *reinterpret_cast<__half2*>(&row[n + 2]) = __floats2half2_rn(acc[g*4+2], acc[g*4+3]);
+            *reinterpret_cast<__half2*>(&row[n]) = __floats2half2_rn(acc[g * 4], acc[g * 4 + 1]);
+            *reinterpret_cast<__half2*>(&row[n + 2]) =
+                __floats2half2_rn(acc[g * 4 + 2], acc[g * 4 + 3]);
         } else {  // __hip_bfloat16
             *reinterpret_cast<__hip_bfloat162*>(&row[n]) =
-                __float22bfloat162_rn(make_float2(acc[g*4], acc[g*4+1]));
+                __float22bfloat162_rn(make_float2(acc[g * 4], acc[g * 4 + 1]));
             *reinterpret_cast<__hip_bfloat162*>(&row[n + 2]) =
-                __float22bfloat162_rn(make_float2(acc[g*4+2], acc[g*4+3]));
+                __float22bfloat162_rn(make_float2(acc[g * 4 + 2], acc[g * 4 + 3]));
         }
     }
 }
 
-} // namespace mxfp6
+}  // namespace mxfp6

@@ -19,7 +19,8 @@ namespace mxfp6 {
 // Coalesced B operand load from a PRESHUFFLED B (preshuffle_B layout): per 32x64 tile,
 // section0 = lane*16 (dwordx4), section1 = 1024 + lane*8 (dwordx2). Consecutive lanes read
 // consecutive bytes -> fully coalesced.
-__device__ __forceinline__ v6i load_b_shuf(const char* Bsh, int k64iters, int bg, int ki, int lane) {
+__device__ __forceinline__ v6i load_b_shuf(const char* Bsh, int k64iters, int bg, int ki,
+                                           int lane) {
     using v4i_a = int __attribute__((__vector_size__(16), __aligned__(4)));
     using v2i_a = int __attribute__((__vector_size__(8), __aligned__(4)));
     const char* base = Bsh + (size_t)(bg * k64iters + ki) * 1536;
@@ -40,7 +41,8 @@ __device__ __forceinline__ v6i load_b_shuf(const char* Bsh, int k64iters, int bg
 // the divisible 256x256 path is unchanged.
 template <int CPR, int NCH = (1 << 30)>
 __device__ __forceinline__ void issue_A_chunks(uint32_t lds_base, int row_stride, int kt_byte,
-                                               int wave, int lane, const v4i& rsrc, int i0, int i1) {
+                                               int wave, int lane, const v4i& rsrc, int i0,
+                                               int i1) {
     for (int i = i0; i < i1; i++) {
         int chunk = i * 256 + wave * 64 + lane;
         set_m0(__builtin_amdgcn_readfirstlane(lds_base + (uint32_t)((i * 256 + wave * 64) * 16)));
@@ -48,7 +50,9 @@ __device__ __forceinline__ void issue_A_chunks(uint32_t lds_base, int row_stride
             int m = chunk / CPR, ck = chunk % CPR;
             uint32_t voff = (uint32_t)(m * row_stride + kt_byte + ck * 16);
             asm volatile("s_nop 0\n buffer_load_dwordx4 %0, %1, 0 offen lds"
-                         : : "v"(voff), "s"(rsrc) : "memory");
+                         :
+                         : "v"(voff), "s"(rsrc)
+                         : "memory");
         }
     }
 }
@@ -76,14 +80,15 @@ template <int M_TILE, int N_TILE, int K_TILE, int WAVES_M, int WAVES_N, int MIN_
 __global__ void __launch_bounds__(256, MIN_OCC)
     lds_gemm_hybrid_dripA(const void* __restrict__ A, const void* __restrict__ B,
                           const uint8_t* __restrict__ sA, const uint8_t* __restrict__ sB,
-                          OutT* __restrict__ D, int N, int k_iters, int A_row_bytes, int B_row_bytes) {
+                          OutT* __restrict__ D, int N, int k_iters, int A_row_bytes,
+                          int B_row_bytes) {
     constexpr int KT_BYTES = K_TILE * 6 / 8;
     constexpr int ROW_CHUNKS = KT_BYTES / 16;
     constexpr int K64_PER_TILE = K_TILE / 64;
     constexpr int M_BLKS = M_TILE / 32, N_BLKS = N_TILE / 32;
     constexpr int M_PW = M_BLKS / WAVES_M, N_PW = N_BLKS / WAVES_N;
     constexpr int A_BYTES = M_TILE * KT_BYTES;
-    constexpr int NB = K64_PER_TILE * N_PW;            // 12 b-stream positions / tile
+    constexpr int NB = K64_PER_TILE * N_PW;                      // 12 b-stream positions / tile
     constexpr int ISSUES_A = (M_TILE * ROW_CHUNKS + 255) / 256;  // 9 A loads / tile
 
     extern __shared__ char smem[];
@@ -94,8 +99,12 @@ __global__ void __launch_bounds__(256, MIN_OCC)
         int mb = gridDim.x, nb = gridDim.y, pid = blockIdx.y * mb + blockIdx.x;
         const int G = SWZ, span = G * mb;
         int grp = pid / span, fn = grp * G, gs = (nb - fn) < G ? (nb - fn) : G, r = pid % span;
-        wg_m = r / gs; wg_n = fn + r % gs;
-    } else { wg_m = blockIdx.x; wg_n = blockIdx.y; }
+        wg_m = r / gs;
+        wg_n = fn + r % gs;
+    } else {
+        wg_m = blockIdx.x;
+        wg_n = blockIdx.y;
+    }
     const char* Ag = reinterpret_cast<const char*>(A) + (size_t)(wg_m * M_TILE) * A_row_bytes;
 
     AccTileA acc[M_PW][N_PW];
@@ -112,7 +121,8 @@ __global__ void __launch_bounds__(256, MIN_OCC)
 
     // A buffer descriptor (Ag constant across the kernel)
     uint64_t ab = reinterpret_cast<uint64_t>(Ag);
-    v4i arsrc{(int)(uint32_t)ab, (int)((uint32_t)(ab >> 32) & 0xFFFF), (int)0x7FFFFFFF, (int)0x00020000};
+    v4i arsrc{(int)(uint32_t)ab, (int)((uint32_t)(ab >> 32) & 0xFFFF), (int)0x7FFFFFFF,
+              (int)0x00020000};
 
     auto load_scales = [&](int kt, int (*sa)[NDA], int (*sb)[NDB]) {
         const char* pa = reinterpret_cast<const char*>(sA) +
@@ -123,7 +133,10 @@ __global__ void __launch_bounds__(256, MIN_OCC)
         asm_load_dwordxN_nowait(ta, pa, K64_PER_TILE);
         asm_load_dwordxN_nowait(tb, pb, K64_PER_TILE);
 #pragma unroll
-        for (int sub = 0; sub < K64_PER_TILE; sub++) { sa[sub][0] = ta[sub]; sb[sub][0] = tb[sub]; }
+        for (int sub = 0; sub < K64_PER_TILE; sub++) {
+            sa[sub][0] = ta[sub];
+            sb[sub][0] = tb[sub];
+        }
     };
 
     // compute tile kt_cur from buffer `cur`; if adrip, drip A(kt_nxt) into buffer nxt_base.
@@ -133,11 +146,13 @@ __global__ void __launch_bounds__(256, MIN_OCC)
         v6i bring[PFD];
         int sbring[PFD];
 #pragma unroll
-        for (int q = 0; q < PFD; q++) if (q < NB) {
-            int s = q / N_PW, n = q % N_PW, blk = wn * N_PW + n;
-            bring[q] = load_b_shuf(reinterpret_cast<const char*>(B), k_iters, wg_n * N_BLKS + blk, kt_cur * K64_PER_TILE + s, lane);
-            sbring[q] = (sb[s][n / 4] >> (8 * (n % 4))) & 0xff;
-        }
+        for (int q = 0; q < PFD; q++)
+            if (q < NB) {
+                int s = q / N_PW, n = q % N_PW, blk = wn * N_PW + n;
+                bring[q] = load_b_shuf(reinterpret_cast<const char*>(B), k_iters,
+                                       wg_n * N_BLKS + blk, kt_cur * K64_PER_TILE + s, lane);
+                sbring[q] = (sb[s][n / 4] >> (8 * (n % 4))) & 0xff;
+            }
         v6i a[M_PW];
         int sav[M_PW];
 #pragma unroll
@@ -155,19 +170,22 @@ __global__ void __launch_bounds__(256, MIN_OCC)
             int sbv_cur = sbring[p % PFD];
             if (p + PFD < NB) {
                 int np = p + PFD, ns = np / N_PW, nn = np % N_PW, nblk = wn * N_PW + nn;
-                bring[(p + PFD) % PFD] = load_b_shuf(reinterpret_cast<const char*>(B), k_iters, wg_n * N_BLKS + nblk, kt_cur * K64_PER_TILE + ns, lane);
+                bring[(p + PFD) % PFD] =
+                    load_b_shuf(reinterpret_cast<const char*>(B), k_iters, wg_n * N_BLKS + nblk,
+                                kt_cur * K64_PER_TILE + ns, lane);
                 sbring[(p + PFD) % PFD] = (sb[ns][nn / 4] >> (8 * (nn % 4))) & 0xff;
             }
             // DRIP A (tunable LINEAR schedule; default = 1 chunk/quartet front-loaded)
             if (adrip) {
                 constexpr int STOP = (ADRIP_STOP > 0 && ADRIP_STOP <= NB) ? ADRIP_STOP : NB;
                 if (p >= ADRIP_START && p < STOP && ((p - ADRIP_START) % ADRIP_STRIDE) == 0) {
-                    int slot = (p - ADRIP_START) / ADRIP_STRIDE;     // 0,1,2,... issuing-quartet idx
+                    int slot = (p - ADRIP_START) / ADRIP_STRIDE;  // 0,1,2,... issuing-quartet idx
                     int a0 = slot * ADRIP_PER, a1 = a0 + ADRIP_PER;
-                    a0 = a0 < ISSUES_A ? a0 : ISSUES_A;             // clamp to chunk count (folds)
+                    a0 = a0 < ISSUES_A ? a0 : ISSUES_A;  // clamp to chunk count (folds)
                     a1 = a1 < ISSUES_A ? a1 : ISSUES_A;
                     if (a0 < a1)
-                        issue_A_chunks<ROW_CHUNKS, M_TILE * ROW_CHUNKS>(nxt_base, A_row_bytes, kb_nxt, wave, lane, arsrc, a0, a1);
+                        issue_A_chunks<ROW_CHUNKS, M_TILE * ROW_CHUNKS>(
+                            nxt_base, A_row_bytes, kb_nxt, wave, lane, arsrc, a0, a1);
                 }
             }
 #pragma unroll
@@ -176,23 +194,29 @@ __global__ void __launch_bounds__(256, MIN_OCC)
         }
     };
 
-    int sa0[K64_PER_TILE][NDA], sa1[K64_PER_TILE][NDA], sb0[K64_PER_TILE][NDB], sb1[K64_PER_TILE][NDB];
+    int sa0[K64_PER_TILE][NDA], sa1[K64_PER_TILE][NDA], sb0[K64_PER_TILE][NDB],
+        sb1[K64_PER_TILE][NDB];
     // prologue: tile 0 A bursted into buf0 (no compute to drip into yet) + its scales
     load_scales(0, sa0, sb0);
-    issue_A_chunks<ROW_CHUNKS, M_TILE * ROW_CHUNKS>(0, A_row_bytes, 0, wave, lane, arsrc, 0, ISSUES_A);
+    issue_A_chunks<ROW_CHUNKS, M_TILE * ROW_CHUNKS>(0, A_row_bytes, 0, wave, lane, arsrc, 0,
+                                                    ISSUES_A);
     int kt = 0;
     for (; kt + 1 < k_tiles; kt += 2) {
         if (HARD_WAIT) wait_vmcnt(0);
         __syncthreads();
         load_scales(kt + 1, sa1, sb1);
-        compute(0, A_BYTES, kt, kt + 1, true, sa0, sb0);          // compute buf0, drip A(kt+1)->buf1
+        compute(0, A_BYTES, kt, kt + 1, true, sa0, sb0);  // compute buf0, drip A(kt+1)->buf1
         bool pf = (kt + 2 < k_tiles);
         if (HARD_WAIT) wait_vmcnt(0);
         __syncthreads();
         if (pf) load_scales(kt + 2, sa0, sb0);
-        compute(A_BYTES, 0, kt + 1, kt + 2, pf, sa1, sb1);        // compute buf1, drip A(kt+2)->buf0
+        compute(A_BYTES, 0, kt + 1, kt + 2, pf, sa1, sb1);  // compute buf1, drip A(kt+2)->buf0
     }
-    if (kt < k_tiles) { wait_vmcnt(0); __syncthreads(); compute(0, 0, kt, 0, false, sa0, sb0); }
+    if (kt < k_tiles) {
+        wait_vmcnt(0);
+        __syncthreads();
+        compute(0, 0, kt, 0, false, sa0, sb0);
+    }
 
     // EPILOGUE — naturally COALESCED, no transpose. The swapped-operand MFMA above made acc hold
     // C^T (lane = N-column), so storing row-major D[m][n] with n = base + lane%32 means consecutive
@@ -204,7 +228,7 @@ __global__ void __launch_bounds__(256, MIN_OCC)
     for (int mi = 0; mi < M_PW; mi++)
 #pragma unroll
         for (int ni = 0; ni < N_PW; ni++) {
-            int n  = wg_n * N_TILE + (wn * N_PW + ni) * 32 + (lane & 31);
+            int n = wg_n * N_TILE + (wn * N_PW + ni) * 32 + (lane & 31);
             int nh = lane >> 5;
             int mb = wg_m * M_TILE + (wm * M_PW + mi) * 32;
             const v16f& a = acc[mi][ni].vec;
@@ -212,10 +236,9 @@ __global__ void __launch_bounds__(256, MIN_OCC)
             for (int g = 0; g < 4; g++) {
                 int m0 = mb + g * 8 + nh * 4;
 #pragma unroll
-                for (int j = 0; j < 4; j++)
-                    D[(size_t)(m0 + j) * N + n] = (OutT)a[g * 4 + j];
+                for (int j = 0; j < 4; j++) D[(size_t)(m0 + j) * N + n] = (OutT)a[g * 4 + j];
             }
         }
 }
 
-} // namespace mxfp6
+}  // namespace mxfp6

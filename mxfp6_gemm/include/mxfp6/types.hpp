@@ -1,8 +1,8 @@
 #pragma once
-#include <cstdint>
-#include <cmath>
-#include <cassert>
 #include <algorithm>
+#include <cassert>
+#include <cmath>
+#include <cstdint>
 
 namespace mxfp6 {
 
@@ -25,7 +25,10 @@ inline float fp6_e2m3_to_float(uint8_t bits6) {
 
 inline uint8_t float_to_fp6_e2m3(float v) {
     uint8_t sign = 0;
-    if (v < 0.0f) { sign = 1; v = -v; }
+    if (v < 0.0f) {
+        sign = 1;
+        v = -v;
+    }
     if (v == 0.0f) return sign << 5;
     if (v > 7.5f) v = 7.5f;
 
@@ -43,9 +46,16 @@ inline uint8_t float_to_fp6_e2m3(float v) {
 
     int E;
     float frac;
-    if (v < 2.0f)      { E = 1; frac = v / 1.0f - 1.0f; }
-    else if (v < 4.0f) { E = 2; frac = v / 2.0f - 1.0f; }
-    else               { E = 3; frac = v / 4.0f - 1.0f; }
+    if (v < 2.0f) {
+        E = 1;
+        frac = v / 1.0f - 1.0f;
+    } else if (v < 4.0f) {
+        E = 2;
+        frac = v / 2.0f - 1.0f;
+    } else {
+        E = 3;
+        frac = v / 4.0f - 1.0f;
+    }
 
     int M = (int)roundf(frac * 8.0f);
     float residual = frac * 8.0f - (float)(int)(frac * 8.0f);
@@ -54,7 +64,8 @@ inline uint8_t float_to_fp6_e2m3(float v) {
         M = (m_floor % 2 == 0) ? m_floor : m_floor + 1;
     }
     if (M >= 8) {
-        E += 1; M = 0;
+        E += 1;
+        M = 0;
         if (E > 3) return (sign << 5) | (3 << 3) | 7;
     }
     return (sign << 5) | (E << 3) | (uint8_t)M;
@@ -98,14 +109,12 @@ inline void unpack_fp6x4(const uint8_t* in, uint8_t* out) {
 
 inline void pack_fp6(const uint8_t* vals, int n, uint8_t* packed) {
     assert(n % 4 == 0);
-    for (int i = 0; i < n; i += 4)
-        pack_fp6x4(vals + i, packed + (i / 4) * 3);
+    for (int i = 0; i < n; i += 4) pack_fp6x4(vals + i, packed + (i / 4) * 3);
 }
 
 inline void unpack_fp6(const uint8_t* packed, int n, uint8_t* vals) {
     assert(n % 4 == 0);
-    for (int i = 0; i < n; i += 4)
-        unpack_fp6x4(packed + (i / 4) * 3, vals + i);
+    for (int i = 0; i < n; i += 4) unpack_fp6x4(packed + (i / 4) * 3, vals + i);
 }
 
 inline int fp6_packed_bytes(int n) {
@@ -113,4 +122,4 @@ inline int fp6_packed_bytes(int n) {
     return n * 3 / 4;
 }
 
-} // namespace mxfp6
+}  // namespace mxfp6

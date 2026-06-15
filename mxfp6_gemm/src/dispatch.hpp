@@ -10,7 +10,7 @@
 //   * 128x256 (8-acc)             — WG-starved small-M, to fill idle CUs.
 // Same lds_gemm_hybrid_dripA kernel for both (tile-general); only the tile args differ.
 #include "lds_hybrid.hpp"
-#include "mxfp6/gemm.hpp"   // TileChoice, choose_tile (declarations)
+#include "mxfp6/gemm.hpp"  // TileChoice, choose_tile (declarations)
 namespace mxfp6 {
 namespace detail {
 
@@ -18,8 +18,8 @@ namespace detail {
 // choose_tile(...).MPW/NPW and preshuffled B (preshuffle_B).
 template <typename OutT>
 inline void dispatch_gemm(int M, int N, int Kp, const void* dA, const void* dBsh,
-                          const uint8_t* dsA, const uint8_t* dsB, OutT* dD,
-                          int A_row_bytes, int B_row_bytes) {
+                          const uint8_t* dsA, const uint8_t* dsB, OutT* dD, int A_row_bytes,
+                          int B_row_bytes) {
     constexpr int KT = 192;
     TileChoice tc = choose_tile(M, N);
     dim3 blk(256);
@@ -41,5 +41,5 @@ inline void dispatch_gemm(int M, int N, int Kp, const void* dA, const void* dBsh
     }
 }
 
-} // namespace detail
-} // namespace mxfp6
+}  // namespace detail
+}  // namespace mxfp6
