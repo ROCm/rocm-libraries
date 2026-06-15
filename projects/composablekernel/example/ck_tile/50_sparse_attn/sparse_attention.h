@@ -119,8 +119,13 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
                                     const sparse_attn_bias_args& bias = {},
                                     float scale_s           = 0.0f,
                                     float logits_soft_cap   = 0.0f,
-                                    const std::vector<int32_t>& seqlen_qs = {},
-                                    const std::vector<int32_t>& seqlen_ks = {});
+                                    // group / varlen: caller-precomputed prefix-sum + block tables
+                                    // (non-empty seqstart_q_host -> group mode)
+                                    const std::vector<int32_t>& seqstart_q_host       = {},
+                                    const std::vector<int32_t>& seqstart_k_host       = {},
+                                    const std::vector<int32_t>& seqstart_q_block_host = {},
+                                    const std::vector<int32_t>& seqstart_k_block_host = {},
+                                    const std::vector<int32_t>& mask_batch_offsets    = {});
 
 // sparge_sage (quantized sparge): bf16 Q/K (device-quantized in the fused preprocess),
 // caller-provided FP8 V + per-channel v_descale. Returns GPU time in ms (negative on error).

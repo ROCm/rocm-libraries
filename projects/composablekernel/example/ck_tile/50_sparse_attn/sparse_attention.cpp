@@ -391,14 +391,17 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
                                     const sparse_attn_bias_args& bias,
                                     float scale_s_user,
                                     float logits_soft_cap,
-                                    const std::vector<int32_t>& seqlen_qs,
-                                    const std::vector<int32_t>& seqlen_ks)
+                                    const std::vector<int32_t>& seqstart_q_host,
+                                    const std::vector<int32_t>& seqstart_k_host,
+                                    const std::vector<int32_t>& seqstart_q_block_host,
+                                    const std::vector<int32_t>& seqstart_k_block_host,
+                                    const std::vector<int32_t>& mask_batch_offsets)
 {
     static_assert(std::is_same_v<DataType_, ck_tile::half_t> ||
                       std::is_same_v<DataType_, ck_tile::bf16_t>,
                   "SpargeAttention supports fp16/bf16 only.");
 
-    const bool is_group_mode = !seqlen_qs.empty();
+    const bool is_group_mode = !seqstart_q_host.empty();
     const char* tag = is_group_mode ? "[sparge group]" : "[sparge]";
 
     assert(hdim_q == 128 && hdim_v == 128 && block_size == 128 &&
@@ -432,12 +435,13 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         constexpr int kMaxKBlocks = 1024;
         if(is_group_mode)
         {
-            for(size_t b = 0; b < seqlen_ks.size(); ++b)
+            for(int b = 0; b < batch; ++b)
             {
-                const int num_k_blocks_b = (seqlen_ks[b] + block_size - 1) / block_size;
+                const int seqlen_k_b = seqstart_k_host[b + 1] - seqstart_k_host[b];
+                const int num_k_blocks_b = (seqlen_k_b + block_size - 1) / block_size;
                 if(num_k_blocks_b > kMaxKBlocks)
                 {
-                    std::cerr << tag << " error: seqlen_k[" << b << "]=" << seqlen_ks[b]
+                    std::cerr << tag << " error: seqlen_k[" << b << "]=" << seqlen_k_b
                               << " (=" << num_k_blocks_b << " K-blocks @ block_size="
                               << block_size << ") exceeds kMaxKBlocksPow2=" << kMaxKBlocks
                               << " (max " << kMaxKBlocks * block_size << " tokens per seq).\n";
@@ -459,34 +463,8 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         }
     }
 
-    // Group mode: locally cumsum seqlen_qs/ks → seqstart and per-batch block tables.
-    auto cumsum = [](const std::vector<int32_t>& v) {
-        std::vector<int32_t> out(v.size() + 1, 0);
-        for(size_t i = 0; i < v.size(); ++i) out[i + 1] = out[i] + v[i];
-        return out;
-    };
-    std::vector<int32_t> seqstart_q, seqstart_k, seqstart_q_block, seqstart_k_block, mask_batch_offsets;
-    int32_t total_q_tokens = seqlen_q;
-    int32_t total_k_tokens = seqlen_k;
-    if(is_group_mode)
-    {
-        seqstart_q     = cumsum(seqlen_qs);
-        seqstart_k     = cumsum(seqlen_ks);
-        total_q_tokens = seqstart_q.back();
-        total_k_tokens = seqstart_k.back();
-
-        std::vector<int32_t> q_blocks(batch), k_blocks(batch);
-        for(int b = 0; b < batch; ++b)
-        {
-            q_blocks[b] = (seqlen_qs[b] + block_size - 1) / block_size;
-            k_blocks[b] = (seqlen_ks[b] + block_size - 1) / block_size;
-        }
-        seqstart_q_block = cumsum(q_blocks);
-        seqstart_k_block = cumsum(k_blocks);
-        mask_batch_offsets.assign(batch + 1, 0);
-        for(int b = 0; b < batch; ++b)
-            mask_batch_offsets[b + 1] = mask_batch_offsets[b] + q_blocks[b] * k_blocks[b];
-    }
+    int32_t total_q_tokens = is_group_mode ? seqstart_q_host.back() : seqlen_q;
+    int32_t total_k_tokens = is_group_mode ? seqstart_k_host.back() : seqlen_k;
 
     if(max_seqlen_q == 0) max_seqlen_q = total_q_tokens;
     if(max_seqlen_k == 0) max_seqlen_k = total_k_tokens;
@@ -510,17 +488,17 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
     k_buf.ToDevice(TK.data());
     v_buf.ToDevice(TV.data());
 
-    ck_tile::DeviceMem seqstart_q_buf(is_group_mode ? seqstart_q.size() * sizeof(int32_t) : 0);
-    ck_tile::DeviceMem seqstart_k_buf(is_group_mode ? seqstart_k.size() * sizeof(int32_t) : 0);
-    ck_tile::DeviceMem seqstart_q_block_buf(is_group_mode ? seqstart_q_block.size() * sizeof(int32_t) : 0);
-    ck_tile::DeviceMem seqstart_k_block_buf(is_group_mode ? seqstart_k_block.size() * sizeof(int32_t) : 0);
+    ck_tile::DeviceMem seqstart_q_buf(is_group_mode ? seqstart_q_host.size() * sizeof(int32_t) : 0);
+    ck_tile::DeviceMem seqstart_k_buf(is_group_mode ? seqstart_k_host.size() * sizeof(int32_t) : 0);
+    ck_tile::DeviceMem seqstart_q_block_buf(is_group_mode ? seqstart_q_block_host.size() * sizeof(int32_t) : 0);
+    ck_tile::DeviceMem seqstart_k_block_buf(is_group_mode ? seqstart_k_block_host.size() * sizeof(int32_t) : 0);
     ck_tile::DeviceMem mask_batch_offsets_buf(is_group_mode ? mask_batch_offsets.size() * sizeof(int32_t) : 0);
     if(is_group_mode)
     {
-        seqstart_q_buf.ToDevice(seqstart_q.data());
-        seqstart_k_buf.ToDevice(seqstart_k.data());
-        seqstart_q_block_buf.ToDevice(seqstart_q_block.data());
-        seqstart_k_block_buf.ToDevice(seqstart_k_block.data());
+        seqstart_q_buf.ToDevice(seqstart_q_host.data());
+        seqstart_k_buf.ToDevice(seqstart_k_host.data());
+        seqstart_q_block_buf.ToDevice(seqstart_q_block_host.data());
+        seqstart_k_block_buf.ToDevice(seqstart_k_block_host.data());
         mask_batch_offsets_buf.ToDevice(mask_batch_offsets.data());
     }
 
@@ -547,8 +525,8 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         args.seqstart_q_block_ptr  = seqstart_q_block_buf.GetDeviceBuffer();
         args.seqstart_k_block_ptr  = seqstart_k_block_buf.GetDeviceBuffer();
         args.mask_batch_offset_ptr  = mask_batch_offsets_buf.GetDeviceBuffer();
-        args.total_q_blocks        = seqstart_q_block.back();
-        args.total_k_blocks        = seqstart_k_block.back();
+        args.total_q_blocks        = seqstart_q_block_host.back();
+        args.total_k_blocks        = seqstart_k_block_host.back();
         args.total_qk_blocks       = mask_batch_offsets.back();
     }
 
@@ -935,6 +913,9 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
                                               const ck_tile::stream_config&,          \
                                               const sparse_attn_bias_args&,           \
                                               float, float,                           \
+                                              const std::vector<int32_t>&,            \
+                                              const std::vector<int32_t>&,            \
+                                              const std::vector<int32_t>&,            \
                                               const std::vector<int32_t>&,            \
                                               const std::vector<int32_t>&)
 

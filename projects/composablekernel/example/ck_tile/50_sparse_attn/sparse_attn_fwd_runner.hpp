@@ -2063,6 +2063,14 @@ sparse_attn_result sparse_attn_fwd_run(
         const int32_t total_q = seqstart_q_host.back();
         const int32_t total_k = seqstart_k_host.back();
 
+        const auto q_blocks_g = seqlens_to_blocks(seqlen_qs, block_size);
+        const auto k_blocks_g = seqlens_to_blocks(seqlen_ks, block_size);
+        const auto seqstart_q_block_host = to_seqstarts(q_blocks_g);
+        const auto seqstart_k_block_host = to_seqstarts(k_blocks_g);
+        std::vector<int32_t> mask_batch_offsets(batch + 1, 0);
+        for(int b = 0; b < batch; ++b)
+            mask_batch_offsets[b + 1] = mask_batch_offsets[b] + q_blocks_g[b] * k_blocks_g[b];
+
         auto q_packed = make_qkv_tensor<T>(1, nhead,   total_q, hdim_q, i_perm);
         auto k_packed = make_qkv_tensor<T>(1, nhead_k, total_k, hdim_q, i_perm);
         auto v_packed = make_qkv_tensor<T>(1, nhead_k, total_k, hdim_v, i_perm);
@@ -2094,7 +2102,8 @@ sparse_attn_result sparse_attn_fwd_run(
                 block_size, /*max_seqlen_q=*/seqlen_q, /*max_seqlen_k=*/0,
                 print_sparsity ? &actual_sparsity : nullptr,
                 stream_config, bs.args, scale_s_user, logits_soft_cap_user,
-                seqlen_qs, seqlen_ks);
+                seqstart_q_host, seqstart_k_host,
+                seqstart_q_block_host, seqstart_k_block_host, mask_batch_offsets);
         }
         catch(const std::exception& e)
         {
