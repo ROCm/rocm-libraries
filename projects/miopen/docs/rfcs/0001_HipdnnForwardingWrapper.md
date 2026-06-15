@@ -298,6 +298,10 @@ Three failure classes, each with explicit defined behavior:
   - a `[hipDNN-forwarded]` prefix on the `miopenGetErrorString` message for any forwarded-error code, so log scraping is unambiguous.
   - A new dedicated error code (`MIOPEN_STATUS_FORWARDED_ERROR`) was considered but rejected for Phase 2 because it would change the visible status set for any consumer that opts into forwarding; the thread-local accessor is additive and does not. To be re-evaluated if forwarded-error patterns turn out to warrant their own bucket.
 
+### 6.2 hipDNN as an upstream dependency — change communication
+
+With forwarding enabled, hipDNN is in MIOpen's runtime dependency chain, so changes on the hipDNN side can now reach MIOpen consumers who never integrated hipDNN directly. A full supply-chain / advisory policy is out of scope for this RFC, but the basic commitment is noted here for visibility: **critical hipDNN changes that affect forwarded behavior — breaking changes, security fixes (CVEs), or ABI bumps — must be surfaced to MIOpen users** through MIOpen's existing release notes and changelog channels, so consumers are not blindsided by behavior originating in a dependency they did not knowingly add. The concrete advisory/coordination process is left to a follow-up.
+
 ## 7. Execution Plan
 
 The work is broken into four phases. Each phase ends with the existing MIOpen test suite green in the default (`MIOPEN_HIPDNN_FORWARDING=disabled`) configuration; phases that forward to hipDNN additionally run the suite with the relevant forwarding env vars set.
