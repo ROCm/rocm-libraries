@@ -221,6 +221,12 @@ For questions about contributing community samples:
 - **Limitations**: M must be a multiple of MACRO_TILE_X (64), N must be a multiple of MACRO_TILE_Y (64), K must be a multiple of ROCWMMA_K (16); row_major only; not production-optimized
 - **Author**: Odin.Yang
 
+### Stream-K GEMM Scheduler
+- **File**: `simple_gemm_streamk.cpp`
+- **Description**: Stream-K-style GEMM sample implementing `D = A * B` with two schedulers: a classic data-parallel tiled GEMM baseline and a work-centric persistent Stream-K scheduler. Both paths share the same rocWMMA inner GEMM kernel using cooperative global reads, LDS double buffering for A / B tiles, MFMA accumulation, and float32 compute. The Stream-K path partitions total GEMM K-iteration work across persistent workers, commits partial accumulators through an fp32 workspace with `atomicAdd`, and finalizes output with a fp32-to-fp16 finish kernel.
+- **Requirements**: ROCm 6.0+; gfx9 / gfx11 / gfx12 supported path, tested on RDNA4 gfx1201 (RX 9070); float16 input/output, float32 compute/workspace
+- **Limitations**: M must be a multiple of MACRO_TILE_X (64), N must be a multiple of MACRO_TILE_Y (64), K must be a multiple of MACRO_TILE_K / ROCWMMA_K (16); row_major only; Stream-K path uses fp32 workspace `M*N*sizeof(float)` and always uses `atomicAdd`; not production-optimized
+- **Author**: Odin.Yang
 
 <!-- Template for documenting samples:
 ### Sample Name
