@@ -214,11 +214,14 @@ def make_tex(figs,
     # Data frames for significant speedups and slowdowns
     df_all_good = pandas.DataFrame()
     df_all_bad = pandas.DataFrame()
-
+    
     # We need a list of speedups to compute the geometric mean via
     # sicpy.stats; the naive calculation suffers from issues with
     # finite precision.
     speedups = []
+
+    total_compared = 0
+    total_significant = 0
 
     figtex = ""
 
@@ -238,9 +241,12 @@ def make_tex(figs,
             for row in df.itertuples(index=False):
                 speedups.append(row.speedup)
 
+            total_compared += len(df)
+                
             # Significant results:
             df_sig = df.loc[df['speedup_pval'] <= significance]
-
+            total_significant += len(df_sig)
+            
             # Significant results that are good or bad:
             df_good = df_sig.loc[df_sig['speedup'] > 1]
             df_bad = df_sig.loc[df_sig['speedup'] < 1]
@@ -255,7 +261,7 @@ def make_tex(figs,
                 for row in df_good.itertuples(index=False):
                     #figtex += str(row.token).replace("_", "\\_")
                     #figtex += "token"
-                    transform_type, placeness, length, batch, precision = perflib.utils.parse_token(
+                    transform_type, placeness, length, batch, precision, bricks, gpus, ranks = perflib.utils.parse_token(
                         row.token)
                     figtex += "$" + "\\times{}".join(str(x)
                                                      for x in length) + "$"
@@ -281,7 +287,7 @@ def make_tex(figs,
                 for row in df_bad.itertuples(index=False):
                     #figtex += str(row.token).replace("_", "\\_")
                     #figtex += "token"
-                    transform_type, placeness, length, batch, precision = perflib.utils.parse_token(
+                    transform_type, placeness, length, batch, precision, bricks, gpus, ranks = perflib.utils.parse_token(
                         row.token)
                     figtex += "$" + "\\times{}".join(str(x)
                                                      for x in length) + "$"
@@ -310,7 +316,9 @@ def make_tex(figs,
         print(
             "nslowdown (" + label[0] + " is faster): " +
             " " * max(len(label[1]) - len(label[0]), 0), nslowdown)
-        tex += "geometric mean overall cases: " + str(globalgeomean) + "\n"
+        tex += "Geometric mean overall cases: " + str(globalgeomean) + "\n"
+        tex += "\\\\"
+        tex += "There were " + str(total_significant) + " statistically significant cases out of a total of " + str(total_compared)  + " transforms (" + '{0:.3f}'.format(100 * total_significant / total_compared) +  "\\%).\n"
 
         if ncompare > 0:
             geometric_mean = 1.0
@@ -341,7 +349,7 @@ def make_tex(figs,
             for row in df_all_bad.itertuples(index=False):
                 vals.append(100 * (1 - (1 / row.speedup)))
 
-            histdatname = os.path.join(docdir, "histogram.dat")
+            histdatname = os.path.join(docdir, "histogramsig.dat")
 
             with open(histdatname, 'w') as f:
                 f.write("\t".join(str(x) for x in vals))
@@ -352,7 +360,7 @@ def make_tex(figs,
 
             asycmd = ["asy", "-f", "pdf", "histogram.asy"]
             asycmd.extend(['-u', 'filename="' + histdatname + '"'])
-            asycmd.extend(['-o', os.path.join(docdir, "histogram.pdf")])
+            asycmd.extend(['-o', os.path.join(docdir, "histogramsig.pdf")])
 
             asyproc = subprocess.Popen(asycmd,
                                        cwd=top,
@@ -376,14 +384,64 @@ def make_tex(figs,
                 print(cerr)
 
             tex += '''\\centering
-    \\begin{figure}[H]
-    \\includegraphics[width=\\textwidth]{'''
-            tex += "histogram.pdf"
+            \\begin{figure}[H]
+            \\includegraphics[width=\\textwidth]{'''
+            tex += "histogramsig.pdf"
             tex += '''}
-    \\caption{''' + "Histogram of performance changes" + '''}\n\\end{figure}'''
+            \\caption{''' + "Histogram of significant performance changes" + '''}\n\\end{figure}'''
+            tex += "\\clearpage\n"
+                
+        # Histogram for all speedups (not just significant ones)
+        if(len(speedups) > 1):
+            allhistogramdat = []
+            for speedup in speedups:
+                if speedup >= 1:
+                    allhistogramdat.append(100 * (speedup - 1))
+                if speedup < 1:
+                    allhistogramdat.append(100 * (1 - (1 / speedup)))
+                    
+            allhistdatname = os.path.join(docdir, "histogramall.dat")
 
-        tex += "\\clearpage\n"
+            with open(allhistdatname, 'w') as f:
+                f.write("\t".join(str(x) for x in vals))
+                f.write("\n")
 
+            fout = tempfile.TemporaryFile(mode="w+")
+            ferr = tempfile.TemporaryFile(mode="w+")
+
+            asycmd = ["asy", "-f", "pdf", "histogram.asy"]
+            asycmd.extend(['-u', 'filename="' + allhistdatname + '"'])
+            asycmd.extend(['-o', os.path.join(docdir, "histogramall.pdf")])
+
+            asyproc = subprocess.Popen(asycmd,
+                                       cwd=top,
+                                       stdout=fout,
+                                       stderr=ferr)
+            try:
+                asyproc.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                logging.info("asy command killed: " + sjoin(asycmd))
+                asyproc.kill()
+
+            if asyproc.returncode != 0:
+                logging.warn('ASY command failed: ' + sjoin(asycmd))
+
+                fout.seek(0)
+                ferr.seek(0)
+                cout = fout.read()
+                cerr = ferr.read()
+
+                print(cout)
+                print(cerr)
+
+            tex += '''\\centering
+            \\begin{figure}[H]
+            \\includegraphics[width=\\textwidth]{'''
+            tex += "histogramsig.pdf"
+            tex += '''}
+            \\caption{''' + "Histogram of all performance changes" + '''}\n\\end{figure}'''
+            tex += "\\clearpage\n"
+        
     tex += figtex
 
     if nspeedup > 0:
