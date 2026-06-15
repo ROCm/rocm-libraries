@@ -88,6 +88,7 @@ class TestPyTorchOps:
         assert "BatchnormInferenceAttributesVarianceExt" in supported
         assert "BatchnormBackwardAttributes" in supported
         assert "SdpaAttributes" in supported
+        assert "SdpaBackwardAttributes" in supported
         assert "LayernormAttributes" in supported
         assert "RMSNormAttributes" in supported
         assert "RMSNormBackwardAttributes" in supported
@@ -303,6 +304,7 @@ class TestPyTorchCudaExecutor:
             "sample_batchnorm_backward.json",
             "sample_sdpa.json",
             "sample_mha_sdpa.json",
+            "sample_sdpa_backward.json",
             "sample_layernorm.json",
             "sample_rmsnorm.json",
             "sample_rmsnorm_backward.json",

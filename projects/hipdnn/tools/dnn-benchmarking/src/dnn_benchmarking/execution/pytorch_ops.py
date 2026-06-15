@@ -123,7 +123,10 @@ def get_reference_warnings(graph_json: Dict[str, Any]) -> List[str]:
             reasons: List[str] = []
             if not hasattr(F, "rms_norm"):
                 reasons.append("torch.nn.functional.rms_norm is unavailable")
-            if _node_uid(node, "bias_tensor_uid", ("inputs",), required=False) is not None:
+            if (
+                _node_uid(node, "bias_tensor_uid", ("inputs",), required=False)
+                is not None
+            ):
                 reasons.append("optional bias is applied manually")
             if (
                 _node_uid(node, "inv_rms_tensor_uid", ("outputs",), required=False)
@@ -147,8 +150,20 @@ def get_reference_warnings(graph_json: Dict[str, Any]) -> List[str]:
                 "built-in PyTorch operator time."
             )
 
+        elif op_type == "SdpaBackwardAttributes":
+            warnings.append(
+                f"{name}: SdpaBackwardAttributes uses a manual flash-attention "
+                "backward formula that consumes hipDNN's saved stats (log-sum-exp); "
+                "torch.nn.functional.scaled_dot_product_attention autograd cannot "
+                "consume external stats, so PyTorch reference timing is not solely "
+                "built-in PyTorch operator time."
+            )
+
         elif op_type == "ReductionAttributes":
-            if _reduction_mode_name(_node_param(node, "mode", "NOT_SET")) == "MUL_NO_ZEROS":
+            if (
+                _reduction_mode_name(_node_param(node, "mode", "NOT_SET"))
+                == "MUL_NO_ZEROS"
+            ):
                 warnings.append(
                     f"{name}: ReductionAttributes mode MUL_NO_ZEROS uses a manual "
                     "masked product; PyTorch reference timing is not solely built-in "
@@ -398,7 +413,11 @@ def _infer_trailing_normalized_count(
         if tensor is None:
             continue
         stripped = _strip_leading_singletons(tensor.shape)
-        if stripped and len(stripped) <= x.ndim and tuple(x.shape[-len(stripped) :]) == stripped:
+        if (
+            stripped
+            and len(stripped) <= x.ndim
+            and tuple(x.shape[-len(stripped) :]) == stripped
+        ):
             return len(stripped)
 
         elements = tensor.numel()
@@ -659,7 +678,9 @@ def _pool_function(mode: str, spatial_rank: int) -> Callable[..., Any]:
     return (F.avg_pool1d, F.avg_pool2d, F.avg_pool3d)[spatial_rank - 1]
 
 
-def _reduce_prod(value: torch.Tensor, dims: Tuple[int, ...], keepdim: bool) -> torch.Tensor:
+def _reduce_prod(
+    value: torch.Tensor, dims: Tuple[int, ...], keepdim: bool
+) -> torch.Tensor:
     if not dims:
         return value
     result = value
@@ -1166,10 +1187,12 @@ def handle_batchnorm_inference_variance(
 
     x = _tensor(tensors, x_uid, node)
     x_float = x.to(dtype=torch.float32)
-    running_mean = _channel_values(_tensor(tensors, mean_uid, node), x).to(torch.float32)
-    running_var = _channel_values(
-        _tensor(tensors, variance_uid, node), x
-    ).to(torch.float32)
+    running_mean = _channel_values(_tensor(tensors, mean_uid, node), x).to(
+        torch.float32
+    )
+    running_var = _channel_values(_tensor(tensors, variance_uid, node), x).to(
+        torch.float32
+    )
     weight = _channel_values(_tensor(tensors, scale_uid, node), x).to(torch.float32)
     bias = _channel_values(_tensor(tensors, bias_uid, node), x).to(torch.float32)
     epsilon = _scalar_value(tensors, epsilon_uid, node)
@@ -1379,9 +1402,7 @@ def handle_rmsnorm(
     layout, reduce_dims, broadcast_shape, normalized_shape = _rmsnorm_layout(x, scale)
 
     use_builtin = (
-        layout == "trailing"
-        and normalized_shape is not None
-        and hasattr(F, "rms_norm")
+        layout == "trailing" and normalized_shape is not None and hasattr(F, "rms_norm")
     )
     if use_builtin:
         weight = _reshape_affine_for_normalized_shape(
@@ -1438,9 +1459,7 @@ def handle_rmsnorm_backward(
     inv_rms = _tensor(tensors, inv_uid, node).to(dtype=torch.float32, device=x.device)
 
     _layout, reduce_dims, broadcast_shape, _normalized_shape = _rmsnorm_layout(x, scale)
-    scale_b = _reshape_affine_for_broadcast(
-        scale, broadcast_shape, x, "RMSNorm scale"
-    )
+    scale_b = _reshape_affine_for_broadcast(scale, broadcast_shape, x, "RMSNorm scale")
     weighted_dy = dy * scale_b
     if reduce_dims:
         dot = (weighted_dy * x_float).sum(dim=reduce_dims, keepdim=True)
@@ -1449,10 +1468,9 @@ def handle_rmsnorm_backward(
         dot = weighted_dy * x_float
         elements = 1
 
-    dx = (
-        weighted_dy * inv_rms
-        - x_float * inv_rms.pow(3) * dot / float(elements)
-    ).to(dtype=x.dtype)
+    dx = (weighted_dy * inv_rms - x_float * inv_rms.pow(3) * dot / float(elements)).to(
+        dtype=x.dtype
+    )
     _store_tensor_for_uid(tensors, graph_json, dx_uid, dx)
 
     dscale = _sum_to_shape(dy * x_float * inv_rms, scale.shape).to(dtype=scale.dtype)
@@ -1495,7 +1513,11 @@ def handle_reduction(
     elif mode == "MAX":
         result = torch.amax(x, dim=dims, keepdim=keepdim) if dims else x
     elif mode == "AMAX":
-        result = torch.amax(torch.abs(x), dim=dims, keepdim=keepdim) if dims else torch.abs(x)
+        result = (
+            torch.amax(torch.abs(x), dim=dims, keepdim=keepdim)
+            if dims
+            else torch.abs(x)
+        )
     elif mode == "AVG":
         result = x.mean(dim=dims, keepdim=keepdim) if dims else x
     elif mode == "NORM1":
@@ -1541,7 +1563,9 @@ def handle_resample_fwd(
         raise ValueError("ResampleFwdAttributes stride/window values must be positive")
 
     mode = _resample_mode_name(_node_param(node, "resample_mode", "NOT_SET"))
-    padding_mode = _padding_mode_name(_node_param(node, "padding_mode", "PADDING_NOT_SET"))
+    padding_mode = _padding_mode_name(
+        _node_param(node, "padding_mode", "PADDING_NOT_SET")
+    )
     pool = _pool_function(mode, spatial_rank)
 
     if mode == "MAXPOOL":
@@ -1665,6 +1689,106 @@ def handle_sdpa(
             stats_uid,
             _sdpa_stats(q, k, attn_mask, is_causal, scale, enable_gqa),
         )
+
+
+@register_handler("SdpaBackwardAttributes")
+def handle_sdpa_backward(
+    node: Dict[str, Any],
+    tensors: Dict[int, torch.Tensor],
+    graph_json: Dict[str, Any],
+) -> None:
+    """Handle scaled dot-product attention backward.
+
+    Mirrors hipDNN's CPU reference (CpuFpReferenceSdpa::backward): the saved
+    softmax statistics ``stats`` (forward log-sum-exp) are consumed directly to
+    recompute probabilities as ``P = exp(scores - stats)`` without
+    renormalization.  PyTorch's built-in SDPA autograd cannot consume an
+    external ``stats`` tensor and always renormalizes its own softmax, so it
+    would diverge from hipDNN whenever ``stats`` is not the exact, consistent
+    forward LSE.  This handler therefore implements the gradient manually.
+    """
+    _sdpa_unsupported_if_present(node, ["dropout_scale_inv_tensor_uid"])
+    if _optional_uid(node, "dbias_tensor_uid") is not None:
+        raise ValueError(
+            "SDPA backward dBias gradient is not supported by the PyTorch reference"
+        )
+
+    q_uid = _required_input_uid(node, "q_tensor_uid")
+    k_uid = _required_input_uid(node, "k_tensor_uid")
+    v_uid = _required_input_uid(node, "v_tensor_uid")
+    o_uid = _required_input_uid(node, "o_tensor_uid")
+    do_uid = _required_input_uid(node, "do_tensor_uid")
+    stats_uid = _required_input_uid(node, "stats_tensor_uid")
+    dq_uid = _required_output_uid(node, "dq_tensor_uid")
+    dk_uid = _required_output_uid(node, "dk_tensor_uid")
+    dv_uid = _required_output_uid(node, "dv_tensor_uid")
+
+    q = _tensor(tensors, q_uid, node)
+    k = _tensor(tensors, k_uid, node)
+    v = _tensor(tensors, v_uid, node)
+    o = _tensor(tensors, o_uid, node)
+    do = _tensor(tensors, do_uid, node)
+    stats = _tensor(tensors, stats_uid, node)
+    attn_mask, _dropout_p, is_causal, scale, enable_gqa = _sdpa_common(
+        node, tensors, q, k
+    )
+
+    if q.ndim != 4 or k.ndim != 4 or v.ndim != 4:
+        raise ValueError("SDPA backward expects rank-4 q/k/v tensors [B, H, S, D]")
+
+    q_f = q.to(dtype=torch.float32)
+    k_f = k.to(dtype=torch.float32)
+    v_f = v.to(dtype=torch.float32)
+    o_f = o.to(dtype=torch.float32)
+    do_f = do.to(dtype=torch.float32)
+    stats_f = stats.to(dtype=torch.float32)
+
+    head_dim = int(q.shape[-1])
+    scale_value = (1.0 / sqrt(float(head_dim))) if scale is None else float(scale)
+    q_heads = int(q.shape[1])
+    k_heads = int(k.shape[1])
+    v_heads = int(v.shape[1])
+    if enable_gqa:
+        k_f = k_f.repeat_interleave(q_heads // k_heads, dim=1)
+        v_f = v_f.repeat_interleave(q_heads // v_heads, dim=1)
+
+    scores = torch.matmul(q_f, k_f.transpose(-2, -1)) * scale_value
+    if attn_mask is not None:
+        scores = scores + attn_mask.to(dtype=torch.float32)
+    if is_causal:
+        causal = torch.ones(
+            scores.shape[-2],
+            scores.shape[-1],
+            dtype=torch.bool,
+            device=scores.device,
+        ).tril()
+        scores = scores.masked_fill(~causal, float("-inf"))
+
+    probs = torch.exp(scores - stats_f)
+    row_dot = (do_f * o_f).sum(dim=-1, keepdim=True)
+    d_probs = torch.matmul(do_f, v_f.transpose(-2, -1))
+    d_scores = probs * (d_probs - row_dot)
+    d_scores_scaled = d_scores * scale_value
+
+    dq = torch.matmul(d_scores_scaled, k_f)
+    dk_full = torch.matmul(d_scores_scaled.transpose(-2, -1), q_f)
+    dv_full = torch.matmul(probs.transpose(-2, -1), do_f)
+
+    if enable_gqa:
+        batch, seq_kv = dk_full.shape[0], dk_full.shape[2]
+        dk_f = dk_full.view(batch, k_heads, q_heads // k_heads, seq_kv, head_dim).sum(
+            dim=2
+        )
+        dv_f = dv_full.view(
+            batch, v_heads, q_heads // v_heads, seq_kv, int(v.shape[-1])
+        ).sum(dim=2)
+    else:
+        dk_f = dk_full
+        dv_f = dv_full
+
+    _store_tensor(tensors, dq_uid, dq.to(dtype=q.dtype))
+    _store_tensor(tensors, dk_uid, dk_f.to(dtype=k.dtype))
+    _store_tensor(tensors, dv_uid, dv_f.to(dtype=v.dtype))
 
 
 @register_handler("PointwiseAttributes")

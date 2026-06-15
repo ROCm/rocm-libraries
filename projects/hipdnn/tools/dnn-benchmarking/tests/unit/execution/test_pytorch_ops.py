@@ -242,14 +242,15 @@ class TestPyTorchOpsSupportsGraph:
     @pytest.mark.parametrize(
         "op_type",
         [
-            "SdpaBackwardAttributes",
             "LayernormBackwardAttributes",
             "CustomOpAttributes",
             "BlockScaleDequantizeAttributes",
             "BlockScaleQuantizeAttributes",
         ],
     )
-    def test_intentionally_unsupported_ops_remain_unsupported(self, op_type: str) -> None:
+    def test_intentionally_unsupported_ops_remain_unsupported(
+        self, op_type: str
+    ) -> None:
         graph_json = {"nodes": [{"type": op_type}]}
 
         assert pytorch_ops.supports_graph(graph_json) is False
@@ -269,6 +270,7 @@ class TestPyTorchOpsNewHandlers:
             "BatchnormInferenceAttributesVarianceExt",
             "BatchnormBackwardAttributes",
             "SdpaAttributes",
+            "SdpaBackwardAttributes",
             "LayernormAttributes",
             "LayerNormAttributes",
             "RMSNormAttributes",
@@ -550,7 +552,9 @@ class TestPyTorchOpsNewHandlers:
         torch.testing.assert_close(tensors[5], x * inv * scale + bias)
 
     def test_rmsnorm_backward_matches_autograd(self) -> None:
-        x = (torch.arange(24, dtype=torch.float32).reshape(2, 3, 4) / 10).requires_grad_()
+        x = (
+            torch.arange(24, dtype=torch.float32).reshape(2, 3, 4) / 10
+        ).requires_grad_()
         scale = torch.tensor([1.0, 0.5, 2.0, -1.0], requires_grad=True)
         dy = torch.linspace(-0.2, 0.3, steps=24).reshape(2, 3, 4)
         y = x * torch.rsqrt(x.square().mean(dim=2, keepdim=True) + 1e-5) * scale
@@ -643,7 +647,9 @@ class TestPyTorchOpsNewHandlers:
             ("MUL_NO_ZEROS", torch.tensor([120.0])),
         ],
     )
-    def test_reduction_modes_match_torch(self, mode: str, expected: torch.Tensor) -> None:
+    def test_reduction_modes_match_torch(
+        self, mode: str, expected: torch.Tensor
+    ) -> None:
         graph_json = {
             "tensors": [{"uid": 2, "dims": [1]}],
             "nodes": [
@@ -771,17 +777,35 @@ class TestPyTorchOpsNewHandlers:
                         "padding_mode": "ZERO_PAD",
                     },
                 },
+                {
+                    "name": "sdpa_bwd",
+                    "type": "SdpaBackwardAttributes",
+                    "inputs": {
+                        "q_tensor_uid": 1,
+                        "k_tensor_uid": 1,
+                        "v_tensor_uid": 1,
+                        "o_tensor_uid": 1,
+                        "do_tensor_uid": 1,
+                        "stats_tensor_uid": 2,
+                    },
+                    "outputs": {
+                        "dq_tensor_uid": 1,
+                        "dk_tensor_uid": 1,
+                        "dv_tensor_uid": 1,
+                    },
+                },
             ],
         }
 
         warnings = pytorch_ops.get_reference_warnings(graph_json)
 
-        assert len(warnings) == 4
+        assert len(warnings) == 5
         assert all("not solely built-in PyTorch operator time" in w for w in warnings)
         assert any("LayernormAttributes" in w for w in warnings)
         assert any("RMSNormBackwardAttributes" in w for w in warnings)
         assert any("MUL_NO_ZEROS" in w for w in warnings)
         assert any("AVGPOOL_EXCLUDE_PADDING" in w for w in warnings)
+        assert any("SdpaBackwardAttributes" in w for w in warnings)
 
     def test_builtin_rmsnorm_reference_has_no_warning_when_available(self) -> None:
         graph_json = {
@@ -820,3 +844,154 @@ class TestPyTorchOpsNewHandlers:
         q = torch.randn(1, 1, 2, 4)
         with pytest.raises(ValueError, match="Nonzero SDPA dropout"):
             pytorch_ops.execute_graph(graph_json, {1: q, 2: q, 3: q})
+
+    @staticmethod
+    def _sdpa_autograd_reference(
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        do: torch.Tensor,
+        scale: float,
+        causal: bool,
+        repeat: int,
+    ):
+        q_g = q.clone().requires_grad_()
+        k_g = k.clone().requires_grad_()
+        v_g = v.clone().requires_grad_()
+        k_e = k_g.repeat_interleave(repeat, dim=1) if repeat > 1 else k_g
+        v_e = v_g.repeat_interleave(repeat, dim=1) if repeat > 1 else v_g
+        scores = (q_g @ k_e.transpose(-2, -1)) * scale
+        if causal:
+            mask = torch.ones(
+                scores.shape[-2], scores.shape[-1], dtype=torch.bool
+            ).tril()
+            scores = scores.masked_fill(~mask, float("-inf"))
+        probs = torch.softmax(scores, dim=-1)
+        out = probs @ v_e
+        lse = torch.logsumexp(scores, dim=-1, keepdim=True)
+        out.backward(do)
+        return out.detach(), lse.detach(), q_g.grad, k_g.grad, v_g.grad
+
+    @staticmethod
+    def _run_sdpa_backward(q, k, v, o, do, stats, attrs):
+        graph_json = {
+            "tensors": [
+                {"uid": 10, "dims": list(q.shape)},
+                {"uid": 11, "dims": list(k.shape)},
+                {"uid": 12, "dims": list(v.shape)},
+            ],
+            "nodes": [
+                {
+                    "type": "SdpaBackwardAttributes",
+                    "inputs": {
+                        "q_tensor_uid": 1,
+                        "k_tensor_uid": 2,
+                        "v_tensor_uid": 3,
+                        "o_tensor_uid": 4,
+                        "do_tensor_uid": 5,
+                        "stats_tensor_uid": 6,
+                    },
+                    "outputs": {
+                        "dq_tensor_uid": 10,
+                        "dk_tensor_uid": 11,
+                        "dv_tensor_uid": 12,
+                    },
+                    "attributes": attrs,
+                }
+            ],
+        }
+        tensors = {1: q, 2: k, 3: v, 4: o, 5: do, 6: stats}
+        pytorch_ops.execute_graph(graph_json, tensors)
+        return tensors[10], tensors[11], tensors[12]
+
+    @pytest.mark.parametrize("causal", [False, True])
+    def test_sdpa_backward_matches_autograd_with_consistent_stats(
+        self, causal: bool
+    ) -> None:
+        torch.manual_seed(0)
+        scale = 1.0 / (8**0.5)
+        q = torch.randn(2, 3, 5, 8)
+        k = torch.randn(2, 3, 5, 8)
+        v = torch.randn(2, 3, 5, 8)
+        do = torch.randn(2, 3, 5, 8)
+        o, lse, dq_ref, dk_ref, dv_ref = self._sdpa_autograd_reference(
+            q, k, v, do, scale, causal, 1
+        )
+
+        attrs = {"attn_scale_value": scale}
+        if causal:
+            attrs["causal_mask"] = True
+        dq, dk, dv = self._run_sdpa_backward(q, k, v, o, do, lse, attrs)
+
+        torch.testing.assert_close(dq, dq_ref, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_close(dk, dk_ref, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_close(dv, dv_ref, rtol=1e-4, atol=1e-4)
+
+    def test_sdpa_backward_gqa_matches_autograd(self) -> None:
+        torch.manual_seed(1)
+        scale = 1.0 / (8**0.5)
+        q = torch.randn(2, 4, 5, 8)
+        k = torch.randn(2, 2, 5, 8)
+        v = torch.randn(2, 2, 5, 8)
+        do = torch.randn(2, 4, 5, 8)
+        o, lse, dq_ref, dk_ref, dv_ref = self._sdpa_autograd_reference(
+            q, k, v, do, scale, False, 2
+        )
+
+        dq, dk, dv = self._run_sdpa_backward(
+            q, k, v, o, do, lse, {"attn_scale_value": scale}
+        )
+
+        torch.testing.assert_close(dq, dq_ref, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_close(dk, dk_ref, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_close(dv, dv_ref, rtol=1e-4, atol=1e-4)
+
+    def test_sdpa_backward_consumes_stats_input(self) -> None:
+        torch.manual_seed(2)
+        scale = 1.0 / (8**0.5)
+        q = torch.randn(1, 2, 4, 8)
+        k = torch.randn(1, 2, 4, 8)
+        v = torch.randn(1, 2, 4, 8)
+        do = torch.randn(1, 2, 4, 8)
+        o, lse, _, _, _ = self._sdpa_autograd_reference(q, k, v, do, scale, False, 1)
+
+        dq_true, _, _ = self._run_sdpa_backward(
+            q, k, v, o, do, lse, {"attn_scale_value": scale}
+        )
+        dq_shift, _, _ = self._run_sdpa_backward(
+            q, k, v, o, do, lse + 0.5, {"attn_scale_value": scale}
+        )
+
+        # hipDNN consumes stats verbatim (no renormalization); perturbing it must
+        # change the gradient, which is exactly why autograd cannot be used.
+        assert (dq_true - dq_shift).abs().max().item() > 1e-3
+
+    def test_sdpa_backward_rejects_dbias(self) -> None:
+        q = torch.randn(1, 1, 2, 4)
+        graph_json = {
+            "tensors": [{"uid": 10, "dims": [1, 1, 2, 4]}],
+            "nodes": [
+                {
+                    "type": "SdpaBackwardAttributes",
+                    "inputs": {
+                        "q_tensor_uid": 1,
+                        "k_tensor_uid": 2,
+                        "v_tensor_uid": 3,
+                        "o_tensor_uid": 4,
+                        "do_tensor_uid": 5,
+                        "stats_tensor_uid": 6,
+                    },
+                    "outputs": {
+                        "dq_tensor_uid": 10,
+                        "dk_tensor_uid": 11,
+                        "dv_tensor_uid": 12,
+                        "dbias_tensor_uid": 13,
+                    },
+                }
+            ],
+        }
+        stats = torch.zeros(1, 1, 2, 1)
+        with pytest.raises(ValueError, match="dBias"):
+            pytorch_ops.execute_graph(
+                graph_json, {1: q, 2: q, 3: q, 4: q, 5: q, 6: stats}
+            )

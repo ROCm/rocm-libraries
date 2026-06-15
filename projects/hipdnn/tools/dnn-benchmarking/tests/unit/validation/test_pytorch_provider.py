@@ -437,6 +437,7 @@ class TestPyTorchProviderGraphSupport:
         assert "BatchnormInferenceAttributesVarianceExt" in supported
         assert "BatchnormBackwardAttributes" in supported
         assert "SdpaAttributes" in supported
+        assert "SdpaBackwardAttributes" in supported
         assert "LayernormAttributes" in supported
         assert "RMSNormAttributes" in supported
         assert "RMSNormBackwardAttributes" in supported
@@ -739,7 +740,11 @@ class TestPyTorchProviderNewOps:
         )
 
         expected = torch.nn.functional.layer_norm(
-            torch.from_numpy(x), (4,), torch.from_numpy(scale), torch.from_numpy(bias), 1e-5
+            torch.from_numpy(x),
+            (4,),
+            torch.from_numpy(scale),
+            torch.from_numpy(bias),
+            1e-5,
         )
         np.testing.assert_allclose(outputs[5].data, expected.numpy(), rtol=1e-6)
         np.testing.assert_allclose(outputs[6].data, x.mean(axis=2, keepdims=True))
@@ -784,7 +789,9 @@ class TestPyTorchProviderNewOps:
 
     def test_rmsnorm_backward_reference_matches_autograd(self) -> None:
         provider = ReferenceProviderRegistry.get_provider("pytorch")
-        x_t = (torch.arange(24, dtype=torch.float32).reshape(2, 3, 4) / 10).requires_grad_()
+        x_t = (
+            torch.arange(24, dtype=torch.float32).reshape(2, 3, 4) / 10
+        ).requires_grad_()
         scale_t = torch.tensor([1.0, 0.5, 2.0, -1.0], requires_grad=True)
         dy_t = torch.linspace(-0.2, 0.3, steps=24).reshape(2, 3, 4)
         y_t = x_t * torch.rsqrt(x_t.square().mean(dim=2, keepdim=True) + 1e-5) * scale_t
@@ -844,7 +851,9 @@ class TestPyTorchProviderNewOps:
         }
         x = np.arange(6, dtype=np.float32).reshape(2, 3)
         reduction_outputs = provider.compute_reference(reduction_graph, {1: x})
-        np.testing.assert_allclose(reduction_outputs[2].data, x.sum(axis=1, keepdims=True))
+        np.testing.assert_allclose(
+            reduction_outputs[2].data, x.sum(axis=1, keepdims=True)
+        )
 
         resample_graph = {
             "tensors": [{"uid": 2, "dims": [1, 1, 2], "data_type": "float"}],
@@ -1075,6 +1084,68 @@ class TestPyTorchProviderNewOps:
         )
 
         np.testing.assert_allclose(outputs[4].data, expected.numpy(), rtol=1e-6)
+
+    def test_sdpa_backward_matches_autograd_with_consistent_stats(self) -> None:
+        provider = ReferenceProviderRegistry.get_provider("pytorch")
+        torch.manual_seed(0)
+        scale = 1.0 / (8**0.5)
+        q_t = torch.randn(2, 2, 4, 8, requires_grad=True)
+        k_t = torch.randn(2, 2, 4, 8, requires_grad=True)
+        v_t = torch.randn(2, 2, 4, 8, requires_grad=True)
+        do_t = torch.randn(2, 2, 4, 8)
+        scores = (q_t @ k_t.transpose(-2, -1)) * scale
+        out = torch.softmax(scores, dim=-1) @ v_t
+        lse = torch.logsumexp(scores, dim=-1, keepdim=True)
+        out.backward(do_t)
+
+        graph_json = {
+            "tensors": [
+                {"uid": 10, "dims": [2, 2, 4, 8], "data_type": "float"},
+                {"uid": 11, "dims": [2, 2, 4, 8], "data_type": "float"},
+                {"uid": 12, "dims": [2, 2, 4, 8], "data_type": "float"},
+            ],
+            "nodes": [
+                {
+                    "type": "SdpaBackwardAttributes",
+                    "inputs": {
+                        "q_tensor_uid": 1,
+                        "k_tensor_uid": 2,
+                        "v_tensor_uid": 3,
+                        "o_tensor_uid": 4,
+                        "do_tensor_uid": 5,
+                        "stats_tensor_uid": 6,
+                    },
+                    "outputs": {
+                        "dq_tensor_uid": 10,
+                        "dk_tensor_uid": 11,
+                        "dv_tensor_uid": 12,
+                    },
+                    "attributes": {"attn_scale_value": scale},
+                }
+            ],
+        }
+
+        outputs = provider.compute_reference(
+            graph_json,
+            {
+                1: q_t.detach().numpy(),
+                2: k_t.detach().numpy(),
+                3: v_t.detach().numpy(),
+                4: out.detach().numpy(),
+                5: do_t.numpy(),
+                6: lse.detach().numpy(),
+            },
+        )
+
+        np.testing.assert_allclose(
+            outputs[10].data, q_t.grad.numpy(), rtol=1e-4, atol=1e-4
+        )
+        np.testing.assert_allclose(
+            outputs[11].data, k_t.grad.numpy(), rtol=1e-4, atol=1e-4
+        )
+        np.testing.assert_allclose(
+            outputs[12].data, v_t.grad.numpy(), rtol=1e-4, atol=1e-4
+        )
 
     def test_sdpa_attention_scale_value_matches_torch(self) -> None:
         provider = ReferenceProviderRegistry.get_provider("pytorch")

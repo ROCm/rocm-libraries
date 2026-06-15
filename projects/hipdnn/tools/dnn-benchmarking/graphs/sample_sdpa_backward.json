@@ -1,0 +1,193 @@
+{
+    "name": "sample_sdpa_backward_2x2x8x16",
+    "compute_data_type": "float",
+    "io_data_type": "float",
+    "intermediate_data_type": "float",
+    "tensors": [
+        {
+            "uid": 1,
+            "name": "q",
+            "dims": [
+                2,
+                2,
+                8,
+                16
+            ],
+            "strides": [
+                256,
+                128,
+                16,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 2,
+            "name": "k",
+            "dims": [
+                2,
+                2,
+                8,
+                16
+            ],
+            "strides": [
+                256,
+                128,
+                16,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 3,
+            "name": "v",
+            "dims": [
+                2,
+                2,
+                8,
+                16
+            ],
+            "strides": [
+                256,
+                128,
+                16,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 4,
+            "name": "o",
+            "dims": [
+                2,
+                2,
+                8,
+                16
+            ],
+            "strides": [
+                256,
+                128,
+                16,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 5,
+            "name": "do",
+            "dims": [
+                2,
+                2,
+                8,
+                16
+            ],
+            "strides": [
+                256,
+                128,
+                16,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 6,
+            "name": "stats",
+            "dims": [
+                2,
+                2,
+                8,
+                1
+            ],
+            "strides": [
+                16,
+                8,
+                1,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 7,
+            "name": "dq",
+            "dims": [
+                2,
+                2,
+                8,
+                16
+            ],
+            "strides": [
+                256,
+                128,
+                16,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 8,
+            "name": "dk",
+            "dims": [
+                2,
+                2,
+                8,
+                16
+            ],
+            "strides": [
+                256,
+                128,
+                16,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 9,
+            "name": "dv",
+            "dims": [
+                2,
+                2,
+                8,
+                16
+            ],
+            "strides": [
+                256,
+                128,
+                16,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        }
+    ],
+    "nodes": [
+        {
+            "name": "sdpa_backward_node",
+            "type": "SdpaBackwardAttributes",
+            "compute_data_type": "float",
+            "inputs": {
+                "q_tensor_uid": 1,
+                "k_tensor_uid": 2,
+                "v_tensor_uid": 3,
+                "o_tensor_uid": 4,
+                "do_tensor_uid": 5,
+                "stats_tensor_uid": 6
+            },
+            "outputs": {
+                "dq_tensor_uid": 7,
+                "dk_tensor_uid": 8,
+                "dv_tensor_uid": 9
+            },
+            "attributes": {
+                "attn_scale_value": 0.25
+            }
+        }
+    ]
+}

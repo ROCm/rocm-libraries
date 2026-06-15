@@ -470,6 +470,34 @@ class TestVerboseReporter:
         assert "Profiling:" in out
         assert "PMC (basic, gfx942)" in out
 
+    def test_verbose_metrics_render_na_when_no_analytical_model(self) -> None:
+        """Ops without an analytical FLOPs model must show N/A, not 0."""
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        pe = ProviderEngineResult(
+            provider="miopen",
+            engine_id=1,
+            status="success",
+            analytical_flops=None,
+            analytical_flops_partial=True,
+            analytical_io_bytes=4096,
+            gpu_kernel_stats=BenchmarkStats(
+                mean_ms=0.5,
+                std_ms=0.05,
+                min_ms=0.45,
+                max_ms=0.55,
+                p95_ms=0.52,
+                p99_ms=0.54,
+            ),
+        )
+        gr = GraphResult(graph_name="g", graph_path="/tmp/g.json", results=[pe])
+        reporter.print_verbose_graph_result(gr, SuiteConfig())
+        out = output.getvalue()
+        assert "Derived Metrics:" in out
+        assert "Analytical FLOPs:     N/A (no analytical model)" in out
+        assert "Throughput:           N/A (no analytical model)" in out
+        assert "Analytical FLOPs:     0" not in out
+
     def test_verbose_profiling_surfaces_error_tail_for_each_source(self) -> None:
         """Tool failures in trace/perf/roofline must show in verbose
         output, not only in JSON. Without -o, a silent profiler failure

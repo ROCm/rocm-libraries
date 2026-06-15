@@ -593,11 +593,16 @@ class Reporter:
         if pe.analytical_flops is not None:
             partial = " (partial)" if pe.analytical_flops_partial else ""
             self._print(f"  Analytical FLOPs:     {pe.analytical_flops:,}{partial}")
-        if pe.derived_tflops_per_s is not None:
-            self._print(
-                f"  Throughput:           {pe.derived_tflops_per_s:.3f} TFLOP/s"
-                f"{derivation_suffix}"
-            )
+            if pe.derived_tflops_per_s is not None:
+                self._print(
+                    f"  Throughput:           {pe.derived_tflops_per_s:.3f} TFLOP/s"
+                    f"{derivation_suffix}"
+                )
+        elif pe.analytical_flops_partial:
+            # No node could be modelled analytically — show N/A rather than a
+            # misleading 0 so users know throughput is unavailable, not zero.
+            self._print("  Analytical FLOPs:     N/A (no analytical model)")
+            self._print("  Throughput:           N/A (no analytical model)")
         if pe.analytical_io_bytes is not None:
             self._print(
                 f"  Analytical I/O:       {self._fmt_mib(pe.analytical_io_bytes / 1024 / 1024)}"
