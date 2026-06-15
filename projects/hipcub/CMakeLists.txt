@@ -171,13 +171,6 @@ elseif(CMAKE_CUDA_COMPILER)
   set(CMAKE_CUDA_SOURCE_FILE_EXTENSIONS hip;cu)
 endif()
 
-# Compressed offload binaries are currently not working with the SPIR-V target
-if("amdgcnspirv" IN_LIST GPU_TARGETS)
-  if(BUILD_OFFLOAD_COMPRESS)
-    message(FATAL_ERROR "Cannot combine SPIR-V and BUILD_OFFLOAD_COMPRESS")
-  endif()
-endif()
-
 # Setup the library version
 rocm_setup_version(VERSION ${VERSION_STRING})
 math(EXPR hipcub_VERSION_NUMBER "${hipcub_VERSION_MAJOR} * 100000 + ${hipcub_VERSION_MINOR} * 100 + ${hipcub_VERSION_PATCH}")

@@ -79,6 +79,13 @@ for i in range(1, maxWGsInCluster + 1):
     if i * j <= maxWGsInCluster:
       validClusterDimensions.append([i, j])
 
+# Shared valid values for LdsBlockSizePerPadA and LdsBlockSizePerPadB so they stay in sync.
+validLdsBlockSizePerPad = [-1, 0, 16, 32, 64, 96, 128, 192, 256, 320, 384, 448, 512, 576, 640, 704, 768,
+                           832, 896, 960, 1024, 1088, 1152, 1216, 1280, 1344, 1408, 1472, 1536, 1600, 1664,
+                           1728, 1792, 1856, 1920, 1984, 2048, 2176, 2304, 2432, 2560, 2688, 2816, 2944,
+                           3072, 3200, 3328, 3456, 3584, 3712, 3840, 3968, 4096, 4352, 4608, 4864, 5120,
+                           5376, 5632, 6144, 6656, 7168, 7680, 8192]
+
 @lru_cache
 def makeValidWorkGroups():
     validWorkGroups = []
@@ -892,9 +899,9 @@ validParameters = { # we need to make sure this matches develop
     # is added (readOffset aware of the pad and adjusts offset value based on this parameter value).
     # Only support LdsBlockSizePerPad >= unrollDepth * BPE
     # 0 means disable LdsBlockSizePerPad
-    "LdsBlockSizePerPadA": [-1, 0, 64, 128, 256, 512, 1024, 2048],
+    "LdsBlockSizePerPadA": validLdsBlockSizePerPad,
     "LdsBlockSizePerPadMXSA": [-1, 0, 64, 128, 256, 512, 1024, 2048],
-    "LdsBlockSizePerPadB": [-1, 0, 64, 128, 256, 512, 1024, 2048],
+    "LdsBlockSizePerPadB": validLdsBlockSizePerPad,
     "LdsBlockSizePerPadMXSB": [-1, 0, 64, 128, 256, 512, 1024, 2048],
     "LdsBlockSizePerPadMetadata": [-1, 0, 64, 128, 256, 512, 1024, 2048],
     # Transpose LDS format. Local store in coalesced dimension , same as optimized global fetch dimension . applicable only in TLU=0 case for miSIMD(s)

@@ -184,13 +184,6 @@ else()
   endif()
 endif()
 
-# Compressed offload binaries are currently not working with the SPIR-V target
-if("amdgcnspirv" IN_LIST GPU_TARGETS)
-  if(BUILD_OFFLOAD_COMPRESS)
-    message(FATAL_ERROR "Cannot combine SPIR-V and BUILD_OFFLOAD_COMPRESS")
-  endif()
-endif()
-
 # TODO: Fix VerifyCompiler for HIP on Windows
 if (NOT WIN32)
   include(cmake/VerifyCompiler.cmake)
