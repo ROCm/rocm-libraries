@@ -991,8 +991,9 @@ def getPassedStagesFromBuild(def rawBuild) {
     return passed
 }
 
-// Returns the set of stage names to skip on a "Restart from Stage" build.
-// Empty set means run everything (fail-open on any guard failure).
+// Returns [passedStages: Set<String>, debugMsg: String] for "Restart from Stage" builds.
+// passedStages is empty on failure or when there's nothing to skip (fail-open).
+// debugMsg contains a brief explanation suitable for echo.
 //
 // Guards:
 // 1. Must be a "Restart from Stage" trigger - other triggers don't guarantee
@@ -1004,26 +1005,38 @@ def getPassedStagesFromBuild(def rawBuild) {
 @NonCPS
 def getPassedStagesFromPreviousBuild() {
     def passed = [] as Set
+    def debugMsg = ""
     try {
         // Guard 1: must be a "Restart from Stage" build.
         def restartCause = currentBuild.rawBuild?.getCauses()?.find { cause ->
             cause.getClass().getName().contains('RestartDeclarativePipeline')
         }
-        if (!restartCause) return passed
+        if (!restartCause) {
+            debugMsg = "not a restart build, running all stages"
+            return [passedStages: passed, debugMsg: debugMsg]
+        }
 
         // Guard 2: get the exact build being restarted from the cause object.
         // getOriginal() returns the WorkflowRun that was restarted.
         def prevRun = restartCause.getOriginal()
-        if (!prevRun) return passed
-        if (prevRun.result?.toString() == 'SUCCESS') return passed
+        if (!prevRun) {
+            debugMsg = "could not resolve restarted build, running all stages"
+            return [passedStages: passed, debugMsg: debugMsg]
+        }
+        if (prevRun.result?.toString() == 'SUCCESS') {
+            debugMsg = "previous build was SUCCESS, running all stages"
+            return [passedStages: passed, debugMsg: debugMsg]
+        }
 
         // No commit guard needed: getOriginal() returns the exact build being
         // restarted, so the commit is implicitly the same.
+        debugMsg = "restarting from build #${prevRun.number}"
         passed = getPassedStagesFromBuild(prevRun)
     } catch (Exception e) {
-        return [] as Set
+        debugMsg = "error (${e.message}), running all stages"
+        return [passedStages: [] as Set, debugMsg: debugMsg]
     }
-    return passed
+    return [passedStages: passed, debugMsg: debugMsg]
 }
 
 // ---------------------------------------------------------------------------
@@ -1058,7 +1071,9 @@ def addStageIf(Map stagesMap, boolean condition, String name, Closure body) {
 }
 
 def packageAndStaticCheckStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def withWorkingDirFn) {
-    def passedStages = getPassedStagesFromPreviousBuild()
+    def result = getPassedStagesFromPreviousBuild()
+    def passedStages = result.passedStages
+    echo "Selective rerun: ${result.debugMsg}"
     echo "Selective rerun: passedStages (${passedStages.size()}): ${passedStages}"
     def stages = [:]
 
@@ -1112,7 +1127,9 @@ def packageAndStaticCheckStages(def pipelineParams, def pipelineEnv, def rocmnod
 }
 
 def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def withWorkingDirFn, def runDbSyncJobFn, def runBuildAndSingleGtestJobFn) {
-    def passedStages = getPassedStagesFromPreviousBuild()
+    def result = getPassedStagesFromPreviousBuild()
+    def passedStages = result.passedStages
+    echo "Selective rerun: ${result.debugMsg}"
     echo "Selective rerun: passedStages (${passedStages.size()}): ${passedStages}"
     def stages = [:]
 
@@ -1330,7 +1347,9 @@ def nightlyTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def w
 }
 
 def nonCriticalHWNightlyStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def withWorkingDirFn, def runDbSyncJobFn, def runBuildAndSingleGtestJobFn) {
-    def passedStages = getPassedStagesFromPreviousBuild()
+    def result = getPassedStagesFromPreviousBuild()
+    def passedStages = result.passedStages
+    echo "Selective rerun: ${result.debugMsg}"
     echo "Selective rerun: passedStages (${passedStages.size()}): ${passedStages}"
     def stages = [:]
 
