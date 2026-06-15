@@ -5,82 +5,83 @@
 
 GPU Kernel Timing
 -----------------
-This module provides GPU kernel timing using PyTorch CUDA/ROCm events.
+GPU timings are collected with HIP runtime events exposed by
+``hipdnn_frontend``. This keeps benchmark timing on the same runtime used by
+hipDNN itself and avoids depending on PyTorch's CUDA/ROCm wrappers for event
+creation, event synchronization, or elapsed-time calculation.
 
-Stream Context Issue
---------------------
-PyTorch maintains its own stream management separate from the underlying
-CUDA/HIP runtime. By default, torch.cuda.Event.record() records on
-torch.cuda.current_stream(), which is PyTorch's per-thread managed stream.
-
-However, external libraries like hipDNN execute kernels via the native C API,
-which uses the CUDA/HIP default stream (stream 0), not PyTorch's current stream.
-
-Solution
---------
-TorchGpuTimer explicitly records events on torch.cuda.default_stream(), which
-corresponds to the native CUDA/HIP default stream (stream 0). This ensures we
-correctly capture kernel execution from external libraries.
-
-Verification
-------------
-Testing confirms that torch.cuda.default_stream() captures hipDNN kernel
-execution with <5% difference compared to events recorded after full device
-synchronization, providing accurate pure GPU kernel timing.
+Stream Context
+--------------
+hipDNN handles default to the native HIP default stream. ``HipGpuTimer`` records
+events on the stream pointer provided by the executor, so external-library work
+and timing markers are enqueued in the same HIP stream.
 """
 
 import time
 from abc import ABC, abstractmethod
 from types import TracebackType
-from typing import List, Literal, Optional, Type
+from typing import Any, List, Literal, Optional, Type
+
+import hipdnn_frontend as hipdnn
+
+
+_HIP_EVENT_API = ("HipEvent", "hip_get_device_count")
+
+
+def _validate_hip_event_api() -> None:
+    """Verify hipdnn_frontend provides the HIP event bindings."""
+    missing = [name for name in _HIP_EVENT_API if not hasattr(hipdnn, name)]
+    if missing:
+        joined = ", ".join(missing)
+        raise RuntimeError(f"hipdnn_frontend is missing HIP event bindings: {joined}")
+
+
+def _require_hip_runtime() -> Any:
+    """Return hipdnn_frontend when at least one HIP device is visible."""
+    _validate_hip_event_api()
+    if int(hipdnn.hip_get_device_count()) <= 0:
+        raise RuntimeError("HIP GPU timing not available: no HIP devices are visible")
+    return hipdnn
+
+
+from ..common import torch_support
 
 
 def _is_torch_available() -> bool:
-    """Check if PyTorch GPU support is available.
+    """Backward-compatible alias for PyTorch GPU timing availability."""
+    return torch_support.gpu_available()
 
-    Returns:
-        True if torch.cuda.is_available() returns True, False otherwise.
-    """
+
+def _is_hip_available() -> bool:
+    """Return True when direct HIP timing bindings and a HIP device exist."""
     try:
-        import torch
-
-        return torch.cuda.is_available()
-    except ImportError:
+        _require_hip_runtime()
+        return True
+    except Exception:
         return False
 
 
 def get_available_backends() -> List[str]:
-    """Return list of available GPU timer backends.
-
-    Returns:
-        List of backend names (e.g., ["torch"] or []).
-    """
-    backends = []
-    if _is_torch_available():
-        backends.append("torch")
-    return backends
+    """Return list of available GPU timer backends."""
+    return ["hip"] if _is_hip_available() else []
 
 
 def is_gpu_timing_available() -> bool:
-    """Check if any GPU timing backend is available.
-
-    Returns:
-        True if PyTorch GPU timing is available, False otherwise.
-    """
-    return _is_torch_available()
+    """Check if direct HIP GPU timing is available."""
+    return _is_hip_available()
 
 
 class GpuTimerInterface(ABC):
     """Abstract interface for GPU kernel timing.
 
     Supports context manager protocol for convenient timing blocks,
-    as well as explicit start/stop control for fine-grained timing.
+    as well as explicit start/stop/synchronize control for fine-grained timing.
     """
 
     @property
     @abstractmethod
     def backend_name(self) -> str:
-        """Return the backend name (e.g., 'torch')."""
+        """Return the backend name (e.g., 'hip')."""
         ...
 
     @abstractmethod
@@ -91,6 +92,11 @@ class GpuTimerInterface(ABC):
     @abstractmethod
     def stop(self) -> None:
         """Record the stop timestamp on the GPU stream."""
+        ...
+
+    @abstractmethod
+    def synchronize(self) -> None:
+        """Block until the stop timestamp has completed."""
         ...
 
     @abstractmethod
@@ -116,105 +122,93 @@ class GpuTimerInterface(ABC):
         self.stop()
 
 
-class TorchGpuTimer(GpuTimerInterface):
-    """GPU kernel timing using PyTorch CUDA/ROCm events.
-
-    Uses torch.cuda.Event for timing on supported GPUs (NVIDIA or AMD ROCm).
-
-    Events are recorded on the default stream to capture kernels launched by
-    external libraries (e.g., hipDNN) that execute on the native CUDA/HIP
-    default stream rather than PyTorch's current stream.
-
-    Example:
-        timer = TorchGpuTimer()
-        timer.start()
-        # GPU kernel execution
-        timer.stop()
-        elapsed = timer.elapsed_ms()
-    """
+class HipGpuTimer(GpuTimerInterface):
+    """GPU kernel timing using direct HIP runtime events."""
 
     @property
     def backend_name(self) -> str:
-        """Return 'torch' as the backend name."""
-        return "torch"
+        """Return 'hip' as the backend name."""
+        return "hip"
 
-    def __init__(self) -> None:
-        """Initialize GPU timer with PyTorch events.
+    def __init__(self, stream: int = 0) -> None:
+        """Initialize GPU timer with HIP events.
+
+        Args:
+            stream: HIP stream pointer encoded as an integer. ``0`` is the
+                default stream.
 
         Raises:
-            RuntimeError: If PyTorch GPU is not available.
+            RuntimeError: If HIP event bindings or a HIP device are unavailable.
         """
-        if not _is_torch_available():
-            raise RuntimeError("PyTorch GPU not available for GPU timing")
-
-        import torch
-
-        self._torch = torch
-        self._start_event = torch.cuda.Event(enable_timing=True)
-        self._stop_event = torch.cuda.Event(enable_timing=True)
+        self._hipdnn = _require_hip_runtime()
+        self._stream = int(stream)
+        self._start_event = self._hipdnn.HipEvent()
+        self._stop_event = self._hipdnn.HipEvent()
+        self._recorded_stop_event: Optional[Any] = None
 
     def start(self) -> None:
-        """Record the start event on the default CUDA stream.
+        """Record the start event on the configured HIP stream."""
+        self._start_event.record(self._stream)
+        self._recorded_stop_event = None
 
-        Uses torch.cuda.default_stream() to ensure we capture kernels
-        launched by external libraries (e.g., hipDNN) that use the native
-        CUDA/HIP default stream.
-        """
-        stream = self._torch.cuda.default_stream()
-        self._start_event.record(stream=stream)
+    def _record_stop_event(self) -> None:
+        """Record the stop event on the configured HIP stream."""
+        self._stop_event.record(self._stream)
+        self._recorded_stop_event = self._stop_event
 
     def stop(self) -> None:
-        """Record the stop event on the default CUDA stream.
+        """Record the stop event on the configured HIP stream."""
+        self._record_stop_event()
 
-        Uses torch.cuda.default_stream() to ensure we capture kernels
-        launched by external libraries (e.g., hipDNN) that use the native
-        CUDA/HIP default stream.
-        """
-        stream = self._torch.cuda.default_stream()
-        self._stop_event.record(stream=stream)
+    def synchronize(self) -> None:
+        """Block until the recorded stop event has completed."""
+        if self._recorded_stop_event is None:
+            raise RuntimeError("HIP timer stop event has not been recorded")
+        self._recorded_stop_event.synchronize()
+
+    def synchronize_stream(self) -> None:
+        """Record and wait for an event on the configured HIP stream."""
+        self._record_stop_event()
+        self.synchronize()
 
     def elapsed_ms(self) -> float:
-        """Synchronize and return elapsed time in milliseconds.
-
-        Returns:
-            Elapsed time in milliseconds between start and stop events.
-        """
-        self._stop_event.synchronize()
-        return self._start_event.elapsed_time(self._stop_event)
+        """Synchronize and return elapsed time in milliseconds."""
+        self.synchronize()
+        return float(self._start_event.elapsed_time(self._stop_event))
 
 
 def create_gpu_timer(
-    backend: Optional[Literal["torch", "auto"]] = "auto",
+    backend: Optional[Literal["hip", "auto"]] = "auto",
+    stream: int = 0,
 ) -> Optional[GpuTimerInterface]:
     """Create a GPU timer for the specified or detected backend.
 
     Args:
         backend: Timer backend to use:
-            - "torch": Force PyTorch backend (CUDA or ROCm)
-            - "auto": Auto-detect (uses PyTorch if available)
+            - "hip": Force direct HIP event timing
+            - "auto": Auto-detect direct HIP event timing
+        stream: HIP stream pointer encoded as an integer.
 
     Returns:
-        GpuTimerInterface implementation.
+        GpuTimerInterface implementation, or None when ``auto`` cannot find one.
 
     Raises:
-        RuntimeError: If requested backend is not available.
+        RuntimeError: If a requested backend is not available.
         ValueError: If invalid backend is specified.
     """
     if backend == "auto" or backend is None:
-        if _is_torch_available():
-            return TorchGpuTimer()
+        if _is_hip_available():
+            return HipGpuTimer(stream)
         return None
 
-    if backend == "torch":
-        if not _is_torch_available():
-            raise RuntimeError("PyTorch GPU not available for GPU timing")
-        return TorchGpuTimer()
+    if backend == "hip":
+        return HipGpuTimer(stream)
 
     raise ValueError(f"Unknown backend: {backend}")
 
 
-# Backward compatibility alias
-GpuTimer = TorchGpuTimer
+# Backward compatibility alias.
+GpuTimer = HipGpuTimer
 
 
 class Timer:
