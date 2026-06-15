@@ -444,6 +444,12 @@ struct rocfft_plan_t
     // was set up
     bool BuildMultiDevicePlan();
 
+#ifdef ROCFFT_RCCL_ENABLE
+    // populate the rccl communicator from the description's local devices,
+    // before any plan-building path is chosen.  empty when not applicable
+    void InitRCCLCommunicator();
+#endif
+
     // check log level, log the topologically sorted plan if plan
     // logging is enabled
     void LogSortedPlan(const std::vector<size_t>& sortedIdx) const;

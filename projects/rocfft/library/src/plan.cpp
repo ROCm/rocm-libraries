@@ -3764,6 +3764,36 @@ rocfft_plan_t::field_view_t rocfft_plan_t::field_view_t::get_embedding_view() co
     return field_view_t(embedding_field, buffers, embedding_array_type, precision, group_name);
 }
 
+#ifdef ROCFFT_RCCL_ENABLE
+void rocfft_plan_t::InitRCCLCommunicator()
+{
+    // RCCL path is single-process multi-GPU today: one comm spans the
+    // local devices and the grouped send/recv path uses device ids as
+    // NCCL peer ranks
+    if(desc.inFields.empty() || desc.outFields.empty())
+        return;
+    if(desc.get_local_comm_size() != 1)
+        return;
+
+    const auto local_comm_rank = desc.get_local_comm_rank();
+
+    std::set<int> device_set;
+    for(const auto& brick : desc.inFields.front().bricks)
+    {
+        if(brick.location.comm_rank == local_comm_rank)
+            device_set.insert(brick.location.device);
+    }
+    for(const auto& brick : desc.outFields.front().bricks)
+    {
+        if(brick.location.comm_rank == local_comm_rank)
+            device_set.insert(brick.location.device);
+    }
+
+    if(device_set.size() > 1)
+        rccl = rocfft_rccl_comm_t::create(device_set);
+}
+#endif
+
 bool rocfft_plan_t::BuildOptMultiDevicePlan()
 {
     const auto local_comm_rank = desc.get_local_comm_rank();
@@ -3785,31 +3815,6 @@ bool rocfft_plan_t::BuildOptMultiDevicePlan()
     // input/output Fields must not be empty
     if(desc.inFields.empty() || desc.outFields.empty())
         return false;
-
-#ifdef ROCFFT_RCCL_ENABLE
-    // RCCL path is single-process multi-GPU today: one comm spans the
-    // local devices and the grouped send/recv path uses device ids as
-    // NCCL peer ranks.  Impl::uniqueId (MPI_Bcast) and
-    // CommRCCLGrouped::AddTransfer (peer_rank remap) are the hand-off
-    // points for future multi-node extension.  Until both land, let
-    // GlobalTransposeA2A handle multi-rank plans.
-    if(desc.get_local_comm_size() == 1)
-    {
-        std::set<int> device_set;
-        for(const auto& brick : desc.inFields.front().bricks)
-        {
-            if(brick.location.comm_rank == local_comm_rank)
-                device_set.insert(brick.location.device);
-        }
-        for(const auto& brick : desc.outFields.front().bricks)
-        {
-            if(brick.location.comm_rank == local_comm_rank)
-                device_set.insert(brick.location.device);
-        }
-        if(device_set.size() > 1)
-            rccl = rocfft_rccl_comm_t::create(device_set);
-    }
-#endif
 
     // work out what FFT dimensions are already contiguous in the fields
     std::vector<size_t> contiguousInputDims;
@@ -4819,6 +4824,11 @@ static rocfft_status rocfft_plan_create_internal(rocfft_plan                   p
             transform_type, placement, lengths, dimensions, number_of_transforms);
         if(rcfft != rocfft_status_success)
             return rcfft;
+
+#ifdef ROCFFT_RCCL_ENABLE
+        // init rccl before any plan-building path is chosen
+        plan->InitRCCLCommunicator();
+#endif
 
         log_bench(rocfft_bench_command(plan));
 

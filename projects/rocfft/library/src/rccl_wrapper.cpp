@@ -147,13 +147,13 @@ rocfft_rccl_comm_t rocfft_rccl_comm_t::create(const std::set<int>& devices)
 
         group.end();
     }
-        catch(const rocfft_rccl_exception_t& e)
-        {
-            // swallowed here (fall back to P2P/A2A), so log it - the
-            // general handler never sees it
-            log_trace(__func__, "RCCL communicator setup failed", e.what());
-            return {};
-        }
+    catch(const rocfft_rccl_exception_t& e)
+    {
+        // swallowed here (fall back to P2P/A2A), so log it - the
+        // general handler never sees it
+        log_trace(__func__, "RCCL communicator setup failed", e.what());
+        return {};
+    }
 
     comm_cache[devices] = std::move(new_comm);
 
@@ -282,26 +282,24 @@ void rocfft_rccl_comm_t::alltoall(const std::vector<const void*>& sendbufs,
     // batch all per-device calls in a single RCCL group so they
     // actually launch together (NCCL requires per-device calls
     // inside ncclGroupStart/End for single-process multi-GPU)
+    rocfft_rccl_group_t group;
+
+    for(size_t r = 0; r < nranks; ++r)
     {
-        rocfft_rccl_group_t group;
+        rocfft_scoped_device dev(devices[r]);
 
-        for(size_t r = 0; r < nranks; ++r)
+        ncclResult_t result = ncclAllToAll(
+            sendbufs[r], recvbufs[r], nccl_count, dtype, get_comm(devices[r]), streams[r]);
+
+        if(result != ncclSuccess)
         {
-            rocfft_scoped_device dev(devices[r]);
-
-            ncclResult_t result = ncclAllToAll(
-                sendbufs[r], recvbufs[r], nccl_count, dtype, get_comm(devices[r]), streams[r]);
-
-            if(result != ncclSuccess)
-            {
-                // logged by the general rocfft_handle_exception handler when it propagates
-                throw rocfft_rccl_exception_t(
-                    "ncclAllToAll failed on device " + std::to_string(devices[r]), result);
-            }
+            // logged by the general rocfft_handle_exception handler when it propagates
+            throw rocfft_rccl_exception_t(
+                "ncclAllToAll failed on device " + std::to_string(devices[r]), result);
         }
-
-        group.end();
     }
+
+    group.end();
 }
 
 void rocfft_rccl_comm_t::send(const void*       sendbuf,

@@ -774,50 +774,47 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
 
     // batch all send/recv into one RCCL group; group.end() (ncclGroupEnd)
     // is what enqueues the work, so event recording must happen after it
+    rocfft_rccl_group_t group;
+
+    for(auto& t : transfers)
     {
-        rocfft_rccl_group_t group;
-
-        for(auto& t : transfers)
+        if(t.local_location.comm_rank == local_comm_rank)
         {
-            if(t.local_location.comm_rank == local_comm_rank)
+            rocfft_scoped_device dev(t.local_location.device);
+
+            void* data_ptr = ptr_offset(t.buffer.get(in_buffer, out_buffer, local_comm_rank, info),
+                                        t.offset,
+                                        precision,
+                                        arrayType);
+
+            // endpoints are addressed by device id; the wrapper maps
+            // the peer device to its RCCL rank internally
+            switch(t.op)
             {
-                rocfft_scoped_device dev(t.local_location.device);
-
-                void* data_ptr
-                    = ptr_offset(t.buffer.get(in_buffer, out_buffer, local_comm_rank, info),
-                                 t.offset,
-                                 precision,
-                                 arrayType);
-
-                // endpoints are addressed by device id; the wrapper maps
-                // the peer device to its RCCL rank internally
-                switch(t.op)
-                {
-                case rccl_op::send:
-                    rccl.send(data_ptr,
-                              t.count,
-                              t.peer_location.device,
-                              t.local_location.device,
-                              t.stream,
-                              precision,
-                              arrayType);
-                    break;
-                case rccl_op::recv:
-                    rccl.recv(data_ptr,
-                              t.count,
-                              t.peer_location.device,
-                              t.local_location.device,
-                              t.stream,
-                              precision,
-                              arrayType);
-                    break;
-                }
+            case rccl_op::send:
+                rccl.send(data_ptr,
+                          t.count,
+                          t.peer_location.device,
+                          t.local_location.device,
+                          t.stream,
+                          precision,
+                          arrayType);
+                break;
+            case rccl_op::recv:
+                rccl.recv(data_ptr,
+                          t.count,
+                          t.peer_location.device,
+                          t.local_location.device,
+                          t.stream,
+                          precision,
+                          arrayType);
+                break;
             }
         }
-
-        // close the group explicitly so a launch failure throws before events record
-        group.end();
     }
+
+    // close the group explicitly so a launch failure throws before events record
+    group.end();
 
     // record a completion event per local transfer so Wait() can
     // synchronize on events (matching every other MultiPlanItem)
