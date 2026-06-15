@@ -61,13 +61,45 @@ GPUs through PyTorch SDPA.
 
 ## Building the C++ driver
 
-Configure the integration tests with the harness enabled and build the driver
-target (it lands in the build `bin` directory):
+The driver target (`sdpa_aotriton_ref_driver`) is **off by default**; enable it
+with `-DBUILD_SDPA_AOTRITON_HARNESS=ON` at CMake configure time. It links the
+in-tree `hipdnn_gpu_ref` library plus HIP/HIPRTC, so those dependencies must be
+available.
+
+### Option A — hipDNN superbuild (recommended)
+
+A superbuild from the rocm-libraries root builds hipDNN and the integration
+tests together via `add_subdirectory`, so every dependency (`hipdnn_gpu_ref`,
+`hipdnn_test_sdk`, HIP, HIPRTC) is made available automatically — no install or
+`find_package` step. Use any CMake preset that includes the
+`hipdnn-integration-tests` component (the smallest is the preset of the same
+name) and pass the harness option through on the configure line:
+
+```bash
+# From the rocm-libraries repo root:
+cmake --preset hipdnn-integration-tests -DBUILD_SDPA_AOTRITON_HARNESS=ON
+cmake --build build --target sdpa_aotriton_ref_driver
+# -> build/bin/sdpa_aotriton_ref_driver
+```
+
+`BUILD_SDPA_AOTRITON_HARNESS` is a global CMake cache variable, so setting it on
+the superbuild configure reaches the integration-tests subproject where the
+option is defined. Any larger preset that also pulls in
+`hipdnn-integration-tests` works too (e.g. `hip-kernel-provider`,
+`hipdnn-providers`, `hipdnn-dev-all`) if you want the providers built as well.
+See [`projects/hipdnn/docs/Superbuild.md`](../../../projects/hipdnn/docs/Superbuild.md)
+for the full preset list and superbuild details.
+
+### Option B — standalone integration-tests build
+
+Build just the integration-tests subproject (requires the hipDNN SDK and HIP
+dependencies to be installed / findable via `find_package`):
 
 ```bash
 cmake -S dnn-providers/integration-tests -B build \
       -DBUILD_SDPA_AOTRITON_HARNESS=ON   # plus your usual hipDNN cmake args
 ninja -C build sdpa_aotriton_ref_driver
+# -> build/bin/sdpa_aotriton_ref_driver
 ```
 
 ## Running
