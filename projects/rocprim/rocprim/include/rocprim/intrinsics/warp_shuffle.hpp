@@ -88,6 +88,16 @@ T warp_move_dpp(const T& input)
         input,
         [=](int v) -> int
         {
+#if defined(__has_builtin) && __has_builtin(__builtin_amdgcn_is_invocable)
+            // For the generic 'amdgcnspirv' target the 'dpp' feature is unknown until the SPIR-V is
+            // JIT-compiled for a concrete GPU by comgr, so clang rejects the bare builtin with
+            // "cannot be invoked in the current context, as it requires the 'dpp' feature(s)". Guard it
+            // with a resolved at JIT if(__builtin_amdgcn_is_invocable(...)).
+            if(__builtin_amdgcn_is_invocable(__builtin_amdgcn_mov_dpp))
+                return ::__builtin_amdgcn_mov_dpp(v, dpp_ctrl, row_mask, bank_mask, bound_ctrl);
+            else
+                return v;
+#else
             // TODO: clean-up, this function activates based ROCPRIM_DETAIL_USE_DPP, however inclusion and
             //       parsing of the template happens unconditionally. The condition causing compilation to
             //       fail is ordinary host-compilers looking at the headers. Non-hipcc compilers don't define
@@ -95,6 +105,7 @@ T warp_move_dpp(const T& input)
             //       because even using /permissive- they somehow still do delayed parsing of the body of
             //       function templates, even though they pinky-swear they don't.)
             return ::__builtin_amdgcn_mov_dpp(v, dpp_ctrl, row_mask, bank_mask, bound_ctrl);
+#endif
         });
 }
 
