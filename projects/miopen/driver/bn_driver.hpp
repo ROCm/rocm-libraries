@@ -610,8 +610,8 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::AllocateBuffersAndCop
     {
         status |=
             out.AllocOnDeviceAndInit(q, ctx, GetTensorSize(&out.GetTensor().desc), buffer_check);
-        out_ref =
-            tensor<Tref>{out.GetTensor().desc.GetLayout_t(), out.GetTensor().desc.GetLengths()};
+        out_ref = tensor<Tref>{out.GetTensor().desc.GetLayoutEnum().value(),
+                               out.GetTensor().desc.GetLengths()};
         status |= scale.AllocOnDeviceAndInit(
             q, ctx, GetTensorSize(&scale.GetTensor().desc), buffer_check);
         status |=
@@ -642,16 +642,16 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::AllocateBuffersAndCop
                 q, ctx, GetTensorSize(&prevRunVariance.GetTensor().desc), buffer_check);
         }
 
-        savedMean_ref = tensor<Tref>{savedMean.GetTensor().desc.GetLayout_t(),
+        savedMean_ref = tensor<Tref>{savedMean.GetTensor().desc.GetLayoutEnum().value(),
                                      savedMean.GetTensor().desc.GetLengths()};
 
-        savedVariance_ref = tensor<Tref>{savedVariance.GetTensor().desc.GetLayout_t(),
+        savedVariance_ref = tensor<Tref>{savedVariance.GetTensor().desc.GetLayoutEnum().value(),
                                          savedVariance.GetTensor().desc.GetLengths()};
 
-        runMean_ref = tensor<Tref>{runMean.GetTensor().desc.GetLayout_t(),
+        runMean_ref = tensor<Tref>{runMean.GetTensor().desc.GetLayoutEnum().value(),
                                    runMean.GetTensor().desc.GetLengths()};
 
-        runVariance_ref = tensor<Tref>{runVariance.GetTensor().desc.GetLayout_t(),
+        runVariance_ref = tensor<Tref>{runVariance.GetTensor().desc.GetLayoutEnum().value(),
                                        runVariance.GetTensor().desc.GetLengths()};
     }
     if(isBwd)
@@ -659,7 +659,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::AllocateBuffersAndCop
         status |= out_bwd.AllocOnDeviceAndInit(
             q, ctx, GetTensorSize(&out_bwd.GetTensor().desc), buffer_check);
 
-        out_ref = tensor<Tref>{out_bwd.GetTensor().desc.GetLayout_t(),
+        out_ref = tensor<Tref>{out_bwd.GetTensor().desc.GetLayoutEnum().value(),
                                out_bwd.GetTensor().desc.GetLengths()};
 
         status |= bnScale.AllocOnDeviceAndInit(
@@ -678,11 +678,11 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::AllocateBuffersAndCop
         status |= savedInvVar.AllocOnDeviceAndInit(
             q, ctx, GetTensorSize(&savedInvVar.GetTensor().desc), buffer_check);
 
-        dScale_ref = tensor<Tref>{dScale.GetTensor().desc.GetLayout_t(),
+        dScale_ref = tensor<Tref>{dScale.GetTensor().desc.GetLayoutEnum().value(),
                                   dScale.GetTensor().desc.GetLengths()};
 
-        dBias_ref =
-            tensor<Tref>{dBias.GetTensor().desc.GetLayout_t(), dBias.GetTensor().desc.GetLengths()};
+        dBias_ref = tensor<Tref>{dBias.GetTensor().desc.GetLayoutEnum().value(),
+                                 dBias.GetTensor().desc.GetLengths()};
     }
 
     for(size_t i = 0; i < runMean.GetVector().size(); ++i)

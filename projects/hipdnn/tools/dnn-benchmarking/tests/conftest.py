@@ -5,28 +5,67 @@
 
 import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 import pytest
 
 from dnn_benchmarking.execution.timing import GpuTimerInterface
 
 
-class DummyTorchTimer(GpuTimerInterface):
+def pytest_addoption(parser):
+    parser.addoption(
+        "--profiling-strict",
+        action="store_true",
+        default=False,
+        help=(
+            "run profiling_strict tests that require profiler subprocesses "
+            "to produce real artifacts, not just error/skip diagnostics"
+        ),
+    )
+    parser.addoption(
+        "--dnn-plugin-paths",
+        action="store",
+        default=None,
+        help=(
+            "Comma-separated hipDNN engine plugin directories for GPU tests. "
+            "Each directory must exist and contain at least one .so file."
+        ),
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--profiling-strict"):
+        return
+
+    skip_strict = pytest.mark.skip(
+        reason="profiling_strict tests require --profiling-strict"
+    )
+    for item in items:
+        if "profiling_strict" in item.keywords:
+            item.add_marker(skip_strict)
+
+
+class DummyHipTimer(GpuTimerInterface):
     """Minimal timer implementation for factory tests.
 
     This is a test fixture that can be used to mock GPU timing
     without requiring actual GPU hardware.
     """
 
+    def __init__(self, stream: int = 0) -> None:
+        self.stream = stream
+
     @property
     def backend_name(self) -> str:
-        return "torch"
+        return "hip"
 
     def start(self) -> None:
         pass
 
     def stop(self) -> None:
+        pass
+
+    def synchronize(self) -> None:
         pass
 
     def elapsed_ms(self) -> float:
@@ -146,7 +185,7 @@ def temp_json_file(tmp_path: Path, sample_conv_fwd_json: Dict[str, Any]) -> Path
 
 
 @pytest.fixture
-def skip_if_no_gpu():
+def skip_if_no_gpu(plugin_paths):
     """Skip test if no AMD GPU available."""
     try:
         import torch
@@ -159,17 +198,67 @@ def skip_if_no_gpu():
     try:
         import hipdnn_frontend as hipdnn
 
+        hipdnn.set_engine_plugin_paths(plugin_paths, hipdnn.PluginLoadingMode.ABSOLUTE)
+
         hipdnn.Handle()
     except Exception:
         pytest.skip("No GPU available or hipdnn_frontend not installed")
 
 
-def _find_plugin_path() -> str:
-    """Find the hipDNN engine plugin directory.
+def _valid_plugin_dir(path: Path) -> bool:
+    return path.is_dir() and any(path.glob("*.so"))
 
-    Searches worktree build dir and standard install locations.
-    Returns the path as a string, or None if not found.
+
+def _parse_plugin_paths(raw_paths: str) -> List[Path]:
+    paths = [Path(path.strip()) for path in raw_paths.split(",") if path.strip()]
+    if not paths:
+        raise pytest.UsageError("--dnn-plugin-paths requires at least one path")
+
+    invalid_paths = [path for path in paths if not _valid_plugin_dir(path)]
+    if invalid_paths:
+        formatted_paths = ", ".join(str(path) for path in invalid_paths)
+        raise pytest.UsageError(
+            "--dnn-plugin-paths entries must be directories containing at "
+            f"least one .so file: {formatted_paths}"
+        )
+
+    return paths
+
+
+def _venv_rocm_sdk_plugin_dirs() -> list[Path]:
+    """Return ROCm SDK wheel plugin directories from the active venv only."""
+    import sys
+    import sysconfig
+
+    venv_root = Path(sys.prefix).resolve()
+    dirs: list[Path] = []
+    for key in ("purelib", "platlib"):
+        value = sysconfig.get_path(key)
+        if not value:
+            continue
+        site_dir = Path(value).resolve()
+        if site_dir != venv_root and venv_root not in site_dir.parents:
+            continue
+        if not site_dir.is_dir():
+            continue
+        dirs.extend(
+            child / "lib" / "hipdnn_plugins" / "engines"
+            for child in site_dir.iterdir()
+            if child.is_dir() and child.name.startswith("_rocm_sdk_libraries_")
+        )
+    return dirs
+
+
+def _find_plugin_paths(pytestconfig) -> Optional[List[str]]:
+    """Find hipDNN engine plugin directories.
+
+    Returns explicitly configured plugin paths, then falls back to known build
+    and system install locations. Returns None if no plugin directory is found.
     """
+    configured_paths = pytestconfig.getoption("--dnn-plugin-paths", default=None)
+    if configured_paths:
+        return [str(path) for path in _parse_plugin_paths(configured_paths)]
+
     project_root = Path(__file__).parent.parent
     candidates = [
         # Worktree/superbuild: relative to dnn-benchmarking tool
@@ -180,28 +269,32 @@ def _find_plugin_path() -> str:
         / "lib"
         / "hipdnn_plugins"
         / "engines",
+        *_venv_rocm_sdk_plugin_dirs(),
         # System install
         Path("/opt/rocm/lib/hipdnn_plugins/engines"),
     ]
-    for p in candidates:
-        if p.is_dir() and any(p.glob("*.so")):
-            return str(p)
+    for path in candidates:
+        if _valid_plugin_dir(path):
+            return [str(path)]
     return None
 
 
 @pytest.fixture
-def plugin_path():
-    """Get the hipDNN engine plugin path, or skip if not found."""
-    path = _find_plugin_path()
-    if path is None:
+def plugin_paths(pytestconfig):
+    """Get hipDNN engine plugin paths, or skip if none are found."""
+    paths = _find_plugin_paths(pytestconfig)
+    if paths is None:
         pytest.skip("No hipDNN engine plugin found")
-    return path
+    return paths
 
 
 @pytest.fixture
-def plugin_path_cli_args():
-    """Return CLI args for --plugin-path, or empty list if not needed."""
-    path = _find_plugin_path()
-    if path is None:
-        return []
-    return ["--plugin-path", path]
+def plugin_path(plugin_paths):
+    """Get the first hipDNN engine plugin path, or skip if not found."""
+    return plugin_paths[0]
+
+
+@pytest.fixture
+def plugin_path_cli_args(plugin_paths):
+    """Return CLI args for --plugin-path using the first resolved plugin path."""
+    return ["--plugin-path", plugin_paths[0]]

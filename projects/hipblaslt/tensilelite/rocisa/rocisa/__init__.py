@@ -3,6 +3,17 @@
 
 import sys
 import types
+
+from pathlib import Path as _Path
+
+if any(_Path(__file__).parent.glob("_rocisa.abi3.*")) and sys.version_info < (3, 12):
+    raise ImportError(
+        f"rocisa stable-ABI extension requires Python >= 3.12 "
+        f"(running {sys.version_info.major}.{sys.version_info.minor}). "
+        f"Install a non-stable-ABI build or upgrade Python."
+    )
+del _Path
+
 from ._rocisa import *
 from . import _rocisa
 
@@ -49,3 +60,8 @@ if _bi is not None:
             "  Rebuild:  cmake --build <build_dir> --target _rocisa"
         )
     del _bi, _so, _so_mtime, _stale, _roots, _build_dir, Path
+
+
+def hasStinkyTofuBackend() -> bool:
+    """Return True if rocisa was built with StinkyTofu backend support."""
+    return hasattr(_rocisa, "isSupportedByStinkyTofu")

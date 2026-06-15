@@ -17,28 +17,17 @@ import pytest
 import numpy as np
 
 from gpu_test_helpers import (
-    HAS_HIP,
+    HAS_GFX950,
+    GFX_TARGET,
     TileConfig,
     BPE, WAVESIZE, NUM_THREADS,
-    create_writer,
-    init_rocisa,
     assemble_and_run,
     generate_kernel_asm,
-    generate_load_params,
+    setup_roundtrip_writer,
+    build_roundtrip_inner_asm,
+    alloc_export_vgprs,
+    requires_gpu,
 )
-
-from Tensile.Components.Subtile.SubtileGREmit import (
-    graTileAssignment,
-    globalReadDTLInitCommonSgpr,
-    globalReadDoSubtile,
-)
-from Tensile.Components.Subtile.SubtileLREmit import (
-    lraTileAssignment,
-    localReadDoSubtile,
-)
-from rocisa.code import Module
-from rocisa.container import sgpr
-from rocisa.instruction import SMovB32, SMovB64, SWaitCnt, SBarrier
 
 
 # ---------------------------------------------------------------------------
@@ -68,17 +57,6 @@ CONFIGS = [
 # Assembly generation using production code paths
 # ---------------------------------------------------------------------------
 
-def generate_srd_setup():
-    """Generate SRD buffer descriptor setup for A and B using rocisa instructions."""
-    module = Module("SRD setup")
-    module.add(SMovB64(dst=sgpr("SrdA+0", 2), src=sgpr(4, 2), comment="SrdA base = input_A_ptr"))
-    module.add(SMovB32(dst=sgpr("SrdA+2"), src="0xFFFFFFFF",   comment="SrdA NumRecords = max"))
-    module.add(SMovB32(dst=sgpr("SrdA+3"), src="0x20000",      comment="SrdA OOB_SELECT=2"))
-    module.add(SMovB64(dst=sgpr("SrdB+0", 2), src=sgpr(6, 2), comment="SrdB base = input_B_ptr"))
-    module.add(SMovB32(dst=sgpr("SrdB+2"), src="0xFFFFFFFF",   comment="SrdB NumRecords = max"))
-    module.add(SMovB32(dst=sgpr("SrdB+3"), src="0x20000",      comment="SrdB OOB_SELECT=2"))
-    return module
-
 
 def generate_export_asm(wave_id, tileInfoA, tileInfoB):
     """Generate assembly to export vgprTile registers from a selected wave.
@@ -89,33 +67,7 @@ def generate_export_asm(wave_id, tileInfoA, tileInfoB):
     lines = []
     lines.append(f"  // ---- Wave-gated export (wave {wave_id}) ----")
 
-    # Find a free vgpr range for address computation (need 3: tmp, addr_lo, addr_hi)
-    # Scan all used vgprs to find next free
-    all_tile_vgprs = set()
-    for t in tileInfoA.vgprTiles:
-        for v in t:
-            all_tile_vgprs.add(v)
-    for t in tileInfoB.vgprTiles:
-        for v in t:
-            all_tile_vgprs.add(v)
-
-    # Also need to know the GR/LR offset vgprs
-    for v in tileInfoA.sharedVgprGROffset:
-        all_tile_vgprs.add(v)
-    for v in tileInfoB.sharedVgprGROffset:
-        all_tile_vgprs.add(v)
-    for v in tileInfoA.sharedVgprLROffset:
-        all_tile_vgprs.add(v)
-    for v in tileInfoB.sharedVgprLROffset:
-        all_tile_vgprs.add(v)
-
-    # Find 4 consecutive free vgprs past all used
-    next_v = max(all_tile_vgprs | {0}) + 1
-    tmp = next_v; next_v += 1
-    if next_v % 2 != 0:
-        next_v += 1
-    addr_lo = next_v; next_v += 1
-    addr_hi = next_v; next_v += 1
+    tmp, addr_lo, addr_hi, next_v = alloc_export_vgprs(tileInfoA, tileInfoB)
 
     # Wave masking
     lines.append(f"  v_lshrrev_b32 v{tmp}, 6, v0                // waveId")
@@ -152,104 +104,26 @@ def generate_export_asm(wave_id, tileInfoA, tileInfoB):
 
 def generate_roundtrip_kernel(cfg, wave_id=0):
     """Generate a complete kernel using production GR/LR code paths."""
-    init_rocisa()
-
-    writer, kernel, tileInfoA, tileInfoB = create_writer(cfg)
+    writer, kernel, tileInfoA, tileInfoB, lds_size = setup_roundtrip_writer(cfg)
     print(tileInfoA)
 
-    # Reserve s0-s11 for hardware regs + kernarg loads
-    writer.sgprPool.checkOut(12)
-    writer.sgprs["StrideA0I"] = 10
-    writer.sgprs["StrideB1J"] = 11
-    tileInfoA.allocOffsetRegisters(writer, kernel)
-    tileInfoB.allocOffsetRegisters(writer, kernel)
-
-    # Subtile-specific: SRD descriptors, DTL sgprs, LDS offsets, vgprTile
-    writer.sgprs["SrdA"] = writer.sgprPool.checkOutAligned(4, 4, "SrdA", preventOverflow=False)
-    writer.sgprs["SrdB"] = writer.sgprPool.checkOutAligned(4, 4, "SrdB", preventOverflow=False)
-    writer.sgprs["LocalWriteBaseAddrA"] = writer.sgprPool.checkOut(1, "LocalWriteBaseAddrA", preventOverflow=False)
-    writer.sgprs["LocalWriteDTLOffsetA"] = writer.sgprPool.checkOut(1, "LocalWriteDTLOffsetA", preventOverflow=False)
-    writer.sgprs["LocalWriteBaseAddrB"] = writer.sgprPool.checkOut(1, "LocalWriteBaseAddrB", preventOverflow=False)
-    writer.sgprs["LocalWriteDTLOffsetB"] = writer.sgprPool.checkOut(1, "LocalWriteDTLOffsetB", preventOverflow=False)
-    writer.sgprs["SwapA"] = writer.sgprPool.checkOut(1, "SwapA", preventOverflow=False)
-    writer.sgprs["SwapB"] = writer.sgprPool.checkOut(1, "SwapB", preventOverflow=False)
-
-    # LDS allocation must match production formula (KernelWriter.py):
-    # align A and B sizes to readSize (2*subtileSize) for DTL 2xsubtile reads
-    readSize = 2 * tileInfoA.subtileSize
-    numASubtiles = tileInfoA.globalSubtileGrid[0] * tileInfoA.globalSubtileGrid[1]
-    numBSubtiles = tileInfoB.globalSubtileGrid[0] * tileInfoB.globalSubtileGrid[1]
-    sizeA = ((numASubtiles * tileInfoA.subtileSize + readSize - 1) // readSize) * readSize
-    sizeB = ((numBSubtiles * tileInfoB.subtileSize + readSize - 1) // readSize) * readSize
-    lds_size = sizeA + sizeB
-    writer.ldsTotalSize = lds_size
-
-    tileInfoA.allocVgprTileRegisters(writer, kernel)
-    tileInfoB.allocVgprTileRegisters(writer, kernel)
-
-    # GRA + LRA offset computation
-    gra_module = graTileAssignment(writer, kernel, useSwizzling=True)
-    lra_module = lraTileAssignment(writer, kernel)
-
-    # DTL init (computes LocalWriteBaseAddr from waveId)
-    dtl_module = globalReadDTLInitCommonSgpr(writer, kernel)
-
-    # Global read
-    gr_a_module = globalReadDoSubtile('A', writer, kernel)
-    gr_b_module = globalReadDoSubtile('B', writer, kernel)
-
-    # Wait + Barrier
-    wait_gr = SWaitCnt(dscnt=-1, vlcnt=0, vscnt=-1)
-    barrier = SBarrier()
-
-    # Local read
-    lr_a_module = localReadDoSubtile('A', writer, kernel)
-    lr_b_module = localReadDoSubtile('B', writer, kernel)
-
-    # Wait for LR
-    wait_lr = SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1)
-
-    # Export
     export_asm, _next_v = generate_export_asm(wave_id, tileInfoA, tileInfoB)
-
-    # Load params
-    prologue = generate_load_params([
-        (4, 4, 0x00, "input_A_ptr + input_B_ptr"),
-        (8, 4, 0x10, "output_ptr + strideA + strideB"),
-    ])
-    srd_module = generate_srd_setup()
-
-    # Put everyting together
-    inner_asm = "\n".join([
-        str(prologue),
-        str(srd_module),
-        str(gra_module),
-        str(lra_module),
-        str(dtl_module),
-        str(gr_a_module),
-        str(gr_b_module),
-        str(wait_gr),
-        str(barrier),
-        str(lr_a_module),
-        str(lr_b_module),
-        str(wait_lr),
-        str(export_asm)
-    ])
+    inner_asm = build_roundtrip_inner_asm(writer, kernel, export_asm)
     print(inner_asm)
-    args = (
-        ("input_A_ptr", 8, "global_buffer", "f16"),
-        ("input_B_ptr", 8, "global_buffer", "f16"),
-        ("output_ptr",  8, "global_buffer", "u32"),
-        ("strideA",     4, "by_value",      "u32"),
-        ("strideB",     4, "by_value",      "u32"),
-    )
 
+    args = (
+        ("input_A_ptr", 8, "global_buffer", "f16"),  # s[4:5]
+        ("input_B_ptr", 8, "global_buffer", "f16"),  # s[6:7]
+        ("output_ptr",  8, "global_buffer", "u32"),  # s[8:9]
+        ("strideA",     4, "by_value",      "u32"),  # s10
+        ("strideB",     4, "by_value",      "u32"),  # s11
+    )
     kernel_asm = generate_kernel_asm(inner_asm, writer, args, lds_size)
 
     num_tiles_a = len(tileInfoA.vgprTiles)
     num_tiles_b = len(tileInfoB.vgprTiles)
     total_tiles = num_tiles_a + num_tiles_b
-    output_size = total_tiles * WAVESIZE * 16
+    output_size = total_tiles * WAVESIZE * 16  # 16 bytes (4 vgprs x 4B) per lane per tile
 
     return kernel_asm, writer, kernel, tileInfoA, tileInfoB, output_size, lds_size
 
@@ -349,16 +223,22 @@ def compare_tiles(actual_bytes, expected_tiles, tileInfoA, tileInfoB, wave_id, d
 
 def _build_tile_to_mma(tileInfo):
     """Build map from vgprTile index to (mmaId0, mmaId1).
-    Non-interleaved layout: interleave_factor = 1 for all configs."""
+
+    Uses the same indexing formula as emitMfmaInstructions (Kernel.py):
+      tileId = (sId1 * lrLocalGrid0 + sId0) * numMmaTilePerSubtile + _mmak
+    """
+    lrSubtileShape = tileInfo.lr.subtileShape
+    lrLocalGrid0 = tileInfo.localMMATileGrid[0] // lrSubtileShape[0]
+    numMmaTilePerSubtile = lrSubtileShape[0] * lrSubtileShape[1]
+
     tile_to_mma = {}
-    for linearId, subtile in enumerate(tileInfo.localSubtiles):
-        for mfmaIdx, tileIdx in enumerate(subtile.localReadMap):
-            sId0, sId1 = tileInfo.getLocalSubtileIdFromLinearId(linearId)
-            mfmaR = mfmaIdx % tileInfo.subtileShape[0]
-            mfmaC = mfmaIdx // tileInfo.subtileShape[0]
-            mmaId0 = sId0 * tileInfo.subtileShape[0] + mfmaR
-            mmaId1 = sId1 * tileInfo.subtileShape[1] + mfmaC
-            tile_to_mma[tileIdx] = (mmaId0, mmaId1)
+    for mmak in range(tileInfo.localMMATileGrid[1]):
+        for mma0 in range(tileInfo.localMMATileGrid[0]):
+            sId0 = mma0 // lrSubtileShape[0]
+            sId1 = mmak // lrSubtileShape[1]
+            _mmak = mmak % lrSubtileShape[1]
+            tileId = (sId1 * lrLocalGrid0 + sId0) * numMmaTilePerSubtile + _mmak
+            tile_to_mma[tileId] = (mma0, mmak)
     return tile_to_mma
 
 
@@ -441,7 +321,7 @@ def print_grid_diff(label, actual, expected):
 # Pytest tests
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not HAS_HIP, reason="HIP Python bindings not available")
+@requires_gpu
 class TestGrLrRoundtrip:
 
     @pytest.fixture(params=CONFIGS, ids=lambda c: c.label)
@@ -491,10 +371,6 @@ if __name__ == "__main__":
     parser.add_argument("--config", type=int, default=None,
                         help="Config index to test (default: all)")
     args = parser.parse_args()
-
-    if not HAS_HIP:
-        print("HIP not available - cannot run GPU test")
-        sys.exit(1)
 
     wave_list = [0, 1, 2, 3] if args.wave == "all" else [int(args.wave)]
     config_list = CONFIGS if args.config is None else [CONFIGS[args.config]]
