@@ -1125,7 +1125,7 @@ def packageAndStaticCheckStages(def pipelineParams, def pipelineEnv, def rocmnod
     // Delibrately cause a break with the flaky node and simulate an error for replay.
     def hipPackage = 'HIP Package'
     addStageIf(stages, !passedStages.contains(hipPackage), hipPackage) {
-        node(rocmnodeFn("do_not_use")) {
+        node("do_not_use") {
             try {
                 withWorkingDirFn {
                     buildHipClangJob(package_build: true, needs_gpu: false, gpu_family: "ci")
