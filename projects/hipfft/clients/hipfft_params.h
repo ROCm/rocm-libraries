@@ -1329,12 +1329,12 @@ private:
 
     hipfftResult_t set_jit_callbacks()
     {
-        throw unimplemented_exception("jit callbacks not implemented");
-#if 0
         if(run_callbacks != fft_callback_type_jit)
         {
             return HIPFFT_SUCCESS;
         }
+        throw unimplemented_exception("jit callbacks not implemented");
+#if 0
         hipfftResult_t       ret{HIPFFT_INVALID_PLAN};
         hipfftXtCallbackType cbtype = HIPFFT_CB_UNDEFINED;
         switch(itype)
