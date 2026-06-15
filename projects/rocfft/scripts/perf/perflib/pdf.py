@@ -364,7 +364,7 @@ def make_tex(figs,
 
             asycmd = ["asy", "-f", "pdf", "histogram.asy"]
             asycmd.extend(['-u', 'filename="' + histdatname + '"'])
-            asycmd.extend(['-o', os.path.join(docdir, "histogramsig.pdf")])
+            asycmd.extend(['-o', os.path.join(docdir, "histogramsig")])
 
             asyproc = subprocess.Popen(asycmd,
                                        cwd=top,
@@ -415,7 +415,7 @@ def make_tex(figs,
 
             asycmd = ["asy", "-f", "pdf", "histogram.asy"]
             asycmd.extend(['-u', 'filename="' + allhistdatname + '"'])
-            asycmd.extend(['-o', os.path.join(docdir, "histogramall.pdf")])
+            asycmd.extend(['-o', os.path.join(docdir, "histogramall")])
 
             asyproc = subprocess.Popen(asycmd,
                                        cwd=top,
