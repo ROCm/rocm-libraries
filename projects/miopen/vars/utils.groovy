@@ -50,7 +50,7 @@ def check_host() {
 }
 
 //default
-// CXX=/opt/rocm/llvm/bin/clang++ CXXFLAGS='-Werror' cmake -DMIOPEN_GPU_SYNC=Off -DCMAKE_PREFIX_PATH=/usr/local -DBUILD_DEV=On -DCMAKE_BUILD_TYPE=release ..
+// CXX=/opt/rocm/llvm/bin/clang++ CXXFLAGS='-Werror' cmake -G Ninja -DMIOPEN_GPU_SYNC=Off -DCMAKE_PREFIX_PATH=/usr/local -DBUILD_DEV=On -DCMAKE_BUILD_TYPE=release ..
 //
 def cmake_build(Map conf=[:]){
 
@@ -143,10 +143,10 @@ def cmake_build(Map conf=[:]){
             rm -f src/kernels/miopen*.udb
             cd build
         """
-    def setup_cmd = conf.get("setup_cmd", "${cmake_envs} cmake ${setup_args}   .. ")
+    def setup_cmd = conf.get("setup_cmd", "${cmake_envs} cmake -G Ninja ${setup_args}   .. ")
     // WORKAROUND_SWDEV_290754
     // It seems like this W/A is not required since 4.5.
-    def build_cmd = conf.get("build_cmd", "LLVM_PATH=/opt/rocm/llvm ${build_envs} dumb-init make -j\$(nproc) ${make_targets}")
+    def build_cmd = conf.get("build_cmd", "LLVM_PATH=/opt/rocm/llvm ${build_envs} dumb-init ninja -j\$(nproc) ${make_targets}")
     def execute_cmd = conf.get("execute_cmd", "")
 
     def cmd = conf.get("cmd", """
@@ -1081,7 +1081,7 @@ def packageAndStaticCheckStages(def pipelineParams, def pipelineEnv, def rocmnod
             try {
                 withWorkingDirFn {
                     def hipNoGpuFlags = "-DMIOPEN_BACKEND=HIPNOGPU -DMIOPEN_INSTALL_CXX_HEADERS=On"
-                    def buildCmd = "make -j\$(nproc)"
+                    def buildCmd = "ninja -j\$(nproc)"
                     buildHipClangJob(build_type: 'debug', setup_flags: hipNoGpuFlags, build_cmd: buildCmd, needs_gpu: false, gpu_family: "ci")
                 }
             } finally { cleanWs() }
@@ -1133,7 +1133,7 @@ def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def with
             try {
                 withWorkingDirFn {
                     def setupCmd = "CXX='/opt/rocm/llvm/bin/clang++' cmake -DCMAKE_PREFIX_PATH=/opt/rocm -DMIOPEN_BACKEND=HIP -DBUILD_DEV=On .. "
-                    def buildCmd = "make -j\$(nproc) -k analyze"
+                    def buildCmd = "ninja -j\$(nproc) -k 0 analyze"
                     buildHipClangJob(setup_cmd: setupCmd, build_cmd: buildCmd, needs_gpu: false, gpu_family: "ci")
                 }
             } finally { cleanWs() }
@@ -1244,7 +1244,7 @@ def nightlyTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def w
         node(rocmnodeFn("gfx90a")) {
             try {
                 withWorkingDirFn {
-                    def nomlirBuildCmd = "CTEST_PARALLEL_LEVEL=4 MIOPEN_LOG_LEVEL=5 make -j\$(nproc) check"
+                    def nomlirBuildCmd = "CTEST_PARALLEL_LEVEL=4 MIOPEN_LOG_LEVEL=5 ninja -j\$(nproc) check"
                     buildHipClangJob(build_type: 'debug', setup_flags: NOMLIR_flags + gfx90a_flags, build_cmd: nomlirBuildCmd, test_flags: ' --verbose ', build_install: true, gpu_family: "ci")
                 }
             } finally { cleanWs() }
