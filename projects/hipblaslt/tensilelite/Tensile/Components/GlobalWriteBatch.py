@@ -968,9 +968,6 @@ class GlobalWriteBatchWriter:
       self._emitNonatomicAdd(module)
 
   def _emitGateCvt(self, dataGate, gateDtype):
-    """Expand the loaded native gate value to f32 in dataGate, in-place.
-    Iterates high->low so writing dataGate[vi] (f32) never clobbers a packed
-    source dword still needed by a lower, unconverted element."""
     cvtMod = Module("GateCvt_%s" % gateDtype.toNameAbbrev())
     if gateDtype.isSingle():
       pass
@@ -1013,16 +1010,18 @@ class GlobalWriteBatchWriter:
           cvtMod.add(VAShiftRightI32(dst=vgpr(dst), shiftHex=24, src=vgpr(dataGate + vi // 4),
             comment="GateCvt[i8]: int8(byte3) -> int32 (vi=%d)"%vi))
         cvtMod.add(VCvtI32toF32(dst=vgpr(dst), src=vgpr(dst), comment="GateCvt[i8]: int32 -> f32 (vi=%d)"%vi))
+    elif gateDtype.isInt32():
+      # int32 = 1 value/dword; cvt in place to f32.
+      for vi in range(self.gwvw - 1, -1, -1):
+        cvtMod.add(VCvtI32toF32(dst=vgpr(dataGate + vi), src=vgpr(dataGate + vi),
+          comment="GateCvt[i32]: int32 -> f32 (vi=%d)"%vi))
     else:
       raise RuntimeError(
           "GateResidual: unsupported gate dtype %s" % str(gateDtype))
     return cvtMod
 
   def _emitHoistedGateLoadPhase(self, module: Module, bufferOOB):
-    """opt path: emit the gate prolog load wrapped in ONE null-gate skip branch (and,
-    for multi-dtype, a single GateType dispatch). Valid only on optSingleColVgpr where
-    gate uses its own shared-col base + compile-time immediate offsets (element-state-
-    free), so single AND multi dtype both collapse to one branch instead of per-element."""
+    """opt path: emit the gate prolog load wrapped in ONE null-gate skip branch."""
     if not (self.parentWriter.states.useGateResidual and
             (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1)):
       return
@@ -1080,10 +1079,8 @@ class GlobalWriteBatchWriter:
     self.parentWriter.states.bpeGate = savedBpe
 
   def _emitGateCvtAllPhase(self, module: Module):
-    """Multi-dtype Gate: convert ALL loaded gate values to f32 in ONE GateType
-    dispatch (branch-once), before the per-element store loop. The per-element
-    loop then needs only the dtype-free FMA. Single-dtype keeps its cvt inline
-    at the FMA site (no dispatch, preserves per-element waitcnt overlap)."""
+    """Multi-dtype Gate: convert ALL loaded gate values to f32 in one GateType
+    dispatch."""
     if not (self.parentWriter.states.useGateResidual and
             (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1)):
       return
@@ -1431,8 +1428,8 @@ class GlobalWriteBatchWriter:
             # Default fallback: use DestDataType as the gate dtype.
             gateList = [self.kernel["ProblemType"]["DestDataType"]]
 
-          def _emit_gate_fma_uniform():
-            """Dtype-free FMA on the f32 gate value: ValuC = gate*ValuC + gate."""
+          def _emit_gate_fma():
+            """ValuC = gate*ValuC + gate."""
             fmaMod = Module("GateFMA")
             for vi in range(0, self.gwvw):
               sumIdxV = self.ss.elementSumIdx[elementIdx] + vi
@@ -1461,9 +1458,9 @@ class GlobalWriteBatchWriter:
               gateModule.add(SCBranchSCC1(_gateSkipLabel.getLabelName(), "skip gate if disabled (null gate)"))
             if len(gateList) == 1:
               gateModule.add(self._emitGateCvt(dataGate, gateList[0]))
-              gateModule.add(_emit_gate_fma_uniform())
+              gateModule.add(_emit_gate_fma())
             else:
-              gateModule.add(_emit_gate_fma_uniform())
+              gateModule.add(_emit_gate_fma())
             if _gateSkipLabel is not None:
               gateModule.add(_gateSkipLabel)
 

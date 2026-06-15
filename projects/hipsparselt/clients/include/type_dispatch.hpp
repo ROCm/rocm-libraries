@@ -200,6 +200,8 @@ auto hipsparselt_spmm_dispatch(const Arguments& arg)
                 return TEST<int8_t, int32_t, int32_t, float, float>{}(arg);
             case HIP_R_8I:
                 return TEST<int8_t, int32_t, int32_t, float, int8_t>{}(arg);
+            case HIP_R_32I:
+                return TEST<int8_t, int32_t, int32_t, float, int32_t>{}(arg);
             default:
                 break;
             }
