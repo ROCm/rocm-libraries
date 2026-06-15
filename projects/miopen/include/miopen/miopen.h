@@ -14,18 +14,7 @@
 #include <miopen/config.h>
 #include <miopen/export.h>
 
-#if MIOPEN_BACKEND_OPENCL
-#define CL_TARGET_OPENCL_VERSION 120
-#if defined(__APPLE__) || defined(__MACOSX)
-#include <OpenCL/cl.h>
-#else
-#define CL_USE_DEPRECATED_OPENCL_1_2_APIS
-#include <CL/cl.h>
-#endif
-
-#elif MIOPEN_BACKEND_HIP
 #include <hip/hip_runtime_api.h>
-#endif
 
 /*
  * @defgroup convolutions
@@ -64,11 +53,7 @@
 extern "C" {
 #endif
 
-#if MIOPEN_BACKEND_OPENCL
-typedef cl_command_queue miopenAcceleratorQueue_t;
-#elif MIOPEN_BACKEND_HIP
 typedef hipStream_t miopenAcceleratorQueue_t;
-#endif
 
 /*! @ingroup handle
  * @brief Creates the miopenHandle_t type
