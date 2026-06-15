@@ -152,8 +152,13 @@ class GlobalWriteBatchWriter:
     # only safe when bypassValuC=True, i.e. every epilogue path resolves ValuC through
     # _valuCVgpr/_storeSumIdx and never reads the raw "ValuC+N" staging register.
     self.valuCSourceMap = {} if useDirectVgprAcc or (valuCOverflows and bypassValuC) else None
-    self.valuCSkipMoves = bypassValuC  # omit v_mov only when all epilogue paths are bypass-safe
-    self.valuCSpareOffsets = [] if self.valuCSourceMap is not None and self.valuCSkipMoves else None
+    # Omit the acc→ValuC v_mov only when (a) the config allows bypass and (b) a source
+    # map exists to redirect epilogue reads to the physical VGPR. Tying the two together
+    # guarantees valuCSkipMoves can never be True while valuCSourceMap is None, which
+    # would otherwise crash the spare-offset / direct-read bookkeeping in the AccVgpr
+    # read loop (writes to valuCSourceMap / valuCSpareOffsets).
+    self.valuCSkipMoves = bypassValuC and self.valuCSourceMap is not None
+    self.valuCSpareOffsets = [] if self.valuCSkipMoves else None
     self.valuCDirectReadBypassed = False
 
     # Stateful tracking for N-group OOB guard deduplication (_emitSubtileOobGuard).

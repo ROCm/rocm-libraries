@@ -1864,7 +1864,11 @@ class StreamK(Component):
             if fixupValuCSourceMap:
                 physVgpr = fixupValuCSourceMap.get(relOffset)
                 if physVgpr is not None:
-                    return vgpr("ValuC+%u" % (physVgpr - writer.states.c.startVgprValu), width)
+                    # physVgpr is an absolute VGPR index; reference it directly rather
+                    # than reconstructing a "ValuC+N" symbolic offset (which only
+                    # resolves correctly when vgprValuC==startVgprValu and physVgpr>=
+                    # startVgprValu, and breaks otherwise). Matches GWB._valuCVgpr.
+                    return vgpr(physVgpr, width)
             return vgpr("ValuC+%u" % relOffset, width)
 
         loadsIssued = 0
