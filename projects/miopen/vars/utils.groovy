@@ -1128,6 +1128,9 @@ def packageAndStaticCheckStages(def pipelineParams, def pipelineEnv, def rocmnod
         node(rocmnodeFn("nogpu")) {
             try {
                 withWorkingDirFn {
+                    // TEST SIMULATION: Deliberately fail this stage to test selective rerun logic
+                    // Remove the next 2 lines to disable this test
+                    sh 'echo "TEST SIMULATION: Failing HIP Package stage to test selective rerun" && exit 1'
                     buildHipClangJob(package_build: true, needs_gpu: false, gpu_family: "ci")
                 }
             } finally { cleanWs() }

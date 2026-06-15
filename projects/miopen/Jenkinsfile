@@ -159,14 +159,6 @@ def runBuildAndSingleGtestJob(Map conf=[:])
     def build_timeout_minutes = (conf.get('build_timeout_minutes', 420) as Integer)
     def gpu_family = conf.get('gpu_family', null)
 
-    // TEST SIMULATION: Deliberately fail rocminfo step to test selective rerun logic
-    // This simulates what happens when rocminfo can't find GPUs (e.g., no hardware available)
-    // Remove the next 3 lines to disable this test
-    sh '''
-        echo "TEST SIMULATION: Simulating rocminfo failure..."
-        rocminfo | grep -q "gfx" || (echo "SIMULATED: GPU not found (this is intentional for testing)" && exit 42)
-    '''
-
     // catchError marks the stage/build FAILED on test failure but does not re-throw,
     // so the junit step below always runs and cleanWs() in the outer finally is not
     // disrupted by a propagating exception.
