@@ -3435,7 +3435,7 @@ Tests:
 - name: matmul_batch_offset_large
   category: nightly
   function: matmul_batch_offset
-  precision: *real_precisions
+  precision: [*hpa_half_precision, *hpa_bf16_precision]
   transA: N
   transB: N
   M: 1024
@@ -3447,10 +3447,10 @@ Tests:
   ldd: 1024
   batch_mode: 1
   batch_count: 4
-  batch_offset_a: 4096
-  batch_offset_b: 2048
-  batch_offset_c: [4096, 1000000]
-  batch_offset_d: [4096, 500000]
+  batch_offset_a: 4294967296
+  batch_offset_b: 4294967297
+  batch_offset_c: 4294967298
+  batch_offset_d: 4097
   alpha: 1.0
   beta: 1.0
   unit_check: 1
