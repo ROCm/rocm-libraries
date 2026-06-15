@@ -74,20 +74,18 @@ fi
 # Step 2: Generate dependency map (always, for the as-if selection)
 echo ""
 echo "Step 2: Generating dependency map..."
-# Drop any stale depmap first: cmake-parse failures are non-fatal (|| echo below),
-# so a leftover file from a prior run would pass the -f check and silently reuse
-# stale data instead of falling back to full.
-rm -f enhanced_dependency_mapping.json
-python3 "${SCRIPT_DIR}/main.py" cmake-parse \
+# Key the decision off cmake-parse's EXIT CODE, not file existence: a non-zero
+# exit means the depmap could not be (re)generated, so fall back to full. Because
+# success is never inferred from "a file is present", a leftover
+# enhanced_dependency_mapping.json from a prior run on a reused build dir can never
+# be mistaken for a fresh one - there is no stale-reuse window to guard against.
+if ! python3 "${SCRIPT_DIR}/main.py" cmake-parse \
     compile_commands.json \
     build.ninja \
     --workspace-root "${WORKSPACE_ROOT}" \
     --parallel ${PARALLEL} \
-    --output enhanced_dependency_mapping.json \
-    || echo "WARNING: cmake-parse failed - as-if selection unavailable, will fall back to full"
-
-if [ ! -f "enhanced_dependency_mapping.json" ]; then
-    echo "Depmap unavailable - full build"
+    --output enhanced_dependency_mapping.json; then
+    echo "cmake-parse failed - full build"
     echo "full" > build_targets.txt
     echo "SMART_BUILD_MODE=full" > build_mode.env
     exit 1
@@ -113,16 +111,16 @@ fi
 # Step 3: Select affected tests (the as-if selection)
 echo ""
 echo "Step 3: Selecting affected tests..."
-python3 "${SCRIPT_DIR}/main.py" select \
+# Same exit-code contract as cmake-parse above: a non-zero select exit -> full, so
+# a leftover tests_to_run.json from a prior run is never reused. (A present-but-
+# malformed file written on a zero exit is still caught by the jq guard below.)
+if ! python3 "${SCRIPT_DIR}/main.py" select \
     enhanced_dependency_mapping.json \
     origin/${BASE_BRANCH} \
     HEAD \
     --ctest-only \
-    --output tests_to_run.json \
-    || echo "WARNING: select failed - will fall back to full"
-
-if [ ! -f "tests_to_run.json" ]; then
-    echo "Selection unavailable - full build"
+    --output tests_to_run.json; then
+    echo "select failed - full build"
     echo "full" > build_targets.txt
     echo "SMART_BUILD_MODE=full" > build_mode.env
     exit 1
