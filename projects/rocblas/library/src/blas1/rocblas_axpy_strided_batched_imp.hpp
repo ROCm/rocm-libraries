@@ -161,19 +161,20 @@ namespace
                 return axpy_check_numerics_status;
         }
 
-        rocblas_status status = ROCBLAS_API(rocblas_internal_axpy_template)(handle,
-                                                                            n,
-                                                                            alpha,
-                                                                            handle->get_stride_alpha(),
-                                                                            x,
-                                                                            offset_0,
-                                                                            incx,
-                                                                            stridex,
-                                                                            y,
-                                                                            offset_0,
-                                                                            incy,
-                                                                            stridey,
-                                                                            batch_count);
+        rocblas_status status
+            = ROCBLAS_API(rocblas_internal_axpy_template)(handle,
+                                                          n,
+                                                          alpha,
+                                                          handle->get_stride_alpha(),
+                                                          x,
+                                                          offset_0,
+                                                          incx,
+                                                          stridex,
+                                                          y,
+                                                          offset_0,
+                                                          incy,
+                                                          stridey,
+                                                          batch_count);
         if(status != rocblas_status_success)
             return status;
 

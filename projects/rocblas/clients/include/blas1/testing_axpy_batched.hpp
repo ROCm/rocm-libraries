@@ -284,7 +284,8 @@ void testing_axpy_batched(const Arguments& arg)
         if(arg.norm_check)
         {
             if(!ab_striding)
-                rocblas_error_1 = norm_check_general<T>('I', 1, N, incy, hy_gold, hy_1, batch_count);
+                rocblas_error_1
+                    = norm_check_general<T>('I', 1, N, incy, hy_gold, hy_1, batch_count);
             rocblas_error_2 = norm_check_general<T>('I', 1, N, incy, hy_gold, hy_2, batch_count);
         }
     }

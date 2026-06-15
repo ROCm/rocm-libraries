@@ -306,9 +306,9 @@ Tests:
     incx_incy: *incx_incy_range_small
     alpha_beta: *alpha_beta_range
     batch_count: [ 3 ]
-    stride_scale: [ 2 ] # for strided_batched x/y stride (avoids batch overlap)
+    stride_scale: [ 2 ] # for strided_batched x/y stride
     alpha_beta_stride: true
-    stride_c: [ 1, 2 ] # alpha stride (1 gives per-batch alternating sign divergence)
+    stride_c: [ 1, 2 ] # alpha stride
     pointer_mode_host: false
     function:
       - axpy_batched: *half_single_precisions_complex_real
@@ -320,9 +320,9 @@ Tests:
     incx_incy: *incx_incy_range_small
     alpha_beta: *alpha_beta_range
     batch_count: [ 3 ]
-    stride_scale: [ 2 ] # for strided_batched x/y stride (avoids batch overlap)
+    stride_scale: [ 2 ] # for strided_batched x/y stride
     alpha_beta_stride: true
-    stride_c: [ 1, 2 ] # alpha stride (1 gives per-batch alternating sign divergence)
+    stride_c: [ 1, 2 ] # alpha stride
     pointer_mode_host: false
     function:
       - axpy_batched_ex: *bfloat_half_single_double_complex_real_precisions

@@ -7,7 +7,7 @@ rocBLAS documentation is available at
 
 ### Added
 
-* Per-batch alpha (scalar vector) API support for `axpy_batched`, `axpy_strided_batched`, and their `_ex` forms through `rocblas_set_batch_alpha_stride` in `rocblas_pointer_mode_device`.
+* Per-batch alpha (scalar vector) API support for `axpy_batched`, `axpy_strided_batched`, and their `_ex` forms through `rocblas_set_batch_alpha_stride` when `rocblas_handle` is in `rocblas_pointer_mode_device`.
 
 ## rocBLAS 5.4.0
 
