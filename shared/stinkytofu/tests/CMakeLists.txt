@@ -82,6 +82,7 @@ set(UNIT_CORE_TEST_FILES
     unit/core/AnalysisManagerTest.cpp
     unit/core/BackendRegistryTest.cpp
     unit/core/ComgrProbeTest.cpp
+    unit/core/PassBuilderTest.cpp
 )
 
 # Common/Shared Tests
@@ -107,6 +108,27 @@ target_link_libraries(unit_tests PRIVATE stinkytofu-warnings)
 target_link_libraries(unit_tests PUBLIC ${TEST_LINK_LIBS})
 target_include_directories(unit_tests PRIVATE ${TEST_INCLUDE_DIRS})
 add_dependencies(unit_tests tablegen_generated)
+
+# Example-plugin tests are gated by STINKYTOFU_BUILD_EXAMPLES: the plugin target
+# only exists when examples are built, so the integration test compiles only then.
+# Future example tests slot in under this same flag.
+if(STINKYTOFU_BUILD_EXAMPLES)
+    target_compile_definitions(unit_tests PRIVATE STINKYTOFU_BUILD_EXAMPLES)
+    target_include_directories(unit_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../examples/plugins
+    )
+    # LLVM-style plugin test linkage:
+    #   Shared build  → plugin is a MODULE; test loads it via loadPlugin() at runtime
+    #   Static build  → plugin is an OBJECT lib; link directly into the test binary
+    if(BUILD_SHARED_LIBS)
+        add_dependencies(unit_tests stinkytofu-plugin-helloworld)
+        target_compile_definitions(unit_tests PRIVATE
+            STINKYTOFU_PLUGIN_HELLOWORLD_PATH="$<TARGET_FILE:stinkytofu-plugin-helloworld>"
+        )
+    else()
+        target_link_libraries(unit_tests PRIVATE stinkytofu-plugin-helloworld)
+    endif()
+endif()
 
 gtest_discover_tests(unit_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
