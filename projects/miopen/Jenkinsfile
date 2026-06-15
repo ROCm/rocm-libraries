@@ -137,6 +137,32 @@ def ensureUtils() {
     }
 }
 
+// Posts GitHub status in post section. Handles both normal case (utils already
+// loaded) and edge case (restart from very early, utils not loaded). Only
+// allocates one node total.
+def postGithubStatus(String context, String state, String description, Closure extraActions = null) {
+    if (utils == null) {
+        // Edge case: utils not loaded (restart from very early). Load utils and
+        // post status in the same node to avoid allocating two nodes.
+        node(rocmnode("nogpu")) {
+            withWorkingDir {
+                utils.setGithubStatus(context, state, description)
+                if (extraActions) {
+                    extraActions()
+                }
+            }
+        }
+    } else {
+        // Normal case: utils already loaded. Just need node context for sh step.
+        node {
+            utils.setGithubStatus(context, state, description)
+            if (extraActions) {
+                extraActions()
+            }
+        }
+    }
+}
+
 def runDbSyncJob(def flags, def gpu_family)
 {
     script {
@@ -482,19 +508,12 @@ pipeline {
     post {
         success {
             script {
-                // Ensure utils is loaded (only allocates node if needed, e.g., on early restart failure)
-                ensureUtils()
-                node {
-                    utils.setGithubStatus('Math CI Summary', 'success', 'All checks have passed')
-                }
+                postGithubStatus('Math CI Summary', 'success', 'All checks have passed')
             }
         }
         failure {
             script {
-                // Ensure utils is loaded (only allocates node if needed, e.g., on early restart failure)
-                ensureUtils()
-                node {
-                    utils.setGithubStatus('Math CI Summary', 'failure', 'Some checks have failed')
+                postGithubStatus('Math CI Summary', 'failure', 'Some checks have failed') {
                     utils.sendTeamsFailureNotification(buildTheRock: params.BUILD_THEROCK_DOCKER)
                 }
             }
