@@ -218,6 +218,15 @@ if( ROCFFT_MPI_ENABLE )
   include_directories(SYSTEM ${MPI_INCLUDE_PATH})
 endif()
 
+# Internal (library-side) unit tests that link rocFFT object libraries
+# directly, to test non-exported functionality.  enable_testing() must
+# be called here (an ancestor of library/src) so ctest can discover
+# tests registered under library/src.
+option( ROCFFT_BUILD_INTERNAL_TESTS "Build internal (library-side) unit tests" OFF )
+if( ROCFFT_BUILD_INTERNAL_TESTS )
+  enable_testing()
+endif()
+
 add_subdirectory( library )
 
 include( clients/cmake/build-options.cmake )
