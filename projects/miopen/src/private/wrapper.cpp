@@ -27,6 +27,17 @@
 // exercised through the wrapper that Phase 2 will extend with per-op routing.
 // MIOPEN_HIPDNN_FORWARDING_TIMING=1 prints cold-start (first hipdnnCreate)
 // and warm-start (subsequent) latency to stderr for the AC2 benchmark.
+//
+// ALMIOPEN-1965 AC3 (stretch): when MIOPEN_HIPDNN_FORWARDING_CONV=enabled
+// (and MIOPEN_HIPDNN_FORWARDING=enabled so a paired handle exists),
+// miopenConvolutionForward builds an equivalent hipDNN backend convolution
+// graph directly (no frontend dependency — same cuDNN-style descriptor API
+// the handle path already uses) and executes it through the paired hipDNN
+// handle instead of MIOpen. The finalized execution plan is cached per
+// problem shape so only hipdnnBackendExecute is on the per-call hot path;
+// MIOPEN_HIPDNN_FORWARDING_TIMING=1 then prints conv plan-build (cold) and
+// per-call execute latency. Any build/execute failure falls back to the
+// MIOpen implementation, so correctness is never worse than MIOpen-only.
 
 #include <miopen/miopen.h>
 
@@ -35,11 +46,14 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
+#include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 extern "C" const char* miopenGetErrorString_impl(miopenStatus_t error);
 extern "C" miopenStatus_t miopenGetVersion_impl(size_t* major, size_t* minor, size_t* patch);
@@ -2045,6 +2059,373 @@ inline void log_meminfo(const char* tag) {
 // clang-format on
 
 // clang-format off
+// ---- ALMIOPEN-1965 AC3: backend-direct hipDNN convolution forwarding ----
+// Every `{` below stays on its signature/keyword line (or is indented) so the
+// investigation_q4_stub_count CTest, which counts a `{` alone on column 0,
+// keeps seeing exactly one match per public stub. This block builds an
+// equivalent hipDNN backend convolution graph by hand (the same cuDNN-style
+// descriptor API the handle path already uses — no frontend dependency),
+// caches the finalized execution plan per problem shape, and executes it
+// through the paired hipDNN handle. Any failure returns a non-success status
+// so miopenConvolutionForward falls back to the MIOpen implementation.
+namespace { // keep `{` on this line
+
+constexpr int64_t kConvUidX = 1;
+constexpr int64_t kConvUidW = 2;
+constexpr int64_t kConvUidY = 3;
+
+inline bool hipdnn_conv_forwarding_enabled() {
+    static const bool enabled = [] {
+        const char* v = std::getenv("MIOPEN_HIPDNN_FORWARDING_CONV");
+        return v != nullptr && std::string_view{v} == std::string_view{"enabled"};
+    }();
+    return enabled;
+}
+
+inline bool to_hipdnn_dtype(miopenDataType_t t, hipdnnDataType_t& out) {
+    switch(t) {
+    case miopenHalf: out = HIPDNN_DATA_HALF; return true;
+    case miopenFloat: out = HIPDNN_DATA_FLOAT; return true;
+    case miopenInt32: out = HIPDNN_DATA_INT32; return true;
+    case miopenInt8: out = HIPDNN_DATA_INT8; return true;
+    case miopenBFloat16: out = HIPDNN_DATA_BFLOAT16; return true;
+    case miopenDouble: out = HIPDNN_DATA_DOUBLE; return true;
+    case miopenInt64: out = HIPDNN_DATA_INT64; return true;
+    case miopenFloat8_fnuz: out = HIPDNN_DATA_FP8_E4M3_FNUZ; return true;
+    case miopenBFloat8_fnuz: out = HIPDNN_DATA_FP8_E5M2_FNUZ; return true;
+    default: return false;
+    }
+}
+
+// Read a MIOpen tensor descriptor into int64 dims/strides + a hipDNN dtype.
+// Strides are passed straight through, so NCHW vs NHWC is handled implicitly.
+inline bool read_tensor(miopenTensorDescriptor_t d,
+                        std::vector<int64_t>& dims,
+                        std::vector<int64_t>& strides,
+                        hipdnnDataType_t& dtype,
+                        miopenDataType_t& mtype) {
+    int n = 0;
+    if(miopenGetTensorDescriptorSize_impl(d, &n) != miopenStatusSuccess || n <= 0)
+        return false;
+    std::vector<int> idims(static_cast<size_t>(n));
+    std::vector<int> istrides(static_cast<size_t>(n));
+    if(miopenGetTensorDescriptor_impl(d, &mtype, idims.data(), istrides.data()) != miopenStatusSuccess)
+        return false;
+    if(!to_hipdnn_dtype(mtype, dtype))
+        return false;
+    dims.assign(idims.begin(), idims.end());
+    strides.assign(istrides.begin(), istrides.end());
+    return true;
+}
+
+// The graph models y = conv(x, w) only (alpha=1, beta=0). Anything else falls
+// back so we never silently drop the caller's requested scaling.
+inline bool scaling_is_identity(const void* alpha, const void* beta, miopenDataType_t t) {
+    auto val = [&](const void* p, double dflt) -> double {
+        if(p == nullptr)
+            return dflt;
+        if(t == miopenDouble)
+            return *static_cast<const double*>(p);
+        return static_cast<double>(*static_cast<const float*>(p));
+    };
+    return val(alpha, 1.0) == 1.0 && val(beta, 0.0) == 0.0;
+}
+
+struct ConvPlanEntry {
+    hipdnnBackendDescriptor_t plan = nullptr;
+    std::vector<hipdnnBackendDescriptor_t> retained; // kept alive for plan lifetime
+    void* workspace = nullptr;
+    int64_t workspaceSize = 0;
+};
+
+inline std::mutex& conv_plan_mutex() {
+    static std::mutex m;
+    return m;
+}
+inline std::unordered_map<std::string, ConvPlanEntry>& conv_plan_cache() {
+    static std::unordered_map<std::string, ConvPlanEntry> m;
+    return m;
+}
+inline std::atomic<unsigned>& conv_exec_seq() {
+    static std::atomic<unsigned> n{0};
+    return n;
+}
+
+inline hipdnnBackendDescriptor_t make_tensor_desc(int64_t uid,
+                                                  const std::vector<int64_t>& dims,
+                                                  const std::vector<int64_t>& strides,
+                                                  hipdnnDataType_t dtype) {
+    hipdnnBackendDescriptor_t d = nullptr;
+    if(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_TENSOR_DESCRIPTOR, &d) != HIPDNN_STATUS_SUCCESS)
+        return nullptr;
+    int64_t uidValue = uid;
+    bool isVirtual   = false;
+    bool ok = hipdnnBackendSetAttribute(d, HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &uidValue) == HIPDNN_STATUS_SUCCESS;
+    ok = ok && hipdnnBackendSetAttribute(d, HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dtype) == HIPDNN_STATUS_SUCCESS;
+    ok = ok && hipdnnBackendSetAttribute(d, HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, static_cast<int64_t>(dims.size()), dims.data()) == HIPDNN_STATUS_SUCCESS;
+    ok = ok && hipdnnBackendSetAttribute(d, HIPDNN_ATTR_TENSOR_STRIDES, HIPDNN_TYPE_INT64, static_cast<int64_t>(strides.size()), strides.data()) == HIPDNN_STATUS_SUCCESS;
+    ok = ok && hipdnnBackendSetAttribute(d, HIPDNN_ATTR_TENSOR_IS_VIRTUAL, HIPDNN_TYPE_BOOLEAN, 1, &isVirtual) == HIPDNN_STATUS_SUCCESS;
+    ok = ok && hipdnnBackendFinalize(d) == HIPDNN_STATUS_SUCCESS;
+    if(!ok) {
+        hipdnnBackendDestroyDescriptor(d);
+        return nullptr;
+    }
+    return d;
+}
+
+inline void append_ints(std::string& s, const std::vector<int64_t>& v) {
+    for(int64_t e : v) {
+        s += std::to_string(e);
+        s += ',';
+    }
+    s += ';';
+}
+
+inline std::string make_conv_key(hipdnnHandle_t h,
+                                 const std::vector<int64_t>& xDims, const std::vector<int64_t>& xStr, miopenDataType_t xMt,
+                                 const std::vector<int64_t>& wDims, const std::vector<int64_t>& wStr, miopenDataType_t wMt,
+                                 const std::vector<int64_t>& yDims, const std::vector<int64_t>& yStr, miopenDataType_t yMt,
+                                 const std::vector<int64_t>& pads, const std::vector<int64_t>& fstrides, const std::vector<int64_t>& dils) {
+    std::string s;
+    s += std::to_string(reinterpret_cast<uintptr_t>(h));
+    s += '|';
+    append_ints(s, xDims); append_ints(s, xStr); s += std::to_string(static_cast<int>(xMt)); s += '#';
+    append_ints(s, wDims); append_ints(s, wStr); s += std::to_string(static_cast<int>(wMt)); s += '#';
+    append_ints(s, yDims); append_ints(s, yStr); s += std::to_string(static_cast<int>(yMt)); s += '#';
+    append_ints(s, pads); append_ints(s, fstrides); append_ints(s, dils);
+    return s;
+}
+
+// Build + finalize a hipDNN execution plan for this conv problem, retaining
+// every descriptor in the entry (process-lifetime cache). Returns false on any
+// failure (caller falls back to MIOpen).
+inline bool build_conv_plan(hipdnnHandle_t h,
+                            const std::vector<int64_t>& xDims, const std::vector<int64_t>& xStr, hipdnnDataType_t xT,
+                            const std::vector<int64_t>& wDims, const std::vector<int64_t>& wStr, hipdnnDataType_t wT,
+                            const std::vector<int64_t>& yDims, const std::vector<int64_t>& yStr, hipdnnDataType_t yT,
+                            const std::vector<int64_t>& pads,
+                            const std::vector<int64_t>& filterStrides,
+                            const std::vector<int64_t>& dilations,
+                            bool isDouble,
+                            ConvPlanEntry& entry) {
+    auto fail = [&](const char* msg) {
+        std::fprintf(stderr, "[MIOpen->hipDNN] conv plan build failed: %s\n", msg);
+        for(auto d : entry.retained)
+            hipdnnBackendDestroyDescriptor(d);
+        entry.retained.clear();
+        entry.plan = nullptr;
+        return false;
+    };
+
+    hipdnnBackendDescriptor_t xDesc = make_tensor_desc(kConvUidX, xDims, xStr, xT);
+    hipdnnBackendDescriptor_t wDesc = make_tensor_desc(kConvUidW, wDims, wStr, wT);
+    hipdnnBackendDescriptor_t yDesc = make_tensor_desc(kConvUidY, yDims, yStr, yT);
+    if(xDesc != nullptr) entry.retained.push_back(xDesc);
+    if(wDesc != nullptr) entry.retained.push_back(wDesc);
+    if(yDesc != nullptr) entry.retained.push_back(yDesc);
+    if(xDesc == nullptr || wDesc == nullptr || yDesc == nullptr)
+        return fail("tensor descriptor");
+
+    hipdnnBackendDescriptor_t convOp = nullptr;
+    if(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR, &convOp) != HIPDNN_STATUS_SUCCESS)
+        return fail("create conv op");
+    entry.retained.push_back(convOp);
+    hipdnnDataType_t compType    = isDouble ? HIPDNN_DATA_DOUBLE : HIPDNN_DATA_FLOAT;
+    hipdnnConvolutionMode_t mode = HIPDNN_CROSS_CORRELATION;
+    bool ok = hipdnnBackendSetAttribute(convOp, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &xDesc) == HIPDNN_STATUS_SUCCESS;
+    ok = ok && hipdnnBackendSetAttribute(convOp, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &wDesc) == HIPDNN_STATUS_SUCCESS;
+    ok = ok && hipdnnBackendSetAttribute(convOp, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &yDesc) == HIPDNN_STATUS_SUCCESS;
+    ok = ok && hipdnnBackendSetAttribute(convOp, HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &compType) == HIPDNN_STATUS_SUCCESS;
+    ok = ok && hipdnnBackendSetAttribute(convOp, HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &mode) == HIPDNN_STATUS_SUCCESS;
+    ok = ok && hipdnnBackendSetAttribute(convOp, HIPDNN_ATTR_CONVOLUTION_DILATIONS, HIPDNN_TYPE_INT64, static_cast<int64_t>(dilations.size()), dilations.data()) == HIPDNN_STATUS_SUCCESS;
+    ok = ok && hipdnnBackendSetAttribute(convOp, HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES, HIPDNN_TYPE_INT64, static_cast<int64_t>(filterStrides.size()), filterStrides.data()) == HIPDNN_STATUS_SUCCESS;
+    ok = ok && hipdnnBackendSetAttribute(convOp, HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS, HIPDNN_TYPE_INT64, static_cast<int64_t>(pads.size()), pads.data()) == HIPDNN_STATUS_SUCCESS;
+    ok = ok && hipdnnBackendSetAttribute(convOp, HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS, HIPDNN_TYPE_INT64, static_cast<int64_t>(pads.size()), pads.data()) == HIPDNN_STATUS_SUCCESS;
+    ok = ok && hipdnnBackendFinalize(convOp) == HIPDNN_STATUS_SUCCESS;
+    if(!ok)
+        return fail("conv op attrs");
+
+    hipdnnBackendDescriptor_t opGraph = nullptr;
+    if(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, &opGraph) != HIPDNN_STATUS_SUCCESS)
+        return fail("create op graph");
+    entry.retained.push_back(opGraph);
+    ok = hipdnnBackendSetAttribute(opGraph, HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &convOp) == HIPDNN_STATUS_SUCCESS;
+    ok = ok && hipdnnBackendSetAttribute(opGraph, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &h) == HIPDNN_STATUS_SUCCESS;
+    ok = ok && hipdnnBackendFinalize(opGraph) == HIPDNN_STATUS_SUCCESS;
+    if(!ok)
+        return fail("op graph attrs");
+
+    hipdnnBackendDescriptor_t heur = nullptr;
+    if(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, &heur) != HIPDNN_STATUS_SUCCESS)
+        return fail("create heur");
+    entry.retained.push_back(heur);
+    hipdnnBackendHeurMode_t heurMode = HIPDNN_HEUR_MODE_FALLBACK;
+    ok = hipdnnBackendSetAttribute(heur, HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &opGraph) == HIPDNN_STATUS_SUCCESS;
+    ok = ok && hipdnnBackendSetAttribute(heur, HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_HEUR_MODE, 1, &heurMode) == HIPDNN_STATUS_SUCCESS;
+    ok = ok && hipdnnBackendFinalize(heur) == HIPDNN_STATUS_SUCCESS;
+    if(!ok)
+        return fail("heur attrs");
+
+    int64_t avail = 0;
+    if(hipdnnBackendGetAttribute(heur, HIPDNN_ATTR_ENGINEHEUR_RESULTS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &avail, nullptr) != HIPDNN_STATUS_SUCCESS || avail == 0)
+        return fail("no engine configs");
+
+    hipdnnBackendDescriptor_t engCfg = nullptr;
+    if(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, &engCfg) != HIPDNN_STATUS_SUCCESS)
+        return fail("create engine config");
+    entry.retained.push_back(engCfg);
+    int64_t got = 0;
+    hipdnnBackendDescriptor_t shallow[1] = {engCfg};
+    if(hipdnnBackendGetAttribute(heur, HIPDNN_ATTR_ENGINEHEUR_RESULTS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &got, shallow) != HIPDNN_STATUS_SUCCESS || got == 0)
+        return fail("get engine config");
+    if(hipdnnBackendFinalize(engCfg) != HIPDNN_STATUS_SUCCESS)
+        return fail("finalize engine config");
+
+    hipdnnBackendDescriptor_t plan = nullptr;
+    if(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &plan) != HIPDNN_STATUS_SUCCESS)
+        return fail("create plan");
+    entry.retained.push_back(plan);
+    if(hipdnnBackendSetAttribute(plan, HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &engCfg) != HIPDNN_STATUS_SUCCESS)
+        return fail("set plan engine config");
+    if(hipdnnBackendFinalize(plan) != HIPDNN_STATUS_SUCCESS)
+        return fail("finalize plan");
+
+    int64_t wsCount = 0;
+    int64_t wsSize  = 0;
+    if(hipdnnBackendGetAttribute(plan, HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, &wsCount, &wsSize) != HIPDNN_STATUS_SUCCESS)
+        wsSize = 0;
+    void* ws = nullptr;
+    if(wsSize > 0 && hipMalloc(&ws, static_cast<size_t>(wsSize)) != hipSuccess)
+        return fail("workspace alloc");
+
+    entry.plan          = plan;
+    entry.workspace     = ws;
+    entry.workspaceSize = wsSize;
+    return true;
+}
+
+inline bool execute_conv_plan(hipdnnHandle_t h, const ConvPlanEntry& entry,
+                              void* x, void* w, void* y) {
+    hipdnnBackendDescriptor_t vp = nullptr;
+    if(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR, &vp) != HIPDNN_STATUS_SUCCESS)
+        return false;
+    int64_t uids[3] = {kConvUidX, kConvUidW, kConvUidY};
+    void* ptrs[3]   = {x, w, y};
+    void* ws        = entry.workspace;
+    bool ok = hipdnnBackendSetAttribute(vp, HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS, HIPDNN_TYPE_INT64, 3, uids) == HIPDNN_STATUS_SUCCESS;
+    ok = ok && hipdnnBackendSetAttribute(vp, HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS, HIPDNN_TYPE_VOID_PTR, 3, ptrs) == HIPDNN_STATUS_SUCCESS;
+    ok = ok && hipdnnBackendSetAttribute(vp, HIPDNN_ATTR_VARIANT_PACK_WORKSPACE, HIPDNN_TYPE_VOID_PTR, 1, &ws) == HIPDNN_STATUS_SUCCESS;
+    ok = ok && hipdnnBackendFinalize(vp) == HIPDNN_STATUS_SUCCESS;
+    if(!ok) {
+        hipdnnBackendDestroyDescriptor(vp);
+        return false;
+    }
+    const hipdnnStatus_t es = hipdnnBackendExecute(h, entry.plan, vp);
+    hipdnnBackendDestroyDescriptor(vp);
+    return es == HIPDNN_STATUS_SUCCESS;
+}
+
+// Top-level entry: returns miopenStatusSuccess when the conv was executed via
+// hipDNN (y is written); any other status means "not handled — fall back".
+inline miopenStatus_t try_forward_conv_to_hipdnn(miopenHandle_t handle,
+                                                 const void* alpha,
+                                                 miopenTensorDescriptor_t xDesc, const void* x,
+                                                 miopenTensorDescriptor_t wDesc, const void* w,
+                                                 miopenConvolutionDescriptor_t convDesc,
+                                                 const void* beta,
+                                                 miopenTensorDescriptor_t yDesc, void* y) {
+    hipdnnHandle_t h = nullptr;
+    {
+        std::lock_guard<std::mutex> g{hipdnn_handle_map_mutex()};
+        auto& m = hipdnn_handle_map();
+        auto it = m.find(handle);
+        if(it != m.end())
+            h = it->second;
+    }
+    if(h == nullptr)
+        return miopenStatusUnsupportedOp;
+
+    std::vector<int64_t> xDims, xStr, wDims, wStr, yDims, yStr;
+    hipdnnDataType_t xT{}, wT{}, yT{};
+    miopenDataType_t xMt{}, wMt{}, yMt{};
+    if(!read_tensor(xDesc, xDims, xStr, xT, xMt) ||
+       !read_tensor(wDesc, wDims, wStr, wT, wMt) ||
+       !read_tensor(yDesc, yDims, yStr, yT, yMt))
+        return miopenStatusUnsupportedOp;
+
+    if(!scaling_is_identity(alpha, beta, yMt))
+        return miopenStatusUnsupportedOp;
+
+    constexpr int kMaxSpatial = 5;
+    int spatialDim            = 0;
+    int padA[kMaxSpatial]     = {0};
+    int strideA[kMaxSpatial]  = {0};
+    int dilA[kMaxSpatial]     = {0};
+    miopenConvolutionMode_t cmode{};
+    // MIOpen's miopenGetConvolutionNdDescriptor throws when requestedSpatialDim
+    // exceeds the descriptor's real spatial dim, so resolve the real dim first
+    // and request exactly that many.
+    if(miopenGetConvolutionSpatialDim_impl(convDesc, &spatialDim) != miopenStatusSuccess ||
+       spatialDim <= 0 || spatialDim > kMaxSpatial)
+        return miopenStatusUnsupportedOp;
+    if(miopenGetConvolutionNdDescriptor_impl(
+           convDesc, spatialDim, &spatialDim, padA, strideA, dilA, &cmode) != miopenStatusSuccess)
+        return miopenStatusUnsupportedOp;
+    int groupCount = 1;
+    (void)miopenGetConvolutionGroupCount_impl(convDesc, &groupCount);
+    if(groupCount != 1)
+        return miopenStatusUnsupportedOp;
+
+    std::vector<int64_t> pads(padA, padA + spatialDim);
+    std::vector<int64_t> fstrides(strideA, strideA + spatialDim);
+    std::vector<int64_t> dils(dilA, dilA + spatialDim);
+    const bool isDouble = (yMt == miopenDouble);
+
+    const std::string key = make_conv_key(h, xDims, xStr, xMt, wDims, wStr, wMt, yDims, yStr, yMt, pads, fstrides, dils);
+
+    ConvPlanEntry* entry = nullptr;
+    {
+        std::lock_guard<std::mutex> g{conv_plan_mutex()};
+        auto& cache = conv_plan_cache();
+        auto it     = cache.find(key);
+        if(it == cache.end()) {
+            ConvPlanEntry e;
+            const auto tb0 = std::chrono::steady_clock::now();
+            const bool ok  = build_conv_plan(h, xDims, xStr, xT, wDims, wStr, wT, yDims, yStr, yT, pads, fstrides, dils, isDouble, e);
+            const auto tb1 = std::chrono::steady_clock::now();
+            if(!ok)
+                return miopenStatusUnsupportedOp;
+            if(hipdnn_timing_enabled())
+                log_timing("conv plan build (cold)", std::chrono::duration_cast<std::chrono::nanoseconds>(tb1 - tb0).count());
+            it = cache.emplace(key, std::move(e)).first;
+        }
+        entry = &it->second;
+    }
+
+    miopenAcceleratorQueue_t stream = nullptr;
+    if(miopenGetStream_impl(handle, &stream) == miopenStatusSuccess)
+        (void)hipdnnSetStream(h, stream);
+
+    if(stream != nullptr)
+        (void)hipStreamSynchronize(stream);
+    const auto te0  = std::chrono::steady_clock::now();
+    const bool ran  = execute_conv_plan(h, *entry, const_cast<void*>(x), const_cast<void*>(w), y);
+    if(stream != nullptr)
+        (void)hipStreamSynchronize(stream);
+    const auto te1 = std::chrono::steady_clock::now();
+    if(!ran)
+        return miopenStatusUnsupportedOp;
+    if(hipdnn_timing_enabled()) {
+        const unsigned seq = conv_exec_seq().fetch_add(1) + 1;
+        log_timing(seq == 1 ? "conv execute (cold)" : "conv execute (warm)",
+                   std::chrono::duration_cast<std::chrono::nanoseconds>(te1 - te0).count());
+    }
+    return miopenStatusSuccess;
+}
+} // namespace
+// clang-format on
+
+// clang-format off
 // Keep this stub multi-line: investigation_q4_stub_count CTest counts `{` on
 // column 0 to enforce stub/header parity. See tools/wrapper/check_stub_count.cmake.
 // ALMIOPEN-1965: when MIOPEN_HIPDNN_FORWARDING=enabled, also open a paired
@@ -2776,6 +3157,11 @@ miopenFindConvolutionForwardAlgorithm(miopenHandle_t handle,
                                                       exhaustiveSearch);
 }
 
+// ALMIOPEN-1965 AC3: with MIOPEN_HIPDNN_FORWARDING=enabled (paired handle) and
+// MIOPEN_HIPDNN_FORWARDING_CONV=enabled, route the conv through a backend-direct
+// hipDNN graph. `algo` is intentionally ignored on this path (hipDNN selects via
+// heuristics). Any non-success from the forwarder means "not handled" and we
+// fall back to the MIOpen implementation below, so correctness is preserved.
 extern "C" miopenStatus_t miopenConvolutionForward(miopenHandle_t handle,
                                                    const void* alpha,
                                                    const miopenTensorDescriptor_t xDesc,
@@ -2790,6 +3176,13 @@ extern "C" miopenStatus_t miopenConvolutionForward(miopenHandle_t handle,
                                                    void* workSpace,
                                                    size_t workSpaceSize)
 {
+    if(hipdnn_forwarding_enabled() && hipdnn_conv_forwarding_enabled())
+    {
+        const miopenStatus_t forwarded = try_forward_conv_to_hipdnn(
+            handle, alpha, xDesc, x, wDesc, w, convDesc, beta, yDesc, y);
+        if(forwarded == miopenStatusSuccess)
+            return miopenStatusSuccess;
+    }
     return miopenConvolutionForward_impl(handle,
                                          alpha,
                                          xDesc,
