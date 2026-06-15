@@ -41,9 +41,13 @@
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
+#include "stinkytofu/transforms/asm/InsertWaitAluPass.hpp"
+#include "stinkytofu/transforms/asm/LongBranchLoweringPass.hpp"
 #include "stinkytofu/transforms/asm/LoopRegionRemarkPass.hpp"
 #include "stinkytofu/transforms/asm/MemTokenConsistencyCheckPass.hpp"
+#include "stinkytofu/transforms/asm/RederiveExpertScopePass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/RemoveWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
 #include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
@@ -97,9 +101,11 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     configureDebugOutput(pm, moduleOptions, "kernel-OuterPM", debugStreams);
 
     const bool runScheduler = optLevel != OptLevel::O0;
-    if (runScheduler) {
+    if (runScheduler || moduleOptions.EnableESM2) {
         // strip delay_alu before scheduling
         pm.addPass(createRemoveDelayAluPass());
+        // strip s_wait_alu before scheduling
+        pm.addPass(createRemoveWaitAluPass());
     }
     PB.applyExtensionPoint(PipelineExtensionPoint::BeforeRegionPasses, pm, module);
 
@@ -152,9 +158,29 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     }
 
     pm.addPass(createInsertVgprMsbPass());
+
+    if (moduleOptions.EnableESM2) {
+        // expertScheduleMode2 region (label_ASM_Start..noLoadLoopBody): wait-alu + mode2
+        // lifecycle. Must precede the kernel-wide CFGBuilder — ScopeAdaptor needs the flat
+        // single-BB function. Re-derive its range first (see RederiveExpertScopePass).
+        {
+            pm.addPass(createRederiveExpertScopePass(module, "expertScheduleMode2",
+                                                     "label_ASM_Start", "noLoadLoopBody"));
+            PassManager innerPM;
+            registerAllAnalyses(innerPM.getAnalysisManager());
+            configureDebugOutput(innerPM, moduleOptions, "expertScheduleMode2", debugStreams);
+            innerPM.addPass(createLongBranchLoweringPass());
+            innerPM.addPass(createCFGBuilderPass());
+            innerPM.addPass(createInsertWaitAluPass());
+            pm.addPass(
+                createKernelToRegionPassAdaptor(module, "expertScheduleMode2", std::move(innerPM)));
+        }
+    }
+
     pm.addPass(createCFGBuilderPass());
     pm.addPass(createMemTokenConsistencyCheckPass());
-    if (optLevel != OptLevel::O0) {
+
+    if (runScheduler) {
         pm.addPass(createInsertDelayAluPass(/*minWavesPerSimd=*/2));
         pm.addPass(createLoopRegionRemarkPass());
     }
@@ -174,7 +200,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
 struct Gfx1250Registrar {
     Gfx1250Registrar() {
         BackendRegistry::setArchPipeline(
-            GFX1250_ARCH, {buildGfx1250Pipeline, {"loopWithPrefetch", "noLoadLoopBody"}});
+            GFX1250_ARCH,
+            {buildGfx1250Pipeline, {"loopWithPrefetch", "noLoadLoopBody", "expertScheduleMode2"}});
     }
 };
 static Gfx1250Registrar s_gfx1250Registrar;
