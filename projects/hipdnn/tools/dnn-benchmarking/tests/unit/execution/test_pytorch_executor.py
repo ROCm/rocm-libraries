@@ -338,4 +338,3 @@ def test_auto_on_cuda_build_requests_torch_not_hip(
     assert FakeHipTimer.created_streams == []
     assert result.metadata is not None
     assert result.metadata.timing_backend == "torch"
-

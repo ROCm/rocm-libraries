@@ -65,7 +65,9 @@ def _run_one_graph(
         graph_json = loader.load_json(graph_path)
         loader.validate(graph_json)
         tensor_infos = loader.extract_tensor_info(graph_json)
-        result = run_loaded_graph(graph_path, graph_json, tensor_infos, config, reporter)
+        result = run_loaded_graph(
+            graph_path, graph_json, tensor_infos, config, reporter
+        )
         if len(result.results) == 0:
             return _error_graph_result(
                 graph_path, "No provider/engine combinations matched filters"

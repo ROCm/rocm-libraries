@@ -189,7 +189,9 @@ def _get_reference_provider(
         return None
 
     try:
-        provider = ReferenceProviderRegistry.get_provider(config.validation.provider.value)
+        provider = ReferenceProviderRegistry.get_provider(
+            config.validation.provider.value
+        )
     except ValueError:
         print(
             f"Reference provider '{config.validation.provider.value}' not registered",

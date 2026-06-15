@@ -1091,7 +1091,9 @@ class TestCheckCorrectnessOutputCount:
             },
             ref_outputs=ref_outputs,
             reference_provider_name="pytorch",
-            config=SuiteConfig(validation=ValidationConfig(provider="pytorch", rtol=0.25)),
+            config=SuiteConfig(
+                validation=ValidationConfig(provider="pytorch", rtol=0.25)
+            ),
         )
 
         assert result.tolerance_match is True
