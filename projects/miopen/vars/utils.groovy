@@ -951,9 +951,51 @@ def sendTeamsFailureNotification(Map conf=[:]) {
 //   - the FlowNode walk fails for any reason (fail-open: run all stages)
 // ---------------------------------------------------------------------------
 
+// Check if a stage's outcome indicates failure. Handles both:
+// 1. Stages with explicit ErrorAction (exceptions thrown in stage)
+// 2. Stages marked FAILURE via catchError() without throwing (no ErrorAction but result is FAILURE)
+@NonCPS
+private def isStageMarkedFailed(def endNode) {
+    // Check 1: Does the end node have ErrorAction? (exceptions during execution)
+    if (endNode.getAction(ErrorAction)) return true
+
+    // Check 2: Does the end node's outcome indicate FAILURE?
+    // getOutcome() returns the execution outcome and is available in most Jenkins versions
+    try {
+        def outcome = endNode.getOutcome()
+        if (outcome != null) {
+            def outcomeStr = outcome.toString()
+            if (outcomeStr.contains('FAILURE') || outcomeStr.contains('ABORTED')) {
+                return true
+            }
+        }
+    } catch (Exception e) {
+        // getOutcome() not available, fall through
+    }
+
+    // Check 3: Attempt ResultAction via reflection (not always available)
+    // This handles Jenkins versions where outcome isn't exposed but ResultAction exists
+    try {
+        def actions = endNode.getActions()
+        def resultAction = actions.find { action ->
+            action.getClass().getSimpleName() == 'ResultAction'
+        }
+        if (resultAction != null) {
+            def result = resultAction.result?.toString()
+            if (result && (result.contains('FAILURE') || result.contains('ABORTED'))) {
+                return true
+            }
+        }
+    } catch (Exception e) {
+        // Reflection failed, continue
+    }
+
+    return false
+}
+
 // Walks the FlowNode execution graph of a build and returns the set of stage
 // display names that completed successfully (have both a start and end node,
-// neither of which carries an ErrorAction). Aborted stages never get a
+// and were not marked as failed or aborted). Aborted stages never get a
 // StepEndNode so they are naturally excluded.
 @NonCPS
 def getPassedStagesFromBuild(def rawBuild) {
@@ -988,7 +1030,7 @@ def getPassedStagesFromBuild(def rawBuild) {
         def stageName = entry.value
         def endNode   = endNodes[startId]
         if (!endNode) continue
-        if (errorIds.contains(startId) || errorIds.contains(endNode.id)) continue
+        if (isStageMarkedFailed(endNode)) continue
 
         passed << stageName
     }
