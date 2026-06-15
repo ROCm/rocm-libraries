@@ -2329,7 +2329,9 @@ namespace TensileLite
         }
 
         args.template append<uint32_t>(concatenate_if<T_Debug>("gsu"), gsu);
-        if((useBias && problemType.useBias == 3) || problemType.useScaleAlphaVec)
+        // Added the extra check for useScaleAlphaVec with value 3 to match the condition in KernelWriterConversion.py for expecting
+        // argument in the kernel side.
+        if((useBias && problemType.useBias == 3) || problemType.useScaleAlphaVec == 3)
         {
             args.template append<uint32_t>("factorDim", (uint32_t)problem.getParams().factorDim());
         }
@@ -3719,6 +3721,13 @@ namespace TensileLite
                     .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
                     .mi_dtype    = datatypeToAnalyticalDatatype(problem.computeInputTypeA()),
                 };
+                if(Debug::Instance().printPropertyEvaluation() && sizeMapping.CUOccupancy <= 0)
+                {
+                    std::cerr << "TensileLite::DEBUG: sizeMapping.CUOccupancy="
+                              << sizeMapping.CUOccupancy
+                              << " (<=0) for kernel '" << kernelName
+                              << "'; clamping to 1 for origami grid selection.\n";
+                }
                 origami::config_t origami_config = {
                     .mt                        = {static_cast<size_t>(sizeMapping.macroTile.x),
                                                 static_cast<size_t>(sizeMapping.macroTile.y),

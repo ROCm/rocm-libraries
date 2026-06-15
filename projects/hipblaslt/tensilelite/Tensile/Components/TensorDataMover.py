@@ -60,7 +60,7 @@ class TensorDataMoverLoad(TensorDataMover):
 
         mod.addComment(f"TDM calc start addr of {tc}")
 
-        with writer.allocTmpSgpr(3) as tmpSgprRes:
+        with writer.allocTmpSgpr(3, tag="TensorDataMoverLoad_tmpSgprRes") as tmpSgprRes:
             tmpSgprIdx = tmpSgprRes.idx
             waveOffsetSgprIdx = tmpSgprRes.idx + 2
             mod.add(SMovB64(sgpr(tmpSgprIdx, 2), 0))
@@ -106,7 +106,7 @@ class TensorDataMoverLoad(TensorDataMover):
                 if kernel["ProblemType"]["StridedBatched"]:
                     batchStrideName = f"Stride{tc}{writer.states.indexChars[tp['ia'][2]]}"
                     mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(batchStrideName), sgpr("WorkGroup2"), comment="Batch: Stride*WG"))
-                    with writer.allocTmpSgpr(1) as bpeTmp:
+                    with writer.allocTmpSgpr(1, tag="TensorDataMoverLoad_tmpSgprBpe") as bpeTmp:
                         mod.add(scalarMultiply64Bpe(tmpSgprIdx, tmpSgprIdx, bpe, bpeTmp.idx, comment="scale by bpe"))
                     mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
                     mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
@@ -149,7 +149,7 @@ class TensorDataMoverLoad(TensorDataMover):
 
         mod.addComment(f"TDM wave separated calc start addr of {tc}")
 
-        with writer.allocTmpSgpr(3) as tmpSgprRes:
+        with writer.allocTmpSgpr(3, tag="TensorDataMoverLoadWaveSeparated_tmpSgprRes") as tmpSgprRes:
             numComp: int = numWaves // 2
             assert numComp & (numComp - 1) == 0, "numComp must be power of 2"
             tmpSgprIdx = tmpSgprRes.idx
@@ -199,7 +199,7 @@ class TensorDataMoverLoad(TensorDataMover):
                 if kernel["ProblemType"]["StridedBatched"]:
                     batchStrideName = f"Stride{tc}{writer.states.indexChars[tp['ia'][2]]}"
                     mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(batchStrideName), sgpr("WorkGroup2"), comment="Batch: Stride*WG"))
-                    with writer.allocTmpSgpr(1) as bpeTmp:
+                    with writer.allocTmpSgpr(1, tag="TensorDataMoverLoadWaveSeparated_tmpSgprBpe") as bpeTmp:
                         mod.add(scalarMultiply64Bpe(tmpSgprIdx, tmpSgprIdx, bpe, bpeTmp.idx, comment="scale by bpe"))
                     if dstGroup0 is not None:
                         # For wave-separated path: descriptor was set from base AddressA before this runs.
@@ -331,7 +331,7 @@ class TensorDataMoverLoad(TensorDataMover):
         mod.add(SAndB32(sgpr(descSgprName(tdmDescIdx)), sgpr(descSgprName(tdmDescIdx)), hex(0x0000FFFF)))
         mod.add(SAndB32(sgpr(descSgprName(tdmDescIdx+1)), sgpr(descSgprName(tdmDescIdx+1)), hex(0xFFFF0000)))
 
-        with writer.allocTmpSgpr(1) as tmpSgpr:
+        with writer.allocTmpSgpr(1, tag="resetTensorDimForTail_tmpSgpr") as tmpSgpr:
             if isMXS:
                 tmp = (1 << constShifter) - 1
                 mod.add(SAddU32(sgpr(tmpSgpr.idx), sgpr(sgprTail), tmp))
@@ -374,7 +374,7 @@ class TensorDataMoverLoad(TensorDataMover):
         mod.add(SAndB32(sgpr(f"{group1}+1"), sgpr(f"{group1}+1"), hex(0x0000FFFF)))
         mod.add(SAndB32(sgpr(f"{group1}+2"), sgpr(f"{group1}+2"), hex(0xFFFF0000)))
 
-        with writer.allocTmpSgpr(1) as tmpSgpr:
+        with writer.allocTmpSgpr(1, tag="setTensorDim0_tmpSgpr") as tmpSgpr:
             if isMXS:
                 mod.add(SLShiftLeftB32(sgpr(tmpSgpr.idx), hex(constShifter), sgpr(sgprDim0)))
                 mod.add(SLShiftLeftB32(sgpr(tmpSgpr.idx), hex(16), sgpr(tmpSgpr.idx)))
@@ -422,7 +422,7 @@ class TensorDataMoverLoad(TensorDataMover):
         mod.addComment("TDM set tensor dim 1")
         mod.add(SAndB32(sgpr(f"{group1}+2"), sgpr(f"{group1}+2"), hex(0x0000FFFF)))
         mod.add(SAndB32(sgpr(f"{group1}+3"), sgpr(f"{group1}+3"), hex(0xFFFF0000)))
-        with writer.allocTmpSgpr(1) as tmpSgpr:
+        with writer.allocTmpSgpr(1, tag="setTensorDim1_tmpSgpr") as tmpSgpr:
             if isMXS:
                 tmp = (1 << constShifter) - 1
                 mod.add(SAddU32(sgpr(tmpSgpr.idx), sgpr(sgprDim1), tmp))
