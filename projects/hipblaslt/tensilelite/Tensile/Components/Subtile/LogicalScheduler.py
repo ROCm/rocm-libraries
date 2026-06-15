@@ -34,6 +34,30 @@ import math
 from rocisa.code import Module
 
 
+# A ds_load_b128 reads 4 contiguous VGPRs, and emitSingleDsRead addresses a
+# tile's registers as baseVgpr + readIdx*4, so a tile must be one contiguous
+# block. Aligning to min(numRegs, 4) gives full b128 tiles the 4-VGPR
+# alignment the load needs without rounding small (e.g. 1-VGPR) tiles up to 4
+# and wasting registers.
+DS_B128_VGPRS = 4
+
+
+def _checkout_tile(pool, numRegs, tag):
+    """Check out one VGPR tile as a single contiguous, b128-aligned block."""
+    from Tensile.Components.Subtile.Kernel import RegisterTileInfo
+    align = min(numRegs, DS_B128_VGPRS)
+    base = pool.checkOutAligned(numRegs, align, tag=tag)
+    tile = RegisterTileInfo(pool)
+    for k in range(numRegs):
+        tile.append(base + k)
+    return tile
+
+
+def _checkin_tile(tile):
+    """Return a contiguous tile to its pool via its base-register handle."""
+    tile.regList.pool.checkIn(tile.regList.indices[0])
+
+
 class Pass(IntEnum):
     """Scheduler passes in dependency order.
 
@@ -2629,30 +2653,14 @@ class LogicalScheduler:
         """
         self._ensure_pass(Pass.VGPR_TILES)
 
-        from Tensile.Components.Subtile.Kernel import RegisterTileInfo
-
         cfg = self.config
 
         def _tile_vgpr_count(tileInfo, lrGran):
             return int(math.ceil(tileInfo.mmaTileRegCount * lrGran.k * lrGran.mn))
 
         def _alloc_tiles(count, numRegs):
-            tiles = []
-            for _ in range(count):
-                tile = RegisterTileInfo(writer.vgprPool)
-                # Allocate the full tile as a single contiguous block.
-                # emitSingleDsRead uses (baseVgpr + readIdx * 4) arithmetic,
-                # so the registers within a tile must be contiguous.
-                # Align to min(numRegs, 4): full b128 tiles get 4-register
-                # alignment, but smaller tiles (notably the common 1-register
-                # tiles) must not be force-aligned to 4 or each one wastes up to
-                # 3 registers, inflating peak VGPR usage and breaking occupancy.
-                align = min(numRegs, 4)
-                vstart = writer.vgprPool.checkOutAligned(numRegs, align, tag="allocVgprTiles_vstart")
-                for k in range(numRegs):
-                    tile.append(vstart + k)
-                tiles.append(tile)
-            return tiles
+            return [_checkout_tile(writer.vgprPool, numRegs, "allocVgprTiles_vstart")
+                    for _ in range(count)]
 
         self.vgprTilesA = _alloc_tiles(self.tile_peaks.get('A', 0),
                                        _tile_vgpr_count(tileInfoA, cfg.lrA))
@@ -2684,10 +2692,7 @@ class LogicalScheduler:
             for tid, tile in enumerate(tiles):
                 if tid in freed:
                     continue
-                pool = tile.regList.pool
-                # Tiles are allocated as single contiguous blocks;
-                # only the base register is the pool checkout handle.
-                pool.checkIn(tile.regList.indices[0])
+                _checkin_tile(tile)
 
         _dealloc_tiles(self.vgprTilesA,  self._tail_freed_tile_ids['A'])
         _dealloc_tiles(self.vgprTilesB,  self._tail_freed_tile_ids['B'])
@@ -2785,13 +2790,7 @@ class LogicalScheduler:
                            'SA': self.vgprTilesSA, 'SB': self.vgprTilesSB}
         for tensor, tile_list in tiles_by_tensor.items():
             for tid in self._tail_unused_tile_ids.get(tensor, ()):
-                tile = tile_list[tid]
-                pool = tile.regList.pool
-                # Tiles are allocated as single contiguous blocks; the base
-                # register is the only valid pool checkout handle. Checking in
-                # every 4th register (the old multi-block stride) would pass
-                # non-handle registers to the pool and risk double-free/overlap.
-                pool.checkIn(tile.regList.indices[0])
+                _checkin_tile(tile_list[tid])
                 self._tail_freed_tile_ids[tensor].add(tid)
 
     def _realloc_tail_tiles_flat(self, writer, peaks):
@@ -2803,8 +2802,6 @@ class LogicalScheduler:
         replace self.vgprTilesA/B/SA/SB; _tail_freed_tile_ids is cleared so
         deallocVgprTiles drops the flat set wholesale at kernel end.
         """
-        from Tensile.Components.Subtile.Kernel import RegisterTileInfo
-
         cfg = self.config
         info = self._alloc_tile_info
 
@@ -2813,22 +2810,11 @@ class LogicalScheduler:
 
         def _dealloc_all(tiles):
             for tile in tiles:
-                pool = tile.regList.pool
-                # Contiguous allocation: base register is the checkout handle.
-                pool.checkIn(tile.regList.indices[0])
+                _checkin_tile(tile)
 
         def _alloc_tiles(count, numRegs):
-            tiles = []
-            for _ in range(count):
-                tile = RegisterTileInfo(writer.vgprPool)
-                # Allocate contiguously (same rationale as allocVgprTiles).
-                # Align to min(numRegs, 4) to avoid wasting registers on small tiles.
-                align = min(numRegs, 4)
-                vstart = writer.vgprPool.checkOutAligned(numRegs, align, tag="reallocTailTilesFlat_vstart")
-                for k in range(numRegs):
-                    tile.append(vstart + k)
-                tiles.append(tile)
-            return tiles
+            return [_checkout_tile(writer.vgprPool, numRegs, "reallocTailTilesFlat_vstart")
+                    for _ in range(count)]
 
         def _swap(target, new_tiles):
             # In-place swap so the InstructionEmitter's references stay valid.
