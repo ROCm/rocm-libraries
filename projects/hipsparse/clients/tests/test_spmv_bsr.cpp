@@ -24,10 +24,10 @@
 #include "test.hpp"
 #include "testing_spmv_bsr.hpp"
 
-#if(!defined(CUDART_VERSION))
+#if defined(HIPSPARSE_WITH_SPMV_BSR) && !defined(CUDART_VERSION)
 TEST_ROUTINE_WITH_CONFIG(spmv_bsr,
                          generic,
-                         hipsparse_test_config_ijt,
+                         hipsparse_test_config_ijabct_spmv,
                          arg.M,
                          arg.N,
                          arg.alpha,
