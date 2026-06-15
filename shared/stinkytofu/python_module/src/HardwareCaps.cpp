@@ -267,6 +267,7 @@ std::map<std::string, int> initArchCaps(const IsaVersion& v) {
     rv["HasMXScaleSwizzle"] = checkInList(v, {{9, 5, 0}, {12, 5, 0}});
     rv["HasInvWbDevFences"] = checkInList(v, {{12, 5, 0}});
     rv["RequiresXCntForVolatileVMEM"] = checkInList(v, {{12, 5, 0}});
+    rv["DefaultScopeIsCULocal"] = checkInList(v, {{12, 5, 0}});
 
     rv["LDSBankCount"] = 64;
     rv["LDSBankWidth"] = 4;
