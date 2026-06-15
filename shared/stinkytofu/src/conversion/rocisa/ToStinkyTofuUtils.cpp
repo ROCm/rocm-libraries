@@ -1224,6 +1224,18 @@ std::array<int, 3> convertArch(nb::object arch_obj) {
 ///
 /// \param m The nanobind module to add bindings to
 void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
+    // Pipeline extension point enum
+    nb::enum_<PipelineExtensionPoint>(m, "PipelineExtensionPoint")
+        .value("BeforeRegionPasses", PipelineExtensionPoint::BeforeRegionPasses)
+        .value("InnerRegionBegin", PipelineExtensionPoint::InnerRegionBegin)
+        .value("InnerRegionEnd", PipelineExtensionPoint::InnerRegionEnd)
+        .value("AfterRegionPasses", PipelineExtensionPoint::AfterRegionPasses);
+
+    m.def("loadPlugin", &PassBuilder::loadPlugin, nb::arg("path"),
+          "Load a plugin shared library (.so/.dll) that exports registerPlugin()");
+    m.def("loadPluginsFromDirectory", &PassBuilder::loadPluginsFromDirectory, nb::arg("dirPath"),
+          "Load all plugin shared libraries (.so/.dll) from a directory");
+
     // Bind isSupportedByStinkyTofu to check if the architecture is supported by StinkyTofu
     m.def(
         "isSupportedByStinkyTofu",
@@ -1283,6 +1295,29 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             return result;
         }
 
+        // Plugin data forwarding
+        void setPluginDataI64(const std::string& key, int64_t value) {
+            module_->setPluginDataI64(key, value);
+        }
+        int64_t getPluginDataI64(const std::string& key, int64_t defaultVal = 0) const {
+            return module_->getPluginDataI64(key, defaultVal);
+        }
+        void setPluginDataStr(const std::string& key, const std::string& value) {
+            module_->setPluginDataStr(key, value);
+        }
+        std::string getPluginDataStr(const std::string& key,
+                                     const std::string& defaultVal = "") const {
+            return module_->getPluginDataStr(key, defaultVal);
+        }
+
+        void registerPassAtExtensionPoint(PipelineExtensionPoint ep, const std::string& passName) {
+            module_->getPassBuilder().registerAtExtensionPoint(
+                ep, [passName](PassManager& PM, StinkyAsmModule& module) {
+                    auto pass = PassBuilder::createPassByName(passName, module);
+                    if (pass) PM.addPass(std::move(pass));
+                });
+        }
+
         // Provide access to underlying module if needed
         std::shared_ptr<StinkyAsmModule> getModule() const {
             return module_;
@@ -1301,7 +1336,18 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
              "Set output dir for cost file: comparison_output/<yaml_name>; file at "
              "<dir>/<kernel_name>/aggregated_instruction_cost.txt")
         .def("getOutputDir", &StinkyAsmModuleWithSignature::getOutputDir)
-        .def("getModule", &StinkyAsmModuleWithSignature::getModule);
+        .def("getModule", &StinkyAsmModuleWithSignature::getModule)
+        .def("setPluginDataI64", &StinkyAsmModuleWithSignature::setPluginDataI64, nb::arg("key"),
+             nb::arg("value"), "Set an integer plugin data value accessible by plugin passes")
+        .def("getPluginDataI64", &StinkyAsmModuleWithSignature::getPluginDataI64, nb::arg("key"),
+             nb::arg("defaultVal") = 0, "Get an integer plugin data value")
+        .def("setPluginDataStr", &StinkyAsmModuleWithSignature::setPluginDataStr, nb::arg("key"),
+             nb::arg("value"), "Set a string plugin data value accessible by plugin passes")
+        .def("getPluginDataStr", &StinkyAsmModuleWithSignature::getPluginDataStr, nb::arg("key"),
+             nb::arg("defaultVal") = "", "Get a string plugin data value")
+        .def("registerPassAtExtensionPoint",
+             &StinkyAsmModuleWithSignature::registerPassAtExtensionPoint, nb::arg("extensionPoint"),
+             nb::arg("passName"), "Register a named C++ pass at a pipeline extension point");
 
     // Bind toStinkyTofuModule with signature support
     m.def(

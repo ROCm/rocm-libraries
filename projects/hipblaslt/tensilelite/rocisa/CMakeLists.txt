@@ -205,4 +205,21 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         endif()
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py" DESTINATION rocisa)
     endif()
+
+    # Example plugin — target only exists when the stinkytofu subproject is configured
+    # with -DSTINKYTOFU_BUILD_EXAMPLES=ON (default OFF; opted in by the standalone wheel
+    # build via tasks.py). Integrated/ROCm builds leave it OFF, so the target is absent
+    # and this block is skipped — the example never lands in a production ROCm package.
+    # When present, it is co-located in rocisa/ next to libstinkytofu (installed by the
+    # ROCISA_STANDALONE block above), so the "$ORIGIN/.." RPATH resolves the host.
+    # Only installable for shared builds (MODULE target); static builds use OBJECT libs.
+    if(TARGET stinkytofu-plugin-helloworld AND BUILD_SHARED_LIBS)
+        set_target_properties(stinkytofu-plugin-helloworld PROPERTIES
+            EXCLUDE_FROM_ALL FALSE
+            INSTALL_RPATH "$ORIGIN/.."
+            BUILD_RPATH "${_st_build_rpath}"
+        )
+        add_dependencies(_rocisa stinkytofu-plugin-helloworld)
+        install(TARGETS stinkytofu-plugin-helloworld DESTINATION rocisa/plugins)
+    endif()
 endif()

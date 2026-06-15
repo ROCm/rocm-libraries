@@ -215,6 +215,9 @@ def build(
         f"-DBUILD_SHARED_LIBS={'OFF' if static else 'ON'}",
         f"-DSTINKYTOFU_BUILD_TESTS={'ON' if tests else 'OFF'}",
         f"-DSTINKYTOFU_BUILD_PYTHON={'OFF' if no_python else 'ON'}",
+        # Standalone dev build: build the example plugins (demo + exercised by the
+        # unit tests). Default OFF in CMake so integrated/ROCm builds never ship them.
+        "-DSTINKYTOFU_BUILD_EXAMPLES=ON",
         "-DSTINKYTOFU_ENABLE_WERROR=ON",
     ]
 
