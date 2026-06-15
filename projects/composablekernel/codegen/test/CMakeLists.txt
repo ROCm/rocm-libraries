@@ -26,3 +26,13 @@ foreach(TEST_SRC ${TEST_SRCS})
     target_include_directories(codegen_test_${BASE_NAME} PUBLIC ${CK_ROOT}/library/include)
   endif()
 endforeach()
+
+# Regression test in case of non-ASCII characters being used.
+add_embed_library(non_ascii_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/non_ascii_test.txt
+    RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+add_test(NAME non_ascii_test_compile
+    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target embed_lib_non_ascii_test
+)

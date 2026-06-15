@@ -88,7 +88,7 @@ extern const size_t ${LENGTH_SYMBOL};
 ")
             endif()
             string(APPEND INIT_KERNELS "
-	    { \"${BASE_NAME}\", { reinterpret_cast<const char*>(${START_SYMBOL}), ${LENGTH_SYMBOL}} },")
+	{ \"${BASE_NAME}\", { reinterpret_cast<const char*>(${START_SYMBOL}), ${LENGTH_SYMBOL}} },")
         endif()
     endforeach()
     if(EMBED_USE STREQUAL "RC")
