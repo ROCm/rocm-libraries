@@ -276,7 +276,7 @@ float vsa_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
                            const std::vector<int32_t>& seqstart_q_host,
                            const std::vector<int32_t>& seqstart_k_host,
                            const std::vector<int32_t>& seqstart_q_block_host,
-                           const std::vector<int32_t>& lut_batch_offsets)
+                           const std::vector<int32_t>& mask_batch_offsets)
 {
     static_assert(std::is_same_v<DataType_, ck_tile::half_t> ||
                       std::is_same_v<DataType_, ck_tile::bf16_t>,
@@ -324,13 +324,13 @@ float vsa_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
     ck_tile::DeviceMem seqstart_q_buf(is_group_mode ? seqstart_q_host.size() * sizeof(int32_t) : 0);
     ck_tile::DeviceMem seqstart_k_buf(is_group_mode ? seqstart_k_host.size() * sizeof(int32_t) : 0);
     ck_tile::DeviceMem seqstart_q_block_buf(is_group_mode ? seqstart_q_block_host.size() * sizeof(int32_t) : 0);
-    ck_tile::DeviceMem lut_batch_offsets_buf(is_group_mode ? lut_batch_offsets.size() * sizeof(int32_t) : 0);
+    ck_tile::DeviceMem mask_batch_offsets_buf(is_group_mode ? mask_batch_offsets.size() * sizeof(int32_t) : 0);
     if(is_group_mode)
     {
         seqstart_q_buf.ToDevice(seqstart_q_host.data());
         seqstart_k_buf.ToDevice(seqstart_k_host.data());
         seqstart_q_block_buf.ToDevice(seqstart_q_block_host.data());
-        lut_batch_offsets_buf.ToDevice(lut_batch_offsets.data());
+        mask_batch_offsets_buf.ToDevice(mask_batch_offsets.data());
     }
 
     fmha_vsa_fwd_traits fmha_traits;
@@ -349,7 +349,7 @@ float vsa_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         args.seqstart_q_ptr       = seqstart_q_buf.GetDeviceBuffer();
         args.seqstart_k_ptr       = seqstart_k_buf.GetDeviceBuffer();
         args.seqstart_q_block_ptr = seqstart_q_block_buf.GetDeviceBuffer();
-        args.lut_batch_offset_ptr = lut_batch_offsets_buf.GetDeviceBuffer();
+        args.mask_batch_offset_ptr = mask_batch_offsets_buf.GetDeviceBuffer();
     }
 
     float ave_time = fmha_vsa_fwd(fmha_traits, args, stream_config);
@@ -465,7 +465,7 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         for(size_t i = 0; i < v.size(); ++i) out[i + 1] = out[i] + v[i];
         return out;
     };
-    std::vector<int32_t> seqstart_q, seqstart_k, seqstart_q_block, seqstart_k_block, lut_batch_offsets;
+    std::vector<int32_t> seqstart_q, seqstart_k, seqstart_q_block, seqstart_k_block, mask_batch_offsets;
     int32_t total_q_tokens = seqlen_q;
     int32_t total_k_tokens = seqlen_k;
     if(is_group_mode)
@@ -483,9 +483,9 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         }
         seqstart_q_block = cumsum(q_blocks);
         seqstart_k_block = cumsum(k_blocks);
-        lut_batch_offsets.assign(batch + 1, 0);
+        mask_batch_offsets.assign(batch + 1, 0);
         for(int b = 0; b < batch; ++b)
-            lut_batch_offsets[b + 1] = lut_batch_offsets[b] + q_blocks[b] * k_blocks[b];
+            mask_batch_offsets[b + 1] = mask_batch_offsets[b] + q_blocks[b] * k_blocks[b];
     }
 
     if(max_seqlen_q == 0) max_seqlen_q = total_q_tokens;
@@ -514,14 +514,14 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
     ck_tile::DeviceMem seqstart_k_buf(is_group_mode ? seqstart_k.size() * sizeof(int32_t) : 0);
     ck_tile::DeviceMem seqstart_q_block_buf(is_group_mode ? seqstart_q_block.size() * sizeof(int32_t) : 0);
     ck_tile::DeviceMem seqstart_k_block_buf(is_group_mode ? seqstart_k_block.size() * sizeof(int32_t) : 0);
-    ck_tile::DeviceMem lut_batch_offsets_buf(is_group_mode ? lut_batch_offsets.size() * sizeof(int32_t) : 0);
+    ck_tile::DeviceMem mask_batch_offsets_buf(is_group_mode ? mask_batch_offsets.size() * sizeof(int32_t) : 0);
     if(is_group_mode)
     {
         seqstart_q_buf.ToDevice(seqstart_q.data());
         seqstart_k_buf.ToDevice(seqstart_k.data());
         seqstart_q_block_buf.ToDevice(seqstart_q_block.data());
         seqstart_k_block_buf.ToDevice(seqstart_k_block.data());
-        lut_batch_offsets_buf.ToDevice(lut_batch_offsets.data());
+        mask_batch_offsets_buf.ToDevice(mask_batch_offsets.data());
     }
 
     auto st = compute_strides(nhead, nhead_k, total_q_tokens, total_k_tokens,
@@ -546,10 +546,10 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         args.seqstart_k_ptr        = seqstart_k_buf.GetDeviceBuffer();
         args.seqstart_q_block_ptr  = seqstart_q_block_buf.GetDeviceBuffer();
         args.seqstart_k_block_ptr  = seqstart_k_block_buf.GetDeviceBuffer();
-        args.lut_batch_offset_ptr  = lut_batch_offsets_buf.GetDeviceBuffer();
+        args.mask_batch_offset_ptr  = mask_batch_offsets_buf.GetDeviceBuffer();
         args.total_q_blocks        = seqstart_q_block.back();
         args.total_k_blocks        = seqstart_k_block.back();
-        args.total_qk_blocks       = lut_batch_offsets.back();
+        args.total_qk_blocks       = mask_batch_offsets.back();
     }
 
     {
@@ -643,7 +643,7 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         return out;
     };
     std::vector<int32_t> seqstart_q, seqstart_k, seqstart_q_block, seqstart_k_block,
-        lut_batch_offsets;
+        mask_batch_offsets;
     int32_t total_q_tokens = seqlen_q;
     int32_t total_k_tokens = seqlen_k;
     int32_t total_q_blocks = 0, total_k_blocks = 0, total_qk_blocks = 0;
@@ -661,12 +661,12 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         }
         seqstart_q_block = cumsum(q_blocks);
         seqstart_k_block = cumsum(k_blocks);
-        lut_batch_offsets.assign(batch + 1, 0);
+        mask_batch_offsets.assign(batch + 1, 0);
         for(int b = 0; b < batch; ++b)
-            lut_batch_offsets[b + 1] = lut_batch_offsets[b] + q_blocks[b] * k_blocks[b];
+            mask_batch_offsets[b + 1] = mask_batch_offsets[b] + q_blocks[b] * k_blocks[b];
         total_q_blocks  = seqstart_q_block.back();
         total_k_blocks  = seqstart_k_block.back();
-        total_qk_blocks = lut_batch_offsets.back();
+        total_qk_blocks = mask_batch_offsets.back();
     }
 
     (void)hipGetLastError();
@@ -687,15 +687,15 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         is_group_mode ? seqstart_q_block.size() * sizeof(int32_t) : 0);
     ck_tile::DeviceMem seqstart_k_block_buf(
         is_group_mode ? seqstart_k_block.size() * sizeof(int32_t) : 0);
-    ck_tile::DeviceMem lut_batch_offsets_buf(
-        is_group_mode ? lut_batch_offsets.size() * sizeof(int32_t) : 0);
+    ck_tile::DeviceMem mask_batch_offsets_buf(
+        is_group_mode ? mask_batch_offsets.size() * sizeof(int32_t) : 0);
     if(is_group_mode)
     {
         seqstart_q_buf.ToDevice(seqstart_q.data());
         seqstart_k_buf.ToDevice(seqstart_k.data());
         seqstart_q_block_buf.ToDevice(seqstart_q_block.data());
         seqstart_k_block_buf.ToDevice(seqstart_k_block.data());
-        lut_batch_offsets_buf.ToDevice(lut_batch_offsets.data());
+        mask_batch_offsets_buf.ToDevice(mask_batch_offsets.data());
     }
 
     // Strides over the packed token totals (group) or per-seq dims (batch).
@@ -783,7 +783,7 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         args.seqstart_k_ptr       = seqstart_k_buf.GetDeviceBuffer();
         args.seqstart_q_block_ptr = seqstart_q_block_buf.GetDeviceBuffer();
         args.seqstart_k_block_ptr = seqstart_k_block_buf.GetDeviceBuffer();
-        args.lut_batch_offset_ptr = lut_batch_offsets_buf.GetDeviceBuffer();
+        args.mask_batch_offset_ptr = mask_batch_offsets_buf.GetDeviceBuffer();
         args.total_q_blocks       = total_q_blocks;
         args.total_k_blocks       = total_k_blocks;
         args.total_qk_blocks      = total_qk_blocks;

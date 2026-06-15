@@ -494,7 +494,7 @@ struct SpargeMaskPredictionKargs
     const int32_t* seqlen_k_ptr          = nullptr;
     const int32_t* seqstart_q_block_ptr  = nullptr;
     const int32_t* seqstart_k_block_ptr  = nullptr;
-    const int32_t* lut_batch_offset_ptr  = nullptr;
+    const int32_t* mask_batch_offset_ptr  = nullptr;
     index_t        total_q_blocks        = 0;
     index_t        total_k_blocks        = 0;
 };
@@ -600,9 +600,9 @@ struct FmhaFwdSpargeMaskPredictionKernel
                 : nullptr;
 
             const long_index_t lut_xstart_b =
-                static_cast<long_index_t>(kargs.lut_batch_offset_ptr[b]);
+                static_cast<long_index_t>(kargs.mask_batch_offset_ptr[b]);
             const long_index_t lut_x_b =
-                static_cast<long_index_t>(kargs.lut_batch_offset_ptr[b + 1]) - lut_xstart_b;
+                static_cast<long_index_t>(kargs.mask_batch_offset_ptr[b + 1]) - lut_xstart_b;
             int32_t* lut_row =
                 kargs.lut_out +
                 lut_xstart_b * kargs.nhead_q +
@@ -816,7 +816,7 @@ struct FmhaFwdSpargeKernel
         const int32_t* seqlen_q_ptr;
         const int32_t* seqlen_k_ptr;
         const int32_t* seqstart_q_block_ptr;
-        const int32_t* lut_batch_offset_ptr;
+        const int32_t* mask_batch_offset_ptr;
         ck_tile::index_t batch;
 
         float pvthreshd;
@@ -952,7 +952,7 @@ struct FmhaFwdSpargeKernel
               const int32_t* seqlen_q_ptr,
               const int32_t* seqlen_k_ptr,
               const int32_t* seqstart_q_block_ptr,
-              const int32_t* lut_batch_offset_ptr,
+              const int32_t* mask_batch_offset_ptr,
               ck_tile::index_t batch,
               ck_tile::index_t window_size_left,
               ck_tile::index_t window_size_right,
@@ -998,7 +998,7 @@ struct FmhaFwdSpargeKernel
                     seqlen_q_ptr,
                     seqlen_k_ptr,
                     seqstart_q_block_ptr,
-                    lut_batch_offset_ptr,
+                    mask_batch_offset_ptr,
                     batch,
                     pvthreshd,
                     pvthreshd_per_head};
@@ -1134,18 +1134,18 @@ struct FmhaFwdSpargeKernel
                            batch_offset_o;
 
         // LUT / VBN. Batch: rectangular. Group: batch-outer/head-mid packed, per-batch [H, X_b]
-        // (LUT X_b = q_b*k_b via lut_batch_offset_ptr, vbn X_b = q_b via seqstart_q_block_ptr);
+        // (LUT X_b = q_b*k_b via mask_batch_offset_ptr, vbn X_b = q_b via seqstart_q_block_ptr);
         // new_index = Xstart_b*H + head*X_b + local.
         const long_index_t lut_xstart_b = [&]() -> long_index_t {
             if constexpr(kIsGroupMode)
                 return __builtin_amdgcn_readfirstlane(
-                    kargs.lut_batch_offset_ptr[i_batch]);
+                    kargs.mask_batch_offset_ptr[i_batch]);
             return 0;
         }();
         const long_index_t lut_x_b = [&]() -> long_index_t {
             if constexpr(kIsGroupMode)
                 return __builtin_amdgcn_readfirstlane(
-                           kargs.lut_batch_offset_ptr[i_batch + 1]) -
+                           kargs.mask_batch_offset_ptr[i_batch + 1]) -
                        lut_xstart_b;
             return 0;
         }();

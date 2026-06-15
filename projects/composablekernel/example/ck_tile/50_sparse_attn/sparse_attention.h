@@ -91,7 +91,7 @@ float vsa_sparse_attention(
     const std::vector<int32_t>& seqstart_q_host       = {},
     const std::vector<int32_t>& seqstart_k_host       = {},
     const std::vector<int32_t>& seqstart_q_block_host = {},
-    const std::vector<int32_t>& lut_batch_offsets     = {});
+    const std::vector<int32_t>& mask_batch_offsets     = {});
 
 template <typename DataType_>
 float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,

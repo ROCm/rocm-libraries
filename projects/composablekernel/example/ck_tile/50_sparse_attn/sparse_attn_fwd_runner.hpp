@@ -1487,17 +1487,17 @@ sparse_attn_result sparse_attn_fwd_run(
         ck_tile::FillUniformDistribution<T>{-0.5f, 0.5f, seed + 1}(k_packed);
         ck_tile::FillUniformDistribution<T>{-0.5f, 0.5f, seed + 2}(v_packed);
 
-        std::vector<int32_t> lut_batch_offsets;
+        std::vector<int32_t> mask_batch_offsets;
         auto mask_packed = generate_random_block_mask_group(
-            q_blocks, k_blocks, nhead, sparsity, seed + 100, true, lut_batch_offsets);
+            q_blocks, k_blocks, nhead, sparsity, seed + 100, true, mask_batch_offsets);
 
         // LUT shares the mask layout; VBN is packed by seqstart_q_block.
-        const int32_t lut_total = lut_batch_offsets.back();
+        const int32_t lut_total = mask_batch_offsets.back();
         const int32_t vbn_total = seqstart_q_block_host.back();
         ck_tile::HostTensor<int32_t> lut_packed({nhead, lut_total});
         ck_tile::HostTensor<int32_t> vbn_packed({nhead, vbn_total});
         block_map_to_lut_group(mask_packed, q_blocks, k_blocks,
-                               lut_batch_offsets, seqstart_q_block_host,
+                               mask_batch_offsets, seqstart_q_block_host,
                                lut_packed, vbn_packed);
 
         const std::size_t flop_g     = compute_sparse_attn_flop_group(
@@ -1523,7 +1523,7 @@ sparse_attn_result sparse_attn_fwd_run(
                 /*max_seqlen_q=*/seqlen_q, /*max_seqlen_k=*/0,
                 stream_config, mask_str, bs.args, scale_s_user, logits_soft_cap_user,
                 seqstart_q_host, seqstart_k_host,
-                seqstart_q_block_host, lut_batch_offsets);
+                seqstart_q_block_host, mask_batch_offsets);
         }
         catch(const std::exception& e)
         {
@@ -1556,7 +1556,7 @@ sparse_attn_result sparse_attn_fwd_run(
                 auto v_b = slice_packed_to_b1(v_packed, seqstart_k_host[b], sk, nhead_k, hdim_v, i_perm);
                 auto o_b = slice_packed_to_b1(o_packed, seqstart_q_host[b], sq, nhead,   hdim_v, o_perm);
                 auto mask_b = slice_packed_mask_to_b1(
-                    mask_packed, b, q_blocks, k_blocks, lut_batch_offsets, nhead);
+                    mask_packed, b, q_blocks, k_blocks, mask_batch_offsets, nhead);
                 bool sub_pass;
                 if(bi.type == bias_enum::elementwise_bias)
                 {

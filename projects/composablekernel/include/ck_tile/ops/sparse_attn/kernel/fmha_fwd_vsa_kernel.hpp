@@ -126,7 +126,7 @@ struct FmhaFwdVSAKernel
         ck_tile::index_t batch_stride_o;
     };
 
-    // Group / varlen: lut_batch_offset_ptr is [B+1] cumulative q_blocks*k_blocks per batch;
+    // Group / varlen: mask_batch_offset_ptr is [B+1] cumulative q_blocks*k_blocks per batch;
     // seqstart_q_block_ptr doubles as the valid_block_num offset table.
     struct FmhaFwdGroupModeKargs
         : FmhaFwdCommonKargs,
@@ -139,7 +139,7 @@ struct FmhaFwdVSAKernel
         const int32_t* seqlen_q_ptr;
         const int32_t* seqlen_k_ptr;
         const int32_t* seqstart_q_block_ptr;
-        const int32_t* lut_batch_offset_ptr;
+        const int32_t* mask_batch_offset_ptr;
         ck_tile::index_t batch;
     };
 
@@ -268,7 +268,7 @@ struct FmhaFwdVSAKernel
               const int32_t* seqlen_q_ptr,
               const int32_t* seqlen_k_ptr,
               const int32_t* seqstart_q_block_ptr,
-              const int32_t* lut_batch_offset_ptr,
+              const int32_t* mask_batch_offset_ptr,
               ck_tile::index_t batch,
               ck_tile::index_t window_size_left,
               ck_tile::index_t window_size_right,
@@ -312,7 +312,7 @@ struct FmhaFwdVSAKernel
                     seqlen_q_ptr,
                     seqlen_k_ptr,
                     seqstart_q_block_ptr,
-                    lut_batch_offset_ptr,
+                    mask_batch_offset_ptr,
                     batch};
 
         if constexpr(kHasMask)
@@ -444,7 +444,7 @@ struct FmhaFwdVSAKernel
             batch_offset_v;
 
         // sparse LUT/vbn. Batch: rectangular. Group: batch-outer/head-mid packed, per-batch [H, X_b]
-        // (LUT X_b = q_b*k_b via lut_batch_offset_ptr, vbn X_b = q_b via seqstart_q_block_ptr);
+        // (LUT X_b = q_b*k_b via mask_batch_offset_ptr, vbn X_b = q_b via seqstart_q_block_ptr);
         // new_index = Xstart_b*H + head*X_b + local.
         const int* lut_ptr = [&]() -> const int* {
             const auto* base = reinterpret_cast<const int*>(kargs.lut_ptr);
@@ -453,9 +453,9 @@ struct FmhaFwdVSAKernel
                 const index_t k_blocks_b =
                     ck_tile::integer_divide_ceil(seqlen_k_actual, FmhaPipeline::kN0);
                 const long_index_t xstart_b = __builtin_amdgcn_readfirstlane(
-                    kargs.lut_batch_offset_ptr[i_batch]);
+                    kargs.mask_batch_offset_ptr[i_batch]);
                 const long_index_t x_b = __builtin_amdgcn_readfirstlane(
-                    kargs.lut_batch_offset_ptr[i_batch + 1]) - xstart_b;
+                    kargs.mask_batch_offset_ptr[i_batch + 1]) - xstart_b;
                 const long_index_t off =
                     xstart_b * kargs.num_head_q +
                     static_cast<long_index_t>(i_nhead) * x_b +

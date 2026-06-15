@@ -130,7 +130,7 @@ struct FmhaFwdSpargeSageKernel
         index_t     batch_stride_bias  = 0;
 
         // Group / varlen (batch leaves all nullptr / 0). seqstart_*_ptr: per-batch token starts.
-        // seqstart_q_block_ptr / lut_batch_offset_ptr: packed VBN/LUT offsets; q/k descale use the
+        // seqstart_q_block_ptr / mask_batch_offset_ptr: packed VBN/LUT offsets; q/k descale use the
         // same block-packed scheme (block_id * scales_per_block). quant Q/K and descale nhead
         // strides carry packed totals (host: total_tokens*hdim and total_*_scale).
         const int32_t* seqstart_q_ptr       = nullptr;
@@ -139,7 +139,7 @@ struct FmhaFwdSpargeSageKernel
         const int32_t* seqlen_k_ptr         = nullptr;
         const int32_t* seqstart_q_block_ptr = nullptr;
         const int32_t* seqstart_k_block_ptr = nullptr;
-        const int32_t* lut_batch_offset_ptr = nullptr;
+        const int32_t* mask_batch_offset_ptr = nullptr;
         index_t        batch                = 0;
 
         // pv-skip: runtime PV-norm block skip (log2 units; 0 = disabled). per_head ptr (length
@@ -281,7 +281,7 @@ struct FmhaFwdSpargeSageKernel
                                              const int32_t* seqlen_k_ptr,
                                              const int32_t* seqstart_q_block_ptr,
                                              const int32_t* seqstart_k_block_ptr,
-                                             const int32_t* lut_batch_offset_ptr,
+                                             const int32_t* mask_batch_offset_ptr,
                                              index_t batch,
                                              index_t window_size_left   = -1,
                                              index_t window_size_right  = -1,
@@ -340,7 +340,7 @@ struct FmhaFwdSpargeSageKernel
         kargs.seqlen_k_ptr         = seqlen_k_ptr;
         kargs.seqstart_q_block_ptr = seqstart_q_block_ptr;
         kargs.seqstart_k_block_ptr = seqstart_k_block_ptr;
-        kargs.lut_batch_offset_ptr = lut_batch_offset_ptr;
+        kargs.mask_batch_offset_ptr = mask_batch_offset_ptr;
         kargs.batch                = batch;
         return kargs;
     }
@@ -489,16 +489,16 @@ struct FmhaFwdSpargeSageKernel
                            batch_offset_o;
 
         // LUT / VBN. Batch: rectangular. Group: batch-outer/head-mid packed (lut X_b = q_b*k_b via
-        // lut_batch_offset_ptr, vbn X_b = q_b via seqstart_q_block_ptr); new_index = Xstart_b*Hq +
+        // mask_batch_offset_ptr, vbn X_b = q_b via seqstart_q_block_ptr); new_index = Xstart_b*Hq +
         // head*X_b + local.
         const int* lut_row = [&]() -> const int* {
             const auto* base = reinterpret_cast<const int*>(kargs.lut_ptr);
             if constexpr(kIsGroupMode)
             {
                 const long_index_t lut_xstart_b =
-                    __builtin_amdgcn_readfirstlane(kargs.lut_batch_offset_ptr[i_batch]);
+                    __builtin_amdgcn_readfirstlane(kargs.mask_batch_offset_ptr[i_batch]);
                 const long_index_t lut_x_b =
-                    __builtin_amdgcn_readfirstlane(kargs.lut_batch_offset_ptr[i_batch + 1]) -
+                    __builtin_amdgcn_readfirstlane(kargs.mask_batch_offset_ptr[i_batch + 1]) -
                     lut_xstart_b;
                 const index_t k_blocks_b = integer_divide_ceil(seqlen_k_actual, SagePipeline::kN0);
                 return base + lut_xstart_b * kargs.num_head_q +

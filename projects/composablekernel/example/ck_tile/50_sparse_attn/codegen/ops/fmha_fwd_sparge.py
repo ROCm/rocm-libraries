@@ -230,7 +230,7 @@ static auto make_mask_prediction_callable_{F_idx}(const fmha_sparge_fwd_args& a,
         mp_kargs.seqlen_k_ptr         = static_cast<const int32_t*>(a.seqlen_k_ptr);
         mp_kargs.seqstart_q_block_ptr = static_cast<const int32_t*>(a.seqstart_q_block_ptr);
         mp_kargs.seqstart_k_block_ptr = static_cast<const int32_t*>(a.seqstart_k_block_ptr);
-        mp_kargs.lut_batch_offset_ptr = static_cast<const int32_t*>(a.lut_batch_offset_ptr);
+        mp_kargs.mask_batch_offset_ptr = static_cast<const int32_t*>(a.mask_batch_offset_ptr);
         mp_kargs.total_q_blocks       = a.total_q_blocks;
         mp_kargs.total_k_blocks       = a.total_k_blocks;
     }}

@@ -216,7 +216,7 @@ float fmha_sparge_sage_fwd_<sage_trait_>(const ck_tile::stream_config& s,
         mp_kargs.seqlen_k_ptr         = static_cast<const int32_t*>(a.seqlen_k_ptr);
         mp_kargs.seqstart_q_block_ptr = static_cast<const int32_t*>(a.seqstart_q_block_ptr);
         mp_kargs.seqstart_k_block_ptr = static_cast<const int32_t*>(a.seqstart_k_block_ptr);
-        mp_kargs.lut_batch_offset_ptr = static_cast<const int32_t*>(a.lut_batch_offset_ptr);
+        mp_kargs.mask_batch_offset_ptr = static_cast<const int32_t*>(a.mask_batch_offset_ptr);
         mp_kargs.total_q_blocks       = a.total_q_blocks;
         mp_kargs.total_k_blocks       = a.total_k_blocks;
     }
@@ -334,7 +334,7 @@ float fmha_sparge_sage_fwd_<sage_trait_>(const ck_tile::stream_config& s,
             static_cast<const int32_t*>(a.seqlen_k_ptr),
             static_cast<const int32_t*>(a.seqstart_q_block_ptr),
             static_cast<const int32_t*>(a.seqstart_k_block_ptr),
-            static_cast<const int32_t*>(a.lut_batch_offset_ptr),
+            static_cast<const int32_t*>(a.mask_batch_offset_ptr),
             a.batch,
             a.window_size_left, a.window_size_right, a.mask_type,
             a.bias_ptr, a.stride_bias, a.nhead_stride_bias, a.batch_stride_bias);

@@ -220,7 +220,7 @@ struct fmha_vsa_fwd_args
 
     // Group-mode block offset tables. seqstart_q_block_ptr also offsets valid_block_num_ptr.
     const void* seqstart_q_block_ptr = nullptr;
-    const void* lut_batch_offset_ptr = nullptr;
+    const void* mask_batch_offset_ptr = nullptr;
 
     const void*      bias_ptr           = nullptr;
     ck_tile::index_t stride_bias        = 0;
@@ -343,7 +343,7 @@ auto fmha_fwd_create_kargs_and_grids(fmha_vsa_fwd_args args)
                                          static_cast<const int32_t*>(args.seqlen_q_ptr),
                                          static_cast<const int32_t*>(args.seqlen_k_ptr),
                                          static_cast<const int32_t*>(args.seqstart_q_block_ptr),
-                                         static_cast<const int32_t*>(args.lut_batch_offset_ptr),
+                                         static_cast<const int32_t*>(args.mask_batch_offset_ptr),
                                          args.batch,
                                          args.window_size_left,
                                          args.window_size_right,
@@ -529,7 +529,7 @@ struct fmha_sparge_fwd_args
     // seqstart_k_block_ptr offsets k_means/k_sim.
     const void* seqstart_q_block_ptr = nullptr;
     const void* seqstart_k_block_ptr = nullptr;
-    const void* lut_batch_offset_ptr = nullptr;
+    const void* mask_batch_offset_ptr = nullptr;
 
     // Group-mode block totals (zero in batch mode); codegen uses these to size workspace.
     ck_tile::index_t total_q_blocks  = 0;
@@ -642,7 +642,7 @@ auto fmha_fwd_create_kargs_and_grids(fmha_sparge_fwd_args args)
                                          static_cast<const int32_t*>(args.seqlen_q_ptr),
                                          static_cast<const int32_t*>(args.seqlen_k_ptr),
                                          static_cast<const int32_t*>(args.seqstart_q_block_ptr),
-                                         static_cast<const int32_t*>(args.lut_batch_offset_ptr),
+                                         static_cast<const int32_t*>(args.mask_batch_offset_ptr),
                                          args.batch,
                                          args.window_size_left,
                                          args.window_size_right,
@@ -875,7 +875,7 @@ struct fmha_sparge_sage_fwd_args
     const void* seqlen_k_ptr          = nullptr;
     const void* seqstart_q_block_ptr  = nullptr;
     const void* seqstart_k_block_ptr  = nullptr;
-    const void* lut_batch_offset_ptr  = nullptr;
+    const void* mask_batch_offset_ptr  = nullptr;
     ck_tile::index_t total_q_blocks  = 0;
     ck_tile::index_t total_k_blocks  = 0;
     ck_tile::index_t total_qk_blocks = 0;
