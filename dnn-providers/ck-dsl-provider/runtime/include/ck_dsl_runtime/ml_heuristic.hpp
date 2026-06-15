@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: MIT
 //
 // Trained-model kernel selector for the ck_dsl runtime, mirroring the CK Tile
-// dispatcher's ML heuristic (`dispatcher/include/ck_tile/dispatcher/ml_heuristic.hpp`):
-// a LightGBM regressor predicts TFLOPS for each candidate from a 72-feature
-// vector (problem + kernel config + hardware), and candidates are ranked
-// best-first. The feature order is byte-identical to CK Tile's feature_spec.json,
-// so the CK Tile `gemm_universal_fp16_gfx950` model can be reused directly for
-// ck_dsl GEMM candidates (same knob space).
+// dispatcher's ML heuristic (`dispatcher/include/ck_tile/dispatcher/ml_heuristic.hpp`).
+// LightGBM regressors predict TFLOPS per candidate and rank them best-first.
+// Three per-op feature extractors are hosted here:
+//   GEMM     — 72 features (byte-identical to CK Tile feature_spec.json;
+//               the CK Tile gemm_universal_fp16_gfx950 model is reusable)
+//   FMHA     — 68 features
+//   Conv-fwd — 97 features (grouped_conv_forward_fp16_gfx942)
 #pragma once
 
 #include <algorithm>
@@ -623,7 +624,13 @@ class DslMlHeuristic {
             return predict(conv_booster_, f.data(), CKDSL_CONV_NUM_FEATURES);
         }
         if (!gemm_booster_) return 0;
-        auto f = ml_extract_features(prob, MlKernelConfig::from_manifest(m), ghw_);
+        // GEMM approximation for conv when no conv model is loaded.
+        // Uses per-arch HW constants so CU utilization features are correct.
+        HardwareProfile hw_approx;
+        if (prob.arch == "gfx942") {
+            hw_approx.num_cus = 228; hw_approx.shader_engines = 28; hw_approx.max_clock_mhz = 2100;
+        }
+        auto f = ml_extract_features(prob, MlKernelConfig::from_manifest(m), hw_approx);
         return predict(gemm_booster_, f.data(), CKDSL_NUM_FEATURES);
     }
 

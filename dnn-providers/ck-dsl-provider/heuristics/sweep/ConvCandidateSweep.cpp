@@ -5,21 +5,22 @@
 //
 // Standalone candidate sweep for the ck_dsl implicit-GEMM conv path.
 //
-// For each shape in SWEEP_SHAPES_CSV:
+// For each shape provided via --shapes:
 //   1. Enumerate all buildable candidate knob combos via enumerateCandidates.
 //   2. Compile + time every candidate on device via CompileServiceBridge + HIP.
-//   3. Write one CSV row per successful candidate to SWEEP_CSV_OUT.
+//   3. Write one CSV row per successful candidate to --out.
 //
-// The sweep and the production dispatcher share the same enumerateCandidates
-// call, so training data coverage is correct by construction.
+// This sweep uses the Python DSL codegen path (CompileServiceBridge) to compile
+// and time every candidate from scratch. It is an offline oracle tool; the
+// production C++ dispatcher uses pre-compiled .hsaco kernels from ArtifactStore
+// and does not share this enumeration path.
 //
-// Environment variables:
-//   SWEEP_SHAPES_CSV   – (required) CSV of conv shapes to sweep. Expected
-//                        columns: N,G,C,K,Hi,Wi,Y,X,stride_h,stride_w,pad_h,pad_w
-//   SWEEP_CSV_OUT      – (required) path to write training rows (appended if
-//                        the file already exists). Columns:
-//                        N,G,C,K,Hi,Wi,Y,X,stride_h,stride_w,pad_h,pad_w,
-//                        tile_m,tile_n,tile_k,pipeline,tflops,latency_us
+// CLI arguments (see main.cpp):
+//   --shapes <path>   CSV of conv shapes to sweep.
+//                     Columns: N,G,C,K,Hi,Wi,Y,X,stride_h,stride_w,pad_h,pad_w
+//   --out    <path>   Path to write training rows (appended if the file exists).
+//                     Columns: N,G,C,K,Hi,Wi,Y,X,stride_h,stride_w,pad_h,pad_w,
+//                              tile_m,tile_n,tile_k,pipeline,tflops,latency_us
 
 #include <hip/hip_runtime.h>
 
@@ -330,7 +331,7 @@ bool runConvOracleSweep(const ConvCase& cse, CkDslContainer& container,
     selProblem.N  = static_cast<std::int32_t>(kN);
     selProblem.C  = static_cast<std::int32_t>(kC);
     selProblem.K  = static_cast<std::int32_t>(kK);
-    selProblem.G  = 1;
+    selProblem.G  = 1;  // Sweep covers G=1 only; hipDNN conv has no group field.
     selProblem.Hi = static_cast<std::int32_t>(kHi);
     selProblem.Wi = static_cast<std::int32_t>(kWi);
     selProblem.R  = static_cast<std::int32_t>(kR);

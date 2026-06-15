@@ -37,13 +37,15 @@ HEADER = ["N", "G", "C", "K", "Hi", "Wi", "Y", "X",
           "stride_h", "stride_w", "pad_h", "pad_w", "direction"]
 
 
-def _valid(N, G, C, K, Hi, Wi, Y, X, stride_h, stride_w, pad_h, pad_w):
+def _valid(N, G, C, K, Hi, Wi, Y, X, stride_h, stride_w, pad_h, pad_w, dilation_h=1, dilation_w=1):
     if C % G != 0 or K % G != 0:
         return False
     if C % 8 != 0 or K % 8 != 0:
         return False
-    Ho = (Hi + 2 * pad_h - Y) // stride_h + 1
-    Wo = (Wi + 2 * pad_w - X) // stride_w + 1
+    eff_Y = (Y - 1) * dilation_h + 1
+    eff_X = (X - 1) * dilation_w + 1
+    Ho = (Hi + 2 * pad_h - eff_Y) // stride_h + 1
+    Wo = (Wi + 2 * pad_w - eff_X) // stride_w + 1
     return Ho >= 1 and Wo >= 1
 
 

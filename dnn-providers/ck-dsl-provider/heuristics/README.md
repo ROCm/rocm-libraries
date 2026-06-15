@@ -101,8 +101,10 @@ is mounted as `/work`.
 
 ```bash
 # Run inside a ROCm container on the target GPU architecture.
+# BUILD_DIR defaults to $HOME/ckdsl_sweep_build; override via env if needed.
 bash $HEURISTICS/sweep/build.sh
-# Binary: <container /work>/sweep_build/oracle_sweep/conv_candidate_sweep
+# Binary: ${BUILD_DIR}/oracle_sweep/conv_candidate_sweep
+#         (default: $HOME/ckdsl_sweep_build/oracle_sweep/conv_candidate_sweep)
 ```
 
 ### 2. Generate and shard shapes
