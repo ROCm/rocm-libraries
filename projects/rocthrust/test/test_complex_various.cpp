@@ -78,6 +78,8 @@ public:
   using T = Type;
 };
 
+TYPED_TEST_SUITE(VariousComplexTest, FloatDouble);
+
 template <typename T, bool SingleParam, class StdFunc, class ThrustFunc>
 void run_rng_test(const StdFunc& sf, const ThrustFunc& tf)
 {
