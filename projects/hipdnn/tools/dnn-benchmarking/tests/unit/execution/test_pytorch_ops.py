@@ -270,6 +270,8 @@ class TestPyTorchOpsNewHandlers:
             "SdpaAttributes",
             "LayernormAttributes",
             "LayerNormAttributes",
+            "LayernormBackwardAttributes",
+            "LayerNormBackwardAttributes",
             "RMSNormAttributes",
             "RmsNormAttributes",
             "RMSNormBackwardAttributes",
@@ -587,6 +589,162 @@ class TestPyTorchOpsNewHandlers:
         torch.testing.assert_close(tensors[6], scale.grad)
         torch.testing.assert_close(tensors[7], dy.sum(dim=(0, 1)))
 
+    def test_layernorm_backward_matches_autograd_with_saved_stats(self) -> None:
+        x = (torch.arange(48, dtype=torch.float32).reshape(2, 4, 6) / 13).requires_grad_()
+        scale = torch.tensor([1.0, 0.5, 2.0, -1.0, 0.25, -0.75], requires_grad=True)
+        bias = torch.tensor([0.1, -0.2, 0.3, -0.4, 0.5, -0.6], requires_grad=True)
+        dy = torch.linspace(-0.3, 0.4, steps=48).reshape(2, 4, 6)
+        y = torch.nn.functional.layer_norm(
+            x, (6,), weight=scale, bias=bias, eps=1e-5
+        )
+        y.backward(dy)
+
+        mean = x.detach().mean(dim=2, keepdim=True)
+        inv = torch.rsqrt(x.detach().var(dim=2, unbiased=False, keepdim=True) + 1e-5)
+        graph_json = {
+            "tensors": [
+                {"uid": 6, "dims": [2, 4, 6]},
+                {"uid": 7, "dims": [6]},
+                {"uid": 8, "dims": [6]},
+            ],
+            "nodes": [
+                {
+                    "type": "LayernormBackwardAttributes",
+                    "inputs": {
+                        "dy_tensor_uid": 1,
+                        "x_tensor_uid": 2,
+                        "scale_tensor_uid": 3,
+                        "mean_tensor_uid": 4,
+                        "inv_variance_tensor_uid": 5,
+                    },
+                    "outputs": {
+                        "dx_tensor_uid": 6,
+                        "dscale_tensor_uid": 7,
+                        "dbias_tensor_uid": 8,
+                    },
+                    "attributes": {"normalized_dim_count": 1},
+                }
+            ],
+        }
+        tensors = {1: dy, 2: x.detach(), 3: scale.detach(), 4: mean, 5: inv}
+
+        pytorch_ops.execute_graph(graph_json, tensors)
+
+        torch.testing.assert_close(tensors[6], x.grad, rtol=1e-4, atol=1e-5)
+        torch.testing.assert_close(tensors[7], scale.grad, rtol=1e-4, atol=1e-5)
+        torch.testing.assert_close(tensors[8], bias.grad, rtol=1e-4, atol=1e-5)
+
+    def test_layernorm_backward_recomputes_stats_from_epsilon(self) -> None:
+        x = (torch.arange(24, dtype=torch.float32).reshape(2, 3, 4) / 7).requires_grad_()
+        scale = torch.tensor([1.0, 0.5, 2.0, -1.0], requires_grad=True)
+        bias = torch.zeros(4, requires_grad=True)
+        dy = torch.linspace(-0.2, 0.3, steps=24).reshape(2, 3, 4)
+        y = torch.nn.functional.layer_norm(x, (4,), weight=scale, bias=bias, eps=1e-5)
+        y.backward(dy)
+
+        graph_json = {
+            "tensors": [
+                {"uid": 5, "dims": [2, 3, 4]},
+                {"uid": 6, "dims": [4]},
+                {"uid": 7, "dims": [4]},
+            ],
+            "nodes": [
+                {
+                    "type": "LayernormBackwardAttributes",
+                    "inputs": {
+                        "dy_tensor_uid": 1,
+                        "x_tensor_uid": 2,
+                        "scale_tensor_uid": 3,
+                        "epsilon_tensor_uid": 4,
+                    },
+                    "outputs": {
+                        "dx_tensor_uid": 5,
+                        "dscale_tensor_uid": 6,
+                        "dbias_tensor_uid": 7,
+                    },
+                    "attributes": {"normalized_dim_count": 1},
+                }
+            ],
+        }
+        tensors = {1: dy, 2: x.detach(), 3: scale.detach(), 4: torch.tensor([1e-5])}
+
+        pytorch_ops.execute_graph(graph_json, tensors)
+
+        torch.testing.assert_close(tensors[5], x.grad, rtol=1e-4, atol=1e-5)
+        torch.testing.assert_close(tensors[6], scale.grad, rtol=1e-4, atol=1e-5)
+        torch.testing.assert_close(tensors[7], dy.sum(dim=(0, 1)), rtol=1e-4, atol=1e-5)
+
+    def test_layernorm_backward_missing_stats_raises(self) -> None:
+        graph_json = {
+            "tensors": [
+                {"uid": 5, "dims": [2, 3, 4]},
+                {"uid": 6, "dims": [4]},
+                {"uid": 7, "dims": [4]},
+            ],
+            "nodes": [
+                {
+                    "type": "LayernormBackwardAttributes",
+                    "inputs": {
+                        "dy_tensor_uid": 1,
+                        "x_tensor_uid": 2,
+                        "scale_tensor_uid": 3,
+                    },
+                    "outputs": {
+                        "dx_tensor_uid": 5,
+                        "dscale_tensor_uid": 6,
+                        "dbias_tensor_uid": 7,
+                    },
+                    "attributes": {"normalized_dim_count": 1},
+                }
+            ],
+        }
+        x = torch.randn(2, 3, 4)
+        tensors = {1: torch.randn(2, 3, 4), 2: x, 3: torch.ones(4)}
+
+        with pytest.raises(ValueError, match="inv_variance or epsilon"):
+            pytorch_ops.execute_graph(graph_json, tensors)
+
+    def test_batchnorm_variance_ext_uses_builtin_batch_norm(self) -> None:
+        x = torch.randn(2, 3, 4, 4)
+        mean = torch.randn(3)
+        variance = torch.rand(3) + 0.5
+        scale = torch.randn(3)
+        bias = torch.randn(3)
+        graph_json = {
+            "tensors": [{"uid": 7, "dims": [2, 3, 4, 4]}],
+            "nodes": [
+                {
+                    "type": "BatchnormInferenceAttributesVarianceExt",
+                    "inputs": {
+                        "x_tensor_uid": 1,
+                        "mean_tensor_uid": 2,
+                        "variance_tensor_uid": 3,
+                        "scale_tensor_uid": 4,
+                        "bias_tensor_uid": 5,
+                        "epsilon_tensor_uid": 6,
+                    },
+                    "outputs": {"y_tensor_uid": 7},
+                }
+            ],
+        }
+        tensors = {
+            1: x,
+            2: mean.reshape(1, 3, 1, 1),
+            3: variance.reshape(1, 3, 1, 1),
+            4: scale.reshape(1, 3, 1, 1),
+            5: bias.reshape(1, 3, 1, 1),
+            6: torch.tensor([1e-4]),
+        }
+
+        pytorch_ops.execute_graph(graph_json, tensors)
+
+        expected = torch.nn.functional.batch_norm(
+            x, mean, variance, weight=scale, bias=bias, training=False, eps=1e-4
+        )
+        torch.testing.assert_close(tensors[7], expected)
+        # Uses the PyTorch batchnorm primitive, so it is not flagged as manual.
+        assert pytorch_ops.get_reference_warnings(graph_json) == []
+
     @pytest.mark.parametrize(
         "mode,expected",
         [
@@ -709,6 +867,20 @@ class TestPyTorchOpsNewHandlers:
                     "outputs": {"dx_tensor_uid": 4, "dscale_tensor_uid": 2},
                 },
                 {
+                    "name": "ln_bwd",
+                    "type": "LayernormBackwardAttributes",
+                    "inputs": {
+                        "dy_tensor_uid": 1,
+                        "x_tensor_uid": 1,
+                        "scale_tensor_uid": 2,
+                    },
+                    "outputs": {
+                        "dx_tensor_uid": 4,
+                        "dscale_tensor_uid": 2,
+                        "dbias_tensor_uid": 2,
+                    },
+                },
+                {
                     "name": "mul_no_zeros",
                     "type": "ReductionAttributes",
                     "inputs": {"in_tensor_uid": 1},
@@ -734,10 +906,11 @@ class TestPyTorchOpsNewHandlers:
 
         warnings = pytorch_ops.get_reference_warnings(graph_json)
 
-        assert len(warnings) == 4
+        assert len(warnings) == 5
         assert all("not solely built-in PyTorch operator time" in w for w in warnings)
         assert any("LayernormAttributes" in w for w in warnings)
         assert any("RMSNormBackwardAttributes" in w for w in warnings)
+        assert any("LayernormBackwardAttributes" in w for w in warnings)
         assert any("MUL_NO_ZEROS" in w for w in warnings)
         assert any("AVGPOOL_EXCLUDE_PADDING" in w for w in warnings)
 

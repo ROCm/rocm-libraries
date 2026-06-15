@@ -438,6 +438,7 @@ class TestPyTorchProviderGraphSupport:
         assert "BatchnormBackwardAttributes" in supported
         assert "SdpaAttributes" in supported
         assert "LayernormAttributes" in supported
+        assert "LayernormBackwardAttributes" in supported
         assert "RMSNormAttributes" in supported
         assert "RMSNormBackwardAttributes" in supported
         assert "ReductionAttributes" in supported
@@ -828,6 +829,64 @@ class TestPyTorchProviderNewOps:
         np.testing.assert_allclose(outputs[5].data, x_t.grad.numpy(), rtol=1e-6)
         np.testing.assert_allclose(outputs[6].data, scale_t.grad.numpy(), rtol=1e-6)
         np.testing.assert_allclose(outputs[7].data, dy_t.sum(dim=(0, 1)).numpy())
+
+    def test_layernorm_backward_reference_matches_autograd(self) -> None:
+        provider = ReferenceProviderRegistry.get_provider("pytorch")
+        x_t = (torch.arange(24, dtype=torch.float32).reshape(2, 3, 4) / 7).requires_grad_()
+        scale_t = torch.tensor([1.0, 0.5, 2.0, -1.0], requires_grad=True)
+        bias_t = torch.tensor([0.1, -0.2, 0.3, -0.4], requires_grad=True)
+        dy_t = torch.linspace(-0.2, 0.3, steps=24).reshape(2, 3, 4)
+        y_t = torch.nn.functional.layer_norm(
+            x_t, (4,), weight=scale_t, bias=bias_t, eps=1e-5
+        )
+        y_t.backward(dy_t)
+        mean = x_t.detach().mean(dim=2, keepdim=True)
+        inv = torch.rsqrt(x_t.detach().var(dim=2, unbiased=False, keepdim=True) + 1e-5)
+
+        graph_json = {
+            "tensors": [
+                {"uid": 6, "dims": [2, 3, 4], "data_type": "float"},
+                {"uid": 7, "dims": [4], "data_type": "float"},
+                {"uid": 8, "dims": [4], "data_type": "float"},
+            ],
+            "nodes": [
+                {
+                    "type": "LayernormBackwardAttributes",
+                    "inputs": {
+                        "dy_tensor_uid": 1,
+                        "x_tensor_uid": 2,
+                        "scale_tensor_uid": 3,
+                        "mean_tensor_uid": 4,
+                        "inv_variance_tensor_uid": 5,
+                    },
+                    "outputs": {
+                        "dx_tensor_uid": 6,
+                        "dscale_tensor_uid": 7,
+                        "dbias_tensor_uid": 8,
+                    },
+                    "attributes": {"normalized_dim_count": 1},
+                }
+            ],
+        }
+
+        outputs = provider.compute_reference(
+            graph_json,
+            {
+                1: dy_t.numpy(),
+                2: x_t.detach().numpy(),
+                3: scale_t.detach().numpy(),
+                4: mean.numpy(),
+                5: inv.numpy(),
+            },
+        )
+
+        np.testing.assert_allclose(outputs[6].data, x_t.grad.numpy(), rtol=1e-5, atol=1e-6)
+        np.testing.assert_allclose(
+            outputs[7].data, scale_t.grad.numpy(), rtol=1e-5, atol=1e-6
+        )
+        np.testing.assert_allclose(
+            outputs[8].data, bias_t.grad.numpy(), rtol=1e-5, atol=1e-6
+        )
 
     def test_reduction_and_resample_references(self) -> None:
         provider = ReferenceProviderRegistry.get_provider("pytorch")

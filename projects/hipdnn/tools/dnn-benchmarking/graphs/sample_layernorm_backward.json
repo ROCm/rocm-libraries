@@ -1,0 +1,146 @@
+{
+    "name": "sample_layernorm_backward_2x3x4",
+    "compute_data_type": "float",
+    "io_data_type": "float",
+    "intermediate_data_type": "float",
+    "tensors": [
+        {
+            "uid": 1,
+            "name": "dy",
+            "dims": [
+                2,
+                3,
+                4
+            ],
+            "strides": [
+                12,
+                4,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 2,
+            "name": "input_x",
+            "dims": [
+                2,
+                3,
+                4
+            ],
+            "strides": [
+                12,
+                4,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 3,
+            "name": "scale",
+            "dims": [
+                4
+            ],
+            "strides": [
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 4,
+            "name": "saved_mean",
+            "dims": [
+                2,
+                3,
+                1
+            ],
+            "strides": [
+                3,
+                1,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 5,
+            "name": "saved_inv_variance",
+            "dims": [
+                2,
+                3,
+                1
+            ],
+            "strides": [
+                3,
+                1,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 6,
+            "name": "dx",
+            "dims": [
+                2,
+                3,
+                4
+            ],
+            "strides": [
+                12,
+                4,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 7,
+            "name": "dscale",
+            "dims": [
+                4
+            ],
+            "strides": [
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 8,
+            "name": "dbias",
+            "dims": [
+                4
+            ],
+            "strides": [
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        }
+    ],
+    "nodes": [
+        {
+            "name": "layernorm_backward_node",
+            "type": "LayernormBackwardAttributes",
+            "compute_data_type": "float",
+            "inputs": {
+                "dy_tensor_uid": 1,
+                "x_tensor_uid": 2,
+                "scale_tensor_uid": 3,
+                "mean_tensor_uid": 4,
+                "inv_variance_tensor_uid": 5
+            },
+            "outputs": {
+                "dx_tensor_uid": 6,
+                "dscale_tensor_uid": 7,
+                "dbias_tensor_uid": 8
+            },
+            "attributes": {
+                "normalized_dim_count": 1
+            }
+        }
+    ]
+}

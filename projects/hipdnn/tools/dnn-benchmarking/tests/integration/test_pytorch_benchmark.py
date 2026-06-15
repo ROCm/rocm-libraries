@@ -88,6 +88,12 @@ class TestPyTorchOps:
         assert "BatchnormInferenceAttributesVarianceExt" in supported
         assert "BatchnormBackwardAttributes" in supported
         assert "SdpaAttributes" in supported
+        assert "LayernormAttributes" in supported
+        assert "LayernormBackwardAttributes" in supported
+        assert "RMSNormAttributes" in supported
+        assert "RMSNormBackwardAttributes" in supported
+        assert "ReductionAttributes" in supported
+        assert "ResampleFwdAttributes" in supported
 
     def test_supports_graph(self, sample_conv_graph):
         """Test graph support checking."""
@@ -299,6 +305,7 @@ class TestPyTorchCudaExecutor:
             "sample_sdpa.json",
             "sample_mha_sdpa.json",
             "sample_layernorm.json",
+            "sample_layernorm_backward.json",
             "sample_rmsnorm.json",
             "sample_rmsnorm_backward.json",
             "sample_reduction.json",
