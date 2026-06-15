@@ -34,17 +34,15 @@ import math
 from rocisa.code import Module
 
 
-# A ds_load_b128 reads 4 contiguous VGPRs, and emitSingleDsRead addresses a
-# tile's registers as baseVgpr + readIdx*4, so a tile must be one contiguous
-# block. Aligning to min(numRegs, 4) gives full b128 tiles the 4-VGPR
-# alignment the load needs without rounding small (e.g. 1-VGPR) tiles up to 4
-# and wasting registers.
+# ds_load_b128 reads 4 contiguous VGPRs.
 DS_B128_VGPRS = 4
 
 
 def _checkout_tile(pool, numRegs, tag):
     """Check out one VGPR tile as a single contiguous, b128-aligned block."""
     from Tensile.Components.Subtile.Kernel import RegisterTileInfo
+    # min(): full b128 tiles get 4-VGPR alignment; smaller tiles aren't padded
+    # up to 4 (which would waste registers and can break occupancy).
     align = min(numRegs, DS_B128_VGPRS)
     base = pool.checkOutAligned(numRegs, align, tag=tag)
     tile = RegisterTileInfo(pool)
