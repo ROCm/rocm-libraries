@@ -9,6 +9,7 @@ Documentation for rocThrust available at
 
 ### Changed
 
+* Replaced `hip::std::__identity` to `hip::std::identity`.
 * Replaced bad_alloc, cassert, cfloat, cmath, complex, cstddef, cstdint, cstring, initializer_list, limits, move and type_traits operators to `hip::std` operators.
 
 ### Removed
