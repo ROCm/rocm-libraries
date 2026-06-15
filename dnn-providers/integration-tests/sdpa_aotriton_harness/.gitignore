@@ -1,0 +1,5 @@
+# Runtime artifacts produced by the harness
+runs/
+# Python bytecode caches
+__pycache__/
+*.pyc

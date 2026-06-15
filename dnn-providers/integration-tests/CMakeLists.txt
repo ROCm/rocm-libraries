@@ -154,6 +154,13 @@ target_compile_options(${INTEGRATION_TESTS_EXE} PRIVATE ${INTEGRATION_TESTS_WARN
 clang_tidy_check(${INTEGRATION_TESTS_EXE})
 
 add_subdirectory(gpu_ref)
+
+option(BUILD_SDPA_AOTRITON_HARNESS
+    "Build the standalone SDPA gpu_ref vs AOTriton comparison driver" OFF)
+if(BUILD_SDPA_AOTRITON_HARNESS)
+    add_subdirectory(sdpa_aotriton_harness)
+endif()
+
 add_subdirectory(tests)
 
 # Finalize test targets with prefix to avoid collisions in superbuild mode
