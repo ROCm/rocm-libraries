@@ -2526,7 +2526,17 @@ class Solution(collections.abc.Mapping):
       # Currently, only the mode that disables VA_VDST and VM_VSRC checks is supported.
       return 2
 
+    # StinkyTofu expert scheduling mode2 (EnableStinkyTofuESM2) — independent of the rocisa ExpertSchedulingMode rules.
+    def evaluateStinkyTofuESM2() -> bool:
+      if not isaInfoMap[isa].archCaps["HasSchedMode"]: return False
+      # stinkytofu does not yet support f64 (double / double-complex) datatypes
+      if state["ProblemType"]["MacDataTypeA"].isDouble() or state["ProblemType"]["MacDataTypeA"].isDoubleComplex(): return False
+      if state["ProblemType"]["MacDataTypeB"].isDouble() or state["ProblemType"]["MacDataTypeB"].isDoubleComplex(): return False
+      if state["ProblemType"]["ComputeDataType"].isDouble() or state["ProblemType"]["ComputeDataType"].isDoubleComplex(): return False
+      return True
+
     state["ExpertSchedulingMode"] = evaluateExpertSchedulingMode()
+    state["EnableStinkyTofuESM2"] = evaluateStinkyTofuESM2()
 
     state["ESMRuntimeGate"] = tuple(state["ISA"])[:2] == (12, 0)
     # Some restrictions for float4 and 6bitFloat:
