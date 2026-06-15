@@ -119,14 +119,18 @@ int DirectionPerfDbCode(conv::Direction d)
 
 std::string DataTypeName(miopenDataType_t t)
 {
-    switch(t)
-    {
-    case miopenHalf: return "fp16";
-    case miopenFloat: return "fp32";
-    case miopenBFloat16: return "bf16";
-    case miopenInt8: return "int8";
-    default: return "";
-    }
+    // Only the four dtypes in the model's data_type vocab are named; anything
+    // else returns "" (encoded as the missing category). An if-chain avoids
+    // -Wswitch-enum, which would require listing every miopenDataType_t value.
+    if(t == miopenHalf)
+        return "fp16";
+    if(t == miopenFloat)
+        return "fp32";
+    if(t == miopenBFloat16)
+        return "bf16";
+    if(t == miopenInt8)
+        return "int8";
+    return "";
 }
 
 // Fill the problem feature block (indices 0..32). The 6 derived workload
