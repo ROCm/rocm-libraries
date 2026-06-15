@@ -1805,7 +1805,7 @@ sparse_attn_result sparse_attn_fwd_run(
                     causal_type, mask_decoded.left, mask_decoded.right,
                     static_cast<int>(mask_decoded.type), stream_config,
                     attention_sink, logits_soft_cap_user, qscale,
-                    {}, {},
+                    {}, {}, {}, {}, {},
                     bs_sage.args.type, bs_sage.args.ptr, bs_sage.args.stride_bias,
                     bs_sage.args.nhead_stride_bias, bs_sage.args.batch_stride_bias,
                     sage_data_type, &dev_lut, &dev_vbn);
@@ -2287,6 +2287,15 @@ sparse_attn_result sparse_attn_fwd_run(
             auto bs_sage = setup_bias<float>(bi_sage, batch, nhead, seqlen_q, seqlen_k,
                                              causal_type, seed + 500, "sparge_sage");
 
+            const auto q_blocks_call = seqlens_to_blocks(seqlen_qs, block_size);
+            const auto k_blocks_call = seqlens_to_blocks(seqlen_ks, block_size);
+            const auto seqstart_q_block_host = to_seqstarts(q_blocks_call);
+            const auto seqstart_k_block_host = to_seqstarts(k_blocks_call);
+            std::vector<int32_t> mask_batch_offsets(batch + 1, 0);
+            for(int b = 0; b < batch; ++b)
+                mask_batch_offsets[b + 1] =
+                    mask_batch_offsets[b] + q_blocks_call[b] * k_blocks_call[b];
+
             float ave = -1.0f;
             std::vector<int32_t> dev_lut, dev_vbn; // device's selected blocks (delta-encoded)
             try
@@ -2298,7 +2307,8 @@ sparse_attn_result sparse_attn_fwd_run(
                     causal_type, mask_decoded.left, mask_decoded.right,
                     static_cast<int>(mask_decoded.type), stream_config,
                     attention_sink, logits_soft_cap_user, qscale,
-                    seqlen_qs, seqlen_ks,
+                    seqstart_q_host, seqstart_k_host,
+                    seqstart_q_block_host, seqstart_k_block_host, mask_batch_offsets,
                     bs_sage.args.type, bs_sage.args.ptr, bs_sage.args.stride_bias,
                     bs_sage.args.nhead_stride_bias, bs_sage.args.batch_stride_bias,
                     sage_data_type, &dev_lut, &dev_vbn);

@@ -155,9 +155,13 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,    
                                    bool attention_sink = false,
                                    float logits_soft_cap = 0.0f,
                                    const std::string& qscale = "perwarp",
-                                   // Group / varlen mode: non-empty -> packed Q/K/V/O.
-                                   const std::vector<int32_t>& seqlen_qs = {},
-                                   const std::vector<int32_t>& seqlen_ks = {},
+                                   // Group / varlen mode: caller-precomputed prefix-sum + block
+                                   // tables (non-empty seqstart_q_host -> packed Q/K/V/O).
+                                   const std::vector<int32_t>& seqstart_q_host       = {},
+                                   const std::vector<int32_t>& seqstart_k_host       = {},
+                                   const std::vector<int32_t>& seqstart_q_block_host = {},
+                                   const std::vector<int32_t>& seqstart_k_block_host = {},
+                                   const std::vector<int32_t>& mask_batch_offsets    = {},
                                    // Bias: 0=no_bias, 1=elementwise, 2=alibi (slopes or dense
                                    // [.., Sq, Sk] in bias_ptr; strides as for sage attn).
                                    int bias_type            = 0,
