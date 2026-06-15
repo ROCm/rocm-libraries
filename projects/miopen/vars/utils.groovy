@@ -28,7 +28,6 @@ import org.jenkinsci.plugins.workflow.graph.FlowGraphWalker
 import org.jenkinsci.plugins.workflow.actions.ErrorAction
 import org.jenkinsci.plugins.workflow.actions.LabelAction
 import org.jenkinsci.plugins.workflow.actions.ThreadNameAction
-import org.jenkinsci.plugins.workflow.actions.ResultAction
 import org.jenkinsci.plugins.workflow.cps.nodes.StepStartNode
 import org.jenkinsci.plugins.workflow.cps.nodes.StepEndNode
 
@@ -990,10 +989,6 @@ def getPassedStagesFromBuild(def rawBuild) {
         def endNode   = endNodes[startId]
         if (!endNode) continue
         if (errorIds.contains(startId) || errorIds.contains(endNode.id)) continue
-
-        // check the StageResult to catch stages marked FAILURE.
-        def stageResult = endNode.getAction(ResultAction)
-        if (stageResult?.result?.toString() != 'SUCCESS') continue
 
         passed << stageName
     }
