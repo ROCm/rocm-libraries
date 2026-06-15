@@ -8,7 +8,7 @@
 //   mfma_f32_32x32x16: 32 spatial × 32 K-output, 16-ch C-reduction
 //
 // Splits the C-reduction across waves within the same workgroup. Each wave
-// handles one channels_per_group C-slice, all producing partial sums for
+// handles one or more channels_per_group C-slices, all producing partial sums for
 // the same block_k_size K-channels. An LDS-based cross-wave reduction
 // combines the partial sums before output.
 //
@@ -17,7 +17,6 @@
 //   - block_k_size = mfma_n (16 or 32 K-channels)
 //   - channels_per_group = mfma_k (32 or 16 C-channels per wave)
 //   - block_c = waves_per_wg * channels_per_group
-//   - No atomics, no serial C-loop per wave
 //   - Cross-wave LDS reduction at flush points
 //
 // Supported: fp16 and bf16, Fprop and Dgrad.
@@ -61,7 +60,7 @@ enum class MfmaShape
 // Config — kernel configuration for v3 cross-wave LDS reduction.
 //
 // Parameters:
-//   mfma_shape: M16N16K32 (only supported shape; M32N32K16 was dropped)
+//   mfma_shape: M16N16K32
 //   waves_per_group() = 1 (each wave is its own C-group)
 //   block_groups() = waves_per_wg
 //   channels_per_group() = mfma_k (32)
@@ -161,8 +160,7 @@ struct Config
             epilogue_suffix = "_lds_staged_epilogue";
         }
 
-        std::string cspw_suffix =
-            (c_slices_per_wave > 1) ? ("_cspw" + std::to_string(c_slices_per_wave)) : "";
+        std::string cspw_suffix = "_cspw_" + std::to_string(c_slices_per_wave);
 
         return base + epilogue_suffix + cspw_suffix;
     }
