@@ -223,7 +223,7 @@ def create_writer(cfg, mi_wave_group=None, geometry=None, inst_k=32, bpe=2):
     writer.sgprs = {}
 
     # Reserve v0 for Serial (hardware workitem_id)
-    writer.vgprPool.checkOut(1)
+    writer.vgprPool.checkOut(1, tag="create_writer_vgprSerial")
 
     # Build kernel and TileInfo
     kernel = _create_kernel(cfg, mi_wave_group=mi_wave_group, inst_k=inst_k, bpe=bpe)
@@ -263,7 +263,7 @@ def _generate_tile_asm(cfg, emitter, geometry=None, inst_k=32, bpe=2):
     init_rocisa()
     # Reserve s0-s11: s[0:1]=kernarg ptr (HW), s[2:3]=workgroup IDs (HW),
     # s[4:5]=output ptr, s[6:9]=padding, s10=StrideA0I, s11=StrideB1J
-    writer.sgprPool.checkOut(12)
+    writer.sgprPool.checkOut(12, tag="_generate_tile_asm_sgprs")
     writer.sgprs["StrideA0I"] = 10
     writer.sgprs["StrideB1J"] = 11
     tileInfoA.allocOffsetRegisters(writer, kernel)
@@ -730,7 +730,7 @@ def setup_roundtrip_writer(cfg, geometry=None, inst_k=32, bpe=2):
     # Reserve s0-s11: s[0:1]=kernarg ptr (HW), s[2:3]=workgroup IDs (HW),
     # s[4:5]=input_A_ptr, s[6:7]=input_B_ptr, s[8:9]=output_ptr,
     # s10=StrideA0I, s11=StrideB1J
-    writer.sgprPool.checkOut(12)
+    writer.sgprPool.checkOut(12, tag="_setup_roundtrip_writer_sgprs")
     writer.sgprs["StrideA0I"] = 10
     writer.sgprs["StrideB1J"] = 11
     tileInfoA.allocOffsetRegisters(writer, kernel)
