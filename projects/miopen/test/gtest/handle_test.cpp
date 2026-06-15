@@ -91,15 +91,8 @@ static void run2s(const miopen::Handle& h, std::size_t n)
 {
     std::vector<int> data_in(n, 1);
     auto data_dev = h.Write(data_in);
-    h.AddKernel("NoAlgo",
-                "",
-                "test_hip.cpp",
-                "write",
-                {n, 1, 1},
-                {n, 1, 1},
-                "",
-                0,
-                Write2s())(data_dev.get());
+    h.AddKernel("NoAlgo", "", "test_hip.cpp", "write", {n, 1, 1}, {n, 1, 1}, "", 0, Write2s())(
+        data_dev.get());
     std::fill(data_in.begin(), data_in.end(), 2);
 
     auto data_out = h.Read<int>(data_dev, n);
@@ -112,9 +105,7 @@ static void test_multithreads(const bool with_stream = false)
     auto&& h2 = get_handle_with_stream(h1);
     std::thread([&] { run2s(with_stream ? h2 : h1, 16); }).join();
     std::thread([&] { run2s(with_stream ? h2 : h1, 32); }).join();
-    std::thread([&] {
-        std::thread([&] { run2s(with_stream ? h2 : h1, 64); }).join();
-    }).join();
+    std::thread([&] { std::thread([&] { run2s(with_stream ? h2 : h1, 64); }).join(); }).join();
     run2s(with_stream ? h2 : h1, 4);
 }
 
@@ -133,27 +124,13 @@ static std::string WriteError()
 static void test_errors()
 {
     auto&& h = get_handle();
-    EXPECT_ANY_THROW(h.AddKernel("NoAlgo",
-                                 "",
-                                 "error_hip.cpp",
-                                 "write",
-                                 {1, 1, 1},
-                                 {1, 1, 1},
-                                 "",
-                                 0,
-                                 WriteError()));
+    EXPECT_ANY_THROW(h.AddKernel(
+        "NoAlgo", "", "error_hip.cpp", "write", {1, 1, 1}, {1, 1, 1}, "", 0, WriteError()));
 
     try
     {
-        h.AddKernel("NoAlgo",
-                    "",
-                    "error_hip.cpp",
-                    "write",
-                    {1, 1, 1},
-                    {1, 1, 1},
-                    "",
-                    0,
-                    WriteError());
+        h.AddKernel(
+            "NoAlgo", "", "error_hip.cpp", "write", {1, 1, 1}, {1, 1, 1}, "", 0, WriteError());
     }
     catch(miopen::Exception& e)
     {
@@ -178,15 +155,8 @@ static void test_warnings()
 {
 #if MIOPEN_BUILD_DEV && !WORKAROUND_ISSUE_2600 && !MIOPEN_WORKAROUND_COMPILER_CHANGE
     auto&& h = get_handle();
-    EXPECT_ANY_THROW(h.AddKernel("NoAlgo",
-                                 "",
-                                 "nop_hip.cpp",
-                                 "write",
-                                 {1, 1, 1},
-                                 {1, 1, 1},
-                                 "",
-                                 0,
-                                 WriteNop()));
+    EXPECT_ANY_THROW(
+        h.AddKernel("NoAlgo", "", "nop_hip.cpp", "write", {1, 1, 1}, {1, 1, 1}, "", 0, WriteNop()));
 #endif
 }
 

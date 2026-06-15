@@ -1212,7 +1212,7 @@ protected:
 
         miopenRNNAlgo_t algoMode  = miopenRNNdefault;
         miopenHandle_t mio_handle = nullptr;
-        void* dropout_state_buf = nullptr;
+        void* dropout_state_buf   = nullptr;
         if(useDropout != 0)
         {
             miopenCreateWithStream(&mio_handle, handle.GetStream());

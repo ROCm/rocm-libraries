@@ -140,9 +140,9 @@ bool IsHipKernelsEnabled()
 
 void ExecutionContext::DetectRocm()
 {
-    use_asm_kernels         = false;
-    use_hip_kernels         = IsHipKernelsEnabled();
-    rmv                     = rocm_meta_version::Default;
+    use_asm_kernels = false;
+    use_hip_kernels = IsHipKernelsEnabled();
+    rmv             = rocm_meta_version::Default;
     if(IsAmdRocmOpencl(*this))
     {
         use_asm_kernels = !env::disabled(MIOPEN_DEBUG_GCN_ASM_KERNELS) && ValidateGcnAssembler();
