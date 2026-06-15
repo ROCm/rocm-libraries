@@ -210,6 +210,14 @@ class TestPyTorchOpsGetHandler:
 class TestPyTorchOpsSupportsGraph:
     """Tests for graph support checking."""
 
+    def test_supported_operations(self) -> None:
+        """Test that expected operations are registered as supported."""
+        supported = pytorch_ops.get_supported_operations()
+        assert "ConvolutionFwdAttributes" in supported
+        assert "MatmulAttributes" in supported
+        assert "PointwiseAttributes" in supported
+        assert "SdpaAttributes" in supported
+
     def test_supports_graph_empty_nodes(self) -> None:
         """Test that empty graph is supported."""
         graph_json = {"nodes": []}

@@ -6140,6 +6140,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                "DebugPass": str(globalParameters.get("StinkyTofuDebugPass") or ""),
                                "PassOrderSnapshotJson": str(globalParameters.get("StinkyTofuPassOrderSnapshotJson") or ""),
                                "EnableWaitCntInsertion": True if stinky_opt_level != 0 else not globalParameters.get("DisableSTWaitCnt", True),
+                               # True: expert scheduling mode2; False: mode 0. Independent of ScheduleIterAlg/OptLevel.
+                               "EnableESM2": kernel["EnableStinkyTofuESM2"],
                                "TileA0": kernel["ThreadTile0"],
                                "TileB0": kernel["ThreadTile1"],
                                "TileM0": kernel["MacroTile0"],
