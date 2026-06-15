@@ -1037,9 +1037,47 @@ def getPassedStagesFromBuild(def rawBuild) {
     return passed
 }
 
+// Walk the restart chain and consolidate passed stages across all builds
+// in the chain (as long as commit is the same). This handles the case where:
+// - Build #9 ran, 4 stages passed, 1 failed
+// - Build #10 restarted from #9, 1 stage re-ran and passed, but then failed partway
+// - Build #11 restarts from #10
+// We should report all 4 original passed stages from #9 plus any newly passed in #10,
+// so #11 doesn't unnecessarily re-run the 3 that passed in #9.
+@NonCPS
+def getPassedStagesAcrossRestartChain(def startBuild) {
+    def consolidatedPassed = [] as Set
+    def visited = [] as Set
+    def currentBuild = startBuild
+
+    while (currentBuild != null && !visited.contains(currentBuild.number)) {
+        visited << currentBuild.number
+
+        // Get passed stages from this build
+        def passedInThisBuild = getPassedStagesFromBuild(currentBuild)
+        consolidatedPassed.addAll(passedInThisBuild)
+
+        // Walk backwards through restart chain: find if this build was a restart
+        def restartCause = currentBuild?.getCauses()?.find { cause ->
+            cause.getClass().getName().contains('RestartDeclarativePipeline')
+        }
+        if (restartCause) {
+            currentBuild = restartCause.getOriginal()
+        } else {
+            // Not a restart, we've reached the beginning of the chain
+            break
+        }
+    }
+
+    return consolidatedPassed
+}
+
 // Returns [passedStages: Set<String>, debugMsg: String] for "Restart from Stage" builds.
 // passedStages is empty on failure or when there's nothing to skip (fail-open).
 // debugMsg contains a brief explanation suitable for echo.
+//
+// Handles restart chains: if build #11 restarts #10 which restarted #9,
+// and all have the same commit, we consolidate passed stages across all of them.
 //
 // Guards:
 // 1. Must be a "Restart from Stage" trigger - other triggers don't guarantee
@@ -1076,8 +1114,9 @@ def getPassedStagesFromPreviousBuild() {
 
         // No commit guard needed: getOriginal() returns the exact build being
         // restarted, so the commit is implicitly the same.
+        // Walk the restart chain and consolidate passed stages across all builds.
         debugMsg = "restarting from build #${prevRun.number}"
-        passed = getPassedStagesFromBuild(prevRun)
+        passed = getPassedStagesAcrossRestartChain(prevRun)
     } catch (Exception e) {
         debugMsg = "error (${e.message}), running all stages"
         return [passedStages: [] as Set, debugMsg: debugMsg]
