@@ -70,7 +70,7 @@ def run_conv_manifest_problem(
     else:
         bm = int(manifest["block_m"])
         bn = int(manifest["block_n"])
-        M = N * Di * Hi * Wi if is_3d else N * Hi * Wi
+        M = N * Do * Ho * Wo if is_3d else N * Ho * Wo
         gx, gy, gz = (
             (K + bn - 1) // bn,
             (M + bm - 1) // bm,
@@ -80,7 +80,7 @@ def run_conv_manifest_problem(
             gx, gy = gy, gx
     grid = (gx, gy, gz)
     block = (int(manifest["threads_per_block"]), 1, 1)
-    flop = 2.0 * N * Di * Hi * Wi * K * Z * Y * X * cpg if is_3d else 2.0 * N * Hi * Wi * K * Y * X * cpg
+    flop = 2.0 * N * Do * Ho * Wo * K * Z * Y * X * cpg if is_3d else 2.0 * N * Ho * Wo * K * Y * X * cpg
     bytes_xfer = float(A.itemsize) * (A.size + B.size + D.size)
 
     def make_args(rt: Runtime):
