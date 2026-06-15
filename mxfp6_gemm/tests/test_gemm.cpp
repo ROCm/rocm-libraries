@@ -12,8 +12,8 @@
 
 #include "mxfp6/gemm.hpp"
 #include "mxfp6/preprocess.hpp"
-#include "mxfp6/reference.hpp"
 #include "mxfp6/types.hpp"
+#include "reference.hpp"  // CPU reference GEMM (test-only, lives in tests/)
 using namespace mxfp6;
 static constexpr int KT = 192;
 

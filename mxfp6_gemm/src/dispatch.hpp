@@ -9,7 +9,7 @@
 //   * 256x256 (16-acc sweet spot) — workhorse for CU-filling shapes.
 //   * 128x256 (8-acc)             — WG-starved small-M, to fill idle CUs.
 // Same lds_gemm_hybrid_dripA kernel for both (tile-general); only the tile args differ.
-#include "lds_hybrid.hpp"
+#include "kernel.hpp"
 #include "mxfp6/gemm.hpp"  // TileChoice, choose_tile (declarations)
 namespace mxfp6 {
 namespace detail {

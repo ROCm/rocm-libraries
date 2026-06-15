@@ -1,19 +1,15 @@
 #pragma once
-// HYBRID experiment: A staged in LDS (deep-K double-buffer, unchanged), B streamed
-// DIRECT from HBM -> VGPR with a compile-time register ring buffer of depth PFD.
+// The MXFP6 GEMM kernel: A staged deep-K in LDS (double-buffered) + B streamed DIRECT from
+// HBM -> VGPR through a compile-time register ring of depth PFD. Bypassing B's LDS round-trip
+// removes the ds-read wall; the per-tile MFMA window (48 MFMA x 32cyc = 1536cyc) hides the
+// direct global_load latency as long as the ring stays ahead. The ring depth is bounded by
+// the VGPR budget (16 acc = 256 AccVGPR); PFD=5 is the deepest that keeps spill == 0.
 //
-// Hypothesis under test: the slow second hop (LDS ds_read, ~258cyc exposed at sub head)
-// is bypassed for B by reading B straight into registers; the per-tile MFMA window
-// (48 MFMA x 32cyc = 1536cyc) hides the direct global_load latency IF the ring is deep
-// enough to stay ahead. Blocker = VGPR budget (16 acc = 256 AccVGPR already). PFD is
-// swept to find the deepest ring that keeps .vgpr_spill_count == 0.
-//
-// B operand global address is derived from the LDS path: the LDS B tile was filled by
-//   LDS[m*KT_BYTES + ck*16] = global[Bg + m*B_row_bytes + kt_byte + ck*16]
-// and read_op read LDS[(blk*32+lane%32)*KT_BYTES + sub*48 + (lane>>5)*24], i.e. 24
-// contiguous bytes within row m. So the SAME 24 bytes live in global at:
+// B's operand global address mirrors the LDS layout read_op uses for A: for a given
+// (blk, sub, lane) the same 24 contiguous FP6 bytes live in global at
 //   Bg + (blk*32 + lane%32)*B_row_bytes + kt*KT_BYTES + sub*48 + (lane>>5)*24
-#include "lds.hpp"
+// (load_b_shuf reads them from the preshuffle_B layout instead, coalesced).
+#include "device_ops.hpp"
 namespace mxfp6 {
 
 // Coalesced B operand load from a PRESHUFFLED B (preshuffle_B layout): per 32x64 tile,
@@ -57,10 +53,10 @@ __device__ __forceinline__ void issue_A_chunks(uint32_t lds_base, int row_stride
     }
 }
 
-// HYBRID DRIP-A kernel (A staged deep-K in LDS + B-direct coalesced ring): A's 9
-// cooperative buffer_loads for the NEXT tile are dripped across THIS tile's MFMA quartets
-// instead of bursted. HARD_WAIT=true puts wait_vmcnt(0) before each DB barrier (hard RAW
-// guarantee for the dripped A; cheap because A is issued early). SHUF is forced true.
+// DRIP-A kernel (A staged deep-K in LDS + B-direct coalesced ring): A's cooperative
+// buffer_loads for the NEXT tile are dripped across THIS tile's MFMA quartets instead of
+// bursted. HARD_WAIT=true puts wait_vmcnt(0) before each DB barrier (hard RAW guarantee for
+// the dripped A; cheap because A is issued early).
 // A-drip schedule knob (LINEAR): which MFMA quartet issues which A chunks.
 //   ADRIP_START : first quartet that issues A chunks (skip the sub-head-stall quartets)
 //   ADRIP_STRIDE: quartets between successive issuing quartets (1 = consecutive)
@@ -107,7 +103,7 @@ __global__ void __launch_bounds__(256, MIN_OCC)
     }
     const char* Ag = reinterpret_cast<const char*>(A) + (size_t)(wg_m * M_TILE) * A_row_bytes;
 
-    AccTileA acc[M_PW][N_PW];
+    AccTile acc[M_PW][N_PW];
 #pragma unroll
     for (int mi = 0; mi < M_PW; mi++)
 #pragma unroll

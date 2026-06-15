@@ -108,12 +108,12 @@ drives it through the public API. Layout:
 |---|---|
 | `include/mxfp6/gemm.hpp` | **public API** — `mxfp6::gemm(OutType,…)` + `choose_tile` (device-free; host TUs can include it) |
 | `include/mxfp6/preprocess.hpp` | host: `quantize_to_mxfp6` / `preprocess_B` / `preshuffle_B` / `preprocess_scale` / `tile_scale` |
-| `include/mxfp6/{types,reference}.hpp` | data types / CPU reference GEMM |
+| `include/mxfp6/types.hpp` | FP6 E2M3 / E8M0 data types + dense FP6 packing |
 | `src/gemm.cpp` | library impl (HIP): `gemm()` + `choose_tile()`, instantiates F32/F16/BF16 |
 | `src/dispatch.hpp` | internal `detail::dispatch_gemm<OutT>` (shape→tile launch) |
-| `src/lds_hybrid.hpp` | **`lds_gemm_hybrid_dripA`** kernel + `load_b_shuf` + `issue_A_chunks` |
-| `src/lds.hpp` · `src/asm_utils.hpp` | device helpers (`read_op`, `asm_load*`) · MFMA/store/wait |
-| `tests/test_dispatch.cpp` | end-to-end correctness (fresh-alloc + CPU ref) + perf, via the public API |
+| `src/kernel.hpp` | **`lds_gemm_hybrid_dripA`** kernel + `load_b_shuf` + `issue_A_chunks` |
+| `src/device_ops.hpp` | device primitives: vector types, `read_op`, `asm_load*`, wait, scaled MFMA (`…_swapC`) |
+| `tests/test_gemm.cpp` · `tests/reference.hpp` | end-to-end correctness (fresh-alloc + CPU ref) + perf, via the public API · CPU reference GEMM |
 | `CMakeLists.txt` | HIP build: static lib `mxfp6gemm` + `ctest` |
 | `docs/perf_optimization_guide.md` | **perf theory** (AI / roofline / latency-hiding / big-tile / deep-K / MFMA / occ), formula-derived with worked examples & this kernel's real numbers |
 | `docs/PERF_SUMMARY.md` | executive summary (vs-CK, the structural ceiling, what it'd take to go higher) |
@@ -191,7 +191,7 @@ table (CK FP6 3200 > FP8 3019) is a *different machine/build* (no power cap); do
 
 ## Validation
 - Fresh-alloc 0x5A-poison vs CPU ref, both tile paths (256×256 and 128×256), incl. partial-grid
-  / non-square / k_tiles==1. `test_dispatch` runs the end-to-end correctness gate.
+  / non-square / k_tiles==1. `test_gemm` runs the end-to-end correctness gate.
 - ⚠️ `k_tiles==1` needs `wait_vmcnt(0)` in the odd-tail (no compute-window margin) — present.
 
 ## Dead ends — do NOT re-try without a new idea

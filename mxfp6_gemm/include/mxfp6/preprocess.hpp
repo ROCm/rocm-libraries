@@ -177,43 +177,6 @@ inline PreshuffledB preshuffle_B(const QuantizedMatrix& B_q) {
     return pb;
 }
 
-// Coalesce per-block scales for the MFMA kernel's scale loads.
-//
-// A wave consumes `group` consecutive 32-blocks (= NPW for B, = M_PER_WAVE for A)
-// at one ki. In the lane-ordered PreprocessedScale those `group` blocks are
-// `k64_iters*64` bytes apart, so the kernel must issue `group` separate
-// global_load_ubyte — gating each MFMA on its own scale byte (the vmcnt cascade).
-//
-// This regroups so the `group` bytes a lane needs become contiguous:
-//   out[((g*k64 + ki)*64 + lane)*group_pad + j] = scale of tile (g*group + j)
-// group_pad = round_up(group,4) so the lane reads a whole dword multiple in ONE
-// load (group=8 -> dwordx2, group<=4 -> dword), then byte-extracts in VGPR.
-struct CoalescedScale {
-    std::vector<uint8_t> data;
-    int num_groups, k64_iters, group, group_pad;
-};
-
-inline CoalescedScale preshuffle_scale(const PreprocessedScale& ps, int group) {
-    assert(group > 0 && ps.num_tiles % group == 0);
-    CoalescedScale cs;
-    cs.group = group;
-    cs.group_pad = (group + 3) / 4 * 4;
-    cs.num_groups = ps.num_tiles / group;
-    cs.k64_iters = ps.k64_iters;
-    cs.data.assign((size_t)cs.num_groups * ps.k64_iters * 64 * cs.group_pad, 0);
-
-    for (int tile = 0; tile < ps.num_tiles; tile++) {
-        int g = tile / group, j = tile % group;
-        for (int ki = 0; ki < ps.k64_iters; ki++) {
-            for (int lane = 0; lane < 64; lane++) {
-                uint8_t v = ps.data[(size_t)(tile * ps.k64_iters + ki) * 64 + lane];
-                cs.data[((size_t)(g * ps.k64_iters + ki) * 64 + lane) * cs.group_pad + j] = v;
-            }
-        }
-    }
-    return cs;
-}
-
 // Tile-grouped scale layout (host): a wave's `group` consecutive 32-blocks AND its `subs`
 // k64 sub-slabs of one K-tile become contiguous per lane, so the kernel fetches a whole
 // K-tile's scales in ONE dwordx{subs} load. Layout:
