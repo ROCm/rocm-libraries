@@ -1801,14 +1801,12 @@ sparse_attn_result sparse_attn_fwd_run(
                 ave = sparge_sage_sparse_attention<T>(
                     q_host, k_host, v_fp8, v_descale, output_host,
                     batch, nhead, nhead_k, seqlen_q, seqlen_k, hdim_q, hdim_v,
-                    i_perm, o_perm, hp, block_size, scale_s_user,
-                    causal_type, mask_decoded.left, mask_decoded.right,
-                    static_cast<int>(mask_decoded.type), stream_config,
-                    attention_sink, logits_soft_cap_user, qscale,
+                    i_perm, o_perm, /*is_v_rowmajor=*/true, seqlen_q, seqlen_k,
+                    stream_config, mask_str, bs_sage.args, scale_s_user,
+                    logits_soft_cap_user, hp, block_size, attention_sink,
+                    qscale, sage_data_type,
                     {}, {}, {}, {}, {},
-                    bs_sage.args.type, bs_sage.args.ptr, bs_sage.args.stride_bias,
-                    bs_sage.args.nhead_stride_bias, bs_sage.args.batch_stride_bias,
-                    sage_data_type, &dev_lut, &dev_vbn);
+                    &dev_lut, &dev_vbn);
             }
             catch(const std::exception& e)
             {
@@ -2303,15 +2301,13 @@ sparse_attn_result sparse_attn_fwd_run(
                 ave = sparge_sage_sparse_attention<T>(
                     q_packed, k_packed, v_fp8, v_descale, o_packed,
                     batch, nhead, nhead_k, seqlen_q, seqlen_k, hdim_q, hdim_v,
-                    i_perm, o_perm, hp, block_size, scale_s_user,
-                    causal_type, mask_decoded.left, mask_decoded.right,
-                    static_cast<int>(mask_decoded.type), stream_config,
-                    attention_sink, logits_soft_cap_user, qscale,
+                    i_perm, o_perm, /*is_v_rowmajor=*/true, seqlen_q, seqlen_k,
+                    stream_config, mask_str, bs_sage.args, scale_s_user,
+                    logits_soft_cap_user, hp, block_size, attention_sink,
+                    qscale, sage_data_type,
                     seqstart_q_host, seqstart_k_host,
                     seqstart_q_block_host, seqstart_k_block_host, mask_batch_offsets,
-                    bs_sage.args.type, bs_sage.args.ptr, bs_sage.args.stride_bias,
-                    bs_sage.args.nhead_stride_bias, bs_sage.args.batch_stride_bias,
-                    sage_data_type, &dev_lut, &dev_vbn);
+                    &dev_lut, &dev_vbn);
             }
             catch(const std::exception& e)
             {

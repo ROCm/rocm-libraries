@@ -567,28 +567,24 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
                                    int hdim_v,
                                    bool i_perm,
                                    bool o_perm,
+                                   bool is_v_rowmajor,
+                                   int max_seqlen_q,
+                                   int max_seqlen_k,
+                                   const ck_tile::stream_config& stream_config,
+                                   const std::string& mask_str,
+                                   const sparse_attn_bias_args& bias,
+                                   float scale_s_user,
+                                   float logits_soft_cap,
                                    const sparge_hyperparam_args& hp,
                                    int block_size,
-                                   float scale_s,
-                                   int causal_type,
-                                   int window_left,
-                                   int window_right,
-                                   int mask_type,
-                                   const ck_tile::stream_config& stream_config,
                                    bool attention_sink,
-                                   float logits_soft_cap,
                                    const std::string& qscale,
+                                   const std::string& data_type,
                                    const std::vector<int32_t>& seqstart_q_host,
                                    const std::vector<int32_t>& seqstart_k_host,
                                    const std::vector<int32_t>& seqstart_q_block_host,
                                    const std::vector<int32_t>& seqstart_k_block_host,
                                    const std::vector<int32_t>& mask_batch_offsets,
-                                   int bias_type,
-                                   const void* bias_ptr,
-                                   ck_tile::index_t stride_bias,
-                                   ck_tile::index_t nhead_stride_bias,
-                                   ck_tile::index_t batch_stride_bias,
-                                   const std::string& data_type,
                                    std::vector<int32_t>* out_lut,
                                    std::vector<int32_t>* out_vbn)
 {
@@ -602,6 +598,12 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         std::cerr << tag << " only hdim=block_size=128 supported.\n";
         return -1.0f;
     }
+    if(bias.type < 0 || bias.type > 2)
+    {
+        std::cerr << tag << " invalid bias.type=" << bias.type
+                  << " (expected 0=no, 1=elementwise, 2=alibi).\n";
+        return -1.0f;
+    }
     if((hp.cdfthreshd > 0.0f) == (hp.topk > 0.0f))
     {
         std::cerr << tag << " error: exactly one of hp.cdfthreshd / hp.topk must be > 0\n";
@@ -613,12 +615,18 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
                      "hp.simthreshold <= 0 → ptr ignored\n";
     }
 
-    const float scale = (scale_s != 0.0f)
-                            ? scale_s
-                            : 1.0f / ck_tile::sqrt(static_cast<float>(hdim_q));
-
     int32_t total_q_tokens = is_group_mode ? seqstart_q_host.back() : seqlen_q;
     int32_t total_k_tokens = is_group_mode ? seqstart_k_host.back() : seqlen_k;
+
+    if(max_seqlen_q == 0) max_seqlen_q = total_q_tokens;
+    if(max_seqlen_k == 0) max_seqlen_k = total_k_tokens;
+    (void)max_seqlen_k;
+
+    mask_info mask = mask_info::decode(mask_str, total_q_tokens, total_k_tokens);
+    ck_tile::index_t causal_type = get_causal_type(mask.type);
+    const float scale_s = (scale_s_user != 0.0f)
+                              ? scale_s_user
+                              : 1.0f / ck_tile::sqrt(static_cast<float>(hdim_q));
 
     (void)hipGetLastError();
     ck_tile::DeviceMem q_buf(TQ.get_element_space_size_in_bytes());
@@ -651,41 +659,16 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
 
     // Strides over the packed token totals (group) or per-seq dims (batch).
     auto st = compute_strides(nhead, nhead_k, total_q_tokens, total_k_tokens,
-                              hdim_q, hdim_v, i_perm, o_perm, /*is_v_rowmajor=*/true);
+                              hdim_q, hdim_v, i_perm, o_perm, is_v_rowmajor);
 
-    fmha_sparge_sage_fwd_args args{};
-    args.q_ptr          = q_buf.GetDeviceBuffer();
-    args.k_ptr          = k_buf.GetDeviceBuffer();
-    args.v_ptr          = v_buf.GetDeviceBuffer();
-    args.o_ptr          = o_buf.GetDeviceBuffer();
-    args.v_descale_ptr  = vdescale_buf.GetDeviceBuffer();
+    fmha_sparge_sage_fwd_args args;
     // Group: seqlen_q/k carry the MAX (mask smem + grid m-tiles); per-batch lengths in seqstart.
-    args.seqlen_q       = seqlen_q;
-    args.seqlen_k       = seqlen_k;
-    args.batch          = batch;
-    args.max_seqlen_q   = seqlen_q;
-    args.hdim_q         = hdim_q;
-    args.hdim_v         = hdim_v;
-    args.nhead_q        = nhead;
-    args.nhead_k        = nhead_k;
-    args.scale_s        = scale;
-    args.stride_q       = st.stride_q;
-    args.stride_k       = st.stride_k;
-    args.stride_v       = st.stride_v;
-    args.stride_o       = st.stride_o;
-    args.nhead_stride_q = st.nhead_stride_q;
-    args.nhead_stride_k = st.nhead_stride_k;
-    args.nhead_stride_v = st.nhead_stride_v;
-    args.nhead_stride_o = st.nhead_stride_o;
-    args.batch_stride_q = st.batch_stride_q;
-    args.batch_stride_k = st.batch_stride_k;
-    args.batch_stride_v = st.batch_stride_v;
-    args.batch_stride_o = st.batch_stride_o;
+    fill_common_args(args, q_buf, k_buf, v_buf, o_buf,
+                     batch, nhead, nhead_k, seqlen_q, seqlen_k, seqlen_q,
+                     hdim_q, hdim_v, st, mask, scale_s, bias, logits_soft_cap);
+    args.v_descale_ptr  = vdescale_buf.GetDeviceBuffer();
     args.pp_block_size  = block_size;
     args.causal_type       = causal_type;
-    args.window_size_left  = window_left;
-    args.window_size_right = window_right;
-    args.mask_type         = mask_type;
     // qscale -> per-token-group quant granularity. Pin the host literals below to
     // TileSageAttnTraits so a trait change can't silently desync the descale stride.
     {
@@ -722,11 +705,6 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
     args.batch_stride_v_descale = nhead_k * hdim_v;
     args.hp = hp;
     args.attention_sink = attention_sink;
-    args.logits_soft_cap = logits_soft_cap;
-    args.bias_ptr          = bias_ptr;
-    args.stride_bias       = stride_bias;
-    args.nhead_stride_bias = nhead_stride_bias;
-    args.batch_stride_bias = batch_stride_bias;
 
     if(is_group_mode)
     {
@@ -788,6 +766,9 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
     workspace.SetZero();
     args.workspace_ptr = workspace.GetDeviceBuffer();
 
+    // sparge_sage's traits struct differs from the shared fmha_jenga_fwd_traits used by
+    // fill_common_traits (it carries qscale/has_mask, not is_v_rowmajor/mask_type), so it
+    // is populated explicitly here.
     fmha_sparge_sage_fwd_traits traits;
     traits.hdim_q        = hdim_q;
     traits.hdim_v        = hdim_v;
@@ -795,11 +776,15 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
     traits.qscale        = qscale;
     traits.is_group_mode = is_group_mode;
     traits.has_mask      = (causal_type != 0);
-    traits.bias_type     = bias_type;
+    traits.bias_type     = bias.type;
 
     float ave_time = fmha_sparge_sage_fwd(traits, args, stream_config);
     if(ave_time < 0)
-        std::cerr << tag << " ERROR: dispatch failed.\n";
+    {
+        std::cerr << tag << " ERROR: dispatch failed (returned " << ave_time
+                  << "). mask_type=" << static_cast<int>(traits.has_mask)
+                  << ", data_type=" << traits.data_type << std::endl;
+    }
 
     HIP_CHECK_ERROR(hipStreamSynchronize(stream_config.stream_id_));
     o_buf.FromDevice(Y.data(), Y.get_element_space_size_in_bytes());
@@ -829,15 +814,15 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
     template float sparge_sage_sparse_attention<T>(                                    \
         const ck_tile::HostTensor<T>&, const ck_tile::HostTensor<T>&,                  \
         const ck_tile::HostTensor<ck_tile::fp8_t>&, const ck_tile::HostTensor<float>&, \
-        ck_tile::HostTensor<T>&, int, int, int, int, int, int, int, bool, bool,        \
-        const sparge_hyperparam_args&, int, float,                            \
-        int, int, int, int,                                                            \
-        const ck_tile::stream_config&, bool, float, const std::string&,                 \
+        ck_tile::HostTensor<T>&, int, int, int, int, int, int, int, bool, bool, bool,  \
+        int, int, const ck_tile::stream_config&, const std::string&,                   \
+        const sparse_attn_bias_args&, float, float,                                    \
+        const sparge_hyperparam_args&, int, bool,                                      \
+        const std::string&, const std::string&,                                        \
         const std::vector<int32_t>&, const std::vector<int32_t>&,                      \
         const std::vector<int32_t>&, const std::vector<int32_t>&,                      \
         const std::vector<int32_t>&,                                                   \
-        int, const void*, ck_tile::index_t, ck_tile::index_t, ck_tile::index_t,        \
-        const std::string&, std::vector<int32_t>*, std::vector<int32_t>*)
+        std::vector<int32_t>*, std::vector<int32_t>*)
 
 #define INSTANTIATE_JENGA(T)                                                           \
     template float jenga_sparse_attention<T>(const ck_tile::HostTensor<T>&,            \
