@@ -85,7 +85,7 @@ namespace TensileLite
             return false;
 
         z_stream strm{};
-        if(inflateInit2(&strm, 15 + 32) != Z_OK)
+        if(inflateInit(&strm) != Z_OK)
             return false;
 
         strm.next_in  = compressed.data();

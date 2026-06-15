@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-import gzip
+import zlib
 from pathlib import Path
 from typing import List
 
@@ -45,7 +45,7 @@ def _loadMapping(libDir: Path, arch: str):
     base = _archDir(libDir, arch) / f"TensileLiteLibrary_lazy_{arch}_Mapping.dat"
     gz_path = Path(str(base) + ".gz")
     if gz_path.is_file():
-        raw = gzip.decompress(gz_path.read_bytes())
+        raw = zlib.decompress(gz_path.read_bytes())
         return msgpack.unpackb(raw, raw=False, strict_map_key=False)
     with open(base, "rb") as f:
         return msgpack.unpack(f, raw=False, strict_map_key=False)
