@@ -216,12 +216,15 @@ else:
         from pathlib import Path
 
         _so = Path(_rocisa.__file__)
-        # Scan rocisa sources and, while stinkytofu is compiled into _rocisa.so,
-        # stinkytofu sources too. STINKYTOFU_SOURCE_ROOT is removed once rocisa
-        # and stinkytofu are loaded independently.
+        # Scan rocisa sources and stinkytofu asm-IR sources (since _rocisa.so
+        # links libstinkytofu.so for the toStinkyTofuModule / emitAssembly path).
         # Both roots are populated by CMake; an empty one signals a malformed
         # _build_info.py. Warn (rather than scan Path("") == the CWD) and skip it,
         # so a regression surfaces instead of silently disabling the check.
+        # Excluded from the stinkytofu scan:
+        #   - tests/        — test code is never compiled into .so
+        #   - src/ir/logical — logical IR is only used by _stinkytofu.so (left
+        #                      path); _rocisa.so never touches logical modules.
         _roots = []
         for _name, _root in (("rocisa", _bi.SOURCE_ROOT), ("stinkytofu", _bi.STINKYTOFU_SOURCE_ROOT)):
             if _root:
@@ -234,7 +237,10 @@ else:
                     f"_build_info.py; skipping it. Rebuild with: invoke rocisa",
                     stacklevel=2,
                 )
-        _stale = _find_stale_sources(_so, _roots, _bi.BUILD_DIR)
+        _st_root = Path(_bi.STINKYTOFU_SOURCE_ROOT) if _bi.STINKYTOFU_SOURCE_ROOT else None
+        _st_skip = {_st_root / "tests", _st_root / "src" / "ir" / "logical"} if _st_root else set()
+        _all_stale = _find_stale_sources(_so, _roots, _bi.BUILD_DIR)
+        _stale = [s for s in _all_stale if not any(Path(s).is_relative_to(sk) for sk in _st_skip)]
         if _stale:
             _preview = _stale[:3] + (["..."] if len(_stale) > 3 else [])
             raise ImportError(
@@ -242,7 +248,7 @@ else:
                 f"  Modified: {', '.join(_preview)}\n"
                 "  Rebuild:  invoke rocisa"
             )
-        del _bi, _so, _stale, _roots, _name, _root, Path
+        del _bi, _so, _stale, _all_stale, _roots, _name, _root, _st_root, _st_skip, Path
 
 
 def hasStinkyTofuBackend() -> bool:
