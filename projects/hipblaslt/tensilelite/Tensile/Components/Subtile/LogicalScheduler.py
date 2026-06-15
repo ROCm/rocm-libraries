@@ -39,7 +39,7 @@ DS_B128_VGPRS = 4
 
 
 def _checkout_tile(pool, numRegs, tag):
-    """Check out one VGPR tile as a single contiguous, b128-aligned block."""
+    """Check out one VGPR tile as a single contiguous, min(numRegs, 4)-aligned block (b128-aligned when numRegs >= 4)."""
     from Tensile.Components.Subtile.Kernel import RegisterTileInfo
     # min(): full b128 tiles get 4-VGPR alignment; smaller tiles aren't padded
     # up to 4 (which would waste registers and can break occupancy).
