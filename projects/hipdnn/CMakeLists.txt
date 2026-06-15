@@ -203,10 +203,6 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL
 )
 
 include(cmake/Dependencies.cmake)
-# rocm-cmake provides rocm_setup_version, used by the product components
-# (backend, frontend) to parse HIPDNN_VERSION into MAJOR/MINOR/PATCH.
-find_package(ROCmCMakeBuildTools CONFIG REQUIRED)
-include(ROCMSetupVersion)
 include(cmake/VersionUtils.cmake)
 include(cmake/CheckToolVersion.cmake)
 include(cmake/ClangCheck.cmake)

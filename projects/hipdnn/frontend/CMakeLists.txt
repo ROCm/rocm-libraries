@@ -3,10 +3,10 @@
 
 include(CMakePackageConfigHelpers)
 
-# Set project, then derive version components from the single product version
-# via rocm-cmake (sets PROJECT_VERSION{,_MAJOR,_MINOR,_PATCH,_TWEAK}).
-project(hipdnn_frontend LANGUAGES CXX)
-rocm_setup_version(VERSION ${HIPDNN_VERSION} NO_GIT_TAG_VERSION)
+# Derive version components (PROJECT_VERSION{,_MAJOR,_MINOR,_PATCH}) from the
+# single product version, and set the tweak field to the git short hash.
+project(hipdnn_frontend VERSION ${HIPDNN_VERSION} LANGUAGES CXX)
+hipdnn_compute_git_tweak(PROJECT_VERSION_TWEAK)
 
 # Read data_sdk version for minimum requirement
 hipdnn_get_component_version(hipdnn_data_sdk HIPDNN_FRONTEND_DATA_SDK_MIN_VERSION)

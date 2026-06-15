@@ -3,10 +3,10 @@
 
 include(CMakePackageConfigHelpers)
 
-# Set project, then derive version components from the single product version
-# via rocm-cmake (sets PROJECT_VERSION{,_MAJOR,_MINOR,_PATCH,_TWEAK}).
-project(hipdnn_backend LANGUAGES CXX)
-rocm_setup_version(VERSION ${HIPDNN_VERSION} NO_GIT_TAG_VERSION)
+# Derive version components (PROJECT_VERSION{,_MAJOR,_MINOR,_PATCH}) from the
+# single product version, and set the tweak field to the git short hash.
+project(hipdnn_backend VERSION ${HIPDNN_VERSION} LANGUAGES CXX)
+hipdnn_compute_git_tweak(PROJECT_VERSION_TWEAK)
 
 find_package(hip REQUIRED)
 
