@@ -10,47 +10,39 @@ except:
     print('CSafeLoader is not installed.')
     DEFAULT_YAML_LOADER = yaml.SafeLoader
 
-def parse_general(loader: yaml.Loader, anchors: dict):
+def parse_general(loader: yaml.Loader):
     if loader.check_event(yaml.MappingStartEvent):
-        return parse_mapping(loader, anchors)
+        return parse_mapping(loader)
     elif loader.check_event(yaml.SequenceStartEvent):
-        return parse_sequence(loader, anchors)
+        return parse_sequence(loader)
     elif loader.check_event(yaml.ScalarEvent):
         return parse_scalar(loader)
-    elif loader.check_event(yaml.AliasEvent):
-        alias = loader.get_event().anchor
-        return anchors[alias] if alias in anchors else alias
 
-def parse_sequence(loader: yaml.Loader, anchors: dict):
+def parse_sequence(loader: yaml.Loader):
     ret = []
-    # pop sequence start event
-    evt = loader.get_event()
+    #pop sequence start event
+    loader.get_event()
     while not loader.check_event(yaml.SequenceEndEvent):
-        ret.append(parse_general(loader, anchors))
-    # store the anchor so it can be resolved when used as an alias
-    if evt.anchor:
-        anchors[evt.anchor] = ret
-    # pop sequence end event
+        ret.append(parse_general(loader))
+    #pop sequence end event
     loader.get_event()
     return ret
 
-def parse_mapping(loader: yaml.Loader, anchors: dict):
+def parse_mapping(loader: yaml.Loader):
     ret = {}
     k, v = None, None
-    # pop mapping start event
-    evt = loader.get_event()
+    #pop mapping start event
+    loader.get_event()
     while not loader.check_event(yaml.MappingEndEvent):
         if k is None:
             k = parse_scalar(loader)
         elif v is None:
-            v = parse_general(loader, anchors)
+            v = parse_general(loader)
             ret[k] = v
             k, v = None, None
 
-    # pop mapping end event
+    #pop mapping end event
     loader.get_event()
-    if evt.anchor:
-        anchors[evt.anchor] = ret
     return ret
 
 def is_float(value):
@@ -83,21 +75,19 @@ def parse_scalar(loader: yaml.Loader):
     return value
 
 def load_yaml_stream(yaml_path: Path, loader_type: yaml.Loader):
-    anchors: dict = {}
     with open(yaml_path, 'r') as f:
         loader = loader_type(f)
         assert loader.check_event(yaml.StreamStartEvent)
         loader.get_event()
         assert loader.check_event(yaml.DocumentStartEvent)
         loader.get_event()
-        logic = parse_general(loader, anchors)
+        logic = parse_general(loader)
         assert loader.check_event(yaml.DocumentEndEvent)
         loader.get_event()
         assert loader.check_event(yaml.StreamEndEvent)
         return logic
 
 def load_yaml_sequence_item(yaml_path: Path, loader_type: yaml.Loader, idx: int):
-    anchors: dict = {}
     with open(yaml_path, 'r') as f:
         loader = loader_type(f)
         assert loader.check_event(yaml.StreamStartEvent)
@@ -114,7 +104,7 @@ def load_yaml_sequence_item(yaml_path: Path, loader_type: yaml.Loader, idx: int)
         ret = None
 
         while not loader.check_event(yaml.SequenceEndEvent):
-            obj = parse_general(loader, anchors)
+            obj = parse_general(loader)
 
             if cur_idx == idx:
                 ret = obj
@@ -125,7 +115,6 @@ def load_yaml_sequence_item(yaml_path: Path, loader_type: yaml.Loader, idx: int)
         return ret
 
 def load_yaml_dict_item(yaml_path: Path, loader_type: yaml.Loader, key: str):
-    anchors: dict = {}
     with open(yaml_path, 'r') as f:
         loader = loader_type(f)
         assert loader.check_event(yaml.StreamStartEvent)
@@ -144,7 +133,7 @@ def load_yaml_dict_item(yaml_path: Path, loader_type: yaml.Loader, key: str):
             if k is None:
                 k = parse_scalar(loader)
             else:
-                value = parse_general(loader, anchors)
+                value = parse_general(loader)
 
                 if k == key:
                     v = value

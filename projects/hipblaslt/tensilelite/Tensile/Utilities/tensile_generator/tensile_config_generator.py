@@ -134,10 +134,6 @@ elif ArchitectureName == 'gfx90a':
     XCC = 1
     DeviceNames = ["Device 0050", "Device 0051", "Device 0052", "Device 0054", "Device 0062", "Device 7400", "Device 740c"]
     ScheduleName = "aldebaran"
-elif ArchitectureName == 'gfx950':
-    XCC = 1 if XCC is None else int(XCC)
-    DeviceNames = ["Device 75a8"]
-    ScheduleName = "gfx950"
 
 if args.full_mfma:
     fp16_instructions = [[32,32,4,2], [32,32,8,1], [16,16,4,4], [16,16,16,1], [4,4,4,16]]
@@ -484,17 +480,10 @@ def dump_yaml(gpu_idx, gemm_group, yaml_file, m_sum, n_sum, batch_sum, k_sum, sa
             if "GlobalSplitU" in item:
                 item["GlobalSplitU"] = list(gsu_group[dtype_str])
         data["BenchmarkProblems"][i][0] = dtype
-    library_logic = data["LibraryLogic"]
-    library_logic["DeviceNames"] = DeviceNames
-    library_logic["ScheduleName"] = ScheduleName
-    library_logic["ArchitectureName"] = {"Architecture": ArchitectureName, "CUCount": CU}
-    # Tuning reads LibraryType (GridBased, Equality, FreeSize, Prediction).
-    # Library.distance mirrors the dict-based logic YAML shape when present.
-    library_logic["LibraryType"] = LibraryType
-    if LibraryType in ("FreeSize", "Prediction"):
-        library_logic.setdefault("Library", {})["distance"] = None
-    else:
-        library_logic.setdefault("Library", {})["distance"] = LibraryType
+    data["LibraryLogic"]["DeviceNames"] = DeviceNames
+    data["LibraryLogic"]["ScheduleName"] = ScheduleName
+    data["LibraryLogic"]["ArchitectureName"] = {"Architecture": ArchitectureName, "CUCount": CU}
+    data["LibraryLogic"]["LibraryType"] = LibraryType
     # Write the updated YAML file
     yaml_file = os.path.basename(yaml_file)
     slices = yaml_file.split('.')

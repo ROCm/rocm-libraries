@@ -36,7 +36,7 @@ from Tensile.SolutionStructs.Solution import getTypeMismatchCollector, resetType
 from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
 from Tensile.Common.GlobalParameters import defaultSolution
 
-from typing import IO, NamedTuple, Dict, Optional
+from typing import IO, NamedTuple, Dict, Optional, Any, Union
 from Tensile.SolutionStructs.Solution import BiasTypeArgs, ActivationArgs
 import io
 import os
@@ -242,15 +242,13 @@ def write(filename_noExt, data, format="yaml"):
 
 def writeYAML(filename, data, **kwargs):
     """Writes data to file in YAML format."""
-    # set default kwags for yaml dump
+    # set default kwargs for yaml dump
     if "explicit_start" not in kwargs:
         kwargs["explicit_start"] = True
     if "explicit_end" not in kwargs:
         kwargs["explicit_end"] = True
     if "default_flow_style" not in kwargs:
         kwargs["default_flow_style"] = None
-    if "sort_keys" not in kwargs:
-        kwargs["sort_keys"] = False
 
     with open(filename, "w") as f:
         yaml.dump(data, f, Dumper=yamlDumper, **kwargs)
@@ -494,6 +492,98 @@ def parseLibraryLogicFile(
            )
 
 
+def prepareLibraryLogicDict(data: dict[str, Any]) -> None:
+    """Attach runtime ``Library`` fields for dict-format library logic.
+
+    Mirrors :func:`parseLibraryLogicList` (``FreeSize`` / ``Prediction`` vs
+    ``Matching`` + ``Library`` for matching modes). Dict logic on disk uses
+    top-level ``Equality``, ``GridBased``, or ``Range``; those are rewritten to
+    ``LibraryType`` ``Matching`` with the original mode in ``Library["distance"]``
+    (the in-memory shape ``MasterSolutionLibrary.FromOriginalState`` expects).
+    ``FreeSize`` and ``Prediction`` keep their top-level type and get a reduced
+    ``Library`` shape. Other ``LibraryType`` values (e.g. ``MLPClassification``)
+    are left unchanged (mutates *data* in place).
+
+    Args:
+        data: Root mapping loaded from dict-format library logic.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    libraryType = data["LibraryType"]
+    if libraryType in ("FreeSize", "Prediction"):
+        data["Library"] = {}
+        data["Library"]["indexOrder"] = None
+        data["Library"]["table"] = [0, len(data["Solutions"])]
+        data["Library"]["distance"] = None
+    elif libraryType in ("Equality", "GridBased", "Range"):
+        data["LibraryType"] = "Matching"
+        data["Library"] = {}
+        data["Library"]["indexOrder"] = data["IndexOrder"]
+        data["Library"]["table"] = data["ExactLogic"]
+        data["Library"]["distance"] = libraryType
+
+
+def reorderSolutionsParams(data: Dict[str, Any]) -> None:
+    """Reorder solution dict keys after list-to-dict conversion.
+
+    Moves ``SolutionIndex``, ``KernelNameMin``, and ``SolutionNameMin`` to the
+    top of each entry in ``data["Solutions"]``. Used when migrating legacy
+    list-format logic to dict format and after :func:`reorderSolutionDictForDictMerge`.
+
+    Args:
+        data: Dict-format library logic data (mutated in place). Must contain
+            a ``"Solutions"`` list of per-kernel mappings.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    keys = ["SolutionIndex", "KernelNameMin", "SolutionNameMin"]
+    sols = data.get("Solutions")
+    if not sols:
+        return
+    for solIdx in range(len(sols)):
+        vals: Dict[str, Any] = {}
+        for key in keys:
+            if key in sols[solIdx]:
+                vals[key] = sols[solIdx].pop(key)
+        sols[solIdx] = {**vals, **sols[solIdx]}
+
+
+def reorderSolutionDictForDictMerge(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Lay out one solution dict for dict-format library logic YAML.
+
+    Sorts top-level keys (and sorts ``InternalSupportParams`` when it is a
+    dict), then applies :func:`reorderSolutionsParams` so the three naming
+    fields lead each solution block, matching merge output.
+
+    Args:
+        state: One solution entry after library-logic serialization.
+
+    Returns:
+        New mapping with reordered keys (does not mutate *state*).
+
+    Raises:
+        None.
+    """
+    out: Dict[str, Any] = {}
+    for key in sorted(state.keys()):
+        value = state[key]
+        if key == "InternalSupportParams" and isinstance(value, dict):
+            out[key] = dict(sorted(value.items()))
+        else:
+            out[key] = value
+    bundle = {"Solutions": [out]}
+    reorderSolutionsParams(bundle)
+    return bundle["Solutions"][0]
+
+
 def parseLibraryLogicData(
         data,
         srcFile,
@@ -510,20 +600,9 @@ def parseLibraryLogicData(
     resetTypeMismatchCollector()
 
     if isinstance(data, list):
-        # TODO: this can be removed when all logic files have dict format
         data = parseLibraryLogicList(data, srcFile)
     elif isinstance(data, dict):
-        libraryType = data["LibraryType"]
-        if libraryType in ("FreeSize", "Prediction"):
-            data["Library"] = {}
-            data["Library"]["indexOrder"] = None
-            data["Library"]["table"] = [0, len(data["Solutions"])]
-            data["Library"]["distance"] = None
-        elif libraryType == "Matching":
-            data["Library"] = {}
-            data["Library"]["indexOrder"] = data["IndexOrder"]
-            data["Library"]["table"] = data["ExactLogic"]
-            data["Library"]["distance"] = libraryType
+        prepareLibraryLogicDict(data)
 
     if "CUCount" not in data:
         data["CUCount"] = None
@@ -550,10 +629,23 @@ def parseLibraryLogicData(
     # unpack problemType
     problemType = ProblemType(data["ProblemType"], printIndexAssignmentInfo, srcFile=srcFile)
 
-    defaultSolutionLibLogic = data.get("DefaultSolution", defaultSolution)
+    # Per-file defaults: fill missing solution keys from this first, then ``defaultSolution``.
+    libDefaults: dict[str, Any] = (
+        dict(data["DefaultSolution"])
+        if isinstance(data.get("DefaultSolution"), dict)
+        else {}
+    )
 
     # unpack solution
     def solutionStateToSolution(solutionState, assembler, isaInfoMap) -> Solution:
+
+        # Fill missing keys: library DefaultSolution, then GlobalParameters defaultSolution.
+        for key, val in libDefaults.items():
+            if key not in solutionState:
+                solutionState[key] = val
+        for key, val in defaultSolution.items():
+            if key not in solutionState:
+                solutionState[key] = val
 
         # If parameter not in yaml, fill with default values
         if "KernelLanguage" not in solutionState.keys():
@@ -562,12 +654,6 @@ def parseLibraryLogicData(
             solutionState["CustomKernelName"] = defaultSolution["CustomKernelName"]
 
         solutionState["ProblemType"] = data["ProblemType"]
-
-        # Default parameter values in the library logic take priority over ones in Common.py
-        for param, defVal in defaultSolutionLibLogic.items():
-            if param == "SolutionIndex": continue
-            if defaultSolution[param] != defVal:
-                solutionState[param] = defVal
 
         if solutionState["KernelLanguage"] == "Assembly":
             solutionState["ISA"] = gfxToIsa(data["ArchitectureName"])
@@ -746,26 +832,43 @@ def getCUCount() -> int:
 
     return int(CU)
 
-def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryType, logicTuple):
-    """Creates the data for a library logic file suitable for writing to YAML.
 
-    Generates a dict for dict-based architectures (see ``dictBasedArchitectures``)
-    and the legacy list format for all other architectures.
+
+def createLibraryLogicDict(
+    schedulePrefix: str,
+    architectureName: str,
+    deviceNames: list[str],
+    libraryType: str,
+    logicTuple: tuple[Any, ...],
+) -> dict[str, Any]:
+    """Build dict-format library logic data for dict-based architectures only.
+
+    Emits the root mapping written for YAML (``ProblemType``, ``Solutions``,
+    ``ExactLogic``, etc.) including sorted ``ProblemType`` keys and merge-aligned
+    solution key layout. ``DefaultSolution`` is a sorted snapshot of
+    ``defaultSolution`` at write time; any solution field equal to that snapshot
+    is omitted from per-solution dicts so defaults live only under
+    ``DefaultSolution``.
 
     Args:
-        schedulePrefix: The schedule name string.
-        architectureName: The GPU architecture name (e.g. ``"gfx942"``, ``"gfx1250"``).
-        deviceNames: Device names for the schedule.
-        libraryType: Library type string (``"GridBased"``, ``"FreeSize"``, ``"Prediction"``).
-        logicTuple: Tuple of (problemType, solutions, indexOrder, exactLogic, rangeLogic,
-                    tileSelectionSolutions, tileSelectionIndices, perfMetric, ...).
+        schedulePrefix: Schedule name string.
+        architectureName: Lowercase GPU architecture tag; must match ``dictBasedArchitectures``.
+        deviceNames: Device name strings for this logic file.
+        libraryType: Library tuning mode string.
+        logicTuple: Same shape as for :func:`createLibraryLogic`.
 
     Returns:
-        dict for dictBasedArchitectures, list for all other architectures.
+        Root dict suitable for ``LibraryIO.writeYAML``.
 
     Raises:
         None.
     """
+    if not any(d in architectureName for d in dictBasedArchitectures):
+        printExit(
+            "createLibraryLogicDict requires a dict-based architecture (see "
+            f"dictBasedArchitectures); got {architectureName!r}"
+        )
+
     problemType = logicTuple[0]
     solutions   = logicTuple[1]
     indexOrder  = logicTuple[2]
@@ -780,6 +883,9 @@ def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryTyp
     )
     CUCount = getCUCount()
 
+    # Snapshot written to YAML; strip per-solution keys that match this map (not live globals).
+    fileDefaultSolution = dict(sorted(defaultSolution.items()))
+
     # Serialize problem-type enum fields to plain values
     problemTypeState = problemType.state
     for field in ("DataType", "MacDataTypeA", "MacDataTypeB", "DataTypeA", "DataTypeB",
@@ -791,13 +897,13 @@ def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryTyp
         if opt in problemTypeState:
             problemTypeState[opt] = problemTypeState[opt].value
 
-    # Build solution list, stripping default values and ProblemType
-    def _removeDefaultVals(params):
+    # Build solution list, stripping values identical to file DefaultSolution and ProblemType
+    def _removeDefaultVals(params: Dict[str, Any]) -> None:
         for k in list(params.keys()):
-            if k in defaultSolution and params[k] == defaultSolution[k]:
+            if k in fileDefaultSolution and params[k] == fileDefaultSolution[k]:
                 del params[k]
 
-    solutionList = []
+    solutionList: list[Dict[str, Any]] = []
     for solution in solutions:
         solutionState = solution.getAttributes()
         _removeDefaultVals(solutionState)
@@ -820,48 +926,187 @@ def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryTyp
 
     perfMetric = logicTuple[7]
 
-    # Determine output format: dict for gfx1250 and similar, list for everyone else
-    arch_lower = architectureName.lower()
-    use_dict = any(d in arch_lower for d in (a.lower() for a in dictBasedArchitectures))
-
-    if use_dict:
-        data = {
-            "MinimumRequiredVersion": __version__,
-            "ScheduleName": schedulePrefix,
-            "ArchitectureName": architectureName,
-            "DeviceNames": deviceNames,
-            "DefaultSolution": dict(sorted(defaultSolution.items())),
-            "ProblemType": problemTypeState,
-            "Solutions": solutionList,
-            "IndexOrder": indexOrder,
-            "ExactLogic": exactLogicList,
-            "RangeLogic": rangeLogic,
-            "TileSelectionIndices": tileSelectionLogic,
-            "PerfMetric": perfMetric,
-            "Library": {"distance": libraryType},
-            "LibraryType": ("FreeSize" if libraryType == "FreeSize"
-                            else "Prediction" if libraryType == "Prediction"
-                            else "Matching"),
-        }
-        if architectureName == "gfx942" and CUCount and CUCount != 304:
-            data["CUCount"] = CUCount
-        return data
-
-    # Legacy list format (indices match what parseLibraryLogicList expects)
-    architect = ({"Architecture": architectureName, "CUCount": CUCount}
-                  if architectureName == "gfx942" and CUCount and CUCount != 304
-                  else architectureName)
-    return [
-        {"MinimumRequiredVersion": __version__},   # 0
-        schedulePrefix,                            # 1
-        architect,                                 # 2
-        deviceNames,                               # 3
-        problemTypeState,                          # 4
-        solutionList,                              # 5
-        indexOrder,                                # 6
-        exactLogicList,                            # 7
-        rangeLogic,                                # 8
-        tileSelectionLogic,                        # 9
-        perfMetric,                                # 10
-        libraryType,                               # 11
+    problemTypeForDict = dict(sorted(problemTypeState.items()))
+    solutionsForDict = [
+        reorderSolutionDictForDictMerge(dict(s)) for s in solutionList
     ]
+    data: dict[str, Any] = {
+        "MinimumRequiredVersion": __version__,
+        "ScheduleName": schedulePrefix,
+        "ArchitectureName": architectureName,
+        "DeviceNames": deviceNames,
+        "DefaultSolution": fileDefaultSolution,
+        "ProblemType": problemTypeForDict,
+        "Solutions": solutionsForDict,
+        "IndexOrder": indexOrder,
+        "ExactLogic": exactLogicList,
+        "RangeLogic": rangeLogic,
+        "TileSelectionIndices": tileSelectionLogic,
+        "PerfMetric": perfMetric,
+        "LibraryType": libraryType,
+    }
+    if architectureName == "gfx942" and CUCount and CUCount != 304:
+        data["CUCount"] = CUCount
+    return data
+
+def createLibraryLogicList(
+    schedulePrefix: str,
+    architectureName: str,
+    deviceNames: list[str],
+    libraryType: str,
+    logicTuple: tuple[Any, ...],
+) -> list[Any]:
+    """Create legacy list-root library logic data for non-dict-based architectures.
+
+    Args:
+        schedulePrefix: Schedule name string.
+        architectureName: GPU architecture tag.
+        deviceNames: Device name strings for this logic file.
+        libraryType: Library tuning mode string.
+        logicTuple: Same shape as for :func:`createLibraryLogic`.
+
+    Returns:
+        List structure with indices expected by ``parseLibraryLogicList``.
+
+    Raises:
+        None.
+    """
+    problemType = logicTuple[0]
+    solutions = logicTuple[1]
+    indexOrder = logicTuple[2]
+    exactLogic = logicTuple[3]
+    rangeLogic = logicTuple[4]
+
+    tileSelection = False
+    if len(logicTuple) > 5 and logicTuple[5]:
+        tileSelection = True
+
+    data = []
+    # Tensile version
+    data.append({"MinimumRequiredVersion": __version__})
+    # schedule name
+    data.append(schedulePrefix)  # change from Tensile to vega10
+    # schedule architecture name and get CU count
+    CUCount=getCUCount()
+    data.append({"Architecture": architectureName, "CUCount": CUCount} if architectureName=="gfx942" and CUCount and CUCount!=304 else architectureName)
+    # schedule device names
+    data.append(deviceNames)
+    # problem type
+    problemTypeState = problemType.state
+    problemTypeState["DataType"] = \
+            problemTypeState["DataType"].value
+    problemTypeState["MacDataTypeA"] = \
+            problemTypeState["MacDataTypeA"].value
+    problemTypeState["MacDataTypeB"] = \
+            problemTypeState["MacDataTypeB"].value
+    problemTypeState["DataTypeA"] = \
+            problemTypeState["DataTypeA"].value
+    problemTypeState["DataTypeB"] = \
+            problemTypeState["DataTypeB"].value
+    problemTypeState["DataTypeE"] = \
+            problemTypeState["DataTypeE"].value
+    problemTypeState["DataTypeAmaxD"] = \
+            problemTypeState["DataTypeAmaxD"].value
+    problemTypeState["DestDataType"] = \
+            problemTypeState["DestDataType"].value
+    problemTypeState["ComputeDataType"] = \
+            problemTypeState["ComputeDataType"].value
+    problemTypeState["BiasDataTypeList"] = \
+            [btype.value for btype in problemTypeState["BiasDataTypeList"]]
+    problemTypeState["ActivationComputeDataType"] = \
+            problemTypeState["ActivationComputeDataType"].value
+    problemTypeState["ActivationType"] = \
+            problemTypeState["ActivationType"].value
+    problemTypeState["F32XdlMathOp"] = \
+            problemTypeState["F32XdlMathOp"].value
+    if "DataTypeMetadata" in problemTypeState:
+        problemTypeState["DataTypeMetadata"] = \
+                problemTypeState["DataTypeMetadata"].value
+    if "DataTypeMXSA" in problemTypeState:
+        problemTypeState["DataTypeMXSA"] = \
+                problemTypeState["DataTypeMXSA"].value
+    if "DataTypeMXSB" in problemTypeState:
+        problemTypeState["DataTypeMXSB"] = \
+                problemTypeState["DataTypeMXSB"].value
+    data.append(problemTypeState)
+    # solutions
+    solutionList = []
+    for solution in solutions:
+        solutionState = solution.getAttributes()
+        del solutionState["ProblemType"]
+        isa = solutionState["ISA"]
+        solutionState["ISA"] = [isa[0], isa[1], isa[2]]
+        solutionList.append(solutionState)
+
+    if tileSelection:
+        tileSolutions = logicTuple[5]
+        for solution in tileSolutions:
+            solutionState = solution.getAttributes()
+            del solutionState["ProblemType"]
+            solutionList.append(solutionState)
+
+    data.append(solutionList)
+    # index order
+    data.append(indexOrder)
+
+    # exactLogic
+    exactLogicList = []
+    if exactLogic:
+        for key in exactLogic:
+            exactLogicList.append([list(key), exactLogic[key]])
+        data.append(exactLogicList)
+    else:
+        data.append(None)
+
+    # rangeLogic
+    data.append(rangeLogic)
+
+    if tileSelection:
+        tileSelectionLogic = {}
+        tileSelectionIndices = logicTuple[6]
+        tileSelectionLogic["TileSelectionIndices"] = tileSelectionIndices
+        data.append(tileSelectionLogic)
+    else:
+        data.append(None)
+
+    data.append(logicTuple[7]) # PerfMetric
+    data.append(libraryType) # LibraryType
+    return data
+
+
+def createLibraryLogic(
+    schedulePrefix: str,
+    architectureName: str,
+    deviceNames: list[str],
+    libraryType: str,
+    logicTuple: tuple[Any, ...],
+) -> Union[dict[str, Any], list[Any]]:
+    """Build library logic data for YAML (dict or legacy list) from the architecture.
+
+    Architectures listed in ``dictBasedArchitectures`` use ``createLibraryLogicDict``;
+    all others use ``createLibraryLogicList``.
+
+    Args:
+        schedulePrefix: Schedule name string (e.g. ``"tensilelite"``).
+        architectureName: Lowercase GPU architecture tag (e.g. ``"gfx950"``, ``"gfx1250"``).
+        deviceNames: ROCm / Tensile device name strings for this logic file.
+        libraryType: Library tuning mode (e.g. ``"GridBased"``, ``"Equality"``).
+        logicTuple: ``(problemType, solutions, indexOrder, exactLogic, rangeLogic,
+            optional tileSelectionSolutions, optional tileSelectionIndices,
+            perfMetric, ...)`` as produced by the analysis pipeline.
+
+    Returns:
+        Dict root mapping for dict-based architectures, else the legacy 12-element
+        list structure consumed by ``parseLibraryLogicList``.
+
+    Raises:
+        None.
+    """
+    useDict = any(d in architectureName for d in dictBasedArchitectures)
+    if useDict:
+        return createLibraryLogicDict(
+            schedulePrefix, architectureName, deviceNames, libraryType, logicTuple
+        )
+    return createLibraryLogicList(
+        schedulePrefix, architectureName, deviceNames, libraryType, logicTuple
+    )

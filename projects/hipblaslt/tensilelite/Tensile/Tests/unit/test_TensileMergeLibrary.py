@@ -28,21 +28,26 @@ from copy import deepcopy
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
+from unittest.mock import patch
+
 from Tensile import LibraryIO
 from Tensile.CustomYamlLoader import DEFAULT_YAML_LOADER, load_yaml_stream
 import pytest
-from unittest.mock import patch
 
 from Tensile.TensileMergeLibrary import (
+    allFiles,
     compareDestFolderToYaml,
+    compareProblemType,
+    convertToDict,
     createAccessor,
+    ensurePath,
     findSolutionWithIndex,
     fixSizeInconsistencies,
     getArchitectureFromData,
     isDictBasedArchitecture,
+    loadData,
     mergeLogic,
     removeDefaultInitParams,
-    findSolutionWithIndex,
     addKernel,
     reNameSolutions,
     msg,
@@ -51,6 +56,7 @@ from Tensile.TensileMergeLibrary import (
     removeDuplicatedSolutions,
     removeUnusedSolutions,
     sanitizeSolutions,
+    normalizeDictLibraryLayout,
     syncDefaultParams,
 )
 
@@ -160,46 +166,46 @@ ArchitectureName: gfx1250
 CUCount: null
 DeviceNames: [Device 73f0]
 ProblemType:
-  OperationType: GEMM
-  DataType: 7
-  UseBeta: true
   Batched: true
+  DataType: 7
+  OperationType: GEMM
   StridedBatched: true
   TransposeA: 0
   TransposeB: 0
+  UseBeta: true
 DefaultSolution:
+  DepthU: -1
   GlobalSplitU: 1
   StaggerU: 32
   StaggerUMapping: 0
   StaggerUStride: 256
-  DepthU: -1
   WorkGroup: [16, 16, 1]
 Solutions:
 - SolutionIndex: 0
   SolutionNameMin: Sol_gfx1250_0
   KernelNameMin: Kernel_gfx1250_0
   BaseName: Base_gfx1250_0
-  StaggerU: 32
-  StaggerUMapping: 0
-  StaggerUStride: 256
-  _staggerStrideShift: 2
   DepthU: 32
   MacroTile0: 16
   MacroTile1: 16
-  WorkGroup: [16, 2, 1]
-- SolutionIndex: 1
-  GlobalSplitU: 4
-  SolutionNameMin: Sol_gfx1250_1
-  KernelNameMin: Kernel_gfx1250_1
-  BaseName: Base_gfx1250_1
   StaggerU: 32
   StaggerUMapping: 0
   StaggerUStride: 256
+  WorkGroup: [16, 2, 1]
   _staggerStrideShift: 2
+- SolutionIndex: 1
+  SolutionNameMin: Sol_gfx1250_1
+  KernelNameMin: Kernel_gfx1250_1
+  BaseName: Base_gfx1250_1
   DepthU: 64
+  GlobalSplitU: 4
   MacroTile0: 32
   MacroTile1: 32
+  StaggerU: 32
+  StaggerUMapping: 0
+  StaggerUStride: 256
   WorkGroup: [32, 4, 1]
+  _staggerStrideShift: 2
 IndexOrder: [2, 3, 0, 1]
 ExactLogic:
 - - [129, 129, 1, 129]
@@ -210,17 +216,7 @@ ExactLogic:
   - [0, 0.0]
 RangeLogic: null
 PerfMetric: DeviceEfficiency
-LibraryType: Matching
-Library:
-  indexOrder: [2, 3, 0, 1]
-  table:
-  - - [129, 129, 1, 129]
-    - [0, 0.0]
-  - - [128, 128, 1, 128]
-    - [1, 0.0]
-  - - [256, 256, 1, 256]
-    - [0, 0.0]
-  distance: GridBased
+LibraryType: GridBased
 """
 
 YAML_BY_ARCH = {"gfx950": GFX950_YAML, "gfx1250": GFX1250_YAML}
@@ -250,6 +246,35 @@ def _append_new_size(data: Any, arch: str) -> None:
         data[7].append([[100, 200, 1, 300], [0, 0.0]])
     else:
         data["ExactLogic"].append([[512, 512, 1, 512], [0, 0.0]])
+
+
+def _minimal_gfx1250_dict_logic(
+    *,
+    library_type: str = "GridBased",
+    library_block: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a tiny dict-format logic root for ``normalizeDictLibraryLayout`` tests.
+
+    Args:
+        library_type: Initial top-level ``LibraryType`` string.
+        library_block: Optional ``Library`` sub-dict; when None, no ``Library`` key.
+
+    Returns:
+        A mutable dict with ``ArchitectureName`` ``gfx1250`` so
+        ``isDictBasedArchitecture`` succeeds.
+
+    Raises:
+        None.
+    """
+    d: dict[str, Any] = {
+        "ArchitectureName": "gfx1250",
+        "LibraryType": library_type,
+        "Solutions": [],
+        "ExactLogic": [],
+    }
+    if library_block is not None:
+        d["Library"] = library_block
+    return d
 
 
 @pytest.fixture(scope="module")
@@ -352,6 +377,15 @@ class TestDataAccessorWithFixtures:
         else:
             assert accessor.getDefaultSolution() is None
 
+    def test_set_default_solution_on_dict(self, gfx1250_data: dict[str, Any]) -> None:
+        """``setDefaultSolution`` writes ``DefaultSolution`` for dict-format data."""
+        data = deepcopy(gfx1250_data)
+        accessor = createAccessor(data)
+        new_default = {"DepthU": 99}
+        accessor.setDefaultSolution(new_default)
+        assert accessor.getDefaultSolution() == new_default
+        assert data["DefaultSolution"] == new_default
+
 
 class TestArchitectureDetectionWithFixtures:
     """Tests for architecture detection using embedded fixtures."""
@@ -366,6 +400,111 @@ class TestArchitectureDetectionWithFixtures:
         """isDictBasedArchitecture returns True only for configured dict-based architectures."""
         name, data = arch_data
         assert isDictBasedArchitecture(data) == (name == "gfx1250")
+
+    def test_is_dict_based_architecture_custom_list(self, gfx950_data: list[Any]) -> None:
+        """Optional ``dictArchs`` overrides global ``dictBasedArchitectures``."""
+        assert isDictBasedArchitecture(gfx950_data) is False
+        assert isDictBasedArchitecture(gfx950_data, dictArchs=["gfx950"]) is True
+        assert isDictBasedArchitecture(gfx950_data, dictArchs=["gfx942"]) is False
+
+
+class TestStripDictBasedLibraryLayout:
+    """Tests for ``normalizeDictLibraryLayout`` canonical dict layout."""
+
+    def test_skips_non_dict_architecture(self) -> None:
+        """Non dict-based architecture short-circuits without mutation."""
+        data = {
+            "ArchitectureName": "gfx942",
+            "LibraryType": "Matching",
+            "Library": {"distance": "GridBased"},
+        }
+        assert normalizeDictLibraryLayout(data) is False
+        assert "Library" in data
+
+    def test_strips_library_and_sets_distance_from_library_block(self) -> None:
+        """``Library.distance`` becomes top-level ``LibraryType``; ``Library`` removed."""
+        data = _minimal_gfx1250_dict_logic(
+            library_type="Matching",
+            library_block={"distance": "Equality"},
+        )
+        assert normalizeDictLibraryLayout(data) is True
+        assert data["LibraryType"] == "Equality"
+        assert "Library" not in data
+
+    def test_matching_without_library_is_noop(self) -> None:
+        """``LibraryType: Matching`` without ``Library`` is not rewritten (non-canonical)."""
+        data = _minimal_gfx1250_dict_logic(library_type="Matching")
+        assert normalizeDictLibraryLayout(data) is False
+        assert data["LibraryType"] == "Matching"
+        assert "Library" not in data
+
+    def test_freesize_preserved(self) -> None:
+        """``FreeSize`` stays when ``Library`` has no usable ``distance`` (only block removed)."""
+        data = _minimal_gfx1250_dict_logic(
+            library_type="FreeSize",
+            library_block={},
+        )
+        assert normalizeDictLibraryLayout(data) is True
+        assert data["LibraryType"] == "FreeSize"
+        assert "Library" not in data
+
+    def test_range_from_library_distance(self) -> None:
+        """``Library.distance: Range`` is promoted to top-level ``LibraryType``."""
+        data = _minimal_gfx1250_dict_logic(
+            library_type="Matching",
+            library_block={"distance": "Range"},
+        )
+        assert normalizeDictLibraryLayout(data) is True
+        assert data["LibraryType"] == "Range"
+        assert "Library" not in data
+
+    def test_prediction_toplevel_empty_library(self) -> None:
+        """``Prediction`` passes through the non-distance branch while dropping ``Library``."""
+        data = _minimal_gfx1250_dict_logic(
+            library_type="Prediction",
+            library_block={},
+        )
+        assert normalizeDictLibraryLayout(data) is True
+        assert data["LibraryType"] == "Prediction"
+        assert "Library" not in data
+
+
+class TestCompareProblemType:
+    """Tests for ``compareProblemType`` (ProblemType equality gate).
+
+    The real ``ProblemType`` constructor rejects the trimmed fixture
+    ``ProblemType`` dict; tests patch it with a lightweight stand-in.
+    """
+
+    def test_matching_problem_types_do_not_exit(self) -> None:
+        """Identical ``ProblemType`` dicts do not call ``sys.exit``."""
+        pt = {"OperationType": "GEMM", "Batched": True}
+        ori = createAccessor({"ProblemType": deepcopy(pt)})
+        inc = createAccessor({"ProblemType": deepcopy(pt)})
+
+        class _FakeProblemType:
+            def __init__(self, state: Any, _assign_gpus: bool) -> None:
+                self.state = deepcopy(state)
+
+        with patch("Tensile.TensileMergeLibrary.ProblemType", _FakeProblemType), patch(
+            "Tensile.TensileMergeLibrary.problemTypeToEnum", lambda _pt: None
+        ):
+            compareProblemType(ori, inc)
+
+    def test_mismatch_exits(self) -> None:
+        """Differing ``ProblemType`` after normalization triggers ``sys.exit``."""
+        ori = createAccessor({"ProblemType": {"OperationType": "GEMM", "Batched": True}})
+        inc = createAccessor({"ProblemType": {"OperationType": "GEMM", "Batched": False}})
+
+        class _FakeProblemType:
+            def __init__(self, state: Any, _assign_gpus: bool) -> None:
+                self.state = deepcopy(state)
+
+        with patch("Tensile.TensileMergeLibrary.ProblemType", _FakeProblemType), patch(
+            "Tensile.TensileMergeLibrary.problemTypeToEnum", lambda _pt: None
+        ):
+            with pytest.raises(SystemExit, match="ProblemType"):
+                compareProblemType(ori, inc)
 
 
 class TestFixSizeInconsistenciesWithFixtures:
@@ -426,6 +565,19 @@ class TestSolutionCleanup:
         assert num_removed == 0
         assert num_solutions == 2
 
+    def test_remove_duplicate_solution_names_keeps_first(self, gfx1250_data: dict[str, Any]) -> None:
+        """Duplicate ``SolutionNameMin`` entries collapse to the first solution."""
+        data = deepcopy(gfx1250_data)
+        dup = deepcopy(data["Solutions"][0])
+        dup["SolutionIndex"] = 1
+        data["Solutions"] = [data["Solutions"][0], dup]
+        data["ExactLogic"][0][1][0] = 0
+        data["ExactLogic"][1][1][0] = 1
+        accessor = createAccessor(data)
+        _, num_removed, num_solutions, _ = removeDuplicatedSolutions(accessor)
+        assert num_removed == 1
+        assert num_solutions == 1
+
     def test_sanitize_solutions_sets_stagger_dependent_params(self, arch_data):
         """sanitizeSolutions zeroes dependent stagger params when StaggerU is zero."""
         _, data = arch_data
@@ -475,8 +627,25 @@ class TestMergeLogicWithFixtures:
             ori_accessor, inc_accessor, forceMerge=False
         )
         
-        # No new sizes, but solution should be replaced
+        # No new sizes, but solution should be replaced with higher efficiency
         assert num_sizes_added == 0
+        assert num_solutions_added >= 1
+        merged_accessor = createAccessor(merged_data)
+        first_logic = merged_accessor.getExactLogic()[0]
+        assert first_logic[1][1] == 2.0
+        sol = findSolutionWithIndex(merged_accessor.getSolutions(), first_logic[1][0])
+        assert sol["SolutionNameMin"] == "Better_Sol"
+
+    def test_merge_no_eff_zeros_stored_efficiency(self, gfx950_data: list[Any]) -> None:
+        """``noEff=True`` forces stored efficiency to 0.0 on merged sizes."""
+        ori_accessor = createAccessor(deepcopy(gfx950_data))
+        inc_data = deepcopy(gfx950_data)
+        _append_new_size(inc_data, "gfx950")
+        inc_accessor = createAccessor(inc_data)
+        merged_data, _, _, _ = mergeLogic(ori_accessor, inc_accessor, forceMerge=False, noEff=True)
+        merged_accessor = createAccessor(merged_data)
+        for _size, (_idx, eff) in merged_accessor.getExactLogic():
+            assert eff == 0.0
 
     def test_merge_gfx1250_force_merge(self, gfx1250_data):
         """Force merge replaces even with worse efficiency."""
@@ -512,6 +681,13 @@ class TestDefaultSolutionFunctionsWithFixtures:
         # that previously relied on it. Verify solutions are still present.
         assert len(data["Solutions"]) == 2
 
+    def test_sync_default_params_identical_defaults_no_op(self, gfx1250_data: dict[str, Any]) -> None:
+        """When default maps are equal, ``syncDefaultParams`` returns immediately."""
+        data = deepcopy(gfx1250_data)
+        before = deepcopy(data["Solutions"])
+        syncDefaultParams(data, {"StaggerU": 32}, {"StaggerU": 32})
+        assert data["Solutions"] == before
+
     def test_remove_default_init_params(self, gfx1250_data):
         """removeDefaultInitParams removes params matching default."""
         data = deepcopy(gfx1250_data)
@@ -537,6 +713,15 @@ class TestDefaultSolutionFunctionsWithFixtures:
 class TestFindSolutionWithIndexWithFixtures:
     """Tests for findSolutionWithIndex using embedded fixture data."""
 
+    def test_find_solution_out_of_order_list(self) -> None:
+        """Uses linear search when ``SolutionIndex`` does not match list position."""
+        solutions = [
+            {"SolutionIndex": 1, "SolutionNameMin": "B"},
+            {"SolutionIndex": 0, "SolutionNameMin": "A"},
+        ]
+        assert findSolutionWithIndex(solutions, 0)["SolutionNameMin"] == "A"
+        assert findSolutionWithIndex(solutions, 1)["SolutionNameMin"] == "B"
+
     def test_find_solution_by_index(self, arch_accessor):
         """Find solution by index for both architectures."""
         name, accessor = arch_accessor
@@ -554,19 +739,18 @@ class TestFindSolutionWithIndexWithFixtures:
             assert result1["SolutionNameMin"] == "Sol_gfx1250_1"
 
 
-class TestLibraryDistanceAccessor:
-    """Tests for Equality/GridBased distance vs Matching LibraryType."""
+class TestLibraryTypeAccessor:
+    """Tests for ``getLibraryType`` (Equality / GridBased vs list index 11)."""
 
-    def test_get_library_distance_dict_uses_library_block(self, gfx1250_data):
-        """Dict-format fixture exposes GridBased under Library.distance."""
+    def test_get_library_type_dict_uses_top_level(self, gfx1250_data):
+        """Dict-format fixture exposes GridBased via top-level ``LibraryType``."""
         accessor = createAccessor(gfx1250_data)
-        assert accessor.getLibraryType() == "Matching"
-        assert accessor.getLibraryDistance() == "GridBased"
+        assert accessor.getLibraryType() == "GridBased"
 
-    def test_get_library_distance_list_uses_index_eleven(self, gfx950_data):
-        """List-format fixture keeps Equality/GridBased at legacy index 11."""
+    def test_get_library_type_list_uses_index_eleven(self, gfx950_data):
+        """List-format fixture keeps Equality at legacy index 11."""
         accessor = createAccessor(gfx950_data)
-        assert accessor.getLibraryDistance() == "Equality"
+        assert accessor.getLibraryType() == "Equality"
 
     @pytest.mark.parametrize(
         "dest_dir,expect_exit",
@@ -575,16 +759,24 @@ class TestLibraryDistanceAccessor:
             ("/path/to/Equality", True),
         ],
     )
-    def test_compare_dest_folder_to_yaml_library_distance(
+    def test_compare_dest_folder_to_yaml_library_type(
         self, gfx1250_data, dest_dir: str, expect_exit: bool
     ) -> None:
-        """compareDestFolderToYaml matches dest folder to Library.distance (GridBased)."""
+        """compareDestFolderToYaml matches dest folder to ``getLibraryType()`` (GridBased)."""
         accessor = createAccessor(gfx1250_data)
         if expect_exit:
             with pytest.raises(SystemExit):
                 compareDestFolderToYaml(dest_dir, "logic.yaml", accessor)
         else:
             compareDestFolderToYaml(dest_dir, "logic.yaml", accessor)
+
+    def test_compare_dest_folder_exits_when_library_type_unset(self) -> None:
+        """``compareDestFolderToYaml`` exits when ``getLibraryType()`` is empty."""
+        data = _minimal_gfx1250_dict_logic(library_type="FreeSize")
+        accessor = createAccessor(data)
+        assert accessor.getLibraryType() is None
+        with pytest.raises(SystemExit, match="Empty YAML attribute"):
+            compareDestFolderToYaml("/any/GridBased", "logic.yaml", accessor)
 
 
 class TestCrossFormatOperations:
@@ -769,6 +961,106 @@ class TestMainFunction:
 
         kwargs = mock_avoid.call_args[0]
         assert kwargs[4] == True  # no_eff
+class TestDataAccessorListEdges:
+    """Branch coverage for list-format ``DataAccessor.get`` / ``set``."""
+
+    def test_get_returns_none_when_index_beyond_list(self) -> None:
+        """``get`` returns None when the mapped index is past the list end."""
+        short: list[Any] = [None] * 5
+        accessor = createAccessor(short)
+        assert accessor.get("LibraryType") is None
+
+    def test_set_extends_short_list(self) -> None:
+        """``set`` pads a short list with ``None`` until the target index exists."""
+        short: list[Any] = [{"MinimumRequiredVersion": "1.0"}]
+        accessor = createAccessor(short)
+        accessor.set("Solutions", [])
+        assert len(short) > 5
+        assert accessor.get("Solutions") == []
+
+
+class TestConvertToDictAndLoadData:
+    """``convertToDict`` / ``loadData`` integration with on-disk YAML."""
+
+    def test_convert_list_fixture_to_dict(self, gfx950_data: list[Any]) -> None:
+        """Legacy list fixture converts to dict via ``parseLibraryLogicList``."""
+        out = convertToDict(deepcopy(gfx950_data), "fixture.yaml")
+        assert isinstance(out, dict)
+        assert "Solutions" in out
+        assert isinstance(out["Solutions"], list)
+
+    def test_convert_dict_is_noop(self, gfx1250_data: dict[str, Any]) -> None:
+        """Dict input is returned unchanged (same object)."""
+        d = deepcopy(gfx1250_data)
+        assert convertToDict(d, "any.yaml") is d
+
+    def test_load_data_list_gfx950_no_migration(self, tmp_path: Path, gfx950_data: list[Any]) -> None:
+        """List-format non-dict arch: ``loadData`` returns data without dict migration."""
+        out_file = tmp_path / "logic.yaml"
+        LibraryIO.writeYAML(
+            str(out_file),
+            deepcopy(gfx950_data),
+            explicit_start=False,
+            explicit_end=False,
+            sort_keys=True,
+        )
+        fn, data, migrated = loadData(str(out_file))
+        assert fn == str(out_file)
+        assert isinstance(data, list)
+        assert migrated is False
+
+    def test_load_data_dict_gfx1250(self, tmp_path: Path, gfx1250_data: dict[str, Any]) -> None:
+        """``loadData`` reads dict YAML for a dict-based architecture."""
+        out_file = tmp_path / "logic.yaml"
+        LibraryIO.writeYAML(
+            str(out_file),
+            deepcopy(gfx1250_data),
+            explicit_start=False,
+            explicit_end=False,
+            sort_keys=False,
+        )
+        fn, data, migrated = loadData(str(out_file))
+        assert fn == str(out_file)
+        assert isinstance(data, dict)
+        assert "Solutions" in data
+        assert isinstance(migrated, bool)
+
+
+class TestEnsurePathAllFiles:
+    """``ensurePath`` and ``allFiles`` helpers used by ``avoidRegressions``."""
+
+    def test_ensure_path_creates_directory(self, tmp_path: Path) -> None:
+        """``ensurePath`` creates a missing directory and returns it."""
+        nested = tmp_path / "a" / "b"
+        assert not nested.exists()
+        assert ensurePath(str(nested)) == str(nested)
+        assert nested.is_dir()
+
+    def test_ensure_path_existing_directory_no_op(self, tmp_path: Path) -> None:
+        """``ensurePath`` is a no-op when the directory already exists."""
+        assert ensurePath(str(tmp_path)) == str(tmp_path)
+
+    def test_all_files_recurses_into_directory_named_with_yaml_suffix(
+        self, tmp_path: Path
+    ) -> None:
+        """A directory whose name ends in ``.yaml`` is traversed like a folder."""
+        nest = tmp_path / "nested.yaml"
+        nest.mkdir()
+        (nest / "leaf.yaml").write_text("k: v\n")
+        (tmp_path / "top.yaml").write_text("a: 1\n")
+        found = sorted(allFiles(str(tmp_path)))
+        assert len(found) == 2
+
+    def test_all_files_collects_yaml_in_directory(self, tmp_path: Path) -> None:
+        """``allFiles`` lists ``*.yaml`` files in the given directory (non-recursive)."""
+        (tmp_path / "a.yaml").write_text("x: 1\n")
+        (tmp_path / "b.yaml").write_text("y: 2\n")
+        (tmp_path / "skip.txt").write_text("no")
+        found = sorted(allFiles(str(tmp_path)))
+        assert len(found) == 2
+        assert all(p.endswith(".yaml") for p in found)
+
+
 class TestRoundTrip:
     """Round-trip tests: Python data → YAML on disk (LibraryIO.writeYAML) → back to memory.
 
@@ -786,7 +1078,10 @@ class TestRoundTrip:
 
         # Step 2: loaded Python data → YAML on disk
         out_file = tmp_path / f"{arch}_roundtrip.yaml"
-        LibraryIO.writeYAML(str(out_file), data, explicit_start=False, explicit_end=False)
+        LibraryIO.writeYAML(
+            str(out_file), data, explicit_start=False, explicit_end=False,
+            sort_keys=isinstance(data, list),
+        )
 
         # Step 3: YAML on disk → load_yaml_stream → Python data
         data2 = load_yaml_stream(out_file, DEFAULT_YAML_LOADER)

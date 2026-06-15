@@ -150,50 +150,27 @@ class DataAccessor:
         self.set("ProblemType", problemType)
 
     def getLibraryType(self):
-        """Get library matching category (Matching, FreeSize, or Prediction).
+        """Return library tuning mode (YAML ``LibraryType`` / list index 11).
 
-        Dict-based logic stores this in ``LibraryType``. Legacy list format
-        overloads index 11 with Equality/GridBased (distance); those map to
-        Matching. FreeSize and Prediction are stored directly at index 11.
+        Used for dict-based canonical layout and for ``compareDestFolderToYaml``
+        (Equality vs GridBased). Dict format: returns ``Equality``, ``GridBased``,
+        or ``Range`` when set at top level; ``None`` for FreeSize or Prediction
+        (no exact-matching tuning folder). List format: returns the legacy index
+        11 string (Equality, GridBased, Range, FreeSize, or Prediction).
+
+        Args:
+            self: Accessor bound to list- or dict-format library logic.
 
         Returns:
-            str | None: ``"Matching"``, ``"FreeSize"``, ``"Prediction"``, or
-            None when unset.
+            str | None: Tuning mode string, or None when unset or not applicable.
 
         Raises:
             None.
         """
         if self._isDict:
-            return self.get("LibraryType")
-        legacy = self.get("LibraryType")
-        if legacy in ("Equality", "GridBased"):
-            return "Matching"
-        if legacy in ("FreeSize", "Prediction"):
-            return legacy
-        return None
-
-    def getLibraryDistance(self):
-        """Get library distance mode (Equality or GridBased) for merge folder checks.
-
-        Dict-based logic stores this under ``Library.distance``. Legacy list
-        format stores Equality/GridBased at index 11 (historically ``LibraryType``).
-
-        Returns:
-            str | None: ``"Equality"``, ``"GridBased"``, or None if unset.
-
-        Raises:
-            None.
-        """
-        if self._isDict:
-            library = self.get("Library")
-            if isinstance(library, dict):
-                distance = library.get("distance")
-                if distance:
-                    return distance
-            # Legacy dict files may still use LibraryType for distance.
-            legacy = self.get("LibraryType")
-            if legacy in ("Equality", "GridBased"):
-                return legacy
+            lt = self.get("LibraryType")
+            if lt in ("Equality", "GridBased", "Range"):
+                return lt
             return None
         return self.get("LibraryType")
 
@@ -230,8 +207,8 @@ def isDictBasedArchitecture(data: Any, dictArchs: list[str] | None = None) -> bo
 
     Args:
         data: Loaded logic data in list or dict form.
-        dictArchs: Optional list of architecture tags that should use dict format.
-            If None, falls back to global ``dictBasedArchitectures``.
+        dictArchs: Optional list of lowercase architecture tags that should use dict
+            format. If None, falls back to global ``dictBasedArchitectures``.
 
     Returns:
         bool: True when architecture matches one of the configured dict-based tags.
@@ -239,10 +216,43 @@ def isDictBasedArchitecture(data: Any, dictArchs: list[str] | None = None) -> bo
     Raises:
         None.
     """
-    arch = str(getArchitectureFromData(data)).lower()
+    arch = str(getArchitectureFromData(data))
     archs = dictArchs if dictArchs is not None else dictBasedArchitectures
-    normalized = [str(name).lower() for name in archs]
-    return any(name in arch for name in normalized) if arch else False
+    return any(name in arch for name in archs) if arch else False
+
+
+def normalizeDictLibraryLayout(data: dict[str, Any]) -> bool:
+    """Normalize on-disk dict-based logic: drop ``Library``, align ``LibraryType``.
+
+    Canonical dict YAML stores the tuning mode only at top-level ``LibraryType``
+    (``Equality``, ``GridBased``, ``Range``, ``FreeSize``, or ``Prediction``) with
+    exact logic in ``ExactLogic``. If an in-memory ``Library`` block is still
+    present (for example after list-to-dict conversion), this copies a recognized
+    ``Library["distance"]`` to ``LibraryType`` when needed, then removes ``Library``.
+    Only ``Equality``, ``GridBased``, and ``Range`` are promoted from ``Library``
+    or from the current top-level ``LibraryType``.
+
+    Args:
+        data: Dict-format library logic (mutated in place). Callers must only
+            invoke this for dict-based architectures (see ``isDictBasedArchitecture``).
+
+    Returns:
+        bool: True when *data* was modified and should be persisted, else False.
+
+    Raises:
+        None.
+    """
+    if not isDictBasedArchitecture(data):
+        return False
+    distanceModes = frozenset({"Equality", "GridBased", "Range"})
+    old_lt = data.get("LibraryType")
+    hadLibrary = "Library" in data
+    lib = data.get("Library")
+    distance = lib.get("distance") if isinstance(lib, dict) else None
+    if distance in distanceModes:
+        data["LibraryType"] = distance
+    data.pop("Library", None)
+    return bool(hadLibrary or data.get("LibraryType") != old_lt)
 
 
 def ensurePath(path):
@@ -343,7 +353,7 @@ def reNameSolutions(accessor):
 
         # For dict format (gfx1250), also set GlobalSplitU
         if accessor.isDict and accessor.hasDefaultSolution():
-            if not sol.get("GlobalSplitU"):
+            if "GlobalSplitU" not in sol:
                 sol["GlobalSplitU"] = accessor.getDefaultSolution()["GlobalSplitU"]
 
         sol["SolutionNameMin"] = getSolutionNameMin(sol, splitGSU=False)
@@ -352,8 +362,8 @@ def reNameSolutions(accessor):
 
         # For dict format (gfx1250), also delete GlobalSplitU
         if accessor.isDict and accessor.hasDefaultSolution():
-            default_gsu = accessor.getDefaultSolution().get("GlobalSplitU")
-            if sol.get("GlobalSplitU") == default_gsu and not sol.get("CustomKernelName"):
+            defaultGsu = accessor.getDefaultSolution().get("GlobalSplitU")
+            if sol.get("GlobalSplitU") == defaultGsu and not sol.get("CustomKernelName"):
                 del sol["GlobalSplitU"]
 
 def removeUnusedSolutions(accessor, prefix=""):
@@ -423,30 +433,6 @@ def removeDuplicatedSolutions(accessor):
 
 from Tensile import LibraryIO
 
-def reorderSolutionsParams(data: dict[str, Any]) -> None:
-    """Reorder solution dict keys after list-to-dict conversion.
-
-    Moves ``SolutionIndex``, ``KernelNameMin``, and ``SolutionNameMin`` to the
-    top of each entry in ``data["Solutions"]``. Used when migrating legacy
-    list-format logic to dict format; dict-native files do not need this step.
-
-    Args:
-        data: Dict-format library logic data (mutated in place).
-
-    Returns:
-        None.
-
-    Raises:
-        None.
-    """
-    keys = ["SolutionIndex", "KernelNameMin", "SolutionNameMin"]
-    for sol_idx in range(len(data["Solutions"])):
-        vals = {}
-        for key in keys:
-            if key in data["Solutions"][sol_idx]:
-                vals[key] = data["Solutions"][sol_idx].pop(key)
-        data["Solutions"][sol_idx] = {**vals, **data["Solutions"][sol_idx]}
-
 
 def convertToDict(data: list | dict, filename: str) -> dict:
     """Convert list-format library logic data to dict format.
@@ -474,7 +460,7 @@ def convertToDict(data: list | dict, filename: str) -> dict:
                 if k in defaultSolution.keys():
                     if v == defaultSolution[k]:
                         del kernel[k]
-        reorderSolutionsParams(rv)
+        LibraryIO.reorderSolutionsParams(rv)
         data = rv
 
     return data
@@ -490,8 +476,9 @@ def loadData(filename: str) -> list[Any]:
     Returns:
         list[Any]: ``[filename, data, migrated]`` where *data* is the loaded
         (and possibly converted) logic, and *migrated* is True when a legacy
-        list file was converted to dict format for a dict-based architecture
-        (caller should persist the converted form).
+        list file was converted to dict format for a dict-based architecture,
+        or when an existing dict file was rewritten to the canonical layout
+        (no ``Library`` block, ``LibraryType`` set to the tuning mode).
 
     Raises:
         AssertionError: When the YAML stream/document structure is invalid.
@@ -503,9 +490,10 @@ def loadData(filename: str) -> list[Any]:
     migrated = False
 
     if isDictBasedArchitecture(data):
-        was_list = isinstance(data, list)
+        wasList = isinstance(data, list)
         data = convertToDict(data, filename)
-        migrated = was_list and isinstance(data, dict)
+        layoutUpdated = normalizeDictLibraryLayout(data)
+        migrated = wasList or layoutUpdated
 
     return [filename, data, migrated]
 
@@ -513,17 +501,17 @@ def compareDestFolderToYaml(originalDir, incFile, accessor):
     """Unified compare destination folder to YAML using DataAccessor."""
     checkFolders = ["Equality", "GridBased"]
     destFolder = originalDir.rstrip('/').split('/')[-1]
-    incAttribute = accessor.getLibraryDistance()
+    incAttribute = accessor.getLibraryType()
     if not incAttribute:
         sys.exit(
-            f"[Error] Empty YAML attribute. Need Library.distance (or legacy "
-            f"LibraryType) set to Equality or GridBased in {incFile}."
+            f"[Error] Empty YAML attribute. Need top-level LibraryType "
+            f"Equality or GridBased in {incFile}."
         )
     if destFolder in checkFolders and destFolder != incAttribute:
         restuls = f"\t{incFile} must be {destFolder} tuning"
         sys.exit(
             f"[Error] Destination folder(={destFolder}) failed to match YAML "
-            f"Library.distance(={incAttribute}): \n{restuls}"
+            f"LibraryType (={incAttribute}): \n{restuls}"
         )
 
 def compareProblemType(oriAccessor, incAccessor):
@@ -584,9 +572,24 @@ def syncDefaultParams(origData, origDefaultValues, incDefaultValues):
             elif p in soln.keys() and soln[p] == incDefaultValues[p]:
                 del soln[p]
 
-# Check each solution and remove any parameters set to default value
-# as well as CUCount which is part of Architecture
-def removeDefaultInitParams(data):
+def removeDefaultInitParams(data: dict[str, Any]) -> None:
+    """Drop solution keys that match ``DefaultSolution`` and strip ``CUCount`` from defaults.
+
+    For each entry in ``data["Solutions"]``, removes any parameter whose value
+    equals the corresponding value in ``data["DefaultSolution"]``. Also removes
+    ``CUCount`` from ``DefaultSolution`` when present (it belongs to
+    architecture metadata, not per-solution defaults).
+
+    Args:
+        data: Dict-format library logic (mutated in place). Must contain
+            ``"DefaultSolution"`` and ``"Solutions"``.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
     defaultSol = data["DefaultSolution"]
 
     for soln in data["Solutions"]:
@@ -594,7 +597,7 @@ def removeDefaultInitParams(data):
         for param in solnParams:
             if param in defaultSol.keys() and soln[param] == defaultSol[param]:
                 del soln[param]
-    # FIXME: When all libs are in dict format this can be discarded
+
     if "CUCount" in defaultSol.keys():
         defaultSol.pop("CUCount")
 
@@ -712,7 +715,9 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
     for filename, data, migrated in logicsList:
         logicsDict[filename] = data
         if migrated:
-            LibraryIO.writeYAML(filename, data, explicit_start=False, explicit_end=False)
+            LibraryIO.writeYAML(
+                filename, data, explicit_start=False, explicit_end=False, sort_keys=False
+            )
             msg("Converted", filename, "to dict format")
 
     for incFile in incrementalFiles:
@@ -768,7 +773,11 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
                 len(mergedAccessor.getExactLogic()), "sizes and", len(mergedAccessor.getSolutions()), "solutions")
 
             removeDefaultInitParams(mergedData)
-            mergedData["Library"]["table"] = mergedAccessor.getExactLogic()
+            normalizeDictLibraryLayout(mergedData)
+            if isinstance(mergedData.get("ProblemType"), dict):
+                mergedData["ProblemType"] = dict(
+                    sorted(mergedData["ProblemType"].items())
+                )
             LibraryIO.writeYAML(os.path.join(outputPath, basename), mergedData, explicit_start=False, explicit_end=False, sort_keys=False)
         else:
             # Non dict-based architecture: list-specific post-processing
