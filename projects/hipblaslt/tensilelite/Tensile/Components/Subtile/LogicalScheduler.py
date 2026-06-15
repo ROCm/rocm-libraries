@@ -2475,11 +2475,21 @@ class LogicalScheduler:
         When schedule=True and a group has MFMAs, calls instructionSchedule
         for interleaving. When schedule=False, emits instructions sequentially.
         """
-        from Tensile.Components.Subtile.InstructionScheduler import instructionSchedule
-        from Tensile.Components.Subtile.WaitAluInsertion import insertLRSwapWaitAlu, setMatrixAReuse
+        from Tensile.Components.Subtile.InstructionScheduler import (
+            instructionSchedule,
+            _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT,
+            _MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250,
+        )
+        from Tensile.Components.Subtile.WaitAluInsertion import insertLRSwapWaitAlu,setMatrixAReuse
         from rocisa.code import Module, Label
         from rocisa.container import sgpr
         from rocisa.instruction import SCmpEQU32, SCBranchSCC0, SMovB32
+
+        # gfx1250 needs a larger ds_read->waitcnt gap.
+        isGfx1250 = writer.states.archCaps.get("HasWmmaArbStallBit", False)
+        minGapDsReadToWait = (_MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250
+                              if isGfx1250
+                              else _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT)
 
         module = Module(label)
         module.addComment0(f"{label} start")
@@ -2496,7 +2506,7 @@ class LogicalScheduler:
             for k, em_list in enumerate(partition_emitted):
                 module.addComment0(f"partition={pi} subIterK={k}")
                 if schedule and em_list:
-                    scheduled = instructionSchedule(em_list)
+                    scheduled = instructionSchedule(em_list, minGapDsReadToWait=minGapDsReadToWait)
                     module.add(scheduled)
                 else:
                     for em in em_list:
