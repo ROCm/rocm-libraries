@@ -37,6 +37,7 @@
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
+#include "stinkytofu/transforms/asm/InsertWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/LongBranchLoweringPass.hpp"
 #include "stinkytofu/transforms/asm/LoopRegionRemarkPass.hpp"
 #include "stinkytofu/transforms/asm/MemTokenConsistencyCheckPass.hpp"
@@ -44,6 +45,7 @@
 #include "stinkytofu/transforms/asm/RaiseVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/RemoveWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
 #include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
@@ -99,6 +101,8 @@ const std::vector<PassInfo> availablePasses = {
          return createInsertClusterBarrierPass(
              /*isKernelScope=*/true, geti("PrefetchGlobalRead", 1), geti("PrefetchLocalRead", 1));
      }},
+    {"RemoveWaitAluPass", []() { return createRemoveWaitAluPass(); }},
+    {"InsertWaitAluPass", []() { return createInsertWaitAluPass(); }},
 };
 
 /**
