@@ -274,33 +274,31 @@ struct device_segmented_radix_sort_pairs_benchmark_generator
 {
     template<size_t key_size = sizeof(Key), size_t value_type = sizeof(Value)>
     static auto _create(std::vector<std::unique_ptr<primbench::benchmark_interface>>& storage)
-        -> std::enable_if_t<((key_size + value_type) * BlockSize * ItemsPerThread
-                             <= TUNING_SHARED_MEMORY_MAX)>
     {
-        const std::vector<size_t> segment_counts{10, 100, 1000, 2500, 5000, 7500, 10000, 100000};
-        const std::vector<size_t> segment_lengths{30, 256, 3000, 300000};
+        if constexpr((key_size + value_type) * BlockSize * ItemsPerThread
+                     <= TUNING_SHARED_MEMORY_MAX)
+        {
+            const std::vector<size_t>
+                segment_counts{10, 100, 1000, 2500, 5000, 7500, 10000, 100000};
+            const std::vector<size_t> segment_lengths{30, 256, 3000, 300000};
 
-        storage.emplace_back(std::make_unique<device_segmented_radix_sort_pairs_benchmark<
-                                 Key,
-                                 Value,
-                                 rocprim::segmented_radix_sort_config<
-                                     RadixBits,
-                                     rocprim::kernel_config<BlockSize, ItemsPerThread>,
-                                     rocprim::WarpSortConfig<WarpSmallLWS,
-                                                             WarpSmallIPT,
-                                                             WarpSmallBS,
-                                                             WarpPartition,
-                                                             WarpMediumLWS,
-                                                             WarpMediumIPT,
-                                                             WarpMediumBS>,
-                                     UnpartitionWarpAllowed>>>(segment_counts, segment_lengths));
+            storage.emplace_back(
+                std::make_unique<device_segmented_radix_sort_pairs_benchmark<
+                    Key,
+                    Value,
+                    rocprim::segmented_radix_sort_config<
+                        RadixBits,
+                        rocprim::kernel_config<BlockSize, ItemsPerThread>,
+                        rocprim::WarpSortConfig<WarpSmallLWS,
+                                                WarpSmallIPT,
+                                                WarpSmallBS,
+                                                WarpPartition,
+                                                WarpMediumLWS,
+                                                WarpMediumIPT,
+                                                WarpMediumBS>,
+                        UnpartitionWarpAllowed>>>(segment_counts, segment_lengths));
+        }
     }
-
-    template<size_t key_size = sizeof(Key), size_t value_type = sizeof(Value)>
-    static auto _create(std::vector<std::unique_ptr<primbench::benchmark_interface>>&)
-        -> std::enable_if_t<!((key_size + value_type) * BlockSize * ItemsPerThread
-                              <= TUNING_SHARED_MEMORY_MAX)>
-    {}
 
     static void create(std::vector<std::unique_ptr<primbench::benchmark_interface>>& storage)
     {
