@@ -1304,6 +1304,30 @@ def runClangFormatAndCppcheck() {
     )
 }
 
+def runAsciiOnlyCheck() {
+    buildAndTest(
+        setup_args: "NO_CK_BUILD",
+        setup_cmd: "",
+        build_cmd: "",
+        execute_cmd: """cd .. && \
+            find . -type f \\( -name '*.h' -o -name '*.hpp' -o -name '*.cpp' -o -name '*.h.in' -o -name '*.hpp.in' -o -name '*.cpp.in' -o -name '*.inc' -o -name '*.cl' \\) \
+            -not -path '*/build/*' -not -path '*/include/rapidjson/*' \
+            -print0 | xargs -0 -P 8 -n 64 script/check_ascii_only.sh"""
+    )
+}
+
+def runCrlfCheck() {
+    buildAndTest(
+        setup_args: "NO_CK_BUILD",
+        setup_cmd: "",
+        build_cmd: "",
+        execute_cmd: """cd .. && \
+            find . -type f \\( -name '*.h' -o -name '*.hpp' -o -name '*.cpp' -o -name '*.h.in' -o -name '*.hpp.in' -o -name '*.cpp.in' -o -name '*.inc' -o -name '*.cl' \\) \
+            -not -path '*/build/*' -not -path '*/include/rapidjson/*' \
+            -print0 | xargs -0 -P 8 -n 64 script/check_no_crlf.sh"""
+    )
+}
+
 def runFullGroupedConvTileTests() {
     buildAndTest(
         setup_args: "NO_CK_BUILD",
