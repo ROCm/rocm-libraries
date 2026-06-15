@@ -872,12 +872,28 @@ def _sdpa_scale(
     return None if value is None else float(value)
 
 
+def _sdpa_head_repeat(q_heads: int, kv_heads: int, label: str) -> int:
+    """Validate and return the per-query-head repeat factor for K or V.
+
+    hipDNN allows independent K and V head counts; each must divide the query
+    head count (frontend SdpaBwdNode validation), and the CPU reference maps K
+    and V with separate ratios.
+    """
+    if kv_heads <= 0 or q_heads % kv_heads != 0:
+        raise ValueError(
+            f"Unsupported SDPA {label} head count: q_heads={q_heads}, "
+            f"{label.lower()}_heads={kv_heads}"
+        )
+    return q_heads // kv_heads
+
+
 def _sdpa_common(
     node: Dict[str, Any],
     tensors: Dict[int, torch.Tensor],
     q: torch.Tensor,
     k: torch.Tensor,
-) -> Tuple[Optional[torch.Tensor], float, bool, Optional[float], bool]:
+    v: torch.Tensor,
+) -> Tuple[Optional[torch.Tensor], float, bool, Optional[float], int, int]:
     unsupported = [
         "seq_len_q_tensor_uid",
         "seq_len_kv_tensor_uid",
@@ -933,16 +949,12 @@ def _sdpa_common(
         )
 
     scale = _sdpa_scale(node, tensors)
-    if q.ndim < 3 or k.ndim < 3:
+    if q.ndim < 3 or k.ndim < 3 or v.ndim < 3:
         raise ValueError("SDPA expects q/k/v tensors with head and matrix dimensions")
     q_heads = int(q.shape[-3])
-    kv_heads = int(k.shape[-3])
-    enable_gqa = q_heads != kv_heads
-    if enable_gqa and (kv_heads == 0 or q_heads % kv_heads != 0):
-        raise ValueError(
-            f"Unsupported GQA head counts: q_heads={q_heads}, kv_heads={kv_heads}"
-        )
-    return attn_mask, dropout_p, is_causal, scale, enable_gqa
+    rep_k = _sdpa_head_repeat(q_heads, int(k.shape[-3]), "K")
+    rep_v = _sdpa_head_repeat(q_heads, int(v.shape[-3]), "V")
+    return attn_mask, dropout_p, is_causal, scale, rep_k, rep_v
 
 
 def _call_sdpa(
@@ -953,36 +965,28 @@ def _call_sdpa(
     dropout_p: float,
     is_causal: bool,
     scale: Optional[float],
-    enable_gqa: bool,
+    rep_k: int,
+    rep_v: int,
 ) -> torch.Tensor:
     kwargs: Dict[str, Any] = {}
     if scale is not None:
         kwargs["scale"] = scale
-    if enable_gqa:
-        kwargs["enable_gqa"] = True
-    try:
-        return F.scaled_dot_product_attention(
-            q,
-            k,
-            v,
-            attn_mask=attn_mask,
-            dropout_p=dropout_p,
-            is_causal=is_causal,
-            **kwargs,
-        )
-    except TypeError:
-        if not enable_gqa:
-            raise
-        repeat = q.shape[-3] // k.shape[-3]
-        return F.scaled_dot_product_attention(
-            q,
-            k.repeat_interleave(repeat, dim=-3),
-            v.repeat_interleave(repeat, dim=-3),
-            attn_mask=attn_mask,
-            dropout_p=dropout_p,
-            is_causal=is_causal,
-            **{key: value for key, value in kwargs.items() if key != "enable_gqa"},
-        )
+    # Expand K and V independently to the query head count. PyTorch's
+    # enable_gqa only models equal K/V head counts, so explicit repeat is the
+    # only correct path when Hk != Hv.
+    if rep_k > 1:
+        k = k.repeat_interleave(rep_k, dim=-3)
+    if rep_v > 1:
+        v = v.repeat_interleave(rep_v, dim=-3)
+    return F.scaled_dot_product_attention(
+        q,
+        k,
+        v,
+        attn_mask=attn_mask,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        **kwargs,
+    )
 
 
 def _sdpa_stats(
@@ -991,13 +995,12 @@ def _sdpa_stats(
     attn_mask: Optional[torch.Tensor],
     is_causal: bool,
     scale: Optional[float],
-    enable_gqa: bool,
+    rep_k: int,
 ) -> torch.Tensor:
     q_float = q.to(dtype=torch.float32)
     k_float = k.to(dtype=torch.float32)
-    if enable_gqa:
-        repeat = q.shape[-3] // k.shape[-3]
-        k_float = k_float.repeat_interleave(repeat, dim=-3)
+    if rep_k > 1:
+        k_float = k_float.repeat_interleave(rep_k, dim=-3)
     scale_value = (1.0 / sqrt(float(q.shape[-1]))) if scale is None else scale
     scores = torch.matmul(q_float, k_float.transpose(-2, -1)) * scale_value
     if attn_mask is not None:
@@ -1676,10 +1679,10 @@ def handle_sdpa(
     q = _tensor(tensors, q_uid, node)
     k = _tensor(tensors, k_uid, node)
     v = _tensor(tensors, v_uid, node)
-    attn_mask, dropout_p, is_causal, scale, enable_gqa = _sdpa_common(
-        node, tensors, q, k
+    attn_mask, dropout_p, is_causal, scale, rep_k, rep_v = _sdpa_common(
+        node, tensors, q, k, v
     )
-    o = _call_sdpa(q, k, v, attn_mask, dropout_p, is_causal, scale, enable_gqa)
+    o = _call_sdpa(q, k, v, attn_mask, dropout_p, is_causal, scale, rep_k, rep_v)
     _store_tensor(tensors, o_uid, o)
 
     stats_uid = _optional_uid(node, "stats_tensor_uid")
@@ -1687,7 +1690,7 @@ def handle_sdpa(
         _store_tensor(
             tensors,
             stats_uid,
-            _sdpa_stats(q, k, attn_mask, is_causal, scale, enable_gqa),
+            _sdpa_stats(q, k, attn_mask, is_causal, scale, rep_k),
         )
 
 
@@ -1729,8 +1732,8 @@ def handle_sdpa_backward(
     o = _tensor(tensors, o_uid, node)
     do = _tensor(tensors, do_uid, node)
     stats = _tensor(tensors, stats_uid, node)
-    attn_mask, _dropout_p, is_causal, scale, enable_gqa = _sdpa_common(
-        node, tensors, q, k
+    attn_mask, _dropout_p, is_causal, scale, rep_k, rep_v = _sdpa_common(
+        node, tensors, q, k, v
     )
 
     if q.ndim != 4 or k.ndim != 4 or v.ndim != 4:
@@ -1745,12 +1748,12 @@ def handle_sdpa_backward(
 
     head_dim = int(q.shape[-1])
     scale_value = (1.0 / sqrt(float(head_dim))) if scale is None else float(scale)
-    q_heads = int(q.shape[1])
     k_heads = int(k.shape[1])
     v_heads = int(v.shape[1])
-    if enable_gqa:
-        k_f = k_f.repeat_interleave(q_heads // k_heads, dim=1)
-        v_f = v_f.repeat_interleave(q_heads // v_heads, dim=1)
+    if rep_k > 1:
+        k_f = k_f.repeat_interleave(rep_k, dim=1)
+    if rep_v > 1:
+        v_f = v_f.repeat_interleave(rep_v, dim=1)
 
     scores = torch.matmul(q_f, k_f.transpose(-2, -1)) * scale_value
     if attn_mask is not None:
@@ -1774,16 +1777,14 @@ def handle_sdpa_backward(
     dk_full = torch.matmul(d_scores_scaled.transpose(-2, -1), q_f)
     dv_full = torch.matmul(probs.transpose(-2, -1), do_f)
 
-    if enable_gqa:
-        batch, seq_kv = dk_full.shape[0], dk_full.shape[2]
-        dk_f = dk_full.view(batch, k_heads, q_heads // k_heads, seq_kv, head_dim).sum(
-            dim=2
-        )
-        dv_f = dv_full.view(
-            batch, v_heads, q_heads // v_heads, seq_kv, int(v.shape[-1])
-        ).sum(dim=2)
+    batch, seq_kv = dk_full.shape[0], dk_full.shape[2]
+    if rep_k > 1:
+        dk_f = dk_full.view(batch, k_heads, rep_k, seq_kv, head_dim).sum(dim=2)
     else:
         dk_f = dk_full
+    if rep_v > 1:
+        dv_f = dv_full.view(batch, v_heads, rep_v, seq_kv, int(v.shape[-1])).sum(dim=2)
+    else:
         dv_f = dv_full
 
     _store_tensor(tensors, dq_uid, dq.to(dtype=q.dtype))

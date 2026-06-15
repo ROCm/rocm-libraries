@@ -908,13 +908,14 @@ class TestPyTorchOpsNewHandlers:
         do: torch.Tensor,
         scale: float,
         causal: bool,
-        repeat: int,
+        repeat_k: int,
+        repeat_v: int,
     ):
         q_g = q.clone().requires_grad_()
         k_g = k.clone().requires_grad_()
         v_g = v.clone().requires_grad_()
-        k_e = k_g.repeat_interleave(repeat, dim=1) if repeat > 1 else k_g
-        v_e = v_g.repeat_interleave(repeat, dim=1) if repeat > 1 else v_g
+        k_e = k_g.repeat_interleave(repeat_k, dim=1) if repeat_k > 1 else k_g
+        v_e = v_g.repeat_interleave(repeat_v, dim=1) if repeat_v > 1 else v_g
         scores = (q_g @ k_e.transpose(-2, -1)) * scale
         if causal:
             mask = torch.ones(
@@ -970,7 +971,7 @@ class TestPyTorchOpsNewHandlers:
         v = torch.randn(2, 3, 5, 8)
         do = torch.randn(2, 3, 5, 8)
         o, lse, dq_ref, dk_ref, dv_ref = self._sdpa_autograd_reference(
-            q, k, v, do, scale, causal, 1
+            q, k, v, do, scale, causal, 1, 1
         )
 
         attrs = {"attn_scale_value": scale}
@@ -990,7 +991,7 @@ class TestPyTorchOpsNewHandlers:
         v = torch.randn(2, 2, 5, 8)
         do = torch.randn(2, 4, 5, 8)
         o, lse, dq_ref, dk_ref, dv_ref = self._sdpa_autograd_reference(
-            q, k, v, do, scale, False, 2
+            q, k, v, do, scale, False, 2, 2
         )
 
         dq, dk, dv = self._run_sdpa_backward(
@@ -1008,7 +1009,7 @@ class TestPyTorchOpsNewHandlers:
         k = torch.randn(1, 2, 4, 8)
         v = torch.randn(1, 2, 4, 8)
         do = torch.randn(1, 2, 4, 8)
-        o, lse, _, _, _ = self._sdpa_autograd_reference(q, k, v, do, scale, False, 1)
+        o, lse, _, _, _ = self._sdpa_autograd_reference(q, k, v, do, scale, False, 1, 1)
 
         dq_true, _, _ = self._run_sdpa_backward(
             q, k, v, o, do, lse, {"attn_scale_value": scale}
@@ -1050,3 +1051,87 @@ class TestPyTorchOpsNewHandlers:
             pytorch_ops.execute_graph(
                 graph_json, {1: q, 2: q, 3: q, 4: q, 5: q, 6: stats}
             )
+
+    def test_sdpa_backward_independent_kv_heads(self) -> None:
+        # Hq == Hk but Hv < Hq: regression for the single-flag GQA bug that
+        # skipped V expansion/reduction whenever Hq == Hk.
+        torch.manual_seed(3)
+        scale = 1.0 / (8**0.5)
+        q = torch.randn(2, 4, 5, 8)
+        k = torch.randn(2, 4, 5, 8)
+        v = torch.randn(2, 1, 5, 8)
+        do = torch.randn(2, 4, 5, 8)
+        o, lse, dq_ref, dk_ref, dv_ref = self._sdpa_autograd_reference(
+            q, k, v, do, scale, False, 1, 4
+        )
+
+        dq, dk, dv = self._run_sdpa_backward(
+            q, k, v, o, do, lse, {"attn_scale_value": scale}
+        )
+
+        assert dk.shape == k.shape
+        assert dv.shape == v.shape
+        torch.testing.assert_close(dq, dq_ref, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_close(dk, dk_ref, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_close(dv, dv_ref, rtol=1e-4, atol=1e-4)
+
+    def test_sdpa_backward_distinct_kv_head_counts(self) -> None:
+        # Hk != Hv, both < Hq.
+        torch.manual_seed(4)
+        scale = 1.0 / (8**0.5)
+        q = torch.randn(2, 8, 5, 8)
+        k = torch.randn(2, 4, 5, 8)
+        v = torch.randn(2, 2, 5, 8)
+        do = torch.randn(2, 8, 5, 8)
+        o, lse, dq_ref, dk_ref, dv_ref = self._sdpa_autograd_reference(
+            q, k, v, do, scale, False, 2, 4
+        )
+
+        dq, dk, dv = self._run_sdpa_backward(
+            q, k, v, o, do, lse, {"attn_scale_value": scale}
+        )
+
+        assert dk.shape == k.shape
+        assert dv.shape == v.shape
+        torch.testing.assert_close(dq, dq_ref, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_close(dk, dk_ref, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_close(dv, dv_ref, rtol=1e-4, atol=1e-4)
+
+    def test_sdpa_backward_rejects_indivisible_v_heads(self) -> None:
+        scale = 1.0 / (8**0.5)
+        q = torch.randn(1, 4, 4, 8)
+        v = torch.randn(1, 3, 4, 8)  # 3 does not divide Hq=4
+        stats = torch.zeros(1, 4, 4, 1)
+        with pytest.raises(ValueError, match="V head count"):
+            self._run_sdpa_backward(q, q, v, q, q, stats, {"attn_scale_value": scale})
+
+    def test_sdpa_forward_independent_kv_heads(self) -> None:
+        # Hk != Hv (2 and 1, both divide Hq=4): explicit independent repeat.
+        torch.manual_seed(5)
+        q = torch.randn(1, 4, 3, 8)
+        k = torch.randn(1, 2, 3, 8)
+        v = torch.randn(1, 1, 3, 8)
+        graph_json = {
+            "tensors": [{"uid": 4, "dims": [1, 4, 3, 8]}],
+            "nodes": [
+                {
+                    "type": "SdpaAttributes",
+                    "inputs": {
+                        "q_tensor_uid": 1,
+                        "k_tensor_uid": 2,
+                        "v_tensor_uid": 3,
+                    },
+                    "outputs": {"o_tensor_uid": 4},
+                }
+            ],
+        }
+        tensors = {1: q, 2: k, 3: v}
+
+        pytorch_ops.execute_graph(graph_json, tensors)
+
+        expected = torch.nn.functional.scaled_dot_product_attention(
+            q,
+            k.repeat_interleave(2, dim=-3),
+            v.repeat_interleave(4, dim=-3),
+        )
+        torch.testing.assert_close(tensors[4], expected, rtol=1e-5, atol=1e-5)
