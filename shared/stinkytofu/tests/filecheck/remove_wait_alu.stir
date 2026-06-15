@@ -1,0 +1,101 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --RemoveWaitAluPass --print-output
+#
+# RemoveWaitAluPass: clear all six GPR hazard fields (va_vdst, vm_vsrc,
+# va_sdst, va_ssrc, va_vcc, sa_sdst) on every s_wait_alu. Delete the
+# instruction iff every field (including hold_cnt) is now no-wait — so
+# hold_cnt-only survivors stay.
+#
+# setreg(SCHED_MODE) stripping is exercised by remove_wait_alu_setreg.s
+# (stir parser does not accept hwreg() destination operands).
+
+#--- s_wait_alu with only va_vdst → fully cleared → instruction removed.
+# CHECK-LABEL: @strip_wait_alu_va_vdst_only
+# CHECK-NOT: s_wait_alu
+# CHECK: v_add_f32
+
+st.func @strip_wait_alu_va_vdst_only() {
+^entry:
+  "st.s_wait_alu"() { issueCycles = 1, latencyCycles = 1, mod.waitalu = { va_vdst = 0 } }
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- s_wait_alu with only vm_vsrc → fully cleared → removed.
+# CHECK-LABEL: @strip_wait_alu_vm_vsrc_only
+# CHECK-NOT: s_wait_alu
+# CHECK: v_add_f32
+
+st.func @strip_wait_alu_vm_vsrc_only() {
+^entry:
+  "st.s_wait_alu"() { issueCycles = 1, latencyCycles = 1, mod.waitalu = { vm_vsrc = 0 } }
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- s_wait_alu with multiple GPR hazard fields → all cleared → removed.
+# CHECK-LABEL: @strip_wait_alu_multi_gpr_fields
+# CHECK-NOT: s_wait_alu
+# CHECK: v_add_f32
+
+st.func @strip_wait_alu_multi_gpr_fields() {
+^entry:
+  "st.s_wait_alu"() { issueCycles = 1, latencyCycles = 1, mod.waitalu = { va_vdst = 0, vm_vsrc = 0, va_sdst = 0 } }
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- s_wait_alu with only hold_cnt → no GPR fields to clear → kept as-is.
+# CHECK-LABEL: @keep_wait_alu_hold_cnt_only
+# CHECK: s_wait_alu
+# CHECK-SAME: hold_cnt = 1
+# CHECK: v_add_f32
+
+st.func @keep_wait_alu_hold_cnt_only() {
+^entry:
+  "st.s_wait_alu"() { issueCycles = 1, latencyCycles = 1, mod.waitalu = { hold_cnt = 1 } }
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- s_wait_alu with GPR fields + hold_cnt → GPR fields cleared, hold_cnt kept.
+# Instruction stays because hold_cnt is still encoded.
+# CHECK-LABEL: @clear_gpr_keep_hold_cnt
+# CHECK: s_wait_alu
+# CHECK-SAME: hold_cnt = 1
+# CHECK-NOT: va_vdst
+# CHECK-NOT: vm_vsrc
+# CHECK: v_add_f32
+
+st.func @clear_gpr_keep_hold_cnt() {
+^entry:
+  "st.s_wait_alu"() { issueCycles = 1, latencyCycles = 1, mod.waitalu = { va_vdst = 0, vm_vsrc = 0, hold_cnt = 1 } }
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- No-op when no s_wait_alu present.
+# CHECK-LABEL: @noop_when_nothing_to_strip
+# CHECK: v_add_f32
+# CHECK-NEXT: v_mul_f32
+# CHECK-NOT: s_wait_alu
+
+st.func @noop_when_nothing_to_strip() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Multiple s_wait_alu intermixed with VALU: clears all GPR fields,
+#--- removes empty ones, leaves hold_cnt survivors.
+# CHECK-LABEL: @intermixed_wait_alu
+# CHECK: v_add_f32
+# CHECK-NEXT: v_mul_f32
+# CHECK-NEXT: s_wait_alu
+# CHECK-SAME: hold_cnt = 1
+# CHECK-NEXT: v_sub_f32
+# CHECK-NOT: s_wait_alu
+
+st.func @intermixed_wait_alu() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_wait_alu"() { issueCycles = 1, latencyCycles = 1, mod.waitalu = { va_vdst = 0 } }
+  v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_wait_alu"() { issueCycles = 1, latencyCycles = 1, mod.waitalu = { vm_vsrc = 0, hold_cnt = 1 } }
+  v5 = "st.v_sub_f32"(v3, v6) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_wait_alu"() { issueCycles = 1, latencyCycles = 1, mod.waitalu = { sa_sdst = 0 } }
+}
