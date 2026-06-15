@@ -1,0 +1,186 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass --print-output
+#
+# InsertWaitAluPass: mode-2 s_wait_alu insertion + SCHED_MODE setreg lifecycle.
+# - setreg HW_REG_WAVE_SCHED_MODE (size=2, value=2) inserted at function entry
+# - setreg HW_REG_WAVE_SCHED_MODE (size=2, value=0) inserted before s_endpgm / s_setpc_b64
+# - VALU→VMEM RAW emits s_wait_alu va_vdst(N)
+# - VMEM→VALU dst WAR emits s_wait_alu vm_vsrc(N)
+# - VALU→VALU consumer suppresses va_vdst (HW per-register scoreboard covers it)
+# - Instructions that write EXEC eagerly drain VA_VDST via va_vdst(0)
+
+#--- setreg(SCHED_MODE)=2 at function entry, =0 before s_endpgm.
+# CHECK-LABEL: @lifecycle_entry_and_return
+# CHECK: hwreg(26,0,2) = "st.s_setreg_IMM32_b32"(2)
+# CHECK: v_add_f32
+# CHECK: hwreg(26,0,2) = "st.s_setreg_IMM32_b32"(0)
+# CHECK-NEXT: s_endpgm
+
+st.func @lifecycle_entry_and_return() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- VALU producer → buffer_load consumer reads v0: emit va_vdst wait
+#--- before the load. Two unrelated VALUs sit between, so the encoded
+#--- wait value is non-zero (UB - score = number of VALUs after producer).
+# CHECK-LABEL: @valu_to_vmem_raw
+# CHECK: v_add_f32
+# CHECK: v_mov_b32
+# CHECK: v_mov_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst
+# CHECK: buffer_load_b32
+
+st.func @valu_to_vmem_raw() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v5 = "st.v_mov_b32"(v6) { issueCycles = 1, latencyCycles = 5 }
+  v7 = "st.v_mov_b32"(v8) { issueCycles = 1, latencyCycles = 5 }
+  v10 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
+}
+
+#--- VMEM read → VALU write to same VGPR: vm_vsrc(0) WAR drain before
+#--- the VALU clobbers a register an in-flight VMEM is still reading.
+# CHECK-LABEL: @vmem_to_valu_war
+# CHECK: buffer_load_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc = 0
+# CHECK: v_mov_b32
+
+st.func @vmem_to_valu_war() {
+^entry:
+  v10 = "st.buffer_load_b32"(v3) { issueCycles = 1, latencyCycles = 100 }
+  v3 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- VALU producer → VALU consumer of the same VGPR: VA_VDST is suppressed
+#--- on VALU consumers (HW per-register scoreboard handles VALU→VGPR→VALU
+#--- forwarding in every SCHED_MODE). No s_wait_alu should appear between
+#--- the two VALU instructions.
+# CHECK-LABEL: @valu_to_valu_no_wait
+# CHECK: v_add_f32
+# CHECK-NOT: s_wait_alu
+# CHECK: v_mul_f32
+
+st.func @valu_to_valu_no_wait() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- SALU writes EXEC (s_and_saveexec) between a VALU and a downstream
+#--- VMEM consumer: must drain VA_VDST at the saveexec to prevent the
+#--- non-zero wait value from being satisfied by EXEC-skipped VALUs.
+# CHECK-LABEL: @exec_modifier_drains_va_vdst
+# CHECK: v_add_f32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK: s_and_saveexec_b32
+
+st.func @exec_modifier_drains_va_vdst() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  s0 = "st.s_and_saveexec_b32"(s1) { issueCycles = 1, latencyCycles = 2 }
+}
+
+#--- v_cmpx_* is VALU that writes EXEC. Step 2 (VALU suppression) would
+#--- otherwise suppress va_vdst here; Step 3 must override with va_vdst(0)
+#--- because the EXEC write invalidates non-zero VA_VDST waits.
+# CHECK-LABEL: @vcmpx_drains_va_vdst
+# CHECK: v_add_f32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK: v_cmpx_eq_u32
+
+st.func @vcmpx_drains_va_vdst() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.v_cmpx_eq_u32"(v0, v3) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- No EXEC drain when VA_VDST is already empty (no pending VALU).
+# CHECK-LABEL: @exec_no_drain_when_empty
+# CHECK-NOT: s_wait_alu
+# CHECK: s_and_saveexec_b32
+
+st.func @exec_no_drain_when_empty() {
+^entry:
+  s0 = "st.s_and_saveexec_b32"(s1) { issueCycles = 1, latencyCycles = 2 }
+}
+
+#--- VALU→VMEM with no intervening VALU emits va_vdst with the tightest
+#--- (smallest) wait value; the producer is the most recent VALU.
+# CHECK-LABEL: @valu_to_vmem_tight
+# CHECK: v_add_f32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst
+# CHECK: buffer_load_b32
+
+st.func @valu_to_vmem_tight() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v10 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
+}
+
+#--- Independent VALU before VMEM that reads a *different* register: no
+#--- wait needed (no dependency on the VMEM source operand).
+# CHECK-LABEL: @no_wait_no_dep
+# CHECK: v_add_f32
+# CHECK-NOT: s_wait_alu
+# CHECK: buffer_load_b32
+
+st.func @no_wait_no_dep() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v10 = "st.buffer_load_b32"(v20) { issueCycles = 1, latencyCycles = 100 }
+}
+
+#--- Two pending VALU event types (CSMACC + TRANS) on VA_VDST force the
+#--- counter into out-of-order mode → emitted wait is forced to 0.
+# CHECK-LABEL: @va_vdst_ooo_forces_zero
+# CHECK: v_rcp_f32
+# CHECK: v_add_f32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK: buffer_load_b32
+
+st.func @va_vdst_ooo_forces_zero() {
+^entry:
+  v0 = "st.v_rcp_f32"(v1) { issueCycles = 1, latencyCycles = 8 }
+  v2 = "st.v_add_f32"(v3, v4) { issueCycles = 1, latencyCycles = 5 }
+  v10 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
+}
+
+#--- Fall-off exit: the function has no s_endpgm / s_setpc_b64 (mirrors a
+#--- --from-label / --to-label region extracted out of a larger kernel).
+#--- The mode2 disable must still land at the end of the last BB.
+# CHECK-LABEL: @fall_off_exit
+# CHECK: hwreg(26,0,2) = "st.s_setreg_IMM32_b32"(2)
+# CHECK: v_add_f32
+# CHECK: hwreg(26,0,2) = "st.s_setreg_IMM32_b32"(0)
+# CHECK-NOT: s_endpgm
+
+st.func @fall_off_exit() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- A hold_cnt-only s_wait_alu (a RemoveWaitAluPass survivor) sits
+#--- immediately before a VMEM consumer that needs a fresh va_vdst wait. The
+#--- pass merges the fresh va_vdst field into the existing instruction so the
+#--- hold_cnt constraint is preserved and only one s_wait_alu remains.
+# CHECK-LABEL: @merge_hold_cnt_with_va_vdst
+# CHECK: v_add_f32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK-SAME: hold_cnt = 1
+# CHECK-NEXT: buffer_load_b32
+# CHECK-NOT: s_wait_alu
+
+st.func @merge_hold_cnt_with_va_vdst() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_wait_alu"() { issueCycles = 1, latencyCycles = 1, mod.waitalu = { hold_cnt = 1 } }
+  v10 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
+}
