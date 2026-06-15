@@ -8,15 +8,15 @@
     pulls a ROCm build of PyTorch from the Linux nightly index, and uses
     LD_LIBRARY_PATH. This script does the Windows equivalents:
 
-      1. Selects a Python environment (defaults to the current/ROCm-wheel env;
-         a bare venv has no ROCm runtime, so reuse is the sane default on Windows).
+      1. Selects an existing Python environment (the active venv, or -PythonExe).
+         On Windows this should be the ROCm-wheel env, which carries the runtime.
       2. Optionally does a FULL BUILD of hipDNN (+ the Python bindings) and the
          MIOpen provider from source via the MSVC + ROCm-wheel toolchain (-FullBuild).
       3. Installs the dnn-benchmark package in editable mode (and its PyPI deps).
       4. Makes the hipdnn_frontend bindings importable by wiring the compiled
          extension onto the env via a .pth file.
-      5. Leaves PyTorch alone — it is OPTIONAL (host-side E2E timings still work
-         without it) and a ROCm build of torch is not readily available on Windows.
+      5. Installs PyTorch (CPU) — the default PyPI wheel — which backs the PyTorch
+         reference provider (--backend pytorch / --validate pytorch).
 
     The ROCm runtime DLLs are resolved at import time by hipdnn_frontend itself,
     either from the rocm_sdk wheel (if installed in the env) or from
@@ -27,19 +27,10 @@
     active, otherwise 'python' on PATH. Recommended: your ROCm wheel env's python
     (it carries rocm_sdk + the _rocm_sdk_devel toolchain used for -FullBuild).
 
-.PARAMETER VenvDir
-    If given, (re)create a venv here and install into it instead of -PythonExe.
-    NOTE: a fresh venv has no ROCm runtime; provide it with
-    `pip install rocm[libraries]` or set ROCM_PATH/HIP_PATH, or imports will fail.
-
 .PARAMETER FullBuild
     Build hipDNN (with the Python bindings) and the MIOpen provider from source,
     then install them to -InstallDir. Requires the MSVC toolchain and a ROCm devel
     wheel (_rocm_sdk_devel) in the selected Python env. Implies building the bindings.
-
-.PARAMETER BuildBindings
-    Lightweight alternative to -FullBuild: build only the bindings via the local
-    build_py_bindings.bat if present. Ignored when -FullBuild is set.
 
 .PARAMETER SkipProvider
     With -FullBuild, skip building the MIOpen provider (build only hipDNN + bindings).
@@ -89,9 +80,7 @@
 [CmdletBinding()]
 param(
     [string]$PythonExe,
-    [string]$VenvDir,
     [switch]$FullBuild,
-    [switch]$BuildBindings,
     [switch]$SkipProvider,
     [string]$InstallDir,
     [string]$GpuTargets = 'gfx1150',
@@ -120,7 +109,6 @@ $HipdnnRoot  = (Resolve-Path (Join-Path $ScriptDir '..\..')).Path
 $BindingsPkg = Join-Path $HipdnnRoot 'python'                              # hipdnn_frontend package
 $BindingsLib = Join-Path $HipdnnRoot 'build\lib'                           # compiled .pyd lands here
 $BuildDir    = Join-Path $HipdnnRoot 'build'
-$BuildBat    = Join-Path $HipdnnRoot 'build_py_bindings.bat'
 $ProviderDir = Join-Path $HipdnnRoot '..\..\dnn-providers\miopen-provider' # rocm-libraries/dnn-providers/...
 if (-not $InstallDir) { $InstallDir = Join-Path $HipdnnRoot 'install' }
 
@@ -173,20 +161,8 @@ function Invoke-ToolchainBuild {
     return $true
 }
 
-# --- 1. Resolve / create the Python environment ----------------------------
-if ($VenvDir) {
-    if (Test-Path $VenvDir) {
-        Write-Step "Removing existing virtual environment at $VenvDir"
-        Remove-Item -Recurse -Force $VenvDir
-    }
-    $basePy = if ($PythonExe) { $PythonExe } else { 'python' }
-    Write-Step "Creating virtual environment at $VenvDir"
-    Invoke-Native $basePy @('-m', 'venv', $VenvDir)
-    $Python = Join-Path $VenvDir 'Scripts\python.exe'
-    Write-Warn ("A fresh venv has no ROCm runtime. Install it with " +
-                "'$Python -m pip install rocm[libraries]' or set ROCM_PATH/HIP_PATH.")
-}
-elseif ($PythonExe) { $Python = $PythonExe }
+# --- 1. Resolve the Python environment -------------------------------------
+if ($PythonExe) { $Python = $PythonExe }
 elseif ($env:VIRTUAL_ENV) { $Python = Join-Path $env:VIRTUAL_ENV 'Scripts\python.exe' }
 else { $Python = 'python' }
 
@@ -294,18 +270,6 @@ if ($FullBuild) {
         }
     }
 }
-elseif ($BuildBindings) {
-    if (Test-Path $BuildBat) {
-        Write-Step "Building hipdnn_frontend bindings via build_py_bindings.bat"
-        $existing = Get-ChildItem -Path $BindingsLib -Filter 'hipdnn_frontend_python*.pyd' -ErrorAction SilentlyContinue
-        if ($Force -or -not $existing) { Invoke-Native 'cmd' @('/c', $BuildBat, 'configure') }
-        Invoke-Native 'cmd' @('/c', $BuildBat, 'build')
-    }
-    else {
-        Write-Warn ("build_py_bindings.bat not found at $BuildBat. Use -FullBuild instead, " +
-                    "or build the bindings manually (see python/README.md).")
-    }
-}
 
 # --- 4. Wire the compiled bindings onto the environment via a .pth ----------
 # The bindings are built out-of-tree (subdirectory CMake build), so the package
@@ -328,15 +292,19 @@ elseif ($builtPyd) {
 }
 else {
     Write-Warn ("hipdnn_frontend is not importable and no compiled extension was found " +
-                "under $BindingsLib. Re-run with -FullBuild (or -BuildBindings), or " +
+                "under $BindingsLib. Re-run with -FullBuild, or " +
                 "pip-install the bindings from $BindingsPkg (see python/README.md).")
 }
 
-# --- 5. Install the dnn-benchmark package ----------------------------------
-# torch is intentionally omitted from pyproject.toml (optional, and ROCm torch is
-# not available on Windows); pip resolves numpy / pytest / psutil from PyPI.
+# --- 5. Install the dnn-benchmark package + PyTorch ------------------------
+# torch is omitted from pyproject.toml (optional dep), so install it explicitly
+# here. The default PyPI wheel on Windows is the CPU build, which backs the
+# PyTorch reference provider (--backend pytorch / --validate pytorch). pip
+# resolves the package's own deps (numpy / pytest / psutil) from PyPI.
 Write-Step "Installing dnn-benchmark (editable) and its PyPI dependencies"
 Invoke-Native $Python @('-m', 'pip', 'install', '-e', $ScriptDir)
+Write-Step "Installing PyTorch (CPU)"
+Invoke-Native $Python @('-m', 'pip', 'install', 'torch')
 
 # --- 6. Best-effort amdsmi (powers the GPU SMI snapshot) -------------------
 # Not on PyPI; ships with the HIP SDK. If absent, metrics/gpu_smi.py degrades to
@@ -374,6 +342,6 @@ if ($FullBuild -and -not $SkipProvider) {
     Write-Host "        --plugin-path '$InstallDir\lib\hipdnn_plugins\engines'"
 }
 Write-Host ""
-Write-Host "  PyTorch was not installed (optional on Windows). Without it, host-side"
-Write-Host "  E2E timings are reported but GPU kernel-event timing, --backend pytorch,"
-Write-Host "  and --validate pytorch are unavailable."
+Write-Host "  PyTorch (CPU) was installed: --backend pytorch and --validate pytorch work."
+Write-Host "  GPU kernel-event timing via torch is unavailable (needs a ROCm/CUDA build"
+Write-Host "  of torch, which isn't readily available on Windows)."

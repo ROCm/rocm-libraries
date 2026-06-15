@@ -3,7 +3,7 @@
 # Run this script from an Administrator PowerShell prompt
 
 param(
-    [string]$InstallRoot = "C:\develop",
+    [string]$InstallRoot = "D:\develop",
     [string]$VsBuildToolsPath = "",
     [string]$ClangPath = "",
     [Alias("GpuTarget")]
