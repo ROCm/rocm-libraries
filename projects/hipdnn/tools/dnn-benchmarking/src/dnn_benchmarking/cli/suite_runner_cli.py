@@ -125,13 +125,6 @@ def _reference_provider_available(config: SuiteConfig, reporter: Reporter) -> bo
     except ValueError:
         reporter.print_error(f"Reference provider '{provider_name}' is not registered.")
         return False
-    except ImportError:
-        # Provider construction failed: an optional dependency (e.g. torch) is missing.
-        reporter.print_error(
-            f"Reference provider '{provider_name}' is not available "
-            "(check that its dependencies are installed)."
-        )
-        return False
     if not ref.is_available():
         reporter.print_error(
             f"Reference provider '{provider_name}' is not available "

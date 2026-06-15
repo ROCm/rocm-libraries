@@ -198,14 +198,6 @@ def _get_reference_provider(
             file=sys.stderr,
         )
         return None
-    except ImportError:
-        # Provider construction failed: an optional dependency (e.g. torch) is missing.
-        print(
-            f"Reference provider '{config.validation.provider.value}' not available "
-            "(dependencies missing)",
-            file=sys.stderr,
-        )
-        return None
 
     if not provider.is_available():
         print(
