@@ -898,7 +898,7 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "UseSubtileImpl=1 requires MatrixInst 16x16")
       if state["_ScheduleIterAlg"] == 1 or state["_ScheduleIterAlg"] == 2:
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support ScheduleIterAlg")
-      if state["StreamK"] == 0 and state["GlobalSplitU"] not in (1, -1):
+      if state["StreamK"] == 0 and state["GlobalSplitU"] != 1:
         reject(state, printRejectionReason, "UseSubtileImpl=1 with StreamK=0 requires GlobalSplitU=1 (no GSU reduction support)")
       if state["StreamK"] not in (0, 3, 4):
         reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK in {0, 3, 4}")
