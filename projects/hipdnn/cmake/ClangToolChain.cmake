@@ -220,6 +220,20 @@ if(DEFINED ROCM_PATH AND NOT DEFINED ROCM_CMAKE_PATH)
     endif()
 endif()
 
+# hipDNN embeds a Windows VERSIONINFO resource (backend.rc) that needs a resource compiler.
+# Prefer llvm-rc from the ROCm LLVM toolchain (next to clang++), then any rc on PATH. If none is
+# found, mark RC as not-required so configuration still succeeds; the backend guards its .rc source
+# on a real compiler and warns when version metadata will be omitted.
+if(WIN32 AND NOT CMAKE_RC_COMPILER)
+    get_filename_component(_hipdnn_llvm_bin "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    find_program(_HIPDNN_RC_COMPILER NAMES llvm-rc rc HINTS "${_hipdnn_llvm_bin}")
+    if(_HIPDNN_RC_COMPILER)
+        set(CMAKE_RC_COMPILER "${_HIPDNN_RC_COMPILER}")
+    else()
+        set(CMAKE_RC_COMPILER "CMAKE_RC_COMPILER-NOTREQUIRED")
+    endif()
+endif()
+
 if(NOT _ROCM_CLANG_TOOLCHAIN_FIRST_RUN_COMPLETED)
     # Validate that a compatible generator is being used
     if(CMAKE_GENERATOR)
