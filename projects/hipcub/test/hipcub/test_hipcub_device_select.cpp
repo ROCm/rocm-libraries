@@ -878,6 +878,7 @@ INSTANTIATE_TEST_SUITE_P(HipcubDeviceSelectLargeIndicesTest,
 
 TEST_P(HipcubDeviceSelectLargeIndicesTests, LargeIndicesSelectOp)
 {
+    GTEST_SKIP_ASAN();
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
