@@ -15,3 +15,5 @@ pandas
 pydantic
 tqdm
 hip-python
+nanobind>=2.0
+scikit-build-core>=0.10
