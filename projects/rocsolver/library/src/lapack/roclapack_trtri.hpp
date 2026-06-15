@@ -237,8 +237,8 @@ void trti2(rocblas_handle handle,
 {
 #ifdef OPTIMAL
     // if very small size, use optimized kernel (warp-synchronous, so only valid for n <= wavefront);
-    // device props are cached in the handle
-    const rocblas_int wavefront = rocblas_internal_get_device_prop(handle)->warpSize;
+    // get_device_warp_size(handle) reads the handle's cached device props
+    const rocblas_int wavefront = get_device_warp_size(handle);
     if(n <= std::min(TRTRI_MAX_COLS, wavefront))
     {
         trti2_run_small<T>(handle, uplo, diag, n, A, shiftA, lda, strideA, batch_count);

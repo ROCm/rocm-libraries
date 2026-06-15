@@ -336,8 +336,8 @@ rocblas_status rocsolver_getri_template(rocblas_handle handle,
 
 #ifdef OPTIMAL
     // the optimized small/tiny kernels are warp-synchronous, so they are only valid for
-    // n <= wavefront size; device props are cached in the handle
-    const rocblas_int wavefront = rocblas_internal_get_device_prop(handle)->warpSize;
+    // n <= wavefront size (get_device_warp_size(handle) reads the handle's cached device props)
+    const rocblas_int wavefront = get_device_warp_size(handle);
     if((n <= std::min(GETRI_TINY_SIZE, wavefront) && !ISBATCHED)
        || (n <= std::min(GETRI_BATCH_TINY_SIZE, wavefront) && ISBATCHED))
     {
