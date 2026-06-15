@@ -1275,57 +1275,42 @@ def getFaTestsCmds() {
     ]
 }
 
-def runClangFormat() {
-    buildAndTest(
-        setup_args: "NO_CK_BUILD",
-        setup_cmd: "",
-        build_cmd: "",
-        execute_cmd: """cd .. && \
-            find . -type f \\( -name '*.h' -o -name '*.hpp' -o -name '*.cpp' -o -name '*.h.in' -o -name '*.hpp.in' -o -name '*.cpp.in' -o -name '*.cl' \\) \
-            -not -path '*/build/*' -not -path '*/include/rapidjson/*' | \
-            xargs -P 8 -I{} sh -c 'clang-format-18 -style=file {} | diff -u - {} || (echo "ERROR: {} needs formatting" && exit 1)'"""
-    )
-}
+// All static checks in one container on a single node: clang-format (always),
+// cppcheck (when RUN_CPPCHECK), then the ASCII-only and CRLF checks. Combined
+// into a single buildAndTest, driven by one Jenkinsfile stage, to keep the
+// declarative pipeline's WorkflowScript under the JVM 64KB method-size limit and
+// to avoid per-check checkout/container overhead.
+//
+// Every check runs from projects/composablekernel (cmake_build runs execute_cmd
+// from .../build, so the single leading `cd ..` lands there); no check changes
+// directory, so chaining them with && is equivalent to the previous separate
+// invocations. Checks run sequentially and fail fast on the first failure.
+def runStaticChecks() {
+    def formatFiles = "find . -type f \\( -name '*.h' -o -name '*.hpp' -o -name '*.cpp' -o -name '*.h.in' -o -name '*.hpp.in' -o -name '*.cpp.in' -o -name '*.cl' \\) -not -path '*/build/*' -not -path '*/include/rapidjson/*'"
+    def checkFiles  = "find . -type f \\( -name '*.h' -o -name '*.hpp' -o -name '*.cpp' -o -name '*.h.in' -o -name '*.hpp.in' -o -name '*.cpp.in' -o -name '*.inc' -o -name '*.cl' \\) -not -path '*/build/*' -not -path '*/include/rapidjson/*'"
 
-def runClangFormatAndCppcheck() {
-    buildAndTest(
-        setup_args: "NO_CK_BUILD",
-        setup_cmd: "",
-        build_cmd: "",
-        execute_cmd: """cd .. && \
-            find . -type f \\( -name '*.h' -o -name '*.hpp' -o -name '*.cpp' -o -name '*.h.in' -o -name '*.hpp.in' -o -name '*.cpp.in' -o -name '*.cl' \\) \
-            -not -path '*/build/*' -not -path '*/include/rapidjson/*' | \
-            xargs -P 8 -I{} sh -c 'clang-format-18 -style=file {} | diff -u - {} || (echo "ERROR: {} needs formatting" && exit 1)' && \
-            /cppcheck/build/bin/cppcheck ../* -v -j \$(nproc) -I ../include -I ../profiler/include -I ../library/include \
+    def checks = []
+    checks << """${formatFiles} | xargs -P 8 -I{} sh -c 'clang-format-18 -style=file {} | diff -u - {} || (echo "ERROR: {} needs formatting" && exit 1)'"""
+    if (params.RUN_CPPCHECK) {
+        checks << """/cppcheck/build/bin/cppcheck ../* -v -j \$(nproc) -I ../include -I ../profiler/include -I ../library/include \
             -D CK_ENABLE_FP64 -D CK_ENABLE_FP32 -D CK_ENABLE_FP16 -D CK_ENABLE_FP8 -D CK_ENABLE_BF16 -D CK_ENABLE_BF8 -D CK_ENABLE_INT8 \
             -D __gfx908__ -D __gfx90a__ -D __gfx942__ -D __gfx1030__ -D __gfx1100__ -D __gfx1101__ -D __gfx1102__ \
             -U __gfx803__ -U __gfx900__ -U __gfx906__ -U CK_EXPERIMENTAL_BIT_INT_EXTENSION_INT4 \
             --file-filter=*.cpp --force --enable=all --output-file=ck_cppcheck.log"""
-    )
-}
+    }
+    checks << """${checkFiles} -print0 | xargs -0 -P 8 -n 64 script/check_ascii_only.sh"""
+    checks << """${checkFiles} -print0 | xargs -0 -P 8 -n 64 script/check_no_crlf.sh"""
 
-def runAsciiOnlyCheck() {
     buildAndTest(
         setup_args: "NO_CK_BUILD",
         setup_cmd: "",
         build_cmd: "",
-        execute_cmd: """cd .. && \
-            find . -type f \\( -name '*.h' -o -name '*.hpp' -o -name '*.cpp' -o -name '*.h.in' -o -name '*.hpp.in' -o -name '*.cpp.in' -o -name '*.inc' -o -name '*.cl' \\) \
-            -not -path '*/build/*' -not -path '*/include/rapidjson/*' \
-            -print0 | xargs -0 -P 8 -n 64 script/check_ascii_only.sh"""
+        execute_cmd: "cd .. && " + checks.join(" && ")
     )
-}
 
-def runCrlfCheck() {
-    buildAndTest(
-        setup_args: "NO_CK_BUILD",
-        setup_cmd: "",
-        build_cmd: "",
-        execute_cmd: """cd .. && \
-            find . -type f \\( -name '*.h' -o -name '*.hpp' -o -name '*.cpp' -o -name '*.h.in' -o -name '*.hpp.in' -o -name '*.cpp.in' -o -name '*.inc' -o -name '*.cl' \\) \
-            -not -path '*/build/*' -not -path '*/include/rapidjson/*' \
-            -print0 | xargs -0 -P 8 -n 64 script/check_no_crlf.sh"""
-    )
+    if (params.RUN_CPPCHECK) {
+        archiveArtifacts "build/ck_cppcheck.log"
+    }
 }
 
 def runFullGroupedConvTileTests() {

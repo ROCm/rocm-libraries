@@ -304,48 +304,11 @@ pipeline {
                 beforeAgent true
                 expression { env.SHOULD_RUN_CI.toBoolean() }
             }
-            parallel{
-                stage('Clang Format and Cppcheck') {
-                    when {
-                        beforeAgent true
-                        expression { params.RUN_CPPCHECK.toBoolean() }
-                    }
-                    agent{ label rocmnode("nogpu") }
-                    steps{
-                        deleteDir()
-                        script { loadCk(); ck.runClangFormatAndCppcheck() }
-                        archiveArtifacts "build/ck_cppcheck.log"
-                        cleanWs()
-                    }
-                }
-                stage('Clang Format') {
-                    when {
-                        beforeAgent true
-                        expression { !params.RUN_CPPCHECK.toBoolean() }
-                    }
-                    agent{ label rocmnode("nogpu") }
-                    steps{
-                        deleteDir()
-                        script { loadCk(); ck.runClangFormat() }
-                        cleanWs()
-                    }
-                }
-                stage('ASCII Only Check') {
-                    agent{ label rocmnode("nogpu") }
-                    steps{
-                        deleteDir()
-                        script { loadCk(); ck.runAsciiOnlyCheck() }
-                        cleanWs()
-                    }
-                }
-                stage('CRLF Check') {
-                    agent{ label rocmnode("nogpu") }
-                    steps{
-                        deleteDir()
-                        script { loadCk(); ck.runCrlfCheck() }
-                        cleanWs()
-                    }
-                }
+            agent{ label rocmnode("nogpu") }
+            steps{
+                deleteDir()
+                script { loadCk(); ck.runStaticChecks() }
+                cleanWs()
             }
         }
          stage("Run Downstream Tests")
