@@ -127,6 +127,22 @@ void preShuffleScaleBuffer_gfx1250(const ScaleType* src,
     static_assert((ScaleBlockSize == 32 || ScaleBlockSize == 16) && sizeof(ScaleType) == 1,
                   "wrong! only support 8-bit scale with ScaleBlockSize=32 or 16");
 
+    // ScaleBlockSize == 16: the natural row-major scale layout already matches the gfx1250
+    // wmma scale distribution (one e8m0 per 16 K-elements lands warp-aligned), so the
+    // device-side shuffle is the identity transform for all K.
+    if constexpr(ScaleBlockSize == 16)
+    {
+        for(ck_tile::index_t mn = 0; mn < MN; ++mn)
+            for(ck_tile::index_t k = 0; k < K; ++k)
+            {
+                if constexpr(KStride)
+                    dst[mn * K + k] = src[mn * K + k];
+                else
+                    dst[mn * K + k] = src[k * MN + mn];
+            }
+        return;
+    }
+
     constexpr ck_tile::index_t MPerXdlops = 16;
     constexpr ck_tile::index_t KPerXdlops = 128;
 
@@ -447,20 +463,13 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
             {static_cast<std::size_t>(num_scale_k), static_cast<std::size_t>(1)});
 
         // Pre-shuffle for gfx1250 (WaveSize=32, WMMA)
-        // For scale16 with descriptor [packs_m, MThreadPerXdl, packs_k]:
-        // the natural row-major layout matches, so skip pre-shuffle.
-        if constexpr(ScaleBlockSize == 16)
-        {
-            std::copy(scale_a.mData.begin(), scale_a.mData.end(), scale_a_shuffled.mData.begin());
-            std::copy(scale_b.mData.begin(), scale_b.mData.end(), scale_b_shuffled.mData.begin());
-        }
-        else
-        {
-            preShuffleScaleBuffer_gfx1250<AScaleDataType, ScaleBlockSize, true>(
-                scale_a.mData.data(), scale_a_shuffled.mData.data(), scale_padded_M, num_scale_k);
-            preShuffleScaleBuffer_gfx1250<BScaleDataType, ScaleBlockSize, true>(
-                scale_b.mData.data(), scale_b_shuffled.mData.data(), N, num_scale_k);
-        }
+        // Scales start in natural tensor layout and are pre-shuffled into the device layout
+        // for both scale block sizes (the shuffle is the identity for ScaleBlockSize==16,
+        // whose natural layout already matches the warp scale distribution).
+        preShuffleScaleBuffer_gfx1250<AScaleDataType, ScaleBlockSize, true>(
+            scale_a.mData.data(), scale_a_shuffled.mData.data(), scale_padded_M, num_scale_k);
+        preShuffleScaleBuffer_gfx1250<BScaleDataType, ScaleBlockSize, true>(
+            scale_b.mData.data(), scale_b_shuffled.mData.data(), N, num_scale_k);
 
         // Allocate device memory
         DeviceMem a_m_k_dev_buf(a_m_k.get_element_space_size_in_bytes());

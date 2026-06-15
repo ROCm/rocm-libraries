@@ -12,6 +12,9 @@
 namespace ck_tile {
 
 namespace detail {
+// Resolves a problem/trait type's microscaling block size: yields T::ScaleBlockSize
+// when the member exists, otherwise falls back to the legacy default of 32 (so
+// problems that predate the ScaleBlockSize member keep compiling unchanged).
 template <typename T, typename = void>
 struct scale_block_size_or_default
 {
