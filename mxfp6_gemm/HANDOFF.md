@@ -27,10 +27,12 @@ Tile routing (`choose_tile`):
   M-tile to double WG count and fill idle CUs. Same kernel, different tile args. (occ1 — an
   occ2 variant was tried and is steady-state-neutral; see dead-ends.)
 
-@8192³: warm ≈ 2292 / cold ≈ 2158 TFLOPs (~25% peak; was 2230 before the coalesced-store epilogue). ⚠️ **2048×4096 is the weak shape** (warm ~1707 /
-cold ~1555, now ~tie vs CK FP8): filling 256 CUs at M=2048 forces an 8-acc tile (area math: MT×NT=32768 ⟺ 8 acc), whose
+@8192³: warm ≈ 2292 / cold ≈ 2158 TFLOPs (~25% peak; was 2230 before the coalesced-store epilogue).
+(Absolute TFLOPs drift day-to-day with the clock — a 2026-06-15 re-measure read 2421/2212; the
+vs-CK ratios below are the stable takeaway.) ⚠️ **2048×4096 is the weak shape** (warm ~1693 /
+cold ~1487): filling 256 CUs at M=2048 forces an 8-acc tile (area math: MT×NT=32768 ⟺ 8 acc), whose
 MFMA window (768 cyc) can't hide B's HBM latency → B-VMEM-exposed, ~18.7% peak. It's the only shape
-that loses to CK FP8 (cold 0.90×). Structurally locked, not a tuning miss.
+that **loses to CK FP8 cold (0.93×)** (it still beats CK FP8 warm, 1.04×). Structurally locked, not a tuning miss.
 
 ---
 
@@ -125,9 +127,9 @@ Use the library: include `<mxfp6/gemm.hpp>`, link `mxfp6gemm`, then
 
 ---
 
-> ⚠️ The tables in this section (both vs-v18 and vs-CK below) were measured BEFORE the 2026-06-11
-> coalesced-store epilogue. Add ~+2.6% to every "ours/hybrid" number (8192³ 2231→~2287). They are a
-> conservative floor — the vs-CK verdicts only improve.
+> ⚠️ The **vs-v18 table** just below was measured BEFORE the 2026-06-11 coalesced-store epilogue
+> (add ~+2.6% to every "hybrid" number). The **vs-CK section after it is freshly re-measured
+> 2026-06-15** on the current kernel — use that for current numbers.
 
 ## Performance (FP16, vs v18 best-per-shape, same machine 2026-06-10)
 
@@ -154,39 +156,38 @@ for those, e.g. 2048×4096 = 1686 steady vs 1517 swept. Trends/ratios hold eithe
 Absolute TFLOPs also swing ±10% run-to-run from the SCLK/1000W power cap; warm up to steady
 state before comparing. The vs-CK table below is all steady-state.
 
-## vs CK (same machine, K=8192, `tile_example_mx_flatmm`, FP16) — FAIR matched, refreshed 2026-06-12
+## vs CK (same machine, K=8192, FP16) — FAIR matched, re-measured 2026-06-15
 
 Methodology: cold = stock `tile_example_mx_flatmm` (RotatingMemWrapper rotates inputs → cold L2/rep);
 warm = `tile_example_mx_flatmm_warm` (single-buffer). Ours measured the same way (warm = single buffer;
-cold = rotate 6 input sets → cold L2). Both sustained back-to-back (no turbo bonus,
-[[feedback_interleave_inflation]]). Report BOTH regimes ([[feedback_bench_cold_and_warm]]).
-⚠️ ours numbers below are the **current swapped-MFMA coalesced-store kernel** (2026-06-11).
-CK FP4 (`pk_fp4`, half the bits) added for cross-precision context — it's a *different tier*.
+cold = rotate 6 input sets → cold L2), standard per-row-padded path. All numbers below collected
+**back-to-back in one session** (no turbo bonus, [[feedback_interleave_inflation]]); both CK fp6/fp8
+and ours measured together so the ratios are fair. Report BOTH regimes ([[feedback_bench_cold_and_warm]]).
+TFLOPs. (CK FP4 not re-run this session — prior context: ~1.7–3.6K, a half-bit *different tier*.)
 
 **COLD-vs-COLD** (rotated; = single-call / real-inference where B is evicted between layers):
-| shape | CK FP8 | CK FP6 | CK FP4 | **ours FP6** | /CK-FP6 | /CK-FP8 |
-|---|---|---|---|---|---|---|
-| 2048×4096 | 1569 | 1004 | 1707 | 1555 | 1.55× | **0.99×** |
-| 2048×8192 | 1704 | 1080 | 3060 | 1965 | 1.82× | 1.15× |
-| 4096×4096 | 1693 | 1079 | 3047 | 2099 | 1.95× | 1.24× |
-| 4096×8192 | 1789 | 1100 | 3321 | 2123 | 1.93× | 1.19× |
-| 8192×8192 | 1831 | 1109 | 3482 | 2158 | 1.95× | 1.18× |
+| shape | CK FP6 | CK FP8 | **ours FP6** | /CK-FP6 | /CK-FP8 |
+|---|---|---|---|---|---|
+| 2048×4096 | 995  | 1594 | 1487 | 1.49× | **0.93×** |
+| 2048×8192 | 1050 | 1752 | 1990 | 1.90× | 1.14× |
+| 4096×4096 | 1051 | 1743 | 2095 | 1.99× | 1.20× |
+| 4096×8192 | 1100 | 1839 | 2151 | 1.96× | 1.17× |
+| 8192×8192 | 1109 | 1881 | 2212 | 1.99× | 1.18× |
 
 **WARM-vs-WARM** (single-buffer / L2-hot; = repeated-call cache-resident):
-| shape | CK FP8 | CK FP6 | CK FP4 | **ours FP6** | /CK-FP6 | /CK-FP8 |
-|---|---|---|---|---|---|---|
-| 2048×4096 | 1626 | 1057 | 1856 | 1707 | 1.62× | 1.05× |
-| 2048×8192 | 1724 | 1101 | 3189 | 2105 | 1.91× | 1.22× |
-| 4096×4096 | 1732 | 1100 | 3182 | 2236 | 2.03× | 1.29× |
-| 4096×8192 | 1809 | 1107 | 3419 | 2243 | 2.03× | 1.24× |
-| 8192×8192 | 1845 | 1111 | 3559 | 2292 | 2.06× | 1.24× |
+| shape | CK FP6 | CK FP8 | **ours FP6** | /CK-FP6 | /CK-FP8 |
+|---|---|---|---|---|---|
+| 2048×4096 | 1044 | 1630 | 1693 | 1.62× | 1.04× |
+| 2048×8192 | 1089 | 1777 | 2192 | 2.01× | 1.23× |
+| 4096×4096 | 1064 | 1794 | 2304 | 2.17× | 1.28× |
+| 4096×8192 | 1111 | 1880 | 2351 | 2.12× | 1.25× |
+| 8192×8192 | 1114 | 1899 | 2421 | 2.17× | 1.28× |
 
-**Verdict:** vs same-precision **CK FP6 we win 1.55~2.06×** (every shape, both regimes). vs the
-higher-precision **CK FP8: WARM we beat it 1.05~1.29×; COLD we beat it 1.15~1.24× except 2048×4096
-which is now ~tie (0.99×, was 0.90× before the coalesced-store epilogue)** — that area-locked 8-acc
-shape is the only non-win and it's now break-even. **CK FP4** (half-bit tier) is ~1.7~3.6K — our FP6
-sits between CK FP8 and CK FP4 (faster than FP8, can't reach FP4's bit-count advantage).
-On this machine CK FP8 > CK FP6 (FP6 pinned by 1000W cap + CK's 16×16×128). The external 2026-05-04
+**Verdict:** vs same-precision **CK FP6 we win every shape, both regimes — 1.49~1.99× cold,
+1.62~2.17× warm.** vs the higher-precision **CK FP8: WARM we beat it on all five (1.04~1.28×); COLD
+we beat it on four (1.14~1.20×), the lone exception being 2048×4096 (0.93×)** — that area-locked
+8-acc small-M shape is the only non-win (its cold MFMA window can't hide B's HBM latency). On this
+machine **CK FP8 > CK FP6** (FP6 pinned by the power cap + CK's 16×16×128). The external 2026-05-04
 table (CK FP6 3200 > FP8 3019) is a *different machine/build* (no power cap); do NOT compare.
 
 ## Validation
