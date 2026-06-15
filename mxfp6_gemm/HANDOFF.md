@@ -15,7 +15,7 @@ MFMA = `v_mfma_scale_f32_32x32x64_f8f6f4` (cbsz:2 blgp:2, 32 cyc/inst on FP6).
 ## TL;DR
 
 **One kernel paradigm — `lds_gemm_hybrid_dripA` — shape-routed by `mxfp6_dispatch.hpp`.**
-@8192³ FP16 ≈ **2285 TFLOPs** (2026-06-11: +2.6% from a **swapped-MFMA coalesced-store epilogue** —
+@8192³ FP16 ≈ **2292 TFLOPs** warm / **2158** cold (2026-06-11: +2.6% from a **swapped-MFMA coalesced-store epilogue** —
 see "Epilogue" in kernel essence; was 2230 with the scattered store). Beats the previous register-direct + pure-LDS v18 dispatcher
 on **all 12 benchmarked shapes (+6~98%)**, including non-pow2 N (5120/7680/9216) where v18
 needed dedicated 18/20-acc mixed tiles — the hybrid paradigm wins those outright.
@@ -27,8 +27,8 @@ Tile routing (`choose_tile`):
   M-tile to double WG count and fill idle CUs. Same kernel, different tile args. (occ1 — an
   occ2 variant was tried and is steady-state-neutral; see dead-ends.)
 
-@8192³: warm ≈ 2285 TFLOPs (~25% peak; was 2230 before the coalesced-store epilogue). ⚠️ **2048×4096 is the weak shape** (warm ~1724 /
-cold ~1408): filling 256 CUs at M=2048 forces an 8-acc tile (area math: MT×NT=32768 ⟺ 8 acc), whose
+@8192³: warm ≈ 2292 / cold ≈ 2158 TFLOPs (~25% peak; was 2230 before the coalesced-store epilogue). ⚠️ **2048×4096 is the weak shape** (warm ~1707 /
+cold ~1555, now ~tie vs CK FP8): filling 256 CUs at M=2048 forces an 8-acc tile (area math: MT×NT=32768 ⟺ 8 acc), whose
 MFMA window (768 cyc) can't hide B's HBM latency → B-VMEM-exposed, ~18.7% peak. It's the only shape
 that loses to CK FP8 (cold 0.90×). Structurally locked, not a tuning miss.
 
@@ -154,44 +154,40 @@ for those, e.g. 2048×4096 = 1686 steady vs 1517 swept. Trends/ratios hold eithe
 Absolute TFLOPs also swing ±10% run-to-run from the SCLK/1000W power cap; warm up to steady
 state before comparing. The vs-CK table below is all steady-state.
 
-## vs CK (same machine, K=8192, `tile_example_mx_flatmm`, FP16) — FAIR matched methodology 2026-06-11
+## vs CK (same machine, K=8192, `tile_example_mx_flatmm`, FP16) — FAIR matched, refreshed 2026-06-12
 
-⚠️ METHODOLOGY CORRECTION (2026-06-11): CK uses `RotatingMemWrapper` (rotates input buffers →
-**cold L2 each rep**). Our earlier table reused a single buffer (**warm inter-rep L2**), which
-inflated ours by 8–15% (most on small-M). The fair comparison is **cold-vs-cold** (both rotate;
-also more realistic — in real inference weights B are evicted between layers). Both sides here are
-sustained back-to-back (CK's repeat loop is gap-free → no turbo-boost bonus; ours measured the
-same way — see [[feedback_interleave_inflation]] for the idle→boost effect that does NOT apply here).
+Methodology: cold = stock `tile_example_mx_flatmm` (RotatingMemWrapper rotates inputs → cold L2/rep);
+warm = `tile_example_mx_flatmm_warm` (single-buffer). Ours measured the same way (warm = single buffer;
+cold = rotate 6 input sets → cold L2). Both sustained back-to-back (no turbo bonus,
+[[feedback_interleave_inflation]]). Report BOTH regimes ([[feedback_bench_cold_and_warm]]).
+⚠️ ours numbers below are the **current swapped-MFMA coalesced-store kernel** (2026-06-11).
+CK FP4 (`pk_fp4`, half the bits) added for cross-precision context — it's a *different tier*.
 
-Both cache regimes measured (CK warm via patched build flush_cache=false/rotating_count=1 →
-`bin/tile_example_mx_flatmm_warm`; CK cold = stock rotating_count=50). KEY: CK barely benefits from
-warm L2 (+2~4%) while ours gains +8~18% (we lean on L2 reuse; CK's 16×16×128 does not) → the verdict
-flips with cache regime.
+**COLD-vs-COLD** (rotated; = single-call / real-inference where B is evicted between layers):
+| shape | CK FP8 | CK FP6 | CK FP4 | **ours FP6** | /CK-FP6 | /CK-FP8 |
+|---|---|---|---|---|---|---|
+| 2048×4096 | 1569 | 1004 | 1707 | 1555 | 1.55× | **0.99×** |
+| 2048×8192 | 1704 | 1080 | 3060 | 1965 | 1.82× | 1.15× |
+| 4096×4096 | 1693 | 1079 | 3047 | 2099 | 1.95× | 1.24× |
+| 4096×8192 | 1789 | 1100 | 3321 | 2123 | 1.93× | 1.19× |
+| 8192×8192 | 1831 | 1109 | 3482 | 2158 | 1.95× | 1.18× |
 
-**COLD-vs-COLD** (both rotated/cold; = single-call / real-inference where B is evicted between layers):
-| shape | CK FP8 | CK FP6 | ours FP6 | ours/CK-FP6 | ours/CK-FP8 |
-|---|---|---|---|---|---|
-| 2048×4096 | 1565 | 1017 | 1408 | 1.38× | **0.90×** |
-| 2048×8192 | 1697 | 1080 | 1865 | 1.73× | 1.10× |
-| 4096×4096 | 1709 | 1080 | 1974 | 1.83× | 1.16× |
-| 4096×8192 | 1799 | 1095 | 2020 | 1.84× | 1.12× |
-| 8192×8192 | 1838 | 1106 | 2031 | 1.84× | 1.10× |
+**WARM-vs-WARM** (single-buffer / L2-hot; = repeated-call cache-resident):
+| shape | CK FP8 | CK FP6 | CK FP4 | **ours FP6** | /CK-FP6 | /CK-FP8 |
+|---|---|---|---|---|---|---|
+| 2048×4096 | 1626 | 1057 | 1856 | 1707 | 1.62× | 1.05× |
+| 2048×8192 | 1724 | 1101 | 3189 | 2105 | 1.91× | 1.22× |
+| 4096×4096 | 1732 | 1100 | 3182 | 2236 | 2.03× | 1.29× |
+| 4096×8192 | 1809 | 1107 | 3419 | 2243 | 2.03× | 1.24× |
+| 8192×8192 | 1845 | 1111 | 3559 | 2292 | 2.06× | 1.24× |
 
-**WARM-vs-WARM** (both single-buffer reuse / L2-hot; = repeated-call cache-resident):
-| shape | CK FP8 | CK FP6 | ours FP6 | ours/CK-FP6 | ours/CK-FP8 |
-|---|---|---|---|---|---|
-| 2048×4096 | 1597 | 1056 | 1666 | 1.58× | 1.04× |
-| 2048×8192 | 1732 | 1105 | 2053 | 1.86× | 1.19× |
-| 4096×4096 | 1735 | 1104 | 2164 | 1.96× | 1.25× |
-| 4096×8192 | 1829 | 1113 | 2202 | 1.98× | 1.20× |
-| 8192×8192 | 1849 | 1116 | 2226 | 1.99× | 1.20× |
-
-**Verdict depends on cache regime:** WARM — we win everywhere (FP6 1.58~1.99×, even beat CK FP8
-1.04~1.25×). COLD — we beat CK FP6 1.38~1.84×, but vs CK FP8 0.90~1.16× (LOSE at 2048×4096 0.90×,
-the area-locked 8-acc shape; edge the rest). Report BOTH regimes (see [[feedback_bench_cold_and_warm]]).
-Both sustained back-to-back (no turbo bonus, [[feedback_interleave_inflation]]). On this machine CK
-FP8 > FP6 (FP6 pinned by 1000W cap + CK's 16×16×128). The external 2026-05-04 table (CK FP6 3200 >
-FP8 3019) is a *different machine/build* (no power cap); do NOT compare.
+**Verdict:** vs same-precision **CK FP6 we win 1.55~2.06×** (every shape, both regimes). vs the
+higher-precision **CK FP8: WARM we beat it 1.05~1.29×; COLD we beat it 1.15~1.24× except 2048×4096
+which is now ~tie (0.99×, was 0.90× before the coalesced-store epilogue)** — that area-locked 8-acc
+shape is the only non-win and it's now break-even. **CK FP4** (half-bit tier) is ~1.7~3.6K — our FP6
+sits between CK FP8 and CK FP4 (faster than FP8, can't reach FP4's bit-count advantage).
+On this machine CK FP8 > CK FP6 (FP6 pinned by 1000W cap + CK's 16×16×128). The external 2026-05-04
+table (CK FP6 3200 > FP8 3019) is a *different machine/build* (no power cap); do NOT compare.
 
 ## Validation
 - Fresh-alloc 0x5A-poison vs CPU ref, both tile paths (256×256 and 128×256), incl. partial-grid
