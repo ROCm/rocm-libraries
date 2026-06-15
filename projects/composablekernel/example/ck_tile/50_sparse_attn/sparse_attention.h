@@ -58,7 +58,6 @@ float jenga_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
                              const sparse_attn_bias_args& bias = {},
                              float scale_s = 0.0f,
                              float logits_soft_cap = 0.0f,
-                             // Group-mode (empty → batch mode):
                              const std::vector<int32_t>& seqstart_q_host       = {},
                              const std::vector<int32_t>& seqstart_k_host       = {},
                              const std::vector<int32_t>& seqstart_q_block_host = {},
@@ -89,7 +88,6 @@ float vsa_sparse_attention(
     const sparse_attn_bias_args& bias = {},
     float scale_s = 0.0f,
     float logits_soft_cap = 0.0f,
-    // Group-mode (empty → batch mode):
     const std::vector<int32_t>& seqstart_q_host       = {},
     const std::vector<int32_t>& seqstart_k_host       = {},
     const std::vector<int32_t>& seqstart_q_block_host = {},
@@ -121,7 +119,6 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
                                     const sparse_attn_bias_args& bias = {},
                                     float scale_s           = 0.0f,
                                     float logits_soft_cap   = 0.0f,
-                                    // Group-mode (empty → batch mode):
                                     const std::vector<int32_t>& seqlen_qs = {},
                                     const std::vector<int32_t>& seqlen_ks = {});
 
