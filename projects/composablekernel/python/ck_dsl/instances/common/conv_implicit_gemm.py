@@ -150,6 +150,15 @@ class ConvProblem:
     pD: Optional[int] = None
     dD: Optional[int] = None
 
+    def __post_init__(self) -> None:
+        depth = (self.Di, self.Z, self.sD, self.pD, self.dD)
+        any_set = any(v is not None for v in depth)
+        all_set = all(v is not None for v in depth)
+        if any_set and not all_set:
+            raise ValueError(
+                "3-D ConvProblem requires Di, Z, sD, pD, dD (set all or leave all as None)"
+            )
+
     @property
     def is_3d(self) -> bool:
         return self.Di is not None
