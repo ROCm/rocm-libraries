@@ -20,7 +20,7 @@ template <typename OutT>
 inline void dispatch_gemm(int M, int N, int Kp, const void* dA, const void* dBsh,
                           const uint8_t* dsA, const uint8_t* dsB, OutT* dD, int A_row_bytes,
                           int B_row_bytes) {
-    constexpr int KT = 192;
+    constexpr int KT = K_TILE;
     TileChoice tc = choose_tile(M, N);
     dim3 blk(256);
     int kit = Kp / 64;

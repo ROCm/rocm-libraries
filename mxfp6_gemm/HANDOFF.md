@@ -193,6 +193,26 @@ table (CK FP6 3200 > FP8 3019) is a *different machine/build* (no power cap); do
 - Fresh-alloc 0x5A-poison vs CPU ref, both tile paths (256×256 and 128×256), incl. partial-grid
   / non-square / k_tiles==1. `test_gemm` runs the end-to-end correctness gate.
 - ⚠️ `k_tiles==1` needs `wait_vmcnt(0)` in the odd-tail (no compute-window margin) — present.
+- 8192³ verified vs CPU ref: literal 8192×8192×8192 AND the exact-K-structure proxy
+  4096×4096×8256 (Kp=8256, 43 odd k_tiles) — both max|err|=0 (MXFP6 products are dyadic →
+  bit-exact regardless of accumulation order).
+
+## K-padding & the "pad-B-only / compact-A" recipe
+K must be padded to `kpad(K)` (a multiple of `K_TILE`=192); the kernel reads the full Kp. The
+padded K-tail is nulled as long as it is **zero on B** (`B[k]·anything = 0`). So:
+- **B (weights):** pad K offline, zero K-tail (free, static). `preprocess_B` over a zero-Kp-padded
+  float already gives this.
+- **A (activations):** can stay in its NATURAL COMPACT layout — `A_row_bytes = fp6_packed_bytes(K)`,
+  no per-row padding — because each row's K-tail read overlaps the next row's real data (last row →
+  the end pad), all ×0 by B. Two obligations: (1) over-allocate `a_compact_end_pad(K)` bytes at the
+  END of the A buffer (8192³ = 48 B; content irrelevant, just in-bounds); (2) extend A's per-block
+  scales to Kp with a **non-NaN tail** via `pad_scales_k` — an E8M0 `0xFF` (NaN) scale poisons the
+  WHOLE output via `0·NaN=NaN` (the ONE real footgun; fp6 data tail is inert, finite by format).
+- **Measured perf-neutral** @8192³ FP16 vs per-row padding (compact 2425/2208 vs std 2411/2217
+  warm/cold, same machine state — within noise; A buffer 0.78% smaller). Helpers in
+  `mxfp6/preprocess.hpp`; gated by `verify_compact` in `test_gemm` (256×256, 128×256, k_tiles==1).
+- ⚠️ K must be a multiple of 32 (MX block). The whole recipe **requires B's K-tail = 0**; it does
+  NOT work if you only pad A.
 
 ## Dead ends — do NOT re-try without a new idea
 - **occ2, both ways:** (a) by shrinking acc (16→≤6): −14~30% (strength collapse, latency→

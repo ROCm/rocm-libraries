@@ -4,9 +4,38 @@
 #include <cstring>
 #include <vector>
 
+#include "mxfp6/gemm.hpp"  // K_TILE, kpad
 #include "mxfp6/types.hpp"
 
 namespace mxfp6 {
+
+// ---- K-padding helpers: "pad-B-only / compact-A" recipe -----------------------------------
+// The kernel reads K in deep tiles, so K must be padded to kpad(K) (Kp). B (weights) is padded
+// offline with a ZERO K-tail. A (activations) can then stay in its NATURAL compact layout —
+// row stride = fp6_packed_bytes(K), A_row_bytes = fp6_packed_bytes(K) — WITHOUT per-row padding,
+// because each row's K-tail read overlaps the next row's real data (or, for the last row, the
+// end pad), all nulled by B's zero K-tail. Two obligations remain:
+//   (1) over-allocate a_compact_end_pad(K) bytes at the END of the A buffer (the last row's
+//       K-tail read; content irrelevant but must be in bounds), and
+//   (2) extend A's per-block scales to kpad(K) with a NON-NaN tail — a 0xFF (E8M0 NaN) scale
+//       would poison the WHOLE output via 0*NaN. pad_scales_k does this.
+// Measured perf-neutral vs per-row padding @8192^3; correctness gated in tests/test_gemm.cpp.
+
+// Extra bytes to over-allocate at the end of a COMPACT A buffer (row stride = packed(K)) so the
+// last row's K-tail read stays in bounds.
+inline int a_compact_end_pad(int K) {
+    return fp6_packed_bytes(kpad(K)) - fp6_packed_bytes(K);
+}
+
+// Extend per-block scales [dim][K/32] -> [dim][kpad(K)/32]: real blocks copied, K-tail blocks set
+// to a finite (non-NaN) E8M0 code (127 = 2^0). Feed the result to preprocess_scale(..., kpad(K)).
+inline std::vector<uint8_t> pad_scales_k(const uint8_t* scales, int dim, int K) {
+    int sc = K / 32, scp = kpad(K) / 32;
+    std::vector<uint8_t> out((size_t)dim * scp, 127);
+    for (int r = 0; r < dim; r++)
+        std::memcpy(out.data() + (size_t)r * scp, scales + (size_t)r * sc, (size_t)sc);
+    return out;
+}
 
 // Quantized MXFP6 matrix: dense-packed FP6 data + per-block E8M0 scales.
 // Logical shape: [rows][cols], with one scale per 32-element block along cols.

@@ -17,6 +17,14 @@ namespace mxfp6 {
 
 enum class OutType { F32, F16, BF16 };
 
+// K is processed in deep tiles of K_TILE; callers pad K up to kpad(K) (Kp) and pass that as the
+// kernel's K. The padded K-tail must be zero on at least one operand (B in the pad-B-only recipe)
+// so its contribution is nulled — see mxfp6/preprocess.hpp for the host-side padding helpers.
+constexpr int K_TILE = 192;
+inline int kpad(int K) {
+    return (K + K_TILE - 1) / K_TILE * K_TILE;
+}
+
 // Tile chosen for (M,N). MPW/NPW = per-wave 32-block counts (2x2 waves); the host scale
 // tiling (tile_scale) must use these for A and B respectively.
 struct TileChoice {
