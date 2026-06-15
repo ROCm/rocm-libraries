@@ -67,6 +67,7 @@ SKIPPABLE_PATH_PATTERNS = [
     "projects/composablekernel/tile_engine/*",
     "projects/composablekernel/tutorial/*",
     "projects/composablekernel/vars/*",
+    "projects/composablekernel/groovy/*",
 ]
 
 
