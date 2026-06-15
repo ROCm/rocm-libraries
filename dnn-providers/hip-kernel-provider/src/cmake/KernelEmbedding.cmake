@@ -37,7 +37,7 @@ function(add_kernels_for_embedding)
         message(FATAL_ERROR "add_kernels_for_embedding called without any FILES!")
     endif()
 
-    # Add kernel file paths to the global property
+    # Add kernel file paths to the target property
     foreach(KERNEL_FILE IN LISTS ADD_KERNELS_FILES)
         set_property(TARGET ${ADD_KERNELS_TARGET} APPEND PROPERTY KERNELEMBEDDING_KERNEL_FILES ${KERNEL_FILE})
     endforeach()
