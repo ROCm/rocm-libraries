@@ -93,6 +93,9 @@ struct ArchDef {
     int vgprAllocGranule = 0;
     int defaultCycle = 4;
     int defaultLatency = 4;
+    // ECC presence: D16 VMEM zero-fills the non-data half and True16 VALU does
+    // a HW RMW at full-DWORD granularity.
+    int d16Writes32BitVgpr = 0;
     std::vector<HwRegEntry> hwRegs;
 };
 
@@ -465,6 +468,7 @@ class DefTParser {
                     parseFieldInt(block, ".vgprAllocGranule", arch_.vgprAllocGranule);
                     parseFieldInt(block, ".defaultCycle", arch_.defaultCycle);
                     parseFieldInt(block, ".defaultLatency", arch_.defaultLatency);
+                    parseFieldInt(block, ".d16Writes32BitVgpr", arch_.d16Writes32BitVgpr);
                 }
             }
         } else {
@@ -1807,6 +1811,10 @@ static bool emitArchHeader(const ArchDef& arch, const std::string& outputPath) {
         << "    IsaOpcode getIsaOpcode(UnifiedOpcode unifiedOpcode) const override\n"
         << "    {\n"
         << "        return get" << arch.name << "Opcode(unifiedOpcode);\n"
+        << "    }\n\n"
+        << "    bool hasD16Writes32BitVgpr() const override\n"
+        << "    {\n"
+        << "        return " << (arch.d16Writes32BitVgpr ? "true" : "false") << ";\n"
         << "    }\n\n"
         << "    const HwInstDesc* getMCIDTable() const override\n"
         << "    {\n"
