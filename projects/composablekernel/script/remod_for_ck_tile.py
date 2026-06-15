@@ -5,12 +5,8 @@ import os
 
 root_dir = os.getcwd()
 ck_tile_include = root_dir + "/projects/composablekernel/include/ck_tile"
-ck_tile_example = root_dir + "/projects/composablekernel/example/ck_tile"
 
-# Run for include
+# Regenerate the ck_tile aggregation headers. example/ck_tile has no headers to
+# generate; its formatting is covered by the clang-format and crlf-checker hooks.
 os.chdir(ck_tile_include)
-_ = os.system("python remod.py")
-
-# Run for example
-os.chdir(ck_tile_example)
 _ = os.system("python remod.py")

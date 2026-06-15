@@ -3,7 +3,6 @@
 
 import pathlib
 from pathlib import Path
-import subprocess
 import os
 import copy
 
@@ -55,17 +54,18 @@ class submodule_t:
 
     def gen(self):
         def gen_header(hpath, include_list):
-            # print(hpath)
+            content = HEADER_COMMON + "#pragma once\n\n"
+            for individual_header in include_list:
+                header_path = NS + "/" + str(individual_header)
+                content += f'#include "{header_path}"\n'
+            # No trailing blank line, otherwise clang-format will complain.
+            # Write only when content changes so content-only commits are a no-op.
             if os.path.exists(str(hpath)):
-                os.remove(str(hpath))
+                with open(str(hpath)) as existing:
+                    if existing.read() == content:
+                        return
             with hpath.open("w") as f:
-                f.write(HEADER_COMMON)
-                f.write("#pragma once\n")
-                f.write("\n")
-                for individual_header in include_list:
-                    header_path = NS + "/" + str(individual_header)
-                    f.write(f'#include "{header_path}"\n')
-                # f.write('\n') # otherwise clang-format will complain
+                f.write(content)
 
         # print(self.m)
         # restructure common
@@ -85,21 +85,10 @@ class submodule_t:
                 gen_header(Path(f"{k}.hpp"), v)
 
 
+# Generation only. Per-file dos2unix/clang-format is handled by the standalone
+# clang-format and crlf-checker pre-commit hooks, so it is not duplicated here.
 submodule = submodule_t()
-# formatting
-format_procs = []
 for x in all_files:
-    dos2unix = f"python3 -m dos2unix {str(x)} {str(x)}"
-    clang_format = f"clang-format -style=file -i {str(x)}"
-    # One process to avoid race conditions.
-    cmd = f"{dos2unix} && {clang_format}"
-    format_procs.append(
-        subprocess.Popen(cmd, shell=True, stdout=open(os.devnull, "wb"))
-    )
     submodule.push(x)
-
-# Wait for formatting to complete before generating headers.
-for p in format_procs:
-    p.wait()
 
 submodule.gen()
