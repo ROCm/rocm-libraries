@@ -180,29 +180,29 @@ void checkVirtualTensors(const BlockScaleDequantizeAttributes& deqAttrA,
 }
 
 // Verify the input shapes are consistent with the output. The matmul is
-// A[M, K] x B[K, N] = D[M, N], so logically (independent of physical strides):
-//   A dims[-2]=M, dims[-1]=K; B dims[-2]=K, dims[-1]=N; D dims[-2]=M, dims[-1]=N.
+// A[M, K] x B[K, N] = C[M, N], so logically (independent of physical strides):
+//   A dims[-2]=M, dims[-1]=K; B dims[-2]=K, dims[-1]=N; C dims[-2]=M, dims[-1]=N.
 void checkShapesMatchOutput(const TensorWrapper& tXA,
                             const TensorWrapper& tXB,
-                            const TensorWrapper& tD)
+                            const TensorWrapper& tC)
 {
     const auto& dimsA = tXA.dims();
     const auto& dimsB = tXB.dims();
-    const auto& dimsD = tD.dims();
+    const auto& dimsC = tC.dims();
 
     PLUGIN_THROW_IF_FALSE(
         dimsA.size() >= 2, HIPDNN_PLUGIN_STATUS_BAD_PARAM, "MX matmul: A tensor rank must be >= 2");
     PLUGIN_THROW_IF_FALSE(
         dimsB.size() >= 2, HIPDNN_PLUGIN_STATUS_BAD_PARAM, "MX matmul: B tensor rank must be >= 2");
     PLUGIN_THROW_IF_FALSE(
-        dimsD.size() >= 2, HIPDNN_PLUGIN_STATUS_BAD_PARAM, "MX matmul: D tensor rank must be >= 2");
+        dimsC.size() >= 2, HIPDNN_PLUGIN_STATUS_BAD_PARAM, "MX matmul: C tensor rank must be >= 2");
 
     const int64_t aM = dimsA[dimsA.size() - 2];
     const int64_t aK = dimsA[dimsA.size() - 1];
     const int64_t bK = dimsB[dimsB.size() - 2];
     const int64_t bN = dimsB[dimsB.size() - 1];
-    const int64_t dM = dimsD[dimsD.size() - 2];
-    const int64_t dN = dimsD[dimsD.size() - 1];
+    const int64_t cM = dimsC[dimsC.size() - 2];
+    const int64_t cN = dimsC[dimsC.size() - 1];
 
     if(aK != bK)
     {
@@ -211,19 +211,19 @@ void checkShapesMatchOutput(const TensorWrapper& tXA,
                                                            + ") must equal B K-dim ("
                                                            + std::to_string(bK) + ")");
     }
-    if(aM != dM)
+    if(aM != cM)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                        "MX matmul: A M-dim (" + std::to_string(aM)
-                                                           + ") must equal D M-dim ("
-                                                           + std::to_string(dM) + ")");
+                                                           + ") must equal C M-dim ("
+                                                           + std::to_string(cM) + ")");
     }
-    if(bN != dN)
+    if(bN != cN)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                        "MX matmul: B N-dim (" + std::to_string(bN)
-                                                           + ") must equal D N-dim ("
-                                                           + std::to_string(dN) + ")");
+                                                           + ") must equal C N-dim ("
+                                                           + std::to_string(cN) + ")");
     }
 }
 
@@ -309,22 +309,22 @@ void checkHipblasltConstraints(const BlockScaleDequantizeAttributes& deqAttrA,
                                const BlockScaleDequantizeAttributes& deqAttrB,
                                const TensorWrapper& tXA,
                                const TensorWrapper& tXB,
-                               const TensorWrapper& tD)
+                               const TensorWrapper& tC)
 {
-    // Output D must be FP32, FP16, or BF16 (VEC32_UE8M0 Dtype restriction)
+    // Output C must be FP32, FP16, or BF16 (VEC32_UE8M0 Dtype restriction)
     static constexpr std::array<DT, 3> VALID_OUT_TYPES = {DT::FLOAT, DT::HALF, DT::BFLOAT16};
-    if(std::find(VALID_OUT_TYPES.begin(), VALID_OUT_TYPES.end(), tD.dataType())
+    if(std::find(VALID_OUT_TYPES.begin(), VALID_OUT_TYPES.end(), tC.dataType())
        == VALID_OUT_TYPES.end())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "MX matmul: output D must be FP32, FP16, or BF16");
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "MX matmul: output C must be FP32, FP16, or BF16");
     }
 
     // Batch must be 1: hipBLASLt requires B==1 for VEC32_UE8M0, and there is no
     // batch-stride attribute for the A/B scale pointers to advance per batch.
     const auto& dimsA = tXA.dims();
     const auto& dimsB = tXB.dims();
-    const auto& dimsD = tD.dims();
+    const auto& dimsC = tC.dims();
 
     const auto checkNoBatch = [](const auto& dims, const char* operand) {
         for(size_t i = 0; i + 2 < dims.size(); ++i)
@@ -339,7 +339,7 @@ void checkHipblasltConstraints(const BlockScaleDequantizeAttributes& deqAttrA,
     };
     checkNoBatch(dimsA, "A");
     checkNoBatch(dimsB, "B");
-    checkNoBatch(dimsD, "D");
+    checkNoBatch(dimsC, "C");
 
     // opA = T, opB = N — inferred from FP8 X tensor strides.
     // Rule: row-major (stride[-1]==1) → HIPBLAS_OP_N; col-major (stride[-2]==1) → HIPBLAS_OP_T
@@ -419,14 +419,14 @@ void checkConstraints(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph
 {
     const auto tXA = hipblaslt_utils::findTensorAttributes(tensorMap, deqAttrA.x_tensor_uid());
     const auto tXB = hipblaslt_utils::findTensorAttributes(tensorMap, deqAttrB.x_tensor_uid());
-    const auto tD = hipblaslt_utils::findTensorAttributes(tensorMap, matmulAttr.c_tensor_uid());
+    const auto tC = hipblaslt_utils::findTensorAttributes(tensorMap, matmulAttr.c_tensor_uid());
 
     checkImplementationLimitations(tXA, tXB);
     checkVirtualTensors(deqAttrA, deqAttrB, matmulAttr, tensorMap);
     checkComputeTypes(graph);
-    checkShapesMatchOutput(tXA, tXB, tD);
+    checkShapesMatchOutput(tXA, tXB, tC);
     checkScaleTensors(deqAttrA, deqAttrB, tXA, tXB, tensorMap);
-    checkHipblasltConstraints(deqAttrA, deqAttrB, tXA, tXB, tD);
+    checkHipblasltConstraints(deqAttrA, deqAttrB, tXA, tXB, tC);
 }
 
 } // namespace
