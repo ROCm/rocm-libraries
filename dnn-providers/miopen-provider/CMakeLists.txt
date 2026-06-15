@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.25.2)
 message(STATUS "Building miopen provider plugin standalone")
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 
-set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ClangToolChain.cmake"
     CACHE STRING "Toolchain file"
 )
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -43,8 +43,8 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${ROCM_PATH}/lib/cmake/hip
-     ${HIP_DIR}/cmake
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
+     ${CMAKE_CURRENT_SOURCE_DIR}/../cmake ${ROCM_PATH}/lib/cmake/hip ${HIP_DIR}/cmake
 )
 
 # Migrate HIP_DNN_SKIP_TESTS -> MIOPENPROVIDER_SKIP_TESTS
@@ -121,6 +121,9 @@ include(ClangTidy)
 include(Sanitizers)
 
 include(Dependencies)
+if(NOT MIOPENPROVIDER_SKIP_TESTS)
+    fetch_gtest_dependency()
+endif()
 include(Tests)
 
 if(MIOPENPROVIDER_ENABLE_COVERAGE)
@@ -222,11 +225,10 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
     # Finalize test targets with prefix to avoid collisions in superbuild mode
     # Keep this after all build folders have been added so they have a chance to register their tests
     # using add_*_test_target()
-    finalize_test_targets("${PROJECT_NAME}")
-
-    # For standalone builds we need to install the ctest files
-    if(NOT ROCM_LIBS_SUPERBUILD)
-        install_miopen_plugin_ctest_files()
+    if(MIOPENPROVIDER_ENABLE_COVERAGE)
+        finalize_test_targets("${PROJECT_NAME}" ENABLE_COVERAGE)
+    else()
+        finalize_test_targets("${PROJECT_NAME}")
     endif()
 
     if(NOT TARGET hipdnn_integration_tests)
@@ -235,17 +237,22 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
 
     if(TARGET hipdnn_integration_tests)
         add_external_integration_test_target(
-            TARGET_NAME   ${PROJECT_NAME}-external-integration-check
-            PLUGIN_TARGET miopen_plugin
-            ENGINE_NAME   MIOPEN_ENGINE
-            TEST_CONFIG   ${CMAKE_CURRENT_SOURCE_DIR}/config/MIOPEN_ENGINE.toml
-            GTEST_FILTER
-                *IsSupported*
-                *ConvFwd*
+            TARGET_NAME    ${PROJECT_NAME}-external-integration-check
+            PLUGIN_TARGET  miopen_plugin
+            ENGINE_NAME    MIOPEN_ENGINE
+            INSTALL_SUBDIR miopen_plugin
+            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/config/MIOPEN_ENGINE.toml
         )
         message(STATUS "Created ${PROJECT_NAME}-external-integration-check target")
     else()
         message(STATUS "hipdnn_integration_tests not found - skipping external-integration-check")
+    endif()
+
+    # For standalone builds we need to install the ctest files. Must run
+    # AFTER add_external_integration_test_target so the staged install-tree
+    # snippet for the cross-provider test is included.
+    if(NOT ROCM_LIBS_SUPERBUILD)
+        install_provider_ctest_files("miopen_plugin")
     endif()
 endif()
 

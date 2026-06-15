@@ -24,6 +24,8 @@
 
 #include <memory>
 
+#include "stinkytofu/Export.hpp"
+
 namespace stinkytofu {
 class Pass;
 
@@ -63,6 +65,6 @@ class Pass;
  * pm.run();
  * ```
  */
-std::unique_ptr<Pass> createCompositeInstructionLoweringPass();
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createCompositeInstructionLoweringPass();
 
 }  // namespace stinkytofu

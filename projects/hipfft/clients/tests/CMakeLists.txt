@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -228,7 +228,7 @@ foreach( target ${TEST_TARGETS} )
       target_compile_options( ${target} PRIVATE -cuda -Xptxas=-w)
       target_link_options( ${target} PRIVATE -cuda)
     else()
-      target_compile_options( ${target} PRIVATE -arch sm_53 -gencode=arch=compute_53,code=sm_53 -Xptxas=-w)
+      target_compile_options( ${target} PRIVATE -arch sm_100 -gencode=arch=compute_100,code=sm_100 -Xptxas=-w)
     endif()
     if( NVHPC_FOUND )
       target_link_libraries( ${target}  PRIVATE NVHPC::CUDART )
@@ -297,12 +297,6 @@ endif()
 # tests have callback functions, which need to be built as relocatable device code
 if( BUILD_WITH_LIB STREQUAL "CUDA" )
   target_compile_options( hipfft-test PRIVATE -dc )
-else()
-  # -fgpu-rdc causes failure at link stage on Windows
-  if (NOT WIN32)
-    target_compile_options( hipfft-test PRIVATE -fgpu-rdc )
-    target_link_options( hipfft-test PRIVATE -fgpu-rdc )
-  endif()
 endif()
 
 if(FFTW_MULTITHREAD)

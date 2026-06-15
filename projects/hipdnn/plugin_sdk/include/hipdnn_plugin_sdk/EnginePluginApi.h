@@ -23,7 +23,7 @@ extern "C" {
 
 /**
  * @defgroup EnginePluginFunctions Engine Plugin API Functions
- * @brief Functions that each engine plugin must implement.
+ * @brief Required and optional functions that engine plugins may implement.
  * @{
  */
 
@@ -208,6 +208,62 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
         hipdnnEnginePluginHandle_t handle, hipdnnEnginePluginExecutionContext_t execution_context);
 
 /**
+ * @brief Serializes an execution context into plugin-owned opaque bytes.
+ *
+ * @param[in] handle The engine plugin handle.
+ * @param[in] execution_context The execution context to serialize.
+ * @param[in,out] serialized_context A pointer to a structure where the plugin-specific serialized execution
+ *                                  context bytes will be stored.
+ *
+ * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
+ *
+ * @note This function is optional. Plugins that do not export it do not support compiled execution plan
+ *       serialization.
+ * @note The serialized bytes are plugin-specific and are treated as opaque by hipDNN.
+ * @note The plugin owns the returned buffer. hipDNN must release it by calling
+ *       hipdnnEnginePluginDestroySerializedExecutionContext().
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginSerializeExecutionContext(
+        hipdnnEnginePluginHandle_t handle,
+        hipdnnEnginePluginExecutionContext_t execution_context,
+        hipdnnPluginConstData_t* serialized_context);
+
+/**
+ * @brief Destroys plugin-owned serialized execution context bytes.
+ *
+ * @param[in] handle The engine plugin handle.
+ * @param[in,out] serialized_context A pointer to the serialized execution context bytes returned by
+ *                                  hipdnnEnginePluginSerializeExecutionContext().
+ *
+ * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
+ *
+ * @note This function is optional. Plugins that export hipdnnEnginePluginSerializeExecutionContext must also
+ *       export this function.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginDestroySerializedExecutionContext(
+        hipdnnEnginePluginHandle_t handle, hipdnnPluginConstData_t* serialized_context);
+
+/**
+ * @brief Creates an execution context from plugin-specific serialized bytes.
+ *
+ * @param[in] handle The engine plugin handle.
+ * @param[in] serialized_context A pointer to the plugin-specific serialized execution context bytes.
+ * @param[out] execution_context A pointer to a variable where the created execution context will be stored.
+ *
+ * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
+ *
+ * @note This function is optional. Plugins that export hipdnnEnginePluginSerializeExecutionContext must also
+ *       export this function.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginCreateExecutionContextFromSerialized(
+        hipdnnEnginePluginHandle_t handle,
+        const hipdnnPluginConstData_t* serialized_context,
+        hipdnnEnginePluginExecutionContext_t* execution_context);
+
+/**
  * @brief Retrieves the required workspace size for a given execution context.
  *
  * @param[in] handle The engine plugin handle.
@@ -242,6 +298,72 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
                                      void* workspace,
                                      const hipdnnPluginDeviceBuffer_t* device_buffers,
                                      uint32_t num_device_buffers);
+
+/**
+ * @brief Optional override-aware execute entry point for engine plugins.
+ *
+ * The host selects this entry only when the plugin reports a new enough API
+ * version and exports this symbol. If either requirement is missing, the
+ * plugin is ineligible for override execution. A plugin that exports this
+ * symbol but cannot support overrides for a particular graph should reject
+ * that graph during applicability; the execute implementation may then be an
+ * empty stub.
+ *
+ * @param[in] handle             The engine plugin handle.
+ * @param[in] execution_context  Execution context produced for this engine
+ *                               configuration.
+ * @param[in] workspace          User-provided workspace memory; may be NULL
+ *                               when the workspace size is zero.
+ * @param[in] device_buffers     Tensor unique-id-keyed device pointer table
+ *                               (same layout as the existing execute entry).
+ * @param[in] num_device_buffers Number of entries in `device_buffers`.
+ * @param[in] num_overrides      Number of tensor unique-ids in the override
+ *                               selectors. The current host dispatches empty
+ *                               override sets through the existing execute
+ *                               entry instead of this function.
+ * @param[in] override_unique_ids Pointer to an array of length `num_overrides`
+ *                                identifying which graph tensors carry an
+ *                                override. Each unique id must also appear in
+ *                                `device_buffers`.
+ * @param[in] override_lengths   Pointer to an array of length `num_overrides`
+ *                                holding the rank (number of dimensions) of
+ *                                each override tensor's shape and stride
+ *                                vectors.
+ * @param[in] override_shapes    Pointer to an array of length `num_overrides`
+ *                                where the i-th entry points to a buffer of
+ *                                `override_lengths[i]` int64 values: the
+ *                                runtime shape for the i-th override tensor.
+ * @param[in] override_strides   Pointer to an array of length `num_overrides`
+ *                                where the i-th entry points to a buffer of
+ *                                `override_lengths[i]` int64 values: the
+ *                                runtime strides for the i-th override tensor.
+ *
+ * @return A value of type `hipdnnPluginStatus_t` indicating the status of the
+ *         operation.
+ *
+ * @note **Pointer-lifetime invariant.** All pointers passed via
+ *       `override_unique_ids`, `override_lengths`, `override_shapes`,
+ *       `override_strides`, and the inner per-tensor buffers reachable
+ *       through them are owned by the host and are valid only for the
+ *       duration of this call. Plugins must not retain any of these pointers
+ *       past return; copy any data that must outlive the call. This matches
+ *       the lifetime of `device_buffers` for the existing execute entry.
+ *
+ * @note The host resolves this symbol through the loader's optional-symbol
+ *       mechanism for backward compatibility with pre-1.1 plugins.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginExecuteOpGraphWithOverrides(
+        hipdnnEnginePluginHandle_t handle,
+        hipdnnEnginePluginExecutionContext_t execution_context,
+        void* workspace,
+        const hipdnnPluginDeviceBuffer_t* device_buffers,
+        uint32_t num_device_buffers,
+        uint32_t num_overrides,
+        const int64_t* override_unique_ids,
+        const uint32_t* override_lengths,
+        const int64_t* const* override_shapes,
+        const int64_t* const* override_strides);
 
 /** @} */ // End of EnginePluginFunctions group
 

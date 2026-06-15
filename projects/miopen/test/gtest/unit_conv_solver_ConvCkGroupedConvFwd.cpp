@@ -98,7 +98,7 @@ auto GetConvFullTestCases(miopenDataType_t datatype)
                  datatype, {{1, 1}, {1, 1}, {1, 1}, 1}},
         TestCase{{datatype, miopenTensorNCHW, {64, 2, 112, 112}},
                  {datatype, miopenTensorNCHW, {2, 1, 3, 3}},
-                 datatype, {{1, 1}, {1, 1}, {1, 1}, 2}}, 
+                 datatype, {{1, 1}, {1, 1}, {1, 1}, 2}},
         TestCase{{datatype, miopenTensorNCHW, {64, 1, 28, 28}},
                  {datatype, miopenTensorNCHW, {1, 1, 3, 3}},
                  datatype, {{1, 1}, {2, 2}, {1, 1}, 1}},
@@ -118,7 +118,7 @@ auto GetConvFullTestCases(miopenDataType_t datatype)
 auto GetTestParams(miopenDataType_t /*datatype*/)
 {
 // Solution requires 64-lane wavefronts and depends on the CK dynamic library
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+#if MIOPEN_BACKEND_HIP
     Gpu supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
 #else
     Gpu supportedDevices = Gpu::None;

@@ -15,3 +15,4 @@
 #include <hipdnn_test_sdk/utilities/DynamicTolerancesMatmul.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerancesPointwise.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerancesRMSNorm.hpp>
+#include <hipdnn_test_sdk/utilities/DynamicTolerancesSdpa.hpp>
