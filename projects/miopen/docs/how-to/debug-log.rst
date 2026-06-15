@@ -112,9 +112,6 @@ Filtering by build method
   normalization.
 * ``MIOPEN_DEBUG_HIP_KERNELS``: Convolution kernels written in HIP. These implement the
   ImplicitGemm algorithm.
-* ``MIOPEN_DEBUG_OPENCL_CONVOLUTIONS``: Convolution kernels written in OpenCL. This only
-  affects convolutions.
-
 Filtering out all but one solution
 --------------------------------------------------------------------------------------------------------------
 
