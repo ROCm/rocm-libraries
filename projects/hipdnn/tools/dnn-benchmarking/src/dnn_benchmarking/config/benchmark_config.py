@@ -16,6 +16,25 @@ class ReferenceProviderName(str, Enum):
     PYTORCH = "pytorch"
 
 
+class TimingBackendName(str, Enum):
+    """Supported GPU timing backend names."""
+
+    HIP = "hip"
+    TORCH = "torch"
+    AUTO = "auto"
+    NONE = "none"
+
+
+class ExecutionBackendName(str, Enum):
+    """Supported execution backend names."""
+
+    HIPDNN = "hipdnn"
+    PYTORCH = "pytorch"
+
+
+EXECUTION_BACKEND_CHOICES = frozenset(backend.value for backend in ExecutionBackendName)
+
+
 REFERENCE_PROVIDER_CHOICES = frozenset(
     provider.value for provider in ReferenceProviderName
 )
@@ -59,31 +78,46 @@ class ValidationConfig:
     """Configuration for reference validation.
 
     Attributes:
-        provider: Reference provider name ("pytorch" or "none").
-        rtol: Relative tolerance for comparison.
-        atol: Absolute tolerance for comparison.
+        provider: Reference provider for correctness checking.
+        rtol: Optional relative tolerance override. If only one of rtol/atol
+            is set, it is used for both; if neither is set, validation uses
+            dtype-aware defaults.
+        atol: Optional absolute tolerance override.
     """
 
-    provider: str = ReferenceProviderName.NONE.value
-    rtol: float = 1e-5
-    atol: float = 1e-8
+    provider: ReferenceProviderName = ReferenceProviderName.NONE
+    rtol: Optional[float] = None
+    atol: Optional[float] = None
 
     def __post_init__(self) -> None:
-        """Validate configuration values."""
-        if self.provider not in REFERENCE_PROVIDER_CHOICES:
+        """Validate and normalize configuration values."""
+        try:
+            self.provider = ReferenceProviderName(self.provider)
+        except ValueError as e:
             raise ValueError(
                 f"Invalid provider: '{self.provider}'. "
                 f"Valid options: {REFERENCE_PROVIDER_CHOICES}"
-            )
-        if self.rtol < 0:
+            ) from e
+        if self.rtol is not None and self.rtol < 0:
             raise ValueError("rtol must be non-negative")
-        if self.atol < 0:
+        if self.atol is not None and self.atol < 0:
             raise ValueError("atol must be non-negative")
 
     @property
     def enabled(self) -> bool:
-        """Check if validation is enabled."""
-        return self.provider != ReferenceProviderName.NONE.value
+        """True when a non-`none` reference provider is selected."""
+        return self.provider is not ReferenceProviderName.NONE
+
+    @property
+    def tolerance_override(self) -> Optional[tuple[float, float]]:
+        """Return explicit validation tolerances, or None for dtype-aware defaults."""
+        if self.rtol is None and self.atol is None:
+            return None
+        value = self.rtol if self.rtol is not None else self.atol
+        return (
+            self.rtol if self.rtol is not None else value,
+            self.atol if self.atol is not None else value,
+        )
 
 
 @dataclass
@@ -257,29 +291,24 @@ class SuiteConfig:
         benchmark_iters: Number of benchmark iterations for timing.
         seed: Optional random seed for reproducible inputs.
         engine_filter: If set, ordered engine selections to run.
-        rtol: Optional relative tolerance override for correctness comparison.
-            If only one of ``rtol`` or ``atol`` is set, the provided tolerance is
-            used for both. If neither is set, validation uses dtype-aware
-            defaults.
-        atol: Optional absolute tolerance override for correctness comparison.
-        timing_backend: GPU timer backend to use ("hip", "auto", "none").
-        reference_provider: Reference provider name for correctness checking.
+        validation: Reference validation configuration (provider + tolerances).
         verbose: If True, print rich per-engine block per graph instead of summary.
         metrics: Metric collection configuration. Defaults to ``basic`` tier
             (always-on probes, no extra runs).
+        backend: Execution backend (``hipdnn`` runs discovered engine plugins,
+            ``pytorch`` runs the graph through the PyTorch executor as a single
+            engine row per graph).
     """
 
     warmup_iters: int = 10
     benchmark_iters: int = 100
     seed: Optional[int] = None
     engine_filter: Optional[List[int]] = None
-    rtol: Optional[float] = None
-    atol: Optional[float] = None
-    timing_backend: str = "auto"
-    reference_provider: str = ReferenceProviderName.NONE.value
     verbose: bool = False
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
+    validation: ValidationConfig = field(default_factory=ValidationConfig)
     plugin_paths: Optional[List[Path]] = None
+    backend: ExecutionBackendName = ExecutionBackendName.HIPDNN
 
     def __post_init__(self) -> None:
         """Validate configuration values."""
@@ -287,10 +316,6 @@ class SuiteConfig:
             raise ValueError("warmup_iters must be non-negative")
         if self.benchmark_iters <= 0:
             raise ValueError("benchmark_iters must be positive")
-        if self.rtol is not None and self.rtol < 0:
-            raise ValueError("rtol must be non-negative")
-        if self.atol is not None and self.atol < 0:
-            raise ValueError("atol must be non-negative")
         if self.engine_filter is not None:
             if len(self.engine_filter) == 0:
                 raise ValueError("engine_filter must be non-empty when set")
@@ -309,29 +334,13 @@ class SuiteConfig:
                     raise ValueError(
                         "--plugin-path entry count must be 1 or match --engine count"
                     )
-        valid_timing_backends = {"hip", "auto", "none"}
-        if self.timing_backend not in valid_timing_backends:
+        try:
+            self.backend = ExecutionBackendName(self.backend)
+        except ValueError as e:
             raise ValueError(
-                f"Invalid timing_backend: '{self.timing_backend}'. "
-                f"Valid options: {valid_timing_backends}"
-            )
-        if self.reference_provider not in REFERENCE_PROVIDER_CHOICES:
-            raise ValueError(
-                f"Invalid reference_provider: '{self.reference_provider}'. "
-                f"Valid options: {REFERENCE_PROVIDER_CHOICES}"
-            )
-
-    @property
-    def tolerance_override(self) -> Optional[tuple[float, float]]:
-        """Return explicit validation tolerances, or None for dtype-aware defaults."""
-        if self.rtol is None and self.atol is None:
-            return None
-
-        value = self.rtol if self.rtol is not None else self.atol
-        return (
-            self.rtol if self.rtol is not None else value,
-            self.atol if self.atol is not None else value,
-        )
+                f"Invalid backend: '{self.backend}'. "
+                f"Valid options: {EXECUTION_BACKEND_CHOICES}"
+            ) from e
 
     @property
     def plugin_path(self) -> Optional[Path]:
