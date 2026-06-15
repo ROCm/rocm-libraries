@@ -51,7 +51,7 @@ BenchmarkProblems:
         - DepthU: [32]
         - PrefetchGlobalRead: [1]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [0]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -60,7 +60,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [-1]
         - StoreVectorWidth: [-1]
         - WorkGroupMapping: [1]
-        - 1LDSBuffer: [-1]
+        - 1LDSBuffer: [0]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - Groups:

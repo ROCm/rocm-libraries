@@ -63,7 +63,7 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - LdsPadMetadata: [0]
         - StaggerU: [0]
-        - ScheduleIterAlg: [1] ########SIA2 and SIA3 only support MatrixInstruction
+        - ScheduleIterAlg: [0]
         - PrefetchLocalRead: [1] #
         - PrefetchGlobalRead: [2] #
         - StoreRemapVectorWidth: [0]
@@ -71,7 +71,7 @@ BenchmarkProblems:
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - GlobalReadVectorWidthA: [1] #
         - GlobalReadVectorWidthB: [1] #
-        - 1LDSBuffer: [-1]
+        - 1LDSBuffer: [0]
         - DirectToVgprSparseMetadata: [0]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
@@ -128,7 +128,7 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - LdsPadMetadata: [0]
         - StaggerU: [0]
-        - ScheduleIterAlg: [1] ########SIA2 and SIA3 only support MatrixInstruction
+        - ScheduleIterAlg: [0]
         - PrefetchLocalRead: [1] #
         - PrefetchGlobalRead: [2] #
         - StoreRemapVectorWidth: [0]
@@ -136,7 +136,7 @@ BenchmarkProblems:
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - GlobalReadVectorWidthA: [1] #
         - GlobalReadVectorWidthB: [1] #
-        - 1LDSBuffer: [-1]
+        - 1LDSBuffer: [0]
         - DirectToVgprSparseMetadata: [0]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
@@ -193,7 +193,7 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - LdsPadMetadata: [0]
         - StaggerU: [0]
-        - ScheduleIterAlg: [1] ########SIA2 and SIA3 only support MatrixInstruction
+        - ScheduleIterAlg: [0]
         - PrefetchLocalRead: [1] #
         - PrefetchGlobalRead: [2] #
         - StoreRemapVectorWidth: [0]
@@ -201,7 +201,7 @@ BenchmarkProblems:
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - GlobalReadVectorWidthA: [1] #
         - GlobalReadVectorWidthB: [1] #
-        - 1LDSBuffer: [-1]
+        - 1LDSBuffer: [0]
         - DirectToVgprSparseMetadata: [0]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
@@ -258,7 +258,7 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - LdsPadMetadata: [0]
         - StaggerU: [0]
-        - ScheduleIterAlg: [1] ########SIA2 and SIA3 only support MatrixInstruction
+        - ScheduleIterAlg: [0]
         - PrefetchLocalRead: [1] #
         - PrefetchGlobalRead: [2] #
         - StoreRemapVectorWidth: [0]
@@ -266,7 +266,7 @@ BenchmarkProblems:
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - GlobalReadVectorWidthA: [1] #
         - GlobalReadVectorWidthB: [1] #
-        - 1LDSBuffer: [-1]
+        - 1LDSBuffer: [0]
         - DirectToVgprSparseMetadata: [0]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
