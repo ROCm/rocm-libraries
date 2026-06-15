@@ -140,6 +140,9 @@ def ensureUtils() {
 // Posts GitHub status in post section. Handles both normal case (utils already
 // loaded) and edge case (restart from very early, utils not loaded). Only
 // allocates one node total.
+// extraActions: optional closure for additional steps (e.g., Teams notification)
+// that also require node context. Both GitHub status and extra actions run in
+// the same node to avoid allocating multiple nodes.
 def postGithubStatus(String context, String state, String description, Closure extraActions = null) {
     if (utils == null) {
         // Edge case: utils not loaded (restart from very early). Load utils and
