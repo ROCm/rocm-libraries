@@ -12,6 +12,7 @@
 #   --input-file commands.txt --output-file results.txt
 
 import argparse
+import copy
 import subprocess
 import shlex
 import sys
@@ -172,7 +173,7 @@ def add_conv_params_to_cmd(args, cmd):
         exit(1)
 
 
-def run_ck_grouped_conv_fwd(args, capture_output=False):
+def build_grouped_conv_fwd_cmd(args):
     args.ck_profier_op = "grouped_conv_fwd_tile"
     parse_data_type(args)
     parse_layouts(args)
@@ -194,10 +195,15 @@ def run_ck_grouped_conv_fwd(args, capture_output=False):
     if args.list_instances:
         cmd += ["--list-instances"]
 
+    return cmd
+
+
+def run_ck_grouped_conv_fwd(args, capture_output=False):
+    cmd = build_grouped_conv_fwd_cmd(args)
     return run_ck_profiler_cmd(cmd, capture_output)
 
 
-def run_ck_grouped_conv_bwd_data(args, capture_output=False):
+def build_grouped_conv_bwd_data_cmd(args):
     args.ck_profier_op = "grouped_conv_bwd_data_tile"
     parse_data_type(args)
     parse_layouts(args)
@@ -221,6 +227,11 @@ def run_ck_grouped_conv_bwd_data(args, capture_output=False):
     if args.list_instances:
         cmd += ["--list-instances"]
 
+    return cmd
+
+
+def run_ck_grouped_conv_bwd_data(args, capture_output=False):
+    cmd = build_grouped_conv_bwd_data_cmd(args)
     return run_ck_profiler_cmd(cmd, capture_output)
 
 
@@ -301,6 +312,42 @@ def run_ck_profiler(args, capture_output=False):
     if capture_output:
         return ("\n".join(outputs), "\n".join(stderr_lines))
     return None
+
+
+def convert_to_profiler_cases(command_line, parser, gpu_verify=False):
+    """Convert one MIOpen driver command line into ckProfiler argument strings.
+
+    Returns a list of ``(section, args)`` tuples where ``section`` is ``"fwd"``
+    or ``"bwd_data"`` and ``args`` is the ckProfiler argument string excluding
+    the executable and the subcommand name (i.e. the same column format used by
+    the direct-conv ``cases`` file). The ``-F`` flag selects which directions
+    are emitted; ``bwd_weight`` is intentionally omitted as the direct-conv
+    bench has no such section.
+
+    Kernel timing is forced on (``time=1``) since the bench measures TFLOPS.
+    """
+    argv = shlex.split(command_line)
+    args, unknown = parser.parse_known_args(argv)
+    init_const_args(args)
+    process_miopen_driver_name(args, unknown)
+
+    if gpu_verify:
+        args.verify = 2
+    # The bench reads TFLOPS from the profiler, which requires kernel timing.
+    args.time = 1
+
+    # MIOpen channel counts are per-all-groups; ckProfiler expects per-group.
+    args.in_channels = int(args.in_channels / args.group_count)
+    args.out_channels = int(args.out_channels / args.group_count)
+
+    cases = []
+    if args.forw in (0, 1, 3, 5):
+        cmd = build_grouped_conv_fwd_cmd(copy.copy(args))
+        cases.append(("fwd", " ".join(cmd[2:])))
+    if args.forw in (0, 2, 3, 6):
+        cmd = build_grouped_conv_bwd_data_cmd(copy.copy(args))
+        cases.append(("bwd_data", " ".join(cmd[2:])))
+    return cases
 
 
 def process_single_command(command_line, parser, capture_output=False, profiler_path=None, verbose=False, gpu_verify=False):
@@ -397,7 +444,7 @@ def process_batch_file(input_file, output_file, parser, profiler_path=None, verb
         f_out.close()
 
 
-if __name__ == "__main__":
+def build_parser():
     parser = argparse.ArgumentParser(
         prog="converter",
         description="Convert miopen driver command to ck tile Profiler"
@@ -714,6 +761,12 @@ if __name__ == "__main__":
         required=False,
         help="List valid instances without running",
     )
+
+    return parser
+
+
+if __name__ == "__main__":
+    parser = build_parser()
 
     preliminary_args, _ = parser.parse_known_args()
 
