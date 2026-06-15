@@ -809,7 +809,13 @@ class TileInfo:
       mainCeil = maxVgprBeforeAgpr - estimateSubtileMainLoopVgprs()
 
       EPILOGUE_TEMP_MARGIN = 32
-      valuCStage = getattr(writer.states.c, "numVgprValu", 0) or _totalDTileRegs
+      # The ValuC staging window equals the per-thread D accumulator count, which
+      # is exactly _totalDTileRegs (numMMATiles * numDword). states.c.numVgprValu
+      # carries the same value in a fully built writer; fall back to the computed
+      # total so this allocator also works under the unit-test writer stub (which
+      # has no states.c).
+      statesC = getattr(writer.states, "c", None)
+      valuCStage = getattr(statesC, "numVgprValu", 0) or _totalDTileRegs
       epiCeil = maxVgprBeforeAgpr - valuCStage - EPILOGUE_TEMP_MARGIN
 
       vgprAccLimit = min(mainCeil, epiCeil)

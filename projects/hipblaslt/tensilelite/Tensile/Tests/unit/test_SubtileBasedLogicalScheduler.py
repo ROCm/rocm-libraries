@@ -2095,7 +2095,10 @@ def test_large_fp4_accumulators_spill_to_agpr_with_vgpr_headroom():
 
 
 def test_large_fp4_accumulators_use_all_vgpr_before_agpr_boundary():
-    kernel = create_kernel(320, 128, fp4=True)
+    # MT128x128 (T = 64 accumulator regs) fits entirely below the conservative
+    # epilogue ceiling (maxVgpr - numVgprValu - margin), so every accumulator
+    # stays in the VGPR file and nothing spills to AGPR.
+    kernel = create_kernel(128, 128, fp4=True)
     writer, _, _, _, _, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
 
     vgpr_tiles = [tile for tile in dTileInfo.vgprTiles if tile.regList.is_vgpr]
@@ -2107,7 +2110,10 @@ def test_large_fp4_accumulators_use_all_vgpr_before_agpr_boundary():
 
 
 def test_mixed_fp4_d_init_zeros_vgpr_and_agpr_accumulators():
-    kernel = create_kernel(320, 192, fp4=True)
+    # MT320x128 (T = 160) lands in the partial VGPR/AGPR split regime under the
+    # conservative epilogue ceiling, so the accumulator zero-init must touch both
+    # VGPR-backed (v[...]) and AGPR-backed (acc[...]) accumulators.
+    kernel = create_kernel(320, 128, fp4=True)
     writer, _, _, _, _, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
 
     asm = str(initVgprTilesToZero(writer, kernel, dTileInfo))
@@ -2997,11 +3003,14 @@ class TestPreferVgprGuard:
         return dTileInfo
 
     @pytest.mark.parametrize("pre_alloc,mt0,mt1", [
-        # MT256x256: 64 tiles × 4 DWORDs = 256 total accumulator registers.
-        # 256 (+pre_alloc) cannot all fit below the VGPR ceiling, so the
-        # allocation splits: some accumulators in VGPR, the rest in AGPR.
-        (4, 256, 256),
-        (1, 256, 256),
+        # MT256x192: 48 tiles × 4 DWORDs = 192 total accumulator registers.
+        # The whole D-tile cannot fit below the conservative epilogue ceiling
+        # (maxVgpr - numVgprValu - margin), but the ceiling still leaves room for
+        # some accumulators, so the allocation splits: some in VGPR, rest in AGPR.
+        # (MT256x256, T=256, no longer splits: the ValuC staging window fills the
+        # VGPR file, forcing the safe pure-AGPR fallback.)
+        (4, 256, 192),
+        (1, 256, 192),
     ])
     def test_overflow_uses_partial_split(self, pre_alloc, mt0, mt1):
         """When the whole D-tile cannot fit below the VGPR ceiling, the
@@ -3040,16 +3049,15 @@ class TestPreferVgprGuard:
         )
 
     @pytest.mark.parametrize("pre_alloc,mt0,mt1", [
-        # MT256x256: P=0 → 0+256=256 ≤ 256 → preferVgpr=True → first tile VGPR.
-        # vgprAccLimit = 256 - conservative(96) = 160; nextVgprEnd=4 ≤ 160 ✓
-        (0, 256, 256),
-        # MT128x128: P=4 → 4+64=68 ≤ 256 → preferVgpr=True → first tile VGPR.
-        # vgprAccLimit = 256 - conservative(64) = 192; nextVgprEnd=8 ≤ 192 ✓
+        # MT128x128: T=64 fits entirely below the conservative epilogue ceiling,
+        # so preferVgpr stays True and the first tile lands in VGPR.
+        (0, 128, 128),
         (4, 128, 128),
     ])
     def test_fits_enables_vgpr(self, pre_alloc, mt0, mt1):
-        """When pool_size + totalDTileRegs ≤ 256, preferVgpr must be True
-        and at least the first CDTile tile must be in VGPR."""
+        """When the whole D-tile fits below the conservative epilogue ceiling,
+        preferVgpr must be True and at least the first CDTile tile must be in
+        VGPR."""
         writer = self._make_writer(pre_alloc)
         dTileInfo = self._alloc_cdtile(writer, mt0, mt1)
         assert len(dTileInfo.vgprTiles) > 0
