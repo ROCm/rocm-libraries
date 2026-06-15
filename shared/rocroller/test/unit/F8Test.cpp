@@ -34,8 +34,8 @@ namespace rocRollerTest
     const size_t numF8PerElement = 4;
 
     /**
-     * Loads F8x4 to GPU, unpacks to individual F8s, convert to float, store to CPU
-    */
+      * Loads F8x4 to GPU, unpacks to individual F8s, convert to float, store to CPU
+     */
     void genF8x4LoadToFloatStore(rocRoller::ContextPtr context,
                                  F8Problem&            prob,
                                  int                   N,
@@ -142,8 +142,8 @@ namespace rocRollerTest
     }
 
     /**
-     * @param N number of F8x4; so Nx4 float results
-     */
+      * @param N number of F8x4; so Nx4 float results
+      */
     template <typename T>
     void executeF8x4LoadToFloatStore(rocRoller::ContextPtr context, rocRoller::DataType F8Type)
     {
@@ -221,8 +221,8 @@ namespace rocRollerTest
     }
 
     /**
-     * Loads sparse F8s to GPU, packs into F8x4s, stores to CPU
-    */
+      * Loads sparse F8s to GPU, packs into F8x4s, stores to CPU
+     */
     void genF8LoadGather(rocRoller::ContextPtr m_context, int N, rocRoller::DataType F8Type)
     {
         auto k = m_context->kernel();
@@ -296,8 +296,8 @@ namespace rocRollerTest
 
             Expression::ExpressionPtr bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
             bufferExpr = BufferDescriptor::SetDefaults(bufferExpr, m_context);
-            bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_a->expression());
-            bufferExpr = BufferDescriptor::SetSize(bufferExpr, Expression::literal(N));
+            bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_a->expression(), m_context);
+            bufferExpr = BufferDescriptor::SetSize(bufferExpr, Expression::literal(N), m_context);
 
             auto bufferRegs = Register::Value::Placeholder(
                 m_context, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
@@ -312,7 +312,8 @@ namespace rocRollerTest
                 co_yield m_context->mem()->loadBuffer(
                     v_temp->element({i}), vgprSerial, i, bufferRegs, bufInstOpts, 1);
             }
-            bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_result->expression());
+            bufferExpr
+                = BufferDescriptor::SetBasePointer(bufferExpr, s_result->expression(), m_context);
             co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
 
             co_yield m_context->mem()->storeBuffer(
@@ -325,8 +326,8 @@ namespace rocRollerTest
     }
 
     /**
-     * @param N number of F8x4; so Nx4 float results
-     */
+      * @param N number of F8x4; so Nx4 float results
+      */
     void executeF8LoadGather(rocRoller::ContextPtr context, int N, rocRoller::DataType F8Type)
     {
         genF8LoadGather(context, N, F8Type);

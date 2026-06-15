@@ -167,6 +167,7 @@ TEST(TestScanBundleJsonFiles, ExcludesMetaJson)
 
     touchFile(dir.path() / "bundle.json");
     touchFile(dir.path() / "meta.json");
+    touchFile(dir.path() / "bundle.meta.json"); // compound .meta.json extension
 
     auto results = scanBundleJsonFiles(dir.path());
     ASSERT_EQ(results.size(), 1u);
@@ -204,6 +205,15 @@ TEST(TestLoadGraphAndTensors, Valid)
     if(!std::filesystem::exists(filepath))
     {
         HIPDNN_SDK_LOG_WARN("Could not find " << filepath.string());
+        GTEST_SKIP();
+    }
+
+    auto basePath = filepath;
+    basePath.replace_extension();
+    const std::filesystem::path tensor0Path = basePath.string() + ".tensor0.bin";
+    if(!std::filesystem::exists(tensor0Path))
+    {
+        HIPDNN_SDK_LOG_WARN("Could not find " << tensor0Path.string());
         GTEST_SKIP();
     }
 
@@ -247,6 +257,15 @@ TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
     if(!std::filesystem::exists(filepath))
     {
         HIPDNN_SDK_LOG_WARN("Could not find " << filepath.string());
+        GTEST_SKIP();
+    }
+
+    auto basePath = filepath;
+    basePath.replace_extension();
+    const std::filesystem::path tensor0Path = basePath.string() + ".tensor0.bin";
+    if(!std::filesystem::exists(tensor0Path))
+    {
+        HIPDNN_SDK_LOG_WARN("Could not find " << tensor0Path.string());
         GTEST_SKIP();
     }
 
