@@ -10,11 +10,11 @@ endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# Runtime __version__ comes from the single product version. SKBUILD wheel builds
-# are standalone (no umbrella CMake defines HIPDNN_VERSION), so fall back to a
-# literal kept in sync with pyproject.toml and the top-level default.
-if(NOT DEFINED HIPDNN_VERSION)
-    set(HIPDNN_VERSION "0.0.1")
+# Runtime __version__ is the frontend component version (frontend/version.json).
+# SKBUILD wheel builds are standalone (no umbrella CMake defines it), so fall back
+# to a literal kept in sync with frontend/version.json and pyproject.toml.
+if(NOT DEFINED HIPDNN_FRONTEND_VERSION)
+    set(HIPDNN_FRONTEND_VERSION "0.2.0")
 endif()
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/__init__.py.in"
