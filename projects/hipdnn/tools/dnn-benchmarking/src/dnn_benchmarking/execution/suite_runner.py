@@ -199,9 +199,9 @@ def _get_reference_provider(
         )
         return None
     except ImportError:
-        # Lazily-resolved provider whose dependencies (e.g. torch) are absent.
+        # Provider construction failed: an optional dependency (e.g. torch) is missing.
         print(
-            f"Reference provider '{config.reference_provider}' not available "
+            f"Reference provider '{config.validation.provider.value}' not available "
             "(dependencies missing)",
             file=sys.stderr,
         )

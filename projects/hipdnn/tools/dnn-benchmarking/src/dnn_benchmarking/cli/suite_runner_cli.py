@@ -126,7 +126,7 @@ def _reference_provider_available(config: SuiteConfig, reporter: Reporter) -> bo
         reporter.print_error(f"Reference provider '{provider_name}' is not registered.")
         return False
     except ImportError:
-        # Lazily-resolved provider whose dependencies (e.g. torch) are absent.
+        # Provider construction failed: an optional dependency (e.g. torch) is missing.
         reporter.print_error(
             f"Reference provider '{provider_name}' is not available "
             "(check that its dependencies are installed)."
