@@ -1440,9 +1440,6 @@ struct UniversalGemmPipelineAgBgCrPolicy
             : vector_size * 2 == thread_elements ? WGAttrNumAccessEnum::Double
             : vector_size * 4 == thread_elements ? WGAttrNumAccessEnum::Quad
                                                  : WGAttrNumAccessEnum::Invalid;
-        using ATypeToUse = typename Problem::AComputeDataType;
-        using BTypeToUse = typename Problem::BComputeDataType;
-
         using ADataType = remove_cvref_t<typename Problem::ADataType>;
         using BDataType = remove_cvref_t<typename Problem::BDataType>;
 
@@ -1464,11 +1461,12 @@ struct UniversalGemmPipelineAgBgCrPolicy
                                             false,
                                             use_pack_num_access>;
 
-        using BlockGemmPolicy = BlockGemmASmemBSmemCRegV1CustomPolicy<ATypeToUse,
-                                                                      BTypeToUse,
-                                                                      typename Problem::CDataType,
-                                                                      BlockWarps,
-                                                                      WarpGemm>;
+        using BlockGemmPolicy =
+            BlockGemmASmemBSmemCRegV1CustomPolicy<typename Problem::AComputeDataType,
+                                                  typename Problem::BComputeDataType,
+                                                  typename Problem::CDataType,
+                                                  BlockWarps,
+                                                  WarpGemm>;
         return BlockUniversalGemmAsBsCr<Problem, BlockGemmPolicy>{};
     }
 };
