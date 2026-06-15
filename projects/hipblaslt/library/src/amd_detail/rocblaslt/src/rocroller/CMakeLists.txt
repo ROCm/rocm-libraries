@@ -3,7 +3,10 @@
 
 add_library(hipblaslt-rocroller OBJECT)
 
-add_subdirectory(custom_kernels)
+string(REGEX MATCHALL "gfx[a-z0-9]+" _rocroller_archs "${GPU_TARGETS}")
+if("gfx950" IN_LIST _rocroller_archs)
+    add_subdirectory(custom_kernels)
+endif()
 
 target_sources(hipblaslt-rocroller
     PRIVATE

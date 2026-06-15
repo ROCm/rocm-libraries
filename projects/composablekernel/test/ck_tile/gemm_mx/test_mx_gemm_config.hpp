@@ -101,7 +101,7 @@ struct MX_GemmConfigEightWaves : MxGemmConfig
     static constexpr int kBlockPerCu = 2;
 };
 
-struct MXfp4_GemmConfig_Preshuffle : MxGemmConfig
+struct MXfp4_GemmConfig16_Preshuffle : MxGemmConfig
 {
     static constexpr ck_tile::index_t M_Tile = 128;
     static constexpr ck_tile::index_t N_Tile = 512;
@@ -111,7 +111,13 @@ struct MXfp4_GemmConfig_Preshuffle : MxGemmConfig
     static constexpr ck_tile::index_t BContiguousItemsPerAccess = 32;
 };
 
-struct MXfp8_GemmConfig_Preshuffle : MxGemmConfig
+struct MXfp4_GemmConfig16_PermuteN : MXfp4_GemmConfig16_Preshuffle
+{
+    static constexpr int N_Repeat          = N_Tile / N_Warp_Tile / N_Warp;
+    static constexpr bool TiledMMAPermuteN = N_Repeat % 2 == 0;
+};
+
+struct MXfp8_GemmConfig16_Preshuffle : MxGemmConfig
 {
     // For FP8 Preshuffle:
     // The theoretical functional minimum is N_Tile =  N_Warp * N_Warp_Tile * NXdlPack = 4*16*2 =
@@ -123,4 +129,20 @@ struct MXfp8_GemmConfig_Preshuffle : MxGemmConfig
     static constexpr ck_tile::index_t K_Tile = 256;
     static constexpr auto Scheduler          = ck_tile::GemmPipelineScheduler::Default;
     static constexpr bool Preshuffle         = true;
+};
+
+// Variant with M/N padding enabled. Used to cover shapes where M/N are not multiples of
+// the respective block tiles (MX_GemmConfig16 has M_Tile = 64, N_Tile = 128). K is still
+// required to be a multiple of K_Tile -- the MX comp-async pipeline does not support K padding
+// (see MXGemmKernel::IsSupportedArgument).
+struct MXfp8_GemmConfig16_PadMN : MX_GemmConfig16
+{
+    static constexpr bool kPadM = true;
+    static constexpr bool kPadN = true;
+};
+
+struct MXfp8_GemmConfig16_PermuteN : MXfp8_GemmConfig16_Preshuffle
+{
+    static constexpr int N_Repeat          = N_Tile / N_Warp_Tile / N_Warp;
+    static constexpr bool TiledMMAPermuteN = N_Repeat % 2 == 0;
 };

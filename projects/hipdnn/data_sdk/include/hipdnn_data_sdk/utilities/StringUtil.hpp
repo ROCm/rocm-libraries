@@ -76,6 +76,17 @@ inline uint64_t fnv1aHash(std::string_view str) noexcept
     return fnv1aHash(reinterpret_cast<const uint8_t*>(str.data()), str.size());
 }
 
+// Builds a std::string from a length-delimited char buffer, stripping a
+// trailing NUL if the producer included it in the reported length.
+inline std::string bufferToString(const std::vector<char>& buf, size_t len)
+{
+    if(len > 0 && buf[len - 1] == '\0')
+    {
+        --len;
+    }
+    return {buf.data(), len};
+}
+
 inline void copyMaxSizeWithNullTerminator(char* destination, const char* source, size_t maxSize)
 {
     if(source == nullptr || destination == nullptr || maxSize == 0)
