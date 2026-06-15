@@ -2166,24 +2166,14 @@ namespace TensileLite
                 case CustomArgSemantic::StrideMetadata1:
                     rv.args.appendCustomType("StrideMetadata1", problem.metadata().strides()[2], arg.type);
                     break;
-                case CustomArgSemantic::StrideAK:
-                    rv.args.appendCustomType("StrideAK", 1, arg.type);
-                    break;
-                case CustomArgSemantic::StrideBK:
-                    rv.args.appendCustomType("StrideBK", 1, arg.type);
-                    break;
                 case CustomArgSemantic::StrideCK:
-                    rv.args.appendCustomType("StrideCK", 0, arg.type);
+                {
+                    size_t splitKStride = 0;
+                    if(gsu > 1)
+                        splitKStride = problem.d().sizes()[0] * problem.d().sizes()[1];
+                    rv.args.appendCustomType("StrideCK", splitKStride, arg.type);
                     break;
-                case CustomArgSemantic::StrideCM:
-                    rv.args.appendCustomType("StrideCM", 1, arg.type);
-                    break;
-                case CustomArgSemantic::StrideASK:
-                    rv.args.appendCustomType("StrideASK", 1, arg.type);
-                    break;
-                case CustomArgSemantic::StrideBSK:
-                    rv.args.appendCustomType("StrideBSK", 1, arg.type);
-                    break;
+                }
                 case CustomArgSemantic::Alpha:
                     rv.args.append("Alpha", inputs.alpha, problem.alphaType());
                     if(problem.alphaType() == rocisa::DataType::Half)
@@ -2215,6 +2205,12 @@ namespace TensileLite
                 }
                 case CustomArgSemantic::Padding:
                     rv.args.template append<uint32_t>("Padding", 0);
+                    break;
+                case CustomArgSemantic::ConstantZero:
+                    rv.args.appendCustomType("ConstantZero", 0, arg.type);
+                    break;
+                case CustomArgSemantic::ConstantOne:
+                    rv.args.appendCustomType("ConstantOne", 1, arg.type);
                     break;
                 case CustomArgSemantic::DebugPattern:
                     rv.args.template append<uint32_t>("DebugPattern", debugPattern);

@@ -89,17 +89,14 @@ namespace TensileLite
         X_MACRO(StrideD0Bytes) \
         X_MACRO(StrideMetadata0) \
         X_MACRO(StrideMetadata1) \
-        X_MACRO(StrideAK) \
-        X_MACRO(StrideBK) \
         X_MACRO(StrideCK) \
-        X_MACRO(StrideCM) \
-        X_MACRO(StrideASK) \
-        X_MACRO(StrideBSK) \
         X_MACRO(Alpha) \
         X_MACRO(Beta) \
         X_MACRO(SplitK) \
         X_MACRO(OutputBF16) \
         X_MACRO(Padding) \
+        X_MACRO(ConstantZero) \
+        X_MACRO(ConstantOne) \
         X_MACRO(DebugPattern) \
         /* Pointer args */ \
         X_MACRO(AddressA) \

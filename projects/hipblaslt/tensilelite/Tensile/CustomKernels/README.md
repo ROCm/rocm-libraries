@@ -46,10 +46,10 @@ Triton-specific concerns for the compile step / YAML argument map:
 - **Layout**: for the `Cijk_Alik_Bljk` (TN) contraction both operands are
   K-contiguous; pass packed-byte leading strides via `StrideA0Bytes` /
   `StrideB0Bytes` for sub-byte (FP4) data.
-- **Native aiter signatures**: name any non-standard Triton arguments after
-  their ABI meaning (for example `StrideAK`, `StrideCK`, `StrideASK`) instead of
-  generic constants. For packed FP4 kernels that take the summation size in
-  bytes, use `SizeSumDiv2`.
+- **Native aiter signatures**: use `ConstantOne` for fixed unit-stride Triton
+  arguments in the constrained custom-kernel layout. Use a named semantic such
+  as `StrideCK` when the value depends on split-K. For packed FP4 kernels that
+  take the summation size in bytes, use `SizeSumDiv2`.
 - Strip the `.amdgcn_target` / `.amdhsa_code_object_version` directives from the
   emitted assembly so Tensile's assembler flags drive target + COV.
 

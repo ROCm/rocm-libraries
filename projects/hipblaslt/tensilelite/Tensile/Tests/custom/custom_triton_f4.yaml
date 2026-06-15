@@ -50,16 +50,16 @@ BenchmarkProblems:
                     { type: uint32,  semantic: SizeFree1 },
                     { type: uint32,  semantic: SizeSumDiv2 },
                     { type: uint32,  semantic: StrideA0Bytes },
-                    { type: uint32,  semantic: StrideAK },
-                    { type: uint32,  semantic: StrideBK },
+                    { type: uint32,  semantic: ConstantOne },
+                    { type: uint32,  semantic: ConstantOne },
                     { type: uint32,  semantic: StrideB0Bytes },
                     { type: uint32,  semantic: StrideCK },
-                    { type: uint32,  semantic: StrideCM },
+                    { type: uint32,  semantic: ConstantOne },
                     { type: uint32,  semantic: StrideD0 },
                     { type: uint32,  semantic: StrideScaleA0 },
-                    { type: uint32,  semantic: StrideASK },
+                    { type: uint32,  semantic: ConstantOne },
                     { type: uint32,  semantic: StrideScaleB0 },
-                    { type: uint32,  semantic: StrideBSK, padding: 16 } ]
+                    { type: uint32,  semantic: ConstantOne, padding: 16 } ]
             macrotile: [256, 256, 64]
             threads: [256, 1, 1]
             grid: [TilesXY, One, One]
