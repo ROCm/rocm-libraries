@@ -264,12 +264,10 @@ inline rocisa::DataType rocComputeType_to_tensile_type(rocblaslt_compute_type ty
     {
     case rocblaslt_compute_f32_fast_xf32:
         return rocisa::DataType::XFloat32;
-    case rocblaslt_compute_f32_fast_f16:
-        return rocisa::DataType::Half;
-    case rocblaslt_compute_f32_fast_bf16:
-        return rocisa::DataType::BFloat16;
     case rocblaslt_compute_f16:
     case rocblaslt_compute_f32:
+    case rocblaslt_compute_f32_fast_f16:
+    case rocblaslt_compute_f32_fast_bf16:
     case rocblaslt_compute_f32_fast_f8_fnuz:
     case rocblaslt_compute_f32_fast_bf8_fnuz:
     case rocblaslt_compute_f32_fast_f8bf8_fnuz:
