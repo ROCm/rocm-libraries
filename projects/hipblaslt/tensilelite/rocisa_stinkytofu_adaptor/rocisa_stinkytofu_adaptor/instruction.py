@@ -57,10 +57,13 @@ What it does (real):
       ``LogicalInstructionDefs.inc`` + tablegen regenerate the Python binding.
       Non-``None`` ``SMEMModifiers`` are rejected until logical IR carries
       SMEM modifier data through the binding.
-    - Other Phase-A candidates (``SNop``, ``SWaitCnt``, ``SEndpgm``, branch
-      shims) remain dummies until matching logical opcodes exist in the
-      generated Python binding (see ``PythonBindings_generated.inc`` from the
-      stinkytofu build).
+    - ``SNop`` — scalar ``s_nop <wait>``; ``to_stinky_logical`` forwards to
+      ``_stinkytofu.SNop`` (tablegen factory: literal wait as ``Register`` +
+      ``comment``).
+    - Other Phase-A candidates (``SWaitCnt``, ``SEndpgm``, branch shims)
+      remain dummies until matching logical opcodes exist in the generated
+      Python binding (see ``PythonBindings_generated.inc`` from the stinkytofu
+      build).
 
     - ``getMFMAIssueLatency`` / ``getSMFMAIssueLatency`` — workaround
       ports returning the C++ default-branch tuple
@@ -70,8 +73,9 @@ What it does (real):
 Not yet done (dummy):
     - All other instruction classes (``Buffer*``, ``DS*``, ``Flat*``,
       most ``S*`` / ``V*``, ``MFMA*`` / ``SMFMA*``, ...) except
-      ``VMovB32``, ``SMovB32``, ``SMovB64``, ``SMemLoadInstruction`` /
-      ``SLoadB32`` … ``SLoadB512``, and ``MacroInstruction``.
+      ``VMovB32``, ``SMovB32``, ``SMovB64``, ``SNop``,
+      ``SMemLoadInstruction`` / ``SLoadB32`` … ``SLoadB512``, and
+      ``MacroInstruction``.
     - ``CompositeInstruction`` still dummy (no concrete subclass
       promoted yet). ``MacroInstruction`` is real (KernelWriter emits
       it 16+ times via ``V_MAGIC_DIV`` / ``GLOBAL_OFFSET_*`` /
@@ -660,6 +664,52 @@ class SMovB64(CommonInstruction):
 
 
 # ==========================================================================
+# SNop -- scalar NOP (SOPP wait field)
+# ==========================================================================
+#
+# source: rocisa/rocisa/include/instruction/common.hpp:1750-1794
+# logicalIR: ``SNop`` in LogicalInstructionDefs.inc
+#         (generated ``_stinkytofu.SNop(src0, comment)`` with ``src0`` = wait
+#         count as a literal ``Register``).
+
+
+class SNop(Instruction):
+    """``s_nop <wait>`` shim with stinkytofu left-path bridge."""
+
+    __slots__ = ("wait_state",)
+
+    def __init__(self, waitState: int = 0, comment: str = ""):
+        super().__init__(InstType.INST_NOTYPE, comment)
+        self.wait_state = int(waitState)
+        self.setInst("s_nop")
+
+    def getParams(self):
+        return [self.wait_state]
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return [self.wait_state]
+
+    def toString(self) -> str:
+        kstr = self.preStr() + " " + _input_to_str(self.wait_state)
+        return self.formatWithComment(kstr)
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        return _st.SNop(_to_stinky_register(self.wait_state), self.comment)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = SNop(waitState=self.wait_state, comment=self.comment)
+        memo[id(self)] = dup
+        return dup
+
+
+# ==========================================================================
 # SMemLoadInstruction / SLoadB* -- scalar memory loads (Phase A).
 # ==========================================================================
 #
@@ -1074,7 +1124,7 @@ SBarrier = make_dummy_class(f"{_P}.SBarrier")
 SDcacheWb = make_dummy_class(f"{_P}.SDcacheWb")
 GlobalWb = make_dummy_class(f"{_P}.GlobalWb")
 GlobalInv = make_dummy_class(f"{_P}.GlobalInv")
-SNop = make_dummy_class(f"{_P}.SNop")
+# SNop — real class (see class SNop above, after SMovB64).
 VNop = make_dummy_class(f"{_P}.VNop")
 SEndpgm = make_dummy_class(f"{_P}.SEndpgm")
 SSleep = make_dummy_class(f"{_P}.SSleep")

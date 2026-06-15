@@ -83,6 +83,7 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     MacroInstruction,
     SMovB32,
     SMovB64,
+    SNop,
     SLoadB32,
     SLoadB64,
     SMemLoadInstruction,
@@ -495,8 +496,8 @@ try:
     import stinkytofu as _stinky
     _STINKY_OK = all(
         hasattr(_stinky, name)
-        for name in ("Register", "vgpr", "VMovB32", "LogicalModule",
-                     "lower_logical_module")
+        for name in ("Register", "vgpr", "VMovB32", "SNop",
+                     "LogicalModule", "lower_logical_module")
     )
 except ImportError:
     _STINKY_OK = False
@@ -668,6 +669,52 @@ class TestSMovB64Construction(unittest.TestCase):
 
 
 # ===========================================================================
+# SNop
+# ===========================================================================
+
+
+class TestSNopConstruction(unittest.TestCase):
+    def test_inst_type_notype(self):
+        m = SNop(waitState=0)
+        self.assertEqual(m.instStr, "s_nop")
+        self.assertEqual(m.instType, InstType.INST_NOTYPE)
+
+    def test_str_wait_and_comment(self):
+        m = SNop(waitState=3, comment="pad")
+        text = str(m)
+        self.assertIn("s_nop", text)
+        self.assertIn("3", text)
+        self.assertIn("pad", text)
+
+    def test_get_params(self):
+        m = SNop(waitState=7)
+        self.assertEqual(m.getParams(), [7])
+        self.assertEqual(m.getDstParams(), [])
+        self.assertEqual(m.getSrcParams(), [7])
+
+    def test_to_stinky_logical(self):
+        m = SNop(waitState=2, comment="c")
+        if hasattr(m, "to_stinky_logical"):
+            name_fn = getattr(m, "getOpcodeName", None)
+            if name_fn:
+                self.assertEqual(name_fn(), "SNop")
+
+    def test_deepcopy(self):
+        m = SNop(waitState=1, comment="x")
+        c = copy.deepcopy(m)
+        self.assertIsInstance(c, SNop)
+        self.assertIsNot(c, m)
+        self.assertEqual(c.wait_state, 1)
+        self.assertEqual(c.comment, "x")
+
+    def test_positional_arg(self):
+        """Supports SNop(3, 'comment') positional style used in Tensile."""
+        m = SNop(3, "delay")
+        self.assertEqual(m.wait_state, 3)
+        self.assertEqual(m.comment, "delay")
+
+
+# ===========================================================================
 # SMemLoadInstruction / SLoadB32 / SLoadB64
 # ===========================================================================
 
@@ -752,10 +799,20 @@ class TestCollectLogicalIntegration(unittest.TestCase):
         m.add(SMovB32(sgpr(0), sgpr(1)))
         self.assertEqual(len(m._collect_logical_insts()), 1)
 
+    def test_snop_exposes_to_stinky_logical(self):
+        n = SNop(waitState=0)
+        self.assertTrue(callable(getattr(n, "to_stinky_logical", None)))
+
     @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
     def test_sloadb32_collected_by_module(self):
         m = Module()
         m.add(SLoadB32(sgpr(0), sgpr(2, 2), 0))
+        self.assertEqual(len(m._collect_logical_insts()), 1)
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_snop_collected_by_module(self):
+        m = Module()
+        m.add(SNop(waitState=0))
         self.assertEqual(len(m._collect_logical_insts()), 1)
 
 

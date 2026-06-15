@@ -571,5 +571,16 @@ class TestSLoadB64_WideDst(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
+class TestSNop_Wait0(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_nop 0`` -- minimal scalar NOP (wait=0)."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SNop
+        module = Module("k")
+        module.add(SNop(waitState=0, comment="align"))
+    """)
+
+
 if __name__ == "__main__":
     unittest.main()

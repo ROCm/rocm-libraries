@@ -476,6 +476,8 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return SAbsI32(sgpr(0), sgpr(1));
         case logical::SBarrier:
             return SBarrier();
+        case logical::SNop:
+            return SNop(literal(3));
         case logical::SMaxI32:
             return SMaxI32(sgpr(0), sgpr(1), sgpr(2));
         case logical::SMaxU32:
@@ -629,6 +631,7 @@ static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX1250 = {
     {logical::SLoadB128, "s_load_b128"},
     {logical::SLoadB256, "s_load_b256"},
     {logical::SLoadB512, "s_load_b512"},
+    {logical::SNop, "s_nop"},
     {logical::DSStoreB32, "ds_store_b32"},
     {logical::DSStoreB64, "ds_store_b64"},
     // Add more: {logical::YourOpcode, "expected_mnemonic"},
