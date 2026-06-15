@@ -191,9 +191,11 @@ def runBuildAndSingleGtestJob(Map conf=[:])
     // catchError marks the stage/build FAILED on test failure but does not re-throw,
     // so the junit step below always runs and cleanWs() in the outer finally is not
     // disrupted by a propagating exception.
+    def buildReached = false
     catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
         withWorkingDir {
             def single_gtest_flags = " -DMIOPEN_TEST_DISCRETE=OFF -DGTEST_PARALLEL_LEVEL=4 "
+            buildReached = true
             utils.buildHipClangJob(
                 setup_flags: single_gtest_flags + flags,
                 build_cmd: "LLVM_PATH=/opt/rocm/llvm CTEST_PARALLEL_LEVEL=4 ninja -j\$(nproc) install miopen_gtest check",
@@ -201,6 +203,13 @@ def runBuildAndSingleGtestJob(Map conf=[:])
                 build_timeout:build_timeout_minutes,
                 gpu_family: gpu_family)
         }
+    }
+
+    // If buildHipClangJob was never reached (e.g. checkout failure inside
+    // catchError), it never posted any status. Post failure explicitly so
+    // the stage doesn't remain stuck at 'pending' on GitHub.
+    if (!buildReached && utils != null) {
+        utils.setGithubStatus(env.STAGE_NAME, 'failure', 'Stage failed before build started')
     }
 
     // Collect per-shard JUnit XML reports even when the build failed.
