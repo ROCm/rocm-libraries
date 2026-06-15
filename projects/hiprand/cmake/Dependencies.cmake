@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -25,14 +25,8 @@
 # HIP dependency is handled earlier in the project cmake file
 # when VerifyCompiler.cmake is included.
 
-# Suppress ROCmChecks warnings for local toolchain modifications.
-set(ROCM_WARN_TOOLCHAIN_VAR OFF)
-
-# Force older versions of option() in googletest to respect the local variable setting.
-set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
-
-# Resolve Ninja generator errors regarding RPATH relinking during the install phase for merged subprojects.
-set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
+# For downloading, building, and installing required dependencies
+include(cmake/DownloadProject.cmake)
 
 # This function checks to see if the download branch given by "branch" exists in the repository.
 # It does so using the git ls-remote command.
@@ -254,7 +248,7 @@ function(fetch_dep method repo_name repo_path download_branch)
   endif()
 endfunction()
 
-include(cmake/FetchContentIsolated.cmake)
+include(FetchContent)
 
 # NOTE: HIPCC includes the default ROCm install directory as a system include directory (-isystem) for header files.
 #       This makes it possible that different rocRAND headers are found than those of the package found with
@@ -274,11 +268,17 @@ if (NOT BUILD_WITH_LIB STREQUAL "CUDA")
 
             # Install rocRAND.
             # This assumes that there is no system-installed rocRAND or that CMAKE_NO_SYSTEM_FROM_IMPORTED is ON.
-            fetch_content_isolated(
+            FetchContent_Declare(
                 rocrand
                 SOURCE_DIR    ${ROCRAND_PATH}
-                CMAKE_ARGS    -DBUILD_TEST=OFF -DCMAKE_PREFIX_PATH=/opt/rocm
+                # ${ROCRAND_ROOT}
+                INSTALL_DIR   ${CMAKE_CURRENT_BINARY_DIR}/deps/rocrand
+                CMAKE_ARGS    -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+                LOG_CONFIGURE TRUE
+                LOG_BUILD     TRUE
+                LOG_INSTALL   TRUE
             )
+            FetchContent_MakeAvailable(rocrand)
 
             if (NOT TARGET roc::rocrand)
                 add_library(roc::rocrand ALIAS rocrand)
@@ -315,19 +315,20 @@ if(BUILD_TEST)
 
   if(NOT TARGET GTest::GTest AND NOT TARGET GTest::gtest)
     message(STATUS "GTest not found or force download GTest on. Downloading and building GTest.")
-
-    fetch_content_isolated(
-      googletest
+    download_project(
+      PROJ                googletest
       GIT_REPOSITORY      https://github.com/google/googletest.git
       GIT_TAG             release-1.11.0
-      CMAKE_ARGS          -DBUILD_GTEST=ON -DINSTALL_GTEST=ON -Dgtest_force_shared_crt=ON -DBUILD_SHARED_LIBS=OFF
+      INSTALL_DIR         ${GTEST_ROOT}
+      CMAKE_ARGS          -DBUILD_GTEST=ON -DINSTALL_GTEST=ON -Dgtest_force_shared_crt=ON -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
+      LOG_DOWNLOAD        TRUE
+      LOG_CONFIGURE       TRUE
+      LOG_BUILD           TRUE
+      LOG_INSTALL         TRUE
+      BUILD_PROJECT       TRUE
+      UPDATE_DISCONNECTED TRUE # Never update automatically from the remote repository
     )
-
-    if(NOT TARGET GTest::GTest)
-        add_library(GTest::GTest ALIAS gtest)
-    endif()
-    if(NOT TARGET GTest::Main)
-        add_library(GTest::Main ALIAS gtest_main)
-    endif()
+    list( APPEND CMAKE_PREFIX_PATH ${GTEST_ROOT} )
+    find_package(GTest CONFIG REQUIRED PATHS ${GTEST_ROOT})
   endif()
 endif()

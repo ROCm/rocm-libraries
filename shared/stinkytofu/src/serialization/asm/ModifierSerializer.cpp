@@ -171,6 +171,9 @@ bool serializeVisit(const MUBUFModifiers& mod, std::ostream& os) {
     if (mod.scope != MUBUFScope::SCOPE_NONE) {
         os << ", scope = \"" << toString(mod.scope) << "\"";
     }
+    if (hasTemporalHint(mod.th)) {
+        os << ", th = \"" << toString(mod.th) << "\"";
+    }
     os << " }";
     return true;
 }
@@ -449,11 +452,12 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
                                           parseMUBUFScope(getStr(fields, "scope", ""))));
     } else if (attrKey == "mod.mubuf") {
         MUBUFScope scope = parseMUBUFScope(getStr(fields, "scope", ""));
+        TemporalHint th = parseTemporalHint(getStr(fields, "th", ""));
         inst->addModifier(
             MUBUFModifiers(getBool(fields, "offen", false), getInt(fields, "offset12", 0),
                            getBool(fields, "glc", false), getBool(fields, "slc", false),
                            getBool(fields, "nt", false), getBool(fields, "lds", false), false,
-                           false, false, false, scope));
+                           false, false, false, scope, th));
     } else if (attrKey == "mod.cache_scope") {
         inst->addModifier(CacheScopeModifiers(parseMUBUFScope(getStr(fields, "scope", ""))));
     } else if (attrKey == "mod.smem") {
