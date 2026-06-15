@@ -986,7 +986,7 @@ class GlobalWriteBatchWriter:
           cvtMod.add(VLShiftLeftB32(dst=vgpr(dataGate + vi), shiftHex=16, src=vgpr(dataGate + vi // 2),
             comment="GateCvt[bf16]: lo bf16 -> f32 (vi=%d)"%vi))
         else:
-          cvtMod.add(VAndB32(dst=vgpr(dataGate + vi), src0=vgpr(dataGate + vi // 2), src1=0xffff0000,
+          cvtMod.add(VAndB32(dst=vgpr(dataGate + vi), src0=hex(0xffff0000), src1=vgpr(dataGate + vi // 2),
             comment="GateCvt[bf16]: hi bf16 -> f32 (vi=%d)"%vi))
     elif gateDtype.isAnyFloat8() or gateDtype.isAnyBFloat8():
       # PK-cvt 2 elements per instruction into a tmp, then move to dataGate.
