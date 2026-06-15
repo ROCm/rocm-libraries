@@ -1,0 +1,104 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  BoundsCheck: False
+  KernelTime: False
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeC: 12
+  MaxWorkspaceSize: 134217728
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  SleepPercent: 50
+
+# Shared SK4-dynamic fork entries (single-value) plus common benchmark params.
+# StreamKWorkStealing is forked over [0, 1] so reference-vs-kernel validation
+# runs for BOTH the stealing-off (must match baseline asm) and stealing-on
+# paths in a single invocation.
+.SkDynamicCommonFork: &sk_dynamic_common_fork
+  - KernelLanguage: ["Assembly"]
+  - PrefetchLocalRead: [True]
+  - 1LDSBuffer: [1]
+  - ExpandPointerSwap: [False]
+  - GlobalSplitU: [0]
+  - MIArchVgpr: [0]
+  - PrefetchGlobalRead: [2]
+  - ScheduleIterAlg: [3]
+  - SourceSwap: [True]
+  - StoreRemapVectorWidth: [0]
+  - StreamK: [4]
+  - StreamKWorkStealing: [0, 1]
+  - TransposeLDS: [0]
+  - WorkGroupMapping: [1]
+
+.SkDynamicBpsg: &sk_dynamic_bpsg
+  InitialSolutionParameters:
+  BenchmarkCommonParameters: *sk_dynamic_common_fork
+  BenchmarkForkParameters:
+  JoinParameters:
+  BenchmarkJoinParameters:
+  BenchmarkFinalParameters:
+    # Multiple sizes / repeated launches exercise the kernelEnd counter-reset
+    # path across launches that reuse the same (host-zeroed-once) Synchronizer.
+    #   512x512  -> 16 (MT128) / 64 (MT64) tiles  : aligned (remainder 0)
+    #   640x640  -> 25 (MT128) / 100 (MT64) tiles : unaligned (remainder != 0, steal fires)
+    #   384x384x3-> 27 (MT128) / 108 (MT64) tiles : unaligned + batched (steal fires)
+    - ProblemSizes:
+      - Exact: [512, 512, 1, 512]
+      - Exact: [640, 640, 1, 512]
+      - Exact: [384, 384, 3, 256]
+
+BenchmarkProblems:
+
+  - # SGEMM NT - StreamK=4 dynamic with single-hop work stealing
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # SK4 dynamic - small MI matrix to keep kernel-object size bounded
+      <<: *sk_dynamic_bpsg
+      ForkParameters:
+        - DepthU: [16]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - MatrixInstruction:
+          - [32, 32, 2, 1, 1, 2,2, 2,2]
+          - [16, 16, 4, 1, 1, 2,2, 2,2]
+        - PrefetchLocalRead: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+
+  - # HGEMM NT - StreamK=4 dynamic with single-hop work stealing
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # SK4 dynamic - small MI matrix
+      <<: *sk_dynamic_bpsg
+      ForkParameters:
+        - DepthU: [64]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - MatrixInstruction:
+          - [32, 32, 8, 1, 1, 2,2, 2,2]
+          - [16, 16, 16, 1, 1, 2,2, 2,2]
+        - PrefetchLocalRead: [1]
