@@ -6,6 +6,10 @@ from pathlib import Path
 import os
 import copy
 
+# Operate on this script's own directory so the hook can invoke it directly from
+# the repo root, regardless of cwd (replaces the former remod_for_ck_tile.py).
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 NS = "ck_tile"
 OPS = "ops"
 OPS_COMMON = "common"  # common header will be duplicated into ops/* other module

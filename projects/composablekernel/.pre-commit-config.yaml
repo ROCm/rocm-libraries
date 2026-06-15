@@ -45,7 +45,7 @@ repos:
         verbose: true
     -   id: remod-ck-tile
         name: Run ck_tile remod.py
-        entry: python projects/composablekernel/script/remod_for_ck_tile.py
+        entry: python projects/composablekernel/include/ck_tile/remod.py
         language: python
         files: '^projects/composablekernel/include/ck_tile/.*$'
         pass_filenames: false
