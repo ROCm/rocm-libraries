@@ -254,7 +254,7 @@ pipeline {
             description: "Force CI to run even when only non-relevant files are changed (default: OFF)")
         booleanParam(
             name: 'USE_CURRENT_BRANCH_FOR_CK_GROOVY',
-            defaultValue: false,
+            defaultValue: true,
             description: 'Load ck.groovy from the current branch instead of develop. Enable when testing pipeline changes (default: OFF).')
     }
     environment{

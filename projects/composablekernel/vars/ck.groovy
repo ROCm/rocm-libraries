@@ -681,7 +681,7 @@ def cmake_build(Map conf=[:]){
         }
         setup_cmd = conf.get(
             "setup_cmd",
-            """${cmake_envs} cmake -G Ninja ${setup_args} -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_CXX_FLAGS=" -O3 " .. """
+            """${cmake_envs} cmake -G Ninja ${setup_args} -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_CXX_FLAGS=" -O3 -DUSE_NEW_UNIFIED_FRAMEWORK=1 " .. """
         )
 
         // Smart-build: Only build if running all tests or forced
