@@ -122,7 +122,7 @@ def generate_in_distribution(training):
         for base in [8, 16, 32, 64, 128]:
             C = base * G
             K = base * G
-            if C % 8 != 0:
+            if (C // G) % 8 != 0 or (K // G) % 8 != 0:
                 continue
             for hw in [7, 14, 28, 56]:
                 for N in [2, 8]:

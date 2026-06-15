@@ -61,7 +61,12 @@ ParsedConvParams parseConvGraph(const hipdnn_flatbuffers_sdk::flatbuffer_utiliti
     p.Wi = xd->Get(3);
     p.K  = wd->Get(0);
     // W=[K, C/G, R, S]: group count is implicit in the per-group channel dim.
-    p.G  = (wd->Get(1) > 0) ? p.C / wd->Get(1) : 1;
+    {
+        const auto cpg = wd->Get(1);
+        if (cpg <= 0 || p.C % cpg != 0)
+            throw std::runtime_error("CkDslConv: weight dim[1] must be a positive divisor of C");
+        p.G = std::max((int64_t)1, p.C / cpg);
+    }
     p.R  = wd->Get(2);
     p.S  = wd->Get(3);
     p.sH = v2(a->stride(), 0, 1);

@@ -628,7 +628,12 @@ class DslMlHeuristic {
         // Uses per-arch HW constants so CU utilization features are correct.
         HardwareProfile hw_approx;
         if (prob.arch == "gfx942") {
-            hw_approx.num_cus = 228; hw_approx.shader_engines = 28; hw_approx.max_clock_mhz = 2100;
+            // MI300X: match ConvHwProfile::for_arch("gfx942") exactly.
+            hw_approx.num_cus = 228; hw_approx.simds_per_cu = 4; hw_approx.shader_engines = 28;
+            hw_approx.max_clock_mhz = 2100; hw_approx.max_waves_per_cu = 32;
+            hw_approx.wavefront_size = 64; hw_approx.lds_capacity = 65536;
+            hw_approx.l1_cache_kb = 32; hw_approx.l2_cache_kb = 4096;
+            hw_approx.l3_cache_kb = 262144; hw_approx.num_xcd = 8;
         }
         auto f = ml_extract_features(prob, MlKernelConfig::from_manifest(m), hw_approx);
         return predict(gemm_booster_, f.data(), CKDSL_NUM_FEATURES);
