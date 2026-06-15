@@ -255,7 +255,6 @@ def main() -> int:
         grid_order="NM",
         warmup_iters=5,
         timed_iters=100,
-        atoms=[f"tile.mfma_f32_32x32x{warp_tile_k}_f16"],
         extra=extra,
         atoms=[f"tile.mfma_f32_32x32x{warp_tile_k}_{dtype}"],
         notes=(
