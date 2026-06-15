@@ -107,7 +107,6 @@ struct Tensor
                     __LINE__);
             abort();
         }
-#endif
     }
 
     ~Tensor()
