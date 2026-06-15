@@ -23,25 +23,21 @@ heuristics/
     main.cpp                — CLI entry point (--shapes / --out)
     CMakeLists.txt          — build definition (plugs into rocm-libraries superbuild)
     build.sh                — self-contained build driver; run inside a ROCm container
-  training/
-    train.py                — LightGBM training (GroupKFold CV, IHEM, warm-start)
-    data_pipeline.py        — parquet loader / builder used by train.py
-    feature_engine_grouped_conv.py — 97-feature extractor for grouped conv
 ```
 
-Shape generators and the shared `feature_engine.py` base class live in:
+Training scripts live in `projects/composablekernel/dispatcher/heuristics/`
+and are called directly from there:
 
 ```
 projects/composablekernel/dispatcher/heuristics/
+  train.py                        — LightGBM training (GroupKFold CV, IHEM, warm-start)
+  data_pipeline.py                — parquet loader / builder used by train.py
+  feature_engine_grouped_conv.py  — 97-feature extractor for grouped conv
+  feature_engine.py               — base class imported by feature_engine_grouped_conv.py
   generate_wide_coverage_conv.py  — wide-coverage training shapes
   generate_edge_dims_conv.py      — edge-case training shapes
   sample_conv_shapes.py           — stratified merge + shard
-  feature_engine.py               — base class imported by feature_engine_grouped_conv.py
 ```
-
-`training/` scripts are copies of their canonical sources in
-`projects/composablekernel/dispatcher/heuristics/`. Apply changes to both
-locations until a shared package is established.
 
 ## How the model is used at runtime
 
@@ -192,16 +188,10 @@ python3 $HEURISTICS/scripts/convert_dsl_csv_to_parquet.py \
 
 ### Step 6 — Train
 
-`train.py` imports `feature_engine.py` (the shared base class) from
-`CK_HEURISTICS`. Set `PYTHONPATH` so it is importable alongside the copies
-in `training/`.
-
 ```bash
 source $WORK/venv/bin/activate
 
-export PYTHONPATH=$CK_HEURISTICS:${PYTHONPATH:-}
-
-python3 $HEURISTICS/training/train.py \
+python3 $CK_HEURISTICS/train.py \
     --data_dir  $WORK/data \
     --out_dir   $WORK/models/grouped_conv_forward_fp16_gfx942 \
     --operation grouped_conv \
@@ -220,7 +210,7 @@ retraining from scratch):
 ```bash
 gunzip -k $HEURISTICS/models/grouped_conv_forward_fp16_gfx942/model_tflops.lgbm.gz
 
-python3 $HEURISTICS/training/train.py \
+python3 $CK_HEURISTICS/train.py \
     --data_dir   $WORK/data \
     --out_dir    $WORK/models/grouped_conv_forward_fp16_gfx942 \
     --operation  grouped_conv \
