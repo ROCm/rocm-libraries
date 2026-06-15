@@ -37,11 +37,7 @@
 #include <miopen/logger.hpp>
 #include "../random.hpp"
 
-#if MIOPEN_BACKEND_OPENCL
-#define BKEND "OpenCL"
-#elif MIOPEN_BACKEND_HIP
 #define BKEND "HIP"
-#endif
 
 #ifdef _WIN32
 #define MDEXE "MIOpenDriver.exe"
@@ -92,26 +88,13 @@ struct Tensor
 {
     miopenTensorDescriptor_t desc{};
     size_t data_size;
-#if MIOPEN_BACKEND_OPENCL
-    cl_mem data;
-#elif MIOPEN_BACKEND_HIP
     void* data;
-#endif
 
     Tensor(int n, int c, int h, int w)
     {
         EXPECT_EQ(miopenCreateTensorDescriptor(&desc), 0);
         EXPECT_EQ(miopenSet4dTensorDescriptor(desc, miopenFloat, n, c, h, w), 0);
         data_size = n * c * h * w * sizeof(float);
-#if MIOPEN_BACKEND_OPENCL
-        cl_command_queue q{};
-        miopenHandle_t handle{};
-        miopenCreate(&handle);
-        miopenGetStream(handle, &q);
-        cl_context ctx;
-        clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-        data = clCreateBuffer(ctx, CL_MEM_READ_WRITE, data_size, nullptr, nullptr);
-#elif MIOPEN_BACKEND_HIP
         // ASSERT_* cannot be used in constructors (generates illegal
         // return-void). Use hard abort on allocation failure instead.
         auto err = hipMalloc(&data, data_size);
@@ -130,11 +113,7 @@ struct Tensor
     ~Tensor()
     {
         miopenDestroyTensorDescriptor(desc);
-#if MIOPEN_BACKEND_OPENCL
-        clReleaseMemObject(data);
-#elif MIOPEN_BACKEND_HIP
         (void)hipFree(data);
-#endif
     }
 };
 

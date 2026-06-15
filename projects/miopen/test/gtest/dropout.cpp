@@ -332,11 +332,7 @@ struct DropoutCommon : public testing::TestWithParam<TestCase>
             handle, DropoutDesc.pstates, DropoutDesc.stateSizeInBytes, DropoutDesc.seed);
 #if DROPOUT_DEBUG_CTEST
         std::cout <<
-#if MIOPEN_BACKEND_OPENCL
-            "Use OpenCL backend."
-#elif MIOPEN_BACKEND_HIP
             "Use HIP backend."
-#endif
                   << std::endl;
 #endif
 

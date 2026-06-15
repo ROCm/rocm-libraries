@@ -31,15 +31,7 @@
 
 TEST(CPU_test_errors_NONE, test_ocl_error)
 {
-#if MIOPEN_BACKEND_OPENCL
-    EXPECT_EQ(miopen::OpenCLErrorMessage(CL_SUCCESS, ":"), ": Success");
-    EXPECT_EQ(miopen::OpenCLErrorMessage(3200, ":"), ":Unknown OpenCL error 3200");
-    EXPECT_ANY_THROW(MIOPEN_THROW_CL_STATUS(CL_DEVICE_NOT_FOUND);));
-    EXPECT_EQ(miopen::try_([] { MIOPEN_THROW_CL_STATUS(CL_DEVICE_NOT_FOUND, "OpenCL Error"); }),
-              miopenStatusUnknownError);
-#else
-    GTEST_SKIP() << "Skipped for HIP backend";
-#endif
+    GTEST_SKIP() << "Skipped: OpenCL backend has been removed";
 }
 
 TEST(CPU_test_errors_NONE, test_try)
