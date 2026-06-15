@@ -74,6 +74,10 @@ static void addEdgeById(DAGNode* from, DAGNode* to,
 struct BBScheduleState {
     int gapCycles = 0;
     std::map<int, int> dsResiduals;
+    // Cross-BB tensor_load_to_lds credit state (see CDNA5ReadyQueue). Carried to
+    // successor BBs in a loop. Kept separate from dsResiduals.
+    int globalReadInflightCount = 0;  // credits still in flight at BB end
+    int globalReadResidual = 0;       // max remaining drain latency among them
 };
 
 // Cache for cross-BB scheduling state. Lives in the scheduler's run() scope
