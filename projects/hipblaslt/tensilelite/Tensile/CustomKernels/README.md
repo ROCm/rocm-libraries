@@ -21,9 +21,37 @@ external manifest.
 | `ck/`         | External: Composable Kernel-sourced kernels.     |
 | `rocroller/`  | External: rocRoller-sourced kernels.              |
 | `wave/`       | External: Wave (handwritten) kernels.             |
+| `triton/`     | External: Triton-compiled GEMM kernels.           |
 
 Loader behavior is the same in every subdirectory; the split is purely
 organizational.
+
+## Triton-sourced kernels
+
+The `triton/` subdirectory holds GEMM kernels compiled from Triton
+(`@triton.jit`). Only the `.s` file and its test YAML are committed.
+The Triton kernel `.py` comes from aiter and is a local input
+to the generation step; it is not maintained in this repository.
+
+Triton-specific concerns for the compile step / YAML argument map:
+
+- **Static LDS**: Triton emits *dynamic* LDS (`group_segment_fixed_size: 0` +
+  `sharedMemBytes` at launch), but the custom-call path launches with
+  `sharedMemBytes = 0`. Rewrite the kernel's LDS into a static group segment
+  (size = Triton's `metadata.shared`) so the driver allocates it, exactly like
+  the other custom kernels.
+- **Trailing scratch pointers**: Triton appends `global_scratch` and
+  `profile_scratch` kernarg pointers; when they are unused, represent their
+  16-byte footprint as trailing `padding` on the last real Triton argument.
+- **Layout**: for the `Cijk_Alik_Bljk` (TN) contraction both operands are
+  K-contiguous; pass packed-byte leading strides via `StrideA0Bytes` /
+  `StrideB0Bytes` for sub-byte (FP4) data.
+- **Native aiter signatures**: use `ConstantOne` for fixed unit-stride Triton
+  arguments in the constrained custom-kernel layout. Use a named semantic such
+  as `StrideCK` when the value depends on split-K. For packed FP4 kernels that
+  take the summation size in bytes, use `SizeSumDiv2`.
+- Strip the `.amdgcn_target` / `.amdhsa_code_object_version` directives from the
+  emitted assembly so Tensile's assembler flags drive target + COV.
 
 ## What `custom.config` looks like
 

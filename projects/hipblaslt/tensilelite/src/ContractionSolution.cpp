@@ -2053,6 +2053,9 @@ namespace TensileLite
                 case CustomArgSemantic::SizeSum:
                     rv.args.appendCustomType("SizeSum", problem.problemSizes()[problem.problemSizes().size() - 1], arg.type);
                     break;
+                case CustomArgSemantic::SizeSumDiv2:
+                    rv.args.appendCustomType("SizeSumDiv2", problem.problemSizes()[problem.problemSizes().size() - 1] / 2, arg.type);
+                    break;
                 case CustomArgSemantic::SizeSum1:
                     rv.args.appendCustomType("SizeSum1", problem.problemSizes()[problem.problemSizes().size() - 2], arg.type);
                     break;
@@ -2163,6 +2166,14 @@ namespace TensileLite
                 case CustomArgSemantic::StrideMetadata1:
                     rv.args.appendCustomType("StrideMetadata1", problem.metadata().strides()[2], arg.type);
                     break;
+                case CustomArgSemantic::StrideCK:
+                {
+                    size_t splitKStride = 0;
+                    if(gsu > 1)
+                        splitKStride = problem.d().sizes()[0] * problem.d().sizes()[1];
+                    rv.args.appendCustomType("StrideCK", splitKStride, arg.type);
+                    break;
+                }
                 case CustomArgSemantic::Alpha:
                     rv.args.append("Alpha", inputs.alpha, problem.alphaType());
                     if(problem.alphaType() == rocisa::DataType::Half)
@@ -2194,6 +2205,12 @@ namespace TensileLite
                 }
                 case CustomArgSemantic::Padding:
                     rv.args.template append<uint32_t>("Padding", 0);
+                    break;
+                case CustomArgSemantic::ConstantZero:
+                    rv.args.appendCustomType("ConstantZero", 0, arg.type);
+                    break;
+                case CustomArgSemantic::ConstantOne:
+                    rv.args.appendCustomType("ConstantOne", 1, arg.type);
                     break;
                 case CustomArgSemantic::DebugPattern:
                     rv.args.template append<uint32_t>("DebugPattern", debugPattern);
