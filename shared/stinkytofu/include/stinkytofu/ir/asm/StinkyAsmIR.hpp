@@ -449,6 +449,11 @@ inline bool isIndirectBranch(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_IndirectBranch);
 }
 
+// Structural call predicate. Only s_swappc_b64 is a call mnemonic in the tree.
+inline bool isCall(const StinkyInstruction& inst) {
+    return inst.getUnifiedOpcode() == GFX::s_swappc_b64;
+}
+
 // Label names of basic-block targets for \p given branch instruction.
 //
 // At most one target is returned today. Switch / multi-way branch semantics
@@ -605,6 +610,13 @@ inline bool isXDLWMMA(const StinkyInstruction& inst) {
 /// Includes v_rcp_f64, v_rsq_f64, v_sqrt_f64.
 inline bool isTrans64(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_Trans64);
+}
+
+/// Check if instruction is a double-precision MACC VALU.
+/// Includes v_add_f64, v_fma_f64, f64 compares (v_cmp_lt_f64), v_cvt_u32_f64.
+/// Excludes f64 transcendentals (v_rcp_f64) — those are Trans64/TRANS.
+inline bool isDPMACC(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_DPMACC);
 }
 
 }  // namespace stinkytofu

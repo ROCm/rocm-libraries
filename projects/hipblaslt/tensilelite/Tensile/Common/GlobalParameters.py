@@ -314,6 +314,20 @@ globalParameters["RotatingMode"] = (
 )
 # Mode 0 requires memcpy everytime when the problem changes to reset the data, but mode 1 doesn't.
 
+# I-cache rotation (used by client --icache-rotate-copies / --icache-rotate-size).
+# IcacheRotateCopies: number of EXTRA hipModule_t copies of each --code-object to load
+#   for I-cache cold-miss tests. 0 = disabled (default). N (>0) = load N extras
+#   (total = N+1 modules). -1 = auto: extras = max(rotating buffer num,
+#   cache-overflow term). The cache-overflow term is
+#   IcacheRotateSize * 2 * 1024 / min(kernel_start->label_GW_End) on Linux, and
+#   IcacheRotateSize directly on non-Linux (no <elf.h> available).
+globalParameters["IcacheRotateCopies"] = 0
+# IcacheRotateSize: cache budget (in KB) used by the auto path's cache-overflow term.
+#   Linux: effective bytes = IcacheRotateSize * 2 * 1024. Default 64 -> 128 KB,
+#   loosely targeting ~2x a typical L1 I-cache.
+#   Non-Linux: used directly as the raw extras count (no ELF parsing).
+globalParameters["IcacheRotateSize"] = 64
+
 globalParameters["BuildIdKind"] = "sha1"
 globalParameters["AsmDebug"] = (
     False  # Set to True to keep debug information for compiled code objects

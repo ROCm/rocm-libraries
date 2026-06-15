@@ -3242,7 +3242,8 @@ namespace TensileLite
 
                 int32_t totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                 std::cout << "Rotating buffer set to: " << m_rotatingBuffer
-                          << ". Rotating num: " << rotatingNum << std::endl;
+                          << ". Rotating num: " << rotatingNum
+                          << ". rotatingSize: " << rotatingSize << std::endl;
                 if(m_rotatingMode == 0)
                 {
                     auto rotatingAllocatedSize
@@ -3304,7 +3305,8 @@ namespace TensileLite
 
                 int32_t totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                 std::cout << "Rotating buffer set to: " << m_rotatingBuffer
-                          << ". Rotating num: " << rotatingNum << std::endl;
+                          << ". Rotating num: " << rotatingNum
+                          << ". rotatingSize: " << rotatingSize << std::endl;
                 if(m_rotatingMode == 0)
                 {
                     auto rotatingAllocatedSize
