@@ -1,23 +1,6 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-# Resolve the git short commit hash for use as the version tweak / build
-# metadata field. Falls back to "unknown" outside a git checkout.
-function(hipdnn_compute_git_tweak OUTPUT_VAR)
-    execute_process(
-        COMMAND git rev-parse --short HEAD
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-        OUTPUT_VARIABLE _git_tweak
-        RESULT_VARIABLE _git_result
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET
-    )
-    if(NOT _git_result EQUAL 0 OR _git_tweak STREQUAL "")
-        set(_git_tweak "unknown")
-    endif()
-    set(${OUTPUT_VAR} ${_git_tweak} PARENT_SCOPE)
-endfunction()
-
 # Function to find the version file path given the component name
 function(hipdnn_version_file_dir COMPONENT_NAME OUTPUT_PATH)
     string(REPLACE "hipdnn_" "" _simple_component_name ${COMPONENT_NAME})

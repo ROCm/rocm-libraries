@@ -30,7 +30,6 @@ BEGIN
             VALUE "OriginalFilename", "hipdnn_backend.dll"
             VALUE "ProductName",      "AMD ROCm hipDNN Backend @HIPDNN_PRODUCT_VERSION_DISPLAY@"
             VALUE "ProductVersion",   "@PROJECT_VERSION_MAJOR@.@PROJECT_VERSION_MINOR@.@PROJECT_VERSION_PATCH@.0"
-            VALUE "Comments",         "Git commit: @PROJECT_VERSION_TWEAK@"
         END
     END
     BLOCK "VarFileInfo"

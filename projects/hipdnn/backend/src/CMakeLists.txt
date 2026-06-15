@@ -4,9 +4,8 @@
 include(CMakePackageConfigHelpers)
 
 # Derive version components (PROJECT_VERSION{,_MAJOR,_MINOR,_PATCH}) from the
-# single product version, and set the tweak field to the git short hash.
+# single product version.
 project(hipdnn_backend VERSION ${HIPDNN_VERSION} LANGUAGES CXX)
-hipdnn_compute_git_tweak(PROJECT_VERSION_TWEAK)
 
 find_package(hip REQUIRED)
 
