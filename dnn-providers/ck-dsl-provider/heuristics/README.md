@@ -250,11 +250,30 @@ git commit -m "[CK DSL] conv model: retrain fp16/gfx942 ($(date +%Y-%m-%d))"
 Validate heuristic efficiency on the held-out validation set before merging:
 
 ```bash
+# Generate held-out shapes from the training parquet.
 python3 $HEURISTICS/scripts/generate_validation_shapes_conv.py \
     --parquet $WORK/data/conv_fp16_gfx942_dsl.parquet \
     --out     $WORK/shapes/validation/all_shapes.csv \
     --shards  4
 
-# Run the sweep binary against the validation shards and compare
-# oracle vs heuristic pick to confirm mean efficiency >= 90%.
+# Run the oracle sweep against the validation shards.
+mkdir -p $WORK/validation
+BINARY=$WORK/sweep_build/conv_candidate_sweep
+for shard in $WORK/shapes/validation/shard_*.csv; do
+    name=$(basename $shard .csv)
+    $BINARY --shapes $shard --out $WORK/validation/${name}.csv
+done
+cat $WORK/validation/shard_*.csv > $WORK/validation/all.csv
+
+# Convert and score: for each shape, compare the oracle-best TFLOPS against
+# the TFLOPS of the kernel the heuristic would pick.
+python3 $CK_HEURISTICS/train.py \
+    --score_only \
+    --data_dir   $WORK/data \
+    --val_csv    $WORK/validation/all.csv \
+    --model_dir  $MODEL_DST \
+    --operation  grouped_conv \
+    --dtype      fp16 \
+    --arch       gfx942
+# Target: mean heuristic efficiency >= 90% (heuristic_tflops / oracle_tflops).
 ```

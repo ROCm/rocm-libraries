@@ -57,11 +57,12 @@ def convert(input_path: str, output_path: str, arch: str, run_id: int) -> None:
     df = df.rename(columns={
         "tile_m": "gemm_m_per_block",
         "tile_n": "gemm_n_per_block",
+        "tile_k": "gemm_k_per_block",
     })
-    # tile_k is the gemm-K block dimension; block_size is the thread block size
-    # (always 256 for the three gfx942 tile configs: 16x64x64, 32x64x64, 64x64x64).
-    df["block_size"] = 256
-    df.drop(columns=["tile_k"], inplace=True)
+    # block_size = (tile_m/warp_tile_m) * (tile_n/warp_tile_n) * wavefront_size.
+    # CEngine uses 2x2 warps with 32x32 warp tiles and 64-thread wavefronts:
+    #   block_size = (tile_m/32) * (tile_n/32) * 64
+    df["block_size"] = (df["gemm_m_per_block"] // 32) * (df["gemm_n_per_block"] // 32) * 64
 
     # DSL gfx942 kernels are all intrawave, no DSB or SI variants.
     df["wave_mode"] = "intrawave"
@@ -86,7 +87,8 @@ def convert(input_path: str, output_path: str, arch: str, run_id: int) -> None:
         "grouped_conv_fwd_fp16_nhwgc_2d_"
         + df["pipeline"] + "_intrawave_"
         + df["gemm_m_per_block"].astype(str) + "x"
-        + df["gemm_n_per_block"].astype(str) + "x64"
+        + df["gemm_n_per_block"].astype(str) + "x"
+        + df["gemm_k_per_block"].astype(str)
     )
 
     # Hardware profile.

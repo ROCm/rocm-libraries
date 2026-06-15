@@ -96,7 +96,8 @@ bool CkDslConvPlanBuilder::isApplicable(
             // CK_DSL_KERNEL_LIB_PATH is set). Accept any well-formed conv with a
             // dtype the C engine supports.
             if (params.N <= 0 || params.C <= 0 || params.K <= 0 || params.Hi <= 0 ||
-                params.Wi <= 0 || params.R <= 0 || params.S <= 0)
+                params.Wi <= 0 || params.R <= 0 || params.S <= 0 ||
+                params.Ho() <= 0 || params.Wo() <= 0)
                 return false;
             return params.dtype == "fp16" || params.dtype == "bf16";
         }

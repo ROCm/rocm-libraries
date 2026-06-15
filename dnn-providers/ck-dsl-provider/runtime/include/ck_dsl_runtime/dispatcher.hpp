@@ -111,6 +111,20 @@ class Dispatcher {
             // No-padding kernels require exact divisibility.
             return (p.M % m.block_m == 0) && (p.N % m.block_n == 0) && (p.K % m.block_k == 0);
         }
+        if (p.op == "conv") {
+            // Baked conv kernels have fixed problem dims encoded in manifest["conv"]
+            // as [N, Hi, Wi, C, K, R, S, sH, sW, pH, pW, dH, dW]. If the array is
+            // absent the kernel is shape-generic (C-JIT path); accept all shapes.
+            if (!m.raw.has("conv")) return true;
+            const auto& arr = m.raw.at("conv").as_array();
+            if (arr.size() < 13) return true;
+            return p.conv_N == arr[0].as_int() && p.Hi == arr[1].as_int() &&
+                   p.Wi == arr[2].as_int() && p.conv_C == arr[3].as_int() &&
+                   p.conv_K == arr[4].as_int() && p.Y == arr[5].as_int() &&
+                   p.X == arr[6].as_int() && p.stride_h == arr[7].as_int() &&
+                   p.stride_w == arr[8].as_int() && p.pad_h == arr[9].as_int() &&
+                   p.pad_w == arr[10].as_int();
+        }
         return true;  // other ops: shape support refined per-engine
     }
 
