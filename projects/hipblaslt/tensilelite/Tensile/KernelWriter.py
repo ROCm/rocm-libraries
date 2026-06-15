@@ -2541,6 +2541,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               localWrites += skipPreIterLW
         dscnt += localWrites
       else:
+        sawLocalRead = False
         for item in list(iterCode.items()):
           localReads  = countWeightedLocalRead(item)
           localWrites = countWeightedLocalWrite(item)
@@ -2559,7 +2560,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
             # we need to wait for all preceding reads before the macs
             # so only opportunity for optimization is if the writes are at the end
             if localReads:
+              sawLocalRead = True
               dscnt = 0 # reset to wait for all reads
+            elif sawLocalRead:
+              # SIA0 + PGR>=2 emits localReadCode and localWriteCode as separate
+              # modules. Once local reads require a full drain, a following
+              # write-only module must not downgrade dscnt to localWrites-only.
+              pass
             else:
               dscnt = localWrites  # this only survives if writes are at the end
 
@@ -6222,19 +6229,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       # tail: re-init local read addresses
       if kernel["PrefetchGlobalRead"]:
-        # StreamK tail workgroups may start from a partial tile slice, so SIA0
-        # also needs the LRO reset before tail MACs.
-        if kernel["_ScheduleIterAlg"] != 0 or kernel["StreamK"]:
-          module.addComment1("Tail: local read reset offsets a")
-          module.add(self.localReadResetOffsets(kernel, tensorParametersA))
-          if kernel["ProblemType"]["MXBlockA"]:
-            module.addComment1("Tail: local read reset offsets mxsa")
-            module.add(self.localReadResetOffsets(kernel, tensorParametersA["MX"]))
-          if kernel["ProblemType"]["MXBlockB"]:
-            module.addComment1("Tail: local read reset offsets mxsb")
-            module.add(self.localReadResetOffsets(kernel, tensorParametersB["MX"]))
-          module.addComment1("Tail: local read reset offsets b")
-          module.add(self.localReadResetOffsets(kernel, tensorParametersB))
+        # Main-loop pointer swaps can leave LROs in the Blk half. Reset before
+        # tail MACs for every scheduler; localReadResetOffsets is empty for
+        # 1LDSBuffer / DirectToVgpr cases.
+        module.addComment1("Tail: local read reset offsets a")
+        module.add(self.localReadResetOffsets(kernel, tensorParametersA))
+        if kernel["ProblemType"]["MXBlockA"]:
+          module.addComment1("Tail: local read reset offsets mxsa")
+          module.add(self.localReadResetOffsets(kernel, tensorParametersA["MX"]))
+        if kernel["ProblemType"]["MXBlockB"]:
+          module.addComment1("Tail: local read reset offsets mxsb")
+          module.add(self.localReadResetOffsets(kernel, tensorParametersB["MX"]))
+        module.addComment1("Tail: local read reset offsets b")
+        module.add(self.localReadResetOffsets(kernel, tensorParametersB))
 
         module.addComment1("Tail: local read init pointers a")
         module.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersA))

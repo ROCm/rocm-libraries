@@ -535,7 +535,13 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
     tdmLoadIter = min(localWriteEndIter + 1, kernel["LoopIters"] - 1)
 
     if kernel["PrefetchGlobalRead"] == 2:
-        imod = writer.codes.perIterGlobalRead[0].add(Module())
+        # SIA0 does not schedule GR/LW instruction-by-instruction. If global reads
+        # are emitted at iter 0, they clobber vgprG2L* before the later local-write
+        # iteration stores the previous prefetch to LDS. Place non-TDM reads in the
+        # local-write iteration; SIA0 sub-iteration order emits localWriteCode before
+        # globalReadCode, preserving the G2L value until it is consumed.
+        grIter = localWriteEndIter if kernel["_ScheduleIterAlg"] == 0 and not kernel["NoLdsWriteCode"] and not tdmDeferLoad else 0
+        imod = writer.codes.perIterGlobalRead[grIter].add(Module())
         imod.addComment1("Global Read IncA")
         imod.add(globalReadIncACode)
         imod.addComment1("Global Read IncB")
