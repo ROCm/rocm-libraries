@@ -109,9 +109,14 @@ struct SdpaBwdParams
         // Ceil-divide an extent by `ts` to get the corresponding grid-x dimension.
         // Returns 0 if `ts` is unset (KernelTiles default-initialised) so callers
         // can fail loudly at launch time rather than divide-by-zero.
-        constexpr unsigned int gridDim(unsigned int extent) const noexcept
+        // When `isCausal` is true the grid is halved (rounded up) because causal
+        // kernels tile only the triangular region of the attention matrix.
+        constexpr unsigned int gridDim(unsigned int extent, bool isCausal = false) const noexcept
         {
-            return ts == 0U ? 0U : (extent + ts - 1U) / ts;
+            unsigned int gd = ts == 0U ? 0U : (extent + ts - 1U) / ts;
+            if(isCausal)
+                gd = (gd + 1U) / 2U;
+            return gd;
         }
     };
     KernelTiles odoTiles{}; // from cfg_fmha_bwd_odo

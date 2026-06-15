@@ -539,17 +539,8 @@ void SdpaBwdPlan::execute(const Handle& handle,
     // 6b. Build args and launch kernel 2: DQDKDV
     auto dqdkdvArgs = buildDqdkdvArgs(mhaArgs, _params.dqdkdvTiles.ts, _params);
 
-    unsigned int gdxDqdkdv = _params.dqdkdvTiles.gridDim(mhaArgs.seqlen_k);
-
-    // Causal masks (TOP_LEFT_CAUSAL=1, BOTTOM_RIGHT_CAUSAL=2) zero out roughly
-    // half the attention matrix.  The causal kernel binary tiles the remaining
-    // triangular region assuming the grid-x has been halved — launching with the
-    // full grid causes tiles to process wrong data and corrupts dQ.
-    // AITER reference: mha_bwd.cu line 600-603 (commit 17d4a33)
-    if(_params.maskOrdinal == 1 || _params.maskOrdinal == 2)
-    {
-        gdxDqdkdv = (gdxDqdkdv + 1) / 2;
-    }
+    const bool isCausal = (_params.maskOrdinal == 1 || _params.maskOrdinal == 2);
+    const unsigned int gdxDqdkdv = _params.dqdkdvTiles.gridDim(mhaArgs.seqlen_k, isCausal);
 
     // A32: zero dq_acc before DQDKDV. The atomic-accumulator kernel adds per-K-tile
     // dQ contributions atomically and does not pre-zero; stale residue from a

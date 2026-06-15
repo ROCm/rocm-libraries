@@ -37,29 +37,14 @@ inline bool
 // Mask classification
 // =============================================================================
 //
-// Mask types for AITER ASM (.co) kernel dispatch.
-//
 // Shared by SdpaFwdPlanBuilder and SdpaBwdPlanBuilder. The CSV `mask` column
 // stores these ordinals directly, so the integer values are part of the
 // dispatch contract and must not be reordered.
-//
-// These ordinals match the ASM mask type returned by AITER's asm_mask_type()
-// lambda (mha_bwd.cu / mha_fwd.cu), NOT the mask_enum values in ck_tile_shim.h.
-// The distinction matters for sliding windows:
-//
-//   AITER mask_enum::window_generic (ordinal 3) — a fully generic window mask
-//   that asm_mask_type() maps to -1 (unsupported). It falls back to CK kernels,
-//   which are not part of this ASM provider.
-//
-//   SLIDING_WINDOW (ordinal 3 here) — a causal mask with finite left/right
-//   bounds. asm_mask_type() returns 3 when mask_top_left or mask_bottom_right
-//   has non-standard window sizes (i.e. not the pure causal -1/0 pattern).
-//   These dispatch to ASM "swa" (sliding window attention) .co kernels
-//   (e.g. bwd_hd128_bf16_swa_a32_rtne_psskddv.co).
-//
-// The numeric coincidence (both are ordinal 3) is because AITER's CSV tables
-// reuse the same column values that asm_mask_type() returns, and window_generic
-// never reaches ASM dispatch.
+// Mask types for AITER ASM (.co) kernel dispatch.
+// Ordinals match AITER's asm_mask_type() return values (mha_bwd.cu / mha_fwd.cu)
+// and the CSV `mask` column — do not reorder.
+// Note: SLIDING_WINDOW (3) is distinct from AITER's mask_enum::window_generic (also
+// ordinal 3), which maps to -1 (unsupported) and falls back to CK kernels.
 enum class MaskType : int
 {
     NO_MASK = 0,
