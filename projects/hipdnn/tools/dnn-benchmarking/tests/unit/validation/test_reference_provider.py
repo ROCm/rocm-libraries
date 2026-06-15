@@ -46,9 +46,6 @@ class TestReferenceProviderRegistry:
 
     def test_get_pytorch_provider(self) -> None:
         """Test getting pytorch provider from registry."""
-        # The pytorch provider is resolved lazily and imports torch, so skip
-        # when torch is absent.
-        pytest.importorskip("torch")
         provider = ReferenceProviderRegistry.get_provider("pytorch")
 
         assert provider.name == "pytorch"

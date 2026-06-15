@@ -1,18 +1,11 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Reference provider registration.
+"""Reference provider implementations.
 
-Providers are registered lazily by import path so importing this package (and
-hence ``dnn_benchmarking.validation``) does not pull in a provider's optional
-or heavy dependencies -- e.g. torch via the PyTorch provider -- until that
-provider is actually requested from the registry.
+Import providers here to register them with the ReferenceProviderRegistry.
 """
 
-from ..reference_provider import ReferenceProviderRegistry
+from .pytorch_provider import PyTorchReferenceProvider
 
-ReferenceProviderRegistry.register_lazy(
-    "pytorch",
-    "dnn_benchmarking.validation.providers.pytorch_provider",
-    "PyTorchReferenceProvider",
-)
+__all__ = ["PyTorchReferenceProvider"]
