@@ -40,7 +40,8 @@ HEADER = ["N", "G", "C", "K", "Hi", "Wi", "Y", "X",
 def _valid(N, G, C, K, Hi, Wi, Y, X, stride_h, stride_w, pad_h, pad_w, dilation_h=1, dilation_w=1):
     if C % G != 0 or K % G != 0:
         return False
-    if C % 8 != 0 or K % 8 != 0:
+    # Per-group channel counts must be 8-aligned (DSL kernel alignment requirement).
+    if (C // G) % 8 != 0 or (K // G) % 8 != 0:
         return False
     eff_Y = (Y - 1) * dilation_h + 1
     eff_X = (X - 1) * dilation_w + 1

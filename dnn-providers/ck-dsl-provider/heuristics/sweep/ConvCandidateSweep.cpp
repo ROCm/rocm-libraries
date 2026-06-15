@@ -17,7 +17,8 @@
 //
 // CLI arguments (see main.cpp):
 //   --shapes <path>   CSV of conv shapes to sweep.
-//                     Columns: N,G,C,K,Hi,Wi,Y,X,stride_h,stride_w,pad_h,pad_w
+//                     Columns: N,G,C,K,Hi,Wi,Y,X,stride_h,stride_w,pad_h,pad_w[,direction]
+//                     G>1 grouped conv is supported; C and K are total across all groups.
 //   --out    <path>   Path to write training rows (appended if the file exists).
 //                     Columns: N,G,C,K,Hi,Wi,Y,X,stride_h,stride_w,pad_h,pad_w,
 //                              tile_m,tile_n,tile_k,pipeline,tflops,latency_us
@@ -123,7 +124,7 @@ static TrainingCsvWriter gCsvWriter;
 
 struct ConvCase {
     std::string  name;
-    std::int64_t n, c, hi, wi;
+    std::int64_t n, g, c, hi, wi;  // g: group count; c,k are totals across all groups
     std::int64_t k, r, s;
     std::int64_t strideH, strideW;
     std::int64_t padH, padW;
@@ -147,6 +148,7 @@ std::vector<ConvCase> loadShapesFromCsv(const std::string& path) {
     if (!std::getline(f, header)) return {};
 
     // Expected columns: N,G,C,K,Hi,Wi,Y,X,stride_h,stride_w,pad_h,pad_w[,direction]
+    // C and K are totals across all groups; G=1 means a standard (non-grouped) conv.
     std::vector<ConvCase> cases;
     std::string line;
     int idx = 0;
@@ -161,7 +163,8 @@ std::vector<ConvCase> loadShapesFromCsv(const std::string& path) {
             ConvCase c{};
             c.name    = "shape_" + std::to_string(idx);
             c.n       = std::stoll(fields[0]);
-            // G (fields[1]) not used; grouped conv with G=1 assumed
+            c.g       = std::stoll(fields[1]);
+            if (c.g < 1) c.g = 1;
             c.c       = std::stoll(fields[2]);
             c.k       = std::stoll(fields[3]);
             c.hi      = std::stoll(fields[4]);
@@ -173,6 +176,8 @@ std::vector<ConvCase> loadShapesFromCsv(const std::string& path) {
             c.padH    = std::stoll(fields[10]);
             c.padW    = std::stoll(fields[11]);
             c.dilH    = 1; c.dilW = 1;
+            // Skip shapes where per-group channels are not 8-aligned.
+            if (c.c % (c.g * 8) != 0 || c.k % (c.g * 8) != 0) continue;
             cases.push_back(c);
         } catch (...) { continue; }
         ++idx;
@@ -289,19 +294,22 @@ std::optional<double> timeCandidate(
 bool runConvOracleSweep(const ConvCase& cse, CkDslContainer& container,
                         ::CkDslHandle& handle, const std::string& arch)
 {
-    const std::int64_t kN  = cse.n, kC = cse.c, kHi = cse.hi, kWi = cse.wi;
+    const std::int64_t kN  = cse.n, kG = cse.g, kC = cse.c, kHi = cse.hi, kWi = cse.wi;
     const std::int64_t kK  = cse.k, kR = cse.r, kS = cse.s;
     const std::int64_t kHo = convOutDim(kHi, cse.padH, cse.dilH, kR, cse.strideH);
     const std::int64_t kWo = convOutDim(kWi, cse.padW, cse.dilW, kS, cse.strideW);
+    // Per-group channel counts used for filter dims and FLOPS.
+    const std::int64_t kCpG = kC / kG;
 
     if (kHo <= 0 || kWo <= 0) {
         std::cerr << "[Sweep] " << cse.name << ": invalid output dims, skipping\n";
         return false;
     }
 
+    // For grouped conv the filter is [K, C/G, R, S] in NHWC order.
     auto fbBuilder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(
         {kN, kC, kHi, kWi}, {kC * kHi * kWi, 1, kWi * kC, kC},
-        {kK, kC, kR, kS},   {kC * kR * kS, 1, kS * kC, kC},
+        {kK, kCpG, kR, kS},  {kCpG * kR * kS, 1, kS * kCpG, kCpG},
         {kN, kK, kHo, kWo}, {kK * kHo * kWo, 1, kWo * kK, kK},
         {cse.padH, cse.padW}, {cse.padH, cse.padW},
         {cse.strideH, cse.strideW}, {cse.dilH, cse.dilW},
@@ -310,8 +318,8 @@ bool runConvOracleSweep(const ConvCase& cse, CkDslContainer& container,
 
     const utilities::TensorLayout& nhwc = utilities::TensorLayout::NHWC;
     utilities::Tensor<half> tensorX({kN, kC, kHi, kWi}, nhwc);
-    utilities::Tensor<half> tensorW({kK, kC, kR, kS},
-        utilities::generateStrides({kK, kC, kR, kS}, nhwc.strideOrder));
+    utilities::Tensor<half> tensorW({kK, kCpG, kR, kS},
+        utilities::generateStrides({kK, kCpG, kR, kS}, nhwc.strideOrder));
     utilities::Tensor<half> tensorY({kN, kK, kHo, kWo}, nhwc);
     tensorX.fillWithRandomValues(half(-0.1f), half(0.1f), 0x4242u);
     tensorW.fillWithRandomValues(half(-0.1f), half(0.1f), 0x5555u);
@@ -322,16 +330,17 @@ bool runConvOracleSweep(const ConvCase& cse, CkDslContainer& container,
         {3, tensorY.memory().deviceData()},
     };
 
+    // FLOPS: each of the K output channels applies a [C/G, R, S] filter over [N, Ho, Wo].
     const double kFlops = 2.0 * static_cast<double>(kN) * static_cast<double>(kHo)
                               * static_cast<double>(kWo) * static_cast<double>(kK)
-                              * static_cast<double>(kC) * static_cast<double>(kR)
+                              * static_cast<double>(kCpG) * static_cast<double>(kR)
                               * static_cast<double>(kS);
 
     ConvSelectionProblem selProblem;
     selProblem.N  = static_cast<std::int32_t>(kN);
     selProblem.C  = static_cast<std::int32_t>(kC);
     selProblem.K  = static_cast<std::int32_t>(kK);
-    selProblem.G  = 1;  // Sweep covers G=1 only; hipDNN conv has no group field.
+    selProblem.G  = static_cast<std::int32_t>(kG);
     selProblem.Hi = static_cast<std::int32_t>(kHi);
     selProblem.Wi = static_cast<std::int32_t>(kWi);
     selProblem.R  = static_cast<std::int32_t>(kR);
@@ -353,7 +362,7 @@ bool runConvOracleSweep(const ConvCase& cse, CkDslContainer& container,
     }
 
     std::cerr << "[Sweep] " << cse.name
-              << " sweeping " << candidates.size() << " candidates\n";
+              << " (G=" << kG << ") sweeping " << candidates.size() << " candidates\n";
 
     std::size_t sweptOk = 0, sweptFail = 0;
     for (const auto& cand : candidates) {
@@ -362,7 +371,7 @@ bool runConvOracleSweep(const ConvCase& cse, CkDslContainer& container,
                                     deviceBuffers, kFlops, us);
         if (!tflops) { ++sweptFail; continue; }
         ++sweptOk;
-        gCsvWriter.write(kN, 1, kC, kK, kHi, kWi, kR, kS,
+        gCsvWriter.write(kN, kG, kC, kK, kHi, kWi, kR, kS,
                          cse.strideH, cse.strideW, cse.padH, cse.padW,
                          cand, *tflops, us);
     }
