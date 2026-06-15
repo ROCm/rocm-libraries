@@ -121,6 +121,9 @@ def main() -> int:
     if args.Di is not None and args.Z is None:
         print("--Z (filter depth) is required when --Di is set", file=sys.stderr)
         return 2
+    if args.Z is not None and args.Di is None:
+        print("--Di (input depth) is required when --Z is set", file=sys.stderr)
+        return 2
 
     arch = args.arch
     if args.isa is not None:
