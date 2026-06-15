@@ -482,6 +482,8 @@ pipeline {
     post {
         success {
             script {
+                // Ensure utils is loaded (only allocates node if needed, e.g., on early restart failure)
+                ensureUtils()
                 node {
                     utils.setGithubStatus('Math CI Summary', 'success', 'All checks have passed')
                 }
@@ -489,6 +491,8 @@ pipeline {
         }
         failure {
             script {
+                // Ensure utils is loaded (only allocates node if needed, e.g., on early restart failure)
+                ensureUtils()
                 node {
                     utils.setGithubStatus('Math CI Summary', 'failure', 'Some checks have failed')
                     utils.sendTeamsFailureNotification(buildTheRock: params.BUILD_THEROCK_DOCKER)
