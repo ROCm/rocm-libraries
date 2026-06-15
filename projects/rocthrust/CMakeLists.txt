@@ -152,13 +152,6 @@ else()
   endif()
 endif()
 
-# Compressed offload binaries are currently not working with the SPIR-V target
-if("amdgcnspirv" IN_LIST GPU_TARGETS)
-  if(BUILD_OFFLOAD_COMPRESS)
-    message(FATAL_ERROR "Cannot combine SPIR-V and BUILD_OFFLOAD_COMPRESS")
-  endif()
-endif()
-
 # Set up options for obtaining dependencies rocPRIM and rocRAND.
 # PACKAGE: Search for an install package that contains the dependency.
 # MONOREPO: Assume this is a monorepo checkout and search for the dependency in the directory at ../../projects/.
