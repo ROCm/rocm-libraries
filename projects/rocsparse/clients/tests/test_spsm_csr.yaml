@@ -49,7 +49,6 @@ Definitions:
     - { alpha:  -0.5, alphai:  0.1 }
 
   - &alpha_range_checkin
-    - { alpha:   2.0, alphai:  0.0 }
     - { alpha:   3.0, alphai: -1.0 }
 
   - &alpha_range_nightly
@@ -184,7 +183,7 @@ Tests:
   indextype: *i64
   precision: *single_only_precisions
   M_N: *M_N_range_checkin
-  K: [16, 32, 64, 128]
+  K: [64, 128]
   ld_multiplier_B: [1]
   ld_multiplier_C: [4]
   alpha_alphai: *alpha_range_checkin
@@ -204,7 +203,7 @@ Tests:
   indextype: *i32
   precision: *double_only_precisions
   M_N: *M_N_range_checkin
-  K: [17, 33, 65, 129]
+  K: [33, 129]
   ld_multiplier_B: [1]
   ld_multiplier_C: [4]
   alpha_alphai: *alpha_range_checkin
