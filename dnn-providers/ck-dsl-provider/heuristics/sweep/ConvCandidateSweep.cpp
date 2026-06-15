@@ -249,12 +249,12 @@ std::optional<double> timeCandidate(
         return std::nullopt;
     }
 
-    const std::int32_t xBytes = static_cast<std::int32_t>(
-        spec.problem.N * spec.problem.C * spec.problem.Hi * spec.problem.Wi * 2);
-    const std::int32_t wBytes = static_cast<std::int32_t>(
-        spec.problem.K * spec.problem.C * spec.problem.R * spec.problem.S * 2);
-    const std::int32_t yBytes = static_cast<std::int32_t>(
-        spec.problem.N * spec.problem.K * spec.problem.Ho() * spec.problem.Wo() * 2);
+    const std::int64_t xBytes =
+        (std::int64_t)spec.problem.N * spec.problem.C * spec.problem.Hi * spec.problem.Wi * 2;
+    const std::int64_t wBytes =
+        (std::int64_t)spec.problem.K * spec.problem.C * spec.problem.R * spec.problem.S * 2;
+    const std::int64_t yBytes =
+        (std::int64_t)spec.problem.N * spec.problem.K * spec.problem.Ho() * spec.problem.Wo() * 2;
 
     ck_dsl_provider::ConvImplicitGemmPlan plan(
         module, /*xUid=*/1, /*wUid=*/2, /*yUid=*/3, xBytes, wBytes, yBytes);

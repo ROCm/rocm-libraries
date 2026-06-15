@@ -68,6 +68,7 @@
   "kernel_name": "ck_dsl_ex08_bake_off_implicit_gemm_N8H56W56C64_K64R3S3_t64x64x64_w2x2_a32x32x16_mem_cshuffle",
   "kind": "conv_fp16",
   "kpg": 64,
+  "pipeline": "mem",
   "notes": "Bake-off 1: implicit-GEMM conv via the coord-transform DAG (ck_dsl.helpers.transforms.TensorDescriptor). A's address is computed as (m, k) -> unmerge -> (n, ho, wo, r, s, c) -> embed -> (n, hi, wi, c) -> naive NHWC offset, with the conv boundary check baked into the descriptor's validity predicate. Same algorithmic strategy as a hand-written implicit-GEMM kernel, but expressed through CK Tile's coordinate-transform algebra instead of inline arithmetic.",
   "schema": "ck.dsl.example.manifest/v1",
   "sig_has_bytes": 1,

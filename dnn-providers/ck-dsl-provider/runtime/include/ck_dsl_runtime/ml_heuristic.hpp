@@ -56,6 +56,8 @@ struct MlKernelConfig {
         if (p == "compv5") return 2;
         if (p == "mem") return 3;
         if (p == "preshufflev2") return 4;
+        if (p == "basic_v1") return 5;
+        if (p == "compv6") return 6;
         return 0;
     }
     static int enc_scheduler(const std::string& s) {
@@ -78,6 +80,10 @@ struct MlKernelConfig {
                 return "mem";
             case 4:
                 return "preshufflev2";
+            case 5:
+                return "basic_v1";
+            case 6:
+                return "compv6";
             case 0:
             default:
                 return "compv3";
@@ -379,7 +385,7 @@ inline std::array<double, CKDSL_FMHA_NUM_FEATURES> ml_extract_fmha_features(
 // 97 features (both gfx942 fp16 and gfx950 bf16 conv models use this schema).
 
 struct ConvHwProfile {
-    int num_cus = 256, simds_per_cu = 4, shader_engines = 32, max_clock_mhz = 2400,
+    int num_cus = 304, simds_per_cu = 4, shader_engines = 38, max_clock_mhz = 2400,
         max_waves_per_cu = 32, wavefront_size = 64, lds_capacity = 65536, l1_cache_kb = 32,
         l2_cache_kb = 4096, l3_cache_kb = 262144, num_xcd = 8;
     int total_simds() const {
@@ -402,7 +408,8 @@ struct ConvHwProfile {
             p.num_xcd = 8;
             return p;
         }
-        return ConvHwProfile{};  // gfx950 defaults
+        // gfx950 (MI350): 304 CUs, 38 SEs, 2400 MHz
+        return ConvHwProfile{};
     }
 };
 

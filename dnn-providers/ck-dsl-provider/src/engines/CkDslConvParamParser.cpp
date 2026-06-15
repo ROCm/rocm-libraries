@@ -65,7 +65,7 @@ ParsedConvParams parseConvGraph(const hipdnn_flatbuffers_sdk::flatbuffer_utiliti
         const auto cpg = wd->Get(1);
         if (cpg <= 0 || p.C % cpg != 0)
             throw std::runtime_error("CkDslConv: weight dim[1] must be a positive divisor of C");
-        p.G = std::max((int64_t)1, p.C / cpg);
+        p.G = static_cast<int>(std::max((int64_t)1, p.C / cpg));
     }
     p.R  = wd->Get(2);
     p.S  = wd->Get(3);
