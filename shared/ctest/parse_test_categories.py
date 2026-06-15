@@ -214,15 +214,16 @@ def get_unfiltered_category_name(category_name):
 
 
 def add_categorized_targets(
-        target_name,
-        dapper_json_file,
-        category_name,
-        gpu_arch,
-        pattern_string,
-        working_dir,
-        label_string,
-        timeout,
-        install_file_handle):
+    target_name,
+    dapper_json_file,
+    category_name,
+    gpu_arch,
+    pattern_string,
+    working_dir,
+    label_string,
+    timeout,
+    install_file_handle,
+):
 
     command_name = ""
     nice_dapper_json_file = ""
@@ -238,7 +239,8 @@ def add_categorized_targets(
             working_dir,
             "unfiltered",
             timeout,
-            install_file_handle)
+            install_file_handle,
+        )
 
         command_name = f"${{Python3_EXECUTABLE}} -m {target_name}_runner.py "
         nice_dapper_json_file = f" {dapper_json_file.strip('')} "
@@ -250,7 +252,9 @@ def add_categorized_targets(
 
     print(f"add_test(")
     print(f"  NAME {target_suite_name}")
-    print(f"  COMMAND {command_name}{target_name}{nice_dapper_json_file} {pattern_string}")
+    print(
+        f"  COMMAND {command_name}{target_name}{nice_dapper_json_file} {pattern_string}"
+    )
     print(f"  WORKING_DIRECTORY {working_dir}")
     print(f")")
     print(f"set_tests_properties({target_suite_name} PROPERTIES")
@@ -262,10 +266,16 @@ def add_categorized_targets(
     # Write install-time test with relative path if install file is provided
     if install_file_handle:
         try:
-            install_command_name = f"${{Python3_EXECUTABLE}} -m ../{target_name}_runner.py " if command_name else ""
-            install_dapper_json_file = f" ../{dapper_json_file.strip()} " if dapper_json_file else ""
+            install_command_name = (
+                f"${{Python3_EXECUTABLE}} -m ../{target_name}_runner.py "
+                if command_name
+                else ""
+            )
+            install_dapper_json_file = (
+                f" ../{dapper_json_file.strip()} " if dapper_json_file else ""
+            )
             install_file_handle.write(
-                f'add_test({target_suite_name} {install_command_name}../{target_name} {install_dapper_json_file} {pattern_string})\n'
+                f"add_test({target_suite_name} {install_command_name}../{target_name} {install_dapper_json_file} {pattern_string})\n"
             )
             install_file_handle.write(
                 f"set_tests_properties({target_suite_name} PROPERTIES LABELS {label_string} TIMEOUT {timeout})\n\n"
@@ -432,10 +442,16 @@ def main():
             print(f"# Category: {category_name}")
             print(f'# Description: {category_info.get("description", "")}')
             if dapper_json_file:
-                print(f'# Dependency Parser (dapper) is enabled for {category_name}, writing to {dapper_json_file}')
-                print(f"# The unfiltered category can be ran via the '{target_name}_{get_unfiltered_category_name(category_name)}_suite' target")
+                print(
+                    f"# Dependency Parser (dapper) is enabled for {category_name}, writing to {dapper_json_file}"
+                )
+                print(
+                    f"# The unfiltered category can be ran via the '{target_name}_{get_unfiltered_category_name(category_name)}_suite' target"
+                )
             else:
-                print(f'# Dependency Parser (dapper) is NOT enabled for {category_name}')
+                print(
+                    f"# Dependency Parser (dapper) is NOT enabled for {category_name}"
+                )
 
             # Build positive pattern string and exclude string
             positive_string = ":".join(patterns)
@@ -455,7 +471,7 @@ def main():
             }
             extra_args_string = _format_extra_args(extra_args)
 
-        # Build complete pattern string for this category test
+            # Build complete pattern string for this category test
             if exclude_string:
                 pattern_string = positive_string + "-" + exclude_string
             else:
@@ -475,7 +491,8 @@ def main():
                 working_dir,
                 label_string,
                 timeout,
-                install_file_handle)
+                install_file_handle,
+            )
 
         # ========================================================================
         # GPU Exclusion Tests with Hierarchical Pattern Matching
@@ -591,7 +608,8 @@ def main():
                     working_dir,
                     label_string,
                     timeout,
-                    install_file_handle)
+                    install_file_handle,
+                )
 
 
 if __name__ == "__main__":
