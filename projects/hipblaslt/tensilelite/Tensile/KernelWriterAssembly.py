@@ -19415,7 +19415,9 @@ class KernelWriterAssembly(KernelWriter):
     #   buffer (buffer 1). However, when numReadsIterCoalesced{A,B} > 1 ("wider local read").
     #   recalcLocalReadAddressesAB() performs this switch by recomputing the local-read
     #   pointer to buffer 0; (e.g. ds_load_b128 covering 2 MI-K to ds_load_b64 per MI_K).
-    needLdsReset = (self.states.numReadsIterCoalescedA > 1 or
+    #   (needResetLROffsets or kernel["StreamK"]) in KernelWriter, keeping write/read consistent.
+    needLdsReset = (kernel["StreamK"] or
+                    self.states.numReadsIterCoalescedA > 1 or
                     self.states.numReadsIterCoalescedB > 1)
     if not kernel["1LDSBuffer"] and needLdsReset:
       ldsAddrSgprName: str = comp.getLdsAddrSgprName(descSgprName(0))

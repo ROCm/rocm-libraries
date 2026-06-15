@@ -6206,6 +6206,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if not kernel["enableTDMB"]:
             tempLWCodeModB = self.localWriteDo(kernel, tensorParametersB)
             module.add(tempLWCodeModB)
+      # recalcLocalReadAddressesAB() below resets numReadsIterCoalesced{A,B} to 1,
+      # so capture the wider-local-read state first.
+      tdm = kernel["enableTDMA"] and kernel["enableTDMB"]
+      tdmTailWasWiderLR = (self.states.numReadsIterCoalescedA > 1 or
+                           self.states.numReadsIterCoalescedB > 1)
+      # TDM tail may keep using whichever LDS buffer the swap parity left it in
+      # (no forced buffer 0), unless wider local read needs the offset recomputed.
+      needResetLROffsets = not kernel["1LDSBuffer"] and (not tdm or tdmTailWasWiderLR)
       # change local read policy from wider local read to one unit of K at a time
       # DirectToVgpr case, use original wider local read instead of recalculating local read address
       if not (kernel["DirectToVgprA"] or kernel["DirectToVgprB"]):
@@ -6229,12 +6237,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       # tail: re-init local read addresses
       if kernel["PrefetchGlobalRead"]:
-        # Main-loop pointer swaps can leave LROs in the Blk half. SIA0 non-TDM
-        # also needs this reset before tail MACs, but SIA0 TDM tail descriptors
-        # already select the correct LDS bank and clearing the LRO Blk bit here
-        # regresses those kernels.
-        if (kernel["_ScheduleIterAlg"] != 0 or kernel["StreamK"] or
-            not (kernel["enableTDMA"] and kernel["enableTDMB"])):
+        # Main-loop pointer swaps can leave LROs in the Blk half. Reset before
+        # tail MACs for every scheduler; localReadResetOffsets is empty for
+        # 1LDSBuffer / DirectToVgpr cases.
+        if needResetLROffsets or kernel["StreamK"]:
           module.addComment1("Tail: local read reset offsets a")
           module.add(self.localReadResetOffsets(kernel, tensorParametersA))
           if kernel["ProblemType"]["MXBlockA"]:
