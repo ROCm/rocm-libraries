@@ -53,6 +53,7 @@ jobs:
       test_type: ${{ steps.linux_projects.outputs.test_type }}
       linux_package_targets: ${{ steps.configure_linux.outputs.package_targets }}
       windows_package_targets: ${{ steps.configure_windows.outputs.package_targets }}
+      coverage_projects: ${{ steps.coverage_projects.outputs.coverage_projects }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -112,6 +113,13 @@ jobs:
           PLATFORM: "windows"
         run: |
           python .github/scripts/therock_configure_ci.py
+
+      - name: Determine Linux projects for coverage (changed subtrees only)
+        id: coverage_projects
+        env:
+          PLATFORM: "linux"
+        run: |
+          python .github/scripts/therock_configure_coverage.py
 
       - name: Fetch Linux targets for build and test
         env:
@@ -188,6 +196,28 @@ jobs:
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
       build_runs_on: ${{ needs.setup.outputs.windows_build_runs_on }}
 
+  therock-ci-coverage:
+    name: Coverage (${{ matrix.projects.project_name }} | ${{ matrix.target_bundle.amdgpu_family }})
+    permissions:
+      contents: read
+      id-token: write
+    needs: setup
+    if: ${{ needs.setup.outputs.coverage_projects != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        projects: ${{ fromJSON(needs.setup.outputs.coverage_projects) }}
+        target_bundle: ${{ fromJSON(needs.setup.outputs.linux_package_targets) }}
+    uses: ./.github/workflows/therock-ci-coverage.yml
+    secrets: inherit
+    with:
+      cmake_options: ${{ matrix.projects.cmake_options }}
+      project_name: ${{ matrix.projects.project_name }}
+      cmake_target: ${{ matrix.projects.cmake_target }}
+      build_dir: ${{ matrix.projects.build_dir }}
+      amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
+      test_runs_on: ${{ matrix.target_bundle.test_machine }}
+
   therock_ci_summary:
     name: TheRock CI Summary
     if: always()
@@ -195,6 +225,7 @@ jobs:
       - setup
       - therock-ci-linux
       - therock-ci-windows
+      - therock-ci-coverage
     runs-on: ubuntu-24.04
     steps:
       - name: Output failed jobs
