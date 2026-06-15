@@ -912,24 +912,12 @@ class Solution(collections.abc.Mapping):
         return
 
     state["Multicast"] = False
+    state["ClusterBarrier"] = False
     if state["ClusterDim"] != [1, 1]:
       state["Multicast"] = True
-    else:
-      if state["ClusterBarrier"] == True:
-        reject(state, printRejectionReason, "ClusterDim can't be [1, 1] if ClusterBarrier enabled.")
-
-    # ClusterBarrier emits SCmp/branch on sgpr("WaveIdx"), which is only allocated
-    # when TDM is enabled.
-    if state["ClusterBarrier"] == True and state["TDMInst"] == 0:
-      reject(state, printRejectionReason, "ClusterBarrier requires TDMInst != 0 (TDMA or TDMB enabled).")
-
-    # ClusterBarrier codegen emits s_barrier_signal/wait -3, which require the
-    # HasClusterBarrier assembler capability. Otherwise rocisa::SBarrier silently
-    # falls back to code -1 and produces incorrect cluster-scope synchronization.
-    if state["ClusterBarrier"] == True \
-       and not isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
-      reject(state, printRejectionReason,
-             "ClusterBarrier requires asmCaps['HasClusterBarrier'] (s_barrier_wait -3 support).")
+      # ClusterBarrier emits SCmp/branch on sgpr("WaveIdx"), which is only allocated when TDM is enabled.
+      if state["TDMInst"] != 0 and isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
+        state["ClusterBarrier"] = True
 
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
@@ -1777,7 +1765,7 @@ class Solution(collections.abc.Mapping):
         if state["EnableMatrixInstruction"]:
           state["MIWaveTileMetadata"] = state["MIWaveTileB"]
         if state["DirectToLdsMetadata"] and not state["DirectToLdsB"]:
-          state["DirectToLdsMetadata"] = False
+          state["DirectToLdsMetadata"] = 0
       else:
         if not state["DirectToVgprSparseMetadata"]:
           state["ThreadTileMetadata"] = state["ThreadTileA"]
@@ -1789,10 +1777,10 @@ class Solution(collections.abc.Mapping):
         if state["EnableMatrixInstruction"]:
           state["MIWaveTileMetadata"] = state["MIWaveTileA"]
         if state["DirectToLdsMetadata"] and not state["DirectToLdsA"]:
-          state["DirectToLdsMetadata"] = False
+          state["DirectToLdsMetadata"] = 0
     elif not state["ProblemType"]["Sparse"]:
       state["DirectToVgprSparseMetadata"] = False
-      state["DirectToLdsMetadata"] = False
+      state["DirectToLdsMetadata"] = 0
       state["MIWaveTileMetadata"] = 0
 
     if state["NonTemporal"] != -1:
@@ -4086,10 +4074,10 @@ class Solution(collections.abc.Mapping):
       grvwm = state["GlobalReadVectorWidthMetadata"]
       grvwmCheck = (grvwm == 4) or (grvwm == 16 and isaInfoMap[state["ISA"]].asmCaps["HasDirectToLdsx4"])
       if state["DirectToLds%s"%sparseTc] and (not state["DirectToVgprSparseMetadata"]) and grvwmCheck:
-        state["DirectToLdsMetadata"] = True
+        state["DirectToLdsMetadata"] = 1
         state["LocalWriteUseSgprMetadata"] = True
       else:
-        state["DirectToLdsMetadata"] = False
+        state["DirectToLdsMetadata"] = 0
         state["LocalWriteUseSgprMetadata"] = False
 
     # Update parent variable so kernel display is accurate
