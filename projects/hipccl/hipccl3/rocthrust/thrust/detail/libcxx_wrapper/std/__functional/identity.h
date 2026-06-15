@@ -30,7 +30,7 @@ namespace internal
 {
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 
-using identity = _THRUST_STD::__identity;
+using identity = _THRUST_STD::identity;
 
 #else
 
