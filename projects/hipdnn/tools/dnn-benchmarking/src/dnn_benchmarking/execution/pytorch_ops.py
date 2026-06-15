@@ -147,14 +147,6 @@ def get_reference_warnings(graph_json: Dict[str, Any]) -> List[str]:
                 "built-in PyTorch operator time."
             )
 
-        elif op_type in ("LayernormBackwardAttributes", "LayerNormBackwardAttributes"):
-            warnings.append(
-                f"{name}: LayernormBackwardAttributes uses a manual layernorm backward "
-                "formula because PyTorch has no public operator matching hipDNN's "
-                "saved-statistics backward node; PyTorch reference timing is not solely "
-                "built-in PyTorch operator time."
-            )
-
         elif op_type == "ReductionAttributes":
             if _reduction_mode_name(_node_param(node, "mode", "NOT_SET")) == "MUL_NO_ZEROS":
                 warnings.append(
@@ -1365,78 +1357,6 @@ def handle_layernorm(
                 int(inv_uid),
                 torch.rsqrt(variance + epsilon),
             )
-
-
-@register_handler("LayerNormBackwardAttributes")
-@register_handler("LayernormBackwardAttributes")
-def handle_layernorm_backward(
-    node: Dict[str, Any],
-    tensors: Dict[int, torch.Tensor],
-    graph_json: Dict[str, Any],
-) -> None:
-    """Handle layer normalization backward over trailing normalized dims."""
-    dy_uid = _required_input_uid(node, "dy_tensor_uid")
-    x_uid = _required_input_uid(node, "x_tensor_uid")
-    scale_uid = _required_input_uid(node, "scale_tensor_uid")
-    dx_uid = _required_output_uid(node, "dx_tensor_uid")
-    dscale_uid = _required_output_uid(node, "dscale_tensor_uid")
-    dbias_uid = _required_output_uid(node, "dbias_tensor_uid")
-
-    dy = _tensor(tensors, dy_uid, node).to(dtype=torch.float32)
-    x = _tensor(tensors, x_uid, node)
-    x_float = x.to(dtype=torch.float32)
-    scale = _tensor(tensors, scale_uid, node)
-
-    normalized_shape = _layernorm_normalized_shape(node, x, scale, scale)
-    reduce_dims = tuple(range(x.ndim - len(normalized_shape), x.ndim))
-    keepdim_shape = tuple(
-        1 if dim in reduce_dims else int(extent) for dim, extent in enumerate(x.shape)
-    )
-
-    mean_uid = _optional_uid(node, "mean_tensor_uid")
-    if mean_uid is not None:
-        mean = _reshape_affine_for_broadcast(
-            _tensor(tensors, int(mean_uid), node), keepdim_shape, x, "Layernorm mean"
-        )
-    else:
-        mean = x_float.mean(dim=reduce_dims, keepdim=True)
-
-    inv_uid = _optional_uid(node, "inv_variance_tensor_uid")
-    if inv_uid is not None:
-        inv_variance = _reshape_affine_for_broadcast(
-            _tensor(tensors, int(inv_uid), node),
-            keepdim_shape,
-            x,
-            "Layernorm inv_variance",
-        )
-    else:
-        epsilon_uid = _optional_uid(node, "epsilon_tensor_uid")
-        if epsilon_uid is None:
-            raise ValueError(
-                "LayernormBackwardAttributes requires inv_variance or epsilon input"
-            )
-        epsilon = _scalar_value(tensors, int(epsilon_uid), node)
-        variance = x_float.var(dim=reduce_dims, unbiased=False, keepdim=True)
-        inv_variance = torch.rsqrt(variance + epsilon)
-
-    x_hat = (x_float - mean) * inv_variance
-    weight = _reshape_affine_for_normalized_shape(
-        scale, normalized_shape, x, "Layernorm scale"
-    )
-    g = dy * weight
-    g_mean = g.mean(dim=reduce_dims, keepdim=True)
-    gx_mean = (g * x_hat).mean(dim=reduce_dims, keepdim=True)
-    dx = (inv_variance * (g - g_mean - x_hat * gx_mean)).to(dtype=x.dtype)
-    _store_tensor_for_uid(tensors, graph_json, dx_uid, dx)
-
-    dscale = _sum_to_shape(dy * x_hat, scale.shape).to(dtype=scale.dtype)
-    _store_tensor_for_uid(tensors, graph_json, dscale_uid, dscale)
-
-    dbias_shape = _stored_tensor_shape(tensors, graph_json, dbias_uid)
-    if dbias_shape is None:
-        dbias_shape = tuple(int(dim) for dim in scale.shape)
-    dbias = _sum_to_shape(dy, dbias_shape).to(dtype=scale.dtype)
-    _store_tensor_for_uid(tensors, graph_json, dbias_uid, dbias)
 
 
 @register_handler("RmsNormAttributes")

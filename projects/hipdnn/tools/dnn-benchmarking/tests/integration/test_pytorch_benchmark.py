@@ -89,7 +89,6 @@ class TestPyTorchOps:
         assert "BatchnormBackwardAttributes" in supported
         assert "SdpaAttributes" in supported
         assert "LayernormAttributes" in supported
-        assert "LayernormBackwardAttributes" in supported
         assert "RMSNormAttributes" in supported
         assert "RMSNormBackwardAttributes" in supported
         assert "ReductionAttributes" in supported
@@ -305,7 +304,6 @@ class TestPyTorchCudaExecutor:
             "sample_sdpa.json",
             "sample_mha_sdpa.json",
             "sample_layernorm.json",
-            "sample_layernorm_backward.json",
             "sample_rmsnorm.json",
             "sample_rmsnorm_backward.json",
             "sample_reduction.json",
