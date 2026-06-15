@@ -99,9 +99,6 @@ hipdnn_generate_version_header(hipdnn_backend)
 # Embed Windows VERSIONINFO into the DLL
 if(WIN32)
     string(TIMESTAMP HIPDNN_COPYRIGHT_YEAR "%Y")
-    set(HIPDNN_PRODUCT_VERSION_DISPLAY
-        "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}"
-    )
     # HIPDNN_BACKEND_VERSION_TWEAK (short rocm-libraries commit hash, RFC 0005)
     # comes from hipdnn_setup_version above. It is used only in the StringFileInfo
     # version strings; the binary FILEVERSION/PRODUCTVERSION fields are four 16-bit
