@@ -714,6 +714,12 @@ class TileInfo:
     # D-tile accumulators in the VGPR file as is safe, spilling the remainder to
     # AGPR (a partial VGPR/AGPR split). The split is bounded by vgprAccLimit below
     # so the peak register index stays inside the VGPR file.
+    #
+    # VGPR-first accumulator policy for MXF4, including StreamK. The StreamK
+    # partials/fixup epilogue now routes accumulator reads through the same
+    # VGPR-first source map as the global-store path (see GlobalWriteBatch bias
+    # fix), and the conservative epilogue ceiling below spills to AGPR before the
+    # ValuC staging window can overflow the VGPR file.
     preferVgpr = isDTile \
         and isFloat4Type(dataTypeA) \
         and isFloat4Type(dataTypeB)
@@ -780,39 +786,46 @@ class TileInfo:
           return numVgpr
       return numVgpr
 
-    # Large FP4 subtile tiles can exceed the VGPR accumulator budget. The number
-    # of D accumulators we may keep in VGPR is bounded by two independent ceilings;
-    # we take the smaller so neither the main loop nor the epilogue overflows v255:
+    # Large FP4 subtile tiles can exceed the VGPR file once accumulators are kept
+    # in VGPR. The number of D accumulators we may keep in VGPR is bounded by two
+    # independent ceilings; we take the smaller so neither the main loop nor the
+    # epilogue references a register past v255:
     #
     #   * main-loop ceiling: A/B/scale working-set VGPRs are checked out above the
-    #     accumulators, so accs must end low enough to leave that working set room.
+    #     accumulators, so the accumulators must end low enough to leave room for
+    #     that working set.
     #
-    #   * post-loop (epilogue) ceiling: the acc->ValuC store stages the AGPR-backed
-    #     accumulator remainder into a reused window that is checked out ABOVE the
-    #     VGPR-backed accumulators. Each VGPR-backed accumulator shifts the peak
-    #     staging index up by one. The all-AGPR staging window is ~0.75 * T wide
-    #     (empirically measured on f32 subtile epilogues, T = _totalDTileRegs), so
-    #     for N VGPR-backed accs the peak is base + N + ratio*(T - N). Bounding that
-    #     peak by a safe maximum gives the cap on N below.
+    #   * post-loop (epilogue) ceiling: the store stages accumulators into the
+    #     ValuC region, which AsmStoreState.setupStoreElementsForBatch checks out
+    #     of the VGPR pool ABOVE the VGPR-backed accumulators
+    #     (vgprPool.checkOutAligned). That staging window plus a margin for
+    #     C-load / conversion / address temps is bounded by numVgprValu, so the
+    #     VGPR accumulators must end below maxVgpr - numVgprValu - margin for the
+    #     whole window to stay in range. This is a safe upper bound (the realized
+    #     window is smaller because VGPR-backed accumulators are stored in place),
+    #     so the cap is conservative but never overflows.
     if preferVgpr:
       startVgprValu = writer.vgprPool.size()
       mainCeil = maxVgprBeforeAgpr - estimateSubtileMainLoopVgprs()
 
-      EPILOGUE_WINDOW_RATIO = 0.75
-      EPILOGUE_SAFETY_MARGIN = 4
-      safeMax = maxVgprBeforeAgpr - EPILOGUE_SAFETY_MARGIN
-      window = EPILOGUE_WINDOW_RATIO * _totalDTileRegs
-      denom = max(1e-3, 1.0 - EPILOGUE_WINDOW_RATIO)
-      nMaxByEpilogue = int(math.floor((safeMax - startVgprValu - window) / denom))
-      postCeil = startVgprValu + max(0, nMaxByEpilogue)
+      EPILOGUE_TEMP_MARGIN = 32
+      valuCStage = getattr(writer.states.c, "numVgprValu", 0) or _totalDTileRegs
+      epiCeil = maxVgprBeforeAgpr - valuCStage - EPILOGUE_TEMP_MARGIN
 
-      vgprAccLimit = max(0, min(mainCeil, postCeil))
+      vgprAccLimit = min(mainCeil, epiCeil)
 
-      # AGPR cannot hold the entire tile -> the remainder MUST live in VGPR. This
-      # floor can legally exceed the ceilings above for genuinely oversized tiles;
-      # honoring it keeps the kernel buildable (correctness over the soft cap).
+      # AGPR cannot hold the entire tile -> the remainder MUST live in VGPR. For
+      # the supported FP4 tiles AGPR holds the whole tile (floor == 0).
       minVgprAccRegs = max(0, _totalDTileRegs - maxAgpr)
       vgprAccLimit = max(vgprAccLimit, startVgprValu + minVgprAccRegs)
+
+      # Never reject: if no VGPR accumulator can fit under the epilogue ceiling
+      # (or the mandatory VGPR floor would itself overflow it), fall back to pure
+      # AGPR-first. That path matches develop, routes the epilogue through the
+      # compact AGPR staging, and is known to fit.
+      if epiCeil < startVgprValu + numDword or startVgprValu + minVgprAccRegs > epiCeil:
+        preferVgpr = False
+        vgprAccLimit = maxVgpr
     else:
       vgprAccLimit = maxVgpr
 

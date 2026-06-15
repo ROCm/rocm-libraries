@@ -252,6 +252,20 @@ class GlobalWriteBatchWriter:
     direct = self._directValuCVgpr(sumIdx - self.parentWriter.states.c.startVgprValu, width)
     return direct if direct is not None else sumIdx
 
+  def _packSourceAddr(self, sumIdx):
+    """Source addressing for pack/convert accumulator reads.
+
+    Under the VGPR-first source map the accumulators live at remapped physical
+    VGPRs, not the literal "ValuC+N" staging slots, so resolve to the physical
+    register and drop the prefix (matching how _storeSumIdx feeds the store).
+    Otherwise keep the ValuC+ staging addressing unchanged. Returns a tuple of
+    (idx, inputPrefix, prefixOffset) consumable by packdata/convertData.
+    """
+    direct = self._directValuCVgpr(sumIdx - self.parentWriter.states.c.startVgprValu, 1)
+    if direct is not None:
+      return direct, "", 0
+    return sumIdx, "ValuC+", self.parentWriter.states.c.startVgprValu
+
   def _copyActivationData(self, computeDataType, elementSumIdx, gwvw, vgprStart, direction=0):
     module = Module("Copy Activation Data")
     vi = 0
@@ -1287,18 +1301,25 @@ class GlobalWriteBatchWriter:
           sumIdxV   = self.ss.elementSumIdx[elementIdx] + vi
           if self.kernel["ProblemType"]["ComputeDataType"].isSingle():
             vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
-            vgprDst = (self.activationSetPCStruct.vgprActCopy + vi) if mergeActFuncCall else "ValuC+%d"%vgprIdx
             # Generate single f32 code if edge is detected.
             if ((vi + 1) == self.gwvw) and ((self.gwvw % 2) == 1):
-              module.add(VAddF32(dst=vgpr(vgprDst), src0=vgpr(inputVgpr), src1=vgpr("ValuC+%d"%vgprIdx), \
+              # VGPR-first bypass: the accumulator may physically live at a VGPR
+              # other than ValuC+vgprIdx, so resolve through the source map (the
+              # same remap alpha/ScaleAlphaVec/store use). Falls back to
+              # ValuC+vgprIdx when no bypass is active.
+              accVgpr = self._valuCVgpr(vgprIdx, 1)
+              vgprDst = vgpr(self.activationSetPCStruct.vgprActCopy + vi) if mergeActFuncCall else accVgpr
+              module.add(VAddF32(dst=vgprDst, src0=vgpr(inputVgpr), src1=accVgpr, \
                                  comment="C += bias"))
 
             # Original packed route
             elif vi%2 == 1:
               assert (self.gwvw % 2 == 0)
             else:
-              module.add(VAddPKF32(dst=vgpr(vgprDst, 2), src0=vgpr(inputVgpr, 2), \
-                                   src1=vgpr("ValuC+%d"%vgprIdx, 2), comment="C += bias"))
+              accVgpr = self._valuCVgpr(vgprIdx, 2)
+              vgprDst = vgpr(self.activationSetPCStruct.vgprActCopy + vi, 2) if mergeActFuncCall else accVgpr
+              module.add(VAddPKF32(dst=vgprDst, src0=vgpr(inputVgpr, 2), \
+                                   src1=accVgpr, comment="C += bias"))
           else:
             raise RuntimeError("Unsupported bias compute data type %s."%str(self.kernel["ProblemType"]["ComputeDataType"]))
 
@@ -1451,44 +1472,52 @@ class GlobalWriteBatchWriter:
       packModule = Module("Empty pack module")
       convertModule = Module("Empty convert module")
       if self.kernel["ProblemType"]["HighPrecisionAccumulate"] and (self.kernel["_GlobalAccumulation"] != 'MultipleBuffer'):
+        # VGPR-first accumulators live at remapped physical VGPRs, so the pack/
+        # convert source (and the in-place pack destination) must follow the same
+        # source map the store path uses via _storeSumIdx. Without this, the edge
+        # (gwvw==1) and other packdata paths read/write the stale "ValuC+N"
+        # staging slots while the store consumes the physical register, producing
+        # an unconverted (and cross-element-clobbering) result. No-op when the
+        # source map is inactive.
+        packSrcIdx, packSrcPrefix, packSrcOffset = self._packSourceAddr(self.ss.elementSumIdx[elementIdx])
         if self.kernel["ActivationFuncCall"] and activationCDataType == self.kernel["ProblemType"]["DestDataType"]:
           destIdx = self.activationSetPCStruct.vgprActCopy
         else:
-          destIdx = self.ss.elementSumIdx[elementIdx]
+          destIdx = self._storeSumIdx(self.ss.elementSumIdx[elementIdx])
         if self.kernel["ProblemType"]["DestDataType"].isHalf():
           # For UseSubtileImpl non-edge: paired dwordx4 path handles packing in _emit16bitSubtilePairedStore.
           if not is16bitSubtile:
-            packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+            packModule = self.packdata(self.gwvw, destIdx, packSrcIdx, inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
         elif self.kernel["ProblemType"]["DestDataType"].isBFloat16():
           # For UseSubtileImpl non-edge: paired dwordx4 path handles packing in _emit16bitSubtilePairedStore.
           if not is16bitSubtile:
-            packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], bf16CVTVgprStruct=self.cvtVgprStruct,
-                                       tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+            packModule = self.packdata(self.gwvw, destIdx, packSrcIdx, bf16CVTVgprStruct=self.cvtVgprStruct,
+                                       tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
         elif self.kernel["ProblemType"]["DestDataType"].isAnyFloat8():
           if self.kernel["ProblemType"]["StochasticRounding"]:
             # Note: Current stochastic rounding FP8 converter does not support pack version
-            convertModule = stochasticRoundingCvt(self, gwvw=self.gwvw, destIdx=destIdx, elementSumIdx=self.ss.elementSumIdx[elementIdx], fp8CVTVgprStruct=self.cvtVgprStruct, \
-                                                  tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, vgprTmp=vgprRND, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+            convertModule = stochasticRoundingCvt(self, gwvw=self.gwvw, destIdx=destIdx, elementSumIdx=packSrcIdx, fp8CVTVgprStruct=self.cvtVgprStruct, \
+                                                  tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, vgprTmp=vgprRND, inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
           else:
-            packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], fp8CVTVgprStruct=self.cvtVgprStruct, \
-                                       tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+            packModule = self.packdata(self.gwvw, destIdx, packSrcIdx, fp8CVTVgprStruct=self.cvtVgprStruct, \
+                                       tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
         elif self.kernel["ProblemType"]["DestDataType"].isAnyBFloat8():
           # TODO: BF8 stochastic rounding is not yet supported here.
           #       VCvtSRF32toBF8 instruction exists but stochasticRoundingCvt() only emits VCvtSRF32toFP8.
           #       To support BF8 SR: add SR branch here, generalize stochasticRoundingCvt() to accept bf8CVTVgprStruct,
           #       and select VCvtSRF32toBF8 based on DestDataType.
-          packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], bf8CVTVgprStruct=self.cvtVgprStruct, \
-                                     tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+          packModule = self.packdata(self.gwvw, destIdx, packSrcIdx, bf8CVTVgprStruct=self.cvtVgprStruct, \
+                                     tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
         elif self.kernel["ProblemType"]["DestDataType"].isInt32():
           if self.kernel["ProblemType"]["ComputeDataType"].isSingle() and ((self.parentWriter.states.useBias == DataDirection.READ) or self.kernel["ActivationFuncCall"] or self.applyAlpha or self.beta):
-            convertModule = convertData(self.gwvw, self.ss.elementSumIdx[elementIdx], cvtType=CvtType.CVT_F32_to_I32, \
-                                        inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+            convertModule = convertData(self.gwvw, packSrcIdx, cvtType=CvtType.CVT_F32_to_I32, \
+                                        inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
         elif self.kernel["ProblemType"]["DestDataType"].isInt8():
           if self.kernel["ProblemType"]["ComputeDataType"].isSingle() and ((self.parentWriter.states.useBias == DataDirection.READ) or self.kernel["ActivationFuncCall"] or self.applyAlpha or self.beta):
-            convertModule = convertData(self.gwvw, self.ss.elementSumIdx[elementIdx], cvtType=CvtType.CVT_F32_to_I32, roundType=RoundType.ROUND_TO_NEAREST_EVEN, \
-                                        inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
-          packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], self.cvtVgprStruct, self.tmpS01,
-                                     SaturateTypeInt8=SaturateTypeInt8, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+            convertModule = convertData(self.gwvw, packSrcIdx, cvtType=CvtType.CVT_F32_to_I32, roundType=RoundType.ROUND_TO_NEAREST_EVEN, \
+                                        inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
+          packModule = self.packdata(self.gwvw, destIdx, packSrcIdx, self.cvtVgprStruct, self.tmpS01,
+                                     SaturateTypeInt8=SaturateTypeInt8, inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
 
       if self.parentWriter.states.asmCaps["HasWMMA_V1"] and self.kernel["EnableMatrixInstruction"] and self.kernel["ProblemType"]["DestDataType"].isHalf() and (not self.kernel["ProblemType"]["HighPrecisionAccumulate"]):
         for vi in range(0, self.gwvw):
