@@ -2787,9 +2787,11 @@ class LogicalScheduler:
             for tid in self._tail_unused_tile_ids.get(tensor, ()):
                 tile = tile_list[tid]
                 pool = tile.regList.pool
-                for j, v in enumerate(tile):
-                    if j % 4 == 0:                # match _alloc_tiles block stride
-                        pool.checkIn(v)
+                # Tiles are allocated as single contiguous blocks; the base
+                # register is the only valid pool checkout handle. Checking in
+                # every 4th register (the old multi-block stride) would pass
+                # non-handle registers to the pool and risk double-free/overlap.
+                pool.checkIn(tile.regList.indices[0])
                 self._tail_freed_tile_ids[tensor].add(tid)
 
     def _realloc_tail_tiles_flat(self, writer, peaks):
