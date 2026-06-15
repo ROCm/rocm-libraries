@@ -112,6 +112,18 @@ void testing_syev_heev_bad_arg()
     rocblas_stride stE = 1;
     I bc = 1;
 
+#ifndef ROCSOLVER_ENABLE_EIGENSOLVERS_64
+    // 64-bit API disabled: entry points must report not_implemented (see note in testing_syev_heev).
+    if constexpr(std::is_same<I, int64_t>::value)
+    {
+        EXPECT_ROCBLAS_STATUS(rocsolver_syev_heev(STRIDED, handle, evect, uplo, n, (T*)nullptr, lda,
+                                                  stA, (S*)nullptr, stD, (S*)nullptr, stE,
+                                                  (I*)nullptr, bc),
+                              rocblas_status_not_implemented);
+        return;
+    }
+#endif
+
     if(BATCHED)
     {
         // memory allocations
@@ -398,6 +410,26 @@ void testing_syev_heev(Arguments& argus)
     rocblas_fill uplo = char2rocblas_fill(uploC);
     I bc = argus.batch_count;
     rocblas_int hot_calls = argus.iters;
+
+#ifndef ROCSOLVER_ENABLE_EIGENSOLVERS_64
+    // The 64-bit eigensolver API is gated behind the ROCSOLVER_ENABLE_EIGENSOLVERS_64
+    // feature flag; when the flag is off the _64 entry points must report
+    // rocblas_status_not_implemented instead of running.
+    if constexpr(std::is_same<I, int64_t>::value)
+    {
+        if(BATCHED)
+            EXPECT_ROCBLAS_STATUS(rocsolver_syev_heev(STRIDED, handle, evect, uplo, n,
+                                                      (T* const*)nullptr, lda, stA, (S*)nullptr,
+                                                      stD, (S*)nullptr, stE, (I*)nullptr, bc),
+                                  rocblas_status_not_implemented);
+        else
+            EXPECT_ROCBLAS_STATUS(rocsolver_syev_heev(STRIDED, handle, evect, uplo, n, (T*)nullptr,
+                                                      lda, stA, (S*)nullptr, stD, (S*)nullptr, stE,
+                                                      (I*)nullptr, bc),
+                                  rocblas_status_not_implemented);
+        return;
+    }
+#endif
 
     if(argus.alg_mode == 1)
     {

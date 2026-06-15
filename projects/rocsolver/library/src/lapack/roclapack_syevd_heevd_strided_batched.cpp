@@ -211,7 +211,7 @@ rocblas_status rocsolver_ssyevd_strided_batched_64(rocblas_handle handle,
                                                    int64_t* info,
                                                    const int64_t batch_count)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
 
     return rocsolver::rocsolver_syevd_heevd_strided_batched_impl<float>(
         handle, evect, uplo, n, A, lda, strideA, D, strideD, E, strideE, info, batch_count);
@@ -234,7 +234,7 @@ rocblas_status rocsolver_dsyevd_strided_batched_64(rocblas_handle handle,
                                                    int64_t* info,
                                                    const int64_t batch_count)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
 
     return rocsolver::rocsolver_syevd_heevd_strided_batched_impl<double>(
         handle, evect, uplo, n, A, lda, strideA, D, strideD, E, strideE, info, batch_count);
@@ -257,7 +257,7 @@ rocblas_status rocsolver_cheevd_strided_batched_64(rocblas_handle handle,
                                                    int64_t* info,
                                                    const int64_t batch_count)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
 
     return rocsolver::rocsolver_syevd_heevd_strided_batched_impl<rocblas_float_complex>(
         handle, evect, uplo, n, A, lda, strideA, D, strideD, E, strideE, info, batch_count);
@@ -280,7 +280,7 @@ rocblas_status rocsolver_zheevd_strided_batched_64(rocblas_handle handle,
                                                    int64_t* info,
                                                    const int64_t batch_count)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
 
     return rocsolver::rocsolver_syevd_heevd_strided_batched_impl<rocblas_double_complex>(
         handle, evect, uplo, n, A, lda, strideA, D, strideD, E, strideE, info, batch_count);

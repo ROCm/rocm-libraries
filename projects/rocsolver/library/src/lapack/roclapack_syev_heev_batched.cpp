@@ -197,7 +197,7 @@ rocblas_status rocsolver_ssyev_batched_64(rocblas_handle handle,
                                           int64_t* info,
                                           const int64_t batch_count)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
 
     return rocsolver::rocsolver_syev_heev_batched_impl<float>(
         handle, evect, uplo, n, A, lda, D, strideD, E, strideE, info, batch_count);
@@ -219,7 +219,7 @@ rocblas_status rocsolver_dsyev_batched_64(rocblas_handle handle,
                                           int64_t* info,
                                           const int64_t batch_count)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
 
     return rocsolver::rocsolver_syev_heev_batched_impl<double>(
         handle, evect, uplo, n, A, lda, D, strideD, E, strideE, info, batch_count);
@@ -241,7 +241,7 @@ rocblas_status rocsolver_cheev_batched_64(rocblas_handle handle,
                                           int64_t* info,
                                           const int64_t batch_count)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
 
     return rocsolver::rocsolver_syev_heev_batched_impl<rocblas_float_complex>(
         handle, evect, uplo, n, A, lda, D, strideD, E, strideE, info, batch_count);
@@ -263,7 +263,7 @@ rocblas_status rocsolver_zheev_batched_64(rocblas_handle handle,
                                           int64_t* info,
                                           const int64_t batch_count)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
 
     return rocsolver::rocsolver_syev_heev_batched_impl<rocblas_double_complex>(
         handle, evect, uplo, n, A, lda, D, strideD, E, strideE, info, batch_count);

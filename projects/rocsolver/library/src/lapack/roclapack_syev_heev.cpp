@@ -178,7 +178,7 @@ rocblas_status rocsolver_ssyev_64(rocblas_handle handle,
                                   float* E,
                                   int64_t* info)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
 
     return rocsolver::rocsolver_syev_heev_impl<float>(handle, evect, uplo, n, A, lda, D, E, info);
 #else
@@ -196,7 +196,7 @@ rocblas_status rocsolver_dsyev_64(rocblas_handle handle,
                                   double* E,
                                   int64_t* info)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
 
     return rocsolver::rocsolver_syev_heev_impl<double>(handle, evect, uplo, n, A, lda, D, E, info);
 #else
@@ -214,7 +214,7 @@ rocblas_status rocsolver_cheev_64(rocblas_handle handle,
                                   float* E,
                                   int64_t* info)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
 
     return rocsolver::rocsolver_syev_heev_impl<rocblas_float_complex>(handle, evect, uplo, n, A,
                                                                       lda, D, E, info);
@@ -233,7 +233,7 @@ rocblas_status rocsolver_zheev_64(rocblas_handle handle,
                                   double* E,
                                   int64_t* info)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
 
     return rocsolver::rocsolver_syev_heev_impl<rocblas_double_complex>(handle, evect, uplo, n, A,
                                                                        lda, D, E, info);
