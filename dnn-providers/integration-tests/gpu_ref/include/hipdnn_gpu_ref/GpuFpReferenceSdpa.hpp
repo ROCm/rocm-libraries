@@ -89,6 +89,12 @@ public:
         std::vector<int64_t> maskStrides;
         if(attnMask != nullptr)
         {
+            // The kernel right-aligns the mask to [B, H, Sq, Skv] and indexes
+            // args.maskDims/maskStr (size 4); a rank>4 mask would read out of bounds.
+            if(attnMask->dims().empty() || attnMask->dims().size() > 4)
+            {
+                throw std::invalid_argument("GpuFpReferenceSdpa: attention mask must be rank 1..4");
+            }
             maskPtr = attnMask->memory().deviceData();
             maskDims = attnMask->dims();
             maskStrides = attnMask->strides();
@@ -144,6 +150,12 @@ private:
         const auto numHeadsV = vDims[1];
         const auto seqKv = kDims[2];
         const auto headDimV = vDims[3];
+
+        if(batch <= 0 || numHeads <= 0 || seqQ <= 0 || headDim <= 0 || numHeadsK <= 0
+           || numHeadsV <= 0 || seqKv <= 0 || headDimV <= 0)
+        {
+            throw std::invalid_argument("GpuFpReferenceSdpa: all dimensions must be positive");
+        }
 
         if(kDims[0] != batch || vDims[0] != batch || oDims[0] != batch)
         {

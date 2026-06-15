@@ -5,12 +5,19 @@
 // Compiled via HipRTC with -DQ_TYPE=<type> -DK_TYPE=<type> -DV_TYPE=<type>
 // -DO_TYPE=<type> -DCOMPUTE_TYPE=<type>.
 // One thread per output element (b, h, sq, dv). Uses stride-based indexing.
-// Numerically mirrors CpuFpReferenceSdpa::forward (float compute path).
+// Reproduces the algorithm of CpuFpReferenceSdpa::forward; outputs agree with the
+// CPU oracle within the test tolerance (host libm vs device math, and the softmax
+// reduction ordering, are not bit-identical).
 
 #include "GpuRefSdpaArgs.h"
 #include "GpuRefTypes.h"
 
 using namespace gpu_ref;
+
+// The kernel computes in float: expf, -__builtin_huge_valf(), and the std::exp-matching
+// softmax all assume it. COMPUTE_TYPE is float by design (see buildSdpaDefines); enforce it
+// so a non-float compute path fails loudly at compile time instead of silently truncating.
+static_assert(__is_same(COMPUTE_TYPE, float), "GpuRefSdpaFwd requires COMPUTE_TYPE == float");
 
 extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
 {
@@ -129,8 +136,9 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
     for(long long skv = 0; skv < args.seqKv; ++skv)
     {
         COMPUTE_TYPE s = score(skv);
-        // COMPUTE_TYPE is float by design (see buildSdpaDefines), so the
-        // float-precision expf matches the oracle's std::exp<float> exactly.
+        // COMPUTE_TYPE is float (enforced by the static_assert above), so expf is the
+        // correct-precision call; device expf and the oracle's host std::exp<float> agree
+        // to within the test tolerance, not bit-for-bit.
         COMPUTE_TYPE e = expf(s - maxVal);
         sumExp += e;
         long long vIdx = b * args.vStr.s[0] + kvHeadV * args.vStr.s[1] + skv * args.vStr.s[2]

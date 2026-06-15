@@ -67,15 +67,11 @@ void compareGpuVsCpuSdpaFwd(Tensor<QDataType>& q,
                             Tensor<float>* attnMask = nullptr,
                             int64_t leftBound = -1,
                             int64_t rightBound = -1,
-                            bool topLeftAlignment = true,
-                            float fillRange = 1.0f)
+                            bool topLeftAlignment = true)
 {
-    q.fillWithRandomValues(
-        static_cast<QDataType>(-fillRange), static_cast<QDataType>(fillRange), kSeedQ);
-    k.fillWithRandomValues(
-        static_cast<KDataType>(-fillRange), static_cast<KDataType>(fillRange), kSeedK);
-    v.fillWithRandomValues(
-        static_cast<VDataType>(-fillRange), static_cast<VDataType>(fillRange), kSeedV);
+    q.fillWithRandomValues(static_cast<QDataType>(-1.0f), static_cast<QDataType>(1.0f), kSeedQ);
+    k.fillWithRandomValues(static_cast<KDataType>(-1.0f), static_cast<KDataType>(1.0f), kSeedK);
+    v.fillWithRandomValues(static_cast<VDataType>(-1.0f), static_cast<VDataType>(1.0f), kSeedV);
 
     CpuFpReferenceSdpa::forward<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
         q,
@@ -524,4 +520,142 @@ TYPED_TEST(GpuSdpaFwdPlain, LargerShape)
     Tensor<T> oGpu({2, 8, 512, 128});
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(q, k, v, oCpu, oGpu, sdpaFwdTolerance<T>());
+}
+
+// ============================================================================
+// Explicit (non-default) attention scale. Every case above leaves attnScaleValue
+// unset, so both references fall back to 1/sqrt(D); this passes an explicit value
+// to exercise the provided-scale path on both sides.
+// ============================================================================
+
+TYPED_TEST(GpuSdpaFwdPlain, ExplicitAttnScale)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    Tensor<T> q({2, 4, 8, 16});
+    Tensor<T> k({2, 4, 8, 16});
+    Tensor<T> v({2, 4, 8, 16});
+    Tensor<T> oCpu({2, 4, 8, 16});
+    Tensor<T> oGpu({2, 4, 8, 16});
+
+    compareGpuVsCpuSdpaFwd<T, T, T, T>(
+        q, k, v, oCpu, oGpu, sdpaFwdTolerance<T>(), /*attnScaleValue=*/0.25f);
+}
+
+// ============================================================================
+// Additive mask combined with a sliding window. Exercises the add-then-overwrite
+// ordering: the additive mask is applied first, then window positions are forced
+// to -inf. No prior case combines the two.
+// ============================================================================
+
+TYPED_TEST(GpuSdpaFwdPlain, AdditiveMaskWithSlidingWindow)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    Tensor<T> q({1, 2, 8, 16});
+    Tensor<T> k({1, 2, 8, 16});
+    Tensor<T> v({1, 2, 8, 16});
+    Tensor<T> oCpu({1, 2, 8, 16});
+    Tensor<T> oGpu({1, 2, 8, 16});
+    Tensor<float> mask({1, 2, 8, 8});
+
+    mask.fillWithRandomValues(-2.0f, 2.0f, kSeedMask);
+
+    compareGpuVsCpuSdpaFwd<T, T, T, T>(q,
+                                       k,
+                                       v,
+                                       oCpu,
+                                       oGpu,
+                                       sdpaFwdTolerance<T>(),
+                                       std::nullopt,
+                                       /*attnMask=*/&mask,
+                                       /*leftBound=*/2,
+                                       /*rightBound=*/1,
+                                       /*topLeftAlignment=*/true);
+}
+
+// ============================================================================
+// Additive mask with per-dim size-1 broadcast at the LEADING positions
+// (mask [1, 1, Sq, Skv] against [B, H, Sq, Skv]). The rank-N broadcast cases
+// above never set an interior/leading dim to 1, so the maskDims[i]==1 -> index 0
+// branch is otherwise unexercised where it actually broadcasts.
+// ============================================================================
+
+TYPED_TEST(GpuSdpaFwdPlain, AdditiveMaskBroadcastBatchHead)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    Tensor<T> q({2, 4, 8, 16});
+    Tensor<T> k({2, 4, 8, 16});
+    Tensor<T> v({2, 4, 8, 16});
+    Tensor<T> oCpu({2, 4, 8, 16});
+    Tensor<T> oGpu({2, 4, 8, 16});
+    Tensor<float> mask({1, 1, 8, 8}); // broadcast over batch and head
+
+    mask.fillWithRandomValues(-2.0f, 2.0f, kSeedMask);
+
+    compareGpuVsCpuSdpaFwd<T, T, T, T>(
+        q, k, v, oCpu, oGpu, sdpaFwdTolerance<T>(), std::nullopt, /*attnMask=*/&mask);
+}
+
+// ============================================================================
+// Additive mask with a size-1 broadcast at an INTERIOR position
+// (mask [B, 1, Sq, Skv] against [B, H, Sq, Skv]): broadcasts over head only,
+// with batch and the sequence dims fully indexed.
+// ============================================================================
+
+TYPED_TEST(GpuSdpaFwdPlain, AdditiveMaskBroadcastHeadOnly)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    Tensor<T> q({2, 4, 8, 16});
+    Tensor<T> k({2, 4, 8, 16});
+    Tensor<T> v({2, 4, 8, 16});
+    Tensor<T> oCpu({2, 4, 8, 16});
+    Tensor<T> oGpu({2, 4, 8, 16});
+    Tensor<float> mask({2, 1, 8, 8}); // broadcast over head only
+
+    mask.fillWithRandomValues(-2.0f, 2.0f, kSeedMask);
+
+    compareGpuVsCpuSdpaFwd<T, T, T, T>(
+        q, k, v, oCpu, oGpu, sdpaFwdTolerance<T>(), std::nullopt, /*attnMask=*/&mask);
+}
+
+// ============================================================================
+// Mixed precision: 16-bit Q/K/V inputs with a float (fp32) output tensor. The
+// FLOAT-output plan builders are registered (HALF/BFLOAT16 inputs -> FLOAT out)
+// but the typed suite above only uses uniform input/output dtypes. The Q/K/V
+// inputs are bit-identical across both backends, so the GPU-vs-CPU difference is
+// the float compute path only; the float tolerance applies.
+// ============================================================================
+
+TEST(GpuSdpaFwdMixedPrecision, HalfInputsFloatOutput)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<half> q({2, 4, 8, 16});
+    Tensor<half> k({2, 4, 8, 16});
+    Tensor<half> v({2, 4, 8, 16});
+    Tensor<float> oCpu({2, 4, 8, 16});
+    Tensor<float> oGpu({2, 4, 8, 16});
+
+    compareGpuVsCpuSdpaFwd<half, half, half, float>(q, k, v, oCpu, oGpu, sdpaFwdTolerance<float>());
+}
+
+TEST(GpuSdpaFwdMixedPrecision, Bfloat16InputsFloatOutput)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<bfloat16> q({2, 4, 8, 16});
+    Tensor<bfloat16> k({2, 4, 8, 16});
+    Tensor<bfloat16> v({2, 4, 8, 16});
+    Tensor<float> oCpu({2, 4, 8, 16});
+    Tensor<float> oGpu({2, 4, 8, 16});
+
+    compareGpuVsCpuSdpaFwd<bfloat16, bfloat16, bfloat16, float>(
+        q, k, v, oCpu, oGpu, sdpaFwdTolerance<float>());
 }
