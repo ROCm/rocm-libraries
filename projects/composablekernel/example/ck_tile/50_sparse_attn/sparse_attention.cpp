@@ -194,6 +194,7 @@ float jenga_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
     auto st = compute_strides(nhead, nhead_k, total_q, total_k,
                               hdim_q, hdim_v, i_perm, o_perm, is_v_rowmajor);
 
+    (void)hipGetLastError();
     ck_tile::DeviceMem q_buf(TQ.get_element_space_size_in_bytes());
     ck_tile::DeviceMem k_buf(TK.get_element_space_size_in_bytes());
     ck_tile::DeviceMem v_buf(TV.get_element_space_size_in_bytes());
@@ -307,6 +308,7 @@ float vsa_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
     auto st = compute_strides(nhead, nhead_k, total_q, total_k,
                               hdim_q, hdim_v, i_perm, o_perm, is_v_rowmajor);
 
+    (void)hipGetLastError();
     ck_tile::DeviceMem q_buf(TQ.get_element_space_size_in_bytes());
     ck_tile::DeviceMem k_buf(TK.get_element_space_size_in_bytes());
     ck_tile::DeviceMem v_buf(TV.get_element_space_size_in_bytes());
@@ -404,8 +406,13 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
     const bool is_group_mode = !seqstart_q_host.empty();
     const char* tag = is_group_mode ? "[sparge group]" : "[sparge]";
 
-    assert(hdim_q == 128 && hdim_v == 128 && block_size == 128 &&
-           "SpargeAttention currently supports only hdim=128, block_size=128");
+    if(hdim_q != 128 || hdim_v != 128 || block_size != 128)
+    {
+        std::cerr << tag << " only hdim=block_size=128 supported.\n";
+        return -1.0f;
+    }
+
+    assert(nhead % nhead_k == 0);
 
     if(bias.type < 0 || bias.type > 2)
     {
@@ -475,8 +482,8 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
     const float scale_s = (scale_s_user != 0.0f)
                               ? scale_s_user
                               : 1.0f / ck_tile::sqrt(static_cast<float>(hdim_q));
-    const std::string dtype_str =
-        std::is_same_v<DataType_, ck_tile::half_t> ? "fp16" : "bf16";
+    const std::string data_type =
+        std::is_same_v<DataType_, ck_tile::bf16_t> ? "bf16" : "fp16";
 
     (void)hipGetLastError();
     ck_tile::DeviceMem q_buf(TQ.get_element_space_size_in_bytes());
@@ -506,7 +513,7 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
                               hdim_q, hdim_v, i_perm, o_perm, is_v_rowmajor);
 
     fmha_sparge_fwd_traits fmha_traits;
-    fill_common_traits(fmha_traits, hdim_q, hdim_v, dtype_str, is_v_rowmajor, mask, bias, logits_soft_cap);
+    fill_common_traits(fmha_traits, hdim_q, hdim_v, data_type, is_v_rowmajor, mask, bias, logits_soft_cap);
     fmha_traits.is_group_mode = is_group_mode;
 
     fmha_sparge_fwd_args args;
@@ -598,6 +605,9 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         std::cerr << tag << " only hdim=block_size=128 supported.\n";
         return -1.0f;
     }
+
+    assert(nhead % nhead_k == 0);
+
     if(bias.type < 0 || bias.type > 2)
     {
         std::cerr << tag << " invalid bias.type=" << bias.type
