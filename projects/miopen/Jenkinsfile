@@ -482,24 +482,14 @@ pipeline {
     post {
         success {
             script {
-                // utils should already be loaded from pipeline execution. Only allocate a node
-                // if it's somehow null (edge case: very early pipeline failure).
-                if (utils == null) {
-                    ensureUtils()
-                }
-                if (utils != null) {
+                node {
                     utils.setGithubStatus('Math CI Summary', 'success', 'All checks have passed')
                 }
             }
         }
         failure {
             script {
-                // utils should already be loaded from pipeline execution. Only allocate a node
-                // if it's somehow null (edge case: very early pipeline failure).
-                if (utils == null) {
-                    ensureUtils()
-                }
-                if (utils != null) {
+                node {
                     utils.setGithubStatus('Math CI Summary', 'failure', 'Some checks have failed')
                     utils.sendTeamsFailureNotification(buildTheRock: params.BUILD_THEROCK_DOCKER)
                 }
