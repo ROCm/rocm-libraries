@@ -8,6 +8,16 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
   add_executable(tile_example_grouped_conv_fwd grouped_convolution_forward.cpp)
   target_compile_options(tile_example_grouped_conv_fwd PRIVATE ${EXAMPLE_CONV_COMPILE_OPTIONS})
 
+  # Instruction-cache prefetch experiment (AICK-1303). Opt-in via -DCK_CONV_INST_PREFETCH=ON
+  # (see the release-gfx1250-prefetch preset). Defines the macro that activates the prefetch
+  # sites in the fwd kernel; when ENABLE_INST_PREFETCH_PATCH=ON, ck_inst_prefetch_patch adds
+  # --save-temps and the PRE_LINK two-pass koffset patcher on this single-.o target.
+  if(CK_CONV_INST_PREFETCH)
+    include(InstPrefetchPatch)
+    target_compile_definitions(tile_example_grouped_conv_fwd PRIVATE CK_CONV_INST_PREFETCH=1)
+    ck_inst_prefetch_patch(tile_example_grouped_conv_fwd)
+  endif()
+
   add_executable(tile_example_grouped_conv_fwd_bias_clamp grouped_convolution_forward_bias_clamp.cpp)
   target_compile_options(tile_example_grouped_conv_fwd_bias_clamp PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
 

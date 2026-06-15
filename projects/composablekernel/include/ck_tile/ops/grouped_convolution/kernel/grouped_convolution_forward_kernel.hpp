@@ -18,6 +18,15 @@
 #include "ck_tile/ops/grouped_convolution/utils/transform_conv_fwd_to_gemm.hpp"
 #include "ck_tile/ops/grouped_convolution/utils/grouped_convolution_utils.hpp"
 
+// Instruction-cache prefetch experiment (AICK-1303). Default off: when
+// CK_CONV_INST_PREFETCH is unset the prefetch sites below compile to nothing, so
+// the baseline binary is byte-identical to the stock kernel. When set (-DCK_CONV_INST_PREFETCH=1)
+// plus the two-pass koffset patcher (ENABLE_INST_PREFETCH_PATCH=ON), the GEMM main loop is
+// prefetched into L1I. Only emits on gfx12+ (gfx1250 here); a no-op elsewhere.
+#ifdef CK_CONV_INST_PREFETCH
+#include "ck_tile/core/arch/inst_prefetch.hpp"
+#endif
+
 #ifdef CK_EXPERIMENTAL_BUILDER
 #include "ck_tile/builder/reflect/instance_traits_tile_grouped_convolution_forward.hpp"
 #endif
@@ -1364,12 +1373,34 @@ struct GroupedConvolutionForwardKernel
                                        const index_t block_idx_n,
                                        const CDElementwise& elfunc)
     {
+#ifdef CK_CONV_INST_PREFETCH
+        // Prefetch the GEMM main-loop instructions into L1I while the block-window /
+        // descriptor setup below runs. Target is the loop block marked before the pipeline
+        // call; koffset is filled in by script/patch_prefetch_offset.py post-compile.
+        // The sched_barrier(0) pins the prefetch here so the compiler cannot hoist the
+        // loop-preheader code above it (which would invert the prefetch/target order and
+        // produce a negative koffset).
+        enable_scalar_prefetch();
+        INST_PREFETCH(CK_CONV_FWD_GEMM_LOOP, 32);
+        __builtin_amdgcn_sched_barrier(0);
+#endif
+
         // Create block windows using specialized methods
         const auto& a_block_window  = MakeABlockWindow(a_ptr, a_desc, block_idx_m);
         const auto& b_block_window  = MakeBBlockWindow(b_ptr, b_desc, block_idx_n);
         const auto& ds_block_window = MakeDBlockWindows(ds_ptr, c_desc, block_idx_m, block_idx_n);
 
         const index_t num_loop = amd_wave_read_first_lane(TilePartitioner::GetLoopNum(gemm_k));
+
+#ifdef CK_CONV_INST_PREFETCH
+        // Prefetch target: the GEMM main loop begins here. The sched_barrier(0) pins this point
+        // so the loop-preheader is not hoisted above the prefetch site. DEFAULT mode (first
+        // instruction after this marker) is used because the prefetch and this marker share one
+        // basic block - there is no .LBB label between them, so BLOCK_ENTRY would snap backward
+        // past the prefetch and yield a negative koffset.
+        __builtin_amdgcn_sched_barrier(0);
+        INST_PREFETCH_TARGET(CK_CONV_FWD_GEMM_LOOP);
+#endif
 
         // Run GEMM cooperatively by whole workgroup.
         const auto& c_block_tile =

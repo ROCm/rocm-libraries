@@ -33,7 +33,11 @@ if(NOT DEFINED CK_INST_PREFETCH_PATCH_DEFINED)
             return()
         endif()
         # Ensure the target produces .s files needed by the patching script.
-        target_compile_options(${TARGET_NAME} PRIVATE --save-temps -Wno-gnu-line-marker)
+        # Use -save-temps=obj (not plain --save-temps): with Ninja the compiler CWD is the
+        # build root, so plain --save-temps drops the .s there, where find_asm_file (which
+        # searches under the target's object dir) cannot see it. -save-temps=obj writes the
+        # temps next to the .o, exactly where the patcher looks.
+        target_compile_options(${TARGET_NAME} PRIVATE -save-temps=obj -Wno-gnu-line-marker)
         set(_log_file "${CMAKE_BINARY_DIR}/prefetch_patch_${TARGET_NAME}.log")
         cmake_host_system_information(RESULT _nproc QUERY NUMBER_OF_LOGICAL_CORES)
         set(_extra_args "")
