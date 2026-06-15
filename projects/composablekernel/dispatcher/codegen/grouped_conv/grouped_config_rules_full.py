@@ -1694,6 +1694,7 @@ def get_configs(
             GroupedConvVariant.FORWARD: "forward",
             GroupedConvVariant.BACKWARD_DATA: "bwd_data",
             GroupedConvVariant.BACKWARD_WEIGHT: "bwd_weight",
+            GroupedConvVariant.FORWARD_DEPTHWISE: None,
         }.get(variant)
 
         if variant_str is not None:

@@ -17,7 +17,6 @@ Based on the GEMM codegen pattern.
 
 import argparse
 import importlib
-import json
 import logging
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
@@ -246,6 +245,7 @@ class GroupedConvKernelConfig:
             GroupedConvVariant.FORWARD: "fwd",
             GroupedConvVariant.BACKWARD_DATA: "bwd_data",
             GroupedConvVariant.BACKWARD_WEIGHT: "bwd_weight",
+            GroupedConvVariant.FORWARD_DEPTHWISE: "fwd",
         }[self.variant]
 
         # Core identity: variant, dtype, layout, dims
@@ -2435,10 +2435,6 @@ def main():
     }
     requested_variants = [variant_map[v] for v in args.variant]
 
-    # Validate --instance-id requires --config-file
-    if args.instance_id is not None and args.config_file is None:
-        parser.error("--instance-id requires --config-file")
-
     # Build custom config from CLI arguments
     if args.tile_m is not None or args.tile_n is not None or args.pipeline is not None:
         tile = TileConfig(
@@ -2537,8 +2533,7 @@ def main():
     # Generate (disable arch filter when using pre-validated JSON configs)
     codegen = UnifiedGroupedConvCodegen(
         output_dir=args.output,
-        gpu_target=args.arch,
-        enable_arch_filter=(args.config_file is None),
+        gpu_target=args.arch
     )
     results = codegen.generate_all(
         configs=filtered_configs, datatypes=args.datatype, parallel=True
