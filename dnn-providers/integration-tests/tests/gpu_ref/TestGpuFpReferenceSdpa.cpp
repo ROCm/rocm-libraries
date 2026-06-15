@@ -427,3 +427,101 @@ TYPED_TEST(GpuSdpaFwdPlain, FullyMaskedRowYieldsZeroNotNan)
         }
     }
 }
+
+// ============================================================================
+// Realistic head dim (D=Dv=128) with a moderate sequence length. The small
+// cases above (D=16, Sk<=8) never exercise long float accumulations: the QK^T
+// dot reduces over D and the softmax sum over Sk, so realistic lengths are what
+// actually stress (a) the GPU/CPU float-accumulation-order match behind the
+// ~1e-5 fp32 tolerance and (b) the subtract-max softmax stability (larger D ->
+// larger pre-softmax magnitudes). One HipRTC compile per dtype is reused across
+// all shapes, so this only costs kernel runtime, not a recompile.
+// ============================================================================
+
+TYPED_TEST(GpuSdpaFwdPlain, RealisticHeadDim)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    // [B=1, H=4, Sq=128, Skv=128, D=128, Dv=128]
+    Tensor<T> q({1, 4, 128, 128});
+    Tensor<T> k({1, 4, 128, 128});
+    Tensor<T> v({1, 4, 128, 128});
+    Tensor<T> oCpu({1, 4, 128, 128});
+    Tensor<T> oGpu({1, 4, 128, 128});
+
+    compareGpuVsCpuSdpaFwd<T, T, T, T>(q, k, v, oCpu, oGpu, sdpaFwdTolerance<T>());
+}
+
+// ============================================================================
+// Long sequence (Sq=Skv=256). Probes the softmax reduction length directly: the
+// running sum over 256 keys is where a GPU-vs-CPU accumulation-order mismatch
+// would show up at the tight fp32 tolerance. If fp32 ever exceeds ~1e-5 here,
+// that is a real signal (order not matched / tolerance must scale), not a flaky
+// test to loosen blindly.
+// ============================================================================
+
+TYPED_TEST(GpuSdpaFwdPlain, LongSequence)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    // [B=1, H=2, Sq=256, Skv=256, D=64, Dv=64]
+    Tensor<T> q({1, 2, 256, 64});
+    Tensor<T> k({1, 2, 256, 64});
+    Tensor<T> v({1, 2, 256, 64});
+    Tensor<T> oCpu({1, 2, 256, 64});
+    Tensor<T> oGpu({1, 2, 256, 64});
+
+    compareGpuVsCpuSdpaFwd<T, T, T, T>(q, k, v, oCpu, oGpu, sdpaFwdTolerance<T>());
+}
+
+// ============================================================================
+// Non-packed (strided) layout. Every case above uses packed/contiguous tensors,
+// so the kernel's per-tensor stride indexing is otherwise untested. BSHD is the
+// realistic attention case: logical dims stay [B, H, Sq, D] but the physical
+// layout stores sequence-major (strideOrder {3,1,2,0}), so the head/seq strides
+// are non-trivial. Both references are stride-aware (the kernel reads via the
+// SdpaStrides POD; the CPU oracle via getHostValue), so a stride-math bug would
+// surface as a mismatch here.
+// ============================================================================
+
+TYPED_TEST(GpuSdpaFwdPlain, NonPackedBshdLayout)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    // Logical [B=2, H=4, Sq=8, Skv=8, D=16, Dv=16] with BSHD physical layout.
+    Tensor<T> q({2, 4, 8, 16}, TensorLayout::BSHD);
+    Tensor<T> k({2, 4, 8, 16}, TensorLayout::BSHD);
+    Tensor<T> v({2, 4, 8, 16}, TensorLayout::BSHD);
+    Tensor<T> oCpu({2, 4, 8, 16}, TensorLayout::BSHD);
+    Tensor<T> oGpu({2, 4, 8, 16}, TensorLayout::BSHD);
+
+    compareGpuVsCpuSdpaFwd<T, T, T, T>(q, k, v, oCpu, oGpu, sdpaFwdTolerance<T>());
+}
+
+// ============================================================================
+// Larger, production-representative single-attention-layer shape: batch x heads
+// = 16, a 512-token context, and a 128 head dim. Pushes the reduction lengths
+// (Skv=512, D=128) and grid size further than RealisticHeadDim/LongSequence to
+// confirm the fp32 tolerance and softmax stability still hold at scale and the
+// launch/bounds handling is correct for a large output grid. (The reference
+// kernel recomputes QK^T per output element, so this is intentionally the
+// largest case kept in the fast suite.)
+// ============================================================================
+
+TYPED_TEST(GpuSdpaFwdPlain, LargerShape)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    // [B=2, H=8, Sq=512, Skv=512, D=128, Dv=128]
+    Tensor<T> q({2, 8, 512, 128});
+    Tensor<T> k({2, 8, 512, 128});
+    Tensor<T> v({2, 8, 512, 128});
+    Tensor<T> oCpu({2, 8, 512, 128});
+    Tensor<T> oGpu({2, 8, 512, 128});
+
+    compareGpuVsCpuSdpaFwd<T, T, T, T>(q, k, v, oCpu, oGpu, sdpaFwdTolerance<T>());
+}
