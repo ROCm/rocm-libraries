@@ -353,6 +353,63 @@ TEST_F(HwInstDescTest, Trans64_VRcpF64) {
     ASSERT_NE(desc, nullptr);
     EXPECT_TRUE(desc->has(IF_Transcendental));
     EXPECT_TRUE(desc->has(IF_Trans64));
+    // f64 transcendentals classify as TRANS (not DPMACC): TRANS is matched
+    // before DPMACC, so they never reach the DPMACC branch.
+    EXPECT_FALSE(desc->has(IF_DPMACC));
+}
+
+// ---------------------------------------------------------------------------
+// DPMACC: double-precision MACC VALU carries IF_DPMACC.
+// f64 arithmetic, f64-reading conversions, and f64 compares.
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, DPMACC_F64Arithmetic) {
+    for (const char* mn : {"v_add_f64", "v_mul_f64", "v_fma_f64", "v_max_f64", "v_min_f64"}) {
+        auto* desc = getDescByMnemonic(mn);
+        ASSERT_NE(desc, nullptr) << mn;
+        EXPECT_TRUE(desc->has(IF_VALU)) << mn;
+        EXPECT_TRUE(desc->has(IF_DPMACC)) << mn;
+        EXPECT_FALSE(desc->has(IF_Transcendental)) << mn;
+    }
+}
+
+TEST_F(HwInstDescTest, DPMACC_F64Convert) {
+    // v_cvt_u32_f64 reads f64 -> DPMACC; v_cvt_f64_u32 produces f64 -> not DPMACC.
+    auto* toU32 = getDescByMnemonic("v_cvt_u32_f64");
+    ASSERT_NE(toU32, nullptr);
+    EXPECT_TRUE(toU32->has(IF_DPMACC));
+
+    auto* toF64 = getDescByMnemonic("v_cvt_f64_u32");
+    ASSERT_NE(toF64, nullptr);
+    EXPECT_FALSE(toF64->has(IF_DPMACC));
+}
+
+TEST_F(HwInstDescTest, DPMACC_F64Compare) {
+    auto* cmp = getDescByMnemonic("v_cmp_lt_f64");
+    ASSERT_NE(cmp, nullptr);
+    EXPECT_TRUE(cmp->has(IF_DPMACC));
+
+    auto* cmpx = getDescByMnemonic("v_cmpx_eq_f64");
+    ASSERT_NE(cmpx, nullptr);
+    EXPECT_TRUE(cmpx->has(IF_DPMACC));
+
+    // class compares are DPMACC too: they run on the double-precision pipe like
+    // the relational f64 compares.
+    auto* cmpClass = getDescByMnemonic("v_cmp_class_f64");
+    ASSERT_NE(cmpClass, nullptr);
+    EXPECT_TRUE(cmpClass->has(IF_DPMACC));
+
+    auto* cmpxClass = getDescByMnemonic("v_cmpx_class_f64");
+    ASSERT_NE(cmpxClass, nullptr);
+    EXPECT_TRUE(cmpxClass->has(IF_DPMACC));
+}
+
+TEST_F(HwInstDescTest, DPMACC_F32NotMarked) {
+    // 32-bit arithmetic must not carry DPMACC.
+    for (const char* mn : {"v_add_f32", "v_mul_f32", "v_cmp_lt_f32"}) {
+        auto* desc = getDescByMnemonic(mn);
+        ASSERT_NE(desc, nullptr) << mn;
+        EXPECT_FALSE(desc->has(IF_DPMACC)) << mn;
+    }
 }
 
 // ---------------------------------------------------------------------------

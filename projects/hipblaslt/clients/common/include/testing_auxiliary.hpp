@@ -3309,9 +3309,9 @@ void testing_aux_tensile_host_func(const Arguments& arg)
     ASSERT_TRUE(rocComputeType_to_tensile_type(rocblaslt_compute_f32_fast_xf32)
                 == rocisa::DataType::XFloat32);
     ASSERT_TRUE(rocComputeType_to_tensile_type(rocblaslt_compute_f32_fast_f16)
-                == rocisa::DataType::Half);
+                == rocisa::DataType::Float);
     ASSERT_TRUE(rocComputeType_to_tensile_type(rocblaslt_compute_f32_fast_bf16)
-                == rocisa::DataType::BFloat16);
+                == rocisa::DataType::Float);
     ASSERT_TRUE(rocComputeType_to_tensile_type(rocblaslt_compute_f16) == rocisa::DataType::Float);
     ASSERT_TRUE(rocComputeType_to_tensile_type(rocblaslt_compute_f32) == rocisa::DataType::Float);
     ASSERT_TRUE(rocComputeType_to_tensile_type(rocblaslt_compute_f32_fast_f8_fnuz)

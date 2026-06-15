@@ -36,18 +36,23 @@ usage() {
     echo ""
     echo "  Requires Python 3.12 or newer."
     echo ""
-    echo "  --torch-mode <rocm|cpu|existing|none>"
+    echo "  --torch-mode <rocm|cuda|cpu|existing|none>"
     echo "                       Select how torch is provided. Default: $TORCH_MODE"
     echo "                         rocm: install ROCm torch nightly, use ROCm"
     echo "                               libraries/toolchain from the torch wheel's"
     echo "                               bundled ROCm SDK packages, and build local"
     echo "                               hipDNN/provider artifacts when absent."
+    echo "                         cuda: install CUDA torch from PyPI (or"
+    echo "                               --torch-index-url) for the PyTorch"
+    echo "                               execution backend only. hipDNN bindings,"
+    echo "                               engine plugins, and ROCm setup are skipped."
     echo "                         cpu:  install CPU-only torch and build bindings"
     echo "                               against installed ROCm/hipDNN."
     echo "                         existing:"
     echo "                               reuse torch already present in $VENV_DIR."
     echo "                               ROCm torch uses its bundled SDK libraries;"
-    echo "                               CPU/non-ROCm torch uses installed ROCm/hipDNN."
+    echo "                               CUDA torch skips hipDNN/ROCm setup;"
+    echo "                               CPU torch uses installed ROCm/hipDNN."
     echo "                         none: leave torch uninstalled and build bindings"
     echo "                               against installed ROCm/hipDNN."
     echo "  --reuse-venv         Reuse an existing $VENV_DIR instead of deleting it."
@@ -154,12 +159,18 @@ done
 
 
 case "$TORCH_MODE" in
-    rocm|cpu|existing|none) ;;
+    rocm|cuda|cpu|existing|none) ;;
     *)
-        echo "ERROR: --torch-mode must be one of: rocm, cpu, existing, none" >&2
+        echo "ERROR: --torch-mode must be one of: rocm, cuda, cpu, existing, none" >&2
         exit 1
         ;;
 esac
+
+if [ "$TORCH_MODE" = "cuda" ] && [ "$FORCE_BUILD" -eq 1 ]; then
+    echo "ERROR: --force-build is not supported with --torch-mode cuda;" >&2
+    echo "hipDNN and provider plugins require a ROCm toolchain." >&2
+    exit 1
+fi
 
 if [ "$TORCH_MODE" = "existing" ]; then
     REUSE_VENV=1
@@ -442,7 +453,12 @@ try:
 except Exception:
     print("missing")
 else:
-    print("rocm" if getattr(torch.version, "hip", None) else "cpu")
+    if getattr(torch.version, "hip", None):
+        print("rocm")
+    elif getattr(torch.version, "cuda", None):
+        print("cuda")
+    else:
+        print("cpu")
 PY
 }
 
@@ -496,6 +512,22 @@ install_torch() {
             pip install torch --index-url "$index_url"
             INSTALLED_TORCH_MODE=$(get_torch_mode)
             require_torch_mode cpu
+            ;;
+        cuda)
+            if [ "$INSTALLED_TORCH_MODE" != "missing" ]; then
+                require_torch_mode cuda
+                echo "Using existing CUDA PyTorch in $VENV_DIR."
+                return
+            fi
+            if [ -n "$TORCH_INDEX_URL" ]; then
+                echo "Installing CUDA PyTorch from $TORCH_INDEX_URL"
+                pip install torch --index-url "$TORCH_INDEX_URL"
+            else
+                echo "Installing CUDA PyTorch from PyPI"
+                pip install torch
+            fi
+            INSTALLED_TORCH_MODE=$(get_torch_mode)
+            require_torch_mode cuda
             ;;
         rocm)
             local index_url="$TORCH_INDEX_URL"
@@ -746,6 +778,14 @@ ACTIVATE_LOCAL="$VENV_DIR/bin/activate.local"
     printf 'export DNN_BENCH_WORKSPACE=%q\n' "$DNN_BENCH_WORKSPACE"
 } > "$ACTIVATE_LOCAL"
 INSTALLED_TORCH_MODE=$(get_torch_mode)
+# An existing venv with CUDA torch reaches the CUDA skip path below even when
+# --torch-mode existing was passed; building hipDNN there would silently be
+# skipped, so reject the build request as early as possible.
+if [ "$INSTALLED_TORCH_MODE" = "cuda" ] && [ "$FORCE_BUILD" -eq 1 ]; then
+    echo "ERROR: --force-build is not supported with an existing CUDA torch venv;" >&2
+    echo "building hipDNN requires a ROCm toolchain. Remove $VENV_DIR or use a ROCm torch mode." >&2
+    exit 1
+fi
 if ! grep -q "activate.local" "$VENV_DIR/bin/activate"; then
     # shellcheck disable=SC2016
     echo 'source "$(dirname "${BASH_SOURCE[0]}")/activate.local" 2>/dev/null || true' \
@@ -759,6 +799,21 @@ echo "Torch mode: $TORCH_MODE"
 # intentionally omits torch so pip never replaces the selected torch wheel.
 install_torch
 pip install -e "$SCRIPT_DIR"
+
+# CUDA torch supports only the PyTorch execution backend: no hipDNN Python
+# bindings, engine plugins, amdsmi, or ROCm prefix are installed or required.
+if [ "$INSTALLED_TORCH_MODE" = "cuda" ] || [ "$TORCH_MODE" = "cuda" ]; then
+    echo ""
+    echo "CUDA torch selected: skipping hipDNN/provider builds, hipDNN Python"
+    echo "bindings, and ROCm environment setup."
+    echo ""
+    echo "Setup complete. Activate the virtual environment with:"
+    echo "  source $VENV_DIR/bin/activate"
+    echo ""
+    echo "Run PyTorch-backend benchmarks with:"
+    echo "  python -m dnn_benchmarking --graph <graph.json> --backend pytorch"
+    exit 0
+fi
 
 # 3. Select the hipDNN/ROCm prefix used by Python bindings and provider builds.
 BINDING_PREFIX=$(select_binding_prefix)
