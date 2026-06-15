@@ -18,6 +18,7 @@ import re
 import subprocess
 from typing import Optional
 
+from ..common import torch_support
 from ._diagnostic import warn_once
 from ._tool_resolver import resolve_rocm_tool
 
@@ -25,13 +26,11 @@ _GFX_PATTERN = re.compile(r"\b(gfx[0-9a-f]+)\b", re.IGNORECASE)
 
 
 def _detect_via_torch() -> Optional[str]:
-    try:
-        import torch
-    except ImportError:
+    if not torch_support.module_available() or not torch_support.gpu_available():
         return None
     try:
-        if not torch.cuda.is_available():
-            return None
+        import torch
+
         props = torch.cuda.get_device_properties(0)
         # gcnArchName is a ROCm-specific attribute on torch.cuda device
         # properties; on CUDA builds it doesn't exist.

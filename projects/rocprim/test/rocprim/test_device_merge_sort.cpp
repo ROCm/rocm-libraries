@@ -346,23 +346,19 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-            bool is_apu = test_utils::is_apu(arch);
-            if (is_apu && test_utils::get_total_system_memory(true) <= test_utils::minimum_memory_required_bytes
-                && size >= (1 << 20))
-            {
-                std::cout << "Insufficient APU system memory. Skipping test for size = " << size << std::endl;
-                GTEST_SKIP();
-            }
-
             in_place = !in_place;
 
+            test_utils::MemCheck memcheck;
+
             // Generate data
+            MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, size)
             std::vector<key_type> keys_input = test_utils::get_random_data_wrapped<key_type>(
                 size,
                 -100,
                 100,
                 seed_value); // float16 can't exceed 65504
 
+            MEMCHECK_OR_BREAK_ALLOC_HOST(value_type, size)
             std::vector<value_type> values_input(size);
             test_utils::iota(values_input.begin(), values_input.end(), 0);
 
@@ -370,6 +366,11 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             common::device_ptr<key_type>   d_keys_output_alloc;
             common::device_ptr<value_type> d_values_input;
             common::device_ptr<value_type> d_values_output_alloc;
+
+            MEMCHECK_OR_BREAK_ALLOC_DEVICE(key_type, size)
+            MEMCHECK_OR_BREAK_ALLOC_DEVICE(key_type, in_place ? 0 : size)
+            MEMCHECK_OR_BREAK_ALLOC_DEVICE(value_type, size)
+            MEMCHECK_OR_BREAK_ALLOC_DEVICE(value_type, in_place ? 0 : size)
 
             if(!d_keys_input.resize_with_memory_check(size)
                || !d_keys_output_alloc.resize_with_memory_check(in_place ? 0 : size)
@@ -393,6 +394,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
 
             // Calculate expected results on host
             using key_value = std::pair<key_type, value_type>;
+            MEMCHECK_OR_BREAK_ALLOC_HOST(key_value, size)
             std::vector<key_value> expected(size);
             for(size_t i = 0; i < size; i++)
             {
@@ -434,6 +436,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             // allocate temporary storage
             common::device_ptr<void> d_temp_storage;
 
+            MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temp_storage_size_bytes)
             if(!d_temp_storage.resize_with_memory_check(temp_storage_size_bytes))
             {
                 std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
@@ -467,7 +470,10 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if output values are as expected
+            MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, expected.size())
             std::vector<key_type> expected_key(expected.size());
+
+            MEMCHECK_OR_BREAK_ALLOC_HOST(value_type, expected.size())
             std::vector<value_type> expected_value(expected.size());
             for(size_t i = 0; i < expected.size(); i++)
             {
@@ -479,11 +485,13 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
 
             {
                 // Copy output to host.  This is scoped so keys_output is freed immediately.
+                MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, size)
                 const auto keys_output   = d_keys_output.load();
                 ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected_key));
             }
             {
                 // Copy output to host.  This is scoped so values_output is freed immediately.
+                MEMCHECK_OR_BREAK_ALLOC_HOST(value_type, size)
                 const auto values_output = d_values_output.load();
                 ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, expected_value));
             }

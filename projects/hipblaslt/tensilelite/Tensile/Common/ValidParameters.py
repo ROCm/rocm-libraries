@@ -786,6 +786,12 @@ validParameters = { # we need to make sure this matches develop
     # The priority of these environment variables is defined as follows:
     # TENSILE_STREAMK_FIXED_GRID > TENSILE_STREAMK_DYNAMIC_GRID > TENSILE_STREAMK_MAX_CUS > TENSILE_STREAMK_GRID_MULTIPLIER
     "StreamK": [0, 1, 2, 3, 4],
+    # Force StreamK=3 to run all output tiles through the persistent DP path.
+    # When enabled, dispatch uses the single-kernel StreamK path, sets skTiles=0
+    # to skip the SK region, and keeps the normal StreamK grid selection policy.
+    # The invariant is no partial output tile fixup and no SK-region processing.
+    # Valid only with DP-first, non-atomic StreamK mode 3.
+    "StreamKForceDPOnly": [0, 1],
     # Determines if StreamK kernel uses atomics
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles
@@ -1076,8 +1082,6 @@ validParameters = { # we need to make sure this matches develop
     #   "Auto":        triggers defaulting in Solution.assignDerivedParameters. The default is
     #                  TDM iff TDMInst != 0, otherwise BufferLoad.
     "MXLoadInst": ["Auto", "TDM", "BufferLoad", "GlobalLoad"],
-    # Enable cluster barrier.
-    "ClusterBarrier": [False, True],
     # Cluster dimension. Clusters have up to 16 work-groups in a cluster, but each work-group in a
     # cluster runs on a separate WGP.
     "ClusterDim": validClusterDimensions,

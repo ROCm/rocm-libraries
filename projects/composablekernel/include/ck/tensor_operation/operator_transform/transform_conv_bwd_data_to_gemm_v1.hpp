@@ -41,7 +41,8 @@ struct TransformConvBwdDataToGemm_v1
      * When set to 1, this variable enables a custom transformation of the output tensor
      * in convolution backward data operations.
      */
-    static constexpr bool CustomTensorTransformBwdData = std::is_same_v<IndexType, index_t>;
+    static constexpr bool CustomTensorTransformBwdData = true;
+    static constexpr bool UsePaddingOnKDim             = std::is_same_v<IndexType, long_index_t>;
 
     template <index_t N>
     using NumberType =
@@ -694,7 +695,7 @@ struct TransformConvBwdDataToGemm_v1
                 ck::tensor_operation::device::PadTensorDescriptor(
                     out_gemmak0_gemmmraw_gemmak1_grid_desc,
                     make_tuple(AK0 * batch_k_, GemmMPerBlock, AK1),
-                    Sequence<false, DoPadGemmM, false>{});
+                    Sequence<UsePaddingOnKDim, DoPadGemmM, UsePaddingOnKDim>{});
 
             return out_gemmak0_gemmm_gemmak1_grid_desc;
         }
@@ -825,28 +826,28 @@ struct TransformConvBwdDataToGemm_v1
 
                     const auto out_n_hop_wop_k_grid_desc_final = transform_tensor_descriptor(
                         out_n_hop_wop_k_grid_desc,
-                        make_tuple(make_conv_bwd_data_out_transform(N_,
-                                                                    Ho_,
-                                                                    Wo_,
-                                                                    K_,
-                                                                    YDot_,
-                                                                    XDot_,
-                                                                    HTilde_,
-                                                                    WTilde_,
-                                                                    ConvDilationH_,
-                                                                    ConvDilationW_,
-                                                                    HTildeSlice,
-                                                                    WTildeSlice,
-                                                                    YDotSlice,
-                                                                    XDotSlice,
-                                                                    IHTildeSliceBegin,
-                                                                    IWTildeSliceBegin,
-                                                                    GcdStrideDilationH_,
-                                                                    GcdStrideDilationW_,
-                                                                    AK0 * batch_k_,
-                                                                    AK1,
-                                                                    GemmMPerBlock,
-                                                                    GemmKPerBlock)),
+                        make_tuple(make_conv_bwd_data_out_transform<IndexType>(N_,
+                                                                               Ho_,
+                                                                               Wo_,
+                                                                               K_,
+                                                                               YDot_,
+                                                                               XDot_,
+                                                                               HTilde_,
+                                                                               WTilde_,
+                                                                               ConvDilationH_,
+                                                                               ConvDilationW_,
+                                                                               HTildeSlice,
+                                                                               WTildeSlice,
+                                                                               YDotSlice,
+                                                                               XDotSlice,
+                                                                               IHTildeSliceBegin,
+                                                                               IWTildeSliceBegin,
+                                                                               GcdStrideDilationH_,
+                                                                               GcdStrideDilationW_,
+                                                                               AK0 * batch_k_,
+                                                                               AK1,
+                                                                               GemmMPerBlock,
+                                                                               GemmKPerBlock)),
                         make_tuple(Sequence<0, 1, 2, 3>{}),
                         make_tuple(Sequence<0, 1, 2>{}));
 
@@ -993,7 +994,7 @@ struct TransformConvBwdDataToGemm_v1
                 ck::tensor_operation::device::PadTensorDescriptor(
                     wei_gemmbk0_gemmnraw_gemmbk1_grid_desc,
                     make_tuple(BK0 * batch_k_, GemmNPerBlock, BK1),
-                    Sequence<false, DoPadGemmN, false>{});
+                    Sequence<UsePaddingOnKDim, DoPadGemmN, UsePaddingOnKDim>{});
 
             return wei_gemmbk0_gemmn_gemmbk1_grid_desc;
         }
@@ -1573,7 +1574,7 @@ struct TransformConvBwdDataToGemm_v1
             return ck::tensor_operation::device::PadTensorDescriptor(
                 out_gemmk0_gemmm_gemmk1_grid_desc,
                 make_tuple(Number<GemmKPerBlock / AK1>{}, Number<GemmMPerBlock>{}, Number<AK1>{}),
-                Sequence<true, DoPadGemmM, false>{});
+                Sequence<true, DoPadGemmM, UsePaddingOnKDim>{});
         }
         else
         {
@@ -1645,7 +1646,7 @@ struct TransformConvBwdDataToGemm_v1
             return ck::tensor_operation::device::PadTensorDescriptor(
                 out_gemmk0_gemmm_gemmk1_grid_desc,
                 make_tuple(Number<GemmKPerBlock / AK1>{}, Number<GemmMPerBlock>{}, Number<AK1>{}),
-                Sequence<true, DoPadGemmM, false>{});
+                Sequence<true, DoPadGemmM, UsePaddingOnKDim>{});
         }
     }
 
@@ -1671,7 +1672,7 @@ struct TransformConvBwdDataToGemm_v1
             return ck::tensor_operation::device::PadTensorDescriptor(
                 wei_gemmk0_gemmn_gemmk1_grid_desc,
                 make_tuple(Number<GemmKPerBlock / BK1>{}, Number<GemmNPerBlock>{}, Number<BK1>{}),
-                Sequence<true, DoPadGemmN, false>{});
+                Sequence<true, DoPadGemmN, UsePaddingOnKDim>{});
         }
         else
         {
@@ -1724,7 +1725,7 @@ struct TransformConvBwdDataToGemm_v1
             return ck::tensor_operation::device::PadTensorDescriptor(
                 wei_gemmk0_gemmn_gemmk1_grid_desc,
                 make_tuple(Number<GemmKPerBlock / BK1>{}, Number<GemmNPerBlock>{}, Number<BK1>{}),
-                Sequence<true, DoPadGemmN, false>{});
+                Sequence<true, DoPadGemmN, UsePaddingOnKDim>{});
         }
     }
 
