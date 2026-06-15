@@ -199,7 +199,14 @@ inline Config
                 std::cerr << "--dims requires a value\n";
                 exit(EXIT_FAILURE);
             }
+
             config.dims = parseList(argv[++i]);
+
+            if(config.dims.size() != 4)
+            {
+                std::cerr << "--dims must contain 4 values (N,C,H,W)\n";
+                exit(EXIT_FAILURE);
+            }
         }
         else if(arg == "--filter")
         {
@@ -252,7 +259,6 @@ inline Config
 
     return config;
 }
-// RUN FUNCTION (MATCHES DEVELOP API)
 
 template <typename F>
 bool run(F&& f)
