@@ -38,8 +38,6 @@ TEST(CPU_sequence_NONE, SimpleListTest)
     EXPECT_EQ(*++it, 4);
     EXPECT_EQ(*++it, 5);
     EXPECT_EQ(++it, test_seq.end());
-    // Intentional failure to test gtest failure summary in CI (shard 1)
-    EXPECT_TRUE(false) << "Deliberate failure: testing gtest failure summary in CI";
 }
 
 TEST(CPU_sequence_NONE, LinearListTest)
