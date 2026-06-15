@@ -9,41 +9,44 @@ convolution-forward path.
 heuristics/
   models/
     grouped_conv_forward_fp16_gfx942/
-      model_tflops.lgbm.gz    — compressed model (in-repo, ~14 MB)
+      model_tflops.lgbm.gz    — compressed LightGBM model (in-repo, ~14 MB)
       feature_spec.json       — feature schema used at training time
-      train_manifest.json     — data provenance (rows, shapes, timestamp)
+      cv_metrics_tflops.json  — cross-validation efficiency metrics
+      feature_importances_tflops.json
+      train_manifest.json     — data provenance (row count, timestamp)
   scripts/
-    convert_dsl_csv_to_parquet.py  — DSL-specific CSV→parquet converter
+    generate_validation_shapes_conv.py — held-out validation shape set
+    convert_dsl_csv_to_parquet.py      — converts sweep CSV output to parquet
   sweep/
-    ConvCandidateSweep.cpp  — candidate sweep: enumerates all DSL candidates,
-                           compiles + times each on-device, writes training CSV
-    main.cpp             — entry point (--shapes / --out CLI args)
-    CMakeLists.txt       — build definition (wraps the rocm-libraries superbuild)
-    build.sh             — build driver; run inside a ROCm container on the target arch
+    ConvCandidateSweep.cpp  — enumerates all DSL candidates per shape,
+                              compiles + times each, writes training CSV rows
+    main.cpp                — CLI entry point (--shapes / --out)
+    CMakeLists.txt          — build definition (plugs into rocm-libraries superbuild)
+    build.sh                — self-contained build driver; run inside a ROCm container
+  training/
+    train.py                — LightGBM training (GroupKFold CV, IHEM, warm-start)
+    data_pipeline.py        — parquet loader / builder used by train.py
+    feature_engine_grouped_conv.py — 97-feature extractor for grouped conv
 ```
 
-Shape generation, sampling, and LightGBM training are shared with the CK
-dispatcher heuristics pipeline and live in:
+Shape generators and the shared `feature_engine.py` base class live in:
 
 ```
 projects/composablekernel/dispatcher/heuristics/
-  generate_wide_coverage_conv.py
-  generate_edge_dims_conv.py
-  sample_conv_shapes.py
-  train.py
-  data_pipeline.py
-  feature_engine.py
-  feature_engine_grouped_conv.py
+  generate_wide_coverage_conv.py  — wide-coverage training shapes
+  generate_edge_dims_conv.py      — edge-case training shapes
+  sample_conv_shapes.py           — stratified merge + shard
+  feature_engine.py               — base class imported by feature_engine_grouped_conv.py
 ```
 
-CSV-to-parquet conversion uses the DSL-specific script in `scripts/` because
-the sweep CSV format (explicit tile columns) differs from the ckProfiler
-format expected by the shared `convert_csv_to_parquet.py`.
+`training/` scripts are copies of their canonical sources in
+`projects/composablekernel/dispatcher/heuristics/`. Apply changes to both
+locations until a shared package is established.
 
 ## How the model is used at runtime
 
-`DslMlHeuristic` loads models from the directory pointed to by the
-`CK_DSL_ML_MODEL_DIR` environment variable. The expected layout is:
+`DslMlHeuristic` loads models from the directory pointed to by
+`CK_DSL_ML_MODEL_DIR`. Expected layout:
 
 ```
 $CK_DSL_ML_MODEL_DIR/
@@ -56,131 +59,206 @@ The in-repo model is stored compressed. Decompress before use:
 
 ```bash
 gunzip -k dnn-providers/ck-dsl-provider/heuristics/models/grouped_conv_forward_fp16_gfx942/model_tflops.lgbm.gz
-# then set:
-export CK_DSL_ML_MODEL_DIR=/path/to/dir-containing-conv-gemm-fmha-subdirs
+# Point the runtime at a directory that has conv/model_tflops.lgbm:
+mkdir -p /tmp/ckdsl_models/conv
+cp dnn-providers/ck-dsl-provider/heuristics/models/grouped_conv_forward_fp16_gfx942/model_tflops.lgbm \
+   /tmp/ckdsl_models/conv/
+export CK_DSL_ML_MODEL_DIR=/tmp/ckdsl_models
 ```
 
 The decompressed `.lgbm` is excluded from git via `models/.gitignore`.
 
-## How the candidate sweep works
+---
 
-`ConvCandidateSweep.cpp` enumerates all DSL conv candidates for a given shape,
-compiles each via the DSL Python codegen (`CompileServiceBridge`), loads the
-HIP module, and times it on-device with `PerfMeasurement`. The measured result
-for every successful candidate is written to the training CSV.
+## Full retraining workflow (single machine)
 
-Note: the sweep uses the Python codegen path (pybind11 / `CompileServiceBridge`)
-intentionally — it is an offline oracle tool that must compile and time every
-candidate from scratch. The production C++ dispatcher uses pre-compiled `.hsaco`
-kernels from the `ArtifactStore` manifest and does not share this enumeration path.
+The steps below run entirely on one machine with a ROCm GPU. No cluster
+or Slurm required. All paths are relative to the repo root unless noted.
 
-Arguments:
+Variables used throughout:
 
-| Argument | Purpose |
-|---|---|
-| `--shapes <path>` | CSV of conv shapes to sweep (required) |
-| `--out <path>` | Path to write training rows; appended if file exists (required) |
-
-## Retraining workflow
-
-Variables used below:
-
-| Variable | Description |
-|---|---|
-| `HEURISTICS` | path to this directory in the repo |
-| `CK_HEURISTICS` | `projects/composablekernel/dispatcher/heuristics/` |
-| `WORK_DIR` | writable scratch directory outside the repo |
-| `N_SHARDS` | number of parallel shards (32 is typical) |
-
-### 1. Build the oracle sweep binary
-
-`build.sh` wraps the rocm-libraries superbuild. It uses container-internal
-mount paths (`/rocm-libraries` for the repo, `/work` for scratch), so
-`WORK_DIR` inside the container corresponds to wherever the scratch directory
-is mounted as `/work`.
+| Variable | Example | Description |
+|---|---|---|
+| `REPO` | `/home/AMD/cerb/rocm-libraries` | Absolute path to this repo |
+| `HEURISTICS` | `$REPO/dnn-providers/ck-dsl-provider/heuristics` | This directory |
+| `CK_HEURISTICS` | `$REPO/projects/composablekernel/dispatcher/heuristics` | Shared shape generators |
+| `WORK` | `/tmp/ckdsl_retrain` | Writable scratch directory |
 
 ```bash
-# Run inside a ROCm container on the target GPU architecture.
-# BUILD_DIR defaults to $HOME/ckdsl_sweep_build; override via env if needed.
-bash $HEURISTICS/sweep/build.sh
-# Binary: ${BUILD_DIR}/oracle_sweep/conv_candidate_sweep
-#         (default: $HOME/ckdsl_sweep_build/oracle_sweep/conv_candidate_sweep)
+REPO=/home/AMD/cerb/rocm-libraries      # adjust to your checkout
+HEURISTICS=$REPO/dnn-providers/ck-dsl-provider/heuristics
+CK_HEURISTICS=$REPO/projects/composablekernel/dispatcher/heuristics
+WORK=/tmp/ckdsl_retrain
+mkdir -p $WORK/{shapes,results,data,models}
 ```
 
-### 2. Generate and shard shapes
+---
+
+### Step 1 — Install Python dependencies
+
+Training requires LightGBM, pandas, pyarrow, and scikit-learn. The sweep
+build additionally needs pybind11 (handled automatically by `build.sh`).
 
 ```bash
-SHAPES=$WORK_DIR/shapes/dsl
-mkdir -p $SHAPES
+python3 -m venv $WORK/venv
+source $WORK/venv/bin/activate
+pip install lightgbm pandas pyarrow scikit-learn
+```
 
-python3 $CK_HEURISTICS/generate_wide_coverage_conv.py --out $SHAPES/wide_coverage_conv.csv
-python3 $CK_HEURISTICS/generate_edge_dims_conv.py     --out $SHAPES/edge_dims_conv.csv
+---
+
+### Step 2 — Generate training shapes
+
+Two generators produce complementary sets; `sample_conv_shapes.py` merges,
+deduplicates, and stratified-samples them to a target count, then optionally
+shards the result for parallel sweep runs.
+
+```bash
+python3 $CK_HEURISTICS/generate_wide_coverage_conv.py \
+    --out $WORK/shapes/wide_coverage_conv.csv
+
+python3 $CK_HEURISTICS/generate_edge_dims_conv.py \
+    --out $WORK/shapes/edge_dims_conv.csv
 
 python3 $CK_HEURISTICS/sample_conv_shapes.py \
-    --inputs $SHAPES/wide_coverage_conv.csv $SHAPES/edge_dims_conv.csv \
-    --out    $SHAPES/all_shapes.csv \
-    --target 2000 \
-    --shards $N_SHARDS \
-    --shard_dir $SHAPES
-# Produces $SHAPES/shard_00.csv .. shard_$(N_SHARDS-1).csv
+    --inputs    $WORK/shapes/wide_coverage_conv.csv \
+                $WORK/shapes/edge_dims_conv.csv \
+    --out       $WORK/shapes/all_shapes.csv \
+    --target    2000 \
+    --shards    8 \
+    --shard_dir $WORK/shapes
+
+# Produces: $WORK/shapes/all_shapes.csv
+#           $WORK/shapes/shard_00.csv .. shard_07.csv
 ```
 
-### 3. Run the sweep
+---
 
-Run once per shard. Each invocation is independent and can be parallelized
-across GPU nodes.
+### Step 3 — Build the sweep binary
+
+`build.sh` wraps the rocm-libraries superbuild. It creates a Python venv
+for pybind11 if one does not already exist, then builds `conv_candidate_sweep`
+via CMake. Run this on a machine with ROCm installed.
 
 ```bash
-RESULTS=$WORK_DIR/results/dsl_sweep_run1
-mkdir -p $RESULTS
+export BUILD_DIR=$WORK/sweep_build   # default: $HOME/ckdsl_sweep_build
 
-# For each shard index NN in 00..$(N_SHARDS-1):
-$WORK_DIR/sweep_build/oracle_sweep/conv_candidate_sweep \
-    --shapes $SHAPES/shard_NN.csv \
-    --out    $RESULTS/shard_NN.csv
+bash $HEURISTICS/sweep/build.sh
+# Binary: $WORK/sweep_build/oracle_sweep/conv_candidate_sweep
 ```
 
-### 4. Convert CSV output to parquet
+The build decompresses the in-repo model automatically so the CMake resolver
+can find it.
 
-Merge all shards before converting. Each shard CSV has a header row;
-`convert_dsl_csv_to_parquet.py` skips duplicate headers automatically.
+---
+
+### Step 4 — Run the sweep
+
+Each shard is independent. Run shards sequentially or in parallel across
+terminals. The sweep appends to the output file, so interrupted runs are
+safely resumed by re-invoking with the same `--out` path.
 
 ```bash
-cat $RESULTS/shard_*.csv > $WORK_DIR/all_shards.csv
+BINARY=$WORK/sweep_build/oracle_sweep/conv_candidate_sweep
+mkdir -p $WORK/results
 
-mkdir -p $WORK_DIR/data/dsl_run1
+for shard in $WORK/shapes/shard_*.csv; do
+    name=$(basename $shard .csv)
+    $BINARY --shapes $shard --out $WORK/results/${name}.csv
+done
+```
+
+Each output row records one (shape, candidate) timing measurement:
+`N,G,C,K,Hi,Wi,Y,X,stride_h,stride_w,pad_h,pad_w,tile_m,tile_n,tile_k,pipeline,tflops,latency_us`
+
+---
+
+### Step 5 — Convert sweep output to parquet
+
+Merge all shard CSVs and convert to the parquet format `train.py` expects.
+`convert_dsl_csv_to_parquet.py` skips duplicate header rows automatically.
+
+```bash
+cat $WORK/results/shard_*.csv > $WORK/all_shards.csv
+
 python3 $HEURISTICS/scripts/convert_dsl_csv_to_parquet.py \
-    --input   $WORK_DIR/all_shards.csv \
-    --output  $WORK_DIR/data/dsl_run1/conv_fp16_gfx942_dsl.parquet \
-    --arch    gfx942 \
-    --run-id  1
+    --input  $WORK/all_shards.csv \
+    --output $WORK/data/conv_fp16_gfx942_dsl.parquet \
+    --arch   gfx942 \
+    --run-id 1
 ```
 
-### 5. Train
+---
+
+### Step 6 — Train
+
+`train.py` imports `feature_engine.py` (the shared base class) from
+`CK_HEURISTICS`. Set `PYTHONPATH` so it is importable alongside the copies
+in `training/`.
 
 ```bash
-cd $CK_HEURISTICS
-python3 train.py \
-    --data_dir  $WORK_DIR/data/dsl_run1 \
-    --out_dir   $WORK_DIR/models/grouped_conv_forward_fp16_gfx942 \
+source $WORK/venv/bin/activate
+
+export PYTHONPATH=$CK_HEURISTICS:${PYTHONPATH:-}
+
+python3 $HEURISTICS/training/train.py \
+    --data_dir  $WORK/data \
+    --out_dir   $WORK/models/grouped_conv_forward_fp16_gfx942 \
     --operation grouped_conv \
     --dtype     fp16 \
     --arch      gfx942 \
     --targets   tflops
-# Model: $WORK_DIR/models/grouped_conv_forward_fp16_gfx942/model_tflops.lgbm
+# Model: $WORK/models/grouped_conv_forward_fp16_gfx942/model_tflops.lgbm
 ```
 
-### 6. Update the in-repo model
+`train.py` runs 5-fold GroupKFold cross-validation and prints per-fold
+TFLOPS efficiency before training the final model on all data.
+
+To warm-start from the current in-repo model (adds trees on top rather than
+retraining from scratch):
 
 ```bash
-MODEL_DIR=$HEURISTICS/models/grouped_conv_forward_fp16_gfx942
+gunzip -k $HEURISTICS/models/grouped_conv_forward_fp16_gfx942/model_tflops.lgbm.gz
 
-gzip -9 -c $WORK_DIR/models/grouped_conv_forward_fp16_gfx942/model_tflops.lgbm \
-    > $MODEL_DIR/model_tflops.lgbm.gz
-
-cp $WORK_DIR/models/grouped_conv_forward_fp16_gfx942/{feature_spec,train_manifest}.json \
-   $MODEL_DIR/
+python3 $HEURISTICS/training/train.py \
+    --data_dir   $WORK/data \
+    --out_dir    $WORK/models/grouped_conv_forward_fp16_gfx942 \
+    --operation  grouped_conv \
+    --dtype      fp16 \
+    --arch       gfx942 \
+    --targets    tflops \
+    --warm_start $HEURISTICS/models/grouped_conv_forward_fp16_gfx942
 ```
 
-Commit the updated files, then run the `ConvOracleSweepGfx942` GTest suite
-to validate heuristic efficiency ≥90% on the canonical shape set before merging.
+---
+
+### Step 7 — Update the in-repo model
+
+When CV efficiency is satisfactory, compress and commit:
+
+```bash
+MODEL_SRC=$WORK/models/grouped_conv_forward_fp16_gfx942
+MODEL_DST=$HEURISTICS/models/grouped_conv_forward_fp16_gfx942
+
+gzip -9 -c $MODEL_SRC/model_tflops.lgbm > $MODEL_DST/model_tflops.lgbm.gz
+
+cp $MODEL_SRC/feature_spec.json               $MODEL_DST/
+cp $MODEL_SRC/cv_metrics_tflops.json          $MODEL_DST/
+cp $MODEL_SRC/feature_importances_tflops.json $MODEL_DST/
+cp $MODEL_SRC/train_manifest.json             $MODEL_DST/
+
+git add $MODEL_DST
+git commit -m "[CK DSL] conv model: retrain fp16/gfx942 ($(date +%Y-%m-%d))"
+```
+
+Validate heuristic efficiency on the held-out validation set before merging:
+
+```bash
+python3 $HEURISTICS/scripts/generate_validation_shapes_conv.py \
+    --parquet $WORK/data/conv_fp16_gfx942_dsl.parquet \
+    --out     $WORK/shapes/validation/all_shapes.csv \
+    --shards  4
+
+# Run the sweep binary against the validation shards and compare
+# oracle vs heuristic pick to confirm mean efficiency >= 90%.
+```
