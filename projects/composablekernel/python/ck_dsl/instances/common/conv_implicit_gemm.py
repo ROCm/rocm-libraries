@@ -835,11 +835,15 @@ def _emit_frag_smem_load(
 
 
 def _choose_load_vec(spec: ImplicitGemmConvSpec) -> int:
-    """Pick the largest fp16 load vector width that divides the K tile and
-    distributes evenly over `block_size` threads. Same rule as GEMM.
+    """Pick the widest load vector width that divides the K tile and
+    distributes evenly over `block_size` threads, respecting the
+    hardware limit of 4 dwords (16 bytes) per buffer_load.
 
     Thin adapter over the shared :func:`ck_dsl.helpers.spec.choose_load_vec`."""
-    return choose_load_vec(spec.tile_m, spec.tile_n, spec.tile_k, spec.block_size)
+    _eb = {"fp16": 2, "bf16": 2, "fp32": 4}.get(spec.data.dtype_a, 2)
+    return choose_load_vec(
+        spec.tile_m, spec.tile_n, spec.tile_k, spec.block_size, elem_bytes=_eb
+    )
 
 
 def build_implicit_gemm_conv(
@@ -1116,12 +1120,14 @@ def build_implicit_gemm_conv(
             tile_cols=block_k,
             block_size=threads,
             wave_size=spec.wave_size,
+            elem_dtype=ir_dtype_a,
         )
         b_loader = AsyncTileLoader.from_tile(
             tile_rows=block_n,
             tile_cols=block_k,
             block_size=threads,
             wave_size=spec.wave_size,
+            elem_dtype=ir_dtype_b,
         )
         a_sync_loader = None
         b_sync_loader = None
@@ -1141,12 +1147,14 @@ def build_implicit_gemm_conv(
             tile_cols=block_k,
             block_size=threads,
             load_vec=load_vec,
+            elem_dtype=ir_dtype_a,
         )
         b_sync_loader = CoalescedTileLoader(
             tile_rows=block_n,
             tile_cols=block_k,
             block_size=threads,
             load_vec=load_vec,
+            elem_dtype=ir_dtype_b,
         )
 
     schedule = SchedulePolicy.for_pipeline(

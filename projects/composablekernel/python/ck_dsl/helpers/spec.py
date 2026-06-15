@@ -104,33 +104,45 @@ def validate_io(rule: IOSpecRule) -> Tuple[bool, str]:
 # ---------------------------------------------------------------------
 
 
-def choose_load_vec(tile_m: int, tile_n: int, tile_k: int, block_size: int) -> int:
-    """Pick the widest fp16 global-load vector width for a GEMM block tile.
+def choose_load_vec(
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    block_size: int,
+    elem_bytes: int = 2,
+) -> int:
+    """Pick the widest global-load vector width for a GEMM block tile.
 
-    Returns the largest ``v`` in ``(8, 4, 2, 1)`` such that ``v`` divides the
-    K tile, and the per-thread A/B load distribution is coalesced over
-    ``block_size`` threads: both ``(tile_m*tile_k)//v`` and
-    ``(tile_n*tile_k)//v`` are ``>= block_size`` and divisible by it.
+    Returns the largest ``v`` such that ``v`` divides the K tile, the
+    per-thread A/B load distribution is coalesced over ``block_size``
+    threads, and ``v * elem_bytes <= 16`` (hardware buffer_load limit
+    of 4 dwords = 16 bytes).
+
+    ``elem_bytes`` defaults to 2 (fp16/bf16); pass 4 for fp32/i32 to
+    cap the vector at 4 elements (= 4 dwords).
 
     This is the single source of truth for the compile-time picker that
     ``gemm_universal`` / ``conv_implicit_gemm`` / ``moe_gemm_fused`` each
     re-implemented; the returned ``int`` is baked into a ``const_i32`` so an
     identical result means byte-identical IR.
     """
+    # 16 bytes == 4 dwords, the hardware maximum for buffer_load_vN.
+    max_vec = 16 // elem_bytes
     threads = block_size
-    for v in (8, 4, 2, 1):
+    v = max_vec
+    while v >= 1:
         if tile_k % v:
+            v //= 2
             continue
         a_vecs = (tile_m * tile_k) // v
         b_vecs = (tile_n * tile_k) // v
-        if a_vecs < threads or b_vecs < threads:
-            continue
-        if a_vecs % threads or b_vecs % threads:
+        if a_vecs < threads or b_vecs < threads or a_vecs % threads or b_vecs % threads:
+            v //= 2
             continue
         return v
     raise ValueError(
         f"no usable load_vec for tile_m={tile_m} tile_n={tile_n} "
-        f"tile_k={tile_k} block_size={block_size}"
+        f"tile_k={tile_k} block_size={block_size} elem_bytes={elem_bytes}"
     )
 
 

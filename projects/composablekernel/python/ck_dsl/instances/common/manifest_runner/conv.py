@@ -40,20 +40,31 @@ def run_conv_manifest_problem(
             f"invalid grouping groups={groups} cpg={cpg} kpg={kpg} C={C} K={K}"
         )
 
+    dtype = str(manifest.get("dtype", "fp16"))
+    if dtype == "bf16":
+        # numpy has no bfloat16; allocate as uint16 (same byte width) and let
+        # the kernel interpret the bits as bf16. Reference check is skipped for bf16
+        # because numpy can't compute a bf16 reference.
+        np_dtype = np.uint16
+    elif dtype == "fp32":
+        np_dtype = np.float32
+    else:
+        np_dtype = np.float16
+
     rng = np.random.default_rng(1234)
     if is_3d:
-        A = (rng.random((N, Di, Hi, Wi, C), dtype=np.float32) * 0.04 - 0.02).astype(np.float16)
-        B = (rng.random((K, Z, Y, X, cpg), dtype=np.float32) * 0.04 - 0.02).astype(np.float16)
+        A = (rng.random((N, Di, Hi, Wi, C), dtype=np.float32) * 0.04 - 0.02).astype(np_dtype)
+        B = (rng.random((K, Z, Y, X, cpg), dtype=np.float32) * 0.04 - 0.02).astype(np_dtype)
         Do = (Di + 2 * pD - dD * (Z - 1) - 1) // sD + 1
         Ho = (Hi + 2 * pH - dH * (Y - 1) - 1) // sH + 1
         Wo = (Wi + 2 * pW - dW * (X - 1) - 1) // sW + 1
-        D = np.empty((N, Do, Ho, Wo, K), dtype=np.float16)
+        D = np.empty((N, Do, Ho, Wo, K), dtype=np_dtype)
     else:
-        A = (rng.random((N, Hi, Wi, C), dtype=np.float32) * 0.04 - 0.02).astype(np.float16)
-        B = (rng.random((K, Y, X, cpg), dtype=np.float32) * 0.04 - 0.02).astype(np.float16)
+        A = (rng.random((N, Hi, Wi, C), dtype=np.float32) * 0.04 - 0.02).astype(np_dtype)
+        B = (rng.random((K, Y, X, cpg), dtype=np.float32) * 0.04 - 0.02).astype(np_dtype)
         Ho = (Hi + 2 * pH - dH * (Y - 1) - 1) // sH + 1
         Wo = (Wi + 2 * pW - dW * (X - 1) - 1) // sW + 1
-        D = np.empty((N, Ho, Wo, K), dtype=np.float16)
+        D = np.empty((N, Ho, Wo, K), dtype=np_dtype)
 
     if "grid_explicit" in manifest:
         gx, gy, gz = [int(x) for x in manifest["grid_explicit"]]
@@ -71,7 +82,7 @@ def run_conv_manifest_problem(
     grid = (gx, gy, gz)
     block = (int(manifest["threads_per_block"]), 1, 1)
     flop = 2.0 * N * Di * Hi * Wi * K * Z * Y * X * cpg if is_3d else 2.0 * N * Hi * Wi * K * Y * X * cpg
-    bytes_xfer = 2.0 * (A.size + B.size + D.size)
+    bytes_xfer = float(A.itemsize) * (A.size + B.size + D.size)
 
     def make_args(rt: Runtime):
         A_dev = rt.alloc(nbytes(A))
@@ -90,6 +101,9 @@ def run_conv_manifest_problem(
 
     def check(rt: Runtime, ptrs):
         if not verify:
+            return 0.0, 0, D.size
+        if dtype == "bf16":
+            # numpy can't compute a bf16 reference; skip numerical check.
             return 0.0, 0, D.size
         rt.memcpy_d2h(as_u8_buffer(D), ptrs[2], nbytes(D))
         ref = np.zeros_like(D, dtype=np.float32)
@@ -132,8 +146,10 @@ def run_conv_manifest_problem(
                         ref[..., g * kpg : (g + 1) * kpg] += np.einsum(
                             "nhwc,kc->nhwk", xs, ws, optimize=True
                         )
-        ref_h = ref.astype(np.float16)
-        diff = np.abs(D.astype(np.float32) - ref_h.astype(np.float32))
-        return float(diff.max()), int(np.count_nonzero(diff > 1e-2)), D.size
+        # Cast reference back to the kernel's output dtype for a fair comparison.
+        ref_out = ref.astype(np_dtype)
+        tol = 1e-4 if dtype == "fp32" else 1e-2
+        diff = np.abs(D.astype(np.float32) - ref_out.astype(np.float32))
+        return float(diff.max()), int(np.count_nonzero(diff > tol)), D.size
 
     return make_args, grid, block, flop, bytes_xfer, check

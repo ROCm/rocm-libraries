@@ -93,8 +93,8 @@ def main() -> int:
     spec_grp.add_argument("--tile-m", type=int, default=64, help="block tile M")
     spec_grp.add_argument("--tile-n", type=int, default=64, help="block tile N")
     spec_grp.add_argument("--tile-k", type=int, default=64, help="block tile K")
-    spec_grp.add_argument("--warp-m", type=int, default=2,  help="warp grid M")
-    spec_grp.add_argument("--warp-n", type=int, default=2,  help="warp grid N")
+    spec_grp.add_argument("--warp-m", type=int, default=2, help="warp grid M")
+    spec_grp.add_argument("--warp-n", type=int, default=2, help="warp grid N")
     spec_grp.add_argument("--warp-tile-m", type=int, default=32, help="MFMA atom M")
     spec_grp.add_argument("--warp-tile-n", type=int, default=32, help="MFMA atom N")
     spec_grp.add_argument(
@@ -133,9 +133,9 @@ def main() -> int:
     # gfx950 (CDNA4) carries the wide 32x32x16 atom, gfx942 (CDNA3) only the
     # 32x32x8 atom. Sourcing K from the catalog keeps gfx950 output unchanged
     # while degrading cleanly to the narrow atom on gfx942 (no comgr crash).
+    dtype = args.dtype
     atom = target.mma.select_largest_k(
-        a_dtype=dtype, b_dtype=dtype, c_dtype="fp32",
-        m=args.warp_tile_m, n=args.warp_tile_n, k_max=args.tile_k,
+        a_dtype=dtype, b_dtype=dtype, c_dtype="fp32", m=args.warp_tile_m, n=args.warp_tile_n, k_max=args.tile_k
     )
     if atom is None:
         print(f"no {dtype} {args.warp_tile_m}x{args.warp_tile_n} MFMA atom for {arch}", file=sys.stderr)
@@ -249,6 +249,7 @@ def main() -> int:
         cpg=p.C,
         kpg=p.K,
         conv_layout=conv_layout,
+        dtype=dtype,
         # The kernel reads block_id.x as the N-tile index and
         # block_id.y as the M-tile index (mirrors gemm_universal).
         grid_order="NM",
@@ -256,6 +257,17 @@ def main() -> int:
         timed_iters=100,
         atoms=[f"tile.mfma_f32_32x32x{warp_tile_k}_f16"],
         extra=extra,
+        atoms=[f"tile.mfma_f32_32x32x{warp_tile_k}_{dtype}"],
+        notes=(
+            "Bake-off 1: implicit-GEMM conv via the coord-transform "
+            "DAG (ck_dsl.helpers.transforms.TensorDescriptor). A's address is "
+            "computed as (m, k) -> unmerge -> (n, ho, wo, r, s, c) -> "
+            "embed -> (n, hi, wi, c) -> naive NHWC offset, with the "
+            "conv boundary check baked into the descriptor's validity "
+            "predicate. Same algorithmic strategy as a hand-written "
+            "implicit-GEMM kernel, but expressed through CK Tile's "
+            "coordinate-transform algebra instead of inline arithmetic."
+        ),
     )
 
     paths = write_artifact(artifact, Path(args.output_dir), manifest)

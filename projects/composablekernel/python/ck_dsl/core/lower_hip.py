@@ -773,6 +773,58 @@ class _Lowerer:
             f"__builtin_memcpy(&{_name(op.result)}, &_u16_{tmp}, 2);"
         )
 
+    def _op_tile_buffer_load_vN(self, op: Op) -> None:
+        # Dtype-generic vectorised buffer load.
+        # Loads <dwords x i32> via __builtin_amdgcn_raw_buffer_load_b{32,64,128},
+        # then memcpy-punches to the target vector type (f16xN, bf16xN, f32xN).
+        rsrc, voffset, soffset = op.operands
+        dwords = int(op.attrs["dwords"])
+        elem_type = op.attrs["elem_type"]
+        n = op.result.type.count
+        # Map our IR elem name → HIP vector typedef prefix
+        _HIP_VEC = {"f16": "f16x", "bf16": "bf16x", "f32": "f32x", "i32": "i32x"}
+        hip_vec_t = f"{_HIP_VEC[elem_type]}{n}"
+        b_suffix = {1: "_b32", 2: "_b64", 4: "_b128"}[dwords]
+        raw_t = "int" if dwords == 1 else f"i32x{dwords}"
+        tmp = f"_blraw_{_name(op.result).lstrip('%')}"
+        self._emit(
+            f"{raw_t} {tmp} = __builtin_amdgcn_raw_buffer_load{b_suffix}("
+            f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
+        )
+        self._emit(
+            f"{hip_vec_t} {_name(op.result)}; "
+            f"__builtin_memcpy(&{_name(op.result)}, &{tmp}, {dwords * 4});"
+        )
+
+    def _op_tile_buffer_load(self, op: Op) -> None:
+        # Dtype-generic scalar buffer load.
+        # 2-byte types (f16, bf16) → __builtin_amdgcn_raw_buffer_load_b16.
+        # 4-byte types (f32, i32) → __builtin_amdgcn_raw_buffer_load_b32.
+        rsrc, voffset, soffset = op.operands
+        elem_type = op.attrs["elem_type"]
+        hip_t = _HIP_TYPE[elem_type]
+        tmp = f"_bl_{_name(op.result).lstrip('%')}"
+        if elem_type in ("f16", "bf16"):
+            self._emit(
+                f"unsigned short {tmp} = (unsigned short)"
+                f"__builtin_amdgcn_raw_buffer_load_b16("
+                f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
+            )
+            self._emit(
+                f"{hip_t} {_name(op.result)}; "
+                f"__builtin_memcpy(&{_name(op.result)}, &{tmp}, 2);"
+            )
+        else:
+            self._emit(
+                f"unsigned int {tmp} = (unsigned int)"
+                f"__builtin_amdgcn_raw_buffer_load_b32("
+                f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
+            )
+            self._emit(
+                f"{hip_t} {_name(op.result)}; "
+                f"__builtin_memcpy(&{_name(op.result)}, &{tmp}, 4);"
+            )
+
     def _op_tile_buffer_store_vN_f16(self, op: Op) -> None:
         # Store ops have no SSA result; use the value operand's name to
         # disambiguate per-call temporaries (multiple store_vN ops in the
