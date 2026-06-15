@@ -75,7 +75,33 @@ NB_MODULE(_stinkytofu, m) {
         .def("getMetaDataU64", &StinkyAsmModule::getMetaDataU64, nb::arg("key"),
              "Get uint64 metadata from function by key")
         .def("runOptimizationPipeline", &StinkyAsmModule::runOptimizationPipeline,
-             "Run the optimization pipeline on this module");
+             "Run the optimization pipeline on this module")
+        .def("setPluginDataI64", &StinkyAsmModule::setPluginDataI64, nb::arg("key"),
+             nb::arg("value"), "Set an integer plugin data value accessible by plugin passes")
+        .def("getPluginDataI64", &StinkyAsmModule::getPluginDataI64, nb::arg("key"),
+             nb::arg("defaultVal") = 0, "Get an integer plugin data value")
+        .def("setPluginDataStr", &StinkyAsmModule::setPluginDataStr, nb::arg("key"),
+             nb::arg("value"), "Set a string plugin data value accessible by plugin passes")
+        .def("getPluginDataStr", &StinkyAsmModule::getPluginDataStr, nb::arg("key"),
+             nb::arg("defaultVal") = "", "Get a string plugin data value")
+        .def(
+            "registerPassAtExtensionPoint",
+            [](StinkyAsmModule& self, PipelineExtensionPoint ep, const std::string& passName) {
+                self.getPassBuilder().registerAtExtensionPoint(
+                    ep, [passName](PassManager& PM, StinkyAsmModule& module) {
+                        auto pass = PassBuilder::createPassByName(passName, module);
+                        if (pass) PM.addPass(std::move(pass));
+                    });
+            },
+            nb::arg("extensionPoint"), nb::arg("passName"),
+            "Register a named C++ pass at a pipeline extension point");
+
+    // Pipeline extension point enum
+    nb::enum_<PipelineExtensionPoint>(m, "PipelineExtensionPoint")
+        .value("BeforeRegionPasses", PipelineExtensionPoint::BeforeRegionPasses)
+        .value("InnerRegionBegin", PipelineExtensionPoint::InnerRegionBegin)
+        .value("InnerRegionEnd", PipelineExtensionPoint::InnerRegionEnd)
+        .value("AfterRegionPasses", PipelineExtensionPoint::AfterRegionPasses);
 
     // ========================================================================
     // Register Types

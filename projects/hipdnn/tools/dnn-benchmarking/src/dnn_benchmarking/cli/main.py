@@ -29,7 +29,6 @@ from ..reporting.reporter import Reporter
 from .config_file import apply_config_file
 from .internal_profiling import run_internal_profiling
 from .parser import create_parser
-from .pytorch_runner_cli import run_pytorch_cli
 from .suite_runner_cli import run_suite_cli
 
 
@@ -83,21 +82,12 @@ def main() -> int:
         return 1
 
     try:
-        if args.backend == "pytorch":
-            if len(resolved_files) > 1:
-                reporter.print_error(
-                    "Suite mode is not supported with --backend pytorch"
-                )
-                return 1
-            return run_pytorch_cli(args, Path(resolved_files[0]), reporter)
-
-        else:
-            return run_suite_cli(
-                args,
-                graph_paths=[Path(p) for p in resolved_files],
-                reporter=reporter,
-                tarball_source=tarball_source,
-            )
+        return run_suite_cli(
+            args,
+            graph_paths=[Path(p) for p in resolved_files],
+            reporter=reporter,
+            tarball_source=tarball_source,
+        )
     finally:
         if tmpdirs:
             for td in tmpdirs:
