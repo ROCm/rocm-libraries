@@ -201,10 +201,10 @@ def main() -> int:
         artifact = compile_kernel(kernel, arch=arch)
 
     p = problem
-    # Build the manifest.  The standard `conv` field always holds 13 ints
-    # (2-D dims); for 3-D we fold the depth axis into the height dim so
-    # the runner can still derive the launch grid from M / N_gemm.
-    # The full 3-D shape lives in the `conv_3d` extra field.
+    # Build the manifest. For 2-D, `conv` holds 13 ints:
+    #   [N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW]
+    # For 3-D, `conv` holds 18 ints and `conv_layout` selects the parser:
+    #   [N, Di, Hi, Wi, C, K, Z, Y, X, sD, sH, sW, pD, pH, pW, dD, dH, dW]
     if p.is_3d:
         conv_field = [p.N, p.Di, p.Hi, p.Wi, p.C, p.K, p.Z, p.Y, p.X, p.sD, p.sH, p.sW, p.pD, p.pH, p.pW, p.dD, p.dH, p.dW]
         conv_layout = "implicit_gemm_3d"
