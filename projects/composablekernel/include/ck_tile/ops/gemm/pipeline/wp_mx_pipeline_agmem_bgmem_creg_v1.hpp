@@ -8,15 +8,10 @@
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_base.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_agmem_bgmem_creg_v1.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_problem.hpp"
-#include "ck_tile/ops/gemm_mx/pipeline/wp_pipeline_agmem_bgmem_creg_v1_policy.hpp"
+#include "ck_tile/ops/gemm/pipeline/wp_mx_pipeline_agmem_bgmem_creg_v1_policy.hpp"
+#include "ck_tile/ops/gemm/pipeline/wp_pipeline_agmem_bgmem_creg_v2.hpp"
 
 namespace ck_tile {
-
-template <typename GemmConfig>
-struct MXEpilogueTraits
-{
-    static constexpr index_t BlockedXDLNPerWarp = GemmConfig::Preshuffle ? 2 : 1;
-};
 
 // This pipeline extends the existing universal GEMM machinery with preshuffled-B support.
 template <typename Problem, typename PipelinePolicy = MXGemmPipelineAgBgCrPolicy>
