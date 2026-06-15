@@ -461,6 +461,53 @@ class TestPyTorchOpsNewHandlers:
         torch.testing.assert_close(tensors[8], torch.tensor([[[[6.0]]]]))
         torch.testing.assert_close(tensors[6], torch.zeros(1, 1, 1, 2))
 
+    def test_batchnorm_backward_matches_autograd(self) -> None:
+        torch.manual_seed(0)
+        x_t = torch.randn(4, 3, 2, 2, requires_grad=True)
+        gamma = torch.randn(3, requires_grad=True)
+        beta = torch.randn(3, requires_grad=True)
+        dy = torch.randn(4, 3, 2, 2)
+
+        # Independent oracle: differentiate the batchnorm-training forward
+        # expression with autograd. The handler uses a hand-derived closed-form
+        # backward, so autograd is a genuinely independent check (recompute path:
+        # no saved mean/inv-variance, epsilon 1e-5, biased variance).
+        reduce = (0, 2, 3)
+        mean = x_t.mean(dim=reduce, keepdim=True)
+        var = x_t.var(dim=reduce, unbiased=False, keepdim=True)
+        x_hat = (x_t - mean) * torch.rsqrt(var + 1e-5)
+        y = gamma.view(1, 3, 1, 1) * x_hat + beta.view(1, 3, 1, 1)
+        y.backward(dy)
+
+        graph_json = {
+            "nodes": [
+                {
+                    "type": "BatchnormBackwardAttributes",
+                    "inputs": {
+                        "dy_tensor_uid": 1,
+                        "x_tensor_uid": 2,
+                        "scale_tensor_uid": 3,
+                    },
+                    "outputs": {
+                        "dx_tensor_uid": 4,
+                        "dscale_tensor_uid": 5,
+                        "dbias_tensor_uid": 6,
+                    },
+                }
+            ]
+        }
+        tensors = {1: dy, 2: x_t.detach(), 3: gamma.detach()}
+
+        pytorch_ops.execute_graph(graph_json, tensors)
+
+        torch.testing.assert_close(tensors[4], x_t.grad, rtol=1e-4, atol=1e-5)
+        torch.testing.assert_close(
+            tensors[5].reshape(-1), gamma.grad, rtol=1e-4, atol=1e-5
+        )
+        torch.testing.assert_close(
+            tensors[6].reshape(-1), beta.grad, rtol=1e-4, atol=1e-5
+        )
+
     def test_layernorm_matches_torch_and_aux_outputs(self) -> None:
         x = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4)
         graph_json = {
