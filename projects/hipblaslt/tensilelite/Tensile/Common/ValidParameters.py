@@ -282,6 +282,19 @@ validParameters = { # we need to make sure this matches develop
     "PrefetchGlobalRead": [0, 1, 2] + list(range(3,16 + 1)),
     # number of iteration prefetch local reads from lds to VGPRs buffer = PLR
     "PrefetchLocalRead": list(range(128 + 1)),
+    # Enable global memory to GL2 cache prefetch using global_prefetch_b8 instruction (gfx1250 only).
+    # So when global reads are issued, the data is likely to be in GL2 cache.
+    # 0: disable
+    # 1: prefetch one load tile (MTxDepthU) ahead of PrefetchGlobalRead
+    # 2: prefetch two load tiles (MTxDepthU) ahead of PrefetchGlobalRead
+    # Currently we have many power of 2 assumptions for prefetchGL2 address calculation, including:
+    #   NumThreads must be power of 2
+    #   ClusterDim must be power of 2 and not [1,1]
+    #   DepthU must be power of 2
+    #   MacroTile must be power of 2
+    #   DataTypeA and DataTypeB must not be 6-bit float
+    # Also does not support GSU, StreamK and general batch yet. May remove these limitations in the future.
+    "PrefetchGL2": [0, 1, 2],
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
     # So we can schedule these localReads to the front of the loop
@@ -773,6 +786,12 @@ validParameters = { # we need to make sure this matches develop
     # The priority of these environment variables is defined as follows:
     # TENSILE_STREAMK_FIXED_GRID > TENSILE_STREAMK_DYNAMIC_GRID > TENSILE_STREAMK_MAX_CUS > TENSILE_STREAMK_GRID_MULTIPLIER
     "StreamK": [0, 1, 2, 3, 4],
+    # Force StreamK=3 to run all output tiles through the persistent DP path.
+    # When enabled, dispatch uses the single-kernel StreamK path, sets skTiles=0
+    # to skip the SK region, and keeps the normal StreamK grid selection policy.
+    # The invariant is no partial output tile fixup and no SK-region processing.
+    # Valid only with DP-first, non-atomic StreamK mode 3.
+    "StreamKForceDPOnly": [0, 1],
     # Determines if StreamK kernel uses atomics
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles
@@ -994,10 +1013,16 @@ validParameters = { # we need to make sure this matches develop
     # 0  : disable CMS even if supported
     # 1  : enable  CMS, is set to 0 if not supported
     "UseCustomMainLoopSchedule" : [-1, 0, 1],
+    # 0  : Generate original Store blocks: NonEdgeN, ThenN, and Then1 for StoreVectorWidth N
+    # 1  : Generate adaptive Store blocks: NonEdgeN, ThenN, ThenN/2, ..., Then1 and select by runtime problem size
     "AdaptiveGemm": [0, 1],
     # 0  : disable
     # 1  : merge MB and MBSK assembly code and select best GW path in runtime
     "AdaptiveGemmGSUA": [0, 1],
+    # 0  : NonTemporalA and NonTemporalB use fixed values from kernel parameters
+    # 1  : NonTemporalA and NonTemporalB are determined at runtime based on problem size and stride alignment
+    #      Adaptive selection applies to the main loop only; prefetch (prolog) and tail loop still use the fixed NonTemporalA/B
+    "AdaptiveGemmNTAB": [0, 1],
     # Add extra latency to calculate number of MFMA to insert between local read and wait
     # Negative value means reduce interval between local read and wait (for DirectToVgpr only)
     "ExtraLatencyForLR":          list(range(0,17,2)) + list(range(-80,0,10)),
@@ -1057,8 +1082,6 @@ validParameters = { # we need to make sure this matches develop
     #   "Auto":        triggers defaulting in Solution.assignDerivedParameters. The default is
     #                  TDM iff TDMInst != 0, otherwise BufferLoad.
     "MXLoadInst": ["Auto", "TDM", "BufferLoad", "GlobalLoad"],
-    # Enable cluster barrier.
-    "ClusterBarrier": [False, True],
     # Cluster dimension. Clusters have up to 16 work-groups in a cluster, but each work-group in a
     # cluster runs on a separate WGP.
     "ClusterDim": validClusterDimensions,
@@ -1067,7 +1090,14 @@ validParameters = { # we need to make sure this matches develop
     # 1: Use PLR 0.5 for A
     # 2: Use PLR 0.5 for B
     # 3: Use PLR 0.5 for both A and B
-    "HalfPLR": [0, 1, 2, 3]
+    "HalfPLR": [0, 1, 2, 3],
+    # Enable iterate-mode TDM
+    # -1: Auto. Enable per-tensor when LBSPP > 1024 B (exceeds pad_interval encoding).
+    # 0: Disabled
+    # 1: Use iterate-mode for A
+    # 2: Use iterate-mode for B
+    # 3: Use iterate-mode for both A and B
+    "TDMIterateMode": [-1, 0, 1, 2, 3]
 }
 
 newMIValidParameters = {

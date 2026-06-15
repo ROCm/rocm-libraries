@@ -16,6 +16,10 @@
   - [C++](#build-and-install-origami-c)
   - [CMake Options](#cmake-options)
   - [Origami Tests](#origami-tests)
+- [Debug Logging](#debug-logging)
+  - [Text Log](#text-log)
+  - [CSV Log](#csv-log)
+  - [Environment Variables](#environment-variables)
 - [Contribute](#contribute)
 - [How to Cite](#how-to-cite)
 
@@ -308,6 +312,55 @@ Run selector tests (requires torch):
 ```bash
 python -m pytest tests/test_selector.py -v
 ```
+
+## Debug Logging
+
+Origami includes built-in debug logging that exposes internal latency model values (cache hit rates, memory/compute latencies, tile parameters, etc.). Debug output requires the `ANALYTICAL_GEMM_DEBUG=1` environment variable to activate the debug code paths.
+
+### Text Log
+
+Write human-readable debug output to a file by setting `ORIGAMI_LOG_FILE`:
+
+```bash
+export ANALYTICAL_GEMM_DEBUG=1
+export ORIGAMI_LOG_FILE=/tmp/origami.log
+```
+
+Each GEMM evaluation produces a block of key-value lines in the log file, e.g.:
+
+```
+[DEBUG] gemm.cpp:99 - ======== Origami Debug Info ========
+[DEBUG] gemm.cpp:100 - M: 2048
+[DEBUG] gemm.cpp:101 - N: 2048
+...
+[DEBUG] gemm.cpp:116 - total_latency: 45678.9
+[DEBUG] gemm.cpp:117 - =================================
+```
+
+### CSV Log
+
+Write structured CSV output (one row per GEMM evaluation) by using a `.csv` file extension:
+
+```bash
+export ANALYTICAL_GEMM_DEBUG=1
+export ORIGAMI_LOG_FILE=/tmp/origami_debug.csv
+```
+
+The log format is inferred from the file extension: `.csv` selects CSV mode, anything else selects human-readable text mode.
+
+The CSV file contains columns for every value logged with `OLOG_DEBUG`, such as `M`, `N`, `K`, `L_mem`, `L_compute`, `H_mem_l2_A`, `total_latency`, etc. This is useful for bulk analysis of the latency model across many GEMM problems.
+
+Accumulated rows are flushed to disk in two situations:
+
+1. **At process exit** — the logger destructor writes any remaining rows.
+2. **On explicit flush or reconfiguration** — calling `Logger::flush()` writes buffered rows. Calling `Logger::update_from_env()` also flushes before applying the new configuration. Subsequent rows are appended incrementally.
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `ANALYTICAL_GEMM_DEBUG` | Set to `1` to enable debug code paths in the latency model |
+| `ORIGAMI_LOG_FILE` | Path for log output; `.csv` extension selects CSV format, any other extension selects text |
 
 ## Contribute
 

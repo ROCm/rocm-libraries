@@ -31,7 +31,7 @@ TEST(TestHipMlopsEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilders)
 {
     const HipMlopsEngine engine(1);
 
-    const HipKernelHandle dummyHandle;
+    const Handle dummyHandle;
     const MockGraph mockGraph;
     const MockEngineConfig mockConfig;
 
@@ -52,7 +52,7 @@ TEST(TestHipMlopsEngine, WorkspaceSizeReturnsPlanBuilderWorkspace)
     HipMlopsEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
-    const HipKernelHandle dummyHandle;
+    const Handle dummyHandle;
     const MockGraph mockGraph;
     const MockEngineConfig mockConfig;
 
@@ -84,7 +84,7 @@ TEST(TestHipMlopsEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
     engine.addPlanBuilder(std::move(mockPlanBuilder));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
-    const HipKernelHandle dummyHandle;
+    const Handle dummyHandle;
     const MockGraph mockGraph;
     const MockEngineConfig mockConfig;
 
@@ -100,7 +100,7 @@ TEST(TestHipMlopsEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
     HipMlopsEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
-    const HipKernelHandle dummyHandle;
+    const Handle dummyHandle;
     const MockGraph mockGraph;
     const MockEngineConfig mockConfig;
 
@@ -122,7 +122,7 @@ TEST(TestHipMlopsEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     const MockGraph mockGraph;
-    HipKernelHandle dummyHandle;
+    Handle dummyHandle;
     EXPECT_TRUE(engine.isApplicable(dummyHandle, mockGraph));
 }
 
@@ -140,7 +140,7 @@ TEST(TestHipMlopsEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
     const MockGraph mockGraph;
-    HipKernelHandle dummyHandle;
+    Handle dummyHandle;
     EXPECT_TRUE(engine.isApplicable(dummyHandle, mockGraph));
 }
 
@@ -149,7 +149,7 @@ TEST(TestHipMlopsEngine, IsApplicableReturnsFalseIfNoPlanBuilders)
     const HipMlopsEngine engine(0);
 
     const MockGraph mockGraph;
-    HipKernelHandle dummyHandle;
+    Handle dummyHandle;
     EXPECT_FALSE(engine.isApplicable(dummyHandle, mockGraph));
 }
 
@@ -163,7 +163,7 @@ TEST(TestHipMlopsEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     const MockGraph mockGraph;
-    HipKernelHandle dummyHandle;
+    Handle dummyHandle;
     EXPECT_FALSE(engine.isApplicable(dummyHandle, mockGraph));
 }
 
@@ -174,7 +174,7 @@ TEST(TestHipMlopsEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
 TEST(TestHipMlopsEngine, GetDetailsReturnsSerializedEngineDetails)
 {
     const HipMlopsEngine engine(1);
-    HipKernelHandle dummyHandle;
+    Handle dummyHandle;
     const MockGraph mockGraph;
 
     hipdnnPluginConstData_t result;
@@ -210,7 +210,7 @@ TEST(TestHipMlopsEngine, GetDetailsOnlyUsesFirstPlanBuilderCustomKnobs)
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
-    HipKernelHandle dummyHandle;
+    Handle dummyHandle;
     const MockGraph mockGraph;
 
     hipdnnPluginConstData_t result;
@@ -259,8 +259,8 @@ TEST(TestHipMlopsEngine, InitializeExecutionContextInvokesFirstApplicablePlanBui
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
     const MockGraph mockGraph;
-    const HipKernelHandle dummyHandle;
-    HipKernelContext ctx;
+    const Handle dummyHandle;
+    Context ctx;
     const MockEngineConfig mockConfig;
     EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
 
@@ -295,8 +295,8 @@ TEST(TestHipMlopsEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
     const MockGraph mockGraph;
-    const HipKernelHandle dummyHandle;
-    HipKernelContext ctx;
+    const Handle dummyHandle;
+    Context ctx;
     const MockEngineConfig mockConfig;
     EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
 
@@ -330,8 +330,8 @@ TEST(TestHipMlopsEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoAppli
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
     const MockGraph mockGraph;
-    const HipKernelHandle dummyHandle;
-    HipKernelContext ctx;
+    const Handle dummyHandle;
+    Context ctx;
     const MockEngineConfig mockConfig;
     EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
 

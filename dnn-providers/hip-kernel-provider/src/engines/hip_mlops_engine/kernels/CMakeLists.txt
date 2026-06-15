@@ -5,11 +5,13 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/KernelEmbedding.cmake")
 
 
 # List kernel files to embed
-add_kernels_for_embedding(${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchNormFwdInferSpatial.cpp
+add_kernels_for_embedding(
+    TARGET hip_kernel_provider_impl
+    FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchNormFwdInferSpatial.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchNormFwdTrainSpatial.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchNormBwdSpatial.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchnormFunctions.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/DefaultConfiguration.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/Configuration.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/ReductionFunctions.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/StaticUnroll.hpp

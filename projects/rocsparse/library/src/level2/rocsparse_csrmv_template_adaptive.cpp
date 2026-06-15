@@ -301,7 +301,7 @@ namespace rocsparse
             *rowBlocks = nRows;
             if((nRows - last_i) > static_cast<I>(ROWS_FOR_VECTOR))
             {
-                *(wgIds - 1) |= numThreadsForReduction(i - last_i);
+                *(wgIds - 1) |= numThreadsForReduction(nRows - last_i);
             }
 
             ++rowBlocks;
