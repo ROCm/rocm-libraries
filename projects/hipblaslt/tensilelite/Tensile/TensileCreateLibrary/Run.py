@@ -229,9 +229,15 @@ def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel
     objFilename = kernel._state.get("codeObjectFile", None)
     pgr = int(kernel["PrefetchGlobalRead"])
     customKernelDef = kernel._state.get("CustomKernel", None)
+    cuocc = kernel["CUOccupancy"]
+    if cuocc <= 0 and getVerbosity() >= 2:
+        print2(
+            f"[codegen] CUOccupancy={cuocc} (<=0) after codegen for kernel {asmFilename}; "
+            f"runtime will clamp to 1."
+        )
     return KernelCodeGenResult(
         err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]), \
-        kernel["WavefrontSize"], kernel["CUOccupancy"], \
+        kernel["WavefrontSize"], cuocc, \
         pgr, kernel["MathClocksUnrolledLoop"], \
         customKernelDef
     )

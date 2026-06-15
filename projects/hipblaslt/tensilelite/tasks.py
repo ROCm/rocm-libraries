@@ -86,7 +86,10 @@ def _pip_install_rocisa(c, rocisa_dir=None):
     """
     src = pathlib.Path(rocisa_dir).resolve() if rocisa_dir else pathlib.Path(__file__).parent / "rocisa"
     rocm = _detect_rocm()
-    cmake_args = f"-DROCM_PATH={rocm} -DROCISA_INCLUDE_BUILD_INFO=ON"
+    # Standalone wheel build: build the stinkytofu example plugin so it is bundled in
+    # the rocisa package (next to libstinkytofu) and exercised by the rocisa plugin
+    # tests. Default OFF in CMake so integrated/ROCm builds never ship it.
+    cmake_args = f"-DROCM_PATH={rocm} -DROCISA_INCLUDE_BUILD_INFO=ON -DSTINKYTOFU_BUILD_EXAMPLES=ON"
     if shutil.which("ccache"):
         cmake_args += " -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
     env = dict(os.environ, CMAKE_ARGS=cmake_args)

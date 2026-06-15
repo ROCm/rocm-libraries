@@ -3057,17 +3057,10 @@ TensileLite::ProblemOverride
 TensileLite::ProblemOverride TensileDataGemm2ProblemOverride(std::shared_ptr<void> gemmData)
 {
     std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-    rocisa::DataType                 computeType      = rocisa::DataType::None;
-    rocisa::DataType                 computeInputType = data->problem.computeInputTypeA();
-
+    rocisa::DataType                 computeType = rocisa::DataType::None;
     if(data->problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
     {
         computeType = rocisa::DataType::XFloat32;
-    }
-    else if(computeInputType == rocisa::DataType::BFloat16
-            || computeInputType == rocisa::DataType::Half)
-    {
-        computeType = computeInputType;
     }
     else
     {

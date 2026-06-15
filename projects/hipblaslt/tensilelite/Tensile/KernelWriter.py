@@ -38,7 +38,7 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB192, BufferLoadB32, Bu
   MFMAInstruction, MXMFMAInstruction, SAndB32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpLeU32, \
   SMFMAInstruction, SNop, SEndpgm, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, SLShiftRightB32, TensorLoadToLds, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, \
-  SCMovB64
+  SCMovB32, SCMovB64
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType, DataTypeEnum
 
@@ -80,8 +80,6 @@ class ConstValues():
   initLdsValue:int  = 0xFFFFFFFF  # Value to use for LDS Init, if enabled
   initSgprValue:int = 0x0  # Value to use for Sgpr Init, if enabled
   initVgprValue:int = 0xFFFFFFFF  # Value to use for Vgpr Init, if enabled
-
-  maxOccupancy: int = 10
 
   ldsOOB: int       = 0xF00000
 
@@ -3774,12 +3772,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.codes.gl2PrefetchIncrement = Module()
       self.codes.gl2PrefetchIncrement.add(SCmpLeU32(loopCounter, kernel["PrefetchGlobalRead"] + kernel["PrefetchGL2"], \
         comment="counterL<=PGR+GL2"))
-      self.codes.gl2PrefetchIncrement.add(SCMovB64(sgpr("GL2PrefetchIncA", 2), 0))
-      self.codes.gl2PrefetchIncrement.add(SCMovB64(sgpr("GL2PrefetchIncB", 2), 0))
+      self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncA"), 0))
+      self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncB"), 0))
       if kernel["ProblemType"]["MXBlockA"]:
-        self.codes.gl2PrefetchIncrement.add(SCMovB64(sgpr("GL2PrefetchIncMXSA", 2), 0))
+        self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncMXSA"), 0))
       if kernel["ProblemType"]["MXBlockB"]:
-        self.codes.gl2PrefetchIncrement.add(SCMovB64(sgpr("GL2PrefetchIncMXSB", 2), 0))
+        self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncMXSB"), 0))
       self.codes.gl2PrefetchIncrement.add(self.gl2PrefetchIncrementAddr(kernel, tensorParametersA, tensorParametersB))
       self.codes.gl2Prefetch = Module()
       self.codes.gl2Prefetch.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
@@ -4267,6 +4265,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if kernel["ExpertSchedulingMode"] > 0:
             pointerLWCode.add(SWaitAlu(vm_vsrc=0, comment="wait for local read to vgpr complete"))
           if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["_ScheduleIterAlg"] == 0 and kernel["PrefetchGlobalRead"] == 2:
+            if not self.states.numItersPLR:
+              pointerLWCode.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, -1, 0, \
+                "wait for local read before cross-wave TDM swap sync"))
             pointerLWCode.add(self._syncThreads(
               kernel,
               "Waiting current LR finish for next GR(TDM), sync"))
@@ -6114,6 +6115,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
     passResult = rocIsaPass(moduleKernelBody, ripo)
     kernel["MathClocksUnrolledLoop"] = passResult.cycles
 
+    # Post-rocIsaPass: rescan actual register usage and update kernel descriptor
+    # + CUOccupancy for ArchAccUnifiedRegs ISAs where removeDuplicateAssignment
+    # may have reduced the instruction-level VGPR count below the pool estimate.
+    self.updateOccupancyFromScan(kernel, moduleKernelBody)
+
     # Initialize stModule as None (will be set for supported architectures)
     stModule = None
 
@@ -6134,6 +6140,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                "DebugPass": str(globalParameters.get("StinkyTofuDebugPass") or ""),
                                "PassOrderSnapshotJson": str(globalParameters.get("StinkyTofuPassOrderSnapshotJson") or ""),
                                "EnableWaitCntInsertion": True if stinky_opt_level != 0 else not globalParameters.get("DisableSTWaitCnt", True),
+                               # True: expert scheduling mode2; False: mode 0. Independent of ScheduleIterAlg/OptLevel.
+                               "EnableESM2": kernel["EnableStinkyTofuESM2"],
                                "TileA0": kernel["ThreadTile0"],
                                "TileB0": kernel["ThreadTile1"],
                                "TileM0": kernel["MacroTile0"],
@@ -9237,6 +9245,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def removeGROffsetsVariableSgprsFromPool(self, kernel):
     return ""
+
+  def updateOccupancyFromScan(self, kernel, mkb) -> None:
+    """Override in KernelWriterAssembly to rescan actual register usage after
+    rocIsaPass optimizations and correct kernel["CUOccupancy"] + the kernel
+    descriptor's next_free_vgpr for ArchAccUnifiedRegs ISAs."""
+    pass
 
   ##############################################################################
   # Check Resources
