@@ -101,13 +101,16 @@ if ! bash "${SCRIPT_DIR}/smart_build_ci.sh"; then
         exit 0
     fi
 
-    echo "Full build mode - building all test + example executables"
-    # Build only (no run): `tests` + `examples` together cover every ctest-run
-    # executable. Examples are EXCLUDE_FROM_ALL and attached to `check`/`examples`
-    # (not to `tests` or the default `all`), so `tests` alone leaves them unbuilt
-    # and the full ctest run in smart_test.sh would mark them "Not Run". This
-    # matches what the old `ninja check` built (check's deps = tests + examples).
-    ninja -j"${NINJA_JOBS}" tests examples
+    echo "Full build mode - building the complete test/example closure (no run)"
+    # Build only (no run): `check_prebuild` is the build-only half of the CMake
+    # `check` target - a command-less aggregate of the entire test+example build
+    # closure (tests + examples + stragglers like the tile_engine multi_reduce
+    # tests that attach to check alone). `check` itself couples that closure with
+    # the ctest run, so it cannot be reused here; `check_prebuild` builds exactly
+    # the set the full ctest run in smart_test.sh executes (minus the
+    # separately-staged rocm_ck/builder suites it excludes via -LE), with no run.
+    # A single parser-free target keeps this fallback path robust and drift-proof.
+    ninja -j"${NINJA_JOBS}" check_prebuild
     process_ninja_trace
     echo ""
     echo "[OK] Smart build complete (full mode - all tests built)"

@@ -758,6 +758,11 @@ endif()
 if(NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTENSOR_REQ_LIBS_ONLY)
     # make check runs the entire set of examples and tests
     add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -C ${CMAKE_CFG_INTDIR} USES_TERMINAL)
+    # Build-only half of `check`: aggregates the full test/example build closure
+    # without running ctest, so the decoupled smart-build (build phase) can build
+    # exactly the set the test phase runs. `check` depends on this for its build
+    # side (wired after the test/example subdirectories are added, below).
+    add_custom_target(check_prebuild)
     # make smoke runs the tests and examples that runs within 30 seconds on gfx90a
     add_custom_target(smoke COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -C ${CMAKE_CFG_INTDIR} -L "SMOKE_TEST" USES_TERMINAL)
     # make regression runs the tests and examples that runs for more 30 seconds on gfx90a
@@ -858,6 +863,22 @@ if(NOT GPU_ARCHS AND USER_GPU_TARGETS AND NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTE
             PACKAGE_NAME tests # Prevent -static suffix on package name
        )
        add_subdirectory(test)
+   endif()
+
+   # Assemble the build-only closure now that test/example aggregates exist, and
+   # make `check` build it. `build-smoke-rocm-ck` is intentionally NOT added here:
+   # it is the separately-staged rocm_ck suite (excluded by smart_test's -LE), so
+   # it stays on `check` directly (above) and out of the smart-full build set.
+   if(TARGET check_prebuild)
+       if(TARGET tests)
+           add_dependencies(check_prebuild tests)
+       endif()
+       if(TARGET examples)
+           add_dependencies(check_prebuild examples)
+       endif()
+       if(TARGET check)
+           add_dependencies(check check_prebuild)
+       endif()
    endif()
 endif()
 
