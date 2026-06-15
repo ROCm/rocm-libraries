@@ -28,15 +28,7 @@ function(add_hipcub_benchmark BENCHMARK_SOURCE)
   endif()
 
   add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
-  target_include_directories(${BENCHMARK_TARGET} SYSTEM BEFORE
-    PUBLIC
-    "$<BUILD_INTERFACE:${GOOGLEBENCHMARK_ROOT}/include>"
-  )
-  target_link_libraries(${BENCHMARK_TARGET}
-    PRIVATE
-    benchmark::benchmark
-    hipcub
-  )
+  target_link_libraries(${BENCHMARK_TARGET} PRIVATE hipcub)
 
   if(WIN32)
     target_compile_definitions(${BENCHMARK_TARGET} PRIVATE BENCHMARK_STATIC_DEFINE)
