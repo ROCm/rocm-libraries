@@ -221,6 +221,12 @@ For questions about contributing community samples:
 - **Limitations**: M must be a multiple of MACRO_TILE_X (64), N must be a multiple of MACRO_TILE_Y (64), K must be a multiple of ROCWMMA_K (16); row_major only; not production-optimized
 - **Author**: Odin.Yang
 
+### Mixture-of-Experts Grouped GEMM
+- **File**: `grouped_gemm_moe.cpp`
+- **Description**: Work-list-scheduled grouped GEMM sample for MoE inference using rocWMMA. Computes per-expert `Y_e = X_e * W_e` in a single kernel launch, where tokens are pre-sorted by expert assignment and described by CSR-style `expert_offsets`. Each CTA consumes one host-built work item `(expert_id, tile_m_idx, tile_n_idx)`, uses cooperative global read, 2-segment LDS layout (A / B^T), 8 KiB Lo/Hi LDS double buffering, and float32 MFMA accumulation before casting output back to float16.
+- **Requirements**: ROCm 6.0+; gfx9 / gfx11 / gfx12 supported path, tested on RDNA4 gfx1201 (RX 9070); float16 I/O, float32 compute
+- **Limitations**: `tokens_per_expert` must be a multiple of `MACRO_TILE_X` (64), N must be a multiple of `MACRO_TILE_Y` (64), K must be a multiple of `ROCWMMA_K` (16); tokens must be pre-sorted by expert; uniform token distribution only in sample host driver; no gating-score multiplication; row_major only; not production-optimized
+- **Author**: Odin.Yang
 
 <!-- Template for documenting samples:
 ### Sample Name
