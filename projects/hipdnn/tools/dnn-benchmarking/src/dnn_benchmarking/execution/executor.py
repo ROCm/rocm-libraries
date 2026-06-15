@@ -4,11 +4,14 @@
 """Graph execution with timing for benchmarks."""
 
 import json
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional
 
 from ..common import torch_support
 from ..common.exceptions import ExecutionError, UnsupportedGraphError
-from ..config.benchmark_config import BenchmarkConfig
+from ..config.benchmark_config import (
+    BenchmarkConfig,
+    ExecutionBackendName,
+)
 from ..reporting.statistics import BenchmarkMetadata, BenchmarkResult
 from .timing import GpuTimerInterface, HipGpuTimer, Timer, create_gpu_timer
 
@@ -69,21 +72,20 @@ class Executor:
         self,
         graph_json_str: str,
         config: BenchmarkConfig,
-        timing_backend: Optional[Literal["hip", "auto", "none"]] = "auto",
+        collect_kernel_timing: bool = True,
     ) -> None:
         """Initialize executor with graph JSON and configuration.
 
         Args:
             graph_json_str: The graph as a JSON string.
             config: Benchmark configuration.
-            timing_backend: GPU timer backend to use:
-                - "hip": Force direct HIP event timing
-                - "auto": Auto-detect direct HIP timing
-                - "none": Disable GPU kernel timing, use synchronized E2E timing
+            collect_kernel_timing: When True, record per-iteration GPU kernel
+                timings via HIP events when available; otherwise collect only
+                E2E timing with stream synchronization.
         """
         self._graph_json_str = graph_json_str
         self._config = config
-        self._timing_backend = timing_backend
+        self._collect_kernel_timing = collect_kernel_timing
         self._execution_stream: Optional[int] = None
         self._graph: Any = None
         self._workspace: Any = None
@@ -330,11 +332,10 @@ class Executor:
         stream_sync_timer = None
         stream = self._get_execution_stream(handle)
 
-        # Create GPU timer if requested and available.
-        if self._timing_backend != "none":
+        # Create GPU timer when kernel timing is requested and available.
+        if self._collect_kernel_timing:
             try:
-                requested_backend = "hip" if self._timing_backend == "hip" else "auto"
-                gpu_timer = create_gpu_timer(requested_backend, stream=stream)
+                gpu_timer = create_gpu_timer(stream=stream)
             except RuntimeError as e:
                 raise ExecutionError(str(e)) from e
             if gpu_timer is not None:
@@ -372,7 +373,7 @@ class Executor:
             benchmark_iters=self._config.benchmark_iters,
             engine_id=self._config.engine_id,
             timing_backend=timing_backend_name,
-            execution_backend="hipdnn",
+            execution_backend=ExecutionBackendName.HIPDNN.value,
         )
 
         return BenchmarkResult(
