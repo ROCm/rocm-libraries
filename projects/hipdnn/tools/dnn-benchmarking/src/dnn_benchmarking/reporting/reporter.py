@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import List, Optional, TextIO
 
 from ..config.benchmark_config import BenchmarkConfig, SuiteConfig
-from .statistics import BenchmarkStats, CombinedBenchmarkStats
+from .statistics import BenchmarkStats
 from .suite_results import (
     CorrectnessResult,
     GraphResult,
@@ -63,26 +63,6 @@ class Reporter:
         self._print_line("-")
         self._print("")
 
-    def print_pytorch_header(
-        self, config: BenchmarkConfig, graph_name: str, device: str
-    ) -> None:
-        """Print PyTorch CUDA benchmark configuration header.
-
-        Args:
-            config: Benchmark configuration.
-            graph_name: Name of the graph being benchmarked.
-            device: CUDA device being used.
-        """
-        self._print_line("=")
-        self._print(f"PyTorch CUDA Benchmark: {graph_name}")
-        self._print_line("=")
-        self._print(f"Graph:      {config.graph_path}")
-        self._print(f"Device:     {device}")
-        self._print(f"Warmup:     {config.warmup_iters} iterations")
-        self._print(f"Benchmark:  {config.benchmark_iters} iterations")
-        self._print_line("-")
-        self._print("")
-
     def print_reference_header(
         self, config: BenchmarkConfig, graph_name: str, provider: str
     ) -> None:
@@ -117,25 +97,8 @@ class Reporter:
         self._print_stats_block(stats)
         self._print("")
 
-    def print_combined_stats(self, stats: CombinedBenchmarkStats) -> None:
-        """Print combined E2E and kernel execution statistics.
-
-        Args:
-            stats: Combined benchmark statistics.
-        """
-        self._print("E2E Execution Statistics:")
-        self._print_stats_block(stats.e2e_stats)
-        self._print("")
-
-        if stats.kernel_stats:
-            self._print("Kernel Execution Statistics:")
-            self._print_stats_block(stats.kernel_stats)
-        else:
-            self._print("Kernel Timing: Not available (PyTorch GPU not available)")
-        self._print("")
-
     def _print_stats_block(self, stats: BenchmarkStats) -> None:
-        """Print a statistics block (helper for print_stats/print_combined_stats).
+        """Print a statistics block (helper for print_stats).
 
         Args:
             stats: Benchmark statistics.
@@ -258,7 +221,8 @@ class Reporter:
             return
         cpu = env.get("cpu_model") or "unknown CPU"
         gpu = env.get("gpu_model") or "unknown GPU"
-        rocm = env.get("rocm_version") or "unknown ROCm"
+        cuda = env.get("cuda_version")
+        cudnn = env.get("cudnn_version")
         cu = env.get("gpu_compute_units")
         hbm = env.get("gpu_hbm_gb")
         gpu_extras = []
@@ -269,7 +233,16 @@ class Reporter:
         gpu_label = gpu + (f" ({', '.join(gpu_extras)})" if gpu_extras else "")
         self._print(f"Host:    {cpu}")
         self._print(f"GPU:     {gpu_label}")
-        self._print(f"ROCm:    {rocm}")
+        # A CUDA wheel reports cuda_version; a ROCm wheel does not. Show the
+        # platform-appropriate label so CUDA hosts never print a ROCm line
+        # (and vice versa).
+        if cuda is not None:
+            self._print(f"CUDA:    {cuda}")
+            if cudnn is not None:
+                self._print(f"cuDNN:   {cudnn}")
+        else:
+            rocm = env.get("rocm_version") or "unknown ROCm"
+            self._print(f"ROCm:    {rocm}")
 
     def print_suite_graph_start(self, index: int, total: int, graph_name: str) -> None:
         """Print per-graph progress line at start (no trailing newline).
@@ -751,13 +724,13 @@ class Reporter:
         if correctness.tolerance_match is None:
             reason = correctness.error_message or "no reference comparison performed"
             self._print(f"Reference Validation: SKIPPED ({reason})")
-            self._print(f"  Provider: {suite_config.reference_provider}")
+            self._print(f"  Provider: {suite_config.validation.provider.value}")
             self._print("")
             return
 
         status = "PASSED" if correctness.tolerance_match else "FAILED"
         self._print(f"Reference Validation: {status}")
-        self._print(f"  Provider: {suite_config.reference_provider}")
+        self._print(f"  Provider: {suite_config.validation.provider.value}")
         self._print(f"  (rtol={correctness.rtol:.0e}, atol={correctness.atol:.0e})")
         if not correctness.tolerance_match:
             if correctness.max_abs_diff is not None:
@@ -779,10 +752,6 @@ class Reporter:
     def print_no_graphs_found(self, pattern: str) -> None:
         """Print message when no graph files match the given pattern."""
         self._print(f"No graph files found matching: {pattern}")
-
-    def print_results_exported(self, path: Path) -> None:
-        """Print JSON export confirmation."""
-        self._print(f"Results exported to: {path}")
 
     def print_no_engines_applicable(self) -> None:
         """Print inline note when no engines matched for a graph."""

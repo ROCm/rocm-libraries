@@ -45,6 +45,77 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_strict)
 
 
+def expected_timing_backend() -> str:
+    """Return the GPU timing backend the executor selects on this host.
+
+    ROCm uses direct HIP events ("hip"); CUDA uses torch.cuda events
+    ("torch"). Lets GPU-generic tests assert the right backend without
+    pinning to one platform.
+    """
+    from dnn_benchmarking.common import torch_support
+
+    return "hip" if torch_support.is_rocm_build() else "torch"
+
+
+def skip_if_no_gpu_torch() -> None:
+    """Skip unless torch can drive a GPU (ROCm or CUDA), for generic tests."""
+    try:
+        import torch
+    except ImportError:
+        pytest.skip("PyTorch not available")
+
+    if not torch.cuda.is_available():
+        pytest.skip("PyTorch GPU not available")
+
+    # The executor picks the timing backend per platform (HIP on ROCm,
+    # torch.cuda on CUDA). HIP timing lazily imports hipdnn_frontend, so a
+    # ROCm-torch host without those bindings would error mid-benchmark rather
+    # than skip. Require the backend the executor will actually use.
+    from dnn_benchmarking.execution import timing
+
+    if expected_timing_backend() not in timing.get_available_backends():
+        pytest.skip(
+            "resolved GPU timing backend unavailable "
+            "(e.g. hipdnn_frontend HIP bindings missing)"
+        )
+
+
+def skip_if_no_rocm_torch() -> None:
+    """Skip unless this is a ROCm torch build with usable HIP bindings."""
+    try:
+        import torch
+    except ImportError:
+        pytest.skip("PyTorch not available")
+
+    if not torch.cuda.is_available():
+        pytest.skip("PyTorch GPU not available")
+
+    if torch.version.hip is None:
+        pytest.skip("ROCm PyTorch build required")
+
+    try:
+        import hipdnn_frontend as hipdnn
+
+        if hipdnn.hip_get_device_count() <= 0:
+            pytest.skip("No HIP GPU available")
+    except Exception as e:
+        pytest.skip(f"hipdnn_frontend HIP bindings not available: {e}")
+
+
+def skip_if_no_cuda_torch() -> None:
+    """Skip unless this is a CUDA (non-ROCm) torch build with a usable GPU."""
+    try:
+        import torch
+    except ImportError:
+        pytest.skip("PyTorch not available")
+
+    if torch.version.cuda is None or torch.version.hip is not None:
+        pytest.skip("CUDA PyTorch build required")
+
+    if not torch.cuda.is_available():
+        pytest.skip("PyTorch GPU not available")
+
+
 class DummyHipTimer(GpuTimerInterface):
     """Minimal timer implementation for factory tests.
 

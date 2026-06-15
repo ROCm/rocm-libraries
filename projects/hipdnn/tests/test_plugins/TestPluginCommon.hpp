@@ -21,6 +21,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_plugin_sdk/PluginDataTypeHelpers.hpp>
 #include <hipdnn_plugin_sdk/PluginHelpers.hpp>
@@ -660,8 +661,12 @@ public:
             }
 
             flatbuffers::FlatBufferBuilder builder;
-            auto newEngineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
-                builder, getInstance()->getEngineId());
+            // This plugin serializes execution plans, so it advertises the note
+            // the frontend checks before serializing a plan alongside the graph.
+            const std::vector<int32_t> behaviorNotes{
+                static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION)};
+            auto newEngineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
+                builder, getInstance()->getEngineId(), nullptr, &behaviorNotes);
             builder.Finish(newEngineDetails);
             auto serializedDetails = builder.Release();
 
