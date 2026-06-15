@@ -535,7 +535,7 @@ def _load_conv0_a_tile_specialized(
     thread distribution but computes the A offset directly:
 
     ``row -> (local_oh, local_ow)``, ``kg -> (y, x, c)``, then
-    ``((global_h + r - 1) * Wi + global_w + s - 1) * 8 + c``.
+    ``((global_h + y - pH) * Wi + global_w + x - pW) * C + c``.
     """
 
     p = spec.problem
