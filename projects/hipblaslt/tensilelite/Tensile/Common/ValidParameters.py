@@ -811,6 +811,14 @@ validParameters = { # we need to make sure this matches develop
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles
     "StreamKAtomic": [0, 1],
+    # Codegen-time toggle for single-hop next-neighbor work stealing in the
+    # dynamic-queue StreamK fetch (auto-mode SK4 / SK5-dynamic, 8 hardcoded
+    # queues). When a workgroup's home queue is empty it makes ONE atomic
+    # attempt to claim the structural extra tile of the next queue. Valid only
+    # for StreamK in (4, 5).
+    #  0: off (emitted assembly is byte-for-byte the baseline)
+    #  1: on
+    "StreamKWorkStealing": [0, 1],
     # Enables XCC-based remapping of workgroups, set the value to the number of XCCs
     # for the device/configuration being used
     #  0: uses default workgroup assignment
