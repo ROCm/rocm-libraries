@@ -91,7 +91,8 @@ rocblas_int trtri_get_blksize(const rocblas_int dim)
 }
 
 template <bool BATCHED, bool STRIDED, typename T>
-void rocsolver_trtri_getMemorySize(const rocblas_diagonal diag,
+void rocsolver_trtri_getMemorySize(rocblas_handle handle,
+                                   const rocblas_diagonal diag,
                                    const rocblas_int n,
                                    const rocblas_int batch_count,
                                    size_t* size_work1,
@@ -138,8 +139,8 @@ void rocsolver_trtri_getMemorySize(const rocblas_diagonal diag,
     rocblas_int nn = (blk == 1) ? n : blk;
 #ifdef OPTIMAL
     // the optimized small-size kernel is warp-synchronous, so it is only valid for n <= wavefront
-    // size (no handle here for the cached device props, so query the warp size directly)
-    const rocblas_int wavefront = get_device_warp_size();
+    // size (get_device_warp_size(handle) reads the handle's cached device props)
+    const rocblas_int wavefront = get_device_warp_size(handle);
     if(nn <= std::min(TRTRI_MAX_COLS, wavefront))
     {
         // if very small size, no workspace needed

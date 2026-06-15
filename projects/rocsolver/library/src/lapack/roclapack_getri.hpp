@@ -167,7 +167,8 @@ rocblas_int getri_get_blksize(const rocblas_int dim)
 }
 
 template <bool BATCHED, bool STRIDED, typename T>
-void rocsolver_getri_getMemorySize(const rocblas_int n,
+void rocsolver_getri_getMemorySize(rocblas_handle handle,
+                                   const rocblas_int n,
                                    const rocblas_int batch_count,
                                    size_t* size_work1,
                                    size_t* size_work2,
@@ -194,8 +195,8 @@ void rocsolver_getri_getMemorySize(const rocblas_int n,
 
 #ifdef OPTIMAL
     // the optimized small/tiny kernels are warp-synchronous, so they are only valid for
-    // n <= wavefront size (no handle here for the cached props, so query the warp size directly)
-    const rocblas_int wavefront = get_device_warp_size();
+    // n <= wavefront size (get_device_warp_size(handle) reads the handle's cached device props)
+    const rocblas_int wavefront = get_device_warp_size(handle);
     // if tiny size, no workspace needed
     if((n <= std::min(GETRI_TINY_SIZE, wavefront) && !ISBATCHED)
        || (n <= std::min(GETRI_BATCH_TINY_SIZE, wavefront) && ISBATCHED))
@@ -215,8 +216,9 @@ void rocsolver_getri_getMemorySize(const rocblas_int n,
     size_t unused, w1a = 0, w1b = 0, w2a = 0, w2b = 0, w3a = 0, w3b = 0, w4a = 0, w4b = 0, t1, t2;
 
     // requirements for calling TRTRI
-    rocsolver_trtri_getMemorySize<BATCHED, STRIDED, T>(rocblas_diagonal_non_unit, n, batch_count,
-                                                       &w1b, &w2b, &w3b, &w4b, &t2, &unused, &opt1);
+    rocsolver_trtri_getMemorySize<BATCHED, STRIDED, T>(handle, rocblas_diagonal_non_unit, n,
+                                                       batch_count, &w1b, &w2b, &w3b, &w4b, &t2,
+                                                       &unused, &opt1);
 
     // size of array of pointers (batched cases)
     if(BATCHED)
