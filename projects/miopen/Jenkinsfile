@@ -482,20 +482,18 @@ pipeline {
     post {
         success {
             script {
-                node {
-                    withWorkingDir {
-                        utils.setGithubStatus('Math CI Summary', 'success', 'All checks have passed')
-                    }
+                // utils is already loaded from the pipeline execution, no need to allocate a node
+                if (utils != null) {
+                    utils.setGithubStatus('Math CI Summary', 'success', 'All checks have passed')
                 }
             }
         }
         failure {
             script {
-                node {
-                    withWorkingDir {
-                        utils.setGithubStatus('Math CI Summary', 'failure', 'Some checks have failed')
-                        utils.sendTeamsFailureNotification(buildTheRock: params.BUILD_THEROCK_DOCKER)
-                    }
+                // utils is already loaded from the pipeline execution, no need to allocate a node
+                if (utils != null) {
+                    utils.setGithubStatus('Math CI Summary', 'failure', 'Some checks have failed')
+                    utils.sendTeamsFailureNotification(buildTheRock: params.BUILD_THEROCK_DOCKER)
                 }
             }
         }
