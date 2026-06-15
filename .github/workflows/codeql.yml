@@ -6,6 +6,7 @@ name: CodeQL
 on:
   push:
     branches:
+      # taken from the old implementation
       - develop
       - hipblaslt_common_cms_dev
       - hipblaslt_common_cms_phase2
@@ -16,6 +17,7 @@ on:
       - '.github/**'
   pull_request:
     branches:
+      # taken from the old implementatio
       - develop
       - hipblaslt_common_cms_dev
       - hipblaslt_common_cms_phase2
