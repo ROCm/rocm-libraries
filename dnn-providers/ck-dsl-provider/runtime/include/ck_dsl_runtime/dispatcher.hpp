@@ -33,6 +33,11 @@ struct Problem {
     long batch = 0, nhead_q = 0, nhead_k = 0, seqlen_q = 0, seqlen_k = 0, hdim_q = 0, hdim_v = 0;
     int mask_type = 0;  // 0=none,1=causal/top_left,...
     bool use_sinks = false;
+    // Conv-specific dims (set by the conv parser; used by the conv ML feature
+    // extractor). Zero when op != "conv".
+    long conv_N = 0, conv_C = 0, conv_K = 0, conv_G = 1;
+    long Hi = 0, Wi = 0, Y = 0, X = 0;
+    int stride_h = 1, stride_w = 1, pad_h = 0, pad_w = 0, dilation_h = 1, dilation_w = 1;
 };
 
 // Selection strategy, mirroring the CK Tile dispatcher: FirstFit (priority /

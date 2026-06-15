@@ -80,6 +80,21 @@ ck_dsl::Problem buildProblem(const ParsedConvParams& p, const std::string& arch)
     prob.M = (long)p.N * p.Ho() * p.Wo();
     prob.N = p.K;
     prob.K = (long)p.R * p.S * p.C;
+    // Conv-specific dims for the 97-feature ML extractor.
+    prob.conv_N = p.N;
+    prob.conv_C = p.C;
+    prob.conv_K = p.K;
+    prob.conv_G = 1;
+    prob.Hi = p.Hi;
+    prob.Wi = p.Wi;
+    prob.Y = p.R;
+    prob.X = p.S;
+    prob.stride_h = p.sH;
+    prob.stride_w = p.sW;
+    prob.pad_h = p.pH;
+    prob.pad_w = p.pW;
+    prob.dilation_h = p.dH;
+    prob.dilation_w = p.dW;
     return prob;
 }
 

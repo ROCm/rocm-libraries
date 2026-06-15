@@ -61,7 +61,9 @@ CkDslHandle::CkDslHandle() {
     }
 
     HIPDNN_PLUGIN_LOG_INFO("CkDslHandle: arch=" << gfx_arch_ << " kernels=" << n << " selection="
-                                                << (ml ? "ml_heuristic" : "firstfit"));
+                                                << (ml ? "ml_heuristic" : "firstfit")
+                                                << (ml && ml_heuristic_->has_conv() ? " conv_model=yes"
+                                                                                    : ""));
 }
 
 CkDslHandle::~CkDslHandle() = default;
