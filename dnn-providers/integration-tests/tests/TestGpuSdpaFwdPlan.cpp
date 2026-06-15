@@ -30,12 +30,12 @@ constexpr int64_t O_UID = 13;
 constexpr int64_t UNUSED_UID = 99;
 
 // Plain [B=1, H=2, Sq=8, D=16] SDPA shape (head_dim_v = 16).
-const std::vector<int64_t> kDims = {1, 2, 8, 16};
+const std::vector<int64_t> DIMS = {1, 2, 8, 16};
 
 flatbuffers::FlatBufferBuilder makeGraph(SdpaAttributesT attrs = {})
 {
     return createSdpaFwdGraph(
-        Q_UID, K_UID, V_UID, O_UID, kDims, kDims, kDims, kDims, DataType::FLOAT, std::move(attrs));
+        Q_UID, K_UID, V_UID, O_UID, DIMS, DIMS, DIMS, DIMS, DataType::FLOAT, attrs);
 }
 
 } // namespace

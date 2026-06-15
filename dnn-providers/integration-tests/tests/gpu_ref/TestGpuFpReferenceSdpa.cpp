@@ -42,10 +42,10 @@ namespace
 {
 
 // Deterministic per-tensor seeds so every run uses identical inputs.
-constexpr unsigned int kSeedQ = 42;
-constexpr unsigned int kSeedK = 43;
-constexpr unsigned int kSeedV = 44;
-constexpr unsigned int kSeedMask = 45;
+constexpr unsigned int SEED_Q = 42;
+constexpr unsigned int SEED_K = 43;
+constexpr unsigned int SEED_V = 44;
+constexpr unsigned int SEED_MASK = 45;
 
 // Core helper: seed Q/K/V (and optional mask), run CPU and GPU SDPA forward on
 // the SAME inputs, and assert the outputs match within tolerance.
@@ -69,9 +69,9 @@ void compareGpuVsCpuSdpaFwd(Tensor<QDataType>& q,
                             int64_t rightBound = -1,
                             bool topLeftAlignment = true)
 {
-    q.fillWithRandomValues(static_cast<QDataType>(-1.0f), static_cast<QDataType>(1.0f), kSeedQ);
-    k.fillWithRandomValues(static_cast<KDataType>(-1.0f), static_cast<KDataType>(1.0f), kSeedK);
-    v.fillWithRandomValues(static_cast<VDataType>(-1.0f), static_cast<VDataType>(1.0f), kSeedV);
+    q.fillWithRandomValues(static_cast<QDataType>(-1.0f), static_cast<QDataType>(1.0f), SEED_Q);
+    k.fillWithRandomValues(static_cast<KDataType>(-1.0f), static_cast<KDataType>(1.0f), SEED_K);
+    v.fillWithRandomValues(static_cast<VDataType>(-1.0f), static_cast<VDataType>(1.0f), SEED_V);
 
     CpuFpReferenceSdpa::forward<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
         q,
@@ -238,7 +238,7 @@ TYPED_TEST(GpuSdpaFwdPlain, AdditiveMaskRank4)
     Tensor<T> oGpu({1, 2, 8, 16});
     Tensor<float> mask({1, 2, 8, 8});
 
-    mask.fillWithRandomValues(-2.0f, 2.0f, kSeedMask);
+    mask.fillWithRandomValues(-2.0f, 2.0f, SEED_MASK);
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(q,
                                        k,
@@ -267,7 +267,7 @@ TYPED_TEST(GpuSdpaFwdPlain, AdditiveMaskBroadcastRank2)
     Tensor<T> oGpu({2, 4, 8, 16});
     Tensor<float> mask({8, 8}); // [Sq, Skv]
 
-    mask.fillWithRandomValues(-2.0f, 2.0f, kSeedMask);
+    mask.fillWithRandomValues(-2.0f, 2.0f, SEED_MASK);
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(q,
                                        k,
@@ -295,7 +295,7 @@ TYPED_TEST(GpuSdpaFwdPlain, AdditiveMaskBroadcastRank3)
     Tensor<T> oGpu({2, 2, 8, 16});
     Tensor<float> mask({2, 8, 8}); // [H, Sq, Skv]
 
-    mask.fillWithRandomValues(-2.0f, 2.0f, kSeedMask);
+    mask.fillWithRandomValues(-2.0f, 2.0f, SEED_MASK);
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(q,
                                        k,
@@ -561,7 +561,7 @@ TYPED_TEST(GpuSdpaFwdPlain, AdditiveMaskWithSlidingWindow)
     Tensor<T> oGpu({1, 2, 8, 16});
     Tensor<float> mask({1, 2, 8, 8});
 
-    mask.fillWithRandomValues(-2.0f, 2.0f, kSeedMask);
+    mask.fillWithRandomValues(-2.0f, 2.0f, SEED_MASK);
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(q,
                                        k,
@@ -595,7 +595,7 @@ TYPED_TEST(GpuSdpaFwdPlain, AdditiveMaskBroadcastBatchHead)
     Tensor<T> oGpu({2, 4, 8, 16});
     Tensor<float> mask({1, 1, 8, 8}); // broadcast over batch and head
 
-    mask.fillWithRandomValues(-2.0f, 2.0f, kSeedMask);
+    mask.fillWithRandomValues(-2.0f, 2.0f, SEED_MASK);
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(
         q, k, v, oCpu, oGpu, sdpaFwdTolerance<T>(), std::nullopt, /*attnMask=*/&mask);
@@ -619,7 +619,7 @@ TYPED_TEST(GpuSdpaFwdPlain, AdditiveMaskBroadcastHeadOnly)
     Tensor<T> oGpu({2, 4, 8, 16});
     Tensor<float> mask({2, 1, 8, 8}); // broadcast over head only
 
-    mask.fillWithRandomValues(-2.0f, 2.0f, kSeedMask);
+    mask.fillWithRandomValues(-2.0f, 2.0f, SEED_MASK);
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(
         q, k, v, oCpu, oGpu, sdpaFwdTolerance<T>(), std::nullopt, /*attnMask=*/&mask);
