@@ -24,6 +24,16 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
   add_executable(tile_example_grouped_conv_bwd_weight grouped_convolution_backward_weight.cpp)
   target_compile_options(tile_example_grouped_conv_bwd_weight PRIVATE ${EXAMPLE_CONV_COMPILE_OPTIONS})
 
+  # Instruction-cache prefetch experiment (AICK-1303). Opt-in via -DCK_CONV_INST_PREFETCH=ON
+  # (see the release-gfx1250-prefetch preset). Defines the macro that activates the prefetch
+  # sites in the bwd_weight kernel; when ENABLE_INST_PREFETCH_PATCH=ON, ck_inst_prefetch_patch
+  # adds --save-temps and the PRE_LINK two-pass koffset patcher on this single-.o target.
+  if(CK_CONV_INST_PREFETCH)
+    include(InstPrefetchPatch)
+    target_compile_definitions(tile_example_grouped_conv_bwd_weight PRIVATE CK_CONV_INST_PREFETCH=1)
+    ck_inst_prefetch_patch(tile_example_grouped_conv_bwd_weight)
+  endif()
+
   # StreamK requires cross-CU coherence (StreamKCoherency), CDNA only.
   if(GPU_TARGETS MATCHES "gfx90a|gfx942|gfx950")
     add_executable(tile_example_grouped_conv_bwd_weight_streamk grouped_convolution_backward_weight_streamk.cpp)
