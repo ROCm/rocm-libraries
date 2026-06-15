@@ -111,6 +111,11 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         PRIVATE
             hip::device
             hipblaslt::hipblaslt-clients-common
+            # caching_library_gtest.cpp includes <Tensile/CachingLibrary.hpp>,
+            # which transitively needs rocisa/origami include dirs. clients-common
+            # links tensilelite-host PRIVATE, so those usage requirements don't
+            # propagate; depend on it directly to inherit them.
+            tensilelite::tensilelite-host
             GTest::gtest
             OpenMP::OpenMP_CXX
             ${CMAKE_DL_LIBS}
