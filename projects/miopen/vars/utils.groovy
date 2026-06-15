@@ -1132,7 +1132,7 @@ def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def with
         node(rocmnodeFn("nogpu")) {
             try {
                 withWorkingDirFn {
-                    def setupCmd = "CXX='/opt/rocm/llvm/bin/clang++' cmake -DCMAKE_PREFIX_PATH=/opt/rocm -DMIOPEN_BACKEND=HIP -DBUILD_DEV=On .. "
+                    def setupCmd = "CXX='/opt/rocm/llvm/bin/clang++' cmake -G Ninja -DCMAKE_PREFIX_PATH=/opt/rocm -DMIOPEN_BACKEND=HIP -DBUILD_DEV=On .. "
                     def buildCmd = "ninja -j\$(nproc) -k 0 analyze"
                     buildHipClangJob(setup_cmd: setupCmd, build_cmd: buildCmd, needs_gpu: false, gpu_family: "ci")
                 }
