@@ -7,8 +7,9 @@
 #include "ck_tile/host/device_prop.hpp"
 #include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/fmha.hpp"
-#include "ck_tile/ops/sparse_attn/sparge_hyperparam.hpp"
 #include "ck_tile/ops/sageattention/block/block_sageattention_quant_scale_enum.hpp"
+
+#include "sparse_attention.h"
 
 #include "../01_fmha/mask.hpp"
 
@@ -455,8 +456,6 @@ float fmha_jenga_fwd(fmha_jenga_fwd_traits, fmha_jenga_fwd_args, const ck_tile::
 template <typename Traits_>
 float fmha_jenga_fwd_(const ck_tile::stream_config&, fmha_jenga_fwd_args);
 
-float fmha_jenga_fwd(fmha_jenga_fwd_args, const ck_tile::stream_config&);
-
 // Sparge: preprocess → mask prediction → attention.
 struct fmha_sparge_fwd_args
 {
@@ -515,7 +514,7 @@ struct fmha_sparge_fwd_args
 
     float* sparsity_out = nullptr;
 
-    ck_tile::sparge_hyperparam_args hp{};
+    sparge_hyperparam_args hp{};
 
     // Group-mode cu_seqlens (all nullptr in batch mode). cu_seqlen_*_ptr reserved
     // for ABI parity with 01_fmha; ignored by kernel today (no padded varlen).
@@ -793,8 +792,6 @@ float fmha_vsa_fwd(fmha_vsa_fwd_traits, fmha_vsa_fwd_args, const ck_tile::stream
 template <typename Traits_>
 float fmha_vsa_fwd_(const ck_tile::stream_config&, fmha_vsa_fwd_args);
 
-float fmha_vsa_fwd(fmha_vsa_fwd_args, const ck_tile::stream_config&);
-
 // sparge_sage (quantized sparge): batch + group, causal/sliding-window mask, ALIBI/elementwise
 // bias, all four qscale granularities, INT8 or FP8 Q/K (i8fp8bf16 / fp8bf16), hdim128. Reuses the
 // sparge fused preprocess + mask prediction, then runs the quantized sage attention pipeline.
@@ -868,7 +865,7 @@ struct fmha_sparge_sage_fwd_args
     ck_tile::index_t nhead_stride_bias = 0;
     ck_tile::index_t batch_stride_bias = 0;
 
-    ck_tile::sparge_hyperparam_args hp{};
+    sparge_hyperparam_args hp{};
 
     // Group / varlen mode (batch leaves all nullptr / 0). seqstart token tables + packed block
     // tables; total_*_blocks size the packed means/LUT/VBN/int8/scale workspaces.

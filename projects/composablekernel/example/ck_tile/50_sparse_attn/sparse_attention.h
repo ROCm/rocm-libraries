@@ -1,7 +1,5 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Returns GPU kernel time in ms (negative on error). mask_str: "0"/"1"|"t"/"2"|"b"/"t:l,r"/"b:l,r".
-// Group mode (varlen) is signalled by passing non-empty seqstart vectors.
 
 #pragma once
 
@@ -11,11 +9,25 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/host/host_tensor.hpp"
 #include "ck_tile/host/stream_config.hpp"
-#include "ck_tile/ops/sparse_attn/sparge_hyperparam.hpp"
+
+struct sparge_hyperparam_args
+{
+    float cdfthreshd   = 1.0f; 
+    float topk         = 0.0f;
+    float simthreshold = 0.0f;
+    float pvthreshd    = 0.0f;
+
+    const void* cdfthreshd_per_head_ptr   = nullptr;
+    const void* topk_per_head_ptr         = nullptr;
+    const void* simthreshold_per_head_ptr = nullptr;
+    const void* pvthreshd_per_head_ptr    = nullptr;
+
+    bool smooth_k = true;
+};
 
 struct sparse_attn_bias_args
 {
-    int type      = 0;   // 0=no_bias, 1=elementwise, 2=alibi (sync with bias_enum)
+    int type      = 0;   // 0=no_bias, 1=elementwise, 2=alibi
     int rank      = 0;
     const void*  ptr               = nullptr;
     std::int32_t stride_bias       = 0;
@@ -98,7 +110,7 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
                                     bool i_perm,
                                     bool o_perm,
                                     bool is_v_rowmajor      = true,
-                                    const ck_tile::sparge_hyperparam_args& hp = {},
+                                    const sparge_hyperparam_args& hp = {},
                                     const std::string& mask_str = "0",
                                     bool attention_sink     = false,
                                     int block_size          = 128,
@@ -130,7 +142,7 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,    
                                    int hdim_v,
                                    bool i_perm,
                                    bool o_perm,
-                                   const ck_tile::sparge_hyperparam_args& hp,
+                                   const sparge_hyperparam_args& hp,
                                    int block_size,
                                    float scale_s,
                                    int causal_type,

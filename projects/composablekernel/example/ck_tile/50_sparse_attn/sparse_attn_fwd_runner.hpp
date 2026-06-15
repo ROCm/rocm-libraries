@@ -82,7 +82,7 @@ struct SpargePerHeadSetup
 // Fill hp.*_per_head_ptr from per-head CSVs or -perhead_test synth. -sparsity_per_head becomes
 // 1 - sparsity[h], routed to topk/cdf by mode_is_topk. Per-field precedence: CSV > perhead_test >
 // scalar. Returns false on error (perhead_test with nhead < 2).
-inline bool setup_sparge_per_head(ck_tile::sparge_hyperparam_args& hp,
+inline bool setup_sparge_per_head(sparge_hyperparam_args& hp,
                                   SpargePerHeadSetup& out,
                                   bool perhead_test,
                                   bool mode_is_topk,
@@ -1624,7 +1624,7 @@ sparse_attn_result sparse_attn_fwd_run(
             return sparse_attn_result::failure;
         sparse_attn_bias_args& bias_args = bs.args;
 
-        ck_tile::sparge_hyperparam_args hp;
+        sparge_hyperparam_args hp;
         hp.cdfthreshd        = scalar_cdf;
         hp.topk               = scalar_topk;
         hp.simthreshold      = scalar_sim;
@@ -1770,7 +1770,7 @@ sparse_attn_result sparse_attn_fwd_run(
             const float scalar_sim  = simthreshold;
             const float scalar_pvthreshd = pvthreshd;
 
-            ck_tile::sparge_hyperparam_args hp;
+            sparge_hyperparam_args hp;
             hp.cdfthreshd   = scalar_cdf;
             hp.topk         = scalar_topk;
             hp.simthreshold = scalar_sim;
@@ -2035,7 +2035,7 @@ sparse_attn_result sparse_attn_fwd_run(
         const float scalar_sim    = simthreshold;
         const float scalar_pvthreshd = pvthreshd;
 
-        ck_tile::sparge_hyperparam_args hp;
+        sparge_hyperparam_args hp;
         hp.cdfthreshd        = scalar_cdf;
         hp.topk               = scalar_topk;
         hp.simthreshold      = scalar_sim;
@@ -2227,7 +2227,7 @@ sparse_attn_result sparse_attn_fwd_run(
             const float scalar_sim  = simthreshold;
             const float scalar_pvthreshd = pvthreshd;
 
-            ck_tile::sparge_hyperparam_args hp;
+            sparge_hyperparam_args hp;
             hp.cdfthreshd   = scalar_cdf;
             hp.topk         = scalar_topk;
             hp.simthreshold = scalar_sim;

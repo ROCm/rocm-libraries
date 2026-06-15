@@ -957,60 +957,6 @@ struct BlockSpargeMaskPredictionPipeline
             (hdim + num_k_blocks + 3 * kMaxKBlocksPow2) * sizeof(float)) + reduce_scratch;
     }
 
-    // ck_tile top-k via BlockTopkStream2D (iterative warp-argmax). Its xor_sync has no cross-warp
-    // stage, so N <= warp_size; larger N and the CDF path use the LDS bitonic+scan instead.
-    // NOTE: unused by the current dispatch (kept for reference); selection goes through bitonic sort.
-    template <index_t N>
-    CK_TILE_DEVICE static void topk_select_ck_tile(const float* score_lds,
-                                                   float*       val_out_lds,
-                                                   int32_t*     idx_out_lds,
-                                                   index_t      k)
-    {
-        static_assert(N > 0 && (N & (N - 1)) == 0, "N must be power of two");
-        constexpr index_t LanesPerRow = N; // whole row in one warp
-
-        // [row(1), col(N)] warp-per-row input distribution.
-        constexpr auto in_dstr = make_static_tile_distribution(
-            tile_distribution_encoding<
-                sequence<1>,
-                tuple<sequence<1, 1, 1>, sequence<1, LanesPerRow, 1>>,
-                tuple<sequence<1>, sequence<1, 2>>,
-                tuple<sequence<1>, sequence<2, 1>>,
-                sequence<1, 2, 2>,
-                sequence<0, 0, 2>>{});
-        // [row(1), single-element-per-step] output distribution.
-        constexpr auto out_dstr = make_static_tile_distribution(
-            tile_distribution_encoding<
-                sequence<LanesPerRow>,
-                tuple<sequence<1, 1, 1>, sequence<1>>,
-                tuple<sequence<1>, sequence<1, 0>>,
-                tuple<sequence<1>, sequence<2, 0>>,
-                sequence<1, 2>,
-                sequence<0, 0>>{});
-
-        auto in_view = make_tensor_view<address_space_enum::lds>(
-            score_lds,
-            make_naive_tensor_descriptor_packed(make_tuple(number<1>{}, number<N>{})));
-        auto in_win = make_tile_window_linear(
-            in_view, make_tuple(number<1>{}, number<N>{}), {0, 0}, in_dstr);
-
-        auto out_view = make_tensor_view<address_space_enum::lds>(
-            val_out_lds,
-            make_naive_tensor_descriptor_packed(make_tuple(number<1>{}, number<N>{})));
-        auto out_win = make_tile_window_linear(
-            out_view, make_tuple(number<1>{}, number<N>{}), {0, 0}, out_dstr);
-
-        auto idx_view = make_tensor_view<address_space_enum::lds>(
-            idx_out_lds,
-            make_naive_tensor_descriptor_packed(make_tuple(number<1>{}, number<N>{})));
-        auto idx_win = make_tile_window_linear(
-            idx_view, make_tuple(number<1>{}, number<N>{}), {0, 0}, out_dstr);
-
-        auto x = load_tile(in_win);
-        using topk_problem = BlockTopkStream2DProblem<float, int32_t, LanesPerRow>;
-        BlockTopkStream2D<topk_problem>{}(x, out_win, idx_win, k);
-    }
-
     struct MaskRunArgs
     {
         const float* k_means;

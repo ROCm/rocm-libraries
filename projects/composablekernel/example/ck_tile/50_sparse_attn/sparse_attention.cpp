@@ -380,7 +380,7 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
                                     bool i_perm,
                                     bool o_perm,
                                     bool is_v_rowmajor,
-                                    const ck_tile::sparge_hyperparam_args& hp,
+                                    const sparge_hyperparam_args& hp,
                                     const std::string& mask_str,
                                     bool attention_sink,
                                     int block_size,
@@ -589,7 +589,7 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
                                    int hdim_v,
                                    bool i_perm,
                                    bool o_perm,
-                                   const ck_tile::sparge_hyperparam_args& hp,
+                                   const sparge_hyperparam_args& hp,
                                    int block_size,
                                    float scale_s,
                                    int causal_type,
@@ -879,7 +879,7 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         const ck_tile::HostTensor<T>&, const ck_tile::HostTensor<T>&,                  \
         const ck_tile::HostTensor<ck_tile::fp8_t>&, const ck_tile::HostTensor<float>&, \
         ck_tile::HostTensor<T>&, int, int, int, int, int, int, int, bool, bool,        \
-        const ck_tile::sparge_hyperparam_args&, int, float,                            \
+        const sparge_hyperparam_args&, int, float,                            \
         int, int, int, int,                                                            \
         const ck_tile::stream_config&, bool, float, const std::string&,                 \
         const std::vector<int32_t>&, const std::vector<int32_t>&,                      \
@@ -928,7 +928,7 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
                                               ck_tile::HostTensor<T>&,                 \
                                               int, int, int, int, int, int, int,      \
                                               bool, bool, bool,                       \
-                                              const ck_tile::sparge_hyperparam_args&, \
+                                              const sparge_hyperparam_args&, \
                                               const std::string&, bool,               \
                                               int, int, int,                          \
                                               float*,                                  \
