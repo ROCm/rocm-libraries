@@ -30,6 +30,7 @@
 
 #include <limits>
 #include <sstream>
+#include <thread>
 
 SchemeTreeVec EmptySchemeTreeVec;
 SchemeVec     EmptySchemeVec;
@@ -718,14 +719,22 @@ void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
 
 void CommRCCLAllToAll::Wait()
 {
-    // synchronize each agent's completion event.  hipEventSynchronize
-    // does not require the current device to match the event's
-    // device, so no rocfft_scoped_device is needed here (mirrors
-    // CommGather / CommScatter / CommPointToPoint).
-    for(auto& agent : agents)
+    // poll each event, checking for async RCCL errors so a stalled
+    // collective throws instead of hanging (NCCL-recommended pattern)
+    const auto devices = rccl.get_devices();
+    for(size_t r = 0; r < agents.size(); ++r)
     {
-        if(agent.event && hipEventSynchronize(agent.event) != hipSuccess)
-            throw std::runtime_error("hipEventSynchronize failed for RCCL AllToAll");
+        if(!agents[r].event)
+            continue;
+
+        hipError_t status;
+        while((status = hipEventQuery(agents[r].event)) == hipErrorNotReady)
+        {
+            rccl.check_async_error(devices[r]);
+            std::this_thread::yield();
+        }
+        if(status != hipSuccess)
+            throw std::runtime_error("hipEventQuery failed for RCCL AllToAll");
     }
 }
 
@@ -833,14 +842,21 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
 
 void CommRCCLGrouped::Wait()
 {
-    // synchronize on each local transfer's completion event.
-    // hipEventSynchronize does not require the current device to
-    // match the event's device (mirrors CommGather / CommScatter /
-    // CommPointToPoint).
+    // poll each event, checking for async RCCL errors so a stalled
+    // transfer throws instead of hanging (NCCL-recommended pattern)
     for(auto& t : transfers)
     {
-        if(t.event && hipEventSynchronize(t.event) != hipSuccess)
-            throw std::runtime_error("hipEventSynchronize failed for RCCL Grouped");
+        if(!t.event)
+            continue;
+
+        hipError_t status;
+        while((status = hipEventQuery(t.event)) == hipErrorNotReady)
+        {
+            rccl.check_async_error(t.local_location.device);
+            std::this_thread::yield();
+        }
+        if(status != hipSuccess)
+            throw std::runtime_error("hipEventQuery failed for RCCL Grouped");
     }
 }
 

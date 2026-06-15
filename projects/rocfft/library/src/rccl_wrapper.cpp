@@ -52,10 +52,11 @@ static ncclDataType_t get_nccl_dtype(rocfft_precision precision)
         return ncclFloat32;
     case 8:
         return ncclFloat64;
+    default:
+        // rocFFT only produces half (2), float (4), or double (8); any
+        // other size indicates a bug in the caller.
+        throw std::runtime_error("unsupported rocfft_precision in RCCL datatype mapping");
     }
-    // rocFFT only produces half (2), float (4), or double (8); any
-    // other size indicates a bug in the caller.
-    throw std::runtime_error("unsupported rocfft_precision in RCCL datatype mapping");
 }
 
 // implementation details shared by all copies of a handle via shared_ptr
@@ -83,13 +84,6 @@ struct rocfft_rccl_comm_t::Impl
 
 rocfft_rccl_comm_t rocfft_rccl_comm_t::create(const std::set<int>& devices)
 {
-    // check if RCCL is disabled via environment variable
-    const char* disable_rccl = std::getenv("ROCFFT_DISABLE_RCCL");
-    if(disable_rccl && std::string(disable_rccl) == "1")
-    {
-        return {};
-    }
-
     // need at least 2 devices for a meaningful communicator
     if(devices.size() < 2)
     {
@@ -208,6 +202,19 @@ std::vector<int> rocfft_rccl_comm_t::get_devices() const
     for(const auto& [dev, comm] : pimpl->device_to_comm)
         devices.push_back(dev);
     return devices;
+}
+
+void rocfft_rccl_comm_t::check_async_error(int device_id) const
+{
+    ncclComm_t   comm        = get_comm(device_id);
+    ncclResult_t async_error = ncclSuccess;
+    ncclResult_t result      = ncclCommGetAsyncError(comm, &async_error);
+    if(result != ncclSuccess)
+        throw rocfft_rccl_exception_t(
+            "ncclCommGetAsyncError failed on device " + std::to_string(device_id), result);
+    if(async_error != ncclSuccess)
+        throw rocfft_rccl_exception_t(
+            "RCCL asynchronous error on device " + std::to_string(device_id), async_error);
 }
 
 // RAII group wrapper
