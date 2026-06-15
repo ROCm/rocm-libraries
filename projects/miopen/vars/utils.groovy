@@ -975,9 +975,17 @@ def getPassedStagesFromBuild(def rawBuild) {
 
     startNodes.each { startId, stageName ->
         def endNode = endNodes[startId]
-        if (endNode && !errorIds.contains(startId) && !errorIds.contains(endNode.id)) {
-            passed << stageName
-        }
+        if (!endNode) return
+        if (errorIds.contains(startId) || errorIds.contains(endNode.id)) return
+
+        // Check the stage result recorded on the end node itself.
+        // When catchError() marks a stage as FAILURE, it attaches a FlowInterruptedException
+        // via ErrorAction to the flow, which we detect above. However, we also need to
+        // check the StageResult to catch stages marked FAILURE by other mechanisms.
+        def stageResult = endNode.getAction(org.jenkinsci.plugins.workflow.actions.ResultAction)
+        if (stageResult?.result?.toString() != 'SUCCESS') return
+
+        passed << stageName
     }
     return passed
 }
