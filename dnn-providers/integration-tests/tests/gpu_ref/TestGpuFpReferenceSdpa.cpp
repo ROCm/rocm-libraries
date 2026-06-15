@@ -19,6 +19,7 @@
 
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/TensorView.hpp>
 
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
@@ -103,6 +104,61 @@ template <typename T>
 float sdpaFwdTolerance()
 {
     return hipdnn_test_sdk::utilities::sdpa::getToleranceFwd<T>();
+}
+
+// Same contract as compareGpuVsCpuSdpaFwd, but also requests the optional
+// log-sum-exp [B, H, Sq] output from both references and compares it. LSE is
+// always float. Use ONLY for configs with no fully-masked rows: a fully-masked
+// row yields LSE = -inf, which assertAllClose treats as a hard failure (see
+// LseFullyMaskedRowIsNegInf for that case, which checks -inf explicitly).
+template <typename QDataType,
+          typename KDataType,
+          typename VDataType,
+          typename ODataType,
+          typename ComputeDataType = float>
+void compareGpuVsCpuSdpaFwdWithLse(Tensor<QDataType>& q,
+                                   Tensor<KDataType>& k,
+                                   Tensor<VDataType>& v,
+                                   Tensor<ODataType>& oCpu,
+                                   Tensor<ODataType>& oGpu,
+                                   Tensor<float>& lseCpu,
+                                   Tensor<float>& lseGpu,
+                                   float tolerance,
+                                   std::optional<float> attnScaleValue = std::nullopt,
+                                   int64_t leftBound = -1,
+                                   int64_t rightBound = -1,
+                                   bool topLeftAlignment = true)
+{
+    q.fillWithRandomValues(static_cast<QDataType>(-1.0f), static_cast<QDataType>(1.0f), SEED_Q);
+    k.fillWithRandomValues(static_cast<KDataType>(-1.0f), static_cast<KDataType>(1.0f), SEED_K);
+    v.fillWithRandomValues(static_cast<VDataType>(-1.0f), static_cast<VDataType>(1.0f), SEED_V);
+
+    CpuFpReferenceSdpa::forward<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
+        q,
+        k,
+        v,
+        oCpu,
+        attnScaleValue,
+        /*attnMask=*/nullptr,
+        leftBound,
+        rightBound,
+        topLeftAlignment,
+        &lseCpu);
+
+    GpuFpReferenceSdpa::fprop<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
+        q,
+        k,
+        v,
+        oGpu,
+        attnScaleValue,
+        /*attnMask=*/nullptr,
+        leftBound,
+        rightBound,
+        topLeftAlignment,
+        &lseGpu);
+
+    assertAllClose(oCpu, oGpu, tolerance);
+    assertAllClose(lseCpu, lseGpu, tolerance);
 }
 
 } // namespace
@@ -658,4 +714,490 @@ TEST(TestGpuSdpaFwdMixedPrecision, Bfloat16InputsFloatOutput)
 
     compareGpuVsCpuSdpaFwd<bfloat16, bfloat16, bfloat16, float>(
         q, k, v, oCpu, oGpu, sdpaFwdTolerance<float>());
+}
+
+// ============================================================================
+// LSE (log-sum-exp) output. The GPU reference exposes the optional [B, H, Sq]
+// LSE that CpuFpReferenceSdpa produces (LSE = maxVal + log(sumExp)); these
+// compare it against the CPU oracle. Configs are chosen so no query row is fully
+// masked (LSE there is -inf, covered separately below).
+// ============================================================================
+
+TYPED_TEST(TestGpuSdpaFwdPlain, LseMatchesCpuRefPlain)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    Tensor<T> q({2, 4, 8, 16});
+    Tensor<T> k({2, 4, 8, 16});
+    Tensor<T> v({2, 4, 8, 16});
+    Tensor<T> oCpu({2, 4, 8, 16});
+    Tensor<T> oGpu({2, 4, 8, 16});
+    Tensor<float> lseCpu({2, 4, 8}); // [B, H, Sq]
+    Tensor<float> lseGpu({2, 4, 8});
+
+    compareGpuVsCpuSdpaFwdWithLse<T, T, T, T>(
+        q, k, v, oCpu, oGpu, lseCpu, lseGpu, sdpaFwdTolerance<T>());
+}
+
+// Top-left causal on a square shape: every query row sees at least its diagonal
+// key, so no row is fully masked and every LSE entry is finite.
+TYPED_TEST(TestGpuSdpaFwdPlain, LseCausalTopLeft)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    Tensor<T> q({1, 2, 8, 16});
+    Tensor<T> k({1, 2, 8, 16});
+    Tensor<T> v({1, 2, 8, 16});
+    Tensor<T> oCpu({1, 2, 8, 16});
+    Tensor<T> oGpu({1, 2, 8, 16});
+    Tensor<float> lseCpu({1, 2, 8});
+    Tensor<float> lseGpu({1, 2, 8});
+
+    compareGpuVsCpuSdpaFwdWithLse<T, T, T, T>(q,
+                                              k,
+                                              v,
+                                              oCpu,
+                                              oGpu,
+                                              lseCpu,
+                                              lseGpu,
+                                              sdpaFwdTolerance<T>(),
+                                              std::nullopt,
+                                              /*leftBound=*/-1,
+                                              /*rightBound=*/0,
+                                              /*topLeftAlignment=*/true);
+}
+
+// Fully-masked rows: the CPU oracle writes LSE = -inf (maxVal=-inf, sumExp=0).
+// assertAllClose rejects Inf, so this checks the masked rows are -inf on BOTH
+// references and the surviving rows match within tolerance.
+TYPED_TEST(TestGpuSdpaFwdPlain, LseFullyMaskedRowIsNegInf)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    // Sq=4, Skv=2, bottom-right causal -> offset=-2: rows sq=0,1 are fully masked.
+    const int64_t batch = 1;
+    const int64_t numHeads = 2;
+    const int64_t seqQ = 4;
+    const int64_t seqKv = 2;
+    const int64_t headDim = 8;
+    const int64_t headDimV = 8;
+
+    Tensor<T> q({batch, numHeads, seqQ, headDim});
+    Tensor<T> k({batch, numHeads, seqKv, headDim});
+    Tensor<T> v({batch, numHeads, seqKv, headDimV});
+    Tensor<T> oCpu({batch, numHeads, seqQ, headDimV});
+    Tensor<T> oGpu({batch, numHeads, seqQ, headDimV});
+    Tensor<float> lseCpu({batch, numHeads, seqQ});
+    Tensor<float> lseGpu({batch, numHeads, seqQ});
+
+    q.fillWithRandomValues(static_cast<T>(-1.0f), static_cast<T>(1.0f), SEED_Q);
+    k.fillWithRandomValues(static_cast<T>(-1.0f), static_cast<T>(1.0f), SEED_K);
+    v.fillWithRandomValues(static_cast<T>(-1.0f), static_cast<T>(1.0f), SEED_V);
+
+    CpuFpReferenceSdpa::forward<T, T, T, T, float>(q,
+                                                   k,
+                                                   v,
+                                                   oCpu,
+                                                   std::nullopt,
+                                                   /*attnMask=*/nullptr,
+                                                   /*leftBound=*/-1,
+                                                   /*rightBound=*/0,
+                                                   /*topLeftAlignment=*/false,
+                                                   &lseCpu);
+    GpuFpReferenceSdpa::fprop<T, T, T, T, float>(q,
+                                                 k,
+                                                 v,
+                                                 oGpu,
+                                                 std::nullopt,
+                                                 /*attnMask=*/nullptr,
+                                                 /*leftBound=*/-1,
+                                                 /*rightBound=*/0,
+                                                 /*topLeftAlignment=*/false,
+                                                 &lseGpu);
+
+    // Non-const TensorView triggers the device->host sync that getHostValue
+    // (const) cannot; the GPU wrote lse on-device and only marked it modified.
+    TensorView<float> lseCpuView(lseCpu);
+    TensorView<float> lseGpuView(lseGpu);
+
+    for(int64_t h = 0; h < numHeads; ++h)
+    {
+        for(int64_t sq = 0; sq < seqQ; ++sq)
+        {
+            const float cpuVal = lseCpuView.getHostValue(std::vector<int64_t>{0, h, sq});
+            const float gpuVal = lseGpuView.getHostValue(std::vector<int64_t>{0, h, sq});
+            if(sq < 2)
+            {
+                // Fully-masked row: -inf on both references.
+                EXPECT_TRUE(std::isinf(cpuVal) && cpuVal < 0.0f)
+                    << "CPU LSE should be -inf for masked row h=" << h << ", sq=" << sq;
+                EXPECT_TRUE(std::isinf(gpuVal) && gpuVal < 0.0f)
+                    << "GPU LSE should be -inf for masked row h=" << h << ", sq=" << sq;
+            }
+            else
+            {
+                EXPECT_TRUE(std::isfinite(gpuVal))
+                    << "GPU LSE should be finite for visible row h=" << h << ", sq=" << sq;
+                EXPECT_NEAR(gpuVal, cpuVal, sdpaFwdTolerance<T>())
+                    << "GPU/CPU LSE mismatch at h=" << h << ", sq=" << sq;
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Combinatorial coverage. The cases above exercise each feature in isolation;
+// these cross features (GQA/MQA, strided layout, explicit scale, window edges,
+// cross-attention, mixed precision) against the CPU oracle to catch interactions
+// a one-feature-at-a-time suite would miss.
+// ============================================================================
+
+// --- GQA/MQA combined with masking ---
+
+TYPED_TEST(TestGpuSdpaFwdPlain, GqaCausalTopLeft)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    Tensor<T> q({1, 8, 8, 16});
+    Tensor<T> k({1, 2, 8, 16});
+    Tensor<T> v({1, 2, 8, 16});
+    Tensor<T> oCpu({1, 8, 8, 16});
+    Tensor<T> oGpu({1, 8, 8, 16});
+
+    compareGpuVsCpuSdpaFwd<T, T, T, T>(q,
+                                       k,
+                                       v,
+                                       oCpu,
+                                       oGpu,
+                                       sdpaFwdTolerance<T>(),
+                                       std::nullopt,
+                                       /*attnMask=*/nullptr,
+                                       /*leftBound=*/-1,
+                                       /*rightBound=*/0,
+                                       /*topLeftAlignment=*/true);
+}
+
+TYPED_TEST(TestGpuSdpaFwdPlain, GqaSlidingWindowBothBounds)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    Tensor<T> q({1, 8, 8, 16});
+    Tensor<T> k({1, 2, 8, 16});
+    Tensor<T> v({1, 2, 8, 16});
+    Tensor<T> oCpu({1, 8, 8, 16});
+    Tensor<T> oGpu({1, 8, 8, 16});
+
+    compareGpuVsCpuSdpaFwd<T, T, T, T>(q,
+                                       k,
+                                       v,
+                                       oCpu,
+                                       oGpu,
+                                       sdpaFwdTolerance<T>(),
+                                       std::nullopt,
+                                       /*attnMask=*/nullptr,
+                                       /*leftBound=*/2,
+                                       /*rightBound=*/1,
+                                       /*topLeftAlignment=*/true);
+}
+
+TYPED_TEST(TestGpuSdpaFwdPlain, GqaAdditiveMaskRank4)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    Tensor<T> q({1, 8, 8, 16});
+    Tensor<T> k({1, 2, 8, 16});
+    Tensor<T> v({1, 2, 8, 16});
+    Tensor<T> oCpu({1, 8, 8, 16});
+    Tensor<T> oGpu({1, 8, 8, 16});
+    Tensor<float> mask({1, 8, 8, 8}); // mask is per Q head, not KV head
+
+    mask.fillWithRandomValues(-2.0f, 2.0f, SEED_MASK);
+
+    compareGpuVsCpuSdpaFwd<T, T, T, T>(
+        q, k, v, oCpu, oGpu, sdpaFwdTolerance<T>(), std::nullopt, /*attnMask=*/&mask);
+}
+
+TYPED_TEST(TestGpuSdpaFwdPlain, MqaCausalTopLeft)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    Tensor<T> q({1, 8, 8, 16});
+    Tensor<T> k({1, 1, 8, 16});
+    Tensor<T> v({1, 1, 8, 16});
+    Tensor<T> oCpu({1, 8, 8, 16});
+    Tensor<T> oGpu({1, 8, 8, 16});
+
+    compareGpuVsCpuSdpaFwd<T, T, T, T>(q,
+                                       k,
+                                       v,
+                                       oCpu,
+                                       oGpu,
+                                       sdpaFwdTolerance<T>(),
+                                       std::nullopt,
+                                       /*attnMask=*/nullptr,
+                                       /*leftBound=*/-1,
+                                       /*rightBound=*/0,
+                                       /*topLeftAlignment=*/true);
+}
+
+// --- Strided (BSHD) layout combined with other modes ---
+
+TYPED_TEST(TestGpuSdpaFwdPlain, NonPackedBshdCausal)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    Tensor<T> q({1, 2, 8, 16}, TensorLayout::BSHD);
+    Tensor<T> k({1, 2, 8, 16}, TensorLayout::BSHD);
+    Tensor<T> v({1, 2, 8, 16}, TensorLayout::BSHD);
+    Tensor<T> oCpu({1, 2, 8, 16}, TensorLayout::BSHD);
+    Tensor<T> oGpu({1, 2, 8, 16}, TensorLayout::BSHD);
+
+    compareGpuVsCpuSdpaFwd<T, T, T, T>(q,
+                                       k,
+                                       v,
+                                       oCpu,
+                                       oGpu,
+                                       sdpaFwdTolerance<T>(),
+                                       std::nullopt,
+                                       /*attnMask=*/nullptr,
+                                       /*leftBound=*/-1,
+                                       /*rightBound=*/0,
+                                       /*topLeftAlignment=*/true);
+}
+
+TYPED_TEST(TestGpuSdpaFwdPlain, NonPackedBshdAdditiveMask)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    Tensor<T> q({2, 4, 8, 16}, TensorLayout::BSHD);
+    Tensor<T> k({2, 4, 8, 16}, TensorLayout::BSHD);
+    Tensor<T> v({2, 4, 8, 16}, TensorLayout::BSHD);
+    Tensor<T> oCpu({2, 4, 8, 16}, TensorLayout::BSHD);
+    Tensor<T> oGpu({2, 4, 8, 16}, TensorLayout::BSHD);
+    Tensor<float> mask({2, 4, 8, 8}); // packed mask against strided q/k/v
+
+    mask.fillWithRandomValues(-2.0f, 2.0f, SEED_MASK);
+
+    compareGpuVsCpuSdpaFwd<T, T, T, T>(
+        q, k, v, oCpu, oGpu, sdpaFwdTolerance<T>(), std::nullopt, /*attnMask=*/&mask);
+}
+
+TYPED_TEST(TestGpuSdpaFwdPlain, NonPackedBshdGqa)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    Tensor<T> q({1, 8, 8, 16}, TensorLayout::BSHD);
+    Tensor<T> k({1, 2, 8, 16}, TensorLayout::BSHD);
+    Tensor<T> v({1, 2, 8, 16}, TensorLayout::BSHD);
+    Tensor<T> oCpu({1, 8, 8, 16}, TensorLayout::BSHD);
+    Tensor<T> oGpu({1, 8, 8, 16}, TensorLayout::BSHD);
+
+    compareGpuVsCpuSdpaFwd<T, T, T, T>(q, k, v, oCpu, oGpu, sdpaFwdTolerance<T>());
+}
+
+// --- Explicit (non-default) scale combined with other modes ---
+
+TYPED_TEST(TestGpuSdpaFwdPlain, ExplicitScaleCausal)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    Tensor<T> q({1, 2, 8, 16});
+    Tensor<T> k({1, 2, 8, 16});
+    Tensor<T> v({1, 2, 8, 16});
+    Tensor<T> oCpu({1, 2, 8, 16});
+    Tensor<T> oGpu({1, 2, 8, 16});
+
+    compareGpuVsCpuSdpaFwd<T, T, T, T>(q,
+                                       k,
+                                       v,
+                                       oCpu,
+                                       oGpu,
+                                       sdpaFwdTolerance<T>(),
+                                       /*attnScaleValue=*/0.25f,
+                                       /*attnMask=*/nullptr,
+                                       /*leftBound=*/-1,
+                                       /*rightBound=*/0,
+                                       /*topLeftAlignment=*/true);
+}
+
+TYPED_TEST(TestGpuSdpaFwdPlain, ExplicitScaleAdditiveMask)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    Tensor<T> q({1, 2, 8, 16});
+    Tensor<T> k({1, 2, 8, 16});
+    Tensor<T> v({1, 2, 8, 16});
+    Tensor<T> oCpu({1, 2, 8, 16});
+    Tensor<T> oGpu({1, 2, 8, 16});
+    Tensor<float> mask({1, 2, 8, 8});
+
+    mask.fillWithRandomValues(-2.0f, 2.0f, SEED_MASK);
+
+    compareGpuVsCpuSdpaFwd<T, T, T, T>(
+        q, k, v, oCpu, oGpu, sdpaFwdTolerance<T>(), /*attnScaleValue=*/0.25f, /*attnMask=*/&mask);
+}
+
+// --- Sliding-window edge cases ---
+
+// Left bound only (rightBound = -1): exercises the leftBound>=0 branch in
+// isolation; every other window case pairs it with a right bound.
+TYPED_TEST(TestGpuSdpaFwdPlain, LeftBoundOnly)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    Tensor<T> q({1, 2, 8, 16});
+    Tensor<T> k({1, 2, 8, 16});
+    Tensor<T> v({1, 2, 8, 16});
+    Tensor<T> oCpu({1, 2, 8, 16});
+    Tensor<T> oGpu({1, 2, 8, 16});
+
+    compareGpuVsCpuSdpaFwd<T, T, T, T>(q,
+                                       k,
+                                       v,
+                                       oCpu,
+                                       oGpu,
+                                       sdpaFwdTolerance<T>(),
+                                       std::nullopt,
+                                       /*attnMask=*/nullptr,
+                                       /*leftBound=*/3,
+                                       /*rightBound=*/-1,
+                                       /*topLeftAlignment=*/true);
+}
+
+// Bottom-right sliding window with seqKv != seqQ, so the diagonal offset is
+// non-zero (offset = Skv - Sq = -2) and differs from the top-left case.
+TYPED_TEST(TestGpuSdpaFwdPlain, SlidingWindowBottomRight)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    Tensor<T> q({1, 2, 8, 16});
+    Tensor<T> k({1, 2, 6, 16});
+    Tensor<T> v({1, 2, 6, 16});
+    Tensor<T> oCpu({1, 2, 8, 16});
+    Tensor<T> oGpu({1, 2, 8, 16});
+
+    compareGpuVsCpuSdpaFwd<T, T, T, T>(q,
+                                       k,
+                                       v,
+                                       oCpu,
+                                       oGpu,
+                                       sdpaFwdTolerance<T>(),
+                                       std::nullopt,
+                                       /*attnMask=*/nullptr,
+                                       /*leftBound=*/2,
+                                       /*rightBound=*/1,
+                                       /*topLeftAlignment=*/false);
+}
+
+// --- Cross-attention (headDimV != headDim, seqKv != seqQ) combined with modes ---
+
+TYPED_TEST(TestGpuSdpaFwdPlain, CrossAttentionCausal)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    Tensor<T> q({1, 2, 8, 16});
+    Tensor<T> k({1, 2, 6, 16});
+    Tensor<T> v({1, 2, 6, 32});
+    Tensor<T> oCpu({1, 2, 8, 32});
+    Tensor<T> oGpu({1, 2, 8, 32});
+
+    compareGpuVsCpuSdpaFwd<T, T, T, T>(q,
+                                       k,
+                                       v,
+                                       oCpu,
+                                       oGpu,
+                                       sdpaFwdTolerance<T>(),
+                                       std::nullopt,
+                                       /*attnMask=*/nullptr,
+                                       /*leftBound=*/-1,
+                                       /*rightBound=*/0,
+                                       /*topLeftAlignment=*/false);
+}
+
+TYPED_TEST(TestGpuSdpaFwdPlain, CrossAttentionAdditiveMask)
+{
+    SKIP_IF_NO_DEVICES();
+    using T = TypeParam;
+
+    Tensor<T> q({1, 2, 8, 16});
+    Tensor<T> k({1, 2, 6, 16});
+    Tensor<T> v({1, 2, 6, 32});
+    Tensor<T> oCpu({1, 2, 8, 32});
+    Tensor<T> oGpu({1, 2, 8, 32});
+    Tensor<float> mask({1, 2, 8, 6}); // [B, H, Sq, Skv]
+
+    mask.fillWithRandomValues(-2.0f, 2.0f, SEED_MASK);
+
+    compareGpuVsCpuSdpaFwd<T, T, T, T>(
+        q, k, v, oCpu, oGpu, sdpaFwdTolerance<T>(), std::nullopt, /*attnMask=*/&mask);
+}
+
+// --- Mixed precision (16-bit in, float out) combined with modes ---
+
+TEST(TestGpuSdpaFwdMixedPrecision, HalfInputsFloatOutputCausal)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<half> q({1, 2, 8, 16});
+    Tensor<half> k({1, 2, 8, 16});
+    Tensor<half> v({1, 2, 8, 16});
+    Tensor<float> oCpu({1, 2, 8, 16});
+    Tensor<float> oGpu({1, 2, 8, 16});
+
+    compareGpuVsCpuSdpaFwd<half, half, half, float>(q,
+                                                    k,
+                                                    v,
+                                                    oCpu,
+                                                    oGpu,
+                                                    sdpaFwdTolerance<float>(),
+                                                    std::nullopt,
+                                                    /*attnMask=*/nullptr,
+                                                    /*leftBound=*/-1,
+                                                    /*rightBound=*/0,
+                                                    /*topLeftAlignment=*/true);
+}
+
+TEST(TestGpuSdpaFwdMixedPrecision, Bfloat16InputsFloatOutputAdditiveMask)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<bfloat16> q({1, 2, 8, 16});
+    Tensor<bfloat16> k({1, 2, 8, 16});
+    Tensor<bfloat16> v({1, 2, 8, 16});
+    Tensor<float> oCpu({1, 2, 8, 16});
+    Tensor<float> oGpu({1, 2, 8, 16});
+    Tensor<float> mask({1, 2, 8, 8});
+
+    mask.fillWithRandomValues(-2.0f, 2.0f, SEED_MASK);
+
+    compareGpuVsCpuSdpaFwd<bfloat16, bfloat16, bfloat16, float>(
+        q, k, v, oCpu, oGpu, sdpaFwdTolerance<float>(), std::nullopt, /*attnMask=*/&mask);
+}
+
+TEST(TestGpuSdpaFwdMixedPrecision, HalfInputsFloatOutputGqa)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<half> q({1, 8, 8, 16});
+    Tensor<half> k({1, 2, 8, 16});
+    Tensor<half> v({1, 2, 8, 16});
+    Tensor<float> oCpu({1, 8, 8, 16});
+    Tensor<float> oGpu({1, 8, 8, 16});
+
+    compareGpuVsCpuSdpaFwd<half, half, half, float>(q, k, v, oCpu, oGpu, sdpaFwdTolerance<float>());
 }

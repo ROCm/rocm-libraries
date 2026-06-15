@@ -74,12 +74,14 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
                                        const void* vPtr,
                                        const void* maskPtr,
                                        void* oPtr,
+                                       void* lsePtr,
                                        const std::vector<int64_t>& qTensorStrides,
                                        const std::vector<int64_t>& kTensorStrides,
                                        const std::vector<int64_t>& vTensorStrides,
                                        const std::vector<int64_t>& oTensorStrides,
                                        const std::vector<int64_t>& maskTensorStrides,
                                        const std::vector<int64_t>& maskDims,
+                                       const std::vector<int64_t>& lseTensorStrides,
                                        int64_t batch,
                                        int64_t numHeads,
                                        int64_t numHeadsK,
@@ -103,11 +105,13 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
     args.v = vPtr;
     args.mask = maskPtr;
     args.o = oPtr;
+    args.lse = lsePtr;
     args.qStr = toSdpaStrides(qTensorStrides);
     args.kStr = toSdpaStrides(kTensorStrides);
     args.vStr = toSdpaStrides(vTensorStrides);
     args.oStr = toSdpaStrides(oTensorStrides);
     args.maskStr = toSdpaStrides(maskTensorStrides);
+    args.lseStr = toSdpaStrides(lseTensorStrides);
     args.batch = static_cast<long long>(batch);
     args.numHeads = static_cast<long long>(numHeads);
     args.numHeadsK = static_cast<long long>(numHeadsK);

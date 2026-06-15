@@ -31,11 +31,14 @@ struct SdpaFwdArgs
     const void* v;
     const void* mask;
     void* o;
+    // Optional log-sum-exp output [B, H, Sq], always float. nullptr disables it.
+    void* lse;
     SdpaStrides qStr;
     SdpaStrides kStr;
     SdpaStrides vStr;
     SdpaStrides oStr;
     SdpaStrides maskStr;
+    SdpaStrides lseStr;
     long long batch, numHeads, numHeadsK, numHeadsV;
     long long seqQ, seqKv, headDim, headDimV;
     int maskRank;

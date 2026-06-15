@@ -26,6 +26,9 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
     auto* v = static_cast<const V_TYPE*>(args.v);
     auto* o = static_cast<O_TYPE*>(args.o);
     auto* mask = static_cast<const COMPUTE_TYPE*>(args.mask);
+    // LSE is always float [B, H, Sq]; nullptr disables it. Written once per
+    // (b, h, sq) by the dv == 0 thread (see below).
+    auto* lse = static_cast<float*>(args.lse);
 
     long long totalOutputElements = args.batch * args.numHeads * args.seqQ * args.headDimV;
     long long idx = static_cast<long long>(blockIdx.x) * static_cast<long long>(blockDim.x)
@@ -122,11 +125,20 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
         = b * args.oStr.s[0] + h * args.oStr.s[1] + sq * args.oStr.s[2] + dv * args.oStr.s[3];
     O_TYPE* tag = nullptr;
 
+    // LSE is per (b, h, sq); only the dv == 0 thread writes it, so every output
+    // row has exactly one writer and there is no contention.
+    long long lseIdx = b * args.lseStr.s[0] + h * args.lseStr.s[1] + sq * args.lseStr.s[2];
+
     // Fully-masked row: probabilities are all zero, so the output is zero.
     // Matches CpuFpReferenceSdpa (avoids a 0/0 NaN from a sumExp==0 guard).
     if(maxVal == negInf)
     {
         o[oIdx] = fromAccum(static_cast<COMPUTE_TYPE>(0), tag);
+        // CPU writes maxVal + log(sumExp) = -inf + log(0) = -inf for masked rows.
+        if(lse != nullptr && dv == 0)
+        {
+            lse[lseIdx] = negInf;
+        }
         return;
     }
 
@@ -147,4 +159,11 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
     }
 
     o[oIdx] = fromAccum(weighted / sumExp, tag);
+
+    // LSE = maxVal + log(sumExp), matching CpuFpReferenceSdpa. sumExp is the
+    // pre-normalization softmax denominator (>= 1, since exp(maxVal-maxVal)=1).
+    if(lse != nullptr && dv == 0)
+    {
+        lse[lseIdx] = static_cast<float>(maxVal) + logf(sumExp);
+    }
 }

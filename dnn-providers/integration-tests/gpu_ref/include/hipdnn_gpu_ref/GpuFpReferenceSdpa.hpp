@@ -64,7 +64,8 @@ public:
                       hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* attnMask = nullptr,
                       int64_t leftBound = -1,
                       int64_t rightBound = -1,
-                      bool topLeftAlignment = true)
+                      bool topLeftAlignment = true,
+                      hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr)
     {
         validateInput(q.dims(), k.dims(), v.dims(), o.dims());
 
@@ -100,17 +101,33 @@ public:
             maskStrides = attnMask->strides();
         }
 
+        void* lsePtr = nullptr;
+        std::vector<int64_t> lseStrides;
+        if(lse != nullptr)
+        {
+            // LSE is one value per query position; mirror the CPU oracle's shape check.
+            if(lse->dims().size() != 3 || lse->dims()[0] != batch || lse->dims()[1] != numHeads
+               || lse->dims()[2] != seqQ)
+            {
+                throw std::invalid_argument("GpuFpReferenceSdpa: lse must be rank-3 [B, H, Sq]");
+            }
+            lsePtr = lse->memory().deviceData();
+            lseStrides = lse->strides();
+        }
+
         launchSdpaFwd(q.memory().deviceData(),
                       k.memory().deviceData(),
                       v.memory().deviceData(),
                       maskPtr,
                       o.memory().deviceData(),
+                      lsePtr,
                       q.strides(),
                       k.strides(),
                       v.strides(),
                       o.strides(),
                       maskStrides,
                       maskDims,
+                      lseStrides,
                       batch,
                       numHeads,
                       numHeadsK,
@@ -126,6 +143,10 @@ public:
                       defines);
 
         o.memory().markDeviceModified();
+        if(lse != nullptr)
+        {
+            lse->memory().markDeviceModified();
+        }
     }
 
 private:
@@ -188,12 +209,14 @@ private:
                               const void* vPtr,
                               const void* maskPtr,
                               void* oPtr,
+                              void* lsePtr,
                               const std::vector<int64_t>& qTensorStrides,
                               const std::vector<int64_t>& kTensorStrides,
                               const std::vector<int64_t>& vTensorStrides,
                               const std::vector<int64_t>& oTensorStrides,
                               const std::vector<int64_t>& maskTensorStrides,
                               const std::vector<int64_t>& maskDims,
+                              const std::vector<int64_t>& lseTensorStrides,
                               int64_t batch,
                               int64_t numHeads,
                               int64_t numHeadsK,
