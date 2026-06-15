@@ -1122,10 +1122,10 @@ def packageAndStaticCheckStages(def pipelineParams, def pipelineEnv, def rocmnod
     echo "Selective rerun: ${result.debugMsg}"
     echo "Selective rerun: passedStages (${passedStages.size()}): ${passedStages}"
     def stages = [:]
-
+    // Delibrately cause a break with the flaky node and simulate an error for replay.
     def hipPackage = 'HIP Package'
     addStageIf(stages, !passedStages.contains(hipPackage), hipPackage) {
-        node(rocmnodeFn("nogpu")) {
+        node(rocmnodeFn("do_not_use")) {
             try {
                 withWorkingDirFn {
                     buildHipClangJob(package_build: true, needs_gpu: false, gpu_family: "ci")
