@@ -158,22 +158,22 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
     )
 
     # Set per-suite ROCALUTION_EMULATION_* env vars.
-    # The YAML uses test_patterns: ["*"] for all suites; the env var drives
+    # The YAML uses test_patterns: ["*"] for most suites; the env var drives
     # which parameter sets actually execute inside the test binary.
+    # ffm-quick and ffm-full use an explicit GTest filter (single CG test) instead,
+    # so they do not need an emulation env var.
     # We also append these to the install-time file because the Python parser
     # that generates it has no knowledge of our post-hoc set_tests_properties().
-    foreach(_suite quick ffm-quick ffm-full)
-      if(TEST rocalution-test_${_suite}_suite)
-        set_tests_properties(rocalution-test_${_suite}_suite PROPERTIES
-          ENVIRONMENT "ROCALUTION_EMULATION_SMOKE=1"
+    if(TEST rocalution-test_quick_suite)
+      set_tests_properties(rocalution-test_quick_suite PROPERTIES
+        ENVIRONMENT "ROCALUTION_EMULATION_SMOKE=1"
+      )
+      if(ROCALUTION_CTEST_INSTALL_FILE)
+        file(APPEND "${ROCALUTION_CTEST_INSTALL_FILE}"
+          "set_tests_properties(rocalution-test_quick_suite PROPERTIES ENVIRONMENT \"ROCALUTION_EMULATION_SMOKE=1\")\n"
         )
-        if(ROCALUTION_CTEST_INSTALL_FILE)
-          file(APPEND "${ROCALUTION_CTEST_INSTALL_FILE}"
-            "set_tests_properties(rocalution-test_${_suite}_suite PROPERTIES ENVIRONMENT \"ROCALUTION_EMULATION_SMOKE=1\")\n"
-          )
-        endif()
       endif()
-    endforeach()
+    endif()
 
     if(TEST rocalution-test_standard_suite)
       set_tests_properties(rocalution-test_standard_suite PROPERTIES

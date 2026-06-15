@@ -87,28 +87,32 @@ test_categories:
       - "weekly"
 
   ffm-quick:
-    description: "FFM NPI simulation tests for PR pipelines (target: < 2 hours on FFM runner)"
+    description: "FFM NPI smoke test for PR pipelines — one CG solve to validate the pipeline end-to-end"
     test_patterns:
-      - "*"
+      - "cg/parameterized_cg.cg_float/0"
     labels:
       - "ffm-quick"
       - "ffm"
     notes: |
-      CMakeLists.txt sets ROCALUTION_EMULATION_SMOKE=1 for this suite.
-      Equivalent to quick but with a 2-hour budget matching the FFM runner constraint.
-      GPU-heavy tests skip; solver tests run with smoke-mode reduced parameters.
+      Intentionally minimal: runs a single CG float test (size=63, one preconditioner,
+      one matrix format) to validate that the FFM runner can build and execute
+      rocalution-test end-to-end. Expand test_patterns once the FFM infrastructure
+      is confirmed working (e.g. add more CG variants, then "cg/*", then full SMOKE set).
 
   ffm-full:
-    description: "FFM NPI nightly tests (initially alias for ffm-quick; expand as capacity grows)"
+    description: "FFM NPI nightly test — initially identical to ffm-quick; widen once infra is proven"
     test_patterns:
-      - "*"
+      - "cg/parameterized_cg.cg_float/0"
     labels:
       - "ffm-full"
       - "ffm"
     notes: |
-      CMakeLists.txt sets ROCALUTION_EMULATION_SMOKE=1 for this suite.
-      Initially identical to ffm-quick. Widen to ROCALUTION_EMULATION_REGRESSION
-      (or remove env var) when TheRock NPI compute capacity allows.
+      Starts identical to ffm-quick (single CG float test).
+      Progression plan:
+        1. Validate FFM runner with this single test.
+        2. Expand to "cg/*" (all CG variants under ROCALUTION_EMULATION_SMOKE).
+        3. Expand to "*" with ROCALUTION_EMULATION_SMOKE for the full smoke suite.
+        4. Switch to ROCALUTION_EMULATION_REGRESSION when capacity allows.
 
 execution_settings:
   timeout_multiplier: 1
