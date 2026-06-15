@@ -123,11 +123,11 @@ class ConvProblem:
       D: NHWK,  shape ``[N, Ho, Wo, K]``
       M = N*Ho*Wo,  N_gemm = K,  K_gemm = Y*X*C
 
-    3-D (set ``Di`` and ``Z``):
-      A: NDHWC, shape ``[N, Di, Hi, Wi, C]``
-      B: KYXC, shape ``[K, Z, Y, X, C]``
-      D: NDHWK, shape ``[N, Do, Ho, Wo, K]``
-      M = N*Do*Ho*Wo,  N_gemm = K,  K_gemm = Z*Y*X*C
+     3-D (set ``Di`` and ``Z``):
+       A: NDHWC, shape ``[N, Di, Hi, Wi, C]``
+       B: KZYXC, shape ``[K, Z, Y, X, C]``
+       D: NDHWK, shape ``[N, Do, Ho, Wo, K]``
+       M = N*Do*Ho*Wo,  N_gemm = K,  K_gemm = Z*Y*X*C
     """
 
     N:  int
