@@ -6,34 +6,41 @@ SDPA **gpu_ref** kernel against **AOTriton** (reached via PyTorch's
 
 ## What it does and why
 
-- The **gpu_ref** kernel is treated as the **high-precision (HP) oracle**: it
-  computes the whole attention in fp32 (QKᵀ, softmax, PV) regardless of the
-  input dtype.
 - **AOTriton** (the flash / mem-efficient backends behind PyTorch SDPA on ROCm)
-  is the **low-precision (LP) result** under test.
+  is the **oracle / reference of record**.
+- The **gpu_ref** kernel is the **candidate under test**: it computes the whole
+  attention in fp32 (QKᵀ, softmax, PV) regardless of the input dtype, and is
+  validated against the AOTriton oracle.
 - Inputs are generated **once** in Python, cast to the target dtype **once**,
   and the **exact same bit patterns** are fed to both sides (the C++ driver
   loads the same `.npy` files Python wrote), so neither side sees a divergent
   cast.
 
-### Adaptive tolerance (mirrors AOTriton's own test methodology)
+### Adaptive tolerance (independent precision-gap budget)
 
 For each case, all math in float32:
 
 ```
-err_aot    = max(abs(aotriton_o - gpuref_o))     # what we're judging
-budget     = max(abs(gpuref_o   - math_lp_o))     # error from low precision alone
-atol_floor = {bf16: 1e-2, fp16: 1e-3}
-threshold  = max(atol_floor, fudge * budget)      # rtol = 0, fudge default 4.0
-passed     = err_aot <= threshold
-selfcheck  = max(abs(gpuref_o - math_hp_o))       # report-only oracle sanity
+err            = max(abs(gpuref_o - aotriton_o))   # candidate vs oracle (judged)
+budget         = max(abs(math_hp_o - math_lp_o))    # independent fp32-vs-LP gap
+atol_floor     = {bf16: 1e-2, fp16: 1e-3}
+threshold      = max(atol_floor, fudge * budget)    # rtol = 0, fudge default 4.0
+passed         = err <= threshold
+# diagnostics (report-only):
+gpuref_vs_fp32 = max(abs(gpuref_o  - math_hp_o))    # is the candidate a sound fp32 impl?
+aotriton_vs_lp = max(abs(aotriton_o - math_lp_o))   # does the oracle behave like a standard LP impl?
 ```
 
-`math_lp_o` is PyTorch's **MATH** backend run on the native low-precision inputs
-(measures the inherent quantization error); `math_hp_o` is the MATH backend with
-inputs upcast to fp32 (an independent fp32 oracle used only as a sanity check on
-the gpu_ref itself). AOTriton must agree with the gpu_ref to within a small
-multiple of the quantization budget, with an absolute floor per dtype.
+`math_hp_o` is PyTorch's **MATH** backend with inputs upcast to fp32; `math_lp_o`
+is the MATH backend on the native low-precision inputs. Their gap is the
+**budget** — the inherent bf16/fp16 attention error, independent of both the
+candidate and the oracle (using `|gpuref - math_lp|` would be circular now that
+gpu_ref is the thing under test). The candidate must agree with the oracle to
+within a small multiple of that budget, with an absolute floor per dtype.
+
+The two diagnostics are report-only: `gpuref_vs_fp32` checks the candidate is a
+sound fp32 implementation, and `aotriton_vs_lp` checks the oracle behaves like a
+standard low-precision implementation.
 
 ## Prerequisites (gfx942 / MI300)
 
@@ -99,11 +106,12 @@ python compare.py   --run-dir runs/manual --fudge 4.0
 | Column      | Meaning |
 |-------------|---------|
 | `backend`   | which AOTriton backend serviced the case: `flash` or `efficient` (mem-efficient). |
-| `err_aot`   | max-abs difference between AOTriton and the gpu_ref oracle. |
-| `budget`    | max-abs difference between the gpu_ref and torch MATH-LP (quantization error). |
+| `err`       | max-abs difference between the gpu_ref candidate and the AOTriton oracle. |
+| `budget`    | max-abs difference between torch MATH-HP and MATH-LP (independent fp32-vs-low-precision attention gap). |
 | `threshold` | `max(atol_floor, fudge * budget)`. |
-| `ratio`     | `err_aot / threshold` (≤ 1.0 passes). |
-| `selfcheck` | gpu_ref vs the independent fp32 MATH oracle; a `!` flags `> 1e-2` (warn only). |
+| `ratio`     | `err / threshold` (≤ 1.0 passes). |
+| `g_vs_fp32` | gpu_ref candidate vs the independent fp32 MATH reference; a `!` flags `> 1e-2` (warn only). |
+| `a_vs_lp`   | AOTriton oracle vs the low-precision MATH reference; a `!` flags `> 1e-2` (warn only). |
 | `RESULT`    | `PASS` / `FAIL` / `SKIP` / `ERROR`. |
 
 - **SKIP** means AOTriton cannot service that shape/config (both flash and

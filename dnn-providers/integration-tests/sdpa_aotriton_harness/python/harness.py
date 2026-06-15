@@ -1,10 +1,13 @@
-"""End-to-end driver for the SDPA gpu_ref vs AOTriton numerical harness.
+"""End-to-end driver for the SDPA gpu_ref-vs-AOTriton numerical harness.
+
+Framing: **AOTriton** is the oracle / reference of record; the **gpu_ref**
+kernel is the candidate under test.
 
 Pipeline:
   (a) gen_inputs   -> populate a run dir with Q/K/V/mask + manifests
-  (b) C++ driver   -> for each case, run THIS branch's fp32 gpu_ref kernel,
+  (b) C++ driver   -> for each case, run THIS branch's fp32 gpu_ref candidate,
                       writing gpuref_o.npy
-  (c) run_torch    -> AOTriton + math (HP/LP) references via PyTorch
+  (c) run_torch    -> AOTriton oracle + math (HP/LP) references via PyTorch
   (d) compare      -> adaptive-tolerance pass/fail
   (e) summary      -> a table to stdout; non-zero exit if any case FAILs/ERRORs
 
@@ -129,8 +132,9 @@ def print_summary(results: List[Dict[str, Any]]) -> Dict[str, int]:
     """Print the results table and return pass/fail/skip/error counts."""
     header = (
         f"{'name':<46} {'dtype':<5} {'shape (BxHqxHkv SqxSkvxD)':<28} "
-        f"{'mode':<7} {'backend':<9} {'err_aot':<10} {'budget':<10} "
-        f"{'thresh':<10} {'ratio':<8} {'selfchk':<10} {'RESULT':<6}"
+        f"{'mode':<7} {'backend':<9} {'err':<10} {'budget':<10} "
+        f"{'thresh':<10} {'ratio':<8} {'g_vs_fp32':<11} {'a_vs_lp':<11} "
+        f"{'RESULT':<6}"
     )
     print(header)
     print("-" * len(header))
@@ -141,15 +145,18 @@ def print_summary(results: List[Dict[str, Any]]) -> Dict[str, int]:
         shape = f"{r['B']}x{r['Hq']}x{r['Hkv']} " f"{r['Sq']}x{r['Skv']}x{r['D']}"
         ratio = r.get("ratio")
         ratio_s = f"{ratio:.2f}" if isinstance(ratio, (int, float)) else "-"
-        selfchk = _fmt(r.get("selfcheck"))
-        if r.get("selfcheck_warn"):
-            selfchk += "!"
+        g_vs_fp32 = _fmt(r.get("gpuref_vs_fp32"))
+        if r.get("gpuref_vs_fp32_warn"):
+            g_vs_fp32 += "!"
+        a_vs_lp = _fmt(r.get("aotriton_vs_lp"))
+        if r.get("aotriton_vs_lp_warn"):
+            a_vs_lp += "!"
         line = (
             f"{r['name']:<46} {r['dtype']:<5} {shape:<28} "
             f"{r['mode']:<7} {str(r.get('backend') or '-'):<9} "
-            f"{_fmt(r.get('err_aot')):<10} {_fmt(r.get('budget')):<10} "
-            f"{_fmt(r.get('threshold')):<10} {ratio_s:<8} {selfchk:<10} "
-            f"{r['result']:<6}"
+            f"{_fmt(r.get('err')):<10} {_fmt(r.get('budget')):<10} "
+            f"{_fmt(r.get('threshold')):<10} {ratio_s:<8} {g_vs_fp32:<11} "
+            f"{a_vs_lp:<11} {r['result']:<6}"
         )
         print(line)
         if r["result"] in ("SKIP", "ERROR", "FAIL") and r.get("reason"):

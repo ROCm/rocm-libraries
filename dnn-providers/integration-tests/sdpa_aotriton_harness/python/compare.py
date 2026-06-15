@@ -1,21 +1,32 @@
-"""Compare the gpu_ref (HP oracle) output against AOTriton (LP) per case.
+"""Compare the gpu_ref CANDIDATE against the AOTriton ORACLE per case.
 
-Methodology (mirrors AOTriton's own adaptive-tolerance approach):
+Framing: **AOTriton** (flash / mem-efficient via PyTorch SDPA) is the oracle /
+reference of record; the **gpu_ref** kernel is the candidate under test.
 
-  * The gpu_ref kernel is the high-precision oracle.
-  * ``math_lp_o`` (torch MATH backend on native low-precision inputs) measures
-    how much error low precision alone induces -> the *budget*.
-  * AOTriton (flash / mem-efficient) must agree with the oracle to within a
-    fudge factor of that budget, with an absolute floor per dtype.
+Methodology (adaptive tolerance with an independent precision-gap budget):
+
+  * ``math_hp_o`` (torch MATH backend, inputs upcast to fp32) and ``math_lp_o``
+    (torch MATH backend, native low-precision inputs) bracket the inherent
+    bf16/fp16 attention error. Their gap is the *budget* -- it depends on
+    neither the candidate nor the oracle.
+  * The candidate must agree with the oracle to within a fudge factor of that
+    budget, with an absolute floor per dtype.
 
 For each non-skipped case, all in float32::
 
-    err_aot    = max(abs(aotriton_o - gpuref_o))
-    budget     = max(abs(gpuref_o   - math_lp_o))
-    atol_floor = {"bf16": 1e-2, "fp16": 1e-3}[dtype]
-    threshold  = max(atol_floor, fudge * budget)          # rtol = 0
-    passed     = err_aot <= threshold
-    selfcheck  = max(abs(gpuref_o - math_hp_o))           # report-only sanity
+    err            = max(abs(gpuref_o - aotriton_o))   # candidate vs oracle
+    budget         = max(abs(math_hp_o - math_lp_o))    # fp32-vs-LP gap (torch math)
+    atol_floor     = {"bf16": 1e-2, "fp16": 1e-3}[dtype]
+    threshold      = max(atol_floor, fudge * budget)    # rtol = 0
+    passed         = err <= threshold
+    # diagnostics (report-only):
+    gpuref_vs_fp32 = max(abs(gpuref_o  - math_hp_o))    # candidate a sound fp32 impl?
+    aotriton_vs_lp = max(abs(aotriton_o - math_lp_o))   # oracle a standard LP impl?
+
+The budget previously used the candidate (``|gpuref - math_lp|``), which is
+circular now that gpu_ref is the thing under test; ``|math_hp - math_lp|`` has
+the same magnitude (bf16/fp16 attention error) but is independent of both the
+candidate and the oracle.
 
 NaN / Inf in any output is treated as a failure (the case matrix avoids
 fully-masked rows, so finite outputs are expected everywhere).
@@ -35,7 +46,7 @@ import numpy as np
 import manifest as mf
 
 ATOL_FLOOR = {"bf16": 1e-2, "fp16": 1e-3}
-SELFCHECK_WARN = 1e-2
+DIAG_WARN = 1e-2  # warn threshold for the report-only diagnostics
 
 
 def _load_f32(path: str) -> np.ndarray:
@@ -110,21 +121,30 @@ def compare_case(man: Dict[str, Any], fudge: float) -> Dict[str, Any]:
         result["reason"] = "non-finite (NaN/Inf) value in an output"
         return result
 
-    err_aot = _max_abs_diff(aotriton, gpuref)
-    budget = _max_abs_diff(gpuref, math_lp)
-    selfcheck = _max_abs_diff(gpuref, math_hp)
+    # Candidate (gpu_ref) vs oracle (AOTriton).
+    err = _max_abs_diff(gpuref, aotriton)
+    # Budget = independent fp32-vs-low-precision gap (torch math). Depends on
+    # neither candidate nor oracle, so it is not circular. The old budget used
+    # |gpuref - math_lp|, which is circular now that gpu_ref is under test;
+    # |math_hp - math_lp| has the same magnitude (bf16/fp16 attention error).
+    budget = _max_abs_diff(math_hp, math_lp)
+    # Diagnostics (report-only).
+    gpuref_vs_fp32 = _max_abs_diff(gpuref, math_hp)
+    aotriton_vs_lp = _max_abs_diff(aotriton, math_lp)
 
     atol_floor = ATOL_FLOOR[dtype]
     threshold = max(atol_floor, fudge * budget)
-    passed = err_aot <= threshold
+    passed = err <= threshold
 
-    result["err_aot"] = err_aot
+    result["err"] = err
     result["budget"] = budget
     result["atol_floor"] = atol_floor
     result["threshold"] = threshold
-    result["ratio"] = (err_aot / threshold) if threshold > 0 else float("inf")
-    result["selfcheck"] = selfcheck
-    result["selfcheck_warn"] = selfcheck > SELFCHECK_WARN
+    result["ratio"] = (err / threshold) if threshold > 0 else float("inf")
+    result["gpuref_vs_fp32"] = gpuref_vs_fp32
+    result["gpuref_vs_fp32_warn"] = gpuref_vs_fp32 > DIAG_WARN
+    result["aotriton_vs_lp"] = aotriton_vs_lp
+    result["aotriton_vs_lp_warn"] = aotriton_vs_lp > DIAG_WARN
     result["result"] = "PASS" if passed else "FAIL"
     return result
 

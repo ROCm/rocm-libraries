@@ -2,14 +2,16 @@
 
 For each (non-skipped) case in a run directory this:
   * Loads Q/K/V (and optional mask) per the dtype contract onto CUDA.
-  * AOTriton output: ``F.scaled_dot_product_attention`` under, in order,
+  * AOTriton output (the oracle / reference of record):
+    ``F.scaled_dot_product_attention`` under, in order,
     ``SDPBackend.FLASH_ATTENTION`` then ``SDPBackend.EFFICIENT_ATTENTION``
     (never MATH). Records the backend that succeeded. If both raise, the case is
     marked skipped ("aotriton-unsupported") and processing continues.
-  * math_hp_o: the MATH backend with inputs upcast to float32 (independent
-    high-precision oracle, separate from the gpu_ref).
-  * math_lp_o: the MATH backend on the native low-precision inputs (the
-    quantization budget reference).
+  * math_hp_o: the MATH backend with inputs upcast to float32 (independent fp32
+    reference; with math_lp_o it sets the precision-gap budget, and it also
+    sanity-checks the gpu_ref candidate).
+  * math_lp_o: the MATH backend on the native low-precision (bf16/fp16) inputs
+    (low-precision math reference).
 
 Outputs are always saved upcast to float32 ('<f4'), matching the gpu_ref output
 contract.
@@ -203,7 +205,7 @@ def _run_case(man: dict) -> dict:
         status["detail"] = last_err
         return man
 
-    # --- math high-precision oracle: upcast inputs to fp32. ---
+    # --- math high-precision reference: upcast inputs to fp32. ---
     with sdpa_kernel(SDPBackend.MATH):
         q32, k32, v32 = q.float(), k.float(), v.float()
         out_hp = _sdpa(
