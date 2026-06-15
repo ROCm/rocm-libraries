@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include <cstdlib>
 #include <functional>
 #include <vector>
 
@@ -33,8 +34,10 @@
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
+#include "stinkytofu/transforms/asm/LongBranchLoweringPass.hpp"
 #include "stinkytofu/transforms/asm/LoopRegionRemarkPass.hpp"
 #include "stinkytofu/transforms/asm/MemTokenConsistencyCheckPass.hpp"
 #include "stinkytofu/transforms/asm/PeepholeOptimizationPass.hpp"
@@ -43,6 +46,7 @@
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
+#include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyConfigurableWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
@@ -61,6 +65,7 @@ struct PassInfo {
 // List of available passes
 const std::vector<PassInfo> availablePasses = {
     {"StinkyDAGSchedulerPass", []() { return createStinkyDAGSchedulerPass(); }},
+    {"SetMatrixReusePass", []() { return createSetMatrixReusePass(); }},
     {"StinkyUnrollWaitCntPass", []() { return createStinkyUnrollWaitCntPass(); }},
     {"StinkyBuildImplicitDependencyPass",
      []() { return createStinkyBuildImplicitDependencyPass(); }},
@@ -83,6 +88,17 @@ const std::vector<PassInfo> availablePasses = {
     {"MemTokenConsistencyCheckPass", []() { return createMemTokenConsistencyCheckPass(); }},
     {"RaiseVgprMsbPass", []() { return createRaiseVgprMsbPass(); }},
     {"InsertVgprMsbPass", []() { return createInsertVgprMsbPass(); }},
+    {"LongBranchLoweringPass", []() { return createLongBranchLoweringPass(); }},
+    {"CFGBuilderPass", []() { return createCFGBuilderPass(); }},
+    {"InsertClusterBarrierPass",
+     []() {
+         auto geti = [](const char* k, int d) {
+             const char* v = std::getenv(k);
+             return v != nullptr ? std::atoi(v) : d;
+         };
+         return createInsertClusterBarrierPass(
+             /*isKernelScope=*/true, geti("PrefetchGlobalRead", 1), geti("PrefetchLocalRead", 1));
+     }},
 };
 
 /**
@@ -107,12 +123,4 @@ stinkytofu::PassFeatureConfig getPassFeatureConfig() {
     config.loopConfig.unrollGemm = true;
     config.dagFeatures.distributeGlobalRead = true;
     return config;
-}
-
-/**
- * Set default kernel configuration for the PassManager.
- */
-void setKernelConfig(stinkytofu::PassManager& passManager, const std::array<int, 3>& arch) {
-    passManager.setKernelConfig(arch /* arch */, 0 /* ta0 */, 0 /* tb0 */, 0 /* tm0 */,
-                                0 /* nGRA */, 0 /* nGRB */, 0 /* nGRM */, 0 /* numWaves */);
 }

@@ -131,7 +131,7 @@ namespace ck_tile::core::arch::mma {
  * ------------------------------------------
  *  Compression and packed data types
  * ------------------------------------------
- * For sparse intrisics we have 4:2 compression of the A matrix, meaning one element of the packed
+ * For sparse intrinsics we have 4:2 compression of the A matrix, meaning one element of the packed
  * (compressed) A matrix represents two elements of the original (uncompressed) A matrix
  * (kCompressionRatio = 2). In a similar vein, for packed datatypes (pk_fp4_t, pk_int4_t,
  * pk_fp6x16_t), each datatype element represents multiple logical / mathematical elements of the
@@ -393,10 +393,3 @@ CK_TILE_HOST_DEVICE void print(amdgcn_mma<ADataType,
 #if __clang_major__ >= 23
 #pragma clang diagnostic pop
 #endif
-
-// Include the implementations
-#include "wmma/wmma.hpp" // should be included before the below headers
-
-#include "mfma/mfma.hpp"
-#include "scale/scale.hpp"
-#include "sparse/sparse.hpp"
