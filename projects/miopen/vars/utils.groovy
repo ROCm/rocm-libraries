@@ -23,6 +23,15 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+
+import org.jenkinsci.plugins.workflow.graph.FlowGraphWalker
+import org.jenkinsci.plugins.workflow.actions.ErrorAction
+import org.jenkinsci.plugins.workflow.actions.LabelAction
+import org.jenkinsci.plugins.workflow.actions.ThreadNameAction
+import org.jenkinsci.plugins.workflow.actions.ResultAction
+import org.jenkinsci.plugins.workflow.cps.nodes.StepStartNode
+import org.jenkinsci.plugins.workflow.cps.nodes.StepEndNode
+
 def miopenCheckout()
 {
     // checkout project
@@ -957,20 +966,20 @@ def getPassedStagesFromBuild(def rawBuild) {
     def endNodes   = [:]       // startNodeId -> StepEndNode
     def errorIds   = [] as Set // nodeIds that carry an ErrorAction
 
-    def walker = new org.jenkinsci.plugins.workflow.graph.FlowGraphWalker(execution)
+    def walker = new FlowGraphWalker(execution)
     def walkerIter = walker.iterator()
     while (walkerIter.hasNext()) {
         def flowNode = walkerIter.next()
-        if (flowNode.getAction(org.jenkinsci.plugins.workflow.actions.ErrorAction)) {
+        if (flowNode.getAction(ErrorAction)) {
             errorIds << flowNode.id
         }
-        if (flowNode instanceof org.jenkinsci.plugins.workflow.cps.nodes.StepStartNode) {
-            def label  = flowNode.getAction(org.jenkinsci.plugins.workflow.actions.LabelAction)
-            def thread = flowNode.getAction(org.jenkinsci.plugins.workflow.actions.ThreadNameAction)
+        if (flowNode instanceof StepStartNode) {
+            def label  = flowNode.getAction(LabelAction)
+            def thread = flowNode.getAction(ThreadNameAction)
             if (label && !thread) {
                 startNodes[flowNode.id] = label.displayName
             }
-        } else if (flowNode instanceof org.jenkinsci.plugins.workflow.cps.nodes.StepEndNode) {
+        } else if (flowNode instanceof StepEndNode) {
             endNodes[flowNode.startNode?.id] = flowNode
         }
     }
@@ -983,7 +992,7 @@ def getPassedStagesFromBuild(def rawBuild) {
         if (errorIds.contains(startId) || errorIds.contains(endNode.id)) continue
 
         // check the StageResult to catch stages marked FAILURE.
-        def stageResult = endNode.getAction(org.jenkinsci.plugins.workflow.actions.ResultAction)
+        def stageResult = endNode.getAction(ResultAction)
         if (stageResult?.result?.toString() != 'SUCCESS') continue
 
         passed << stageName
