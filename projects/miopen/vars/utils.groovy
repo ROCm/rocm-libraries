@@ -958,7 +958,9 @@ def getPassedStagesFromBuild(def rawBuild) {
     def errorIds   = [] as Set // nodeIds that carry an ErrorAction
 
     def walker = new org.jenkinsci.plugins.workflow.graph.FlowGraphWalker(execution)
-    walker.each { flowNode ->
+    def walkerIter = walker.iterator()
+    while (walkerIter.hasNext()) {
+        def flowNode = walkerIter.next()
         if (flowNode.getAction(org.jenkinsci.plugins.workflow.actions.ErrorAction)) {
             errorIds << flowNode.id
         }
@@ -973,14 +975,16 @@ def getPassedStagesFromBuild(def rawBuild) {
         }
     }
 
-    startNodes.each { startId, stageName ->
-        def endNode = endNodes[startId]
-        if (!endNode) return
-        if (errorIds.contains(startId) || errorIds.contains(endNode.id)) return
+    for (def entry : startNodes.entrySet()) {
+        def startId   = entry.key
+        def stageName = entry.value
+        def endNode   = endNodes[startId]
+        if (!endNode) continue
+        if (errorIds.contains(startId) || errorIds.contains(endNode.id)) continue
 
         // check the StageResult to catch stages marked FAILURE.
         def stageResult = endNode.getAction(org.jenkinsci.plugins.workflow.actions.ResultAction)
-        if (stageResult?.result?.toString() != 'SUCCESS') return
+        if (stageResult?.result?.toString() != 'SUCCESS') continue
 
         passed << stageName
     }
@@ -1005,29 +1009,18 @@ def getPassedStagesFromPreviousBuild() {
         def restartCause = currentBuild.rawBuild?.getCauses()?.find { cause ->
             cause.getClass().getName().contains('RestartDeclarativePipeline')
         }
-        if (!restartCause) {
-            echo "Selective rerun: not a restart build, running all stages"
-            return passed
-        }
+        if (!restartCause) return passed
 
         // Guard 2: get the exact build being restarted from the cause object.
         // getOriginal() returns the WorkflowRun that was restarted.
         def prevRun = restartCause.getOriginal()
-        if (!prevRun) {
-            echo "Selective rerun: could not resolve restarted build, running all stages"
-            return passed
-        }
-        if (prevRun.result?.toString() == 'SUCCESS') {
-            echo "Selective rerun: previous build was SUCCESS, running all stages"
-            return passed
-        }
+        if (!prevRun) return passed
+        if (prevRun.result?.toString() == 'SUCCESS') return passed
 
         // No commit guard needed: getOriginal() returns the exact build being
         // restarted, so the commit is implicitly the same.
-        echo "Selective rerun: restarting from build #${prevRun.number}, checking for passed stages"
         passed = getPassedStagesFromBuild(prevRun)
     } catch (Exception e) {
-        echo "Selective rerun: error (${e.message}), running all stages"
         return [] as Set
     }
     return passed
