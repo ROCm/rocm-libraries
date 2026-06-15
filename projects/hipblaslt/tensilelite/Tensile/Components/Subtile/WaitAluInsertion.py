@@ -20,6 +20,7 @@ from rocisa.instruction import (
 
 # Number of WMMAs that must issue between a swap XOR and its dependent ds_read
 # for the v_xor latency to be fully hidden (no s_wait_alu required).
+# Conversative value based on s_wait_alu latency.
 MIN_MMA_BEFORE_LR_READ = 4
 
 _isMMA = lambda x: isinstance(x, (MFMAInstruction, MXMFMAInstruction))
@@ -34,14 +35,6 @@ def _vgprIndices(container):
 
 def setMatrixAReuse(module, writer, kernel):
   """Enable the gfx1250 WMMA matrix-A reuse hint where it is safe.
-
-  For plain (non load-scale) WMMA the hint means the A source is already cached
-  from the PREVIOUS, identical WMMA, so it may be reused instead of re-read.  Per
-  the ISA it is only valid when "the current instruction is the same as the
-  previous instruction", so it is set on MMA[i] when the preceding MMA in the
-  final stream reads the exact same A operand VGPRs -- never on the first MMA of
-  a constant-A run.  Operates on the post-schedule order so "previous MMA"
-  matches what the hardware sees.
 
   No-op unless gfx1250 (HasWmmaArbStallBit).  Mutates instructions in place.
   """
