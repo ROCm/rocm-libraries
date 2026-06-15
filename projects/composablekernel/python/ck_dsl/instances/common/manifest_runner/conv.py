@@ -29,6 +29,7 @@ def run_conv_manifest_problem(
     else:
         if len(cv) < 13:
             raise ValueError("conv manifest needs [N,Hi,Wi,C,K,Y,X,sH,sW,pH,pW,dH,dW]")
+        N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW = cv[:13]
         Di, Z, sD, pD, dD = 1, 1, 1, 0, 1
 
     groups = int(manifest.get("groups", 1))
