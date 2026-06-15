@@ -28,8 +28,8 @@
 #include <numeric>
 #include <vector>
 
-#include "../library/include/hipfft/hipfft.h"
-#include "../library/include/hipfft/hipfftXt.h"
+#include "hipfft.h"
+#include "hipfftXt.h"
 #include "client_data_layout_helpers.h"
 
 struct hipfft_brick
