@@ -112,14 +112,14 @@ float sdpaFwdTolerance()
 // ============================================================================
 
 template <typename T>
-class GpuSdpaFwdPlain : public ::testing::Test
+class TestGpuSdpaFwdPlain : public ::testing::Test
 {
 };
 
 using SdpaFwdTypes = ::testing::Types<float, half, bfloat16>;
-TYPED_TEST_SUITE(GpuSdpaFwdPlain, SdpaFwdTypes, );
+TYPED_TEST_SUITE(TestGpuSdpaFwdPlain, SdpaFwdTypes, );
 
-TYPED_TEST(GpuSdpaFwdPlain, MatchesCpuRef)
+TYPED_TEST(TestGpuSdpaFwdPlain, MatchesCpuRef)
 {
     SKIP_IF_NO_DEVICES();
     using T = TypeParam;
@@ -138,7 +138,7 @@ TYPED_TEST(GpuSdpaFwdPlain, MatchesCpuRef)
 // Causal top-left (leftBound=-1, rightBound=0, topLeftAlignment=true).
 // ============================================================================
 
-TYPED_TEST(GpuSdpaFwdPlain, CausalTopLeft)
+TYPED_TEST(TestGpuSdpaFwdPlain, CausalTopLeft)
 {
     SKIP_IF_NO_DEVICES();
     using T = TypeParam;
@@ -169,7 +169,7 @@ TYPED_TEST(GpuSdpaFwdPlain, CausalTopLeft)
 // start of the masked region for early query rows.
 // ============================================================================
 
-TYPED_TEST(GpuSdpaFwdPlain, CausalBottomRightSmallerSkv)
+TYPED_TEST(TestGpuSdpaFwdPlain, CausalBottomRightSmallerSkv)
 {
     SKIP_IF_NO_DEVICES();
     using T = TypeParam;
@@ -198,7 +198,7 @@ TYPED_TEST(GpuSdpaFwdPlain, CausalBottomRightSmallerSkv)
 // Generic sliding window with BOTH leftBound>=0 and rightBound>=0.
 // ============================================================================
 
-TYPED_TEST(GpuSdpaFwdPlain, SlidingWindowBothBounds)
+TYPED_TEST(TestGpuSdpaFwdPlain, SlidingWindowBothBounds)
 {
     SKIP_IF_NO_DEVICES();
     using T = TypeParam;
@@ -226,7 +226,7 @@ TYPED_TEST(GpuSdpaFwdPlain, SlidingWindowBothBounds)
 // Additive mask — full rank-4 [B, H, Sq, Skv].
 // ============================================================================
 
-TYPED_TEST(GpuSdpaFwdPlain, AdditiveMaskRank4)
+TYPED_TEST(TestGpuSdpaFwdPlain, AdditiveMaskRank4)
 {
     SKIP_IF_NO_DEVICES();
     using T = TypeParam;
@@ -255,7 +255,7 @@ TYPED_TEST(GpuSdpaFwdPlain, AdditiveMaskRank4)
 // broadcasting over batch and head.
 // ============================================================================
 
-TYPED_TEST(GpuSdpaFwdPlain, AdditiveMaskBroadcastRank2)
+TYPED_TEST(TestGpuSdpaFwdPlain, AdditiveMaskBroadcastRank2)
 {
     SKIP_IF_NO_DEVICES();
     using T = TypeParam;
@@ -283,7 +283,7 @@ TYPED_TEST(GpuSdpaFwdPlain, AdditiveMaskBroadcastRank2)
 // Additive mask — BROADCAST rank-3 [H, Sq, Skv]. Broadcasts over batch only.
 // ============================================================================
 
-TYPED_TEST(GpuSdpaFwdPlain, AdditiveMaskBroadcastRank3)
+TYPED_TEST(TestGpuSdpaFwdPlain, AdditiveMaskBroadcastRank3)
 {
     SKIP_IF_NO_DEVICES();
     using T = TypeParam;
@@ -312,7 +312,7 @@ TYPED_TEST(GpuSdpaFwdPlain, AdditiveMaskBroadcastRank3)
 // H=8, Hk=4, Hv=2.
 // ============================================================================
 
-TYPED_TEST(GpuSdpaFwdPlain, GqaDifferentKvHeads)
+TYPED_TEST(TestGpuSdpaFwdPlain, GqaDifferentKvHeads)
 {
     SKIP_IF_NO_DEVICES();
     using T = TypeParam;
@@ -330,7 +330,7 @@ TYPED_TEST(GpuSdpaFwdPlain, GqaDifferentKvHeads)
 // MQA — single KV head shared by all Q heads (Hk = Hv = 1).
 // ============================================================================
 
-TYPED_TEST(GpuSdpaFwdPlain, Mqa)
+TYPED_TEST(TestGpuSdpaFwdPlain, Mqa)
 {
     SKIP_IF_NO_DEVICES();
     using T = TypeParam;
@@ -348,7 +348,7 @@ TYPED_TEST(GpuSdpaFwdPlain, Mqa)
 // Cross-attention — headDimV != headDim (D=16, Dv=32).
 // ============================================================================
 
-TYPED_TEST(GpuSdpaFwdPlain, CrossAttentionHeadDimVDiffers)
+TYPED_TEST(TestGpuSdpaFwdPlain, CrossAttentionHeadDimVDiffers)
 {
     SKIP_IF_NO_DEVICES();
     using T = TypeParam;
@@ -373,7 +373,7 @@ TYPED_TEST(GpuSdpaFwdPlain, CrossAttentionHeadDimVDiffers)
 // early query rows see no kv positions and are fully masked.
 // ============================================================================
 
-TYPED_TEST(GpuSdpaFwdPlain, FullyMaskedRowYieldsZeroNotNan)
+TYPED_TEST(TestGpuSdpaFwdPlain, FullyMaskedRowYieldsZeroNotNan)
 {
     SKIP_IF_NO_DEVICES();
     using T = TypeParam;
@@ -434,7 +434,7 @@ TYPED_TEST(GpuSdpaFwdPlain, FullyMaskedRowYieldsZeroNotNan)
 // all shapes, so this only costs kernel runtime, not a recompile.
 // ============================================================================
 
-TYPED_TEST(GpuSdpaFwdPlain, RealisticHeadDim)
+TYPED_TEST(TestGpuSdpaFwdPlain, RealisticHeadDim)
 {
     SKIP_IF_NO_DEVICES();
     using T = TypeParam;
@@ -457,7 +457,7 @@ TYPED_TEST(GpuSdpaFwdPlain, RealisticHeadDim)
 // test to loosen blindly.
 // ============================================================================
 
-TYPED_TEST(GpuSdpaFwdPlain, LongSequence)
+TYPED_TEST(TestGpuSdpaFwdPlain, LongSequence)
 {
     SKIP_IF_NO_DEVICES();
     using T = TypeParam;
@@ -482,7 +482,7 @@ TYPED_TEST(GpuSdpaFwdPlain, LongSequence)
 // surface as a mismatch here.
 // ============================================================================
 
-TYPED_TEST(GpuSdpaFwdPlain, NonPackedBshdLayout)
+TYPED_TEST(TestGpuSdpaFwdPlain, NonPackedBshdLayout)
 {
     SKIP_IF_NO_DEVICES();
     using T = TypeParam;
@@ -507,7 +507,7 @@ TYPED_TEST(GpuSdpaFwdPlain, NonPackedBshdLayout)
 // largest case kept in the fast suite.)
 // ============================================================================
 
-TYPED_TEST(GpuSdpaFwdPlain, LargerShape)
+TYPED_TEST(TestGpuSdpaFwdPlain, LargerShape)
 {
     SKIP_IF_NO_DEVICES();
     using T = TypeParam;
@@ -528,7 +528,7 @@ TYPED_TEST(GpuSdpaFwdPlain, LargerShape)
 // to exercise the provided-scale path on both sides.
 // ============================================================================
 
-TYPED_TEST(GpuSdpaFwdPlain, ExplicitAttnScale)
+TYPED_TEST(TestGpuSdpaFwdPlain, ExplicitAttnScale)
 {
     SKIP_IF_NO_DEVICES();
     using T = TypeParam;
@@ -549,7 +549,7 @@ TYPED_TEST(GpuSdpaFwdPlain, ExplicitAttnScale)
 // to -inf. No prior case combines the two.
 // ============================================================================
 
-TYPED_TEST(GpuSdpaFwdPlain, AdditiveMaskWithSlidingWindow)
+TYPED_TEST(TestGpuSdpaFwdPlain, AdditiveMaskWithSlidingWindow)
 {
     SKIP_IF_NO_DEVICES();
     using T = TypeParam;
@@ -583,7 +583,7 @@ TYPED_TEST(GpuSdpaFwdPlain, AdditiveMaskWithSlidingWindow)
 // branch is otherwise unexercised where it actually broadcasts.
 // ============================================================================
 
-TYPED_TEST(GpuSdpaFwdPlain, AdditiveMaskBroadcastBatchHead)
+TYPED_TEST(TestGpuSdpaFwdPlain, AdditiveMaskBroadcastBatchHead)
 {
     SKIP_IF_NO_DEVICES();
     using T = TypeParam;
@@ -607,7 +607,7 @@ TYPED_TEST(GpuSdpaFwdPlain, AdditiveMaskBroadcastBatchHead)
 // with batch and the sequence dims fully indexed.
 // ============================================================================
 
-TYPED_TEST(GpuSdpaFwdPlain, AdditiveMaskBroadcastHeadOnly)
+TYPED_TEST(TestGpuSdpaFwdPlain, AdditiveMaskBroadcastHeadOnly)
 {
     SKIP_IF_NO_DEVICES();
     using T = TypeParam;
@@ -633,7 +633,7 @@ TYPED_TEST(GpuSdpaFwdPlain, AdditiveMaskBroadcastHeadOnly)
 // the float compute path only; the float tolerance applies.
 // ============================================================================
 
-TEST(GpuSdpaFwdMixedPrecision, HalfInputsFloatOutput)
+TEST(TestGpuSdpaFwdMixedPrecision, HalfInputsFloatOutput)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -646,7 +646,7 @@ TEST(GpuSdpaFwdMixedPrecision, HalfInputsFloatOutput)
     compareGpuVsCpuSdpaFwd<half, half, half, float>(q, k, v, oCpu, oGpu, sdpaFwdTolerance<float>());
 }
 
-TEST(GpuSdpaFwdMixedPrecision, Bfloat16InputsFloatOutput)
+TEST(TestGpuSdpaFwdMixedPrecision, Bfloat16InputsFloatOutput)
 {
     SKIP_IF_NO_DEVICES();
 
