@@ -1,7 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 #pragma once
-#include <chrono>
 #include <sstream>
 #include <gtest/gtest.h>
 
@@ -192,8 +191,9 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
     using DsLayout   = ck_tile::tuple<>;
     using DsDataType = ck_tile::tuple<>;
 
-    static constexpr bool Persistent    = false;
-    static constexpr bool ClusterLaunch = false;
+    static constexpr bool Persistent = false;
+    static constexpr bool ClusterLaunch =
+        ck_tile::tuple_element_or_default_t<Tuple, 16, std::false_type>::value;
 
     static constexpr ck_tile::index_t ScaleBlockSize = 32;
 
@@ -205,6 +205,14 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         constexpr ck_tile::index_t M_Warp = 2;
         constexpr ck_tile::index_t N_Warp = 2;
         constexpr ck_tile::index_t K_Warp = 1;
+
+        // if cluster launch is enabled, set cluster dim to 2x2x1
+        constexpr ck_tile::index_t kClusterSizeM =
+            std::conditional_t<ClusterLaunch, ck_tile::number<2>, ck_tile::number<1>>{};
+        constexpr ck_tile::index_t kClusterSizeN =
+            std::conditional_t<ClusterLaunch, ck_tile::number<2>, ck_tile::number<1>>{};
+        constexpr ck_tile::index_t kClusterSizeK =
+            std::conditional_t<ClusterLaunch, ck_tile::number<1>, ck_tile::number<1>>{};
 
         constexpr bool kPadM      = PadM;
         constexpr bool kPadN      = PadN;
@@ -223,14 +231,27 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         static constexpr bool StructuredSparsity = false;
         static constexpr bool NumWaveGroup       = 1;
 
-        constexpr int kBlockPerCu = 1;
+        constexpr int kBlockPerCu                         = 1;
+        constexpr ck_tile::index_t TileParitionerGroupNum = 8;
+        constexpr ck_tile::index_t TileParitionerM01      = 4;
 
-        using GemmShape =
+        using GemmShape = std::conditional_t<
+            ClusterLaunch,
+            ck_tile::ClusterTileGemmShape<
+                ck_tile::sequence<kClusterSizeM, kClusterSizeN, kClusterSizeK>,
+                ck_tile::sequence<M_Tile, N_Tile, K_Tile>,
+                ck_tile::sequence<M_Warp, N_Warp, K_Warp>,
+                ck_tile::sequence<M_Warp_Tile, N_Warp_Tile, K_Warp_Tile>>,
             ck_tile::TileGemmShape<ck_tile::sequence<M_Tile, N_Tile, K_Tile>,
                                    ck_tile::sequence<M_Warp, N_Warp, K_Warp>,
-                                   ck_tile::sequence<M_Warp_Tile, N_Warp_Tile, K_Warp_Tile>>;
+                                   ck_tile::sequence<M_Warp_Tile, N_Warp_Tile, K_Warp_Tile>>>;
 
-        using TilePartitioner = ck_tile::GemmSpatiallyLocalTilePartitioner<GemmShape, 8, 4>;
+        using TilePartitioner =
+            std::conditional_t<ClusterLaunch,
+                               ck_tile::GemmClusterTilePartitioner<GemmShape>,
+                               ck_tile::GemmSpatiallyLocalTilePartitioner<GemmShape,
+                                                                          TileParitionerGroupNum,
+                                                                          TileParitionerM01>>;
 
         using GemmUniversalTraits = ck_tile::TileGemmUniversalTraits<kPadM,
                                                                      kPadN,
@@ -306,8 +327,17 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
                       << blocks.y << ", " << blocks.z << "}" << std::endl;
         }
 
-        ck_tile::launch_kernel(
-            s, ck_tile::make_kernel<kBlockPerCu>(Kernel{}, grids, blocks, 0, kargs));
+        if constexpr(ClusterLaunch)
+        {
+            dim3 clusters = Kernel::ClusterSize();
+            ck_tile::launch_kernel(
+                s, ck_tile::make_kernel<kBlockPerCu>(Kernel{}, clusters, grids, blocks, 0, kargs));
+        }
+        else
+        {
+            ck_tile::launch_kernel(
+                s, ck_tile::make_kernel<kBlockPerCu>(Kernel{}, grids, blocks, 0, kargs));
+        }
     }
 
     public:
@@ -417,16 +447,18 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         }
 
         {
-            std::mt19937 gen(std::chrono::steady_clock::now().time_since_epoch().count());
-            std::uniform_int_distribution<int> dist(40, 60);
-            for(auto& s : scale_a.mData)
-            {
-                s = AScaleDataType(static_cast<typename AScaleDataType::type>(dist(gen)));
-            }
-            for(auto& s : scale_b.mData)
-            {
-                s = BScaleDataType(static_cast<typename BScaleDataType::type>(dist(gen)));
-            }
+            // Fill scale tensors with values uniformly drawn from [0.125, 2.0] = [2^-3, 2^1].
+            // This spans 5 exponent bands centred around 1.0, keeping scales numerically
+            // well-behaved without saturating the accumulator.
+            //
+            // Per-type raw byte ranges produced (raw bytes sampled uniformly within each):
+            //   e8m0_t (bias=127, mant=0): raw in [124, 128] -> floats {0.125, 0.25, 0.5, 1.0, 2.0}
+            //   e4m3_t (bias=7,   mant=3): raw in [32,  64]  -> floats  0.125 .. 2.0
+            //   e5m3_t (bias=15,  mant=3): raw in [96,  128] -> floats  0.125 .. 2.0
+            // No generated value exceeds 2.0 for any type.
+            // A and B use different seeds so their scale values are uncorrelated.
+            ck_tile::FillUniformScaleDistribution<AScaleDataType>{0.125f, 2.0f, 11941}(scale_a);
+            ck_tile::FillUniformScaleDistribution<BScaleDataType>{0.125f, 2.0f, 11943}(scale_b);
         }
 
         // Pre-shuffle scale buffers for the hardware

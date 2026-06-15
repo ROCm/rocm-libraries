@@ -28,6 +28,7 @@
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -39,31 +40,6 @@ enum VgprMsbState : int {
 int getMsbFromVgpr(const StinkyRegister& reg) {
     if (reg.dataType != StinkyRegister::Type::Register || reg.reg.type != RegType::V) return -1;
     return static_cast<int>(reg.reg.idx) / 256;
-}
-
-int encodeFieldToVgprOffSlot(EncodeField ef) {
-    switch (ef) {
-        case EncodeField::vdst:
-        case EncodeField::vdata:
-            return 3;
-        case EncodeField::src0:
-        case EncodeField::addr:
-        case EncodeField::vaddr:
-        case EncodeField::vaddr0:
-            return 0;
-        case EncodeField::src1:
-        case EncodeField::vsrc1:
-        case EncodeField::data0:
-        case EncodeField::vsrc:
-        case EncodeField::vaddr1:
-            return 1;
-        case EncodeField::src2:
-        case EncodeField::data1:
-        case EncodeField::vaddr2:
-            return 2;
-        default:
-            return -1;
-    }
 }
 
 void collectVgprMsbSlots(const StinkyInstruction* inst, int msbSrc[3], int& msbDst, bool& hasVgpr) {
@@ -113,8 +89,25 @@ std::pair<int, bool> computeRequiredMsb(const StinkyInstruction* inst) {
 
     if (!hasVgpr) return {VgprMsbState::NOT_REQUIRED, false};
 
-    int setVal = msbSrc[0] + (msbSrc[1] << 2) + (msbSrc[2] << 4) + (msbDst << 6);
+    int setVal = encodeVgprMsbForSlot(0, msbSrc[0]) | encodeVgprMsbForSlot(1, msbSrc[1]) |
+                 encodeVgprMsbForSlot(2, msbSrc[2]) | encodeVgprMsbForSlot(3, msbDst);
     return {setVal, true};
+}
+
+// Set offset = -msb*256 on each VGPR operand so the emitter prints byte form
+// (`v[idx + offset]` evaluates to idx ≤ 255).
+void encodeVgprOperands(StinkyInstruction* inst) {
+    auto rewrite = [](StinkyRegister& reg) {
+        if (reg.dataType != StinkyRegister::Type::Register) return;
+        if (reg.reg.type != RegType::V) return;
+        int msb = static_cast<int>(reg.reg.idx) / 256;
+        if (msb == 0) return;  // already byte-form; nothing to do
+        int wantOffset = -msb * 256;
+        if (reg.reg.offset == wantOffset) return;  // already encoded (rocisa path)
+        reg.reg.offset = static_cast<int16_t>(wantOffset);
+    };
+    for (auto& src : const_cast<std::vector<StinkyRegister>&>(inst->getSrcRegs())) rewrite(src);
+    for (auto& dst : const_cast<std::vector<StinkyRegister>&>(inst->getDestRegs())) rewrite(dst);
 }
 
 void emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, int& currentMsb, AsmIRBuilder& irBuilder,
@@ -141,10 +134,10 @@ void emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, int& currentMsb, AsmI
     StinkyInstruction* msbInst = irBuilder.create(desc, insertBefore);
     msbInst->addSrcReg(StinkyRegister(combinedSetVal));
 
-    std::string msbComment = std::string("src0: " + std::to_string(requiredSetVal & 0x3) +
-                                         ", src1: " + std::to_string((requiredSetVal >> 2) & 0x3) +
-                                         ", src2: " + std::to_string((requiredSetVal >> 4) & 0x3) +
-                                         ", dst: " + std::to_string((requiredSetVal >> 6) & 0x3));
+    std::string msbComment = "src0: " + std::to_string(decodeVgprMsbForSlot(requiredSetVal, 0)) +
+                             ", src1: " + std::to_string(decodeVgprMsbForSlot(requiredSetVal, 1)) +
+                             ", src2: " + std::to_string(decodeVgprMsbForSlot(requiredSetVal, 2)) +
+                             ", dst: " + std::to_string(decodeVgprMsbForSlot(requiredSetVal, 3));
     msbInst->addModifier<CommentData>(CommentData{msbComment});
     currentMsb = requiredSetVal;
 }
@@ -187,6 +180,7 @@ class InsertVgprMsbPassImpl : public Pass {
                 auto [requiredMsb, hasVgpr] = computeRequiredMsb(inst);
                 emitVgprMsbIfNeeded(requiredMsb, hasVgpr, currentMsb, irBuilder, archId, inst,
                                     msbMode);
+                encodeVgprOperands(inst);
             }
         }
         return preserveCFGAnalyses();

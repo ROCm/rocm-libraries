@@ -47,7 +47,7 @@ inline void execute_cpu_fft(const fft_params&            cpu_fft_params,
     // input will be modified.  So we need to modify the copy instead.
     std::vector<hostbuf>  cpu_input_copy(cpu_input.size());
     std::vector<hostbuf>* input_ptr = &cpu_input;
-    if(cpu_fft_params.run_callbacks
+    if(cpu_fft_params.run_callbacks != fft_callback_type_none
        || cpu_fft_params.transform_type == fft_transform_type_real_inverse)
     {
         for(size_t i = 0; i < cpu_input.size(); ++i)
@@ -230,17 +230,7 @@ struct reference_fft_data_t
                                                   hipMemcpyDeviceToHost);
                 if(hip_status != hipSuccess)
                 {
-                    ++n_hip_failures;
-                    std::stringstream ss;
-                    ss << "hipMemcpy failure with error " << hip_status;
-                    if(skip_runtime_fails)
-                    {
-                        throw ROCFFT_SKIP{ss.str()};
-                    }
-                    else
-                    {
-                        throw ROCFFT_FAIL{ss.str()};
-                    }
+                    throw hip_runtime_error("hipMemcpy failure", hip_status);
                 }
             }
         }
@@ -256,17 +246,7 @@ struct reference_fft_data_t
                                                   hipMemcpyDeviceToHost);
                 if(hip_status != hipSuccess)
                 {
-                    ++n_hip_failures;
-                    std::stringstream ss;
-                    ss << "hipMemcpy failure with error " << hip_status;
-                    if(skip_runtime_fails)
-                    {
-                        throw ROCFFT_SKIP{ss.str()};
-                    }
-                    else
-                    {
-                        throw ROCFFT_FAIL{ss.str()};
-                    }
+                    throw hip_runtime_error("hipMemcpy failure", hip_status);
                 }
             }
 
@@ -350,17 +330,7 @@ struct reference_fft_data_t
 
             if(hip_status != hipSuccess)
             {
-                ++n_hip_failures;
-                std::stringstream ss;
-                ss << "hipMemcpy failure with error " << hip_status;
-                if(skip_runtime_fails)
-                {
-                    throw ROCFFT_SKIP{ss.str()};
-                }
-                else
-                {
-                    throw ROCFFT_FAIL{ss.str()};
-                }
+                throw hip_runtime_error("hipMemcpy failure", hip_status);
             }
         }
     }

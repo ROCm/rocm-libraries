@@ -31,6 +31,7 @@
 
 #include <sstream>
 
+#include "HardwareCaps.hpp"
 #include "stinkytofu/bindings/python/LogicalModule.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
@@ -74,7 +75,33 @@ NB_MODULE(_stinkytofu, m) {
         .def("getMetaDataU64", &StinkyAsmModule::getMetaDataU64, nb::arg("key"),
              "Get uint64 metadata from function by key")
         .def("runOptimizationPipeline", &StinkyAsmModule::runOptimizationPipeline,
-             "Run the optimization pipeline on this module");
+             "Run the optimization pipeline on this module")
+        .def("setPluginDataI64", &StinkyAsmModule::setPluginDataI64, nb::arg("key"),
+             nb::arg("value"), "Set an integer plugin data value accessible by plugin passes")
+        .def("getPluginDataI64", &StinkyAsmModule::getPluginDataI64, nb::arg("key"),
+             nb::arg("defaultVal") = 0, "Get an integer plugin data value")
+        .def("setPluginDataStr", &StinkyAsmModule::setPluginDataStr, nb::arg("key"),
+             nb::arg("value"), "Set a string plugin data value accessible by plugin passes")
+        .def("getPluginDataStr", &StinkyAsmModule::getPluginDataStr, nb::arg("key"),
+             nb::arg("defaultVal") = "", "Get a string plugin data value")
+        .def(
+            "registerPassAtExtensionPoint",
+            [](StinkyAsmModule& self, PipelineExtensionPoint ep, const std::string& passName) {
+                self.getPassBuilder().registerAtExtensionPoint(
+                    ep, [passName](PassManager& PM, StinkyAsmModule& module) {
+                        auto pass = PassBuilder::createPassByName(passName, module);
+                        if (pass) PM.addPass(std::move(pass));
+                    });
+            },
+            nb::arg("extensionPoint"), nb::arg("passName"),
+            "Register a named C++ pass at a pipeline extension point");
+
+    // Pipeline extension point enum
+    nb::enum_<PipelineExtensionPoint>(m, "PipelineExtensionPoint")
+        .value("BeforeRegionPasses", PipelineExtensionPoint::BeforeRegionPasses)
+        .value("InnerRegionBegin", PipelineExtensionPoint::InnerRegionBegin)
+        .value("InnerRegionEnd", PipelineExtensionPoint::InnerRegionEnd)
+        .value("AfterRegionPasses", PipelineExtensionPoint::AfterRegionPasses);
 
     // ========================================================================
     // Register Types
@@ -223,6 +250,26 @@ NB_MODULE(_stinkytofu, m) {
         },
         nb::arg("arch"),
         "Probe toolchain capabilities for [major, minor, stepping]. Results are cached.");
+
+    m.def(
+        "tryAssemble",
+        [](const std::string& asmString, std::array<int, 3> arch) {
+            auto* info = ArchHelper::getInstance().getArchInfo(arch[0], arch[1], arch[2]);
+            if (!info)
+                throw nb::value_error(("Unsupported architecture: gfx" + std::to_string(arch[0]) +
+                                       std::to_string(arch[1]) + std::to_string(arch[2]))
+                                          .c_str());
+            // Build ISA name: amdgcn-amd-amdhsa--gfxMAJORMINORSTEPPING
+            static constexpr char kHex[] = "0123456789abcdef";
+            std::string isaName = "amdgcn-amd-amdhsa--gfx";
+            isaName += std::to_string(info->major);
+            isaName += std::to_string(info->minor);
+            isaName += kHex[info->stepping & 0xF];
+            return tryAssembleWithComgr(asmString, isaName, info->waveFrontSize);
+        },
+        nb::arg("asm_string"), nb::arg("arch"),
+        "Try to assemble the given string for [major, minor, stepping]. Returns True if assembly "
+        "succeeds.");
 
     nb::enum_<VgprMsbMode>(m, "VgprMsbMode")
         .value("NONE", VgprMsbMode::None)
@@ -455,6 +502,32 @@ NB_MODULE(_stinkytofu, m) {
     m.def("getRegisteredArchKeys", &BackendRegistry::getRegisteredArchKeys,
           "Return a list of arch name strings for all registered StinkyTofu backends (e.g. "
           "[\"gfx1250\"]).");
+
+    // ========================================================================
+    // Hardware capability dictionaries (replaces rocisa getAsmCaps/etc.)
+    // ========================================================================
+    m.def(
+        "getHardwareCaps",
+        [](std::array<int, 3> arch) {
+            auto caps = HardwareCaps::query(arch[0], arch[1], arch[2]);
+
+            nb::dict asmCaps, archCaps, regCaps, asmBugs;
+            for (auto& [k, v] : caps.asmCaps) asmCaps[k.c_str()] = v;
+            for (auto& [k, v] : caps.archCaps) archCaps[k.c_str()] = v;
+            for (auto& [k, v] : caps.regCaps) regCaps[k.c_str()] = v;
+            for (auto& [k, v] : caps.asmBugs) asmBugs[k.c_str()] = v;
+
+            nb::dict result;
+            result["asmCaps"] = asmCaps;
+            result["archCaps"] = archCaps;
+            result["regCaps"] = regCaps;
+            result["asmBugs"] = asmBugs;
+            return result;
+        },
+        nb::arg("arch"),
+        "Return hardware capability dicts for [major, minor, stepping].\n\n"
+        "Returns a dict with keys 'asmCaps', 'archCaps', 'regCaps', 'asmBugs',\n"
+        "matching the rocisa getAsmCaps()/getArchCaps()/getRegCaps()/getAsmBugs() API.");
 
     // ========================================================================
     // Logical Instruction Counting (ported from rocisa)

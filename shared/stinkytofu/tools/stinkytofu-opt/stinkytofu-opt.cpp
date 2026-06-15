@@ -26,8 +26,9 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <limits>
+#include <optional>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -35,6 +36,7 @@
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/pipeline/Backend.hpp"
@@ -132,6 +134,17 @@ int extractOptLevel(int argc, char** argv) {
     return -1;
 }
 
+bool isKernelConfigArg(const std::string& arg) {
+    static constexpr const char* kAssignPrefixes[] = {
+        "--TileA0=", "--TileB0=", "--TileM0=",  "--NumGRA=",
+        "--NumGRB=", "--NumGRM=", "--NumWaves="};
+    for (const char* prefix : kAssignPrefixes) {
+        if (arg.starts_with(prefix)) return true;
+    }
+    return arg == "--TileA0" || arg == "--TileB0" || arg == "--TileM0" || arg == "--NumGRA" ||
+           arg == "--NumGRB" || arg == "--NumGRM" || arg == "--NumWaves";
+}
+
 // Function to parse command-line arguments for passes
 std::vector<std::string> parsePassNames(int argc, char** argv, int startIdx) {
     std::vector<std::string> passNames;
@@ -142,12 +155,20 @@ std::vector<std::string> parsePassNames(int argc, char** argv, int startIdx) {
             static constexpr char kSnapJson[] = "--pass-order-snapshot-json=";
             static constexpr char kSnapAfter[] = "--pass-order-snapshot-after-passes=";
             if (arg.starts_with(kSnapJson) || arg.starts_with(kSnapAfter) ||
-                arg == "--print-output" || arg == "--emit-asm" ||
+                arg == "--print-output" || arg == "--emit-asm" || arg == "--remarks" ||
                 arg == "--preserve-symbolic-regs" || arg == "--preserve-comments" ||
-                arg.starts_with("--ds-read-order=") || arg == "--from-label" || arg == "--to-label")
+                arg.starts_with("--ds-read-order=") || arg.starts_with("--vgpr-msb-mode=") ||
+                arg == "--from-label" || arg == "--to-label" || isKernelConfigArg(arg))
                 continue;
-            if (arg == "-o") {
-                ++i;  // skip the filename argument
+            // Two-arg flags: skip both the flag and its value so the value
+            // doesn't get mistaken for a pass name and the flag doesn't get
+            // mistaken for a missing pass (e.g. `--debug-pass FooPass` was
+            // emitting `Warning: Unknown pass 'debug-pass'` because the
+            // `--` prefix was stripped and `debug-pass` wasn't a known pass).
+            if (arg == "-o" || arg == "--debug-pass" || arg == "--TileA0" || arg == "--TileB0" ||
+                arg == "--TileM0" || arg == "--NumGRA" || arg == "--NumGRB" || arg == "--NumGRM" ||
+                arg == "--NumWaves") {
+                ++i;  // skip the value argument
                 continue;
             }
             passNames.push_back(arg.substr(2));  // Remove "--" prefix
@@ -204,6 +225,84 @@ std::vector<std::string> extractPassOrderSnapshotAfterPasses(int argc, char** ar
     }
     return {};
 }
+
+static bool parseUint32Value(const std::string& value, uint32_t& out) {
+    if (value.empty()) return false;
+    uint64_t result = 0;
+    for (unsigned char c : value) {
+        if (!std::isdigit(c)) return false;
+        result = result * 10 + static_cast<uint64_t>(c - '0');
+        if (result > std::numeric_limits<uint32_t>::max()) return false;
+    }
+    out = static_cast<uint32_t>(result);
+    return true;
+}
+
+static bool parseGemmTileField(const char* flag, const std::string& value, uint32_t& field,
+                               std::string& error) {
+    if (parseUint32Value(value, field)) return true;
+    error = std::string("Invalid value for ") + flag;
+    return false;
+}
+
+static bool parseGemmTileConfigOptions(int argc, char** argv, stinkytofu::GemmTileConfig& config,
+                                       std::string& error) {
+    config = {};
+    for (int i = 1; i < argc; ++i) {
+        std::string a = argv[i];
+        auto parseAssign = [&](const char* prefix, const char* flag, uint32_t& field) -> bool {
+            if (!a.starts_with(prefix)) return true;
+            return parseGemmTileField(flag, a.substr(std::strlen(prefix)), field, error);
+        };
+        auto parseNext = [&](const char* flag, uint32_t& field) -> bool {
+            if (a != flag) return true;
+            if (i + 1 >= argc) return true;
+            return parseGemmTileField(flag, argv[++i], field, error);
+        };
+
+        if (!parseAssign("--TileA0=", "--TileA0", config.TileA0)) return false;
+        if (a.starts_with("--TileA0=")) continue;
+        if (!parseAssign("--TileB0=", "--TileB0", config.TileB0)) return false;
+        if (a.starts_with("--TileB0=")) continue;
+        if (!parseAssign("--TileM0=", "--TileM0", config.TileM0)) return false;
+        if (a.starts_with("--TileM0=")) continue;
+        if (!parseAssign("--NumGRA=", "--NumGRA", config.NumGRA)) return false;
+        if (a.starts_with("--NumGRA=")) continue;
+        if (!parseAssign("--NumGRB=", "--NumGRB", config.NumGRB)) return false;
+        if (a.starts_with("--NumGRB=")) continue;
+        if (!parseAssign("--NumGRM=", "--NumGRM", config.NumGRM)) return false;
+        if (a.starts_with("--NumGRM=")) continue;
+        if (!parseAssign("--NumWaves=", "--NumWaves", config.NumWaves)) return false;
+        if (a.starts_with("--NumWaves=")) continue;
+
+        if (!parseNext("--TileA0", config.TileA0)) return false;
+        if (a == "--TileA0") continue;
+        if (!parseNext("--TileB0", config.TileB0)) return false;
+        if (a == "--TileB0") continue;
+        if (!parseNext("--TileM0", config.TileM0)) return false;
+        if (a == "--TileM0") continue;
+        if (!parseNext("--NumGRA", config.NumGRA)) return false;
+        if (a == "--NumGRA") continue;
+        if (!parseNext("--NumGRB", config.NumGRB)) return false;
+        if (a == "--NumGRB") continue;
+        if (!parseNext("--NumGRM", config.NumGRM)) return false;
+        if (a == "--NumGRM") continue;
+        if (!parseNext("--NumWaves", config.NumWaves)) return false;
+        if (a == "--NumWaves") continue;
+    }
+    return true;
+}
+
+static void printKernelConfigHelp(std::ostream& os) {
+    os << "  Kernel configuration (GemmTileConfig fields):\n";
+    os << "  --TileA0 <n>        (or --TileA0=<n>)\n";
+    os << "  --TileB0 <n>        (or --TileB0=<n>)\n";
+    os << "  --TileM0 <n>        (or --TileM0=<n>)\n";
+    os << "  --NumGRA <n>        (or --NumGRA=<n>)\n";
+    os << "  --NumGRB <n>        (or --NumGRB=<n>)\n";
+    os << "  --NumGRM <n>        (or --NumGRM=<n>)\n";
+    os << "  --NumWaves <n>      (or --NumWaves=<n>)\n";
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -220,10 +319,12 @@ int main(int argc, char** argv) {
         std::cerr << "  --pass-order-snapshot-after-passes=A,B  Pass::getName() allow-list "
                      "(optional; default: scheduler only)\n";
         std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
+        std::cerr << "  --remarks        Enable optimization remarks on stderr\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
-        std::cerr << "Input formats:\n";
+        printKernelConfigHelp(std::cerr);
+        std::cerr << "\nInput formats:\n";
         std::cerr << "  <file>.stir      StinkyTofu IR text format (default)\n";
         std::cerr << "  <file>.s         Raw GPU assembly (auto-detected by extension)\n\n";
         std::cerr << "Output flags:\n";
@@ -279,10 +380,12 @@ int main(int argc, char** argv) {
         std::cerr << "  --pass-order-snapshot-after-passes=A,B  Pass::getName() allow-list "
                      "(optional; default: scheduler only)\n";
         std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
+        std::cerr << "  --remarks        Enable optimization remarks on stderr\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
-        std::cerr << "Input formats:\n";
+        printKernelConfigHelp(std::cerr);
+        std::cerr << "\nInput formats:\n";
         std::cerr << "  <file>.stir      StinkyTofu IR text format (default)\n";
         std::cerr << "  <file>.s         Raw GPU assembly (auto-detected by extension)\n\n";
         std::cerr << "Output flags:\n";
@@ -346,12 +449,40 @@ int main(int argc, char** argv) {
 
     std::string filename = argv[irFileIdx];
 
+    stinkytofu::GemmTileConfig gemmTileConfig;
+    std::string gemmTileConfigError;
+    if (!parseGemmTileConfigOptions(argc, argv, gemmTileConfig, gemmTileConfigError)) {
+        std::cerr << "Error: " << gemmTileConfigError << "\n";
+        return 1;
+    }
+
     stinkytofu::PassFeatureConfig passFeatureConfig = getPassFeatureConfig();
     passFeatureConfig.passOrderSnapshot.jsonPath = extractPassOrderSnapshotJsonPath(argc, argv);
     passFeatureConfig.passOrderSnapshot.dumpAfterPasses =
         extractPassOrderSnapshotAfterPasses(argc, argv);
 
-    // Parse --ds-read-order=ProgramOrder|Ascending|AscendingCache
+    // Parse --vgpr-msb-mode=none|msb8|msb16 (override of ToolchainCaps::probe).
+    // Useful when running on a host whose comgr doesn't know the target ISA,
+    // so the FileCheck/regression tests can pin the mode explicitly.
+    std::optional<stinkytofu::VgprMsbMode> vgprMsbOverride;
+    for (int i = 1; i < argc; ++i) {
+        std::string a = argv[i];
+        if (a.starts_with("--vgpr-msb-mode=")) {
+            std::string val = a.substr(std::string("--vgpr-msb-mode=").size());
+            if (val == "none")
+                vgprMsbOverride = stinkytofu::VgprMsbMode::None;
+            else if (val == "msb8")
+                vgprMsbOverride = stinkytofu::VgprMsbMode::Msb8;
+            else if (val == "msb16")
+                vgprMsbOverride = stinkytofu::VgprMsbMode::Msb16;
+            else {
+                std::cerr << "Error: --vgpr-msb-mode expects none|msb8|msb16, got '" << val
+                          << "'\n";
+                return 1;
+            }
+        }
+    }
+
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (a.starts_with("--ds-read-order=")) {
@@ -399,6 +530,7 @@ int main(int argc, char** argv) {
     // --preserve-symbolic-regs, --preserve-comments flags
     bool printOutput = false;
     bool emitAsm = false;
+    bool enableRemarks = false;
     bool preserveSymbolicRegs = false;
     bool preserveComments = false;
     std::string outputFile;
@@ -407,6 +539,7 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--print-output") printOutput = true;
         if (std::string(argv[i]) == "--emit-asm") emitAsm = true;
+        if (std::string(argv[i]) == "--remarks") enableRemarks = true;
         if (std::string(argv[i]) == "--preserve-symbolic-regs") preserveSymbolicRegs = true;
         if (std::string(argv[i]) == "--preserve-comments") preserveComments = true;
         if (std::string(argv[i]) == "--debug-pass" && i + 1 < argc) {
@@ -602,6 +735,7 @@ int main(int argc, char** argv) {
             // Pipeline mode: create a StinkyAsmModule and run the registered pipeline
             stinkytofu::StinkyAsmModule::ModuleOptions moduleOpts{};
             moduleOpts.OptLevel = optLevel;
+            moduleOpts.EnableRemarks = enableRemarks;
             stinkytofu::StinkyAsmModule module(parsedFunc->funcName, arch, moduleOpts);
 
             stinkytofu::Function& func = module.getFunction();
@@ -611,6 +745,10 @@ int main(int argc, char** argv) {
                 std::cerr << "Error: Failed to populate function '" << parsedFunc->funcName
                           << "'\n";
                 continue;
+            }
+            if (asmSignature) {
+                func.setMetaData(stinkytofu::kSigTotalVgprsMetaKey,
+                                 static_cast<uint64_t>(asmSignature->kernelDescriptor.totalVgprs));
             }
 
             stinkytofu::Backend backend(module);
@@ -631,7 +769,12 @@ int main(int argc, char** argv) {
                         std::move(collector)));
             }
             passManager.setPassFeatureConfig(passFeatureConfig);
-            setKernelConfig(passManager, arch);
+            gemmTileConfig.arch = arch;
+            passManager.setGemmTileConfig(gemmTileConfig);
+            auto caps = stinkytofu::ToolchainCaps::probe(archID);
+            if (vgprMsbOverride) caps.vgprMsbMode = *vgprMsbOverride;
+            passManager.setAsmCapsConfig(caps);
+            if (enableRemarks) passManager.getPassContext().setRemarksEnabled(true);
 
             for (const auto& passName : requestedPasses) {
                 auto pass = createPassByName(passName);
@@ -639,7 +782,7 @@ int main(int argc, char** argv) {
             }
 
             stinkytofu::Function func(parsedFunc->funcName);
-            func.setGemmTileConfig(passManager.getPassContext().getGemmTileConfig());
+            func.setGemmTileConfig(gemmTileConfig);
 
             auto result = stinkytofu::StinkyIRConverter::populateFunctionFromParsed(*parsedFunc,
                                                                                     func, archID);
@@ -647,6 +790,10 @@ int main(int argc, char** argv) {
                 std::cerr << "Error: Failed to populate function '" << parsedFunc->funcName
                           << "'\n";
                 continue;
+            }
+            if (asmSignature) {
+                func.setMetaData(stinkytofu::kSigTotalVgprsMetaKey,
+                                 static_cast<uint64_t>(asmSignature->kernelDescriptor.totalVgprs));
             }
 
             passManager.run(func);

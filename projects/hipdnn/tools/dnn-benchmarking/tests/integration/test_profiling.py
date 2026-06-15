@@ -3,12 +3,12 @@
 
 """Integration tests for opt-in profiling sources.
 
-Each test is double-gated: a pytest marker (``rocprofv3`` / ``perf`` /
-``rocprof_compute``) for selection, plus an inline binary/host probe
-that skips when the precondition isn't met. This keeps unmarked runs
-green on the dev host (no perf, no GPU) while still allowing
-``pytest -m rocprofv3 tests/integration/`` to fire on a real gfx942
-host.
+Each non-strict test is double-gated: a pytest marker (``rocprofv3`` /
+``perf`` / ``rocprof_compute``) for selection, plus an inline
+binary/host probe that skips when the precondition isn't met. Strict
+payload tests are additionally gated by the pytest ``--profiling-strict``
+option so default ``pytest`` runs do not fail on profiler/runtime stacks
+that can launch but cannot produce full artifacts.
 """
 
 import json
@@ -219,8 +219,8 @@ def test_combined_pmc_perf_roofline_merge_into_one_extra_metrics(tmp_path):
 # paranoid, replay budget) doesn't fully cooperate. That tolerance also
 # means a regression that silently drops the real payload would slip
 # through. The strict tier closes that gap: opt in with
-# ``-m profiling_strict`` on a known-good GPU host before merging
-# changes to the profiling stack.
+# ``--profiling-strict -m profiling_strict`` on a known-good GPU host
+# before merging changes to the profiling stack.
 # --------------------------------------------------------------------------
 
 

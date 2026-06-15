@@ -1,12 +1,17 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
+#include <cstdint>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
@@ -33,6 +38,40 @@ namespace
 class IntegrationGraphLifting : public IntegrationTestFixture
 {
 };
+
+// Runs execute() on a conv-fprop graph (built via buildConvFpropGraph, with the
+// fixed X/W/Y UIDs and dims) over zero-initialized device buffers. The fake
+// TestGoodPlugin records the execute entry without computing numbers, so this
+// only proves the graph+plan object reaches the execute path. Tensor/Workspace
+// RAII own the device memory. Returns the Error from Graph::execute.
+hipdnn_frontend::Error executeConvFpropOnDeviceBundle(const hipdnn_frontend::graph::Graph& graph,
+                                                      hipdnnHandle_t handle)
+{
+    using hipdnn_data_sdk::utilities::Tensor;
+    using hipdnn_data_sdk::utilities::Workspace;
+
+    Tensor<float> xTensor(toVec(K_FPROP_TENSOR_X_DIMS));
+    Tensor<float> wTensor(toVec(K_FPROP_TENSOR_W_DIMS));
+    Tensor<float> yTensor(toVec(K_FPROP_TENSOR_Y_DIMS));
+    xTensor.fillWithValue(0.0F);
+    wTensor.fillWithValue(0.0F);
+    yTensor.fillWithValue(0.0F);
+
+    int64_t workspaceSize = 0;
+    auto wsResult = graph.get_workspace_size(workspaceSize);
+    if(wsResult.code != ErrorCode::OK)
+    {
+        return wsResult;
+    }
+    const Workspace workspace(static_cast<size_t>(std::max<int64_t>(workspaceSize, 0)));
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[K_FPROP_TENSOR_X_UID] = xTensor.memory().deviceData();
+    variantPack[K_FPROP_TENSOR_W_UID] = wTensor.memory().deviceData();
+    variantPack[K_FPROP_TENSOR_Y_UID] = yTensor.memory().deviceData();
+
+    return graph.execute(handle, variantPack, workspace.get());
+}
 
 // Builds a conv fprop graph, lowers via build_operation_graph(handle), extracts the
 // raw descriptor, creates a new graph with fromBackendDescriptor(), and verifies
@@ -453,6 +492,74 @@ TEST_F(IntegrationGraphLifting, JsonRoundTripWithHandle)
     EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_FPROP_CONV_DILATION));
     EXPECT_EQ(convNode->attributes.get_convolution_mode(), ConvolutionMode::CROSS_CORRELATION);
     EXPECT_EQ(convNode->attributes.get_name(), "conv_fprop_op");
+}
+
+// build()s a conv-fprop graph (finalizing a plan), serializes graph+plan to one
+// blob, then deserializes with a handle. Verifies the graph is reconstructed
+// (1 ConvolutionFpropNode, 3 tensors), the plan is re-attached, and the object
+// reaches the execute path. No numerical check here; that gate lives in the GPU
+// test (IntegrationGpuConvForwardSerializeRoundTrip.cpp).
+TEST_F(IntegrationGraphLifting, GraphPlusPlanWithHandleAttachAndExecuteReachesPlugin)
+{
+    auto originalGraph = buildConvFpropGraph();
+
+    auto result = originalGraph->build(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+    auto lifted = std::make_shared<TestableGraphLifting>();
+    result = lifted->deserialize(_handle, data);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Graph reconstructed.
+    auto& subNodes = lifted->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+    auto* convNode = dynamic_cast<ConvolutionFpropNode*>(subNodes[0].get());
+    ASSERT_NE(convNode, nullptr) << "Expected a ConvolutionFpropNode";
+
+    auto tensorMap = lifted->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 3u) << "Expected 3 tensors (X, W, Y) in lifted graph";
+
+    // Plan re-attached.
+    EXPECT_TRUE(lifted->hasExecutionPlan())
+        << "Execution plan should be attached after deserialize with a handle";
+
+    auto execResult = executeConvFpropOnDeviceBundle(*lifted, _handle);
+    EXPECT_EQ(execResult.code, ErrorCode::OK) << execResult.err_msg;
+}
+
+// validate()s a conv-fprop graph but does NOT build it, so to_binary() yields
+// the legacy plan-less blob. After deserialize the graph has no plan; a fresh
+// build() creates one and the graph executes. Confirms the no-plan path is
+// unchanged.
+TEST_F(IntegrationGraphLifting, BuildSerializeWithoutPlanThenFreshBuildExecutes)
+{
+    auto originalGraph = buildConvFpropGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+    auto lifted = std::make_shared<TestableGraphLifting>();
+    result = lifted->deserialize(_handle, data);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // No plan in the serialized blob.
+    EXPECT_FALSE(lifted->hasExecutionPlan())
+        << "No execution plan should be present after deserializing a no-plan blob";
+
+    // A fresh build creates a new plan; the graph then executes.
+    result = lifted->build(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    EXPECT_TRUE(lifted->hasExecutionPlan())
+        << "Execution plan should be present after a fresh build";
+
+    auto execResult = executeConvFpropOnDeviceBundle(*lifted, _handle);
+    EXPECT_EQ(execResult.code, ErrorCode::OK) << execResult.err_msg;
 }
 
 } // namespace

@@ -30,8 +30,8 @@ BenchmarkProblems:
       DataType: s
       DestDataType: s
       ComputeDataType: s
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       BiasDataTypeList: [s]
