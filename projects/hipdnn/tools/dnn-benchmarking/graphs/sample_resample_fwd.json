@@ -52,26 +52,26 @@
             "outputs": {
                 "y_tensor_uid": 2
             },
-            "attributes": {
-                "pre_padding": [
-                    1,
-                    0
-                ],
-                "post_padding": [
-                    0,
-                    1
-                ],
-                "stride": [
-                    2,
-                    2
-                ],
-                "window": [
-                    2,
-                    2
-                ],
-                "resample_mode": "AVGPOOL_EXCLUDE_PADDING",
-                "padding_mode": "ZERO_PAD"
-            }
+            "x_tensor_uid": 1,
+            "y_tensor_uid": 2,
+            "pre_padding": [
+                1,
+                0
+            ],
+            "post_padding": [
+                0,
+                1
+            ],
+            "stride": [
+                2,
+                2
+            ],
+            "window": [
+                2,
+                2
+            ],
+            "resample_mode": "avgpool_exclude_padding",
+            "padding_mode": "zero_pad"
         }
     ]
 }

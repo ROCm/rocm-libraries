@@ -27,14 +27,14 @@
             "name": "scale",
             "dims": [
                 1,
-                3,
                 1,
-                1
+                4,
+                4
             ],
             "strides": [
-                3,
-                1,
-                1,
+                16,
+                16,
+                4,
                 1
             ],
             "data_type": "float",
@@ -59,14 +59,14 @@
             "name": "bias",
             "dims": [
                 1,
-                3,
                 1,
-                1
+                4,
+                4
             ],
             "strides": [
-                3,
-                1,
-                1,
+                16,
+                16,
+                4,
                 1
             ],
             "data_type": "float",
@@ -124,9 +124,7 @@
                 "y_tensor_uid": 5,
                 "inv_rms_tensor_uid": 6
             },
-            "attributes": {
-                "forward_phase": "TRAINING"
-            }
+            "forward_phase": "TRAINING"
         }
     ]
 }

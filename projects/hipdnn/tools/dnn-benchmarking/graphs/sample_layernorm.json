@@ -123,10 +123,8 @@
                 "mean_tensor_uid": 6,
                 "inv_variance_tensor_uid": 7
             },
-            "attributes": {
-                "normalized_dim_count": 1,
-                "forward_phase": "TRAINING"
-            }
+            "normalized_dim_count": 1,
+            "forward_phase": 2
         }
     ]
 }

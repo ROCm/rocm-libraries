@@ -48,10 +48,10 @@
             "outputs": {
                 "out_tensor_uid": 2
             },
-            "attributes": {
-                "mode": "ADD",
-                "is_deterministic": true
-            }
+            "in_tensor_uid": 1,
+            "out_tensor_uid": 2,
+            "mode": "add",
+            "is_deterministic": true
         }
     ]
 }
