@@ -1,47 +1,41 @@
 # heuristics/sweep/CMakeLists.txt
 #
-# Standalone oracle sweep binary for the ck_dsl implicit-GEMM conv path.
+# Standalone candidate sweep for the ck_dsl implicit-GEMM conv path.
 #
-# This CMakeLists is designed to be added via add_subdirectory() from a
-# superbuild that has already defined ck_dsl_provider_private and the
-# generated ckdsl_provider_paths.h (see build.sh for the wrapper).
+# Dependencies:
+#   - hip::host       (HIP runtime)
+#   - ckc_core        (pure-C ck_dsl engine; provides CEngine::build_conv)
+#   - amd_comgr       (LLVM IR -> HSACO compilation; used by Kernel::ensure_compiled)
+#   - ck_dsl_runtime  (header-only: c_engine.hpp, kernel.hpp, manifest.hpp, comgr.hpp)
 #
 # Targets defined here:
-#   conv_oracle_sweep   -- data collection binary; run on a gfx942 device
+#   conv_candidate_sweep  -- data collection binary; run on a gfx942/gfx950 device
 
 cmake_minimum_required(VERSION 3.21)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    project(ConvOracleSweep LANGUAGES CXX)
-    message(WARNING
-        "heuristics/sweep configured as a standalone project. "
-        "ck_dsl_provider_private will not be found unless you ran "
-        "build.sh which sets up the superbuild wrapper.")
+    project(ConvCandidateSweep LANGUAGES CXX)
 endif()
 
 find_package(Threads REQUIRED)
 if(NOT TARGET hip::host)
     find_package(hip REQUIRED)
 endif()
-if(NOT TARGET Python3::Python)
-    find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
-endif()
-if(NOT TARGET pybind11::embed)
-    find_package(pybind11 REQUIRED)
-endif()
-if(NOT TARGET hipdnn_test_sdk)
-    find_package(hipdnn_test_sdk CONFIG REQUIRED)
+
+if(NOT DEFINED CK_DSL_RUNTIME_INCLUDE_DIR)
+    set(CK_DSL_RUNTIME_INCLUDE_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/include"
+        CACHE PATH "Path to ck_dsl_runtime headers (runtime/include)")
 endif()
 
-if(NOT DEFINED CK_DSL_PROVIDER_SOURCE_DIR)
-    set(CK_DSL_PROVIDER_SOURCE_DIR
-        "/rocm-libraries/dnn-providers/ck-dsl-provider/src"
-        CACHE PATH "Path to ck-dsl-provider/src (private headers)")
+if(NOT DEFINED CKC_INCLUDE_DIR)
+    set(CKC_INCLUDE_DIR
+        "/rocm-libraries/projects/composablekernel/python/ck_dsl_c/include"
+        CACHE PATH "Path to ckc/ headers (instance_conv_implicit_gemm.h etc.)")
 endif()
 
-if(NOT DEFINED CK_DSL_PROVIDER_BINARY_DIR)
-    set(CK_DSL_PROVIDER_BINARY_DIR "${CMAKE_BINARY_DIR}/provider_build"
-        CACHE PATH "Provider binary dir containing ckdsl_provider_paths.h")
+if(NOT DEFINED CKC_CORE_LIB)
+    set(CKC_CORE_LIB "" CACHE FILEPATH "Path to libckc_core.a")
 endif()
 
 add_executable(conv_candidate_sweep
@@ -53,17 +47,25 @@ target_compile_features(conv_candidate_sweep PRIVATE cxx_std_17)
 
 target_include_directories(conv_candidate_sweep
     PRIVATE
-        ${CK_DSL_PROVIDER_SOURCE_DIR}   # CkDslContainer.hpp, engines/*, adapters/*
-        ${CK_DSL_PROVIDER_BINARY_DIR}   # ckdsl_provider_paths.h (generated)
+        ${CK_DSL_RUNTIME_INCLUDE_DIR}   # ck_dsl_runtime/*.hpp
+        ${CKC_INCLUDE_DIR}              # ckc/ir.h, ckc/instance_conv_implicit_gemm.h, etc.
 )
 
 target_link_libraries(conv_candidate_sweep
     PRIVATE
         hip::host
-        ck_dsl_provider_private
-        hipdnn_test_sdk
-        hipdnn_plugin_sdk
-        Python3::Python
-        pybind11::embed
         Threads::Threads
+        amd_comgr
 )
+
+if(CKC_CORE_LIB)
+    target_link_libraries(conv_candidate_sweep PRIVATE ${CKC_CORE_LIB})
+else()
+    find_library(CKC_CORE_FOUND ckc_core HINTS /opt/rocm/lib)
+    if(CKC_CORE_FOUND)
+        target_link_libraries(conv_candidate_sweep PRIVATE ${CKC_CORE_FOUND})
+    else()
+        message(FATAL_ERROR
+            "libckc_core not found. Set -DCKC_CORE_LIB=/path/to/libckc_core.a")
+    endif()
+endif()

@@ -1,30 +1,30 @@
-// Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 //
 // heuristics/sweep/ConvCandidateSweep.cpp
 //
 // Standalone candidate sweep for the ck_dsl implicit-GEMM conv path.
 //
 // For each shape provided via --shapes:
-//   1. Enumerate all buildable candidate knob combos via enumerateCandidates.
-//   2. Compile + time every candidate on device via CompileServiceBridge + HIP.
-//   3. Write one CSV row per successful candidate to --out.
+//   1. Enumerate all (tile_m, tile_n, tile_k, pipeline) candidates.
+//   2. JIT-compile each via CEngine::build_conv (pure C engine, no Python).
+//   3. Time each candidate on device and write one CSV row per success.
 //
-// This sweep uses the Python DSL codegen path (CompileServiceBridge) to compile
-// and time every candidate from scratch. It is an offline oracle tool; the
-// production C++ dispatcher uses pre-compiled .hsaco kernels from ArtifactStore
-// and does not share this enumeration path.
+// Uses the same CEngine / Kernel infrastructure as the production C-JIT path.
+// No pybind11, no CompileServiceBridge, no ArtifactStore dependency.
 //
 // CLI arguments (see main.cpp):
 //   --shapes <path>   CSV of conv shapes to sweep.
 //                     Columns: N,G,C,K,Hi,Wi,Y,X,stride_h,stride_w,pad_h,pad_w[,direction]
-//                     G>1 grouped conv is supported; C and K are total across all groups.
+//                     G>1 grouped conv is supported; C and K are totals across all groups.
 //   --out    <path>   Path to write training rows (appended if the file exists).
 //                     Columns: N,G,C,K,Hi,Wi,Y,X,stride_h,stride_w,pad_h,pad_w,
 //                              tile_m,tile_n,tile_k,pipeline,tflops,latency_us
 
 #include <hip/hip_runtime.h>
 
+#include <array>
+#include <chrono>
 #include <cstdint>
 #include <exception>
 #include <fstream>
@@ -35,47 +35,10 @@
 #include <string>
 #include <vector>
 
-#include <flatbuffers/flatbuffers.h>
-#include <hipdnn_data_sdk/types.hpp>
-#include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
-#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_plugin_sdk/PluginLogging.hpp>
-#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
-
-#include "CkDslContainer.hpp"
-#include "CkDslContext.hpp"
-#include "CkDslHandle.hpp"
-#include "adapters/conv_implicit_gemm/ConvImplicitGemmAdapter.hpp"
-#include "adapters/conv_implicit_gemm/ConvImplicitGemmCandidateSelector.hpp"
-#include "adapters/conv_implicit_gemm/ConvImplicitGemmPayload.hpp"
-#include "adapters/conv_implicit_gemm/ConvImplicitGemmPerfKnobs.hpp"
-#include "adapters/conv_implicit_gemm/ConvImplicitGemmSpec.hpp"
-#include "engines/conv_implicit_gemm/ConvImplicitGemmPlan.hpp"
-#include "engines/conv_implicit_gemm/ConvImplicitGemmPlanBuilder.hpp"
-#include "perf/PerfMeasurement.hpp"
-#include "python/CompileServiceBridge.hpp"
-#include "runtime/DeviceArch.hpp"
-#include "runtime/HipModule.hpp"
-#include "runtime/KernelArtifact.hpp"
-
-namespace py = pybind11;
+#include "ck_dsl_runtime/c_engine.hpp"
+#include "ck_dsl_runtime/kernel.hpp"
 
 namespace {
-
-namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
-namespace flatbuf      = hipdnn_flatbuffers_sdk::flatbuffer_utilities;
-namespace utilities    = hipdnn_data_sdk::utilities;
-
-using ck_dsl_provider::CkDslContainer;
-using ck_dsl_provider::CkDslContext;
-using ck_dsl_provider::ConvImplicitGemmPerfKnobs;
-using ck_dsl_provider::ConvImplicitGemmPlanBuilder;
-using ck_dsl_provider::KernelArtifact;
-using ck_dsl_provider::PerfMeasurement;
-using ck_dsl_provider::PerfResult;
-using ck_dsl_provider::ConvSelectionProblem;
-using hipdnn_data_sdk::types::half;
 
 // ── Training CSV writer ───────────────────────────────────────────────────────
 
@@ -104,15 +67,15 @@ struct TrainingCsvWriter {
     void write(std::int64_t N, std::int64_t G, std::int64_t C, std::int64_t K,
                std::int64_t Hi, std::int64_t Wi, std::int64_t Y, std::int64_t X,
                std::int64_t sH, std::int64_t sW, std::int64_t pH, std::int64_t pW,
-               const ConvImplicitGemmPerfKnobs& k, double tflops, double latency_us)
-    {
+               int tile_m, int tile_n, int tile_k, const std::string& pipeline,
+               double tflops, double latency_us) {
         if (!active) return;
         std::lock_guard<std::mutex> lk(mu);
         f << N << ',' << G << ',' << C << ',' << K << ','
           << Hi << ',' << Wi << ',' << Y << ',' << X << ','
           << sH << ',' << sW << ',' << pH << ',' << pW << ','
-          << k.tile_m << ',' << k.tile_n << ',' << k.tile_k << ','
-          << k.pipeline << ','
+          << tile_m << ',' << tile_n << ',' << tile_k << ','
+          << pipeline << ','
           << tflops << ',' << latency_us << '\n';
         f.flush();
     }
@@ -124,7 +87,7 @@ static TrainingCsvWriter gCsvWriter;
 
 struct ConvCase {
     std::string  name;
-    std::int64_t n, g, c, hi, wi;  // g: group count; c,k are totals across all groups
+    std::int64_t n, g, c, hi, wi;
     std::int64_t k, r, s;
     std::int64_t strideH, strideW;
     std::int64_t padH, padW;
@@ -147,8 +110,6 @@ std::vector<ConvCase> loadShapesFromCsv(const std::string& path) {
     std::string header;
     if (!std::getline(f, header)) return {};
 
-    // Expected columns: N,G,C,K,Hi,Wi,Y,X,stride_h,stride_w,pad_h,pad_w[,direction]
-    // C and K are totals across all groups; G=1 means a standard (non-grouped) conv.
     std::vector<ConvCase> cases;
     std::string line;
     int idx = 0;
@@ -176,7 +137,6 @@ std::vector<ConvCase> loadShapesFromCsv(const std::string& path) {
             c.padH    = std::stoll(fields[10]);
             c.padW    = std::stoll(fields[11]);
             c.dilH    = 1; c.dilW = 1;
-            // Skip shapes where per-group channels are not 8-aligned.
             if (c.c % (c.g * 8) != 0 || c.k % (c.g * 8) != 0) continue;
             cases.push_back(c);
         } catch (...) { continue; }
@@ -187,198 +147,192 @@ std::vector<ConvCase> loadShapesFromCsv(const std::string& path) {
     return cases;
 }
 
-// ── Knob formatter ────────────────────────────────────────────────────────────
+// ── Candidate enumeration ─────────────────────────────────────────────────────
+//
+// The ck_dsl conv implicit-GEMM kernel is parameterized by (tile_m, tile_n,
+// tile_k, pipeline). Warp geometry is derived from the tile as per the C engine
+// defaults (2x2 warps, 32x32x16 atom). Candidates are filtered by:
+//   - M = N*Ho*Wo must be >= tile_m (grid must be non-empty)
+//   - K must be >= tile_n
+//   - C/G*R*S must be >= tile_k (k-loop must have at least one iteration)
 
-std::string fmtKnobs(const ConvImplicitGemmPerfKnobs& k) {
-    std::ostringstream os;
-    os << "tile=" << k.tile_m << "x" << k.tile_n << "x" << k.tile_k
-       << ",pipe=" << k.pipeline
-       << ",blk=" << k.block_size();
-    return os.str();
+struct Candidate {
+    int tile_m, tile_n, tile_k;
+    std::string pipeline;
+};
+
+std::vector<Candidate> enumerateCandidates(const ConvCase& cse, std::int64_t Ho, std::int64_t Wo) {
+    static const int kTileSizes[] = {32, 64, 128};
+    static const char* kPipelines[] = {"mem", "compv3", "compv4"};
+
+    const std::int64_t M   = cse.n * Ho * Wo;
+    const std::int64_t N   = cse.k;
+    const std::int64_t Kgm = (cse.c / cse.g) * cse.r * cse.s;  // K-dimension of the GEMM
+
+    std::vector<Candidate> out;
+    for (int tm : kTileSizes)
+        for (int tn : kTileSizes)
+            for (int tk : kTileSizes)
+                for (const char* pipe : kPipelines) {
+                    if (M < tm || N < tn || Kgm < tk) continue;
+                    out.push_back({tm, tn, tk, pipe});
+                }
+    return out;
 }
 
 // ── Per-candidate compile + time ─────────────────────────────────────────────
 
-std::optional<double> timeCandidate(
-        CkDslContainer&                                container,
-        ::CkDslHandle&                                 handle,
-        const std::string&                             arch,
-        const ConvImplicitGemmPerfKnobs&               knobs,
-        const flatbuf::GraphWrapper&                   graph,
-        const std::vector<hipdnnPluginDeviceBuffer_t>& deviceBuffers,
-        double                                         flops,
-        double&                                        medianUsOut)
-{
-    if (graph.nodeCount() == 0) return std::nullopt;
-    const auto& node = graph.getNodeWrapper(0);
-    if (node.attributesType() != data_objects::NodeAttributes::ConvolutionFwdAttributes)
-        return std::nullopt;
-    const auto& convAttr = node.attributesAs<data_objects::ConvolutionFwdAttributes>();
+static constexpr int kWarmup  = 3;
+static constexpr int kRepeat  = 20;
 
-    ck_dsl_provider::ConvImplicitGemmSpec spec;
+// Returns latency in microseconds, or nullopt on compile/launch failure.
+std::optional<double> timeCandidate(const ConvCase& cse, std::int64_t Ho, std::int64_t Wo,
+                                    const Candidate& cand, const hipDeviceProp_t& props,
+                                    void* devX, void* devW, void* devY) {
+    ck_dsl::CEngine::ConvProblem prob;
+    prob.N        = (int)cse.n;
+    prob.Hi       = (int)cse.hi;
+    prob.Wi       = (int)cse.wi;
+    prob.C        = (int)cse.c;
+    prob.K        = (int)cse.k;
+    prob.R        = (int)cse.r;
+    prob.S        = (int)cse.s;
+    prob.sH       = (int)cse.strideH;
+    prob.sW       = (int)cse.strideW;
+    prob.pH       = (int)cse.padH;
+    prob.pW       = (int)cse.padW;
+    prob.dH       = (int)cse.dilH;
+    prob.dW       = (int)cse.dilW;
+    prob.tile_m   = cand.tile_m;
+    prob.tile_n   = cand.tile_n;
+    prob.tile_k   = cand.tile_k;
+    prob.pipeline = cand.pipeline.c_str();
+    prob.arch     = props.gcnArchName;
+
+    ck_dsl::CEngineResult r;
     try {
-        spec = ck_dsl_provider::ConvImplicitGemmAdapter::buildSpec(convAttr, graph.getTensorMap());
-    } catch (...) { return std::nullopt; }
-
-    spec.tile_m      = knobs.tile_m;
-    spec.tile_n      = knobs.tile_n;
-    spec.tile_k      = knobs.tile_k;
-    spec.warp_m      = knobs.warp_m;
-    spec.warp_n      = knobs.warp_n;
-    spec.warp_tile_m = knobs.warp_tile_m;
-    spec.warp_tile_n = knobs.warp_tile_n;
-    spec.warp_tile_k = knobs.warp_tile_k;
-    spec.pipeline    = knobs.pipeline;
-
-    KernelArtifact artifact;
-    try {
-        py::gil_scoped_acquire gil;
-        py::dict payload = ck_dsl_provider::convImplicitGemmSpecToPayload(spec);
-        artifact = container.compileServiceBridge().compile(
-            ConvImplicitGemmPlanBuilder::opKind(), payload, arch);
+        r = ck_dsl::CEngine::build_conv(prob);
     } catch (const std::exception& e) {
-        std::cerr << "[Sweep] (" << fmtKnobs(knobs) << ") compile FAILED: " << e.what() << "\n";
+        std::cerr << "[Sweep]   build_conv FAILED: " << e.what() << "\n";
         return std::nullopt;
     }
 
-    std::shared_ptr<ck_dsl_provider::HipModule> module;
+    ck_dsl::Kernel kernel = ck_dsl::Kernel::from_llvm_ir(
+        std::move(r.llvm_ir), std::move(r.manifest), "");
     try {
-        module = std::make_shared<ck_dsl_provider::HipModule>(artifact);
+        kernel.ensure_compiled(props);
     } catch (const std::exception& e) {
-        std::cerr << "[Sweep] (" << fmtKnobs(knobs) << ") module load FAILED: " << e.what() << "\n";
+        std::cerr << "[Sweep]   compile FAILED: " << e.what() << "\n";
         return std::nullopt;
     }
 
-    const std::int64_t xBytes =
-        (std::int64_t)spec.problem.N * spec.problem.C * spec.problem.Hi * spec.problem.Wi * 2;
-    const std::int64_t wBytes =
-        (std::int64_t)spec.problem.K * spec.problem.C * spec.problem.R * spec.problem.S * 2;
-    const std::int64_t yBytes =
-        (std::int64_t)spec.problem.N * spec.problem.K * spec.problem.Ho() * spec.problem.Wo() * 2;
+    const std::int64_t elt  = 2;  // fp16
+    const std::int64_t cpg  = cse.c / cse.g;
+    uint64_t a_bytes = (uint64_t)cse.n * cse.hi * cse.wi * cse.c * elt;
+    uint64_t b_bytes = (uint64_t)cse.k * cpg * cse.r * cse.s * elt;
+    uint64_t d_bytes = (uint64_t)cse.n * Ho * Wo * cse.k * elt;
 
-    ck_dsl_provider::ConvImplicitGemmPlan plan(
-        module, /*xUid=*/1, /*wUid=*/2, /*yUid=*/3, xBytes, wBytes, yBytes);
+    const auto& m = kernel.manifest();
+    long M_long    = (long)(cse.n * Ho * Wo);
+    unsigned m_tiles = (unsigned)((M_long + m.block_m - 1) / m.block_m);
+    unsigned n_tiles = (unsigned)((cse.k   + m.block_n - 1) / m.block_n);
+    std::array<unsigned, 3> grid = (m.grid_order == "NM")
+        ? std::array<unsigned, 3>{n_tiles, m_tiles, 1}
+        : std::array<unsigned, 3>{m_tiles, n_tiles, 1};
+    unsigned block = (unsigned)m.threads_per_block;
 
-    const std::size_t wsBytes = plan.getWorkspaceSize(handle);
-    void* workspace = nullptr;
-    if (wsBytes > 0 && hipMalloc(&workspace, wsBytes) != hipSuccess) {
-        std::cerr << "[Sweep] (" << fmtKnobs(knobs) << ") workspace alloc FAILED\n";
-        return std::nullopt;
-    }
+    if (grid[0] == 0 || grid[1] == 0) return std::nullopt;
 
-    std::optional<double> result;
+    auto launch = [&]() {
+        kernel.launch(
+            {{"A", devX}, {"B", devW}, {"D", devY}},
+            {{"A_bytes", a_bytes}, {"B_bytes", b_bytes}, {"D_bytes", d_bytes}},
+            grid, block, nullptr);
+    };
+
+    // Warmup
     try {
-        plan.execute(handle, deviceBuffers.data(),
-                     static_cast<std::uint32_t>(deviceBuffers.size()), workspace);
-        if (hipDeviceSynchronize() != hipSuccess)
-            throw std::runtime_error("hipDeviceSynchronize failed");
-
-        PerfMeasurement pm;
-        auto launchFn = [&]() {
-            plan.execute(handle, deviceBuffers.data(),
-                         static_cast<std::uint32_t>(deviceBuffers.size()), workspace);
-        };
-        PerfResult pr = pm.measure(launchFn, flops, handle.getStream());
-        medianUsOut = pr.medianUs;
-        result      = pr.tflops;
-    } catch (const std::exception& e) {
-        std::cerr << "[Sweep] (" << fmtKnobs(knobs) << ") launch FAILED: " << e.what() << "\n";
+        for (int i = 0; i < kWarmup; ++i) launch();
+        if (hipDeviceSynchronize() != hipSuccess) return std::nullopt;
+    } catch (...) {
+        std::cerr << "[Sweep]   warmup FAILED\n";
+        return std::nullopt;
     }
 
-    if (workspace) (void)hipFree(workspace);
-    return result;
+    // Timed runs
+    auto t0 = std::chrono::steady_clock::now();
+    try {
+        for (int i = 0; i < kRepeat; ++i) launch();
+        if (hipDeviceSynchronize() != hipSuccess) return std::nullopt;
+    } catch (...) {
+        std::cerr << "[Sweep]   timed launch FAILED\n";
+        return std::nullopt;
+    }
+    auto t1 = std::chrono::steady_clock::now();
+
+    double total_us =
+        std::chrono::duration<double, std::micro>(t1 - t0).count();
+    return total_us / kRepeat;
 }
 
 // ── Per-shape sweep ───────────────────────────────────────────────────────────
 
-bool runConvOracleSweep(const ConvCase& cse, CkDslContainer& container,
-                        ::CkDslHandle& handle, const std::string& arch)
-{
-    const std::int64_t kN  = cse.n, kG = cse.g, kC = cse.c, kHi = cse.hi, kWi = cse.wi;
-    const std::int64_t kK  = cse.k, kR = cse.r, kS = cse.s;
-    const std::int64_t kHo = convOutDim(kHi, cse.padH, cse.dilH, kR, cse.strideH);
-    const std::int64_t kWo = convOutDim(kWi, cse.padW, cse.dilW, kS, cse.strideW);
-    // Per-group channel counts used for filter dims and FLOPS.
-    const std::int64_t kCpG = kC / kG;
-
-    if (kHo <= 0 || kWo <= 0) {
+bool runConvSweep(const ConvCase& cse, const hipDeviceProp_t& props) {
+    const std::int64_t Ho = convOutDim(cse.hi, cse.padH, cse.dilH, cse.r, cse.strideH);
+    const std::int64_t Wo = convOutDim(cse.wi, cse.padW, cse.dilW, cse.s, cse.strideW);
+    if (Ho <= 0 || Wo <= 0) {
         std::cerr << "[Sweep] " << cse.name << ": invalid output dims, skipping\n";
         return false;
     }
 
-    // For grouped conv the filter is [K, C/G, R, S] in NHWC order.
-    auto fbBuilder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(
-        {kN, kC, kHi, kWi}, {kC * kHi * kWi, 1, kWi * kC, kC},
-        {kK, kCpG, kR, kS},  {kCpG * kR * kS, 1, kS * kCpG, kCpG},
-        {kN, kK, kHo, kWo}, {kK * kHo * kWo, 1, kWo * kK, kK},
-        {cse.padH, cse.padW}, {cse.padH, cse.padW},
-        {cse.strideH, cse.strideW}, {cse.dilH, cse.dilW},
-        data_objects::DataType::HALF);
-    flatbuf::GraphWrapper graph(fbBuilder.GetBufferPointer(), fbBuilder.GetSize());
+    const std::int64_t cpg   = cse.c / cse.g;
+    const std::int64_t elt   = 2;  // fp16
+    std::int64_t a_bytes = cse.n * cse.hi * cse.wi * cse.c * elt;
+    std::int64_t b_bytes = cse.k * cpg * cse.r * cse.s * elt;
+    std::int64_t d_bytes = cse.n * Ho * Wo * cse.k * elt;
 
-    const utilities::TensorLayout& nhwc = utilities::TensorLayout::NHWC;
-    utilities::Tensor<half> tensorX({kN, kC, kHi, kWi}, nhwc);
-    utilities::Tensor<half> tensorW({kK, kCpG, kR, kS},
-        utilities::generateStrides({kK, kCpG, kR, kS}, nhwc.strideOrder));
-    utilities::Tensor<half> tensorY({kN, kK, kHo, kWo}, nhwc);
-    tensorX.fillWithRandomValues(half(-0.1f), half(0.1f), 0x4242u);
-    tensorW.fillWithRandomValues(half(-0.1f), half(0.1f), 0x5555u);
-
-    const std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers = {
-        {1, tensorX.memory().deviceData()},
-        {2, tensorW.memory().deviceData()},
-        {3, tensorY.memory().deviceData()},
-    };
-
-    // FLOPS: each of the K output channels applies a [C/G, R, S] filter over [N, Ho, Wo].
-    const double kFlops = 2.0 * static_cast<double>(kN) * static_cast<double>(kHo)
-                              * static_cast<double>(kWo) * static_cast<double>(kK)
-                              * static_cast<double>(kCpG) * static_cast<double>(kR)
-                              * static_cast<double>(kS);
-
-    ConvSelectionProblem selProblem;
-    selProblem.N  = static_cast<std::int32_t>(kN);
-    selProblem.C  = static_cast<std::int32_t>(kC);
-    selProblem.K  = static_cast<std::int32_t>(kK);
-    selProblem.G  = static_cast<std::int32_t>(kG);
-    selProblem.Hi = static_cast<std::int32_t>(kHi);
-    selProblem.Wi = static_cast<std::int32_t>(kWi);
-    selProblem.R  = static_cast<std::int32_t>(kR);
-    selProblem.S  = static_cast<std::int32_t>(kS);
-    selProblem.sH = static_cast<std::int32_t>(cse.strideH);
-    selProblem.sW = static_cast<std::int32_t>(cse.strideW);
-    selProblem.pH = static_cast<std::int32_t>(cse.padH);
-    selProblem.pW = static_cast<std::int32_t>(cse.padW);
-    selProblem.dH = static_cast<std::int32_t>(cse.dilH);
-    selProblem.dW = static_cast<std::int32_t>(cse.dilW);
-    selProblem.dtype = "fp16";
-
-    const std::vector<ConvImplicitGemmPerfKnobs> candidates =
-        ck_dsl_provider::enumerateCandidates(selProblem, arch);
-
-    if (candidates.empty()) {
-        std::cerr << "[Sweep] " << cse.name << ": enumerateCandidates returned no candidates, skipping\n";
+    void* devX = nullptr;
+    void* devW = nullptr;
+    void* devY = nullptr;
+    if (hipMalloc(&devX, (size_t)a_bytes) != hipSuccess ||
+        hipMalloc(&devW, (size_t)b_bytes) != hipSuccess ||
+        hipMalloc(&devY, (size_t)d_bytes) != hipSuccess) {
+        std::cerr << "[Sweep] " << cse.name << ": device alloc FAILED, skipping\n";
+        hipFree(devX); hipFree(devW); hipFree(devY);
         return false;
     }
+    // Initialize input buffers to a benign constant.
+    hipMemset(devX, 0, (size_t)a_bytes);
+    hipMemset(devW, 0, (size_t)b_bytes);
 
+    const std::vector<Candidate> candidates = enumerateCandidates(cse, Ho, Wo);
     std::cerr << "[Sweep] " << cse.name
-              << " (G=" << kG << ") sweeping " << candidates.size() << " candidates\n";
+              << " (N=" << cse.n << " G=" << cse.g << " C=" << cse.c
+              << " K=" << cse.k << " Hi=" << cse.hi << " Wi=" << cse.wi
+              << " R=" << cse.r << " S=" << cse.s << ")"
+              << " sweeping " << candidates.size() << " candidates\n";
 
-    std::size_t sweptOk = 0, sweptFail = 0;
+    // FLOPS: 2 * N * Ho * Wo * K * (C/G) * R * S
+    const double kFlops = 2.0 * (double)cse.n * (double)Ho * (double)Wo
+                              * (double)cse.k * (double)cpg
+                              * (double)cse.r * (double)cse.s;
+
+    std::size_t ok = 0, failed = 0;
     for (const auto& cand : candidates) {
-        double us = 0.0;
-        auto tflops = timeCandidate(container, handle, arch, cand, graph,
-                                    deviceBuffers, kFlops, us);
-        if (!tflops) { ++sweptFail; continue; }
-        ++sweptOk;
-        gCsvWriter.write(kN, kG, kC, kK, kHi, kWi, kR, kS,
+        auto lat_us = timeCandidate(cse, Ho, Wo, cand, props, devX, devW, devY);
+        if (!lat_us) { ++failed; continue; }
+        ++ok;
+        double tflops = kFlops / (*lat_us * 1e-6) / 1e12;
+        gCsvWriter.write(cse.n, cse.g, cse.c, cse.k, cse.hi, cse.wi, cse.r, cse.s,
                          cse.strideH, cse.strideW, cse.padH, cse.padW,
-                         cand, *tflops, us);
+                         cand.tile_m, cand.tile_n, cand.tile_k, cand.pipeline,
+                         tflops, *lat_us);
     }
 
+    hipFree(devX); hipFree(devW); hipFree(devY);
     std::cerr << "[Sweep] " << cse.name
-              << " done: " << sweptOk << " ok, " << sweptFail << " failed\n";
-    return sweptOk > 0;
+              << " done: " << ok << " ok, " << failed << " failed\n";
+    return ok > 0;
 }
 
 }  // namespace
@@ -395,17 +349,18 @@ int sweepMain(const std::string& shapesPath, const std::string& outPath) {
     gCsvWriter.open(outPath);
     if (!gCsvWriter.active) return 1;
 
-    CkDslContainer container;
-    ::CkDslHandle handle;
-    const auto arch = ck_dsl_provider::detectDeviceArch(handle.getStream());
-    if (!arch.has_value()) {
-        std::cerr << "ERROR: could not detect device arch\n";
+    // Detect device arch once; ensure_compiled(props) handles ISA derivation.
+    hipDeviceProp_t props{};
+    if (hipGetDeviceProperties(&props, 0) != hipSuccess) {
+        std::cerr << "ERROR: hipGetDeviceProperties failed\n";
         return 1;
     }
+    std::cerr << "[Sweep] device: " << props.name
+              << " (" << props.gcnArchName << ")\n";
 
     std::size_t shapesOk = 0, shapesFailed = 0;
     for (const auto& shape : shapes) {
-        if (runConvOracleSweep(shape, container, handle, *arch))
+        if (runConvSweep(shape, props))
             ++shapesOk;
         else
             ++shapesFailed;

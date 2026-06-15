@@ -132,19 +132,25 @@ python3 $CK_HEURISTICS/sample_conv_shapes.py \
 
 ### Step 3 — Build the sweep binary
 
-`build.sh` wraps the rocm-libraries superbuild. It creates a Python venv
-for pybind11 if one does not already exist, then builds `conv_candidate_sweep`
-via CMake. Run this on a machine with ROCm installed.
+`build.sh` builds `conv_candidate_sweep` via CMake. The sweep uses the
+pure-C ck_dsl engine (`libckc_core`) to JIT-compile and time every candidate
+— no Python, no pybind11, no hipdnn SDK. Run this on a machine with ROCm
+installed.
 
 ```bash
 export BUILD_DIR=$WORK/sweep_build   # default: $HOME/ckdsl_sweep_build
 
 bash $HEURISTICS/sweep/build.sh
-# Binary: $WORK/sweep_build/oracle_sweep/conv_candidate_sweep
+# Binary: $WORK/sweep_build/conv_candidate_sweep
 ```
 
-The build decompresses the in-repo model automatically so the CMake resolver
-can find it.
+If `libckc_core.a` is not under `/opt/rocm`, set `CKC_CORE_LIB` before calling
+`build.sh`:
+
+```bash
+export CKC_CORE_LIB=/path/to/libckc_core.a
+bash $HEURISTICS/sweep/build.sh
+```
 
 ---
 
@@ -155,7 +161,7 @@ terminals. The sweep appends to the output file, so interrupted runs are
 safely resumed by re-invoking with the same `--out` path.
 
 ```bash
-BINARY=$WORK/sweep_build/oracle_sweep/conv_candidate_sweep
+BINARY=$WORK/sweep_build/conv_candidate_sweep
 mkdir -p $WORK/results
 
 for shard in $WORK/shapes/shard_*.csv; do
