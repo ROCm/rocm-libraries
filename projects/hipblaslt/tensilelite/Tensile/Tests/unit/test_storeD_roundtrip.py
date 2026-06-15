@@ -461,7 +461,7 @@ def _build_sgprs_for_test(writer):
       s[24:27] = SrdInput (4-aligned)
     """
     # s[0:3] reserved: s[0:1] = kernarg ptr, s[2:3] = padding to 4-align SrdD
-    writer.sgprPool.checkOut(4)
+    writer.sgprPool.checkOut(4, tag="_build_sgprs_for_test_sgprs")
 
     # SrdD: 4 sgprs for buffer descriptor (must be 4-aligned for buffer_store)
     srd_d_base = writer.sgprPool.checkOut(4, "SrdD")
@@ -506,7 +506,7 @@ def _build_sgprs_for_test(writer):
     writer.sgprs["Alpha"] = alpha                # s[20:21]
 
     # Pad to 4-align SrdInput (s[22:23] = padding, SrdInput starts at s[24])
-    writer.sgprPool.checkOut(2)
+    writer.sgprPool.checkOut(2, tag="_build_sgprs_for_test_pad_to_4_align_SrdInput")
 
     # SrdInput: input buffer descriptor (4-aligned)
     srd_in_base = writer.sgprPool.checkOut(4, "SrdInput")
