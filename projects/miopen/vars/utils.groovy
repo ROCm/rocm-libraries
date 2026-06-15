@@ -403,6 +403,42 @@ def promoteTheRockDockerImage(String hashedImage, String fullHash)
 }
 
 
+// Appends TheRock and CK label args to dockerArgs. Only call when actually building
+// the CI image — not when the image already exists in the registry.
+private def embedBuildMetadata(String dockerArgs) {
+    try {
+        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            sh "docker pull ${env.MIOPEN_DOCKER_IMAGE_URL}:therock > /dev/null 2>&1 || true"
+            def promotedHash = sh(
+                script: """
+                    docker inspect --format '{{ index .Config.Labels "therock.git.hash" }}' \
+                        ${env.MIOPEN_DOCKER_IMAGE_URL}:therock 2>/dev/null || true
+                """.stripIndent(),
+                returnStdout: true
+            ).trim()
+            if (promotedHash) {
+                echo "Embedding TheRock hash into CI image metadata: ${promotedHash}"
+                dockerArgs = dockerArgs + "--label therock.git.hash=${promotedHash} "
+                env.THEROCK_PROMOTED_HASH = promotedHash
+            }
+        }
+    } catch (Exception e) {
+        echo "Could not read TheRock label from :therock image, skipping metadata embedding: ${e.message}"
+    }
+
+    def ckHash = sh(
+        script: "git -C ${env.WORKSPACE}/${env.CK_DIR} rev-parse HEAD",
+        returnStdout: true
+    ).trim()
+    if (ckHash) {
+        echo "Embedding CK hash into CI image metadata: ${ckHash}"
+        dockerArgs = dockerArgs + "--label ck.git.hash=${ckHash} "
+        env.CK_GIT_HASH = ckHash
+    }
+    return dockerArgs
+}
+
+
 def getDockerImage(Map conf=[:])
 {
     env.DOCKER_BUILDKIT=1
@@ -484,40 +520,6 @@ def getDockerImage(Map conf=[:])
     // Append Dockerfile path after image name is generated to avoid affecting the hash.
     dockerArgs = dockerArgs + " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile "
 
-    // Carry the promoted TheRock hash forward into the CI image metadata.
-    try {
-        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-            sh "docker pull ${env.MIOPEN_DOCKER_IMAGE_URL}:therock > /dev/null 2>&1 || true"
-            def promotedHash = sh(
-                script: """
-                    docker inspect --format '{{ index .Config.Labels "therock.git.hash" }}' \
-                        ${env.MIOPEN_DOCKER_IMAGE_URL}:therock 2>/dev/null || true
-                """.stripIndent(),
-                returnStdout: true
-            ).trim()
-            if (promotedHash) {
-                echo "Embedding TheRock hash into CI image metadata: ${promotedHash}"
-                dockerArgs = dockerArgs + "--label therock.git.hash=${promotedHash} "
-                env.THEROCK_PROMOTED_HASH = promotedHash
-            }
-        }
-    } catch (Exception e) {
-        echo "Could not read TheRock label from :therock image, skipping metadata embedding: ${e.message}"
-    }
-
-    // Embed the CK commit hash built into this image.
-    def ckHash = sh(
-        script: "git -C ${env.WORKSPACE}/${env.CK_DIR} rev-parse HEAD",
-        returnStdout: true
-    ).trim()
-    if (ckHash) {
-        echo "Embedding CK hash into CI image metadata: ${ckHash}"
-        dockerArgs = dockerArgs + "--label ck.git.hash=${ckHash} "
-        env.CK_GIT_HASH = ckHash
-    }
-
-    echo "Docker Args: ${dockerArgs}"
-
     // ensure_only: true  -- called from the Build Docker stage whose sole goal is
     //   to guarantee the image exists in the registry. Use docker manifest inspect
     //   (no layer download) to probe; only build if the image is absent.
@@ -534,6 +536,8 @@ def getDockerImage(Map conf=[:])
             echo "Image ${image} already exists in registry - skipping build."
             dockerImage = docker.image("${image}")
         } else {
+            dockerArgs = embedBuildMetadata(dockerArgs)
+            echo "Docker Args: ${dockerArgs}"
             echo "Building image..."
             def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
             def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=max,registry.insecure=true " +
@@ -588,6 +592,8 @@ def getDockerImage(Map conf=[:])
         }
         catch(Exception ex)
         {
+            dockerArgs = embedBuildMetadata(dockerArgs)
+            echo "Docker Args: ${dockerArgs}"
             echo "Building image..."
             def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
             def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=max,registry.insecure=true " +
