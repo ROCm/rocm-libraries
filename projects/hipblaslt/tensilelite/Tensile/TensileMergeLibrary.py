@@ -256,15 +256,15 @@ def normalizeDictLibraryLayout(data: dict[str, Any]) -> bool:
 
 
 def ensurePath(path):
-    if not os.path.exists(path):
-        os.makedirs(path)
-    return path
+  if not os.path.exists(path):
+    os.makedirs(path)
+  return path
 
 def allFiles(startDir):
     current = os.listdir(startDir)
     files = []
     for filename in [_current for _current in current if os.path.splitext(_current)[-1].lower() == '.yaml']:
-        fullPath = os.path.join(startDir, filename)
+        fullPath = os.path.join(startDir,filename)
         if os.path.isdir(fullPath):
             files = files + allFiles(fullPath)
         else:
@@ -275,15 +275,14 @@ def fixSizeInconsistencies(sizes, fileType):
     origNumSizes = len(sizes)
     sizesDict = dict()
     for size, index in sizes:
-        # Trim 8-tuple sizes to 4-tuple [m, n, b, k]
         size = size[:-4] if len(size) >= 8 else size
-        # Use tuple(size) as dict key for proper deduplication
-        sizesDict[tuple(size)] = [size, index]
-    newSizes = list(sizesDict.values())
+        sizesDict[tuple(value for value in size)] = [size, index]
+    newSizes = list()
+    for value in sizesDict.values():
+        newSizes.append(value)
     numSize = len(newSizes)
-    numRemoved = origNumSizes - numSize
-    if numRemoved > 0:
-        verbose(numRemoved, "duplicate size(s) removed from", fileType, "logic file")
+    if origNumSizes - numSize > 0:
+        verbose(origNumSizes - numSize, "duplicate size(s) removed from", fileType, "logic file")
     return newSizes, len(newSizes)
 
 def addKernel(solutionPool, solDict, solution):
@@ -292,7 +291,7 @@ def addKernel(solutionPool, solDict, solution):
         debug("...Reuse previously existed solution", end="")
     else:
         index = len(solutionPool)
-        _solution = deepcopy(solution)
+        _solution = deepcopy(solution) # if we don't we will see some subtle errors
         _solution["SolutionIndex"] = index
         solutionPool.append(_solution)
         solDict[solution["SolutionNameMin"]] = _solution
@@ -536,18 +535,15 @@ def compareProblemType(oriAccessor, incAccessor):
         sys.exit(f"[Error] ProblemType in library logic doesn't match: \n{results}")
 
 def msg(*args, **kwargs):
-    for i in args:
-        print(i, end=" ")
+    for i in args: print(i, end=" ")
     print(**kwargs)
 
 def verbose(*args, **kwargs):
-    if verbosity < 1:
-        return
+    if verbosity < 1: return
     msg(*args, **kwargs)
 
 def debug(*args, **kwargs):
-    if verbosity < 2:
-        return
+    if verbosity < 2: return
     msg(*args, **kwargs)
 
 def syncDefaultParams(origData, origDefaultValues, incDefaultValues):
@@ -602,16 +598,47 @@ def removeDefaultInitParams(data: dict[str, Any]) -> None:
         defaultSol.pop("CUCount")
 
 def findSolutionWithIndex(solutionData, solIndex):
+    # Check solution at the index corresponding to solIndex first
     if solIndex < len(solutionData) and solutionData[solIndex]["SolutionIndex"] == solIndex:
         return solutionData[solIndex]
     else:
         debug("Searching for index...")
-        solution = [s for s in solutionData if s["SolutionIndex"] == solIndex]
+        solution = [s for s in solutionData if s["SolutionIndex"]==solIndex]
         assert(len(solution) == 1)
         return solution[0]
 
-def mergeLogic(oriAccessor, incAccessor, forceMerge, noEff=False):
-    """Unified merge logic using DataAccessor."""
+def mergeLogic(
+    oriAccessor: DataAccessor,
+    incAccessor: DataAccessor,
+    forceMerge: bool,
+    noEff: bool = False,
+) -> list[Any]:
+    """Merge incremental library logic into base logic using ``DataAccessor``.
+
+    Combines exact-logic entries from the incremental accessor into the base
+    accessor: sizes that improve efficiency (or all sizes when *forceMerge*)
+    adopt kernels from the incremental file. Unused solutions are trimmed
+    before and after the merge.
+
+    Args:
+        oriAccessor: Base (original) logic wrapped in a ``DataAccessor``.
+        incAccessor: Incremental logic wrapped in a ``DataAccessor``; mutated
+            when its exact-logic list is empty (normalized to ``[]``).
+        forceMerge: When True, replace entries even if efficiency does not
+            improve.
+        noEff: When True, store ``0.0`` for efficiency values on merged rows
+            instead of the incremental file's efficiency.
+
+    Returns:
+        A four-element list ``[mergedData, numSizesAdded, numSolutionsAdded,
+        numSolutionsRemoved]`` where *mergedData* is list- or dict-format logic
+        (same representation as the base accessor's raw data), and the counters
+        summarize changes versus the pre-merge base.
+
+    Raises:
+        AssertionError: If ``findSolutionWithIndex`` cannot resolve a solution
+            index referenced by incremental exact logic.
+    """
     oriSolutions = oriAccessor.getSolutions()
     oriExactLogic = oriAccessor.getExactLogic()
     incSolutions = incAccessor.getSolutions()
@@ -666,9 +693,9 @@ def mergeLogic(oriAccessor, incAccessor, forceMerge, noEff=False):
                 verbose("[X]", incSize, "already exists but does not improve in performance.", end="")
                 verbose("Efficiency:", origEff, "->", incEff)
         except KeyError:
-            verbose("[-]", incSize, "has been added to solution table, Efficiency: N/A ->", incEff)
-            solutionPool, solDict, index = addKernel(solutionPool, solDict, incSolution)
-            solutionMap.append([incSize, [index, storeEff]])
+                verbose("[-]", incSize, "has been added to solution table, Efficiency: N/A ->", incEff)
+                solutionPool, solDict, index = addKernel(solutionPool, solDict, incSolution)
+                solutionMap.append([incSize,[index, storeEff]])
 
     verbose(numOrigRemoved, "unused solutions removed from base logic file")
     verbose(numIncRemoved, "unused solutions removed from incremental logic file")
@@ -809,11 +836,8 @@ def main():
     forceMerge = args.force_merge.lower()
     no_eff = args.no_eff
 
-    if forceMerge in ["none"]:
-        forceMerge = True
-    elif forceMerge in ["true", "1"]:
-        forceMerge = True
-    elif forceMerge in ["false", "0"]:
-        forceMerge = False
+    if forceMerge in ["none"]: forceMerge=True
+    elif forceMerge in ["true", "1"]: forceMerge=True
+    elif forceMerge in ["false", "0"]: forceMerge=False
 
     avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, no_eff)

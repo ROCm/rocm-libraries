@@ -1,229 +1,45 @@
-################################################################################
-#
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-################################################################################
-"""Unit tests for `TensileMergeLibrary` using compact embedded YAML fixtures."""
 
-from copy import deepcopy
+import pytest
+import os
+import tempfile
 from pathlib import Path
-from tempfile import TemporaryDirectory
-from typing import Any
 from unittest.mock import patch
-
+from copy import deepcopy
+from typing import Any
 from Tensile import LibraryIO
 from Tensile.CustomYamlLoader import DEFAULT_YAML_LOADER, load_yaml_stream
-import pytest
 
 from Tensile.TensileMergeLibrary import (
+    ensurePath,
     allFiles,
+    fixSizeInconsistencies,
+    addKernel,
+    sanitizeSolutions,
+    reNameSolutions,
+    removeUnusedSolutions,
+    removeDuplicatedSolutions,
+    loadData,
     compareDestFolderToYaml,
     compareProblemType,
-    convertToDict,
-    createAccessor,
-    ensurePath,
-    findSolutionWithIndex,
-    fixSizeInconsistencies,
-    getArchitectureFromData,
-    isDictBasedArchitecture,
-    loadData,
-    mergeLogic,
-    removeDefaultInitParams,
-    addKernel,
-    reNameSolutions,
     msg,
     verbose,
     debug,
-    removeDuplicatedSolutions,
-    removeUnusedSolutions,
-    sanitizeSolutions,
+    findSolutionWithIndex,
+    mergeLogic,
+    convertToDict,
+    createAccessor,
+    getArchitectureFromData,
+    isDictBasedArchitecture,
+    removeDefaultInitParams,
     normalizeDictLibraryLayout,
     syncDefaultParams,
 )
 
-GFX950_YAML = """
-- {MinimumRequiredVersion: 5.0.0}
-- gfx950
-- gfx950
-- [Device 75a8]
-- Activation: true
-  ActivationType: hipblaslt_all
-  AssignedDerivedParameters: true
-  Batched: true
-  ComputeDataType: 0
-  DataType: 15
-  DataTypeA: 15
-  DataTypeB: 15
-  DestDataType: 7
-  HighPrecisionAccumulate: true
-  Index0: 0
-  Index1: 1
-  IndexAssignmentsA: [3, 0, 2]
-  IndexAssignmentsB: [3, 1, 2]
-  IndexUnroll: 3
-  IndicesBatch: [2]
-  IndicesFree: [0, 1]
-  IndicesSummation: [3]
-  NumIndicesBatch: 1
-  NumIndicesC: 3
-  NumIndicesFree: 2
-  NumIndicesSummation: 1
-  OperationType: GEMM
-  StridedBatched: true
-  SupportUserArgs: true
-  TotalIndices: 4
-  TransposeA: true
-  TransposeB: false
-  UseBeta: true
-  UseBias: 1
-  UseScaleAB: Scalar
-- - 1LDSBuffer: 0
-    ActivationFused: true
-    AssignedDerivedParameters: true
-    AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_UserArgNMVfVa0LuB8lRTcyOpGO2YH741LGRrePzbeHygp1IY8=
-    BufferLoad: true
-    BufferStore: true
-    DepthU: 128
-    GlobalSplitU: 0
-    ISA: [9, 5, 0]
-    Kernel: true
-    KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_UserArgs_MT160x192x128_Test0
-    MacroTile0: 160
-    MacroTile1: 192
-    NumThreads: 256
-    SolutionIndex: 0
-    SolutionNameMin: Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_UserArgs_Test0
-    StaggerU: 0
-    StaggerUMapping: 0
-    StaggerUStride: 0
-    Valid: true
-    WavefrontSize: 64
-    WorkGroup: [16, 16, 1]
-    _staggerStrideShift: 0
-  - 1LDSBuffer: 0
-    ActivationFused: true
-    AssignedDerivedParameters: true
-    AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_UserArgXzDbxA8LsiKAenzoLoqFOTbCc3GwRQe0GwhODFVZXaI=
-    BufferLoad: true
-    BufferStore: true
-    DepthU: 128
-    GlobalSplitU: 0
-    ISA: [9, 5, 0]
-    Kernel: true
-    KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_UserArgs_MT160x192x128_Test1
-    MacroTile0: 160
-    MacroTile1: 192
-    NumThreads: 256
-    SolutionIndex: 1
-    SolutionNameMin: Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_UserArgs_Test1
-    StaggerU: 0
-    StaggerUMapping: 0
-    StaggerUStride: 0
-    Valid: true
-    WavefrontSize: 64
-    WorkGroup: [16, 16, 1]
-    _staggerStrideShift: 0
-- [2, 3, 0, 1]
-- - - [10240, 384, 1, 8192]
-    - [0, 0.0]
-  - - [10240, 336, 1, 8192]
-    - [1, 0.0]
-  - - [10240, 272, 1, 8192]
-    - [0, 0.0]
-- null
-- null
-- DeviceEfficiency
-- Equality
-"""
-
-GFX1250_YAML = """
-MinimumRequiredVersion: 5.0.0
-ScheduleName: gfx1250
-ArchitectureName: gfx1250
-CUCount: null
-DeviceNames: [Device 73f0]
-ProblemType:
-  Batched: true
-  DataType: 7
-  OperationType: GEMM
-  StridedBatched: true
-  TransposeA: 0
-  TransposeB: 0
-  UseBeta: true
-DefaultSolution:
-  DepthU: -1
-  GlobalSplitU: 1
-  StaggerU: 32
-  StaggerUMapping: 0
-  StaggerUStride: 256
-  WorkGroup: [16, 16, 1]
-Solutions:
-- SolutionIndex: 0
-  SolutionNameMin: Sol_gfx1250_0
-  KernelNameMin: Kernel_gfx1250_0
-  BaseName: Base_gfx1250_0
-  DepthU: 32
-  MacroTile0: 16
-  MacroTile1: 16
-  StaggerU: 32
-  StaggerUMapping: 0
-  StaggerUStride: 256
-  WorkGroup: [16, 2, 1]
-  _staggerStrideShift: 2
-- SolutionIndex: 1
-  SolutionNameMin: Sol_gfx1250_1
-  KernelNameMin: Kernel_gfx1250_1
-  BaseName: Base_gfx1250_1
-  DepthU: 64
-  GlobalSplitU: 4
-  MacroTile0: 32
-  MacroTile1: 32
-  StaggerU: 32
-  StaggerUMapping: 0
-  StaggerUStride: 256
-  WorkGroup: [32, 4, 1]
-  _staggerStrideShift: 2
-IndexOrder: [2, 3, 0, 1]
-ExactLogic:
-- - [129, 129, 1, 129]
-  - [0, 0.0]
-- - [128, 128, 1, 128]
-  - [1, 0.0]
-- - [256, 256, 1, 256]
-  - [0, 0.0]
-RangeLogic: null
-PerfMetric: DeviceEfficiency
-LibraryType: GridBased
-"""
-
-YAML_BY_ARCH = {"gfx950": GFX950_YAML, "gfx1250": GFX1250_YAML}
-
 
 def _load_arch_data(arch: str) -> Any:
-    """Load architecture fixture data from embedded YAML.
+    """Load architecture fixture data from a test_data YAML file.
 
     Args:
         arch: Architecture tag (``"gfx950"`` or ``"gfx1250"``).
@@ -232,12 +48,10 @@ def _load_arch_data(arch: str) -> Any:
         Parsed Python object (list for gfx950, dict for gfx1250).
 
     Raises:
-        KeyError: If *arch* is not present in ``YAML_BY_ARCH``.
+        FileNotFoundError: If no ``merge_logic_{arch}.yaml`` exists in test_data.
     """
-    with TemporaryDirectory() as tmp_dir:
-        yaml_file = Path(tmp_dir) / f"{arch}.yaml"
-        yaml_file.write_text(YAML_BY_ARCH[arch])
-        return load_yaml_stream(yaml_file, DEFAULT_YAML_LOADER)
+    yaml_file = Path(__file__).parent / "test_data" / f"merge_logic_{arch}.yaml"
+    return load_yaml_stream(yaml_file, DEFAULT_YAML_LOADER)
 
 
 def _append_new_size(data: Any, arch: str) -> None:
@@ -803,6 +617,109 @@ class TestCrossFormatOperations:
         assert len(accessor.getExactLogic()) == 4
 
 
+
+@pytest.mark.unit
+class TestEnsurePath:
+    """Test ensurePath function"""
+
+    def test_create_new_directory(self):
+        """Test creating a new directory"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            new_path = os.path.join(tmpdir, "test_dir", "nested")
+            result = ensurePath(new_path)
+            assert os.path.exists(new_path)
+            assert result == new_path
+
+    def test_existing_directory(self):
+        """Test with existing directory"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = ensurePath(tmpdir)
+            assert os.path.exists(tmpdir)
+            assert result == tmpdir
+
+
+@pytest.mark.unit
+class TestAllFiles:
+    """Test allFiles function"""
+
+    def test_find_yaml_files_in_directory(self):
+        """Test finding YAML files in a directory"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create test files
+            Path(os.path.join(tmpdir, "file1.yaml")).touch()
+            Path(os.path.join(tmpdir, "file2.YAML")).touch()
+            Path(os.path.join(tmpdir, "file3.txt")).touch()
+
+            files = allFiles(tmpdir)
+            yaml_names = [os.path.basename(f) for f in files]
+
+            assert len(files) == 2
+            assert "file1.yaml" in yaml_names
+            assert "file2.YAML" in yaml_names
+            assert "file3.txt" not in yaml_names
+
+    def test_empty_directory(self):
+        """Test with empty directory"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = allFiles(tmpdir)
+            assert files == []
+
+    def test_nested_directories(self):
+        """Test finding YAML files in nested directories"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create nested structure - but not as a subdirectory with yaml extension
+            # because allFiles recursively searches directories, not files ending in .yaml
+            Path(os.path.join(tmpdir, "top.yaml")).touch()
+            Path(os.path.join(tmpdir, "another.yaml")).touch()
+
+            files = allFiles(tmpdir)
+            # Should find both .yaml files
+            assert len(files) == 2
+
+
+@pytest.mark.unit
+class TestFixSizeInconsistencies:
+    """Test fixSizeInconsistencies function"""
+
+    def test_remove_duplicates(self):
+        """Test removing duplicate sizes"""
+        sizes = [
+            ([1, 2, 3, 4, 5, 6, 7, 8], 0),
+            ([1, 2, 3, 4], 1),
+            ([1, 2, 3, 4, 9, 10, 11, 12], 2),
+        ]
+        result, count = fixSizeInconsistencies(sizes, "test")
+        # All 3 sizes truncate/normalize to [1, 2, 3, 4], so should deduplicate to 1 unique size
+        # - [1,2,3,4,5,6,7,8] -> [1,2,3,4] (removes last 4)
+        # - [1,2,3,4] -> [1,2,3,4] (no change)
+        # - [1,2,3,4,9,10,11,12] -> [1,2,3,4] (removes last 4)
+        assert count == 1
+        assert len(result) == 1
+        assert result[0][0] == [1, 2, 3, 4]
+
+    @patch('Tensile.TensileMergeLibrary.verbose')
+    def test_remove_duplicates_verbose_message(self, mock_verbose):
+        """Test that verbose message is triggered with correct count when duplicates are removed"""
+        sizes = [
+            ([1, 2, 3, 4, 5, 6, 7, 8], 0),
+            ([1, 2, 3, 4], 1),
+            ([1, 2, 3, 4, 9, 10, 11, 12], 2),
+        ]
+        result, count = fixSizeInconsistencies(sizes, "test")
+
+        # Verify verbose was called with correct count: origNumSizes - numSize = 3 - 1 = 2
+        mock_verbose.assert_called_once_with(2, "duplicate size(s) removed from", "test", "logic file")
+
+    def test_no_duplicates(self):
+        """Test with no duplicates"""
+        sizes = [
+            ([1, 2, 3], 0),
+            ([4, 5, 6], 1),
+        ]
+        result, count = fixSizeInconsistencies(sizes, "test")
+        assert count == 2
+
+
 @pytest.mark.unit
 class TestAddKernel:
     """Test addKernel function"""
@@ -888,6 +805,42 @@ class TestMessageFunctions:
 
 
 @pytest.mark.unit
+class TestFindSolutionWithIndex:
+    """Test findSolutionWithIndex function"""
+
+    def test_find_solution_at_correct_index(self):
+        """Test finding solution when index matches position"""
+        solutions = [
+            {"SolutionIndex": 0, "name": "sol0"},
+            {"SolutionIndex": 1, "name": "sol1"},
+            {"SolutionIndex": 2, "name": "sol2"},
+        ]
+
+        result = findSolutionWithIndex(solutions, 1)
+        assert result["name"] == "sol1"
+
+    def test_find_solution_with_search(self):
+        """Test finding solution when index doesn't match position"""
+        solutions = [
+            {"SolutionIndex": 5, "name": "sol5"},
+            {"SolutionIndex": 10, "name": "sol10"},
+            {"SolutionIndex": 15, "name": "sol15"},
+        ]
+
+        result = findSolutionWithIndex(solutions, 10)
+        assert result["name"] == "sol10"
+
+    def test_find_nonexistent_solution(self):
+        """Test finding non-existent solution raises assertion"""
+        solutions = [
+            {"SolutionIndex": 0, "name": "sol0"},
+        ]
+
+        with pytest.raises(AssertionError):
+            findSolutionWithIndex(solutions, 99)
+
+
+@pytest.mark.unit
 class TestReNameSolutions:
     """Test reNameSolutions function"""
 
@@ -961,6 +914,8 @@ class TestMainFunction:
 
         kwargs = mock_avoid.call_args[0]
         assert kwargs[4] == True  # no_eff
+
+
 class TestDataAccessorListEdges:
     """Branch coverage for list-format ``DataAccessor.get`` / ``set``."""
 
@@ -995,11 +950,17 @@ class TestConvertToDictAndLoadData:
         assert convertToDict(d, "any.yaml") is d
 
     def test_load_data_list_gfx950_no_migration(self, tmp_path: Path, gfx950_data: list[Any]) -> None:
-        """List-format non-dict arch: ``loadData`` returns data without dict migration."""
+        """List-format non-dict arch: ``loadData`` returns data without dict migration.
+
+        Also checks that ``LibraryIO.writeYAML`` → ``loadData`` preserves key
+        structural fields (architecture, solution and exact-logic counts).
+        """
+        src = deepcopy(gfx950_data)
+        accessor_src = createAccessor(src)
         out_file = tmp_path / "logic.yaml"
         LibraryIO.writeYAML(
             str(out_file),
-            deepcopy(gfx950_data),
+            src,
             explicit_start=False,
             explicit_end=False,
             sort_keys=True,
@@ -1008,13 +969,27 @@ class TestConvertToDictAndLoadData:
         assert fn == str(out_file)
         assert isinstance(data, list)
         assert migrated is False
+        accessor_dst = createAccessor(data)
+        assert getArchitectureFromData(src) == getArchitectureFromData(data)
+        assert len(accessor_src.getSolutions()) == len(accessor_dst.getSolutions())
+        assert len(accessor_src.getExactLogic()) == len(accessor_dst.getExactLogic())
+        assert (
+            accessor_src.getSolutions()[0]["SolutionIndex"]
+            == accessor_dst.getSolutions()[0]["SolutionIndex"]
+        )
 
     def test_load_data_dict_gfx1250(self, tmp_path: Path, gfx1250_data: dict[str, Any]) -> None:
-        """``loadData`` reads dict YAML for a dict-based architecture."""
+        """``loadData`` reads dict YAML for a dict-based architecture.
+
+        Also checks that ``LibraryIO.writeYAML`` → ``loadData`` preserves key
+        structural fields after any dict normalization.
+        """
+        src = deepcopy(gfx1250_data)
+        accessor_src = createAccessor(src)
         out_file = tmp_path / "logic.yaml"
         LibraryIO.writeYAML(
             str(out_file),
-            deepcopy(gfx1250_data),
+            src,
             explicit_start=False,
             explicit_end=False,
             sort_keys=False,
@@ -1024,75 +999,11 @@ class TestConvertToDictAndLoadData:
         assert isinstance(data, dict)
         assert "Solutions" in data
         assert isinstance(migrated, bool)
-
-
-class TestEnsurePathAllFiles:
-    """``ensurePath`` and ``allFiles`` helpers used by ``avoidRegressions``."""
-
-    def test_ensure_path_creates_directory(self, tmp_path: Path) -> None:
-        """``ensurePath`` creates a missing directory and returns it."""
-        nested = tmp_path / "a" / "b"
-        assert not nested.exists()
-        assert ensurePath(str(nested)) == str(nested)
-        assert nested.is_dir()
-
-    def test_ensure_path_existing_directory_no_op(self, tmp_path: Path) -> None:
-        """``ensurePath`` is a no-op when the directory already exists."""
-        assert ensurePath(str(tmp_path)) == str(tmp_path)
-
-    def test_all_files_recurses_into_directory_named_with_yaml_suffix(
-        self, tmp_path: Path
-    ) -> None:
-        """A directory whose name ends in ``.yaml`` is traversed like a folder."""
-        nest = tmp_path / "nested.yaml"
-        nest.mkdir()
-        (nest / "leaf.yaml").write_text("k: v\n")
-        (tmp_path / "top.yaml").write_text("a: 1\n")
-        found = sorted(allFiles(str(tmp_path)))
-        assert len(found) == 2
-
-    def test_all_files_collects_yaml_in_directory(self, tmp_path: Path) -> None:
-        """``allFiles`` lists ``*.yaml`` files in the given directory (non-recursive)."""
-        (tmp_path / "a.yaml").write_text("x: 1\n")
-        (tmp_path / "b.yaml").write_text("y: 2\n")
-        (tmp_path / "skip.txt").write_text("no")
-        found = sorted(allFiles(str(tmp_path)))
-        assert len(found) == 2
-        assert all(p.endswith(".yaml") for p in found)
-
-
-class TestRoundTrip:
-    """Round-trip tests: Python data → YAML on disk (LibraryIO.writeYAML) → back to memory.
-
-    Each test covers both the non-dict (gfx950) and dict (gfx1250) formats.
-    """
-
-    @pytest.mark.parametrize("arch", ["gfx950", "gfx1250"])
-    def test_round_trip_preserves_structure(self, arch, tmp_path):
-        """Data loaded from YAML, written back, and re-read retains key fields.
-
-        Covers: in-memory → disk (LibraryIO.writeYAML) → memory (load_yaml_stream).
-        """
-        # Step 1: in-memory YAML string → temp file → load_yaml_stream
-        data = _load_arch_data(arch)
-
-        # Step 2: loaded Python data → YAML on disk
-        out_file = tmp_path / f"{arch}_roundtrip.yaml"
-        LibraryIO.writeYAML(
-            str(out_file), data, explicit_start=False, explicit_end=False,
-            sort_keys=isinstance(data, list),
+        accessor_dst = createAccessor(data)
+        assert getArchitectureFromData(src) == getArchitectureFromData(data)
+        assert len(accessor_src.getSolutions()) == len(accessor_dst.getSolutions())
+        assert len(accessor_src.getExactLogic()) == len(accessor_dst.getExactLogic())
+        assert (
+            accessor_src.getSolutions()[0]["SolutionIndex"]
+            == accessor_dst.getSolutions()[0]["SolutionIndex"]
         )
-
-        # Step 3: YAML on disk → load_yaml_stream → Python data
-        data2 = load_yaml_stream(out_file, DEFAULT_YAML_LOADER)
-
-        # Step 4: key structural fields survive the round-trip
-        accessor1 = createAccessor(data)
-        accessor2 = createAccessor(data2)
-
-        assert type(data) is type(data2)
-        assert getArchitectureFromData(data) == getArchitectureFromData(data2)
-        assert len(accessor1.getSolutions()) == len(accessor2.getSolutions())
-        assert len(accessor1.getExactLogic()) == len(accessor2.getExactLogic())
-        assert (accessor1.getSolutions()[0]["SolutionIndex"]
-                == accessor2.getSolutions()[0]["SolutionIndex"])
