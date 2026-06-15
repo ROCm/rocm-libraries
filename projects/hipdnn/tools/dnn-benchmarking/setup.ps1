@@ -96,6 +96,26 @@ function Invoke-Native {
     }
 }
 
+function New-CMakeStages {
+    # Turn one CMake project into its configure -> build -> install command lines,
+    # ready to run inside the toolchain .bat. Source/build paths are forward-slashed
+    # and quoted here; $ConfigureArgs carries the project-specific -D flags (each
+    # already quoted as needed). Keeps the call sites a readable list of flags
+    # instead of one positional format string.
+    param(
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Build,
+        [Parameter(Mandatory)][string[]]$ConfigureArgs
+    )
+    $cmake = '"{0}"' -f $CMakeExe
+    $src   = '"{0}"' -f (Fwd $Source)
+    $bld   = '"{0}"' -f (Fwd $Build)
+    $configure = '{0} -S {1} -B {2} {3}' -f $cmake, $src, $bld, ($ConfigureArgs -join ' ')
+    $build     = '{0} --build {1}'       -f $cmake, $bld
+    $install   = '{0} --install {1}'     -f $cmake, $bld
+    return @($configure, $build, $install)
+}
+
 function Get-TorchMode {
     # Mirror setup.sh get_torch_mode: rocm / cuda / cpu / missing.
     $code = @'
@@ -234,22 +254,48 @@ if ($ForceBuild) {
         if ($ProviderBuild -and (Test-Path $ProviderBuild)) { Remove-Item -Recurse -Force $ProviderBuild }
     }
 
-    # hipDNN: configure -> build -> install (bindings included).
-    $hipdnnCfg = '"{0}" -S "{1}" -B "{2}" -GNinja -DCMAKE_BUILD_TYPE={3} -DCMAKE_CXX_COMPILER="{4}/lib/llvm/bin/clang++.exe" -DCMAKE_MAKE_PROGRAM="{5}" -DCMAKE_PREFIX_PATH="{4}" -DROCM_CMAKE_PATH="{4}" -DPython_EXECUTABLE="{6}" -DGPU_TARGETS={7} -DENABLE_CLANG_FORMAT=OFF -DHIPDNN_SKIP_TESTS=ON -DHIPDNN_BUILD_PYTHON_BINDINGS=ON -DCMAKE_INSTALL_PREFIX="{8}"' -f `
-        $CMakeExe, (Fwd $HipdnnRoot), (Fwd $BuildDir), $BuildType, (Fwd $Wheel), (Fwd $NinjaExe), (Fwd $Python), $GpuArch, (Fwd $InstallDir)
-    $hipdnnBuild   = '"{0}" --build "{1}"'   -f $CMakeExe, (Fwd $BuildDir)
-    $hipdnnInstall = '"{0}" --install "{1}"' -f $CMakeExe, (Fwd $BuildDir)
+    # Forward-slashed copies of the paths CMake flags embed (Windows backslashes
+    # would be read as escapes inside the .bat command lines).
+    $wheelFwd   = Fwd $Wheel
+    $ninjaFwd   = Fwd $NinjaExe
+    $pythonFwd  = Fwd $Python
+    $installFwd = Fwd $InstallDir
+
+    # hipDNN: configure -> build -> install (Python bindings included).
+    $hipdnnArgs = @(
+        '-GNinja'
+        "-DCMAKE_BUILD_TYPE=$BuildType"
+        "-DCMAKE_CXX_COMPILER=`"$wheelFwd/lib/llvm/bin/clang++.exe`""
+        "-DCMAKE_MAKE_PROGRAM=`"$ninjaFwd`""
+        "-DCMAKE_PREFIX_PATH=`"$wheelFwd`""
+        "-DROCM_CMAKE_PATH=`"$wheelFwd`""
+        "-DPython_EXECUTABLE=`"$pythonFwd`""
+        "-DGPU_TARGETS=$GpuArch"
+        '-DENABLE_CLANG_FORMAT=OFF'
+        '-DHIPDNN_SKIP_TESTS=ON'
+        '-DHIPDNN_BUILD_PYTHON_BINDINGS=ON'
+        "-DCMAKE_INSTALL_PREFIX=`"$installFwd`""
+    )
+    $hipdnnStages = New-CMakeStages -Source $HipdnnRoot -Build $BuildDir -ConfigureArgs $hipdnnArgs
     Invoke-ToolchainBuild -Title "Building + installing hipDNN (with Python bindings)" `
-        -Commands @($hipdnnCfg, $hipdnnBuild, $hipdnnInstall) | Out-Null
+        -Commands $hipdnnStages | Out-Null
 
     # MIOpen provider: built against the freshly installed hipDNN (best-effort).
     if ($ProviderDir) {
-        $provCfg = '"{0}" -S "{1}" -B "{2}" -GNinja -DCMAKE_BUILD_TYPE={3} -DCMAKE_MAKE_PROGRAM="{4}" -DCMAKE_PREFIX_PATH="{5};{6}" -DROCM_CMAKE_PATH="{6}" -DROCM_PATH="{6}" -DGPU_TARGETS={7} -DMIOPENPROVIDER_SKIP_TESTS=ON -DCMAKE_INSTALL_PREFIX="{5}"' -f `
-            $CMakeExe, (Fwd $ProviderDir), (Fwd $ProviderBuild), $BuildType, (Fwd $NinjaExe), (Fwd $InstallDir), (Fwd $Wheel), $GpuArch
-        $provBuild   = '"{0}" --build "{1}"'   -f $CMakeExe, (Fwd $ProviderBuild)
-        $provInstall = '"{0}" --install "{1}"' -f $CMakeExe, (Fwd $ProviderBuild)
+        $provArgs = @(
+            '-GNinja'
+            "-DCMAKE_BUILD_TYPE=$BuildType"
+            "-DCMAKE_MAKE_PROGRAM=`"$ninjaFwd`""
+            "-DCMAKE_PREFIX_PATH=`"$installFwd;$wheelFwd`""
+            "-DROCM_CMAKE_PATH=`"$wheelFwd`""
+            "-DROCM_PATH=`"$wheelFwd`""
+            "-DGPU_TARGETS=$GpuArch"
+            '-DMIOPENPROVIDER_SKIP_TESTS=ON'
+            "-DCMAKE_INSTALL_PREFIX=`"$installFwd`""
+        )
+        $provStages = New-CMakeStages -Source $ProviderDir -Build $ProviderBuild -ConfigureArgs $provArgs
         $ok = Invoke-ToolchainBuild -Title "Building + installing MIOpen provider" `
-            -Commands @($provCfg, $provBuild, $provInstall) -BestEffort
+            -Commands $provStages -BestEffort
         if ($ok) { Write-Step "MIOpen plugin installed to $InstallDir\lib\hipdnn_plugins\engines" }
     }
     else {
