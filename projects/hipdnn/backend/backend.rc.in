@@ -24,12 +24,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "Advanced Micro Devices, Inc."
             VALUE "FileDescription",  "hipDNN Backend"
-            VALUE "FileVersion",      "@PROJECT_VERSION_MAJOR@.@PROJECT_VERSION_MINOR@.@PROJECT_VERSION_PATCH@.0"
+            VALUE "FileVersion",      "@PROJECT_VERSION_MAJOR@.@PROJECT_VERSION_MINOR@.@PROJECT_VERSION_PATCH@.@HIPDNN_BACKEND_VERSION_TWEAK@"
             VALUE "InternalName",     "hipdnn_backend"
             VALUE "LegalCopyright",   "Copyright (C) @HIPDNN_COPYRIGHT_YEAR@ Advanced Micro Devices, Inc."
             VALUE "OriginalFilename", "hipdnn_backend.dll"
             VALUE "ProductName",      "AMD ROCm hipDNN Backend @HIPDNN_PRODUCT_VERSION_DISPLAY@"
-            VALUE "ProductVersion",   "@PROJECT_VERSION_MAJOR@.@PROJECT_VERSION_MINOR@.@PROJECT_VERSION_PATCH@.0"
+            VALUE "ProductVersion",   "@PROJECT_VERSION_MAJOR@.@PROJECT_VERSION_MINOR@.@PROJECT_VERSION_PATCH@.@HIPDNN_BACKEND_VERSION_TWEAK@"
         END
     END
     BLOCK "VarFileInfo"

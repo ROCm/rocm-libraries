@@ -3,9 +3,9 @@
 
 include(CMakePackageConfigHelpers)
 
-# Derive version components (PROJECT_VERSION{,_MAJOR,_MINOR,_PATCH}) from the
-# single product version.
-project(hipdnn_backend VERSION ${HIPDNN_VERSION} LANGUAGES CXX)
+# Version handling: independent component version from backend/version.json.
+hipdnn_setup_version(hipdnn_backend)
+project(hipdnn_backend VERSION ${HIPDNN_BACKEND_VERSION} LANGUAGES CXX)
 
 find_package(hip REQUIRED)
 
@@ -102,6 +102,10 @@ if(WIN32)
     set(HIPDNN_PRODUCT_VERSION_DISPLAY
         "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}"
     )
+    # HIPDNN_BACKEND_VERSION_TWEAK (short rocm-libraries commit hash, RFC 0005)
+    # comes from hipdnn_setup_version above. It is used only in the StringFileInfo
+    # version strings; the binary FILEVERSION/PRODUCTVERSION fields are four 16-bit
+    # integers and cannot hold a non-numeric hash, so they keep 0.
     configure_file(
         "${CMAKE_CURRENT_LIST_DIR}/../backend.rc.in"
         "${CMAKE_CURRENT_BINARY_DIR}/backend.rc"
