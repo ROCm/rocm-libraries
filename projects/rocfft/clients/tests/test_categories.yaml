@@ -22,20 +22,9 @@ test_categories:
       - "--test_prob"
       - "0.02"
     labels:
-    #Same tests run for comprehensive and full categories
+    # standard/comprehensive/full run the same single-GPU test set
       - "standard"
       - "comprehensive"
-
-  full:
-    description: "Pre-checkin (full tier) - rocfft-test --test_prob 0.02"
-    test_patterns:
-      - "*"
-    exclude:
-      - "*multi_gpu*"
-    extra_args:
-      - "--test_prob"
-      - "0.02"
-    labels:
       - "full"
 
   # Multi-GPU only subset. These tests are excluded from the single-GPU
@@ -70,8 +59,6 @@ execution_settings:
   timeout_multiplier: 1
   category_timeouts:
     quick: 600           # 10 min
-    standard: 3600       # 1 hour
-    comprehensive: 14400 # 4 hours
-    full: 43200          # 12 hours
+    standard: 3600       # 1 hour (covers standard/comprehensive/full labels)
     ffm-quick: 7200      # 2 hours
     multigpu_tests: 3600 # 1 hour
