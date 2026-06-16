@@ -941,5 +941,116 @@ class TestVReadfirstlaneB32(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
+# ===========================================================================
+# Compare instructions (Phase 6 Step 5)
+# ===========================================================================
+
+
+class TestSCmpEQI32(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_cmp_eq_i32 s0, s1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SCmpEQI32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SCmpEQI32(src0=sgpr(0), src1=sgpr(1), comment="eq"))
+    """)
+
+
+class TestSCmpGtU32(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_cmp_gt_u32 s0, s1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SCmpGtU32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SCmpGtU32(src0=sgpr(0), src1=sgpr(1)))
+    """)
+
+
+class TestSCmpLgI32(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_cmp_lg_i32 s0, s1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SCmpLgI32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SCmpLgI32(src0=sgpr(0), src1=sgpr(1)))
+    """)
+
+
+class TestSBitcmp1B32(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_bitcmp1_b32 s0, s1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SBitcmp1B32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SBitcmp1B32(src0=sgpr(0), src1=sgpr(1)))
+    """)
+
+
+class TestVCmpEQF32(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_cmp_eq_f32 v0, v1, v2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VCmpEQF32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VCmpEQF32(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2), comment="eq"))
+    """)
+
+
+class TestVCmpGEI32(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_cmp_ge_i32 v0, v1, v2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VCmpGEI32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VCmpGEI32(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
+    """)
+
+
+class TestVCmpNeU32(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_cmp_ne_u32 v0, v1, v2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VCmpNeU32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VCmpNeU32(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
+    """)
+
+
+class TestVCmpClassF32(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_cmp_class_f32 v0, v1, v2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VCmpClassF32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VCmpClassF32(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
+    """)
+
+
+## VCmpX* emission consistency is skipped: the native rocisa VCmpXInstruction
+## toString() has arch-dependent behaviour — when CMPXWritesSGPR is false (test
+## env default), it replaces "v_cmpx_" with "v_cmp_" and appends an
+## "s_mov_b64 exec, dst" (wavefront64) or "s_mov_b32 exec_lo, dst" (wavefront32)
+## instruction. The logical IR path on gfx1250 (which has CMPXWritesSGPR=true)
+## correctly emits the real "v_cmpx_*" mnemonic directly. This is an intentional
+## arch-specific divergence in the native C++ toString; the adaptor correctly
+## forwards to the logical IR lowering which matches the hardware behaviour.
+
+
 if __name__ == "__main__":
     unittest.main()

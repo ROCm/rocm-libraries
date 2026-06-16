@@ -91,6 +91,21 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     SAndSaveExecB64,
     SAShiftRightI32,
     SBarrier,
+    SBitcmp1B32,
+    SCmpEQI32,
+    SCmpEQU32,
+    SCmpEQU64,
+    SCmpGeI32,
+    SCmpGeU32,
+    SCmpGtI32,
+    SCmpGtU32,
+    SCmpLeI32,
+    SCmpLeU32,
+    SCmpLgI32,
+    SCmpLgU32,
+    SCmpLgU64,
+    SCmpLtI32,
+    SCmpLtU32,
     SGetRegB32,
     SLShiftLeftB32,
     SLShiftRightB32,
@@ -122,6 +137,41 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     VAddU32,
     VAndB32,
     VAndOrB32,
+    VCmpClassF32,
+    VCmpEQF32,
+    VCmpEQF64,
+    VCmpEQI32,
+    VCmpEQU32,
+    VCmpGEF16,
+    VCmpGEF32,
+    VCmpGEF64,
+    VCmpGEI32,
+    VCmpGEU32,
+    VCmpGTF16,
+    VCmpGTF32,
+    VCmpGTF64,
+    VCmpGTI32,
+    VCmpGtU32,
+    VCmpLeI32,
+    VCmpLeU32,
+    VCmpLtI32,
+    VCmpLtU32,
+    VCmpNeI32,
+    VCmpNeU32,
+    VCmpNeU64,
+    VCmpUF32,
+    VCmpXClassF32,
+    VCmpXEqU32,
+    VCmpXGeU32,
+    VCmpXGtU32,
+    VCmpXLeI32,
+    VCmpXLeU32,
+    VCmpXLtF32,
+    VCmpXLtI32,
+    VCmpXLtU32,
+    VCmpXLtU64,
+    VCmpXNeU16,
+    VCmpXNeU32,
     VCndMaskB32,
     VFmaF32,
     VFmaMixF32,
@@ -1322,6 +1372,196 @@ class TestVReadfirstlaneB32Construction(unittest.TestCase):
         m = Module()
         m.add(VReadfirstlaneB32(dst=vgpr(0), src=vgpr(1)))
         self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+# ===========================================================================
+# Compare instructions (Phase 6 Step 5)
+# ===========================================================================
+
+_SCALAR_CMP = [
+    # (class, mnemonic, InstType)
+    (SCmpEQI32, "s_cmp_eq_i32", InstType.INST_I32),
+    (SCmpEQU32, "s_cmp_eq_u32", InstType.INST_U32),
+    (SCmpEQU64, "s_cmp_eq_u64", InstType.INST_U64),
+    (SCmpGeI32, "s_cmp_ge_i32", InstType.INST_I32),
+    (SCmpGeU32, "s_cmp_ge_u32", InstType.INST_U32),
+    (SCmpGtI32, "s_cmp_gt_i32", InstType.INST_I32),
+    (SCmpGtU32, "s_cmp_gt_u32", InstType.INST_U32),
+    (SCmpLeI32, "s_cmp_le_i32", InstType.INST_I32),
+    (SCmpLeU32, "s_cmp_le_u32", InstType.INST_U32),
+    (SCmpLgU32, "s_cmp_lg_u32", InstType.INST_U32),
+    (SCmpLgI32, "s_cmp_lg_i32", InstType.INST_I32),
+    (SCmpLgU64, "s_cmp_lg_u64", InstType.INST_U64),
+    (SCmpLtI32, "s_cmp_lt_i32", InstType.INST_I32),
+    (SCmpLtU32, "s_cmp_lt_u32", InstType.INST_U32),
+    (SBitcmp1B32, "s_bitcmp1_b32", InstType.INST_B32),
+]
+
+_VECTOR_CMP = [
+    (VCmpEQF32, "v_cmp_eq_f32", InstType.INST_F32),
+    (VCmpEQF64, "v_cmp_eq_f64", InstType.INST_F64),
+    (VCmpEQU32, "v_cmp_eq_u32", InstType.INST_U32),
+    (VCmpEQI32, "v_cmp_eq_i32", InstType.INST_I32),
+    (VCmpGEF16, "v_cmp_ge_f16", InstType.INST_F16),
+    (VCmpGTF16, "v_cmp_gt_f16", InstType.INST_F16),
+    (VCmpGEF32, "v_cmp_ge_f32", InstType.INST_F32),
+    (VCmpGTF32, "v_cmp_gt_f32", InstType.INST_F32),
+    (VCmpGEF64, "v_cmp_ge_f64", InstType.INST_F64),
+    (VCmpGTF64, "v_cmp_gt_f64", InstType.INST_F64),
+    (VCmpGEI32, "v_cmp_ge_i32", InstType.INST_I32),
+    (VCmpGTI32, "v_cmp_gt_i32", InstType.INST_I32),
+    (VCmpGEU32, "v_cmp_ge_u32", InstType.INST_U32),
+    (VCmpGtU32, "v_cmp_gt_u32", InstType.INST_U32),
+    (VCmpLeU32, "v_cmp_le_u32", InstType.INST_U32),
+    (VCmpLeI32, "v_cmp_le_i32", InstType.INST_I32),
+    (VCmpLtI32, "v_cmp_lt_i32", InstType.INST_I32),
+    (VCmpLtU32, "v_cmp_lt_u32", InstType.INST_U32),
+    (VCmpUF32, "v_cmp_u_f32", InstType.INST_F32),
+    (VCmpNeI32, "v_cmp_ne_i32", InstType.INST_I32),
+    (VCmpNeU32, "v_cmp_ne_u32", InstType.INST_U32),
+    (VCmpNeU64, "v_cmp_ne_u64", InstType.INST_U64),
+    (VCmpClassF32, "v_cmp_class_f32", InstType.INST_F32),
+]
+
+_VECTOR_CMPX = [
+    (VCmpXClassF32, "v_cmpx_class_f32", InstType.INST_F32),
+    (VCmpXEqU32, "v_cmpx_eq_u32", InstType.INST_U32),
+    (VCmpXGeU32, "v_cmpx_ge_u32", InstType.INST_U32),
+    (VCmpXGtU32, "v_cmpx_gt_u32", InstType.INST_U32),
+    (VCmpXLeU32, "v_cmpx_le_u32", InstType.INST_U32),
+    (VCmpXLeI32, "v_cmpx_le_i32", InstType.INST_I32),
+    (VCmpXLtF32, "v_cmpx_lt_f32", InstType.INST_F32),
+    (VCmpXLtI32, "v_cmpx_lt_i32", InstType.INST_I32),
+    (VCmpXLtU32, "v_cmpx_lt_u32", InstType.INST_U32),
+    (VCmpXLtU64, "v_cmpx_lt_u64", InstType.INST_U64),
+    (VCmpXNeU16, "v_cmpx_ne_u16", InstType.INST_U16),
+    (VCmpXNeU32, "v_cmpx_ne_u32", InstType.INST_U32),
+]
+
+
+class TestScalarCmpConstruction(unittest.TestCase):
+    """Scalar compare shims (no dst, src0, src1)."""
+
+    def test_construction_and_str(self):
+        for cls, mnemonic, itype in _SCALAR_CMP:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(src0=sgpr(0), src1=sgpr(1), comment="cmp")
+                self.assertIsInstance(inst, CommonInstruction)
+                self.assertEqual(inst.instStr, mnemonic)
+                self.assertEqual(inst.instType, itype)
+                self.assertIsNone(inst.dst)
+                self.assertEqual(len(inst.srcs), 2)
+                text = str(inst)
+                self.assertIn(mnemonic, text)
+                self.assertIn("s0", text)
+                self.assertIn("s1", text)
+
+    def test_deepcopy(self):
+        for cls, _, _ in _SCALAR_CMP:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(src0=sgpr(2), src1=sgpr(3), comment="cp")
+                c = copy.deepcopy(inst)
+                self.assertIsInstance(c, cls)
+                self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        for cls, _, _ in _SCALAR_CMP:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(src0=sgpr(0), src1=sgpr(1))
+                self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        for cls, _, _ in _SCALAR_CMP:
+            with self.subTest(cls=cls.__name__):
+                m = Module()
+                m.add(cls(src0=sgpr(0), src1=sgpr(1)))
+                self.assertEqual(len(m._collect_logical_insts()), 1)
+
+    def test_immediate_operand(self):
+        inst = SCmpEQI32(src0=sgpr(0), src1=42)
+        text = str(inst)
+        self.assertIn("42", text)
+
+
+class TestVectorCmpConstruction(unittest.TestCase):
+    """Vector compare shims (dst, src0, src1)."""
+
+    def test_construction_and_str(self):
+        for cls, mnemonic, itype in _VECTOR_CMP:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2), comment="vcmp")
+                self.assertIsInstance(inst, CommonInstruction)
+                self.assertEqual(inst.instStr, mnemonic)
+                self.assertEqual(inst.instType, itype)
+                self.assertIsNotNone(inst.dst)
+                self.assertEqual(len(inst.srcs), 2)
+                text = str(inst)
+                self.assertIn(mnemonic, text)
+                self.assertIn("v0", text)
+                self.assertIn("v1", text)
+                self.assertIn("v2", text)
+
+    def test_deepcopy(self):
+        for cls, _, _ in _VECTOR_CMP:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(4), src0=vgpr(5), src1=vgpr(6), comment="cp")
+                c = copy.deepcopy(inst)
+                self.assertIsInstance(c, cls)
+                self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        for cls, _, _ in _VECTOR_CMP:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2))
+                self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        for cls, _, _ in _VECTOR_CMP:
+            with self.subTest(cls=cls.__name__):
+                m = Module()
+                m.add(cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
+                self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestVectorCmpXConstruction(unittest.TestCase):
+    """Vector compareX shims (dst, src0, src1)."""
+
+    def test_construction_and_str(self):
+        for cls, mnemonic, itype in _VECTOR_CMPX:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2), comment="cmpx")
+                self.assertIsInstance(inst, CommonInstruction)
+                self.assertEqual(inst.instStr, mnemonic)
+                self.assertEqual(inst.instType, itype)
+                text = str(inst)
+                self.assertIn(mnemonic, text)
+                self.assertIn("v0", text)
+                self.assertIn("v1", text)
+                self.assertIn("v2", text)
+
+    def test_deepcopy(self):
+        for cls, _, _ in _VECTOR_CMPX:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(4), src0=vgpr(5), src1=vgpr(6))
+                c = copy.deepcopy(inst)
+                self.assertIsInstance(c, cls)
+                self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        for cls, _, _ in _VECTOR_CMPX:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2))
+                self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        for cls, _, _ in _VECTOR_CMPX:
+            with self.subTest(cls=cls.__name__):
+                m = Module()
+                m.add(cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
+                self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
 # ===========================================================================

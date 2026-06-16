@@ -78,13 +78,10 @@ Not yet done (dummy):
       ``MacroInstruction``, the Scalar ALU batch (``SAddI32`` …
       ``SOrSaveExecB64``), Scalar Control (``SBarrier``,
       ``SGetRegB32``, ``SSetRegB32``, ``SSetRegIMM32B32``),
-      and the Vector ALU batch: ``VAddU32``, ``VAddF32``,
-      ``VSubF32``, ``VSubI32``, ``VSubU32``, ``VMulF32``,
-      ``VMulLOU32``, ``VMulHIU32``, ``VMulHII32``, ``VMulI32I24``,
-      ``VMulU32U24``, ``VAndB32``, ``VOrB32``, ``VXorB32``,
-      ``VLShiftLeftB32``, ``VLShiftRightB32``, ``VLShiftLeftB64``,
-      ``VLShiftRightB64``, ``VFmaF32``, ``VFmaMixF32``,
-      ``VAndOrB32``, ``VCndMaskB32``, ``VReadfirstlaneB32``.
+      the Vector ALU batch (``VAddU32`` … ``VReadfirstlaneB32``),
+      and the Compare batch: ``SCmpEQI32`` … ``SCmpLtU32``,
+      ``SBitcmp1B32``, ``VCmpEQF32`` … ``VCmpClassF32``,
+      ``VCmpXClassF32`` … ``VCmpXNeU32``.
     - ``CompositeInstruction`` still dummy (no concrete subclass
       promoted yet). ``MacroInstruction`` is real (KernelWriter emits
       it 16+ times via ``V_MAGIC_DIV`` / ``GLOBAL_OFFSET_*`` /
@@ -1392,115 +1389,212 @@ SCBranchExecNZ = make_dummy_class(f"{_P}.SCBranchExecNZ")
 
 
 # ==========================================================================
-# Compare instructions
+# Compare instructions (Phase 6 Step 5)
 # source: rocisa/rocisa/src/instruction/cmp.cpp
 # ==========================================================================
+#
+# Three shapes:
+#   - Scalar Compare (SCmp*, SBitcmp1B32): no dst, 2 srcs.
+#     Native API: (src0, src1, comment="")
+#     Stinkytofu binding: (src0, src1, comment="")
+#   - Vector Compare (VCmp*): dst, src0, src1.
+#     Native API: (dst, src0, src1, sdwa=None, comment="")
+#     Stinkytofu binding: (dest, src0, src1, dpp=None, sdwa=None, comment="")
+#   - Vector CompareX (VCmpX*): same shape as VCmp.
+#
+# VCmpInstruction / VCmpXInstruction base classes remain dummies (not in
+# logical IR); concrete subclasses are what matters.
 VCmpInstruction = make_dummy_class(f"{_P}.VCmpInstruction")
 VCmpXInstruction = make_dummy_class(f"{_P}.VCmpXInstruction")
-# logicalIR: SCmpEQI32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-SCmpEQI32 = make_dummy_class(f"{_P}.SCmpEQI32")
-# logicalIR: SCmpEQU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-SCmpEQU32 = make_dummy_class(f"{_P}.SCmpEQU32")
-# logicalIR: SCmpEQU64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-SCmpEQU64 = make_dummy_class(f"{_P}.SCmpEQU64")
-# logicalIR: SCmpGeI32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-SCmpGeI32 = make_dummy_class(f"{_P}.SCmpGeI32")
-# logicalIR: SCmpGeU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-SCmpGeU32 = make_dummy_class(f"{_P}.SCmpGeU32")
-# logicalIR: SCmpGtI32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-SCmpGtI32 = make_dummy_class(f"{_P}.SCmpGtI32")
-# logicalIR: SCmpGtU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-SCmpGtU32 = make_dummy_class(f"{_P}.SCmpGtU32")
-# logicalIR: SCmpLeI32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-SCmpLeI32 = make_dummy_class(f"{_P}.SCmpLeI32")
-# logicalIR: SCmpLeU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-SCmpLeU32 = make_dummy_class(f"{_P}.SCmpLeU32")
-# logicalIR: SCmpLgU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-SCmpLgU32 = make_dummy_class(f"{_P}.SCmpLgU32")
-# logicalIR: SCmpLgI32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-SCmpLgI32 = make_dummy_class(f"{_P}.SCmpLgI32")
-# logicalIR: SCmpLgU64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-SCmpLgU64 = make_dummy_class(f"{_P}.SCmpLgU64")
-# logicalIR: SCmpLtI32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-SCmpLtI32 = make_dummy_class(f"{_P}.SCmpLtI32")
-# logicalIR: SCmpLtU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-SCmpLtU32 = make_dummy_class(f"{_P}.SCmpLtU32")
-# logicalIR: SBitcmp1B32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-SBitcmp1B32 = make_dummy_class(f"{_P}.SBitcmp1B32")
+
+
+def _make_scalar_cmp_class(class_name: str, mnemonic: str, inst_type: "InstType"):
+    """Factory for scalar compare instruction shims (no dst, 2 srcs)."""
+
+    def __init__(self, src0: Any = None, src1: Any = None,
+                 comment: str = "", **kw):
+        _ = kw
+        CommonInstruction.__init__(
+            self,
+            instType=inst_type,
+            dst=None,
+            srcs=[src0, src1],
+            dpp=None,
+            sdwa=None,
+            vop3=None,
+            comment=comment,
+        )
+        self.setInst(mnemonic)
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        src0_reg = _to_stinky_register(self.srcs[0])
+        src1_reg = _to_stinky_register(self.srcs[1])
+        factory = getattr(_st, class_name)
+        return factory(src0_reg, src1_reg, comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+    cls = type(class_name, (CommonInstruction,), {
+        "__doc__": f"``{mnemonic} src0, src1`` shim with stinkytofu left-path bridge.",
+        "__init__": __init__,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+    })
+    return cls
+
+
+def _make_vcmp_class(class_name: str, mnemonic: str, inst_type: "InstType"):
+    """Factory for vector compare instruction shims (dst, src0, src1)."""
+
+    def __init__(self, dst: Any = None, src0: Any = None, src1: Any = None,
+                 sdwa: Any = None, comment: str = "", dpp: Any = None, **kw):
+        _ = kw
+        CommonInstruction.__init__(
+            self,
+            instType=inst_type,
+            dst=dst,
+            srcs=[src0, src1],
+            dpp=dpp,
+            sdwa=sdwa,
+            vop3=None,
+            comment=comment,
+        )
+        self.setInst(mnemonic)
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        dst_reg = _to_stinky_register(self.dst)
+        src0_reg = _to_stinky_register(self.srcs[0])
+        src1_reg = _to_stinky_register(self.srcs[1])
+        factory = getattr(_st, class_name)
+        return factory(dst_reg, src0_reg, src1_reg, comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+    cls = type(class_name, (CommonInstruction,), {
+        "__doc__": f"``{mnemonic} dst, src0, src1`` shim with stinkytofu left-path bridge.",
+        "__init__": __init__,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+    })
+    return cls
+
+
+# -- Scalar Compare (no dst, 2 srcs) --
+# logicalIR: SCmpEQI32
+SCmpEQI32 = _make_scalar_cmp_class("SCmpEQI32", "s_cmp_eq_i32", InstType.INST_I32)
+# logicalIR: SCmpEQU32
+SCmpEQU32 = _make_scalar_cmp_class("SCmpEQU32", "s_cmp_eq_u32", InstType.INST_U32)
+# logicalIR: SCmpEQU64
+SCmpEQU64 = _make_scalar_cmp_class("SCmpEQU64", "s_cmp_eq_u64", InstType.INST_U64)
+# logicalIR: SCmpGeI32
+SCmpGeI32 = _make_scalar_cmp_class("SCmpGeI32", "s_cmp_ge_i32", InstType.INST_I32)
+# logicalIR: SCmpGeU32
+SCmpGeU32 = _make_scalar_cmp_class("SCmpGeU32", "s_cmp_ge_u32", InstType.INST_U32)
+# logicalIR: SCmpGtI32
+SCmpGtI32 = _make_scalar_cmp_class("SCmpGtI32", "s_cmp_gt_i32", InstType.INST_I32)
+# logicalIR: SCmpGtU32
+SCmpGtU32 = _make_scalar_cmp_class("SCmpGtU32", "s_cmp_gt_u32", InstType.INST_U32)
+# logicalIR: SCmpLeI32
+SCmpLeI32 = _make_scalar_cmp_class("SCmpLeI32", "s_cmp_le_i32", InstType.INST_I32)
+# logicalIR: SCmpLeU32
+SCmpLeU32 = _make_scalar_cmp_class("SCmpLeU32", "s_cmp_le_u32", InstType.INST_U32)
+# logicalIR: SCmpLgU32
+SCmpLgU32 = _make_scalar_cmp_class("SCmpLgU32", "s_cmp_lg_u32", InstType.INST_U32)
+# logicalIR: SCmpLgI32
+SCmpLgI32 = _make_scalar_cmp_class("SCmpLgI32", "s_cmp_lg_i32", InstType.INST_I32)
+# logicalIR: SCmpLgU64
+SCmpLgU64 = _make_scalar_cmp_class("SCmpLgU64", "s_cmp_lg_u64", InstType.INST_U64)
+# logicalIR: SCmpLtI32
+SCmpLtI32 = _make_scalar_cmp_class("SCmpLtI32", "s_cmp_lt_i32", InstType.INST_I32)
+# logicalIR: SCmpLtU32
+SCmpLtU32 = _make_scalar_cmp_class("SCmpLtU32", "s_cmp_lt_u32", InstType.INST_U32)
+# logicalIR: SBitcmp1B32
+SBitcmp1B32 = _make_scalar_cmp_class("SBitcmp1B32", "s_bitcmp1_b32", InstType.INST_B32)
+# SCmpK* — no logical IR entries, remain dummies.
 SCmpKEQU32 = make_dummy_class(f"{_P}.SCmpKEQU32")
 SCmpKGeU32 = make_dummy_class(f"{_P}.SCmpKGeU32")
 SCmpKGtU32 = make_dummy_class(f"{_P}.SCmpKGtU32")
 SCmpKLGU32 = make_dummy_class(f"{_P}.SCmpKLGU32")
-# logicalIR: VCmpEQF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpEQF32 = make_dummy_class(f"{_P}.VCmpEQF32")
-# logicalIR: VCmpEQF64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpEQF64 = make_dummy_class(f"{_P}.VCmpEQF64")
-# logicalIR: VCmpEQU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpEQU32 = make_dummy_class(f"{_P}.VCmpEQU32")
-# logicalIR: VCmpEQI32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpEQI32 = make_dummy_class(f"{_P}.VCmpEQI32")
-# logicalIR: VCmpGEF16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpGEF16 = make_dummy_class(f"{_P}.VCmpGEF16")
-# logicalIR: VCmpGTF16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpGTF16 = make_dummy_class(f"{_P}.VCmpGTF16")
-# logicalIR: VCmpGEF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpGEF32 = make_dummy_class(f"{_P}.VCmpGEF32")
-# logicalIR: VCmpGTF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpGTF32 = make_dummy_class(f"{_P}.VCmpGTF32")
-# logicalIR: VCmpGEF64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpGEF64 = make_dummy_class(f"{_P}.VCmpGEF64")
-# logicalIR: VCmpGTF64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpGTF64 = make_dummy_class(f"{_P}.VCmpGTF64")
-# logicalIR: VCmpGEI32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpGEI32 = make_dummy_class(f"{_P}.VCmpGEI32")
-# logicalIR: VCmpGTI32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpGTI32 = make_dummy_class(f"{_P}.VCmpGTI32")
-# logicalIR: VCmpGEU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpGEU32 = make_dummy_class(f"{_P}.VCmpGEU32")
-# logicalIR: VCmpGtU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpGtU32 = make_dummy_class(f"{_P}.VCmpGtU32")
-# logicalIR: VCmpLeU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpLeU32 = make_dummy_class(f"{_P}.VCmpLeU32")
-# logicalIR: VCmpLeI32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpLeI32 = make_dummy_class(f"{_P}.VCmpLeI32")
-# logicalIR: VCmpLtI32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpLtI32 = make_dummy_class(f"{_P}.VCmpLtI32")
-# logicalIR: VCmpLtU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpLtU32 = make_dummy_class(f"{_P}.VCmpLtU32")
-# logicalIR: VCmpUF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpUF32 = make_dummy_class(f"{_P}.VCmpUF32")
-# logicalIR: VCmpNeI32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpNeI32 = make_dummy_class(f"{_P}.VCmpNeI32")
-# logicalIR: VCmpNeU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpNeU32 = make_dummy_class(f"{_P}.VCmpNeU32")
-# logicalIR: VCmpNeU64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpNeU64 = make_dummy_class(f"{_P}.VCmpNeU64")
-# logicalIR: VCmpClassF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpClassF32 = make_dummy_class(f"{_P}.VCmpClassF32")
-# logicalIR: VCmpXClassF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpXClassF32 = make_dummy_class(f"{_P}.VCmpXClassF32")
-# logicalIR: VCmpXEqU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpXEqU32 = make_dummy_class(f"{_P}.VCmpXEqU32")
-# logicalIR: VCmpXGeU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpXGeU32 = make_dummy_class(f"{_P}.VCmpXGeU32")
-# logicalIR: VCmpXGtU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpXGtU32 = make_dummy_class(f"{_P}.VCmpXGtU32")
-# logicalIR: VCmpXLeU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpXLeU32 = make_dummy_class(f"{_P}.VCmpXLeU32")
-# logicalIR: VCmpXLeI32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpXLeI32 = make_dummy_class(f"{_P}.VCmpXLeI32")
-# logicalIR: VCmpXLtF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpXLtF32 = make_dummy_class(f"{_P}.VCmpXLtF32")
-# logicalIR: VCmpXLtI32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpXLtI32 = make_dummy_class(f"{_P}.VCmpXLtI32")
-# logicalIR: VCmpXLtU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpXLtU32 = make_dummy_class(f"{_P}.VCmpXLtU32")
-# logicalIR: VCmpXLtU64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpXLtU64 = make_dummy_class(f"{_P}.VCmpXLtU64")
-# logicalIR: VCmpXNeU16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpXNeU16 = make_dummy_class(f"{_P}.VCmpXNeU16")
-# logicalIR: VCmpXNeU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCmpXNeU32 = make_dummy_class(f"{_P}.VCmpXNeU32")
+
+# -- Vector Compare (dst, src0, src1) --
+# logicalIR: VCmpEQF32
+VCmpEQF32 = _make_vcmp_class("VCmpEQF32", "v_cmp_eq_f32", InstType.INST_F32)
+# logicalIR: VCmpEQF64
+VCmpEQF64 = _make_vcmp_class("VCmpEQF64", "v_cmp_eq_f64", InstType.INST_F64)
+# logicalIR: VCmpEQU32
+VCmpEQU32 = _make_vcmp_class("VCmpEQU32", "v_cmp_eq_u32", InstType.INST_U32)
+# logicalIR: VCmpEQI32
+VCmpEQI32 = _make_vcmp_class("VCmpEQI32", "v_cmp_eq_i32", InstType.INST_I32)
+# logicalIR: VCmpGEF16
+VCmpGEF16 = _make_vcmp_class("VCmpGEF16", "v_cmp_ge_f16", InstType.INST_F16)
+# logicalIR: VCmpGTF16
+VCmpGTF16 = _make_vcmp_class("VCmpGTF16", "v_cmp_gt_f16", InstType.INST_F16)
+# logicalIR: VCmpGEF32
+VCmpGEF32 = _make_vcmp_class("VCmpGEF32", "v_cmp_ge_f32", InstType.INST_F32)
+# logicalIR: VCmpGTF32
+VCmpGTF32 = _make_vcmp_class("VCmpGTF32", "v_cmp_gt_f32", InstType.INST_F32)
+# logicalIR: VCmpGEF64
+VCmpGEF64 = _make_vcmp_class("VCmpGEF64", "v_cmp_ge_f64", InstType.INST_F64)
+# logicalIR: VCmpGTF64
+VCmpGTF64 = _make_vcmp_class("VCmpGTF64", "v_cmp_gt_f64", InstType.INST_F64)
+# logicalIR: VCmpGEI32
+VCmpGEI32 = _make_vcmp_class("VCmpGEI32", "v_cmp_ge_i32", InstType.INST_I32)
+# logicalIR: VCmpGTI32
+VCmpGTI32 = _make_vcmp_class("VCmpGTI32", "v_cmp_gt_i32", InstType.INST_I32)
+# logicalIR: VCmpGEU32
+VCmpGEU32 = _make_vcmp_class("VCmpGEU32", "v_cmp_ge_u32", InstType.INST_U32)
+# logicalIR: VCmpGtU32
+VCmpGtU32 = _make_vcmp_class("VCmpGtU32", "v_cmp_gt_u32", InstType.INST_U32)
+# logicalIR: VCmpLeU32
+VCmpLeU32 = _make_vcmp_class("VCmpLeU32", "v_cmp_le_u32", InstType.INST_U32)
+# logicalIR: VCmpLeI32
+VCmpLeI32 = _make_vcmp_class("VCmpLeI32", "v_cmp_le_i32", InstType.INST_I32)
+# logicalIR: VCmpLtI32
+VCmpLtI32 = _make_vcmp_class("VCmpLtI32", "v_cmp_lt_i32", InstType.INST_I32)
+# logicalIR: VCmpLtU32
+VCmpLtU32 = _make_vcmp_class("VCmpLtU32", "v_cmp_lt_u32", InstType.INST_U32)
+# logicalIR: VCmpUF32
+VCmpUF32 = _make_vcmp_class("VCmpUF32", "v_cmp_u_f32", InstType.INST_F32)
+# logicalIR: VCmpNeI32
+VCmpNeI32 = _make_vcmp_class("VCmpNeI32", "v_cmp_ne_i32", InstType.INST_I32)
+# logicalIR: VCmpNeU32
+VCmpNeU32 = _make_vcmp_class("VCmpNeU32", "v_cmp_ne_u32", InstType.INST_U32)
+# logicalIR: VCmpNeU64
+VCmpNeU64 = _make_vcmp_class("VCmpNeU64", "v_cmp_ne_u64", InstType.INST_U64)
+# logicalIR: VCmpClassF32
+VCmpClassF32 = _make_vcmp_class("VCmpClassF32", "v_cmp_class_f32", InstType.INST_F32)
+
+# -- Vector CompareX (dst, src0, src1) --
+# logicalIR: VCmpXClassF32
+VCmpXClassF32 = _make_vcmp_class("VCmpXClassF32", "v_cmpx_class_f32", InstType.INST_F32)
+# logicalIR: VCmpXEqU32
+VCmpXEqU32 = _make_vcmp_class("VCmpXEqU32", "v_cmpx_eq_u32", InstType.INST_U32)
+# logicalIR: VCmpXGeU32
+VCmpXGeU32 = _make_vcmp_class("VCmpXGeU32", "v_cmpx_ge_u32", InstType.INST_U32)
+# logicalIR: VCmpXGtU32
+VCmpXGtU32 = _make_vcmp_class("VCmpXGtU32", "v_cmpx_gt_u32", InstType.INST_U32)
+# logicalIR: VCmpXLeU32
+VCmpXLeU32 = _make_vcmp_class("VCmpXLeU32", "v_cmpx_le_u32", InstType.INST_U32)
+# logicalIR: VCmpXLeI32
+VCmpXLeI32 = _make_vcmp_class("VCmpXLeI32", "v_cmpx_le_i32", InstType.INST_I32)
+# logicalIR: VCmpXLtF32
+VCmpXLtF32 = _make_vcmp_class("VCmpXLtF32", "v_cmpx_lt_f32", InstType.INST_F32)
+# logicalIR: VCmpXLtI32
+VCmpXLtI32 = _make_vcmp_class("VCmpXLtI32", "v_cmpx_lt_i32", InstType.INST_I32)
+# logicalIR: VCmpXLtU32
+VCmpXLtU32 = _make_vcmp_class("VCmpXLtU32", "v_cmpx_lt_u32", InstType.INST_U32)
+# logicalIR: VCmpXLtU64
+VCmpXLtU64 = _make_vcmp_class("VCmpXLtU64", "v_cmpx_lt_u64", InstType.INST_U64)
+# logicalIR: VCmpXNeU16
+VCmpXNeU16 = _make_vcmp_class("VCmpXNeU16", "v_cmpx_ne_u16", InstType.INST_U16)
+# logicalIR: VCmpXNeU32
+VCmpXNeU32 = _make_vcmp_class("VCmpXNeU32", "v_cmpx_ne_u32", InstType.INST_U32)
 
 
 # ==========================================================================
