@@ -14,13 +14,13 @@
 # CHECK-LABEL: @waitcnt_insertion_tensor_anchor_ds_read_num_waves_multi
 # CHECK: tensor_load_to_lds
 # CHECK-SAME: tokens = [0]
-# CHECK-NEXT: ds_load_b64
+# CHECK: ds_load_b64
 # CHECK-SAME: tokens = [0]
-# CHECK-NEXT: s_wait_tensorcnt
-# CHECK-SAME: tlcnt = 0
-# CHECK-NEXT: s_wait_dscnt
-# CHECK-SAME: dlcnt = 0
-# CHECK-NEXT: s_barrier
+# tensorcnt and dscnt are independent counters; both must drain before the
+# barrier but their relative emission order is unspecified (use CHECK-DAG).
+# CHECK-DAG: s_wait_tensorcnt{{.*}}tlcnt = 0
+# CHECK-DAG: s_wait_dscnt{{.*}}dlcnt = 0
+# CHECK: s_barrier
 
 st.func @waitcnt_insertion_tensor_anchor_ds_read_num_waves_multi() {
 ^entry:

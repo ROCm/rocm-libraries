@@ -162,6 +162,20 @@ def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printR
   return True
 
 
+def _disableRuntimeStaggerU(state):
+  state["StaggerU"] = 0
+  state["StaggerUMapping"] = 0
+  state["StaggerUStride"] = 0
+  state["InternalSupportParams"]["SupportCustomStaggerU"] = False
+
+
+def _disableUnsupportedRuntimeStaggerU(state):
+  # PAP+TDM StaggerU is not implemented (the staggered TDM descriptor isn't carried
+  # across the PAP persistent-tile handoff), so force runtime StaggerU off.
+  if state["PrefetchAcrossPersistent"] and state["TDMInst"] == 3:
+    _disableRuntimeStaggerU(state)
+
+
 def _validateStreamKForceDPOnly(state, printRejectionReason):
   if state["StreamKForceDPOnly"]:
     if state["StreamK"] != 3:
@@ -901,9 +915,16 @@ class Solution(collections.abc.Mapping):
       if state["StreamK"] == 0:
         reject(state, printRejectionReason, "UseSubtileImpl=1 supports StreamK only (no support for GSU)")
       if state["StreamK"] != 3 and state["StreamK"] != 4:
-        reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK=3 (DP-before-SK mode)")
+        reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK=3 or StreamK=4")
       if state["DebugStreamK"] != 0:
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support DebugStreamK (must be 0)")
+      if state["PrefetchAcrossPersistent"]:
+        if state["ISA"] != (9, 5, 0):
+          reject(state, printRejectionReason, "UseSubtileImpl=1 PrefetchAcrossPersistent is currently audited only for gfx950")
+        if state["PrefetchGlobalRead"] != 2:
+          reject(state, printRejectionReason, "UseSubtileImpl=1 PrefetchAcrossPersistent requires PrefetchGlobalRead=2")
+        if state["DirectToVgprMXSA"] or state["DirectToVgprMXSB"]:
+          reject(state, printRejectionReason, "UseSubtileImpl=1 PrefetchAcrossPersistent not supported with DirectToVgpr MX scale tensors")
 
     # TODO: Support other LdsBlockSizePerPadMXSA/B for gfx1250.
     if state["ISA"] == (12, 5, 0):
@@ -1290,6 +1311,10 @@ class Solution(collections.abc.Mapping):
     if state["UseSubtileImpl"]:
       return True
 
+    if not isaInfoMap[isa].asmCaps["HasDirectToLds"]:
+      reject(state, printRejectionReason, "DirectToLds not supported on ISA %s" % (isa,))
+      return False
+
     # x4 support for directToLds
     canDTLx4 = isaInfoMap[isa].asmCaps["HasDirectToLdsx4"]
 
@@ -1549,6 +1574,45 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "Atomic Stream-K requires BufferStore")
         if state["LocalSplitU"] > 1:
           reject(state, printRejectionReason, "Atomic Stream-K not working with LocalSplitU")
+      if state.get("PrefetchAcrossPersistent", 0):
+        # StreamK PAP emits a next-tile first-PGR handoff inside the NLL
+        # window, then restores borrowed tile identity, descriptors/shadow
+        # limits, stagger state, and LDS bank state before current-tile code
+        # resumes. Keep rejecting axes whose borrowed-state contract is not
+        # audited below.
+        if state["StreamK"] != 3:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent is currently supported only with StreamK=3")
+        if not state["BufferLoad"]:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent requires BufferLoad")
+        if state["PrefetchGlobalRead"] < 1:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent requires PGR >= 1")
+        if state["PrefetchGlobalRead"] > 2:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent requires PrefetchGlobalRead in [1, 2]")
+        if state["1LDSBuffer"] == 1:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent requires 1LDSBuffer != 1 (double LDS buffer)")
+        if state["DirectToVgprA"] or state["DirectToVgprB"]:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent not supported with DirectToVgpr")
+        if state["ProblemType"]["NumIndicesSummation"] > 1:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent not supported with multiple summation indices")
+        if not state["BufferStore"]:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path requires BufferStore")
+        if state.get("SuppressNoLoadLoop", False):
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path requires NoLoadLoop")
+        if state["ProblemType"]["Sparse"]:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path not supported with sparse")
+        if state["StoreRemapVectorWidth"]:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path not supported with StoreRemap")
+        # DP-only (StreamKForceDPOnly) + PAP is supported (mirror phase): DP-only
+        # StreamK==3 is a persistent grid-stride kernel (graWorkGroup pre-advances
+        # StreamKIter += skGrid*ItersPerTile each persistent iteration), so the
+        # standard PAP next-tile handoff applies unchanged. AddressFlags is
+        # non-zero for DP-only (tree reduction passes the Synchronizer pointer),
+        # so the PAP AddressFlags guard falls through correctly. All
+        # partial/fixup/workspace machinery is already bypassed by
+        # StreamKForceDPOnly guards in storeBranches/writePartials/
+        # computeStoreSrdStart, and StreamKLocalStart/End are constant
+        # (0 / ItersPerTile). No DP-only-specific gating is required here;
+        # Phase 2 strips the now-redundant snapshot/restore of those constants.
       if state["DebugPersistentKernelLoopForever"] and state["StreamK"] not in (1, 2, 3):
         # Mode 4 exits via KernelEnd in graWorkGroup, so the flag would no-op.
         reject(state, printRejectionReason,
@@ -1564,6 +1628,7 @@ class Solution(collections.abc.Mapping):
       state["StreamKXCCMapping"] = 0
       state["StreamKFixupTreeReduction"] = 0
       state["DebugStreamK"] = 0
+      state["PrefetchAcrossPersistent"] = 0
       state["DebugPersistentKernelLoopForever"] = False
 
     computeBytes = int(state["ProblemType"]["ComputeDataType"].numBytes())
@@ -2306,6 +2371,24 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "Currently TDMA and TDMB must be enabled simultaneously")
       return
 
+    if state.get("PrefetchAcrossPersistent", 0) and (state["enableTDMA"] or state["enableTDMB"]):
+      if not (state["enableTDMA"] and state["enableTDMB"]):
+        reject(state, printRejectionReason, "TDM + PrefetchAcrossPersistent requires TDMInst == 3 (enableTDMA and enableTDMB)")
+        return
+      if state["StreamK"] != 3:
+        reject(state, printRejectionReason, "TDM + PrefetchAcrossPersistent requires StreamK == 3")
+        return
+      if state["TDMInst"] == 3 and state["StaggerU"] != 0:
+        reject(state, printRejectionReason, "TDM + PrefetchAcrossPersistent with StaggerU is not implemented")
+        return
+      if (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) \
+          and (state["ProblemType"]["TransposeA"], state["ProblemType"]["TransposeB"]) != (True, False):
+        reject(state, printRejectionReason, "TDM + PrefetchAcrossPersistent with MX supports TN only")
+        return
+      if math.prod(state["MIWaveGroup"]) <= 1:
+        reject(state, printRejectionReason, "TDM + PrefetchAcrossPersistent requires wave-separated mode (prod(MIWaveGroup) > 1)")
+        return
+
     # Wave-separated TDM splits waves by parity (even=A, odd=B) and requires
     # numComp = numWaves//2 to be a power of two; equivalently, numWaves
     # itself must be a power of two (>= 2).
@@ -2327,7 +2410,7 @@ class Solution(collections.abc.Mapping):
         backupValues.append([key, value])
     # Skip this check for subtile impl?
     # TODO: Add this check back
-    
+
     # Save auto-derived VW for restoration across DepthU loop iterations.
     # TDM VW fallback in depthUIteration may reduce VW for a specific DepthU;
     # each DepthU attempt should start from the original auto-derived VW.
@@ -2428,6 +2511,8 @@ class Solution(collections.abc.Mapping):
     # UseSubtileImpl has its own main loop scheduler; CMS is not compatible.
     if state["UseSubtileImpl"] and state["UseCustomMainLoopSchedule"] == 1:
         reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 is incompatible with UseSubtileImpl")
+    if state.get("PrefetchAcrossPersistent", 0) and state["UseCustomMainLoopSchedule"] == 1:
+      reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path not supported with custom main-loop scheduling")
 
     # additional setting for non CMS
     if state["UseCustomMainLoopSchedule"] == 0:
@@ -4014,11 +4099,9 @@ class Solution(collections.abc.Mapping):
       # - MX + StreamK (not enough sgpr)
       if state["TailloopInNll"] or \
          (state["StreamK"] and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"])):
-        # need to disable StaggerU
-        state["StaggerU"] = 0
-        state["StaggerUMapping"] = 0
-        state["StaggerUStride"] = 0
-        state["InternalSupportParams"]["SupportCustomStaggerU"] = False # Disable CustomStaggerU for no StagggerU code
+        _disableRuntimeStaggerU(state)
+
+    _disableUnsupportedRuntimeStaggerU(state)
 
     # Determine if we can load directly-to-Vgpr
     # need to check after state["LocalReadVectorWidth"] = -1 is resolved
@@ -4738,7 +4821,7 @@ class Solution(collections.abc.Mapping):
         if state["PrefetchGlobalRead"] == 1:
           reject(state, printRejectionReason, "Sparse + DirectToLds + PrefetchGlobalRead=1 currently unsupported")
           return False
-      
+
       # if state["PrefetchGlobalRead"] and not state["ExpandPointerSwap"]:
       #   reject(state, printRejectionReason, "Sparse A kernel only support PGR with EPS=1.")
       #   return

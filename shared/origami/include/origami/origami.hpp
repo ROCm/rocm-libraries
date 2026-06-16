@@ -33,6 +33,7 @@
 
 #include "origami/hardware.hpp"
 #include "origami/types.hpp"
+#include "origami/origami_export.h"
 
 namespace origami {
 
@@ -44,7 +45,7 @@ namespace origami {
  * @param configs Vector of all possible valid configurations.
  * @return prediction_result_t Configurations with best latency.
  */
-prediction_result_t select_config(const problem_t& problem,
+ORIGAMI_EXPORT prediction_result_t select_config(const problem_t& problem,
                                   const hardware_t& hardware,
                                   const std::vector<config_t>& configs,
                                   model_t model = model_t::gemm);
@@ -58,7 +59,7 @@ prediction_result_t select_config(const problem_t& problem,
  * @param skGrid StreamK grid size.
  * @return workgroup_mapping_t Workgroup mapping parameters (wgmxccchunk, wgmxcc, wgm).
  */
-workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
+ORIGAMI_EXPORT workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
                                              const hardware_t& hardware,
                                              const config_t& config,
                                              size_t skGrid);
@@ -73,7 +74,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
  * @param wgm Workgroup mapping
  * @return staggerU_t StaggerU parameters (staggerUMapping, staggerU, staggerUStrideShift).
  */
-staggerU_t select_staggerU(const problem_t& problem,
+ORIGAMI_EXPORT staggerU_t select_staggerU(const problem_t& problem,
                            const hardware_t& hardware,
                            const config_t& config,
                            size_t skGrid,
@@ -89,7 +90,7 @@ staggerU_t select_staggerU(const problem_t& problem,
  * @return std::vector<prediction_result_t> Configurations with latencies ranked by performance
  * (best first)
  */
-std::vector<prediction_result_t> rank_configs(const problem_t& problem,
+ORIGAMI_EXPORT std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                                               const hardware_t& hardware,
                                               const std::vector<config_t>& configs,
                                               model_t model = model_t::gemm);
@@ -104,7 +105,7 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
  * @param configs List of candidate configurations
  * @return prediction_result_t Configurations with best latency.
  */
-prediction_result_t select_config_mnk(std::size_t M,
+ORIGAMI_EXPORT prediction_result_t select_config_mnk(std::size_t M,
                                       std::size_t N,
                                       std::size_t K,
                                       const hardware_t& hardware,
@@ -119,7 +120,7 @@ prediction_result_t select_config_mnk(std::size_t M,
  * @param topk Number of top configurations to return
  * @return std::vector<prediction_result_t> Top K configurations ranked by performance (best first)
  */
-std::vector<prediction_result_t> select_topk_configs(const problem_t& problem,
+ORIGAMI_EXPORT std::vector<prediction_result_t> select_topk_configs(const problem_t& problem,
                                                      const hardware_t& hardware,
                                                      const std::vector<config_t>& configs,
                                                      std::size_t topk,
@@ -133,7 +134,7 @@ std::vector<prediction_result_t> select_topk_configs(const problem_t& problem,
  * @param latency Kernel latency.
  * @return double Throughput in gflops/s.
  */
-double compute_perf_gflops(const hardware_t& hardware,
+ORIGAMI_EXPORT double compute_perf_gflops(const hardware_t& hardware,
                            const problem_t& problem,
                            const double latency);
 

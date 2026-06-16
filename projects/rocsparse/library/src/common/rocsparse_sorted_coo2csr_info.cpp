@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,27 +40,20 @@ rocsparse::sorted_coo2csr_info_t::sorted_coo2csr_info_t(int64_t             num_
     const size_t num_bytes
         = rocsparse::indextype_sizeof(this->m_row_ptr_indextype) * (this->m_num_rows + 1);
     THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&this->m_row_ptr, num_bytes, stream));
-    THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
+    THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 }
 
 hipError_t rocsparse::sorted_coo2csr_info_t::free_memory(hipStream_t stream)
 {
-    auto e = rocsparse_hipFreeAsync(this->m_row_ptr, stream);
-    if(e == hipSuccess)
-    {
-        this->m_row_ptr = nullptr;
-        return hipSuccess;
-    }
-    else
-    {
-        return e;
-    }
+
+    const auto e    = rocsparse_hipFreeAsync(this->m_row_ptr, stream);
+    this->m_row_ptr = nullptr;
+    return e;
 }
 
 rocsparse::sorted_coo2csr_info_t::~sorted_coo2csr_info_t()
 {
-    hipStream_t default_stream = 0;
-    std::ignore                = this->free_memory(default_stream);
+    WARNING_IF_HIP_ERROR(this->free_memory(nullptr));
 }
 
 rocsparse_status
