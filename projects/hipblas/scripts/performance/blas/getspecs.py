@@ -80,7 +80,15 @@ def _metric_clock_val(cout, devicenum, metric_cols):
 
 def getgfx(devicenum, cuda):
     if cuda:
-        return "N/A"
+        cmd = ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader",
+               "-i", str(devicenum)]
+        success, cout = _subprocess_helper(cmd)
+        if not success:
+            return "N/A"
+        name = cout.strip().splitlines()
+        if not name or not name[0].strip():
+            return "N/A"
+        return name[0].strip()
 
     cmd = ["/opt/rocm/bin/rocm_agent_enumerator"]
     success, cout = _subprocess_helper(cmd)

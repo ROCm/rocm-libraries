@@ -36,7 +36,8 @@ public:
                  const std::unordered_map<int64_t, void*>& variantPack)
     {
         auto graphWrap
-            = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(graphBuffer, size);
+            = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
+                graphBuffer, size);
 
         std::vector<std::unique_ptr<detail::IGraphNodePlanExecutor>> planExecutors;
 
