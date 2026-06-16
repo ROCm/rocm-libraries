@@ -58,7 +58,7 @@ project(hipRAND CXX)
 # Build options
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
-option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
+option(BUILD_CODE_COVERAGE "Build with code coverage enabled" ON)
 option(BUILD_FORTRAN_WRAPPER "Build Fortran wrapper" OFF)
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
 option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Download non-ROCm dependencies and do not search for packages" OFF)
