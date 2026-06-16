@@ -47,16 +47,12 @@ void graphBindings(nb::module_& m)
         .def(
             "create_execution_plan_ext",
             [](graph::Graph& g, int64_t engineId) {
-                const auto err = g.create_execution_plan_ext(engineId, {});
-                if(err.is_bad())
-                {
-                    throw std::runtime_error("Failed to create execution plan for engine "
-                                             + std::to_string(engineId) + ": " + err.get_message());
-                }
+                return g.create_execution_plan_ext(engineId, {});
             },
             nb::arg("engine_id"),
             "Hard-select an engine: build the execution plan for this exact engine id. "
-            "Raises if the engine is not valid/applicable (no heuristic fallback).")
+            "Returns an Error whose is_bad() is set if the engine is not "
+            "valid/applicable (no heuristic fallback).")
         .def(
             "get_execution_plan_engine_id",
             [](const graph::Graph& g) {

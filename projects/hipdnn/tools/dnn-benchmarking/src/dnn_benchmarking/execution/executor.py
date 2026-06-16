@@ -213,15 +213,15 @@ class Executor:
 
             if engine_id is not None:
                 # Hard engine selection: build the plan for exactly this engine.
-                # The binding errors if the engine is not valid/applicable, so it
-                # can never silently fall back to a different engine the way the
-                # soft preferred-engine path could.
-                try:
-                    self._graph.create_execution_plan_ext(engine_id)
-                except RuntimeError as e:
+                # create_execution_plan_ext reports a bad result if the engine is
+                # not valid/applicable, so it can never silently fall back to a
+                # different engine the way the soft preferred-engine path could.
+                result = self._graph.create_execution_plan_ext(engine_id)
+                if result.is_bad():
                     raise UnsupportedGraphError(
-                        f"Forced engine {engine_id} not applicable to this graph: {e}"
-                    ) from e
+                        f"Forced engine {engine_id} not applicable to this graph: "
+                        f"{result.get_message()}"
+                    )
             else:
                 result = self._graph.create_execution_plans()
                 if result.is_bad():

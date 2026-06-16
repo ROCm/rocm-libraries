@@ -27,27 +27,32 @@ from dnn_benchmarking.common.exceptions import UnsupportedGraphError
 
 
 class _StubResult:
-    """hipDNN Error stub that always reports success."""
+    """hipDNN Error stub with a configurable bad/message state."""
+
+    def __init__(self, bad: bool = False, message: str = ""):
+        self._bad = bad
+        self._message = message
 
     def is_bad(self) -> bool:
-        return False
+        return self._bad
 
     def get_message(self) -> str:
-        return ""
+        return self._message
 
 
 class _StubGraph:
     """Minimal hipDNN Graph stub exercising the executor's plan lifecycle.
 
-    ``create_execution_plan_ext`` records the hard-selected engine (or raises
-    when ``hard_raises``); ``create_execution_plans`` flags the heuristic path;
-    ``get_execution_plan_engine_id`` reports the engine backing the built plan.
+    ``create_execution_plan_ext`` records the hard-selected engine, returning a
+    bad Error when ``hard_fails``; ``create_execution_plans`` flags the
+    heuristic path; ``get_execution_plan_engine_id`` reports the engine backing
+    the built plan.
     """
 
-    def __init__(self, ranked, selected=None, hard_raises=False, rank_error=None):
+    def __init__(self, ranked, selected=None, hard_fails=False, rank_error=None):
         self._ranked = ranked
         self._selected = selected
-        self._hard_raises = hard_raises
+        self._hard_fails = hard_fails
         self._rank_error = rank_error
         self.plans_created = False
         self.hard_engine_id = None
@@ -71,9 +76,10 @@ class _StubGraph:
         return _StubResult()
 
     def create_execution_plan_ext(self, engine_id):
-        if self._hard_raises:
-            raise RuntimeError("Failed to finalize engine descriptor")
+        if self._hard_fails:
+            return _StubResult(bad=True, message="Failed to finalize engine descriptor")
         self.hard_engine_id = engine_id
+        return _StubResult()
 
     def get_execution_plan_engine_id(self):
         return self._selected
@@ -116,7 +122,7 @@ def test_prepare_hard_select_not_applicable_is_skip():
     """A hard-select failure (engine not applicable) becomes an
     UnsupportedGraphError, i.e. a clean skip rather than a silent fallback."""
     executor = _executor()
-    graph = _StubGraph(ranked=[111], hard_raises=True)
+    graph = _StubGraph(ranked=[111], hard_fails=True)
     with patch.dict(sys.modules, {"hipdnn_frontend": _fake_module(graph)}):
         with pytest.raises(UnsupportedGraphError):
             executor.prepare(handle=object(), engine_id=999)
