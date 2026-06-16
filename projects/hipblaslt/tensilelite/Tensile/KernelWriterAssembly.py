@@ -6512,8 +6512,6 @@ class KernelWriterAssembly(KernelWriter):
     # T reg definition for F32XEmu
     self.macroAndSetF32XEmuTreg(kernel, tensorParametersA, tensorParametersB)
 
-    # 1024 vgpr: avoid cross pool usage
-    valuVgprAlignment = 8 if self.states.asmCaps["HasVgprMSB"] else 2
     if self.states.a.numVgprValu > 0 and not kernel["DirectToVgprA"]:
       numValuA = self.states.a.numVgprValu
       if tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not kernel["enableLDSTrA"]:
