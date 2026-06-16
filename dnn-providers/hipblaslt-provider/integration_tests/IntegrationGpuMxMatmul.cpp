@@ -95,8 +95,10 @@ protected:
                                           this->generateInputStrideOrder(scaleBDims, false));
         auto scaleBTensor = std::make_shared<graph::TensorAttributes>(std::move(scaleBAttr));
 
+        // B is [..., K, N]: the 32-wide blocks run along K, the second-to-last
+        // axis. block_size maps to trailing axes, so block K by 32 and N by 1.
         graph::BlockScaleDequantizeAttributes deqAttrB;
-        deqAttrB.set_block_size(32);
+        deqAttrB.set_block_size(std::vector<int32_t>{32, 1});
         auto yBTensor = graphObj.block_scale_dequantize(bTensor, scaleBTensor, deqAttrB);
 
         graph::MatmulAttributes const matmulAttrs;
