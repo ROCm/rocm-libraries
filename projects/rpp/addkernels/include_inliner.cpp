@@ -32,14 +32,14 @@ SOFTWARE.
 #endif
 #ifdef __linux__
 #include <linux/limits.h>
+
 #include <cstdlib>
-#endif // !WIN32
+#endif  // !WIN32
 
 #include "include_inliner.hpp"
 
 namespace PathHelpers {
-static int GetMaxPath()
-{
+static int GetMaxPath() {
 #ifdef _WIN32
     return MAX_PATH;
 #else
@@ -47,63 +47,48 @@ static int GetMaxPath()
 #endif
 }
 
-static std::string GetAbsolutePath(const std::string& path)
-{
+static std::string GetAbsolutePath(const std::string& path) {
     std::string result(GetMaxPath(), ' ');
 #ifdef _WIN32
     const auto retval = GetFullPathName(path.c_str(), result.size(), &result[0], nullptr);
 
-    if(retval == 0)
-        return "";
+    if (retval == 0) return "";
 #else
     const auto retval = realpath(path.c_str(), &result[0]);
 
-    if(retval == nullptr)
-        return "";
+    if (retval == nullptr) return "";
 #endif
     return result;
 }
-} // namespace PathHelpers
+}  // namespace PathHelpers
 
-std::string IncludeFileExceptionBase::What() const
-{
+std::string IncludeFileExceptionBase::What() const {
     std::ostringstream ss;
     ss << GetMessage() << ": <" << _file << ">";
 
     return ss.str();
 }
 
-void IncludeInliner::Process(std::istream& input,
-                             std::ostream& output,
-                             const std::string& root,
-                             const std::string& file_name,
-                             const std::string& directive,
-                             bool allow_angle_brackets,
-                             bool recurse)
-{
+void IncludeInliner::Process(std::istream& input, std::ostream& output, const std::string& root,
+                             const std::string& file_name, const std::string& directive,
+                             bool allow_angle_brackets, bool recurse) {
     ProcessCore(input, output, root, file_name, 0, directive, allow_angle_brackets, recurse);
 }
 
-void IncludeInliner::ProcessCore(std::istream& input,
-                                 std::ostream& output,
-                                 const std::string& root,
-                                 const std::string& file_name,
-                                 int line_number,
-                                 const std::string& directive,
-                                 bool allow_angle_brackets,
-                                 bool recurse)
-{
-    if(_include_depth >= include_depth_limit)
+void IncludeInliner::ProcessCore(std::istream& input, std::ostream& output, const std::string& root,
+                                 const std::string& file_name, int line_number,
+                                 const std::string& directive, bool allow_angle_brackets,
+                                 bool recurse) {
+    if (_include_depth >= include_depth_limit)
         throw InlineStackOverflowException(GetIncludeStackTrace(0));
 
     _include_depth++;
     _included_stack_head =
         std::make_shared<SourceFileDesc>(file_name, _included_stack_head, line_number);
-    auto current_line          = 0;
+    auto current_line = 0;
     auto next_include_optional = false;
 
-    while(!input.eof())
-    {
+    while (!input.eof()) {
         std::string line;
         std::string word;
         std::getline(input, line);
@@ -113,97 +98,78 @@ void IncludeInliner::ProcessCore(std::istream& input,
         std::transform(word.begin(), word.end(), word.begin(), ::tolower);
 
         const auto include_optional = next_include_optional;
-        next_include_optional       = false;
+        next_include_optional = false;
 
-        if(!word.empty() && word == "//inliner-include-optional")
-        {
-            if(include_optional)
+        if (!word.empty() && word == "//inliner-include-optional") {
+            if (include_optional)
                 throw IncludeExpectedException(GetIncludeStackTrace(current_line));
             next_include_optional = true;
             continue;
         }
 
-        if(!word.empty() && word == directive && recurse)
-        {
+        if (!word.empty() && word == directive && recurse) {
             auto first_quote_pos = line.find('"', static_cast<int>(line_parser.tellg()) + 1);
             std::string::size_type second_quote_pos;
 
-            if(first_quote_pos != std::string::npos)
-            {
+            if (first_quote_pos != std::string::npos) {
                 second_quote_pos = line.find('"', first_quote_pos + 1);
-                if(second_quote_pos == std::string::npos)
+                if (second_quote_pos == std::string::npos)
                     throw WrongInlineDirectiveException(GetIncludeStackTrace(current_line));
-            }
-            else
-            {
-                if(!allow_angle_brackets)
+            } else {
+                if (!allow_angle_brackets)
                     throw WrongInlineDirectiveException(GetIncludeStackTrace(current_line));
 
                 first_quote_pos = line.find('<', static_cast<int>(line_parser.tellg()) + 1);
-                if(first_quote_pos == std::string::npos)
+                if (first_quote_pos == std::string::npos)
                     throw WrongInlineDirectiveException(GetIncludeStackTrace(current_line));
 
                 second_quote_pos = line.find('>', first_quote_pos + 1);
-                if(second_quote_pos == std::string::npos)
+                if (second_quote_pos == std::string::npos)
                     throw WrongInlineDirectiveException(GetIncludeStackTrace(current_line));
             }
 
             const std::string include_file_path =
                 line.substr(first_quote_pos + 1, second_quote_pos - first_quote_pos - 1);
             const std::string abs_include_file_path(
-                PathHelpers::GetAbsolutePath(root + "/" + include_file_path)); // NOLINT
+                PathHelpers::GetAbsolutePath(root + "/" + include_file_path));  // NOLINT
 
-            if(abs_include_file_path.empty())
-            {
-                if(include_optional)
-                    continue;
+            if (abs_include_file_path.empty()) {
+                if (include_optional) continue;
                 throw IncludeNotFoundException(include_file_path,
                                                GetIncludeStackTrace(current_line));
             }
             std::ifstream include_file(abs_include_file_path, std::ios::in);
 
-            if(!include_file.good())
+            if (!include_file.good())
                 throw IncludeCantBeOpenedException(include_file_path,
                                                    GetIncludeStackTrace(current_line));
 
-            ProcessCore(include_file,
-                        output,
-                        root,
-                        include_file_path,
-                        current_line,
-                        directive,
-                        allow_angle_brackets,
-                        recurse);
-        }
-        else
-        {
-            if(include_optional)
+            ProcessCore(include_file, output, root, include_file_path, current_line, directive,
+                        allow_angle_brackets, recurse);
+        } else {
+            if (include_optional)
                 throw IncludeExpectedException(GetIncludeStackTrace(current_line));
 
-            if(output.tellp() > 0)
-                output << std::endl;
+            if (output.tellp() > 0) output << std::endl;
 
             output << line;
         }
     }
 
-    auto prev_file       = _included_stack_head->included_from;
+    auto prev_file = _included_stack_head->included_from;
     _included_stack_head = prev_file;
     _include_depth--;
 }
 
-std::string IncludeInliner::GetIncludeStackTrace(int line)
-{
+std::string IncludeInliner::GetIncludeStackTrace(int line) {
     std::ostringstream ss;
 
-    if(_included_stack_head == nullptr)
-        return "";
+    if (_included_stack_head == nullptr) return "";
 
     auto item = _included_stack_head;
     ss << "    " << item->path << ":" << line;
 
-    while(item->included_from != nullptr)
-    {
+    while (item->included_from != nullptr) {
         ss << std::endl << "    from " << item->included_from->path << ":" << item->included_line;
         item = item->included_from;
     }

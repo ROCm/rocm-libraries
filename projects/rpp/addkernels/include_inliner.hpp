@@ -25,120 +25,109 @@ SOFTWARE.
 #ifndef SOURCE_INLINER_HPP
 
 #define SOURCE_INLINER_HPP
-#include "source_file_desc.hpp"
-#include <ostream>
 #include <memory>
+#include <ostream>
 #include <stack>
 
-class InlineException : public std::exception
-{
-    public:
-    InlineException(const std::string& trace) : _trace(trace) {}
-    virtual ~InlineException() throw() {return ;}
-    virtual std::string What() const = 0;
-    const std::string& GetTrace() const { return _trace; }
+#include "source_file_desc.hpp"
 
-    private:
+class InlineException : public std::exception {
+   public:
+    InlineException(const std::string& trace) : _trace(trace) {}
+    virtual ~InlineException() throw() {
+        return;
+    }
+    virtual std::string What() const = 0;
+    const std::string& GetTrace() const {
+        return _trace;
+    }
+
+   private:
     std::string _trace;
 };
 
-class InlineStackOverflowException : public InlineException
-{
-    public:
+class InlineStackOverflowException : public InlineException {
+   public:
     InlineStackOverflowException(const std::string& trace) : InlineException(trace) {}
 
-    std::string What() const override
-    {
+    std::string What() const override {
         return "Include stack depth limit has been reached, possible circle includes";
     }
 };
 
-class IncludeExpectedException : public InlineException
-{
-    public:
+class IncludeExpectedException : public InlineException {
+   public:
     IncludeExpectedException(const std::string& trace) : InlineException(trace) {}
 
-    std::string What() const override { return "Include directive expected"; }
+    std::string What() const override {
+        return "Include directive expected";
+    }
 };
 
-class WrongInlineDirectiveException : public InlineException
-{
-    public:
+class WrongInlineDirectiveException : public InlineException {
+   public:
     WrongInlineDirectiveException(const std::string& trace) : InlineException(trace) {}
 
-    std::string What() const override { return "Include directive has wrong format"; }
+    std::string What() const override {
+        return "Include directive has wrong format";
+    }
 };
 
-class IncludeFileExceptionBase : public InlineException
-{
-    public:
-    virtual ~IncludeFileExceptionBase() throw() {return ;}
-    IncludeFileExceptionBase(const std::string& file, const std::string& trace)
-        : InlineException(trace), _file(file)
-    {
+class IncludeFileExceptionBase : public InlineException {
+   public:
+    virtual ~IncludeFileExceptionBase() throw() {
+        return;
     }
+    IncludeFileExceptionBase(const std::string& file, const std::string& trace)
+        : InlineException(trace), _file(file) {}
 
     std::string What() const override;
     virtual std::string GetMessage() const = 0;
 
-    private:
+   private:
     std::string _file;
 };
 
-class IncludeNotFoundException : public IncludeFileExceptionBase
-{
-    public:
-    virtual ~IncludeNotFoundException() throw() {return ;}
-    IncludeNotFoundException(const std::string& file, const std::string& trace)
-        : IncludeFileExceptionBase(file, trace)
-    {
+class IncludeNotFoundException : public IncludeFileExceptionBase {
+   public:
+    virtual ~IncludeNotFoundException() throw() {
+        return;
     }
+    IncludeNotFoundException(const std::string& file, const std::string& trace)
+        : IncludeFileExceptionBase(file, trace) {}
 
-
-    std::string GetMessage() const override
-    {
+    std::string GetMessage() const override {
         return "Include file not found (if it is optional put //inliner-include-optional on line "
                "before it)";
     }
 };
 
-class IncludeCantBeOpenedException : public IncludeFileExceptionBase
-{
-    public:
+class IncludeCantBeOpenedException : public IncludeFileExceptionBase {
+   public:
     IncludeCantBeOpenedException(const std::string& file, const std::string& trace)
-        : IncludeFileExceptionBase(file, trace)
-    {
-    }
+        : IncludeFileExceptionBase(file, trace) {}
 
-    std::string GetMessage() const override { return "Can not open include file"; }
+    std::string GetMessage() const override {
+        return "Can not open include file";
+    }
 };
 
-class IncludeInliner
-{
-    public:
+class IncludeInliner {
+   public:
     int include_depth_limit = 256;
 
-    void Process(std::istream& input,
-                 std::ostream& output,
-                 const std::string& root,
-                 const std::string& file_name,
-                 const std::string& directive,
-                 bool allow_angle_brackets,
-                 bool recurse);
+    void Process(std::istream& input, std::ostream& output, const std::string& root,
+                 const std::string& file_name, const std::string& directive,
+                 bool allow_angle_brackets, bool recurse);
     std::string GetIncludeStackTrace(int line);
 
-    private:
-    int _include_depth                                   = 0;
+   private:
+    int _include_depth = 0;
     std::shared_ptr<SourceFileDesc> _included_stack_head = nullptr;
 
-    void ProcessCore(std::istream& input,
-                     std::ostream& output,
-                     const std::string& root,
-                     const std::string& file_name,
-                     int line_number,
-                     const std::string& directive,
-                     bool allow_angle_brackets,
-                     bool recurse);
+    void ProcessCore(std::istream& input, std::ostream& output, const std::string& root,
+                     const std::string& file_name, int line_number, const std::string& directive,
+                     bool allow_angle_brackets, bool recurse);
 };
 
-#endif // !SOURCE_INLINER_HPP
+#endif  // !SOURCE_INLINER_HPP
