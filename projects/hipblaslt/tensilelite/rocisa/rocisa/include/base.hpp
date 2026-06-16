@@ -113,7 +113,6 @@ namespace rocisa
             m_mutex.lock();
             m_threads[id] = std::move(KernelInfo(isaVersion, wavefrontSize));
             m_vgpridx[id] = std::move(std::map<std::string, int>());
-            m_vgprmsb[id] = 0;
             m_mutex.unlock();
         }
 
@@ -164,11 +163,6 @@ namespace rocisa
             return m_vgpridx[std::this_thread::get_id()];
         }
 
-        int getVgprMsb()
-        {
-            return m_vgprmsb[std::this_thread::get_id()];
-        }
-
         void setData(const std::map<IsaVersion, IsaInfo>& data)
         {
             m_isainfo = data;
@@ -197,15 +191,6 @@ namespace rocisa
             m_mutex.unlock();
         }
 
-        void setVgprMsb(const int msb)
-        {
-            std::thread::id id = std::this_thread::get_id();
-            // need lock here?
-            m_mutex.lock();
-            m_vgprmsb[id] = msb;
-            m_mutex.unlock();
-        }
-
     private:
         rocIsa() = default;
 
@@ -214,7 +199,6 @@ namespace rocisa
         std::map<IsaVersion, IsaInfo>         m_isainfo;
         std::map<std::thread::id, OutputOptions> m_outputOptions;
         std::map<std::thread::id, std::map<std::string, int>> m_vgpridx;
-        std::map<std::thread::id, int>        m_vgprmsb;
     };
 
     struct Item
@@ -256,11 +240,6 @@ namespace rocisa
         std::map<std::string, int> getVgprIdx() const
         {
             return rocIsa::getInstance().getVgprIdx();
-        }
-
-        int getVgprMsb() const
-        {
-            return rocIsa::getInstance().getVgprMsb();
         }
 
         KernelInfo kernel() const

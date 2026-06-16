@@ -884,7 +884,6 @@ namespace rocisa
         std::optional<RegName> regName;
         int                    regIdx;
         int                    regNum;
-        mutable  int           msb;
         bool                   isInlineAsm;
         bool                   isMinus;
         bool                   isAbs;
@@ -900,7 +899,6 @@ namespace rocisa
             , regName(std::move(regName))
             , regIdx(regIdx)
             , regNum(int(ceil(regNum)))
-            , msb(0)
             , isInlineAsm(false)
             , isMinus(false)
             , isAbs(false)
@@ -921,7 +919,6 @@ namespace rocisa
             , regName(std::move(regName))
             , regIdx(regIdx)
             , regNum(int(ceil(regNum)))
-            , msb(0)
             , isInlineAsm(false)
             , isMinus(false)
             , isAbs(isAbs)
@@ -936,7 +933,6 @@ namespace rocisa
             , regName(other.regName)
             , regIdx(other.regIdx)
             , regNum(other.regNum)
-            , msb(other.msb)
             , isInlineAsm(other.isInlineAsm)
             , isMinus(other.isMinus)
             , isAbs(other.isAbs)
@@ -961,7 +957,6 @@ namespace rocisa
             , regName(std::move(other.regName))
             , regIdx(other.regIdx)
             , regNum(other.regNum)
-            , msb(other.msb)
             , isInlineAsm(other.isInlineAsm)
             , isMinus(other.isMinus)
             , isAbs(other.isAbs)
@@ -978,7 +973,6 @@ namespace rocisa
                 regName     = other.regName;
                 regIdx      = other.regIdx;
                 regNum      = other.regNum;
-                msb         = other.msb;
                 isInlineAsm = other.isInlineAsm;
                 isMinus     = other.isMinus;
                 isAbs       = other.isAbs;
@@ -996,7 +990,6 @@ namespace rocisa
                 regName     = std::move(other.regName);
                 regIdx      = other.regIdx;
                 regNum      = other.regNum;
-                msb         = other.msb;
                 isInlineAsm = other.isInlineAsm;
                 isMinus     = other.isMinus;
                 isAbs       = other.isAbs;
@@ -1116,18 +1109,6 @@ namespace rocisa
             return !(*this == other);
         }
 
-        void setMsb() const
-        {
-            if(regName)
-            {
-                msb = regName->getTotalIdx() / 256;
-            }
-            else
-            {
-                msb = regIdx / 256;
-            }
-        }
-
         std::string toString() const override
         {
             if(isOff)
@@ -1138,13 +1119,6 @@ namespace rocisa
             std::string minusStr = isMinus ? "-" : "";
             minusStr             = isAbs ? "abs(" + minusStr : minusStr;
             auto absStr          = isAbs ? ")" : "";
-            std::string msbStr = "";
-            if(rocIsa::getInstance().getAsmCaps()["HasVgprMSB"] && regType == "v")
-            {
-                setMsb();
-                if(msb > 0)
-                    msbStr = std::to_string(-256 * msb);
-            }
             if(isInlineAsm)
             {
                 return minusStr + "%" + std::to_string(regIdx) + absStr;
@@ -1155,12 +1129,12 @@ namespace rocisa
                 if(regNum == 1)
                 {
                     return minusStr + regType + "[" + macroSlash + regType + "gpr"
-                           + regName->toString() + msbStr + "]" + absStr;
+                           + regName->toString() + "]" + absStr;
                 }
                 else
                 {
                     return minusStr + regType + "[" + macroSlash + regType + "gpr"
-                           + regName->toString() + msbStr + ":" + regType + "gpr" + regName->toString() + msbStr + "+"
+                           + regName->toString() + ":" + regType + "gpr" + regName->toString() + "+"
                            + std::to_string(regNum - 1) + "]" + absStr;
                 }
             }
@@ -1168,14 +1142,12 @@ namespace rocisa
             {
                 if(regNum == 1)
                 {
-                    if(msb > 0)
-                        return minusStr + regType + "["  + std::to_string(regIdx) + msbStr + "]" + absStr;
                     return minusStr + regType + std::to_string(regIdx) + absStr;
                 }
                 else
                 {
-                    return minusStr + regType + "[" + std::to_string(regIdx) + msbStr + ":"
-                           + std::to_string(regIdx + regNum - 1) + msbStr + "]" + absStr;
+                    return minusStr + regType + "[" + std::to_string(regIdx) + ":"
+                           + std::to_string(regIdx + regNum - 1) + "]" + absStr;
                 }
             }
         }

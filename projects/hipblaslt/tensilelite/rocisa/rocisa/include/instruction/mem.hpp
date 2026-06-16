@@ -210,7 +210,6 @@ namespace rocisa
                 kStr += flat->toString();
             }
             kStr = formatWithComment(kStr);
-            setMsb(kStr, {vaddr}, dst);
             return kStr;
         }
     };
@@ -367,7 +366,6 @@ namespace rocisa
                 kStr += " offen offset:0";
             }
             kStr = formatWithComment(kStr);
-            setMsb(kStr, {vaddr}, dst);
             return kStr;
         }
     };
@@ -705,7 +703,6 @@ namespace rocisa
                 kStr += flat->toString();
             }
             kStr = formatWithComment(kStr);
-            setMsb(kStr, {vaddr, srcData}, nullptr);
             return kStr;
         }
     };
@@ -793,7 +790,6 @@ namespace rocisa
                 kStr += " offen offset:0";
             }
             kStr = formatWithComment(kStr);
-            setMsb(kStr, {vaddr}, srcData);
             return kStr;
         }
     };
@@ -885,7 +881,6 @@ namespace rocisa
                 kStr += ds->toString();
             }
             kStr = formatWithComment(kStr);
-            setMsb(kStr, {srcs}, dst);
             return kStr;
         }
     };
@@ -979,16 +974,6 @@ namespace rocisa
             return kStr;
         }
 
-        virtual const std::vector<InstructionInput> getMsbSrcParams() const
-        {
-            return {dstAddr, src0, src1};
-        }
-
-        virtual const std::shared_ptr<Container> getMsbDstParam() const
-        {
-            return {};
-        }
-
         std::string toString() const override
         {
             auto        newInstStr = preStr();
@@ -998,7 +983,6 @@ namespace rocisa
                 kStr += ds->toString();
             }
             kStr = formatWithComment(kStr);
-            setMsb(kStr, getMsbSrcParams(), getMsbDstParam());
             return kStr;
         }
     };
@@ -1745,7 +1729,6 @@ namespace rocisa
                 kStr += " offen offset:0";
             }
             kStr = formatWithComment(kStr);
-            setMsb(kStr, {vaddr}, srcData);
             return kStr;
         }
     };
@@ -1965,7 +1948,6 @@ namespace rocisa
             if(flat)
                 kStr += flat->toString();
             kStr = formatWithComment(kStr);
-            setMsb(kStr, {tmp, srcData}, vaddr);
             return kStr;
         }
 
@@ -2422,19 +2404,6 @@ namespace rocisa
             kStr = formatWithComment(kStr);
             kStr2 = formatWithComment(kStr2);
 
-            auto dstCopyPtr = std::make_shared<RegisterContainer>(*dynamic_cast<RegisterContainer*>(dst.get()));
-
-            int const idx = dstCopyPtr->regName->offsets.size() - 1;
-            int const regNum = 4;
-            dstCopyPtr->regNum = regNum;
-            dstCopyPtr->setMsb();
-            setMsb(kStr, {srcs}, dstCopyPtr);
-
-            dstCopyPtr->regName->offsets[idx] = dstCopyPtr->regName->offsets[idx] + regNum;
-            dstCopyPtr->regNum                = 2;
-            dstCopyPtr->setMsb();
-            setMsb(kStr2, {srcs}, dstCopyPtr);
-
             return kStr + kStr2;
         }
     };
@@ -2820,18 +2789,6 @@ namespace rocisa
             kStr2 += dsCopy->toString();
             kStr  = formatWithComment(kStr);
             kStr2 = formatWithComment(kStr2);
-            // compute 2 different src vgpr msb
-            auto srcCopyPtr = std::make_shared<RegisterContainer>(
-                *dynamic_cast<RegisterContainer*>(src0.get()));
-            int idx            = srcCopyPtr->regName->offsets.size() - 1;
-            int regNum         = 4;
-            srcCopyPtr->regNum = regNum;
-            srcCopyPtr->setMsb();
-            setMsb(kStr, {dstAddr, srcCopyPtr}, nullptr);
-            srcCopyPtr->regName->offsets[idx] = srcCopyPtr->regName->offsets[idx] + regNum;
-            srcCopyPtr->regNum                = 2;
-            srcCopyPtr->setMsb();
-            setMsb(kStr2, {dstAddr, srcCopyPtr}, nullptr);
 
             return kStr + kStr2;
         }
@@ -2899,15 +2856,6 @@ namespace rocisa
             kStr2 += dsCopy->toString();
             kStr  = formatWithComment(kStr);
             kStr2 = formatWithComment(kStr2);
-            // TODO: refactor this
-            auto srcCopy       = RegisterContainer(*dynamic_cast<RegisterContainer*>(src0.get()));
-            auto srcCopyPtr    = std::make_shared<RegisterContainer>(srcCopy);
-            int  regNum        = srcCopyPtr->regNum / 2;
-            srcCopyPtr->regNum = regNum;
-            setMsb(kStr, {srcCopyPtr}, dstAddr);
-            int idx                           = srcCopyPtr->regName->offsets.size() - 1;
-            srcCopyPtr->regName->offsets[idx] = srcCopyPtr->regName->offsets[idx] + regNum;
-            setMsb(kStr2, {srcCopyPtr}, dstAddr);
             return kStr + kStr2;
         }
     };
@@ -3017,16 +2965,6 @@ namespace rocisa
         std::vector<InstructionInput> getSrcParams() const override
         {
             return {src0, src1};
-        }
-
-        const std::vector<InstructionInput> getMsbSrcParams() const override
-        {
-            return {src0, src1};
-        }
-
-        const std::shared_ptr<Container> getMsbDstParam() const override
-        {
-            return dstAddr;
         }
     };
 
@@ -3459,7 +3397,6 @@ namespace rocisa
                 kStr += gm->toString();
 
             kStr = formatWithComment(kStr);
-            setMsb(kStr, {v_addr, s_addr}, nullptr);
             return kStr;
         }
 

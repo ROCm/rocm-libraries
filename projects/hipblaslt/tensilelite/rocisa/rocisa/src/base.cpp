@@ -122,10 +122,8 @@ void init_base(nb::module_ m)
         .def("setData", &rocisa::rocIsa::setData, "Set data for pickling.")
         .def("getOutputOptions", &rocisa::rocIsa::getOutputOptions, "Get output options.")
         .def("getVgprIdx", &rocisa::rocIsa::getVgprIdx, "Get vgpr idx.")
-        .def("getVgprMsb", &rocisa::rocIsa::getVgprMsb, "Get vgpr msb.")
         .def("setOutputOptions", &rocisa::rocIsa::setOutputOptions, "Set output options.")
-        .def("setVgprIdx", &rocisa::rocIsa::setVgprIdx, "Set vgpr idx.")
-        .def("setVgprMsb", &rocisa::rocIsa::setVgprMsb, "Set vgpr msb.");
+        .def("setVgprIdx", &rocisa::rocIsa::setVgprIdx, "Set vgpr idx.");
 
     auto m_base = m.def_submodule("base", "rocIsa base submodule.");
     nb::class_<IsaVersion>(m_base, "IsaVersion")
@@ -208,7 +206,6 @@ void init_base(nb::module_ m)
         .def_prop_ro("archCaps", &rocisa::Item::getArchCaps)
         .def_prop_ro("asmBugs", &rocisa::Item::getAsmBugs)
         .def_prop_ro("vgprIdx", &rocisa::Item::getVgprIdx)
-        .def_prop_ro("vgprMsb", &rocisa::Item::getVgprMsb)
         .def_prop_ro("kernel", &rocisa::Item::kernel)
         .def("prettyPrint", &rocisa::Item::prettyPrint, "Print the instance and the name of Item.")
         .def("__str__", &rocisa::Item::toString)
