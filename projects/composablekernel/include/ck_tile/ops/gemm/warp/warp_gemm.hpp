@@ -511,6 +511,9 @@ using WarpGemmMfma_i32_32x32x16_i8_i8_CTransposed =
 using WarpGemmMfma_i32_16x16x32_i8_i8 = WarpGemmImpl<
     WarpGemmAttributeMfma<WarpGemmAttributeMfmaImpl_i32_16x16x32_i8<WGAttrCtlEnum::Default_>>>;
 
+using WarpGemmMfma_i32_16x16x64_i8_i8 = WarpGemmImpl<
+    WarpGemmAttributeMfma<WarpGemmAttributeMfmaImpl_i32_16x16x64_i8<WGAttrCtlEnum::Default_>>>;
+
 using WarpGemmMfma_i32_16x16x32_i8_i8_CTransposed =
     WarpGemmImpl<WarpGemmAttributeMfmaTransposedCDistribution<
         WarpGemmAttributeMfmaImpl_i32_16x16x32_i8<WGAttrCtlEnum::Default_>>>;
