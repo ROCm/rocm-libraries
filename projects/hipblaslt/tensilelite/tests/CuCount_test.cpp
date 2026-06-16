@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <limits>
 #include <memory>
 
 #include <hip/hip_runtime.h>
@@ -586,6 +587,126 @@ TEST(StreamK5HybridModeTest, OffWithSmCountTargetEngagesHeuristic)
 }
 
 // smCountTarget heuristic threshold behavior is covered by origami/tests/test_streamk.cpp.
+
+// ===========================================================================
+// SK5 workspace sizing regression tests
+//
+// Verify two invariants that prevent the under-provision regression:
+//   1. The work-queue (Synchronizer) lives in a separate allocation
+//      (AddressFlags); requiredWorkspaceSize must NOT include its 2048 bytes.
+//   2. requiredWorkspaceSize for mode=ON (dynamic) and mode=OFF (static)
+//      must each equal partialTileSize(grid) for their respective grids,
+//      ensuring the workspace query and solve() always agree.
+// ===========================================================================
+
+TEST(StreamK5WorkspaceRegressionTest, WorkspaceExcludesQueueRegion)
+{
+    StreamK5AnalyticalEnv env;
+    env.solution.sizeMapping.workspaceSizePerElemC = 4;
+    env.solution.sizeMapping.streamKAtomic        = 0;
+
+    // Pick M/N so tiles % grid != 0 (partial tiles exist).
+    // macroTile=128x128 → tiles = ceil(M/128)*ceil(N/128).
+    // 4096x4224: tiles = 32*33 = 1056, grid = min(1056, 256) = 256,
+    // 1056 % 256 != 0 → partial workspace required.
+    auto problem = makeGemmProblem(4096, 4224, 64);
+    problem.setParams().setStreamKTileSchedulingMode(1); // ON (dynamic)
+    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+
+    size_t tiles = problem.getNumTiles(env.solution.sizeMapping, 1);
+    ASSERT_GT(tiles, 0u);
+
+    bool effectiveDynamic = env.solution.streamK5EffectiveDynamic(problem, env.device);
+    ASSERT_TRUE(effectiveDynamic) << "4096x4224 with mode=ON must be dynamic";
+
+    auto   reduction = env.solution.getSKReduction(problem, env.device);
+    size_t grid      = env.solution.getSKGrid(problem, env.device, tiles, reduction);
+
+    ASSERT_NE(tiles % grid, 0u) << "Need partial tiles for this test";
+
+    size_t expected = env.solution.partialTileSize(grid);
+    size_t ws       = env.solution.requiredWorkspaceSize(problem, env.device);
+
+    EXPECT_EQ(ws, expected)
+        << "Workspace must equal partialTileSize(grid) with no +2048 queue padding. "
+        << "ws=" << ws << " expected=" << expected
+        << " diff=" << static_cast<int64_t>(ws) - static_cast<int64_t>(expected);
+}
+
+TEST(StreamK5WorkspaceRegressionTest, ModeConsistencyOffVsDynamic)
+{
+    StreamK5AnalyticalEnv env;
+    env.solution.sizeMapping.workspaceSizePerElemC = 4;
+    env.solution.sizeMapping.streamKAtomic        = 0;
+
+    // Use dimensions that produce partial tiles (tiles % grid != 0).
+    auto problemOff = makeGemmProblem(4096, 4224, 64);
+    problemOff.setParams().setStreamKTileSchedulingMode(0); // OFF (static)
+    problemOff.setWorkspaceSize(std::numeric_limits<size_t>::max());
+
+    auto problemOn = makeGemmProblem(4096, 4224, 64);
+    problemOn.setParams().setStreamKTileSchedulingMode(1); // ON (dynamic)
+    problemOn.setWorkspaceSize(std::numeric_limits<size_t>::max());
+
+    size_t wsOff = env.solution.requiredWorkspaceSize(problemOff, env.device);
+    size_t wsOn  = env.solution.requiredWorkspaceSize(problemOn, env.device);
+
+    auto tilesOff = problemOff.getNumTiles(env.solution.sizeMapping, 1);
+    auto tilesOn  = problemOn.getNumTiles(env.solution.sizeMapping, 1);
+    ASSERT_EQ(tilesOff, tilesOn) << "Same GEMM dimensions must produce same tile count";
+
+    auto redOff  = env.solution.getSKReduction(problemOff, env.device);
+    auto gridOff = env.solution.getSKGrid(problemOff, env.device, tilesOff, redOff);
+
+    auto redOn  = env.solution.getSKReduction(problemOn, env.device);
+    auto gridOn = env.solution.getSKGrid(problemOn, env.device, tilesOn, redOn);
+
+    // Both must equal their respective partialTileSize(grid) — no queue term.
+    if(tilesOff % gridOff != 0)
+        EXPECT_EQ(wsOff, env.solution.partialTileSize(gridOff))
+            << "OFF workspace must equal partialTileSize(staticGrid)";
+    if(tilesOn % gridOn != 0)
+        EXPECT_EQ(wsOn, env.solution.partialTileSize(gridOn))
+            << "ON workspace must equal partialTileSize(dynamicGrid)";
+}
+
+TEST(StreamK5WorkspaceRegressionTest, SufficientWorkspacePreventsDPFallback)
+{
+    StreamK5AnalyticalEnv env;
+    env.solution.sizeMapping.workspaceSizePerElemC = 4;
+    env.solution.sizeMapping.streamKAtomic        = 0;
+
+    // Use dimensions that produce partial tiles.
+    auto problem = makeGemmProblem(4096, 4224, 64);
+    problem.setParams().setStreamKTileSchedulingMode(1); // ON (dynamic)
+
+    size_t wsNeeded = env.solution.requiredWorkspaceSize(
+        [&]{
+            auto p = problem;
+            p.setWorkspaceSize(std::numeric_limits<size_t>::max());
+            return p;
+        }(),
+        env.device);
+
+    ASSERT_GT(wsNeeded, 0u) << "Need non-zero workspace for this test";
+
+    // Provide exactly the workspace that requiredWorkspaceSize reported.
+    // The solve guard must not fall back to DP.
+    problem.setWorkspaceSize(wsNeeded);
+    size_t wsActual = env.solution.requiredWorkspaceSize(problem, env.device);
+    EXPECT_EQ(wsActual, wsNeeded)
+        << "With workspace >= required, requiredWorkspaceSize must return the "
+        << "full amount (not 0 from DP fallback). ws=" << wsActual
+        << " needed=" << wsNeeded;
+
+    // Providing one byte less must trigger fallback (returns 0 for SK partial).
+    auto problemShort = makeGemmProblem(4096, 4224, 64);
+    problemShort.setParams().setStreamKTileSchedulingMode(1);
+    problemShort.setWorkspaceSize(wsNeeded - 1);
+    size_t wsShort = env.solution.requiredWorkspaceSize(problemShort, env.device);
+    EXPECT_EQ(wsShort, 0u)
+        << "With workspace < required, must fall back (return 0 for partial)";
+}
 
 TEST(Sk3Sk5OffPartition512Test, NativeSk3MatchesSk5OffHostPack)
 {

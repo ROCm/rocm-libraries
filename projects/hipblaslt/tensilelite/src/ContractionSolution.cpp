@@ -3163,11 +3163,9 @@ namespace TensileLite
                    || (tiles % sk.grid != 0 && !streamKDP && !forceDPOnly)))
             {
                 size_t idealWorkspace = partialTileSize(sk.grid);
-                // SK4 and SK5-dynamic need the per-XCD work-queue region; SK5-static
-                // sizes like standalone SK3.
-                if(sizeMapping.streamK == 4
-                   || (sizeMapping.streamK == 5 && effectiveDynamic))
-                    idealWorkspace += 256 * 8;
+                // The per-XCD work-queue (Synchronizer) lives in a separate
+                // allocation managed by AddressFlags, not in the workspace
+                // buffer (AddressWS). Do NOT add its size here.
                 // If given workspace is less than ideal, we can fall back to DP mode
                 // Performance will likely be lower, but the kernel can run if workspace is unavailable
                 if(idealWorkspace > problem.workspaceSize())
@@ -3595,9 +3593,6 @@ namespace TensileLite
                 else if(skGrid > 0 && (tiles % skGrid != 0 && !streamKDP && !forceDPOnly))
                 {
                     size_t idealWorkspace = partialTileSize(skGrid);
-                    if(sizeMapping.streamK == 4
-                       || (sizeMapping.streamK == 5 && effectiveDynamic))
-                        idealWorkspace += 256 * 8;
                     // If given workspace is less than ideal, we can fall back to DP mode
                     // Performance will likely be lower, but the kernel can run if workspace is unavailable
                     if(idealWorkspace <= problem.workspaceSize())

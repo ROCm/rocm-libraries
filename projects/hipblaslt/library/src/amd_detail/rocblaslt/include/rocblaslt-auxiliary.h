@@ -417,6 +417,10 @@ rocblaslt_status rocblaslt_is_algo_supported_cpp(rocblaslt_handle              h
                                                  const rocblaslt::RocTuningV2* tuning,
                                                  size_t& workspaceSizeInBytes);
 
+void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
+                                    rocblaslt::RocGemmType gemmType,
+                                    int32_t                mode);
+
 rocblaslt_status
     rocblaslt_algo_get_heuristic_cpp(rocblaslt_handle       handle,
                                      rocblaslt::RocGemmType gemmType,
