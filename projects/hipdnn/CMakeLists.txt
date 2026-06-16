@@ -57,6 +57,8 @@ project(hipdnn VERSION ${HIPDNN_VERSION} LANGUAGES CXX)
 # ----------------------------------------------------------------------------
 # TheRock Feature Flags
 #
+# See: https://github.com/ROCm/TheRock/blob/main/docs/development/flags.md
+#
 # These flags are injected during the project() call above via
 # CMAKE_PROJECT_TOP_LEVEL_INCLUDES (TheRock's build system), which only
 # populates the cache during that call. They must therefore be declared AFTER
