@@ -157,7 +157,7 @@ jobs:
           retention-days: 7
 
   test:
-    name: "Test hipBLASLt HOST_ASAN | ${{ matrix.family }} (pre_checkin)"
+    name: "Test hipBLASLt HOST_ASAN | ${{ matrix.family }} (quick)"
     needs: [setup, build]
     runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 210
@@ -241,12 +241,12 @@ jobs:
             echo "LD_LIBRARY_PATH=${OUT}/lib:${ASAN_RT_DIR}:${LD_LIBRARY_PATH:-}"
           } >> "$GITHUB_ENV"
 
-      - name: Test hipBLASLt (pre_checkin)
+      - name: Test hipBLASLt (quick)
         timeout-minutes: 180
         env:
           SHARD_INDEX: 1
           TOTAL_SHARDS: 1
-          TEST_TYPE: pre_checkin
+          TEST_TYPE: quick
         run: |
           mkdir -p ./test_logs
           python3 rocm-libraries/test/therock/test_hipblaslt.py 2>&1 | tee ./test_logs/hipblaslt-test_output.log
