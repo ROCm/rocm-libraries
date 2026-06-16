@@ -23,7 +23,6 @@
 ################################################################################
 from .population import Population
 from abc import abstractmethod
-from scipy.stats import gaussian_kde
 
 import math
 import numpy as np
@@ -114,54 +113,6 @@ class Random(Selection):
 
     def op(self, pop: Population, n_parents: int) -> Population:
         return pop[np.random.choice(np.arange(pop.size), n_parents, replace=self.replace)]
-
-
-class RankedRoundRobin(Selection):  # TODO test and maybe sample based on rank/fitness
-    name = "ranked_round_robin"
-
-    def __init__(self, var_name: str = None, mode: str = "elite", **kwargs):
-        self.k = var_name
-        self.mode = mode
-        super(RankedRoundRobin, self).__init__(**kwargs)
-
-    def op(self, pop: Population, n_parents: int) -> Population:
-        pop = pop.sort()
-        if self.k:
-            vals = pop.get(self.k)
-            uniq_vals, uniq_indices = pop.unique(self.k, return_index=True)
-        else:
-            F = pop.F
-            try:
-                vals = gaussian_kde(F).evaluate(F)
-            except np.linalg.LinAlgError:
-                vals = F
-            uniq_vals, uniq_indices = np.unique(vals, return_index=True)
-
-        uniq_vals = uniq_vals[np.argsort(uniq_indices)]
-
-        groups = [np.where(vals == i)[0].tolist() for i in uniq_vals]
-
-        if self.mode == "elite":
-            max_len = len(max(groups, key=len))
-            indices = np.array([g.pop(0) for _ in range(max_len) for g in groups if len(g) > 0])[:n_parents]
-            return pop[indices]
-
-        indices = []
-        while len(indices) < n_parents:
-            for g in groups:
-                if len(g) == 0:
-                    continue
-                n = len(g)
-                p = [(2 * (n - r + 1)) / (n * (n + 1)) for r in range(1, n + 1)]
-                i = np.random.choice(g, p=p)
-                indices.append(i)
-                del g[g.index(i)]
-        return pop[indices[:n_parents]]
-
-    def __repr__(self):
-        msg = super().__repr__()
-        msg = msg.split(")")[0]
-        return f"{msg}, var_name={self.k})"
 
 
 class Rank(Selection):

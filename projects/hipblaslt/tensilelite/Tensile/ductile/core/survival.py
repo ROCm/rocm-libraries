@@ -81,25 +81,3 @@ class Current(Survival):
 
     def __repr__(self):
         return f"Survival(name={self.name})"
-
-
-class Test(Survival):  # TODO this could be used to maintain MI diversity instead of on selection
-    name = "test"
-
-    def __init__(self):
-        from .selection import Selection
-        self.selection = Selection.get("ranked_round_robin", "MatrixInstruction")
-
-    def __call__(self,
-                 old_pop: Population,
-                 pop: Population,
-                 size: int,
-                 *args,
-                 **kwargs) -> Population:
-        if old_pop.size == 0:
-            return pop
-        pop = old_pop.merge(pop)
-        return self.selection(pop, size)
-
-    def __repr__(self):
-        return f"Survival(name={self.name})"

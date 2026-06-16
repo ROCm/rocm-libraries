@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -21,46 +21,31 @@
 # SOFTWARE.
 #
 ################################################################################
-algorithm: GA
-pop_size: 512
-n_gen: 30
-soo: False
-period: 5 # 0 disables it
-tol: 0.0008
-div_thr: 0.5
-max_iters: 250
-seed: 0
-verbose: 1
-log_file: optimization.log
-weights: null
-weight_beta: 0.25 # Beta parameter for weight transformation: w = exp(-beta * (w - w.min()))
-n_elements_to_validate: 0
-survival:
-  name: fitness
-#  ratio: 1.0 # TODO
-selection:
-  name: tournament
-  tournament:
-    k: 2
-  truncation:
-    elite_ratio: 0.231579
-  beta:
-    a: 1
-    b: 2.5
-  common:
-    ratio: 0.5
-    elitism: 0.05
-    replacement: true
-crossover:
-  name: ux
-  common:
-    mode: random
-    prob: 0.9 # Should be in the (0.8, 1.0) range usually
-mutation:
-  prob: null # If set should be something small (e.g. 0.02~0.06), set to 1 / n_params by default
-#  weights:
-#    group_0: 2.1 # MatrixInstruction group is more important to explore/exploit, so we increase its mutation rate, this is just an example
-#    DepthU: 2.1
-# weights' role is to increase the mutation rate for certain parameters, the final prob will be prob * w
+
+import pytest
+
+from Tensile.ductile.core import Mutation, SearchSpace
+from Tensile.ductile.core.population import Individual
+
+pytestmark = pytest.mark.unit
 
 
+def _space():
+    return SearchSpace({"DepthU": [32, 64, 128], "SourceSwap": [0, 1]}, max_iters=2)
+
+
+class TestMutationContracts:
+    def test_rejects_invalid_probability_and_weight_type(self):
+        space = _space()
+        with pytest.raises(ValueError, match="probabilities must be a float"):
+            Mutation(space, prob=2.0)
+        with pytest.raises(ValueError, match="weights must be a dictionary"):
+            Mutation(space, prob=0.2, weights=[1, 2])
+
+    def test_never_introduces_out_of_space_values(self):
+        space = _space()
+        mutation = Mutation(space, prob=1.0)
+        mutated = mutation(Individual({"DepthU": 1, "SourceSwap": 0}))
+
+        assert mutated["DepthU"] in space["DepthU"]
+        assert mutated["SourceSwap"] in space["SourceSwap"]
