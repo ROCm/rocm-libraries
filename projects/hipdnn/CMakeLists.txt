@@ -54,12 +54,16 @@ set(HIPDNN_VERSION "0.0.1")
 
 project(hipdnn VERSION ${HIPDNN_VERSION} LANGUAGES CXX)
 
-# SDPA feature flag. Declared AFTER project() so that a value injected during
-# the project() call via CMAKE_PROJECT_TOP_LEVEL_INCLUDES (e.g. TheRock's
-# HIPDNN_ENABLE_SDPA build flag) is already in the cache when option() runs.
-# If declared before project(), option() falls back to OFF and the compile
-# definition is skipped before the injected value becomes visible, leaving
-# SDPA disabled despite the flag being set.
+# ----------------------------------------------------------------------------
+# TheRock Feature Flags
+#
+# These flags are injected during the project() call above via
+# CMAKE_PROJECT_TOP_LEVEL_INCLUDES (TheRock's build system), which only
+# populates the cache during that call. They must therefore be declared AFTER
+# project(): declared before, option() captures the pre-injection default
+# (typically OFF) and the injected value is silently ignored, leaving the
+# feature compiled out despite the flag being set.
+# ----------------------------------------------------------------------------
 option(HIPDNN_ENABLE_SDPA "Enable SDPA (Scaled Dot-Product Attention) support" OFF)
 if(HIPDNN_ENABLE_SDPA)
     message(STATUS "hipDNN: SDPA support enabled")
