@@ -64,7 +64,7 @@ else()
     message(STATUS "ASM SDPA engine disabled")
 endif()
 
-option(ENABLE_HIP_FLASH2_ENGINE "Build the HIP Flash-Attention 2 SDPA engine (FP16, gfx942/gfx950)" ON)
+option(ENABLE_HIP_FLASH2_ENGINE "Build the HIP Flash-Attention 2 SDPA engine (FP16, gfx942/gfx950)" OFF)
 if(ENABLE_HIP_FLASH2_ENGINE)
     message(STATUS "HIP Flash2 SDPA engine enabled")
     target_compile_definitions(hip_kernel_provider PRIVATE HIPDNN_ENGINE_HIP_FLASH2)
