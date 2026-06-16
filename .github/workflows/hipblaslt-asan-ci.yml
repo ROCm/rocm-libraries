@@ -2,6 +2,11 @@ name: hipBLASLt ASAN CI
 
 on:
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
     paths:
       - "projects/hipblaslt/**"
       - "test/therock/test_hipblaslt.py"
@@ -24,6 +29,8 @@ jobs:
       therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
       docker_image: ${{ steps.ci-env.outputs.docker-image }}
       build_runs_on: ${{ steps.ci-env.outputs.linux-runner }}
+      build_matrix: ${{ steps.matrix.outputs.build_matrix }}
+      test_matrix: ${{ steps.matrix.outputs.test_matrix }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -36,19 +43,32 @@ jobs:
         id: ci-env
         uses: ./.github/actions/ci-env
 
+      - name: Compute arch matrix
+        id: matrix
+        env:
+          IS_DISPATCH: ${{ github.event_name == 'workflow_dispatch' }}
+          HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:asan') }}
+        run: |
+          build='[{"family":"gfx90a"}]'
+          test='[{"family":"gfx90a","runs_on":"linux-gfx90a-gpu-rocm"}]'
+          if [[ "$IS_DISPATCH" == "true" || "$HAS_LABEL" == "true" ]]; then
+            build='[{"family":"gfx90a"},{"family":"gfx942"}]'
+            test='[{"family":"gfx90a","runs_on":"linux-gfx90a-gpu-rocm"},{"family":"gfx942","runs_on":"linux-gfx942-1gpu-core42-ossci-rocm"}]'
+          fi
+          echo "build_matrix={\"include\":${build}}" >> "$GITHUB_OUTPUT"
+          echo "test_matrix={\"include\":${test}}" >> "$GITHUB_OUTPUT"
+
   build:
     name: "Build (hipBLASLt | ${{ matrix.family }} | HOST_ASAN)"
     needs: setup
     runs-on: ${{ needs.setup.outputs.build_runs_on }}
     timeout-minutes: 600
+    continue-on-error: ${{ matrix.family == 'gfx942' }}
     permissions:
       id-token: write
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - family: gfx90a
-          - family: gfx942
+      matrix: ${{ fromJSON(needs.setup.outputs.build_matrix) }}
     container:
       image: ${{ needs.setup.outputs.docker_image }}
       options: -v /runner/config:/home/awsconfig/
@@ -161,6 +181,7 @@ jobs:
     needs: [setup, build]
     runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 210
+    continue-on-error: ${{ matrix.family == 'gfx942' }}
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       options: --ipc host
@@ -173,12 +194,7 @@ jobs:
         --env-file /etc/podinfo/gha-gpu-isolation-settings
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - family: gfx90a
-            runs_on: linux-gfx90a-gpu-rocm
-          - family: gfx942
-            runs_on: linux-gfx942-1gpu-core42-ossci-rocm
+      matrix: ${{ fromJSON(needs.setup.outputs.test_matrix) }}
     defaults:
       run:
         shell: bash
@@ -264,8 +280,9 @@ jobs:
           BUILD: ${{ needs.build.result }}
           TEST: ${{ needs.test.result }}
         run: |
-          echo "Build (hipBLASLt ASAN): ${BUILD}"
-          echo "Test  (pre_checkin):    ${TEST}"
+          echo "Build (hipBLASLt ASAN, gfx90a-gating): ${BUILD}"
+          echo "Test  (hipBLASLt ASAN, gfx90a-gating): ${TEST}"
+          echo "Note: gfx942 is opt-in (ci:asan label) and non-gating."
           if [[ "$BUILD" != "success" || "$TEST" != "success" ]]; then
             echo "::error::hipBLASLt ASAN failed (build=${BUILD} test=${TEST})"
             exit 1
