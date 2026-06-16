@@ -226,6 +226,60 @@ protected:
         ///< Set by deselect_engines().
         ///< Accumulates across calls.
 
+    enum class ActivePlanFinalization
+    {
+        UNFINALIZED,
+        FINALIZED
+    };
+
+    static bool isFinalized(ActivePlanFinalization finalization)
+    {
+        return finalization == ActivePlanFinalization::FINALIZED;
+    }
+
+    void resetActivePlanState()
+    {
+        _activePlanIndex = 0;
+        _executionPlanFinalized = false;
+        _selectedEngineId.reset();
+    }
+
+    void resetCompiledPlanState()
+    {
+        _compiledPlans.clear();
+        resetActivePlanState();
+    }
+
+    void setActivePlanState(size_t activePlanIndex, ActivePlanFinalization finalization)
+    {
+        _activePlanIndex = activePlanIndex;
+
+        if(_compiledPlans.empty() || _activePlanIndex >= _compiledPlans.size())
+        {
+            resetActivePlanState();
+            return;
+        }
+
+        _executionPlanFinalized = isFinalized(finalization);
+        _selectedEngineId = _compiledPlans[_activePlanIndex].engineId;
+    }
+
+    void replaceCompiledPlans(std::vector<CompiledPlan>&& plans,
+                              size_t activePlanIndex,
+                              ActivePlanFinalization finalization)
+    {
+        _compiledPlans = std::move(plans);
+        setActivePlanState(activePlanIndex, finalization);
+    }
+
+    void replaceWithSingleCompiledPlan(CompiledPlan plan, ActivePlanFinalization finalization)
+    {
+        std::vector<CompiledPlan> plans;
+        plans.reserve(1);
+        plans.push_back(std::move(plan));
+        replaceCompiledPlans(std::move(plans), 0, finalization);
+    }
+
     /// Get the active plan's engine config descriptor, or nullptr if no active plan exists
     /// or the active plan is barred.
     detail::ScopedHipdnnBackendDescriptor* activeEngineConfigPtr()
@@ -981,7 +1035,7 @@ private:
 
     /// Lower the frontend graph into a backend descriptor without a handle.
     /// The descriptor is serializable but cannot be used for engine selection
-    /// or execution. Clears any existing descriptor before re-lowering.
+    /// or execution. Clears any existing descriptor and compiled plans before re-lowering.
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error lower_to_backend()
     {
@@ -1008,6 +1062,7 @@ private:
             HIPDNN_FE_LOG_INFO("Purging existing graph descriptor before re-lowering");
         }
         resetGraphDesc();
+        resetCompiledPlanState();
 
         std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor> tensorDescs;
         std::vector<detail::ScopedHipdnnBackendDescriptor> operations;
@@ -1118,21 +1173,17 @@ private:
         const int64_t selectedEngineId = engineIds[selectedIndex];
         HIPDNN_FE_LOG_INFO("Selected engine id " << selectedEngineId << " for execution plan.");
 
-        // Populate _compiledPlans with ALL engine configs and set the active
-        // index to the selected engine.
-        _compiledPlans.clear();
-        _activePlanIndex = selectedIndex;
-        _compiledPlans.reserve(engineConfigs.size());
+        std::vector<CompiledPlan> plans;
+        plans.reserve(engineConfigs.size());
         for(size_t i = 0; i < engineConfigs.size(); ++i)
         {
-            auto& plan = _compiledPlans.emplace_back();
+            CompiledPlan plan;
             plan.engineConfigDesc = std::move(engineConfigs[i]);
             plan.engineId = engineIds[i];
+            plans.push_back(std::move(plan));
         }
 
-        // Record the engine for the upcoming plan; serialize() queries it for
-        // plan-serialization support.
-        _selectedEngineId = selectedEngineId;
+        replaceCompiledPlans(std::move(plans), selectedIndex, ActivePlanFinalization::UNFINALIZED);
 
         return {ErrorCode::OK, ""};
     }
@@ -1161,15 +1212,11 @@ private:
                                              static_cast<const void*>(&engineDesc.get())),
                                          "Failed to set engine on the engine config descriptor.");
 
-        _compiledPlans.clear();
-        _activePlanIndex = 0;
-        auto& plan = _compiledPlans.emplace_back();
+        CompiledPlan plan;
         plan.engineConfigDesc = std::move(engineConfigDesc);
         plan.engineId = engineId;
 
-        // Record the engine for the upcoming plan; serialize() queries it for
-        // plan-serialization support.
-        _selectedEngineId = engineId;
+        replaceWithSingleCompiledPlan(std::move(plan), ActivePlanFinalization::UNFINALIZED);
 
         return {ErrorCode::OK, ""};
     }
@@ -1616,10 +1663,7 @@ protected:
         // Any cached backend descriptors are stale and must be cleared. The caller
         // must call build_operation_graph() to rebuild them.
         resetGraphDesc();
-        _compiledPlans.clear();
-        _activePlanIndex = 0;
-        _executionPlanFinalized = false;
-        _selectedEngineId.reset();
+        resetCompiledPlanState();
         return {};
     }
 
@@ -1835,7 +1879,7 @@ public:
         // Allocate an unfinalized execution plan descriptor for each engine
         // config. build_plans() will finalize the active plan (default) or all
         // plans (BuildPlanPolicy::ALL).
-        _executionPlanFinalized = false;
+        setActivePlanState(_activePlanIndex, ActivePlanFinalization::UNFINALIZED);
         for(auto& plan : _compiledPlans)
         {
             plan.executionPlanDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
@@ -1891,9 +1935,7 @@ public:
         CompiledPlan plan;
         HIPDNN_CHECK_ERROR(compilePlanFromSpec(engineId, settings, plan));
 
-        _compiledPlans.clear();
-        _activePlanIndex = 0;
-        _compiledPlans.push_back(std::move(plan));
+        replaceWithSingleCompiledPlan(std::move(plan), ActivePlanFinalization::UNFINALIZED);
 
         return {ErrorCode::OK, ""};
     }
@@ -2068,10 +2110,7 @@ public:
         _preferredEngineId = tempEngineId;
         _isOverrideShapeEnabled = tempOverrideShapeEnabled;
         setGraphDesc(std::move(graphDesc), handle != nullptr);
-        _compiledPlans.clear();
-        _activePlanIndex = 0;
-        _executionPlanFinalized = false;
-        _selectedEngineId.reset();
+        resetCompiledPlanState();
 
         int flags = 0;
         HIPDNN_RETURN_ON_BACKEND_FAILURE(
@@ -2088,20 +2127,20 @@ public:
                     detail::hipdnnBackend()->backendCreateAndDeserializeExecutionPlanExt(
                         handle, &plan, data.data(), data.size()),
                     "Failed to deserialize embedded execution plan");
-                // Store the deserialized plan as the single active compiled plan.
-                auto& compiledPlan = _compiledPlans.emplace_back();
+                CompiledPlan compiledPlan;
                 compiledPlan.executionPlanDesc
                     = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(plan);
-                _activePlanIndex = 0;
+
                 // A deserialized compiled plan is finalized by construction and can be re-serialized.
-                _executionPlanFinalized = true;
-                // Recover the engine backing the attached plan for the serialize capability gate.
-                _selectedEngineId
+                auto engineId
                     = detail::getExecutionPlanEngineId(compiledPlan.executionPlanDesc->get());
-                if(_selectedEngineId.has_value())
+                if(engineId.has_value())
                 {
-                    compiledPlan.engineId = *_selectedEngineId;
+                    compiledPlan.engineId = *engineId;
                 }
+
+                replaceWithSingleCompiledPlan(std::move(compiledPlan),
+                                              ActivePlanFinalization::FINALIZED);
             }
             else
             {
@@ -2139,10 +2178,11 @@ public:
     Error serialize_compiled_plan(std::vector<uint8_t>& data) const
     {
         const auto* execPlan = activeExecutionPlanPtr();
-        if(execPlan == nullptr || !execPlan->valid())
+        if(execPlan == nullptr || !execPlan->valid() || !_executionPlanFinalized)
         {
             return {ErrorCode::INVALID_VALUE,
-                    "Graph has no compiled execution plan. Call build() or build_plans() first."};
+                    "Graph has no finalized compiled execution plan. Call build() or "
+                    "build_plans() first."};
         }
 
         size_t planByteSize = 0;
@@ -2193,20 +2233,18 @@ public:
                 handle, &executionPlan, data.data(), data.size()),
             "Failed to deserialize compiled plan");
 
-        // Deserialized plans have no engine config — only the execution plan.
-        _compiledPlans.clear();
-        _activePlanIndex = 0;
-        auto& plan = _compiledPlans.emplace_back();
+        CompiledPlan plan;
         plan.executionPlanDesc
             = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(executionPlan);
+
         // A deserialized compiled plan is finalized by construction and can be re-serialized.
-        _executionPlanFinalized = true;
-        // Recover the engine backing the attached plan for the serialize capability gate.
-        _selectedEngineId = detail::getExecutionPlanEngineId(plan.executionPlanDesc->get());
-        if(_selectedEngineId.has_value())
+        auto engineId = detail::getExecutionPlanEngineId(plan.executionPlanDesc->get());
+        if(engineId.has_value())
         {
-            plan.engineId = *_selectedEngineId;
+            plan.engineId = *engineId;
         }
+
+        replaceWithSingleCompiledPlan(std::move(plan), ActivePlanFinalization::FINALIZED);
         resetGraphDesc();
         _sub_nodes.clear();
         _isOverrideShapeEnabled = false;
@@ -2367,10 +2405,7 @@ public:
         _preferredEngineId = tempEngineId;
         _isOverrideShapeEnabled = tempOverrideShapeEnabled;
         setGraphDesc(std::move(graphDesc), handle != nullptr);
-        _compiledPlans.clear();
-        _activePlanIndex = 0;
-        _executionPlanFinalized = false;
-        _selectedEngineId.reset();
+        resetCompiledPlanState();
         return {};
     }
 
@@ -2561,7 +2596,7 @@ public:
                         "Failed to finalize any execution plan (policy=ALL)."};
             }
 
-            _activePlanIndex = firstSuccessIndex;
+            setActivePlanState(firstSuccessIndex, ActivePlanFinalization::FINALIZED);
             return {ErrorCode::OK, ""};
         }
 
@@ -2618,7 +2653,7 @@ public:
                         + std::to_string(_maxWorkspaceAllowed) + "."};
         }
 
-        _executionPlanFinalized = true;
+        setActivePlanState(_activePlanIndex, ActivePlanFinalization::FINALIZED);
 
         return {ErrorCode::OK, ""};
     }
@@ -3715,8 +3750,7 @@ private:
             }
 
             // ── Compile real plans ──────────────────────────────────────
-            _compiledPlans.clear();
-            _activePlanIndex = 0;
+            std::vector<CompiledPlan> compiledPlans;
 
             for(size_t specIdx = 0; specIdx < filteredSpecs.size(); ++specIdx)
             {
@@ -3792,14 +3826,14 @@ private:
                     }
 
                     // Record this skip for deferred result generation.
-                    // The plan is NOT added to _compiledPlans or
-                    // compiledPlanMap — it will not be benchmarked.
+                    // The plan is NOT added to compiledPlans or compiledPlanMap — it will not be
+                    // benchmarked.
                     workspaceSkippedPlans.push_back({specIdx, wsSize});
                     continue;
                 }
 
-                const size_t idx = _compiledPlans.size();
-                _compiledPlans.push_back(std::move(plan));
+                const size_t idx = compiledPlans.size();
+                compiledPlans.push_back(std::move(plan));
                 compiledPlanMap.push_back({idx, specIdx});
             }
 
@@ -3813,7 +3847,7 @@ private:
                                    << " skipped: workspace limit, " << failed << " failed)");
             }
 
-            if(_compiledPlans.empty())
+            if(compiledPlans.empty())
             {
                 if(!workspaceSkippedPlans.empty())
                 {
@@ -3843,6 +3877,8 @@ private:
                 return {ErrorCode::HIPDNN_BACKEND_ERROR,
                         "No plans could be compiled from the provided plan specs."};
             }
+
+            replaceCompiledPlans(std::move(compiledPlans), 0, ActivePlanFinalization::FINALIZED);
         }
         else
         {
@@ -3872,8 +3908,6 @@ private:
             {
                 filterSet.insert(config.engineIdFilter.begin(), config.engineIdFilter.end());
             }
-
-            _activePlanIndex = 0;
 
             for(size_t i = 0; i < _compiledPlans.size(); ++i)
             {
@@ -4332,13 +4366,13 @@ private:
         }
 
         // ── Ranking and winner selection ────────────────────────────────
+        size_t winnerPlanIndex = _activePlanIndex;
+        auto rankErr = rankAndSelectWinner(allResults, config, winnerPlanIndex);
+        if(rankErr.is_bad())
         {
-            auto rankErr = rankAndSelectWinner(allResults, config, _activePlanIndex);
-            if(rankErr.is_bad())
-            {
-                return rankErr;
-            }
+            return rankErr;
         }
+        setActivePlanState(winnerPlanIndex, ActivePlanFinalization::FINALIZED);
 
         // ── Persist results ─────────────────────────────────────────────
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
@@ -4863,7 +4897,7 @@ public:
                         + std::to_string(_maxWorkspaceAllowed)};
         }
 
-        _activePlanIndex = static_cast<size_t>(index);
+        setActivePlanState(static_cast<size_t>(index), ActivePlanFinalization::FINALIZED);
 
         return {ErrorCode::OK, ""};
     }
