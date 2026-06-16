@@ -10,7 +10,7 @@
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
 
-#include <optional>
+#include <memory>
 
 namespace asm_sdpa_engine
 {
@@ -27,20 +27,22 @@ namespace asm_sdpa_engine
  *   - A32 (3-kernel path): ODO → DQDKDV → DQ_CONVERT
  *   - A16 (2-kernel path): ODO → DQDKDV (dQ written directly in BF16)
  *
- * When A16, `_postKernel` is std::nullopt and the DQ_CONVERT launch + dq_acc
+ * When A16, `_postKernel` is nullptr and the DQ_CONVERT launch + dq_acc
  * workspace are both skipped.
  */
 class SdpaBwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {
 public:
     /// A32 constructor: requires all 3 kernels (ODO, DQDKDV, DQ_CONVERT).
-    SdpaBwdPlan(HipModuleGuard odoKernel,
-                HipModuleGuard dqdkdvKernel,
-                std::optional<HipModuleGuard> postKernel,
+    SdpaBwdPlan(std::shared_ptr<HipModuleGuard> odoKernel,
+                std::shared_ptr<HipModuleGuard> dqdkdvKernel,
+                std::shared_ptr<HipModuleGuard> postKernel,
                 SdpaBwdParams params);
 
     /// A16 constructor: requires only 2 kernels (ODO, DQDKDV).
-    SdpaBwdPlan(HipModuleGuard odoKernel, HipModuleGuard dqdkdvKernel, SdpaBwdParams params);
+    SdpaBwdPlan(std::shared_ptr<HipModuleGuard> odoKernel,
+                std::shared_ptr<HipModuleGuard> dqdkdvKernel,
+                SdpaBwdParams params);
 
     ~SdpaBwdPlan() override = default;
 
@@ -57,9 +59,9 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
-    HipModuleGuard _odoKernel;
-    HipModuleGuard _dqdkdvKernel;
-    std::optional<HipModuleGuard> _postKernel; // nullopt when A16 (dq_convert not needed)
+    std::shared_ptr<HipModuleGuard> _odoKernel;
+    std::shared_ptr<HipModuleGuard> _dqdkdvKernel;
+    std::shared_ptr<HipModuleGuard> _postKernel; // nullptr when A16 (dq_convert not needed)
     SdpaBwdParams _params;
 };
 

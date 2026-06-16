@@ -385,9 +385,9 @@ namespace asm_sdpa_engine
 // Constructors
 // =============================================================================
 
-SdpaBwdPlan::SdpaBwdPlan(HipModuleGuard odoKernel,
-                         HipModuleGuard dqdkdvKernel,
-                         std::optional<HipModuleGuard> postKernel,
+SdpaBwdPlan::SdpaBwdPlan(std::shared_ptr<HipModuleGuard> odoKernel,
+                         std::shared_ptr<HipModuleGuard> dqdkdvKernel,
+                         std::shared_ptr<HipModuleGuard> postKernel,
                          SdpaBwdParams params)
     : _odoKernel(std::move(odoKernel))
     , _dqdkdvKernel(std::move(dqdkdvKernel))
@@ -396,12 +396,12 @@ SdpaBwdPlan::SdpaBwdPlan(HipModuleGuard odoKernel,
 {
 }
 
-SdpaBwdPlan::SdpaBwdPlan(HipModuleGuard odoKernel,
-                         HipModuleGuard dqdkdvKernel,
+SdpaBwdPlan::SdpaBwdPlan(std::shared_ptr<HipModuleGuard> odoKernel,
+                         std::shared_ptr<HipModuleGuard> dqdkdvKernel,
                          SdpaBwdParams params)
     : _odoKernel(std::move(odoKernel))
     , _dqdkdvKernel(std::move(dqdkdvKernel))
-    , _postKernel(std::nullopt)
+    , _postKernel(nullptr)
     , _params(params)
 {
 }
@@ -487,7 +487,7 @@ void SdpaBwdPlan::execute(const Handle& handle,
     const unsigned int gdxOdo = _params.odoTiles.gridDim(mhaArgs.seqlen_q);
 
     if(!launchKernel("SDPA backward ODO",
-                     _odoKernel.function(),
+                     _odoKernel->function(),
                      &odoArgs,
                      sizeof(odoArgs),
                      gdxOdo,
@@ -528,7 +528,7 @@ void SdpaBwdPlan::execute(const Handle& handle,
     }
 
     if(!launchKernel("SDPA backward DQDKDV",
-                     _dqdkdvKernel.function(),
+                     _dqdkdvKernel->function(),
                      &dqdkdvArgs,
                      sizeof(dqdkdvArgs),
                      gdxDqdkdv,

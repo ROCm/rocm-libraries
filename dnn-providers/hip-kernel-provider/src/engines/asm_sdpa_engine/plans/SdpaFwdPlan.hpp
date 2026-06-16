@@ -9,6 +9,8 @@
 #include "SdpaKernelUtils.hpp"
 #include "core/Handle.hpp"
 
+#include <memory>
+
 namespace asm_sdpa_engine
 {
 
@@ -21,7 +23,7 @@ public:
     /**
      * @brief Construct a plan with kernel module and precomputed metadata.
      */
-    SdpaFwdPlan(HipModuleGuard kernel, SdpaFwdParams params);
+    SdpaFwdPlan(std::shared_ptr<HipModuleGuard> kernel, SdpaFwdParams params);
 
     ~SdpaFwdPlan() override = default;
 
@@ -41,7 +43,7 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
-    HipModuleGuard _kernel;
+    std::shared_ptr<HipModuleGuard> _kernel;
     SdpaFwdParams _params;
 };
 

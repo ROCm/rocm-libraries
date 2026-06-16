@@ -1050,7 +1050,7 @@ void SdpaBwdPlanBuilder::buildPlan(
     // -------------------------------------------------------------------------
     // 5. Load kernel modules for resolved stages
     // -------------------------------------------------------------------------
-    auto odoKernel = loadKernelModule(odoResolved.coPath, odoResolved.knlName.c_str());
+    auto odoKernel = loadOrGetCachedModule(odoResolved.coPath, odoResolved.knlName.c_str());
     if(!odoKernel)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -1059,7 +1059,8 @@ void SdpaBwdPlanBuilder::buildPlan(
                 + odoResolved.coPath);
     }
 
-    auto dqdkdvKernel = loadKernelModule(dqdkdvResolved.coPath, dqdkdvResolved.knlName.c_str());
+    auto dqdkdvKernel
+        = loadOrGetCachedModule(dqdkdvResolved.coPath, dqdkdvResolved.knlName.c_str());
     if(!dqdkdvKernel)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -1068,11 +1069,11 @@ void SdpaBwdPlanBuilder::buildPlan(
                 + dqdkdvResolved.coPath);
     }
 
-    std::optional<HipModuleGuard> postKernel;
+    std::shared_ptr<HipModuleGuard> postKernel;
     if(dqConvertResolved)
     {
-        postKernel
-            = loadKernelModule(dqConvertResolved->coPath, dqConvertResolved->knlName.c_str());
+        postKernel = loadOrGetCachedModule(dqConvertResolved->coPath,
+                                           dqConvertResolved->knlName.c_str());
         if(!postKernel)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -1140,10 +1141,10 @@ void SdpaBwdPlanBuilder::buildPlan(
     params.attnScale = attnScale;
     params.accumulatorType = accType;
 
-    // postKernel is nullopt for the A16 path; the optional-taking ctor handles
+    // postKernel is nullptr for the A16 path; the shared_ptr-taking ctor handles
     // both paths uniformly.
     executionContext.setPlan(std::make_unique<SdpaBwdPlan>(
-        std::move(*odoKernel), std::move(*dqdkdvKernel), std::move(postKernel), params));
+        std::move(odoKernel), std::move(dqdkdvKernel), std::move(postKernel), params));
 }
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::getCustomKnobs(
