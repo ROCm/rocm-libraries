@@ -11,7 +11,6 @@ TEST(TestTypes, HeuristicModeConversion)
 
     EXPECT_EQ(toBackendType(HeuristicMode::FALLBACK),
               hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK);
-    // cuDNN FE HeurMode_t name-superset values all fold to fallback (RFC 0012 §4.5)
     EXPECT_EQ(toBackendType(HeuristicMode::A), hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK);
     EXPECT_EQ(toBackendType(HeuristicMode::B), hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK);
     EXPECT_EQ(toBackendType(HeuristicMode::OPENSOURCE),
@@ -117,7 +116,6 @@ TEST(TestTypes, DataTypeToString)
     EXPECT_STREQ(to_string(DataType::FP6_E3M2), "fp6_e3m2");
     EXPECT_STREQ(to_string(DataType::INT64), "int64");
     EXPECT_STREQ(to_string(DataType::BOOLEAN), "boolean");
-    // cuDNN FE DataType_t name-superset values (RFC 0012 §4.3)
     EXPECT_STREQ(to_string(DataType::INT8x4), "int8x4");
     EXPECT_STREQ(to_string(DataType::UINT8x4), "uint8x4");
     EXPECT_STREQ(to_string(DataType::INT8x32), "int8x32");
@@ -127,13 +125,10 @@ TEST(TestTypes, DataTypeToString)
     EXPECT_STREQ(to_string(DataType::NOT_SET), "unknown");
 }
 
-TEST(TestTypes, DataTypeCudnnSupersetHasNoBackendMapping)
+TEST(TestTypes, DataTypeCudnnCompatHasNoBackendMapping)
 {
     using namespace hipdnn_frontend;
 
-    // These cuDNN FE DataType_t values are name-superset only: they exist as
-    // enumerators (so the shim can alias the type) but have no hipDNN backend
-    // equivalent, so toHipdnnDataType() reports std::nullopt (RFC 0012 §4.3).
     for(auto dt : {DataType::INT8x4,
                    DataType::UINT8x4,
                    DataType::INT8x32,
@@ -154,7 +149,6 @@ TEST(TestTypes, PointwiseModeToString)
     EXPECT_STREQ(to_string(PointwiseMode::RELU_FWD), "RELU_FWD");
     EXPECT_STREQ(to_string(PointwiseMode::ADD), "ADD");
     EXPECT_STREQ(to_string(PointwiseMode::BINARY_SELECT), "BINARY_SELECT");
-    // cuDNN FE PointwiseMode_t name-superset values (RFC 0012 §4.3)
     EXPECT_STREQ(to_string(PointwiseMode::MOD), "MOD");
     EXPECT_STREQ(to_string(PointwiseMode::POW), "POW");
     EXPECT_STREQ(to_string(PointwiseMode::COS), "COS");
@@ -220,13 +214,10 @@ TEST(TestTypes, PointwiseModeToString)
     }
 }
 
-TEST(TestTypes, PointwiseModeCudnnSupersetClassificationAndMapping)
+TEST(TestTypes, PointwiseModeCudnnCompatClassificationAndMapping)
 {
     using namespace hipdnn_frontend;
 
-    // cuDNN FE PointwiseMode_t name-superset values (RFC 0012 §4.3). COS is unary;
-    // MOD and POW are binary (matching cuDNN's port counts). None have a hipDNN
-    // backend equivalent yet, so toBackendPointwiseMode() reports std::nullopt.
     EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::COS));
     EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::MOD));
     EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::POW));
@@ -242,12 +233,10 @@ TEST(TestTypes, PointwiseModeCudnnSupersetClassificationAndMapping)
     }
 }
 
-TEST(TestTypes, ResampleAndPaddingCudnnSupersetHaveNoBackendMapping)
+TEST(TestTypes, ResampleAndPaddingCudnnCompatHaveNoBackendMapping)
 {
     using namespace hipdnn_frontend;
 
-    // cuDNN FE ResampleMode_t / PaddingMode_t name-superset values (RFC 0012 §4.3):
-    // present as enumerators for shim aliasing, no hipDNN backend equivalent yet.
     EXPECT_EQ(toBackendResampleMode(ResampleMode::BILINEAR), std::nullopt);
     EXPECT_EQ(toBackendResampleMode(ResampleMode::NEAREST), std::nullopt);
     EXPECT_EQ(toBackendPaddingMode(PaddingMode::EDGE_VAL_PAD), std::nullopt);

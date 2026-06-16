@@ -39,12 +39,6 @@ namespace hipdnn_frontend
  * @enum ErrorCode
  * @brief Error codes returned by hipDNN Frontend operations
  *
- * The values below `GRAPH_NOT_SUPPORTED` mirror NVIDIA cuDNN frontend's
- * `error_code_t` (`cudnn_frontend/graph_helpers.h`) so the cuDNN shim can alias
- * this enum 1:1 instead of carrying a parallel re-declared type (RFC 0012 §4.6).
- * They are additive only — names are present for source compatibility; several
- * are CUDA-specific and not produced by the hipDNN backend.
- *
  * Portions derived from NVIDIA cuDNN frontend, used under the MIT license.
  */
 enum class ErrorCode
@@ -62,7 +56,6 @@ enum class ErrorCode
      * just not runnable by the available engines.
      */
     GRAPH_NOT_SUPPORTED, ///< No engine accepted this graph (graph well-formed but unrunnable on available engines)
-    // --- cuDNN FE error_code_t name-superset values (RFC 0012 §4.6) ---
     SHAPE_DEDUCTION_FAILED, ///< Tensor shape/stride deduction failed
     INVALID_TENSOR_NAME, ///< A referenced tensor name is invalid
     INVALID_VARIANT_PACK, ///< The variant pack provided to execute() is invalid

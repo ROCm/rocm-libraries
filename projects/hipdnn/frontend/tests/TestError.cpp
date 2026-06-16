@@ -57,7 +57,6 @@ TEST(TestError, ToStringReturnsCorrectStringForAllErrorCodes)
               "ATTRIBUTE_NOT_SET");
     EXPECT_EQ(hipdnn_frontend::to_string(hipdnn_frontend::ErrorCode::GRAPH_NOT_SUPPORTED),
               "GRAPH_NOT_SUPPORTED");
-    // cuDNN FE error_code_t name-superset values (RFC 0012 §4.6)
     EXPECT_EQ(hipdnn_frontend::to_string(hipdnn_frontend::ErrorCode::SHAPE_DEDUCTION_FAILED),
               "SHAPE_DEDUCTION_FAILED");
     EXPECT_EQ(hipdnn_frontend::to_string(hipdnn_frontend::ErrorCode::INVALID_TENSOR_NAME),
@@ -84,10 +83,8 @@ TEST(TestError, ToStringReturnsCorrectStringForAllErrorCodes)
               "NVRTC_COMPILATION_FAILED");
 }
 
-TEST(TestError, CudnnSupersetCodesConstructAndCompare)
+TEST(TestError, CudnnCompatCodesConstructAndCompare)
 {
-    // Every cuDNN FE error_code_t value must be nameable and usable on the
-    // hipDNN ErrorCode enum so the shim can alias the type 1:1 (RFC 0012 §4.6).
     for(auto code : {hipdnn_frontend::ErrorCode::SHAPE_DEDUCTION_FAILED,
                      hipdnn_frontend::ErrorCode::INVALID_TENSOR_NAME,
                      hipdnn_frontend::ErrorCode::INVALID_VARIANT_PACK,

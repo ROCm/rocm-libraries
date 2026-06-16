@@ -21,6 +21,8 @@
  *
  * This file also contains conversion utilities between frontend types and
  * the backend C API types (hipdnn_backend.h).
+ *
+ * Portions derived from NVIDIA cuDNN frontend, used under the MIT license.
  */
 
 #pragma once
@@ -129,10 +131,6 @@ enum class PointwiseMode
     TAN = 45, ///< Tangent function
     TANH_BWD = 46, ///< Tanh backward pass
     TANH_FWD = 47, ///< Tanh forward pass
-    // --- cuDNN FE PointwiseMode_t name-superset values (RFC 0012 §4.3) ---
-    // Present so the cuDNN shim can alias PointwiseMode_t 1:1. No hipDNN backend
-    // equivalent yet, so toBackendPointwiseMode() returns std::nullopt for these.
-    // Portions derived from NVIDIA cuDNN frontend, used under the MIT license.
     MOD = 48, ///< Modulo: x mod y (binary)
     POW = 49, ///< Power: x raised to y (binary)
     COS = 50, ///< Cosine function (unary)
@@ -171,10 +169,6 @@ enum class ResampleMode
     MAXPOOL = 1, ///< Maximum pooling
     AVGPOOL_EXCLUDE_PADDING = 2, ///< Average pooling (excludes padding from divisor)
     AVGPOOL_INCLUDE_PADDING = 3, ///< Average pooling (includes padding in divisor)
-    // --- cuDNN FE ResampleMode_t name-superset values (RFC 0012 §4.3) ---
-    // Present so the cuDNN shim can alias ResampleMode_t 1:1. No hipDNN backend
-    // equivalent yet, so toBackendResampleMode() returns std::nullopt for these.
-    // Portions derived from NVIDIA cuDNN frontend, used under the MIT license.
     BILINEAR = 4, ///< Bilinear resampling
     NEAREST = 5 ///< Nearest-neighbor resampling
 };
@@ -189,10 +183,6 @@ enum class PaddingMode
     NOT_SET = 0, ///< Padding mode not specified
     NEG_INF_PAD = 1, ///< Pad with negative infinity
     ZERO_PAD = 2, ///< Pad with zeros
-    // --- cuDNN FE PaddingMode_t name-superset value (RFC 0012 §4.3) ---
-    // Present so the cuDNN shim can alias PaddingMode_t 1:1. No hipDNN backend
-    // equivalent yet, so toBackendPaddingMode() returns std::nullopt for this.
-    // Portions derived from NVIDIA cuDNN frontend, used under the MIT license.
     EDGE_VAL_PAD = 3 ///< Pad with the edge value
 };
 typedef PaddingMode PaddingMode_t; ///< @brief Type alias for PaddingMode
@@ -225,11 +215,6 @@ enum class DataType
     BOOLEAN = 16, ///< 8-bit boolean
     FP8_E4M3_FNUZ = 17, ///< 8-bit floating point (4 exponent, 3 mantissa bits, FNUZ)
     FP8_E5M2_FNUZ = 18, ///< 8-bit floating point (5 exponent, 2 mantissa bits, FNUZ)
-    // --- cuDNN FE DataType_t name-superset values (RFC 0012 §4.3) ---
-    // Present so the cuDNN shim can alias DataType_t 1:1. No hipDNN backend
-    // equivalent yet, so toHipdnnDataType() returns std::nullopt for these; a
-    // graph using one surfaces as a runtime GRAPH_NOT_SUPPORTED, not an enum gap.
-    // Portions derived from NVIDIA cuDNN frontend, used under the MIT license.
     INT8x4 = 19, ///< Four packed 8-bit signed integers (vectorized layout)
     UINT8x4 = 20, ///< Four packed 8-bit unsigned integers (vectorized layout)
     INT8x32 = 21, ///< Thirty-two packed 8-bit signed integers (vectorized layout)
@@ -288,10 +273,6 @@ typedef AttentionImplementation
 enum class HeuristicMode
 {
     FALLBACK, ///< Use fallback heuristics for engine selection
-    // --- cuDNN FE HeurMode_t name-superset values (RFC 0012 §4.3, §4.5) ---
-    // Present so the cuDNN shim can alias HeurMode_t 1:1. Until real hipDNN
-    // heuristics exist, every mode maps to fallback selection (RFC 0012 §4.5).
-    // Portions derived from NVIDIA cuDNN frontend, used under the MIT license.
     A, ///< cuDNN heuristic mode A (mapped to fallback for now)
     B, ///< cuDNN heuristic mode B (mapped to fallback for now)
     OPENSOURCE, ///< cuDNN open-source heuristic mode (mapped to fallback for now)
@@ -950,7 +931,7 @@ inline hipdnnBackendHeurMode_t toBackendType(const HeuristicMode& type)
 {
     switch(type)
     {
-    // All cuDNN heuristic modes currently fold to hipDNN fallback (RFC 0012 §4.5).
+    // All cuDNN heuristic modes currently fold to hipDNN fallback.
     case HeuristicMode::FALLBACK:
     case HeuristicMode::A:
     case HeuristicMode::B:
