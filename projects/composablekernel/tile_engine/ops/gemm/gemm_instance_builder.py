@@ -66,6 +66,7 @@ class GemmKernelBuilder:
         if config_json and os.path.exists(config_json):
             with open(config_json, "r") as f:
                 self.config = json.load(f)
+            self.group_size_k = self.config.get("group_size_k", 128)
 
     def _apply_sampling(self, kernel_list):
         """Apply RFC Sobol+LHS+maximin sampling. Returns sampled subset."""
@@ -323,6 +324,8 @@ class GemmKernelBuilder:
                 pipelines = ["compv3"]
             elif self.kernel_name_prefix in ["gemm_universal", "gemm_multi_d", "gemm_multi_abd", "grouped_gemm", "batched_contraction", "batched_gemm"]:
                 pipelines = ["compv4"]
+            elif self.kernel_name_prefix == "gemm_abquant":
+                pipelines = ["compv3"]
 
         configs = []
         for tile_m in tile_m_values:
@@ -463,7 +466,7 @@ class GemmKernelBuilder:
                 pad_m_values,
                 pad_n_values,
                 pad_k_values,
-                persistent_values,
+                persistent_or_preshuffle_quant,
             )
         )
 
@@ -574,7 +577,7 @@ class GemmKernelBuilder:
             pipeline,
             epilogue,
             k_block_per_cu,
-            persistent,
+            persistent_or_preshuffle_quant,
         )
 
         # Write into a file
@@ -616,7 +619,7 @@ class GemmKernelBuilder:
         elif self.kernel_name_prefix == "mx_gemm":
             instance_code += """#include "ck_tile/ops/gemm_mx.hpp"
 """
-        elif self.kernel_name_prefix in ["gemm_aquant", "gemm_bquant"]:
+        elif self.kernel_name_prefix in ["gemm_aquant", "gemm_bquant", "gemm_abquant"]:
             instance_code += """#include "ck_tile/ops/gemm_quant.hpp"
 #include "ck_tile/ops/gemm_quant/kernel/gemm_quant_kernel.hpp"
 """
@@ -642,6 +645,7 @@ class GemmKernelBuilder:
             "batched_gemm",
             "gemm_aquant",
             "gemm_bquant",
+            "gemm_abquant",
         ]:
             a_layout, b_layout, c_layout = get_abc_layouts(self.layout)
 
@@ -663,6 +667,10 @@ using ScaleType = ck_tile::e8m0_t;
 using ScaleM = ck_tile::MXScalePointer<ScaleType, 1, 32>;
 using ScaleN = ck_tile::MXScalePointer<ScaleType, 1, 32>;
 using MxGemmHostArgs = ck_tile::MXGemmKernelArgs<ScaleM, ScaleN, 1, 1, 0>;"""
+
+        if self.kernel_name_prefix == "gemm_bquant":
+            instance_code += """
+using BQDataType = float;"""
 
         if self.kernel_name_prefix == "gemm_multi_d":
             instance_code += f"""
@@ -762,7 +770,7 @@ struct SelectedKernel {{
             "batched_gemm",
         ]:
             instance_code += f"""
-    static constexpr bool UsePersistentKernel = {"true" if persistent in [True, "true"] else "false"};
+    static constexpr bool UsePersistentKernel = {"true" if persistent_or_preshuffle_quant in [True, "true"] else "false"};
     static constexpr bool UseStructuredSparsity = false;
     static constexpr ck_tile::index_t NumWaveGroups = 1;"""
 
@@ -773,11 +781,26 @@ struct SelectedKernel {{
             else:
                 instance_code += """
     static constexpr bool Preshuffle = false;"""
+
+        if self.kernel_name_prefix == "gemm_aquant":
+            instance_code += f"""
+    static constexpr bool APreshuffleQuant = {"true" if persistent_or_preshuffle_quant in [True, "true"] else "false"};
+    static constexpr bool BPreshuffleQuant = false;
+    static constexpr bool PreshuffleB = false;
+    static constexpr ck_tile::index_t GroupSizeK = {self.group_size_k};"""
+
+        elif self.kernel_name_prefix == "gemm_bquant":
+            instance_code += f"""
+    static constexpr bool APreshuffleQuant = false;
+    static constexpr bool BPreshuffleQuant = {"true" if persistent_or_preshuffle_quant in [True, "true"] else "false"};
+    static constexpr bool PreshuffleB = false;
+    static constexpr ck_tile::index_t GroupSizeK = {self.group_size_k};"""
+
         return instance_code
 
     def populate_initialization(self, base_pipeline_map, pipeline):
         # Tile Shape
-        if self.kernel_name_prefix in ["gemm_multi_d", "batched_gemm", "gemm_aquant", "gemm_bquant"]:
+        if self.kernel_name_prefix in ["gemm_multi_d", "batched_gemm", "gemm_aquant", "gemm_bquant", "gemm_abquant"]:
             instance_code = """
 
     // Tile shape
@@ -899,7 +922,7 @@ struct SelectedKernel {{
         pipeline,
         epilogue,
         k_block_per_cu,
-        persistent,
+        persistent_or_preshuffle_quant,
     ):
         if self.kernel_name_prefix == "gemm_aquant":
             return self._populate_launch_aquant(
@@ -1096,7 +1119,7 @@ struct SelectedKernel {{
         }}
 
         // Get grid and block sizes
-        const dim3 grids = {"GemmKernel::MaxOccupancyGridSize(stream)" if persistent in [True, "true"] else "GemmKernel::GridSize(args.M, args.N, args.k_batch)"};
+        const dim3 grids = {"GemmKernel::MaxOccupancyGridSize(stream)" if persistent_or_preshuffle_quant in [True, "true"] else "GemmKernel::GridSize(args.M, args.N, args.k_batch)"};
         const dim3 blocks = GemmKernel::BlockSize();
 
         if(stream.log_level_ > 0) {{
@@ -1169,7 +1192,7 @@ struct SelectedKernel {{
         }}
 
         // Get grid and block sizes
-        const dim3 grids = {"Kernel::MaxOccupancyGridSize(stream)" if persistent in [True, "true"] else "dim3(kargs.empty() ? 0 : kargs.back().block_end, 1, 1)"};
+        const dim3 grids = {"Kernel::MaxOccupancyGridSize(stream)" if persistent_or_preshuffle_quant in [True, "true"] else "dim3(kargs.empty() ? 0 : kargs.back().block_end, 1, 1)"};
         const dim3 blocks = Kernel::BlockSize();
 
         HIP_CHECK_ERROR(hipMemcpyWithStream(kargs_ptr,
@@ -1228,6 +1251,187 @@ struct SelectedKernel {{
             ck_tile::make_kernel<kBlockPerCu>(Kernel{{}}, grids, blocks, 0, kargs));
 
         return ave_time;
+    }}
+}};
+"""
+        return instance_code
+
+    def _populate_launch_aquant(
+        self,
+        scheduler_type_map,
+        scheduler,
+        pipeline_impl_map,
+        pipeline,
+        epilogue,
+        k_block_per_cu,
+    ):
+        """Generate the complete launch function for AQuant kernels."""
+        instance_code = """
+
+    // Launch function
+    static float launch(const ck_tile::QuantGemmHostArgs& args, const ck_tile::stream_config& stream) {
+
+        // Hot loop detection
+        const ck_tile::index_t K_split = ck_tile::integer_least_multiple(args.K, TileShape::kK);
+        const ck_tile::index_t num_loop = TilePartitioner::GetLoopNum(K_split);
+        const bool has_hot_loop = BaseGemmPipeline::BlockHasHotloop(num_loop);
+        const ck_tile::TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);"""
+
+        instance_code += f"""
+
+        const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {{
+            constexpr bool has_hot_loop_v = has_hot_loop_.value;
+            constexpr auto tail_number_v = tail_number_.value;
+
+            // Full pipeline problem with hot loop and tail number
+            using PipelineProblem = ck_tile::GemmAQuantPipelineProblem<
+                ADataType,
+                AQDataType,
+                BDataType,
+                AccDataType,
+                TileShape,
+                Traits,
+                QuantGroupSize,
+                TransposeC,
+                BDataType,
+                {scheduler_type_map.get(scheduler)},
+                has_hot_loop_v,
+                tail_number_v>;
+
+            using GemmPipeline = {pipeline_impl_map.get(pipeline)}<PipelineProblem>;"""
+
+        instance_code += """
+
+            // Epilogue"""
+        if epilogue == "cshuffle":
+            instance_code += self.populate_cshuffle_gemm_aquant()
+        else:
+            instance_code += self.populate_default_gemm_aquant()
+
+        instance_code += f"""
+
+            // Kernel type
+            using Kernel = ck_tile::QuantGemmKernel<
+                TilePartitioner, GemmPipeline, GemmEpilogue,
+                ck_tile::QuantType::AQuantGrouped>;
+
+            // Kernel arguments
+            auto kargs = Kernel::MakeKernelArgs(args);
+
+            if (!Kernel::IsSupportedArgument(kargs)) {{
+                throw std::runtime_error("Unsupported kernel arguments; skipping GEMM launch.");
+            }}
+
+            // Get grid and block sizes
+            const dim3 grids = Kernel::GridSize(args.M, args.N, args.k_batch);
+            const dim3 blocks = Kernel::BlockSize();
+
+            if(stream.log_level_ > 0) {{
+                std::cout << "Launching kernel: " << Kernel::GetName() << '\\n'
+                          << "grid: {{" << grids.x << ", " << grids.y << ", " << grids.z << "}}"
+                          << ", blocks: {{" << blocks.x << ", " << blocks.y << ", " << blocks.z << "}}"
+                          << std::endl;
+            }}
+
+            // Launch kernel
+            constexpr int kBlockPerCu = {k_block_per_cu};
+            float ave_time = ck_tile::launch_kernel(
+                stream,
+                ck_tile::make_kernel<kBlockPerCu>(Kernel{{}}, grids, blocks, 0, kargs));
+
+            return ave_time;
+        }};
+        return BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
+    }}
+}};
+"""
+        return instance_code
+
+    def _populate_launch_bquant(
+        self,
+        scheduler_type_map,
+        scheduler,
+        pipeline_impl_map,
+        pipeline,
+        epilogue,
+        k_block_per_cu,
+    ):
+        """Generate the complete launch function for BQuant kernels."""
+        instance_code = """
+
+    // Launch function
+    static float launch(const ck_tile::QuantGemmHostArgs& args, const ck_tile::stream_config& stream) {
+
+        // Hot loop detection
+        const ck_tile::index_t K_split = ck_tile::integer_least_multiple(args.K, TileShape::kK);
+        const ck_tile::index_t num_loop = TilePartitioner::GetLoopNum(K_split);
+        const bool has_hot_loop = BaseGemmPipeline::BlockHasHotloop(num_loop);
+        const ck_tile::TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);"""
+
+        instance_code += f"""
+
+        const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {{
+            constexpr bool has_hot_loop_v = has_hot_loop_.value;
+            constexpr auto tail_number_v = tail_number_.value;
+
+            // Full pipeline problem with hot loop and tail number
+            using PipelineProblem = ck_tile::GemmBQuantPipelineProblem<
+                ADataType,
+                BDataType,
+                BQDataType,
+                AccDataType,
+                TileShape,
+                Traits,
+                QuantGroupSize,
+                ADataType,
+                {scheduler_type_map.get(scheduler)},
+                has_hot_loop_v,
+                tail_number_v>;
+
+            using GemmPipeline = {pipeline_impl_map.get(pipeline)}<PipelineProblem>;"""
+
+        instance_code += """
+
+            // Epilogue"""
+        if epilogue == "cshuffle":
+            instance_code += self.populate_cshuffle_gemm_bquant()
+        else:
+            instance_code += self.populate_default_gemm_bquant()
+
+        instance_code += f"""
+
+            // Kernel type
+            using Kernel = ck_tile::QuantGemmKernel<
+                TilePartitioner, GemmPipeline, GemmEpilogue,
+                ck_tile::QuantType::BQuantGrouped>;
+
+            // Kernel arguments
+            auto kargs = Kernel::MakeKernelArgs(args);
+
+            if (!Kernel::IsSupportedArgument(kargs)) {{
+                throw std::runtime_error("Unsupported kernel arguments; skipping GEMM launch.");
+            }}
+
+            // Get grid and block sizes
+            const dim3 grids = Kernel::GridSize(args.M, args.N, args.k_batch);
+            const dim3 blocks = Kernel::BlockSize();
+
+            if(stream.log_level_ > 0) {{
+                std::cout << "Launching kernel: " << Kernel::GetName() << '\\n'
+                          << "grid: {{" << grids.x << ", " << grids.y << ", " << grids.z << "}}"
+                          << ", blocks: {{" << blocks.x << ", " << blocks.y << ", " << blocks.z << "}}"
+                          << std::endl;
+            }}
+
+            // Launch kernel
+            constexpr int kBlockPerCu = {k_block_per_cu};
+            float ave_time = ck_tile::launch_kernel(
+                stream,
+                ck_tile::make_kernel<kBlockPerCu>(Kernel{{}}, grids, blocks, 0, kargs));
+
+            return ave_time;
+        }};
+        return BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
     }}
 }};
 """

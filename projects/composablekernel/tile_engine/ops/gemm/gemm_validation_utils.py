@@ -12,6 +12,8 @@ GEMM_ROWCOLQUANT_PIPELINES = ["compv3"]
 GEMM_MX_PIPELINES = ["comp_async"]
 GEMM_BQUANT_PIPELINES = ["compv3"]
 
+GEMM_ABQUANT_PIPELINES = ["compv3"]
+
 LAYOUT_MAP = {
     "r": "ck_tile::tensor_layout::gemm::RowMajor",
     "c": "ck_tile::tensor_layout::gemm::ColumnMajor",
@@ -244,6 +246,12 @@ BQUANT_TRAIT_UNSUPPORTED_COMBINATIONS = {
     ("compv3", "cshuffle", "interwave"),
 }
 
+ABQUANT_TRAIT_UNSUPPORTED_COMBINATIONS = {
+    ("compv3", "default", "interwave"),
+    ("compv3", "cshuffle", "interwave"),
+}
+
+
 def element_size(data_type: str) -> float:
     """Calculate the size (in bytes) of a single element for given data type."""
     data_type = data_type.lower()
@@ -285,6 +293,13 @@ def is_trait_combination_valid(
     ):
         # rowcolquant and tensorquant only supports compv3 + intrawave + cshuffle
         if pipeline != "compv3" or scheduler != "intrawave" or epilogue != "cshuffle":
+            return False
+        return True
+    elif kernel_name_prefix == "gemm_abquant":
+        if (pipeline, epilogue, scheduler) in ABQUANT_TRAIT_UNSUPPORTED_COMBINATIONS:
+            return False
+        # abquant only supports compv3 + intrawave
+        if pipeline != "compv3" or scheduler != "intrawave":
             return False
         return True
     else:
@@ -770,6 +785,28 @@ def is_tile_config_valid(
         )
         if not bquant_valid:
             logging.debug(f"GEMM BQuant validation failed: {bquant_valid_error}")
+            return False
+
+    elif kernel_name_prefix == "gemm_abquant":
+        abquant_valid, abquant_valid_error = validate_gemm_abquant(
+            tile_m,
+            tile_n,
+            tile_k,
+            warp_m,
+            warp_n,
+            warp_k,
+            warp_tile_m,
+            warp_tile_n,
+            warp_tile_k,
+            a_datatype,
+            b_datatype,
+            c_datatype,
+            pipeline,
+            layout,
+            gpu_target,
+        )
+        if not abquant_valid:
+            logging.debug(f"GEMM ABQuant validation failed: {abquant_valid_error}")
             return False
 
     return True
@@ -1530,4 +1567,57 @@ def validate_gemm_bquant(
     return _validate_fp8_mfma_warp_tile_k(
         warp_tile_m, warp_tile_n, warp_tile_k, a_datatype, gpu_target,
         op_label="BQuant"
+    )
+
+
+def validate_gemm_abquant(
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    warp_tile_m: int,
+    warp_tile_n: int,
+    warp_tile_k: int,
+    a_datatype: str,
+    b_datatype: str,
+    c_datatype: str,
+    pipeline: str,
+    layout: str,
+    gpu_target: str,
+    group_size_k: int = 128,
+) -> Tuple[bool, str]:
+    """Validate ABQuant GEMM-specific constraints."""
+    whole_workgroup_cover_valid, whole_workgroup_cover_error = (
+        validate_whole_wg_cover_configuration(
+            tile_m,
+            tile_n,
+            tile_k,
+            warp_m,
+            warp_n,
+            warp_k,
+            layout,
+            a_datatype,
+            b_datatype,
+            gpu_target,
+        )
+    )
+    if not whole_workgroup_cover_valid:
+        return False, whole_workgroup_cover_error
+
+    if tile_k % group_size_k != 0 or tile_k < group_size_k:
+        return False, (
+            f"tile_k({tile_k}) must be a multiple of group_size_k({group_size_k}) "
+            f"and tile_k >= group_size_k"
+        )
+
+    if group_size_k % warp_tile_k != 0:
+        return False, (
+            f"group_size_k({group_size_k}) must be divisible by warp_tile_k({warp_tile_k})"
+        )
+
+    return _validate_fp8_mfma_warp_tile_k(
+        warp_tile_m, warp_tile_n, warp_tile_k, a_datatype, gpu_target,
+        op_label="ABQuant"
     )
