@@ -200,13 +200,9 @@ class AddrCalculation:
             idxChar= INDEX_CHARS[idx]
             module.addComment0("extract %s"%kw.sizeRef(idx))
             assert(tmpVgpr+1 != packedBits) # bad since we still need packedBits below for remainder (can't overwrite here)
-            if kw.states.asmCaps["HasVgprMSB"]:
-                module.add(VMagicDiv(kernel["MagicDivAlg"], tmpVgpr+1, vgpr(packedBits), sgpr("MagicNumberSize%s"%idxChar), \
-                           sgpr("MagicShiftSize%s"%idxChar), sgpr("MagicAbitSize%s"%idxChar)))
-            else:
-                module.add(MacroInstruction("V_MAGIC_DIV", \
-                           args=[tmpVgpr+1, vgpr(packedBits), sgpr("MagicNumberSize%s"%idxChar), \
-                           sgpr("MagicShiftSize%s"%idxChar), sgpr("MagicAbitSize%s"%idxChar) if kernel["MagicDivAlg"]==2 else "0"]))
+            module.add(MacroInstruction("V_MAGIC_DIV", \
+                       args=[tmpVgpr+1, vgpr(packedBits), sgpr("MagicNumberSize%s"%idxChar), \
+                       sgpr("MagicShiftSize%s"%idxChar), sgpr("MagicAbitSize%s"%idxChar) if kernel["MagicDivAlg"]==2 else "0"]))
             # tmpVgpr+1 returns the quotient, tmpVgpr+2 is overwritten
 
             # compute remainder, packedBits % sizeIdx - this is the 'extracted' index that must be scaled
@@ -584,10 +580,7 @@ class AddrCalculation:
                 else: # just a group index
                     params.append("sgprWorkGroup%u"%i)
             params.append("%s" % (tmpVgpr+2))
-            if kw.states.asmCaps["HasVgprMSB"]:
-                module.add(kw.globalOffset(kernel, None, "C", params))
-            else:
-                module.add(MacroInstruction(name="GLOBAL_OFFSET_C", args=params))
+            module.add(MacroInstruction(name="GLOBAL_OFFSET_C", args=params))
             module.add(vectorMultiply64Bpe(addrVgpr, addrVgpr, tPB["bpeGR"]))
             module.add(VMovB32(dst=vgpr(tmpVgpr+2), src=vgpr(addrVgpr+0), comment="temp store offset 0"))
             module.add(VMovB32(dst=vgpr(tmpVgpr+3), src=vgpr(addrVgpr+1), comment="temp store offset 1"))

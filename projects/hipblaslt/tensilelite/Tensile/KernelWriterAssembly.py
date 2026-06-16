@@ -3170,13 +3170,9 @@ class KernelWriterAssembly(KernelWriter):
     for i,idx in enumerate(packedC1[:-1]):
       idxChar= INDEX_CHARS[idx]
       module.addComment0("extract %s"%self.sizeRef(idx))
-      if self.states.asmCaps["HasVgprMSB"]:
-        module.add(VMagicDiv(kernel["MagicDivAlg"], tmpV1, vgpr(tmpV0), sgpr("MagicNumberSize%s"%idxChar), \
-                  sgpr("MagicShiftSize%s"%idxChar), sgpr("MagicAbitSize%s"%idxChar)))
-      else:
-        module.add(MacroInstruction(name="V_MAGIC_DIV", \
-                  args=[tmpV1, vgpr(tmpV0), sgpr("MagicNumberSize%s"%idxChar), \
-                  sgpr("MagicShiftSize%s"%idxChar), (sgpr("MagicAbitSize%s"%idxChar) if kernel["MagicDivAlg"]==2 else "0")]))
+      module.add(MacroInstruction(name="V_MAGIC_DIV", \
+                args=[tmpV1, vgpr(tmpV0), sgpr("MagicNumberSize%s"%idxChar), \
+                sgpr("MagicShiftSize%s"%idxChar), (sgpr("MagicAbitSize%s"%idxChar) if kernel["MagicDivAlg"]==2 else "0")]))
       module.add(VMulLOU32(dst=vgpr(tmpV2), src0=vgpr(tmpV1), src1=self.sizeRef(idx), comment="remainder part 1"))
       module.add(VSubU32(dst=vgpr(tmpV2), src0=vgpr(tmpV0), src1=vgpr(tmpV2), comment="remainder part 2"))
       if i==0:
@@ -3507,13 +3503,9 @@ class KernelWriterAssembly(KernelWriter):
             groChar = INDEX_CHARS[tP["PackedIndices"][p+1]]
             groVgpr = vgpr(tP["vgprPackedOffsets"] + l*numExtraPackedOffsetsPerTile + p)
             pChar = INDEX_CHARS[tP["PackedIndices"][p]]
-            if self.states.asmCaps["HasVgprMSB"]:
-              module.add(VMagicDiv(kernel["MagicDivAlg"], tmpV, lastGroVgpr, sgpr("MagicNumberSize%s"%pChar), \
-                  sgpr("MagicShiftSize%s"%pChar), sgpr("MagicAbitSize%s"%pChar)))
-            else:
-              module.add(MacroInstruction(name="V_MAGIC_DIV", \
-                  args=[tmpV, lastGroVgpr, sgpr("MagicNumberSize%s"%pChar), \
-                  sgpr("MagicShiftSize%s"%pChar), (sgpr("MagicAbitSize%s"%pChar) if kernel["MagicDivAlg"]==2 else "0")] ))
+            module.add(MacroInstruction(name="V_MAGIC_DIV", \
+                args=[tmpV, lastGroVgpr, sgpr("MagicNumberSize%s"%pChar), \
+                sgpr("MagicShiftSize%s"%pChar), (sgpr("MagicAbitSize%s"%pChar) if kernel["MagicDivAlg"]==2 else "0")] ))
             module.add(VMovB32(dst=groVgpr, src=vgpr(tmpV), comment="extract gro%s%s_%u (%s)"%(tc,groChar,l,groVgpr)))
             module.add(VMulLOU32(dst=vgpr(tmpV), src0=groVgpr, src1=sgpr("SizesFree+%u"%lastGroIdx), comment="remainder part 1"))
             module.add(VSubU32(dst=lastGroVgpr, src0=lastGroVgpr, src1=vgpr(tmpV), \
@@ -4161,10 +4153,7 @@ class KernelWriterAssembly(KernelWriter):
 
       bfArgs.append( "%u" % tmp )
       bfComment = "gRO%s_%u_%u_%u_%u" % (tP["tensorChar"], para, sPara, perp, sPerp)
-      if self.states.asmCaps["HasVgprMSB"]:
-        module.add(self.globalOffset(kernel, tP, tc, bfArgs, bfComment))
-      else:
-        module.add(MacroInstruction(name=bfName, args=bfArgs, comment=bfComment))
+      module.add(MacroInstruction(name=bfName, args=bfArgs, comment=bfComment))
       dest = f'GlobalReadOffset{tP["tensorChar"]}+{graIdx}'
       if kernel["BufferLoad"]:
           module.add(vectorMultiplyBpe(dest, dest, tP["bpeGR"]))
@@ -8533,11 +8522,9 @@ class KernelWriterAssembly(KernelWriter):
     if s_nop != 0:
       imod.add(SNop(waitState=(s_nop - 1), comment=""))
 
-    tmpIU = kernel["InnerUnroll"]
     if kernel["InnerUnroll"] > 1 and iuiCount==1:
       # This it tail-loop case where we just want one IUI,
       instr = "MAC_%ux%u_X%u_OneIUI" % (kernel["ThreadTile0"],kernel["ThreadTile1"], bufferIdx)
-      tmpIU = 1
     else:
       if not useMacro:
         printExit("MAC doesn't support useMacro=False")
@@ -8549,14 +8536,7 @@ class KernelWriterAssembly(KernelWriter):
 
     if self.do["MAC"]:
       imod.add(shiftK)
-      if self.states.asmCaps["HasVgprMSB"]:
-        component = Component.MAC.find(self)
-        if not component:
-          printExit("Assembly doesn't support datatype %s" % kernel["ProblemType"]["DataType"])
-        innerModule = component(self, tPA, tPB, bufferIdx, tmpIU)
-        imod.add(innerModule)
-      else:
-        imod.add(MacroInstruction(name=instr, args=[]))
+      imod.add(MacroInstruction(name=instr, args=[]))
       imod.addSpaceLine()
     return imod
 
@@ -12307,10 +12287,7 @@ class KernelWriterAssembly(KernelWriter):
                     else:
                       vTemp0 = vgprTmp+2
                       vTemp1 = vgprTmp+3
-                      if self.states.asmCaps["HasVgprMSB"]:
-                        localWriteCVTCode.add(PseudoRandomGeneratorModule(vRand, vgprTmp, vTemp0, vTemp1))
-                      else:
-                        localWriteCVTCode.add(MacroInstruction(name="PRND_GENERATOR", args=[vRand, vgprTmp, vTemp0, vTemp1]))
+                      localWriteCVTCode.add(MacroInstruction(name="PRND_GENERATOR", args=[vRand, vgprTmp, vTemp0, vTemp1]))
 
                     if (toF8):
                       localWriteCVTCode.add(VCvtSRF32toFP8(dst=paramList[0], src0=vgpr(vgprTmp), src1=vgpr(vRand), sels=[sel], comment="Convert to FP8"))
@@ -12354,29 +12331,20 @@ class KernelWriterAssembly(KernelWriter):
                         else:
                           vTemp0 = vgprTmp+3
                           vTemp1 = vgprTmp+4
-                          if self.states.asmCaps["HasVgprMSB"]:
-                            localWriteCVTCode.add(PseudoRandomGeneratorModule(vRand, vgprTmp, vTemp0, vTemp1))
-                          else:
-                            localWriteCVTCode.add(MacroInstruction(name="PRND_GENERATOR", args=[vRand, vgprTmp, vTemp0, vTemp1]))
+                          localWriteCVTCode.add(MacroInstruction(name="PRND_GENERATOR", args=[vRand, vgprTmp, vTemp0, vTemp1]))
                         if (toF8):
                           localWriteCVTCode.add(VCvtSRF32toFP8(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src0=vgpr(vgprTmp), src1=vgpr(vRand), sels=[0,sel], comment="Convert to FP8"))
                           if self.states.asmCaps["v_prng_b32"]:
                             localWriteCVTCode.add(VPrngB32(dst=vgpr(vRand),src=vgpr(vgprTmp2),comment="Psudo Random Number Generator"))
                           else:
-                            if self.states.asmCaps["HasVgprMSB"]:
-                              localWriteCVTCode.add(PseudoRandomGeneratorModule(vRand, vgprTmp2, vTemp0, vTemp1))
-                            else:
-                              localWriteCVTCode.add(MacroInstruction(name="PRND_GENERATOR", args=[vRand, vgprTmp2, vTemp0, vTemp1]))
+                            localWriteCVTCode.add(MacroInstruction(name="PRND_GENERATOR", args=[vRand, vgprTmp2, vTemp0, vTemp1]))
                           localWriteCVTCode.add(VCvtSRF32toFP8(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src0=vgpr(vgprTmp2), src1=vgpr(vRand), sels=[1,sel], comment="Convert to FP8"))
                         else:
                           localWriteCVTCode.add(VCvtSRF32toBF8(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src0=vgpr(vgprTmp), src1=vgpr(vRand), sels=[0,sel], comment="Convert to BF8"))
                           if self.states.asmCaps["v_prng_b32"]:
                             localWriteCVTCode.add(VPrngB32(dst=vgpr(vRand),src=vgpr(vgprTmp2),comment="Psudo Random Number Generator"))
                           else:
-                            if self.states.asmCaps["HasVgprMSB"]:
-                              localWriteCVTCode.add(PseudoRandomGeneratorModule(vRand, vgprTmp2, vTemp0, vTemp1))
-                            else:
-                              localWriteCVTCode.add(MacroInstruction(name="PRND_GENERATOR", args=[vRand, vgprTmp2, vTemp0, vTemp1]))
+                            localWriteCVTCode.add(MacroInstruction(name="PRND_GENERATOR", args=[vRand, vgprTmp2, vTemp0, vTemp1]))
                           localWriteCVTCode.add(VCvtSRF32toBF8(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src0=vgpr(vgprTmp2), src1=vgpr(vRand), sels=[1,sel], comment="Convert to BF8"))
                       else:
                         # ScaleA/B, sgpr upper is dummy.
@@ -17929,281 +17897,6 @@ class KernelWriterAssembly(KernelWriter):
     module = self.dumpData.dumpLds(startU, numU, tmp, self.states.bpeAB, kernel["NumThreads"], \
       self.labels.getUniqueName())
     self.vgprPool.checkIn(tmp.idx)
-    return module
-
-  def globalOffset(self, kernel, tP, tc, args, comment=""):
-    module = Module("globalOffset")
-
-     ########################################
-    # Global Offsets
-    ########################################
-    # justOffset32 means we should only write the 32-bit offset
-    # This is used in Buffer addressing modes.
-    # Flat addressing modes expect the GLOBAL_OFFSET to initialize a full 64-bit address
-
-    # GOList =  [ \
-    #     ("C", list(range(0, kernel["ProblemType"]["NumIndicesC"])), kernel["BufferStore"], None, False), \
-    #     ("A", kernel["ProblemType"]["IndexAssignmentsA"], kernel["BufferLoad"], tPA, False), \
-    #     ("B", kernel["ProblemType"]["IndexAssignmentsB"], kernel["BufferLoad"], tPB, False) ]
-    # if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-    #   GOList.append(("Metadata", kernel["ProblemType"]["IndexAssignmentsMetadata"], kernel["BufferLoad"], tPM, False))
-    # if kernel["ProblemType"]["SwizzleTensorA"]:
-    #   GOList.append(("A", kernel["ProblemType"]["IndexAssignmentsA"], kernel["BufferLoad"], tPA, True))
-    # if kernel["ProblemType"]["SwizzleTensorB"]:
-    #   GOList.append(("B", kernel["ProblemType"]["IndexAssignmentsB"], kernel["BufferLoad"], tPB, True))
-
-    # for (tc, indices, justOffset32, tP, isSwizzled) in GOList:
-
-    isSwizzled = False if tP == None else tP["isSwizzled"]
-    indices = kernel["ProblemType"]["NumIndicesC"] if tc == "C" else kernel["ProblemType"]["IndexAssignments%s"%tc]
-    justOffset32 =  kernel["BufferStore"] if tc == "C" else kernel["BufferLoad"]
-    aidx = 1
-    if args[0].isdigit():
-      tmp = int(args[0])
-      addrVgpr0 = vgpr(tmp)
-      addrVgpr1 = vgpr(tmp+1)
-      addrVgpr01 = vgpr(tmp,2)
-    else:
-      tmp = args[0][4:]
-      addrVgpr0 = vgpr(tmp)
-      addrVgpr1 = vgpr(tmp+"+1")
-      addrVgpr01 = vgpr(tmp,2)
-
-    # function name and comment
-    suffix_tc = tc + "_SWIZZLED" if isSwizzled else tc
-    module.addComment1("Global Offset %s"%suffix_tc)
-    numDim = len(indices)
-    idxChars = []
-    for i in indices:
-      idxChars.append(self.states.indexChars[i])
-
-    # macro declaration
-    calcDims = [] # dimensions which are participating in the address calc (ignores other summation)
-    mirrorSumDims = []
-    macroArgs = []
-    offsets = {}
-    for i in range(0, numDim):
-      if tc == 'C':
-        useInitialStrides = kernel["ProblemType"]["UseInitialStridesCD"]
-        idxChar = self.states.indexChars[i]
-      else:
-        useInitialStrides = kernel["ProblemType"]["UseInitialStridesAB"]
-        idxChar = self.states.indexChars[tP['ia'][i]]
-
-      # tile index or unroll vgpr or summation
-      # other summation (other than unroll) are included in the GLOBAL_OFFSET macro but not used in address calc
-      if     tc in ('A','C') and indices[i] == kernel["ProblemType"]["Index0"] \
-          or tc in ('B','C', "Metadata") and indices[i] == kernel["ProblemType"]["Index1"] \
-          or indices[i] == kernel["ProblemType"]["IndexUnroll"]:
-        # macroArgs.append("vgprOffset%s:req" % idxChars[i])
-        offsets[i] = int(args[aidx]) if args[aidx].isdigit() else args[aidx][4:]
-        aidx += 1
-        calcDims.append(i)
-      elif indices[i] in kernel["ProblemType"]["IndicesSummation"]:
-        # other summation index (not unroll)
-        if tc in ('A', 'B', "Metadata") and indices[i] in kernel["ProblemType"]["MirrorDims%s" % tc]:
-          mirrorSumDims.append(i)
-        continue
-      else:
-        # other batch or free index
-        if isPackedIndex(kernel, indices[i]):
-          calcDims.append(i)
-          # macroArgs.append("vgprOffset%s:req" % idxChars[i])
-          offsets[i] = int(args[aidx]) if args[aidx].isdigit() else args[aidx][4:]
-          aidx += 1
-        elif not justOffset32: # buffer/justOffset32 scalars are included in SRD not the offset, so skip here
-          calcDims.append(i)
-          # macroArgs.append("sgprOffset%s:req" % idxChars[i])
-          offsets[i] = int(args[aidx]) if args[aidx].isdigit() else args[aidx][4:]
-          aidx += 1
-
-    if args[aidx].isdigit():
-      tmp = int(args[aidx])
-      tmpVgpr0 = vgpr(tmp)
-      tmpVgpr1 = vgpr(tmp+1)
-      tmpVgpr2 = vgpr(tmp+2)
-    else:
-      tmp = args[aidx][4:]
-      tmpVgpr0 = vgpr(tmp)
-      tmpVgpr1 = vgpr(tmp+"+1")
-      tmpVgpr2 = vgpr(tmp+"+2")
-
-    aidx += 1
-
-    # Each index may be skipped, scaled by stride, or unscaled
-    # If destLo is unset, no accumulation is necessary.
-
-    # if the first index (i==0) is unscaled (UseInitialStrides),
-    # it can be combined at the next update or moved at end
-    # (if there is no next update)
-
-    pendingOffset = None # offset pending for accumulation
-    offsetIsVgpr = False # True if the source is VGPR ; False if SGPR
-    destLo = None
-
-    # true for first addr calc. In this case, we can directly write addr
-    # rather than accumulating through a tmp
-    writeDirectToAddr = 1
-
-    # mirror other summation indices
-    for i in mirrorSumDims:
-      if writeDirectToAddr:
-        dest = addrVgpr0
-        needAdd = 0 # don't need add since writing address directly.
-        writeDirectToAddr = 0
-      else:
-        dest = tmpVgpr0
-        needAdd = 1
-      module.add(VSubU32(dst=dest, \
-              src0=sgpr("Size%s"%INDEX_CHARS[indices[i]]), \
-              src1=1, \
-              comment="mirror %s%s 1"%(tc, INDEX_CHARS[indices[i]])))
-      module.add(VMulLOU32(dst=dest, \
-              src0=dest, \
-              src1=self.strideRef(tc, indices[i]), \
-              comment="mirror %s%s 2"%(tc, INDEX_CHARS[indices[i]])))
-
-      if needAdd:
-        writeDirectToAddr = 0 # safety net, once we write address can't directly overwrite it later
-        destLo = addrVgpr0
-        destHi = addrVgpr1
-        srcLo = pendingOffset if pendingOffset else destLo
-        srcHi = 0 if pendingOffset else destHi
-        module.add(VAddCOU32(dst=destLo, \
-          dst1=VCC(), \
-          src0=srcLo, \
-          src1=vgprTmp0, \
-          comment="accumulate %s lower"%idxChar))
-
-    for i in calcDims:
-      # should have eliminated these above
-      idx = indices[i]
-      isMirrorIdx = tc in ('A', 'B', "Metadata") and idx in kernel["ProblemType"]["MirrorDims%s" % tc]
-      assert not (idx in kernel["ProblemType"]["IndicesSummation"] and idx != kernel["ProblemType"]["IndexUnroll"])
-
-      if indices[i] == kernel["ProblemType"]["Index0"] \
-          or indices[i] == kernel["ProblemType"]["Index1"] \
-          or indices[i] == kernel["ProblemType"]["IndexUnroll"]:
-        offsetIsVgpr = True
-      # other c index sgpr (free or batch)
-      elif indices[i] < kernel["ProblemType"]["NumIndicesC"]:
-        if isPackedIndex(kernel, indices[i]):
-          offsetIsVgpr = True
-        else:
-          offsetIsVgpr = False
-      else:
-        assert(0) # no other type allowed
-
-      # offset is VGPR or SGPR string to use for the offset
-      if offsetIsVgpr:
-        offset = vgpr(offsets[i])
-      else:
-        offset = sgpr(offsets[i])
-
-      # macro.addComment0("dim%s pendingOffset=%s offset=%s offsetIsVgpr=%s" \
-      #    % (self.states.indexChars[indices[i]], pendingOffset, offset, offsetIsVgpr))
-
-      needAdd = 0
-      # should be indices[i]??
-      if i==0 and not useInitialStrides:
-        # slide into next address calc - can do addr = pendingOffset + nextAddrCalc
-        pendingOffset = offset
-        writeDirectToAddr = 0
-      else:
-        # tile index or unroll vgpr
-        if offsetIsVgpr:
-          if writeDirectToAddr:
-            destLo = addrVgpr0
-            destHi = addrVgpr1
-            needAdd = 0 # don't need add since writing address directly.
-            writeDirectToAddr = 0
-          else:
-            destLo = tmpVgpr0
-            destHi = tmpVgpr1
-            needAdd = 1
-          if isMirrorIdx:
-            module.add(VSubI32(
-              dst=tmpVgpr0,
-              src0=sgpr("Size%s"%INDEX_CHARS[idx]), \
-              src1=offset, \
-              comment="mirror %s%s 1"%(tc, INDEX_CHARS[indices[i]])))
-            module.add(VSubI32(\
-              dst=tmpVgpr0,
-              src0=tmpVgpr0, \
-              src1=1, \
-              comment="mirror %s%s 2"%(tc, INDEX_CHARS[indices[i]])))
-            offset = tmpVgpr0
-
-          # offset * stride
-          if isSwizzled:
-            # Swizzle directly uses the offset base that has already been multiplied by the stride.
-            module.add(VMovB32(dst=destLo, src=offset))
-          else:
-            module.add(VMulLOU32(dst=destLo,
-              src0=self.strideRef(tc, indices[i]), \
-              src1=offset, \
-              comment="mul d%u lower"%i))
-          if not justOffset32:
-            module.add(VMulHIU32(dst=destHi,
-                src0=self.strideRef(tc, indices[i]), \
-                src1=offset, \
-                comment="mul d%u upper"%i))
-        else: # offset is SGPR:
-          assert not isMirrorIdx
-          if not justOffset32:
-            # buffer mode (aka justOffset32) does scalars into SRD not offset
-            module.add(VMovB32(dst=tmpVgpr2, src=offset, \
-                comment="sgprOffset -> vgprTmp+2"))
-            # offset * stride
-            module.add(VMulLOU32(dst=tmpVgpr0, \
-                src0=self.strideRef(tc, indices[i]), src1=tmpVgpr2,  \
-                comment="other stride mul d%u lower"%i))
-            module.add(VMulHIU32(dst=tmpVgpr1, \
-                src0=self.strideRef(tc, indices[i]), src1=tmpVgpr2,  \
-                comment="mul d%u upper"%i))
-            needAdd = 1
-
-      if needAdd:
-        writeDirectToAddr = 0 # safety net, once we write address can't directly overwrite it later
-        destLo = addrVgpr0
-        destHi = addrVgpr1
-        # addr += offset * stride (lo) : accumulate just-computed address term into addr
-
-        srcLo = pendingOffset if pendingOffset else destLo
-        srcHi = 0 if pendingOffset else destHi
-        module.add(VAddCOU32(dst=destLo, dst1=VCC(), \
-          src0=srcLo, src1=tmpVgpr0, \
-          comment="accumulate %s lower"%idxChar))
-
-        # addr += offset * stride (hi)
-        if not justOffset32:
-          module.add(VAddCCOU32(dst=addrVgpr1, dst1=VCC(), \
-              src0=tmpVgpr1, src1=srcHi, src2=VCC(), \
-              comment="accumulate %s upper"%idxChar))
-        pendingOffset = None
-
-    # pendingOffset but never got a chance to apply it,
-    # need to just add an explicit move or add:
-    # this can happen for small-order tensors
-    if pendingOffset != None:
-      destLo = addrVgpr0
-      if writeDirectToAddr:
-        module.add(VMovB32(dst=destLo, src=offset, comment="setup d0 lower"))
-        if not justOffset32:
-          module.add(VMovB32(dst=addrVgpr1, src=0, comment="d0 upper"))
-      else:
-        module.add(VAddCOU32(dst=destLo, dst1=VCC(), \
-          src0=destLo, src1=pendingOffset, \
-          comment="accumulate final pendingOffset"))
-
-    if tP != None and kernel["BufferLoad"] and self.states.srdShiftLeft[tc]:
-      module.add(VAddU32(dst=addrVgpr0, \
-          src0=hex(self.states.srdShiftLeft[tc]), \
-          src1=addrVgpr0, \
-          comment="add prepad for pointer shift"))
-
-    module.addComment1("Global Offset %s (end)"%suffix_tc)
-
     return module
 
   def shiftVgpr6bitFloat(self, tPA, tPB):

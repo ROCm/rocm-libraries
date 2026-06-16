@@ -40,7 +40,6 @@ from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VCvtBF16toFP32, \
   VCmpClassF32, VMed3F32, VPrngB32, VCvtSRF32toFP8, MacroInstruction
 from rocisa.functions import vectorStaticMultiply
-from rocisa.macro import PseudoRandomGeneratorModule
 
 from ..Common import DataDirection, SemanticVersion
 from ..Common.DataType import DataType
@@ -2772,10 +2771,7 @@ def stochasticRoundingCvt(self, gwvw, destIdx, elementSumIdx, fp8CVTVgprStruct, 
       # For thread ID-based seed design, see the legacy PRND_GENERATOR approach in tensilelite/rocisa/rocisa/include/macro.hpp
       module.add(VPrngB32(dst=vgpr(vRand),src=vgpr(formatVgpr),comment="Pseudo Random Number Generator"))
     else:
-      if self.parentWriter.states.asmCaps["HasVgprMSB"]:
-        module.add(PseudoRandomGeneratorModule(vRand, vgprFp8Temp, vTemp0, vTemp1))
-      else:
-        module.add(MacroInstruction(name="PRND_GENERATOR", args=[vRand, vgprFp8Temp, vTemp0, vTemp1]))
+      module.add(MacroInstruction(name="PRND_GENERATOR", args=[vRand, vgprFp8Temp, vTemp0, vTemp1]))
     # sels=[vi%4] selects which byte within the packed VGPR to write the FP8 value to
     module.add(VCvtSRF32toFP8(dst=vgpr(d), src0=vgpr(formatVgpr), src1=vgpr(vRand), sels=[vi%4]))
 
