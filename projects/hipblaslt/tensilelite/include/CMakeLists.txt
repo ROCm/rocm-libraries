@@ -1,11 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-if(HIPBLASLT_ENABLE_HOST)
-    set(_tensilelite_header_scope PUBLIC)
-else()
-    set(_tensilelite_header_scope PRIVATE)
-endif()
+set(_tensilelite_header_scope PRIVATE)
 
 target_sources(tensilelite-host
     ${_tensilelite_header_scope}
@@ -135,7 +131,7 @@ endif()
 if(HIPBLASLT_ENABLE_HOST)
     get_filename_component(_rocisa_include_root "${CMAKE_CURRENT_SOURCE_DIR}/../rocisa" ABSOLUTE)
     target_sources(tensilelite-host
-        PUBLIC
+        PRIVATE
             FILE_SET tensilelite_generated_headers TYPE HEADERS
                 BASE_DIRS "${CMAKE_CURRENT_BINARY_DIR}"
                 FILES "${CMAKE_CURRENT_BINARY_DIR}/tensilelitehost/export.h"
