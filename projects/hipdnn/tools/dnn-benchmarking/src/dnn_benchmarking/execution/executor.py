@@ -178,6 +178,28 @@ class Executor:
                 f"Failed to build operation graph: {result.get_message()}"
             )
 
+        # A preferred engine is a SOFT request: hipDNN honors it only when it is
+        # among the engines the backend ranks as applicable for this graph (see
+        # Graph::initializeEngineConfig, which uses index 0 when the preferred id
+        # is absent from the ranked list). Otherwise it silently runs the
+        # top-ranked engine while the caller still believes the forced engine
+        # ran -- fabricating comparison rows where several "different" forced
+        # engines are all the same fallback. Membership in get_ranked_engine_ids()
+        # is exactly that honor-it predicate, so verify it here and turn a
+        # would-be silent fallback into an honest unsupported-graph skip.
+        if engine_id is not None:
+            try:
+                ranked_ids = [int(eid) for eid in self._graph.get_ranked_engine_ids()]
+            except RuntimeError as e:
+                raise UnsupportedGraphError(str(e)) from e
+            if engine_id not in ranked_ids:
+                raise UnsupportedGraphError(
+                    f"Forced engine {engine_id} is not applicable to this graph; "
+                    f"the backend would silently fall back to another engine, so "
+                    f"the row is skipped instead of mislabeled "
+                    f"(applicable engines: {ranked_ids})."
+                )
+
         return hipdnn
 
     def discover_engines(self, handle: Any) -> List[int]:
