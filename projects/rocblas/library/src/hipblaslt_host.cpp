@@ -705,34 +705,39 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
             std::vector<To*> C(batch_count, nullptr);
             std::vector<To*> D(batch_count, nullptr);
             auto             addOffset = []<typename T1, typename T2>(std::vector<T1*>& host_vec,
-                                                          T2*    input_device_pointer_array,
-                                                          void*  output_device_pointer_array,
-                                                          int    batch_count,
-                                                          size_t offset) -> rocblas_status {
-                THROW_IF_HIP_ERROR(hipMemcpy((void*)(&host_vec[0]),
-                                             input_device_pointer_array,
-                                             sizeof(void*) * batch_count,
-                                             hipMemcpyDeviceToHost,
-                                             prob.handle->get_stream()));
+                                                          T2*         input_device_pointer_array,
+                                                          void*       output_device_pointer_array,
+                                                          int         batch_count,
+                                                          size_t      offset,
+                                                          hipStream_t stream) -> rocblas_status {
+                THROW_IF_HIP_ERROR(hipMemcpyAsync((void*)(&host_vec[0]),
+                                                  input_device_pointer_array,
+                                                  sizeof(void*) * batch_count,
+                                                  hipMemcpyDeviceToHost,
+                                                  stream));
                 for(int batch = 0; batch < batch_count; batch++)
                     host_vec[batch] += offset;
-                THROW_IF_HIP_ERROR(hipMemcpy(output_device_pointer_array,
-                                             (void*)(&host_vec[0]),
-                                             sizeof(void*) * batch_count,
-                                             hipMemcpyHostToDevice,
-                                             prob.handle->get_stream()));
+                THROW_IF_HIP_ERROR(hipMemcpyAsync(output_device_pointer_array,
+                                                  (void*)(&host_vec[0]),
+                                                  sizeof(void*) * batch_count,
+                                                  hipMemcpyHostToDevice,
+                                                  stream));
                 return rocblas_status_success;
             };
-            void *ptrA = prob.batch_A, *ptrB = prob.batch_B, *ptrC = prob.batch_C,
-                 *ptrD = prob.batch_D;
+            void *ptrA = (void*)prob.batch_A, *ptrB = (void*)prob.batch_B,
+                 *ptrC = (void*)prob.batch_C, *ptrD = (void*)prob.batch_D;
             if(prob.batch_A != nullptr)
             {
                 if(prob.buffer_offset_a > 0)
                 {
                     THROW_IF_HIP_ERROR(hipMallocAsync(
                         &devicePtrArray_A, sizeof(void*) * batch_count, prob.handle->get_stream()));
-                    THROW_IF_ROCBLAS_ERROR(addOffset(
-                        A, prob.batch_A, devicePtrArray_A, batch_count, prob.buffer_offset_a));
+                    THROW_IF_ROCBLAS_ERROR(addOffset(A,
+                                                     prob.batch_A,
+                                                     devicePtrArray_A,
+                                                     batch_count,
+                                                     prob.buffer_offset_a,
+                                                     prob.handle->get_stream()));
                     ptrA = devicePtrArray_A;
                 }
             }
@@ -743,8 +748,12 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                 {
                     THROW_IF_HIP_ERROR(hipMallocAsync(
                         &devicePtrArray_B, sizeof(void*) * batch_count, prob.handle->get_stream()));
-                    THROW_IF_ROCBLAS_ERROR(addOffset(
-                        B, prob.batch_B, devicePtrArray_B, batch_count, prob.buffer_offset_b));
+                    THROW_IF_ROCBLAS_ERROR(addOffset(B,
+                                                     prob.batch_B,
+                                                     devicePtrArray_B,
+                                                     batch_count,
+                                                     prob.buffer_offset_b,
+                                                     prob.handle->get_stream()));
                     ptrB = devicePtrArray_B;
                 }
             }
@@ -755,8 +764,12 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                 {
                     THROW_IF_HIP_ERROR(hipMallocAsync(
                         &devicePtrArray_C, sizeof(void*) * batch_count, prob.handle->get_stream()));
-                    THROW_IF_ROCBLAS_ERROR(addOffset(
-                        C, prob.batch_C, devicePtrArray_C, batch_count, prob.buffer_offset_c));
+                    THROW_IF_ROCBLAS_ERROR(addOffset(C,
+                                                     prob.batch_C,
+                                                     devicePtrArray_C,
+                                                     batch_count,
+                                                     prob.buffer_offset_c,
+                                                     prob.handle->get_stream()));
                     ptrC = devicePtrArray_C;
                 }
             }
@@ -767,8 +780,12 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                 {
                     THROW_IF_HIP_ERROR(hipMallocAsync(
                         &devicePtrArray_D, sizeof(void*) * batch_count, prob.handle->get_stream()));
-                    THROW_IF_ROCBLAS_ERROR(addOffset(
-                        D, prob.batch_D, devicePtrArray_D, batch_count, prob.buffer_offset_d));
+                    THROW_IF_ROCBLAS_ERROR(addOffset(D,
+                                                     prob.batch_D,
+                                                     devicePtrArray_D,
+                                                     batch_count,
+                                                     prob.buffer_offset_d,
+                                                     prob.handle->get_stream()));
                     ptrD = devicePtrArray_D;
                 }
             }
