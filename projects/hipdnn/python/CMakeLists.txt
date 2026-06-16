@@ -93,6 +93,6 @@ else()
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/__init__.py"
             DESTINATION "${CMAKE_INSTALL_LIBDIR}/python/hipdnn_frontend")
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/test/"
-            DESTINATION "${CMAKE_INSTALL_LIBDIR}/python"
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/python/tests"
             FILES_MATCHING PATTERN "*.py")
 endif()
