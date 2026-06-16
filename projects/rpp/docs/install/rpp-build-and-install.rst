@@ -1,5 +1,5 @@
 .. meta::
-  :description: Building and installing ROCm Performance Primitives 
+  :description: Building and installing ROCm Performance Primitives
   :keywords: rpp, ROCm Performance Primitives, ROCm, documentation, installing, building, source code
 
 **************************************************************************
@@ -11,13 +11,13 @@ ROCm Performance Primitives (RPP) supports HIP and OpenCL backends running on `a
 On OpenCL and HIP backends, RPP requires ROCm installed with the `AMDGPU installer <https://rocm.docs.amd.com/projects/install-on-linux/en/docs-6.4.1/install/install-methods/amdgpu-installer-index.html>`_ and the ``rocm`` usecase:
 
 .. code:: shell
-    
+
     sudo amdgpu-install --usecase=rocm
 
 Clone the source code from the `RPP GitHub repository <https://github.com/ROCm/rpp>`_, then use the following commands to build and install RPP:
 
 .. tab-set::
- 
+
   .. tab-item:: HIP
 
     .. code:: shell
@@ -36,7 +36,4 @@ Clone the source code from the `RPP GitHub repository <https://github.com/ROCm/r
         cd build-cpu
         cmake -DBACKEND=CPU ../
         make -j8
-        sudo make install 
-    
-
-
+        sudo make install
