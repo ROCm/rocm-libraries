@@ -130,3 +130,95 @@ def test_forced_engine_ranking_runtime_error_becomes_unsupported():
         with pytest.raises(UnsupportedGraphError) as exc:
             executor._build_through_operation_graph(handle=object(), engine_id=7)
     assert "applicable solution" in str(exc.value)
+
+
+class _HardStubGraph(_StubGraph):
+    """Graph stub that exposes the hard-select + read-back bindings.
+
+    Presence of ``create_execution_plan_ext`` is what makes the executor take
+    the hard path; ``get_execution_plan_engine_id`` reports the engine that
+    actually backs the built plan.
+    """
+
+    def __init__(self, ranked, selected=None, hard_raises=False):
+        super().__init__(ranked)
+        self._selected = selected
+        self._hard_raises = hard_raises
+        self.hard_engine_id = None
+
+    def create_execution_plan_ext(self, engine_id):
+        if self._hard_raises:
+            raise RuntimeError("Failed to finalize engine descriptor")
+        self.hard_engine_id = engine_id
+
+    def get_execution_plan_engine_id(self):
+        if self._selected is None:
+            raise RuntimeError("no execution plan engine id")
+        return self._selected
+
+    # Plan lifecycle methods used by Executor.prepare.
+    def check_support(self):
+        return _StubResult()
+
+    def build_plans(self):
+        return _StubResult()
+
+    def get_workspace_size(self):
+        return 0
+
+
+def test_hard_select_skips_soft_preferred_and_guard():
+    """When the hard-select binding exists, the build neither sets a soft
+    preference nor runs the membership guard (the hard plan creation in
+    prepare is the authority)."""
+    executor = _executor()
+    fake = types.ModuleType("hipdnn_frontend")
+    # 999 is NOT in the ranked list, yet the guard must not fire on the build.
+    fake.Graph = lambda: _HardStubGraph(ranked=[111])
+    with patch.dict(sys.modules, {"hipdnn_frontend": fake}):
+        executor._build_through_operation_graph(handle=object(), engine_id=999)
+    assert executor._used_hard_select is True
+    assert executor._graph.preferred_engine_id is None  # soft path not taken
+
+
+def test_prepare_hard_select_records_actual_engine():
+    """prepare() uses create_execution_plan_ext and records the engine the
+    backend reports as backing the plan."""
+    executor = _executor()
+    g = _HardStubGraph(ranked=[999], selected=999)
+    fake = types.ModuleType("hipdnn_frontend")
+    fake.Graph = lambda: g
+    with patch.dict(sys.modules, {"hipdnn_frontend": fake}):
+        executor.prepare(handle=object(), engine_id=999)
+    assert g.hard_engine_id == 999  # hard selection was used
+    assert executor.selected_engine_id == 999
+
+
+def test_prepare_hard_select_not_applicable_is_skip():
+    """A hard-select failure (engine not applicable) becomes an
+    UnsupportedGraphError, i.e. a clean skip."""
+    executor = _executor()
+    fake = types.ModuleType("hipdnn_frontend")
+    fake.Graph = lambda: _HardStubGraph(ranked=[111], hard_raises=True)
+    with patch.dict(sys.modules, {"hipdnn_frontend": fake}):
+        with pytest.raises(UnsupportedGraphError):
+            executor.prepare(handle=object(), engine_id=999)
+
+
+def test_record_selected_engine_mismatch_raises():
+    """If a forced engine differs from the engine actually selected (only
+    possible on the soft path), it's treated as an unsupported-graph skip."""
+    executor = _executor()
+    executor._graph = _HardStubGraph(ranked=[111], selected=111)
+    with pytest.raises(UnsupportedGraphError) as exc:
+        executor._record_selected_engine(999)
+    assert "999" in str(exc.value) and "111" in str(exc.value)
+
+
+def test_record_selected_engine_without_binding_is_noop():
+    """Without get_execution_plan_engine_id the read-back is a no-op (older
+    bindings); selected_engine_id stays None and nothing raises."""
+    executor = _executor()
+    executor._graph = _StubGraph(ranked=[111])  # no get_execution_plan_engine_id
+    executor._record_selected_engine(999)
+    assert executor.selected_engine_id is None
