@@ -14,6 +14,11 @@
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormPlanBuilder.hpp"
 #endif
 
+#ifdef HIPDNN_ENGINE_HIP_FLASH2
+#include "engines/hip_flash2_engine/HipFlash2Engine.hpp"
+#include "engines/hip_flash2_engine/HipFlash2FwdPlanBuilder.hpp"
+#endif
+
 #ifdef HIPDNN_ENGINE_ASM_SDPA
 #include "engines/asm_sdpa_engine/AsmSdpaEngine.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaBwdPlanBuilder.hpp"
@@ -63,7 +68,23 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
              engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaBwdPlanBuilder>());
              return engine;
          }},
-#endif
+#endif // HIPDNN_ENGINE_ASM_SDPA
+#ifdef HIPDNN_ENGINE_HIP_FLASH2
+        // HIP_FLASH2_ENGINE: FP16 Flash-Attention 2 V7 (rocWMMA MFMA + causal tile skip)
+        // Complements ASM_SDPA_ENGINE: handles FP16 on gfx942/gfx950.
+        // Performance: 78.98 TFLOPS MI325X, 71.27 TFLOPS MI300X (seq=4096 causal D=128).
+        {HIP_FLASH2_ENGINE_ID,
+         [](const compilation::IKernelCompiler& kernelCompiler,
+            const device::IDevicePropertyProvider& devicePropertyProvider)
+             -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
+             auto engine =
+                 std::make_unique<hip_flash2_engine::HipFlash2Engine>(HIP_FLASH2_ENGINE_ID);
+             engine->addPlanBuilder(
+                 std::make_unique<hip_flash2_engine::HipFlash2FwdPlanBuilder>(
+                     kernelCompiler, devicePropertyProvider));
+             return engine;
+         }},
+#endif // HIPDNN_ENGINE_HIP_FLASH2
     };
 
     return s_engineDefinitions;

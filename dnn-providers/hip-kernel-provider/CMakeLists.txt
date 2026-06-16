@@ -59,6 +59,18 @@ if(HIPKERNELPROVIDER_ENABLE_COVERAGE)
 endif()
 
 if(ENABLE_ASM_SDPA_ENGINE)
+
+option(ENABLE_HIP_FLASH2_ENGINE "Build the HIP Flash-Attention 2 SDPA engine (FP16, gfx942/gfx950)" ON)
+if(ENABLE_HIP_FLASH2_ENGINE)
+    message(STATUS "HIP Flash2 SDPA engine enabled")
+    target_compile_definitions(hip_kernel_provider PRIVATE HIPDNN_ENGINE_HIP_FLASH2)
+    target_sources(hip_kernel_provider PRIVATE
+        src/engines/hip_flash2_engine/HipFlash2Engine.cpp
+        src/engines/hip_flash2_engine/HipFlash2FwdPlan.hip)
+else()
+    message(STATUS "HIP Flash2 SDPA engine disabled")
+endif()
+
     message(STATUS "ASM SDPA engine enabled")
 else()
     message(STATUS "ASM SDPA engine disabled")
