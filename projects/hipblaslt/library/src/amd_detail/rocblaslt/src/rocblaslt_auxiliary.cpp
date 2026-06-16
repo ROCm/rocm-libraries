@@ -508,7 +508,12 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                         swizzleA,
                                         swizzleB,
                                         batchMode,
-                                        bias_stride};
+                                        bias_stride,
+                                        // Forward these so the heuristic / workspace-size query
+                                        // sees the same config the launch uses (else an SK5 dynamic
+                                        // launch is under-provisioned and falls back to the DP grid).
+                                        matmul_descr->streamk_tile_scheduling_ext,
+                                        effective_sm_count_target(handle, matmul_descr, nullptr)};
 
     if(scaleAlphaVec)
     {
