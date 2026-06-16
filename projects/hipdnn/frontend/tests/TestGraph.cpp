@@ -175,112 +175,6 @@ protected:
             .WillByDefault(Return(HIPDNN_STATUS_SUCCESS));
     }
 
-    // Sets up backend mocks so create_execution_plans({FALLBACK}) then
-    // build_plans() succeed, returning the execution-plan descriptor handle.
-    // The single ranked engine config reports global index 10. Shared by the
-    // get_execution_plan_engine_id lifecycle tests below.
-    hipdnnBackendDescriptor_t buildFinalizedExecutionPlan(Graph& graph)
-    {
-        ON_CALL(*_mockBackend, backendCreateDescriptor(_, _))
-            .WillByDefault(Return(HIPDNN_STATUS_SUCCESS));
-        ON_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
-            .WillByDefault(Return(HIPDNN_STATUS_SUCCESS));
-        EXPECT_CALL(*_mockBackend, backendGetAttribute(_, _, _, _, _, _))
-            .WillRepeatedly([](hipdnnBackendDescriptor_t,
-                               hipdnnBackendAttributeName_t,
-                               hipdnnBackendAttributeType_t,
-                               int64_t,
-                               int64_t* elementCount,
-                               void*) {
-                if(elementCount != nullptr)
-                {
-                    *elementCount = 1;
-                }
-                return HIPDNN_STATUS_SUCCESS;
-            });
-
-        auto heurDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
-        EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, _))
-            .WillOnce([heurDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* d) {
-                *d = heurDesc;
-                return HIPDNN_STATUS_SUCCESS;
-            });
-        EXPECT_CALL(*_mockBackend, backendFinalize(heurDesc));
-
-        auto engineConfigDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x2345);
-        auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x3345);
-        EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, _))
-            .WillOnce(
-                [engineConfigDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* d) {
-                    *d = engineConfigDesc;
-                    return HIPDNN_STATUS_SUCCESS;
-                });
-        EXPECT_CALL(*_mockBackend, backendFinalize(engineConfigDesc));
-
-        EXPECT_CALL(*_mockBackend,
-                    backendGetAttribute(engineConfigDesc,
-                                        HIPDNN_ATTR_ENGINECFG_ENGINE,
-                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                        1,
-                                        nullptr,
-                                        _))
-            .WillOnce([engineDesc](hipdnnBackendDescriptor_t,
-                                   hipdnnBackendAttributeName_t,
-                                   hipdnnBackendAttributeType_t,
-                                   int64_t,
-                                   int64_t*,
-                                   void* out) {
-                *static_cast<hipdnnBackendDescriptor_t*>(out) = engineDesc;
-                return HIPDNN_STATUS_SUCCESS;
-            });
-
-        EXPECT_CALL(
-            *_mockBackend,
-            backendGetAttribute(
-                engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, nullptr, _))
-            .WillOnce([](hipdnnBackendDescriptor_t,
-                         hipdnnBackendAttributeName_t,
-                         hipdnnBackendAttributeType_t,
-                         int64_t,
-                         int64_t*,
-                         void* out) {
-                *static_cast<int64_t*>(out) = 10;
-                return HIPDNN_STATUS_SUCCESS;
-            });
-
-        EXPECT_CALL(*_mockBackend,
-                    backendGetAttribute(heurDesc,
-                                        HIPDNN_ATTR_ENGINEHEUR_RESULTS,
-                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                        1,
-                                        _,
-                                        NotNull()))
-            .WillOnce([](hipdnnBackendDescriptor_t,
-                         hipdnnBackendAttributeName_t,
-                         hipdnnBackendAttributeType_t,
-                         int64_t,
-                         int64_t* retrievedCount,
-                         void*) {
-                *retrievedCount = 1;
-                return HIPDNN_STATUS_SUCCESS;
-            });
-
-        auto executionPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
-        EXPECT_CALL(*_mockBackend,
-                    backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
-            .WillOnce(
-                [executionPlanDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* d) {
-                    *d = executionPlanDesc;
-                    return HIPDNN_STATUS_SUCCESS;
-                });
-        EXPECT_CALL(*_mockBackend, backendFinalize(executionPlanDesc))
-            .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
-
-        EXPECT_TRUE(graph.create_execution_plans({HeuristicMode::FALLBACK}).is_good());
-        EXPECT_TRUE(graph.build_plans().is_good());
-        return executionPlanDesc;
-    }
-
     void TearDown() override
     {
         detail::IHipdnnBackend::resetInstance();
@@ -2253,68 +2147,17 @@ TEST_F(TestGraph, GetExecutionPlanEngineIdFailsWithNoPlan)
     EXPECT_EQ(engineId, -1);
 }
 
-TEST_F(TestGraph, GetExecutionPlanEngineIdReturnsBackendReportedId)
+TEST_F(TestGraph, GetExecutionPlanEngineIdReturnsSelectedEngine)
 {
-    ::testing::FLAGS_gmock_verbose = "error";
-    Graph graph;
-    auto tensorAttributes = createBasicBatchnormGraph(graph);
-    ASSERT_TRUE(graph.validate().is_good());
-    graph.build_operation_graph(_handle);
-
-    auto executionPlanDesc = buildFinalizedExecutionPlan(graph);
-
-    // The getter reads the engine global index straight off the finalized
-    // execution-plan descriptor (detail::getExecutionPlanEngineId).
-    EXPECT_CALL(*_mockBackend,
-                backendGetAttribute(executionPlanDesc,
-                                    HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT,
-                                    HIPDNN_TYPE_INT64,
-                                    1,
-                                    _,
-                                    _))
-        .WillOnce([](hipdnnBackendDescriptor_t,
-                     hipdnnBackendAttributeName_t,
-                     hipdnnBackendAttributeType_t,
-                     int64_t,
-                     int64_t* count,
-                     void* out) {
-            if(count != nullptr)
-            {
-                *count = 1;
-            }
-            *static_cast<int64_t*>(out) = 4242;
-            return HIPDNN_STATUS_SUCCESS;
-        });
+    // get_execution_plan_engine_id returns the cached engine selected for the
+    // plan (_selectedEngineId), set when the engine config is built.
+    GraphTestUtils graph;
+    graph.setSelectedEngineId(4242);
 
     int64_t engineId = -1;
     auto result = graph.get_execution_plan_engine_id(engineId);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(engineId, 4242);
-}
-
-TEST_F(TestGraph, GetExecutionPlanEngineIdFailsWhenBackendCannotReport)
-{
-    ::testing::FLAGS_gmock_verbose = "error";
-    Graph graph;
-    auto tensorAttributes = createBasicBatchnormGraph(graph);
-    ASSERT_TRUE(graph.validate().is_good());
-    graph.build_operation_graph(_handle);
-
-    auto executionPlanDesc = buildFinalizedExecutionPlan(graph);
-
-    EXPECT_CALL(*_mockBackend,
-                backendGetAttribute(executionPlanDesc,
-                                    HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT,
-                                    HIPDNN_TYPE_INT64,
-                                    1,
-                                    _,
-                                    _))
-        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
-
-    int64_t engineId = -1;
-    auto result = graph.get_execution_plan_engine_id(engineId);
-    EXPECT_FALSE(result.is_good());
-    EXPECT_THAT(result.get_message(), HasSubstr("Backend did not report an engine id"));
 }
 
 TEST_F(TestGraph, WorkspaceSizeIsRetrievedFromExecutionPlan)
