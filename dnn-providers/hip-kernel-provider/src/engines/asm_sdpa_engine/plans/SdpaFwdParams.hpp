@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "SdpaPlanUtils.hpp"
+
 #include <cstdint>
 #include <string>
 
@@ -60,7 +62,7 @@ struct SdpaFwdParams
     std::string archString;
 
     // Mask type
-    bool noMask;
+    plan_utils::MaskType maskType;
 
     // Attention scale
     float attnScale;
