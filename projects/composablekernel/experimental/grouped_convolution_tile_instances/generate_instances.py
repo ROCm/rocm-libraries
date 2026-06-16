@@ -515,7 +515,7 @@ def parse_bwd_weight_instances(instances, problem_name, verbose=True):
             ):
                 if verbose:
                     print(
-                    f"Skipping instance {instance_id} with streamk, async, float since it's not supported yet."
+                        f"Skipping instance {instance_id} with streamk, async, float since it's not supported yet."
                     )
                 continue
             convs.append(native)
@@ -842,7 +842,7 @@ def parse_bwd_data_instances(instances, problem_name, verbose=True):
         ):
             if verbose:
                 print(
-                f"Skipping instance {instance_id} with irregular load since it's not supported yet."
+                    f"Skipping instance {instance_id} with irregular load since it's not supported yet."
                 )
             continue
 
