@@ -1,0 +1,501 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  MergeFiles: False
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  DeviceLDS: 163840
+  MaxLDS: 163840
+  CpuThreads: 1
+  RotatingBufferSize: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # FP8 TN (no scales) — PGR=0, DU = 2*MI_K = 256, MT 128x128
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]                 # 2*MI_K = 256
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]   # K = 1*DU
+          - Exact: [256, 256, 1, 512]   # K = 2*DU
+          - Exact: [256, 256, 1, 768]   # K = 3*DU (K-loop)
+
+  ########################################
+  # FP8 TN (no scales) — PGR=2, DU = 2*MI_K = 256, MT 128x128
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]                 # 2*MI_K = 256
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]   # K = 1*DU
+          - Exact: [256, 256, 1, 512]   # K = 2*DU
+          - Exact: [256, 256, 1, 768]   # K = 3*DU (K-loop)
+
+  ########################################
+  # FP8 TN (no scales) — PGR=0, DU = 1*MI_K = 128
+  # Group A: MT_M,MT_N in {32,64,96,128,192,256,384,512} (2^a*3^b)
+  # LCM(MT_M) = LCM(MT_N) = 1536
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          # 2x2 wave group
+          - [16, 16, 128, 1,  1, 4,  6,  2, 2]  # MT 128x192
+          - [16, 16, 128, 1,  1, 4,  8,  2, 2]  # MT 128x256
+          - [16, 16, 128, 1,  1, 4, 12,  2, 2]  # MT 128x384
+          - [16, 16, 128, 1,  1, 6,  4,  2, 2]  # MT 192x128
+          - [16, 16, 128, 1,  1, 6,  6,  2, 2]  # MT 192x192
+          - [16, 16, 128, 1,  1, 6,  8,  2, 2]  # MT 192x256
+          - [16, 16, 128, 1,  1, 6, 12,  2, 2]  # MT 192x384
+          - [16, 16, 128, 1,  1, 8,  3,  2, 2]  # MT 256x96
+          - [16, 16, 128, 1,  1, 8,  4,  2, 2]  # MT 256x128
+          - [16, 16, 128, 1,  1, 8,  6,  2, 2]  # MT 256x192
+          - [16, 16, 128, 1,  1, 8,  8,  2, 2]  # MT 256x256
+          - [16, 16, 128, 1,  1, 12, 4,  2, 2]  # MT 384x128
+          - [16, 16, 128, 1,  1, 12, 6,  2, 2]  # MT 384x192
+          # 4x1 wave group
+          - [16, 16, 128, 1,  1, 6,  2,  4, 1]  # MT 384x32
+          - [16, 16, 128, 1,  1, 6,  4,  4, 1]  # MT 384x64
+          - [16, 16, 128, 1,  1, 6,  6,  4, 1]  # MT 384x96
+          - [16, 16, 128, 1,  1, 8,  2,  4, 1]  # MT 512x32
+          # 1x4 wave group
+          - [16, 16, 128, 1,  1, 2,  6,  1, 4]  # MT 32x384
+          - [16, 16, 128, 1,  1, 2,  8,  1, 4]  # MT 32x512
+          - [16, 16, 128, 1,  1, 4,  4,  1, 4]  # MT 64x256
+          - [16, 16, 128, 1,  1, 4,  8,  1, 4]  # MT 64x512
+          - [16, 16, 128, 1,  1, 6,  6,  1, 4]  # MT 96x384
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [128]                 # 1*MI_K = 128
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1536, 1536, 1, 128]   # K = 1*DU
+          - Exact: [1536, 1536, 1, 256]   # K = 2*DU
+          - Exact: [1536, 1536, 1, 384]   # K = 3*DU
+
+  ########################################
+  # FP8 TN (no scales) — PGR=0, DU = 1*MI_K = 128
+  # Group B: MT_M or MT_N = 288 = 2^5*3^2
+  # LCM(MT_M) = LCM(MT_N) = 2304
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          # 2x2 wave group
+          - [16, 16, 128, 1,  1, 8,  9,  2, 2]  # MT 256x288
+          - [16, 16, 128, 1,  1, 9,  8,  2, 2]  # MT 288x256
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [128]                 # 1*MI_K = 128
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2304, 2304, 1, 128]   # K = 1*DU
+          - Exact: [2304, 2304, 1, 256]   # K = 2*DU
+          - Exact: [2304, 2304, 1, 384]   # K = 3*DU
+
+  ########################################
+  # FP8 TN (no scales) — PGR=0, DU = 1*MI_K = 128
+  # Group C: MT_M or MT_N in {160,320} (factor 5)
+  # LCM(MT_M) = LCM(MT_N) = 1280
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          # 2x2 wave group
+          - [16, 16, 128, 1,  1, 5,  8,  2, 2]  # MT 160x256
+          - [16, 16, 128, 1,  1, 8,  5,  2, 2]  # MT 256x160
+          - [16, 16, 128, 1,  1, 8, 10,  2, 2]  # MT 256x320
+          - [16, 16, 128, 1,  1, 10, 4,  2, 2]  # MT 320x128
+          - [16, 16, 128, 1,  1, 10, 8,  2, 2]  # MT 320x256
+          # 1x4 wave group
+          - [16, 16, 128, 1,  1, 4,  5,  1, 4]  # MT 64x320
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [128]                 # 1*MI_K = 128
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1280, 1280, 1, 128]   # K = 1*DU
+          - Exact: [1280, 1280, 1, 256]   # K = 2*DU
+          - Exact: [1280, 1280, 1, 384]   # K = 3*DU
+
+  ########################################
+  # FP8 TN (no scales) — PGR=0, DU = 1*MI_K = 128
+  # Group D: MT_M or MT_N = 448 = 2^6*7 (factor 7)
+  # LCM(MT_M) = LCM(MT_N) = 896
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          # 2x2 wave group
+          - [16, 16, 128, 1,  1, 4, 14,  2, 2]  # MT 128x448
+          - [16, 16, 128, 1,  1, 14, 4,  2, 2]  # MT 448x128
+          # 4x1 wave group
+          - [16, 16, 128, 1,  1, 7,  4,  4, 1]  # MT 448x64
+          - [16, 16, 128, 1,  1, 7,  8,  4, 1]  # MT 448x128
+          # 1x4 wave group
+          - [16, 16, 128, 1,  1, 4,  7,  1, 4]  # MT 64x448
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [128]                 # 1*MI_K = 128
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [896, 896, 1, 128]    # K = 1*DU
+          - Exact: [896, 896, 1, 256]    # K = 2*DU
+          - Exact: [896, 896, 1, 384]    # K = 3*DU
+          - Exact: [896, 896, 1, 640]    # K = 5*DU
+          - Exact: [896, 896, 1, 768]    # K = 6*DU
+
+  ########################################
+  # FP8 TN (no scales) — PGR=2, DU = 1*MI_K = 128
+  # Group A: MT_M,MT_N in {32,64,96,128,192,256,384,512} (2^a*3^b)
+  # LCM(MT_M) = LCM(MT_N) = 1536
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          # 2x2 wave group
+          - [16, 16, 128, 1,  1, 4,  6,  2, 2]  # MT 128x192
+          - [16, 16, 128, 1,  1, 4,  8,  2, 2]  # MT 128x256
+          - [16, 16, 128, 1,  1, 4, 12,  2, 2]  # MT 128x384
+          - [16, 16, 128, 1,  1, 6,  4,  2, 2]  # MT 192x128
+          - [16, 16, 128, 1,  1, 6,  6,  2, 2]  # MT 192x192
+          - [16, 16, 128, 1,  1, 6,  8,  2, 2]  # MT 192x256
+          - [16, 16, 128, 1,  1, 6, 12,  2, 2]  # MT 192x384
+          - [16, 16, 128, 1,  1, 8,  3,  2, 2]  # MT 256x96
+          - [16, 16, 128, 1,  1, 8,  4,  2, 2]  # MT 256x128
+          - [16, 16, 128, 1,  1, 8,  6,  2, 2]  # MT 256x192
+          - [16, 16, 128, 1,  1, 8,  8,  2, 2]  # MT 256x256
+          - [16, 16, 128, 1,  1, 12, 4,  2, 2]  # MT 384x128
+          - [16, 16, 128, 1,  1, 12, 6,  2, 2]  # MT 384x192
+          # 4x1 wave group
+          - [16, 16, 128, 1,  1, 6,  2,  4, 1]  # MT 384x32
+          - [16, 16, 128, 1,  1, 6,  4,  4, 1]  # MT 384x64
+          - [16, 16, 128, 1,  1, 6,  6,  4, 1]  # MT 384x96
+          - [16, 16, 128, 1,  1, 8,  2,  4, 1]  # MT 512x32
+          # 1x4 wave group
+          - [16, 16, 128, 1,  1, 2,  6,  1, 4]  # MT 32x384
+          - [16, 16, 128, 1,  1, 2,  8,  1, 4]  # MT 32x512
+          - [16, 16, 128, 1,  1, 4,  4,  1, 4]  # MT 64x256
+          - [16, 16, 128, 1,  1, 4,  8,  1, 4]  # MT 64x512
+          - [16, 16, 128, 1,  1, 6,  6,  1, 4]  # MT 96x384
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [128]                 # 1*MI_K = 128
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1536, 1536, 1, 128]   # K = 1*DU
+          - Exact: [1536, 1536, 1, 256]   # K = 2*DU
+          - Exact: [1536, 1536, 1, 384]   # K = 3*DU
+
+  # ########################################
+  # # FP8 TN (no scales) — PGR=2, DU = 1*MI_K = 128
+  # # Group B: MT_M or MT_N = 288 = 2^5*3^2
+  # # LCM(MT_M) = LCM(MT_N) = 2304
+  # #
+  # # DISABLED: MT256x288/MT288x256 exceed the 256-VGPR limit for PGR=2.
+  # # With num_k_groups=1 (FP8, DU=128=1*MI_K), all partitions' data collapses
+  # # into the same double-buffer set, so all 9 B-tile groups need unique VGPR
+  # # positions → tile_peaks['B']=18 → 144 B VGPRs + 128 A VGPRs + overhead = 316.
+  # # These tiles work under PGR=0 (1 set → ~180 VGPRs); see Group B PGR=0 above.
+  # ########################################
+  # -
+  #   - # ProblemType
+  #     OperationType: GEMM
+  #     DataType: F8
+  #     DestDataType: b
+  #     ComputeDataType: s
+  #     HighPrecisionAccumulate: True
+  #     TransposeA: 1
+  #     TransposeB: 0
+  #     UseBeta: True
+  #     Batched: True
+  #     ActivationFuncCall: True
+  #
+  #   - InitialSolutionParameters:
+  #     BenchmarkCommonParameters:
+  #       - KernelLanguage: ["Assembly"]
+  #     ForkParameters:
+  #       - MatrixInstruction:
+  #         # 2x2 wave group
+  #         - [16, 16, 128, 1,  1, 8,  9,  2, 2]  # MT 256x288
+  #         - [16, 16, 128, 1,  1, 9,  8,  2, 2]  # MT 288x256
+  #       - PrefetchGlobalRead: [2]
+  #       - PrefetchLocalRead: [1]
+  #       - DepthU: [128]                 # 1*MI_K = 128
+  #       - ScheduleIterAlg: [3]
+  #       - DirectToLds: [1]
+  #       - StreamK: [3]
+  #       - StaggerU: [0]
+  #       - UseSubtileImpl: [1]
+  #     BenchmarkJoinParameters:
+  #     BenchmarkFinalParameters:
+  #       - ProblemSizes:
+  #         - Exact: [2304, 2304, 1, 128]   # K = 1*DU
+  #         - Exact: [2304, 2304, 1, 256]   # K = 2*DU
+  #         - Exact: [2304, 2304, 1, 384]   # K = 3*DU
+
+  ########################################
+  # FP8 TN (no scales) — PGR=2, DU = 1*MI_K = 128
+  # Group C: MT_M or MT_N in {160,320} (factor 5)
+  # LCM(MT_M) = LCM(MT_N) = 1280
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          # 2x2 wave group
+          - [16, 16, 128, 1,  1, 5,  8,  2, 2]  # MT 160x256
+          - [16, 16, 128, 1,  1, 8,  5,  2, 2]  # MT 256x160
+          - [16, 16, 128, 1,  1, 8, 10,  2, 2]  # MT 256x320
+          - [16, 16, 128, 1,  1, 10, 4,  2, 2]  # MT 320x128
+          - [16, 16, 128, 1,  1, 10, 8,  2, 2]  # MT 320x256
+          # 1x4 wave group
+          - [16, 16, 128, 1,  1, 4,  5,  1, 4]  # MT 64x320
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [128]                 # 1*MI_K = 128
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1280, 1280, 1, 128]   # K = 1*DU
+          - Exact: [1280, 1280, 1, 256]   # K = 2*DU
+          - Exact: [1280, 1280, 1, 384]   # K = 3*DU
+
+  ########################################
+  # FP8 TN (no scales) — PGR=2, DU = 1*MI_K = 128
+  # Group D: MT_M or MT_N = 448 = 2^6*7 (factor 7)
+  # LCM(MT_M) = LCM(MT_N) = 896
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          # 2x2 wave group
+          - [16, 16, 128, 1,  1, 4, 14,  2, 2]  # MT 128x448
+          - [16, 16, 128, 1,  1, 14, 4,  2, 2]  # MT 448x128
+          # 4x1 wave group
+          - [16, 16, 128, 1,  1, 7,  4,  4, 1]  # MT 448x64
+          - [16, 16, 128, 1,  1, 7,  8,  4, 1]  # MT 448x128
+          # 1x4 wave group
+          - [16, 16, 128, 1,  1, 4,  7,  1, 4]  # MT 64x448
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [128]                 # 1*MI_K = 128
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [896, 896, 1, 128]    # K = 1*DU
+          - Exact: [896, 896, 1, 256]    # K = 2*DU
+          - Exact: [896, 896, 1, 384]    # K = 3*DU
+          - Exact: [896, 896, 1, 640]    # K = 5*DU
+          - Exact: [896, 896, 1, 768]    # K = 6*DU

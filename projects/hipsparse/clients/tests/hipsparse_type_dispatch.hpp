@@ -340,6 +340,64 @@ auto hipsparse_axpby_dispatch(const Arguments& arg)
     return TEST<void>{}(arg);
 }
 
+template <template <typename...> class TEST>
+auto hipsparse_spvv_dispatch(const Arguments& arg)
+{
+    const auto I = arg.index_type_I;
+    const auto X = arg.x_type;
+    const auto Y = arg.y_type;
+    const auto T = arg.compute_type;
+
+    // hipsparseSpVV requires x and y element types to match.
+    if(X != Y)
+    {
+        return TEST<void>{}(arg);
+    }
+
+    if(I == HIPSPARSE_INDEX_32I)
+    {
+        if(X == HIP_R_32F && T == HIP_R_32F)
+            return TEST<int32_t, float, float, float>{}(arg);
+        if(X == HIP_R_64F && T == HIP_R_64F)
+            return TEST<int32_t, double, double, double>{}(arg);
+        if(X == HIP_C_32F && T == HIP_C_32F)
+            return TEST<int32_t, hipComplex, hipComplex, hipComplex>{}(arg);
+        if(X == HIP_C_64F && T == HIP_C_64F)
+            return TEST<int32_t, hipDoubleComplex, hipDoubleComplex, hipDoubleComplex>{}(arg);
+        if(X == HIP_R_8I && T == HIP_R_32I)
+            return TEST<int32_t, int8_t, int8_t, int32_t>{}(arg);
+        if(X == HIP_R_8I && T == HIP_R_32F)
+            return TEST<int32_t, int8_t, int8_t, float>{}(arg);
+        if(X == HIP_R_16F && T == HIP_R_32F)
+            return TEST<int32_t, hipsparseFloat16, hipsparseFloat16, float>{}(arg);
+        if(X == HIP_R_16BF && T == HIP_R_32F)
+            return TEST<int32_t, hipsparseBfloat16, hipsparseBfloat16, float>{}(arg);
+        return TEST<void>{}(arg);
+    }
+    else if(I == HIPSPARSE_INDEX_64I)
+    {
+        if(X == HIP_R_32F && T == HIP_R_32F)
+            return TEST<int64_t, float, float, float>{}(arg);
+        if(X == HIP_R_64F && T == HIP_R_64F)
+            return TEST<int64_t, double, double, double>{}(arg);
+        if(X == HIP_C_32F && T == HIP_C_32F)
+            return TEST<int64_t, hipComplex, hipComplex, hipComplex>{}(arg);
+        if(X == HIP_C_64F && T == HIP_C_64F)
+            return TEST<int64_t, hipDoubleComplex, hipDoubleComplex, hipDoubleComplex>{}(arg);
+        if(X == HIP_R_8I && T == HIP_R_32I)
+            return TEST<int64_t, int8_t, int8_t, int32_t>{}(arg);
+        if(X == HIP_R_8I && T == HIP_R_32F)
+            return TEST<int64_t, int8_t, int8_t, float>{}(arg);
+        if(X == HIP_R_16F && T == HIP_R_32F)
+            return TEST<int64_t, hipsparseFloat16, hipsparseFloat16, float>{}(arg);
+        if(X == HIP_R_16BF && T == HIP_R_32F)
+            return TEST<int64_t, hipsparseBfloat16, hipsparseBfloat16, float>{}(arg);
+        return TEST<void>{}(arg);
+    }
+
+    return TEST<void>{}(arg);
+}
+
 #define HIPSPARSE_UNPACK(...) __VA_ARGS__
 
 // Shared per-numeric-type expansion for SPMV-style dispatches. The IDX_PACK

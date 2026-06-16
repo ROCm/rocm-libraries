@@ -67,7 +67,7 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    I m, l, lsv, lend, lendsv;
+    I m, l, lsv, lend, lendsv, lsv_scaling, lendsv_scaling;
     I l1;
     I iters;
     S anorm, p;
@@ -131,13 +131,15 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
             if(lend == l)
                 continue;
 
+            lsv_scaling = lsv;
+            lendsv_scaling = lendsv;
             // Scale submatrix
             if(anorm == 0)
                 continue;
             else if(anorm > ssfmax)
-                scale_tridiag(lsv, lendsv, D, E, anorm / ssfmax);
+                scale_tridiag(lsv_scaling, lendsv_scaling, D, E, ssfmax / anorm);
             else if(anorm < ssfmin)
-                scale_tridiag(lsv, lendsv, D, E, anorm / ssfmin);
+                scale_tridiag(lsv_scaling, lendsv_scaling, D, E, ssfmin / anorm);
 
             if(lend >= l)
             {
@@ -315,9 +317,9 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
 
             // Undo scaling
             if(anorm > ssfmax)
-                scale_tridiag(lsv, lendsv, D, E, ssfmax / anorm);
+                scale_tridiag(lsv_scaling, lendsv_scaling, D, E, anorm / ssfmax);
             if(anorm < ssfmin)
-                scale_tridiag(lsv, lendsv, D, E, ssfmin / anorm);
+                scale_tridiag(lsv_scaling, lendsv_scaling, D, E, anorm / ssfmin);
         }
 
         // Check for convergence
@@ -383,7 +385,7 @@ __device__ void run_steqr(const I tid,
                           const S ssfmax,
                           const bool ordered = true)
 {
-    __shared__ I m, l, lsv, lend, lendsv;
+    __shared__ I m, l, lsv, lend, lendsv, lsv_scaling, lendsv_scaling;
     __shared__ I l1;
     __shared__ I iters;
     __shared__ S anorm, p;
@@ -424,6 +426,10 @@ __device__ void run_steqr(const I tid,
 
             // Get scaling factor
             anorm = find_max_tridiag(lsv, lendsv, D, E);
+
+            // Save for the case we have to undo the scaling later
+            lsv_scaling = lsv;
+            lendsv_scaling = lendsv;
         }
         __syncthreads();
 
@@ -434,9 +440,9 @@ __device__ void run_steqr(const I tid,
         if(anorm == 0)
             continue;
         else if(anorm > ssfmax)
-            scale_tridiag(lsv, lendsv, D, E, anorm / ssfmax, tid, tid_inc);
+            scale_tridiag(lsv_scaling, lendsv_scaling, D, E, ssfmax / anorm, tid, tid_inc);
         else if(anorm < ssfmin)
-            scale_tridiag(lsv, lendsv, D, E, anorm / ssfmin, tid, tid_inc);
+            scale_tridiag(lsv_scaling, lendsv_scaling, D, E, ssfmin / anorm, tid, tid_inc);
         __syncthreads();
 
         if(lend >= l)
@@ -622,9 +628,9 @@ __device__ void run_steqr(const I tid,
 
         // Undo scaling
         if(anorm > ssfmax)
-            scale_tridiag(lsv, lendsv, D, E, ssfmax / anorm, tid, tid_inc);
+            scale_tridiag(lsv_scaling, lendsv_scaling, D, E, anorm / ssfmax, tid, tid_inc);
         if(anorm < ssfmin)
-            scale_tridiag(lsv, lendsv, D, E, ssfmin / anorm, tid, tid_inc);
+            scale_tridiag(lsv_scaling, lendsv_scaling, D, E, anorm / ssfmin, tid, tid_inc);
         __syncthreads();
     }
 

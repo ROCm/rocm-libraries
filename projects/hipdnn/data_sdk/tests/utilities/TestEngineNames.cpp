@@ -33,12 +33,10 @@ TEST_F(TestEngineNames, MacroGeneratesCorrectConstants)
     // Check that the string constants are defined
     EXPECT_STREQ(MIOPEN_ENGINE_NAME, "MIOPEN_ENGINE");
     EXPECT_STREQ(HIPBLASLT_ENGINE_NAME, "HIPBLASLT_ENGINE");
-    EXPECT_STREQ(FUSILLI_ENGINE_NAME, "FUSILLI_ENGINE");
 
     // Check that the ID constants are defined and match the hash function
     EXPECT_EQ(MIOPEN_ENGINE_ID, engineNameToId("MIOPEN_ENGINE"));
     EXPECT_EQ(HIPBLASLT_ENGINE_ID, engineNameToId("HIPBLASLT_ENGINE"));
-    EXPECT_EQ(FUSILLI_ENGINE_ID, engineNameToId("FUSILLI_ENGINE"));
 }
 
 TEST_F(TestEngineNames, EngineIdToNameMappingConsistent)
@@ -61,7 +59,6 @@ TEST_F(TestEngineNames, IsEngineNameRegistered)
     // Test with known registered names
     EXPECT_TRUE(isEngineNameRegistered(MIOPEN_ENGINE_NAME));
     EXPECT_TRUE(isEngineNameRegistered(HIPBLASLT_ENGINE_NAME));
-    EXPECT_TRUE(isEngineNameRegistered(FUSILLI_ENGINE_NAME));
 
     // Test with unregistered names
     EXPECT_FALSE(isEngineNameRegistered("UNKNOWN_ENGINE"));
@@ -74,7 +71,6 @@ TEST_F(TestEngineNames, GetEngineNameFromId)
     // Test with registered engines
     EXPECT_EQ(getEngineNameFromId(MIOPEN_ENGINE_ID), "MIOPEN_ENGINE");
     EXPECT_EQ(getEngineNameFromId(HIPBLASLT_ENGINE_ID), "HIPBLASLT_ENGINE");
-    EXPECT_EQ(getEngineNameFromId(FUSILLI_ENGINE_ID), "FUSILLI_ENGINE");
 
     // Test with non-existent ID - should throw
     const int64_t nonExistentId = 0xDEADBEEF;
@@ -115,9 +111,7 @@ TEST_F(TestEngineNames, RegistrarThrowsOnDuplicateName)
     // These names are already in the map from HIPDNN_REGISTER_ENGINE static initialization.
     // Re-registering should throw to catch accidental duplicate engine definitions.
     const std::string_view miopenName{MIOPEN_ENGINE_NAME};
-    const std::string_view fusilliName{FUSILLI_ENGINE_NAME};
     EXPECT_THROW(EngineRegistrar{miopenName}, std::runtime_error);
-    EXPECT_THROW(EngineRegistrar{fusilliName}, std::runtime_error);
 }
 
 TEST_F(TestEngineNames, RegistrarDetectsCollision)
@@ -151,15 +145,6 @@ TEST_F(TestEngineNames, EnsureAllEngineNameToIdsBehaveTheSame)
         auto engineIdCString = engineNameToId(HIPBLASLT_ENGINE_NAME);
         auto engineIdString = engineNameToId(std::string(HIPBLASLT_ENGINE_NAME));
         auto engineIdStringView = engineNameToId(std::string_view(HIPBLASLT_ENGINE_NAME));
-
-        EXPECT_EQ(engineIdCString, engineIdString);
-        EXPECT_EQ(engineIdCString, engineIdStringView);
-    }
-
-    {
-        auto engineIdCString = engineNameToId(FUSILLI_ENGINE_NAME);
-        auto engineIdString = engineNameToId(std::string(FUSILLI_ENGINE_NAME));
-        auto engineIdStringView = engineNameToId(std::string_view(FUSILLI_ENGINE_NAME));
 
         EXPECT_EQ(engineIdCString, engineIdString);
         EXPECT_EQ(engineIdCString, engineIdStringView);

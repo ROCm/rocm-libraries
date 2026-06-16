@@ -52,4 +52,12 @@ target_include_directories(
 )
 
 include(GoogleTest)
-gtest_discover_tests(hipdnn_example_provider_unit_tests DISCOVERY_MODE PRE_TEST)
+if(TEST_ENVIRONMENT)
+    gtest_discover_tests(hipdnn_example_provider_unit_tests
+        DISCOVERY_MODE PRE_TEST
+        PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}"
+    )
+else()
+    gtest_discover_tests(hipdnn_example_provider_unit_tests
+        DISCOVERY_MODE PRE_TEST)
+endif()

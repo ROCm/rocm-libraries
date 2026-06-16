@@ -33,10 +33,10 @@
 #include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/solver/problem_description_interpreter.hpp>
 #include <miopen/solver/ck_impl_lib_loader.hpp>
+#include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
-#include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
 #endif
 #include <miopen/solver/implicitgemm_ck_util_common.hpp>
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS)
@@ -346,7 +346,7 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
     if(!loader.IsLoaded())
         return;
 
-    const bool is_deterministic = problem.GetConv().attribute.deterministic;
+    [[maybe_unused]] const bool is_deterministic = problem.GetConv().attribute.deterministic;
 
     // AI heuristics (if enabled)
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
@@ -529,8 +529,6 @@ bool ConvHipImplicitGemmGroupWrwXdlops::IsApplicable(
     if(env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS))
         return false;
     if(problem.HasMixedDataTypes())
-        return false;
-    if(!problem.AllTensorsDimsFitIntoInt())
         return false;
     if(!problem.IsDirectionBackwardWrW())
         return false;

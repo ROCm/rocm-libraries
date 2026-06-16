@@ -1173,8 +1173,8 @@ inline flatbuffers::FlatBufferBuilder buildBatchnormFusedBackwardGraph(
         flatbuffers::nullopt, // relu_upper_clip
         flatbuffers::nullopt, // relu_lower_clip_slope
         flatbuffers::nullopt, // axis_tensor_uid
-        bnYVirtualUid,
-        flatbuffers::Optional<int64_t>(dyUid),
+        dyUid,
+        flatbuffers::Optional<int64_t>(bnYVirtualUid),
         flatbuffers::nullopt, // in_2_tensor_uid
         dxDreluVirtualUid);
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(

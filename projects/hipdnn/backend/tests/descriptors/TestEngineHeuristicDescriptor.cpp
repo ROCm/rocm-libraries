@@ -81,7 +81,7 @@ public:
 
     void setHeuristicMode() const
     {
-        hipdnnBackendHeurMode_t mode = HIPDNN_HEUR_MODE_FALLBACK;
+        const hipdnnBackendHeurMode_t mode = HIPDNN_HEUR_MODE_FALLBACK;
         ASSERT_NO_THROW(getEngineHeuristicDescriptor()->setAttribute(
             HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_HEUR_MODE, 1, &mode));
     }

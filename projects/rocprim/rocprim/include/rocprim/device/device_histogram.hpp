@@ -238,12 +238,6 @@ inline hipError_t histogram_impl(void*          temporary_storage,
                                                    0,
                                                    size_private_histograms * sizeof(Counter),
                                                    stream));
-
-            ROCPRIM_RETURN_ON_ERROR(hipMemcpyAsync(block_id_count,
-                                                   &global_histogram_grid_size,
-                                                   sizeof(unsigned int),
-                                                   hipMemcpyHostToDevice,
-                                                   stream));
         }
     }
 
@@ -262,12 +256,21 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         start = std::chrono::steady_clock::now();
     }
 
+    // This also initializes block_id_count (for the use_private_histogram path) from
+    // global_histogram_grid_size which is a stack-local variable. This replaces a
+    // hipMemcpyAsync which is unsafe under HIP graph capture (the host pointer becomes
+    // dangling when the graph is replayed after the capturing function has returned).
     auto init_histogram_kernel
         = [hist       = fixed_array<Counter*, ActiveChannels>(histogram),
-           bin_counts = fixed_array<size_t, ActiveChannels>(bins)](auto target_config)
+           bin_counts = fixed_array<size_t, ActiveChannels>(bins),
+           block_id_count,
+           grid_size = static_cast<unsigned int>(global_histogram_grid_size)](auto target_config)
     {
         static constexpr histogram_config_params params = decltype(target_config)::params;
-        init_histogram<params.histogram_config.block_size, ActiveChannels>(hist, bin_counts);
+        init_histogram<params.histogram_config.block_size, ActiveChannels>(hist,
+                                                                           bin_counts,
+                                                                           block_id_count,
+                                                                           grid_size);
     };
 
     ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, selector, histogram_config_static_selector>(

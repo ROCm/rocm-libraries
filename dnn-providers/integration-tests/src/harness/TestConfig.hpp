@@ -8,13 +8,13 @@
 #include <filesystem>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/DeviceQuery.hpp>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 
 #include "common/PlatformUtils.hpp"
-#include "harness/DeviceArch.hpp"
 #include "harness/TestSettings.hpp"
 
 namespace hipdnn_integration_tests
@@ -106,7 +106,7 @@ public:
 
         // Detect device 0's gfx arch once at startup. Used by [[test_skips]]
         // todo: In future allow the test runner to use any specified device.
-        instance._currentArch = currentDeviceArchRaw();
+        instance._currentArch = hipdnn_test_sdk::utilities::currentDeviceArch();
 
         // Detect platform once at startup (always succeeds; PlatformUtils.hpp
         // refuses to compile on unsupported OSes).

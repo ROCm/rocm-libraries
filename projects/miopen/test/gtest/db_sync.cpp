@@ -61,7 +61,7 @@ MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_WORKAROUND_ISSUE_2492)
 
 #define WORKAROUND_ISSUE_1987 0      // Allows testing FDB on gfx1030 (legacy fdb).
 #define SKIP_KDB_PDB_TESTING 0       // Allows testing FDB on gfx1030.
-#define SKIP_CONVOCLDIRECTFWDFUSED 0 // Allows testing FDB on gfx1030 (legacy fdb).
+#define SKIP_CONVHIPDIRECTFWDFUSED 0 // Allows testing FDB on gfx1030 (legacy fdb).
 
 namespace fs  = miopen::fs;
 namespace env = miopen::env;
@@ -771,10 +771,10 @@ void CheckFDBEntry(size_t thread_index,
                 << "Solver " << id.Value() << "/" << id.ToString() << ", val.solver_id "
                 << val.solver_id << ", val.vals " << val.vals;
 
-#if SKIP_CONVOCLDIRECTFWDFUSED
-            /// \todo Workaround: solv.IsApplicable() asserts with ConvOclDirectFwdFused
+#if SKIP_CONVHIPDIRECTFWDFUSED
+            /// \todo Workaround: solv.IsApplicable() asserts with ConvHipDirectFwdFused
             /// on gfx1030. AnySolver instance is empty (nullptr) due to some unknown reason.
-            if(val.solver_id == "ConvOclDirectFwdFused")
+            if(val.solver_id == "ConvHipDirectFwdFused")
             {
                 MIOPEN_LOG_I("Skipping: val.solver_id " << val.solver_id << ", val.vals "
                                                         << val.vals);

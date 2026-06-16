@@ -102,8 +102,8 @@ Op4dTensorGeneric::GetSolution([[maybe_unused]] const ExecutionContext& context,
     build_params.Define("MAX_NUM_WG", std::to_string(max_num_wg));
     auto kernel = KernelInfo{};
 
-    kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
-    kernel.kernel_file  = "MIOpenTensorKernels.cl";
+    kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
+    kernel.kernel_file  = "MIOpenTensorKernelsHip.cpp";
     kernel.kernel_name  = "Op4dTensorGeneric";
 
     using std::begin, std::end;

@@ -235,6 +235,10 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
 
     add_test(NAME ${TARGET} COMMAND ${TARGET} WORKING_DIRECTORY ${WORKING_DIR})
     set_tests_properties(${TARGET} PROPERTIES LABELS "${ALL_LABELS}")
+
+    if(TEST_ENVIRONMENT)
+        set_tests_properties(${TARGET} PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}")
+    endif()
 endfunction()
 
 # ~~~
@@ -352,6 +356,12 @@ function(add_tiered_test_target TARGET WORKING_DIR)
         LABELS "full;slow" TIMEOUT ${ARG_FULL_TIMEOUT}
         FAIL_REGULAR_EXPRESSION "${_no_tests_re}")
 
+    if(TEST_ENVIRONMENT)
+        set_tests_properties(
+            ${TARGET}_quick ${TARGET}_standard ${TARGET}_comprehensive ${TARGET}_full
+            PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}")
+    endif()
+
     # -- Install staging: smoke only --
     # Accumulated in a global property so install_integration_tests_ctest_files()
     # can emit all tiered entries automatically.
@@ -389,6 +399,17 @@ function(install_provider_ctest_files INSTALL_SUBDIR)
     if(_tiered_staging)
         file(APPEND "${INSTALLED_CTEST_FILE}" "\n# Tiered test entries (smoke tier only for CI)\n")
         file(APPEND "${INSTALLED_CTEST_FILE}" "${_tiered_staging}")
+    endif()
+
+    # Append external integration test entries (cross-provider suite).
+    # These are accumulated by add_external_integration_test_target() calls
+    # that pass INSTALL_SUBDIR matching the value passed here.
+    get_property(_external_staging GLOBAL
+        PROPERTY "EXTERNAL_TEST_INSTALL_STAGING_${INSTALL_SUBDIR}"
+    )
+    if(_external_staging)
+        file(APPEND "${INSTALLED_CTEST_FILE}" "\n# External integration test entries (cross-provider suite)\n")
+        file(APPEND "${INSTALLED_CTEST_FILE}" "${_external_staging}")
     endif()
 
     install(FILES "${INSTALLED_CTEST_FILE}"

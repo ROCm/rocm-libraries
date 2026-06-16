@@ -1,4 +1,4 @@
-// Copyright (C) 2023 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -103,27 +103,22 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
 
     // gather cases to test as single-device params, then distribute
     // to multiple GPUs
-    std::vector<fft_params> params_single;
-
-    // legacy callbacks need -fgpu-rdc, but that causes build
-    // nondeterminism in kpack
-    for(auto run_callbacks : {false, /*true*/})
-    {
-        auto params = param_generator_base(test_prob,
-                                           trans_type_range_full,
-                                           multi_gpu_sizes,
-                                           precision_range_sp_dp,
-                                           multi_gpu_batch_range,
-                                           generate_types,
-                                           stride_generator(stride_range),
-                                           stride_generator(stride_range),
-                                           ioffset_range_zero,
-                                           ooffset_range_zero,
-                                           place_range,
-                                           false,
-                                           run_callbacks);
-        std::copy(params.begin(), params.end(), std::back_inserter(params_single));
-    }
+    std::vector<fft_params> params_single
+        = param_generator_base(test_prob,
+                               trans_type_range_full,
+                               multi_gpu_sizes,
+                               precision_range_sp_dp,
+                               multi_gpu_batch_range,
+                               generate_types,
+                               stride_generator(stride_range),
+                               stride_generator(stride_range),
+                               ioffset_range_zero,
+                               ooffset_range_zero,
+                               place_range,
+                               false,
+                               // function pointer callbacks need -fgpu-rdc, but that causes build
+                               // nondeterminism in kpack
+                               {fft_callback_type_none, /*fft_callback_type_funcptr,*/});
 
     std::vector<fft_params> all_params;
 
@@ -218,7 +213,7 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
                     continue; // FIXME, fails even with only 2 ranks
                 if(p.placement == fft_placement_inplace)
                     continue; // only out-of-place
-                if(p.run_callbacks)
+                if(p.run_callbacks != fft_callback_type_none)
                     continue; // known issue to fix w/ callbacks
                 start_global_dev_id_input  = dev_rng(gen);
                 start_global_dev_id_output = dev_rng(gen);

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Start of configuration
-preamble="Copyright +(\([cC]\) +)?"
+preamble="Copyright +(\([cC]\)|© +)?"
 postamble=",? +Advanced +Micro +Devices, +Inc\."
 find_pattern="$preamble([0-9]{4}-)?[0-9]{4}$postamble"
 # printf format string, receives the current year as a parameter
@@ -31,6 +31,10 @@ print_help() { printf -- \
 Use '\033[33mgit config --local hooks.updateCopyright <true|false>\033[0m' to automatically apply copyright changes on commit.
 "
 }
+
+# Filter diffs to the following directories.
+# Can be used via 'git diff -- ${diff_filter}'
+diff_filter="projects/rocprim projects/hipcub projects/rocthrust projects/rocrand projects/hiprand shared/primbench"
 
 # argument parsing
 apply=false
@@ -86,7 +90,7 @@ if $cached; then
 fi
 
 ! $quiet && printf -- "Checking if copyright statements are up-to-date... "
-mapfile -d $'\0' changed_files < <(git diff-index "${diff_opts[@]}" "$diff_hash" | LANG=C.UTF-8 sort -z)
+mapfile -d $'\0' changed_files < <(git diff-index "${diff_opts[@]}" "$diff_hash" -- ${diff_filter} | LANG=C.UTF-8 sort -z)
 
 if ! (( ${#changed_files[@]} )); then
     ! $quiet && printf -- "\033[32mDone!\033[0m\n"
@@ -148,7 +152,7 @@ printf -- '  - %q\n' "${outdated_copyright[@]}"
 # If we don't need to update, we early exit.
 if ! $update; then
     printf -- \
-"\nRun '\033[33mscripts/copyright-date/check-copyright.sh -u\033[0m' to update the copyright statement(s). See '-h' for more info,
+"\nRun '\033[33mprojects/rocprim/scripts/copyright-date/check-copyright.sh -u\033[0m' to update the copyright statement(s). See '-h' for more info,
 or set '\033[33mgit config --local hooks.updateCopyright true\033[0m' to automatically update copyrights when committing.\n"
     exit 1
 fi

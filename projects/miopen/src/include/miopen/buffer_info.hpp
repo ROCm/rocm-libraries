@@ -245,7 +245,6 @@ struct WinogradBufferInfo
                                      element_size);
                 wino_info = wino_data;
                 break;
-            default: break;
             }
             break;
         }
@@ -272,11 +271,9 @@ struct WinogradBufferInfo
                     layout, n, k, wino_data.wino_HW[0], wino_data.wino_HW[1], element_size);
                 wino_info = wino_data;
                 break;
-            default: break;
             }
             break;
         }
-        default: break;
         }
     }
     WinogradBufferInfo(int n,

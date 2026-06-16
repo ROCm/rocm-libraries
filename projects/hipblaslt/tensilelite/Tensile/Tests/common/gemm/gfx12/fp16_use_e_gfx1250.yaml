@@ -30,8 +30,8 @@ BenchmarkProblems:
       UseE: True
       Activation: False
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       SparseA: False
       UseBias: 0

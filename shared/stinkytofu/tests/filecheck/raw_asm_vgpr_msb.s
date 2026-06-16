@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --RaiseVgprMsbPass --InsertVgprMsbPass --from-label label_start --to-label label_end --emit-asm
+# RUN: %stinkytofu-opt --arch gfx1250 %s --vgpr-msb-mode=msb16 --RaiseVgprMsbPass --InsertVgprMsbPass --from-label label_start --to-label label_end --emit-asm
 #
 # Round-trip through RaiseVgprMsbPass + InsertVgprMsbPass on a kernel that
 # uses VGPRs above index 255. Each such operand requires an s_set_vgpr_msb

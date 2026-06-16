@@ -10,6 +10,10 @@
 
 #include <hip/hip_runtime.h>
 
+// When including hip/hip_ext_ocp.h __half* types are not defined.
+// This is a workaround for the include bug in HIP headers, please remove when fixed.
+#include <hip/hip_fp16.h>
+
 // Provides __amd_cvt_floatx{2,8,32}_to_fp{4,6,8}*_scale and __amd_scale_t.
 // Hits the gfx950 hardware MX convert instructions where available
 // (v_cvt_scalef32_pk_fp4_f32 / pk32_f32_fp6 / pk_fp8_f32 etc.); falls back to

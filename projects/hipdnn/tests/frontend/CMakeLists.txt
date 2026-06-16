@@ -42,6 +42,7 @@ add_executable(
     IntegrationGraphKnobsDescriptorLifting.cpp
     IntegrationGraphLifting.cpp
     IntegrationGraphSupportCheck.cpp
+    IntegrationHeuristicPolicyEnumeration.cpp
     IntegrationLayerNormDescriptorLifting.cpp
     IntegrationLayerNormDescriptorLowering.cpp
     IntegrationLayernormForward.cpp
@@ -61,6 +62,9 @@ add_executable(
     IntegrationRMSNormBackwardDescriptorLowering.cpp
     IntegrationRMSNormBackwardDescriptorLifting.cpp
     IntegrationSetPluginPathsExt.cpp
+    # cuDNN-compatibility shim integration coverage (ALMIOPEN-2034); only built
+    # when the shim is enabled.
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnShimUmbrella.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationOverrideExecute.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationOverrideValidation.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationTestPluginInfrastructure.cpp>

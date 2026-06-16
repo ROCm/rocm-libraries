@@ -565,12 +565,20 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
                 # TODO: For the 1-wave case, schedule B's TDM load independently for better tensor load balance.
                 deferMod.addComment1("Global Read B (TDM deferred after LDS swap)")
                 deferMod.add(tdmLoadModB)
-            # TODO: Once metadata TDM issueLoad is embedded inside globalReadDo(), globalReadMetadata
-            # will be empty and this block can be removed. Until then, apply _splitTdmLoad so the
-            # metadata TensorLoadToLds is deferred to tdmLoadIter together with A and B.
+            # Metadata TDM also writes to a double-buffered LDS region that is XOR-swapped
+            # alongside A's (see s_xor on sgprtdmMetadataGroup0+1). Defer its tensor_load_to_lds
+            # to tdmLoadIter so the load lands in the post-swap buffer, matching the
+            # ds_load_tr8_b64 reads from the new side; otherwise the async TDM write races
+            # against the current iter's metadata local reads from the same LDS region.
             if kernel["ProblemType"]["Sparse"]:
+                nonTdmModM, tdmLoadModM = _splitTdmLoad(writer.codes.globalReadMetadata)
                 imod.addComment1("Global Read Metadata")
-                imod.add(writer.codes.globalReadMetadata)
+                imod.add(nonTdmModM)
+                if tdmLoadModM.itemsSize() > 0:
+                    deferMod.addComment1("Global Read Metadata (TDM deferred after LDS swap)")
+                    deferMod.add(tdmLoadModM)
+            imod.add(writer.codes.gl2PrefetchIncrement)
+            imod.add(writer.codes.gl2Prefetch)
         else:
             imod.addComment1("Global Read A")
             imod.add(writer.codes.dtlsM0UpdateA)
@@ -587,6 +595,8 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
             if kernel["ProblemType"]["Sparse"]:
                 imod.addComment1("Global Read Metadata")
                 imod.add(writer.codes.globalReadMetadata)
+            imod.add(writer.codes.gl2PrefetchIncrement)
+            imod.add(writer.codes.gl2Prefetch)
     else:
         # put everything in the header (original behavior for PGR=0/1):
         writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateA)
@@ -600,6 +610,8 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
         writer.codes.unrollLoopHeader.add(writer.codes.globalReadMetadata) if kernel["ProblemType"]["Sparse"] else None
         writer.codes.unrollLoopHeader.add(globalReadIncACode)
         writer.codes.unrollLoopHeader.add(globalReadIncBCode)
+        writer.codes.unrollLoopHeader.add(writer.codes.gl2PrefetchIncrement)
+        writer.codes.unrollLoopHeader.add(writer.codes.gl2Prefetch)
     # Dummy
     itemsGRToSchedLater = []
     lastLoadIter = 0

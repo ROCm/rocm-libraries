@@ -55,6 +55,7 @@ add_library(
     logging/GraphLogger.cpp
     logging/Logging.cpp
     FlatbufferUtilities.cpp
+    heuristics/DeviceProperties.cpp
     heuristics/BuiltInHeuristics.cpp
     heuristics/SelectionHeuristic.cpp
     heuristics/config/ConfigBuiltIn.cpp

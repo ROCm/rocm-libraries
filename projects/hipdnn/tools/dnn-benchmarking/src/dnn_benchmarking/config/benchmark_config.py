@@ -4,8 +4,40 @@
 """Benchmark configuration dataclasses."""
 
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
+
+
+class ReferenceProviderName(str, Enum):
+    """Supported reference provider names."""
+
+    NONE = "none"
+    PYTORCH = "pytorch"
+
+
+class TimingBackendName(str, Enum):
+    """Supported GPU timing backend names."""
+
+    HIP = "hip"
+    TORCH = "torch"
+    AUTO = "auto"
+    NONE = "none"
+
+
+class ExecutionBackendName(str, Enum):
+    """Supported execution backend names."""
+
+    HIPDNN = "hipdnn"
+    PYTORCH = "pytorch"
+
+
+EXECUTION_BACKEND_CHOICES = frozenset(backend.value for backend in ExecutionBackendName)
+
+
+REFERENCE_PROVIDER_CHOICES = frozenset(
+    provider.value for provider in ReferenceProviderName
+)
 
 
 @dataclass
@@ -42,82 +74,50 @@ class BenchmarkConfig:
 
 
 @dataclass
-class ABTestConfig:
-    """Configuration for A/B testing mode.
-
-    Attributes:
-        a_path: Plugin path for configuration A (None = default).
-        a_id: Engine ID for configuration A.
-        b_path: Plugin path for configuration B (None = default).
-        b_id: Engine ID for configuration B.
-        rtol: Relative tolerance for np.allclose comparison.
-        atol: Absolute tolerance for np.allclose comparison.
-    """
-
-    a_path: Optional[Path] = None
-    a_id: int = 1
-    b_path: Optional[Path] = None
-    b_id: int = 1
-    rtol: float = 1e-5
-    atol: float = 1e-8
-
-    def __post_init__(self) -> None:
-        """Validate configuration values."""
-        if isinstance(self.a_path, str):
-            self.a_path = Path(self.a_path)
-        if isinstance(self.b_path, str):
-            self.b_path = Path(self.b_path)
-
-        # a_id / b_id are FNV-1a engine ID hashes that may be negative when
-        # interpreted as signed int64; do not bound-check them.
-        if self.rtol < 0:
-            raise ValueError("rtol must be non-negative")
-        if self.atol < 0:
-            raise ValueError("atol must be non-negative")
-
-    def validate_paths(self) -> None:
-        """Validate that plugin paths exist if specified.
-
-        Raises:
-            ValueError: If a specified path does not exist.
-        """
-        if self.a_path is not None and not self.a_path.exists():
-            raise ValueError(f"Plugin path A does not exist: {self.a_path}")
-        if self.b_path is not None and not self.b_path.exists():
-            raise ValueError(f"Plugin path B does not exist: {self.b_path}")
-
-
-@dataclass
 class ValidationConfig:
     """Configuration for reference validation.
 
     Attributes:
-        provider: Reference provider name ("pytorch", "cpu_plugin", or "none").
-        rtol: Relative tolerance for comparison.
-        atol: Absolute tolerance for comparison.
+        provider: Reference provider for correctness checking.
+        rtol: Optional relative tolerance override. If only one of rtol/atol
+            is set, it is used for both; if neither is set, validation uses
+            dtype-aware defaults.
+        atol: Optional absolute tolerance override.
     """
 
-    provider: str = "none"
-    rtol: float = 1e-5
-    atol: float = 1e-8
+    provider: ReferenceProviderName = ReferenceProviderName.NONE
+    rtol: Optional[float] = None
+    atol: Optional[float] = None
 
     def __post_init__(self) -> None:
-        """Validate configuration values."""
-        valid_providers = {"none", "pytorch", "cpu_plugin"}
-        if self.provider not in valid_providers:
+        """Validate and normalize configuration values."""
+        try:
+            self.provider = ReferenceProviderName(self.provider)
+        except ValueError as e:
             raise ValueError(
                 f"Invalid provider: '{self.provider}'. "
-                f"Valid options: {valid_providers}"
-            )
-        if self.rtol < 0:
+                f"Valid options: {REFERENCE_PROVIDER_CHOICES}"
+            ) from e
+        if self.rtol is not None and self.rtol < 0:
             raise ValueError("rtol must be non-negative")
-        if self.atol < 0:
+        if self.atol is not None and self.atol < 0:
             raise ValueError("atol must be non-negative")
 
     @property
     def enabled(self) -> bool:
-        """Check if validation is enabled."""
-        return self.provider != "none"
+        """True when a non-`none` reference provider is selected."""
+        return self.provider is not ReferenceProviderName.NONE
+
+    @property
+    def tolerance_override(self) -> Optional[tuple[float, float]]:
+        """Return explicit validation tolerances, or None for dtype-aware defaults."""
+        if self.rtol is None and self.atol is None:
+            return None
+        value = self.rtol if self.rtol is not None else self.atol
+        return (
+            self.rtol if self.rtol is not None else value,
+            self.atol if self.atol is not None else value,
+        )
 
 
 @dataclass
@@ -136,7 +136,7 @@ class MetricsConfig:
 
     Attributes:
         tier: ``basic`` enables always-on probes. ``off`` disables all
-            metric collection — useful for clean A/B timing comparisons.
+            metric collection — useful for clean engine-comparison timing.
         emit_trace: ``pftrace`` or ``kineto`` — re-run benchmark under
             ``rocprofv3 --kernel-trace --memory-copy-trace`` and write a
             trace file. ``kineto`` falls back to pftrace if the rocpd
@@ -266,6 +266,19 @@ class MetricsConfig:
         )
 
 
+@dataclass(frozen=True)
+class EngineSelection:
+    """One ordered engine execution selection.
+
+    The plugin path is attached to the selection row rather than looked up by
+    engine ID so repeated engine IDs can be benchmarked against different
+    plugin builds.
+    """
+
+    engine_id: int
+    plugin_path: Optional[Path] = None
+
+
 @dataclass
 class SuiteConfig:
     """Configuration for suite execution mode.
@@ -277,30 +290,25 @@ class SuiteConfig:
         warmup_iters: Number of warmup iterations per provider/engine.
         benchmark_iters: Number of benchmark iterations for timing.
         seed: Optional random seed for reproducible inputs.
-        engine_filter: If set, only iterate engine IDs in this list.
-        rtol: Relative tolerance for correctness comparison.
-        atol: Absolute tolerance for correctness comparison.
-        gpu_backend: GPU timer backend to use.
-        reference_provider: Reference provider name for correctness checking.
+        engine_filter: If set, ordered engine selections to run.
+        validation: Reference validation configuration (provider + tolerances).
         verbose: If True, print rich per-engine block per graph instead of summary.
         metrics: Metric collection configuration. Defaults to ``basic`` tier
             (always-on probes, no extra runs).
+        backend: Execution backend (``hipdnn`` runs discovered engine plugins,
+            ``pytorch`` runs the graph through the PyTorch executor as a single
+            engine row per graph).
     """
 
     warmup_iters: int = 10
     benchmark_iters: int = 100
     seed: Optional[int] = None
     engine_filter: Optional[List[int]] = None
-    rtol: float = 1e-5
-    atol: float = 1e-8
-    gpu_backend: str = "auto"
-    reference_provider: str = "none"
     verbose: bool = False
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
-    # Forwarded to the orchestrator's inner subprocess so the child
-    # picks up the same plugin .so directory the parent loaded. Not used
-    # outside of the opt-in profiling path.
-    plugin_path: Optional[Path] = None
+    validation: ValidationConfig = field(default_factory=ValidationConfig)
+    plugin_paths: Optional[List[Path]] = None
+    backend: ExecutionBackendName = ExecutionBackendName.HIPDNN
 
     def __post_init__(self) -> None:
         """Validate configuration values."""
@@ -308,23 +316,63 @@ class SuiteConfig:
             raise ValueError("warmup_iters must be non-negative")
         if self.benchmark_iters <= 0:
             raise ValueError("benchmark_iters must be positive")
-        if self.rtol < 0:
-            raise ValueError("rtol must be non-negative")
-        if self.atol < 0:
-            raise ValueError("atol must be non-negative")
         if self.engine_filter is not None:
             if len(self.engine_filter) == 0:
                 raise ValueError("engine_filter must be non-empty when set")
             # engine IDs are FNV-1a hashes -- may be negative as signed int64.
-        valid_gpu_backends = {"torch", "auto", "none"}
-        if self.gpu_backend not in valid_gpu_backends:
+        if self.plugin_paths is not None:
+            if len(self.plugin_paths) == 0:
+                raise ValueError("plugin_paths must be non-empty when set")
+            self.plugin_paths = [Path(p) for p in self.plugin_paths]
+
+            if len(self.plugin_paths) > 1:
+                if self.engine_filter is None:
+                    raise ValueError(
+                        "--plugin-path with multiple entries requires --engine"
+                    )
+                if len(self.plugin_paths) != len(self.engine_filter):
+                    raise ValueError(
+                        "--plugin-path entry count must be 1 or match --engine count"
+                    )
+        try:
+            self.backend = ExecutionBackendName(self.backend)
+        except ValueError as e:
             raise ValueError(
-                f"Invalid gpu_backend: '{self.gpu_backend}'. "
-                f"Valid options: {valid_gpu_backends}"
-            )
-        valid_reference_providers = {"none", "pytorch", "cpu_plugin"}
-        if self.reference_provider not in valid_reference_providers:
+                f"Invalid backend: '{self.backend}'. "
+                f"Valid options: {EXECUTION_BACKEND_CHOICES}"
+            ) from e
+
+    @property
+    def plugin_path(self) -> Optional[Path]:
+        """Return the shared plugin path when exactly one path is configured."""
+        if self.plugin_paths is None or len(self.plugin_paths) != 1:
+            return None
+        return self.plugin_paths[0]
+
+    def engine_selections_for(self, engine_ids: List[int]) -> List[EngineSelection]:
+        """Return ordered engine selections for the provided engine IDs.
+
+        ``engine_ids`` is either the explicit ``--engine`` list, where duplicate
+        IDs are meaningful selections, or the backend-discovered engine list.
+        Multiple plugin paths are only valid with an explicit engine list and
+        are associated positionally with that list.
+        """
+        if self.plugin_paths is None:
+            return [EngineSelection(engine_id) for engine_id in engine_ids]
+
+        if len(self.plugin_paths) == 1:
+            plugin_path = self.plugin_paths[0]
+            return [
+                EngineSelection(engine_id, plugin_path=plugin_path)
+                for engine_id in engine_ids
+            ]
+
+        if self.engine_filter is None or len(engine_ids) != len(self.plugin_paths):
             raise ValueError(
-                f"Invalid reference_provider: '{self.reference_provider}'. "
-                f"Valid options: {valid_reference_providers}"
+                "--plugin-path entry count must be 1 or match --engine count"
             )
+
+        return [
+            EngineSelection(engine_id, plugin_path=plugin_path)
+            for engine_id, plugin_path in zip(engine_ids, self.plugin_paths)
+        ]

@@ -10,6 +10,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * 64-bit APIs for the symmetric/Hermitian eigensolvers
     * SYEV_64 and HEEV_64 (with batched and strided\_batched versions)
     * SYEVD_64 and HEEVD_64 (with batched and strided\_batched versions)
+* Support added for the gfx1250 architecture.
 
 ### Changed
 ### Removed
