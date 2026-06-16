@@ -1461,7 +1461,7 @@ def run_deep_fused_conv_pool_fp16_manifest_problem(
 
     def check(rt: Runtime, ptrs):
         if not verify:
-            return 0.0, 0, Y.size
+            return 0.0, 0, 0.0, 0, Y.size
         rt.memcpy_d2h(as_u8_buffer(Y), ptrs[2], nbytes(Y))
         Ap = np.pad(A, ((0, 0), (pH, pH), (pW, pW), (0, 0)))
         C0 = np.zeros((N, Ho, Wo, K), dtype=np.float32)
@@ -1488,7 +1488,9 @@ def run_deep_fused_conv_pool_fp16_manifest_problem(
                 patch = C1[:, h0 : h0 + pool_y, w0 : w0 + pool_x, :]
                 ref[:, ho, wo, :] = patch.max(axis=(1, 2))
         ref_h = ref.astype(np.float16)
-        diff = np.abs(Y.astype(np.float32) - ref_h.astype(np.float32))
-        return float(diff.max()), int(np.count_nonzero(diff > 1e-2)), Y.size
+        ref_f32 = ref_h.astype(np.float32)
+        diff_abs = np.abs(Y.astype(np.float32) - ref_f32)
+        diff_rel = diff_abs / (np.abs(ref_f32) + 1e-8)  # avoid div-by-zero when ref is 0
+        return float(diff_rel.max()), int(np.count_nonzero(diff_rel > 1e-2)), float(diff_abs.max()), int(np.count_nonzero(diff_abs > 1e-2)), Y.size
 
     return make_args, grid, block, flop, bytes_xfer, check

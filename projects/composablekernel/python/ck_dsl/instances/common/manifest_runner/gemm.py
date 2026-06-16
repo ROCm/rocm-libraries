@@ -49,11 +49,13 @@ def run_gemm_manifest_problem(
 
     def check(rt: Runtime, ptrs):
         if not verify:
-            return 0.0, 0, C.size
+            return 0.0, 0, 0.0, 0, C.size
         rt.memcpy_d2h(as_u8_buffer(C), ptrs[2], nbytes(C))
         ref = (A.astype(np.float32) @ B.astype(np.float32).T).astype(np.float16)
-        diff = np.abs(C.astype(np.float32) - ref.astype(np.float32))
-        return float(diff.max()), int(np.count_nonzero(diff > 0)), C.size
+        ref_f32 = ref.astype(np.float32)
+        diff_abs = np.abs(C.astype(np.float32) - ref_f32)
+        diff_rel = diff_abs / (np.abs(ref_f32) + 1e-8)  # avoid div-by-zero when ref is 0
+        return float(diff_rel.max()), int(np.count_nonzero(diff_rel > 0)), float(diff_abs.max()), int(np.count_nonzero(diff_abs > 0)), C.size
 
     return make_args, grid, block, flop, bytes_xfer, check
 
@@ -100,11 +102,12 @@ def run_gemm_iu8_manifest_problem(
 
     def check(rt: Runtime, ptrs):
         if not verify:
-            return 0.0, 0, C.size
+            return 0.0, 0, 0.0, 0, C.size
         rt.memcpy_d2h(as_u8_buffer(C), ptrs[2], nbytes(C))
         ref = A.astype(np.int32) @ B.astype(np.int32).T
-        diff = np.abs(C.astype(np.int64) - ref.astype(np.int64))
-        return float(diff.max()), int(np.count_nonzero(diff > 0)), C.size
+        diff_abs = np.abs(C.astype(np.int64) - ref.astype(np.int64)).astype(np.float64)
+        diff_rel = diff_abs / (np.abs(ref.astype(np.float64)) + 1e-8)  # avoid div-by-zero when ref is 0
+        return float(diff_rel.max()), int(np.count_nonzero(diff_rel > 0)), float(diff_abs.max()), int(np.count_nonzero(diff_abs > 0)), C.size
 
     return make_args, grid, block, flop, bytes_xfer, check
 
@@ -156,14 +159,16 @@ def run_batched_gemm_manifest_problem(
 
     def check(rt: Runtime, ptrs):
         if not verify:
-            return 0.0, 0, C.size
+            return 0.0, 0, 0.0, 0, C.size
         rt.memcpy_d2h(as_u8_buffer(C), ptrs[2], nbytes(C))
         ref = np.empty_like(C)
         for bi in range(BATCH):
             ref[bi] = (A[bi].astype(np.float32) @ Bm[bi].astype(np.float32).T).astype(
                 np.float16
             )
-        diff = np.abs(C.astype(np.float32) - ref.astype(np.float32))
-        return float(diff.max()), int(np.count_nonzero(diff > 0)), C.size
+        ref_f32 = ref.astype(np.float32)
+        diff_abs = np.abs(C.astype(np.float32) - ref_f32)
+        diff_rel = diff_abs / (np.abs(ref_f32) + 1e-8)  # avoid div-by-zero when ref is 0
+        return float(diff_rel.max()), int(np.count_nonzero(diff_rel > 0)), float(diff_abs.max()), int(np.count_nonzero(diff_abs > 0)), C.size
 
     return make_args, grid, block, flop, bytes_xfer, check
