@@ -41,6 +41,7 @@ add_library(
     descriptors/LayernormOperationDescriptor.cpp
     descriptors/MatmulOperationDescriptor.cpp
     descriptors/PointwiseOperationDescriptor.cpp
+    descriptors/ProfilingControlDescriptor.cpp
     descriptors/ResampleFwdOperationDescriptor.cpp
     descriptors/ReductionOperationDescriptor.cpp
     descriptors/RMSNormBackwardOperationDescriptor.cpp

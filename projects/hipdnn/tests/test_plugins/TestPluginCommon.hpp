@@ -37,6 +37,9 @@ public:
 
 struct HipdnnEnginePluginExecutionContext
 {
+    // Engine ID captured at execution-context creation. Lets a plugin make
+    // per-engine execution decisions (e.g. an engine that fails on purpose).
+    int64_t engineId = 0;
 };
 
 inline const char* apiVersionWithoutTweak()
@@ -357,6 +360,16 @@ public:
     virtual bool supportsEngineOperations() const
     {
         return getNumApplicableEngines() > 0;
+    }
+
+    // Workspace sizes - derived classes override for per-engine behavior
+    virtual size_t getEstimatedWorkspaceSize() const
+    {
+        return 1024;
+    }
+    virtual size_t getCompiledWorkspaceSize() const
+    {
+        return 2048;
     }
 
     // Execute graph - derived classes override this for custom behavior
@@ -733,7 +746,7 @@ public:
                     "No engines available - cannot get workspace size");
             }
 
-            *workspaceSize = 1024;
+            *workspaceSize = getInstance()->getEstimatedWorkspaceSize();
 
             LOG_API_SUCCESS(apiName, "workspaceSize=" << *workspaceSize);
         });
@@ -761,7 +774,7 @@ public:
                     "No engines available - cannot get workspace size");
             }
 
-            *workspaceSize = 2048;
+            *workspaceSize = getInstance()->getCompiledWorkspaceSize();
 
             LOG_API_SUCCESS(apiName, "workspaceSize=" << *workspaceSize);
         });
@@ -798,6 +811,7 @@ public:
                 engineConfigWrapper(engineConfig->ptr, engineConfig->size);
 
             auto context = std::make_unique<HipdnnEnginePluginExecutionContext>();
+            context->engineId = engineConfigWrapper.engineId();
             *executionContext = context.release();
 
             LOG_API_SUCCESS(apiName,

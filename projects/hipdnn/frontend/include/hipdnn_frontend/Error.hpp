@@ -42,6 +42,11 @@ namespace hipdnn_frontend
 enum class ErrorCode
 {
     OK, ///< Operation completed successfully
+    // "No usable plan" taxonomy (kept distinct on purpose):
+    //   INVALID_VALUE        — user over-constrained selection (all plans deselected, or
+    //                          none fit the requested workspace). Caller relaxes the constraint.
+    //   HIPDNN_BACKEND_ERROR — a backend step failed: compile/finalize, OR plans were
+    //                          benchmarked but every engine failed at runtime (no winner).
     INVALID_VALUE, ///< An invalid value was provided
     HIPDNN_BACKEND_ERROR, ///< An error occurred in the hipDNN backend
     ATTRIBUTE_NOT_SET, ///< A required attribute was not set

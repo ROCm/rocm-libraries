@@ -24,6 +24,7 @@
 #include "LayernormOperationDescriptor.hpp"
 #include "MatmulOperationDescriptor.hpp"
 #include "PointwiseOperationDescriptor.hpp"
+#include "ProfilingControlDescriptor.hpp"
 #include "RMSNormBackwardOperationDescriptor.hpp"
 #include "RMSNormOperationDescriptor.hpp"
 #include "ReductionOperationDescriptor.hpp"
@@ -136,6 +137,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_RMSNORM_BACKWARD_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<RMSNormBackwardOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_PROFILING_CONTROL_EXT:
+        privateDesc = std::make_shared<ProfilingControlDescriptor>();
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
