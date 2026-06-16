@@ -28,14 +28,6 @@ else()
     message(STATUS "hipDNN: JSON serialization enabled in SDK public headers (requires nlohmann_json)")
 endif()
 
-option(HIPDNN_ENABLE_SDPA "Enable SDPA (Scaled Dot-Product Attention) support" OFF)
-
-if(HIPDNN_ENABLE_SDPA)
-    message(STATUS "hipDNN: SDPA support enabled")
-else()
-    message(STATUS "hipDNN: SDPA support disabled")
-endif()
-
 # Gates install of the cuDNN-compatibility shim headers and build/run of its
 # tests (RFC 0012; ALMIOPEN-2034). The shim sources always exist in the tree;
 # this option controls only whether they are installed and tested.
@@ -53,10 +45,6 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 
-if(HIPDNN_ENABLE_SDPA)
-    add_compile_definitions(HIPDNN_ENABLE_SDPA)
-endif()
-
 if(NOT CMAKE_TOOLCHAIN_FILE)
     set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ClangToolChain.cmake"
         CACHE FILEPATH "Toolchain file"
@@ -65,6 +53,20 @@ endif()
 set(HIPDNN_VERSION "0.0.1")
 
 project(hipdnn VERSION ${HIPDNN_VERSION} LANGUAGES CXX)
+
+# SDPA feature flag. Declared AFTER project() so that a value injected during
+# the project() call via CMAKE_PROJECT_TOP_LEVEL_INCLUDES (e.g. TheRock's
+# HIPDNN_ENABLE_SDPA build flag) is already in the cache when option() runs.
+# If declared before project(), option() falls back to OFF and the compile
+# definition is skipped before the injected value becomes visible, leaving
+# SDPA disabled despite the flag being set.
+option(HIPDNN_ENABLE_SDPA "Enable SDPA (Scaled Dot-Product Attention) support" OFF)
+if(HIPDNN_ENABLE_SDPA)
+    message(STATUS "hipDNN: SDPA support enabled")
+    add_compile_definitions(HIPDNN_ENABLE_SDPA)
+else()
+    message(STATUS "hipDNN: SDPA support disabled")
+endif()
 
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/CheckPreCommit.cmake)
 
