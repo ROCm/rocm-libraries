@@ -1199,9 +1199,12 @@ class GlobalWriteBatchWriter:
           # the elementSumIdx has indicated the VGPRs from LSU.
           # Don't use the ValuC prefix here.
           enableValuC = False
-        elif enableValuC:
-          # elementSumIdx is an absolute vgpr index; ValuC+N uses offset from startVgprValu.
-          gradientInput = gradientInput - self.parentWriter.states.c.startVgprValu
+        # NOTE: gradientInput is an ABSOLUTE vgpr index (= elementSumIdx). The
+        # ActivationFuncCall/copyData and getActivationDestDataType consumers below
+        # address it directly as an absolute vgpr, so it must stay absolute here.
+        # Only getActivationActivationComputeType() renders on the "ValuC+N"
+        # relative namespace (when enableValuC is set); the startVgprValu offset is
+        # applied locally at that call site (see below).
       if self.kernel["ActivationFuncCall"]:
         if (activationCDataType == self.kernel["ProblemType"]["DestDataType"]) and \
           (activationCDataType != self.kernel["ProblemType"]["ComputeDataType"]) and ((self.kernel["ProblemType"]["UseScaleCD"] == False) or (self.kernel["ProblemType"]["UseScaleAlphaVec"] == False)):
@@ -1224,8 +1227,16 @@ class GlobalWriteBatchWriter:
           if (self.activationTypeStr == 'abs') or (self.activationTypeStr == 'relu'):
             SaturateTypeInt8 = SaturateCastType.DO_NOTHING
             satInt8 = True
+        # getActivationActivationComputeType emits on the "ValuC+N" relative
+        # register namespace when enableValuC is set, so its input index must be
+        # made relative to startVgprValu. (This is the case ee90c582898 intended
+        # to fix; here the offset is scoped to this consumer only, leaving the
+        # absolute-vgpr consumers above untouched.)
+        actComputeInput = gradientInput
+        if enableValuC:
+          actComputeInput = gradientInput - self.parentWriter.states.c.startVgprValu
         activationModule = self.parentWriter.getActivationActivationComputeType(self.kernel, self.activation, \
-          self.activationTypeStr, self.gwvw, gradientInput, gradientInput, self.tmpVgpr, self.tmpSgpr, satInt8, enableValuC)
+          self.activationTypeStr, self.gwvw, actComputeInput, actComputeInput, self.tmpVgpr, self.tmpSgpr, satInt8, enableValuC)
       # Add C *= GradientAct
       if self.kernel["ProblemType"]["ActivationType"] != 'none' and self.kernel["ProblemType"]["Gradient"] and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
         if isActivationInsertAfter:
