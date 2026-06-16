@@ -913,14 +913,16 @@ class Solution(collections.abc.Mapping):
       if state["_ScheduleIterAlg"] == 1 or state["_ScheduleIterAlg"] == 2:
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support ScheduleIterAlg")
       if state["StreamK"] == 0:
-        reject(state, printRejectionReason, "UseSubtileImpl=1 supports StreamK only (no support for GSU)")
+        if state["GlobalSplitU"] != 1:
+          reject(state, printRejectionReason, "UseSubtileImpl=1 with StreamK=0 requires GlobalSplitU=1 (no GSU reduction support)")
+        state["InternalSupportParams"]["SupportUserGSU"] = False
       # Lazy import: Components/StreamK.py pulls ..Component which
       # back-imports the Components package and would deadlock at
       # module-load time if pulled from Solution.py's top-level
       # imports.
       from Tensile.Components.StreamK import streamKVariantClass
-      if not streamKVariantClass(state["StreamK"]).supportsSubtileImpl:
-        reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK in {3, 4, 5}")
+      if state["StreamK"] != 0 and not streamKVariantClass(state["StreamK"]).supportsSubtileImpl:
+        reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK in {0, 3, 4, 5}")
       if state["DebugStreamK"] != 0:
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support DebugStreamK (must be 0)")
       if state["PrefetchAcrossPersistent"]:
