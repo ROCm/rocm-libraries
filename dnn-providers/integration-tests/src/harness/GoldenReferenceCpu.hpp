@@ -55,8 +55,22 @@ protected:
 
         auto tensorMap = _graphAndTensors.hostBufferMap();
 
-        hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
-            _graphAndTensors.graphBuffer.data(), _graphAndTensors.graphBuffer.size(), tensorMap);
+        try
+        {
+            hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
+                _graphAndTensors.graphBuffer.data(),
+                _graphAndTensors.graphBuffer.size(),
+                tensorMap);
+        }
+        catch(const std::runtime_error& e)
+        {
+            const std::string msg = e.what();
+            if(msg.find("not applicable") != std::string::npos)
+            {
+                GTEST_SKIP() << "CPU reference executor: " << msg;
+            }
+            throw;
+        }
 
         EXPECT_TRUE(_graphAndTensors.validateTensors(
             _referenceOutputTensors, absoluteTolerance, relativeTolerance));
