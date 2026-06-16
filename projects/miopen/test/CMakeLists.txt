@@ -220,7 +220,6 @@ else()
     add_definitions(-DMIOPEN_TEST_DRIVER_MODE=1)
 endif()
 
-add_custom_target(tests)
 # Project-prefixed targets avoid collisions when included via add_subdirectory in a superbuild.
 # Unprefixed `check` / `tests` / `gpu_detection_check` aliases are created standalone-only.
 add_custom_target(miopen-check 
