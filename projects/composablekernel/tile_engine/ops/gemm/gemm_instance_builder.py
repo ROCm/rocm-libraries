@@ -633,6 +633,8 @@ using AccDataType = {acc_type};
 using CDataType = {get_dtype_string(c_type)};"""
 
         if self.kernel_name_prefix == "gemm_aquant":
+            # AQ scale factors are always fp32: the CK AQuant kernel expects float scales
+            # regardless of the A/B element type. Changing this requires a matching kernel update.
             instance_code += """
 using AQDataType = float;"""
 

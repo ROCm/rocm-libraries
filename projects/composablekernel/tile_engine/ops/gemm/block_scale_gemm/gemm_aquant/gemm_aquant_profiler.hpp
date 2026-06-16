@@ -19,10 +19,12 @@
 class AQuantGemmProfiler
 {
     public:
+    // Initialize and return the singleton. Must be called exactly once per process;
+    // subsequent calls return the same instance regardless of the `setting` argument.
     static AQuantGemmProfiler& instance(Setting setting)
     {
-        static AQuantGemmProfiler instance{setting};
-        return instance;
+        static AQuantGemmProfiler inst{setting};
+        return inst;
     }
 
     void benchmark(AQuantGemmProblem& problem,

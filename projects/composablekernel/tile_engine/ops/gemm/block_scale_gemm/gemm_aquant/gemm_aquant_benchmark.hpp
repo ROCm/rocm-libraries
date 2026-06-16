@@ -141,12 +141,17 @@ struct Setting
 
 inline std::string get_rocm_version()
 {
-    std::ifstream version_file("/opt/rocm/.info/version");
-    if(version_file.is_open())
+    // Try the legacy path first, then the path used by newer ROCm installs.
+    for(const char* path : {"/opt/rocm/.info/version", "/opt/rocm/lib/rocm_version.h"})
     {
-        std::string version;
-        std::getline(version_file, version);
-        return version;
+        std::ifstream version_file(path);
+        if(version_file.is_open())
+        {
+            std::string version;
+            std::getline(version_file, version);
+            if(!version.empty())
+                return version;
+        }
     }
     return "Unknown";
 }

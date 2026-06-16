@@ -54,6 +54,11 @@ class GemmAQuantKernelBuilder(GemmKernelBuilder):
         )
         self.group_size_k = self.config.get("group_size_k", 128)
 
+    def _uses_persistent_trait(self):
+        # The 7th trait slot carries a_preshuffle_quant, not a persistent-kernel flag.
+        # Return True so the base class includes it in kernel names and sampling features.
+        return True
+
     def _generate_all_individual(self, num_workers=None):
         """Generate individual kernel files for separate compilation with parallel processing"""
         if num_workers is None:
@@ -100,13 +105,6 @@ class GemmAQuantKernelBuilder(GemmKernelBuilder):
         print(f"  Tile configs: {len(tile_configs)}")
         print(f"  Trait combinations: {len(trait_combos)}")
         print(f"  Total kernels: {len(work_items)}")
-
-        # Show first few work items for debugging
-        if work_items:
-            print("  First work item example:")
-            tile_config, trait_combo = work_items[0][:2]
-            print(f"    Tile config: {tile_config}")
-            print(f"    Trait combo: {trait_combo[:3]}")  # Show first 3 traits
 
         # Process work items in parallel
         kernel_list = []
@@ -246,10 +244,6 @@ def main():
     )
 
     args = parser.parse_args()
-
-    assert args.datatype in ["fp16", "bf16", "fp8", "bf8"], (
-        f"Invalid datatype string: {args.datatype} (supported datatypes are [fp16, bf16, fp8, and bf8])"
-    )
 
     layout_parts = args.layout.lower()
     assert len(layout_parts) == 3, (

@@ -127,21 +127,10 @@ function(build_individual_gemm_aquant_targets datatype layout)
         message(FATAL_ERROR "Config file not found: ${json_blob}")
     endif()
 
-    # Determine number of workers for parallel generation
-    if(DEFINED ENV{CMAKE_BUILD_PARALLEL_LEVEL})
-        set(num_workers $ENV{CMAKE_BUILD_PARALLEL_LEVEL})
-    else()
-        cmake_host_system_information(RESULT num_cores QUERY NUMBER_OF_LOGICAL_CORES)
-        math(EXPR num_workers "${num_cores}")
-        if(num_workers GREATER 8)
-            set(num_workers 8)
-        endif()
-    endif()
-
     # Create working directory
     file(MAKE_DIRECTORY ${working_path})
 
-    message(VERBOSE "Generating individual AQuant kernels for ${datatype} ${layout} using ${num_workers} workers...")
+    message(VERBOSE "Generating individual AQuant kernels for ${datatype} ${layout}...")
 
     # Build sampling arguments
     set(extra_list_args "")
@@ -225,8 +214,8 @@ if(NOT GEMM_AQUANT_GPU_TARGETS_INDIVIDUAL)
 else()
     message(VERBOSE "Building individual GEMM AQuant targets for GPU targets: ${GEMM_AQUANT_GPU_TARGETS_INDIVIDUAL}")
 
-    # Enable parallel compilation optimizations
-    set_property(GLOBAL PROPERTY JOB_POOLS
+    # Enable parallel compilation optimizations (directory-scoped to avoid overriding parent)
+    set_property(DIRECTORY PROPERTY JOB_POOLS
         compile_heavy=4    # Limit heavy compilations to prevent OOM
         compile_normal=16  # Allow more parallel normal compilations
     )

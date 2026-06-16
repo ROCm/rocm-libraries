@@ -1292,6 +1292,47 @@ def validate_m0_m1_m2_configuration(
         return False, f"Error in M0/M1/M2 validation: {str(e)}"
 
 
+def _validate_fp8_mfma_warp_tile_k(
+    warp_tile_m: int,
+    warp_tile_n: int,
+    warp_tile_k: int,
+    a_datatype: str,
+    gpu_target: str,
+    op_label: str = "",
+) -> Tuple[bool, str]:
+    """Validate MFMA warp-tile constraints shared by all fp8/bf8 quantized GEMM ops.
+
+    Checks:
+    - warp_tile_m == warp_tile_n (square MFMA requirement)
+    - warp_tile_k matches the ISA-mandated K-block for the given warp_tile_m and gpu_target
+    """
+    suffix = f" ({op_label})" if op_label else ""
+    if warp_tile_m != warp_tile_n:
+        return False, (
+            f"warp_tile_m({warp_tile_m}) must equal warp_tile_n({warp_tile_n})"
+            f" — MFMA requires a square warp tile{suffix}"
+        )
+
+    if a_datatype in ["fp8", "bf8"]:
+        # MFMA instruction shapes for fp8/bf8 (from CDNA ISA reference manual):
+        #   gfx90a/gfx942: MFMA_F32_16x16x128_F8 (warp_tile_m=16) → warp_tile_k=64
+        #                  MFMA_F32_32x32x64_F8  (warp_tile_m=32) → warp_tile_k=32
+        #   gfx950 doubles the K-block:
+        #                  MFMA_F32_16x16x256_F8 (warp_tile_m=16) → warp_tile_k=128
+        #                  MFMA_F32_32x32x128_F8 (warp_tile_m=32) → warp_tile_k=64
+        if gpu_target == "gfx950":
+            expected_k = 64 if warp_tile_m == 32 else 128
+        else:
+            expected_k = 32 if warp_tile_m == 32 else 64
+        if warp_tile_k != expected_k:
+            return False, (
+                f"For {a_datatype} on {gpu_target}, warp_tile_m={warp_tile_m} "
+                f"requires warp_tile_k={expected_k}, got warp_tile_k={warp_tile_k}{suffix}"
+            )
+
+    return True, ""
+
+
 def validate_gemm_rowcol_tensor_quant(
     tile_m: int,
     tile_n: int,
@@ -1327,24 +1368,10 @@ def validate_gemm_rowcol_tensor_quant(
     if not whole_workgroup_cover_valid:
         return False, whole_workgroup_cover_error
 
-    if warp_tile_m != warp_tile_n:
-        return False, (
-            f"warp_tile_m({warp_tile_m}) must be equal to warp_tile_n({warp_tile_n}) "
-            f"(MFMA requirement for RowColQuant / TensorQuant)"
-        )
-
-    if a_datatype in ["fp8", "bf8"]:
-        if gpu_target == "gfx950":
-            expected_k = 64 if warp_tile_m == 32 else 128
-        else:
-            expected_k = 32 if warp_tile_m == 32 else 64
-        if warp_tile_k != expected_k:
-            return False, (
-                f"For {a_datatype} on {gpu_target}, warp_tile_m={warp_tile_m} "
-                f"requires warp_tile_k={expected_k}, got warp_tile_k={warp_tile_k}"
-            )
-
-    return True, ""
+    return _validate_fp8_mfma_warp_tile_k(
+        warp_tile_m, warp_tile_n, warp_tile_k, a_datatype, gpu_target,
+        op_label="RowColQuant / TensorQuant"
+    )
 
 
 def validate_gemm_aquant(
@@ -1378,6 +1405,7 @@ def validate_gemm_aquant(
             layout,
             a_datatype,
             b_datatype,
+            gpu_target,
         )
     )
     if not whole_workgroup_cover_valid:
@@ -1397,29 +1425,7 @@ def validate_gemm_aquant(
             f"group_size_k({group_size_k}) must be divisible by warp_tile_k({warp_tile_k})"
         )
 
-    if warp_tile_m != warp_tile_n:
-        return False, (
-            f"warp_tile_m({warp_tile_m}) must equal warp_tile_n({warp_tile_n}) "
-            f"(MFMA requirement for AQuant)"
-        )
-
-    if a_datatype in ["fp8", "bf8"]:
-        # warp_tile_k is fixed by the MFMA instruction shape for fp8/bf8:
-        #   MFMA_F32_16x16x128_F8  (warp_tile_m=16) → K-block = 128 (gfx90a/gfx942)
-        #   MFMA_F32_32x32x64_F8   (warp_tile_m=32) → K-block = 64  (gfx90a/gfx942)
-        #   gfx950 doubles the K-block per instruction:
-        #   MFMA_F32_16x16x256_F8  (warp_tile_m=16) → K-block = 256 → warp_tile_k = 128
-        #   MFMA_F32_32x32x128_F8  (warp_tile_m=32) → K-block = 128 → warp_tile_k = 64
-        # Larger warp_tile_m corresponds to a wider but shallower MFMA shape (fewer K lanes),
-        # hence the smaller expected_k. Values are from the CDNA ISA reference manual.
-        if gpu_target == "gfx950":
-            expected_k = 64 if warp_tile_m == 32 else 128
-        else:
-            expected_k = 32 if warp_tile_m == 32 else 64
-        if warp_tile_k != expected_k:
-            return False, (
-                f"For {a_datatype} on {gpu_target}, warp_tile_m={warp_tile_m} "
-                f"requires warp_tile_k={expected_k}, got warp_tile_k={warp_tile_k}"
-            )
-
-    return True, ""
+    return _validate_fp8_mfma_warp_tile_k(
+        warp_tile_m, warp_tile_n, warp_tile_k, a_datatype, gpu_target,
+        op_label="AQuant"
+    )
