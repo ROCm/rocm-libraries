@@ -30,7 +30,7 @@
 #include <cmath>
 #include <iostream>
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 #define TENSILE_USE_BF16
 

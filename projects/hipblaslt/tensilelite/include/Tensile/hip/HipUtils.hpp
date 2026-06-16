@@ -36,7 +36,7 @@
 #include <Tensile/TensorDescriptor.hpp>
 #include <Tensile/Utils.hpp>
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 #define HIP_CHECK_EXC(expr)                                                                       \
     do                                                                                            \

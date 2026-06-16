@@ -37,7 +37,7 @@
 
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/Debug.hpp>
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 #include <Tensile/Utils.hpp>
 
 namespace TensileLite
@@ -156,7 +156,7 @@ namespace TensileLite
  *
  * Provides functions for indexing and otherwise iterating through a tensor.
  */
-    class TENSILE_API TensorDescriptor
+    class TENSILELITEHOST_EXPORT TensorDescriptor
     {
     public:
         static const size_t UseDefaultStride;

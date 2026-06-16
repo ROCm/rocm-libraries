@@ -29,7 +29,7 @@
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/Comparison.hpp>
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 namespace std
 {

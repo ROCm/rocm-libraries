@@ -46,7 +46,7 @@
 #include <Tensile/Serialization/MatchingLibrary.hpp>
 #include <Tensile/Serialization/PlaceholderLibrary.hpp>
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {

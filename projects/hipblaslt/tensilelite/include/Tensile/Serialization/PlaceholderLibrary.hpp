@@ -32,7 +32,7 @@
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/PlaceholderLibrary.hpp>
 //Replace std::regex, as it crashes when matching long lines(GCC Bug #86164).
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 #ifdef _WIN32
 #include "shlwapi.h"

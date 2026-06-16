@@ -37,7 +37,7 @@
 #include <Tensile/Predicates.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {

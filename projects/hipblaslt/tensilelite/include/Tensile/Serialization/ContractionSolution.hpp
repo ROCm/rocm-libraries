@@ -31,7 +31,7 @@
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/Serialization/Base.hpp>
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {

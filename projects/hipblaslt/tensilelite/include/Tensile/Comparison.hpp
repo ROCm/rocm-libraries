@@ -28,7 +28,7 @@
 
 #include <type_traits>
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {

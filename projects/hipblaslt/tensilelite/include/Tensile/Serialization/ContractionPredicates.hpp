@@ -32,7 +32,7 @@
 #include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/Predicates.hpp>
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {

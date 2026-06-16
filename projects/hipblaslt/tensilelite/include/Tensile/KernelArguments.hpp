@@ -33,7 +33,7 @@
 #include <vector>
 
 #include <Tensile/DataTypes.hpp>
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -131,7 +131,7 @@ namespace TensileLite
         std::vector<T> m_vec_data;
     };
 
-    class TENSILE_API KernelArguments
+    class TENSILELITEHOST_EXPORT KernelArguments
     {
     public:
         KernelArguments(bool log = true);
@@ -236,8 +236,8 @@ namespace TensileLite
         bool m_log;
     };
 
-    TENSILE_API KernelArguments::const_iterator begin(KernelArguments const&);
-    TENSILE_API KernelArguments::const_iterator end(KernelArguments const&);
+    TENSILELITEHOST_EXPORT KernelArguments::const_iterator begin(KernelArguments const&);
+    TENSILELITEHOST_EXPORT KernelArguments::const_iterator end(KernelArguments const&);
 
     inline void KernelArguments::append(std::string const&     name,
                                         ConstantVariant const& value,

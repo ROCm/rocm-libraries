@@ -26,7 +26,7 @@
 
 #pragma once
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 #define TENSILE_USE_MX_SCALE
 

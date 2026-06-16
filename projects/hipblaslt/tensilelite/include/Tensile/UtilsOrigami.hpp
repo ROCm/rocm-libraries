@@ -30,7 +30,7 @@
 #include <rocisa/include/enum.hpp>
 #include <origami/simulator/tensilelite/formocast_simulator.hpp>
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {

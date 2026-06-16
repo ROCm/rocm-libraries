@@ -31,7 +31,7 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/TensorDescriptor_Detail.hpp>
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {

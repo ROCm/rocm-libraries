@@ -30,7 +30,7 @@
 #include <Tensile/GranularitySelectionLibrary.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {

@@ -40,11 +40,11 @@
 namespace TensileLite
 {
 
-    TENSILE_API Problem::~Problem()                 = default;
-    TENSILE_API Hardware::Hardware()                = default;
-    TENSILE_API Hardware::~Hardware()               = default;
-    TENSILE_API Solution::~Solution()               = default;
-    TENSILE_API SolutionAdapter::~SolutionAdapter() = default;
+    TENSILELITEHOST_EXPORT Problem::~Problem()                 = default;
+    TENSILELITEHOST_EXPORT Hardware::Hardware()                = default;
+    TENSILELITEHOST_EXPORT Hardware::~Hardware()               = default;
+    TENSILELITEHOST_EXPORT Solution::~Solution()               = default;
+    TENSILELITEHOST_EXPORT SolutionAdapter::~SolutionAdapter() = default;
 
 #ifdef TENSILE_MSGPACK
     std::map<int, std::string> LoadLibraryMapping(std::string const& filename)

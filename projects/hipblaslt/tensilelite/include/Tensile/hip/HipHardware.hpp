@@ -32,7 +32,7 @@
 
 #include <hip/hip_runtime.h>
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {

@@ -30,7 +30,7 @@
 
 #include <Tensile/FreeSizeLibrary.hpp>
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {

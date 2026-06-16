@@ -30,7 +30,7 @@
 #include <Tensile/TensorDescriptor_fwd.hpp>
 #include <Tensile/TensorOps_fwd.hpp>
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -46,7 +46,7 @@ namespace TensileLite
  * For now can represent a complex conjugate but this could be where we
  * represent inline activation layers later.
  */
-    class TENSILE_API TensorOp
+    class TENSILELITEHOST_EXPORT TensorOp
     {
     public:
         enum class Type : int

@@ -38,7 +38,7 @@
 #include <Tensile/DataTypes_BFloat16.hpp>
 #include <rocisa/include/enum.hpp>
 // Using hip header for both NANOO and OCP data types
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 #if defined(__HIPCC__)
 #include <hip/hip_fp8.h>

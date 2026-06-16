@@ -29,7 +29,7 @@
 #include <Tensile/Debug.hpp>
 #include <Tensile/PredicateDebugger.hpp>
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {

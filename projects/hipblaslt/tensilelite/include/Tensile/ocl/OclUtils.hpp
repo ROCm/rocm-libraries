@@ -35,7 +35,7 @@
 * executable kernels
 */
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 #include <Tensile/ocl/OclFwd.hpp>
 #include <iostream>
 

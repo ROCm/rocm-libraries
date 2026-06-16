@@ -36,7 +36,7 @@
 #include <sstream>
 #include <vector>
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {

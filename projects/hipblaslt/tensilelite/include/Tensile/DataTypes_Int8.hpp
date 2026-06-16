@@ -26,7 +26,7 @@
 
 #pragma once
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 #include <hip/hip_runtime.h>
 

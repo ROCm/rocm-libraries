@@ -35,7 +35,7 @@
 #include <Tensile/Properties.hpp>
 #include <Tensile/Utils.hpp>
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {

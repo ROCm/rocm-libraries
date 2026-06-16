@@ -39,7 +39,7 @@
 #include <Tensile/ScalarValueTypes.hpp>
 #include <Tensile/geom.hpp>
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {

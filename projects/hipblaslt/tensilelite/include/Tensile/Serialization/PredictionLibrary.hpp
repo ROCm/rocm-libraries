@@ -31,7 +31,7 @@
 #include <Tensile/PredictionLibrary.hpp>
 
 #include <Tensile/Debug.hpp>
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 #include <iostream>
 
 namespace TensileLite

@@ -39,7 +39,7 @@ namespace TensileLite
  * See subclass in `hip` directory which can create an instance
  * automatically.
  */
-    struct TENSILE_API AMDGPU : public Hardware
+    struct TENSILELITEHOST_EXPORT AMDGPU : public Hardware
     {
         static std::string Type()
         {
@@ -411,6 +411,6 @@ namespace TensileLite
         return static_cast<int>(l) >= static_cast<int>(r);
     }
 
-    TENSILE_API std::ostream& operator<<(std::ostream& stream, AMDGPU::Processor p);
-    TENSILE_API std::ostream& operator<<(std::ostream& stream, AMDGPU g);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, AMDGPU::Processor p);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, AMDGPU g);
 } // namespace TensileLite

@@ -29,7 +29,7 @@
 #include <cstdlib>
 #include <set>
 #include <string>
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 #ifdef Tensile_ENABLE_MARKER
 #include <roctracer/roctx.h>

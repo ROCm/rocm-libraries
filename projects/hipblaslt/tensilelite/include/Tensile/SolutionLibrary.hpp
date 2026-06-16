@@ -34,7 +34,7 @@
 #include <Tensile/Tensile.hpp>
 #include <Tensile/Task.hpp>
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -125,7 +125,7 @@ namespace TensileLite
  *
  */
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
-    struct TENSILE_API SolutionLibrary
+    struct TENSILELITEHOST_EXPORT SolutionLibrary
     {
         virtual ~SolutionLibrary() = default;
 

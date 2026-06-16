@@ -46,7 +46,7 @@
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 #define TENSILE_COMMON_KERNEL_ARGS_SIZE 16
 

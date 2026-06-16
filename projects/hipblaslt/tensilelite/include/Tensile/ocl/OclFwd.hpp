@@ -35,7 +35,7 @@
 * where they are needed.
 */
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 // Fwd declarations
 namespace cl
