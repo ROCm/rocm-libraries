@@ -100,6 +100,7 @@
 #include <hipdnn_frontend/detail/ConvolutionFpropUnpacker.hpp>
 #include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
 #include <hipdnn_frontend/detail/GraphDetail.hpp>
+#include <hipdnn_frontend/detail/GraphMatchKey.hpp>
 #include <hipdnn_frontend/detail/GraphOverrideValidation.hpp>
 #include <hipdnn_frontend/detail/GraphPacker.hpp>
 #include <hipdnn_frontend/detail/GraphUnpacker.hpp>
@@ -457,115 +458,6 @@ private:
         });
 
         return result;
-    }
-
-    /// Get non-virtual tensors for config file match key.
-    /// Excludes virtual (intermediate) tensors since the backend matcher
-    /// (ConfigBuiltIn::matchOverrideConfig) uses only the operation's
-    /// physical input/output tensors for matching.
-    std::vector<std::shared_ptr<TensorAttributes>> getMatchKeyTensors() const
-    {
-        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
-        gatherHipdnnTensorsSubtree(allTensors);
-
-        std::vector<std::shared_ptr<TensorAttributes>> result;
-        result.reserve(allTensors.size());
-        for(const auto& tensor : allTensors)
-        {
-            if(tensor && tensor->has_uid() && !tensor->get_is_virtual())
-            {
-                result.push_back(tensor);
-            }
-        }
-
-        std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) {
-            return a->get_uid() < b->get_uid();
-        });
-
-        return result;
-    }
-
-    /// Determine the core operation name for config file output.
-    /// Priority: convolution/GEMM/SDPA (highest) > normalization > pointwise (lowest).
-    /// Returns the graph name as fallback if no recognized operation is found.
-    std::string getCoreOperationName() const
-    {
-        // Priority levels: 0 = default/unknown, 1 = pointwise, 2 = normalization,
-        // 3 = conv/matmul/SDPA
-        int bestPriority = 0;
-        std::string bestName;
-
-        for(const auto& node : _sub_nodes)
-        {
-            if(!node)
-            {
-                continue;
-            }
-            int priority = 0;
-            std::string name;
-            switch(node->getNodeType())
-            {
-            case NodeType::CONVOLUTION_FPROP:
-                priority = 3;
-                name = "conv_fprop";
-                break;
-            case NodeType::CONVOLUTION_DGRAD:
-                priority = 3;
-                name = "conv_dgrad";
-                break;
-            case NodeType::CONVOLUTION_WGRAD:
-                priority = 3;
-                name = "conv_wgrad";
-                break;
-            case NodeType::MATMUL:
-                priority = 3;
-                name = "matmul";
-                break;
-            case NodeType::SDPA_FWD:
-                priority = 3;
-                name = "sdpa_fwd";
-                break;
-            case NodeType::SDPA_BWD:
-                priority = 3;
-                name = "sdpa_bwd";
-                break;
-            case NodeType::BATCHNORM:
-            case NodeType::BATCHNORM_INFERENCE:
-            case NodeType::BATCHNORM_BACKWARD:
-            case NodeType::BATCHNORM_INFERENCE_VARIANCE_EXT:
-                priority = 2;
-                name = "batchnorm";
-                break;
-            case NodeType::LAYER_NORM:
-                priority = 2;
-                name = "layernorm";
-                break;
-            case NodeType::RMS_NORM:
-                priority = 2;
-                name = "rmsnorm";
-                break;
-            case NodeType::POINTWISE:
-                priority = 1;
-                name = "pointwise";
-                break;
-            default:
-                break;
-            }
-
-            if(priority > bestPriority)
-            {
-                bestPriority = priority;
-                bestName = std::move(name);
-            }
-
-            // Short-circuit: can't do better than priority 3
-            if(bestPriority == 3)
-            {
-                break;
-            }
-        }
-
-        return bestPriority > 0 ? bestName : graph_attributes.get_name();
     }
 
     /// Resolve a backend engine ID to its human-readable name.
@@ -4370,29 +4262,44 @@ private:
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
         if(!storageConfig.filePath.empty())
         {
-            // Collect tensor dimensions and strides from the graph's input/output tensors
-            std::vector<std::vector<int64_t>> tensorDims;
-            std::vector<std::vector<int64_t>> tensorStrides;
-            auto allTensors = getMatchKeyTensors();
-            tensorDims.reserve(allTensors.size());
-            tensorStrides.reserve(allTensors.size());
-            for(const auto& tensor : allTensors)
+            // An op unsupported for config round-trip yields an empty match key (no
+            // op-aware branch in detail::getMatchKeyTensors). Such an op cannot round-trip
+            // (the reader never matches a tensor-less entry), so skip writing an entry for
+            // it and warn that the autotune result was not persisted, naming the op.
+            auto allTensors = detail::getMatchKeyTensors(*this);
+            if(allTensors.empty())
             {
-                tensorDims.push_back(tensor->get_dim());
-                tensorStrides.push_back(tensor->get_stride());
+                HIPDNN_FE_LOG_WARN("autotune: op '"
+                                   << detail::getCoreOperationName(*this)
+                                   << "' is not supported for config round-trip; its autotune"
+                                      " result was not written to the config file "
+                                   << storageConfig.filePath);
             }
-
-            auto writeErr
-                = autotune::writeAutotuneResults(storageConfig.filePath,
-                                                 getCoreOperationName(),
-                                                 allResults,
-                                                 storageConfig.deleteAllExistingFileContent,
-                                                 tensorDims,
-                                                 tensorStrides);
-            if(writeErr.is_bad())
+            else
             {
-                HIPDNN_FE_LOG_WARN("autotune: failed to write results to "
-                                   << storageConfig.filePath << ": " << writeErr.get_message());
+                // Collect tensor dimensions and strides from the graph's input/output tensors
+                std::vector<std::vector<int64_t>> tensorDims;
+                std::vector<std::vector<int64_t>> tensorStrides;
+                tensorDims.reserve(allTensors.size());
+                tensorStrides.reserve(allTensors.size());
+                for(const auto& tensor : allTensors)
+                {
+                    tensorDims.push_back(tensor->get_dim());
+                    tensorStrides.push_back(tensor->get_stride());
+                }
+
+                auto writeErr
+                    = autotune::writeAutotuneResults(storageConfig.filePath,
+                                                     detail::getCoreOperationName(*this),
+                                                     allResults,
+                                                     storageConfig.deleteAllExistingFileContent,
+                                                     tensorDims,
+                                                     tensorStrides);
+                if(writeErr.is_bad())
+                {
+                    HIPDNN_FE_LOG_WARN("autotune: failed to write results to "
+                                       << storageConfig.filePath << ": " << writeErr.get_message());
+                }
             }
         }
 #else

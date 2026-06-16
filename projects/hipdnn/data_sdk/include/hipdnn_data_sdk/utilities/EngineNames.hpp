@@ -3,6 +3,10 @@
 
 #pragma once
 
+#include <cctype>
+#include <cerrno>
+#include <cstdint>
+#include <cstdlib>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <iomanip>
 #include <set>
@@ -44,6 +48,75 @@ inline int64_t engineNameToId(const std::string& engineName)
 inline int64_t engineNameToId(std::string_view engineName)
 {
     return static_cast<int64_t>(fnv1aHash(engineName));
+}
+
+/**
+ * @brief Converts an engine-name OR a serialized numeric engine ID to an int64_t ID.
+ *
+ * Some engine IDs (test plugins, vendor plugins) are not registered in the
+ * id↔name map, so the frontend serializes their winning choice as a numeric
+ * literal — a signed-hex fallback (e.g. "0xffffffffffffffee" for -18) or a
+ * plain decimal. This helper inverts those numeric forms so the config file
+ * round-trips for unregistered engines; ordinary engine names still hash via
+ * engineNameToId (FNV-1a).
+ *
+ * Resolution order:
+ *   1. "0x"/"0X" prefix → parse with strtoull base 16 and reinterpret the
+ *      unsigned result to int64_t. strtoull (not strtoll) is required because
+ *      a negative signed-hex literal streams as two's-complement unsigned hex
+ *      that exceeds LLONG_MAX; strtoll base 16 would overflow (ERANGE) and
+ *      fail to recover the negative ID.
+ *   2. plain decimal → strtoll base 10.
+ *   3. otherwise → engineNameToId(s) (FNV-1a) for ordinary engine names.
+ *
+ * Whitespace is treated as a valid engine-name character: the name is NOT
+ * trimmed. A string that is empty or begins with whitespace, or whose numeric
+ * parse does not consume the ENTIRE string, is hashed as a name. (strtoll/
+ * strtoull skip leading whitespace internally, so the leading-whitespace guard
+ * is needed to keep e.g. " 123" a name rather than the number 123.)
+ *
+ * @param engineName Engine name or serialized numeric ID.
+ * @return int64_t The resolved engine ID.
+ */
+inline int64_t engineNameOrIdToId(std::string_view engineName)
+{
+    // Whitespace is a valid name character: do not trim. Empty, or leading
+    // whitespace, is always a name (strto* would otherwise skip leading
+    // whitespace and misparse " 123" as a number).
+    if(engineName.empty() || std::isspace(static_cast<unsigned char>(engineName.front())) != 0)
+    {
+        return engineNameToId(engineName);
+    }
+
+    // strto* require a null-terminated buffer; string_view is not guaranteed
+    // null-terminated, so copy.
+    const std::string token(engineName);
+
+    const bool hasHexPrefix
+        = token.size() > 2 && token[0] == '0' && (token[1] == 'x' || token[1] == 'X');
+
+    if(hasHexPrefix)
+    {
+        char* end = nullptr;
+        errno = 0;
+        const unsigned long long parsed = std::strtoull(token.c_str(), &end, 16);
+        if(end != nullptr && end != token.c_str() && *end == '\0' && errno == 0)
+        {
+            return static_cast<int64_t>(parsed);
+        }
+    }
+    else
+    {
+        char* end = nullptr;
+        errno = 0;
+        const long long parsed = std::strtoll(token.c_str(), &end, 10);
+        if(end != nullptr && end != token.c_str() && *end == '\0' && errno == 0)
+        {
+            return static_cast<int64_t>(parsed);
+        }
+    }
+
+    return engineNameToId(engineName);
 }
 
 // Internal namespace for mutable access (used only by EngineRegistrar)

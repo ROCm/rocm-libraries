@@ -128,17 +128,6 @@ inline nlohmann::json buildOverrideEntry(const AutotuneResult& result,
     }
     entry["tensors"] = std::move(tensors);
 
-    // Knob settings
-    if(!result.knobSettings.empty())
-    {
-        nlohmann::json knobs = nlohmann::json::array();
-        for(const auto& setting : result.knobSettings)
-        {
-            knobs.push_back(knobSettingToJson(setting));
-        }
-        entry["knobs"] = std::move(knobs);
-    }
-
     // Autotune metadata
     nlohmann::json metadata;
     metadata["min_time_ms"] = result.minTimeMs;
@@ -170,6 +159,18 @@ inline nlohmann::json buildOverrideEntry(const AutotuneResult& result,
     {
         metadata["converged"] = result.converged;
     }
+
+    // Knob settings (informational; nested under autotune_metadata, omitted when empty)
+    if(!result.knobSettings.empty())
+    {
+        nlohmann::json knobs = nlohmann::json::array();
+        for(const auto& setting : result.knobSettings)
+        {
+            knobs.push_back(knobSettingToJson(setting));
+        }
+        metadata["knobs"] = std::move(knobs);
+    }
+
     entry["autotune_metadata"] = std::move(metadata);
 
     return entry;
@@ -185,8 +186,11 @@ inline nlohmann::json buildOverrideEntry(const AutotuneResult& result,
 ///       "op": "conv_fprop",
 ///       "engine_name": "MIOPEN_ENGINE",
 ///       "tensors": [ { "dim": [1, 3, 224, 224] }, { "dim": [64, 3, 7, 7] } ],
-///       "knobs": [ { "knob_id": "SPLIT_K", "type": "int", "value": 2 } ],
-///       "autotune_metadata": { "min_time_ms": 1.23, "rank": 0 }
+///       "autotune_metadata": {
+///         "min_time_ms": 1.23,
+///         "rank": 0,
+///         "knobs": [ { "knob_id": "SPLIT_K", "type": "int", "value": 2 } ]
+///       }
 ///     }
 ///   ]
 /// }

@@ -46,7 +46,9 @@ struct TempFile
         std::error_code ec;
         std::filesystem::remove(path, ec);
         // Also remove any .tmp file
-        std::filesystem::remove(std::filesystem::path(path.string() + ".tmp"), ec);
+        std::filesystem::path tmp = path;
+        tmp += ".tmp";
+        std::filesystem::remove(tmp, ec);
     }
 
     TempFile(const TempFile&) = delete;
@@ -127,7 +129,8 @@ TEST(TestAutotuneFileWriter, BuildOverrideEntryBasic)
     EXPECT_EQ(entry["tensors"][1]["dim"], std::vector<int64_t>({64, 3, 7, 7}));
     EXPECT_EQ(entry["tensors"][0]["stride"], std::vector<int64_t>({150528, 50176, 224, 1}));
     EXPECT_EQ(entry["tensors"][1]["stride"], std::vector<int64_t>({147, 49, 7, 1}));
-    EXPECT_FALSE(entry.contains("knobs")); // No knobs → field absent
+    ASSERT_TRUE(entry.contains("autotune_metadata"));
+    EXPECT_FALSE(entry["autotune_metadata"].contains("knobs")); // No knobs → field absent
 }
 
 TEST(TestAutotuneFileWriter, BuildOverrideEntryWithKnobs)
@@ -141,12 +144,13 @@ TEST(TestAutotuneFileWriter, BuildOverrideEntryWithKnobs)
 
     auto entry = buildOverrideEntry(result, "conv_fprop", tensorDims, tensorStrides);
 
-    ASSERT_TRUE(entry.contains("knobs"));
-    ASSERT_EQ(entry["knobs"].size(), 2u);
-    EXPECT_EQ(entry["knobs"][0]["knob_id"], "TILE_SIZE");
-    EXPECT_EQ(entry["knobs"][0]["value"], 128);
-    EXPECT_EQ(entry["knobs"][1]["knob_id"], "SPLIT_K");
-    EXPECT_EQ(entry["knobs"][1]["value"], 2);
+    ASSERT_TRUE(entry.contains("autotune_metadata"));
+    ASSERT_TRUE(entry["autotune_metadata"].contains("knobs"));
+    ASSERT_EQ(entry["autotune_metadata"]["knobs"].size(), 2u);
+    EXPECT_EQ(entry["autotune_metadata"]["knobs"][0]["knob_id"], "TILE_SIZE");
+    EXPECT_EQ(entry["autotune_metadata"]["knobs"][0]["value"], 128);
+    EXPECT_EQ(entry["autotune_metadata"]["knobs"][1]["knob_id"], "SPLIT_K");
+    EXPECT_EQ(entry["autotune_metadata"]["knobs"][1]["value"], 2);
 }
 
 TEST(TestAutotuneFileWriter, BuildOverrideEntryWithMetadata)
@@ -191,8 +195,7 @@ TEST(TestAutotuneFileWriter, WriteToNewFile)
 
     const std::vector<std::vector<int64_t>> tensorDims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
 
-    auto err
-        = writeAutotuneResults(tmpFile.path.string(), "conv_fprop", results, false, tensorDims, {});
+    auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, tensorDims, {});
     ASSERT_TRUE(err.is_good()) << err.get_message();
 
     // Verify file exists and is valid JSON
@@ -218,8 +221,7 @@ TEST(TestAutotuneFileWriter, WriteReplacesNonArrayEngineOverrides)
     results.push_back(makeResult(1, "MIOPEN_ENGINE", 1.0f, true, 0));
     const std::vector<std::vector<int64_t>> tensorDims = {{1, 3, 224, 224}};
 
-    auto err
-        = writeAutotuneResults(tmpFile.path.string(), "conv_fprop", results, false, tensorDims, {});
+    auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, tensorDims, {});
     ASSERT_TRUE(err.is_good()) << err.get_message();
 
     std::ifstream file(tmpFile.path);
@@ -241,8 +243,7 @@ TEST(TestAutotuneFileWriter, WriteSkipsFailedResults)
 
     const std::vector<std::vector<int64_t>> tensorDims = {{1, 3, 224, 224}};
 
-    auto err
-        = writeAutotuneResults(tmpFile.path.string(), "conv_fprop", results, false, tensorDims, {});
+    auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, tensorDims, {});
     ASSERT_TRUE(err.is_good());
 
     std::ifstream file(tmpFile.path);
@@ -262,8 +263,7 @@ TEST(TestAutotuneFileWriter, AppendToExistingFile)
     results1.push_back(makeResult(1, "MIOPEN_ENGINE", 1.0f, true, 0));
 
     const std::vector<std::vector<int64_t>> dims1 = {{1, 3, 224, 224}, {64, 3, 7, 7}};
-    auto err1
-        = writeAutotuneResults(tmpFile.path.string(), "conv_fprop", results1, false, dims1, {});
+    auto err1 = writeAutotuneResults(tmpFile.path, "conv_fprop", results1, false, dims1, {});
     ASSERT_TRUE(err1.is_good());
 
     // Write new results for conv_dgrad (different op)
@@ -271,8 +271,7 @@ TEST(TestAutotuneFileWriter, AppendToExistingFile)
     results2.push_back(makeResult(2, "HIPBLASLT_ENGINE", 2.0f, true, 0));
 
     const std::vector<std::vector<int64_t>> dims2 = {{8, 64, 56, 56}};
-    auto err2
-        = writeAutotuneResults(tmpFile.path.string(), "conv_dgrad", results2, false, dims2, {});
+    auto err2 = writeAutotuneResults(tmpFile.path, "conv_dgrad", results2, false, dims2, {});
     ASSERT_TRUE(err2.is_good());
 
     // Both entries should be in the file
@@ -293,16 +292,14 @@ TEST(TestAutotuneFileWriter, ReplaceMatchingEntryWithSameKnobs)
     results1.push_back(makeResult(1, "MIOPEN_ENGINE", 5.0f, true, 0));
 
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
-    auto err1
-        = writeAutotuneResults(tmpFile.path.string(), "conv_fprop", results1, false, dims, {});
+    auto err1 = writeAutotuneResults(tmpFile.path, "conv_fprop", results1, false, dims, {});
     ASSERT_TRUE(err1.is_good());
 
     // Write updated result for same op + tensors + same (empty) knobs
     std::vector<AutotuneResult> results2;
     results2.push_back(makeResult(2, "HIPBLASLT_ENGINE", 1.0f, true, 0));
 
-    auto err2
-        = writeAutotuneResults(tmpFile.path.string(), "conv_fprop", results2, false, dims, {});
+    auto err2 = writeAutotuneResults(tmpFile.path, "conv_fprop", results2, false, dims, {});
     ASSERT_TRUE(err2.is_good());
 
     // Should have replaced the matching entry (same op + same tensors + same knobs)
@@ -324,8 +321,7 @@ TEST(TestAutotuneFileWriter, ReplaceEntriesWithDifferentKnobs)
     results1.push_back(r1);
 
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
-    auto err1
-        = writeAutotuneResults(tmpFile.path.string(), "conv_fprop", results1, false, dims, {});
+    auto err1 = writeAutotuneResults(tmpFile.path, "conv_fprop", results1, false, dims, {});
     ASSERT_TRUE(err1.is_good());
 
     // Write new result for same op + tensors but DIFFERENT knobs (SPLIT_K=4)
@@ -334,8 +330,7 @@ TEST(TestAutotuneFileWriter, ReplaceEntriesWithDifferentKnobs)
     r2.knobSettings.emplace_back("SPLIT_K", int64_t{4});
     results2.push_back(r2);
 
-    auto err2
-        = writeAutotuneResults(tmpFile.path.string(), "conv_fprop", results2, false, dims, {});
+    auto err2 = writeAutotuneResults(tmpFile.path, "conv_fprop", results2, false, dims, {});
     ASSERT_TRUE(err2.is_good());
 
     // The old entry should be replaced (matching by op + tensors only)
@@ -365,8 +360,7 @@ TEST(TestAutotuneFileWriter, ReplaceOnlyExactOperationAndTensorSignature)
 
     std::vector<AutotuneResult> results;
     results.push_back(makeResult(9, "NEW_MATCH", 0.5f, true, 0));
-    auto err = writeAutotuneResults(
-        tmpFile.path.string(), "conv_fprop", results, false, matchingDims, {});
+    auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, matchingDims, {});
     ASSERT_TRUE(err.is_good()) << err.get_message();
 
     std::ifstream file(tmpFile.path);
@@ -387,16 +381,14 @@ TEST(TestAutotuneFileWriter, DeleteAllExistingContent)
     std::vector<AutotuneResult> results1;
     results1.push_back(makeResult(1, "MIOPEN_ENGINE", 1.0f, true, 0));
     const std::vector<std::vector<int64_t>> dims1 = {{1, 3, 224, 224}};
-    auto err1
-        = writeAutotuneResults(tmpFile.path.string(), "conv_fprop", results1, false, dims1, {});
+    auto err1 = writeAutotuneResults(tmpFile.path, "conv_fprop", results1, false, dims1, {});
     ASSERT_TRUE(err1.is_good());
 
     // Write new results with deleteAllExisting=true
     std::vector<AutotuneResult> results2;
     results2.push_back(makeResult(2, "HIPBLASLT_ENGINE", 2.0f, true, 0));
     const std::vector<std::vector<int64_t>> dims2 = {{8, 64, 56, 56}};
-    auto err2
-        = writeAutotuneResults(tmpFile.path.string(), "conv_dgrad", results2, true, dims2, {});
+    auto err2 = writeAutotuneResults(tmpFile.path, "conv_dgrad", results2, true, dims2, {});
     ASSERT_TRUE(err2.is_good());
 
     // Only the new results should be in the file
@@ -421,7 +413,7 @@ TEST(TestAutotuneFileWriter, RoundTripWriteThenLoad)
     results.push_back(result);
 
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
-    auto err = writeAutotuneResults(tmpFile.path.string(), "conv_fprop", results, true, dims, {});
+    auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, true, dims, {});
     ASSERT_TRUE(err.is_good());
 
     // Verify by parsing the JSON directly
@@ -441,12 +433,13 @@ TEST(TestAutotuneFileWriter, RoundTripWriteThenLoad)
     EXPECT_EQ(entry["tensors"][1]["dim"], std::vector<int64_t>({64, 3, 7, 7}));
 
     // Verify knobs round-tripped correctly
-    ASSERT_TRUE(entry.contains("knobs"));
-    ASSERT_EQ(entry["knobs"].size(), 2u);
+    ASSERT_TRUE(entry.contains("autotune_metadata"));
+    ASSERT_TRUE(entry["autotune_metadata"].contains("knobs"));
+    ASSERT_EQ(entry["autotune_metadata"]["knobs"].size(), 2u);
 
     bool foundTileSize = false;
     bool foundSplitK = false;
-    for(const auto& knob : entry["knobs"])
+    for(const auto& knob : entry["autotune_metadata"]["knobs"])
     {
         const auto knobId = knob["knob_id"].get<std::string>();
         if(knobId == "TILE_SIZE")
@@ -473,7 +466,7 @@ TEST(TestAutotuneFileWriter, RoundTripNoKnobs)
     results.push_back(makeResult(MIOPEN_ENGINE_ID, "MIOPEN_ENGINE", 1.0f, true, 0));
 
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
-    auto err = writeAutotuneResults(tmpFile.path.string(), "conv_fprop", results, true, dims, {});
+    auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, true, dims, {});
     ASSERT_TRUE(err.is_good());
 
     // Verify by parsing the JSON directly
@@ -488,7 +481,8 @@ TEST(TestAutotuneFileWriter, RoundTripNoKnobs)
     EXPECT_EQ(entry["engine_name"], "MIOPEN_ENGINE");
     ASSERT_EQ(entry["tensors"].size(), 1u);
     EXPECT_EQ(entry["tensors"][0]["dim"], std::vector<int64_t>({1, 3, 224, 224}));
-    EXPECT_FALSE(entry.contains("knobs"));
+    ASSERT_TRUE(entry.contains("autotune_metadata"));
+    EXPECT_FALSE(entry["autotune_metadata"].contains("knobs"));
 }
 
 // ── Strategy/Mode String Tests ──────────────────────────────────────────────
@@ -552,7 +546,7 @@ TEST(TestAutotuneFileWriter, WriteNoSucceededResultsIsOk)
     results.push_back(makeResult(1, "MIOPEN_ENGINE", 0.0f, false, -1));
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
 
-    auto err = writeAutotuneResults(tmpFile.path.string(), "conv_fprop", results, true, dims, {});
+    auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, true, dims, {});
 
     // Should succeed (no error) but write nothing
     EXPECT_TRUE(err.is_good());
@@ -573,7 +567,7 @@ TEST(TestAutotuneFileWriter, HandleCorruptExistingFile)
     results.push_back(makeResult(1, "MIOPEN_ENGINE"));
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
 
-    auto err = writeAutotuneResults(tmpFile.path.string(), "conv_fprop", results, false, dims, {});
+    auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, dims, {});
 
     ASSERT_TRUE(err.is_good());
 
@@ -686,8 +680,7 @@ TEST(TestAutotuneFileWriter, WritesOnlyRank0Winner)
 
     const std::vector<std::vector<int64_t>> tensorDims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
 
-    auto err
-        = writeAutotuneResults(tmpFile.path.string(), "conv_fprop", results, false, tensorDims, {});
+    auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, tensorDims, {});
     ASSERT_TRUE(err.is_good()) << err.get_message();
 
     std::ifstream file(tmpFile.path);
@@ -713,8 +706,7 @@ TEST(TestAutotuneFileWriter, WritesRank0WinnerSkippingLeadingFailures)
 
     const std::vector<std::vector<int64_t>> tensorDims = {{4, 64, 56, 56}};
 
-    auto err
-        = writeAutotuneResults(tmpFile.path.string(), "conv_fprop", results, false, tensorDims, {});
+    auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, tensorDims, {});
     ASSERT_TRUE(err.is_good()) << err.get_message();
 
     std::ifstream file(tmpFile.path);
@@ -737,8 +729,7 @@ TEST(TestAutotuneFileWriter, Rank0WinnerReplacesExistingEntry)
     {
         std::vector<AutotuneResult> results;
         results.push_back(makeResult(1, "OLD_WINNER", 2.0f, true, 0));
-        auto err
-            = writeAutotuneResults(tmpFile.path.string(), "conv_fprop", results, false, dims, {});
+        auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, dims, {});
         ASSERT_TRUE(err.is_good());
     }
 
@@ -747,8 +738,7 @@ TEST(TestAutotuneFileWriter, Rank0WinnerReplacesExistingEntry)
         std::vector<AutotuneResult> results;
         results.push_back(makeResult(5, "NEW_WINNER", 0.8f, true, 0));
         results.push_back(makeResult(6, "NEW_RUNNER_UP", 1.2f, true, 1));
-        auto err
-            = writeAutotuneResults(tmpFile.path.string(), "conv_fprop", results, false, dims, {});
+        auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, dims, {});
         ASSERT_TRUE(err.is_good());
     }
 

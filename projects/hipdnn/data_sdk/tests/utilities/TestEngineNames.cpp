@@ -198,6 +198,50 @@ TEST_F(TestEngineNames, MacroDualArgRegistersWithDisplayName)
               "CustomDisplayName");
 }
 
+TEST_F(TestEngineNames, EngineNameOrIdToIdParsesPositiveDecimal)
+{
+    // A plain decimal serialized ID round-trips exactly.
+    EXPECT_EQ(engineNameOrIdToId("12345"), 12345);
+}
+
+TEST_F(TestEngineNames, EngineNameOrIdToIdRecoversNegativeIdFromSignedHex)
+{
+    // The frontend serializes an unregistered negative ID (e.g. test plugin -18)
+    // as two's-complement unsigned hex. strtoull + reinterpret must recover -18.
+    EXPECT_EQ(engineNameOrIdToId("0xffffffffffffffee"), static_cast<int64_t>(-18));
+}
+
+TEST_F(TestEngineNames, EngineNameOrIdToIdParsesPositiveHex)
+{
+    EXPECT_EQ(engineNameOrIdToId("0x10"), 16);
+    EXPECT_EQ(engineNameOrIdToId("0X1A2B"), 0x1A2B);
+}
+
+TEST_F(TestEngineNames, EngineNameOrIdToIdParsesPlainDecimalNegative)
+{
+    EXPECT_EQ(engineNameOrIdToId("-18"), static_cast<int64_t>(-18));
+}
+
+TEST_F(TestEngineNames, EngineNameOrIdToIdHashesOrdinaryName)
+{
+    // An ordinary, non-numeric engine name falls through to FNV-1a, matching
+    // engineNameToId so registered engines still resolve.
+    EXPECT_EQ(engineNameOrIdToId("MIOPEN_ENGINE"), engineNameToId("MIOPEN_ENGINE"));
+}
+
+TEST_F(TestEngineNames, EngineNameOrIdToIdTreatsWhitespaceAsNameCharacter)
+{
+    // Whitespace is a valid name character: a string is only treated as numeric
+    // when it parses fully with no whitespace anywhere. Leading, trailing, and
+    // internal whitespace all force the FNV-1a name path (matching engineNameToId
+    // on the untrimmed string), and an all-whitespace or empty string is a name.
+    EXPECT_EQ(engineNameOrIdToId(" 123"), engineNameToId(" 123"));
+    EXPECT_EQ(engineNameOrIdToId("123 "), engineNameToId("123 "));
+    EXPECT_EQ(engineNameOrIdToId("1 2 3"), engineNameToId("1 2 3"));
+    EXPECT_EQ(engineNameOrIdToId("   "), engineNameToId("   "));
+    EXPECT_EQ(engineNameOrIdToId(""), engineNameToId(""));
+}
+
 TEST_F(TestEngineNames, MacroMatchingArgsEquivalentToSingleArg)
 {
     // Two-argument form with matching args should behave the same as single-argument form

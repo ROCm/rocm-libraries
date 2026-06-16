@@ -322,7 +322,7 @@ private:
 
     void indexRule(OperationRule rule, size_t order)
     {
-        const int64_t resolvedId = hipdnn_data_sdk::utilities::engineNameToId(rule.engineName);
+        const int64_t resolvedId = hipdnn_data_sdk::utilities::engineNameOrIdToId(rule.engineName);
         OpBucket& bucket = _index[rule.op];
         if(hasWildcard(rule.tensors))
         {

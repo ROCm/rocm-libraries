@@ -62,6 +62,8 @@ add_executable(
     IntegrationRMSNormBackwardDescriptorLowering.cpp
     IntegrationRMSNormBackwardDescriptorLifting.cpp
     IntegrationAutotuneCompiledPlanPath.cpp
+    IntegrationAutotuneConfigRoundTrip.cpp
+    IntegrationAutotuneConfigRoundTripUnsupportedOp.cpp
     IntegrationAutotuneEndToEnd.cpp
     IntegrationAutotuneExhaustive.cpp
     IntegrationAutotunePersistence.cpp

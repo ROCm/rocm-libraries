@@ -141,34 +141,50 @@ std::optional<int64_t>
         }
 
         const char* op = nullptr;
-        const TensorDimsStrides* a = nullptr;
-        const TensorDimsStrides* b = nullptr;
+        std::vector<const TensorDimsStrides*> opTensors;
 
+        // CANONICAL-TENSOR-ORDER: the per-op tensor order supplied here is the
+        // op's flatbuffer `*_attributes.fbs` INPUT-field declaration order with
+        // the output field(s) dropped; the comparison is POSITIONAL (the views
+        // below are matched index-by-index against the config rule). This MUST
+        // stay in lockstep with the frontend writer/selector that produces these
+        // tensors: `hipdnn_frontend::detail::getMatchKeyTensors` in
+        // `frontend/include/hipdnn_frontend/detail/GraphMatchKey.hpp`. Any change
+        // to a per-op set/order here MUST be mirrored there and vice versa.
+        // Convolution (output excluded, 2 inputs each): conv_fprop → (x, w);
+        // conv_dgrad → (dy, w); conv_wgrad → (x, dy).
         if(const auto* fwd = node->attributes_as_ConvolutionFwdAttributes())
         {
             op = "conv_fprop";
-            a = viewFor(fwd->x_tensor_uid());
-            b = viewFor(fwd->w_tensor_uid());
+            opTensors = {viewFor(fwd->x_tensor_uid()), viewFor(fwd->w_tensor_uid())};
         }
         else if(const auto* bwd = node->attributes_as_ConvolutionBwdAttributes())
         {
             op = "conv_dgrad";
-            a = viewFor(bwd->dy_tensor_uid());
-            b = viewFor(bwd->w_tensor_uid());
+            opTensors = {viewFor(bwd->dy_tensor_uid()), viewFor(bwd->w_tensor_uid())};
         }
         else if(const auto* wrw = node->attributes_as_ConvolutionWrwAttributes())
         {
             op = "conv_wgrad";
-            a = viewFor(wrw->x_tensor_uid());
-            b = viewFor(wrw->dy_tensor_uid());
+            opTensors = {viewFor(wrw->x_tensor_uid()), viewFor(wrw->dy_tensor_uid())};
         }
 
-        if(op == nullptr || a == nullptr || b == nullptr)
+        if(op == nullptr || opTensors.empty() || opTensors[0] == nullptr)
         {
             continue;
         }
 
-        const std::vector<TensorView> views{buildView(a), buildView(b)};
+        // Build the positional view vector from every required tensor that
+        // resolved; a null trailing tensor is dropped (matching prior behavior).
+        std::vector<TensorView> views;
+        views.reserve(opTensors.size());
+        for(const auto* t : opTensors)
+        {
+            if(t != nullptr)
+            {
+                views.push_back(buildView(t));
+            }
+        }
         auto match = config.matchOperation(op, views);
         if(match.has_value())
         {

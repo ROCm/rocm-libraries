@@ -7,6 +7,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <vector>
@@ -41,12 +42,12 @@ public:
 
     uint32_t getNumEngines() const override
     {
-        return 4;
+        return 5;
     }
 
     uint32_t getNumApplicableEngines() const override
     {
-        return 4;
+        return 5;
     }
 
     size_t getCompiledWorkspaceSize() const override
@@ -67,7 +68,9 @@ public:
             }
             hipdnn_plugin_sdk::throwIfNull(numEngines);
 
-            *numEngines = 4;
+            constexpr uint32_t TOTAL_ENGINES = 5;
+            // When maxEngines=0, return total count for discovery; otherwise return actual count
+            *numEngines = (maxEngines == 0) ? TOTAL_ENGINES : std::min(maxEngines, TOTAL_ENGINES);
 
             if(maxEngines >= 1)
             {
@@ -85,6 +88,11 @@ public:
             {
                 engineIds[3]
                     = hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineFails>();
+            }
+            if(maxEngines >= 5)
+            {
+                engineIds[4] = hipdnn_tests::plugin_constants::engineId<
+                    AutotunePluginEnginePrimingOnlyFails>();
             }
 
             LOG_API_SUCCESS(apiName, "numEngines=" << *numEngines);
@@ -112,7 +120,9 @@ public:
             }
             hipdnn_plugin_sdk::throwIfNull(numEngines);
 
-            *numEngines = 4;
+            constexpr uint32_t TOTAL_ENGINES = 5;
+            // When maxEngines=0, return total count for discovery; otherwise return actual count
+            *numEngines = (maxEngines == 0) ? TOTAL_ENGINES : std::min(maxEngines, TOTAL_ENGINES);
 
             if(maxEngines >= 1)
             {
@@ -131,14 +141,78 @@ public:
                 engineIds[3]
                     = hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineFails>();
             }
+            if(maxEngines >= 5)
+            {
+                engineIds[4] = hipdnn_tests::plugin_constants::engineId<
+                    AutotunePluginEnginePrimingOnlyFails>();
+            }
 
             LOG_API_SUCCESS(apiName, "numEngines=" << *numEngines);
         });
     }
 
-    // Fails executeGraph() UNCONDITIONALLY so both priming AND benchmark fail and
-    // succeeded==false holds. A priming-only failure would leave succeeded==true
-    // ("...even though succeeded may be true") — a different scenario.
+    // Custom createExecutionContext that parses knob settings to detect priming mode.
+    static hipdnnPluginStatus_t
+        createExecutionContext(hipdnnEnginePluginHandle_t handle,
+                               const hipdnnPluginConstData_t* engineConfig,
+                               const hipdnnPluginConstData_t* opGraph,
+                               hipdnnEnginePluginExecutionContext_t* executionContext)
+    {
+        LOG_API_ENTRY("handle=" << static_cast<void*>(handle)
+                                << ", engineConfig=" << static_cast<const void*>(engineConfig)
+                                << ", opGraph=" << static_cast<const void*>(opGraph)
+                                << ", executionContext=" << static_cast<void*>(executionContext));
+
+        return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+            hipdnn_plugin_sdk::throwIfNull(handle);
+            hipdnn_plugin_sdk::throwIfNull(engineConfig);
+            hipdnn_plugin_sdk::throwIfNull(opGraph);
+            hipdnn_plugin_sdk::throwIfNull(executionContext);
+            hipdnn_plugin_sdk::throwIfNull(getInstance());
+
+            if(!getInstance()->supportsEngineOperations())
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                    "No engines available - cannot create execution context");
+            }
+
+            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(
+                opGraph->ptr, opGraph->size);
+            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper
+                engineConfigWrapper(engineConfig->ptr, engineConfig->size);
+
+            auto context = std::make_unique<HipdnnEnginePluginExecutionContext>();
+            context->engineId = engineConfigWrapper.engineId();
+
+            // Parse knob settings to detect benchmarking mode (global.benchmarking = 1)
+            if(engineConfigWrapper.hasKnobSetting("global.benchmarking"))
+            {
+                const auto& knobSetting
+                    = engineConfigWrapper.getKnobSettingByName("global.benchmarking");
+                if(knobSetting.valueType()
+                   == hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue)
+                {
+                    const auto& intValue
+                        = knobSetting.valueAs<hipdnn_flatbuffers_sdk::data_objects::IntValue>();
+                    if(intValue.value() == 1)
+                    {
+                        context->hasBenchmarkingKnobEnabled = true;
+                    }
+                }
+            }
+
+            *executionContext = context.release();
+
+            LOG_API_SUCCESS(apiName,
+                            "createdExecutionContext=" << static_cast<void*>(*executionContext));
+        });
+    }
+
+    // AutotunePluginEngineFails: fails executeGraph() UNCONDITIONALLY so both priming
+    // AND benchmark fail and succeeded==false holds.
+    // AutotunePluginEnginePrimingOnlyFails: fails only during priming (hasBenchmarkingKnobEnabled=true),
+    // succeeds during normal benchmark. Tests the RFC case where "succeeded may be true".
     static hipdnnPluginStatus_t
         executeOpGraph(hipdnnEnginePluginHandle_t handle,
                        hipdnnEnginePluginExecutionContext_t executionContext,
@@ -149,6 +223,8 @@ public:
         if(executionContext != nullptr)
         {
             const auto* ctx = static_cast<HipdnnEnginePluginExecutionContext*>(executionContext);
+
+            // AutotunePluginEngineFails: fails unconditionally
             if(ctx->engineId
                == hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineFails>())
             {
@@ -157,6 +233,21 @@ public:
                         HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                         "AutotunePluginEngineFails: executeGraph fails unconditionally");
                 });
+            }
+
+            // AutotunePluginEnginePrimingOnlyFails: fails only when benchmarking knob is enabled
+            if(ctx->engineId
+               == hipdnn_tests::plugin_constants::engineId<AutotunePluginEnginePrimingOnlyFails>())
+            {
+                if(ctx->hasBenchmarkingKnobEnabled)
+                {
+                    return hipdnn_plugin_sdk::tryCatch([]() {
+                        throw hipdnn_plugin_sdk::HipdnnPluginException(
+                            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                            "AutotunePluginEnginePrimingOnlyFails: priming execution failed");
+                    });
+                }
+                // Normal execution succeeds - fall through to base implementation
             }
         }
         return TestPluginBase::enginePluginExecuteOpGraph(
@@ -195,12 +286,15 @@ public:
             const auto engineB = hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineB>();
             const auto engineFails
                 = hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineFails>();
+            const auto enginePrimingOnlyFails
+                = hipdnn_tests::plugin_constants::engineId<AutotunePluginEnginePrimingOnlyFails>();
 
-            if(engineId == engineFails)
+            if(engineId == engineFails || engineId == enginePrimingOnlyFails)
             {
-                // Give the failing engine the benchmarking knob so it IS selected
-                // for EXHAUSTIVE priming — its executeGraph() then fails the
-                // priming execution unconditionally.
+                // Both failing engines need the benchmarking knob so they are selected
+                // for EXHAUSTIVE priming. EngineFails fails unconditionally, while
+                // EnginePrimingOnlyFails fails only during priming (testing RFC's
+                // "succeeded may be true" case).
                 knobOffsets.push_back(hipdnn_plugin_sdk::KnobFactory::createIntKnob(
                     builder,
                     "global.benchmarking",
@@ -383,8 +477,7 @@ HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
                                              const hipdnnPluginConstData_t* opGraph,
                                              hipdnnEnginePluginExecutionContext_t* executionContext)
 {
-    return TestPluginBase::enginePluginCreateExecutionContext(
-        handle, engineConfig, opGraph, executionContext);
+    return AutotunePlugin::createExecutionContext(handle, engineConfig, opGraph, executionContext);
 }
 
 HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t hipdnnEnginePluginDestroyExecutionContext(

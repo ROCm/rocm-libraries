@@ -40,6 +40,10 @@ struct HipdnnEnginePluginExecutionContext
     // Engine ID captured at execution-context creation. Lets a plugin make
     // per-engine execution decisions (e.g. an engine that fails on purpose).
     int64_t engineId = 0;
+
+    // True if global.benchmarking=1 was set in the engine config knob settings.
+    // Used by autotune test plugins to simulate priming-only failures.
+    bool hasBenchmarkingKnobEnabled = false;
 };
 
 inline const char* apiVersionWithoutTweak()

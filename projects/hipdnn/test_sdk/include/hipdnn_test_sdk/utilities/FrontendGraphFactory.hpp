@@ -184,7 +184,7 @@ public:
         convAttrs.set_pre_padding({1, 1}).set_post_padding({1, 1}).set_stride({1, 1}).set_dilation(
             {1, 1});
 
-        auto dwAttr = graphObj.conv_wgrad(xTensorAttr, dyTensorAttr, convAttrs);
+        auto dwAttr = graphObj.conv_wgrad(dyTensorAttr, xTensorAttr, convAttrs);
         dwAttr->set_output(true);
 
         return graphObj;

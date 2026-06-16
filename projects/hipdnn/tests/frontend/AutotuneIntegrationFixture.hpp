@@ -28,13 +28,18 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_test_sdk/utilities/FrontendGraphFactory.hpp>
+#include <hipdnn_test_sdk/utilities/GraphExecuteTestKit.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -178,6 +183,35 @@ protected:
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
     }
 
+    /// Builds a FRESH conv graph against the override config at @p configPath and
+    /// reports the engine ID the backend selects for it. Sets
+    /// HIPDNN_HEUR_CONFIG_PATH, runs the minimal selection path
+    /// (createConvGraph -> build -> get_plan_name), then parses the plan name
+    /// back to an int64 ID via the shared engineNameOrIdToId helper so callers
+    /// can compare IDs regardless of whether the name is a hex or decimal form.
+    ///
+    /// Op-agnostic on purpose: future per-op end-to-end tests reuse it once
+    /// createConvGraph is generalized. Out-parameter because gtest ASSERT_*
+    /// requires a void-returning function. Leaves the env var set; callers /
+    /// TearDown unset it.
+    void buildConvGraphAndGetSelectedEngineId(const char* name,
+                                              const std::string& configPath,
+                                              int64_t& outEngineId)
+    {
+        hipdnn_data_sdk::utilities::setEnv("HIPDNN_HEUR_CONFIG_PATH", configPath.c_str());
+
+        auto bundle = createConvGraph(name);
+
+        auto result = bundle.graph->build(_handle);
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        std::string planName;
+        result = bundle.graph->get_plan_name(planName);
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        outEngineId = hipdnn_data_sdk::utilities::engineNameOrIdToId(planName);
+    }
+
     /// Asserts the result vector is non-empty and at least one engine succeeded.
     static void assertAnySucceeded(const std::vector<hipdnn_frontend::AutotuneResult>& results,
                                    const std::string& message
@@ -194,6 +228,62 @@ protected:
             }
         }
         ASSERT_TRUE(anySucceeded) << message;
+    }
+
+    // ── Shared execute-path kit (consolidation R1) ───────────────────────────
+    //
+    // The helpers below replace the hand-rolled ConvGraphBundle path with the
+    // op-agnostic GraphExecuteTestKit. They take an OperationType so any future
+    // deferred op (matmul, sdpa, norms, pointwise) reuses them with no new graph
+    // or tensor code. The write graph and read graph MUST use the SAME op so
+    // their autotune match keys agree.
+
+    /// Builds a fresh graph for @p op via FrontendGraphFactory, brings it through
+    /// validate() + build_operation_graph() (which assigns UIDs), then constructs
+    /// an op-agnostic variant pack from the built graph. The graph and bundle are
+    /// returned via out-parameters because gtest ASSERT_* needs a void return and
+    /// because the bundle owns the tensors backing the variant pack.
+    void
+        buildGraphAndBundle(hipdnn_test_sdk::utilities::OperationType op,
+                            std::shared_ptr<hipdnn_frontend::graph::Graph>& outGraph,
+                            std::optional<hipdnn_test_sdk::utilities::GraphTensorBundle>& outBundle)
+    {
+        outGraph = hipdnn_test_sdk::utilities::buildGraphForOp(op);
+
+        auto result = outGraph->validate();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        result = outGraph->build_operation_graph(_handle);
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        outBundle.emplace(*outGraph);
+    }
+
+    /// Builds a FRESH graph for @p op against the override config at @p configPath
+    /// and reports the engine ID the backend selects. Sets HIPDNN_HEUR_CONFIG_PATH,
+    /// runs the minimal selection path (build -> get_plan_name), then parses the
+    /// plan name back to an int64 ID via engineNameOrIdToId so callers can compare
+    /// IDs regardless of hex/decimal form.
+    ///
+    /// Op-agnostic: needs only the graph, no host tensors. Out-parameter because
+    /// gtest ASSERT_* requires a void-returning function. Leaves the env var set;
+    /// callers / TearDown unset it.
+    void buildGraphAndGetSelectedEngineId(hipdnn_test_sdk::utilities::OperationType op,
+                                          const std::string& configPath,
+                                          int64_t& outEngineId)
+    {
+        hipdnn_data_sdk::utilities::setEnv("HIPDNN_HEUR_CONFIG_PATH", configPath.c_str());
+
+        auto graph = hipdnn_test_sdk::utilities::buildGraphForOp(op);
+
+        auto result = graph->build(_handle);
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        std::string planName;
+        result = graph->get_plan_name(planName);
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        outEngineId = hipdnn_data_sdk::utilities::engineNameOrIdToId(planName);
     }
 };
 

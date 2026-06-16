@@ -157,7 +157,7 @@ struct AutotuneConfig {
     AutotuneRankingFn rankingFn = nullptr;
 
     // EXHAUSTIVE mode: when false (default), abort on priming failure.
-    // When true: benchmark without priming; ranExhaustive=false, errorMessage notes reason.
+    // When true: continue to benchmark without priming; ranExhaustive=false, errorMessage notes reason.
     // No effect in AUTO mode.
     bool continueOnPrimingFailure = false;
 
@@ -601,10 +601,6 @@ Reuses the `EngineOverrideConfig` JSON format with autotuning metadata added:
         { "dim": [16, 64, 56, 56], "stride": [200704, 3136, 56, 1] },
         { "dim": [64, 64, 3, 3], "stride": [576, 9, 3, 1] }
       ],
-      "knobs": [
-        { "knob_id": "global.workspace_size_limit", "type": "int", "value": 16777216 },
-        { "knob_id": "global.search_mode", "type": "int", "value": 2 }
-      ],
       "autotune_metadata": {
         "rank": 0,
         "min_time_ms": 0.0412,
@@ -616,7 +612,11 @@ Reuses the `EngineOverrideConfig` JSON format with autotuning metadata added:
         "strategy": "run_until_stable",
         "iterations_run": 37,
         "converged": true,
-        "timestamp": "2026-04-21T10:30:00Z"
+        "timestamp": "2026-04-21T10:30:00Z",
+        "knobs": [
+          { "knob_id": "global.workspace_size_limit", "type": "int", "value": 16777216 },
+          { "knob_id": "global.search_mode", "type": "int", "value": 2 }
+        ]
       }
     },
     {
@@ -655,8 +655,9 @@ Reuses the `EngineOverrideConfig` JSON format with autotuning metadata added:
 - `iterations_run`: actual timed iterations executed
 - `converged`: present only for `"run_until_stable"`; `true` if variance stabilized, `false` if `maxIterations` reached
 - `timestamp`: ISO 8601 timestamp
+- `knobs`: array of knob settings active during the winning run (informational; omitted for default-knob entries; not part of the match key)
 
-**Knob settings in config file entries**: Each entry may include a `knobs` array recording the knob settings active during the winning autotune run. These are informational metadata, not applied on load, not part of the match key. The user is responsible for configuring knobs to match the autotuned configuration if needed (via `add_engine()` with knob settings, or `create_execution_plan_ext()`). Default-knob entries omit the `knobs` key entirely. The `type` field (`"int"`, `"double"`, or `"string"`) enables correct deserialization since JSON does not distinguish `int64_t` from `double`.
+**Knob settings in config file entries**: Each entry's `autotune_metadata` may include a `knobs` array recording the knob settings active during the winning autotune run. These are informational metadata, not applied on load, not part of the match key. The user is responsible for configuring knobs to match the autotuned configuration if needed (via `add_engine()` with knob settings, or `create_execution_plan_ext()`). Default-knob entries omit the `knobs` key entirely. The `type` field (`"int"`, `"double"`, or `"string"`) enables correct deserialization since JSON does not distinguish `int64_t` from `double`.
 
 The config file is a lightweight engine *selection* hint; plan serialization is the mechanism for full *restoration* of the winning plan with all configuration (knobs, workspace, compilation state).
 
@@ -794,11 +795,11 @@ Write unit tests alongside each stage of implementation. Key areas:
   - Knob serialization for each value type (int, double, string)
   - Override entry construction: metadata fields match § 6.5 schema (conditional presence of `converged`; `ran_exhaustive` always present); edge case for tensors with empty strides
   - Write modes: new file, append, replace matching, delete all
-  - Round-trip test (write -> load -> `matchOperation()` -> verify knob values)
+  - Round-trip test (write -> load -> `matchOperation()` -> verify knob values nested under `autotune_metadata`)
   - Recovery from corrupt JSON
 - **Config reader extensions**: `EngineOverrideConfig` knob parsing:
-  - Each knob type, type aliases, wildcards with knobs
-  - Missing/empty knobs fields (backward compatibility with pre-autotune config files)
+  - Each knob type, type aliases, wildcards with knobs nested under `autotune_metadata`
+  - Missing/empty `autotune_metadata.knobs` fields (backward compatibility with pre-autotune config files)
 - **Graph API guards** (§ 6.2.3, § 6.3):
   - Mutual exclusion: `add_engine_*()` after `create_execution_plans()` (and vice versa) returns error
   - Precondition: `add_engine_*()` returns error before `build_operation_graph()`
