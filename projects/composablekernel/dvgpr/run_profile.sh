@@ -36,7 +36,9 @@ JOBS=("fused_conv 0" "fused_conv 1" "fused_conv 2" "fused_conv 3"
 echo "variant,kernel,sel,avg_us,checksum" > "$SUMMARY"
 run() {  # label hsaco kernel sel
   local label="$1" hsaco="$2" kern="$3" sel="$4"
-  local line; line=$("$HARNESS" "$hsaco" "$kern" "$sel" "$REPS") || { echo "  run failed: $label $kern $sel" >&2; return 0; }
+  printf '[%2d/%d] %-8s %-10s sel=%s ... ' "$STEP" "$TOTAL" "$label" "$kern" "$sel"; STEP=$((STEP+1))
+  local line; line=$("$HARNESS" "$hsaco" "$kern" "$sel" "$REPS") || { echo "FAILED"; echo "  run failed: $label $kern $sel" >&2; return 0; }
+  echo "$line"                       # live: kernel,sel,avg_us,checksum
   echo "$label,$line" >> "$SUMMARY"
   if [[ "$PROFILE" == "1" ]]; then
     local dir="$OUT/prof/${label}_${kern}_sel${sel}"; mkdir -p "$dir"
@@ -45,6 +47,9 @@ run() {  # label hsaco kernel sel
   fi
 }
 
+STEP=1
+TOTAL=$(( ${#JOBS[@]} * 2 ))
+echo ">>> running $TOTAL harness invocations (REPS=$REPS, PROFILE=$PROFILE) ..."
 for j in "${JOBS[@]}"; do
   read -r k s <<<"$j"
   run vanilla "$VANILLA_HSACO" "$k" "$s"
