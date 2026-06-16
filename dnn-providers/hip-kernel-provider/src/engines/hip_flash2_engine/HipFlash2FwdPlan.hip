@@ -13,7 +13,7 @@
 // Performance (MI325X gfx942, ROCm 7.2, seq=4096 causal):
 //   V7b: 78.98 TFLOPS MHA, 78.16 TFLOPS GQA4 (Alola job 366655)
 //
-// This file is compiled as a .hip file by hipcc for the gfx942 target.
+// This file is compiled as a .hip file by hipcc for gfx942 and gfx950 targets.
 // The hipDNN hip-kernel-provider includes it as a HIPRTC source or pre-compiled .co.
 
 #include <hip/hip_runtime.h>
@@ -29,6 +29,27 @@
 #include "HipFlash2FwdPlanBuilder.hpp"
 
 namespace hip_flash2_engine {
+
+// ── Portable fast-exp helper ───────────────────────────────────────────────────
+// On gfx942 (CDNA3): __builtin_amdgcn_exp2f is a single-cycle v_exp_f32 instruction.
+// On gfx950 (CDNA4) and other targets: fall back to standard exp2f.
+//
+// Brian / gfx950 validation note: The gfx942 intrinsic was causing validation
+// failures on gfx950 because the instruction's rounding behaviour differs
+// between CDNA3 and CDNA4.  The portable path uses exp2f which is IEEE-754
+// correct on both architectures.  Performance impact on gfx942: < 1%.
+__device__ __forceinline__ float flash2_exp2f(float x) {
+#if defined(__gfx942__)
+    return __builtin_amdgcn_exp2f(x);
+#else
+    return exp2f(x);
+#endif
+}
+
+// exp(x) via exp2: exp(x) = 2^(x * log2(e))
+__device__ __forceinline__ float flash2_expf(float x) {
+    return flash2_exp2f(x * 1.4426950408f);  // log2(e) = 1/ln(2)
+}
 
 // ── Flash-Attention 2 V7 kernel (full MFMA + causal skip) ─────────────────────
 // Grid:  (ceil(Lq/64), B, Hq)  — 64 query rows per CTA, 1 wavefront
@@ -169,8 +190,8 @@ void flash2_v7_hipdnn(
         for (int g = 1; g < 4; g++)
             tile_new_m = fmaxf(tile_new_m, __shfl_xor(tile_new_m, g * 16));
 
-        // Fast exp2 for rescale (AMDable KB: flash2_fast_exp_softmax_gfx942)
-        float br = __builtin_amdgcn_exp2f((row_m - tile_new_m) * 1.4426950408f);
+        // Fast exp2 for rescale — portable across gfx942/gfx950
+        float br = flash2_expf(row_m - tile_new_m);
         row_m = tile_new_m;
         for (int qg = 0; qg < 4; qg++)
             for (int d16 = 0; d16 < D16; d16++)
@@ -184,8 +205,7 @@ void flash2_v7_hipdnn(
             for (int kg = 0; kg < 4; kg++) {
                 fill_fragment(p_frags[qg][kg], __half(0));
                 for (int e = 0; e < 4; e++) {
-                    float pv = __builtin_amdgcn_exp2f(
-                        (ms[qg][kg][e] - row_m) * 1.4426950408f);
+                    float pv = flash2_expf(ms[qg][kg][e] - row_m);
                     p_frags[qg][kg].x[e] = (_Float16)pv;
                     if (qg == my_cg) row_d += pv;
                 }
@@ -256,25 +276,4 @@ void launch_flash2_v7(
             (flash2_v7_hipdnn<128>), grid, block, 0, stream,
             Q, K, V, O,
             p.seq_len_q, p.seq_len_kv,
-            p.num_heads_q, p.num_heads_k,
-            sm_scale, (int)p.causal,
-            p.q_stride_batch, p.q_stride_seq, p.q_stride_head,
-            p.k_stride_batch, p.k_stride_seq, p.k_stride_head,
-            p.v_stride_batch, p.v_stride_seq, p.v_stride_head,
-            p.o_stride_batch, p.o_stride_seq, p.o_stride_head);
-    } else if (p.head_dim == 64) {
-        hipLaunchKernelGGL(
-            (flash2_v7_hipdnn<64>), grid, block, 0, stream,
-            Q, K, V, O,
-            p.seq_len_q, p.seq_len_kv,
-            p.num_heads_q, p.num_heads_k,
-            sm_scale, (int)p.causal,
-            p.q_stride_batch, p.q_stride_seq, p.q_stride_head,
-            p.k_stride_batch, p.k_stride_seq, p.k_stride_head,
-            p.v_stride_batch, p.v_stride_seq, p.v_stride_head,
-            p.o_stride_batch, p.o_stride_seq, p.o_stride_head);
-    }
-#endif
-}
-
-}  // namespace hip_flash2_engine
+            
