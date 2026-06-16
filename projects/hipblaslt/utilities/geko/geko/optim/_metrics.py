@@ -81,7 +81,7 @@ def _load_and_normalize_weights(
             
             if weights["us_reference"].isna().any():
                 logger.warning(
-                    f"{weights["us_reference"].isna().sum()} missing GEMMs from tuned results"
+                    f"{weights['us_reference'].isna().sum()} missing GEMMs from tuned results"
                 )
                 weights = weights.dropna(subset=['us_reference'])
                 if len(weights) == 0:
