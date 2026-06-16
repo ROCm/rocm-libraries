@@ -671,8 +671,10 @@ std::vector<float> EngineerKernelConfigFeaturesImpl(const std::vector<float>& ra
     const float k_per_block = safe_param("KPerBlock");
     const float m_per_xdl   = safe_param("MPerXDL");
     const float n_per_xdl   = safe_param("NPerXDL");
-    const float m_xdl_wave  = safe_param("MXdlPerWave");
-    const float n_xdl_wave  = safe_param("NXdlPerWave");
+    // MXdlPerWave / NXdlPerWave use the raw value (not the missing->1 clamp the others use), to
+    // match the trained feature definitions: a missing value stays as the missing token here.
+    const float m_xdl_wave  = get_param("MXdlPerWave");
+    const float n_xdl_wave  = get_param("NXdlPerWave");
     const float a_block_vec = safe_param("ABlockTransferSrcScalarPerVector");
     const float b_block_vec = safe_param("BBlockTransferSrcScalarPerVector");
 
