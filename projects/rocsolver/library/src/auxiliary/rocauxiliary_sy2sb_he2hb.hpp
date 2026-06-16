@@ -175,10 +175,10 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
         // Using ldab-1 converts dense to band format.
         // When kd == n-1, A(0, n-1) is outside the kd-1 upper diagonals,
         // but gets copied to a "don't care" entry in the band structure.
-        I cpy_mblks = ceildiv(n, 32);
-        I cpy_nblks = ceildiv(n, 32);
-        ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(cpy_mblks, cpy_nblks, batch_count), dim3(32, 32),
-                                0, stream, n, n, // opts
+        I cpy_mblks = ceildiv(n, BS2);
+        I cpy_nblks = ceildiv(n, BS2);
+        ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(cpy_mblks, cpy_nblks, batch_count),
+                                dim3(BS2, BS2), 0, stream, n, n, // opts
                                 A, shiftA, lda, strideA, // A
                                 Aband, idiag, ldab - 1, strideAb); // Aband
         return rocblas_status_success;
@@ -224,10 +224,10 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
         // For copying purposes, round up to full kd.
         // Includes diagonal tile above panel and all kd columns.
         I jb_rnd = roundup(jb, kd);
-        cpy_mblks = ceildiv(n - j, 32);
-        cpy_nblks = ceildiv(jb_rnd, 32);
-        ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(cpy_mblks, cpy_nblks, batch_count), dim3(32, 32),
-                                0, stream, n - j, jb_rnd, // opts
+        cpy_mblks = ceildiv(n - j, BS2);
+        cpy_nblks = ceildiv(jb_rnd, BS2);
+        ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(cpy_mblks, cpy_nblks, batch_count),
+                                dim3(BS2, BS2), 0, stream, n - j, jb_rnd, // opts
                                 A, idx2D(j, j, lda) + shiftA, lda, strideA, // Aj
                                 V, idx2D(j, 0, ldv), ldv, strideV); // Vj
 
@@ -269,10 +269,10 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
             // Copy band of A (diag tile and R) to Aband.
             // Copies some "don't care" entries from below bandwidth kd.
             // Using ldab-1 converts dense to band format.
-            cpy_mblks = ceildiv(kd + 1 + qn, 32);
-            cpy_nblks = ceildiv(kd, 32);
+            cpy_mblks = ceildiv(kd + 1 + qn, BS2);
+            cpy_nblks = ceildiv(kd, BS2);
             ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(cpy_mblks, cpy_nblks, batch_count),
-                                    dim3(32, 32), 0, stream, kd + 1 + qn, kd, // opts
+                                    dim3(BS2, BS2), 0, stream, kd + 1 + qn, kd, // opts
                                     V, idx2D(i, i - j, ldv), ldv, strideV, // A_ii
                                     Aband, idx2D(idiag, i, ldab), ldab - 1, strideAb); // Aband_ii
 
@@ -365,10 +365,10 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
             // Zj is really jm rows tall, but we need only qm rows for her2k/gemms
             // to update the next panel (above) or trailing matrix (below).
             // Too bad there isn't a 4 matrix gemm: C = alpha AB + beta D.
-            cpy_mblks = ceildiv(qm, 32);
-            cpy_nblks = ceildiv(i - j + qn, 32);
+            cpy_mblks = ceildiv(qm, BS2);
+            cpy_nblks = ceildiv(i - j + qn, BS2);
             ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(cpy_mblks, cpy_nblks, batch_count),
-                                    dim3(32, 32), 0, stream, qm, i - j + qn, // opts
+                                    dim3(BS2, BS2), 0, stream, qm, i - j + qn, // opts
                                     X, idx2D(i + kd, 0, ldx), ldx, strideX, // Xj
                                     Z, idx2D(i + kd, 0, ldz), ldz, strideZ); // Zj
             rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none, qm, i - j + qn,
@@ -428,17 +428,17 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
         // Copy factored panel with all [Cij; Ti; Vi] back to A.
         // If we don't need [Cij, Ti], this could be reduced to n-j-kd rows.
         // This could be done in parallel with above trailing matrix update.
-        cpy_mblks = ceildiv(n - j, 32);
-        cpy_nblks = ceildiv(jb_rnd, 32);
-        ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(cpy_mblks, cpy_nblks, batch_count), dim3(32, 32),
-                                0, stream, n - j, jb_rnd, // opts
+        cpy_mblks = ceildiv(n - j, BS2);
+        cpy_nblks = ceildiv(jb_rnd, BS2);
+        ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(cpy_mblks, cpy_nblks, batch_count),
+                                dim3(BS2, BS2), 0, stream, n - j, jb_rnd, // opts
                                 V, idx2D(j, 0, ldv), ldv, strideV, // Vj
                                 A, idx2D(j, j, lda) + shiftA, lda, strideA); // Aj
     }
 
     // Copy last, lower triangular block of band of A to Aband.
-    cpy_mblks = ceildiv(n - i, 32);
-    ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(cpy_mblks, cpy_mblks, batch_count), dim3(32, 32), 0,
+    cpy_mblks = ceildiv(n - i, BS2);
+    ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(cpy_mblks, cpy_mblks, batch_count), dim3(BS2, BS2), 0,
                             stream, n - i, n - i, // opts
                             A, idx2D(i, i, lda) + shiftA, lda, strideA, // Aii
                             Aband, idx2D(idiag, i, ldab), ldab - 1, strideAb, // Aband_ii
