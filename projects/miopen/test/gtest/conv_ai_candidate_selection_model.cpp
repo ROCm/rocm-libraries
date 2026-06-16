@@ -738,9 +738,21 @@ TEST_P(GPU_CandidateSelection_FP32, EngineeredInputGolden_Test)
                                     1.0f,
                                     1.0f};
     expected.insert(expected.end(), raw.begin(), raw.end());
-    // Derived block (shared math), normalized with the metadata's num_cu.
-    const auto derived = miopen::ai::common::EngineeredConvFeatures(
-        1, 64, 64, 56, 56, 56, 56, 3, 3, 1, meta.GetNumCu());
+    // Derived block (shared math), normalized with the metadata's num_cu. direction=0 (Forward) and
+    // C_in==C_out here, so the direction-dependent GEMM assignment is exercised by the CPU golden.
+    const auto derived =
+        miopen::ai::common::EngineeredConvFeatures(1,
+                                                   64,
+                                                   64,
+                                                   56,
+                                                   56,
+                                                   56,
+                                                   56,
+                                                   3,
+                                                   3,
+                                                   1,
+                                                   meta.GetNumCu(),
+                                                   miopen::ai::common::ConvDirection::Forward);
     expected.insert(expected.end(), derived.begin(), derived.end());
 
     ASSERT_EQ(engineered.size(), expected.size());
@@ -806,8 +818,19 @@ TEST_P(GPU_CandidateSelection_FP32, EngineeredInputHardcoded_Test)
                                     1.0f,
                                     1.0f};
     expected.insert(expected.end(), raw.begin(), raw.end());
-    const auto derived = miopen::ai::common::EngineeredConvFeatures(
-        1, 64, 64, 56, 56, 56, 56, 3, 3, 1, expected_num_cu);
+    const auto derived =
+        miopen::ai::common::EngineeredConvFeatures(1,
+                                                   64,
+                                                   64,
+                                                   56,
+                                                   56,
+                                                   56,
+                                                   56,
+                                                   3,
+                                                   3,
+                                                   1,
+                                                   expected_num_cu,
+                                                   miopen::ai::common::ConvDirection::Forward);
     expected.insert(expected.end(), derived.begin(), derived.end());
 
     ASSERT_EQ(engineered.size(), expected.size());

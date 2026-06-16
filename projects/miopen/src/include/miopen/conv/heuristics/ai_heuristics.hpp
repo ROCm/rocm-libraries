@@ -63,11 +63,22 @@ std::vector<int> OneHot(long long label, std::size_t num_classes);
 // selection). Defined in ai_heuristics.cpp.
 const char* DataTypeToEncodingKey(miopenDataType_t data_type);
 
+// Convolution direction. Selects the implicit-GEMM (M, N, K) dimension assignment in
+// EngineeredConvFeatures (the conv lowers to a different GEMM per direction). Dimensions are always
+// passed in the forward (driver) convention; this enum only chooses the GEMM formula.
+enum class ConvDirection
+{
+    Forward,
+    BackwardData,
+    BackwardWeights
+};
+
 // Derived 2D-convolution feature block shared by the TunaNet (ExtractTunaNetND2dFeatures) and
 // candidate-selection (EngineerCandidateSelectionInputFeatures) input encoders. Given the problem
-// dimensions it returns the engineered tail (log-transformed FLOPs/GEMM sizes, utilization and
-// spatial/channel ratios) in a fixed order. Single source of truth so the two paths cannot drift.
-// Defined in ai_heuristics.cpp.
+// dimensions (forward convention) and direction it returns the engineered tail (log-transformed
+// FLOPs/GEMM sizes, utilization and spatial/channel ratios) in a fixed order. Must match the
+// feature definitions the models were trained with. Single source of truth so the two paths cannot
+// drift. Defined in ai_heuristics.cpp.
 MIOPEN_INTERNALS_EXPORT std::vector<float> EngineeredConvFeatures(std::size_t N,
                                                                   std::size_t C_in,
                                                                   std::size_t C_out,
@@ -78,7 +89,8 @@ MIOPEN_INTERNALS_EXPORT std::vector<float> EngineeredConvFeatures(std::size_t N,
                                                                   std::size_t K_h,
                                                                   std::size_t K_w,
                                                                   std::size_t groups,
-                                                                  std::size_t num_cu);
+                                                                  std::size_t num_cu,
+                                                                  ConvDirection direction);
 
 /**
  * @brief Load JSON from file path

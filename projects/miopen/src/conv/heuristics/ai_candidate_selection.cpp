@@ -508,9 +508,14 @@ EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& feat
     };
     engineered.insert(engineered.end(), raw_tail.begin(), raw_tail.end());
 
-    // Derived feature block (shared with the TunaNet path).
-    const auto derived = common::EngineeredConvFeatures(
-        N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu);
+    // Derived feature block (shared with the TunaNet path). Dimensions above are normalized to the
+    // forward (driver) convention; the GEMM assignment is selected by the actual direction. The
+    // direction feature is encoded as 0=Forward, 1=BackwardData, 2=BackwardWeights.
+    const auto gemm_dir = direction_code == 0.0f   ? common::ConvDirection::Forward
+                          : direction_code == 1.0f ? common::ConvDirection::BackwardData
+                                                   : common::ConvDirection::BackwardWeights;
+    const auto derived  = common::EngineeredConvFeatures(
+        N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu, gemm_dir);
     engineered.insert(engineered.end(), derived.begin(), derived.end());
 
     const std::size_t expected_size = in_layout.size() + fil_layout.size() + out_layout.size() +
