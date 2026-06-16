@@ -77,7 +77,7 @@ namespace rocsparse
 
         switch(indextype_I)
         {
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented,
                                                    "rocsparse_indextype_u16 is not supported");
@@ -292,7 +292,7 @@ namespace rocsparse
 
         switch(indextype_J)
         {
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented,
                                                    "rocsparse_indextype_u16 is not supported");
@@ -321,7 +321,7 @@ namespace rocsparse
 
         switch(indextype_I)
         {
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented,
                                                    "rocsparse_indextype_u16 is not supported");
@@ -561,7 +561,7 @@ namespace rocsparse
 
         switch(indextype_J)
         {
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented,
                                                    "rocsparse_indextype_u16 is not supported");
@@ -590,7 +590,7 @@ namespace rocsparse
 
         switch(indextype_I)
         {
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented,
                                                    "rocsparse_indextype_u16 is not supported");
