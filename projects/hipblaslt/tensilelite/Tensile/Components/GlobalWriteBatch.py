@@ -2579,11 +2579,13 @@ class GlobalWriteBatchWriter:
 
       elif kernel["ProblemType"]["DestDataType"].isInt8():
         if kernel["ProblemType"]["HighPrecisionAccumulate"]:
+          dataCExternal   = ss.elementData[elementIdx] + (vi // 4)
+          byteIdx       = vi %  4
           if (vi%4) != 3:
-            module.add(VMovB32(dst=vgpr(tmpVgpr+1), src=hex(vi * 8), comment="value = %u"%(vi * 8)))
-            module.add(VBfeI32(dst=vgpr(tmpVgpr), src0=vgpr(dataV+0), src1=vgpr(tmpVgpr+1), src2=8, comment="int8 to int32"))
+            module.add(VMovB32(dst=vgpr(tmpVgpr+1), src=hex(byteIdx * 8), comment="value = %u"%(byteIdx * 8)))
+            module.add(VBfeI32(dst=vgpr(tmpVgpr), src0=vgpr(dataCExternal), src1=vgpr(tmpVgpr+1), src2=8, comment="int8 to int32"))
           else:
-            module.add(VAShiftRightI32(dst=vgpr(tmpVgpr), shiftHex=24, src=vgpr(dataV+0), comment="int8 to int32"))
+            module.add(VAShiftRightI32(dst=vgpr(tmpVgpr), shiftHex=24, src=vgpr(dataCExternal), comment="int8 to int32"))
 
           newSumIdxV = sumIdxV - self.parentWriter.states.c.startVgprValu
           if kernel["ProblemType"]["ComputeDataType"].isSingle():
@@ -2632,6 +2634,7 @@ class GlobalWriteBatchWriter:
       # float8 precision
       elif kernel["ProblemType"]["DestDataType"].isAnyFloat8():
         if kernel["ProblemType"]["HighPrecisionAccumulate"]:
+          dataCExternal   = ss.elementData[elementIdx] + (vi // 4)
           newSumIdxV = sumIdxV - self.parentWriter.states.c.startVgprValu
           # Generate single f32 code if edge is detected.
           isPK = False
@@ -2639,18 +2642,18 @@ class GlobalWriteBatchWriter:
             if self.parentWriter.states.archCaps["VOP3ByteSel"]:
               sb = 0 if self.gwvw == 1 else 1
               if not self.amdClangVersion.major >= 19:
-                module.add(VCvtFP8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataV), vop3=VOP3PModifiers(op_sel=[0,sb])))
+                module.add(VCvtFP8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataCExternal), vop3=VOP3PModifiers(op_sel=[0,sb])))
               else:
-                module.add(VCvtFP8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataV), vop3=VOP3PModifiers(byte_sel=[sb])))
+                module.add(VCvtFP8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataCExternal), vop3=VOP3PModifiers(byte_sel=[sb])))
             else:
               sb = SelectBit.BYTE_0 if self.gwvw == 1 else SelectBit.BYTE_2
-              module.add(VCvtFP8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataV), sdwa=SDWAModifiers(src0_sel=sb)))
+              module.add(VCvtFP8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataCExternal), sdwa=SDWAModifiers(src0_sel=sb)))
           # Original packed route
           elif vi%2 == 1:
             continue
           else:
             isPK = True
-            module.add(ECvtPkFP8toF32(dst=vgpr(tmpVgpr, 2), src=vgpr(dataV), sel=HighBitSel.LOW if vi%4 == 0 else HighBitSel.HIGH))
+            module.add(ECvtPkFP8toF32(dst=vgpr(tmpVgpr, 2), src=vgpr(dataCExternal), sel=HighBitSel.LOW if vi%4 == 0 else HighBitSel.HIGH))
           module.add(SNop(waitState=0))
           if kernel["ProblemType"]["ComputeDataType"].isSingle():
             module.add(VMacF32(dst=vgpr("ValuC+%u"%newSumIdxV), src0=vgpr(tmpVgpr), src1=sgpr("Beta"), comment="finalSum = sum*alpha + C*beta"))
@@ -2659,6 +2662,7 @@ class GlobalWriteBatchWriter:
       # bfloat8 precision
       elif kernel["ProblemType"]["DestDataType"].isAnyBFloat8():
         if kernel["ProblemType"]["HighPrecisionAccumulate"]:
+          dataCExternal   = ss.elementData[elementIdx] + (vi // 4)
           newSumIdxV = sumIdxV - self.parentWriter.states.c.startVgprValu
           # Generate single f32 code if edge is detected.
           isPK = False
@@ -2666,18 +2670,18 @@ class GlobalWriteBatchWriter:
             if self.parentWriter.states.archCaps["VOP3ByteSel"]:
               sb = 0 if self.gwvw == 1 else 1
               if not self.amdClangVersion.major >= 19:
-                module.add(VCvtBF8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataV), vop3=VOP3PModifiers(op_sel=[0,sb])))
+                module.add(VCvtBF8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataCExternal), vop3=VOP3PModifiers(op_sel=[0,sb])))
               else:
-                module.add(VCvtBF8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataV), vop3=VOP3PModifiers(byte_sel=[sb])))
+                module.add(VCvtBF8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataCExternal), vop3=VOP3PModifiers(byte_sel=[sb])))
             else:
               sb = SelectBit.BYTE_0 if self.gwvw == 1 else SelectBit.BYTE_2
-              module.add(VCvtBF8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataV), sdwa=SDWAModifiers(src0_sel=sb)))
+              module.add(VCvtBF8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataCExternal), sdwa=SDWAModifiers(src0_sel=sb)))
           # Original packed route
           elif vi%2 == 1:
             continue
           else:
             isPK = True
-            module.add(ECvtPkBF8toF32(dst=vgpr(tmpVgpr, 2), src=vgpr(dataV), sel=HighBitSel.LOW if vi%4 == 0 else HighBitSel.HIGH))
+            module.add(ECvtPkBF8toF32(dst=vgpr(tmpVgpr, 2), src=vgpr(dataCExternal), sel=HighBitSel.LOW if vi%4 == 0 else HighBitSel.HIGH))
           module.add(SNop(waitState=0))
           if kernel["ProblemType"]["ComputeDataType"].isSingle():
             module.add(VMacF32(dst=vgpr("ValuC+%u"%newSumIdxV), src0=vgpr(tmpVgpr), src1=sgpr("Beta"), comment="finalSum = sum*alpha + C*beta"))

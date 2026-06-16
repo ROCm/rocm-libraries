@@ -92,10 +92,11 @@ endif()
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/KernelEmbedding.cmake")
 # Generate embedded kernel sources and includes at configure time
 embed_kernel_sources(
-    ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_sources.cpp
-    ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_sources.hpp
-    ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_includes.cpp
-    ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_includes.hpp
+    TARGET hip_kernel_provider_impl
+    OUTPUT_SRCS_CPP ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_sources.cpp
+    OUTPUT_SRCS_HPP ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_sources.hpp
+    OUTPUT_INCS_CPP ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_includes.cpp
+    OUTPUT_INCS_HPP ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_includes.hpp
 )
 
 set(HIP_KERNEL_PROVIDER_GENERATED_SOURCES
