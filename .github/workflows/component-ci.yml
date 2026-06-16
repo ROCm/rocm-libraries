@@ -22,6 +22,7 @@ jobs:
     outputs:
       stinkytofu: ${{ steps.configure.outputs.stinkytofu }}
       rocisa: ${{ steps.configure.outputs.rocisa }}
+      miopen: ${{ steps.configure.outputs.miopen }}
       docker-image: ${{ steps.env.outputs.docker-image }}
       linux-runner: ${{ steps.env.outputs.linux-runner }}
       windows-runner: ${{ steps.env.outputs.windows-runner }}
@@ -62,12 +63,19 @@ jobs:
       linux_runner: ${{ needs.changes.outputs.linux-runner }}
       windows_runner: ${{ needs.changes.outputs.windows-runner }}
 
+  miopen:
+    name: "MIOpen"
+    needs: changes
+    if: needs.changes.outputs.miopen == 'true'
+    uses: ./.github/workflows/component-ci-miopen.yml
+
   component-ci-summary:
     name: "Component CI Summary"
     if: always()
     needs:
       - stinkytofu
       - rocisa
+      - miopen
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository
