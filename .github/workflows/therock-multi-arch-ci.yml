@@ -54,7 +54,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  configure:
+    name: Configure Changed Projects
+    runs-on: ubuntu-24.04
+    outputs:
+      changed_projects: ${{ steps.configure.outputs.changed_projects }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Determine changed projects from git diff
+        id: configure
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+        run: |
+          CHANGED_PROJECTS=$(python3 .github/scripts/get_changed_projects.py)
+          echo "Changed projects: $CHANGED_PROJECTS"
+          echo "changed_projects=$CHANGED_PROJECTS" >> $GITHUB_OUTPUT
+
   setup:
+    needs: configure
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@rocm-libraries/multi-arch-ci-custom # TheRock@rocm-libraries/multi-arch-ci-custom
     with:
       build_variant: "release"
@@ -63,6 +84,7 @@ jobs:
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx1151' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
+      changed_projects: ${{ needs.configure.outputs.changed_projects }}
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       repository: ROCm/TheRock
