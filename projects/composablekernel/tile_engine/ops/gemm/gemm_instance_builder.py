@@ -748,20 +748,6 @@ struct SelectedKernel {{
     static constexpr bool TransposeC = false;
     static constexpr bool DoubleSmemBuffer = {"true" if pipeline in ["compv4", "preshufflev2"] else "false"};"""
 
-        if self.kernel_name_prefix == "gemm_aquant":
-            instance_code += f"""
-    static constexpr bool APreshuffleQuant = {"true" if persistent in [True, "true"] else "false"};
-    static constexpr bool BPreshuffleQuant = false;
-    static constexpr bool PreshuffleB = false;
-    static constexpr ck_tile::index_t GroupSizeK = {self.config.get("group_size_k", 128)};"""
-
-        elif self.kernel_name_prefix == "gemm_bquant":
-            instance_code += f"""
-    static constexpr bool APreshuffleQuant = false;
-    static constexpr bool BPreshuffleQuant = {"true" if persistent in [True, "true"] else "false"};
-    static constexpr bool PreshuffleB = false;
-    static constexpr ck_tile::index_t GroupSizeK = {self.config.get("group_size_k", 128)};"""
-
         if self.kernel_name_prefix in [
             "gemm_universal",
             "gemm_preshuffle",

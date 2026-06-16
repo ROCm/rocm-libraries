@@ -60,6 +60,8 @@ class AQuantGemmProfiler
             problem.m_, problem.n_, problem.stride_c_, is_row_major(layout_c));
 
         // Compute AQ scale tensor dimensions: [M, K / group_size_k]
+        if(problem.k_ % problem.group_size_k_ != 0)
+            throw std::runtime_error("k_ must be divisible by group_size_k_");
         const ck_tile::index_t QK_A = problem.k_ / problem.group_size_k_;
         problem.stride_aq_          = ck_tile::get_default_stride(
             problem.m_, QK_A, problem.stride_aq_, is_row_major(layout_aq));

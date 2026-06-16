@@ -55,8 +55,11 @@ class GemmAQuantKernelBuilder(GemmKernelBuilder):
         self.group_size_k = self.config.get("group_size_k", 128)
 
     def _uses_persistent_trait(self):
-        # The 7th trait slot carries a_preshuffle_quant, not a persistent-kernel flag.
-        # Return True so the base class includes it in kernel names and sampling features.
+        # AQuant reuses the base-class 7th trait slot for a_preshuffle_quant instead of
+        # UsePersistentKernel. Returning True tells the base class to include this slot in
+        # kernel names and sampling — the slot value is still a bool, just with different semantics.
+        # This works because the base-class populate_trait_config is bypassed: gemm_aquant is
+        # handled by a dedicated branch in gemm_instance_builder.py that emits APreshuffleQuant.
         return True
 
     def _generate_all_individual(self, num_workers=None):

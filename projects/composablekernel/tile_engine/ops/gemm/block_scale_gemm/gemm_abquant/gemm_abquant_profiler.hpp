@@ -20,11 +20,10 @@
 class ABQuantGemmProfiler
 {
     public:
-    static ABQuantGemmProfiler& instance(Setting setting)
-    {
-        static ABQuantGemmProfiler instance{setting};
-        return instance;
-    }
+    explicit ABQuantGemmProfiler(Setting setting) : setting_(setting) {}
+
+    ABQuantGemmProfiler(const ABQuantGemmProfiler&)            = delete;
+    ABQuantGemmProfiler& operator=(const ABQuantGemmProfiler&) = delete;
 
     void reset() { kernel_instances_.clear(); }
 
@@ -324,13 +323,7 @@ class ABQuantGemmProfiler
         return kernel_instance;
     }
 
-    ABQuantGemmProfiler(const ABQuantGemmProfiler&)            = delete;
-    ABQuantGemmProfiler& operator=(const ABQuantGemmProfiler&) = delete;
-
     private:
-    ~ABQuantGemmProfiler() { kernel_instances_.clear(); }
-    ABQuantGemmProfiler(Setting setting) : setting_(setting) {}
-
     Setting setting_;
     std::vector<KernelInstance> kernel_instances_;
 };
