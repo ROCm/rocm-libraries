@@ -33,6 +33,28 @@ import math
 
 from rocisa.code import Module
 
+from ...Common.GlobalParameters import globalParameters
+
+# ds_load_b128 reads 4 contiguous VGPRs.
+DS_B128_VGPRS = 4
+
+def _checkout_tile(pool, numRegs, tag):
+    """Check out one VGPR tile as a single contiguous, min(numRegs, 4)-aligned block (b128-aligned when numRegs >= 4)."""
+    from Tensile.Components.Subtile.Kernel import RegisterTileInfo
+    # min(): full b128 tiles get 4-VGPR alignment; smaller tiles aren't padded
+    # up to 4 (which would waste registers and can break occupancy).
+    align = min(numRegs, DS_B128_VGPRS)
+    base = pool.checkOutAligned(numRegs, align, tag=tag)
+    tile = RegisterTileInfo(pool)
+    for k in range(numRegs):
+        tile.append(base + k)
+    return tile
+
+
+def _checkin_tile(tile):
+    """Return a contiguous tile to its pool via its base-register handle."""
+    tile.regList.pool.checkIn(tile.regList.indices[0])
+
 
 class Pass(IntEnum):
     """Scheduler passes in dependency order.
@@ -127,6 +149,20 @@ class ReadGranularity:
         return MFMATileRange(ks, ks + self.k, ts, te)
 
 
+class GRPlacementStrategy(IntEnum):
+    """How Global Reads are spread across (partition, subIterK) slots.
+
+    SPREAD   — distribute GR atoms across all slots weighted by partition
+               MFMA count. Default for buffer-load GR (gfx9xx): spreading
+               avoids issue-slot pressure on the SIMD.
+    BUNCHED  — pin every GR atom to partition 0, subIterK 0. Suitable when
+               the GR instruction does not contend for SIMD issue slots
+               (e.g. TDM tensor_load_to_lds on gfx1250).
+    """
+    SPREAD  = 0
+    BUNCHED = 1
+
+
 @dataclass
 class SchedulerConfig:
     """Configuration for the MFMATile-based scheduler."""
@@ -144,6 +180,7 @@ class SchedulerConfig:
     partitionSizeM: Union[int, List[int]] = 0  # partition size(s) in M dimension (0 = full dim)
     partitionSizeN: Union[int, List[int]] = 0  # partition size(s) in N dimension (0 = full dim)
     pgr: int = 2              # Prefetch Global Read
+    grPlacement: GRPlacementStrategy = GRPlacementStrategy.SPREAD
 
     # Resolve a partition spec into per-partition sizes along one dimension.
     # spec is either:
@@ -398,7 +435,7 @@ class SyncOp(BaseOp):
 @dataclass
 class MaskKOp(BaseOp):
     """Zero A and B vgprs whose K-index >= remaining
-    tail K, for one subIterK group. 
+    tail K, for one subIterK group.
     """
     subIterK: int = 0
     vgpr_tile_map: dict = field(default_factory=dict)
@@ -521,7 +558,7 @@ class LogicalScheduler:
         self._preloop_emitted: Optional[List[List[List[EmittedModule]]]] = None
         self._ngll_emitted: Optional[List[List[List[EmittedModule]]]] = None
         self._nll_emitted: Optional[List[List[List[EmittedModule]]]] = None
-        # Tail-loop tile bookkeeping. Tail loop only use a subset of tiles, so we track which tileIds are 
+        # Tail-loop tile bookkeeping. Tail loop only use a subset of tiles, so we track which tileIds are
         # unused or freed for reuse within the tail loop.
         self._tail_unused_tile_ids: Dict[str, set] = {'A': set(), 'B': set(),
                                                       'SA': set(), 'SB': set()}
@@ -970,9 +1007,13 @@ class LogicalScheduler:
     def _build_gr_slot_bounds(self):
         """Build lower and upper slot bounds for GR placement.
 
-        lower: (pi, tensor) -> [(subIterK, k_start, k_end)] for LR(mt=0).
-               GR(mt=2) can't be placed at a slot where a later LR(mt=0)
-               in the same partition has overlapping k-range (LDS conflict).
+        lower: tensor -> [(flat, t_start, t_end, k_start, k_end)] for LR(mt=0).
+               GR(mt=2) writes the same LDS buffer as MT n, so it can't be
+               placed at/before a flat slot where a later LR(mt=0) in *any*
+               partition reads an overlapping tile/k-range (LDS conflict).
+               Collisions span partitions: an LR(n) read for tensor B may sit
+               in partition pi+1 while the GR(n+2) overwrite is emitted in
+               partition pi, so the check must be in flat execution order.
         upper: (tensor, mt) -> first flat slot index with LR(tensor, mt).
                GR(tensor, mt) must be placed strictly before this slot.
         """
@@ -984,8 +1025,10 @@ class LogicalScheduler:
                 flat = pi * numK + slot.subIterK
                 for lr in slot.lrs:
                     if lr.mtIteration == 0:
-                        lower.setdefault((pi, lr.tensor), []).append(
-                            (slot.subIterK,
+                        lower.setdefault(lr.tensor, []).append(
+                            (flat,
+                             lr.tiles.tileId_start,
+                             lr.tiles.tileId_end,
                              lr.tiles.subIterK_start,
                              lr.tiles.subIterK_end))
                     key = (lr.tensor, lr.mtIteration)
@@ -994,18 +1037,20 @@ class LogicalScheduler:
         return lower, upper
 
     @staticmethod
-    def _has_lr_conflict(lr_lower, tensor, mt_val, pi, subIterK,
-                         gr_k_start, gr_k_end):
-        """Return True if placing GR(mt_val) at (pi, subIterK) conflicts.
+    def _has_lr_conflict(lr_lower, tensor, mt_val, flat,
+                         gr_t_start, gr_t_end, gr_k_start, gr_k_end):
+        """Return True if placing GR(mt_val) at flat slot conflicts.
 
-        GR(MT n+2) writes the same LDS buffer as MT n, so it conflicts
-        only if a later LR(MT n) in the same partition accesses an
-        overlapping subIterK range.
+        GR(MT n+2) writes the same LDS buffer as MT n, so it conflicts if a
+        later LR(MT n) — in flat execution order across all partitions —
+        still reads an overlapping tile/subIterK range from that buffer.
         """
         if mt_val != 2:
             return False
-        for lr_slot, lr_ks, lr_ke in lr_lower.get((pi, tensor), []):
-            if lr_slot > subIterK and gr_k_start < lr_ke and lr_ks < gr_k_end:
+        for lr_flat, lr_ts, lr_te, lr_ks, lr_ke in lr_lower.get(tensor, []):
+            if (lr_flat > flat and
+                    gr_t_start < lr_te and lr_ts < gr_t_end and
+                    gr_k_start < lr_ke and lr_ks < gr_k_end):
                 return True
         return False
 
@@ -1050,11 +1095,15 @@ class LogicalScheduler:
         slot_boundaries = [p * nAtoms for p in weight_prefix[1:]]
 
         for i, (tensor, mt_val, ts, te, ks, ke, last) in enumerate(atoms):
-            slot = min(bisect_left(slot_boundaries, i * total_weight + 1),
-                       last) if nAtoms else 0
+            if cfg.grPlacement == GRPlacementStrategy.BUNCHED:
+                # TDM: pin every GR atom to partition 0, subIterK 0.
+                slot = 0
+            else:
+                slot = min(bisect_left(slot_boundaries, i * total_weight + 1),
+                           last) if nAtoms else 0
             while (slot < last and
                    self._has_lr_conflict(lower, tensor, mt_val,
-                                         slot // numK, slot % numK, ks, ke)):
+                                         slot, ts, te, ks, ke)):
                 slot += 1
             buckets[slot].append((tensor, mt_val, ts, te, ks, ke))
 
@@ -2205,7 +2254,7 @@ class LogicalScheduler:
                 label="tail_boundary_ab"))
         preamble.append(WaitGROp(wait_gr_counts=WaitGRCounts()))
         preamble.append(SyncOp())
-        
+
 
         # Flat per-subIterK emission. The K-boundary mask depends only on k,
         # and with flat tile ids the per-partition tile_maps reference
@@ -2423,25 +2472,79 @@ class LogicalScheduler:
         When schedule=True and a group has MFMAs, calls instructionSchedule
         for interleaving. When schedule=False, emits instructions sequentially.
         """
-        from Tensile.Components.Subtile.InstructionScheduler import instructionSchedule
-        from rocisa.code import Module
+        from Tensile.Components.Subtile.InstructionScheduler import (
+            instructionSchedule,
+            _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT,
+            _MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250,
+        )
+        from Tensile.Components.Subtile.WaitAluInsertion import (
+            insertLRSwapRawWaitAlu, setMatrixAReuse, insertLRSwapWarWaitAlu)
+        from rocisa.code import Module, Label
+        from rocisa.container import sgpr
+        from rocisa.instruction import SCmpEQU32, SCBranchSCC0, SMovB32
+
+        # gfx1250 needs a larger ds_read->waitcnt gap.
+        isGfx1250 = writer.states.archCaps.get("HasWmmaArbStallBit", False)
+        minGapDsReadToWait = (_MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250
+                              if isGfx1250
+                              else _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT)
 
         module = Module(label)
         module.addComment0(f"{label} start")
+        if kernel.get("ClusterBarrier"):
+            from Tensile.Components.Subtile.ClusterBarrier import subtileClusterBarrier
+            for inst in subtileClusterBarrier(writer, kernel, label=label).flatitems():
+                module.add(inst)
+        use_pap_preloop_skip = (
+            label == "PRELOOP"
+            and kernel.get("UseSubtileImpl")
+            and kernel.get("PrefetchAcrossPersistent")
+            and kernel.get("StreamK") == 3
+        )
+        pap_merge_label = Label("SubtilePAPPreloopFirstGRMerge", "") if use_pap_preloop_skip else None
+        skipping_first_gr_group = False
+        first_gr_group_done = False
         for pi, partition_emitted in enumerate(emitted_3d):
             for k, em_list in enumerate(partition_emitted):
                 module.addComment0(f"partition={pi} subIterK={k}")
                 if schedule and em_list:
-                    scheduled = instructionSchedule(em_list)
+                    scheduled = instructionSchedule(em_list, minGapDsReadToWait=minGapDsReadToWait)
                     module.add(scheduled)
                 else:
                     for em in em_list:
+                        if use_pap_preloop_skip and not first_gr_group_done:
+                            if em.opType == 'gr':
+                                if not skipping_first_gr_group:
+                                    module.add(SCmpEQU32(src0=sgpr("SkPrefetchPrimed"), src1=0,
+                                                         comment="Subtile PAP: first PRELOOP GR already issued?"))
+                                    module.add(SCBranchSCC0(labelName=pap_merge_label.getLabelName(),
+                                                            comment="skip first PRELOOP GR group if primed"))
+                                    skipping_first_gr_group = True
+                            elif skipping_first_gr_group:
+                                module.add(pap_merge_label)
+                                module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
+                                                   comment="Subtile PAP: clear after first PRELOOP GR merge"))
+                                first_gr_group_done = True
                         for inst in em.instructions:
                             module.add(inst)
+        if use_pap_preloop_skip and skipping_first_gr_group and not first_gr_group_done:
+            module.add(pap_merge_label)
+            module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
+                               comment="Subtile PAP: clear after first PRELOOP GR merge"))
         module.addComment0(f"{label} end")
+        # SCHED_MODE 2: guard the LR offset-swap -> ds_read RAW hazard once, against
+        # the final post-schedule order (no-op on other archs).
+        module = insertLRSwapRawWaitAlu(module, writer, kernel)
+        # gfx1250: enable WMMA matrix-A reuse on the final post-schedule order.
+        module = setMatrixAReuse(module, writer, kernel)
+        # PGR=0 only: the unprefetched loop puts the ds_read of an LR offset
+        # right before the swap that overwrites it.  PGR>=1 prefetch separates
+        # them (swap hoisted ahead, dscnt drain between), so no WAR can form.
+        if self.config.pgr == 0 and label.startswith("MAINLOOP"):
+            module = insertLRSwapWarWaitAlu(module, writer, kernel)
         return module
 
-    def emitMainAndExitLoops(self, writer, kernel):
+    def emitMainAndExitLoops(self, writer, kernel, tensorParametersA=None, tensorParametersB=None):
         """Emit preloop + mainloop + NGLL + NLL exit paths (no tail).
 
         Owns all control flow (labels, branches, counter management) for the
@@ -2461,6 +2564,61 @@ class LogicalScheduler:
 
         module = Module("MainAndExitLoops")
         uf = self.unroll_factor
+
+        def make_subtile_pap_module(skip_barrier=False):
+            if (kernel.get("UseSubtileImpl")
+                and kernel.get("PrefetchAcrossPersistent")
+                and kernel.get("StreamK") == 3
+                and hasattr(writer, "prefetchAcrossPersistentSubtile")):
+                preloop_gr = Module("Subtile PAP first PRELOOP GR")
+                for em in self._preloop_emitted[0][0]:
+                    if em.opType != 'gr':
+                        break
+                    for inst in em.instructions:
+                        preloop_gr.add(copy.deepcopy(inst))
+                return writer.prefetchAcrossPersistentSubtile(
+                    kernel, tensorParametersA, tensorParametersB, preloop_gr,
+                    skipBarrier=skip_barrier)
+            return None
+
+        def inject_pap_after_nll_drain(emitted_3d):
+            emitted_3d = copy.deepcopy(emitted_3d)
+
+            def insert_after_drain(em_list):
+                wait_gr = next((em for em in em_list if em.opType == 'wait_gr'), None)
+                if wait_gr is None:
+                    return False
+
+                tail_id = wait_gr.moduleId
+                sync = next((em for em in em_list
+                             if em.opType == 'sync' and em.before == tail_id), None)
+                if sync is not None:
+                    tail_id = sync.moduleId
+
+                pap_module = make_subtile_pap_module(skip_barrier=(sync is not None))
+                if pap_module is None:
+                    return False
+
+                pap_id = max(em.moduleId for em in em_list) + 1
+                consumers = [em for em in em_list if em.before == tail_id]
+                em_list.append(EmittedModule(moduleId=pap_id,
+                                             instructions=[pap_module],
+                                             before=tail_id,
+                                             source=None))
+                # Place PAP between the final drain and the first NLL work that
+                # was waiting on that drain. The existing before-link graph is a
+                # chain, so this preserves scheduler ordering while moving PAP
+                # past the vlcnt(0) that would otherwise drain it immediately.
+                for consumer in consumers:
+                    consumer.before = pap_id
+                return True
+
+            for partition_emitted in emitted_3d:
+                for em_list in partition_emitted:
+                    if insert_after_drain(em_list):
+                        return emitted_3d
+
+            return emitted_3d
 
         # ── Skip preloop/mainloop/NGLL/NLL when K < DepthU ──
         endLabel = Label("SkipToEnd", "")
@@ -2482,7 +2640,22 @@ class LogicalScheduler:
 
         exitLabels = [Label(f"ExitC{ui}", "") for ui in range(uf - 1)]
         module.add(loopBegin)
+        # Debug: emit `s_mov_b32 m0, LoopCounterL; s_ttracedata` at the start of
+        # every mainloop iteration so SQTT / trace decoders can identify iterations
+        # (adds 2 instructions per iter). Gated by the EmitMainloopTraceMarker global.
+        emitTraceMarker = globalParameters.get("EmitMainloopTraceMarker", False)
+        if emitTraceMarker:
+            from rocisa.container import mgpr
+            from rocisa.instruction import SMovB32 as _SMovB32
+            from rocisa.instruction import STtraceData as _STtraceData
         for ui in range(uf):
+            if emitTraceMarker:
+                # Mainloop iteration marker for SQTT / trace decoder: write
+                # LoopCounterL into M0 then emit it via s_ttracedata. Decoder
+                # only uses low 8 bits, so M0 wrap past 256 is fine.
+                module.add(_SMovB32(dst=mgpr(0), src=sgpr("LoopCounterL"),
+                                    comment="trace: M0 = LoopCounterL"))
+                module.add(_STtraceData(comment="trace: emit M0 to SQTT"))
             module.add(self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}",
                                       self._emitted_per_unroll[ui]))
             module.add(SSubU32(dst=sgpr("LoopCounterL"),
@@ -2523,7 +2696,7 @@ class LogicalScheduler:
             module.add(Label("SkipToNLL", ""))
         module.addComment0(f"NLL_C{last}")
         module.add(self._emitLoop(writer, kernel, f"NLL_C{last}",
-                                  self._nll_per_unroll[nll_ft]))
+                                  inject_pap_after_nll_drain(self._nll_per_unroll[nll_ft])))
         module.add(SBranch(labelName=endLabel.getLabelName(),
                            comment="skip other exit paths"))
 
@@ -2538,7 +2711,7 @@ class LogicalScheduler:
                 module.add(Label("SkipToNLL", ""))
             module.addComment0(f"NLL_C{ui}")
             module.add(self._emitLoop(writer, kernel, f"NLL_C{ui}",
-                                      self._nll_per_unroll[nll_idx]))
+                                      inject_pap_after_nll_drain(self._nll_per_unroll[nll_idx])))
             if ui < uf - 2:
                 module.add(SBranch(labelName=endLabel.getLabelName(),
                                    comment="skip other exit paths"))
@@ -2629,24 +2802,14 @@ class LogicalScheduler:
         """
         self._ensure_pass(Pass.VGPR_TILES)
 
-        from Tensile.Components.Subtile.Kernel import RegisterTileInfo
-
         cfg = self.config
 
         def _tile_vgpr_count(tileInfo, lrGran):
             return int(math.ceil(tileInfo.mmaTileRegCount * lrGran.k * lrGran.mn))
 
         def _alloc_tiles(count, numRegs):
-            tiles = []
-            for _ in range(count):
-                tile = RegisterTileInfo(writer.vgprPool)
-                for j in range(0, numRegs, 4):
-                    blockSize = min(4, numRegs - j)
-                    vstart = writer.vgprPool.checkOutAligned(blockSize, blockSize, tag="allocVgprTiles_vstart")
-                    for k in range(blockSize):
-                        tile.append(vstart + k)
-                tiles.append(tile)
-            return tiles
+            return [_checkout_tile(writer.vgprPool, numRegs, "allocVgprTiles_vstart")
+                    for _ in range(count)]
 
         self.vgprTilesA = _alloc_tiles(self.tile_peaks.get('A', 0),
                                        _tile_vgpr_count(tileInfoA, cfg.lrA))
@@ -2678,10 +2841,7 @@ class LogicalScheduler:
             for tid, tile in enumerate(tiles):
                 if tid in freed:
                     continue
-                pool = tile.regList.pool
-                for val in tile:
-                    if tile.index(val) % 4 == 0:
-                        pool.checkIn(val)
+                _checkin_tile(tile)
 
         _dealloc_tiles(self.vgprTilesA,  self._tail_freed_tile_ids['A'])
         _dealloc_tiles(self.vgprTilesB,  self._tail_freed_tile_ids['B'])
@@ -2779,11 +2939,7 @@ class LogicalScheduler:
                            'SA': self.vgprTilesSA, 'SB': self.vgprTilesSB}
         for tensor, tile_list in tiles_by_tensor.items():
             for tid in self._tail_unused_tile_ids.get(tensor, ()):
-                tile = tile_list[tid]
-                pool = tile.regList.pool
-                for j, v in enumerate(tile):
-                    if j % 4 == 0:                # match _alloc_tiles block stride
-                        pool.checkIn(v)
+                _checkin_tile(tile_list[tid])
                 self._tail_freed_tile_ids[tensor].add(tid)
 
     def _realloc_tail_tiles_flat(self, writer, peaks):
@@ -2795,8 +2951,6 @@ class LogicalScheduler:
         replace self.vgprTilesA/B/SA/SB; _tail_freed_tile_ids is cleared so
         deallocVgprTiles drops the flat set wholesale at kernel end.
         """
-        from Tensile.Components.Subtile.Kernel import RegisterTileInfo
-
         cfg = self.config
         info = self._alloc_tile_info
 
@@ -2805,22 +2959,11 @@ class LogicalScheduler:
 
         def _dealloc_all(tiles):
             for tile in tiles:
-                pool = tile.regList.pool
-                for j, v in enumerate(tile):
-                    if j % 4 == 0:
-                        pool.checkIn(v)
+                _checkin_tile(tile)
 
         def _alloc_tiles(count, numRegs):
-            tiles = []
-            for _ in range(count):
-                tile = RegisterTileInfo(writer.vgprPool)
-                for j in range(0, numRegs, 4):
-                    blockSize = min(4, numRegs - j)
-                    vstart = writer.vgprPool.checkOutAligned(blockSize, blockSize, tag="reallocTailTilesFlat_vstart")
-                    for k in range(blockSize):
-                        tile.append(vstart + k)
-                tiles.append(tile)
-            return tiles
+            return [_checkout_tile(writer.vgprPool, numRegs, "reallocTailTilesFlat_vstart")
+                    for _ in range(count)]
 
         def _swap(target, new_tiles):
             # In-place swap so the InstructionEmitter's references stay valid.

@@ -29,6 +29,7 @@
 #include <nanobind/stl/vector.h>
 #include <nanobind/trampoline.h>
 
+#include <cstdint>
 #include <sstream>
 
 #include "HardwareCaps.hpp"

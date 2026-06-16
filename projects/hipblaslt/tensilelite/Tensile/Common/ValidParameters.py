@@ -79,6 +79,13 @@ for i in range(1, maxWGsInCluster + 1):
     if i * j <= maxWGsInCluster:
       validClusterDimensions.append([i, j])
 
+# Shared valid values for LdsBlockSizePerPadA and LdsBlockSizePerPadB so they stay in sync.
+validLdsBlockSizePerPad = [-1, 0, 16, 32, 64, 96, 128, 192, 256, 320, 384, 448, 512, 576, 640, 704, 768,
+                           832, 896, 960, 1024, 1088, 1152, 1216, 1280, 1344, 1408, 1472, 1536, 1600, 1664,
+                           1728, 1792, 1856, 1920, 1984, 2048, 2176, 2304, 2432, 2560, 2688, 2816, 2944,
+                           3072, 3200, 3328, 3456, 3584, 3712, 3840, 3968, 4096, 4352, 4608, 4864, 5120,
+                           5376, 5632, 6144, 6656, 7168, 7680, 8192]
+
 @lru_cache
 def makeValidWorkGroups():
     validWorkGroups = []
@@ -321,6 +328,11 @@ validParameters = { # we need to make sure this matches develop
     #    SIA3: 1LDSBuffer works only when PGR=True
     # TODO: optimize scheduling to support more cases.
     "1LDSBuffer": [-1, 0, 1],
+    # StreamK persistent loop: use the current tile's no-load-loop window to
+    # issue the first global-read group for the next persistent tile. The
+    # generated code keeps that first-PGR data durable and restores borrowed
+    # current-tile state before current tail/NLL code resumes.
+    "PrefetchAcrossPersistent": [0, 1],
     # Split the unroll summation into multiple sections and combine the sections
     # GSU applies only to the unroll summation dimension
     # Set to 0 to disable GSU, kernel code will be generated without GSU support
@@ -400,6 +412,9 @@ validParameters = { # we need to make sure this matches develop
     "OptNoLoadLoop": [0, 1, 2],
     "BufferLoad": [False, True],
     "BufferStore": [False, True],
+    # CompactLoopStore default (opt-in, off by default). When enabled, the
+    # per-batch global write body is wrapped in a CLS countdown loop and
+    "CompactLoopStore": [False, True],
     # Attempt to load directly from global memory into Vgpr.
     # Assembly only
     "DirectToVgprA": [False, True],
@@ -761,6 +776,9 @@ validParameters = { # we need to make sure this matches develop
     # 1 : Basic StreamK
     # 2 : Two-Tile StreamK (each WG completes an even number of sk iterations, followed by an even number of dp tiles)
     # 3 : Two-Tile StreamK with DP before SK tiles
+    # 4 : Dynamic StreamK using per-XCD work queues
+    # 5 : Hybrid SK3 + SK4 in one kernel; mode bit 30 of MagicShiftItersPerTile
+    #     selects the active sub-path (see StreamKHybrid in StreamK.py).
     # StreamK kernels can adjust the number of CUs being used.
     # Using fewer sometimes increases overall throughput by allowing other kernels to run in parallel.
     # StreamK grid is controlled by setting these enviornment variables:
@@ -785,7 +803,7 @@ validParameters = { # we need to make sure this matches develop
     #   1 = 1 WG per CU (default), for example. 2 will launch WGs = 2 x CU count.
     # The priority of these environment variables is defined as follows:
     # TENSILE_STREAMK_FIXED_GRID > TENSILE_STREAMK_DYNAMIC_GRID > TENSILE_STREAMK_MAX_CUS > TENSILE_STREAMK_GRID_MULTIPLIER
-    "StreamK": [0, 1, 2, 3, 4],
+    "StreamK": [0, 1, 2, 3, 4, 5],
     # Force StreamK=3 to run all output tiles through the persistent DP path.
     # When enabled, dispatch uses the single-kernel StreamK path, sets skTiles=0
     # to skip the SK region, and keeps the normal StreamK grid selection policy.
@@ -892,9 +910,9 @@ validParameters = { # we need to make sure this matches develop
     # is added (readOffset aware of the pad and adjusts offset value based on this parameter value).
     # Only support LdsBlockSizePerPad >= unrollDepth * BPE
     # 0 means disable LdsBlockSizePerPad
-    "LdsBlockSizePerPadA": [-1, 0, 64, 128, 256, 512, 1024, 2048],
+    "LdsBlockSizePerPadA": validLdsBlockSizePerPad,
     "LdsBlockSizePerPadMXSA": [-1, 0, 64, 128, 256, 512, 1024, 2048],
-    "LdsBlockSizePerPadB": [-1, 0, 64, 128, 256, 512, 1024, 2048],
+    "LdsBlockSizePerPadB": validLdsBlockSizePerPad,
     "LdsBlockSizePerPadMXSB": [-1, 0, 64, 128, 256, 512, 1024, 2048],
     "LdsBlockSizePerPadMetadata": [-1, 0, 64, 128, 256, 512, 1024, 2048],
     # Transpose LDS format. Local store in coalesced dimension , same as optimized global fetch dimension . applicable only in TLU=0 case for miSIMD(s)
@@ -1126,6 +1144,58 @@ newMIValidParameters = {
     'WorkGroup': -1,
 }
 
+
+# Expected-type derivation for solution parameters --------------------------
+#
+# These helpers live here, next to `validParameters`, because that registry
+# is the source of truth for "what types this parameter is allowed to take".
+# Consumers (Solution.validateParameterTypes, and the input-YAML strict gate
+# in checkParametersAreValid) import them from this module. Keeping the
+# registry and its derived expected-types map co-located preserves the
+# Common -> Solution import direction; the prior layout (defined inside
+# Solution.py and imported back by ValidParameters extensions) would have
+# introduced a Common -> Solution reverse import.
+
+def _getExpectedTypes(validParams):
+    """Build a map from parameter name to the set of allowed Python types.
+
+    Uses the validParameters registry as the source of truth.  For each
+    parameter whose allowed-value list is not the sentinel ``-1``, we
+    collect the concrete ``type()`` of every allowed value.  Because
+    Python ``bool`` is a subclass of ``int``, we use ``type()`` (not
+    ``isinstance``) so that ``bool`` and ``int`` are kept distinct.
+
+    Returns:
+        dict[str, set[type]]: e.g. {"UseCustomMainLoopSchedule": {int},
+                                     "BufferLoad": {bool}, ...}
+    """
+    typeMap = {}
+    for name, allowedValues in validParams.items():
+        if allowedValues == -1:
+            continue
+        if isinstance(allowedValues, list) and len(allowedValues) > 0:
+            typeMap[name] = set(type(v) for v in allowedValues)
+    return typeMap
+
+# Pre-compute once at import time so the per-Solution cost is a dict lookup.
+_expectedParamTypes = _getExpectedTypes(validParameters)
+
+# Parameters to skip during type validation because YAML serialization
+# inherently produces a different type (e.g. [9, 0, 10] -> list) and the
+# conversion to the canonical type happens downstream in the pipeline.
+# Also skip DataType* parameters as they are converted from strings/ints to
+# DataType objects.
+_skipTypeCheck = {
+    "ISA",
+    "DataType", "DataTypeA", "DataTypeB", "DataTypeC", "DataTypeD", "DataTypeE",
+    "MacDataTypeA", "MacDataTypeB",
+    "DataTypeAmaxD", "DataTypeAmaxC", "DataTypeAmaxA", "DataTypeAmaxB",
+    "DataTypeMXSA", "DataTypeMXSB",
+    "DestDataType", "ComputeDataType",
+    "F32XdlMathOp",  # Also converted to DataType
+}
+
+
 def checkSpaceFillAlgoIsValid(name, value):
     if type(value) != list:
         msgBase = "Invalid parameter value: {} = {}\nMust be a list of values"
@@ -1158,12 +1228,39 @@ def checkSpaceFillAlgoWGMIsValid(name, value):
                     raise Exception(msgBase.format(name, value, dim))
 
 
-def checkParametersAreValid(param, validParams):
-    """Ensures paramaters in params exist and have valid values as specified by validParames"""
+def checkParametersAreValid(
+    param,
+    validParams,
+    *,
+    keyPathPrefix: str = "",
+    srcFile: str = "",
+):
+    """Ensures parameters in params exist and have valid values as specified by validParams.
+
+    In addition to the legacy name+value-membership checks, when the
+    parameter name has an entry in the derived ``_expectedParamTypes`` map
+    and is not in ``_skipTypeCheck``, each element of ``values`` is also
+    type-checked against the union of allowed-value types. ``type(value)``
+    is used (not ``isinstance``) so ``bool`` and ``int`` are distinguished.
+    Raises :class:`ConfigTypeError` immediately on the first type mismatch.
+
+    Args:
+        param: ``(name, values)`` tuple; ``values`` is the list of
+            candidate values.
+        validParams: registry to validate ``name``/``values`` against.
+        keyPathPrefix: dotted/bracketed prefix for the keypath in error
+            messages.
+        srcFile: YAML file path, used for src:line in messages.
+    """
+    # Defer imports of the shared error machinery so this module stays
+    # importable in any context that doesn't already pull in Common.
+    from .TypeValidationErrors import (
+        ConfigTypeError,
+        formatMismatch,
+    )
+
     (name, values) = param
     if name == "ProblemSizes":
-        return
-    elif name == "InternalSupportParams":
         return
 
     if name not in validParams:
@@ -1173,7 +1270,12 @@ def checkParametersAreValid(param, validParams):
             )
         )
 
-    for value in values:
+    runTypeCheck = (
+        name in _expectedParamTypes
+        and name not in _skipTypeCheck
+    )
+
+    for idx, value in enumerate(values):
         if validParams[name] != -1 and value not in validParams[name]:
             msgBase = "Invalid parameter value: {} = {}\nValid values for {} are {}{}."
             msgExt = (
@@ -1186,3 +1288,57 @@ def checkParametersAreValid(param, validParams):
             checkSpaceFillAlgoIsValid(name, value)
         elif name == "SFCWGM":
             checkSpaceFillAlgoWGMIsValid(name, value)
+
+        if runTypeCheck:
+            expectedTypes = _expectedParamTypes[name]
+            actualType = type(value)
+            if actualType not in expectedTypes:
+                # Build keypath. Lists of candidate values use [idx]; a
+                # single-element list (the common case for one value per
+                # key) still gets [0] so the location is unambiguous.
+                base = f"{keyPathPrefix}.{name}" if keyPathPrefix else name
+                keyPath = f"{base}[{idx}]" if len(values) > 1 else base
+                msg = formatMismatch(srcFile, keyPath, value, expectedTypes)
+                raise ConfigTypeError(msg)
+
+
+def validateInternalSupportParams(
+    d,
+    srcFile: str = "",
+    keyPathPrefix: str = "InternalSupportParams",
+):
+    """Validate an InternalSupportParams dict against defaultInternalSupportParams.
+
+    Sibling to ``checkParametersAreValid`` rather than a fold-in (per the
+    plan's B3): ``checkParametersAreValid`` has a ``(name, list)``
+    contract and ``InternalSupportParams`` arrives as a dict, so folding
+    would break the function's signature.
+
+    Each key in ``d`` must exist in ``defaultInternalSupportParams`` and
+    have ``type(default)``. Mismatches and unknown-key errors are
+    Raises :class:`ConfigTypeError` on the first bad key encountered. Strict is
+    the only behaviour.
+    """
+    if not d:
+        return
+
+    from .TypeValidationErrors import (
+        ConfigTypeError, formatMismatch,
+    )
+
+    # defaultInternalSupportParams lives in Common/GlobalParameters; import
+    # lazily because that module pulls in a lot.
+    from .GlobalParameters import defaultInternalSupportParams
+
+    for key, value in d.items():
+        if key not in defaultInternalSupportParams:
+            raise ConfigTypeError(
+                f"{keyPathPrefix}.{key}: unknown key. "
+                f"Valid keys are {sorted(defaultInternalSupportParams.keys())}."
+            )
+        default = defaultInternalSupportParams[key]
+        expectedTypes = {type(default)}
+        if type(value) not in expectedTypes:
+            raise ConfigTypeError(formatMismatch(srcFile, f"{keyPathPrefix}.{key}", value, expectedTypes))
+
+

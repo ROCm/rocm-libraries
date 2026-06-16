@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_r2_activation_gfx942_golden
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bljk_HHS_BH_Bias_D_GradH_A_S_UserArgs_iP-FE0efdW0QcVXVD30BALXuNhBzyKKXttYRsCoOVt4=',
+      'err': 0,
+    }),
+  ])
+# ---

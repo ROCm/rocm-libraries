@@ -22,20 +22,27 @@ test_categories:
       - "--test_prob"
       - "0.02"
     labels:
-    #Same tests run for comprehensive and full categories
+    # standard/comprehensive/full run the same single-GPU test set
       - "standard"
       - "comprehensive"
+      - "full"
 
-  full:
-    description: "Includes all tests including multigpu"
+  # Multi-GPU only subset. These tests are excluded from the single-GPU
+  # categories above (via "*multi_gpu*" excludes) and are instead selected
+  # by a dedicated multi-GPU CI job that runs `ctest -L multigpu_<tier>`.
+  # The labels are namespaced (multigpu_*) so they never overlap with the
+  # single-GPU tier labels.
+  multigpu_tests:
+    description: "Multi-GPU only - rocfft-test *multi_gpu* (multi-GPU runner)"
     test_patterns:
-      - "*"
+      - "*multi_gpu*"
     exclude:
     extra_args:
       - "--test_prob"
       - "0.02"
     labels:
-      - "full"
+      - "multigpu_comprehensive"
+      - "multigpu_full"
 
   ffm-quick:
     description: "Small test suite for simulation tests"
@@ -49,11 +56,9 @@ test_categories:
       - "ffm-full" # alias to "ffm-quick" for now
 
 execution_settings:
-  default_timeout: 600
   timeout_multiplier: 1
   category_timeouts:
-    quick: 600           # 10 min  
-    standard: 3600       # 1 hour  
-    comprehensive: 14400 # 4 hours 
-    full: 43200          # 12 hours 
+    quick: 600           # 10 min
+    standard: 3600       # 1 hour (covers standard/comprehensive/full labels)
     ffm-quick: 7200      # 2 hours
+    multigpu_tests: 3600 # 1 hour
