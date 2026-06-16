@@ -23,10 +23,10 @@
 * ************************************************************************ */
 
 #include "rocsparse_arguments_config.hpp"
+#include "rocsparse-auxiliary.h"
 #include "rocsparse_clients_matrices_dir.hpp"
 #include "rocsparse_enum.hpp"
 #include "rocsparse_importer_format_t.hpp"
-
 rocsparse_arguments_config::rocsparse_arguments_config()
 {
     //

@@ -23,6 +23,7 @@
 
 #include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
 
+#include <cstdint>
 #include <limits>
 #include <regex>
 

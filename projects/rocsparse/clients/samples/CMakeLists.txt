@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
 function(add_rocsparse_example EXAMPLE_SOURCE)
   get_filename_component(EXAMPLE_TARGET ${EXAMPLE_SOURCE} NAME_WE)
   add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCE})
+
 
   # Target compile options
   target_compile_options(${EXAMPLE_TARGET} PRIVATE -Wno-unused-command-line-argument)
@@ -174,8 +175,14 @@ if(TARGET rocsparse)
 endif()
 
 # Build documentation examples
+
 FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES documentation_examples/*.cpp)
+FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES2 documentation_examples/*.c)
 
 foreach(file ${DOCUMENTATION_EXAMPLES})
+    add_rocsparse_example(${file})
+endforeach()
+
+foreach(file ${DOCUMENTATION_EXAMPLES2})
     add_rocsparse_example(${file})
 endforeach()

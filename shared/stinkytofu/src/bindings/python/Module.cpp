@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #include "stinkytofu/bindings/python/Module.hpp"
 
+#include <cstdint>
 #include <sstream>
 #include <unordered_map>
 
