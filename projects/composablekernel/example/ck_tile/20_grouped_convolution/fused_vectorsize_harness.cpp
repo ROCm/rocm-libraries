@@ -44,11 +44,17 @@ int main(int argc, char** argv)
     const int sel            = std::atoi(argv[2]);
     const int reps           = argc > 3 ? std::atoi(argv[3]) : 100;
 
-    // Representative fp16 2D conv: G=1 N=64 K=128 C=128, 3x3, 28x28, stride1 pad1.
-    // C,K multiples of 8 so VectorSize 1/2/4/8 are all valid.
-    using Bld = FusedConvKernelBuilder<8, 8, 8>;
-    ck_tile::conv::ConvParam conv_param{2, 1, 64, 128, 128, {3, 3}, {28, 28},
-                                        {1, 1}, {1, 1}, {1, 1}, {1, 1}};
+    // fp16 2D conv, shape from env (defaults = small baseline). C,K must be multiples
+    // of 8 so VectorSize 1/2/4/8 stay valid. Override via CONV_N/K/C/HI/WI/FY/FX/STRIDE/PAD.
+    using Bld   = FusedConvKernelBuilder<8, 8, 8>;
+    auto envi   = [](const char* k, int d) { const char* v = getenv(k); return v ? std::atoi(v) : d; };
+    const int N = envi("CONV_N", 64), Kc = envi("CONV_K", 128), Cc = envi("CONV_C", 128);
+    const int HI = envi("CONV_HI", 28), WI = envi("CONV_WI", 28);
+    const int FY = envi("CONV_FY", 3), FX = envi("CONV_FX", 3);
+    const int ST = envi("CONV_STRIDE", 1), PD = envi("CONV_PAD", 1);
+    ck_tile::conv::ConvParam conv_param{2,  1,        N,        Kc,       Cc, {FY, FX},
+                                        {HI, WI}, {ST, ST}, {1, 1}, {PD, PD}, {PD, PD}};
+    std::fprintf(stderr, "shape: G1 N%d K%d C%d %dx%d filt%dx%d s%d p%d\n", N, Kc, Cc, HI, WI, FY, FX, ST, PD);
 
     const auto in_desc =
         ck_tile::conv::make_input_host_tensor_descriptor_g_n_c_wis_packed<Bld::InLayout>(conv_param);

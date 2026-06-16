@@ -49,9 +49,10 @@ bash dvgpr/run_profile.sh           # fused path i vs solo i; PROFILE=1 adds roc
 ```
 
 Scripts derive compile flags from the build's `compile_commands.json` (set `BUILD=` if not
-`./build`). The harness uses a fixed shape (G=1 N=64 K=128 C=128, 3x3, 28x28, stride1 pad1);
-edit `fused_vectorsize_harness.cpp` to change it. `run_profile.sh` reports each fused path's
-overhead vs its solo - i.e. the occupancy cost of plain fusion - and a checksum-match column.
+`./build`). `run_profile.sh` sweeps several shapes (small/large/spatial/deep) and reports each
+fused path's overhead vs its solo - i.e. the runtime cost of plain fusion - with a checksum-match
+column. The harness shape is set by env vars (`CONV_N/K/C/HI/WI/FY/FX/STRIDE/PAD`, C/K multiples
+of 8); run one shape directly, e.g. `CONV_N=256 CONV_C=256 CONV_K=256 dvgpr/out/harness solo8 0 1000`.
 
 ## Static result
 
