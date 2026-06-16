@@ -145,6 +145,22 @@
 #include <nlohmann/json.hpp>
 #endif
 
+namespace hipdnn_frontend::detail
+{
+
+enum class ActivePlanFinalization
+{
+    UNFINALIZED,
+    FINALIZED
+};
+
+constexpr bool isFinalized(ActivePlanFinalization finalization) noexcept
+{
+    return finalization == ActivePlanFinalization::FINALIZED;
+}
+
+} // namespace hipdnn_frontend::detail
+
 namespace hipdnn_frontend::graph
 {
 
@@ -226,17 +242,6 @@ protected:
         ///< Set by deselect_engines().
         ///< Accumulates across calls.
 
-    enum class ActivePlanFinalization
-    {
-        UNFINALIZED,
-        FINALIZED
-    };
-
-    static bool isFinalized(ActivePlanFinalization finalization)
-    {
-        return finalization == ActivePlanFinalization::FINALIZED;
-    }
-
     void resetActivePlanState()
     {
         _activePlanIndex = 0;
@@ -250,7 +255,7 @@ protected:
         resetActivePlanState();
     }
 
-    void setActivePlanState(size_t activePlanIndex, ActivePlanFinalization finalization)
+    void setActivePlanState(size_t activePlanIndex, detail::ActivePlanFinalization finalization)
     {
         _activePlanIndex = activePlanIndex;
 
@@ -260,19 +265,20 @@ protected:
             return;
         }
 
-        _executionPlanFinalized = isFinalized(finalization);
+        _executionPlanFinalized = detail::isFinalized(finalization);
         _selectedEngineId = _compiledPlans[_activePlanIndex].engineId;
     }
 
     void replaceCompiledPlans(std::vector<CompiledPlan>&& plans,
                               size_t activePlanIndex,
-                              ActivePlanFinalization finalization)
+                              detail::ActivePlanFinalization finalization)
     {
         _compiledPlans = std::move(plans);
         setActivePlanState(activePlanIndex, finalization);
     }
 
-    void replaceWithSingleCompiledPlan(CompiledPlan plan, ActivePlanFinalization finalization)
+    void replaceWithSingleCompiledPlan(CompiledPlan plan,
+                                       detail::ActivePlanFinalization finalization)
     {
         std::vector<CompiledPlan> plans;
         plans.reserve(1);
@@ -1183,7 +1189,8 @@ private:
             plans.push_back(std::move(plan));
         }
 
-        replaceCompiledPlans(std::move(plans), selectedIndex, ActivePlanFinalization::UNFINALIZED);
+        replaceCompiledPlans(
+            std::move(plans), selectedIndex, detail::ActivePlanFinalization::UNFINALIZED);
 
         return {ErrorCode::OK, ""};
     }
@@ -1216,7 +1223,7 @@ private:
         plan.engineConfigDesc = std::move(engineConfigDesc);
         plan.engineId = engineId;
 
-        replaceWithSingleCompiledPlan(std::move(plan), ActivePlanFinalization::UNFINALIZED);
+        replaceWithSingleCompiledPlan(std::move(plan), detail::ActivePlanFinalization::UNFINALIZED);
 
         return {ErrorCode::OK, ""};
     }
@@ -1879,7 +1886,7 @@ public:
         // Allocate an unfinalized execution plan descriptor for each engine
         // config. build_plans() will finalize the active plan (default) or all
         // plans (BuildPlanPolicy::ALL).
-        setActivePlanState(_activePlanIndex, ActivePlanFinalization::UNFINALIZED);
+        setActivePlanState(_activePlanIndex, detail::ActivePlanFinalization::UNFINALIZED);
         for(auto& plan : _compiledPlans)
         {
             plan.executionPlanDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
@@ -1935,7 +1942,7 @@ public:
         CompiledPlan plan;
         HIPDNN_CHECK_ERROR(compilePlanFromSpec(engineId, settings, plan));
 
-        replaceWithSingleCompiledPlan(std::move(plan), ActivePlanFinalization::UNFINALIZED);
+        replaceWithSingleCompiledPlan(std::move(plan), detail::ActivePlanFinalization::UNFINALIZED);
 
         return {ErrorCode::OK, ""};
     }
@@ -2140,7 +2147,7 @@ public:
                 }
 
                 replaceWithSingleCompiledPlan(std::move(compiledPlan),
-                                              ActivePlanFinalization::FINALIZED);
+                                              detail::ActivePlanFinalization::FINALIZED);
             }
             else
             {
@@ -2244,7 +2251,7 @@ public:
             plan.engineId = *engineId;
         }
 
-        replaceWithSingleCompiledPlan(std::move(plan), ActivePlanFinalization::FINALIZED);
+        replaceWithSingleCompiledPlan(std::move(plan), detail::ActivePlanFinalization::FINALIZED);
         resetGraphDesc();
         _sub_nodes.clear();
         _isOverrideShapeEnabled = false;
@@ -2596,7 +2603,7 @@ public:
                         "Failed to finalize any execution plan (policy=ALL)."};
             }
 
-            setActivePlanState(firstSuccessIndex, ActivePlanFinalization::FINALIZED);
+            setActivePlanState(firstSuccessIndex, detail::ActivePlanFinalization::FINALIZED);
             return {ErrorCode::OK, ""};
         }
 
@@ -2653,7 +2660,7 @@ public:
                         + std::to_string(_maxWorkspaceAllowed) + "."};
         }
 
-        setActivePlanState(_activePlanIndex, ActivePlanFinalization::FINALIZED);
+        setActivePlanState(_activePlanIndex, detail::ActivePlanFinalization::FINALIZED);
 
         return {ErrorCode::OK, ""};
     }
@@ -3878,7 +3885,8 @@ private:
                         "No plans could be compiled from the provided plan specs."};
             }
 
-            replaceCompiledPlans(std::move(compiledPlans), 0, ActivePlanFinalization::FINALIZED);
+            replaceCompiledPlans(
+                std::move(compiledPlans), 0, detail::ActivePlanFinalization::FINALIZED);
         }
         else
         {
@@ -4372,7 +4380,7 @@ private:
         {
             return rankErr;
         }
-        setActivePlanState(winnerPlanIndex, ActivePlanFinalization::FINALIZED);
+        setActivePlanState(winnerPlanIndex, detail::ActivePlanFinalization::FINALIZED);
 
         // ── Persist results ─────────────────────────────────────────────
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
@@ -4897,7 +4905,7 @@ public:
                         + std::to_string(_maxWorkspaceAllowed)};
         }
 
-        setActivePlanState(static_cast<size_t>(index), ActivePlanFinalization::FINALIZED);
+        setActivePlanState(static_cast<size_t>(index), detail::ActivePlanFinalization::FINALIZED);
 
         return {ErrorCode::OK, ""};
     }

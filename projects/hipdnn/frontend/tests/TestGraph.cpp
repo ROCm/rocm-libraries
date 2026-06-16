@@ -10107,6 +10107,52 @@ TEST_F(TestGraph, CompiledPlanAutotuneWinnerUpdatesSerializableActivePlan)
     EXPECT_EQ(data, fakeContainerBytes);
 }
 
+TEST_F(TestGraph, CompiledPlanAutotuneFailurePreservesActivePlanState)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    graph.injectValidCompiledPlan(/*engineId=*/-2, /*workspaceSize=*/0, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/-3, /*workspaceSize=*/0, /*barred=*/false);
+
+    auto result = graph.build_plan_at_index(1);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    ASSERT_EQ(graph.getActivePlanIndex(), 1u);
+    ASSERT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    ASSERT_EQ(*graph.selectedEngineIdForTest(), -3);
+
+    AutotuneConfig config;
+    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.warmupIterations = 0;
+    config.engineIdFilter = {-999};
+
+    std::vector<AutotuneResult> results;
+    const std::unordered_map<int64_t, void*> variantPack = {{1, reinterpret_cast<void*>(0x1)},
+                                                            {2, reinterpret_cast<void*>(0x2)},
+                                                            {3, reinterpret_cast<void*>(0x3)},
+                                                            {4, reinterpret_cast<void*>(0x4)},
+                                                            {5, reinterpret_cast<void*>(0x5)}};
+    result = graph.autotune(_handle, variantPack, nullptr, config, {}, &results);
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), -3);
+
+    expectEngineSupportsPlanSerialization(*_mockBackend);
+    const std::vector<uint8_t> fakeContainerBytes = {0x33, 0x44, 0x55};
+    expectComboContainerSerialization(*_mockBackend, fakeContainerBytes);
+
+    std::vector<uint8_t> data;
+    auto err = graph.serialize(data);
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(data, fakeContainerBytes);
+}
+
 TEST_F(TestGraph, PlanSpecAutotuneWinnerUpdatesSerializableActivePlan)
 {
     ::testing::FLAGS_gmock_verbose = "error";
