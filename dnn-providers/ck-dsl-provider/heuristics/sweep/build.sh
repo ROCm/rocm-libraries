@@ -11,7 +11,7 @@
 # Overridable via environment:
 #   ARCH          GPU architecture              (default: gfx942)
 #   BUILD_DIR     CMake build output dir        (default: $HOME/ckdsl_sweep_build)
-#   CKC_CORE_LIB  Path to libckc_core.a         (auto-detected from /opt/rocm if unset)
+#   CKC_CORE_LIB  Path to libckc_core.a         (built from source if unset)
 #   CKC_INCLUDE   Path to ckc/ headers          (default: derived from ROCM_LIBS)
 
 set -euo pipefail
@@ -24,6 +24,7 @@ ROCM_LIBS="$(cd "${SWEEP_SRC}/../../../.." && pwd)"
 : "${CKC_INCLUDE:=${ROCM_LIBS}/projects/composablekernel/python/ck_dsl_c/include}"
 
 CK_DSL_RUNTIME_INCLUDE="${ROCM_LIBS}/dnn-providers/ck-dsl-provider/runtime/include"
+CKC_SRC="${ROCM_LIBS}/projects/composablekernel/python/ck_dsl_c"
 
 echo "=== conv_candidate_sweep build ===" >&2
 echo "  SWEEP_SRC             : ${SWEEP_SRC}" >&2
@@ -35,6 +36,19 @@ echo "  CKC_INCLUDE           : ${CKC_INCLUDE}" >&2
 
 mkdir -p "${BUILD_DIR}"
 
+# Build libckc_core.a from source if not provided. ckc_core is pure C99 with
+# no GPU dependency, so any C compiler in the container works.
+if [[ -z "${CKC_CORE_LIB:-}" ]]; then
+    CKC_BUILD_DIR="${BUILD_DIR}/ckc_core_build"
+    echo "=== Building libckc_core.a from source ===" >&2
+    cmake -S "${CKC_SRC}" -B "${CKC_BUILD_DIR}" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON >&2
+    cmake --build "${CKC_BUILD_DIR}" --target ckc_core -j"$(nproc)" >&2
+    CKC_CORE_LIB="${CKC_BUILD_DIR}/libckc_core.a"
+    echo "  CKC_CORE_LIB (built)  : ${CKC_CORE_LIB}" >&2
+fi
+
 CMAKE_ARGS=(
     -S "${SWEEP_SRC}"
     -B "${BUILD_DIR}"
@@ -43,11 +57,8 @@ CMAKE_ARGS=(
     -DCMAKE_CXX_COMPILER=hipcc
     -DCK_DSL_RUNTIME_INCLUDE_DIR="${CK_DSL_RUNTIME_INCLUDE}"
     -DCKC_INCLUDE_DIR="${CKC_INCLUDE}"
+    -DCKC_CORE_LIB="${CKC_CORE_LIB}"
 )
-
-if [[ -n "${CKC_CORE_LIB:-}" ]]; then
-    CMAKE_ARGS+=(-DCKC_CORE_LIB="${CKC_CORE_LIB}")
-fi
 
 echo "=== Configuring ===" >&2
 cmake "${CMAKE_ARGS[@]}"

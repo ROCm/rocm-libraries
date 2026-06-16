@@ -38,7 +38,7 @@ DSL_CSV_COLUMNS = [
 ]
 
 
-def convert(input_path: str, output_path: str, arch: str, run_id: int) -> None:
+def convert(input_path: str, output_path: str, arch: str, run_id: int, dtype: str = "fp16") -> None:
     df = pd.read_csv(input_path, header=0, names=DSL_CSV_COLUMNS,
                      on_bad_lines="skip")
 
@@ -74,7 +74,7 @@ def convert(input_path: str, output_path: str, arch: str, run_id: int) -> None:
     # Metadata.
     df["op_type"] = "grouped_conv"
     df["variant"] = "fwd"
-    df["dtype"] = "fp16"
+    df["dtype"] = dtype
     df["arch"] = arch
     df["ndim_spatial"] = 2
     df["is_valid"] = (df["tflops"] > 0) & (df["latency_ms"] > 0)
@@ -82,7 +82,7 @@ def convert(input_path: str, output_path: str, arch: str, run_id: int) -> None:
 
     # Synthetic kernel_name for compatibility with downstream tooling.
     df["kernel_name"] = (
-        "grouped_conv_fwd_fp16_nhwgc_2d_"
+        f"grouped_conv_fwd_{dtype}_nhwgc_2d_"
         + df["pipeline"] + "_intrawave_"
         + df["gemm_m_per_block"].astype(str) + "x"
         + df["gemm_n_per_block"].astype(str) + "x"
@@ -111,11 +111,13 @@ def main() -> int:
                         help="Output parquet path")
     parser.add_argument("--arch", default="gfx942",
                         help="GPU architecture tag written into parquet (default: gfx942)")
+    parser.add_argument("--dtype", default="fp16", choices=["fp16", "bf16"],
+                        help="Data type written into parquet (default: fp16)")
     parser.add_argument("--run-id", type=int, default=1,
                         help="Integer run identifier written into parquet (default: 1)")
     args = parser.parse_args()
 
-    convert(args.input, args.output, args.arch, args.run_id)
+    convert(args.input, args.output, args.arch, args.run_id, args.dtype)
     return 0
 
 

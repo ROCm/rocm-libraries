@@ -182,8 +182,8 @@ def main():
     parser.add_argument("--inputs", nargs="+", required=True,
                         help="Input CSVs (wide_coverage_conv.csv, edge_dims_conv.csv, ...)")
     parser.add_argument("--out", required=True, help="Output merged CSV (all_shapes.csv)")
-    parser.add_argument("--target", type=int, default=2000,
-                        help="Target shape count after sampling")
+    parser.add_argument("--target", type=int, default=None,
+                        help="Target shape count after sampling (default: use all shapes)")
     parser.add_argument("--shards", type=int, default=0,
                         help="If >0, also write shard_00.csv ... shard_NN.csv")
     parser.add_argument("--shard_dir", default="shards",
@@ -207,9 +207,9 @@ def main():
     print(f"Total unique shapes before sampling: {len(all_shapes)}", file=sys.stderr)
     print_stats(all_shapes, "Before sampling")
 
-    if len(all_shapes) <= args.target:
+    if args.target is None or len(all_shapes) <= args.target:
         sampled = all_shapes
-        print(f"Shape count <= target ({args.target}), no sampling needed.", file=sys.stderr)
+        print(f"Using all {len(all_shapes)} shapes (no sampling).", file=sys.stderr)
     else:
         sampled = stratified_sample(all_shapes, args.target, seed=args.seed)
 

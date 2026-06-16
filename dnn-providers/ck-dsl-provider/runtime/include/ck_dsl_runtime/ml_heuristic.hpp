@@ -392,6 +392,10 @@ struct ConvHwProfile {
         return num_cus * simds_per_cu;
     }
     static ConvHwProfile for_arch(const std::string& arch) {
+        if (arch == "gfx950") {
+            // MI350X: 304 CUs, 38 shader engines, 2400 MHz
+            return ConvHwProfile{};  // default values match gfx950 exactly
+        }
         if (arch == "gfx942") {
             // MI300X: 228 CUs, 28 shader engines, 2100 MHz
             ConvHwProfile p;
@@ -408,7 +412,22 @@ struct ConvHwProfile {
             p.num_xcd = 8;
             return p;
         }
-        // gfx950 (MI350): 304 CUs, 38 SEs, 2400 MHz
+        if (arch == "gfx90a") {
+            // MI210X: 104 CUs, 4 SEs, 1700 MHz, no XCD
+            ConvHwProfile p;
+            p.num_cus = 104;
+            p.simds_per_cu = 4;
+            p.shader_engines = 4;
+            p.max_clock_mhz = 1700;
+            p.max_waves_per_cu = 32;
+            p.wavefront_size = 64;
+            p.lds_capacity = 65536;
+            p.l1_cache_kb = 16;
+            p.l2_cache_kb = 8192;
+            p.l3_cache_kb = 0;
+            p.num_xcd = 1;
+            return p;
+        }
         return ConvHwProfile{};
     }
 };

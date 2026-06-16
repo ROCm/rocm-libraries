@@ -106,8 +106,7 @@ pip install lightgbm pandas pyarrow scikit-learn
 ### Step 2 — Generate training shapes
 
 Two generators produce complementary sets; `sample_conv_shapes.py` merges,
-deduplicates, and stratified-samples them to a target count, then optionally
-shards the result for parallel sweep runs.
+deduplicates, and shards the result for parallel sweep runs.
 
 ```bash
 python3 $CK_HEURISTICS/generate_wide_coverage_conv.py \
@@ -120,7 +119,6 @@ python3 $CK_HEURISTICS/sample_conv_shapes.py \
     --inputs    $WORK/shapes/wide_coverage_conv.csv \
                 $WORK/shapes/edge_dims_conv.csv \
     --out       $WORK/shapes/all_shapes.csv \
-    --target    2000 \
     --shards    8 \
     --shard_dir $WORK/shapes
 

@@ -506,6 +506,26 @@ bool ckc_implicit_gemm_conv_is_valid_spec(const ckc_implicit_gemm_conv_spec_t* s
                           s->warp_tile_m, s->warp_tile_n, s->warp_tile_k, arch);
     }
 
+    /* LDS budget: must fit before we attempt codegen.
+     *   A_smem + B_smem, each (tile_m or tile_n) × row_stride × 2 bytes (f16).
+     *   row_stride = tile_k + k_pad  (k_pad = 8 when tile_k >= 16, else 0).
+     *   compv4 pipeline double-buffers A and B → ×2.
+     *   This mirrors the smem_alloc calls in instance_conv_implicit_gemm_conv_build_glue.c
+     *   and catches the overflow that would otherwise produce CODEGEN_BC_TO_RELOCATABLE. */
+    {
+        int k_pad      = (s->tile_k >= 16) ? 8 : 0;
+        int row_stride = s->tile_k + k_pad;
+        int ab_single  = (s->tile_m + s->tile_n) * row_stride * 2; /* f16 = 2 bytes */
+        int double_buf = (s->pipeline && strcmp(s->pipeline, "compv4") == 0) ? 1 : 0;
+        int bytes_lds  = ab_single * (double_buf ? 2 : 1);
+        if (!ckc_archtarget_fits_lds(target, (long)bytes_lds))
+        {
+            CKC_CONVVS_REJECT("LDS budget %d > %d cap (AB=%d, double_buf=%d) on %s",
+                              bytes_lds, target->lds_capacity_bytes,
+                              ab_single, double_buf, arch);
+        }
+    }
+
     /* WMMA (RDNA wave32) narrow-subset gates. */
     if (strcmp(family, "wmma") == 0)
     {
