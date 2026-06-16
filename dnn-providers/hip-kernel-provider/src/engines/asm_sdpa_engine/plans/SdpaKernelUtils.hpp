@@ -8,8 +8,11 @@
 #include <cstddef>
 #include <hip/hip_runtime.h>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 namespace asm_sdpa_engine
@@ -247,6 +250,44 @@ inline std::optional<HipModuleGuard> loadKernelModule(const std::string& coPath,
     guard.setFunction(func);
 
     return guard; // moved out
+}
+
+// =============================================================================
+// Cached kernel module loader
+// =============================================================================
+//
+// Process-level cache for loaded kernel modules.  hipModuleLoad() is expensive
+// (~97% of SDPA execution time in profiling), but the set of distinct .co files
+// is small (bounded by CSV config count).  This wrapper returns a
+// shared_ptr<HipModuleGuard>: on the first call for a given (coPath, funcName)
+// pair the module is loaded and cached; subsequent calls return the cached
+// shared_ptr.  Modules are never unloaded until process exit (the static map
+// destructor runs during global teardown).
+
+using CachedModule = std::shared_ptr<HipModuleGuard>;
+
+inline CachedModule loadOrGetCachedModule(const std::string& coPath, const char* funcName)
+{
+    static std::mutex cacheMutex;
+    static std::unordered_map<std::string, CachedModule> cache;
+
+    std::string key = coPath + "::" + funcName;
+
+    std::lock_guard<std::mutex> lock(cacheMutex);
+    auto it = cache.find(key);
+    if(it != cache.end())
+    {
+        return it->second;
+    }
+
+    auto loaded = loadKernelModule(coPath, funcName);
+    if(!loaded)
+    {
+        return nullptr;
+    }
+    auto cached = std::make_shared<HipModuleGuard>(std::move(*loaded));
+    cache.emplace(key, cached);
+    return cached;
 }
 
 } // namespace asm_sdpa_engine
