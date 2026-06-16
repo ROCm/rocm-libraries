@@ -399,6 +399,52 @@ public:
     }
 };
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+
+template<class T, unsigned int VirtualWaveSize, bool UseAllReduce>
+class warp_reduce<T, VirtualWaveSize, UseAllReduce, ::rocprim::arch::wavefront::target::dynamic>
+{
+private:
+    using warp_reduce_wave32
+        = warp_reduce<T, VirtualWaveSize, UseAllReduce, ::rocprim::arch::wavefront::target::size32>;
+    using warp_reduce_wave64
+        = warp_reduce<T, VirtualWaveSize, UseAllReduce, ::rocprim::arch::wavefront::target::size64>;
+
+    using dispatch = detail::dispatch_wave_size<warp_reduce_wave32, warp_reduce_wave64>;
+
+public:
+    using storage_type = typename dispatch::storage_type;
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto reduce(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args)
+                   { impl.reduce(std::forward<decltype(args)>(args)...); },
+                   std::forward<Args>(args)...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto tail_segmented_reduce(Args... args)
+    {
+        dispatch{}([](auto impl, auto&&... args)
+                   { impl.tail_segmented_reduce(std::forward<decltype(args)>(args)...); },
+                   std::forward<Args>(args)...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto head_segmented_reduce(Args... args)
+    {
+        dispatch{}([](auto impl, auto&&... args)
+                   { impl.tail_segmented_reduce(std::forward<decltype(args)>(args)...); },
+                   std::forward<Args>(args)...);
+    }
+};
+
+#endif
+
 END_ROCPRIM_NAMESPACE
 
 /// @}
