@@ -753,6 +753,44 @@ The plan cache is an in-process `unordered_map` keyed on tensor dims/strides/typ
 
 This is a concrete, end-to-end realization of the descriptor → hipDNN graph + variant-pack translation that the umbrella review's concern #1 asked for as a worked example: it names exactly which descriptor fields have no 1:1 hipDNN mapping in this prototype (alpha/beta scaling, groups, > 5 spatial dims) and states what the wrapper does for them (decline and fall back). See the concern #1 entry in `review-decisions-2026-06-08.md` for how this bears on closing that concern.
 
+## Full field-by-field mapping (descriptor → hipDNN backend graph)
+
+The worked example above names the *declined* fields; this section records the full translation the prototype performs for the fields that **do** map, so the mapping is documented rather than living only in `wrapper.cpp`. The wrapper builds the graph from hipDNN **backend descriptors** (the cuDNN-style API — no frontend dependency), in this order:
+
+1. Three `HIPDNN_BACKEND_TENSOR_DESCRIPTOR`s — one each for X, W, Y.
+2. One `HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR` referencing the three tensors and carrying the conv parameters.
+3. One `HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR` (paired hipDNN handle + the single op).
+4. `ENGINEHEUR` → `ENGINECFG` → `EXECUTION_PLAN` (cached per problem shape; queried for workspace size).
+5. A `HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR` binding tensor UIDs to device pointers, then `hipdnnBackendExecute`.
+
+**Fields that map 1:1** (`miopenConvolutionForward(handle, alpha, xDesc, x, wDesc, w, convDesc, algo, beta, yDesc, y, workSpace, workSpaceSize)`):
+
+| MIOpen input | hipDNN backend target | Notes |
+| --- | --- | --- |
+| `handle` | paired `hipdnnHandle_t` → `HIPDNN_ATTR_OPERATIONGRAPH_HANDLE` / `HIPDNN_ATTR_EXECUTION_PLAN_HANDLE` | Paired at `miopenCreate` (see handle lifecycle above). |
+| `xDesc`/`wDesc`/`yDesc` dims | `HIPDNN_ATTR_TENSOR_DIMENSIONS` (×3) | Copied directly. |
+| `xDesc`/`wDesc`/`yDesc` strides (i.e. layout) | `HIPDNN_ATTR_TENSOR_STRIDES` (×3) | MIOpen encodes layout (NCHW/NHWC/NCDHW/NDHWC) as strides; hipDNN takes dims+strides, so layout maps by copying strides — no separate layout enum. Vectorized layouts (NCHWc4/c8, CHWNc4/c8) have no plain dims+strides form → decline. |
+| tensor `dataType` | `HIPDNN_ATTR_TENSOR_DATA_TYPE` (×3) | 1:1: `miopenHalf`→`HIPDNN_DATA_HALF`, `miopenFloat`→`FLOAT`, `miopenBFloat16`→`BFLOAT16`, `miopenDouble`→`DOUBLE`, `miopenInt8`→`INT8`, `miopenInt32`→`INT32`, `miopenInt64`→`INT64`, `miopenFloat8_fnuz`→`FP8_E4M3_FNUZ`, `miopenBFloat8_fnuz`→`FP8_E5M2_FNUZ`. Every MIOpen dtype has an equivalent; whether the selected engine supports it is separate. |
+| tensor identity | `HIPDNN_ATTR_TENSOR_UNIQUE_ID` (×3) | Wrapper assigns stable UIDs (X/W/Y); these link the graph to the variant pack. |
+| `convDesc` `padA` | `HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS` **and** `HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS` | MIOpen padding is symmetric (one array); set hipDNN pre = post = `padA`. |
+| `convDesc` `strideA` | `HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES` | Direct. |
+| `convDesc` `dilationA` | `HIPDNN_ATTR_CONVOLUTION_DILATIONS` | Direct. |
+| `convDesc` `c_mode` | `HIPDNN_ATTR_CONVOLUTION_CONV_MODE` | `miopenConvolution` (documented as cross-correlation) → `HIPDNN_CROSS_CORRELATION`. |
+| `convDesc` spatialDim | length of the four arrays above | Supported for ≤ 5 (see decline table above). |
+| (derived) compute/accumulation type | `HIPDNN_ATTR_CONVOLUTION_COMP_TYPE` | Derived from IO dtypes (e.g. fp32 accumulate for half/bf16). |
+| `x`, `w`, `y` device pointers | `HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS` keyed by `HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS` | Pointers live in the variant pack, not the graph. |
+
+**Variant pack:** `UNIQUE_IDS = {X, W, Y}`, `DATA_POINTERS = {x, w, y}`, `WORKSPACE = wrapper-owned buffer` sized from the execution plan's `HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE`.
+
+**Behavioral differences — fields that map but not faithfully** (these are *not* declines; the call proceeds, but a consumer could observe a difference):
+
+- `algo` (`miopenConvFwdAlgorithm_t`) is **ignored** — hipDNN selects its own engine via `ENGINEHEUR`, so the caller's algorithm choice is not honored.
+- `workSpace` / `workSpaceSize` are **not reused** — hipDNN computes its own workspace requirement and the wrapper owns that buffer; the caller-provided workspace is left untouched.
+
+**Why the declined fields have no mapping** (the decline table above, with the underlying reason): `alpha`/`beta` ≠ identity — the hipDNN conv-forward op exposes **no** alpha/beta scaling attribute (there is no `HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_ALPHA/BETA`), so only `α=1, β=0` is expressible; `groupCount` ≠ 1 — no group-count attribute on the hipDNN conv-forward op in this API; `c_mode = miopenTranspose` — deconvolution is not a forward-conv op (maps to backward-data); spatial dim > 5 — prototype boundary.
+
+**Status translation:** any `hipdnnStatus_t` failure during build/finalize/execute currently returns `miopenStatusUnsupportedOp` (native fallback). Per RFC §6.1 this becomes a translated `miopenStatus_t` carrying the `[hipDNN-forwarded]` marker and exposed via `miopenGetLastForwardedError()`; reconciling the prototype's blanket fallback with that design is RFC §7 Phase 2 task 6.
+
 ## How it was tested
 
 Single conv repeated 100 iterations (`-i 100`) via `MIOpenDriver`:
