@@ -208,7 +208,8 @@ rocsparse_status rocsparse::nrminf(rocsparse_handle          handle_,
 
     if(!MX)
     {
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(nrm_, 0, sizeof(floating_data_t<T>), handle_->stream));
+        RETURN_IF_HIP_ERROR(
+            rocsparse_hipMemsetAsync(nrm_, 0, sizeof(floating_data_t<T>), handle_->stream));
     }
     //
     // Compute nrm max of the matrix.
@@ -247,7 +248,8 @@ rocsparse_status rocsparse::nrminf_diff(rocsparse_handle          handle_,
     dim3   threads(BLOCKSIZE);
     if(!MX)
     {
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(nrm_, 0, sizeof(floating_data_t<T>), handle_->stream));
+        RETURN_IF_HIP_ERROR(
+            rocsparse_hipMemsetAsync(nrm_, 0, sizeof(floating_data_t<T>), handle_->stream));
     }
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::kernel_nrminf_diff<BLOCKSIZE, T>),

@@ -29,6 +29,9 @@
 #include "hipsparse_test_functors.hpp"
 #include "hipsparse_test_traits.hpp"
 
+#include <exception>
+#include <hip/hip_runtime_api.h>
+
 namespace
 {
     template <hipsparse_test_enum::value_type ROUTINE>
@@ -51,23 +54,47 @@ namespace
             void operator()(const Arguments& arg)
             {
                 const char* name_ROUTINE = hipsparse_test_enum::to_string(ROUTINE);
-                if(!strcmp(arg.function, name_ROUTINE))
+
+                // Catch exceptions centrally so a single CI failure is actionable.
+                // Without this, an exception thrown from inside the library/HIP
+                // runtime is reported by gtest only as "Unknown C++ exception
+                // thrown in the test body", with no type, message, or HIP status.
+                try
                 {
-                    call_t::template testing<P...>(arg);
-                }
-                else
-                {
-                    std::string s(name_ROUTINE);
-                    s += "_bad_arg";
-                    if(!strcmp(arg.function, s.c_str()))
+                    if(!strcmp(arg.function, name_ROUTINE))
                     {
-                        call_t::template testing_bad_arg<P...>(arg);
+                        call_t::template testing<P...>(arg);
                     }
                     else
                     {
-                        FAIL() << "Internal error: Test called with unknown function: "
-                               << arg.function;
+                        std::string s(name_ROUTINE);
+                        s += "_bad_arg";
+                        if(!strcmp(arg.function, s.c_str()))
+                        {
+                            call_t::template testing_bad_arg<P...>(arg);
+                        }
+                        else
+                        {
+                            FAIL() << "Internal error: Test called with unknown function: "
+                                   << arg.function;
+                        }
                     }
+                }
+                catch(const std::exception& e)
+                {
+                    hipError_t hip_err = hipGetLastError();
+                    FAIL() << "Test '" << name_ROUTINE << "' threw std::exception: " << e.what()
+                           << " | last HIP error: " << hipGetErrorString(hip_err) << " ("
+                           << static_cast<int>(hip_err) << ").";
+                }
+                catch(...)
+                {
+                    hipError_t hip_err = hipGetLastError();
+                    FAIL() << "Test '" << name_ROUTINE
+                           << "' threw an unknown (non-std::exception) C++ exception | last HIP "
+                              "error: "
+                           << hipGetErrorString(hip_err) << " (" << static_cast<int>(hip_err)
+                           << ").";
                 }
             }
         };

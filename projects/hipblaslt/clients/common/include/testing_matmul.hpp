@@ -104,6 +104,15 @@ bool isSwizzleSupported(hipDataType datatype)
     }
 }
 
+bool MXUseRocroller()
+{
+#ifdef HIPBLASLT_USE_ROCROLLER
+    return hipblaslt_get_arch() != 1250;
+#else
+    return false;
+#endif
+}
+
 hipblasLtOrder_t orderForDatatype(hipDataType datatype)
 {
     switch(datatype)
@@ -1914,6 +1923,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     bool do_swizzle_a = arg.swizzle_a && isSwizzleSupported(TiA);
     bool do_swizzle_b = arg.swizzle_b && isSwizzleSupported(TiB);
+    bool mx_use_rocroller = MXUseRocroller();
 
     // Need to split into two for loop to calculate the rotating buffer
     int64_t totalRotatingSizeNeeded = 0;
@@ -2055,21 +2065,24 @@ void testing_matmul_with_bias(const Arguments& arg,
                 size_scaleAVec[i] = M[i];
             else if(isBlockScaling(arg.scaleA))
             {
-#ifndef HIPBLASLT_USE_ROCROLLER
-                // Account for padding in the swizzled MX layout
-                size_t MXBlock_A = blockSize(arg.scaleA);
-                size_t dimk    = 128 / MXBlock_A;
-                size_t scaleA_r = A_row[i] / ((transA == HIPBLAS_OP_T) ? MXBlock_A : 1);
-                size_t scaleA_c = A_col[i] / ((transA == HIPBLAS_OP_T) ? 1 : MXBlock_A);
-                bool   kAlongRowsA = (transA == HIPBLAS_OP_T);
-                size_t kDim   = kAlongRowsA ? scaleA_r : scaleA_c;
-                size_t mnDim  = kAlongRowsA ? scaleA_c : scaleA_r;
-                size_t padDim    = kAlongRowsA ? kDim : mnDim;
-                size_t paddedDim = (padDim + dimk - 1) / dimk * dimk;
-                size_scaleAVec[i] = kAlongRowsA ? (mnDim * paddedDim) : (kDim * paddedDim);
-#else
-                size_scaleAVec[i] = scaleBufferSize(A_row[i], A_col[i], arg.scaleA);
-#endif
+                if(!mx_use_rocroller)
+                {
+                    // Account for padding in the swizzled MX layout
+                    size_t MXBlock_A   = blockSize(arg.scaleA);
+                    size_t dimk        = 128 / MXBlock_A;
+                    size_t scaleA_r    = A_row[i] / ((transA == HIPBLAS_OP_T) ? MXBlock_A : 1);
+                    size_t scaleA_c    = A_col[i] / ((transA == HIPBLAS_OP_T) ? 1 : MXBlock_A);
+                    bool   kAlongRowsA = (transA == HIPBLAS_OP_T);
+                    size_t kDim        = kAlongRowsA ? scaleA_r : scaleA_c;
+                    size_t mnDim       = kAlongRowsA ? scaleA_c : scaleA_r;
+                    size_t padDim      = kAlongRowsA ? kDim : mnDim;
+                    size_t paddedDim   = (padDim + dimk - 1) / dimk * dimk;
+                    size_scaleAVec[i]  = kAlongRowsA ? (mnDim * paddedDim) : (kDim * paddedDim);
+                }
+                else
+                {
+                    size_scaleAVec[i] = scaleBufferSize(A_row[i], A_col[i], arg.scaleA);
+                }
             }
             else
                 size_scaleAVec[i] = 0;
@@ -2079,20 +2092,24 @@ void testing_matmul_with_bias(const Arguments& arg,
                 size_scaleBVec[i] = N[i];
             else if(isBlockScaling(arg.scaleB))
             {
-#ifndef HIPBLASLT_USE_ROCROLLER
-                size_t MXBlock_B = blockSize(arg.scaleB);
-                size_t dimk    = 128 / MXBlock_B;
-                size_t scaleB_r = B_row[i] / ((transB == HIPBLAS_OP_T) ? 1 : MXBlock_B);
-                size_t scaleB_c = B_col[i] / ((transB == HIPBLAS_OP_T) ? MXBlock_B : 1);
-                bool   kAlongRowsB = (transB == HIPBLAS_OP_N);
-                size_t kDim   = kAlongRowsB ? scaleB_r : scaleB_c;
-                size_t mnDim  = kAlongRowsB ? scaleB_c : scaleB_r;
-                size_t padDim    = kAlongRowsB ? kDim : mnDim;
-                size_t paddedDim = (padDim + dimk - 1) / dimk * dimk;
-                size_scaleBVec[i] = kAlongRowsB ? (mnDim * paddedDim) : (kDim * paddedDim);
-#else
-                size_scaleBVec[i] = scaleBufferSize(B_row[i], B_col[i], arg.scaleB);
-#endif
+                if(!mx_use_rocroller)
+                {
+                    // Account for padding in the swizzled MX layout
+                    size_t MXBlock_B   = blockSize(arg.scaleB);
+                    size_t dimk        = 128 / MXBlock_B;
+                    size_t scaleB_r    = B_row[i] / ((transB == HIPBLAS_OP_T) ? 1 : MXBlock_B);
+                    size_t scaleB_c    = B_col[i] / ((transB == HIPBLAS_OP_T) ? MXBlock_B : 1);
+                    bool   kAlongRowsB = (transB == HIPBLAS_OP_N);
+                    size_t kDim        = kAlongRowsB ? scaleB_r : scaleB_c;
+                    size_t mnDim       = kAlongRowsB ? scaleB_c : scaleB_r;
+                    size_t padDim      = kAlongRowsB ? kDim : mnDim;
+                    size_t paddedDim   = (padDim + dimk - 1) / dimk * dimk;
+                    size_scaleBVec[i]  = kAlongRowsB ? (mnDim * paddedDim) : (kDim * paddedDim);
+                }
+                else
+                {
+                    size_scaleBVec[i] = scaleBufferSize(B_row[i], B_col[i], arg.scaleB);
+                }
             }
             else
                 size_scaleBVec[i] = 0;
@@ -2740,55 +2757,85 @@ void testing_matmul_with_bias(const Arguments& arg,
         if(isBlockScaling(arg.scaleA))
         {
 #ifdef HIPBLASLT_USE_ROCROLLER
-            if(arg.initialization != hipblaslt_initialization::hpl
-               && arg.initialization != hipblaslt_initialization::trig_float
-               && arg.initialization != hipblaslt_initialization::uniform_01)
+            if(mx_use_rocroller)
             {
-                hipblaslt_cout << "Initialization of microscaling data only allows hpl, trig_float "
-                                  "or uniform_01, not "
-                               << hipblaslt_initialization2string(arg.initialization) << std::endl;
-                return;
+                if(arg.initialization != hipblaslt_initialization::hpl
+                   && arg.initialization != hipblaslt_initialization::trig_float
+                   && arg.initialization != hipblaslt_initialization::uniform_01)
+                {
+                    hipblaslt_cout
+                        << "Initialization of microscaling data only allows hpl, trig_float "
+                           "or uniform_01, not "
+                        << hipblaslt_initialization2string(arg.initialization) << std::endl;
+                    throw std::runtime_error("unsupported initialization for MX");
+                }
+                if(arg.algo_method == 1)
+                {
+                    hipblaslt_cout << "MX data types do not support algorithm \"all\"" << std::endl;
+                    throw std::runtime_error("unsupported algorithm for MX");
+                }
+                // For MX format, use mxDataGenerator to generate input data
+                // (consists of data part and scale part)
+                // preTile for A: {tileK, tileM} - swap from preTileSizeForScaleA which returns {tileM, tileK}
+                auto preTileATmp = preTileSizeForScaleA(arg.scaleA);
+                auto preTileA    = (preTileATmp.size() == 2)
+                                       ? std::vector<size_t>{preTileATmp[1], preTileATmp[0]}
+                                       : std::vector<size_t>{};
+                // Compute batch strides in bytes for data and scale buffers.
+                size_t dataBatchBytesA
+                    = (num_batches[i] > 1) ? elementsToBytes(stride_a[i], TiA) : 0;
+                size_t scaleBatchBytesA = (num_batches[i] > 1) ? size_scaleAVec[i] : 0;
+                // Generate MX data for each batch and collect reference floats
+                std::vector<float> refAAll;
+                refAAll.reserve(static_cast<size_t>(A_row[i]) * A_col[i] * num_batches[i]);
+                for(int64_t b = 0; b < num_batches[i]; b++)
+                {
+                    auto* dataPtr = reinterpret_cast<uint8_t*>(hA[i].buf()) + b * dataBatchBytesA;
+                    auto* scalePtr
+                        = reinterpret_cast<uint8_t*>(hScaleA[i].buf()) + b * scaleBatchBytesA;
+                    auto batchRef
+                        = generateMXInput(TiA,
+                                          scaleDataType(arg.scaleA),
+                                          dataPtr,
+                                          scalePtr,
+                                          A_row[i],
+                                          A_col[i],
+                                          lda[i],
+                                          transA == HIPBLAS_OP_T,
+                                          preSwizzleSizeForScale(arg.scaleA),
+                                          preTileA,
+                                          blockSize(arg.scaleA),
+                                          1,
+                                          true,
+                                          hipblaslt_initialization2string(arg.initialization));
+                    refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
+                }
+                refA.emplace_back(std::move(refAAll));
+                // Copy data and scale to device buffers
+                CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count));
+                CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
             }
-            if(arg.algo_method == 1)
+            else
             {
-                hipblaslt_cout << "MX data types do not support algorithm \"all\"" << std::endl;
-                return;
+                hipblaslt_init_device(ABC_dims::A,
+                                      arg.initialization,
+                                      alpha_isnan_type(arg, Talpha),
+                                      dA[i].buf(),
+                                      A_row[i],
+                                      A_col[i],
+                                      (arg.swizzle_a) ? A_row[i] : lda[i],
+                                      TiA,
+                                      (arg.swizzle_a) ? A_row[i] * A_col[i] : stride_a[i],
+                                      num_batches[i]);
+
+                hipblaslt_init(hScaleA[i].buf(),
+                               A_row[i] / scaleA_row,
+                               A_col[i] / scaleA_col,
+                               lda[i] / scaleA_row,
+                               scaleDataType(arg.scaleA),
+                               stride_a[i] / scaleA_row / scaleA_col,
+                               num_batches[i]);
             }
-            // For MX format, use mxDataGenerator to generate input data
-            // (consists of data part and scale part)
-            // preTile for A: {tileK, tileM} - swap from preTileSizeForScaleA which returns {tileM, tileK}
-            auto preTileATmp = preTileSizeForScaleA(arg.scaleA);
-            auto preTileA = (preTileATmp.size() == 2) ? std::vector<size_t>{preTileATmp[1], preTileATmp[0]} : std::vector<size_t>{};
-            // Compute batch strides in bytes for data and scale buffers.
-            size_t dataBatchBytesA  = (num_batches[i] > 1) ? elementsToBytes(stride_a[i], TiA) : 0;
-            size_t scaleBatchBytesA = (num_batches[i] > 1) ? size_scaleAVec[i] : 0;
-            // Generate MX data for each batch and collect reference floats
-            std::vector<float> refAAll;
-            refAAll.reserve(static_cast<size_t>(A_row[i]) * A_col[i] * num_batches[i]);
-            for(int64_t b = 0; b < num_batches[i]; b++)
-            {
-                auto* dataPtr  = reinterpret_cast<uint8_t*>(hA[i].buf()) + b * dataBatchBytesA;
-                auto* scalePtr = reinterpret_cast<uint8_t*>(hScaleA[i].buf()) + b * scaleBatchBytesA;
-                auto batchRef = generateMXInput(TiA,
-                                                scaleDataType(arg.scaleA),
-                                                dataPtr,
-                                                scalePtr,
-                                                A_row[i],
-                                                A_col[i],
-                                                lda[i],
-                                                transA == HIPBLAS_OP_T,
-                                                preSwizzleSizeForScale(arg.scaleA),
-                                                preTileA,
-                                                blockSize(arg.scaleA),
-                                                1,
-                                                true,
-                                                hipblaslt_initialization2string(arg.initialization));
-                refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
-            }
-            refA.emplace_back(std::move(refAAll));
-            // Copy data and scale to device buffers
-            CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count));
-            CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
 #else
             hipblaslt_init_device(ABC_dims::A,
                                   arg.initialization,
@@ -2850,54 +2897,82 @@ void testing_matmul_with_bias(const Arguments& arg,
         if(isBlockScaling(arg.scaleB))
         {
 #ifdef HIPBLASLT_USE_ROCROLLER
-            if(arg.initialization != hipblaslt_initialization::hpl
-               && arg.initialization != hipblaslt_initialization::trig_float
-               && arg.initialization != hipblaslt_initialization::uniform_01)
+            if(mx_use_rocroller)
             {
-                hipblaslt_cout << "Initialization of microscaling data only allows hpl, trig_float "
-                                  "or uniform_01, not "
-                               << hipblaslt_initialization2string(arg.initialization) << std::endl;
-                return;
+                if(arg.initialization != hipblaslt_initialization::hpl
+                   && arg.initialization != hipblaslt_initialization::trig_float
+                   && arg.initialization != hipblaslt_initialization::uniform_01)
+                {
+                    hipblaslt_cout
+                        << "Initialization of microscaling data only allows hpl, trig_float "
+                           "or uniform_01, not "
+                        << hipblaslt_initialization2string(arg.initialization) << std::endl;
+                    throw std::runtime_error("unsupported initialization for MX");
+                }
+                if(arg.algo_method == 1)
+                {
+                    hipblaslt_cout << "MX data types do not support algorithm \"all\"" << std::endl;
+                    throw std::runtime_error("unsupported algorithm for MX");
+                }
+                // For MX format, use mxDataGenerator to generate
+                // input data (consists of data part and scale part)
+                // preTile for B: {tileK, tileN}
+                auto preTileB = preTileSizeForScaleB(arg.scaleB);
+                // Compute batch strides in bytes for data and scale buffers.
+                size_t dataBatchBytesB
+                    = (num_batches[i] > 1) ? elementsToBytes(stride_b[i], TiB) : 0;
+                size_t scaleBatchBytesB = (num_batches[i] > 1) ? size_scaleBVec[i] : 0;
+                // Generate MX data for each batch and collect reference floats
+                std::vector<float> refBAll;
+                refBAll.reserve(static_cast<size_t>(B_row[i]) * B_col[i] * num_batches[i]);
+                for(int64_t b = 0; b < num_batches[i]; b++)
+                {
+                    auto* dataPtr = reinterpret_cast<uint8_t*>(hB[i].buf()) + b * dataBatchBytesB;
+                    auto* scalePtr
+                        = reinterpret_cast<uint8_t*>(hScaleB[i].buf()) + b * scaleBatchBytesB;
+                    auto batchRef
+                        = generateMXInput(TiB,
+                                          scaleDataType(arg.scaleB),
+                                          dataPtr,
+                                          scalePtr,
+                                          B_row[i],
+                                          B_col[i],
+                                          ldb[i],
+                                          transB == HIPBLAS_OP_T,
+                                          preSwizzleSizeForScale(arg.scaleB),
+                                          preTileB,
+                                          1,
+                                          blockSize(arg.scaleB),
+                                          false,
+                                          hipblaslt_initialization2string(arg.initialization));
+                    refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
+                }
+                refB.emplace_back(std::move(refBAll));
+                // Copy data and scale to device buffers
+                CHECK_HIP_ERROR(synchronize(dB[i], hB[i], block_count));
+                CHECK_HIP_ERROR(synchronize(dScaleB[i], hScaleB[i], block_count));
             }
-            if(arg.algo_method == 1)
+            else
             {
-                hipblaslt_cout << "MX data types do not support algorithm \"all\"" << std::endl;
-                return;
+                hipblaslt_init_device(ABC_dims::B,
+                                      arg.initialization,
+                                      alpha_isnan_type(arg, Talpha),
+                                      dB[i].buf(),
+                                      B_row[i],
+                                      B_col[i],
+                                      ldb[i],
+                                      TiB,
+                                      stride_b[i],
+                                      num_batches[i]);
+
+                hipblaslt_init(hScaleB[i].buf(),
+                               B_row[i] / scaleB_row,
+                               B_col[i] / scaleB_col,
+                               ldb[i] / scaleB_row,
+                               scaleDataType(arg.scaleB),
+                               stride_b[i] / scaleB_row / scaleB_col,
+                               num_batches[i]);
             }
-            // For MX format, use mxDataGenerator to generate
-            // input data (consists of data part and scale part)
-            // preTile for B: {tileK, tileN}
-            auto preTileB = preTileSizeForScaleB(arg.scaleB);
-            // Compute batch strides in bytes for data and scale buffers.
-            size_t dataBatchBytesB  = (num_batches[i] > 1) ? elementsToBytes(stride_b[i], TiB) : 0;
-            size_t scaleBatchBytesB = (num_batches[i] > 1) ? size_scaleBVec[i] : 0;
-            // Generate MX data for each batch and collect reference floats
-            std::vector<float> refBAll;
-            refBAll.reserve(static_cast<size_t>(B_row[i]) * B_col[i] * num_batches[i]);
-            for(int64_t b = 0; b < num_batches[i]; b++)
-            {
-                auto* dataPtr  = reinterpret_cast<uint8_t*>(hB[i].buf()) + b * dataBatchBytesB;
-                auto* scalePtr = reinterpret_cast<uint8_t*>(hScaleB[i].buf()) + b * scaleBatchBytesB;
-                auto batchRef = generateMXInput(TiB,
-                                                scaleDataType(arg.scaleB),
-                                                dataPtr,
-                                                scalePtr,
-                                                B_row[i],
-                                                B_col[i],
-                                                ldb[i],
-                                                transB == HIPBLAS_OP_T,
-                                                preSwizzleSizeForScale(arg.scaleB),
-                                                preTileB,
-                                                1,
-                                                blockSize(arg.scaleB),
-                                                false,
-                                                hipblaslt_initialization2string(arg.initialization));
-                refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
-            }
-            refB.emplace_back(std::move(refBAll));
-            // Copy data and scale to device buffers
-            CHECK_HIP_ERROR(synchronize(dB[i], hB[i], block_count));
-            CHECK_HIP_ERROR(synchronize(dScaleB[i], hScaleB[i], block_count));
 #else
             hipblaslt_init_device(ABC_dims::B,
                                   arg.initialization,
@@ -2967,115 +3042,113 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   stride_c[i],
                                   num_batches[i]);
 
-#ifndef HIPBLASLT_USE_ROCROLLER
-        // Sync A/B data from GPU to host so mx_type_to_f32 can read them.
-        // In the non-ROCROLLER MX path, A/B data is initialized on GPU
-        // (hipblaslt_init_device) so hA/hB are not yet populated.
-        if(isBlockScaling(arg.scaleA))
-            CHECK_HIP_ERROR(synchronize(hA[i],
-                                        dA[i],
-                                        num_batches[i],
-                                        A_row[i],
-                                        A_col[i],
-                                        lda[i],
-                                        realDataTypeSize(TiA),
-                                        false,
-                                        stream));
-        if(isBlockScaling(arg.scaleB))
-            CHECK_HIP_ERROR(synchronize(hB[i],
-                                        dB[i],
-                                        num_batches[i],
-                                        K[i],
-                                        N[i],
-                                        ldb[i],
-                                        realDataTypeSize(TiB),
-                                        false,
-                                        stream));
+            if(!mx_use_rocroller)
+            {
+                // Sync A/B data from GPU to host so mx_type_to_f32 can read them.
+                // In the non-ROCROLLER MX path, A/B data is initialized on GPU
+                // (hipblaslt_init_device) so hA/hB are not yet populated.
+                if(isBlockScaling(arg.scaleA))
+                    CHECK_HIP_ERROR(synchronize(hA[i],
+                                                dA[i],
+                                                num_batches[i],
+                                                A_row[i],
+                                                A_col[i],
+                                                lda[i],
+                                                realDataTypeSize(TiA),
+                                                false,
+                                                stream));
+                if(isBlockScaling(arg.scaleB))
+                    CHECK_HIP_ERROR(synchronize(hB[i],
+                                                dB[i],
+                                                num_batches[i],
+                                                K[i],
+                                                N[i],
+                                                ldb[i],
+                                                realDataTypeSize(TiB),
+                                                false,
+                                                stream));
 
-        // Build CPU reference for every batch from the unswizzled data/scale
-        // before mutating the scale buffer. The cblas_gemm validation loop
-        // below offsets refA/refB by stride_* * batchIdx, so we must cover
-        // all num_batches batches (otherwise batchIdx>0 reads past end).
-        if(isBlockScaling(arg.scaleA))
-        {
-            size_t dataBatchBytesA
-                = (num_batches[i] > 1) ? elementsToBytes(stride_a[i], TiA) : 0;
-            size_t scaleBatchBytesA = (num_batches[i] > 1) ? size_scaleAVec[i] : 0;
-            std::vector<float> refAAll;
-            refAAll.reserve(static_cast<size_t>(A_row[i]) * A_col[i] * num_batches[i]);
-            for(int64_t b = 0; b < num_batches[i]; ++b)
-            {
-                auto* dataPtr  = reinterpret_cast<uint8_t*>(hA[i].buf()) + b * dataBatchBytesA;
-                auto* scalePtr = reinterpret_cast<uint8_t*>(hScaleA[i].buf()) + b * scaleBatchBytesA;
-                auto  batchRef = mx_type_to_f32(TiA,
-                                               scaleDataType(arg.scaleA),
-                                               dataPtr,
-                                               scalePtr,
-                                               A_row[i],
-                                               A_col[i],
-                                               scaleA_row,
-                                               scaleA_col);
-                refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
+                if(isBlockScaling(arg.scaleA))
+                {
+                    size_t dataBatchBytesA
+                        = (num_batches[i] > 1) ? elementsToBytes(stride_a[i], TiA) : 0;
+                    size_t scaleBatchBytesA = (num_batches[i] > 1) ? size_scaleAVec[i] : 0;
+                    std::vector<float> refAAll;
+                    refAAll.reserve(static_cast<size_t>(A_row[i]) * A_col[i] * num_batches[i]);
+                    for(int64_t b = 0; b < num_batches[i]; ++b)
+                    {
+                        auto* dataPtr  = reinterpret_cast<uint8_t*>(hA[i].buf()) + b * dataBatchBytesA;
+                        auto* scalePtr = reinterpret_cast<uint8_t*>(hScaleA[i].buf()) + b * scaleBatchBytesA;
+                        auto  batchRef = mx_type_to_f32(TiA,
+                                                        scaleDataType(arg.scaleA),
+                                                        dataPtr,
+                                                        scalePtr,
+                                                        A_row[i],
+                                                        A_col[i],
+                                                        scaleA_row,
+                                                        scaleA_col);
+                        refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
+                    }
+                    refA.emplace_back(std::move(refAAll));
+                }
+                if(isBlockScaling(arg.scaleB))
+                {
+                    size_t dataBatchBytesB
+                        = (num_batches[i] > 1) ? elementsToBytes(stride_b[i], TiB) : 0;
+                    size_t scaleBatchBytesB = (num_batches[i] > 1) ? size_scaleBVec[i] : 0;
+                    std::vector<float> refBAll;
+                    refBAll.reserve(static_cast<size_t>(B_row[i]) * B_col[i] * num_batches[i]);
+                    for(int64_t b = 0; b < num_batches[i]; ++b)
+                    {
+                        auto* dataPtr  = reinterpret_cast<uint8_t*>(hB[i].buf()) + b * dataBatchBytesB;
+                        auto* scalePtr = reinterpret_cast<uint8_t*>(hScaleB[i].buf()) + b * scaleBatchBytesB;
+                        auto  batchRef = mx_type_to_f32(TiB,
+                                                        scaleDataType(arg.scaleB),
+                                                        dataPtr,
+                                                        scalePtr,
+                                                        B_row[i],
+                                                        B_col[i],
+                                                        scaleB_row,
+                                                        scaleB_col);
+                        refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
+                    }
+                    refB.emplace_back(std::move(refBAll));
+                }
+        
+                // Swizzle MX scale on CPU and upload to GPU (unconditional — kernel always expects swizzled).
+                // hScaleA/B hold num_batches scale blocks concatenated (size_scale*Vec[i] bytes each,
+                // padding already included), so swizzle every batch in place before uploading; otherwise
+                // batches 1..N-1 stay un-swizzled and the kernel reads them with a swizzled layout (wrong / OOB).
+                if(isBlockScaling(arg.scaleA))
+                {
+                    size_t scaleA_r    = A_row[i] / scaleA_row;
+                    size_t scaleA_c    = A_col[i] / scaleA_col;
+                    size_t MXBlockA    = blockSize(arg.scaleA);
+                    bool   kAlongRowsA = (transA == HIPBLAS_OP_T);
+                    for(int64_t b = 0; b < num_batches[i]; ++b)
+                    {
+                        auto* scalePtr
+                            = reinterpret_cast<uint8_t*>(hScaleA[i].buf()) + b * size_scaleAVec[i];
+                        swizzle_mx_scale(scalePtr, scaleA_r, scaleA_c, MXBlockA, kAlongRowsA);
+                    }
+                    CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
+                }
+                if(isBlockScaling(arg.scaleB))
+                {
+                    size_t scaleB_r    = B_row[i] / scaleB_row;
+                    size_t scaleB_c    = B_col[i] / scaleB_col;
+                    size_t MXBlockB    = blockSize(arg.scaleB);
+                    bool   kAlongRowsB = (transB == HIPBLAS_OP_N);
+                    for(int64_t b = 0; b < num_batches[i]; ++b)
+                    {
+                        auto* scalePtr
+                            = reinterpret_cast<uint8_t*>(hScaleB[i].buf()) + b * size_scaleBVec[i];
+                        swizzle_mx_scale(scalePtr, scaleB_r, scaleB_c, MXBlockB, kAlongRowsB);
+                    }
+                    CHECK_HIP_ERROR(synchronize(dScaleB[i], hScaleB[i], block_count));
+                }
             }
-            refA.emplace_back(std::move(refAAll));
-        }
-        if(isBlockScaling(arg.scaleB))
-        {
-            size_t dataBatchBytesB
-                = (num_batches[i] > 1) ? elementsToBytes(stride_b[i], TiB) : 0;
-            size_t scaleBatchBytesB = (num_batches[i] > 1) ? size_scaleBVec[i] : 0;
-            std::vector<float> refBAll;
-            refBAll.reserve(static_cast<size_t>(B_row[i]) * B_col[i] * num_batches[i]);
-            for(int64_t b = 0; b < num_batches[i]; ++b)
-            {
-                auto* dataPtr  = reinterpret_cast<uint8_t*>(hB[i].buf()) + b * dataBatchBytesB;
-                auto* scalePtr = reinterpret_cast<uint8_t*>(hScaleB[i].buf()) + b * scaleBatchBytesB;
-                auto  batchRef = mx_type_to_f32(TiB,
-                                               scaleDataType(arg.scaleB),
-                                               dataPtr,
-                                               scalePtr,
-                                               B_row[i],
-                                               B_col[i],
-                                               scaleB_row,
-                                               scaleB_col);
-                refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
-            }
-            refB.emplace_back(std::move(refBAll));
-        }
 
-        // Swizzle MX scale on CPU and upload to GPU (unconditional — kernel always expects swizzled).
-        // hScaleA/B hold num_batches scale blocks concatenated (size_scale*Vec[i] bytes each,
-        // padding already included), so swizzle every batch in place before uploading; otherwise
-        // batches 1..N-1 stay un-swizzled and the kernel reads them with a swizzled layout (wrong / OOB).
-        if(isBlockScaling(arg.scaleA))
-        {
-            size_t scaleA_r    = A_row[i] / scaleA_row;
-            size_t scaleA_c    = A_col[i] / scaleA_col;
-            size_t MXBlockA    = blockSize(arg.scaleA);
-            bool   kAlongRowsA = (transA == HIPBLAS_OP_T);
-            for(int64_t b = 0; b < num_batches[i]; ++b)
-            {
-                auto* scalePtr
-                    = reinterpret_cast<uint8_t*>(hScaleA[i].buf()) + b * size_scaleAVec[i];
-                swizzle_mx_scale(scalePtr, scaleA_r, scaleA_c, MXBlockA, kAlongRowsA);
-            }
-            CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
-        }
-        if(isBlockScaling(arg.scaleB))
-        {
-            size_t scaleB_r    = B_row[i] / scaleB_row;
-            size_t scaleB_c    = B_col[i] / scaleB_col;
-            size_t MXBlockB    = blockSize(arg.scaleB);
-            bool   kAlongRowsB = (transB == HIPBLAS_OP_N);
-            for(int64_t b = 0; b < num_batches[i]; ++b)
-            {
-                auto* scalePtr
-                    = reinterpret_cast<uint8_t*>(hScaleB[i].buf()) + b * size_scaleBVec[i];
-                swizzle_mx_scale(scalePtr, scaleB_r, scaleB_c, MXBlockB, kAlongRowsB);
-            }
-            CHECK_HIP_ERROR(synchronize(dScaleB[i], hScaleB[i], block_count));
-        }
-#endif
             // broadcast first block
             CHECK_HIP_ERROR(broadcast(dA[i], block_count));
             CHECK_HIP_ERROR(broadcast(dB[i], block_count));
@@ -3947,18 +4020,36 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 if(b == 0)
                 {
-                    hipblasLtMatmulMatrixScale_t sscale = HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
-                    hipblasLtMatmulMatrixScale_t svector
-                        = HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F;
+                    auto toMatrixScale = [](hipblaslt_scaling_format f) {
+                        switch(f)
+                        {
+                        case hipblaslt_scaling_format::Vector:
+                            return HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F;
+                        case hipblaslt_scaling_format::Block_32_UE8M0:
+                            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+                        case hipblaslt_scaling_format::Block_16_UE8M0:
+                            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE8M0_EXT;
+                        case hipblaslt_scaling_format::Block_32_UE4M3:
+                            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE4M3_EXT;
+                        case hipblaslt_scaling_format::Block_16_UE4M3:
+                            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3;
+                        case hipblaslt_scaling_format::Block_32_UE5M3:
+                            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE5M3_EXT;
+                        case hipblaslt_scaling_format::Block_16_UE5M3:
+                            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT;
+                        case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+                            return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
+                        default:
+                            return HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
+                        }
+                    };
                     extepilogue[gemmIdx].setMode(epilogue[gemmIdx]);
                     extepilogue[gemmIdx].setBiasDataType(bias_type);
                     extepilogue[gemmIdx].setAuxDataType(aux_type);
                     extepilogue[gemmIdx].setAuxLeadingDimension(lde[gemmIdx]);
                     extepilogue[gemmIdx].setAuxBatchStride(stride_e[gemmIdx]);
-                    extepilogue[gemmIdx].setScalingAType(
-                        arg.scaleA == hipblaslt_scaling_format::Vector ? svector : sscale);
-                    extepilogue[gemmIdx].setScalingBType(
-                        arg.scaleB == hipblaslt_scaling_format::Vector ? svector : sscale);
+                    extepilogue[gemmIdx].setScalingAType(toMatrixScale(arg.scaleA));
+                    extepilogue[gemmIdx].setScalingBType(toMatrixScale(arg.scaleB));
                 }
                 extinputs[b][gemmIdx].setA((void*)((dA[gemmIdx].as<char>())
                                                    + b * size_dA[gemmIdx] * realDataTypeSize(TiA)));
@@ -3972,13 +4063,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                 extinputs[b][gemmIdx].setBeta(&h_beta[gemmIdx]);
                 extinputs[b][gemmIdx].setBias(bias_addr);
                 extinputs[b][gemmIdx].setScaleA(
-                    (arg.scaleA == hipblaslt_scaling_format::Scalar
-                     || arg.scaleA == hipblaslt_scaling_format::Vector)
+                    arg.scaleA != hipblaslt_scaling_format::none
                         ? (void*)((dScaleA[gemmIdx].as<char>()) + b * size_scaleAVec[gemmIdx])
                         : nullptr);
                 extinputs[b][gemmIdx].setScaleB(
-                    (arg.scaleB == hipblaslt_scaling_format::Scalar
-                     || arg.scaleB == hipblaslt_scaling_format::Vector)
+                    arg.scaleB != hipblaslt_scaling_format::none
                         ? (void*)((dScaleB[gemmIdx].as<char>()) + b * size_scaleBVec[gemmIdx])
                         : nullptr);
                 extinputs[b][gemmIdx].setScaleC(arg.scaleC ? dScaleC[gemmIdx].as<char>() : nullptr);

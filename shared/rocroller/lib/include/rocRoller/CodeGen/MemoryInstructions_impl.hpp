@@ -929,7 +929,8 @@ namespace rocRoller
     {
         return [dst](Instruction inst) -> Instruction {
             if(GPUInstructionInfo::isVMEM(inst.getOpCode())
-               || GPUInstructionInfo::isLDS(inst.getOpCode()))
+               || GPUInstructionInfo::isLDS(inst.getOpCode())
+               || GPUInstructionInfo::isTensor(inst.getOpCode()))
             {
                 inst.addExtraDst(dst);
             }
@@ -942,7 +943,8 @@ namespace rocRoller
     {
         return [src](Instruction inst) -> Instruction {
             if(GPUInstructionInfo::isVMEM(inst.getOpCode())
-               || GPUInstructionInfo::isLDS(inst.getOpCode()))
+               || GPUInstructionInfo::isLDS(inst.getOpCode())
+               || GPUInstructionInfo::isTensor(inst.getOpCode()))
             {
                 inst.addExtraSrc(src);
             }

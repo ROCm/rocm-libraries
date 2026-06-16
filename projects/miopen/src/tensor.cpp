@@ -130,7 +130,12 @@ std::size_t GetVectorLengthForLayout(const std::optional<miopenTensorLayout_t>& 
         case miopenTensorNCHWc8: vector_length = 8; break;
         case miopenTensorCHWNc4:
         case miopenTensorNCHWc4: vector_length = 4; break;
-        default: break;
+
+        case miopenTensorNCHW:
+        case miopenTensorNHWC:
+        case miopenTensorCHWN:
+        case miopenTensorNCDHW:
+        case miopenTensorNDHWC: break;
         }
     }
 
@@ -163,7 +168,12 @@ void VectLensReorder(miopenTensorLayout_t layout, std::vector<size_t>& lens)
         // For some reason we have CHWN storage layout for CHWNc
         ReorderVector(lens, {1, 2, 3, 0});
         break;
-    default: break;
+
+    case miopenTensorNCHW:
+    case miopenTensorNHWC:
+    case miopenTensorCHWN:
+    case miopenTensorNCDHW:
+    case miopenTensorNDHWC: break;
     }
 }
 
@@ -183,7 +193,12 @@ void VectLensRecalc(miopenTensorLayout_t layout,
         // For some reason we have CHWN storage layout for CHWNc
         c_pos = 0;
         break;
-    default: return;
+
+    case miopenTensorNCHW:
+    case miopenTensorNHWC:
+    case miopenTensorCHWN:
+    case miopenTensorNCDHW:
+    case miopenTensorNDHWC: return;
     }
 
     if(lens[c_pos] % vector_length != 0)
@@ -577,8 +592,9 @@ std::string TensorDescriptor::LayoutEnumToStr(miopenTensorLayout_t layout)
     case miopenTensorCHWNc8: return "CHWNc";
     case miopenTensorNCDHW: return "NCDHW";
     case miopenTensorNDHWC: return "NDHWC";
-    default: MIOPEN_THROW(miopenStatusInternalError, "Unknown layout");
     }
+
+    MIOPEN_THROW(miopenStatusInternalError, "Unknown layout");
 }
 
 const std::string& TensorDescriptor::GetLayout_str() const
@@ -694,7 +710,6 @@ bool TensorDescriptor::IsPossibleLayout(const std::string& storage_layout,
             }
             break;
         case LayoutValidationMode::StrictDecreasingStrides: break;
-        default: MIOPEN_THROW(miopenStatusInternalError, "Unknown validation mode provided");
         }
 
         layout_strides.push_back(strides[pos]);
@@ -1574,8 +1589,9 @@ std::string GetCastTensorBuildOptionFromType(const std::string& buildOption, mio
         MIOPEN_THROW(miopenStatusBadParm, "miopenDouble data type not supported in cast tensor.");
     case miopenInt64:
         MIOPEN_THROW(miopenStatusBadParm, "miopenInt64 data type not supported in cast tensor.");
-    default: MIOPEN_THROW(miopenStatusBadParm, "Invalid data type in cast tensor desc.");
     }
+
+    MIOPEN_THROW(miopenStatusBadParm, "Invalid data type in cast tensor desc.");
 }
 
 void CastTensor(const Handle& handle,
