@@ -608,7 +608,7 @@ class TestCkTileMxGroupedGemm : public ::testing::Test
 
             // Pre-shuffle scale buffers for the hardware
 #if defined(CK_USE_GFX1250)
-            constexpr index_t NXdlPackEff = 1;
+            constexpr ck_tile::index_t NXdlPackEff = 1;
 
             ck_tile::HostTensor<AScaleDataType> scale_a_shuffled(
                 {static_cast<std::size_t>(scale_padded_M), static_cast<std::size_t>(num_scale_k)},
