@@ -164,18 +164,25 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     endif()
     set_target_properties(_rocisa PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/rocisa"
-        INSTALL_RPATH "$ORIGIN"
         BUILD_RPATH "${_st_build_rpath}"
     )
-    # On Windows there is no RPATH; copy stinkytofu.dll next to _rocisa.pyd
-    # so the dynamic linker can find it at runtime.
-    if(WIN32)
-        add_custom_command(TARGET _rocisa POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_FILE:stinkytofu>
-                $<TARGET_FILE_DIR:_rocisa>
-        )
+    if(_stinkytofu_from_subdirectory)
+        # Source-built sibling: no installed libstinkytofu exists, so the wheel carries
+        # its own copy next to _rocisa and loads it from there.
+        set_target_properties(_rocisa PROPERTIES INSTALL_RPATH "$ORIGIN")
+        # Windows has no RPATH; copy stinkytofu.dll next to _rocisa.pyd so the loader
+        # finds it at runtime.
+        if(WIN32)
+            add_custom_command(TARGET _rocisa POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_FILE:stinkytofu>
+                    $<TARGET_FILE_DIR:_rocisa>
+            )
+        endif()
     endif()
+    # Installed stinkytofu is a standard ROCm library on the loader's search path (like
+    # libyaml behind PyYAML); _rocisa's DT_NEEDED resolves it from there, so no
+    # wheel-local copy or RPATH is needed in that case.
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py"
         "${CMAKE_CURRENT_BINARY_DIR}/rocisa/__init__.py"
@@ -195,25 +202,37 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     endif()
 
     if(ROCISA_STANDALONE)
-        # Install rules for scikit-build-core: place _rocisa.so, libstinkytofu.so,
-        # and __init__.py into the rocisa/ package directory in the wheel.
+        # scikit-build-core wheel install rules: place _rocisa and __init__.py into the
+        # rocisa/ package directory in the wheel.
         install(TARGETS _rocisa DESTINATION rocisa)
-        # Co-install the stinkytofu shared library next to _rocisa.
-        install(FILES $<TARGET_FILE:stinkytofu> DESTINATION rocisa)
-        if(NOT WIN32)
-            install(FILES $<TARGET_SONAME_FILE:stinkytofu> DESTINATION rocisa)
+        if(_stinkytofu_from_subdirectory)
+            # Source-built: vendor libstinkytofu into the wheel — no installed copy exists.
+            install(FILES $<TARGET_FILE:stinkytofu> DESTINATION rocisa)
+            if(NOT WIN32)
+                install(FILES $<TARGET_SONAME_FILE:stinkytofu> DESTINATION rocisa)
+            endif()
         endif()
+        # Installed stinkytofu ships in its own ROCm package; it is not bundled here.
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py" DESTINATION rocisa)
     endif()
 
-    # Example plugin — target only exists when the stinkytofu subproject is configured
-    # with -DSTINKYTOFU_BUILD_EXAMPLES=ON (default OFF; opted in by the standalone wheel
-    # build via tasks.py). Integrated/ROCm builds leave it OFF, so the target is absent
-    # and this block is skipped — the example never lands in a production ROCm package.
-    # When present, it is co-located in rocisa/ next to libstinkytofu (installed by the
-    # ROCISA_STANDALONE block above), so the "$ORIGIN/.." RPATH resolves the host.
-    # Only installable for shared builds (MODULE target); static builds use OBJECT libs.
-    if(TARGET stinkytofu-plugin-helloworld AND BUILD_SHARED_LIBS)
+    # TODO: rocisa should automatically detect whether the resolved stinkytofu (installed
+    # or source-built) actually includes the example plugin — e.g. via a stinkytofu-exported
+    # variable from find_package(stinkytofu), or by probing the installed plugin dir — and
+    # surface that to the test layer so test_pass_plugin.py enables the plugin check only
+    # when the example is present, instead of relying on a filesystem glob + pytest.skip.
+    # That also lets plugin-install ownership move entirely to stinkytofu (see the
+    # STINKYTOFU_INSTALL_PLUGINDIR direction) without rocisa re-installing or guessing.
+    #
+    # Example plugin — target only exists when stinkytofu is configured with
+    # -DSTINKYTOFU_BUILD_EXAMPLES=ON (default OFF; opted in by the source-built standalone
+    # wheel via tasks.py). Integrated/ROCm builds leave it OFF, so the target is absent and
+    # this block is skipped — the example never lands in a production ROCm package. It is
+    # only shipped in the source-built case, where libstinkytofu is vendored into rocisa/,
+    # so the plugin's "$ORIGIN/.." RPATH resolves the host. (With an installed stinkytofu
+    # the host lives elsewhere and that RPATH would not resolve, hence the subdirectory
+    # guard.) Only installable for shared builds (MODULE target); static builds use OBJECT.
+    if(TARGET stinkytofu-plugin-helloworld AND BUILD_SHARED_LIBS AND _stinkytofu_from_subdirectory)
         set_target_properties(stinkytofu-plugin-helloworld PROPERTIES
             EXCLUDE_FROM_ALL FALSE
             INSTALL_RPATH "$ORIGIN/.."
