@@ -468,12 +468,8 @@ def get_wave_warp_pairs(
     tile_math.py) on the (wave, warp_m, warp_n) granularity, and any curated pair
     rejected is dropped with a warning.
     """
-    tm_pairs_mn = {
-        (wave, (wt[0], wt[1]))
-        for (wave, wt) in _tm_get_valid_wave_warp_pairs(
-            tile_m, tile_n, tile_k, dtype_key, arch,
-        )
-    }
+    tm_pairs = _tm_get_valid_wave_warp_pairs(tile_m, tile_n, tile_k, dtype_key, arch)
+    tm_pairs_mn = {(wave, (wt[0], wt[1])) for (wave, wt) in tm_pairs}
     result = []
     for wave in get_wave_configs(tile_m, tile_n, tile_k, variant):
         for mn in get_warp_configs_for_tile_and_wave(
@@ -487,6 +483,14 @@ def get_wave_warp_pairs(
                 )
                 continue
             result.append((wave, mn))
+
+    # If no curated pairs survived (e.g. for architectures whose supported wave
+    # combos don't match the CDNA-derived curated strategies, such as rdna4/gfx1250),
+    # fall back to all tile_math-valid pairs so those arches still get kernels.
+    if not result and tm_pairs:
+        for wave, wt in tm_pairs:
+            result.append((wave, (wt[0], wt[1])))
+
     return result
 
 

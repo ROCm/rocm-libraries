@@ -28,6 +28,7 @@ ARCH_FAMILY_MAP: Dict[str, str] = {
     "gfx1100": "rdna3",
     "gfx1200": "rdna4",
     "gfx1201": "rdna4",
+    "gfx1250": "rdna4",
 }
 
 # Element size in bytes for each data type
@@ -42,6 +43,7 @@ WARP_SUPPORTED_COMBINATIONS: Dict[str, List[List[int]]] = {
     "gfx1100": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1]],
     "gfx1200": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1]],
     "gfx1201": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1]],
+    "gfx1250": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1], [2, 1, 1], [1, 2, 2], [4, 1, 1], [1, 4, 1], [2, 2, 1]],
 }
 
 # Supported warp tile combinations: arch -> dtype_key -> [[warp_tile_m, n, k], ...]
@@ -103,6 +105,10 @@ WARP_TILE_SUPPORTED_COMBINATIONS: Dict[str, Dict[str, List[List[int]]]] = {
         "fp8_bf8_fp32": [[16, 16, 16]],
         "bf8_fp8_fp32": [[16, 16, 16]],
         "int8_int8_int32": [[16, 16, 16]],
+    },
+    "gfx1250": {
+        "fp16_fp16_fp32": [[16, 16, 32]],
+        "bf16_bf16_fp32": [[16, 16, 32]],
     },
 }
 
