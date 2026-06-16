@@ -1,0 +1,83 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+# Pre-submit GPU emulation tests for TensileLite gfx1250 common GEMM tests.
+#
+# Dispatches to an external CI workflow that builds ROCm from the PR's commit
+# and runs GPU emulation tests on gfx1250. The downstream handler posts commit
+# statuses back to this PR automatically.
+#
+# Required secrets:
+#   GPU_EMU_DISPATCH_PAT  — GitHub PAT with `repo` scope on the target repo
+#   GPU_EMU_DISPATCH_REPO — Target repository in "org/repo" format (secret to
+#                           avoid exposing internal infrastructure in public logs)
+#
+# Required variable:
+#   GPU_EMU_DISPATCH_ENABLED — Set to "true" to enable dispatch (kill switch)
+#
+# Note: forked PRs cannot trigger dispatch (no access to secrets).
+
+name: Pre-Submit GPU Emulation Tests
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check-paths:
+    name: Check affected paths
+    runs-on: ubuntu-24.04
+    outputs:
+      should_dispatch: ${{ steps.check.outputs.should_dispatch }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 2
+      - id: check
+        run: |
+          if git diff --name-only HEAD~1 | grep -qE '^projects/hipblaslt/tensilelite/|^\.github/workflows/tensilelite-'; then
+            echo "should_dispatch=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_dispatch=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  dispatch-gpu-tests:
+    name: Dispatch gfx1250 emulation tests
+    needs: check-paths
+    if: >-
+      needs.check-paths.outputs.should_dispatch == 'true'
+      && !github.event.pull_request.draft
+      && vars.GPU_EMU_DISPATCH_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Trigger GPU emulation build and tests
+        env:
+          GH_TOKEN: ${{ secrets.GPU_EMU_DISPATCH_PAT }}
+          DISPATCH_REPO: ${{ secrets.GPU_EMU_DISPATCH_REPO }}
+          COMMIT: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg commit    "$COMMIT" \
+            --arg pr_number "$PR_NUMBER" \
+            '{
+               event_type: "psdb-trigger",
+               client_payload: {
+                 repo: "rocm-libraries",
+                 commit: $commit,
+                 pr_number: $pr_number,
+                 families: "gfx1250",
+                 component_list: "tensilelite"
+               }
+             }' \
+          | gh api "repos/$DISPATCH_REPO/dispatches" --input -
