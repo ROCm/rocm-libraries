@@ -12,12 +12,13 @@ Outputs into ./rank/:
 These files are checked into the MIOpen tree. Only re-run when the source
 LightGBM .txt model changes. Requires `treelite>=4` and `tl2cgen>=1`.
 
-v11 (2026-06-12): runtime-pure, rank-only, retrained on corrected
-(unfiltered) data. Same 51-feature schema as v10; the v9/v10 filter that
-excluded Xdlops solvers on RDNA3 was reverted (Xdlops are applicable on
-RDNA3 via Composable Kernel; MIOpen IsApplicable has no arch gate). GPU
-inputs come from hipDeviceProp_t + the gpu_constants.h arch table. Source
-model is model_rank_v11_runtime.txt.
+v16 (2026-06-15): HIP-only, rank-only. 41 features. Dropped every GPU
+feature that is not directly readable from hipDeviceProp_t, so there is no
+embedded per-arch table anymore (gpu_constants.h is gone). The only GPU
+inputs are cu_count, wave_size, lds_size_per_workgroup_kb, l2_cache_total_kb,
+boost_clock_mhz, vram_bytes (all hipDeviceProp_t) and gfx_id (gcnArchName).
+This lets the model project to unseen architectures without curated data.
+Source model is model_rank_v16s_strict.txt.
 """
 from __future__ import annotations
 
@@ -36,9 +37,9 @@ HERE = Path(__file__).resolve().parent
 
 MODELS = [
     # (subdir, libname, source .txt model)
-    # v11 runtime-pure: 51 features, GPU values sourced from hipDeviceProp_t +
-    # gpu_constants.h (no GPUInfo JSON / spec_id). Retrained on corrected data.
-    ("rank", "lgbm_rank", "model_rank_v11_runtime.txt"),
+    # v16 HIP-only: 41 features. GPU inputs are exclusively hipDeviceProp_t
+    # fields + gfx_id; no embedded per-arch table.
+    ("rank", "lgbm_rank", "model_rank_v16s_strict.txt"),
 ]
 
 

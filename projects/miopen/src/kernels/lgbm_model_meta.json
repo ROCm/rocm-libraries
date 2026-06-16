@@ -36,21 +36,11 @@
       "out_layout",
       "cu_count",
       "wave_size",
-      "simds_per_cu",
-      "lds_size_per_cu_kb",
       "lds_size_per_workgroup_kb",
-      "l1_cache_kb_per_cu",
       "l2_cache_total_kb",
       "boost_clock_mhz",
-      "xcd_count",
-      "shader_engines",
-      "cacheline_size_bytes",
       "vram_bytes",
-      "mfma_shape_count",
       "gfx_id",
-      "arch_family",
-      "winograd_support",
-      "asm_implicit_gemm_support",
       "solver_name"
     ],
     "numeric": [
@@ -84,17 +74,10 @@
       "bandwidth_gbps",
       "cu_count",
       "wave_size",
-      "simds_per_cu",
-      "lds_size_per_cu_kb",
       "lds_size_per_workgroup_kb",
-      "l1_cache_kb_per_cu",
       "l2_cache_total_kb",
       "boost_clock_mhz",
-      "xcd_count",
-      "shader_engines",
-      "cacheline_size_bytes",
-      "vram_bytes",
-      "mfma_shape_count"
+      "vram_bytes"
     ],
     "categorical": [
       "data_type",
@@ -103,9 +86,6 @@
       "fil_layout",
       "out_layout",
       "gfx_id",
-      "arch_family",
-      "winograd_support",
-      "asm_implicit_gemm_support",
       "solver_name"
     ],
     "categorical_vocab": {
@@ -147,22 +127,6 @@
         "gfx90a",
         "gfx942",
         "gfx950"
-      ],
-      "arch_family": [
-        "CDNA2",
-        "CDNA3",
-        "CDNA4",
-        "RDNA3",
-        "RDNA3.5",
-        "RDNA4"
-      ],
-      "winograd_support": [
-        "false",
-        "true"
-      ],
-      "asm_implicit_gemm_support": [
-        "false",
-        "true"
       ],
       "solver_name": [
         "ConvAsm1x1U",
@@ -1860,5 +1824,5 @@
       "GemmWrwUniversal"
     ]
   },
-  "_note_v11": "v11_runtime: runtime-pure features (51, no spec_id/l3/peak_tflops) on CORRECT unfiltered data. The v9/v10 Xdlops filter was REVERTED - Xdlops solvers ARE applicable on RDNA3 via Composable Kernel (MIOpen IsApplicable has no arch gate). Oracle val geomean 1.0147 top1 94.5%."
+  "_note_v16": "v16_strict: HIP-only inputs. 41 features. Dropped all 8 HSA-only GPU fields (simds_per_cu,l1_cache_kb_per_cu,shader_engines,cacheline_size_bytes,xcd_count,mfma_shape_count,winograd_support,asm_implicit_gemm_support) PLUS lds_size_per_cu_kb and arch_family. Only GPU inputs: cu_count,wave_size,lds_size_per_workgroup_kb,l2_cache_total_kb,boost_clock_mhz,vram_bytes (all hipDeviceProp_t) + gfx_id (gcnArchName). No curated GPU data. Oracle val geomean 1.0147 top1 94.6% - identical to v11."
 }

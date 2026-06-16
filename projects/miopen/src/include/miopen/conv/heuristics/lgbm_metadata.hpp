@@ -12,9 +12,9 @@ namespace miopen {
 namespace ai {
 namespace lgbm {
 
-// Number of features the v10 rank model consumes per row. Matches
+// Number of features the v16 rank model consumes per row. Matches
 // model_meta.json rank.feature_order length.
-inline constexpr int kNumFeatures = 51;
+inline constexpr int kNumFeatures = 41;
 
 // Singleton bundling the rank-model metadata (categorical vocabularies +
 // solver list). Constructed lazily on first call to Get(); thread-safe via the

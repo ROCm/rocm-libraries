@@ -10,9 +10,6 @@
 #include <miopen/handle.hpp>
 #include <miopen/logger.hpp>
 
-// Arch-invariant GPU constants keyed by gfx_id (generated; v10 runtime-pure).
-#include "lgbm_models/gpu_constants.h"
-
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -25,9 +22,11 @@ namespace lgbm {
 
 namespace {
 
-// Indices into the v10 51-feature row, matching model_meta.json
-// rank.feature_order. v10 dropped spec_id, l3_infinity_cache_kb, and all 6
-// peak_tflops_* relative to v5.
+// Indices into the v16 41-feature row, matching model_meta.json
+// rank.feature_order. v16 is HIP-only: every GPU feature that is not directly
+// readable from hipDeviceProp_t was dropped, so there is no embedded per-arch
+// table. The only GPU inputs are the six hipDeviceProp_t-backed numerics below
+// plus gfx_id.
 constexpr int kIdxNMiniBatchSize = 0;
 constexpr int kIdxChannels       = 1;
 constexpr int kIdxDepth          = 2;
@@ -63,22 +62,12 @@ constexpr int kIdxFilLayout      = 31;
 constexpr int kIdxOutLayout      = 32;
 constexpr int kIdxCuCount               = 33;
 constexpr int kIdxWaveSize              = 34;
-constexpr int kIdxSimdsPerCu            = 35;
-constexpr int kIdxLdsSizePerCuKb        = 36;
-constexpr int kIdxLdsSizePerWorkgroupKb = 37;
-constexpr int kIdxL1CacheKbPerCu        = 38;
-constexpr int kIdxL2CacheTotalKb        = 39;
-constexpr int kIdxBoostClockMhz         = 40;
-constexpr int kIdxXcdCount              = 41;
-constexpr int kIdxShaderEngines         = 42;
-constexpr int kIdxCachelineSizeBytes    = 43;
-constexpr int kIdxVramBytes             = 44;
-constexpr int kIdxMfmaShapeCount        = 45;
-constexpr int kIdxGfxId                  = 46;
-constexpr int kIdxArchFamily             = 47;
-constexpr int kIdxWinogradSupport        = 48;
-constexpr int kIdxAsmImplicitGemmSupport = 49;
-constexpr int kIdxSolverName             = 50;
+constexpr int kIdxLdsSizePerWorkgroupKb = 35;
+constexpr int kIdxL2CacheTotalKb        = 36;
+constexpr int kIdxBoostClockMhz         = 37;
+constexpr int kIdxVramBytes             = 38;
+constexpr int kIdxGfxId                 = 39;
+constexpr int kIdxSolverName            = 40;
 
 // Treelite missing-marker. Generated header sets missing = -1 to indicate
 // "present"; we mirror that in our LgbmEntry union.
@@ -119,14 +108,18 @@ int DirectionPerfDbCode(conv::Direction d)
 
 std::string DataTypeName(miopenDataType_t t)
 {
-    switch(t)
-    {
-    case miopenHalf: return "fp16";
-    case miopenFloat: return "fp32";
-    case miopenBFloat16: return "bf16";
-    case miopenInt8: return "int8";
-    default: return "";
-    }
+    // Only the four dtypes in the model's data_type vocab are named; anything
+    // else returns "" (encoded as the missing category). An if-chain avoids
+    // -Wswitch-enum, which would require listing every miopenDataType_t value.
+    if(t == miopenHalf)
+        return "fp16";
+    if(t == miopenFloat)
+        return "fp32";
+    if(t == miopenBFloat16)
+        return "bf16";
+    if(t == miopenInt8)
+        return "int8";
+    return "";
 }
 
 // Fill the problem feature block (indices 0..32). The 6 derived workload
@@ -181,46 +174,28 @@ void FillProblemFeatures(LgbmEntry* row,
     SetCategorical(row[kIdxOutLayout], meta.CategoricalCode("out_layout", p.GetOutLayout()));
 }
 
-// Fill the GPU feature block (indices 33..49). Six numeric come straight from
-// the live device (hipDeviceProp_t via the Handle); the rest are arch
-// invariants from the gfx_id -> gpu_constants.h table.
-void FillGpuFeatures(LgbmEntry* row,
-                     const Handle& handle,
-                     const std::string& gfx_id,
-                     const GpuArchConstants& c,
+// Fill the GPU feature block (indices 33..39). v16 uses only fields readable
+// from the live device via the Handle (hipDeviceProp_t) plus gfx_id; there is
+// no curated per-arch data, so the model can project to unseen architectures.
+void FillGpuFeatures(LgbmEntry* row, const Handle& handle, const std::string& gfx_id,
                      const LgbmMetadata& meta)
 {
     SetNumeric(row[kIdxCuCount],   static_cast<double>(handle.GetMaxComputeUnits()));
     SetNumeric(row[kIdxWaveSize],  static_cast<double>(handle.GetWavefrontWidth()));
+    SetNumeric(row[kIdxLdsSizePerWorkgroupKb],
+               static_cast<double>(handle.GetLocalMemorySize()) / 1024.0);
     SetNumeric(row[kIdxL2CacheTotalKb],
                static_cast<double>(handle.GetL2CacheSize()) / 1024.0);
     SetNumeric(row[kIdxBoostClockMhz],
                static_cast<double>(handle.GetClockRateKhz()) / 1000.0);
-    SetNumeric(row[kIdxLdsSizePerWorkgroupKb],
-               static_cast<double>(handle.GetLocalMemorySize()) / 1024.0);
     SetNumeric(row[kIdxVramBytes], static_cast<double>(handle.GetGlobalMemorySize()));
 
-    SetNumeric(row[kIdxSimdsPerCu],         static_cast<double>(c.simds_per_cu));
-    SetNumeric(row[kIdxLdsSizePerCuKb],     static_cast<double>(c.lds_size_per_cu_kb));
-    SetNumeric(row[kIdxL1CacheKbPerCu],     static_cast<double>(c.l1_cache_kb_per_cu));
-    SetNumeric(row[kIdxXcdCount],           static_cast<double>(c.xcd_count));
-    SetNumeric(row[kIdxShaderEngines],      static_cast<double>(c.shader_engines));
-    SetNumeric(row[kIdxCachelineSizeBytes], static_cast<double>(c.cacheline_size_bytes));
-    SetNumeric(row[kIdxMfmaShapeCount],     static_cast<double>(c.mfma_shape_count));
-
     SetCategorical(row[kIdxGfxId], meta.CategoricalCode("gfx_id", gfx_id));
-    SetCategorical(row[kIdxArchFamily], meta.CategoricalCode("arch_family", c.arch_family));
-    SetCategorical(row[kIdxWinogradSupport],
-                   meta.CategoricalCode("winograd_support", c.winograd_support ? "true" : "false"));
-    SetCategorical(
-        row[kIdxAsmImplicitGemmSupport],
-        meta.CategoricalCode("asm_implicit_gemm_support",
-                             c.asm_implicit_gemm_support ? "true" : "false"));
 }
 
 // Score the full solver vocabulary over a finished problem+GPU prefix and
 // return the argmax solver index. `row[kIdxSolverName]` is overwritten per
-// candidate. v10 has no candidate masking, margin gate, or applicability VETO.
+// candidate. v16 has no candidate masking, margin gate, or applicability VETO.
 std::size_t ArgmaxOverVocab(std::array<LgbmEntry, kNumFeatures>& row, const LgbmMetadata& meta)
 {
     const auto& solvers = meta.Solvers();
@@ -252,13 +227,10 @@ solver::Id PickSolver(const conv::ProblemDescription& problem, const Handle& han
     // :sramecc+:xnack- suffix).
     const std::string gfx_id = handle.GetDeviceName();
 
-    const auto& table = gpu_arch_constants();
-    const auto cit    = table.find(gfx_id);
-    if(cit == table.end())
-    {
-        MIOPEN_LOG_I2("lgbm: abstain (no arch constants for " << gfx_id << ")");
-        return {};
-    }
+    // Architecture gating: only run on gfx_ids the model was trained on. The
+    // feature set is otherwise fully runtime-derived, so the model can project
+    // to unseen architectures; this gate keeps it to validated archs until that
+    // projection is vetted on new silicon.
     if(meta.CategoricalCode("gfx_id", gfx_id) < 0)
     {
         MIOPEN_LOG_I2("lgbm: abstain (gfx_id " << gfx_id << " not in model vocab)");
@@ -267,7 +239,7 @@ solver::Id PickSolver(const conv::ProblemDescription& problem, const Handle& han
 
     std::array<LgbmEntry, kNumFeatures> row{};
     FillProblemFeatures(row.data(), problem, meta);
-    FillGpuFeatures(row.data(), handle, gfx_id, cit->second, meta);
+    FillGpuFeatures(row.data(), handle, gfx_id, meta);
 
     const std::size_t top = ArgmaxOverVocab(row, meta);
 
