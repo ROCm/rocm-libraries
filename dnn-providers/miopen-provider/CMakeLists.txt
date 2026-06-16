@@ -152,6 +152,9 @@ add_library(
     miopen_plugin_impl OBJECT
     engines/MiopenEngine.cpp
     engines/plans/MiopenBatchnormApplicabilityChecks.cpp
+    engines/plans/MiopenReluApplicabilityChecks.cpp
+    engines/plans/MiopenReluPlan.cpp
+    engines/plans/MiopenReluPlanBuilder.cpp
     engines/plans/MiopenBatchnormPlanBuilder.cpp
     engines/plans/MiopenBatchnormBwdPlan.cpp
     engines/plans/MiopenBatchnormFwdInferencePlan.cpp
@@ -172,6 +175,7 @@ add_library(
     MiopenTensor.cpp
     MiopenPluginPublic.cpp
 )
+
 target_include_directories(miopen_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(miopen_plugin_impl PUBLIC MIOpen hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
 

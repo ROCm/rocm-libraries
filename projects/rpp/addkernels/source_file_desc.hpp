@@ -25,20 +25,17 @@ SOFTWARE.
 #ifndef SOURCE_FILE_DESC_HPP
 
 #define SOURCE_FILE_DESC_HPP
-#include <string>
 #include <memory>
+#include <string>
 
-class SourceFileDesc
-{
-    public:
+class SourceFileDesc {
+   public:
     const std::string path;
     int included_line;
     std::shared_ptr<SourceFileDesc> included_from;
 
     SourceFileDesc(const std::string& path_, std::shared_ptr<SourceFileDesc> from, int line)
-        : path(path_), included_line(line), included_from(from)
-    {
-    }
+        : path(path_), included_line(line), included_from(from) {}
 };
 
-#endif // SOURCE_FILE_DESC_HPP
+#endif  // SOURCE_FILE_DESC_HPP

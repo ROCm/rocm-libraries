@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -242,11 +242,11 @@ namespace rocsparse
         // Setting count to 0.
         //
         RETURN_IF_HIP_ERROR(
-            hipMemsetAsync(target_ptr_, 0, sizeof(I) * (num_seq + 1), handle_->stream));
+            rocsparse_hipMemsetAsync(target_ptr_, 0, sizeof(I) * (num_seq + 1), handle_->stream));
 
         {
             const I base_value = static_cast<I>(target_base_);
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 target_ptr_, &base_value, sizeof(I), hipMemcpyHostToDevice, handle_->stream));
         }
 

@@ -38,6 +38,7 @@
 #include <variant>
 
 #include "origami/math.hpp"
+#include "origami/origami_export.h"
 
 namespace origami {
 
@@ -87,7 +88,7 @@ inline data_type_t int_to_data_type(int dt) { return static_cast<data_type_t>(dt
  * @param type Data type
  * @return int Number of bits
  */
-int datatype_to_bits(data_type_t type);
+ORIGAMI_EXPORT int datatype_to_bits(data_type_t type);
 
 /**
  * @brief Convert data_type_t to number of bytes.
@@ -105,7 +106,7 @@ inline double data_type_to_bytes(data_type_t type) {
  * @param type Data type
  * @return std::string String representation of data type
  */
-std::string datatype_to_string(data_type_t type);
+ORIGAMI_EXPORT std::string datatype_to_string(data_type_t type);
 
 /**
  * @brief Convert string to data_type_t enum.
@@ -113,7 +114,7 @@ std::string datatype_to_string(data_type_t type);
  * @param s String value to convert
  * @return data_type_t Corresponding data type
  */
-data_type_t string_to_datatype(std::string s);
+ORIGAMI_EXPORT data_type_t string_to_datatype(std::string s);
 
 /**
  * @brief Struct to define a matrix instruction.
@@ -301,7 +302,7 @@ struct dim4_t {
  * Provides programmatic access to runtime configuration options that can be
  * set either programmatically or via environment variables.
  */
-struct runtime_options {
+struct ORIGAMI_EXPORT runtime_options {
   /// Enable debug logging (reads from ANALYTICAL_GEMM_DEBUG env var)
   bool debug_enabled;
 
