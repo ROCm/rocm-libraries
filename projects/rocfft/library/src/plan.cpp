@@ -3797,6 +3797,13 @@ void rocfft_plan_t::InitRCCLCommunicator()
             device_set.insert(brick.location.device);
     }
 
+    // include the device active at plan creation so it always
+    // participates in the communicator
+    int current_device = 0;
+    if(hipGetDevice(&current_device) != hipSuccess || current_device == hipInvalidDeviceId)
+        throw std::runtime_error("hipGetDevice failed");
+    device_set.insert(current_device);
+
     if(device_set.size() > 1)
         rccl = rocfft_rccl_comm_t::create(device_set);
 }
