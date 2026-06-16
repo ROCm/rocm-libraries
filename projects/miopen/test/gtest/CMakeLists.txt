@@ -189,7 +189,7 @@ function(add_gtest TEST_NAME TEST_CPP)
     foreach(i RANGE 1 ${GTEST_PARALLEL_LEVEL})
       math(EXPR SHARD_INDEX "${i} - 1")
       add_test(NAME ${TEST_NAME}_shard${i}
-        COMMAND ${TEST_NAME} 
+        COMMAND ${TEST_NAME}
           --gtest_filter=${MIOPEN_GTEST_FILTER}
           --gtest_output=xml:${PROJECT_BINARY_DIR}/test_results/${TEST_NAME}_shard${i}.xml
         WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"

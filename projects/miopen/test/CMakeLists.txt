@@ -222,7 +222,7 @@ endif()
 
 # Project-prefixed targets avoid collisions when included via add_subdirectory in a superbuild.
 # Unprefixed `check` / `tests` / `gpu_detection_check` aliases are created standalone-only.
-add_custom_target(miopen-check 
+add_custom_target(miopen-check
   COMMAND ${CMAKE_COMMAND} -E make_directory ${PROJECT_BINARY_DIR}/test_results
   COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure --verbose -C ${CMAKE_CFG_INTDIR} --exclude-regex ".*_suite" COMMENT "Running MIOpen tests"
 )
