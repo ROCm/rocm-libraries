@@ -655,7 +655,6 @@ void init_containers(nb::module_ m)
         .def("getCompleteRegNameWithType", &rocisa::RegisterContainer::getCompleteRegNameWithType)
         .def("getCompleteRegName", &rocisa::RegisterContainer::getCompleteRegName)
         .def("splitRegContainer", &rocisa::RegisterContainer::splitRegContainer)
-        .def("setMsb", &rocisa::RegisterContainer::setMsb)
         .def(
             "__eq__",
             [](const rocisa::RegisterContainer& self, nb::object other) {

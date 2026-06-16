@@ -126,7 +126,6 @@ namespace rocisa
                     kStr += vop3->toString();
                 }
                 kStr = formatWithComment(kStr);
-                setMsb(kStr, srcs, dst);
             }
             else
             {
@@ -156,7 +155,6 @@ namespace rocisa
                     kStr += sdwa->toString();
                 }
                 kStr = formatWithComment(kStr);
-                setMsb(kStr, srcs, dst);
                 std::string kStr2;
                 if(kernel().wavefront == 64)
                 {

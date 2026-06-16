@@ -119,10 +119,6 @@ namespace rocisa
                 t += "  /// " + comment;
             }
             t += "\n";
-            if(getAsmCaps()["HasVgprMSB"])
-            {
-                rocIsa::getInstance().setVgprMsb(-1);
-            }
             return t;
         }
     };
@@ -746,9 +742,6 @@ namespace rocisa
             {
                 // macro formatting
                 std::string tmp = x->toString();
-                size_t pos = tmp.find("\n");
-                if(tmp.find("s_set_vgpr_msb") != std::string::npos)
-                    tmp.insert(pos+1, "    ");
                 s += "    " + tmp;
             }
             s += ".endm\n";

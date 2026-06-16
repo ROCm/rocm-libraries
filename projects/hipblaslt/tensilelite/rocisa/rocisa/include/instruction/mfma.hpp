@@ -524,7 +524,6 @@ namespace rocisa
             auto        newInstStr = preStr();
             std::string kStr       = newInstStr + " " + getArgStr();
             kStr = formatWithComment(kStr);
-            setMsb(kStr, {a, b, acc2.has_value() ? acc2.value() : InstructionInput(acc2_imm)}, acc);
             return kStr;
         }
 
@@ -940,7 +939,6 @@ namespace rocisa
         {
             auto        newInstStr = preStr();
             std::string kStr       = newInstStr + " " + getArgStr();
-            setMsb(kStr, {a, b, acc2}, acc);
             return formatWithComment(kStr);
         }
 
@@ -1080,7 +1078,6 @@ namespace rocisa
             auto        newInstStr = preStr();
             std::string kStr       = newInstStr + " " + getArgStr();
             kStr = formatWithComment(kStr);
-            setMsb(kStr, {a, b, metadata}, acc);
             return kStr;
         }
 
