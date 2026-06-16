@@ -132,59 +132,6 @@ inline std::string dataTypeToShortString(hipdnn_flatbuffers_sdk::data_objects::D
     }
 }
 
-inline std::string deriveLayoutFromStrides(const flatbuffers::Vector<int64_t>* dims,
-                                           const flatbuffers::Vector<int64_t>* strides)
-{
-    if(dims == nullptr || strides == nullptr || dims->size() < 4)
-    {
-        return "unknown";
-    }
-
-    auto ndim = dims->size();
-
-    // Build index-by-stride (descending stride → dimension order)
-    std::vector<size_t> indices(ndim);
-    for(size_t i = 0; i < ndim; ++i)
-    {
-        indices[i] = i;
-    }
-    std::sort(indices.begin(), indices.end(), [&](size_t a, size_t b) {
-        return strides->Get(static_cast<flatbuffers::uoffset_t>(a))
-               > strides->Get(static_cast<flatbuffers::uoffset_t>(b));
-    });
-
-    if(ndim == 4)
-    {
-        // NCHW: N(0) C(1) H(2) W(3) — strides descending in that order
-        if(indices[0] == 0 && indices[1] == 1 && indices[2] == 2 && indices[3] == 3)
-        {
-            return "nchw";
-        }
-        // NHWC: N(0) H(2) W(3) C(1)
-        if(indices[0] == 0 && indices[1] == 2 && indices[2] == 3 && indices[3] == 1)
-        {
-            return "nhwc";
-        }
-    }
-    else if(ndim == 5)
-    {
-        // NCDHW: N(0) C(1) D(2) H(3) W(4)
-        if(indices[0] == 0 && indices[1] == 1 && indices[2] == 2 && indices[3] == 3
-           && indices[4] == 4)
-        {
-            return "ncdhw";
-        }
-        // NDHWC: N(0) D(2) H(3) W(4) C(1)
-        if(indices[0] == 0 && indices[1] == 2 && indices[2] == 3 && indices[3] == 4
-           && indices[4] == 1)
-        {
-            return "ndhwc";
-        }
-    }
-
-    return "unknown";
-}
-
 inline std::string
     nodeAttributesToOperationName(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType)
 {
