@@ -9,6 +9,13 @@ if(MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
         "${CMAKE_CURRENT_SOURCE_DIR}/lgbm_test_vectors.json"
         "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}/lgbm_test_vectors.json"
         COPYONLY)
+    # Perf-config picker fixture: vectors carry raw problem inputs + expected
+    # descriptor; the picker model meta + catalog must also be staged so the
+    # CPU_LgbmPcfgPickerFixture can score on CPU via GetSystemDbPath().
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/lgbm_pcfg_test_vectors.json"
+        "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}/lgbm_pcfg_test_vectors.json"
+        COPYONLY)
 endif()
 
 if(MIOPEN_USE_HIPBLASLT)

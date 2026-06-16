@@ -40,6 +40,12 @@
 #include <miopen/env.hpp>
 #include <miopen/generic_search_controls.hpp>
 
+#include <miopen/config.h>
+#if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
+#include <miopen/conv/heuristics/lgbm_pcfg_hook.hpp>
+#include <miopen/conv/problem_description.hpp>
+#endif
+
 #include <limits>
 #include <type_traits>
 #include <optional>
@@ -167,6 +173,38 @@ auto FindSolutionImpl(rank<1>,
             }
         }
     }
+
+#if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
+    // Perf-config picker: last resort before the generic default. Only fires for
+    // conv problems, when no perf_cfg was passed and the perf-db (+alt) missed
+    // and no search ran — i.e. exactly where GetDefaultPerformanceConfig would
+    // otherwise be used. Perf-db records remain authoritative ("perf-db wins").
+    // The picked string is validated by IsValidPerformanceConfig; on miss/invalid
+    // we fall through to the default below, so behavior never regresses.
+    if constexpr(std::is_same_v<Problem, conv::ProblemDescription>)
+    {
+        if(perf_cfg.empty() && !enforce.IsDbClean(context) &&
+           !(context.do_search || enforce.IsSearch(context)))
+        {
+            const auto picked =
+                ai::lgbm::pcfg::MaybePickConfig(s.SolverDbId(), problem, context.GetStream());
+            if(!picked.empty())
+            {
+                using PerformanceConfig =
+                    decltype(s.GetDefaultPerformanceConfig(context, problem));
+                PerformanceConfig cfg{};
+                cfg.Deserialize(picked);
+                if(s.IsValidPerformanceConfig(context, problem, cfg))
+                {
+                    MIOPEN_LOG_I2("lgbm_pcfg: using picked config for " << s.SolverDbId());
+                    return s.GetSolution(context, problem, cfg);
+                }
+                MIOPEN_LOG_I2("lgbm_pcfg: picked config invalid for " << s.SolverDbId()
+                                                                      << "; using default");
+            }
+        }
+    }
+#endif
 
     return s.GetSolution(context, problem, s.GetDefaultPerformanceConfig(context, problem));
 }
