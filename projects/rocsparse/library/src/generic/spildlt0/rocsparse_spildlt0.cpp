@@ -157,6 +157,7 @@ namespace rocsparse
                 // LCOV_EXCL_STOP
             }
             }
+            break;
         }
         case rocsparse_spildlt0_stage_compute:
         {
@@ -215,6 +216,7 @@ namespace rocsparse
                 // LCOV_EXCL_STOP
             }
             }
+            break;
         }
         }
         // LCOV_EXCL_START

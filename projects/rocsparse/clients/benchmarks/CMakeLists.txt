@@ -123,7 +123,6 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_bsric0.cpp
 ../testings/testing_bsrilu0.cpp
 ../testings/testing_csric0.cpp
-../testings/testing_spildlt0.cpp
 ../testings/testing_csrilu0.cpp
 ../testings/testing_csritilu0.cpp
 ../testings/testing_csritilu0_ex.cpp
@@ -217,6 +216,10 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_check_spmat.cpp
 ../testings/testing_bsrpad_value.cpp
 )
+
+if(BUILD_WITH_ILDLT0)
+  list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_spildlt0.cpp)
+endif()
 
 add_executable(rocsparse-bench ${ROCSPARSE_BENCHMARK_SOURCES} ${ROCSPARSE_CLIENTS_COMMON} ${ROCSPARSE_CLIENTS_TESTINGS})
 

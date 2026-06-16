@@ -353,6 +353,7 @@ inline void auto_testing_bad_arg_set_invalid(rocsparse_spilu0_stage& p)
     p = (rocsparse_spilu0_stage)-1;
 }
 
+#ifdef ROCSPARSE_WITH_ILDLT0
 template <>
 inline void auto_testing_bad_arg_set_invalid(rocsparse_spildlt0_stage& p)
 {
@@ -370,6 +371,7 @@ inline void auto_testing_bad_arg_set_invalid(rocsparse_spildlt0_output& p)
 {
     p = (rocsparse_spildlt0_output)-1;
 }
+#endif
 
 template <>
 inline void auto_testing_bad_arg_set_invalid(rocsparse_spitsv_stage& p)

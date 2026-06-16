@@ -29,6 +29,7 @@
 #define ROCSPARSE_TYPES_H
 
 #include "rocsparse-complex-types.h"
+#include "rocsparse-version.h"
 #include "rocsparse_bfloat16.h"
 
 #include <float.h>
@@ -285,6 +286,7 @@ typedef struct _rocsparse_spic0_descr* rocsparse_spic0_descr;
  */
 typedef struct _rocsparse_spilu0_descr* rocsparse_spilu0_descr;
 
+#ifdef ROCSPARSE_WITH_ILDLT0
 /*! \ingroup types_module
  * \brief \p rocsparse_spildlt0_descr is a structure holding the rocSPARSE spildlt0
  * descriptor data. It must be initialized using
@@ -292,6 +294,7 @@ typedef struct _rocsparse_spilu0_descr* rocsparse_spilu0_descr;
  * end using rocsparse_spildlt0_descr_destroy().
  */
 typedef struct _rocsparse_spildlt0_descr* rocsparse_spildlt0_descr;
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -1210,6 +1213,7 @@ typedef enum rocsparse_spilu0_output_
     rocsparse_spilu0_output_singularity_position, /**< Get the singularity \p int64_t based position for output from the SpILU0 descriptor. */
 } rocsparse_spilu0_output;
 
+#ifdef ROCSPARSE_WITH_ILDLT0
 /*! \ingroup types_module
  *  \brief List of SpILDLT0 algorithms.
  *
@@ -1263,6 +1267,7 @@ typedef enum rocsparse_spildlt0_output_
     rocsparse_spildlt0_output_singularity, /**< Get the type of \ref rocsparse_singularity detected during SpILDLT0 calculation for output from the SpILDLT0 descriptor. */
     rocsparse_spildlt0_output_singularity_position, /**< Get the singularity \p int64_t based position for output from the SpILDLT0 descriptor. */
 } rocsparse_spildlt0_output;
+#endif /* ROCSPARSE_WITH_ILDLT0 */
 
 /*! \ingroup types_module
  *  \brief List of SpGEAM stages.

@@ -521,6 +521,16 @@ constexpr double csric0_gbyte_count(rocsparse_int M, rocsparse_int nnz)
 }
 
 template <typename T>
+constexpr double csrildlt0_gbyte_count(rocsparse_int M, rocsparse_int nnz)
+{
+    // Same accesses as csric0 (read/write of the value array, read of the sparsity pattern),
+    // plus the write of the real diagonal D of M entries.
+    return ((M + 1 + nnz) * sizeof(rocsparse_int) + 2.0 * nnz * sizeof(T)
+            + M * sizeof(floating_data_t<T>))
+           / 1e9;
+}
+
+template <typename T>
 constexpr double csrilu0_gbyte_count(rocsparse_int M, rocsparse_int nnz)
 {
     return ((M + 1 + nnz) * sizeof(rocsparse_int) + 2.0 * nnz * sizeof(T)) / 1e9;

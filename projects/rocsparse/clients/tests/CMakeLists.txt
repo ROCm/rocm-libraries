@@ -116,7 +116,6 @@ set(ROCSPARSE_TEST_SOURCES
   test_bsrilu0.cpp
   test_csric0.cpp
   test_spic0.cpp
-  test_spildlt0.cpp
   test_spilu0.cpp
   test_sptrsv.cpp
   test_csrilu0.cpp
@@ -235,6 +234,10 @@ if(BUILD_ROCSPARSE_DEBUGGING)
     )
 endif()
 
+if(BUILD_WITH_ILDLT0)
+  list(APPEND ROCSPARSE_TEST_SOURCES test_spildlt0.cpp)
+endif()
+
 set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_axpby.cpp
 ../testings/testing_axpyi.cpp
@@ -272,7 +275,6 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_bsric0.cpp
 ../testings/testing_bsrilu0.cpp
 ../testings/testing_csric0.cpp
-../testings/testing_spildlt0.cpp
 ../testings/testing_spic0.cpp
 ../testings/testing_spilu0.cpp
 ../testings/testing_sptrsv.cpp
@@ -386,6 +388,10 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_bsrpad_value.cpp
 rocsparse_test_listeners.cpp
   )
+
+if(BUILD_WITH_ILDLT0)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_spildlt0.cpp)
+endif()
 
 
 

@@ -160,7 +160,8 @@ extern "C" rocsparse_status rocsparse_spildlt0_descr_create(rocsparse_handle    
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
-    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, descr);
     *descr = new _rocsparse_spildlt0_descr();
     return rocsparse_status_success;
     // LCOV_EXCL_START

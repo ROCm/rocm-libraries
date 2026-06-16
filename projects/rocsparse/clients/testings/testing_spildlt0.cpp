@@ -29,16 +29,16 @@
 
 // Host reference for ILDLt factorization (templated on index types I, J)
 template <typename T, typename I, typename J>
-static void host_csrildlt0_ref(J                    M,
-                               const I*             csr_row_ptr,
-                               const J*             csr_col_ind,
-                               T*                   csr_val,
-                               floating_data_t<T>*  diag,
+static void host_csrildlt0_ref(J M,
+                               const I* __restrict__ csr_row_ptr,
+                               const J* __restrict__ csr_col_ind,
+                               T* __restrict__ csr_val,
+                               floating_data_t<T>* __restrict__ diag,
                                rocsparse_index_base base,
-                               int64_t*             struct_pivot,
-                               int64_t*             numeric_pivot,
-                               int64_t*             singular_pivot,
-                               double               tol)
+                               int64_t* __restrict__ struct_pivot,
+                               int64_t* __restrict__ numeric_pivot,
+                               int64_t* __restrict__ singular_pivot,
+                               double tol)
 {
     *struct_pivot   = -1;
     *numeric_pivot  = -1;
@@ -49,9 +49,9 @@ static void host_csrildlt0_ref(J                    M,
 
     for(J ai = 0; ai < M; ++ai)
     {
-        I row_begin = csr_row_ptr[ai] - base;
-        I row_end   = csr_row_ptr[ai + 1] - base;
-        J j;
+        const I row_begin = csr_row_ptr[ai] - base;
+        const I row_end   = csr_row_ptr[ai + 1] - base;
+        J       j;
 
         for(j = row_begin; j < row_end; ++j)
         {
@@ -63,7 +63,7 @@ static void host_csrildlt0_ref(J                    M,
 
         for(j = row_begin; j < row_end; ++j)
         {
-            J col_j = csr_col_ind[j] - base;
+            const J col_j = csr_col_ind[j] - base;
 
             if(col_j == ai)
             {
@@ -76,7 +76,7 @@ static void host_csrildlt0_ref(J                    M,
                 break;
             }
 
-            floating_data_t<T> d_j = diag[col_j];
+            const floating_data_t<T> d_j = diag[col_j];
 
             if(std::abs(d_j) <= tol)
             {
@@ -93,19 +93,19 @@ static void host_csrildlt0_ref(J                    M,
                 continue;
             }
 
-            floating_data_t<T> inv_d_j = static_cast<floating_data_t<T>>(1) / d_j;
+            const floating_data_t<T> inv_d_j = static_cast<floating_data_t<T>>(1) / d_j;
 
-            I row_begin_j = csr_row_ptr[col_j] - base;
-            I row_diag_j  = diag_offset[col_j];
+            const I row_begin_j = csr_row_ptr[col_j] - base;
+            const I row_diag_j  = diag_offset[col_j];
 
             T local_sum = static_cast<T>(0);
 
             for(I k = row_begin_j; k < row_diag_j; ++k)
             {
-                J col_k = csr_col_ind[k] - base;
+                const J col_k = csr_col_ind[k] - base;
                 if(nnz_entries[col_k] != -1)
                 {
-                    I idx = nnz_entries[col_k];
+                    const I idx = nnz_entries[col_k];
                     // L_{ai,k} * D_k * conj(L_{col_j,k})
                     local_sum = std::fma(csr_val[idx],
                                          static_cast<T>(diag[col_k]) * rocsparse_conj(csr_val[k]),
@@ -113,8 +113,8 @@ static void host_csrildlt0_ref(J                    M,
                 }
             }
 
-            T val_j    = (csr_val[j] - local_sum) * static_cast<T>(inv_d_j);
-            csr_val[j] = val_j;
+            const T val_j = (csr_val[j] - local_sum) * static_cast<T>(inv_d_j);
+            csr_val[j]    = val_j;
 
             // Accumulate |L_{ai,col_j}|^2 * D_{col_j} (real)
             const floating_data_t<T> re_l = std::real(val_j);
@@ -133,7 +133,7 @@ static void host_csrildlt0_ref(J                    M,
         {
             diag_offset[ai] = j;
 
-            floating_data_t<T> d_i = std::real(csr_val[j]) - diag_sum;
+            const floating_data_t<T> d_i = std::real(csr_val[j]) - diag_sum;
 
             if(std::abs(d_i) <= tol)
             {
@@ -971,7 +971,7 @@ void testing_spildlt0(const Arguments& arg)
             = (n_calls % 2 == 0) ? (gpu_time[mid] + gpu_time[mid - 1]) / 2 : gpu_time[mid];
 
         auto&        device      = A.template as<rocsparse_format_csr>().device();
-        double       gbyte_count = csric0_gbyte_count<T>(device.m, device.nnz);
+        double       gbyte_count = csrildlt0_gbyte_count<T>(device.m, device.nnz);
         const double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);
         display_timing_info(display_key_t::M,
                             device.m,

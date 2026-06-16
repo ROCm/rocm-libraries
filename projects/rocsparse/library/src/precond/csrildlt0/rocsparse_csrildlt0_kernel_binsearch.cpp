@@ -159,10 +159,9 @@ namespace rocsparse
                 {
                     // L_{row,k} * D_k * conj(L_{local_col,k})
                     floating_data_t<T> d_k = diag[col_k - idx_base];
-                    local_sum
-                        = rocsparse::fma(csr_val[k],
-                                         static_cast<T>(d_k) * rocsparse::conj(csr_val[m_idx]),
-                                         local_sum);
+                    local_sum              = rocsparse::fma(csr_val[m_idx],
+                                               static_cast<T>(d_k) * rocsparse::conj(csr_val[k]),
+                                               local_sum);
                 }
             }
 

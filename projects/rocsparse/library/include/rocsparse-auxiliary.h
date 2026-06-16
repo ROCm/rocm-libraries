@@ -2019,6 +2019,7 @@ rocsparse_status rocsparse_spilu0_get_output(rocsparse_handle        handle,
                                              size_t                  output_size_in_bytes,
                                              rocsparse_error*        p_error);
 
+#ifdef ROCSPARSE_WITH_ILDLT0
 /*! \ingroup aux_module
 *  \brief Create SpILDLT0 descriptor.
 *
@@ -2132,6 +2133,7 @@ rocsparse_status rocsparse_spildlt0_get_output(rocsparse_handle          handle,
                                                void*                     output,
                                                size_t                    output_size_in_bytes,
                                                rocsparse_error*          p_error);
+#endif /* ROCSPARSE_WITH_ILDLT0 */
 
 /*! \ingroup aux_module
  *  \brief Get the fields of the sparse COO matrix descriptor.
