@@ -2801,7 +2801,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         tdmA: bool = kernel["enableTDMA"]
         tdmB: bool = kernel["enableTDMB"]
         tdmM: bool = kernel["enableTDMMetadata"]
-        if tdmA and tdmB and kernel["NumWaves"] > 1:
+        if tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl"):
           module.add(self.undefineSgpr("MulticastMask"))
         else:
           module.add(self.undefineSgpr("MulticastMaskA"))
@@ -9036,7 +9036,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       tdmA: bool = kernel["enableTDMA"]
       tdmB: bool = kernel["enableTDMB"]
       tdmM: bool = kernel["enableTDMMetadata"]
-      if tdmA and tdmB and kernel["NumWaves"] > 1:
+      # Subtile issues both A and B loads on every wave (no wave-parity load
+      # split), so the single parity MulticastMask is wrong there -- it would
+      # OR one tensor's mask into both descriptors. Use the split A/B masks.
+      if tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl"):
         self.defineSgpr("MulticastMask", 1)
       else:
         self.defineSgpr("MulticastMaskA", 1)
