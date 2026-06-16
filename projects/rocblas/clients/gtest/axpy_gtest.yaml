@@ -299,6 +299,37 @@ Tests:
       - axpy_strided_batched: *single_precision
       - axpy_strided_batched_ex: *single_precision
 
+  # Per-batch alpha (scalar vector / alpha striding) - device pointer mode only
+  - name: axpy_stride_alpha
+    category: pre_checkin
+    N: [ 64, 257 ]
+    incx_incy: *incx_incy_range_small
+    alpha_beta: *alpha_beta_range
+    batch_count: [ 3 ]
+    stride_scale: [ 2 ] # for strided_batched x/y stride
+    alpha_beta_stride: true
+    stride_c: [ 1, 2 ] # alpha stride
+    pointer_mode_host: false
+    function:
+      - axpy_batched: *half_single_precisions_complex_real
+      - axpy_strided_batched: *half_single_precisions_complex_real
+
+  - name: axpy_ex_stride_alpha
+    category: pre_checkin
+    N: [ 64, 257 ]
+    incx_incy: *incx_incy_range_small
+    alpha_beta: *alpha_beta_range
+    batch_count: [ 3 ]
+    stride_scale: [ 2 ] # for strided_batched x/y stride
+    alpha_beta_stride: true
+    stride_c: [ 1, 2 ] # alpha stride
+    pointer_mode_host: false
+    function:
+      - axpy_batched_ex: *bfloat_half_single_double_complex_real_precisions
+      - axpy_strided_batched_ex: *bfloat_half_single_double_complex_real_precisions
+      - axpy_batched_ex: *hpa_half_float_alpha
+      - axpy_strided_batched_ex: *hpa_half_float_alpha
+
   - name: blas1_nan_check
     category: pre_checkin
     arguments: *blas1_nan_common_args
