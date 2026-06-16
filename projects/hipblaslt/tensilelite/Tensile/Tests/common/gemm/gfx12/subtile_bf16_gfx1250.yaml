@@ -4,7 +4,7 @@ TestParameters:
 GlobalParameters:
   NumElementsToValidate: -1
   PrintLevel: 3
-  Device: 3
+  Device: 0
   CMakeBuildType: Release
   KernelTime: True
   DataInitTypeA: 3
