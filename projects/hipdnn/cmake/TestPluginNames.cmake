@@ -49,3 +49,6 @@ set(TEST_BAD_API_VERSION_HEURISTIC_PLUGIN_NAME "test_bad_api_version_heuristic_p
 set(TEST_EMPTY_NAME_HEURISTIC_PLUGIN_NAME "test_empty_name_heuristic_plugin")
 set(TEST_DUPLICATE_POLICY_ID_A_PLUGIN_NAME "test_duplicate_policy_id_a_plugin")
 set(TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME "test_duplicate_policy_id_b_plugin")
+
+# Autotune plugin test names
+set(TEST_AUTOTUNE_PLUGIN_NAME "test_autotune_plugin")
