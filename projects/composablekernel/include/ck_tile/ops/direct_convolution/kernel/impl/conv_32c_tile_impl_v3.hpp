@@ -1355,9 +1355,9 @@ inline bool is_applicable(const Conv2dParams& par)
         return false;
     }
 
-    if(!par.is_non_grouped())
+    if(par.groups != 1)
     {
-        LogInfo("Grouped convolution not supported");
+        LogInfo("Grouped convolution not supported by dense kernel");
         return false;
     }
 

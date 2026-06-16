@@ -205,6 +205,26 @@ struct KernelConfigurations
           .c_slices_per_wave = 2,
           .direction         = Direction::Dgrad,
           .swizzle_type      = SwizzleType::XOR}},
+        // --- reduction <= 32 (waves_per_wg=1, keys 60-63) ---
+        {60, {.waves_per_wg = 1, .direction = Direction::Dgrad}},
+        {61, {.waves_per_wg = 1}},
+        {62, {.waves_per_wg = 1, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift}},
+        {63, {.waves_per_wg = 1, .swizzle_type = SwizzleType::CyclicShift}},
+        // --- covering-window gap fill (keys 64-67) ---
+        // W=9: waves_per_wg=3, c_slices_per_wave=3 (CyclicShift; non-pow2 waves)
+        {64,
+         {.waves_per_wg      = 3,
+          .c_slices_per_wave = 3,
+          .direction         = Direction::Dgrad,
+          .swizzle_type      = SwizzleType::CyclicShift}},
+        {65, {.waves_per_wg = 3, .c_slices_per_wave = 3, .swizzle_type = SwizzleType::CyclicShift}},
+        // W=10: waves_per_wg=5, c_slices_per_wave=2 (CyclicShift; non-pow2 waves)
+        {66,
+         {.waves_per_wg      = 5,
+          .c_slices_per_wave = 2,
+          .direction         = Direction::Dgrad,
+          .swizzle_type      = SwizzleType::CyclicShift}},
+        {67, {.waves_per_wg = 5, .c_slices_per_wave = 2, .swizzle_type = SwizzleType::CyclicShift}},
     });
     static_assert(configs_map.is_valid(),
                   "Duplicate or negative config key in conv_32c_tile_v3 configs_map");

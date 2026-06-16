@@ -634,7 +634,10 @@ def direct_conv_status(
     """Classify the direct conv outcome for a single run.
 
     Priority:
-      1. Non-empty stderr -> profiler reported incorrect results.
+      1. Non-empty stderr -> profiler reported incorrect results. A numerical
+         verification failure routes through run_cpu_validation -> check_err,
+         which writes the mismatch to std::cerr, so this branch also covers
+         "applicable instance(s) present but failed verification".
       2. No [Valid] direct conv line in stdout -> no applicable instance.
       3. Otherwise -> OK.
     """

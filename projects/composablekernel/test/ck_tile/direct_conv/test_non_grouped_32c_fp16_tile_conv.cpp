@@ -1940,3 +1940,154 @@ TEST_F(DirectConvNonGrouped32cFp16V3ReductionPadSwizzleCspwDgradTest, Dgrad_Cfg5
 {
     ASSERT_TRUE((RunDgrad<59>(1, 8, 8, 1, 256, 240, 3, 3, 1, 1)));
 }
+
+// =============================================================================
+// v3 — COVERING-WINDOW GAP FILL (W = waves * c_slices_per_wave = 9 and 10).
+//
+// The dispatcher previously instantiated W in {2,3,4,5,6,7,8,12,16,24,32,48,64}
+// only, leaving reductions needing W=9 (total_block_c=288) or W=10
+// (total_block_c=320) uncovered. New configs:
+//   key 64/65 = waves=3, cspw=3 (W=9, total_block_c=288): Dgrad/Fprop CyclicShift
+//   key 66/67 = waves=5, cspw=2 (W=10, total_block_c=320): Dgrad/Fprop CyclicShift
+// Non-power-of-2 waves (3, 5) require CyclicShift (XOR static-asserts pow2).
+// The covering rule places the exact reduction at the top of the window, so
+// these cases are NOT reduction-padded (C_in == total_block_c).
+// =============================================================================
+
+// --- Fprop covering gap (reduction dim C_in = c_tot) ---
+
+class DirectConvNonGrouped32cFp16V3CoveringGapFpropTest
+    : public DirectConvGroupedTestHarness<TileConv32cDenseKernelTraitsV3>
+{
+};
+
+// Config key 65 (W=9, total_block_c=288): C=288, output K=144 (>32).
+TEST_F(DirectConvNonGrouped32cFp16V3CoveringGapFpropTest, Fprop_Cfg65_W9_C288_K144)
+{
+    ASSERT_TRUE((RunFprop<65>(1, 8, 8, 1, 288, 144, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3CoveringGapFpropTest, Fprop_Cfg65_W9_C288_K144_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<65>(2, 16, 16, 1, 288, 144, 3, 3, 1, 1)));
+}
+
+// Config key 67 (W=10, total_block_c=320): C=320, output K=160/K=80 (>32).
+TEST_F(DirectConvNonGrouped32cFp16V3CoveringGapFpropTest, Fprop_Cfg67_W10_C320_K160)
+{
+    ASSERT_TRUE((RunFprop<67>(1, 8, 8, 1, 320, 160, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3CoveringGapFpropTest, Fprop_Cfg67_W10_C320_K80)
+{
+    ASSERT_TRUE((RunFprop<67>(1, 8, 8, 1, 320, 80, 3, 3, 1, 1)));
+}
+
+// --- Dgrad covering gap (reduction dim C_in = k_tot, output = c_tot > 32) ---
+
+class DirectConvNonGrouped32cFp16V3CoveringGapDgradTest
+    : public DirectConvGroupedTestHarness<TileConv32cDenseKernelTraitsV3>
+{
+};
+
+// Config key 64 (W=9, total_block_c=288): K=288, output C=144 (>32).
+TEST_F(DirectConvNonGrouped32cFp16V3CoveringGapDgradTest, Dgrad_Cfg64_W9_C144_K288)
+{
+    ASSERT_TRUE((RunDgrad<64>(1, 8, 8, 1, 144, 288, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3CoveringGapDgradTest, Dgrad_Cfg64_W9_C144_K288_LargerSpatial)
+{
+    ASSERT_TRUE((RunDgrad<64>(2, 16, 16, 1, 144, 288, 3, 3, 1, 1)));
+}
+
+// Config key 66 (W=10, total_block_c=320): K=320, output C=160/C=80 (>32).
+TEST_F(DirectConvNonGrouped32cFp16V3CoveringGapDgradTest, Dgrad_Cfg66_W10_C160_K320)
+{
+    ASSERT_TRUE((RunDgrad<66>(1, 8, 8, 1, 160, 320, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3CoveringGapDgradTest, Dgrad_Cfg66_W10_C80_K320)
+{
+    ASSERT_TRUE((RunDgrad<66>(1, 8, 8, 1, 80, 320, 3, 3, 1, 1)));
+}
+
+// =============================================================================
+// v3 — REDUCTION <= 32 (waves_per_wg=1, total_block_c=32).
+//
+// The smallest covering config used to be waves=2 (window (32,64]), so any
+// reduction <= 32 had no instance, and the dense applicability gate also
+// rejected groups==1 shapes with channels <= 32. The gate is now groups != 1,
+// and waves=1 configs cover reduction in (0,32]:
+//   key 60/61 = waves=1 None        (Dgrad/Fprop) — robust for sub-32 padding
+//   key 62/63 = waves=1 CyclicShift (Dgrad/Fprop) — exact C==32 path
+// Output channel kept > 32 so the shape is genuinely non-grouped.
+// =============================================================================
+
+// --- Fprop reduction <= 32 (reduction dim C_in = c_tot) ---
+
+class DirectConvNonGrouped32cFp16V3ReductionLE32FpropTest
+    : public DirectConvGroupedTestHarness<TileConv32cDenseKernelTraitsV3>
+{
+};
+
+// Config key 61 (None, waves=1): padded reductions C in {3,16,24}, output K=64.
+TEST_F(DirectConvNonGrouped32cFp16V3ReductionLE32FpropTest, Fprop_Cfg61_None_C3_K64)
+{
+    ASSERT_TRUE((RunFprop<61>(1, 8, 8, 1, 3, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3ReductionLE32FpropTest, Fprop_Cfg61_None_C16_K64)
+{
+    ASSERT_TRUE((RunFprop<61>(1, 8, 8, 1, 16, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3ReductionLE32FpropTest, Fprop_Cfg61_None_C24_K64)
+{
+    ASSERT_TRUE((RunFprop<61>(1, 8, 8, 1, 24, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3ReductionLE32FpropTest, Fprop_Cfg61_None_C32_K64)
+{
+    ASSERT_TRUE((RunFprop<61>(1, 8, 8, 1, 32, 64, 3, 3, 1, 1)));
+}
+
+// Config key 63 (CyclicShift, waves=1): exact C==32 path, output K=64.
+TEST_F(DirectConvNonGrouped32cFp16V3ReductionLE32FpropTest, Fprop_Cfg63_CS_C32_K64)
+{
+    ASSERT_TRUE((RunFprop<63>(1, 8, 8, 1, 32, 64, 3, 3, 1, 1)));
+}
+
+// --- Dgrad reduction <= 32 (reduction dim C_in = k_tot, output = c_tot > 32) ---
+
+class DirectConvNonGrouped32cFp16V3ReductionLE32DgradTest
+    : public DirectConvGroupedTestHarness<TileConv32cDenseKernelTraitsV3>
+{
+};
+
+// Config key 60 (None, waves=1): padded reductions K in {3,16,24}, output C=64.
+TEST_F(DirectConvNonGrouped32cFp16V3ReductionLE32DgradTest, Dgrad_Cfg60_None_C64_K3)
+{
+    ASSERT_TRUE((RunDgrad<60>(1, 8, 8, 1, 64, 3, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3ReductionLE32DgradTest, Dgrad_Cfg60_None_C64_K16)
+{
+    ASSERT_TRUE((RunDgrad<60>(1, 8, 8, 1, 64, 16, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3ReductionLE32DgradTest, Dgrad_Cfg60_None_C64_K24)
+{
+    ASSERT_TRUE((RunDgrad<60>(1, 8, 8, 1, 64, 24, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3ReductionLE32DgradTest, Dgrad_Cfg60_None_C64_K32)
+{
+    ASSERT_TRUE((RunDgrad<60>(1, 8, 8, 1, 64, 32, 3, 3, 1, 1)));
+}
+
+// Config key 62 (CyclicShift, waves=1): exact K==32 path, output C=64.
+TEST_F(DirectConvNonGrouped32cFp16V3ReductionLE32DgradTest, Dgrad_Cfg62_CS_C64_K32)
+{
+    ASSERT_TRUE((RunDgrad<62>(1, 8, 8, 1, 64, 32, 3, 3, 1, 1)));
+}
