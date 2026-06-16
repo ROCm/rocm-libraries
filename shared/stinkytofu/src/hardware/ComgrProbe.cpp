@@ -13,6 +13,7 @@
 #include <Windows.h>
 #include <delayimp.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <string>

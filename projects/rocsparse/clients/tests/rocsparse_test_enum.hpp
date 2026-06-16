@@ -33,6 +33,7 @@ static constexpr std::size_t countof2(T (&)[N])
 #define ROCSPARSE_FOREACH_TEST_ENUM		                        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(axpby)					        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(axpyi)					        \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(hip_debug)				\
   TRANSFORM_ROCSPARSE_TEST_ENUM(bsr2csr)				        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(bsrgeam)				        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(bsrgemm)			            \

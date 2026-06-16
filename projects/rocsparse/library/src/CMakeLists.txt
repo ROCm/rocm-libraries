@@ -27,7 +27,6 @@ set(rocsparse_source
 # Auxiliary
   src/auxiliary/rocsparse_auxiliary.cpp
   src/auxiliary/rocsparse_error.cpp
-
 # Common
   src/common/rocsparse_singularity.cpp
   src/common/rocsparse_common.cpp
@@ -683,3 +682,11 @@ set(rocsparse_source
   src/generic/spic0/rocsparse_spic0_buffer_size.cpp
 
 )
+
+if(BUILD_ROCSPARSE_DEBUGGING)
+  list(APPEND rocsparse_source
+    src/hip/rocsparse_hip.cpp
+    src/hip/rocsparse_hip_debug.cpp
+    src/hip/rocsparse_hip_debug_t.cpp)
+endif()
+

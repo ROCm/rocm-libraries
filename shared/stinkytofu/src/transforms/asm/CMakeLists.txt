@@ -20,6 +20,8 @@ target_sources(stinkytofu PRIVATE
     StinkyConfigurableWaitCntPass.cpp
     ScheduleFirstLRsPass.cpp
     StinkyWaitCntInsertionPass.cpp
+    waitcnt/WaitDataflow.cpp
+    waitcnt/ShallowPredPromotion.cpp
     StinkyRemoveWaitCntPass.cpp
     StinkyRemoveNopPass.cpp
     StinkyBuildImplicitDependencyPass.cpp
@@ -30,5 +32,8 @@ target_sources(stinkytofu PRIVATE
     RemoveDelayAluPass.cpp
     InsertDelayAluPass.cpp
     LoopRegionRemarkPass.cpp
+    RemoveWaitAluPass.cpp
+    InsertWaitAluPass.cpp
+    RederiveExpertScopePass.cpp
     EstimateAsmCyclesPass.cpp
 )

@@ -28,6 +28,7 @@
 
 #include "origami/hardware.hpp"
 #include "origami/types.hpp"
+#include "origami/origami_export.h"
 
 #include <vector>
 
@@ -43,7 +44,7 @@ namespace streamk {
  * @param batch Number of batches.
  * @return size_t Total number of output tiles.
  */
-size_t compute_number_of_output_tiles(size_t mt_m, size_t mt_n, size_t m, size_t n, size_t batch);
+ORIGAMI_EXPORT size_t compute_number_of_output_tiles(size_t mt_m, size_t mt_n, size_t m, size_t n, size_t batch);
 
 /**
  * @brief Select the best reduction strategy for StreamK.
@@ -54,7 +55,7 @@ size_t compute_number_of_output_tiles(size_t mt_m, size_t mt_n, size_t m, size_t
  * @param algorithm Grid selection algorithm
  * @return reduction_t Selected reduction strategy
  */
-reduction_t select_reduction(const problem_t& problem,
+ORIGAMI_EXPORT reduction_t select_reduction(const problem_t& problem,
                              const hardware_t& hardware,
                              const config_t& config,
                              grid_selection_t algorithm);
@@ -69,7 +70,7 @@ reduction_t select_reduction(const problem_t& problem,
  * @param max_cus Maximum number of CUs to use.
  * @return size_t Dimensions of the grid launched.
  */
-size_t select_grid_size(const problem_t& problem,
+ORIGAMI_EXPORT size_t select_grid_size(const problem_t& problem,
                         const hardware_t& hardware,
                         const config_t& config,
                         grid_selection_t algorithm,

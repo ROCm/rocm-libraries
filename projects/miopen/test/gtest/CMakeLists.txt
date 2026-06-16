@@ -173,6 +173,9 @@ function(add_gtest TEST_NAME TEST_CPP)
         add_gtest_negative_filter("Full/GPU_LstmMSRnn_FP32.TestFloat/1095") # Disable flaky test ALMIOPEN-1926
     endif()
 
+    # Excluded from MIOpen CI: the FP32 case OOMs when shards run concurrently on a single GPU.
+    add_gtest_negative_filter("*UnitTestConvSolver*LargeStride*")
+
     # when building the single gtest, add them in a sharded manner
     # loop over GTEST_PARALLEL_LEVEL
     set(MIOPEN_GTEST_FILTER "${MIOPEN_GTEST_PREFIX}*${MIOPEN_GTEST_SUFFIX}*:${MIOPEN_GTEST_PREFIX}*NONE*${MIOPEN_GTEST_FILTER_NEGATIVE}")

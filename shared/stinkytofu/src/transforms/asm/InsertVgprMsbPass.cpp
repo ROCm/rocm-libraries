@@ -23,6 +23,7 @@
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
 
 #include <cassert>
+#include <cstdint>
 #include <string>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"

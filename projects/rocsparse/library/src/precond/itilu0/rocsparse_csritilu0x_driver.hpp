@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -156,11 +156,11 @@ namespace rocsparse
 
             void* buffer = buffer_;
             buffer       = info.init(buffer);
-            THROW_IF_HIP_ERROR(hipMemcpyAsync(
+            THROW_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 info.options, &options_, sizeof(J), hipMemcpyHostToDevice, handle_->stream));
-            THROW_IF_HIP_ERROR(hipMemcpyAsync(
+            THROW_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 info.nmaxiter, &nsweeps_, sizeof(J), hipMemcpyHostToDevice, handle_->stream));
-            THROW_IF_HIP_ERROR(hipStreamSynchronize(handle_->stream));
+            THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
 
             const bool compute_nrm_corr
                 = (options_ & rocsparse_itilu0_option_compute_nrm_correction) > 0;
@@ -192,11 +192,11 @@ namespace rocsparse
             buffer       = info.init(buffer);
 
             J options_, nsweeps_;
-            THROW_IF_HIP_ERROR(hipMemcpyAsync(
+            THROW_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 &options_, info.options, sizeof(J), hipMemcpyDeviceToHost, handle_->stream));
-            THROW_IF_HIP_ERROR(hipMemcpyAsync(
+            THROW_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 &nsweeps_, info.nmaxiter, sizeof(J), hipMemcpyDeviceToHost, handle_->stream));
-            THROW_IF_HIP_ERROR(hipStreamSynchronize(handle_->stream));
+            THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
 
             const bool compute_nrm_corr
                 = (options_ & rocsparse_itilu0_option_compute_nrm_correction) > 0;
