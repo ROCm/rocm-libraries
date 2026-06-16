@@ -95,11 +95,15 @@ function(create_individual_gemm_bquant_target datatype layout trait tile_config 
     add_dependencies(benchmark_gemm_bquant_${layout} ${target_name})
     add_dependencies(benchmark_gemm_bquant_${datatype}_${layout} ${target_name})
 
-    # Add to pipeline-specific targets
+    # Add to pipeline-specific, epilogue-specific, and scheduler-specific targets
     string(REPLACE "_" ";" trait_parts ${trait})
     list(GET trait_parts 0 pipeline)
+    list(GET trait_parts 1 epilogue)
+    list(GET trait_parts 2 scheduler)
 
     add_dependencies(benchmark_gemm_bquant_${pipeline}_pipeline ${target_name})
+    add_dependencies(benchmark_gemm_bquant_${epilogue}_epilogue ${target_name})
+    add_dependencies(benchmark_gemm_bquant_${scheduler}_scheduler ${target_name})
 endfunction()
 
 # Function to build individual GEMM BQuant targets
@@ -228,6 +232,39 @@ else()
     foreach(pipeline IN LISTS GEMM_BQUANT_PIPELINES)
         add_custom_target(benchmark_gemm_bquant_${pipeline}_pipeline)
     endforeach()
+
+    # Create epilogue-specific collection targets
+    set(GEMM_BQUANT_EPILOGUES "default;cshuffle")
+    foreach(epilogue IN LISTS GEMM_BQUANT_EPILOGUES)
+        add_custom_target(benchmark_gemm_bquant_${epilogue}_epilogue)
+    endforeach()
+
+    # Create scheduler-specific collection targets
+    set(GEMM_BQUANT_SCHEDULERS "intrawave")
+    foreach(scheduler IN LISTS GEMM_BQUANT_SCHEDULERS)
+        add_custom_target(benchmark_gemm_bquant_${scheduler}_scheduler)
+    endforeach()
+
+    # Divide MAX_INSTANCES budget across all active (dtype, layout) combos so that
+    # sampling fires per-combo rather than being a single cap.
+    # CMake integer division truncates; clamp the result to at least 1 so that a
+    # small total budget (e.g. 5 instances across 8 combos) does not silently
+    # produce a per-combo budget of 0 and skip all kernels.
+    if(NOT "${GEMM_BQUANT_MAX_INSTANCES}" STREQUAL "")
+        list(LENGTH GEMM_BQUANT_DATATYPE _bq_n_dt)
+        list(LENGTH GEMM_BQUANT_LAYOUT _bq_n_lay)
+        math(EXPR _bq_n_combos "${_bq_n_dt} * ${_bq_n_lay}")
+        if(_bq_n_combos GREATER 0)
+            math(EXPR GEMM_BQUANT_MAX_INSTANCES
+                "${GEMM_BQUANT_MAX_INSTANCES} / ${_bq_n_combos}")
+            if(GEMM_BQUANT_MAX_INSTANCES EQUAL 0)
+                set(GEMM_BQUANT_MAX_INSTANCES 1)
+                message(WARNING "  gemm_bquant: per-combo budget rounded to 0; clamped to 1 (total budget too small for ${_bq_n_combos} combos)")
+            else()
+                message(STATUS "  gemm_bquant: per-combo budget = ${GEMM_BQUANT_MAX_INSTANCES} (${_bq_n_combos} combos)")
+            endif()
+        endif()
+    endif()
 
     # Build individual targets for each datatype/layout combination
     foreach(dt IN LISTS GEMM_BQUANT_DATATYPE)

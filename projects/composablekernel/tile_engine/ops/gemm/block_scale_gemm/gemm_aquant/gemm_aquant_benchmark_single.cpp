@@ -116,7 +116,7 @@ void benchmark_single(const ck_tile::ArgParser& arg_parser)
                     arg_parser.get_int("rotating_count"),
                     arg_parser.get_bool("json_output")};
 
-    auto& profiler = AQuantGemmProfiler::instance(setting);
+    AQuantGemmProfiler profiler{setting};
 
     try
     {

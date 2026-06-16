@@ -13,9 +13,6 @@
 #include "ck_tile/host.hpp"
 #include "gemm_aquant_common.hpp"
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
 // Data types and Layouts are defined by the generated kernel headers:
 //   ADataType, BDataType, AQDataType, AccDataType, CDataType
 //   ALayout, BLayout, CLayout, AQLayout
@@ -178,6 +175,8 @@ auto calculate_rtol_atol_aquant(const ck_tile::index_t K,
     return ck_tile::make_tuple(std::max(rtol, rtol_split_k), std::max(atol, atol_split_k));
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 /// @brief Compare device and host results for AQuant GEMM
 bool compare_aquant(std::string instanceName,
                     ck_tile::index_t K,

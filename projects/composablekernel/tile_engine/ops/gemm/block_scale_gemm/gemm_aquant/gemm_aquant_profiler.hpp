@@ -19,13 +19,12 @@
 class AQuantGemmProfiler
 {
     public:
-    // Initialize and return the singleton. Must be called exactly once per process;
-    // subsequent calls return the same instance regardless of the `setting` argument.
-    static AQuantGemmProfiler& instance(Setting setting)
-    {
-        static AQuantGemmProfiler inst{setting};
-        return inst;
-    }
+    explicit AQuantGemmProfiler(Setting setting) : setting_(setting) {}
+
+    AQuantGemmProfiler(const AQuantGemmProfiler&)            = delete;
+    AQuantGemmProfiler& operator=(const AQuantGemmProfiler&) = delete;
+
+    void reset() { kernel_instances_.clear(); }
 
     void benchmark(AQuantGemmProblem& problem,
                    std::function<float(const ck_tile::QuantGemmHostArgs&,
@@ -271,13 +270,7 @@ class AQuantGemmProfiler
         return kernel_instance;
     }
 
-    AQuantGemmProfiler(const AQuantGemmProfiler&)            = delete;
-    AQuantGemmProfiler& operator=(const AQuantGemmProfiler&) = delete;
-
     private:
-    ~AQuantGemmProfiler() { kernel_instances_.clear(); }
-    AQuantGemmProfiler(Setting setting) : setting_(setting) {}
-
     Setting setting_;
     std::vector<KernelInstance> kernel_instances_;
 };

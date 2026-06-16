@@ -91,15 +91,15 @@ class BQuantGemmBenchmark:
 
         parts = kernel_name.split("_")
 
-        # Extract boolean flags
+        # Locate the first boolean token; collect the contiguous boolean run
+        bool_start = -1
         bool_sequence = []
-        for i, part in enumerate(parts):
-            if part in ["True", "False"]:
+        for part in parts:
+            if part in ("True", "False"):
+                if bool_start == -1:
+                    bool_start = 0
                 bool_sequence.append(part == "True")
-                j = i + 1
-                while j < len(parts) and parts[j] in ["True", "False"]:
-                    bool_sequence.append(parts[j] == "True")
-                    j += 1
+            elif bool_start != -1:
                 break
 
         if len(bool_sequence) >= 5:
