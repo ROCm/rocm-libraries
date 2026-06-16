@@ -202,28 +202,28 @@ struct CKArgs
         }
     }
 
-    // CK BWD interface accepts int32 arrays only; lazy-populate so narrowing
-    // only runs for kernels that survived the RequiresLargeTensorCKInstance
-    // filter (FillValidKernelsIDs constructs CKArgs unconditionally, before
-    // filtering -- narrowing here on overflow shapes would assert even when
-    // no kernel is ultimately selected). The bundle is a mutable member so
-    // its arrays outlive any arg_ptr that captures references to them.
-    // Safe because no BWD large-tensor registrations exist, so MakeArgPtr
-    // is never reached on >INT_MAX inputs.
+    // Sub-INT_MAX shapes bind CK's int32 ck::index_t MakeArgumentPointer
+    // overload, so lengths/strides must be narrowed from the int64 members.
+    // Lazy-populate so narrowing only runs for kernels that survived the
+    // RequiresLargeTensorCKInstance filter (FillValidKernelsIDs constructs
+    // CKArgs unconditionally, before filtering -- narrowing here on overflow
+    // shapes would assert even when no kernel is ultimately selected). The
+    // bundle is a mutable member so its arrays outlive any arg_ptr that
+    // captures references to them. Large-tensor (>INT_MAX) instances instead
+    // bind the int64 long_index_t overload directly from the int64 members
+    // (see the IsLargeTensorCKInstance branches below).
     const NarrowedCKArrays3D& NarrowedArrays() const
     {
-        narrowed = NarrowedCKArrays3D{
-            .in_l             = ToCKIndexArray(in_lengths),
-            .in_s             = ToCKIndexArray(in_strides),
-            .out_l            = ToCKIndexArray(out_lengths),
-            .out_s            = ToCKIndexArray(out_strides),
-            .wei_l            = ToCKIndexArray(wei_lengths),
-            .wei_s            = ToCKIndexArray(wei_strides),
-            .filter_strides   = ToCKIndexArray(filter_strides),
-            .filter_dilations = ToCKIndexArray(filter_dilations),
-            .lPadding         = ToCKIndexArray(lPadding),
-            .rPadding         = ToCKIndexArray(rPadding),
-        };
+        narrowed = MakeNarrowedCKArrays<NarrowedCKArrays3D>(in_lengths,
+                                                            in_strides,
+                                                            out_lengths,
+                                                            out_strides,
+                                                            wei_lengths,
+                                                            wei_strides,
+                                                            filter_strides,
+                                                            filter_dilations,
+                                                            lPadding,
+                                                            rPadding);
         return narrowed;
     }
 
@@ -235,6 +235,10 @@ struct CKArgs
                             float alpha,
                             float beta) const
     {
+        // Bilinear is a MultipleD device op; CK ships no Large_Tensor instance
+        // for it, so an overflow (>INT_MAX) shape is filtered out upstream by
+        // RequiresLargeTensorCKInstance and never reaches this builder. Always
+        // narrow to the int32 overload (mirrors the 3D WRW reference path).
         const auto& a = NarrowedArrays();
         return conv_ptr->MakeArgumentPointer(out,
                                              w,
@@ -261,6 +265,10 @@ struct CKArgs
     auto MakeScaleArgPtr(
         const ConvPtr& conv_ptr, Data_t in, ConstData_t w, ConstData_t out, float alpha) const
     {
+        // Scale is a MultipleD device op; CK ships no Large_Tensor instance for
+        // it, so an overflow (>INT_MAX) shape is filtered out upstream by
+        // RequiresLargeTensorCKInstance and never reaches this builder. Always
+        // narrow to the int32 overload (mirrors the 3D WRW reference path).
         const auto& a = NarrowedArrays();
         return conv_ptr->MakeArgumentPointer(out,
                                              w,
@@ -286,6 +294,32 @@ struct CKArgs
     template <typename ConvPtr>
     auto MakeDefaultArgPtr(const ConvPtr& conv_ptr, Data_t in, ConstData_t w, ConstData_t out) const
     {
+        // Large-tensor (>INT_MAX element stride) instances expose CK's int64
+        // long_index_t MakeArgumentPointer overload; bind it with the int64
+        // member arrays directly (they outlive the returned arg_ptr). This
+        // mirrors the FWD path in ck_grouped_conv_fwd_impl.cpp.
+        if(miopen::solver::IsLargeTensorCKInstance(conv_ptr))
+        {
+            return conv_ptr->MakeArgumentPointer(out,
+                                                 w,
+                                                 {},
+                                                 in,
+                                                 out_lengths,
+                                                 out_strides,
+                                                 wei_lengths,
+                                                 wei_strides,
+                                                 {},
+                                                 {},
+                                                 in_lengths,
+                                                 in_strides,
+                                                 filter_strides,
+                                                 filter_dilations,
+                                                 lPadding,
+                                                 rPadding,
+                                                 PassThrough{},
+                                                 PassThrough{},
+                                                 PassThrough{});
+        }
         const auto& a = NarrowedArrays();
         return conv_ptr->MakeArgumentPointer(out,
                                              w,

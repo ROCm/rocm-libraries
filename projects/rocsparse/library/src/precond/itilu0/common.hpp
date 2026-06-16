@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -95,19 +95,21 @@ namespace rocsparse
     template <typename T>
     inline hipError_t stay_on_device(T* target_, const T* source_, hipStream_t stream_)
     {
-        return hipMemcpyAsync(target_, source_, sizeof(T), hipMemcpyDeviceToDevice, stream_);
+        return rocsparse_hipMemcpyAsync(
+            target_, source_, sizeof(T), hipMemcpyDeviceToDevice, stream_);
     }
 
     template <typename T>
     inline hipError_t on_host(T* target_, const T* source_, hipStream_t stream_)
     {
-        return hipMemcpyAsync(target_, source_, sizeof(T), hipMemcpyDeviceToHost, stream_);
+        return rocsparse_hipMemcpyAsync(
+            target_, source_, sizeof(T), hipMemcpyDeviceToHost, stream_);
     }
 
     template <typename T>
     inline hipError_t on_device(T* target, const T* source_, hipStream_t stream_)
     {
-        return hipMemcpyAsync(target, source_, sizeof(T), hipMemcpyHostToDevice, stream_);
+        return rocsparse_hipMemcpyAsync(target, source_, sizeof(T), hipMemcpyHostToDevice, stream_);
     }
 
     template <typename IMPL>

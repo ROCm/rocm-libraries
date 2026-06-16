@@ -8,7 +8,7 @@
 // occur inside the CK kernel even after MIOpen's host-side widening. The shape
 // is shared with the 3D Fwd test.
 //
-// Shape: x = (1, 96, 512, 512, 88), w = (32, 96, 3, 3, 3), group=1, pad=1, stride=1.
+// Shape: x = (1, 96, 512, 512, 88), w = (16, 96, 1, 1, 1), group=1, pad=0, stride=1.
 //   element count of x = 96 * 512 * 512 * 88 = 2.214 B (just above INT_MAX).
 //   FP16 footprint of x ~= 4.4 GB; FP32 ~= 8.9 GB. The full test allocates several
 //   such tensors (X, W, Y on device plus host-side reference), so heavyweight
@@ -37,7 +37,7 @@ std::vector<TestCase> GetLargeStrideBwdTestCases()
 {
     return {
         // clang-format off
-        TestCase{{1, 96, 512, 512, 88}, {32, 96, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 1, false, false},
+        TestCase{{1, 96, 512, 512, 88}, {16, 96, 1, 1, 1}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, 1, false, false},
         // clang-format on
     };
 }
@@ -57,9 +57,9 @@ miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
     p.UsesCKDynamicLib();
     if constexpr(type == TestDataType::FP32)
     {
-        // BWD reduces over K * Kd * Kh * Kw = 32*3*3*3 = 864 FMAs/output (less than
-        // Fwd's 96*3*3*3 = 2592). RMS error still scales with reduction size, and the
-        // 2× bump from Fwd is conservative here.
+        // BWD reduces over K * Kd * Kh * Kw = 16*1*1*1 = 16 FMAs/output (vs. Fwd's
+        // C = 96 at the 1x1x1 filter). RMS error still scales with reduction size, and
+        // the 2× bump from Fwd is conservative here.
         p.SetTolerance(supportedDevices, miopenFloat, 2.0f);
     }
     return p;

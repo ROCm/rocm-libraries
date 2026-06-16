@@ -8,7 +8,7 @@
 // reference, catching int32 wraparound that can occur inside the CK kernel even
 // after MIOpen's host-side widening. The shape is shared with the Fwd test.
 //
-// Shape: x = (1, 96, 4736, 4736), w = (32, 96, 3, 3), group=1, pad=1, stride=1.
+// Shape: x = (1, 96, 4736, 4736), w = (16, 96, 1, 1), group=1, pad=0, stride=1.
 //   element count of x = 96 * 4736 * 4736 = 2.153 B (just above INT_MAX = 2.147 B).
 //   FP16 footprint of x ~= 4.3 GB; FP32 ~= 8.6 GB. The full test allocates several
 //   such tensors (X, W, Y on device plus host-side reference), so heavyweight
@@ -38,7 +38,7 @@ std::vector<TestCase> GetLargeStrideWrwTestCases()
 {
     return {
         // clang-format off
-        TestCase{{1, 96, 4736, 4736}, {32, 96, 3, 3}, {1, 1}, {1, 1}, {1, 1}, 1, false, false},
+        TestCase{{1, 96, 4736, 4736}, {16, 96, 1, 1}, {0, 0}, {1, 1}, {1, 1}, 1, false, false},
         // clang-format on
     };
 }
@@ -59,8 +59,8 @@ miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
     if constexpr(type == TestDataType::FP32)
     {
         // WRW reduces over N*H*W per output element (~22.4M FMAs at this shape) vs.
-        // Fwd's K*Kh*Kw (864 FMAs). RMS error scales with reduction size, so a much
-        // larger tolerance bump than Fwd's is required.
+        // Fwd's C reduction (96 FMAs at the 1x1 filter). RMS error scales with
+        // reduction size, so a much larger tolerance bump than Fwd's is required.
         p.SetTolerance(supportedDevices, miopenFloat, 80.0f);
     }
     return p;

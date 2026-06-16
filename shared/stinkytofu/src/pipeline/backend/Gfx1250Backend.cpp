@@ -91,7 +91,7 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
 /// TODO: EnableWaitCntInsertion is a per-pass toggle for the
 /// bring-up phase. Once the pipeline stabilizes, pass selection should
 /// be controlled by OptLevel.
-bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
+bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBuilder& PB) {
     const auto& moduleOptions = module.getModuleOptions();
     const OptLevel optLevel = static_cast<OptLevel>(
         std::max(0, std::min(moduleOptions.OptLevel, static_cast<int>(OptLevel::O3))));
@@ -107,6 +107,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
         // strip s_wait_alu before scheduling
         pm.addPass(createRemoveWaitAluPass());
     }
+    PB.applyExtensionPoint(PipelineExtensionPoint::BeforeRegionPasses, pm, module);
 
     // -- region: loopWithPrefetch + noLoadLoopBody --
     // Both the DAG scheduler (O3) and waitcnt insertion need the region-scoped CFG, so they
@@ -115,7 +116,6 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
         PassFeatureConfig passFeatureConfig;
         std::shared_ptr<DAGScheduleJsonCollector> snapshotCollector;
         if (runScheduler) {
-            passFeatureConfig.barrierConfig.unrollMovableBarrier = true;
             passFeatureConfig.loopConfig.unrollGemm = true;
             passFeatureConfig.dagFeatures.distributeGlobalRead = true;
             passFeatureConfig.passOrderSnapshot.jsonPath = moduleOptions.PassOrderSnapshotJson;
@@ -132,14 +132,18 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
         }
         configureDebugOutput(innerPM, moduleOptions, "loopWithPrefetch+noLoadLoopBody",
                              debugStreams);
+        PB.applyExtensionPoint(PipelineExtensionPoint::InnerRegionBegin, innerPM, module);
         addGfx1250RegionPasses(innerPM, module, optLevel, moduleOptions.EnableWaitCntInsertion,
                                runScheduler);
+        PB.applyExtensionPoint(PipelineExtensionPoint::InnerRegionEnd, innerPM, module);
         if (moduleOptions.EnableWaitCntInsertion) {
             innerPM.addPass(createStinkyWaitCntInsertionPass());
         }
         pm.addPass(createKernelToRegionsPassAdaptor(module, {"loopWithPrefetch", "noLoadLoopBody"},
                                                     std::move(innerPM)));
     }
+
+    PB.applyExtensionPoint(PipelineExtensionPoint::AfterRegionPasses, pm, module);
 
     // -- kernel --
 
