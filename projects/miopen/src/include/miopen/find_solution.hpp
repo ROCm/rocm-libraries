@@ -181,7 +181,7 @@ auto FindSolutionImpl(rank<1>,
     // otherwise be used. Perf-db records remain authoritative ("perf-db wins").
     // The picked string is validated by IsValidPerformanceConfig; on miss/invalid
     // we fall through to the default below, so behavior never regresses.
-    if constexpr(std::is_same_v<Problem, conv::ProblemDescription>)
+    if constexpr(std::is_same_v<Problem, ::miopen::conv::ProblemDescription>)
     {
         if(perf_cfg.empty() && !enforce.IsDbClean(context) &&
            !(context.do_search || enforce.IsSearch(context)))
