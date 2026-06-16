@@ -310,9 +310,6 @@ namespace TensileLite
         }
     }
 
-    // Force default visibility on the explicit instantiation (clang does not carry
-    // the template declaration's TENSILELITEHOST_EXPORT through to the out-of-line
-    // explicit instantiation definition) so it stays in the exported ABI.
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC visibility push(default)
 #endif

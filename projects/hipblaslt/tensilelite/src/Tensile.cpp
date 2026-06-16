@@ -105,10 +105,6 @@ namespace TensileLite
         return nullptr;
     }
 
-    // Explicit instantiations of the public LoadLibrary* entry points. clang does
-    // not propagate the template declarations' TENSILELITEHOST_EXPORT (default)
-    // visibility to explicit instantiation definitions, so force default visibility
-    // here to keep them in the shared library's exported ABI.
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC visibility push(default)
 #endif

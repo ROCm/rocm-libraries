@@ -157,15 +157,8 @@ if(HIPSPARSELT_ENABLE_HIP)
     set(HIPBLASLT_ENABLE_CLIENT OFF CACHE BOOL "" FORCE)
     # Builds tensilelite's device libraries (.co/.dat)
     set(HIPBLASLT_ENABLE_DEVICE ${HIPSPARSELT_ENABLE_DEVICE} CACHE BOOL "" FORCE)
-    # Builds tensilelite::tensilelite-host (the shared libtensilelite-host.so this
-    # fork links). Keep its install ON so libtensilelite-host.so ships in this
-    # package for runtime (DT_NEEDED) resolution -- with HIPBLASLT_ENABLE_HOST OFF,
-    # hipBLASLt's hipblaslt-targets export is not created, so tensilelite-host
-    # installs as a plain shared library (no EXPORT clause; see tensilelite/CMakeLists).
     set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
     set(TENSILELITE_ENABLE_INSTALL ON CACHE BOOL "" FORCE)
-    # Route tensilelite-host into this fork's package export (its exported library
-    # links the SHARED tensilelite-host, so that target must be in an export set).
     set(TENSILELITE_HOST_EXPORT_SET hipsparselt-targets)
     set(HIPBLASLT_ENABLE_ASAN ${HIPSPARSELT_ENABLE_ASAN} CACHE BOOL "" FORCE)
     set(HIPBLASLT_DEVICE_LIBRARY_PATH "${CMAKE_BINARY_DIR}/Tensile" CACHE PATH "" FORCE)
@@ -192,12 +185,6 @@ if(HIPSPARSELT_ENABLE_HIP)
     endif()
 
     add_subdirectory("${HIPBLASLT_PATH}" hipblaslt)
-    # NOTE (Phase 2): the previous
-    #   target_compile_definitions(tensilelite-host PRIVATE TENSILE_STATIC_ONLY)
-    # symbol-hiding workaround is gone. tensilelite-host is now a single shared
-    # library that both hipBLASLt and hipSPARSELt link, so there is no second copy
-    # to interpose with -- the reach-in that hid TensileLite's symbols (the §3.4
-    # smoking gun) is no longer needed.
     endblock()
 endif()
 
