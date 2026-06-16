@@ -821,7 +821,9 @@ class AddrCalculation:
         If not, this could generate some other instructions
 
         stmp must point to 2 consecutive SGPRs (stmp, stmp+1) for the 64-bit
-        row-increment computation.
+        row-increment computation.  The caller must ensure that
+        numTempSgprPerBatch >= 2 so that stmp+1 does not alias the
+        element-mask region (enforced in AsmStoreState).
         """
 
         module = Module("incrementToNextRow")
@@ -831,6 +833,9 @@ class AddrCalculation:
             tmpBpe = int(self.kernelWriter.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters())
         if ss.optSrdIncForRow:
             if numRows:
+                assert ss.cfg.numTempSgprPerBatch >= 2, \
+                    "incrementToNextRow needs 2 consecutive SGPRs; " \
+                    "numTempSgprPerBatch=%d is too small" % ss.cfg.numTempSgprPerBatch
                 packedC1 = kernel["PackedC1IndicesX"]
                 assert(len(packedC1) == 1)  # would need to extract each dim and scale
                 if tc == 'Bias' and (not kernel["WorkGroupReduction"]):

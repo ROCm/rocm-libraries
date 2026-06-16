@@ -16343,7 +16343,7 @@ class KernelWriterAssembly(KernelWriter):
   def addStore(self, kernel, ss, tc: str, addrCalc, sumIdx, tmpS01, edge, wsOffset=0, comment="addStore"):
     """
     Add stores for the element with addrCalc and sumIdx.
-    tmpS01 is a single :temp sGPR
+    tmpS01 is a temp SGPR (2 consecutive SGPRs when optSrdIncForRow is set).
     """
     module = Module("addStore sumIdx %s"%(str(sumIdx)))
     if self.do["GlobalWrite"]:
