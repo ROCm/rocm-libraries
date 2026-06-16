@@ -398,7 +398,7 @@ class SyncOp(BaseOp):
 @dataclass
 class MaskKOp(BaseOp):
     """Zero A and B vgprs whose K-index >= remaining
-    tail K, for one subIterK group. 
+    tail K, for one subIterK group.
     """
     subIterK: int = 0
     vgpr_tile_map: dict = field(default_factory=dict)
@@ -521,7 +521,7 @@ class LogicalScheduler:
         self._preloop_emitted: Optional[List[List[List[EmittedModule]]]] = None
         self._ngll_emitted: Optional[List[List[List[EmittedModule]]]] = None
         self._nll_emitted: Optional[List[List[List[EmittedModule]]]] = None
-        # Tail-loop tile bookkeeping. Tail loop only use a subset of tiles, so we track which tileIds are 
+        # Tail-loop tile bookkeeping. Tail loop only use a subset of tiles, so we track which tileIds are
         # unused or freed for reuse within the tail loop.
         self._tail_unused_tile_ids: Dict[str, set] = {'A': set(), 'B': set(),
                                                       'SA': set(), 'SB': set()}
@@ -2205,7 +2205,7 @@ class LogicalScheduler:
                 label="tail_boundary_ab"))
         preamble.append(WaitGROp(wait_gr_counts=WaitGRCounts()))
         preamble.append(SyncOp())
-        
+
 
         # Flat per-subIterK emission. The K-boundary mask depends only on k,
         # and with flat tile ids the per-partition tile_maps reference
@@ -2424,10 +2424,21 @@ class LogicalScheduler:
         for interleaving. When schedule=False, emits instructions sequentially.
         """
         from Tensile.Components.Subtile.InstructionScheduler import instructionSchedule
-        from rocisa.code import Module
+        from rocisa.code import Module, Label
+        from rocisa.container import sgpr
+        from rocisa.instruction import SCmpEQU32, SCBranchSCC0, SMovB32
 
         module = Module(label)
         module.addComment0(f"{label} start")
+        use_pap_preloop_skip = (
+            label == "PRELOOP"
+            and kernel.get("UseSubtileImpl")
+            and kernel.get("PrefetchAcrossPersistent")
+            and kernel.get("StreamK") == 3
+        )
+        pap_merge_label = Label("SubtilePAPPreloopFirstGRMerge", "") if use_pap_preloop_skip else None
+        skipping_first_gr_group = False
+        first_gr_group_done = False
         for pi, partition_emitted in enumerate(emitted_3d):
             for k, em_list in enumerate(partition_emitted):
                 module.addComment0(f"partition={pi} subIterK={k}")
@@ -2436,12 +2447,29 @@ class LogicalScheduler:
                     module.add(scheduled)
                 else:
                     for em in em_list:
+                        if use_pap_preloop_skip and not first_gr_group_done:
+                            if em.opType == 'gr':
+                                if not skipping_first_gr_group:
+                                    module.add(SCmpEQU32(src0=sgpr("SkPrefetchPrimed"), src1=0,
+                                                         comment="Subtile PAP: first PRELOOP GR already issued?"))
+                                    module.add(SCBranchSCC0(labelName=pap_merge_label.getLabelName(),
+                                                            comment="skip first PRELOOP GR group if primed"))
+                                    skipping_first_gr_group = True
+                            elif skipping_first_gr_group:
+                                module.add(pap_merge_label)
+                                module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
+                                                   comment="Subtile PAP: clear after first PRELOOP GR merge"))
+                                first_gr_group_done = True
                         for inst in em.instructions:
                             module.add(inst)
+        if use_pap_preloop_skip and skipping_first_gr_group and not first_gr_group_done:
+            module.add(pap_merge_label)
+            module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
+                               comment="Subtile PAP: clear after first PRELOOP GR merge"))
         module.addComment0(f"{label} end")
         return module
 
-    def emitMainAndExitLoops(self, writer, kernel):
+    def emitMainAndExitLoops(self, writer, kernel, tensorParametersA=None, tensorParametersB=None):
         """Emit preloop + mainloop + NGLL + NLL exit paths (no tail).
 
         Owns all control flow (labels, branches, counter management) for the
@@ -2461,6 +2489,61 @@ class LogicalScheduler:
 
         module = Module("MainAndExitLoops")
         uf = self.unroll_factor
+
+        def make_subtile_pap_module(skip_barrier=False):
+            if (kernel.get("UseSubtileImpl")
+                and kernel.get("PrefetchAcrossPersistent")
+                and kernel.get("StreamK") == 3
+                and hasattr(writer, "prefetchAcrossPersistentSubtile")):
+                preloop_gr = Module("Subtile PAP first PRELOOP GR")
+                for em in self._preloop_emitted[0][0]:
+                    if em.opType != 'gr':
+                        break
+                    for inst in em.instructions:
+                        preloop_gr.add(copy.deepcopy(inst))
+                return writer.prefetchAcrossPersistentSubtile(
+                    kernel, tensorParametersA, tensorParametersB, preloop_gr,
+                    skipBarrier=skip_barrier)
+            return None
+
+        def inject_pap_after_nll_drain(emitted_3d):
+            emitted_3d = copy.deepcopy(emitted_3d)
+
+            def insert_after_drain(em_list):
+                wait_gr = next((em for em in em_list if em.opType == 'wait_gr'), None)
+                if wait_gr is None:
+                    return False
+
+                tail_id = wait_gr.moduleId
+                sync = next((em for em in em_list
+                             if em.opType == 'sync' and em.before == tail_id), None)
+                if sync is not None:
+                    tail_id = sync.moduleId
+
+                pap_module = make_subtile_pap_module(skip_barrier=(sync is not None))
+                if pap_module is None:
+                    return False
+
+                pap_id = max(em.moduleId for em in em_list) + 1
+                consumers = [em for em in em_list if em.before == tail_id]
+                em_list.append(EmittedModule(moduleId=pap_id,
+                                             instructions=[pap_module],
+                                             before=tail_id,
+                                             source=None))
+                # Place PAP between the final drain and the first NLL work that
+                # was waiting on that drain. The existing before-link graph is a
+                # chain, so this preserves scheduler ordering while moving PAP
+                # past the vlcnt(0) that would otherwise drain it immediately.
+                for consumer in consumers:
+                    consumer.before = pap_id
+                return True
+
+            for partition_emitted in emitted_3d:
+                for em_list in partition_emitted:
+                    if insert_after_drain(em_list):
+                        return emitted_3d
+
+            return emitted_3d
 
         # ── Skip preloop/mainloop/NGLL/NLL when K < DepthU ──
         endLabel = Label("SkipToEnd", "")
@@ -2523,7 +2606,7 @@ class LogicalScheduler:
             module.add(Label("SkipToNLL", ""))
         module.addComment0(f"NLL_C{last}")
         module.add(self._emitLoop(writer, kernel, f"NLL_C{last}",
-                                  self._nll_per_unroll[nll_ft]))
+                                  inject_pap_after_nll_drain(self._nll_per_unroll[nll_ft])))
         module.add(SBranch(labelName=endLabel.getLabelName(),
                            comment="skip other exit paths"))
 
@@ -2538,7 +2621,7 @@ class LogicalScheduler:
                 module.add(Label("SkipToNLL", ""))
             module.addComment0(f"NLL_C{ui}")
             module.add(self._emitLoop(writer, kernel, f"NLL_C{ui}",
-                                      self._nll_per_unroll[nll_idx]))
+                                      inject_pap_after_nll_drain(self._nll_per_unroll[nll_idx])))
             if ui < uf - 2:
                 module.add(SBranch(labelName=endLabel.getLabelName(),
                                    comment="skip other exit paths"))

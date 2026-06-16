@@ -58,13 +58,13 @@ def fixSizeInconsistencies(sizes, fileType):
     sizesDict = dict()
     for size, index in sizes:
         size = size[:-4] if len(size) >= 8 else size
-        sizesDict[(value for value in size)] = [size, index]
+        sizesDict[tuple(value for value in size)] = [size, index]
     newSizes = list()
     for value in sizesDict.values():
         newSizes.append(value)
     numSize = len(newSizes)
-    if numSize - origNumSizes > 0:
-        verbose(numSize - origNumSizes, "duplicate size(s) removed from", fileType, "logic file")
+    if origNumSizes - numSize > 0:
+        verbose(origNumSizes - numSize, "duplicate size(s) removed from", fileType, "logic file")
     return newSizes, len(newSizes)
 
 def addKernel(solutionPool, solDict, solution):

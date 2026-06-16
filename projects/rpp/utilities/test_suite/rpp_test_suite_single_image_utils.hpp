@@ -24,42 +24,40 @@ SOFTWARE.
 
 #pragma once
 
-#include <stdio.h>
 #include <dirent.h>
+#include <stdio.h>
 #include <string.h>
+#include <turbojpeg.h>
+
+#include <algorithm>
+#include <filesystem>
+#include <iostream>
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/opencv.hpp>
-#include <iostream>
-#include <vector>
 #include <string>
-#include <algorithm>
-#include <filesystem>
-#include <turbojpeg.h>
+#include <vector>
+
 #include "rpp.h"
 #include "rpp_test_suite_image.h"
 
 using namespace cv;
 using namespace std;
 
-inline cv::Mat convert_pkd3_to_pln3(const cv::Mat& srcPacked)
-{
+inline cv::Mat convert_pkd3_to_pln3(const cv::Mat& srcPacked) {
     int width = srcPacked.cols;
     int height = srcPacked.rows;
 
     cv::Mat dstPlanar(height * 3, width, CV_MAKETYPE(srcPacked.depth(), 1));
 
-    if (srcPacked.depth() == CV_8U || srcPacked.depth() == CV_8S)
-    {
-        for (int y = 0; y < height; y++)
-        {
+    if (srcPacked.depth() == CV_8U || srcPacked.depth() == CV_8S) {
+        for (int y = 0; y < height; y++) {
             const uchar* srcRow = srcPacked.ptr<uchar>(y);
             uchar* dstR = dstPlanar.ptr<uchar>(y);
             uchar* dstG = dstPlanar.ptr<uchar>(y + height);
             uchar* dstB = dstPlanar.ptr<uchar>(y + 2 * height);
 
-            for (int x = 0; x < width; x++)
-            {
+            for (int x = 0; x < width; x++) {
                 uchar val0 = *srcRow++;
                 uchar val1 = *srcRow++;
                 uchar val2 = *srcRow++;
@@ -69,19 +67,15 @@ inline cv::Mat convert_pkd3_to_pln3(const cv::Mat& srcPacked)
                 *dstB++ = val2;
             }
         }
-    }
-    else if (srcPacked.depth() == CV_32F)
-    {
-        for (int y = 0; y < height; y++)
-        {
+    } else if (srcPacked.depth() == CV_32F) {
+        for (int y = 0; y < height; y++) {
             const float* srcRow = srcPacked.ptr<float>(y);
 
             float* dstR = dstPlanar.ptr<float>(y);
             float* dstG = dstPlanar.ptr<float>(y + height);
             float* dstB = dstPlanar.ptr<float>(y + 2 * height);
 
-            for (int x = 0; x < width; x++)
-            {
+            for (int x = 0; x < width; x++) {
                 float val0 = *srcRow++;
                 float val1 = *srcRow++;
                 float val2 = *srcRow++;
@@ -91,19 +85,15 @@ inline cv::Mat convert_pkd3_to_pln3(const cv::Mat& srcPacked)
                 *dstB++ = val2;
             }
         }
-    }
-    else if (srcPacked.depth() == CV_16F)
-    {
-        for (int y = 0; y < height; y++)
-        {
+    } else if (srcPacked.depth() == CV_16F) {
+        for (int y = 0; y < height; y++) {
             const cv::float16_t* srcRow = srcPacked.ptr<cv::float16_t>(y);
 
             cv::float16_t* dstR = dstPlanar.ptr<cv::float16_t>(y);
             cv::float16_t* dstG = dstPlanar.ptr<cv::float16_t>(y + height);
             cv::float16_t* dstB = dstPlanar.ptr<cv::float16_t>(y + 2 * height);
 
-            for (int x = 0; x < width; x++)
-            {
+            for (int x = 0; x < width; x++) {
                 cv::float16_t val0 = *srcRow++;
                 cv::float16_t val1 = *srcRow++;
                 cv::float16_t val2 = *srcRow++;
@@ -118,58 +108,46 @@ inline cv::Mat convert_pkd3_to_pln3(const cv::Mat& srcPacked)
     return dstPlanar;
 }
 
-inline cv::Mat convert_pln3_to_pkd3(const cv::Mat& srcPlanar, int height, int width)
-{
+inline cv::Mat convert_pln3_to_pkd3(const cv::Mat& srcPlanar, int height, int width) {
     cv::Mat dstPacked(height, width, CV_MAKETYPE(srcPlanar.depth(), 3));
 
-    if (srcPlanar.depth() == CV_8U || srcPlanar.depth() == CV_8S)
-    {
-        for (int y = 0; y < height; y++)
-        {
+    if (srcPlanar.depth() == CV_8U || srcPlanar.depth() == CV_8S) {
+        for (int y = 0; y < height; y++) {
             const uchar* srcR = srcPlanar.ptr<uchar>(y);
             const uchar* srcG = srcPlanar.ptr<uchar>(y + height);
             const uchar* srcB = srcPlanar.ptr<uchar>(y + 2 * height);
 
             uchar* dstRow = dstPacked.ptr<uchar>(y);
 
-            for (int x = 0; x < width; x++)
-            {
+            for (int x = 0; x < width; x++) {
                 *dstRow++ = *srcR++;
                 *dstRow++ = *srcG++;
                 *dstRow++ = *srcB++;
             }
         }
-    }
-    else if (srcPlanar.depth() == CV_32F)
-    {
-        for (int y = 0; y < height; y++)
-        {
+    } else if (srcPlanar.depth() == CV_32F) {
+        for (int y = 0; y < height; y++) {
             const float* srcR = srcPlanar.ptr<float>(y);
             const float* srcG = srcPlanar.ptr<float>(y + height);
             const float* srcB = srcPlanar.ptr<float>(y + 2 * height);
 
             float* dstRow = dstPacked.ptr<float>(y);
 
-            for (int x = 0; x < width; x++)
-            {
+            for (int x = 0; x < width; x++) {
                 *dstRow++ = *srcR++;
                 *dstRow++ = *srcG++;
                 *dstRow++ = *srcB++;
             }
         }
-    }
-    else if (srcPlanar.depth() == CV_16F)
-    {
-        for (int y = 0; y < height; y++)
-        {
+    } else if (srcPlanar.depth() == CV_16F) {
+        for (int y = 0; y < height; y++) {
             const cv::float16_t* srcR = srcPlanar.ptr<cv::float16_t>(y);
             const cv::float16_t* srcG = srcPlanar.ptr<cv::float16_t>(y + height);
             const cv::float16_t* srcB = srcPlanar.ptr<cv::float16_t>(y + 2 * height);
 
             cv::float16_t* dstRow = dstPacked.ptr<cv::float16_t>(y);
 
-            for (int x = 0; x < width; x++)
-            {
+            for (int x = 0; x < width; x++) {
                 *dstRow++ = *srcR++;
                 *dstRow++ = *srcG++;
                 *dstRow++ = *srcB++;
@@ -180,8 +158,7 @@ inline cv::Mat convert_pln3_to_pkd3(const cv::Mat& srcPlanar, int height, int wi
     return dstPacked;
 }
 
-inline vector<Mat> loadBatchImages_jpegd(const string& directory, int& noOfImages, bool isColor)
-{
+inline vector<Mat> loadBatchImages_jpegd(const string& directory, int& noOfImages, bool isColor) {
     vector<Mat> images;
     DIR* dir;
     struct dirent* entry;
@@ -204,11 +181,10 @@ inline vector<Mat> loadBatchImages_jpegd(const string& directory, int& noOfImage
     closedir(dir);
     std::sort(image_names.begin(), image_names.end());
 
-    for (const auto& inputImagePath : image_names)
-    {
+    for (const auto& inputImagePath : image_names) {
         FILE* fp = fopen(inputImagePath.c_str(), "rb");
-        if(!fp) {
-            std::cerr << "\n unable to open file : "<< inputImagePath;
+        if (!fp) {
+            std::cerr << "\n unable to open file : " << inputImagePath;
             continue;
         }
         fseek(fp, 0, SEEK_END);
@@ -217,36 +193,35 @@ inline vector<Mat> loadBatchImages_jpegd(const string& directory, int& noOfImage
 
         unsigned char* jpegBuf = (unsigned char*)malloc(jpegSize);
         if (fread(jpegBuf, 1, jpegSize, fp) != jpegSize) {
-             std::cerr << "\n File read incomplete: " << inputImagePath;
-             free(jpegBuf);
-             fclose(fp);
-             continue;
+            std::cerr << "\n File read incomplete: " << inputImagePath;
+            free(jpegBuf);
+            fclose(fp);
+            continue;
         }
         fclose(fp);
 
         int width, height, subsamp, color_space;
-        if(tjDecompressHeader3(m_jpegDecompressor, jpegBuf, jpegSize, &width, &height, &subsamp, &color_space) != 0) {
-            std::cerr << "\n Jpeg image decode failed in tjDecompressHeader3 for " << inputImagePath;
+        if (tjDecompressHeader3(m_jpegDecompressor, jpegBuf, jpegSize, &width, &height, &subsamp,
+                                &color_space) != 0) {
+            std::cerr << "\n Jpeg image decode failed in tjDecompressHeader3 for "
+                      << inputImagePath;
             free(jpegBuf);
             continue;
         }
 
         Mat decodedImage;
-        if(isColor)
-        {
+        if (isColor) {
             decodedImage = Mat::zeros(height, width, CV_8UC3);
-            if(tjDecompress2(m_jpegDecompressor, jpegBuf, jpegSize, decodedImage.data, width,
-                             (int)decodedImage.step, height, TJPF_RGB, TJFLAG_ACCURATEDCT) != 0) {
+            if (tjDecompress2(m_jpegDecompressor, jpegBuf, jpegSize, decodedImage.data, width,
+                              (int)decodedImage.step, height, TJPF_RGB, TJFLAG_ACCURATEDCT) != 0) {
                 std::cerr << "\n Jpeg image decode failed for " << inputImagePath;
                 free(jpegBuf);
                 continue;
             }
-        }
-        else
-        {
+        } else {
             decodedImage = Mat::zeros(height, width, CV_8UC1);
-            if(tjDecompress2(m_jpegDecompressor, jpegBuf, jpegSize, decodedImage.data, width,
-                             (int)decodedImage.step, height, TJPF_GRAY, 0) != 0) {
+            if (tjDecompress2(m_jpegDecompressor, jpegBuf, jpegSize, decodedImage.data, width,
+                              (int)decodedImage.step, height, TJPF_GRAY, 0) != 0) {
                 std::cerr << "\n Jpeg image decode failed for " << inputImagePath;
                 free(jpegBuf);
                 continue;
@@ -261,8 +236,7 @@ inline vector<Mat> loadBatchImages_jpegd(const string& directory, int& noOfImage
     return images;
 }
 
-inline vector<Mat> loadBatchImages_cv(const string& directory, int& noOfImages, bool isColor)
-{
+inline vector<Mat> loadBatchImages_cv(const string& directory, int& noOfImages, bool isColor) {
     vector<Mat> images;
     DIR* dir;
     struct dirent* entry;
@@ -292,21 +266,17 @@ inline vector<Mat> loadBatchImages_cv(const string& directory, int& noOfImages, 
             cvtColor(temp, img, COLOR_BGR2RGB);
         else
             img = temp;
-        if (!img.isContinuous())
-            img = img.clone();
+        if (!img.isContinuous()) img = img.clone();
         images.push_back(img);
     }
     noOfImages = images.size();
     return images;
 }
 
-inline void convertBatchBitDepth(vector<Mat>& images, int bitDepthMode, float conversionFactor)
-{
-    if (bitDepthMode == U8_TO_U8)
-        return;
+inline void convertBatchBitDepth(vector<Mat>& images, int bitDepthMode, float conversionFactor) {
+    if (bitDepthMode == U8_TO_U8) return;
 
-    for (size_t i = 0; i < images.size(); i++)
-    {
+    for (size_t i = 0; i < images.size(); i++) {
         Mat finalImg;
 
         if (bitDepthMode == U8_TO_F32 || bitDepthMode == F32_TO_F32)
@@ -322,52 +292,44 @@ inline void convertBatchBitDepth(vector<Mat>& images, int bitDepthMode, float co
     }
 }
 
-inline void initializeROI(const vector<Mat>& imgs, vector<RpptROI>& rois, vector<RpptDesc>& descPtr, int* roiList, int* roiHeightList, int* roiWidthList)
-{
+inline void initializeROI(const vector<Mat>& imgs, vector<RpptROI>& rois, vector<RpptDesc>& descPtr,
+                          int* roiList, int* roiHeightList, int* roiWidthList) {
     int batchSize = imgs.size();
     bool invalidROI = (roiList[0] == 0 && roiList[1] == 0 && roiList[2] == 0 && roiList[3] == 0);
 
-    for (int i = 0; i < batchSize; ++i)
-    {
+    for (int i = 0; i < batchSize; ++i) {
         rois[i].xywhROI.xy.x = 0;
         rois[i].xywhROI.xy.y = 0;
         rois[i].xywhROI.roiWidth = descPtr[i].w;
         rois[i].xywhROI.roiHeight = descPtr[i].h;
-        if (invalidROI)
-        {
+        if (invalidROI) {
             roiList[0] = 10;
             roiList[1] = 10;
             roiWidthList[i] = rois[i].xywhROI.roiWidth / 2;
             roiHeightList[i] = rois[i].xywhROI.roiHeight / 2;
-        }
-        else
-        {
+        } else {
             roiWidthList[i] = roiList[2];
             roiHeightList[i] = roiList[3];
         }
     }
 }
 
-inline void initializeROI(const vector<Mat>& imgs, RpptROI *rois, vector<RpptDesc>& descPtr, int* roiList, int* roiHeightList, int* roiWidthList)
-{
+inline void initializeROI(const vector<Mat>& imgs, RpptROI* rois, vector<RpptDesc>& descPtr,
+                          int* roiList, int* roiHeightList, int* roiWidthList) {
     int batchSize = imgs.size();
     bool invalidROI = (roiList[0] == 0 && roiList[1] == 0 && roiList[2] == 0 && roiList[3] == 0);
 
-    for (int i = 0; i < batchSize; ++i)
-    {
+    for (int i = 0; i < batchSize; ++i) {
         rois[i].xywhROI.xy.x = 0;
         rois[i].xywhROI.xy.y = 0;
         rois[i].xywhROI.roiWidth = descPtr[i].w;
         rois[i].xywhROI.roiHeight = descPtr[i].h;
-        if (invalidROI)
-        {
+        if (invalidROI) {
             roiList[0] = 10;
             roiList[1] = 10;
             roiWidthList[i] = rois[i].xywhROI.roiWidth / 2;
             roiHeightList[i] = rois[i].xywhROI.roiHeight / 2;
-        }
-        else
-        {
+        } else {
             roiWidthList[i] = roiList[2];
             roiHeightList[i] = roiList[3];
         }
@@ -377,12 +339,11 @@ inline void initializeROI(const vector<Mat>& imgs, RpptROI *rois, vector<RpptDes
 // alignWidthTo8: when true (HIP path), pads descriptor width to next multiple of 8.
 // additionalStride / offsetInBytes: HIP-only padding parameters (default 0).
 inline void initializeDescriptors(const vector<Mat>& imgs, vector<RpptDesc>& descPtr, int channel,
-                                   bool alignWidthTo8 = false, int additionalStride = 0, int offsetInBytes = 0)
-{
+                                  bool alignWidthTo8 = false, int additionalStride = 0,
+                                  int offsetInBytes = 0) {
     int batchSize = imgs.size();
 
-    for (int i = 0; i < batchSize; ++i)
-    {
+    for (int i = 0; i < batchSize; ++i) {
         const Mat& img = imgs[i];
 
         descPtr[i].h = img.rows;
@@ -394,15 +355,12 @@ inline void initializeDescriptors(const vector<Mat>& imgs, vector<RpptDesc>& des
         descPtr[i].c = channel;
         descPtr[i].n = 1;
 
-        if (descPtr[i].layout == RpptLayout::NHWC)
-        {
+        if (descPtr[i].layout == RpptLayout::NHWC) {
             descPtr[i].strides.nStride = descPtr[i].h * descPtr[i].w * channel;
             descPtr[i].strides.hStride = descPtr[i].w * channel;
             descPtr[i].strides.wStride = channel;
             descPtr[i].strides.cStride = 1;
-        }
-        else
-        {
+        } else {
             descPtr[i].strides.nStride = descPtr[i].h * descPtr[i].w * channel;
             descPtr[i].strides.hStride = descPtr[i].w;
             descPtr[i].strides.wStride = 1;
@@ -411,34 +369,50 @@ inline void initializeDescriptors(const vector<Mat>& imgs, vector<RpptDesc>& des
     }
 }
 
-inline void set_descriptor_data_type_name(int BitDepthTestMode, string &funcName)
-{
-    if (BitDepthTestMode == U8_TO_U8) funcName += "_u8_";
-    else if (BitDepthTestMode == F16_TO_F16) funcName += "_f16_";
-    else if (BitDepthTestMode == F32_TO_F32) funcName += "_f32_";
-    else if (BitDepthTestMode == U8_TO_F16) funcName += "_u8_f16_";
-    else if (BitDepthTestMode == U8_TO_F32) funcName += "_u8_f32_";
-    else if (BitDepthTestMode == I8_TO_I8) funcName += "_i8_";
-    else if (BitDepthTestMode == U8_TO_I8) funcName += "_u8_i8_";
-    else if (BitDepthTestMode == I8_TO_F32) funcName += "_i8_f32_";
-    else if (BitDepthTestMode == I16_TO_F32) funcName += "_i16_f32_";
+inline void set_descriptor_data_type_name(int BitDepthTestMode, string& funcName) {
+    if (BitDepthTestMode == U8_TO_U8)
+        funcName += "_u8_";
+    else if (BitDepthTestMode == F16_TO_F16)
+        funcName += "_f16_";
+    else if (BitDepthTestMode == F32_TO_F32)
+        funcName += "_f32_";
+    else if (BitDepthTestMode == U8_TO_F16)
+        funcName += "_u8_f16_";
+    else if (BitDepthTestMode == U8_TO_F32)
+        funcName += "_u8_f32_";
+    else if (BitDepthTestMode == I8_TO_I8)
+        funcName += "_i8_";
+    else if (BitDepthTestMode == U8_TO_I8)
+        funcName += "_u8_i8_";
+    else if (BitDepthTestMode == I8_TO_F32)
+        funcName += "_i8_f32_";
+    else if (BitDepthTestMode == I16_TO_F32)
+        funcName += "_i16_f32_";
 }
 
-inline void set_descriptor_layout(vector<RpptDesc>& srcDescs, vector<RpptDesc>& dstDescs, int layoutType, bool pln1OutTypeCase, int outputFormatToggle, int noOfImages)
-{
-    for(int i = 0; i < noOfImages; i++)
-    {
-        if(layoutType == 0) srcDescs[i].layout = RpptLayout::NHWC;
-        else srcDescs[i].layout = RpptLayout::NCHW;
+inline void set_descriptor_layout(vector<RpptDesc>& srcDescs, vector<RpptDesc>& dstDescs,
+                                  int layoutType, bool pln1OutTypeCase, int outputFormatToggle,
+                                  int noOfImages) {
+    for (int i = 0; i < noOfImages; i++) {
+        if (layoutType == 0)
+            srcDescs[i].layout = RpptLayout::NHWC;
+        else
+            srcDescs[i].layout = RpptLayout::NCHW;
 
         RpptLayout dstLayout;
 
         if (layoutType == 0) {
-            if (pln1OutTypeCase) { dstLayout = RpptLayout::NCHW;}
-            else { dstLayout = (outputFormatToggle == 0) ? RpptLayout::NHWC : RpptLayout::NCHW; }
+            if (pln1OutTypeCase) {
+                dstLayout = RpptLayout::NCHW;
+            } else {
+                dstLayout = (outputFormatToggle == 0) ? RpptLayout::NHWC : RpptLayout::NCHW;
+            }
         } else if (layoutType == 1) {
-            if (pln1OutTypeCase) { dstLayout = RpptLayout::NCHW; }
-            else { dstLayout = (outputFormatToggle == 0) ? RpptLayout::NCHW : RpptLayout::NHWC; }
+            if (pln1OutTypeCase) {
+                dstLayout = RpptLayout::NCHW;
+            } else {
+                dstLayout = (outputFormatToggle == 0) ? RpptLayout::NCHW : RpptLayout::NHWC;
+            }
         } else {
             dstLayout = RpptLayout::NCHW;
         }
@@ -447,10 +421,9 @@ inline void set_descriptor_layout(vector<RpptDesc>& srcDescs, vector<RpptDesc>& 
     }
 }
 
-inline void set_descriptor_data_type(int BitDepthTestMode, vector<RpptDesc>& srcDescPtr, vector<RpptDesc>& dstDescPtr, int noOfImages)
-{
-    for(int i = 0; i < noOfImages; i++)
-    {
+inline void set_descriptor_data_type(int BitDepthTestMode, vector<RpptDesc>& srcDescPtr,
+                                     vector<RpptDesc>& dstDescPtr, int noOfImages) {
+    for (int i = 0; i < noOfImages; i++) {
         if (BitDepthTestMode == U8_TO_U8) {
             srcDescPtr[i].dataType = RpptDataType::U8;
             dstDescPtr[i].dataType = RpptDataType::U8;
@@ -476,28 +449,29 @@ inline void set_descriptor_data_type(int BitDepthTestMode, vector<RpptDesc>& src
     }
 }
 
-inline int get_cv_type(RpptDataType dataType, int channels)
-{
-    switch (dataType)
-    {
-        case RpptDataType::U8:  return CV_MAKETYPE(CV_8U, channels);
-        case RpptDataType::I8:  return CV_MAKETYPE(CV_8S, channels);
-        case RpptDataType::F16: return CV_MAKETYPE(CV_16F, channels);
-        case RpptDataType::F32: return CV_MAKETYPE(CV_32F, channels);
-        default: return -1;
+inline int get_cv_type(RpptDataType dataType, int channels) {
+    switch (dataType) {
+        case RpptDataType::U8:
+            return CV_MAKETYPE(CV_8U, channels);
+        case RpptDataType::I8:
+            return CV_MAKETYPE(CV_8S, channels);
+        case RpptDataType::F16:
+            return CV_MAKETYPE(CV_16F, channels);
+        case RpptDataType::F32:
+            return CV_MAKETYPE(CV_32F, channels);
+        default:
+            return -1;
     }
 }
 
-inline void saveBatchOutput(const string& dstDir, int noOfImages, const vector<Mat>& outputVec, const vector<RpptDesc>& dstDescPtr, RpptImagePatch *dstImgSizes)
-{
+inline void saveBatchOutput(const string& dstDir, int noOfImages, const vector<Mat>& outputVec,
+                            const vector<RpptDesc>& dstDescPtr, RpptImagePatch* dstImgSizes) {
     mkdir(dstDir.c_str(), 0700);
     string outputFolder = dstDir;
-    if (outputFolder.back() != '/')
-        outputFolder += "/";
+    if (outputFolder.back() != '/') outputFolder += "/";
     int cnt = 1;
 
-    for (int i = 0; i < noOfImages; i++)
-    {
+    for (int i = 0; i < noOfImages; i++) {
         string baseName = to_string(i);
         string ext = ".jpg";
         string outputImagePath = outputFolder + baseName + ext;
@@ -506,22 +480,18 @@ inline void saveBatchOutput(const string& dstDir, int noOfImages, const vector<M
         Rpp32u width = dstImgSizes[i].width;
 
         Mat tempImg;
-        if ((dstDescPtr[i].c == 3) && (dstDescPtr[i].layout == RpptLayout::NCHW))
-        {
+        if ((dstDescPtr[i].c == 3) && (dstDescPtr[i].layout == RpptLayout::NCHW)) {
             int matChannelStride = outputVec[i].rows / 3;
             Mat planarImg(height * 3, width, CV_MAKETYPE(outputVec[i].depth(), 1));
 
-            for(int c = 0; c < 3; c++)
-            {
+            for (int c = 0; c < 3; c++) {
                 Mat channelSrc = outputVec[i](Rect(0, c * matChannelStride, width, height));
                 Mat channelDst = planarImg(Rect(0, c * height, width, height));
                 channelSrc.copyTo(channelDst);
             }
 
             tempImg = convert_pln3_to_pkd3(planarImg, height, width);
-        }
-        else
-        {
+        } else {
             tempImg = outputVec[i](Rect(0, 0, width, height));
         }
 
@@ -533,22 +503,16 @@ inline void saveBatchOutput(const string& dstDir, int noOfImages, const vector<M
         else
             saveImg = tempImg;
 
-        if (saveImg.channels() == 3)
-            cvtColor(saveImg, saveImg, COLOR_RGB2BGR);
+        if (saveImg.channels() == 3) cvtColor(saveImg, saveImg, COLOR_RGB2BGR);
 
-        if (!saveImg.empty())
-        {
-            if (std::filesystem::exists(outputImagePath))
-            {
+        if (!saveImg.empty()) {
+            if (std::filesystem::exists(outputImagePath)) {
                 std::string outPath = outputFolder + baseName + "_" + to_string(cnt) + ext;
                 imwrite(outPath, saveImg);
                 cnt++;
-            }
-            else
+            } else
                 imwrite(outputImagePath, saveImg);
-        }
-        else
-        {
+        } else {
             cerr << "\n[Error] Failed to create output image " << i;
         }
     }
