@@ -31,15 +31,15 @@ import pytest
 from Tensile.LibraryIO import writeMsgPack
 
 
-def test_writeMsgPack_produces_gz_file(tmp_path):
-    """writeMsgPack writes <filename>.gz, not <filename>."""
+def test_writeMsgPack_produces_zlib_file(tmp_path):
+    """writeMsgPack writes <filename>.zlib, not <filename>."""
     dest = str(tmp_path / "library.dat")
     data = {"key": "value", "count": 42}
 
     writeMsgPack(dest, data)
 
     assert not (tmp_path / "library.dat").exists()
-    assert (tmp_path / "library.dat.gz").exists()
+    assert (tmp_path / "library.dat.zlib").exists()
 
 
 def test_writeMsgPack_roundtrips_data(tmp_path):
@@ -49,7 +49,7 @@ def test_writeMsgPack_roundtrips_data(tmp_path):
 
     writeMsgPack(dest, data)
 
-    raw = zlib.decompress((tmp_path / "library.dat.gz").read_bytes())
+    raw = zlib.decompress((tmp_path / "library.dat.zlib").read_bytes())
     assert msgpack.unpackb(raw) == data
 
 
@@ -58,7 +58,7 @@ def test_writeMsgPack_uses_zlib_compression(tmp_path):
     dest = str(tmp_path / "library.dat")
     writeMsgPack(dest, {"x": list(range(100))})
 
-    gz_bytes = (tmp_path / "library.dat.gz").read_bytes()
+    gz_bytes = (tmp_path / "library.dat.zlib").read_bytes()
     # zlib.decompress raises if the bytes are not valid zlib
     decompressed = zlib.decompress(gz_bytes)
     assert len(decompressed) > 0

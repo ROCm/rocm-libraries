@@ -158,12 +158,12 @@ namespace
         if(auto perArchPath = rocblaslt_find_library_relative_path(relpath))
             return perArchPath->string();
 
-        auto relpath_gz = std::filesystem::path(archName) / (basename + ".dat.gz");
+        auto relpath_gz = std::filesystem::path(archName) / (basename + ".dat.zlib");
         if(auto perArchPath = rocblaslt_find_library_relative_path(relpath_gz))
         {
-            // Return the base .dat path; fileToMsgObject() probes for .gz internally
+            // Return the base .dat path; fileToMsgObject() probes for .zlib internally
             auto gz_path = perArchPath->string();
-            return gz_path.substr(0, gz_path.size() - 3);
+            return gz_path.substr(0, gz_path.size() - 5);
         }
 
         rocblaslt_log_error("getExtOpLibraryPath",

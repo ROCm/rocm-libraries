@@ -2,7 +2,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Post-build integrity checks for installed hipBLASLt Tensile .dat/.dat.gz files."""
+"""Post-build integrity checks for installed hipBLASLt Tensile .dat/.dat.zlib files."""
 
 from __future__ import annotations
 
@@ -18,9 +18,9 @@ try:
 except ImportError:
     msgpack = None
 
-_MASTER_RE = re.compile(r"^TensileLibrary_lazy_(?P<arch>[A-Za-z0-9]+)\.dat(?:\.gz)?$")
+_MASTER_RE = re.compile(r"^TensileLibrary_lazy_(?P<arch>[A-Za-z0-9]+)\.dat(?:\.zlib)?$")
 _MAPPING_RE = re.compile(
-    r"^TensileLiteLibrary_lazy_(?P<arch>[A-Za-z0-9]+)_Mapping\.dat(?:\.gz)?$"
+    r"^TensileLiteLibrary_lazy_(?P<arch>[A-Za-z0-9]+)_Mapping\.dat(?:\.zlib)?$"
 )
 
 
@@ -43,7 +43,7 @@ def _scanArchs(libDir: Path):
 
 def _loadMapping(libDir: Path, arch: str):
     base = _archDir(libDir, arch) / f"TensileLiteLibrary_lazy_{arch}_Mapping.dat"
-    gz_path = Path(str(base) + ".gz")
+    gz_path = Path(str(base) + ".zlib")
     if gz_path.is_file():
         raw = zlib.decompress(gz_path.read_bytes())
         return msgpack.unpackb(raw, raw=False, strict_map_key=False)
@@ -73,7 +73,7 @@ def validate(libDir: Path) -> List[str]:
         violations.append(f"per-arch Mapping without a master: {a}")
 
     fallback_dat_files = list(libDir.glob("*/*_fallback_*.dat")) + list(
-        libDir.glob("*/*_fallback_*.dat.gz")
+        libDir.glob("*/*_fallback_*.dat.zlib")
     )
     for arch in sorted(archs):
         mapping = _loadMapping(libDir, arch)
@@ -81,10 +81,10 @@ def validate(libDir: Path) -> List[str]:
 
         for idx, kernelName in mapping.items():
             if not (archDir / f"{kernelName}.dat").is_file() and not (
-                archDir / f"{kernelName}.dat.gz"
+                archDir / f"{kernelName}.dat.zlib"
             ).is_file():
                 violations.append(
-                    f"arch={arch}: Mapping[{idx}] -> {kernelName}.dat(.gz) is not on disk"
+                    f"arch={arch}: Mapping[{idx}] -> {kernelName}.dat(.zlib) is not on disk"
                 )
             if not kernelName.endswith("_" + arch):
                 violations.append(
@@ -94,7 +94,7 @@ def validate(libDir: Path) -> List[str]:
 
         arch_has_fallback_files = any(
             f.name.endswith(f"_fallback_{arch}.dat")
-            or f.name.endswith(f"_fallback_{arch}.dat.gz")
+            or f.name.endswith(f"_fallback_{arch}.dat.zlib")
             for f in fallback_dat_files
         )
         mapping_has_fallback = any(
@@ -114,7 +114,7 @@ def main(argv=None) -> int:
     parser.add_argument(
         "library_dir",
         type=Path,
-        help="Installed library dir containing <base-arch>/ subdirs of .dat/.dat.gz files",
+        help="Installed library dir containing <base-arch>/ subdirs of .dat/.dat.zlib files",
     )
     parser.add_argument("--quiet", "-q", action="store_true")
     args = parser.parse_args(argv)

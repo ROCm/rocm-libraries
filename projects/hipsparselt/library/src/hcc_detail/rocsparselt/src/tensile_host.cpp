@@ -719,10 +719,10 @@ namespace
                 tensileLibPath = path + "/TensileLibrary_" + processor + ".dat";
 #endif
 #endif
-                if(!TestPath(tensileLibPath) && !TestPath(tensileLibPath + ".gz"))
+                if(!TestPath(tensileLibPath) && !TestPath(tensileLibPath + ".zlib"))
                 {
                     hipsparselt_cerr << "\nhipsparselt_error: Cannot read " << tensileLibPath
-                                     << " (or .gz variant): " << strerror(errno) << std::endl;
+                                     << " (or .zlib variant): " << strerror(errno) << std::endl;
                     //rocsparselt_abort();
                 }
 

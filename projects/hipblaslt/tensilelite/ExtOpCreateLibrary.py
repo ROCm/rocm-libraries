@@ -72,8 +72,8 @@ if __name__ == '__main__':
     }
 
     output_lib_path = os.path.join(output, f'hipblasltExtOpLibrary.{lib_format}')
-    # dat format is written as zlib-compressed .dat.gz (consistent with LibraryIO.py)
-    output_lib_gz_path = output_lib_path + '.gz' if lib_format == 'dat' else None
+    # dat format is written as zlib-compressed .dat.zlib (consistent with LibraryIO.py)
+    output_lib_gz_path = output_lib_path + '.zlib' if lib_format == 'dat' else None
 
     if lib_format == 'dat':
         existing_path = output_lib_gz_path if os.path.exists(output_lib_gz_path) else (
@@ -81,7 +81,7 @@ if __name__ == '__main__':
         )
         if existing_path:
             data = open(existing_path, 'rb').read()
-            if existing_path.endswith('.gz'):
+            if existing_path.endswith('.zlib'):
                 data = zlib.decompress(data)
             org_content = msgpack.unpackb(data)
             lib_meta = {**org_content, **lib_meta}

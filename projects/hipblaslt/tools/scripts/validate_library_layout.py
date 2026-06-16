@@ -20,13 +20,13 @@ REQUIRED_PER_BASE_FILES = (
 
 TENSILE_MASTER_CANDIDATES = (
     "TensileLibrary_{arch}.dat",
-    "TensileLibrary_{arch}.dat.gz",
+    "TensileLibrary_{arch}.dat.zlib",
     "TensileLibrary_{arch}.yaml",
 )
 
 TENSILE_LAZY_CANDIDATES = (
     "TensileLibrary_lazy_{arch}.dat",
-    "TensileLibrary_lazy_{arch}.dat.gz",
+    "TensileLibrary_lazy_{arch}.dat.zlib",
     "TensileLibrary_lazy_{arch}.yaml",
 )
 
@@ -36,14 +36,14 @@ PER_ARCH_REQUIRED = {
 
 FORBIDDEN_FLAT_ROOT_BASENAMES = (
     "TensileLibrary.dat",
-    "TensileLibrary.dat.gz",
+    "TensileLibrary.dat.zlib",
     "TensileLibrary.yaml",
     "TensileLibrary_lazy.dat",
-    "TensileLibrary_lazy.dat.gz",
+    "TensileLibrary_lazy.dat.zlib",
     "TensileLibrary_lazy.yaml",
     "hipblasltTransform.hsaco",
     "hipblasltExtOpLibrary.dat",
-    "hipblasltExtOpLibrary.dat.gz",
+    "hipblasltExtOpLibrary.dat.zlib",
     "extop.co",
 )
 
@@ -79,12 +79,12 @@ def _library_root(install_root: Path) -> Optional[Path]:
 
 
 def _has_required_file(entries: Set[str], template: str, arch: str) -> bool:
-    """Check if entries contains the required file or its .gz variant (for .dat only)."""
+    """Check if entries contains the required file or its .zlib variant (for .dat only)."""
     wanted = template.format(arch=arch)
     if wanted in entries:
         return True
     if wanted.endswith(".dat"):
-        return (wanted + ".gz") in entries
+        return (wanted + ".zlib") in entries
     return False
 
 
@@ -110,7 +110,7 @@ def validate(install_root: Path) -> List[str]:
             )
 
     for entry in library_dir.iterdir():
-        if entry.is_file() and entry.suffix in (".dat", ".gz", ".co", ".hsaco", ".yaml"):
+        if entry.is_file() and entry.suffix in (".dat", ".zlib", ".co", ".hsaco", ".yaml"):
             violations.append(
                 f"unexpected payload file at library root: {entry} "
                 f"(per-base layout requires files in library/<base>/)"
@@ -149,8 +149,8 @@ def validate(install_root: Path) -> List[str]:
         if not (master_present or lazy_present):
             violations.append(
                 f"missing TensileLibrary master/lazy file for {base} in {arch_dir} "
-                f"(expected one of: TensileLibrary_{base}.{{dat,dat.gz,yaml}} or "
-                f"TensileLibrary_lazy_{base}.{{dat,dat.gz,yaml}})"
+                f"(expected one of: TensileLibrary_{base}.{{dat,dat.zlib,yaml}} or "
+                f"TensileLibrary_lazy_{base}.{{dat,dat.zlib,yaml}})"
             )
 
         for extra in PER_ARCH_REQUIRED.get(base, ()):

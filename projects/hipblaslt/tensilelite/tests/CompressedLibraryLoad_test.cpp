@@ -24,13 +24,13 @@
  *
  *******************************************************************************/
 
-// Host-only tests for compressed .dat.gz loading via fileToMsgObject.
+// Host-only tests for compressed .dat.zlib loading via fileToMsgObject.
 //
 // These tests verify that the runtime can:
-// 1. Load zlib-compressed .dat.gz files when no uncompressed .dat exists
-// 2. Fall back to uncompressed .dat when no .gz file exists
-// 3. Prefer .dat.gz over .dat when both exist
-// 4. Handle corrupt .dat.gz gracefully
+// 1. Load zlib-compressed .dat.zlib files when no uncompressed .dat exists
+// 2. Fall back to uncompressed .dat when no .zlib file exists
+// 3. Prefer .dat.zlib over .dat when both exist
+// 4. Handle corrupt .dat.zlib gracefully
 //
 // We test through the public LoadLibraryMapping API which exercises the full
 // fileToMsgObject -> msgpack parse path. No GPU required.
@@ -111,7 +111,7 @@ namespace
 TEST_F(CompressedLibraryLoadTest, LoadsCompressedDatGz)
 {
     fs::path datPath = tmpDir / "test_mapping.dat";
-    fs::path gzPath  = tmpDir / "test_mapping.dat.gz";
+    fs::path gzPath  = tmpDir / "test_mapping.dat.zlib";
 
     writeCompressedMsgpackMapping(gzPath,
                                   {{"0", "kernel_a"}, {"10", "kernel_b"}, {"99", "kernel_c"}});
@@ -139,7 +139,7 @@ TEST_F(CompressedLibraryLoadTest, FallsBackToUncompressedDat)
 TEST_F(CompressedLibraryLoadTest, PrefersCompressedOverUncompressed)
 {
     fs::path datPath = tmpDir / "test_mapping.dat";
-    fs::path gzPath  = tmpDir / "test_mapping.dat.gz";
+    fs::path gzPath  = tmpDir / "test_mapping.dat.zlib";
 
     writeMsgpackMapping(datPath, {{"0", "from_uncompressed"}});
     writeCompressedMsgpackMapping(gzPath, {{"0", "from_compressed"}});
@@ -152,9 +152,9 @@ TEST_F(CompressedLibraryLoadTest, PrefersCompressedOverUncompressed)
 TEST_F(CompressedLibraryLoadTest, HandlesCorruptCompressedFile)
 {
     fs::path datPath = tmpDir / "test_mapping.dat";
-    fs::path gzPath  = tmpDir / "test_mapping.dat.gz";
+    fs::path gzPath  = tmpDir / "test_mapping.dat.zlib";
 
-    // Write garbage to the .gz file
+    // Write garbage to the .zlib file
     {
         std::ofstream out(gzPath, std::ios::binary);
         const char garbage[] = "this is not valid zlib data at all";
@@ -188,14 +188,14 @@ TEST_F(CompressedLibraryLoadTest, LoadTimingComparison)
               + std::to_string(i);
 
     fs::path datPath = tmpDir / "bench_mapping.dat";
-    fs::path gzPath  = tmpDir / "bench_mapping.dat.gz";
+    fs::path gzPath  = tmpDir / "bench_mapping.dat.zlib";
 
     writeMsgpackMapping(datPath, entries);
     writeCompressedMsgpackMapping(gzPath, entries);
 
     constexpr int N = 20;
 
-    // Time uncompressed loads (only .dat present, no .gz)
+    // Time uncompressed loads (only .dat present, no .zlib)
     fs::rename(gzPath, gzPath.string() + ".bak");
     auto t0 = std::chrono::steady_clock::now();
     for(int i = 0; i < N; i++)
@@ -204,7 +204,7 @@ TEST_F(CompressedLibraryLoadTest, LoadTimingComparison)
     double dat_us    = std::chrono::duration<double, std::micro>(t1 - t0).count() / N;
     fs::rename(gzPath.string() + ".bak", gzPath);
 
-    // Time compressed loads (.gz present — .dat also exists but is ignored)
+    // Time compressed loads (.zlib present — .dat also exists but is ignored)
     fs::rename(datPath, datPath.string() + ".bak");
     auto t2          = std::chrono::steady_clock::now();
     for(int i = 0; i < N; i++)
@@ -215,7 +215,7 @@ TEST_F(CompressedLibraryLoadTest, LoadTimingComparison)
 
     std::cout << "\n[LoadTimingComparison] entries=" << entries.size()
               << "  uncompressed .dat: " << dat_us << " µs/call"
-              << "  compressed .dat.gz: " << gz_us << " µs/call"
+              << "  compressed .dat.zlib: " << gz_us << " µs/call"
               << "  overhead: " << (gz_us - dat_us) << " µs\n";
 
     // Correctness check — no EXPECT on timing values to avoid flakiness.

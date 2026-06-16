@@ -126,7 +126,7 @@ namespace TensileLite
         try
         {
             // Probe for a zlib-compressed variant first
-            std::string gz_filename = filename + ".gz";
+            std::string gz_filename = filename + ".zlib";
             if(std::filesystem::exists(gz_filename))
             {
                 if(readCompressedMsgObject(gz_filename, result))
