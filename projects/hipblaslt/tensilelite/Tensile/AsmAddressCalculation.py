@@ -23,7 +23,8 @@
 from rocisa.code import Module
 from rocisa.container import EXEC, VCC, vgpr, sgpr
 from rocisa.instruction import MacroInstruction, SAddCU32, SAddU32, SAndB32, \
-    SAndB64, SLShiftLeftB32, SMovB32, SMovB64, SMulI32, SSubBU32, SSubU32, \
+    SAndB64, SLShiftLeftB32, SLShiftRightB32, SMovB32, SMovB64, SMulHIU32, \
+    SMulI32, SSubBU32, SSubU32, \
     VAddCCOU32, VAddCOU32, VAddI32, VAddU32, VAndB32, VBfiB32, \
     VCmpEQU32, VCmpGtU32, VCmpLtU32, VCmpXNeU32, VCndMaskB32, VLShiftLeftB32, \
     VMadI32I24, VMovB32, VMulLOU32, VSubI32, VSubU32
@@ -776,42 +777,64 @@ class AddrCalculation:
 
     @staticmethod
     def incrementSrdMultipleRows(srcDstBaseSgpr: str, strideSgpr: str, tmpSgpr: str, numRows: int, bpe: int) -> Module:
+        """tmpSgpr must be a 2-wide consecutive SGPR allocation (lo at +0, hi at +1)."""
         module = Module("incrementToNextRows")
+        tmpLo = tmpSgpr
+        tmpHi = tmpSgpr + "+1"
+
         if numRows > 1:
-            module.add(SMulI32(dst=sgpr(tmpSgpr), \
+            module.add(SMulHIU32(dst=sgpr(tmpHi), \
+                                 src0=sgpr(strideSgpr), \
+                                 src1=numRows*bpe, \
+                                 comment="scale %s *= numRows(%u) * bpe (hi)"%(strideSgpr, numRows)))
+            module.add(SMulI32(dst=sgpr(tmpLo), \
                                src0=sgpr(strideSgpr), \
                                src1=numRows*bpe, \
                                comment="scale %s *= numRows(%u) * bpe"%(strideSgpr, numRows)))
         elif numRows < 0:
-            module.add(SMulI32(dst=sgpr(tmpSgpr), \
+            module.add(SMulHIU32(dst=sgpr(tmpHi), \
+                                 src0=sgpr(strideSgpr), \
+                                 src1=(-numRows)*bpe, \
+                                 comment="scale %s *= numRows(%u) * bpe (hi)"%(strideSgpr, numRows)))
+            module.add(SMulI32(dst=sgpr(tmpLo), \
                                src0=sgpr(strideSgpr), \
                                 src1=(-numRows)*bpe, \
                                 comment="scale %s *= numRows(%u) * bpe"%(strideSgpr, numRows)))
         else:
-            module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), \
+            shift = log2(bpe)
+            module.add(SLShiftLeftB32(dst=sgpr(tmpLo), \
                                       src=sgpr(strideSgpr), \
-                                      shiftHex=log2(bpe), \
+                                      shiftHex=shift, \
                                       comment="incToNextRow: Scale by BPE"))
+            if shift > 0:
+                module.add(SLShiftRightB32(dst=sgpr(tmpHi), \
+                                           src=sgpr(strideSgpr), \
+                                           shiftHex=32-shift, \
+                                           comment="incToNextRow: Scale by BPE (hi)"))
+            else:
+                module.add(SMovB32(dst=sgpr(tmpHi), src=0, \
+                                   comment="incToNextRow: Scale by BPE (hi, bpe=1)"))
+
         dstLow = f"{srcDstBaseSgpr}+0"
         dstHigh = f"{srcDstBaseSgpr}+1"
 
         if numRows >= 0:
             module.add(SAddU32(dst=sgpr(dstLow), \
                                         src0=sgpr(dstLow), \
-                                        src1=sgpr(tmpSgpr), \
+                                        src1=sgpr(tmpLo), \
                                         comment="incToNextRow: gra SRD += inc(lower)" ))
             module.add(SAddCU32(dst=sgpr(dstHigh), \
                                         src0=sgpr(dstHigh), \
-                                        src1=0, \
+                                        src1=sgpr(tmpHi), \
                                         comment="incToNextRow: gra SRD += inc(upper)" ))
         else:
             module.add(SSubU32(dst=sgpr(dstLow), \
                                         src0=sgpr(dstLow), \
-                                        src1=sgpr(tmpSgpr), \
+                                        src1=sgpr(tmpLo), \
                                         comment="incToNextRow: gra SRD -= inc(lower)" ))
             module.add(SSubBU32(dst=sgpr(dstHigh), \
                                         src0=sgpr(dstHigh), \
-                                        src1=0, \
+                                        src1=sgpr(tmpHi), \
                                         comment="incToNextRow: gra SRD -= inc(upper)" ))
         return module
 
@@ -820,6 +843,9 @@ class AddrCalculation:
         Generate code to move to the next row(s)
         If optSrdIncForRow, this will move the SRD forward
         If not, this could generate some other instructions
+
+        stmp must point to 2 consecutive SGPRs (stmp, stmp+1) for the 64-bit
+        row-increment computation.
         """
 
         module = Module("incrementToNextRow")
@@ -837,21 +863,42 @@ class AddrCalculation:
                 else:
                     td = "D" if tc == 'TD' else tc
                     strideCD1 = "Stride%s%s"%(td ,self.kernelWriter.states.indexChars[packedC1[0]])
+
+                # Compute stride * bpe (or stride * numRows * bpe) as a full
+                # 64-bit value in (stmp+1 : stmp).  The old code used 32-bit
+                # ops which silently truncated when the byte increment >= 2^32.
                 if numRows > 1:
+                    module.add(SMulHIU32(dst=sgpr(stmp+1), \
+                                src0=sgpr(strideCD1), \
+                                src1=numRows*tmpBpe, \
+                                comment="scale Stride%s *= numRows(%u) * bpe (hi)"%(tc,numRows)))
                     module.add(SMulI32(dst=sgpr(stmp), \
                                 src0=sgpr(strideCD1), \
                                 src1=numRows*tmpBpe, \
                                 comment="scale Stride%s *= numRows(%u) * bpe"%(tc,numRows)))
                 elif numRows < 0:
+                    module.add(SMulHIU32(dst=sgpr(stmp+1), \
+                                src0=sgpr(strideCD1), \
+                                src1=(-numRows)*tmpBpe, \
+                                comment="scale Stride%s *= numRows(%u) * bpe (hi)"%(tc,numRows)))
                     module.add(SMulI32(dst=sgpr(stmp), \
                                 src0=sgpr(strideCD1), \
                                 src1=(-numRows)*tmpBpe, \
                                 comment="scale Stride%s *= numRows(%u) * bpe"%(tc,numRows)))
                 else:
+                    shift = log2(tmpBpe)
                     module.add(SLShiftLeftB32(dst=sgpr(stmp), \
                                 src=sgpr(strideCD1), \
-                                shiftHex=log2(tmpBpe), \
+                                shiftHex=shift, \
                                 comment="incToNextRow: Scale by BPE"))
+                    if shift > 0:
+                        module.add(SLShiftRightB32(dst=sgpr(stmp+1), \
+                                    src=sgpr(strideCD1), \
+                                    shiftHex=32-shift, \
+                                    comment="incToNextRow: Scale by BPE (hi)"))
+                    else:
+                        module.add(SMovB32(dst=sgpr(stmp+1), src=0, \
+                                    comment="incToNextRow: Scale by BPE (hi, bpe=1)"))
 
                 if dst == -1:
                     dstLow = "Srd%s+0"%(tc)
@@ -867,7 +914,7 @@ class AddrCalculation:
                                         comment="incToNextRow: gra SRD += inc(lower)" ))
                     module.add(SAddCU32(dst=sgpr(dstHigh), \
                                         src0=sgpr(dstHigh), \
-                                        src1=0, \
+                                        src1=sgpr(stmp+1), \
                                         comment="incToNextRow: gra SRD += inc(upper)" ))
                 else: # numRows < 0
                     module.add(SSubU32(dst=sgpr(dstLow), \
@@ -876,7 +923,7 @@ class AddrCalculation:
                                         comment="incToNextRow: gra SRD -= inc(lower)" ))
                     module.add(SSubBU32(dst=sgpr(dstHigh), \
                                         src0=sgpr(dstHigh), \
-                                        src1=0, \
+                                        src1=sgpr(stmp+1), \
                                         comment="incToNextRow: gra SRD -= inc(upper)" ))
 
         return module
