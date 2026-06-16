@@ -26,15 +26,19 @@ from Tensile import __version__
 from Tensile import LibraryIO
 from Tensile.Common.GlobalParameters import defaultBenchmarkCommonParameters
 from Tensile.Common.Constants import HR
+from Tensile.Common.ValidParameters import validParameters
 from Tensile.SolutionStructs.Problem import _defaultProblemType as defaultProblemType
 from Tensile.Common.GlobalParameters import globalParameters
 
 import argparse
+import ast
+import functools
 import os
 import sys
 import re
 import yaml
-from typing import Optional, Tuple
+from io import StringIO
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 
 class Quoted(str):
@@ -69,6 +73,249 @@ def representNone(self, _):
 yaml.add_representer(Quoted, quotedPresenter)
 yaml.add_representer(FlowList, flowSeq)
 yaml.add_representer(type(None), representNone)
+
+
+def _format_compact_range(
+    rng: Any, start_elements: int = 2, end_elements: int = 2
+) -> str:
+    """Return a short string for a valid-values sequence (same idea as TuningDriver GEKO).
+
+    Long lists are shown as first *start_elements* and last *end_elements* entries
+    with an ellipsis between.
+
+    Args:
+        rng: Iterable of valid values, typically a list from ``validParameters``.
+        start_elements: Number of leading entries to include before ``...``.
+        end_elements: Number of trailing entries to include after ``...``.
+
+    Returns:
+        A bracketed string representation of *rng*, or ``str(rng)`` if not a list.
+
+    Raises:
+        None.
+    """
+    if not isinstance(rng, list):
+        return str(rng)
+    if len(rng) <= start_elements + end_elements:
+        return str(rng)
+    start = ", ".join(map(str, rng[:start_elements]))
+    end = ", ".join(map(str, rng[-end_elements:]))
+    return f"[{start}, ..., {end}]"
+
+
+@functools.lru_cache(maxsize=1)
+def build_fork_parameter_comment_metadata() -> Dict[str, str]:
+    """Build trailing comment text per fork parameter for inline documentation.
+
+    Merges ``defaultBenchmarkCommonParameters`` the same way as TuningDriver's
+    ``load_tensile_metadata``, then intersects keys with ``validParameters``.
+
+    Returns:
+        Mapping from fork parameter name to a suffix string starting with
+        ``' # Default Value: ... # Range: ...'`` suitable to append to a YAML line.
+
+    Raises:
+        None.
+    """
+    defaults_merged: Dict[str, Any] = {}
+    for param_dict in defaultBenchmarkCommonParameters:
+        defaults_merged.update(param_dict)
+    meta: Dict[str, str] = {}
+    for name in set(validParameters.keys()) & set(defaults_merged.keys()):
+        default_list = defaults_merged[name]
+        range_str = _format_compact_range(validParameters[name])
+        meta[name] = f" # Default Value: {default_list} # Range: {range_str}"
+    return meta
+
+
+_FORK_PARAM_LINE_RE = re.compile(r"^(?P<indent>    )- (?P<key>[A-Za-z0-9_]+)(?P<rest>:.*)$")
+
+# First row of a Groups entry (yaml.dump uses ``- - MatrixInstruction:``).
+_GROUP_MATRIX_INSTRUCTION_RE = re.compile(
+    r"^(?P<prefix>\s+- - MatrixInstruction)(?P<rest>:.*)$"
+)
+# Continuation keys in the same group block (indented mapping under ``- -``).
+_GROUP_WORKGROUP_RE = re.compile(r"^(?P<prefix>\s+WorkGroup)(?P<rest>:.*)$")
+_GROUP_MIARCH_VGPR_RE = re.compile(r"^(?P<prefix>\s+MIArchVgpr)(?P<rest>:.*)$")
+
+
+def parse_matrix_instruction_list_from_colon_rest(rest: str) -> Optional[List[int]]:
+    """Parse the YAML list after ``MatrixInstruction:`` from the ``: [...]`` tail.
+
+    Args:
+        rest: Substring starting with ``':'`` then optional whitespace and a
+            bracketed list (as emitted by ``yaml.dump`` for ``FlowList``).
+
+    Returns:
+        The parsed list of integers, or ``None`` if parsing fails or values are
+        not all integers.
+
+    Raises:
+        None.
+    """
+    rest = rest.lstrip()
+    if not rest.startswith(":"):
+        return None
+    tail = rest[1:].strip()
+    if not tail.startswith("["):
+        return None
+    depth = 0
+    for i, ch in enumerate(tail):
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                try:
+                    v = ast.literal_eval(tail[: i + 1])
+                except (ValueError, SyntaxError):
+                    return None
+                if isinstance(v, list) and v and all(isinstance(x, int) for x in v):
+                    return v
+                return None
+    return None
+
+
+def format_matrix_instruction_cms_comment(
+    mi: Sequence[int], wavefront_size: int = 64
+) -> Optional[str]:
+    """Build the GEKO-style ``#CMS — MT …`` suffix for a 9-deep MatrixInstruction.
+
+    Uses the same MFMA layout math as ``MIDesign.calculate_mfma_parameters`` in
+    TuningDriver (``geko/.../mi_designer.py``).
+
+    Args:
+        mi: MatrixInstruction tuple (M, N, K, B, MIBlockM, WaveTileM, WaveTileN,
+            WaveM, WaveN).
+        wavefront_size: Wavefront size in threads (default 64).
+
+    Returns:
+        A string starting with ``' #CMS — MT …'``, or ``None`` if *mi* has fewer
+        than nine integer entries.
+
+    Raises:
+        None.
+    """
+    if len(mi) < 9:
+        return None
+    wave = (mi[7], mi[8])
+    mi_block_m = mi[4]
+    wave_tile_m, wave_tile_n = mi[5], mi[6]
+    matrix_inst_m = mi[0] * mi_block_m
+    mt0 = matrix_inst_m * wave_tile_m * wave[0]
+    matrix_inst_n = mi[1] / mi_block_m * mi[3]
+    mt1 = int(matrix_inst_n * wave_tile_n * wave[1])
+    tt0 = wave_tile_m
+    tt1 = wave_tile_n * mi[1]
+    wg0 = matrix_inst_m * wave[0]
+    wg1 = int(wave[0] * wave[1] * wavefront_size / wg0)
+    return (
+        f" #CMS — MT {mt0}x{mt1} - TT {tt0}x{tt1} - WG {wg0}x{wg1} - MIBlockM {mi_block_m}"
+    )
+
+
+def inject_fork_parameter_inline_comments(
+    yaml_text: str, comment_by_key: Optional[Dict[str, str]] = None
+) -> str:
+    """Append inline comments to ForkParameters and key lines under ``Groups``.
+
+    Fork list entries get ``# Default Value`` / ``# Range`` from metadata.
+    Under ``Groups``, ``MatrixInstruction`` uses a GEKO-style ``#CMS — MT …``
+    suffix when the instruction has nine components (same layout math as
+    TuningDriver ``MIDesign.calculate_mfma_parameters``); shorter tuples fall
+    back to default/range metadata. ``WorkGroup`` and ``MIArchVgpr`` use
+    metadata only. Lines already containing ``CMS —`` or ``Default Value:``
+    are left unchanged (idempotent).
+
+    Args:
+        yaml_text: Full document text produced by ``yaml.dump``.
+        comment_by_key: Optional pre-built metadata; defaults to
+            :func:`build_fork_parameter_comment_metadata`.
+
+    Returns:
+        Text with fork-parameter and group MI lines annotated where applicable.
+
+    Raises:
+        None.
+    """
+    if comment_by_key is None:
+        comment_by_key = build_fork_parameter_comment_metadata()
+    lines = yaml_text.splitlines(keepends=True)
+    out: List[str] = []
+    in_fork_block = False
+    in_groups_content = False
+    for line in lines:
+        if not in_fork_block and line.startswith("    ForkParameters:"):
+            in_fork_block = True
+            in_groups_content = False
+            out.append(line)
+            continue
+        if in_fork_block and (
+            line.startswith("    BenchmarkJoinParameters:")
+            or line.startswith("    BenchmarkFinalParameters:")
+        ):
+            in_fork_block = False
+            in_groups_content = False
+            out.append(line)
+            continue
+        if in_fork_block:
+            stripped = line.rstrip("\n")
+            if stripped.startswith("    - Groups:"):
+                in_groups_content = True
+                out.append(line)
+                continue
+            if in_groups_content:
+                if "Default Value:" not in stripped and "CMS —" not in stripped:
+                    gm = _GROUP_MATRIX_INSTRUCTION_RE.match(stripped)
+                    if gm:
+                        rest_clean = gm.group("rest").split("#", 1)[0].rstrip()
+                        prefix = gm.group("prefix")
+                        mi_vals = parse_matrix_instruction_list_from_colon_rest(
+                            rest_clean
+                        )
+                        cms_suffix = None
+                        if mi_vals is not None and len(mi_vals) >= 9:
+                            cms_suffix = format_matrix_instruction_cms_comment(mi_vals)
+                        if cms_suffix:
+                            line = prefix + rest_clean + cms_suffix + "\n"
+                        elif "MatrixInstruction" in comment_by_key:
+                            line = (
+                                prefix
+                                + rest_clean
+                                + comment_by_key["MatrixInstruction"]
+                                + "\n"
+                            )
+                    else:
+                        gw = _GROUP_WORKGROUP_RE.match(stripped)
+                        if gw and "WorkGroup" in comment_by_key:
+                            line = (
+                                gw.group("prefix")
+                                + gw.group("rest")
+                                + comment_by_key["WorkGroup"]
+                                + "\n"
+                            )
+                        else:
+                            gmv = _GROUP_MIARCH_VGPR_RE.match(stripped)
+                            if gmv and "MIArchVgpr" in comment_by_key:
+                                line = (
+                                    gmv.group("prefix")
+                                    + gmv.group("rest")
+                                    + comment_by_key["MIArchVgpr"]
+                                    + "\n"
+                                )
+                out.append(line)
+                continue
+            m = _FORK_PARAM_LINE_RE.match(stripped)
+            if (
+                m
+                and m.group("key") != "Groups"
+                and m.group("key") in comment_by_key
+                and "Default Value:" not in stripped
+            ):
+                suffix = comment_by_key[m.group("key")]
+                line = stripped + suffix + "\n"
+        out.append(line)
+    return "".join(out)
 
 
 def tPrint(verbosity: int, arg) -> None:
@@ -267,21 +514,38 @@ def formLibraryLogic(
     return data
 
 
-def writeToTensileYamlFile(tensileYamlFile: str, tensileYamlData: str) -> Optional[str]:
+def writeToTensileYamlFile(tensileYamlFile: str, tensileYamlData: dict) -> Optional[str]:
+    """Write Tensile YAML to disk, with inline fork-parameter documentation.
+
+    Args:
+        tensileYamlFile: Destination path.
+        tensileYamlData: Nested dict for the tuning config (GlobalParameters,
+            BenchmarkProblems, LibraryLogic).
+
+    Returns:
+        The output path on success, or ``None`` on I/O error.
+
+    Raises:
+        None.
+    """
     ret = None
     try:
         fileDir = os.path.dirname(tensileYamlFile)
         if fileDir:
             os.makedirs(fileDir, exist_ok=True)
 
+        buf = StringIO()
+        yaml.dump(
+            tensileYamlData,
+            buf,
+            default_flow_style=False,
+            sort_keys=False,
+            Dumper=yaml.Dumper,
+        )
+        body = inject_fork_parameter_inline_comments(buf.getvalue())
+
         with open(tensileYamlFile, "w") as f:
-            yaml.dump(
-                tensileYamlData,
-                f,
-                default_flow_style=False,
-                sort_keys=False,
-                Dumper=yaml.Dumper,
-            )
+            f.write(body)
         tPrint(1, "Config library is written to {}".format(tensileYamlFile))
         ret = tensileYamlFile
 
