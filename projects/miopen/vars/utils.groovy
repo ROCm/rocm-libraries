@@ -50,7 +50,7 @@ def check_host() {
 }
 
 //default
-// CXX=/opt/rocm/llvm/bin/clang++ CXXFLAGS='-Werror' cmake -DMIOPEN_GPU_SYNC=Off -DCMAKE_PREFIX_PATH=/usr/local -DBUILD_DEV=On -DCMAKE_BUILD_TYPE=release ..
+// CXX=/opt/rocm/llvm/bin/clang++ CXXFLAGS='-Werror' cmake -G Ninja -DMIOPEN_GPU_SYNC=Off -DCMAKE_PREFIX_PATH=/usr/local -DBUILD_DEV=On -DCMAKE_BUILD_TYPE=release ..
 //
 def cmake_build(Map conf=[:]){
 
@@ -143,10 +143,10 @@ def cmake_build(Map conf=[:]){
             rm -f src/kernels/miopen*.udb
             cd build
         """
-    def setup_cmd = conf.get("setup_cmd", "${cmake_envs} cmake ${setup_args}   .. ")
+    def setup_cmd = conf.get("setup_cmd", "${cmake_envs} cmake -G Ninja ${setup_args}   .. ")
     // WORKAROUND_SWDEV_290754
     // It seems like this W/A is not required since 4.5.
-    def build_cmd = conf.get("build_cmd", "LLVM_PATH=/opt/rocm/llvm ${build_envs} dumb-init make -j\$(nproc) ${make_targets}")
+    def build_cmd = conf.get("build_cmd", "LLVM_PATH=/opt/rocm/llvm ${build_envs} dumb-init ninja -j\$(nproc) ${make_targets}")
     def execute_cmd = conf.get("execute_cmd", "")
 
     def cmd = conf.get("cmd", """
@@ -213,7 +213,7 @@ def getDockerImageName(dockerArgs)
         sh "echo ${env.THEROCK_CANDIDATE_IMAGE} >> ${env.WORKSPACE}/factors.txt"
     }
     def image = "${env.MIOPEN_DOCKER_IMAGE_URL}"
-    // Note: The following files and directories from the CK repo are used to generate a hash for 
+    // Note: The following files and directories from the CK repo are used to generate a hash for
     // the docker image build. To ensure that we rebuild the docker image only when necessary.
     // Add any other files or directories that should trigger a rebuild of the docker image when changed.
     sh """
@@ -236,7 +236,7 @@ def getDockerImageName(dockerArgs)
         | md5sum \
         | awk '{print \$1}' >> "${env.WORKSPACE}/factors.txt"
     """
-    
+
     sh "cd ${env.WORKSPACE}/${env.MIOPEN_DIR}/ && md5sum Dockerfile requirements.txt dev-requirements.txt >> ${env.WORKSPACE}/factors.txt"
     def docker_hash = sh(script: "cd ${env.WORKSPACE} && md5sum factors.txt | awk '{print \$1}' | head -c 6", returnStdout: true)
     sh "rm ${env.WORKSPACE}/factors.txt"
@@ -728,10 +728,10 @@ def buildHipClangJob(Map conf=[:]){
             withDockerContainer(image: image, args: dockerOpts + " -v=${remote_root}:${remote_root}") {
                 timeout(time: build_timeout, unit:'MINUTES')
                 {
-                    // We set LOGNAME here because under the hood dvc calls Python's getpass.getuser() object to 
+                    // We set LOGNAME here because under the hood dvc calls Python's getpass.getuser() object to
                     // create a unique hash to store its local cache in. When Jenkins runs this Docker container, it
                     // runs as a UID that doesn't have an entry in /etc/passwd within the container. getuser() throws
-                    // an exception if it can't get the user name for the current user's UID, but it will check the 
+                    // an exception if it can't get the user name for the current user's UID, but it will check the
                     // LOGNAME environment variable and use that value if it's available.
                     // https://github.com/iterative/dvc/blob/3915fa26aa7d95d5cbe345e62846bfd82dccbfc7/dvc/repo/__init__.py#L646
                     // https://docs.python.org/3/library/getpass.html#getpass.getuser

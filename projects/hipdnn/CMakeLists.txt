@@ -10,8 +10,10 @@ if(NOT DEFINED ROCM_LIBRARIES_ROOT)
 endif()
 
 # hipDNN dependency versions to use
+set(_HIPDNN_DEFAULT_FLATBUFFERS_VERSION "25.9.23")
+
 set(HIPDNN_SPDLOG_VERSION "1.15.3" CACHE STRING "Version of spdlog to use")
-set(HIPDNN_FLATBUFFERS_VERSION "25.9.23" CACHE STRING "Version of flatbuffers to use")
+set(HIPDNN_FLATBUFFERS_VERSION "${_HIPDNN_DEFAULT_FLATBUFFERS_VERSION}" CACHE STRING "Version of flatbuffers to use")
 set(HIPDNN_NLOHMANN_JSON_VERSION "3.12.0" CACHE STRING "Version of nlohmann_json to use")
 set(HIPDNN_GTEST_VERSION "1.16.0" CACHE STRING "Version of googletest to use")
 set(HIPDNN_NANOBIND_VERSION "2.12.0" CACHE STRING "Version of nanobind to use")
@@ -32,6 +34,19 @@ if(HIPDNN_ENABLE_SDPA)
     message(STATUS "hipDNN: SDPA support enabled")
 else()
     message(STATUS "hipDNN: SDPA support disabled")
+endif()
+
+# Gates install of the cuDNN-compatibility shim headers and build/run of its
+# tests (RFC 0012; ALMIOPEN-2034). The shim sources always exist in the tree;
+# this option controls only whether they are installed and tested.
+option(HIPDNN_ENABLE_CUDNN_COMPATIBILITY
+    "Enable the cuDNN compatibility shim (headers + tests)" OFF
+)
+
+if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
+    message(STATUS "hipDNN: cuDNN compatibility shim enabled")
+else()
+    message(STATUS "hipDNN: cuDNN compatibility shim disabled")
 endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)

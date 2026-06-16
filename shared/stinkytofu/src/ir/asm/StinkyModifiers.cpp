@@ -23,6 +23,7 @@
 
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 
+#include <cstdint>
 #include <cstdlib>
 
 namespace stinkytofu {

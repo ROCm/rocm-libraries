@@ -24,21 +24,15 @@ SOFTWARE.
 
 #include "host_tensor_executors.hpp"
 
-RppStatus audio_tensor_add_tensor_host(Rpp32f *srcPtr1,
-                                       Rpp32f *srcPtr2,
-                                       RpptDescPtr srcDescPtr,
-                                       Rpp32f *dstPtr,
-                                       RpptDescPtr dstDescPtr,
-                                       Rpp32s *srcLengthTensor,
-                                       rpp::Handle& handle)
-{
+RppStatus audio_tensor_add_tensor_host(Rpp32f* srcPtr1, Rpp32f* srcPtr2, RpptDescPtr srcDescPtr,
+                                       Rpp32f* dstPtr, RpptDescPtr dstDescPtr,
+                                       Rpp32s* srcLengthTensor, rpp::Handle& handle) {
     omp_set_dynamic(0);
     omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-    for(int batchCount = 0; batchCount < srcDescPtr->n; batchCount++)
-    {
-        Rpp32f *srcPtr1Temp = srcPtr1 + batchCount * srcDescPtr->strides.nStride;
-        Rpp32f *dstPtrTemp = dstPtr + batchCount * dstDescPtr->strides.nStride;
+    for (int batchCount = 0; batchCount < srcDescPtr->n; batchCount++) {
+        Rpp32f* srcPtr1Temp = srcPtr1 + batchCount * srcDescPtr->strides.nStride;
+        Rpp32f* dstPtrTemp = dstPtr + batchCount * dstDescPtr->strides.nStride;
         Rpp32s bufferLength = srcLengthTensor[batchCount];
 
         // Scalar per batch broadcasting: srcPtr2 has shape (batchSize, 1)
@@ -50,8 +44,7 @@ RppStatus audio_tensor_add_tensor_host(Rpp32f *srcPtr1,
         Rpp32s alignedLength = (bufferLength / 8) * 8;
 #if __AVX2__
         __m256 pScalar = _mm256_set1_ps(scalarValue);
-        for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement)
-        {
+        for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
             __m256 pSrc = _mm256_loadu_ps(srcPtr1Temp);
             __m256 pDst = _mm256_add_ps(pSrc, pScalar);
             _mm256_storeu_ps(dstPtrTemp, pDst);
