@@ -399,11 +399,25 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
     }
 
     public:
+    std::vector<int> k_batches_;
+
     void SetUp() override
     {
         if constexpr(!Derived::check_data_type())
         {
             GTEST_SKIP() << "Unsupported data type combination for mx_gemm pipeline test.";
+        }
+        // for TDM it's used tdm_epilogue which don't support split-k
+        if constexpr(PipelineType == MxGemmPipelineType::CompTDMV1 ||
+                     PipelineType == MxGemmPipelineType::CompTDMV2)
+        {
+            // Only do k_batch = 1
+            k_batches_ = {1};
+        }
+        else
+        {
+            // Otherwise, use k_batch = 1 and 2
+            k_batches_ = {1, 2};
         }
     }
 
@@ -420,7 +434,15 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
     {
         if constexpr(Derived::check_data_type())
         {
-            RunSingle<PadM, PadN, PadK, Preshuffle>(M, N, K, StrideA, StrideB, StrideC, 1);
+            for(auto kb : k_batches_)
+            {
+                // skip test when split k' number is not evenly distributed
+                if((K / K_Tile) % kb != 0)
+                {
+                    continue;
+                }
+                RunSingle<PadM, PadN, PadK, Preshuffle>(M, N, K, StrideA, StrideB, StrideC, kb);
+            }
         }
     }
 
