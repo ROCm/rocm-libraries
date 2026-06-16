@@ -52,6 +52,7 @@ xxgtr             -> to test QL factorization Orthonormal/Unitary matrix constru
 xxmtr             -> to test QL factorization Orthonormal/Unitary matrix multiply
 gebrd             -> General matrix bidiagonalization
 xxgbr             -> to test LQ factorization Orthonormal/Unitary matrix construction
+stedc             -> Tridiagonal eigenvalue problem (Divide and Conquer)
 xxevd             -> Symmetric/Hermitian eigenvalue problem (Divide and Conquer)
 xxgvd             -> Symmetric/Hermitian generalized eigenvalue problem (Divide and Conquer)
 xxevdBatch        -> Symmetric/Hermitian eigenvalue problem (Divide and Conquer) batch version
@@ -68,7 +69,7 @@ gesvdjBatch       -> Singular Value Decomposition (Jacobi iteration) batch versi
 (note: several can be selected)
 
 precisions to use
-valid options are: (default is d)
+valid options are: (default is s,d)
 s -> real single precision
 d -> real double precision
 c -> complex single precision
@@ -80,11 +81,12 @@ valid options are: (default is large)
 small  -> see definitions in rocsolver_suites.py for included size values
 medium -> see definitions in rocsolver_suites.py for included size values
 large  -> see definitions in rocsolver_suites.py for included size values
+huge   -> see definitions in rocsolver_suites.py for included size values
 (note: select only one as small is a sub-set of medium which is a sub-set of large)
 ```
 
-For example, benchmarking `geqrf` with real single and real double precisions on the medium and small size cases would look like this:
+For example, benchmarking `geqrf` with real single and complex precisions on the medium and small size cases would look like this:
 ```
-./perfoptim-suite geqrf s d medium
+./perfoptim-suite geqrf s c medium
 ```
-After completion, the results of the benchmark will have been written to `rocsolver_customer01_benchmarks/sgeqrf_benchmarks.csv` and `rocsolver_customer01_benchmarks/dgeqrf_benchmarks.csv` for the real single precision case and the real double precision case, respectively.
+After completion, the results of the benchmark will have been written to `rocsolver_customer01_benchmarks/sgeqrf_benchmarks.csv` and `rocsolver_customer01_benchmarks/cgeqrf_benchmarks.csv` for the real single precision case and the complex single precision case, respectively.

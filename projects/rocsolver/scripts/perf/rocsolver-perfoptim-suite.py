@@ -102,8 +102,9 @@ def execute_benchmarks(output_file, suite, precision, case, bench_executable, lo
         else:
             row = roww
             row['gpu_time_us'] = time
-            row['log_n'] = math.log10(n)
-            row['log_gpu_time_us'] = math.log10(time)
+            # re-enable if needed
+            #row['log_n'] = math.log10(n)
+            #row['log_gpu_time_us'] = math.log10(time)
 
         if not init:
             results = csv.DictWriter(output_file, fieldnames=row.keys(),

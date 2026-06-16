@@ -37,6 +37,7 @@
 # xxmtr             -> to test QL factorization Orthonormal/Unitary matrix multiply
 # gebrd             -> General matrix bidiagonalization
 # xxgbr             -> to test LQ factorization Orthonormal/Unitary matrix construction
+# stedc             -> Tridiagonal eigenvalue problem (Divide and Conquer)
 # xxevd             -> Symmetric/Hermitian eigenvalue problem (Divide and Conquer)
 # xxgvd             -> Symmetric/Hermitian generalized eigenvalue problem (Divide and Conquer)
 # xxevdBatch        -> Symmetric/Hermitian eigenvalue problem (Divide and Conquer) batch version
@@ -53,11 +54,11 @@
 # (note: several can be selected)
 Slist="potrf potrfBatch potrs potrsBatch potri sytrf sytrs getrf getrfBatch getrfNpvt getrfNpvtBatch
         getrs getrsBatch getrsNpvt getrsNpvtBatch getriBatch getriOOPBatch trtri geqrf geqrfBatch
-        cholqr cholqrBatch gels gelsBatch xxgqr xxmqr larft xxtrd xxgtr xxmtr gebrd xxgbr xxevd
+        cholqr cholqrBatch gels gelsBatch xxgqr xxmqr larft xxtrd xxgtr xxmtr gebrd xxgbr stedc xxevd
         xxgvd xxevdBatch xxevBatch xxevdx xxgvdx xxevj xxgvj xxevjBatch gesvd gesdd gesvdj gesvdjBatch"
 
 # precisions to use
-# valid options are: (default is d)
+# valid options are: (default is s,d)
 # s -> real single precision
 # d -> real double precision
 # c -> complex single precision
@@ -70,25 +71,25 @@ Plist="s d c z"
 # small  -> see definitions in rocsolver_suites.py for included size values  
 # medium -> see definitions in rocsolver_suites.py for included size values
 # large  -> see definitions in rocsolver_suites.py for included size values
-# (note: select only one as small is a sub-set of medium which is a sub-set of large)
-Clist="small medium large"
+# huge   -> see definitions in rocsolver_suites.py for included size values
+# (note: select only one as small is a sub-set of medium which is a sub-set of large, etc.)
+Clist="small medium large huge"
  
 
 # Get and validate input arguments:
-error=true
 havecase=false
 suite=""
 precision=""
 case=""
 
 if [ $# == 0 ]; then
-    error=false
     suite=$Slist
-    precision="d"
+    precision="s d"
     case="large"
 else
     args=$@
     for a in $args; do
+        error=true
         for s in $Slist; do
             if [ $a == $s ]; then
                 new=true
@@ -133,18 +134,18 @@ else
                 break
             fi
         done  
+        if $error; then
+            echo "Incorrect arguments..."
+            exit 1
+        fi
     done
 fi
 
-if $error; then
-    echo "Incorrect arguments..."
-    exit 1 
-fi
 if [ -z "$suite" ]; then
     suite=$Slist
 fi
 if [ -z "$precision" ]; then
-    precision="d"
+    precision="s d"
 fi
 if [ -z "$case" ]; then
     case="large"
