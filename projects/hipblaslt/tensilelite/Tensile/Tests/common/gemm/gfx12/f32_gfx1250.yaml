@@ -69,8 +69,8 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1] #
         - PrefetchGlobalRead: [2] #
         - StoreRemapVectorWidth: [0]
-        - GlobalSplitU: [1]
-        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalSplitU: [2]
+        - GlobalSplitUAlgorithm: [MultipleBufferSingleKernel]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - 1LDSBuffer: [-1]
@@ -212,8 +212,8 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1] #
         - PrefetchGlobalRead: [2] #
         - StoreRemapVectorWidth: [0]
-        - GlobalSplitU: [1]
-        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalSplitU: [2]
+        - GlobalSplitUAlgorithm: [MultipleBufferSingleKernel]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - 1LDSBuffer: [-1]

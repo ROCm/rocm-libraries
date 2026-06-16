@@ -154,7 +154,7 @@ function(add_gtest TEST_NAME TEST_CPP)
     if (NOT MIOPEN_TEST_DEEPBENCH)
         add_gtest_negative_filter("*DeepBench*")
     endif()
-    
+
     if (NOT MIOPEN_TEST_CONV)
         add_gtest_negative_filter("*MIOpenTestConv*")
     endif()
@@ -162,7 +162,7 @@ function(add_gtest TEST_NAME TEST_CPP)
     if(MIOPEN_NO_GPU)
         add_gtest_negative_filter("*GPU*")
     endif()
-    
+
     if(MIOPEN_TEST_GFX115X)
         add_gtest_negative_filter("Full/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
         add_gtest_negative_filter("Full/GPU_BNFWDTrainLarge2D_FP32.BnV2LargeFWD_TrainCKfp32/NCHW_BNSpatial_testBNAPIV2_Dim_2_test_id_64") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
@@ -172,6 +172,9 @@ function(add_gtest TEST_NAME TEST_CPP)
     if(MIOPEN_TEST_GFX94X)
         add_gtest_negative_filter("Full/GPU_LstmMSRnn_FP32.TestFloat/1095") # Disable flaky test ALMIOPEN-1926
     endif()
+
+    # Excluded from MIOpen CI: the FP32 case OOMs when shards run concurrently on a single GPU.
+    add_gtest_negative_filter("*UnitTestConvSolver*LargeStride*")
 
     # when building the single gtest, add them in a sharded manner
     # loop over GTEST_PARALLEL_LEVEL
@@ -303,4 +306,3 @@ if( NOT ENABLE_ASAN_PACKAGING )
       RENAME "CTestTestfile.cmake"
   )
 endif()
-

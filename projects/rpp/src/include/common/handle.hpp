@@ -28,18 +28,19 @@ SOFTWARE.
 #include <cstdio>
 #include <cstring>
 #include <memory>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
-#include "rpp.h"
-#include "rppdefs.h"
+#include "allocator.hpp"
 #include "common.hpp"
 #include "object.hpp"
-#include "allocator.hpp"
+#include "rpp.h"
+#include "rppdefs.h"
 
 #if RPP_USE_ROCBLAS
-#include "manage_ptr.hpp"
 #include <rocblas.h>
+
+#include "manage_ptr.hpp"
 #endif
 
 namespace rpp {
@@ -56,8 +57,7 @@ using rocblas_handle_ptr = RPP_MANAGE_PTR(rocblas_handle, rocblas_destroy_handle
 
 #if !GPU_SUPPORT
 
-struct Handle : rppHandle
-{
+struct Handle : rppHandle {
     Handle(size_t nBatchSize, Rpp32u numThreads = 0);
     ~Handle();
 
@@ -72,12 +72,11 @@ struct Handle : rppHandle
 
 #else
 
-struct Handle : rppHandle
-{
+struct Handle : rppHandle {
     // Host handle related
     Handle(size_t nBatchSize, Rpp32u numThreads = 0);
     ~Handle();
-    InitHandle*  GetInitHandle() const;
+    InitHandle* GetInitHandle() const;
     size_t GetBatchSize() const;
     Rpp32u GetNumThreads() const;
     RppBackend GetBackend() const;
@@ -85,7 +84,8 @@ struct Handle : rppHandle
     void rpp_destroy_object_host();
 
     // Allocator related
-    void SetAllocator(rppAllocatorFunction allocator, rppDeallocatorFunction deallocator, void* allocatorContext) const;
+    void SetAllocator(rppAllocatorFunction allocator, rppDeallocatorFunction deallocator,
+                      void* allocatorContext) const;
 
     // Device handle related
     Handle(size_t nBatchSize, rppAcceleratorQueue_t stream);
@@ -105,10 +105,10 @@ struct Handle : rppHandle
     std::unique_ptr<HandleImpl> impl;
 };
 
-#endif // GPU_SUPPORT
+#endif  // GPU_SUPPORT
 
-} // namespace rpp
+}  // namespace rpp
 
 RPP_DEFINE_OBJECT(rppHandle, rpp::Handle);
 
-#endif // GUARD_RPP_CONTEXT_HPP_
+#endif  // GUARD_RPP_CONTEXT_HPP_

@@ -235,8 +235,8 @@ set( MIOpen_Source
     solver/conv/conv_multipass_wino3x3WrW.cpp
     solver/conv/conv_hip_dir2D_bwdWrW_53.cpp
     solver/conv/conv_hip_dir2D11x11.cpp
-    solver/conv/conv_ocl_dir2Dfwd.cpp
-    solver/conv/conv_ocl_dir2Dfwd_exhaustive_search.cpp
+    solver/conv/conv_hip_dir2Dfwd.cpp
+    solver/conv/conv_hip_dir2Dfwd_exhaustive_search.cpp
     solver/conv/conv_wino_fury_RxS.cpp
     solver/conv/conv_wino_rage_RxS.cpp
     solver/conv/conv_winoRxS.cpp
@@ -253,7 +253,7 @@ set( MIOpen_Source
     solver/conv_ck_igemm_fwd_bias_activ_fused.cpp
     solver/conv_ck_igemm_grp_fwd_bias_activ_fused.cpp
     solver/conv_ck_igemm_fwd_bias_res_add_activ_fused.cpp
-    solver/conv_ocl_dir2Dfwd_fused.cpp
+    solver/conv_hip_dir2Dfwd_fused.cpp
     solver/conv_winoRxS_fused.cpp
     solver/glu/backward_glu.cpp
     solver/glu/forward_glu.cpp
@@ -545,8 +545,8 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenBatchNormFwdInferPerAct.cpp
         kernels/MIOpenBatchNormBwdSpatial.cpp
         kernels/MIOpenBatchNormBwdPerAct.cpp
-        kernels/MIOpenConvDirUni.cl
-        kernels/MIOpenConvDirBatchNormActiv.cl
+        kernels/MIOpenConvDirUniHip.cpp
+        kernels/MIOpenConvDirBatchNormActivHip.cpp
         kernels/MIOpenGLU.cpp
         kernels/MIOpenGroupNorm.cpp
         kernels/MIOpenGetitem.cpp

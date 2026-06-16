@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2020 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2020 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -61,7 +61,7 @@ if ( BUILD_WITH_LIB STREQUAL "CUDA" )
     target_compile_options( hipfft-bench PRIVATE -cuda -Xptxas=-w)
     target_link_options( hipfft-bench PRIVATE -cuda)
   else()
-    target_compile_options( hipfft-bench PRIVATE -arch sm_53 -gencode=arch=compute_53,code=sm_53 -Xptxas=-w)
+    target_compile_options( hipfft-bench PRIVATE -arch sm_100 -gencode=arch=compute_100,code=sm_100 -Xptxas=-w)
   endif()
   target_link_libraries( hipfft-bench PRIVATE ${CUDA_LIBRARIES} )
 else()
