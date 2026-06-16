@@ -91,7 +91,7 @@ ORIGAMI_EXPORT size_t select_grid_size(const problem_t& problem,
  *                           clamps hardware.N_CU from above.
  * @return hybrid_mode_t::static_ for SK3, hybrid_mode_t::dynamic for SK4.
  */
-hybrid_mode_t select_hybrid_mode(const problem_t& problem,
+ORIGAMI_EXPORT hybrid_mode_t select_hybrid_mode(const problem_t& problem,
                                  const hardware_t& hardware,
                                  const config_t& config,
                                  size_t sm_count_target);
