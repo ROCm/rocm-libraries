@@ -2512,6 +2512,10 @@ std::vector<size_t> rocfft_plan_t::GlobalTranspose(const field_view_t&        in
     // to the P2P / A2A paths below.
     if(rccl && desc.get_local_comm_size() == 1)
     {
+        // GlobalTransposeRCCL appends to multiPlan as it builds,
+        // on failure roll back to this size so the fallback path does not
+        // run alongside orphaned RCCL items
+        const size_t multiPlanRollback = multiPlan.size();
         try
         {
             return GlobalTransposeRCCL(input, output, antecedents);
@@ -2531,6 +2535,10 @@ std::vector<size_t> rocfft_plan_t::GlobalTranspose(const field_view_t&        in
                        "falling back to P2P/A2A"
                     << std::endl;
         }
+
+        // discard any partially-built RCCL items before falling back
+        multiPlan.resize(multiPlanRollback);
+        multiPlanAntecedents.resize(multiPlanRollback);
     }
 #endif
 
