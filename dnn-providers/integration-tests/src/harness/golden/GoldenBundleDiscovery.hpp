@@ -158,8 +158,14 @@ inline std::string
         return "Matmul";
     case NA::RMSNormAttributes:
         return "RmsNorm";
+    case NA::RMSNormBackwardAttributes:
+        return "RmsNormBwd";
+    case NA::ResampleFwdAttributes:
+        return "ResampleFwd";
     case NA::LayernormAttributes:
         return "LayerNorm";
+    case NA::LayernormBackwardAttributes:
+        return "LayerNormBwd";
     case NA::SdpaAttributes:
         return "SdpaFwd";
     case NA::SdpaBackwardAttributes:
