@@ -211,7 +211,9 @@ struct rhs_mapping_contains
             return false;
         else
         {
-            using MatchFlags = decltype(generate_sequence_v2(
+            // Evaluate the generator (rather than wrapping it in decltype) so the lambda
+            // lives in an evaluated operand; lambdas in unevaluated operands are not valid C++17.
+            constexpr auto match_flags = generate_sequence_v2(
                 [](auto i) {
                     using MajorSequence = remove_cvref_t<decltype(MajorTuple{}[i])>;
                     using MinorSequence = remove_cvref_t<decltype(MinorTuple{}[i])>;
@@ -222,9 +224,9 @@ struct rhs_mapping_contains
                                        ? 1
                                        : 0)>{};
                 },
-                number<MajorTuple::size()>{}));
+                number<MajorTuple::size()>{});
 
-            return MatchFlags::sum() != 0;
+            return match_flags.sum() != 0;
         }
     }();
 };
@@ -240,16 +242,18 @@ struct have_compatible_hs_lengthss
             constexpr auto expected_hs = ExpectedEncoding::hs_lengthss_;
             constexpr auto actual_hs   = ActualEncoding::hs_lengthss_;
 
-            using CompatibleFlags = decltype(generate_sequence_v2(
+            // Evaluate the generator (rather than wrapping it in decltype) so the lambda
+            // lives in an evaluated operand; lambdas in unevaluated operands are not valid C++17.
+            constexpr auto compatible_flags = generate_sequence_v2(
                 [](auto i) {
                     using ExpectedHs = remove_cvref_t<decltype(expected_hs[i])>;
                     using ActualHs   = remove_cvref_t<decltype(actual_hs[i])>;
                     return number<(
                         is_same_or_terminal_split_sequence<ExpectedHs, ActualHs>::value ? 1 : 0)>{};
                 },
-                number<ExpectedEncoding::NDimX>{}));
+                number<ExpectedEncoding::NDimX>{});
 
-            return CompatibleFlags::sum() == ExpectedEncoding::NDimX;
+            return compatible_flags.sum() == ExpectedEncoding::NDimX;
         }
     }();
 };
