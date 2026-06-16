@@ -44,7 +44,7 @@ def setMatrixAReuse(module, writer, kernel):
   mmas = [inst for inst in module.flatitems() if _isMMA(inst)]
   for prev, cur in zip(mmas, mmas[1:]):
     if tuple(_vgprIndices(cur.a)) and _vgprIndices(cur.a) == _vgprIndices(prev.a):
-      cur.reuseA = True
+      prev.reuseA = True
   return module
 
 
