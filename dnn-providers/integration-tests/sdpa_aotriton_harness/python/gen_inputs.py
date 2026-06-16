@@ -64,6 +64,10 @@ def _generate_case(case: sdpa_cases.Case, run_dir: str) -> dict:
     man = mf.manifest_from_case(case, run_dir)
     files = man["files"]
 
+    # Ensure the per-case directory exists before writing input .npy files
+    # (the manifest itself is written later by the caller).
+    os.makedirs(mf.case_dir(run_dir, case.name), exist_ok=True)
+
     _save_qkv(files["q"], q, case.dtype)
     _save_qkv(files["k"], k, case.dtype)
     _save_qkv(files["v"], v, case.dtype)
