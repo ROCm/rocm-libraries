@@ -22,7 +22,7 @@
 
 from rocisa.code import Label, Module, RegSet, TextBlock, ValueSet, SrdUpperValue
 from rocisa.container import EXEC, VCC, DSModifiers, MUBUFModifiers, vgpr, sgpr
-from rocisa.enum import RegisterType
+from rocisa.enum import HighBitSel, RegisterType
 from rocisa.register import RegisterPool
 import rocisa.instruction as ri
 
@@ -451,11 +451,11 @@ class AMaxKernelGenerator:
     def max_per_data(self, i, onlyOneElement = False) -> Module:
         mod = Module("max_per_data")
         if (self.i_type.isHalf()):
-            mod.add(ri.VMaxF16(vgpr("Output"), vgpr("Output"), vgpr(f"Value+{i}", isAbs=True)))
+            mod.add(ri.EMaxF16(vgpr("Output"), vgpr("Output"), vgpr(f"Value+{i}", isAbs=True)))
             # On non-Ecc hardware, the top 16 bits are dirty
             if not onlyOneElement:
                 mod.add(ri.VLShiftRightB32(vgpr(f"Value+{i}"), 16, vgpr(f"Value+{i}")))
-                mod.add(ri.VMaxF16(vgpr("Output"), vgpr("Output"), vgpr(f"Value+{i}", isAbs=True)))
+                mod.add(ri.EMaxF16(vgpr("Output"), vgpr("Output"), vgpr(f"Value+{i}", isAbs=True)))
         elif (self.i_type.isSingle()):
             mod.add(ri.VMaxF32(vgpr("Output"), vgpr("Output"), vgpr(f"Value+{i}", isAbs=True)))
         return mod
@@ -652,7 +652,7 @@ class AMaxKernelGenerator:
     def merge_sum(self) -> Module:
         mod = Module("merge_sum")
         if (self.i_type.isHalf()):
-            mod.add(ri.VMaxF16(vgpr("Output"), vgpr("Output"), vgpr("OutputB")))
+            mod.add(ri.EMaxF16(vgpr("Output"), vgpr("Output"), vgpr("OutputB")))
         elif (self.i_type.isSingle()):
             mod.add(ri.VMaxF32(vgpr("Output"), vgpr("Output"), vgpr("OutputB")))
 
@@ -763,9 +763,9 @@ class AMaxKernelGenerator:
 
         mod.add(ri.VMovB32(vgpr("Offset"), 0))
         if self.i_type.toChar() == 'H' and self.o_type.toChar() == "S":
-            mod.add(ri.VCvtF16toF32(vgpr("Output"), vgpr("Output")))
+            mod.add(ri.ECvtF16toF32(vgpr("Output"), vgpr("Output"), sel=HighBitSel.LOW))
         elif self.i_type.toChar() == 'S' and self.o_type.toChar() == "H":
-            mod.add(ri.VCvtF32toF16(vgpr("Output"), vgpr("Output")))
+            mod.add(ri.ECvtF32toF16(vgpr("Output"), vgpr("Output"), sel=HighBitSel.LOW))
         mod.add(BufferStorex1(vgpr("Output"), vgpr("Offset"), sgpr("Dst",4), 0, MUBUFModifiers(offen=True)))
         mod.addSpaceLine()
 

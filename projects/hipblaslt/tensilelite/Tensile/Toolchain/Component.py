@@ -169,8 +169,12 @@ class Assembler(Component):
             destPath: The destination path for the generated object file.
         """
         args = self._default_args
-        # Enable true16 syntax on targets that support +real-true16.
-        if targetGfx in ("gfx1250", "gfx1201", "gfx1200", "gfx1100"):
+        # NoSDWA targets (gfx11*/gfx12*, see hardware_caps NoSDWA = {11, 12})
+        # emit true16 instruction syntax (.l/.h half-word operands). gfx11*
+        # defaults true16-ON while gfx12* defaults true16-OFF, so force
+        # +real-true16 on the whole NoSDWA set to keep emission and assembler
+        # in agreement (no-op where it is already the default).
+        if targetGfx.startswith(("gfx11", "gfx12")):
             args = args + ["-Xclangas", "-target-feature", "-Xclangas", "+real-true16"]
         args = [
             *args,

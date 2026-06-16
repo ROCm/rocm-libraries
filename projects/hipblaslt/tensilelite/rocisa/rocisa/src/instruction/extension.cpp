@@ -139,4 +139,10 @@ void ext_inst(nb::module_ m)
           nb::arg("vgprMask").none(),
           nb::arg("vi"),
           nb::arg("comment") = "");
+    m.def("EMaxF16",
+          &rocisa::EMaxF16,
+          nb::arg("dst"),
+          nb::arg("src0"),
+          nb::arg("src1"),
+          nb::arg("comment") = "");
 }

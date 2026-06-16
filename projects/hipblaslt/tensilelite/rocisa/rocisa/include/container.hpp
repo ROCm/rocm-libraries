@@ -1180,6 +1180,25 @@ namespace rocisa
             }
         }
 
+        // Render this register operand with a true16 half-word selector (.l/.h).
+        // The suffix must bind to the register itself, so for abs() operands it
+        // is inserted *inside* the closing paren (abs(v[v].l) is valid, while
+        // abs(v[v]).l is not).
+        std::string toStringTrue16(HighBitSel sel) const
+        {
+            std::string base = toString();
+            if(sel == HighBitSel::NONE)
+            {
+                return base;
+            }
+            const std::string suffix = (sel == HighBitSel::HIGH) ? ".h" : ".l";
+            if(isAbs && !base.empty() && base.back() == ')')
+            {
+                return base.substr(0, base.size() - 1) + suffix + ")";
+            }
+            return base + suffix;
+        }
+
         bool sameRegBaseAddr(const RegisterContainer& b) const
         {
             if(regName && b.regName)

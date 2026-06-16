@@ -27,6 +27,7 @@
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/variant.h>
+#include <nanobind/stl/vector.h>
 
 namespace nb = nanobind;
 
@@ -1620,11 +1621,13 @@ void common_inst(nb::module_ m_common)
                       const InstructionInput&,
                       const InstructionInput&,
                       std::optional<rocisa::SDWAModifiers>,
+                      const std::vector<int>&,
                       const std::string&>(),
              nb::arg("dst"),
              nb::arg("src0"),
              nb::arg("src1"),
              nb::arg("sdwa")    = std::nullopt,
+             nb::arg("true16")  = std::vector<int>({}),
              nb::arg("comment") = "")
         .def("__deepcopy__",
              [](const rocisa::VMaxF16& self, nb::dict&) { return new rocisa::VMaxF16(self); });

@@ -51,10 +51,10 @@ LDD := $(ROCM_PATH)/bin/amdclang++
 WAVE ?= 64
 WAVEFRONTSIZE ?= $(if $(WAVE:32=),-mwavefrontsize64, -mno-wavefrontsize64)
 
-TRUE16_FEATURE :=
-ifneq ($(filter gfx1250,$(TARGET_ARCH)),)
-	TRUE16_FEATURE += -Xclangas -target-feature -Xclangas +real-true16
-endif
+# NoSDWA targets (gfx11*/gfx12*) emit true16 syntax (.l/.h half-word operands).
+# gfx12* defaults true16-OFF and gfx11* defaults true16-ON, so enable
+# +real-true16 across the whole set to keep the assembler in agreement.
+TRUE16_FEATURE = $(if $(filter gfx11% gfx12%,$(ARCH)),-Xclangas -target-feature -Xclangas +real-true16)
 
 .SECONDEXPANSION:
 co: COFILES = $(shell find ${TENSILE_OUT}/1_BenchmarkProblems/*/00_Final/caches/*/source/library -name '*.co')

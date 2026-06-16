@@ -4659,25 +4659,73 @@ namespace rocisa
 
     struct VMaxF16 : public CommonInstruction
     {
+        std::vector<True16Modifiers> true16;
+
         VMaxF16(const std::shared_ptr<Container>& dst,
                 const InstructionInput&           src0,
                 const InstructionInput&           src1,
-                std::optional<SDWAModifiers>      sdwa    = std::nullopt,
-                const std::string&                comment = "")
+                std::optional<SDWAModifiers>      sdwa      = std::nullopt,
+                const std::vector<int>&           true16Arg = {},
+                const std::string&                comment   = "")
             : CommonInstruction(
                 InstType::INST_F16, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
         {
             setInst("v_max_f16");
+            for(int arg : true16Arg)
+            {
+                true16.emplace_back(arg);
+            }
         }
 
         VMaxF16(const VMaxF16& other)
             : CommonInstruction(other)
+            , true16(other.true16)
         {
         }
 
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VMaxF16>(*this);
+        }
+
+        std::string getArgStr() const override
+        {
+            if(true16.empty())
+            {
+                return CommonInstruction::getArgStr();
+            }
+
+            auto selAt = [&](size_t i) -> HighBitSel {
+                return i < true16.size() ? true16[i].high_bit : HighBitSel::NONE;
+            };
+            auto render = [&](const InstructionInput& in, HighBitSel sel) -> std::string {
+                if(std::holds_alternative<std::shared_ptr<Container>>(in))
+                {
+                    auto rc = std::dynamic_pointer_cast<RegisterContainer>(
+                        std::get<std::shared_ptr<Container>>(in));
+                    if(rc)
+                    {
+                        return rc->toStringTrue16(sel);
+                    }
+                }
+                return InstructionInputToString(in);
+            };
+
+            std::string kStr;
+            if(dst && !dst->toString().empty())
+            {
+                auto rc = std::dynamic_pointer_cast<RegisterContainer>(dst);
+                kStr += rc ? rc->toStringTrue16(selAt(0)) : dst->toString();
+            }
+            for(size_t i = 0; i < srcs.size(); ++i)
+            {
+                if(!kStr.empty())
+                {
+                    kStr += ", ";
+                }
+                kStr += render(srcs[i], selAt(i + 1));
+            }
+            return kStr;
         }
     };
 

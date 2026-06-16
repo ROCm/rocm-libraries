@@ -617,6 +617,32 @@ namespace rocisa
             dst, src, sdwa, std::nullopt, std::vector<int>{}, comment);
     }
 
+    /// Max of two F16 operands. On NoSDWA targets (gfx11+) the operands are
+    /// emitted with true16 half-word selectors (.l); on legacy targets the
+    /// plain (fake16) form is used. Callers keep the data in the low half-word.
+    inline std::shared_ptr<Item>
+        EMaxF16(const std::shared_ptr<RegisterContainer>& dst,
+                const InstructionInput&                   src0,
+                const InstructionInput&                   src1,
+                const std::string&                        comment = "")
+    {
+        rocIsa& instance = rocIsa::getInstance();
+        if(instance.getArchCaps()["NoSDWA"])
+        {
+            return std::make_shared<VMaxF16>(
+                dst,
+                src0,
+                src1,
+                std::nullopt,
+                std::vector<int>{static_cast<int>(HighBitSel::LOW),
+                                 static_cast<int>(HighBitSel::LOW),
+                                 static_cast<int>(HighBitSel::LOW)},
+                comment);
+        }
+        return std::make_shared<VMaxF16>(
+            dst, src0, src1, std::nullopt, std::vector<int>{}, comment);
+    }
+
     inline std::shared_ptr<Item>
         VCvtBF16toFP32(const std::shared_ptr<RegisterContainer>&         dst,
                        const std::shared_ptr<RegisterContainer>&         src,

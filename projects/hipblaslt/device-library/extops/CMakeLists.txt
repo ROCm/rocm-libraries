@@ -17,13 +17,17 @@ foreach(arch IN LISTS archs)
         set(extop_xnack_args --xnack)
     endif()
     set(WAVEFRONT "-mwavefrontsize64")
+    set(TRUE16_FLAGS "")
     if(arch MATCHES "^gfx1[12][0-9][0-9]$")
         set(WAVEFRONT "-mno-wavefrontsize64")
+        # gfx11/gfx12 use true16 instruction syntax (.l/.h half-word operands)
+        # which requires the +real-true16 assembler feature to be enabled.
+        set(TRUE16_FLAGS -Xclangas -target-feature -Xclangas +real-true16)
     endif()
     add_library(extop-obj-${arch} OBJECT)
     target_compile_options(extop-obj-${arch}
         PRIVATE
-            -Wno-unused-command-line-argument -x assembler -target amdgcn-amd-amdhsa -mcode-object-version=4 -mcpu=${offload_arch} ${WAVEFRONT} -c
+            -Wno-unused-command-line-argument -x assembler -target amdgcn-amd-amdhsa -mcode-object-version=4 -mcpu=${offload_arch} ${WAVEFRONT} ${TRUE16_FLAGS} -c
     )
     target_sources(extop-obj-${arch}
         PRIVATE
