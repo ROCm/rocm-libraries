@@ -27,6 +27,54 @@
 
 set -e
 
+# Default values
+NUM_THREADS=""
+NUM_RUNS=""
+CLEAN_BUILD=1  # Default to fresh build
+
+# Parse command-line arguments
+usage() {
+    echo "Usage: $0 [OPTIONS]"
+    echo ""
+    echo "Options:"
+    echo "  -t, --threads <N>     Number of threads to use (default: auto-detect)"
+    echo "  -n, --num-runs <N>    Number of benchmark runs (default: 100)"
+    echo "  --no-clean            Skip clean build (use existing build)"
+    echo "  -h, --help            Display this help message"
+    echo ""
+    echo "Examples:"
+    echo "  $0                     # Fresh build, auto-detect threads, 100 runs (default)"
+    echo "  $0 -t 64               # Fresh build with 64 threads"
+    echo "  $0 -t 32 -n 50         # Fresh build with 32 threads, 50 runs"
+    echo "  $0 --no-clean          # Use existing build without cleaning"
+    echo ""
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -t|--threads)
+            NUM_THREADS="$2"
+            shift 2
+            ;;
+        -n|--num-runs)
+            NUM_RUNS="$2"
+            shift 2
+            ;;
+        --no-clean)
+            CLEAN_BUILD=0
+            shift
+            ;;
+        -h|--help)
+            usage
+            ;;
+        *)
+            echo "Error: Unknown option: $1"
+            usage
+            ;;
+    esac
+done
+
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
@@ -34,6 +82,12 @@ echo "========================================"
 echo "OpenCV Benchmark - Complete Setup"
 echo "========================================"
 echo ""
+if [ -n "$NUM_THREADS" ] || [ -n "$NUM_RUNS" ]; then
+    echo "Configuration:"
+    [ -n "$NUM_THREADS" ] && echo "  Threads: $NUM_THREADS"
+    [ -n "$NUM_RUNS" ] && echo "  Number of runs: $NUM_RUNS"
+    echo ""
+fi
 
 # Check if dependencies are installed
 DEPS_MISSING=0
@@ -91,51 +145,64 @@ else
     echo ""
 fi
 
-# Function to build benchmark with specified configuration
-build_benchmark() {
-    local pthreads_flag=$1
-    local build_dir=$2
-    local description=$3
-
-    echo "Building benchmark ${description}..."
-    echo "--------------------------------------"
-    mkdir -p "$build_dir"
-    cd "$build_dir"
-    cmake .. -DENABLE_PARALLEL_THREADS="$pthreads_flag"
+# Build benchmark
+echo "Step 4: Building benchmark..."
+echo "--------------------------------------"
+if [ $CLEAN_BUILD -eq 1 ]; then
+    echo "Performing fresh build (cleaning old build artifacts)..."
+    rm -rf build
+    mkdir -p build
+    cd build
+    cmake ..
     make -j$(nproc)
     cd ..
-    echo "✓ Build complete"
-    echo ""
-}
+    echo "✓ Fresh build complete"
+else
+    echo "Using existing build (incremental build)..."
+    mkdir -p build
+    cd build
+    if [ ! -f Makefile ]; then
+        echo "No existing build found, running cmake..."
+        cmake ..
+    fi
+    make -j$(nproc)
+    cd ..
+    echo "✓ Incremental build complete"
+fi
+echo ""
 
-# Function to run benchmark
-run_benchmark() {
-    local build_dir=$1
-    local description=$2
+# Build command with optional arguments
+BUILD_DIR="build"
+cmd="./${BUILD_DIR}/opencv_vs_rpp_host_benchmarking"
+cmd_args=""
 
-    echo "========================================"
-    echo "Starting Benchmark ${description}"
-    echo "========================================"
-    echo ""
-    echo "This will take several minutes..."
-    echo "Running 100 iterations of 50+ operations on 128 1080p images"
-    echo ""
+if [ -n "$NUM_THREADS" ]; then
+    cmd_args="$cmd_args --threads $NUM_THREADS"
+fi
 
-    "./${build_dir}/opencv_vs_rpp_host_benchmarking"
+if [ -n "$NUM_RUNS" ]; then
+    cmd_args="$cmd_args --num-runs $NUM_RUNS"
+fi
 
-    echo ""
-    echo "========================================"
-    echo "Benchmark Complete ${description}!"
-    echo "========================================"
-    echo ""
-}
+runs_text="${NUM_RUNS:-100}"
+threads_text="${NUM_THREADS:-auto-detect}"
 
-# Build both configurations sequentially for clean output
-echo "Step 4: Building benchmarks..."
-echo "--------------------------------------"
-build_benchmark ON build_enabled_pthreads "with parallel threads"
-build_benchmark OFF build_disabled_pthreads "without parallel threads"
+echo "========================================"
+echo "Starting Benchmark"
+echo "========================================"
+echo ""
+echo "Configuration:"
+echo "  Threads: $threads_text"
+echo "  Runs: $runs_text"
+echo ""
+echo "This will take several minutes..."
+echo "Running $runs_text iterations of 50+ operations on 128 1080p images"
+echo ""
 
-# Run benchmarks sequentially
-run_benchmark build_enabled_pthreads "with parallel threads"
-run_benchmark build_disabled_pthreads "without parallel threads"
+$cmd $cmd_args
+
+echo ""
+echo "========================================"
+echo "Benchmark Complete!"
+echo "========================================"
+echo ""

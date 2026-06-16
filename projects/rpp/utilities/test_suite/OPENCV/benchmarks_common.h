@@ -60,10 +60,8 @@ using namespace chrono;
 #define DEFAULT_GRAY_IMAGE_PATH "1080p_128images_dataset/"
 #define DEFAULT_RGB_IMAGE_PATH  "1080p_128images_dataset/"
 
-// Default number of runs per benchmark
-#define NUM_RUNS     100
-
 // Global configuration variables (set at runtime)
+extern int NUM_RUNS;
 extern int NUM_THREADS;
 extern string GRAY_IMAGE_PATH;
 extern string RGB_IMAGE_PATH;
@@ -168,6 +166,7 @@ void benchmark_RPP_Phase(const vector<Mat>& imgs, bool isColor, rppHandle_t hand
 void benchmark_RPP_WarpPerspective(const vector<Mat>& imgs, bool isColor, rppHandle_t handle);
 void benchmark_RPP_Remap(const vector<Mat>& imgs, bool isColor, rppHandle_t handle);
 void benchmark_RPP_Normalize(const vector<Mat>& imgs, bool isColor, rppHandle_t handle);
+void benchmark_RPP_Normalize_SingleImage(const vector<Mat>& imgs, bool isColor, rppHandle_t handle);
 void benchmark_RPP_FusedMultiplyAddScalar(const vector<Mat>& imgs, bool isColor, Rpp32f mul, Rpp32f add, rppHandle_t handle);
 void benchmark_RPP_Emboss(const vector<Mat>& imgs, bool isColor, rppHandle_t handle);
 void benchmark_RPP_TensorMin(const vector<Mat>& imgs, bool isColor, rppHandle_t handle);

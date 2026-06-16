@@ -1765,6 +1765,77 @@ void benchmark_RPP_Normalize(const vector<Mat>& imgs, bool isColor, rppHandle_t 
                 duration<double, milli>(end - start).count());
 }
 
+void benchmark_RPP_Normalize_SingleImage(const vector<Mat>& imgs, bool isColor, rppHandle_t handle)
+{
+    int num_images = (int)imgs.size();
+    int channels = isColor ? 3 : 1;
+    int height = imgs[0].rows;
+    int width = imgs[0].cols;
+    int nDim = 3;  // 3D per-image: H, W, C
+
+    // Create output buffers for each image
+    vector<Mat> outputImages(num_images);
+    for (int i = 0; i < num_images; ++i)
+        outputImages[i] = Mat::zeros(imgs[i].size(), imgs[i].type());
+
+    // Create generic descriptor for SINGLE IMAGE (batchSize=1)
+    RpptGenericDesc srcGenericDesc, dstGenericDesc;
+    srcGenericDesc.numDims = nDim + 1;  // 4D: N, H, W, C
+    srcGenericDesc.offsetInBytes = 0;
+    srcGenericDesc.dataType = RpptDataType::U8;
+    srcGenericDesc.layout = RpptLayout::NHWC;
+    srcGenericDesc.dims[0] = 1;         // *** BATCH SIZE = 1 (single image) ***
+    srcGenericDesc.dims[1] = height;
+    srcGenericDesc.dims[2] = width;
+    srcGenericDesc.dims[3] = channels;
+    srcGenericDesc.strides[3] = 1;
+    srcGenericDesc.strides[2] = channels;
+    srcGenericDesc.strides[1] = width * channels;
+    srcGenericDesc.strides[0] = height * width * channels;
+
+    dstGenericDesc = srcGenericDesc;
+
+    // axisMask: Bit 0=H, Bit 1=W, Bit 2=C
+    // axisMask=3 (0b011) -> normalize over H and W, keep C separate
+    Rpp32u axisMask = 3;
+
+    // ROI for SINGLE IMAGE
+    vector<Rpp32u> roiTensor(nDim * 2);  // Only 6 values for one image
+    roiTensor[0] = 0;         // h_start
+    roiTensor[1] = 0;         // w_start
+    roiTensor[2] = 0;         // c_start
+    roiTensor[3] = height;    // h_size
+    roiTensor[4] = width;     // w_size
+    roiTensor[5] = channels;  // c_size
+
+    // Mean/stddev for SINGLE IMAGE (one value per channel)
+    vector<Rpp32f> meanTensor(channels, 0.0f);
+    vector<Rpp32f> stdDevTensor(channels, 0.0f);
+
+    Rpp8u computeMeanStddev = 3;  // Compute both internally
+    Rpp32f scale = 1.0f;
+    Rpp32f shift = 0.0f;
+
+    // *** KEY DIFFERENCE: Process images ONE AT A TIME in a SERIAL LOOP ***
+    auto start = high_resolution_clock::now();
+    for (int k = 0; k < NUM_RUNS; ++k)
+    {
+        for (int i = 0; i < num_images; ++i)  // *** SERIAL LOOP over images ***
+        {
+            CHECK_RPP_STATUS(rppt_normalize(imgs[i].data, &srcGenericDesc,
+                                           outputImages[i].data, &dstGenericDesc,
+                                           axisMask, meanTensor.data(), stdDevTensor.data(),
+                                           computeMeanStddev, scale, shift,
+                                           roiTensor.data(), handle, RPP_HOST_BACKEND),
+                            "normalize");
+        }
+    }
+    auto end = high_resolution_clock::now();
+
+    printResult("RPP HOST Normalize", num_images, isColor,
+                duration<double, milli>(end - start).count());
+}
+
 void benchmark_RPP_WarpPerspective(const vector<Mat>& imgs, bool isColor, rppHandle_t handle)
 {
     int num_images = (int)imgs.size();

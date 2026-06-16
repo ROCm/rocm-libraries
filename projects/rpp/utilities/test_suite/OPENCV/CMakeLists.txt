@@ -28,9 +28,6 @@ project(opencv_benchmarking_script CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Option to enable/disable parallel threads
-option(ENABLE_PARALLEL_THREADS "Enable parallel threading with OpenMP" ON)
-
 # ROCM Path
 if(DEFINED ENV{ROCM_PATH})
     set(ROCM_PATH $ENV{ROCM_PATH} CACHE PATH "Default ROCm installation path")
@@ -126,15 +123,6 @@ target_compile_options(opencv_vs_rpp_host_benchmarking PRIVATE -O3)
 
 # Define HIP platform for AMD ROCm
 target_compile_definitions(opencv_vs_rpp_host_benchmarking PRIVATE __HIP_PLATFORM_AMD__)
-
-# Add ENABLE_PARALLEL_THREADS definition
-if(ENABLE_PARALLEL_THREADS)
-    target_compile_definitions(opencv_vs_rpp_host_benchmarking PRIVATE ENABLE_PARALLEL_THREADS=1)
-    message("-- ${Green}Parallel threads: ENABLED${ColourReset}")
-else()
-    target_compile_definitions(opencv_vs_rpp_host_benchmarking PRIVATE ENABLE_PARALLEL_THREADS=0)
-    message("-- ${Yellow}Parallel threads: DISABLED${ColourReset}")
-endif()
 
 message("-- ${White}${PROJECT_NAME} configured successfully${ColourReset}")
 message("-- \tOpenCV: ${OpenCV_VERSION}")

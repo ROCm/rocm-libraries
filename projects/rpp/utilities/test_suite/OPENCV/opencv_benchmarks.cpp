@@ -40,9 +40,6 @@ void benchmark_OpenCV_Brightness(const vector<Mat>& imgs, bool isColor, float al
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             imgs[i].convertTo(out[i], -1, alpha, beta);
     }
@@ -64,9 +61,6 @@ void benchmark_OpenCV_GammaCorrection(const vector<Mat>& imgs, bool isColor, flo
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             LUT(imgs[i], lut, out[i]);
     }
@@ -85,9 +79,6 @@ void benchmark_OpenCV_Blend(const vector<Mat>& imgs, bool isColor, float alpha)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             addWeighted(imgs[i], alpha, imgs2[i], 1.0 - alpha, 0, out[i]);
     }
@@ -105,9 +96,6 @@ void benchmark_OpenCV_Contrast(const vector<Mat>& imgs, bool isColor, float cont
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             imgs[i].convertTo(out[i], -1, contrastFactor, beta);
     }
@@ -127,9 +115,6 @@ void benchmark_OpenCV_Exposure(const vector<Mat>& imgs, bool isColor, float stop
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             imgs[i].convertTo(out[i], -1, scale, 0);
     }
@@ -146,9 +131,6 @@ void benchmark_OpenCV_Hue(const vector<Mat>& imgs, float hueDelta)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             // Note: Input images are in RGB format (converted in loadBatchImages)
@@ -174,9 +156,6 @@ void benchmark_OpenCV_Saturation(const vector<Mat>& imgs, float satFactor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             // Note: Input images are in RGB format (converted in loadBatchImages)
@@ -202,9 +181,6 @@ void benchmark_OpenCV_ColorToGreyscale(const vector<Mat>& imgs)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             cvtColor(imgs[i], out[i], COLOR_RGB2GRAY);
     }
@@ -263,9 +239,6 @@ void benchmark_OpenCV_ColorJitter(const vector<Mat>& imgs, float brightness, flo
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             out[i] = Mat::zeros(imgs[i].size(), imgs[i].type());
@@ -309,9 +282,6 @@ void benchmark_OpenCV_BoxFilter(const vector<Mat>& imgs, bool isColor, int kerne
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             boxFilter(imgs[i], out[i], -1, Size(kernelSize, kernelSize),
                      Point(-1, -1), true, BORDER_REPLICATE);
@@ -329,9 +299,6 @@ void benchmark_OpenCV_MedianFilter(const vector<Mat>& imgs, bool isColor, int ke
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             medianBlur(imgs[i], out[i], kernelSize);
     }
@@ -348,9 +315,6 @@ void benchmark_OpenCV_GaussianFilter(const vector<Mat>& imgs, bool isColor, int 
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             GaussianBlur(imgs[i], out[i], Size(kernelSize, kernelSize), sigma, sigma, BORDER_REPLICATE);
     }
@@ -379,9 +343,6 @@ void benchmark_OpenCV_SobelFilter(const vector<Mat>& imgs, bool isColor, int sob
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             if (sobelType == 0)
@@ -434,9 +395,6 @@ void benchmark_OpenCV_Crop(const vector<Mat>& imgs, bool isColor, int cropWidth,
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             int x = (imgs[i].cols - cropWidth) / 2;
@@ -460,9 +418,6 @@ void benchmark_OpenCV_Resize(const vector<Mat>& imgs, bool isColor, int dstW, in
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             resize(imgs[i], out[i], Size(dstW, dstH), 0, 0, interpType);
     }
@@ -481,9 +436,6 @@ void benchmark_OpenCV_Flip(const vector<Mat>& imgs, bool isColor, int flipCode)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             flip(imgs[i], out[i], flipCode);
     }
@@ -501,9 +453,6 @@ void benchmark_OpenCV_Rotate(const vector<Mat>& imgs, bool isColor, float angleD
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             Point2f center(imgs[i].cols / 2.f, imgs[i].rows / 2.f);
@@ -527,9 +476,6 @@ void benchmark_OpenCV_WarpAffine(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             warpAffine(imgs[i], out[i], affineMat, imgs[i].size(), INTER_LINEAR, BORDER_REPLICATE);
     }
@@ -547,9 +493,6 @@ void benchmark_OpenCV_Erode(const vector<Mat>& imgs, bool isColor, int kernelSiz
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             erode(imgs[i], out[i], kernel, Point(-1, -1), 1, BORDER_REPLICATE);
     }
@@ -567,9 +510,6 @@ void benchmark_OpenCV_Dilate(const vector<Mat>& imgs, bool isColor, int kernelSi
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             dilate(imgs[i], out[i], kernel, Point(-1, -1), 1, BORDER_REPLICATE);
     }
@@ -592,9 +532,6 @@ void benchmark_OpenCV_AddScalar(const vector<Mat>& imgs, bool isColor, float add
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             add(imgsF32[i], s, out[i]);
     }
@@ -617,9 +554,6 @@ void benchmark_OpenCV_SubtractScalar(const vector<Mat>& imgs, bool isColor, floa
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             subtract(imgsF32[i], s, out[i]);
     }
@@ -641,9 +575,6 @@ void benchmark_OpenCV_MultiplyScalar(const vector<Mat>& imgs, bool isColor, floa
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             multiply(imgsF32[i], Scalar(mulVal, mulVal, mulVal), out[i]);
     }
@@ -664,9 +595,6 @@ void benchmark_OpenCV_BitwiseAnd(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             bitwise_and(imgs[i], imgs2[i], out[i]);
     }
@@ -687,9 +615,6 @@ void benchmark_OpenCV_BitwiseOr(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             bitwise_or(imgs[i], imgs2[i], out[i]);
     }
@@ -706,9 +631,6 @@ void benchmark_OpenCV_BitwiseNot(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             bitwise_not(imgs[i], out[i]);
     }
@@ -727,9 +649,6 @@ void benchmark_OpenCV_BitwiseXor(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             bitwise_xor(imgs[i], imgs2[i], out[i]);
     }
@@ -746,9 +665,6 @@ void benchmark_OpenCV_Threshold(const vector<Mat>& imgs, bool isColor, double th
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             threshold(imgs[i], out[i], thresh, 255, THRESH_BINARY);
     }
@@ -765,9 +681,6 @@ void benchmark_OpenCV_HistogramEqualize(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             if (isColor)
@@ -802,9 +715,6 @@ void benchmark_OpenCV_LUT(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             LUT(imgs[i], lut, out[i]);
     }
@@ -821,9 +731,6 @@ void benchmark_OpenCV_Magnitude(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             Mat grad_x, grad_y;
@@ -845,9 +752,6 @@ void benchmark_OpenCV_Phase(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             Mat grad_x, grad_y;
@@ -873,9 +777,6 @@ void benchmark_OpenCV_Normalize(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             Mat temp;
@@ -914,9 +815,6 @@ void benchmark_OpenCV_WarpPerspective(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             warpPerspective(imgs[i], out[i], perspMat, imgs[i].size(), INTER_LINEAR, BORDER_REPLICATE);
     }
@@ -947,9 +845,6 @@ void benchmark_OpenCV_Remap(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             remap(imgs[i], out[i], map_x, map_y, INTER_LINEAR, BORDER_REPLICATE);
     }
@@ -966,9 +861,6 @@ void benchmark_OpenCV_FusedMultiplyAddScalar(const vector<Mat>& imgs, bool isCol
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             imgs[i].convertTo(out[i], -1, mul, add);
     }
@@ -987,9 +879,6 @@ void benchmark_OpenCV_Transpose(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             transpose(imgs[i], out[i]);
     }
@@ -1009,9 +898,6 @@ void benchmark_OpenCV_Emboss(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             filter2D(imgs[i], out[i], -1, kernel, Point(-1, -1), 128, BORDER_REPLICATE);
     }
@@ -1028,9 +914,6 @@ void benchmark_OpenCV_TensorMin(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             double minVal, maxVal;
@@ -1051,9 +934,6 @@ void benchmark_OpenCV_TensorMax(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             double minVal, maxVal;
@@ -1078,9 +958,6 @@ void benchmark_OpenCV_TensorSum(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             Scalar s = cv::sum(imgs[i]);
@@ -1112,9 +989,6 @@ void benchmark_OpenCV_TensorMean(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             meanVals[i] = cv::mean(imgs[i]);
     }
@@ -1132,9 +1006,6 @@ void benchmark_OpenCV_TensorStddev(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             cv::meanStdDev(imgs[i], meanVals[i], stddevVals[i]);
     }
@@ -1151,9 +1022,6 @@ void benchmark_OpenCV_GaussianNoise(const vector<Mat>& imgs, bool isColor, float
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             Mat noise(imgs[i].size(), CV_32FC(imgs[i].channels()));
@@ -1179,9 +1047,6 @@ void benchmark_OpenCV_SaltAndPepperNoise(const vector<Mat>& imgs, bool isColor, 
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             out[i] = imgs[i].clone();
@@ -1231,9 +1096,6 @@ void benchmark_OpenCV_Copy(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             imgs[i].copyTo(out[i]);
     }
@@ -1251,9 +1113,6 @@ void benchmark_OpenCV_Posterize(const vector<Mat>& imgs, bool isColor, Rpp32u bi
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
             out[i] = imgs[i] & mask;
     }
@@ -1270,9 +1129,6 @@ void benchmark_OpenCV_Solarize(const vector<Mat>& imgs, bool isColor, Rpp8u thre
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             out[i] = imgs[i].clone();
@@ -1300,9 +1156,6 @@ void benchmark_OpenCV_NoiseShot(const vector<Mat>& imgs, bool isColor, float sho
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             Mat temp;
@@ -1345,9 +1198,6 @@ void benchmark_OpenCV_Gridmask(const vector<Mat>& imgs, bool isColor, Rpp32u til
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             out[i] = imgs[i].clone();
@@ -1385,9 +1235,6 @@ void benchmark_OpenCV_ColorCast(const vector<Mat>& imgs, bool isColor, Rpp32f rS
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             imgs[i].copyTo(out[i]);
@@ -1426,9 +1273,6 @@ void benchmark_OpenCV_ColorTemperature(const vector<Mat>& imgs, bool isColor, Rp
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             vector<Mat> channels;
@@ -1451,9 +1295,6 @@ void benchmark_OpenCV_Vignette(const vector<Mat>& imgs, bool isColor, Rpp32f vig
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             Mat mask(imgs[i].size(), CV_32F);
@@ -1502,9 +1343,6 @@ void benchmark_OpenCV_NonLinearBlend(const vector<Mat>& imgs, bool isColor, Rpp3
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images - 1; ++i)
         {
             const Mat& src1 = imgs[i];
@@ -1579,9 +1417,6 @@ void benchmark_OpenCV_Erase(const vector<Mat>& imgs, bool isColor, Rpp32u numBox
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             out[i] = imgs[i].clone();
@@ -1611,9 +1446,6 @@ void benchmark_OpenCV_CoarseDropout(const vector<Mat>& imgs, bool isColor, Rpp32
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             out[i] = imgs[i].clone();
@@ -1645,9 +1477,6 @@ void benchmark_OpenCV_GridDropout(const vector<Mat>& imgs, bool isColor, Rpp32u 
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             out[i] = imgs[i].clone();
@@ -1687,9 +1516,6 @@ void benchmark_OpenCV_RandomErase(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             out[i] = imgs[i].clone();
@@ -1730,9 +1556,6 @@ void benchmark_OpenCV_ColorTwist(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             Mat temp, hsv;
@@ -1817,9 +1640,6 @@ void benchmark_OpenCV_CropMirrorNormalize(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             int cropW = imgs[i].cols * 0.8;
@@ -1852,9 +1672,6 @@ void benchmark_OpenCV_ResizeMirrorNormalize(const vector<Mat>& imgs, bool isColo
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             Mat resized, flipped;
@@ -1880,9 +1697,6 @@ void benchmark_OpenCV_ResizeCropMirror(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             Mat resized;
@@ -1916,9 +1730,6 @@ void benchmark_OpenCV_ChannelDropout(const vector<Mat>& imgs, bool isColor, floa
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             // Thread-local RNG with iteration-aware seed for proper randomness
@@ -1964,9 +1775,6 @@ void benchmark_OpenCV_CutoutDropout(const vector<Mat>& imgs, bool isColor, Rpp32
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             out[i] = imgs[i].clone();
@@ -2019,9 +1827,6 @@ void benchmark_OpenCV_JpegCompressionDistortion(const vector<Mat>& imgs, bool is
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             // Encode to JPEG buffer
@@ -2077,9 +1882,6 @@ void benchmark_OpenCV_Emboss(const vector<Mat>& imgs, bool isColor, int kernelSi
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             // Apply emboss filter using filter2D
@@ -2110,9 +1912,6 @@ void benchmark_OpenCV_ChannelPermute(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             // Split channels
@@ -2139,9 +1938,6 @@ void benchmark_OpenCV_Slice(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             int h = imgs[i].rows;
@@ -2171,9 +1967,6 @@ void benchmark_OpenCV_Fisheye(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             int h = imgs[i].rows;
@@ -2239,9 +2032,6 @@ void benchmark_OpenCV_LensCorrection(const vector<Mat>& imgs, bool isColor)
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
     {
-#if ENABLE_PARALLEL_THREADS
-        #pragma omp parallel for num_threads(NUM_THREADS)
-#endif
         for (int i = 0; i < num_images; ++i)
         {
             // Use OpenCV's undistort function for lens correction

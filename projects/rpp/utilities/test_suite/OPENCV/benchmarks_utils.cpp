@@ -25,6 +25,7 @@ SOFTWARE.
 #include "benchmarks_common.h"
 
 // Global configuration variables (defined here, declared extern in header)
+int NUM_RUNS = 100;  // Default number of runs, can be overridden via command line
 int NUM_THREADS = 0;  // Will be set at runtime
 string GRAY_IMAGE_PATH = DEFAULT_GRAY_IMAGE_PATH;
 string RGB_IMAGE_PATH = DEFAULT_RGB_IMAGE_PATH;

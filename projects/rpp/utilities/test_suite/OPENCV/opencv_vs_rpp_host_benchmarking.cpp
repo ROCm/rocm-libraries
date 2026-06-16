@@ -30,12 +30,14 @@ void printUsage(const char* programName)
     cout << "Usage: " << programName << " [OPTIONS]\n" << endl;
     cout << "Options:" << endl;
     cout << "  -t, --threads <N>        Number of threads to use (default: auto-detect)" << endl;
+    cout << "  -n, --num-runs <N>       Number of benchmark runs (default: 100)" << endl;
     cout << "  -g, --gray-path <PATH>   Path to grayscale images (default: " << DEFAULT_GRAY_IMAGE_PATH << ")" << endl;
     cout << "  -r, --rgb-path <PATH>    Path to RGB images (default: " << DEFAULT_RGB_IMAGE_PATH << ")" << endl;
     cout << "  -h, --help               Display this help message" << endl;
     cout << "\nExamples:" << endl;
-    cout << "  " << programName << "                           # Auto-detect threads" << endl;
+    cout << "  " << programName << "                           # Auto-detect threads, 100 runs (default)" << endl;
     cout << "  " << programName << " --threads 64              # Use 64 threads" << endl;
+    cout << "  " << programName << " -t 32 -n 50               # Use 32 threads with 50 runs" << endl;
     cout << "  " << programName << " -t 32 -g ./my_images/     # Use 32 threads with custom dataset" << endl;
     cout << endl;
 }
@@ -64,6 +66,24 @@ int main(int argc, char* argv[])
             else
             {
                 cerr << "Error: --threads requires a value" << endl;
+                printUsage(argv[0]);
+                return 1;
+            }
+        }
+        else if (strcmp(argv[i], "-n") == 0 || strcmp(argv[i], "--num-runs") == 0)
+        {
+            if (i + 1 < argc)
+            {
+                NUM_RUNS = atoi(argv[++i]);
+                if (NUM_RUNS <= 0)
+                {
+                    cerr << "Error: Number of runs must be a positive integer" << endl;
+                    return 1;
+                }
+            }
+            else
+            {
+                cerr << "Error: --num-runs requires a value" << endl;
                 printUsage(argv[0]);
                 return 1;
             }
@@ -112,7 +132,6 @@ int main(int argc, char* argv[])
     // Initialize RPP HOST backend handle
     rppHandle_t handle;
     rppStatus_t status;
-#if ENABLE_PARALLEL_THREADS
     status = rppCreate(&handle, 1, NUM_THREADS, nullptr, RPP_HOST_BACKEND);
     if (status != rppStatusSuccess)
     {
@@ -121,15 +140,6 @@ int main(int argc, char* argv[])
     }
     // Control OpenCV threading to match RPP configuration for fair comparison
     cv::setNumThreads(NUM_THREADS);
-#else
-    status = rppCreate(&handle, 1, 1, nullptr, RPP_HOST_BACKEND);
-    if (status != rppStatusSuccess)
-    {
-        cerr << "Error: Failed to initialize RPP handle with 1 thread (Status: " << status << ")" << endl;
-        return 1;
-    }
-    cv::setNumThreads(1);
-#endif
 
     int batchSizeGray = 0, maxWidthGray = 0, maxHeightGray = 0;
     int batchSizeRGB  = 0, maxWidthRGB  = 0, maxHeightRGB  = 0;
@@ -204,13 +214,7 @@ int main(int argc, char* argv[])
     cout << "CPU: " << getCPUInfo() << endl;
     cout << "Memory: " << getMemoryInfo() << endl;
     cout << "\n--- Benchmark Configuration ---" << endl;
-#if ENABLE_PARALLEL_THREADS
-    cout << "Parallel Threading: ENABLED" << endl;
     cout << "Number of Threads: " << NUM_THREADS << " (max available: " << maxAvailableThreads << ")" << endl;
-#else
-    cout << "Parallel Threading: DISABLED" << endl;
-    cout << "Number of Threads: 1" << endl;
-#endif
     cout << "Number of Runs: " << NUM_RUNS << endl;
     cout << "Grayscale Dataset: " << GRAY_IMAGE_PATH << endl;
     cout << "RGB Dataset: " << RGB_IMAGE_PATH << endl;
@@ -379,7 +383,8 @@ int main(int argc, char* argv[])
         benchmark_RPP_Phase(imgsGray, false, handle);
         benchmark_OpenCV_Phase(imgsGray, false);
 
-        benchmark_RPP_Normalize(imgsGray, false, handle);
+        //benchmark_RPP_Normalize(imgsGray, false, handle);
+        benchmark_RPP_Normalize_SingleImage(imgsGray, false, handle);
         benchmark_OpenCV_Normalize(imgsGray, false);
 
         benchmark_RPP_FusedMultiplyAddScalar(imgsGray, false, 1.2f, 10.0f, handle);
@@ -387,7 +392,7 @@ int main(int argc, char* argv[])
 
         benchmark_RPP_Remap(imgsGray, false, handle);
         benchmark_OpenCV_Remap(imgsGray, false);
-        
+
     }
     // ==================== RGB ====================
     if (!imgsRGB.empty())
@@ -605,7 +610,8 @@ int main(int argc, char* argv[])
         benchmark_RPP_Phase(imgsRGB, true, handle);
         benchmark_OpenCV_Phase(imgsRGB, true);
 
-        benchmark_RPP_Normalize(imgsRGB, true, handle);
+        //benchmark_RPP_Normalize(imgsRGB, true, handle);
+        benchmark_RPP_Normalize_SingleImage(imgsRGB, true, handle);
         benchmark_OpenCV_Normalize(imgsRGB, true);
 
         benchmark_RPP_FusedMultiplyAddScalar(imgsRGB, true, 1.2f, 10.0f, handle);
@@ -635,17 +641,20 @@ int main(int argc, char* argv[])
     cout << "========================================\n" << endl;
 
     // Export results to Excel
-#if ENABLE_PARALLEL_THREADS
-    string excelFilename = "opencv_vs_rpp_benchmark_results_parallel_threads_ON.xlsx";
-#else
-    string excelFilename = "opencv_vs_rpp_benchmark_results_parallel_threads_OFF.xlsx";
-#endif
+    ostringstream excelFilenameStream;
+    excelFilenameStream << "opencv_vs_rpp_benchmark_results_" << NUM_THREADS << "threads.xlsx";
+    string excelFilename = excelFilenameStream.str();
 
+    cout << "Exporting results to: " << excelFilename << endl;
     bool exportSuccess = writeResultsToExcel(excelFilename, grayscaleResults, rgbResults);
     if (!exportSuccess)
     {
         cerr << "\nWarning: Benchmark completed successfully, but failed to export results to Excel." << endl;
         cerr << "         Benchmark data is still available in memory but not saved to disk." << endl;
+    }
+    else
+    {
+        cout << "Results successfully exported to: " << excelFilename << endl;
     }
 
     // Cleanup RPP handle
