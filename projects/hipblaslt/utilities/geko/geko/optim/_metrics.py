@@ -78,10 +78,16 @@ def _load_and_normalize_weights(
                 .drop_duplicates(subset=list(GEMM_FIELDS))
             )
             weights = weights.merge(ref_us, on=list(GEMM_FIELDS), how="left")
+            
             if weights["us_reference"].isna().any():
-                raise ValueError(
-                    f"Format error in '{path}': cannot infer reference time for all GEMMs"
+                logger.warning(
+                    f"{weights["us_reference"].isna().sum()} missing GEMMs from tuned results"
                 )
+                weights = weights.dropna(subset=['us_reference'])
+                if len(weights) == 0:
+                    raise ValueError(
+                        f"Format error in '{path}': cannot infer reference time for any GEMM"
+                    )
             weights["total (us)"] = weights["call_count"] * weights["us_reference"]
         else:
             raise ValueError(

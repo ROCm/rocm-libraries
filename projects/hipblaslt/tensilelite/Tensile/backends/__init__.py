@@ -28,9 +28,7 @@ from .ductile_backend import DuctileBackend
 
 # Register backends
 BackendFactory.register("tensile", TensileBackend)
-try:
-    BackendFactory.register("ductile", DuctileBackend)
-except ImportError:
-    pass  # Ductile not available, will be caught if explicitly selected
+BackendFactory.register("ductile", DuctileBackend)
+
 
 __all__ = ["OptimizationBackend", "BackendFactory", "TensileBackend", "DuctileBackend"]

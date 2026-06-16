@@ -272,3 +272,153 @@ def test_benchmark_problems_backend_cfg_not_dict_exits(monkeypatch, tmp_path):
     with pytest.raises(AttributeError):
         TensileModule.Tensile([str(config_path), str(tmp_path / "output")])
     assert len(exited) > 0
+
+
+def test_execute_steps_normalizes_default_backend_cfg(monkeypatch, tmp_path):
+    captured = {}
+
+    import Tensile.BenchmarkProblems as BP
+
+    monkeypatch.setattr(
+        BP,
+        "main",
+        lambda backend_cfg, *_a, **_kw: captured.setdefault("backend", backend_cfg),
+    )
+    monkeypatch.setattr(TensileModule.LibraryLogic, "main", lambda *_a, **_kw: None)
+    monkeypatch.setattr(TensileModule.ClientWriter, "main", lambda *_a, **_kw: None)
+
+    config = {
+        "BenchmarkProblems": [],
+        "UseCache": False,
+    }
+
+    TensileModule.executeStepsInConfig(
+        config=config,
+        outputPath=tmp_path,
+        asmToolchain=types.SimpleNamespace(assembler=object()),
+        srcToolchain=types.SimpleNamespace(compiler="cc"),
+        isaInfoMap={(9, 4, 2): types.SimpleNamespace()},
+        cCompiler="cc",
+        debugConfig=types.SimpleNamespace(splitGSU=False, printSolutionRejectionReason=False, printIndexAssignmentInfo=False),
+        deviceId=0,
+        probSolDict={},
+        buildOnly=True,
+        solutionPoolFiles=None,
+    )
+
+    assert captured["backend"]["Name"] == "tensile"
+    assert captured["backend"]["Config"] == {}
+
+
+def test_execute_steps_normalizes_missing_name_and_none_config(monkeypatch, tmp_path):
+    captured = {}
+
+    import Tensile.BenchmarkProblems as BP
+
+    monkeypatch.setattr(
+        BP,
+        "main",
+        lambda backend_cfg, *_a, **_kw: captured.setdefault("backend", backend_cfg),
+    )
+    monkeypatch.setattr(TensileModule.LibraryLogic, "main", lambda *_a, **_kw: None)
+    monkeypatch.setattr(TensileModule.ClientWriter, "main", lambda *_a, **_kw: None)
+
+    config = {
+        "BenchmarkProblems": [],
+        "UseCache": False,
+        "Backend": {"Config": None},
+    }
+
+    TensileModule.executeStepsInConfig(
+        config=config,
+        outputPath=tmp_path,
+        asmToolchain=types.SimpleNamespace(assembler=object()),
+        srcToolchain=types.SimpleNamespace(compiler="cc"),
+        isaInfoMap={(9, 4, 2): types.SimpleNamespace()},
+        cCompiler="cc",
+        debugConfig=types.SimpleNamespace(splitGSU=False, printSolutionRejectionReason=False, printIndexAssignmentInfo=False),
+        deviceId=0,
+        probSolDict={},
+        buildOnly=True,
+        solutionPoolFiles=None,
+    )
+
+    assert captured["backend"]["Name"] == "tensile"
+    assert captured["backend"]["Config"] == {}
+
+
+def test_execute_steps_invalid_backend_type_exits(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        TensileModule,
+        "printExit",
+        lambda msg: (_ for _ in ()).throw(RuntimeError(msg)),
+    )
+
+    with pytest.raises(RuntimeError, match="Invalid backend configuration type"):
+        TensileModule.executeStepsInConfig(
+            config={"BenchmarkProblems": [], "UseCache": False, "Backend": "bad"},
+            outputPath=tmp_path,
+            asmToolchain=types.SimpleNamespace(assembler=object()),
+            srcToolchain=types.SimpleNamespace(compiler="cc"),
+            isaInfoMap={(9, 4, 2): types.SimpleNamespace()},
+            cCompiler="cc",
+            debugConfig=types.SimpleNamespace(splitGSU=False, printSolutionRejectionReason=False, printIndexAssignmentInfo=False),
+            deviceId=0,
+            probSolDict={},
+            buildOnly=True,
+            solutionPoolFiles=None,
+        )
+
+
+def test_execute_steps_invalid_backend_config_type_exits(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        TensileModule,
+        "printExit",
+        lambda msg: (_ for _ in ()).throw(RuntimeError(msg)),
+    )
+
+    with pytest.raises(RuntimeError, match="'Config' must be a dictionary"):
+        TensileModule.executeStepsInConfig(
+            config={"BenchmarkProblems": [], "UseCache": False, "Backend": {"Name": "tensile", "Config": "bad"}},
+            outputPath=tmp_path,
+            asmToolchain=types.SimpleNamespace(assembler=object()),
+            srcToolchain=types.SimpleNamespace(compiler="cc"),
+            isaInfoMap={(9, 4, 2): types.SimpleNamespace()},
+            cCompiler="cc",
+            debugConfig=types.SimpleNamespace(splitGSU=False, printSolutionRejectionReason=False, printIndexAssignmentInfo=False),
+            deviceId=0,
+            probSolDict={},
+            buildOnly=True,
+            solutionPoolFiles=None,
+        )
+
+
+def test_alternate_format_builds_benchmark_problems(monkeypatch, tmp_path):
+    captured = _stub_pipeline(monkeypatch)
+
+    base_cfg = {
+        "GlobalParameters": {"MinimumRequiredVersion": "5.0.0", "ISA": [[9, 5, 0]]},
+        "ProblemType": {"OperationType": "GEMM", "DataType": "s", "DestDataType": "s"},
+        "BenchmarkCommonParameters": [{"KernelLanguage": "Assembly"}],
+        "ForkParameters": [{"DepthU": [16]}],
+        "GroupForkParameters": [],
+    }
+    sizes_cfg = [[128, 128, 1, 128]]
+
+    base_path = tmp_path / "base.yaml"
+    sizes_path = tmp_path / "sizes.yaml"
+    base_path.write_text(yaml.safe_dump(base_cfg), encoding="utf-8")
+    sizes_path.write_text(yaml.safe_dump(sizes_cfg), encoding="utf-8")
+
+    TensileModule.Tensile(
+        [
+            str(base_path),
+            str(sizes_path),
+            str(tmp_path / "output"),
+            "--alternate-format",
+        ]
+    )
+
+    benchmark_problems = captured["config"]["BenchmarkProblems"]
+    assert benchmark_problems[0][0] == base_cfg["ProblemType"]
+    assert benchmark_problems[0][1]["BenchmarkFinalParameters"][0]["ProblemSizes"] == sizes_cfg

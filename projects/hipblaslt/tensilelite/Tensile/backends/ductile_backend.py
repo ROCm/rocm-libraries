@@ -44,14 +44,11 @@ from Tensile.SolutionStructs.Naming import getKernelFileBase
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
 from .base import OptimizationBackend
 
-# Will be imported conditionally if this backend is used
-try:
-    from Tensile.ductile import config as ductile_config
-    from Tensile.ductile.core import SearchSpace, Selection, Crossover, Mutation, Mating, Survival
-    from Tensile.ductile.algorithm import GeneticAlgorithm
-    DUCTILE_AVAILABLE = True
-except ImportError:
-    DUCTILE_AVAILABLE = False
+
+from Tensile.ductile import config as ductile_config
+from Tensile.ductile.core import SearchSpace, Selection, Crossover, Mutation, Mating, Survival
+from Tensile.ductile.algorithm import GeneticAlgorithm
+
 
 
 def _generate_single_solution_with_groups(perm, problemType, constantParams, assembler, debugConfig, isaInfoMap, silent=False):
@@ -129,11 +126,6 @@ class DuctileBackend(OptimizationBackend):
     Uses Ductile's GA implementation to iteratively search the fork parameter space,
     focusing effort on promising regions and avoiding exhaustive enumeration.
     """
-
-    def __init__(self):
-        """Initialize the DuctileBackend."""
-        if not DUCTILE_AVAILABLE:
-            raise ImportError("DuctileBackend requires Ductile modules: from Tensile.ductile import config, core, algorithm")
 
     def run(self, 
             backend_config: Dict[str, Any],

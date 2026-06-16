@@ -111,7 +111,6 @@ def _patch_ductile_backend_primitives(monkeypatch, merged_config):
     )
 
 
-@pytest.mark.skipif(not ductile_backend_mod.DUCTILE_AVAILABLE, reason="Ductile modules are not available")
 def test_ductile_backend_evaluate_missing_results_file_exits(monkeypatch, tmp_path):
     class FakeGA:
         def __init__(self, *args, **kwargs):
@@ -144,7 +143,6 @@ def test_ductile_backend_evaluate_missing_results_file_exits(monkeypatch, tmp_pa
         )
 
 
-@pytest.mark.skipif(not ductile_backend_mod.DUCTILE_AVAILABLE, reason="Ductile modules are not available")
 def test_ductile_backend_evaluate_column_mismatch_exits(monkeypatch, tmp_path):
     csv_path = tmp_path / "results.csv"
     pd.DataFrame({"Cijk_0": [10.0, 11.0]}).to_csv(csv_path, index=False)
@@ -176,7 +174,6 @@ def test_ductile_backend_evaluate_column_mismatch_exits(monkeypatch, tmp_path):
         backend.run({}, _make_benchmark_config(tmp_path), lambda *_args, **_kwargs: (str(csv_path), 0))
 
 
-@pytest.mark.skipif(not ductile_backend_mod.DUCTILE_AVAILABLE, reason="Ductile modules are not available")
 def test_ductile_backend_evaluate_preserves_solution_index_alignment(monkeypatch, tmp_path):
     csv_path = tmp_path / "results.csv"
     pd.DataFrame({"Cijk_0": [10.0, 11.0], "Cijk_1": [20.0, 21.0]}).to_csv(csv_path, index=False)
@@ -215,6 +212,96 @@ def test_ductile_backend_evaluate_preserves_solution_index_alignment(monkeypatch
     assert np.allclose(fitness[:, 0], [10.0, 11.0])
     assert np.allclose(fitness[:, 1], [0.0, 0.0])
     assert np.allclose(fitness[:, 2], [20.0, 21.0])
+
+
+def test_generate_single_solution_with_groups_expands_group_keys(monkeypatch):
+    captured = {}
+
+    def _fake_build(solution, *_a, **_kw):
+        captured["solution"] = solution
+        return types.SimpleNamespace()
+
+    monkeypatch.setattr("Tensile.BenchmarkProblems._build_and_validate_solution", _fake_build)
+
+    perm = {"DepthU": 64, "group_0": {"SourceSwap": 1, "PrefetchGlobalRead": 2}}
+    result = ductile_backend_mod._generate_single_solution_with_groups(
+        perm=perm,
+        problemType=types.SimpleNamespace(state={"DataType": "s"}),
+        constantParams={"WorkGroup": [16, 16, 1]},
+        assembler=object(),
+        debugConfig=types.SimpleNamespace(),
+        isaInfoMap={"gfx942": {}},
+        silent=True,
+    )
+
+    assert result is not None
+    assert "group_0" not in captured["solution"]
+    assert captured["solution"]["SourceSwap"] == 1
+    assert captured["solution"]["PrefetchGlobalRead"] == 2
+    assert captured["solution"]["DepthU"] == 64
+
+
+def test_validate_solution_returns_false_when_kernel_init_fails(monkeypatch):
+    monkeypatch.setattr(
+        ductile_backend_mod,
+        "_generate_single_solution_with_groups",
+        lambda *_a, **_kw: types.SimpleNamespace(),
+    )
+
+    class _FailKW:
+        def __init__(self, *_a, **_kw):
+            pass
+
+        def _initKernel(self, *_a, **_kw):
+            raise RuntimeError("bad")
+
+    monkeypatch.setattr(ductile_backend_mod, "KernelWriterAssembly", _FailKW)
+
+    ok = ductile_backend_mod._validate_solution(
+        problemType=types.SimpleNamespace(state={}),
+        constantParams={},
+        assembler=object(),
+        debugConfig=types.SimpleNamespace(),
+        isaInfoMap={"gfx942": {}},
+        perm={"DepthU": 64},
+        get_kernel_src=False,
+    )
+
+    assert ok is False
+
+
+def test_validate_solution_calls_get_kernel_source_when_requested(monkeypatch):
+    monkeypatch.setattr(
+        ductile_backend_mod,
+        "_generate_single_solution_with_groups",
+        lambda *_a, **_kw: types.SimpleNamespace(),
+    )
+    seen = {"src": False}
+
+    class _OkKW:
+        def __init__(self, *_a, **_kw):
+            pass
+
+        def _initKernel(self, *_a, **_kw):
+            return None
+
+        def _getKernelSource(self, *_a, **_kw):
+            seen["src"] = True
+
+    monkeypatch.setattr(ductile_backend_mod, "KernelWriterAssembly", _OkKW)
+
+    ok = ductile_backend_mod._validate_solution(
+        problemType=types.SimpleNamespace(state={}),
+        constantParams={},
+        assembler=object(),
+        debugConfig=types.SimpleNamespace(),
+        isaInfoMap={"gfx942": {}},
+        perm={"DepthU": 64},
+        get_kernel_src=True,
+    )
+
+    assert ok is True
+    assert seen["src"] is True
 
 ################################################################################
 #
@@ -260,11 +347,6 @@ import Tensile.backends.ductile_backend as ductile_backend_mod
 from Tensile.backends.ductile_backend import DuctileBackend
 
 pytestmark = pytest.mark.unit
-
-skipif_no_ductile = pytest.mark.skipif(
-    not ductile_backend_mod.DUCTILE_AVAILABLE,
-    reason="Ductile modules not available",
-)
 
 
 # ---------------------------------------------------------------------------
@@ -369,7 +451,6 @@ def _make_simple_ga(csv_path, solutions_list):
 # API / construction
 # ---------------------------------------------------------------------------
 
-@skipif_no_ductile
 def test_supports_solution_pool_returns_false():
     backend = DuctileBackend()
     assert backend.supports_solution_pool() is False
@@ -379,7 +460,6 @@ def test_supports_solution_pool_returns_false():
 # Input validation — missing / bad configuration
 # ---------------------------------------------------------------------------
 
-@skipif_no_ductile
 def test_run_raises_if_benchmark_step_missing(monkeypatch, tmp_path):
     _patch_primitives(monkeypatch, _base_merged_config())
     backend = DuctileBackend()
@@ -390,7 +470,6 @@ def test_run_raises_if_benchmark_step_missing(monkeypatch, tmp_path):
         backend.run({}, cfg, lambda *a, **kw: ("", 0))
 
 
-@skipif_no_ductile
 def test_run_raises_if_required_config_keys_missing(monkeypatch, tmp_path):
     _patch_primitives(monkeypatch, _base_merged_config())
     backend = DuctileBackend()
@@ -405,7 +484,6 @@ def test_run_raises_if_required_config_keys_missing(monkeypatch, tmp_path):
 # Warnings for unsupported flags
 # ---------------------------------------------------------------------------
 
-@skipif_no_ductile
 def test_run_warns_on_cache_valid(monkeypatch, tmp_path, capsys):
     csv_path = tmp_path / "results.csv"
     pd.DataFrame({"Cijk_0": [5.0]}).to_csv(csv_path, index=False)
@@ -439,7 +517,6 @@ def test_run_warns_on_cache_valid(monkeypatch, tmp_path, capsys):
     assert any("cacheValid" in w for w in warned)
 
 
-@skipif_no_ductile
 def test_run_warns_on_build_only(monkeypatch, tmp_path):
     csv_path = tmp_path / "results.csv"
     pd.DataFrame({"Cijk_0": [5.0]}).to_csv(csv_path, index=False)
@@ -477,7 +554,6 @@ def test_run_warns_on_build_only(monkeypatch, tmp_path):
 # Group parameter expansion
 # ---------------------------------------------------------------------------
 
-@skipif_no_ductile
 def test_single_element_param_group_folded_into_constant_params(monkeypatch, tmp_path):
     """A param_group with one item must be moved to constantParams, not fork_params."""
     csv_path = tmp_path / "results.csv"
@@ -523,7 +599,6 @@ def test_single_element_param_group_folded_into_constant_params(monkeypatch, tmp
     assert "group_0" not in captured_space_kwargs.get("space", {})
 
 
-@skipif_no_ductile
 def test_multi_element_param_group_becomes_fork_param(monkeypatch, tmp_path):
     """A param_group with >1 item must appear as group_N in the fork space."""
     csv_path = tmp_path / "results.csv"
@@ -575,7 +650,6 @@ def test_multi_element_param_group_becomes_fork_param(monkeypatch, tmp_path):
 # Checkpoint loading — success and failure paths
 # ---------------------------------------------------------------------------
 
-@skipif_no_ductile
 def test_checkpoint_loading_success(monkeypatch, tmp_path):
     csv_path = tmp_path / "results.csv"
     pd.DataFrame({"Cijk_0": [5.0]}).to_csv(csv_path, index=False)
@@ -613,7 +687,6 @@ def test_checkpoint_loading_success(monkeypatch, tmp_path):
     assert len(load_called) == 1
 
 
-@skipif_no_ductile
 def test_checkpoint_loading_failure_falls_back_to_fresh(monkeypatch, tmp_path):
     csv_path = tmp_path / "results.csv"
     pd.DataFrame({"Cijk_0": [5.0]}).to_csv(csv_path, index=False)
@@ -655,7 +728,6 @@ def test_checkpoint_loading_failure_falls_back_to_fresh(monkeypatch, tmp_path):
 # Post-optimization verification — partial / all-fail paths
 # ---------------------------------------------------------------------------
 
-@skipif_no_ductile
 def test_verification_all_fail_calls_exit(monkeypatch, tmp_path):
     csv_path = tmp_path / "results.csv"
     pd.DataFrame({"Cijk_0": [5.0]}).to_csv(csv_path, index=False)
@@ -691,7 +763,6 @@ def test_verification_all_fail_calls_exit(monkeypatch, tmp_path):
     assert any("No solutions passed" in e for e in exited)
 
 
-@skipif_no_ductile
 def test_verification_partial_fail_warns_and_reevaluates(monkeypatch, tmp_path):
     csv_path = tmp_path / "results.csv"
     pd.DataFrame({"Cijk_0": [5.0], "Cijk_1": [3.0]}).to_csv(csv_path, index=False)
@@ -732,7 +803,6 @@ def test_verification_partial_fail_warns_and_reevaluates(monkeypatch, tmp_path):
 # Multi-step log filename path
 # ---------------------------------------------------------------------------
 
-@skipif_no_ductile
 def test_multistep_uses_step_indexed_log_filename(monkeypatch, tmp_path):
     csv_path = tmp_path / "results.csv"
     pd.DataFrame({"Cijk_0": [5.0]}).to_csv(csv_path, index=False)
