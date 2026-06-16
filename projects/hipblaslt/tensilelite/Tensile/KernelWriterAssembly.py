@@ -4626,6 +4626,8 @@ class KernelWriterAssembly(KernelWriter):
             moduleLoadStridedBatch.add(SAddU32(dst=sgpr(tileStart+0), src0=sgpr(tileStart+0), src1=sgpr(stmp+0), comment="accum wg term to tilestart"))
             moduleLoadStridedBatch.add(SAddCU32(dst=sgpr(tileStart+1), src0=sgpr(tileStart+1), src1=sgpr(stmp+1), comment="accum wg term to tilestart"))
           wg+=1
+    moduleLoadGeneralBatch.add(SCmpEQU32(src0=sgpr("SizesSum"), src1=hex(0), comment="Don't dereference Pointer array if SizesSum == 0"))
+    moduleLoadGeneralBatch.add(SCBranchSCC1(labelName=stridedBatchedGemmLoad_End.getLabelName()))          
     moduleLoadGeneralBatch.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr("Address%s+0"%tc), comment="Offsetting to the location [Lower half of address]"))
     moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr(stmp+1), src0=sgpr("Address%s+1"%tc), src1=0, comment="Offsetting to the location [Higher half of address]"))
     moduleLoadGeneralBatch.add(SLoadB64(dst=sgpr("Srd%s"%tc, 2), base=sgpr(stmp, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
