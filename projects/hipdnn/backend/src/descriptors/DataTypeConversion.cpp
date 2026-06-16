@@ -44,6 +44,10 @@ hipdnn_flatbuffers_sdk::data_objects::DataType toSdkDataType(hipdnnDataType_t ty
         return DataType::INT64;
     case HIPDNN_DATA_BOOLEAN:
         return DataType::BOOLEAN;
+    case HIPDNN_DATA_FP8_E4M3_FNUZ:
+        return DataType::FP8_E4M3_FNUZ;
+    case HIPDNN_DATA_FP8_E5M2_FNUZ:
+        return DataType::FP8_E5M2_FNUZ;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnDataType_t value");
     }
@@ -87,6 +91,10 @@ hipdnnDataType_t fromSdkDataType(hipdnn_flatbuffers_sdk::data_objects::DataType 
         return HIPDNN_DATA_INT64;
     case DataType::BOOLEAN:
         return HIPDNN_DATA_BOOLEAN;
+    case DataType::FP8_E4M3_FNUZ:
+        return HIPDNN_DATA_FP8_E4M3_FNUZ;
+    case DataType::FP8_E5M2_FNUZ:
+        return HIPDNN_DATA_FP8_E5M2_FNUZ;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK DataType");
     }
@@ -111,6 +119,8 @@ int64_t getDataTypeByteSize(hipdnn_flatbuffers_sdk::data_objects::DataType type)
     case DataType::FP8_E4M3:
     case DataType::FP8_E5M2:
     case DataType::BOOLEAN:
+    case DataType::FP8_E4M3_FNUZ:
+    case DataType::FP8_E5M2_FNUZ:
         return 1;
     case DataType::INT64:
         return 8;

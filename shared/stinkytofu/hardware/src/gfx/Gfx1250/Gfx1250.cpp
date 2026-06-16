@@ -30,6 +30,7 @@
 namespace stinkytofu {
 // Rocisa (tensilelite) type name -> mnemonic; original map (pre-66fabbd) for
 // RocisaGfx1250Mappings.inc.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void setGfx1250RocisaToArchMap(GpuArch& registry) {
     std::unordered_map<std::string, std::string> rocisaToArchMap = {
         /* branch.hpp */
@@ -146,6 +147,7 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
         {"FlatStoreB64", "flat_store_b64"},
         {"FlatStoreB128", "flat_store_b128"},
         {"FlatAtomicCmpswapB32", "flat_atomic_cmpswap_b32"},
+        {"FlatAtomicDecU32", "flat_atomic_dec_u32"},
         {"DSLoadU8", "ds_load_u8"},
         {"DSLoadU16", "ds_load_u16"},
         {"DSLoadB32", "ds_load_b32"},
@@ -171,6 +173,7 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
         {"DSBPermuteB32", "ds_bpermute_b32"},
         {"DSStoreB8HID16", "ds_store_b8_d16_hi"},
         {"DSStoreD16HIB16", "ds_store_b16_d16_hi"},
+        {"GlobalPrefetchB8", "global_prefetch_b8"},
         /* common.hpp */
         {"SAbsI32", "s_abs_i32"},
         {"SMaxI32", "s_max_i32"},
@@ -180,6 +183,8 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
         {"SAddI32", "s_add_i32"},
         {"SAddU32", "s_add_u32"},
         {"SAddCU32", "s_addc_u32"},
+        {"SAddU64", "s_add_u64"},
+        {"_SAddU64", "s_add_u64"},
         {"SMulI32", "s_mul_i32"},
         {"SMulHII32", "s_mul_hi_i32"},
         {"SMulHIU32", "s_mul_hi_u32"},
@@ -210,6 +215,7 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
         {"SCMovB32", "s_cmov_b32"},
         {"SCMovB64", "s_cmov_b64"},
         {"SFf1B32", "s_ff1_i32_b32"},
+        {"SBfeU32", "s_bfe_u32"},
         {"SBfmB32", "s_bfm_b32"},
         {"SMovkI32", "s_movk_i32"},
         {"SSExtI16toI32", "s_sext_i32_i16"},
@@ -218,7 +224,6 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
         {"SOrSaveExecB32", "s_or_saveexec_b32"},
         {"SOrSaveExecB64", "s_or_saveexec_b64"},
         {"SSetPrior", "s_setprio"},
-        {"SBarrier", "s_barrier"},
         {"SNop", "s_nop"},
         {"SEndpgm", "s_endpgm"},
         {"SSleep", "s_sleep"},
@@ -227,6 +232,9 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
         {"SSetRegIMM32B32", "s_setreg_IMM32_b32"},
         {"SWaitCnt", "s_waitcnt"},
         {"SWaitTensorcnt", "s_wait_tensorcnt"},
+        {"SWaitXCnt", "s_wait_xcnt"},
+        {"GlobalWb", "global_wb"},
+        {"GlobalInv", "global_inv"},
         {"SDelayAlu", "s_delay_alu"},
         {"VAddF16", "v_add_f16"},
         {"VAddF32", "v_add_f32"},
@@ -236,6 +244,8 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
         {"VAdd3U32", "v_add3_u32"},
         {"VAddCOU32", "v_add_co_u32"},
         {"VAddCCOU32", "v_add_co_ci_u32"},
+        {"VAddNCU64", "v_add_nc_u64"},
+        {"_VAddNCU64", "v_add_nc_u64"},
         {"VNop", "v_nop"},
         {"VAddPKF32", "v_pk_add_f32"},
         {"_VAddPKF32", "v_pk_add_f32"},
@@ -312,6 +322,7 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
     registry.setRocisaToArchMap(std::move(rocisaToArchMap));
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void setGfx1250ConversionMap(GpuArch& registry) {
     std::unordered_map<std::string, std::string> conversion = {
         {"SSchedulingFence", "lowerRocisaSchedulingFence"},
@@ -323,6 +334,7 @@ void setGfx1250ConversionMap(GpuArch& registry) {
         {"_SWaitDscnt", "lowerRocisaWaitCnt"},
         {"SWaitTensorcnt", "lowerRocisaWaitTensorcnt"},
         {"SWaitAlu", "lowerRocisaWaitAlu"},
+        {"SBarrier", "lowerRocisaSBarrier"},
 
         // {"VMaxPKF16", "v_max_pk_f16"},
 

@@ -431,6 +431,7 @@ def instructionSchedule(emittedModules):
         if _isBufferLoad(inst):
             bufLoadCount += 1
         elif _isWaitCnt(inst) and inst.vlcnt >= 0:
-            inst.vlcnt += bufLoadCount
+            if getattr(inst, 'adjustVmcnt', True):
+                inst.vlcnt += bufLoadCount
 
     return scheduled

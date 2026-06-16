@@ -52,6 +52,11 @@ namespace rocsparse
                                                     const Z* const*      z_arrays,
                                                     rocsparse_index_base idx_base)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+
         const int lid = hipThreadIdx_x & (WF_SIZE - 1);
 
         const J gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
@@ -120,6 +125,11 @@ namespace rocsparse
                                                     Y*                   y,
                                                     rocsparse_index_base idx_base)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+
         const int lid = hipThreadIdx_x & (WF_SIZE - 1);
 
         const J gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
@@ -241,6 +251,11 @@ namespace rocsparse
                                                      const Z* const*      z_arrays,
                                                      rocsparse_index_base idx_base)
     {
+        static_assert(WG_SIZE > 0 && (WG_SIZE & (WG_SIZE - 1)) == 0,
+                      "WG_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WG_SIZE == 0, "BLOCKSIZE must be a multiple of WG_SIZE.");
+
         __shared__ T partialSums[BLOCKSIZE];
 
         const int lid = hipThreadIdx_x;
@@ -948,6 +963,11 @@ namespace rocsparse
                                                   const Z* const*      z_arrays,
                                                   rocsparse_index_base idx_base)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+
         const int tid = hipThreadIdx_x;
         const int bid = hipBlockIdx_x;
 

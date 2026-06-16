@@ -41,7 +41,9 @@ def extract_tarball(tarball_path: str) -> Tuple[tempfile.TemporaryDirectory, Lis
     tmpdir = tempfile.TemporaryDirectory(prefix="dnn_benchmarking_")
     try:
         with tarfile.open(tarball_path) as tf:
-            json_members = [m for m in tf.getmembers() if m.name.endswith(".json")]
+            json_members = [
+                m for m in tf.getmembers() if m.name.endswith(".json") and m.isfile()
+            ]
             if not json_members:
                 raise GraphLoadError(f"No .json files found in tarball: {tarball_path}")
             tf.extractall(path=tmpdir.name, members=json_members, filter="data")

@@ -172,6 +172,11 @@ add_rocprim_benchmark(benchmark_block_scan.cpp)
 add_rocprim_benchmark(benchmark_block_sort.cpp)
 add_rocprim_benchmark(benchmark_config_dispatch.cpp)
 add_rocprim_benchmark(benchmark_device_adjacent_difference.cpp)
+# Workaround for ROCm/llvm-project#2616: DAG combine cycle hangs codegen at
+# -O2/-O3 on gfx950 for this TU. Build at -O1 until the codegen fix lands.
+if(TARGET benchmark_device_adjacent_difference)
+  target_compile_options(benchmark_device_adjacent_difference PRIVATE -O1)
+endif()
 add_rocprim_benchmark(benchmark_device_adjacent_find.cpp)
 add_rocprim_benchmark(benchmark_device_batch_memcpy.cpp)
 add_rocprim_benchmark(benchmark_device_binary_search.cpp)

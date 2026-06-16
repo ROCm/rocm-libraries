@@ -45,7 +45,7 @@ CK_TILE_DEVICE auto load_tile(const TileWindow_& tile_window,
  *
  * @note This function is a modification of the existing load function.
  *       It has been extended with two additional parameters: it takes a tuple as input
- *       and an elementwise function. For each A = A0, A1… AN, the elementwise function
+ *       and an elementwise function. For each A = A0, A1... AN, the elementwise function
  *       is additionally applied during a single read.
  */
 template <typename... TileWindow_,
@@ -174,6 +174,27 @@ CK_TILE_DEVICE void async_load_tile(LdsTileWindow_&& lds_tile,
                                     bool_constant<static_move_ys> smy        = {})
 {
     async_load_tile_with_offset(lds_tile, tile_window, 0, number<i_access>{}, occ, smy);
+}
+
+template <typename TDMConfig_,
+          typename LdsTileWindow_,
+          typename BottomTensorView_,
+          typename WindowLengths_,
+          typename TileDistribution_,
+          index_t NumCoord_,
+          typename GatherIndexView_ = null_tile_window<WindowLengths_>,
+          index_t i_access          = -1> // this i_access is used for gather mode
+CK_TILE_DEVICE auto
+load_tile_tdm(const TDMConfig_& tdm_config,
+              LdsTileWindow_&& lds_tile,
+              const tile_window_with_static_distribution<BottomTensorView_,
+                                                         WindowLengths_,
+                                                         TileDistribution_,
+                                                         NumCoord_>& tile_window,
+              const GatherIndexView_& gather_index_view = null_tile_window<WindowLengths_>{},
+              number<i_access>                          = {})
+{
+    return tile_window.tdm_load_to_lds(tdm_config, lds_tile, gather_index_view, number<i_access>{});
 }
 
 template <typename LdsTileWindow_,

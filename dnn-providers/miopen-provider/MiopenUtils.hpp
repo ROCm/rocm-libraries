@@ -125,7 +125,7 @@ private:
         {                                                                                   \
             statement;                                                                      \
         }                                                                                   \
-        catch(hipdnn_plugin_sdk::HipdnnPluginException error)                               \
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)                        \
         {                                                                                   \
             throw hipdnn_plugin_sdk::HipdnnPluginException(error.getStatus(),               \
                                                            (message) + error.getMessage()); \

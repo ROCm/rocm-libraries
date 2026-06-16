@@ -26,7 +26,10 @@
 #ifndef TYPE_DISPATCH_HPP
 #define TYPE_DISPATCH_HPP
 
+#include "hipsparse-bfloat16.h"
+#include "hipsparse-float16.h"
 #include "hipsparse_arguments.hpp"
+#include <hipsparse/hipsparse.h>
 
 // ----------------------------------------------------------------------------
 // Calls TEST template based on the argument types. TEST<> is expected to
@@ -99,6 +102,62 @@ auto hipsparse_it_dispatch(const Arguments& arg)
     return TEST<void>{}(arg);
 }
 
+// Dispatch for hipsparseGather. Gather supports uniform precisions only, so X,
+// Y and the compute type are identical: we only need the index type I and the
+// element type T. The set of valid element types is wider than the default
+// hipsparse_it_dispatch (adds int8, fp16, and bf16).
+template <template <typename...> class TEST>
+auto hipsparse_gather_dispatch(const Arguments& arg)
+{
+    const auto I = arg.index_type_I;
+    if(I == HIPSPARSE_INDEX_32I)
+    {
+        switch(arg.compute_type)
+        {
+        case HIP_R_8I:
+            return TEST<int32_t, int8_t>{}(arg);
+        case HIP_R_16F:
+            return TEST<int32_t, hipsparseFloat16>{}(arg);
+        case HIP_R_16BF:
+            return TEST<int32_t, hipsparseBfloat16>{}(arg);
+        case HIP_R_32F:
+            return TEST<int32_t, float>{}(arg);
+        case HIP_R_64F:
+            return TEST<int32_t, double>{}(arg);
+        case HIP_C_32F:
+            return TEST<int32_t, hipComplex>{}(arg);
+        case HIP_C_64F:
+            return TEST<int32_t, hipDoubleComplex>{}(arg);
+        default:
+            return TEST<void>{}(arg);
+        }
+    }
+    else if(I == HIPSPARSE_INDEX_64I)
+    {
+        switch(arg.compute_type)
+        {
+        case HIP_R_8I:
+            return TEST<int64_t, int8_t>{}(arg);
+        case HIP_R_16F:
+            return TEST<int64_t, hipsparseFloat16>{}(arg);
+        case HIP_R_16BF:
+            return TEST<int64_t, hipsparseBfloat16>{}(arg);
+        case HIP_R_32F:
+            return TEST<int64_t, float>{}(arg);
+        case HIP_R_64F:
+            return TEST<int64_t, double>{}(arg);
+        case HIP_C_32F:
+            return TEST<int64_t, hipComplex>{}(arg);
+        case HIP_C_64F:
+            return TEST<int64_t, hipDoubleComplex>{}(arg);
+        default:
+            return TEST<void>{}(arg);
+        }
+    }
+
+    return TEST<void>{}(arg);
+}
+
 template <template <typename...> class TEST>
 auto hipsparse_ijt_dispatch(const Arguments& arg)
 {
@@ -152,6 +211,188 @@ auto hipsparse_ijt_dispatch(const Arguments& arg)
         default:
             return TEST<void>{}(arg);
         }
+    }
+
+    return TEST<void>{}(arg);
+}
+
+template <template <typename...> class TEST>
+auto hipsparse_scatter_dispatch(const Arguments& arg)
+{
+    const auto I = arg.index_type_I;
+    if(I == HIPSPARSE_INDEX_32I)
+    {
+        switch(arg.compute_type)
+        {
+        case HIP_R_8I:
+            return TEST<int32_t, int8_t>{}(arg);
+        case HIP_R_16F:
+            return TEST<int32_t, hipsparseFloat16>{}(arg);
+        case HIP_R_16BF:
+            return TEST<int32_t, hipsparseBfloat16>{}(arg);
+        case HIP_R_32F:
+            return TEST<int32_t, float>{}(arg);
+        case HIP_R_64F:
+            return TEST<int32_t, double>{}(arg);
+        case HIP_C_32F:
+            return TEST<int32_t, hipComplex>{}(arg);
+        case HIP_C_64F:
+            return TEST<int32_t, hipDoubleComplex>{}(arg);
+        default:
+            return TEST<void>{}(arg);
+        }
+    }
+    else if(I == HIPSPARSE_INDEX_64I)
+    {
+        switch(arg.compute_type)
+        {
+        case HIP_R_8I:
+            return TEST<int64_t, int8_t>{}(arg);
+        case HIP_R_16F:
+            return TEST<int64_t, hipsparseFloat16>{}(arg);
+        case HIP_R_16BF:
+            return TEST<int64_t, hipsparseBfloat16>{}(arg);
+        case HIP_R_32F:
+            return TEST<int64_t, float>{}(arg);
+        case HIP_R_64F:
+            return TEST<int64_t, double>{}(arg);
+        case HIP_C_32F:
+            return TEST<int64_t, hipComplex>{}(arg);
+        case HIP_C_64F:
+            return TEST<int64_t, hipDoubleComplex>{}(arg);
+        default:
+            return TEST<void>{}(arg);
+        }
+    }
+
+    return TEST<void>{}(arg);
+}
+
+// Dispatch for hipsparseAxpby: selects a <I, X, Y, T> template instantiation
+// based on the valid (uniform and mixed) precision combinations supported by
+// hipsparseAxpby. Each routine that needs an <I, X, Y, T> dispatch should
+// define its own routine-specific dispatch so that different routines with the
+// same template parameter structure can advertise different sets of valid
+// precision combinations (including mixed precisions).
+template <template <typename...> class TEST>
+auto hipsparse_axpby_dispatch(const Arguments& arg)
+{
+    const auto I = arg.index_type_I;
+    const auto X = arg.x_type;
+    const auto Y = arg.y_type;
+    const auto T = arg.compute_type;
+
+    if(I == HIPSPARSE_INDEX_32I)
+    {
+        if(X == HIP_R_16F && Y == HIP_R_16F && T == HIP_R_32F)
+        {
+            return TEST<int32_t, hipsparseFloat16, hipsparseFloat16, float>{}(arg);
+        }
+        if(X == HIP_R_16BF && Y == HIP_R_16BF && T == HIP_R_32F)
+        {
+            return TEST<int32_t, hipsparseBfloat16, hipsparseBfloat16, float>{}(arg);
+        }
+        if(X == HIP_R_32F && Y == HIP_R_32F && T == HIP_R_32F)
+        {
+            return TEST<int32_t, float, float, float>{}(arg);
+        }
+        if(X == HIP_R_64F && Y == HIP_R_64F && T == HIP_R_64F)
+        {
+            return TEST<int32_t, double, double, double>{}(arg);
+        }
+        if(X == HIP_C_32F && Y == HIP_C_32F && T == HIP_C_32F)
+        {
+            return TEST<int32_t, hipComplex, hipComplex, hipComplex>{}(arg);
+        }
+        if(X == HIP_C_64F && Y == HIP_C_64F && T == HIP_C_64F)
+        {
+            return TEST<int32_t, hipDoubleComplex, hipDoubleComplex, hipDoubleComplex>{}(arg);
+        }
+    }
+    else if(I == HIPSPARSE_INDEX_64I)
+    {
+        if(X == HIP_R_16F && Y == HIP_R_16F && T == HIP_R_32F)
+        {
+            return TEST<int64_t, hipsparseFloat16, hipsparseFloat16, float>{}(arg);
+        }
+        if(X == HIP_R_16BF && Y == HIP_R_16BF && T == HIP_R_32F)
+        {
+            return TEST<int64_t, hipsparseBfloat16, hipsparseBfloat16, float>{}(arg);
+        }
+        if(X == HIP_R_32F && Y == HIP_R_32F && T == HIP_R_32F)
+        {
+            return TEST<int64_t, float, float, float>{}(arg);
+        }
+        if(X == HIP_R_64F && Y == HIP_R_64F && T == HIP_R_64F)
+        {
+            return TEST<int64_t, double, double, double>{}(arg);
+        }
+        if(X == HIP_C_32F && Y == HIP_C_32F && T == HIP_C_32F)
+        {
+            return TEST<int64_t, hipComplex, hipComplex, hipComplex>{}(arg);
+        }
+        if(X == HIP_C_64F && Y == HIP_C_64F && T == HIP_C_64F)
+        {
+            return TEST<int64_t, hipDoubleComplex, hipDoubleComplex, hipDoubleComplex>{}(arg);
+        }
+    }
+
+    return TEST<void>{}(arg);
+}
+
+template <template <typename...> class TEST>
+auto hipsparse_spvv_dispatch(const Arguments& arg)
+{
+    const auto I = arg.index_type_I;
+    const auto X = arg.x_type;
+    const auto Y = arg.y_type;
+    const auto T = arg.compute_type;
+
+    // hipsparseSpVV requires x and y element types to match.
+    if(X != Y)
+    {
+        return TEST<void>{}(arg);
+    }
+
+    if(I == HIPSPARSE_INDEX_32I)
+    {
+        if(X == HIP_R_32F && T == HIP_R_32F)
+            return TEST<int32_t, float, float, float>{}(arg);
+        if(X == HIP_R_64F && T == HIP_R_64F)
+            return TEST<int32_t, double, double, double>{}(arg);
+        if(X == HIP_C_32F && T == HIP_C_32F)
+            return TEST<int32_t, hipComplex, hipComplex, hipComplex>{}(arg);
+        if(X == HIP_C_64F && T == HIP_C_64F)
+            return TEST<int32_t, hipDoubleComplex, hipDoubleComplex, hipDoubleComplex>{}(arg);
+        if(X == HIP_R_8I && T == HIP_R_32I)
+            return TEST<int32_t, int8_t, int8_t, int32_t>{}(arg);
+        if(X == HIP_R_8I && T == HIP_R_32F)
+            return TEST<int32_t, int8_t, int8_t, float>{}(arg);
+        if(X == HIP_R_16F && T == HIP_R_32F)
+            return TEST<int32_t, hipsparseFloat16, hipsparseFloat16, float>{}(arg);
+        if(X == HIP_R_16BF && T == HIP_R_32F)
+            return TEST<int32_t, hipsparseBfloat16, hipsparseBfloat16, float>{}(arg);
+        return TEST<void>{}(arg);
+    }
+    else if(I == HIPSPARSE_INDEX_64I)
+    {
+        if(X == HIP_R_32F && T == HIP_R_32F)
+            return TEST<int64_t, float, float, float>{}(arg);
+        if(X == HIP_R_64F && T == HIP_R_64F)
+            return TEST<int64_t, double, double, double>{}(arg);
+        if(X == HIP_C_32F && T == HIP_C_32F)
+            return TEST<int64_t, hipComplex, hipComplex, hipComplex>{}(arg);
+        if(X == HIP_C_64F && T == HIP_C_64F)
+            return TEST<int64_t, hipDoubleComplex, hipDoubleComplex, hipDoubleComplex>{}(arg);
+        if(X == HIP_R_8I && T == HIP_R_32I)
+            return TEST<int64_t, int8_t, int8_t, int32_t>{}(arg);
+        if(X == HIP_R_8I && T == HIP_R_32F)
+            return TEST<int64_t, int8_t, int8_t, float>{}(arg);
+        if(X == HIP_R_16F && T == HIP_R_32F)
+            return TEST<int64_t, hipsparseFloat16, hipsparseFloat16, float>{}(arg);
+        if(X == HIP_R_16BF && T == HIP_R_32F)
+            return TEST<int64_t, hipsparseBfloat16, hipsparseBfloat16, float>{}(arg);
+        return TEST<void>{}(arg);
     }
 
     return TEST<void>{}(arg);

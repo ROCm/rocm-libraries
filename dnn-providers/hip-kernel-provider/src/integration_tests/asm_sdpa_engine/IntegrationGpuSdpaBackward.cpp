@@ -82,15 +82,18 @@ protected:
         auto& oTensor = bundle.getTensor(_oUid);
         auto& statsTensor = bundle.getTensor(_statsUid);
 
-        ShallowTensor<DataType> shallowQ(qTensor.rawHostData(), qTensor.dims(), qTensor.strides());
-        ShallowTensor<DataType> shallowK(kTensor.rawHostData(), kTensor.dims(), kTensor.strides());
-        ShallowTensor<DataType> shallowV(vTensor.rawHostData(), vTensor.dims(), vTensor.strides());
+        const ShallowTensor<DataType> shallowQ(
+            qTensor.rawHostData(), qTensor.dims(), qTensor.strides());
+        const ShallowTensor<DataType> shallowK(
+            kTensor.rawHostData(), kTensor.dims(), kTensor.strides());
+        const ShallowTensor<DataType> shallowV(
+            vTensor.rawHostData(), vTensor.dims(), vTensor.strides());
         ShallowTensor<DataType> shallowO(oTensor.rawHostData(), oTensor.dims(), oTensor.strides());
         // Stats (LSE) is [B, H_q, S_q] for the CPU reference, but the graph may
         // lower it as 4D. Use the correct 3D dims with contiguous strides.
-        std::vector<int64_t> statsDims3d
+        const std::vector<int64_t> statsDims3d
             = {qTensor.dims()[0], qTensor.dims()[1], qTensor.dims()[2]};
-        std::vector<int64_t> statsStrides3d = generateStrides(statsDims3d);
+        const std::vector<int64_t> statsStrides3d = generateStrides(statsDims3d);
         ShallowTensor<float> shallowStats(statsTensor.rawHostData(), statsDims3d, statsStrides3d);
 
         CpuFpReferenceSdpa::forward<DataType, DataType, DataType, DataType, float>(
@@ -126,7 +129,8 @@ protected:
         const auto& doStrides = oStrides;
 
         // Stats (LSE) dims: [B, H_q, S_q] with contiguous strides
-        std::vector<int64_t> statsDims = {testCase.qDims[0], testCase.qDims[1], testCase.qDims[2]};
+        const std::vector<int64_t> statsDims
+            = {testCase.qDims[0], testCase.qDims[1], testCase.qDims[2]};
         auto statsStrides = generateStrides(statsDims);
 
         Graph graph;
@@ -208,6 +212,8 @@ private:
 
 using IntegrationGpuSdpaBwdBf16 = SdpaBackward<bfloat16>;
 
+using IntegrationGpuSdpaBwdFp16 = SdpaBackward<hipdnn_data_sdk::types::half>;
+
 } // namespace
 
 TEST_P(IntegrationGpuSdpaBwdBf16, Correctness)
@@ -227,4 +233,23 @@ TEST_P(IntegrationGpuSdpaBwdBf16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuSdpaBwdBf16,
+                         testing::ValuesIn(getSdpaBwdTestCases()));
+
+TEST_P(IntegrationGpuSdpaBwdFp16, Correctness)
+{
+    // FP16 backward shares the same softmax-recomputation error sources as bf16,
+    // but the 10-bit mantissa (vs bf16's 7) yields markedly tighter results: the
+    // worst-case element on this shape lands just under 0.25 in the combined
+    // atol+rtol metric. Use 0.5 — ~2x margin over that measured floor to absorb
+    // the |ref| ≈ 0 outliers and seed/driver variation, while staying 4x tighter
+    // than the bf16 bar.
+    // Tolerance: 5e-1 (atol=0.5, rtol=0.5)
+
+    auto tolerance = 5e-1f;
+
+    runGraphTest(tolerance);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuSdpaBwdFp16,
                          testing::ValuesIn(getSdpaBwdTestCases()));

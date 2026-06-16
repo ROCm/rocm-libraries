@@ -128,6 +128,8 @@ Auxiliary functions
 +------------------------------------------+
 |:cpp:func:`hipsparseCreateBlockedEll`     |
 +------------------------------------------+
+|:cpp:func:`hipsparseCreateBsr`            |
++------------------------------------------+
 |:cpp:func:`hipsparseDestroySpMat`         |
 +------------------------------------------+
 |:cpp:func:`hipsparseCooGet`               |

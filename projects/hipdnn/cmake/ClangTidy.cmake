@@ -114,7 +114,7 @@ endfunction()
 # @param TARGET target to enable clang-tidy checks for
 function(clang_tidy_check TARGET)
     setclangtidyvars()
-    if(ENABLE_CLANG_TIDY)
+    if(ENABLE_CLANG_TIDY AND CLANG_TIDY_EXE)
         set_target_properties(${TARGET} PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_COMMAND}")
         if(CLANG_TIDY_HIP_ARGS)
             set(CLANG_TIDY_HIP_COMMAND ${CLANG_TIDY_COMMAND} ${CLANG_TIDY_HIP_ARGS})

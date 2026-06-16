@@ -1,29 +1,20 @@
 .. meta::
-  :description: building and installing rocFFT
+  :description: Building and installing rocFFT
   :keywords: rocFFT, ROCm, API, documentation, install, build from source
 
 .. _building-installing-rocfft:
 
-********************************************************************
-Building and installing rocFFT
-********************************************************************
+************************************
+Build and install rocFFT from source
+************************************
 
+To build rocFFT as part of the ROCm Core SDK, see `TheRock build
+instructions
+<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the recommended way to build ROCm components from source.
 
-This topic explains how to install rocFFT from the prebuilt packages or build it from the source code.
-
-Installing prebuilt packages
-=============================
-
-For information on downloading and installing ROCm, see the
-:doc:`ROCm installation guide <rocm-install-on-linux:install/quick-start>`.
-
-To install rocFFT, use the package manager for your Linux distribution.
-
-For example, on the Ubuntu distribution, run the following command:
-
-.. code-block:: shell
-
-   sudo apt update && sudo apt install rocfft
+Alternatively, you can build rocFFT standalone using the following
+instructions.
 
 Building rocFFT from source
 =============================

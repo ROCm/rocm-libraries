@@ -124,7 +124,7 @@ set_target_properties( hipsparselt-test PROPERTIES
 
 set( HIPSPARSELT_TEST_DATA "${PROJECT_BINARY_DIR}/staging/hipsparselt_gtest.data")
 add_custom_command( OUTPUT "${HIPSPARSELT_TEST_DATA}"
-                    COMMAND ${python} ../common/hipsparselt_gentest.py -I ../include hipsparselt_gtest.yaml -o "${HIPSPARSELT_TEST_DATA}"
+                    COMMAND ${Python3_EXECUTABLE} ../common/hipsparselt_gentest.py -I ../include hipsparselt_gtest.yaml -o "${HIPSPARSELT_TEST_DATA}"
                     DEPENDS ../common/hipsparselt_gentest.py ../include/hipsparselt_common.yaml
                             spmm_common.yaml spmm_batched_common.yaml spmm_strided_batched_common.yaml
                             spmm_common_16.yaml spmm_batched_common_16.yaml spmm_strided_batched_common_16.yaml

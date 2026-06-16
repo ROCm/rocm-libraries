@@ -116,7 +116,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
@@ -196,7 +196,7 @@
     LdsPadMXSB: 0
     LdsPadMetadata: 4
     LocalReadVectorWidth: 16
-    LocalReadVectorWidthA: 8
+    LocalReadVectorWidthA: 16
     LocalReadVectorWidthB: 16
     LocalReadVectorWidthMetadata: 16
     LocalSplitU: 1

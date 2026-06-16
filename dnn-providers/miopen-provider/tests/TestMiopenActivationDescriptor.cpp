@@ -51,7 +51,7 @@ TEST(TestMiopenActivationDescriptor, CreatesStandardRelu)
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
             builder.GetBufferPointer());
 
-    MiopenActivationDescriptor activDesc(*attr);
+    const MiopenActivationDescriptor activDesc(*attr);
 
     miopenActivationMode_t mode;
     double alpha;
@@ -74,7 +74,7 @@ TEST(TestMiopenActivationDescriptor, CreatesStandardReluBwd)
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
             builder.GetBufferPointer());
 
-    MiopenActivationDescriptor activDesc(*attr);
+    const MiopenActivationDescriptor activDesc(*attr);
 
     miopenActivationMode_t mode;
     double alpha;
@@ -97,7 +97,7 @@ TEST(TestMiopenActivationDescriptor, CreatesClippedRelu)
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
             builder.GetBufferPointer());
 
-    MiopenActivationDescriptor activDesc(*attr);
+    const MiopenActivationDescriptor activDesc(*attr);
 
     miopenActivationMode_t mode;
     double alpha;
@@ -122,7 +122,7 @@ TEST(TestMiopenActivationDescriptor, CreatesLeakyRelu)
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
             builder.GetBufferPointer());
 
-    MiopenActivationDescriptor activDesc(*attr);
+    const MiopenActivationDescriptor activDesc(*attr);
 
     miopenActivationMode_t mode;
     double alpha;
@@ -145,7 +145,7 @@ TEST(TestMiopenActivationDescriptor, CreatesClamp)
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
             builder.GetBufferPointer());
 
-    MiopenActivationDescriptor activDesc(*attr);
+    const MiopenActivationDescriptor activDesc(*attr);
 
     miopenActivationMode_t mode;
     double alpha;
@@ -167,7 +167,7 @@ TEST(TestMiopenActivationDescriptor, CreatesSigmoidFwd)
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
             builder.GetBufferPointer());
 
-    MiopenActivationDescriptor activDesc(*attr);
+    const MiopenActivationDescriptor activDesc(*attr);
 
     miopenActivationMode_t mode;
     double alpha;
@@ -187,7 +187,7 @@ TEST(TestMiopenActivationDescriptor, CreatesSigmoidBwd)
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
             builder.GetBufferPointer());
 
-    MiopenActivationDescriptor activDesc(*attr);
+    const MiopenActivationDescriptor activDesc(*attr);
 
     miopenActivationMode_t mode;
     double alpha;
@@ -207,7 +207,7 @@ TEST(TestMiopenActivationDescriptor, CreatesTanhFwd)
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
             builder.GetBufferPointer());
 
-    MiopenActivationDescriptor activDesc(*attr);
+    const MiopenActivationDescriptor activDesc(*attr);
 
     miopenActivationMode_t mode;
     double alpha;
@@ -229,7 +229,7 @@ TEST(TestMiopenActivationDescriptor, CreatesTanhBwd)
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
             builder.GetBufferPointer());
 
-    MiopenActivationDescriptor activDesc(*attr);
+    const MiopenActivationDescriptor activDesc(*attr);
 
     miopenActivationMode_t mode;
     double alpha;
@@ -254,7 +254,7 @@ TEST(TestMiopenActivationDescriptor, CreatesEluWithCustomAlpha)
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
             builder.GetBufferPointer());
 
-    MiopenActivationDescriptor activDesc(*attr);
+    const MiopenActivationDescriptor activDesc(*attr);
 
     miopenActivationMode_t mode;
     double alpha;
@@ -275,7 +275,7 @@ TEST(TestMiopenActivationDescriptor, CreatesEluWithDefaultAlpha)
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
             builder.GetBufferPointer());
 
-    MiopenActivationDescriptor activDesc(*attr);
+    const MiopenActivationDescriptor activDesc(*attr);
 
     miopenActivationMode_t mode;
     double alpha;
@@ -296,7 +296,7 @@ TEST(TestMiopenActivationDescriptor, CreatesSoftplusFwdWithoutBeta)
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
             builder.GetBufferPointer());
 
-    MiopenActivationDescriptor activDesc(*attr);
+    const MiopenActivationDescriptor activDesc(*attr);
 
     miopenActivationMode_t mode;
     double alpha;
@@ -316,7 +316,7 @@ TEST(TestMiopenActivationDescriptor, CreatesSoftplusBwdWithoutBeta)
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
             builder.GetBufferPointer());
 
-    MiopenActivationDescriptor activDesc(*attr);
+    const MiopenActivationDescriptor activDesc(*attr);
 
     miopenActivationMode_t mode;
     double alpha;
@@ -342,7 +342,7 @@ TEST(TestMiopenActivationDescriptor, CreatesSoftplusWithBetaOne)
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
             builder.GetBufferPointer());
 
-    MiopenActivationDescriptor activDesc(*attr);
+    const MiopenActivationDescriptor activDesc(*attr);
 
     miopenActivationMode_t mode;
     double alpha;
@@ -368,7 +368,7 @@ TEST(TestMiopenActivationDescriptor, ThrowsOnSoftplusWithInvalidBeta)
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
             builder.GetBufferPointer());
 
-    EXPECT_THROW(MiopenActivationDescriptor activDesc(*attr),
+    EXPECT_THROW(const MiopenActivationDescriptor activDesc(*attr),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
@@ -380,7 +380,7 @@ TEST(TestMiopenActivationDescriptor, CreatesAbs)
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
             builder.GetBufferPointer());
 
-    MiopenActivationDescriptor activDesc(*attr);
+    const MiopenActivationDescriptor activDesc(*attr);
 
     miopenActivationMode_t mode;
     double alpha;
@@ -400,7 +400,7 @@ TEST(TestMiopenActivationDescriptor, CreatesIdentity)
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
             builder.GetBufferPointer());
 
-    MiopenActivationDescriptor activDesc(*attr);
+    const MiopenActivationDescriptor activDesc(*attr);
 
     miopenActivationMode_t mode;
     double alpha;
@@ -420,7 +420,7 @@ TEST(TestMiopenActivationDescriptor, ThrowsOnUnsupportedMode)
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
             builder.GetBufferPointer());
 
-    EXPECT_THROW(MiopenActivationDescriptor activDesc(*attr),
+    EXPECT_THROW(const MiopenActivationDescriptor activDesc(*attr),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
@@ -435,7 +435,7 @@ TEST(TestMiopenActivationDescriptor, ClampTakesPrecedenceOverClippedRelu)
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
             builder.GetBufferPointer());
 
-    MiopenActivationDescriptor activDesc(*attr);
+    const MiopenActivationDescriptor activDesc(*attr);
 
     miopenActivationMode_t mode;
     double alpha;
@@ -461,7 +461,7 @@ TEST(TestMiopenActivationDescriptor, UpperClipWithoutLowerUsesClippedRelu)
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
             builder.GetBufferPointer());
 
-    MiopenActivationDescriptor activDesc(*attr);
+    const MiopenActivationDescriptor activDesc(*attr);
 
     miopenActivationMode_t mode;
     double alpha;

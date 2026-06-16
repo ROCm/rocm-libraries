@@ -40,7 +40,7 @@ void populateBundleFromGraph(Graph& graph, GraphTensorBundle& bundle)
     graph.visit([&](const INode& node) {
         for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
         {
-            int64_t tensorId = tensorAttr->get_uid();
+            const int64_t tensorId = tensorAttr->get_uid();
             if(!tensorAttr->get_is_virtual()
                && bundle.tensors.find(tensorId) == bundle.tensors.end())
             {
@@ -49,7 +49,7 @@ void populateBundleFromGraph(Graph& graph, GraphTensorBundle& bundle)
         }
         for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
         {
-            int64_t tensorId = tensorAttr->get_uid();
+            const int64_t tensorId = tensorAttr->get_uid();
             if(!tensorAttr->get_is_virtual()
                && bundle.tensors.find(tensorId) == bundle.tensors.end())
             {
@@ -89,13 +89,13 @@ void assertBundleOutputsMatch(GraphTensorBundle& bundle1,
     auto* host1 = static_cast<const uint8_t*>(tensor1->rawHostData());
     auto* host2 = static_cast<const uint8_t*>(tensor2->rawHostData());
 
-    size_t elementCount = tensor1->elementCount();
-    size_t elementSize = tensor1->elementSize();
-    size_t totalBytes = elementCount * elementSize;
+    const size_t elementCount = tensor1->elementCount();
+    const size_t elementSize = tensor1->elementSize();
+    const size_t totalBytes = elementCount * elementSize;
 
     ASSERT_EQ(elementCount, tensor2->elementCount()) << "Output tensor sizes differ";
 
-    int mismatchResult = std::memcmp(host1, host2, totalBytes);
+    const int mismatchResult = std::memcmp(host1, host2, totalBytes);
     ASSERT_EQ(mismatchResult, 0) << "Output tensors are not bit-exact";
 }
 
@@ -190,7 +190,7 @@ inline std::vector<FusedConvTestCase> getDeterministicFusedConvTestCases()
 {
     unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
-    std::vector<ConvTestCase> convCases = {
+    const std::vector<ConvTestCase> convCases = {
         {{1, 16, 16, 16}, {1, 16, 3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, seed},
     };
 
@@ -263,7 +263,7 @@ protected:
         int64_t workspaceSize;
         result = graphObj.get_workspace_size(workspaceSize);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        Workspace workspace(static_cast<size_t>(workspaceSize));
+        const Workspace workspace(static_cast<size_t>(workspaceSize));
 
         auto variantPack1 = bundle1.toDeviceVariantPack();
         result = graphObj.execute(_handle, variantPack1, workspace.get());
@@ -346,7 +346,7 @@ protected:
         int64_t workspaceSize;
         result = graphObj.get_workspace_size(workspaceSize);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        Workspace workspace(static_cast<size_t>(workspaceSize));
+        const Workspace workspace(static_cast<size_t>(workspaceSize));
 
         auto variantPack1 = bundle1.toDeviceVariantPack();
         result = graphObj.execute(_handle, variantPack1, workspace.get());
@@ -430,7 +430,7 @@ protected:
         int64_t workspaceSize;
         result = graphObj.get_workspace_size(workspaceSize);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        Workspace workspace(static_cast<size_t>(workspaceSize));
+        const Workspace workspace(static_cast<size_t>(workspaceSize));
 
         auto variantPack1 = bundle1.toDeviceVariantPack();
         result = graphObj.execute(_handle, variantPack1, workspace.get());
@@ -548,7 +548,7 @@ protected:
         int64_t workspaceSize;
         result = graphObj.get_workspace_size(workspaceSize);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        Workspace workspace(static_cast<size_t>(workspaceSize));
+        const Workspace workspace(static_cast<size_t>(workspaceSize));
 
         auto variantPack1 = bundle1.toDeviceVariantPack();
         result = graphObj.execute(_handle, variantPack1, workspace.get());
@@ -600,7 +600,7 @@ protected:
         auto biasTensorAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("bias", dataType, derivedDims, generateStrides(derivedDims)));
 
-        BatchnormInferenceAttributes bnAttrs;
+        const BatchnormInferenceAttributes bnAttrs;
 
         auto yTensorAttr = graphObj.batchnorm_inference(xTensorAttr,
                                                         meanTensorAttr,

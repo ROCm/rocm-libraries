@@ -76,6 +76,17 @@ inline uint64_t fnv1aHash(std::string_view str) noexcept
     return fnv1aHash(reinterpret_cast<const uint8_t*>(str.data()), str.size());
 }
 
+// Builds a std::string from a length-delimited char buffer, stripping a
+// trailing NUL if the producer included it in the reported length.
+inline std::string bufferToString(const std::vector<char>& buf, size_t len)
+{
+    if(len > 0 && buf[len - 1] == '\0')
+    {
+        --len;
+    }
+    return {buf.data(), len};
+}
+
 inline void copyMaxSizeWithNullTerminator(char* destination, const char* source, size_t maxSize)
 {
     if(source == nullptr || destination == nullptr || maxSize == 0)
@@ -93,7 +104,7 @@ inline void copyMaxSizeWithNullTerminator(char* destination, const char* source,
 
 inline std::string toLower(const std::string& str)
 {
-    std::string lowerStr = str;
+    std::string lowerStr = str; // NOLINT(misc-const-correctness)
     std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(), ::tolower);
     return lowerStr;
 }
@@ -111,7 +122,7 @@ inline std::string trim(const std::string& str)
 
 inline std::string removeNewlines(const std::string& str)
 {
-    std::string result = str;
+    std::string result = str; // NOLINT(misc-const-correctness)
     result.erase(std::remove(result.begin(), result.end(), '\r'), result.end());
     result.erase(std::remove(result.begin(), result.end(), '\n'), result.end());
     return result;

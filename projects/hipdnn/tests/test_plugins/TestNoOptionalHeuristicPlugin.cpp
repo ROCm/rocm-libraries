@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
 #include <hipdnn_plugin_sdk/HeuristicsPluginApi.h>
 #include <hipdnn_plugin_sdk/PluginLastErrorManager.hpp>
 #include <hipdnn_plugin_sdk/heuristic_api_version.h>
@@ -25,6 +26,7 @@ thread_local char
 namespace
 {
 // NOLINTBEGIN(readability-identifier-naming)
+const char* PLUGIN_NAME = "TestNoOptionalHeuristicPlugin";
 const char* POLICY_NAME = "TestNoOptionalHeuristicPolicy";
 // NOLINTEND(readability-identifier-naming)
 } // anonymous namespace
@@ -46,15 +48,58 @@ hipdnnPluginStatus_t hipdnnPluginGetApiVersion(const char** version)
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
-hipdnnPluginStatus_t hipdnnPluginGetName(const char** policy_name)
+hipdnnPluginStatus_t hipdnnPluginGetName(const char** plugin_name)
 {
-    if(policy_name == nullptr)
+    if(plugin_name == nullptr)
     {
         hipdnn_plugin_sdk::PluginLastErrorManager::setLastError(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-                                                                "policy_name pointer is null");
+                                                                "plugin_name pointer is null");
         return HIPDNN_PLUGIN_STATUS_INVALID_VALUE;
     }
-    *policy_name = POLICY_NAME;
+    *plugin_name = PLUGIN_NAME;
+    return HIPDNN_PLUGIN_STATUS_SUCCESS;
+}
+
+hipdnnPluginStatus_t hipdnnHeuristicPluginGetAllPolicyIds(int64_t* policy_ids,
+                                                          uint32_t max_policies,
+                                                          uint32_t* num_policies)
+{
+    if(num_policies == nullptr)
+    {
+        hipdnn_plugin_sdk::PluginLastErrorManager::setLastError(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                                                                "num_policies pointer is null");
+        return HIPDNN_PLUGIN_STATUS_INVALID_VALUE;
+    }
+    *num_policies = 1;
+    if(policy_ids == nullptr || max_policies == 0)
+    {
+        return HIPDNN_PLUGIN_STATUS_SUCCESS;
+    }
+    if(max_policies < 1)
+    {
+        hipdnn_plugin_sdk::PluginLastErrorManager::setLastError(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE, "max_policies smaller than available count");
+        return HIPDNN_PLUGIN_STATUS_INVALID_VALUE;
+    }
+    policy_ids[0] = hipdnn_data_sdk::utilities::policyNameToId(POLICY_NAME);
+    return HIPDNN_PLUGIN_STATUS_SUCCESS;
+}
+
+hipdnnPluginStatus_t hipdnnHeuristicPluginGetPolicyName(int64_t policy_id, const char** name)
+{
+    if(name == nullptr)
+    {
+        hipdnn_plugin_sdk::PluginLastErrorManager::setLastError(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                                                                "name pointer is null");
+        return HIPDNN_PLUGIN_STATUS_INVALID_VALUE;
+    }
+    if(policy_id != hipdnn_data_sdk::utilities::policyNameToId(POLICY_NAME))
+    {
+        hipdnn_plugin_sdk::PluginLastErrorManager::setLastError(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                                "unknown policy id");
+        return HIPDNN_PLUGIN_STATUS_BAD_PARAM;
+    }
+    *name = POLICY_NAME;
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
@@ -147,6 +192,7 @@ hipdnnPluginStatus_t
 
 hipdnnPluginStatus_t
     hipdnnHeuristicPolicyDescriptorCreate(hipdnnHeuristicHandle_t handle,
+                                          int64_t policy_id,
                                           hipdnnHeuristicPolicyDescriptor_t* out_descriptor)
 {
     if(handle == nullptr)
@@ -160,6 +206,12 @@ hipdnnPluginStatus_t
         hipdnn_plugin_sdk::PluginLastErrorManager::setLastError(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
                                                                 "out_descriptor pointer is null");
         return HIPDNN_PLUGIN_STATUS_INVALID_VALUE;
+    }
+    if(policy_id != hipdnn_data_sdk::utilities::policyNameToId(POLICY_NAME))
+    {
+        hipdnn_plugin_sdk::PluginLastErrorManager::setLastError(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                                "unknown policy id");
+        return HIPDNN_PLUGIN_STATUS_BAD_PARAM;
     }
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     *out_descriptor = reinterpret_cast<hipdnnHeuristicPolicyDescriptor_t>(0xDCBA);

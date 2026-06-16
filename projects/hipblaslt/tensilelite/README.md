@@ -152,6 +152,17 @@ Use these flags when you want to override or make that behavior explicit:
 * `--bundle-python-deps`: Explicitly force `HIPBLASLT_BUNDLE_PYTHON_DEPS=ON`
 * `--enable-rocprof`: Sets `TENSILELITE_CLIENT_ENABLE_ROCPROFSDK=ON`
 
+### Speeding Up Builds with ccache
+
+Install ccache to cache compiled objects across rebuilds:
+
+```bash
+sudo apt install ccache    # Ubuntu/Debian
+```
+
+`invoke rocisa` and `invoke build-client` will detect ccache automatically
+and use it as the compiler launcher. No additional configuration is needed.
+
 ### Environment Variables
 
 * `TENSILE_NUM_PYTEST_WORKERS`: Number of parallel pytest workers used by tox (default: `4`)

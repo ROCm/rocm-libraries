@@ -6,6 +6,7 @@
 #include <flatbuffers/flatbuffers.h>
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/KnobWrapper.hpp>
@@ -23,6 +24,7 @@ public:
     virtual int64_t engineId() const = 0;
 
     virtual uint32_t knobCount() const = 0;
+    virtual std::vector<int32_t> behaviorNotes() const = 0;
     virtual const std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::flatbuffer_utilities::IKnob>>&
         knobWrappers() const
         = 0;
@@ -82,6 +84,25 @@ public:
             return 0;
         }
         return knobs->size();
+    }
+
+    std::vector<int32_t> behaviorNotes() const override
+    {
+        throwIfNotValid();
+
+        auto rawNotes = _shallowEngineDetails->behavior_notes();
+        if(rawNotes == nullptr)
+        {
+            return {};
+        }
+
+        std::vector<int32_t> notes;
+        notes.reserve(rawNotes->size());
+        for(uint32_t i = 0; i < rawNotes->size(); ++i)
+        {
+            notes.push_back(rawNotes->Get(i));
+        }
+        return notes;
     }
 
     const std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::flatbuffer_utilities::IKnob>>&

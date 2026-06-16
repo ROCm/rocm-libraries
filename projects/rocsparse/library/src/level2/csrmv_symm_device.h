@@ -95,6 +95,11 @@ namespace rocsparse
                                                           Y*                   y,
                                                           rocsparse_index_base idx_base)
     {
+        static_assert(WG_SIZE > 0 && (WG_SIZE & (WG_SIZE - 1)) == 0,
+                      "WG_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WG_SIZE == 0, "BLOCKSIZE must be a multiple of WG_SIZE.");
+
         __shared__ T           partial_sums[BLOCKSIZE];
         extern __shared__ char cols_in_rows[];
 
@@ -508,6 +513,10 @@ namespace rocsparse
                                                                 Y*                   y,
                                                                 rocsparse_index_base idx_base)
     {
+        static_assert(WG_SIZE > 0 && (WG_SIZE & (WG_SIZE - 1)) == 0,
+                      "WG_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE == 4 * WG_SIZE, "BLOCKSIZE must be 4 * WG_SIZE.");
+
         __shared__ T partial_sums[BLOCKSIZE];
 
         const int gid = hipBlockIdx_x;

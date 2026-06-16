@@ -19,57 +19,10 @@ from gpu_test_helpers import (
     GFX_TARGET,
     TileConfig,
     BPE, LOAD_WIDTH, WAVESIZE, NUM_THREADS, NUM_WAVES,
-    create_writer,
-    init_rocisa,
-    assemble_and_run,
-    generate_kernel_asm,
-    generate_load_params,
-    generate_export_epilogue,
+    generate_lra_asm,
+    export_register,
     print_offset_grid,
 )
-from Tensile.Components.Subtile.SubtileLREmit import lraTileAssignment
-
-EXPORT_LOAD_PARAMS = (
-    (4, 2, 0x00, "output_ptr"),
-    ("StrideA0I", 1, 0x08, "strideA"),
-    ("StrideB1J", 1, 0x0c, "strideB"),
-)
-
-EXPORT_ARGS = (
-    ("output_ptr", 8, "global_buffer", "u32"),
-    ("strideA",    4, "by_value",      "u32"),
-    ("strideB",    4, "by_value",      "u32"),
-)
-
-
-def generate_lra_asm(cfg):
-    """Run lraTileAssignment and return (lra_asm, writer, tileInfoA, tileInfoB, kernel)."""
-    writer, kernel, tileInfoA, tileInfoB = create_writer(cfg)
-    init_rocisa()
-
-    # Reserve s0-s11 for hardware regs + kernarg loads
-    writer.sgprPool.checkOut(12)
-    writer.sgprs["StrideA0I"] = 10
-    writer.sgprs["StrideB1J"] = 11
-    tileInfoA.allocOffsetRegisters(writer, kernel)
-    tileInfoB.allocOffsetRegisters(writer, kernel)
-
-    prologue = generate_load_params(EXPORT_LOAD_PARAMS)
-    module = lraTileAssignment(writer, kernel)
-    lra_asm = f"{prologue}\n{module}"
-    return lra_asm, writer, tileInfoA, tileInfoB, kernel
-
-
-def export_register(writer, test_asm, export_reg, is_sgpr, cfg, tmp_path, label):
-    """Generate export kernel, assemble, run, return per-thread u32 results."""
-    epilogue, allocated = generate_export_epilogue(writer, export_reg, is_sgpr)
-    kernel_asm = generate_kernel_asm(f"{test_asm}\n{epilogue}", writer, EXPORT_ARGS)
-    for v in allocated:
-        writer.vgprPool.checkIn(v)
-
-    raw = assemble_and_run(kernel_asm, tmp_path, label, NUM_THREADS * 4,
-                           scalars=(cfg.stride_a, cfg.stride_b))
-    return struct.unpack(f"{NUM_THREADS}I", raw)
 
 
 # ---- Reference implementations ----

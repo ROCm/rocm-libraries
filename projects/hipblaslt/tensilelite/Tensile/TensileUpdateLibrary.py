@@ -25,8 +25,11 @@
 from . import LibraryIO
 from .Tensile import addCommonArguments, argUpdatedGlobalParameters
 
-from .Common import assignGlobalParameters, print1, restoreDefaultGlobalParameters, HR, \
-                    globalParameters, architectureMap, ensurePath, ParallelMap, __version__
+from .Common.GlobalParameters import assignGlobalParameters, restoreDefaultGlobalParameters, globalParameters, __version__
+from .Common.Utilities import print1, ensurePath
+from .Common.Constants import HR
+from .Common.Architectures import architectureMap
+from .Common.Parallel import ParallelMap
 
 import argparse
 import copy

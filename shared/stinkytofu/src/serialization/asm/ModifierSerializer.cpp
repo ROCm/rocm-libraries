@@ -24,6 +24,7 @@
 #include "ModifierSerializer.hpp"
 
 #include <climits>
+#include <cstdint>
 #include <cstdlib>
 #include <string>
 #include <unordered_map>
@@ -147,9 +148,18 @@ bool serializeVisit(const FLATModifiers& mod, std::ostream& os) {
     return true;
 }
 
-// GLOBALModifiers
+// GLOBALModifiers — offset plus the temporal hint / cache scope used by
+// global_prefetch_b8 (gl2-prefetch). Serialized so the .stir IR roundtrip
+// preserves the hint/scope; TH_NONE / SCOPE_NONE are omitted.
 bool serializeVisit(const GLOBALModifiers& mod, std::ostream& os) {
-    os << ", mod.global = { offset = " << mod.offset << " }";
+    os << ", mod.global = { offset = " << mod.offset;
+    if (hasTemporalHint(mod.th)) {
+        os << ", th = \"" << toString(mod.th) << "\"";
+    }
+    if (mod.scope != MUBUFScope::SCOPE_NONE) {
+        os << ", scope = \"" << toString(mod.scope) << "\"";
+    }
+    os << " }";
     return true;
 }
 
@@ -161,6 +171,22 @@ bool serializeVisit(const MUBUFModifiers& mod, std::ostream& os) {
        << ", nt = " << (mod.nt ? "true" : "false") << ", lds = " << (mod.lds ? "true" : "false");
     if (mod.scope != MUBUFScope::SCOPE_NONE) {
         os << ", scope = \"" << toString(mod.scope) << "\"";
+    }
+    if (hasTemporalHint(mod.th)) {
+        os << ", th = \"" << toString(mod.th) << "\"";
+    }
+    os << " }";
+    return true;
+}
+
+// CacheScopeModifiers — dedicated cache-scope carrier for SOPP-format memory
+// fences (global_wb / global_inv on gfx1250+). Serialized so the .stir IR
+// roundtrip preserves the scope token; otherwise a fence written out and
+// reparsed would silently lose its scope (worst-case fence-scope demotion).
+bool serializeVisit(const CacheScopeModifiers& mod, std::ostream& os) {
+    os << ", mod.cache_scope = {";
+    if (mod.scope != MUBUFScope::SCOPE_NONE) {
+        os << " scope = \"" << toString(mod.scope) << "\"";
     }
     os << " }";
     return true;
@@ -379,6 +405,13 @@ bool serializeVisit(const MemTokenData& mod, std::ostream& os) {
     return true;
 }
 
+// LabelData
+bool serializeVisit(const LabelData& mod, std::ostream& os) {
+    os << ", mod.label = { label = \"" << mod.label << "\""
+       << ", alignment = " << static_cast<int>(mod.alignment) << " }";
+    return true;
+}
+
 template <typename ModifierType, typename... Rest, unsigned Dummy = 0>
 bool serializeVisit(const Modifier& mod, std::ostream& os) {
     if (auto* modifier = dyn_cast<ModifierType>(&mod)) {
@@ -390,10 +423,10 @@ bool serializeVisit(const Modifier& mod, std::ostream& os) {
 
 bool ModifierSerializer::serialize(const Modifier& mod, std::ostream& os) {
     return serializeVisit<DSModifiers, FLATModifiers, GLOBALModifiers, MUBUFModifiers,
-                          SMEMModifiers, SDWAModifiers, DPPModifiers, VOP3Modifiers, VOP3PModifiers,
-                          True16Modifiers, EXEC, VCC, SWaitCntData, SWaitTensorCntData,
-                          SWaitStoreCntData, SDelayAluData, SWaitAluData, MFMAModifiers,
-                          MatrixFmtModifiers, MemTokenData>(mod, os);
+                          CacheScopeModifiers, SMEMModifiers, SDWAModifiers, DPPModifiers,
+                          VOP3Modifiers, VOP3PModifiers, True16Modifiers, EXEC, VCC, SWaitCntData,
+                          SWaitTensorCntData, SWaitStoreCntData, SDelayAluData, SWaitAluData,
+                          MFMAModifiers, MatrixFmtModifiers, MemTokenData, LabelData>(mod, os);
 }
 
 /*
@@ -415,14 +448,19 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
             FLATModifiers(getInt(fields, "offset12", 0), getBool(fields, "glc", false),
                           getBool(fields, "slc", false), getBool(fields, "lds", false)));
     } else if (attrKey == "mod.global") {
-        inst->addModifier(GLOBALModifiers(getInt(fields, "offset", 0)));
+        inst->addModifier(GLOBALModifiers(getInt(fields, "offset", 0),
+                                          parseTemporalHint(getStr(fields, "th", "")),
+                                          parseMUBUFScope(getStr(fields, "scope", ""))));
     } else if (attrKey == "mod.mubuf") {
         MUBUFScope scope = parseMUBUFScope(getStr(fields, "scope", ""));
+        TemporalHint th = parseTemporalHint(getStr(fields, "th", ""));
         inst->addModifier(
             MUBUFModifiers(getBool(fields, "offen", false), getInt(fields, "offset12", 0),
                            getBool(fields, "glc", false), getBool(fields, "slc", false),
                            getBool(fields, "nt", false), getBool(fields, "lds", false), false,
-                           false, false, false, scope));
+                           false, false, false, scope, th));
+    } else if (attrKey == "mod.cache_scope") {
+        inst->addModifier(CacheScopeModifiers(parseMUBUFScope(getStr(fields, "scope", ""))));
     } else if (attrKey == "mod.smem") {
         inst->addModifier(SMEMModifiers(getBool(fields, "glc", false), getBool(fields, "nv", false),
                                         getInt(fields, "offset", 0)));
@@ -452,7 +490,7 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
         mod.reuseB = getBool(fields, "reuseB", false);
 
         // Neg bits
-        if (fields.count("negLo")) {
+        if (fields.contains("negLo")) {
             auto loVec = getIntVector(fields, "negLo");
             auto hiVec = getIntVector(fields, "negHi");
             mod.negBits.numSrcs =
@@ -466,11 +504,11 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
         inst->addModifier(mod);
     } else if (attrKey == "mod.matrix_fmt") {
         MatrixFmtModifiers mod;
-        if (fields.count("fmtA")) mod.fmtA = parseMatrixFmt(getStr(fields, "fmtA"));
-        if (fields.count("fmtB")) mod.fmtB = parseMatrixFmt(getStr(fields, "fmtB"));
-        if (fields.count("scaleFmtA"))
+        if (fields.contains("fmtA")) mod.fmtA = parseMatrixFmt(getStr(fields, "fmtA"));
+        if (fields.contains("fmtB")) mod.fmtB = parseMatrixFmt(getStr(fields, "fmtB"));
+        if (fields.contains("scaleFmtA"))
             mod.scaleFmtA = parseMatrixScaleFmt(getStr(fields, "scaleFmtA"));
-        if (fields.count("scaleFmtB"))
+        if (fields.contains("scaleFmtB"))
             mod.scaleFmtB = parseMatrixScaleFmt(getStr(fields, "scaleFmtB"));
         inst->addModifier(mod);
     } else if (attrKey == "mod.delayalu") {
@@ -480,8 +518,8 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
             if (s == "TRANS") return SDelayAluData::InstType::TRANS;
             return SDelayAluData::InstType::NO_DEP;
         };
-        bool hasInstId1 = getBool(fields, "hasInstId1", false) || fields.count("instid1Type") ||
-                          fields.count("instSkip") || fields.count("instid1Distance");
+        bool hasInstId1 = getBool(fields, "hasInstId1", false) || fields.contains("instid1Type") ||
+                          fields.contains("instSkip") || fields.contains("instid1Distance");
         if (hasInstId1) {
             inst->addModifier(
                 SDelayAluData(toInstType(getStr(fields, "instid0Type", "NO_DEP")),
@@ -518,9 +556,12 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
                                            static_cast<uint8_t>(getInt(fields, "fi", 0))));
         }
     } else if (attrKey == "mod.memtoken") {
-        if (fields.count("tokens")) {
+        if (fields.contains("tokens")) {
             inst->addModifier(MemTokenData(getIntVector(fields, "tokens")));
         }
+    } else if (attrKey == "mod.label") {
+        inst->addModifier(LabelData(getStr(fields, "label", ""),
+                                    static_cast<uint16_t>(getInt(fields, "alignment", 1))));
     }
     // mod.sdwa, mod.vop3p, mod.true16: no deserialize support yet
 }

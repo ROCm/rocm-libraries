@@ -26,7 +26,7 @@ TEST(TestMiopenEngineManager, ReturnsApplicableEngineIds)
 {
     SKIP_IF_NO_DEVICES();
 
-    std::set<std::unique_ptr<
+    const std::set<std::unique_ptr<
         hipdnn_plugin_sdk::IEngine<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>>>
         engines;
 
@@ -45,7 +45,7 @@ TEST(TestMiopenEngineManager, ReturnsApplicableEngineIds)
     manager.addEngine(std::move(mockEngine1));
     manager.addEngine(std::move(mockEngine2));
 
-    MockGraph mockGraph;
+    const MockGraph mockGraph;
     HipdnnMiopenHandle dummyHandle;
     auto applicable = manager.getApplicableEngineIds(dummyHandle, mockGraph);
 
@@ -57,7 +57,7 @@ TEST(TestMiopenEngineManager, ReturnsMultipleApplicableEngineIds)
 {
     SKIP_IF_NO_DEVICES();
 
-    std::set<std::unique_ptr<
+    const std::set<std::unique_ptr<
         hipdnn_plugin_sdk::IEngine<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>>>
         engines;
 
@@ -76,7 +76,7 @@ TEST(TestMiopenEngineManager, ReturnsMultipleApplicableEngineIds)
     manager.addEngine(std::move(mockEngine1));
     manager.addEngine(std::move(mockEngine2));
 
-    MockGraph mockGraph;
+    const MockGraph mockGraph;
     HipdnnMiopenHandle dummyHandle;
     auto applicable = manager.getApplicableEngineIds(dummyHandle, mockGraph);
 
@@ -89,7 +89,7 @@ TEST(TestMiopenEngineManager, ReturnsNoApplicableEngineIds)
 {
     SKIP_IF_NO_DEVICES();
 
-    std::set<std::unique_ptr<
+    const std::set<std::unique_ptr<
         hipdnn_plugin_sdk::IEngine<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>>>
         engines;
 
@@ -108,7 +108,7 @@ TEST(TestMiopenEngineManager, ReturnsNoApplicableEngineIds)
     manager.addEngine(std::move(mockEngine1));
     manager.addEngine(std::move(mockEngine2));
 
-    MockGraph mockGraph;
+    const MockGraph mockGraph;
     HipdnnMiopenHandle dummyHandle;
     auto applicable = manager.getApplicableEngineIds(dummyHandle, mockGraph);
 
@@ -140,7 +140,7 @@ TEST(TestMiopenEngineManager, ReturnsEngineDetails)
 
     manager.addEngine(std::move(mockEngine));
 
-    MockGraph mockGraph;
+    const MockGraph mockGraph;
     HipdnnMiopenHandle dummyHandle = {};
     hipdnnPluginConstData_t details;
     manager.getEngineDetails(dummyHandle, mockGraph, 1, details);
@@ -156,7 +156,7 @@ TEST(TestMiopenEngineManager, ThrowsOnInvalidEngineId)
     hipdnn_plugin_sdk::EngineManager<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>
         manager;
 
-    MockGraph mockGraph;
+    const MockGraph mockGraph;
     hipdnnPluginConstData_t engineDetails;
 
     HipdnnMiopenHandle dummyHandle = {};
@@ -173,16 +173,17 @@ TEST(TestMiopenEngineManager, GetWorkspaceSizeReturnsCorrectValue)
 
     auto mockEngine = std::make_unique<MockEngine>();
     EXPECT_CALL(*mockEngine, id()).WillRepeatedly(Return(42));
-    HipdnnMiopenHandle dummyHandle = {};
-    MockGraph mockGraph;
-    MockEngineConfig mockEngineConfig;
+    const HipdnnMiopenHandle dummyHandle = {};
+    const MockGraph mockGraph;
+    const MockEngineConfig mockEngineConfig;
     EXPECT_CALL(mockEngineConfig, engineId()).WillRepeatedly(Return(42));
     EXPECT_CALL(*mockEngine, getMaxWorkspaceSize(::testing::_, ::testing::_, ::testing::_))
         .WillOnce(Return(4096));
 
     manager.addEngine(std::move(mockEngine));
 
-    size_t workspaceSize = manager.getMaxWorkspaceSize(dummyHandle, mockGraph, mockEngineConfig);
+    const size_t workspaceSize
+        = manager.getMaxWorkspaceSize(dummyHandle, mockGraph, mockEngineConfig);
     EXPECT_EQ(workspaceSize, 4096);
 }
 
@@ -190,11 +191,12 @@ TEST(TestMiopenEngineManager, GetWorkspaceSizeThrowsOnInvalidEngineId)
 {
     SKIP_IF_NO_DEVICES();
 
-    hipdnn_plugin_sdk::EngineManager<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>
-        manager;
-    HipdnnMiopenHandle dummyHandle = {};
-    MockGraph mockGraph;
-    MockEngineConfig mockEngineConfig;
+    const hipdnn_plugin_sdk::
+        EngineManager<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>
+            manager;
+    const HipdnnMiopenHandle dummyHandle = {};
+    const MockGraph mockGraph;
+    const MockEngineConfig mockEngineConfig;
     EXPECT_CALL(mockEngineConfig, engineId()).WillRepeatedly(Return(999));
 
     EXPECT_THROW(manager.getMaxWorkspaceSize(dummyHandle, mockGraph, mockEngineConfig),
@@ -214,9 +216,9 @@ TEST(TestMiopenEngineManager, InitializeExecutionContextCallsEngine)
     hipdnn_plugin_sdk::EngineManager<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>
         manager;
     manager.addEngine(std::move(mockEngine));
-    HipdnnMiopenHandle dummyHandle = {};
-    MockGraph mockGraph;
-    MockEngineConfig mockEngineConfig;
+    const HipdnnMiopenHandle dummyHandle = {};
+    const MockGraph mockGraph;
+    const MockEngineConfig mockEngineConfig;
     ON_CALL(mockEngineConfig, engineId()).WillByDefault(Return(7));
     EXPECT_CALL(mockEngineConfig, engineId()).Times(testing::AnyNumber()); // Uninteresting call
     MockHipdnnMiopenContext execCtx;
@@ -229,11 +231,12 @@ TEST(TestMiopenEngineManager, InitializeExecutionContextThrowsOnInvalidEngineId)
     SKIP_IF_NO_DEVICES();
 
     MockHipdnnMiopenContext execCtx;
-    hipdnn_plugin_sdk::EngineManager<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>
-        manager;
-    HipdnnMiopenHandle dummyHandle = {};
-    MockGraph mockGraph;
-    MockEngineConfig mockEngineConfig;
+    const hipdnn_plugin_sdk::
+        EngineManager<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>
+            manager;
+    const HipdnnMiopenHandle dummyHandle = {};
+    const MockGraph mockGraph;
+    const MockEngineConfig mockEngineConfig;
 
     EXPECT_CALL(mockEngineConfig, engineId()).Times(testing::AnyNumber()); // Uninteresting call
     EXPECT_THROW(

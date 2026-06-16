@@ -194,7 +194,8 @@ public:
 
 private:
     std::shared_ptr<EnginePluginResourceManager> _rm;
-    hipdnnPluginConstData_t _engineDetailsData;
+    int64_t _engineId = 0;
+    hipdnnPluginConstData_t _engineDetailsData{nullptr, 0};
 };
 
 // A class to manage engine execution context lifecycle

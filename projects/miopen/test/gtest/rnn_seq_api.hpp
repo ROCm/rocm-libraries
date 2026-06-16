@@ -238,7 +238,6 @@ struct verify_rnn_api_base
         case miopenRNNRELU: ss << " relu "; break;
         case miopenLSTM: ss << " lstm "; break;
         case miopenGRU: ss << " gru "; break;
-        default: break;
         }
 
         auto& inLens = input.desc.GetLengths();
@@ -364,7 +363,7 @@ struct rnn_ref
                           std::vector<T>& workSpace,
                           bool nohx) const = 0;
 
-    virtual ~rnn_ref(){};
+    virtual ~rnn_ref() {};
 };
 
 template <class T>
@@ -1823,7 +1822,7 @@ protected:
         seqTensor<T> dy(output);
 
         const auto num_hidden_layers = numLayers * ((dirMode != 0) ? 2 : 1);
-        tensor<T> hx                 = [=]() {
+        tensor<T> hx                 = [=, this]() {
             if(pytorchTensorDescriptorFormat)
                 return tensor<T>(std::vector{num_hidden_layers, batchSize, hiddenSize, 1, 1});
             else

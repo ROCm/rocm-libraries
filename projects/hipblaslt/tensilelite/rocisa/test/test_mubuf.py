@@ -90,7 +90,7 @@ def _mubuf_off_asm() -> str:
         sgprWorkGroup=(1, 1, 0),
         vgprWorkItem=0,
         flatWorkGroupSize=64,
-        preloadKernArgs=False,
+        numSgprPreload=0,
     )
 
     stinky_module_options = {"OptLevel": 0}
@@ -135,7 +135,7 @@ def _mubuf_scope_asm() -> str:
         sgprWorkGroup=(1, 1, 0),
         vgprWorkItem=0,
         flatWorkGroupSize=64,
-        preloadKernArgs=False,
+        numSgprPreload=0,
     )
 
     st = rocisa.toStinkyTofuModule(
@@ -242,7 +242,7 @@ def _mubuf_zero_soffset_asm() -> str:
         sgprWorkGroup=(1, 1, 0),
         vgprWorkItem=0,
         flatWorkGroupSize=64,
-        preloadKernArgs=False,
+        numSgprPreload=0,
     )
 
     st = rocisa.toStinkyTofuModule(

@@ -178,6 +178,8 @@ namespace rocsparse
     ROCSPARSE_DEVICE_ILF void insert_pair_rxc(
         I key, T val, int row, int col, I* __restrict__ table, T* __restrict__ data, I empty)
     {
+        static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
+                      "HASHSIZE must be a power of two.");
         static constexpr uint32_t BLOCKDIM_SQ = BLOCKDIM * BLOCKDIM;
 
         // Compute hash
@@ -251,6 +253,11 @@ namespace rocsparse
                                            bool                 mul,
                                            bool                 add)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
+                      "HASHSIZE must be a power of two.");
         // Lane id
         int lid = hipThreadIdx_x & (WFSIZE - 1);
         // Wavefront id
@@ -519,6 +526,11 @@ namespace rocsparse
                                               bool                 mul,
                                               bool                 add)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
+                      "HASHSIZE must be a power of two.");
         // Lane id
         int lid = hipThreadIdx_x & (WFSIZE - 1);
         // Wavefront id

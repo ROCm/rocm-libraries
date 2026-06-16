@@ -13,6 +13,55 @@ TEST(TestTypes, HeuristicModeConversion)
               hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK);
 }
 
+TEST(TestTypes, BehaviorNoteFromBackend)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(fromHipdnnBehaviorNote(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION),
+              BehaviorNote::RUNTIME_COMPILATION);
+    EXPECT_EQ(fromHipdnnBehaviorNote(HIPDNN_BEHAVIOR_NOTE_REQUIRES_LAYOUT_TRANSFORM),
+              BehaviorNote::REQUIRES_LAYOUT_TRANSFORM);
+    EXPECT_EQ(fromHipdnnBehaviorNote(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE),
+              BehaviorNote::SUPPORTS_GRAPH_CAPTURE);
+    EXPECT_EQ(fromHipdnnBehaviorNote(HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY),
+              BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY);
+    EXPECT_EQ(fromHipdnnBehaviorNote(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION),
+              BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
+
+    constexpr hipdnnBackendBehaviorNote_t UNKNOWN_NOTE = HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT + 1;
+    EXPECT_EQ(fromHipdnnBehaviorNote(UNKNOWN_NOTE), static_cast<BehaviorNote>(UNKNOWN_NOTE));
+}
+
+TEST(TestTypes, IsKnownBehaviorNote)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_TRUE(isKnownBehaviorNote(BehaviorNote::RUNTIME_COMPILATION));
+    EXPECT_TRUE(isKnownBehaviorNote(BehaviorNote::REQUIRES_LAYOUT_TRANSFORM));
+    EXPECT_TRUE(isKnownBehaviorNote(BehaviorNote::SUPPORTS_GRAPH_CAPTURE));
+    EXPECT_TRUE(isKnownBehaviorNote(BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY));
+    EXPECT_TRUE(isKnownBehaviorNote(BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION));
+    EXPECT_FALSE(isKnownBehaviorNote(static_cast<BehaviorNote>(HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT)));
+}
+
+TEST(TestTypes, BehaviorNoteToString)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_STREQ(to_string(BehaviorNote::RUNTIME_COMPILATION), "RUNTIME_COMPILATION");
+    EXPECT_STREQ(to_string(BehaviorNote::REQUIRES_LAYOUT_TRANSFORM), "REQUIRES_LAYOUT_TRANSFORM");
+    EXPECT_STREQ(to_string(BehaviorNote::SUPPORTS_GRAPH_CAPTURE), "SUPPORTS_GRAPH_CAPTURE");
+    EXPECT_STREQ(to_string(BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY),
+                 "EXTERNAL_LIBRARY_DEPENDENCY");
+    EXPECT_STREQ(to_string(BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION),
+                 "SUPPORTS_EXECUTION_PLAN_SERIALIZATION");
+    EXPECT_STREQ(to_string(static_cast<BehaviorNote>(-1)), "unknown");
+
+    std::ostringstream oss;
+    oss << BehaviorNote::SUPPORTS_GRAPH_CAPTURE;
+    EXPECT_EQ(oss.str(), "SUPPORTS_GRAPH_CAPTURE");
+}
+
 TEST(TestTypes, GetDataTypeEnumFromType)
 {
     using namespace hipdnn_frontend;

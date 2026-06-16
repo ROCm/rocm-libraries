@@ -13,7 +13,9 @@ using hipdnn_data_sdk::types::fp4_e2m1;
 using hipdnn_data_sdk::types::fp6_e2m3;
 using hipdnn_data_sdk::types::fp6_e3m2;
 using hipdnn_data_sdk::types::fp8_e4m3;
+using hipdnn_data_sdk::types::fp8_e4m3_fnuz;
 using hipdnn_data_sdk::types::fp8_e5m2;
+using hipdnn_data_sdk::types::fp8_e5m2_fnuz;
 using hipdnn_data_sdk::types::fp8_e8m0;
 using hipdnn_data_sdk::types::half;
 }
@@ -50,9 +52,17 @@ constexpr auto datatypeToNative()
     {
         return fp8_e4m3{};
     }
+    else if constexpr(DT == DataType::FP8_E4M3_FNUZ)
+    {
+        return fp8_e4m3_fnuz{};
+    }
     else if constexpr(DT == DataType::FP8_E5M2)
     {
         return fp8_e5m2{};
+    }
+    else if constexpr(DT == DataType::FP8_E5M2_FNUZ)
+    {
+        return fp8_e5m2_fnuz{};
     }
     else if constexpr(DT == DataType::FP8_E8M0)
     {
@@ -87,7 +97,9 @@ inline std::variant<float,
                     fp8_e8m0,
                     fp4_e2m1,
                     fp6_e2m3,
-                    fp6_e3m2>
+                    fp6_e3m2,
+                    fp8_e4m3_fnuz,
+                    fp8_e5m2_fnuz>
     datatypeToNativeVariant(hipdnn_flatbuffers_sdk::data_objects::DataType type)
 {
     using DataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
@@ -127,6 +139,12 @@ inline std::variant<float,
     case DataType::FP6_E3M2:
         return fp6_e3m2{};
         break;
+    case DataType::FP8_E4M3_FNUZ:
+        return fp8_e4m3_fnuz{};
+        break;
+    case DataType::FP8_E5M2_FNUZ:
+        return fp8_e5m2_fnuz{};
+        break;
     default:
         throw std::runtime_error("Error: Invalid type");
     }
@@ -159,9 +177,17 @@ constexpr hipdnn_flatbuffers_sdk::data_objects::DataType nativeTypeToDataType()
     {
         return hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3;
     }
+    else if constexpr(std::is_same_v<T, fp8_e4m3_fnuz>)
+    {
+        return hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ;
+    }
     else if constexpr(std::is_same_v<T, fp8_e5m2>)
     {
         return hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2;
+    }
+    else if constexpr(std::is_same_v<T, fp8_e5m2_fnuz>)
+    {
+        return hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2_FNUZ;
     }
     else if constexpr(std::is_same_v<T, fp8_e8m0>)
     {

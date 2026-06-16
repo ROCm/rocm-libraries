@@ -13,11 +13,15 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Load CI environment
+      id: ci-env
+      uses: ./.github/actions/ci-env
+
     - name: Checkout TheRock
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         repository: ROCm/TheRock
-        ref: 1372b2541cd0991c3b53d2134abb1a6fcd7ec792 # 2026-05-08
+        ref: ${{ steps.ci-env.outputs.therock-ref }}
         path: TheRock
         sparse-checkout: build_tools
 

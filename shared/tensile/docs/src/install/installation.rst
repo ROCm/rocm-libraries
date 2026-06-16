@@ -44,7 +44,7 @@ Install OS dependencies
 
       apt-get install libtinfo-dev      # If using the YAML backend
 
-3. Install build tools. For additional installation methods for the latest versions of CMake, see the `CMake installation <https://cliutils.gitlab.io/modern-cmake/chapters/intro/installing.html>`_ page.
+3. Install build tools. For additional installation methods for the latest versions of CMake, see the `CMake installation <https://cliutils.gitlab.io/modern-cmake/installing/>`_ page.
 
    .. code-block::
 

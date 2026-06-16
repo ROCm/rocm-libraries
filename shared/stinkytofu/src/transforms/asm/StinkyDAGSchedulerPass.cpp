@@ -22,6 +22,8 @@
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
 
+#include <climits>
+
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/BBIndexAnalysis.hpp"
 #include "stinkytofu/analysis/LoopAnalysis.hpp"
@@ -53,14 +55,6 @@ static void dumpDAGGraph(const std::vector<std::unordered_set<unsigned>>& dagGra
         std::cerr << "\n";
     }
     std::cerr << "\n\n";
-}
-
-static bool hasLdsPseudoRegs(const StinkyInstruction& inst) {
-    for (const StinkyRegister& r : inst.getSrcRegs())
-        if (r.isRegister() && r.reg.type == RegType::LDS) return true;
-    for (const StinkyRegister& r : inst.getDestRegs())
-        if (r.isRegister() && r.reg.type == RegType::LDS) return true;
-    return false;
 }
 
 // --- Region scheduler (does NOT move fences) ---
@@ -262,7 +256,7 @@ static void scheduleRegionWithMovableSideEffects(
             std::vector<DsInfo*> group;
             auto flushGroup = [&]() {
                 if (group.empty()) return;
-                bool asc = groupAsc.count(prevAff) ? groupAsc[prevAff] : true;
+                bool asc = groupAsc.contains(prevAff) ? groupAsc[prevAff] : true;
                 if (!asc) {
                     // Reverse operand type order but keep DAG id order within
                     // each type. Sort by (srcReg descending, idx ascending).
@@ -327,22 +321,6 @@ static void scheduleRegionWithMovableSideEffects(
             }
         }
     }
-}
-
-static bool hasSideEffect(const StinkyInstruction& inst) {
-    if (isGlobalMemStore(inst) || isBranch(inst) || isWaitCnt(inst) || isHasSideEffect(inst)) {
-        return true;
-    }
-
-    // Barriers and memory ops without LDS pseudo-registers (no MemTokenData
-    // assigned) must be treated conservatively as non-movable side effects to
-    // preserve strict ordering. When LDS pseudo-regs are present, ordering is
-    // enforced by the DAG via def-use edges, so they are safe to schedule.
-    if ((isBarrier(inst) || isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst)) &&
-        !hasLdsPseudoRegs(inst)) {
-        return true;
-    }
-    return false;
 }
 
 // Schedule the instructions in the given IRList.
@@ -451,7 +429,7 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
                 for (auto it = bb->begin(); it != bb->end(); ++it) {
                     auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
                     if (!inst) continue;
-                    if (isWMMA(*inst) || isSWMMA(*inst)) wmmaIndex[inst] = idx++;
+                    if (isMatrixInstruction(*inst)) wmmaIndex[inst] = idx++;
                 }
             }
         }

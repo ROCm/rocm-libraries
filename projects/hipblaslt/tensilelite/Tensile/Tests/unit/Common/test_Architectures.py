@@ -236,22 +236,6 @@ def test_filterLogicFilesByPredicates_no_match(mock_logic_file):
         result = filterLogicFilesByPredicates(logicFiles, predicateMap)
         assert len(result) == 0
 
-@pytest.mark.xfail
-def test_filterLogicFilesByPredicates_match_emulation_ids(mock_logic_file):
-    logicFiles = ["file1.yaml"]
-    predicateMap = {
-        "gfx950": {
-            "id=75a0": set(),
-            "fallback": set()
-        }
-    }
-    
-    with patch("Tensile.Common.Architectures._extractArchInfo") as mock_extract:
-        mock_extract.return_value = ArchInfo("test", "gfx950", {"id=0049"}, None)
-        result = filterLogicFilesByPredicates(logicFiles, predicateMap)
-        assert len(result) == 1
-        assert "file1.yaml" in result
-
 def test_splitArchsFromPredicates_with_variants():
     archSpecs = ["gfx950[id=75a0]", "gfx906"]
     archs, variants = splitArchsFromPredicates(archSpecs)

@@ -6,6 +6,7 @@ This document describes the environment variables and runtime configuration opti
 
 - [Environment Variables](#environment-variables)
   - [Plugin Discovery](#plugin-discovery)
+  - [Heuristic Policy Selection](#heuristic-policy-selection)
   - [Logging Variables](#logging-variables)
   - [MIOpen Plugin Logging](#miopen-plugin-logging)
   - [Test Configuration](#test-configuration)
@@ -66,6 +67,62 @@ export HIPDNN_HEURISTIC_PLUGIN_DIR=/opt/rocm/lib/hipdnn/plugins/heuristics
 - Only plugins with API version matching the Heuristic API major version will be loaded
 - Each heuristic plugin must provide a unique policy ID and policy name
 - See the [Plugin Development Guide](PluginDevelopment.md) for details on creating heuristic plugins
+
+### Heuristic Policy Selection
+
+hipDNN's heuristic framework selects an engine for each graph by running a configurable list of selection policies (the *outer loop*). The following variables tune that loop and the behavior of two built-in policies.
+
+#### HIPDNN_HEUR_POLICY_ORDER
+
+Overrides the heuristic policy order for the outer loop. Read by every `EngineHeuristicDescriptor::finalize()` call.
+
+| Value      | Description                                                |
+|------------|------------------------------------------------------------|
+| (unset)    | Use the descriptor's `HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT` attribute if set; otherwise fall back to the built-in default `[SelectionHeuristic::Config, SelectionHeuristic::StaticOrdering]`. |
+| `<list>`   | Comma-separated tokens consulted in the order written. Each token is either a policy name (hashed via `policyNameToId`) or a raw decimal int64 policy ID. Whitespace around tokens is trimmed; empty tokens are skipped. |
+
+This variable has the **highest priority** — it overrides both the descriptor attribute and the built-in default.
+
+**Example:**
+```bash
+# By name
+export HIPDNN_HEUR_POLICY_ORDER="SelectionHeuristic::Config,SelectionHeuristic::StaticOrdering"
+
+# By raw ID (or mixed names + IDs)
+export HIPDNN_HEUR_POLICY_ORDER="-1234567890123456789,SelectionHeuristic::StaticOrdering"
+```
+
+#### HIPDNN_HEUR_CONFIG_PATH
+
+Path to a JSON rule file consumed by the `SelectionHeuristic::Config` built-in policy. The file maps convolution op + tensor-shape patterns to a preferred engine name; the policy walks conv-like nodes in the serialized graph and, on the first matching rule, reorders the candidate engines so the chosen one runs first. Re-read on every `Finalize` invocation — there is no process-wide cache.
+
+| Value      | Description                                                |
+|------------|------------------------------------------------------------|
+| (unset)    | The `SelectionHeuristic::Config` policy declines, allowing subsequent policies to run. |
+| `<path>`   | Absolute or working-directory-relative path to a JSON rule file. |
+
+If the file is missing, unreadable, fails to parse, no rule matches, or the matched engine name is not among the current candidates, the policy declines (so the outer loop continues with the next policy).
+
+**Example:**
+```bash
+export HIPDNN_HEUR_CONFIG_PATH=/etc/hipdnn/engine_overrides.json
+```
+
+#### HIPDNN_HEUR_FALLBACK_ENGINE_ORDER
+
+Replaces the built-in ordering used by `SelectionHeuristic::StaticOrdering`. When set, **only** engines named here are eligible — anything else is dropped from the candidate list.
+
+| Value      | Description                                                |
+|------------|------------------------------------------------------------|
+| (unset)    | Use the built-in static ordering (MIOpen-first, deterministic engines last). |
+| `<list>`   | Comma-separated engine names, applied in the order written. Whitespace is trimmed and empty tokens are skipped. |
+
+Engine names that are not among the current candidates are silently skipped. If no listed engine matches any candidate, the policy declines so the outer loop can try the next plugin.
+
+**Example:**
+```bash
+export HIPDNN_HEUR_FALLBACK_ENGINE_ORDER="MIOpenConvolutionFwdEngine,HipBLASLtMatmulEngine"
+```
 
 ### Logging Variables
 

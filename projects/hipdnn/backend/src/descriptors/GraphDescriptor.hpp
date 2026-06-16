@@ -54,6 +54,9 @@ private:
     // Preferred engine ID, empty when unset.
     std::optional<int64_t> _preferredEngineId = std::nullopt;
 
+    // Opt-in flag for overridable tensor shapes (RFC 0008).
+    bool _isOverrideShapeEnabled = false;
+
     // Optional human-readable name for the graph, empty when unset.
     std::string _name;
 
@@ -134,6 +137,7 @@ public:
         createFromJsonGraph(GraphDescriptor& desc, const char* jsonGraph, size_t jsonByteSize);
 
     virtual hipdnnHandle_t getHandle() const;
+    virtual bool isOverrideShapeEnabled() const;
 
     static hipdnnBackendDescriptorType_t getStaticType();
 

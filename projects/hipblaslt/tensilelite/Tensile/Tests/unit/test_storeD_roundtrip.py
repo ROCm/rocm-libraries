@@ -22,8 +22,6 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
 
-from hip import hip  # type: ignore
-
 from unittest.mock import MagicMock
 
 from rocisa.code import Module, TextBlock
@@ -39,7 +37,6 @@ from Tensile.Components.Subtile.Kernel import TileInfo, CD_F32
 
 from gpu_test_helpers import (
     TileConfig,
-    HAS_GFX950,
     GFX_TARGET,
     WAVESIZE,
     NUM_THREADS,
@@ -47,11 +44,13 @@ from gpu_test_helpers import (
     generate_kernel_asm,
     assemble_and_run,
     assemble_kernel,
+    hip,
     hip_check,
     init_rocisa,
+    requires_gpu,
 )
 
-pytestmark = pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
+pytestmark = requires_gpu
 
 # ---------------------------------------------------------------------------
 # Test configurations: (mt_a, mt_b, depth_u)
@@ -210,7 +209,6 @@ def _build_store_kernel(cfg, mi_wave_group=None, use_bf16=False):
     kernel["LocalSplitU"] = 1
     kernel["StoreRemapVectorWidth"] = 0
     kernel["SourceSwap"] = False
-    kernel["BAddrInterleave"] = False
     kernel["EnableMatrixInstruction"] = True
     kernel["AdaptiveGemm"] = 0
     kernel["AdaptiveGemmGSUA"] = 0
@@ -292,6 +290,7 @@ def _build_store_kernel(cfg, mi_wave_group=None, use_bf16=False):
     kernel["ProblemType"]["ActivationNoGuard"] = True
     kernel["ProblemType"]["ActivationComputeDataType"] = compute_dtype
     kernel["ProblemType"]["HighPrecisionAccumulate"] = use_bf16
+    kernel["ProblemType"]["StochasticRounding"] = False
     kernel["ProblemType"]["UseInitialStridesCD"] = False
     kernel["ProblemType"]["UseInitialStridesAB"] = False
     kernel["ProblemType"]["Fp16AltImpl"] = False
@@ -462,7 +461,7 @@ def _build_sgprs_for_test(writer):
       s[24:27] = SrdInput (4-aligned)
     """
     # s[0:3] reserved: s[0:1] = kernarg ptr, s[2:3] = padding to 4-align SrdD
-    writer.sgprPool.checkOut(4)
+    writer.sgprPool.checkOut(4, tag="_build_sgprs_for_test_sgprs")
 
     # SrdD: 4 sgprs for buffer descriptor (must be 4-aligned for buffer_store)
     srd_d_base = writer.sgprPool.checkOut(4, "SrdD")
@@ -507,7 +506,7 @@ def _build_sgprs_for_test(writer):
     writer.sgprs["Alpha"] = alpha                # s[20:21]
 
     # Pad to 4-align SrdInput (s[22:23] = padding, SrdInput starts at s[24])
-    writer.sgprPool.checkOut(2)
+    writer.sgprPool.checkOut(2, tag="_build_sgprs_for_test_pad_to_4_align_SrdInput")
 
     # SrdInput: input buffer descriptor (4-aligned)
     srd_in_base = writer.sgprPool.checkOut(4, "SrdInput")
@@ -1970,6 +1969,17 @@ CLOAD_OOB_CASES = [
     (_BETA_CFG, 64, 48),   # wave-1-N partially OOB → hits guard
     (_BETA_CFG, 32, 32),   # M and N both OOB → hits guard
     (_BETA_CFG, 32, 48),   # M OOB + N partial → hits guard
+    # storeAlign8: M%8==0 (but M%16!=0) takes NonEdge with partial-LG exec mask.
+    # C-load SrdC+2 gate operates at 16-row MMA tile granularity — verify no OOB.
+    (_BETA_CFG, 8,  64),   # M=8:  1 valid LG in wave-0, wave-1 fully OOB
+    (_BETA_CFG, 24, 64),   # M=24: partial within wave-0 (8 valid rows in 2nd tile)
+    (_BETA_CFG, 40, 64),   # M=40: wave-0 full, wave-1 partial (8 valid rows)
+    (_BETA_CFG, 56, 64),   # M=56: wave-0 full, wave-1 partial (24 valid rows)
+    (_BETA_CFG, 8,  13),   # M=8 + arbitrary N=13: both M and N partial
+    (_BETA_CFG, 40, 5),    # M=40 + N=5: partial M + very small N
+    (_BETA_CFG, 64, 3),    # full M + tiny N=3: arbitrary N boundary
+    (_BETA_CFG, 64, 13),   # full M + N=13: arbitrary N partial
+    (_BETA_CFG, 8,  1),    # M=8 + N=1: minimal partial in both dims
 ]
 
 

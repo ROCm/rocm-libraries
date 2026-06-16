@@ -50,6 +50,10 @@ namespace rocsparse
                                                     I* __restrict__ bsr_row_ptr,
                                                     J* __restrict__ bsr_col_ind)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        static_assert(WFSIZE % BLOCKDIM == 0, "WFSIZE must be a multiple of BLOCKDIM.");
         int bid = hipBlockIdx_x;
         int tid = hipThreadIdx_x;
 
@@ -175,6 +179,9 @@ namespace rocsparse
                                                 I* __restrict__ bsr_row_ptr,
                                                 J* __restrict__ bsr_col_ind)
     {
+        static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
+                      "BLOCKSIZE must be a power of two.");
+        static_assert(BLOCKSIZE % BLOCKDIM == 0, "BLOCKSIZE must be a multiple of BLOCKDIM.");
         int bid = hipBlockIdx_x;
         int tid = hipThreadIdx_x;
 
@@ -304,6 +311,8 @@ namespace rocsparse
                                J* __restrict__ temp2,
                                T* __restrict__ temp3)
     {
+        static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
+                      "BLOCKSIZE must be a power of two.");
         J block_id = hipBlockIdx_x;
         J lane_id  = hipThreadIdx_x;
 

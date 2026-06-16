@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,51 @@
 #include "rocsparse_enum.hpp"
 #include "testing.hpp"
 #include "testing_csrilu0.hpp"
+#include <memory>
+
+// Check that the product of the ILU factors L*U matches the original matrix A.
+template <typename T>
+static void check_bsr_lu(const T* __restrict__ factors,
+                         const T* __restrict__ orig,
+                         rocsparse_int       bd,
+                         rocsparse_direction direction,
+                         floating_data_t<T>  tol)
+{
+    const size_t bds = static_cast<size_t>(bd);
+    auto         LU  = std::make_unique<T[]>(bds * bds);
+    for(rocsparse_int i = 0; i < bd; i++)
+    {
+        for(rocsparse_int j = 0; j < bd; j++)
+        {
+            T sum = static_cast<T>(0);
+            for(rocsparse_int k = 0; k < bd; k++)
+            {
+                T Lik;
+                if(k > i)
+                    Lik = static_cast<T>(0);
+                else if(k == i)
+                    Lik = static_cast<T>(1);
+                else
+                    Lik = (direction == rocsparse_direction_row) ? factors[bds * i + k]
+                                                                 : factors[bds * k + i];
+
+                T Ukj;
+                if(k > j)
+                    Ukj = static_cast<T>(0);
+                else
+                    Ukj = (direction == rocsparse_direction_row) ? factors[bds * k + j]
+                                                                 : factors[bds * j + k];
+
+                sum = sum + Lik * Ukj;
+            }
+            if(direction == rocsparse_direction_row)
+                LU[bds * i + j] = sum;
+            else
+                LU[bds * j + i] = sum;
+        }
+    }
+    near_check_general<T>(bd, bd, orig, bd, LU.get(), bd, tol);
+}
 
 template <typename T>
 void testing_bsrilu0_bad_arg(const Arguments& arg)
@@ -410,6 +455,28 @@ void testing_bsrilu0(const Arguments& arg)
 
             hbsr_val_gold.near_check(hbsr_val_1);
             hbsr_val_gold.near_check(hbsr_val_2);
+
+            if(Mb == 1)
+            {
+                // Mb == 1: ILU(0) is exact LU. Verify L*U = A independently for CPU and GPU,
+                // instead of comparing them against each other.
+                const rocsparse_int      bd = block_dim;
+                const floating_data_t<T> tol
+                    = static_cast<floating_data_t<T>>(bd) * get_near_check_tol<T>(arg);
+
+                check_bsr_lu<T>(
+                    hbsr_val_gold.data(), hbsr_val_orig.data(), bd, direction, tol); // CPU
+                check_bsr_lu<T>(hbsr_val_1.data(),
+                                hbsr_val_orig.data(),
+                                bd,
+                                direction,
+                                tol); // GPU pointer mode host
+                check_bsr_lu<T>(hbsr_val_2.data(),
+                                hbsr_val_orig.data(),
+                                bd,
+                                direction,
+                                tol); // GPU pointer mode device
+            }
         }
         else
         {

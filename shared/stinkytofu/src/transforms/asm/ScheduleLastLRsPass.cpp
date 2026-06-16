@@ -117,7 +117,7 @@ void scheduleFinalLocalReadWithLatency(BasicBlock& bb, PassContext& passCtx) {
         if (labelData != nullptr) {
             const std::string& labelName = labelData->label;
             auto pos = labelName.find("label_LoopBeginL");
-            if (pos != std::string::npos && pos == 0) {
+            if (pos == 0) {
                 regionEnd = rit;
                 break;
             }

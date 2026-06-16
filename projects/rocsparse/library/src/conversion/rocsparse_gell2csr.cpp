@@ -98,7 +98,7 @@ rocsparse_status rocsparse::gell2csr_nnz(rocsparse_handle          handle,
         }
 
         // LCOV_EXCL_START
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
@@ -143,7 +143,7 @@ rocsparse_status rocsparse::gell2csr_nnz(rocsparse_handle          handle,
         }
 
         // LCOV_EXCL_START
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
@@ -155,7 +155,7 @@ rocsparse_status rocsparse::gell2csr_nnz(rocsparse_handle          handle,
     }
 
     // LCOV_EXCL_START
-    case rocsparse_indextype_u16:
+    case deprecated_rocsparse_indextype_u16:
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
     }
@@ -233,7 +233,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
                 CALL(float, int32_t, int64_t);
             }
             // LCOV_EXCL_START
-            case rocsparse_indextype_u16:
+            case deprecated_rocsparse_indextype_u16:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -256,7 +256,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
                 CALL(float, int64_t, int64_t);
             }
             // LCOV_EXCL_START
-            case rocsparse_indextype_u16:
+            case deprecated_rocsparse_indextype_u16:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -267,7 +267,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
             // LCOV_EXCL_STOP
         }
         // LCOV_EXCL_START
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
@@ -295,7 +295,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
                 CALL(rocsparse_float_complex, int32_t, int64_t);
             }
             // LCOV_EXCL_START
-            case rocsparse_indextype_u16:
+            case deprecated_rocsparse_indextype_u16:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -318,7 +318,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
                 CALL(rocsparse_float_complex, int64_t, int64_t);
             }
             // LCOV_EXCL_START
-            case rocsparse_indextype_u16:
+            case deprecated_rocsparse_indextype_u16:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -329,7 +329,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
             // LCOV_EXCL_STOP
         }
         // LCOV_EXCL_START
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
@@ -357,7 +357,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
                 CALL(double, int32_t, int64_t);
             }
             // LCOV_EXCL_START
-            case rocsparse_indextype_u16:
+            case deprecated_rocsparse_indextype_u16:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -380,7 +380,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
                 CALL(double, int64_t, int64_t);
             }
             // LCOV_EXCL_START
-            case rocsparse_indextype_u16:
+            case deprecated_rocsparse_indextype_u16:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -391,7 +391,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
             // LCOV_EXCL_STOP
         }
         // LCOV_EXCL_START
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
@@ -419,7 +419,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
                 CALL(rocsparse_double_complex, int32_t, int64_t);
             }
             // LCOV_EXCL_START
-            case rocsparse_indextype_u16:
+            case deprecated_rocsparse_indextype_u16:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -442,7 +442,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
                 CALL(rocsparse_double_complex, int64_t, int64_t);
             }
             // LCOV_EXCL_START
-            case rocsparse_indextype_u16:
+            case deprecated_rocsparse_indextype_u16:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -453,7 +453,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
             // LCOV_EXCL_STOP
         }
         // LCOV_EXCL_START
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }

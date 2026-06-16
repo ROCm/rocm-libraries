@@ -23,7 +23,8 @@ The hipSOLVER repository for ROCm 7.0.2 and earlier is located at `<https://gith
 
   .. grid-item-card:: Install
 
-    * :doc:`Installation guide <./installation/install>`
+    * :doc:`Install hipSOLVER <./installation/install>`
+    * :doc:`Build from source <./installation/build>`
 
   .. grid-item-card:: How to
 
