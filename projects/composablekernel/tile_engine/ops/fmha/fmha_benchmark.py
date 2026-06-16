@@ -120,9 +120,15 @@ def _compute_result(
     splits_tag = f"  [ns={ns}]" if api_family == "splitkv" else ""
     display_name = f"{config.name}{splits_tag}"
     gpu_tag = f"  [GPU{gpu_id}]" if gpu_id is not None else ""
+    # WithinTol% is only meaningful when verification ran (ref + output present);
+    # otherwise show a placeholder so the column stays aligned.
+    if ref is not None and output is not None:
+        wt_str = f"{within_tol_pct:>10.4f}"
+    else:
+        wt_str = f"{'-':>10}"
     display_line = (
         f"  {display_name:<105} {time_ms:>10.3f}"
-        f" {tflops:>10.2f} {max_err:>10.2e} {status:>6}{gpu_tag}"
+        f" {tflops:>10.2f} {max_err:>10.2e} {wt_str} {status:>6}{gpu_tag}"
     )
 
     result_dict = {
@@ -597,9 +603,9 @@ def main():
         print(f"\n  Problem [{prob_idx}]: {prob_str}")
         print(
             f"  {'Kernel':<105} {'Time(ms)':>10} {'TFLOPS':>10}"
-            f" {'MaxErr':>10} {'Status':>6}"
+            f" {'MaxErr':>10} {'WithinTol%':>10} {'Status':>6}"
         )
-        print(f"  {'-' * 145}")
+        print(f"  {'-' * 156}")
 
         _BIAS_INT = {"no": 0, "bias": 1, "alibi": 2}
         _QSCALE_INT = {
@@ -707,7 +713,7 @@ def main():
                 if err:
                     splits_tag = f"  [ns={ns}]" if api_family == "splitkv" else ""
                     print(
-                        f"  {config.name}{splits_tag:<105} {'---':>10} {'---':>10} {'---':>10} GPU{gpu_id} {err[:15]}"
+                        f"  {config.name}{splits_tag:<105} {'---':>10} {'---':>10} {'---':>10} {'---':>10} GPU{gpu_id} {err[:15]}"
                     )
                     continue
 
@@ -751,7 +757,7 @@ def main():
                     shutil.rmtree(data_dir, ignore_errors=True)
                     if err:
                         print(
-                            f"  {config.name:<105} {'---':>10} {'---':>10} {'---':>10} {err[:20]:>6}"
+                            f"  {config.name:<105} {'---':>10} {'---':>10} {'---':>10} {'---':>10} {err[:20]:>6}"
                         )
                         continue
                 else:
