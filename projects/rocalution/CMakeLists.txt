@@ -243,6 +243,7 @@ if(BUILD_CODE_COVERAGE)
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
     COMMAND ./clients/staging/rocalution-test --gtest_filter=\"\${GTEST_FILTER}\"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running rocalution coverage analysis"
     )
 
   add_dependencies(coverage_analysis rocalution)
@@ -254,6 +255,7 @@ if(BUILD_CODE_COVERAGE)
   add_custom_target(coverage_output
     DEPENDS coverage_analysis
     COMMAND mkdir -p lcoverage
+    COMMENT "Preparing coverage output directory"
     )
 
   #
@@ -263,9 +265,10 @@ if(BUILD_CODE_COVERAGE)
     COMMAND lcov --directory . --base-directory . --capture -o lcoverage/raw_main_coverage.info
     COMMAND lcov --remove lcoverage/raw_main_coverage.info "'${CMAKE_SOURCE_DIR}/src/utils/*'" "'${CMAKE_SOURCE_DIR}/src/base/host/host_io.*'" "'${CMAKE_SOURCE_DIR}/clients/*'" "'${CMAKE_SOURCE_DIR}/build/*'" "'/opt/*'" "'/usr/*'" -o lcoverage/main_coverage.info
     COMMAND genhtml lcoverage/main_coverage.info --output-directory lcoverage
+    COMMENT "Generating HTML coverage report"
     )
 
-  add_custom_target(coverage DEPENDS coverage_output)
+  add_custom_target(coverage DEPENDS coverage_output COMMENT "Building coverage report")
 
   #
   # Coverage cleanup
@@ -273,5 +276,6 @@ if(BUILD_CODE_COVERAGE)
   add_custom_target(coverage_cleanup
     COMMAND find ${CMAKE_BINARY_DIR} -name *.gcda -delete
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Cleaning up coverage data files"
     )
 endif()

@@ -232,6 +232,6 @@ if(WIN32)
     C:/Windows/System32/libomp140*.dll
   )
   foreach(file_i ${third_party_dlls})
-    add_custom_command(TARGET rocalution-test POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy ${file_i} ${PROJECT_BINARY_DIR}/staging/)
+    add_custom_command(TARGET rocalution-test POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy ${file_i} ${PROJECT_BINARY_DIR}/staging/ COMMENT "Copying ${file_i} to staging")
   endforeach(file_i)
 endif()
