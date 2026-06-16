@@ -189,6 +189,10 @@ def main():
     parser.add_argument("--shard_dir", default="shards",
                         help="Directory for shard CSVs")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--min-tile", type=int, default=32,
+                        help="Minimum GEMM dimension (M, N, K_gemm) required for a shape to be "
+                             "tileable. Matches the smallest entry in the sweep's tile-size set "
+                             "(kTileSizes[] in ConvCandidateSweep.cpp). Default: 32")
     args = parser.parse_args()
 
     # Load and deduplicate
@@ -205,6 +209,27 @@ def main():
               f"{len(seen) - before} new unique shapes", file=sys.stderr)
 
     print(f"Total unique shapes before sampling: {len(all_shapes)}", file=sys.stderr)
+
+    # Drop shapes where any GEMM dimension is smaller than the sweep's minimum tile size.
+    #   M      = N * Ho * Wo   (output pixels per image)
+    #   N_gemm = K             (output channels)
+    #   K_gemm = (C/G) * R * S (input channels × filter area, per group)
+    min_tile = args.min_tile
+    tileable = []
+    for r in all_shapes:
+        N, G, C, K, Hi, Wi, Y, X, sh, sw, ph, pw = r
+        Ho = (Hi + 2 * ph - Y) // sh + 1
+        Wo = (Wi + 2 * pw - X) // sw + 1
+        M      = N * Ho * Wo
+        N_gemm = K
+        K_gemm = (C // G) * Y * X
+        if M >= min_tile and N_gemm >= min_tile and K_gemm >= min_tile:
+            tileable.append(r)
+    n_dropped = len(all_shapes) - len(tileable)
+    print(f"Dropped {n_dropped} untileable shapes (M/N/K_gemm < {min_tile}); "
+          f"{len(tileable)} remain", file=sys.stderr)
+    all_shapes = tileable
+
     print_stats(all_shapes, "Before sampling")
 
     if args.target is None or len(all_shapes) <= args.target:
