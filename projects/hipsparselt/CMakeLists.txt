@@ -276,8 +276,6 @@ rocm_export_targets(
     DEPENDS
     PACKAGE
     hip
-    PACKAGE
-    origami
 )
 
 if(HIPSPARSELT_ENABLE_CLIENT)

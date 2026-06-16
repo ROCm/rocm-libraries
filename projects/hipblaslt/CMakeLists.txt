@@ -271,13 +271,6 @@ if(NOT ROCM_LIBS_SUPERBUILD)
     endif()
 endif()
 
-# INTERFACE library that owns the public hipblaslt API headers (the in-tree
-# `library/include` subtree plus its build-tree counterpart, where
-# `hipblaslt-export.h` and `hipblaslt-version.h` are generated). Routing the
-# include directories through a target lets consumers pick them up via the
-# build graph rather than via `target_include_directories(<tgt> BEFORE
-# PRIVATE .../library/include ...)`. `hip::host` is exposed as an INTERFACE
-# link because the in-tree headers `#include <hip/...>`.
 add_library(hipblaslt-headers INTERFACE)
 add_library(hipblaslt::headers ALIAS hipblaslt-headers)
 target_include_directories(hipblaslt-headers
@@ -430,7 +423,6 @@ if(HIPBLASLT_ENABLE_HOST)
         TARGETS roc::hipblaslt roc::tensilelite-host
         DEPENDS PACKAGE hip
         DEPENDS PACKAGE ${hipblas_target}
-        DEPENDS PACKAGE origami
         NAMESPACE roc::
     )
 
