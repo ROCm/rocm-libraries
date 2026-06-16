@@ -89,6 +89,7 @@ namespace TensileLite
 
             public:
                 variable_value() = default;
+                explicit variable_value(std::any v) : m_value(std::move(v)) {}
 
                 bool empty() const
                 {

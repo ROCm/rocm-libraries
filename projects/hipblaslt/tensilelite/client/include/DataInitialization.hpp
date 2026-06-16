@@ -892,6 +892,7 @@ namespace TensileLite
                 m_currentGemmProblem
                     = dynamic_cast<ContractionProblemGemm const*>(problem);
                 m_currentSolution = nullptr;
+                m_batchInit       = false;
             }
             virtual void postProblem() override {}
             virtual void preSolution(ContractionSolution* const solution) override
@@ -1183,8 +1184,9 @@ namespace TensileLite
             std::shared_ptr<void>                 m_workspacePristine;
             std::vector<ConstDataInitProperties>  m_cdata;
 
-            bool m_cpuInit = false;
-            bool m_gpuInit = false;
+            bool m_cpuInit   = false;
+            bool m_gpuInit   = false;
+            bool m_batchInit = false;
 
             // Multi-buffer ring control
             bool   m_hasAltBuffers    = false;

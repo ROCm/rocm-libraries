@@ -3492,6 +3492,13 @@ namespace TensileLite
                 kind = hipMemcpyHostToDevice;
             }
 
+            if(!m_batchInit)
+            {
+                ScopedTimer t("async_reset_batchedinit");
+                initializeGPUBatchedInputs(problem, asyncStream);
+                m_batchInit = true;
+            }
+
             if(m_gpuInit && m_curBoundsCheck == BoundsCheckMode::Disable
                && !m_problemDependentData && !needSwizzle && !needMXSwizzle)
             {
@@ -3559,10 +3566,6 @@ namespace TensileLite
                         }
                 }
                 m_gpuInit = true;
-                {
-                    ScopedTimer t("async_reset_batchedinit");
-                    initializeGPUBatchedInputs(problem, asyncStream);
-                }
             }
 
             if(m_cpuPtrs.empty())
