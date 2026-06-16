@@ -1855,7 +1855,7 @@ void predict_unit1(union Entry* data, double* result) {
           if ( LIKELY( !(data[22].missing != -1) || (data[22].fvalue <= (double)7168.000000000000909) ) ) {
             if ( UNLIKELY( !(data[30].missing != -1) || (data[30].fvalue <= (double)48.00000000000000711) ) ) {
               if ( LIKELY( !(data[14].missing != -1) || (data[14].fvalue <= (double)6.255632162094117099) ) ) {
-                result[0] += -0.0016377992667558979;
+                result[0] += -0.00163779926675592;
               } else {
                 result[0] += -0.07337397829627682;
               }
@@ -2938,7 +2938,7 @@ void predict_unit1(union Entry* data, double* result) {
     }
   } else {
     if ( LIKELY( !(data[29].missing != -1) || (data[29].fvalue <= (double)192.0000000000000284) ) ) {
-      result[0] += 0.0022148089778173488;
+      result[0] += 0.0022148089778173466;
     } else {
       if ( LIKELY( !(data[27].missing != -1) || (data[27].fvalue <= (double)4.500000000000000888) ) ) {
         if ( UNLIKELY( !(data[15].missing != -1) || (data[15].fvalue <= (double)3.067782521247864214) ) ) {
@@ -3137,7 +3137,7 @@ void predict_unit1(union Entry* data, double* result) {
                 } else {
                   if ( LIKELY( !(data[39].missing != -1) || (data[39].fvalue <= (double)1.500000000000000222) ) ) {
                     if ( LIKELY( !(data[45].missing != -1) || (data[45].fvalue <= (double)3.500000000000000444) ) ) {
-                      result[0] += -0.02072454612065412;
+                      result[0] += -0.020724546120654268;
                     } else {
                       result[0] += -0.06384905073504893;
                     }
@@ -4013,7 +4013,7 @@ void predict_unit1(union Entry* data, double* result) {
             if ( UNLIKELY( !(data[13].missing != -1) || (data[13].fvalue <= (double)2.970085620880127397) ) ) {
               result[0] += 0.1665931992111325;
             } else {
-              result[0] += 0.012542106421095867;
+              result[0] += 0.012542106421097394;
             }
           } else {
             result[0] += -0.010859493641544137;
@@ -4240,7 +4240,7 @@ void predict_unit1(union Entry* data, double* result) {
     if ( UNLIKELY( !(data[34].missing != -1) || (data[34].fvalue <= (double)3.000000000000000444) ) ) {
       if ( LIKELY( !(data[24].missing != -1) || (data[24].fvalue <= (double)257681260544.0000305) ) ) {
         if ( UNLIKELY( !(data[23].missing != -1) || (data[23].fvalue <= (double)1900.000000000000227) ) ) {
-          result[0] += 0.08862158494846967;
+          result[0] += 0.08862158494849433;
         } else {
           result[0] += 0.0034590991509048257;
         }
@@ -4456,18 +4456,18 @@ void predict_unit1(union Entry* data, double* result) {
     }
   } else {
     if ( UNLIKELY( !(data[39].missing != -1) || (data[39].fvalue <= (double)1.500000000000000222) ) ) {
-      if ( UNLIKELY( !(data[23].missing != -1) || (data[23].fvalue <= (double)2252.000000000000455) ) ) {
+      if ( LIKELY( !(data[19].missing != -1) || (data[19].fvalue <= (double)100.0000000000000142) ) ) {
+        result[0] += 0.006285211161186008;
+      } else {
         if ( UNLIKELY( !(data[15].missing != -1) || (data[15].fvalue <= (double)1.994492053985595925) ) ) {
           if ( LIKELY( !(data[42].missing != -1) || (data[42].fvalue <= (double)24.00000000000000355) ) ) {
-            result[0] += 0.04419083054649307;
+            result[0] += 0.044190830546489826;
           } else {
             result[0] += -0.11227150061991559;
           }
         } else {
           result[0] += -0.07218004759626305;
         }
-      } else {
-        result[0] += 0.006285211161186014;
       }
     } else {
       if ( UNLIKELY( !(data[14].missing != -1) || (data[14].fvalue <= (double)3.357691764831543413) ) ) {
@@ -4739,7 +4739,7 @@ void predict_unit1(union Entry* data, double* result) {
       if ( LIKELY( !(data[3].missing != -1) || (data[3].fvalue <= (double)5.172047138214112216) ) ) {
         if ( LIKELY( !(data[30].missing != -1) || (data[30].fvalue <= (double)96.00000000000001421) ) ) {
           if ( LIKELY( !(data[2].missing != -1) || (data[2].fvalue <= (double)4.284418344497681552) ) ) {
-            result[0] += 0.0013314250525007605;
+            result[0] += 0.0013314250525007618;
           } else {
             result[0] += 0.042651917571646554;
           }
