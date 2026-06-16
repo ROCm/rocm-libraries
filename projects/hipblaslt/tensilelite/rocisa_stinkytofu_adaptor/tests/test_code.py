@@ -1224,16 +1224,14 @@ class TestCollectLogicalInsts(unittest.TestCase):
         self.assertEqual(outer._collect_logical_insts(), ["0", "1", "2", "3"])
 
     def test_skips_dummy_instruction_classes(self):
-        # As of Step 3 most instruction shims (e.g. ``SBarrier``) remain
-        # dummies whose ``__getattr__`` returns a no-op that yields
-        # ``None``. The collector must skip them rather than smuggling
-        # ``None`` into the logical IR module. We pick ``SBarrier`` here
-        # specifically because ``VMovB32`` was promoted to a real shim
-        # in Step 3; using a still-dummy class keeps this regression
-        # guard meaningful as more shims light up.
-        from rocisa_stinkytofu_adaptor.instruction import SBarrier  # noqa: WPS433
+        # Most instruction shims (e.g. ``SEndpgm``) remain dummies whose
+        # ``__getattr__`` returns a no-op that yields ``None``. The
+        # collector must skip them rather than smuggling ``None`` into the
+        # logical IR module. We pick ``SEndpgm`` here because it has no
+        # logical IR entry and remains a dummy.
+        from rocisa_stinkytofu_adaptor.instruction import SEndpgm  # noqa: WPS433
         m = Module()
-        m.add(SBarrier())
+        m.add(SEndpgm())
         self.assertEqual(m._collect_logical_insts(), [])
 
     def test_textblocks_and_logical_mixed(self):

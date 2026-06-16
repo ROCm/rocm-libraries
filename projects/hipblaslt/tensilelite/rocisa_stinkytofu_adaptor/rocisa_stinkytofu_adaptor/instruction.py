@@ -923,6 +923,75 @@ SOrSaveExecB64 = _make_scalar_unary_class("SOrSaveExecB64", "s_or_saveexec_b64",
 
 
 # ==========================================================================
+# SBarrier -- workgroup barrier (Phase 6 Step 2).
+# ==========================================================================
+#
+# source: rocisa/rocisa/include/instruction/common.hpp:1470-1548
+# logicalIR: ``SBarrier`` in LogicalInstructionDefs.inc (0 srcs, no dest).
+#
+# Native rocisa SBarrier has complex logic (separate signal/wait, cluster
+# barrier) gated on HasNewBarrier/HasClusterBarrier caps.  For gfx1250 the
+# logical IR lowering pass handles the arch-specific emit; we only bridge
+# the constructor parameters through.
+
+
+class SBarrier(Instruction):
+    """``s_barrier`` shim with stinkytofu left-path bridge."""
+
+    __slots__ = ("separate", "wait_flag", "cluster_barrier")
+
+    def __init__(self, separate: bool = False, wait: bool = False,
+                 clusterBarrier: bool = False, comment: str = ""):
+        super().__init__(InstType.INST_NOTYPE, comment)
+        self.separate = bool(separate)
+        self.wait_flag = bool(wait)
+        self.cluster_barrier = bool(clusterBarrier)
+        self.setInst("s_barrier")
+
+    def getParams(self):
+        return []
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return []
+
+    def toString(self) -> str:
+        return self.formatWithComment(self.instStr)
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        return _st.SBarrier(self.comment)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = SBarrier(
+            separate=self.separate, wait=self.wait_flag,
+            clusterBarrier=self.cluster_barrier, comment=self.comment,
+        )
+        memo[id(self)] = dup
+        return dup
+
+
+# ==========================================================================
+# SGetRegB32 / SSetRegB32 / SSetRegIMM32B32 -- HW register access (Step 2).
+# ==========================================================================
+#
+# source: rocisa/rocisa/include/instruction/common.hpp:1990-2054
+# logicalIR: 1 src, hasDest=true, "Scalar Control"
+
+# logicalIR: SGetRegB32
+SGetRegB32 = _make_scalar_unary_class("SGetRegB32", "s_getreg_b32", InstType.INST_B32)
+# logicalIR: SSetRegB32
+SSetRegB32 = _make_scalar_unary_class("SSetRegB32", "s_setreg_b32", InstType.INST_B32)
+# logicalIR: SSetRegIMM32B32
+SSetRegIMM32B32 = _make_scalar_unary_class("SSetRegIMM32B32", "s_setreg_IMM32_b32", InstType.INST_B32)
+
+
+# ==========================================================================
 # SMemLoadInstruction / SLoadB* -- scalar memory loads (Phase A).
 # ==========================================================================
 #
@@ -1303,8 +1372,7 @@ SSExtI16toI32 = make_dummy_class(f"{_P}.SSExtI16toI32")
 # SOrSaveExecB32 — real class (see Scalar ALU section above)
 # SOrSaveExecB64 — real class (see Scalar ALU section above)
 SSetPrior = make_dummy_class(f"{_P}.SSetPrior")
-# logicalIR: SBarrier  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-SBarrier = make_dummy_class(f"{_P}.SBarrier")
+# SBarrier — real class (see SBarrier section above)
 SDcacheWb = make_dummy_class(f"{_P}.SDcacheWb")
 GlobalWb = make_dummy_class(f"{_P}.GlobalWb")
 GlobalInv = make_dummy_class(f"{_P}.GlobalInv")
@@ -1313,12 +1381,9 @@ VNop = make_dummy_class(f"{_P}.VNop")
 SEndpgm = make_dummy_class(f"{_P}.SEndpgm")
 SSleep = make_dummy_class(f"{_P}.SSleep")
 SSetVgprMsb = make_dummy_class(f"{_P}.SSetVgprMsb")
-# logicalIR: SGetRegB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-SGetRegB32 = make_dummy_class(f"{_P}.SGetRegB32")
-# logicalIR: SSetRegB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-SSetRegB32 = make_dummy_class(f"{_P}.SSetRegB32")
-# logicalIR: SSetRegIMM32B32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-SSetRegIMM32B32 = make_dummy_class(f"{_P}.SSetRegIMM32B32")
+# SGetRegB32 — real class (see Scalar Control section above)
+# SSetRegB32 — real class (see Scalar Control section above)
+# SSetRegIMM32B32 — real class (see Scalar Control section above)
 _SWaitCnt = make_dummy_class(f"{_P}._SWaitCnt")
 _SWaitCntVscnt = make_dummy_class(f"{_P}._SWaitCntVscnt")
 _SWaitStorecnt = make_dummy_class(f"{_P}._SWaitStorecnt")

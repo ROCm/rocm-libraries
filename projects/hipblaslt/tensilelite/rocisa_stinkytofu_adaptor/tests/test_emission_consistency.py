@@ -743,5 +743,22 @@ class TestSLShiftLeft1AddU32(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
+# ===========================================================================
+# Scalar Control (Phase 6 Step 2) -- SGetRegB32
+# ===========================================================================
+
+
+class TestSGetRegB32(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_getreg_b32 s0, s1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SGetRegB32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SGetRegB32(dst=sgpr(0), src=sgpr(1), comment="hwid"))
+    """)
+
+
 if __name__ == "__main__":
     unittest.main()

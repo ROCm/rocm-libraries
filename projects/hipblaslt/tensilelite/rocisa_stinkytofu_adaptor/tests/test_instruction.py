@@ -90,6 +90,8 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     SAndSaveExecB32,
     SAndSaveExecB64,
     SAShiftRightI32,
+    SBarrier,
+    SGetRegB32,
     SLShiftLeftB32,
     SLShiftRightB32,
     SLShiftLeftB64,
@@ -527,6 +529,7 @@ try:
         hasattr(_stinky, name)
         for name in ("Register", "vgpr", "VMovB32", "SNop",
                      "SAddU32", "SAndB32", "SLShiftLeftB32",
+                     "SBarrier", "SGetRegB32",
                      "LogicalModule", "lower_logical_module")
     )
 except ImportError:
@@ -885,6 +888,68 @@ _SCALAR_ALU_UNARY = [
     (SOrSaveExecB32, "s_or_saveexec_b32", InstType.INST_B32),
     (SOrSaveExecB64, "s_or_saveexec_b64", InstType.INST_B64),
 ]
+
+
+# ===========================================================================
+# SBarrier / SGetRegB32 / SSetRegB32 / SSetRegIMM32B32 (Phase 6 Step 2)
+# ===========================================================================
+
+
+class TestSBarrierConstruction(unittest.TestCase):
+    """SBarrier is a zero-operand instruction with stinkytofu bridge."""
+
+    def test_default_construction(self):
+        b = SBarrier()
+        self.assertIsInstance(b, Instruction)
+        self.assertEqual(b.instStr, "s_barrier")
+        self.assertEqual(b.instType, InstType.INST_NOTYPE)
+
+    def test_with_comment(self):
+        b = SBarrier(comment="sync")
+        text = str(b)
+        self.assertIn("s_barrier", text)
+        self.assertIn("sync", text)
+
+    def test_deepcopy(self):
+        b = SBarrier(comment="x")
+        c = copy.deepcopy(b)
+        self.assertIsInstance(c, SBarrier)
+        self.assertEqual(str(c), str(b))
+
+    def test_has_to_stinky_logical(self):
+        b = SBarrier()
+        self.assertTrue(callable(getattr(b, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        m = Module()
+        m.add(SBarrier())
+        self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestSGetRegB32Construction(unittest.TestCase):
+    """SGetRegB32 is a unary scalar control instruction."""
+
+    def test_construction(self):
+        inst = SGetRegB32(dst=sgpr(0), src=sgpr(1))
+        self.assertIsInstance(inst, CommonInstruction)
+        self.assertEqual(inst.instStr, "s_getreg_b32")
+
+    def test_str(self):
+        inst = SGetRegB32(dst=sgpr(0), src=sgpr(1), comment="hwid")
+        text = str(inst)
+        self.assertIn("s_getreg_b32", text)
+        self.assertIn("s0", text)
+
+    def test_has_to_stinky_logical(self):
+        inst = SGetRegB32(dst=sgpr(0), src=sgpr(1))
+        self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        m = Module()
+        m.add(SGetRegB32(dst=sgpr(0), src=sgpr(1)))
+        self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
 class TestScalarALUBinaryConstruction(unittest.TestCase):

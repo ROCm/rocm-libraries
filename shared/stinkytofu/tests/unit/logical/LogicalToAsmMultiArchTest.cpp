@@ -666,6 +666,11 @@ static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX1250 = {
     {logical::SAndSaveExecB64, "s_and_saveexec_b64"},
     {logical::SOrSaveExecB32, "s_or_saveexec_b32"},
     {logical::SOrSaveExecB64, "s_or_saveexec_b64"},
+    // Scalar Control
+    {logical::SBarrier, "s_barrier"},
+    {logical::SGetRegB32, "s_getreg_b32"},
+    {logical::SSetRegB32, "s_setreg_b32"},
+    {logical::SSetRegIMM32B32, "s_setreg_IMM32_b32"},
 };
 
 /** Returns expected asm mnemonic for (opcode, arch) if we have one; else nullopt. */
