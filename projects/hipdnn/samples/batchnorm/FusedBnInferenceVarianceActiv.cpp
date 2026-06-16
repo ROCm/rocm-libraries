@@ -43,6 +43,21 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         .set_intermediate_data_type(computeType)
         .set_compute_data_type(computeType);
 
+    if(config.engine_id != -1)
+    {
+        graph->set_preferred_engine_id_ext(config.engine_id);
+    }
+    else if(!config.engine_name.empty())
+    {
+        if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(config.engine_name))
+        {
+            std::cerr << "Warning: Unknown engine name: " << config.engine_name << "\n";
+        }
+
+        graph->set_preferred_engine_id_ext(
+            hipdnn_data_sdk::utilities::engineNameToId(config.engine_name));
+    }
+
     auto x = createTensor({n, c, h, w}, inputType, layout);
     auto scale = createTensor({1, c, 1, 1}, computeType);
     auto bias = createTensor({1, c, 1, 1}, computeType);

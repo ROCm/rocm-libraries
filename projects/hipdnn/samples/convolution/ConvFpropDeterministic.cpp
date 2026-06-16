@@ -55,8 +55,26 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType).set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    // Deterministic engine
-    graph->set_preferred_engine_id_ext(MIOPEN_ENGINE_DETERMINISTIC_NAME);
+    if(config.engine_id != -1)
+    {
+        graph->set_preferred_engine_id_ext(config.engine_id);
+    }
+    else if(!config.engine_name.empty())
+    {
+        if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(config.engine_name))
+        {
+            std::cerr << "Warning: Unknown engine name: " << config.engine_name << "\n";
+        }
+
+        graph->set_preferred_engine_id_ext(
+            hipdnn_data_sdk::utilities::engineNameToId(config.engine_name));
+    }
+    else
+    {
+        // Default to deterministic engine if nothing specified
+        graph->set_preferred_engine_id_ext(
+            hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID);
+    }
 
     auto xAttr = createTensor({N, C, H, W}, inputType, layout);
     auto wAttr = createTensor({K, C, R, S}, inputType, layout);
@@ -87,6 +105,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     HIPDNN_FE_CHECK(graph->get_workspace_size(workspaceSize));
     const utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
 
+    // First execution
     {
         std::unordered_map<int64_t, void*> variantPack;
         variantPack[xAttr->get_uid()] = xTensor.memory().deviceData();
@@ -96,7 +115,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         HIPDNN_FE_CHECK(graph->execute(handle, variantPack, workspace.get()));
         yTensor1.memory().markDeviceModified();
     }
-
+    // Second execution with same inputs
     {
         std::unordered_map<int64_t, void*> variantPack;
         variantPack[xAttr->get_uid()] = xTensor.memory().deviceData();
@@ -112,14 +131,19 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     std::cout << "First 10 y values (run 1): ";
     for(int i = 0; i < 10; ++i)
+    {
         std::cout << static_cast<float>(y1HostPtr[i]) << " ";
+    }
     std::cout << '\n';
 
     std::cout << "First 10 y values (run 2): ";
     for(int i = 0; i < 10; ++i)
+    {
         std::cout << static_cast<float>(y2HostPtr[i]) << " ";
+    }
     std::cout << '\n';
 
+    // Verify determinism - results should be bit-exact
     bool determinismPassed = true;
     auto elementCount = getTensorElementCount(yAttr);
 
@@ -135,9 +159,13 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     }
 
     if(determinismPassed)
+    {
         std::cout << "Determinism check: PASSED (results are bit-exact)\n";
+    }
     else
+    {
         std::cout << "Determinism check: FAILED (results differ)\n";
+    }
 
     bool validationPassed = true;
 

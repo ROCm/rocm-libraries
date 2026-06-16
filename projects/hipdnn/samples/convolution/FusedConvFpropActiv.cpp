@@ -57,10 +57,19 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    // Preserve engine_id feature
     if(config.engine_id != -1)
     {
         graph->set_preferred_engine_id_ext(config.engine_id);
+    }
+    else if(!config.engine_name.empty())
+    {
+        if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(config.engine_name))
+        {
+            std::cerr << "Warning: Unknown engine name: " << config.engine_name << "\n";
+        }
+
+        graph->set_preferred_engine_id_ext(
+            hipdnn_data_sdk::utilities::engineNameToId(config.engine_name));
     }
 
     auto xAttr = createTensor({n, c, h, w}, inputType, layout);
@@ -77,6 +86,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     graph::PointwiseAttributes pointwiseAttributes;
     pointwiseAttributes.set_mode(PointwiseMode::RELU_FWD);
+    // Set values to clamp between 0.2 - 0.7
     pointwiseAttributes.set_relu_lower_clip(0.2f);
     pointwiseAttributes.set_relu_upper_clip(0.7f);
 

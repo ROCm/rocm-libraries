@@ -56,11 +56,22 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
         .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT)
-        .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+        .set_compute_data_type(
+            hipdnn_frontend::DataType::FLOAT); // MIOpen requires FLOAT compute type
 
     if(config.engine_id != -1)
     {
         graph->set_preferred_engine_id_ext(config.engine_id);
+    }
+    else if(!config.engine_name.empty())
+    {
+        if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(config.engine_name))
+        {
+            std::cerr << "Warning: Unknown engine name: " << config.engine_name << "\n";
+        }
+
+        graph->set_preferred_engine_id_ext(
+            hipdnn_data_sdk::utilities::engineNameToId(config.engine_name));
     }
 
     auto xAttr = createTensor({N, C, H, W}, inputType, layout);
@@ -76,12 +87,17 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     // Explicitly set output dimensions and strides so we can derive the bias shape.
     // The output dimensions aren't automatically populated until after graph->build_operation_graph(),
     // but we need them now to create the bias tensor with the correct per-channel shape.
-    convOutAttr->set_dim({n, k, h, w});
-    convOutAttr->set_stride(utilities::generateStrides({n, k, h, w}, layout.strideOrder));
+    const int64_t outH = (h + 2 * padH - dilH * (r - 1) - 1) / u + 1;
+    const int64_t outW = (w + 2 * padW - dilW * (s - 1) - 1) / v + 1;
 
+    convOutAttr->set_dim({n, k, outH, outW});
+    convOutAttr->set_stride(utilities::generateStrides({n, k, outH, outW}, layout.strideOrder));
+
+    // Create bias tensor with per-channel shape (1, k, 1, 1) derived from output dims
     const auto biasDims = utilities::getDerivedShape(convOutAttr->get_dim());
     auto biasAttr = createTensor(biasDims, inputType, layout);
 
+    // Add bias using pointwise ADD operation
     graph::PointwiseAttributes biasAddAttributes;
     biasAddAttributes.set_name("bias_add_node");
     biasAddAttributes.set_mode(hipdnn_frontend::PointwiseMode::ADD);
@@ -89,6 +105,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     auto biasOutAttr = graph->pointwise(convOutAttr, biasAttr, biasAddAttributes);
 
+    // Apply ReLU activation
     graph::PointwiseAttributes activationAttributes;
     activationAttributes.set_name("activation_node");
     activationAttributes.set_mode(hipdnn_frontend::PointwiseMode::RELU_FWD);
@@ -139,10 +156,12 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     {
         std::cout << "Running CPU reference validation...\n";
 
+        // Step 1: Compute convolution output
         utilities::Tensor<InputType> convRefTensor(convOutAttr->get_dim(), layout);
         hipdnn_test_sdk::utilities::CpuFpReferenceConvolution::fprop(
             xTensor, wTensor, convRefTensor, {U, V}, {DIL_H, DIL_W}, {PAD_H, PAD_W});
 
+        // Step 2: Add bias using pointwise ADD with broadcasting
         utilities::Tensor<InputType> biasRefTensor(convOutAttr->get_dim(), layout);
         hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
             hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD,
@@ -150,6 +169,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
             convRefTensor,
             biasTensor);
 
+        // Step 3: Apply ReLU activation
         utilities::Tensor<InputType> yRefTensor(yAttr->get_dim(), layout);
         hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
             hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,

@@ -39,12 +39,27 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         .set_intermediate_data_type(intermediateType)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
+    if(config.engine_id != -1)
+    {
+        graph->set_preferred_engine_id_ext(config.engine_id);
+    }
+    else if(!config.engine_name.empty())
+    {
+        if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(config.engine_name))
+        {
+            std::cerr << "Warning: Unknown engine name: " << config.engine_name << "\n";
+        }
+
+        graph->set_preferred_engine_id_ext(
+            hipdnn_data_sdk::utilities::engineNameToId(config.engine_name));
+    }
+
     auto x = createTensor({n, c, h, w}, inputType, layout);
     auto scale = createTensor({1, c, 1, 1}, intermediateType);
     auto bias = createTensor({1, c, 1, 1}, intermediateType);
     auto mean = createTensor({1, c, 1, 1}, intermediateType);
     auto variance = createTensor({1, c, 1, 1}, intermediateType);
-
+    // Epsilon is a pass-by-value scalar, not a buffer
     auto epsilonTensor = std::make_shared<graph::TensorAttributes>();
     epsilonTensor->set_value(utilities::BATCHNORM_DEFAULT_EPSILON);
 

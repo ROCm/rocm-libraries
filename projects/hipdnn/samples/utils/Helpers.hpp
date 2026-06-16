@@ -104,6 +104,7 @@ struct Config
     int engine_id = -1;
     std::string dtype;
     std::string layout;
+    std::string engine_name;
 
     std::vector<int64_t> dims;
     std::vector<int64_t> filter;
@@ -157,6 +158,15 @@ inline Config
                 exit(EXIT_FAILURE);
             }
             config.engine_id = std::stoi(argv[++i]);
+        }
+        else if(arg == "--engine-name")
+        {
+            if(i + 1 >= argc)
+            {
+                std::cerr << "--engine-name requires a value\n";
+                exit(EXIT_FAILURE);
+            }
+            config.engine_name = argv[++i];
         }
         else if(arg == "--dtype")
         {
@@ -255,6 +265,13 @@ inline Config
             printSampleHelp(argv[0], sampleType);
             exit(EXIT_FAILURE);
         }
+    }
+
+    // Prevent conflicting options
+    if(config.engine_id != -1 && !config.engine_name.empty())
+    {
+        std::cerr << "Specify either --engine-id or --engine-name, not both\n";
+        exit(EXIT_FAILURE);
     }
 
     return config;

@@ -38,6 +38,21 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         .set_intermediate_data_type(intermediateType)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
+    if(config.engine_id != -1)
+    {
+        graph->set_preferred_engine_id_ext(config.engine_id);
+    }
+    else if(!config.engine_name.empty())
+    {
+        if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(config.engine_name))
+        {
+            std::cerr << "Warning: Unknown engine name: " << config.engine_name << "\n";
+        }
+
+        graph->set_preferred_engine_id_ext(
+            hipdnn_data_sdk::utilities::engineNameToId(config.engine_name));
+    }
+
     auto dy = createTensor({n, c, h, w}, inputType, layout);
     auto x = createTensor({n, c, h, w}, inputType, layout);
     auto scale = createTensor({1, c, 1, 1}, intermediateType);
@@ -152,18 +167,21 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     std::cout << "First 10 dx values: ";
     for(int i = 0; i < 10; ++i)
+    {
         std::cout << static_cast<float>(dxHostPtr[i]) << " ";
+    }
 
     std::cout << "\nFirst 10 dscale values: ";
     for(int i = 0; i < 10; ++i)
+    {
         std::cout << static_cast<float>(dscaleHostPtr[i]) << " ";
+    }
 
     std::cout << "\nFirst 10 dbias values: ";
     for(int i = 0; i < 10; ++i)
+    {
         std::cout << static_cast<float>(dbiasHostPtr[i]) << " ";
-
-    std::cout << "\nBatch normalization backward graph execution complete for " << inputType
-              << ".\n\n";
+    }
 
     return validationPassed;
 }

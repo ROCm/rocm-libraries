@@ -54,10 +54,19 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType).set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    // Preserve engine_id feature
     if(config.engine_id != -1)
     {
         graph->set_preferred_engine_id_ext(config.engine_id);
+    }
+    else if(!config.engine_name.empty())
+    {
+        if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(config.engine_name))
+        {
+            std::cerr << "Warning: Unknown engine name: " << config.engine_name << "\n";
+        }
+
+        graph->set_preferred_engine_id_ext(
+            hipdnn_data_sdk::utilities::engineNameToId(config.engine_name));
     }
 
     auto xAttr = createTensor({n, c, h, w}, inputType, layout);
@@ -116,6 +125,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         hipdnn_test_sdk::utilities::CpuFpReferenceConvolution::fprop(
             xTensor, wTensor, yRefTensor, {U, V}, {DIL_H, DIL_W}, {PAD_H, PAD_W});
 
+        // Use dynamic tolerance calculation instead of static tolerance
         auto tolerance = hipdnn_test_sdk::utilities::conv::
             calculateConvFpropTolerance<InputType, InputType, float>(
                 0.0, 1.0, 0.0, 1.0, wAttr->get_dim());
