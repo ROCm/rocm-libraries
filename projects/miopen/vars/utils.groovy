@@ -411,8 +411,7 @@ def promoteTheRockDockerImage(String hashedImage, String fullHash)
 }
 
 
-// Appends TheRock and CK label args to dockerArgs. Only call when actually building
-// the CI image, not when the image already exists in the registry.
+// Embeds TheRock and CK git hashes as Docker image labels.
 private def embedBuildMetadata(String dockerArgs) {
     try {
         withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
@@ -528,11 +527,8 @@ def getDockerImage(Map conf=[:])
     // Append Dockerfile path after image name is generated to avoid affecting the hash.
     dockerArgs = dockerArgs + " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile "
 
-    // ensure_only: true  -- called from the Build Docker stage whose sole goal is
-    //   to guarantee the image exists in the registry. Use docker manifest inspect
-    //   (no layer download) to probe; only build if the image is absent.
-    // ensure_only: false (default) -- called from buildHipClangJob which needs the
-    //   image present in the local daemon. Pull first; build if pull fails.
+    // ensure_only: true = check registry only (manifest inspect), build if absent.
+    // ensure_only: false (default) = pull to local daemon, build if pull fails.
     def ensure_only = conf.get("ensure_only", false)
 
     def dockerImage
@@ -943,38 +939,16 @@ def sendTeamsFailureNotification(Map conf=[:]) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Auto-skip helper for "Restart from Stage" reruns
-//
-// When a user clicks "Restart Full Tests" (or any other stage) Jenkins
-// replays the pipeline from that stage.  This helper reads the previous
-// build's per-stage results using the Jenkins FlowNode Java API and returns
-// the set of sub-stage names that already passed, so the factory methods
-// below can skip them automatically - no manual flags needed.
-//
-// Why FlowNode instead of wfapi? The wfapi /describe endpoint only returns
-// top-level declarative stages in its stages[] array. Parallel sub-stages
-// created by stage('Name'){} inside parallel(Map) closures are nested in
-// stageFlowNodes and never appear at the top level. The FlowNode API walks
-// the full execution graph and sees every stage regardless of nesting.
-//
-// Return value: Set<String> of stage display names with status SUCCESS.
-// Returns an empty set when:
-//   - there is no previous build (first run)
-//   - the previous build fully succeeded (nothing to skip - rerun everything)
-//   - the FlowNode walk fails for any reason (fail-open: run all stages)
-// ---------------------------------------------------------------------------
+// Selective-rerun helpers: on "Restart from Stage", reads the previous build's
+// FlowNode graph to find stages that already passed. Uses FlowNode (not wfapi)
+// because wfapi only exposes top-level stages, not parallel sub-stages.
+// Returns empty set on first run, full success, or any error (fail-open).
 
-// Check if a stage's outcome indicates failure. Handles both:
-// 1. Stages with explicit ErrorAction (exceptions thrown in stage)
-// 2. Stages marked FAILURE via catchError() without throwing (no ErrorAction but result is FAILURE)
+// Detects failure via ErrorAction, getOutcome(), or ResultAction reflection.
 @NonCPS
 private def isStageMarkedFailed(def endNode) {
-    // Check 1: Does the end node have ErrorAction? (exceptions during execution)
     if (endNode.getAction(ErrorAction)) return true
 
-    // Check 2: Does the end node's outcome indicate FAILURE?
-    // getOutcome() returns the execution outcome and is available in most Jenkins versions
     try {
         def outcome = endNode.getOutcome()
         if (outcome != null) {
@@ -984,11 +958,9 @@ private def isStageMarkedFailed(def endNode) {
             }
         }
     } catch (Exception e) {
-        // getOutcome() not available, fall through
     }
 
-    // Check 3: Attempt ResultAction via reflection (not always available)
-    // This handles Jenkins versions where outcome isn't exposed but ResultAction exists
+    // Fallback: ResultAction via reflection
     try {
         def actions = endNode.getActions()
         def resultAction = actions.find { action ->
@@ -1001,25 +973,21 @@ private def isStageMarkedFailed(def endNode) {
             }
         }
     } catch (Exception e) {
-        // Reflection failed, continue
     }
 
     return false
 }
 
-// Walks the FlowNode execution graph of a build and returns the set of stage
-// display names that completed successfully (have both a start and end node,
-// and were not marked as failed or aborted). Aborted stages never get a
-// StepEndNode so they are naturally excluded.
+// Returns stage names that completed successfully in the given build.
 @NonCPS
 def getPassedStagesFromBuild(def rawBuild) {
     def passed = [] as Set
     def execution = rawBuild?.execution
     if (!execution) return passed
 
-    def startNodes = [:]       // nodeId -> stageName
-    def endNodes   = [:]       // startNodeId -> StepEndNode
-    def errorIds   = [] as Set // nodeIds that carry an ErrorAction
+    def startNodes = [:]
+    def endNodes   = [:]
+    def errorIds   = [] as Set
 
     def walker = new FlowGraphWalker(execution)
     def walkerIter = walker.iterator()
@@ -1051,13 +1019,7 @@ def getPassedStagesFromBuild(def rawBuild) {
     return passed
 }
 
-// Walk the restart chain and consolidate passed stages across all builds
-// in the chain (as long as commit is the same). This handles the case where:
-// - Build #9 ran, 4 stages passed, 1 failed
-// - Build #10 restarted from #9, 1 stage re-ran and passed, but then failed partway
-// - Build #11 restarts from #10
-// We should report all 4 original passed stages from #9 plus any newly passed in #10,
-// so #11 doesn't unnecessarily re-run the 3 that passed in #9.
+// Consolidates passed stages across a chain of restarts (same commit).
 @NonCPS
 def getPassedStagesAcrossRestartChain(def startBuild) {
     def consolidatedPassed = [] as Set
@@ -1067,18 +1029,15 @@ def getPassedStagesAcrossRestartChain(def startBuild) {
     while (currentBuild != null && !visited.contains(currentBuild.number)) {
         visited << currentBuild.number
 
-        // Get passed stages from this build
         def passedInThisBuild = getPassedStagesFromBuild(currentBuild)
         consolidatedPassed.addAll(passedInThisBuild)
 
-        // Walk backwards through restart chain: find if this build was a restart
         def restartCause = currentBuild?.getCauses()?.find { cause ->
             cause.getClass().getName().contains('RestartDeclarativePipeline')
         }
         if (restartCause) {
             currentBuild = restartCause.getOriginal()
         } else {
-            // Not a restart, we've reached the beginning of the chain
             break
         }
     }
@@ -1086,26 +1045,13 @@ def getPassedStagesAcrossRestartChain(def startBuild) {
     return consolidatedPassed
 }
 
-// Returns [passedStages: Set<String>, debugMsg: String] for "Restart from Stage" builds.
-// passedStages is empty on failure or when there's nothing to skip (fail-open).
-// debugMsg contains a brief explanation suitable for echo.
-//
-// Handles restart chains: if build #11 restarts #10 which restarted #9,
-// and all have the same commit, we consolidate passed stages across all of them.
-//
-// Guards:
-// 1. Must be a "Restart from Stage" trigger - other triggers don't guarantee
-//    we are re-running the same commit.
-// 2. The restarted build is identified directly from the cause object (not
-//    currentBuild.previousBuild, which may be a different commit's build).
-// 3. Commit hashes are compared via GIT_COMMIT env var set by checkoutRepo(),
-//    which is already reliable. If either is missing, run everything.
+// Returns [passedStages: Set<String>, debugMsg: String]. Consolidates passed
+// stages across restart chains. Empty set on non-restart or error (fail-open).
 @NonCPS
 def getPassedStagesFromPreviousBuild() {
     def passed = [] as Set
     def debugMsg = ""
     try {
-        // Guard 1: must be a "Restart from Stage" build.
         def restartCause = currentBuild.rawBuild?.getCauses()?.find { cause ->
             cause.getClass().getName().contains('RestartDeclarativePipeline')
         }
@@ -1114,8 +1060,6 @@ def getPassedStagesFromPreviousBuild() {
             return [passedStages: passed, debugMsg: debugMsg]
         }
 
-        // Guard 2: get the exact build being restarted from the cause object.
-        // getOriginal() returns the WorkflowRun that was restarted.
         def prevRun = restartCause.getOriginal()
         if (!prevRun) {
             debugMsg = "could not resolve restarted build, running all stages"
@@ -1126,9 +1070,6 @@ def getPassedStagesFromPreviousBuild() {
             return [passedStages: passed, debugMsg: debugMsg]
         }
 
-        // No commit guard needed: getOriginal() returns the exact build being
-        // restarted, so the commit is implicitly the same.
-        // Walk the restart chain and consolidate passed stages across all builds.
         debugMsg = "restarting from build #${prevRun.number}"
         passed = getPassedStagesAcrossRestartChain(prevRun)
     } catch (Exception e) {
@@ -1138,33 +1079,8 @@ def getPassedStagesFromPreviousBuild() {
     return [passedStages: passed, debugMsg: debugMsg]
 }
 
-// ---------------------------------------------------------------------------
-// Parallel-stage factory methods
-//
-// Each method returns a Map<String, Closure> suitable for passing directly to
-// parallel(). Moving the stage bodies here keeps the Jenkinsfile small enough
-// to stay under the Java 64 KB per-method bytecode limit.
-//
-// Convention:
-//   - 'script' context already active (called from a Jenkinsfile script{} block)
-//   - agent allocation, cleanWs(), and GitHub status updates are handled inside
-//     the closures via node() + try/finally, matching existing buildHipClangJob()
-//     behaviour.
-//   - Condition guards replace 'when { beforeAgent true }' blocks so that no
-//     agent is acquired when the condition is false.
-//   - passedStages is populated by getPassedStagesFromPreviousBuild() once per
-//     factory call; stages already in that set are skipped on restart.
-//   - Each parallel closure wraps its body in stage(name){} so that Jenkins sets
-//     env.STAGE_NAME to the sub-stage name. This is required for correct GitHub
-//     status reporting (buildHipClangJob reads env.STAGE_NAME) and for the wfapi
-//     to record the sub-stage name that getPassedStagesFromPreviousBuild() checks.
-//   - addStageIf(map, condition, name, body) adds map[name] = { stage(name){ body() } } only
-//     when condition is true, preventing false green checkmarks for disabled stages.
-// ---------------------------------------------------------------------------
-
-// Only adds the stage if condition is true. Avoids repeating the stage name
-// as both the map key and stage() argument, and prevents false green checkmarks
-// in CI for disabled stages.
+// Stage factory methods -- return Map<String,Closure> for parallel().
+// Moved here to keep the Jenkinsfile under the 64 KB bytecode limit.
 def addStageIf(Map stagesMap, boolean condition, String name, Closure body) {
     if (condition) stagesMap[name] = { stage(name) { body() } }
 }
@@ -1182,9 +1098,6 @@ def packageAndStaticCheckStages(def pipelineParams, def pipelineEnv, def rocmnod
             try {
                 withStageStatus {
                     withWorkingDirFn {
-                        // TEST SIMULATION: Deliberately fail this stage to test selective rerun logic
-                        // Remove the next 2 lines to disable this test
-                        sh 'echo "TEST SIMULATION: Failing HIP Package stage to test selective rerun" && exit 1'
                         buildHipClangJob(package_build: true, needs_gpu: false, gpu_family: "ci")
                     }
                 }

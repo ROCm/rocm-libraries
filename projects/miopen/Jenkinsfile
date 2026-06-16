@@ -126,9 +126,7 @@ def withWorkingDir(Closure body) {
     }
 }
 
-// Ensures utils is loaded without a full checkout. Used in stage steps{} blocks
-// that call utils.*Stages() directly, where a "Restart from Stage" may have
-// skipped all earlier stages so withWorkingDir was never called.
+// Loads utils if a "Restart from Stage" skipped all earlier withWorkingDir calls.
 def ensureUtils() {
     if (utils == null) {
         node(rocmnode("nogpu")) {
@@ -137,16 +135,9 @@ def ensureUtils() {
     }
 }
 
-// Posts GitHub status in post section. Handles both normal case (utils already
-// loaded) and edge case (restart from very early, utils not loaded). Only
-// allocates one node total.
-// extraActions: optional closure for additional steps (e.g., Teams notification)
-// that also require node context. Both GitHub status and extra actions run in
-// the same node to avoid allocating multiple nodes.
+// Posts GitHub status from the pipeline post section, loading utils if needed.
 def postGithubStatus(String context, String state, String description, Closure extraActions = null) {
     if (utils == null) {
-        // Edge case: utils not loaded (restart from very early). Load utils and
-        // post status in the same node to avoid allocating two nodes.
         node(rocmnode("nogpu")) {
             withWorkingDir {
                 utils.setGithubStatus(context, state, description)
@@ -156,7 +147,6 @@ def postGithubStatus(String context, String state, String description, Closure e
             }
         }
     } else {
-        // Normal case: utils already loaded. Just need node context for sh step.
         node {
             utils.setGithubStatus(context, state, description)
             if (extraActions) {
@@ -188,9 +178,7 @@ def runBuildAndSingleGtestJob(Map conf=[:])
     def build_timeout_minutes = (conf.get('build_timeout_minutes', 420) as Integer)
     def gpu_family = conf.get('gpu_family', null)
 
-    // catchError marks the stage/build FAILED on test failure but does not re-throw,
-    // so the junit step below always runs and cleanWs() in the outer finally is not
-    // disrupted by a propagating exception.
+    // catchError prevents exceptions from propagating so junit always runs.
     def buildReached = false
     catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
         withWorkingDir {
@@ -205,14 +193,12 @@ def runBuildAndSingleGtestJob(Map conf=[:])
         }
     }
 
-    // If buildHipClangJob was never reached (e.g. checkout failure inside
-    // catchError), it never posted any status. Post failure explicitly so
-    // the stage doesn't remain stuck at 'pending' on GitHub.
+    // Post failure if catchError swallowed an exception before buildHipClangJob ran.
     if (!buildReached && utils != null) {
         utils.setGithubStatus(env.STAGE_NAME, 'failure', 'Stage failed before build started')
     }
 
-    // Collect per-shard JUnit XML reports even when the build failed.
+    // Collect JUnit XML even on failure.
     def xmlGlob = "${env.MIOPEN_DIR}/build/test_results/miopen_gtest_shard*.xml"
     junit allowEmptyResults: true, testResults: xmlGlob
 }
@@ -290,11 +276,8 @@ pipeline {
     agent none
     options {
         skipDefaultCheckout()
+        // Disabled: selective-rerun needs all parallel stages to finish.
         // parallelsAlwaysFailFast()
-        // parallelsAlwaysFailFast() is intentionally disabled so that all parallel
-        // stages run to completion even when one fails. This is required for
-        // the selective-rerun logic (getPassedStagesFromPreviousBuild) to correctly
-        // skip stages that already passed on "Restart from Stage".
     }
     triggers{
         parameterizedCron(CRON_SETTINGS)
