@@ -64,10 +64,10 @@ rocsparse_status rocsparse::bsrilu0_kernel_launch(rocsparse_handle          hand
     //
     // Set done array to zero.
     //
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
-                                       0,
-                                       sizeof(int32_t) * A->rows * A->batch_count,
-                                       handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
+                                                 0,
+                                                 sizeof(int32_t) * A->rows * A->batch_count,
+                                                 handle->stream));
 
     //
     // Launch gpu kernel.

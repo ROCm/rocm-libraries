@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,11 +40,11 @@ rocsparse_status rocsparse::calculate_nnz(
     case rocsparse_indextype_i32:
     {
         int32_t u, v;
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             &u, ptr, rocsparse::indextype_sizeof(indextype), hipMemcpyDeviceToHost, stream));
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             &v, p, rocsparse::indextype_sizeof(indextype), hipMemcpyDeviceToHost, stream));
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
         start = u;
         end   = v;
         break;
@@ -52,11 +52,11 @@ rocsparse_status rocsparse::calculate_nnz(
     case rocsparse_indextype_i64:
     {
         int64_t u, v;
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             &u, ptr, rocsparse::indextype_sizeof(indextype), hipMemcpyDeviceToHost, stream));
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             &v, p, rocsparse::indextype_sizeof(indextype), hipMemcpyDeviceToHost, stream));
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
         start = u;
         end   = v;
         break;
@@ -64,9 +64,9 @@ rocsparse_status rocsparse::calculate_nnz(
     case rocsparse_indextype_u16:
     {
         uint16_t u, v;
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             &u, ptr, rocsparse::indextype_sizeof(indextype), hipMemcpyDeviceToHost, stream));
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             &v, p, rocsparse::indextype_sizeof(indextype), hipMemcpyDeviceToHost, stream));
         start = u;
         end   = v;

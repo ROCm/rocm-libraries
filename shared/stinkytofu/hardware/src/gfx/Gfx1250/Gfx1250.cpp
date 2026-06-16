@@ -147,6 +147,7 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
         {"FlatStoreB64", "flat_store_b64"},
         {"FlatStoreB128", "flat_store_b128"},
         {"FlatAtomicCmpswapB32", "flat_atomic_cmpswap_b32"},
+        {"FlatAtomicDecU32", "flat_atomic_dec_u32"},
         {"DSLoadU8", "ds_load_u8"},
         {"DSLoadU16", "ds_load_u16"},
         {"DSLoadB32", "ds_load_b32"},

@@ -1250,10 +1250,10 @@ try
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMalloc(&dest->ell_col_ind, sizeof(rocsparse_int) * src->ell_nnz));
         }
-        RETURN_IF_HIP_ERROR(hipMemcpy(dest->ell_col_ind,
-                                      src->ell_col_ind,
-                                      sizeof(rocsparse_int) * src->ell_nnz,
-                                      hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(dest->ell_col_ind,
+                                                src->ell_col_ind,
+                                                sizeof(rocsparse_int) * src->ell_nnz,
+                                                hipMemcpyDeviceToDevice));
     }
 
     if(src->ell_val != nullptr)
@@ -1262,8 +1262,8 @@ try
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&dest->ell_val, T_size * src->ell_nnz));
         }
-        RETURN_IF_HIP_ERROR(
-            hipMemcpy(dest->ell_val, src->ell_val, T_size * src->ell_nnz, hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(
+            dest->ell_val, src->ell_val, T_size * src->ell_nnz, hipMemcpyDeviceToDevice));
     }
 
     if(src->coo_row_ind != nullptr)
@@ -1273,10 +1273,10 @@ try
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMalloc(&dest->coo_row_ind, sizeof(rocsparse_int) * src->coo_nnz));
         }
-        RETURN_IF_HIP_ERROR(hipMemcpy(dest->coo_row_ind,
-                                      src->coo_row_ind,
-                                      sizeof(rocsparse_int) * src->coo_nnz,
-                                      hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(dest->coo_row_ind,
+                                                src->coo_row_ind,
+                                                sizeof(rocsparse_int) * src->coo_nnz,
+                                                hipMemcpyDeviceToDevice));
     }
 
     if(src->coo_col_ind != nullptr)
@@ -1286,10 +1286,10 @@ try
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMalloc(&dest->coo_col_ind, sizeof(rocsparse_int) * src->coo_nnz));
         }
-        RETURN_IF_HIP_ERROR(hipMemcpy(dest->coo_col_ind,
-                                      src->coo_col_ind,
-                                      sizeof(rocsparse_int) * src->coo_nnz,
-                                      hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(dest->coo_col_ind,
+                                                src->coo_col_ind,
+                                                sizeof(rocsparse_int) * src->coo_nnz,
+                                                hipMemcpyDeviceToDevice));
     }
 
     if(src->coo_val != nullptr)
@@ -1298,8 +1298,8 @@ try
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&dest->coo_val, T_size * src->coo_nnz));
         }
-        RETURN_IF_HIP_ERROR(
-            hipMemcpy(dest->coo_val, src->coo_val, T_size * src->coo_nnz, hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(
+            dest->coo_val, src->coo_val, T_size * src->coo_nnz, hipMemcpyDeviceToDevice));
     }
 
     dest->m           = src->m;
@@ -1334,7 +1334,7 @@ try
     // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
     // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
     // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
-    RETURN_IF_HIP_ERROR(hipDeviceSynchronize());
+    RETURN_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
 
     // Clean up ELL part
     if(hyb->ell_col_ind != nullptr)
@@ -5434,7 +5434,7 @@ try
     // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
     // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
     // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
-    RETURN_IF_HIP_ERROR(hipDeviceSynchronize());
+    RETURN_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
 
     // Clean up row pointer array
     if(descr->csr_row_ptr_C != nullptr)

@@ -60,6 +60,11 @@ class STINKYTOFU_EXPORT ArchHelper {
         virtual const std::unordered_map<std::string, uint16_t>& getMnemonicToIsaOpcodeMap()
             const = 0;
 
+        // True on targets where ECC forces every VGPR write to be 32 bits wide.
+        // On such targets a D16 VMEM op zero-fills the non-data 16-bit half, and
+        // True16 VALU performs the write at full-DWORD granularity.
+        virtual bool hasD16Writes32BitVgpr() const = 0;
+
         const uint32_t major;
         const uint32_t minor;
         const uint32_t stepping;

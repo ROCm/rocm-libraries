@@ -31,7 +31,7 @@
 #include <hip/hip_runtime.h>
 
 ROCSPARSE_KERNEL(1) void init_kernel(){};
-
+static hipStream_t main_stream{};
 /*******************************************************************************
  * constructor
  *
@@ -189,7 +189,11 @@ _rocsparse_handle::_rocsparse_handle()
 
         // Shared memory per block opt-in
         shared_mem_per_block_optin = properties.sharedMemPerBlockOptin;
-
+        if(main_stream == nullptr)
+        {
+            std::ignore = hipStreamCreate(&main_stream);
+        }
+        stream = main_stream;
 #if HIP_VERSION >= 307
         // ASIC revision
         asic_rev = properties.asicRevision;
@@ -234,18 +238,18 @@ _rocsparse_handle::_rocsparse_handle()
         THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "'empty kernel scheduling failed'");
 
         // Execute memset for initialization
-        THROW_IF_HIP_ERROR(hipMemsetAsync(sone, 0, sizeof(float) * 2, stream));
-        THROW_IF_HIP_ERROR(hipMemsetAsync(done, 0, sizeof(double) * 2, stream));
+        THROW_IF_HIP_ERROR(rocsparse_hipMemsetAsync(sone, 0, sizeof(float) * 2, stream));
+        THROW_IF_HIP_ERROR(rocsparse_hipMemsetAsync(done, 0, sizeof(double) * 2, stream));
 
         const float  s_value = 1.0f;
         const double d_value = 1.0;
         THROW_IF_HIP_ERROR(
-            hipMemcpyAsync(sone, &s_value, sizeof(float), hipMemcpyHostToDevice, stream));
-        THROW_IF_HIP_ERROR(
-            hipMemcpyAsync(done, &d_value, sizeof(double), hipMemcpyHostToDevice, stream));
+            rocsparse_hipMemcpyAsync(sone, &s_value, sizeof(float), hipMemcpyHostToDevice, stream));
+        THROW_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+            done, &d_value, sizeof(double), hipMemcpyHostToDevice, stream));
 
         // Wait for device transfer to finish
-        THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
+        THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
 #if defined(ROCSPARSE_WITH_ASAN)
         const size_t required_stack_size = 64 * 1024;
@@ -315,7 +319,7 @@ _rocsparse_handle::~_rocsparse_handle()
     // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
     // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
     // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
-    PRINT_IF_HIP_ERROR(hipDeviceSynchronize());
+    PRINT_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
 
     PRINT_IF_HIP_ERROR(rocsparse_hipFree(buffer));
     PRINT_IF_HIP_ERROR(rocsparse_hipFree(sone));

@@ -8,21 +8,32 @@ Benchmarking and validation tool for hipDNN graphs.
 > Do not use it in build workflows or CI pipelines.
 
 This tool loads serialized hipDNN graphs, executes them via installed hipDNN
-engine plugins, and captures performance metrics. GPU kernel timing and
-synchronized E2E timing use direct HIP runtime events exposed by
+engine plugins, and captures performance metrics. On AMD GPUs, hipDNN kernel
+timing and synchronized E2E timing use direct HIP runtime events exposed by
 `hipdnn_frontend`; PyTorch is only needed for the optional PyTorch executor and
 reference validation.
 
+The `--backend pytorch` executor also runs on NVIDIA GPUs with a CUDA PyTorch
+build, where it times kernels with `torch.cuda` events. Because the hipDNN and
+PyTorch backends share one suite execution path and emit the same
+`SuiteResult` JSON schema, the same `--graph ... --backend pytorch -o out.json`
+command can be run on a ROCm host and a CUDA host and the two JSON artifacts
+compared offline. See [Cross-Machine Comparison](#cross-machine-comparison-rocm-vs-cuda).
+
 ## Requirements
 
-- Python 3.9+
+- Python 3.12+
 - numpy
-- hipdnn_frontend (installed hipDNN Python bindings)
-- AMD GPU with ROCm + hipDNN provider plugins for the graphs under test
-- PyTorch *(optional)* — any usable PyTorch build enables the `--validate pytorch`
-  reference provider. A ROCm PyTorch build additionally enables the
-  `--backend pytorch` GPU executor. Not listed in `pyproject.toml` because torch
-  package selection depends on the target environment.
+- hipdnn_frontend (installed hipDNN Python bindings) — required for the hipDNN
+  backend; **not** required for the `--backend pytorch` executor
+- A GPU for execution:
+  - AMD GPU with ROCm + hipDNN provider plugins — for the hipDNN backend and the
+    ROCm PyTorch executor
+  - NVIDIA GPU with a CUDA PyTorch build — for the `--backend pytorch` executor
+- PyTorch *(optional for the hipDNN backend)* — any usable PyTorch build enables
+  the `--validate pytorch` reference provider. A ROCm or CUDA PyTorch build
+  enables the `--backend pytorch` GPU executor. Not listed in `pyproject.toml`
+  because torch package selection depends on the target environment.
 
 ## Installation
 
@@ -76,26 +87,59 @@ bash setup.sh --torch-mode cpu --rocm-prefix /opt/rocm
 source /workspace/.venv/bin/activate
 ```
 
-CPU-only torch never enables the PyTorch execution backend; GPU execution paths still
-require a ROCm-enabled torch build and a visible GPU. Timing still comes from
-the HIP APIs bound through `hipdnn_frontend`, not from torch.
+CPU-only torch never enables the PyTorch execution backend; it is only for
+Python reference validation. The `--backend pytorch` executor needs a GPU torch
+build: ROCm torch (HIP-event timing) or CUDA torch (torch.cuda-event timing,
+see below).
 
 Use `--torch-mode existing` to reuse torch already installed in the target
 virtual environment. Existing ROCm torch uses its bundled ROCm SDK libraries;
-existing CPU/non-ROCm torch builds the hipDNN bindings against `--rocm-prefix`,
-`$ROCM_PATH`, or `/opt/rocm`.
+existing CUDA torch takes the CUDA skip path (no hipDNN bindings); existing
+CPU-only torch builds the hipDNN bindings against `--rocm-prefix`, `$ROCM_PATH`,
+or `/opt/rocm` for the hipDNN backend.
 
-### Non-ROCm PyTorch
+### CUDA PyTorch (NVIDIA GPUs, `--backend pytorch` only)
 
-Direct HIP timing requires ROCm HIP runtime libraries and the hipDNN frontend
-bindings. Non-ROCm PyTorch wheels can be used only for CPU reference validation;
+To benchmark graph shapes through PyTorch on an NVIDIA GPU — for offline
+comparison against ROCm results — install a CUDA PyTorch build with
+`--torch-mode cuda`:
+
+```bash
+bash setup.sh --torch-mode cuda --workspace .workspace
+source .workspace/.venv/bin/activate
+```
+
+`--torch-mode cuda` installs torch from PyPI (override the index with
+`--torch-index-url <url>`, e.g. a specific CUDA wheel channel) and **skips all
+ROCm setup**: no hipDNN build, engine plugins, hipDNN Python bindings, amdsmi,
+or `ROCM_PATH`/`LD_LIBRARY_PATH` wiring. Only the `--backend pytorch` executor
+is available in this mode — the hipDNN backend requires `hipdnn_frontend` and
+ROCm. `--force-build` is rejected with `--torch-mode cuda` because building
+hipDNN requires a ROCm toolchain.
+
+```bash
+# Benchmark a graph suite through PyTorch CUDA and emit comparable JSON
+python -m dnn_benchmarking --graph 'graphs/*.json' --backend pytorch -o cuda_results.json
+```
+
+On CUDA, kernel timing uses `torch.cuda` events and the ROCm-specific metadata
+fields (`rocm_version`, amdsmi GPU snapshot) are `None` in the JSON, while
+`gpu_arch` is the sentinel `"unknown"` (no ROCm gfx target is detectable); the
+timing statistics and graph structure are identical to a ROCm run.
+
+### Other Non-ROCm PyTorch (CPU)
+
+hipDNN timing requires ROCm HIP runtime libraries and the hipDNN frontend
+bindings. CPU-only PyTorch wheels can be used only for reference validation;
 they do not enable GPU benchmarking in this tool.
 
 **Note**: hipDNN Python bindings (`hipdnn_frontend`) must be installed separately
 for hipDNN benchmarking.
-**Note**: PyTorch is optional. CPU-only PyTorch enables `--validate pytorch`
-reference computation; ROCm PyTorch also enables `--backend pytorch`. GPU timing
-and E2E synchronization always use direct HIP APIs from `hipdnn_frontend`.
+**Note**: PyTorch is optional for the hipDNN backend. CPU-only PyTorch enables
+`--validate pytorch` reference computation; ROCm or CUDA PyTorch also enables
+`--backend pytorch`. hipDNN-backend GPU timing and E2E synchronization always
+use direct HIP APIs from `hipdnn_frontend`; the PyTorch backend uses HIP events
+on ROCm and `torch.cuda` events on CUDA.
 
 ## Usage
 
@@ -171,6 +215,52 @@ python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json \
   --plugin-path /path/to/pluginA,/path/to/pluginB
 ```
 
+### PyTorch Backend
+
+`--backend pytorch` runs each graph through the PyTorch executor instead of
+hipDNN engine plugins, producing one `provider="pytorch"` row per graph. It
+shares the suite execution path with the hipDNN backend, so single-graph,
+glob, and tarball inputs and `--output` JSON all work identically.
+
+```bash
+# Single graph through PyTorch
+dnn-benchmark --graph ./graphs/sample_conv_fwd.json --backend pytorch
+
+# A whole suite through PyTorch, with JSON output
+dnn-benchmark --graph 'graphs/*.json' --backend pytorch -o pytorch_results.json
+```
+
+The PyTorch backend ignores hipDNN-specific selection and profiling options;
+the following are rejected with `--backend pytorch`:
+
+- `--engine` / `--plugin-path` (no hipDNN engine plugins are loaded)
+- `--validate pytorch` (the backend would validate against itself)
+- `--pmc` / `--emit-trace` / `--perf` / `--roofline` (rocprofv3-based passes)
+
+### Cross-Machine Comparison (ROCm vs CUDA)
+
+Because both backends emit the same `SuiteResult` JSON schema, you can benchmark
+the same graphs on an AMD machine and an NVIDIA machine and compare offline:
+
+```bash
+# On the AMD/ROCm host (hipDNN engines):
+dnn-benchmark --graph 'graphs/*.json' -o rocm_results.json
+
+# On the AMD/ROCm host (PyTorch executor, for an apples-to-apples PyTorch row):
+dnn-benchmark --graph 'graphs/*.json' --backend pytorch -o rocm_pytorch_results.json
+
+# On the NVIDIA/CUDA host (PyTorch executor):
+dnn-benchmark --graph 'graphs/*.json' --backend pytorch -o cuda_pytorch_results.json
+```
+
+Each JSON file is a full `SuiteResult`: `graphs` is a list of graph entries,
+each carrying its `graph_name` plus result rows with E2E and kernel timing
+statistics and whatever machine metadata the host could provide
+(`rocm_version` and the amdsmi snapshot are `None` on CUDA, and `gpu_arch` is
+`"unknown"`). Graphs match across files by `graph_name`, so the artifacts can
+be diffed offline. (An offline comparison helper is planned but not yet
+included.)
+
 ### Config Files
 
 Use `--config` for repeatable benchmark recipes. CLI flags override config
@@ -194,7 +284,7 @@ python -m dnn_benchmarking --config sample_configs/config.toml.example --iters 5
 | `--iters`, `-i` | Number of benchmark iterations | 100 |
 | `--engine`, `-e` | Engine ID or comma-separated list (e.g. `1` or `1,2,3`); default = all discovered engines | None |
 | `--seed`, `-s` | Random seed for reproducible input data | None |
-| `--backend`, `-b` | Execution backend: `hipdnn` (AMD GPU via hipDNN) or `pytorch` (GPU via PyTorch) | `hipdnn` |
+| `--backend`, `-b` | Execution backend: `hipdnn` (AMD GPU via hipDNN engine plugins) or `pytorch` (GPU via PyTorch; ROCm or CUDA). `pytorch` is incompatible with `--engine`, `--plugin-path`, `--validate pytorch`, and the profiling flags. | `hipdnn` |
 
 #### Output Options
 
@@ -367,6 +457,25 @@ pytest -m gpu
 GPU tests auto-discover provider build-tree, active-venv ROCm SDK, and
 `/opt/rocm` plugin installs. Use `--dnn-plugin-paths` with a comma-separated
 directory list when testing custom engine plugin builds.
+
+GPU tests are tiered by marker: `gpu` (any GPU), `rocm` (AMD ROCm only),
+`cuda` (NVIDIA CUDA only). GPU-generic tests run on either platform and
+adapt their timing-backend assertion automatically (HIP on ROCm,
+torch.cuda on CUDA); platform-specific tests assert one backend's unique
+behavior. Every GPU test self-skips on the wrong platform, so bare
+`pytest` is safe on any host. Use `-m` for explicit, additive selection:
+
+```bash
+# On a ROCm host: unit + generic + rocm (drops cuda-only tests)
+pytest -m "not cuda"
+
+# On a CUDA host: unit + generic + cuda (drops rocm-only tests)
+pytest -m "not rocm"
+
+# Only one platform's dedicated tests
+pytest -m rocm
+pytest -m cuda
+```
 
 Strict profiling tests that require real profiler artifacts are skipped by
 default. Run them explicitly on a known-good profiling host:

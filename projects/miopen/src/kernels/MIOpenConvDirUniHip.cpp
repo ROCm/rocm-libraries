@@ -20,6 +20,81 @@
 
 #define UNUSED __attribute__((__unused__))
 
+#if defined(CPPCHECK)
+// cppcheck preprocesses kernel files standalone, without the -D macros the
+// solver injects at runtime-compile time. Provide non-zero defaults so the
+// preprocessor arithmetic below does not divide by zero.
+#ifndef MLO_ALU_VTILE0
+#define MLO_ALU_VTILE0 1
+#endif
+#ifndef MLO_ALU_VTILE1
+#define MLO_ALU_VTILE1 1
+#endif
+#ifndef MLO_BATCH_SZ
+#define MLO_BATCH_SZ 1
+#endif
+#ifndef MLO_DIR_FORWARD
+#define MLO_DIR_FORWARD 0
+#endif
+#ifndef MLO_FILTER_PAD0
+#define MLO_FILTER_PAD0 0
+#endif
+#ifndef MLO_FILTER_PAD1
+#define MLO_FILTER_PAD1 0
+#endif
+#ifndef MLO_FILTER_SIZE0
+#define MLO_FILTER_SIZE0 1
+#endif
+#ifndef MLO_FILTER_SIZE1
+#define MLO_FILTER_SIZE1 1
+#endif
+#ifndef MLO_GRP_TILE0
+#define MLO_GRP_TILE0 1
+#endif
+#ifndef MLO_GRP_TILE1
+#define MLO_GRP_TILE1 1
+#endif
+#ifndef MLO_IN_HEIGHT
+#define MLO_IN_HEIGHT 1
+#endif
+#ifndef MLO_IN_WIDTH
+#define MLO_IN_WIDTH 1
+#endif
+#ifndef MLO_N_INPUTS
+#define MLO_N_INPUTS 1
+#endif
+#ifndef MLO_N_IN_TILES_PERSTACK
+#define MLO_N_IN_TILES_PERSTACK 1
+#endif
+#ifndef MLO_N_OUTPUTS
+#define MLO_N_OUTPUTS 1
+#endif
+#ifndef MLO_N_OUT_TILES
+#define MLO_N_OUT_TILES 1
+#endif
+#ifndef MLO_N_OUT_TILES_PERSTACK
+#define MLO_N_OUT_TILES_PERSTACK 1
+#endif
+#ifndef MLO_N_READ_PROCS
+#define MLO_N_READ_PROCS 1
+#endif
+#ifndef MLO_N_STACKS
+#define MLO_N_STACKS 1
+#endif
+#ifndef MLO_OUT_HEIGHT
+#define MLO_OUT_HEIGHT 1
+#endif
+#ifndef MLO_OUT_TILE0
+#define MLO_OUT_TILE0 1
+#endif
+#ifndef MLO_OUT_TILE1
+#define MLO_OUT_TILE1 1
+#endif
+#ifndef MLO_OUT_WIDTH
+#define MLO_OUT_WIDTH 1
+#endif
+#endif // defined(CPPCHECK)
+
 #ifndef MLO_FILTER_STRIDE0
 #define MLO_FILTER_STRIDE0 1
 #endif
@@ -39,6 +114,13 @@
 #define MLO_N_PROC_WAVES ((MLO_GRP_SZ + MLO_N_READ_PROCS - 1) / MLO_N_READ_PROCS)
 #define MLO_OUT_TILE_SZ (MLO_OUT_TILE1 * MLO_OUT_TILE0)
 #define MLO_ALU_TILE_SZ (MLO_ALU_VTILE1 * MLO_ALU_VTILE0)
+
+#ifndef MLO_IN_TILE0
+#define MLO_IN_TILE0 1
+#endif
+#ifndef MLO_IN_TILE1
+#define MLO_IN_TILE1 1
+#endif
 
 #if MLO_IN_TILE0 < MLO_OUT_WIDTH || MLO_IN_TILE1 < MLO_OUT_HEIGHT
 #define MLO_LARGE_MAP 1

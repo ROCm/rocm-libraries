@@ -35,6 +35,11 @@ if(BUILD_MEMSTAT)
   add_compile_options(-DROCSPARSE_WITH_MEMSTAT)
 endif()
 
+# ROCSPARSE_DEBUG ?
+if(BUILD_ROCSPARSE_DEBUGGING)
+  add_compile_options(-DROCSPARSE_DEBUGGING)
+endif()
+
 if(BUILD_ROCSPARSE_ILP64)
   add_compile_options(-Drocsparse_ILP64)
 endif()
