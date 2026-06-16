@@ -66,6 +66,7 @@ class GemmKernelBuilder:
         if config_json and os.path.exists(config_json):
             with open(config_json, "r") as f:
                 self.config = json.load(f)
+            self.group_size_k = self.config.get("group_size_k", 128)
 
     def _apply_sampling(self, kernel_list):
         """Apply RFC Sobol+LHS+maximin sampling. Returns sampled subset."""
@@ -89,9 +90,9 @@ class GemmKernelBuilder:
         flat_items = []
         for k in kernel_list:
             flat = dict(k["tile_config"])
-            pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent = (
-                self._normalize_trait_combo(k["trait_combo"])
-            )
+            pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent = k[
+                "trait_combo"
+            ]
             flat.update(
                 {
                     "pipeline": pipeline,
@@ -100,10 +101,9 @@ class GemmKernelBuilder:
                     "pad_m": pad_m,
                     "pad_n": pad_n,
                     "pad_k": pad_k,
+                    "persistent": persistent,
                 }
             )
-            if self._uses_persistent_trait():
-                flat["persistent"] = persistent
             flat_items.append(flat)
 
         selected, method, selected_indices = sample_feasible_set(
@@ -136,19 +136,15 @@ class GemmKernelBuilder:
         )
         return kernel_list
 
-    def _get_sampled_kernel_list(self):
-        """Enumerate all valid (tile_config, trait_combo) pairs and apply sampling.
-
-        Returns a list of dicts with keys: name, tile_config, trait_combo.
-        Both _list_kernels and _generate_all_individual should use this
-        to guarantee identical enumeration and sampling."""
+    def _list_kernels(self):
+        """Write kernel list to file for CMake to read (with comprehensive validation)"""
+        # Get configurations using comprehensive validation
         tile_configs = self._get_tile_configs()
         trait_combos = self._generate_trait_combinations()
 
         kernel_list = []
         for tile_config in tile_configs:
             for trait_combo in trait_combos:
-                kernel_name = self._format_kernel_name(trait_combo, tile_config)
                 (
                     pipeline,
                     epilogue,
@@ -192,67 +188,8 @@ class GemmKernelBuilder:
                     }
                 )
 
-        return self._apply_sampling(kernel_list)
-
-    def _uses_persistent_trait(self):
-        return self.kernel_name_prefix != "batched_gemm"
-
-    def _normalize_trait_combo(self, trait_combo):
-        if len(trait_combo) == 7:
-            return trait_combo
-        if len(trait_combo) == 6:
-            return (*trait_combo, False)
-        raise ValueError(f"Unexpected trait combination: {trait_combo}")
-
-    def _format_tile_config_string(self, tile_config):
-        tile_str = f"{tile_config['tile_m']}x{tile_config['tile_n']}x{tile_config['tile_k']}_"
-        tile_str += (
-            f"{tile_config['warp_m']}x{tile_config['warp_n']}x{tile_config['warp_k']}_"
-        )
-        tile_str += (
-            f"{tile_config['warp_tile_m']}x{tile_config['warp_tile_n']}x{tile_config['warp_tile_k']}"
-        )
-        return tile_str
-
-    def _format_trait_combo_string(self, trait_combo):
-        pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent = (
-            self._normalize_trait_combo(trait_combo)
-        )
-
-        trait_parts = [
-            pipeline,
-            epilogue,
-            scheduler,
-            str(pad_m),
-            str(pad_n),
-            str(pad_k),
-        ]
-        if self._uses_persistent_trait():
-            trait_parts.append(str(persistent))
-
-        return "_".join(trait_parts)
-
-    def _format_kernel_name(self, trait_combo, tile_config=None):
-        pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent = (
-            self._normalize_trait_combo(trait_combo)
-        )
-
-        kernel_name = (
-            f"{self.kernel_name_prefix}_{self.datatype}_{self.layout}_{pipeline}_"
-            f"{epilogue}_{scheduler}_{str(pad_m).capitalize()}_{str(pad_n).capitalize()}_"
-            f"{str(pad_k).capitalize()}"
-        )
-        if self._uses_persistent_trait():
-            kernel_name += f"_{str(persistent).capitalize()}"
-
-        if tile_config is not None:
-            kernel_name += f"_{self._format_tile_config_string(tile_config)}"
-
-        return kernel_name
-
-    def _list_kernels(self):
-        """Write kernel list to file for CMake to read (with comprehensive validation)"""
-        kernel_list = self._get_sampled_kernel_list()
+        # Apply RFC-compliant sampling (Sobol + LHS + maximin)
+        kernel_list = self._apply_sampling(kernel_list)
 
         # Write kernel count
         with open(
@@ -269,8 +206,14 @@ class GemmKernelBuilder:
                 tile_config = kernel["tile_config"]
                 trait_combo = kernel["trait_combo"]
 
-                tile_str = self._format_tile_config_string(tile_config)
-                trait_str = self._format_trait_combo_string(trait_combo)
+                tile_str = f"{tile_config['tile_m']}x{tile_config['tile_n']}x{tile_config['tile_k']}_"
+                tile_str += f"{tile_config['warp_m']}x{tile_config['warp_n']}x{tile_config['warp_k']}_"
+                tile_str += f"{tile_config['warp_tile_m']}x{tile_config['warp_tile_n']}x{tile_config['warp_tile_k']}"
+
+                trait_str = (
+                    f"{trait_combo[0]}_{trait_combo[1]}_{trait_combo[2]}_"
+                    + "_".join(str(x) for x in trait_combo[3:])
+                )
 
                 f.write(f"{kernel['name']}|{tile_str}|{trait_str}\n")
 
@@ -317,11 +260,9 @@ class GemmKernelBuilder:
         if not pipelines:
             if self.kernel_name_prefix == "gemm_preshuffle":
                 pipelines = ["preshufflev2"]
-            elif self.kernel_name_prefix == "mx_gemm":
-                pipelines = ["comp_async"]
-            elif self.kernel_name_prefix in ["grouped_gemm_rowcolquant", "grouped_gemm_tensorquant", "gemm_rowcolquant", "gemm_tensor_quant", "gemm_aquant"]:
+            elif self.kernel_name_prefix == "gemm_bquant":
                 pipelines = ["compv3"]
-            elif self.kernel_name_prefix in ["gemm_universal", "gemm_multi_d", "gemm_multi_abd", "grouped_gemm", "batched_contraction", "batched_gemm"]:
+            else:
                 pipelines = ["compv4"]
 
         configs = []
@@ -405,7 +346,7 @@ class GemmKernelBuilder:
         layout = self.layout
 
         # Special handling for certain data types
-        if self.datatype in ["fp4", "fp8", "bf8"]:
+        if self.datatype in ["fp8", "bf8"]:
             c_datatype = "fp16"
 
         # Use the comprehensive validation function
@@ -440,15 +381,17 @@ class GemmKernelBuilder:
         pad_n_values = trait_config.get("pad_n").get("values")
         pad_k_values = trait_config.get("pad_k").get("values")
         if self.kernel_name_prefix == "gemm_aquant":
-            persistent_values = trait_config.get(
-                "a_preshuffle_quant", {}
-            ).get("values", [False])
-        elif self.kernel_name_prefix in ["gemm_rowcolquant", "batched_gemm"]:
-            persistent_values = [
-                False
-            ]  # Force disable persistent where it is unsupported or not part of the trait key
+            persistent_or_preshuffle_quant = trait_config.get("a_preshuffle_quant").get(
+                "values"
+            )
+        elif self.kernel_name_prefix == "gemm_bquant":
+            persistent_or_preshuffle_quant = trait_config.get("b_preshuffle_quant").get(
+                "values"
+            )
         else:
-            persistent_values = trait_config.get("persistent").get("values")
+            persistent_or_preshuffle_quant = trait_config.get("persistent").get(
+                "values"
+            )
 
         all_combinations = list(
             itertools.product(
@@ -458,7 +401,7 @@ class GemmKernelBuilder:
                 pad_m_values,
                 pad_n_values,
                 pad_k_values,
-                persistent_values,
+                persistent_or_preshuffle_quant,
             )
         )
 
@@ -467,7 +410,12 @@ class GemmKernelBuilder:
         for combo in all_combinations:
             pipeline, epilogue, scheduler = combo[:3]
             if is_trait_combination_valid(
-                pipeline, epilogue, scheduler, self.kernel_name_prefix
+                pipeline,
+                epilogue,
+                scheduler,
+                persistent_or_preshuffle_quant,
+                self.kernel_name_prefix,
+                self.layout,
             ):
                 combinations.append(combo)
             else:
@@ -488,18 +436,27 @@ class GemmKernelBuilder:
             pad_m,
             pad_n,
             pad_k,
-            persistent,
-        ) = self._normalize_trait_combo(trait_combo)
+            persistent_or_preshuffle_quant,
+        ) = trait_combo
 
-        kernel_name = self._format_kernel_name(trait_combo, tile_config)
+        # Create kernel name with proper boolean capitalization
+        kernel_name = f"{self.kernel_name_prefix}_{self.datatype}_{self.layout}_{pipeline}_{epilogue}_{scheduler}_{str(pad_m).capitalize()}_{str(pad_n).capitalize()}_{str(pad_k).capitalize()}_{str(persistent_or_preshuffle_quant).capitalize()}"
+
+        # Create tile configuration string
+        tile_str = (
+            f"{tile_config['tile_m']}x{tile_config['tile_n']}x{tile_config['tile_k']}_"
+        )
+        tile_str += (
+            f"{tile_config['warp_m']}x{tile_config['warp_n']}x{tile_config['warp_k']}_"
+        )
+        tile_str += f"{tile_config['warp_tile_m']}x{tile_config['warp_tile_n']}x{tile_config['warp_tile_k']}"
+
+        kernel_name += f"_{tile_str}"
 
         if self.kernel_name_prefix in [
             "gemm_universal",
             "gemm_multi_d",
-            "gemm_multi_abd",
             "grouped_gemm",
-            "batched_contraction",
-            "batched_gemm",
         ]:
             # Map pipeline names to the correct pipeline implementation
             pipeline_impl_map = {
@@ -522,11 +479,6 @@ class GemmKernelBuilder:
             base_pipeline_map = {
                 "preshufflev2": "ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2",
             }
-        elif self.kernel_name_prefix == "mx_gemm":
-            pipeline_impl_map = {
-                "comp_async": "ck_tile::MXGemmPipelineAgBgCrCompAsync",
-            }
-            base_pipeline_map = {}
         elif self.kernel_name_prefix == "gemm_aquant":
             pipeline_impl_map = {
                 "mem": "ck_tile::AQuantGemmPipelineAgBgCrMem",
@@ -534,6 +486,13 @@ class GemmKernelBuilder:
             }
             base_pipeline_map = {
                 "mem": "ck_tile::BaseGemmPipelineAgBgCrMem",
+                "compv3": "ck_tile::BaseGemmPipelineAgBgCrCompV3",
+            }
+        elif self.kernel_name_prefix == "gemm_bquant":
+            pipeline_impl_map = {
+                "compv3": "ck_tile::BQuantGemmPipelineAgBgCrCompV3",
+            }
+            base_pipeline_map = {
                 "compv3": "ck_tile::BaseGemmPipelineAgBgCrCompV3",
             }
 
@@ -556,7 +515,7 @@ class GemmKernelBuilder:
             pipeline,
             epilogue,
             k_block_per_cu,
-            persistent,
+            persistent_or_preshuffle_quant,
         )
 
         # Write into a file
@@ -595,10 +554,7 @@ class GemmKernelBuilder:
 #include <hip/hip_runtime.h>
 #include "ck_tile/ops/gemm/kernel/grouped_gemm_kernel.hpp"
 """
-        elif self.kernel_name_prefix == "mx_gemm":
-            instance_code += """#include "ck_tile/ops/gemm_mx.hpp"
-"""
-        elif self.kernel_name_prefix == "gemm_aquant":
+        elif self.kernel_name_prefix in ["gemm_aquant", "gemm_bquant"]:
             instance_code += """#include "ck_tile/ops/gemm_quant.hpp"
 #include "ck_tile/ops/gemm_quant/kernel/gemm_quant_kernel.hpp"
 """
@@ -610,7 +566,7 @@ class GemmKernelBuilder:
 
         # Determine output type
         c_type = self.datatype
-        if self.datatype in ["fp4", "fp8", "bf8"]:
+        if self.datatype in ["fp8", "bf8"]:
             c_type = "fp16"
 
         # Assign layouts based on self.layout
@@ -620,9 +576,8 @@ class GemmKernelBuilder:
             "gemm_universal",
             "gemm_preshuffle",
             "grouped_gemm",
-            "mx_gemm",
-            "batched_gemm",
             "gemm_aquant",
+            "gemm_bquant",
         ]:
             a_layout, b_layout, c_layout = get_abc_layouts(self.layout)
 
@@ -633,17 +588,11 @@ using AccDataType = {acc_type};
 using CDataType = {get_dtype_string(c_type)};"""
 
         if self.kernel_name_prefix == "gemm_aquant":
-            # AQ scale factors are always fp32: the CK AQuant kernel expects float scales
-            # regardless of the A/B element type. Changing this requires a matching kernel update.
             instance_code += """
 using AQDataType = float;"""
-
-        if self.kernel_name_prefix == "mx_gemm":
+        elif self.kernel_name_prefix == "gemm_bquant":
             instance_code += """
-using ScaleType = ck_tile::e8m0_t;
-using ScaleM = ck_tile::MXScalePointer<ScaleType, 1, 32>;
-using ScaleN = ck_tile::MXScalePointer<ScaleType, 1, 32>;
-using MxGemmHostArgs = ck_tile::MXGemmKernelArgs<ScaleM, ScaleN, 1, 1, 0>;"""
+using BQDataType = float;"""
 
         if self.kernel_name_prefix == "gemm_multi_d":
             instance_code += f"""
@@ -657,9 +606,13 @@ using BLayout = {b_layout};
 using CLayout = {c_layout};
 """
         if self.kernel_name_prefix == "gemm_aquant":
+            # AQ scale tensor is always RowMajor regardless of A matrix layout
             instance_code += """using AQLayout = ck_tile::tensor_layout::gemm::RowMajor;
 """
-
+        elif self.kernel_name_prefix == "gemm_bquant":
+            # BQ scale tensor layout matches B matrix layout
+            instance_code += """using BQLayout = BLayout;
+"""
         if self.kernel_name_prefix == "gemm_multi_d":
             instance_code += f"""
 using D0Layout = {ds_layout[0]};
@@ -702,8 +655,8 @@ struct SelectedKernel {{
             pad_m,
             pad_n,
             pad_k,
-            persistent,
-        ) = self._normalize_trait_combo(trait_combo)
+            persistent_or_preshuffle_quant,
+        ) = trait_combo
 
         instance_code = f"""
 
@@ -714,22 +667,13 @@ struct SelectedKernel {{
     static constexpr bool TransposeC = false;
     static constexpr bool DoubleSmemBuffer = {"true" if pipeline in ["compv4", "preshufflev2"] else "false"};"""
 
-        if self.kernel_name_prefix == "gemm_aquant":
-            instance_code += f"""
-    static constexpr bool APreshuffleQuant = {"true" if persistent in [True, "true"] else "false"};
-    static constexpr bool BPreshuffleQuant = false;
-    static constexpr bool PreshuffleB = false;
-    static constexpr ck_tile::index_t GroupSizeK = {self.config.get("group_size_k", 128)};"""
-
         if self.kernel_name_prefix in [
             "gemm_universal",
             "gemm_preshuffle",
             "grouped_gemm",
-            "mx_gemm",
-            "batched_gemm",
         ]:
             instance_code += f"""
-    static constexpr bool UsePersistentKernel = {"true" if persistent in [True, "true"] else "false"};
+    static constexpr bool UsePersistentKernel = {"true" if persistent_or_preshuffle_quant in [True, "true"] else "false"};
     static constexpr bool UseStructuredSparsity = false;
     static constexpr ck_tile::index_t NumWaveGroups = 1;"""
 
@@ -740,11 +684,26 @@ struct SelectedKernel {{
             else:
                 instance_code += """
     static constexpr bool Preshuffle = false;"""
+
+        if self.kernel_name_prefix == "gemm_aquant":
+            instance_code += f"""
+    static constexpr bool APreshuffleQuant = {"true" if persistent_or_preshuffle_quant in [True, "true"] else "false"};
+    static constexpr bool BPreshuffleQuant = false;
+    static constexpr bool PreshuffleB = false;
+    static constexpr ck_tile::index_t GroupSizeK = {self.group_size_k};"""
+
+        elif self.kernel_name_prefix == "gemm_bquant":
+            instance_code += f"""
+    static constexpr bool APreshuffleQuant = false;
+    static constexpr bool BPreshuffleQuant = {"true" if persistent_or_preshuffle_quant in [True, "true"] else "false"};
+    static constexpr bool PreshuffleB = false;
+    static constexpr ck_tile::index_t GroupSizeK = {self.group_size_k};"""
+
         return instance_code
 
     def populate_initialization(self, base_pipeline_map, pipeline):
         # Tile Shape
-        if self.kernel_name_prefix in ["gemm_multi_d", "batched_gemm", "gemm_aquant"]:
+        if self.kernel_name_prefix in ["gemm_multi_d", "gemm_aquant", "gemm_bquant"]:
             instance_code = """
 
     // Tile shape
@@ -757,8 +716,6 @@ struct SelectedKernel {{
             "gemm_universal",
             "gemm_preshuffle",
             "grouped_gemm",
-            "mx_gemm",
-            "batched_gemm",
         ]:
             instance_code = """
 
@@ -792,6 +749,22 @@ struct SelectedKernel {{
         ck_tile::QuantType::AQuantGrouped,
         AQLayout>;"""
 
+        elif self.kernel_name_prefix == "gemm_bquant":
+            instance_code += """
+
+    // Quantization group size
+    using QuantGroupSize = ck_tile::QuantGroupShape<ck_tile::sequence<1, 1, GroupSizeK>>;
+
+    // Traits
+    using Traits = ck_tile::TileGemmQuantTraits<
+        kPadM, kPadN, kPadK,
+        APreshuffleQuant,
+        BPreshuffleQuant,
+        PreshuffleB,
+        ALayout, BLayout, CLayout,
+        ck_tile::QuantType::BQuantGrouped,
+        BQLayout>;"""
+
         elif self.kernel_name_prefix == "gemm_multi_d":
             instance_code += """
 
@@ -804,7 +777,18 @@ struct SelectedKernel {{
     using Traits = ck_tile::TileGemmTraits<kPadM, kPadN, kPadK, ALayout, BLayout, CLayout, NumWaveGroups>;"""
 
         # Pipeline problem
-        if self.kernel_name_prefix == "gemm_aquant":
+        if self.kernel_name_prefix in ["gemm_preshuffle", "gemm_multi_d"]:
+            instance_code += """
+
+    // Pipeline problem
+    using GemmPipelineProblem = ck_tile::GemmPipelineProblem<
+        ADataType,
+        BDataType,
+        AccDataType,
+        TileShape,
+        Traits>;"""
+
+        elif self.kernel_name_prefix == "gemm_aquant":
             instance_code += """
 
     // Pipeline problem (base, for hot loop detection)
@@ -816,16 +800,17 @@ struct SelectedKernel {{
         Traits,
         BDataType>;"""
 
-        elif self.kernel_name_prefix in ["gemm_preshuffle", "gemm_multi_d"]:
+        elif self.kernel_name_prefix == "gemm_bquant":
             instance_code += """
 
-    // Pipeline problem
-    using GemmPipelineProblem = ck_tile::GemmPipelineProblem<
+    // Pipeline problem (base, for hot loop detection)
+    using GemmPipelineProblem = ck_tile::GemmPipelineProblemBase<
         ADataType,
         BDataType,
         AccDataType,
         TileShape,
-        Traits>;"""
+        Traits,
+        BDataType>;"""
 
         # Base pipeline for hot loop detection
         if self.kernel_name_prefix == "gemm_preshuffle":
@@ -834,7 +819,7 @@ struct SelectedKernel {{
     // Base pipeline for hot loop detection
     using BaseGemmPipeline = {base_pipeline_map.get(pipeline, "ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2")}<GemmPipelineProblem>;"""
 
-        elif self.kernel_name_prefix in ["gemm_multi_d", "gemm_aquant"]:
+        elif self.kernel_name_prefix in ["gemm_multi_d", "gemm_aquant", "gemm_bquant"]:
             instance_code += f"""
 
     // Base pipeline for hot loop detection
@@ -850,10 +835,22 @@ struct SelectedKernel {{
         pipeline,
         epilogue,
         k_block_per_cu,
-        persistent,
+        persistent_or_preshuffle_quant,
     ):
+        # AQuant has a self-contained launch with TailHandler dispatch
         if self.kernel_name_prefix == "gemm_aquant":
             return self._populate_launch_aquant(
+                scheduler_type_map,
+                scheduler,
+                pipeline_impl_map,
+                pipeline,
+                epilogue,
+                k_block_per_cu,
+            )
+
+        # BQuant has a self-contained launch with TailHandler dispatch
+        if self.kernel_name_prefix == "gemm_bquant":
+            return self._populate_launch_bquant(
                 scheduler_type_map,
                 scheduler,
                 pipeline_impl_map,
@@ -873,11 +870,6 @@ struct SelectedKernel {{
 
     // Launch function
     static float launch(const ck_tile::GemmHostArgs& args, const ck_tile::stream_config& stream) {"""
-        elif self.kernel_name_prefix == "batched_gemm":
-            instance_code = """
-
-    // Launch function
-    static float launch(const ck_tile::BatchedGemmHostArgs& args, const ck_tile::stream_config& stream) {"""
         elif self.kernel_name_prefix == "grouped_gemm":
             instance_code = """
 
@@ -885,18 +877,9 @@ struct SelectedKernel {{
     static float launch(const std::vector<ck_tile::GroupedGemmHostArgs<>>& gemm_descs,
                         const ck_tile::stream_config& stream,
                         void* kargs_ptr) {"""
-        elif self.kernel_name_prefix == "mx_gemm":
-            instance_code = """
-
-    // Launch function
-    static float launch(const MxGemmHostArgs& args, const ck_tile::stream_config& stream) {"""
 
         # Scheduler initialization
-        if self.kernel_name_prefix in [
-            "gemm_preshuffle",
-            "gemm_multi_d",
-            "batched_gemm",
-        ]:
+        if self.kernel_name_prefix in ["gemm_preshuffle", "gemm_multi_d"]:
             instance_code += f"""
 
         constexpr auto scheduler = {scheduler_type_map.get(scheduler)};"""
@@ -915,26 +898,6 @@ struct SelectedKernel {{
                                                 UseStructuredSparsity, UsePersistentKernel,
                                             NumWaveGroups, Preshuffle>,
                 scheduler>;"""
-        elif self.kernel_name_prefix == "batched_gemm":
-            instance_code += """
-
-        using GemmUniversalTraits = ck_tile::TileGemmUniversalTraits<
-                kPadM,
-                kPadN,
-                kPadK,
-                DoubleSmemBuffer,
-                ALayout,
-                BLayout,
-                CLayout,
-                TransposeC>;
-
-        using UniversalGemmProblem = ck_tile::UniversalGemmPipelineProblem<
-                ADataType,
-                BDataType,
-                AccDataType,
-                TileShape,
-                GemmUniversalTraits,
-                scheduler>;"""
         elif self.kernel_name_prefix == "gemm_multi_d":
             instance_code += """
 
@@ -948,22 +911,18 @@ struct SelectedKernel {{
                 scheduler>;"""
 
         # GemmPipeline
-        if self.kernel_name_prefix in [
-            "gemm_preshuffle",
-            "gemm_multi_d",
-            "batched_gemm",
-        ]:
+        if self.kernel_name_prefix in ["gemm_preshuffle", "gemm_multi_d"]:
             instance_code += f"""
-
+            
         using GemmPipeline = {pipeline_impl_map.get(pipeline)}<UniversalGemmProblem>;"""
 
         # Scheduler initialization
-        if self.kernel_name_prefix in ["gemm_universal", "grouped_gemm", "mx_gemm"]:
+        if self.kernel_name_prefix in ["gemm_universal", "grouped_gemm"]:
             instance_code += f"""
         constexpr auto scheduler = {scheduler_type_map.get(scheduler)};"""
 
         # UniversalGemmProblem
-        if self.kernel_name_prefix in ["gemm_universal", "grouped_gemm", "mx_gemm"]:
+        if self.kernel_name_prefix in ["gemm_universal", "grouped_gemm"]:
             instance_code += """
 
         using UniversalGemmProblem = ck_tile::UniversalGemmPipelineProblem<
@@ -978,7 +937,7 @@ struct SelectedKernel {{
             scheduler>;"""
 
         # GemmPipeline
-        if self.kernel_name_prefix in ["gemm_universal", "grouped_gemm", "mx_gemm"]:
+        if self.kernel_name_prefix in ["gemm_universal", "grouped_gemm"]:
             instance_code += f"""
 
         using GemmPipeline = {pipeline_impl_map.get(pipeline)}<UniversalGemmProblem>;"""
@@ -989,13 +948,13 @@ struct SelectedKernel {{
         # Kernel type
         if self.kernel_name_prefix == "gemm_multi_d":
             instance_code += """
-
+            
         // Kernel type
         using GemmKernelMultiD = ck_tile::GemmKernelMultiD<TilePartitioner, GemmPipeline, GemmEpilogue>;
-
+        
         // Kernel arguments
         auto kargs = GemmKernelMultiD::MakeKernelArgs(args);
-
+        
         if (!GemmKernelMultiD::IsSupportedArgument(kargs)) {
             throw std::runtime_error("Wrong! Arguments not supported! Skipping gemm!");
         }
@@ -1003,7 +962,7 @@ struct SelectedKernel {{
         // Get grid and block sizes
         const dim3 grids = GemmKernelMultiD::GridSize(args.M, args.N, args.k_batch);
         const dim3 blocks = GemmKernelMultiD::BlockSize();
-
+        
         if(stream.log_level_ > 0) {
             std::cout << "Launching kernel with args: " << GemmKernelMultiD::GetName() << '\\n'
                         << "grid: {" << grids.x << ", " << grids.y << ", " << grids.z << "}"
@@ -1011,13 +970,13 @@ struct SelectedKernel {{
                         << std::endl;
         }"""
 
-            instance_code += f"""
+            instance_code += f"""    
         // Launch kernel
         constexpr int kBlockPerCu = {k_block_per_cu};
         float ave_time = ck_tile::launch_kernel(
             stream,
             ck_tile::make_kernel<kBlockPerCu>(GemmKernelMultiD{{}}, grids, blocks, 0, kargs));
-
+        
         return ave_time;
     }}
 }};
@@ -1037,49 +996,11 @@ struct SelectedKernel {{
         }}
 
         // Get grid and block sizes
-        const dim3 grids = {"GemmKernel::MaxOccupancyGridSize(stream)" if persistent in [True, "true"] else "GemmKernel::GridSize(args.M, args.N, args.k_batch)"};
+        const dim3 grids = {"GemmKernel::MaxOccupancyGridSize(stream)" if persistent_or_preshuffle_quant in [True, "true"] else "GemmKernel::GridSize(args.M, args.N, args.k_batch)"};
         const dim3 blocks = GemmKernel::BlockSize();
 
         if(stream.log_level_ > 0) {{
             std::cout << "Launching kernel with args: " << GemmKernel::GetName() << '\\n'
-                        << "grid: {{" << grids.x << ", " << grids.y << ", " << grids.z << "}}"
-                        << ", blocks: {{" << blocks.x << ", " << blocks.y << ", " << blocks.z << "}}"
-                        << std::endl;
-        }}"""
-
-            instance_code += f"""
-        // Launch kernel
-        constexpr int kBlockPerCu = {k_block_per_cu};
-        float ave_time = ck_tile::launch_kernel(
-            stream,
-            ck_tile::make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
-
-        return ave_time;
-    }}
-}};
-"""
-
-        elif self.kernel_name_prefix == "batched_gemm":
-            instance_code += f"""
-
-        // Kernel type
-        using GemmKernel = ck_tile::BatchedGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
-
-        // Kernel arguments
-        auto kargs = GemmKernel::MakeKernelArgs(args);
-
-        if (!GemmKernel::IsSupportedArgument(kargs)) {{
-            throw std::runtime_error("Wrong! Arguments not supported! Skipping gemm!");
-        }}
-
-        // Get grid and block sizes
-        const dim3 grids = GemmKernel::GridSize(args.M, args.N, args.k_batch, args.batch_count);
-        const dim3 blocks = GemmKernel::BlockSize();
-
-        if(stream.log_level_ > 0) {{
-            std::cout << "Launching kernel with args: " << GemmKernel::GetName() << '\\n'
-                        << "shape: " << TileShape::GetName() << '\\n'
-                        << "pipeline: " << GemmPipeline::GetName() << '\\n'
                         << "grid: {{" << grids.x << ", " << grids.y << ", " << grids.z << "}}"
                         << ", blocks: {{" << blocks.x << ", " << blocks.y << ", " << blocks.z << "}}"
                         << std::endl;
@@ -1110,7 +1031,7 @@ struct SelectedKernel {{
         }}
 
         // Get grid and block sizes
-        const dim3 grids = {"Kernel::MaxOccupancyGridSize(stream)" if persistent in [True, "true"] else "dim3(kargs.empty() ? 0 : kargs.back().block_end, 1, 1)"};
+        const dim3 grids = {"Kernel::MaxOccupancyGridSize(stream)" if persistent_or_preshuffle_quant in [True, "true"] else "dim3(kargs.empty() ? 0 : kargs.back().block_end, 1, 1)"};
         const dim3 blocks = Kernel::BlockSize();
 
         HIP_CHECK_ERROR(hipMemcpyWithStream(kargs_ptr,
@@ -1138,260 +1059,6 @@ struct SelectedKernel {{
     }}
 }};
 """
-        elif self.kernel_name_prefix == "mx_gemm":
-            instance_code += f"""
-
-        // Kernel type
-        using Kernel = ck_tile::MXGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
-
-        // Kernel arguments
-        auto kargs = args;
-
-        if(!Kernel::Underlying::IsSupportedArgument(kargs)) {{
-            throw std::runtime_error("Wrong! Arguments not supported! Skipping mx gemm!");
-        }}
-
-        // Get grid and block sizes
-        const dim3 grids = Kernel::GridSize(kargs);
-        const dim3 blocks = Kernel::BlockSize();
-
-        if(stream.log_level_ > 0) {{
-            std::cout << "Launching kernel: " << KERNEL_NAME
-                      << " grid: {{" << grids.x << ", " << grids.y << ", " << grids.z << "}}"
-                      << ", blocks: {{" << blocks.x << ", " << blocks.y << ", " << blocks.z << "}}"
-                      << std::endl;
-        }}
-
-        // Launch kernel
-        constexpr int kBlockPerCu = {k_block_per_cu};
-        float ave_time = ck_tile::launch_kernel(
-            stream,
-            ck_tile::make_kernel<kBlockPerCu>(Kernel{{}}, grids, blocks, 0, kargs));
-
-        return ave_time;
-    }}
-}};
-"""
-        return instance_code
-
-    def populate_epilogue(self, epilogue):
-        instance_code = """
-
-        // Epilogue
-        """
-
-        if epilogue == "cshuffle":
-            if self.kernel_name_prefix in ["gemm_universal", "grouped_gemm"]:
-                instance_code += self.populate_cshuffle_gemm_universal()
-            elif self.kernel_name_prefix == "batched_gemm":
-                instance_code += self.populate_cshuffle_batched_gemm()
-            elif self.kernel_name_prefix == "gemm_multi_d":
-                instance_code += self.populate_cshuffle_gemm_multi_d()
-            elif self.kernel_name_prefix == "gemm_preshuffle":
-                instance_code += self.populate_cshuffle_gemm_preshuffle()
-            elif self.kernel_name_prefix == "mx_gemm":
-                instance_code += self.populate_cshuffle_mx_gemm()
-        else:  # default epilogue
-            if self.kernel_name_prefix in ["gemm_universal", "grouped_gemm", "batched_gemm"]:
-                instance_code += self.populate_default_gemm_universal()
-            elif self.kernel_name_prefix == "gemm_multi_d":
-                instance_code += self.populate_default_gemm_multi_d()
-            elif self.kernel_name_prefix == "gemm_preshuffle":
-                instance_code += self.populate_default_gemm_preshuffle()
-            elif self.kernel_name_prefix == "mx_gemm":
-                raise ValueError("MX GEMM currently supports only cshuffle epilogue")
-            elif self.kernel_name_prefix == "gemm_aquant":
-                instance_code += self.populate_default_gemm_aquant()
-
-        return instance_code
-
-    def populate_cshuffle_gemm_universal(self):
-        instance_code = """
-        using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<
-            ADataType,
-            BDataType,
-            ck_tile::tuple<>,  // DsDataType
-            AccDataType,
-            CDataType,
-            ck_tile::tuple<>,  // DsLayout
-            CLayout,
-            ck_tile::element_wise::PassThrough,
-            TileM,  // kM_
-            TileN,  // kN_
-            WarpPerBlock_M,              // MWave_
-            WarpPerBlock_N,              // NWave_
-            WarpTileM,                   // MPerXdl_
-            WarpTileN,                   // NPerXdl_
-            WarpTileK,                   // KPerXdl_
-            TransposeC,                  // isCTransposed_
-            NumWaveGroups>;              // kNumWaveGroups_
-
-        using GemmEpilogue = ck_tile::CShuffleEpilogue<EpilogueProblem>;"""
-        return instance_code
-
-    def populate_cshuffle_batched_gemm(self):
-        instance_code = """
-        using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<
-            ADataType,
-            BDataType,
-            ck_tile::tuple<>,  // DsDataType
-            AccDataType,
-            CDataType,
-            ck_tile::tuple<>,  // DsLayout
-            CLayout,
-            ck_tile::element_wise::PassThrough,
-            TilePartitioner::MPerBlock,
-            TilePartitioner::NPerBlock,
-            WarpPerBlock_M,
-            WarpPerBlock_N,
-            WarpTileM,
-            WarpTileN,
-            WarpTileK,
-            UniversalGemmProblem::TransposeC>;
-
-        using GemmEpilogue = ck_tile::CShuffleEpilogue<EpilogueProblem>;"""
-        return instance_code
-
-    def populate_cshuffle_gemm_multi_d(self):
-        instance_code = """
-        using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<
-            ADataType,
-            BDataType,
-            DsDataType,
-            AccDataType,
-            CDataType,
-            DsLayout,
-            CLayout,
-            ElementWiseFn,
-            TileM,  // kM_
-            TileN,  // kN_
-            WarpPerBlock_M,              // MWave_
-            WarpPerBlock_N,              // NWave_
-            WarpTileM,                   // MPerXdl_
-            WarpTileN,                   // NPerXdl_
-            WarpTileK,                   // KPerXdl_
-            TransposeC>;                  // isCTransposed_
-
-        using GemmEpilogue = ck_tile::CShuffleEpilogue<EpilogueProblem>;"""
-        return instance_code
-
-    def populate_cshuffle_gemm_preshuffle(self):
-        instance_code = """
-        using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<
-            ADataType,
-            BDataType,
-            ck_tile::tuple<>,  // DsDataType
-            AccDataType,
-            CDataType,
-            ck_tile::tuple<>,  // DsLayout
-            CLayout,
-            ck_tile::element_wise::PassThrough,
-            TileM,  // kM_
-            TileN,  // kN_
-            WarpPerBlock_M,              // MWave_
-            WarpPerBlock_N,              // NWave_
-            WarpTileM,                   // MPerXdl_
-            WarpTileN,                   // NPerXdl_
-            WarpTileK,                   // KPerXdl_
-            TransposeC,                  // isCTransposed_
-            NumWaveGroups,               // kNumWaveGroups_
-            false,                       // FixedVectorSize_
-            1,                           // VectorSizeC_
-            PermuteN>;                   // isPermuteN_
-
-        using GemmEpilogue = ck_tile::CShuffleEpilogue<EpilogueProblem>;"""
-        return instance_code
-
-    def populate_cshuffle_mx_gemm(self):
-        instance_code = """
-        using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<
-            ADataType,
-            BDataType,
-            ck_tile::tuple<>,  // DsDataType
-            AccDataType,
-            CDataType,
-            ck_tile::tuple<>,  // DsLayout
-            CLayout,
-            ck_tile::element_wise::PassThrough,
-            TilePartitioner::MPerBlock,
-            TilePartitioner::NPerBlock,
-            WarpPerBlock_M,
-            WarpPerBlock_N,
-            WarpTileM,
-            WarpTileN,
-            WarpTileK,
-            TransposeC>;
-
-        using GemmEpilogue = ck_tile::CShuffleEpilogue<EpilogueProblem>;"""
-        return instance_code
-
-    def populate_default_gemm_universal(self):
-        instance_code = """
-        using EpilogueProblem = ck_tile::DefaultGemm2DEpilogueProblem<
-            ADataType,
-            BDataType,
-            ck_tile::tuple<>,  // DsDataType
-            AccDataType,
-            CDataType,
-            ck_tile::tuple<>,  // DsLayout
-            CLayout,
-            ck_tile::element_wise::PassThrough,
-            TileM,  // kM_
-            TileN,  // kN_
-            kPadM,
-            kPadN,
-            WarpTileM,  // kMPerXdl_
-            WarpTileN,  // kNPerXdl_
-            WarpTileK,  // kKPerXdl_
-            TransposeC>;  // isCTransposed_
-
-        using GemmEpilogue = ck_tile::DefaultGemm2DEpilogue<EpilogueProblem>;"""
-        return instance_code
-
-    def populate_default_gemm_multi_d(self):
-        instance_code = """
-        using EpilogueProblem = ck_tile::DefaultGemm2DEpilogueProblem<
-            ADataType,
-            BDataType,
-            DsDataType,
-            AccDataType,
-            CDataType,
-            DsLayout,
-            CLayout,
-            ElementWiseFn,
-            TileM,  // kM_
-            TileN,  // kN_
-            kPadM,
-            kPadN,
-            WarpTileM,  // kMPerXdl_
-            WarpTileN,  // kNPerXdl_
-            WarpTileK,  // kKPerXdl_
-            TransposeC>;  // isCTransposed_
-
-        using GemmEpilogue = ck_tile::DefaultGemm2DEpilogue<EpilogueProblem>;"""
-        return instance_code
-
-    def populate_default_gemm_preshuffle(self):
-        instance_code = """
-        using EpilogueProblem = ck_tile::DefaultGemm2DEpilogueProblem<
-            ADataType,
-            BDataType,
-            ck_tile::tuple<>,  // DsDataType
-            AccDataType,
-            CDataType,
-            ck_tile::tuple<>,  // DsLayout
-            CLayout,
-            ck_tile::element_wise::PassThrough,
-            TileM,  // kM_
-            TileN,  // kN_
-            kPadM,
-            kPadN,
-            WarpTileM,  // kMPerXdl_
-            WarpTileN,  // kNPerXdl_
-            WarpTileK,  // kKPerXdl_
-            TransposeC>;  // isCTransposed_
-
-        using GemmEpilogue = ck_tile::DefaultGemm2DEpilogue<EpilogueProblem>;"""
         return instance_code
 
     def _populate_launch_aquant(
@@ -1403,6 +1070,7 @@ struct SelectedKernel {{
         epilogue,
         k_block_per_cu,
     ):
+        """Generate the complete launch function for AQuant kernels."""
         instance_code = """
 
     // Launch function
@@ -1484,6 +1152,262 @@ struct SelectedKernel {{
 """
         return instance_code
 
+    def _populate_launch_bquant(
+        self,
+        scheduler_type_map,
+        scheduler,
+        pipeline_impl_map,
+        pipeline,
+        epilogue,
+        k_block_per_cu,
+    ):
+        """Generate the complete launch function for BQuant kernels."""
+        instance_code = """
+
+    // Launch function
+    static float launch(const ck_tile::QuantGemmHostArgs& args, const ck_tile::stream_config& stream) {
+
+        // Hot loop detection
+        const ck_tile::index_t K_split = ck_tile::integer_least_multiple(args.K, TileShape::kK);
+        const ck_tile::index_t num_loop = TilePartitioner::GetLoopNum(K_split);
+        const bool has_hot_loop = BaseGemmPipeline::BlockHasHotloop(num_loop);
+        const ck_tile::TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);"""
+
+        instance_code += f"""
+
+        const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {{
+            constexpr bool has_hot_loop_v = has_hot_loop_.value;
+            constexpr auto tail_number_v = tail_number_.value;
+
+            // Full pipeline problem with hot loop and tail number
+            using PipelineProblem = ck_tile::GemmBQuantPipelineProblem<
+                ADataType,
+                BDataType,
+                BQDataType,
+                AccDataType,
+                TileShape,
+                Traits,
+                QuantGroupSize,
+                ADataType,
+                {scheduler_type_map.get(scheduler)},
+                has_hot_loop_v,
+                tail_number_v>;
+
+            using GemmPipeline = {pipeline_impl_map.get(pipeline)}<PipelineProblem>;"""
+
+        instance_code += """
+
+            // Epilogue"""
+        if epilogue == "cshuffle":
+            instance_code += self.populate_cshuffle_gemm_bquant()
+        else:
+            instance_code += self.populate_default_gemm_bquant()
+
+        instance_code += f"""
+
+            // Kernel type
+            using Kernel = ck_tile::QuantGemmKernel<
+                TilePartitioner, GemmPipeline, GemmEpilogue,
+                ck_tile::QuantType::BQuantGrouped>;
+
+            // Kernel arguments
+            auto kargs = Kernel::MakeKernelArgs(args);
+
+            if (!Kernel::IsSupportedArgument(kargs)) {{
+                throw std::runtime_error("Unsupported kernel arguments; skipping GEMM launch.");
+            }}
+
+            // Get grid and block sizes
+            const dim3 grids = Kernel::GridSize(args.M, args.N, args.k_batch);
+            const dim3 blocks = Kernel::BlockSize();
+
+            if(stream.log_level_ > 0) {{
+                std::cout << "Launching kernel: " << Kernel::GetName() << '\\n'
+                          << "grid: {{" << grids.x << ", " << grids.y << ", " << grids.z << "}}"
+                          << ", blocks: {{" << blocks.x << ", " << blocks.y << ", " << blocks.z << "}}"
+                          << std::endl;
+            }}
+
+            // Launch kernel
+            constexpr int kBlockPerCu = {k_block_per_cu};
+            float ave_time = ck_tile::launch_kernel(
+                stream,
+                ck_tile::make_kernel<kBlockPerCu>(Kernel{{}}, grids, blocks, 0, kargs));
+
+            return ave_time;
+        }};
+        return BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
+    }}
+}};
+"""
+        return instance_code
+
+    def populate_epilogue(self, epilogue):
+        instance_code = """
+
+        // Epilogue
+        """
+
+        if epilogue == "cshuffle":
+            if self.kernel_name_prefix in ["gemm_universal", "grouped_gemm"]:
+                instance_code += self.populate_cshuffle_gemm_universal()
+            elif self.kernel_name_prefix == "gemm_multi_d":
+                instance_code += self.populate_cshuffle_gemm_multi_d()
+            elif self.kernel_name_prefix == "gemm_preshuffle":
+                instance_code += self.populate_cshuffle_gemm_preshuffle()
+        else:  # default epilogue
+            if self.kernel_name_prefix in ["gemm_universal", "grouped_gemm"]:
+                instance_code += self.populate_default_gemm_universal()
+            elif self.kernel_name_prefix == "gemm_multi_d":
+                instance_code += self.populate_default_gemm_multi_d()
+            elif self.kernel_name_prefix == "gemm_preshuffle":
+                instance_code += self.populate_default_gemm_preshuffle()
+
+        return instance_code
+
+    def populate_cshuffle_gemm_universal(self):
+        instance_code = """            
+        using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<
+            ADataType,
+            BDataType,
+            ck_tile::tuple<>,  // DsDataType
+            AccDataType,
+            CDataType,
+            ck_tile::tuple<>,  // DsLayout
+            CLayout,
+            ck_tile::element_wise::PassThrough,
+            TileM,  // kM_
+            TileN,  // kN_
+            WarpPerBlock_M,              // MWave_
+            WarpPerBlock_N,              // NWave_
+            WarpTileM,                   // MPerXdl_
+            WarpTileN,                   // NPerXdl_
+            WarpTileK,                   // KPerXdl_
+            TransposeC,                  // isCTransposed_
+            NumWaveGroups>;              // kNumWaveGroups_
+        
+        using GemmEpilogue = ck_tile::CShuffleEpilogue<EpilogueProblem>;"""
+        return instance_code
+
+    def populate_cshuffle_gemm_multi_d(self):
+        instance_code = """            
+        using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<
+            ADataType,
+            BDataType,
+            DsDataType,
+            AccDataType,
+            CDataType,
+            DsLayout,
+            CLayout,
+            ElementWiseFn,
+            TileM,  // kM_
+            TileN,  // kN_
+            WarpPerBlock_M,              // MWave_
+            WarpPerBlock_N,              // NWave_
+            WarpTileM,                   // MPerXdl_
+            WarpTileN,                   // NPerXdl_
+            WarpTileK,                   // KPerXdl_
+            TransposeC>;                  // isCTransposed_
+    
+        using GemmEpilogue = ck_tile::CShuffleEpilogue<EpilogueProblem>;"""
+        return instance_code
+
+    def populate_cshuffle_gemm_preshuffle(self):
+        instance_code = """            
+        using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<
+            ADataType,
+            BDataType,
+            ck_tile::tuple<>,  // DsDataType
+            AccDataType,
+            CDataType,
+            ck_tile::tuple<>,  // DsLayout
+            CLayout,
+            ck_tile::element_wise::PassThrough,
+            TileM,  // kM_
+            TileN,  // kN_
+            WarpPerBlock_M,              // MWave_
+            WarpPerBlock_N,              // NWave_
+            WarpTileM,                   // MPerXdl_
+            WarpTileN,                   // NPerXdl_
+            WarpTileK,                   // KPerXdl_
+            TransposeC,                  // isCTransposed_
+            NumWaveGroups,               // kNumWaveGroups_
+            false,                       // FixedVectorSize_
+            1,                           // VectorSizeC_
+            PermuteN>;                   // isPermuteN_
+        
+        using GemmEpilogue = ck_tile::CShuffleEpilogue<EpilogueProblem>;"""
+        return instance_code
+
+    def populate_default_gemm_universal(self):
+        instance_code = """            
+        using EpilogueProblem = ck_tile::DefaultGemm2DEpilogueProblem<
+            ADataType,
+            BDataType,
+            ck_tile::tuple<>,  // DsDataType
+            AccDataType,
+            CDataType,
+            ck_tile::tuple<>,  // DsLayout
+            CLayout,
+            ck_tile::element_wise::PassThrough,
+            TileM,  // kM_
+            TileN,  // kN_
+            kPadM,
+            kPadN,
+            WarpTileM,  // kMPerXdl_
+            WarpTileN,  // kNPerXdl_
+            WarpTileK,  // kKPerXdl_
+            TransposeC>;  // isCTransposed_
+        
+        using GemmEpilogue = ck_tile::DefaultGemm2DEpilogue<EpilogueProblem>;"""
+        return instance_code
+
+    def populate_default_gemm_multi_d(self):
+        instance_code = """            
+        using EpilogueProblem = ck_tile::DefaultGemm2DEpilogueProblem<
+            ADataType,
+            BDataType,
+            DsDataType,
+            AccDataType,
+            CDataType,
+            DsLayout,
+            CLayout,
+            ElementWiseFn,
+            TileM,  // kM_
+            TileN,  // kN_
+            kPadM,
+            kPadN,
+            WarpTileM,  // kMPerXdl_
+            WarpTileN,  // kNPerXdl_
+            WarpTileK,  // kKPerXdl_
+            TransposeC>;  // isCTransposed_
+        
+        using GemmEpilogue = ck_tile::DefaultGemm2DEpilogue<EpilogueProblem>;"""
+        return instance_code
+
+    def populate_default_gemm_preshuffle(self):
+        instance_code = """            
+        using EpilogueProblem = ck_tile::DefaultGemm2DEpilogueProblem<
+            ADataType,
+            BDataType,
+            ck_tile::tuple<>,  // DsDataType
+            AccDataType,
+            CDataType,
+            ck_tile::tuple<>,  // DsLayout
+            CLayout,
+            ck_tile::element_wise::PassThrough,
+            TileM,  // kM_
+            TileN,  // kN_
+            kPadM,
+            kPadN,
+            WarpTileM,  // kMPerXdl_
+            WarpTileN,  // kNPerXdl_
+            WarpTileK,  // kKPerXdl_
+            TransposeC>;  // isCTransposed_
+        
+        using GemmEpilogue = ck_tile::DefaultGemm2DEpilogue<EpilogueProblem>;"""
+        return instance_code
+
     def populate_default_gemm_aquant(self):
         instance_code = """
             using EpilogueProblem = ck_tile::DefaultGemm2DEpilogueProblem<
@@ -1530,6 +1454,52 @@ struct SelectedKernel {{
             using GemmEpilogue = ck_tile::CShuffleEpilogue<EpilogueProblem>;"""
         return instance_code
 
+    def populate_default_gemm_bquant(self):
+        instance_code = """
+            using EpilogueProblem = ck_tile::DefaultGemm2DEpilogueProblem<
+                ADataType,
+                BDataType,
+                ck_tile::tuple<>,  // DsDataType
+                AccDataType,
+                CDataType,
+                ck_tile::tuple<>,  // DsLayout
+                CLayout,
+                ck_tile::element_wise::PassThrough,
+                TileM,  // kM_
+                TileN,  // kN_
+                kPadM,
+                kPadN,
+                WarpTileM,  // kMPerXdl_
+                WarpTileN,  // kNPerXdl_
+                WarpTileK,  // kKPerXdl_
+                TransposeC>;  // isCTransposed_
+
+            using GemmEpilogue = ck_tile::DefaultGemm2DEpilogue<EpilogueProblem>;"""
+        return instance_code
+
+    def populate_cshuffle_gemm_bquant(self):
+        instance_code = """
+            using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<
+                ADataType,
+                BDataType,
+                ck_tile::tuple<>,  // DsDataType
+                AccDataType,
+                CDataType,
+                ck_tile::tuple<>,  // DsLayout
+                CLayout,
+                ck_tile::element_wise::PassThrough,
+                TileM,  // kM_
+                TileN,  // kN_
+                WarpPerBlock_M,  // MWave_
+                WarpPerBlock_N,  // NWave_
+                WarpTileM,  // kMPerXdl_
+                WarpTileN,  // kNPerXdl_
+                WarpTileK,  // kKPerXdl_
+                TransposeC>;  // isCTransposed_
+
+            using GemmEpilogue = ck_tile::CShuffleEpilogue<EpilogueProblem>;"""
+        return instance_code
+
     def _generate_cmake_individual_targets(self, kernel_list):
         """Generate CMake include file that creates individual targets"""
         cmake_code = f"""# Generated CMake file for individual {self.kernel_name_prefix} targets
@@ -1537,9 +1507,16 @@ struct SelectedKernel {{
         """
 
         for kernel_name, trait_combo, tile_config in kernel_list:
+            pipeline, epilogue, scheduler = trait_combo[:3]
+
             # Format tile config for CMake function
-            tile_str = self._format_tile_config_string(tile_config)
-            trait_str = self._format_trait_combo_string(trait_combo)
+            tile_str = f"{tile_config['tile_m']}x{tile_config['tile_n']}x{tile_config['tile_k']}_"
+            tile_str += f"{tile_config['warp_m']}x{tile_config['warp_n']}x{tile_config['warp_k']}_"
+            tile_str += f"{tile_config['warp_tile_m']}x{tile_config['warp_tile_n']}x{tile_config['warp_tile_k']}"
+
+            trait_str = f"{pipeline}_{epilogue}_{scheduler}_" + "_".join(
+                str(x) for x in trait_combo[3:]
+            )
 
             cmake_code += f'create_individual_{self.kernel_name_prefix}_target("{self.datatype}" "{self.layout}" "{trait_str}" "{tile_str}")\n'
 
