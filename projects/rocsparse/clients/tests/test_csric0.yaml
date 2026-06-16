@@ -86,7 +86,7 @@ Tests:
 - name: csric0
   category: pre_checkin
   function: csric0
-  precision: *double_only_precisions_complex
+  precision: *single_double_precisions_complex_real
   M_N: *M_N_range_checkin
   transA: [rocsparse_operation_none]
   apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]

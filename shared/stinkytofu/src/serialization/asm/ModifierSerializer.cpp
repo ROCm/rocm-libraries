@@ -24,6 +24,7 @@
 #include "ModifierSerializer.hpp"
 
 #include <climits>
+#include <cstdint>
 #include <cstdlib>
 #include <string>
 #include <unordered_map>
