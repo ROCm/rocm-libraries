@@ -8,9 +8,10 @@ Sources in `../example/ck_tile/20_grouped_convolution/`:
 - `fused_vectorsize_probe.hpp` - kernel-type machinery (the real conv kernel for VS 1/2/4/8).
 - `fused_vectorsize_probe.cpp` - the `__global__` kernels (four solos + `fused_conv`); device
   code source for the `.hsaco` and the static analysis.
+- `fused_vectorsize_kernels.inc` - the kernel definitions (shared by probe + harness).
 - `fused_vectorsize_harness.cpp` - host program: sets up a real fp16 2D NHWGC conv, builds
-  kargs, loads a `.hsaco`, launches a kernel via `hipModuleLaunchKernel`, times it, prints a
-  checksum. The same harness runs vanilla or patched - only the code object differs.
+  kargs, and launches a kernel via `<<<>>>` (compiler-handled ABI), times it, prints a checksum.
+  Vanilla (as-compiled) only; the dynamic-VGPR patched path is not runnable here (see below).
 
 ## Comparison matrix
 
@@ -43,13 +44,14 @@ python3 dvgpr/extract_metrics.py dvgpr/out/vanilla.s dvgpr/out/patched.s
 
 Runtime comparison (on the MI450 node):
 ```bash
-bash dvgpr/build_runnable.sh        # builds out/{vanilla.hsaco,patched.hsaco,harness}
-bash dvgpr/run_profile.sh           # time + checksum per variant; PROFILE=1 adds rocprofv3
+bash dvgpr/build_runnable.sh        # builds out/harness (kernels compiled in, <<<>>>)
+bash dvgpr/run_profile.sh           # fused path i vs solo i; PROFILE=1 adds rocprofv3
 ```
 
 Scripts derive compile flags from the build's `compile_commands.json` (set `BUILD=` if not
 `./build`). The harness uses a fixed shape (G=1 N=64 K=128 C=128, 3x3, 28x28, stride1 pad1);
-edit `fused_vectorsize_harness.cpp` to change it.
+edit `fused_vectorsize_harness.cpp` to change it. `run_profile.sh` reports each fused path's
+overhead vs its solo - i.e. the occupancy cost of plain fusion - and a checksum-match column.
 
 ## Static result
 
@@ -58,14 +60,19 @@ lets each path run at its own allocation: VS8 174/~8 waves, VS2 200/~7, VS4 216/
 259/~5. So the lighter paths recover occupancy a single fused instance would otherwise lose.
 Estimate uses 1536 VGPR/SIMD (gfx1250 wave32); achieved values need hardware.
 
-## Running on hardware
+## Dynamic VGPR on hardware: unsupported on this ROCm (MI450, 2026-06-16)
 
-`build_runnable.sh` + `run_profile.sh` are the runtime path. `run_profile.sh` prints, per
-kernel/sel, vanilla vs patched time and whether the output checksum matches (the patched code
-must produce the same result). The patched run only differs from vanilla if the MI450 CP/MES
-honors `ENABLE_DYNAMIC_VGPR`. Open correctness items if results mismatch or it faults:
-`s_alloc_vgpr` can fail (SCC=0) and may need a retry loop (the inserts don't loop yet), and the
-dynamic-VGPR segment granularity must match the creation block size (32). The harness launches
-via `hipModuleLaunchKernel` with a kargs buffer mirroring the kernel signature; if the fused
-result is wrong but solos are right, suspect the kernarg layout for the 4-struct `fused_conv`
-signature.
+The dynamic-VGPR patched path does not run on this node's ROCm. Evidence:
+- `libhsa-runtime64.so` has no dynamic-vgpr / dvgpr strings - the runtime never puts a dispatch
+  into dynamic-VGPR mode, so `ENABLE_DYNAMIC_VGPR` in the descriptor is not honored.
+- Running the patched code object hangs the GPU (GPU Hang, core dumped): with the mode off,
+  `s_alloc_vgpr` is illegal per the ISA and the wave stalls.
+
+So the descriptor-patch approach cannot work until AMD wires the launch path (queue/MES/firmware)
+for compute dynamic VGPR. The static analysis (build_variants.sh + extract_metrics.py) and the
+patched `.o`/`.hsaco` build remain valid as the design + a HW-ready artifact for when support lands.
+
+The runnable harness was therefore switched to vanilla `<<<>>>` launches, measuring the
+as-compiled kernels: the plain fused kernel (one instance, runtime sel - the 4->1 enumeration win)
+and each fused path's overhead vs its solo (the occupancy cost plain fusion pays, which dynamic
+VGPR would remove).

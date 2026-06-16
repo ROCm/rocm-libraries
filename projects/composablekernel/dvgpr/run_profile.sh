@@ -2,66 +2,51 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# AICK-1303: run the dynamic-VGPR comparison on MI450 (gfx1250). For each kernel and
-# the fused sel-paths, runs the harness against the vanilla and patched code objects
-# and collects per-launch time + an output checksum (correctness proxy). With
-# PROFILE=1 it also captures rocprofv3 occupancy/duration counters.
+# AICK-1303: run the fused-VectorSize conv kernels on MI450 (gfx1250) and compare each
+# fused sel-path against its solo kernel. Both are vanilla (as-compiled); fused_conv is
+# pinned to the VS1 VGPR budget, so fused-path-i slower than solo-i quantifies the
+# occupancy cost of plain fusion - the cost dynamic VGPR would remove (dynamic VGPR is
+# unsupported on this ROCm; see README). With PROFILE=1, also captures rocprofv3.
 #
-#   {solo1,solo2,solo4,solo8,fused_conv(sel 0..3)} x {vanilla,patched}
-#
-# Prereqs: dvgpr/build_runnable.sh has produced out/{harness,vanilla.hsaco,patched.hsaco}
-# and you are on an MI450 node. The patched run only differs if the CP/MES honors
-# ENABLE_DYNAMIC_VGPR; if results mismatch or it fails, see dynamic-vgpr-feasibility.md
-# (s_alloc_vgpr SCC-retry, segment granularity).
+# Prereq: dvgpr/build_runnable.sh has produced out/harness, on an MI450 node.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT="$HERE/out"
 HARNESS="${HARNESS:-$OUT/harness}"
-VANILLA_HSACO="${VANILLA_HSACO:-$OUT/vanilla.hsaco}"
-PATCHED_HSACO="${PATCHED_HSACO:-$OUT/patched.hsaco}"
 REPS="${REPS:-100}"
 PROFILE="${PROFILE:-0}"
 ROCPROF="${ROCPROF:-rocprofv3}"
 SUMMARY="$OUT/summary.csv"
+[[ -x "$HARNESS" ]] || { echo "missing $HARNESS - run build_runnable.sh first" >&2; exit 2; }
 
-for f in "$HARNESS" "$VANILLA_HSACO" "$PATCHED_HSACO"; do
-  [[ -f "$f" ]] || { echo "missing $f - run build_runnable.sh first" >&2; exit 2; }
-done
+# kernel sel ; solos first (per-VS baselines), then the fused paths.
+JOBS=("solo1 0" "solo2 0" "solo4 0" "solo8 0"
+      "fused_conv 0" "fused_conv 1" "fused_conv 2" "fused_conv 3")
 
-# matrix: "kernel sel"
-JOBS=("fused_conv 0" "fused_conv 1" "fused_conv 2" "fused_conv 3"
-      "solo1 0" "solo2 0" "solo4 0" "solo8 0")
-
-echo "variant,kernel,sel,avg_us,checksum" > "$SUMMARY"
-run() {  # label hsaco kernel sel
-  local label="$1" hsaco="$2" kern="$3" sel="$4"
-  printf '[%2d/%d] %-8s %-10s sel=%s ... ' "$STEP" "$TOTAL" "$label" "$kern" "$sel"; STEP=$((STEP+1))
-  local line; line=$("$HARNESS" "$hsaco" "$kern" "$sel" "$REPS") || { echo "FAILED"; echo "  run failed: $label $kern $sel" >&2; return 0; }
-  echo "$line"                       # live: kernel,sel,avg_us,checksum
-  echo "$label,$line" >> "$SUMMARY"
-  if [[ "$PROFILE" == "1" ]]; then
-    local dir="$OUT/prof/${label}_${kern}_sel${sel}"; mkdir -p "$dir"
-    "$ROCPROF" --kernel-trace --output-format csv -d "$dir" -- \
-        "$HARNESS" "$hsaco" "$kern" "$sel" "$REPS" >/dev/null 2>&1 || true
-  fi
-}
-
-STEP=1
-TOTAL=$(( ${#JOBS[@]} * 2 ))
-echo ">>> running $TOTAL harness invocations (REPS=$REPS, PROFILE=$PROFILE) ..."
+echo "kernel,sel,avg_us,checksum" > "$SUMMARY"
+STEP=1; TOTAL=${#JOBS[@]}
+echo ">>> running $TOTAL kernels (REPS=$REPS, PROFILE=$PROFILE) ..."
 for j in "${JOBS[@]}"; do
   read -r k s <<<"$j"
-  run vanilla "$VANILLA_HSACO" "$k" "$s"
-  run patched "$PATCHED_HSACO" "$k" "$s"
+  printf '[%d/%d] %-10s sel=%s ... ' "$STEP" "$TOTAL" "$k" "$s"; STEP=$((STEP+1))
+  line=$("$HARNESS" "$k" "$s" "$REPS") || { echo "FAILED"; continue; }
+  echo "$line"
+  echo "$line" >> "$SUMMARY"
+  if [[ "$PROFILE" == "1" ]]; then
+    dir="$OUT/prof/${k}_sel${s}"; mkdir -p "$dir"
+    "$ROCPROF" --kernel-trace --output-format csv -d "$dir" -- "$HARNESS" "$k" "$s" "$REPS" >/dev/null 2>&1 || true
+  fi
 done
 
 echo ">>> raw: $SUMMARY"
-echo ">>> vanilla vs patched (avg us) + checksum match:"
+echo ">>> fused path vs its solo (overhead = plain-fusion occupancy cost; checksum must match):"
 duckdb -markdown -c "
-  WITH v AS (SELECT kernel,sel,avg_us van_us,checksum van_sum FROM read_csv_auto('$SUMMARY') WHERE variant='vanilla'),
-       p AS (SELECT kernel,sel,avg_us pat_us,checksum pat_sum FROM read_csv_auto('$SUMMARY') WHERE variant='patched')
-  SELECT v.kernel, v.sel, v.van_us, p.pat_us,
-         round(100.0*(v.van_us-p.pat_us)/v.van_us, 1) AS pct_faster,
-         (abs(v.van_sum-p.pat_sum) < 1e-3*abs(v.van_sum)) AS checksum_match
-  FROM v JOIN p USING (kernel, sel) ORDER BY v.kernel, v.sel"
+  WITH s AS (SELECT kernel, avg_us solo_us, checksum solo_sum FROM read_csv_auto('$SUMMARY') WHERE kernel LIKE 'solo%'),
+       f AS (SELECT sel, avg_us fused_us, checksum fused_sum,
+                    CASE sel WHEN 0 THEN 'solo1' WHEN 1 THEN 'solo2' WHEN 2 THEN 'solo4' ELSE 'solo8' END AS solo
+             FROM read_csv_auto('$SUMMARY') WHERE kernel='fused_conv')
+  SELECT f.sel, f.solo, s.solo_us, f.fused_us,
+         round(100.0*(f.fused_us - s.solo_us)/s.solo_us, 1) AS fused_overhead_pct,
+         (abs(f.fused_sum - s.solo_sum) < 1e-3*abs(s.solo_sum)) AS checksum_match
+  FROM f JOIN s ON s.kernel = f.solo ORDER BY f.sel"
