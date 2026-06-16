@@ -257,6 +257,8 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                                               const rocblas_stride strideD,
                                               S* E,
                                               const rocblas_stride strideE,
+                                              // info encodes O(n^2) submatrix row/col positions on
+                                              // failure, so it is typed I (64-bit on the _64 path).
                                               I* info,
                                               const I batch_count,
                                               T* scalars,
@@ -387,6 +389,8 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                                               const rocblas_stride strideD,
                                               S* E,
                                               const rocblas_stride strideE,
+                                              // info encodes O(n^2) submatrix row/col positions on
+                                              // failure, so it is typed I (64-bit on the _64 path).
                                               I* info,
                                               const I batch_count,
                                               T* scalars,

@@ -157,7 +157,7 @@ __device__ __host__ void run_sterf(const I n,
                     gamma = D[m] - sigma;
                     p = gamma * gamma;
 
-                    for(int i = m - 1; i >= l; i--)
+                    for(I i = m - 1; i >= l; i--)
                     {
                         T bb = E[i];
                         r = p + bb;
@@ -233,7 +233,7 @@ __device__ __host__ void run_sterf(const I n,
                     gamma = D[m] - sigma;
                     p = gamma * gamma;
 
-                    for(int i = m; i <= l - 1; i++)
+                    for(I i = m; i <= l - 1; i++)
                     {
                         T bb = E[i];
                         r = p + bb;
@@ -282,7 +282,7 @@ __device__ __host__ void run_sterf(const I n,
         l = ii - 1;
         m = l;
         p = D[l];
-        for(int j = ii; j < n; j++)
+        for(I j = ii; j < n; j++)
         {
             if(D[j] < p)
             {

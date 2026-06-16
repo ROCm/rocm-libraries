@@ -6,11 +6,21 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ## (Unreleased) rocSOLVER
 
 ### Added
+
+* 64-bit APIs for the symmetric/Hermitian eigensolvers
+    * SYEV_64 and HEEV_64 (with batched and strided\_batched versions)
+    * SYEVD_64 and HEEVD_64 (with batched and strided\_batched versions)
+
 ### Changed
 ### Removed
 ### Optimized
 ### Resolved issues
 ### Known issues
+
+* The 64-bit eigensolver APIs (SYEV_64, HEEV_64, SYEVD_64, HEEVD_64) require the matrix
+  dimensions `n` and `lda` to fit within a 32-bit integer, because their internal tridiagonal
+  reduction and back-transformation steps remain 32-bit.
+
 ### Upcoming changes
 
 

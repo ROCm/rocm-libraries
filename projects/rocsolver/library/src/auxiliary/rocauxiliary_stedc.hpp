@@ -1518,7 +1518,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     {
         if(hipThreadIdx_x == 0)
             D[eid] = evs[eid];
-        for(int i = p1 + hipThreadIdx_x; i < p1 + sz; i += hipBlockDim_x)
+        for(I i = p1 + hipThreadIdx_x; i < p1 + sz; i += hipBlockDim_x)
             C[i + eid * ldc] = vecs[i + eid * n];
     }
 }
