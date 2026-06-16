@@ -61,20 +61,27 @@ struct DominanceInfo;
 /// @param clearExisting  When true, existing PHI instructions and def-use
 ///                        chains are removed before rebuilding.  Pass false
 ///                        on a fresh function that has no PHIs/chains yet.
+/// @param includePseudo  When true, pseudo registers (e.g. memory tokens) are
+///                        also included in chain construction. Default false
+///                        keeps the historical "skip pseudo regs" behavior.
 ///
 /// Note: Assumes non-SSA form (physical registers). Requires CFG to be built.
-STINKYTOFU_EXPORT void buildUseDefChain(Function& func, bool clearExisting);
+STINKYTOFU_EXPORT void buildUseDefChain(Function& func, bool clearExisting,
+                                        bool includePseudo = false);
 
 /// Overload that accepts pre-computed dominance info to avoid
 /// redundant computeDominanceInfo() calls.
 STINKYTOFU_EXPORT void buildUseDefChain(Function& func, const DominanceInfo& domInfo,
-                                        bool clearExisting);
+                                        bool clearExisting, bool includePseudo = false);
 
 /// Creates a Pass that builds the def-use chain for a Function.
 /// Use this to run buildUseDefChain as part of a pass pipeline.
 ///
 /// @param clearExisting  Forwarded to buildUseDefChain(). When true,
 ///                        existing PHIs and chains are removed first.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createBuildUseDefChainPass(bool clearExisting = true);
+/// @param includePseudo  Forwarded to buildUseDefChain(). When true, pseudo
+///                        registers (e.g. memory tokens) are also included.
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createBuildUseDefChainPass(bool clearExisting = true,
+                                                                   bool includePseudo = false);
 
 }  // namespace stinkytofu
