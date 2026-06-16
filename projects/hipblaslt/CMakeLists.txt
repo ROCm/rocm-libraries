@@ -96,13 +96,6 @@ if(HIPBLASLT_ENABLE_HOST)
     option(HIPBLASLT_ENABLE_ROCROLLER "Use RocRoller library." ON)
     cmake_dependent_option(HIPBLASLT_ENABLE_MARKER "Use the marker library." ON "NOT WIN32" OFF)
     option(HIPBLASLT_ENABLE_HIPBLAS_DIRECT "Use the hipblas header directly." OFF)
-
-    if(NOT HIPBLASLT_BUILD_SHARED_LIBS AND HIPBLASLT_ENABLE_ROCROLLER)
-        message(STATUS
-            "hipBLASLt: RocRoller cannot yet be co-exported from a static build; "
-            "forcing HIPBLASLT_ENABLE_ROCROLLER=OFF for this static configuration.")
-        set(HIPBLASLT_ENABLE_ROCROLLER OFF CACHE BOOL "Use RocRoller library." FORCE)
-    endif()
 endif()
 
 # mxDataGenerator is used by hipblaslt clients and tensilelite client; default OFF on Windows
