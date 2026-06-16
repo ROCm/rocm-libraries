@@ -262,7 +262,7 @@ std::map<std::string, int> initArchCaps(const IsaVersion& v) {
     rv["HasFP8_OCP"] = v[0] == 12;
     rv["HasWmmaArbStallBit"] = v[0] == 12 && v[1] == 5;
     rv["HasF32XEmulation"] = checkInList(v, {{9, 5, 0}, {12, 5, 0}});
-    rv["MaxSgprPreload"] = checkInList(v, {{12, 5, 0}}) ? 32 : 16;
+    rv["MaxSgprPreload"] = 16;
     rv["SgprPreloadPad"] =
         checkInList(v, {{9, 5, 0}}) || checkInList(v, {{9, 0, 10}}) || (v[0] == 9 && v[1] == 4);
     rv["HasMXScaleSwizzle"] = checkInList(v, {{9, 5, 0}, {12, 5, 0}});
