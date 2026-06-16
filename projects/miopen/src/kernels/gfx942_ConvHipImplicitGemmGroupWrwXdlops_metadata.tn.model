@@ -1,5 +1,5 @@
 {
-    "generated_on": "11 Jun 2026, 12:38:15",
+    "generated_on": "15 Jun 2026, 02:39:35",
     "gpu": {
         "num_cu": 304,
         "arch": "gfx942"
@@ -227,6 +227,26 @@
         }
     },
     "conditional_layouts": {
+        "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_Large_Tensor": {
+            "base_param_count": 15,
+            "conditional_params": {
+                "NumGroupsToMerge": {
+                    "kind": "present_if_gt_one",
+                    "base_index": 15
+                },
+                "BlkGemmPipelineScheduler": {
+                    "kind": "inline_after_optionals",
+                    "base_index": 15
+                },
+                "BlkGemmPipelineVersion": {
+                    "kind": "inline_after_optionals",
+                    "base_index": 16
+                },
+                "SplitK": {
+                    "kind": "appended_suffix"
+                }
+            }
+        },
         "DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3": {
             "base_param_count": 15,
             "conditional_params": {
@@ -255,26 +275,6 @@
                 "NumGroupsToMerge": {
                     "kind": "present_if_gt_one",
                     "base_index": 15
-                },
-                "SplitK": {
-                    "kind": "appended_suffix"
-                }
-            }
-        },
-        "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_Large_Tensor": {
-            "base_param_count": 15,
-            "conditional_params": {
-                "NumGroupsToMerge": {
-                    "kind": "present_if_gt_one",
-                    "base_index": 15
-                },
-                "BlkGemmPipelineScheduler": {
-                    "kind": "inline_after_optionals",
-                    "base_index": 15
-                },
-                "BlkGemmPipelineVersion": {
-                    "kind": "inline_after_optionals",
-                    "base_index": 16
                 },
                 "SplitK": {
                     "kind": "appended_suffix"

@@ -205,18 +205,16 @@ struct CKArgs
     // -- see commit 23059ecb41b).
     const NarrowedCKArrays2D& NarrowedArrays() const
     {
-        narrowed = NarrowedCKArrays2D{
-            .in_l             = ToCKIndexArray(input),
-            .in_s             = ToCKIndexArray(in_strides),
-            .out_l            = ToCKIndexArray(output),
-            .out_s            = ToCKIndexArray(out_strides),
-            .wei_l            = ToCKIndexArray(weight),
-            .wei_s            = ToCKIndexArray(wei_strides),
-            .filter_strides   = ToCKIndexArray(strides),
-            .filter_dilations = ToCKIndexArray(dilation),
-            .lPadding         = ToCKIndexArray(lPadding),
-            .rPadding         = ToCKIndexArray(rPadding),
-        };
+        narrowed = MakeNarrowedCKArrays<NarrowedCKArrays2D>(input,
+                                                            in_strides,
+                                                            output,
+                                                            out_strides,
+                                                            weight,
+                                                            wei_strides,
+                                                            strides,
+                                                            dilation,
+                                                            lPadding,
+                                                            rPadding);
         return narrowed;
     }
 

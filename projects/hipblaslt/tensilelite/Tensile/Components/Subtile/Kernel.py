@@ -1076,7 +1076,7 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
                                    comment=comment))
     else:
       # Fallback: use unit scale VGPR pre-initialized to 0x7f7f7f7f (scale=1.0 E8M0).
-      # Initialized once in mainLoop() before emitAllLoops() — VMovB32 cannot live here
+      # Initialized once in mainLoop() before emitMainAndExitLoops() — VMovB32 cannot live here
       # because InstructionScheduler drops non-MFMA instructions from the MFMA module.
       unitScaleVgpr = kernel.get("_subtileUnitScaleVgpr", -1)
       assert unitScaleVgpr >= 0, \
@@ -1315,7 +1315,7 @@ def mainLoop(writer, kernel):
       tensorParametersA=tensorParametersA,
       tensorParametersB=tensorParametersB)
 
-  module.add(scheduler.emitMainAndExitLoops(writer, kernel))
+  module.add(scheduler.emitMainAndExitLoops(writer, kernel, tensorParametersA, tensorParametersB))
 
   # Wrap the tail loop with the runtime K%DU counter setup and skip branch,
   # mirroring the legacy KernelWriter pattern (KernelWriter.py:5237 / 5618).

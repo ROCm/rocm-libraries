@@ -20,15 +20,15 @@
 // ---------------------------------------------------------------------------
 // ToCKIndexArray — narrow a long_index_t array to a ck::index_t (int32) array.
 //
-// Used at the BWD/WRW MakeArgPtr boundary because the installed CK BWD/WRW
-// MakeArgumentPointer interface (e.g.
-// device_grouped_conv_bwd_data_multiple_d.hpp) only accepts int32 length /
-// stride arrays. Narrowing here is safe because RequiresLargeTensorCKInstance
-// (implicitgemm_ck_util.hpp) blocks BWD/WRW selection when any stride exceeds
-// INT_MAX -- under that guard the candidate set for those directions is empty
-// (no BWD/WRW large-tensor CK instances are registered) and the narrowing
-// path is never reached on overflow shapes. For sub-INT_MAX shapes the
-// narrowing is exact.
+// Used on the sub-INT_MAX BWD/WRW MakeArgPtr path, where CK's int32
+// MakeArgumentPointer overload (e.g. device_grouped_conv_bwd_data_multiple_d.hpp)
+// accepts ck::index_t length / stride arrays only. For those shapes the
+// narrowing is exact. Large-tensor (>INT_MAX) shapes never reach this helper:
+// MakeArgPtr detects a large-tensor CK instance (IsLargeTensorCKInstance) and
+// binds CK's int64 long_index_t overload with the un-narrowed members instead.
+// The assert below therefore guards the contract -- if a >INT_MAX value is ever
+// narrowed here, the large-tensor branch was bypassed and the result would be
+// silently wrong.
 // ---------------------------------------------------------------------------
 template <typename T, std::size_t N>
 constexpr std::array<ck::index_t, N> ToCKIndexArray(const std::array<T, N>& src)
@@ -46,9 +46,9 @@ constexpr std::array<ck::index_t, N> ToCKIndexArray(const std::array<T, N>& src)
 
 // ---------------------------------------------------------------------------
 // NarrowedCKArrays3D / NarrowedCKArrays2D — bundles of int32-narrowed
-// length/stride arrays handed to CK's int32 MakeArgumentPointer overload.
-// Same caveat as ToCKIndexArray: only safe when RequiresLargeTensorCKInstance
-// is filtering out >INT_MAX shapes.
+// length/stride arrays handed to CK's int32 MakeArgumentPointer overload on
+// the sub-INT_MAX path. Large-tensor (>INT_MAX) shapes bypass these bundles
+// and bind CK's int64 long_index_t overload directly (see ToCKIndexArray).
 //
 // These bundles MUST be stored as members of the owning CKArgs (not as
 // function-local temporaries), because CK's MakeArgumentPointer captures
@@ -83,6 +83,42 @@ struct NarrowedCKArrays2D
     std::array<ck::index_t, 2> lPadding;
     std::array<ck::index_t, 2> rPadding;
 };
+
+// ---------------------------------------------------------------------------
+// MakeNarrowedCKArrays — build a NarrowedCKArrays2D/3D bundle by int32-narrowing
+// each int64 length/stride array via ToCKIndexArray. The 2D and 3D bundles
+// share field names, so a single Bundle-parameterized helper deduplicates the
+// identical field mapping across all five narrowing accessors (2D FWD, the
+// CKArgsSplitK base, and 3D FWD/BWD/WRW). Callers pass their own member arrays
+// positionally, which differ in name (2D uses input/output/weight/strides/
+// dilation; 3D uses in_lengths/out_lengths/wei_lengths/filter_strides/
+// filter_dilations) but not in meaning or order.
+// ---------------------------------------------------------------------------
+template <typename Bundle, typename LenArr, typename FilterArr>
+Bundle MakeNarrowedCKArrays(const LenArr& in_lengths,
+                            const LenArr& in_strides,
+                            const LenArr& out_lengths,
+                            const LenArr& out_strides,
+                            const LenArr& wei_lengths,
+                            const LenArr& wei_strides,
+                            const FilterArr& filter_strides,
+                            const FilterArr& filter_dilations,
+                            const FilterArr& lPadding,
+                            const FilterArr& rPadding)
+{
+    return Bundle{
+        .in_l             = ToCKIndexArray(in_lengths),
+        .in_s             = ToCKIndexArray(in_strides),
+        .out_l            = ToCKIndexArray(out_lengths),
+        .out_s            = ToCKIndexArray(out_strides),
+        .wei_l            = ToCKIndexArray(wei_lengths),
+        .wei_s            = ToCKIndexArray(wei_strides),
+        .filter_strides   = ToCKIndexArray(filter_strides),
+        .filter_dilations = ToCKIndexArray(filter_dilations),
+        .lPadding         = ToCKIndexArray(lPadding),
+        .rPadding         = ToCKIndexArray(rPadding),
+    };
+}
 
 // ---------------------------------------------------------------------------
 // CKArgsSplitK — CRTP base for BWD and WRW CKArgs.
@@ -167,18 +203,16 @@ struct CKArgsSplitK
     // >INT_MAX shapes even though no kernel is ultimately selected.
     const NarrowedCKArrays2D& GetNarrowedArrays() const
     {
-        narrowed = NarrowedCKArrays2D{
-            .in_l             = ToCKIndexArray(input),
-            .in_s             = ToCKIndexArray(in_strides),
-            .out_l            = ToCKIndexArray(output),
-            .out_s            = ToCKIndexArray(out_strides),
-            .wei_l            = ToCKIndexArray(weight),
-            .wei_s            = ToCKIndexArray(wei_strides),
-            .filter_strides   = ToCKIndexArray(strides),
-            .filter_dilations = ToCKIndexArray(dilation),
-            .lPadding         = ToCKIndexArray(lPadding),
-            .rPadding         = ToCKIndexArray(rPadding),
-        };
+        narrowed = MakeNarrowedCKArrays<NarrowedCKArrays2D>(input,
+                                                            in_strides,
+                                                            output,
+                                                            out_strides,
+                                                            weight,
+                                                            wei_strides,
+                                                            strides,
+                                                            dilation,
+                                                            lPadding,
+                                                            rPadding);
         return narrowed;
     }
 

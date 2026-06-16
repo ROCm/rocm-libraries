@@ -43,6 +43,10 @@
 #include <miopen/filesystem.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
+#include <fdeep/fdeep.hpp>
+#include <sstream>
+#include <string>
+#include <vector>
 
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 
@@ -499,8 +503,8 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, ExtractTunaNet2dFeaturesGolden)
                                     1.0f};
     expected.insert(expected.end(), raw.begin(), raw.end());
 
-    const auto derived =
-        common::EngineeredConvFeatures(1, 64, 64, 56, 56, 56, 56, 3, 3, 1, metadata.GetNumCu());
+    const auto derived = common::EngineeredConvFeatures(
+        1, 64, 64, 56, 56, 56, 56, 3, 3, 1, metadata.GetNumCu(), common::ConvDirection::Forward);
     expected.insert(expected.end(), derived.begin(), derived.end());
 
     ASSERT_EQ(features.size(), expected.size());
@@ -571,8 +575,8 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, ExtractTunaNet2dFeaturesHardcoded)
                                     1.0f,
                                     1.0f};
     expected.insert(expected.end(), raw.begin(), raw.end());
-    const auto derived =
-        common::EngineeredConvFeatures(1, 64, 64, 56, 56, 56, 56, 3, 3, 1, expected_num_cu);
+    const auto derived = common::EngineeredConvFeatures(
+        1, 64, 64, 56, 56, 56, 56, 3, 3, 1, expected_num_cu, common::ConvDirection::Forward);
     expected.insert(expected.end(), derived.begin(), derived.end());
 
     ASSERT_EQ(features.size(), expected.size());
@@ -593,45 +597,140 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          ::testing::ValuesIn(GenerateConvNDParams()),
                          ConvNDParamName);
 
-// Golden vector for the derived-feature block shared by the TunaNet (ExtractTunaNetND2dFeatures)
+// Golden vectors for the derived-feature block shared by the TunaNet (ExtractTunaNetND2dFeatures)
 // and candidate-selection input encoders via common::EngineeredConvFeatures. Pins the shared math
-// so a hasty change on either path is caught. The values match the derived tail of the
-// candidate-selection EngineeredInputGolden_Test for the same dimensions, anchoring both consumers
-// to one source. Pure CPU math -- no model files or device required.
+// so a hasty change on either path is caught. Uses C_in != C_out and all three directions so the
+// direction-dependent GEMM (M, N, K) assignment is fully exercised (C_in == C_out would hide it).
+// Pure CPU math -- no model files or device required.
 TEST(CPU_ConvAiEngineeredConvFeatures_NONE, Golden)
 {
-    const auto derived                = common::EngineeredConvFeatures(/*N=*/1,
-                                                        /*C_in=*/64,
-                                                        /*C_out=*/64,
-                                                        /*H_in=*/56,
-                                                        /*W_in=*/56,
-                                                        /*H_out=*/56,
-                                                        /*W_out=*/56,
-                                                        /*K_h=*/3,
-                                                        /*K_w=*/3,
-                                                        /*groups=*/1,
-                                                        /*num_cu=*/254);
-    const std::vector<float> expected = {19.2588406f,
-                                         8.05102253f,
-                                         4.17438745f,
-                                         6.35784245f,
-                                         49.0f,
-                                         5.44444466f,
-                                         0.111111112f,
-                                         18.5656948f,
-                                         6.67351675f,
-                                         1.0f,
-                                         0.00286989799f,
-                                         1.0f,
-                                         0.015625f,
-                                         4.04305124f,
-                                         4.04305124f,
-                                         4.17438745f,
-                                         4.17438745f,
-                                         0.693147182f};
-    ASSERT_EQ(derived.size(), expected.size());
-    for(std::size_t i = 0; i < expected.size(); ++i)
-        EXPECT_FLOAT_EQ(derived[i], expected[i]) << "derived feature mismatch at index " << i;
+    // N=2, C_in=64, C_out=128, 56x56, 3x3, g=1, num_cu=304. Only the GEMM-dimension features
+    // (indices 1..6) differ between directions; the rest are direction-independent.
+    struct Case
+    {
+        common::ConvDirection dir;
+        std::vector<float> expected;
+    };
+    const std::vector<Case> cases = {
+        {common::ConvDirection::Forward,
+         {20.645136f,
+          8.74401f,
+          4.1743873f,
+          7.0501225f,
+          98.0f,
+          5.4444444f,
+          0.055555556f,
+          19.951988f,
+          7.8792317f,
+          1.0f,
+          0.002869898f,
+          0.5f,
+          0.015625f,
+          4.0430513f,
+          4.0430513f,
+          4.1743873f,
+          4.8598124f,
+          1.0986123f}},
+        {common::ConvDirection::BackwardData,
+         {20.645136f,
+          4.8598124f,
+          6.3578423f,
+          8.74401f,
+          0.22222222f,
+          0.020408163f,
+          0.091836735f,
+          19.951988f,
+          7.8792317f,
+          1.0f,
+          0.002869898f,
+          0.5f,
+          0.015625f,
+          4.0430513f,
+          4.0430513f,
+          4.1743873f,
+          4.8598124f,
+          1.0986123f}},
+        {common::ConvDirection::BackwardWeights,
+         {20.645136f,
+          8.74401f,
+          6.3578423f,
+          4.8598124f,
+          10.888889f,
+          49.0f,
+          4.5f,
+          19.951988f,
+          7.8792317f,
+          1.0f,
+          0.002869898f,
+          0.5f,
+          0.015625f,
+          4.0430513f,
+          4.0430513f,
+          4.1743873f,
+          4.8598124f,
+          1.0986123f}},
+    };
+
+    for(const auto& c : cases)
+    {
+        const auto derived = common::EngineeredConvFeatures(
+            /*N=*/2,
+            /*C_in=*/64,
+            /*C_out=*/128,
+            /*H_in=*/56,
+            /*W_in=*/56,
+            /*H_out=*/56,
+            /*W_out=*/56,
+            /*K_h=*/3,
+            /*K_w=*/3,
+            /*groups=*/1,
+            /*num_cu=*/304,
+            c.dir);
+        ASSERT_EQ(derived.size(), c.expected.size());
+        for(std::size_t i = 0; i < c.expected.size(); ++i)
+            EXPECT_FLOAT_EQ(derived[i], c.expected[i])
+                << "derived feature mismatch at index " << i << " (direction "
+                << static_cast<int>(c.dir) << ")";
+    }
+}
+
+// Every bundled fdeep model file must be loadable by the deployed frugally-deep. This fails
+// loudly and directly if a model is exported in a format the linked fdeep cannot parse (e.g. a
+// Keras 3 export against a Keras 2-era fdeep). Without this, such a breakage only surfaces
+// indirectly downstream -- and because the runtime now degrades gracefully to the non-AI
+// heuristic on a load failure, it would otherwise be masked in CI. The .tn.model files are
+// frugally-deep models EXCEPT the "*_metadata.tn.model" siblings, which are plain JSON read by
+// MIOpen directly (not by fdeep). Pure CPU fdeep load -- no device required for the work itself.
+TEST(GPU_ConvAIModelLoad_FP32, BundledFdeepModelsLoad)
+{
+    const auto db = GetSystemDbPath();
+    ASSERT_TRUE(fs::exists(db)) << "system db path does not exist: " << db;
+
+    std::vector<std::string> failures;
+    std::size_t checked = 0;
+    for(const auto& entry : fs::directory_iterator(db))
+    {
+        const auto path = entry.path();
+        const auto name = path.filename().string();
+        if(!name.ends_with(".tn.model") || name.find("metadata") != std::string::npos)
+            continue;
+        ++checked;
+        try
+        {
+            fdeep::load_model(path.string(), true, fdeep::dev_null_logger);
+        }
+        catch(const std::exception& e)
+        {
+            failures.push_back(name + " -> " + e.what());
+        }
+    }
+    ASSERT_GT(checked, 0u) << "no fdeep .tn.model files found in " << db;
+
+    std::ostringstream oss;
+    for(const auto& f : failures)
+        oss << "\n  " << f;
+    EXPECT_TRUE(failures.empty()) << "frugally-deep failed to load " << failures.size() << " of "
+                                  << checked << " bundled model(s):" << oss.str();
 }
 
 } // namespace

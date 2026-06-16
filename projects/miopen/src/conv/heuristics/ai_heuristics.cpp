@@ -94,7 +94,8 @@ MIOPEN_INTERNALS_EXPORT std::vector<float> EngineeredConvFeatures(std::size_t N,
                                                                   std::size_t K_h,
                                                                   std::size_t K_w,
                                                                   std::size_t groups,
-                                                                  std::size_t num_cu)
+                                                                  std::size_t num_cu,
+                                                                  ConvDirection direction)
 {
     if(groups < 1) // avoid division by zero
         groups = 1;
@@ -118,13 +119,37 @@ MIOPEN_INTERNALS_EXPORT std::vector<float> EngineeredConvFeatures(std::size_t N,
                                         static_cast<double>(K_w) * static_cast<double>(H_out) *
                                         static_cast<double>(W_out),
                                     static_cast<double>(groups));
-    // Implicit GEMM dimensions: Conv -> GEMM(M, N, K).
-    const double M =
+    // Implicit GEMM dimensions: Conv -> GEMM(M, N, K). The (M, N, K) assignment is
+    // direction-dependent (the conv is lowered to a different GEMM for Fwd/BwdData/Wrw).
+    const double nhowo_over_g =
         safe_ratio(static_cast<double>(N) * static_cast<double>(H_out) * static_cast<double>(W_out),
                    static_cast<double>(groups));
-    const double N_gemm = safe_ratio(static_cast<double>(C_out), static_cast<double>(groups));
-    const double K_gemm =
+    const double cin_over_g  = safe_ratio(static_cast<double>(C_in), static_cast<double>(groups));
+    const double cout_over_g = safe_ratio(static_cast<double>(C_out), static_cast<double>(groups));
+    const double cin_filter =
         static_cast<double>(C_in) * static_cast<double>(K_h) * static_cast<double>(K_w);
+    const double cout_filter =
+        static_cast<double>(C_out) * static_cast<double>(K_h) * static_cast<double>(K_w);
+
+    double M = 0.0, N_gemm = 0.0, K_gemm = 0.0;
+    switch(direction)
+    {
+    case ConvDirection::Forward:
+        M      = nhowo_over_g;
+        N_gemm = cin_over_g;
+        K_gemm = cout_filter;
+        break;
+    case ConvDirection::BackwardData:
+        M      = cout_over_g;
+        N_gemm = cin_filter;
+        K_gemm = nhowo_over_g;
+        break;
+    case ConvDirection::BackwardWeights:
+        M      = nhowo_over_g;
+        N_gemm = cin_filter;
+        K_gemm = cout_over_g;
+        break;
+    }
     const double gemm_size = M * N_gemm * K_gemm;
     // Hardware utilization: work per compute unit.
     const double work_per_cu =
@@ -884,38 +909,52 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
     // 1. Try ND model first (for gfx942/gfx950, supports both 2D and 3D)
     // 2. Fall back to legacy model (for gfx908/gfx90a, 2D only)
     // 3. Return empty vector to trigger WTI fallback for unsupported architectures
-
-    // Try ND model first (preferred for gfx942/gfx950)
-    if((is2d || is3d) && HasNDTunaNetSupport(device))
+    //
+    // Any failure inside this block (including a model that fdeep cannot load -- e.g. a
+    // model exported in an incompatible format, which throws a non-miopen std::exception)
+    // is swallowed and turned into an empty result, so the caller degrades to the non-AI
+    // heuristic instead of failing the convolution. This is the predictor's contract: it
+    // returns a prediction or nothing, but never throws.
+    try
     {
-        int dim                        = is3d ? 3 : 2;
-        std::unique_ptr<ModelND> model = GetNDModel(device, dim);
-
-        if(model && model->IsProblemSupported(problem, ctx))
+        // Try ND model first (preferred for gfx942/gfx950)
+        if((is2d || is3d) && HasNDTunaNetSupport(device))
         {
-            MIOPEN_LOG_I2("Evaluating ND TunaNet for " << device);
-            std::vector<float> predictions = model->Forward(problem);
-            return ProcessAndCachePredictions(
-                problem, device, true, predictions, model->GetSolverMap());
+            int dim                        = is3d ? 3 : 2;
+            std::unique_ptr<ModelND> model = GetNDModel(device, dim);
+
+            if(model && model->IsProblemSupported(problem, ctx))
+            {
+                MIOPEN_LOG_I2("Evaluating ND TunaNet for " << device);
+                std::vector<float> predictions = model->Forward(problem);
+                return ProcessAndCachePredictions(
+                    problem, device, true, predictions, model->GetSolverMap());
+            }
+            // If ND model failed for this architecture, don't try legacy - go to WTI
+            MIOPEN_LOG_I2("ND TunaNet not applicable for this problem on " << device);
+            return {};
         }
-        // If ND model failed for this architecture, don't try legacy - go to WTI
-        MIOPEN_LOG_I2("ND TunaNet not applicable for this problem on " << device);
-        return {};
+
+        // Fall back to legacy 2D model (for gfx908/gfx90a only)
+        if(is2d && HasLegacyTunaNetSupport(device))
+        {
+            std::unique_ptr<Model> model = GetModel(device);
+
+            if(model && model->IsProblemSupported(problem, ctx))
+            {
+                MIOPEN_LOG_I2("Evaluating legacy TunaNet for " << device);
+                std::vector<float> predictions = model->Forward(problem);
+                return ProcessAndCachePredictions(
+                    problem, device, false, predictions, model->metadata.solver_map);
+            }
+            MIOPEN_LOG_I2("Legacy TunaNet not applicable for this problem on " << device);
+            return {};
+        }
     }
-
-    // Fall back to legacy 2D model (for gfx908/gfx90a only)
-    if(is2d && HasLegacyTunaNetSupport(device))
+    catch(const std::exception& e)
     {
-        std::unique_ptr<Model> model = GetModel(device);
-
-        if(model && model->IsProblemSupported(problem, ctx))
-        {
-            MIOPEN_LOG_I2("Evaluating legacy TunaNet for " << device);
-            std::vector<float> predictions = model->Forward(problem);
-            return ProcessAndCachePredictions(
-                problem, device, false, predictions, model->metadata.solver_map);
-        }
-        MIOPEN_LOG_I2("Legacy TunaNet not applicable for this problem on " << device);
+        MIOPEN_LOG_W("TunaNet prediction failed (" << e.what()
+                                                   << "); falling back to non-AI heuristic");
         return {};
     }
 
@@ -986,9 +1025,15 @@ MIOPEN_INTERNALS_EXPORT std::vector<float> ExtractTunaNetND2dFeatures(
     };
     features.insert(features.end(), raw_tail.begin(), raw_tail.end());
 
-    // Derived feature block (shared with the candidate-selection path).
-    const auto derived = common::EngineeredConvFeatures(
-        N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu);
+    // Derived feature block (shared with the candidate-selection path). Dimensions above are in the
+    // forward (driver) convention; the GEMM assignment is selected by the actual direction.
+    const auto gemm_dir = problem.GetDirection() == conv::Direction::Forward
+                              ? common::ConvDirection::Forward
+                          : problem.GetDirection() == conv::Direction::BackwardData
+                              ? common::ConvDirection::BackwardData
+                              : common::ConvDirection::BackwardWeights;
+    const auto derived  = common::EngineeredConvFeatures(
+        N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu, gemm_dir);
     features.insert(features.end(), derived.begin(), derived.end());
     return features;
 }

@@ -8,7 +8,7 @@
 // reference, catching int32 wraparound that can occur inside the CK kernel even
 // after MIOpen's host-side widening.
 //
-// Shape: x = (1, 96, 4736, 4736), w = (32, 96, 3, 3), group=1, pad=1, stride=1.
+// Shape: x = (1, 96, 4736, 4736), w = (16, 96, 1, 1), group=1, pad=0, stride=1.
 //   element count of x = 96 * 4736 * 4736 = 2.153 B (just above INT_MAX = 2.147 B).
 //   FP16 footprint of x ~= 4.3 GB; FP32 ~= 8.6 GB. The full test allocates several
 //   such tensors (X, W, Y on device plus host-side reference), so heavyweight
@@ -35,7 +35,7 @@ std::vector<TestCase> GetLargeStrideFwdTestCases()
 {
     return {
         // clang-format off
-        TestCase{{1, 96, 4736, 4736}, {32, 96, 3, 3}, {1, 1}, {1, 1}, {1, 1}, 1, false, false},
+        TestCase{{1, 96, 4736, 4736}, {16, 96, 1, 1}, {0, 0}, {1, 1}, {1, 1}, 1, false, false},
         // clang-format on
     };
 }

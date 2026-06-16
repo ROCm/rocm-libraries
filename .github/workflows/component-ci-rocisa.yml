@@ -1,0 +1,67 @@
+name: "Component CI: rocISA"
+
+on:
+  workflow_call:
+    inputs:
+      docker_image:
+        type: string
+        required: true
+      linux_runner:
+        type: string
+        required: true
+      windows_runner:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ${{ inputs.linux_runner }}
+    container:
+      image: ${{ inputs.docker_image }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm-linux
+        with:
+          amdgpu_family: gfx94X-dcgpu
+
+      - name: Test pip install
+        uses: ./.github/actions/pip-install-test
+        with:
+          package_path: projects/hipblaslt/tensilelite/rocisa
+          test_path: test
+
+  windows:
+    name: Windows
+    runs-on: ${{ inputs.windows_runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Configure git long paths
+        run: git config --global core.longpaths true
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm-windows
+        with:
+          amdgpu_family: gfx1151
+
+      - name: Test pip install
+        uses: ./.github/actions/pip-install-test
+        with:
+          package_path: projects/hipblaslt/tensilelite/rocisa
+          test_path: test

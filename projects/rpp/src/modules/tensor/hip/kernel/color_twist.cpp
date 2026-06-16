@@ -26,8 +26,8 @@ SOFTWARE.
 #include "rpp_hip_math.hpp"
 #include "rpp_hip_rgb_hsv_conversion.hpp"
 
-__device__ void color_twist_1RGB_hip_compute(float *pixelR, float *pixelG, float *pixelB, float4 *colorTwistParams_f4)
-{
+__device__ void color_twist_1RGB_hip_compute(float* pixelR, float* pixelG, float* pixelB,
+                                             float4* colorTwistParams_f4) {
     // RGB to HSV
     float hue, sat, val, add = 0.0f;
     rgb_to_hsv_hip(pixelR, pixelG, pixelB, hue, sat, val, add);
@@ -40,96 +40,96 @@ __device__ void color_twist_1RGB_hip_compute(float *pixelR, float *pixelG, float
     sat = fmaxf(0.0f, fminf(1.0f, sat));
 
     // HSV to RGB with brightness/contrast adjustment
-    hsv_to_rgb_hip(hue, sat, val, pixelR, pixelG, pixelB); 
+    hsv_to_rgb_hip(hue, sat, val, pixelR, pixelG, pixelB);
     *pixelR = fmaf(*pixelR, colorTwistParams_f4->x, colorTwistParams_f4->y);
     *pixelG = fmaf(*pixelG, colorTwistParams_f4->x, colorTwistParams_f4->y);
     *pixelB = fmaf(*pixelB, colorTwistParams_f4->x, colorTwistParams_f4->y);
 }
 
-__device__ void color_twist_8RGB_hip_compute(d_float24 *pix_f24, float4 *colorTwistParams_f4)
-{
-    color_twist_1RGB_hip_compute(&(pix_f24->f1[ 0]), &(pix_f24->f1[ 8]), &(pix_f24->f1[16]), colorTwistParams_f4);
-    color_twist_1RGB_hip_compute(&(pix_f24->f1[ 1]), &(pix_f24->f1[ 9]), &(pix_f24->f1[17]), colorTwistParams_f4);
-    color_twist_1RGB_hip_compute(&(pix_f24->f1[ 2]), &(pix_f24->f1[10]), &(pix_f24->f1[18]), colorTwistParams_f4);
-    color_twist_1RGB_hip_compute(&(pix_f24->f1[ 3]), &(pix_f24->f1[11]), &(pix_f24->f1[19]), colorTwistParams_f4);
-    color_twist_1RGB_hip_compute(&(pix_f24->f1[ 4]), &(pix_f24->f1[12]), &(pix_f24->f1[20]), colorTwistParams_f4);
-    color_twist_1RGB_hip_compute(&(pix_f24->f1[ 5]), &(pix_f24->f1[13]), &(pix_f24->f1[21]), colorTwistParams_f4);
-    color_twist_1RGB_hip_compute(&(pix_f24->f1[ 6]), &(pix_f24->f1[14]), &(pix_f24->f1[22]), colorTwistParams_f4);
-    color_twist_1RGB_hip_compute(&(pix_f24->f1[ 7]), &(pix_f24->f1[15]), &(pix_f24->f1[23]), colorTwistParams_f4);
+__device__ void color_twist_8RGB_hip_compute(d_float24* pix_f24, float4* colorTwistParams_f4) {
+    color_twist_1RGB_hip_compute(&(pix_f24->f1[0]), &(pix_f24->f1[8]), &(pix_f24->f1[16]),
+                                 colorTwistParams_f4);
+    color_twist_1RGB_hip_compute(&(pix_f24->f1[1]), &(pix_f24->f1[9]), &(pix_f24->f1[17]),
+                                 colorTwistParams_f4);
+    color_twist_1RGB_hip_compute(&(pix_f24->f1[2]), &(pix_f24->f1[10]), &(pix_f24->f1[18]),
+                                 colorTwistParams_f4);
+    color_twist_1RGB_hip_compute(&(pix_f24->f1[3]), &(pix_f24->f1[11]), &(pix_f24->f1[19]),
+                                 colorTwistParams_f4);
+    color_twist_1RGB_hip_compute(&(pix_f24->f1[4]), &(pix_f24->f1[12]), &(pix_f24->f1[20]),
+                                 colorTwistParams_f4);
+    color_twist_1RGB_hip_compute(&(pix_f24->f1[5]), &(pix_f24->f1[13]), &(pix_f24->f1[21]),
+                                 colorTwistParams_f4);
+    color_twist_1RGB_hip_compute(&(pix_f24->f1[6]), &(pix_f24->f1[14]), &(pix_f24->f1[22]),
+                                 colorTwistParams_f4);
+    color_twist_1RGB_hip_compute(&(pix_f24->f1[7]), &(pix_f24->f1[15]), &(pix_f24->f1[23]),
+                                 colorTwistParams_f4);
 }
 
-__device__ void color_twist_hip_compute(uchar *srcPtr, d_float24 *pix_f24, float4 *colorTwistParams_f4)
-{
+__device__ void color_twist_hip_compute(uchar* srcPtr, d_float24* pix_f24,
+                                        float4* colorTwistParams_f4) {
     float4 normalizer_f4 = FLOAT4_ONE_OVER_255;
     rpp_hip_math_multiply24_const(pix_f24, pix_f24, normalizer_f4);
     colorTwistParams_f4->x = colorTwistParams_f4->x * 255.0f;
     float hueParam = fmodf(colorTwistParams_f4->z, 360.0f);
-    if(hueParam < 0.0f)
-        hueParam += 360.0f;
-    colorTwistParams_f4->z = hueParam * 0.01666667f; // 6 * 1/360
+    if (hueParam < 0.0f) hueParam += 360.0f;
+    colorTwistParams_f4->z = hueParam * 0.01666667f;  // 6 * 1/360
     color_twist_8RGB_hip_compute(pix_f24, colorTwistParams_f4);
     rpp_hip_pixel_check_0to255(pix_f24);
 }
-__device__ void color_twist_hip_compute(float *srcPtr, d_float24 *pix_f24, float4 *colorTwistParams_f4)
-{
+__device__ void color_twist_hip_compute(float* srcPtr, d_float24* pix_f24,
+                                        float4* colorTwistParams_f4) {
     colorTwistParams_f4->y = colorTwistParams_f4->y * ONE_OVER_255;
     float hueParam = fmodf(colorTwistParams_f4->z, 360.0f);
-    if(hueParam < 0.0f)
-        hueParam += 360.0f;
-    colorTwistParams_f4->z = hueParam * 0.01666667f; // 6 * 1/360
+    if (hueParam < 0.0f) hueParam += 360.0f;
+    colorTwistParams_f4->z = hueParam * 0.01666667f;  // 6 * 1/360
     color_twist_8RGB_hip_compute(pix_f24, colorTwistParams_f4);
     rpp_hip_pixel_check_0to1(pix_f24);
 }
-__device__ void color_twist_hip_compute(half *srcPtr, d_float24 *pix_f24, float4 *colorTwistParams_f4)
-{
+__device__ void color_twist_hip_compute(half* srcPtr, d_float24* pix_f24,
+                                        float4* colorTwistParams_f4) {
     colorTwistParams_f4->y = colorTwistParams_f4->y * ONE_OVER_255;
     float hueParam = fmodf(colorTwistParams_f4->z, 360.0f);
-    if(hueParam < 0.0f)
-        hueParam += 360.0f;
-    colorTwistParams_f4->z = hueParam * 0.01666667f; // 6 * 1/360
+    if (hueParam < 0.0f) hueParam += 360.0f;
+    colorTwistParams_f4->z = hueParam * 0.01666667f;  // 6 * 1/360
     color_twist_8RGB_hip_compute(pix_f24, colorTwistParams_f4);
     rpp_hip_pixel_check_0to1(pix_f24);
 }
-__device__ void color_twist_hip_compute(schar *srcPtr, d_float24 *pix_f24, float4 *colorTwistParams_f4)
-{
-    float4 i8Offset_f4 =  FLOAT4_128;
+__device__ void color_twist_hip_compute(schar* srcPtr, d_float24* pix_f24,
+                                        float4* colorTwistParams_f4) {
+    float4 i8Offset_f4 = FLOAT4_128;
     float4 normalizer_f4 = FLOAT4_ONE_OVER_255;
     rpp_hip_math_add24_const(pix_f24, pix_f24, i8Offset_f4);
     rpp_hip_math_multiply24_const(pix_f24, pix_f24, normalizer_f4);
     colorTwistParams_f4->x = colorTwistParams_f4->x * 255.0f;
     float hueParam = fmodf(colorTwistParams_f4->z, 360.0f);
-    if(hueParam < 0.0f)
-        hueParam += 360.0f;
-    colorTwistParams_f4->z = hueParam * 0.01666667f; // 6 * 1/360
+    if (hueParam < 0.0f) hueParam += 360.0f;
+    colorTwistParams_f4->z = hueParam * 0.01666667f;  // 6 * 1/360
     color_twist_8RGB_hip_compute(pix_f24, colorTwistParams_f4);
     rpp_hip_pixel_check_0to255(pix_f24);
     rpp_hip_math_subtract24_const(pix_f24, pix_f24, i8Offset_f4);
 }
 
 template <typename T>
-__global__ void color_twist_pkd_hip_tensor(T *srcPtr,
-                                           uint2 srcStridesNH,
-                                           T *dstPtr,
-                                           uint2 dstStridesNH,
-                                           float *brightnessTensor,
-                                           float *contrastTensor,
-                                           float *hueTensor,
-                                           float *saturationTensor,
-                                           RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void color_twist_pkd_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr,
+                                           uint2 dstStridesNH, float* brightnessTensor,
+                                           float* contrastTensor, float* hueTensor,
+                                           float* saturationTensor, RpptROIPtr roiTensorPtrSrc) {
     int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 8;
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y >= roiTensorPtrSrc[id_z].xywhROI.roiHeight) || (id_x >= roiTensorPtrSrc[id_z].xywhROI.roiWidth))
-    {
+    if ((id_y >= roiTensorPtrSrc[id_z].xywhROI.roiHeight) ||
+        (id_x >= roiTensorPtrSrc[id_z].xywhROI.roiWidth)) {
         return;
     }
 
-    uint srcIdx = (id_z * srcStridesNH.x) + ((id_y + roiTensorPtrSrc[id_z].xywhROI.xy.y) * srcStridesNH.y) + ((id_x + roiTensorPtrSrc[id_z].xywhROI.xy.x) * 3);
+    uint srcIdx = (id_z * srcStridesNH.x) +
+                  ((id_y + roiTensorPtrSrc[id_z].xywhROI.xy.y) * srcStridesNH.y) +
+                  ((id_x + roiTensorPtrSrc[id_z].xywhROI.xy.x) * 3);
     uint dstIdx = (id_z * dstStridesNH.x) + (id_y * dstStridesNH.y) + id_x * 3;
 
-    float4 colorTwistParams_f4 = make_float4(brightnessTensor[id_z], contrastTensor[id_z], hueTensor[id_z], saturationTensor[id_z]);
+    float4 colorTwistParams_f4 = make_float4(brightnessTensor[id_z], contrastTensor[id_z],
+                                             hueTensor[id_z], saturationTensor[id_z]);
 
     d_float24 pix_f24;
 
@@ -139,29 +139,26 @@ __global__ void color_twist_pkd_hip_tensor(T *srcPtr,
 }
 
 template <typename T>
-__global__ void color_twist_pln_hip_tensor(T *srcPtr,
-                                           uint3 srcStridesNCH,
-                                           T *dstPtr,
-                                           uint3 dstStridesNCH,
-                                           float *brightnessTensor,
-                                           float *contrastTensor,
-                                           float *hueTensor,
-                                           float *saturationTensor,
-                                           RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void color_twist_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
+                                           uint3 dstStridesNCH, float* brightnessTensor,
+                                           float* contrastTensor, float* hueTensor,
+                                           float* saturationTensor, RpptROIPtr roiTensorPtrSrc) {
     int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 8;
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y >= roiTensorPtrSrc[id_z].xywhROI.roiHeight) || (id_x >= roiTensorPtrSrc[id_z].xywhROI.roiWidth))
-    {
+    if ((id_y >= roiTensorPtrSrc[id_z].xywhROI.roiHeight) ||
+        (id_x >= roiTensorPtrSrc[id_z].xywhROI.roiWidth)) {
         return;
     }
 
-    uint srcIdx = (id_z * srcStridesNCH.x) + ((id_y + roiTensorPtrSrc[id_z].xywhROI.xy.y) * srcStridesNCH.z) + (id_x + roiTensorPtrSrc[id_z].xywhROI.xy.x);
+    uint srcIdx = (id_z * srcStridesNCH.x) +
+                  ((id_y + roiTensorPtrSrc[id_z].xywhROI.xy.y) * srcStridesNCH.z) +
+                  (id_x + roiTensorPtrSrc[id_z].xywhROI.xy.x);
     uint dstIdx = (id_z * dstStridesNCH.x) + (id_y * dstStridesNCH.z) + id_x;
 
-    float4 colorTwistParams_f4 = make_float4(brightnessTensor[id_z], contrastTensor[id_z], hueTensor[id_z], saturationTensor[id_z]);
+    float4 colorTwistParams_f4 = make_float4(brightnessTensor[id_z], contrastTensor[id_z],
+                                             hueTensor[id_z], saturationTensor[id_z]);
 
     d_float24 pix_f24;
 
@@ -171,29 +168,27 @@ __global__ void color_twist_pln_hip_tensor(T *srcPtr,
 }
 
 template <typename T>
-__global__ void color_twist_pkd3_pln3_hip_tensor(T *srcPtr,
-                                                 uint2 srcStridesNH,
-                                                 T *dstPtr,
-                                                 uint3 dstStridesNCH,
-                                                 float *brightnessTensor,
-                                                 float *contrastTensor,
-                                                 float *hueTensor,
-                                                 float *saturationTensor,
-                                                 RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void color_twist_pkd3_pln3_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr,
+                                                 uint3 dstStridesNCH, float* brightnessTensor,
+                                                 float* contrastTensor, float* hueTensor,
+                                                 float* saturationTensor,
+                                                 RpptROIPtr roiTensorPtrSrc) {
     int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 8;
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y >= roiTensorPtrSrc[id_z].xywhROI.roiHeight) || (id_x >= roiTensorPtrSrc[id_z].xywhROI.roiWidth))
-    {
+    if ((id_y >= roiTensorPtrSrc[id_z].xywhROI.roiHeight) ||
+        (id_x >= roiTensorPtrSrc[id_z].xywhROI.roiWidth)) {
         return;
     }
 
-    uint srcIdx = (id_z * srcStridesNH.x) + ((id_y + roiTensorPtrSrc[id_z].xywhROI.xy.y) * srcStridesNH.y) + ((id_x + roiTensorPtrSrc[id_z].xywhROI.xy.x) * 3);
+    uint srcIdx = (id_z * srcStridesNH.x) +
+                  ((id_y + roiTensorPtrSrc[id_z].xywhROI.xy.y) * srcStridesNH.y) +
+                  ((id_x + roiTensorPtrSrc[id_z].xywhROI.xy.x) * 3);
     uint dstIdx = (id_z * dstStridesNCH.x) + (id_y * dstStridesNCH.z) + id_x;
 
-    float4 colorTwistParams_f4 = make_float4(brightnessTensor[id_z], contrastTensor[id_z], hueTensor[id_z], saturationTensor[id_z]);
+    float4 colorTwistParams_f4 = make_float4(brightnessTensor[id_z], contrastTensor[id_z],
+                                             hueTensor[id_z], saturationTensor[id_z]);
 
     d_float24 pix_f24;
 
@@ -203,29 +198,27 @@ __global__ void color_twist_pkd3_pln3_hip_tensor(T *srcPtr,
 }
 
 template <typename T>
-__global__ void color_twist_pln3_pkd3_hip_tensor(T *srcPtr,
-                                                 uint3 srcStridesNCH,
-                                                 T *dstPtr,
-                                                 uint2 dstStridesNH,
-                                                 float *brightnessTensor,
-                                                 float *contrastTensor,
-                                                 float *hueTensor,
-                                                 float *saturationTensor,
-                                                 RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void color_twist_pln3_pkd3_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
+                                                 uint2 dstStridesNH, float* brightnessTensor,
+                                                 float* contrastTensor, float* hueTensor,
+                                                 float* saturationTensor,
+                                                 RpptROIPtr roiTensorPtrSrc) {
     int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 8;
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y >= roiTensorPtrSrc[id_z].xywhROI.roiHeight) || (id_x >= roiTensorPtrSrc[id_z].xywhROI.roiWidth))
-    {
+    if ((id_y >= roiTensorPtrSrc[id_z].xywhROI.roiHeight) ||
+        (id_x >= roiTensorPtrSrc[id_z].xywhROI.roiWidth)) {
         return;
     }
 
-    uint srcIdx = (id_z * srcStridesNCH.x) + ((id_y + roiTensorPtrSrc[id_z].xywhROI.xy.y) * srcStridesNCH.z) + (id_x + roiTensorPtrSrc[id_z].xywhROI.xy.x);
+    uint srcIdx = (id_z * srcStridesNCH.x) +
+                  ((id_y + roiTensorPtrSrc[id_z].xywhROI.xy.y) * srcStridesNCH.z) +
+                  (id_x + roiTensorPtrSrc[id_z].xywhROI.xy.x);
     uint dstIdx = (id_z * dstStridesNH.x) + (id_y * dstStridesNH.y) + id_x * 3;
 
-    float4 colorTwistParams_f4 = make_float4(brightnessTensor[id_z], contrastTensor[id_z], hueTensor[id_z], saturationTensor[id_z]);
+    float4 colorTwistParams_f4 = make_float4(brightnessTensor[id_z], contrastTensor[id_z],
+                                             hueTensor[id_z], saturationTensor[id_z]);
 
     d_float24 pix_f24;
 
@@ -235,99 +228,74 @@ __global__ void color_twist_pln3_pkd3_hip_tensor(T *srcPtr,
 }
 
 template <typename T>
-RppStatus hip_exec_color_twist_tensor(T *srcPtr,
-                                      RpptDescPtr srcDescPtr,
-                                      T *dstPtr,
-                                      RpptDescPtr dstDescPtr,
-                                      Rpp32f *brightnessTensor,
-                                      Rpp32f *contrastTensor,
-                                      Rpp32f *hueTensor,
-                                      Rpp32f *saturationTensor,
-                                      RpptROIPtr roiTensorPtrSrc,
-                                      RpptRoiType roiType,
-                                      rpp::Handle& handle)
-{
-    if (roiType == RpptRoiType::LTRB)
-        hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+RppStatus hip_exec_color_twist_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
+                                      RpptDescPtr dstDescPtr, Rpp32f* brightnessTensor,
+                                      Rpp32f* contrastTensor, Rpp32f* hueTensor,
+                                      Rpp32f* saturationTensor, RpptROIPtr roiTensorPtrSrc,
+                                      RpptRoiType roiType, rpp::Handle& handle) {
+    if (roiType == RpptRoiType::LTRB) hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
 
-    if ((srcDescPtr->c == 3) && (dstDescPtr->c == 3))
-    {
+    if ((srcDescPtr->c == 3) && (dstDescPtr->c == 3)) {
         int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
         int globalThreads_y = dstDescPtr->h;
         int globalThreads_z = handle.GetBatchSize();
 
-        if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
+        if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NHWC)) {
             globalThreads_x = (dstDescPtr->strides.hStride / 3 + 7) >> 3;
-            hipLaunchKernelGGL(color_twist_pkd_hip_tensor,
-                               dim3(ceil((float)globalThreads_x/LOCAL_THREADS_X), ceil((float)globalThreads_y/LOCAL_THREADS_Y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                               0,
-                               handle.GetStream(),
-                               srcPtr,
-                               make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
-                               dstPtr,
-                               make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
-                               brightnessTensor,
-                               contrastTensor,
-                               hueTensor,
-                               saturationTensor,
-                               roiTensorPtrSrc);
+            hipLaunchKernelGGL(
+                color_twist_pkd_hip_tensor,
+                dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
+                     ceil((float)globalThreads_y / LOCAL_THREADS_Y),
+                     ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0, handle.GetStream(),
+                srcPtr, make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
+                dstPtr, make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
+                brightnessTensor, contrastTensor, hueTensor, saturationTensor, roiTensorPtrSrc);
             HIP_CHECK_LAUNCH_RETURN();
-        }
-        else if ((srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
+                   (dstDescPtr->layout == RpptLayout::NCHW)) {
             hipLaunchKernelGGL(color_twist_pln_hip_tensor,
-                               dim3(ceil((float)globalThreads_x/LOCAL_THREADS_X), ceil((float)globalThreads_y/LOCAL_THREADS_Y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                               0,
-                               handle.GetStream(),
-                               srcPtr,
-                               make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride, srcDescPtr->strides.hStride),
+                               dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
+                                    ceil((float)globalThreads_y / LOCAL_THREADS_Y),
+                                    ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
+                               handle.GetStream(), srcPtr,
+                               make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride,
+                                          srcDescPtr->strides.hStride),
                                dstPtr,
-                               make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride, dstDescPtr->strides.hStride),
-                               brightnessTensor,
-                               contrastTensor,
-                               hueTensor,
-                               saturationTensor,
+                               make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
+                                          dstDescPtr->strides.hStride),
+                               brightnessTensor, contrastTensor, hueTensor, saturationTensor,
                                roiTensorPtrSrc);
             HIP_CHECK_LAUNCH_RETURN();
-        }
-        else if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
-            hipLaunchKernelGGL(color_twist_pkd3_pln3_hip_tensor,
-                               dim3(ceil((float)globalThreads_x/LOCAL_THREADS_X), ceil((float)globalThreads_y/LOCAL_THREADS_Y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                               0,
-                               handle.GetStream(),
-                               srcPtr,
-                               make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
-                               dstPtr,
-                               make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride, dstDescPtr->strides.hStride),
-                               brightnessTensor,
-                               contrastTensor,
-                               hueTensor,
-                               saturationTensor,
-                               roiTensorPtrSrc);
+        } else if ((srcDescPtr->layout == RpptLayout::NHWC) &&
+                   (dstDescPtr->layout == RpptLayout::NCHW)) {
+            hipLaunchKernelGGL(
+                color_twist_pkd3_pln3_hip_tensor,
+                dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
+                     ceil((float)globalThreads_y / LOCAL_THREADS_Y),
+                     ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0, handle.GetStream(),
+                srcPtr, make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
+                dstPtr,
+                make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
+                           dstDescPtr->strides.hStride),
+                brightnessTensor, contrastTensor, hueTensor, saturationTensor, roiTensorPtrSrc);
             HIP_CHECK_LAUNCH_RETURN();
-        }
-        else if ((srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
+        } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
+                   (dstDescPtr->layout == RpptLayout::NHWC)) {
             globalThreads_x = (srcDescPtr->strides.hStride + 7) >> 3;
-            hipLaunchKernelGGL(color_twist_pln3_pkd3_hip_tensor,
-                               dim3(ceil((float)globalThreads_x/LOCAL_THREADS_X), ceil((float)globalThreads_y/LOCAL_THREADS_Y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                               0,
-                               handle.GetStream(),
-                               srcPtr,
-                               make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride, srcDescPtr->strides.hStride),
-                               dstPtr,
-                               make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
-                               brightnessTensor,
-                               contrastTensor,
-                               hueTensor,
-                               saturationTensor,
-                               roiTensorPtrSrc);
+            hipLaunchKernelGGL(
+                color_twist_pln3_pkd3_hip_tensor,
+                dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
+                     ceil((float)globalThreads_y / LOCAL_THREADS_Y),
+                     ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0, handle.GetStream(),
+                srcPtr,
+                make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride,
+                           srcDescPtr->strides.hStride),
+                dstPtr, make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
+                brightnessTensor, contrastTensor, hueTensor, saturationTensor, roiTensorPtrSrc);
             HIP_CHECK_LAUNCH_RETURN();
         }
     }
@@ -335,50 +303,18 @@ RppStatus hip_exec_color_twist_tensor(T *srcPtr,
     return RPP_SUCCESS;
 }
 
-template RppStatus hip_exec_color_twist_tensor<Rpp8u>(Rpp8u*,
-                                                      RpptDescPtr,
-                                                      Rpp8u*,
-                                                      RpptDescPtr,
-                                                      Rpp32f*,
-                                                      Rpp32f*,
-                                                      Rpp32f*,
-                                                      Rpp32f*,
-                                                      RpptROIPtr,
-                                                      RpptRoiType,
-                                                      rpp::Handle&);
+template RppStatus hip_exec_color_twist_tensor<Rpp8u>(Rpp8u*, RpptDescPtr, Rpp8u*, RpptDescPtr,
+                                                      Rpp32f*, Rpp32f*, Rpp32f*, Rpp32f*,
+                                                      RpptROIPtr, RpptRoiType, rpp::Handle&);
 
-template RppStatus hip_exec_color_twist_tensor<half>(half*,
-                                                     RpptDescPtr,
-                                                     half*,
-                                                     RpptDescPtr,
-                                                     Rpp32f*,
-                                                     Rpp32f*,
-                                                     Rpp32f*,
-                                                     Rpp32f*,
-                                                     RpptROIPtr,
-                                                     RpptRoiType,
-                                                     rpp::Handle&);
+template RppStatus hip_exec_color_twist_tensor<half>(half*, RpptDescPtr, half*, RpptDescPtr,
+                                                     Rpp32f*, Rpp32f*, Rpp32f*, Rpp32f*, RpptROIPtr,
+                                                     RpptRoiType, rpp::Handle&);
 
-template RppStatus hip_exec_color_twist_tensor<Rpp32f>(Rpp32f*,
-                                                       RpptDescPtr,
-                                                       Rpp32f*,
-                                                       RpptDescPtr,
-                                                       Rpp32f*,
-                                                       Rpp32f*,
-                                                       Rpp32f*,
-                                                       Rpp32f*,
-                                                       RpptROIPtr,
-                                                       RpptRoiType,
-                                                       rpp::Handle&);
+template RppStatus hip_exec_color_twist_tensor<Rpp32f>(Rpp32f*, RpptDescPtr, Rpp32f*, RpptDescPtr,
+                                                       Rpp32f*, Rpp32f*, Rpp32f*, Rpp32f*,
+                                                       RpptROIPtr, RpptRoiType, rpp::Handle&);
 
-template RppStatus hip_exec_color_twist_tensor<Rpp8s>(Rpp8s*,
-                                                      RpptDescPtr,
-                                                      Rpp8s*,
-                                                      RpptDescPtr,
-                                                      Rpp32f*,
-                                                      Rpp32f*,
-                                                      Rpp32f*,
-                                                      Rpp32f*,
-                                                      RpptROIPtr,
-                                                      RpptRoiType,
-                                                      rpp::Handle&);
+template RppStatus hip_exec_color_twist_tensor<Rpp8s>(Rpp8s*, RpptDescPtr, Rpp8s*, RpptDescPtr,
+                                                      Rpp32f*, Rpp32f*, Rpp32f*, Rpp32f*,
+                                                      RpptROIPtr, RpptRoiType, rpp::Handle&);
