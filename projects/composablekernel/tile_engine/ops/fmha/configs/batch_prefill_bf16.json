@@ -1,0 +1,8 @@
+{
+  "variant": "batch_prefill",
+  "trait_config": {
+    "data_type": {"values": ["bf16"]},
+    "mask": {"values": ["top_left"]},
+    "bias": {"values": ["no"]}
+  }
+}

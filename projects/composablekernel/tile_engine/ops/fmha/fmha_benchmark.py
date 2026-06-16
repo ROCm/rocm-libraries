@@ -46,6 +46,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
 from parallel_runner import run_parallel_on_gpus  # noqa: E402
 
 
+# Dual PASS/FAIL gate thresholds for FP8 dtypes. The strict per-element
+# tolerance (atol=0.055, see _DTYPE_TOL) decides what counts as "within tol";
+# a kernel passes only when nearly every element is within that tol AND the
+# worst element stays under CK's fp8bf16 reference atol ceiling. This separates
+# acceptable FP8 quantization drift from a localized kernel bug.
+FP8_WITHIN_TOL_PCT_MIN = 99.9  # minimum percent of elements within strict tol
+FP8_MAX_ERR_CEILING = 0.18  # CK's fp8bf16 reference atol ceiling
+
+
 def _compute_result(
     config,
     prob,
@@ -58,7 +67,7 @@ def _compute_result(
     dtype_tol,
     gpu_id=None,
 ):
-    """Compute tflops, max_err, status and build result dict + display line.
+    """Compute tflops, error metrics, status and build result dict + display line.
 
     Returns (result_dict, display_line) or None if time_ms is None/0.
     """
@@ -69,13 +78,37 @@ def _compute_result(
         tflops = prob.num_ops * causal_ratio / (time_ms * 1e-3) / 1e12
 
     max_err = 0.0
+    mean_err = 0.0
+    rms_err = 0.0
+    p99_err = 0.0
+    within_tol_pct = 0.0
     status = "OK"
     if ref is not None and output is not None:
         out_f = output.astype(np.float32)
-        max_err = float(np.abs(out_f - ref).max())
+        abs_err = np.abs(out_f - ref)
+        max_err = float(abs_err.max())
+        mean_err = float(abs_err.mean())
+        rms_err = float(np.sqrt(np.mean((out_f - ref) ** 2)))
+        p99_err = float(np.percentile(abs_err, 99))
         atol, rtol = dtype_tol
         tol = atol + rtol * np.abs(ref).max()
-        status = "PASS" if max_err < tol else "FAIL"
+        within_tol_pct = float(100.0 * np.mean(abs_err < tol))
+        # PASS/FAIL gate. FP8 dtypes use a DUAL gate: the bulk of elements must
+        # be within the strict per-element tol AND the worst element must stay
+        # under CK's fp8bf16 reference atol ceiling. This distinguishes a
+        # localized kernel bug (a few elements very wrong, rest perfect) from
+        # genuine FP8 quantization drift. Non-FP8 dtypes keep max_err < tol.
+        if config.data_type.startswith("fp8"):
+            status = (
+                "PASS"
+                if (
+                    within_tol_pct >= FP8_WITHIN_TOL_PCT_MIN
+                    and max_err < FP8_MAX_ERR_CEILING
+                )
+                else "FAIL"
+            )
+        else:
+            status = "PASS" if max_err < tol else "FAIL"
         # Guard against broken kernels that emit all-zeros or NaN/Inf while the
         # reference is non-trivial (e.g. the bk0=128 all-zero-output bug). A loose
         # tolerance would otherwise let these silently "PASS".
@@ -124,6 +157,10 @@ def _compute_result(
         "latency_ms": time_ms,
         "tflops": tflops,
         "max_err": max_err,
+        "mean_err": mean_err,
+        "rms_err": rms_err,
+        "p99_err": p99_err,
+        "within_tol_pct": within_tol_pct,
         "status": status,
     }
     return result_dict, display_line
@@ -627,10 +664,11 @@ def main():
                     qs_int = _QSCALE_INT.get(config.qscale, 0)
                     run_kwargs["qscale_type"] = qs_int
                     # Enable real FP8 quant + paged K/V upload + descales so the
-                    # kernel output can be meaningfully verified (PER_TOKEN_HEAD).
+                    # kernel output can be meaningfully verified. Supported for
+                    # PER_TENSOR (1) and PER_TOKEN_HEAD (5).
                     run_kwargs["verify_fp8"] = int(
                         (not args.no_verify)
-                        and qs_int == 5
+                        and qs_int in (1, 5)
                         and config.data_type.startswith("fp8")
                     )
                 bench_jobs.append(
@@ -813,6 +851,10 @@ def main():
         "latency_ms",
         "tflops",
         "max_err",
+        "mean_err",
+        "rms_err",
+        "p99_err",
+        "within_tol_pct",
         "status",
     ]
     csv_path = args.csv if args.csv else str(build_dir / "results.csv")
@@ -840,7 +882,15 @@ def main():
                 for row in reader:
                     # Convert numeric fields back from strings
                     for k in row:
-                        if k in ("latency_ms", "tflops", "max_err"):
+                        if k in (
+                            "latency_ms",
+                            "tflops",
+                            "max_err",
+                            "mean_err",
+                            "rms_err",
+                            "p99_err",
+                            "within_tol_pct",
+                        ):
                             try:
                                 row[k] = float(row[k])
                             except (ValueError, TypeError):

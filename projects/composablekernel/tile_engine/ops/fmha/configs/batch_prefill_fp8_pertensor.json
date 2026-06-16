@@ -1,0 +1,9 @@
+{
+  "variant": "batch_prefill",
+  "trait_config": {
+    "data_type": {"values": ["fp8bf16"]},
+    "mask": {"values": ["top_left"]},
+    "qscale": {"values": ["pertensor"]},
+    "block_per_cu": {"values": [-1, 2]}
+  }
+}

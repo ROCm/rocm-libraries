@@ -507,6 +507,101 @@ def quantize_pack_per_token_head(Q, K, V, page_size, fp8_fnuz=False, layout="lin
     }
 
 
+def quantize_pack_pertensor(Q, K, V, page_size, fp8_fnuz=False, layout="linear"):
+    """FP8 PER_TENSOR quantize + pack into the dispatcher's paged byte layout.
+
+    Mirrors AITER's per-tensor quantization (op_tests/test_batch_prefill.py):
+    a single scalar descale per tensor = abs_max(whole tensor) / fp8_max, so the
+    kernel dequantizes via fp8 * descale. The K/V byte packing is identical to
+    quantize_pack_per_token_head; only the descales differ (one scalar each, which
+    matches the C++ q/k/v_descale_count == 1 for quant_scale_enum::pertensor).
+
+    Inputs (numpy, any float dtype):
+      Q [B, Hq, Sq, D]   K [B, Hk, Sk, D]   V [B, Hk, Sk, Dv]
+
+    Returns a dict of contiguous host buffers (see fmha_dispatcher_run_batch_prefill):
+      q_fp8     uint8 [B*Sq, Hq, D]
+      k_fp8     uint8 [total_pages, Hk, page_size, D]   (linear)
+      v_fp8     uint8 [total_pages, Hk, page_size, Dv]
+      q_descale f32   [1]
+      k_descale f32   [1]
+      v_descale f32   [1]
+    """
+    import torch
+
+    fp8 = torch.float8_e4m3fnuz if fp8_fnuz else torch.float8_e4m3fn
+    fp8_max = float(torch.finfo(fp8).max)
+
+    B, Hq, Sq, D = Q.shape
+    _, Hk, Sk, Dv = V.shape
+    pps = (Sk + page_size - 1) // page_size
+    total_pages = B * pps
+    Sk_pad = pps * page_size
+
+    qt = torch.from_numpy(np.ascontiguousarray(Q.astype(np.float32)))
+    kt = torch.from_numpy(np.ascontiguousarray(K.astype(np.float32)))
+    vt = torch.from_numpy(np.ascontiguousarray(V.astype(np.float32)))
+
+    # --- per-tensor scalar descales ---
+    q_descale = float(qt.abs().amax().clamp(min=1e-12) / fp8_max)
+    k_descale = float(kt.abs().amax().clamp(min=1e-12) / fp8_max)
+    v_descale = float(vt.abs().amax().clamp(min=1e-12) / fp8_max)
+
+    q_fp8 = (qt / q_descale).to(fp8)  # [B,Hq,Sq,D]
+    k_fp8 = (kt / k_descale).to(fp8)  # [B,Hk,Sk,D]
+    v_fp8 = (vt / v_descale).to(fp8)  # [B,Hk,Sk,Dv]
+
+    def _u8(t):
+        return t.contiguous().view(torch.uint8).cpu().numpy()
+
+    # Q -> [B*Sq, Hq, D]
+    q_pack = q_fp8.permute(0, 2, 1, 3).contiguous().reshape(B * Sq, Hq, D)
+
+    kvs = 16  # fp8 vector size = 16 bytes / 1 byte (vectorized swizzle).
+
+    def _logical_paged(fp8_t, dim):
+        padded = torch.zeros(B, Hk, Sk_pad, dim, dtype=fp8_t.dtype)
+        padded[:, :, :Sk, :] = fp8_t
+        return (
+            padded.view(B, Hk, pps, page_size, dim)
+            .permute(0, 2, 3, 1, 4)  # [B, pps, page_size, Hk, dim]
+            .contiguous()
+            .reshape(total_pages, page_size, Hk, dim)
+        )
+
+    def _pack_k(fp8_t):
+        base = _logical_paged(fp8_t, D)  # [pages, ps, Hk, D]
+        if layout == "vectorized":
+            return (
+                base.view(total_pages, page_size, Hk, D // kvs, kvs)
+                .permute(0, 2, 3, 1, 4)
+                .contiguous()
+            )
+        return base.permute(0, 2, 1, 3).contiguous()
+
+    def _pack_v(fp8_t):
+        base = _logical_paged(fp8_t, Dv)  # [pages, ps, Hk, Dv]
+        if layout == "vectorized":
+            return (
+                base.view(total_pages, page_size // kvs, kvs, Hk, Dv)
+                .permute(0, 3, 1, 4, 2)
+                .contiguous()
+            )
+        return base.permute(0, 2, 1, 3).contiguous()
+
+    k_paged = _pack_k(k_fp8)
+    v_paged = _pack_v(v_fp8)
+
+    return {
+        "q_fp8": np.ascontiguousarray(_u8(q_pack)),
+        "k_fp8": np.ascontiguousarray(_u8(k_paged)),
+        "v_fp8": np.ascontiguousarray(_u8(v_paged)),
+        "q_descale": np.ascontiguousarray(np.array([q_descale], dtype=np.float32)),
+        "k_descale": np.ascontiguousarray(np.array([k_descale], dtype=np.float32)),
+        "v_descale": np.ascontiguousarray(np.array([v_descale], dtype=np.float32)),
+    }
+
+
 def cpu_attention_fwd_with_intermediates(
     Q: np.ndarray, K: np.ndarray, V: np.ndarray, scale: float
 ) -> tuple:
@@ -1071,14 +1166,14 @@ class FmhaRunner:
             elif api_family == "batch_prefill":
                 skip_min_sq = kwargs.get("skip_min_seqlen_q", 0)
                 qscale_type = kwargs.get("qscale_type", 0)
-                # Verification mode: for FP8 PER_TOKEN_HEAD, quantize Q/K/V to FP8,
-                # pack K/V into the dispatcher's paged byte layout, and pass real
-                # per-token/per-head descales so the kernel computes a result that
+                # Verification mode: for FP8 PER_TOKEN_HEAD (5) or PER_TENSOR (1),
+                # quantize Q/K/V to FP8, pack K/V into the dispatcher's paged byte
+                # layout, and pass real descales so the kernel computes a result that
                 # can be checked against the FP32 reference. Otherwise descales stay
                 # 1.0 and K/V are zeroed (pure latency benchmarking).
                 verify_fp8 = (
                     int(kwargs.get("verify_fp8", 0))
-                    and qscale_type == 5
+                    and qscale_type in (1, 5)
                     and data_type.startswith("fp8")
                 )
                 q_arg, k_arg, v_arg = d_q, d_k, d_v
@@ -1097,7 +1192,12 @@ class FmhaRunner:
                     )
                     # kv_layout: 0=vectorized (swizzled), 1=linear.
                     pack_layout = "vectorized" if kv_layout == 0 else "linear"
-                    packed = quantize_pack_per_token_head(
+                    _packer = (
+                        quantize_pack_pertensor
+                        if qscale_type == 1
+                        else quantize_pack_per_token_head
+                    )
+                    packed = _packer(
                         Q, K, V, page_size, fp8_fnuz=fp8_fnuz, layout=pack_layout
                     )
                     self._hip.hipMemcpy(
