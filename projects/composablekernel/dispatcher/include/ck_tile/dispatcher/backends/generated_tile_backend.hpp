@@ -12,6 +12,8 @@
 #include <sstream>
 #include <vector>
 #include <cmath>
+#include <cstdlib>
+#include <string>
 
 namespace ck_tile {
 namespace dispatcher {
@@ -101,16 +103,30 @@ class GeneratedTileKernelInstance : public KernelInstance
                                    problem.N        // stride_E/C (row-major C: stride = N)
         );
 
+        // Benchmark parameters. Defaults mirror old Tile Engine's
+        // gemm_common.hpp (warmup=50, repeat=100, flush_cache=true,
+        // rotating_count=1000), and a generous warmup keeps the GPU clock
+        // ramped. NOTE: matching these knobs does NOT by itself make
+        // bridge-vs-old-TE numbers comparable -- the byte-identical kernel
+        // measures ~18-20% faster here than through old TE's *standalone
+        // benchmark binary* at e.g. 1024^3/compv4, purely because that
+        // separate process runs the kernel at a lower sustained SCLK (+ more
+        // memory-stall cycles), not because of any bench knob, compiler, or
+        // kernel difference (rocprof-confirmed). For an honest A/B, measure
+        // BOTH kernels through the SAME harness (build the old-TE kernel into a
+        // .so and run it via run_one_gemm_kernel.py) -- the gap then collapses
+        // to ~1%. Each knob is env-overridable so a caller can match another
+        // harness without recompiling.
         const bool bench = this->benchmarking_;
         ck_tile::stream_config stream_cfg;
         stream_cfg.stream_id_      = reinterpret_cast<hipStream_t>(stream);
         stream_cfg.time_kernel_    = bench;
         stream_cfg.log_level_      = 0;
-        stream_cfg.cold_niters_    = bench ? 5 : 0;
-        stream_cfg.nrepeat_        = bench ? 10 : 1;
+        stream_cfg.cold_niters_    = bench ? env_int("CK_TILE_BENCH_WARMUP", 50) : 0;
+        stream_cfg.nrepeat_        = bench ? env_int("CK_TILE_BENCH_REPEAT", 100) : 1;
         stream_cfg.is_gpu_timer_   = bench;
-        stream_cfg.flush_cache_    = false;
-        stream_cfg.rotating_count_ = 1;
+        stream_cfg.flush_cache_    = bench && env_bool("CK_TILE_BENCH_FLUSH", true);
+        stream_cfg.rotating_count_ = bench ? env_int("CK_TILE_BENCH_ROTATING", 1000) : 1;
 
         // Call the generated kernel's launch method
         return SelectedKernel::launch(args, stream_cfg);
@@ -134,6 +150,33 @@ class GeneratedTileKernelInstance : public KernelInstance
     }
 
     private:
+    // Read an integer benchmark knob from the environment, falling back to
+    // `fallback` when unset or unparseable.
+    static int env_int(const char* name, int fallback)
+    {
+        const char* v = std::getenv(name);
+        if(v == nullptr || *v == '\0')
+            return fallback;
+        char* end      = nullptr;
+        const long out = std::strtol(v, &end, 10);
+        if(end == v)
+            return fallback;
+        return static_cast<int>(out);
+    }
+
+    // Read a boolean benchmark knob ("0"/"false"/"off", any case => false, else true).
+    static bool env_bool(const char* name, bool fallback)
+    {
+        const char* v = std::getenv(name);
+        if(v == nullptr || *v == '\0')
+            return fallback;
+        std::string s(v);
+        for(char& c : s)
+            if(c >= 'A' && c <= 'Z')
+                c = static_cast<char>(c - 'A' + 'a');
+        return !(s == "0" || s == "false" || s == "off");
+    }
+
     KernelKey key_;
     std::string name_;
 };
