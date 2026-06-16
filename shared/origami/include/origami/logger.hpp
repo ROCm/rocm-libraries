@@ -11,6 +11,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "origami/origami_export.h"
+
 namespace origami {
 
 enum class LogLevel {
@@ -27,13 +29,13 @@ enum class LogFormat {
 
 class Logger {
 public:
-    static Logger& instance();
+    ORIGAMI_EXPORT static Logger& instance();
     bool is_enabled() const { return enabled_.load(std::memory_order_acquire); }
     LogFormat format() const { return format_; }
 
-    void log(LogLevel level, const std::string& message, const char* file, int line);
-    void flush();
-    void update_from_env();
+    ORIGAMI_EXPORT void log(LogLevel level, const std::string& message, const char* file, int line);
+    ORIGAMI_EXPORT void flush();
+    ORIGAMI_EXPORT void update_from_env();
 
     Logger(const Logger&) = delete;
     Logger& operator=(const Logger&) = delete;

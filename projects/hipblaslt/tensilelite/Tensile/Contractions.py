@@ -627,6 +627,7 @@ class SizeMapping:
                  'streamK',
                  'streamKForceDPOnly',
                  'streamKAtomic',
+                 'prefetchAcrossPersistent',
                  'sourceKernel',
                  'globalAccumulation',
                  'adaptiveGemmGSUA',
@@ -646,6 +647,7 @@ class SizeMapping:
                  'nonTemporalB',
                  'adaptiveGemmNTAB',
                  'customMainLoopScheduling',
+                 'useSubtileImpl',
                  'NonTemporalD',
                  'WaveSeparateGlobalReadA',
                  'WaveSeparateGlobalReadB',
@@ -719,6 +721,7 @@ class SizeMapping:
                    streamK                  = d['StreamK'] if 'StreamK' in d else 0,
                    streamKForceDPOnly       = d.get('StreamKForceDPOnly', 0),
                    streamKAtomic            = d['StreamKAtomic'] if 'StreamKAtomic' in d else 0,
+                   prefetchAcrossPersistent = d.get('PrefetchAcrossPersistent', 0),
                    magicDivAlg              = d.get('MagicDivAlg', 1),
                    sourceKernel             = d['KernelLanguage'] == 'Source',
                    globalAccumulation       = globalAccum,
@@ -739,6 +742,7 @@ class SizeMapping:
                    nonTemporalB             = d['NonTemporalB'],
                    adaptiveGemmNTAB         = d['AdaptiveGemmNTAB'] if 'AdaptiveGemmNTAB' in d else 0,
                    customMainLoopScheduling = d['UseCustomMainLoopSchedule'],
+                   useSubtileImpl           = bool(d.get('UseSubtileImpl', False)),
                    NonTemporalD             = d['NonTemporalD'],
                    WaveSeparateGlobalReadA  = d['WaveSeparateGlobalReadA'],
                    WaveSeparateGlobalReadB  = d['WaveSeparateGlobalReadB'],
@@ -825,7 +829,8 @@ class Solution:
                    printIndexAssignmentInfo,
                    assembler,
                    isaInfoMap,
-                   solution.srcName
+                   solution.srcName,
+                   raiseProblemTypeOnTypeMismatch=False,
                )
 
     @classmethod
@@ -839,7 +844,9 @@ class Solution:
             assembler,
             isaInfoMap,
             srcName = "",
-            deviceInfo=None
+            deviceInfo=None,
+            *,
+            raiseProblemTypeOnTypeMismatch: bool = True,
         ):
         rv = cls()
 
@@ -902,7 +909,8 @@ class Solution:
                                   printIndexAssignmentInfo,
                                   assembler,
                                   isaInfoMap,
-                                  srcName
+                                  srcName,
+                                  raiseProblemTypeOnTypeMismatch=raiseProblemTypeOnTypeMismatch,
                               )
         rv.srcName = srcName
 
