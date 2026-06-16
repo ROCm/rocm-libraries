@@ -189,7 +189,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 1
 
-    md_path = Path(args.markdown)
+    md_path = Path(args.output_path)
     print(f"Comparing {len(cases)} case(s) from '{src}'")
     print(f"Streaming results to {md_path}\n")
 
@@ -316,7 +316,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_shared(p_cmp, bin_required=True)
     p_cmp.add_argument("--plot", default=None,
                        help="Output PNG path (lazy matplotlib). Omit to skip the figure.")
-    p_cmp.add_argument("--markdown", default="ck_profiler_comparison.md",
+    p_cmp.add_argument("--output-path", default="ck_profiler_comparison.md",
                        help="Output markdown path (default: ck_profiler_comparison.md).")
     p_cmp.add_argument("--igemm-prefix", default=None,
                        help="Instance-name prefix identifying iGEMM kernels "

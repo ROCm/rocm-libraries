@@ -2091,3 +2091,236 @@ TEST_F(DirectConvNonGrouped32cFp16V3ReductionLE32DgradTest, Dgrad_Cfg62_CS_C64_K
 {
     ASSERT_TRUE((RunDgrad<62>(1, 8, 8, 1, 64, 32, 3, 3, 1, 1)));
 }
+
+// =============================================================================
+// v3 — waves_per_wg=1, c_slices_per_wave > 1 (config keys 68-83).
+//
+// Single-wave configs that stream the full C-reduction as cspw chunks of 32
+// channels through ONE wavefront, eliminating the cross-wave LDS reduction.
+// total_block_c = cspw * 32, covering reduction in (32*(cspw-1), 32*cspw]:
+//   cspw=2 -> (32,64]   cspw=3 -> (64,96]   cspw=4 -> (96,128]   cspw=6 -> (160,192]
+// CyclicShift swizzle; both DRAM and LDS-staged epilogues; Fprop and Dgrad.
+//
+//   Fprop DRAM: 68(cspw2) 72(cspw3) 76(cspw4) 80(cspw6)
+//   Fprop LDS : 70(cspw2) 74(cspw3) 78(cspw4) 82(cspw6)
+//   Dgrad DRAM: 69(cspw2) 73(cspw3) 77(cspw4) 81(cspw6)
+//   Dgrad LDS : 71(cspw2) 75(cspw3) 79(cspw4) 83(cspw6)
+// For Fprop: reduction dim C_in = c_tot. For Dgrad: reduction dim C_in = k_tot,
+// output dim K_out = c_tot (must stay > 32 to be genuinely non-grouped).
+// =============================================================================
+
+// --- Fprop, DRAM epilogue ---
+
+class DirectConvNonGrouped32cFp16V3Waves1CspwFpropTest
+    : public DirectConvGroupedTestHarness<TileConv32cDenseKernelTraitsV3>
+{
+};
+
+// cspw=2 (total_block_c=64): exact C=64 and padded C=48.
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwFpropTest, Fprop_Cfg68_cspw2_C64_K64)
+{
+    ASSERT_TRUE((RunFprop<68>(1, 8, 8, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwFpropTest, Fprop_Cfg68_cspw2_C64_K64_NoPad)
+{
+    ASSERT_TRUE((RunFprop<68>(1, 8, 8, 1, 64, 64, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwFpropTest, Fprop_Cfg68_cspw2_C48_K64)
+{
+    ASSERT_TRUE((RunFprop<68>(1, 8, 8, 1, 48, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwFpropTest, Fprop_Cfg68_cspw2_C64_K64_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<68>(2, 16, 16, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+// cspw=3 (total_block_c=96): exact C=96 and padded C=80.
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwFpropTest, Fprop_Cfg72_cspw3_C96_K64)
+{
+    ASSERT_TRUE((RunFprop<72>(1, 8, 8, 1, 96, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwFpropTest, Fprop_Cfg72_cspw3_C80_K64)
+{
+    ASSERT_TRUE((RunFprop<72>(1, 8, 8, 1, 80, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwFpropTest, Fprop_Cfg72_cspw3_C96_K64_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<72>(2, 16, 16, 1, 96, 64, 3, 3, 1, 1)));
+}
+
+// cspw=4 (total_block_c=128): exact C=128 and padded C=112.
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwFpropTest, Fprop_Cfg76_cspw4_C128_K64)
+{
+    ASSERT_TRUE((RunFprop<76>(1, 8, 8, 1, 128, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwFpropTest, Fprop_Cfg76_cspw4_C112_K64)
+{
+    ASSERT_TRUE((RunFprop<76>(1, 8, 8, 1, 112, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwFpropTest, Fprop_Cfg76_cspw4_C128_K128_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<76>(2, 16, 16, 1, 128, 128, 3, 3, 1, 1)));
+}
+
+// cspw=6 (total_block_c=192): exact C=192 and padded C=176.
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwFpropTest, Fprop_Cfg80_cspw6_C192_K64)
+{
+    ASSERT_TRUE((RunFprop<80>(1, 8, 8, 1, 192, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwFpropTest, Fprop_Cfg80_cspw6_C176_K64)
+{
+    ASSERT_TRUE((RunFprop<80>(1, 8, 8, 1, 176, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwFpropTest, Fprop_Cfg80_cspw6_C192_K48_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<80>(2, 16, 16, 1, 192, 48, 3, 3, 1, 1)));
+}
+
+// --- Fprop, LDS-staged epilogue ---
+
+class DirectConvNonGrouped32cFp16V3Waves1CspwLdsFpropTest
+    : public DirectConvGroupedTestHarness<TileConv32cDenseKernelTraitsV3>
+{
+};
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwLdsFpropTest, Fprop_Cfg70_cspw2_C64_K64)
+{
+    ASSERT_TRUE((RunFprop<70>(1, 8, 8, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwLdsFpropTest, Fprop_Cfg70_cspw2_C64_K64_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<70>(2, 16, 16, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwLdsFpropTest, Fprop_Cfg74_cspw3_C96_K64)
+{
+    ASSERT_TRUE((RunFprop<74>(1, 8, 8, 1, 96, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwLdsFpropTest, Fprop_Cfg78_cspw4_C128_K64)
+{
+    ASSERT_TRUE((RunFprop<78>(1, 8, 8, 1, 128, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwLdsFpropTest, Fprop_Cfg82_cspw6_C192_K64)
+{
+    ASSERT_TRUE((RunFprop<82>(1, 8, 8, 1, 192, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwLdsFpropTest, Fprop_Cfg82_cspw6_C192_K128_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<82>(2, 16, 16, 1, 192, 128, 3, 3, 1, 1)));
+}
+
+// --- Dgrad, DRAM epilogue (reduction dim C_in = k_tot; output c_tot > 32) ---
+
+class DirectConvNonGrouped32cFp16V3Waves1CspwDgradTest
+    : public DirectConvGroupedTestHarness<TileConv32cDenseKernelTraitsV3>
+{
+};
+
+// cspw=2 (total_block_c=64): exact K=64 and padded K=48.
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwDgradTest, Dgrad_Cfg69_cspw2_C64_K64)
+{
+    ASSERT_TRUE((RunDgrad<69>(1, 8, 8, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwDgradTest, Dgrad_Cfg69_cspw2_C64_K64_NoPad)
+{
+    ASSERT_TRUE((RunDgrad<69>(1, 8, 8, 1, 64, 64, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwDgradTest, Dgrad_Cfg69_cspw2_C64_K48)
+{
+    ASSERT_TRUE((RunDgrad<69>(1, 8, 8, 1, 64, 48, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwDgradTest, Dgrad_Cfg69_cspw2_C64_K64_LargerSpatial)
+{
+    ASSERT_TRUE((RunDgrad<69>(2, 16, 16, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+// cspw=3 (total_block_c=96): exact K=96.
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwDgradTest, Dgrad_Cfg73_cspw3_C64_K96)
+{
+    ASSERT_TRUE((RunDgrad<73>(1, 8, 8, 1, 64, 96, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwDgradTest, Dgrad_Cfg73_cspw3_C64_K80)
+{
+    ASSERT_TRUE((RunDgrad<73>(1, 8, 8, 1, 64, 80, 3, 3, 1, 1)));
+}
+
+// cspw=4 (total_block_c=128): exact K=128.
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwDgradTest, Dgrad_Cfg77_cspw4_C64_K128)
+{
+    ASSERT_TRUE((RunDgrad<77>(1, 8, 8, 1, 64, 128, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwDgradTest, Dgrad_Cfg77_cspw4_C64_K112)
+{
+    ASSERT_TRUE((RunDgrad<77>(1, 8, 8, 1, 64, 112, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwDgradTest, Dgrad_Cfg77_cspw4_C128_K128_LargerSpatial)
+{
+    ASSERT_TRUE((RunDgrad<77>(2, 16, 16, 1, 128, 128, 3, 3, 1, 1)));
+}
+
+// cspw=6 (total_block_c=192): exact K=192.
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwDgradTest, Dgrad_Cfg81_cspw6_C64_K192)
+{
+    ASSERT_TRUE((RunDgrad<81>(1, 8, 8, 1, 64, 192, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwDgradTest, Dgrad_Cfg81_cspw6_C64_K176)
+{
+    ASSERT_TRUE((RunDgrad<81>(1, 8, 8, 1, 64, 176, 3, 3, 1, 1)));
+}
+
+// --- Dgrad, LDS-staged epilogue ---
+
+class DirectConvNonGrouped32cFp16V3Waves1CspwLdsDgradTest
+    : public DirectConvGroupedTestHarness<TileConv32cDenseKernelTraitsV3>
+{
+};
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwLdsDgradTest, Dgrad_Cfg71_cspw2_C64_K64)
+{
+    ASSERT_TRUE((RunDgrad<71>(1, 8, 8, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwLdsDgradTest, Dgrad_Cfg71_cspw2_C64_K64_LargerSpatial)
+{
+    ASSERT_TRUE((RunDgrad<71>(2, 16, 16, 1, 64, 64, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwLdsDgradTest, Dgrad_Cfg75_cspw3_C64_K96)
+{
+    ASSERT_TRUE((RunDgrad<75>(1, 8, 8, 1, 64, 96, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwLdsDgradTest, Dgrad_Cfg79_cspw4_C64_K128)
+{
+    ASSERT_TRUE((RunDgrad<79>(1, 8, 8, 1, 64, 128, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwLdsDgradTest, Dgrad_Cfg83_cspw6_C64_K192)
+{
+    ASSERT_TRUE((RunDgrad<83>(1, 8, 8, 1, 64, 192, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwLdsDgradTest, Dgrad_Cfg83_cspw6_C128_K192_LargerSpatial)
+{
+    ASSERT_TRUE((RunDgrad<83>(2, 16, 16, 1, 128, 192, 3, 3, 1, 1)));
+}

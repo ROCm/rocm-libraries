@@ -4373,6 +4373,70 @@
         "vector_size": 8
       },
       "id": 319
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 1,
+        "c_slices_per_wave": 2,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 320
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 1,
+        "c_slices_per_wave": 3,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 322
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 1,
+        "c_slices_per_wave": 4,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 324
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 1,
+        "c_slices_per_wave": 6,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 326
     }
   ]
 }

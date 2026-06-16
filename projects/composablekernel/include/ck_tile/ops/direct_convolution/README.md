@@ -165,6 +165,7 @@ cmake                                                                           
   -D CMAKE_CXX_STANDARD=20                                                                        \
   -D CK_PROFILER_OP_FILTER="_tile"                                                                \
   -D DISABLE_IMPLICIT_GEMM_INSTANCES=ON                                                           \
+  -D DISPATCHER_CONFIG_SET=profiler                                                               \
   -G Ninja                                                                                        \
   ..
 ```
@@ -178,6 +179,15 @@ we specify flag
 
 The CK Tile kernel names are required for the benchmarking and regression test script that rely on the CK Tile kernel
 name format when parsing the results from the CK Profiler output.
+
+We can toggle the implicit GEMM instance flag on and off depending on whether we want to compare the direct conv also to the implicit GEMM.
+Switch 
+
+```
+-D DISPATCHER_CONFIG_SET=profiler 
+```
+
+ensures that we always use the full set implicit GEMM instances. 
 
 ## Testing
 
