@@ -218,8 +218,32 @@ namespace rocisa
         }
         catch(...)
         {
-            reg.regName = RegName(nameStr);
+            // Parse trailing "+N" offsets into RegName::offsets instead of baking them
+            // into the base name. Otherwise the symbol lookup in RegName::getTotalIdx()
+            // (getVgprIdx()[name]) misses (the name would carry the offsets, e.g.
+            // "GlobalReadOffsetA+0+0") and defaults the index to 0, which breaks VGPR
+            // MSB bank selection for registers above 255.
+            reg.regName = generateRegName(nameStr);
         }
+    }
+
+    // Convert a substituted single VGPR reference string such as
+    // "v[vgprGlobalReadOffsetA+0+0]" into a RegisterContainer. Macro bodies emit their
+    // source operands as strings; left as strings they reach later passes as opaque
+    // tokens, so the stinkytofu VGPR MSB pass cannot resolve their index/bank for
+    // registers above 255. Returns nullptr when the string is not a single symbolic
+    // VGPR reference (numerics, sgpr, ranges and immediates are left untouched).
+    static std::shared_ptr<RegisterContainer> tryMakeVgprFromString(const std::string& str)
+    {
+        static const std::regex pattern(R"(^v\[(vgpr[A-Za-z_][^:\]]*)\]$)");
+        std::smatch             match;
+        if(!std::regex_match(str, match, pattern))
+            return nullptr;
+
+        // Strip the "vgpr" prefix to get the bare symbolic core, e.g. "GlobalReadOffsetA+0+0".
+        std::string core = match[1].str().substr(4);
+        return std::make_shared<RegisterContainer>(
+            "v", generateRegName(core), /*isAbs=*/false, /*isMacro=*/false, /*isOff=*/false);
     }
 
     // Substitute macro params in a single InstructionInput
@@ -231,7 +255,12 @@ namespace rocisa
                 using T = std::decay_t<decltype(arg)>;
                 if constexpr(std::is_same_v<T, std::string>)
                 {
-                    return substituteStringParam(arg, params);
+                    auto substituted = substituteStringParam(arg, params);
+                    // Re-materialize VGPR references as RegisterContainers so downstream
+                    // passes (e.g. stinkytofu VGPR MSB) can resolve their index/bank.
+                    if(auto reg = tryMakeVgprFromString(substituted))
+                        return std::static_pointer_cast<Container>(reg);
+                    return substituted;
                 }
                 else if constexpr(std::is_same_v<T, std::shared_ptr<rocisa::Container>>)
                 {
