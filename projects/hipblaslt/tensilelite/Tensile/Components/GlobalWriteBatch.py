@@ -196,14 +196,23 @@ class GlobalWriteBatchWriter:
     assert self._checkAtomicPreconditions()
     module = Module(self.moduleName)
     self._prolog(module)
-    # UseSubtileImpl with bias/SAV: drain LDS reads and sync waves after prolog
-    # (alpha + epilogue LDS loads) and before _emitAdd subtile stores.
-    if self.kernel.get("UseSubtileImpl") and \
+    # GATE(non-multi-DU byte-identity): the bias/SAV drain barrier ordering is a
+    # multi-DU-only hardening (prevents cross-wave LDS corruption from ds_bpermute).
+    # Multi-DU keeps the on-branch order (drain+barrier BEFORE _emitAdd subtile
+    # stores); non-multi-DU restores merge-base order (_emitAdd before the drain)
+    # so non-multi-DU codegen is byte-identical to merge-base.
+    _du = self.kernel["DepthU"]
+    isMultiDU = self.kernel.get("_DepthUA", _du) < _du or self.kernel.get("_DepthUB", _du) < _du
+    drainBiasSav = self.kernel.get("UseSubtileImpl") and \
        (self.parentWriter.states.useBias != DataDirection.NONE or \
-        self.kernel["ProblemType"].get("UseScaleAlphaVec", 0)):
+        self.kernel["ProblemType"].get("UseScaleAlphaVec", 0))
+    if not isMultiDU:
+      self._emitAdd(module)
+    if drainBiasSav:
       module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads"))
       module.add(SBarrier(comment="sync waves before subtile paired stores"))
-    self._emitAdd(module)
+    if isMultiDU:
+      self._emitAdd(module)
     self._epilog(module)
     return module
 
@@ -571,7 +580,15 @@ class GlobalWriteBatchWriter:
 
       if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
         modGwvwScaleAlpha = Module("GwvwScaleAlpha")
-        savLdsRefVgpr = None if (self.kernel.get("UseSubtileImpl") and addrScaleAlphaVecVgpr is not None) else localReferenceVgpr
+        # GATE(non-multi-DU byte-identity): the on-branch subtile ScaleAlphaVec
+        # epilogue load passes None as the LDS reference vgpr (multi-DU path); for
+        # non-multi-DU restore the merge-base localReferenceVgpr so codegen matches.
+        _savDu = self.kernel["DepthU"]
+        savIsMultiDU = self.kernel.get("_DepthUA", _savDu) < _savDu or self.kernel.get("_DepthUB", _savDu) < _savDu
+        if savIsMultiDU:
+          savLdsRefVgpr = None if (self.kernel.get("UseSubtileImpl") and addrScaleAlphaVecVgpr is not None) else localReferenceVgpr
+        else:
+          savLdsRefVgpr = localReferenceVgpr
         self.loadsScaleAlphaVecIssued += addEpilogueLoad(modGwvwScaleAlpha, "ScaleAlphaVec", addrScaleAlphaVecVgpr, self.addrScaleAlphaVec, dataScaleAlphaVec, loadedDataScaleAlphaVec, addrCalc.scaleAlphaVecOffset[self.factorDim], factor_gwvw, savLdsRefVgpr, self.factorDim, self.factorDim, skipLoad=skipLoad, comment="load scaleAlpha")
         if localReferenceVgpr == None:
           localReferenceVgpr = addrScaleAlphaVecVgpr

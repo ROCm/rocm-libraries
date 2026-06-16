@@ -2743,9 +2743,11 @@ class LogicalScheduler:
                         # tail entry (PRELOOP's single GR did neither).
                         removed.add(em.moduleId)
                     elif (em.opType == 'lr_inc' and not src.isUnrollSwap
-                          and (self.config.pgr == 2 or self._is_multi_du())):
-                        # PGR=2: drop MT-transition lr_inc to match gr_inc drop.
-                        # PGR=1 single-DU: keep for tail-loop entry; multi-DU NLL differs.
+                          and self._is_multi_du()):
+                        # GATE(non-multi-DU byte-identity): only multi-DU drops the
+                        # MT-transition lr_inc in NLL. Merge-base kept lr_inc for
+                        # PGR=2 single-DU (gr_inc dropped, lr_inc kept), so restore
+                        # that to leave non-multi-DU kernels byte-identical.
                         removed.add(em.moduleId)
 
                 has_lr = any(em.opType == 'lr' and em.moduleId not in removed
@@ -3274,6 +3276,13 @@ class LogicalScheduler:
         from rocisa.container import sgpr
 
         module = Module("Pgr2TailLwAlign")
+        # GATE(non-multi-DU byte-identity): the tail LW_base parity re-align is
+        # only needed when the NLL drops the MT-transition lr_inc (multi-DU path,
+        # see build_nll). For non-multi-DU PGR=2 the NLL keeps lr_inc (merge-base
+        # behavior), so the parity invariant is already preserved and this
+        # re-align must be skipped to stay byte-identical with merge-base.
+        if not self._is_multi_du():
+            return module
         if self.config.pgr != 2 or kernel.get("NoTailLoop"):
             return module
         tensors = ['A', 'B']
