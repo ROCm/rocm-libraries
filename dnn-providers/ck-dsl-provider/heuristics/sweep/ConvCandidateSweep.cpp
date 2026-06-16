@@ -38,6 +38,7 @@
 #include <cstdint>
 #include <exception>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <mutex>
 #include <optional>
@@ -93,7 +94,7 @@ struct TrainingCsvWriter {
 };
 
 static TrainingCsvWriter gCsvWriter;
-static std::string gDtype = "fp16";  // set by sweepMain before any sweep
+static std::string gDtype = "fp16";  // set by sweepMain; reserved for future multi-dtype support
 
 // ── Shape descriptor ─────────────────────────────────────────────────────────
 
@@ -307,9 +308,11 @@ static constexpr int kRepeat  = 20;
 // Result from timeCandidate.
 // latency_us is set on success; is_error is set when a pre-validated candidate
 // failed to compile or launch — which should never happen and requires triage.
+// timed_out is set when the candidate exceeded the per-candidate wall-clock limit.
 struct TimingResult {
     std::optional<double> latency_us;
-    bool is_error = false;
+    bool is_error   = false;
+    bool timed_out  = false;
 };
 
 // Compiles and times one pre-validated candidate.
@@ -341,7 +344,6 @@ TimingResult timeCandidate(const ConvCase& cse, std::int64_t Ho, std::int64_t Wo
     prob.warp_tile_n = cand.warp_tile_n;
     prob.warp_tile_k = cand.warp_tile_k;
     prob.pipeline    = cand.pipeline.c_str();
-    prob.dtype       = gDtype.c_str();
     // gcnArchName may carry suffixes like "gfx942:sramecc+:xnack-"; the C engine
     // lookup is an exact match so strip at the first colon, same as the provider.
     std::string arch_bare = props.gcnArchName;
@@ -436,9 +438,11 @@ TimingResult timeCandidate(const ConvCase& cse, std::int64_t Ho, std::int64_t Wo
 struct ShapeSweepResult {
     bool   produced_data;  // at least one timing row written
     size_t errors;         // pre-validated candidates that failed compile/run
+    size_t timeouts;       // candidates that exceeded the per-candidate wall-clock limit
 };
 
-ShapeSweepResult runConvSweep(const ConvCase& cse, const hipDeviceProp_t& props) {
+ShapeSweepResult runConvSweep(const ConvCase& cse, const hipDeviceProp_t& props,
+                               int candidateTimeoutS) {
     const std::int64_t Ho = convOutDim(cse.hi, cse.padH, cse.dilH, cse.r, cse.strideH);
     const std::int64_t Wo = convOutDim(cse.wi, cse.padW, cse.dilW, cse.s, cse.strideW);
     if (Ho <= 0 || Wo <= 0) {
@@ -479,9 +483,32 @@ ShapeSweepResult runConvSweep(const ConvCase& cse, const hipDeviceProp_t& props)
                               * (double)cse.k * (double)cpg
                               * (double)cse.r * (double)cse.s;
 
-    std::size_t ok = 0, errors = 0;
+    const auto timeoutDur = std::chrono::seconds(candidateTimeoutS);
+
+    // Timed-out futures are moved here so their threads can drain after the
+    // candidate loop rather than blocking each subsequent iteration.
+    std::vector<std::future<TimingResult>> graveyard;
+
+    std::size_t ok = 0, errors = 0, timeouts = 0;
     for (const auto& cand : candidates) {
-        TimingResult res = timeCandidate(cse, Ho, Wo, cand, props, devX, devW, devY);
+        // Run timeCandidate on a background thread so we can enforce a wall-clock
+        // limit. If the JIT compile or hipDeviceSynchronize hangs, the future
+        // times out and we skip the candidate rather than stalling the shard.
+        auto fut = std::async(std::launch::async,
+                              timeCandidate, cse, Ho, Wo, cand,
+                              std::cref(props), devX, devW, devY);
+
+        if (fut.wait_for(timeoutDur) == std::future_status::timeout) {
+            ++timeouts;
+            std::cerr << "[Sweep]   TIMEOUT: " << cse.name
+                      << " tile(" << cand.tile_m << "," << cand.tile_n
+                      << "," << cand.tile_k << ") pipeline=" << cand.pipeline
+                      << " exceeded " << candidateTimeoutS << "s limit — skipping\n";
+            graveyard.push_back(std::move(fut));
+            continue;
+        }
+
+        TimingResult res = fut.get();
         if (res.is_error) {
             ++errors;
             std::cerr << "[Sweep]   TRIAGE NEEDED: " << cse.name
@@ -502,10 +529,12 @@ ShapeSweepResult runConvSweep(const ConvCase& cse, const hipDeviceProp_t& props)
     hipFree(devX); hipFree(devW); hipFree(devY);
     std::cerr << "[Sweep] " << cse.name
               << " done: " << ok << " ok";
+    if (timeouts > 0)
+        std::cerr << ", " << timeouts << " timed out (>" << candidateTimeoutS << "s)";
     if (errors > 0)
         std::cerr << ", " << errors << " ERRORS (triage required)";
     std::cerr << "\n";
-    return {ok > 0, errors};
+    return {ok > 0, errors, timeouts};
 }
 
 }  // namespace
@@ -513,7 +542,7 @@ ShapeSweepResult runConvSweep(const ConvCase& cse, const hipDeviceProp_t& props)
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 int sweepMain(const std::string& shapesPath, const std::string& outPath,
-              const std::string& dtype) {
+              const std::string& dtype, int candidateTimeoutS) {
     if (dtype != "fp16") {
         std::cerr << "ERROR: --dtype must be fp16 (got: " << dtype << ")\n";
         return 1;
@@ -537,21 +566,26 @@ int sweepMain(const std::string& shapesPath, const std::string& outPath,
     }
     std::cerr << "[Sweep] device: " << props.name
               << " (" << props.gcnArchName << ")\n";
+    std::cerr << "[Sweep] per-candidate timeout: " << candidateTimeoutS << "s\n";
 
-    std::size_t shapesOk = 0, shapesNoData = 0, totalErrors = 0;
+    std::size_t shapesOk = 0, shapesNoData = 0, totalErrors = 0, totalTimeouts = 0;
     for (const auto& shape : shapes) {
-        ShapeSweepResult r = runConvSweep(shape, props);
+        ShapeSweepResult r = runConvSweep(shape, props, candidateTimeoutS);
         if (r.produced_data)
             ++shapesOk;
         else
             ++shapesNoData;
-        totalErrors += r.errors;
+        totalErrors   += r.errors;
+        totalTimeouts += r.timeouts;
     }
 
     std::cerr << "=== Sweep complete: " << shapesOk << "/" << shapes.size()
               << " shapes produced data";
     if (shapesNoData > 0)
         std::cerr << ", " << shapesNoData << " produced no data";
+    if (totalTimeouts > 0)
+        std::cerr << ", " << totalTimeouts << " candidates timed out (>"
+                  << candidateTimeoutS << "s)";
     if (totalErrors > 0)
         std::cerr << ", " << totalErrors
                   << " CANDIDATE ERRORS (pre-validated but compile/run failed — TRIAGE REQUIRED)";
