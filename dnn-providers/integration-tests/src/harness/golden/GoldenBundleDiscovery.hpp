@@ -7,18 +7,12 @@
 #include <array>
 #include <cctype>
 #include <filesystem>
-#include <fstream>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
-#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
-#include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 
 namespace hipdnn_integration_tests::golden
 {
@@ -270,198 +264,33 @@ inline bool isSdpaOp(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrTy
     return attrType == NA::SdpaAttributes || attrType == NA::SdpaBackwardAttributes;
 }
 
-inline std::string deriveDataTypeFromGraph(
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper)
-{
-    auto nodeCount = wrapper.nodeCount();
-    auto tensorMap = wrapper.getTensorMap();
-    for(uint32_t i = 0; i < nodeCount; ++i)
-    {
-        auto& node = wrapper.getNode(i);
-        if(isPointwiseOp(node.attributes_type()))
-        {
-            continue;
-        }
-        const auto uid = opMeta(&node).primaryInputUid(&node);
-        if(uid == -1)
-        {
-            continue;
-        }
-        auto it = tensorMap.find(uid);
-        if(it != tensorMap.end() && it->second != nullptr)
-        {
-            return dataTypeToShortString(it->second->data_type());
-        }
-    }
-    return "unknown";
-}
-
-inline const std::vector<const hipdnn_data_sdk::utilities::TensorLayout*>*
-    layoutCandidates(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes opType, size_t ndim)
-{
-    using TL = hipdnn_data_sdk::utilities::TensorLayout;
-    static const std::vector<const TL*> s_sdpaLayouts = {&TL::BHSD, &TL::BSHD};
-    static const std::vector<const TL*> s_convLayouts5 = {&TL::NCDHW, &TL::NDHWC};
-    static const std::vector<const TL*> s_convLayouts4 = {&TL::NCHW, &TL::NHWC};
-    static const std::vector<const TL*> s_convLayouts3 = {&TL::NCL, &TL::NLC};
-    if(isSdpaOp(opType))
-    {
-        return &s_sdpaLayouts;
-    }
-    if(ndim == 5)
-    {
-        return &s_convLayouts5;
-    }
-    if(ndim == 4)
-    {
-        return &s_convLayouts4;
-    }
-    if(ndim == 3)
-    {
-        return &s_convLayouts3;
-    }
-    return nullptr;
-}
-
-inline std::string layoutNameFromGraph(const hipdnn_flatbuffers_sdk::data_objects::Graph* graph)
-{
-    if(graph == nullptr)
-    {
-        return "unknown";
-    }
-
-    const auto* nodes = graph->nodes();
-    if(nodes == nullptr || nodes->empty())
-    {
-        return "unknown";
-    }
-
-    const hipdnn_flatbuffers_sdk::data_objects::Node* primaryNode = nullptr;
-    for(flatbuffers::uoffset_t i = 0; i < nodes->size(); ++i)
-    {
-        const auto* node = nodes->Get(i);
-        if(node != nullptr && !isPointwiseOp(node->attributes_type()))
-        {
-            primaryNode = node;
-            break;
-        }
-    }
-    if(primaryNode == nullptr)
-    {
-        return "unknown";
-    }
-
-    const auto uid = opMeta(primaryNode).primaryInputUid(primaryNode);
-    if(uid == -1)
-    {
-        return "unknown";
-    }
-
-    const auto* tensors = graph->tensors();
-    if(tensors == nullptr)
-    {
-        return "unknown";
-    }
-
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* primaryTensor = nullptr;
-    for(flatbuffers::uoffset_t i = 0; i < tensors->size(); ++i)
-    {
-        const auto* t = tensors->Get(i);
-        if(t != nullptr && t->uid() == uid)
-        {
-            primaryTensor = t;
-            break;
-        }
-    }
-    if(primaryTensor == nullptr || primaryTensor->dims() == nullptr
-       || primaryTensor->strides() == nullptr)
-    {
-        return "unknown";
-    }
-
-    const auto ndim = primaryTensor->dims()->size();
-    if(ndim < 3)
-    {
-        return "unknown";
-    }
-
-    std::vector<int64_t> strides(ndim);
-    for(flatbuffers::uoffset_t i = 0; i < ndim; ++i)
-    {
-        strides[i] = primaryTensor->strides()->Get(i);
-    }
-
-    const auto order = hipdnn_data_sdk::utilities::extractStrideOrder(strides);
-
-    const auto* candidates = layoutCandidates(primaryNode->attributes_type(), ndim);
-    if(candidates == nullptr)
-    {
-        return "unknown";
-    }
-
-    for(const auto* layout : *candidates)
-    {
-        if(order == layout->strideOrder)
-        {
-            std::string name = layout->name;
-            std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) {
-                return static_cast<char>(std::tolower(c));
-            });
-            return name;
-        }
-    }
-    return "unknown";
-}
-
-inline std::string
-    deriveLayoutFromGraph(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper)
-{
-    return layoutNameFromGraph(&wrapper.getGraph());
-}
-
 struct DerivedTestName
 {
     std::string suiteName;
     std::string testName;
 };
 
+// Derives the GTest suite and test names from the bundle's folder path.
+// Path convention: {tier}/{op}/{layout}/{dtype}/{bundle_name}/{file}.json
 inline DerivedTestName deriveTestName(const std::filesystem::path& jsonPath,
                                       const std::string& tierName)
 {
-    std::ifstream file(jsonPath);
-    if(!file)
+    const auto bundleDir = jsonPath.parent_path();
+    const auto op = bundleDir.parent_path().parent_path().parent_path().filename().string();
+    const auto layout = bundleDir.parent_path().parent_path().filename().string();
+    const auto dtype = bundleDir.parent_path().filename().string();
+    const auto bundleName = bundleDir.filename().string();
+
+    if(op.empty() || layout.empty() || dtype.empty() || bundleName.empty())
     {
-        throw std::runtime_error("Cannot open bundle JSON: " + jsonPath.string());
+        throw std::runtime_error(
+            "Golden bundle path has empty segment(s): " + jsonPath.string()
+            + "; expected {tier}/{op}/{layout}/{dtype}/{bundle_name}/{file}.json");
     }
 
-    nlohmann::json graphJson;
-    try
-    {
-        graphJson = nlohmann::json::parse(file);
-    }
-    catch(const std::exception& e)
-    {
-        throw std::runtime_error("Failed to parse bundle JSON " + jsonPath.string() + ": "
-                                 + e.what());
-    }
-    flatbuffers::FlatBufferBuilder builder;
-    auto offset = hipdnn_flatbuffers_sdk::json::to<hipdnn_flatbuffers_sdk::data_objects::Graph>(
-        builder, graphJson);
-    builder.Finish(offset);
-
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper(
-        builder.GetBufferPointer(), builder.GetSize());
-
-    const auto opName = deriveOperationName(wrapper);
-    const auto layout = deriveLayoutFromGraph(wrapper);
-    const auto dtype = deriveDataTypeFromGraph(wrapper);
-
-    const std::string suite = tierPrefix(tierName) + sanitizeForGtest(opName) + "_"
+    const std::string suite = tierPrefix(tierName) + sanitizeForGtest(op) + "_"
                               + sanitizeForGtest(layout) + "_" + sanitizeForGtest(dtype);
-
-    // Test name = bundle directory name (the immediate parent of the .json)
-    const auto bundleDirName = jsonPath.parent_path().filename().string();
-    const std::string test = sanitizeForGtest(bundleDirName);
+    const std::string test = sanitizeForGtest(bundleName);
 
     return {suite, test};
 }
@@ -471,7 +300,8 @@ inline DerivedTestName deriveTestName(const std::filesystem::path& jsonPath,
 // Per ALMIOPEN-1968, structural problems are hard errors (throw), not warnings:
 //   - a stray top-level directory that is not one of the four tiers
 //   - a tier directory that is missing or empty
-//   - an unparseable bundle .json
+//   - a bundle placed at the wrong directory depth
+//   - a generated test-name collision
 // Scans a single tier directory for bundle .json files: a recursive scan with
 // the golden-ref meta-file filter layered on top. This is the "recursive .json
 // scan per tier" the ticket (ALMIOPEN-1968) describes. It deliberately does NOT
@@ -492,7 +322,6 @@ inline std::vector<std::filesystem::path> scanTier(const std::filesystem::path& 
     return jsonPaths;
 }
 
-//   - a generated test-name collision (names both producing paths)
 // The caller registers tests only on success, so any throw aborts startup and
 // surfaces the authoring mistake loudly rather than silently dropping coverage.
 inline std::vector<DiscoveredBundle>
@@ -539,6 +368,20 @@ inline std::vector<DiscoveredBundle>
 
         for(const auto& jsonPath : jsonPaths)
         {
+            // Validate path depth: {op}/{layout}/{dtype}/{bundle_name}/{file}.json = 5 components
+            const auto relative = std::filesystem::relative(jsonPath, tierDir);
+            size_t depth = 0;
+            for(auto it = relative.begin(); it != relative.end(); ++it)
+            {
+                ++depth;
+            }
+            if(depth < 5)
+            {
+                throw std::runtime_error(
+                    "Golden bundle at wrong directory depth: " + jsonPath.string()
+                    + "; expected {tier}/{op}/{layout}/{dtype}/{bundle_name}/{file}.json");
+            }
+
             const DerivedTestName derived = deriveTestName(jsonPath, tierName);
 
             auto fullName = derived.suiteName + "." + derived.testName;

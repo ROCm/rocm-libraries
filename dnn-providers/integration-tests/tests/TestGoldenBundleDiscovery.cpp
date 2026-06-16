@@ -37,8 +37,6 @@ protected:
     }
 
     // Writes a minimal but schema-valid batchnorm-inference graph (nchw, fp32).
-    // The bundle directory name becomes the test name; suite is derived from
-    // graph content -> "BatchnormInference_nchw_fp32".
     static void createMinimalBundle(const std::filesystem::path& dir, const std::string& name)
     {
         std::filesystem::create_directories(dir);
@@ -64,13 +62,15 @@ protected:
 
     // Populates one bundle in every tier so the per-tier "must exist and be
     // non-empty" check passes. Each tier gets a distinct bundle name so test
-    // names stay unique.
+    // names stay unique. Path convention: {tier}/{op}/{layout}/{dtype}/{bundle}/
     void populateAllTiers()
     {
-        createMinimalBundle(_tempDir / "quick" / "Bn" / "q", "q");
-        createMinimalBundle(_tempDir / "standard" / "Bn" / "s", "s");
-        createMinimalBundle(_tempDir / "comprehensive" / "Bn" / "c", "c");
-        createMinimalBundle(_tempDir / "full" / "Bn" / "f", "f");
+        createMinimalBundle(_tempDir / "quick" / "BatchnormInference" / "nchw" / "fp32" / "q", "q");
+        createMinimalBundle(_tempDir / "standard" / "BatchnormInference" / "nchw" / "fp32" / "s",
+                            "s");
+        createMinimalBundle(
+            _tempDir / "comprehensive" / "BatchnormInference" / "nchw" / "fp32" / "c", "c");
+        createMinimalBundle(_tempDir / "full" / "BatchnormInference" / "nchw" / "fp32" / "f", "f");
     }
 };
 
@@ -79,7 +79,7 @@ protected:
 TEST_F(TestGoldenBundleDiscoveryFixture, MissingTierThrows)
 {
     // Only quick populated; standard/comprehensive/full are absent -> hard fail.
-    createMinimalBundle(_tempDir / "quick" / "Bn" / "q", "q");
+    createMinimalBundle(_tempDir / "quick" / "BatchnormInference" / "nchw" / "fp32" / "q", "q");
     EXPECT_THROW(discoverGoldenBundles(_tempDir), std::runtime_error);
 }
 
@@ -101,23 +101,22 @@ TEST_F(TestGoldenBundleDiscoveryFixture, StrayTopLevelDirThrows)
     EXPECT_THROW(discoverGoldenBundles(_tempDir), std::runtime_error);
 }
 
-TEST_F(TestGoldenBundleDiscoveryFixture, UnparseableJsonThrows)
+TEST_F(TestGoldenBundleDiscoveryFixture, WrongDepthBundleThrows)
 {
     populateAllTiers();
-    // Corrupt one bundle in the quick tier (processed first).
-    auto badDir = _tempDir / "quick" / "Bn" / "bad";
-    std::filesystem::create_directories(badDir);
-    std::ofstream(badDir / "bad.json") << "{ this is not valid json";
+    // Bundle placed at wrong depth (missing layout and dtype levels).
+    auto badDir = _tempDir / "quick" / "BadOp" / "bad";
+    createMinimalBundle(badDir, "bad");
     EXPECT_THROW(discoverGoldenBundles(_tempDir), std::runtime_error);
 }
 
 TEST_F(TestGoldenBundleDiscoveryFixture, CollisionThrows)
 {
     populateAllTiers();
-    // Two bundles in the same tier with identical graph content + scenario name
-    // generate the same test name -> collision.
-    createMinimalBundle(_tempDir / "quick" / "OpA" / "SameName", "SameName");
-    createMinimalBundle(_tempDir / "quick" / "OpB" / "SameName", "SameName");
+    // Two bundles whose op names differ only by dash vs underscore
+    // both sanitize to the same suite + test name -> collision.
+    createMinimalBundle(_tempDir / "quick" / "Op-A" / "nchw" / "fp32" / "SameName", "SameName");
+    createMinimalBundle(_tempDir / "quick" / "Op_A" / "nchw" / "fp32" / "SameName", "SameName");
     EXPECT_THROW(discoverGoldenBundles(_tempDir), std::runtime_error);
 }
 
@@ -154,7 +153,7 @@ TEST_F(TestGoldenBundleDiscoveryFixture, SkipsMetaJson)
 {
     populateAllTiers();
     // Both a bare meta.json and a {Name}.meta.json companion must be ignored.
-    auto bundleDir = _tempDir / "quick" / "Bn" / "withmeta";
+    auto bundleDir = _tempDir / "quick" / "BatchnormInference" / "nchw" / "fp32" / "withmeta";
     createMinimalBundle(bundleDir, "withmeta");
     std::ofstream(bundleDir / "withmeta.meta.json") << "{}";
     std::ofstream(bundleDir / "meta.json") << "{}";

@@ -4,23 +4,23 @@
 #pragma once
 
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <unordered_map>
 
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_data_sdk/utilities/Visitor.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/BundleMetadata.hpp>
-#include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "harness/IReferenceGraphExecutor.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/golden/GoldenBundleDiscovery.hpp"
-#include "harness/golden/GoldenTensorComparator.hpp"
 
 namespace hipdnn_integration_tests::golden
 {
@@ -28,20 +28,47 @@ namespace hipdnn_integration_tests::golden
 class IntegrationGraphGoldenReferenceVerificationHarness : public ::testing::Test
 {
 public:
+    using ExecuteFunc = std::function<void(hipdnn_test_sdk::utilities::GraphAndTensorMap&)>;
+
+    IntegrationGraphGoldenReferenceVerificationHarness(ExecuteFunc executor, bool requiresDevice)
+        : _executeFunc(std::move(executor))
+        , _requiresDevice(requiresDevice)
+    {
+    }
+
     void setBundlePath(std::filesystem::path path)
     {
         _bundlePath = std::move(path);
     }
 
-protected:
-    std::filesystem::path _bundlePath;
-    hipdnn_test_sdk::utilities::GraphAndTensorMap _graphAndTensors;
-    std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>
-        _referenceOutputTensors;
+    static void runReferenceExecutor(IReferenceGraphExecutor& executor,
+                                     hipdnn_test_sdk::utilities::GraphAndTensorMap& graphAndTensors)
+    {
+        const bool usesDevice = executor.requiresDeviceMemory();
+        const auto variantPack
+            = usesDevice ? deviceVariantPack(graphAndTensors) : graphAndTensors.hostBufferMap();
 
+        executor.execute(
+            graphAndTensors.graphBuffer.data(), graphAndTensors.graphBuffer.size(), variantPack);
+
+        if(usesDevice)
+        {
+            for(const auto uid : graphAndTensors.outputTensorUids)
+            {
+                graphAndTensors.tensorMap.at(uid)->markDeviceModified();
+            }
+        }
+    }
+
+protected:
     // NOLINTNEXTLINE(readability-identifier-naming)
     void SetUp() override
     {
+        if(_requiresDevice)
+        {
+            SKIP_IF_NO_DEVICES();
+        }
+
         if(_bundlePath.empty())
         {
             GTEST_SKIP() << "No bundle path set";
@@ -65,47 +92,23 @@ protected:
         _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();
     }
 
-    virtual void executeUnderTest(hipdnn_test_sdk::utilities::GraphAndTensorMap& graphAndTensors)
-        = 0;
-
-    // GTest entry point. The base owns the load/execute/compare flow; the only
-    // per-runner variation is executeUnderTest (CPU ref / GPU ref / engine).
-    // This keeps the base abstract (executeUnderTest is pure) while making each
-    // subclass a concrete, registrable test.
     // NOLINTNEXTLINE(readability-identifier-naming)
     void TestBody() override
     {
         runGoldenComparison();
     }
 
-    // Runs a reference-graph executor (the ALMIOPEN-1944 IReferenceGraphExecutor
-    // port) against the loaded bundle. The interface drives host-vs-device
-    // variant-pack selection via requiresDeviceMemory(), so the CPU and GPU
-    // golden subclasses no longer hand-roll that branching. Device executors
-    // write to GPU memory, so outputs are marked device-modified to trigger a
-    // device-to-host sync when the comparator reads them.
-    static void runReferenceExecutor(IReferenceGraphExecutor& executor,
-                                     hipdnn_test_sdk::utilities::GraphAndTensorMap& graphAndTensors)
-    {
-        const bool usesDevice = executor.requiresDeviceMemory();
-        const auto variantPack
-            = usesDevice ? deviceVariantPack(graphAndTensors) : graphAndTensors.hostBufferMap();
-
-        executor.execute(
-            graphAndTensors.graphBuffer.data(), graphAndTensors.graphBuffer.size(), variantPack);
-
-        if(usesDevice)
-        {
-            for(const auto uid : graphAndTensors.outputTensorUids)
-            {
-                graphAndTensors.tensorMap.at(uid)->markDeviceModified();
-            }
-        }
-    }
+private:
+    ExecuteFunc _executeFunc;
+    bool _requiresDevice;
+    std::filesystem::path _bundlePath;
+    hipdnn_test_sdk::utilities::GraphAndTensorMap _graphAndTensors;
+    std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>
+        _referenceOutputTensors;
 
     void runGoldenComparison()
     {
-        ASSERT_NO_FATAL_FAILURE(executeUnderTest(_graphAndTensors));
+        ASSERT_NO_FATAL_FAILURE(_executeFunc(_graphAndTensors));
 
         auto wrapper = _graphAndTensors.createGraphWrapper();
         const auto& tensorAttrMap = wrapper.getTensorMap();
@@ -118,52 +121,17 @@ protected:
             auto* attrs = tensorAttrMap.at(uid);
             auto dataType = attrs->data_type();
 
-            // Tolerance lookup is the per-operation default only. The TOML
-            // override and bundle-metadata levels of the three-level chain
-            // (RFC 0011 §4.3) are a separate story and intentionally not wired
-            // here.
             float atol = 0.0f;
             float rtol = 0.0f;
             resolveTolerances(wrapper, dataType, atol, rtol);
 
-            auto compareFunc = [&](auto typeTag) {
-                using T = decltype(typeTag);
-                return compareTensors<T>(expectedTensor, actualTensor, atol, rtol);
-            };
-
-            auto result
-                = std::visit(hipdnn_data_sdk::utilities::Visitor{compareFunc,
-                                                                 [](int) -> ComparisonResult {
-                                                                     ComparisonResult r;
-                                                                     r.passed = false;
-                                                                     return r;
-                                                                 }},
-                             hipdnn_test_sdk::utilities::datatypeToNativeVariant(dataType));
-
-            if(!result.passed)
-            {
-                std::string tensorName;
-                if(attrs->name() != nullptr)
-                {
-                    tensorName = attrs->name()->str();
-                }
-                std::vector<int64_t> shape;
-                if(attrs->dims() != nullptr)
-                {
-                    for(flatbuffers::uoffset_t i = 0; i < attrs->dims()->size(); ++i)
-                    {
-                        shape.push_back(attrs->dims()->Get(i));
-                    }
-                }
-                auto dtypeStr = dataTypeToShortString(dataType);
-
-                FAIL() << formatComparisonFailure(
-                    _bundlePath, uid, tensorName, shape, dtypeStr, result);
-            }
+            auto validator
+                = hipdnn_test_sdk::utilities::createAllCloseValidator(dataType, atol, rtol);
+            ASSERT_TRUE(validator->allClose(expectedTensor, actualTensor))
+                << "Mismatch in output tensor uid=" << uid << " for bundle " << _bundlePath;
         }
     }
 
-private:
     static std::unordered_map<int64_t, void*>
         deviceVariantPack(hipdnn_test_sdk::utilities::GraphAndTensorMap& graphAndTensors)
     {

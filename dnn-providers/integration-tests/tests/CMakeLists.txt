@@ -16,8 +16,6 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuConvolutionFwdPlan.cpp
     TestReferenceGraphExecutorFactory.cpp
     TestGoldenBundleDiscovery.cpp
-    TestLayoutNameFromGraph.cpp
-    TestGoldenTensorComparator.cpp
     TestGoldenVerificationPaths.cpp
 )
 

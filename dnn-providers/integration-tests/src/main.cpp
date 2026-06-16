@@ -267,7 +267,7 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
-        hipdnn_integration_tests::golden::registerGoldenBundleTests();
+        hipdnn_integration_tests::golden::registerBundleTests();
 
         const int result = RUN_ALL_TESTS();
 

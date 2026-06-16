@@ -6,15 +6,13 @@
 #include <filesystem>
 #include <fstream>
 
-#include <hipdnn_data_sdk/utilities/Visitor.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
-#include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 #include "harness/golden/GoldenBundleDiscovery.hpp"
-#include "harness/golden/GoldenTensorComparator.hpp"
 #include "harness/gpu_graph_executor/GpuReferenceGraphExecutor.hpp"
 
 // NOLINTBEGIN(readability-identifier-naming)
@@ -37,7 +35,7 @@ std::filesystem::path batchNormSmallBundle()
 
 void verifyGoldenComparison(
     hipdnn_test_sdk::utilities::GraphAndTensorMap& graphAndTensors,
-    const std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>&
+    std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>&
         goldenOutputs,
     float tolerance)
 {
@@ -46,27 +44,14 @@ void verifyGoldenComparison(
 
     for(const auto uid : graphAndTensors.outputTensorUids)
     {
-        const auto& actualTensor = *graphAndTensors.tensorMap.at(uid);
-        const auto& expectedTensor = *goldenOutputs.at(uid);
+        auto& actualTensor = *graphAndTensors.tensorMap.at(uid);
+        auto& expectedTensor = *goldenOutputs.at(uid);
         const auto dataType = tensorAttrMap.at(uid)->data_type();
 
-        auto compareFunc = [&](auto typeTag) {
-            using T = decltype(typeTag);
-            return compareTensors<T>(expectedTensor, actualTensor, tolerance, tolerance);
-        };
-
-        const auto result
-            = std::visit(hipdnn_data_sdk::utilities::Visitor{compareFunc,
-                                                             [](int) -> ComparisonResult {
-                                                                 ComparisonResult r;
-                                                                 r.passed = false;
-                                                                 return r;
-                                                             }},
-                         hipdnn_test_sdk::utilities::datatypeToNativeVariant(dataType));
-
-        EXPECT_TRUE(result.passed) << "Golden comparison failed for tensor uid=" << uid << ": "
-                                   << result.mismatchCount << "/" << result.totalElements
-                                   << " elements mismatched, max abs error=" << result.maxAbsError;
+        auto validator
+            = hipdnn_test_sdk::utilities::createAllCloseValidator(dataType, tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expectedTensor, actualTensor))
+            << "Golden comparison failed for tensor uid=" << uid;
     }
 }
 
@@ -205,23 +190,28 @@ TEST(TestGoldenVerificationRouting, OnlyBatchNormDiscoveredConvAndLayerNormFallT
     std::filesystem::remove_all(path);
     const hipdnn_test_sdk::utilities::ScopedDirectory tempDir(path);
 
-    writeMinimalBatchNormBundle(tempDir.path() / "quick" / "Bn" / "q", "q");
-    writeMinimalBatchNormBundle(tempDir.path() / "standard" / "Bn" / "s", "s");
-    writeMinimalBatchNormBundle(tempDir.path() / "comprehensive" / "Bn" / "c", "c");
-    writeMinimalBatchNormBundle(tempDir.path() / "full" / "Bn" / "f", "f");
+    writeMinimalBatchNormBundle(
+        tempDir.path() / "quick" / "BatchnormInference" / "nchw" / "fp32" / "q", "q");
+    writeMinimalBatchNormBundle(
+        tempDir.path() / "standard" / "BatchnormInference" / "nchw" / "fp32" / "s", "s");
+    writeMinimalBatchNormBundle(
+        tempDir.path() / "comprehensive" / "BatchnormInference" / "nchw" / "fp32" / "c", "c");
+    writeMinimalBatchNormBundle(
+        tempDir.path() / "full" / "BatchnormInference" / "nchw" / "fp32" / "f", "f");
 
     const auto bundles = discoverGoldenBundles(tempDir.path());
     ASSERT_EQ(bundles.size(), 4u);
 
     for(const auto& b : bundles)
     {
-        EXPECT_NE(b.suiteName.find("BatchnormInference"), std::string::npos)
-            << "Expected BatchnormInference in suite name, got: " << b.suiteName;
         EXPECT_EQ(b.suiteName.find("Conv"), std::string::npos)
             << "Conv should NOT appear — no conv golden bundles exist";
         EXPECT_EQ(b.suiteName.find("LayerNorm"), std::string::npos)
             << "LayerNorm should NOT appear — no layer norm golden bundles exist";
     }
+
+    const auto* quickBundle = &bundles.front();
+    EXPECT_EQ(quickBundle->suiteName, "BatchnormInference_nchw_fp32");
 }
 
 // ---------------------------------------------------------------------------
@@ -238,10 +228,14 @@ TEST(TestGoldenVerificationRouting, ThreeRunnerSuffixesProduceDistinctSuites)
     std::filesystem::remove_all(path);
     const hipdnn_test_sdk::utilities::ScopedDirectory tempDir(path);
 
-    writeMinimalBatchNormBundle(tempDir.path() / "quick" / "Bn" / "q", "q");
-    writeMinimalBatchNormBundle(tempDir.path() / "standard" / "Bn" / "s", "s");
-    writeMinimalBatchNormBundle(tempDir.path() / "comprehensive" / "Bn" / "c", "c");
-    writeMinimalBatchNormBundle(tempDir.path() / "full" / "Bn" / "f", "f");
+    writeMinimalBatchNormBundle(
+        tempDir.path() / "quick" / "BatchnormInference" / "nchw" / "fp32" / "q", "q");
+    writeMinimalBatchNormBundle(
+        tempDir.path() / "standard" / "BatchnormInference" / "nchw" / "fp32" / "s", "s");
+    writeMinimalBatchNormBundle(
+        tempDir.path() / "comprehensive" / "BatchnormInference" / "nchw" / "fp32" / "c", "c");
+    writeMinimalBatchNormBundle(
+        tempDir.path() / "full" / "BatchnormInference" / "nchw" / "fp32" / "f", "f");
 
     const auto bundles = discoverGoldenBundles(tempDir.path());
     ASSERT_FALSE(bundles.empty());
