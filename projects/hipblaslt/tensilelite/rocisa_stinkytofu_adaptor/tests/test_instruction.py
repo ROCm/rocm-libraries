@@ -118,7 +118,30 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     SSubI32,
     SSubU32,
     SXorB32,
+    VAddF32,
+    VAddU32,
+    VAndB32,
+    VAndOrB32,
+    VCndMaskB32,
+    VFmaF32,
+    VFmaMixF32,
+    VLShiftLeftB32,
+    VLShiftLeftB64,
+    VLShiftRightB32,
+    VLShiftRightB64,
     VMovB32,
+    VMulF32,
+    VMulHII32,
+    VMulHIU32,
+    VMulI32I24,
+    VMulLOU32,
+    VMulU32U24,
+    VOrB32,
+    VReadfirstlaneB32,
+    VSubF32,
+    VSubI32,
+    VSubU32,
+    VXorB32,
     _to_stinky_register,
 )
 
@@ -1064,6 +1087,241 @@ class TestDevelopInstructionExports(unittest.TestCase):
                 cls = getattr(inst_mod, name)
                 obj = cls()
                 self.assertIn("DummyShim", repr(obj))
+
+
+# ===========================================================================
+# Vector ALU instructions (Phase 6 Step 4)
+# ===========================================================================
+
+_VECTOR_ALU_BINARY = [
+    # (class, mnemonic, InstType)
+    (VAddU32, "v_add_nc_u32", InstType.INST_U32),
+    (VAddF32, "v_add_f32", InstType.INST_F32),
+    (VSubF32, "v_sub_f32", InstType.INST_F32),
+    (VSubI32, "v_sub_nc_i32", InstType.INST_I32),
+    (VSubU32, "v_sub_nc_u32", InstType.INST_U32),
+    (VMulF32, "v_mul_f32", InstType.INST_F32),
+    (VMulLOU32, "v_mul_lo_u32", InstType.INST_LO_U32),
+    (VMulHIU32, "v_mul_hi_u32", InstType.INST_HI_U32),
+    (VMulHII32, "v_mul_hi_i32", InstType.INST_HI_I32),
+    (VMulI32I24, "v_mul_i32_i24", InstType.INST_I32),
+    (VMulU32U24, "v_mul_u32_u24", InstType.INST_U32),
+    (VAndB32, "v_and_b32", InstType.INST_B32),
+    (VOrB32, "v_or_b32", InstType.INST_B32),
+    (VXorB32, "v_xor_b32", InstType.INST_B32),
+]
+
+_VECTOR_SHIFT = [
+    (VLShiftLeftB32, "v_lshlrev_b32", InstType.INST_B32),
+    (VLShiftRightB32, "v_lshrrev_b32", InstType.INST_B32),
+    (VLShiftLeftB64, "v_lshlrev_b64", InstType.INST_B64),
+    (VLShiftRightB64, "v_lshrrev_b64", InstType.INST_B64),
+]
+
+_VECTOR_TERNARY = [
+    (VFmaF32, "v_fma_f32", InstType.INST_F32),
+    (VFmaMixF32, "v_fma_mix_f32", InstType.INST_F32),
+    (VAndOrB32, "v_and_or_b32", InstType.INST_B32),
+]
+
+
+class TestVectorALUBinaryConstruction(unittest.TestCase):
+    """Binary vector ALU shims (dst, src0, src1) inherit CommonInstruction."""
+
+    def test_construction_and_str(self):
+        for cls, mnemonic, itype in _VECTOR_ALU_BINARY:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2), comment="t")
+                self.assertIsInstance(inst, CommonInstruction)
+                self.assertEqual(inst.instStr, mnemonic)
+                self.assertEqual(inst.instType, itype)
+                text = str(inst)
+                self.assertTrue(text.startswith(mnemonic), text)
+                self.assertIn("v0", text)
+                self.assertIn("v1", text)
+                self.assertIn("v2", text)
+
+    def test_deepcopy(self):
+        for cls, _, _ in _VECTOR_ALU_BINARY:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(4), src0=vgpr(5), src1=vgpr(6), comment="cp")
+                c = copy.deepcopy(inst)
+                self.assertIsInstance(c, cls)
+                self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        for cls, _, _ in _VECTOR_ALU_BINARY:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2))
+                self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        for cls, _, _ in _VECTOR_ALU_BINARY:
+            with self.subTest(cls=cls.__name__):
+                m = Module()
+                m.add(cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
+                self.assertEqual(len(m._collect_logical_insts()), 1)
+
+    def test_immediate_src(self):
+        inst = VAddU32(dst=vgpr(0), src0=vgpr(1), src1=42)
+        text = str(inst)
+        self.assertIn("42", text)
+
+
+class TestVectorShiftConstruction(unittest.TestCase):
+    """Vector shift shims (dst, shiftHex, src) with rev mnemonics."""
+
+    def test_construction_native_api(self):
+        for cls, mnemonic, itype in _VECTOR_SHIFT:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), shiftHex=vgpr(1), src=vgpr(2), comment="sh")
+                self.assertIsInstance(inst, CommonInstruction)
+                self.assertEqual(inst.instStr, mnemonic)
+                self.assertEqual(inst.instType, itype)
+                text = str(inst)
+                self.assertTrue(text.startswith(mnemonic), text)
+                self.assertIn("v0", text)
+                self.assertIn("v1", text)
+                self.assertIn("v2", text)
+
+    def test_construction_generic_api(self):
+        for cls, mnemonic, _ in _VECTOR_SHIFT:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2))
+                self.assertEqual(inst.instStr, mnemonic)
+                text = str(inst)
+                self.assertIn("v1", text)
+                self.assertIn("v2", text)
+
+    def test_deepcopy(self):
+        for cls, _, _ in _VECTOR_SHIFT:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), shiftHex=vgpr(1), src=vgpr(2))
+                c = copy.deepcopy(inst)
+                self.assertIsInstance(c, cls)
+                self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        for cls, _, _ in _VECTOR_SHIFT:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), shiftHex=vgpr(1), src=vgpr(2))
+                self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        for cls, _, _ in _VECTOR_SHIFT:
+            with self.subTest(cls=cls.__name__):
+                m = Module()
+                m.add(cls(dst=vgpr(0), shiftHex=vgpr(1), src=vgpr(2)))
+                self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestVectorTernaryConstruction(unittest.TestCase):
+    """Ternary vector ALU shims (dst, src0, src1, src2)."""
+
+    def test_construction_and_str(self):
+        for cls, mnemonic, itype in _VECTOR_TERNARY:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2),
+                           src2=vgpr(3), comment="ter")
+                self.assertIsInstance(inst, CommonInstruction)
+                self.assertEqual(inst.instStr, mnemonic)
+                self.assertEqual(inst.instType, itype)
+                text = str(inst)
+                self.assertTrue(text.startswith(mnemonic), text)
+                self.assertIn("v0", text)
+                self.assertIn("v1", text)
+                self.assertIn("v2", text)
+                self.assertIn("v3", text)
+
+    def test_deepcopy(self):
+        for cls, _, _ in _VECTOR_TERNARY:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2), src2=vgpr(3))
+                c = copy.deepcopy(inst)
+                self.assertIsInstance(c, cls)
+                self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        for cls, _, _ in _VECTOR_TERNARY:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2), src2=vgpr(3))
+                self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        for cls, _, _ in _VECTOR_TERNARY:
+            with self.subTest(cls=cls.__name__):
+                m = Module()
+                m.add(cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2), src2=vgpr(3)))
+                self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestVCndMaskB32Construction(unittest.TestCase):
+    """VCndMaskB32 (native: dst, src0, src1, src2=VCC; logical IR: 2 srcs)."""
+
+    def test_construction_with_src2(self):
+        inst = VCndMaskB32(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2),
+                           src2=vgpr(3), comment="mask")
+        self.assertIsInstance(inst, CommonInstruction)
+        self.assertEqual(inst.instStr, "v_cndmask_b32")
+        text = str(inst)
+        self.assertIn("v0", text)
+        self.assertIn("v1", text)
+        self.assertIn("v2", text)
+        self.assertIn("v3", text)
+
+    def test_construction_without_src2(self):
+        inst = VCndMaskB32(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2))
+        self.assertEqual(len(inst.srcs), 2)
+        text = str(inst)
+        self.assertIn("v_cndmask_b32", text)
+
+    def test_deepcopy(self):
+        inst = VCndMaskB32(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2), src2=vgpr(3))
+        c = copy.deepcopy(inst)
+        self.assertIsInstance(c, VCndMaskB32)
+        self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        inst = VCndMaskB32(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2))
+        self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        m = Module()
+        m.add(VCndMaskB32(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
+        self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestVReadfirstlaneB32Construction(unittest.TestCase):
+    """VReadfirstlaneB32 (unary: dst, src)."""
+
+    def test_construction_and_str(self):
+        inst = VReadfirstlaneB32(dst=vgpr(0), src=vgpr(1), comment="lane0")
+        self.assertIsInstance(inst, CommonInstruction)
+        self.assertEqual(inst.instStr, "v_readfirstlane_b32")
+        text = str(inst)
+        self.assertIn("v_readfirstlane_b32", text)
+        self.assertIn("v0", text)
+        self.assertIn("v1", text)
+
+    def test_deepcopy(self):
+        inst = VReadfirstlaneB32(dst=vgpr(0), src=vgpr(1))
+        c = copy.deepcopy(inst)
+        self.assertIsInstance(c, VReadfirstlaneB32)
+        self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        inst = VReadfirstlaneB32(dst=vgpr(0), src=vgpr(1))
+        self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        m = Module()
+        m.add(VReadfirstlaneB32(dst=vgpr(0), src=vgpr(1)))
+        self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
 # ===========================================================================

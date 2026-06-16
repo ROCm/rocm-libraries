@@ -72,18 +72,19 @@ What it does (real):
 
 Not yet done (dummy):
     - All other instruction classes (``Buffer*``, ``DS*``, ``Flat*``,
-      most ``V*``, ``MFMA*`` / ``SMFMA*``, ...) except the real classes:
+      ``MFMA*`` / ``SMFMA*``, ...) except the real classes:
       ``VMovB32``, ``SMovB32``, ``SMovB64``, ``SNop``,
       ``SMemLoadInstruction`` / ``SLoadB32`` … ``SLoadB512``,
-      ``MacroInstruction``, and the Scalar ALU batch:
-      ``SAddI32``, ``SAddU32``, ``SAddCU32``, ``SMulI32``,
-      ``SMulHII32``, ``SMulHIU32``, ``SMulLOU32``, ``SSubI32``,
-      ``SSubU32``, ``SSubBU32``, ``SLShiftLeftB32``,
-      ``SLShiftRightB32``, ``SLShiftLeftB64``, ``SLShiftRightB64``,
-      ``SAShiftRightI32``, ``SLShiftLeft1AddU32`` …
-      ``SLShiftLeft4AddU32``, ``SAndB32``, ``SAndB64``, ``SAndN2B32``,
-      ``SOrB32``, ``SOrB64``, ``SXorB32``, ``SAndSaveExecB32``,
-      ``SAndSaveExecB64``, ``SOrSaveExecB32``, ``SOrSaveExecB64``.
+      ``MacroInstruction``, the Scalar ALU batch (``SAddI32`` …
+      ``SOrSaveExecB64``), Scalar Control (``SBarrier``,
+      ``SGetRegB32``, ``SSetRegB32``, ``SSetRegIMM32B32``),
+      and the Vector ALU batch: ``VAddU32``, ``VAddF32``,
+      ``VSubF32``, ``VSubI32``, ``VSubU32``, ``VMulF32``,
+      ``VMulLOU32``, ``VMulHIU32``, ``VMulHII32``, ``VMulI32I24``,
+      ``VMulU32U24``, ``VAndB32``, ``VOrB32``, ``VXorB32``,
+      ``VLShiftLeftB32``, ``VLShiftRightB32``, ``VLShiftLeftB64``,
+      ``VLShiftRightB64``, ``VFmaF32``, ``VFmaMixF32``,
+      ``VAndOrB32``, ``VCndMaskB32``, ``VReadfirstlaneB32``.
     - ``CompositeInstruction`` still dummy (no concrete subclass
       promoted yet). ``MacroInstruction`` is real (KernelWriter emits
       it 16+ times via ``V_MAGIC_DIV`` / ``GLOBAL_OFFSET_*`` /
@@ -729,7 +730,7 @@ class SNop(Instruction):
 
 
 def _make_scalar_alu_class(class_name: str, mnemonic: str, inst_type: "InstType"):
-    """Factory for scalar ALU instruction shim classes (dst, src0, src1)."""
+    """Factory for scalar/vector ALU instruction shim classes (dst, src0, src1)."""
 
     def __init__(self, dst: Any, src0: Any = None, src1: Any = None,
                  sdwa: Any = None, comment: str = "", dpp: Any = None, **kw):
@@ -753,7 +754,7 @@ def _make_scalar_alu_class(class_name: str, mnemonic: str, inst_type: "InstType"
         src0_reg = _to_stinky_register(self.srcs[0])
         src1_reg = _to_stinky_register(self.srcs[1])
         factory = getattr(_st, class_name)
-        return factory(dst_reg, src0_reg, src1_reg, self.comment)
+        return factory(dst_reg, src0_reg, src1_reg, comment=self.comment)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -768,7 +769,7 @@ def _make_scalar_alu_class(class_name: str, mnemonic: str, inst_type: "InstType"
 
 
 def _make_scalar_unary_class(class_name: str, mnemonic: str, inst_type: "InstType"):
-    """Factory for scalar unary instruction shim classes (dst, src) — 1 source."""
+    """Factory for scalar/vector unary instruction shim classes (dst, src) — 1 source."""
 
     def __init__(self, dst: Any, src: Any = None,
                  sdwa: Any = None, comment: str = "", dpp: Any = None, **kw):
@@ -791,7 +792,7 @@ def _make_scalar_unary_class(class_name: str, mnemonic: str, inst_type: "InstTyp
         dst_reg = _to_stinky_register(self.dst)
         src_reg = _to_stinky_register(self.srcs[0])
         factory = getattr(_st, class_name)
-        return factory(dst_reg, src_reg, self.comment)
+        return factory(dst_reg, src_reg, comment=self.comment)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -866,7 +867,7 @@ def _make_scalar_shift_class(class_name: str, mnemonic: str, inst_type: "InstTyp
         src0_reg = _to_stinky_register(self.srcs[0])  # value
         src1_reg = _to_stinky_register(self.srcs[1])  # shift amount
         factory = getattr(_st, class_name)
-        return factory(dst_reg, src0_reg, src1_reg, self.comment)
+        return factory(dst_reg, src0_reg, src1_reg, comment=self.comment)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -920,6 +921,205 @@ SAndSaveExecB64 = _make_scalar_unary_class("SAndSaveExecB64", "s_and_saveexec_b6
 SOrSaveExecB32 = _make_scalar_unary_class("SOrSaveExecB32", "s_or_saveexec_b32", InstType.INST_B32)
 # logicalIR: SOrSaveExecB64 (1 src)
 SOrSaveExecB64 = _make_scalar_unary_class("SOrSaveExecB64", "s_or_saveexec_b64", InstType.INST_B64)
+
+
+# ==========================================================================
+# Vector ALU -- arithmetic, shift, bitwise, other (Phase 6 Step 4).
+# ==========================================================================
+#
+# source: rocisa/rocisa/include/instruction/common.hpp
+# logicalIR: All have entries in LogicalInstructionDefs.inc.
+#
+# Pattern: reuse the scalar factories where the API shape is identical
+# (dst, src0, src1) or create specialized ones for ternary / vector-shift.
+
+
+def _make_ternary_class(class_name: str, mnemonic: str, inst_type: "InstType"):
+    """Factory for ternary instruction shim classes (dst, src0, src1, src2)."""
+
+    def __init__(self, dst: Any, src0: Any = None, src1: Any = None,
+                 src2: Any = None,
+                 sdwa: Any = None, comment: str = "", dpp: Any = None,
+                 vop3: Any = None, **kw):
+        _ = kw
+        CommonInstruction.__init__(
+            self,
+            instType=inst_type,
+            dst=dst,
+            srcs=[src0, src1, src2],
+            dpp=dpp,
+            sdwa=sdwa,
+            vop3=vop3,
+            comment=comment,
+        )
+        self.setInst(mnemonic)
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        dst_reg = _to_stinky_register(self.dst)
+        src0_reg = _to_stinky_register(self.srcs[0])
+        src1_reg = _to_stinky_register(self.srcs[1])
+        src2_reg = _to_stinky_register(self.srcs[2])
+        factory = getattr(_st, class_name)
+        return factory(dst_reg, src0_reg, src1_reg, src2_reg, comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+    cls = type(class_name, (CommonInstruction,), {
+        "__doc__": f"``{mnemonic} dst, src0, src1, src2`` shim with stinkytofu left-path bridge.",
+        "__init__": __init__,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+    })
+    return cls
+
+
+def _make_vector_shift_class(class_name: str, mnemonic: str, inst_type: "InstType"):
+    """Factory for vector shift instruction shims matching rocisa (dst, shiftHex, src) API.
+
+    Unlike scalar shifts (which internally reorder srcs to [value, shift]), vector
+    shifts store srcs in the native order [shiftHex, src] and emit as-is.  The
+    stinkytofu factory also expects (dst, src0=shift, src1=value, comment).
+    """
+
+    def __init__(self, dst: Any, shiftHex: Any = None, src: Any = None,
+                 src0: Any = None, src1: Any = None,
+                 sdwa: Any = None, comment: str = "", dpp: Any = None, **kw):
+        _ = kw
+        if shiftHex is not None or src is not None:
+            s0 = shiftHex
+            s1 = src
+        else:
+            s0 = src0
+            s1 = src1
+        CommonInstruction.__init__(
+            self,
+            instType=inst_type,
+            dst=dst,
+            srcs=[s0, s1],
+            dpp=dpp,
+            sdwa=sdwa,
+            vop3=None,
+            comment=comment,
+        )
+        self.setInst(mnemonic)
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        dst_reg = _to_stinky_register(self.dst)
+        src0_reg = _to_stinky_register(self.srcs[0])
+        src1_reg = _to_stinky_register(self.srcs[1])
+        factory = getattr(_st, class_name)
+        return factory(dst_reg, src0_reg, src1_reg, comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+    cls = type(class_name, (CommonInstruction,), {
+        "__doc__": f"``{mnemonic} dst, shiftHex, src`` shim with stinkytofu left-path bridge.",
+        "__init__": __init__,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+    })
+    return cls
+
+
+# -- Vector Arithmetic (binary: dst, src0, src1) --
+# logicalIR: VAddU32
+VAddU32 = _make_scalar_alu_class("VAddU32", "v_add_nc_u32", InstType.INST_U32)
+# logicalIR: VAddF32
+VAddF32 = _make_scalar_alu_class("VAddF32", "v_add_f32", InstType.INST_F32)
+# logicalIR: VSubF32
+VSubF32 = _make_scalar_alu_class("VSubF32", "v_sub_f32", InstType.INST_F32)
+# logicalIR: VSubI32
+VSubI32 = _make_scalar_alu_class("VSubI32", "v_sub_nc_i32", InstType.INST_I32)
+# logicalIR: VSubU32
+VSubU32 = _make_scalar_alu_class("VSubU32", "v_sub_nc_u32", InstType.INST_U32)
+# logicalIR: VMulF32
+VMulF32 = _make_scalar_alu_class("VMulF32", "v_mul_f32", InstType.INST_F32)
+# logicalIR: VMulLOU32
+VMulLOU32 = _make_scalar_alu_class("VMulLOU32", "v_mul_lo_u32", InstType.INST_LO_U32)
+# logicalIR: VMulHIU32
+VMulHIU32 = _make_scalar_alu_class("VMulHIU32", "v_mul_hi_u32", InstType.INST_HI_U32)
+# logicalIR: VMulHII32
+VMulHII32 = _make_scalar_alu_class("VMulHII32", "v_mul_hi_i32", InstType.INST_HI_I32)
+# logicalIR: VMulI32I24
+VMulI32I24 = _make_scalar_alu_class("VMulI32I24", "v_mul_i32_i24", InstType.INST_I32)
+# logicalIR: VMulU32U24
+VMulU32U24 = _make_scalar_alu_class("VMulU32U24", "v_mul_u32_u24", InstType.INST_U32)
+# logicalIR: VAndB32
+VAndB32 = _make_scalar_alu_class("VAndB32", "v_and_b32", InstType.INST_B32)
+# logicalIR: VOrB32
+VOrB32 = _make_scalar_alu_class("VOrB32", "v_or_b32", InstType.INST_B32)
+# logicalIR: VXorB32
+VXorB32 = _make_scalar_alu_class("VXorB32", "v_xor_b32", InstType.INST_B32)
+
+# -- Vector Shift (dst, shiftHex, src) → rev mnemonic --
+# logicalIR: VLShiftLeftB32
+VLShiftLeftB32 = _make_vector_shift_class("VLShiftLeftB32", "v_lshlrev_b32", InstType.INST_B32)
+# logicalIR: VLShiftRightB32
+VLShiftRightB32 = _make_vector_shift_class("VLShiftRightB32", "v_lshrrev_b32", InstType.INST_B32)
+# logicalIR: VLShiftLeftB64
+VLShiftLeftB64 = _make_vector_shift_class("VLShiftLeftB64", "v_lshlrev_b64", InstType.INST_B64)
+# logicalIR: VLShiftRightB64
+VLShiftRightB64 = _make_vector_shift_class("VLShiftRightB64", "v_lshrrev_b64", InstType.INST_B64)
+
+# -- Vector Ternary (dst, src0, src1, src2) --
+# logicalIR: VFmaF32
+VFmaF32 = _make_ternary_class("VFmaF32", "v_fma_f32", InstType.INST_F32)
+# logicalIR: VFmaMixF32
+VFmaMixF32 = _make_ternary_class("VFmaMixF32", "v_fma_mix_f32", InstType.INST_F32)
+# logicalIR: VAndOrB32
+VAndOrB32 = _make_ternary_class("VAndOrB32", "v_and_or_b32", InstType.INST_B32)
+
+# -- VCndMaskB32 (native: dst, src0, src1, src2=VCC; logical IR: 2 srcs) --
+# logicalIR: VCndMaskB32
+
+
+class VCndMaskB32(CommonInstruction):
+    """``v_cndmask_b32 dst, src0, src1, vcc`` shim with stinkytofu left-path bridge.
+
+    Native rocisa takes (dst, src0, src1, src2=VCC). The logical IR version has
+    only 2 sources (the VCC mask is implicit); ``to_stinky_logical`` forwards
+    only (dst, src0, src1).
+    """
+
+    def __init__(self, dst: Any, src0: Any = None, src1: Any = None,
+                 src2: Any = None,
+                 sdwa: Any = None, comment: str = "", dpp: Any = None, **kw):
+        _ = kw
+        srcs = [src0, src1]
+        if src2 is not None:
+            srcs.append(src2)
+        super().__init__(
+            instType=InstType.INST_B32,
+            dst=dst,
+            srcs=srcs,
+            dpp=dpp,
+            sdwa=sdwa,
+            vop3=None,
+            comment=comment,
+        )
+        self.setInst("v_cndmask_b32")
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        dst_reg = _to_stinky_register(self.dst)
+        src0_reg = _to_stinky_register(self.srcs[0])
+        src1_reg = _to_stinky_register(self.srcs[1])
+        return _st.VCndMaskB32(dst_reg, src0_reg, src1_reg, comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+
+# -- VReadfirstlaneB32 (unary: dst, src) --
+# logicalIR: VReadfirstlaneB32
+VReadfirstlaneB32 = _make_scalar_unary_class("VReadfirstlaneB32", "v_readfirstlane_b32", InstType.INST_B32)
 
 
 # ==========================================================================
@@ -1397,14 +1597,12 @@ SWaitAlu = make_dummy_class(f"{_P}.SWaitAlu")
 SDelayAlu = make_dummy_class(f"{_P}.SDelayAlu")
 # logicalIR: VAddF16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 VAddF16 = make_dummy_class(f"{_P}.VAddF16")
-# logicalIR: VAddF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VAddF32 = make_dummy_class(f"{_P}.VAddF32")
+# VAddF32 — real class (see Vector ALU section above)
 # logicalIR: VAddF64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 VAddF64 = make_dummy_class(f"{_P}.VAddF64")
 # logicalIR: VAddI32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 VAddI32 = make_dummy_class(f"{_P}.VAddI32")
-# logicalIR: VAddU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VAddU32 = make_dummy_class(f"{_P}.VAddU32")
+# VAddU32 — real class (see Vector ALU section above)
 # logicalIR: VAddCOU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 VAddCOU32 = make_dummy_class(f"{_P}.VAddCOU32")
 # logicalIR: VAddCCOU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
@@ -1420,8 +1618,7 @@ VAddPKF32 = make_dummy_class(f"{_P}.VAddPKF32")
 VAdd3U32 = make_dummy_class(f"{_P}.VAdd3U32")
 # logicalIR: VMulF16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 VMulF16 = make_dummy_class(f"{_P}.VMulF16")
-# logicalIR: VMulF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VMulF32 = make_dummy_class(f"{_P}.VMulF32")
+# VMulF32 — real class (see Vector ALU section above)
 # logicalIR: VMulF64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 VMulF64 = make_dummy_class(f"{_P}.VMulF64")
 # logicalIR: VMulPKF16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
@@ -1431,22 +1628,14 @@ VMulPKF32S = make_dummy_class(f"{_P}.VMulPKF32S")
 _VMulPKF32 = make_dummy_class(f"{_P}._VMulPKF32")
 # logicalIR: VMulPKF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 VMulPKF32 = make_dummy_class(f"{_P}.VMulPKF32")
-# logicalIR: VMulLOU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VMulLOU32 = make_dummy_class(f"{_P}.VMulLOU32")
-# logicalIR: VMulHII32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VMulHII32 = make_dummy_class(f"{_P}.VMulHII32")
-# logicalIR: VMulHIU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VMulHIU32 = make_dummy_class(f"{_P}.VMulHIU32")
-# logicalIR: VMulI32I24  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VMulI32I24 = make_dummy_class(f"{_P}.VMulI32I24")
-# logicalIR: VMulU32U24  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VMulU32U24 = make_dummy_class(f"{_P}.VMulU32U24")
-# logicalIR: VSubF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VSubF32 = make_dummy_class(f"{_P}.VSubF32")
-# logicalIR: VSubI32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VSubI32 = make_dummy_class(f"{_P}.VSubI32")
-# logicalIR: VSubU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VSubU32 = make_dummy_class(f"{_P}.VSubU32")
+# VMulLOU32 — real class (see Vector ALU section above)
+# VMulHII32 — real class (see Vector ALU section above)
+# VMulHIU32 — real class (see Vector ALU section above)
+# VMulI32I24 — real class (see Vector ALU section above)
+# VMulU32U24 — real class (see Vector ALU section above)
+# VSubF32 — real class (see Vector ALU section above)
+# VSubI32 — real class (see Vector ALU section above)
+# VSubU32 — real class (see Vector ALU section above)
 # logicalIR: VSubCoU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 VSubCoU32 = make_dummy_class(f"{_P}.VSubCoU32")
 # logicalIR: VMacF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
@@ -1461,14 +1650,12 @@ VDot2F32F16 = make_dummy_class(f"{_P}.VDot2F32F16")
 VDot2F32BF16 = make_dummy_class(f"{_P}.VDot2F32BF16")
 # logicalIR: VFmaF16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 VFmaF16 = make_dummy_class(f"{_P}.VFmaF16")
-# logicalIR: VFmaF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VFmaF32 = make_dummy_class(f"{_P}.VFmaF32")
+# VFmaF32 — real class (see Vector ALU section above)
 # logicalIR: VFmaF64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 VFmaF64 = make_dummy_class(f"{_P}.VFmaF64")
 # logicalIR: VFmaPKF16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 VFmaPKF16 = make_dummy_class(f"{_P}.VFmaPKF16")
-# logicalIR: VFmaMixF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VFmaMixF32 = make_dummy_class(f"{_P}.VFmaMixF32")
+# VFmaMixF32 — real class (see Vector ALU section above)
 # logicalIR: VMadI32I24  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 VMadI32I24 = make_dummy_class(f"{_P}.VMadI32I24")
 # logicalIR: VMadU32U24  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
@@ -1514,30 +1701,21 @@ VMinF32 = make_dummy_class(f"{_P}.VMinF32")
 VMinF64 = make_dummy_class(f"{_P}.VMinF64")
 # logicalIR: VMinI32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 VMinI32 = make_dummy_class(f"{_P}.VMinI32")
-# logicalIR: VAndB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VAndB32 = make_dummy_class(f"{_P}.VAndB32")
-# logicalIR: VAndOrB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VAndOrB32 = make_dummy_class(f"{_P}.VAndOrB32")
+# VAndB32 — real class (see Vector ALU section above)
+# VAndOrB32 — real class (see Vector ALU section above)
 # logicalIR: VNotB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 VNotB32 = make_dummy_class(f"{_P}.VNotB32")
-# logicalIR: VOrB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VOrB32 = make_dummy_class(f"{_P}.VOrB32")
-# logicalIR: VXorB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VXorB32 = make_dummy_class(f"{_P}.VXorB32")
+# VOrB32 — real class (see Vector ALU section above)
+# VXorB32 — real class (see Vector ALU section above)
 # logicalIR: VPrngB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 VPrngB32 = make_dummy_class(f"{_P}.VPrngB32")
-# logicalIR: VCndMaskB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCndMaskB32 = make_dummy_class(f"{_P}.VCndMaskB32")
+# VCndMaskB32 — real class (see Vector ALU section above)
 # logicalIR: VLShiftLeftB16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 VLShiftLeftB16 = make_dummy_class(f"{_P}.VLShiftLeftB16")
-# logicalIR: VLShiftLeftB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VLShiftLeftB32 = make_dummy_class(f"{_P}.VLShiftLeftB32")
-# logicalIR: VLShiftRightB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VLShiftRightB32 = make_dummy_class(f"{_P}.VLShiftRightB32")
-# logicalIR: VLShiftLeftB64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VLShiftLeftB64 = make_dummy_class(f"{_P}.VLShiftLeftB64")
-# logicalIR: VLShiftRightB64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VLShiftRightB64 = make_dummy_class(f"{_P}.VLShiftRightB64")
+# VLShiftLeftB32 — real class (see Vector ALU section above)
+# VLShiftRightB32 — real class (see Vector ALU section above)
+# VLShiftLeftB64 — real class (see Vector ALU section above)
+# VLShiftRightB64 — real class (see Vector ALU section above)
 _VLShiftLeftOrB32 = make_dummy_class(f"{_P}._VLShiftLeftOrB32")
 # logicalIR: VAShiftRightI32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 VAShiftRightI32 = make_dummy_class(f"{_P}.VAShiftRightI32")
@@ -1570,8 +1748,7 @@ VAccvgprReadB32 = make_dummy_class(f"{_P}.VAccvgprReadB32")
 VAccvgprWrite = make_dummy_class(f"{_P}.VAccvgprWrite")
 # logicalIR: VAccvgprWriteB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 VAccvgprWriteB32 = make_dummy_class(f"{_P}.VAccvgprWriteB32")
-# logicalIR: VReadfirstlaneB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VReadfirstlaneB32 = make_dummy_class(f"{_P}.VReadfirstlaneB32")
+# VReadfirstlaneB32 — real class (see Vector ALU section above)
 VReadlaneB32 = make_dummy_class(f"{_P}.VReadlaneB32")
 VWritelaneB32 = make_dummy_class(f"{_P}.VWritelaneB32")
 # logicalIR: VRndneF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)

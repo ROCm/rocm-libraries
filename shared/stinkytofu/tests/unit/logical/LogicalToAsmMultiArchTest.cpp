@@ -671,6 +671,33 @@ static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX1250 = {
     {logical::SGetRegB32, "s_getreg_b32"},
     {logical::SSetRegB32, "s_setreg_b32"},
     {logical::SSetRegIMM32B32, "s_setreg_IMM32_b32"},
+    // Vector Arithmetic
+    {logical::VAddU32, "v_add_nc_u32"},
+    {logical::VAddF32, "v_add_f32"},
+    {logical::VSubF32, "v_sub_f32"},
+    {logical::VSubI32, "v_sub_nc_i32"},
+    {logical::VSubU32, "v_sub_nc_u32"},
+    {logical::VMulF32, "v_mul_f32"},
+    {logical::VMulLOU32, "v_mul_lo_u32"},
+    {logical::VMulHIU32, "v_mul_hi_u32"},
+    {logical::VMulHII32, "v_mul_hi_i32"},
+    {logical::VMulI32I24, "v_mul_i32_i24"},
+    {logical::VMulU32U24, "v_mul_u32_u24"},
+    {logical::VFmaF32, "v_fma_f32"},
+    {logical::VFmaMixF32, "v_fma_mix_f32"},
+    // Vector Bitwise
+    {logical::VAndB32, "v_and_b32"},
+    {logical::VOrB32, "v_or_b32"},
+    {logical::VXorB32, "v_xor_b32"},
+    {logical::VAndOrB32, "v_and_or_b32"},
+    {logical::VCndMaskB32, "v_cndmask_b32"},
+    // Vector Shift
+    {logical::VLShiftLeftB32, "v_lshlrev_b32"},
+    {logical::VLShiftRightB32, "v_lshrrev_b32"},
+    {logical::VLShiftLeftB64, "v_lshlrev_b64"},
+    {logical::VLShiftRightB64, "v_lshrrev_b64"},
+    // Vector Other
+    {logical::VReadfirstlaneB32, "v_readfirstlane_b32"},
 };
 
 /** Returns expected asm mnemonic for (opcode, arch) if we have one; else nullopt. */
