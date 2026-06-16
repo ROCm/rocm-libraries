@@ -566,6 +566,7 @@ private:
                                 const std::optional<StoreOps>& storeOps,
                                 const std::vector<size_t>&     antecedents);
 
+    template <bool scope_solution_map = true>
     std::unique_ptr<ExecPlan> BuildSingleDevicePlan(NodeMetaData&                  rootPlanData,
                                                     rocfft_location_t              location,
                                                     const std::optional<LoadOps>&  loadOps,

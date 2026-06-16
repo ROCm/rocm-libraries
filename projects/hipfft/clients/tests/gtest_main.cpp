@@ -32,6 +32,7 @@
 #include <string>
 
 #include "../../shared/CLI11.hpp"
+#include "../../shared/client_except.h"
 #include "../../shared/concurrency.h"
 #include "../../shared/device_properties.h"
 #include "../../shared/environment.h"
@@ -75,8 +76,6 @@ hipfft_params manual_params;
 
 // Allow skipping tests if there is a runtime error
 bool skip_runtime_fails;
-// But count the number of failures
-int n_hip_failures = 0;
 
 // Manually specified precision cutoffs:
 double single_epsilon;
@@ -423,9 +422,10 @@ int main(int argc, char* argv[])
     auto* non_token = app.add_option_group("Token Conflict", "Options excluded by --token");
     non_token->excludes(opt_token);
     // Declare the supported options. Some option pointers are declared to track passed opts.
-    non_token->add_flag("--callback", "Inject load/store callbacks")->each([&](const std::string&) {
-        manual_params.run_callbacks = true;
-    });
+    non_token
+        ->add_flag(
+            "--callback", manual_params.run_callbacks, "Inject load/store callbacks: none, funcptr")
+        ->default_val("none");
     non_token
         ->add_option("--auto_allocation",
                      manual_params.auto_allocate,

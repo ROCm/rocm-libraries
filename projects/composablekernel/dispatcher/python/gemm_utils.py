@@ -486,6 +486,19 @@ class GpuGemmRunner:
 # Build API: codegen + hipcc -> .so paths (no GPU)
 # ============================================================================
 
+# AMDGPU codegen flags Tile Engine passes to hipcc for GEMM kernels (see
+# tile_engine/ops/gemm/gemm_universal CMake flags). They steer inlining and
+# register allocation; omitting them changes occupancy and, because persistent
+# kernels size their grid by occupancy, produces large perf gaps vs Tile Engine.
+# Matching them keeps the bridge byte-for-byte performance-equivalent.
+_TILE_ENGINE_CODEGEN_FLAGS = (
+    "-mllvm", "--lsr-drop-solution=1",
+    "-mllvm", "-enable-post-misched=0",
+    "-mllvm", "-amdgpu-early-inline-all=true",
+    "-mllvm", "-amdgpu-function-calls=false",
+    "-fno-offload-uniform-block",
+)
+
 
 def _build_compile_jobs(
     config: GemmKernelConfig, header: Path
@@ -517,6 +530,12 @@ def _build_compile_jobs(
         f'-DGFX_ARCH="{config.gfx_arch}"',
         "-mllvm",
         "-enable-noalias-to-md-conversion=0",
+        # Match Tile Engine's AMDGPU codegen flags. Without them the kernel is
+        # compiled with different inlining/register allocation, which changes
+        # occupancy; persistent kernels size their grid by occupancy
+        # (UniversalGemmKernel::MaxOccupancyGridSize = #CUs x occupancy), so the
+        # mismatch shows up as large perf gaps vs Tile Engine on persistent tiles.
+        *_TILE_ENGINE_CODEGEN_FLAGS,
         "-Wno-undefined-func-template",
         "-Wno-float-equal",
         str(ctypes_source),

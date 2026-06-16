@@ -34,19 +34,24 @@ Tile Engine does — it only swaps the harness.
 | `gemm_full_benchmark.py` | Driver: compile (Phase 1) → load problems (Phase 2) → benchmark across all visible GPUs (Phase 3). |
 | `run_one_gemm_kernel.py` | Disposable worker: loads one `.so` in an isolated subprocess and times it. A GPU fault kills only the worker. |
 
-### Per-variant organization
+### Folder layout
 
-Each GEMM variant owns a `configs/` directory; the driver selects it with
-`--variant`:
+The bridged regular-GEMM path follows the same op-root convention as the merged
+`fmha/` and `grouped_conv/` bridges — driver + worker + a flat `configs/` at the
+op root:
 
 ```
-gemm_universal/configs/    # default variant (wired through the bridge today)
-gemm_multi_d/configs/
-gemm_preshuffle/configs/
-grouped_gemm/configs/
+gemm/
+├── gemm_full_benchmark.py     # bridge driver (op root)
+├── run_one_gemm_kernel.py     # disposable per-kernel worker (op root)
+├── configs/                   # bridged gemm_universal sweep configs (flat)
+├── gemm_instance_builder.py   # shared generator for the non-bridged variants
+├── gemm_benchmark.{py,hpp}, gemm_common.hpp, gemm_profiler.hpp  # shared harness
+├── gemm_multi_d/   gemm_preshuffle/   grouped_gemm/             # legacy variants
+└── README.md
 ```
 
-Every `configs/` directory ships example sweep configs:
+`configs/` ships example sweep configs:
 
 - `default_ci_config.json` — small CI-sized sweep (the driver's default when no
   config is passed).
@@ -56,8 +61,12 @@ Every `configs/` directory ships example sweep configs:
   is omitted).
 
 > The JSON used by **nightly** tests is intended to drop into the same
-> `configs/` directory and be selected with `--variant` / positional config —
-> no driver changes needed.
+> `configs/` directory and be selected with a positional config — no driver
+> changes needed.
+
+The not-yet-bridged variants (`gemm_multi_d/`, `gemm_preshuffle/`,
+`grouped_gemm/`) keep their own per-variant `configs/` directories; the driver
+selects them with `--variant`.
 
 ### Running
 
@@ -70,13 +79,28 @@ python gemm_full_benchmark.py
 
 # Full sweep, fp16/rcr, restricted to 4 GPUs, custom output:
 python gemm_full_benchmark.py --variant gemm_universal \
-    gemm_universal/configs/default_config.json \
+    configs/default_config.json \
     --dtype fp16 --layout rcr --devices 4 --csv gemm_results.csv
 
 # Specific GPU ids and a custom problem file:
 python gemm_full_benchmark.py --devices 0,2,5 \
-    --problems gemm_universal/configs/example_problems.json
+    --problems configs/example_problems.json
+
+# Correctness mode: check every kernel against an fp32 numpy reference.
+python gemm_full_benchmark.py --verify --max-kernels 8
 ```
+
+### Liveness vs correctness (`--verify`)
+
+By default a measurement is reported `OK` purely on **liveness** — the kernel
+ran and produced a non-zero output (`ZERO` otherwise). It is *not* a correctness
+check: a numerically wrong but non-zero result still reads `OK`. Pass `--verify`
+to have each worker compare its output against an fp32 numpy reference
+(`A @ B`) using the global relative metric `max|out - ref| / max|ref|`. With
+`--verify`, results read `VERIFY` (within `--verify-tol`, default `2e-2`) or
+`MISMATCH` (counted as a failure), and the `max_rel` / `verified` columns are
+populated in the CSV. This gives self-contained per-kernel confidence; the
+broader numeric parity against native Tile Engine remains a separate task.
 
 ### Multi-GPU parallelism
 
@@ -97,32 +121,40 @@ auto-detected (`HIP_VISIBLE_DEVICES`, then `rocm-smi`/`amd-smi`); override with
 ### Variant scope
 
 The bridge is **one shared, variant-aware driver** (`gemm_full_benchmark.py` +
-`run_one_gemm_kernel.py`), not a per-variant copy of the driver. `--variant`
-selects the per-variant `configs/` directory, mirroring the existing Tile Engine
-layout where each variant (`gemm_universal/`, `gemm_multi_d/`,
-`gemm_preshuffle/`, `grouped_gemm/`) owns its own subdirectory.
+`run_one_gemm_kernel.py`), not a per-variant copy of the driver. The bridged
+regular-GEMM path (`gemm_universal`) uses the op-root `configs/`; `--variant`
+selects a not-yet-bridged variant's own `configs/` subdirectory.
 
 What that means for this PR:
 
-- **Only `gemm_universal` is wired and validated through the bridge.** The full
-  dtype/layout surface above (fp16 + bf16, all four layouts) applies to the
-  `gemm_universal` variant, whose dispatcher codegen path is exercised and
-  parity-checked.
+- **Only `gemm_universal` is wired and validated through the bridge here.** It is
+  the foundation variant; the dispatcher codegen path is exercised and parity-
+  checked for it alone.
 - The `gemm_multi_d/`, `gemm_preshuffle/`, and `grouped_gemm/` `configs/`
   directories are **scaffolding** that follows the per-variant convention so the
   layout is ready. `--variant` will select them, but the bridge does **not** yet
-  produce correct kernels for those variants — do not treat their presence as
-  working support.
+  produce correct kernels for those variants on this PR — do not treat their
+  presence as working support.
 - Grouped GEMM and stream-K go through **separate bridge efforts** (stream-K in
   #8136, grouped GEMM on its own branch), not this PR.
 
-### Deprecation note
+### Removal note
 
-The per-variant `*_instance_builder.py` scripts (e.g.
-`gemm_universal/gemm_universal_instance_builder.py`) are the **legacy** kernel
-generators. They are slated for deprecation once the Dispatcher bridge reaches
-full parity across all variants; new sweeps should prefer the bridge workflow
-above.
+The legacy regular-GEMM standalone build path has been **removed**, and the
+`gemm_universal/` folder is gone entirely. The per-config benchmark generator and
+driver (`gemm_universal_instance_builder.py`, `gemm_universal_benchmark.py`,
+`gemm_universal_benchmark*.{cpp,hpp}`, and `gemm_universal/CMakeLists.txt`) no
+longer exist; its sweep configs were promoted to the op-root `configs/` directory
+(matching the `fmha/` and `grouped_conv/` bridge convention) and are consumed by
+the bridge. Regular GEMM now runs exclusively through the Dispatcher bridge
+workflow above (`gemm_full_benchmark.py` / `run_one_gemm_kernel.py`). The other
+variants (`gemm_multi_d/`, `gemm_preshuffle/`, `grouped_gemm/`) still use the
+shared `gemm_instance_builder.py` generator.
+
+The build-system, build-instruction, and benchmark-execution sections below
+describe that removed standalone path and are retained only as historical
+reference for the non-bridged variants; the `benchmark_gemm_universal_*` targets
+they mention are no longer produced.
 
 ## Build System Architecture
 
@@ -279,24 +311,19 @@ The system uses JSON configuration files to specify kernel parameters:
 
 ### Python Scripts
 
-#### gemm_universal_instance_builder.py
-**Purpose**: Main kernel instance generation script that creates C++ kernel implementations based on configuration files.
+#### gemm_instance_builder.py
+**Purpose**: Shared kernel instance generator used by the non-bridged variants
+(`gemm_multi_d`, `gemm_preshuffle`, `grouped_gemm`). Creates C++ kernel
+implementations based on configuration files.
+
+> The regular-GEMM subclass `gemm_universal/gemm_universal_instance_builder.py`
+> has been removed; regular GEMM now goes through the Dispatcher bridge.
 
 **Key Features**:
 - Generates individual kernel header files for separate compilation
 - Supports multiple data types (fp16, fp8, bf16, fp32, fp64)
 - Validates tile configurations for correctness
 - Creates CMake integration files
-
-**Usage**:
-```bash
-python gemm_universal_instance_builder.py \
-    --working_path ./generated \
-    --datatype fp16 \
-    --layout rcr \
-    --config_json configs/user_provided_config.json \
-    --gen_all_individual
-```
 
 #### gemm_instance_builder_parallel.py
 **Purpose**: Parallel version of the instance builder for faster generation of multiple kernel configurations.
@@ -332,14 +359,6 @@ python test_validation.py
 - Warp tile combination validation
 - Trait combination validation
 - Full tile configuration validation
-
-#### gemm_universal_benchmark.py
-**Purpose**: Python script for running and analyzing GEMM benchmarks.
-
-**Features**:
-- Automated benchmark execution
-- Performance data collection
-- Result analysis and reporting
 
 #### json_config.py
 **Purpose**: Configuration file parsing and management.

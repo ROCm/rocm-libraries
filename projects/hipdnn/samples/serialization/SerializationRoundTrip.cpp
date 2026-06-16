@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <cstdio>
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -15,12 +16,15 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_data_sdk;
 
+namespace
+{
+
 template <typename InputType>
 void executeConvFpropGraph(graph::Graph& graph,
                            hipdnnHandle_t handle,
-                           std::shared_ptr<graph::Tensor_attributes> xAttr,
-                           std::shared_ptr<graph::Tensor_attributes> wAttr,
-                           std::shared_ptr<graph::Tensor_attributes> yAttr,
+                           const std::shared_ptr<graph::Tensor_attributes>& xAttr,
+                           const std::shared_ptr<graph::Tensor_attributes>& wAttr,
+                           const std::shared_ptr<graph::Tensor_attributes>& yAttr,
                            utilities::Tensor<InputType>& xTensor,
                            utilities::Tensor<InputType>& wTensor,
                            utilities::Tensor<InputType>& yTensor)
@@ -32,7 +36,7 @@ void executeConvFpropGraph(graph::Graph& graph,
 
     int64_t workspaceSize = 0;
     HIPDNN_FE_CHECK(graph.get_workspace_size(workspaceSize));
-    utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+    const utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
 
     HIPDNN_FE_CHECK(graph.execute(handle, variantPack, workspace.get()));
 
@@ -46,7 +50,7 @@ bool testJsonSerialization(const graph::Graph& originalGraph,
                            utilities::Tensor<InputType>& xTensor,
                            utilities::Tensor<InputType>& wTensor,
                            utilities::Tensor<InputType>& yOriginal,
-                           TensorLayout layout)
+                           const TensorLayout& layout)
 {
     std::cout << "\n--- Testing JSON serialization/deserialization ---\n";
 
@@ -77,7 +81,7 @@ bool testJsonSerialization(const graph::Graph& originalGraph,
     std::cout << "JSON-deserialized graph execution complete.\n";
 
     auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator<InputType>();
-    bool passed = validator->allClose(yOriginal, yJson);
+    const bool passed = validator->allClose(yOriginal, yJson);
     std::cout << "JSON round-trip result: " << (passed ? "PASSED" : "FAILED") << "\n";
     return passed;
 }
@@ -89,7 +93,7 @@ bool testBinarySerialization(const graph::Graph& originalGraph,
                              utilities::Tensor<InputType>& xTensor,
                              utilities::Tensor<InputType>& wTensor,
                              utilities::Tensor<InputType>& yOriginal,
-                             TensorLayout layout)
+                             const TensorLayout& layout)
 {
     std::cout << "\n--- Testing binary serialization/deserialization ---\n";
 
@@ -120,10 +124,12 @@ bool testBinarySerialization(const graph::Graph& originalGraph,
     std::cout << "Binary-deserialized graph execution complete.\n";
 
     auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator<InputType>();
-    bool passed = validator->allClose(yOriginal, yBinary);
+    const bool passed = validator->allClose(yOriginal, yBinary);
     std::cout << "Binary round-trip result: " << (passed ? "PASSED" : "FAILED") << "\n";
     return passed;
 }
+
+} // namespace
 
 template <typename InputType, typename IntermediateType>
 bool SampleRunner::operator()(const TensorLayout& layout)
@@ -133,13 +139,23 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     std::cout << "\n=== Running serialization round-trip test " << inputType << " [" << layout
               << "] ===\n";
 
-    constexpr int64_t n = 4, c = 8, h = 8, w = 8;
-    constexpr int64_t k = 8, r = 3, s = 3;
-    constexpr int64_t u = 1, v = 1, padH = 1, padW = 1, dilH = 1, dilW = 1;
+    constexpr int64_t N = 4;
+    constexpr int64_t C = 8;
+    constexpr int64_t H = 8;
+    constexpr int64_t W = 8;
+    constexpr int64_t K = 8;
+    constexpr int64_t R = 3;
+    constexpr int64_t S = 3;
+    constexpr int64_t U = 1;
+    constexpr int64_t V = 1;
+    constexpr int64_t PAD_H = 1;
+    constexpr int64_t PAD_W = 1;
+    constexpr int64_t DIL_H = 1;
+    constexpr int64_t DIL_W = 1;
 
     // Set names on tensors so we can retrieve them after deserialization
-    auto xAttrOrig = createTensor({n, c, h, w}, inputType, layout);
-    auto wAttrOrig = createTensor({k, c, r, s}, inputType, layout);
+    auto xAttrOrig = createTensor({N, C, H, W}, inputType, layout);
+    auto wAttrOrig = createTensor({K, C, R, S}, inputType, layout);
     xAttrOrig->set_name("x");
     wAttrOrig->set_name("w");
 
@@ -158,9 +174,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     graph::ConvFpropAttributes convAttrs;
     convAttrs.set_name("conv_fprop")
-        .set_padding({padH, padW})
-        .set_stride({u, v})
-        .set_dilation({dilH, dilW});
+        .set_padding({PAD_H, PAD_W})
+        .set_stride({U, V})
+        .set_dilation({DIL_H, DIL_W});
 
     auto yAttrOrig = originalGraph.conv_fprop(xAttrOrig, wAttrOrig, convAttrs);
     yAttrOrig->set_name("y");
@@ -177,14 +193,14 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     // ==================== RUN SERIALIZATION TESTS ====================
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-    bool jsonMatch = testJsonSerialization<InputType>(
+    const bool jsonMatch = testJsonSerialization<InputType>(
         originalGraph, handle, xTensor, wTensor, yOriginal, layout);
 #else
     std::cout << "\n--- Skipping JSON serialization test (JSON support disabled) ---\n";
-    bool jsonMatch = true;
+    const bool jsonMatch = true;
 #endif
 
-    bool binaryMatch = testBinarySerialization<InputType>(
+    const bool binaryMatch = testBinarySerialization<InputType>(
         originalGraph, handle, xTensor, wTensor, yOriginal, layout);
 
     return jsonMatch && binaryMatch;
@@ -192,21 +208,26 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
 int main(int argc, char* argv[])
 {
-    auto config = parseCommandLineArgs(argc, argv);
-
-    auto [handle, handleError] = createHipdnnHandle();
-    HIPDNN_FE_CHECK(handleError);
-
-    bool allPassed = run(SampleRunner{*handle, config});
-
-    if(allPassed)
+    try
     {
-        std::cout << "\nAll serialization round-trip tests PASSED.\n";
-        return 0;
-    }
-    else
-    {
+        auto config = parseCommandLineArgs(argc, argv);
+
+        auto [handle, handleError] = createHipdnnHandle();
+        HIPDNN_FE_CHECK(handleError);
+
+        const bool allPassed = run(SampleRunner{*handle, config});
+
+        if(allPassed)
+        {
+            std::cout << "\nAll serialization round-trip tests PASSED.\n";
+            return 0;
+        }
         std::cout << "\nSome serialization round-trip tests FAILED.\n";
+        return 1;
+    }
+    catch(const std::exception& e)
+    {
+        std::fprintf(stderr, "Unhandled exception: %s\n", e.what());
         return 1;
     }
 }

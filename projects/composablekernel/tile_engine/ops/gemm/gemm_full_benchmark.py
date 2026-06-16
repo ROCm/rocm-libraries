@@ -24,7 +24,7 @@ Examples:
 
     # Explicit variant + full sweep config on 4 GPUs:
     python gemm_full_benchmark.py --variant gemm_universal \
-        gemm_universal/configs/default_config.json --devices 4 --csv out.csv
+        configs/default_config.json --devices 4 --csv out.csv
 
 When no config is given the driver uses the chosen variant's
 ``configs/default_ci_config.json`` (a small CI-sized sweep);
@@ -51,13 +51,14 @@ sys.path.insert(0, str(_THIS_DIR))
 
 from gemm_utils import setup_multiple_gemm_dispatchers, expand_sweep  # noqa: E402
 
-# Per-variant config layout. Each variant owns a ``configs/`` directory holding
-# default_ci_config.json (small CI sweep), default_config.json (full sweep) and
-# user_provided_config.json. The bridge currently exercises gemm_universal; the
-# other variants are registered so the driver organizes by variant and is ready
-# to wire them as their bridge paths land.
+# Config layout. The bridged regular-GEMM path (gemm_universal) keeps its sweep
+# configs in this op's flat ``configs/`` directory (matching the fmha/grouped_conv
+# bridge convention): default_ci_config.json (small CI sweep), default_config.json
+# (full sweep), user_provided_config.json, example_problems.json. The other,
+# not-yet-bridged variants still live in their own per-variant ``configs/`` dirs;
+# they are registered so ``--variant`` can select them once their bridge lands.
 VARIANT_CONFIGS = {
-    "gemm_universal": "gemm_universal/configs",
+    "gemm_universal": "configs",
     "gemm_multi_d": "gemm_multi_d/configs",
     "gemm_preshuffle": "gemm_preshuffle/configs",
     "grouped_gemm": "grouped_gemm/configs",
@@ -112,8 +113,9 @@ def detect_devices():
 def resolve_devices(spec):
     """Resolve --devices into a concrete list of device id strings.
 
-    spec is None (auto: all visible), an int count, a comma-list of ids, or a
-    single id.
+    spec is None (auto: all visible), an int count, or a comma-list of ids.
+    A bare digit is a *count*, not an id; to target one specific id use the
+    comma form, e.g. "5,".
     """
     detected = detect_devices()
     if spec is None:
@@ -166,7 +168,9 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
         {"so_path": str(lib), "problem": prob_dict, "kernel_name": cfg.name}
         for _, cfg, lib in batch
     ]
-    payload = json.dumps({"items": items})
+    payload = json.dumps(
+        {"items": items, "verify": args.verify, "verify_tol": args.verify_tol}
+    )
 
     env = base_env.copy()
     env["HIP_VISIBLE_DEVICES"] = str(device_id)
@@ -201,9 +205,19 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
             reported.add(bidx)
             if result.get("ok", False):
                 status = "OK" if result.get("non_zero", 0) > 0 else "ZERO"
+                mismatch = False
+                if args.verify and "verified" in result:
+                    if result["verified"]:
+                        status = "VERIFY"
+                    else:
+                        status = "MISMATCH"
+                        mismatch = True
+                extra = (
+                    f" rel={result['max_rel']:.2e}" if "max_rel" in result else ""
+                )
                 lines.append(
                     f"  [gpu{device_id}] {cfg.name:<58} {result['ms']:>10.3f} "
-                    f"{result['tflops']:>10.2f} {status:>8}"
+                    f"{result['tflops']:>10.2f} {status:>8}{extra}"
                 )
                 rows.append(
                     {
@@ -216,8 +230,12 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
                         "latency_ms": result["ms"],
                         "tflops": result["tflops"],
                         "non_zero": result.get("non_zero", 0),
+                        "max_rel": result.get("max_rel", ""),
+                        "verified": result.get("verified", ""),
                     }
                 )
+                if mismatch:
+                    n_fail += 1
             else:
                 lines.append(f"  [gpu{device_id}] {cfg.name:<58} FAILED")
                 lines.append(f"    Error: {result.get('error', 'unknown')[:100]}")
@@ -285,7 +303,8 @@ def main():
         "--devices",
         default=None,
         help="GPUs to use: int count (e.g. 4) or comma-list of ids (e.g. 0,2,5); "
-        "default auto-detects all visible",
+        "for one specific id use the comma form (e.g. 5,) since a bare digit is "
+        "a count; default auto-detects all visible",
     )
     parser.add_argument(
         "--batch-size",
@@ -298,6 +317,18 @@ def main():
     )
     parser.add_argument(
         "--max-kernels", type=int, default=0, help="Limit to first N kernels (0=all)"
+    )
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="Check each kernel's output against an fp32 numpy reference "
+        "(global max|out-ref|/max|ref|); a mismatch counts as a failure",
+    )
+    parser.add_argument(
+        "--verify-tol",
+        type=float,
+        default=2e-2,
+        help="Relative tolerance for --verify (default 2e-2, suits fp16)",
     )
     args = parser.parse_args()
 
@@ -393,6 +424,8 @@ def main():
         "latency_ms",
         "tflops",
         "non_zero",
+        "max_rel",
+        "verified",
     ]
     csv_file = open(csv_path, "w", newline="")
     writer = csv.DictWriter(csv_file, fieldnames=csv_fields)
