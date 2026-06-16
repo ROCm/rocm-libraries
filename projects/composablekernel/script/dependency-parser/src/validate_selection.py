@@ -167,12 +167,26 @@ def render_junit(result):
             f'name="{escape(case_name, _attr)}"/>'
         )
 
+    props = [
+        ("n_selected", result.get("n_selected", 0)),
+        ("n_known_targets", result.get("n_known_targets", 0)),
+        ("n_invalid_targets", result.get("n_invalid_targets", 0)),
+    ]
+    if "n_invalid_tests" in result:
+        props.append(("n_invalid_tests", result["n_invalid_tests"]))
+    if "advisory" in result:
+        props.append(("advisory", str(result["advisory"]).lower()))
+    props_xml = "\n".join(
+        f'    <property name="{k}" value="{v}"/>' for k, v in props
+    )
+
     n_failures = len(failures)
     body = "\n".join(cases)
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         f'<testsuite name="{suite}" tests="{max(len(cases), 1)}" '
         f'failures="{n_failures}">\n'
+        f"  <properties>\n{props_xml}\n  </properties>\n"
         f"{body}\n"
         "</testsuite>\n"
     )

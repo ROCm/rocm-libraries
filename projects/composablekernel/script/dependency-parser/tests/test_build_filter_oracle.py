@@ -393,6 +393,129 @@ class TestOracleCli(unittest.TestCase):
             result = json.load(f)
         self.assertEqual(result["verdict"], "fail")
 
+    def test_reachability_junit_written_when_flag_given(self):
+        import xml.etree.ElementTree as ET
+
+        depmap = {"file_to_executables": {"a.hpp": ["bin/test_a"]}}
+        depmap_path = self._write_json("dep.json", depmap)
+        ctest_path = self._write_text("ctest.txt", "Test #1: test_a\n")
+        ninja_path = self._write_text("build.ninja", "bin/test_a: phony\n")
+        junit_path = os.path.join(self.tmp, "reach.xml")
+        rc, _, _ = self._run(
+            "reachability",
+            "--depmap", depmap_path,
+            "--ctest", ctest_path,
+            "--ninja", ninja_path,
+            "--junit", junit_path,
+        )
+        self.assertEqual(rc, 0)
+        self.assertTrue(os.path.exists(junit_path))
+        root = ET.parse(junit_path).getroot()
+        self.assertEqual(root.get("failures"), "0")
+
+    def test_reachability_junit_fail_has_failure_per_fn(self):
+        import xml.etree.ElementTree as ET
+
+        depmap = {"file_to_executables": {}}
+        depmap_path = self._write_json("dep.json", depmap)
+        ctest_path = self._write_text("ctest.txt", "Test #1: test_b\nTest #2: test_c\n")
+        junit_path = os.path.join(self.tmp, "reach.xml")
+        rc, _, _ = self._run(
+            "reachability",
+            "--depmap", depmap_path,
+            "--ctest", ctest_path,
+            "--junit", junit_path,
+        )
+        self.assertEqual(rc, 1)
+        root = ET.parse(junit_path).getroot()
+        self.assertEqual(root.get("failures"), "2")
+        failures = root.findall(".//failure")
+        self.assertEqual(len(failures), 2)
+
+
+class TestReachabilityJunit(unittest.TestCase):
+    """Unit tests for render_junit_reachability."""
+
+    def _pass_result(self, **kwargs):
+        base = {
+            "n_ctest": 3, "n_reachable": 3, "n_false_negatives": 0,
+            "false_negatives": [], "n_non_compiled": 0, "non_compiled": [],
+            "allowlisted": [], "n_codegen_allowlisted": 0, "codegen_allowlisted": [],
+            "classified": True, "verdict": "pass",
+        }
+        base.update(kwargs)
+        return base
+
+    def _fail_result(self, fn_tests, **kwargs):
+        base = self._pass_result(**kwargs)
+        base.update({
+            "n_false_negatives": len(fn_tests),
+            "false_negatives": fn_tests,
+            "verdict": "fail",
+        })
+        return base
+
+    def test_pass_no_failures(self):
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(bfo.render_junit_reachability(self._pass_result()))
+        self.assertEqual(root.get("failures"), "0")
+        self.assertEqual(len(root.findall(".//failure")), 0)
+
+    def test_fail_has_failure_per_fn(self):
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(bfo.render_junit_reachability(self._fail_result(["t1", "t2"])))
+        self.assertEqual(root.get("failures"), "2")
+        self.assertEqual(len(root.findall(".//failure")), 2)
+
+    def test_xml_is_well_formed(self):
+        import xml.etree.ElementTree as ET
+
+        ET.fromstring(bfo.render_junit_reachability(self._pass_result()))
+        ET.fromstring(bfo.render_junit_reachability(self._fail_result(["t1"])))
+
+    def test_properties_present_with_counts(self):
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(bfo.render_junit_reachability(self._pass_result(n_ctest=5, n_reachable=4)))
+        props = {p.get("name"): p.get("value") for p in root.findall("./properties/property")}
+        self.assertEqual(props["n_ctest"], "5")
+        self.assertEqual(props["n_reachable"], "4")
+        self.assertEqual(props["n_false_negatives"], "0")
+        self.assertIn("classified", props)
+
+    def test_mode_label_tagging(self):
+        import xml.etree.ElementTree as ET
+
+        result = self._pass_result(mode="full", label="gfx942")
+        xml = bfo.render_junit_reachability(result)
+        self.assertIn('classname="smart-build.reachability.full.gfx942"', xml)
+        self.assertIn('name="smart-build-reachability-full-gfx942"', xml)
+        root = ET.fromstring(xml)
+        props = {p.get("name"): p.get("value") for p in root.findall("./properties/property")}
+        self.assertEqual(props["advisory"], "true")
+
+    def test_selective_mode_not_advisory(self):
+        import xml.etree.ElementTree as ET
+
+        result = self._pass_result(mode="selective")
+        root = ET.fromstring(bfo.render_junit_reachability(result))
+        props = {p.get("name"): p.get("value") for p in root.findall("./properties/property")}
+        self.assertEqual(props["advisory"], "false")
+
+    def test_no_mode_no_advisory_property(self):
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(bfo.render_junit_reachability(self._pass_result()))
+        props = {p.get("name") for p in root.findall("./properties/property")}
+        self.assertNotIn("advisory", props)
+
+    def test_pass_case_name_includes_label(self):
+        result = self._pass_result(label="gfx950")
+        xml = bfo.render_junit_reachability(result)
+        self.assertIn("all-compiled-tests-reachable (gfx950)", xml)
+
 
 if __name__ == "__main__":
     unittest.main()

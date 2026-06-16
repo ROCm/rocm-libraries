@@ -248,6 +248,67 @@ def _run_probe(args):
     return 0 if result["verdict"] == "pass" else 1
 
 
+def render_junit_reachability(result):
+    """Render a JUnit XML report for the reachability guardrail result.
+
+    Mirrors the validate_selection pattern: mode/label tagging on suite/classname
+    so per-arch and per-mode publishes land as distinct rows in Jenkins. Pass =
+    one testcase; fail = one testcase per false-negative test. A <properties>
+    block carries the numeric counts so the detail page is self-contained.
+    """
+    from xml.sax.saxutils import escape
+
+    mode = result.get("mode")
+    label = result.get("label")
+    tag = (f".{mode}" if mode else "") + (f".{label}" if label else "")
+    suite_tag = (f"-{mode}" if mode else "") + (f"-{label}" if label else "")
+    classname = "smart-build.reachability" + tag
+    suite = "smart-build-reachability" + suite_tag
+
+    _attr = {"'": "&apos;", '"': "&quot;"}
+    fn = result.get("false_negatives", [])
+    cases = []
+    if fn:
+        for name in fn:
+            cases.append(
+                f'    <testcase classname="{classname}" '
+                f'name="{escape(name, _attr)}">\n'
+                f'      <failure message="compiled test unreachable in depmap"/>\n'
+                f"    </testcase>"
+            )
+    else:
+        case_name = "all-compiled-tests-reachable" + (f" ({label})" if label else "")
+        cases.append(
+            f'    <testcase classname="{classname}" '
+            f'name="{escape(case_name, _attr)}"/>'
+        )
+
+    props = [
+        ("n_ctest", result.get("n_ctest", 0)),
+        ("n_reachable", result.get("n_reachable", 0)),
+        ("n_false_negatives", result.get("n_false_negatives", 0)),
+        ("n_non_compiled", result.get("n_non_compiled", 0)),
+        ("n_codegen_allowlisted", result.get("n_codegen_allowlisted", 0)),
+        ("classified", str(result.get("classified", False)).lower()),
+    ]
+    if mode is not None:
+        props.append(("advisory", str(mode != "selective").lower()))
+    props_xml = "\n".join(
+        f'    <property name="{k}" value="{v}"/>' for k, v in props
+    )
+
+    n_failures = len(fn)
+    body = "\n".join(cases)
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        f'<testsuite name="{suite}" tests="{max(len(cases), 1)}" '
+        f'failures="{n_failures}">\n'
+        f"  <properties>\n{props_xml}\n  </properties>\n"
+        f"{body}\n"
+        "</testsuite>\n"
+    )
+
+
 def _run_reachability(args):
     for path, label in [(args.depmap, "--depmap"), (args.ctest, "--ctest")]:
         if not os.path.exists(path):
@@ -293,9 +354,16 @@ def _run_reachability(args):
         "classified": compiled is not None,
         "verdict": "pass" if not fn else "fail",
     }
+    if getattr(args, "mode", None):
+        result["mode"] = args.mode
+    if getattr(args, "label", None):
+        result["label"] = args.label
     if args.output:
         with open(args.output, "w") as f:
             json.dump(result, f, indent=2)
+    if getattr(args, "junit", None):
+        with open(args.junit, "w") as f:
+            f.write(render_junit_reachability(result))
 
     print("=== reachability guardrail ===")
     print(f"ctest tests:      {result['n_ctest']}")
@@ -549,6 +617,16 @@ def main():
         "build time) as a known class rather than false negatives",
     )
     rc.add_argument("--output", help="write result JSON here")
+    rc.add_argument("--junit", help="write JUnit XML report here")
+    rc.add_argument(
+        "--mode",
+        choices=["full", "selective", "none"],
+        help="tag the result/JUnit with the build mode (mirrors validate --mode)",
+    )
+    rc.add_argument(
+        "--label",
+        help="extra tag for the JUnit suite/classname (e.g. GPU arch)",
+    )
 
     ca = sub.add_parser(
         "codegen-allowlist",

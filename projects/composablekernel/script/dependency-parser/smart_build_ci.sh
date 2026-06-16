@@ -93,6 +93,13 @@ fi
 echo "[OK] Dependency map generated"
 
 # Step 2b: Reachability guardrail (advisory).
+# ASIF_MODE and LABEL_ARGS are computed here (before step 3 where num_tests is
+# known) so that both the reachability and validate JUnit share the same tags.
+# ASIF_MODE defaults to full until select runs; it is refined after step 3.
+ASIF_MODE=full
+LABEL_ARGS=()
+if [ -n "${ARCH_NAME:-}" ]; then LABEL_ARGS=(--label "${ARCH_NAME}"); fi
+
 echo ""
 echo "Step 2b: Reachability guardrail (non-fatal)..."
 ctest -N > ctest_list.txt 2>/dev/null || true
@@ -105,6 +112,9 @@ else
         --ninja build.ninja \
         --codegen-inventory "${SCRIPT_DIR}/codegen_blindspots.json" \
         --output reachability_result.json \
+        --junit reachability_result.xml \
+        --mode "${ASIF_MODE}" \
+        "${LABEL_ARGS[@]}" \
         || echo "WARNING: reachability guardrail found unreachable compiled tests (see reachability_result.json) - continuing"
 fi
 
@@ -152,10 +162,6 @@ fi
 echo ""
 echo "Step 3b: Selection-validity smoke (mode=${ASIF_MODE}, non-fatal)..."
 ninja -t targets all > ninja_targets.txt 2>/dev/null || true
-# Tag the JUnit with the arch (when CI set it) so the per-arch smoke results land
-# as distinct rows instead of indistinguishable duplicate pass entries.
-LABEL_ARGS=()
-if [ -n "${ARCH_NAME:-}" ]; then LABEL_ARGS=(--label "${ARCH_NAME}"); fi
 python3 "${SCRIPT_DIR}/main.py" validate \
     tests_to_run.json \
     --ninja-targets ninja_targets.txt \

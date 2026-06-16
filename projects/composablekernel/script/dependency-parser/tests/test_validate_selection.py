@@ -206,6 +206,53 @@ class TestJunit(unittest.TestCase):
         xml = render_junit(validate(["bin/a"], {"bin/a"}, label="gfx950"))
         self.assertIn('classname="smart-build.selection.gfx950"', xml)
 
+    def test_junit_pass_has_properties(self):
+        import xml.etree.ElementTree as ET
+        from validate_selection import render_junit, validate
+
+        result = validate(["bin/a", "bin/b"], {"bin/a", "bin/b"})
+        root = ET.fromstring(render_junit(result))
+        props = {p.get("name"): p.get("value") for p in root.findall("./properties/property")}
+        self.assertEqual(props["n_selected"], "2")
+        self.assertEqual(props["n_known_targets"], "2")
+        self.assertEqual(props["n_invalid_targets"], "0")
+
+    def test_junit_fail_has_properties(self):
+        import xml.etree.ElementTree as ET
+        from validate_selection import render_junit, validate
+
+        result = validate(["bin/a", "bin/bogus"], {"bin/a"})
+        root = ET.fromstring(render_junit(result))
+        props = {p.get("name"): p.get("value") for p in root.findall("./properties/property")}
+        self.assertEqual(props["n_selected"], "2")
+        self.assertEqual(props["n_invalid_targets"], "1")
+
+    def test_junit_properties_include_advisory_when_mode_set(self):
+        import xml.etree.ElementTree as ET
+        from validate_selection import render_junit, validate
+
+        result = validate(["bin/a"], {"bin/a"}, mode="full")
+        root = ET.fromstring(render_junit(result))
+        props = {p.get("name"): p.get("value") for p in root.findall("./properties/property")}
+        self.assertEqual(props["advisory"], "true")
+
+    def test_junit_properties_no_advisory_without_mode(self):
+        import xml.etree.ElementTree as ET
+        from validate_selection import render_junit, validate
+
+        root = ET.fromstring(render_junit(validate(["bin/a"], {"bin/a"})))
+        props = {p.get("name") for p in root.findall("./properties/property")}
+        self.assertNotIn("advisory", props)
+
+    def test_junit_properties_include_n_invalid_tests_when_ctest_checked(self):
+        import xml.etree.ElementTree as ET
+        from validate_selection import render_junit, validate
+
+        result = validate(["bin/a"], {"bin/a"}, ctest_tests={"a"})
+        root = ET.fromstring(render_junit(result))
+        props = {p.get("name") for p in root.findall("./properties/property")}
+        self.assertIn("n_invalid_tests", props)
+
 
 class TestCli(unittest.TestCase):
     """End-to-end exit-code checks through main.py validate."""
