@@ -952,6 +952,62 @@ public:
         = delete;
 };
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+
+template<class T, unsigned int VirtualWaveSize>
+class warp_scan<T, VirtualWaveSize, ::rocprim::arch::wavefront::target::dynamic>
+{
+private:
+    using warp_scan_wave32
+        = warp_scan<T, VirtualWaveSize, ::rocprim::arch::wavefront::target::size32>;
+
+    using warp_scan_wave64
+        = warp_scan<T, VirtualWaveSize, ::rocprim::arch::wavefront::target::size64>;
+
+    using dispatch = ::rocprim::detail::dispatch_wave_size<warp_scan_wave32, warp_scan_wave64>;
+
+public:
+    using storage_type = typename dispatch::storage_type;
+
+    template<typename... Args>
+        ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto inclusive_scan(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args)
+                   { impl.inclusive_scan(std::forward<decltype(args)>(args)...); },
+                   std::forward<Args>(args)...);
+    }
+
+    template<typename... Args>
+        ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto exclusive_scan(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args)
+                   { impl.exclusive_scan(std::forward<decltype(args)>(args)...); },
+                   std::forward<Args>(args)...);
+    }
+
+    template<typename... Args>
+        ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto scan(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args)
+                   { impl.scan(std::forward<decltype(args)>(args)...); },
+                   std::forward<Args>(args)...);
+    }
+
+    template<typename... Args>
+        ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto broadcast(Args&&... args)
+    {
+        return dispatch{}([](auto impl, auto&&... args)
+                          { return impl.broadcast(std::forward<decltype(args)>(args)...); },
+                          std::forward<Args>(args)...);
+    }
+};
+
+#endif
+
 END_ROCPRIM_NAMESPACE
 
 /// @}
