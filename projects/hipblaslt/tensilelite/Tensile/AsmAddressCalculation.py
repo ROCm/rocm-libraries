@@ -23,8 +23,7 @@
 from rocisa.code import Module
 from rocisa.container import EXEC, VCC, vgpr, sgpr
 from rocisa.instruction import MacroInstruction, SAddCU32, SAddU32, SAndB32, \
-    SAndB64, SLShiftLeftB32, SLShiftRightB32, SMovB32, SMovB64, SMulHIU32, \
-    SMulI32, SSubBU32, SSubU32, \
+    SAndB64, SMovB32, SMovB64, SMulHIU32, SMulI32, SSubBU32, SSubU32, \
     VAddCCOU32, VAddCOU32, VAddI32, VAddU32, VAndB32, VBfiB32, \
     VCmpEQU32, VCmpGtU32, VCmpLtU32, VCmpXNeU32, VCndMaskB32, VLShiftLeftB32, \
     VMadI32I24, VMovB32, VMulLOU32, VSubI32, VSubU32
@@ -782,38 +781,15 @@ class AddrCalculation:
         tmpLo = tmpSgpr
         tmpHi = tmpSgpr + "+1"
 
-        if numRows > 1:
-            module.add(SMulHIU32(dst=sgpr(tmpHi), \
-                                 src0=sgpr(strideSgpr), \
-                                 src1=numRows*bpe, \
-                                 comment="scale %s *= numRows(%u) * bpe (hi)"%(strideSgpr, numRows)))
-            module.add(SMulI32(dst=sgpr(tmpLo), \
-                               src0=sgpr(strideSgpr), \
-                               src1=numRows*bpe, \
-                               comment="scale %s *= numRows(%u) * bpe"%(strideSgpr, numRows)))
-        elif numRows < 0:
-            module.add(SMulHIU32(dst=sgpr(tmpHi), \
-                                 src0=sgpr(strideSgpr), \
-                                 src1=(-numRows)*bpe, \
-                                 comment="scale %s *= numRows(%u) * bpe (hi)"%(strideSgpr, numRows)))
-            module.add(SMulI32(dst=sgpr(tmpLo), \
-                               src0=sgpr(strideSgpr), \
-                                src1=(-numRows)*bpe, \
-                                comment="scale %s *= numRows(%u) * bpe"%(strideSgpr, numRows)))
-        else:
-            shift = log2(bpe)
-            module.add(SLShiftLeftB32(dst=sgpr(tmpLo), \
-                                      src=sgpr(strideSgpr), \
-                                      shiftHex=shift, \
-                                      comment="incToNextRow: Scale by BPE"))
-            if shift > 0:
-                module.add(SLShiftRightB32(dst=sgpr(tmpHi), \
-                                           src=sgpr(strideSgpr), \
-                                           shiftHex=32-shift, \
-                                           comment="incToNextRow: Scale by BPE (hi)"))
-            else:
-                module.add(SMovB32(dst=sgpr(tmpHi), src=0, \
-                                   comment="incToNextRow: Scale by BPE (hi, bpe=1)"))
+        scaleFactor = abs(numRows) * bpe
+        module.add(SMulHIU32(dst=sgpr(tmpHi), \
+                             src0=sgpr(strideSgpr), \
+                             src1=scaleFactor, \
+                             comment="scale %s *= numRows(%d) * bpe (hi)"%(strideSgpr, numRows)))
+        module.add(SMulI32(dst=sgpr(tmpLo), \
+                           src0=sgpr(strideSgpr), \
+                           src1=scaleFactor, \
+                           comment="scale %s *= numRows(%d) * bpe"%(strideSgpr, numRows)))
 
         dstLow = f"{srcDstBaseSgpr}+0"
         dstHigh = f"{srcDstBaseSgpr}+1"
@@ -864,41 +840,18 @@ class AddrCalculation:
                     td = "D" if tc == 'TD' else tc
                     strideCD1 = "Stride%s%s"%(td ,self.kernelWriter.states.indexChars[packedC1[0]])
 
-                # Compute stride * bpe (or stride * numRows * bpe) as a full
-                # 64-bit value in (stmp+1 : stmp).  The old code used 32-bit
-                # ops which silently truncated when the byte increment >= 2^32.
-                if numRows > 1:
-                    module.add(SMulHIU32(dst=sgpr(stmp+1), \
-                                src0=sgpr(strideCD1), \
-                                src1=numRows*tmpBpe, \
-                                comment="scale Stride%s *= numRows(%u) * bpe (hi)"%(tc,numRows)))
-                    module.add(SMulI32(dst=sgpr(stmp), \
-                                src0=sgpr(strideCD1), \
-                                src1=numRows*tmpBpe, \
-                                comment="scale Stride%s *= numRows(%u) * bpe"%(tc,numRows)))
-                elif numRows < 0:
-                    module.add(SMulHIU32(dst=sgpr(stmp+1), \
-                                src0=sgpr(strideCD1), \
-                                src1=(-numRows)*tmpBpe, \
-                                comment="scale Stride%s *= numRows(%u) * bpe (hi)"%(tc,numRows)))
-                    module.add(SMulI32(dst=sgpr(stmp), \
-                                src0=sgpr(strideCD1), \
-                                src1=(-numRows)*tmpBpe, \
-                                comment="scale Stride%s *= numRows(%u) * bpe"%(tc,numRows)))
-                else:
-                    shift = log2(tmpBpe)
-                    module.add(SLShiftLeftB32(dst=sgpr(stmp), \
-                                src=sgpr(strideCD1), \
-                                shiftHex=shift, \
-                                comment="incToNextRow: Scale by BPE"))
-                    if shift > 0:
-                        module.add(SLShiftRightB32(dst=sgpr(stmp+1), \
-                                    src=sgpr(strideCD1), \
-                                    shiftHex=32-shift, \
-                                    comment="incToNextRow: Scale by BPE (hi)"))
-                    else:
-                        module.add(SMovB32(dst=sgpr(stmp+1), src=0, \
-                                    comment="incToNextRow: Scale by BPE (hi, bpe=1)"))
+                # Compute stride * abs(numRows) * bpe as a full 64-bit value
+                # in (stmp+1 : stmp).  The old code used 32-bit ops which
+                # silently truncated when the byte increment >= 2^32.
+                scaleFactor = abs(numRows) * tmpBpe
+                module.add(SMulHIU32(dst=sgpr(stmp+1), \
+                            src0=sgpr(strideCD1), \
+                            src1=scaleFactor, \
+                            comment="scale Stride%s *= numRows(%d) * bpe (hi)"%(tc,numRows)))
+                module.add(SMulI32(dst=sgpr(stmp), \
+                            src0=sgpr(strideCD1), \
+                            src1=scaleFactor, \
+                            comment="scale Stride%s *= numRows(%d) * bpe"%(tc,numRows)))
 
                 if dst == -1:
                     dstLow = "Srd%s+0"%(tc)
