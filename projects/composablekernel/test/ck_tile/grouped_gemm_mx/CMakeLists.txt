@@ -11,7 +11,12 @@ endif()
 
 # Currently TDM is only supported on gfx1250
 if(GPU_TARGETS MATCHES "gfx1250")
-    add_gtest_executable(test_ck_tile_grouped_gemm_mx_tdm test_mx_grouped_gemm.cpp)
+    add_gtest_executable(test_ck_tile_grouped_gemm_mx_tdm test_mx_grouped_gemm_wmma_tdm.cpp)
+    # target_compile_options(test_ck_tile_grouped_gemm_mx_tdm PRIVATE --save-temps)
+endif()
+
+if(GPU_TARGETS MATCHES "gfx950")
+    add_gtest_executable(test_ck_tile_grouped_gemm_mx_comp_async test_mx_grouped_gemm_comp_async.cpp)
     # target_compile_options(test_ck_tile_grouped_gemm_mx_tdm PRIVATE --save-temps)
     add_gtest_executable(test_ck_tile_grouped_gemm_mx_flatmm_tdm test_grouped_gemm_mx_flatmm_tdm.cpp)
     target_compile_options(test_ck_tile_grouped_gemm_mx_flatmm_tdm

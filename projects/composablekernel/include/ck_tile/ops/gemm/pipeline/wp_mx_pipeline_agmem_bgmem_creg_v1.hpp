@@ -48,9 +48,9 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
     static constexpr index_t BlockSize       = Problem::kBlockSize;
     static constexpr index_t WaveSize        = get_warp_size();
 
-    static constexpr index_t kMPerBlock = BlockGemmShape::kM;
-    static constexpr index_t kNPerBlock = BlockGemmShape::kN;
-    static constexpr index_t kKPerBlock = BlockGemmShape::kK;
+    static constexpr index_t MPerBlock = BlockGemmShape::kM;
+    static constexpr index_t NPerBlock = BlockGemmShape::kN;
+    static constexpr index_t KPerBlock = BlockGemmShape::kK;
 
     static constexpr index_t flatKPerWarp = BlockGemmShape::flatKPerWarp;
     static constexpr index_t flatNPerWarp = BlockGemmShape::flatNPerWarp;
@@ -88,16 +88,16 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
     static constexpr index_t MWarp = BlockGemm::MWarp;
     static constexpr index_t NWarp = BlockGemm::NWarp;
 
-    static constexpr index_t MIterPerWarp = kMPerBlock / (MWarp * WarpGemm::kM);
-    static constexpr index_t NIterPerWarp = kNPerBlock / (NWarp * WarpGemm::kN);
-    static constexpr index_t KIterPerWarp = kKPerBlock / WarpGemm::kK;
+    static constexpr index_t MIterPerWarp = MPerBlock / (MWarp * WarpGemm::kM);
+    static constexpr index_t NIterPerWarp = NPerBlock / (NWarp * WarpGemm::kN);
+    static constexpr index_t KIterPerWarp = KPerBlock / WarpGemm::kK;
 
     static constexpr index_t KFlatBytesPerBlockPerIter =
         flatKPerWarp * sizeof(BDataType) / BPackedSize;
     static constexpr index_t NFlatPerBlockPerIter = flatNPerWarp;
 
-    static constexpr index_t MPerBlockPerIter = kMPerBlock / MIterPerWarp;
-    static constexpr index_t KPerBlockPerIter = kKPerBlock / KIterPerWarp;
+    static constexpr index_t MPerBlockPerIter = MPerBlock / MIterPerWarp;
+    static constexpr index_t KPerBlockPerIter = KPerBlock / KIterPerWarp;
 
     static constexpr index_t ScaleGranularityK = 32;
     static constexpr index_t MXdlPack          = 2;
@@ -120,12 +120,12 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
     static constexpr index_t Aload_num_perK = dswrite_num_perK;
     static constexpr index_t Aload_rep      = dswrite_rep;
 
-    static constexpr index_t Bload_num_perK = kNPerBlock * WarpGemm::kK / NWarp / BK1 / WaveSize;
+    static constexpr index_t Bload_num_perK = NPerBlock * WarpGemm::kK / NWarp / BK1 / WaveSize;
     static constexpr index_t Bload_num      = Bload_num_perK * KIterPerWarp;
     static constexpr index_t ScaleBload_num =
-        kNPerBlock * kKPerBlock / NWarp / ScaleGranularityK / NXdlPack / KXdlPack / WaveSize;
+        NPerBlock * KPerBlock / NWarp / ScaleGranularityK / NXdlPack / KXdlPack / WaveSize;
     static constexpr index_t ScaleAload_num =
-        kMPerBlock * kKPerBlock / MWarp / ScaleGranularityK / MXdlPack / KXdlPack / WaveSize;
+        MPerBlock * KPerBlock / MWarp / ScaleGranularityK / MXdlPack / KXdlPack / WaveSize;
 
     static constexpr index_t HalfMIter        = (MIterPerWarp + 1) / 2;
     static constexpr index_t Bload_rep        = (Bload_num_perK + HalfMIter - 1) / HalfMIter;
@@ -176,9 +176,9 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
                 std::is_same_v<ADataType, remove_cvref_t<typename ADramBlockWindowTmp::DataType>>,
                 "wrong!");
 
-            static_assert(kMPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[number<0>{}],
+            static_assert(MPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[number<0>{}],
                           "wrong!");
-            static_assert(kKPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[number<1>{}],
+            static_assert(KPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[number<1>{}],
                           "wrong!");
 
             static_assert(MWarp == 1);
@@ -189,7 +189,7 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
                 a_copy_dram_window_tmp);
             using ADramTileWindowStep = typename ADramBlockWindowTmp::BottomTensorIndex;
             constexpr ADramTileWindowStep a_dram_tile_window_step =
-                make_array(index_t{0}, index_t{kKPerBlock * sizeof(ADataType) / APackedSize});
+                make_array(index_t{0}, index_t{KPerBlock * sizeof(ADataType) / APackedSize});
 
             __builtin_amdgcn_sched_barrier(0);
 
@@ -203,13 +203,13 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
 
             auto a_store_lds_window_ping =
                 make_tile_window(a_lds_block_ping,
-                                 make_tuple(number<kMPerBlock>{},
-                                            number<kKPerBlock / APackedSize * sizeof(ADataType)>{}),
+                                 make_tuple(number<MPerBlock>{},
+                                            number<KPerBlock / APackedSize * sizeof(ADataType)>{}),
                                  {0, 0});
             auto a_store_lds_window_pong =
                 make_tile_window(a_lds_block_pong,
-                                 make_tuple(number<kMPerBlock>{},
-                                            number<kKPerBlock / APackedSize * sizeof(ADataType)>{}),
+                                 make_tuple(number<MPerBlock>{},
+                                            number<KPerBlock / APackedSize * sizeof(ADataType)>{}),
                                  {0, 0});
 
             auto a_warp_window_ping = make_tile_window(
@@ -301,7 +301,7 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
                         impack * scale_a_dram_step_m + ikpack * scale_a_dram_step_k);
                 });
             });
-            move_tile_window(scale_a_dram_window, {0, kKPerBlock / (ScaleGranularityK * KXdlPack)});
+            move_tile_window(scale_a_dram_window, {0, KPerBlock / (ScaleGranularityK * KXdlPack)});
 
             static_for<0, NPackIterPerWarp, 1>{}([&](auto inpack) {
                 static_for<0, KPackIterPerWarp, 1>{}([&](auto ikpack) {
@@ -310,7 +310,7 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
                         inpack * scale_b_dram_step_n + ikpack * scale_b_dram_step_k);
                 });
             });
-            move_tile_window(scale_b_dram_window, {0, kKPerBlock / (ScaleGranularityK * KXdlPack)});
+            move_tile_window(scale_b_dram_window, {0, KPerBlock / (ScaleGranularityK * KXdlPack)});
             __builtin_amdgcn_sched_barrier(0);
 
             if constexpr(HasHotLoop || TailNum == TailNumber::Even)
@@ -371,9 +371,9 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
                     a_store_lds_window_ping, a_dram_window, a_dram_tile_window_step);
 
                 move_tile_window(scale_a_dram_window,
-                                 {0, kKPerBlock / (ScaleGranularityK * KXdlPack)});
+                                 {0, KPerBlock / (ScaleGranularityK * KXdlPack)});
                 move_tile_window(scale_b_dram_window,
-                                 {0, kKPerBlock / (ScaleGranularityK * KXdlPack)});
+                                 {0, KPerBlock / (ScaleGranularityK * KXdlPack)});
 
                 block_gemm.LocalPrefetch(a_load_windows_pong);
                 HotLoopScheduler();
@@ -416,9 +416,9 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
                 Base::GlobalPrefetchAsync(
                     a_store_lds_window_pong, a_dram_window, a_dram_tile_window_step);
                 move_tile_window(scale_a_dram_window,
-                                 {0, kKPerBlock / (ScaleGranularityK * KXdlPack)});
+                                 {0, KPerBlock / (ScaleGranularityK * KXdlPack)});
                 move_tile_window(scale_b_dram_window,
-                                 {0, kKPerBlock / (ScaleGranularityK * KXdlPack)});
+                                 {0, KPerBlock / (ScaleGranularityK * KXdlPack)});
 
                 block_gemm.LocalPrefetch(a_load_windows_ping);
                 HotLoopScheduler();

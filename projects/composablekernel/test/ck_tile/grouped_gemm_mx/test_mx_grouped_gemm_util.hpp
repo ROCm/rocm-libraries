@@ -15,10 +15,42 @@
 #include "ck_tile/ops/gemm/kernel/mx_grouped_gemm_kernel.hpp"
 #include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
 
+template <typename PrecType, ck_tile::index_t M_Warp_Tile>
+constexpr ck_tile::index_t get_k_warp_tile()
+{
+#if CK_TILE_USE_WMMA
+#if defined(CK_USE_GFX1250)
+    constexpr bool is_8bit = std::is_same_v<PrecType, ck_tile::fp8_t> ||
+                             std::is_same_v<PrecType, ck_tile::bf8_t> ||
+                             std::is_same_v<PrecType, ck_tile::int8_t>;
+    constexpr bool is_mxtype =
+        std::is_same_v<PrecType, ck_tile::fp8_t> || std::is_same_v<PrecType, ck_tile::pk_fp4_t>;
+    if constexpr(M_Warp_Tile == 32 && is_mxtype)
+    {
+        return 128;
+    }
+    else
+    {
+        return is_8bit ? 64 : 32;
+    }
+#else
+    return 16;
+#endif
+#else
+    if constexpr(M_Warp_Tile == 32)
+        return 64;
+    else
+        return 128;
+#endif
+}
+
 enum struct MxGemmPipelineType
 {
     CompTDMV1,
-    CompTDMV2
+    CompTDMV2,
+    CompAsync,
+    CompEightWaves,
+    WeightPreshuffle
 };
 
 template <MxGemmPipelineType PT, typename Problem>
@@ -42,7 +74,86 @@ struct MxGemmPipelineTypeSelector<MxGemmPipelineType::CompTDMV2, Problem>
     static constexpr auto GetName() { return "GemmPipelineAgBgCrCompTDMV2"; }
 };
 
-template <typename Tuple>
+template <typename Problem>
+struct MxGemmPipelineTypeSelector<MxGemmPipelineType::CompAsync, Problem>
+{
+    using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompAsync<Problem>;
+    using pipeline      = ck_tile::GemmPipelineAgBgCrCompAsync<Problem>;
+
+    static constexpr auto GetName() { return "GemmPipelineAgBgCrCompAsync"; }
+};
+
+template <typename Problem>
+struct MxGemmPipelineTypeSelector<MxGemmPipelineType::CompEightWaves, Problem>
+{
+    using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompV3<Problem>;
+    using pipeline      = ck_tile::GemmPipelineAgBgCrCompAsyncEightWaves<Problem>;
+
+    static constexpr auto GetName() { return "GemmPipelineAgBgCrCompEightWaves"; }
+};
+
+template <typename Problem>
+struct MxGemmPipelineTypeSelector<MxGemmPipelineType::WeightPreshuffle, Problem>
+{
+    using base_pipeline = ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2<Problem>;
+    using pipeline      = ck_tile::MXGemmPreshufflePipelineAGmemBGmemCRegV1<Problem>;
+
+    static constexpr auto GetName() { return "GemmPipelineAgBgCrWeightPreshuffle"; }
+};
+
+template <MxGemmPipelineType PT, typename Problem, bool PermuteN>
+struct MxGemmEpilogueTypeSelector
+{
+};
+
+template <typename Problem>
+struct MxGemmEpilogueTypeSelector<MxGemmPipelineType::CompTDMV1, Problem, false>
+{
+    using epilogue = ck_tile::TdmEpilogue<Problem>;
+};
+
+template <typename Problem>
+struct MxGemmEpilogueTypeSelector<MxGemmPipelineType::CompTDMV2, Problem, false>
+{
+    using epilogue = ck_tile::TdmEpilogue<Problem>;
+};
+
+template <typename Problem>
+struct MxGemmEpilogueTypeSelector<MxGemmPipelineType::CompAsync, Problem, false>
+{
+    using epilogue = ck_tile::CShuffleEpilogue<Problem>;
+};
+
+template <typename Problem>
+struct MxGemmEpilogueTypeSelector<MxGemmPipelineType::CompEightWaves, Problem, false>
+{
+    using epilogue = ck_tile::CShuffleEpilogue<Problem>;
+};
+
+template <typename Problem, bool PermuteN>
+struct MxGemmEpilogueTypeSelector<MxGemmPipelineType::WeightPreshuffle, Problem, PermuteN>
+{
+    using epilogue = std::conditional_t<PermuteN,
+                                        ck_tile::PermuteNEpilogue<Problem>,
+                                        ck_tile::CShuffleEpilogue<Problem>>;
+};
+
+template <ck_tile::index_t N_Warp_Tile_,
+          ck_tile::index_t K_Warp_Tile_,
+          ck_tile::index_t N_Tile_,
+          ck_tile::index_t N_Warp_,
+          typename BDataType_>
+struct Config
+{
+    static constexpr ck_tile::index_t N_Warp_Tile = N_Warp_Tile_;
+    static constexpr ck_tile::index_t K_Warp_Tile = K_Warp_Tile_;
+    static constexpr ck_tile::index_t N_Tile      = N_Tile_;
+    static constexpr ck_tile::index_t N_Warp      = N_Warp_;
+    static constexpr ck_tile::index_t BContiguousItemsPerAccess =
+        std::is_same_v<BDataType_, ck_tile::pk_fp4_t> ? 32 : 16;
+};
+
+template <typename Tuple, typename Derived>
 class TestCkTileMxGroupedGemm : public ::testing::Test
 {
     protected:
@@ -57,9 +168,36 @@ class TestCkTileMxGroupedGemm : public ::testing::Test
     using CDataType                                  = std::tuple_element_t<8, Tuple>;
     using PersistentType                             = std::tuple_element_t<9, Tuple>;
     static constexpr bool Persistent                 = PersistentType::value;
-    static constexpr auto Scheduler                  = std::tuple_element_t<10, Tuple>::value;
-    static constexpr auto PipelineType               = std::tuple_element_t<11, Tuple>::value;
-    static constexpr ck_tile::index_t ScaleBlockSize = std::tuple_element_t<12, Tuple>::value;
+    static constexpr auto Scheduler                  = ck_tile::GemmPipelineScheduler::Intrawave;
+    static constexpr auto PipelineType               = std::tuple_element_t<15, Tuple>::value;
+    static constexpr ck_tile::index_t ScaleBlockSize = std::tuple_element_t<16, Tuple>::value;
+    static constexpr bool PermuteN =
+        ck_tile::tuple_element_or_default_t<Tuple, 17, std::false_type>::value;
+
+    static constexpr ck_tile::index_t M_Tile = std::tuple_element_t<10, Tuple>{};
+    static constexpr ck_tile::index_t N_Tile = std::tuple_element_t<11, Tuple>{};
+    static constexpr ck_tile::index_t K_Tile = std::tuple_element_t<12, Tuple>{};
+
+    static constexpr ck_tile::index_t M_Warp_Tile = std::tuple_element_t<13, Tuple>{};
+    static constexpr ck_tile::index_t N_Warp_Tile = std::tuple_element_t<14, Tuple>{};
+    static constexpr ck_tile::index_t K_Warp_Tile = ck_tile::max(
+        get_k_warp_tile<ADataType, M_Warp_Tile>(), get_k_warp_tile<BDataType, N_Warp_Tile>());
+
+    static constexpr ck_tile::index_t M_Warp =
+        PipelineType == MxGemmPipelineType::WeightPreshuffle
+            ? 1
+            : (PipelineType == MxGemmPipelineType::CompEightWaves ? 4 : 2);
+    static constexpr ck_tile::index_t N_Warp =
+        PipelineType == MxGemmPipelineType::WeightPreshuffle ? 4 : 2;
+    static constexpr ck_tile::index_t K_Warp = 1;
+
+    static constexpr int kBlockPerCu = 1;
+
+    static constexpr bool kPadM = false;
+    static constexpr bool kPadN = false;
+    static constexpr bool kPadK = false;
+
+    static constexpr bool Preshuffle = PipelineType == MxGemmPipelineType::WeightPreshuffle;
 
     // No D tensors for this test
     using DsLayout   = ck_tile::tuple<>;
@@ -69,42 +207,27 @@ class TestCkTileMxGroupedGemm : public ::testing::Test
     using AComputeDataType = ADataType;
     using BComputeDataType = BDataType;
 
-    struct GroupedGemKernelParam_Wmma
-    {
-        static const bool kPadM = false;
-        static const bool kPadN = false;
-        static const bool kPadK = false;
-
-        static const int kBlockPerCu         = 1;
-        static const ck_tile::index_t M_Tile = 64;
-        static const ck_tile::index_t N_Tile = 64;
-        static const ck_tile::index_t K_Tile = 128;
-
-        static const ck_tile::index_t M_Warp = 2;
-        static const ck_tile::index_t N_Warp = 2;
-        static const ck_tile::index_t K_Warp = 1;
-
-        static const ck_tile::index_t M_Warp_Tile     = 32;
-        static const ck_tile::index_t N_Warp_Tile     = 32;
-        static constexpr ck_tile::index_t K_Warp_Tile = 128;
-    };
-
     using mx_grouped_gemm_kargs = ck_tile::MxGroupedGemmHostArgs<>;
     std::size_t get_workspace_size(const std::vector<mx_grouped_gemm_kargs>& gemm_descs)
     {
         return gemm_descs.size() * sizeof(ck_tile::MxGemmTransKernelArg<>);
     }
 
-    template <typename GroupedGemKernelParam, typename ALayout, typename BLayout, typename CLayout>
+    template <typename ALayout, typename BLayout, typename CLayout>
     bool invoke_mx_grouped_gemm(const std::vector<mx_grouped_gemm_kargs>& gemm_descs,
                                 const ck_tile::stream_config& s,
                                 void* kargs_ptr)
     {
-        constexpr bool preshuffle       = false;
         constexpr bool DoubleSmemBuffer = true; // TDM pipeline requires double smem buffer
+#if defined(CK_USE_GFX1250)
+        constexpr ck_tile::index_t BlockedXDLNPerWarp = 1;
         constexpr bool TransposeC =
             std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor> &&
-            GroupedGemKernelParam::M_Warp_Tile == GroupedGemKernelParam::N_Warp_Tile;
+            M_Warp_Tile == N_Warp_Tile;
+#elif defined(CK_USE_GFX950)
+        constexpr ck_tile::index_t BlockedXDLNPerWarp = Preshuffle ? 2 : 1;
+        constexpr bool TransposeC                     = false;
+#endif
         static constexpr bool StructuredSparsity = false;
         static constexpr bool NumWaveGroup       = 1;
 
@@ -112,21 +235,15 @@ class TestCkTileMxGroupedGemm : public ::testing::Test
         constexpr ck_tile::index_t TileParitionerM01      = 4;
 
         using GemmShape =
-            ck_tile::TileGemmShape<ck_tile::sequence<GroupedGemKernelParam::M_Tile,
-                                                     GroupedGemKernelParam::N_Tile,
-                                                     GroupedGemKernelParam::K_Tile>,
-                                   ck_tile::sequence<GroupedGemKernelParam::M_Warp,
-                                                     GroupedGemKernelParam::N_Warp,
-                                                     GroupedGemKernelParam::K_Warp>,
-                                   ck_tile::sequence<GroupedGemKernelParam::M_Warp_Tile,
-                                                     GroupedGemKernelParam::N_Warp_Tile,
-                                                     GroupedGemKernelParam::K_Warp_Tile>>;
+            ck_tile::TileGemmShape<ck_tile::sequence<M_Tile, N_Tile, K_Tile>,
+                                   ck_tile::sequence<M_Warp, N_Warp, K_Warp>,
+                                   ck_tile::sequence<M_Warp_Tile, N_Warp_Tile, K_Warp_Tile>>;
         using TilePartitioner = ck_tile::
             GemmSpatiallyLocalTilePartitioner<GemmShape, TileParitionerGroupNum, TileParitionerM01>;
 
-        using GemmUniversalTraits = ck_tile::TileGemmUniversalTraits<GroupedGemKernelParam::kPadM,
-                                                                     GroupedGemKernelParam::kPadN,
-                                                                     GroupedGemKernelParam::kPadK,
+        using GemmUniversalTraits = ck_tile::TileGemmUniversalTraits<kPadM,
+                                                                     kPadN,
+                                                                     kPadK,
                                                                      DoubleSmemBuffer,
                                                                      ALayout,
                                                                      BLayout,
@@ -135,7 +252,7 @@ class TestCkTileMxGroupedGemm : public ::testing::Test
                                                                      StructuredSparsity,
                                                                      Persistent,
                                                                      NumWaveGroup,
-                                                                     preshuffle>;
+                                                                     Preshuffle>;
 
         using UniversalGemmProblem =
             ck_tile::MxGemmPipelineProblem<ADataType,
@@ -155,7 +272,26 @@ class TestCkTileMxGroupedGemm : public ::testing::Test
         using GemmPipeline =
             typename MxGemmPipelineTypeSelector<PipelineType, UniversalGemmProblem>::pipeline;
 
-        using GemmEpilogue = ck_tile::TdmEpilogue<
+        using GemmEpilogueProblem = std::conditional_t<
+            Preshuffle && PermuteN,
+            ck_tile::PermuteNEpilogueProblem<ADataType,
+                                             BDataType,
+                                             DsDataType,
+                                             AccDataType,
+                                             CDataType,
+                                             DsLayout,
+                                             CLayout,
+                                             ck_tile::element_wise::PassThrough,
+                                             TilePartitioner::MPerBlock,
+                                             TilePartitioner::NPerBlock,
+                                             M_Warp,
+                                             N_Warp,
+                                             M_Warp_Tile,
+                                             N_Warp_Tile,
+                                             K_Warp_Tile,
+                                             UniversalGemmProblem::TransposeC,
+                                             false, /*FixedVectorSize_*/
+                                             1>,    /*VectorSizeC_*/
             ck_tile::CShuffleEpilogueProblem<ADataType,
                                              BDataType,
                                              DsDataType,
@@ -166,19 +302,24 @@ class TestCkTileMxGroupedGemm : public ::testing::Test
                                              ck_tile::element_wise::PassThrough,
                                              TilePartitioner::MPerBlock,
                                              TilePartitioner::NPerBlock,
-                                             GroupedGemKernelParam::M_Warp,
-                                             GroupedGemKernelParam::N_Warp,
-                                             GroupedGemKernelParam::M_Warp_Tile,
-                                             GroupedGemKernelParam::N_Warp_Tile,
-                                             GroupedGemKernelParam::K_Warp_Tile,
+                                             M_Warp,
+                                             N_Warp,
+                                             M_Warp_Tile,
+                                             N_Warp_Tile,
+                                             K_Warp_Tile,
                                              UniversalGemmProblem::TransposeC,
-                                             1,                /*kNumWaveGroups_*/
-                                             false,            /*FixedVectorSize_*/
-                                             1,                /*VectorSizeC_*/
-                                             1,                /*BlockedXDLN_PerWarp_*/
-                                             DoubleSmemBuffer, /*DoubleSmemBuffer*/
-                                             AComputeDataType, /*AComputeDataType_*/
-                                             BComputeDataType /*BComputeDataType_*/>>;
+                                             1,                  /*kNumWaveGroups_*/
+                                             false,              /*FixedVectorSize_*/
+                                             1,                  /*VectorSizeC_*/
+                                             BlockedXDLNPerWarp, /*BlockedXDLN_PerWarp_*/
+                                             DoubleSmemBuffer,   /*DoubleSmemBuffer*/
+                                             AComputeDataType,   /*AComputeDataType_*/
+                                             BComputeDataType,   /*BComputeDataType_*/
+                                             !Preshuffle>>;
+
+        using GemmEpilogue = typename MxGemmEpilogueTypeSelector<PipelineType,
+                                                                 GemmEpilogueProblem,
+                                                                 PermuteN>::epilogue;
 
         using Kernel = ck_tile::MxGroupedGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
 
@@ -212,7 +353,7 @@ class TestCkTileMxGroupedGemm : public ::testing::Test
 
         ck_tile::ignore =
             ck_tile::launch_kernel(s,
-                                   ck_tile::make_kernel<GroupedGemKernelParam::kBlockPerCu>(
+                                   ck_tile::make_kernel<kBlockPerCu>(
                                        Kernel{},
                                        grids,
                                        blocks,
@@ -249,36 +390,9 @@ class TestCkTileMxGroupedGemm : public ::testing::Test
         return ck_tile::make_tuple(std::max(rtol, rtol_split_k), std::max(atol, atol_split_k));
     }
 
-    static constexpr bool check_data_type()
-    {
-
-        // Validate scale type / data type combination
-        constexpr bool a_is_f4      = std::is_same_v<ADataType, ck_tile::pk_fp4_t>;
-        constexpr bool b_is_f4      = std::is_same_v<BDataType, ck_tile::pk_fp4_t>;
-        constexpr bool a_scale_e8m0 = std::is_same_v<AScaleDataType, ck_tile::e8m0_t>;
-        constexpr bool b_scale_e8m0 = std::is_same_v<BScaleDataType, ck_tile::e8m0_t>;
-        if constexpr(!a_is_f4 && !a_scale_e8m0)
-            return false;
-        if constexpr(!b_is_f4 && !b_scale_e8m0)
-            return false;
-
-            // Check hardware WMMA support for the fixed warp tile (32x32x128)
-#if defined(CK_USE_GFX1250)
-        return ck_tile::has_wmma_traits_v<ck_tile::gfx125_t,
-                                          ADataType,
-                                          BDataType,
-                                          AccDataType,
-                                          GroupedGemKernelParam_Wmma::M_Warp_Tile,
-                                          GroupedGemKernelParam_Wmma::N_Warp_Tile,
-                                          GroupedGemKernelParam_Wmma::K_Warp_Tile>;
-#else
-        return false;
-#endif
-    }
-
     void SetUp() override
     {
-        if constexpr(!check_data_type())
+        if constexpr(!Derived::check_data_type())
         {
             GTEST_SKIP() << "Unsupported data type / layout combination for mx_grouped_gemm.";
         }
@@ -291,7 +405,7 @@ class TestCkTileMxGroupedGemm : public ::testing::Test
              const int kbatch      = 1,
              const int group_count = 16)
     {
-        if constexpr(!check_data_type())
+        if constexpr(!Derived::check_data_type())
             return;
 
         using namespace ck_tile::literals;
@@ -391,8 +505,42 @@ class TestCkTileMxGroupedGemm : public ::testing::Test
                       << " b_k_n: " << b_k_n_tensors[i].mDesc
                       << " c_m_n: " << c_m_n_tensors[i].mDesc << " KBatch: " << kbatch << std::endl;
 
-            ck_tile::FillUniformDistribution<ADataType>{-1.f, 1.f}(a_m_k_tensors[i]);
-            ck_tile::FillUniformDistribution<BDataType>{-1.f, 1.f}(b_k_n_tensors[i]);
+            // For pk_fp4_t each byte packs two 4-bit elements; the generic filler
+            // converts a single float and duplicates it into both nibbles.
+            // Generate two independent random values per byte instead.
+            if constexpr(std::is_same_v<ADataType, ck_tile::pk_fp4_t>)
+            {
+                std::mt19937 gen(11939);
+                std::uniform_real_distribution<float> dis(-5.f, 5.f);
+                for(auto& elem : a_m_k_tensors[i].mData)
+                {
+                    auto lo = ck_tile::float_to_mxfp4(std::round(dis(gen)), 1.f);
+                    auto hi = ck_tile::float_to_mxfp4(std::round(dis(gen)), 1.f);
+                    elem    = ck_tile::pk_fp4_t::_pack(lo, hi);
+                }
+            }
+            else
+            {
+                ck_tile::FillUniformDistributionIntegerValue<ADataType>{-5, 5, 11939}(
+                    a_m_k_tensors[i]);
+            }
+
+            if constexpr(std::is_same_v<BDataType, ck_tile::pk_fp4_t>)
+            {
+                std::mt19937 gen(11940);
+                std::uniform_real_distribution<float> dis(-5.f, 5.f);
+                for(auto& elem : b_k_n_tensors[i].mData)
+                {
+                    auto lo = ck_tile::float_to_mxfp4(std::round(dis(gen)), 1.f);
+                    auto hi = ck_tile::float_to_mxfp4(std::round(dis(gen)), 1.f);
+                    elem    = ck_tile::pk_fp4_t::_pack(lo, hi);
+                }
+            }
+            else
+            {
+                ck_tile::FillUniformDistributionIntegerValue<BDataType>{-5, 5, 11940}(
+                    b_k_n_tensors[i]);
+            }
 
             // K must be a multiple of ScaleBlockSize
             if(K % ScaleBlockSize != 0)
@@ -400,15 +548,13 @@ class TestCkTileMxGroupedGemm : public ::testing::Test
                 GTEST_SKIP() << "K must be multiple of ScaleBlockSize for MX GEMM";
             }
             const ck_tile::index_t num_scale_k = K / ScaleBlockSize;
-            if(num_scale_k % (GroupedGemKernelParam_Wmma::K_Warp_Tile / ScaleBlockSize) != 0)
+            if(num_scale_k % (K_Warp_Tile / ScaleBlockSize) != 0)
             {
-                GTEST_SKIP() << "K must be a multiple of K_Warp_Tile ("
-                             << GroupedGemKernelParam_Wmma::K_Warp_Tile
+                GTEST_SKIP() << "K must be a multiple of K_Warp_Tile (" << K_Warp_Tile
                              << ") for MX GEMM. Pad the scale data.";
             }
             const ck_tile::index_t scale_padded_M = ck_tile::integer_least_multiple(
-                static_cast<ck_tile::index_t>(M),
-                static_cast<ck_tile::index_t>(GroupedGemKernelParam_Wmma::M_Warp_Tile));
+                static_cast<ck_tile::index_t>(M), static_cast<ck_tile::index_t>(M_Tile));
 
             ck_tile::HostTensor<AScaleDataType> scale_a(
                 {static_cast<std::size_t>(scale_padded_M), static_cast<std::size_t>(num_scale_k)},
@@ -461,6 +607,9 @@ class TestCkTileMxGroupedGemm : public ::testing::Test
             }
 
             // Pre-shuffle scale buffers for the hardware
+#if defined(CK_USE_GFX1250)
+            constexpr index_t NXdlPackEff = 1;
+
             ck_tile::HostTensor<AScaleDataType> scale_a_shuffled(
                 {static_cast<std::size_t>(scale_padded_M), static_cast<std::size_t>(num_scale_k)},
                 {static_cast<std::size_t>(num_scale_k), static_cast<std::size_t>(1)});
@@ -468,11 +617,6 @@ class TestCkTileMxGroupedGemm : public ::testing::Test
             ck_tile::HostTensor<BScaleDataType> scale_b_shuffled(
                 {static_cast<std::size_t>(N), static_cast<std::size_t>(num_scale_k)},
                 {static_cast<std::size_t>(num_scale_k), static_cast<std::size_t>(1)});
-
-            std::cout << " scale_a: [scale_padded_M = " << scale_padded_M
-                      << ", num_scale_k = " << num_scale_k << "]." << std::endl;
-            std::cout << " scale_b: [N = " << N << ", num_scale_k = " << num_scale_k << "]."
-                      << std::endl;
 
             // Pre-shuffle for gfx1250 (WaveSize=32, WMMA)
             preShuffleScaleBuffer_gfx1250<AScaleDataType, ScaleBlockSize, true>(
@@ -482,19 +626,95 @@ class TestCkTileMxGroupedGemm : public ::testing::Test
             // where N is the fast-changing dimension for col-major B
             preShuffleScaleBuffer_gfx1250<BScaleDataType, ScaleBlockSize, true>(
                 scale_b.mData.data(), scale_b_shuffled.mData.data(), N, num_scale_k);
+#elif defined(CK_USE_GFX950)
+            constexpr ck_tile::index_t MPerXdl      = M_Warp_Tile;
+            constexpr ck_tile::index_t NPerXdl      = N_Warp_Tile;
+            constexpr ck_tile::index_t KPerXdl      = K_Warp_Tile;
+            constexpr ck_tile::index_t MIterPerWarp = M_Tile / (M_Warp * MPerXdl);
+            constexpr ck_tile::index_t NIterPerWarp = N_Tile / (N_Warp * NPerXdl);
+            constexpr ck_tile::index_t KIterPerWarp = K_Tile / KPerXdl;
+
+            constexpr ck_tile::index_t MXdlPackEff =
+                (MIterPerWarp >= 2 && MIterPerWarp % 2 == 0) ? 2 : 1;
+            constexpr ck_tile::index_t NXdlPackEff =
+                (NIterPerWarp >= 2 && NIterPerWarp % 2 == 0) ? 2 : 1;
+            constexpr ck_tile::index_t KXdlPackEff =
+                (KIterPerWarp >= 2 && KIterPerWarp % 2 == 0) ? 2 : 1;
+
+            constexpr ck_tile::index_t XdlMNThread = M_Warp_Tile;
+            constexpr ck_tile::index_t XdlKThread  = 64 / XdlMNThread;
+
+            ck_tile::HostTensor<AScaleDataType> scale_a_shuffled(
+                {static_cast<std::size_t>(scale_padded_M / MXdlPackEff * 2),
+                 static_cast<std::size_t>(num_scale_k / KXdlPackEff * 2)},
+                {static_cast<std::size_t>(num_scale_k / KXdlPackEff * 2),
+                 static_cast<std::size_t>(1)});
+
+            ck_tile::HostTensor<BScaleDataType> scale_b_shuffled(
+                {static_cast<std::size_t>(N / NXdlPackEff * 2),
+                 static_cast<std::size_t>(num_scale_k / KXdlPackEff * 2)},
+                {static_cast<std::size_t>(num_scale_k / KXdlPackEff * 2),
+                 static_cast<std::size_t>(1)});
+
+            ck_tile::
+                preShuffleScaleBuffer_gfx950<MXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(
+                    scale_a.mData.data(),
+                    scale_a_shuffled.mData.data(),
+                    scale_padded_M,
+                    num_scale_k,
+                    true);
+
+            if constexpr(Preshuffle && PermuteN)
+            {
+                ck_tile::preShuffleScaleBufferPermuteN_gfx950<N_Warp, N_Tile, XdlMNThread>(
+                    scale_b.mData.data(), scale_b_shuffled.mData.data(), N, num_scale_k, true);
+            }
+            else
+            {
+                ck_tile::
+                    preShuffleScaleBuffer_gfx950<NXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(
+                        scale_b.mData.data(), scale_b_shuffled.mData.data(), N, num_scale_k, true);
+            }
+#endif
+
+            std::cout << " scale_a: [scale_padded_M = " << scale_padded_M
+                      << ", num_scale_k = " << num_scale_k << "]." << std::endl;
+            std::cout << " scale_b: [N = " << N << ", num_scale_k = " << num_scale_k << "]."
+                      << std::endl;
 
             scale_a_tensors.push_back(scale_a_shuffled);
             scale_b_tensors.push_back(scale_b_shuffled);
 
+            using GemmConfig = Config<N_Warp_Tile, K_Warp_Tile, N_Tile, N_Warp, BDataType>;
+
+            const auto b_host_for_dev = [&]() {
+                if constexpr(Preshuffle)
+                {
+                    if constexpr(PermuteN)
+                    {
+                        return ck_tile::shuffle_b_permuteN<GemmConfig, BDataType, NXdlPackEff>(
+                            b_k_n_tensors[i]);
+                    }
+                    else
+                    {
+                        return ck_tile::shuffle_b<GemmConfig>(b_k_n_tensors[i]);
+                    }
+                }
+                else
+                {
+                    return b_k_n_tensors[i];
+                }
+            }();
+
             a_m_k_dev_buf.push_back(std::make_unique<ck_tile::DeviceMem>(
                 a_m_k_tensors[i].get_element_space_size_in_bytes()));
             b_k_n_dev_buf.push_back(std::make_unique<ck_tile::DeviceMem>(
-                b_k_n_tensors[i].get_element_space_size_in_bytes()));
+                b_host_for_dev.get_element_space_size_in_bytes()));
             c_m_n_dev_buf.push_back(std::make_unique<ck_tile::DeviceMem>(
                 c_m_n_tensors[i].get_element_space_size_in_bytes()));
 
             a_m_k_dev_buf[i]->ToDevice(a_m_k_tensors[i].data());
-            b_k_n_dev_buf[i]->ToDevice(b_k_n_tensors[i].data());
+            b_k_n_dev_buf[i]->ToDevice(b_host_for_dev.data());
             c_m_n_dev_buf[i]->SetZero();
             c_m_n_tensors[i].SetZero();
 
@@ -530,7 +750,7 @@ class TestCkTileMxGroupedGemm : public ::testing::Test
         ck_tile::DeviceMem gemm_workspace;
         gemm_workspace.Realloc(get_workspace_size(gemm_descs));
 
-        if(!invoke_mx_grouped_gemm<GroupedGemKernelParam_Wmma, ALayout, BLayout, CLayout>(
+        if(!invoke_mx_grouped_gemm<ALayout, BLayout, CLayout>(
                gemm_descs,
                ck_tile::stream_config{nullptr, false, 1},
                gemm_workspace.GetDeviceBuffer()))
