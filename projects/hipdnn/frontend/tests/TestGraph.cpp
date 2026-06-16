@@ -2142,8 +2142,7 @@ TEST_F(TestGraph, GetExecutionPlanEngineIdFailsWithNoPlan)
     const Graph graph;
     int64_t engineId = -1;
     auto result = graph.get_execution_plan_engine_id(engineId);
-    EXPECT_FALSE(result.is_good());
-    EXPECT_THAT(result.get_message(), HasSubstr("No execution plan available"));
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_EQ(engineId, -1);
 }
 
