@@ -334,9 +334,9 @@ A_desc address plan, vector_width=4
 
 Semantic transform:
   m -> (n, ho, wo)
-  k -> (r, s, c)
-  hi = ho * sH - pH + r * dH
-  wi = wo * sW - pW + s * dW
+  k -> (y, x, c)
+  hi = ho * sH - pH + y * dH
+  wi = wo * sW - pW + x * dW
   offset = ((n * Hi + hi) * Wi + wi) * C + c
   valid = 0 <= hi < Hi && 0 <= wi < Wi && c < C
 

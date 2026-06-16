@@ -246,8 +246,8 @@ def make_deep_fused_conv_pool_spec(
         Wi=w,
         C=c,
         K=k0,
-        R=r,
-        S=s,
+        Y=r,
+        X=s,
         sH=1,
         sW=1,
         pH=1,
@@ -508,8 +508,8 @@ def _can_use_specialized_conv0_a_loader(spec: DeepFusedConvPoolSpec) -> bool:
         and not spec.direct_conv0_from_input_cache
         and c.N == 1
         and c.C == 8
-        and c.R == 3
-        and c.S == 3
+        and c.Y == 3
+        and c.X == 3
         and c.sH == 1
         and c.sW == 1
         and c.pH == 1
@@ -531,11 +531,11 @@ def _load_conv0_a_tile_specialized(
     """Specialized NHWC conv0 A loader for the fixed deep-fusion target.
 
     This replaces the generic TensorDescriptor path for
-    ``N=1,C=8,R=S=3,stride=1,pad=1``. It keeps the shared coalesced loader's
+    ``N=1,C=8,Y=X=3,stride=1,pad=1``. It keeps the shared coalesced loader's
     thread distribution but computes the A offset directly:
 
-    ``row -> (local_oh, local_ow)``, ``kg -> (r, s, c)``, then
-    ``((global_h + r - 1) * Wi + global_w + s - 1) * 8 + c``.
+    ``row -> (local_oh, local_ow)``, ``kg -> (y, x, c)``, then
+    ``((global_h + y - pH) * Wi + global_w + x - pW) * C + c``.
     """
 
     p = spec.problem
@@ -544,7 +544,7 @@ def _load_conv0_a_tile_specialized(
     c_conv_tile_w = b.const_i32(conv_tile_w)
     c_wi = b.const_i32(c.Wi)
     c_c = b.const_i32(c.C)
-    c_sc = b.const_i32(c.S * c.C)  # 24 for the target shape.
+    c_sc = b.const_i32(c.X * c.C)  # 24 for the target shape.
     c_k_gemm = b.const_i32(c.K_gemm)
 
     h_base = b.mul(b.block_id_y(), b.const_i32(spec.pool_tile_h * p.pool_stride_h))
@@ -603,8 +603,8 @@ def _setup_input_footprint_cache(
     c = p.conv
     conv_tile_h = spec.pool_tile_h * p.pool_stride_h
     conv_tile_w = spec.pool_tile_w * p.pool_stride_w
-    foot_h = conv_tile_h + (c.R - 1) * c.dH
-    foot_w = conv_tile_w + (c.S - 1) * c.dW
+    foot_h = conv_tile_h + (c.Y - 1) * c.dH
+    foot_w = conv_tile_w + (c.X - 1) * c.dW
     input_smem = b.smem_alloc(F16, [foot_h * foot_w, c.C], name_hint="InputFoot_smem")
     total = foot_h * foot_w * c.C
     elems_per_thread = (total + spec.block_size - 1) // spec.block_size
@@ -666,13 +666,13 @@ def _load_conv0_a_tile_from_input_cache(
     p = spec.problem
     c = p.conv
     conv_tile_w = spec.pool_tile_w * p.pool_stride_w
-    foot_w = conv_tile_w + (c.S - 1) * c.dW
+    foot_w = conv_tile_w + (c.X - 1) * c.dW
     total = spec.tile_m * spec.tile_k
     elems_per_thread = (total + spec.block_size - 1) // spec.block_size
     c_total = b.const_i32(total)
     c_tile_k = b.const_i32(spec.tile_k)
     c_conv_tile_w = b.const_i32(conv_tile_w)
-    c_sc = b.const_i32(c.S * c.C)
+    c_sc = b.const_i32(c.X * c.C)
     c_c = b.const_i32(c.C)
     c_foot_w = b.const_i32(foot_w)
     c_k_gemm = b.const_i32(c.K_gemm)
@@ -727,9 +727,9 @@ def _load_conv0_a_operand_from_input_cache(
     p = spec.problem
     c = p.conv
     conv_tile_w = spec.pool_tile_w * p.pool_stride_w
-    foot_w = conv_tile_w + (c.S - 1) * c.dW
+    foot_w = conv_tile_w + (c.X - 1) * c.dW
     c_conv_tile_w = b.const_i32(conv_tile_w)
-    c_sc = b.const_i32(c.S * c.C)
+    c_sc = b.const_i32(c.X * c.C)
     c_c = b.const_i32(c.C)
     c_foot_w = b.const_i32(foot_w)
     c_k_gemm = b.const_i32(c.K_gemm)

@@ -41,8 +41,8 @@ def _reference_conv1x1_relu_pool(
 
     Ap = np.pad(A, ((0, 0), (conv.pH, conv.pH), (conv.pW, conv.pW), (0, 0)))
     C0 = np.zeros((conv.N, conv.Ho, conv.Wo, conv.K), dtype=np.float32)
-    for r in range(conv.R):
-        for s in range(conv.S):
+    for r in range(conv.Y):
+        for s in range(conv.X):
             row_start = r * conv.dH
             col_start = s * conv.dW
             x = Ap[
@@ -80,7 +80,7 @@ def _make_inputs(spec: Gfx950DeepFusedConvPoolSpec, *, seed: int):
         * 0.25
     ).astype(np.float16)
     B0 = (
-        rng.standard_normal((conv.K, conv.R, conv.S, conv.C)).astype(np.float32) * 0.25
+        rng.standard_normal((conv.K, conv.Y, conv.X, conv.C)).astype(np.float32) * 0.25
     ).astype(np.float16)
     W1 = (
         rng.standard_normal((spec.problem.conv1_channels, conv.K)).astype(np.float32)
@@ -114,7 +114,7 @@ def _pack_args(A_dev: int, B_dev: int, Y_dev: int, W1_dev: int, A, B0, Y, W1) ->
 
 def _useful_flops(spec: Gfx950DeepFusedConvPoolSpec) -> int:
     conv = spec.problem.conv
-    conv0 = conv.N * conv.Ho * conv.Wo * conv.K * conv.R * conv.S * conv.C
+    conv0 = conv.N * conv.Ho * conv.Wo * conv.K * conv.Y * conv.X * conv.C
     conv1 = conv.N * conv.Ho * conv.Wo * spec.problem.conv1_channels * conv.K
     return 2 * (conv0 + conv1)
 
@@ -299,8 +299,8 @@ def main() -> int:
         Wi=args.w,
         C=args.c,
         K=args.k0,
-        R=3,
-        S=3,
+        Y=3,
+        X=3,
         sH=1,
         sW=1,
         pH=1,
@@ -347,8 +347,8 @@ def main() -> int:
             conv.Wi,
             conv.C,
             conv.K,
-            conv.R,
-            conv.S,
+            conv.Y,
+            conv.X,
             conv.sH,
             conv.sW,
             conv.pH,

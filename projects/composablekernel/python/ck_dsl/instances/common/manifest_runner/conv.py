@@ -16,10 +16,22 @@ def run_conv_manifest_problem(
     manifest: dict, _shape: Optional[Tuple[int, int, int]], verify: bool
 ) -> tuple:
     np = require_numpy()
+
+    is_3d = manifest.get("conv_layout") == "implicit_gemm_3d"
+
     cv = [int(x) for x in manifest["conv"]]
-    if len(cv) < 13:
-        raise ValueError("conv manifest needs [N,H,W,C,K,R,S,sH,sW,pH,pW,dH,dW]")
-    N, H, W, C, K, R, S, sH, sW, pH, pW, dH, dW = cv[:13]
+    if is_3d:
+        if len(cv) < 18:
+            raise ValueError(
+                "3-D conv manifest needs [N,Di,Hi,Wi,C,K,Z,Y,X,sD,sH,sW,pD,pH,pW,dD,dH,dW]"
+            )
+        N, Di, Hi, Wi, C, K, Z, Y, X, sD, sH, sW, pD, pH, pW, dD, dH, dW = cv[:18]
+    else:
+        if len(cv) < 13:
+            raise ValueError("conv manifest needs [N,Hi,Wi,C,K,Y,X,sH,sW,pH,pW,dH,dW]")
+        N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW = cv[:13]
+        Di, Z, sD, pD, dD = 1, 1, 1, 0, 1
+
     groups = int(manifest.get("groups", 1))
     cpg = int(manifest.get("cpg", C // groups))
     kpg = int(manifest.get("kpg", K // groups))
@@ -40,29 +52,26 @@ def run_conv_manifest_problem(
         np_dtype = np.float16
 
     rng = np.random.default_rng(1234)
-    if dtype == "bf16":
-        # Generate as float32, then take the upper 2 bytes of each f32 word as
-        # bf16 bits (little-endian: bytes [2:4]). This produces valid bf16-encoded
-        # values rather than integer bit patterns (.astype(uint16) would truncate
-        # the float to an integer first, giving garbage — often zeros or NaNs).
-        def _to_bf16(x):
-            f32 = np.ascontiguousarray(x, dtype=np.float32)
-            return f32.view(np.uint8).reshape(-1, 4)[:, 2:].copy().view(np.uint16).reshape(x.shape)
-        A = _to_bf16(rng.random((N, H, W, C), dtype=np.float32) * 0.04 - 0.02)
-        B = _to_bf16(rng.random((K, R, S, cpg), dtype=np.float32) * 0.04 - 0.02)
+    if is_3d:
+        A = (rng.random((N, Di, Hi, Wi, C), dtype=np.float32) * 0.04 - 0.02).astype(np_dtype)
+        B = (rng.random((K, Z, Y, X, cpg), dtype=np.float32) * 0.04 - 0.02).astype(np_dtype)
+        Do = (Di + 2 * pD - dD * (Z - 1) - 1) // sD + 1
+        Ho = (Hi + 2 * pH - dH * (Y - 1) - 1) // sH + 1
+        Wo = (Wi + 2 * pW - dW * (X - 1) - 1) // sW + 1
+        D = np.empty((N, Do, Ho, Wo, K), dtype=np_dtype)
     else:
-        A = (rng.random((N, H, W, C), dtype=np.float32) * 0.04 - 0.02).astype(np_dtype)
-        B = (rng.random((K, R, S, cpg), dtype=np.float32) * 0.04 - 0.02).astype(np_dtype)
-    Ho = (H + 2 * pH - dH * (R - 1) - 1) // sH + 1
-    Wo = (W + 2 * pW - dW * (S - 1) - 1) // sW + 1
-    D = np.empty((N, Ho, Wo, K), dtype=np_dtype)
+        A = (rng.random((N, Hi, Wi, C), dtype=np.float32) * 0.04 - 0.02).astype(np_dtype)
+        B = (rng.random((K, Y, X, cpg), dtype=np.float32) * 0.04 - 0.02).astype(np_dtype)
+        Ho = (Hi + 2 * pH - dH * (Y - 1) - 1) // sH + 1
+        Wo = (Wi + 2 * pW - dW * (X - 1) - 1) // sW + 1
+        D = np.empty((N, Ho, Wo, K), dtype=np_dtype)
 
     if "grid_explicit" in manifest:
         gx, gy, gz = [int(x) for x in manifest["grid_explicit"]]
     else:
         bm = int(manifest["block_m"])
         bn = int(manifest["block_n"])
-        M = N * H * W
+        M = N * Do * Ho * Wo if is_3d else N * Ho * Wo
         gx, gy, gz = (
             (K + bn - 1) // bn,
             (M + bm - 1) // bm,
@@ -72,7 +81,7 @@ def run_conv_manifest_problem(
             gx, gy = gy, gx
     grid = (gx, gy, gz)
     block = (int(manifest["threads_per_block"]), 1, 1)
-    flop = 2.0 * N * H * W * K * R * S * cpg
+    flop = 2.0 * N * Do * Ho * Wo * K * Z * Y * X * cpg if is_3d else 2.0 * N * Ho * Wo * K * Y * X * cpg
     bytes_xfer = float(A.itemsize) * (A.size + B.size + D.size)
 
     def make_args(rt: Runtime):
@@ -97,24 +106,46 @@ def run_conv_manifest_problem(
             # numpy can't compute a bf16 reference; skip numerical check.
             return 0.0, 0, D.size
         rt.memcpy_d2h(as_u8_buffer(D), ptrs[2], nbytes(D))
-        Ap = np.pad(A, ((0, 0), (pH, pH), (pW, pW), (0, 0)), mode="constant")
         ref = np.zeros_like(D, dtype=np.float32)
-        for r in range(R):
-            for s in range(S):
-                row_start = r * dH
-                col_start = s * dW
-                x = Ap[
-                    :,
-                    row_start : row_start + Ho * sH : sH,
-                    col_start : col_start + Wo * sW : sW,
-                    :,
-                ]
-                for g in range(groups):
-                    xs = x[..., g * cpg : (g + 1) * cpg].astype(np.float32)
-                    ws = B[g * kpg : (g + 1) * kpg, r, s, :].astype(np.float32)
-                    ref[..., g * kpg : (g + 1) * kpg] += np.einsum(
-                        "nhwc,kc->nhwk", xs, ws, optimize=True
-                    )
+        if is_3d:
+            Ap = np.pad(A, ((0, 0), (pD, pD), (pH, pH), (pW, pW), (0, 0)), mode="constant")
+            for z in range(Z):
+                for y in range(Y):
+                    for x in range(X):
+                        d_start = z * dD
+                        r_start = y * dH
+                        c_start = x * dW
+                        inp = Ap[
+                            :,
+                            d_start : d_start + Do * sD : sD,
+                            r_start : r_start + Ho * sH : sH,
+                            c_start : c_start + Wo * sW : sW,
+                            :,
+                        ]
+                        for g in range(groups):
+                            xs = inp[..., g * cpg : (g + 1) * cpg].astype(np.float32)
+                            ws = B[g * kpg : (g + 1) * kpg, z, y, x, :].astype(np.float32)
+                            ref[..., g * kpg : (g + 1) * kpg] += np.einsum(
+                                "ndhwc,kc->ndhwk", xs, ws, optimize=True
+                            )
+        else:
+            Ap = np.pad(A, ((0, 0), (pH, pH), (pW, pW), (0, 0)), mode="constant")
+            for y in range(Y):
+                for x in range(X):
+                    row_start = y * dH
+                    col_start = x * dW
+                    inp = Ap[
+                        :,
+                        row_start : row_start + Ho * sH : sH,
+                        col_start : col_start + Wo * sW : sW,
+                        :,
+                    ]
+                    for g in range(groups):
+                        xs = inp[..., g * cpg : (g + 1) * cpg].astype(np.float32)
+                        ws = B[g * kpg : (g + 1) * kpg, y, x, :].astype(np.float32)
+                        ref[..., g * kpg : (g + 1) * kpg] += np.einsum(
+                            "nhwc,kc->nhwk", xs, ws, optimize=True
+                        )
         # Cast reference back to the kernel's output dtype for a fair comparison.
         ref_out = ref.astype(np_dtype)
         tol = 1e-4 if dtype == "fp32" else 1e-2

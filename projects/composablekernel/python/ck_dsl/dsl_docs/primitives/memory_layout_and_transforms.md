@@ -41,11 +41,11 @@ desc = (
            coord_names=["n", "hi", "wi", "c"])
     .transform(
         unmerge("m",  into=["n", "ho", "wo"], dims=[N, Ho, Wo]),
-        embed(["ho", "r"], "hi", strides=[sH, dH], offset=-pH, lo=0, hi=Hi),
-        embed(["wo", "s"], "wi", strides=[sW, dW], offset=-pW, lo=0, hi=Wi),
-        unmerge("k",  into=["r", "s", "c"], dims=[R, S, C]),
-        pad("r", lo=0, hi=R),
-        pad("s", lo=0, hi=S),
+        embed(["ho", "y"], "hi", strides=[sH, dH], offset=-pH, lo=0, hi=Hi),
+        embed(["wo", "x"], "wi", strides=[sW, dW], offset=-pW, lo=0, hi=Wi),
+        unmerge("k",  into=["y", "x", "c"], dims=[Y, X, C]),
+        pad("y", lo=0, hi=Y),
+        pad("x", lo=0, hi=X),
     )
 )
 off, valid = desc.offset(b, m=m_val, k=k_val)
@@ -276,7 +276,7 @@ Do not issue a global load from an invalid pointer and then select the value awa
 
 ```text
 Plain GEMM A/B/C, regular strides              -> TensorView + TileWindow
-Conv input/weight/output (NHWC/KRSC/NHWK)       -> transform DAG descriptors
+Conv input/weight/output (NHWC/KYXC/NHWK)      -> transform DAG descriptors
 Paged-KV attention addressing                  -> transform DAG with `indirect`
 Small row-wise ops (norm, reduce, elementwise) -> packed view + sweep_row_chunks
 Tails / padding / masks                         -> buffer resources + descriptor.valid

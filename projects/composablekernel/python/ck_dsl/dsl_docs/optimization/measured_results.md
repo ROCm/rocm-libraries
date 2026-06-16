@@ -44,7 +44,7 @@ A small handful of doc inaccuracies surfaced during this verification and were c
 - `BiasAdd` kwargs are `(param_name, dtype)` (was wrongly `bias_dtype` in `fusion/overview.md`).
 - `pack_f32_to(b, scalars_f32, *, dtype)` and `store_vec(b, ptr, idx, value, *, n)` are keyword-only with `dtype`/`n`, no `target_dtype` (was wrong in `primitives/intrinsics_and_primitives.md`).
 - `BatchedGemmSpec` and `GroupedGemmSpec` both require `name` (and `GroupedGemmSpec` also `trait`).
-- `DirectConvProblem` fields are `(N, H, W, groups, cpg, kpg, KH, KW, PAD, stride)` — not the `(Hi, Wi, R, S, sH, sW, pH, pW, dH, dW)` shape used by `ConvProblem` (was wrong in `instances/convolution.md`).
+- `DirectConvProblem` fields are `(N, H, W, groups, cpg, kpg, KH, KW, PAD, stride)` — not the `(Hi, Wi, Y, X, sH, sW, pH, pW, dH, dW)` shape used by `ConvProblem` (was wrong in `instances/convolution.md`).
 - `QDType` is `Literal["i8", "fp8e4m3", "bf8e5m2"]`, not an enum; values are plain strings (was wrong in `primitives/quantization.md`).
 
 ## Generated Example Harness
@@ -84,7 +84,7 @@ verify max_abs_diff=7.6293945e-06  bad=0/1605632
 Perf: 0.00802084 ms, 230.61 TFlops, 809.922 GB/s
 ```
 
-Shape: N=8, Hi=Wi=56, C=K=64, R=S=3, pad=1, stride=1, dilation=1. Implicit-GEMM (m=N*Ho*Wo=25088, n=K=64, k=R*S*C=576). Atom: `mfma_f32_32x32x16_f16`. Pipeline `mem`, epilogue `cshuffle`.
+Shape: N=8, Hi=Wi=56, C=K=64, Y=X=3, pad=1, stride=1, dilation=1. Implicit-GEMM (m=N*Ho*Wo=25088, n=K=64, k=Y*X*C=576). Atom: `mfma_f32_32x32x16_f16`. Pipeline `mem`, epilogue `cshuffle`.
 
 `bad = 0` at the conv tolerance (1e-2). `max_abs_diff = 7.6e-06` against the fp32 NumPy reference is within expected fp16-sum noise.
 

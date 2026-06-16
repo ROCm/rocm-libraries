@@ -118,18 +118,18 @@ This is what `embed` is for:
 from ck_dsl.helpers.transforms import embed
 
 desc = desc.transform(
-    embed(upper=["ho", "r"], into="hi",
+    embed(upper=["ho", "y"], into="hi",
           strides=[sH, dH], offset=-pH,
           lo=0, hi=Hi),
-    embed(upper=["wo", "s"], into="wi",
+    embed(upper=["wo", "x"], into="wi",
           strides=[sW, dW], offset=-pW,
           lo=0, hi=Wi),
 )
 ```
 
-After this, the user-facing coord space contains `ho, r, wo, s`
+After this, the user-facing coord space contains `ho, y, wo, x`
 instead of `hi, wi`. `embed` consumes the input upper coords
-(`ho, r` and `wo, s`) to produce lower coords (`hi, wi`), with the
+(`ho, y` and `wo, x`) to produce lower coords (`hi, wi`), with the
 bounds check `0 <= hi < Hi` and `0 <= wi < Wi` AND-ed into the
 validity predicate.
 
@@ -153,18 +153,18 @@ or `pH=0`.)
 The implicit-GEMM treats the convolution as a matmul where:
   - M = N * Ho * Wo  (output-spatial flatten)
   - N_gemm = K       (output-channel)
-  - K_gemm = R * S * C  (filter flatten)
+  - K_gemm = Y * X * C  (filter flatten)
 
 So the kernel hands the descriptor a flat `m` and `k`, and the
 descriptor must split `m` into `(n, ho, wo)` and `k` into
-`(r, s, c)`.
+`(y, x, c)`.
 
 ```python
 from ck_dsl.helpers.transforms import unmerge
 
 desc = desc.transform(
     unmerge("m",  into=["n", "ho", "wo"],  dims=[N, Ho, Wo]),
-    unmerge("k",  into=["r", "s", "c"],    dims=[R, S, C]),
+    unmerge("k",  into=["y", "x", "c"],    dims=[Y, X, C]),
 )
 ```
 
@@ -177,15 +177,15 @@ ho = (m / Wo) % Ho
 wo = m % Wo
 ```
 
-Similarly for k -> (r, s, c).
+Similarly for k -> (y, x, c).
 
 ## Walkthrough 4: full implicit-GEMM convolution
 
-Putting it all together for an NHWC × KRSC -> NHWK conv. The user
+Putting it all together for an NHWC × KYXC -> NHWK conv. The user
 passes `m` and `k`; the descriptor maps to the NHWC linear offset.
 
 ```python
-def make_a_descriptor(N, Hi, Wi, C, K, R, S, Ho, Wo, sH, sW, pH, pW, dH, dW):
+def make_a_descriptor(N, Hi, Wi, C, K, Y, X, Ho, Wo, sH, sW, pH, pW, dH, dW):
     return (
         TensorDescriptor.naive(
             "A_nhwc",
@@ -195,19 +195,19 @@ def make_a_descriptor(N, Hi, Wi, C, K, R, S, Ho, Wo, sH, sW, pH, pW, dH, dW):
         .transform(
             # User-facing m -> (n, ho, wo)
             unmerge("m", into=["n", "ho", "wo"], dims=[N, Ho, Wo]),
-            # Conv affine map: (ho, r) -> hi, (wo, s) -> wi
-            embed(["ho", "r"], "hi", strides=[sH, dH], offset=-pH,
+            # Conv affine map: (ho, y) -> hi, (wo, x) -> wi
+            embed(["ho", "y"], "hi", strides=[sH, dH], offset=-pH,
                   lo=0, hi=Hi),
-            embed(["wo", "s"], "wi", strides=[sW, dW], offset=-pW,
+            embed(["wo", "x"], "wi", strides=[sW, dW], offset=-pW,
                   lo=0, hi=Wi),
-            # User-facing k -> (r, s, c)
-            unmerge("k", into=["r", "s", "c"], dims=[R, S, C]),
+            # User-facing k -> (y, x, c)
+            unmerge("k", into=["y", "x", "c"], dims=[Y, X, C]),
             # Boundary guards: when K_gemm doesn't cleanly divide the
-            # K-tile, the last tile produces r >= R or s >= S. Without
+            # K-tile, the last tile produces y >= Y or x >= X. Without
             # these pads the unmerge would compute a valid-looking
-            # offset that crosses into the next k_out's KRSC slice.
-            pad("r", lo=0, hi=R),
-            pad("s", lo=0, hi=S),
+            # offset that crosses into the next k_out's KYXC slice.
+            pad("y", lo=0, hi=Y),
+            pad("x", lo=0, hi=X),
         )
     )
 ```
@@ -371,11 +371,11 @@ kernel's caller can route the load to a safe sentinel address (the
    `naive(...)` call. The K-loop body doesn't change.
 
 2. **Validity is wired in.** The kernel author never forgets a
-   bounds check. If you write `pad("r", lo=0, hi=R)`, the descriptor
-   knows to suppress reads where `r >= R`.
+   bounds check. If you write `pad("y", lo=0, hi=Y)`, the descriptor
+   knows to suppress reads where `y >= Y`.
 
 3. **The math is correct.** The transform DAG has been validated on
-   the bake-off 1 shapes (`N=8, H=W=56, C=K=64, R=S=3`) with
+   the bake-off 1 shapes (`N=8, H=W=56, C=K=64, Y=X=3`) with
    `bad=0` at the conv tolerance vs the NumPy grouped-conv reference
    (`max_abs_diff = 7.6e-6` in the canonical run). Once
    the algebra is right, it's right for every shape.

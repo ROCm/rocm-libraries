@@ -69,7 +69,7 @@ def _reference(X, W0, W1, spec: Gfx1151DeepFusedConvPoolSpec) -> np.ndarray:
     p = spec.problem
     conv = p.conv
     N, Hi, Wi, C = X.shape
-    K0, R, S = conv.K, conv.R, conv.S
+    K0, R, S = conv.K, conv.Y, conv.X
     Ho, Wo = conv.Ho, conv.Wo
     K1 = p.conv1_channels
 
@@ -145,7 +145,7 @@ def _make_inputs(spec: Gfx1151DeepFusedConvPoolSpec, *, seed: int):
     K1 = spec.problem.conv1_channels
     rng = np.random.default_rng(seed)
     X = rng.integers(-3, 4, size=(conv.N, conv.Hi, conv.Wi, conv.C), dtype=np.int8)
-    W0 = rng.integers(-3, 4, size=(conv.K, conv.R, conv.S, conv.C), dtype=np.int8)
+    W0 = rng.integers(-3, 4, size=(conv.K, conv.Y, conv.X, conv.C), dtype=np.int8)
     W1_codes = rng.integers(-3, 4, size=(K1, conv.K), dtype=np.int8)
     W1 = _pack_w1(W1_codes)
     Y = np.zeros(
@@ -161,7 +161,7 @@ def _pack_args(X_dev, W0_dev, Y_dev, W1_dev) -> bytes:
 
 def _useful_flops(spec: Gfx1151DeepFusedConvPoolSpec) -> int:
     conv = spec.problem.conv
-    conv0 = conv.N * conv.Ho * conv.Wo * conv.K * conv.R * conv.S * conv.C
+    conv0 = conv.N * conv.Ho * conv.Wo * conv.K * conv.Y * conv.X * conv.C
     conv1 = conv.N * conv.Ho * conv.Wo * spec.problem.conv1_channels * conv.K
     return 2 * (conv0 + conv1)
 
@@ -193,8 +193,8 @@ def _make_manifest(artifact, spec, *, seed: int, tol: int, warmup: int, iters: i
             conv.Wi,
             conv.C,
             conv.K,
-            conv.R,
-            conv.S,
+            conv.Y,
+            conv.X,
             conv.sH,
             conv.sW,
             conv.pH,

@@ -329,12 +329,12 @@ class Gfx1151DeepFusedConvPoolSpec:
     def foot_h(self) -> int:
         """Input-halo footprint height for one conv0 output tile (direct mode)."""
         c = self.problem.conv
-        return (self.conv_tile_h - 1) * c.sH + (c.R - 1) * c.dH + 1
+        return (self.conv_tile_h - 1) * c.sH + (c.Y - 1) * c.dH + 1
 
     @property
     def foot_w(self) -> int:
         c = self.problem.conv
-        return (self.conv_tile_w - 1) * c.sW + (c.S - 1) * c.dW + 1
+        return (self.conv_tile_w - 1) * c.sW + (c.X - 1) * c.dW + 1
 
     def kernel_name(self) -> str:
         parts = [
@@ -434,8 +434,8 @@ def make_deep_fused_conv_pool_spec(
         Wi=w,
         C=c,
         K=k0,
-        R=r,
-        S=s,
+        Y=r,
+        X=s,
         sH=1,
         sW=1,
         pH=1,
@@ -581,8 +581,8 @@ def is_valid_spec(
                 False,
                 "static_direct_kmap is only implemented for native direct conv0",
             )
-        if (c.C, c.R, c.S) != (8, 3, 3):
-            return False, "static_direct_kmap assumes C=8 and R=S=3"
+        if (c.C, c.Y, c.X) != (8, 3, 3):
+            return False, "static_direct_kmap assumes C=8 and Y=X=3"
     if spec.packed_c0_handoff:
         if not spec.native_int:
             return False, "packed_c0_handoff is only implemented for native_int"
@@ -789,8 +789,8 @@ def _stage_conv0_a(
             sidx = b.select(in_range, idx, c0)
             row = b.div(sidx, c_g)
             g = b.mod(sidx, c_g)
-            r = b.div(g, b.const_i32(c.S))
-            s = b.mod(g, b.const_i32(c.S))
+            r = b.div(g, b.const_i32(c.X))
+            s = b.mod(g, b.const_i32(c.X))
             local_oh = b.div(row, c_ctw)
             local_ow = b.mod(row, c_ctw)
             oh = b.add(h_base, local_oh)
@@ -830,7 +830,7 @@ def _stage_conv0_a(
     ept = (total + bs - 1) // bs
     c_kpad = b.const_i32(kpad)
     c_kg = b.const_i32(c.K_gemm)
-    c_sc = b.const_i32(c.S * c.C)
+    c_sc = b.const_i32(c.X * c.C)
     c_cc = b.const_i32(c.C)
     zero_f = b.const_f32(0.0)
 
@@ -1120,7 +1120,7 @@ def _stage_conv0_w0(
     w0_smem: Value,
     grid: WarpGrid,
 ) -> None:
-    """Load int8 conv0 weights ``W0[K0, K_gemm]`` (KRSC contiguous) into
+    """Load int8 conv0 weights ``W0[K0, K_gemm]`` (KYXC contiguous) into
     ``w0_smem[tile_n, kpad]`` as fp16 codes; padding rows/cols -> 0."""
     p = spec.problem
     c = p.conv
@@ -1240,8 +1240,8 @@ def _stage_conv0_a_int(
             sidx = b.select(in_range, idx, c0)
             row = b.div(sidx, c_g)
             g = b.mod(sidx, c_g)
-            r = b.div(g, b.const_i32(c.S))
-            s = b.mod(g, b.const_i32(c.S))
+            r = b.div(g, b.const_i32(c.X))
+            s = b.mod(g, b.const_i32(c.X))
             local_oh = b.div(row, c_ctw)
             local_ow = b.mod(row, c_ctw)
             oh = b.add(h_base, local_oh)
@@ -1271,7 +1271,7 @@ def _stage_conv0_a_int(
     ept = (total + bs - 1) // bs
     c_kpad = b.const_i32(kpad)
     c_kg = b.const_i32(c.K_gemm)
-    c_sc = b.const_i32(c.S * c.C)
+    c_sc = b.const_i32(c.X * c.C)
     c_cc = b.const_i32(c.C)
 
     for e in range(ept):
@@ -1315,7 +1315,7 @@ def _stage_conv0_w0_int(
     w0_smem: Value,
     grid: WarpGrid,
 ) -> None:
-    """Native-int conv0: load int8 conv0 weights ``W0[K0, K_gemm]`` (KRSC
+    """Native-int conv0: load int8 conv0 weights ``W0[K0, K_gemm]`` (KYXC
     contiguous) into the *i8* LDS tile ``w0_smem[tile_n, kpad]`` as raw int8
     codes; padding rows/cols -> 0. The fast path stores one contiguous C-channel
     group with a vector LDS store."""
@@ -2027,7 +2027,7 @@ def _load_conv0_a_frag_from_footprint(
     when ``C`` is a power of two."""
     c = spec.problem.conv
     c_ctw = b.const_i32(spec.conv_tile_w)
-    c_sc = b.const_i32(c.S * c.C)
+    c_sc = b.const_i32(c.X * c.C)
     c_fw = b.const_i32(spec.foot_w)
     c_kg = b.const_i32(c.K_gemm)
     zero_h = b.trunc_f32_to_f16(b.const_f32(0.0))
@@ -2075,7 +2075,7 @@ def _load_conv0_a_frag_from_footprint_iu8(
     """
     c = spec.problem.conv
     c_ctw = b.const_i32(spec.conv_tile_w)
-    c_sc = b.const_i32(c.S * c.C)
+    c_sc = b.const_i32(c.X * c.C)
     c_fw = b.const_i32(spec.foot_w)
     c_kg = b.const_i32(c.K_gemm)
 
@@ -2118,8 +2118,8 @@ def _load_conv0_a_frag_from_footprint_iu8_static(
 ) -> Value:
     """Static-K-map sibling of ``_load_conv0_a_frag_from_footprint_iu8``.
 
-    Target specialization: C=8, R=S=3, iu8 slots pack four contiguous C values.
-    The flattened K -> (r, s, ci) mapping is compile-time for each kk/slot.
+    Target specialization: C=8, Y=X=3, iu8 slots pack four contiguous C values.
+    The flattened K -> (y, x, ci) mapping is compile-time for each kk/slot.
     """
     c = spec.problem.conv
     c_ctw = b.const_i32(spec.conv_tile_w)
@@ -2135,8 +2135,8 @@ def _load_conv0_a_frag_from_footprint_iu8_static(
         if kg0 >= c.K_gemm:
             words.append(b.const_i32(0))
             continue
-        r = kg0 // (c.S * c.C)
-        rem = kg0 % (c.S * c.C)
+        r = kg0 // (c.X * c.C)
+        rem = kg0 % (c.X * c.C)
         s_col = rem // c.C
         ci = rem % c.C
         fr = b.add(oh_base, b.const_i32(r * c.dH))

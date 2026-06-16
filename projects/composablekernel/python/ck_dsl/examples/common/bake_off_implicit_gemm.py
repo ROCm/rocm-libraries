@@ -3,7 +3,7 @@
 """DSL example 08: implicit-GEMM convolution (bake-off 1).
 
 A DSL-native implicit-GEMM convolution targeting the bake-off problem
-(NHWC × KRSC -> NHWK, `N=8 H=W=56 C=K=64 R=S=3 stride=pad=1`):
+(NHWC × KYXC -> NHWK, `N=8 H=W=56 C=K=64 Y=X=3 stride=pad=1`):
   - Implicit-GEMM with the convolution map encoded as a
     coordinate-transform DAG, fused so we never materialise the im2col
     tile.
@@ -64,21 +64,27 @@ def main() -> int:
         help="data type for A/B/D tensors (default: fp16)",
     )
 
-    # ConvProblem parameters
+    # ConvProblem parameters — shared between 2-D and 3-D.
+    # Pass --Di and --Z to activate the 3-D path; omit for 2-D.
     conv = parser.add_argument_group("ConvProblem", "convolution shape parameters")
-    conv.add_argument("--N", type=int, default=8, help="batch size")
-    conv.add_argument("--Hi", type=int, default=56, help="input height")
-    conv.add_argument("--Wi", type=int, default=56, help="input width")
-    conv.add_argument("--C", type=int, default=64, help="input channels")
-    conv.add_argument("--K", type=int, default=64, help="output channels / filters")
-    conv.add_argument("--R", type=int, default=3, help="filter height")
-    conv.add_argument("--S", type=int, default=3, help="filter width")
-    conv.add_argument("--sH", type=int, default=1, help="vertical stride")
-    conv.add_argument("--sW", type=int, default=1, help="horizontal stride")
-    conv.add_argument("--pH", type=int, default=1, help="vertical padding")
-    conv.add_argument("--pW", type=int, default=1, help="horizontal padding")
-    conv.add_argument("--dH", type=int, default=1, help="vertical dilation")
-    conv.add_argument("--dW", type=int, default=1, help="horizontal dilation")
+    conv.add_argument("--N",  type=int, default=8,    help="batch size")
+    conv.add_argument("--Di", type=int, default=None, help="input depth  (3-D only; omit for 2-D)")
+    conv.add_argument("--Hi", type=int, default=56,   help="input height")
+    conv.add_argument("--Wi", type=int, default=56,   help="input width")
+    conv.add_argument("--C",  type=int, default=64,   help="input channels")
+    conv.add_argument("--K",  type=int, default=64,   help="output channels / filters")
+    conv.add_argument("--Z",  type=int, default=None, help="filter depth  (3-D only)")
+    conv.add_argument("--Y",  type=int, default=3,    help="filter height")
+    conv.add_argument("--X",  type=int, default=3,    help="filter width")
+    conv.add_argument("--sD", type=int, default=None, help="depth stride  (3-D only)")
+    conv.add_argument("--sH", type=int, default=1,    help="vertical stride")
+    conv.add_argument("--sW", type=int, default=1,    help="horizontal stride")
+    conv.add_argument("--pD", type=int, default=None, help="depth padding  (3-D only)")
+    conv.add_argument("--pH", type=int, default=1,    help="vertical padding")
+    conv.add_argument("--pW", type=int, default=1,    help="horizontal padding")
+    conv.add_argument("--dD", type=int, default=None, help="depth dilation  (3-D only)")
+    conv.add_argument("--dH", type=int, default=1,    help="vertical dilation")
+    conv.add_argument("--dW", type=int, default=1,    help="horizontal dilation")
 
     # ImplicitGemmConvSpec parameters
     spec_grp = parser.add_argument_group(
@@ -112,12 +118,20 @@ def main() -> int:
 
     args = parser.parse_args()
 
+    if args.Di is not None and args.Z is None:
+        print("--Z (filter depth) is required when --Di is set", file=sys.stderr)
+        return 2
+    if args.Z is not None and args.Di is None:
+        print("--Di (input depth) is required when --Z is set", file=sys.stderr)
+        return 2
+
     arch = args.arch
     if args.isa is not None:
         from ck_dsl.core.arch import arch_from_isa
-
         arch = arch_from_isa(args.isa) or arch
     target = ArchTarget.from_gfx(arch)
+
+    dtype = args.dtype
     # The winning 32x32 warp tile uses the largest legal K for the target:
     # gfx950 (CDNA4) carries the wide 32x32x16 atom, gfx942 (CDNA3) only the
     # 32x32x8 atom. Sourcing K from the catalog keeps gfx950 output unchanged
@@ -131,21 +145,28 @@ def main() -> int:
         return 2
     warp_tile_k = args.warp_tile_k if args.warp_tile_k is not None else atom.k
 
+    # Single ConvProblem for both 2-D and 3-D; Di/Z being None selects 2-D.
     problem = ConvProblem(
         N=args.N,
+        Di=args.Di,
         Hi=args.Hi,
         Wi=args.Wi,
         C=args.C,
         K=args.K,
-        R=args.R,
-        S=args.S,
+        Z=args.Z,
+        Y=args.Y,
+        X=args.X,
+        sD=args.sD,
         sH=args.sH,
         sW=args.sW,
+        pD=args.pD,
         pH=args.pH,
         pW=args.pW,
+        dD=args.dD,
         dH=args.dH,
         dW=args.dW,
     )
+
     # Winning config from the sweep in `instances.conv_implicit_gemm`:
     #   tile (64, 64, 64)
     #   warp grid (2, 2)
@@ -180,26 +201,64 @@ def main() -> int:
         artifact = compile_kernel(kernel, arch=arch)
 
     p = problem
+    # Build the manifest. For 2-D, `conv` holds 13 ints:
+    #   [N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW]
+    # For 3-D, `conv` holds 18 ints and `conv_layout` selects the parser:
+    #   [N, Di, Hi, Wi, C, K, Z, Y, X, sD, sH, sW, pD, pH, pW, dD, dH, dW]
+    if p.is_3d:
+        conv_field = [p.N, p.Di, p.Hi, p.Wi, p.C, p.K, p.Z, p.Y, p.X, p.sD, p.sH, p.sW, p.pD, p.pH, p.pW, p.dD, p.dH, p.dW]
+        conv_layout = "implicit_gemm_3d"
+        extra = {
+            "dtype": dtype,
+            "conv_3d": [
+                p.N, p.Di, p.Hi, p.Wi, p.C, p.K,
+                p.Z, p.Y, p.X,
+                p.sD, p.sH, p.sW,
+                p.pD, p.pH, p.pW,
+                p.dD, p.dH, p.dW,
+            ],
+            "default_shape": [p.M, p.N_gemm, p.K_gemm],
+        }
+    else:
+        conv_field = [p.N, p.Hi, p.Wi, p.C, p.K, p.Y, p.X, p.sH, p.sW, p.pH, p.pW, p.dH, p.dW]
+        conv_layout = "implicit_gemm"
+        extra = {
+            "dtype": dtype,
+            "default_shape": [p.M, p.N_gemm, p.K_gemm],
+            "transform_dag": {
+                "A_nhwc": [
+                    {"transform": "unmerge", "upper": "m",    "into": ["n", "ho", "wo"], "dims": [p.N, p.Ho, p.Wo]},
+                    {"transform": "embed",   "upper": ["ho", "y"], "into": "hi", "strides": [p.sH, p.dH], "offset": -p.pH, "lo": 0, "hi": p.Hi},
+                    {"transform": "embed",   "upper": ["wo", "x"], "into": "wi", "strides": [p.sW, p.dW], "offset": -p.pW, "lo": 0, "hi": p.Wi},
+                    {"transform": "unmerge", "upper": "k",    "into": ["y", "x", "c"],   "dims": [p.Y, p.X, p.C]},
+                ],
+                "B_kyxc": [
+                    {"transform": "unmerge", "upper": "k_gemm", "into": ["y", "x", "c"], "dims": [p.Y, p.X, p.C]},
+                ],
+                "D_nhwk": [
+                    {"transform": "unmerge", "upper": "m", "into": ["n", "ho", "wo"], "dims": [p.N, p.Ho, p.Wo]},
+                ],
+            },
+        }
+
     manifest = make_conv_manifest(
         artifact=artifact,
         block_m=spec.tile_m,
         block_n=spec.tile_n,
         block_k=spec.tile_k,
         threads_per_block=spec.block_size,
-        conv=[p.N, p.Hi, p.Wi, p.C, p.K, p.R, p.S, p.sH, p.sW, p.pH, p.pW, p.dH, p.dW],
+        conv=conv_field,
         groups=1,
         cpg=p.C,
         kpg=p.K,
+        conv_layout=conv_layout,
         dtype=dtype,
-        conv_layout="implicit_gemm",
         # The kernel reads block_id.x as the N-tile index and
         # block_id.y as the M-tile index (mirrors gemm_universal).
-        # The runner computes (M_tiles, N_tiles) following the
-        # "M-first" convention; we set grid_order="NM" so it swaps
-        # (gx, gy) -> (N_tiles, M_tiles) before launch.
         grid_order="NM",
         warmup_iters=5,
         timed_iters=100,
+        extra=extra,
         atoms=[f"tile.mfma_f32_32x32x{warp_tile_k}_{dtype}"],
         notes=(
             "Bake-off 1: implicit-GEMM conv via the coord-transform "
@@ -211,60 +270,6 @@ def main() -> int:
             "implicit-GEMM kernel, but expressed through CK Tile's "
             "coordinate-transform algebra instead of inline arithmetic."
         ),
-        extra={
-            "dtype": dtype,
-            "default_shape": [p.M, p.N_gemm, p.K_gemm],
-            "transform_dag": {
-                "A_nhwc": [
-                    {
-                        "transform": "unmerge",
-                        "upper": "m",
-                        "into": ["n", "ho", "wo"],
-                        "dims": [p.N, p.Ho, p.Wo],
-                    },
-                    {
-                        "transform": "embed",
-                        "upper": ["ho", "r"],
-                        "into": "hi",
-                        "strides": [p.sH, p.dH],
-                        "offset": -p.pH,
-                        "lo": 0,
-                        "hi": p.Hi,
-                    },
-                    {
-                        "transform": "embed",
-                        "upper": ["wo", "s"],
-                        "into": "wi",
-                        "strides": [p.sW, p.dW],
-                        "offset": -p.pW,
-                        "lo": 0,
-                        "hi": p.Wi,
-                    },
-                    {
-                        "transform": "unmerge",
-                        "upper": "k",
-                        "into": ["r", "s", "c"],
-                        "dims": [p.R, p.S, p.C],
-                    },
-                ],
-                "B_krsc": [
-                    {
-                        "transform": "unmerge",
-                        "upper": "k_gemm",
-                        "into": ["r", "s", "c"],
-                        "dims": [p.R, p.S, p.C],
-                    },
-                ],
-                "D_nhwk": [
-                    {
-                        "transform": "unmerge",
-                        "upper": "m",
-                        "into": ["n", "ho", "wo"],
-                        "dims": [p.N, p.Ho, p.Wo],
-                    },
-                ],
-            },
-        },
     )
 
     paths = write_artifact(artifact, Path(args.output_dir), manifest)

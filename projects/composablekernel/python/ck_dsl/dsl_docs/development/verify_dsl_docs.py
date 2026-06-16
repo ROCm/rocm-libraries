@@ -676,7 +676,7 @@ gemm_out = check(
 def t_conv_spec() -> None:
     spec = ImplicitGemmConvSpec(
         problem=ConvProblem(
-            N=8, Hi=56, Wi=56, C=64, K=64, R=3, S=3, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1
+            N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1
         ),
         tile_m=64,
         tile_n=64,
@@ -1528,7 +1528,7 @@ section("implicit-GEMM conv end-to-end")
 def t_implicit_conv_e2e() -> None:
     spec = ImplicitGemmConvSpec(
         problem=ConvProblem(
-            N=8, Hi=56, Wi=56, C=64, K=64, R=3, S=3, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1
+            N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1
         ),
         tile_m=64,
         tile_n=64,

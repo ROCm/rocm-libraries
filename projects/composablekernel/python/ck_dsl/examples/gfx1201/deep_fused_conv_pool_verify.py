@@ -95,7 +95,7 @@ def main() -> int:
 
     conv = ConvProblem(
         N=args.n, Hi=args.h, Wi=args.w, C=args.c, K=args.k0,
-        R=3, S=3, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1,
+        Y=3, X=3, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1,
     )
     problem = FusedConvPoolProblem(conv=conv, conv1_k=args.k1)
     conv_tile_h = args.pool_tile_h * problem.pool_stride_h
@@ -138,7 +138,7 @@ def main() -> int:
         block_k=spec.tile_k,
         threads_per_block=spec.block_size,
         conv=[
-            conv.N, conv.Hi, conv.Wi, conv.C, conv.K, conv.R, conv.S,
+            conv.N, conv.Hi, conv.Wi, conv.C, conv.K, conv.Y, conv.X,
             conv.sH, conv.sW, conv.pH, conv.pW, conv.dH, conv.dW,
         ],
         groups=1,

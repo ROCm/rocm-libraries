@@ -35,7 +35,7 @@ In `ck_dsl`, many performance decisions are encoded in the spec and the helper c
 Concrete contract examples (all in `instances/`):
 
 - `UniversalGemmSpec` — GEMM tile, trait, data, layout, scheduler, epilogue.
-- `ConvProblem` — NHWC/KRSC/NHWK convolution geometry; derives `Ho`, `Wo`, `M_gemm`, `flops`.
+- `ConvProblem` — NHWC/KYXC/NHWK convolution geometry; derives `Ho`, `Wo`, `M_gemm`, `flops`.
 - `UnifiedAttentionProblem` — paged-attention shape; selectors choose 2D vs 3D.
 - `Reduce2DSpec`, `LayerNorm2DSpec`, `RMSNorm2DSpec`, `ElementwiseSpec` — small-op contracts.
 
@@ -150,7 +150,7 @@ distributed register tiles  -> TileDistributionEncoding + StaticDistributedTenso
 
 The transform DAG is essential for:
 
-- convolution `(m, k) -> NHWC` and `(k_out, k_gemm) -> KRSC`;
+- convolution `(m, k) -> NHWC` and `(k_out, k_gemm) -> KYXC`;
 - output `(m, k_out) -> NHWK`;
 - paged-KV attention table lookup (`indirect`);
 - dynamic attention bounds / masks (`pad_dynamic`).

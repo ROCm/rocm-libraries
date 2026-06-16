@@ -368,7 +368,7 @@ import tempfile
 
 # Problem definition
 problem = ConvProblem(
-    N=16, Hi=56, Wi=56, C=512, K=512, R=3, S=3,
+    N=16, Hi=56, Wi=56, C=512, K=512, Y=3, X=3,
     sH=1, sW=1, pH=1, pW=1, dH=1, dW=1
 )
 

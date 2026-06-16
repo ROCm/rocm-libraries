@@ -1,13 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Implicit-GEMM convolution kernel instance (NHWC × KRSC -> NHWK).
+"""Implicit-GEMM convolution kernel instance (NHWC × KYXC -> NHWK).
 
 This is the standard implicit-GEMM convolution problem authored entirely
 through the ck_dsl IR + coordinate-transform DAG. It mirrors how CK
 Tile expresses convolution (`tensor_descriptor` with
 `unmerge_transform` for `(m -> n, ho, wo)`, `embed_transform` for
-`(ho, r -> hi)`, and `pad_transform` for boundary checks), and the
+`(ho, y -> hi)`, and `pad_transform` for boundary checks), and the
 GEMM body is the same compv4-style pipeline we use for square GEMM
 in `gemm_universal.py`. The only kernel-authoring change vs GEMM is
 how the A tile's address is computed.
@@ -16,7 +16,7 @@ Authoring style (this is what the kernel writer types):
 
     spec = ImplicitGemmConvSpec(
         problem=ConvProblem(N=8, Hi=56, Wi=56, C=64,
-                            K=64, R=3, S=3,
+                            K=64, Y=3, X=3,
                             sH=1, sW=1, pH=1, pW=1, dH=1, dW=1),
         tile_m=64, tile_n=64, tile_k=64,
         warp_m=2, warp_n=2,
@@ -29,23 +29,23 @@ Internally, A's per-element address is computed via a transform DAG:
     A_desc = TensorDescriptor.naive('A', [N, Hi, Wi, C], coord_names=
         ['n', 'hi', 'wi', 'c'])
         .transform(unmerge('m', into=['n','ho','wo'], dims=[N,Ho,Wo]))
-        .transform(embed(['ho','r'], 'hi', strides=(sH,dH), offset=-pH,
+        .transform(embed(['ho','y'], 'hi', strides=(sH,dH), offset=-pH,
                           lo=0, hi=Hi))
-        .transform(embed(['wo','s'], 'wi', strides=(sW,dW), offset=-pW,
+        .transform(embed(['wo','x'], 'wi', strides=(sW,dW), offset=-pW,
                           lo=0, hi=Wi))
-        .transform(unmerge('k', into=['r','s','c'], dims=[R,S,C]))
+        .transform(unmerge('k', into=['y','x','c'], dims=[Y,X,C]))
 
 At every per-thread A-tile load we call `A_desc.offset(b, m=m_val,
 k=k_val)` which emits the bounds-checked NHWC offset for that
 implicit-GEMM (m, k) point — the same SSA dataflow a hand-written
 implicit-GEMM kernel would compute.
 
-B (KRSC weight) and D (NHWK output) use naive descriptors with extra
+B (KYXC weight) and D (NHWK output) use naive descriptors with extra
 `unmerge` transforms for the output store (so the epilogue can write
 NHWK from MFMA's (m_in_tile, n_in_tile) layout).
 
 Target: CK Tile's `cktile_fixed_lean` reference for this shape
-(`N=8, Hi=Wi=56, C=K=64, R=S=3`) reaches ~250 TFLOPS in CUDA-graph
+(`N=8, Hi=Wi=56, C=K=64, Y=X=3`) reaches ~250 TFLOPS in CUDA-graph
 mode. We aim to beat that on the same shape.
 """
 
@@ -102,7 +102,7 @@ class ConvDataSpec:
 
     Layouts:
       A: NHWC, dtype_a (input activations)
-      B: KRSC, dtype_b (weights)
+      B: KYXC, dtype_b (weights)
       D: NHWK, dtype_d (output)
       accumulator: dtype_acc (always fp32)
     """
@@ -115,44 +115,73 @@ class ConvDataSpec:
 
 @dataclass(frozen=True)
 class ConvProblem:
-    """The convolution shape parameters.
+    """2-D or 3-D convolution shape parameters.
 
-    Layouts:
-      A: NHWC fp16, shape `[N, Hi, Wi, C]`
-      B: KRSC fp16, shape `[K, R, S, C]`
-      D: NHWK fp16, shape `[N, Ho, Wo, K]`
+    2-D (default — ``Di`` / ``Z`` are ``None``):
+      A: NHWC,  shape ``[N, Hi, Wi, C]``
+      B: KYXC, shape ``[K, Y, X, C]``
+      D: NHWK,  shape ``[N, Ho, Wo, K]``
+      M = N*Ho*Wo,  N_gemm = K,  K_gemm = Y*X*C
 
-    Implicit-GEMM packing:
-      M = N * Ho * Wo
-      N_gemm = K
-      K_gemm = R * S * C
+     3-D (set ``Di`` and ``Z``):
+       A: NDHWC, shape ``[N, Di, Hi, Wi, C]``
+       B: KZYXC, shape ``[K, Z, Y, X, C]``
+       D: NDHWK, shape ``[N, Do, Ho, Wo, K]``
+       M = N*Do*Ho*Wo,  N_gemm = K,  K_gemm = Z*Y*X*C
     """
 
-    N: int
+    N:  int
     Hi: int
     Wi: int
-    C: int
-    K: int
-    R: int
-    S: int
+    C:  int
+    K:  int
+    Y:  int
+    X:  int
     sH: int = 1
     sW: int = 1
     pH: int = 0
     pW: int = 0
     dH: int = 1
     dW: int = 1
+    # 3-D-only fields; leave as None for 2-D convolutions.
+    Di: Optional[int] = None
+    Z:  Optional[int] = None
+    sD: Optional[int] = None
+    pD: Optional[int] = None
+    dD: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        depth = (self.Di, self.Z, self.sD, self.pD, self.dD)
+        any_set = any(v is not None for v in depth)
+        all_set = all(v is not None for v in depth)
+        if any_set and not all_set:
+            raise ValueError(
+                "3-D ConvProblem requires Di, Z, sD, pD, dD (set all or leave all as None)"
+            )
+
+    @property
+    def is_3d(self) -> bool:
+        return self.Di is not None
+
+    # ---- depth spatial output (3-D only) ----
+    @property
+    def Do(self) -> Optional[int]:
+        if not self.is_3d:
+            return None
+        return (self.Di + 2 * self.pD - self.dD * (self.Z - 1) - 1) // self.sD + 1
 
     @property
     def Ho(self) -> int:
-        return (self.Hi + 2 * self.pH - self.dH * (self.R - 1) - 1) // self.sH + 1
+        return (self.Hi + 2 * self.pH - self.dH * (self.Y - 1) - 1) // self.sH + 1
 
     @property
     def Wo(self) -> int:
-        return (self.Wi + 2 * self.pW - self.dW * (self.S - 1) - 1) // self.sW + 1
+        return (self.Wi + 2 * self.pW - self.dW * (self.X - 1) - 1) // self.sW + 1
 
     @property
     def M(self) -> int:
-        return self.N * self.Ho * self.Wo
+        base = self.N * self.Ho * self.Wo
+        return base * self.Do if self.is_3d else base
 
     @property
     def N_gemm(self) -> int:
@@ -160,14 +189,20 @@ class ConvProblem:
 
     @property
     def K_gemm(self) -> int:
-        return self.R * self.S * self.C
+        z = self.Z if self.is_3d else 1
+        return z * self.Y * self.X * self.C
 
     @property
     def flops(self) -> int:
         return 2 * self.M * self.N_gemm * self.K_gemm
 
     def short(self) -> str:
-        return f"N{self.N}H{self.Hi}W{self.Wi}C{self.C}_K{self.K}R{self.R}S{self.S}"
+        if self.is_3d:
+            return (
+                f"N{self.N}D{self.Di}H{self.Hi}W{self.Wi}C{self.C}"
+                f"_K{self.K}Z{self.Z}Y{self.Y}X{self.X}"
+            )
+        return f"N{self.N}H{self.Hi}W{self.Wi}C{self.C}_K{self.K}Y{self.Y}X{self.X}"
 
 
 @dataclass(frozen=True)
@@ -541,18 +576,27 @@ def _resolve_conv_op(spec: ImplicitGemmConvSpec, arch: str):
 def make_a_descriptor(
     p: ConvProblem, decompose_m: bool = True, dtype: str = "fp16"
 ) -> TensorDescriptor:
-    """Build the (m, k) -> NHWC linear-offset descriptor for the input.
+    """Build the (m, k) -> N[D]HWC linear-offset descriptor for the input.
 
-    DAG:
+    2-D DAG  (``p.is_3d`` is False):
       naive(NHWC):                       (n, hi, wi, c)
       + unmerge('m' -> n, ho, wo):       (hi, wi, c, m, ho, wo) intermediate
-      + embed((ho, r) -> hi):            (wi, c, m, r, wo)      intermediate
-      + embed((wo, s) -> wi):            (c, m, r, s)           intermediate
-      + unmerge('k' -> r, s, c):         (m, k)                 user-facing
-      + pad('r' lo=0 hi=R):              boundary check
-      + pad('s' lo=0 hi=S):              boundary check
+      + embed((ho, y) -> hi):            (wi, c, m, y, wo)      intermediate
+      + embed((wo, x) -> wi):            (c, m, y, x)           intermediate
+      + unmerge('k' -> y, x, c):         (m, k)                 user-facing
+      + pad('y' lo=0 hi=Y):              boundary check
+      + pad('x' lo=0 hi=X):              boundary check
 
-    When ``decompose_m`` is ``False`` the leading ``unmerge('m' -> n, ho, wo)``
+    3-D DAG  (``p.is_3d`` is True):
+      naive(NDHWC):                      (n, di, hi, wi, c)
+      + unmerge('m' -> n, do, ho, wo)
+      + embed((do, z) -> di)
+      + embed((ho, y) -> hi)
+      + embed((wo, x) -> wi)
+      + unmerge('k' -> z, y, x, c)
+      + pad('z'), pad('y'), pad('x')
+
+    When ``decompose_m`` is ``False`` the leading ``unmerge('m' -> ...)``
     is dropped and the user-facing upper coords become ``(n, ho, wo, k)``
     directly. This is a strict win for callers that already hold ``(ho, wo)``
     cheaply (e.g. computed via shift/mask from the tile row): the default
@@ -561,98 +605,128 @@ def make_a_descriptor(
     ``(n, ho, wo)`` straight in produces a bit-identical offset while skipping
     both the caller-side flatten and the descriptor-side magic unmerge.
 
-    The two `embed` transforms encode the convolution affine map
-    `hi = ho*sH - pH + r*dH` and `wi = wo*sW - pW + s*dW`, with the
-    convolution boundary check baked into the descriptor's validity
-    predicate. The two `pad` transforms add per-coord bound checks on
-    `r` and `s`: when `K_gemm` is not divisible by the block tile_k,
-    the K-loop loads past `K_gemm-1` and the unmerge produces `r >= R`
-    or `s >= S`. Without these `pad` transforms the kernel would read
-    valid-looking offsets that *cross* into adjacent KRSC rows and
-    blend wrong weights into the accumulator.
+    The ``embed`` transforms encode the convolution affine maps
+    ``hi = ho*sH - pH + y*dH`` and ``wi = wo*sW - pW + x*dW``, with the
+    convolution boundary check baked into the descriptor's validity predicate.
+    The ``pad`` transforms add per-coord bound checks on ``y`` and ``x``: when
+    ``K_gemm`` is not divisible by the block ``tile_k``, the K-loop loads past
+    ``K_gemm-1`` and the unmerge produces ``y >= Y`` or ``x >= X``. Without
+    these ``pad`` transforms the kernel would read valid-looking offsets that
+    *cross* into adjacent weight rows and blend wrong weights into the
+    accumulator.
     """
     transforms = []
-    if decompose_m:
-        transforms.append(
-            unmerge_magic(upper="m", into=["n", "ho", "wo"], dims=[p.N, p.Ho, p.Wo])
-        )
-    transforms += [
-        embed(
-            upper=["ho", "r"],
-            into="hi",
-            strides=[p.sH, p.dH],
-            offset=-p.pH,
-            lo=0,
-            hi=p.Hi,
-        ),
-        embed(
-            upper=["wo", "s"],
-            into="wi",
-            strides=[p.sW, p.dW],
-            offset=-p.pW,
-            lo=0,
-            hi=p.Wi,
-        ),
-        unmerge_magic(upper="k", into=["r", "s", "c"], dims=[p.R, p.S, p.C]),
-    ]
-    # Only add r/s pads if K_gemm doesn't cleanly divide expected tile_k
-    # multiples; today we always include them for safety. They are cheap
-    # and they protect against the partial-K-tile failure mode.
-    transforms += [
-        pad("r", lo=0, hi=p.R),
-        pad("s", lo=0, hi=p.S),
-    ]
-    return TensorDescriptor.naive(
-        "A_nhwc",
-        lengths=[p.N, p.Hi, p.Wi, p.C],
-        dtype=_ir_dtype(dtype),
-        coord_names=["n", "hi", "wi", "c"],
-    ).transform(*transforms)
+    if p.is_3d:
+        if decompose_m:
+            transforms.append(
+                unmerge_magic("m", into=["n", "do", "ho", "wo"], dims=[p.N, p.Do, p.Ho, p.Wo])
+            )
+        transforms += [
+            embed(upper=["do", "z"], into="di", strides=[p.sD, p.dD], offset=-p.pD, lo=0, hi=p.Di),
+            embed(upper=["ho", "y"], into="hi", strides=[p.sH, p.dH], offset=-p.pH, lo=0, hi=p.Hi),
+            embed(upper=["wo", "x"], into="wi", strides=[p.sW, p.dW], offset=-p.pW, lo=0, hi=p.Wi),
+            unmerge_magic("k", into=["z", "y", "x", "c"], dims=[p.Z, p.Y, p.X, p.C]),
+            pad("z", lo=0, hi=p.Z),
+            pad("y", lo=0, hi=p.Y),
+            pad("x", lo=0, hi=p.X),
+        ]
+        return TensorDescriptor.naive(
+            "A_ndhwc",
+            lengths=[p.N, p.Di, p.Hi, p.Wi, p.C],
+            dtype=_ir_dtype(dtype),
+            coord_names=["n", "di", "hi", "wi", "c"],
+        ).transform(*transforms)
+    else:
+        if decompose_m:
+            transforms.append(
+                unmerge_magic(upper="m", into=["n", "ho", "wo"], dims=[p.N, p.Ho, p.Wo])
+            )
+        transforms += [
+            embed(upper=["ho", "y"], into="hi", strides=[p.sH, p.dH], offset=-p.pH, lo=0, hi=p.Hi),
+            embed(upper=["wo", "x"], into="wi", strides=[p.sW, p.dW], offset=-p.pW, lo=0, hi=p.Wi),
+            unmerge_magic(upper="k", into=["y", "x", "c"], dims=[p.Y, p.X, p.C]),
+            # pad('y'/'x'): guard against partial K-tile overruns into adjacent weight rows.
+            pad("y", lo=0, hi=p.Y),
+            pad("x", lo=0, hi=p.X),
+        ]
+        return TensorDescriptor.naive(
+            "A_nhwc",
+            lengths=[p.N, p.Hi, p.Wi, p.C],
+            dtype=_ir_dtype(dtype),
+            coord_names=["n", "hi", "wi", "c"],
+        ).transform(*transforms)
 
 
 def make_b_descriptor(p: ConvProblem, dtype: str = "fp16") -> TensorDescriptor:
-    """Build the (n_gemm, k_gemm) -> KRSC linear-offset descriptor for the weight.
+    """Build the (n_gemm, k_gemm) -> K[Z]YXC linear-offset descriptor for the weight.
 
-    KRSC is a flat row-major `[K, R, S, C]` layout, and the implicit-GEMM
-    treats `n_gemm = k_out` and `k_gemm = r*S*C + s*C + c`. So the
-    descriptor is just a renaming:
-      naive(KRSC):              (k_out, r, s, c)
-      + unmerge('k_gemm'
-         -> (r, s, c))
-      + pad('r' lo=0 hi=R):     boundary check for partial K-tile
-      + pad('s' lo=0 hi=S):     boundary check for partial K-tile
+    KYXC (2-D) / KZYXC (3-D) is a flat row-major layout, and the
+    implicit-GEMM treats ``n_gemm = k_out`` and
+    ``k_gemm = y*X*C + x*C + c`` (2-D) or ``k_gemm = z*Y*X*C + y*X*C + x*C + c`` (3-D).
+    The descriptor is a renaming + unmerge:
 
-    The user-facing coords are then (k_out, k_gemm). The two `pad`
-    transforms catch the `k_gemm >= K_gemm` case (when the K-loop's
-    last tile is partial): without them, the naive `k_out*RSC + r*SC
-    + s*C + c` computation produces an offset that's still
-    in-buffer-bounds (because B's total size is K*RSC) but indexes
-    into the NEXT k_out's weights, contaminating the load.
+      2-D:
+        naive(KYXC)  (k_out, y, x, c)
+        + unmerge('k_gemm' -> y, x, c)
+        + pad('y' lo=0 hi=Y)   boundary check for partial K-tile
+        + pad('x' lo=0 hi=X)   boundary check for partial K-tile
 
-    A consumes its B via MFMA at K=32 atoms, and A's load also has
-    `pad('r')` / `pad('s')`, so when A's mask is 0 for the partial
-    K-tile the MFMA contribution is 0 regardless of B. Padding B
-    here is defense-in-depth so a future A-load change doesn't
-    silently regress.
+      3-D:
+        naive(KZYXC)  (k_out, z, y, x, c)
+        + unmerge('k_gemm' -> z, y, x, c)
+        + pad('z'), pad('y'), pad('x')
+
+    The ``pad`` transforms catch the ``k_gemm >= K_gemm`` case (when the
+    K-loop's last tile is partial): without them, the naive offset computation
+    produces a value that's still in-buffer-bounds but indexes into the *next*
+    ``k_out``'s weights, contaminating the accumulator.
+
+    A also has ``pad('y')`` / ``pad('x')``, so when A's mask is 0 for the
+    partial K-tile the MFMA contribution is 0 regardless of B. Padding B here
+    is defense-in-depth so a future A-load change doesn't silently regress.
     """
+    if p.is_3d:
+        return TensorDescriptor.naive(
+            "B_kzyxc",
+            lengths=[p.K, p.Z, p.Y, p.X, p.C],
+            dtype=_ir_dtype(dtype),
+            coord_names=["k_out", "z", "y", "x", "c"],
+        ).transform(
+            unmerge_magic("k_gemm", into=["z", "y", "x", "c"], dims=[p.Z, p.Y, p.X, p.C]),
+            pad("z", lo=0, hi=p.Z),
+            pad("y", lo=0, hi=p.Y),
+            pad("x", lo=0, hi=p.X),
+        )
     return TensorDescriptor.naive(
-        "B_krsc",
-        lengths=[p.K, p.R, p.S, p.C],
+        "B_kyxc",
+        lengths=[p.K, p.Y, p.X, p.C],
         dtype=_ir_dtype(dtype),
-        coord_names=["k_out", "r", "s", "c"],
+        coord_names=["k_out", "y", "x", "c"],
     ).transform(
-        unmerge_magic(upper="k_gemm", into=["r", "s", "c"], dims=[p.R, p.S, p.C]),
-        pad("r", lo=0, hi=p.R),
-        pad("s", lo=0, hi=p.S),
+        unmerge_magic(upper="k_gemm", into=["y", "x", "c"], dims=[p.Y, p.X, p.C]),
+        pad("y", lo=0, hi=p.Y),
+        pad("x", lo=0, hi=p.X),
     )
 
 
 def make_d_descriptor(p: ConvProblem, dtype: str = "fp16") -> TensorDescriptor:
-    """Build the (m, k_out) -> NHWK linear-offset descriptor for the output.
+    """Build the (m, k_out) -> N[D]HWK linear-offset descriptor for the output.
 
-    naive(NHWK): (n, ho, wo, k_out)
-    + unmerge('m' -> (n, ho, wo)): user-facing = (m, k_out)
+    2-D:  naive(NHWK):  (n, ho, wo, k_out)
+          + unmerge('m' -> n, ho, wo):  user-facing = (m, k_out)
+
+    3-D:  naive(NDHWK): (n, do, ho, wo, k_out)
+          + unmerge('m' -> n, do, ho, wo): user-facing = (m, k_out)
     """
+    if p.is_3d:
+        return TensorDescriptor.naive(
+            "D_ndhwk",
+            lengths=[p.N, p.Do, p.Ho, p.Wo, p.K],
+            dtype=_ir_dtype(dtype),
+            coord_names=["n", "do", "ho", "wo", "k_out"],
+        ).transform(
+            unmerge_magic("m", into=["n", "do", "ho", "wo"], dims=[p.N, p.Do, p.Ho, p.Wo]),
+        )
     return TensorDescriptor.naive(
         "D_nhwk",
         lengths=[p.N, p.Ho, p.Wo, p.K],
@@ -824,7 +898,7 @@ def build_implicit_gemm_conv(
     Shape:
         M = N * Ho * Wo,
         N_gemm = K,
-        K_gemm = R * S * C.
+        K_gemm = Y * X * C.
     Block tile: tile_m x tile_n x tile_k MFMA atoms at warp_tile_m x
         warp_tile_n x warp_tile_k.
     Pipeline: single-buffer LDS, sync barriers, direct vector global
@@ -992,7 +1066,7 @@ def build_implicit_gemm_conv(
     # ``load()`` invocation, which the AMDGPU backend constant-folds.
 
     # The two descriptors used for global loads. The A descriptor is
-    # the conv-coord-transform DAG; B is a simple naive (KRSC) +
+    # the conv-coord-transform DAG; B is a simple naive (KYXC) +
     # unmerge for K_gemm.
     A_desc = make_a_descriptor(p, decompose_m=(a_mhw_index_fn is None), dtype=spec.data.dtype_a)
     B_desc = make_b_descriptor(p, dtype=spec.data.dtype_b)
@@ -1104,13 +1178,13 @@ def build_implicit_gemm_conv(
             m = block_m_off + a_row
             k = k_off + a_col
         and the A descriptor turns (m, k) -> NHWC linear offset with
-        the convolution bounds check (pad on r/s, embed for hi/wi).
+        the convolution bounds check (pad on y/x, embed for hi/wi).
         The buffer rsrc is created with flag 0x00027000 which encodes
         proper bounds checking; OOB byte offsets silently return 0
         (the runbook §6.1 lever for tail-safe loads).
 
-        For B: same (b_row, b_col) -> (k_out, k_gemm) -> KRSC linear
-        offset, also bounds-checked via the pad on r/s (catches the
+        For B: same (b_row, b_col) -> (k_out, k_gemm) -> KYXC linear
+        offset, also bounds-checked via the pad on y/x (catches the
         partial-last-tile case).
 
         `spec.async_dma=True` switches the load path to

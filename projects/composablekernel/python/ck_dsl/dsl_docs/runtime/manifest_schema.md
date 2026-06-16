@@ -63,7 +63,7 @@ Emitted by `make_conv_manifest(...)`:
 {
   "conv_layout": "implicit_gemm",
   "block_m": 64, "block_n": 64, "block_k": 64,
-  "conv": [N, H, W, C, K, R, S, sH, sW, pH, pW, dH, dW],
+  "conv": [N, H, W, C, K, Y, X, sH, sW, pH, pW, dH, dW],
   "groups": 1, "cpg": 64, "kpg": 64,
   "grid_explicit": [gx, gy, gz]   // optional
 }
