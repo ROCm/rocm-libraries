@@ -783,13 +783,8 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["ProblemType"]["Sparse"]:
         module.add(self.defineSgpr("WrapUMetadata", 2, wrapAlignment))  # Bytes to add to SrdMetadata to reset address from N-1 iter to AddressMetadata
 
-      if not (kernel["enableTDMA"] or kernel["enableTDMB"]):
-        self.addSgprVarToPool("WrapUA")
-        self.addSgprVarToPool("WrapUB")
-        if kernel["ProblemType"]["MXBlockA"]:
-          self.addSgprVarToPool("WrapUMXSA")
-        if kernel["ProblemType"]["MXBlockB"]:
-          self.addSgprVarToPool("WrapUMXSB")
+      self.addSgprVarToPool("WrapUA")
+      self.addSgprVarToPool("WrapUB")
 
     if self.states.a.numSgprGlobalReadIncs > 0:
       module.add(self.defineSgpr("GlobalReadIncsA", self.states.a.numSgprGlobalReadIncs))
