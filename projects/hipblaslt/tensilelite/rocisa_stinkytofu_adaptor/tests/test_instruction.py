@@ -192,6 +192,36 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     VSubI32,
     VSubU32,
     VXorB32,
+    SAbsI32,
+    SMaxI32,
+    SMaxU32,
+    SMinI32,
+    SMinU32,
+    VExpF16,
+    VExpF32,
+    VRcpF16,
+    VRcpF32,
+    VRcpIFlagF32,
+    VRsqF16,
+    VRsqF32,
+    VRsqIFlagF32,
+    VMaxF16,
+    VMaxF32,
+    VMaxF64,
+    VMaxI32,
+    VMaxPKF16,
+    VMinF16,
+    VMinF32,
+    VMinF64,
+    VMinI32,
+    VMed3I32,
+    VMed3F32,
+    VNotB32,
+    VPrngB32,
+    VRndneF32,
+    VAShiftRightI32,
+    VPackF16toB32,
+    VLShiftLeftOrB32,
     _to_stinky_register,
 )
 
@@ -1562,6 +1592,265 @@ class TestVectorCmpXConstruction(unittest.TestCase):
                 m = Module()
                 m.add(cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
                 self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+# ===========================================================================
+# Step 6: Scalar Min/Max/Abs + Vector Unary/Misc tests
+# ===========================================================================
+
+_SCALAR_MINMAX = [
+    (SAbsI32, "s_abs_i32", InstType.INST_I32),
+    (SMaxI32, "s_max_i32", InstType.INST_I32),
+    (SMaxU32, "s_max_u32", InstType.INST_U32),
+    (SMinI32, "s_min_i32", InstType.INST_I32),
+    (SMinU32, "s_min_u32", InstType.INST_U32),
+]
+
+_VECTOR_UNARY = [
+    (VExpF16, "v_exp_f16", InstType.INST_F16),
+    (VExpF32, "v_exp_f32", InstType.INST_F32),
+    (VRcpF16, "v_rcp_f16", InstType.INST_F16),
+    (VRcpF32, "v_rcp_f32", InstType.INST_F32),
+    (VRcpIFlagF32, "v_rcp_iflag_f32", InstType.INST_F32),
+    (VRsqF16, "v_rsq_f16", InstType.INST_F16),
+    (VRsqF32, "v_rsq_f32", InstType.INST_F32),
+    (VRsqIFlagF32, "v_rsq_iflag_f32", InstType.INST_F32),
+    (VNotB32, "v_not_b32", InstType.INST_B32),
+    (VPrngB32, "v_prng_b32", InstType.INST_B32),
+    (VRndneF32, "v_rndne_f32", InstType.INST_F32),
+]
+
+_VECTOR_MINMAX = [
+    (VMaxF16, "v_max_f16", InstType.INST_F16),
+    (VMaxF32, "v_max_f32", InstType.INST_F32),
+    (VMaxF64, "v_max_f64", InstType.INST_F64),
+    (VMaxI32, "v_max_i32", InstType.INST_I32),
+    (VMaxPKF16, "v_pk_max_f16", InstType.INST_F16),
+    (VMinF16, "v_min_f16", InstType.INST_F16),
+    (VMinF32, "v_min_f32", InstType.INST_F32),
+    (VMinF64, "v_min_f64", InstType.INST_F64),
+    (VMinI32, "v_min_i32", InstType.INST_I32),
+    (VPackF16toB32, "v_pack_b32_f16", InstType.INST_B32),
+]
+
+_VECTOR_TERNARY_MISC = [
+    (VMed3I32, "v_med3_i32", InstType.INST_I32),
+    (VMed3F32, "v_med3_f32", InstType.INST_F32),
+    (VLShiftLeftOrB32, "v_lshl_or_b32", InstType.INST_B32),
+]
+
+
+class TestScalarMinMaxAbsConstruction(unittest.TestCase):
+    """SAbsI32 (unary), SMaxI32/SMaxU32/SMinI32/SMinU32 (binary)."""
+
+    def test_sabsi32_construction(self):
+        inst = SAbsI32(dst=sgpr(0), src=sgpr(1), comment="abs")
+        self.assertIsInstance(inst, CommonInstruction)
+        self.assertEqual(inst.instStr, "s_abs_i32")
+        self.assertEqual(inst.instType, InstType.INST_I32)
+        self.assertEqual(len(inst.srcs), 1)
+        text = str(inst)
+        self.assertIn("s_abs_i32", text)
+        self.assertIn("s0", text)
+        self.assertIn("s1", text)
+
+    def test_binary_construction(self):
+        for cls, mnemonic, itype in _SCALAR_MINMAX[1:]:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2), comment="mm")
+                self.assertIsInstance(inst, CommonInstruction)
+                self.assertEqual(inst.instStr, mnemonic)
+                self.assertEqual(inst.instType, itype)
+                self.assertEqual(len(inst.srcs), 2)
+                text = str(inst)
+                self.assertIn(mnemonic, text)
+                self.assertIn("s0", text)
+                self.assertIn("s1", text)
+                self.assertIn("s2", text)
+
+    def test_deepcopy(self):
+        inst = SAbsI32(dst=sgpr(0), src=sgpr(1))
+        c = copy.deepcopy(inst)
+        self.assertIsInstance(c, type(inst))
+        self.assertEqual(str(c), str(inst))
+        for cls, _, _ in _SCALAR_MINMAX[1:]:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2))
+                c = copy.deepcopy(inst)
+                self.assertIsInstance(c, cls)
+                self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        for cls, _, _ in _SCALAR_MINMAX:
+            with self.subTest(cls=cls.__name__):
+                if cls == SAbsI32:
+                    inst = cls(dst=sgpr(0), src=sgpr(1))
+                else:
+                    inst = cls(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2))
+                self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        for cls, _, _ in _SCALAR_MINMAX:
+            with self.subTest(cls=cls.__name__):
+                m = Module()
+                if cls == SAbsI32:
+                    m.add(cls(dst=sgpr(0), src=sgpr(1)))
+                else:
+                    m.add(cls(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2)))
+                self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestVectorUnaryConstruction(unittest.TestCase):
+    """Vector unary shims (dst, src)."""
+
+    def test_construction_and_str(self):
+        for cls, mnemonic, itype in _VECTOR_UNARY:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src=vgpr(1), comment="vu")
+                self.assertIsInstance(inst, CommonInstruction)
+                self.assertEqual(inst.instStr, mnemonic)
+                self.assertEqual(inst.instType, itype)
+                self.assertEqual(len(inst.srcs), 1)
+                text = str(inst)
+                self.assertIn(mnemonic, text)
+                self.assertIn("v0", text)
+                self.assertIn("v1", text)
+
+    def test_deepcopy(self):
+        for cls, _, _ in _VECTOR_UNARY:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(4), src=vgpr(5))
+                c = copy.deepcopy(inst)
+                self.assertIsInstance(c, cls)
+                self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        for cls, _, _ in _VECTOR_UNARY:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src=vgpr(1))
+                self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        for cls, _, _ in _VECTOR_UNARY:
+            with self.subTest(cls=cls.__name__):
+                m = Module()
+                m.add(cls(dst=vgpr(0), src=vgpr(1)))
+                self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestVectorMinMaxConstruction(unittest.TestCase):
+    """Vector min/max binary shims (dst, src0, src1)."""
+
+    def test_construction_and_str(self):
+        for cls, mnemonic, itype in _VECTOR_MINMAX:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2), comment="vmm")
+                self.assertIsInstance(inst, CommonInstruction)
+                self.assertEqual(inst.instStr, mnemonic)
+                self.assertEqual(inst.instType, itype)
+                self.assertEqual(len(inst.srcs), 2)
+                text = str(inst)
+                self.assertIn(mnemonic, text)
+                self.assertIn("v0", text)
+                self.assertIn("v1", text)
+                self.assertIn("v2", text)
+
+    def test_deepcopy(self):
+        for cls, _, _ in _VECTOR_MINMAX:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2))
+                c = copy.deepcopy(inst)
+                self.assertIsInstance(c, cls)
+                self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        for cls, _, _ in _VECTOR_MINMAX:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2))
+                self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        for cls, _, _ in _VECTOR_MINMAX:
+            with self.subTest(cls=cls.__name__):
+                m = Module()
+                m.add(cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
+                self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestVectorTernaryMiscConstruction(unittest.TestCase):
+    """VMed3I32, VMed3F32, VLShiftLeftOrB32 (dst, src0, src1, src2)."""
+
+    def test_construction_and_str(self):
+        for cls, mnemonic, itype in _VECTOR_TERNARY_MISC:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2),
+                           src2=vgpr(3), comment="vtern")
+                self.assertIsInstance(inst, CommonInstruction)
+                self.assertEqual(inst.instStr, mnemonic)
+                self.assertEqual(inst.instType, itype)
+                self.assertEqual(len(inst.srcs), 3)
+                text = str(inst)
+                self.assertIn(mnemonic, text)
+                self.assertIn("v0", text)
+                self.assertIn("v1", text)
+                self.assertIn("v2", text)
+                self.assertIn("v3", text)
+
+    def test_deepcopy(self):
+        for cls, _, _ in _VECTOR_TERNARY_MISC:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2), src2=vgpr(3))
+                c = copy.deepcopy(inst)
+                self.assertIsInstance(c, cls)
+                self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        for cls, _, _ in _VECTOR_TERNARY_MISC:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2), src2=vgpr(3))
+                self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        for cls, _, _ in _VECTOR_TERNARY_MISC:
+            with self.subTest(cls=cls.__name__):
+                m = Module()
+                m.add(cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2), src2=vgpr(3)))
+                self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestVAShiftRightI32Construction(unittest.TestCase):
+    """VAShiftRightI32 — vector shift (dst, shiftHex, src)."""
+
+    def test_construction_and_str(self):
+        inst = VAShiftRightI32(dst=vgpr(0), shiftHex=vgpr(1), src=vgpr(2),
+                               comment="ashr")
+        self.assertIsInstance(inst, CommonInstruction)
+        self.assertEqual(inst.instStr, "v_ashrrev_i32")
+        self.assertEqual(inst.instType, InstType.INST_I32)
+        self.assertEqual(len(inst.srcs), 2)
+        text = str(inst)
+        self.assertIn("v_ashrrev_i32", text)
+        self.assertIn("v0", text)
+
+    def test_deepcopy(self):
+        inst = VAShiftRightI32(dst=vgpr(0), shiftHex=vgpr(1), src=vgpr(2))
+        c = copy.deepcopy(inst)
+        self.assertIsInstance(c, type(inst))
+        self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        inst = VAShiftRightI32(dst=vgpr(0), shiftHex=vgpr(1), src=vgpr(2))
+        self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        m = Module()
+        m.add(VAShiftRightI32(dst=vgpr(0), shiftHex=vgpr(1), src=vgpr(2)))
+        self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
 # ===========================================================================

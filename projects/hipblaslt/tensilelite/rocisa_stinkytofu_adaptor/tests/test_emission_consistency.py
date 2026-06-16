@@ -1052,5 +1052,202 @@ class TestVCmpClassF32(unittest.TestCase, _ThreePathEqualityCase):
 ## forwards to the logical IR lowering which matches the hardware behaviour.
 
 
+# ===========================================================================
+# Step 6: Scalar Min/Max/Abs + Vector Unary/Misc
+# ===========================================================================
+
+
+class TestSAbsI32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_abs_i32 s0, s1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SAbsI32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SAbsI32(dst=sgpr(0), src=sgpr(1)))
+    """)
+
+
+class TestSMaxI32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_max_i32 s0, s1, s2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SMaxI32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SMaxI32(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2)))
+    """)
+
+
+class TestSMinU32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_min_u32 s0, s1, s2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SMinU32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SMinU32(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2)))
+    """)
+
+
+class TestVExpF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_exp_f32 v0, v1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VExpF32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VExpF32(dst=vgpr(0), src=vgpr(1)))
+    """)
+
+
+class TestVRcpF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_rcp_f32 v0, v1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VRcpF32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VRcpF32(dst=vgpr(0), src=vgpr(1)))
+    """)
+
+
+class TestVRsqF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_rsq_f32 v0, v1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VRsqF32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VRsqF32(dst=vgpr(0), src=vgpr(1)))
+    """)
+
+
+class TestVNotB32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_not_b32 v0, v1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VNotB32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VNotB32(dst=vgpr(0), src=vgpr(1)))
+    """)
+
+
+class TestVRndneF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_rndne_f32 v0, v1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VRndneF32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VRndneF32(dst=vgpr(0), src=vgpr(1)))
+    """)
+
+
+class TestVMaxF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_max_f32 v0, v1, v2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VMaxF32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VMaxF32(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
+    """)
+
+
+class TestVMinF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_min_f32 v0, v1, v2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VMinF32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VMinF32(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
+    """)
+
+
+class TestVMaxI32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_max_i32 v0, v1, v2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VMaxI32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VMaxI32(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
+    """)
+
+
+class TestVMed3I32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_med3_i32 v0, v1, v2, v3``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VMed3I32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VMed3I32(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2), src2=vgpr(3)))
+    """)
+
+
+class TestVMed3F32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_med3_f32 v0, v1, v2, v3``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VMed3F32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VMed3F32(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2), src2=vgpr(3)))
+    """)
+
+
+class TestVAShiftRightI32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_ashrrev_i32 v0, v1, v2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VAShiftRightI32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VAShiftRightI32(dst=vgpr(0), shiftHex=vgpr(1), src=vgpr(2)))
+    """)
+
+
+class TestVPackF16toB32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_pack_b32_f16 v0, v1, v2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VPackF16toB32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VPackF16toB32(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
+    """)
+
+
+## VLShiftLeftOrB32 emission consistency is skipped: the native rocisa class is a
+## CompositeInstruction that expands to two sub-instructions
+## ("v_lshlrev_b32 dst, shift, src" + "v_or_b32 dst, dst, src2"), while the
+## logical IR correctly emits the fused "v_lshl_or_b32 dst, shift, src, src2".
+## This is an intentional arch-level optimisation in the logical IR pipeline.
+
+
+## VPrngB32 emission consistency is skipped: "v_prng_b32" is only available
+## on architectures with hardware PRNG support. The instruction may not
+## assemble successfully in all test environments.
+
+
 if __name__ == "__main__":
     unittest.main()
