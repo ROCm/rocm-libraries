@@ -9,6 +9,13 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, FrozenSet, List, Optional
 
+from ..config.benchmark_config import (
+    EXECUTION_BACKEND_CHOICES,
+    ExecutionBackendName,
+    REFERENCE_PROVIDER_CHOICES,
+    ReferenceProviderName,
+)
+
 
 class ConfigKind(str, Enum):
     """Config-file value normalization strategies."""
@@ -94,8 +101,8 @@ def _parse_plugin_path_list(s: str) -> List[Path]:
     return [Path(p) for p in parts]
 
 
-_BACKEND_CHOICES = frozenset({"hipdnn", "pytorch"})
-_VALIDATE_CHOICES = frozenset({"pytorch", "cpu_plugin", "none"})
+_BACKEND_CHOICES = EXECUTION_BACKEND_CHOICES
+_REFERENCE_PROVIDER_HELP = ", ".join(sorted(REFERENCE_PROVIDER_CHOICES))
 _METRICS_TIER_CHOICES = frozenset({"basic", "off"})
 _EMIT_TRACE_CHOICES = frozenset({"pftrace", "kineto"})
 _PMC_CHOICES = frozenset({"basic", "memory", "flops", "all"})
@@ -166,7 +173,7 @@ CLI_OPTIONS: tuple[CliOption, ...] = (
         dest="backend",
         parser_type=str,
         choices=_BACKEND_CHOICES,
-        default="hipdnn",
+        default=ExecutionBackendName.HIPDNN.value,
         metavar="BACKEND",
         help="Execution backend (default: hipdnn). "
         "Options: hipdnn (AMD GPU via hipDNN), pytorch (GPU via PyTorch)",
@@ -200,36 +207,48 @@ CLI_OPTIONS: tuple[CliOption, ...] = (
         flags=("--rtol",),
         dest="rtol",
         parser_type=float,
-        default=1e-5,
+        default=None,
         metavar="TOL",
         group="Reference Comparison",
-        help="Relative tolerance for output comparison (default: 1e-5)",
+        help=(
+            "Relative tolerance for output comparison (default: dtype-aware; "
+            "if set without --atol, also used as absolute tolerance)"
+        ),
         config_key="rtol",
         config_kind=ConfigKind.SCALAR,
         config_type=float,
+        config_optional=True,
     ),
     CliOption(
         flags=("--atol",),
         dest="atol",
         parser_type=float,
-        default=1e-8,
+        default=None,
         metavar="TOL",
         group="Reference Comparison",
-        help="Absolute tolerance for output comparison (default: 1e-8)",
+        help=(
+            "Absolute tolerance for output comparison (default: dtype-aware; "
+            "if set without --rtol, also used as relative tolerance)"
+        ),
         config_key="atol",
         config_kind=ConfigKind.SCALAR,
         config_type=float,
+        config_optional=True,
     ),
     CliOption(
         flags=("--validate",),
         dest="validate",
         parser_type=str,
-        choices=_VALIDATE_CHOICES,
-        default="none",
+        choices=REFERENCE_PROVIDER_CHOICES,
+        default=ReferenceProviderName.NONE.value,
         metavar="PROVIDER",
         group="Reference Validation",
-        help="Reference provider for validation (default: none). "
-        "Options: pytorch, cpu_plugin, none",
+        help=(
+            "Reference provider for validation (default: none). "
+            f"Options: {_REFERENCE_PROVIDER_HELP}. "
+            "With pytorch, suite output includes a timed reference row when "
+            "PyTorch GPU execution is available."
+        ),
         config_key="validate",
         config_kind=ConfigKind.CHOICE,
         config_type=str,
@@ -243,7 +262,8 @@ CLI_OPTIONS: tuple[CliOption, ...] = (
         help=(
             "Directory containing hipDNN engine plugin .so files, or a "
             "comma-separated list matching --engine order. A single path is "
-            "shared by all selected engines."
+            "shared by all selected engines. If omitted, "
+            "ROCM_PATH/lib/hipdnn_plugins/engines is used when ROCM_PATH is set."
         ),
         config_key="plugin_path",
         config_kind=ConfigKind.PATH_OR_PATH_LIST,
@@ -459,6 +479,7 @@ PyTorch Backend (GPU via PyTorch):
 Reference Validation:
   dnn-benchmark -g ./graph.json --validate pytorch
   dnn-benchmark -g ./graph.json --validate pytorch --rtol 1e-3
+  dnn-benchmark -g ./graph.json --validate pytorch -v  # includes PyTorch reference row when available
 
 Engine Comparison:
   dnn-benchmark -g ./graph.json --engine 1,2,3

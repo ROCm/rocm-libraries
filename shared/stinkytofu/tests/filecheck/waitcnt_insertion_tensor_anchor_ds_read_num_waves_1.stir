@@ -1,0 +1,23 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=1 --StinkyWaitCntInsertionPass --print-output
+#
+# StinkyWaitCntInsertionPass (gfx1250): when NumWaves == 1, DS reads are tensor-wait
+# anchors. A pending tensor_load_to_lds with overlapping MemTokenData must drain
+# before the ds_read issues.
+#
+# IR (single block):
+#   tensor_load_to_lds   tokens=[0]
+#   ds_load_b64          tokens=[0]   (no consumer of v[0:1])
+#
+# CHECK-LABEL: @waitcnt_insertion_tensor_anchor_ds_read_num_waves_1
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 0
+# CHECK-NEXT: ds_load_b64
+# CHECK-SAME: tokens = [0]
+
+st.func @waitcnt_insertion_tensor_anchor_ds_read_num_waves_1() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+}

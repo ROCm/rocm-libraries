@@ -25,6 +25,7 @@ from rocisa.instruction import (
     SCBranchSCC1, SMovB32, VAddU32, VAndB32, VCmpGEI32, VCmpGTI32, VCmpLeI32,
     VCmpLtI32, VCndMaskB32, VLShiftLeftB32, VLShiftRightB32, VMovB32, VSubI32,
 )
+from rocisa.instruction import SWaitTensorcnt
 from rocisa.container import vgpr, sgpr, DSModifiers, ContinuousRegister
 from rocisa.code import Label
 
@@ -158,8 +159,9 @@ class InstructionEmitter:
                     subtileK = k // self.subtileShapeK
                     subIterK_within = k % self.subtileShapeK
                     dstTile = vgprTiles[tile_map[tileId]]
+                    swizzled = self.writer.states.subtileLdsSwizzle
                     module.add(emitSingleDsRead(
-                        ti, tileId, subtileK, subIterK_within, dstTile))
+                        ti, tileId, subtileK, subIterK_within, dstTile, swizzled=swizzled))
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             ti = self.tileInfoMap[tensor]
@@ -201,6 +203,11 @@ class InstructionEmitter:
         if counts is None:
             return []
         
+        if self.kernel.get("enableTDMA", False) and self.kernel.get("enableTDMB", False):
+            tdmCnt = counts.A + counts.B + counts.SA + counts.SB
+            return [SWaitTensorcnt(tensorcnt=tdmCnt,
+                                   comment=f"Wait TDM (tensor_load_to_lds): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")]
+
         # TODO. Hardcoded for now, but we should just get this from atomic emit codes (emitSingleBufferLoad, ...)
         grMap = {'A': max(1,int(1.0/self.tileInfoA.loadRatioGR)),
                  'B':  max(1,int(1.0/self.tileInfoB.loadRatioGR)),
@@ -262,7 +269,7 @@ class InstructionEmitter:
                 src0=sgpr("LoopCounterL"), src1=source.value,
                 comment=f"LoopCounter {source.compare} {source.value}?"))
         else:
-            with self.writer.allocTmpSgpr(1) as litSgprInfo:
+            with self.writer.allocTmpSgpr(1, tag="InstructionEmitter_skip_tmpSgpr") as litSgprInfo:
                 litSgpr = litSgprInfo.idx
                 module.add(SMovB32(
                     dst=sgpr(litSgpr), src=hex(source.value),
@@ -364,7 +371,7 @@ class InstructionEmitter:
                 writer.vgprPool.checkOut(1, f"tail_boundaryMask{i}")
                 for i in range(numBoundaryMasks)
             ]
-            with writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount) as tmpSgprInfo:
+            with writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount, tag="InstructionEmitter_mask_k_init_tmpSgpr") as tmpSgprInfo:
                 maskSgpr = tmpSgprInfo.idx
                 for i in range(numBoundaryMasks):
                     bm = self._tail_boundaryMask[i]
@@ -432,7 +439,7 @@ class InstructionEmitter:
         refIds = aIds or bIds
         vgprPerInUnroll = len(list(refTiles[refIds[0]])) if refIds else 0
 
-        with writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount) as tmpSgprInfo:
+        with writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount, tag="InstructionEmitter_mask_k_tmpSgpr") as tmpSgprInfo:
             maskSgpr = tmpSgprInfo.idx
 
             def _emit_cmp(cmpCls, literal, comment):
@@ -444,7 +451,7 @@ class InstructionEmitter:
                         src0=vgpr(self._tail_vDiff), src1=literal,
                         comment=comment))
                 else:
-                    with writer.allocTmpSgpr(1) as litSgprInfo:
+                    with writer.allocTmpSgpr(1, tag="InstructionEmitter_mask_k_litSgprInfo") as litSgprInfo:
                         litSgpr = litSgprInfo.idx
                         module.add(SMovB32(
                             dst=sgpr(litSgpr), src=hex(literal),
@@ -553,4 +560,3 @@ class InstructionEmitter:
                     handler = self._dispatch.get(em.opType)
                     if handler:
                         em.instructions = handler(em, unroll_iter)
-

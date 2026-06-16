@@ -23,6 +23,7 @@
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 
 #include <cassert>
+#include <cstdint>
 #include <iostream>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"

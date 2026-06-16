@@ -47610,7 +47610,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -47892,7 +47892,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -48700,7 +48700,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -50034,7 +50034,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -50316,7 +50316,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -50598,7 +50598,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -50880,7 +50880,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -51656,7 +51656,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 8, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -51938,7 +51938,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -52220,7 +52220,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -52502,7 +52502,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -52784,7 +52784,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -53066,7 +53066,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -53579,7 +53579,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 8, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -54124,7 +54124,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [64, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -54406,7 +54406,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [64, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -54688,7 +54688,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -54970,7 +54970,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -55493,7 +55493,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 8, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -55775,7 +55775,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -56057,7 +56057,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 8, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -56339,7 +56339,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -56884,7 +56884,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -57166,7 +57166,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 8, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -57448,7 +57448,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 8, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -57993,7 +57993,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -58275,7 +58275,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -58557,7 +58557,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -58839,7 +58839,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 8, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -59121,7 +59121,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -59403,7 +59403,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [64, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -59685,7 +59685,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -59967,7 +59967,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -60249,7 +60249,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -60531,7 +60531,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 8, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -60813,7 +60813,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -61095,7 +61095,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -61640,7 +61640,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [64, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -61922,7 +61922,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -62204,7 +62204,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -62486,7 +62486,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -62768,7 +62768,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -63050,7 +63050,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -63332,7 +63332,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -63877,7 +63877,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -64159,7 +64159,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -64704,7 +64704,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -64986,7 +64986,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -65531,7 +65531,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -65813,7 +65813,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -66336,7 +66336,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [64, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -66618,7 +66618,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 8, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -66900,7 +66900,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -67182,7 +67182,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -67464,7 +67464,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -67746,7 +67746,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -68291,7 +68291,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -68836,7 +68836,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [64, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -69118,7 +69118,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [64, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -69400,7 +69400,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -70208,7 +70208,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -71542,7 +71542,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -72087,7 +72087,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -72369,7 +72369,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -72651,7 +72651,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -72933,7 +72933,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -73215,7 +73215,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -73497,7 +73497,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -73779,7 +73779,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 8, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -74587,7 +74587,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -75395,7 +75395,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 8, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -75677,7 +75677,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 8, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -75959,7 +75959,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -76241,7 +76241,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -76523,7 +76523,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [64, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -77594,7 +77594,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 8, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -77876,7 +77876,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [64, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -78158,7 +78158,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -87613,7 +87613,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -87895,7 +87895,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [32, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -88440,7 +88440,7 @@
     WaveSplitK: false
     WavefrontSize: 32
     WorkGroup: [16, 8, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 5
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
