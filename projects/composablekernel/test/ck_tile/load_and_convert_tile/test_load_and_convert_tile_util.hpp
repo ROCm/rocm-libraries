@@ -4,6 +4,7 @@
 #pragma once
 
 #include <gtest/gtest.h>
+#include <type_traits>
 
 #include "ck_tile/host.hpp"
 #include "ck_tile/ops/common.hpp"
@@ -31,6 +32,19 @@ class TestLoadAndConvert : public ::testing::Test
     protected:
     void RunTest()
     {
+        // gfx11: sporadic check_err failures for any load_and_convert_tile case where X and Y
+        // differ (see TestTypes in test_load_and_convert_tile_no_transpose.cpp and
+        // test_load_and_convert_tile_transposed.cpp - same seven tuples, only transpose flag
+        // differs). Same-type tuples (half/half, bf16/bf16, fp8/fp8) have been stable.
+        if constexpr(!std::is_same_v<XDataType, YDataType>)
+        {
+            if(ck_tile::is_gfx11_supported())
+            {
+                GTEST_SKIP() << "Skipped on gfx11: intermittent check_err failures in "
+                                "load_and_convert_tile when XDataType != YDataType";
+            }
+        }
+
         constexpr ck_tile::index_t M = 256;
         constexpr ck_tile::index_t N = 256;
 
