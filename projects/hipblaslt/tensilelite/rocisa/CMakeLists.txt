@@ -216,29 +216,23 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py" DESTINATION rocisa)
     endif()
 
-    # TODO: rocisa should automatically detect whether the resolved stinkytofu (installed
-    # or source-built) actually includes the example plugin — e.g. via a stinkytofu-exported
-    # variable from find_package(stinkytofu), or by probing the installed plugin dir — and
-    # surface that to the test layer so test_pass_plugin.py enables the plugin check only
-    # when the example is present, instead of relying on a filesystem glob + pytest.skip.
-    # That also lets plugin-install ownership move entirely to stinkytofu (see the
-    # STINKYTOFU_INSTALL_PLUGINDIR direction) without rocisa re-installing or guessing.
-    #
-    # Example plugin — target only exists when stinkytofu is configured with
+    # Example plugin — the target only exists when stinkytofu is configured with
     # -DSTINKYTOFU_BUILD_EXAMPLES=ON (default OFF; opted in by the source-built standalone
     # wheel via tasks.py). Integrated/ROCm builds leave it OFF, so the target is absent and
-    # this block is skipped — the example never lands in a production ROCm package. It is
-    # only shipped in the source-built case, where libstinkytofu is vendored into rocisa/,
-    # so the plugin's "$ORIGIN/.." RPATH resolves the host. (With an installed stinkytofu
-    # the host lives elsewhere and that RPATH would not resolve, hence the subdirectory
-    # guard.) Only installable for shared builds (MODULE target); static builds use OBJECT.
+    # this block is skipped — the example never lands in a production ROCm package; there,
+    # the installed stinkytofu package ships and locates its own plugin.
+    #
+    # In the source-built wheel, libstinkytofu is vendored into rocisa/, so the plugin must
+    # sit at rocisa/${STINKYTOFU_PLUGIN_INSTALL_RELDIR} to match PassBuilder::examplePluginPath()'s
+    # lookup relative to libstinkytofu. Consuming stinkytofu's exported reldir keeps the install
+    # path in lockstep with the runtime lookup — no hardcoded duplicate.
+    # No INSTALL_RPATH is needed: on Linux the plugin has no DT_NEEDED on libstinkytofu (it
+    # is headers-only) and the host is already resident when loadPlugin() dlopens it.
+    # Only installable for shared builds (MODULE target); static builds use OBJECT.
     if(TARGET stinkytofu-plugin-helloworld AND BUILD_SHARED_LIBS AND _stinkytofu_from_subdirectory)
-        set_target_properties(stinkytofu-plugin-helloworld PROPERTIES
-            EXCLUDE_FROM_ALL FALSE
-            INSTALL_RPATH "$ORIGIN/.."
-            BUILD_RPATH "${_st_build_rpath}"
-        )
+        set_target_properties(stinkytofu-plugin-helloworld PROPERTIES EXCLUDE_FROM_ALL FALSE)
         add_dependencies(_rocisa stinkytofu-plugin-helloworld)
-        install(TARGETS stinkytofu-plugin-helloworld DESTINATION rocisa/plugins)
+        install(TARGETS stinkytofu-plugin-helloworld
+            DESTINATION "rocisa/${STINKYTOFU_PLUGIN_INSTALL_RELDIR}")
     endif()
 endif()
