@@ -59,6 +59,8 @@ class RunSummary:
     max_abs_diff: float = 0.0
     bad_count: int = 0
     total: int = 0
+    max_rel_diff: float = 0.0
+    bad_rel_count: int = 0
 
 
 def _parse_shape(s: Optional[str]) -> Optional[Tuple[int, int, int]]:
@@ -173,7 +175,7 @@ def run_manifest(
     warmup = int(manifest.get("warmup_iters", 5))
     iters = int(manifest.get("timed_iters", 100))
     ms = _launch_timed(rt, fn, grid, block, args, warmup, iters)
-    max_abs, bad, total = check(rt, ptrs)
+    max_rel, bad_rel, max_abs, bad_abs, total = check(rt, ptrs)
     for ptr in ptrs:
         rt.free(ptr)
     module.unload()
@@ -182,8 +184,10 @@ def run_manifest(
         tflops=flop / 1e9 / ms,
         gbps=bytes_xfer / 1e6 / ms,
         max_abs_diff=max_abs,
-        bad_count=bad,
+        bad_count=bad_abs,
         total=total,
+        max_rel_diff=max_rel,
+        bad_rel_count=bad_rel,
     )
 
 
@@ -203,7 +207,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     if ns.verify:
         print(
             f"verify max_abs_diff={summary.max_abs_diff:.8g} "
-            f"bad={summary.bad_count}/{summary.total}"
+            f"bad={summary.bad_count}/{summary.total} "
+            f"max_rel_diff={summary.max_rel_diff:.8g} "
+            f"bad_rel={summary.bad_rel_count}/{summary.total}"
         )
     print(
         f"Perf: {summary.ms:.6g} ms, {summary.tflops:.6g} TFlops, {summary.gbps:.6g} GB/s"
@@ -221,6 +227,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                 "max_abs_diff": summary.max_abs_diff,
                 "bad_count": summary.bad_count,
                 "total": summary.total,
+                "max_rel_diff": summary.max_rel_diff,
+                "bad_rel_count": summary.bad_rel_count,
             }
         )
     )

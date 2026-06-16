@@ -53,15 +53,29 @@ def run_conv_manifest_problem(
 
     rng = np.random.default_rng(1234)
     if is_3d:
-        A = (rng.random((N, Di, Hi, Wi, C), dtype=np.float32) * 0.04 - 0.02).astype(np_dtype)
-        B = (rng.random((K, Z, Y, X, cpg), dtype=np.float32) * 0.04 - 0.02).astype(np_dtype)
+        A = np.random.uniform(-5.0, 5.0, size=(N, Di, Hi, Wi, C)).astype(np.float32)
+        B = np.random.uniform(-5.0, 5.0, size=(K, Z, Y, X, cpg)).astype(np.float32)
+        if dtype == "bf16":
+            A = (A.view(np.uint32) >> 16).view(np.float32)
+            B = (B.view(np.uint32) >> 16).view(np.float32)
+        else:
+            A = A.astype(np_dtype)
+            B = B.astype(np_dtype)
+
         Do = (Di + 2 * pD - dD * (Z - 1) - 1) // sD + 1
         Ho = (Hi + 2 * pH - dH * (Y - 1) - 1) // sH + 1
         Wo = (Wi + 2 * pW - dW * (X - 1) - 1) // sW + 1
         D = np.empty((N, Do, Ho, Wo, K), dtype=np_dtype)
     else:
-        A = (rng.random((N, Hi, Wi, C), dtype=np.float32) * 0.04 - 0.02).astype(np_dtype)
-        B = (rng.random((K, Y, X, cpg), dtype=np.float32) * 0.04 - 0.02).astype(np_dtype)
+        A = np.random.uniform(-5.0, 5.0, size=(N, Hi, Wi, C)).astype(np.float32)
+        B = np.random.uniform(-5.0, 5.0, size=(K, Y, X, cpg)).astype(np.float32)
+        if dtype == "bf16":
+            A = (A.view(np.uint32) >> 16).view(np.float32)
+            B = (B.view(np.uint32) >> 16).view(np.float32)
+        else:
+            A = A.astype(np_dtype)
+            B = B.astype(np_dtype)
+
         Ho = (Hi + 2 * pH - dH * (Y - 1) - 1) // sH + 1
         Wo = (Wi + 2 * pW - dW * (X - 1) - 1) // sW + 1
         D = np.empty((N, Ho, Wo, K), dtype=np_dtype)
@@ -101,9 +115,6 @@ def run_conv_manifest_problem(
 
     def check(rt: Runtime, ptrs):
         if not verify:
-            return 0.0, 0, D.size
-        if dtype == "bf16":
-            # numpy can't compute a bf16 reference; skip numerical check.
             return 0.0, 0, D.size
         rt.memcpy_d2h(as_u8_buffer(D), ptrs[2], nbytes(D))
         ref = np.zeros_like(D, dtype=np.float32)
@@ -149,7 +160,15 @@ def run_conv_manifest_problem(
         # Cast reference back to the kernel's output dtype for a fair comparison.
         ref_out = ref.astype(np_dtype)
         tol = 1e-4 if dtype == "fp32" else 1e-2
-        diff = np.abs(D.astype(np.float32) - ref_out.astype(np.float32))
-        return float(diff.max()), int(np.count_nonzero(diff > tol)), D.size
+        if dtype == "bf16":
+            # D is uint16 (bf16 bits); zero-extend each element to uint32, then
+            # shift into the float32 exponent/mantissa position.
+            D_casted = D.astype(np.uint32) << 16
+            D_casted = D_casted.view(np.float32)
+        else:
+            D_casted = D.astype(np.float32)
+        diff_abs = np.abs(D_casted - ref_out)
+        diff_rel = diff_abs / (np.abs(ref_out) + 1e-8)  # avoid div-by-zero when ref is 0
+        return float(diff_rel.max()), int(np.count_nonzero(diff_rel > tol)), float(diff_abs.max()), int(np.count_nonzero(diff_abs > tol)), D.size
 
     return make_args, grid, block, flop, bytes_xfer, check
