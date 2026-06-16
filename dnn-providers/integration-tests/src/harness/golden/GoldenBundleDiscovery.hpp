@@ -132,56 +132,114 @@ inline std::string dataTypeToShortString(hipdnn_flatbuffers_sdk::data_objects::D
     }
 }
 
-inline std::string
-    nodeAttributesToOperationName(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType)
+struct OpMeta
+{
+    const char* name;
+    int64_t (*primaryInputUid)(const hipdnn_flatbuffers_sdk::data_objects::Node*);
+};
+
+// -Wswitch-enum enforces that opMeta() handles every NodeAttributes enumerator;
+// -Wswitch-default is suppressed here because a default: would defeat that check.
+#pragma clang diagnostic push
+#pragma clang diagnostic error "-Wswitch-enum"
+#pragma clang diagnostic ignored "-Wswitch-default"
+inline OpMeta opMeta(const hipdnn_flatbuffers_sdk::data_objects::Node* node)
 {
     using NA = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
-    switch(attrType)
+    using Node = hipdnn_flatbuffers_sdk::data_objects::Node;
+    switch(node->attributes_type())
     {
     case NA::ConvolutionFwdAttributes:
-        return "ConvFprop";
+        return {"ConvFprop", [](const Node* n) {
+                    return n->attributes_as_ConvolutionFwdAttributes()->x_tensor_uid();
+                }};
     case NA::ConvolutionBwdAttributes:
-        return "ConvDgrad";
+        return {"ConvDgrad", [](const Node* n) {
+                    return n->attributes_as_ConvolutionBwdAttributes()->dy_tensor_uid();
+                }};
     case NA::ConvolutionWrwAttributes:
-        return "ConvWgrad";
+        return {"ConvWgrad", [](const Node* n) {
+                    return n->attributes_as_ConvolutionWrwAttributes()->x_tensor_uid();
+                }};
     case NA::BatchnormInferenceAttributes:
-        return "BatchnormInference";
+        return {"BatchnormInference", [](const Node* n) {
+                    return n->attributes_as_BatchnormInferenceAttributes()->x_tensor_uid();
+                }};
     case NA::BatchnormInferenceAttributesVarianceExt:
-        return "BatchnormInferenceVarianceExt";
+        return {
+            "BatchnormInferenceVarianceExt", [](const Node* n) {
+                return n->attributes_as_BatchnormInferenceAttributesVarianceExt()->x_tensor_uid();
+            }};
     case NA::BatchnormAttributes:
-        return "Batchnorm";
+        return {"Batchnorm", [](const Node* n) {
+                    return n->attributes_as_BatchnormAttributes()->x_tensor_uid();
+                }};
     case NA::BatchnormBackwardAttributes:
-        return "BatchnormBackward";
+        return {"BatchnormBackward", [](const Node* n) {
+                    return n->attributes_as_BatchnormBackwardAttributes()->x_tensor_uid();
+                }};
     case NA::PointwiseAttributes:
-        return "Pointwise";
+        return {"Pointwise", [](const Node*) -> int64_t { return -1; }};
     case NA::MatmulAttributes:
-        return "Matmul";
+        return {"Matmul",
+                [](const Node* n) { return n->attributes_as_MatmulAttributes()->a_tensor_uid(); }};
     case NA::RMSNormAttributes:
-        return "RmsNorm";
+        return {"RmsNorm",
+                [](const Node* n) { return n->attributes_as_RMSNormAttributes()->x_tensor_uid(); }};
     case NA::RMSNormBackwardAttributes:
-        return "RmsNormBwd";
-    case NA::ResampleFwdAttributes:
-        return "ResampleFwd";
+        return {"RmsNormBwd", [](const Node* n) {
+                    return n->attributes_as_RMSNormBackwardAttributes()->x_tensor_uid();
+                }};
     case NA::LayernormAttributes:
-        return "LayerNorm";
+        return {"LayerNorm", [](const Node* n) {
+                    return n->attributes_as_LayernormAttributes()->x_tensor_uid();
+                }};
     case NA::LayernormBackwardAttributes:
-        return "LayerNormBwd";
+        return {"LayerNormBwd", [](const Node* n) {
+                    return n->attributes_as_LayernormBackwardAttributes()->x_tensor_uid();
+                }};
     case NA::SdpaAttributes:
-        return "SdpaFwd";
+        return {"SdpaFwd",
+                [](const Node* n) { return n->attributes_as_SdpaAttributes()->q_tensor_uid(); }};
     case NA::SdpaBackwardAttributes:
-        return "SdpaBwd";
+        return {"SdpaBwd", [](const Node* n) {
+                    return n->attributes_as_SdpaBackwardAttributes()->q_tensor_uid();
+                }};
     case NA::BlockScaleQuantizeAttributes:
-        return "BlockScaleQuantize";
+        return {"BlockScaleQuantize", [](const Node* n) {
+                    return n->attributes_as_BlockScaleQuantizeAttributes()->x_tensor_uid();
+                }};
     case NA::BlockScaleDequantizeAttributes:
-        return "BlockScaleDequantize";
+        return {"BlockScaleDequantize", [](const Node* n) {
+                    return n->attributes_as_BlockScaleDequantizeAttributes()->x_tensor_uid();
+                }};
     case NA::ReductionAttributes:
-        return "Reduction";
+        return {"Reduction", [](const Node* n) {
+                    return n->attributes_as_ReductionAttributes()->in_tensor_uid();
+                }};
+    case NA::ResampleFwdAttributes:
+        return {"ResampleFwd", [](const Node* n) {
+                    return n->attributes_as_ResampleFwdAttributes()->x_tensor_uid();
+                }};
     case NA::CustomOpAttributes:
-        return "CustomOp";
-    default:
-        return "Unknown";
+        return {"CustomOp", [](const Node* n) -> int64_t {
+                    const auto* uids = n->attributes_as_CustomOpAttributes()->input_tensor_uids();
+                    if(uids != nullptr && !uids->empty())
+                    {
+                        return uids->Get(0);
+                    }
+                    return -1;
+                }};
+    case NA::NONE:
+        throw std::runtime_error(std::string{"opMeta(): unhandled NodeAttributes value: "}
+                                 + hipdnn_flatbuffers_sdk::data_objects::EnumNameNodeAttributes(
+                                     node->attributes_type()));
     }
+    throw std::runtime_error(
+        std::string{"opMeta(): unhandled NodeAttributes value: "}
+        + hipdnn_flatbuffers_sdk::data_objects::EnumNameNodeAttributes(node->attributes_type()));
 }
+#pragma clang diagnostic pop
 
 inline std::string
     deriveOperationName(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper)
@@ -191,8 +249,7 @@ inline std::string
     for(uint32_t i = 0; i < nodeCount; ++i)
     {
         auto& node = wrapper.getNode(i);
-        auto attrType = node.attributes_type();
-        auto name = nodeAttributesToOperationName(attrType);
+        auto name = opMeta(&node).name;
         if(!opName.empty())
         {
             opName += "_";
@@ -200,21 +257,6 @@ inline std::string
         opName += name;
     }
     return opName.empty() ? "UnknownOp" : opName;
-}
-
-inline std::string deriveDataTypeFromGraph(
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper)
-{
-    auto tensorMap = wrapper.getTensorMap();
-    for(auto& [uid, attrs] : tensorMap)
-    {
-        if(attrs == nullptr)
-        {
-            continue;
-        }
-        return dataTypeToShortString(attrs->data_type());
-    }
-    return "unknown";
 }
 
 inline bool isPointwiseOp(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType)
@@ -228,59 +270,30 @@ inline bool isSdpaOp(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrTy
     return attrType == NA::SdpaAttributes || attrType == NA::SdpaBackwardAttributes;
 }
 
-inline int64_t primaryInputUid(const hipdnn_flatbuffers_sdk::data_objects::Node* node)
+inline std::string deriveDataTypeFromGraph(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper)
 {
-    using NA = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
-    switch(node->attributes_type())
+    auto nodeCount = wrapper.nodeCount();
+    auto tensorMap = wrapper.getTensorMap();
+    for(uint32_t i = 0; i < nodeCount; ++i)
     {
-    case NA::ConvolutionFwdAttributes:
-        return node->attributes_as_ConvolutionFwdAttributes()->x_tensor_uid();
-    case NA::ConvolutionBwdAttributes:
-        return node->attributes_as_ConvolutionBwdAttributes()->dy_tensor_uid();
-    case NA::ConvolutionWrwAttributes:
-        return node->attributes_as_ConvolutionWrwAttributes()->x_tensor_uid();
-    case NA::BatchnormInferenceAttributes:
-        return node->attributes_as_BatchnormInferenceAttributes()->x_tensor_uid();
-    case NA::BatchnormInferenceAttributesVarianceExt:
-        return node->attributes_as_BatchnormInferenceAttributesVarianceExt()->x_tensor_uid();
-    case NA::BatchnormAttributes:
-        return node->attributes_as_BatchnormAttributes()->x_tensor_uid();
-    case NA::BatchnormBackwardAttributes:
-        return node->attributes_as_BatchnormBackwardAttributes()->x_tensor_uid();
-    case NA::SdpaAttributes:
-        return node->attributes_as_SdpaAttributes()->q_tensor_uid();
-    case NA::SdpaBackwardAttributes:
-        return node->attributes_as_SdpaBackwardAttributes()->q_tensor_uid();
-    case NA::MatmulAttributes:
-        return node->attributes_as_MatmulAttributes()->a_tensor_uid();
-    case NA::LayernormAttributes:
-        return node->attributes_as_LayernormAttributes()->x_tensor_uid();
-    case NA::LayernormBackwardAttributes:
-        return node->attributes_as_LayernormBackwardAttributes()->x_tensor_uid();
-    case NA::RMSNormAttributes:
-        return node->attributes_as_RMSNormAttributes()->x_tensor_uid();
-    case NA::RMSNormBackwardAttributes:
-        return node->attributes_as_RMSNormBackwardAttributes()->x_tensor_uid();
-    case NA::ReductionAttributes:
-        return node->attributes_as_ReductionAttributes()->in_tensor_uid();
-    case NA::BlockScaleQuantizeAttributes:
-        return node->attributes_as_BlockScaleQuantizeAttributes()->x_tensor_uid();
-    case NA::BlockScaleDequantizeAttributes:
-        return node->attributes_as_BlockScaleDequantizeAttributes()->x_tensor_uid();
-    case NA::ResampleFwdAttributes:
-        return node->attributes_as_ResampleFwdAttributes()->x_tensor_uid();
-    case NA::CustomOpAttributes:
-    {
-        const auto* uids = node->attributes_as_CustomOpAttributes()->input_tensor_uids();
-        if(uids != nullptr && !uids->empty())
+        auto& node = wrapper.getNode(i);
+        if(isPointwiseOp(node.attributes_type()))
         {
-            return uids->Get(0);
+            continue;
         }
-        return -1;
+        const auto uid = opMeta(&node).primaryInputUid(&node);
+        if(uid == -1)
+        {
+            continue;
+        }
+        auto it = tensorMap.find(uid);
+        if(it != tensorMap.end() && it->second != nullptr)
+        {
+            return dataTypeToShortString(it->second->data_type());
+        }
     }
-    default:
-        return -1;
-    }
+    return "unknown";
 }
 
 inline const std::vector<const hipdnn_data_sdk::utilities::TensorLayout*>*
@@ -338,7 +351,7 @@ inline std::string layoutNameFromGraph(const hipdnn_flatbuffers_sdk::data_object
         return "unknown";
     }
 
-    const auto uid = primaryInputUid(primaryNode);
+    const auto uid = opMeta(primaryNode).primaryInputUid(primaryNode);
     if(uid == -1)
     {
         return "unknown";
