@@ -23,30 +23,7 @@ def _import_gemm_kernel_builder():
     return gemm_builder_module.GemmKernelBuilder
 
 
-# def _import_validation_utils():
-#     """Import validation utilities from the gemm directory."""
-#     current_dir = os.path.dirname(os.path.abspath(__file__))
-#     gemm_dir = os.path.dirname(os.path.dirname(current_dir))
-
-#     spec = importlib.util.spec_from_file_location(
-#         "validation_utils",
-#         os.path.join(gemm_dir, "gemm_validation_utils.py"),
-#     )
-#     validation_utils = importlib.util.module_from_spec(spec)
-#     spec.loader.exec_module(validation_utils)
-
-#     return validation_utils
-
-
 GemmKernelBuilder = _import_gemm_kernel_builder()
-# _validation_utils = _import_validation_utils()
-# is_tile_config_valid = _validation_utils.is_tile_config_valid
-# get_abc_layouts = _validation_utils.get_abc_layouts
-# get_dtype_string = _validation_utils.get_dtype_string
-
-# # AQuant-specific pipeline unsupported combinations:
-# # mem pipeline only supports interwave scheduler
-# # compv3 pipeline only supports intrawave scheduler
 
 
 class GemmAQuantKernelBuilder(GemmKernelBuilder):
@@ -195,13 +172,8 @@ def _generate_single_kernel_individual(work_item):
             tile_config, trait_combo
         )
 
-        # Create simplified filename without the "gemm_aquant_" prefix
-        # Remove "gemm_aquant_" from the beginning of kernel_name for the filename
-        simplified_name = kernel_name
-        if simplified_name.startswith("gemm_aquant_"):
-            simplified_name = simplified_name[
-                len(kernel_name_prefix) + 1 :
-            ]  # Remove "gemm_aquant" prefix
+        # Strip the "gemm_aquant_" prefix so the header filename does not duplicate it
+        simplified_name = kernel_name.removeprefix(kernel_name_prefix + "_")
 
         # Write individual header file
         header_file = working_path / f"gemm_aquant_single_{simplified_name}.hpp"

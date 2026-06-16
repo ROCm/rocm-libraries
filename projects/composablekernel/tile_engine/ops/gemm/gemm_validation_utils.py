@@ -1404,6 +1404,14 @@ def validate_gemm_aquant(
         )
 
     if a_datatype in ["fp8", "bf8"]:
+        # warp_tile_k is fixed by the MFMA instruction shape for fp8/bf8:
+        #   MFMA_F32_16x16x128_F8  (warp_tile_m=16) → K-block = 128 (gfx90a/gfx942)
+        #   MFMA_F32_32x32x64_F8   (warp_tile_m=32) → K-block = 64  (gfx90a/gfx942)
+        #   gfx950 doubles the K-block per instruction:
+        #   MFMA_F32_16x16x256_F8  (warp_tile_m=16) → K-block = 256 → warp_tile_k = 128
+        #   MFMA_F32_32x32x128_F8  (warp_tile_m=32) → K-block = 128 → warp_tile_k = 64
+        # Larger warp_tile_m corresponds to a wider but shallower MFMA shape (fewer K lanes),
+        # hence the smaller expected_k. Values are from the CDNA ISA reference manual.
         if gpu_target == "gfx950":
             expected_k = 64 if warp_tile_m == 32 else 128
         else:

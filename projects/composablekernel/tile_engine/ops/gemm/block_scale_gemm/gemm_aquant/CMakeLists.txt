@@ -280,6 +280,9 @@ else()
 
     # Divide MAX_INSTANCES budget across all active (dtype, layout) combos so that
     # sampling fires per-combo rather than being a single cap.
+    # CMake integer division truncates; clamp the result to at least 1 so that a
+    # small total budget (e.g. 5 instances across 8 combos) does not silently
+    # produce a per-combo budget of 0 and skip all kernels.
     if(NOT "${GEMM_AQUANT_MAX_INSTANCES}" STREQUAL "")
         list(LENGTH GEMM_AQUANT_DATATYPE _aq_n_dt)
         list(LENGTH GEMM_AQUANT_LAYOUT _aq_n_lay)
@@ -287,7 +290,12 @@ else()
         if(_aq_n_combos GREATER 0)
             math(EXPR GEMM_AQUANT_MAX_INSTANCES
                 "${GEMM_AQUANT_MAX_INSTANCES} / ${_aq_n_combos}")
-            message(STATUS "  gemm_aquant: per-combo budget = ${GEMM_AQUANT_MAX_INSTANCES} (${_aq_n_combos} combos)")
+            if(GEMM_AQUANT_MAX_INSTANCES EQUAL 0)
+                set(GEMM_AQUANT_MAX_INSTANCES 1)
+                message(WARNING "  gemm_aquant: per-combo budget rounded to 0; clamped to 1 (total budget too small for ${_aq_n_combos} combos)")
+            else()
+                message(STATUS "  gemm_aquant: per-combo budget = ${GEMM_AQUANT_MAX_INSTANCES} (${_aq_n_combos} combos)")
+            endif()
         endif()
     endif()
 

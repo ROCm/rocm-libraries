@@ -75,7 +75,16 @@ class AQuantGemmBenchmark:
         return info
 
     def parse_detailed_config(self, kernel_name: str) -> Dict:
-        """Parse tile dimensions and boolean flags from kernel name."""
+        """Parse tile dimensions and boolean flags from kernel name.
+
+        Kernel name format (after "benchmark_gemm_aquant_"):
+          {dtype}_{layout}_{pipeline}_{epilogue}_{scheduler}
+          _{padM}_{padN}_{padK}_{aPreshuffle}
+          _{TileMxTileNxTileK}_{WarpMxWarpNxWarpK}_{WarpTileMxWarpTileNxWarpTileK}
+
+        Dimensions are extracted positionally (in order of appearance) rather than
+        by sorting, which would silently misassign groups that share a max value.
+        """
         config = {
             "tile_sizes": {"tile_m": 0, "tile_n": 0, "tile_k": 0},
             "warp_config": {"warp_m": 0, "warp_n": 0, "warp_k": 0},
@@ -90,15 +99,16 @@ class AQuantGemmBenchmark:
 
         parts = kernel_name.split("_")
 
-        # Extract boolean flags
+        # Locate the first boolean token; collect the contiguous boolean run
+        bool_start = -1
         bool_sequence = []
         for i, part in enumerate(parts):
-            if part in ["True", "False"]:
+            if part in ("True", "False"):
+                if bool_start == -1:
+                    bool_start = i
                 bool_sequence.append(part == "True")
-                j = i + 1
-                while j < len(parts) and parts[j] in ["True", "False"]:
-                    bool_sequence.append(parts[j] == "True")
-                    j += 1
+            elif bool_start != -1:
+                # End of the boolean run
                 break
 
         if len(bool_sequence) >= 4:
@@ -107,36 +117,36 @@ class AQuantGemmBenchmark:
             config["optimization_flags"]["pad_k"] = bool_sequence[2]
             config["optimization_flags"]["a_preshuffle_quant"] = bool_sequence[3]
 
-        # Extract dimension groups (e.g., 128x128x128)
+        # Extract dimension groups (NxNxN tokens) in positional order.
+        # Appearance order in the name is: tile, warp, warp_tile.
         dimension_groups = []
         for part in parts:
-            if "x" in part and len(part.split("x")) == 3:
+            sub = part.split("x")
+            if len(sub) == 3:
                 try:
-                    dims = [int(x) for x in part.split("x")]
+                    dims = [int(v) for v in sub]
                     if all(d > 0 for d in dims):
                         dimension_groups.append(dims)
                 except ValueError:
                     continue
 
         if len(dimension_groups) >= 3:
-            sorted_groups = sorted(dimension_groups, key=lambda x: max(x), reverse=True)
-            config["tile_sizes"]["tile_m"] = sorted_groups[0][0]
-            config["tile_sizes"]["tile_n"] = sorted_groups[0][1]
-            config["tile_sizes"]["tile_k"] = sorted_groups[0][2]
-            config["warp_config"]["warp_m"] = sorted_groups[2][0]
-            config["warp_config"]["warp_n"] = sorted_groups[2][1]
-            config["warp_config"]["warp_k"] = sorted_groups[2][2]
-            config["warp_tile"]["warp_tile_m"] = sorted_groups[1][0]
-            config["warp_tile"]["warp_tile_n"] = sorted_groups[1][1]
-            config["warp_tile"]["warp_tile_k"] = sorted_groups[1][2]
+            config["tile_sizes"]["tile_m"] = dimension_groups[0][0]
+            config["tile_sizes"]["tile_n"] = dimension_groups[0][1]
+            config["tile_sizes"]["tile_k"] = dimension_groups[0][2]
+            config["warp_config"]["warp_m"] = dimension_groups[1][0]
+            config["warp_config"]["warp_n"] = dimension_groups[1][1]
+            config["warp_config"]["warp_k"] = dimension_groups[1][2]
+            config["warp_tile"]["warp_tile_m"] = dimension_groups[2][0]
+            config["warp_tile"]["warp_tile_n"] = dimension_groups[2][1]
+            config["warp_tile"]["warp_tile_k"] = dimension_groups[2][2]
         elif len(dimension_groups) == 2:
-            sorted_groups = sorted(dimension_groups, key=lambda x: max(x), reverse=True)
-            config["tile_sizes"]["tile_m"] = sorted_groups[0][0]
-            config["tile_sizes"]["tile_n"] = sorted_groups[0][1]
-            config["tile_sizes"]["tile_k"] = sorted_groups[0][2]
-            config["warp_config"]["warp_m"] = sorted_groups[1][0]
-            config["warp_config"]["warp_n"] = sorted_groups[1][1]
-            config["warp_config"]["warp_k"] = sorted_groups[1][2]
+            config["tile_sizes"]["tile_m"] = dimension_groups[0][0]
+            config["tile_sizes"]["tile_n"] = dimension_groups[0][1]
+            config["tile_sizes"]["tile_k"] = dimension_groups[0][2]
+            config["warp_config"]["warp_m"] = dimension_groups[1][0]
+            config["warp_config"]["warp_n"] = dimension_groups[1][1]
+            config["warp_config"]["warp_k"] = dimension_groups[1][2]
         elif len(dimension_groups) == 1:
             config["tile_sizes"]["tile_m"] = dimension_groups[0][0]
             config["tile_sizes"]["tile_n"] = dimension_groups[0][1]
@@ -478,6 +488,18 @@ def main():
         help="Best kernels output filename (default: best_aquant_kernels.txt)",
     )
     parser.add_argument("--json", help="JSON output filename (optional)")
+    parser.add_argument(
+        "--flush-cache",
+        action="store_true",
+        default=True,
+        help="Flush cache between kernel runs (default: true)",
+    )
+    parser.add_argument(
+        "--rotating-count",
+        type=int,
+        default=1000,
+        help="Number of iterations to rotate the cache (default: 1000)",
+    )
 
     args = parser.parse_args()
 
@@ -502,6 +524,8 @@ def main():
         verify=args.verify,
         warmup=args.warmup,
         repeat=args.repeat,
+        flush_cache=args.flush_cache,
+        rotating_count=args.rotating_count,
     )
 
     elapsed_time = time.time() - start_time
