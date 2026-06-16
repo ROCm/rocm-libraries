@@ -57,76 +57,66 @@
 
 namespace hipstd
 {
-namespace detail
-{
-// Returns true if the current active HIP device supports XNACK.
-// gcnArchName for XNACK-capable GPUs always contains the substring "xnack"
-// (e.g. "gfx90a:xnack+" or "gfx90a:xnack-"); non-XNACK architectures never do.
-inline bool current_device_supports_xnack() noexcept
-{
-  int device = 0;
-  if (::hipGetDevice(&device) != hipSuccess)
-  {
-    return false;
-  }
-
-  ::hipDeviceProp_t prop{};
-  if (::hipGetDeviceProperties(&prop, device) != hipSuccess)
-  {
-    return false;
-  }
-
-  // Substring search for "xnack" without pulling in <cstring>.
-  const char* arch   = prop.gcnArchName;
-  const char* needle = "xnack";
-  for (; *arch != '\0'; ++arch)
-  {
-    const char* a = arch;
-    const char* n = needle;
-    while (*n != '\0' && *a == *n)
-    {
-      ++a;
-      ++n;
-    }
-    if (*n == '\0')
-    {
-      return true;
-    }
-  }
-  return false;
-}
-} // namespace detail
-
-// Emits a one-time stderr warning when HSA_XNACK is not set to "1", the
-// interpose-alloc compiler flag was not active, and the current
-// device is from a XNACK-capable AMD GPU family.  Without XNACK or managed
-// memory, device-only allocations are not CPU-accessible and hipstdpar
-// algorithms may silently produce wrong results.
-// Suppressed when __HIPSTDPAR_INTERPOSE_ALLOC__ or __HIPSTDPAR_INTERPOSE_ALLOC_V1__
-// is defined because interpose-alloc replaces allocations with hipMallocManaged,
-// making XNACK unnecessary.
-inline void warn_if_no_xnack() noexcept
+// Emits a one-time stderr warning when host-allocated memory may not be directly
+// accessible on the device and -hipstdpar-interpose-alloc was not used.
+//
+// On Linux: warns when the current GPU is XNACK-capable but XNACK is disabled at
+//   runtime (gcnArchName contains "xnack-").  No warning if XNACK is on ("xnack+")
+//   or the GPU does not support XNACK at all.
+// On Windows: XNACK is never available, so warns unconditionally — without
+//   interpose-alloc, host memory is never device-accessible on this platform.
+//
+// Suppressed on both platforms when __HIPSTDPAR_INTERPOSE_ALLOC__ or
+// __HIPSTDPAR_INTERPOSE_ALLOC_V1__ is defined, since interpose-alloc replaces
+// allocations with hipMallocManaged, making XNACK unnecessary.
+inline void warn_if_no_xnack()
 {
 #  if !defined(__HIPSTDPAR_INTERPOSE_ALLOC__) && !defined(__HIPSTDPAR_INTERPOSE_ALLOC_V1__)
-#    if defined(__linux__)
   static ::std::once_flag xnack_flag_;
   ::std::call_once(xnack_flag_, [] {
-    if (!::hipstd::detail::current_device_supports_xnack())
+#    if defined(__linux__)
+    int device = 0;
+    if (::hipGetDevice(&device) != hipSuccess)
     {
       return;
     }
-    const char* val = ::std::getenv("HSA_XNACK");
-    if (val == nullptr || val[0] != '1' || val[1] != '\0')
+    ::hipDeviceProp_t prop{};
+    if (::hipGetDeviceProperties(&prop, device) != hipSuccess)
     {
-      ::std::fputs(
-        "hipstdpar warning: HSA_XNACK is not set to 1. "
-        "Host-allocated memory may not be directly accessible on the device. "
-        "Set HSA_XNACK=1 before running, or recompile with -hipstdpar-interpose-alloc "
-        "to suppress this warning.\n",
-        stderr);
+      return;
     }
+    // gcnArchName contains "xnack+" when XNACK is enabled and "xnack-" when the
+    // GPU supports XNACK but it is currently disabled.  Warn only in the latter case.
+    const char* needle = "xnack-";
+    for (const char* arch = prop.gcnArchName; *arch != '\0'; ++arch)
+    {
+      const char* a = arch;
+      const char* n = needle;
+      while (*n != '\0' && *a == *n)
+      {
+        ++a;
+        ++n;
+      }
+      if (*n == '\0')
+      {
+        ::std::fputs(
+          "hipstdpar warning: the current GPU is XNACK-capable but XNACK is disabled. "
+          "Host-allocated memory may not be directly accessible on the device. "
+          "Enable XNACK (e.g. set HSA_XNACK=1, or add amdgpu.xnack=1 to the kernel "
+          "command line) or recompile with -hipstdpar-interpose-alloc to suppress "
+          "this warning.\n",
+          stderr);
+        return;
+      }
+    }
+#    else // Windows
+    ::std::fputs(
+      "hipstdpar warning: XNACK is not supported on this platform. "
+      "Host-allocated memory is not directly accessible on the device. "
+      "Recompile with -hipstdpar-interpose-alloc to suppress this warning.\n",
+      stderr);
+#    endif // Windows
   });
-#    endif // __linux__
 #  endif // !__HIPSTDPAR_INTERPOSE_ALLOC__ && !__HIPSTDPAR_INTERPOSE_ALLOC_V1__
 }
 
