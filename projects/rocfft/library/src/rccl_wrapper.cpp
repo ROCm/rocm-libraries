@@ -212,9 +212,15 @@ void rocfft_rccl_comm_t::check_async_error(int device_id) const
     if(result != ncclSuccess)
         throw rocfft_rccl_exception_t(
             "ncclCommGetAsyncError failed on device " + std::to_string(device_id), result);
-    if(async_error != ncclSuccess)
-        throw rocfft_rccl_exception_t(
-            "RCCL asynchronous error on device " + std::to_string(device_id), async_error);
+
+    // if a nonblocking op is still running, keep waiting
+    if(async_error == ncclSuccess || async_error == ncclInProgress)
+        return;
+
+    // a genuine async error leaves the communicator unusable, abort it
+    ncclCommAbort(comm);
+    throw rocfft_rccl_exception_t("RCCL asynchronous error on device " + std::to_string(device_id),
+                                  async_error);
 }
 
 // RAII group wrapper
