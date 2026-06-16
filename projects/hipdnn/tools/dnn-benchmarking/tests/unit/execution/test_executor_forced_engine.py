@@ -12,8 +12,7 @@ all the same fallback.
 The executor avoids this by hard-selecting a forced engine via
 ``Graph.create_execution_plan_ext`` (which errors instead of falling back) and
 reading back the engine that actually backs the built plan via
-``Graph.get_execution_plan_engine_id``. Both bindings are required; a frontend
-too old to expose them is a loud configuration error, not a silent degrade.
+``Graph.get_execution_plan_engine_id``.
 """
 
 import sys
@@ -24,7 +23,7 @@ import pytest
 
 import dnn_benchmarking.execution.executor as executor_module
 from dnn_benchmarking.config.benchmark_config import BenchmarkConfig
-from dnn_benchmarking.common.exceptions import ExecutionError, UnsupportedGraphError
+from dnn_benchmarking.common.exceptions import UnsupportedGraphError
 
 
 class _StubResult:
@@ -37,17 +36,21 @@ class _StubResult:
         return ""
 
 
-class _BaseGraph:
-    """hipDNN Graph stub with the lifecycle methods present in every build.
+class _StubGraph:
+    """Minimal hipDNN Graph stub exercising the executor's plan lifecycle.
 
-    Deliberately lacks the hard-select / read-back bindings so it stands in for
-    an older frontend wheel.
+    ``create_execution_plan_ext`` records the hard-selected engine (or raises
+    when ``hard_raises``); ``create_execution_plans`` flags the heuristic path;
+    ``get_execution_plan_engine_id`` reports the engine backing the built plan.
     """
 
-    def __init__(self, ranked, rank_error=None):
+    def __init__(self, ranked, selected=None, hard_raises=False, rank_error=None):
         self._ranked = ranked
+        self._selected = selected
+        self._hard_raises = hard_raises
         self._rank_error = rank_error
         self.plans_created = False
+        self.hard_engine_id = None
 
     def from_json(self, _s):
         return _StubResult()
@@ -67,6 +70,14 @@ class _BaseGraph:
         self.plans_created = True
         return _StubResult()
 
+    def create_execution_plan_ext(self, engine_id):
+        if self._hard_raises:
+            raise RuntimeError("Failed to finalize engine descriptor")
+        self.hard_engine_id = engine_id
+
+    def get_execution_plan_engine_id(self):
+        return self._selected
+
     def check_support(self):
         return _StubResult()
 
@@ -75,31 +86,6 @@ class _BaseGraph:
 
     def get_workspace_size(self):
         return 0
-
-
-class _ModernGraph(_BaseGraph):
-    """Stub that also exposes the hard-select + read-back bindings.
-
-    ``create_execution_plan_ext`` records the hard-selected engine (or raises
-    when ``hard_raises``); ``get_execution_plan_engine_id`` reports the engine
-    that actually backs the built plan.
-    """
-
-    def __init__(self, ranked, selected=None, hard_raises=False, rank_error=None):
-        super().__init__(ranked, rank_error=rank_error)
-        self._selected = selected
-        self._hard_raises = hard_raises
-        self.hard_engine_id = None
-
-    def create_execution_plan_ext(self, engine_id):
-        if self._hard_raises:
-            raise RuntimeError("Failed to finalize engine descriptor")
-        self.hard_engine_id = engine_id
-
-    def get_execution_plan_engine_id(self):
-        if self._selected is None:
-            raise RuntimeError("no execution plan engine id")
-        return self._selected
 
 
 def _executor():
@@ -118,7 +104,7 @@ def test_prepare_hard_select_records_actual_engine():
     """A forced, applicable engine is hard-selected (not soft-preferred) and the
     engine the backend reports as backing the plan is recorded."""
     executor = _executor()
-    graph = _ModernGraph(ranked=[999], selected=999)
+    graph = _StubGraph(ranked=[999], selected=999)
     with patch.dict(sys.modules, {"hipdnn_frontend": _fake_module(graph)}):
         executor.prepare(handle=object(), engine_id=999)
     assert graph.hard_engine_id == 999  # hard selection was used
@@ -130,28 +116,17 @@ def test_prepare_hard_select_not_applicable_is_skip():
     """A hard-select failure (engine not applicable) becomes an
     UnsupportedGraphError, i.e. a clean skip rather than a silent fallback."""
     executor = _executor()
-    graph = _ModernGraph(ranked=[111], hard_raises=True)
+    graph = _StubGraph(ranked=[111], hard_raises=True)
     with patch.dict(sys.modules, {"hipdnn_frontend": _fake_module(graph)}):
         with pytest.raises(UnsupportedGraphError):
             executor.prepare(handle=object(), engine_id=999)
-
-
-def test_prepare_forced_engine_without_binding_raises():
-    """Forcing an engine on a frontend that lacks create_execution_plan_ext is a
-    loud configuration error -- never a silent soft-preferred fallback."""
-    executor = _executor()
-    graph = _BaseGraph(ranked=[999])  # no create_execution_plan_ext
-    with patch.dict(sys.modules, {"hipdnn_frontend": _fake_module(graph)}):
-        with pytest.raises(ExecutionError) as exc:
-            executor.prepare(handle=object(), engine_id=999)
-    assert "create_execution_plan_ext" in str(exc.value)
 
 
 def test_prepare_discovery_uses_heuristic_plan_creation():
     """With no forced engine, prepare uses the heuristic create_execution_plans
     path and records whichever engine the backend selected."""
     executor = _executor()
-    graph = _ModernGraph(ranked=[111, 222], selected=111)
+    graph = _StubGraph(ranked=[111, 222], selected=111)
     with patch.dict(sys.modules, {"hipdnn_frontend": _fake_module(graph)}):
         executor.prepare(handle=object(), engine_id=None)
     assert graph.plans_created is True  # heuristic path taken
@@ -163,27 +138,17 @@ def test_record_selected_engine_mismatch_raises():
     """If a forced engine differs from the engine actually selected, it is
     treated as an unsupported-graph skip rather than mislabeled timings."""
     executor = _executor()
-    executor._graph = _ModernGraph(ranked=[111], selected=111)
+    executor._graph = _StubGraph(ranked=[111], selected=111)
     with pytest.raises(UnsupportedGraphError) as exc:
         executor._record_selected_engine(999)
     assert "999" in str(exc.value) and "111" in str(exc.value)
-
-
-def test_record_selected_engine_without_binding_raises():
-    """A missing get_execution_plan_engine_id is a stale-bindings error, not a
-    silent no-op that would leave the selected engine unverified."""
-    executor = _executor()
-    executor._graph = _BaseGraph(ranked=[111])  # no get_execution_plan_engine_id
-    with pytest.raises(ExecutionError) as exc:
-        executor._record_selected_engine(999)
-    assert "get_execution_plan_engine_id" in str(exc.value)
 
 
 def test_discover_engines_ranking_runtime_error_becomes_unsupported():
     """A backend RuntimeError while ranking surfaces as an unsupported-graph
     skip, not a hard error."""
     executor = _executor()
-    graph = _BaseGraph(ranked=[], rank_error="no engine has an applicable solution")
+    graph = _StubGraph(ranked=[], rank_error="no engine has an applicable solution")
     with patch.dict(sys.modules, {"hipdnn_frontend": _fake_module(graph)}):
         with pytest.raises(UnsupportedGraphError) as exc:
             executor.discover_engines(handle=object())

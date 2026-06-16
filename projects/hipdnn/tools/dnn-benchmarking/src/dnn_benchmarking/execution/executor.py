@@ -216,12 +216,6 @@ class Executor:
                 # The binding errors if the engine is not valid/applicable, so it
                 # can never silently fall back to a different engine the way the
                 # soft preferred-engine path could.
-                if not hasattr(self._graph, "create_execution_plan_ext"):
-                    raise ExecutionError(
-                        "hipDNN Python bindings are too old: "
-                        "Graph.create_execution_plan_ext is missing. Rebuild the "
-                        "hipDNN frontend bindings to benchmark a forced engine."
-                    )
                 try:
                     self._graph.create_execution_plan_ext(engine_id)
                 except RuntimeError as e:
@@ -264,24 +258,12 @@ class Executor:
         """Read back and record the engine that actually backs the built plan.
 
         ``get_execution_plan_engine_id`` is the authoritative source for the
-        engine that will run, regardless of how it was chosen, and it is
-        required: a missing binding is a stale-install error, not something to
-        paper over. A forced engine that differs from the engine actually
-        selected should be impossible on the hard-select path, so any mismatch
-        is treated as an unsupported-graph skip rather than mislabeled timings.
+        engine that will run, regardless of how it was chosen. A forced engine
+        that differs from the engine actually selected should be impossible on
+        the hard-select path, so any mismatch is treated as an unsupported-graph
+        skip rather than mislabeled timings.
         """
-        if not hasattr(self._graph, "get_execution_plan_engine_id"):
-            raise ExecutionError(
-                "hipDNN Python bindings are too old: "
-                "Graph.get_execution_plan_engine_id is missing. Rebuild the "
-                "hipDNN frontend bindings."
-            )
-        try:
-            actual = int(self._graph.get_execution_plan_engine_id())
-        except RuntimeError as e:
-            raise ExecutionError(
-                f"Failed to read the selected engine id from the built plan: {e}"
-            ) from e
+        actual = int(self._graph.get_execution_plan_engine_id())
         self._selected_engine_id = actual
         if requested_engine_id is not None and actual != requested_engine_id:
             raise UnsupportedGraphError(
