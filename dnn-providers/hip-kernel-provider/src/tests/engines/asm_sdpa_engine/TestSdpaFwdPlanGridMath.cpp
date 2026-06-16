@@ -5,9 +5,9 @@
 
 #include "engines/asm_sdpa_engine/plans/SdpaFwdLaunchParams.hpp"
 
+using asm_sdpa_engine::computeFwdLaunchParams;
 using asm_sdpa_engine::SdpaFwdLaunchParams;
 using asm_sdpa_engine::SdpaFwdParams;
-using asm_sdpa_engine::computeFwdLaunchParams;
 using asm_sdpa_engine::plan_utils::MaskType;
 
 namespace
