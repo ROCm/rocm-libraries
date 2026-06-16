@@ -2944,6 +2944,95 @@ class TestIntegration:
         finally:
             sched.deallocVgprTiles(writer)
 
+    def test_initD_emitted_on_tail_only_and_preloop_paths(self):
+        """initD must run whether or not the K<DepthU skip fires.
+
+        Normal path (K>=DepthU): preloop zeros D exactly once.
+        Tail-only path (K<DepthU): the preloop is skipped, so a separate
+        InitDForTailOnly block (guarded so the normal path branches over it)
+        zeros D before the tail loop accumulates.
+        """
+        kernel = create_kernel(256, 256, fp4=True)
+        assert not kernel["NoTailLoop"]
+        writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
+
+        cfg = make_cfg_256x256_fp4()
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.allocVgprTiles(writer, tiA, tiB,
+                              scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+        try:
+            sched.populate_instructions(
+                writer, kernel,
+                tileInfoA=tiA, tileInfoB=tiB,
+                dtileInfo=dTileInfo,
+                scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
+            )
+
+            # Normal path: the preloop zeros D exactly once (no double-zero).
+            preloop_asm = str(sched._emitLoop(
+                writer, kernel, "PRELOOP", sched._preloop_emitted, schedule=False))
+            assert preloop_asm.count("vgprTiles to zero") == 1, \
+                "preloop should zero D exactly once"
+
+            asm = str(sched.emitMainAndExitLoops(writer, kernel))
+
+            # Tail-only path: dedicated guarded init block exists.
+            assert "InitDForTailOnly:" in asm, \
+                "tail-only path must have an InitDForTailOnly block"
+            assert "preloop skipped, must init D" in asm, \
+                "K<DepthU guard should branch to the tail-only init block"
+            assert "main pipeline ran: D already valid" in asm, \
+                "normal path must branch over the tail-only init block"
+
+            # The tail-only init zeroing is emitted inside that block, after the
+            # branch-over guard (so the normal path skips it at runtime).
+            init_label_idx = asm.index("InitDForTailOnly:")
+            skip_branch_idx = asm.rindex("main pipeline ran: D already valid",
+                                         0, init_label_idx)
+            zero_after_block = asm.index("vgprTiles to zero", init_label_idx)
+            assert skip_branch_idx < init_label_idx < zero_after_block, \
+                "expected: branch-over -> InitDForTailOnly: -> zero D"
+        finally:
+            sched.deallocVgprTiles(writer)
+
+    def test_initD_uf1_tail_only_control_flow_invariants(self):
+        """uf==1 (make_cfg_bf16): tail-only initD control-flow invariants."""
+        import re
+        kernel = create_kernel(256, 256, fp4=False)
+        assert not kernel["NoTailLoop"]
+        writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel)
+
+        cfg = make_cfg_bf16()
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.allocVgprTiles(writer, tiA, tiB)
+        try:
+            sched.populate_instructions(
+                writer, kernel, tileInfoA=tiA, tileInfoB=tiB, dtileInfo=dTileInfo)
+
+            assert sched.unroll_factor == 1, "fixture must yield uf==1"
+
+            asm = str(sched.emitMainAndExitLoops(writer, kernel))
+
+            assert asm.count("label_InitDForTailOnly:") == 1, \
+                "uf==1 must emit exactly one InitDForTailOnly block"
+
+            guard_branches = re.findall(r"s_cbranch_scc1\s+label_InitDForTailOnly", asm)
+            assert len(guard_branches) == 1, \
+                "K<DepthU guard must branch to InitDForTailOnly"
+
+            assert asm.count("label_SkipToEnd:") == 1, "SkipToEnd label must be present"
+
+            # Tolerant lower bound (not ==2): finding #1 drops the dead uf==1 branch.
+            skip_branches = re.findall(r"s_branch\s+label_SkipToEnd", asm)
+            assert len(skip_branches) >= 1, "normal path must branch over to SkipToEnd"
+
+            assert asm.count("vgprTiles to zero") == 2, \
+                "initD zeroed in preloop and in tail-only block"
+        finally:
+            sched.deallocVgprTiles(writer)
+
     def test_emitMainAndExitLoops_pap_mx_inserts_preloop_skip_and_nll_hooks(self):
         """Subtile PAP is scheduler-owned and applies to MX PRELOOP/NLL paths."""
         kernel = create_kernel(256, 256, fp4=True)
@@ -3872,12 +3961,18 @@ class TestEmit_PGR0:
 
 class TestBuildLoopVariants_PGR0:
 
-    def test_preloop_empty(self):
+    def test_preloop_has_initD_only(self):
+        # PGR=0 has no GR/LR preloop, but it must still zero the D
+        # accumulators before the mainloop's first MFMA. The preloop is
+        # therefore a single initD op (not empty).
         cfg = make_cfg_bf16_pgr0()
         sched = LogicalScheduler(cfg)
         sched.emit()
         preloop = sched.build_preloop()
-        assert preloop == [[[]]]
+        ops = preloop[0][0]
+        labels = [getattr(em.source, 'label', None) for em in ops]
+        assert labels == ['initD_overlap'], \
+            f"PGR=0 preloop should be exactly one initD op, got {labels}"
 
     def test_ngll_empty(self):
         cfg = make_cfg_bf16_pgr0()
@@ -3892,6 +3987,26 @@ class TestBuildLoopVariants_PGR0:
         sched.emit()
         nll = sched.build_nll()
         assert nll == [[[]]]
+
+
+class TestPreloopInitD:
+    """initD (accumulator zeroing) placement across pgr values."""
+
+    @pytest.mark.parametrize("make_cfg,pgr", [
+        (make_cfg_bf16_pgr0, 0),
+        (make_cfg_bf16_pgr1, 1),
+        (make_cfg_bf16, 2),
+    ], ids=["pgr0", "pgr1", "pgr2"])
+    def test_preloop_zeros_d_exactly_once(self, make_cfg, pgr):
+        cfg = make_cfg()
+        assert cfg.pgr == pgr
+        sched = LogicalScheduler(cfg)
+        sched.emit()
+        preloop = sched.build_preloop()
+        initd = [em for em in preloop[0][0]
+                 if getattr(em.source, 'label', None) == 'initD_overlap']
+        assert len(initd) == 1, \
+            f"pgr={pgr} preloop should zero D exactly once, got {len(initd)}"
 
 
 class TestBuildTailloopPGR0:
