@@ -31,6 +31,8 @@
 //
 #include <algorithm>
 #include <cassert>
+#include <climits>
+#include <cstdint>
 #include <map>
 #include <vector>
 
