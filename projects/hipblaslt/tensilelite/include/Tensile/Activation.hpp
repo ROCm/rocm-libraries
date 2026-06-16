@@ -36,8 +36,6 @@
 
 #include <Tensile/Macros.hpp>
 
-TENSILE_HIDDEN_BEGIN
-
 namespace TensileLite
 {
     /**
@@ -84,4 +82,3 @@ namespace TensileLite
     int getAdditionalArgNum(ActivationType d);
 }
 
-TENSILE_HIDDEN_END

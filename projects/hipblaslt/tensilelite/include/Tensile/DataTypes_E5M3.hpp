@@ -30,8 +30,6 @@
 
 #include <Tensile/Macros.hpp>
 
-TENSILE_HIDDEN_BEGIN
-
 #define HIP_HOST_DEVICE __host__ __device__
 #define HIP_HOST __host__
 #define HIP_DEVICE __device__
@@ -372,4 +370,3 @@ HIP_DEVICE static float cast_to_f32_from_uf8(uint8_t v) {
 
 }
 
-TENSILE_HIDDEN_END

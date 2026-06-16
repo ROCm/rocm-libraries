@@ -37,8 +37,6 @@
 
 #include <Tensile/Singleton.hpp>
 
-TENSILE_HIDDEN_BEGIN
-
 namespace TensileLite
 {
     using StringSet = std::set<std::string>;
@@ -161,4 +159,3 @@ namespace TensileLite
     };
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

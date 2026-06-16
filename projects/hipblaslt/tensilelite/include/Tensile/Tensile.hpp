@@ -75,7 +75,6 @@
 /**
  * @brief Primary namespace for Tensile host code.
  */
-TENSILE_HIDDEN_BEGIN
 namespace TensileLite
 {
     /**
@@ -206,6 +205,5 @@ namespace TensileLite
     std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
         LoadLibraryData(std::vector<uint8_t> const& data);
 } // namespace TensileLite
-TENSILE_HIDDEN_END
 
 /** @} */

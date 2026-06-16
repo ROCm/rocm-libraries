@@ -34,8 +34,6 @@
 #include <Tensile/Macros.hpp>
 #include <iostream>
 
-TENSILE_HIDDEN_BEGIN
-
 namespace TensileLite
 {
     namespace Serialization
@@ -144,4 +142,3 @@ namespace TensileLite
     } // namespace Serialization
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

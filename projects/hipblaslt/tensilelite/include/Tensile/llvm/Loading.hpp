@@ -30,8 +30,6 @@
 
 #include <Tensile/Macros.hpp>
 
-TENSILE_HIDDEN_BEGIN
-
 namespace TensileLite
 {
     template <typename MyProblem, typename MySolution>
@@ -44,4 +42,3 @@ namespace TensileLite
         LLVMLoadLibraryData(std::vector<uint8_t> const& data, std::string filename = "");
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

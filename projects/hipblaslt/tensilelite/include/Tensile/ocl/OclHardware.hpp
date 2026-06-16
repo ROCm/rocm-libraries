@@ -31,8 +31,6 @@
 #include <Tensile/Macros.hpp>
 #include <Tensile/Tensile.hpp>
 
-TENSILE_HIDDEN_BEGIN
-
 namespace TensileLite
 {
     namespace ocl
@@ -68,7 +66,5 @@ namespace TensileLite
 
     } // namespace ocl
 } // namespace TensileLite
-
-TENSILE_HIDDEN_END
 
 #endif // OCL_HARDWARE_HPP

@@ -45,8 +45,6 @@
 
 #include <Tensile/Macros.hpp>
 
-TENSILE_HIDDEN_BEGIN
-
 namespace TensileLite
 {
     namespace Predicates
@@ -3098,4 +3096,3 @@ namespace TensileLite
     } // namespace Predicates
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

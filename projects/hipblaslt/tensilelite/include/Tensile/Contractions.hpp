@@ -33,7 +33,4 @@
 #include <Tensile/TensorDescriptor.hpp>
 #include <Tensile/Macros.hpp>
 
-TENSILE_HIDDEN_BEGIN
 
-
-TENSILE_HIDDEN_END

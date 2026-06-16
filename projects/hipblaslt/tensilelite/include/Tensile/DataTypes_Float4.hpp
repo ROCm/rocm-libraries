@@ -49,8 +49,6 @@ namespace TensileLite
 
 #include <hip/hip_ext_ocp.h>
 
-TENSILE_HIDDEN_BEGIN
-
 namespace TensileLite
 {
     enum class hip_f4_rounding_mode
@@ -155,8 +153,6 @@ namespace std
         return stream << static_cast<float>(result[0]) << " " << static_cast<float>(result[1]);
     }
 } // namespace std
-
-TENSILE_HIDDEN_END
 
 #endif // _WIN32
 

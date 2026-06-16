@@ -37,8 +37,6 @@
 
 #include <Tensile/Macros.hpp>
 
-TENSILE_HIDDEN_BEGIN
-
 namespace TensileLite
 {
     // Which placeholder libraries should be initialized at start
@@ -366,4 +364,3 @@ namespace TensileLite
 
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

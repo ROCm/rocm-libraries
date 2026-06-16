@@ -32,8 +32,6 @@
 
 #include <Tensile/Macros.hpp>
 
-TENSILE_HIDDEN_BEGIN
-
 #define TENSILE_USE_XF32
 
 #ifndef __BYTE_ORDER__
@@ -239,4 +237,3 @@ namespace std
     }
 } // namespace std
 
-TENSILE_HIDDEN_END

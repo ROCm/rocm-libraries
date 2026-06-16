@@ -28,12 +28,9 @@
 
 #include <Tensile/Macros.hpp>
 
-TENSILE_HIDDEN_BEGIN
-
 namespace TensileLite
 {
     class ContractionSolution;
     struct SizeMapping;
 }
 
-TENSILE_HIDDEN_END

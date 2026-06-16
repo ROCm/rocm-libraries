@@ -36,8 +36,6 @@
 
 #include <Tensile/Macros.hpp>
 
-TENSILE_HIDDEN_BEGIN
-
 namespace TensileLite
 {
     bool fileToMsgObject(std::string const& filename, msgpack::object_handle& result);
@@ -54,4 +52,3 @@ namespace TensileLite
         MessagePackLoadLibraryData(std::vector<uint8_t> const& data);
 }
 
-TENSILE_HIDDEN_END

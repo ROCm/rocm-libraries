@@ -53,8 +53,6 @@ namespace TensileLite
 
 #include <cstdint>
 
-TENSILE_HIDDEN_BEGIN
-
 namespace TensileLite
 {
     enum class hip_f6_rounding_mode
@@ -308,8 +306,6 @@ namespace std
         return stream << to_string(a);
     }
 } // namespace std
-
-TENSILE_HIDDEN_END
 
 #endif // _WIN32
 

@@ -39,8 +39,6 @@
 #include <Tensile/ocl/OclFwd.hpp>
 #include <iostream>
 
-TENSILE_HIDDEN_BEGIN
-
 #define CL_CHECK(x)                                                                     \
     if(CL_SUCCESS != (x))                                                               \
     {                                                                                   \
@@ -75,7 +73,5 @@ namespace cl
 {
     std::ostream& operator<<(std::ostream& stream, Buffer buffer);
 }
-
-TENSILE_HIDDEN_END
 
 #endif // OCL_UTILS_HPP

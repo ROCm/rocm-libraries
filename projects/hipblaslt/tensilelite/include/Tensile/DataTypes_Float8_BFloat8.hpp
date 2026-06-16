@@ -37,8 +37,6 @@
 #define HIP_HOST __host__
 #define HIP_DEVICE __device__
 
-TENSILE_HIDDEN_BEGIN
-
 namespace TensileLite
 {
 
@@ -530,4 +528,3 @@ namespace std
 
 } // namespace std
 
-TENSILE_HIDDEN_END

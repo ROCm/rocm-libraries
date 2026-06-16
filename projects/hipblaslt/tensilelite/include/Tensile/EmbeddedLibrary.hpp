@@ -31,8 +31,6 @@
 #include <Tensile/Singleton.hpp>
 #include <Tensile/Tensile.hpp>
 
-TENSILE_HIDDEN_BEGIN
-
 namespace TensileLite
 {
     /**
@@ -101,4 +99,3 @@ namespace TensileLite
 
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

@@ -28,7 +28,6 @@
 
 #include <Tensile/Macros.hpp>
 
-TENSILE_HIDDEN_BEGIN
 namespace TensileLite
 {
     class TENSILE_API ContractionProblemParameters;
@@ -38,4 +37,3 @@ namespace TensileLite
     struct TENSILE_API ContractionInputs;
     struct TENSILE_API ContractionGroupedInputs;
 } // namespace TensileLite
-TENSILE_HIDDEN_END

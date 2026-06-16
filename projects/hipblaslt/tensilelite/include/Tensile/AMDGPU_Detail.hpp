@@ -31,8 +31,6 @@
 
 #include <Tensile/Macros.hpp>
 
-TENSILE_HIDDEN_BEGIN
-
 namespace std
 {
     template <>
@@ -45,4 +43,3 @@ namespace std
     };
 } // namespace std
 
-TENSILE_HIDDEN_END

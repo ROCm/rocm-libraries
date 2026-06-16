@@ -55,8 +55,6 @@
 #include <Tensile/DataTypes_E8.hpp>
 #include <Tensile/DataTypes_E5M3.hpp>
 
-TENSILE_HIDDEN_BEGIN
-
 namespace rocisa
 {
     /**
@@ -502,4 +500,3 @@ namespace TensileLite
  */
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

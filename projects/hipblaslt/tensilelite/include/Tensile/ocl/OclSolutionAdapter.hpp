@@ -33,8 +33,6 @@
 
 #include <mutex>
 
-TENSILE_HIDDEN_BEGIN
-
 namespace TensileLite
 {
     namespace ocl
@@ -100,7 +98,5 @@ namespace TensileLite
 
     } // namespace ocl
 } // namespace TensileLite
-
-TENSILE_HIDDEN_END
 
 #endif //OCL_SOLUTION_ADAPTER_HPP
