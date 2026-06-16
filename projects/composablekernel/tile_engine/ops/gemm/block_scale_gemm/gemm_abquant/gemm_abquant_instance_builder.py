@@ -319,11 +319,6 @@ class GemmABQuantKernelBuilder(GemmKernelBuilder):
             b_preshuffle,
         ) = trait_combo
 
-        # Store current group_size_n for use in populate_* methods
-        self._current_group_size_n = group_size_n
-        self._current_a_preshuffle = a_preshuffle
-        self._current_b_preshuffle = b_preshuffle
-
         # Create kernel name
         kernel_name = (
             f"{self.kernel_name_prefix}_{self.datatype}_{self.layout}_"
@@ -361,7 +356,7 @@ class GemmABQuantKernelBuilder(GemmKernelBuilder):
         instance_code += self.populate_kernel_dtype_layout()
         instance_code += self.populate_strut_begin(kernel_name)
         instance_code += self.populate_tile_config(tile_config)
-        instance_code += self._populate_abquant_trait_config(trait_combo)
+        instance_code += self._populate_abquant_trait_config(trait_combo, group_size_n)
         instance_code += self._populate_abquant_initialization(
             base_pipeline_map, pipeline
         )
@@ -432,7 +427,7 @@ using BQLayout = ck_tile::tensor_layout::gemm::ColumnMajor;
 """
         return instance_code
 
-    def _populate_abquant_trait_config(self, trait_combo):
+    def _populate_abquant_trait_config(self, trait_combo, group_size_n):
         (
             pipeline,
             epilogue,
@@ -443,8 +438,6 @@ using BQLayout = ck_tile::tensor_layout::gemm::ColumnMajor;
             a_preshuffle,
             b_preshuffle,
         ) = trait_combo
-
-        group_size_n = self._current_group_size_n
 
         instance_code = f"""
 
@@ -744,18 +737,9 @@ def _generate_single_kernel_individual(work_item):
     )
 
     try:
-        kernel_name, instance_code = builder._generate_kernel_instance(
+        kernel_name, _ = builder._generate_kernel_instance(
             tile_config, trait_combo, group_size_n
         )
-
-        simplified_name = kernel_name
-        if simplified_name.startswith("gemm_abquant_"):
-            simplified_name = simplified_name[len(kernel_name_prefix) + 1 :]
-
-        header_file = working_path / f"gemm_abquant_single_{simplified_name}.hpp"
-        with open(header_file, "w") as f:
-            f.write(instance_code)
-
         return (kernel_name, trait_combo, tile_config)
     except Exception as e:
         print(f"Error generating individual kernel: {e}")

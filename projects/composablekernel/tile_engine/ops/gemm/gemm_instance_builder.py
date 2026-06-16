@@ -899,30 +899,6 @@ struct SelectedKernel {{
         TileShape,
         Traits>;"""
 
-        elif self.kernel_name_prefix == "gemm_aquant":
-            instance_code += """
-
-    // Pipeline problem (base, for hot loop detection)
-    using GemmPipelineProblem = ck_tile::GemmPipelineProblemBase<
-        ADataType,
-        BDataType,
-        AccDataType,
-        TileShape,
-        Traits,
-        BDataType>;"""
-
-        elif self.kernel_name_prefix == "gemm_bquant":
-            instance_code += """
-
-    // Pipeline problem (base, for hot loop detection)
-    using GemmPipelineProblem = ck_tile::GemmPipelineProblemBase<
-        ADataType,
-        BDataType,
-        AccDataType,
-        TileShape,
-        Traits,
-        BDataType>;"""
-
         # Base pipeline for hot loop detection
         if self.kernel_name_prefix == "gemm_preshuffle":
             instance_code += f"""
