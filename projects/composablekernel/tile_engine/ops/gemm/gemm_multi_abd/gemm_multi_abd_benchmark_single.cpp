@@ -34,8 +34,8 @@ inline auto create_args(int argc, char* argv[])
         .insert("split_k", "1", "The split value for k dimension. Default is 1.")
         .insert("verify",
                 "1",
-                "for validation on GPU. Default is 1, validation on CPU, as validation on GPU is "
-                "not supported.")
+                "Default is 1, validation on CPU, as validation on GPU is "
+                "not supported. 0 for no validation.")
         .insert("log",
                 "false",
                 "Whether output kernel instance information or not. Possible values are true or "
@@ -56,7 +56,8 @@ inline auto create_args(int argc, char* argv[])
                 "true",
                 "To flush cache, possible values are true or false. "
                 "Default is true.")
-        .insert("rotating_count", "1000", "number of iterations to rotate the cache. default is 5.")
+        .insert(
+            "rotating_count", "1000", "number of iterations to rotate the cache. default is 1000.")
         .insert("metric",
                 "0",
                 "Metric with which to measure kernel performance. Set to 0 for latency, 1 for "
@@ -90,10 +91,21 @@ void benchmark_single(const ck_tile::ArgParser& arg_parser)
     std::vector<int> stride_bs(NumBTensors, arg_parser.get_int("stride_bs"));
     std::vector<int> stride_ds(NumDTensors, arg_parser.get_int("stride_ds"));
 
-    GemmMultiABDProblem problem{arg_parser.get_int("split_k"),
-                                arg_parser.get_int("m"),
-                                arg_parser.get_int("n"),
-                                arg_parser.get_int("k"),
+    GemmMultiABDProblem problem{GemmProblem{arg_parser.get_int("split_k"),
+                                            arg_parser.get_int("m"),
+                                            arg_parser.get_int("n"),
+                                            arg_parser.get_int("k"),
+                                            /*stride_a_=*/arg_parser.get_int("stride_as"),
+                                            /*stride_b_=*/arg_parser.get_int("stride_bs"),
+                                            /*stride_c_=*/arg_parser.get_int("stride_e"),
+                                            std::string(ck_tile::DataTypeTraits<ADataType>::name),
+                                            std::string(ck_tile::DataTypeTraits<BDataType>::name),
+                                            std::string(ck_tile::DataTypeTraits<AccDataType>::name),
+                                            std::string(ck_tile::DataTypeTraits<EDataType>::name),
+                                            std::string(ALayout::name),
+                                            std::string(BLayout::name),
+                                            std::string(ELayout::name),
+                                            /*structured_sparsity_=*/false},
                                 stride_as,
                                 stride_bs,
                                 stride_ds,
@@ -101,7 +113,6 @@ void benchmark_single(const ck_tile::ArgParser& arg_parser)
                                 dtype_as,
                                 dtype_bs,
                                 dtype_ds,
-                                std::string(ck_tile::DataTypeTraits<AccDataType>::name),
                                 std::string(ck_tile::DataTypeTraits<EDataType>::name),
                                 layout_as,
                                 layout_bs,

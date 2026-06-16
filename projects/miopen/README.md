@@ -321,7 +321,7 @@ or
 dvc pull "filename"
 ```
 
-If you are familiar with using Git LFS, a key difference with DVC is that you must manually run `dvc pull` after you 
+If you are familiar with using Git LFS, a key difference with DVC is that you must manually run `dvc pull` after you
 switch branches or merge changes in Git to ensure any large binaries are kept in sync with your checkout.
 
 ## Installing the dependencies manually

@@ -444,7 +444,7 @@ namespace rocsparse
         {
             return rocsparse::bsric0_kernel_2_8_launch<MX_NNZB, T, I, int64_t>;
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");
@@ -468,7 +468,7 @@ namespace rocsparse
         {
             return rocsparse::transform_j_type<MX_NNZB, T, int64_t>(p...);
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");

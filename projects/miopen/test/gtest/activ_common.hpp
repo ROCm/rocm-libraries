@@ -460,7 +460,8 @@ void CpuActivation(miopenActivationMode_t m, std::size_t num_items, Ts&&... xs)
     case miopenActivationELU:
         CpuActivation<direction, is_packed, activ_func::ActivationELU>(num_items, xs...);
         break;
-    default: throw std::runtime_error("Unknown activation mode");
+
+    case miopenActivationCLAMP: throw std::runtime_error("Unknown activation mode");
     }
 }
 

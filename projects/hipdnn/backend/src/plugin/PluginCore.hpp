@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -16,6 +17,7 @@
 #include "HipdnnBackendPluginLoadingMode.h"
 #include "PlatformUtils.hpp"
 #include "logging/Logging.hpp"
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginDataTypeHelpers.hpp>
 
@@ -50,6 +52,21 @@ public:
     virtual std::string_view version() const;
     virtual std::string_view apiVersion() const;
     virtual hipdnnPluginType_t type() const;
+
+    /**
+     * @brief Returns the plugin's API version parsed into a structured
+     *        `Version` object, or `std::nullopt` if the version string is
+     *        malformed.
+     *
+     * Plugin managers validate this at load time and reject malformed
+     * plugin API versions before dispatch.
+     */
+    std::optional<hipdnn_data_sdk::utilities::Version> parsedApiVersion() const;
+
+    /**
+     * @brief Returns the plugin's name captured during plugin load.
+     */
+    const std::string& cachedName() const;
 
     static hipdnnPluginType_t getPluginType();
 
@@ -113,6 +130,10 @@ private:
     void (*_funcGetLastErrorStr)(const char**);
     hipdnnPluginStatus_t (*_funcSetLoggingCallback)(hipdnnCallback_t);
     hipdnnPluginStatus_t (*_funcSetLogLevel)(hipdnnSeverity_t);
+
+    // The plugin name is captured during construction. Mock/default
+    // construction uses a deterministic fallback so cachedName() remains safe.
+    std::string _name = "uninitialized_plugin";
 };
 
 // The PluginManagerBase is responsible for loading and unloading plugins. This class is the base class for all plugin managers.

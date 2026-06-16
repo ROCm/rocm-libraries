@@ -79,6 +79,7 @@ TEST(TestPlatformUtils, GetCurrentExecutableDirectoryContainsExecutable)
 
     EXPECT_TRUE(std::filesystem::exists(execDir / actualExecPath.filename()));
 }
+
 #endif // defined(__linux__)
 
 // getLibraryName tests
@@ -194,6 +195,16 @@ TEST(TestPlatformUtils, SetEnvSetsValue)
     EXPECT_EQ(result, "new_value");
 
     hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_TEST_PLATFORMUTILS_SET");
+}
+
+TEST(TestPlatformUtils, SetEnvNullValueDoesNotSetVariable)
+{
+    hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_TEST_PLATFORMUTILS_NULL_SET");
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_TEST_PLATFORMUTILS_NULL_SET", nullptr);
+
+    auto result = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_PLATFORMUTILS_NULL_SET");
+
+    EXPECT_EQ(result, "");
 }
 
 TEST(TestPlatformUtils, SetEnvOverwritesExisting)

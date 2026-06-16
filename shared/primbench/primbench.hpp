@@ -2248,7 +2248,7 @@ public:
         m_device_storage = std::make_unique<device_storage>(m_num_items * sizeof(float));
     }
 
-    void warm_up(stream_t stream, uint16_t min_gpu_temp, double max_warming_secs) const
+    void warm_up(stream_t stream, uint16_t min_gpu_temp, double max_warming_secs, bool print) const
     {
         auto start = std::chrono::steady_clock::now();
 
@@ -2258,7 +2258,7 @@ public:
             if(gpu_temp >= min_gpu_temp)
                 break;
 
-            if(use_color())
+            if(use_color() && print)
                 progress::print_warming(gpu_temp, min_gpu_temp);
 
             dim3 blocks(m_num_items / m_threads_per_block);
@@ -2416,8 +2416,7 @@ public:
         size_t bytes_per_item = m_read_write_bytes / m_items;
 
 #if PRIMBENCH_HAS_MONITORING
-        warm_up();
-        cool_down();
+        cool_or_warm();
 #endif
 
         init_kernels_per_batch(kernel);
@@ -2482,6 +2481,10 @@ private:
                        double                                       estimated_remaining_secs)
     {
         const auto& s = m_settings;
+
+#if PRIMBENCH_HAS_MONITORING
+        cool_or_warm(false);
+#endif
 
         iterations++;
 
@@ -2581,31 +2584,26 @@ private:
     }
 
 #if PRIMBENCH_HAS_MONITORING
-    /// Warms up the GPU until minimum temperature is reached.
-    void warm_up() const
+    /// Gets the GPU within a stable temperature range.
+    void cool_or_warm(bool print = true) const
     {
         const auto& s = m_settings;
 
-        gpu_warmer::instance().warm_up(stream, s.min_gpu_temp, s.max_warming_secs);
-    }
+        // Warm up GPU.
+        gpu_warmer::instance().warm_up(stream, s.min_gpu_temp, s.max_warming_secs, print);
 
-    /// Waits for GPU to cool down below maximum temperature.
-    void cool_down() const
-    {
-        auto start = std::chrono::steady_clock::now();
-
-        const auto& s = m_settings;
-
+        // Wait for GPU to cool down.
+        auto cool_down_start_time = std::chrono::steady_clock::now();
         while(true)
         {
             uint16_t gpu_temp = monitor::instance().get_temp();
             if(gpu_temp <= s.max_gpu_temp)
                 break;
 
-            if(use_color())
+            if(use_color() && print)
                 progress::print_cooling(gpu_temp, s.max_gpu_temp);
 
-            auto duration = std::chrono::steady_clock::now() - start;
+            auto duration = std::chrono::steady_clock::now() - cool_down_start_time;
             if(duration >= std::chrono::duration<double>(s.max_cooling_secs))
             {
                 std::cerr << "\nError: Failed to cool down after " << s.max_cooling_secs

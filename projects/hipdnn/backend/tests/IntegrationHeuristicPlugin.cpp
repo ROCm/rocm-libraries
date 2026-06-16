@@ -20,6 +20,7 @@
 #include "HipdnnException.hpp"
 #include "PlatformUtils.hpp"
 #include "TestPluginConstants.hpp"
+#include "heuristics/DeviceProperties.hpp"
 #include "plugin/HeuristicPlugin.hpp"
 #include "plugin/HeuristicPluginManager.hpp"
 #include "plugin/HeuristicPluginResourceManager.hpp"
@@ -30,8 +31,6 @@
 #include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/device_properties_generated.h>
-
-#include <flatbuffers/flatbuffers.h>
 
 #include <gtest/gtest.h>
 #include <string_view>
@@ -45,15 +44,8 @@ namespace
 // Note: TEST_GOOD_HEURISTIC_PLUGIN_NAME, TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME,
 // and TEST_NO_OPTIONAL_HEURISTIC_PLUGIN_NAME are defined as macros in CMakeLists.txt
 
-// Helper to serialize DevicePropertiesT using FlatBuffers Pack
-std::vector<uint8_t>
-    serializeDeviceProperties(const hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT& props)
-{
-    flatbuffers::FlatBufferBuilder builder(256);
-    auto offset = hipdnn_flatbuffers_sdk::data_objects::DeviceProperties::Pack(builder, &props);
-    builder.Finish(offset, "HDDP");
-    return {builder.GetBufferPointer(), builder.GetBufferPointer() + builder.GetSize()};
-}
+using hipdnn_backend::heuristics::serializeDeviceProperties;
+using hipdnn_backend::heuristics::wrapSerializedDeviceProperties;
 
 // Wrapper class to access protected constructor
 class TestableHeuristicPlugin : public HeuristicPlugin
@@ -172,10 +164,8 @@ TEST_F(IntegrationHeuristicPlugin, SetDevicePropertiesOnHandle)
     props.architecture_name = "gfx90a";
 
     // Serialize
-    auto serialized = serializeDeviceProperties(props);
-    hipdnnPluginConstData_t devicePropsData;
-    devicePropsData.ptr = serialized.data();
-    devicePropsData.size = serialized.size();
+    const auto serialized = serializeDeviceProperties(props);
+    const hipdnnPluginConstData_t devicePropsData = wrapSerializedDeviceProperties(serialized);
 
     // Set on handle (should not throw)
     EXPECT_NO_THROW(plugin->setDeviceProperties(handle, &devicePropsData));
@@ -193,10 +183,8 @@ TEST_F(IntegrationHeuristicPlugin, SetDevicePropertiesOnAllHandles)
     props.total_global_mem = 16ULL * 1024 * 1024 * 1024;
     props.architecture_name = "gfx90a";
 
-    auto serialized = serializeDeviceProperties(props);
-    hipdnnPluginConstData_t devicePropsData;
-    devicePropsData.ptr = serialized.data();
-    devicePropsData.size = serialized.size();
+    const auto serialized = serializeDeviceProperties(props);
+    const hipdnnPluginConstData_t devicePropsData = wrapSerializedDeviceProperties(serialized);
 
     // Set on all handles via resource manager
     EXPECT_NO_THROW(rm->setDevicePropertiesOnAllHandles(&devicePropsData));
@@ -226,10 +214,8 @@ TEST_F(IntegrationHeuristicPlugin, CompleteWorkflowWithDevicePropertiesAndFinali
     props.total_global_mem = 16ULL * 1024 * 1024 * 1024;
     props.architecture_name = "gfx90a";
 
-    auto serialized = serializeDeviceProperties(props);
-    hipdnnPluginConstData_t devicePropsData;
-    devicePropsData.ptr = serialized.data();
-    devicePropsData.size = serialized.size();
+    const auto serialized = serializeDeviceProperties(props);
+    const hipdnnPluginConstData_t devicePropsData = wrapSerializedDeviceProperties(serialized);
     plugin->setDeviceProperties(handle, &devicePropsData);
 
     // Create policy descriptor (RAII so destroy runs even on ASSERT_* abort)
@@ -463,10 +449,8 @@ TEST_F(IntegrationHeuristicPlugin, SetDevicePropertiesWithNoPluginsLoaded)
     props.total_global_mem = 16ULL * 1024 * 1024 * 1024;
     props.architecture_name = "gfx90a";
 
-    auto serialized = serializeDeviceProperties(props);
-    hipdnnPluginConstData_t devicePropsData;
-    devicePropsData.ptr = serialized.data();
-    devicePropsData.size = serialized.size();
+    const auto serialized = serializeDeviceProperties(props);
+    const hipdnnPluginConstData_t devicePropsData = wrapSerializedDeviceProperties(serialized);
 
     // Should not throw when no plugins loaded
     EXPECT_NO_THROW(rm->setDevicePropertiesOnAllHandles(&devicePropsData));

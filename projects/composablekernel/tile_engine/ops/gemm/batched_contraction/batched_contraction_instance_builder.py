@@ -111,46 +111,34 @@ class BatchedContractionKernelBuilder(GemmKernelBuilder):
         if num_workers is None:
             num_workers = min(multiprocessing.cpu_count(), 8)
 
-        tile_configs = self._get_tile_configs()
-        trait_combos = self._generate_trait_combinations()
+        sampled_kernels = self._get_sampled_kernel_list()
 
-        # Prepare work items for parallel processing
         work_items = []
-        for tile_config in tile_configs:
-            for trait_combo in trait_combos:
-                work_items.append(
-                    (
-                        tile_config,
-                        trait_combo,
-                        self.kernel_name_prefix,
-                        self.working_path,
-                        self.gpu_target,
-                        self.datatype,
-                        self.layout,
-                        self.num_dim_g,
-                        self.num_dim_m,
-                        self.num_dim_n,
-                        self.num_dim_k,
-                        self.num_d_tensors,
-                        self.elementwise_function,
-                        self.config_json,
-                    )
+        for kernel in sampled_kernels:
+            tile_config = kernel["tile_config"]
+            trait_combo = kernel["trait_combo"]
+            work_items.append(
+                (
+                    tile_config,
+                    trait_combo,
+                    self.kernel_name_prefix,
+                    self.working_path,
+                    self.gpu_target,
+                    self.datatype,
+                    self.layout,
+                    self.num_dim_g,
+                    self.num_dim_m,
+                    self.num_dim_n,
+                    self.num_dim_k,
+                    self.num_d_tensors,
+                    self.elementwise_function,
+                    self.config_json,
                 )
-
-        # Apply RFC-compliant sampling (Sobol + LHS + maximin)
-        if self.max_instances is not None and len(work_items) > self.max_instances:
-            kernel_dicts = [
-                {"tile_config": item[0], "trait_combo": item[1], "_work_item": item}
-                for item in work_items
-            ]
-            sampled = self._apply_sampling(kernel_dicts)
-            work_items = [k["_work_item"] for k in sampled]
+            )
 
         print(
             f"Generating {len(work_items)} individual kernel files using {num_workers} workers..."
         )
-        print(f"  Tile configs: {len(tile_configs)}")
-        print(f"  Trait combinations: {len(trait_combos)}")
         print(f"  Total kernels: {len(work_items)}")
 
         if work_items:
@@ -607,7 +595,8 @@ def main():
         elementwise_function.lower(), elementwise_function
     )
 
-    # Read extra config from JSON if provided
+    # CLI args take precedence; fall back to config JSON values when CLI
+    # args were not explicitly provided (i.e. still at their defaults).
     num_dim_g = args.num_dim_g
     num_dim_m = args.num_dim_m
     num_dim_n = args.num_dim_n
@@ -617,16 +606,10 @@ def main():
     if args.config_json and os.path.exists(args.config_json):
         with open(args.config_json, "r") as f:
             cfg = json.load(f)
-        # Override from config if present (CLI args take precedence only if explicitly provided)
-        if "num_dim_g" in cfg:
-            num_dim_g = cfg["num_dim_g"]
-        if "num_dim_m" in cfg:
-            num_dim_m = cfg["num_dim_m"]
-        if "num_dim_n" in cfg:
-            num_dim_n = cfg["num_dim_n"]
-        if "num_dim_k" in cfg:
-            num_dim_k = cfg["num_dim_k"]
-        if "num_d_tensors" in cfg:
+        # Only use config JSON as fallback for args that weren't explicitly
+        # provided on the command line (num_dim_g/m/n/k are required so they
+        # are always explicit; num_d_tensors has a default of 0).
+        if "num_d_tensors" in cfg and args.num_d_tensors == 0:
             num_d_tensors = cfg["num_d_tensors"]
 
     # Create builder
@@ -679,13 +662,13 @@ def main():
         # Parse trait combo
         trait_parts = args.trait_combo.split("_")
         trait_combo = (
-            trait_parts[0],
-            trait_parts[1],
-            trait_parts[2],
-            trait_parts[3],
-            trait_parts[4],
-            trait_parts[5],
-            trait_parts[6],
+            trait_parts[0],  # pipeline
+            trait_parts[1],  # epilogue
+            trait_parts[2],  # scheduler
+            trait_parts[3] == "True",  # pad_m
+            trait_parts[4] == "True",  # pad_n
+            trait_parts[5] == "True",  # pad_k
+            trait_parts[6] == "True",  # persistent
         )
 
         builder._generate_kernel_instance(tile_config, trait_combo)

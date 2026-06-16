@@ -148,6 +148,7 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     target_link_libraries(${lib_name} PRIVATE MIOpen)
 
     # Install alongside MIOpen
+    set_target_properties(${lib_name} PROPERTIES INSTALL_RPATH "$ORIGIN")
     install(TARGETS ${lib_name}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}

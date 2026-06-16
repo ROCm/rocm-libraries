@@ -186,10 +186,15 @@ class BatchedContractionProfiler
 
         for(auto& callable : callables)
         {
-            auto kernel_run_result =
-                callable(contraction_args,
-                         ck_tile::stream_config{
-                             nullptr, true, setting_.log, setting_.n_warmup, setting_.n_repeat});
+            auto kernel_run_result = callable(contraction_args,
+                                              ck_tile::stream_config{nullptr,
+                                                                     true,
+                                                                     setting_.log,
+                                                                     setting_.n_warmup,
+                                                                     setting_.n_repeat,
+                                                                     setting_.is_gpu_timer,
+                                                                     setting_.flush_cache,
+                                                                     setting_.rotating_count});
             process_result(problem, e_dev_buf, e_host_result, e_dev_result, kernel_run_result);
         }
     }
@@ -230,9 +235,22 @@ class BatchedContractionProfiler
 
         // verify result
         e_dev_buf.FromDevice(e_dev_result.data());
-        bool verified_correct =
-            !setting_.verify || compare<ADataType, BDataType, AccDataType, EDataType>(
-                                    name, K_total, problem.split_k_, e_dev_result, e_host_result);
+        bool verified_correct = !setting_.verify;
+
+        if(setting_.verify)
+        {
+            if constexpr(NUM_D_TENSORS > 0)
+            {
+                verified_correct =
+                    compare<ADataType, BDataType, AccDataType, EDataType, DBaseDataType>(
+                        name, K_total, problem.split_k_, e_dev_result, e_host_result);
+            }
+            else
+            {
+                verified_correct = compare<ADataType, BDataType, AccDataType, EDataType>(
+                    name, K_total, problem.split_k_, e_dev_result, e_host_result);
+            }
+        }
 
         if(verified_correct)
         {

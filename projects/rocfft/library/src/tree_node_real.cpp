@@ -20,9 +20,11 @@
 
 #include "tree_node_real.h"
 #include "../../shared/arithmetic.h"
+#include "../../shared/precision_type.h"
 #include "function_pool.h"
 #include "node_factory.h"
 #include "real2complex.h"
+#include <algorithm>
 
 // work out the real and complex lengths on a real-complex plan, and
 // return pointers to those lengths
@@ -111,6 +113,25 @@ static bool SBCR_dim_available(const function_pool&       pool,
     return pool.has_SBCR_kernel(length[sbcr_dim], precision);
 }
 
+// True if a fused real-Stockham kernel of the given cfft length / precision
+// fits in this device's per-workgroup LDS.  Fused mode disables half-LDS and
+// adds 1 padding element per batch, so
+//   lds_bytes = (cfftLength + 1) * transforms_per_block * bytes_per_complex
+// Budget matches the runtime check in LeafNode::SetupGridParam (tree_node.cpp).
+// Returns false if no Stockham kernel is registered for this length.
+static bool fused_real_stockham_fits_lds(const function_pool&   pool,
+                                         size_t                 cfftLength,
+                                         rocfft_precision       precision,
+                                         const hipDeviceProp_t& deviceProp)
+{
+    FMKey key(cfftLength, precision, CS_KERNEL_STOCKHAM);
+    if(!pool.has_function(key))
+        return false;
+    const size_t batch_width     = std::max<size_t>(pool.get_kernel(key).transforms_per_block, 1);
+    const size_t fused_lds_bytes = (cfftLength + 1) * batch_width * complex_type_size(precision);
+    return fused_lds_bytes <= deviceProp.sharedMemPerBlock;
+}
+
 /*****************************************************
  * CS_REAL_TRANSFORM_USING_CMPLX
  *****************************************************/
@@ -118,7 +139,7 @@ void RealTransCmplxNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 {
     bool noSolution = child_scheme_trees.empty();
 
-    // Embed the data into a full-length complex array, perform a
+    // Embed the data into a full-length complex array, perform
     // complex transform, and then extract the relevant output.
     bool          r2c            = inArrayType == rocfft_array_type_real;
     ComputeScheme copyHeadScheme = r2c ? CS_KERNEL_COPY_R_TO_CMPLX : CS_KERNEL_COPY_HERM_TO_CMPLX;
@@ -268,12 +289,14 @@ void RealTransEvenNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         if(try_fuse_pre_post_processing)
             try_fuse_pre_post_processing = cfftPlan->isLeafNode();
 
-        // Enable fusion for small simple 1D cases only.
-        // TODO: remove it after full solution done.
+        // fuse 1D pre/post when the fused Stockham kernel fits in LDS.
+        // Use cfftPlan->length[0] (always = realLength/2) rather than length[0]/2:
+        // for C2R, set_complex_length swaps node.length to the Hermitian side,
+        // making length[0]/2 wrong.
         if((cfftPlan->scheme == CS_KERNEL_STOCKHAM) && // simple decomposition
            (length.size() == 1) && // 1D
-           (length[0] < 512) && // < small case < 512
-           (inArrayType != rocfft_array_type_hermitian_planar) && // no planar
+           fused_real_stockham_fits_lds(pool, cfftPlan->length[0], precision, deviceProp)
+           && (inArrayType != rocfft_array_type_hermitian_planar) && // no planar
            (outArrayType != rocfft_array_type_hermitian_planar))
         {
             try_fuse_pre_post_processing = true;
@@ -557,9 +580,9 @@ void Real2DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
 
         // first row fft + postproc is mandatory for fastest dimension
         auto rcplan = NodeFactory::CreateNodeFromScheme(CS_REAL_TRANSFORM_EVEN, this);
-        // for length > 2048, don't try pre/post because LDS usage is too high
+        // R2C: length is the real-side count; fused cfft is half-length
         static_cast<RealTransEvenNode*>(rcplan.get())->try_fuse_pre_post_processing
-            = length[0] <= 2048;
+            = fused_real_stockham_fits_lds(pool, length[0] / 2, precision, deviceProp);
 
         rcplan->length    = length;
         rcplan->dimension = 1;
@@ -595,9 +618,9 @@ void Real2DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
 
         // c2r
         auto crplan = NodeFactory::CreateNodeFromScheme(CS_REAL_TRANSFORM_EVEN, this);
-        // for length > 2048, don't try pre/post because LDS usage is too high
+        // C2R: outputLength is the real-side count; fused cfft is half-length
         static_cast<RealTransEvenNode*>(crplan.get())->try_fuse_pre_post_processing
-            = length[0] <= 2048;
+            = fused_real_stockham_fits_lds(pool, outputLength[0] / 2, precision, deviceProp);
 
         crplan->length    = outputLength;
         crplan->dimension = 1;
@@ -1218,9 +1241,9 @@ void Real3DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
 
         // first row fft + postproc is mandatory for fastest dimension
         auto rcplan = NodeFactory::CreateNodeFromScheme(CS_REAL_TRANSFORM_EVEN, this);
-        // for length > 2048, don't try pre/post because LDS usage is too high
+        // R2C: length is the real-side count; fused cfft is half-length
         static_cast<RealTransEvenNode*>(rcplan.get())->try_fuse_pre_post_processing
-            = length[0] <= 2048;
+            = fused_real_stockham_fits_lds(pool, length[0] / 2, precision, deviceProp);
 
         rcplan->length    = length;
         rcplan->dimension = 1;
@@ -1249,9 +1272,9 @@ void Real3DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
 
         // c2r
         auto crplan = NodeFactory::CreateNodeFromScheme(CS_REAL_TRANSFORM_EVEN, this);
-        // for length > 2048, don't try pre/post because LDS usage is too high
+        // C2R: outputLength is the real-side count; fused cfft is half-length
         static_cast<RealTransEvenNode*>(crplan.get())->try_fuse_pre_post_processing
-            = length[0] <= 2048;
+            = fused_real_stockham_fits_lds(pool, outputLength[0] / 2, precision, deviceProp);
 
         crplan->length    = outputLength;
         crplan->dimension = 1;

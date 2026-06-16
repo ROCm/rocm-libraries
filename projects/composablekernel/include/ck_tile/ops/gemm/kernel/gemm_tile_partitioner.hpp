@@ -496,18 +496,18 @@ struct GemmClusterTilePartitioner
 
 
     EXAMPLE CONFIGURATION:
-    - Cluster dimensions: ClusterM = 2, ClusterN = 2 (2×2 cluster)
-    - Grid dimensions:    GridM = 6, GridN = 4 (6×4 output tiles)
-    - Number of clusters: (6/2) × (4/2) = 3 × 2 = 6 clusters
-    - Blocks per cluster: 2 × 2 = 4 blocks
+    - Cluster dimensions: ClusterM = 2, ClusterN = 2 (2x2 cluster)
+    - Grid dimensions:    GridM = 6, GridN = 4 (6x4 output tiles)
+    - Number of clusters: (6/2) x (4/2) = 3 x 2 = 6 clusters
+    - Blocks per cluster: 2 x 2 = 4 blocks
 
     The tables below show which BLOCK (identified by its flattened cluster_id) processes
     each output TILE position (tile_m, tile_n). Values 0-5 represent the 6
     different clusters in the grid.
 
-    ═══════════════════════════════════════════════════════════════════════════
+    ===========================================================================
     Pattern::ContiguousBlock (ClusterTilePattern::ContiguousBlock)
-    ═══════════════════════════════════════════════════════════════════════════
+    ===========================================================================
 
     DESCRIPTION:
     Tiles are assigned in CONTIGUOUS blocks within each cluster. Each cluster
@@ -515,20 +515,20 @@ struct GemmClusterTilePartitioner
 
     TILE ASSIGNMENT (each cell shows which cluster processes that tile):
 
-             N→ 0    1    2    3
-           ┌────────────────────────┐
-      M  0 │ │  0  │  0  │  3  │  3  │
-           │ ├────────────────────┤
-      │  1 │ │  0  │  0  │  3  │  3  │
-           │ ├────────────────────┤
-      ↓  2 │ │  1  │  1  │  4  │  4  │
-           │ ├────────────────────┤
-         3 │ │  1  │  1  │  4  │  4  │
-           │ ├────────────────────┤
-         4 │ │  2  │  2  │  5  │  5  │
-           │ ├────────────────────┤
-         5 │ │  2  │  2  │  5  │  5  │
-           └────────────────────────┘
+             N-> 0    1    2    3
+           +------------------------+
+      M  0 | |  0  |  0  |  3  |  3  |
+           | +--------------------+
+      |  1 | |  0  |  0  |  3  |  3  |
+           | +--------------------+
+      v  2 | |  1  |  1  |  4  |  4  |
+           | +--------------------+
+         3 | |  1  |  1  |  4  |  4  |
+           | +--------------------+
+         4 | |  2  |  2  |  5  |  5  |
+           | +--------------------+
+         5 | |  2  |  2  |  5  |  5  |
+           +------------------------+
 
     CLUSTER LAYOUT:
     - Cluster 0: tiles (0,0), (0,1), (1,0), (1,1) - Top-left block
@@ -538,9 +538,9 @@ struct GemmClusterTilePartitioner
     - Cluster 4: tiles (2,2), (2,3), (3,2), (3,3) - Middle-right block
     - Cluster 5: tiles (4,2), (4,3), (5,2), (5,3) - Bottom-right block
 
-    ═══════════════════════════════════════════════════════════════════════════
+    ===========================================================================
     Pattern::InterleavedBoth (ClusterTilePattern::InterleavedBoth)
-    ═══════════════════════════════════════════════════════════════════════════
+    ===========================================================================
 
     DESCRIPTION:
     Tiles are INTERLEAVED along both M and N dimensions. Within each cluster,
@@ -548,20 +548,20 @@ struct GemmClusterTilePartitioner
 
     TILE ASSIGNMENT (interleaved along both M and N):
 
-             N→ 0    1    2    3
-           ┌────────────────────────┐
-      M  0 │ │  0  │  3  │  0  │  3  │
-           │ ├────────────────────┤
-      │  1 │ │  1  │  4  │  1  │  4  │
-           │ ├────────────────────┤
-      ↓  2 │ │  2  │  5  │  2  │  5  │
-           │ ├────────────────────┤
-         3 │ │  0  │  3  │  0  │  3  │
-           │ ├────────────────────┤
-         4 │ │  1  │  4  │  1  │  4  │
-           │ ├────────────────────┤
-         5 │ │  2  │  5  │  2  │  5  │
-           └────────────────────────┘
+             N-> 0    1    2    3
+           +------------------------+
+      M  0 | |  0  |  3  |  0  |  3  |
+           | +--------------------+
+      |  1 | |  1  |  4  |  1  |  4  |
+           | +--------------------+
+      v  2 | |  2  |  5  |  2  |  5  |
+           | +--------------------+
+         3 | |  0  |  3  |  0  |  3  |
+           | +--------------------+
+         4 | |  1  |  4  |  1  |  4  |
+           | +--------------------+
+         5 | |  2  |  5  |  2  |  5  |
+           +------------------------+
 
     CLUSTER LAYOUT:
     - Cluster 0: tiles (0,0), (0,2), (3,0), (3,2) - Strided along M and N
@@ -571,9 +571,9 @@ struct GemmClusterTilePartitioner
     - Cluster 4: tiles (1,1), (1,3), (4,1), (4,3) - Strided along M and N
     - Cluster 5: tiles (2,1), (2,3), (5,1), (5,3) - Strided along M and N
 
-    ═══════════════════════════════════════════════════════════════════════════
+    ===========================================================================
     Pattern::InterleavedM (ClusterTilePattern::InterleavedM)
-    ═══════════════════════════════════════════════════════════════════════════
+    ===========================================================================
 
     DESCRIPTION:
     Tiles are INTERLEAVED along the M dimension while contiguous along N.
@@ -581,20 +581,20 @@ struct GemmClusterTilePartitioner
 
     TILE ASSIGNMENT (interleaved along M, contiguous along N):
 
-             N→ 0    1    2    3
-           ┌────────────────────────┐
-      M  0 │ │  0  │  0  │  3  │  3  │
-           │ ├────────────────────┤
-      │  1 │ │  1  │  1  │  4  │  4  │
-           │ ├────────────────────┤
-      ↓  2 │ │  2  │  2  │  5  │  5  │
-           │ ├────────────────────┤
-         3 │ │  0  │  0  │  3  │  3  │
-           │ ├────────────────────┤
-         4 │ │  1  │  1  │  4  │  4  │
-           │ ├────────────────────┤
-         5 │ │  2  │  2  │  5  │  5  │
-           └────────────────────────┘
+             N-> 0    1    2    3
+           +------------------------+
+      M  0 | |  0  |  0  |  3  |  3  |
+           | +--------------------+
+      |  1 | |  1  |  1  |  4  |  4  |
+           | +--------------------+
+      v  2 | |  2  |  2  |  5  |  5  |
+           | +--------------------+
+         3 | |  0  |  0  |  3  |  3  |
+           | +--------------------+
+         4 | |  1  |  1  |  4  |  4  |
+           | +--------------------+
+         5 | |  2  |  2  |  5  |  5  |
+           +------------------------+
 
     CLUSTER LAYOUT:
     - Cluster 0: tiles (0,0), (0,1), (3,0), (3,1) - Strided along M, contiguous N

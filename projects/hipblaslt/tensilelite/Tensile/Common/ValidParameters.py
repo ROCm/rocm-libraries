@@ -79,6 +79,13 @@ for i in range(1, maxWGsInCluster + 1):
     if i * j <= maxWGsInCluster:
       validClusterDimensions.append([i, j])
 
+# Shared valid values for LdsBlockSizePerPadA and LdsBlockSizePerPadB so they stay in sync.
+validLdsBlockSizePerPad = [-1, 0, 16, 32, 64, 96, 128, 192, 256, 320, 384, 448, 512, 576, 640, 704, 768,
+                           832, 896, 960, 1024, 1088, 1152, 1216, 1280, 1344, 1408, 1472, 1536, 1600, 1664,
+                           1728, 1792, 1856, 1920, 1984, 2048, 2176, 2304, 2432, 2560, 2688, 2816, 2944,
+                           3072, 3200, 3328, 3456, 3584, 3712, 3840, 3968, 4096, 4352, 4608, 4864, 5120,
+                           5376, 5632, 6144, 6656, 7168, 7680, 8192]
+
 @lru_cache
 def makeValidWorkGroups():
     validWorkGroups = []
@@ -282,6 +289,19 @@ validParameters = { # we need to make sure this matches develop
     "PrefetchGlobalRead": [0, 1, 2] + list(range(3,16 + 1)),
     # number of iteration prefetch local reads from lds to VGPRs buffer = PLR
     "PrefetchLocalRead": list(range(128 + 1)),
+    # Enable global memory to GL2 cache prefetch using global_prefetch_b8 instruction (gfx1250 only).
+    # So when global reads are issued, the data is likely to be in GL2 cache.
+    # 0: disable
+    # 1: prefetch one load tile (MTxDepthU) ahead of PrefetchGlobalRead
+    # 2: prefetch two load tiles (MTxDepthU) ahead of PrefetchGlobalRead
+    # Currently we have many power of 2 assumptions for prefetchGL2 address calculation, including:
+    #   NumThreads must be power of 2
+    #   ClusterDim must be power of 2 and not [1,1]
+    #   DepthU must be power of 2
+    #   MacroTile must be power of 2
+    #   DataTypeA and DataTypeB must not be 6-bit float
+    # Also does not support GSU, StreamK and general batch yet. May remove these limitations in the future.
+    "PrefetchGL2": [0, 1, 2],
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
     # So we can schedule these localReads to the front of the loop
@@ -308,6 +328,11 @@ validParameters = { # we need to make sure this matches develop
     #    SIA3: 1LDSBuffer works only when PGR=True
     # TODO: optimize scheduling to support more cases.
     "1LDSBuffer": [-1, 0, 1],
+    # StreamK persistent loop: use the current tile's no-load-loop window to
+    # issue the first global-read group for the next persistent tile. The
+    # generated code keeps that first-PGR data durable and restores borrowed
+    # current-tile state before current tail/NLL code resumes.
+    "PrefetchAcrossPersistent": [0, 1],
     # Split the unroll summation into multiple sections and combine the sections
     # GSU applies only to the unroll summation dimension
     # Set to 0 to disable GSU, kernel code will be generated without GSU support
@@ -412,6 +437,10 @@ validParameters = { # we need to make sure this matches develop
     #  2: DirectToLds A only (no DTLB)
     #  3: DirectToLds B only (no DTLA)
     "DirectToLds": [0, 1, 2, 3],
+    # DirectToLds for sparse metadata.
+    # Requires DirectToLds on the dense side (B if Sparse==2 else A),
+    # and GlobalReadVectorWidthMetadata ∈ {4, 16} (16 needs HasDirectToLdsx4).
+    "DirectToLdsMetadata": [0, 1],
     # Enable subtile-based kernel implementation for MX FP4 (gfx950 only).
     # When True, uses a subtile scheduling strategy with DTL global reads and
     # an optimized storeD path. Automatically forced False on non-gfx950.
@@ -768,7 +797,13 @@ validParameters = { # we need to make sure this matches develop
     #   1 = 1 WG per CU (default), for example. 2 will launch WGs = 2 x CU count.
     # The priority of these environment variables is defined as follows:
     # TENSILE_STREAMK_FIXED_GRID > TENSILE_STREAMK_DYNAMIC_GRID > TENSILE_STREAMK_MAX_CUS > TENSILE_STREAMK_GRID_MULTIPLIER
-    "StreamK": [0, 1, 2, 3],
+    "StreamK": [0, 1, 2, 3, 4],
+    # Force StreamK=3 to run all output tiles through the persistent DP path.
+    # When enabled, dispatch uses the single-kernel StreamK path, sets skTiles=0
+    # to skip the SK region, and keeps the normal StreamK grid selection policy.
+    # The invariant is no partial output tile fixup and no SK-region processing.
+    # Valid only with DP-first, non-atomic StreamK mode 3.
+    "StreamKForceDPOnly": [0, 1],
     # Determines if StreamK kernel uses atomics
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles
@@ -791,6 +826,10 @@ validParameters = { # we need to make sure this matches develop
     #   2 = No partials
     #   3 = Nofixup and no partials
     "DebugStreamK": [0, 1, 2, 3],
+    # Persistent-kernel debug: when True, the persistent loop never exits.
+    # Used as a co-tenant load kernel for contended-perf benchmarking.
+    # Termination is via process death. Requires StreamK = 1, 2, or 3.
+    "DebugPersistentKernelLoopForever": [False, True],
     # Controls desired width (#elements) for loads from global memory -> LDS.
     # and eliminates the pointer unshift logic
     # -1 : Set GlobalReadVectorWidth =  VectorWidth
@@ -865,9 +904,9 @@ validParameters = { # we need to make sure this matches develop
     # is added (readOffset aware of the pad and adjusts offset value based on this parameter value).
     # Only support LdsBlockSizePerPad >= unrollDepth * BPE
     # 0 means disable LdsBlockSizePerPad
-    "LdsBlockSizePerPadA": [-1, 0, 64, 128, 256, 512, 1024, 2048],
+    "LdsBlockSizePerPadA": validLdsBlockSizePerPad,
     "LdsBlockSizePerPadMXSA": [-1, 0, 64, 128, 256, 512, 1024, 2048],
-    "LdsBlockSizePerPadB": [-1, 0, 64, 128, 256, 512, 1024, 2048],
+    "LdsBlockSizePerPadB": validLdsBlockSizePerPad,
     "LdsBlockSizePerPadMXSB": [-1, 0, 64, 128, 256, 512, 1024, 2048],
     "LdsBlockSizePerPadMetadata": [-1, 0, 64, 128, 256, 512, 1024, 2048],
     # Transpose LDS format. Local store in coalesced dimension , same as optimized global fetch dimension . applicable only in TLU=0 case for miSIMD(s)
@@ -893,6 +932,28 @@ validParameters = { # we need to make sure this matches develop
     "NonTemporalWS": list(range(0, 8)),
     "NonTemporalMetadata": list(range(0, 8)),
     "NonTemporal": list(range(-1, 8)),
+    # gfx1250-only temporal-hint modifier.
+    "TemporalHint": list(range(-1, 8)),
+    "TemporalHintE": list(range(0, 8)),
+    "TemporalHintD": list(range(0, 8)),
+    "TemporalHintC": list(range(0, 8)),
+    "TemporalHintA": list(range(0, 8)),
+    "TemporalHintMXSA": list(range(0, 8)),
+    "TemporalHintB": list(range(0, 8)),
+    "TemporalHintMXSB": list(range(0, 8)),
+    "TemporalHintWS": list(range(0, 8)),
+    "TemporalHintMetadata": list(range(0, 8)),
+    # gfx1250-only non-volatile memory modifier.
+    "NonVolatile": [-1, 0, 1],
+    "NonVolatileE": [0, 1],
+    "NonVolatileD": [0, 1],
+    "NonVolatileC": [0, 1],
+    "NonVolatileA": [0, 1],
+    "NonVolatileMXSA": [0, 1],
+    "NonVolatileB": [0, 1],
+    "NonVolatileMXSB": [0, 1],
+    "NonVolatileWS": [0, 1],
+    "NonVolatileMetadata": [0, 1],
     # Group together unroll iterations inside the unroll loop.
     # For example, InnerUnroll=2 will fetch LDS for two unroll iterations
     "InnerUnroll": [1, 2, 4, 8, 16, 32, 64],
@@ -940,6 +1001,11 @@ validParameters = { # we need to make sure this matches develop
     "ConvertAfterDS": [False, True],
     # Force disable shadow init to release more sgpr in preloop
     "ForceDisableShadowInit": [False, True],
+    # Use WMMA/MFMA with src C=0 to initialize C accumulators (skipping v_mov initC).
+    # -1: auto-detect
+    #  0: force disable
+    #  1: force enable (rejected if the auto-disable conditions are met)
+    "InitCIterWmma": [-1, 0, 1],
     # Enable LDS Transpose Instruction
     "LDSTrInst": [False, True],
     # False: Use LocalSplitU. Number of WorkGroup[2] WorkItems (wave or thread) will compute the same output elements (matrix D) along different
@@ -959,10 +1025,16 @@ validParameters = { # we need to make sure this matches develop
     # 0  : disable CMS even if supported
     # 1  : enable  CMS, is set to 0 if not supported
     "UseCustomMainLoopSchedule" : [-1, 0, 1],
+    # 0  : Generate original Store blocks: NonEdgeN, ThenN, and Then1 for StoreVectorWidth N
+    # 1  : Generate adaptive Store blocks: NonEdgeN, ThenN, ThenN/2, ..., Then1 and select by runtime problem size
     "AdaptiveGemm": [0, 1],
-    # 0  : MB and MBSK generate different assembly code
-    # 1  : MB and MBSK generate same assembly code
+    # 0  : disable
+    # 1  : merge MB and MBSK assembly code and select best GW path in runtime
     "AdaptiveGemmGSUA": [0, 1],
+    # 0  : NonTemporalA and NonTemporalB use fixed values from kernel parameters
+    # 1  : NonTemporalA and NonTemporalB are determined at runtime based on problem size and stride alignment
+    #      Adaptive selection applies to the main loop only; prefetch (prolog) and tail loop still use the fixed NonTemporalA/B
+    "AdaptiveGemmNTAB": [0, 1],
     # Add extra latency to calculate number of MFMA to insert between local read and wait
     # Negative value means reduce interval between local read and wait (for DirectToVgpr only)
     "ExtraLatencyForLR":          list(range(0,17,2)) + list(range(-80,0,10)),
@@ -1025,6 +1097,19 @@ validParameters = { # we need to make sure this matches develop
     # Cluster dimension. Clusters have up to 16 work-groups in a cluster, but each work-group in a
     # cluster runs on a separate WGP.
     "ClusterDim": validClusterDimensions,
+    # Enable PLR 0.5 to save vgprs
+    # 0: Disabled
+    # 1: Use PLR 0.5 for A
+    # 2: Use PLR 0.5 for B
+    # 3: Use PLR 0.5 for both A and B
+    "HalfPLR": [0, 1, 2, 3],
+    # Enable iterate-mode TDM
+    # -1: Auto. Enable per-tensor when LBSPP > 1024 B (exceeds pad_interval encoding).
+    # 0: Disabled
+    # 1: Use iterate-mode for A
+    # 2: Use iterate-mode for B
+    # 3: Use iterate-mode for both A and B
+    "TDMIterateMode": [-1, 0, 1, 2, 3]
 }
 
 newMIValidParameters = {

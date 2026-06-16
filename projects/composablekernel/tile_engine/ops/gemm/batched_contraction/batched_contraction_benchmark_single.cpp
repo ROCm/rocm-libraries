@@ -5,6 +5,7 @@
 #include <functional>
 #include <tuple>
 #include <exception>
+#include <stdexcept>
 #include <sstream>
 #include <vector>
 #include <string>
@@ -86,6 +87,21 @@ void benchmark_single(const ck_tile::ArgParser& arg_parser)
     auto m_dims = parse_dims_string(arg_parser.get_str("m_dims"));
     auto n_dims = parse_dims_string(arg_parser.get_str("n_dims"));
     auto k_dims = parse_dims_string(arg_parser.get_str("k_dims"));
+
+    // Validate dimension counts match the compiled kernel
+    auto validate_dims = [](const std::vector<int>& dims, int expected, const std::string& name) {
+        if(static_cast<int>(dims.size()) != expected)
+            throw std::runtime_error("Expected " + std::to_string(expected) + " " + name +
+                                     " dimension(s), got " + std::to_string(dims.size()));
+        for(int v : dims)
+            if(v <= 0)
+                throw std::runtime_error(name + " dimensions must be positive, got " +
+                                         std::to_string(v));
+    };
+    validate_dims(g_dims, NUM_DIM_G, "G");
+    validate_dims(m_dims, NUM_DIM_M, "M");
+    validate_dims(n_dims, NUM_DIM_N, "N");
+    validate_dims(k_dims, NUM_DIM_K, "K");
 
     // Create BatchedContractionProblem struct
     BatchedContractionProblem problem;

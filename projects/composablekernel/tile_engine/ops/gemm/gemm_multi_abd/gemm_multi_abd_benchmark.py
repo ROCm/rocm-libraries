@@ -88,12 +88,20 @@ def main():
         default=100,
         help="Number of benchmark iterations (default: 100)",
     )
-    parser.add_argument(
+    flush_cache_group = parser.add_mutually_exclusive_group()
+    flush_cache_group.add_argument(
         "--flush-cache",
+        dest="flush_cache",
         action="store_true",
-        default=True,
         help="Enable cache flushing (default: True)",
     )
+    flush_cache_group.add_argument(
+        "--no-flush-cache",
+        dest="flush_cache",
+        action="store_false",
+        help="Disable cache flushing",
+    )
+    parser.set_defaults(flush_cache=True)
     parser.add_argument(
         "--rotating-count",
         type=int,

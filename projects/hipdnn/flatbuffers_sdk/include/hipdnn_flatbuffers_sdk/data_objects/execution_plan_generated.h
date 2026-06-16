@@ -30,6 +30,7 @@ struct SerializedExecutionPlanT : public ::flatbuffers::NativeTable {
   int64_t workspace_size = 0;
   std::vector<int64_t> tensor_uids{};
   std::vector<uint8_t> plugin_payload{};
+  bool is_override_shape_enabled = false;
 };
 
 struct SerializedExecutionPlan FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
@@ -40,7 +41,8 @@ struct SerializedExecutionPlan FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::
     VT_ENGINE_ID = 6,
     VT_WORKSPACE_SIZE = 8,
     VT_TENSOR_UIDS = 10,
-    VT_PLUGIN_PAYLOAD = 12
+    VT_PLUGIN_PAYLOAD = 12,
+    VT_IS_OVERRIDE_SHAPE_ENABLED = 14
   };
   uint32_t version() const {
     return GetField<uint32_t>(VT_VERSION, 0);
@@ -72,6 +74,12 @@ struct SerializedExecutionPlan FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::
   ::flatbuffers::Vector<uint8_t> *mutable_plugin_payload() {
     return GetPointer<::flatbuffers::Vector<uint8_t> *>(VT_PLUGIN_PAYLOAD);
   }
+  bool is_override_shape_enabled() const {
+    return GetField<uint8_t>(VT_IS_OVERRIDE_SHAPE_ENABLED, 0) != 0;
+  }
+  bool mutate_is_override_shape_enabled(bool _is_override_shape_enabled = 0) {
+    return SetField<uint8_t>(VT_IS_OVERRIDE_SHAPE_ENABLED, static_cast<uint8_t>(_is_override_shape_enabled), 0);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<uint32_t>(verifier, VT_VERSION, 4) &&
@@ -81,6 +89,7 @@ struct SerializedExecutionPlan FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::
            verifier.VerifyVector(tensor_uids()) &&
            VerifyOffset(verifier, VT_PLUGIN_PAYLOAD) &&
            verifier.VerifyVector(plugin_payload()) &&
+           VerifyField<uint8_t>(verifier, VT_IS_OVERRIDE_SHAPE_ENABLED, 1) &&
            verifier.EndTable();
   }
   SerializedExecutionPlanT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -107,6 +116,9 @@ struct SerializedExecutionPlanBuilder {
   void add_plugin_payload(::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> plugin_payload) {
     fbb_.AddOffset(SerializedExecutionPlan::VT_PLUGIN_PAYLOAD, plugin_payload);
   }
+  void add_is_override_shape_enabled(bool is_override_shape_enabled) {
+    fbb_.AddElement<uint8_t>(SerializedExecutionPlan::VT_IS_OVERRIDE_SHAPE_ENABLED, static_cast<uint8_t>(is_override_shape_enabled), 0);
+  }
   explicit SerializedExecutionPlanBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -124,13 +136,15 @@ inline ::flatbuffers::Offset<SerializedExecutionPlan> CreateSerializedExecutionP
     int64_t engine_id = 0,
     int64_t workspace_size = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> tensor_uids = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> plugin_payload = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> plugin_payload = 0,
+    bool is_override_shape_enabled = false) {
   SerializedExecutionPlanBuilder builder_(_fbb);
   builder_.add_workspace_size(workspace_size);
   builder_.add_engine_id(engine_id);
   builder_.add_plugin_payload(plugin_payload);
   builder_.add_tensor_uids(tensor_uids);
   builder_.add_version(version);
+  builder_.add_is_override_shape_enabled(is_override_shape_enabled);
   return builder_.Finish();
 }
 
@@ -140,7 +154,8 @@ inline ::flatbuffers::Offset<SerializedExecutionPlan> CreateSerializedExecutionP
     int64_t engine_id = 0,
     int64_t workspace_size = 0,
     const std::vector<int64_t> *tensor_uids = nullptr,
-    const std::vector<uint8_t> *plugin_payload = nullptr) {
+    const std::vector<uint8_t> *plugin_payload = nullptr,
+    bool is_override_shape_enabled = false) {
   auto tensor_uids__ = tensor_uids ? _fbb.CreateVector<int64_t>(*tensor_uids) : 0;
   auto plugin_payload__ = plugin_payload ? _fbb.CreateVector<uint8_t>(*plugin_payload) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateSerializedExecutionPlan(
@@ -149,7 +164,8 @@ inline ::flatbuffers::Offset<SerializedExecutionPlan> CreateSerializedExecutionP
       engine_id,
       workspace_size,
       tensor_uids__,
-      plugin_payload__);
+      plugin_payload__,
+      is_override_shape_enabled);
 }
 
 ::flatbuffers::Offset<SerializedExecutionPlan> CreateSerializedExecutionPlan(::flatbuffers::FlatBufferBuilder &_fbb, const SerializedExecutionPlanT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -161,7 +177,8 @@ inline bool operator==(const SerializedExecutionPlanT &lhs, const SerializedExec
       (lhs.engine_id == rhs.engine_id) &&
       (lhs.workspace_size == rhs.workspace_size) &&
       (lhs.tensor_uids == rhs.tensor_uids) &&
-      (lhs.plugin_payload == rhs.plugin_payload);
+      (lhs.plugin_payload == rhs.plugin_payload) &&
+      (lhs.is_override_shape_enabled == rhs.is_override_shape_enabled);
 }
 
 inline bool operator!=(const SerializedExecutionPlanT &lhs, const SerializedExecutionPlanT &rhs) {
@@ -183,6 +200,7 @@ inline void SerializedExecutionPlan::UnPackTo(SerializedExecutionPlanT *_o, cons
   { auto _e = workspace_size(); _o->workspace_size = _e; }
   { auto _e = tensor_uids(); if (_e) { _o->tensor_uids.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->tensor_uids[_i] = _e->Get(_i); } } else { _o->tensor_uids.resize(0); } }
   { auto _e = plugin_payload(); if (_e) { _o->plugin_payload.resize(_e->size()); std::copy(_e->begin(), _e->end(), _o->plugin_payload.begin()); } }
+  { auto _e = is_override_shape_enabled(); _o->is_override_shape_enabled = _e; }
 }
 
 inline ::flatbuffers::Offset<SerializedExecutionPlan> SerializedExecutionPlan::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const SerializedExecutionPlanT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -198,13 +216,15 @@ inline ::flatbuffers::Offset<SerializedExecutionPlan> CreateSerializedExecutionP
   auto _workspace_size = _o->workspace_size;
   auto _tensor_uids = _o->tensor_uids.size() ? _fbb.CreateVector(_o->tensor_uids) : 0;
   auto _plugin_payload = _o->plugin_payload.size() ? _fbb.CreateVector(_o->plugin_payload) : 0;
+  auto _is_override_shape_enabled = _o->is_override_shape_enabled;
   return hipdnn_flatbuffers_sdk::data_objects::CreateSerializedExecutionPlan(
       _fbb,
       _version,
       _engine_id,
       _workspace_size,
       _tensor_uids,
-      _plugin_payload);
+      _plugin_payload,
+      _is_override_shape_enabled);
 }
 
 inline const hipdnn_flatbuffers_sdk::data_objects::SerializedExecutionPlan *GetSerializedExecutionPlan(const void *buf) {

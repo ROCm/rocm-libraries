@@ -319,6 +319,14 @@ typedef enum
     = 0x10 /**< enumerator rocblas_gemm_flags_fp16_alt_impl_rnz */
 } hipblasGemmFlags_t;
 
+/*! \brief Library property types for querying version components. */
+typedef enum
+{
+    HIPBLAS_MAJOR_VERSION = 0, /**< Major version number */
+    HIPBLAS_MINOR_VERSION = 1, /**< Minor version number */
+    HIPBLAS_PATCH_LEVEL   = 2 /**< Patch level */
+} hipblasLibraryProperty_t;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -328,6 +336,32 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasCreate(hipblasHandle_t* handle);
 
 /*! \brief Destroys the library context created using hipblasCreate(). */
 HIPBLAS_EXPORT hipblasStatus_t hipblasDestroy(hipblasHandle_t handle);
+
+/*! \brief Gets the hipBLAS library version number.
+    \details
+    Returns version as integer: major * 10000 + minor * 100 + patch.
+    Example: version 3.5.1 returns 30501.
+
+    Handle parameter can be NULL.
+
+    @param[in]  handle    Handle to library context (can be NULL)
+    @param[out] version   Pointer to integer for version number
+
+    @return HIPBLAS_STATUS_SUCCESS or HIPBLAS_STATUS_INVALID_VALUE if version is NULL
+*/
+HIPBLAS_EXPORT hipblasStatus_t hipblasGetVersion(hipblasHandle_t handle, int* version);
+
+/*! \brief Gets a specific property of the hipBLAS library.
+    \details
+    Returns requested property value (major, minor, or patch).
+    Does not require a handle.
+
+    @param[in]  type     Property type to query
+    @param[out] value    Pointer to integer for property value
+
+    @return HIPBLAS_STATUS_SUCCESS or HIPBLAS_STATUS_INVALID_VALUE
+*/
+HIPBLAS_EXPORT hipblasStatus_t hipblasGetProperty(hipblasLibraryProperty_t type, int* value);
 
 /*! \brief Sets the stream for the handle */
 HIPBLAS_EXPORT hipblasStatus_t hipblasSetStream(hipblasHandle_t handle, hipStream_t streamId);

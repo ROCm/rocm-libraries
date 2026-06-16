@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <array>
+#include <cstddef>
 #include <limits>
 #include <numeric>
 #include <string>
@@ -25,7 +26,7 @@ inline int64_t getBatchCount(const std::vector<int64_t>& dims)
     PLUGIN_THROW_IF_TRUE(dims.size() < 2,
                          HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                          "Failed to calculate batch count:expected at least 2 dimensions");
-    return std::accumulate(dims.begin(), dims.end() - 2, int64_t{1}, std::multiplies<int64_t>());
+    return std::accumulate(dims.begin(), dims.end() - 2, int64_t{1}, std::multiplies<>());
 }
 } // namespace
 
@@ -42,7 +43,7 @@ hipblasOperation_t MatmulParams::getTrans(
         return HIPBLAS_OP_N;
     }
     // Column-major storage: dims not swapped, need transpose
-    else if(strides[strides.size() - 2] == 1)
+    if(strides[strides.size() - 2] == 1)
     {
         return HIPBLAS_OP_T;
     }
@@ -60,7 +61,7 @@ hipblasComputeType_t MatmulParams::getComputeDataType(
     {
         return HIPBLAS_COMPUTE_32F_FAST_16F;
     }
-    else if(hipDataTypeA == hipDataTypeB && hipDataTypeA == HIP_R_16BF)
+    if(hipDataTypeA == hipDataTypeB && hipDataTypeA == HIP_R_16BF)
     {
         return HIPBLAS_COMPUTE_32F_FAST_16BF;
     }
@@ -117,7 +118,7 @@ MatmulParams::MatmulParams(
     }
 
     hipDataType biasDataType = HIP_R_32F;
-    if(biasAttr)
+    if(biasAttr != nullptr)
     {
         if(!biasAttr->in_1_tensor_uid().has_value())
         {
@@ -128,7 +129,7 @@ MatmulParams::MatmulParams(
 
         if(biasAttr->in_0_tensor_uid() == attributes.c_tensor_uid())
         {
-            _biasUid = biasAttr->in_1_tensor_uid().value();
+            _biasUid = biasAttr->in_1_tensor_uid();
         }
         else if(biasAttr->in_1_tensor_uid().value() == attributes.c_tensor_uid())
         {
@@ -147,7 +148,7 @@ MatmulParams::MatmulParams(
         PLUGIN_THROW_IF_TRUE(
             biasDims.empty() || biasDims.back() != cDims.back()
                 || std::accumulate(
-                       biasDims.cbegin(), biasDims.cend(), int64_t(1), std::multiplies<int64_t>())
+                       biasDims.cbegin(), biasDims.cend(), int64_t(1), std::multiplies<>())
                        != biasDims.back(),
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Bias tensor dims must be equal to column dimension of output matrix");
@@ -202,7 +203,7 @@ void MatmulParams::setBatchInfo(
         _matrixLayoutB.setBatchCount(cBatch);
         _matrixLayoutC.setBatchCount(cBatch);
 
-        size_t rank = tA.dims().size();
+        size_t const rank = tA.dims().size();
         if(aBatch > 1)
         {
             _matrixLayoutA.setStridedBatchOffset(tA.strides()[rank - 3]);
@@ -257,7 +258,7 @@ void MatmulParams::setEpilogue(
         THROW_ON_HIPBLASLT_FAILURE(
             hipblasLtMatmulDescSetAttribute(_matmulDesc.matmulDesc(),
                                             HIPBLASLT_MATMUL_DESC_BIAS_POINTER,
-                                            &dummyBiasPtr,
+                                            static_cast<const void*>(&dummyBiasPtr),
                                             sizeof(dummyBiasPtr)));
     }
 }
@@ -294,18 +295,18 @@ MatmulPlan::MatmulPlan(const HipdnnEnginePluginHandle& handle, MatmulParams&& pa
     // so that it fits within the available memory size.
     // So for better performance we set 128 MB here since
     // it is enough to get the most performant solution from hipblaslt.
-    size_t max_workspace_size = 128 * 1024 * 1024; // 128MB
+    auto maxWorkspaceSize = static_cast<size_t>(128 * 1024 * 1024); // 128MB
     hipblasLtMatmulPreference_t pref;
     THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulPreferenceCreate(&pref));
     THROW_ON_HIPBLASLT_FAILURE(
         hipblasLtMatmulPreferenceSetAttribute(pref,
                                               HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
-                                              &max_workspace_size,
-                                              sizeof(max_workspace_size)));
+                                              &maxWorkspaceSize,
+                                              sizeof(maxWorkspaceSize)));
 
     // Row-major BLAS trick: swap A and B layouts
-    constexpr int request_solutions = 1;
-    hipblasLtMatmulHeuristicResult_t heuristicResult[request_solutions];
+    constexpr int REQUEST_SOLUTIONS = 1;
+    std::array<hipblasLtMatmulHeuristicResult_t, REQUEST_SOLUTIONS> heuristicResult{};
     int returnedAlgoCount = 0;
     THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulAlgoGetHeuristic(handle.hipblasltHandle,
                                                                _params.desc().matmulDesc(),
@@ -314,8 +315,8 @@ MatmulPlan::MatmulPlan(const HipdnnEnginePluginHandle& handle, MatmulParams&& pa
                                                                _params.c().matrixLayout(),
                                                                _params.c().matrixLayout(),
                                                                pref,
-                                                               request_solutions,
-                                                               heuristicResult,
+                                                               REQUEST_SOLUTIONS,
+                                                               heuristicResult.data(),
                                                                &returnedAlgoCount));
 
     PLUGIN_THROW_IF_FALSE(returnedAlgoCount > 0,
@@ -353,7 +354,7 @@ void MatmulPlan::execute(const HipdnnEnginePluginHandle& handle,
         THROW_ON_HIPBLASLT_FAILURE(
             hipblasLtMatmulDescSetAttribute(_params.desc().matmulDesc(),
                                             HIPBLASLT_MATMUL_DESC_BIAS_POINTER,
-                                            &biasBuffer.ptr,
+                                            static_cast<const void*>(&biasBuffer.ptr),
                                             sizeof(biasBuffer.ptr)));
     }
     // A, B and C matrices are row-major. But hipBLASLt works with column-major matrices
@@ -363,12 +364,12 @@ void MatmulPlan::execute(const HipdnnEnginePluginHandle& handle,
     // Due to this formula, we changed the order of A and B matrices in arguments
     THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmul(handle.hipblasltHandle,
                                                _params.desc().matmulDesc(),
-                                               &_alpha,
+                                               &ALPHA,
                                                bBuffer.ptr,
                                                _params.b().matrixLayout(),
                                                aBuffer.ptr,
                                                _params.a().matrixLayout(),
-                                               &_beta,
+                                               &BETA,
                                                cBuffer.ptr,
                                                _params.c().matrixLayout(),
                                                cBuffer.ptr,

@@ -9,6 +9,7 @@ table SerializedExecutionPlan {
     workspace_size: int64;
     tensor_uids: [int64];
     plugin_payload: [ubyte];
+    is_override_shape_enabled: bool = false;
 }
 
 root_type SerializedExecutionPlan;

@@ -11,11 +11,13 @@ Always-on probes (zero overhead, wrapped around the timed loop):
 
 Opt-in profiling sources (separate workload re-run, orchestrated via
 :mod:`profiling_orchestrator`):
+    * rocprofv3 PMC counters (:mod:`rocprof_pmc`).
     * rocprofv3 kernel/memory trace (:mod:`rocprof_trace`).
     * Linux ``perf stat`` CPU counters (:mod:`perf`).
+    * ``rocprof-compute --roof-only`` roofline plot (:mod:`roofline`).
 
-Each opt-in source runs after the timed pass so the profiler's
-overhead can't pollute the headline timing. Results land in
+Each opt-in source runs after the timed pass so PMC sampling and roof
+replay can't pollute the headline timing. Results land in
 ``ProviderEngineResult.extra_metrics`` under per-source keys.
 """
 

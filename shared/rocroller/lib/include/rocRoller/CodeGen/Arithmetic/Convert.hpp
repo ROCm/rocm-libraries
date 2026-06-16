@@ -67,8 +67,6 @@ namespace rocRoller
 
         Generator<Instruction> generateBFloat16x2(Register::ValuePtr dest, Register::ValuePtr arg);
 
-        Generator<Instruction> generateE8M0x4(Register::ValuePtr dest, Register::ValuePtr arg);
-
         Generator<Instruction> generateFP8x4(Register::ValuePtr dest, Register::ValuePtr arg);
 
         Generator<Instruction> generateBF8x4(Register::ValuePtr dest, Register::ValuePtr arg);
@@ -92,6 +90,9 @@ namespace rocRoller
         Generator<Instruction> generateUInt64(Register::ValuePtr dest, Register::ValuePtr arg);
 
         Generator<Instruction> generateDouble(Register::ValuePtr dest, Register::ValuePtr arg);
+
+        Generator<Instruction> generatePackedScales(Register::ValuePtr dest,
+                                                    Register::ValuePtr arg);
     };
 
     /**

@@ -84,8 +84,8 @@ ConvSolution GetitemBackward::GetSolution(const ExecutionContext& /*context*/,
     for(int32_t i = 0; i < indexCount; i++)
     {
         const auto& index_dims = problem.GetIndexDesc(i).GetLengths();
-        auto index_numel =
-            std::accumulate(index_dims.begin(), index_dims.end(), 1L, std::multiplies<int64_t>());
+        auto index_numel       = std::accumulate(
+            index_dims.begin(), index_dims.end(), uint64_t{1}, std::multiplies<uint64_t>());
 
         size_t xlocalsize = LOCAL_SIZE;
         size_t xgridsize  = AlignUp(index_numel, xlocalsize);
@@ -268,8 +268,8 @@ GetitemBackward::GetWorkspaceSize(const ExecutionContext& /*context*/,
     if(indexCount > 0)
     {
         const auto& index_dims = problem.GetIndexDesc(0).GetLengths();
-        auto index_numel =
-            std::accumulate(index_dims.begin(), index_dims.end(), 1L, std::multiplies<int64_t>());
+        auto index_numel       = std::accumulate(
+            index_dims.begin(), index_dims.end(), uint64_t{1}, std::multiplies<uint64_t>());
         return (indexCount * index_numel + problem.GetIndexCount()) *
                get_data_size(problem.GetIndexDesc(0).GetType());
     }

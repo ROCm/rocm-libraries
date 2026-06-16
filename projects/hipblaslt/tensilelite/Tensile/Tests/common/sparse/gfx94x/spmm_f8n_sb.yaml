@@ -36,7 +36,6 @@ BenchmarkProblems:
       UseBias: 3
       UseScaleAlphaVec: 3
       BiasDataTypeList: [s]
-      BiasDataTypeList: [s]
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:

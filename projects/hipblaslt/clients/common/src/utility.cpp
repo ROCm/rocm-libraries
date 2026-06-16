@@ -346,7 +346,7 @@ std::vector<void*> benchmark_allocation()
     return ptrs;
 }
 
-int32_t hipblaslt_get_arch_major()
+int32_t hipblaslt_get_arch()
 {
     int             deviceId;
     hipDeviceProp_t deviceProperties;
@@ -357,13 +357,18 @@ int32_t hipblaslt_get_arch_major()
         {
             return s.substr(pos + 3);
         }
-        return s;
+        throw std::runtime_error("Invalid architecture name: " + s);
     };
 
     static_cast<void>(hipGetDevice(&deviceId));
     static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
     auto gpu_arch_no_prefix = removePrefix(deviceProperties.gcnArchName);
-    return stoi(gpu_arch_no_prefix) / 100;
+    return stoi(gpu_arch_no_prefix);
+}
+
+int32_t hipblaslt_get_arch_major()
+{
+    return hipblaslt_get_arch() / 100;
 }
 
 void hipblaslt_print_version()

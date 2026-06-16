@@ -307,10 +307,10 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
 
     J nnz_max;
     RETURN_IF_HIP_ERROR(
-        hipMemcpyAsync(&nnz_max, workspace, sizeof(J), hipMemcpyDeviceToHost, stream));
+        rocsparse_hipMemcpyAsync(&nnz_max, workspace, sizeof(J), hipMemcpyDeviceToHost, stream));
 
     // Wait for host transfer to finish
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
     // Group offset buffer
     J* d_group_offset = reinterpret_cast<J*>(buffer);
@@ -382,14 +382,14 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
                                                                         rocprim_buffer));
 
         // Copy group sizes to host
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(&h_group_size,
-                                           d_group_size,
-                                           sizeof(J) * CSRGEMM_MAXGROUPS,
-                                           hipMemcpyDeviceToHost,
-                                           stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&h_group_size,
+                                                     d_group_size,
+                                                     sizeof(J) * CSRGEMM_MAXGROUPS,
+                                                     hipMemcpyDeviceToHost,
+                                                     stream));
 
         // Wait for host transfer to finish
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
         // Create identity permutation for group access
         RETURN_IF_ROCSPARSE_ERROR(
@@ -420,7 +420,7 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
     {
         // First group processes all rows
         h_group_size[0] = m;
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(d_group_offset, 0, sizeof(J), stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(d_group_offset, 0, sizeof(J), stream));
     }
 
     // Compute columns and accumulate values for each group

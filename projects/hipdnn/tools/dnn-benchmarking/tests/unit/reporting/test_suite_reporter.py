@@ -4,8 +4,9 @@
 """Unit tests for Reporter suite-specific methods."""
 
 import io
+from unittest.mock import patch
 
-from dnn_benchmarking.config.benchmark_config import SuiteConfig
+from dnn_benchmarking.config.benchmark_config import SuiteConfig, ValidationConfig
 from dnn_benchmarking.reporting.reporter import Reporter
 from dnn_benchmarking.reporting.statistics import BenchmarkStats
 from dnn_benchmarking.reporting.suite_results import (
@@ -252,7 +253,7 @@ class TestVerboseReporter:
             results=[_make_pe_success(correctness=correctness)],
         )
         reporter.print_verbose_graph_result(
-            gr, SuiteConfig(reference_provider="pytorch")
+            gr, SuiteConfig(validation=ValidationConfig(provider="pytorch"))
         )
         out = output.getvalue()
         assert "Reference Validation: PASSED" in out
@@ -275,7 +276,7 @@ class TestVerboseReporter:
             results=[_make_pe_success(correctness=correctness)],
         )
         reporter.print_verbose_graph_result(
-            gr, SuiteConfig(reference_provider="pytorch")
+            gr, SuiteConfig(validation=ValidationConfig(provider="pytorch"))
         )
         out = output.getvalue()
         assert "Reference Validation: FAILED" in out
@@ -298,7 +299,7 @@ class TestVerboseReporter:
             results=[_make_pe_success(correctness=correctness)],
         )
         reporter.print_verbose_graph_result(
-            gr, SuiteConfig(reference_provider="pytorch")
+            gr, SuiteConfig(validation=ValidationConfig(provider="pytorch"))
         )
         out = output.getvalue()
         assert "Reference Validation: SKIPPED" in out
@@ -362,6 +363,117 @@ class TestVerboseReporter:
         # The legacy literal must not appear anywhere in suite-mode verbose output.
         assert "(MIOpen)" not in out
 
+    def test_verbose_reference_row_uses_reference_header(self) -> None:
+        """Timed validation-provider rows must not render as hipDNN engines."""
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        gr = GraphResult(
+            graph_name="g",
+            graph_path="/tmp/g.json",
+            results=[
+                _make_pe_success(engine_id=0, provider="pytorch", correctness=None)
+            ],
+        )
+        gr.results[0].role = "reference"
+
+        reporter.print_verbose_graph_result(
+            gr, SuiteConfig(validation=ValidationConfig(provider="pytorch"))
+        )
+        out = output.getvalue()
+
+        assert "Validation Reference Benchmark: g" in out
+        assert "Provider:   pytorch" in out
+        assert "Engine ID:" not in out
+        assert "Reference: timing baseline (no correctness comparison)" in out
+
+    def test_verbose_profiling_renders_when_always_on_metrics_absent(self) -> None:
+        """``--metrics-tier off --pmc basic`` leaves every always-on metric
+        field unset but still populates ``extra_metrics``. The profiling
+        block must render regardless of the always-on suppression — users
+        who opted into profiling need to see where their artefacts landed.
+        """
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        pe = ProviderEngineResult(
+            provider="miopen",
+            engine_id=1,
+            status="success",
+            cpu_build_time_ms=12.3,
+            e2e_stats=BenchmarkStats(
+                mean_ms=1.0,
+                std_ms=0.1,
+                min_ms=0.9,
+                max_ms=1.1,
+                p95_ms=1.05,
+                p99_ms=1.09,
+            ),
+            gpu_kernel_stats=BenchmarkStats(
+                mean_ms=0.5,
+                std_ms=0.05,
+                min_ms=0.45,
+                max_ms=0.55,
+                p95_ms=0.52,
+                p99_ms=0.54,
+            ),
+            extra_metrics={
+                "pmc": {
+                    "set": "basic",
+                    "arch": "gfx942",
+                    "counters": {
+                        "GRBM_GUI_ACTIVE": {"sum": 999, "mean_per_kernel": 1.0}
+                    },
+                }
+            },
+        )
+        gr = GraphResult(graph_name="g", graph_path="/tmp/g.json", results=[pe])
+        reporter.print_verbose_graph_result(gr, SuiteConfig())
+        out = output.getvalue()
+        # Always-on block must be suppressed (no Derived Metrics header)…
+        assert "Derived Metrics:" not in out
+        # …but the profiling block still renders.
+        assert "Profiling:" in out
+        assert "PMC (basic, gfx942)" in out
+
+    def test_verbose_profiling_surfaces_error_tail_for_each_source(self) -> None:
+        """Tool failures in trace/perf/roofline must show in verbose
+        output, not only in JSON. Without -o, a silent profiler failure
+        is invisible."""
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        pe = ProviderEngineResult(
+            provider="miopen",
+            engine_id=1,
+            status="success",
+            cpu_build_time_ms=12.3,
+            e2e_stats=BenchmarkStats(
+                mean_ms=1.0,
+                std_ms=0.1,
+                min_ms=0.9,
+                max_ms=1.1,
+                p95_ms=1.05,
+                p99_ms=1.09,
+            ),
+            gpu_kernel_stats=BenchmarkStats(
+                mean_ms=0.5,
+                std_ms=0.05,
+                min_ms=0.45,
+                max_ms=0.55,
+                p95_ms=0.52,
+                p99_ms=0.54,
+            ),
+            extra_metrics={
+                "trace": {"format": "pftrace", "error_tail": "boom", "returncode": 3},
+                "perf": {"error_tail": "perf: bad event", "returncode": 2},
+                "roofline": {"error_tail": "workload failed", "returncode": 1},
+            },
+        )
+        gr = GraphResult(graph_name="g", graph_path="/tmp/g.json", results=[pe])
+        reporter.print_verbose_graph_result(gr, SuiteConfig())
+        out = output.getvalue()
+        assert "Trace (pftrace):" in out and "rc=3" in out
+        assert "CPU (perf):" in out and "rc=2" in out
+        assert "Roofline:" in out and "rc=1" in out
+
 
 class TestPrintHeader:
     """Tests for print_header provider override."""
@@ -400,3 +512,76 @@ class TestPrintHeader:
         out = output.getvalue()
         assert "Engine ID:  42 (HIPBLASLT_ENGINE)" in out
         assert "(MIOpen)" not in out
+
+    def test_reference_row_status_renders_reference(self) -> None:
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        graph = GraphResult(
+            graph_name="g",
+            graph_path="/tmp/g.json",
+            results=[
+                ProviderEngineResult(
+                    provider="pytorch",
+                    engine_id=0,
+                    status="success",
+                    role="reference",
+                    e2e_stats=BenchmarkStats(
+                        mean_ms=2.0,
+                        median_ms=2.0,
+                        std_ms=0.0,
+                        min_ms=2.0,
+                        max_ms=2.0,
+                        p95_ms=2.0,
+                        p99_ms=2.0,
+                    ),
+                )
+            ],
+        )
+
+        reporter.print_graph_result_table(graph)
+
+        assert "reference" in output.getvalue()
+
+
+class TestMachineSummaryPlatformLabel:
+    """The suite header shows a platform-appropriate accelerator label.
+
+    A CUDA wheel reports cuda_version (and cudnn_version); a ROCm wheel
+    reports rocm_version. The header must show only the label that matches
+    the running platform — CUDA hosts never print a ROCm line, and ROCm
+    hosts never print a CUDA/cuDNN line.
+    """
+
+    @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
+    def test_cuda_host_shows_cuda_and_cudnn_not_rocm(self, mock_env) -> None:
+        mock_env.return_value = {
+            "cpu_model": "Test CPU",
+            "gpu_model": "NVIDIA GeForce RTX 5080",
+            "rocm_version": None,
+            "cuda_version": "13.0",
+            "cudnn_version": "9.20.0",
+        }
+        output = io.StringIO()
+        Reporter(output=output).print_suite_header(1)
+        out = output.getvalue()
+
+        assert "CUDA:    13.0" in out
+        assert "cuDNN:   9.20.0" in out
+        assert "ROCm:" not in out
+
+    @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
+    def test_rocm_host_shows_rocm_not_cuda(self, mock_env) -> None:
+        mock_env.return_value = {
+            "cpu_model": "Test CPU",
+            "gpu_model": "AMD Instinct MI300X",
+            "rocm_version": "6.2.0",
+            "cuda_version": None,
+            "cudnn_version": None,
+        }
+        output = io.StringIO()
+        Reporter(output=output).print_suite_header(1)
+        out = output.getvalue()
+
+        assert "ROCm:    6.2.0" in out
+        assert "CUDA:" not in out
+        assert "cuDNN:" not in out

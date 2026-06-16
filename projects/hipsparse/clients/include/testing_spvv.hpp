@@ -39,7 +39,7 @@
 
 using namespace hipsparse_test;
 
-template <typename I, typename T>
+template <typename I, typename X, typename Y, typename T>
 void testing_spvv_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
@@ -47,46 +47,48 @@ void testing_spvv_bad_arg(const Arguments& argus)
     int64_t size = 100;
     int64_t nnz  = 100;
 
-    float result;
+    T result;
 
-    hipsparseOperation_t opType   = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-    hipsparseIndexType_t idxType  = HIPSPARSE_INDEX_32I;
-    hipsparseIndexBase_t idxBase  = HIPSPARSE_INDEX_BASE_ZERO;
-    hipDataType          dataType = HIP_R_32F;
+    hipsparseOperation_t opType      = HIPSPARSE_OPERATION_NON_TRANSPOSE;
+    hipsparseIndexType_t idxType     = HIPSPARSE_INDEX_32I;
+    hipsparseIndexBase_t idxBase     = HIPSPARSE_INDEX_BASE_ZERO;
+    hipDataType          xType       = getDataType<X>();
+    hipDataType          yType       = getDataType<Y>();
+    hipDataType          computeType = getDataType<T>();
 
     hipsparseLocalHandle_t handle;
 
-    auto dx_val_managed = hipsparse_unique_ptr{device_malloc(sizeof(float) * nnz), device_free};
+    auto dx_val_managed = hipsparse_unique_ptr{device_malloc(sizeof(X) * nnz), device_free};
     auto dx_ind_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * nnz), device_free};
-    auto dy_managed     = hipsparse_unique_ptr{device_malloc(sizeof(float) * size), device_free};
+    auto dy_managed     = hipsparse_unique_ptr{device_malloc(sizeof(Y) * size), device_free};
 
-    float* dx_val = (float*)dx_val_managed.get();
-    int*   dx_ind = (int*)dx_ind_managed.get();
-    float* dy     = (float*)dy_managed.get();
+    X*   dx_val = (X*)dx_val_managed.get();
+    int* dx_ind = (int*)dx_ind_managed.get();
+    Y*   dy     = (Y*)dy_managed.get();
 
     // Structures
     hipsparseSpVecDescr_t x;
     hipsparseDnVecDescr_t y;
 
     verify_hipsparse_status_success(
-        hipsparseCreateSpVec(&x, size, nnz, dx_ind, dx_val, idxType, idxBase, dataType), "Success");
-    verify_hipsparse_status_success(hipsparseCreateDnVec(&y, size, dy, dataType), "Success");
+        hipsparseCreateSpVec(&x, size, nnz, dx_ind, dx_val, idxType, idxBase, xType), "Success");
+    verify_hipsparse_status_success(hipsparseCreateDnVec(&y, size, dy, yType), "Success");
 
     // SpVV bufferSize
     size_t bufferSize;
     verify_hipsparse_status_invalid_handle(
-        hipsparseSpVV_bufferSize(nullptr, opType, x, y, &result, dataType, &bufferSize));
+        hipsparseSpVV_bufferSize(nullptr, opType, x, y, &result, computeType, &bufferSize));
     verify_hipsparse_status_invalid_pointer(
-        hipsparseSpVV_bufferSize(handle, opType, nullptr, y, &result, dataType, &bufferSize),
+        hipsparseSpVV_bufferSize(handle, opType, nullptr, y, &result, computeType, &bufferSize),
         "Error: x is nullptr");
     verify_hipsparse_status_invalid_pointer(
-        hipsparseSpVV_bufferSize(handle, opType, x, nullptr, &result, dataType, &bufferSize),
+        hipsparseSpVV_bufferSize(handle, opType, x, nullptr, &result, computeType, &bufferSize),
         "Error: y is nullptr");
     verify_hipsparse_status_invalid_pointer(
-        hipsparseSpVV_bufferSize(handle, opType, x, y, nullptr, dataType, &bufferSize),
+        hipsparseSpVV_bufferSize(handle, opType, x, y, nullptr, computeType, &bufferSize),
         "Error: result is nullptr");
     verify_hipsparse_status_invalid_pointer(
-        hipsparseSpVV_bufferSize(handle, opType, x, y, &result, dataType, nullptr),
+        hipsparseSpVV_bufferSize(handle, opType, x, y, &result, computeType, nullptr),
         "Error: bufferSize is nullptr");
 
     // SpVV
@@ -94,17 +96,18 @@ void testing_spvv_bad_arg(const Arguments& argus)
     CHECK_HIP_ERROR(hipMalloc(&buffer, 100));
 
     verify_hipsparse_status_invalid_handle(
-        hipsparseSpVV(nullptr, opType, x, y, &result, dataType, buffer));
+        hipsparseSpVV(nullptr, opType, x, y, &result, computeType, buffer));
     verify_hipsparse_status_invalid_pointer(
-        hipsparseSpVV(handle, opType, nullptr, y, &result, dataType, buffer),
+        hipsparseSpVV(handle, opType, nullptr, y, &result, computeType, buffer),
         "Error: x is nullptr");
     verify_hipsparse_status_invalid_pointer(
-        hipsparseSpVV(handle, opType, x, nullptr, &result, dataType, buffer),
+        hipsparseSpVV(handle, opType, x, nullptr, &result, computeType, buffer),
         "Error: y is nullptr");
     verify_hipsparse_status_invalid_pointer(
-        hipsparseSpVV(handle, opType, x, y, nullptr, dataType, buffer), "Error: result is nullptr");
+        hipsparseSpVV(handle, opType, x, y, nullptr, computeType, buffer),
+        "Error: result is nullptr");
     verify_hipsparse_status_invalid_pointer(
-        hipsparseSpVV(handle, opType, x, y, &result, dataType, nullptr),
+        hipsparseSpVV(handle, opType, x, y, &result, computeType, nullptr),
         "Error: buffer is nullptr");
 
     // Destruct
@@ -115,7 +118,7 @@ void testing_spvv_bad_arg(const Arguments& argus)
 #endif
 }
 
-template <typename I, typename T>
+template <typename I, typename X, typename Y, typename T>
 void testing_spvv(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
@@ -125,9 +128,11 @@ void testing_spvv(Arguments argus)
     hipsparseOperation_t trans   = argus.transA;
     hipsparseIndexBase_t idxBase = argus.baseA;
 
-    // Index and data type
-    hipsparseIndexType_t idxType  = getIndexType<I>();
-    hipDataType          dataType = getDataType<T>();
+    // Index, vector element and compute data types
+    hipsparseIndexType_t idxType     = getIndexType<I>();
+    hipDataType          xType       = getDataType<X>();
+    hipDataType          yType       = getDataType<Y>();
+    hipDataType          computeType = getDataType<T>();
 
     // hipSPARSE handle
     hipsparseLocalHandle_t handle(argus);
@@ -137,38 +142,38 @@ void testing_spvv(Arguments argus)
 
     // Host structures
     std::vector<I> hx_ind(nnz);
-    std::vector<T> hx_val(nnz);
-    std::vector<T> hy(size);
+    std::vector<X> hx_val(nnz);
+    std::vector<Y> hy(size);
 
     // Initial Data on CPU
     srand(12345ULL);
     hipsparseInitIndex(hx_ind.data(), nnz, idxBase, size + idxBase);
-    hipsparseInit<T>(hx_val, 1, nnz);
-    hipsparseInit<T>(hy, 1, size);
+    hipsparseInit<X>(hx_val, 1, nnz);
+    hipsparseInit<Y>(hy, 1, size);
 
     // Allocate memory on device
     auto dx_ind_managed  = hipsparse_unique_ptr{device_malloc(sizeof(I) * nnz), device_free};
-    auto dx_val_managed  = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnz), device_free};
-    auto dy_managed      = hipsparse_unique_ptr{device_malloc(sizeof(T) * size), device_free};
+    auto dx_val_managed  = hipsparse_unique_ptr{device_malloc(sizeof(X) * nnz), device_free};
+    auto dy_managed      = hipsparse_unique_ptr{device_malloc(sizeof(Y) * size), device_free};
     auto dresult_managed = hipsparse_unique_ptr{device_malloc(sizeof(T)), device_free};
 
     I* dx_ind  = (I*)dx_ind_managed.get();
-    T* dx_val  = (T*)dx_val_managed.get();
-    T* dy      = (T*)dy_managed.get();
+    X* dx_val  = (X*)dx_val_managed.get();
+    Y* dy      = (Y*)dy_managed.get();
     T* dresult = (T*)dresult_managed.get();
 
     // copy data from CPU to device
     CHECK_HIP_ERROR(hipMemcpy(dx_ind, hx_ind.data(), sizeof(I) * nnz, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dx_val, hx_val.data(), sizeof(T) * nnz, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dy, hy.data(), sizeof(T) * size, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dx_val, hx_val.data(), sizeof(X) * nnz, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dy, hy.data(), sizeof(Y) * size, hipMemcpyHostToDevice));
 
     // Create structures
     hipsparseSpVecDescr_t x;
     hipsparseDnVecDescr_t y;
 
     CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateSpVec(&x, size, nnz, dx_ind, dx_val, idxType, idxBase, dataType));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y, size, dy, dataType));
+        hipsparseCreateSpVec(&x, size, nnz, dx_ind, dx_val, idxType, idxBase, xType));
+    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y, size, dy, yType));
 
     T hresult;
     T hresult_gold;
@@ -177,7 +182,7 @@ void testing_spvv(Arguments argus)
     // SpVV_bufferSize
     size_t bufferSize;
     CHECK_HIPSPARSE_ERROR(
-        testing::hipsparseSpVV_bufferSize(handle, trans, x, y, &hresult, dataType, &bufferSize));
+        testing::hipsparseSpVV_bufferSize(handle, trans, x, y, &hresult, computeType, &bufferSize));
 
     void* externalBuffer;
     CHECK_HIP_ERROR(hipMalloc(&externalBuffer, bufferSize));
@@ -186,18 +191,19 @@ void testing_spvv(Arguments argus)
     {
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
         CHECK_HIPSPARSE_ERROR(
-            testing::hipsparseSpVV(handle, trans, x, y, &hresult, dataType, externalBuffer));
+            testing::hipsparseSpVV(handle, trans, x, y, &hresult, computeType, externalBuffer));
 
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
         CHECK_HIPSPARSE_ERROR(
-            testing::hipsparseSpVV(handle, trans, x, y, dresult, dataType, externalBuffer));
+            testing::hipsparseSpVV(handle, trans, x, y, dresult, computeType, externalBuffer));
 
         // Copy output from device to CPU
         CHECK_HIP_ERROR(
             hipMemcpy(&hresult_copied_from_device, dresult, sizeof(T), hipMemcpyDeviceToHost));
 
         // CPU solution
-        host_spvv(nnz, hx_val.data(), hx_ind.data(), hy.data(), &hresult_gold, trans, idxBase);
+        host_spvv<I, X, Y, T>(
+            nnz, hx_val.data(), hx_ind.data(), hy.data(), &hresult_gold, trans, idxBase);
 
         // Verify results against host
         unit_check_general(1, 1, 1, &hresult_gold, &hresult);
@@ -215,7 +221,7 @@ void testing_spvv(Arguments argus)
         for(int iter = 0; iter < number_cold_calls; ++iter)
         {
             CHECK_HIPSPARSE_ERROR(
-                testing::hipsparseSpVV(handle, trans, x, y, &hresult, dataType, externalBuffer));
+                testing::hipsparseSpVV(handle, trans, x, y, &hresult, computeType, externalBuffer));
             CHECK_HIP_ERROR(hipStreamSynchronize(stream));
         }
 
@@ -225,14 +231,14 @@ void testing_spvv(Arguments argus)
         for(int iter = 0; iter < number_hot_calls; ++iter)
         {
             CHECK_HIPSPARSE_ERROR(
-                testing::hipsparseSpVV(handle, trans, x, y, &hresult, dataType, externalBuffer));
+                testing::hipsparseSpVV(handle, trans, x, y, &hresult, computeType, externalBuffer));
             CHECK_HIP_ERROR(hipStreamSynchronize(stream));
         }
 
         gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
 
         double gflop_count = doti_gflop_count(nnz);
-        double gbyte_count = doti_gbyte_count<T, T>(nnz);
+        double gbyte_count = doti_gbyte_count<X, Y>(nnz);
 
         double gpu_gbyte  = get_gpu_gbyte(gpu_time_used, gbyte_count);
         double gpu_gflops = get_gpu_gflops(gpu_time_used, gflop_count);

@@ -1,7 +1,7 @@
 /*! \file */
 
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -53,20 +53,24 @@ void rocsparse::roctx_variables_st::set_roctx_enabled(bool value)
 
 extern "C" {
 
-// LCOV_EXCL_START
 void rocsparse_enable_roctx()
 {
+    // LCOV_EXCL_START
     rocsparse_roctx_variables.set_roctx_enabled(true);
+    // LCOV_EXCL_STOP
 }
 
 void rocsparse_disable_roctx()
 {
+    // LCOV_EXCL_START
     rocsparse_roctx_variables.set_roctx_enabled(false);
+    // LCOV_EXCL_STOP
 }
 
 int rocsparse_state_roctx()
 {
+    // LCOV_EXCL_START
     return rocsparse_roctx_variables.get_roctx_enabled() ? 1 : 0;
+    // LCOV_EXCL_STOP
 }
-// LCOV_EXCL_STOP
 }

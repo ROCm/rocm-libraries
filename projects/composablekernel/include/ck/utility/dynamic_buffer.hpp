@@ -16,10 +16,10 @@
 #include "generic_memory_space_atomic.hpp"
 #include "data_cache_prefetch.hpp"
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck {
 
 // T may be scalar or vector
@@ -516,28 +516,19 @@ struct DynamicBuffer
 
 template <AddressSpaceEnum BufferAddressSpace,
           AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence,
+          typename IndexType               = index_t,
           typename T,
           typename ElementSpaceSize>
 __host__ __device__ constexpr auto make_dynamic_buffer(T* p, ElementSpaceSize element_space_size)
 {
-    return DynamicBuffer<BufferAddressSpace, T, ElementSpaceSize, true, coherence>{
-        p, element_space_size};
-}
-
-template <AddressSpaceEnum BufferAddressSpace,
-          AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence,
-          typename T,
-          typename ElementSpaceSize>
-__host__ __device__ constexpr auto make_long_dynamic_buffer(T* p,
-                                                            ElementSpaceSize element_space_size)
-{
-    return DynamicBuffer<BufferAddressSpace, T, ElementSpaceSize, true, coherence, long_index_t>{
+    return DynamicBuffer<BufferAddressSpace, T, ElementSpaceSize, true, coherence, IndexType>{
         p, element_space_size};
 }
 
 template <
     AddressSpaceEnum BufferAddressSpace,
     AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence,
+    typename IndexType               = index_t,
     typename T,
     typename ElementSpaceSize,
     typename X,
@@ -545,10 +536,12 @@ template <
 __host__ __device__ constexpr auto
 make_dynamic_buffer(T* p, ElementSpaceSize element_space_size, X invalid_element_value)
 {
-    return DynamicBuffer<BufferAddressSpace, T, ElementSpaceSize, false, coherence>{
+    return DynamicBuffer<BufferAddressSpace, T, ElementSpaceSize, false, coherence, IndexType>{
         p, element_space_size, invalid_element_value};
 }
 
 } // namespace ck
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

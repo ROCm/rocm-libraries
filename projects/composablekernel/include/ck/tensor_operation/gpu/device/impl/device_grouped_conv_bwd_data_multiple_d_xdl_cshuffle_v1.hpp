@@ -32,6 +32,7 @@
 #include "ck_tile/builder/reflect/description.hpp"
 #include "ck_tile/builder/reflect/instance_traits_device_grouped_conv_bwd_data_multiple_d_xdl_cshuffle.hpp"
 #endif
+#include "ck/tensor_operation/gpu/device/tensor_size_check.hpp"
 
 namespace ck {
 namespace tensor_operation {
@@ -818,7 +819,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                  const AElementwiseOp& a_element_op,
                  const BElementwiseOp& b_element_op,
                  const CDEElementwiseOp& cde_element_op,
-                 ck::index_t split_k = 1)
+                 ck::index_t split_k     = 1,
+                 bool stride_overflow_in = false)
             : p_a_grid_{static_cast<const ADataType*>(p_a)},
               p_b_grid_{static_cast<const BDataType*>(p_b)},
               p_ds_grid_{},
@@ -836,6 +838,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
               input_right_pads_{input_right_pads},
               k_batch_{split_k}
         {
+            stride_overflow             = stride_overflow_in;
             bool image_covered_dilation = true;
             bool image_covered_strides  = true;
             for(index_t d = 0; d < NDimSpatial; d++)
@@ -1287,6 +1290,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
 
         bool bwd_needs_zero_out;
         long_index_t e_space_size_bytes;
+        bool stride_overflow;
     };
 
     // Invoker
@@ -1486,17 +1490,23 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                 };
 
                 // Dispatch: use flat-descriptor path (non-grouped GEMM) for G=1,
-                // NDim=2. The non-grouped kernel uses packed (flat) descriptors
-                // with fewer transform layers, avoiding the grouped GEMM overhead.
-                // The NoShuffle epilogue used by this path supports only unary
-                // element-wise ops (e.g. PassThrough). When D tensors are present
-                // the cde_element_op is multi-input (e.g. AddRelu(y, x0, x1)),
-                // which is incompatible with the unary VGPR->global writer; fall
-                // back to the regular CShuffle path in that case.
+                // NDim=2, no D tensors, and a single sub-GEMM per dispatch
+                // (gemms_count_ == 1, i.e. stride == dilation on every spatial
+                // axis). The non-grouped kernel uses packed (flat) descriptors
+                // with fewer transform layers, but processes exactly one
+                // sub-GEMM per launch. When stride > dilation the implicit GEMM
+                // is split into gemms_count_ sub-GEMMs whose output cells tile
+                // dx disjointly; routing those through the flat path would
+                // require gemms_count_ separate launches, which has been
+                // measured to be 6-32% slower than letting the grouped CShuffle
+                // path walk the sub-GEMMs in a single launch via the packed
+                // descriptor array. The NoShuffle epilogue used by the flat
+                // path is also unary-only, so D tensors fall back here as well.
                 bool used_flat_desc = false;
                 if constexpr(NDimSpatial == 2 && !CTranspose && NumDTensor == 0)
                 {
-                    if(arg.num_group_ == 1 && arg.k_batch_ == 1 && !arg.flat_a_container_.empty())
+                    if(arg.num_group_ == 1 && arg.k_batch_ == 1 && arg.gemms_count_ == 1 &&
+                       !arg.flat_a_container_.empty())
                     {
                         used_flat_desc          = true;
                         const index_t flat_idx  = gemm_set_id;
@@ -1765,6 +1775,9 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
 
     static bool IsSupportedArgument(const Argument& arg)
     {
+        if(arg.stride_overflow)
+            return false;
+
         // gfx11 doesn't support float atomic
         // Todo: Enable splitK for gfx12
         if((ck::is_gfx12_supported() || ck::is_gfx11_supported()) && arg.k_batch_ > 1)
@@ -2128,6 +2141,91 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                         split_k};
     }
 
+    static auto MakeArgument(
+        const void* p_a,                                                      // output image
+        const void* p_b,                                                      // weight
+        const std::array<const void*, NumDTensor>& p_ds,                      // bias
+        void* p_e,                                                            // input image
+        const std::array<long_index_t, NDimSpatial + 3>& a_g_n_k_wos_lengths, // output image
+        const std::array<long_index_t, NDimSpatial + 3>& a_g_n_k_wos_strides, // output image
+        const std::array<long_index_t, NDimSpatial + 3>& b_g_k_c_xs_lengths,  // weight
+        const std::array<long_index_t, NDimSpatial + 3>& b_g_k_c_xs_strides,  // weight
+        const std::array<std::array<long_index_t, NDimSpatial + 3>, NumDTensor>&
+            ds_g_n_c_wis_lengths, // bias
+        const std::array<std::array<long_index_t, NDimSpatial + 3>, NumDTensor>&
+            ds_g_n_c_wis_strides,                                             // bias
+        const std::array<long_index_t, NDimSpatial + 3>& e_g_n_c_wis_lengths, // input image
+        const std::array<long_index_t, NDimSpatial + 3>& e_g_n_c_wis_strides, // input image
+        const std::array<long_index_t, NDimSpatial>& conv_filter_strides,
+        const std::array<long_index_t, NDimSpatial>& conv_filter_dilations,
+        const std::array<long_index_t, NDimSpatial>& input_left_pads,
+        const std::array<long_index_t, NDimSpatial>& input_right_pads,
+        const AElementwiseOp& a_element_op,
+        const BElementwiseOp& b_element_op,
+        const CDEElementwiseOp& cde_element_op,
+        const ck::index_t split_k = 1)
+    {
+        bool ds_ovf = false;
+        static_for<0, NumDTensor, 1>{}([&](auto i) {
+            using DDataType = remove_cvref_t<tuple_element_t<i.value, DsDataType>>;
+            ds_ovf |= tensor_exceeds_2gb<DDataType>(ds_g_n_c_wis_lengths[i]);
+        });
+        const bool stride_ovf = tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths) ||
+                                tensor_exceeds_2gb<BDataType>(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb<EDataType>(e_g_n_c_wis_lengths) || ds_ovf;
+
+        std::array<index_t, NDimSpatial + 3> a_g_n_k_wos_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> a_g_n_k_wos_strides_i32;
+        std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_strides_i32;
+        std::array<std::array<index_t, NDimSpatial + 3>, NumDTensor> ds_g_n_c_wis_lengths_i32;
+        std::array<std::array<index_t, NDimSpatial + 3>, NumDTensor> ds_g_n_c_wis_strides_i32;
+        std::array<index_t, NDimSpatial + 3> e_g_n_c_wis_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> e_g_n_c_wis_strides_i32;
+        std::array<index_t, NDimSpatial> conv_filter_strides_i32;
+        std::array<index_t, NDimSpatial> conv_filter_dilations_i32;
+        std::array<index_t, NDimSpatial> input_left_pads_i32;
+        std::array<index_t, NDimSpatial> input_right_pads_i32;
+
+        array_convert(a_g_n_k_wos_lengths_i32, a_g_n_k_wos_lengths);
+        array_convert(a_g_n_k_wos_strides_i32, a_g_n_k_wos_strides);
+        array_convert(b_g_k_c_xs_lengths_i32, b_g_k_c_xs_lengths);
+        array_convert(b_g_k_c_xs_strides_i32, b_g_k_c_xs_strides);
+        for(index_t d = 0; d < NumDTensor; d++)
+        {
+            array_convert(ds_g_n_c_wis_lengths_i32[d], ds_g_n_c_wis_lengths[d]);
+            array_convert(ds_g_n_c_wis_strides_i32[d], ds_g_n_c_wis_strides[d]);
+        }
+        array_convert(e_g_n_c_wis_lengths_i32, e_g_n_c_wis_lengths);
+        array_convert(e_g_n_c_wis_strides_i32, e_g_n_c_wis_strides);
+        array_convert(conv_filter_strides_i32, conv_filter_strides);
+        array_convert(conv_filter_dilations_i32, conv_filter_dilations);
+        array_convert(input_left_pads_i32, input_left_pads);
+        array_convert(input_right_pads_i32, input_right_pads);
+
+        return Argument{p_a,
+                        p_b,
+                        p_ds,
+                        p_e,
+                        a_g_n_k_wos_lengths_i32,
+                        a_g_n_k_wos_strides_i32,
+                        b_g_k_c_xs_lengths_i32,
+                        b_g_k_c_xs_strides_i32,
+                        ds_g_n_c_wis_lengths_i32,
+                        ds_g_n_c_wis_strides_i32,
+                        e_g_n_c_wis_lengths_i32,
+                        e_g_n_c_wis_strides_i32,
+                        conv_filter_strides_i32,
+                        conv_filter_dilations_i32,
+                        input_left_pads_i32,
+                        input_right_pads_i32,
+                        a_element_op,
+                        b_element_op,
+                        cde_element_op,
+                        split_k,
+                        stride_ovf};
+    }
+
     static auto MakeInvoker() { return Invoker{}; }
 
     std::unique_ptr<BaseArgument> MakeArgumentPointer(
@@ -2174,6 +2272,91 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                                           b_element_op,
                                           cde_element_op,
                                           split_k);
+    }
+
+    std::unique_ptr<BaseArgument> MakeArgumentPointer(
+        const void* p_a,                                                      // output image
+        const void* p_b,                                                      // weight
+        const std::array<const void*, NumDTensor>& p_ds,                      // bias
+        void* p_e,                                                            // input image
+        const std::array<long_index_t, NDimSpatial + 3>& a_g_n_k_wos_lengths, // output image
+        const std::array<long_index_t, NDimSpatial + 3>& a_g_n_k_wos_strides, // output image
+        const std::array<long_index_t, NDimSpatial + 3>& b_g_k_c_xs_lengths,  // weight
+        const std::array<long_index_t, NDimSpatial + 3>& b_g_k_c_xs_strides,  // weight
+        const std::array<std::array<long_index_t, NDimSpatial + 3>, NumDTensor>&
+            ds_g_n_c_wis_lengths, // bias
+        const std::array<std::array<long_index_t, NDimSpatial + 3>, NumDTensor>&
+            ds_g_n_c_wis_strides,                                             // bias
+        const std::array<long_index_t, NDimSpatial + 3>& e_g_n_c_wis_lengths, // input image
+        const std::array<long_index_t, NDimSpatial + 3>& e_g_n_c_wis_strides, // input image
+        const std::array<long_index_t, NDimSpatial>& conv_filter_strides,
+        const std::array<long_index_t, NDimSpatial>& conv_filter_dilations,
+        const std::array<long_index_t, NDimSpatial>& input_left_pads,
+        const std::array<long_index_t, NDimSpatial>& input_right_pads,
+        const AElementwiseOp& a_element_op,
+        const BElementwiseOp& b_element_op,
+        const CDEElementwiseOp& cde_element_op,
+        const ck::index_t split_k = 1) override
+    {
+        bool ds_ovf = false;
+        static_for<0, NumDTensor, 1>{}([&](auto i) {
+            using DDataType = remove_cvref_t<tuple_element_t<i.value, DsDataType>>;
+            ds_ovf |= tensor_exceeds_2gb<DDataType>(ds_g_n_c_wis_lengths[i]);
+        });
+        const bool stride_ovf = tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths) ||
+                                tensor_exceeds_2gb<BDataType>(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb<EDataType>(e_g_n_c_wis_lengths) || ds_ovf;
+
+        std::array<index_t, NDimSpatial + 3> a_g_n_k_wos_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> a_g_n_k_wos_strides_i32;
+        std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_strides_i32;
+        std::array<std::array<index_t, NDimSpatial + 3>, NumDTensor> ds_g_n_c_wis_lengths_i32;
+        std::array<std::array<index_t, NDimSpatial + 3>, NumDTensor> ds_g_n_c_wis_strides_i32;
+        std::array<index_t, NDimSpatial + 3> e_g_n_c_wis_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> e_g_n_c_wis_strides_i32;
+        std::array<index_t, NDimSpatial> conv_filter_strides_i32;
+        std::array<index_t, NDimSpatial> conv_filter_dilations_i32;
+        std::array<index_t, NDimSpatial> input_left_pads_i32;
+        std::array<index_t, NDimSpatial> input_right_pads_i32;
+
+        array_convert(a_g_n_k_wos_lengths_i32, a_g_n_k_wos_lengths);
+        array_convert(a_g_n_k_wos_strides_i32, a_g_n_k_wos_strides);
+        array_convert(b_g_k_c_xs_lengths_i32, b_g_k_c_xs_lengths);
+        array_convert(b_g_k_c_xs_strides_i32, b_g_k_c_xs_strides);
+        for(index_t d = 0; d < NumDTensor; d++)
+        {
+            array_convert(ds_g_n_c_wis_lengths_i32[d], ds_g_n_c_wis_lengths[d]);
+            array_convert(ds_g_n_c_wis_strides_i32[d], ds_g_n_c_wis_strides[d]);
+        }
+        array_convert(e_g_n_c_wis_lengths_i32, e_g_n_c_wis_lengths);
+        array_convert(e_g_n_c_wis_strides_i32, e_g_n_c_wis_strides);
+        array_convert(conv_filter_strides_i32, conv_filter_strides);
+        array_convert(conv_filter_dilations_i32, conv_filter_dilations);
+        array_convert(input_left_pads_i32, input_left_pads);
+        array_convert(input_right_pads_i32, input_right_pads);
+
+        return std::make_unique<Argument>(p_a,
+                                          p_b,
+                                          p_ds,
+                                          p_e,
+                                          a_g_n_k_wos_lengths_i32,
+                                          a_g_n_k_wos_strides_i32,
+                                          b_g_k_c_xs_lengths_i32,
+                                          b_g_k_c_xs_strides_i32,
+                                          ds_g_n_c_wis_lengths_i32,
+                                          ds_g_n_c_wis_strides_i32,
+                                          e_g_n_c_wis_lengths_i32,
+                                          e_g_n_c_wis_strides_i32,
+                                          conv_filter_strides_i32,
+                                          conv_filter_dilations_i32,
+                                          input_left_pads_i32,
+                                          input_right_pads_i32,
+                                          a_element_op,
+                                          b_element_op,
+                                          cde_element_op,
+                                          split_k,
+                                          stride_ovf);
     }
 
     std::unique_ptr<BaseInvoker> MakeInvokerPointer() override

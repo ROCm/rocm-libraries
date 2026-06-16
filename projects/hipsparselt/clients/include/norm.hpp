@@ -105,7 +105,13 @@ void m_axpy(size_t* N, T* alpha, T* x, int* incx, T* y, int* incy)
 // Real
 template <
     typename T,
-    std::enable_if_t<!(std::is_same<T, hipsparselt_fp8_e4m3>{} || std::is_same<T, hipsparselt_fp8_e5m2>{}
+    std::enable_if_t<!(false
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP        
+                       || std::is_same<T, hipsparselt_fp8_e4m3>{} || std::is_same<T, hipsparselt_fp8_e5m2>{}
+#endif        
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
+                       || std::is_same<T, hipsparselt_fp8_e4m3_fnuz>{} || std::is_same<T, hipsparselt_fp8_e5m2_fnuz>{}
+#endif
                        ),
                      int>
     = 0>
@@ -151,7 +157,14 @@ double norm_check_general(char norm_type, int64_t M, int64_t N, int64_t lda, T* 
 
 template <
     typename T,
-    std::enable_if_t<(std::is_same<T, hipsparselt_fp8_e4m3>{} || std::is_same<T, hipsparselt_fp8_e5m2>{}), int>
+    std::enable_if_t<(false
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
+                      || std::is_same<T, hipsparselt_fp8_e4m3>{} || std::is_same<T, hipsparselt_fp8_e5m2>{}
+#endif
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
+                      || std::is_same<T, hipsparselt_fp8_e4m3_fnuz>{} || std::is_same<T, hipsparselt_fp8_e5m2_fnuz>{}
+#endif
+                     ), int>
     = 0>
 double norm_check_general(char norm_type, int64_t M, int64_t N, int64_t lda, T* hCPU, T* hGPU)
 {
@@ -334,6 +347,7 @@ double norm_check_general(
                                                 lda,
                                                 static_cast<hip_bfloat16*>(hCPU),
                                                 static_cast<hip_bfloat16*>(hGPU));
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
     case HIP_R_8F_E4M3:
         return norm_check_general<hipsparselt_fp8_e4m3>(norm_type,
                                                 M,
@@ -348,6 +362,23 @@ double norm_check_general(
                                                  lda,
                                                  static_cast<hipsparselt_fp8_e5m2*>(hCPU),
                                                  static_cast<hipsparselt_fp8_e5m2*>(hGPU));
+#endif                                                 
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
+    case HIP_R_8F_E4M3_FNUZ:
+        return norm_check_general<hipsparselt_fp8_e4m3_fnuz>(norm_type,
+                                                M,
+                                                N,
+                                                lda,
+                                                static_cast<hipsparselt_fp8_e4m3_fnuz*>(hCPU),
+                                                static_cast<hipsparselt_fp8_e4m3_fnuz*>(hGPU));
+    case HIP_R_8F_E5M2_FNUZ:
+        return norm_check_general<hipsparselt_fp8_e5m2_fnuz>(norm_type,
+                                                 M,
+                                                 N,
+                                                 lda,
+                                                 static_cast<hipsparselt_fp8_e5m2_fnuz*>(hCPU),
+                                                 static_cast<hipsparselt_fp8_e5m2_fnuz*>(hGPU));
+#endif
     case HIP_R_32I:
         return norm_check_general<int32_t>(
             norm_type, M, N, lda, static_cast<int32_t*>(hCPU), static_cast<int32_t*>(hGPU));
@@ -403,6 +434,8 @@ double norm_check_general(char        norm_type,
                                                 static_cast<hip_bfloat16*>(hCPU),
                                                 static_cast<hip_bfloat16*>(hGPU),
                                                 batch_count);
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
+    case HIP_R_8F_E4M3:
         return norm_check_general<hipsparselt_fp8_e4m3>(norm_type,
                                                 M,
                                                 N,
@@ -420,6 +453,27 @@ double norm_check_general(char        norm_type,
                                                  static_cast<hipsparselt_fp8_e5m2*>(hCPU),
                                                  static_cast<hipsparselt_fp8_e5m2*>(hGPU),
                                                  batch_count);
+#endif
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
+    case HIP_R_8F_E4M3_FNUZ:
+        return norm_check_general<hipsparselt_fp8_e4m3_fnuz>(norm_type,
+                                                M,
+                                                N,
+                                                lda,
+                                                stride_a,
+                                                static_cast<hipsparselt_fp8_e4m3_fnuz*>(hCPU),
+                                                static_cast<hipsparselt_fp8_e4m3_fnuz*>(hGPU),
+                                                batch_count);
+    case HIP_R_8F_E5M2_FNUZ:
+        return norm_check_general<hipsparselt_fp8_e5m2_fnuz>(norm_type,
+                                                 M,
+                                                 N,
+                                                 lda,
+                                                 stride_a,
+                                                 static_cast<hipsparselt_fp8_e5m2_fnuz*>(hCPU),
+                                                 static_cast<hipsparselt_fp8_e5m2_fnuz*>(hGPU),
+                                                 batch_count);
+#endif
     case HIP_R_32I:
         return norm_check_general<int32_t>(norm_type,
                                            M,
@@ -460,10 +514,18 @@ bool norm_check(double norm_error)
         return norm_error < 0.01;
     if(std::is_same<T, int32_t>{})
         return norm_error < 0.0001;
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
     if(std::is_same<T, hipsparselt_fp8_e4m3>{})
         return norm_error < 0.125;
     if(std::is_same<T, hipsparselt_fp8_e5m2>{})
         return norm_error < 0.25;
+#endif
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
+    if(std::is_same<T, hipsparselt_fp8_e4m3_fnuz>{})
+        return norm_error < 0.125;
+    if(std::is_same<T, hipsparselt_fp8_e5m2_fnuz>{})
+        return norm_error < 0.25;
+#endif
     return false;
 }
 
@@ -479,10 +541,18 @@ bool norm_check(double norm_error, hipDataType type)
         return norm_error < 0.01;
     case HIP_R_16BF:
         return norm_error < 0.1;
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
     case HIP_R_8F_E4M3:
         return norm_error < 0.125;
     case HIP_R_8F_E5M2:
         return norm_error < 0.25;
+#endif
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ        
+    case HIP_R_8F_E4M3_FNUZ:
+        return norm_error < 0.125;
+    case HIP_R_8F_E5M2_FNUZ:
+        return norm_error < 0.25;
+#endif
     case HIP_R_32I:
         return norm_error < 0.0001;
     case HIP_R_8I:

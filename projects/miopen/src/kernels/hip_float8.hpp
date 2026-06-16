@@ -46,12 +46,15 @@
 
 #define USE_SIMPLER_HIP_F8x8 0
 
+// FP8 configuration macros. In host builds these come from config.h
+// (included transitively). In kernel builds the solver passes them
+// via -D compiler flags. Fallback defaults match CMake defaults.
 #ifndef MIOPEN_FP8_CLIPPING
 #define MIOPEN_FP8_CLIPPING 1
 #endif
 
 #ifndef MIOPEN_FP8_IEEE_EXPONENT_BIAS
-#define MIOPEN_FP8_IEEE_EXPONENT_BIAS 1
+#define MIOPEN_FP8_IEEE_EXPONENT_BIAS 0
 #endif
 
 namespace miopen_hip_f8_impl {

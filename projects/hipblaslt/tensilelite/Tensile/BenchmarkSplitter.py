@@ -120,8 +120,8 @@ class BenchmarkSplitter(object):
                 benchmarkIdx = i
 
         assert len(benchmarkProblems) == 2 \
-            and problemIdx is not -1 \
-            and benchmarkIdx is not -1, \
+            and problemIdx != -1 \
+            and benchmarkIdx != -1, \
             "Config file must have one ProblemType group and one Benchmark group"
 
         # Grab the problem sizes from the Benchmark group

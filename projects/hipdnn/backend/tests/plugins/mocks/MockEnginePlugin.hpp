@@ -83,6 +83,20 @@ public:
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers),
                 (const));
+    MOCK_METHOD(bool, hasOverrideExecute, (), (const));
+    MOCK_METHOD(void,
+                executeOpGraphWithOverrides,
+                (hipdnnEnginePluginHandle_t handle,
+                 hipdnnEnginePluginExecutionContext_t executionContext,
+                 void* workspace,
+                 const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                 uint32_t numDeviceBuffers,
+                 uint32_t numOverrides,
+                 const int64_t* overrideUniqueIds,
+                 const uint32_t* overrideLengths,
+                 const int64_t* const* overrideShapes,
+                 const int64_t* const* overrideStrides),
+                (const));
 
     // Mock inherited methods from PluginBase
     MOCK_METHOD(std::string_view, name, (), (const));

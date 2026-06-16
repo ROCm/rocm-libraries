@@ -140,6 +140,9 @@ class GemmMultiABDKernelBuilder(GemmKernelBuilder):
         for i in range(self.num_d_tensors):
             lines.append(f"using D{i}DataType = {dtype_str};")
         lines.append(f"using EDataType = {e_dtype_str};")
+        lines.append(
+            "using CDataType = EDataType;"
+        )  # alias required by GemmProfiler base
         lines.append(f"using AccDataType = {acc_type};")
         lines.append("")
 
@@ -372,49 +375,34 @@ class GemmMultiABDKernelBuilder(GemmKernelBuilder):
         if num_workers is None:
             num_workers = min(multiprocessing.cpu_count(), 8)
 
-        tile_configs = self._get_tile_configs()
-        trait_combos = self._generate_trait_combinations()
+        sampled_kernels = self._get_sampled_kernel_list()
 
         work_items = []
-        for tile_config in tile_configs:
-            for trait_combo in trait_combos:
-                (pipeline, _epilogue, scheduler, pad_m, pad_n, pad_k, persistent) = (
-                    trait_combo
+        for kernel in sampled_kernels:
+            tile_config = kernel["tile_config"]
+            trait_combo = kernel["trait_combo"]
+            work_items.append(
+                (
+                    tile_config,
+                    trait_combo,
+                    self.kernel_name_prefix,
+                    self.working_path,
+                    self.gpu_target,
+                    self.datatype,
+                    self.layout,
+                    self.a_elementwise_function,
+                    self.b_elementwise_function,
+                    self.cde_elementwise_function,
+                    self.num_a_tensors,
+                    self.num_b_tensors,
+                    self.num_d_tensors,
+                    self.config_json,
                 )
-
-                work_items.append(
-                    (
-                        tile_config,
-                        trait_combo,
-                        self.kernel_name_prefix,
-                        self.working_path,
-                        self.gpu_target,
-                        self.datatype,
-                        self.layout,
-                        self.a_elementwise_function,
-                        self.b_elementwise_function,
-                        self.cde_elementwise_function,
-                        self.num_a_tensors,
-                        self.num_b_tensors,
-                        self.num_d_tensors,
-                        self.config_json,
-                    )
-                )
-
-        # Apply RFC-cmpliant sampling (Sobol + LHS + maximin)
-        if self.max_instances and len(work_items) > self.max_instances:
-            kernel_dicts = [
-                {"tile_config": item[0], "trait_combo": item[1], "_work_item": item}
-                for item in work_items
-            ]
-            sampled = self._apply_sampling(kernel_dicts)
-            work_items = [k["_work_item"] for k in sampled]
+            )
 
         print(
             f"Generating {len(work_items)} individual kernel files using {num_workers} workers..."
         )
-        print(f"  Tile configs: {len(tile_configs)}")
-        print(f"  Trait combinations: {len(trait_combos)}")
         print(f"  Total kernels: {len(work_items)}")
         print(
             f"  NumA={self.num_a_tensors}, NumB={self.num_b_tensors}, NumD={self.num_d_tensors}"
@@ -654,7 +642,15 @@ def main():
         }
 
         trait_parts = args.trait_combo.split("_")
-        trait_combo = tuple(trait_parts[:7])
+        trait_combo = (
+            trait_parts[0],  # pipeline
+            trait_parts[1],  # epilogue
+            trait_parts[2],  # scheduler
+            trait_parts[3] == "True",  # pad_m
+            trait_parts[4] == "True",  # pad_n
+            trait_parts[5] == "True",  # pad_k
+            trait_parts[6] == "True",  # persistent
+        )
 
         builder._generate_kernel_instance(tile_config, trait_combo)
     elif args.gen_all_individual:
