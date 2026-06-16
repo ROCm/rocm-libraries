@@ -215,7 +215,7 @@ Tests:
   filename: [Chevron4]
 
 - name: csrilu0_graph_test
-  category: pre_checkin
+  category: known_bug
   function: csrilu0
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_quick

@@ -3,6 +3,7 @@
 #include "stinkytofu/hardware/ToolchainCaps.hpp"
 
 #include <cassert>
+#include <cstdint>
 #include <mutex>
 #include <string>
 

@@ -3,8 +3,8 @@
 
 """Tests for the hidden --internal-profiling-run sub-mode.
 
-The sub-mode must short-circuit gpu_check, skip Reporter output, and
-delegate to suite_runner.run_single_provider_engine for the named
+The sub-mode must skip Reporter output and delegate to
+suite_runner.run_single_provider_engine for the named
 (graph, engine). These tests focus on the wiring (parser flags,
 quiet reporter, error paths) rather than running an actual workload.
 """
@@ -94,6 +94,7 @@ class TestRunInternalProfilingSuccessPath:
 
         fake_hipdnn = MagicMock()
         fake_hipdnn.Handle.return_value = MagicMock()
+        fake_hipdnn.PluginLoadingMode.ABSOLUTE = "absolute"
         monkeypatch.setitem(_sys.modules, "hipdnn_frontend", fake_hipdnn)
         captured["hipdnn"] = fake_hipdnn
 
@@ -144,9 +145,10 @@ class TestRunInternalProfilingSuccessPath:
         assert rc == 0
         # Two forwarding paths must both fire: set_engine_plugin_paths
         # for the active hipdnn registry, and SuiteConfig.plugin_path
-        # for any inner code that reads from config.
+        # for any inner code that reads from config. An explicit CLI
+        # plugin path must replace default plugin loading, not add to it.
         captured["hipdnn"].set_engine_plugin_paths.assert_called_once_with(
-            [str(plugin)]
+            [str(plugin)], "absolute"
         )
         cfg: SuiteConfig = captured["run_kwargs"]["config"]
         assert cfg.plugin_path == plugin

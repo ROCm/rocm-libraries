@@ -289,6 +289,11 @@ class TensorDataMover(Component):
     TDM
     """
 
+class GL2Prefetch(Component):
+    """
+    GL2 Prefetch
+    """
+
 # Importing here allows auto-registry of components in the Components directory.
 # Each file must be listed in __all__ in Components/__init__.py
 # "noqa" prevents linter from complaining here.

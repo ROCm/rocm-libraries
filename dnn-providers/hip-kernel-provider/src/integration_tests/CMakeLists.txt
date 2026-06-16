@@ -15,17 +15,6 @@ endif()
 add_executable(
     hip_kernel_provider_integration_tests
     main.cpp
-    Batchnorm/IntegrationGpuBatchnormForwardInference.cpp
-    Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVariance.cpp
-    Batchnorm/IntegrationGpuBatchnormForwardInferenceAndActivation.cpp
-    Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivation.cpp
-    Batchnorm/IntegrationGpuBatchnormForwardTraining.cpp
-    Batchnorm/IntegrationGpuBatchnormFwdTrainingActiv.cpp
-    Batchnorm/IntegrationGpuBatchnormBackward.cpp
-    Batchnorm/IntegrationGpuBatchnormBackwardActivation.cpp
-    RMSnorm/IntegrationGpuRMSnormForward.cpp
-    RMSnorm/IntegrationGpuRMSnormBackward.cpp
-    Layernorm/IntegrationGpuLayernormForward.cpp
 )
 
 target_compile_options(hip_kernel_provider_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
@@ -70,6 +59,22 @@ if(ENABLE_ASM_SDPA_ENGINE)
             AITER_ASM_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../engines/asm_sdpa_engine/asm/asm_kernels"
         )
     endif()
+endif()
+
+if(ENABLE_HIP_MLOPS_ENGINE)
+    target_sources(hip_kernel_provider_integration_tests PRIVATE
+        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormForwardInference.cpp
+        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVariance.cpp
+        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormForwardInferenceAndActivation.cpp
+        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivation.cpp
+        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormForwardTraining.cpp
+        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormFwdTrainingActiv.cpp
+        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormBackward.cpp
+        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormBackwardActivation.cpp
+        hip_mlops_engine/RMSnorm/IntegrationGpuRMSnormForward.cpp
+        hip_mlops_engine/RMSnorm/IntegrationGpuRMSnormBackward.cpp
+        hip_mlops_engine/Layernorm/IntegrationGpuLayernormForward.cpp
+    )
 endif()
 
 clang_tidy_check(hip_kernel_provider_integration_tests)

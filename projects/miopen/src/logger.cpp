@@ -314,8 +314,9 @@ const char* LoggingLevelToCString(const LoggingLevel level)
     case LoggingLevel::Info: return "Info";
     case LoggingLevel::Info2: return "Info2";
     case LoggingLevel::Trace: return "Trace";
-    default: return "<Unknown>";
     }
+
+    return "<Unknown>";
 }
 
 bool IsLoggingCmd() { return env::enabled(MIOPEN_ENABLE_LOGGING_CMD) && !IsLoggingDebugQuiet(); }

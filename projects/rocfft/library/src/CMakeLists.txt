@@ -79,11 +79,13 @@ target_include_directories( rocfft_rtc_helper
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/include>
 )
 # rocfft_rtc_helper will be installed in /opt/rocm-ver/lib/rocfft/VERSION_STRING
-# To find rocm libraries need the relative RPATH
+# To find rocm libraries need the relative RPATH.  Also prevent TheRock builds
+# from overriding this RPATH.
 set(APPEND_ROCMLIB_RPATH "\$ORIGIN/../../../lib")
 target_link_libraries( rocfft_rtc_helper PRIVATE rocfft-rtc-compile )
 set_target_properties( rocfft_rtc_helper PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON
-                                         INSTALL_RPATH "${APPEND_ROCMLIB_RPATH}" )
+                                         INSTALL_RPATH "${APPEND_ROCMLIB_RPATH}"
+                                         THEROCK_NO_INSTALL_RPATH TRUE )
 target_link_directories( rocfft_rtc_helper PRIVATE ${ROCFFT_HOST_LINK_DIRS} )
 
 # Package that helps me set visibility for function names exported

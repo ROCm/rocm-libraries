@@ -217,11 +217,11 @@ install_packages( )
   fi
 
   if [[ "${build_clients}" == true ]]; then
-    library_dependencies_ubuntu+=( "gfortran" )
-    library_dependencies_centos_rhel+=( "devtoolset-7-gcc-gfortran" )
-    library_dependencies_centos_rhel_8+=( "gcc-gfortran" )
-    library_dependencies_fedora+=( "gcc-gfortran" )
-    library_dependencies_sles+=( "gcc-fortran pkg-config" "dpkg" )
+    library_dependencies_ubuntu+=( "gfortran" "python3-yaml" )
+    library_dependencies_centos_rhel+=( "devtoolset-7-gcc-gfortran" "python3-pyyaml" )
+    library_dependencies_centos_rhel_8+=( "gcc-gfortran" "python3-pyyaml" )
+    library_dependencies_fedora+=( "gcc-gfortran" "python3-pyyaml" )
+    library_dependencies_sles+=( "gcc-fortran pkg-config" "dpkg" "python3-PyYAML" )
   fi
 
   case "${ID}" in

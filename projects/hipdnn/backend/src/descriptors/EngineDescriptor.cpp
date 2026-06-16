@@ -411,7 +411,7 @@ std::string EngineDescriptor::toString() const
     str += _engineIdSet ? std::to_string(_engineId) : "unset";
     str += _graph ? ", graph=" + fmt::format("{:p}", static_cast<const void*>(_graph.get()))
                   : ", graph=null";
-    str += "}";
+    str += '}';
     return str;
 }
 

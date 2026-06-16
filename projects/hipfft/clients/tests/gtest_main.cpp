@@ -32,6 +32,7 @@
 #include <string>
 
 #include "../../shared/CLI11.hpp"
+#include "../../shared/client_except.h"
 #include "../../shared/concurrency.h"
 #include "../../shared/device_properties.h"
 #include "../../shared/environment.h"
@@ -75,8 +76,6 @@ hipfft_params manual_params;
 
 // Allow skipping tests if there is a runtime error
 bool skip_runtime_fails;
-// But count the number of failures
-int n_hip_failures = 0;
 
 // Manually specified precision cutoffs:
 double single_epsilon;

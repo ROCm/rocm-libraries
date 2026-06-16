@@ -314,6 +314,20 @@ globalParameters["RotatingMode"] = (
 )
 # Mode 0 requires memcpy everytime when the problem changes to reset the data, but mode 1 doesn't.
 
+# I-cache rotation (used by client --icache-rotate-copies / --icache-rotate-size).
+# IcacheRotateCopies: number of EXTRA hipModule_t copies of each --code-object to load
+#   for I-cache cold-miss tests. 0 = disabled (default). N (>0) = load N extras
+#   (total = N+1 modules). -1 = auto: extras = max(rotating buffer num,
+#   cache-overflow term). The cache-overflow term is
+#   IcacheRotateSize * 2 * 1024 / min(kernel_start->label_GW_End) on Linux, and
+#   IcacheRotateSize directly on non-Linux (no <elf.h> available).
+globalParameters["IcacheRotateCopies"] = 0
+# IcacheRotateSize: cache budget (in KB) used by the auto path's cache-overflow term.
+#   Linux: effective bytes = IcacheRotateSize * 2 * 1024. Default 64 -> 128 KB,
+#   loosely targeting ~2x a typical L1 I-cache.
+#   Non-Linux: used directly as the raw extras count (no ELF parsing).
+globalParameters["IcacheRotateSize"] = 64
+
 globalParameters["BuildIdKind"] = "sha1"
 globalParameters["AsmDebug"] = (
     False  # Set to True to keep debug information for compiled code objects
@@ -361,6 +375,8 @@ globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 # code quality — e.g. how many regions a loop was split into, what caused the
 # splits, and how many s_nop cycles were wasted.
 globalParameters["StinkyTofuEnableRemarks"] = False
+
+globalParameters["DisableSTWaitCnt"] = True
 
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 # we should do this here...
@@ -425,6 +441,7 @@ defaultBenchmarkCommonParameters = [
     {"UnrollLoopSwapGlobalReadOrder": [0]},
     {"PrefetchGlobalRead": [1]},
     {"PrefetchLocalRead": [1]},
+    {"PrefetchGL2": [0]},
     {"ClusterLocalRead": [1]},
     {"SuppressNoLoadLoop": [False]},
     {"ExpandPointerSwap": [True]},
@@ -514,6 +531,7 @@ defaultBenchmarkCommonParameters = [
     {"GroupLoadStore": [False]},
     {"MIArchVgpr": [False]},
     {"StreamK": [0]},
+    {"StreamKForceDPOnly": [0]},
     {"StreamKAtomic": [0]},
     {"StreamKXCCMapping": [0]},
     {"StreamKFixupTreeReduction": [0]},
@@ -525,15 +543,17 @@ defaultBenchmarkCommonParameters = [
     {"WorkGroupReduction": [False]},
     {"ConvertAfterDS": [False]},
     {"ForceDisableShadowInit": [False]},
-    {"InitCIterWmma": [-1]},
+    {"InitCIterWmma": [0]},
     {"LDSTrInst": [False]},
     {"WaveSplitK": [ False ]},
     {"MbskPrefetchMethod": [-1]},
+    {"PrefetchAcrossPersistent": [0]},
     {"UseCustomMainLoopSchedule": [-1]},
     {"SpaceFillingAlgo": [[]]},
     {"SFCWGM": [[[1,1],[1,1]]]},
     {"AdaptiveGemm": [0]},
     {"AdaptiveGemmGSUA": [0]},
+    {"AdaptiveGemmNTAB": [0]},
     {"ExtraMiLatencyLeft": [-1]},
     {"ExtraLatencyForLR": [0]},
     {"TailloopInNll": [False]},
@@ -556,12 +576,8 @@ defaultBenchmarkCommonParameters = [
     # [1, 1] disables clustering. Non-[1, 1] enables Multicast so workgroups within
     # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.
     {"ClusterDim": [[1, 1]]},
-    # ClusterBarrier — True: emit split signal/wait cluster_barrier instructions
-    # so workgroups in a cluster synchronize before/after consuming shared
-    # TDM-multicast data. Requires ClusterDim != [1, 1] and TDMInst != 0;
-    # False: standard per-WG barriers, no inter-WG synchronization.
-    {"ClusterBarrier": [ False ]},
-    {"HalfPLR": [0]}
+    {"HalfPLR": [0]},
+    {"TDMIterateMode": [0]}
 ]
 
 # dictionary of defaults comprised of default option for each parameter
