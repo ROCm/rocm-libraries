@@ -2167,6 +2167,36 @@ public:
         return _preferredEngineId;
     }
 
+    /// @brief Get the engine ID actually backing the built execution plan.
+    ///
+    /// This is the engine that will execute, read straight off the finalized
+    /// execution-plan descriptor -- the ground truth regardless of how the
+    /// engine was chosen (heuristic, soft preferred-engine with fallback, hard
+    /// create_execution_plan_ext, or a deserialized compiled plan). Unlike
+    /// get_preferred_engine_id_ext (which returns the *request*), this returns
+    /// what was *selected*, so callers can detect a silent fallback.
+    ///
+    /// Requires an execution plan to exist (create_execution_plans /
+    /// create_execution_plan_ext, followed by build).
+    // NOLINTBEGIN(readability-identifier-naming)
+    Error get_execution_plan_engine_id(int64_t& engineId) const
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(!_executionPlanDesc || !_executionPlanDesc->valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "No execution plan available; build a plan before querying its engine."};
+        }
+        const auto id = detail::getExecutionPlanEngineId(_executionPlanDesc->get());
+        if(!id.has_value())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Backend did not report an engine id for the execution plan."};
+        }
+        engineId = *id;
+        return {ErrorCode::OK, ""};
+    }
+
     /// @brief Set the graph name
     Graph& set_name(const std::string& name) // NOLINT(readability-identifier-naming)
     {

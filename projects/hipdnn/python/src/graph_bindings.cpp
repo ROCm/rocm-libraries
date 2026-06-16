@@ -45,6 +45,33 @@ void graphBindings(nb::module_& m)
              nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
              "Create execution plans with specified heuristic modes")
         .def(
+            "create_execution_plan_ext",
+            [](graph::Graph& g, int64_t engineId) {
+                const auto err = g.create_execution_plan_ext(engineId, {});
+                if(err.is_bad())
+                {
+                    throw std::runtime_error("Failed to create execution plan for engine "
+                                             + std::to_string(engineId) + ": " + err.get_message());
+                }
+            },
+            nb::arg("engine_id"),
+            "Hard-select an engine: build the execution plan for this exact engine id. "
+            "Raises if the engine is not valid/applicable (no heuristic fallback).")
+        .def(
+            "get_execution_plan_engine_id",
+            [](const graph::Graph& g) {
+                int64_t engineId = 0;
+                const auto err = g.get_execution_plan_engine_id(engineId);
+                if(err.is_bad())
+                {
+                    throw std::runtime_error("Failed to get execution plan engine id: "
+                                             + err.get_message());
+                }
+                return engineId;
+            },
+            "Engine id actually backing the built execution plan (ground truth; "
+            "detects a silent soft-preference fallback).")
+        .def(
             "get_ranked_engine_ids",
             [](graph::Graph& g, const std::vector<HeuristicMode>& modes) {
                 std::vector<int64_t> ids;
