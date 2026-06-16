@@ -4841,8 +4841,19 @@ static rocfft_status rocfft_plan_create_internal(rocfft_plan                   p
             return rcfft;
 
 #ifdef ROCFFT_RCCL_ENABLE
-        // init rccl before any plan-building path is chosen
-        plan->InitRCCLCommunicator();
+        // init rccl before any plan-building path is chosen, on failure
+        // leave rccl empty and fall back to the P2P / A2A paths
+        try
+        {
+            plan->InitRCCLCommunicator();
+        }
+        catch(const std::exception& e)
+        {
+            if(LOG_PLAN_ENABLED())
+                *LogSingleton::GetInstance().GetPlanOS()
+                    << "InitRCCLCommunicator failed, proceeding without RCCL: " << e.what()
+                    << std::endl;
+        }
 #endif
 
         log_bench(rocfft_bench_command(plan));
