@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 
 from ..common.exceptions import GraphLoadError
-from ..config.benchmark_config import MetricsConfig, ReferenceProviderName, SuiteConfig
+from ..config.benchmark_config import MetricsConfig, SuiteConfig
 from ..execution.buffer_manager import generate_input_data
 from ..execution.suite_runner import run_single_provider_engine, set_plugin_path
 from ..graph.loader import GraphLoader
@@ -92,8 +92,6 @@ def run_internal_profiling(args: argparse.Namespace) -> int:
         benchmark_iters=args.iters,
         seed=args.seed,
         engine_filter=[engine_id],
-        timing_backend="auto",
-        reference_provider=ReferenceProviderName.NONE.value,
         verbose=False,
         metrics=MetricsConfig(tier="off"),
         plugin_paths=[plugin_path] if plugin_path is not None else None,

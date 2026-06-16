@@ -48,7 +48,7 @@ slice (3D slice - 100x200 from 240x240x155):
 Spectrogram functionality output represented as an image:
 
 <p align="center"><img width="55%" src="docs/data/spectrogramOutput.png" /></p>
-  
+
 ## Prerequisites
 
 ### Operating Systems
@@ -62,7 +62,7 @@ Spectrogram functionality output represented as an image:
 * **CPU**: [AMD64](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html)
 * **GPU**: [AMD Radeon&trade; Graphics](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html) / [AMD Instinct&trade; Accelerators](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html)
 
-> [!IMPORTANT] 
+> [!IMPORTANT]
 > * [ROCm-supported hardware required for HIP backend](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html)
 > * `gfx908` or higher GPU required
 

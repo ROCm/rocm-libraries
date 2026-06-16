@@ -345,26 +345,26 @@ namespace rocsparse
             {
             case rocsparse_order_column:
             {
-                RETURN_IF_HIP_ERROR(hipMemcpy2DAsync(Y->values,
-                                                     sizeof_datatype_Y * Y->ld,
-                                                     X->const_values,
-                                                     sizeof_datatype_X * X->ld,
-                                                     sizeof_datatype_X * X->rows,
-                                                     X->cols,
-                                                     hipMemcpyDeviceToDevice,
-                                                     handle->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy2DAsync(Y->values,
+                                                               sizeof_datatype_Y * Y->ld,
+                                                               X->const_values,
+                                                               sizeof_datatype_X * X->ld,
+                                                               sizeof_datatype_X * X->rows,
+                                                               X->cols,
+                                                               hipMemcpyDeviceToDevice,
+                                                               handle->stream));
                 break;
             }
             case rocsparse_order_row:
             {
-                RETURN_IF_HIP_ERROR(hipMemcpy2DAsync(Y->values,
-                                                     sizeof_datatype_Y * Y->ld,
-                                                     X->const_values,
-                                                     sizeof_datatype_X * X->ld,
-                                                     sizeof_datatype_X * X->cols,
-                                                     X->rows,
-                                                     hipMemcpyDeviceToDevice,
-                                                     handle->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy2DAsync(Y->values,
+                                                               sizeof_datatype_Y * Y->ld,
+                                                               X->const_values,
+                                                               sizeof_datatype_X * X->ld,
+                                                               sizeof_datatype_X * X->cols,
+                                                               X->rows,
+                                                               hipMemcpyDeviceToDevice,
+                                                               handle->stream));
                 break;
             }
             }
@@ -469,25 +469,25 @@ namespace rocsparse
         {
             if(X->order == rocsparse_order_column)
             {
-                RETURN_IF_HIP_ERROR(hipMemcpy2DAsync(sptrsm_buffer,
-                                                     sizeof_datatype * X->rows,
-                                                     X->const_values,
-                                                     sizeof_datatype * X->ld,
-                                                     sizeof_datatype * X->rows,
-                                                     X->cols,
-                                                     hipMemcpyDeviceToDevice,
-                                                     handle->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy2DAsync(sptrsm_buffer,
+                                                               sizeof_datatype * X->rows,
+                                                               X->const_values,
+                                                               sizeof_datatype * X->ld,
+                                                               sizeof_datatype * X->rows,
+                                                               X->cols,
+                                                               hipMemcpyDeviceToDevice,
+                                                               handle->stream));
             }
             else
             {
-                RETURN_IF_HIP_ERROR(hipMemcpy2DAsync(sptrsm_buffer,
-                                                     sizeof_datatype * X->cols,
-                                                     X->const_values,
-                                                     sizeof_datatype * X->ld,
-                                                     sizeof_datatype * X->cols,
-                                                     X->rows,
-                                                     hipMemcpyDeviceToDevice,
-                                                     handle->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy2DAsync(sptrsm_buffer,
+                                                               sizeof_datatype * X->cols,
+                                                               X->const_values,
+                                                               sizeof_datatype * X->ld,
+                                                               sizeof_datatype * X->cols,
+                                                               X->rows,
+                                                               hipMemcpyDeviceToDevice,
+                                                               handle->stream));
             }
         }
 

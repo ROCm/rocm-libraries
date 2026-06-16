@@ -44,6 +44,7 @@ BenchmarkProblems:
         - ExpandPointerSwap: [False]
         - GlobalReadVectorWidthA: [1]
         - GlobalReadVectorWidthB: [1]
+        - GlobalReadPerMfma: [1.0]
         - GlobalSplitU: [0]
         - LocalReadVectorWidth: [1]
         - MatrixInstruction:
@@ -67,7 +68,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 1,4, 2,2]
           - [16, 16, 4, 1, 1, 1,2, 2,2]
           - [16, 16, 4, 1, 1, 1,1, 2,2]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [False]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
@@ -116,6 +117,7 @@ BenchmarkProblems:
         - ExpandPointerSwap: [False]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
+        - GlobalReadPerMfma: [1.0]
         - GlobalSplitU: [0]
         # - LocalReadVectorWidth: [8]
         - MatrixInstruction:
@@ -139,7 +141,7 @@ BenchmarkProblems:
           - [16, 16, 16, 1, 1, 1,4, 2,2]
           - [16, 16, 16, 1, 1, 1,2, 2,2]
           - [16, 16, 16, 1, 1, 1,1, 2,2]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [False]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
