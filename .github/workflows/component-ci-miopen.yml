@@ -8,29 +8,13 @@
 # GPU hardware), the Tuna Fin subproject (offline tuning infrastructure), a
 # no-CK UBSan debug build, and gtest binary naming convention validation.
 
-name: MIOpen CI
+name: "Component CI: MIOpen"
 
 on:
-  push:
-    branches:
-      - develop
-      - release/therock-*
-    paths:
-      - 'projects/miopen/**'
-      - '.github/workflows/miopen-ci.yml'
-  pull_request:
-    types: [opened, synchronize, reopened]
-    paths:
-      - 'projects/miopen/**'
-      - '.github/workflows/miopen-ci.yml'
-  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
-  cancel-in-progress: true
 
 env:
   LLVM_PATH: /opt/rocm/llvm
@@ -38,8 +22,6 @@ env:
 jobs:
   miopen-build:
     name: ${{ matrix.name }}
-    permissions:
-      id-token: write
     container:
       image: rocm/miopen-dev:latest
       options: -v /runner/config:/home/awsconfig/
@@ -187,23 +169,3 @@ jobs:
           LD_PRELOAD=$(pwd)/rocjitsu-build/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so \
             ./build/bin/miopen_gtest --gtest_list_tests > test_list
           python3 projects/miopen/test/gtest/check_names.py --list test_list
-
-  miopen_build_summary:
-    name: MIOpen CI Summary
-    if: always()
-    needs:
-      - miopen-build
-
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Report results
-        run: |
-          echo '${{ toJson(needs) }}'
-          FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
-            | jq --raw-output \
-            'map_values(select(.result!="success" and .result!="skipped")) | keys | join(",")' \
-          )"
-          if [[ "${FAILED_JOBS}" != "" ]]; then
-            echo "Failed jobs: ${FAILED_JOBS}"
-            exit 1
-          fi
