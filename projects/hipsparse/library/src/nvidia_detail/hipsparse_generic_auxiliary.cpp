@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -494,7 +494,7 @@ hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMa
 }
 #endif
 
-#if(CUDART_VERSION >= 12011)
+#if defined(HIPSPARSE_WITH_SPMV_BSR) && (CUDART_VERSION >= 12011)
 hipsparseStatus_t hipsparseCreateBsr(hipsparseSpMatDescr_t* spMatDescr,
                                      int64_t                mb,
                                      int64_t                nb,
@@ -528,7 +528,7 @@ hipsparseStatus_t hipsparseCreateBsr(hipsparseSpMatDescr_t* spMatDescr,
 }
 #endif
 
-#if(CUDART_VERSION >= 12011)
+#if defined(HIPSPARSE_WITH_SPMV_BSR) && (CUDART_VERSION >= 12011)
 hipsparseStatus_t hipsparseCreateConstBsr(hipsparseConstSpMatDescr_t* spMatDescr,
                                           int64_t                     mb,
                                           int64_t                     nb,

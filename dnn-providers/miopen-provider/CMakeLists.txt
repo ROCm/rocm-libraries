@@ -152,6 +152,9 @@ add_library(
     miopen_plugin_impl OBJECT
     engines/MiopenEngine.cpp
     engines/plans/MiopenBatchnormApplicabilityChecks.cpp
+    engines/plans/MiopenReluApplicabilityChecks.cpp
+    engines/plans/MiopenReluPlan.cpp
+    engines/plans/MiopenReluPlanBuilder.cpp
     engines/plans/MiopenBatchnormPlanBuilder.cpp
     engines/plans/MiopenBatchnormBwdPlan.cpp
     engines/plans/MiopenBatchnormFwdInferencePlan.cpp
@@ -172,6 +175,7 @@ add_library(
     MiopenTensor.cpp
     MiopenPluginPublic.cpp
 )
+
 target_include_directories(miopen_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(miopen_plugin_impl PUBLIC MIOpen hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
 
@@ -231,25 +235,28 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
         finalize_test_targets("${PROJECT_NAME}")
     endif()
 
-    # For standalone builds we need to install the ctest files
-    if(NOT ROCM_LIBS_SUPERBUILD)
-        install_provider_ctest_files("miopen_plugin")
-    endif()
-
     if(NOT TARGET hipdnn_integration_tests)
         find_package(hipdnn_integration_tests CONFIG QUIET)
     endif()
 
     if(TARGET hipdnn_integration_tests)
         add_external_integration_test_target(
-            TARGET_NAME   ${PROJECT_NAME}-external-integration-check
-            PLUGIN_TARGET miopen_plugin
-            ENGINE_NAME   MIOPEN_ENGINE
-            TEST_CONFIG   ${CMAKE_CURRENT_SOURCE_DIR}/config/MIOPEN_ENGINE.toml
+            TARGET_NAME    ${PROJECT_NAME}-external-integration-check
+            PLUGIN_TARGET  miopen_plugin
+            ENGINE_NAME    MIOPEN_ENGINE
+            INSTALL_SUBDIR miopen_plugin
+            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/config/MIOPEN_ENGINE.toml
         )
         message(STATUS "Created ${PROJECT_NAME}-external-integration-check target")
     else()
         message(STATUS "hipdnn_integration_tests not found - skipping external-integration-check")
+    endif()
+
+    # For standalone builds we need to install the ctest files. Must run
+    # AFTER add_external_integration_test_target so the staged install-tree
+    # snippet for the cross-provider test is included.
+    if(NOT ROCM_LIBS_SUPERBUILD)
+        install_provider_ctest_files("miopen_plugin")
     endif()
 endif()
 

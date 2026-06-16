@@ -78,7 +78,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - StoreRemapVectorWidth: [0]
-        - GlobalSplitU: [1]
+        - GlobalSplitU: [1,2,4,8]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]

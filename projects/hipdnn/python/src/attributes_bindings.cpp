@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include "bindings.hpp"
+
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_frontend/attributes/BatchnormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
@@ -16,7 +18,7 @@
 namespace nb = nanobind;
 using namespace hipdnn_frontend;
 
-void attributes_bindings(nb::module_& m)
+void attributesBindings(nb::module_& m)
 {
     // BatchnormAttributes
     nb::class_<graph::BatchnormAttributes>(m, "BatchnormAttributes")

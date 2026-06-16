@@ -71,6 +71,16 @@ struct hipsparse_test_dispatch<hipsparse_test_dispatch_enum::scatter>
 };
 
 template <>
+struct hipsparse_test_dispatch<hipsparse_test_dispatch_enum::gather>
+{
+    template <template <typename...> class TEST>
+    static auto dispatch(const Arguments& arg)
+    {
+        return hipsparse_gather_dispatch<TEST>(arg);
+    }
+};
+
+template <>
 struct hipsparse_test_dispatch<hipsparse_test_dispatch_enum::axpby>
 {
     template <template <typename...> class TEST>
@@ -81,12 +91,12 @@ struct hipsparse_test_dispatch<hipsparse_test_dispatch_enum::axpby>
 };
 
 template <>
-struct hipsparse_test_dispatch<hipsparse_test_dispatch_enum::gather>
+struct hipsparse_test_dispatch<hipsparse_test_dispatch_enum::spvv>
 {
     template <template <typename...> class TEST>
     static auto dispatch(const Arguments& arg)
     {
-        return hipsparse_gather_dispatch<TEST>(arg);
+        return hipsparse_spvv_dispatch<TEST>(arg);
     }
 };
 

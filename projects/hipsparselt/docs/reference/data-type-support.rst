@@ -61,6 +61,16 @@ List of supported input and output types:
     - ✅
     - ✅
   *
+    - float8_fnuz
+    - HIP_R_8F_E4M3_FNUZ
+    - ✅
+    - ❌
+  *
+    - bfloat8_fnuz
+    - HIP_R_8F_E5M2_FNUZ
+    - ✅
+    - ❌
+  *
     - int16
     - Not supported
     - ❌
@@ -187,3 +197,5 @@ List of supported compute types for specific input and output types:
     "HIP_R_8F_E5M2", "HIP_R_16F", "HIP_R_16F", "HIPSPARSELT_COMPUTE_32F", "CUDA", ""
     "HIP_R_8F_E5M2", "HIP_R_16BF", "HIP_R_16BF", "HIPSPARSELT_COMPUTE_32F", "CUDA", ""
     "HIP_R_8F_E5M2", "HIP_R_32F", "HIP_R_32F", "HIPSPARSELT_COMPUTE_32F", "HIP / CUDA", "gfx950"
+    "HIP_R_8F_E4M3_FNUZ", "HIP_R_32F", "HIP_R_32F", "HIPSPARSELT_COMPUTE_32F", "HIP", "gfx942"
+    "HIP_R_8F_E5M2_FNUZ", "HIP_R_32F", "HIP_R_32F", "HIPSPARSELT_COMPUTE_32F", "HIP", "gfx942"        

@@ -651,6 +651,22 @@ Tests:
   batch_count: [ 2 ]
   gpu_arch: '9??'
 
+- name: gemv_stride_alpha_beta
+  category: pre_checkin
+  function:
+    - gemv_batched
+    - gemv_strided_batched
+  precision: *gemv_bfloat_half_single_double_complex_real_precisions
+  transA: [ N, T, C ]
+  matrix_size: *qmcpack_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 3 ]
+  alpha_beta_stride: true
+  stride_c: 2 # alpha beta stride
+  stride_d: 2
+  pointer_mode_host: false
+
 - name: gemv_row_vectorized_coverage
   category: pre_checkin
   function:

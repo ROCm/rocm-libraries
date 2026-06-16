@@ -12,6 +12,20 @@ from invoke import task
 ROOT_PATH = Path(__file__).resolve().parent
 BUILD_DIR = ROOT_PATH / "build"
 
+# Fail early if invoke is running under a different Python than the active
+# venv.  This happens when invoke is installed system-wide (/usr/bin/invoke)
+# but a venv is active — sys.executable will be the system Python, so cmake
+# gets the wrong -DPython_EXECUTABLE and venv packages like pytest won't be
+# found.
+_venv = os.environ.get("VIRTUAL_ENV")
+if _venv and not sys.executable.startswith(_venv):
+    raise SystemExit(
+        f"ERROR: invoke is running under {sys.executable} but VIRTUAL_ENV "
+        f"is set to {_venv}.\n"
+        f"Install invoke in the venv:  pip install invoke\n"
+        f"Then re-run:  invoke build"
+    )
+
 
 def _detect_rocm() -> Path:
     """Detect ROCm installation path.
@@ -160,6 +174,7 @@ def _rmtree(path: Path):
         "static": "Build as a static library instead of shared.",
         "jobs": "Number of parallel build jobs (default: all cores).",
         "clean": "Remove the build directory before configuring.",
+        "reconfigure": "Delete CMake cache to force a fresh configure (keeps compiled objects).",
         "gcc": "Use GCC instead of amdclang.",
         "rocm_path": "Path to ROCm installation (default: ROCM_PATH env or /opt/rocm).",
     }
@@ -173,6 +188,7 @@ def build(
     static=False,
     jobs=None,
     clean=False,
+    reconfigure=False,
     gcc=False,
     rocm_path=None,
 ):
@@ -180,6 +196,11 @@ def build(
 
     if clean and bld.exists():
         _rmtree(bld)
+    elif reconfigure and bld.exists():
+        for name in ("CMakeCache.txt",):
+            p = bld / name
+            if p.exists():
+                p.unlink()
 
     bld.mkdir(parents=True, exist_ok=True)
 
@@ -194,6 +215,9 @@ def build(
         f"-DBUILD_SHARED_LIBS={'OFF' if static else 'ON'}",
         f"-DSTINKYTOFU_BUILD_TESTS={'ON' if tests else 'OFF'}",
         f"-DSTINKYTOFU_BUILD_PYTHON={'OFF' if no_python else 'ON'}",
+        # Standalone dev build: build the example plugins (demo + exercised by the
+        # unit tests). Default OFF in CMake so integrated/ROCm builds never ship them.
+        "-DSTINKYTOFU_BUILD_EXAMPLES=ON",
         "-DSTINKYTOFU_ENABLE_WERROR=ON",
     ]
 

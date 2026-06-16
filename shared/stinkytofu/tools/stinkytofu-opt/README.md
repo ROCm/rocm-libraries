@@ -64,6 +64,7 @@ stinkytofu-opt [options] <ir_file> [--pass1] [--pass2] ...
 
 **Options:**
 - `--arch <arch>`: Target GPU architecture (default: gfx1250). Supported: `gfx1250`
+- `--remarks`: Enable optimization remarks on stderr (e.g. loop region diagnostics)
 - `--list-passes`: Display all available optimization passes
 - `--help`: Show usage information
 
@@ -340,3 +341,24 @@ Successors: ^next
 ```
 
 See `tests/unit/asm/IRParserTest.cpp` and the serialization layer (`StinkyAsmPrinter`, `IRParser`) for more examples.
+
+---
+
+## Optimization Remarks
+
+Use `--remarks` to enable optimization remarks on stderr. Remarks report code quality diagnostics (loop region count, s_nop waste, etc.) without requiring `PASS_DEBUG`.
+
+```bash
+# Run the full gfx1250 pipeline with remarks
+./build/tools/stinkytofu-opt/stinkytofu-opt \
+    --arch gfx1250 kernel.s -O2 --remarks --emit-asm
+
+# Run individual passes with remarks
+./build/tools/stinkytofu-opt/stinkytofu-opt \
+    --arch gfx1250 input.stir \
+    --from-label loop_start --to-label loop_end \
+    --StinkyDAGSchedulerPass --InsertDelayAluPass --LoopRegionRemarkPass \
+    --remarks --print-output
+```
+
+See [Global Parameters](../../docs/user/global-parameters.md) for the `StinkyTofuEnableRemarks` equivalent in the Tensile/KernelWriter path.

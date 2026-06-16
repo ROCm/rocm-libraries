@@ -16,17 +16,26 @@
 import ctypes
 import os
 import re
+import shutil
 import sys
 import struct
 import subprocess
 import tempfile
 
+import pytest
+
+hip = None
+try:
+    from hip import hip
+except ImportError:
+    pass
+
+requires_hip = pytest.mark.skipif(hip is None, reason="hip module not installed")
+
 # Add tensilelite to path
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
-
-from hip import hip, hiprtc  # type: ignore
 
 from unittest.mock import MagicMock
 from types import SimpleNamespace
@@ -78,6 +87,10 @@ def _detect_gfx_target():
 # ---- Constants ----
 GFX_TARGET = _detect_gfx_target()
 HAS_GFX950 = GFX_TARGET == "gfx950"
+requires_gpu = pytest.mark.skipif(
+    hip is None or not HAS_GFX950,
+    reason=f"requires hip module and gfx950 (found hip={'yes' if hip else 'no'}, arch={GFX_TARGET})",
+)
 WAVESIZE   = 64
 NUM_WAVES  = 4
 NUM_THREADS = WAVESIZE * NUM_WAVES  # 256
@@ -154,8 +167,12 @@ def _create_kernel(cfg, mi_wave_group=None, inst_k=32, bpe=2):
         "MIWaveGroup": MIWaveGroup,
         "WavefrontSize": WAVESIZE,
         "UseSubtileImpl": True,
+        "ISA": (9, 5, 0),
         "NonTemporalA": 0,
         "NonTemporalB": 0,
+        "enableTDMA": False,
+        "enableTDMB": False,
+        "enableTDMMetadata": False,
         "ProblemType": {
             "DataTypeA": dtype,
             "DataTypeB": dtype,
@@ -206,7 +223,7 @@ def create_writer(cfg, mi_wave_group=None, geometry=None, inst_k=32, bpe=2):
     writer.sgprs = {}
 
     # Reserve v0 for Serial (hardware workitem_id)
-    writer.vgprPool.checkOut(1)
+    writer.vgprPool.checkOut(1, tag="create_writer_vgprSerial")
 
     # Build kernel and TileInfo
     kernel = _create_kernel(cfg, mi_wave_group=mi_wave_group, inst_k=inst_k, bpe=bpe)
@@ -222,6 +239,7 @@ def create_writer(cfg, mi_wave_group=None, geometry=None, inst_k=32, bpe=2):
         b=SimpleNamespace(tileInfo=tileInfoB),
         regCaps={"MaxSgpr": 106, "MaxVgpr": 256, "PhysicalMaxVgpr": 512},
         archCaps={"LDSBankCount": 64, "LDSBankWidth": 4},
+        subtileLdsSwizzle=True,
     )
     # LDS layout: A subtiles followed by B subtiles, aligned to readSize
     writer.ldsStartOffsetA = 0
@@ -245,7 +263,7 @@ def _generate_tile_asm(cfg, emitter, geometry=None, inst_k=32, bpe=2):
     init_rocisa()
     # Reserve s0-s11: s[0:1]=kernarg ptr (HW), s[2:3]=workgroup IDs (HW),
     # s[4:5]=output ptr, s[6:9]=padding, s10=StrideA0I, s11=StrideB1J
-    writer.sgprPool.checkOut(12)
+    writer.sgprPool.checkOut(12, tag="_generate_tile_asm_sgprs")
     writer.sgprs["StrideA0I"] = 10
     writer.sgprs["StrideB1J"] = 11
     tileInfoA.allocOffsetRegisters(writer, kernel)
@@ -314,7 +332,7 @@ def generate_set_directives(sgprs):
     return "\n".join(f".set sgpr{name}, {idx}" for name, idx in sgprs.items())
 
 
-def init_rocisa(target=None):
+def init_rocisa(target=None, wavesize=None):
     """Initialize rocIsa singleton for the detected GPU target.
     Args:
         target: Optional gfx string (e.g. 'gfx950'). When None (default), we
@@ -322,6 +340,8 @@ def init_rocisa(target=None):
                 rocm_agent_enumerator. Passing an explicit target is required
                 only by tests whose assertions are tied to a specific ISA's
                 opcode mnemonics (mfma vs wmma).
+        wavesize: Optional wavefront size for ri.setKernel. Defaults to WAVESIZE
+                (wave64); wave32 targets (e.g. gfx1250) pass 32.
     Always calls ri.init() because other module imports (e.g. KernelWriter)
     may have already initialized the singleton with a different target.
     """
@@ -335,7 +355,7 @@ def init_rocisa(target=None):
     isa = gfxToIsa(gfx_target)
     asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
     ri.init(isa, asmpath)
-    ri.setKernel(isa, WAVESIZE)
+    ri.setKernel(isa, wavesize if wavesize is not None else WAVESIZE)
 
 
 # ---- Kernel assembly generator ----
@@ -543,25 +563,35 @@ def generate_export_epilogue(writer, export_reg, is_sgpr=False):
 
 # ---- Assemble / run ----
 
-def assemble_kernel(asm_source, output_path):
-    """Assemble .s source to .co code object."""
+def assemble_kernel(asm_source, output_path, wavefront_size=64):
+    """Assemble .s source to .co code object.
+
+    Args:
+        wavefront_size: wave size to pass via -mwavefrontsize. 64 (default) for
+            wave64 targets. Pass None to omit the flag entirely and let the
+            target's native default apply (e.g. gfx1250, which is wave32 and
+            whose assembler does not accept -mwavefrontsize32).
+    """
     with tempfile.NamedTemporaryFile(suffix=".s", mode="w", delete=False) as f:
         f.write(asm_source)
         asm_path = f.name
 
     obj_path = asm_path.replace(".s", ".o")
 
+    cmd = [
+        "amdclang++", "-x", "assembler",
+        "--target=amdgcn-amd-amdhsa",
+        f"-mcpu={GFX_TARGET}",
+    ]
+    if wavefront_size is not None:
+        cmd.append(f"-mwavefrontsize{wavefront_size}")
+    cmd += ["-mcode-object-version=5", "-o", obj_path, asm_path]
+
     try:
-        subprocess.check_call([
-            "amdclang++", "-x", "assembler",
-            "--target=amdgcn-amd-amdhsa",
-            f"-mcpu={GFX_TARGET}",
-            "-mwavefrontsize64",
-            "-mcode-object-version=5",
-            "-o", obj_path,
-            asm_path
-        ])
-        os.rename(obj_path, output_path)
+        subprocess.check_call(cmd)
+        # shutil.move (not os.rename) so the temp .o in /tmp can land on a
+        # different filesystem than output_path without Errno 18 (EXDEV).
+        shutil.move(obj_path, output_path)
     finally:
         if os.path.exists(asm_path):
             os.unlink(asm_path)
@@ -569,7 +599,7 @@ def assemble_kernel(asm_source, output_path):
             os.unlink(obj_path)
 
 
-def run_on_gpu(co_path, output_size, inputs=(), scalars=(), lds_size=0, num_threads=None):
+def run_on_gpu(co_path, output_size, inputs=(), scalars=(), lds_size=0, num_threads=None, grid=1):
     """Load code object, launch kernel, read output buffer.
 
     Builds the kernarg struct dynamically: one u64 per input buffer pointer,
@@ -626,9 +656,15 @@ def run_on_gpu(co_path, output_size, inputs=(), scalars=(), lds_size=0, num_thre
         ctypes.c_void_p(0x03),  # HIP_LAUNCH_PARAM_END
     )
 
+    if isinstance(grid, (tuple, list)):
+        gx = grid[0] if len(grid) > 0 else 1
+        gy = grid[1] if len(grid) > 1 else 1
+        gz = grid[2] if len(grid) > 2 else 1
+    else:
+        gx, gy, gz = grid, 1, 1
     hip_check(hip.hipModuleLaunchKernel(
         kernel,
-        1, 1, 1,
+        gx, gy, gz,
         num_threads, 1, 1,
         lds_size,
         None,
@@ -694,7 +730,7 @@ def setup_roundtrip_writer(cfg, geometry=None, inst_k=32, bpe=2):
     # Reserve s0-s11: s[0:1]=kernarg ptr (HW), s[2:3]=workgroup IDs (HW),
     # s[4:5]=input_A_ptr, s[6:7]=input_B_ptr, s[8:9]=output_ptr,
     # s10=StrideA0I, s11=StrideB1J
-    writer.sgprPool.checkOut(12)
+    writer.sgprPool.checkOut(12, tag="_setup_roundtrip_writer_sgprs")
     writer.sgprs["StrideA0I"] = 10
     writer.sgprs["StrideB1J"] = 11
     tileInfoA.allocOffsetRegisters(writer, kernel)

@@ -58,7 +58,7 @@ static void LogCmdReduceExtreme(const miopenTensorDescriptor_t xDesc,
         {
             input_sz += std::to_string(input[i]);
             if(i != input.size() - 1)
-                input_sz += "x";
+                input_sz += 'x';
         }
 
         ss << " -input " << input_sz;

@@ -93,6 +93,7 @@ include(CheckCXXCompilerFlag)
 include(ROCMHeaderWrapper)
 
 include(cmake/ClangCheck.cmake)
+include(cmake/CheckPreCommit.cmake)
 
 # Build library with Beta APIs
 add_definitions("-DMIOPEN_BETA_API=1")
@@ -211,7 +212,7 @@ set( MIOPEN_BACKEND ${MIOPEN_DEFAULT_BACKEND} CACHE STRING
     "Which of MIOpens's backends to use?" )
 set_property( CACHE MIOPEN_BACKEND PROPERTY STRINGS
     OpenCL HIP HIPOC HIPNOGPU)
-    
+
 set_var_to_condition(MIOPEN_BUILD_DRIVER_DEFAULT (NOT MIOPEN_EMBED_BUILD) AND (NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU")))
 option(MIOPEN_BUILD_DRIVER "Build MIOpenDriver (and use it in tests)" ${MIOPEN_BUILD_DRIVER_DEFAULT})
 message(STATUS "MIOPEN_BUILD_DRIVER: ${MIOPEN_BUILD_DRIVER}" )
@@ -735,7 +736,7 @@ function(install_gpu_databases gfx_target)
     if("${gfx_target}" IN_LIST _targets)
         message(FATAL_ERROR "AMDGPU target ${gfx_target} already defined")
     endif()
-    
+
     set(KDB_FILENAME "${gfx_target}.kdb.bz2")
     if(${KDB_FILENAME} IN_LIST KDB_BZ2_FILES)
         set(KDB_COMPONENT_NAME "${gfx_target}kdb")
@@ -800,6 +801,7 @@ elseif(MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
 endif()
 
 include(ClangTidy)
+# TODO: Remove the -nogpulib workaround once clang-tidy version is bumped to clang-tidy-23+
 enable_clang_tidy(
     CHECKS
         ${MIOPEN_TIDY_CHECKS}
@@ -809,6 +811,7 @@ enable_clang_tidy(
     EXTRA_ARGS
         -DMIOPEN_USE_CLANG_TIDY
         -D__builtin_elementwise_exp10=__builtin_elementwise_exp
+        -nogpulib
 )
 
 include(CppCheck)
@@ -842,9 +845,12 @@ enable_cppcheck(
         *:*src/sqlite/*.cpp
         *:*.cl
         *:*src/kernels/*.h
-        # MIOpenConvFwd_LxL_11.cpp is a HIP kernel file compiled at runtime with -D defines;
-        # cppcheck evaluates undefined macros as 0, causing false array-size errors.
+        # These are HIP kernel files compiled at runtime with -D defines; cppcheck
+        # evaluates undefined macros as 0, causing false array-size errors and
+        # division/modulo-by-zero in #if preprocessor conditions.
         *:*src/kernels/MIOpenConvFwd_LxL_11.cpp
+        *:*src/kernels/MIOpenConvDirBatchNormActivHip.cpp
+        *:*src/kernels/MIOpenConvDirUniHip.cpp
         knownConditionTrueFalse:*src/kernels/static_composable_kernel/*/*
         redundantAssignment:*src/kernels/static_composable_kernel/*/*
         unreadVariable:*src/kernels/static_composable_kernel/*/*

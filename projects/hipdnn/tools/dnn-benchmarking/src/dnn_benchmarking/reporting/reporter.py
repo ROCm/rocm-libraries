@@ -5,10 +5,10 @@
 
 import sys
 from pathlib import Path
-from typing import Any, List, Optional, TextIO
+from typing import List, Optional, TextIO
 
-from ..config.benchmark_config import ABTestConfig, BenchmarkConfig, SuiteConfig
-from .statistics import BenchmarkStats, CombinedBenchmarkStats
+from ..config.benchmark_config import BenchmarkConfig, SuiteConfig
+from .statistics import BenchmarkStats
 from .suite_results import (
     CorrectnessResult,
     GraphResult,
@@ -63,21 +63,15 @@ class Reporter:
         self._print_line("-")
         self._print("")
 
-    def print_pytorch_header(
-        self, config: BenchmarkConfig, graph_name: str, device: str
+    def print_reference_header(
+        self, config: BenchmarkConfig, graph_name: str, provider: str
     ) -> None:
-        """Print PyTorch CUDA benchmark configuration header.
-
-        Args:
-            config: Benchmark configuration.
-            graph_name: Name of the graph being benchmarked.
-            device: CUDA device being used.
-        """
+        """Print a timed validation-provider reference row header."""
         self._print_line("=")
-        self._print(f"PyTorch CUDA Benchmark: {graph_name}")
+        self._print(f"Validation Reference Benchmark: {graph_name}")
         self._print_line("=")
         self._print(f"Graph:      {config.graph_path}")
-        self._print(f"Device:     {device}")
+        self._print(f"Provider:   {provider}")
         self._print(f"Warmup:     {config.warmup_iters} iterations")
         self._print(f"Benchmark:  {config.benchmark_iters} iterations")
         self._print_line("-")
@@ -103,30 +97,14 @@ class Reporter:
         self._print_stats_block(stats)
         self._print("")
 
-    def print_combined_stats(self, stats: CombinedBenchmarkStats) -> None:
-        """Print combined E2E and kernel execution statistics.
-
-        Args:
-            stats: Combined benchmark statistics.
-        """
-        self._print("E2E Execution Statistics:")
-        self._print_stats_block(stats.e2e_stats)
-        self._print("")
-
-        if stats.kernel_stats:
-            self._print("Kernel Execution Statistics:")
-            self._print_stats_block(stats.kernel_stats)
-        else:
-            self._print("Kernel Timing: Not available (PyTorch GPU not available)")
-        self._print("")
-
     def _print_stats_block(self, stats: BenchmarkStats) -> None:
-        """Print a statistics block (helper for print_stats/print_combined_stats).
+        """Print a statistics block (helper for print_stats).
 
         Args:
             stats: Benchmark statistics.
         """
         self._print(f"  Mean:                 {stats.mean_ms:.3f} ms")
+        self._print(f"  Median:               {stats.median_ms:.3f} ms")
         self._print(f"  Std Dev:              {stats.std_ms:.3f} ms")
         self._print(f"  Min:                  {stats.min_ms:.3f} ms")
         self._print(f"  Max:                  {stats.max_ms:.3f} ms")
@@ -158,6 +136,14 @@ class Reporter:
         """
         self._print(f"ERROR: {message}")
 
+    def print_warning(self, message: str) -> None:
+        """Print non-fatal warning message.
+
+        Args:
+            message: Warning message.
+        """
+        self._print(f"WARNING: {message}")
+
     def _print(self, text: str) -> None:
         """Print a line of text.
 
@@ -173,242 +159,6 @@ class Reporter:
             char: Character to use for the line.
         """
         print(char * self.WIDTH, file=self._output)
-
-    # A/B Testing Methods
-
-    def print_ab_header(
-        self, config: BenchmarkConfig, ab_config: ABTestConfig, graph_name: str
-    ) -> None:
-        """Print A/B test configuration header.
-
-        Args:
-            config: Benchmark configuration.
-            ab_config: A/B test configuration.
-            graph_name: Name of the graph being benchmarked.
-        """
-        self._print_line("=")
-        self._print(f"hipDNN A/B Test: {graph_name}")
-        self._print_line("=")
-        self._print(f"Graph:      {config.graph_path}")
-        self._print(f"Warmup:     {config.warmup_iters} iterations")
-        self._print(f"Benchmark:  {config.benchmark_iters} iterations")
-        self._print_line("-")
-        self._print("Configuration A:")
-        if ab_config.a_path:
-            self._print(f"  Plugin Path: {ab_config.a_path}")
-        else:
-            self._print("  Plugin Path: (default)")
-        self._print(f"  Engine ID:   {ab_config.a_id}")
-        self._print("Configuration B:")
-        if ab_config.b_path:
-            self._print(f"  Plugin Path: {ab_config.b_path}")
-        else:
-            self._print("  Plugin Path: (default)")
-        self._print(f"  Engine ID:   {ab_config.b_id}")
-        self._print_line("-")
-        self._print("")
-
-    def print_ab_stats(
-        self,
-        stats_a: BenchmarkStats,
-        stats_b: BenchmarkStats,
-        init_time_a_ms: float,
-        init_time_b_ms: float,
-    ) -> None:
-        """Print side-by-side comparison of A vs B statistics.
-
-        Args:
-            stats_a: Statistics for configuration A.
-            stats_b: Statistics for configuration B.
-            init_time_a_ms: Init time for A in milliseconds.
-            init_time_b_ms: Init time for B in milliseconds.
-        """
-        # Header
-        self._print(f"{'':20} {'A':>15} {'B':>15}")
-        self._print_line("-")
-
-        # Init times
-        self._print(
-            f"{'Init Time:':20} {init_time_a_ms:>12.2f} ms {init_time_b_ms:>12.2f} ms"
-        )
-
-        # Execution stats
-        self._print(
-            f"{'Mean:':20} {stats_a.mean_ms:>12.3f} ms {stats_b.mean_ms:>12.3f} ms"
-        )
-        self._print(
-            f"{'Std Dev:':20} {stats_a.std_ms:>12.3f} ms {stats_b.std_ms:>12.3f} ms"
-        )
-        self._print(
-            f"{'Min:':20} {stats_a.min_ms:>12.3f} ms {stats_b.min_ms:>12.3f} ms"
-        )
-        self._print(
-            f"{'Max:':20} {stats_a.max_ms:>12.3f} ms {stats_b.max_ms:>12.3f} ms"
-        )
-        self._print(
-            f"{'P95:':20} {stats_a.p95_ms:>12.3f} ms {stats_b.p95_ms:>12.3f} ms"
-        )
-        self._print(
-            f"{'P99:':20} {stats_a.p99_ms:>12.3f} ms {stats_b.p99_ms:>12.3f} ms"
-        )
-        self._print_line("-")
-
-        # Calculate speedup
-        if stats_a.mean_ms > 0 and stats_b.mean_ms > 0:
-            if stats_a.mean_ms > stats_b.mean_ms:
-                speedup = (stats_a.mean_ms - stats_b.mean_ms) / stats_a.mean_ms * 100
-                self._print(f"Speedup:            B is {speedup:.1f}% faster")
-            elif stats_b.mean_ms > stats_a.mean_ms:
-                speedup = (stats_b.mean_ms - stats_a.mean_ms) / stats_b.mean_ms * 100
-                self._print(f"Speedup:            A is {speedup:.1f}% faster")
-            else:
-                self._print("Speedup:            A and B are equal")
-
-        self._print("")
-
-    def print_ab_combined_stats(
-        self,
-        stats_a: CombinedBenchmarkStats,
-        stats_b: CombinedBenchmarkStats,
-        init_time_a_ms: float,
-        init_time_b_ms: float,
-    ) -> None:
-        """Print side-by-side comparison of A vs B with both E2E and kernel stats.
-
-        Args:
-            stats_a: Combined statistics for configuration A.
-            stats_b: Combined statistics for configuration B.
-            init_time_a_ms: Init time for A in milliseconds.
-            init_time_b_ms: Init time for B in milliseconds.
-        """
-        # E2E Stats section
-        self._print("E2E Execution Statistics:")
-        self._print(f"{'':20} {'A':>15} {'B':>15}")
-        self._print_line("-")
-
-        # Init times
-        self._print(
-            f"{'Init Time:':20} {init_time_a_ms:>12.2f} ms {init_time_b_ms:>12.2f} ms"
-        )
-
-        # E2E execution stats
-        self._print_ab_stats_block(stats_a.e2e_stats, stats_b.e2e_stats)
-        self._print("")
-
-        # Kernel Stats section (if available)
-        if stats_a.kernel_stats and stats_b.kernel_stats:
-            self._print("Kernel Execution Statistics:")
-            self._print(f"{'':20} {'A':>15} {'B':>15}")
-            self._print_line("-")
-            self._print_ab_stats_block(stats_a.kernel_stats, stats_b.kernel_stats)
-            self._print("")
-
-            # Calculate kernel speedup
-            ka, kb = stats_a.kernel_stats, stats_b.kernel_stats
-            if ka.mean_ms > 0 and kb.mean_ms > 0:
-                if ka.mean_ms > kb.mean_ms:
-                    speedup = (ka.mean_ms - kb.mean_ms) / ka.mean_ms * 100
-                    self._print(f"Kernel Speedup:     B is {speedup:.1f}% faster")
-                elif kb.mean_ms > ka.mean_ms:
-                    speedup = (kb.mean_ms - ka.mean_ms) / kb.mean_ms * 100
-                    self._print(f"Kernel Speedup:     A is {speedup:.1f}% faster")
-                else:
-                    self._print("Kernel Speedup:     A and B are equal")
-                self._print("")
-        else:
-            self._print("Kernel Timing: Not available")
-            self._print("")
-
-    def _print_ab_stats_block(
-        self, stats_a: BenchmarkStats, stats_b: BenchmarkStats
-    ) -> None:
-        """Print a side-by-side statistics block for A/B comparison.
-
-        Args:
-            stats_a: Statistics for configuration A.
-            stats_b: Statistics for configuration B.
-        """
-        self._print(
-            f"{'Mean:':20} {stats_a.mean_ms:>12.3f} ms {stats_b.mean_ms:>12.3f} ms"
-        )
-        self._print(
-            f"{'Std Dev:':20} {stats_a.std_ms:>12.3f} ms {stats_b.std_ms:>12.3f} ms"
-        )
-        self._print(
-            f"{'Min:':20} {stats_a.min_ms:>12.3f} ms {stats_b.min_ms:>12.3f} ms"
-        )
-        self._print(
-            f"{'Max:':20} {stats_a.max_ms:>12.3f} ms {stats_b.max_ms:>12.3f} ms"
-        )
-        self._print(
-            f"{'P95:':20} {stats_a.p95_ms:>12.3f} ms {stats_b.p95_ms:>12.3f} ms"
-        )
-        self._print(
-            f"{'P99:':20} {stats_a.p99_ms:>12.3f} ms {stats_b.p99_ms:>12.3f} ms"
-        )
-
-    def print_ab_comparison(
-        self,
-        passed: bool,
-        max_abs_diff: float,
-        max_rel_diff: float,
-        rtol: float,
-        atol: float,
-    ) -> None:
-        """Print A/B accuracy comparison result.
-
-        Args:
-            passed: Whether comparison passed.
-            max_abs_diff: Maximum absolute difference.
-            max_rel_diff: Maximum relative difference.
-            rtol: Relative tolerance used.
-            atol: Absolute tolerance used.
-        """
-        status = "PASSED" if passed else "FAILED"
-        self._print(f"Accuracy Comparison: {status}")
-        self._print(f"  (rtol={rtol:.0e}, atol={atol:.0e})")
-        if not passed:
-            self._print(f"  Max abs diff: {max_abs_diff:.2e}")
-            self._print(f"  Max rel diff: {max_rel_diff:.2e}")
-
-    def print_ab_validation(
-        self,
-        validation_a: Optional[Any],
-        validation_b: Optional[Any],
-        rtol: float,
-        atol: float,
-    ) -> None:
-        """Print reference validation results for A/B test.
-
-        Args:
-            validation_a: ValidationResult for configuration A, or None.
-            validation_b: ValidationResult for configuration B, or None.
-            rtol: Relative tolerance used.
-            atol: Absolute tolerance used.
-        """
-        if validation_a is None and validation_b is None:
-            return
-
-        self._print("")
-        self._print("Reference Validation:")
-
-        if validation_a is not None:
-            status_a = "PASSED" if validation_a.passed else "FAILED"
-            self._print(f"  Config A vs {validation_a.provider_name}: {status_a}")
-            if not validation_a.passed:
-                self._print(f"    Max abs diff: {validation_a.max_abs_diff:.2e}")
-                self._print(f"    Max rel diff: {validation_a.max_rel_diff:.2e}")
-
-        if validation_b is not None:
-            status_b = "PASSED" if validation_b.passed else "FAILED"
-            self._print(f"  Config B vs {validation_b.provider_name}: {status_b}")
-            if not validation_b.passed:
-                self._print(f"    Max abs diff: {validation_b.max_abs_diff:.2e}")
-                self._print(f"    Max rel diff: {validation_b.max_rel_diff:.2e}")
-
-        self._print(f"  (rtol={rtol:.0e}, atol={atol:.0e})")
-
-    # Reference Validation Methods
 
     # Suite Methods
 
@@ -471,7 +221,8 @@ class Reporter:
             return
         cpu = env.get("cpu_model") or "unknown CPU"
         gpu = env.get("gpu_model") or "unknown GPU"
-        rocm = env.get("rocm_version") or "unknown ROCm"
+        cuda = env.get("cuda_version")
+        cudnn = env.get("cudnn_version")
         cu = env.get("gpu_compute_units")
         hbm = env.get("gpu_hbm_gb")
         gpu_extras = []
@@ -482,7 +233,16 @@ class Reporter:
         gpu_label = gpu + (f" ({', '.join(gpu_extras)})" if gpu_extras else "")
         self._print(f"Host:    {cpu}")
         self._print(f"GPU:     {gpu_label}")
-        self._print(f"ROCm:    {rocm}")
+        # A CUDA wheel reports cuda_version; a ROCm wheel does not. Show the
+        # platform-appropriate label so CUDA hosts never print a ROCm line
+        # (and vice versa).
+        if cuda is not None:
+            self._print(f"CUDA:    {cuda}")
+            if cudnn is not None:
+                self._print(f"cuDNN:   {cudnn}")
+        else:
+            rocm = env.get("rocm_version") or "unknown ROCm"
+            self._print(f"ROCm:    {rocm}")
 
     def print_suite_graph_start(self, index: int, total: int, graph_name: str) -> None:
         """Print per-graph progress line at start (no trailing newline).
@@ -573,6 +333,16 @@ class Reporter:
     @staticmethod
     def _pe_outcome(pe: ProviderEngineResult) -> str:
         """Derive a short outcome label for a ProviderEngineResult."""
+        if pe.role == "reference" and pe.status == "success":
+            label = "reference"
+            timing = (
+                pe.gpu_kernel_stats if pe.gpu_kernel_stats is not None else pe.e2e_stats
+            )
+            if timing is not None:
+                exec_s = timing.total_ms / 1000
+                wall_s = pe.elapsed_time_ms / 1000
+                return f"{label} (exec {exec_s:.2f}s, elapsed {wall_s:.2f}s)"
+            return label
         if pe.status == "success":
             label = (
                 "failed"
@@ -594,6 +364,68 @@ class Reporter:
             return "skipped"
         return "errored"
 
+    def print_graph_result_table(self, graph_result: GraphResult) -> None:
+        """Render one compact summary row per engine for a graph."""
+        if not graph_result.results:
+            return
+
+        include_plugin = any(pe.plugin_path for pe in graph_result.results)
+        headers = ["engine", "status"]
+        if include_plugin:
+            headers.append("plugin_path")
+        headers.extend(
+            [
+                "kernel_mean_ms",
+                "kernel_median_ms",
+                "e2e_mean_ms",
+                "e2e_median_ms",
+            ]
+        )
+        rows: List[List[str]] = []
+        for pe in graph_result.results:
+            row = [pe.provider, self._pe_status(pe)]
+            if include_plugin:
+                row.append(pe.plugin_path or "")
+            row.extend(
+                [
+                    self._fmt_stat(pe.gpu_kernel_stats, "mean_ms"),
+                    self._fmt_stat(pe.gpu_kernel_stats, "median_ms"),
+                    self._fmt_stat(pe.e2e_stats, "mean_ms"),
+                    self._fmt_stat(pe.e2e_stats, "median_ms"),
+                ]
+            )
+            rows.append(row)
+
+        widths = [
+            max(len(headers[i]), *(len(row[i]) for row in rows))
+            for i in range(len(headers))
+        ]
+        self._print("Results:")
+        self._print("  " + "  ".join(h.ljust(widths[i]) for i, h in enumerate(headers)))
+        self._print("  " + "  ".join("-" * width for width in widths))
+        for row in rows:
+            self._print(
+                "  " + "  ".join(row[i].ljust(widths[i]) for i in range(len(row)))
+            )
+        self._print("")
+
+    @staticmethod
+    def _pe_status(pe: ProviderEngineResult) -> str:
+        if pe.role == "reference" and pe.status == "success":
+            return "reference"
+        if pe.status != "success":
+            return pe.status
+        if pe.correctness is not None and pe.correctness.tolerance_match is False:
+            return "failed"
+        return "passed"
+
+    @staticmethod
+    def _fmt_stat(stats: Optional[BenchmarkStats], name: str) -> str:
+        if stats is None:
+            return "n/a"
+        value = getattr(stats, name)
+        return f"{value:.3f}"
+
     def print_verbose_graph_result(
         self, graph_result: GraphResult, suite_config: SuiteConfig
     ) -> None:
@@ -610,7 +442,14 @@ class Reporter:
                 benchmark_iters=suite_config.benchmark_iters,
                 engine_id=pe.engine_id,
             )
-            self.print_header(cfg_view, graph_result.graph_name, provider=pe.provider)
+            if pe.role == "reference":
+                self.print_reference_header(
+                    cfg_view, graph_result.graph_name, pe.provider
+                )
+            else:
+                self.print_header(
+                    cfg_view, graph_result.graph_name, provider=pe.provider
+                )
 
             if pe.cpu_build_time_ms is not None:
                 self.print_init_time(pe.cpu_build_time_ms)
@@ -618,7 +457,17 @@ class Reporter:
             if pe.status == "success":
                 self._print_pe_stats(pe)
                 self._print_pe_metrics(pe)
-                if pe.correctness is not None:
+                # Profiling artefacts render independently of the always-on
+                # metrics block — opt-in profiling is valid under
+                # --metrics-tier off, and the user should still see where
+                # their artefacts landed plus any tool-failure detail.
+                self._print_profiling_block(pe)
+                if pe.role == "reference":
+                    self._print(
+                        "Reference: timing baseline (no correctness comparison)"
+                    )
+                    self._print("")
+                elif pe.correctness is not None:
                     self._print_pe_correctness(pe.correctness, suite_config)
             elif pe.status == "skipped":
                 self._print(f"Status: SKIPPED ({pe.skip_reason or 'no reason given'})")
@@ -727,36 +576,99 @@ class Reporter:
         if pe.vram_used_mb is not None:
             self._print(f"  VRAM used:            {self._fmt_mib(pe.vram_used_mb)}")
         self._print("")
-        self._print_profiling_block(pe)
 
     def _print_profiling_block(self, pe: ProviderEngineResult) -> None:
         """Render the opt-in profiling artefacts when extra_metrics is set.
 
-        Each line is conditional: a user who runs only --emit-trace
-        sees one line, only --perf sees a different one. Full nested
-        data is always in the JSON.
+        Each line is conditional: a user who runs only --pmc sees one
+        line, only --emit-trace sees a different one, and so on. Long
+        counter lists fold to ``[N more, see JSON]`` so the console
+        block stays compact — full nested data is always in the JSON.
         """
         extra = pe.extra_metrics
         if not extra:
             return
-        any_present = any(isinstance(extra.get(k), dict) for k in ("trace", "perf"))
+        any_present = any(
+            isinstance(extra.get(k), dict) for k in ("trace", "pmc", "perf", "roofline")
+        )
         if not any_present:
             return
         self._print("Profiling:")
 
         trace = extra.get("trace")
         if isinstance(trace, dict):
-            path = trace.get("path") or trace.get("db_path")
+            # Trace and rocpd db are distinct artefacts — kineto in
+            # particular emits both: `path` is the chrome JSON the user
+            # opens in Perfetto/Chrome, `db_path` is the rocpd source.
+            # Folding them onto one line with a `fmt` suffix would
+            # mislabel a database as a trace whenever convert failed and
+            # only `db_path` was present.
             fmt = trace.get("format", "?")
-            if path:
-                self._print(f"  Trace ({fmt}):         {path}")
-            elif "skipped" in trace:
+            trace_path = trace.get("path")
+            db_path = trace.get("db_path")
+            if trace_path:
+                self._print(f"  Trace ({fmt}):         {trace_path}")
+                # Both .pftrace and chrome JSON open in Perfetto.
+                self._print("    → drag onto https://ui.perfetto.dev/")
+            if db_path:
+                self._print(f"  Trace DB:              {db_path}")
+                # When the kineto convert failed, the db is all we have;
+                # surface the convert command so the user can rerun.
+                if not trace_path:
+                    self._print(
+                        "    → python -m rocpd convert -i <db> "
+                        "--output-format chrome -o trace.json"
+                    )
+            if not trace_path and not db_path and "skipped" in trace:
                 self._print(f"  Trace ({fmt}):         skipped — {trace['skipped']}")
+            if "error_tail" in trace:
+                self._print(
+                    f"  Trace ({fmt}):         rocprofv3 errored "
+                    f"(rc={trace.get('returncode', '?')})"
+                )
+
+        pmc = extra.get("pmc")
+        if isinstance(pmc, dict):
+            arch = pmc.get("arch", "?")
+            pmc_set = pmc.get("set", "?")
+            counters = pmc.get("counters") or {}
+            db_path = pmc.get("db_path")
+            if counters:
+                head = list(counters.items())[:3]
+                rendered = "  ".join(
+                    f"{name}={int(v.get('sum', 0)):,}" for name, v in head
+                )
+                more = len(counters) - len(head)
+                suffix = f"  [{more} more, see JSON]" if more > 0 else ""
+                self._print(f"  PMC ({pmc_set}, {arch}):  {rendered}{suffix}")
+            elif "skipped" in pmc:
+                self._print(f"  PMC ({pmc_set}, {arch}):  skipped — {pmc['skipped']}")
+            elif "error_tail" in pmc:
+                self._print(
+                    f"  PMC ({pmc_set}, {arch}):  rocprofv3 errored "
+                    f"(rc={pmc.get('returncode', '?')})"
+                )
+            # Surface the rocpd db path + analyze hint whenever we
+            # captured one, regardless of whether parsing succeeded.
+            # The db itself is the full source of truth; aggregates are
+            # the convenience layer.
+            if db_path:
+                self._print(f"  PMC db:               {db_path}")
+                self._print(
+                    "    → rocprof-compute analyze --path "
+                    f"{Path(db_path).parent} "
+                    "(see docs/troubleshooting.md for venv setup)"
+                )
 
         perf = extra.get("perf")
         if isinstance(perf, dict):
             if "skipped" in perf:
                 self._print(f"  CPU (perf):           skipped — {perf['skipped']}")
+            elif "error_tail" in perf:
+                self._print(
+                    f"  CPU (perf):           errored "
+                    f"(rc={perf.get('returncode', '?')})"
+                )
             else:
                 bits = []
                 ipc = perf.get("ipc_user")
@@ -773,6 +685,36 @@ class Reporter:
                     bits.append(f"task_clock={tc:.1f}ms")
                 if bits:
                     self._print(f"  CPU (perf):           {'  '.join(bits)}")
+
+        roofline = extra.get("roofline")
+        if isinstance(roofline, dict):
+            # rocprof-compute profile mode emits CSVs (no PDF); the
+            # rendered roofline (ASCII / GUI / TUI) comes from a
+            # separate `rocprof-compute analyze` pass against
+            # `workload_path`. analyze has its own Python deps that
+            # would downgrade torch's numpy if installed into the
+            # dnn-benchmarking venv — see docs/troubleshooting.md for
+            # the separate-venv recipe.
+            workload = roofline.get("workload_path")
+            csv = roofline.get("roofline_csv")
+            if csv:
+                self._print(f"  Roofline CSV:         {csv}")
+            if workload:
+                self._print(
+                    f"    → rocprof-compute analyze --path {workload} "
+                    "--block 4  (ASCII roofline)"
+                )
+                self._print(
+                    "    → add --gui for interactive web UI "
+                    "(see docs/troubleshooting.md for analyze venv setup)"
+                )
+            if "skipped" in roofline:
+                self._print(f"  Roofline:             skipped — {roofline['skipped']}")
+            if "error_tail" in roofline:
+                self._print(
+                    f"  Roofline:             rocprof-compute errored "
+                    f"(rc={roofline.get('returncode', '?')})"
+                )
         self._print("")
 
     def _print_pe_correctness(
@@ -782,13 +724,13 @@ class Reporter:
         if correctness.tolerance_match is None:
             reason = correctness.error_message or "no reference comparison performed"
             self._print(f"Reference Validation: SKIPPED ({reason})")
-            self._print(f"  Provider: {suite_config.reference_provider}")
+            self._print(f"  Provider: {suite_config.validation.provider.value}")
             self._print("")
             return
 
         status = "PASSED" if correctness.tolerance_match else "FAILED"
         self._print(f"Reference Validation: {status}")
-        self._print(f"  Provider: {suite_config.reference_provider}")
+        self._print(f"  Provider: {suite_config.validation.provider.value}")
         self._print(f"  (rtol={correctness.rtol:.0e}, atol={correctness.atol:.0e})")
         if not correctness.tolerance_match:
             if correctness.max_abs_diff is not None:
@@ -810,10 +752,6 @@ class Reporter:
     def print_no_graphs_found(self, pattern: str) -> None:
         """Print message when no graph files match the given pattern."""
         self._print(f"No graph files found matching: {pattern}")
-
-    def print_results_exported(self, path: Path) -> None:
-        """Print JSON export confirmation."""
-        self._print(f"Results exported to: {path}")
 
     def print_no_engines_applicable(self) -> None:
         """Print inline note when no engines matched for a graph."""

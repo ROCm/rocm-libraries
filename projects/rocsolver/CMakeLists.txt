@@ -66,6 +66,11 @@ option(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER "Use LAPACK like impleme
 # Add our CMake helper files to the lookup path
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# Root of the rocm-libraries monorepo (for shared infrastructure like CTest categories)
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 find_package(fmt REQUIRED)
@@ -181,6 +186,9 @@ else()
       gfx1152
       gfx1153
       gfx12-generic
+      gfx1200
+      gfx1201
+      gfx1250
     )
     if(BUILD_ADDRESS_SANITIZER)
       set(OPTIONAL_TARGETS_QUERY ${XNACK_PLUS_TARGETS})

@@ -567,7 +567,7 @@ Real precisions 1 bytes: &real_precisions_mx
 rocRoller predicate: &rocroller_predicate
   - &unrollKPredicate
     { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r, M: 128, N: 128, K: 96}
-
+    
 # The Arguments struct passed directly to C++. See hipblaslt_arguments.hpp.
 # The order of the entries is significant, so it can't simply be a dictionary.
 # The types on the RHS are eval'd for Python-recognized types including ctypes
@@ -631,6 +631,7 @@ Arguments:
   - aux_type: hipDataType
   - bias_source: hipblaslt_bias_source
   - bias_vector: c_bool
+  - bias_stride: c_int32
   - scaleA: hipblaslt_scaling_format
   - scaleB: hipblaslt_scaling_format
   - scaleC: c_bool
@@ -740,6 +741,7 @@ Defaults:
   bias_type: default
   aux_type: hipblaslt_datatype_invalid
   bias_source: d
+  bias_stride: 0
   use_e: false
   gradient: false
   bias_vector: false

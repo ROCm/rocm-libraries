@@ -18,11 +18,18 @@ namespace rocRoller
         class AddConvert : public GraphTransform
         {
         public:
+            AddConvert(ContextPtr context)
+                : m_context(context)
+            {
+            }
             KernelGraph apply(KernelGraph const& original) override;
             std::string name() const override
             {
                 return "AddConvert";
             }
+
+        private:
+            ContextPtr m_context;
         };
     }
 }

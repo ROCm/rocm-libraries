@@ -8,6 +8,18 @@
 namespace asm_sdpa_engine
 {
 
+/// Accumulator precision for the backward DQDKDV kernel.
+///
+/// - A32: dQ is accumulated in FP32 into a workspace buffer (dq_acc), then a
+///   separate DQ_CONVERT kernel converts FP32 → BF16. Requires 3 kernels.
+/// - A16: dQ is written directly in BF16 by the DQDKDV kernel. No dq_acc
+///   workspace buffer, no DQ_CONVERT kernel. Requires 2 kernels.
+enum class AccumulatorType : uint8_t
+{
+    A32, // FP32 accumulator — 3-kernel path (ODO → DQDKDV → DQ_CONVERT)
+    A16 // BF16 accumulator — 2-kernel path (ODO → DQDKDV)
+};
+
 /**
  * @brief Parameters for SDPA backward kernel execution.
  *
@@ -87,6 +99,27 @@ struct SdpaBwdParams
 
     // Attention scale
     float attnScale;
+
+    // Per-stage tile sizes; populated by SdpaBwdPlanBuilder from the resolved
+    // CSV configs ('ts' column) and consumed by SdpaBwdPlan grid math.
+    struct KernelTiles
+    {
+        unsigned int ts; // K/V or convert tile size (column 'ts' in the AITER CSV)
+
+        // Ceil-divide an extent by `ts` to get the corresponding grid-x dimension.
+        // Returns 0 if `ts` is unset (KernelTiles default-initialised) so callers
+        // can fail loudly at launch time rather than divide-by-zero.
+        constexpr unsigned int gridDim(unsigned int extent) const noexcept
+        {
+            return ts == 0U ? 0U : (extent + ts - 1U) / ts;
+        }
+    };
+    KernelTiles odoTiles{}; // from cfg_fmha_bwd_odo
+    KernelTiles dqdkdvTiles{}; // from cfg_fmha_bwd_dqdkdv
+    KernelTiles dqConvertTiles{}; // from cfg_fmha_bwd_dq_convert; unused when A16
+
+    // Accumulator type (a32 = 3-kernel path, a16 = 2-kernel path)
+    AccumulatorType accumulatorType = AccumulatorType::A32;
 };
 
 } // namespace asm_sdpa_engine

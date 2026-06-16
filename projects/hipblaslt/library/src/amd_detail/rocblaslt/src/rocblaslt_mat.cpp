@@ -221,7 +221,8 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         handle->Synchronizer,
                                         swizzleA,
                                         swizzleB,
-                                        batch_mode};
+                                        batch_mode,
+                                        matmul_descr->bias_stride};
 
     rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
 
@@ -402,7 +403,8 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
                                         handle->Synchronizer,
                                         swizzleA,
                                         swizzleB,
-                                        batch_mode};
+                                        batch_mode,
+                                        matmul_descr->bias_stride};
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -693,7 +695,8 @@ rocblaslt_status
                                         (char*)handle->Synchronizer + (409600 * i * sizeof(int)),
                                         swizzleA,
                                         swizzleB,
-                                        hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED});
+                                        hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,
+                                        matmul_descr[i]->bias_stride});
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }
@@ -1035,7 +1038,8 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
         handle->Synchronizer,
         swizzleA,
         swizzleB,
-        HIPBLASLT_BATCH_MODE_STRIDED};
+        HIPBLASLT_BATCH_MODE_STRIDED,
+        0};
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -1355,7 +1359,8 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                         (char*)handle->Synchronizer + (409600 * i * sizeof(int)),
                                         swizzleA,
                                         swizzleB,
-                                        hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED});
+                                        hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,
+                                        0});
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }
