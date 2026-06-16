@@ -43,6 +43,10 @@
 #include <miopen/filesystem.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
+#include <fdeep/fdeep.hpp>
+#include <sstream>
+#include <string>
+#include <vector>
 
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 
@@ -632,6 +636,45 @@ TEST(CPU_ConvAiEngineeredConvFeatures_NONE, Golden)
     ASSERT_EQ(derived.size(), expected.size());
     for(std::size_t i = 0; i < expected.size(); ++i)
         EXPECT_FLOAT_EQ(derived[i], expected[i]) << "derived feature mismatch at index " << i;
+}
+
+// Every bundled fdeep model file must be loadable by the deployed frugally-deep. This fails
+// loudly and directly if a model is exported in a format the linked fdeep cannot parse (e.g. a
+// Keras 3 export against a Keras 2-era fdeep). Without this, such a breakage only surfaces
+// indirectly downstream -- and because the runtime now degrades gracefully to the non-AI
+// heuristic on a load failure, it would otherwise be masked in CI. The .tn.model files are
+// frugally-deep models EXCEPT the "*_metadata.tn.model" siblings, which are plain JSON read by
+// MIOpen directly (not by fdeep). Pure CPU fdeep load -- no device required for the work itself.
+TEST(GPU_ConvAIModelLoad_FP32, BundledFdeepModelsLoad)
+{
+    const auto db = GetSystemDbPath();
+    ASSERT_TRUE(fs::exists(db)) << "system db path does not exist: " << db;
+
+    std::vector<std::string> failures;
+    std::size_t checked = 0;
+    for(const auto& entry : fs::directory_iterator(db))
+    {
+        const auto path = entry.path();
+        const auto name = path.filename().string();
+        if(!name.ends_with(".tn.model") || name.find("metadata") != std::string::npos)
+            continue;
+        ++checked;
+        try
+        {
+            fdeep::load_model(path.string(), true, fdeep::dev_null_logger);
+        }
+        catch(const std::exception& e)
+        {
+            failures.push_back(name + " -> " + e.what());
+        }
+    }
+    ASSERT_GT(checked, 0u) << "no fdeep .tn.model files found in " << db;
+
+    std::ostringstream oss;
+    for(const auto& f : failures)
+        oss << "\n  " << f;
+    EXPECT_TRUE(failures.empty()) << "frugally-deep failed to load " << failures.size() << " of "
+                                  << checked << " bundled model(s):" << oss.str();
 }
 
 } // namespace

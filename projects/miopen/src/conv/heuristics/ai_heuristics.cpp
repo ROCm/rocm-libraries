@@ -860,38 +860,52 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
     // 1. Try ND model first (for gfx942/gfx950, supports both 2D and 3D)
     // 2. Fall back to legacy model (for gfx908/gfx90a, 2D only)
     // 3. Return empty vector to trigger WTI fallback for unsupported architectures
-
-    // Try ND model first (preferred for gfx942/gfx950)
-    if((is2d || is3d) && HasNDTunaNetSupport(device))
+    //
+    // Any failure inside this block (including a model that fdeep cannot load -- e.g. a
+    // model exported in an incompatible format, which throws a non-miopen std::exception)
+    // is swallowed and turned into an empty result, so the caller degrades to the non-AI
+    // heuristic instead of failing the convolution. This is the predictor's contract: it
+    // returns a prediction or nothing, but never throws.
+    try
     {
-        int dim                        = is3d ? 3 : 2;
-        std::unique_ptr<ModelND> model = GetNDModel(device, dim);
-
-        if(model && model->IsProblemSupported(problem, ctx))
+        // Try ND model first (preferred for gfx942/gfx950)
+        if((is2d || is3d) && HasNDTunaNetSupport(device))
         {
-            MIOPEN_LOG_I2("Evaluating ND TunaNet for " << device);
-            std::vector<float> predictions = model->Forward(problem);
-            return ProcessAndCachePredictions(
-                problem, device, true, predictions, model->GetSolverMap());
+            int dim                        = is3d ? 3 : 2;
+            std::unique_ptr<ModelND> model = GetNDModel(device, dim);
+
+            if(model && model->IsProblemSupported(problem, ctx))
+            {
+                MIOPEN_LOG_I2("Evaluating ND TunaNet for " << device);
+                std::vector<float> predictions = model->Forward(problem);
+                return ProcessAndCachePredictions(
+                    problem, device, true, predictions, model->GetSolverMap());
+            }
+            // If ND model failed for this architecture, don't try legacy - go to WTI
+            MIOPEN_LOG_I2("ND TunaNet not applicable for this problem on " << device);
+            return {};
         }
-        // If ND model failed for this architecture, don't try legacy - go to WTI
-        MIOPEN_LOG_I2("ND TunaNet not applicable for this problem on " << device);
-        return {};
+
+        // Fall back to legacy 2D model (for gfx908/gfx90a only)
+        if(is2d && HasLegacyTunaNetSupport(device))
+        {
+            std::unique_ptr<Model> model = GetModel(device);
+
+            if(model && model->IsProblemSupported(problem, ctx))
+            {
+                MIOPEN_LOG_I2("Evaluating legacy TunaNet for " << device);
+                std::vector<float> predictions = model->Forward(problem);
+                return ProcessAndCachePredictions(
+                    problem, device, false, predictions, model->metadata.solver_map);
+            }
+            MIOPEN_LOG_I2("Legacy TunaNet not applicable for this problem on " << device);
+            return {};
+        }
     }
-
-    // Fall back to legacy 2D model (for gfx908/gfx90a only)
-    if(is2d && HasLegacyTunaNetSupport(device))
+    catch(const std::exception& e)
     {
-        std::unique_ptr<Model> model = GetModel(device);
-
-        if(model && model->IsProblemSupported(problem, ctx))
-        {
-            MIOPEN_LOG_I2("Evaluating legacy TunaNet for " << device);
-            std::vector<float> predictions = model->Forward(problem);
-            return ProcessAndCachePredictions(
-                problem, device, false, predictions, model->metadata.solver_map);
-        }
-        MIOPEN_LOG_I2("Legacy TunaNet not applicable for this problem on " << device);
+        MIOPEN_LOG_W("TunaNet prediction failed (" << e.what()
+                                                   << "); falling back to non-AI heuristic");
         return {};
     }
 
