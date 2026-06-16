@@ -1426,8 +1426,26 @@ class GlobalWriteBatchWriter:
           if (self.activationTypeStr == 'abs') or (self.activationTypeStr == 'relu'):
             SaturateTypeInt8 = SaturateCastType.DO_NOTHING
             satInt8 = True
+        # VGPR-first source map: alpha/ScaleAlphaVec/bias write the remapped
+        # physical accumulator (via _valuCVgpr) and the store reads it back (via
+        # _storeSumIdx/_packSourceAddr). The activation must operate on that same
+        # physical register so it sees the scaled/biased value; otherwise it reads
+        # the stale "ValuC+N" staging slot (filled with the pre-scale accumulator),
+        # discarding alpha/ScaleAlphaVec/bias. Resolve the element's gwvw
+        # accumulators through the source map and address them directly (no ValuC+
+        # prefix). Falls back to the existing ValuC+N path when the map is inactive
+        # or the block is not contiguous (identical assembly on the legacy path).
+        actSumIdxIn  = gradientInput
+        actSumIdxOut = gradientInput
+        actEnableValuC = enableValuC
+        if enableValuC:
+          actDirect = self._directValuCVgpr(gradientInput - self.parentWriter.states.c.startVgprValu, self.gwvw)
+          if actDirect is not None:
+            actSumIdxIn  = actDirect
+            actSumIdxOut = actDirect
+            actEnableValuC = False
         activationModule = self.parentWriter.getActivationActivationComputeType(self.kernel, self.activation, \
-          self.activationTypeStr, self.gwvw, gradientInput, gradientInput, self.tmpVgpr, self.tmpSgpr, satInt8, enableValuC)
+          self.activationTypeStr, self.gwvw, actSumIdxIn, actSumIdxOut, self.tmpVgpr, self.tmpSgpr, satInt8, actEnableValuC)
       # Add C *= GradientAct
       if self.kernel["ProblemType"]["ActivationType"] != 'none' and self.kernel["ProblemType"]["Gradient"] and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
         if isActivationInsertAfter:
