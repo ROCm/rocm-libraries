@@ -1,8 +1,49 @@
 #!/usr/bin/env python3
-"""Get changed project paths based on git diff."""
+"""Get changed project paths based on git diff, validated against repos-config.json."""
 
+import fnmatch
 import os
 import subprocess
+from pathlib import Path
+from typing import Iterable, Optional
+
+from config_loader import load_repo_config
+from pr_detect_changed_subtrees import get_valid_prefixes, find_matched_subtrees
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+SKIPPABLE_PATH_PATTERNS = [
+    "*.md",
+    "*.rst",
+    "docs/*",
+    "projects/*/docs/*",
+    "shared/*/docs/*",
+]
+
+THEROCK_CI_PATTERNS = [
+    ".github/workflows/therock*",
+    ".github/scripts/therock*",
+]
+
+
+def is_path_skippable(path: str) -> bool:
+    return any(fnmatch.fnmatch(path, pattern) for pattern in SKIPPABLE_PATH_PATTERNS)
+
+
+def check_for_non_skippable_path(paths: Optional[Iterable[str]]) -> bool:
+    if paths is None:
+        return False
+    return any(not is_path_skippable(p) for p in paths)
+
+
+def matches_paths(paths: Iterable[str], patterns: list[str]) -> bool:
+    return any(fnmatch.fnmatch(p, pattern) for p in paths for pattern in patterns)
+
+
+def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> bool:
+    if paths is None:
+        return False
+    return matches_paths(paths, THEROCK_CI_PATTERNS)
 
 
 def get_changed_files(base_ref: str) -> list[str]:
@@ -20,18 +61,25 @@ def get_changed_files(base_ref: str) -> list[str]:
 
 
 def get_changed_projects(base_ref: str) -> str:
-    """Get comma-separated list of changed project paths."""
+    """Get comma-separated list of changed project paths validated against repos-config.json."""
     changed_files = get_changed_files(base_ref)
     if not changed_files:
         return ""
 
-    projects = set()
-    for file_path in changed_files:
-        parts = file_path.split("/")
-        if len(parts) >= 2 and parts[0] in ("projects", "shared"):
-            projects.add(f"{parts[0]}/{parts[1]}")
+    # If CI workflow files changed, run all tests
+    if check_for_workflow_file_related_to_ci(changed_files):
+        return ""
 
-    return ",".join(sorted(projects))
+    # If only skippable files changed, skip
+    if not check_for_non_skippable_path(changed_files):
+        return ""
+
+    repo_config_path = SCRIPT_DIR / ".." / "repos-config.json"
+    config = load_repo_config(str(repo_config_path))
+    valid_prefixes = get_valid_prefixes(config)
+    matched_subtrees = find_matched_subtrees(changed_files, valid_prefixes)
+
+    return ",".join(matched_subtrees)
 
 
 if __name__ == "__main__":
