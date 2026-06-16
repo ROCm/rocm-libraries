@@ -19,9 +19,7 @@ hipblaslt_gemm_cache_key_hash::operator()(const hipblaslt_gemm_cache_key& k) con
 {
     // boost::hash_combine pattern using the 64-bit golden-ratio constant.
     std::size_t h = 0;
-    auto mix      = [&](std::size_t v) {
-        h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
-    };
+    auto mix      = [&](std::size_t v) { h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2); };
     mix(static_cast<std::size_t>(k.transA) | (static_cast<std::size_t>(k.transB) << 1) |
         (static_cast<std::size_t>(k.skip_batches) << 2));
     mix(static_cast<std::size_t>(k.m));
@@ -53,8 +51,7 @@ hipblaslt_gemm_cache::hipblaslt_gemm_cache() : pimpl_(std::make_unique<impl>()) 
 
 hipblaslt_gemm_cache::~hipblaslt_gemm_cache() = default;
 
-hipblaslt_gemm_cache_entry*
-hipblaslt_gemm_cache::find(const hipblaslt_gemm_cache_key& key) const
+hipblaslt_gemm_cache_entry* hipblaslt_gemm_cache::find(const hipblaslt_gemm_cache_key& key) const
 {
     std::shared_lock<std::shared_mutex> guard{pimpl_->mutex};
     auto it = pimpl_->entries.find(key);

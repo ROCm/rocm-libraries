@@ -364,7 +364,7 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
         /*type_C=*/static_cast<int>(hip_type_C),
     };
 
-    auto& cache                            = handle.GetHipblasLtGemmCache();
+    auto& cache                               = handle.GetHipblasLtGemmCache();
     miopen::hipblaslt_gemm_cache_entry* entry = cache.find(key);
 
     if(entry == nullptr)
