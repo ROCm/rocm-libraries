@@ -59,10 +59,8 @@ def convert(input_path: str, output_path: str, arch: str, run_id: int) -> None:
         "tile_n": "gemm_n_per_block",
         "tile_k": "gemm_k_per_block",
     })
-    # block_size = (tile_m/warp_tile_m) * (tile_n/warp_tile_n) * wavefront_size.
-    # CEngine uses 2x2 warps with 32x32 warp tiles and 64-thread wavefronts:
-    #   block_size = (tile_m/32) * (tile_n/32) * 64
-    df["block_size"] = (df["gemm_m_per_block"] // 32) * (df["gemm_n_per_block"] // 32) * 64
+    # CEngine conv always uses warp_m=2, warp_n=2, wavefront_size=64 → block_size=256.
+    df["block_size"] = 256
 
     # DSL gfx942 kernels are all intrawave, no DSB or SI variants.
     df["wave_mode"] = "intrawave"

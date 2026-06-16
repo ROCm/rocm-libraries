@@ -207,7 +207,12 @@ std::optional<double> timeCandidate(const ConvCase& cse, std::int64_t Ho, std::i
     prob.tile_n   = cand.tile_n;
     prob.tile_k   = cand.tile_k;
     prob.pipeline = cand.pipeline.c_str();
-    prob.arch     = props.gcnArchName;
+    // gcnArchName may carry suffixes like "gfx942:sramecc+:xnack-"; the C engine
+    // lookup is an exact match so strip at the first colon, same as the provider.
+    std::string arch_bare = props.gcnArchName;
+    if (auto colon = arch_bare.find(':'); colon != std::string::npos)
+        arch_bare.resize(colon);
+    prob.arch = arch_bare.c_str();
 
     ck_dsl::CEngineResult r;
     try {

@@ -265,15 +265,18 @@ for shard in $WORK/shapes/validation/shard_*.csv; do
 done
 cat $WORK/validation/shard_*.csv > $WORK/validation/all.csv
 
-# Convert and score: for each shape, compare the oracle-best TFLOPS against
-# the TFLOPS of the kernel the heuristic would pick.
-python3 $CK_HEURISTICS/train.py \
-    --score_only \
-    --data_dir   $WORK/data \
-    --val_csv    $WORK/validation/all.csv \
-    --model_dir  $MODEL_DST \
-    --operation  grouped_conv \
-    --dtype      fp16 \
-    --arch       gfx942
-# Target: mean heuristic efficiency >= 90% (heuristic_tflops / oracle_tflops).
+# Convert validation sweep output to parquet.
+python3 $HEURISTICS/scripts/convert_dsl_csv_to_parquet.py \
+    --input  $WORK/validation/all.csv \
+    --output $WORK/validation/val.parquet \
+    --arch   gfx942 \
+    --run-id 99
+
+# Score each shape: compare oracle-best TFLOPS against the kernel the model picks.
+# The model directory must contain model_tflops.lgbm (decompressed — see above).
+python3 $CK_HEURISTICS/validation/grouped_conv/validate_conv_ml_vs_oracle.py \
+    --model          $MODEL_DST \
+    --oracle-parquet $WORK/validation/val.parquet \
+    --output         $WORK/validation/results.csv
+# Target: mean efficiency >= 0.90.
 ```

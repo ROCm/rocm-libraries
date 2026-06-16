@@ -123,7 +123,9 @@ class Dispatcher {
                    p.conv_K == arr[4].as_int() && p.Y == arr[5].as_int() &&
                    p.X == arr[6].as_int() && p.stride_h == arr[7].as_int() &&
                    p.stride_w == arr[8].as_int() && p.pad_h == arr[9].as_int() &&
-                   p.pad_w == arr[10].as_int();
+                   p.pad_w == arr[10].as_int() && p.dilation_h == arr[11].as_int() &&
+                   p.dilation_w == arr[12].as_int() &&
+                   p.conv_G == m.raw.get_int("groups", 1);
         }
         return true;  // other ops: shape support refined per-engine
     }
