@@ -1105,6 +1105,14 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
   mod.add(comp.initOperands(descSgprName(0), descSgprName(1), None, None))
   mod.add(comp.setDataType(dtype, descSgprName(1)))
   mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
+  # Multicast: OR the per-cluster broadcast mask into the descriptor (Group1+0)
+  # so the TDM load broadcasts to peer workgroups' LDS. Mirrors the non-subtile
+  # wave-separated path; the mask itself is computed once in defineAndResources.
+  enableCluster = (kernel["ClusterDim"][0] * kernel["ClusterDim"][1]) != 1
+  if kernel["Multicast"] and enableCluster:
+    waveSeparated = kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] > 1
+    maskName = "MulticastMask" if waveSeparated else f"MulticastMask{tc}"
+    mod.add(comp.setMulticastMask(descSgprName(1), maskName, writer))
 
   with writer.allocTmpSgpr(1) as tmpSgprRes:
     waveOffsetSgprIdx = tmpSgprRes.idx
