@@ -517,6 +517,11 @@ if(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
   target_compile_definitions(rocsolver PRIVATE ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
 endif()
 
+# Feature flags
+if(ROCSOLVER_ENABLE_CHOLQR)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_CHOLQR)
+endif()
+
 target_compile_definitions(rocsolver PRIVATE
   ROCM_USE_FLOAT16
   ROCBLAS_INTERNAL_API

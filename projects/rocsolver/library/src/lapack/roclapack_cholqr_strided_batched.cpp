@@ -135,8 +135,12 @@ rocblas_status rocsolver_scholqr_strided_batched(rocblas_handle handle,
                                                  rocblas_int* nr,
                                                  const rocblas_int batch_count)
 {
+#if defined(ROCSOLVER_ENABLE_CHOLQR)
     return rocsolver::rocsolver_cholqr_strided_batched_impl<float>(
         handle, cholshift, cholnum, m, n, A, lda, strideA, W, ldw, strideW, sigma, nr, batch_count);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 rocblas_status rocsolver_dcholqr_strided_batched(rocblas_handle handle,
@@ -154,8 +158,12 @@ rocblas_status rocsolver_dcholqr_strided_batched(rocblas_handle handle,
                                                  rocblas_int* nr,
                                                  const rocblas_int batch_count)
 {
+#if defined(ROCSOLVER_ENABLE_CHOLQR)
     return rocsolver::rocsolver_cholqr_strided_batched_impl<double>(
         handle, cholshift, cholnum, m, n, A, lda, strideA, W, ldw, strideW, sigma, nr, batch_count);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 rocblas_status rocsolver_ccholqr_strided_batched(rocblas_handle handle,
@@ -173,8 +181,12 @@ rocblas_status rocsolver_ccholqr_strided_batched(rocblas_handle handle,
                                                  rocblas_int* nr,
                                                  const rocblas_int batch_count)
 {
+#if defined(ROCSOLVER_ENABLE_CHOLQR)
     return rocsolver::rocsolver_cholqr_strided_batched_impl<rocblas_float_complex>(
         handle, cholshift, cholnum, m, n, A, lda, strideA, W, ldw, strideW, sigma, nr, batch_count);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 rocblas_status rocsolver_zcholqr_strided_batched(rocblas_handle handle,
@@ -192,8 +204,12 @@ rocblas_status rocsolver_zcholqr_strided_batched(rocblas_handle handle,
                                                  rocblas_int* nr,
                                                  const rocblas_int batch_count)
 {
+#if defined(ROCSOLVER_ENABLE_CHOLQR)
     return rocsolver::rocsolver_cholqr_strided_batched_impl<rocblas_double_complex>(
         handle, cholshift, cholnum, m, n, A, lda, strideA, W, ldw, strideW, sigma, nr, batch_count);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 rocblas_status rocsolver_scholqr_strided_batched_64(rocblas_handle handle,
@@ -211,7 +227,7 @@ rocblas_status rocsolver_scholqr_strided_batched_64(rocblas_handle handle,
                                                     int64_t* nr,
                                                     const int64_t batch_count)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_CHOLQR)
     return rocsolver::rocsolver_cholqr_strided_batched_impl<float>(
         handle, cholshift, cholnum, m, n, A, lda, strideA, W, ldw, strideW, sigma, nr, batch_count);
 #else
@@ -234,7 +250,7 @@ rocblas_status rocsolver_dcholqr_strided_batched_64(rocblas_handle handle,
                                                     int64_t* nr,
                                                     const int64_t batch_count)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_CHOLQR)
     return rocsolver::rocsolver_cholqr_strided_batched_impl<double>(
         handle, cholshift, cholnum, m, n, A, lda, strideA, W, ldw, strideW, sigma, nr, batch_count);
 #else
@@ -257,7 +273,7 @@ rocblas_status rocsolver_ccholqr_strided_batched_64(rocblas_handle handle,
                                                     int64_t* nr,
                                                     const int64_t batch_count)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_CHOLQR)
     return rocsolver::rocsolver_cholqr_strided_batched_impl<rocblas_float_complex>(
         handle, cholshift, cholnum, m, n, A, lda, strideA, W, ldw, strideW, sigma, nr, batch_count);
 #else
@@ -280,7 +296,7 @@ rocblas_status rocsolver_zcholqr_strided_batched_64(rocblas_handle handle,
                                                     int64_t* nr,
                                                     const int64_t batch_count)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_CHOLQR)
     return rocsolver::rocsolver_cholqr_strided_batched_impl<rocblas_double_complex>(
         handle, cholshift, cholnum, m, n, A, lda, strideA, W, ldw, strideW, sigma, nr, batch_count);
 #else

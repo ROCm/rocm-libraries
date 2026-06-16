@@ -235,6 +235,11 @@ target_compile_definitions(rocsolver-test PRIVATE
   ROCSOLVER_CLIENTS_TEST
 )
 
+# Mirror feature flags to test behaviour
+if(ROCSOLVER_ENABLE_CHOLQR)
+  target_compile_definitions(rocsolver-test PRIVATE ROCSOLVER_ENABLE_CHOLQR)
+endif()
+
 add_test(
   NAME rocsolver-test
   COMMAND rocsolver-test

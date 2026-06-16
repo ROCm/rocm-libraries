@@ -125,6 +125,7 @@ void testing_cholqr_bad_arg()
     CHECK_HIP_ERROR(dSigma.memcheck());
     CHECK_HIP_ERROR(dnr.memcheck());
 
+#ifdef ROCSOLVER_ENABLE_CHOLQR
     if(BATCHED)
     {
         // memory allocations
@@ -145,6 +146,7 @@ void testing_cholqr_bad_arg()
         cholqr_checkBadArgs<STRIDED>(handle, cholshift, cholnum, m, n, dA.data(), lda, stA,
                                      dW.data(), ldw, stW, dSigma.data(), dnr.data(), bc);
     }
+#endif
 }
 
 template <bool CPU, bool GPU, typename T, typename S, typename I, typename Td, typename Ud, typename Sd, typename Th, typename Uh, typename Sh>
@@ -522,6 +524,24 @@ void testing_cholqr(Arguments& argus)
 
     size_t size_ARes = (argus.unit_check || argus.norm_check) ? size_A : 0;
     size_t size_WRes = (argus.unit_check || argus.norm_check) ? size_W : 0;
+
+// check feature flag
+#ifndef ROCSOLVER_ENABLE_CHOLQR
+    {
+        if(BATCHED)
+            EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n,
+                                                   (T* const*)nullptr, lda, stA, (T*)nullptr, ldw,
+                                                   stW, (S*)nullptr, (I*)nullptr, bc),
+                                  rocblas_status_not_implemented);
+        else
+            EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, cholshift, cholnum, m, n,
+                                                   (T*)nullptr, lda, stA, (T*)nullptr, ldw, stW,
+                                                   (S*)nullptr, (I*)nullptr, bc),
+                                  rocblas_status_not_implemented);
+
+        return;
+    }
+#endif
 
     // check invalid sizes
     bool invalid_size = (m < 0 || n < 0 || lda < m || ldw < mn || bc < 0 || cholnum < 1

@@ -133,8 +133,12 @@ rocblas_status rocsolver_scholqr(rocblas_handle handle,
                                  float* sigma,
                                  rocblas_int* nr)
 {
+#if defined(ROCSOLVER_ENABLE_CHOLQR)
     return (rocsolver::rocsolver_cholqr_impl<float>(handle, cholshift, cholnum, m, n, A, lda, W,
                                                     ldw, sigma, nr));
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 rocblas_status rocsolver_dcholqr(rocblas_handle handle,
@@ -149,8 +153,12 @@ rocblas_status rocsolver_dcholqr(rocblas_handle handle,
                                  double* sigma,
                                  rocblas_int* nr)
 {
+#if defined(ROCSOLVER_ENABLE_CHOLQR)
     return (rocsolver::rocsolver_cholqr_impl<double>(handle, cholshift, cholnum, m, n, A, lda, W,
                                                      ldw, sigma, nr));
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 rocblas_status rocsolver_ccholqr(rocblas_handle handle,
@@ -165,8 +173,12 @@ rocblas_status rocsolver_ccholqr(rocblas_handle handle,
                                  float* sigma,
                                  rocblas_int* nr)
 {
+#if defined(ROCSOLVER_ENABLE_CHOLQR)
     return (rocsolver::rocsolver_cholqr_impl<rocblas_float_complex>(handle, cholshift, cholnum, m,
                                                                     n, A, lda, W, ldw, sigma, nr));
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 rocblas_status rocsolver_zcholqr(rocblas_handle handle,
@@ -181,8 +193,12 @@ rocblas_status rocsolver_zcholqr(rocblas_handle handle,
                                  double* sigma,
                                  rocblas_int* nr)
 {
+#if defined(ROCSOLVER_ENABLE_CHOLQR)
     return (rocsolver::rocsolver_cholqr_impl<rocblas_double_complex>(handle, cholshift, cholnum, m,
                                                                      n, A, lda, W, ldw, sigma, nr));
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 rocblas_status rocsolver_scholqr_64(rocblas_handle handle,
@@ -197,7 +213,7 @@ rocblas_status rocsolver_scholqr_64(rocblas_handle handle,
                                     float* sigma,
                                     int64_t* nr)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_CHOLQR)
     return rocsolver::rocsolver_cholqr_impl<float>(handle, cholshift, cholnum, m, n, A, lda, W, ldw,
                                                    sigma, nr);
 #else
@@ -217,7 +233,7 @@ rocblas_status rocsolver_dcholqr_64(rocblas_handle handle,
                                     double* sigma,
                                     int64_t* nr)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_CHOLQR)
     return rocsolver::rocsolver_cholqr_impl<double>(handle, cholshift, cholnum, m, n, A, lda, W,
                                                     ldw, sigma, nr);
 #else
@@ -237,7 +253,7 @@ rocblas_status rocsolver_ccholqr_64(rocblas_handle handle,
                                     float* sigma,
                                     int64_t* nr)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_CHOLQR)
     return rocsolver::rocsolver_cholqr_impl<rocblas_float_complex>(handle, cholshift, cholnum, m, n,
                                                                    A, lda, W, ldw, sigma, nr);
 #else
@@ -257,7 +273,7 @@ rocblas_status rocsolver_zcholqr_64(rocblas_handle handle,
                                     double* sigma,
                                     int64_t* nr)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_CHOLQR)
     return rocsolver::rocsolver_cholqr_impl<rocblas_double_complex>(handle, cholshift, cholnum, m,
                                                                     n, A, lda, W, ldw, sigma, nr);
 #else
