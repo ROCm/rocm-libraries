@@ -464,6 +464,13 @@ struct DefaultTranspose
     template <index_t LaneGroupSize>
     using QuadOutputEncoding = typename Quad<LaneGroupSize, NumBitsDataType>::OutputEncoding;
 #endif
+    // Number of elements a single transpose instruction loads per lane along the minor
+    // (terminal K) dimension. Architecture/data-type specific (e.g. gfx1250 uses 128-bit
+    // ds_read_tr for 16-bit types -> 8, vs 64-bit on gfx950 -> 4). Independent of
+    // LaneGroupSize, so any valid value (16) selects the right Quad specialization.
+    static constexpr index_t SubtileMinorDimension =
+        Quad<16, NumBitsDataType>::SubtileMinorDimension;
+
     // Always swap last two dimensions
     static constexpr auto transpose_dims = sequence<1, 0>{};
 
@@ -548,11 +555,13 @@ struct DefaultTranspose
 namespace detail {
 
 // Normalize a distribution encoding so that the last K sub-dimension equals SubtileMinorDim.
-// ds_read_tr loads SubtileMinorDim (= 64 / bits_per_element) elements per instruction.
+// ds_read_tr loads SubtileMinorDim elements per instruction; this width is architecture- and
+// data-type-specific (e.g. gfx1250 uses a 128-bit instruction for 16-bit types, gfx950 uses
+// 64-bit), so it is sourced from the transpose Policy rather than hardcoded.
 // When the last K sub-dim is a multiple of SubtileMinorDim, this struct splits it into
 // sequence<..., factor, SubtileMinorDim> and adds a corresponding Y dimension.
 // This is a no-op when the encoding is already compatible.
-template <typename DstrEncode, typename DataType>
+template <typename DstrEncode, typename DataType, typename Policy = DefaultTranspose<DataType>>
 struct NormalizeEncodingForTranspose
 {
     static_assert(DstrEncode::NDimX == 2,
@@ -562,7 +571,7 @@ struct NormalizeEncodingForTranspose
 
     static constexpr index_t NumBits =
         sizeof(DataType) * 8 / numeric_traits<remove_cvref_t<DataType>>::PackedSize;
-    static constexpr index_t SubtileMinorDim = 64 / NumBits;
+    static constexpr index_t SubtileMinorDim = Policy::SubtileMinorDimension;
 
     static constexpr auto I0 = number<0>{};
     static constexpr auto I1 = number<1>{};
@@ -660,7 +669,7 @@ struct TransposeTileDistributionTraits
     // transposed and has the correct structure.
     using InDstrEncode = std::conditional_t<
         ReverseDirection,
-        typename detail::NormalizeEncodingForTranspose<RawDstrEncode, DataType_>::type,
+        typename detail::NormalizeEncodingForTranspose<RawDstrEncode, DataType_, Policy>::type,
         RawDstrEncode>;
     static constexpr auto input_hs_lengthss = InDstrEncode::hs_lengthss_;
     static constexpr index_t LaneGroupSize =
