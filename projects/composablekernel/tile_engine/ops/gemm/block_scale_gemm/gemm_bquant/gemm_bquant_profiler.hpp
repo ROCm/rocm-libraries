@@ -3,30 +3,31 @@
 
 #pragma once
 
-#include <algorithm>
-#include <fstream>
-#include <functional>
-#include <iomanip>
 #include <iostream>
-#include <stdexcept>
+#include <fstream>
+#include <iomanip>
+#include <functional>
 #include <tuple>
 #include <vector>
+#include <algorithm>
+#include <stdexcept>
 
 #include "ck_tile/host/device_prop.hpp"
+#include "ck_tile/host/tensor_shuffle_utils.hpp"
 #include "ck_tile/ops/gemm_quant.hpp"
-#include "gemm_aquant_benchmark.hpp"
+#include "gemm_bquant_benchmark.hpp"
 
-class AQuantGemmProfiler
+class BQuantGemmProfiler
 {
     public:
-    explicit AQuantGemmProfiler(Setting setting) : setting_(setting) {}
+    explicit BQuantGemmProfiler(Setting setting) : setting_(setting) {}
 
-    AQuantGemmProfiler(const AQuantGemmProfiler&)            = delete;
-    AQuantGemmProfiler& operator=(const AQuantGemmProfiler&) = delete;
+    BQuantGemmProfiler(const BQuantGemmProfiler&)            = delete;
+    BQuantGemmProfiler& operator=(const BQuantGemmProfiler&) = delete;
 
     void reset() { kernel_instances_.clear(); }
 
-    void benchmark(AQuantGemmProblem& problem,
+    void benchmark(BQuantGemmProblem problem,
                    std::function<float(const ck_tile::QuantGemmHostArgs&,
                                        const ck_tile::stream_config&)> kernel_func)
     {
@@ -43,14 +44,14 @@ class AQuantGemmProfiler
         benchmark(problem, callables);
     }
 
-    void benchmark(AQuantGemmProblem& problem,
+    void benchmark(BQuantGemmProblem problem,
                    std::vector<std::function<std::tuple<std::string, float>(
                        ck_tile::QuantGemmHostArgs&, const ck_tile::stream_config&)>>& callables)
     {
         const ALayout layout_a   = ALayout{};
         const BLayout layout_b   = BLayout{};
         const CLayout layout_c   = CLayout{};
-        const AQLayout layout_aq = AQLayout{};
+        const BQLayout layout_bq = BQLayout{};
 
         problem.stride_a_ = ck_tile::get_default_stride(
             problem.m_, problem.k_, problem.stride_a_, is_row_major(layout_a));
@@ -59,10 +60,12 @@ class AQuantGemmProfiler
         problem.stride_c_ = ck_tile::get_default_stride(
             problem.m_, problem.n_, problem.stride_c_, is_row_major(layout_c));
 
-        // Compute AQ scale tensor dimensions: [M, K / group_size_k]
-        const ck_tile::index_t QK_A = problem.k_ / problem.group_size_k_;
-        problem.stride_aq_          = ck_tile::get_default_stride(
-            problem.m_, QK_A, problem.stride_aq_, is_row_major(layout_aq));
+        // Compute BQ scale tensor dimensions: [K / group_size_k, N]
+        if(problem.k_ % problem.group_size_k_ != 0)
+            throw std::runtime_error("k_ must be divisible by group_size_k_");
+        const ck_tile::index_t QK_B = problem.k_ / problem.group_size_k_;
+        problem.stride_bq_          = ck_tile::get_default_stride(
+            QK_B, problem.n_, problem.stride_bq_, is_row_major(layout_bq));
 
         // Allocate host tensors
         ck_tile::HostTensor<ADataType> a_m_k(ck_tile::host_tensor_descriptor(
@@ -72,45 +75,57 @@ class AQuantGemmProfiler
         ck_tile::HostTensor<CDataType> c_m_n_dev_result(ck_tile::host_tensor_descriptor(
             problem.m_, problem.n_, problem.stride_c_, is_row_major(layout_c)));
 
-        // AQ scale tensor: [M, QK_A]
-        ck_tile::HostTensor<AQDataType> aq_m_qk(ck_tile::host_tensor_descriptor(
-            problem.m_, QK_A, problem.stride_aq_, is_row_major(layout_aq)));
+        // BQ scale tensor: [QK_B, N]
+        ck_tile::HostTensor<BQDataType> bq_qk_n(ck_tile::host_tensor_descriptor(
+            QK_B, problem.n_, problem.stride_bq_, is_row_major(layout_bq)));
 
         // Initialize tensors
         if(setting_.init_method_ == 0)
         {
             ck_tile::FillUniformDistribution<ADataType>{-1.f, 1.f}(a_m_k);
             ck_tile::FillUniformDistribution<BDataType>{-1.f, 1.f}(b_k_n);
-            ck_tile::FillUniformDistribution<AQDataType>{0.5f, 1.5f}(aq_m_qk);
+            ck_tile::FillUniformDistribution<BQDataType>{0.5f, 1.5f}(bq_qk_n);
         }
         else if(setting_.init_method_ == 1)
         {
             ck_tile::FillMonotonicSeq<ADataType>{}(a_m_k);
             ck_tile::FillMonotonicSeq<BDataType>{}(b_k_n);
-            ck_tile::FillConstant<AQDataType>{static_cast<AQDataType>(1)}(aq_m_qk);
+            ck_tile::FillConstant<BQDataType>{static_cast<BQDataType>(1)}(bq_qk_n);
         }
         else if(setting_.init_method_ == 2)
         {
             ck_tile::FillConstant<ADataType>{static_cast<ADataType>(1)}(a_m_k);
             ck_tile::FillConstant<BDataType>{static_cast<BDataType>(1)}(b_k_n);
-            ck_tile::FillConstant<AQDataType>{static_cast<AQDataType>(1)}(aq_m_qk);
+            ck_tile::FillConstant<BQDataType>{static_cast<BQDataType>(1)}(bq_qk_n);
         }
         else
         {
             a_m_k.SetZero();
             b_k_n.SetZero();
-            aq_m_qk.SetZero();
+            bq_qk_n.SetZero();
         }
 
         // Allocate device memory
         ck_tile::DeviceMem a_m_k_dev_buf(a_m_k.get_element_space_size_in_bytes());
         ck_tile::DeviceMem b_k_n_dev_buf(b_k_n.get_element_space_size_in_bytes());
         ck_tile::DeviceMem c_m_n_dev_buf(c_m_n_dev_result.get_element_space_size_in_bytes());
-        ck_tile::DeviceMem aq_dev_buf(aq_m_qk.get_element_space_size_in_bytes());
+        ck_tile::DeviceMem bq_dev_buf(bq_qk_n.get_element_space_size_in_bytes());
 
         a_m_k_dev_buf.ToDevice(a_m_k.data());
         b_k_n_dev_buf.ToDevice(b_k_n.data());
-        aq_dev_buf.ToDevice(aq_m_qk.data());
+
+        // Shuffle BQ data if preshuffle is enabled
+        if constexpr(SelectedKernel::BPreshuffleQuant)
+        {
+            constexpr int block_bq_k = SelectedKernel::TileK / SelectedKernel::GroupSizeK;
+            ck_tile::HostTensor<BQDataType> bq_shuffled = ck_tile::shuffle_bq(&bq_qk_n, block_bq_k);
+            bq_dev_buf.ToDevice(bq_shuffled.data());
+        }
+        else
+        {
+            bq_dev_buf.ToDevice(bq_qk_n.data());
+        }
+
         c_m_n_dev_buf.SetZero();
         c_m_n_dev_result.SetZero();
 
@@ -118,20 +133,19 @@ class AQuantGemmProfiler
         ck_tile::QuantGemmHostArgs gemm_args(a_m_k_dev_buf.GetDeviceBuffer(),
                                              b_k_n_dev_buf.GetDeviceBuffer(),
                                              c_m_n_dev_buf.GetDeviceBuffer(),
-                                             aq_dev_buf.GetDeviceBuffer(),
-                                             nullptr, // bq_ptr not used for AQuant
+                                             nullptr, // aq_ptr not used for BQuant
+                                             bq_dev_buf.GetDeviceBuffer(),
                                              problem.split_k_,
                                              problem.m_,
                                              problem.n_,
                                              problem.k_,
-                                             QK_A,
-                                             0, // QK_B not used for AQuant
+                                             0, // QK_A not used for BQuant
+                                             QK_B,
                                              problem.stride_a_,
                                              problem.stride_b_,
                                              problem.stride_c_,
-                                             problem.stride_aq_,
-                                             0 // stride_BQ not used for AQuant
-        );
+                                             0, // stride_AQ not used for BQuant
+                                             problem.stride_bq_);
 
         // Host reference for verification
         ck_tile::HostTensor<CDataType> c_m_n_host_result(ck_tile::host_tensor_descriptor(
@@ -139,7 +153,7 @@ class AQuantGemmProfiler
 
         if(setting_.verify_)
         {
-            aquant_gemm_host_reference(setting_.verify_, a_m_k, aq_m_qk, b_k_n, c_m_n_host_result);
+            bquant_gemm_host_reference(setting_.verify_, a_m_k, b_k_n, bq_qk_n, c_m_n_host_result);
         }
 
         // Run kernel(s)
@@ -155,7 +169,7 @@ class AQuantGemmProfiler
                                                                      setting_.flush_cache_,
                                                                      setting_.rotating_count_});
             process_result(problem,
-                           QK_A,
+                           QK_B,
                            c_m_n_dev_buf,
                            c_m_n_host_result,
                            c_m_n_dev_result,
@@ -163,8 +177,8 @@ class AQuantGemmProfiler
         }
     }
 
-    void process_result(const AQuantGemmProblem& problem,
-                        ck_tile::index_t QK_A,
+    void process_result(const BQuantGemmProblem& problem,
+                        ck_tile::index_t QK_B,
                         ck_tile::DeviceMem& c_m_n_dev_buf,
                         ck_tile::HostTensor<CDataType>& c_m_n_host_result,
                         ck_tile::HostTensor<CDataType>& c_m_n_dev_result,
@@ -178,7 +192,7 @@ class AQuantGemmProfiler
         std::size_t flop     = std::size_t(2) * problem.m_ * problem.n_ * problem.k_;
         std::size_t num_byte = sizeof(ADataType) * problem.m_ * problem.k_ +
                                sizeof(BDataType) * problem.n_ * problem.k_ +
-                               sizeof(AQDataType) * problem.m_ * QK_A +
+                               sizeof(BQDataType) * problem.n_ * QK_B +
                                sizeof(CDataType) * problem.m_ * problem.n_;
 
         kernel_instance.perf_result_.latency_   = avg_time;
@@ -191,10 +205,13 @@ class AQuantGemmProfiler
         }
 
         // Verify result
-        c_m_n_dev_buf.FromDevice(c_m_n_dev_result.data());
-        bool verified_correct =
-            !setting_.verify_ ||
-            compare_aquant(name, problem.k_, problem.split_k_, c_m_n_dev_result, c_m_n_host_result);
+        bool verified_correct = true;
+        if(setting_.verify_)
+        {
+            c_m_n_dev_buf.FromDevice(c_m_n_dev_result.data());
+            verified_correct = compare_bquant(
+                name, problem.k_, problem.split_k_, c_m_n_dev_result, c_m_n_host_result);
+        }
 
         if(verified_correct)
         {
@@ -246,8 +263,8 @@ class AQuantGemmProfiler
                 if(file.tellp() == 0)
                 {
                     file << "rocm_version,device_name,"
-                         << "split_k,m,n,k,stride_a,stride_b,stride_c,stride_aq,group_size_k,"
-                         << "dtype_a,dtype_b,dtype_aq,dtype_acc,dtype_c,"
+                         << "split_k,m,n,k,stride_a,stride_b,stride_c,stride_bq,group_size_k,"
+                         << "dtype_a,dtype_b,dtype_bq,dtype_acc,dtype_c,"
                          << "layout_a,layout_b,layout_c," << "name,"
                          << "latency(ms),tflops(TFlops),bandwidth(GB/s),metric\n";
                 }
@@ -258,8 +275,8 @@ class AQuantGemmProfiler
                 file << get_rocm_version() << "," << ck_tile::get_device_name() << ","
                      << prob.split_k_ << "," << prob.m_ << "," << prob.n_ << "," << prob.k_ << ","
                      << prob.stride_a_ << "," << prob.stride_b_ << "," << prob.stride_c_ << ","
-                     << prob.stride_aq_ << "," << prob.group_size_k_ << "," << prob.dtype_a_ << ","
-                     << prob.dtype_b_ << "," << prob.dtype_aq_ << "," << prob.dtype_acc_ << ","
+                     << prob.stride_bq_ << "," << prob.group_size_k_ << "," << prob.dtype_a_ << ","
+                     << prob.dtype_b_ << "," << prob.dtype_bq_ << "," << prob.dtype_acc_ << ","
                      << prob.dtype_c_ << "," << prob.layout_a_ << "," << prob.layout_b_ << ","
                      << prob.layout_c_ << "," << kernel_instance.name_ << "," << std::fixed
                      << std::setprecision(4) << perf.latency_ << "," << perf.tflops_ << ","

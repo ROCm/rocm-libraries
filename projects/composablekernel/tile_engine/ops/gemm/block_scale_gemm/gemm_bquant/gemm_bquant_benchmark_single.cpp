@@ -11,13 +11,13 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
-#include "gemm_aquant_profiler.hpp"
-#include "gemm_aquant_common.hpp"
+#include "gemm_bquant_profiler.hpp"
+#include "gemm_bquant_common.hpp"
 
 // The kernel header is included via the compile command line with -include flag
 // It defines SelectedKernel struct, KERNEL_NAME, and type aliases:
-//   ADataType, BDataType, AQDataType, AccDataType, CDataType
-//   ALayout, BLayout, CLayout, AQLayout
+//   ADataType, BDataType, BQDataType, AccDataType, CDataType
+//   ALayout, BLayout, CLayout, BQLayout
 
 inline auto create_args(int argc, char* argv[])
 {
@@ -77,7 +77,7 @@ void benchmark_single(const ck_tile::ArgParser& arg_parser)
 {
     std::string dtype_a   = DataTypeTraits<ADataType>::name;
     std::string dtype_b   = DataTypeTraits<BDataType>::name;
-    std::string dtype_aq  = DataTypeTraits<AQDataType>::name;
+    std::string dtype_bq  = DataTypeTraits<BQDataType>::name;
     std::string dtype_acc = DataTypeTraits<AccDataType>::name;
     std::string dtype_c   = DataTypeTraits<CDataType>::name;
 
@@ -85,20 +85,33 @@ void benchmark_single(const ck_tile::ArgParser& arg_parser)
     std::string layout_b = BLayout::name;
     std::string layout_c = CLayout::name;
 
+    int M            = arg_parser.get_int("m");
+    int N            = arg_parser.get_int("n");
+    int K            = arg_parser.get_int("k");
     int group_size_k = arg_parser.get_int("group_size_k");
 
-    AQuantGemmProblem problem{arg_parser.get_int("split_k"),
-                              arg_parser.get_int("m"),
-                              arg_parser.get_int("n"),
-                              arg_parser.get_int("k"),
+    if(M <= 0 || N <= 0 || K <= 0)
+    {
+        throw std::invalid_argument("m, n, k must be positive integers");
+    }
+    if(group_size_k <= 0 || K % group_size_k != 0)
+    {
+        throw std::invalid_argument(
+            "group_size_k must be positive and k must be divisible by group_size_k");
+    }
+
+    BQuantGemmProblem problem{arg_parser.get_int("split_k"),
+                              M,
+                              N,
+                              K,
                               arg_parser.get_int("stride_a"),
                               arg_parser.get_int("stride_b"),
                               arg_parser.get_int("stride_c"),
-                              0, // stride_aq computed by profiler
+                              0, // stride_bq computed by profiler
                               group_size_k,
                               dtype_a,
                               dtype_b,
-                              dtype_aq,
+                              dtype_bq,
                               dtype_acc,
                               dtype_c,
                               layout_a,
@@ -116,7 +129,7 @@ void benchmark_single(const ck_tile::ArgParser& arg_parser)
                     arg_parser.get_int("rotating_count"),
                     arg_parser.get_bool("json_output")};
 
-    AQuantGemmProfiler profiler{setting};
+    BQuantGemmProfiler profiler{setting};
 
     try
     {

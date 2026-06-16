@@ -3,7 +3,6 @@
 
 import sys
 import json
-import csv
 import subprocess
 import argparse
 import time
@@ -11,22 +10,22 @@ from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 
 
-class AQuantGemmBenchmark:
+class BQuantGemmBenchmark:
     def __init__(self, build_dir: str, verbose: bool = False):
         self.build_dir = Path(build_dir)
         self.verbose = verbose
         self.results = []
 
     def discover_kernels(self) -> List[Path]:
-        """Find all benchmark_gemm_aquant_* executables in the build directory."""
+        """Find all benchmark_gemm_bquant_* executables in the build directory."""
         bin_dir = self.build_dir / "bin"
         if not bin_dir.exists():
             print(f"Error: Binary directory {bin_dir} does not exist")
             return []
 
-        kernels = list(bin_dir.glob("benchmark_gemm_aquant_*"))
+        kernels = list(bin_dir.glob("benchmark_gemm_bquant_*"))
         if self.verbose:
-            print(f"Found {len(kernels)} AQuant kernel executables")
+            print(f"Found {len(kernels)} BQuant kernel executables")
             for k in kernels:
                 print(f"  - {k.name}")
         return kernels
@@ -43,14 +42,15 @@ class AQuantGemmBenchmark:
             "pipeline": "unknown",
             "scheduler": "unknown",
             "epilogue": "unknown",
-            "a_preshuffle_quant": False,
+            "b_preshuffle_quant": False,
+            "preshuffle_b": False,
         }
 
-        # Parse: benchmark_gemm_aquant_fp8_rcr_mem_default_interwave_False_False_True_False_128x128x128_...
+        # Parse: benchmark_gemm_bquant_fp8_rcr_compv3_default_intrawave_False_False_True_False_False_128x128x128_...
         parts = name.split("_")
 
         if len(parts) >= 3:
-            # Skip "benchmark_gemm_aquant" prefix (3 parts)
+            # Skip "benchmark_gemm_bquant" prefix (3 parts)
             idx = 3
             if idx < len(parts):
                 info["data_type"] = parts[idx]
@@ -75,16 +75,7 @@ class AQuantGemmBenchmark:
         return info
 
     def parse_detailed_config(self, kernel_name: str) -> Dict:
-        """Parse tile dimensions and boolean flags from kernel name.
-
-        Kernel name format (after "benchmark_gemm_aquant_"):
-          {dtype}_{layout}_{pipeline}_{epilogue}_{scheduler}
-          _{padM}_{padN}_{padK}_{aPreshuffle}
-          _{TileMxTileNxTileK}_{WarpMxWarpNxWarpK}_{WarpTileMxWarpTileNxWarpTileK}
-
-        Dimensions are extracted positionally (in order of appearance) rather than
-        by sorting, which would silently misassign groups that share a max value.
-        """
+        """Parse tile dimensions and boolean flags from kernel name."""
         config = {
             "tile_sizes": {"tile_m": 0, "tile_n": 0, "tile_k": 0},
             "warp_config": {"warp_m": 0, "warp_n": 0, "warp_k": 0},
@@ -93,7 +84,8 @@ class AQuantGemmBenchmark:
                 "pad_m": False,
                 "pad_n": False,
                 "pad_k": False,
-                "a_preshuffle_quant": False,
+                "b_preshuffle_quant": False,
+                "preshuffle_b": False,
             },
         }
 
@@ -102,35 +94,35 @@ class AQuantGemmBenchmark:
         # Locate the first boolean token; collect the contiguous boolean run
         bool_start = -1
         bool_sequence = []
-        for i, part in enumerate(parts):
+        for part in parts:
             if part in ("True", "False"):
                 if bool_start == -1:
-                    bool_start = i
+                    bool_start = 0
                 bool_sequence.append(part == "True")
             elif bool_start != -1:
-                # End of the boolean run
                 break
 
-        if len(bool_sequence) >= 4:
+        if len(bool_sequence) >= 5:
             config["optimization_flags"]["pad_m"] = bool_sequence[0]
             config["optimization_flags"]["pad_n"] = bool_sequence[1]
             config["optimization_flags"]["pad_k"] = bool_sequence[2]
-            config["optimization_flags"]["a_preshuffle_quant"] = bool_sequence[3]
+            config["optimization_flags"]["b_preshuffle_quant"] = bool_sequence[3]
+            config["optimization_flags"]["preshuffle_b"] = bool_sequence[4]
 
-        # Extract dimension groups (NxNxN tokens) in positional order.
-        # Appearance order in the name is: tile, warp, warp_tile.
+        # Extract dimension groups (e.g., 128x128x128) in positional order.
+        # Kernel names encode groups as: tile_MxNxK_warp_MxNxK_warp_tile_MxNxK
         dimension_groups = []
         for part in parts:
-            sub = part.split("x")
-            if len(sub) == 3:
+            if "x" in part and len(part.split("x")) == 3:
                 try:
-                    dims = [int(v) for v in sub]
+                    dims = [int(x) for x in part.split("x")]
                     if all(d > 0 for d in dims):
                         dimension_groups.append(dims)
                 except ValueError:
                     continue
 
         if len(dimension_groups) >= 3:
+            # Use positional order: tile, warp, warp_tile
             config["tile_sizes"]["tile_m"] = dimension_groups[0][0]
             config["tile_sizes"]["tile_n"] = dimension_groups[0][1]
             config["tile_sizes"]["tile_k"] = dimension_groups[0][2]
@@ -140,17 +132,6 @@ class AQuantGemmBenchmark:
             config["warp_tile"]["warp_tile_m"] = dimension_groups[2][0]
             config["warp_tile"]["warp_tile_n"] = dimension_groups[2][1]
             config["warp_tile"]["warp_tile_k"] = dimension_groups[2][2]
-        elif len(dimension_groups) == 2:
-            config["tile_sizes"]["tile_m"] = dimension_groups[0][0]
-            config["tile_sizes"]["tile_n"] = dimension_groups[0][1]
-            config["tile_sizes"]["tile_k"] = dimension_groups[0][2]
-            config["warp_config"]["warp_m"] = dimension_groups[1][0]
-            config["warp_config"]["warp_n"] = dimension_groups[1][1]
-            config["warp_config"]["warp_k"] = dimension_groups[1][2]
-        elif len(dimension_groups) == 1:
-            config["tile_sizes"]["tile_m"] = dimension_groups[0][0]
-            config["tile_sizes"]["tile_n"] = dimension_groups[0][1]
-            config["tile_sizes"]["tile_k"] = dimension_groups[0][2]
 
         return config
 
@@ -167,18 +148,6 @@ class AQuantGemmBenchmark:
         if tile_sizes.get("tile_m", 0) > 0:
             parts.append(
                 f"{tile_sizes['tile_m']}x{tile_sizes['tile_n']}x{tile_sizes['tile_k']}"
-            )
-
-        warp_config = info.get("warp_config", {})
-        if warp_config.get("warp_m", 0) > 0:
-            parts.append(
-                f"w{warp_config['warp_m']}x{warp_config['warp_n']}x{warp_config['warp_k']}"
-            )
-
-        warp_tile = info.get("warp_tile", {})
-        if warp_tile.get("warp_tile_m", 0) > 0:
-            parts.append(
-                f"wt{warp_tile['warp_tile_m']}x{warp_tile['warp_tile_n']}x{warp_tile['warp_tile_k']}"
             )
 
         return "_".join(parts)
@@ -382,43 +351,6 @@ class AQuantGemmBenchmark:
         self.results = all_results
         return best_kernels
 
-    def export_csv(self, filename: str):
-        """Export all results to CSV."""
-        if not self.results:
-            print("No results to export")
-            return
-
-        all_keys = set()
-        for result in self.results:
-            all_keys.update(result.keys())
-
-        fieldnames = sorted(all_keys)
-
-        with open(filename, "w", newline="") as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(self.results)
-
-        print(f"Results exported to {filename}")
-
-    def export_best_kernels(self, best_kernels: Dict, filename: str):
-        """Export best kernel selections to file."""
-        with open(filename, "w") as f:
-            f.write("# Best AQuant kernel selections\n")
-            f.write(
-                "# Format: problem_size -> kernel_name (TFLOPS, bandwidth, latency)\n\n"
-            )
-
-            for key, kernel in sorted(best_kernels.items()):
-                f.write(
-                    f"{key}: {kernel['name']} "
-                    f"({kernel['tflops']:.2f} TFLOPS, "
-                    f"{kernel['bandwidth_gb_s']:.2f} GB/s, "
-                    f"{kernel['time_ms']:.2f}ms)\n"
-                )
-
-        print(f"Best kernels exported to {filename}")
-
     def export_json(self, filename: str, best_kernels: Dict = None):
         """Export results to JSON."""
         from datetime import datetime
@@ -426,7 +358,7 @@ class AQuantGemmBenchmark:
         output_data = {
             "benchmark_metadata": {
                 "timestamp": datetime.now().isoformat(),
-                "operator": "gemm_aquant",
+                "operator": "gemm_bquant",
                 "total_kernels_tested": len(self.results),
                 "successful_runs": len(
                     [r for r in self.results if r.get("tflops", 0) > 0]
@@ -442,7 +374,7 @@ class AQuantGemmBenchmark:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="AQuant GEMM Kernel Benchmarking Tool")
+    parser = argparse.ArgumentParser(description="BQuant GEMM Kernel Benchmarking Tool")
     parser.add_argument(
         "build_dir", help="Build directory containing kernel executables"
     )
@@ -480,21 +412,9 @@ def main():
         help="Number of benchmark iterations",
     )
     parser.add_argument(
-        "--csv",
-        default="gemm_aquant_benchmark_results.csv",
-        help="CSV output filename (default: gemm_aquant_benchmark_results.csv)",
-    )
-    parser.add_argument(
-        "--best",
-        default="best_aquant_kernels.txt",
-        help="Best kernels output filename (default: best_aquant_kernels.txt)",
-    )
-    parser.add_argument("--json", help="JSON output filename (optional)")
-    parser.add_argument(
-        "--flush-cache",
+        "--no-flush-cache",
         action="store_true",
-        default=True,
-        help="Flush cache between kernel runs (default: true)",
+        help="Disable cache flushing between iterations",
     )
     parser.add_argument(
         "--rotating-count",
@@ -502,6 +422,7 @@ def main():
         default=1000,
         help="Number of iterations to rotate the cache (default: 1000)",
     )
+    parser.add_argument("--json", help="JSON output filename (optional)")
 
     args = parser.parse_args()
 
@@ -514,9 +435,9 @@ def main():
             print(f"Invalid problem size: {size_str}")
             return 1
 
-    benchmark = AQuantGemmBenchmark(args.build_dir, verbose=args.verbose)
+    benchmark = BQuantGemmBenchmark(args.build_dir, verbose=args.verbose)
 
-    print("Starting AQuant GEMM kernel benchmark sweep...")
+    print("Starting BQuant GEMM kernel benchmark sweep...")
     start_time = time.time()
 
     best_kernels = benchmark.benchmark_sweep(
@@ -526,16 +447,12 @@ def main():
         verify=args.verify,
         warmup=args.warmup,
         repeat=args.repeat,
-        flush_cache=args.flush_cache,
+        flush_cache=not args.no_flush_cache,
         rotating_count=args.rotating_count,
     )
 
     elapsed_time = time.time() - start_time
     print(f"\nBenchmark completed in {elapsed_time:.2f} seconds")
-
-    # Export results
-    benchmark.export_csv(args.csv)
-    benchmark.export_best_kernels(best_kernels, args.best)
 
     if args.json:
         benchmark.export_json(args.json, best_kernels)

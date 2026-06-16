@@ -3,19 +3,21 @@
 
 #pragma once
 
-#include <iostream>
-#include <string>
+#include <algorithm>
+#include <cmath>
 #include <fstream>
-#include <stdexcept>
 #include <iomanip>
+#include <iostream>
+#include <stdexcept>
+#include <string>
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
-#include "gemm_aquant_common.hpp"
+#include "gemm_bquant_common.hpp"
 
 // Data types and Layouts are defined by the generated kernel headers:
-//   ADataType, BDataType, AQDataType, AccDataType, CDataType
-//   ALayout, BLayout, CLayout, AQLayout
+//   ADataType, BDataType, BQDataType, AccDataType, CDataType
+//   ALayout, BLayout, CLayout, BQLayout
 
 enum class Metric
 {
@@ -35,18 +37,18 @@ inline constexpr auto get_metric_name(Metric m)
     }
 }
 
-struct AQuantGemmProblem
+struct BQuantGemmProblem
 {
     int split_k_;
     int m_, n_, k_;
     int stride_a_, stride_b_, stride_c_;
-    int stride_aq_;
+    int stride_bq_;
     int group_size_k_;
 
-    std::string dtype_a_, dtype_b_, dtype_aq_, dtype_acc_, dtype_c_;
+    std::string dtype_a_, dtype_b_, dtype_bq_, dtype_acc_, dtype_c_;
     std::string layout_a_, layout_b_, layout_c_;
 
-    friend std::ostream& operator<<(std::ostream& os, const AQuantGemmProblem& problem)
+    friend std::ostream& operator<<(std::ostream& os, const BQuantGemmProblem& problem)
     {
         os << "{\n"
            << "   \"split_k\":" << problem.split_k_ << ",\n"
@@ -56,11 +58,11 @@ struct AQuantGemmProblem
            << "   \"stride_a\":" << problem.stride_a_ << ",\n"
            << "   \"stride_b\":" << problem.stride_b_ << ",\n"
            << "   \"stride_c\":" << problem.stride_c_ << ",\n"
-           << "   \"stride_aq\":" << problem.stride_aq_ << ",\n"
+           << "   \"stride_bq\":" << problem.stride_bq_ << ",\n"
            << "   \"group_size_k\":" << problem.group_size_k_ << ",\n"
            << "   \"dtype_a\":\"" << problem.dtype_a_ << "\",\n"
            << "   \"dtype_b\":\"" << problem.dtype_b_ << "\",\n"
-           << "   \"dtype_aq\":\"" << problem.dtype_aq_ << "\",\n"
+           << "   \"dtype_bq\":\"" << problem.dtype_bq_ << "\",\n"
            << "   \"dtype_acc\":\"" << problem.dtype_acc_ << "\",\n"
            << "   \"dtype_c\":\"" << problem.dtype_c_ << "\",\n"
            << "   \"layout_a\":\"" << problem.layout_a_ << "\",\n"
@@ -103,7 +105,7 @@ struct PerformanceResult
 struct KernelInstance
 {
     std::string name_;
-    AQuantGemmProblem problem_;
+    BQuantGemmProblem problem_;
     PerformanceResult perf_result_;
 
     static bool compare(const KernelInstance& a, const KernelInstance& b, Metric m)
@@ -138,27 +140,22 @@ struct Setting
 
 inline std::string get_rocm_version()
 {
-    // Try the legacy path first, then the path used by newer ROCm installs.
-    for(const char* path : {"/opt/rocm/.info/version", "/opt/rocm/lib/rocm_version.h"})
+    std::ifstream version_file("/opt/rocm/.info/version");
+    if(version_file.is_open())
     {
-        std::ifstream version_file(path);
-        if(version_file.is_open())
-        {
-            std::string version;
-            std::getline(version_file, version);
-            if(!version.empty())
-                return version;
-        }
+        std::string version;
+        std::getline(version_file, version);
+        return version;
     }
     return "Unknown";
 }
 
 template <typename ADataType_,
-          typename AQDataType_,
           typename BDataType_,
+          typename BQDataType_,
           typename AccDataType_,
           typename CDataType_>
-auto calculate_rtol_atol_aquant(const ck_tile::index_t K,
+auto calculate_rtol_atol_bquant(const ck_tile::index_t K,
                                 const ck_tile::index_t kbatch,
                                 const float max_accumulated_value)
 {
@@ -177,8 +174,8 @@ auto calculate_rtol_atol_aquant(const ck_tile::index_t K,
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-/// @brief Compare device and host results for AQuant GEMM
-bool compare_aquant(std::string instanceName,
+/// @brief Compare device and host results for BQuant GEMM
+bool compare_bquant(std::string instanceName,
                     ck_tile::index_t K,
                     ck_tile::index_t kbatch,
                     ck_tile::HostTensor<CDataType>& c_m_n_dev_result,
@@ -192,7 +189,7 @@ bool compare_aquant(std::string instanceName,
                                                                  std::abs(static_cast<float>(b));
                                                       })));
     const auto rtol_atol =
-        calculate_rtol_atol_aquant<ADataType, AQDataType, BDataType, AccDataType, CDataType>(
+        calculate_rtol_atol_bquant<ADataType, BDataType, BQDataType, AccDataType, CDataType>(
             K, kbatch, max_accumulated_value);
     bool pass = ck_tile::check_err(c_m_n_dev_result,
                                    c_m_n_host_result,
@@ -200,19 +197,19 @@ bool compare_aquant(std::string instanceName,
                                    rtol_atol.at(ck_tile::number<0>{}),
                                    rtol_atol.at(ck_tile::number<1>{}));
 
-    std::cerr << "For " << instanceName << " Relative error threshold is "
+    std::cout << "For " << instanceName << " Relative error threshold is "
               << rtol_atol.at(ck_tile::number<0>{}) << " Absolute error threshold is "
               << rtol_atol.at(ck_tile::number<1>{}) << std::endl;
-    std::cerr << "The verification result is:" << (pass ? "correct" : "fail") << std::endl;
+    std::cout << "The verification result is:" << (pass ? "correct" : "fail") << std::endl;
 
     return pass;
 }
 
-/// @brief CPU reference implementation for AQuant GEMM
-void aquant_gemm_host_reference(int verify,
+/// @brief CPU reference implementation for BQuant GEMM
+void bquant_gemm_host_reference(int verify,
                                 ck_tile::HostTensor<ADataType>& a_m_k,
-                                ck_tile::HostTensor<AQDataType>& aq_m_qk,
                                 ck_tile::HostTensor<BDataType>& b_k_n,
+                                ck_tile::HostTensor<BQDataType>& bq_qk_n,
                                 ck_tile::HostTensor<CDataType>& c_m_n_host_result)
 {
     if(verify == 1)
@@ -220,12 +217,13 @@ void aquant_gemm_host_reference(int verify,
         c_m_n_host_result.SetZero();
         using QuantGroupSize = typename SelectedKernel::QuantGroupSize;
         ck_tile::reference_gemm_quant<ADataType,
-                                      AQDataType,
+                                      BQDataType,
                                       BDataType,
                                       AccDataType,
                                       CDataType,
                                       QuantGroupSize,
-                                      true /* aquant */>(a_m_k, aq_m_qk, b_k_n, c_m_n_host_result);
+                                      false /* aquant=false, bquant */>(
+            a_m_k, bq_qk_n, b_k_n, c_m_n_host_result);
     }
 }
 #pragma clang diagnostic pop

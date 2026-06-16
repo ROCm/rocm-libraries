@@ -10,6 +10,7 @@ GEMM_PRESHUFFLE_PIPELINES = ["preshufflev2"]
 
 GEMM_ROWCOLQUANT_PIPELINES = ["compv3"]
 GEMM_MX_PIPELINES = ["comp_async"]
+GEMM_BQUANT_PIPELINES = ["compv3"]
 
 LAYOUT_MAP = {
     "r": "ck_tile::tensor_layout::gemm::RowMajor",
@@ -238,6 +239,11 @@ AQUANT_TRAIT_UNSUPPORTED_COMBINATIONS = {
     ("compv3", "cshuffle", "interwave"),
 }
 
+BQUANT_TRAIT_UNSUPPORTED_COMBINATIONS = {
+    ("compv3", "default", "interwave"),
+    ("compv3", "cshuffle", "interwave"),
+}
+
 def element_size(data_type: str) -> float:
     """Calculate the size (in bytes) of a single element for given data type."""
     data_type = data_type.lower()
@@ -247,11 +253,29 @@ def element_size(data_type: str) -> float:
 
 
 def is_trait_combination_valid(
-    pipeline: str, epilogue: str, scheduler: str, kernel_name_prefix: str = ""
+    pipeline: str,
+    epilogue: str,
+    scheduler: str,
+    persistent_or_preshuffle_quant=None,
+    kernel_name_prefix: str = "",
+    layout: str = "",
 ) -> bool:
     """Check if a trait combination is valid."""
     if kernel_name_prefix == "gemm_aquant":
         if (pipeline, epilogue, scheduler) in AQUANT_TRAIT_UNSUPPORTED_COMBINATIONS:
+            return False
+        # mem pipeline does not support preshuffle
+        if pipeline == "mem" and persistent_or_preshuffle_quant is True:
+            return False
+        return True
+    elif kernel_name_prefix == "gemm_bquant":
+        if (pipeline, epilogue, scheduler) in BQUANT_TRAIT_UNSUPPORTED_COMBINATIONS:
+            return False
+        # bquant only supports compv3 + intrawave
+        if pipeline != "compv3" or scheduler != "intrawave":
+            return False
+        # BPreshuffleQuant requires ColumnMajor BLayout (second char of layout is 'c')
+        if persistent_or_preshuffle_quant is True and len(layout) >= 2 and layout[1] != "c":
             return False
         return True
     elif (
@@ -504,6 +528,7 @@ def is_tile_config_valid(
     layout: str,
     gpu_target: str,
     kernel_name_prefix: str = "",
+    group_size_k: int = 128,
 ) -> bool:
     """
     Comprehensive tile configuration validation.
@@ -722,6 +747,29 @@ def is_tile_config_valid(
         )
         if not aquant_valid:
             logging.debug(f"GEMM AQuant validation failed: {aquant_valid_error}")
+            return False
+
+    elif kernel_name_prefix == "gemm_bquant":
+        bquant_valid, bquant_valid_error = validate_gemm_bquant(
+            tile_m,
+            tile_n,
+            tile_k,
+            warp_m,
+            warp_n,
+            warp_k,
+            warp_tile_m,
+            warp_tile_n,
+            warp_tile_k,
+            a_datatype,
+            b_datatype,
+            c_datatype,
+            pipeline,
+            layout,
+            gpu_target,
+            group_size_k,
+        )
+        if not bquant_valid:
+            logging.debug(f"GEMM BQuant validation failed: {bquant_valid_error}")
             return False
 
     return True
@@ -1428,4 +1476,58 @@ def validate_gemm_aquant(
     return _validate_fp8_mfma_warp_tile_k(
         warp_tile_m, warp_tile_n, warp_tile_k, a_datatype, gpu_target,
         op_label="AQuant"
+    )
+
+
+def validate_gemm_bquant(
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    warp_tile_m: int,
+    warp_tile_n: int,
+    warp_tile_k: int,
+    a_datatype: str,
+    b_datatype: str,
+    c_datatype: str,
+    pipeline: str,
+    layout: str,
+    gpu_target: str,
+    group_size_k: int = 128,
+) -> Tuple[bool, str]:
+    """Validate BQuant GEMM-specific constraints."""
+
+    whole_workgroup_cover_valid, whole_workgroup_cover_error = (
+        validate_whole_wg_cover_configuration(
+            tile_m,
+            tile_n,
+            tile_k,
+            warp_m,
+            warp_n,
+            warp_k,
+            layout,
+            a_datatype,
+            b_datatype,
+            gpu_target,
+        )
+    )
+    if not whole_workgroup_cover_valid:
+        return False, whole_workgroup_cover_error
+
+    if tile_k % group_size_k != 0 or tile_k < group_size_k:
+        return False, (
+            f"tile_k({tile_k}) must be a multiple of group_size_k({group_size_k}) "
+            f"and tile_k >= group_size_k"
+        )
+
+    if group_size_k % warp_tile_k != 0:
+        return False, (
+            f"group_size_k({group_size_k}) must be divisible by warp_tile_k({warp_tile_k})"
+        )
+
+    return _validate_fp8_mfma_warp_tile_k(
+        warp_tile_m, warp_tile_n, warp_tile_k, a_datatype, gpu_target,
+        op_label="BQuant"
     )
