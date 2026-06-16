@@ -17,7 +17,7 @@ Analog of generate_edge_dims.py (GEMM N=1 / K=1 cases) for conv:
 Output CSV columns (13 fields):
     N, G, C, K, Hi, Wi, Y, X, stride_h, stride_w, pad_h, pad_w, direction
 
-All shapes satisfy C % G == 0, K % G == 0, C % 8 == 0, K % 8 == 0,
+All shapes satisfy C % G == 0, K % G == 0, (C/G) % 8 == 0, (K/G) % 8 == 0,
 Ho >= 1, Wo >= 1.
 
 Usage:
@@ -35,7 +35,7 @@ HEADER = ["N", "G", "C", "K", "Hi", "Wi", "Y", "X", "stride_h", "stride_w", "pad
 def _valid(N, G, C, K, Hi, Wi, Y, X, stride_h, stride_w, pad_h, pad_w):
     if C % G != 0 or K % G != 0:
         return False
-    if C % 8 != 0 or K % 8 != 0:
+    if (C // G) % 8 != 0 or (K // G) % 8 != 0:
         return False
     Ho = (Hi + 2 * pad_h - Y) // stride_h + 1
     Wo = (Wi + 2 * pad_w - X) // stride_w + 1

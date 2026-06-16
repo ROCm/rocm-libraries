@@ -19,7 +19,7 @@ Output CSV columns (13 fields):
     N, G, C, K, Hi, Wi, Y, X, stride_h, stride_w, pad_h, pad_w, direction
 
 All shapes satisfy:
-    C % G == 0, K % G == 0, C % 8 == 0, K % 8 == 0
+    C % G == 0, K % G == 0, (C/G) % 8 == 0, (K/G) % 8 == 0
     Ho = (Hi + 2*pad_h - Y) // stride_h + 1 >= 1
     Wo = (Wi + 2*pad_w - X) // stride_w + 1 >= 1
 
@@ -39,7 +39,7 @@ HEADER = ["N", "G", "C", "K", "Hi", "Wi", "Y", "X", "stride_h", "stride_w", "pad
 def _valid(N, G, C, K, Hi, Wi, Y, X, stride_h, stride_w, pad_h, pad_w):
     if C % G != 0 or K % G != 0:
         return False
-    if C % 8 != 0 or K % 8 != 0:
+    if (C // G) % 8 != 0 or (K // G) % 8 != 0:
         return False
     Ho = (Hi + 2 * pad_h - Y) // stride_h + 1
     Wo = (Wi + 2 * pad_w - X) // stride_w + 1
@@ -138,8 +138,6 @@ def generate_shapes():
         for base in [16, 32, 64]:
             C = base * G
             K = base * G
-            if C % 8 != 0:
-                continue
             for hw in [14, 28, 56]:
                 for N in [1, 4, 8]:
                     for Y, X, pad_h, pad_w in [(1, 1, 0, 0), (3, 3, 1, 1)]:

@@ -513,10 +513,16 @@ bool ckc_implicit_gemm_conv_is_valid_spec(const ckc_implicit_gemm_conv_spec_t* s
      *   This mirrors the smem_alloc calls in instance_conv_implicit_gemm_conv_build_glue.c
      *   and catches the overflow that would otherwise produce CODEGEN_BC_TO_RELOCATABLE. */
     {
-        int k_pad      = (s->tile_k >= 16) ? 8 : 0;
+        /* k_pad and double_buffer mirror build_glue priority order exactly:
+         *   k_pad: has_lds_k_pad → lds_k_pad; async_dma → 0; else (tile_k>=16)?8:0
+         *   double_buffer: compv4 || async_dma || unroll_k */
+        int k_pad      = s->has_lds_k_pad ? s->lds_k_pad :
+                         (s->async_dma    ? 0            :
+                          ((s->tile_k >= 16) ? 8 : 0));
         int row_stride = s->tile_k + k_pad;
         int ab_single  = (s->tile_m + s->tile_n) * row_stride * 2; /* f16 = 2 bytes */
-        int double_buf = (s->pipeline && strcmp(s->pipeline, "compv4") == 0) ? 1 : 0;
+        int double_buf = ((s->pipeline && strcmp(s->pipeline, "compv4") == 0) ||
+                          s->async_dma || s->unroll_k) ? 1 : 0;
         int bytes_lds  = ab_single * (double_buf ? 2 : 1);
         if (!ckc_archtarget_fits_lds(target, (long)bytes_lds))
         {

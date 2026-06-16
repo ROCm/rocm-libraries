@@ -54,7 +54,7 @@ ParsedConvParams parseConvGraph(const hipdnn_flatbuffers_sdk::flatbuffer_utiliti
     const auto* xd = x->dims();
     const auto* wd = w->dims();
     if (!xd || !wd || xd->size() < 4 || wd->size() < 4)
-        throw std::runtime_error("CkDslConv: expected rank-4 X[N,C,H,W] and W[K,C,R,S]");
+        throw std::runtime_error("CkDslConv: expected rank-4 X[N,C,H,W] and W[K,C/G,R,S]");
     p.N  = xd->Get(0);
     p.C  = xd->Get(1);
     p.Hi = xd->Get(2);
@@ -66,6 +66,8 @@ ParsedConvParams parseConvGraph(const hipdnn_flatbuffers_sdk::flatbuffer_utiliti
         if (cpg <= 0 || p.C % cpg != 0)
             throw std::runtime_error("CkDslConv: weight dim[1] must be a positive divisor of C");
         p.G = static_cast<int>(std::max((int64_t)1, p.C / cpg));
+        if (p.K % p.G != 0)
+            throw std::runtime_error("CkDslConv: K must be divisible by G (grouped conv)");
     }
     p.R  = wd->Get(2);
     p.S  = wd->Get(3);

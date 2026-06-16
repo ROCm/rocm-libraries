@@ -224,6 +224,7 @@ static ckc_implicit_gemm_conv_spec_t makeSpec(const ConvCase& cse, const Candida
         (int)cse.strideH, (int)cse.strideW, (int)cse.padH, (int)cse.padW,
         (int)cse.dilH, (int)cse.dilW);
     s.name        = "conv_igemm";
+    s.groups      = (int)cse.g;
     s.tile_m      = cand.tile_m;
     s.tile_n      = cand.tile_n;
     s.tile_k      = cand.tile_k;
