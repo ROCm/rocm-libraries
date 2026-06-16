@@ -81,12 +81,41 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     CommonInstruction,
     Instruction,
     MacroInstruction,
-    SMovB32,
-    SMovB64,
-    SNop,
+    SAddI32,
+    SAddU32,
+    SAddCU32,
+    SAndB32,
+    SAndB64,
+    SAndN2B32,
+    SAndSaveExecB32,
+    SAndSaveExecB64,
+    SAShiftRightI32,
+    SLShiftLeftB32,
+    SLShiftRightB32,
+    SLShiftLeftB64,
+    SLShiftRightB64,
+    SLShiftLeft1AddU32,
+    SLShiftLeft2AddU32,
+    SLShiftLeft3AddU32,
+    SLShiftLeft4AddU32,
     SLoadB32,
     SLoadB64,
     SMemLoadInstruction,
+    SMovB32,
+    SMovB64,
+    SMulHII32,
+    SMulHIU32,
+    SMulI32,
+    SMulLOU32,
+    SNop,
+    SOrB32,
+    SOrB64,
+    SOrSaveExecB32,
+    SOrSaveExecB64,
+    SSubBU32,
+    SSubI32,
+    SSubU32,
+    SXorB32,
     VMovB32,
     _to_stinky_register,
 )
@@ -497,6 +526,7 @@ try:
     _STINKY_OK = all(
         hasattr(_stinky, name)
         for name in ("Register", "vgpr", "VMovB32", "SNop",
+                     "SAddU32", "SAndB32", "SLShiftLeftB32",
                      "LogicalModule", "lower_logical_module")
     )
 except ImportError:
@@ -814,6 +844,127 @@ class TestCollectLogicalIntegration(unittest.TestCase):
         m = Module()
         m.add(SNop(waitState=0))
         self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+# ===========================================================================
+# Scalar ALU instructions (Phase 6 Step 1)
+# ===========================================================================
+
+_SCALAR_ALU_BINARY = [
+    # (class, mnemonic, InstType)
+    (SAddI32, "s_add_i32", InstType.INST_I32),
+    (SAddU32, "s_add_u32", InstType.INST_U32),
+    (SAddCU32, "s_addc_u32", InstType.INST_U32),
+    (SMulI32, "s_mul_i32", InstType.INST_I32),
+    (SMulHII32, "s_mul_hi_i32", InstType.INST_I32),
+    (SMulHIU32, "s_mul_hi_u32", InstType.INST_U32),
+    (SMulLOU32, "s_mul_lo_u32", InstType.INST_U32),
+    (SSubI32, "s_sub_i32", InstType.INST_I32),
+    (SSubU32, "s_sub_u32", InstType.INST_U32),
+    (SSubBU32, "s_subb_u32", InstType.INST_U32),
+    (SLShiftLeftB32, "s_lshl_b32", InstType.INST_B32),
+    (SLShiftRightB32, "s_lshr_b32", InstType.INST_B32),
+    (SLShiftLeftB64, "s_lshl_b64", InstType.INST_B64),
+    (SLShiftRightB64, "s_lshr_b64", InstType.INST_B64),
+    (SAShiftRightI32, "s_ashr_i32", InstType.INST_I32),
+    (SLShiftLeft1AddU32, "s_lshl1_add_u32", InstType.INST_U32),
+    (SLShiftLeft2AddU32, "s_lshl2_add_u32", InstType.INST_U32),
+    (SLShiftLeft3AddU32, "s_lshl3_add_u32", InstType.INST_U32),
+    (SLShiftLeft4AddU32, "s_lshl4_add_u32", InstType.INST_U32),
+    (SAndB32, "s_and_b32", InstType.INST_B32),
+    (SAndB64, "s_and_b64", InstType.INST_B64),
+    (SAndN2B32, "s_andn2_b32", InstType.INST_B32),
+    (SOrB32, "s_or_b32", InstType.INST_B32),
+    (SOrB64, "s_or_b64", InstType.INST_B64),
+    (SXorB32, "s_xor_b32", InstType.INST_B32),
+]
+
+_SCALAR_ALU_UNARY = [
+    (SAndSaveExecB32, "s_and_saveexec_b32", InstType.INST_B32),
+    (SAndSaveExecB64, "s_and_saveexec_b64", InstType.INST_B64),
+    (SOrSaveExecB32, "s_or_saveexec_b32", InstType.INST_B32),
+    (SOrSaveExecB64, "s_or_saveexec_b64", InstType.INST_B64),
+]
+
+
+class TestScalarALUBinaryConstruction(unittest.TestCase):
+    """All binary scalar ALU shims inherit CommonInstruction and emit correct asm."""
+
+    def test_construction_and_str(self):
+        for cls, mnemonic, itype in _SCALAR_ALU_BINARY:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2), comment="t")
+                self.assertIsInstance(inst, CommonInstruction)
+                self.assertEqual(inst.instStr, mnemonic)
+                self.assertEqual(inst.instType, itype)
+                text = str(inst)
+                self.assertTrue(text.startswith(mnemonic), text)
+                self.assertIn("s0", text)
+                self.assertIn("s1", text)
+                self.assertIn("s2", text)
+
+    def test_deepcopy(self):
+        for cls, _, _ in _SCALAR_ALU_BINARY:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=sgpr(4), src0=sgpr(5), src1=sgpr(6), comment="cp")
+                c = copy.deepcopy(inst)
+                self.assertIsInstance(c, cls)
+                self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        for cls, _, _ in _SCALAR_ALU_BINARY:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2))
+                self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        for cls, _, _ in _SCALAR_ALU_BINARY:
+            with self.subTest(cls=cls.__name__):
+                m = Module()
+                m.add(cls(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2)))
+                self.assertEqual(len(m._collect_logical_insts()), 1)
+
+    def test_immediate_src(self):
+        inst = SAddU32(dst=sgpr(0), src0=sgpr(1), src1=42)
+        text = str(inst)
+        self.assertIn("42", text)
+
+
+class TestScalarALUUnaryConstruction(unittest.TestCase):
+    """Unary scalar ALU shims (dst, src) inherit CommonInstruction."""
+
+    def test_construction_and_str(self):
+        for cls, mnemonic, itype in _SCALAR_ALU_UNARY:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=sgpr(0), src=sgpr(1), comment="u")
+                self.assertIsInstance(inst, CommonInstruction)
+                self.assertEqual(inst.instStr, mnemonic)
+                self.assertEqual(inst.instType, itype)
+                text = str(inst)
+                self.assertTrue(text.startswith(mnemonic), text)
+
+    def test_deepcopy(self):
+        for cls, _, _ in _SCALAR_ALU_UNARY:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=sgpr(0), src=sgpr(1), comment="x")
+                c = copy.deepcopy(inst)
+                self.assertIsInstance(c, cls)
+                self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        for cls, _, _ in _SCALAR_ALU_UNARY:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=sgpr(0), src=sgpr(1))
+                self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        for cls, _, _ in _SCALAR_ALU_UNARY:
+            with self.subTest(cls=cls.__name__):
+                m = Module()
+                m.add(cls(dst=sgpr(0), src=sgpr(1)))
+                self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
 class TestDevelopInstructionExports(unittest.TestCase):

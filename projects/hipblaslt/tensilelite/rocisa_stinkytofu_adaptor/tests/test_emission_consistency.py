@@ -582,5 +582,166 @@ class TestSNop_Wait0(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
+# ===========================================================================
+# Scalar ALU -- arithmetic, shift, bitwise (Phase 6 Step 1)
+# ===========================================================================
+
+
+class TestSAddU32_SgprToSgpr(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_add_u32 s0, s1, s2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SAddU32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SAddU32(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2), comment="add"))
+    """)
+
+
+class TestSAddU32_Immediate(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_add_u32 s0, s1, 4`` -- immediate operand."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SAddU32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SAddU32(dst=sgpr(0), src0=sgpr(1), src1=4))
+    """)
+
+
+class TestSSubU32_SgprToSgpr(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_sub_u32 s0, s1, s2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SSubU32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SSubU32(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2), comment="sub"))
+    """)
+
+
+class TestSMulI32_SgprToSgpr(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_mul_i32 s0, s1, s2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SMulI32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SMulI32(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2), comment="mul"))
+    """)
+
+
+class TestSMulHII32_SgprToSgpr(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_mul_hi_i32 s0, s1, s2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SMulHII32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SMulHII32(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2)))
+    """)
+
+
+class TestSLShiftLeftB32(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_lshl_b32 s0, s1, s2`` -- value=s1, shift=s2."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SLShiftLeftB32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SLShiftLeftB32(dst=sgpr(0), shiftHex=sgpr(2), src=sgpr(1), comment="shl"))
+    """)
+
+
+class TestSLShiftRightB32(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_lshr_b32 s0, s1, s2`` -- value=s1, shift=s2."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SLShiftRightB32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SLShiftRightB32(dst=sgpr(0), shiftHex=sgpr(2), src=sgpr(1)))
+    """)
+
+
+class TestSAShiftRightI32(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_ashr_i32 s0, s1, s2`` -- value=s1, shift=s2."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SAShiftRightI32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SAShiftRightI32(dst=sgpr(0), shiftHex=sgpr(2), src=sgpr(1)))
+    """)
+
+
+class TestSAndB32(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_and_b32 s0, s1, s2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SAndB32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SAndB32(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2), comment="mask"))
+    """)
+
+
+class TestSOrB32(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_or_b32 s0, s1, s2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SOrB32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SOrB32(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2)))
+    """)
+
+
+class TestSXorB32(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_xor_b32 s0, s1, s2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SXorB32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SXorB32(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2)))
+    """)
+
+
+class TestSAndSaveExecB32(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_and_saveexec_b32 s0, s1`` -- unary (1 src)."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SAndSaveExecB32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SAndSaveExecB32(dst=sgpr(0), src=sgpr(1), comment="exec"))
+    """)
+
+
+class TestSLShiftLeft1AddU32(unittest.TestCase, _ThreePathEqualityCase):
+    """``s_lshl1_add_u32 s0, s1, s2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import SLShiftLeft1AddU32
+        from rocisa.container import sgpr
+        module = Module("k")
+        module.add(SLShiftLeft1AddU32(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2)))
+    """)
+
+
 if __name__ == "__main__":
     unittest.main()
