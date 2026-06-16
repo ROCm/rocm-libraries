@@ -369,6 +369,14 @@ inline bool isSMemStore(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_SMemStore);
 }
 
+inline bool isBufferMemLoad(const StinkyInstruction& inst) {
+    return isMUBUFLoad(inst) || isFLATLoad(inst) || isGLOBALLoad(inst);
+}
+
+inline bool isBufferMemStore(const StinkyInstruction& inst) {
+    return isMUBUFStore(inst) || isFLATStore(inst) || isGLOBALStore(inst);
+}
+
 /// Check if instruction is a scheduling fence pseudo-instruction.
 /// Fences emit no assembly but carry MemTokenData ordering constraints.
 inline bool isFence(const StinkyInstruction& inst) {
@@ -447,6 +455,11 @@ inline bool isUnconditionalBranch(const StinkyInstruction& inst) {
 
 inline bool isIndirectBranch(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_IndirectBranch);
+}
+
+// Structural call predicate. Only s_swappc_b64 is a call mnemonic in the tree.
+inline bool isCall(const StinkyInstruction& inst) {
+    return inst.getUnifiedOpcode() == GFX::s_swappc_b64;
 }
 
 // Label names of basic-block targets for \p given branch instruction.
@@ -605,6 +618,13 @@ inline bool isXDLWMMA(const StinkyInstruction& inst) {
 /// Includes v_rcp_f64, v_rsq_f64, v_sqrt_f64.
 inline bool isTrans64(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_Trans64);
+}
+
+/// Check if instruction is a double-precision MACC VALU.
+/// Includes v_add_f64, v_fma_f64, f64 compares (v_cmp_lt_f64), v_cvt_u32_f64.
+/// Excludes f64 transcendentals (v_rcp_f64) — those are Trans64/TRANS.
+inline bool isDPMACC(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_DPMACC);
 }
 
 }  // namespace stinkytofu

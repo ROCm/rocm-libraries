@@ -24,6 +24,7 @@
 #include "AllHwMappings.hpp"
 
 #include <cassert>
+#include <cstdint>
 #include <unordered_map>
 
 #include "instruction/branch.hpp"

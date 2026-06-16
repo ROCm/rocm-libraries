@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -67,8 +67,8 @@ rocsparse_status rocsparse::csr2csc_core(rocsparse_handle     handle,
     ptr += ((sizeof(J) * nnz - 1) / 256 + 1) * 256;
 
     // Load CSR column indices into work1 buffer
-    RETURN_IF_HIP_ERROR(
-        hipMemcpyAsync(tmp_work1, csr_col_ind, sizeof(J) * nnz, hipMemcpyDeviceToDevice, stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+        tmp_work1, csr_col_ind, sizeof(J) * nnz, hipMemcpyDeviceToDevice, stream));
 
     if(copy_values == rocsparse_action_symbolic)
     {
@@ -106,7 +106,7 @@ rocsparse_status rocsparse::csr2csc_core(rocsparse_handle     handle,
         // Copy csc_row_ind if not current
         if(vals.current() != csc_row_ind)
         {
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 csc_row_ind, vals.current(), sizeof(J) * nnz, hipMemcpyDeviceToDevice, stream));
         }
     }
