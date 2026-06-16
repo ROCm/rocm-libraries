@@ -546,7 +546,13 @@ typedef enum rocsparse_data_status_
  */
 typedef enum rocsparse_indextype_
 {
-    rocsparse_indextype_u16 = 1, /**< 16-bit unsigned integer. */
+    rocsparse_indextype_u16
+    [[deprecated("rocsparse_indextype_u16 is no longer supported and will be removed in a future "
+                 "release. Use "
+                 "rocsparse_indextype_i32 or rocsparse_indextype_i64 instead.")]]
+    = 1, /**< 16-bit unsigned integer. \deprecated This index type is unsupported and will be
+            removed in a future release. Use \ref rocsparse_indextype_i32 or \ref
+            rocsparse_indextype_i64 instead. */
     rocsparse_indextype_i32 = 2, /**< 32-bit signed integer. */
     rocsparse_indextype_i64 = 3 /**< 64-bit signed integer. */
 } rocsparse_indextype;

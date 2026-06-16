@@ -52,6 +52,8 @@ struct GemmPipelineAgBgCrCompAsyncEightWaves : public BaseGemmPipelineAgBgCrComp
     static constexpr auto I1 = number<1>{};
     static constexpr auto I2 = number<2>{};
 
+    static constexpr bool LargeTensors = Problem::LargeTensors;
+
     static constexpr index_t BlockSize = Problem::kBlockSize;
 
     static constexpr index_t MPerBlock = BlockGemmShape::kM;
@@ -62,7 +64,7 @@ struct GemmPipelineAgBgCrCompAsyncEightWaves : public BaseGemmPipelineAgBgCrComp
     static constexpr index_t NWarps = BlockGemmShape::BlockWarps::at(I1);
     static constexpr index_t KWarps = BlockGemmShape::BlockWarps::at(I2);
 
-    static constexpr index_t kflatKPerBlock = BlockGemmShape::flatKPerBlock;
+    static constexpr index_t kflatKPerWarp = BlockGemmShape::flatKPerWarp;
 
     static constexpr index_t MIterPerWarp = MPerBlock / (MWarps * WarpGemm::kM);
     static constexpr index_t NIterPerWarp = NPerBlock / (NWarps * WarpGemm::kN);
@@ -170,9 +172,9 @@ struct GemmPipelineAgBgCrCompAsyncEightWaves : public BaseGemmPipelineAgBgCrComp
             static_assert((MPerBlock == AsDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                            KPerBlock == AsDramBlockWindowTmp{}.get_window_lengths()[I1]),
                           "A block window has incorrect lengths for defined ALayout!");
-            static_assert(Preshuffle //
+            static_assert(Preshuffle
                               ? (NWarps == BsDramBlockWindowTmp{}.get_window_lengths()[I0] &&
-                                 kflatKPerBlock == BsDramBlockWindowTmp{}.get_window_lengths()[I1])
+                                 kflatKPerWarp == BsDramBlockWindowTmp{}.get_window_lengths()[I1])
                               : (NPerBlock == BsDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                                  KPerBlock == BsDramBlockWindowTmp{}.get_window_lengths()[I1]),
                           "B block window has incorrect lengths for defined BLayout!");

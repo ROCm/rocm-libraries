@@ -156,7 +156,7 @@ protected:
                                          output.desc,
                                          output_dev.get(),
                                          indicesDesc,
-                                         (size_t*)indices_dev.get(),
+                                         static_cast<size_t*>(indices_dev.get()),
                                          config.k,
                                          config.dim,
                                          config.keepDim);

@@ -152,7 +152,7 @@ struct verify_inference_batchnorm_activ
             miopenTensorArgument_t{miopenTensorBatchnormBias, nullptr, bnbias_dev.get()},
             miopenTensorArgument_t{miopenTensorBatchnormEstimatedMean, nullptr, estMean_dev.get()},
             miopenTensorArgument_t{miopenTensorBatchnormEstimatedVariance, nullptr, estVariance_dev.get()},
-            miopenTensorArgument_t{miopenScalarBatchnormEpsilon, nullptr, (void*)&mut_eps},
+            miopenTensorArgument_t{miopenScalarBatchnormEpsilon, nullptr, static_cast<void*>(&mut_eps)},
             // clang-format on
         };
 

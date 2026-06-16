@@ -262,6 +262,25 @@ HeaderFilterRegex: '.'
 ExcludeHeaderFilterRegex: '^(.*(data_objects|python3\.[0-9]+|nanobind|_deps).*)$'
 
 CheckOptions:
+  # Disable type analysis for misc-use-internal-linkage to maintain consistent
+  # behavior across clang-tidy versions. AnalyzeTypes was introduced after
+  # LLVM 20 and defaults to true, which flags classes/structs in .cpp files.
+  # Older clang-tidy versions silently ignore this option.
+  - { key: misc-use-internal-linkage.AnalyzeTypes,                value: 'false' }
+  # Disable pointer pointee const analysis for misc-const-correctness.
+  # AnalyzePointers was introduced after LLVM 20 and defaults to true, which
+  # flags pointer variables whose pointees could be declared const.
+  # Older clang-tidy versions silently ignore this option.
+  - { key: misc-const-correctness.AnalyzePointers,                value: 'false' }
+  # Disable parameter const analysis for misc-const-correctness.
+  # AnalyzeParameters was introduced after LLVM 20 and defaults to true.
+  # Older clang-tidy versions silently ignore this option.
+  - { key: misc-const-correctness.AnalyzeParameters,              value: 'false' }
+  # Disable post-LLVM 20 bugprone-exception-escape sub-checks that expand the
+  # check's scope beyond what LLVM 20 analyzed. Older versions ignore these.
+  - { key: bugprone-exception-escape.CheckDestructors,             value: 'false' }
+  - { key: bugprone-exception-escape.CheckMoveMemberFunctions,     value: 'false' }
+  - { key: bugprone-exception-escape.CheckNothrowFunctions,        value: 'false' }
   - { key: readability-identifier-naming.NamespaceCase,           value: lower_case }
   - { key: readability-identifier-naming.ClassCase,               value: CamelCase }
   - { key: readability-identifier-naming.StructCase,              value: CamelCase }

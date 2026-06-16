@@ -168,7 +168,7 @@ struct EngineRegistrar
 ////////////////////////////////////////////////////////////////////////////////////////////
 // NOLINTBEGIN(bugprone-throwing-static-initialization) collision detection requires throw
 
-HIPDNN_REGISTER_ENGINE(HIP_KERNEL_ENGINE)
+HIPDNN_REGISTER_ENGINE(HIP_MLOPS_ENGINE)
 HIPDNN_REGISTER_ENGINE(HIPBLASLT_ENGINE)
 HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE)
 HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE_DETERMINISTIC)

@@ -126,6 +126,7 @@ inline std::map<std::string, int>
     rv["HasScalarStore"]
         = tryAssembler(isaVersion, assemblerPath, "s_store_dword s79, s[70:71], s77", isDebug)
           || tryAssembler(isaVersion, assemblerPath, "s_store_b32 s79, s[70:71], s77", isDebug);
+    rv["HasSAtomic"] = tryAssembler(isaVersion, assemblerPath, "s_atomic_dec s11, s[0:1]", isDebug);
     rv["HasMFMA_explictB"] = tryAssembler(
         isaVersion, assemblerPath, "v_mfma_f32_32x32x1_2b_f32 a[0:31], v0, v1, a[0:31]", isDebug);
     rv["HasMFMA"] = tryAssembler(isaVersion,
@@ -309,6 +310,9 @@ inline std::map<std::string, int>
     rv["v_mov_b64"] = tryAssembler(isaVersion, assemblerPath, "v_mov_b64 v[0:1], v[2:3]", isDebug);
     rv["s_sub_u64"]
         = tryAssembler(isaVersion, assemblerPath, "s_sub_u64 s[0:1], s[0:1], s[2:3]", isDebug);
+    rv["s_add_u64"]
+        = tryAssembler(isaVersion, assemblerPath, "s_add_u64 s[0:1], s[0:1], s[2:3]", isDebug);
+    rv["v_add_nc_u64"] = tryAssembler(isaVersion, assemblerPath, "v_add_nc_u64 v[0:1], v[2:3], v[4:5]", isDebug);
 
     rv["HasBF16CVT"] = tryAssembler(isaVersion, assemblerPath, "v_cvt_f32_bf16 v0, v1", isDebug);
 
@@ -421,6 +425,31 @@ inline std::map<std::string, int>
                        "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0, offen offset:0, nt",
                        isDebug);
 
+    // gfx1250 replaces the bare 'nt' bit with a 3-bit Temporal Hint
+    // (th:TH_LOAD_*/TH_STORE_*) and adds a per-op Non-Volatile (nv) bit.
+    // (Volatile and Non-Volatile Memory Access).  Probe both with the buffer_*
+    // form because gfx12 supports the same modifier syntax for buffer / global / flat.
+    rv["HasTHModifier"]
+        = tryAssembler(
+              isaVersion,
+              assemblerPath,
+              "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0 offen offset:0 th:TH_LOAD_NT",
+              isDebug)
+          || tryAssembler(
+              isaVersion,
+              assemblerPath,
+              "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null offen offset:0 th:TH_LOAD_NT",
+              isDebug);
+    rv["HasNVModifier"]
+        = tryAssembler(isaVersion,
+                       assemblerPath,
+                       "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0 offen offset:0 nv",
+                       isDebug)
+          || tryAssembler(isaVersion,
+                          assemblerPath,
+                          "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null offen offset:0 nv",
+                          isDebug);
+
     rv["HasNewBarrier"] = tryAssembler(isaVersion, assemblerPath, "s_barrier_wait -1", isDebug);
     rv["HasClusterBarrier"] = tryAssembler(isaVersion, assemblerPath, "s_barrier_wait -3", isDebug);
     rv["HasTDM"] = tryAssembler(isaVersion, assemblerPath, "tensor_load_to_lds s[0:3], s[4:11]", isDebug);
@@ -439,6 +468,7 @@ inline std::map<std::string, int>
 
     rv["SeparateVscnt"]
         = tryAssembler(isaVersion, assemblerPath, "s_waitcnt_vscnt null 0", isDebug);
+    rv["HasGlobalPrefetch"] = tryAssembler(isaVersion, assemblerPath, "global_prefetch_b8 v[0:1], off scope:SCOPE_SE th:TH_LOAD_NT", isDebug);
 
     rv["SeparateLGKMcnt"] = tryAssembler(isaVersion, assemblerPath, "s_wait_dscnt 0", isDebug)
                             && tryAssembler(isaVersion, assemblerPath, "s_wait_kmcnt 0", isDebug);
@@ -509,6 +539,8 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["HasSchedMode"]       = checkInList(isaVersion[0], {12});
     rv["HasAccCD"]           = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["ArchAccUnifiedRegs"] = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
+    // Max concurrent waves per SIMD: 8 for ArchAccUnifiedRegs (gfx90a/gfx942/gfx950), 10 otherwise.
+    rv["MaxWavesPerSimd"]    = rv["ArchAccUnifiedRegs"] ? 8 : 10;
     rv["CrosslaneWait"]      = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}});
     rv["TransOpWait"]        = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
     rv["SDWAWait"]           = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
@@ -541,6 +573,7 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     // therefore reorder w.r.t. a subsequent volatile/atomic VMEM. An
     // `s_wait_xcnt 0` must precede the volatile/atomic VMEM op.
     rv["RequiresXCntForVolatileVMEM"]  = checkInList(isaVersion, {{12, 5, 0}});
+    rv["DefaultScopeIsCULocal"]        = checkInList(isaVersion, {{12, 5, 0}});
 
     // LDS bank geometry — used for swizzle/rotation in subtile-based tiling.
     rv["LDSBankCount"] = 64;
@@ -560,6 +593,7 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
     rv["PhysicalMaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 512;
     rv["PhysicalMaxSgpr"]   = 800;
     rv["maxLDSConstOffset"] = 65536;
+    rv["GlobalPrefetchSize"] = 256;
 
     if(isaVersion[0] == 10)
         rv["PhysicalMaxVgprCU"] = 1024 * 32;

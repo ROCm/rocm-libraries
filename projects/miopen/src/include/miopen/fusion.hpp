@@ -219,7 +219,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvForwardOpDescriptor : FusionOpDescriptor
         : base_desc(conv_descriptor),
           filter_desc(filter_descriptor),
           kernel_info_valid(false),
-          conv_compiler_options(""){};
+          conv_compiler_options("") {};
     miopenStatus_t GetOutputDesc(TensorDescriptor& output_desc) const override;
     miopenStatus_t SetArgs(OperatorArgs& args, const void* alpha, const void* beta, ConstData_t w);
     // miopenStatus_t SetArgs(OperatorArgs& args, float alpha, float beta, ConstData_t w);

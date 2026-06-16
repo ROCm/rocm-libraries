@@ -112,6 +112,10 @@ if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANIT
     # Add compile definition for conditional compilation
     add_compile_definitions(ADDRESS_SANITIZER)
 
+    # Ensure the LLVM symbolizer is located before setting TEST_ENVIRONMENT.
+    include(${CMAKE_CURRENT_LIST_DIR}/CheckToolVersion.cmake)
+    findandcheckllvmsymbolizer()
+
     # Set environment variables for Address Sanitizer.
     # HSA_XNACK is only required for device-side ASAN (not HOST_ASAN).
     # ASAN_SYMBOLIZER_PATH is set to the LLVM symbolizer to make the output from leak detection
@@ -126,6 +130,7 @@ if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANIT
                              # "ASAN_OPTIONS=halt_on_error=1:abort_on_error=1"
         )
     endif()
+    message(VERBOSE "ASAN ${CMAKE_CURRENT_SOURCE_DIR} TEST_ENVIRONMENT=${TEST_ENVIRONMENT}")
 
 endif()
 

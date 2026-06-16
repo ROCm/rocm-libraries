@@ -169,4 +169,4 @@ See [docs/](docs/README.md) for detailed documentation including user guides, de
 
 ## License
 
-MIT License. Copyright (C) Advanced Micro Devices, Inc.
+This project is licensed under the MIT License. See [LICENSE.md](LICENSE.md) for details.
