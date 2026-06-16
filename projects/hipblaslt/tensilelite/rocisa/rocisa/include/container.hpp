@@ -630,11 +630,7 @@ namespace rocisa
 
         std::string toString() const override
         {
-            if(high_bit == HighBitSel::NONE)
-            {
-                return "";
-            }
-            return high_bit == HighBitSel::HIGH ? ".h" : ".l";
+            return highBitSelSuffix(high_bit);
         }
 
         const HighBitSel high_bit;
@@ -1191,7 +1187,7 @@ namespace rocisa
             {
                 return base;
             }
-            const std::string suffix = (sel == HighBitSel::HIGH) ? ".h" : ".l";
+            const std::string suffix = highBitSelSuffix(sel);
             if(isAbs && !base.empty() && base.back() == ')')
             {
                 return base.substr(0, base.size() - 1) + suffix + ")";

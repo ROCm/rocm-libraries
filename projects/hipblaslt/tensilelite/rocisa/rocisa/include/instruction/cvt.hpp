@@ -66,15 +66,35 @@ namespace rocisa
 
         std::string getArgStr() const override
         {
-            const bool isTrue16 = !true16.empty();
+            // Half-word selector for operand `idx` (NONE when not a true16 op).
+            // toStringTrue16() then places the .l/.h suffix correctly, including
+            // inside abs(...) so abs(v[x].l) is produced rather than the illegal
+            // abs(v[x]).l. With NONE the output is byte-identical to toString().
+            auto selAt = [&](ArgType a) -> HighBitSel {
+                size_t i = static_cast<size_t>(a);
+                return i < true16.size() ? true16[i].high_bit : HighBitSel::NONE;
+            };
+            auto renderReg = [&](const std::shared_ptr<Container>& c, HighBitSel sel) -> std::string {
+                auto rc = std::dynamic_pointer_cast<RegisterContainer>(c);
+                return rc ? rc->toStringTrue16(sel) : c->toString();
+            };
+            auto renderInput = [&](const InstructionInput& in, HighBitSel sel) -> std::string {
+                if(std::holds_alternative<std::shared_ptr<Container>>(in))
+                {
+                    auto rc = std::dynamic_pointer_cast<RegisterContainer>(
+                        std::get<std::shared_ptr<Container>>(in));
+                    if(rc)
+                    {
+                        return rc->toStringTrue16(sel);
+                    }
+                }
+                return InstructionInputToString(in);
+            };
+
             std::string kStr;
             if(dst && !dst->toString().empty())
             {
-                kStr += dst->toString();
-                if (isTrue16 && true16.size() > static_cast<size_t>(ArgType::DST))
-                {
-                    kStr += true16[static_cast<size_t>(ArgType::DST)].toString();
-                }
+                kStr += renderReg(dst, selAt(ArgType::DST));
             }
             if(dst1 && !dst1->toString().empty())
             {
@@ -82,31 +102,17 @@ namespace rocisa
                 {
                     kStr += ", ";
                 }
-                kStr += dst1->toString();
-                if (isTrue16 && true16.size() > static_cast<size_t>(ArgType::DST1))
-                {
-                    kStr += true16[static_cast<size_t>(ArgType::DST1)].toString();
-                }
+                kStr += renderReg(dst1, selAt(ArgType::DST1));
             }
-            if(!srcs.empty())
+            for(size_t i = 0; i < srcs.size(); ++i)
             {
                 if(!kStr.empty())
                 {
                     kStr += ", ";
                 }
-                kStr += InstructionInputToString(srcs[0]);
-                if (isTrue16 && true16.size() > static_cast<size_t>(ArgType::SRC0))
-                {
-                    kStr += true16[static_cast<size_t>(ArgType::SRC0)].toString();
-                }
-            }
-            for(size_t i = 1; i < srcs.size(); ++i)
-            {
-                kStr += ", " + InstructionInputToString(srcs[i]);
-                if (isTrue16 && true16.size() > static_cast<size_t>(ArgType::SRC0) + i)
-                {
-                    kStr += true16[static_cast<size_t>(ArgType::SRC0) + i].toString();
-                }
+                size_t     idx = static_cast<size_t>(ArgType::SRC0) + i;
+                HighBitSel sel = idx < true16.size() ? true16[idx].high_bit : HighBitSel::NONE;
+                kStr += renderInput(srcs[i], sel);
             }
             return kStr;
         }

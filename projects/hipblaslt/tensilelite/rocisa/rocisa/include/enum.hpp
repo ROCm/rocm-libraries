@@ -320,6 +320,20 @@ namespace rocisa
         HIGH = 1
     };
 
+    // Single source of truth for the true16 half-word operand suffix.
+    inline const char* highBitSelSuffix(HighBitSel sel)
+    {
+        switch(sel)
+        {
+        case HighBitSel::HIGH:
+            return ".h";
+        case HighBitSel::LOW:
+            return ".l";
+        default:
+            return "";
+        }
+    }
+
     enum class CvtType : int
     {
         CVT_F16_to_F32          = 1,
