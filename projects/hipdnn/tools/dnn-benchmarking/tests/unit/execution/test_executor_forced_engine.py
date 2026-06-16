@@ -23,7 +23,7 @@ import pytest
 
 import dnn_benchmarking.execution.executor as executor_module
 from dnn_benchmarking.config.benchmark_config import BenchmarkConfig
-from dnn_benchmarking.common.exceptions import UnsupportedGraphError
+from dnn_benchmarking.common.exceptions import ExecutionError, UnsupportedGraphError
 
 
 class _StubResult:
@@ -49,11 +49,23 @@ class _StubGraph:
     the built plan.
     """
 
-    def __init__(self, ranked, selected=None, hard_fails=False, rank_error=None):
+    def __init__(
+        self,
+        ranked,
+        selected=None,
+        hard_fails=False,
+        rank_error=None,
+        plans_fail=False,
+        support_fails=False,
+        build_fails=False,
+    ):
         self._ranked = ranked
         self._selected = selected
         self._hard_fails = hard_fails
         self._rank_error = rank_error
+        self._plans_fail = plans_fail
+        self._support_fails = support_fails
+        self._build_fails = build_fails
         self.plans_created = False
         self.hard_engine_id = None
 
@@ -73,7 +85,7 @@ class _StubGraph:
 
     def create_execution_plans(self):
         self.plans_created = True
-        return _StubResult()
+        return _StubResult(bad=self._plans_fail, message="plan creation failed")
 
     def create_execution_plan_ext(self, engine_id):
         if self._hard_fails:
@@ -85,10 +97,10 @@ class _StubGraph:
         return self._selected
 
     def check_support(self):
-        return _StubResult()
+        return _StubResult(bad=self._support_fails, message="not supported")
 
     def build_plans(self):
-        return _StubResult()
+        return _StubResult(bad=self._build_fails, message="build failed")
 
     def get_workspace_size(self):
         return 0
@@ -159,3 +171,46 @@ def test_discover_engines_ranking_runtime_error_becomes_unsupported():
         with pytest.raises(UnsupportedGraphError) as exc:
             executor.discover_engines(handle=object())
     assert "applicable solution" in str(exc.value)
+
+
+def test_prepare_forced_engine_mismatch_is_skip():
+    """Driven through the public prepare() flow: hard-select succeeds but the
+    backend reports a different engine backing the plan -> unsupported skip."""
+    executor = _executor()
+    graph = _StubGraph(ranked=[999], selected=111)  # hard select ok, read-back differs
+    with patch.dict(sys.modules, {"hipdnn_frontend": _fake_module(graph)}):
+        with pytest.raises(UnsupportedGraphError) as exc:
+            executor.prepare(handle=object(), engine_id=999)
+    assert graph.hard_engine_id == 999  # hard select was attempted
+    assert "999" in str(exc.value) and "111" in str(exc.value)
+
+
+def test_prepare_create_execution_plans_failure_is_execution_error():
+    """A bad create_execution_plans() result on the discovery path is a hard
+    ExecutionError, not an unsupported-graph skip."""
+    executor = _executor()
+    graph = _StubGraph(ranked=[1], plans_fail=True)
+    with patch.dict(sys.modules, {"hipdnn_frontend": _fake_module(graph)}):
+        with pytest.raises(ExecutionError) as exc:
+            executor.prepare(handle=object(), engine_id=None)
+    assert "plan creation failed" in str(exc.value)
+
+
+def test_prepare_check_support_failure_is_unsupported():
+    """A bad check_support() result is classified as an unsupported-graph skip."""
+    executor = _executor()
+    graph = _StubGraph(ranked=[1], selected=1, support_fails=True)
+    with patch.dict(sys.modules, {"hipdnn_frontend": _fake_module(graph)}):
+        with pytest.raises(UnsupportedGraphError) as exc:
+            executor.prepare(handle=object(), engine_id=None)
+    assert "not supported" in str(exc.value)
+
+
+def test_prepare_build_plans_failure_is_execution_error():
+    """A bad build_plans() result is a hard ExecutionError."""
+    executor = _executor()
+    graph = _StubGraph(ranked=[1], selected=1, build_fails=True)
+    with patch.dict(sys.modules, {"hipdnn_frontend": _fake_module(graph)}):
+        with pytest.raises(ExecutionError) as exc:
+            executor.prepare(handle=object(), engine_id=None)
+    assert "build failed" in str(exc.value)

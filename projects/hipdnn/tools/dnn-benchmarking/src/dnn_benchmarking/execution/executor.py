@@ -263,6 +263,12 @@ class Executor:
         the hard-select path, so any mismatch is treated as an unsupported-graph
         skip rather than mislabeled timings.
         """
+        # prepare() always calls build_plans() before this, so the execution-plan
+        # descriptor is finalized before we query the backend for its engine id
+        # (HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT). A pre-build call
+        # would hit the frontend's "build a plan before querying" path; gating the
+        # getter on _executionPlanFinalized would only sharpen that public-API
+        # error message, not change this caller's behavior.
         actual = int(self._graph.get_execution_plan_engine_id())
         self._selected_engine_id = actual
         if requested_engine_id is not None and actual != requested_engine_id:

@@ -50,9 +50,10 @@ void graphBindings(nb::module_& m)
                 return g.create_execution_plan_ext(engineId, {});
             },
             nb::arg("engine_id"),
-            "Hard-select an engine: build the execution plan for this exact engine id. "
-            "Returns an Error whose is_bad() is set if the engine is not "
-            "valid/applicable (no heuristic fallback).")
+            "Hard-select an engine: create/select the execution plan descriptor for "
+            "this exact engine id (call build_plans() to finalize). Returns an Error "
+            "whose is_bad() is set if the engine is not valid/applicable (no "
+            "heuristic fallback).")
         .def(
             "get_execution_plan_engine_id",
             [](const graph::Graph& g) {
