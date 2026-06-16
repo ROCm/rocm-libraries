@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -878,6 +878,7 @@ INSTANTIATE_TEST_SUITE_P(HipcubDeviceSelectLargeIndicesTest,
 
 TEST_P(HipcubDeviceSelectLargeIndicesTests, LargeIndicesSelectOp)
 {
+    GTEST_SKIP_ASAN();
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
@@ -1216,6 +1217,8 @@ TYPED_TEST(HipcubDeviceUniqueByKeyTests, UniqueByKey)
 
 TEST(HipcubDeviceUniqueByKeyTests, LargeIndicesUniqueByKey)
 {
+    GTEST_SKIP_ASAN();
+
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
