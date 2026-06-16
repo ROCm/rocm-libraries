@@ -83,8 +83,8 @@ if(DEFINED SKBUILD)
             DESTINATION hipdnn_frontend)
 else()
     install(TARGETS hipdnn_frontend_python
-            LIBRARY DESTINATION lib
-            RUNTIME DESTINATION bin)
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/test/"
             DESTINATION "share/hipdnn/tests/python"
             FILES_MATCHING PATTERN "*.py")
