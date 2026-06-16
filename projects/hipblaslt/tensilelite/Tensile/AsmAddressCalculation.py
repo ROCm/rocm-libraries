@@ -774,46 +774,6 @@ class AddrCalculation:
                             src2=VCC(), comment="addrVgpr = C(D) + index*bytes (hi)"))
         return module
 
-    @staticmethod
-    def incrementSrdMultipleRows(srcDstBaseSgpr: str, strideSgpr: str, tmpSgpr: str, numRows: int, bpe: int) -> Module:
-        """tmpSgpr must be a 2-wide consecutive SGPR allocation (lo at +0, hi at +1)."""
-        module = Module("incrementToNextRows")
-        tmpLo = tmpSgpr
-        tmpHi = tmpSgpr + "+1"
-
-        scaleFactor = abs(numRows) * bpe
-        module.add(SMulHIU32(dst=sgpr(tmpHi), \
-                             src0=sgpr(strideSgpr), \
-                             src1=scaleFactor, \
-                             comment="scale %s *= numRows(%d) * bpe (hi)"%(strideSgpr, numRows)))
-        module.add(SMulI32(dst=sgpr(tmpLo), \
-                           src0=sgpr(strideSgpr), \
-                           src1=scaleFactor, \
-                           comment="scale %s *= numRows(%d) * bpe"%(strideSgpr, numRows)))
-
-        dstLow = f"{srcDstBaseSgpr}+0"
-        dstHigh = f"{srcDstBaseSgpr}+1"
-
-        if numRows >= 0:
-            module.add(SAddU32(dst=sgpr(dstLow), \
-                                        src0=sgpr(dstLow), \
-                                        src1=sgpr(tmpLo), \
-                                        comment="incToNextRow: gra SRD += inc(lower)" ))
-            module.add(SAddCU32(dst=sgpr(dstHigh), \
-                                        src0=sgpr(dstHigh), \
-                                        src1=sgpr(tmpHi), \
-                                        comment="incToNextRow: gra SRD += inc(upper)" ))
-        else:
-            module.add(SSubU32(dst=sgpr(dstLow), \
-                                        src0=sgpr(dstLow), \
-                                        src1=sgpr(tmpLo), \
-                                        comment="incToNextRow: gra SRD -= inc(lower)" ))
-            module.add(SSubBU32(dst=sgpr(dstHigh), \
-                                        src0=sgpr(dstHigh), \
-                                        src1=sgpr(tmpHi), \
-                                        comment="incToNextRow: gra SRD -= inc(upper)" ))
-        return module
-
     def incrementToNextRow(self, kernel, tc, ss, stmp, bpeType=None, dst=-1):
         """
         Generate code to move to the next row(s)
