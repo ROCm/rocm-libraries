@@ -21,7 +21,8 @@ iters = 100
 # Optional seed for reproducible input data. Use an integer, or omit/null for no fixed seed.
 seed = 123
 
-# Execution backend: "hipdnn" or "pytorch". The pytorch backend supports a single graph only.
+# Execution backend: "hipdnn" or "pytorch". Both support single-graph, glob,
+# tarball, and multi-graph suite execution.
 backend = "hipdnn"
 
 # Output JSON path for the full SuiteResult. Omit or set null to disable JSON output.
