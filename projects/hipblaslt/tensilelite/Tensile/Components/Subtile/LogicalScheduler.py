@@ -2450,6 +2450,10 @@ class LogicalScheduler:
 
         module = Module(label)
         module.addComment0(f"{label} start")
+        if kernel.get("ClusterBarrier"):
+            from Tensile.Components.Subtile.ClusterBarrier import subtileClusterBarrier
+            for inst in subtileClusterBarrier(writer, kernel, label=label).flatitems():
+                module.add(inst)
         for pi, partition_emitted in enumerate(emitted_3d):
             for k, em_list in enumerate(partition_emitted):
                 module.addComment0(f"partition={pi} subIterK={k}")
