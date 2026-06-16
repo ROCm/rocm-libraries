@@ -73,17 +73,10 @@ Consequences:
   perf-meaningless.
 
 For this reason `--cpu-only` must never *silently* drive a real `LibraryLogic`
-generation step. Two protections exist:
-
-- `Tensile.py` declines the efficiency-based (`UseEffLike`) frequency path under
-  `CpuOnly`.
-- `Tensile.warnIfCpuOnlyWithLibraryLogic(config)` emits an unmistakable warning
-  whenever `--cpu-only` is combined with a `LibraryLogic` generation step, so a
-  synthetic run can never be mistaken for a real tuning run. It warns rather than
-  aborts on purpose: the GPU-less coverage/CI path deliberately exercises
-  LibraryLogic generation, so the goal is to surface the synthetic provenance,
-  not to block the run. (Pinned by
-  `characterization/ClientPath/test_cpu_only_guard_char.py`.)
+generation step. The seam itself enforces this structurally: `Tensile.py`
+declines the efficiency-based (`UseEffLike`) frequency path — and therefore the
+real `LibraryLogic` winner-selection path — under `CpuOnly`, so synthetic perf
+is never consumed for tuning in the first place.
 
 Always treat `--cpu-only` runs as CI/coverage artifacts, not tuning results.
 

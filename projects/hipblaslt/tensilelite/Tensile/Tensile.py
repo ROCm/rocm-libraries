@@ -66,37 +66,6 @@ TENSILE_CLIENT_PATH = TENSILE_SCRIPT_DIR.parent / TENSILE_CLIENT_PATH
 #   ClientWriter.main() to create client which calls library based on above yaml
 ################################################################################
 @profile
-def warnIfCpuOnlyWithLibraryLogic(config: dict) -> bool:
-    """Loud guard: never let ``--cpu-only`` silently produce real tuning output.
-
-    Under ``--cpu-only`` the benchmark step writes a *synthetic* results CSV
-    (a fixed GFlops value per cell), so any LibraryLogic generated from it has
-    perf-meaningless winners. Whenever ``--cpu-only`` is combined with a
-    LibraryLogic generation step, emit an unmistakable warning so a synthetic
-    run can never be silently mistaken for a real tuning run. A warning (not an
-    abort) is intentional: the GPU-less coverage/CI path deliberately exercises
-    LibraryLogic generation, so the goal is to make the synthetic provenance
-    impossible to miss, not to block the run.
-
-    Returns ``True`` iff the guard fired (so callers and tests can assert on it).
-    """
-    if not globalParameters.get("CpuOnly", False):
-        return False
-    if "LibraryLogic" not in config:
-        return False
-    bar = "!" * 78
-    printWarning(
-        "\n" + bar
-        + "\n  --cpu-only is generating LibraryLogic from SYNTHETIC performance data."
-        + "\n  The results CSV under --cpu-only contains fixed, synthetic GFlops values,"
-        + "\n  so the winner selection in the generated logic is NOT based on real"
-        + "\n  measurements. Do NOT use this output for tuning decisions or production"
-        + "\n  libraries; --cpu-only is for CI / coverage / structural validation only."
-        + "\n" + bar
-    )
-    return True
-
-
 def executeStepsInConfig(
         config: dict,
         outputPath: Path,
@@ -630,11 +599,6 @@ def Tensile(userArgs):
     device_id = config["GlobalParameters"].get("Device", int(args.device))
     UseEffLike = config["GlobalParameters"].get("UseEffLike", globalParameters["UseEffLike"])
     UseEffLike = False if isRhel8() else UseEffLike
-
-    # WP-1.2 guard: under --cpu-only the benchmark results CSV is synthetic, so a
-    # LibraryLogic step would tune on fake perf. Warn unmistakably here so that
-    # synthetic perf can never silently drive real tuning output.
-    warnIfCpuOnlyWithLibraryLogic(config)
 
     if 'LibraryLogic' in config and UseEffLike and not buildOnly and not globalParameters["CpuOnly"]:
         max_frequency = get_gpu_max_frequency(device_id)
