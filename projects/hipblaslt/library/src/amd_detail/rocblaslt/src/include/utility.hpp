@@ -407,6 +407,7 @@ inline bool is_act_enabled(rocblaslt_epilogue value_)
     case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_AUX_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT:
+    case ROCBLASLT_EPILOGUE_SIGMOID:
         return true;
     case ROCBLASLT_EPILOGUE_DEFAULT:
     case ROCBLASLT_EPILOGUE_BIAS:

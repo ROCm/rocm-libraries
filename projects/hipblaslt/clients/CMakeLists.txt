@@ -14,6 +14,18 @@ target_include_directories(hipblaslt-clients-common
         "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite"
 )
 
+if(HIPBLASLT_ENABLE_COVERAGE)
+    target_include_directories(hipblaslt-clients-common
+        PUBLIC
+            ${PROJECT_SOURCE_DIR}/library/src/amd_detail
+            ${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/include
+            ${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include
+            ${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/rocroller/include
+            ${PROJECT_SOURCE_DIR}/tensilelite/rocisa
+            ${PROJECT_SOURCE_DIR}/../../shared/origami/include
+    )
+endif()
+
 add_library(hipblaslt::hipblaslt-clients-common ALIAS hipblaslt-clients-common)
 
 if(HIPBLASLT_ENABLE_BLIS)
@@ -118,6 +130,14 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     target_compile_definitions(hipblaslt-test PRIVATE GOOGLE_TEST)
     if(HIPBLASLT_ENABLE_ROCROLLER)
         target_compile_definitions(hipblaslt-test PRIVATE HIPBLASLT_USE_ROCROLLER)
+    endif()
+    if(HIPBLASLT_ENABLE_COVERAGE)
+        target_compile_definitions(hipblaslt-test PRIVATE CODE_COVERAGE)
+        target_compile_definitions(hipblaslt-test PRIVATE ROCBLASLT_INTERNAL_API)
+        # Add stub implementations for internal symbols used by coverage tests
+        target_sources(hipblaslt-test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/src/coverage_stubs.cpp
+        )
     endif()
 
     add_subdirectory(tests)

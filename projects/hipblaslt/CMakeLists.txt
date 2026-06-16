@@ -732,17 +732,18 @@ if(HIPBLASLT_ENABLE_COVERAGE)
 
     target_compile_options(hipblaslt-clients-common PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
     target_link_options(hipblaslt-clients-common PUBLIC -fprofile-instr-generate)
+    target_compile_definitions(hipblaslt-clients-common PRIVATE CODE_COVERAGE)
 
     set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
+    # Allow GTEST_FILTER to be set via environment variable to filter tests during coverage runs.
+    # Usage: GTEST_FILTER="*quick*" make coverage
+    # Default: Run all tests if GTEST_FILTER is not set
     add_custom_target(
         code_cov_tests
         DEPENDS hipblaslt-test
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${coverage_dir}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${coverage_dir}/profraw"
-        COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="${coverage_dir}/profraw/hipblaslt-coverage_%p.profraw"
-                                        GTEST_LISTENER=NO_PASS_LINE_IN_LOG
-                                        $<TARGET_FILE:hipblaslt-test>
-                                        --precompile=hipblaslt-test-precompile.db
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_coverage_tests.sh" "$<TARGET_FILE:hipblaslt-test>" "${coverage_dir}"
         COMMENT "Running hipblaslt testcases for coverage report"
       )
 
