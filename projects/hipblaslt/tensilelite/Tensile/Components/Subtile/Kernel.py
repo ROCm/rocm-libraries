@@ -724,17 +724,24 @@ class TileInfo:
         and isFloat4Type(dataTypeA) \
         and isFloat4Type(dataTypeB)
 
-    def conservativeSubtileMainLoopVgprReserve():
+    # Fallback only: a coarse upper bound on the main-loop A/B/scale working set
+    # used when the real A/B tile info is unavailable (e.g. the unit-test writer
+    # stub). The production path below uses the exact LogicalScheduler estimate.
+    def _fallbackMainLoopVgprReserve():
       pgrReserve = 12 if int(kernel.get("PrefetchGlobalRead", 0)) == 2 else 0
       return numDword * (int(self.localMMATileGrid[0]) + int(self.localMMATileGrid[1]) + 8 + pgrReserve)
 
+    # Production estimate: build the same LogicalScheduler the main loop uses and
+    # ask getNumVgpr() for the exact A/B/scale working-set size, walking the
+    # partition candidates until the allocation fits under MaxVgpr. This is the
+    # accurate reserve; the coarse fallback above is only for the no-tile-info case.
     def estimateSubtileMainLoopVgprs():
       stateA = getattr(writer.states, "a", None)
       stateB = getattr(writer.states, "b", None)
       tiA = getattr(stateA, "tileInfo", None)
       tiB = getattr(stateB, "tileInfo", None)
       if tiA is None or tiB is None:
-        return conservativeSubtileMainLoopVgprReserve()
+        return _fallbackMainLoopVgprReserve()
 
       stateMXSA = getattr(writer.states, "mxsa", None)
       stateMXSB = getattr(writer.states, "mxsb", None)
@@ -808,14 +815,50 @@ class TileInfo:
       startVgprValu = writer.vgprPool.size()
       mainCeil = maxVgprBeforeAgpr - estimateSubtileMainLoopVgprs()
 
-      EPILOGUE_TEMP_MARGIN = 32
-      # The ValuC staging window equals the per-thread D accumulator count, which
-      # is exactly _totalDTileRegs (numMMATiles * numDword). states.c.numVgprValu
-      # carries the same value in a fully built writer; fall back to the computed
-      # total so this allocator also works under the unit-test writer stub (which
-      # has no states.c).
+      # Epilogue (post-loop) ceiling: the store stages accumulators into the ValuC
+      # region, checked out of the VGPR pool ABOVE the VGPR-backed accumulators. The
+      # reserve (valuCStage) is the size of that staging window; the accumulators
+      # must end below maxVgpr - valuCStage - margin so the window stays in range.
+      #
+      # The size of the staging window is macrotile-size dependent:
+      #
+      #   * Small/medium tiles (totalDTileRegs <= AGPR file): the whole D tile can be
+      #     staged at once, so the safe reserve is the whole-tile count. This is the
+      #     validated, conservative default and is REQUIRED for these tiles -- a
+      #     looser reserve lets the accumulators climb too high and the store's
+      #     ValuC/data window then runs past v255 (observed on MT192x128).
+      #
+      #   * Large tiles (totalDTileRegs > AGPR file): the whole tile cannot be staged
+      #     at once (it would need more than maxVgpr regs and forces the AGPR-first
+      #     fallback). The store therefore MUST batch, and refineOccupancy() sizes
+      #     each batch to the free pool while snapping to MIWaveTile[0] ("miwt0")
+      #     columns -- so the realized peak is one column-aligned batch, not the
+      #     whole tile. Reserving that single batch (miwt0 * perElem) lets these
+      #     large tiles keep a partial VGPR/AGPR split instead of falling back, while
+      #     the store self-limits the remaining batches under maxVgpr.
       statesC = getattr(writer.states, "c", None)
-      valuCStage = getattr(statesC, "numVgprValu", 0) or _totalDTileRegs
+      wholeTileStage = getattr(statesC, "numVgprValu", 0) or _totalDTileRegs
+      if _totalDTileRegs > maxVgprBeforeAgpr:
+        pt = kernel["ProblemType"]
+        _ADDR = 2  # 64-bit buffer address pair (AsmStoreState numVgprsPerAddr)
+        # Upper bound on AsmStoreState.numVgprsPerElement for the worst
+        # (beta/bias/scaleVec/E) store path: ValuC + C/D data + D address, plus an
+        # address pair and data block per optional epilogue input.
+        perElem = 2 * numDword + _ADDR
+        if pt.get("UseBeta"):
+          perElem += _ADDR + numDword
+        if pt.get("UseBias"):
+          perElem += _ADDR + numDword
+        if pt.get("UseScaleAlphaVec") or pt.get("UseScaleAB"):
+          perElem += _ADDR + numDword
+        if pt.get("UseE"):
+          perElem += _ADDR + numDword
+        miwt0 = max(1, int(kernel["MIWaveTile"][0]))
+        valuCStage = min(wholeTileStage, miwt0 * perElem)
+        EPILOGUE_TEMP_MARGIN = 4
+      else:
+        valuCStage = wholeTileStage
+        EPILOGUE_TEMP_MARGIN = 32
       epiCeil = maxVgprBeforeAgpr - valuCStage - EPILOGUE_TEMP_MARGIN
 
       vgprAccLimit = min(mainCeil, epiCeil)
