@@ -210,11 +210,11 @@ protected:
         auto engineConfigDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x2345);
         auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x3345);
         EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, _))
-            .WillOnce([engineConfigDesc](hipdnnBackendDescriptorType_t,
-                                         hipdnnBackendDescriptor_t* d) {
-                *d = engineConfigDesc;
-                return HIPDNN_STATUS_SUCCESS;
-            });
+            .WillOnce(
+                [engineConfigDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* d) {
+                    *d = engineConfigDesc;
+                    return HIPDNN_STATUS_SUCCESS;
+                });
         EXPECT_CALL(*_mockBackend, backendFinalize(engineConfigDesc));
 
         EXPECT_CALL(*_mockBackend,
@@ -268,11 +268,11 @@ protected:
         auto executionPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
         EXPECT_CALL(*_mockBackend,
                     backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
-            .WillOnce([executionPlanDesc](hipdnnBackendDescriptorType_t,
-                                          hipdnnBackendDescriptor_t* d) {
-                *d = executionPlanDesc;
-                return HIPDNN_STATUS_SUCCESS;
-            });
+            .WillOnce(
+                [executionPlanDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* d) {
+                    *d = executionPlanDesc;
+                    return HIPDNN_STATUS_SUCCESS;
+                });
         EXPECT_CALL(*_mockBackend, backendFinalize(executionPlanDesc))
             .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
@@ -2245,7 +2245,7 @@ TEST_F(TestGraph, ExecutionPlanisFinalizedAfterBuildPlans)
 
 TEST_F(TestGraph, GetExecutionPlanEngineIdFailsWithNoPlan)
 {
-    Graph graph;
+    const Graph graph;
     int64_t engineId = -1;
     auto result = graph.get_execution_plan_engine_id(engineId);
     EXPECT_FALSE(result.is_good());
