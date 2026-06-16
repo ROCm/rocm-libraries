@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -60,30 +60,12 @@ def _is_legal_valuC_offset(startVgprValu, maxVgpr, valuCOffset, width=1):
     return startVgprValu + valuCOffset + width <= maxVgpr
 
 
-def _is_fp4_subtile_accumulator_vgpr_first(kernel) -> bool:
-    """Return True for the scoped FP4 subtile kernels that use VGPR-first accumulators.
-
-    NOTE: this only tests the kernel data types — it does not confirm that the VGPR
-    budget was large enough to actually place any accumulator in a VGPR.  Use
-    _has_any_vgpr_backed_accumulator(tileInfo) for a runtime-accurate check.
-    """
-    if not kernel.get("UseSubtileImpl"):
-        return False
-    pt = kernel.get("ProblemType", {})
-    dataTypeA = pt.get("DataTypeA")
-    dataTypeB = pt.get("DataTypeB")
-    return (
-        dataTypeA is not None and dataTypeB is not None
-        and dataTypeA.isFloat4() and dataTypeB.isFloat4()
-    )
-
-
 def _has_any_vgpr_backed_accumulator(tileInfo) -> bool:
     """Return True when at least one D-tile accumulator was actually allocated as a VGPR.
 
-    Unlike _is_fp4_subtile_accumulator_vgpr_first, this inspects the actual register
-    allocation recorded in tileInfo.vgprTiles, so it correctly returns False when the
-    VGPR budget was exhausted and all D-tile registers fell back to AGPR.
+    This inspects the actual register allocation recorded in tileInfo.vgprTiles
+    (rather than just the kernel data types), so it correctly returns False when
+    the VGPR budget was exhausted and all D-tile registers fell back to AGPR.
     """
     if tileInfo is None:
         return False
@@ -93,6 +75,12 @@ def _has_any_vgpr_backed_accumulator(tileInfo) -> bool:
 def _can_bypass_valu_c(kernel, edge: bool, atomic: bool, use_bias,
                        beta: bool = False) -> bool:
     """Return True when acc->ValuC v_mov moves can be skipped (subtile bypass).
+
+    NOTE: `edge` is intentionally NOT a gate. Both edge and non-edge stores take
+    the bypass; edge correctness is handled by the epilogue source-map remap
+    (every edge ValuC read/write resolves through _valuCVgpr / _storeSumIdx), so
+    there is no need to disable the bypass for edge. The parameter is kept for
+    call-site clarity and is covered by test_edge_store.
 
     The bypass is only valid when every ValuC read in the global-write epilogue
     uses _valuCVgpr / _storeSumIdx. Any epilogue feature whose ValuC reads were

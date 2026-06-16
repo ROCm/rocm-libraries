@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -211,9 +211,9 @@ def _mock_tile_info(vtile_flags):
 class TestHasAnyVgprBackedAccumulator:
     """_has_any_vgpr_backed_accumulator(tileInfo) must reflect actual allocation.
 
-    The key distinction vs _is_fp4_subtile_accumulator_vgpr_first: this function
-    inspects the real register-allocation records, so it returns False when all
-    D-tile registers fell back to AGPR (e.g. VGPR budget exhausted).
+    Unlike a data-type-only check, this function inspects the real register-
+    allocation records, so it returns False when all D-tile registers fell back
+    to AGPR (e.g. VGPR budget exhausted).
     """
 
     def test_none_tile_info_returns_false(self):
