@@ -137,7 +137,7 @@ __global__ static void __launch_bounds__(LASET_MAX_THREADS) laset_kernel(char co
     } // end for bid
 }
 
-// Initializes scalars on the device.
+// Initializes matrix on the device.
 template <typename T, typename I, typename Istride, typename UA>
 inline void laset(rocblas_handle handle,
                   char const uplo_c,
@@ -153,6 +153,10 @@ inline void laset(rocblas_handle handle,
 
                   I const batch_count)
 {
+    // quick return
+    if(m <= 0 || n <= 0 || batch_count <= 0)
+        return;
+
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
