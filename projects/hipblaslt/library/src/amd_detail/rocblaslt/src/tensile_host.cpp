@@ -2809,7 +2809,7 @@ namespace
                 {
                     auto processor_path     = path / processor;
                     auto mapping_msgpack    = processor_path / ("TensileLibrary_lazy_" + processor + ".dat");
-                    auto mapping_msgpack_gz = processor_path / ("TensileLibrary_lazy_" + processor + ".dat.gz");
+                    auto mapping_msgpack_gz = processor_path / ("TensileLibrary_lazy_" + processor + ".dat.zlib");
                     auto mapping_yaml       = processor_path / ("TensileLibrary_lazy_" + processor + ".yaml");
                     if(std::filesystem::exists(mapping_msgpack) || std::filesystem::exists(mapping_msgpack_gz)
                        || std::filesystem::exists(mapping_yaml))
@@ -2884,10 +2884,10 @@ namespace
                     }
                 }
                 if(!std::filesystem::exists(tensileLibPath)
-                   && !std::filesystem::exists(tensileLibPath.string() + ".gz"))
+                   && !std::filesystem::exists(tensileLibPath.string() + ".zlib"))
                 {
                     std::cerr << "\nrocblaslt error: Cannot read " << tensileLibPath
-                              << " (or .gz variant): " << strerror(errno) << std::endl;
+                              << " (or .zlib variant): " << strerror(errno) << std::endl;
                     // rocblaslt_abort();
                 }
 
