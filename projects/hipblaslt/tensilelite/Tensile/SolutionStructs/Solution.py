@@ -913,9 +913,15 @@ class Solution(collections.abc.Mapping):
       if state["_ScheduleIterAlg"] == 1 or state["_ScheduleIterAlg"] == 2:
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support ScheduleIterAlg")
       if state["StreamK"] == 0:
-        reject(state, printRejectionReason, "UseSubtileImpl=1 supports StreamK only (no support for GSU)")
-      if state["StreamK"] != 3 and state["StreamK"] != 4:
-        reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK=3 or StreamK=4")
+        # Subtile has no GSU reduction path, so it can only run data-parallel
+        # (GSU=1). GSU is also a runtime parameter, so disable the user GSU
+        # override too (mirrors Stream-K / PrefetchGL2) instead of only
+        # rejecting the build-time value.
+        if state["GlobalSplitU"] != 1:
+          reject(state, printRejectionReason, "UseSubtileImpl=1 with StreamK=0 requires GlobalSplitU=1 (no GSU reduction support)")
+        state["InternalSupportParams"]["SupportUserGSU"] = False
+      if state["StreamK"] not in (0, 3, 4):
+        reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK in {0, 3, 4}")
       if state["DebugStreamK"] != 0:
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support DebugStreamK (must be 0)")
       if state["PrefetchAcrossPersistent"]:
