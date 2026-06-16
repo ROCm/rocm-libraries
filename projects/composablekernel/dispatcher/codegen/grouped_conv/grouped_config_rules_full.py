@@ -28,8 +28,6 @@ from .tile_math import (
     get_valid_wave_warp_pairs as _tm_get_valid_wave_warp_pairs,
 )
 
-WARP_SIZE = 64
-
 # Dtype string to dtype_key mapping (for tile_math filter functions).
 DTYPE_TO_DTYPE_KEY: Dict[str, str] = {
     "fp16": "fp16_fp16_fp32",
@@ -1065,16 +1063,11 @@ def get_specs_for_tile(
     if variant == "forward":
         if tile_k == 8:
             return ["default"]
-        elif tile_k == 16:
-            specs = ["default", "filter1x1_pad0", "filter1x1_stride1_pad0"]
-            if tile_m * tile_n <= 4096:
-                specs.append("filter3x3")
-            return specs
-        else:  # tile_k >= 32
-            specs = ["default", "filter1x1_pad0", "filter1x1_stride1_pad0"]
-            if tile_m * tile_n <= 4096:
-                specs.append("filter3x3")
-            return specs
+        # tile_k >= 16
+        specs = ["default", "filter1x1_pad0", "filter1x1_stride1_pad0"]
+        if tile_m * tile_n <= 4096:
+            specs.append("filter3x3")
+        return specs
     elif variant in ("bwd_data", "bwd_weight"):
         return ["default", "filter1x1_stride1_pad0"]
 
@@ -1360,22 +1353,6 @@ def check_vectors(vec_a: int, vec_b: int, vec_c: int) -> bool:
     """Check all three vector sizes are valid (1 or even)."""
     return all(is_valid_vector_size(v) for v in (vec_a, vec_b, vec_c))
 
-
-
-# --- Pipeline-scheduler restrictions ---
-
-INTERWAVE_PIPELINES = {"basic_v1", "mem"}  # Only these support interwave
-
-
-def is_valid_pipeline_scheduler(pipeline: str, scheduler: str) -> bool:
-    """Check pipeline+scheduler combo is valid.
-
-    Only 'mem' and 'basic_v1' pipelines support interwave; all compute
-    pipelines (compv3/v4/v5/v6/async) only support intrawave.
-    """
-    if scheduler == "interwave" and pipeline not in INTERWAVE_PIPELINES:
-        return False
-    return True
 
 
 # --- Pipeline-variant restrictions ---
@@ -1698,6 +1675,7 @@ def get_configs(
             GroupedConvVariant.FORWARD: "forward",
             GroupedConvVariant.BACKWARD_DATA: "bwd_data",
             GroupedConvVariant.BACKWARD_WEIGHT: "bwd_weight",
+            GroupedConvVariant.FORWARD_DEPTHWISE: None,
         }.get(variant)
 
         if variant_str is not None:

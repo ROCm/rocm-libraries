@@ -58,6 +58,12 @@ else()
   set(ROCM_ROOT "/opt/rocm" CACHE PATH "Root directory of the ROCm installation")
 endif()
 
+# ROCm libraries root (for shared/ctest and other shared resources)
+# Only set default when not already defined (e.g. by superproject / rocm-libraries).
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 include(CheckLanguage)
 include(CMakeDependentOption)
 
@@ -175,13 +181,6 @@ else()
       )
     endif()
     set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
-  endif()
-endif()
-
-# Compressed offload binaries are currently not working with the SPIR-V target
-if("amdgcnspirv" IN_LIST GPU_TARGETS)
-  if(BUILD_OFFLOAD_COMPRESS)
-    message(FATAL_ERROR "Cannot combine SPIR-V and BUILD_OFFLOAD_COMPRESS")
   endif()
 endif()
 

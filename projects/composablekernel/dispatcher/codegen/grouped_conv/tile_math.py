@@ -102,14 +102,7 @@ def _pipeline_wave_valid(
 
 def _deduplicate(pairs: List[Tuple[Tuple, Tuple]]) -> List[Tuple[Tuple, Tuple]]:
     """Remove duplicate (wave, warp_tile) pairs while preserving order."""
-    seen: Set[Tuple] = set()
-    result = []
-    for item in pairs:
-        key = (item[0], item[1])
-        if key not in seen:
-            seen.add(key)
-            result.append(item)
-    return result
+    return list(dict.fromkeys(pairs))
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +214,17 @@ def get_valid_vec_sizes(
         Sorted list of (vec_a, vec_b, vec_c) tuples.
     """
     dtype_a = dtype_key.split("_")[0]
+    dtype_b = dtype_key.split("_")[1]
     sizeof_a = float(ELEMENT_SIZE_MAP.get(dtype_a, 2))  # bytes per A element
+
+    # vec_b / vec_c reuse sizeof_a, so this is only valid when A and B share an
+    # element type (the C output element type is assumed to match the input).
+    # The third field is the accumulator (fp32/int32), so it is intentionally
+    # not compared here.
+    if dtype_a != dtype_b:
+        raise ValueError(
+            f"get_valid_vec_sizes assumes A and B share an element type, got {dtype_key}"
+        )
 
     block_size = WARP_SIZE * wave_m * wave_n * wave_k
 

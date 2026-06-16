@@ -105,9 +105,7 @@ class TestIsValidDepthwiseConfig(unittest.TestCase):
         """Reference configs must also be valid with fp32 dtype_size=4."""
         for t in DEPTHWISE_PROFILER_CONFIGS:
             cfg = _tuple_to_cfg(t)
-            # Some configs may fail SmemSize with fp32; those are expected
-            # to still be structurally valid for fp16/bf16
-            is_valid_depthwise_config(cfg, dtype_size=4)  # no crash
+            self.assertTrue(is_valid_depthwise_config(cfg, dtype_size=4))
 
     def test_odd_filter_required(self):
         """Even filter size must be rejected."""

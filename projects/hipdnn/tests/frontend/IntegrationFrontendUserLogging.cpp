@@ -2,9 +2,17 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
+#include <hipdnn_test_sdk/utilities/LiftingTestHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 
+#include "test_plugins/TestPluginConstants.hpp"
+
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -507,4 +515,50 @@ TEST_F(IntegrationFrontendUserLogging, MultipleCallbacksAllReceiveLogs)
         << "First sync callback should not receive logs after unregister";
     EXPECT_EQ(syncCount2.count.load(), sync2After)
         << "Second sync callback should not receive logs after unregister";
+}
+
+// Deserializing a graph+plan blob via the no-handle overload drops the plan and
+// logs a WARN. This fixture's SetUp only manages the global log level, so the
+// test stands up its own handle/plugin environment to build a graph+plan first.
+TEST_F(IntegrationFrontendUserLogging, GraphPlusPlanWithoutHandleDropsPlanAndWarns)
+{
+    SKIP_IF_NO_DEVICES();
+
+    ASSERT_EQ(hipInit(0), hipSuccess);
+
+    const std::string& pluginPath = hipdnn_tests::plugin_constants::testGoodPluginPath();
+    const std::array<const char*, 1> paths = {pluginPath.c_str()};
+    ASSERT_EQ(
+        hipdnnSetEnginePluginPaths_ext(paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+        HIPDNN_STATUS_SUCCESS);
+
+    hipdnnHandle_t handle = nullptr;
+    ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
+
+    // Finalize a plan so the serialized blob carries one.
+    auto originalGraph = hipdnn_tests::buildConvFpropGraph();
+    auto result = originalGraph->build(handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+    // Install a SYNC WARN recorder so the warning is observable immediately.
+    auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    registerUserCallback(HIPDNN_SEV_WARN, LogCallbackMode::SYNC);
+    auto logLevelError = setGlobalLogLevel(HIPDNN_SEV_WARN);
+    ASSERT_EQ(logLevelError.code, ErrorCode::OK);
+
+    // No-handle overload: the plan must be dropped and a WARN emitted.
+    auto lifted = std::make_shared<hipdnn_tests::TestableGraphLifting>();
+    result = lifted->deserialize(data);
+    EXPECT_TRUE(result.is_good()) << result.err_msg;
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "no handle was provided"))
+        << "Expected a WARN about the dropped execution plan\nRecorded logs:\n"
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(lifted->hasExecutionPlan())
+        << "Execution plan should be dropped when deserializing without a handle";
+
+    ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 }

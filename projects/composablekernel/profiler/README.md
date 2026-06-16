@@ -322,7 +322,7 @@ cmake -D DISPATCHER_RULE_SET=profiler <other options> ..
 
 To build only the CK Tile profiler, one can use an additional flag `-DCK_PROFILER_OP_FILTER="_tile"`.
 
-All togteher, we have a CMake configure command
+All together, we have a CMake configure command
 
 ```bash
 cmake                                                                                             \

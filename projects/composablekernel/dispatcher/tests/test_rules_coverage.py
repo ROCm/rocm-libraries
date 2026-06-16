@@ -49,6 +49,10 @@ from unified_grouped_conv_codegen import (                                      
 
 ARCHS: List[str] = ["gfx942", "gfx950"]
 
+# GroupedConvVariant.FORWARD_DEPTHWISE is intentionally omitted: depthwise
+# instances follow a separate generation/validation path (the depthwise rule
+# set and test_depthwise_tile_math.py), not the XDL GEMM variant cross-product
+# whose coverage this test verifies.
 VARIANTS = [
     GroupedConvVariant.FORWARD,
     GroupedConvVariant.BACKWARD_DATA,
@@ -205,9 +209,9 @@ def _print_coverage_report(
     print("=" * 70)
 
     if n_missing == 0:
-        print(f"✓ '{sup_name}' fully contains all '{sub_name}' instances!")
+        print(f"[PASS] '{sup_name}' fully contains all '{sub_name}' instances!")
     else:
-        print(f"✗ {n_missing} '{sub_name}' instances are not covered by '{sup_name}'.")
+        print(f"[FAIL] {n_missing} '{sub_name}' instances are not covered by '{sup_name}'.")
 
 
 def _format_key(key: FrozenSet) -> str:

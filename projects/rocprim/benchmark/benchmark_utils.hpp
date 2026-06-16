@@ -116,19 +116,41 @@ using engine_type = std::minstd_rand;
 
 // generate_random_data_n() generates only part of sequence and replicates it,
 // because benchmarks usually do not need "true" random sequence.
-template<typename OutputIter, typename U, typename V, typename Generator>
-inline auto generate_random_data_n(
-    OutputIter it, size_t size, U min, V max, Generator& gen, size_t max_random_size = 1024 * 1024)
-    -> typename std::enable_if_t<rocprim::is_integral<common::it_value_t<OutputIter>>::value,
-                                 OutputIter>
+template<typename OutputIterator, typename U, typename V, typename Generator>
+inline auto generate_random_data_n(OutputIterator it,
+                                   size_t         size,
+                                   U              min,
+                                   V              max,
+                                   Generator&     gen,
+                                   size_t         max_random_size = 1024 * 1024)
+    -> std::enable_if_t<rocprim::is_arithmetic<common::it_value_t<OutputIterator>>::value,
+                        OutputIterator>
 {
-    using T = common::it_value_t<OutputIter>;
+    using value_type = common::it_value_t<OutputIterator>;
 
-    using dis_type = typename std::conditional<
-        common::is_valid_for_int_distribution<T>::value,
-        T,
-        typename std::conditional<std::is_signed<T>::value, int, unsigned int>::type>::type;
-    common::uniform_int_distribution<dis_type> distribution((T)min, (T)max);
+    // Ensure value_type is valid for distribution
+    using dis_type = std::conditional_t<
+        rocprim::is_integral<value_type>::value,
+
+        // Integral
+        std::conditional_t<
+            common::is_valid_for_int_distribution<value_type>::value,
+            value_type,
+            std::conditional_t<std::is_signed<value_type>::value, int, unsigned int>>,
+
+        // Floating point
+        std::conditional_t<std::is_same_v<rocprim::half, value_type>
+                               || std::is_same_v<rocprim::bfloat16, value_type>,
+                           float,
+                           value_type>>;
+
+    using distribution_type =
+        typename std::conditional<rocprim::is_integral<dis_type>::value,
+                                  common::uniform_int_distribution<dis_type>,
+                                  std::uniform_real_distribution<dis_type>>::type;
+
+    distribution_type distribution(min, max);
+
     std::generate_n(it, std::min(size, max_random_size), [&]() { return distribution(gen); });
     for(size_t i = max_random_size; i < size; i += max_random_size)
     {
@@ -137,29 +159,48 @@ inline auto generate_random_data_n(
     return it + size;
 }
 
-template<typename OutputIterator, typename U, typename V, typename Generator>
-inline auto generate_random_data_n(OutputIterator it,
-                                   size_t         size,
-                                   U              min,
-                                   V              max,
-                                   Generator&     gen,
-                                   size_t         max_random_size = 1024 * 1024)
-    -> std::enable_if_t<rocprim::is_floating_point<common::it_value_t<OutputIterator>>::value,
+// Non arithmetic types
+template<typename OutputIterator, typename Generator>
+inline auto generate_random_data_n(OutputIterator                     it,
+                                   size_t                             size,
+                                   common::it_value_t<OutputIterator> min,
+                                   common::it_value_t<OutputIterator> max,
+                                   Generator&                         gen,
+                                   size_t                             max_random_size = 1024 * 1024)
+    -> std::enable_if_t<!rocprim::is_arithmetic<common::it_value_t<OutputIterator>>::value,
                         OutputIterator>
 {
-    using T = typename std::iterator_traits<OutputIterator>::value_type;
+    using T = common::it_value_t<OutputIterator>;
 
-    // Generate floats when T is half
-    using dis_type = std::conditional_t<std::is_same<rocprim::half, T>::value
-                                            || std::is_same<rocprim::bfloat16, T>::value,
-                                        float,
-                                        T>;
-    std::uniform_real_distribution<dis_type> distribution((dis_type)min, (dis_type)max);
-    std::generate_n(it, std::min(size, max_random_size), [&]() { return distribution(gen); });
-    for(size_t i = max_random_size; i < size; i += max_random_size)
+    if constexpr(common::is_custom_type<T>::value)
     {
-        std::copy_n(it, std::min(size - i, max_random_size), it + i);
+        using first_type  = typename T::first_type;
+        using second_type = typename T::second_type;
+
+        std::vector<first_type>  fdata(size);
+        std::vector<second_type> sdata(size);
+        generate_random_data_n(fdata.begin(), size, min.x, max.x, gen, max_random_size);
+        generate_random_data_n(sdata.begin(), size, min.y, max.y, gen, max_random_size);
+
+        for(size_t i = 0; i < size; ++i)
+        {
+            it[i] = T(fdata[i], sdata[i]);
+        }
     }
+    else
+    {
+        static_assert(!std::is_same<decltype(max.x), void>(), "Custom types must have an x field");
+
+        using field_type = decltype(max.x);
+        std::vector<field_type> field_data(size);
+        generate_random_data_n(field_data.begin(), size, min.x, max.x, gen, max_random_size);
+
+        for(size_t i = 0; i < size; ++i)
+        {
+            it[i] = T(field_data[i]);
+        }
+    }
+
     return it + size;
 }
 
@@ -244,56 +285,6 @@ struct generate_limits<T, std::enable_if_t<common::is_custom_type<T>::value>>
 
 } // namespace common
 
-template<typename OutputIterator, typename Generator>
-inline auto generate_random_data_n(OutputIterator                     it,
-                                   size_t                             size,
-                                   common::it_value_t<OutputIterator> min,
-                                   common::it_value_t<OutputIterator> max,
-                                   Generator&                         gen,
-                                   size_t                             max_random_size = 1024 * 1024)
-    -> std::enable_if_t<common::is_custom_type<common::it_value_t<OutputIterator>>::value,
-                        OutputIterator>
-{
-    using T = common::it_value_t<OutputIterator>;
-
-    using first_type  = typename T::first_type;
-    using second_type = typename T::second_type;
-
-    std::vector<first_type>  fdata(size);
-    std::vector<second_type> sdata(size);
-    generate_random_data_n(fdata.begin(), size, min.x, max.x, gen, max_random_size);
-    generate_random_data_n(sdata.begin(), size, min.y, max.y, gen, max_random_size);
-
-    for(size_t i = 0; i < size; ++i)
-    {
-        it[i] = T(fdata[i], sdata[i]);
-    }
-    return it + size;
-}
-
-template<typename OutputIterator, typename Generator>
-inline auto generate_random_data_n(OutputIterator                     it,
-                                   size_t                             size,
-                                   common::it_value_t<OutputIterator> min,
-                                   common::it_value_t<OutputIterator> max,
-                                   Generator&                         gen,
-                                   size_t                             max_random_size = 1024 * 1024)
-    -> std::enable_if_t<!common::is_custom_type<common::it_value_t<OutputIterator>>::value
-                            && !std::is_same<decltype(max.x), void>::value,
-                        OutputIterator>
-{
-    using T = common::it_value_t<OutputIterator>;
-
-    using field_type = decltype(max.x);
-    std::vector<field_type> field_data(size);
-    generate_random_data_n(field_data.begin(), size, min.x, max.x, gen, max_random_size);
-    for(size_t i = 0; i < size; ++i)
-    {
-        it[i] = T(field_data[i]);
-    }
-    return it + size;
-}
-
 template<typename T, typename U, typename V>
 inline std::vector<T> get_random_data(
     size_t size, U min, V max, unsigned int seed, size_t max_random_size = 1024 * 1024)
@@ -349,56 +340,50 @@ auto limit_cast(U value) -> T
     return static_cast<T>(value);
 }
 
-// This overload below is selected for non-standard float types, e.g. half, which cannot be compared with the limit types.
 template<typename T, typename U, typename V>
 inline auto limit_random_range(U range_start, V range_end)
-    -> std::enable_if_t<!common::is_custom_type<T>::value
-                            && (!is_comparable<T, U>::value || !is_comparable<T, V>::value),
-                        std::pair<T, T>>
 {
-    return {static_cast<T>(range_start), static_cast<T>(range_end)};
-}
-
-template<typename T, typename U, typename V>
-auto limit_random_range(U range_start, V range_end)
-    -> std::enable_if_t<(common::is_custom_type<T>::value
-                         && is_comparable<typename T::first_type, U>::value
-                         && is_comparable<typename T::second_type, U>::value
-                         && is_comparable<typename T::first_type, V>::value
-                         && is_comparable<typename T::second_type, V>::value
-                         && rocprim::is_arithmetic<typename T::first_type>::value
-                         && rocprim::is_arithmetic<typename T::second_type>::value
-                         && rocprim::is_arithmetic<U>::value && rocprim::is_arithmetic<V>::value),
-                        std::pair<T, T>>
-{
-
-    return {
-        T{limit_cast<typename T::first_type>(range_start),
-          limit_cast<typename T::second_type>(range_start)},
-        T{  limit_cast<typename T::first_type>(range_end),
-          limit_cast<typename T::second_type>(range_end)  }
-    };
-}
-
-template<typename T, typename U, typename V>
-inline auto limit_random_range(U range_start, V range_end)
-    -> std::enable_if_t<!common::is_custom_type<T>::value && is_comparable<T, U>::value
-                            && is_comparable<T, V>::value,
-                        std::pair<T, T>>
-{
-
-    if(is_comparable<V, U>::value)
+    if constexpr(common::is_custom_type<T>::value)
     {
-        using common_type = typename std::common_type<T, U>::type;
-        if(static_cast<common_type>(range_start) > static_cast<common_type>(range_end))
-        {
-            throw std::range_error("limit_random_range: Incorrect range used!");
-        }
-    }
+        static_assert(is_comparable<typename T::first_type, U>::value,
+                      "T::first_type must be comparable with U");
+        static_assert(is_comparable<typename T::second_type, U>::value,
+                      "T::second_type must be comparable with U");
+        static_assert(is_comparable<typename T::first_type, V>::value,
+                      "T::first_type must be comparable with V");
+        static_assert(is_comparable<typename T::second_type, V>::value,
+                      "T::second_type must be comparable with V");
+        static_assert(rocprim::is_arithmetic<typename T::first_type>::value,
+                      "T::first_type must be arithmetic");
+        static_assert(rocprim::is_arithmetic<typename T::second_type>::value,
+                      "T::second_type must be arithmetic");
+        static_assert(rocprim::is_arithmetic<U>::value, "U must be arithmetic");
+        static_assert(rocprim::is_arithmetic<V>::value, "V must be arithmetic");
 
-    T start = limit_cast<T>(range_start);
-    T end   = limit_cast<T>(range_end);
-    return std::make_pair(start, end);
+        return std::pair<T, T>{
+            T{limit_cast<typename T::first_type>(range_start),
+              limit_cast<typename T::second_type>(range_start)},
+            T{  limit_cast<typename T::first_type>(range_end),
+              limit_cast<typename T::second_type>(range_end)  }
+        };
+    }
+    else if constexpr(is_comparable<T, U>::value && is_comparable<T, V>::value)
+    {
+        if constexpr(is_comparable<V, U>::value)
+        {
+            using common_type = typename std::common_type<T, U>::type;
+            if(static_cast<common_type>(range_start) > static_cast<common_type>(range_end))
+            {
+                throw std::range_error("limit_random_range: Incorrect range used!");
+            }
+        }
+
+        T start = limit_cast<T>(range_start);
+        T end   = limit_cast<T>(range_end);
+        return std::make_pair(start, end);
+    }
+    // Selected for non-standard float types, e.g. half, which cannot be compared with the limit types.
+    return std::pair<T, T>{static_cast<T>(range_start), static_cast<T>(range_end)};
 }
 
 inline bool is_warp_size_supported(const unsigned int required_warp_size, const int device_id)
@@ -471,26 +456,25 @@ std::vector<T>
     return keys;
 }
 
-template<typename T, typename U, typename V>
+template<typename T, typename U = rocprim::empty_type, typename V = rocprim::empty_type>
 inline auto get_random_value(U min, V max, size_t seed_value)
-    -> std::enable_if_t<rocprim::is_arithmetic<T>::value, T>
 {
-    T           result;
-    engine_type gen(seed_value);
-    generate_random_data_n(&result, 1, min, max, gen);
-    return result;
-}
-
-template<typename T>
-inline auto get_random_value(T min, T max, size_t seed_value)
-    -> std::enable_if_t<common::is_custom_type<T>::value, T>
-{
-    typename T::first_type  result_first;
-    typename T::second_type result_second;
-    engine_type             gen(seed_value);
-    generate_random_data_n(&result_first, 1, min.x, max.x, gen);
-    generate_random_data_n(&result_second, 1, min.y, max.y, gen);
-    return T{result_first, result_second};
+    if constexpr(rocprim::is_arithmetic<T>::value)
+    {
+        T           result;
+        engine_type gen(seed_value);
+        generate_random_data_n(&result, 1, min, max, gen);
+        return result;
+    }
+    if constexpr(common::is_custom_type<T>::value)
+    {
+        typename T::first_type  result_first;
+        typename T::second_type result_second;
+        engine_type             gen(seed_value);
+        generate_random_data_n(&result_first, 1, min.x, max.x, gen);
+        generate_random_data_n(&result_second, 1, min.y, max.y, gen);
+        return T{result_first, result_second};
+    }
 }
 
 template<typename T, T, typename>

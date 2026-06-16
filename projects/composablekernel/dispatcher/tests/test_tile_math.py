@@ -319,7 +319,7 @@ class TestGetValidWaveWarpPairs(unittest.TestCase):
 
     def test_no_duplicates(self):
         """The returned list must not contain duplicate pairs."""
-        for tile in list(TILE_TO_WAVE_WARP.keys())[:10]:
+        for tile in list(TILE_TO_WAVE_WARP.keys()):
             pairs = get_valid_wave_warp_pairs(*tile, "bf16_bf16_fp32")
             self.assertEqual(
                 len(pairs), len(set(pairs)),

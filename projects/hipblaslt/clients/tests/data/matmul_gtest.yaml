@@ -432,6 +432,8 @@ Tests:
   matrix_size: *deepbench_sizes
   alpha_beta: *deepbench_alpha_beta_range
   transA_transB: *deepbench_transA_transB_range
+  batch_mode: [0, 1]
+  batch_count: [1, 3]    
 
 - name: resnet50_fwd
   category: nightly

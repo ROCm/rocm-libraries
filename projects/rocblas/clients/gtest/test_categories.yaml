@@ -57,13 +57,13 @@ test_categories:
 #     labels: ["quick", "standard", "comprehensive", "full", "ex_gpu_gfxXXXX"]
 
 execution_settings:
-  default_timeout: 300
+  default_timeout: 900
   timeout_multiplier: 1
   environment:
     OPENBLAS_NUM_THREADS: "48"
     OMP_NUM_THREADS: "48"
   category_timeouts:
-    quick: 600    # 10 min (quick suite can exceed 300s on some systems)
-    standard: 7200    # ~2 hours (standard can take over an hour)
-    comprehensive: 28800   # 8 hours
-    full: 86400       # 24 hours
+    quick: 900    # 15 min
+    standard: 7200    # 2 hours
+    comprehensive: 7200   # 2 hours
+    full: 28800       # 8 hours

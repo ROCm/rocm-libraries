@@ -79,7 +79,14 @@ def map_pipeline_version(version_str):
         "ASYNC_V4": "mem",
         "WAVELET": "wavelet",
     }
-    return mapping.get(version_str, version_str.lower())
+    mapped = mapping.get(version_str)
+    if mapped is None:
+        log.warning(
+            "Unknown pipeline version %r; falling back to %r",
+            version_str, version_str.lower(),
+        )
+        return version_str.lower()
+    return mapped
 
 
 def map_scheduler(scheduler_str):
@@ -168,7 +175,7 @@ def _build_data(input_path, variant, layout, datatype, ndim, specialization, ver
     instead of writing JSON. The dict shape matches what the loaders below
     expect: ``{variant, ndim_spatial, layout, datatype, instances}``.
     """
-    with open(input_path, "r") as f:
+    with open(input_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
     # problem_name is used only for dtype detection (fp32/fp16/bf16 substring match)
@@ -241,8 +248,7 @@ def _parse_config(config: str, variant: str):
     if datatype == "depthwise":
         datatype = parts[2]
         specialization = Specialization.Depthwise
-
-    if len(parts) == 3 and parts[2] == "streamk":
+    elif len(parts) == 3 and parts[2] == "streamk":
         specialization = Specialization.StreamK
 
     if layout not in ["nhwgc", "ndhwgc"]:

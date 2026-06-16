@@ -17,7 +17,6 @@ Based on the GEMM codegen pattern.
 
 import argparse
 import importlib
-import json
 import logging
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
@@ -252,6 +251,7 @@ class GroupedConvKernelConfig:
             GroupedConvVariant.FORWARD: "fwd",
             GroupedConvVariant.BACKWARD_DATA: "bwd_data",
             GroupedConvVariant.BACKWARD_WEIGHT: "bwd_weight",
+            GroupedConvVariant.FORWARD_DEPTHWISE: "fwd",
         }[self.variant]
 
         # Core identity: variant, dtype, layout, dims
@@ -2019,12 +2019,12 @@ class UnifiedGroupedConvCodegen:
 
         # Generate kernel header
         content = kernel_gen.generate(config)
-        filepath.write_text(content)
+        filepath.write_text(content, encoding="utf-8")
         self.generated_files.append(filepath)
 
         wrapper_content = wrapper_gen.generate(config, filepath, self.output_dir)
         wrapper_path = self.wrapper_dir / f"dispatcher_wrapper_{kernel_name}.hpp"
-        wrapper_path.write_text(wrapper_content)
+        wrapper_path.write_text(wrapper_content, encoding="utf-8")
         self.generated_wrappers.append(wrapper_path)
 
         # Generate .cpp compilation unit for per-kernel parallel builds
@@ -2040,7 +2040,7 @@ namespace ck_tile {{ namespace generated {{
     volatile bool _{kernel_name.replace("-", "_")}_loaded = true;
 }} }}
 """
-        cpp_filepath.write_text(cpp_content)
+        cpp_filepath.write_text(cpp_content, encoding="utf-8")
 
         return filepath, wrapper_path
 
@@ -2205,7 +2205,7 @@ namespace ck_tile {{ namespace generated {{
 // Default launcher alias (uses first kernel)
 {launcher_alias}
 """
-            header_path.write_text(content)
+            header_path.write_text(content, encoding="utf-8")
             if kernel_headers:
                 log.info(f"Generated: {header_name} ({len(kernel_headers)} kernels)")
 
@@ -2301,7 +2301,7 @@ inline std::size_t get_grouped_conv_kernel_count() {{ return {len(fwd_kernels) +
 }}  // namespace ck_tile
 """
         reg_path = self.wrapper_dir / "register_all_grouped_conv_kernels.hpp"
-        reg_path.write_text(content)
+        reg_path.write_text(content, encoding="utf-8")
         log.info(f"Generated registration header: {reg_path}")
 
 
@@ -2470,10 +2470,6 @@ def main():
     }
     requested_variants = [variant_map[v] for v in args.variant]
 
-    # Validate --instance-id requires --config-file
-    if args.instance_id is not None and args.config_file is None:
-        parser.error("--instance-id requires --config-file")
-
     # Build custom config from CLI arguments
     if args.tile_m is not None or args.tile_n is not None or args.pipeline is not None:
         tile = TileConfig(
@@ -2572,8 +2568,7 @@ def main():
     # Generate (disable arch filter when using pre-validated JSON configs)
     codegen = UnifiedGroupedConvCodegen(
         output_dir=args.output,
-        gpu_target=args.arch,
-        enable_arch_filter=(args.config_file is None),
+        gpu_target=args.arch
     )
     results = codegen.generate_all(
         configs=filtered_configs, datatypes=args.datatype, parallel=True

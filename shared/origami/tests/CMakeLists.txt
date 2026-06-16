@@ -20,6 +20,7 @@ target_sources(
     origami-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/test_gemm.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_origami.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_formocast.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/test_logger.cpp"
 )
 
 target_include_directories(origami-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")

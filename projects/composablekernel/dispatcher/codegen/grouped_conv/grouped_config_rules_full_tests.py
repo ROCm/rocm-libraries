@@ -1,3 +1,5 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 from typing import List
 
@@ -42,47 +44,56 @@ def _select_test_configs(configs) -> List:
         GroupedConvKernelConfig
     )
 
-    categories = defaultdict(list)
-    for cfg in configs:
-        cat = _classify_config(cfg)
-        categories[cat].append(cfg)
+    # Config dataclasses are mutable (unhashable), so membership is tracked by
+    # position in the original list rather than id() (which is only valid while
+    # objects stay alive) or a content key (which would require hashability).
+    configs = list(configs)
 
-    selected_ids = set()
+    categories = defaultdict(list)  # category -> list of original indices
+    for idx, cfg in enumerate(configs):
+        categories[_classify_config(cfg)].append(idx)
+
+    selected = set()  # original indices
 
     # Take ~20% from each category (minimum 1)
-    for cat, cat_configs in categories.items():
+    for cat, cat_indices in categories.items():
         cat_selected = False
-        for i, cfg in enumerate(cat_configs):
-            if (i + 1) % 5 == 0:
-                selected_ids.add(id(cfg))
+        for rank, idx in enumerate(cat_indices):
+            if (rank + 1) % 5 == 0:
+                selected.add(idx)
                 cat_selected = True
         # Ensure minimum 1 per category
-        if not cat_selected:
-            selected_ids.add(id(cat_configs[0]))
+        if not cat_selected and cat_indices:
+            selected.add(cat_indices[0])
 
     # Ensure pipeline/scheduler coverage per (variant, datatype) (GEMM only).
-    gemm_configs = [c for c in configs if isinstance(c, GroupedConvKernelConfig)]
+    gemm_indices = [
+        i for i, c in enumerate(configs)
+        if isinstance(c, GroupedConvKernelConfig)
+    ]
     variant_combos = defaultdict(set)
     variant_covered = defaultdict(set)
-    for c in gemm_configs:
+    for i in gemm_indices:
+        c = configs[i]
         vkey = (c.variant, getattr(c, "datatype", None) or "fp16")
         combo = (c.trait.pipeline, c.trait.scheduler)
         variant_combos[vkey].add(combo)
-        if id(c) in selected_ids:
+        if i in selected:
             variant_covered[vkey].add(combo)
 
     for vkey, required in variant_combos.items():
         variant, dt = vkey
         missing = required - variant_covered[vkey]
         for combo in missing:
-            for c in gemm_configs:
+            for i in gemm_indices:
+                c = configs[i]
                 if c.variant == variant and \
                         (getattr(c, "datatype", None) or "fp16") == dt and \
                         (c.trait.pipeline, c.trait.scheduler) == combo:
-                    selected_ids.add(id(c))
+                    selected.add(i)
                     break
 
-    return [c for c in configs if id(c) in selected_ids]
+    return [configs[i] for i in sorted(selected)]
 
 def get_configs(
     arch: str,

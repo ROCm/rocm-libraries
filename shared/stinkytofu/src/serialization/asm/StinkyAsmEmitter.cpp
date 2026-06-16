@@ -24,6 +24,7 @@
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <iomanip>
 #include <limits>
 #include <sstream>
@@ -181,6 +182,15 @@ inline std::ostream& operator<<(std::ostream& os, const FLATModifiers& flatMod) 
         else if (flatMod.hasSC0Modifier)
             os << " sc1";
     }
+    // gfx12+ FLAT ops use scope:/th: in place of glc/slc/sc0/sc1; the rocisa
+    // emitter writes these for cross-CU sync (e.g. flat_atomic_dec_u32 for
+    // MBSK GSU), and dropping them on re-emit silently breaks coherence.
+    if (flatMod.scope != MUBUFScope::SCOPE_NONE) {
+        os << " scope:" << toString(flatMod.scope);
+    }
+    if (hasTemporalHint(flatMod.th)) {
+        os << " th:" << toString(flatMod.th);
+    }
     if (flatMod.lds) {
         os << " lds";
     }
@@ -206,7 +216,11 @@ inline std::ostream& operator<<(std::ostream& os, const MUBUFModifiers& mubufMod
     if (mubufMod.scope != MUBUFScope::SCOPE_NONE) {
         os << " scope:" << toString(mubufMod.scope);
     }
-    if (mubufMod.nt) {
+    // Match rocisa MUBUFModifiers::toString(): gfx1250+ temporal hints replace the
+    // legacy nt token when both are present in the modifier bag.
+    if (hasTemporalHint(mubufMod.th)) {
+        os << " th:" << toString(mubufMod.th, mubufMod.isStore);
+    } else if (mubufMod.nt) {
         os << " nt";
     }
     if (mubufMod.lds) {
@@ -736,6 +750,15 @@ static bool emitCustomOperands(std::ostream& os, const StinkyInstruction& inst) 
     }
 }
 
+// SMEM atomics signal return via glc, not th:, so they are excluded.
+static bool needThAtomicReturn(const StinkyInstruction& inst) {
+    if (!isFLATAtomic(inst) && !isMUBUFAtomic(inst)) return false;
+    for (const auto& d : inst.getDestRegs()) {
+        if (!isPseudoReg(d) && !isImplicitDest(d, inst)) return true;
+    }
+    return false;
+}
+
 static void emitTrailingModifiers(std::ostream& os, const StinkyInstruction& inst) {
 #define EMIT_TRAILING_MODIFIER(TYPE_ENUM, CLASS_PREFIX)                \
     case Modifier::Type::TYPE_ENUM:                                    \
@@ -759,6 +782,10 @@ static void emitTrailingModifiers(std::ostream& os, const StinkyInstruction& ins
         }
     }
 #undef EMIT_TRAILING_MODIFIER
+
+    if (needThAtomicReturn(inst)) {
+        os << " th:TH_ATOMIC_RETURN";
+    }
 }
 
 static void emitCycleComment(std::ostream& os, const StinkyInstruction& inst, int currentColumn,
