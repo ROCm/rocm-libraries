@@ -40,7 +40,32 @@ TEST_CASE("Origami: compute_perf_gflops", "[origami]") {
       auto hardware_slow = make_hardware(gpu_arch);
       auto hardware_fast = make_hardware(gpu_arch);
 
-      if (gpu_arch == 942) {
+      if (gpu_arch == 90) {
+        const std::string gpu_arch_str = "gfx" + std::to_string(gpu_arch) + "a";
+        auto gpu_arch_enum             = origami::hardware_t::arch_name_to_enum(gpu_arch_str);
+        hardware_slow                  = origami::hardware_t(gpu_arch_enum,
+                                            110,
+                                            65536,
+                                            1,
+                                            1.0,
+                                            1.0,
+                                            1.0,
+                                            8000000,
+                                            1.4,
+                                            4,
+                                            std::make_tuple(0, 0.03, 0));
+        hardware_fast                  = origami::hardware_t(gpu_arch_enum,
+                                            110,
+                                            65536,
+                                            1,
+                                            1.0,
+                                            1.0,
+                                            1.0,
+                                            8000000,
+                                            1.8,
+                                            4,
+                                            std::make_tuple(0, 0.03, 0));
+      } else if (gpu_arch == 942) {
         const std::string gpu_arch_str = "gfx" + std::to_string(gpu_arch);
         auto gpu_arch_enum             = origami::hardware_t::arch_name_to_enum(gpu_arch_str);
         hardware_slow                  = origami::hardware_t(gpu_arch_enum,
@@ -111,10 +136,12 @@ TEST_CASE("Origami: compute_perf_gflops", "[origami]") {
 TEST_CASE("Origami: hardware_arch_enum", "[origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " architecture enum") {
-      std::string arch_str = "gfx" + std::to_string(gpu_arch);
+      std::string arch_str = (gpu_arch == 90) ? "gfx90a" : "gfx" + std::to_string(gpu_arch);
       auto arch_enum       = origami::hardware_t::arch_name_to_enum(arch_str);
 
-      if (gpu_arch == 942) {
+      if (gpu_arch == 90) {
+        REQUIRE(arch_enum == origami::hardware_t::architecture_t::gfx90a);
+      } else if (gpu_arch == 942) {
         REQUIRE(arch_enum == origami::hardware_t::architecture_t::gfx942);
       } else if (gpu_arch == 950) {
         REQUIRE(arch_enum == origami::hardware_t::architecture_t::gfx950);
@@ -128,8 +155,11 @@ TEST_CASE("Origami: has_MALL", "[origami]") {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - MALL support check") {
       auto hardware = make_hardware(gpu_arch);
 
-      // gfx942 and gfx950 have MALL support
-      if (gpu_arch == 942 || gpu_arch == 950) { REQUIRE(hardware.has_MALL() == true); }
+      if (gpu_arch == 90) {
+        REQUIRE(hardware.has_MALL() == false);
+      } else if (gpu_arch == 942 || gpu_arch == 950) {
+        REQUIRE(hardware.has_MALL() == true);
+      }
     }
   }
 }
@@ -398,7 +428,7 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
 
       // Test 2: Test with all invalid configs (LDS capacity exceeded)
       std::vector<origami::config_t> invalid_configs;
-      if (gpu_arch == 942) {
+      if (gpu_arch == 90 || gpu_arch == 942) {
         invalid_configs.push_back(make_config(256, 256, 128, 32, 32, 8, false, 1, 6, 0, 0));
         invalid_configs.push_back(make_config(128, 128, 256, 32, 32, 8, false, 1, 6, 0, 0));
         invalid_configs.push_back(make_config(64, 64, 512, 32, 32, 8, false, 1, 6, 0, 0));
@@ -512,12 +542,15 @@ TEST_CASE("Origami: select_config_mnk unit test", "[origami]") {
       REQUIRE(result_config.config.mt.m == config[1].mt.m);
 
       result_config = origami::select_config_mnk(4500, 8499, 4500, hardware, config);  // N > M,K
-      REQUIRE(result_config.config.mt.m == config[0].mt.m);
+      if (gpu_arch == 90)
+        REQUIRE(result_config.config.mt.m == config[1].mt.m);
+      else
+        REQUIRE(result_config.config.mt.m == config[0].mt.m);
 
       result_config = origami::select_config_mnk(3941, 4500, 8499, hardware, config);  // K > M,N
       if (gpu_arch == 942)
         REQUIRE(result_config.config.mt.m == config[0].mt.m);
-      else if (gpu_arch == 950)
+      else if (gpu_arch == 90 || gpu_arch == 950)
         REQUIRE(result_config.config.mt.m == config[1].mt.m);
 
       result_config = origami::select_config_mnk(201, 201, 201, hardware, config);  // M = N = K
@@ -548,6 +581,7 @@ TEST_CASE("Origami: select_config_mnk unit test", "[origami]") {
 
 TEST_CASE("Origami: simulation mode basic", "[origami][formocast]") {
   for (int gpu_arch : test_architectures) {
+    if (gpu_arch == 90) continue;  // Formocast simulator does not support gfx90a
     DYNAMIC_SECTION("gfx" << gpu_arch << " - Formocast returns positive latency") {
       auto hardware = make_hardware(gpu_arch);
       auto problem = make_problem(2048, 2048, 2048);
@@ -576,6 +610,7 @@ TEST_CASE("Origami: simulation mode basic", "[origami][formocast]") {
 
 TEST_CASE("Origami: simulation mode via compute_total_latency", "[origami][formocast]") {
   for (int gpu_arch : test_architectures) {
+    if (gpu_arch == 90) continue;  // Formocast simulator does not support gfx90a
     DYNAMIC_SECTION("gfx" << gpu_arch << " - compute_total_latency uses Formocast in simulation mode") {
       auto hardware = make_hardware(gpu_arch);
       auto problem = make_problem(2048, 2048, 2048);
@@ -614,6 +649,7 @@ TEST_CASE("Origami: simulation mode via compute_total_latency", "[origami][formo
 
 TEST_CASE("Origami: Formocast with various problem sizes", "[origami][formocast]") {
   for (int gpu_arch : test_architectures) {
+    if (gpu_arch == 90) continue;  // Formocast simulator does not support gfx90a
     DYNAMIC_SECTION("gfx" << gpu_arch << " - Formocast handles various problem sizes") {
       auto hardware = make_hardware(gpu_arch);
       
@@ -650,6 +686,7 @@ TEST_CASE("Origami: Formocast with various problem sizes", "[origami][formocast]
 
 TEST_CASE("Origami: Formocast with different tile sizes", "[origami][formocast]") {
   for (int gpu_arch : test_architectures) {
+    if (gpu_arch == 90) continue;  // Formocast simulator does not support gfx90a
     DYNAMIC_SECTION("gfx" << gpu_arch << " - Formocast handles different tile sizes") {
       auto hardware = make_hardware(gpu_arch);
       auto problem = make_problem(4096, 4096, 4096);
@@ -831,7 +868,11 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       config.cache_hints_b = 3;
       auto out_wgm_1 =
           origami::select_workgroup_mapping(problem, hardware, config, skGrid);  // nta > 3, ntb < 4
-      REQUIRE(out_wgm_1.wgmxccchunk == chunk_size);
+      if (hardware.NUM_XCD > 1) {
+        REQUIRE(out_wgm_1.wgmxccchunk == chunk_size);
+      } else {
+        REQUIRE(out_wgm_1.wgmxccchunk == 0);
+      }
       REQUIRE(out_wgm_1.wgmxcc == default_wgmxcc);
       REQUIRE(out_wgm_1.wgm == numMT_N);
 
@@ -839,7 +880,11 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       config.cache_hints_b = 4;
       auto out_wgm_2 =
           origami::select_workgroup_mapping(problem, hardware, config, skGrid);  // nta < 4, ntb > 3
-      REQUIRE(out_wgm_2.wgmxccchunk == chunk_size);
+      if (hardware.NUM_XCD > 1) {
+        REQUIRE(out_wgm_2.wgmxccchunk == chunk_size);
+      } else {
+        REQUIRE(out_wgm_2.wgmxccchunk == 0);
+      }
       REQUIRE(out_wgm_2.wgmxcc == default_wgmxcc);
       REQUIRE(out_wgm_2.wgm == -numMT_M);
 
@@ -870,15 +915,24 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       auto out_wgm_problem_small =
           origami::select_workgroup_mapping(problem_small, hardware, config, skGrid_small);
       REQUIRE(out_wgm_problem_small.wgmxccchunk == default_wgmxccchunk);
-      REQUIRE(out_wgm_problem_small.wgmxcc == default_wgmxcc);
-      REQUIRE(out_wgm_problem_small.wgm == 1);
+      if (hardware.NUM_XCD > 1) {
+        REQUIRE(out_wgm_problem_small.wgmxcc == default_wgmxcc);
+        REQUIRE(out_wgm_problem_small.wgm == 1);
+      } else {
+        REQUIRE(out_wgm_problem_small.wgmxcc == 0);
+        REQUIRE(out_wgm_problem_small.wgm >= 1);
+      }
 
       // Test 4: Test cases where splitFactor is multiple of NUM_XCD
       auto out_wgm_split_multiple_num_xcd =
           origami::select_workgroup_mapping(problem, hardware, config, 2048);
       REQUIRE(out_wgm_split_multiple_num_xcd.wgmxccchunk == default_wgmxccchunk);
       REQUIRE(out_wgm_split_multiple_num_xcd.wgmxcc == 0);
-      REQUIRE(out_wgm_split_multiple_num_xcd.wgm == 1);
+      if (hardware.NUM_XCD > 1) {
+        REQUIRE(out_wgm_split_multiple_num_xcd.wgm == 1);
+      } else {
+        REQUIRE(out_wgm_split_multiple_num_xcd.wgm >= 1);
+      }
 
       // Test 5: Test cases tall cases (M >> N) with numMT_N <= 8
       auto problem_tall = make_problem(409600, 256, 256);
@@ -886,7 +940,11 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       auto out_wgm_tall =
           origami::select_workgroup_mapping(problem_tall, hardware, config, skGrid_tall);
       REQUIRE(out_wgm_tall.wgmxccchunk == default_wgmxccchunk);
-      REQUIRE(out_wgm_tall.wgmxcc == 8);
+      if (hardware.NUM_XCD > 1) {
+        REQUIRE(out_wgm_tall.wgmxcc == 8);
+      } else {
+        REQUIRE(out_wgm_tall.wgmxcc == 0);
+      }
       REQUIRE(out_wgm_tall.wgm == 1);
 
       // Test 6: Test MallIsImportant cases
@@ -894,17 +952,27 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       auto out_wgm_mall_is_important =
           origami::select_workgroup_mapping(problem_mall_is_important, hardware, config, 900);
       REQUIRE(out_wgm_mall_is_important.wgmxccchunk == default_wgmxccchunk);
-      REQUIRE(out_wgm_mall_is_important.wgmxcc == default_wgmxcc);
-      REQUIRE(out_wgm_mall_is_important.wgm == 5);
+      if (hardware.NUM_XCD > 1) {
+        REQUIRE(out_wgm_mall_is_important.wgmxcc == default_wgmxcc);
+        REQUIRE(out_wgm_mall_is_important.wgm == 5);
+      } else {
+        REQUIRE(out_wgm_mall_is_important.wgmxcc == 0);
+        REQUIRE(out_wgm_mall_is_important.wgm >= 1);
+      }
 
       // Test 7: Test WGM prediction with various wgmList values
       auto out_wgm = origami::select_workgroup_mapping(problem, hardware, config, skGrid);
       REQUIRE(out_wgm.wgmxccchunk == default_wgmxccchunk);
-      REQUIRE(out_wgm.wgmxcc == default_wgmxcc);
-      if (gpu_arch == 942)
-        REQUIRE(out_wgm.wgm == 3);
-      else if (gpu_arch == 950)
-        REQUIRE(out_wgm.wgm == 4);
+      if (hardware.NUM_XCD > 1) {
+        REQUIRE(out_wgm.wgmxcc == default_wgmxcc);
+        if (gpu_arch == 942)
+          REQUIRE(out_wgm.wgm == 3);
+        else if (gpu_arch == 950)
+          REQUIRE(out_wgm.wgm == 4);
+      } else {
+        REQUIRE(out_wgm.wgmxcc == 0);
+        REQUIRE(out_wgm.wgm >= 1);
+      }
     }
   }
 }

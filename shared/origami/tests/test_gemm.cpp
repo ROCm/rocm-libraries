@@ -62,7 +62,10 @@ TEST_CASE("GEMM: compute_mt_compute_latency", "[gemm]") {
       auto config = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
       auto latency = origami::compute_mt_compute_latency(problem, hardware, config);
-      REQUIRE(latency == 4096);
+      if (gpu_arch == 90)
+        REQUIRE(latency == 1024);
+      else
+        REQUIRE(latency == 4096);
     }
 
     DYNAMIC_SECTION("gfx" << gpu_arch << " - transA=N transB=T") {
@@ -72,7 +75,10 @@ TEST_CASE("GEMM: compute_mt_compute_latency", "[gemm]") {
       auto config = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
       auto latency = origami::compute_mt_compute_latency(problem, hardware, config);
-      REQUIRE(latency == 4096);
+      if (gpu_arch == 90)
+        REQUIRE(latency == 1024);
+      else
+        REQUIRE(latency == 4096);
     }
 
     DYNAMIC_SECTION("gfx" << gpu_arch << " - transA=N transB=N") {
@@ -82,7 +88,10 @@ TEST_CASE("GEMM: compute_mt_compute_latency", "[gemm]") {
       auto config = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
       auto latency = origami::compute_mt_compute_latency(problem, hardware, config);
-      REQUIRE(latency == 4096);
+      if (gpu_arch == 90)
+        REQUIRE(latency == 1024);
+      else
+        REQUIRE(latency == 4096);
     }
 
     DYNAMIC_SECTION("gfx" << gpu_arch << " - transA=T transB=T") {
@@ -92,7 +101,10 @@ TEST_CASE("GEMM: compute_mt_compute_latency", "[gemm]") {
       auto config = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
       auto latency = origami::compute_mt_compute_latency(problem, hardware, config);
-      REQUIRE(latency == 4096);
+      if (gpu_arch == 90)
+        REQUIRE(latency == 1024);
+      else
+        REQUIRE(latency == 4096);
     }
 
     DYNAMIC_SECTION("gfx" << gpu_arch << " - different MT_K") {
@@ -101,7 +113,10 @@ TEST_CASE("GEMM: compute_mt_compute_latency", "[gemm]") {
       auto config   = make_config(128, 128, 32, 32, 32, 8, false, 1);
 
       auto latency = origami::compute_mt_compute_latency(problem, hardware, config);
-      REQUIRE(latency == 2048);
+      if (gpu_arch == 90)
+        REQUIRE(latency == 512);
+      else
+        REQUIRE(latency == 2048);
     }
 
     DYNAMIC_SECTION("gfx" << gpu_arch << " - larger tile") {
@@ -110,7 +125,10 @@ TEST_CASE("GEMM: compute_mt_compute_latency", "[gemm]") {
       auto config   = make_config(224, 224, 64, 32, 32, 8, false, 1);
 
       auto latency = origami::compute_mt_compute_latency(problem, hardware, config);
-      REQUIRE(latency > 12543);
+      if (gpu_arch == 90)
+        REQUIRE(latency > 3135);
+      else
+        REQUIRE(latency > 12543);
     }
   }
 }
@@ -648,7 +666,10 @@ TEST_CASE("GEMM: compute_mem_bw_from_occupancy unit test", "[gemm]") {
       hardware.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.008, 0);
       auto result_different_mem_bw_per_wg_coefficients =
           origami::compute_mem_bw_from_occupancy(hardware, hardware.N_CU);
-      REQUIRE(result_different_mem_bw_per_wg_coefficients == 1.0);
+      if (gpu_arch == 90)
+        REQUIRE(result_different_mem_bw_per_wg_coefficients == Approx(0.88).epsilon(1e-3));
+      else
+        REQUIRE(result_different_mem_bw_per_wg_coefficients == 1.0);
 
       hardware.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.17, 0);
       result_different_mem_bw_per_wg_coefficients =
@@ -664,20 +685,26 @@ TEST_CASE("GEMM: compute_mem_bw_from_occupancy unit test", "[gemm]") {
       hardware.mem_bw_per_wg_coefficients = std::make_tuple(0.000001, 0.001, 0);
       auto result_value_less_than_one =
           origami::compute_mem_bw_from_occupancy(hardware, hardware.N_CU);
-      if (gpu_arch == 942)
+      if (gpu_arch == 90)
+        REQUIRE(result_value_less_than_one == Approx(0.12211).epsilon(1e-3));
+      else if (gpu_arch == 942)
         REQUIRE(result_value_less_than_one == Approx(0.3964).epsilon(1e-3));
       else if (gpu_arch == 950)
         REQUIRE(result_value_less_than_one == Approx(0.32153).epsilon(1e-3));
 
       hardware.mem_bw_per_wg_coefficients = std::make_tuple(0.000002, 0.002, 0);
       result_value_less_than_one = origami::compute_mem_bw_from_occupancy(hardware, hardware.N_CU);
-      if (gpu_arch == 942)
+      if (gpu_arch == 90)
+        REQUIRE(result_value_less_than_one == Approx(0.24422).epsilon(1e-3));
+      else if (gpu_arch == 942)
         REQUIRE(result_value_less_than_one == Approx(0.7928).epsilon(1e-3));
       else if (gpu_arch == 950)
         REQUIRE(result_value_less_than_one == Approx(0.64307).epsilon(1e-3));
 
       // Reset the value of mem_bw_per_wg_coefficients back
-      if (gpu_arch == 942)
+      if (gpu_arch == 90)
+        hardware.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.03, 0);
+      else if (gpu_arch == 942)
         hardware.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.015, 0);
       else if (gpu_arch == 950)
         hardware.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.008, 0);
@@ -983,7 +1010,10 @@ TEST_CASE("GEMM: estimate_l2_hit and  estimate_mall_hit unit test", "[gemm]") {
       REQUIRE(result_different_splitting_factors == 0.0);
 
       result_different_splitting_factors = origami::estimate_l2_hit(problem, hardware, config, 1);
-      REQUIRE(result_different_splitting_factors == 0.4375);
+      if (gpu_arch == 90)
+        REQUIRE(result_different_splitting_factors == 0.875);
+      else
+        REQUIRE(result_different_splitting_factors == 0.4375);
 
       result_different_splitting_factors = origami::estimate_l2_hit(problem, hardware, config, -1);
       REQUIRE(result_different_splitting_factors == 0.0);
@@ -1054,7 +1084,10 @@ TEST_CASE("GEMM: estimate_l2_hit and  estimate_mall_hit unit test", "[gemm]") {
 
       problem           = make_problem(81930, 40930, 10240);
       result_edge_cases = origami::estimate_mall_hit(problem, hardware, config, hardware.N_CU, 1);
-      REQUIRE(result_edge_cases == Approx(0.498).epsilon(1e-3));
+      if (gpu_arch == 90)
+        REQUIRE(result_edge_cases == Approx(0.4955).epsilon(1e-3));
+      else
+        REQUIRE(result_edge_cases == Approx(0.498).epsilon(1e-3));
     }
   }
 }

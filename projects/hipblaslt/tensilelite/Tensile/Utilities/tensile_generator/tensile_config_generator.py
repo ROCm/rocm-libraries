@@ -82,6 +82,10 @@ parser.add_argument(
     "--num_stages", type=int, default=8,
     help="How many times to divide matrix")
 
+parser.add_argument(
+    "--streamk", action="store_true", default=False,
+    help="If enabled, generate StreamK (two-tile DP-first) configs instead of GSU-based data-parallel configs")
+
 args = parser.parse_args()
 
 NUM_WARM_UP = 20
@@ -413,7 +417,7 @@ def calculate_gsu(matmul_instruction, size):
     mt1 = matmul_instruction[1] * matmul_instruction[6] * matmul_instruction[8]
     return max(1, CU // (math.ceil(size[0] / mt0) * math.ceil(size[1] / mt1)))
 
-def dump_yaml(gpu_idx, gemm_group, yaml_file, m_sum, n_sum, batch_sum, k_sum, samples_num, iters, groups, gsu_group, matmul_instructions):
+def dump_yaml(gpu_idx, gemm_group, yaml_file, m_sum, n_sum, batch_sum, k_sum, samples_num, iters, groups, gsu_group, matmul_instructions, use_streamk=False):
     MinFlopsPerSync = calculate_min_flops(m_sum, n_sum, batch_sum, k_sum, samples_num, iters)
     # Read the YAML file
     with open(yaml_file, 'r') as f:
@@ -472,13 +476,24 @@ def dump_yaml(gpu_idx, gemm_group, yaml_file, m_sum, n_sum, batch_sum, k_sum, sa
             if ("Groups" in item) and group_params[0]:
                 item["Groups"] = group_params
             elif "MatrixInstruction" in item:
-                item["MatrixInstruction"] = [list(v) for v in matmul_instructions[dtype_str].values()]
-            if "WorkGroupMappingXCCGroup" in item:
-                item["WorkGroupMappingXCCGroup"] = [CU]
-            if "WorkGroupMappingXCC" in item:
-                item["WorkGroupMappingXCC"] = [XCC]
-            if "GlobalSplitU" in item:
-                item["GlobalSplitU"] = list(gsu_group[dtype_str])
+                if use_streamk:
+                    pass
+                else:
+                    item["MatrixInstruction"] = [list(v) for v in matmul_instructions[dtype_str].values()]
+            if use_streamk:
+                if "StreamKXCCMapping" in item:
+                    item["StreamKXCCMapping"] = [0] if XCC == 1 else [XCC]
+                if "WorkGroupMappingXCC" in item:
+                    item["WorkGroupMappingXCC"] = [-1]
+                if "WorkGroupMappingXCCGroup" in item:
+                    item["WorkGroupMappingXCCGroup"] = [CU]
+            else:
+                if "WorkGroupMappingXCCGroup" in item:
+                    item["WorkGroupMappingXCCGroup"] = [CU]
+                if "WorkGroupMappingXCC" in item:
+                    item["WorkGroupMappingXCC"] = [XCC]
+                if "GlobalSplitU" in item:
+                    item["GlobalSplitU"] = list(gsu_group[dtype_str])
         data["BenchmarkProblems"][i][0] = dtype
     data["LibraryLogic"]["DeviceNames"] = DeviceNames
     data["LibraryLogic"]["ScheduleName"] = ScheduleName
@@ -492,6 +507,9 @@ def dump_yaml(gpu_idx, gemm_group, yaml_file, m_sum, n_sum, batch_sum, k_sum, sa
         yaml.dump(data, f, default_flow_style=None)
     print(f"Dumped yaml to {fname}")
 
+
+if not args.hipblaslt_log and not args.gridbase_config:
+    raise RuntimeError("Must specify either --hipblaslt_log or --gridbase_config to provide problem sizes.")
 
 if args.hipblaslt_log and args.gridbase_config is None:
     LibraryType = "Equality"
@@ -615,7 +633,12 @@ if args.hipblaslt_log and args.gridbase_config is None:
                 batch_sum += original_size[2]
                 k_sum += original_size[3]
         samples_num = len(unique_gemms_subgroup)
-        return dump_yaml(gpu_idx, gemm_group, args.tensile_config, m_sum, n_sum, batch_sum, k_sum, samples_num, args.iters, groups, gsu_group, matmul_instructions)
+        template = args.tensile_config
+        if args.streamk:
+            sk_template = os.path.join(os.path.dirname(os.path.abspath(args.tensile_config)), "streamk_tuning_template.yaml")
+            if os.path.exists(sk_template):
+                template = sk_template
+        return dump_yaml(gpu_idx, gemm_group, template, m_sum, n_sum, batch_sum, k_sum, samples_num, args.iters, groups, gsu_group, matmul_instructions, use_streamk=args.streamk)
 
 
 elif args.gridbase_config and args.hipblaslt_log is None:
@@ -637,7 +660,9 @@ elif args.gridbase_config and args.hipblaslt_log is None:
             TransposeB = trans_map(data['TransposeB'])
             HighPrecisionAccumulate = get_high_precision_accumulate(DataType)
             ComputeDataType, F32XdlMathOp = adapt_xf32(ComputeDataType)
-            dtype = {"Batched": True, "DataType": DataType, "DestDataType": DestDataType, "ComputeDataType": ComputeDataType, "TransposeA": TransposeA, "TransposeB": TransposeB, "HighPrecisionAccumulate": HighPrecisionAccumulate, "F32XdlMathOp": F32XdlMathOp, "OperationType": "GEMM", "UseBeta": True, "UseBias": 1, "Activation": True, "ActivationType": "hipblaslt_all", "UseScaleAlphaVec": 1}
+            dtype = {"Batched": True, "DataType": DataType, "DestDataType": DestDataType, "ComputeDataType": ComputeDataType, "TransposeA": TransposeA, "TransposeB": TransposeB, "HighPrecisionAccumulate": HighPrecisionAccumulate, "F32XdlMathOp": F32XdlMathOp, "OperationType": "GEMM", "UseBeta": True}
+            if not args.streamk:
+                dtype.update({"UseBias": 1, "Activation": True, "ActivationType": "hipblaslt_all", "UseScaleAlphaVec": 1})
             dtype_str = json.dumps(dtype)
             for m in m_shapes:
                 for n in n_shapes:
@@ -702,7 +727,12 @@ elif args.gridbase_config and args.hipblaslt_log is None:
                 batch_sum += original_size[2]
                 k_sum += original_size[3]
         samples_num = len(unique_gemms_subgroup)
-        return dump_yaml(gpu_idx, gemm_group, args.tensile_config, m_sum, n_sum, batch_sum, k_sum, samples_num, args.iters, {}, gsu_group, matmul_instructions)
+        template = args.tensile_config
+        if args.streamk:
+            sk_template = os.path.join(os.path.dirname(os.path.abspath(args.tensile_config)), "streamk_tuning_template.yaml")
+            if os.path.exists(sk_template):
+                template = sk_template
+        return dump_yaml(gpu_idx, gemm_group, template, m_sum, n_sum, batch_sum, k_sum, samples_num, args.iters, {}, gsu_group, matmul_instructions, use_streamk=args.streamk)
 
 with concurrent.futures.ProcessPoolExecutor(args.gpus) as executor:
     results = executor.map(_process_gemms, list(enumerate(unique_gemms_subgroups)))

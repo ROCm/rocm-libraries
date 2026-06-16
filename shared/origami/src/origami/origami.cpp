@@ -173,9 +173,10 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   auto out_wgm = defaultWGM;
 
   // shortcut:
-  // 1. if we have decided to not remap xcc, there is no reason to use wgm
+  // 1. On multi-XCD: if we decided not to remap xcc, wgm won't help (tiles scattered across L2s)
+  //    On single-XCD: there's one shared L2, so wgm still helps with L2 reuse
   // 2. GEMMs that only have one tile in one dimension don't need wgm
-  if (out_wgmxcc == 0 || numMT_M == 1 || numMT_N == 1) out_wgm = 1;
+  if ((out_wgmxcc == 0 && numXCD > 1) || numMT_M == 1 || numMT_N == 1) out_wgm = 1;
   // For tall cases (M >> N), if we have enough tiles to schedule, we use the number of tiles
   // in the smaller dimension as WGM value
   else if (numMTs >= numCUs && numMT_N <= 8)

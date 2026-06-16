@@ -61,9 +61,9 @@ option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support." OFF)
 option(HIPBLASLT_ENABLE_THEROCK "Build hipBLASLt for TheRock." OFF)
 
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
-option(TENSILELITE_BUILD_TESTING "Build client when building tests" OFF)
+option(TENSILELITE_BUILD_TESTING "Build client when building tests" ON)
 option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${TENSILELITE_BUILD_TESTING})
-option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile python scripts" OFF)
+option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile python scripts" ON)
 
 if(HIPBLASLT_ENABLE_CLIENT)
     option(HIPBLASLT_BUILD_TESTING "Build hipblaslt client tests." ON)

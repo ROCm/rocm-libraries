@@ -148,7 +148,7 @@ class hardware_t {
   static constexpr architecture_constants get_arch_constants(architecture_t arch) {
     switch (arch) {
       case architecture_t::gfx90a:
-        return {1, 5.5, 1.21875121875121875122 * 1.2, 1.2, 4, std::make_tuple(0, 0.03, 0), 1.5};
+        return {1, 5.5, NO_MALL_AVAILABLE, 1.2, 4, std::make_tuple(0, 0.03, 0), 1.5};
       case architecture_t::gfx942:
         return {8, 17, 1.21875121875121875122 * 6, 4, 4, std::make_tuple(0, 0.015, 0), 1.5};
       case architecture_t::gfx950:

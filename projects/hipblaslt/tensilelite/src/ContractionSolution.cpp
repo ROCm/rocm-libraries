@@ -974,52 +974,75 @@ namespace TensileLite
         uint32_t defaultWGMXCC      = 1;
         uint32_t defaultWGMXCCCHUNK = 0;
 
-        // Dynamically pick the values
-        if(sizeMapping.streamK != 0 && skgrid != 0 && sizeMapping.workGroupMapping == 0
-           && sizeMapping.workGroupMappingXCC == -1)
-        {
-            auto sizes = problem.problemSizes();
-            // Try to find cached WGM and WGMXCC and WGMXCCCHUNK
-            auto cachedWGMParams = wgmParamsCache.find(problem);
+        // Use Origami analytical model for WGM prediction when the solution opts in
+        // to dynamic WGM (workGroupMapping == 0, workGroupMappingXCC == -1).
+        // This works for both StreamK and non-StreamK (data-parallel) solutions.
+        bool useOrigamiWGM = hipAMDGPU && hipAMDGPU->analyticalHardware
+                             && sizeMapping.workGroupMapping == 0
+                             && sizeMapping.workGroupMappingXCC == -1;
 
-            if(cachedWGMParams == std::make_tuple(INT32_MAX, SIZE_MAX, SIZE_MAX))
+        if(useOrigamiWGM)
+        {
+            // For non-StreamK solutions, compute the data-parallel grid (number of output tiles)
+            uint32_t effectiveSkGrid = skgrid;
+            if(sizeMapping.streamK == 0 || effectiveSkGrid == 0)
             {
+                auto sizes = problem.problemSizes();
                 if(sizes.size() >= 4)
                 {
-                    origami::problem_t origami_problem = {
-                        .size  = {sizes[0], sizes[1], sizes[3]},
-                        .batch = sizes[2],
-                    };
-                    origami::config_t origami_config = {
-                        .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
-                                          static_cast<size_t>(sizeMapping.macroTile.y),
-                                          static_cast<size_t>(sizeMapping.depthU)},
-                        .cache_hints_a = sizeMapping.nonTemporalA,
-                        .cache_hints_b = sizeMapping.nonTemporalB,
-                    };
-
-                    origami::workgroup_mapping_t prediction_results
-                        = origami::select_workgroup_mapping(origami_problem,
-                                                            *(hipAMDGPU->analyticalHardware),
-                                                            origami_config,
-                                                            skgrid);
-
-                    defaultWGM         = prediction_results.wgm;
-                    defaultWGMXCC      = prediction_results.wgmxcc;
-                    defaultWGMXCCCHUNK = prediction_results.wgmxccchunk;
-
-                    // Add to cache only if dynamically calculated.
-                    wgmParamsCache.add(
-                        std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK), problem);
-                    if(Debug::Instance().printPropertyEvaluation())
-                        std::cout << "AutoWGM - WGM: " << defaultWGM
-                                  << ", WGMXCC: " << defaultWGMXCC
-                                  << ", WGMXCCCHUNK: " << defaultWGMXCCCHUNK << std::endl;
+                    effectiveSkGrid = origami::streamk::compute_number_of_output_tiles(
+                        sizeMapping.macroTile.x,
+                        sizeMapping.macroTile.y,
+                        sizes[0],
+                        sizes[1],
+                        sizes[2]);
                 }
             }
-            else
+
+            if(effectiveSkGrid != 0)
             {
-                std::tie(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK) = cachedWGMParams;
+                auto sizes = problem.problemSizes();
+                auto cachedWGMParams = wgmParamsCache.find(problem);
+
+                if(cachedWGMParams == std::make_tuple(INT32_MAX, SIZE_MAX, SIZE_MAX))
+                {
+                    if(sizes.size() >= 4)
+                    {
+                        origami::problem_t origami_problem = {
+                            .size  = {sizes[0], sizes[1], sizes[3]},
+                            .batch = sizes[2],
+                        };
+                        origami::config_t origami_config = {
+                            .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
+                                              static_cast<size_t>(sizeMapping.macroTile.y),
+                                              static_cast<size_t>(sizeMapping.depthU)},
+                            .cache_hints_a = sizeMapping.nonTemporalA,
+                            .cache_hints_b = sizeMapping.nonTemporalB,
+                        };
+
+                        origami::workgroup_mapping_t prediction_results
+                            = origami::select_workgroup_mapping(origami_problem,
+                                                                *(hipAMDGPU->analyticalHardware),
+                                                                origami_config,
+                                                                effectiveSkGrid);
+
+                        defaultWGM         = prediction_results.wgm;
+                        defaultWGMXCC      = prediction_results.wgmxcc;
+                        defaultWGMXCCCHUNK = prediction_results.wgmxccchunk;
+
+                        wgmParamsCache.add(
+                            std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK),
+                            problem);
+                        if(Debug::Instance().printPropertyEvaluation())
+                            std::cout << "AutoWGM - WGM: " << defaultWGM
+                                      << ", WGMXCC: " << defaultWGMXCC
+                                      << ", WGMXCCCHUNK: " << defaultWGMXCCCHUNK << std::endl;
+                    }
+                }
+                else
+                {
+                    std::tie(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK) = cachedWGMParams;
+                }
             }
         }
         else
@@ -1081,59 +1104,81 @@ namespace TensileLite
         size_t defaultStaggerU            = 0;
         size_t defaultStaggerUStrideShift = 0;
 
-        // Dynamically pick the values
-        if(sizeMapping.streamK != 0 && skgrid != 0 && sizeMapping.workGroupMapping == 0
-           && sizeMapping.workGroupMappingXCC == -1)
-        {
-            auto sizes = problem.problemSizes();
-            // Try to find cached StaggerUMapping, StaggerU and StaggerUStrideShift
-            auto cachedStaggerUParams = staggerUParamsCache.find(problem);
+        // Use Origami analytical model for StaggerU prediction when the solution opts in
+        // to dynamic WGM (workGroupMapping == 0, workGroupMappingXCC == -1).
+        // This works for both StreamK and non-StreamK (data-parallel) solutions.
+        bool useOrigamiStaggerU = hipAMDGPU && hipAMDGPU->analyticalHardware
+                                  && sizeMapping.workGroupMapping == 0
+                                  && sizeMapping.workGroupMappingXCC == -1;
 
-            if(cachedStaggerUParams == std::make_tuple(SIZE_MAX, SIZE_MAX, SIZE_MAX))
+        if(useOrigamiStaggerU)
+        {
+            // For non-StreamK solutions, compute the data-parallel grid (number of output tiles)
+            uint32_t effectiveSkGrid = skgrid;
+            if(sizeMapping.streamK == 0 || effectiveSkGrid == 0)
             {
+                auto sizes = problem.problemSizes();
                 if(sizes.size() >= 4)
                 {
-                    origami::problem_t origami_problem = {
-                        .size    = {sizes[0], sizes[1], sizes[3]},
-                        .batch   = sizes[2],
-                        .a_dtype = datatypeToAnalyticalDatatype(problem.a().dataType()),
-                        .b_dtype = datatypeToAnalyticalDatatype(problem.b().dataType()),
-                    };
-                    origami::config_t origami_config = {
-                        .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
-                                          static_cast<size_t>(sizeMapping.macroTile.y),
-                                          static_cast<size_t>(sizeMapping.depthU)},
-                        .cache_hints_a = sizeMapping.nonTemporalA,
-                        .cache_hints_b = sizeMapping.nonTemporalB,
-                    };
-
-                    origami::staggerU_t prediction_results
-                        = origami::select_staggerU(origami_problem,
-                                                   *(hipAMDGPU->analyticalHardware),
-                                                   origami_config,
-                                                   skgrid,
-                                                   autoWGM);
-
-                    defaultStaggerUMapping     = prediction_results.staggerUMapping;
-                    defaultStaggerU            = prediction_results.staggerU;
-                    defaultStaggerUStrideShift = prediction_results.staggerUStrideShift;
-
-                    // Add to cache only if dynamically calculated.
-                    staggerUParamsCache.add(std::make_tuple(defaultStaggerUMapping,
-                                                            defaultStaggerU,
-                                                            defaultStaggerUStrideShift),
-                                            problem);
-                    if(Debug::Instance().printPropertyEvaluation())
-                        std::cout << "AutoStaggerU - Mapping: " << defaultStaggerUMapping
-                                  << ", StaggerU: " << defaultStaggerU
-                                  << ", StaggerUStrideShift: " << defaultStaggerUStrideShift
-                                  << std::endl;
+                    effectiveSkGrid = origami::streamk::compute_number_of_output_tiles(
+                        sizeMapping.macroTile.x,
+                        sizeMapping.macroTile.y,
+                        sizes[0],
+                        sizes[1],
+                        sizes[2]);
                 }
             }
-            else
+
+            if(effectiveSkGrid != 0)
             {
-                std::tie(defaultStaggerUMapping, defaultStaggerU, defaultStaggerUStrideShift)
-                    = cachedStaggerUParams;
+                auto sizes = problem.problemSizes();
+                auto cachedStaggerUParams = staggerUParamsCache.find(problem);
+
+                if(cachedStaggerUParams == std::make_tuple(SIZE_MAX, SIZE_MAX, SIZE_MAX))
+                {
+                    if(sizes.size() >= 4)
+                    {
+                        origami::problem_t origami_problem = {
+                            .size    = {sizes[0], sizes[1], sizes[3]},
+                            .batch   = sizes[2],
+                            .a_dtype = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                            .b_dtype = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                        };
+                        origami::config_t origami_config = {
+                            .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
+                                              static_cast<size_t>(sizeMapping.macroTile.y),
+                                              static_cast<size_t>(sizeMapping.depthU)},
+                            .cache_hints_a = sizeMapping.nonTemporalA,
+                            .cache_hints_b = sizeMapping.nonTemporalB,
+                        };
+
+                        origami::staggerU_t prediction_results
+                            = origami::select_staggerU(origami_problem,
+                                                       *(hipAMDGPU->analyticalHardware),
+                                                       origami_config,
+                                                       effectiveSkGrid,
+                                                       autoWGM);
+
+                        defaultStaggerUMapping     = prediction_results.staggerUMapping;
+                        defaultStaggerU            = prediction_results.staggerU;
+                        defaultStaggerUStrideShift = prediction_results.staggerUStrideShift;
+
+                        staggerUParamsCache.add(std::make_tuple(defaultStaggerUMapping,
+                                                                defaultStaggerU,
+                                                                defaultStaggerUStrideShift),
+                                                problem);
+                        if(Debug::Instance().printPropertyEvaluation())
+                            std::cout << "AutoStaggerU - Mapping: " << defaultStaggerUMapping
+                                      << ", StaggerU: " << defaultStaggerU
+                                      << ", StaggerUStrideShift: " << defaultStaggerUStrideShift
+                                      << std::endl;
+                    }
+                }
+                else
+                {
+                    std::tie(defaultStaggerUMapping, defaultStaggerU, defaultStaggerUStrideShift)
+                        = cachedStaggerUParams;
+                }
             }
         }
         else

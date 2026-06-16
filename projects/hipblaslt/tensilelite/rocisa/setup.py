@@ -15,8 +15,8 @@ class CMakeBuild(build_ext):
             os.makedirs(self.build_temp, exist_ok=True)
             os.makedirs(self.build_lib, exist_ok=True)
             source_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), '..', '..')
-            rocm_path = os.environ.get('ROCM_PATH', '/opt/rocm')
-            compilerpath = os.path.join(rocm_path, 'bin/amdclang++')
+            rocm_path = os.environ.get('ROCM_PATH', '/opt/COE_modules/rocm/rocm-7.2.0')
+            compilerpath = os.path.join(rocm_path, 'lib/llvm/bin/amdclang++')
             cmakeargs = [
                 "cmake",
                 "--preset rocisa",

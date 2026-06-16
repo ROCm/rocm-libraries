@@ -597,7 +597,7 @@ double compute_memory_latency(const problem_t& problem,
   // Global cap on L2 hit-rate (prevents impossible cache residency claims)
   // (Assumes capacity is given in KiB, convert to bytes)
   double H_mem_l2_global =
-      compute_l2_hit_rate_global(problem, hardware, config, hardware.L2_capacity * 1024);
+      compute_l2_hit_rate_global(problem, hardware, config, hardware.L2_capacity);
 
   H_mem_l2 = std::min(H_mem_l2, H_mem_l2_global);
 
@@ -650,7 +650,9 @@ double compute_memory_latency(const problem_t& problem,
       hardware.has_MALL()
           ? (1.0 - H_mem_l2) * total_Ld
           : 0.0;  // MALL is not supported, we emulate it by saying there are zero loads to MALL
-  double Ld_mem_dram = (1.0 - H_mem_mall) * Ld_mem_mall;
+  double Ld_mem_dram = hardware.has_MALL()
+      ? (1.0 - H_mem_mall) * Ld_mem_mall
+      : (1.0 - H_mem_l2) * total_Ld;
 
   // 9) enforce whole‐problem minimum loads when we can fit M/N in the CUs.
   // Calculate the tile of workgroups that can run concurrently (logic from estimate_mall_hit).
@@ -677,7 +679,7 @@ double compute_memory_latency(const problem_t& problem,
                     concurrent_batches;  // Apply batching to the minimum load itself.
   // The actual loads cannot be less than this physical minimum.
   Ld_mem_dram = std::max(Ld_mem_dram, min_load);
-  Ld_mem_mall = std::max(Ld_mem_mall, min_load);
+  if (hardware.has_MALL()) Ld_mem_mall = std::max(Ld_mem_mall, min_load);
 
   // 10) mem_mall latency
   double limited_mem_mall_bw = (hardware.mem2_perf_ratio * bw_limited);

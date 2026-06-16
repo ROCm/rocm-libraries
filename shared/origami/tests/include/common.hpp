@@ -44,7 +44,7 @@ inline int portable_setenv(const char* name, const char* value, int overwrite) {
 }
 
 // List of GPU architectures to test
-inline const std::vector<int> test_architectures = {942, 950};
+inline const std::vector<int> test_architectures = {90, 942, 950};
 
 // Helper function to construct problem_t
 inline origami::problem_t make_problem(size_t m,
@@ -112,7 +112,18 @@ inline origami::hardware_t make_hardware(int gpu_arch) {
   size_t parallel_mi_cu                                         = 0;
   std::tuple<double, double, double> mem_bw_per_wg_coefficients = std::make_tuple(0, 0, 0);
 
-  if (gpu_arch == 942) {
+  if (gpu_arch == 90) {
+    n_cu                       = 110;
+    lds_capacity               = 65536;
+    num_xcd                    = 1;
+    mem1_perf_ratio            = 1.0;
+    mem2_perf_ratio            = 1.0;
+    mem3_perf_ratio            = 1.0;
+    l2_capacity                = 8000000;
+    compute_clock_ghz          = 1;
+    parallel_mi_cu             = 4;
+    mem_bw_per_wg_coefficients = std::make_tuple(0, 0.03, 0);
+  } else if (gpu_arch == 942) {
     n_cu                       = 304;
     lds_capacity               = 65536;
     num_xcd                    = 8;
@@ -136,7 +147,7 @@ inline origami::hardware_t make_hardware(int gpu_arch) {
     mem_bw_per_wg_coefficients = std::make_tuple(0, 0.008, 0);
   }
 
-  const std::string gpu_arch_str = "gfx" + std::to_string(gpu_arch);
+  const std::string gpu_arch_str = (gpu_arch == 90) ? "gfx90a" : "gfx" + std::to_string(gpu_arch);
   auto gpu_arch_enum             = origami::hardware_t::arch_name_to_enum(gpu_arch_str);
   return origami::hardware_t(gpu_arch_enum,
                              n_cu,
