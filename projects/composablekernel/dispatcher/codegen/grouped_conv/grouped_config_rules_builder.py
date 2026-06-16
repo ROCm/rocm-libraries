@@ -423,7 +423,8 @@ def _load_gemm_configs(data: dict, arch: str) -> List:
         # the kernel only for that datatype (an untagged config is compiled for
         # every datatype).
         config.datatype = datatype
-        configs.append(config)
+        if config.is_valid_for_arch():
+            configs.append(config)
 
     log.debug(
         f"Loaded {len(configs)} configs (variant={data['variant']}, layout={layout}, dtype={datatype})"
