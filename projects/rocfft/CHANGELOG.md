@@ -7,7 +7,7 @@ Documentation for rocFFT is available at
 
 ### Added
 
-* Support for the gfx90c architecture.
+* Support for the gfx90c compilation target.
 
 ### Optimized
 
