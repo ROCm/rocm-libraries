@@ -64,31 +64,16 @@ class GemmBQuantKernelBuilder(GemmKernelBuilder):
                         self.config_json,
                     )
                 )
-        print(
-            f"Generating {len(work_items)} individual kernel files using {num_workers} workers..."
-        )
-        print(f"  Tile configs: {len(tile_configs)}")
-        print(f"  Trait combinations: {len(trait_combos)}")
-        print(f"  Total kernels: {len(work_items)}")
-
-        if work_items:
-            print("  First work item example:")
-            tile_config, trait_combo = work_items[0][:2]
-            print(f"    Tile config: {tile_config}")
-            print(f"    Trait combo: {trait_combo[:3]}")
-
         kernel_list = []
         completed = 0
 
         with concurrent.futures.ProcessPoolExecutor(
             max_workers=num_workers
         ) as executor:
-            print(f"  Submitting {len(work_items)} tasks to executor...")
             future_to_item = {
                 executor.submit(_generate_single_kernel_individual, item): item
                 for item in work_items
             }
-            print("  All tasks submitted, waiting for completion...")
 
             for future in concurrent.futures.as_completed(future_to_item):
                 completed += 1
@@ -134,9 +119,7 @@ def _generate_single_kernel_individual(work_item):
             tile_config, trait_combo
         )
 
-        simplified_name = kernel_name
-        if simplified_name.startswith("gemm_bquant_"):
-            simplified_name = simplified_name[len(kernel_name_prefix) + 1 :]
+        simplified_name = kernel_name.removeprefix(kernel_name_prefix + "_")
 
         header_file = working_path / f"gemm_bquant_single_{simplified_name}.hpp"
         with open(header_file, "w") as f:

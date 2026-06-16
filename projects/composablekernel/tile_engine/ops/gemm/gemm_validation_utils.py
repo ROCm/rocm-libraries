@@ -528,6 +528,7 @@ def is_tile_config_valid(
     layout: str,
     gpu_target: str,
     kernel_name_prefix: str = "",
+    group_size_k: int = 128,
 ) -> bool:
     """
     Comprehensive tile configuration validation.
@@ -765,6 +766,7 @@ def is_tile_config_valid(
             pipeline,
             layout,
             gpu_target,
+            group_size_k,
         )
         if not bquant_valid:
             logging.debug(f"GEMM BQuant validation failed: {bquant_valid_error}")

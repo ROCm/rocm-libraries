@@ -426,6 +426,7 @@ class GemmKernelBuilder:
             layout,
             self.gpu_target,
             self.kernel_name_prefix,
+            self.config.get("group_size_k", 128),
         )
 
     def _generate_trait_combinations(self):
@@ -678,7 +679,10 @@ using CLayout = {c_layout};
             instance_code += """using AQLayout = ck_tile::tensor_layout::gemm::RowMajor;
 """
         elif self.kernel_name_prefix == "gemm_bquant":
-            # BQ scale tensor layout matches B matrix layout
+            # BQ scale tensor has shape [K/group_size_k, N], so its leading dimension
+            # matches B's K dimension. Setting BQLayout = BLayout is only valid when B
+            # is column-major (layout[1]=='c'); BPreshuffleQuant with row-major B is
+            # blocked in is_trait_combination_valid to enforce this.
             instance_code += """using BQLayout = BLayout;
 """
 
