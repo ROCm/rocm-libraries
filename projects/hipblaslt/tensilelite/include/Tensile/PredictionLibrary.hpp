@@ -167,14 +167,8 @@ namespace TensileLite
 
             hip::HipAMDGPU const* pAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
-            // Copy so we can override N_CU for CU-limited Stream-K launches without
-            // mutating the shared analyticalHardware instance.
+            // Rank against the capped CU count when TENSILE_STREAMK_MAX_CUS limits the grid.
             origami::hardware_t analytical_hardware = *(pAMDGPU->analyticalHardware);
-
-            // AIHPBLAS-1942: when TENSILE_STREAMK_MAX_CUS caps the Stream-K grid to fewer
-            // CUs (skMaxCUs > 0), origami must model occupancy / bandwidth / L2 behavior at
-            // that reduced CU count so its ranking matches the actual launch. skMaxCUs == 0
-            // means the env var is unset, leaving the full-CU default path unchanged.
             if(pAMDGPU->skMaxCUs > 0)
             {
                 analytical_hardware.N_CU = std::min(
