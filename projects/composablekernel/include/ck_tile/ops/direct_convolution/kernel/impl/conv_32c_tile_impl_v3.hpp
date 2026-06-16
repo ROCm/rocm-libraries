@@ -8,7 +8,7 @@
 //   mfma_f32_32x32x16: 32 spatial x 32 K-output, 16-ch C-reduction
 //
 // Splits the C-reduction across waves within the same workgroup. Each wave
-// handles one channels_per_group C-slice, all producing partial sums for
+// handles one or more channels_per_group C-slices, all producing partial sums for
 // the same block_k_size K-channels. An LDS-based cross-wave reduction
 // combines the partial sums before output.
 //
@@ -17,7 +17,6 @@
 //   - block_k_size = mfma_n (16 or 32 K-channels)
 //   - channels_per_group = mfma_k (32 or 16 C-channels per wave)
 //   - block_c = waves_per_wg * channels_per_group
-//   - No atomics, no serial C-loop per wave
 //   - Cross-wave LDS reduction at flush points
 //
 // Supported: fp16 and bf16, Fprop and Dgrad.
@@ -27,6 +26,7 @@
 #include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_kernel_base.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_input_loader.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_output_writer.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/impl/non_grouped_conv_descriptors.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/impl/non_grouped_conv_compute_loop_v3.hpp"
 #include "ck_tile/ops/direct_convolution/utils/common.hpp"
 #include "ck_tile/ops/direct_convolution/utils/mfma.hpp"
@@ -49,6 +49,10 @@ constexpr int WAVE_SIZE = 64;
 enum class MfmaShape
 {
     M16N16K32,
+    // M32N32K16 is retained as an enum value for config compatibility but is no
+    // longer supported by the v3 dense kernel (rejected in is_valid_config; the
+    // loaders/writers static_assert M16N16K32). No live instance used it and
+    // M16N16K32 is the efficient shape.
     M32N32K16
 };
 
@@ -56,12 +60,12 @@ enum class MfmaShape
 // Config -- kernel configuration for v3 cross-wave LDS reduction.
 //
 // Parameters:
-//   mfma_shape: M16N16K32 or M32N32K16
+//   mfma_shape: M16N16K32
 //   waves_per_group() = 1 (each wave is its own C-group)
 //   block_groups() = waves_per_wg
-//   channels_per_group() = mfma_k (32 or 16)
+//   channels_per_group() = mfma_k (32)
 //   block_c() = waves_per_wg * channels_per_group
-//   block_k_size() = mfma_m (16 or 32 K-output channels; A/C rows)
+//   block_k_size() = mfma_m (16 K-output channels; A/C rows)
 //   block_q() = mfma_n (16 or 32 spatial positions; B/C columns)
 //   c_local_count() = waves_per_wg (one cpg slice per wave)
 //
@@ -156,8 +160,7 @@ struct Config
             epilogue_suffix = "_lds_staged_epilogue";
         }
 
-        std::string cspw_suffix =
-            (c_slices_per_wave > 1) ? ("_cspw" + std::to_string(c_slices_per_wave)) : "";
+        std::string cspw_suffix = "_cspw_" + std::to_string(c_slices_per_wave);
 
         return base + epilogue_suffix + cspw_suffix;
     }
@@ -168,7 +171,7 @@ struct Config
 //
 // Loads weight[block_k_start : +block_k_size, :, c_slice*cpg : +cpg]
 // from KYXC DRAM layout into contiguous [block_k_size, KH_KW, cpg] LDS.
-// cpg = channels_per_group (32 for M16N16K32, 16 for M32N32K16).
+// cpg = channels_per_group (32 for M16N16K32).
 // ===================================================================
 template <auto cfg, typename ElementType = _Float16>
 CK_TILE_DEVICE void weight_load_to_lds_kyxc(uint4* weight_lds,
@@ -255,38 +258,6 @@ CK_TILE_DEVICE void weight_load_to_lds_kyxc_dgrad(uint4* weight_lds,
 }
 
 // ===================================================================
-// swizzle_c8_forward / swizzle_c8_inverse -- tile-local LDS swizzle.
-//
-// Forward: maps logical c8 to permuted c8 for DRAM reads.
-// Inverse: maps permuted c8 back to logical c8 for LDS reads.
-// ===================================================================
-template <auto cfg>
-CK_TILE_DEVICE int swizzle_c8_forward(int spatial, int c8)
-{
-    using TC               = TileConstantsBase<cfg>;
-    constexpr int BLOCK_C8 = TC::BLOCK_C8;
-    if constexpr(cfg.swizzle_type == SwizzleType::CyclicShift)
-        return (c8 + spatial) % BLOCK_C8;
-    else if constexpr(cfg.swizzle_type == SwizzleType::XOR)
-        return c8 ^ (spatial % BLOCK_C8);
-    else
-        return c8;
-}
-
-template <auto cfg>
-CK_TILE_DEVICE int swizzle_c8_inverse(int spatial, int c8)
-{
-    using TC               = TileConstantsBase<cfg>;
-    constexpr int BLOCK_C8 = TC::BLOCK_C8;
-    if constexpr(cfg.swizzle_type == SwizzleType::CyclicShift)
-        return (c8 - spatial % BLOCK_C8 + BLOCK_C8) % BLOCK_C8;
-    else if constexpr(cfg.swizzle_type == SwizzleType::XOR)
-        return c8 ^ (spatial % BLOCK_C8); // self-inverse
-    else
-        return c8;
-}
-
-// ===================================================================
 // is_valid_config -- config compatibility check for v3.
 // ===================================================================
 template <DataType DT = DataType::fp16>
@@ -308,11 +279,26 @@ inline bool is_valid_config(const Conv2dParams& par, const Config<DT>& cfg)
         return false;
     }
 
-    // C_in must equal total_block_c (= waves_per_wg * c_slices_per_wave * cpg).
-    const int C_in = (cfg.direction == Direction::Dgrad) ? par.k_tot : par.c_tot;
-    if(C_in != cfg.total_block_c())
+    // M32N32K16 was dropped from the v3 dense kernel (no live instance used it;
+    // M16N16K32 is the efficient shape). Reject any M32N32K16 config cleanly.
+    if(cfg.mfma_shape != MfmaShape::M16N16K32)
     {
-        LogInfo("Input channel mismatch: conv C_in != config block_c: ",
+        LogInfo("v3 dense kernel supports only MfmaShape::M16N16K32");
+        return false;
+    }
+
+    // C_in covering rule: the workgroup reduces total_block_c() channels across
+    // its waves. With channel padding, the real C_in may be smaller — but it
+    // must land in (total_block_c() - cpg, total_block_c()] so that exactly this
+    // config minimally covers C_in (the last wave's cpg-slice is the partial
+    // one, and no fully-empty wave exists). Phase 2 supports any C_in within
+    // that range, including counts that are not multiples of 8 (sub-8): the
+    // straddling channel tile is loaded and zeroed at element granularity by
+    // the weight loader.
+    const int C_in = (cfg.direction == Direction::Dgrad) ? par.k_tot : par.c_tot;
+    if(C_in > cfg.total_block_c() || C_in <= cfg.total_block_c() - cfg.channels_per_group())
+    {
+        LogInfo("Input channel not covered by config: ",
                 " C_in = ",
                 std::move(std::to_string(C_in)),
                 ", config.total_block_c() = ",
@@ -320,16 +306,42 @@ inline bool is_valid_config(const Conv2dParams& par, const Config<DT>& cfg)
         return false;
     }
 
-    // K_out must be divisible by block_k_size.
-    const int K_out = (cfg.direction == Direction::Dgrad) ? par.c_tot : par.k_tot;
-    if(K_out % cfg.block_k_size() != 0)
+    // The output-channel count (k_tot for Fprop, c_tot for Dgrad) may be any
+    // positive value; partial block_k_size tiles — down to sub-8 — are masked
+    // at element granularity at output time and need no config restriction.
+
+    // Channel padding splits into two INDEPENDENT cases with different needs:
+    //
+    //   - Reduction-channel padding (C_in < total_block_c()): correctness comes
+    //     from the WEIGHT loader, which zeroes every invalid reduction channel
+    //     (garbage_input * 0_weight == 0 in the MFMA) using the GLOBAL channel
+    //     index c_slice * cpg + c8*8 (c_slice = CS * waves + wave_id), so it is
+    //     already chunk-aware. The input loader additionally masks, per thread
+    //     and per chunk CS, the SWIZZLED physical channel-8 block it loads
+    //     (global_c8 = CS * BLOCK_C8 + swizzled_c8(global_spatial, logical_c8))
+    //     when that block lands at or beyond ceil(C_in/8), purely to avoid
+    //     reading garbage. Both the validity check and the weight zeroing derive
+    //     from the same global channel coordinate, so they compose with any
+    //     swizzle AND any c_slices_per_wave. The only remaining requirement is
+    //     the regular {BLOCK_C8, LANES_PER_ROW} lane decomposition, i.e.
+    //     64 % BLOCK_C8 == 0.
+    //
+    //   - Output-channel padding (K_out % block_k_size != 0): handled entirely
+    //     by element-precise masking in the output writer plus K-row zeroing in
+    //     the weight loader. Both are independent of c_slices_per_wave and the
+    //     swizzle, so NO extra restriction applies. When the reduction is not
+    //     padded (C_in == total_block_c()) the input-loader channel mask is a
+    //     no-op (main_c8 < ceil(C_in/8) always), so swizzled / multi-slice
+    //     configs are safe.
+    const bool reduction_padded = (C_in != cfg.total_block_c());
+    if(reduction_padded)
     {
-        LogInfo("Output channel mismatch: conv K_out not divisible by config block_k_size, ",
-                " K_out = ",
-                std::to_string(K_out),
-                ", config.block_k_size() = ",
-                std::to_string(cfg.block_k_size()));
-        return false;
+        const int block_c8 = cfg.block_c() / 8;
+        if(64 % block_c8 != 0)
+        {
+            LogInfo("Reduction-padded config requires 64 %% (block_c/8) == 0");
+            return false;
+        }
     }
 
     if(!swizzle_config_valid(cfg, par))
@@ -365,6 +377,10 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
 
     static constexpr int WAVES_PER_WG = cfg.waves_per_wg;
     static constexpr int KH_KW_       = cfg.kh * cfg.kw;
+
+    // Output-channel block size (K rows of the MFMA accumulator). Used by
+    // DenseSharedDescriptors<TC>::Output::MakeChannelPadDescriptor.
+    static constexpr int BLOCK_K = cfg.block_k_size();
 
     // Weight LDS sizing for one c_slice: [block_k_size, KH_KW, cpg].
     // Both MFMA shapes: block_k_size * cpg = 512, so 512 * 9 = 4,608 elements.
@@ -423,7 +439,7 @@ using ConvBlockCoordsT = direct_conv::BlockCoordsNonGrouped<cfg>;
 //      DIST_SPATIAL to BLOCK_W-1 are loaded by the first
 //      OVERFLOW_COUNT threads.
 // ===================================================================
-template <auto cfg>
+template <auto cfg, bool Padded = false>
 struct ConvInputLoader
     : direct_conv::InputLoader<
           TileConstants<cfg>,
@@ -466,6 +482,15 @@ struct ConvInputLoader
     CK_TILE_LDS_ADDR ElementType* overflow_lds_dest;
     ck_tile::index_t overflow_is_valid;
     bool overflow_active;
+
+    // Reduction-channel pad state (only meaningful when Padded). The swizzled
+    // channel-8 block this thread loads WITHIN a chunk is pad_*_c8_dram; for
+    // chunk CS the global channel-8 index is CS * BLOCK_C8 + pad_*_c8_dram, and
+    // the block is masked out when that index reaches pad_c8_ceil = ceil(C_in/8).
+    // Evaluated per chunk in prefetch_tile_to_lds so it composes with cspw > 1.
+    int pad_main_c8_dram = 0;
+    int pad_ov_c8_dram   = 0;
+    int pad_c8_ceil      = 0;
 
     template <typename BlockCoords_>
     CK_TILE_DEVICE ConvInputLoader(const BlockCoords_& bc,
@@ -526,16 +551,43 @@ struct ConvInputLoader
         const int wave_group = wave;
         const int c8_pos     = wave_group * TC::GROUP_SIZE_8 + lane_c8;
 
-        // The DRAM cyclic-shift swizzle is applied to the global wi_padded
-        // coordinate (block_q + spatial_pos), so the inverse used to find the
-        // LDS slot must also include block_q. Otherwise the inverse is wrong
-        // whenever block_q is not a multiple of BLOCK_C8.
+        // The DRAM swizzle is applied to the global wi_padded coordinate
+        // (block_q + spatial_pos), so the inverse used to find the LDS slot must
+        // also include block_q. Otherwise the inverse is wrong whenever block_q
+        // is not a multiple of BLOCK_C8.
+        //
+        // Express the inverse swizzle as a descriptor transform: build a
+        // [spatial, BLOCK_C8, 8] element-strided LDS view with the inverse
+        // swizzle, evaluate at the global spatial index, then subtract the
+        // block_q base so the result is the tile-local LDS element offset.
+        const int spatial_len = bc.block_q + TC::BLOCK_W;
+        const auto lds_read_desc =
+            direct_conv::DenseSharedDescriptors<TC>::Input::MakeLdsReadDescriptor(spatial_len);
+        const ck_tile::index_t block_q_base =
+            static_cast<ck_tile::index_t>(bc.block_q) * TC::BLOCK_C8 * 8;
         ck_tile::static_for<0, cfg.kw, 1>{}([&](auto s_n) {
-            constexpr int S           = s_n.value;
-            int spatial_pos           = lane_q + S;
-            int c8_lds                = swizzle_c8_inverse<cfg>(bc.block_q + spatial_pos, c8_pos);
-            base::mfma_lds_offsets[S] = spatial_pos * TC::BLOCK_C8 * 8 + c8_lds * 8;
+            constexpr int S = s_n.value;
+            int spatial_pos = lane_q + S;
+            int global      = bc.block_q + spatial_pos;
+            auto coord      = ck_tile::make_tensor_coordinate(
+                lds_read_desc, ck_tile::make_multi_index(global, c8_pos, 0));
+            base::mfma_lds_offsets[S] = coord.get_offset() - block_q_base;
         });
+
+        // Forward-swizzle descriptor: maps (global_spatial, logical_c8) to the
+        // physical channel-8 index that the load actually targets in DRAM. Used
+        // both to compute the overflow DRAM offset and to make the reduction-pad
+        // validity check swizzle-aware (see below). For SwizzleType::None this is
+        // the identity on c8.
+        auto fwd_swz_desc =
+            direct_conv::DenseSharedDescriptors<TC>::Input::MakeForwardSwizzleDescriptor(
+                bc.block_q + TC::BLOCK_W);
+        auto swizzled_c8 = [&](int global_spatial, int logical_c8) {
+            return static_cast<int>(
+                ck_tile::make_tensor_coordinate(
+                    fwd_swz_desc, ck_tile::make_multi_index(global_spatial, logical_c8))
+                    .get_offset());
+        };
 
         // --- Overflow load setup ---
         // The tile distribution covers DIST_SPATIAL spatial positions, but
@@ -558,15 +610,50 @@ struct ConvInputLoader
             // Match the DRAM descriptor's global-coordinate swizzle so the
             // overflow DRAM read is consistent with the main load path when
             // block_q is not a multiple of BLOCK_C8.
-            int ov_c8_dram   = swizzle_c8_forward<cfg>(bc.block_q + ov_spatial, ov_c8);
+            const int ov_c8_dram = swizzled_c8(bc.block_q + ov_spatial, ov_c8);
             overflow_voffset = static_cast<ck_tile::index_t>((input_x * bc.C + ov_c8_dram * 8) *
                                                              static_cast<int>(sizeof(ElementType)));
+
+            // Reduction-channel padding: record the swizzled channel-8 block this
+            // thread loads WITHIN a chunk (ov_c8_dram). The actual masking is done
+            // per chunk CS in prefetch_tile_to_lds, where the global channel-8
+            // index CS * BLOCK_C8 + ov_c8_dram is compared against ceil(C_in/8).
+            // Computing it per chunk (rather than zeroing once here) is what lets
+            // reduction padding compose with c_slices_per_wave > 1. Composing the
+            // check on the SWIZZLED block also makes it work with any swizzle.
+            //
+            // Sub-8 (Phase 2): the partial block that straddles C_in (channels
+            // [floor(C_in/8)*8, +8) where some are < C_in and some are not) is
+            // still LOADED — its garbage lanes are multiplied by zeroed weights
+            // in the MFMA, so they contribute nothing. Only fully-out-of-range
+            // blocks (>= ceil(C_in/8)) are masked. The input read is hardware
+            // bounds-checked (buffer resource), so loading the partial block is
+            // always safe.
+            if constexpr(Padded)
+                pad_ov_c8_dram = ov_c8_dram;
         }
         else
         {
             overflow_voffset  = 0;
             overflow_lds_dest = nullptr;
             overflow_is_valid = 0;
+        }
+
+        // Reduction-channel padding for the main load: record the swizzled
+        // channel-8 block this thread loads WITHIN a chunk. With 64 % BLOCK_C8 == 0
+        // the tile distribution decomposes lane as {BLOCK_C8, LANES_PER_ROW}, so
+        // the thread's logical c8 is tid % BLOCK_C8 and its global spatial position
+        // is block_q + tid / BLOCK_C8. The block it physically loads is the
+        // swizzled index, so the pad check (done per chunk CS in prefetch) is
+        // swizzle-aware and chunk-aware: it masks when CS * BLOCK_C8 + main_c8_dram
+        // reaches ceil(C_in/8). Sub-8: keep the straddling partial block (ceil),
+        // zeroed by weights.
+        if constexpr(Padded)
+        {
+            const int main_c8  = tid % TC::BLOCK_C8;
+            const int main_global = bc.block_q + tid / TC::BLOCK_C8;
+            pad_main_c8_dram   = swizzled_c8(main_global, main_c8);
+            pad_c8_ceil        = (bc.C + 7) / 8; // ceil(C_in / 8)
         }
     }
 
@@ -582,13 +669,27 @@ struct ConvInputLoader
         static_assert(CS >= 0 && CS < cfg.c_slices_per_wave, "CS out of range");
         constexpr ck_tile::index_t chunk_off = CS * CHUNK_VOFFSET_STRIDE;
 
+        // Reduction-channel pad masks are per chunk: the global channel-8 block
+        // this thread loads for chunk CS is CS * BLOCK_C8 + pad_*_c8_dram, masked
+        // out when it reaches pad_c8_ceil = ceil(C_in/8). For Padded==false these
+        // collapse to the unmodified base validity.
+        ck_tile::index_t main_valid = base::is_valid;
+        ck_tile::index_t ov_valid   = overflow_is_valid;
+        if constexpr(Padded)
+        {
+            if(CS * TC::BLOCK_C8 + pad_main_c8_dram >= pad_c8_ceil)
+                main_valid = 0;
+            if(CS * TC::BLOCK_C8 + pad_ov_c8_dram >= pad_c8_ceil)
+                ov_valid = 0;
+        }
+
         if(base::load_active)
         {
             CK_TILE_LDS_ADDR ElementType* lds_dest =
                 base::store_input_lds + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
 
             buffer_load16_to_lds<ElementType>(
-                lds_dest, base::input_rsrc, base::input_voffset + chunk_off, base::is_valid);
+                lds_dest, base::input_rsrc, base::input_voffset + chunk_off, main_valid);
         }
 
         if(overflow_active)
@@ -597,7 +698,7 @@ struct ConvInputLoader
                 overflow_lds_dest + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
 
             buffer_load16_to_lds<ElementType>(
-                lds_dest, base::input_rsrc, overflow_voffset + chunk_off, overflow_is_valid);
+                lds_dest, base::input_rsrc, overflow_voffset + chunk_off, ov_valid);
         }
     }
 
@@ -623,7 +724,7 @@ struct ConvInputLoader
 //
 // The DRAM -> LDS load functions are reused from v1 unchanged.
 // ===================================================================
-template <auto cfg>
+template <auto cfg, bool Padded = false>
 struct WeightLoader : direct_conv::WeightAccessor8<
                           cfg.kh,
                           cfg.kw,
@@ -662,7 +763,8 @@ struct WeightLoader : direct_conv::WeightAccessor8<
                           const ElementType* __restrict__ wei,
                           int block_k_start,
                           int c_slice,
-                          int C_total)
+                          int C_total,
+                          int K_total)
     {
         constexpr int WEIGHT_K   = cfg.block_k_size();
         constexpr int KH_KW      = cfg.kh * cfg.kw;
@@ -687,6 +789,35 @@ struct WeightLoader : direct_conv::WeightAccessor8<
                 const ElementType* src = wei + static_cast<size_t>(block_k_start + k) * K_stride +
                                          filter * C_total + c_slice * C_SLICE + c8 * 8;
 
+                // Channel padding.
+                //   K dim (output): block_k_start + k selects a full weight row;
+                //     a row >= K_total is OOB — zero the whole uint4.
+                //   C dim (reduction): c_base..c_base+7 are reduction channels.
+                //     For sub-8 (Phase 2) the last uint4 straddles C_total: load
+                //     the valid lanes and zero the rest (element-wise), which both
+                //     avoids the OOB DRAM read and zeroes the invalid reduction
+                //     weights so their MFMA contribution is exactly 0.
+                if constexpr(Padded)
+                {
+                    const int k_global = block_k_start + k;
+                    const int c_base   = c_slice * C_SLICE + c8 * 8;
+                    if(k_global >= K_total)
+                    {
+                        wave_lds[flat_idx] = uint4{0, 0, 0, 0};
+                        continue;
+                    }
+                    if(c_base + 8 > C_total)
+                    {
+                        ElementType vals[8];
+                        ck_tile::static_for<0, 8, 1>{}([&](auto j_n) {
+                            constexpr int J = j_n.value;
+                            vals[J] = (c_base + J < C_total) ? src[J] : ElementType{0};
+                        });
+                        __builtin_memcpy(&wave_lds[flat_idx], vals, sizeof(uint4));
+                        continue;
+                    }
+                }
+
                 wave_lds[flat_idx] = *reinterpret_cast<const uint4*>(src);
             }
         }
@@ -699,7 +830,8 @@ struct WeightLoader : direct_conv::WeightAccessor8<
                                 const ElementType* __restrict__ wei,
                                 int k_slice_start,
                                 int block_c_start,
-                                int C_total)
+                                int C_total,
+                                int K_total)
     {
         constexpr int K_SLICE    = cfg.channels_per_group();
         constexpr int KH_KW      = cfg.kh * cfg.kw;
@@ -723,6 +855,38 @@ struct WeightLoader : direct_conv::WeightAccessor8<
 
                 const ElementType* src = wei + static_cast<size_t>(k_slice_start + k) * K_stride +
                                          filter * C_total + block_c_start + c8 * 8;
+
+                // Channel padding: the weight tensor is physically
+                // [K_total, KH, KW, C_total]. For Dgrad the reduction maps to the
+                // weight K dim (k_slice_start+k, a full row) and the output maps
+                // to the weight C dim (block_c_start+c8*8, within the uint4).
+                //   K dim (reduction): a row >= K_total is OOB and an invalid
+                //     reduction channel — zero the whole uint4 (MFMA contribution
+                //     0).
+                //   C dim (output): for sub-8 (Phase 2) the last uint4 straddles
+                //     C_total — load the valid lanes and zero the rest to avoid
+                //     the OOB DRAM read (the invalid output lanes are also masked
+                //     at write time).
+                if constexpr(Padded)
+                {
+                    const int k_global = k_slice_start + k;
+                    const int c_base   = block_c_start + c8 * 8;
+                    if(k_global >= K_total)
+                    {
+                        wave_lds[flat_idx] = uint4{0, 0, 0, 0};
+                        continue;
+                    }
+                    if(c_base + 8 > C_total)
+                    {
+                        ElementType vals[8];
+                        ck_tile::static_for<0, 8, 1>{}([&](auto j_n) {
+                            constexpr int J = j_n.value;
+                            vals[J] = (c_base + J < C_total) ? src[J] : ElementType{0};
+                        });
+                        __builtin_memcpy(&wave_lds[flat_idx], vals, sizeof(uint4));
+                        continue;
+                    }
+                }
 
                 wave_lds[flat_idx] = *reinterpret_cast<const uint4*>(src);
             }
@@ -817,31 +981,38 @@ struct WeightLoader : direct_conv::WeightAccessor8<
 // In v3, all waves share the same block_k_size K-channels. Only wave 0
 // writes the output after cross-wave LDS reduction.
 //
-// M16N16K32: lane % 16 -> spatial, lane / 16 -> K-group (4 groups x 4 K).
-//   Single 8B DRAM write per thread.
+// M16N16K32 only (M32N32K16 was dropped — no live instance used it and the
+// efficient shape is M16N16K32): lane % 16 → spatial, lane / 16 → K-group
+// (4 groups × 4 K). Single 8B DRAM write per thread (unpadded).
 //
-// M32N32K16: lane % 32 -> spatial, lane / 32 -> K-block (0 or 1).
-//   16 accumulator values map to 4 groups of 4 contiguous K values:
-//     acc[0..3]   -> K = g*8 + m_block*4 + {0..3} for g=0
-//     acc[4..7]   -> K = g*8 + m_block*4 + {0..3} for g=1
-//     acc[8..11]  -> K = g*8 + m_block*4 + {0..3} for g=2
-//     acc[12..15] -> K = g*8 + m_block*4 + {0..3} for g=3
-//   where m_block = lane / 32. Four 8B DRAM writes per thread.
+// Output-channel padding is expressed as a CK Tile pad transform via
+// DenseSharedDescriptors<TC>::Output::MakeChannelPadDescriptor. Each thread
+// writes a 4-K group [k_off, k_off+4) whose channels are contiguous and
+// increasing; the descriptor's pad validity yields valid_k_count, the number
+// of in-range channels in this group (a prefix, since the group is
+// contiguous). The hot flush path then writes exactly valid_k_count elements
+// with no per-element bound check.
 // ===================================================================
-template <auto cfg>
+template <auto cfg, bool Padded = false>
 struct OutputWriterV3
 {
+    static_assert(cfg.mfma_shape == MfmaShape::M16N16K32,
+                  "OutputWriterV3 supports only MfmaShape::M16N16K32");
+
     using ElementType = ToType<cfg.data_type>;
-    using AccType = std::conditional_t<cfg.mfma_shape == MfmaShape::M16N16K32, fp32x4_t, fp32x16_t>;
+    using AccType     = fp32x4_t;
+    using TC          = TileConstants<cfg>;
 
     ElementType* output_base;
     ck_tile::index_t output_spatial_offset; // q_pos * K (spatial + batch offset)
     ck_tile::index_t row_stride_elems;
     bool store_valid;
 
-    // For M16N16K32: single K-offset (4 contiguous K values)
-    // For M32N32K16: m_block value for computing 4 K-offsets
-    int k_offset_or_m_block;
+    int k_offset; // single K-offset (4 contiguous K values)
+
+    // Number of in-range output channels in this thread's 4-K group (0..4).
+    // Only meaningful when Padded; the unpadded path always writes 4.
+    int valid_k_count;
 
     template <typename BlockCoords_>
     CK_TILE_DEVICE OutputWriterV3(const BlockCoords_& bc,
@@ -855,20 +1026,29 @@ struct OutputWriterV3
 
         const int lane = static_cast<int>(threadIdx.x) % WAVE_SIZE;
 
-        if constexpr(cfg.mfma_shape == MfmaShape::M16N16K32)
+        const int q_pos       = bc.block_q + lane % 16;
+        k_offset              = (lane / 16) * 4;
+        output_spatial_offset = static_cast<ck_tile::index_t>(q_pos) * bc.K + k_offset;
+        store_valid           = (q_pos < wo);
+        valid_k_count         = 4;
+
+        if constexpr(Padded)
         {
-            const int q_pos     = bc.block_q + lane % 16;
-            k_offset_or_m_block = (lane / 16) * 4;
-            output_spatial_offset =
-                static_cast<ck_tile::index_t>(q_pos) * bc.K + k_offset_or_m_block;
-            store_valid = (q_pos < wo);
-        }
-        else
-        {
-            const int q_pos       = bc.block_q + lane % 32;
-            k_offset_or_m_block   = (lane / 32) * 4; // m_block * 4
-            output_spatial_offset = static_cast<ck_tile::index_t>(q_pos) * bc.K;
-            store_valid           = (q_pos < wo);
+            // Derive per-group output-channel validity from the pad-transform
+            // descriptor (computed once, here in the ctor — off the hot path).
+            const int k_base = bc.block_k_out + k_offset;
+            const auto kdesc = direct_conv::DenseSharedDescriptors<TC>::Output::
+                MakeChannelPadDescriptor(bc.K);
+            int count = 0;
+            ck_tile::static_for<0, 4, 1>{}([&](auto j_n) {
+                constexpr int J = j_n.value;
+                const auto coord =
+                    ck_tile::make_tensor_coordinate(kdesc, ck_tile::make_multi_index(k_base + J));
+                if(ck_tile::coordinate_has_valid_offset_assuming_top_index_is_valid(kdesc, coord))
+                    ++count;
+            });
+            valid_k_count = count;
+            store_valid   = store_valid && (count > 0);
         }
     }
 
@@ -878,33 +1058,24 @@ struct OutputWriterV3
             return;
 
         const ck_tile::index_t row_offset = static_cast<ck_tile::index_t>(p_out) * row_stride_elems;
+        const ck_tile::index_t store_offset = output_spatial_offset + row_offset;
 
-        if constexpr(cfg.mfma_shape == MfmaShape::M16N16K32)
+        if constexpr(Padded)
+        {
+            // Write the in-range prefix of the 4-K group (valid_k_count elements).
+            ck_tile::static_for<0, 4, 1>{}([&](auto j_n) {
+                constexpr int J = j_n.value;
+                if(J < valid_k_count)
+                    output_base[store_offset + J] = static_cast<ElementType>(acc_val[J]);
+            });
+        }
+        else
         {
             // Single 8B write: 4 contiguous K values.
             uint32_t words[2];
             words[0] = ConvertFp32ToVec4<ElementType>::convert(acc_val[0], acc_val[1]);
             words[1] = ConvertFp32ToVec4<ElementType>::convert(acc_val[2], acc_val[3]);
-
-            ck_tile::index_t store_offset = output_spatial_offset + row_offset;
             __builtin_memcpy(output_base + store_offset, words, sizeof(words));
-        }
-        else
-        {
-            // Four 8B writes: 4 groups of 4 contiguous K values.
-            // Group g: K-offset = g*8 + m_block*4, acc values [g*4 .. g*4+3].
-            const ck_tile::index_t base_offset = output_spatial_offset + row_offset;
-
-            ck_tile::static_for<0, 4, 1>{}([&](auto g_n) {
-                constexpr int G = g_n.value;
-                const int k_off = G * 8 + k_offset_or_m_block;
-                uint32_t words[2];
-                words[0] =
-                    ConvertFp32ToVec4<ElementType>::convert(acc_val[G * 4 + 0], acc_val[G * 4 + 1]);
-                words[1] =
-                    ConvertFp32ToVec4<ElementType>::convert(acc_val[G * 4 + 2], acc_val[G * 4 + 3]);
-                __builtin_memcpy(output_base + base_offset + k_off, words, sizeof(words));
-            });
         }
     }
 };
@@ -922,27 +1093,36 @@ struct OutputWriterV3
 // (reduce_lds), which is dead after cross_wave_reduce completes.
 //
 // Staging LDS layout: [BLOCK_Q, BLOCK_K] contiguous fp16.
-//   M16N16K32: 16 x 16 = 256 fp16 = 512B = 32 uint4
-//   M32N32K16: 32 x 32 = 1024 fp16 = 2048B = 128 uint4
+//   M16N16K32: 16 × 16 = 256 fp16 = 512B = 32 uint4
 //
 // DRAM store: tid-based linear mapping.
 //   Each active thread reads one uint4 (8 fp16) from staging LDS
-//   and writes it to DRAM. Active threads: BLOCK_Q x BLOCK_K8.
-//     M16N16K32: 16 x 2 = 32 active threads
-//     M32N32K16: 32 x 4 = 128 active threads
+//   and writes it to DRAM. Active threads: BLOCK_Q × BLOCK_K8.
+//     M16N16K32: 16 × 2 = 32 active threads
+//
+// Output-channel padding is expressed as a CK Tile pad transform via
+// DenseSharedDescriptors<TC>::Output::MakeChannelPadDescriptor: each active
+// thread writes a contiguous 8-K block, and the descriptor's pad validity
+// gives valid_k_count (a prefix count, 0..8) used to bound the flush writes.
+//
+// M16N16K32 only (M32N32K16 was dropped).
 // ===================================================================
-template <auto cfg>
+template <auto cfg, bool Padded = false>
 struct OutputWriterV3Lds
 {
-    using ElementType = ToType<cfg.data_type>;
-    using AccType = std::conditional_t<cfg.mfma_shape == MfmaShape::M16N16K32, fp32x4_t, fp32x16_t>;
+    static_assert(cfg.mfma_shape == MfmaShape::M16N16K32,
+                  "OutputWriterV3Lds supports only MfmaShape::M16N16K32");
 
-    static constexpr int BLOCK_K  = cfg.block_k_size(); // 16 or 32
-    static constexpr int BLOCK_Q_ = cfg.block_q();      // 16 or 32
-    static constexpr int BLOCK_K8 = BLOCK_K / 8;        // 2 or 4
+    using ElementType = ToType<cfg.data_type>;
+    using AccType     = fp32x4_t;
+    using TC          = TileConstants<cfg>;
+
+    static constexpr int BLOCK_K  = cfg.block_k_size(); // 16
+    static constexpr int BLOCK_Q_ = cfg.block_q();      // 16
+    static constexpr int BLOCK_K8 = BLOCK_K / 8;        // 2
 
     // Number of 16B stores needed to flush the staging buffer.
-    static constexpr int STORE_VECS_V3 = BLOCK_Q_ * BLOCK_K8; // 32 or 128
+    static constexpr int STORE_VECS_V3 = BLOCK_Q_ * BLOCK_K8; // 32
 
     // Verify staging buffer fits within the cross-wave reduction LDS region.
     static constexpr int ACC_FLOATS    = sizeof(AccType) / sizeof(float);
@@ -957,12 +1137,16 @@ struct OutputWriterV3Lds
 
     // Wave 0 LDS write state (MFMA accumulator layout).
     int lds_q_pos;
-    int lds_k_offset_or_m_block;
+    int lds_k_offset;
 
     // Wide store state (tid-based 16B per thread).
     ck_tile::index_t store_lds_elem_offset; // element offset in staging LDS
     ck_tile::index_t store_dram_offset;     // element offset in DRAM (relative to output_base)
     bool store_valid;
+
+    // Number of in-range output channels in this thread's 8-K block (0..8).
+    // Only meaningful when Padded; the unpadded path always writes 8.
+    int valid_k_count;
 
     template <typename BlockCoords_>
     CK_TILE_DEVICE OutputWriterV3Lds(const BlockCoords_& bc,
@@ -979,18 +1163,11 @@ struct OutputWriterV3Lds
         const int tid  = static_cast<int>(threadIdx.x);
 
         // --- Wave 0 LDS write state ---
-        if constexpr(cfg.mfma_shape == MfmaShape::M16N16K32)
-        {
-            lds_q_pos               = lane % 16;
-            lds_k_offset_or_m_block = (lane / 16) * 4;
-        }
-        else
-        {
-            lds_q_pos               = lane % 32;
-            lds_k_offset_or_m_block = (lane / 32) * 4; // m_block * 4
-        }
+        lds_q_pos    = lane % 16;
+        lds_k_offset = (lane / 16) * 4;
 
         // --- Wide store state (16B per active thread) ---
+        valid_k_count = 8;
         if(tid < STORE_VECS_V3)
         {
             const int store_q  = tid / BLOCK_K8;
@@ -1000,6 +1177,26 @@ struct OutputWriterV3Lds
             store_lds_elem_offset = store_q * BLOCK_K + store_k8 * 8;
             store_dram_offset     = static_cast<ck_tile::index_t>(global_q) * bc.K + store_k8 * 8;
             store_valid           = (global_q < wo);
+
+            if constexpr(Padded)
+            {
+                // Derive the contiguous 8-K block's in-range count from the
+                // pad-transform descriptor (computed once, off the hot path).
+                const int k_base = bc.block_k_out + store_k8 * 8;
+                const auto kdesc = direct_conv::DenseSharedDescriptors<TC>::Output::
+                    MakeChannelPadDescriptor(bc.K);
+                int count = 0;
+                ck_tile::static_for<0, 8, 1>{}([&](auto j_n) {
+                    constexpr int J  = j_n.value;
+                    const auto coord = ck_tile::make_tensor_coordinate(
+                        kdesc, ck_tile::make_multi_index(k_base + J));
+                    if(ck_tile::coordinate_has_valid_offset_assuming_top_index_is_valid(kdesc,
+                                                                                        coord))
+                        ++count;
+                });
+                valid_k_count = count;
+                store_valid   = store_valid && (count > 0);
+            }
         }
         else
         {
@@ -1014,31 +1211,12 @@ struct OutputWriterV3Lds
         // Step 1: Wave 0 writes fp16-converted accumulator to staging LDS.
         if(wave_id == 0)
         {
-            if constexpr(cfg.mfma_shape == MfmaShape::M16N16K32)
-            {
-                // Single 8B LDS write: 4 contiguous K values.
-                uint32_t words[2];
-                words[0] = ConvertFp32ToVec4<ElementType>::convert(acc_val[0], acc_val[1]);
-                words[1] = ConvertFp32ToVec4<ElementType>::convert(acc_val[2], acc_val[3]);
-                __builtin_memcpy(staging_lds + lds_q_pos * BLOCK_K + lds_k_offset_or_m_block,
-                                 words,
-                                 sizeof(words));
-            }
-            else
-            {
-                // Four 8B LDS writes: 4 groups of 4 contiguous K values.
-                ck_tile::static_for<0, 4, 1>{}([&](auto g_n) {
-                    constexpr int G = g_n.value;
-                    const int k_off = G * 8 + lds_k_offset_or_m_block;
-                    uint32_t words[2];
-                    words[0] = ConvertFp32ToVec4<ElementType>::convert(acc_val[G * 4 + 0],
-                                                                       acc_val[G * 4 + 1]);
-                    words[1] = ConvertFp32ToVec4<ElementType>::convert(acc_val[G * 4 + 2],
-                                                                       acc_val[G * 4 + 3]);
-                    __builtin_memcpy(
-                        staging_lds + lds_q_pos * BLOCK_K + k_off, words, sizeof(words));
-                });
-            }
+            // Single 8B LDS write: 4 contiguous K values.
+            uint32_t words[2];
+            words[0] = ConvertFp32ToVec4<ElementType>::convert(acc_val[0], acc_val[1]);
+            words[1] = ConvertFp32ToVec4<ElementType>::convert(acc_val[2], acc_val[3]);
+            __builtin_memcpy(
+                staging_lds + lds_q_pos * BLOCK_K + lds_k_offset, words, sizeof(words));
         }
 
         // Step 2: Barrier for LDS write visibility.
@@ -1052,7 +1230,20 @@ struct OutputWriterV3Lds
 
             ck_tile::index_t store_offset =
                 store_dram_offset + static_cast<ck_tile::index_t>(p_out) * row_stride_elems;
-            __builtin_memcpy(output_base + store_offset, &data, sizeof(data));
+            if constexpr(Padded)
+            {
+                // Write the in-range prefix of the 8-K block (valid_k_count elems).
+                const ElementType* d = reinterpret_cast<const ElementType*>(&data);
+                ck_tile::static_for<0, 8, 1>{}([&](auto j_n) {
+                    constexpr int J = j_n.value;
+                    if(J < valid_k_count)
+                        output_base[store_offset + J] = d[J];
+                });
+            }
+            else
+            {
+                __builtin_memcpy(output_base + store_offset, &data, sizeof(data));
+            }
         }
 
         // Step 4: Barrier to prevent next flush from overwriting staging LDS
@@ -1064,7 +1255,7 @@ struct OutputWriterV3Lds
 // ===================================================================
 // Kernel entry points.
 // ===================================================================
-template <auto cfg>
+template <auto cfg, bool Padded = false>
 CK_TILE_DEVICE void ck_tile_conv2d_32c_nhwc_v3_impl(const ToType<cfg.data_type>* __restrict__ in,
                                                     const ToType<cfg.data_type>* __restrict__ wei,
                                                     double alpha,
@@ -1089,29 +1280,30 @@ CK_TILE_DEVICE void ck_tile_conv2d_32c_nhwc_v3_impl(const ToType<cfg.data_type>*
     using TC          = TileConstants<cfg>;
     using ElementType = ToType<cfg.data_type>;
 
-    // Select MFMA functor based on shape and data type.
-    using MfmaFn = std::conditional_t<
-        cfg.mfma_shape == MfmaShape::M32N32K16,
-        std::conditional_t<cfg.data_type == DataType::bf16, Mfma32x32x16_bf16, Mfma32x32x16>,
-        std::conditional_t<cfg.data_type == DataType::bf16, Mfma16x16x32_bf16, Mfma16x16x32>>;
+    // Select MFMA functor based on data type. M16N16K32 only (M32N32K16 was
+    // dropped — no live instance used it and M16N16K32 is the efficient shape).
+    static_assert(cfg.mfma_shape == MfmaShape::M16N16K32,
+                  "v3 dense kernel supports only MfmaShape::M16N16K32");
+    using MfmaFn =
+        std::conditional_t<cfg.data_type == DataType::bf16, Mfma16x16x32_bf16, Mfma16x16x32>;
 
     // Select output writer based on epilogue type.
     using OutputWriterType =
         std::conditional_t<cfg.epilogue == EpilogueType::RegistersToLdsToGlobalMemory,
-                           OutputWriterV3Lds<cfg>,
-                           OutputWriterV3<cfg>>;
+                           OutputWriterV3Lds<cfg, Padded>,
+                           OutputWriterV3<cfg, Padded>>;
 
     conv_compute_loop_v3<TC,
                          cfg,
                          MfmaFn,
                          ConvBlockCoordsT<cfg>,
-                         ConvInputLoader<cfg>,
-                         WeightLoader<cfg>,
+                         ConvInputLoader<cfg, Padded>,
+                         WeightLoader<cfg, Padded>,
                          OutputWriterType,
                          ElementType>(in, wei, out, N, C, K, hi, wi, ho, wo, py, px);
 }
 
-template <auto cfg>
+template <auto cfg, bool Padded = false>
 struct Conv32cV3Kernel
 {
     static constexpr ck_tile::index_t kBlockSize = cfg.block_size();
@@ -1143,7 +1335,7 @@ struct Conv32cV3Kernel
             cfg.swizzle_type != SwizzleType::XOR ||
                 (cfg.waves_per_wg > 0 && (cfg.waves_per_wg & (cfg.waves_per_wg - 1)) == 0),
             "XOR swizzle requires waves_per_wg to be a power of 2");
-        ck_tile_conv2d_32c_nhwc_v3_impl<cfg>(
+        ck_tile_conv2d_32c_nhwc_v3_impl<cfg, Padded>(
             in, wei, alpha, beta, out, N, C, K, hi, wi, ho, wo, fy, fx, sy, sx, dy, dx, py, px);
     }
 };
@@ -1163,42 +1355,21 @@ inline bool is_applicable(const Conv2dParams& par)
         return false;
     }
 
-    if(!par.is_non_grouped())
+    if(par.groups != 1)
     {
-        LogInfo("Grouped convolution not supported");
+        LogInfo("Grouped convolution not supported by dense kernel");
         return false;
     }
 
-    // Fprop: C_in=c_tot must be %32 (MFMA reduction), K_out=k_tot must be %16 (MFMA output).
-    // Dgrad: roles swap -- C_in=k_tot must be %32, K_out=c_tot must be %16.
-    // The stricter requirement (C_in == block_c = waves*32 exactly) is
-    // checked per-config in is_valid_config.
-    if(par.direction == Direction::Fprop)
-    {
-        if(par.c_tot % 32 != 0 || par.k_tot % 16 != 0)
-        {
-            LogInfo("For Fprop, C-in must be multiple of 32 and K-out must be multiple of 16. "
-                    "But got C-in = " +
-                    std::to_string(par.c_tot) + " and K-out = " + std::to_string(par.k_tot));
-            return false;
-        }
-    }
-    else if(par.direction == Direction::Dgrad)
-    {
-        // For Dgrad the tensor roles are swapped relative to Fprop:
-        //   C_in = par.k_tot  (output-gradient channels, MFMA reduction dim, needs %32)
-        //   K_out = par.c_tot (input-gradient channels,  MFMA output dim,    needs %16)
-        // This mirrors the is_valid_config() mapping: C_in = par.k_tot, K_out = par.c_tot.
-        if(par.k_tot % 32 != 0 || par.c_tot % 16 != 0)
-        {
-            LogInfo("For Dgrad, C_in (=k_tot) must be multiple of 32 and K_out (=c_tot) must be "
-                    "multiple of 16. "
-                    "But got k_tot = " +
-                    std::to_string(par.k_tot) + " and c_tot = " + std::to_string(par.c_tot));
-            return false;
-        }
-    }
-    else
+    // Sub-8 channel granularity: the reduction (C_in) and
+    // output (K_out) channel counts may be any positive value. Straddling
+    // channel tiles are loaded and zeroed at element granularity by the weight
+    // loader (reduction) and masked element-wise by the output writer (output).
+    // The exact per-config covering requirement (C_in lands in the last
+    // cpg-slice) is checked in is_valid_config.
+    //   Fprop: C_in = c_tot (reduction),  K_out = k_tot (output)
+    //   Dgrad: C_in = k_tot (reduction),  K_out = c_tot (output)
+    if(par.direction != Direction::Fprop && par.direction != Direction::Dgrad)
     {
         LogInfo("Unsupported convolution direction (bwd weight).");
         return false;
@@ -1221,33 +1392,49 @@ inline void launch_kernel(const LaunchParams& lp,
     using ElementType = ToType<DT>;
     auto view         = SizeView<cfg.direction>(par);
 
+    // Determine whether channel padding is required at runtime: the reduction
+    // channel count (C_in) is smaller than the config's full total_block_c(),
+    // or the output channel count (K_out) is not a multiple of block_k_size.
+    const int C_in        = (cfg.direction == Direction::Dgrad) ? par.k_tot : par.c_tot;
+    const int K_out       = (cfg.direction == Direction::Dgrad) ? par.c_tot : par.k_tot;
+    const bool needs_pad  = (C_in != cfg.total_block_c()) || (K_out % cfg.block_k_size() != 0);
+
     // The non-grouped v3 kernel is compute-bound and register-hungry.
     // Using the default min-2-blocks/CU caps registers and spills.
     constexpr int MinBlockPerCu = 1;
-    ck_tile::make_kernel<MinBlockPerCu>(Conv32cV3Kernel<cfg>{},
-                                        lp.grid,
-                                        lp.block_size,
-                                        lp.dynamic_shared_bytes,
-                                        static_cast<const ElementType*>(in),
-                                        static_cast<const ElementType*>(wei),
-                                        1.0,
-                                        0.0,
-                                        static_cast<ElementType*>(out),
-                                        par.n,
-                                        par.c_tot,
-                                        par.k_tot,
-                                        view.h(),
-                                        view.w(),
-                                        view.p(),
-                                        view.q(),
-                                        par.kh,
-                                        par.kw,
-                                        par.stride_h,
-                                        par.stride_w,
-                                        par.dilation_h,
-                                        par.dilation_w,
-                                        view.pad_h(),
-                                        view.pad_w())(ck_tile::stream_config{stream});
+
+    auto run = [&](auto padded_const) {
+        constexpr bool Padded = decltype(padded_const)::value;
+        ck_tile::make_kernel<MinBlockPerCu>(Conv32cV3Kernel<cfg, Padded>{},
+                                            lp.grid,
+                                            lp.block_size,
+                                            lp.dynamic_shared_bytes,
+                                            static_cast<const ElementType*>(in),
+                                            static_cast<const ElementType*>(wei),
+                                            1.0,
+                                            0.0,
+                                            static_cast<ElementType*>(out),
+                                            par.n,
+                                            par.c_tot,
+                                            par.k_tot,
+                                            view.h(),
+                                            view.w(),
+                                            view.p(),
+                                            view.q(),
+                                            par.kh,
+                                            par.kw,
+                                            par.stride_h,
+                                            par.stride_w,
+                                            par.dilation_h,
+                                            par.dilation_w,
+                                            view.pad_h(),
+                                            view.pad_w())(ck_tile::stream_config{stream});
+    };
+
+    if(needs_pad)
+        run(std::true_type{});
+    else
+        run(std::false_type{});
 }
 
 } // namespace ck_tile::direct_conv::conv_32c_tile::v3

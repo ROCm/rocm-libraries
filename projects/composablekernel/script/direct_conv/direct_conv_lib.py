@@ -19,8 +19,12 @@ Sections:
 import enum
 import re
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# Data-type token (first profiler argument) keyed by short name.
+DTYPE_TOKEN = {"fp16": "1", "bf16": "2"}
 
 
 # ===========================================================================
@@ -82,6 +86,11 @@ _SECTION_BINARY = {
 
 _SECTION_TITLE = {"fwd": "FWD", "bwd_data": "BWD data"}
 
+# Reverse map: profiler subcommand token -> section. Lets a case file lead each
+# line with the subcommand (e.g. "grouped_conv_fwd_tile <args...>") instead of
+# grouping rows under a section header.
+_BINARY_SECTION = {v: k for k, v in _SECTION_BINARY.items()}
+
 
 @dataclass
 class Case:
@@ -96,6 +105,35 @@ class Case:
         """First argument token: "1" (FP16) or "2" (BF16)."""
         toks = self.args.split()
         return toks[0] if toks else ""
+
+    @property
+    def group_count(self) -> int | None:
+        """Group count (G) token, located by section column layout.
+
+        FWD rows carry an extra ``indexing_type`` column, so G sits one column
+        later than in BWD-data rows.
+        """
+        toks = self.args.split()
+        idx = 8 if self.section == "fwd" else 7
+        try:
+            return int(toks[idx])
+        except (IndexError, ValueError):
+            return None
+
+    @property
+    def filter_size(self) -> str | None:
+        """Convolution filter size as ``"<Y>x<X>"`` (e.g. ``"3x3"``).
+
+        The Y/X columns follow G N K C; FWD rows carry an extra
+        ``indexing_type`` column, so they sit one column later than in BWD-data
+        rows.
+        """
+        toks = self.args.split()
+        y_idx = 12 if self.section == "fwd" else 11
+        try:
+            return f"{int(toks[y_idx])}x{int(toks[y_idx + 1])}"
+        except (IndexError, ValueError):
+            return None
 
 
 def _parse_expected_suffix(suffix: str) -> dict[str, float]:
@@ -123,15 +161,34 @@ def _select_expected(values: dict[str, float], arch: str | None) -> float | None
     return None
 
 
-def parse_cases(path: Path, arch: str | None) -> list[Case]:
-    """Parse the sectioned case file.
+def _make_case(section: str, body: str, arch: str | None) -> Case:
+    """Build a ``Case`` from an argument string with an optional ``| key=val`` suffix."""
+    expected_by_arch: dict[str, float] = {}
+    if "|" in body:
+        body, _, suffix = body.partition("|")
+        expected_by_arch = _parse_expected_suffix(suffix.strip())
+    return Case(
+        section=section,
+        binary=_SECTION_BINARY[section],
+        args=" ".join(body.split()),
+        expected=_select_expected(expected_by_arch, arch),
+        expected_by_arch=expected_by_arch,
+    )
 
-    Format:
-      - ``#`` comments and blank lines are ignored.
-      - A non-digit-first line is a section header ("FWD" / "BWD data") or a
-        column-header line inside a section (ignored).
-      - A digit-first line is a case row; its tokens are passed verbatim to the
-        profiler. An optional ``| key=val …`` suffix gives expected TFLOPS.
+
+def parse_cases(path: Path, arch: str | None) -> list[Case]:
+    """Parse a case file in either supported layout.
+
+    Two line shapes are accepted (and may be mixed):
+      - **Subcommand-prefixed**: a line leading with a known profiler
+        subcommand (``grouped_conv_fwd_tile`` / ``grouped_conv_bwd_data_tile``)
+        is a self-contained case; the section comes from the token and the rest
+        is the verbatim argument string.
+      - **Sectioned**: a section header ("FWD" / "BWD data") selects the section
+        for the digit-first case rows that follow it.
+
+    In both shapes ``#`` comments and blank lines are ignored, and a case may
+    carry an optional trailing ``| key=val …`` suffix giving expected TFLOPS.
     """
     cases: list[Case] = []
     section: str | None = None
@@ -139,6 +196,14 @@ def parse_cases(path: Path, arch: str | None) -> list[Case]:
     for raw in path.read_text().splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
+            continue
+
+        first_tok = line.split()[0]
+        if first_tok in _BINARY_SECTION:
+            cases.append(
+                _make_case(_BINARY_SECTION[first_tok],
+                           line[len(first_tok):].strip(), arch)
+            )
             continue
 
         lower = line.lower()
@@ -153,25 +218,81 @@ def parse_cases(path: Path, arch: str | None) -> list[Case]:
         if section is None:
             continue
 
-        # Split optional "| <key>=<val> ..." suffix.
-        expected_by_arch: dict[str, float] = {}
-        body = line
-        if "|" in line:
-            body, _, suffix = line.partition("|")
-            body = body.strip()
-            expected_by_arch = _parse_expected_suffix(suffix.strip())
-
-        cases.append(
-            Case(
-                section=section,
-                binary=_SECTION_BINARY[section],
-                args=" ".join(body.split()),
-                expected=_select_expected(expected_by_arch, arch),
-                expected_by_arch=expected_by_arch,
-            )
-        )
+        cases.append(_make_case(section, line, arch))
 
     return cases
+
+
+def parse_miopen_cases(path: Path, arch: str | None = None) -> list[Case]:
+    """Parse a file of MIOpenDriver commands (one per line) into ``Case`` objects.
+
+    Each command is converted to ckProfiler argument strings via
+    ``convert_miopen_driver_to_tile_profiler`` (the same converter used
+    standalone), yielding a FWD and/or BWD-data case per ``-F`` direction.
+    MIOpen commands carry no expected performance, so cases are unthresholded
+    (``expected=None``); ``arch`` is accepted for signature parity but unused.
+    """
+    # The converter lives one directory up (script/), next to this package.
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    import convert_miopen_driver_to_tile_profiler as conv
+
+    parser = conv.build_parser()
+    cases: list[Case] = []
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            converted = conv.convert_to_profiler_cases(line, parser)
+        except SystemExit:
+            # The converter calls exit() on unsupported drivers/layouts/dtypes;
+            # skip such lines rather than aborting the whole run.
+            print(f"WARNING: skipping unsupported MIOpen command: {line}")
+            continue
+        for section, args in converted:
+            cases.append(
+                Case(
+                    section=section,
+                    binary=_SECTION_BINARY[section],
+                    args=args,
+                    expected=None,
+                )
+            )
+    return cases
+
+
+def filter_cases(
+    cases: list[Case],
+    category: str | None = None,
+    dtype: str | list[str] | None = None,
+    group_count: int | None = None,
+    filter_size: str | list[str] | None = None,
+) -> list[Case]:
+    """Filter cases by section substring, data type(s), group count, and/or filter size.
+
+    ``dtype`` may be a single name (e.g. ``"fp16"``) or a list of names
+    (e.g. ``["fp16", "bf16"]``); only cases of those types are kept, which is
+    how unsupported types such as fp32 are excluded.
+
+    ``filter_size`` may be a single ``"<Y>x<X>"`` token (e.g. ``"3x3"``) or a
+    list of them (e.g. ``["3x3", "1x1"]``); only cases with a matching
+    convolution filter size are kept.
+    """
+    out = cases
+    if category:
+        flt = category.lower()
+        out = [c for c in out if flt in c.section.lower()]
+    if dtype:
+        names = [dtype] if isinstance(dtype, str) else dtype
+        toks = {DTYPE_TOKEN[d] for d in names}
+        out = [c for c in out if c.data_type in toks]
+    if group_count is not None:
+        out = [c for c in out if c.group_count == group_count]
+    if filter_size:
+        sizes = [filter_size] if isinstance(filter_size, str) else filter_size
+        wanted = {s.lower() for s in sizes}
+        out = [c for c in out if c.filter_size in wanted]
+    return out
 
 
 # ===========================================================================
@@ -513,7 +634,10 @@ def direct_conv_status(
     """Classify the direct conv outcome for a single run.
 
     Priority:
-      1. Non-empty stderr -> profiler reported incorrect results.
+      1. Non-empty stderr -> profiler reported incorrect results. A numerical
+         verification failure routes through run_cpu_validation -> check_err,
+         which writes the mismatch to std::cerr, so this branch also covers
+         "applicable instance(s) present but failed verification".
       2. No [Valid] direct conv line in stdout -> no applicable instance.
       3. Otherwise -> OK.
     """
@@ -524,19 +648,77 @@ def direct_conv_status(
     return DirectConvStatus.OK
 
 
+# Instance-name prefixes identifying iGEMM (implicit-GEMM) and direct-conv
+# kernels in the profiler's "[Valid] Perf:" lines, per section. Under
+# CK_EXPERIMENTAL_BUILDER (the build used by the profiler) the iGEMM instance
+# name is reflection-derived from the kernel struct name.
+IGEMM_PREFIX = {
+    "fwd": "GroupedConvolutionForwardKernel",
+    "bwd_data": "GroupedConvolutionBackwardDataKernel",
+}
+DIRECT_PREFIX = {
+    "fwd": "direct_tile_conv",
+    "bwd_data": "direct_tile_conv",
+}
+
+
 def compare_label(case: Case) -> str:
     """Short human-readable label for a comparison case from its arguments.
 
-    Column order (no profiler subcommand in args):
-      data_type layout indexing_type verify init_type print time_kernel nDims
-      G N K C Y X Hi Wi ...
+    FWD rows carry an extra ``indexing_type`` column, so G/N/K/C start one
+    column later than in BWD-data rows. A direction tag disambiguates rows that
+    would otherwise share the same shape label.
+      FWD: data_type layout indexing_type verify init print time nDims G N K C Y X Hi Wi
+      BWD: data_type layout verify init print time nDims G N K C Y X Hi Wi
     """
     args = case.args.split()
+    start = 8 if case.section == "fwd" else 7
+    tag = "FWD" if case.section == "fwd" else "BWD"
     try:
-        g, n, k, c, y, x, hi, wi = args[8:16]
-        return f"G{g}N{n}K{k}C{c}_{y}x{x}_{hi}x{wi}"
+        g, n, k, c, y, x, hi, wi = args[start:start + 8]
+        return f"{tag} G{g}N{n}K{k}C{c}_{y}x{x}_{hi}x{wi}"
     except (IndexError, ValueError):
-        return case.args
+        return f"{tag} {case.args}"
+
+
+_COMPARE_TITLE = "# CK Profiler: iGEMM vs Direct Conv"
+_COMPARE_TABLE_HEADER = (
+    "| Test case | iGEMM (TFlops) | Best iGEMM kernel"
+    " | Direct Conv (TFlops) | Best Direct kernel | Direct status | Improvement |\n"
+    "|-----------|---------------:|-------------------|"
+    "---------------------:|--------------------|---------------|------------:|"
+)
+_DIRECT_STATUS_STR = {
+    DirectConvStatus.OK: "✓ ok",
+    DirectConvStatus.INCORRECT: "✗ incorrect",
+    DirectConvStatus.NO_INSTANCE: "— no instance",
+}
+
+
+def compare_markdown_header() -> str:
+    """Markdown title + table header (the part written once, before any rows)."""
+    return f"{_COMPARE_TITLE}\n\n{_COMPARE_TABLE_HEADER}\n"
+
+
+def compare_markdown_row(
+    label: str,
+    ig: float | None,
+    ig_name: str | None,
+    dc: float | None,
+    dc_name: str | None,
+    dc_status: DirectConvStatus,
+) -> str:
+    """Format a single comparison row (no trailing newline)."""
+    ig_str = f"{ig:.4f}" if ig else "FAIL"
+    dc_str = f"{dc:.4f}" if dc else "—"
+    ig_name_str = f"`{ig_name}`" if ig_name else "—"
+    dc_name_str = f"`{dc_name}`" if dc_name else "—"
+    status_str = _DIRECT_STATUS_STR[dc_status]
+    improvement_str = f"{dc/ig:.3f}x" if ig and dc else "N/A"
+    return (
+        f"| {label} | {ig_str} | {ig_name_str} | {dc_str} | {dc_name_str} "
+        f"| {status_str} | {improvement_str} |"
+    )
 
 
 def render_compare_markdown(
@@ -547,33 +729,14 @@ def render_compare_markdown(
     direct_names: list[str | None],
     direct_statuses: list[DirectConvStatus],
 ) -> str:
-    """Render the iGEMM-vs-direct comparison table as markdown."""
-    header = (
-        "| Test case | iGEMM (TFlops) | Best iGEMM kernel"
-        " | Direct Conv (TFlops) | Best Direct kernel | Direct status | Improvement |\n"
-        "|-----------|---------------:|-------------------|"
-        "---------------------:|--------------------|---------------|------------:|"
-    )
-    rows = [header]
-    for label, ig, ig_name, dc, dc_name, dc_status in zip(
-        labels, igemm_best, igemm_names, direct_best, direct_names, direct_statuses
-    ):
-        ig_str = f"{ig:.4f}" if ig else "FAIL"
-        dc_str = f"{dc:.4f}" if dc else "—"
-        ig_name_str = f"`{ig_name}`" if ig_name else "—"
-        dc_name_str = f"`{dc_name}`" if dc_name else "—"
-        status_str = {
-            DirectConvStatus.OK: "✓ ok",
-            DirectConvStatus.INCORRECT: "✗ incorrect",
-            DirectConvStatus.NO_INSTANCE: "— no instance",
-        }[dc_status]
-        improvement_str = f"{dc/ig:.3f}x" if ig and dc else "N/A"
-        rows.append(
-            f"| {label} | {ig_str} | {ig_name_str} | {dc_str} | {dc_name_str} "
-            f"| {status_str} | {improvement_str} |"
+    """Render the full iGEMM-vs-direct comparison table as markdown."""
+    rows = [
+        compare_markdown_row(label, ig, ig_name, dc, dc_name, dc_status)
+        for label, ig, ig_name, dc, dc_name, dc_status in zip(
+            labels, igemm_best, igemm_names, direct_best, direct_names, direct_statuses
         )
-
-    return "# CK Profiler: iGEMM vs Direct Conv\n\n" + "\n".join(rows) + "\n"
+    ]
+    return compare_markdown_header() + "\n".join(rows) + "\n"
 
 
 def make_figure(
