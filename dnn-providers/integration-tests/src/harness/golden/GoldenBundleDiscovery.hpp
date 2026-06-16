@@ -14,6 +14,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
@@ -262,22 +264,193 @@ inline std::string deriveDataTypeFromGraph(
     return "unknown";
 }
 
-inline std::string
-    deriveLayoutFromGraph(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper)
+inline bool isPointwiseOp(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType)
 {
-    auto tensorMap = wrapper.getTensorMap();
-    for(auto& [uid, attrs] : tensorMap)
+    return attrType == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes;
+}
+
+inline bool isSdpaOp(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType)
+{
+    using NA = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
+    return attrType == NA::SdpaAttributes || attrType == NA::SdpaBackwardAttributes;
+}
+
+inline int64_t primaryInputUid(const hipdnn_flatbuffers_sdk::data_objects::Node* node)
+{
+    using NA = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
+    switch(node->attributes_type())
     {
-        if(attrs == nullptr || attrs->dims() == nullptr || attrs->strides() == nullptr)
+    case NA::ConvolutionFwdAttributes:
+        return node->attributes_as_ConvolutionFwdAttributes()->x_tensor_uid();
+    case NA::ConvolutionBwdAttributes:
+        return node->attributes_as_ConvolutionBwdAttributes()->dy_tensor_uid();
+    case NA::ConvolutionWrwAttributes:
+        return node->attributes_as_ConvolutionWrwAttributes()->x_tensor_uid();
+    case NA::BatchnormInferenceAttributes:
+        return node->attributes_as_BatchnormInferenceAttributes()->x_tensor_uid();
+    case NA::BatchnormInferenceAttributesVarianceExt:
+        return node->attributes_as_BatchnormInferenceAttributesVarianceExt()->x_tensor_uid();
+    case NA::BatchnormAttributes:
+        return node->attributes_as_BatchnormAttributes()->x_tensor_uid();
+    case NA::BatchnormBackwardAttributes:
+        return node->attributes_as_BatchnormBackwardAttributes()->x_tensor_uid();
+    case NA::SdpaAttributes:
+        return node->attributes_as_SdpaAttributes()->q_tensor_uid();
+    case NA::SdpaBackwardAttributes:
+        return node->attributes_as_SdpaBackwardAttributes()->q_tensor_uid();
+    case NA::MatmulAttributes:
+        return node->attributes_as_MatmulAttributes()->a_tensor_uid();
+    case NA::LayernormAttributes:
+        return node->attributes_as_LayernormAttributes()->x_tensor_uid();
+    case NA::LayernormBackwardAttributes:
+        return node->attributes_as_LayernormBackwardAttributes()->x_tensor_uid();
+    case NA::RMSNormAttributes:
+        return node->attributes_as_RMSNormAttributes()->x_tensor_uid();
+    case NA::RMSNormBackwardAttributes:
+        return node->attributes_as_RMSNormBackwardAttributes()->x_tensor_uid();
+    case NA::ReductionAttributes:
+        return node->attributes_as_ReductionAttributes()->in_tensor_uid();
+    case NA::BlockScaleQuantizeAttributes:
+        return node->attributes_as_BlockScaleQuantizeAttributes()->x_tensor_uid();
+    case NA::BlockScaleDequantizeAttributes:
+        return node->attributes_as_BlockScaleDequantizeAttributes()->x_tensor_uid();
+    case NA::ResampleFwdAttributes:
+        return node->attributes_as_ResampleFwdAttributes()->x_tensor_uid();
+    case NA::CustomOpAttributes:
+    {
+        const auto* uids = node->attributes_as_CustomOpAttributes()->input_tensor_uids();
+        if(uids != nullptr && !uids->empty())
         {
-            continue;
+            return uids->Get(0);
         }
-        if(attrs->dims()->size() >= 4)
+        return -1;
+    }
+    default:
+        return -1;
+    }
+}
+
+inline const std::vector<const hipdnn_data_sdk::utilities::TensorLayout*>*
+    layoutCandidates(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes opType, size_t ndim)
+{
+    using TL = hipdnn_data_sdk::utilities::TensorLayout;
+    static const std::vector<const TL*> s_sdpaLayouts = {&TL::BHSD, &TL::BSHD};
+    static const std::vector<const TL*> s_convLayouts5 = {&TL::NCDHW, &TL::NDHWC};
+    static const std::vector<const TL*> s_convLayouts4 = {&TL::NCHW, &TL::NHWC};
+    static const std::vector<const TL*> s_convLayouts3 = {&TL::NCL, &TL::NLC};
+    if(isSdpaOp(opType))
+    {
+        return &s_sdpaLayouts;
+    }
+    if(ndim == 5)
+    {
+        return &s_convLayouts5;
+    }
+    if(ndim == 4)
+    {
+        return &s_convLayouts4;
+    }
+    if(ndim == 3)
+    {
+        return &s_convLayouts3;
+    }
+    return nullptr;
+}
+
+inline std::string layoutNameFromGraph(const hipdnn_flatbuffers_sdk::data_objects::Graph* graph)
+{
+    if(graph == nullptr)
+    {
+        return "unknown";
+    }
+
+    const auto* nodes = graph->nodes();
+    if(nodes == nullptr || nodes->empty())
+    {
+        return "unknown";
+    }
+
+    const hipdnn_flatbuffers_sdk::data_objects::Node* primaryNode = nullptr;
+    for(flatbuffers::uoffset_t i = 0; i < nodes->size(); ++i)
+    {
+        const auto* node = nodes->Get(i);
+        if(node != nullptr && !isPointwiseOp(node->attributes_type()))
         {
-            return deriveLayoutFromStrides(attrs->dims(), attrs->strides());
+            primaryNode = node;
+            break;
+        }
+    }
+    if(primaryNode == nullptr)
+    {
+        return "unknown";
+    }
+
+    const auto uid = primaryInputUid(primaryNode);
+    if(uid == -1)
+    {
+        return "unknown";
+    }
+
+    const auto* tensors = graph->tensors();
+    if(tensors == nullptr)
+    {
+        return "unknown";
+    }
+
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* primaryTensor = nullptr;
+    for(flatbuffers::uoffset_t i = 0; i < tensors->size(); ++i)
+    {
+        const auto* t = tensors->Get(i);
+        if(t != nullptr && t->uid() == uid)
+        {
+            primaryTensor = t;
+            break;
+        }
+    }
+    if(primaryTensor == nullptr || primaryTensor->dims() == nullptr
+       || primaryTensor->strides() == nullptr)
+    {
+        return "unknown";
+    }
+
+    const auto ndim = primaryTensor->dims()->size();
+    if(ndim < 3)
+    {
+        return "unknown";
+    }
+
+    std::vector<int64_t> strides(ndim);
+    for(flatbuffers::uoffset_t i = 0; i < ndim; ++i)
+    {
+        strides[i] = primaryTensor->strides()->Get(i);
+    }
+
+    const auto order = hipdnn_data_sdk::utilities::extractStrideOrder(strides);
+
+    const auto* candidates = layoutCandidates(primaryNode->attributes_type(), ndim);
+    if(candidates == nullptr)
+    {
+        return "unknown";
+    }
+
+    for(const auto* layout : *candidates)
+    {
+        if(order == layout->strideOrder)
+        {
+            std::string name = layout->name;
+            std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            return name;
         }
     }
     return "unknown";
+}
+
+inline std::string
+    deriveLayoutFromGraph(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper)
+{
+    return layoutNameFromGraph(&wrapper.getGraph());
 }
 
 struct DerivedTestName
