@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -46,6 +46,17 @@
 // Including test_utils.hpp by itself will cause a compile error.
 #define TEST_UTILS_INCLUDE_GAURD
 #include "test_utils.hpp"
+
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    #define GTEST_SKIP_ASAN()                           \
+        do                                              \
+        {                                               \
+            GTEST_SKIP() << "Skipping test under ASan"; \
+        }                                               \
+        while(0)
+#else
+    #define GTEST_SKIP_ASAN()
+#endif
 
 #define HIP_CHECK(condition)         \
 {                                    \
