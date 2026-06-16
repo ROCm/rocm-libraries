@@ -129,7 +129,7 @@ void benchmark_single(const ck_tile::ArgParser& arg_parser)
                     arg_parser.get_int("rotating_count"),
                     arg_parser.get_bool("json_output")};
 
-    auto& profiler = BQuantGemmProfiler::instance(setting);
+    BQuantGemmProfiler profiler{setting};
 
     try
     {

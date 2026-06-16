@@ -20,15 +20,14 @@
 class BQuantGemmProfiler
 {
     public:
-    static BQuantGemmProfiler& instance(Setting setting)
-    {
-        static BQuantGemmProfiler instance{setting};
-        return instance;
-    }
+    explicit BQuantGemmProfiler(Setting setting) : setting_(setting) {}
+
+    BQuantGemmProfiler(const BQuantGemmProfiler&)            = delete;
+    BQuantGemmProfiler& operator=(const BQuantGemmProfiler&) = delete;
 
     void reset() { kernel_instances_.clear(); }
 
-    void benchmark(BQuantGemmProblem& problem,
+    void benchmark(BQuantGemmProblem problem,
                    std::function<float(const ck_tile::QuantGemmHostArgs&,
                                        const ck_tile::stream_config&)> kernel_func)
     {
@@ -45,7 +44,7 @@ class BQuantGemmProfiler
         benchmark(problem, callables);
     }
 
-    void benchmark(BQuantGemmProblem& problem,
+    void benchmark(BQuantGemmProblem problem,
                    std::vector<std::function<std::tuple<std::string, float>(
                        ck_tile::QuantGemmHostArgs&, const ck_tile::stream_config&)>>& callables)
     {
@@ -288,13 +287,7 @@ class BQuantGemmProfiler
         return kernel_instance;
     }
 
-    BQuantGemmProfiler(const BQuantGemmProfiler&)            = delete;
-    BQuantGemmProfiler& operator=(const BQuantGemmProfiler&) = delete;
-
     private:
-    ~BQuantGemmProfiler() { kernel_instances_.clear(); }
-    BQuantGemmProfiler(Setting setting) : setting_(setting) {}
-
     Setting setting_;
     std::vector<KernelInstance> kernel_instances_;
 };

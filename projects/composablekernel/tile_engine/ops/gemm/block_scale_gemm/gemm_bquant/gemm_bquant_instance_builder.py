@@ -187,10 +187,6 @@ def main():
 
     args = parser.parse_args()
 
-    assert args.datatype in ["fp16", "bf16", "fp8", "bf8"], (
-        f"Invalid datatype string: {args.datatype} (supported datatypes are [fp16, bf16, fp8, and bf8])"
-    )
-
     layout_parts = args.layout.lower()
     assert len(layout_parts) == 3, (
         f"Invalid layout string: {args.layout} (must be 3 characters like 'rcr')"

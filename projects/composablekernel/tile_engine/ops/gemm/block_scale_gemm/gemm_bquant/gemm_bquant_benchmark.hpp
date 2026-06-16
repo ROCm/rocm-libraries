@@ -15,9 +15,6 @@
 #include "ck_tile/host.hpp"
 #include "gemm_bquant_common.hpp"
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
 // Data types and Layouts are defined by the generated kernel headers:
 //   ADataType, BDataType, BQDataType, AccDataType, CDataType
 //   ALayout, BLayout, CLayout, BQLayout
@@ -175,6 +172,8 @@ auto calculate_rtol_atol_bquant(const ck_tile::index_t K,
     return ck_tile::make_tuple(std::max(rtol, rtol_split_k), std::max(atol, atol_split_k));
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 /// @brief Compare device and host results for BQuant GEMM
 bool compare_bquant(std::string instanceName,
                     ck_tile::index_t K,
