@@ -24,6 +24,7 @@
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <iomanip>
 #include <limits>
 #include <sstream>

@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include <climits>
 #include <cmath>
 #include <iostream>  // TODO: don't use iostream.
 #include <map>
