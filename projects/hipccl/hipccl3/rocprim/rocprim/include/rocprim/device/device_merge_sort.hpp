@@ -38,10 +38,12 @@
 #include "device_merge_sort_config.hpp"
 #include "device_transform.hpp"
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup devicemodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 namespace detail
 {
@@ -865,6 +867,8 @@ inline hipError_t merge_sort_impl(
 
 } // namespace detail
 
+#endif // DOXYGEN_SHOULD_SKIP_THIS
+
 /// \brief Parallel merge sort primitive for device level.
 ///
 /// \p merge_sort function performs a device-wide merge sort
@@ -1085,9 +1089,9 @@ inline hipError_t merge_sort(void*                temporary_storage,
                                            debug_synchronous);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_SORT_HPP_

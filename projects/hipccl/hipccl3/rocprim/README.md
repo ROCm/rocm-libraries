@@ -292,18 +292,18 @@ backend.
 
 #### Doxygen
 
-The build system uses Doxygen [version 1.9.4](https://github.com/doxygen/doxygen/releases/tag/Release_1_9_4). You can try using a newer version, but that might cause issues.
+The build system uses Doxygen [version 1.9.8](https://github.com/doxygen/doxygen/releases/tag/Release_1_9_8). You can try using a newer version, but that might cause issues.
 
-After you have downloaded Doxygen version 1.9.4:
+After you have downloaded Doxygen version 1.9.8:
 
 ```shell
 # Add doxygen to your PATH
-echo 'export PATH=<doxygen 1.9.4 path>/bin:$PATH' >> ~/.bashrc
+echo 'export PATH=<doxygen 1.9.8 path>/bin:$PATH' >> ~/.bashrc
 
 # Apply the updated .bashrc
 source ~/.bashrc
 
-# Confirm that you are using version 1.9.4
+# Confirm that you are using version 1.9.8
 doxygen --version
 ```
 
