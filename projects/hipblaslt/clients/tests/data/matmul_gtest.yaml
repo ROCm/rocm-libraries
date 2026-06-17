@@ -114,6 +114,18 @@ Tests:
    function: matmul, transA: N, transB: N, M: 64, N: 64, K: 64, alpha: 1.0, beta: 0.0,
    initialization: inf }
 
+# ROCM-26298: bf16 transposed GEMM (transA=T, transB=N) on gfx950 (MI350X/MI355X) triggers a
+# GPU illegal-memory-access fault. The heuristic-selected Tensile solution
+# (Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT128x192x128_..._SK3_..._ISA950) performs an
+# out-of-bounds store past the end of the D output buffer on a partial N macro-tile: it faults
+# when N is not a multiple of the 192-wide N macro-tile and the remainder N%192 lands in
+# [158, 191]. N=2096 (remainder 176) faults; N=2112 (a multiple of 192) is the adjacent control
+# that passes. The output buffer is allocated exactly ldd*N, so the OOB store is observable as an
+# illegal memory access. Tracked in known_bugs.yaml until the kernel store-edge fix lands.
+- {name: matmul_bf16_oob_store_ROCM26298, category: pre_checkin, precision: *hpa_bf16_precision,
+   function: matmul, transA: T, transB: N, M: 2816, N: [ 2096, 2112 ], K: 2048,
+   alpha: 1.0, beta: 0.0, norm_check: 1, gpu_arch: '950' }
+
 # Smoke: norm_dist_one_special (Gaussian fill + one FP special); batch_count 2 exercises packed strided buffers.
 - {name: matmul_norm_dist_one_special_smoke, category: quick, precision: *real_precisions,
    function: matmul, transA: N, transB: N, M: 32, N: 32, K: 32, alpha: 1.0, beta: 0.0,

@@ -11,3 +11,7 @@
 Known bugs:
   # ROCM-1545: TF32 matmul with INF inputs returns NaN on gfx950 (MI355)
   - { name: matmul_tf32_inf_ROCM1545, function: matmul, initialization: inf, known_bug_platforms: "gfx950, gfx1250" }
+  # ROCM-26298: bf16 transposed GEMM (T/N) does an out-of-bounds store on a partial N macro-tile
+  # (N%192 in [158,191]) on gfx950, causing an illegal memory access. N=2096 faults; the N=2112
+  # control (multiple of 192) is unaffected and is not listed here.
+  - { name: matmul_bf16_oob_store_ROCM26298, function: matmul, transA: T, transB: N, M: 2816, N: 2096, K: 2048, a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, known_bug_platforms: gfx950 }
