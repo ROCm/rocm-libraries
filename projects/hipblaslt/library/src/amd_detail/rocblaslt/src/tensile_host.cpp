@@ -253,6 +253,42 @@ namespace
     {
         return *(reinterpret_cast<const T*>(ptr));
     }
+
+    // Classifies an alpha/beta scalar (One / NegativeOne / Any) by reading it through
+    // its STORAGE type (== alphaBetaType, the type used by setAlphaType()/append()).
+    // Keying on the matrix type is wrong: an int8 GEMM stores alpha as int32, and
+    // reading it as float aliases the int32 bits 0x3F800000 (1.0f); a complex scalar
+    // collapsed to its magnitude loses sign/phase ((-1,0) and (0,1) both look like 1).
+    static TensileLite::ScalarValue get_scalar_value_from_void_ptr(const void*      ptr,
+                                                                   rocisa::DataType type)
+    {
+        if(!ptr)
+            return TensileLite::ScalarValue::Any; // Safety check
+
+        switch(type)
+        {
+        case rocisa::DataType::ComplexDouble:
+            return TensileLite::toScalarValueEnum(
+                *reinterpret_cast<const hipblaslt_complex_double*>(ptr));
+        case rocisa::DataType::ComplexFloat:
+            return TensileLite::toScalarValueEnum(
+                *reinterpret_cast<const hipblaslt_complex_float*>(ptr));
+        case rocisa::DataType::Double:
+            return TensileLite::toScalarValueEnum(*reinterpret_cast<const double*>(ptr));
+        case rocisa::DataType::Int32:
+            return TensileLite::toScalarValueEnum(*reinterpret_cast<const int32_t*>(ptr));
+        case rocisa::DataType::Half:
+            return TensileLite::toScalarValueEnum(*reinterpret_cast<const hipblasLtHalf*>(ptr));
+        case rocisa::DataType::Float:
+        case rocisa::DataType::XFloat32:
+            // f32, xf32, and all f32_fast_* (f16/bf16/f8/bf8) store alpha as float
+            return TensileLite::toScalarValueEnum(*reinterpret_cast<const float*>(ptr));
+        default:
+            throw std::runtime_error(
+                "get_scalar_value_from_void_ptr: unsupported alpha/beta storage type.");
+        }
+    }
+
     static void assignAlphaBeta(rocisa::DataType computeType,
                                 rocisa::DataType typeA,
                                 const void*      alphaPtr,
@@ -1884,10 +1920,22 @@ namespace
         // alpha and beta are copied from host to TensileLite::TypedContractionInputs
         // If k==0, we do not need to dereference prob.alpha and can set
         // tensileAlpha=0 Not positive if this is necessary here as well
-        double alphaRestriction = 0;
-        if(prob.k)
-            alphaRestriction = alpha;
-        tensileProblem.setAlphaRestriction(TensileLite::toScalarValueEnum(alphaRestriction));
+        // Derive the restriction from the alpha STORAGE type (complex -> a_type, else
+        // compute type), matching updateTensileProblem so the two paths never disagree.
+        if(prob.k == 0)
+        {
+            // If K=0, A*B is zero. Alpha doesn't matter.
+            tensileProblem.setAlphaRestriction(TensileLite::toScalarValueEnum(0.0));
+        }
+        else
+        {
+            tensileProblem.setAlphaRestriction(
+                get_scalar_value_from_void_ptr(prob.alpha, alphaBetaType));
+        }
+
+        // set beta restrictions (beta shares the same storage type as alpha)
+        tensileProblem.setBetaRestriction(
+            get_scalar_value_from_void_ptr(prob.beta, alphaBetaType));
 
         // Add problem predicates for CEqualsD
         tensileProblem.setCEqualsD(prob.C == prob.D);
@@ -2143,38 +2191,6 @@ namespace
         else
             tensileProblem.setUseDeviceUserArguments(false);
 
-        auto get_scalar_value_from_void_ptr
-            = [](const void* ptr, hipDataType type) -> TensileLite::ScalarValue {
-            if(!ptr)
-                return TensileLite::ScalarValue::Any; // Safety check
-
-            if(type == HIP_C_64F)
-            {
-                auto val = *(reinterpret_cast<const hipblaslt_complex_double*>(ptr));
-                return TensileLite::toScalarValueEnum(val);
-            }
-            else if(type == HIP_C_32F)
-            {
-                auto val = *(reinterpret_cast<const hipblaslt_complex_float*>(ptr));
-                return TensileLite::toScalarValueEnum(val);
-            }
-            else if(type == HIP_R_64F)
-            {
-                auto val = *(reinterpret_cast<const double*>(ptr));
-                return TensileLite::toScalarValueEnum(val);
-            }
-            else if(type == HIP_R_32I)
-            {
-                auto val = *(reinterpret_cast<const int32_t*>(ptr));
-                return TensileLite::toScalarValueEnum(val);
-            }
-            else
-            {
-                auto val = *(reinterpret_cast<const float*>(ptr));
-                return TensileLite::toScalarValueEnum(val);
-            }
-        };
-
         // alpha and beta are stored by value in TensileLite::TypedContractionInputs
         // alpha and beta are copied from host to TensileLite::TypedContractionInputs
         // If k==0, we do not need to dereference prob.alpha and can set
@@ -2186,13 +2202,14 @@ namespace
         }
         else
         {
-            // Read directly from prob.alpha using the matrix type
-            auto alpha_restriction = get_scalar_value_from_void_ptr(prob.alpha, prob.a_type);
+            // Read using the alpha STORAGE type (complex -> a_type, else compute type),
+            // matching setAlphaType()/append() so value and restriction never disagree.
+            auto alpha_restriction = get_scalar_value_from_void_ptr(prob.alpha, alphaBetaType);
             tensileProblem.setAlphaRestriction(alpha_restriction);
         }
 
-        //set beta restrictions
-        auto beta_restriction = get_scalar_value_from_void_ptr(prob.beta, prob.d_type);
+        // set beta restrictions (beta shares the same storage type as alpha)
+        auto beta_restriction = get_scalar_value_from_void_ptr(prob.beta, alphaBetaType);
         tensileProblem.setBetaRestriction(beta_restriction);
 
         // Add problem predicates for CEqualsD
