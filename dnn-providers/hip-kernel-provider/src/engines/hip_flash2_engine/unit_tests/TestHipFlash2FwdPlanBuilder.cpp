@@ -37,7 +37,14 @@ TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsFP16MHACausal)
     const std::vector<int64_t> dims{1, 32, 4096, 128};
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
-        dims, strides, dims, strides, dims, strides, dims, strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
         /*causal=*/true);
 
@@ -56,7 +63,14 @@ TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsFP16MHANonCausal)
     const std::vector<int64_t> dims{1, 32, 2048, 128};
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
-        dims, strides, dims, strides, dims, strides, dims, strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
         /*causal=*/false);
 
@@ -75,7 +89,14 @@ TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsFP16HeadDim64)
     const std::vector<int64_t> dims{1, 32, 2048, 64};
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
-        dims, strides, dims, strides, dims, strides, dims, strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
@@ -91,12 +112,19 @@ TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsFP16GQA)
     if(arch != "gfx942" && arch != "gfx950")
         GTEST_SKIP();
 
-    const std::vector<int64_t> qDims{1, 32, 4096, 128};  // 32 query heads
-    const std::vector<int64_t> kvDims{1, 8,  4096, 128}; // 8 KV heads (GQA ratio=4)
-    const auto qStrides  = hipdnn_data_sdk::utilities::generateStrides(qDims);
+    const std::vector<int64_t> qDims{1, 32, 4096, 128}; // 32 query heads
+    const std::vector<int64_t> kvDims{1, 8, 4096, 128}; // 8 KV heads (GQA ratio=4)
+    const auto qStrides = hipdnn_data_sdk::utilities::generateStrides(qDims);
     const auto kvStrides = hipdnn_data_sdk::utilities::generateStrides(kvDims);
     auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
-        qDims, qStrides, kvDims, kvStrides, kvDims, kvStrides, qDims, qStrides,
+        qDims,
+        qStrides,
+        kvDims,
+        kvStrides,
+        kvDims,
+        kvStrides,
+        qDims,
+        qStrides,
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
         /*causal=*/true);
 
@@ -113,7 +141,14 @@ TEST_F(TestHipFlash2FwdPlanBuilder, RejectsBF16)
     const std::vector<int64_t> dims{1, 32, 2048, 128};
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
-        dims, strides, dims, strides, dims, strides, dims, strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
         hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
@@ -131,7 +166,14 @@ TEST_F(TestHipFlash2FwdPlanBuilder, RejectsUnsupportedHeadDim256)
     const std::vector<int64_t> dims{1, 32, 2048, 256};
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
-        dims, strides, dims, strides, dims, strides, dims, strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
@@ -149,10 +191,17 @@ TEST_F(TestHipFlash2FwdPlanBuilder, RejectsShortSequenceDecodeLength)
     // seq_q=1 means decode — should use batched GEMM, not Flash2
     const std::vector<int64_t> qDims{1, 32, 1, 128};
     const std::vector<int64_t> kvDims{1, 32, 2048, 128};
-    const auto qStrides  = hipdnn_data_sdk::utilities::generateStrides(qDims);
+    const auto qStrides = hipdnn_data_sdk::utilities::generateStrides(qDims);
     const auto kvStrides = hipdnn_data_sdk::utilities::generateStrides(kvDims);
     auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
-        qDims, qStrides, kvDims, kvStrides, kvDims, kvStrides, qDims, qStrides,
+        qDims,
+        qStrides,
+        kvDims,
+        kvStrides,
+        kvDims,
+        kvStrides,
+        qDims,
+        qStrides,
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
