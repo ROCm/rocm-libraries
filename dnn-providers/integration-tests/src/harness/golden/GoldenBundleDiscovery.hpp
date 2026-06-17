@@ -43,9 +43,14 @@ inline std::vector<std::filesystem::path>
     return paths;
 }
 
-// Golden-ref filter: true for companion metadata files, i.e. either a bare
-// `meta.json` or any `{Name}.meta.json`. These are not bundle graphs and must
-// be excluded from discovery.
+// Golden-ref filter: true for companion .json files that are NOT bundle graphs
+// and must be excluded from discovery. Currently only metadata: a bare
+// `meta.json` or any `{Name}.meta.json`.
+//
+// NOTE: scanTier keeps every .json this returns false for, so this is the single
+// chokepoint for "companion, not a graph." Any future non-graph companion (e.g.
+// a planned support.json) MUST be added here — otherwise it is misregistered as
+// a graph bundle and fails at load time as a spurious test.
 inline bool isGoldenMetaFile(const std::filesystem::path& jsonPath)
 {
     if(jsonPath.filename() == "meta.json")
