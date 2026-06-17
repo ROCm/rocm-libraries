@@ -46,6 +46,18 @@ def fastdeepcopy(x):
     # Note: Some object can't be pickled
     return pickle.loads(pickle.dumps(x))
 
+def isSubtileMultiDU(kernel) -> bool:
+    """True when a subtile kernel runs in multi-DU mode.
+
+    Multi-DU means a data tensor's per-uid DepthU (_DepthUA/_DepthUB) is
+    smaller than the loop DepthU, i.e. the unroll is split into sub-iterations
+    (currently the MXFP8 swizzle path). Single helper so the detection is not
+    re-derived inline across the codegen (AsmStoreState, GlobalWriteBatch,
+    KernelWriterAssembly).
+    """
+    du = kernel["DepthU"]
+    return kernel.get("_DepthUA", du) < du or kernel.get("_DepthUB", du) < du
+
 # Global
 _global_ti = rocIsa.getInstance()
 

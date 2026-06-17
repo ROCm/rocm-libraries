@@ -42,7 +42,7 @@ from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
 from rocisa.functions import vectorStaticMultiply
 from rocisa.macro import PseudoRandomGeneratorModule
 
-from ..Common import DataDirection, SemanticVersion
+from ..Common import DataDirection, SemanticVersion, isSubtileMultiDU
 from ..Common.DataType import DataType
 from ..Component import GlobalWriteComponents
 from ..Component import Component
@@ -200,8 +200,7 @@ class GlobalWriteBatchWriter:
     # prevents cross-wave LDS corruption from ds_bpermute. Multi-DU emits the
     # drain+barrier before the _emitAdd subtile stores; non-multi-DU emits
     # _emitAdd first.
-    _du = self.kernel["DepthU"]
-    isMultiDU = self.kernel.get("_DepthUA", _du) < _du or self.kernel.get("_DepthUB", _du) < _du
+    isMultiDU = isSubtileMultiDU(self.kernel)
     drainBiasSav = self.kernel.get("UseSubtileImpl") and \
        (self.parentWriter.states.useBias != DataDirection.NONE or \
         self.kernel["ProblemType"].get("UseScaleAlphaVec", 0))
@@ -581,8 +580,7 @@ class GlobalWriteBatchWriter:
         modGwvwScaleAlpha = Module("GwvwScaleAlpha")
         # For multi-DU, the subtile ScaleAlphaVec epilogue load passes None as the
         # LDS reference vgpr; non-multi-DU uses localReferenceVgpr.
-        _savDu = self.kernel["DepthU"]
-        savIsMultiDU = self.kernel.get("_DepthUA", _savDu) < _savDu or self.kernel.get("_DepthUB", _savDu) < _savDu
+        savIsMultiDU = isSubtileMultiDU(self.kernel)
         if savIsMultiDU:
           savLdsRefVgpr = None if (self.kernel.get("UseSubtileImpl") and addrScaleAlphaVecVgpr is not None) else localReferenceVgpr
         else:

@@ -21,7 +21,7 @@
 ################################################################################
 
 from .AsmAddressCalculation import AddrCalculation
-from .Common import DataDirection
+from .Common import DataDirection, isSubtileMultiDU
 from .Common.DataType import DataType
 
 from math import ceil, trunc, modf
@@ -258,9 +258,7 @@ class StoreState:
                 # (localReferenceVgpr) for the SAV LDS read, so a dedicated SAV
                 # address would only force a redundant per-read recompute in
                 # emitLdChange.
-                _du = kernel["DepthU"]
-                _isMultiDU = kernel.get("_DepthUA", _du) < _du or kernel.get("_DepthUB", _du) < _du
-                if (kernel.get("UseSubtileImpl") and self.useBias == DataDirection.READ and _isMultiDU) or \
+                if (kernel.get("UseSubtileImpl") and self.useBias == DataDirection.READ and isSubtileMultiDU(kernel)) or \
                    (self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha"):
                     self.sharedColScaleAlphaVecVgprs = kernelWriter.vgprPool.checkOut(self.numAddrVgpr, "sharedColScaleAlphaVecVgprs for packed elements")
                 else:
@@ -306,9 +304,7 @@ class StoreState:
             if kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
                 # Only allocate a separate ScaleAlphaVec column-address vgpr for
                 # multi-DU kernels (see note above).
-                _du = kernel["DepthU"]
-                _isMultiDU = kernel.get("_DepthUA", _du) < _du or kernel.get("_DepthUB", _du) < _du
-                if (kernel.get("UseSubtileImpl") and self.useBias == DataDirection.READ and _isMultiDU) or \
+                if (kernel.get("UseSubtileImpl") and self.useBias == DataDirection.READ and isSubtileMultiDU(kernel)) or \
                    (self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha"):
                     self.sharedColScaleAlphaVecVgprs = kernelWriter.vgprPool.checkOut(1, "sharedColScaleAlphaVecVgprs for packed elements")
                 else:

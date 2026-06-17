@@ -81,7 +81,7 @@ from .CustomKernels import isCustomKernelConfig
 from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
-from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection
+from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU
 from Tensile.Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal
 from Tensile.Common.DataType import DataType
 from Tensile.Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
@@ -16928,10 +16928,7 @@ class KernelWriterAssembly(KernelWriter):
     # Emit the epilogue vector-LDS drain barrier for multi-DU kernels only
     # (matches the GlobalWriteBatch bias/SAV barrier gating). Single-DU MX
     # kernels do not need it.
-    _du = kernel["DepthU"]
-    _isMultiDU = (kernel.get("_DepthUA", _du) < _du
-                  or kernel.get("_DepthUB", _du) < _du)
-    if kernel.get("UseSubtileImpl") and _isMultiDU:
+    if kernel.get("UseSubtileImpl") and isSubtileMultiDU(kernel):
       module.add(SWaitCnt(dscnt=0, comment="drain epilogue vector LDS writes"))
       module.add(SBarrier(comment="sync waves after epilogue vector LDS writes"))
 
