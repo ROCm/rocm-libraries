@@ -15,8 +15,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 # Coverage-enabled projects: project key -> (cmake_target, build_subdir)
 # Only projects listed here will get coverage jobs
 COVERAGE_PROJECT_METADATA = {
-    "hipdnn": ("hipDNN", "ml-libs/hipDNN"),
-    "prim": ("rocPRIM", "math-libs/PRIM"),
+    "hiprand": ("hipRAND", "ml-libs/hipRAND"),
 }
 
 
@@ -61,8 +60,12 @@ def main():
     for proj in projects:
         pts_list = [p for p in proj.get("projects_to_test", "").split(",") if p]
 
-        # Find primary project (prefer changed projects)
-        primary = pts_list[0] if pts_list else ""
+        # Find primary project: prefer the first coverage-enabled test project,
+        # then a changed project, otherwise fall back to the first entry.
+        primary = next(
+            (p for p in pts_list if p in COVERAGE_PROJECT_METADATA),
+            pts_list[0] if pts_list else "",
+        )
         for p in pts_list:
             if p in changed_project_keys:
                 primary = p
