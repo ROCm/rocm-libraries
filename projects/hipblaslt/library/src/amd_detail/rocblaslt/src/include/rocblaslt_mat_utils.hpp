@@ -220,15 +220,6 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
         return rocblaslt_status_invalid_size;
     }
 
-    // sizes must not be negative
-    if(batch_offset_a < 0 || batch_offset_b < 0 || batch_offset_c < 0 || batch_offset_d < 0)
-    {
-#ifndef CODE_COVERAGE
-        std::cerr << "matrix offset size must be zero or positive" << std::endl;
-#endif
-        return rocblaslt_status_invalid_size;
-    }
-
     // Batch offsets are expressed in elements and converted to bytes; sub-byte
     // (MX) data types are not byte-addressable, so a nonzero offset is unsupported.
     if((batch_offset_a != 0 && hip_datatype_is_mxtype(type_a))
