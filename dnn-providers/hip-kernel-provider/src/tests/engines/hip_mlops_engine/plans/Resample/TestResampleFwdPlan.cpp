@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 
 #include <algorithm>
-#include <cstdio>
 #include <optional>
 #include <type_traits>
 
@@ -13,6 +12,8 @@
 #include "mocks/MockCompiledProgram.hpp"
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
+
+#include "../TestPlanCommon.hpp"
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -116,15 +117,6 @@ std::pair<flatbuffers::FlatBufferBuilder, ResampleFwdPlan>
 
     ResampleFwdParams params(attr, graph.getTensorMap(), node.compute_data_type());
     return {std::move(builder), ResampleFwdPlan{std::move(params)}};
-}
-
-hipDeviceProp_t createTestDeviceProps(const char* archName = "gfx942")
-{
-    hipDeviceProp_t deviceProps = {};
-    deviceProps.multiProcessorCount = 60;
-    deviceProps.warpSize = 64;
-    std::snprintf(deviceProps.gcnArchName, sizeof(deviceProps.gcnArchName), "%s", archName);
-    return deviceProps;
 }
 
 } // namespace

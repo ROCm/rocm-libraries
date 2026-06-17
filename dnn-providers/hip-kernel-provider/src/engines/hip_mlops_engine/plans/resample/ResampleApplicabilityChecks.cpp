@@ -21,9 +21,8 @@ void ResampleValidator::checkTensorLayoutsAndDimsSupported()
     std::vector<TensorDescriptor> tensors;
     tensors.reserve(_tensorMap.size());
 
-    for(const auto& [id, attr] : _tensorMap)
+    for(const auto& [_, attr] : _tensorMap)
     {
-        (void)id;
         if(attr->value_type() == data_objects::TensorValue::NONE)
         {
             tensors.emplace_back(attr);
@@ -108,7 +107,7 @@ void ResampleValidator::checkTensorConfigSupported(
                                                        "ResampleFwd padding mode must be set.");
     }
     const bool generateIndex
-        = resampleAttr.generate_index().has_value() && resampleAttr.generate_index();
+        = resampleAttr.generate_index().has_value() && resampleAttr.generate_index().value();
     if(generateIndex && !resampleAttr.index_tensor_uid().has_value())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
