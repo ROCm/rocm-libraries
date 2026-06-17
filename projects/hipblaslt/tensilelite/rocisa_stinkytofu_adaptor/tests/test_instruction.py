@@ -244,6 +244,54 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     VCvtScalePkF16toBF8,
     VCvtScaleSRF16toFP8,
     VCvtScaleSRF16toBF8,
+    BufferLoadU8,
+    BufferLoadD16HIU8,
+    BufferLoadD16U8,
+    BufferLoadD16HIB16,
+    BufferLoadD16B16,
+    BufferLoadB32,
+    BufferLoadB64,
+    BufferLoadB96,
+    BufferLoadB128,
+    BufferStoreB8,
+    BufferStoreD16HIU8,
+    BufferStoreD16HIB16,
+    BufferStoreB16,
+    BufferStoreB32,
+    BufferStoreB64,
+    BufferStoreB128,
+    BufferAtomicAddF32,
+    BufferAtomicCmpswapB32,
+    BufferAtomicCmpswapB64,
+    FlatLoadD16HIU8,
+    FlatLoadD16U8,
+    FlatLoadD16HIB16,
+    FlatLoadD16B16,
+    FlatLoadB32,
+    FlatLoadB64,
+    FlatLoadB128,
+    FlatStoreD16HIB16,
+    FlatStoreB32,
+    FlatStoreB64,
+    FlatStoreB128,
+    FlatAtomicCmpswapB32,
+    DSLoadU8,
+    DSLoadU16,
+    DSLoadB32,
+    DSLoadB64,
+    DSLoadB128,
+    DSLoad2B32,
+    DSLoad2B64,
+    DSStoreB8,
+    DSStoreB16,
+    DSStoreB32,
+    DSStoreB64,
+    DSStoreB96,
+    DSStoreB128,
+    DSStore2B32,
+    DSStore2B64,
+    DSBPermuteB32,
+    TensorLoadToLds,
     _to_stinky_register,
 )
 
@@ -2020,6 +2068,403 @@ class TestCvtScaleConstruction(unittest.TestCase):
                 m = Module()
                 m.add(cls(dst=vgpr(0), src=vgpr(1), scale=vgpr(2)))
                 self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+# ===========================================================================
+# Memory instructions -- Step 8 (Buffer/Flat/DS/Tensor).
+# ===========================================================================
+
+
+_BUFFER_LOAD = [
+    (BufferLoadU8, "buffer_load_u8"),
+    (BufferLoadD16HIU8, "buffer_load_d16_hi_u8"),
+    (BufferLoadD16U8, "buffer_load_d16_u8"),
+    (BufferLoadD16HIB16, "buffer_load_d16_hi_b16"),
+    (BufferLoadD16B16, "buffer_load_d16_b16"),
+    (BufferLoadB32, "buffer_load_b32"),
+    (BufferLoadB64, "buffer_load_b64"),
+    (BufferLoadB96, "buffer_load_b96"),
+    (BufferLoadB128, "buffer_load_b128"),
+]
+
+_BUFFER_STORE = [
+    (BufferStoreB8, "buffer_store_b8"),
+    (BufferStoreD16HIU8, "buffer_store_d16_hi_b8"),
+    (BufferStoreD16HIB16, "buffer_store_d16_hi_b16"),
+    (BufferStoreB16, "buffer_store_b16"),
+    (BufferStoreB32, "buffer_store_b32"),
+    (BufferStoreB64, "buffer_store_b64"),
+    (BufferStoreB128, "buffer_store_b128"),
+    (BufferAtomicCmpswapB32, "buffer_atomic_cmpswap_b32"),
+    (BufferAtomicCmpswapB64, "buffer_atomic_cmpswap_b64"),
+]
+
+_FLAT_LOAD = [
+    (FlatLoadD16HIU8, "flat_load_d16_hi_u8"),
+    (FlatLoadD16U8, "flat_load_d16_u8"),
+    (FlatLoadD16HIB16, "flat_load_d16_hi_b16"),
+    (FlatLoadD16B16, "flat_load_d16_b16"),
+    (FlatLoadB32, "flat_load_b32"),
+    (FlatLoadB64, "flat_load_b64"),
+    (FlatLoadB128, "flat_load_b128"),
+]
+
+_FLAT_STORE = [
+    (FlatStoreD16HIB16, "flat_store_d16_hi_b16"),
+    (FlatStoreB32, "flat_store_b32"),
+    (FlatStoreB64, "flat_store_b64"),
+    (FlatStoreB128, "flat_store_b128"),
+]
+
+_DS_LOAD = [
+    (DSLoadU8, "ds_load_u8"),
+    (DSLoadU16, "ds_load_u16"),
+    (DSLoadB32, "ds_load_b32"),
+    (DSLoadB64, "ds_load_b64"),
+    (DSLoadB128, "ds_load_b128"),
+]
+
+_DS_LOAD2 = [
+    (DSLoad2B32, "ds_load2_b32"),
+    (DSLoad2B64, "ds_load2_b64"),
+]
+
+_DS_STORE = [
+    (DSStoreB8, "ds_store_b8"),
+    (DSStoreB16, "ds_store_b16"),
+    (DSStoreB32, "ds_store_b32"),
+    (DSStoreB64, "ds_store_b64"),
+    (DSStoreB96, "ds_store_b96"),
+    (DSStoreB128, "ds_store_b128"),
+]
+
+_DS_STORE2 = [
+    (DSStore2B32, "ds_store2_b32"),
+    (DSStore2B64, "ds_store2_b64"),
+]
+
+
+class TestBufferLoadInstructions(unittest.TestCase):
+    def test_construction_and_mnemonic(self):
+        for cls, mnemonic in _BUFFER_LOAD:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), vaddr=vgpr(1), saddr=sgpr(4, 4),
+                           soffset=0, comment="load")
+                self.assertIn(mnemonic, str(inst))
+
+    def test_deepcopy(self):
+        for cls, _ in _BUFFER_LOAD:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), vaddr=vgpr(1), saddr=sgpr(4, 4), soffset=0)
+                c = copy.deepcopy(inst)
+                self.assertIsInstance(c, cls)
+                self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        for cls, _ in _BUFFER_LOAD:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), vaddr=vgpr(1), saddr=sgpr(4, 4), soffset=0)
+                self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        for cls, _ in _BUFFER_LOAD:
+            with self.subTest(cls=cls.__name__):
+                m = Module()
+                m.add(cls(dst=vgpr(0), vaddr=vgpr(1), saddr=sgpr(4, 4), soffset=0))
+                self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestBufferAtomicAddF32(unittest.TestCase):
+    def test_construction(self):
+        inst = BufferAtomicAddF32(dst=vgpr(2), vaddr=vgpr(1),
+                                  saddr=sgpr(4, 4), soffset=0, comment="at")
+        self.assertIn("buffer_atomic_add_f32", str(inst))
+
+    def test_has_to_stinky_logical(self):
+        inst = BufferAtomicAddF32(dst=vgpr(0), vaddr=vgpr(1),
+                                  saddr=sgpr(4, 4), soffset=0)
+        self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+
+class TestBufferStoreInstructions(unittest.TestCase):
+    def test_construction_and_mnemonic(self):
+        for cls, mnemonic in _BUFFER_STORE:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(src=vgpr(0), vaddr=vgpr(1), saddr=sgpr(4, 4),
+                           soffset=0, comment="store")
+                self.assertIn(mnemonic, str(inst))
+
+    def test_deepcopy(self):
+        for cls, _ in _BUFFER_STORE:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(src=vgpr(0), vaddr=vgpr(1), saddr=sgpr(4, 4), soffset=0)
+                c = copy.deepcopy(inst)
+                self.assertIsInstance(c, cls)
+                self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        for cls, _ in _BUFFER_STORE:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(src=vgpr(0), vaddr=vgpr(1), saddr=sgpr(4, 4), soffset=0)
+                self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        for cls, _ in _BUFFER_STORE:
+            with self.subTest(cls=cls.__name__):
+                m = Module()
+                m.add(cls(src=vgpr(0), vaddr=vgpr(1), saddr=sgpr(4, 4), soffset=0))
+                self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestFlatLoadInstructions(unittest.TestCase):
+    def test_construction_and_mnemonic(self):
+        for cls, mnemonic in _FLAT_LOAD:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), vaddr=vgpr(2), comment="fload")
+                self.assertIn(mnemonic, str(inst))
+
+    def test_deepcopy(self):
+        for cls, _ in _FLAT_LOAD:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), vaddr=vgpr(2))
+                c = copy.deepcopy(inst)
+                self.assertIsInstance(c, cls)
+                self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        for cls, _ in _FLAT_LOAD:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), vaddr=vgpr(2))
+                self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        for cls, _ in _FLAT_LOAD:
+            with self.subTest(cls=cls.__name__):
+                m = Module()
+                m.add(cls(dst=vgpr(0), vaddr=vgpr(2)))
+                self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestFlatStoreInstructions(unittest.TestCase):
+    def test_construction_and_mnemonic(self):
+        for cls, mnemonic in _FLAT_STORE:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(src=vgpr(0), vaddr=vgpr(2), comment="fstore")
+                self.assertIn(mnemonic, str(inst))
+
+    def test_deepcopy(self):
+        for cls, _ in _FLAT_STORE:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(src=vgpr(0), vaddr=vgpr(2))
+                c = copy.deepcopy(inst)
+                self.assertIsInstance(c, cls)
+                self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        for cls, _ in _FLAT_STORE:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(src=vgpr(0), vaddr=vgpr(2))
+                self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        for cls, _ in _FLAT_STORE:
+            with self.subTest(cls=cls.__name__):
+                m = Module()
+                m.add(cls(src=vgpr(0), vaddr=vgpr(2)))
+                self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestFlatAtomicCmpswapB32(unittest.TestCase):
+    def test_construction(self):
+        inst = FlatAtomicCmpswapB32(vaddr=vgpr(0), tmp=vgpr(1),
+                                     src=vgpr(2), comment="cas")
+        self.assertIn("flat_atomic_cmpswap_b32", str(inst))
+
+    def test_deepcopy(self):
+        inst = FlatAtomicCmpswapB32(vaddr=vgpr(0), tmp=vgpr(1), src=vgpr(2))
+        c = copy.deepcopy(inst)
+        self.assertIsInstance(c, FlatAtomicCmpswapB32)
+        self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        inst = FlatAtomicCmpswapB32(vaddr=vgpr(0), tmp=vgpr(1), src=vgpr(2))
+        self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        m = Module()
+        m.add(FlatAtomicCmpswapB32(vaddr=vgpr(0), tmp=vgpr(1), src=vgpr(2)))
+        self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestDSLoadInstructions(unittest.TestCase):
+    def test_construction_and_mnemonic(self):
+        for cls, mnemonic in _DS_LOAD:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src=vgpr(1), comment="dsld")
+                self.assertIn(mnemonic, str(inst))
+
+    def test_deepcopy(self):
+        for cls, _ in _DS_LOAD:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src=vgpr(1))
+                c = copy.deepcopy(inst)
+                self.assertIsInstance(c, cls)
+                self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        for cls, _ in _DS_LOAD:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src=vgpr(1))
+                self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        for cls, _ in _DS_LOAD:
+            with self.subTest(cls=cls.__name__):
+                m = Module()
+                m.add(cls(dst=vgpr(0), src=vgpr(1)))
+                self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestDSLoad2Instructions(unittest.TestCase):
+    def test_construction_and_mnemonic(self):
+        for cls, mnemonic in _DS_LOAD2:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src=vgpr(1), comment="dsld2")
+                self.assertIn(mnemonic, str(inst))
+
+    def test_deepcopy(self):
+        for cls, _ in _DS_LOAD2:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src=vgpr(1))
+                c = copy.deepcopy(inst)
+                self.assertIsInstance(c, cls)
+                self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        for cls, _ in _DS_LOAD2:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src=vgpr(1))
+                self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        for cls, _ in _DS_LOAD2:
+            with self.subTest(cls=cls.__name__):
+                m = Module()
+                m.add(cls(dst=vgpr(0), src=vgpr(1)))
+                self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestDSStoreInstructions(unittest.TestCase):
+    def test_construction_and_mnemonic(self):
+        for cls, mnemonic in _DS_STORE:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dstAddr=vgpr(0), src=vgpr(1), comment="dsst")
+                self.assertIn(mnemonic, str(inst))
+
+    def test_deepcopy(self):
+        for cls, _ in _DS_STORE:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dstAddr=vgpr(0), src=vgpr(1))
+                c = copy.deepcopy(inst)
+                self.assertIsInstance(c, cls)
+                self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        for cls, _ in _DS_STORE:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dstAddr=vgpr(0), src=vgpr(1))
+                self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        for cls, _ in _DS_STORE:
+            with self.subTest(cls=cls.__name__):
+                m = Module()
+                m.add(cls(dstAddr=vgpr(0), src=vgpr(1)))
+                self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestDSStore2Instructions(unittest.TestCase):
+    def test_construction_and_mnemonic(self):
+        for cls, mnemonic in _DS_STORE2:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dstAddr=vgpr(0), src0=vgpr(1), src1=vgpr(2),
+                           comment="dsst2")
+                self.assertIn(mnemonic, str(inst))
+
+    def test_deepcopy(self):
+        for cls, _ in _DS_STORE2:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dstAddr=vgpr(0), src0=vgpr(1), src1=vgpr(2))
+                c = copy.deepcopy(inst)
+                self.assertIsInstance(c, cls)
+                self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        for cls, _ in _DS_STORE2:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dstAddr=vgpr(0), src0=vgpr(1), src1=vgpr(2))
+                self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        for cls, _ in _DS_STORE2:
+            with self.subTest(cls=cls.__name__):
+                m = Module()
+                m.add(cls(dstAddr=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
+                self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestDSBPermuteB32(unittest.TestCase):
+    def test_construction(self):
+        inst = DSBPermuteB32(dstAddr=vgpr(0), src0=vgpr(1), src1=vgpr(2),
+                             comment="perm")
+        self.assertIn("ds_bpermute_b32", str(inst))
+
+    def test_deepcopy(self):
+        inst = DSBPermuteB32(dstAddr=vgpr(0), src0=vgpr(1), src1=vgpr(2))
+        c = copy.deepcopy(inst)
+        self.assertIsInstance(c, DSBPermuteB32)
+        self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        inst = DSBPermuteB32(dstAddr=vgpr(0), src0=vgpr(1), src1=vgpr(2))
+        self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        m = Module()
+        m.add(DSBPermuteB32(dstAddr=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
+        self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestTensorLoadToLds(unittest.TestCase):
+    def test_construction(self):
+        inst = TensorLoadToLds(group0=vgpr(0), group1=vgpr(1), comment="tld")
+        self.assertIn("tensor_load_to_lds", str(inst))
+
+    def test_deepcopy(self):
+        inst = TensorLoadToLds(group0=vgpr(0), group1=vgpr(1))
+        c = copy.deepcopy(inst)
+        self.assertIsInstance(c, TensorLoadToLds)
+        self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        inst = TensorLoadToLds(group0=vgpr(0), group1=vgpr(1))
+        self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        m = Module()
+        m.add(TensorLoadToLds(group0=vgpr(0), group1=vgpr(1)))
+        self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
 # ===========================================================================

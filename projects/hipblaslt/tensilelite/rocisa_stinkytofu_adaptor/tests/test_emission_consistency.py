@@ -1441,5 +1441,157 @@ class TestVCvtPkF32toBF16Emission(unittest.TestCase, _ThreePathEqualityCase):
 ## but the asm emission cannot be compared end-to-end yet.
 
 
+# ===========================================================================
+# Memory instructions -- DS Load/Store (Step 8)
+# ===========================================================================
+
+
+class TestDSLoadB32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``ds_load_b32 v0, v1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import DSLoadB32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(DSLoadB32(dst=vgpr(0), src=vgpr(1)))
+    """)
+
+
+class TestDSLoadB64Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``ds_load_b64 v[0:1], v2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import DSLoadB64
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(DSLoadB64(dst=vgpr(0, 2), src=vgpr(2)))
+    """)
+
+
+class TestDSLoadB128Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``ds_load_b128 v[0:3], v4``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import DSLoadB128
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(DSLoadB128(dst=vgpr(0, 4), src=vgpr(4)))
+    """)
+
+
+class TestDSLoadU8Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``ds_load_u8 v0, v1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import DSLoadU8
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(DSLoadU8(dst=vgpr(0), src=vgpr(1)))
+    """)
+
+
+class TestDSLoadU16Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``ds_load_u16 v0, v1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import DSLoadU16
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(DSLoadU16(dst=vgpr(0), src=vgpr(1)))
+    """)
+
+
+class TestDSStoreB32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``ds_store_b32 v0, v1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import DSStoreB32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(DSStoreB32(dstAddr=vgpr(0), src=vgpr(1)))
+    """)
+
+
+class TestDSStoreB64Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``ds_store_b64 v0, v[1:2]``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import DSStoreB64
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(DSStoreB64(dstAddr=vgpr(0), src=vgpr(1, 2)))
+    """)
+
+
+class TestDSStoreB128Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``ds_store_b128 v0, v[1:4]``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import DSStoreB128
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(DSStoreB128(dstAddr=vgpr(0), src=vgpr(1, 4)))
+    """)
+
+
+class TestDSStoreB8Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``ds_store_b8 v0, v1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import DSStoreB8
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(DSStoreB8(dstAddr=vgpr(0), src=vgpr(1)))
+    """)
+
+
+class TestDSStoreB16Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``ds_store_b16 v0, v1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import DSStoreB16
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(DSStoreB16(dstAddr=vgpr(0), src=vgpr(1)))
+    """)
+
+
+class TestDSStoreB96Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``ds_store_b96 v0, v[1:3]``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import DSStoreB96
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(DSStoreB96(dstAddr=vgpr(0), src=vgpr(1, 3)))
+    """)
+
+
+## DSBPermuteB32 emission consistency is skipped: native rocisa path-1 toString()
+## and path-2 toStinkyTofuModule produce different asm for this instruction
+## (mismatch unrelated to our adaptor), so three-path equality is not achievable.
+## The adaptor's to_stinky_logical() is validated by unit tests above.
+
+
+## Buffer/Flat emission consistency tests are skipped: the logicalIR lowering
+## for buffer/flat memory instructions uses a simplified operand model (2-3
+## register args) while the native rocisa toString() emits full asm with buffer
+## descriptors, soffset, and MUBUF/FLAT modifiers. Matching all three paths
+## end-to-end requires the lowering pass to reconstruct these modifiers from
+## the abstract operand set, which is architecture-specific and not yet
+## validated for the adaptor path.
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1960,140 +1960,454 @@ PVCvtBF16toFP32 = make_dummy_class(f"{_P}.PVCvtBF16toFP32")
 # Memory (Buffer/Flat/Global/DS/SMEM) instructions
 # source: rocisa/rocisa/src/instruction/mem.cpp
 # ==========================================================================
-ReadWriteInstruction = make_dummy_class(f"{_P}.ReadWriteInstruction")
-GlobalReadInstruction = make_dummy_class(f"{_P}.GlobalReadInstruction")
-FLATReadInstruction = make_dummy_class(f"{_P}.FLATReadInstruction")
-GLOBALLoadInstruction = make_dummy_class(f"{_P}.GLOBALLoadInstruction")
-MUBUFReadInstruction = make_dummy_class(f"{_P}.MUBUFReadInstruction")
-AtomicReadWriteInstruction = make_dummy_class(f"{_P}.AtomicReadWriteInstruction")
+
+
+def _make_buffer_load_class(class_name: str, mnemonic: str, latency: int = 1):
+    """Factory for MUBUF load shims: rocisa(dst, vaddr, saddr, soffset, mubuf, comment)."""
+
+    def __init__(self, dst: Any = None, vaddr: Any = None, saddr: Any = None,
+                 soffset: Any = None, mubuf: Any = None, comment: str = "", **kw):
+        _ = kw
+        CommonInstruction.__init__(
+            self, instType=InstType.INST_NOTYPE, dst=dst,
+            srcs=[vaddr, saddr, soffset], dpp=None, sdwa=None, vop3=None,
+            comment=comment)
+        self.setInst(mnemonic)
+        self.mubuf = mubuf
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st
+        factory = getattr(_st, class_name)
+        return factory(
+            _to_stinky_register(self.dst),
+            _to_stinky_register(self.srcs[0]),
+            comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+    cls = type(class_name, (CommonInstruction,), {
+        "__init__": __init__,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+        "issueLatency": staticmethod(lambda: latency),
+    })
+    cls.__qualname__ = class_name
+    return cls
+
+
+def _make_buffer_store_class(class_name: str, mnemonic: str, latency: int = 1):
+    """Factory for MUBUF store/atomic shims: rocisa(src, vaddr, saddr, soffset, mubuf, comment)."""
+
+    def __init__(self, src: Any = None, vaddr: Any = None, saddr: Any = None,
+                 soffset: Any = None, mubuf: Any = None, comment: str = "", **kw):
+        _ = kw
+        CommonInstruction.__init__(
+            self, instType=InstType.INST_NOTYPE, dst=src,
+            srcs=[vaddr, saddr, soffset], dpp=None, sdwa=None, vop3=None,
+            comment=comment)
+        self.setInst(mnemonic)
+        self.mubuf = mubuf
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st
+        factory = getattr(_st, class_name)
+        return factory(
+            _to_stinky_register(self.dst),
+            _to_stinky_register(self.srcs[0]),
+            _to_stinky_register(self.srcs[1]),
+            comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+    cls = type(class_name, (CommonInstruction,), {
+        "__init__": __init__,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+        "issueLatency": staticmethod(lambda: latency),
+    })
+    cls.__qualname__ = class_name
+    return cls
+
+
+def _make_flat_load_class(class_name: str, mnemonic: str, latency: int = 1):
+    """Factory for Flat load shims: rocisa(dst, vaddr, flat, comment)."""
+
+    def __init__(self, dst: Any = None, vaddr: Any = None,
+                 flat: Any = None, comment: str = "", **kw):
+        _ = kw
+        CommonInstruction.__init__(
+            self, instType=InstType.INST_NOTYPE, dst=dst,
+            srcs=[vaddr], dpp=None, sdwa=None, vop3=None, comment=comment)
+        self.setInst(mnemonic)
+        self.flat = flat
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st
+        factory = getattr(_st, class_name)
+        return factory(
+            _to_stinky_register(self.dst),
+            _to_stinky_register(self.srcs[0]),
+            comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+    cls = type(class_name, (CommonInstruction,), {
+        "__init__": __init__,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+        "issueLatency": staticmethod(lambda: latency),
+    })
+    cls.__qualname__ = class_name
+    return cls
+
+
+def _make_flat_store_class(class_name: str, mnemonic: str, latency: int = 1):
+    """Factory for Flat store shims: rocisa(src, vaddr, flat, comment)."""
+
+    def __init__(self, src: Any = None, vaddr: Any = None,
+                 flat: Any = None, comment: str = "", **kw):
+        _ = kw
+        CommonInstruction.__init__(
+            self, instType=InstType.INST_NOTYPE, dst=src,
+            srcs=[vaddr], dpp=None, sdwa=None, vop3=None, comment=comment)
+        self.setInst(mnemonic)
+        self.flat = flat
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st
+        factory = getattr(_st, class_name)
+        return factory(
+            _to_stinky_register(self.dst),
+            _to_stinky_register(self.srcs[0]),
+            _to_stinky_register(self.dst),
+            comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+    cls = type(class_name, (CommonInstruction,), {
+        "__init__": __init__,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+        "issueLatency": staticmethod(lambda: latency),
+    })
+    cls.__qualname__ = class_name
+    return cls
+
+
+def _make_flat_atomic_class(class_name: str, mnemonic: str, latency: int = 1):
+    """Factory for Flat atomic shims: rocisa(vaddr, tmp, src, flat, comment)."""
+
+    def __init__(self, vaddr: Any = None, tmp: Any = None, src: Any = None,
+                 flat: Any = None, comment: str = "", **kw):
+        _ = kw
+        CommonInstruction.__init__(
+            self, instType=InstType.INST_NOTYPE, dst=vaddr,
+            srcs=[tmp, src], dpp=None, sdwa=None, vop3=None, comment=comment)
+        self.setInst(mnemonic)
+        self.flat = flat
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st
+        factory = getattr(_st, class_name)
+        return factory(
+            _to_stinky_register(self.dst),
+            _to_stinky_register(self.srcs[0]),
+            _to_stinky_register(self.srcs[1]),
+            comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+    cls = type(class_name, (CommonInstruction,), {
+        "__init__": __init__,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+        "issueLatency": staticmethod(lambda: latency),
+    })
+    cls.__qualname__ = class_name
+    return cls
+
+
+def _make_ds_load_class(class_name: str, mnemonic: str, latency: int = 1):
+    """Factory for DS load shims: rocisa(dst, src, ds, comment)."""
+
+    def __init__(self, dst: Any = None, src: Any = None,
+                 ds: Any = None, comment: str = "", **kw):
+        _ = kw
+        CommonInstruction.__init__(
+            self, instType=InstType.INST_NOTYPE, dst=dst,
+            srcs=[src], dpp=None, sdwa=None, vop3=None, comment=comment)
+        self.setInst(mnemonic)
+        self.ds = ds
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st
+        factory = getattr(_st, class_name)
+        return factory(
+            _to_stinky_register(self.dst),
+            _to_stinky_register(self.srcs[0]),
+            comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+    cls = type(class_name, (CommonInstruction,), {
+        "__init__": __init__,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+        "issueLatency": staticmethod(lambda: latency),
+    })
+    cls.__qualname__ = class_name
+    return cls
+
+
+def _make_ds_store_class(class_name: str, mnemonic: str, latency: int = 1):
+    """Factory for DS store (binary) shims: rocisa(dstAddr, src, ds, comment)."""
+
+    def __init__(self, dstAddr: Any = None, src: Any = None,
+                 ds: Any = None, comment: str = "", **kw):
+        _ = kw
+        CommonInstruction.__init__(
+            self, instType=InstType.INST_NOTYPE, dst=dstAddr,
+            srcs=[src], dpp=None, sdwa=None, vop3=None, comment=comment)
+        self.setInst(mnemonic)
+        self.ds = ds
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st
+        factory = getattr(_st, class_name)
+        return factory(
+            _to_stinky_register(self.dst),
+            _to_stinky_register(self.srcs[0]),
+            comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+    cls = type(class_name, (CommonInstruction,), {
+        "__init__": __init__,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+        "issueLatency": staticmethod(lambda: latency),
+    })
+    cls.__qualname__ = class_name
+    return cls
+
+
+def _make_ds_store2_class(class_name: str, mnemonic: str, latency: int = 1):
+    """Factory for DS store2/permute (ternary) shims: rocisa(dstAddr, src0, src1, ds, comment)."""
+
+    def __init__(self, dstAddr: Any = None, src0: Any = None, src1: Any = None,
+                 ds: Any = None, comment: str = "", **kw):
+        _ = kw
+        CommonInstruction.__init__(
+            self, instType=InstType.INST_NOTYPE, dst=dstAddr,
+            srcs=[src0, src1], dpp=None, sdwa=None, vop3=None, comment=comment)
+        self.setInst(mnemonic)
+        self.ds = ds
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st
+        factory = getattr(_st, class_name)
+        return factory(
+            _to_stinky_register(self.dst),
+            _to_stinky_register(self.srcs[0]),
+            _to_stinky_register(self.srcs[1]),
+            comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+    cls = type(class_name, (CommonInstruction,), {
+        "__init__": __init__,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+        "issueLatency": staticmethod(lambda: latency),
+    })
+    cls.__qualname__ = class_name
+    return cls
+
+
+# Base classes — aliased to CommonInstruction for isinstance checks
+ReadWriteInstruction = CommonInstruction
+GlobalReadInstruction = CommonInstruction
+FLATReadInstruction = CommonInstruction
+GLOBALLoadInstruction = CommonInstruction
+MUBUFReadInstruction = CommonInstruction
+AtomicReadWriteInstruction = CommonInstruction
 SMemAtomicIncInstruction = make_dummy_class(f"{_P}.SMemAtomicIncInstruction")
 SMemAtomicDecInstruction = make_dummy_class(f"{_P}.SMemAtomicDecInstruction")
 # SMemLoadInstruction / SLoadB* — real classes (see above after SMovB64).
-GlobalWriteInstruction = make_dummy_class(f"{_P}.GlobalWriteInstruction")
+GlobalWriteInstruction = CommonInstruction
 SMemStoreInstruction = make_dummy_class(f"{_P}.SMemStoreInstruction")
-FLATStoreInstruction = make_dummy_class(f"{_P}.FLATStoreInstruction")
-MUBUFStoreInstruction = make_dummy_class(f"{_P}.MUBUFStoreInstruction")
-LocalReadInstruction = make_dummy_class(f"{_P}.LocalReadInstruction")
-DSLoadInstruction = make_dummy_class(f"{_P}.DSLoadInstruction")
-LocalWriteInstruction = make_dummy_class(f"{_P}.LocalWriteInstruction")
-DSStoreInstruction = make_dummy_class(f"{_P}.DSStoreInstruction")
-# logicalIR: BufferLoadU8  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-BufferLoadU8 = make_dummy_class(f"{_P}.BufferLoadU8")
-# logicalIR: BufferLoadD16HIU8  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-BufferLoadD16HIU8 = make_dummy_class(f"{_P}.BufferLoadD16HIU8")
-# logicalIR: BufferLoadD16U8  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-BufferLoadD16U8 = make_dummy_class(f"{_P}.BufferLoadD16U8")
-# logicalIR: BufferLoadD16HIB16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-BufferLoadD16HIB16 = make_dummy_class(f"{_P}.BufferLoadD16HIB16")
-# logicalIR: BufferLoadD16B16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-BufferLoadD16B16 = make_dummy_class(f"{_P}.BufferLoadD16B16")
+FLATStoreInstruction = CommonInstruction
+MUBUFStoreInstruction = CommonInstruction
+LocalReadInstruction = CommonInstruction
+DSLoadInstruction = CommonInstruction
+LocalWriteInstruction = CommonInstruction
+DSStoreInstruction = CommonInstruction
+
+# --- Buffer Load (MUBUF): rocisa(dst, vaddr, saddr, soffset, mubuf, comment) ---
+BufferLoadU8 = _make_buffer_load_class("BufferLoadU8", "buffer_load_u8")
+BufferLoadD16HIU8 = _make_buffer_load_class("BufferLoadD16HIU8", "buffer_load_d16_hi_u8")
+BufferLoadD16U8 = _make_buffer_load_class("BufferLoadD16U8", "buffer_load_d16_u8")
+BufferLoadD16HIB16 = _make_buffer_load_class("BufferLoadD16HIB16", "buffer_load_d16_hi_b16")
+BufferLoadD16B16 = _make_buffer_load_class("BufferLoadD16B16", "buffer_load_d16_b16")
 BufferLoadB16 = make_dummy_class(f"{_P}.BufferLoadB16")
 BufferLoadU16 = make_dummy_class(f"{_P}.BufferLoadU16")
-# logicalIR: BufferLoadB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-BufferLoadB32 = make_dummy_class(f"{_P}.BufferLoadB32")
-# logicalIR: BufferLoadB64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-BufferLoadB64 = make_dummy_class(f"{_P}.BufferLoadB64")
-# logicalIR: BufferLoadB96  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-BufferLoadB96 = make_dummy_class(f"{_P}.BufferLoadB96")
-# logicalIR: BufferLoadB128  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-BufferLoadB128 = make_dummy_class(f"{_P}.BufferLoadB128")
+BufferLoadB32 = _make_buffer_load_class("BufferLoadB32", "buffer_load_b32")
+BufferLoadB64 = _make_buffer_load_class("BufferLoadB64", "buffer_load_b64")
+BufferLoadB96 = _make_buffer_load_class("BufferLoadB96", "buffer_load_b96")
+BufferLoadB128 = _make_buffer_load_class("BufferLoadB128", "buffer_load_b128")
 BufferLoadB192 = make_dummy_class(f"{_P}.BufferLoadB192")
-# logicalIR: FlatLoadD16HIU8  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-FlatLoadD16HIU8 = make_dummy_class(f"{_P}.FlatLoadD16HIU8")
-# logicalIR: FlatLoadD16U8  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-FlatLoadD16U8 = make_dummy_class(f"{_P}.FlatLoadD16U8")
-# logicalIR: FlatLoadD16HIB16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-FlatLoadD16HIB16 = make_dummy_class(f"{_P}.FlatLoadD16HIB16")
-# logicalIR: FlatLoadD16B16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-FlatLoadD16B16 = make_dummy_class(f"{_P}.FlatLoadD16B16")
-# logicalIR: FlatLoadB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-FlatLoadB32 = make_dummy_class(f"{_P}.FlatLoadB32")
-# logicalIR: FlatLoadB64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-FlatLoadB64 = make_dummy_class(f"{_P}.FlatLoadB64")
-# logicalIR: FlatLoadB128  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-FlatLoadB128 = make_dummy_class(f"{_P}.FlatLoadB128")
+
+# --- Flat Load: rocisa(dst, vaddr, flat, comment) ---
+FlatLoadD16HIU8 = _make_flat_load_class("FlatLoadD16HIU8", "flat_load_d16_hi_u8")
+FlatLoadD16U8 = _make_flat_load_class("FlatLoadD16U8", "flat_load_d16_u8")
+FlatLoadD16HIB16 = _make_flat_load_class("FlatLoadD16HIB16", "flat_load_d16_hi_b16")
+FlatLoadD16B16 = _make_flat_load_class("FlatLoadD16B16", "flat_load_d16_b16")
+FlatLoadB32 = _make_flat_load_class("FlatLoadB32", "flat_load_b32")
+FlatLoadB64 = _make_flat_load_class("FlatLoadB64", "flat_load_b64")
+FlatLoadB128 = _make_flat_load_class("FlatLoadB128", "flat_load_b128")
 FlatLoadB192 = make_dummy_class(f"{_P}.FlatLoadB192")
 GlobalLoadTR8B64 = make_dummy_class(f"{_P}.GlobalLoadTR8B64")
 GlobalLoadTR16B128 = make_dummy_class(f"{_P}.GlobalLoadTR16B128")
-# logicalIR: BufferStoreB8  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-BufferStoreB8 = make_dummy_class(f"{_P}.BufferStoreB8")
-# logicalIR: BufferStoreD16HIU8  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-BufferStoreD16HIU8 = make_dummy_class(f"{_P}.BufferStoreD16HIU8")
+
+# --- Buffer Store / Atomic: rocisa(src, vaddr, saddr, soffset, mubuf, comment) ---
+BufferStoreB8 = _make_buffer_store_class("BufferStoreB8", "buffer_store_b8")
+BufferStoreD16HIU8 = _make_buffer_store_class("BufferStoreD16HIU8", "buffer_store_d16_hi_b8")
 BufferStoreD16U8 = make_dummy_class(f"{_P}.BufferStoreD16U8")
-# logicalIR: BufferStoreD16HIB16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-BufferStoreD16HIB16 = make_dummy_class(f"{_P}.BufferStoreD16HIB16")
+BufferStoreD16HIB16 = _make_buffer_store_class("BufferStoreD16HIB16", "buffer_store_d16_hi_b16")
 BufferStoreD16B16 = make_dummy_class(f"{_P}.BufferStoreD16B16")
-# logicalIR: BufferStoreB16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-BufferStoreB16 = make_dummy_class(f"{_P}.BufferStoreB16")
-# logicalIR: BufferStoreB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-BufferStoreB32 = make_dummy_class(f"{_P}.BufferStoreB32")
-# logicalIR: BufferStoreB64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-BufferStoreB64 = make_dummy_class(f"{_P}.BufferStoreB64")
-# logicalIR: BufferStoreB128  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-BufferStoreB128 = make_dummy_class(f"{_P}.BufferStoreB128")
-# logicalIR: BufferAtomicAddF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-BufferAtomicAddF32 = make_dummy_class(f"{_P}.BufferAtomicAddF32")
-# logicalIR: BufferAtomicCmpswapB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-BufferAtomicCmpswapB32 = make_dummy_class(f"{_P}.BufferAtomicCmpswapB32")
-# logicalIR: BufferAtomicCmpswapB64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-BufferAtomicCmpswapB64 = make_dummy_class(f"{_P}.BufferAtomicCmpswapB64")
-# logicalIR: FlatStoreD16HIB16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-FlatStoreD16HIB16 = make_dummy_class(f"{_P}.FlatStoreD16HIB16")
+BufferStoreB16 = _make_buffer_store_class("BufferStoreB16", "buffer_store_b16")
+BufferStoreB32 = _make_buffer_store_class("BufferStoreB32", "buffer_store_b32")
+BufferStoreB64 = _make_buffer_store_class("BufferStoreB64", "buffer_store_b64")
+BufferStoreB128 = _make_buffer_store_class("BufferStoreB128", "buffer_store_b128")
+BufferAtomicAddF32 = _make_buffer_load_class("BufferAtomicAddF32", "buffer_atomic_add_f32")
+BufferAtomicCmpswapB32 = _make_buffer_store_class("BufferAtomicCmpswapB32", "buffer_atomic_cmpswap_b32")
+BufferAtomicCmpswapB64 = _make_buffer_store_class("BufferAtomicCmpswapB64", "buffer_atomic_cmpswap_b64")
+
+# --- Flat Store: rocisa(src, vaddr, flat, comment) ---
+FlatStoreD16HIB16 = _make_flat_store_class("FlatStoreD16HIB16", "flat_store_d16_hi_b16")
 FlatStoreD16B16 = make_dummy_class(f"{_P}.FlatStoreD16B16")
-# logicalIR: FlatStoreB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-FlatStoreB32 = make_dummy_class(f"{_P}.FlatStoreB32")
-# logicalIR: FlatStoreB64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-FlatStoreB64 = make_dummy_class(f"{_P}.FlatStoreB64")
-# logicalIR: FlatStoreB128  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-FlatStoreB128 = make_dummy_class(f"{_P}.FlatStoreB128")
-# logicalIR: FlatAtomicCmpswapB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-FlatAtomicCmpswapB32 = make_dummy_class(f"{_P}.FlatAtomicCmpswapB32")
-# logicalIR: DSLoadU8  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-DSLoadU8 = make_dummy_class(f"{_P}.DSLoadU8")
+FlatStoreB32 = _make_flat_store_class("FlatStoreB32", "flat_store_b32")
+FlatStoreB64 = _make_flat_store_class("FlatStoreB64", "flat_store_b64")
+FlatStoreB128 = _make_flat_store_class("FlatStoreB128", "flat_store_b128")
+
+# --- Flat Atomic: rocisa(vaddr, tmp, src, flat, comment) ---
+FlatAtomicCmpswapB32 = _make_flat_atomic_class("FlatAtomicCmpswapB32", "flat_atomic_cmpswap_b32")
+
+# --- DS Load: rocisa(dst, src, ds, comment) ---
+DSLoadU8 = _make_ds_load_class("DSLoadU8", "ds_load_u8")
 DSLoadD16HIU8 = make_dummy_class(f"{_P}.DSLoadD16HIU8")
-# logicalIR: DSLoadU16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-DSLoadU16 = make_dummy_class(f"{_P}.DSLoadU16")
+DSLoadU16 = _make_ds_load_class("DSLoadU16", "ds_load_u16")
 DSLoadD16HIU16 = make_dummy_class(f"{_P}.DSLoadD16HIU16")
 DSLoadB16 = make_dummy_class(f"{_P}.DSLoadB16")
-# logicalIR: DSLoadB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-DSLoadB32 = make_dummy_class(f"{_P}.DSLoadB32")
-# logicalIR: DSLoadB64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-DSLoadB64 = make_dummy_class(f"{_P}.DSLoadB64")
+DSLoadB32 = _make_ds_load_class("DSLoadB32", "ds_load_b32")
+DSLoadB64 = _make_ds_load_class("DSLoadB64", "ds_load_b64")
 DSLoadB96TrB6 = make_dummy_class(f"{_P}.DSLoadB96TrB6")
 DSLoadB64TrB4 = make_dummy_class(f"{_P}.DSLoadB64TrB4")
 DSLoadB64TrB16 = make_dummy_class(f"{_P}.DSLoadB64TrB16")
 DSLoadB128TrB16 = make_dummy_class(f"{_P}.DSLoadB128TrB16")
 DSLoadB64TrB8 = make_dummy_class(f"{_P}.DSLoadB64TrB8")
-# logicalIR: DSLoadB128  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-DSLoadB128 = make_dummy_class(f"{_P}.DSLoadB128")
+DSLoadB128 = _make_ds_load_class("DSLoadB128", "ds_load_b128", latency=2)
 DSLoadB192 = make_dummy_class(f"{_P}.DSLoadB192")
-# logicalIR: DSLoad2B32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-DSLoad2B32 = make_dummy_class(f"{_P}.DSLoad2B32")
-# logicalIR: DSLoad2B64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-DSLoad2B64 = make_dummy_class(f"{_P}.DSLoad2B64")
+def _make_ds_load2_class(class_name: str, mnemonic: str, latency: int = 1):
+    """Factory for DS load2 (dual-address): rocisa(dst, src, ds, comment) → logicalIR 3 args."""
+
+    def __init__(self, dst: Any = None, src: Any = None,
+                 ds: Any = None, comment: str = "", **kw):
+        _ = kw
+        CommonInstruction.__init__(
+            self, instType=InstType.INST_NOTYPE, dst=dst,
+            srcs=[src], dpp=None, sdwa=None, vop3=None, comment=comment)
+        self.setInst(mnemonic)
+        self.ds = ds
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st
+        factory = getattr(_st, class_name)
+        src_reg = _to_stinky_register(self.srcs[0])
+        return factory(
+            _to_stinky_register(self.dst),
+            src_reg,
+            src_reg,
+            comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+    cls = type(class_name, (CommonInstruction,), {
+        "__init__": __init__,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+        "issueLatency": staticmethod(lambda: latency),
+    })
+    cls.__qualname__ = class_name
+    return cls
+
+
+DSLoad2B32 = _make_ds_load2_class("DSLoad2B32", "ds_load2_b32")
+DSLoad2B64 = _make_ds_load2_class("DSLoad2B64", "ds_load2_b64")
+
+# --- DS Store (binary): rocisa(dstAddr, src, ds, comment) ---
 DSStoreU16 = make_dummy_class(f"{_P}.DSStoreU16")
-# logicalIR: DSStoreB8  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-DSStoreB8 = make_dummy_class(f"{_P}.DSStoreB8")
-# logicalIR: DSStoreB16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-DSStoreB16 = make_dummy_class(f"{_P}.DSStoreB16")
+DSStoreB8 = _make_ds_store_class("DSStoreB8", "ds_store_b8")
+DSStoreB16 = _make_ds_store_class("DSStoreB16", "ds_store_b16")
 DSStoreB8HID16 = make_dummy_class(f"{_P}.DSStoreB8HID16")
 DSStoreD16HIB16 = make_dummy_class(f"{_P}.DSStoreD16HIB16")
-# logicalIR: DSStoreB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-DSStoreB32 = make_dummy_class(f"{_P}.DSStoreB32")
-# logicalIR: DSStoreB64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-DSStoreB64 = make_dummy_class(f"{_P}.DSStoreB64")
-# logicalIR: DSStoreB96  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-DSStoreB96 = make_dummy_class(f"{_P}.DSStoreB96")
-# logicalIR: DSStoreB128  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-DSStoreB128 = make_dummy_class(f"{_P}.DSStoreB128")
+DSStoreB32 = _make_ds_store_class("DSStoreB32", "ds_store_b32", latency=2)
+DSStoreB64 = _make_ds_store_class("DSStoreB64", "ds_store_b64", latency=3)
+DSStoreB96 = _make_ds_store_class("DSStoreB96", "ds_store_b96", latency=4)
+DSStoreB128 = _make_ds_store_class("DSStoreB128", "ds_store_b128", latency=5)
 DSStoreB192 = make_dummy_class(f"{_P}.DSStoreB192")
 DSStoreB256 = make_dummy_class(f"{_P}.DSStoreB256")
-# logicalIR: DSStore2B32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-DSStore2B32 = make_dummy_class(f"{_P}.DSStore2B32")
-# logicalIR: DSStore2B64  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-DSStore2B64 = make_dummy_class(f"{_P}.DSStore2B64")
-# logicalIR: DSBPermuteB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-DSBPermuteB32 = make_dummy_class(f"{_P}.DSBPermuteB32")
+
+# --- DS Store2 / Permute (ternary): rocisa(dstAddr, src0, src1, ds, comment) ---
+DSStore2B32 = _make_ds_store2_class("DSStore2B32", "ds_store2_b32", latency=3)
+DSStore2B64 = _make_ds_store2_class("DSStore2B64", "ds_store2_b64", latency=3)
+
+
+def _make_ds_permute_class(class_name: str, mnemonic: str, latency: int = 1):
+    """Factory for DS permute: rocisa(dst, src0, src1, ds, comment) → logicalIR 2 args."""
+
+    def __init__(self, dstAddr: Any = None, src0: Any = None, src1: Any = None,
+                 ds: Any = None, comment: str = "", **kw):
+        _ = kw
+        CommonInstruction.__init__(
+            self, instType=InstType.INST_NOTYPE, dst=dstAddr,
+            srcs=[src0, src1], dpp=None, sdwa=None, vop3=None, comment=comment)
+        self.setInst(mnemonic)
+        self.ds = ds
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st
+        factory = getattr(_st, class_name)
+        return factory(
+            _to_stinky_register(self.dst),
+            _to_stinky_register(self.srcs[0]),
+            comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+    cls = type(class_name, (CommonInstruction,), {
+        "__init__": __init__,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+        "issueLatency": staticmethod(lambda: latency),
+    })
+    cls.__qualname__ = class_name
+    return cls
+
+
+DSBPermuteB32 = _make_ds_permute_class("DSBPermuteB32", "ds_bpermute_b32")
+
+# --- SMEM Atomic / Store (remain dummy) ---
 SAtomicInc = make_dummy_class(f"{_P}.SAtomicInc")
 SAtomicDec = make_dummy_class(f"{_P}.SAtomicDec")
 # SLoadB32 … SLoadB512 — real classes (``SMemLoadInstruction`` subclasses).
@@ -2102,8 +2416,40 @@ SStoreB64 = make_dummy_class(f"{_P}.SStoreB64")
 SStoreB128 = make_dummy_class(f"{_P}.SStoreB128")
 SStoreB256 = make_dummy_class(f"{_P}.SStoreB256")
 SStoreB512 = make_dummy_class(f"{_P}.SStoreB512")
-# logicalIR: TensorLoadToLds  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-TensorLoadToLds = make_dummy_class(f"{_P}.TensorLoadToLds")
+
+# --- TensorLoadToLds: rocisa(group0, group1, group2, group3, comment) ---
+def _make_tensor_load_class():
+    def __init__(self, group0: Any = None, group1: Any = None,
+                 group2: Any = None, group3: Any = None,
+                 comment: str = "", **kw):
+        _ = kw
+        CommonInstruction.__init__(
+            self, instType=InstType.INST_NOTYPE, dst=group0,
+            srcs=[group1, group2, group3], dpp=None, sdwa=None,
+            vop3=None, comment=comment)
+        self.setInst("tensor_load_to_lds")
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st
+        return _st.TensorLoadToLds(
+            _to_stinky_register(self.dst),
+            _to_stinky_register(self.srcs[0]),
+            comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+    cls = type("TensorLoadToLds", (CommonInstruction,), {
+        "__init__": __init__,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+        "issueLatency": staticmethod(lambda: 1),
+    })
+    cls.__qualname__ = "TensorLoadToLds"
+    return cls
+
+
+TensorLoadToLds = _make_tensor_load_class()
 GlobalPrefetchB8 = make_dummy_class(f"{_P}.GlobalPrefetchB8")
 
 
