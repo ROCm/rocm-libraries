@@ -109,6 +109,22 @@ struct DerivedTestName
 
 // Derives the GTest suite and test names from the bundle's folder path.
 // Path convention: {tier}/{op}/{layout}/{dtype}/{bundle_name}/{file}.json
+//
+// NOTE — divergence from RFC 0011 §4.3: the RFC derives op/layout/dtype from
+// the *graph JSON* ("suite name derived from graph content"). We deliberately
+// derive them from the *folder path* instead, moving the responsibility for
+// computational identity out of C++ and onto the directory layout — adding a
+// bundle is purely "drop files in the right folders," no graph parsing here.
+// This also handles mixed-precision graphs (e.g. fp16 in / fp8 weight / fp32
+// out) cleanly: the author encodes the signature as a folder label (e.g.
+// "fp16_fp8_fp32"), which a single graph dtype enum could not express.
+//
+// Trade-off: folder labels are NOT validated against the graph's actual
+// dtype/layout, so a bundle can be mislabeled (an fp16 graph dropped under
+// "fp32/") and the test name will silently lie about its content.
+// FOLLOW-UP: add a discovery-time check that the {op}/{layout}/{dtype} labels
+// agree with the graph JSON (cheap to fold into the tolerance-lookup story,
+// which already parses op+dtype from the graph).
 inline DerivedTestName deriveTestName(const std::filesystem::path& jsonPath,
                                       const std::string& tierName)
 {
