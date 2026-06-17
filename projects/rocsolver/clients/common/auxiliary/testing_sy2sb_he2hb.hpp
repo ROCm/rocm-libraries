@@ -149,6 +149,8 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
                           Th& hTau,
                           double* max_err)
 {
+    using S = decltype(std::real(T{}));
+
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
 
@@ -173,18 +175,42 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
     cpu_sy2sb_he2hb(rocblas_fill_lower, n, kd, hA[0], lda, hAband[0], ldab, hTau[0], hwork.data(),
                     lwork);
 
-    // error is ||hARes - hAband|| / ||hAband||
+    // error is ||hAband - hAbandRes|| / (n * ||hAband||)
+    // and ||hTau - hTauRes|| / (n * ||hTau||)
     // using frobenius norm
     // (THIS DOES NOT ACCOUNT FOR NUMERICAL REPRODUCIBILITY
     // ISSUES. IT MIGHT BE REVISITED IN THE FUTURE)
 
+    S dummy_work;
+    S A_norm = cpu_lange('F', kd + 1, n, hAband[0], ldab, &dummy_work);
+    S tau_norm = cpu_lange('F', n - kd, 1, hTau[0], n - kd, &dummy_work);
+
+    // hAband -= hAbandRes (restricted to lower band structure).
+    // hAbandRes has "don't care" values outside the band structure.
+    I idiag = kd - 1;
+    for(int j = 0; j < n; ++j)
+    {
+        for(int k = 0; k < kd + 1 && k + j < n; ++k)
+        {
+            hAband[0][k + j * ldab] -= hAbandRes[0][k + idiag + j * ldab];
+        }
+    }
+    // hTau -= hTauRes
+    cpu_axpy(n - kd, T(-1.0), hTauRes[0], 1, hTau[0], 1);
+
     // todo: check orthogonality of Q and backward error.
     double err;
     *max_err = 0;
-    err = norm_error('F', kd + 1, n, ldab, hAband[0], hAbandRes[0] + kd - 1);
+    err = cpu_lange('F', kd + 1, n, hAband[0], ldab, &dummy_work);
+    err /= n;
+    if(A_norm != 0)
+        err /= A_norm;
     *max_err = rocblas_max_nan(err, *max_err);
 
-    err = norm_error('F', 1, n - kd, 1, hTau[0], hTauRes[0]);
+    err = cpu_lange('F', n - kd, 1, hTau[0], n - kd, &dummy_work);
+    err /= n;
+    if(tau_norm != 0)
+        err /= tau_norm;
     *max_err = rocblas_max_nan(err, *max_err);
 }
 
@@ -383,9 +409,10 @@ void testing_sy2sb_he2hb(Arguments& argus)
     }
 
     // validate results for rocsolver-test
-    // using n * machine_precision as tolerance
+    // using 10*machine_precision as tolerance
+    // max_errors is already normalized, e.g., by n.
     if(argus.unit_check)
-        ROCSOLVER_TEST_CHECK(T, max_error, n);
+        ROCSOLVER_TEST_CHECK(T, max_error, 10);
 
     // output results for rocsolver-bench
     if(argus.timing)
