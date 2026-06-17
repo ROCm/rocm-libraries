@@ -9,16 +9,15 @@
 
 #pragma once
 
-#include "core/Context.hpp"
-#include "core/Handle.hpp"
-#include "core/Settings.hpp"
-
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
-
 #include <memory>
 #include <vector>
+
+#include "core/Context.hpp"
+#include "core/Handle.hpp"
+#include "core/Settings.hpp"
 
 namespace hip_flash2_engine
 {
