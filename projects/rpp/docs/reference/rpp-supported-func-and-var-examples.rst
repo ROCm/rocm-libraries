@@ -6,7 +6,7 @@
 ROCm Performance Primitives functionality and variant example outputs
 ****************************************************************************
 
-The following table shows example outputs of some ROCm Performance Primitives (RPP) functionalities and variants. 
+The following table shows example outputs of some ROCm Performance Primitives (RPP) functionalities and variants.
 
 
 .. csv-table::
@@ -55,7 +55,7 @@ The following table shows example outputs of some ROCm Performance Primitives (R
   "remap", |orig_road|, |remap|
 
 
-.. |orig_dog| image:: ../data/doxygenInputs/img150x150_2.png 
+.. |orig_dog| image:: ../data/doxygenInputs/img150x150_2.png
 
 .. |orig_flower| image:: ../data/doxygenInputs/img150x150_1.png
 

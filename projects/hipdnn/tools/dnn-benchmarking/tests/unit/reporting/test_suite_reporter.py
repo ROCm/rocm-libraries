@@ -4,8 +4,9 @@
 """Unit tests for Reporter suite-specific methods."""
 
 import io
+from unittest.mock import patch
 
-from dnn_benchmarking.config.benchmark_config import SuiteConfig
+from dnn_benchmarking.config.benchmark_config import SuiteConfig, ValidationConfig
 from dnn_benchmarking.reporting.reporter import Reporter
 from dnn_benchmarking.reporting.statistics import BenchmarkStats
 from dnn_benchmarking.reporting.suite_results import (
@@ -252,7 +253,7 @@ class TestVerboseReporter:
             results=[_make_pe_success(correctness=correctness)],
         )
         reporter.print_verbose_graph_result(
-            gr, SuiteConfig(reference_provider="pytorch")
+            gr, SuiteConfig(validation=ValidationConfig(provider="pytorch"))
         )
         out = output.getvalue()
         assert "Reference Validation: PASSED" in out
@@ -275,7 +276,7 @@ class TestVerboseReporter:
             results=[_make_pe_success(correctness=correctness)],
         )
         reporter.print_verbose_graph_result(
-            gr, SuiteConfig(reference_provider="pytorch")
+            gr, SuiteConfig(validation=ValidationConfig(provider="pytorch"))
         )
         out = output.getvalue()
         assert "Reference Validation: FAILED" in out
@@ -298,7 +299,7 @@ class TestVerboseReporter:
             results=[_make_pe_success(correctness=correctness)],
         )
         reporter.print_verbose_graph_result(
-            gr, SuiteConfig(reference_provider="pytorch")
+            gr, SuiteConfig(validation=ValidationConfig(provider="pytorch"))
         )
         out = output.getvalue()
         assert "Reference Validation: SKIPPED" in out
@@ -376,7 +377,7 @@ class TestVerboseReporter:
         gr.results[0].role = "reference"
 
         reporter.print_verbose_graph_result(
-            gr, SuiteConfig(reference_provider="pytorch")
+            gr, SuiteConfig(validation=ValidationConfig(provider="pytorch"))
         )
         out = output.getvalue()
 
@@ -384,6 +385,43 @@ class TestVerboseReporter:
         assert "Provider:   pytorch" in out
         assert "Engine ID:" not in out
         assert "Reference: timing baseline (no correctness comparison)" in out
+
+    def test_verbose_reference_row_renders_warnings(self) -> None:
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        pe = _make_pe_success(engine_id=0, provider="pytorch", correctness=None)
+        pe.role = "reference"
+        pe.warnings = [
+            "RMSNormBackwardAttributes uses a manual formula; "
+            "PyTorch reference timing is not solely built-in PyTorch operator time."
+        ]
+        gr = GraphResult(graph_name="g", graph_path="/tmp/g.json", results=[pe])
+
+        reporter.print_verbose_graph_result(
+            gr, SuiteConfig(validation=ValidationConfig(provider="pytorch"))
+        )
+
+        out = output.getvalue()
+        assert "Warnings:" in out
+        assert "WARNING: RMSNormBackwardAttributes" in out
+        assert "Reference: timing baseline" in out
+
+    def test_graph_result_table_renders_warning_column(self) -> None:
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        pe = _make_pe_success(engine_id=0, provider="pytorch", correctness=None)
+        pe.role = "reference"
+        pe.warnings = [
+            "manual RMSNorm backward; PyTorch reference timing is not solely "
+            "built-in PyTorch operator time."
+        ]
+        graph = GraphResult(graph_name="g", graph_path="/tmp/g.json", results=[pe])
+
+        reporter.print_graph_result_table(graph)
+
+        out = output.getvalue()
+        assert "warnings" in out
+        assert "manual RMSNorm backward" in out
 
     def test_verbose_profiling_renders_when_always_on_metrics_absent(self) -> None:
         """``--metrics-tier off --pmc basic`` leaves every always-on metric
@@ -432,6 +470,34 @@ class TestVerboseReporter:
         # …but the profiling block still renders.
         assert "Profiling:" in out
         assert "PMC (basic, gfx942)" in out
+
+    def test_verbose_metrics_render_na_when_no_analytical_model(self) -> None:
+        """Ops without an analytical FLOPs model must show N/A, not 0."""
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        pe = ProviderEngineResult(
+            provider="miopen",
+            engine_id=1,
+            status="success",
+            analytical_flops=None,
+            analytical_flops_partial=True,
+            analytical_io_bytes=4096,
+            gpu_kernel_stats=BenchmarkStats(
+                mean_ms=0.5,
+                std_ms=0.05,
+                min_ms=0.45,
+                max_ms=0.55,
+                p95_ms=0.52,
+                p99_ms=0.54,
+            ),
+        )
+        gr = GraphResult(graph_name="g", graph_path="/tmp/g.json", results=[pe])
+        reporter.print_verbose_graph_result(gr, SuiteConfig())
+        out = output.getvalue()
+        assert "Derived Metrics:" in out
+        assert "Analytical FLOPs:     N/A (no analytical model)" in out
+        assert "Throughput:           N/A (no analytical model)" in out
+        assert "Analytical FLOPs:     0" not in out
 
     def test_verbose_profiling_surfaces_error_tail_for_each_source(self) -> None:
         """Tool failures in trace/perf/roofline must show in verbose
@@ -540,3 +606,47 @@ class TestPrintHeader:
         reporter.print_graph_result_table(graph)
 
         assert "reference" in output.getvalue()
+
+
+class TestMachineSummaryPlatformLabel:
+    """The suite header shows a platform-appropriate accelerator label.
+
+    A CUDA wheel reports cuda_version (and cudnn_version); a ROCm wheel
+    reports rocm_version. The header must show only the label that matches
+    the running platform — CUDA hosts never print a ROCm line, and ROCm
+    hosts never print a CUDA/cuDNN line.
+    """
+
+    @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
+    def test_cuda_host_shows_cuda_and_cudnn_not_rocm(self, mock_env) -> None:
+        mock_env.return_value = {
+            "cpu_model": "Test CPU",
+            "gpu_model": "NVIDIA GeForce RTX 5080",
+            "rocm_version": None,
+            "cuda_version": "13.0",
+            "cudnn_version": "9.20.0",
+        }
+        output = io.StringIO()
+        Reporter(output=output).print_suite_header(1)
+        out = output.getvalue()
+
+        assert "CUDA:    13.0" in out
+        assert "cuDNN:   9.20.0" in out
+        assert "ROCm:" not in out
+
+    @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
+    def test_rocm_host_shows_rocm_not_cuda(self, mock_env) -> None:
+        mock_env.return_value = {
+            "cpu_model": "Test CPU",
+            "gpu_model": "AMD Instinct MI300X",
+            "rocm_version": "6.2.0",
+            "cuda_version": None,
+            "cudnn_version": None,
+        }
+        output = io.StringIO()
+        Reporter(output=output).print_suite_header(1)
+        out = output.getvalue()
+
+        assert "ROCm:    6.2.0" in out
+        assert "CUDA:" not in out
+        assert "cuDNN:" not in out

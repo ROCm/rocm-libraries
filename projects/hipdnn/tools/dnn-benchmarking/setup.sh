@@ -36,18 +36,23 @@ usage() {
     echo ""
     echo "  Requires Python 3.12 or newer."
     echo ""
-    echo "  --torch-mode <rocm|cpu|existing|none>"
+    echo "  --torch-mode <rocm|cuda|cpu|existing|none>"
     echo "                       Select how torch is provided. Default: $TORCH_MODE"
     echo "                         rocm: install ROCm torch nightly, use ROCm"
     echo "                               libraries/toolchain from the torch wheel's"
     echo "                               bundled ROCm SDK packages, and build local"
     echo "                               hipDNN/provider artifacts when absent."
+    echo "                         cuda: install CUDA torch from PyPI (or"
+    echo "                               --torch-index-url) for the PyTorch"
+    echo "                               execution backend only. hipDNN bindings,"
+    echo "                               engine plugins, and ROCm setup are skipped."
     echo "                         cpu:  install CPU-only torch and build bindings"
     echo "                               against installed ROCm/hipDNN."
     echo "                         existing:"
     echo "                               reuse torch already present in $VENV_DIR."
     echo "                               ROCm torch uses its bundled SDK libraries;"
-    echo "                               CPU/non-ROCm torch uses installed ROCm/hipDNN."
+    echo "                               CUDA torch skips hipDNN/ROCm setup;"
+    echo "                               CPU torch uses installed ROCm/hipDNN."
     echo "                         none: leave torch uninstalled and build bindings"
     echo "                               against installed ROCm/hipDNN."
     echo "  --reuse-venv         Reuse an existing $VENV_DIR instead of deleting it."
@@ -154,12 +159,18 @@ done
 
 
 case "$TORCH_MODE" in
-    rocm|cpu|existing|none) ;;
+    rocm|cuda|cpu|existing|none) ;;
     *)
-        echo "ERROR: --torch-mode must be one of: rocm, cpu, existing, none" >&2
+        echo "ERROR: --torch-mode must be one of: rocm, cuda, cpu, existing, none" >&2
         exit 1
         ;;
 esac
+
+if [ "$TORCH_MODE" = "cuda" ] && [ "$FORCE_BUILD" -eq 1 ]; then
+    echo "ERROR: --force-build is not supported with --torch-mode cuda;" >&2
+    echo "hipDNN and provider plugins require a ROCm toolchain." >&2
+    exit 1
+fi
 
 if [ "$TORCH_MODE" = "existing" ]; then
     REUSE_VENV=1
@@ -442,7 +453,12 @@ try:
 except Exception:
     print("missing")
 else:
-    print("rocm" if getattr(torch.version, "hip", None) else "cpu")
+    if getattr(torch.version, "hip", None):
+        print("rocm")
+    elif getattr(torch.version, "cuda", None):
+        print("cuda")
+    else:
+        print("cpu")
 PY
 }
 
@@ -496,6 +512,22 @@ install_torch() {
             pip install torch --index-url "$index_url"
             INSTALLED_TORCH_MODE=$(get_torch_mode)
             require_torch_mode cpu
+            ;;
+        cuda)
+            if [ "$INSTALLED_TORCH_MODE" != "missing" ]; then
+                require_torch_mode cuda
+                echo "Using existing CUDA PyTorch in $VENV_DIR."
+                return
+            fi
+            if [ -n "$TORCH_INDEX_URL" ]; then
+                echo "Installing CUDA PyTorch from $TORCH_INDEX_URL"
+                pip install torch --index-url "$TORCH_INDEX_URL"
+            else
+                echo "Installing CUDA PyTorch from PyPI"
+                pip install torch
+            fi
+            INSTALLED_TORCH_MODE=$(get_torch_mode)
+            require_torch_mode cuda
             ;;
         rocm)
             local index_url="$TORCH_INDEX_URL"
@@ -620,8 +652,8 @@ build_provider() {
     fi
 
     if [ ! -d "$provider_dir" ]; then
-        echo "Error: $name not found at $provider_dir" >&2
-        exit 1
+        echo "Warning: $name not found at $provider_dir" >&2
+        return 1
     fi
 
     echo "Building and installing $name to $install_prefix..."
@@ -635,9 +667,9 @@ build_provider() {
         -DROCM_PATH="$toolchain_prefix" \
         -DENABLE_CLANG_FORMAT=OFF \
         -DENABLE_CLANG_TIDY=OFF \
-        "$@"
-    cmake --build "$build_dir"
-    cmake --install "$build_dir"
+        "$@" &&
+        cmake --build "$build_dir" &&
+        cmake --install "$build_dir"
 }
 
 build_miopen_provider() {
@@ -647,7 +679,7 @@ build_miopen_provider() {
         "$MIOPEN_BUILD_DIR" \
         "$1" \
         "$2" \
-        -DMIOPENPROVIDER_SKIP_TESTS=ON
+        -DMIOPENPROVIDER_SKIP_TESTS=ON || return $?
     echo ""
     echo "MIOpen plugin installed to: $1/lib/hipdnn_plugins/engines/"
 }
@@ -659,7 +691,7 @@ build_hipblaslt_provider() {
         "$HIPBLASLT_BUILD_DIR" \
         "$1" \
         "$2" \
-        -DHIPDNN_SKIP_TESTS=ON
+        -DHIPDNN_SKIP_TESTS=ON || return $?
 }
 
 build_hip_kernel_provider() {
@@ -670,7 +702,39 @@ build_hip_kernel_provider() {
         "$1" \
         "$2" \
         -DHIPKERNELPROVIDER_ENABLE_TESTS=OFF \
-        -DENABLE_ASM_SDPA_ENGINE=ON
+        -DENABLE_ASM_SDPA_ENGINE=ON || return $?
+}
+
+try_build_optional_provider() {
+    local name="$1"
+    shift
+
+    if "$@"; then
+        return 0
+    fi
+
+    echo "Warning: $name plugin build failed; continuing with any available providers." >&2
+    return 1
+}
+
+has_engine_plugins() {
+    local plugin_dir="$1"
+    local plugins=()
+
+    if [ ! -d "$plugin_dir" ]; then
+        return 1
+    fi
+
+    plugins=("$plugin_dir"/*.so)
+    [ -e "${plugins[0]}" ]
+}
+
+warn_no_native_engine_plugins() {
+    local plugin_dir="$1"
+
+    echo "Warning: no native hipDNN engine plugins were found in $plugin_dir." >&2
+    echo "Setup will still finish, but default hipDNN benchmark runs need engine plugins." >&2
+    echo "Pass --plugin-path or config plugin_path to use custom provider plugins." >&2
 }
 
 FORCE_BUILD_PREFIX=$(resolve_installed_rocm_prefix)
@@ -714,6 +778,14 @@ ACTIVATE_LOCAL="$VENV_DIR/bin/activate.local"
     printf 'export DNN_BENCH_WORKSPACE=%q\n' "$DNN_BENCH_WORKSPACE"
 } > "$ACTIVATE_LOCAL"
 INSTALLED_TORCH_MODE=$(get_torch_mode)
+# An existing venv with CUDA torch reaches the CUDA skip path below even when
+# --torch-mode existing was passed; building hipDNN there would silently be
+# skipped, so reject the build request as early as possible.
+if [ "$INSTALLED_TORCH_MODE" = "cuda" ] && [ "$FORCE_BUILD" -eq 1 ]; then
+    echo "ERROR: --force-build is not supported with an existing CUDA torch venv;" >&2
+    echo "building hipDNN requires a ROCm toolchain. Remove $VENV_DIR or use a ROCm torch mode." >&2
+    exit 1
+fi
 if ! grep -q "activate.local" "$VENV_DIR/bin/activate"; then
     # shellcheck disable=SC2016
     echo 'source "$(dirname "${BASH_SOURCE[0]}")/activate.local" 2>/dev/null || true' \
@@ -727,6 +799,21 @@ echo "Torch mode: $TORCH_MODE"
 # intentionally omits torch so pip never replaces the selected torch wheel.
 install_torch
 pip install -e "$SCRIPT_DIR"
+
+# CUDA torch supports only the PyTorch execution backend: no hipDNN Python
+# bindings, engine plugins, amdsmi, or ROCm prefix are installed or required.
+if [ "$INSTALLED_TORCH_MODE" = "cuda" ] || [ "$TORCH_MODE" = "cuda" ]; then
+    echo ""
+    echo "CUDA torch selected: skipping hipDNN/provider builds, hipDNN Python"
+    echo "bindings, and ROCm environment setup."
+    echo ""
+    echo "Setup complete. Activate the virtual environment with:"
+    echo "  source $VENV_DIR/bin/activate"
+    echo ""
+    echo "Run PyTorch-backend benchmarks with:"
+    echo "  python -m dnn_benchmarking --graph <graph.json> --backend pytorch"
+    exit 0
+fi
 
 # 3. Select the hipDNN/ROCm prefix used by Python bindings and provider builds.
 BINDING_PREFIX=$(select_binding_prefix)
@@ -772,18 +859,43 @@ if [ "$FORCE_BUILD" -eq 1 ] || [ "$BUILT_HIPDNN" -eq 1 ] || \
     fi
 fi
 
+PROVIDER_BUILD_FAILED=0
 if [ "$FORCE_BUILD" -eq 1 ] || [ "$BUILT_HIPDNN" -eq 1 ] || [ ! -f "$MIOPEN_PLUGIN" ]; then
-    build_miopen_provider "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX"
+    try_build_optional_provider \
+        "MIOpen provider" \
+        build_miopen_provider "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX" ||
+        PROVIDER_BUILD_FAILED=1
 fi
 if [ "$FORCE_BUILD" -eq 1 ] || [ "$BUILT_HIPDNN" -eq 1 ] || [ ! -f "$HIPBLASLT_PLUGIN" ]; then
-    build_hipblaslt_provider "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX"
+    try_build_optional_provider \
+        "hipBLASLt provider" \
+        build_hipblaslt_provider "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX" ||
+        PROVIDER_BUILD_FAILED=1
 fi
 if [ "$FORCE_BUILD" -eq 1 ] || [ "$BUILT_HIPDNN" -eq 1 ] || [ ! -f "$HIP_KERNEL_PLUGIN" ]; then
-    build_hip_kernel_provider "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX"
+    try_build_optional_provider \
+        "hip-kernel-provider" \
+        build_hip_kernel_provider "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX" ||
+        PROVIDER_BUILD_FAILED=1
+fi
+
+NATIVE_ENGINE_PLUGINS_AVAILABLE=1
+if ! has_engine_plugins "$PLUGIN_DIR"; then
+    NATIVE_ENGINE_PLUGINS_AVAILABLE=0
+    warn_no_native_engine_plugins "$PLUGIN_DIR"
+fi
+
+if [ "$PROVIDER_BUILD_FAILED" -ne 0 ]; then
+    echo "Warning: one or more provider plugins failed to build." >&2
+    echo "Continuing with available or user-specified plugins." >&2
 fi
 
 echo ""
-echo "hipDNN plugins installed to: $PLUGIN_DIR/"
+if [ "$NATIVE_ENGINE_PLUGINS_AVAILABLE" -eq 1 ]; then
+    echo "hipDNN plugins available at: $PLUGIN_DIR/"
+else
+    echo "hipDNN plugin search path: $PLUGIN_DIR/ (no .so files found)"
+fi
 ROCM_PATH="$BINDING_PREFIX"
 export ROCM_PATH
 prepend_ld_library_path "$BINDING_PREFIX/lib"

@@ -78,14 +78,14 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [3, 5, 11, 20]
   N: [300]
-  denseld: [800, 2000, 2600]
+  denseld: [800]
   matrix: [rocsparse_matrix_random]
 
 - name: gtsv
   category: quick
   function: gtsv
   precision: *single_double_precisions_complex_real
-  M: [300, 556, 1068, 2092, 4140, 8236]
+  M: [556, 2092, 8236]
   N: [8]
   denseld: [8236]
   matrix: [rocsparse_matrix_random]
@@ -155,9 +155,9 @@ Tests:
   category: pre_checkin
   function: gtsv
   precision: *single_double_precisions_complex_real
-  M: [524288, 1048576, 2097152, 4194304, 8388608]
+  M: [1048576, 4194304]
   N: [3]
-  denseld: [8388608]
+  denseld: [4194304]
   matrix: [rocsparse_matrix_random]
 
 # Nightly

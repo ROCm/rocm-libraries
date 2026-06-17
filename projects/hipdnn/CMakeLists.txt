@@ -10,8 +10,10 @@ if(NOT DEFINED ROCM_LIBRARIES_ROOT)
 endif()
 
 # hipDNN dependency versions to use
+set(_HIPDNN_DEFAULT_FLATBUFFERS_VERSION "25.9.23")
+
 set(HIPDNN_SPDLOG_VERSION "1.15.3" CACHE STRING "Version of spdlog to use")
-set(HIPDNN_FLATBUFFERS_VERSION "25.9.23" CACHE STRING "Version of flatbuffers to use")
+set(HIPDNN_FLATBUFFERS_VERSION "${_HIPDNN_DEFAULT_FLATBUFFERS_VERSION}" CACHE STRING "Version of flatbuffers to use")
 set(HIPDNN_NLOHMANN_JSON_VERSION "3.12.0" CACHE STRING "Version of nlohmann_json to use")
 set(HIPDNN_GTEST_VERSION "1.16.0" CACHE STRING "Version of googletest to use")
 set(HIPDNN_NANOBIND_VERSION "2.12.0" CACHE STRING "Version of nanobind to use")
@@ -26,10 +28,35 @@ else()
     message(STATUS "hipDNN: JSON serialization enabled in SDK public headers (requires nlohmann_json)")
 endif()
 
-option(HIPDNN_ENABLE_SDPA "Enable SDPA (Scaled Dot-Product Attention) support" OFF)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+add_compile_definitions(__HIP_PLATFORM_AMD__)
+
+if(NOT CMAKE_TOOLCHAIN_FILE)
+    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+        CACHE FILEPATH "Toolchain file"
+    )
+endif()
+set(HIPDNN_VERSION "0.0.1")
+
+project(hipdnn VERSION ${HIPDNN_VERSION} LANGUAGES CXX)
+
+# ----------------------------------------------------------------------------
+# TheRock Feature Flags
+#
+# See: https://github.com/ROCm/TheRock/blob/main/docs/development/flags.md
+#
+# These flags are injected during the project() call above via
+# CMAKE_PROJECT_TOP_LEVEL_INCLUDES (TheRock's build system), which only
+# populates the cache during that call. They must therefore be declared AFTER
+# project(): declared before, option() captures the pre-injection default
+# (typically OFF) and the injected value is silently ignored, leaving the
+# feature compiled out despite the flag being set.
+# ----------------------------------------------------------------------------
+option(HIPDNN_ENABLE_SDPA "Enable SDPA (Scaled Dot-Product Attention) support" OFF)
 if(HIPDNN_ENABLE_SDPA)
     message(STATUS "hipDNN: SDPA support enabled")
+    add_compile_definitions(HIPDNN_ENABLE_SDPA)
 else()
     message(STATUS "hipDNN: SDPA support disabled")
 endif()
@@ -40,29 +67,11 @@ endif()
 option(HIPDNN_ENABLE_CUDNN_COMPATIBILITY
     "Enable the cuDNN compatibility shim (headers + tests)" OFF
 )
-
 if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
     message(STATUS "hipDNN: cuDNN compatibility shim enabled")
 else()
     message(STATUS "hipDNN: cuDNN compatibility shim disabled")
 endif()
-
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-
-add_compile_definitions(__HIP_PLATFORM_AMD__)
-
-if(HIPDNN_ENABLE_SDPA)
-    add_compile_definitions(HIPDNN_ENABLE_SDPA)
-endif()
-
-if(NOT CMAKE_TOOLCHAIN_FILE)
-    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ClangToolChain.cmake"
-        CACHE FILEPATH "Toolchain file"
-    )
-endif()
-set(HIPDNN_VERSION "0.0.1")
-
-project(hipdnn VERSION ${HIPDNN_VERSION} LANGUAGES CXX)
 
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/CheckPreCommit.cmake)
 

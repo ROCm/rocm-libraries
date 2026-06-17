@@ -131,7 +131,7 @@ def generate_gr_to_vgpr_loads_v2(writer, ti):
             offsetK = j * int(ti.mmaTileShape[1] * ti.subtileShape[0] * ti.bpe)
 
             for gr_idx in range(ti.numGRPerSubtile):
-                dst_start = writer.vgprPool.checkOutAligned(4, 2, preventOverflow=False)
+                dst_start = writer.vgprPool.checkOutAligned(4, 2, tag="_generate_gr_to_vgpr_loads_v2_dst_start", preventOverflow=False)
 
                 if len(rl) > 0 and rl.is_sgpr:
                     soff_str = f"s{rl.indices[0]}"
@@ -209,7 +209,7 @@ def generate_gr_offset_kernel(cfg):
     ti = tileInfoA
 
     # Reserve s0-s7 for hardware + kernarg
-    writer.sgprPool.checkOut(12)
+    writer.sgprPool.checkOut(12, tag="_generate_gr_offset_kernel_sgprs")
     stride_sgpr = 10
     writer.sgprs["StrideA0I"] = stride_sgpr
     writer.sgprs["StrideB1J"] = 11

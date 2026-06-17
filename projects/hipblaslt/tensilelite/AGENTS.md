@@ -28,6 +28,58 @@ invoke get-gpu-arch
 
 For custom CMake builds, cmake presets, linting, running tests, rebuilding assembly, CMake options, and supported targets — see `AGENTS_reference.md`. Read that file automatically whenever the task involves any of those topics.
 
+## License headers
+
+New source files (Python under `Tensile/`, C++/HIP under `include/`, `src/`, `client/`, `rocisa/`, plus CMake, shell, and YAML) MUST start with the short SPDX license header. Use the comment form that matches the file's syntax.
+
+C / C++ / HIP files (`//` comments):
+
+```cpp
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+```
+
+Python / shell / CMake / YAML files (`#` comments):
+
+```python
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+```
+
+The header goes at the very top of the file, immediately after a `#!` shebang line if one is present.
+
+Do NOT paste the legacy verbose multi-line MIT block ("Permission is hereby granted, free of charge, ... THE SOFTWARE." plus the warranty disclaimer) into new files; the short SPDX header replaces it.
+
+Existing files that still carry the legacy verbose MIT block MAY be migrated to the SPDX header when you are already editing them, but only when it does not materially grow the PR. If swapping headers would substantially increase the diff's line footprint (e.g. many files touched solely to change the header), leave those headers unchanged and keep the SPDX requirement scoped to net-new files.
+
+## Pull requests
+
+Always write PR descriptions using the rocm-libraries PR template. Fill in every section (use "N/A" or "Docs only, no testing needed" where a section genuinely does not apply rather than deleting it):
+
+```markdown
+## Motivation
+<why this change is needed: the problem, bug, or feature being addressed>
+
+## Technical Details
+<what changed and how; key design decisions and trade-offs>
+
+## Test Plan
+<how the change was/should be validated: builds, unit/gtest, smoke, manual steps>
+
+## Test Result
+<outcome of the test plan: passing suites, benchmark numbers, before/after>
+
+## Submission Checklist
+- [ ] Look over the contributing guidelines at https://github.com/ROCm/ROCm/blob/develop/CONTRIBUTING.md#pull-requests.
+
+## Risk level
+<None/Low/Medium/High, with a short justification>
+
+**Associated ticket**: <JIRA/issue id, or N/A>
+```
+
+Use the `users/<github-username>/<branch-name>` branch convention and base PRs on `develop`.
+
 ## Architecture
 
 ### Three-Phase Workflow

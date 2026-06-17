@@ -1,4 +1,4 @@
-# Sample example to run brightness augmentation 
+# Sample example to run brightness augmentation
 
 *   To run this example
 ```none

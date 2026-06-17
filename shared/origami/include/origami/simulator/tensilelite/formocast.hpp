@@ -10,6 +10,8 @@
 #include <vector>
 #include <cmath>
 
+#include "origami/origami_export.h"
+
 namespace origami
 {
     // Forward declarations
@@ -36,7 +38,7 @@ namespace origami
          * @param tcc_ea0_coalesced Output parameter for TCC EA0 coalesced value
          * @return The calculated load request value
          */
-        double getL1LoadRequest(double   MTX,
+        ORIGAMI_EXPORT double getL1LoadRequest(double   MTX,
                              double   DU,
                              double   L1CacheLineSize,
                              uint32_t grvw,
@@ -85,7 +87,7 @@ namespace origami
          * @param L2WriteBusWidthPerCU L2 write bus width per CU
          * @return The calculated memory-bound overhead of Split K for multiple buffers
          */
-        double getMultipleBufferOverhead(double M, double N, double GlobalSplitU, double NumBatches,
+        ORIGAMI_EXPORT double getMultipleBufferOverhead(double M, double N, double GlobalSplitU, double NumBatches,
                             uint32_t bpeCompute, uint32_t bpeD, double hbmBandWidth,
                             double L1CacheLineSize, double NumCUs, uint32_t num_tiles, uint32_t CUOccupancy, double boost_frequency,
                             double mem_frequency, double L2WriteArbEff, double L2ReadArbEff,
@@ -109,7 +111,7 @@ namespace origami
          * @param storeGSU Store overhead for Global Split K accumulation
          * @return The calculated overhead for MBSK (Multiple Buffer Single Kernel) approach
          */
-        double getMultipleBufferSingleKernelOverhead(double GlobalSplitU, double MT0, double MT1, uint32_t bpeCompute,
+        ORIGAMI_EXPORT double getMultipleBufferSingleKernelOverhead(double GlobalSplitU, double MT0, double MT1, uint32_t bpeCompute,
                               double NumCUs, uint32_t numWGs, uint32_t num_tiles, uint32_t CUOccupancy, double boost_frequency,
                               double L2ReadArbEff, double L1BusWidthPerCU, double L2BusWidthPerCU,
                               double storeGSU);
@@ -125,7 +127,7 @@ namespace origami
          * @param math_frequency Math frequency in MHz
          * @return The calculated overhead for Local Split K accumulation and reduction
          */
-        double getLocalSplitKOverhead(double MT0, double MT1, double lsu, uint32_t svw,
+        ORIGAMI_EXPORT double getLocalSplitKOverhead(double MT0, double MT1, double lsu, uint32_t svw,
                              uint32_t numThreads, uint32_t bpeCompute, double math_frequency);
 
         // Cache hit rate calculation functions
@@ -181,7 +183,7 @@ namespace origami
          * @param isL1FourBank Whether L1 cache has four banks
          * @return L1CacheHitRate structure containing hit rates for both tiles
          */
-        L1CacheHitRate computeL1CacheHitRate(double L1CacheCapacity, double L1CacheLineSize,
+        ORIGAMI_EXPORT L1CacheHitRate computeL1CacheHitRate(double L1CacheCapacity, double L1CacheLineSize,
                                              double L1BusWidthPerCU, double MT0, double MT1, uint32_t depthU,
                                              uint32_t bpeA, uint32_t bpeB, int NTA, int NTB,
                                              uint32_t GRVWA, uint32_t GRVWB, bool DTVA, bool DTVB,
@@ -207,7 +209,7 @@ namespace origami
          * @param M_WGs_per_tile Number of workgroups per tile in M dimension
          * @return L3CacheHitRate structure containing total and per-tile hit rates
          */
-        L3CacheHitRate computeL3CacheHitRate(double M, double N, double K, double L3CacheCapacity,
+        ORIGAMI_EXPORT L3CacheHitRate computeL3CacheHitRate(double M, double N, double K, double L3CacheCapacity,
                                              double NumCUs, uint32_t bpeA, uint32_t bpeB,
                                              int NTA, int NTB, int N_WGs_total, int M_WGs_total,
                                              int N_WGs_per_tile, int M_WGs_per_tile);
@@ -235,7 +237,7 @@ namespace origami
          * @param isGSUWGMRR Whether using GSU WGM round-robin scheduling
          * @return L2CacheHitRate structure containing total and per-tile hit rates
          */
-        L2CacheHitRate computeL2CacheHitRate(uint32_t M, uint32_t N, uint32_t K,
+        ORIGAMI_EXPORT L2CacheHitRate computeL2CacheHitRate(uint32_t M, uint32_t N, uint32_t K,
                                              uint32_t MT0, uint32_t MT1, uint32_t depthU,
                                              uint32_t L2CacheCapacity, uint32_t NumCUs, uint32_t NumXCDs,
                                              int XCC, int XCCG, uint32_t gsu, int32_t wgm,
@@ -254,7 +256,7 @@ namespace origami
          * @param edge_req Output parameter for edge store requests
          * @return Total L3 store request value
          */
-        double calculateStoreL3Request(double M, double N, double MT0, double MT1,
+        ORIGAMI_EXPORT double calculateStoreL3Request(double M, double N, double MT0, double MT1,
                                        double& non_edge_req, double& edge_req);
 
         /**
@@ -268,7 +270,7 @@ namespace origami
          * @param edge_req Output parameter for edge store requests
          * @return Total L2 store request value
          */
-        double calculateStoreL2Request(double M, double N, double MT0, double MT1, double SVW,
+        ORIGAMI_EXPORT double calculateStoreL2Request(double M, double N, double MT0, double MT1, double SVW,
                                        double& non_edge_req, double& edge_req);
 
         /**
@@ -282,7 +284,7 @@ namespace origami
          * @param edge_req Output parameter for edge store requests
          * @return Total L1 store request value
          */
-        double calculateStoreL1Request(double M, double N, double MT0, double MT1, double SVW,
+        ORIGAMI_EXPORT double calculateStoreL1Request(double M, double N, double MT0, double MT1, double SVW,
                                        double& non_edge_req, double& edge_req);
 
         // FIFO and queue simulation functions
@@ -297,7 +299,7 @@ namespace origami
          * @param isSgprOffset Whether the SGPR offset is used
          * @return Stall cycles if FIFO is full, currentCycle otherwise
          */
-        int getGlobalReadQueueFullStallCycles(int currentCycle, std::deque<int>& fifo, int bpRead, int numWaves, bool isStall, bool isSgprOffset);
+        ORIGAMI_EXPORT int getGlobalReadQueueFullStallCycles(int currentCycle, std::deque<int>& fifo, int bpRead, int numWaves, bool isStall, bool isSgprOffset);
 
         /**
          * @brief Get the cycle when local read operations complete
@@ -306,7 +308,7 @@ namespace origami
          * @param numLR Number of local reads
          * @return Cycle number if local reads not completed, currentCycle otherwise
          */
-        int getLocalReadCompletionCycle(int currentCycle, std::queue<int>& fifo, int numLR);
+        ORIGAMI_EXPORT int getLocalReadCompletionCycle(int currentCycle, std::queue<int>& fifo, int numLR);
 
         /**
          * @brief Get stall cycles when local read queue is full
@@ -317,7 +319,7 @@ namespace origami
          * @param lrStallLatencyBuffer Local read stall latency buffer
          * @return Stall cycles if FIFO is full, currentCycle otherwise
          */
-        int getLocalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, int lrStallLatencyBuffer);
+        ORIGAMI_EXPORT int getLocalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, int lrStallLatencyBuffer);
 
         /**
          * @brief Calculate local read latency considering bank conflicts
@@ -326,7 +328,7 @@ namespace origami
          * @param bankConflict Bank conflict rate
          * @return Total latency including bank conflict penalty
          */
-        int getLocalReadLatency(int baseLatency, int conflictMultiplier, double bankConflict);
+        ORIGAMI_EXPORT int getLocalReadLatency(int baseLatency, int conflictMultiplier, double bankConflict);
 
         /**
          * @brief Calculate local write latency considering bank conflicts
@@ -335,7 +337,7 @@ namespace origami
          * @param bankConflict Bank conflict rate
          * @return Total latency including bank conflict penalty
          */
-         int getLocalWriteLatency(int baseLatency, int conflictMultiplier, double bankConflict);
+         ORIGAMI_EXPORT int getLocalWriteLatency(int baseLatency, int conflictMultiplier, double bankConflict);
 
         /**
          * @brief Analyze bank conflicts from VGPR state
@@ -347,7 +349,7 @@ namespace origami
          * @param LocalReadBytesA Number of bytes to read for matrix A
          * @return Bank conflict rate (0.0 = no conflicts, 1.0 = maximum conflicts)
          */
-        double analyzeBankConflictsFromVGPR(
+        ORIGAMI_EXPORT double analyzeBankConflictsFromVGPR(
             const std::vector<std::unordered_map<std::string, int64_t>>& vgprState,
             const std::string& vgprLocalReadAddrA,
             int NUM_THREADS_TO_SIMULATE,
