@@ -75,6 +75,13 @@ jobs:
         env:
           BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
         run: |
+          echo "BASE_REF: $BASE_REF"
+          echo "git log:"
+          git log --oneline -5
+          echo "git diff --name-only $BASE_REF:"
+          git diff --name-only $BASE_REF || echo "git diff failed"
+          echo "git diff --name-only HEAD^:"
+          git diff --name-only HEAD^ || echo "git diff HEAD^ failed"
           CHANGED_PROJECTS=$(python3 .github/scripts/get_changed_projects.py)
           echo "Changed projects: $CHANGED_PROJECTS"
           echo "changed_projects=$CHANGED_PROJECTS" >> $GITHUB_OUTPUT
