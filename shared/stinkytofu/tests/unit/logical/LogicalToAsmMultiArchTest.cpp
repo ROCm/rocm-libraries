@@ -605,6 +605,28 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return Label("test_label");
         case logical::IntrinsicCall:
             return nullptr;  // Special: handled separately
+        case logical::SBranch:
+            return SBranch(literal(0));
+        case logical::SCBranchSCC0:
+            return SCBranchSCC0(literal(0));
+        case logical::SCBranchSCC1:
+            return SCBranchSCC1(literal(0));
+        case logical::SCBranchVCCNZ:
+            return SCBranchVCCNZ(literal(0));
+        case logical::SCBranchVCCZ:
+            return SCBranchVCCZ(literal(0));
+        case logical::SCBranchExecZ:
+            return SCBranchExecZ(literal(0));
+        case logical::SCBranchExecNZ:
+            return SCBranchExecNZ(literal(0));
+        case logical::SWaitCnt:
+            return SWaitCnt(literal(0));
+        case logical::SWaitTensorcnt:
+            return SWaitTensorcnt(literal(0));
+        case logical::SWaitXCnt:
+            return SWaitXCnt(literal(0));
+        case logical::SEndpgm:
+            return SEndpgm();
         default:
             return nullptr;
     }
@@ -785,6 +807,20 @@ static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX1250 = {
     {logical::VAShiftRightI32, "v_ashrrev_i32"},
     // Vector Pack
     {logical::VPackF16toB32, "v_pack_b32_f16"},
+    // Branch / Control Flow
+    {logical::SBranch, "s_branch"},
+    {logical::SCBranchSCC0, "s_cbranch_scc0"},
+    {logical::SCBranchSCC1, "s_cbranch_scc1"},
+    {logical::SCBranchVCCNZ, "s_cbranch_vccnz"},
+    {logical::SCBranchVCCZ, "s_cbranch_vccz"},
+    {logical::SCBranchExecZ, "s_cbranch_execz"},
+    {logical::SCBranchExecNZ, "s_cbranch_execnz"},
+    // Wait / Sync
+    {logical::SWaitCnt, "s_waitcnt"},
+    {logical::SWaitTensorcnt, "s_wait_tensorcnt"},
+    {logical::SWaitXCnt, "s_wait_xcnt"},
+    // End program
+    {logical::SEndpgm, "s_endpgm"},
 };
 
 /** Returns expected asm mnemonic for (opcode, arch) if we have one; else nullopt. */

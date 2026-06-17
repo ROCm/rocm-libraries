@@ -60,10 +60,12 @@ What it does (real):
     - ``SNop`` — scalar ``s_nop <wait>``; ``to_stinky_logical`` forwards to
       ``_stinkytofu.SNop`` (tablegen factory: literal wait as ``Register`` +
       ``comment``).
-    - Other Phase-A candidates (``SWaitCnt``, ``SEndpgm``, branch shims)
-      remain dummies until matching logical opcodes exist in the generated
-      Python binding (see ``PythonBindings_generated.inc`` from the stinkytofu
-      build).
+    - Branch instructions (``SBranch``, ``SCBranchSCC0/1``,
+      ``SCBranchVCCNZ/Z``, ``SCBranchExecZ/NZ``) — real classes;
+      ``to_stinky_logical`` forwards to matching tablegen factory.
+    - ``SEndpgm`` — real class (0 operands).
+    - Wait instructions (``_SWaitCnt``, ``SWaitCnt``, ``SWaitXCnt``,
+      ``SWaitTensorcnt``) — real classes with ``to_stinky_logical``.
 
     - ``getMFMAIssueLatency`` / ``getSMFMAIssueLatency`` — workaround
       ports returning the C++ default-branch tuple
@@ -1391,18 +1393,80 @@ class SLoadB512(SMemLoadInstruction):
 # ==========================================================================
 # Branch instructions
 # source: rocisa/rocisa/src/instruction/branch.cpp
+# logicalIR: SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ,
+#            SCBranchVCCZ, SCBranchExecZ, SCBranchExecNZ
 # ==========================================================================
-BranchInstruction = make_dummy_class(f"{_P}.BranchInstruction")
-SBranch = make_dummy_class(f"{_P}.SBranch")
-SCBranchSCC0 = make_dummy_class(f"{_P}.SCBranchSCC0")
-SCBranchSCC1 = make_dummy_class(f"{_P}.SCBranchSCC1")
+
+
+class BranchInstruction(Instruction):
+    """Base class for branch instructions (labelName target)."""
+
+    __slots__ = ("labelName",)
+
+    def __init__(self, labelName: str = "", comment: str = ""):
+        super().__init__(InstType.INST_NOTYPE, comment)
+        self.labelName = str(labelName)
+
+    def getParams(self):
+        return [self.labelName]
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return [self.labelName]
+
+    def toString(self) -> str:
+        return self.formatWithComment(self.instStr + " " + self.labelName)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = self.__class__(labelName=self.labelName, comment=self.comment)
+        memo[id(self)] = dup
+        return dup
+
+
+def _make_branch_class(class_name: str, mnemonic: str):
+    """Factory for branch instruction adaptor classes."""
+
+    def _init(self, labelName: str = "", comment: str = ""):
+        BranchInstruction.__init__(self, labelName, comment)
+        self.setInst(mnemonic)
+
+    def _to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        factory = getattr(_st, class_name)
+        return factory(_to_stinky_register(self.labelName), self.comment)
+
+    cls = type(class_name, (BranchInstruction,), {
+        "__init__": _init,
+        "to_stinky_logical": _to_stinky_logical,
+        "__slots__": (),
+    })
+    cls.__qualname__ = class_name
+    cls.__module__ = __name__
+    return cls
+
+
+# logicalIR: SBranch
+SBranch = _make_branch_class("SBranch", "s_branch")
+# logicalIR: SCBranchSCC0
+SCBranchSCC0 = _make_branch_class("SCBranchSCC0", "s_cbranch_scc0")
+# logicalIR: SCBranchSCC1
+SCBranchSCC1 = _make_branch_class("SCBranchSCC1", "s_cbranch_scc1")
 SAddPCI64_SIMM = make_dummy_class(f"{_P}.SAddPCI64_SIMM")
-SCBranchVCCNZ = make_dummy_class(f"{_P}.SCBranchVCCNZ")
-SCBranchVCCZ = make_dummy_class(f"{_P}.SCBranchVCCZ")
+# logicalIR: SCBranchVCCNZ
+SCBranchVCCNZ = _make_branch_class("SCBranchVCCNZ", "s_cbranch_vccnz")
+# logicalIR: SCBranchVCCZ
+SCBranchVCCZ = _make_branch_class("SCBranchVCCZ", "s_cbranch_vccz")
 SSetPCB64 = make_dummy_class(f"{_P}.SSetPCB64")
 SSwapPCB64 = make_dummy_class(f"{_P}.SSwapPCB64")
-SCBranchExecZ = make_dummy_class(f"{_P}.SCBranchExecZ")
-SCBranchExecNZ = make_dummy_class(f"{_P}.SCBranchExecNZ")
+# logicalIR: SCBranchExecZ
+SCBranchExecZ = _make_branch_class("SCBranchExecZ", "s_cbranch_execz")
+# logicalIR: SCBranchExecNZ
+SCBranchExecNZ = _make_branch_class("SCBranchExecNZ", "s_cbranch_execnz")
 
 
 # ==========================================================================
@@ -1689,21 +1753,228 @@ GlobalWb = make_dummy_class(f"{_P}.GlobalWb")
 GlobalInv = make_dummy_class(f"{_P}.GlobalInv")
 # SNop — real class (see class SNop above, after SMovB64).
 VNop = make_dummy_class(f"{_P}.VNop")
-SEndpgm = make_dummy_class(f"{_P}.SEndpgm")
+
+
+# logicalIR: SEndpgm
+class SEndpgm(Instruction):
+    """``s_endpgm`` shim with stinkytofu left-path bridge."""
+
+    __slots__ = ()
+
+    def __init__(self, comment: str = ""):
+        super().__init__(InstType.INST_NOTYPE, comment)
+        self.setInst("s_endpgm")
+
+    def getParams(self):
+        return []
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return []
+
+    def toString(self) -> str:
+        return self.formatWithComment(self.instStr)
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        return _st.SEndpgm(self.comment)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = SEndpgm(comment=self.comment)
+        memo[id(self)] = dup
+        return dup
+
+
 SSleep = make_dummy_class(f"{_P}.SSleep")
 SSetVgprMsb = make_dummy_class(f"{_P}.SSetVgprMsb")
 # SGetRegB32 — real class (see Scalar Control section above)
 # SSetRegB32 — real class (see Scalar Control section above)
 # SSetRegIMM32B32 — real class (see Scalar Control section above)
-_SWaitCnt = make_dummy_class(f"{_P}._SWaitCnt")
+
+
+# ==========================================================================
+# Wait-count instructions
+# source: rocisa/rocisa/include/instruction/common.hpp
+# logicalIR: SWaitCnt, SWaitTensorcnt, SWaitXCnt
+# ==========================================================================
+
+
+class _SWaitCnt(Instruction):
+    """``s_waitcnt`` primitive (lgkmcnt/vmcnt combined)."""
+
+    __slots__ = ("lgkmcnt", "vmcnt")
+
+    def __init__(self, lgkmcnt: int = -1, vmcnt: int = -1, comment: str = ""):
+        super().__init__(InstType.INST_NOTYPE, comment)
+        self.lgkmcnt = int(lgkmcnt)
+        self.vmcnt = int(vmcnt)
+        self.setInst("s_waitcnt")
+
+    def getParams(self):
+        return [self.lgkmcnt, self.vmcnt]
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return [self.lgkmcnt, self.vmcnt]
+
+    def toString(self) -> str:
+        if self.lgkmcnt == 0 and self.vmcnt == 0:
+            wait_str = "0"
+        else:
+            parts: List[str] = []
+            if self.lgkmcnt != -1:
+                parts.append(f"lgkmcnt({self.lgkmcnt})")
+            if self.vmcnt != -1:
+                parts.append(f"vmcnt({self.vmcnt})")
+            wait_str = ", ".join(parts)
+        return self.formatWithComment("s_waitcnt " + wait_str)
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        return _st.SWaitCnt(_to_stinky_register(0), self.comment)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = _SWaitCnt(lgkmcnt=self.lgkmcnt, vmcnt=self.vmcnt, comment=self.comment)
+        memo[id(self)] = dup
+        return dup
+
+
 _SWaitCntVscnt = make_dummy_class(f"{_P}._SWaitCntVscnt")
 _SWaitStorecnt = make_dummy_class(f"{_P}._SWaitStorecnt")
 _SWaitLoadcnt = make_dummy_class(f"{_P}._SWaitLoadcnt")
 _SWaitKMcnt = make_dummy_class(f"{_P}._SWaitKMcnt")
 _SWaitDscnt = make_dummy_class(f"{_P}._SWaitDscnt")
-SWaitCnt = make_dummy_class(f"{_P}.SWaitCnt")
-SWaitXCnt = make_dummy_class(f"{_P}.SWaitXCnt")
-SWaitTensorcnt = make_dummy_class(f"{_P}.SWaitTensorcnt")
+
+
+class SWaitCnt(Instruction):
+    """High-level ``s_waitcnt`` composite (vlcnt/vscnt/dscnt/kmcnt).
+
+    Mirrors rocisa::SWaitCnt which is a CompositeInstruction that
+    decomposes into _SWaitCnt/_SWaitCntVscnt. For the logical IR path,
+    we emit a single SWaitCnt logical instruction.
+    """
+
+    __slots__ = ("vlcnt", "vscnt", "dscnt", "kmcnt", "waitAll")
+
+    def __init__(self, vlcnt: int = -1, vscnt: int = -1,
+                 dscnt: int = -1, kmcnt: int = -1,
+                 comment: str = "", waitAll: bool = False):
+        super().__init__(InstType.INST_NOTYPE, comment)
+        self.vlcnt = int(vlcnt)
+        self.vscnt = int(vscnt)
+        self.dscnt = int(dscnt)
+        self.kmcnt = int(kmcnt)
+        self.waitAll = bool(waitAll)
+        self.setInst("s_waitcnt")
+
+    def getParams(self):
+        return []
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return []
+
+    def toString(self) -> str:
+        return self.formatWithComment(self.instStr)
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        return _st.SWaitCnt(_to_stinky_register(0), self.comment)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = SWaitCnt(
+            vlcnt=self.vlcnt, vscnt=self.vscnt, dscnt=self.dscnt,
+            kmcnt=self.kmcnt, comment=self.comment, waitAll=self.waitAll,
+        )
+        memo[id(self)] = dup
+        return dup
+
+
+class SWaitXCnt(Instruction):
+    """``s_wait_xcnt`` shim."""
+
+    __slots__ = ("cnt",)
+
+    def __init__(self, cnt: int = 0, comment: str = ""):
+        super().__init__(InstType.INST_NOTYPE, comment)
+        self.cnt = int(cnt)
+        self.setInst("s_wait_xcnt")
+
+    def getParams(self):
+        return [self.cnt]
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return [self.cnt]
+
+    def toString(self) -> str:
+        return self.formatWithComment(f"s_wait_xcnt {self.cnt}")
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        return _st.SWaitXCnt(_to_stinky_register(self.cnt), self.comment)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = SWaitXCnt(cnt=self.cnt, comment=self.comment)
+        memo[id(self)] = dup
+        return dup
+
+
+class SWaitTensorcnt(Instruction):
+    """``s_wait_tensorcnt`` shim."""
+
+    __slots__ = ("cnt",)
+
+    def __init__(self, cnt: int = 0, comment: str = ""):
+        super().__init__(InstType.INST_NOTYPE, comment)
+        self.cnt = int(cnt)
+        self.setInst("s_wait_tensorcnt")
+
+    def getParams(self):
+        return [self.cnt]
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return [self.cnt]
+
+    def toString(self) -> str:
+        return self.formatWithComment(f"s_wait_tensorcnt {self.cnt}")
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        return _st.SWaitTensorcnt(_to_stinky_register(self.cnt), self.comment)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = SWaitTensorcnt(cnt=self.cnt, comment=self.comment)
+        memo[id(self)] = dup
+        return dup
+
+
 SWaitAlu = make_dummy_class(f"{_P}.SWaitAlu")
 SDelayAlu = make_dummy_class(f"{_P}.SDelayAlu")
 # logicalIR: VAddF16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)

@@ -292,6 +292,19 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     DSStore2B64,
     DSBPermuteB32,
     TensorLoadToLds,
+    BranchInstruction,
+    SBranch,
+    SCBranchSCC0,
+    SCBranchSCC1,
+    SCBranchVCCNZ,
+    SCBranchVCCZ,
+    SCBranchExecZ,
+    SCBranchExecNZ,
+    SEndpgm,
+    _SWaitCnt,
+    SWaitCnt,
+    SWaitXCnt,
+    SWaitTensorcnt,
     _to_stinky_register,
 )
 
@@ -1223,7 +1236,6 @@ class TestDevelopInstructionExports(unittest.TestCase):
         "SAtomicInc",
         "SBfeU32",
         "SMemAtomicIncInstruction",
-        "SWaitXCnt",
         "VAddNCU64",
         "_SAddU64",
         "_VAddNCU64",
@@ -2488,6 +2500,205 @@ class TestTensorLoadToLds(unittest.TestCase):
 # the logical-IR pipeline") is structurally covered by
 # ``tests/test_code.py::TestCollectLogicalInsts::test_textblocks_and_logical_mixed``,
 # which asserts the collector returns only logical leaves.
+
+
+# ===========================================================================
+# Branch instructions
+# ===========================================================================
+
+
+class TestBranchInstructionConstruction(unittest.TestCase):
+    """Branch instructions take (labelName, comment)."""
+
+    def test_sbranch_default(self):
+        inst = SBranch("loop_start")
+        self.assertIsInstance(inst, BranchInstruction)
+        self.assertIsInstance(inst, Instruction)
+        self.assertEqual(inst.instStr, "s_branch")
+        self.assertEqual(inst.labelName, "loop_start")
+
+    def test_sbranch_str(self):
+        inst = SBranch("loop_start", comment="jump back")
+        text = str(inst)
+        self.assertIn("s_branch", text)
+        self.assertIn("loop_start", text)
+        self.assertIn("jump back", text)
+
+    def test_scbranch_scc0(self):
+        inst = SCBranchSCC0("done")
+        self.assertEqual(inst.instStr, "s_cbranch_scc0")
+        self.assertIn("done", str(inst))
+
+    def test_scbranch_scc1(self):
+        inst = SCBranchSCC1("skip")
+        self.assertEqual(inst.instStr, "s_cbranch_scc1")
+
+    def test_scbranch_vccnz(self):
+        inst = SCBranchVCCNZ("active_label")
+        self.assertEqual(inst.instStr, "s_cbranch_vccnz")
+
+    def test_scbranch_vccz(self):
+        inst = SCBranchVCCZ("exit")
+        self.assertEqual(inst.instStr, "s_cbranch_vccz")
+
+    def test_scbranch_execz(self):
+        inst = SCBranchExecZ("all_done")
+        self.assertEqual(inst.instStr, "s_cbranch_execz")
+
+    def test_scbranch_execnz(self):
+        inst = SCBranchExecNZ("still_active")
+        self.assertEqual(inst.instStr, "s_cbranch_execnz")
+
+    def test_deepcopy(self):
+        inst = SBranch("target", comment="c")
+        dup = copy.deepcopy(inst)
+        self.assertIsInstance(dup, SBranch)
+        self.assertEqual(dup.labelName, "target")
+        self.assertEqual(str(dup), str(inst))
+        self.assertIsNot(dup, inst)
+
+    def test_getParams(self):
+        inst = SCBranchSCC0("lbl")
+        self.assertEqual(inst.getParams(), ["lbl"])
+        self.assertEqual(inst.getDstParams(), [])
+        self.assertEqual(inst.getSrcParams(), ["lbl"])
+
+    def test_has_to_stinky_logical(self):
+        for cls in (SBranch, SCBranchSCC0, SCBranchSCC1,
+                    SCBranchVCCNZ, SCBranchVCCZ,
+                    SCBranchExecZ, SCBranchExecNZ):
+            inst = cls("lbl")
+            self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)),
+                            f"{cls.__name__} missing to_stinky_logical")
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        m = Module()
+        m.add(SBranch("lbl"))
+        m.add(SCBranchSCC0("lbl"))
+        self.assertEqual(len(m._collect_logical_insts()), 2)
+
+
+# ===========================================================================
+# SEndpgm
+# ===========================================================================
+
+
+class TestSEndpgmConstruction(unittest.TestCase):
+    """SEndpgm is a zero-operand terminator instruction."""
+
+    def test_default(self):
+        inst = SEndpgm()
+        self.assertIsInstance(inst, Instruction)
+        self.assertEqual(inst.instStr, "s_endpgm")
+
+    def test_str(self):
+        inst = SEndpgm(comment="end")
+        text = str(inst)
+        self.assertIn("s_endpgm", text)
+        self.assertIn("end", text)
+
+    def test_deepcopy(self):
+        inst = SEndpgm(comment="fin")
+        dup = copy.deepcopy(inst)
+        self.assertIsInstance(dup, SEndpgm)
+        self.assertEqual(str(dup), str(inst))
+
+    def test_params(self):
+        inst = SEndpgm()
+        self.assertEqual(inst.getParams(), [])
+        self.assertEqual(inst.getDstParams(), [])
+        self.assertEqual(inst.getSrcParams(), [])
+
+    def test_has_to_stinky_logical(self):
+        inst = SEndpgm()
+        self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        m = Module()
+        m.add(SEndpgm())
+        self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+# ===========================================================================
+# Wait-count instructions
+# ===========================================================================
+
+
+class TestWaitCntInstructions(unittest.TestCase):
+    """_SWaitCnt, SWaitCnt, SWaitXCnt, SWaitTensorcnt."""
+
+    def test_swaitcnt_primitive_default(self):
+        inst = _SWaitCnt()
+        self.assertIsInstance(inst, Instruction)
+        self.assertEqual(inst.lgkmcnt, -1)
+        self.assertEqual(inst.vmcnt, -1)
+
+    def test_swaitcnt_primitive_str_both_zero(self):
+        inst = _SWaitCnt(lgkmcnt=0, vmcnt=0)
+        self.assertIn("s_waitcnt 0", str(inst))
+
+    def test_swaitcnt_primitive_str_lgkm_only(self):
+        inst = _SWaitCnt(lgkmcnt=2)
+        self.assertIn("lgkmcnt(2)", str(inst))
+
+    def test_swaitcnt_primitive_str_both(self):
+        inst = _SWaitCnt(lgkmcnt=1, vmcnt=3)
+        text = str(inst)
+        self.assertIn("lgkmcnt(1)", text)
+        self.assertIn("vmcnt(3)", text)
+
+    def test_swaitcnt_primitive_deepcopy(self):
+        inst = _SWaitCnt(lgkmcnt=4, vmcnt=2, comment="wait")
+        dup = copy.deepcopy(inst)
+        self.assertEqual(dup.lgkmcnt, 4)
+        self.assertEqual(dup.vmcnt, 2)
+        self.assertEqual(str(dup), str(inst))
+
+    def test_swaitcnt_composite(self):
+        inst = SWaitCnt(vlcnt=0, vscnt=0, dscnt=0, kmcnt=0, waitAll=True)
+        self.assertIsInstance(inst, Instruction)
+        self.assertTrue(inst.waitAll)
+
+    def test_swaitcnt_composite_deepcopy(self):
+        inst = SWaitCnt(vlcnt=1, comment="sync")
+        dup = copy.deepcopy(inst)
+        self.assertEqual(dup.vlcnt, 1)
+        self.assertEqual(dup.vscnt, -1)
+
+    def test_swaitxcnt(self):
+        inst = SWaitXCnt(cnt=5)
+        self.assertIn("s_wait_xcnt", str(inst))
+        self.assertIn("5", str(inst))
+
+    def test_swaitxcnt_deepcopy(self):
+        inst = SWaitXCnt(cnt=3, comment="x")
+        dup = copy.deepcopy(inst)
+        self.assertEqual(dup.cnt, 3)
+
+    def test_swaittensorcnt(self):
+        inst = SWaitTensorcnt(cnt=2)
+        self.assertIn("s_wait_tensorcnt", str(inst))
+        self.assertIn("2", str(inst))
+
+    def test_swaittensorcnt_deepcopy(self):
+        inst = SWaitTensorcnt(cnt=1, comment="tensor")
+        dup = copy.deepcopy(inst)
+        self.assertEqual(dup.cnt, 1)
+
+    def test_all_have_to_stinky_logical(self):
+        for inst in (_SWaitCnt(), SWaitCnt(), SWaitXCnt(), SWaitTensorcnt()):
+            self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)),
+                            f"{type(inst).__name__} missing to_stinky_logical")
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        m = Module()
+        m.add(_SWaitCnt(lgkmcnt=0, vmcnt=0))
+        m.add(SWaitTensorcnt(cnt=0))
+        m.add(SWaitXCnt(cnt=0))
+        self.assertEqual(len(m._collect_logical_insts()), 3)
 
 
 if __name__ == "__main__":
