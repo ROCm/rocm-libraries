@@ -62,6 +62,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/SetpcSwappcCfgTest.cpp
     unit/asm/LongBranchLoweringTest.cpp
     unit/asm/MemTokenConsistencyCheckPassTest.cpp
+    unit/asm/VerifyInstrumentationTest.cpp
 )
 
 # High-Level IR Tests
