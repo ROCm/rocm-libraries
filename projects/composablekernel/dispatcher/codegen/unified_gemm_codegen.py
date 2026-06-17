@@ -800,6 +800,13 @@ using CLayout = {ns_name}::CLayout;
         return StreamKGemmKernel::GetWorkSpaceSize(kargs);
     }}
 
+    // Whether the kernel can actually partition this problem (enough tiles across
+    // CUs). Lets the dispatcher's supports() reject too-small problems and fall
+    // back to a non-Stream-K kernel instead of throwing at launch.
+    static bool IsSupported(const ck_tile::StreamKHostArgs& args) {{
+        return StreamKGemmKernel::IsSupportedArgument(StreamKGemmKernel::MakeKernelArgs(args));
+    }}
+
     // Internal-workspace launch: allocates a fresh DeviceMem on every call.
     // Kept unchanged for the bridge ctypes lib and the standalone 03 driver.
     static float launch(const ck_tile::StreamKHostArgs& args, const stream_config& stream) {{
@@ -819,8 +826,14 @@ using CLayout = {ns_name}::CLayout;
         // Atomic reduction accumulates into C, so reset buffers before each run.
         auto reset_data_buffers = [&]() {{
             if constexpr (SkReductionStrategy == ck_tile::StreamKReductionStrategy::Atomic) {{
-                (void)hipMemsetAsync(args.e_ptr, 0,
-                    args.M * args.N * sizeof(CDataType), stream.stream_id_);
+                // Stride-aware: CLayout is row-major with stride_E elems/row, so a
+                // padded C is zeroed correctly (not just the contiguous M*N case).
+                (void)hipMemset2DAsync(args.e_ptr,
+                    args.stride_E * sizeof(CDataType),
+                    0,
+                    args.N * sizeof(CDataType),
+                    args.M,
+                    stream.stream_id_);
             }} else {{
                 workspace_dev.SetZero();
             }}
@@ -853,8 +866,14 @@ using CLayout = {ns_name}::CLayout;
 
         auto reset_data_buffers = [&]() {{
             if constexpr (SkReductionStrategy == ck_tile::StreamKReductionStrategy::Atomic) {{
-                (void)hipMemsetAsync(args.e_ptr, 0,
-                    args.M * args.N * sizeof(CDataType), stream.stream_id_);
+                // Stride-aware: CLayout is row-major with stride_E elems/row, so a
+                // padded C is zeroed correctly (not just the contiguous M*N case).
+                (void)hipMemset2DAsync(args.e_ptr,
+                    args.stride_E * sizeof(CDataType),
+                    0,
+                    args.N * sizeof(CDataType),
+                    args.M,
+                    stream.stream_id_);
             }} else {{
                 (void)hipMemsetAsync(workspace, 0, ws_size, stream.stream_id_);
             }}

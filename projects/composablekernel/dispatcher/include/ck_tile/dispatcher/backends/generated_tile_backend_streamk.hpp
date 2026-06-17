@@ -69,8 +69,7 @@ class GeneratedStreamKKernelInstance : public KernelInstance
             return false;
 
         // Stream-K distributes K-iterations across workgroups; padding flags
-        // mirror the regular backend's divisibility guard. Final feasibility
-        // (enough tiles to partition) is enforced by the kernel at launch.
+        // mirror the regular backend's divisibility guard.
         constexpr bool pad_m = SelectedKernel::kPadM;
         constexpr bool pad_n = SelectedKernel::kPadN;
         constexpr bool pad_k = SelectedKernel::kPadK;
@@ -80,7 +79,11 @@ class GeneratedStreamKKernelInstance : public KernelInstance
             return false;
         if(!pad_k && problem.K % SelectedKernel::TileK != 0)
             return false;
-        return true;
+
+        // Final feasibility: enough tiles to partition across CUs. Rejecting here
+        // (instead of throwing at launch) lets the dispatcher's first-fit fall back
+        // to a non-Stream-K kernel for too-small problems.
+        return SelectedKernel::IsSupported(make_args(problem));
     }
 
     /// Device workspace (bytes) needed for `problem`. 0 for Atomic; >0 for
