@@ -80,8 +80,7 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
              auto engine =
                  std::make_unique<hip_flash2_engine::HipFlash2Engine>(HIP_FLASH2_ENGINE_ID);
              engine->addPlanBuilder(
-                 std::make_unique<hip_flash2_engine::HipFlash2FwdPlanBuilder>(
-                     kernelCompiler, devicePropertyProvider));
+                 std::make_unique<hip_flash2_engine::HipFlash2FwdPlanBuilder>());
              return engine;
          }},
 #endif // HIPDNN_ENGINE_HIP_FLASH2
