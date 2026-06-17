@@ -478,8 +478,8 @@ void testing_spsm_coo(const Arguments& arg)
 
         if(analysis_pivot == -1 && solve_pivot == -1)
         {
-            hC_gold.near_check(hC_1);
-            hC_gold.near_check(hC_2);
+            hC_gold.near_check(hC_1, get_near_check_tol<T>(arg));
+            hC_gold.near_check(hC_2, get_near_check_tol<T>(arg));
         }
     }
 

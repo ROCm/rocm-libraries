@@ -690,7 +690,7 @@ void testing_csrgemm(const Arguments& arg)
                 rocsparse_reproducibility::save("d_C pointer mode host", d_C);
             }
 
-            h_C.near_check(d_C);
+            h_C.near_check(d_C, get_near_check_tol<T>(arg));
         }
         {
             //
@@ -711,7 +711,7 @@ void testing_csrgemm(const Arguments& arg)
                 rocsparse_reproducibility::save("d_C pointer mode device", d_C);
             }
 
-            h_C.near_check(d_C);
+            h_C.near_check(d_C, get_near_check_tol<T>(arg));
         }
     }
 
