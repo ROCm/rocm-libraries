@@ -7,11 +7,11 @@
 
 #pragma once
 
-#include "HipFlash2FwdPlanBuilder.hpp"  // Flash2FwdParams
-#include "HipFlash2KernelUtils.hpp"     // HipModuleGuard, Flash2KernelArgs
-#include "core/Handle.hpp"
-
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
+
+#include "HipFlash2FwdPlanBuilder.hpp" // Flash2FwdParams
+#include "HipFlash2KernelUtils.hpp" // HipModuleGuard, Flash2KernelArgs
+#include "core/Handle.hpp"
 
 namespace hip_flash2_engine
 {
@@ -31,9 +31,9 @@ public:
 
     ~HipFlash2FwdPlan() override = default;
 
-    HipFlash2FwdPlan(const HipFlash2FwdPlan&)            = delete;
+    HipFlash2FwdPlan(const HipFlash2FwdPlan&) = delete;
     HipFlash2FwdPlan& operator=(const HipFlash2FwdPlan&) = delete;
-    HipFlash2FwdPlan(HipFlash2FwdPlan&&) noexcept        = default;
+    HipFlash2FwdPlan(HipFlash2FwdPlan&&) noexcept = default;
     HipFlash2FwdPlan& operator=(HipFlash2FwdPlan&&) noexcept = default;
 
     /// Flash-Attention 2 V7 uses only registers and LDS — no external workspace.
@@ -46,7 +46,7 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
-    HipModuleGuard  _kernel;
+    HipModuleGuard _kernel;
     Flash2FwdParams _params;
 };
 
