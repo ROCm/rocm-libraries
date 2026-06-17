@@ -32,7 +32,7 @@ class IKernelCompiler;
 class ReluPlan : public hipdnn_plugin_sdk::IPlan<ExampleProviderHandle>
 {
 public:
-    explicit ReluPlan(ReluParams&& params);
+    explicit ReluPlan(const ReluParams& params);
 
     ~ReluPlan() override = default;
 

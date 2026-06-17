@@ -1,0 +1,512 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
+
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  SleepPercent: 50
+  NumElementsToValidate: -1
+  NewClient: 2
+  CSVExportWinner: 1
+  CSVMergeSameProblemID: 1
+  PruneSparseMode: 0
+  MaxLDS: 163840
+  DeviceLDS: 163840
+  PrintSolutionRejectionReason: 1
+
+BenchmarkProblems:
+  ########################################
+  # I8I8S NN SPA DTL
+  ########################################
+  -
+    -
+      OperationType: GEMM
+      DataType: i8
+      DestDataType: i8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      UseBias: 3
+      Batched: True
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
+      Sparse: 1
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 128, 1, 1, 6, 6, 2, 2]
+          - [32, 32, 64,  1, 1, 2, 2, 2, 2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [128]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - SourceSwap: [1]
+        - TransposeLDS: [-1]
+        - TransposeLDSMetadata: [1]
+        - LDSTrInst: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - GlobalReadVectorWidthA: [16]
+        - GlobalReadVectorWidthB: [16]
+        - VectorWidthA: [2]
+        - VectorWidthB: [2]
+        - StaggerU: [0]
+        - WorkGroupMapping: [1]
+        - DirectToLds: [1, 2, 3]
+        - DirectToLdsMetadata: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 128] # classic format
+          - Exact: [256, 256, 1, 256] # classic format
+          - Exact: [256, 256, 1, 384] # classic format
+          - Exact: [256, 256, 1, 512] # classic format
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [1]
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################
+  # I8I8S NN SPB DTL
+  ########################################
+  -
+    -
+      OperationType: GEMM
+      DataType: i8
+      DestDataType: i8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      UseBias: 3
+      Batched: True
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
+      Sparse: 2
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 128, 1, 1, 6, 6, 2, 2]
+          - [32, 32, 64,  1, 1, 2, 2, 2, 2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [128]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - SourceSwap: [1]
+        - TransposeLDS: [-1]
+        - TransposeLDSMetadata: [1]
+        - LDSTrInst: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - GlobalReadVectorWidthA: [16]
+        - GlobalReadVectorWidthB: [16]
+        - VectorWidthA: [2]
+        - VectorWidthB: [2]
+        - StaggerU: [0]
+        - WorkGroupMapping: [1]
+        - DirectToLds: [1, 2, 3]
+        - DirectToLdsMetadata: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 128] # classic format
+          - Exact: [256, 256, 1, 256] # classic format
+          - Exact: [256, 256, 1, 384] # classic format
+          - Exact: [256, 256, 1, 512] # classic format
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [1]
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################
+  # I8I8S NT SPA DTL
+  ########################################
+  -
+    -
+      OperationType: GEMM
+      DataType: i8
+      DestDataType: i8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      UseBias: 3
+      Batched: True
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
+      Sparse: 1
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 128, 1, 1, 6, 6, 2, 2]
+          - [32, 32, 64,  1, 1, 2, 2, 2, 2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [128]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - SourceSwap: [1]
+        - TransposeLDS: [-1]
+        - TransposeLDSMetadata: [1]
+        - LDSTrInst: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - GlobalReadVectorWidthA: [16]
+        - GlobalReadVectorWidthB: [16]
+        - VectorWidthA: [2]
+        - VectorWidthB: [2]
+        - StaggerU: [0]
+        - WorkGroupMapping: [1]
+        - DirectToLds: [1, 2, 3]
+        - DirectToLdsMetadata: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 128] # classic format
+          - Exact: [256, 256, 1, 256] # classic format
+          - Exact: [256, 256, 1, 384] # classic format
+          - Exact: [256, 256, 1, 512] # classic format
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [1]
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################
+  # I8I8S NT SPB DTL
+  ########################################
+  -
+    -
+      OperationType: GEMM
+      DataType: i8
+      DestDataType: i8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      UseBias: 3
+      Batched: True
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
+      Sparse: 2
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 128, 1, 1, 6, 6, 2, 2]
+          - [32, 32, 64,  1, 1, 2, 2, 2, 2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [128]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - SourceSwap: [1]
+        - TransposeLDS: [-1]
+        - TransposeLDSMetadata: [1]
+        - LDSTrInst: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - GlobalReadVectorWidthA: [16]
+        - GlobalReadVectorWidthB: [16]
+        - VectorWidthA: [2]
+        - VectorWidthB: [2]
+        - StaggerU: [0]
+        - WorkGroupMapping: [1]
+        - DirectToLds: [1, 2, 3]
+        - DirectToLdsMetadata: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 128] # classic format
+          - Exact: [256, 256, 1, 256] # classic format
+          - Exact: [256, 256, 1, 384] # classic format
+          - Exact: [256, 256, 1, 512] # classic format
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [1]
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################
+  # HHS NN SPA DTL
+  ########################################
+  -
+    -
+      OperationType: GEMM
+      DataType: H
+      DestDataType: H
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      UseBias: 3
+      Batched: True
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
+      Sparse: 1
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 64, 1, 1, 6, 6, 2, 2]
+          - [32, 32, 32, 1, 1, 2, 2, 2, 2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - SourceSwap: [1]
+        - TransposeLDS: [-1]
+        - TransposeLDSMetadata: [1]
+        - LDSTrInst: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - GlobalReadVectorWidthA: [4, 8]
+        - GlobalReadVectorWidthB: [4, 8]
+        - VectorWidthA: [2]
+        - VectorWidthB: [2]
+        - StaggerU: [0]
+        - WorkGroupMapping: [1]
+        - DirectToLds: [1, 2, 3]
+        - DirectToLdsMetadata: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 128] # classic format
+          - Exact: [256, 256, 1, 256] # classic format
+          - Exact: [256, 256, 1, 384] # classic format
+          - Exact: [256, 256, 1, 512] # classic format
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [1]
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################
+  # HHS NN SPB DTL
+  ########################################
+  -
+    -
+      OperationType: GEMM
+      DataType: H
+      DestDataType: H
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      UseBias: 3
+      Batched: True
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
+      Sparse: 2
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 64, 1, 1, 6, 6, 2, 2]
+          - [32, 32, 32, 1, 1, 2, 2, 2, 2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - SourceSwap: [1]
+        - TransposeLDS: [-1]
+        - TransposeLDSMetadata: [1]
+        - LDSTrInst: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - GlobalReadVectorWidthA: [4, 8]
+        - GlobalReadVectorWidthB: [4, 8]
+        - VectorWidthA: [2]
+        - VectorWidthB: [2]
+        - StaggerU: [0]
+        - WorkGroupMapping: [1]
+        - DirectToLds: [1, 2, 3]
+        - DirectToLdsMetadata: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 128] # classic format
+          - Exact: [256, 256, 1, 256] # classic format
+          - Exact: [256, 256, 1, 384] # classic format
+          - Exact: [256, 256, 1, 512] # classic format
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [1]
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################
+  # HHS NT SPA DTL
+  ########################################
+  -
+    -
+      OperationType: GEMM
+      DataType: H
+      DestDataType: H
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      UseBias: 3
+      Batched: True
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
+      Sparse: 1
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 64, 1, 1, 6, 6, 2, 2]
+          - [32, 32, 32, 1, 1, 2, 2, 2, 2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - SourceSwap: [1]
+        - TransposeLDS: [-1]
+        - TransposeLDSMetadata: [1]
+        - LDSTrInst: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - GlobalReadVectorWidthA: [4, 8]
+        - GlobalReadVectorWidthB: [4, 8]
+        - VectorWidthA: [2]
+        - VectorWidthB: [2]
+        - StaggerU: [0]
+        - WorkGroupMapping: [1]
+        - DirectToLds: [1, 2, 3]
+        - DirectToLdsMetadata: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 128] # classic format
+          - Exact: [256, 256, 1, 256] # classic format
+          - Exact: [256, 256, 1, 384] # classic format
+          - Exact: [256, 256, 1, 512] # classic format
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [1]
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################
+  # HHS NT SPB DTL
+  ########################################
+  -
+    -
+      OperationType: GEMM
+      DataType: H
+      DestDataType: H
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      UseBias: 3
+      Batched: True
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
+      Sparse: 2
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 64, 1, 1, 6, 6, 2, 2]
+          - [32, 32, 32, 1, 1, 2, 2, 2, 2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - SourceSwap: [1]
+        - TransposeLDS: [-1]
+        - TransposeLDSMetadata: [1]
+        - LDSTrInst: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - GlobalReadVectorWidthA: [4, 8]
+        - GlobalReadVectorWidthB: [4, 8]
+        - VectorWidthA: [2]
+        - VectorWidthB: [2]
+        - StaggerU: [0]
+        - WorkGroupMapping: [1]
+        - DirectToLds: [1, 2, 3]
+        - DirectToLdsMetadata: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 128] # classic format
+          - Exact: [256, 256, 1, 256] # classic format
+          - Exact: [256, 256, 1, 384] # classic format
+          - Exact: [256, 256, 1, 512] # classic format
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [1]
+        - ActivationArgs:
+          - [Enum: none]
+

@@ -54,6 +54,11 @@ namespace rocsparse
                                                               rocsparse_order      order_C,
                                                               rocsparse_index_base idx_base)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+
         const uint32_t tid = hipThreadIdx_x;
         const J        gid = hipBlockIdx_x * BLOCKSIZE + tid;
         const uint32_t lid = gid & (WF_SIZE - 1);
@@ -158,6 +163,11 @@ namespace rocsparse
                                                        rocsparse_order      order_C,
                                                        rocsparse_index_base idx_base)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+
         const uint32_t tid  = hipThreadIdx_x;
         const J        gid  = hipBlockIdx_x * BLOCKSIZE + tid;
         const uint32_t lid  = gid & (WF_SIZE - 1);
@@ -437,6 +447,13 @@ namespace rocsparse
                                                   rocsparse_order      order_C,
                                                   rocsparse_index_base idx_base)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(SUB_WF_SIZE > 0 && (SUB_WF_SIZE & (SUB_WF_SIZE - 1)) == 0,
+                      "SUB_WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+
         const uint32_t tid = hipThreadIdx_x;
         const J        gid = hipBlockIdx_x * BLOCKSIZE + tid;
         const J        row = gid / WF_SIZE;
@@ -579,6 +596,12 @@ namespace rocsparse
         bool                 conj_A,
         bool                 conj_B)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(SUBWFSIZE > 0 && (SUBWFSIZE & (SUBWFSIZE - 1)) == 0,
+                      "SUBWFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+
         static constexpr uint32_t SUBWFSIZES[]   = {SUBWFSIZES_LIST...};
         static constexpr uint32_t NUM_SUBWFSIZES = sizeofarray(SUBWFSIZES);
 
@@ -821,6 +844,11 @@ namespace rocsparse
                                                        rocsparse_order      order_C,
                                                        rocsparse_index_base idx_base)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+
         const uint32_t tid = hipThreadIdx_x;
         const J        gid = hipBlockIdx_x * BLOCKSIZE + tid;
         const uint32_t lid = gid & (WF_SIZE - 1);
@@ -909,6 +937,11 @@ namespace rocsparse
                                                        rocsparse_order      order_C,
                                                        rocsparse_index_base idx_base)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+
         const uint32_t tid = hipThreadIdx_x;
         const J        gid = hipBlockIdx_x * BLOCKSIZE + tid;
         const uint32_t lid = gid & (WF_SIZE - 1);

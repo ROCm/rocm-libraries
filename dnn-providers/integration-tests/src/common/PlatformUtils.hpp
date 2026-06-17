@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <string>
 #include <string_view>
 
 #ifdef _WIN32
@@ -28,6 +29,18 @@
 
 namespace hipdnn_integration_tests
 {
+
+/// Returns the lowercase platform name the test binary was built for
+/// ("windows" or "linux"). Used to match against the optional
+/// `platforms` field in [[test_skips]] TOML entries.
+inline std::string currentPlatform()
+{
+#ifdef _WIN32
+    return "windows";
+#elif defined(__linux__)
+    return "linux";
+#endif
+}
 
 /// Cross-platform glob match supporting '*' and '?' wildcards.
 /// Returns true if @p text matches @p pattern.

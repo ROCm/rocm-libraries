@@ -27,6 +27,7 @@ coverage.xml
 venv/
 env/
 ENV/
+.workspace/
 
 # IDE
 .idea/
@@ -46,3 +47,4 @@ dmypy.json
 # Project-specific
 results.json
 *.log
+.planning/

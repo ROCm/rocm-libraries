@@ -1282,41 +1282,33 @@ void testLargeIndicesInclusiveScan()
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScan)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     testLargeIndicesInclusiveScan();
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanWithGraphs)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     testLargeIndicesInclusiveScan<true>();
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanWithInitialValue)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     testLargeIndicesInclusiveScan<false, true>();
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanWithInitialValueAndGraphs)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     testLargeIndicesInclusiveScan<true, true>();
 }
 
@@ -1402,21 +1394,17 @@ void testLargeIndicesExclusiveScan()
 
 TEST(RocprimDeviceScanTests, LargeIndicesExclusiveScan)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     testLargeIndicesExclusiveScan();
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesExclusiveScanWithGraphs)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     testLargeIndicesExclusiveScan<true>();
 }
 

@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include "bindings.hpp"
+
 #include <HipdnnBackendPluginLoadingMode.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
@@ -10,7 +12,7 @@
 namespace nb = nanobind;
 using namespace hipdnn_frontend;
 
-void types_bindings(nb::module_& m)
+void typesBindings(nb::module_& m)
 {
     // Bind DataType enum
     nb::enum_<DataType>(m, "DataType")
@@ -29,7 +31,10 @@ void types_bindings(nb::module_& m)
         .value("INT4", DataType::INT4)
         .value("FP6_E2M3", DataType::FP6_E2M3)
         .value("FP6_E3M2", DataType::FP6_E3M2)
-        .value("INT64", DataType::INT64);
+        .value("INT64", DataType::INT64)
+        .value("BOOLEAN", DataType::BOOLEAN)
+        .value("FP8_E4M3_FNUZ", DataType::FP8_E4M3_FNUZ)
+        .value("FP8_E5M2_FNUZ", DataType::FP8_E5M2_FNUZ);
 
     // Bind ConvolutionMode enum
     nb::enum_<ConvolutionMode>(m, "ConvolutionMode")
@@ -90,6 +95,15 @@ void types_bindings(nb::module_& m)
 
     // Bind HeuristicMode enum
     nb::enum_<HeuristicMode>(m, "HeuristicMode").value("FALLBACK", HeuristicMode::FALLBACK);
+
+    // Bind BehaviorNote enum
+    nb::enum_<BehaviorNote>(m, "BehaviorNote")
+        .value("RUNTIME_COMPILATION", BehaviorNote::RUNTIME_COMPILATION)
+        .value("REQUIRES_LAYOUT_TRANSFORM", BehaviorNote::REQUIRES_LAYOUT_TRANSFORM)
+        .value("SUPPORTS_GRAPH_CAPTURE", BehaviorNote::SUPPORTS_GRAPH_CAPTURE)
+        .value("EXTERNAL_LIBRARY_DEPENDENCY", BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY)
+        .value("SUPPORTS_EXECUTION_PLAN_SERIALIZATION",
+               BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
 
     // Bind ErrorCode enum
     nb::enum_<ErrorCode>(m, "ErrorCode")

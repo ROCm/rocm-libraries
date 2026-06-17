@@ -38,6 +38,10 @@
 #include <Tensile/SingleSolutionLibrary.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 namespace TensileLite
 {
     using ContractionLibrary = SolutionLibrary<ContractionProblemGemm>;
@@ -61,3 +65,5 @@ namespace TensileLite
     using ContractionGranularitySelectionLibrary
         = GranularitySelectionLibrary<ContractionProblemGemm, ContractionSolution>;
 } // namespace TensileLite
+
+TENSILE_HIDDEN_END

@@ -67,6 +67,22 @@
             }
         },
         {
+            "name": "miopen",
+            "description": "Build miopen only",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "miopen"
+            }
+        },
+        {
+            "name": "miopen-with-provider",
+            "description": "Build miopen, hipdnn, hipdnn-integration-tests, and miopen-provider; provider links the in-tree MIOpen target",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "miopen;hipdnn;hipdnn-integration-tests;miopen-provider"
+            }
+        },
+        {
             "name": "hipdnn-integration-tests",
             "description": "Build hipdnn and hipdnn-integration-tests",
             "inherits": ["default:release"],
@@ -120,6 +136,14 @@
             "inherits": ["default:release"],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-integration-tests;miopen-provider;hipblaslt-provider;hipdnn-samples"
+            }
+        },
+        {
+            "name": "hipdnn-dev-all",
+            "description": "Build hipdnn, all providers (including some unsupported), integration tests, and samples",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-integration-tests;miopen-provider;hipblaslt-provider;hip-kernel-provider;hipdnn-samples"
             }
         }
     ],

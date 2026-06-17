@@ -14,6 +14,7 @@
 #include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 #include <test_plugins/TestPluginEngineIdMap.hpp>
 
@@ -32,8 +33,20 @@ protected:
     hipdnnBackendDescriptor_t _graph = nullptr;
     hipdnnBackendDescriptor_t _heuristicDescriptor = nullptr;
     hipdnnHandle_t _handle = nullptr;
+    hipStream_t _stream = nullptr;
 
     void SetUp() override {}
+
+    // Bind a real stream to the handle. Required for tests that finalize a
+    // heuristic descriptor with a non-empty applicable-engine list, since
+    // EngineHeuristicDescriptor::finalize() resolves the device through
+    // hipStreamGetDevice(handle->getStream(), ...). Caller must invoke
+    // SKIP_IF_NO_DEVICES() before this so the test skips on no-GPU runners.
+    void bindStream()
+    {
+        ASSERT_EQ(hipStreamCreate(&_stream), hipSuccess);
+        ASSERT_EQ(hipdnnSetStream(_handle, _stream), HIPDNN_STATUS_SUCCESS);
+    }
 
     void TearDown() override
     {
@@ -61,6 +74,11 @@ protected:
         {
             EXPECT_EQ(hipdnnDestroy(_handle), HIPDNN_STATUS_SUCCESS);
             _handle = nullptr;
+        }
+        if(_stream != nullptr)
+        {
+            EXPECT_EQ(hipStreamDestroy(_stream), hipSuccess);
+            _stream = nullptr;
         }
     }
 };
@@ -262,6 +280,8 @@ TEST_F(IntegrationPluginLoading, MultiplePluginsNoApplicableEngines)
 
 TEST_F(IntegrationPluginLoading, MultiplePluginsOneApplicableEngine)
 {
+    SKIP_IF_NO_DEVICES();
+
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
         "HIPDNN_PLUGIN_DIR", getTestPluginDefaultDir());
 
@@ -271,7 +291,16 @@ TEST_F(IntegrationPluginLoading, MultiplePluginsOneApplicableEngine)
         hipdnnSetEnginePluginPaths_ext(paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ADDITIVE),
         HIPDNN_STATUS_SUCCESS);
 
+    const std::array<const char*, 1> heuristicPaths
+        = {hipdnn_tests::plugin_constants::testGoodHeuristicPluginPath().c_str()};
+    ASSERT_EQ(hipdnnSetHeuristicPluginPaths_ext(
+                  heuristicPaths.size(), heuristicPaths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+              HIPDNN_STATUS_SUCCESS);
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter policyEnv(
+        "HIPDNN_HEUR_POLICY_ORDER", hipdnn_tests::plugin_constants::testGoodHeuristicPolicyName());
+
     ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+    bindStream();
     EXPECT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, &_engineConfig),
               HIPDNN_STATUS_SUCCESS);
     ASSERT_NE(_engineConfig, nullptr);
@@ -295,6 +324,7 @@ TEST_F(IntegrationPluginLoading, MultiplePluginsOneApplicableEngine)
 
 TEST_F(IntegrationPluginLoading, MultiplePluginsMultipleApplicableEngines)
 {
+    SKIP_IF_NO_DEVICES();
 
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
         "HIPDNN_PLUGIN_DIR", getTestPluginDefaultDir());
@@ -305,7 +335,16 @@ TEST_F(IntegrationPluginLoading, MultiplePluginsMultipleApplicableEngines)
         hipdnnSetEnginePluginPaths_ext(paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ADDITIVE),
         HIPDNN_STATUS_SUCCESS);
 
+    const std::array<const char*, 1> heuristicPaths
+        = {hipdnn_tests::plugin_constants::testGoodHeuristicPluginPath().c_str()};
+    ASSERT_EQ(hipdnnSetHeuristicPluginPaths_ext(
+                  heuristicPaths.size(), heuristicPaths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+              HIPDNN_STATUS_SUCCESS);
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter policyEnv(
+        "HIPDNN_HEUR_POLICY_ORDER", hipdnn_tests::plugin_constants::testGoodHeuristicPolicyName());
+
     ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+    bindStream();
     EXPECT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, &_engineConfig),
               HIPDNN_STATUS_SUCCESS);
     ASSERT_NE(_engineConfig, nullptr);
@@ -344,7 +383,7 @@ TEST_F(IntegrationPluginLoading, PluginWithIncompatibleApiVersion)
     std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> buffer;
     hipdnnGetLastErrorString(buffer.data(), buffer.size());
 
-    EXPECT_NE(std::string{buffer.data()}.find("does not match backend major version"),
+    EXPECT_NE(std::string{buffer.data()}.find("does not match expected engine API major version"),
               std::string::npos);
     EXPECT_EQ(test_util::getLoadedPlugins(_handle).size(), 0);
 }

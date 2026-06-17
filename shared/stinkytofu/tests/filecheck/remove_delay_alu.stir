@@ -1,0 +1,49 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --RemoveDelayAluPass --print-output
+#
+# RemoveDelayAluPass: strip all s_delay_alu instructions so the InsertDelayAlu
+# pass can recompute optimal ones after scheduling.
+
+#--- Single s_delay_alu between VALU instructions is removed
+# CHECK-LABEL: @remove_single_delay_alu
+# CHECK: v_add_f32
+# CHECK-NOT: s_delay_alu
+# CHECK: v_mul_f32
+
+st.func @remove_single_delay_alu() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_delay_alu"() { issueCycles = 0, latencyCycles = 0, mod.delayalu = { instid0Type = "VALU", instid0Distance = 1 } }
+  v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Multiple s_delay_alu instructions are all removed
+# CHECK-LABEL: @remove_multiple_delay_alu
+# CHECK: v_add_f32
+# CHECK-NOT: s_delay_alu
+# CHECK: v_mul_f32
+# CHECK-NOT: s_delay_alu
+# CHECK: v_sub_f32
+
+st.func @remove_multiple_delay_alu() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_delay_alu"() { issueCycles = 0, latencyCycles = 0, mod.delayalu = { instid0Type = "VALU", instid0Distance = 1 } }
+  v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_delay_alu"() { issueCycles = 0, latencyCycles = 0, mod.delayalu = { instid0Type = "VALU", instid0Distance = 1 } }
+  v5 = "st.v_sub_f32"(v3, v6) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Packed s_delay_alu (with instid1) is also removed
+# CHECK-LABEL: @remove_packed_delay_alu
+# CHECK: v_add_f32
+# CHECK-NOT: s_delay_alu
+# CHECK: v_mul_f32
+# CHECK: v_sub_f32
+
+st.func @remove_packed_delay_alu() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_delay_alu"() { issueCycles = 0, latencyCycles = 0, mod.delayalu = { instid0Type = "VALU", instid0Distance = 1, instSkip = 1, instid1Type = "VALU", instid1Distance = 1 } }
+  v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+  v5 = "st.v_sub_f32"(v3, v6) { issueCycles = 1, latencyCycles = 5 }
+}

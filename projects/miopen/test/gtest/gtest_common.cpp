@@ -66,35 +66,42 @@ std::size_t MockHandle::GetMaxMemoryAllocSize() const
 
 bool MockHandle::CooperativeLaunchSupported() const { return false; }
 
+std::string_view GetBaseDeviceName(std::string_view dev_name)
+{
+    const auto suffix_pos = dev_name.find(':');
+    return suffix_pos == std::string_view::npos ? dev_name : dev_name.substr(0, suffix_pos);
+}
+
+Gpu GetGpuType(const std::string& dev_name)
+{
+    const auto arch = std::string{GetBaseDeviceName(dev_name)};
+
+    if(arch == "gfx900")
+        return Gpu::gfx900;
+    if(arch == "gfx906")
+        return Gpu::gfx906;
+    if(arch == "gfx908")
+        return Gpu::gfx908;
+    if(arch == "gfx90a")
+        return Gpu::gfx90A;
+    if(arch == "gfx942")
+        return Gpu::gfx94X;
+    if(miopen::StartsWith(arch, "gfx95"))
+        return Gpu::gfx950;
+    if(miopen::StartsWith(arch, "gfx103"))
+        return Gpu::gfx103X;
+    if(miopen::StartsWith(arch, "gfx110"))
+        return Gpu::gfx110X;
+    if(miopen::StartsWith(arch, "gfx115"))
+        return Gpu::gfx115X;
+    if(miopen::StartsWith(arch, "gfx120"))
+        return Gpu::gfx120X;
+    throw std::runtime_error("unknown_gpu");
+}
+
 Gpu GetDevGpuType()
 {
-    const auto dev_name = get_handle().GetDeviceName();
-
-    static const auto dev = [&] {
-        if(dev_name == "gfx900")
-            return Gpu::gfx900;
-        else if(dev_name == "gfx906")
-            return Gpu::gfx906;
-        else if(dev_name == "gfx908")
-            return Gpu::gfx908;
-        else if(dev_name == "gfx90a")
-            return Gpu::gfx90A;
-        else if(dev_name == "gfx942")
-            return Gpu::gfx94X;
-        else if(miopen::StartsWith(dev_name, "gfx95"))
-            return Gpu::gfx950;
-        else if(miopen::StartsWith(dev_name, "gfx103"))
-            return Gpu::gfx103X;
-        else if(miopen::StartsWith(dev_name, "gfx110"))
-            return Gpu::gfx110X;
-        else if(miopen::StartsWith(dev_name, "gfx115"))
-            return Gpu::gfx115X;
-        else if(miopen::StartsWith(dev_name, "gfx120"))
-            return Gpu::gfx120X;
-        else
-            throw std::runtime_error("unknown_gpu");
-    }();
-
+    static const auto dev = GetGpuType(get_handle().GetDeviceName());
     return dev;
 }
 

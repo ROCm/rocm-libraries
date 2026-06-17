@@ -10,8 +10,8 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/DynamicTolerancesBatchNorm.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
-#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferencePlan.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
@@ -41,7 +41,10 @@ protected:
 
 TEST_F(TestBatchnormFwdPlan, ExecutePlan)
 {
-    auto tolerance = batchnorm::getToleranceInference<float>();
+    // Tensor ranges from BatchnormFwdTensorBundle:
+    // x=[0,1], scale=[0,1], bias=[0,1], mean=[0,1], invVar=[1,3]
+    auto tolerance = batchnorm::calculateBatchnormInferenceTolerance<float, float>(
+        0.0, 1.0, 0.0, 1.0, 1.0, 3.0, 0.0, 1.0, 0.0, 1.0);
     const std::vector<int64_t> dims = {6, 3, 32, 32};
     const unsigned int seed = getGlobalTestSeed();
     auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,

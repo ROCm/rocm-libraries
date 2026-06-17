@@ -41,7 +41,10 @@ Each run generates:
 | `frontend/include/hipdnn_frontend/detail/<Op>Packer.hpp` | Frontend packer function |
 | `backend/tests/descriptors/Test<Op>OperationDescriptor.cpp` | Descriptor unit tests |
 | `backend/tests/descriptors/TestGraphDescriptor<Op>.cpp` | Graph building tests |
-| `tests/frontend/Integration<Op>DescriptorLowering.cpp` | Integration test **stub** (must be implemented) |
+| `tests/frontend/Integration<Op>DescriptorLowering.cpp` | Lowering round-trip + per-scalar preservation tests (operation-specific tests can be added on top) |
+| `tests/frontend/Integration<Op>DescriptorLifting.cpp` | Lifting round-trip, tensor sharing, no-finalization, and per-scalar tests |
+| `frontend/include/hipdnn_frontend/detail/<Op>Unpacker.hpp` | Frontend unpacker (inverse of packer) |
+| `backend/tests/descriptors/Test<Op>OperationFromNode.cpp` | fromNode() round-trip tests |
 | `fragments/*.txt` | Code snippets for manual insertion into existing files |
 
 See `CLAUDE.md` for post-generation integration steps.
@@ -50,7 +53,7 @@ See `CLAUDE.md` for post-generation integration steps.
 
 The end-to-end workflow for adding a new operation type:
 
-1. **Create the FBS schema** in `data_sdk/schemas/` and generate the C++ header with `flatc`
+1. **Create the FBS schema** in `flatbuffers_sdk/schemas/` and generate the C++ header with `flatc`
 2. **Create a YAML config** in `configs/` (use `convolution_fwd.yaml` as a reference)
 3. **Run the generator** to produce source files, tests, and fragments
 4. **Add enums** to backend headers and string utilities (using the generated fragments)
@@ -58,7 +61,7 @@ The end-to-end workflow for adding a new operation type:
 6. **Place generated files** into the project tree
 7. **Update CMake** build files
 8. **Build and test** to verify everything compiles and passes
-9. **Implement integration test** — the generated integration test is a stub; implement full E2E round-trip tests following the ConvFprop reference at `tests/frontend/IntegrationConvFpropDescriptorLowering.cpp`
+9. **Review the generated integration tests** — both `Integration<Op>DescriptorLowering.cpp` and `Integration<Op>DescriptorLifting.cpp` now ship with full round-trip + per-scalar coverage; add operation-specific tests (multi-input variants, multi-op graphs) on top following the ConvFprop reference at `tests/frontend/IntegrationConvFpropDescriptorLowering.cpp`
 
 See `CLAUDE.md` for detailed integration steps (especially steps 4-7).
 
@@ -66,7 +69,7 @@ See `CLAUDE.md` for detailed integration steps (especially steps 4-7).
 
 The YAML config maps FBS schema fields to hipDNN backend API concepts. To create a new config:
 
-1. Read the FBS schema in `data_sdk/schemas/`
+1. Read the FBS schema in `flatbuffers_sdk/schemas/`
 2. Identify tensor UID fields (`*_tensor_uid: long`) → `tensor_fields`
 3. Identify data fields (vectors, enums, scalars) → `data_fields`
 4. Look at existing frontend node/attributes classes for naming conventions
@@ -92,13 +95,23 @@ operation:
     packer_function: "createMyOpOperation"   # Generated packer function name
     node_class: "MyOpNode"                    # Frontend node class (if it exists)
     attributes_class: "MyOpAttributes"        # Frontend attributes class (if it exists)
+    # attributes_filename: "MyOp"             # Optional: override basename of generated
+                                              # Attributes header / test files when the
+                                              # in-tree filename differs from the class
+                                              # name (e.g., ConvFpropAttributes lives in
+                                              # ConvolutionFpropAttributes.hpp).
 
   tensor_fields:
     - name: "input"
       fbs_field: "input_tensor_uid"
       attr_suffix: "INPUT"
       required: true
-      frontend_getter: "get_input()"         # Method on the frontend attributes class
+      # frontend_getter (optional): override the default getter resolution.
+      # When unset, the loader matches by frontend.inputs[].name / outputs[].name,
+      # then falls back to abbreviation-aware matching. Set it to a bare
+      # accessor name (a trailing "()" is stripped) when the backend tensor
+      # name does not map to any frontend tensor — e.g., SDPA's `attn_mask`
+      # uses `frontend_getter: "get_bias"`. See "Recent Changes" for details.
 
   data_fields:
     - name: "alpha"
@@ -106,10 +119,13 @@ operation:
       attr_name: "HIPDNN_ATTR_MY_OP_ALPHA"
       type: "scalar_float"            # vector_int64 | enum | scalar_float | scalar_int64 | bool
       required: true
-      frontend_getter: "get_alpha()"
+      frontend_getter: "get_alpha()"  # data_fields[].frontend_getter is still honored
       shared: false                   # true if attribute enum already exists from another op
+      fbs_optional: false             # true for FBS optional scalars (frontend getter returns std::optional<T>)
       # For enum fields only:
       # test_enum_value: "ADD"        # Required for enum type - value used in generated tests
+      # For mode fields with new enums, see CLAUDE.md "Mode Field Properties"
+      # and "enum_def" sections; mode_sentinel controls finalize sentinel checks.
 
   tensor_array_fields:                # For tensor arrays (e.g., peer_stats)
     - name: "peer_stats"
@@ -145,6 +161,8 @@ operation:
 | `batchnorm_backward.yaml` | Batch normalization backward |
 | `batchnorm_inference.yaml` | Batch normalization inference |
 | `batchnorm_inference_variance_ext.yaml` | Batch normalization inference (variance extension) |
+| `reduction.yaml` | Reduction operations |
+| `sdpa.yaml` | Scaled dot-product attention forward (packer/unpacker only; Attributes class is hand-maintained — see `CLAUDE.md` "Hand-maintained ops") |
 
 ## Third-Party Libraries
 
@@ -157,6 +175,12 @@ This tool uses the following third-party Python libraries (installed via `pip`):
 | [PyYAML](https://pyyaml.org/) | MIT | YAML parser for loading operation config files |
 
 See `THIRD_PARTY_LICENSES.md` for full license texts.
+
+## Recent Changes
+
+The codegen overhaul added some YAML keys, removed others, and folded `--mode lift-only` into `--mode backend`. See [`CLAUDE.md`](./CLAUDE.md#recent-changes) for the full breakdown of added/removed surfaces, replacement keys, and current loader behavior.
+
+---
 
 ## Field Type Reference
 

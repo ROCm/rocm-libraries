@@ -45,3 +45,16 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateShallowTensor)
     EXPECT_EQ(tensor->strides(), attr.strides);
     EXPECT_EQ(tensor->memory().hostData(), data.data());
 }
+
+TEST(TestFlatbufferTensorAttributesUtils, CreateTensorBoolean)
+{
+    const std::vector<int64_t> dims = {2, 2};
+    const std::vector<int64_t> strides = {2, 1};
+
+    auto tensor = createTensor(DataType::BOOLEAN, dims, strides);
+
+    ASSERT_NE(tensor, nullptr);
+    EXPECT_EQ(tensor->dims(), dims);
+    EXPECT_EQ(tensor->strides(), strides);
+    EXPECT_EQ(tensor->elementSize(), sizeof(bool));
+}

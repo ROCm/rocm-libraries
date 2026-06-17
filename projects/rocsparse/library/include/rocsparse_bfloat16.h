@@ -35,7 +35,7 @@
    include a minimal definition of rocsparse_bfloat16 */
 
 #include <stdint.h>
-/*! \brief Struct to represent a 16 bit brain floating-point number. */
+/*! \brief Struct to represent a 16-bit brain floating-point number. */
 typedef struct
 {
     uint16_t data; /**< brain float storage. */
@@ -50,7 +50,7 @@ typedef struct
 #include <ostream>
 #include <type_traits>
 
-/*! \brief Struct to represent a 16 bit brain floating-point number. */
+/*! \brief Struct to represent a 16-bit brain floating-point number. */
 struct ROCSPARSE_EXPORT rocsparse_bfloat16
 {
     uint16_t data;

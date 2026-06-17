@@ -14,7 +14,7 @@
 namespace example_provider
 {
 
-static constexpr int64_t kDefaultBlockSize = 256;
+static constexpr int64_t DEFAULT_BLOCK_SIZE = 256;
 
 ConvFwdPlanBuilder::ConvFwdPlanBuilder(const IKernelCompiler& compiler)
     : _compiler(compiler)
@@ -69,12 +69,7 @@ bool ConvFwdPlanBuilder::isApplicable(
 
     // Only FLOAT data type is supported
     const auto& nodeWrapper = opGraph.getNodeWrapper(0);
-    if(nodeWrapper.computeDataType() != DataType::FLOAT)
-    {
-        return false;
-    }
-
-    return true;
+    return nodeWrapper.computeDataType() == DataType::FLOAT;
 }
 
 size_t ConvFwdPlanBuilder::getMaxWorkspaceSize(
@@ -123,7 +118,7 @@ void ConvFwdPlanBuilder::buildPlan(
 
     // Get block size from execution settings
     const auto& settings = executionContext.executionSettings();
-    int64_t blockSize = settings.blockSize;
+    const int64_t blockSize = settings.blockSize;
 
     // Extract tensor dimensions from the graph tensor map
     const auto& tensorMap = opGraph.getTensorMap();
@@ -200,24 +195,24 @@ void ConvFwdPlanBuilder::buildPlan(
     auto outH = outputDims->Get(2);
     auto outW = outputDims->Get(3);
 
-    ConvFwdParams params{inputUid,
-                         weightUid,
-                         outputUid,
-                         n,
-                         c,
-                         h,
-                         w,
-                         k,
-                         r,
-                         s,
-                         outH,
-                         outW,
-                         padH,
-                         padW,
-                         strideH,
-                         strideW,
-                         static_cast<int64_t>(blockSize)};
-    auto plan = std::make_unique<ConvFwdPlan>(std::move(params));
+    const ConvFwdParams params{inputUid,
+                               weightUid,
+                               outputUid,
+                               n,
+                               c,
+                               h,
+                               w,
+                               k,
+                               r,
+                               s,
+                               outH,
+                               outW,
+                               padH,
+                               padW,
+                               strideH,
+                               strideW,
+                               blockSize};
+    auto plan = std::make_unique<ConvFwdPlan>(params);
     plan->compile(_compiler);
 
     executionContext.setPlan(std::move(plan));
@@ -235,8 +230,8 @@ std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> ConvFwdPlanBuilder::get
 
     // Default value: 256
     hipdnn_flatbuffers_sdk::data_objects::IntValueT defaultValue;
-    defaultValue.value = kDefaultBlockSize;
-    knob.default_value.Set(std::move(defaultValue));
+    defaultValue.value = DEFAULT_BLOCK_SIZE;
+    knob.default_value.Set(defaultValue);
 
     // Constraint: valid values are 64, 128, 256
     hipdnn_flatbuffers_sdk::data_objects::IntConstraintT constraint;

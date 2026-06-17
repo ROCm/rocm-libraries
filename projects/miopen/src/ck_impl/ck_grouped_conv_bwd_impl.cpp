@@ -48,22 +48,54 @@ struct CKArgs : CKArgsSplitK<CKArgs>
     {
         (void)alpha;
         (void)beta;
+        // Large-tensor (>INT_MAX element stride) instances expose CK's int64
+        // long_index_t MakeArgumentPointer overload; bind it with the int64
+        // member arrays directly (they outlive the returned arg_ptr). This
+        // mirrors the FWD path in ck_grouped_conv_fwd_impl.cpp.
+        if(miopen::solver::IsLargeTensorCKInstance(conv_ptr))
+        {
+            return conv_ptr->MakeArgumentPointer(out,
+                                                 w,
+                                                 {},
+                                                 in,
+                                                 output,
+                                                 out_strides,
+                                                 weight,
+                                                 wei_strides,
+                                                 {},
+                                                 {},
+                                                 input,
+                                                 in_strides,
+                                                 strides,
+                                                 dilation,
+                                                 lPadding,
+                                                 rPadding,
+                                                 {},
+                                                 {},
+                                                 {},
+                                                 split_k);
+        }
+        // Sub-INT_MAX shapes: narrow to int32 at the boundary. The narrowed
+        // bundle is a mutable member of CKArgs (populated by GetNarrowedArrays)
+        // so its arrays outlive any arg_ptr referencing them -- CK's
+        // MakeArgumentPointer captures references into the bundle.
+        const auto& a = this->GetNarrowedArrays();
         return conv_ptr->MakeArgumentPointer(out,
                                              w,
                                              {},
                                              in,
-                                             output,
-                                             out_strides,
-                                             weight,
-                                             wei_strides,
+                                             a.out_l,
+                                             a.out_s,
+                                             a.wei_l,
+                                             a.wei_s,
                                              {},
                                              {},
-                                             input,
-                                             in_strides,
-                                             strides,
-                                             dilation,
-                                             lPadding,
-                                             rPadding,
+                                             a.in_l,
+                                             a.in_s,
+                                             a.filter_strides,
+                                             a.filter_dilations,
+                                             a.lPadding,
+                                             a.rPadding,
                                              {},
                                              {},
                                              {},
@@ -216,5 +248,20 @@ ck_impl_bwd_get_solution(const miopen::ExecutionContext* ctx,
             use_tf32);
 
         *out_solution = new ConvSolution(std::move(solution));
+    });
+}
+
+extern "C" ck_impl_status_t ck_impl_bwd_get_all_kernel_type_strings(CKKernelListHandle** out_handle)
+{
+    return ck_impl_try_catch([&]() {
+        CK_IMPL_THROW_IF_NULL(out_handle, CK_IMPL_STATUS_BAD_PARAM, "Null out_handle");
+        auto result = std::make_unique<CKKernelListHandle>();
+
+        auto ptrs = DeviceOpGBwdPtrs<float>::GetInstances();
+        result->kernels.reserve(ptrs.size());
+        for(const auto& ptr : ptrs)
+            result->kernels.push_back(ptr->GetTypeString());
+
+        *out_handle = result.release();
     });
 }

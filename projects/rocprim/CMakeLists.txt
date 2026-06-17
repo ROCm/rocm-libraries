@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,8 +20,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
-cmake_policy(VERSION 3.16...3.25)
+cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
+cmake_policy(VERSION 3.18...3.25)
 
 # Install prefix
 set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
@@ -58,6 +58,12 @@ else()
   set(ROCM_ROOT "/opt/rocm" CACHE PATH "Root directory of the ROCm installation")
 endif()
 
+# ROCm libraries root (for shared/ctest and other shared resources)
+# Only set default when not already defined (e.g. by superproject / rocm-libraries).
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 include(CheckLanguage)
 include(CMakeDependentOption)
 
@@ -73,6 +79,7 @@ cmake_dependent_option(BUILD_DOCS "Build documentation (requires sphinx)" OFF "N
 option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
 option(ROCPRIM_INSTALL "Enable installation of rocPRIM (projects embedding rocPRIM may want to turn this OFF)" ON)
 option(ROCPRIM_ENABLE_ASSERTS "Enable asserts in release build)" OFF)
+cmake_dependent_option(ROCPRIM_ENABLE_TOPK "Enable the device level topk and segmented topk algorithms" OFF BUILD_TEST ON)
 option(BUILD_OFFLOAD_COMPRESS "Build rocPRIM with offload compression" ON)
 cmake_dependent_option(USE_SYSTEM_LIB "Use installed ROCm libs when building tests" OFF BUILD_TEST OFF)
 
@@ -131,6 +138,15 @@ if(ROCPRIM_ENABLE_ASSERTS)
   endif()
 endif()
 
+# Check if mold linker is available and use it if so
+find_program(MOLD_LINKER mold)
+if(MOLD_LINKER)
+    message(STATUS "Using mold linker")
+    add_link_options(-fuse-ld=mold)
+else()
+    message(STATUS "mold not found, using default linker")
+endif()
+
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
 if(DEFINED BUILD_SHARED_LIBS)
@@ -162,17 +178,10 @@ else()
       )
     else()
       rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-        TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201"
+        TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250"
       )
     endif()
     set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
-  endif()
-endif()
-
-# Compressed offload binaries are currently not working with the SPIR-V target
-if("amdgcnspirv" IN_LIST GPU_TARGETS)
-  if(BUILD_OFFLOAD_COMPRESS)
-    message(FATAL_ERROR "Cannot combine SPIR-V and BUILD_OFFLOAD_COMPRESS")
   endif()
 endif()
 
@@ -184,7 +193,7 @@ list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} ${ROCM_PATH}/hip ${ROCM_PATH}/llvm ${
 find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 
 # Setup VERSION
-set(VERSION_STRING "4.4.0")
+set(VERSION_STRING "4.5.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 math(EXPR rocprim_VERSION_NUMBER "${rocprim_VERSION_MAJOR} * 100000 + ${rocprim_VERSION_MINOR} * 100 + ${rocprim_VERSION_PATCH}")
 
@@ -207,6 +216,9 @@ if(BUILD_TEST)
       message(WARNING "The installed rocprim version, ${rocprim_VERSION}, does not match project version ${VERSION_STRING}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
     endif()
   endif()
+
+  # Used by tests to define their RESOURCE_GROUPS
+  set(DEFAULT_GPU_RESOURCE "gpus")
 
   if (ROCPRIM_PROJECT_IS_TOP_LEVEL)
     rocm_package_setup_client_component(tests)

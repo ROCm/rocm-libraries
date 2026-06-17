@@ -32,7 +32,7 @@
 extern "C" {
 #endif
 /*! \ingroup conv_module
-*  \brief Create the identity map
+*  \brief Create the identity map.
 *
 *  \details
 *  \p rocsparse_create_identity_permutation stores the identity map in \p p, such that
@@ -46,14 +46,14 @@ extern "C" {
 *  \endcode
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  n           size of the map \p p.
 *  @param[out]
@@ -87,14 +87,14 @@ rocsparse_status rocsparse_create_identity_permutation(rocsparse_handle handle,
 *  \endcode
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  n           size of the permutation vector \p p.
 *  @param[in]
@@ -119,7 +119,7 @@ rocsparse_status rocsparse_inverse_permutation(rocsparse_handle     handle,
                                                rocsparse_index_base base);
 
 /*! \ingroup conv_module
-*  \brief Create the identity map
+*  \brief Create the identity map.
 *
 *  \details
 *  \p rocsparse_set_identity_permutation stores the identity map in \p p, such that
@@ -133,14 +133,14 @@ rocsparse_status rocsparse_inverse_permutation(rocsparse_handle     handle,
 *  \endcode
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  n           size of the map \p p.
 *  @param[out]

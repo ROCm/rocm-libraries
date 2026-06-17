@@ -457,6 +457,13 @@ ck_impl_depthwise_fwd_get_solution(const miopen::ExecutionContext* ctx,
 // -- Get all kernel type strings (for test/metadata validation) -----------------
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
+ck_impl_fwd_get_all_kernel_type_strings(CKKernelListHandle** out_handle);
+CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
+ck_impl_bwd_get_all_kernel_type_strings(CKKernelListHandle** out_handle);
+CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
+ck_impl_wrw_get_all_kernel_type_strings(CKKernelListHandle** out_handle);
+
+CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_3d_fwd_get_all_kernel_type_strings(CKKernelListHandle** out_handle);
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_3d_bwd_get_all_kernel_type_strings(CKKernelListHandle** out_handle);

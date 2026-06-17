@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #include "stinkytofu/hardware/ArchHelper.hpp"
 
+#include <cstdint>
 #include <unordered_map>
 
 #include "stinkytofu/Config/Config.h"
@@ -63,10 +64,12 @@ const GfxArchID ArchHelper::getGfxArchID(uint32_t major, uint32_t minor, uint32_
         const auto& archInfo = registeredArchInfos[i];
         if (archInfo->major == major && archInfo->minor == minor &&
             archInfo->stepping == stepping) {
-            return static_cast<GfxArchID>(i);
+            return static_cast<GfxArchID>(
+                i);  // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
         }
     }
     assert(false && "Unsupported GfxArchID");
+    return static_cast<GfxArchID>(0);
 }
 
 }  // namespace stinkytofu

@@ -24,6 +24,8 @@
 
 #include <memory>
 
+#include "stinkytofu/Export.hpp"
+
 namespace stinkytofu {
 class Pass;
 
@@ -44,6 +46,6 @@ class Pass;
 /// pm.addPass(createPeepholeOptimizationPass());
 /// pm.run();
 /// ```
-std::unique_ptr<Pass> createPeepholeOptimizationPass();
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createPeepholeOptimizationPass();
 
 }  // namespace stinkytofu

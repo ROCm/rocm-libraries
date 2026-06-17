@@ -64,6 +64,29 @@ public:
     virtual hipdnnStatus_t backendCreateAndDeserializeJsonGraphExt(
         hipdnnBackendDescriptor_t* descriptor, const char* jsonGraph, size_t jsonByteSize)
         = 0;
+    virtual hipdnnStatus_t
+        backendGetSerializedExecutionPlanExt(hipdnnBackendDescriptor_t descriptor,
+                                             size_t requestedByteSize,
+                                             size_t* planByteSize,
+                                             uint8_t* serializedPlan)
+        = 0;
+    virtual hipdnnStatus_t
+        backendCreateAndDeserializeExecutionPlanExt(hipdnnHandle_t handle,
+                                                    hipdnnBackendDescriptor_t* descriptor,
+                                                    const uint8_t* serializedPlan,
+                                                    size_t planByteSize)
+        = 0;
+    virtual hipdnnStatus_t
+        backendGetSerializedBinaryGraphAndPlanExt(hipdnnBackendDescriptor_t graphDescriptor,
+                                                  hipdnnBackendDescriptor_t executionPlanDescriptor,
+                                                  size_t requestedByteSize,
+                                                  size_t* blobByteSize,
+                                                  uint8_t* serializedBlob)
+        = 0;
+    virtual hipdnnStatus_t backendGetSerializedBinaryContentsExt(const uint8_t* serializedBlob,
+                                                                 size_t blobByteSize,
+                                                                 int* contentFlags)
+        = 0;
     virtual void loggingCallbackExt(hipdnnSeverity_t severity, const char* msg) = 0;
 
     virtual hipdnnStatus_t setEnginePluginPathsExt(size_t numPaths,
@@ -75,6 +98,22 @@ public:
                                                          size_t* numPluginPaths,
                                                          char** pluginPaths,
                                                          size_t* maxStringLen)
+        = 0;
+
+    // RFC 0007 Section 16: Heuristic policy enumeration
+    virtual hipdnnStatus_t getHeuristicPolicyCount(hipdnnHandle_t handle, size_t* numPolicies) = 0;
+
+    virtual hipdnnStatus_t getHeuristicPolicyInfo(hipdnnHandle_t handle,
+                                                  size_t policyIndex,
+                                                  int64_t* policyId,
+                                                  char* policyName,
+                                                  size_t* policyNameLen,
+                                                  char* pluginName,
+                                                  size_t* pluginNameLen,
+                                                  char* pluginVersion,
+                                                  size_t* pluginVersionLen,
+                                                  char* apiVersion,
+                                                  size_t* apiVersionLen)
         = 0;
 
     // HIPDNN_HIDDEN on accessor functions ensures each shared object has its own backendInstance

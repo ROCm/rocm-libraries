@@ -35,12 +35,16 @@ TEST(TestShallowTensor, MemoryAccessHostOnly)
     EXPECT_EQ(mem.location(), MemoryLocation::HOST);
 }
 
-TEST(TestShallowTensor, FillWithValueThrows)
+TEST(TestShallowTensor, FillWithValueFillsMemory)
 {
     std::array<int, 4> backing = {7, 8, 9, 10};
     ShallowTensor<int> tensor(backing.data(), {1, 1, 2, 2}, {4, 4, 2, 1});
 
-    EXPECT_THROW(tensor.fillWithValue(123), std::runtime_error);
+    tensor.fillWithValue(123);
+    for(const auto& val : backing)
+    {
+        EXPECT_EQ(val, 123);
+    }
 }
 
 TEST(TestShallowTensor, FillWithRandomValuesThrows)

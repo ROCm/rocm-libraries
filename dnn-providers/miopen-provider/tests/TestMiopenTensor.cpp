@@ -13,8 +13,8 @@ TEST(TestMiopenTensor, CanCreateAndDestroy)
 {
     // Use a real tensor attributes from a valid batchnorm graph
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     // Get the first tensor attributes from the tensor map
     const auto& tensorMap = graph.getTensorMap();
@@ -24,7 +24,7 @@ TEST(TestMiopenTensor, CanCreateAndDestroy)
 
     // Construct and destroy MiopenTensor
     EXPECT_NO_THROW({
-        MiopenTensor tensor(*tensorAttr);
+        const MiopenTensor tensor(*tensorAttr);
         EXPECT_EQ(tensor.uid(), tensorAttr->uid());
         EXPECT_NE(tensor.tensorDescriptor(), nullptr);
     });
@@ -33,13 +33,13 @@ TEST(TestMiopenTensor, CanCreateAndDestroy)
 TEST(TestMiopenTensor, TensorDescriptorIsValid)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& tensorMap = graph.getTensorMap();
     ASSERT_FALSE(tensorMap.empty());
     const auto* tensorAttr = tensorMap.begin()->second;
-    MiopenTensor tensor(*tensorAttr);
+    const MiopenTensor tensor(*tensorAttr);
 
     // The descriptor should be non-null and can be used in MIOpen API calls
     EXPECT_NE(tensor.tensorDescriptor(), nullptr);
@@ -52,7 +52,7 @@ TEST(TestMiopenTensor, ConstructorWithDimsAndStridesSucceeds)
     const std::vector<int64_t> strides = {static_cast<int64_t>(16) * 224, 224, 1};
 
     EXPECT_NO_THROW({
-        MiopenTensor tensor(
+        const MiopenTensor tensor(
             UID, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, dims, strides);
         EXPECT_NE(tensor.tensorDescriptor(), nullptr);
     });
@@ -98,7 +98,7 @@ TEST(TestMiopenTensor, ConstructorSetsCorrectUid)
     const std::vector<int64_t> dims = {2, 16};
     const std::vector<int64_t> strides = {16, 1};
 
-    MiopenTensor tensor(
+    const MiopenTensor tensor(
         EXPECTED_UID, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, dims, strides);
 
     EXPECT_EQ(tensor.uid(), EXPECTED_UID);

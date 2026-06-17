@@ -28,6 +28,10 @@
 
 #include <type_traits>
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 namespace TensileLite
 {
     /**
@@ -231,3 +235,5 @@ namespace std
         }
     };
 } // namespace std
+
+TENSILE_HIDDEN_END

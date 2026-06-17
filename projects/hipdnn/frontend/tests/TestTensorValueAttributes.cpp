@@ -56,6 +56,7 @@ TEST(TestTensorValueAttributes, TypeSafety)
     EXPECT_FALSE(tensor.get_pass_by_value<int32_t>().has_value());
     EXPECT_FALSE(tensor.get_pass_by_value<int64_t>().has_value());
     EXPECT_FALSE(tensor.get_pass_by_value<double>().has_value());
+    EXPECT_FALSE(tensor.get_pass_by_value<bool>().has_value());
 
     tensor.set_value(int32_t{123});
 
@@ -74,4 +75,14 @@ TEST(TestTensorValueAttributes, TypeSafety)
     auto int64Opt = tensor.get_pass_by_value<int64_t>();
     ASSERT_TRUE(int64Opt.has_value());
     EXPECT_EQ(int64Opt.value(), 456789012345LL);
+
+    tensor.set_value(true);
+
+    EXPECT_FALSE(tensor.get_pass_by_value<float>().has_value());
+    EXPECT_FALSE(tensor.get_pass_by_value<int32_t>().has_value());
+    EXPECT_FALSE(tensor.get_pass_by_value<int64_t>().has_value());
+
+    auto boolOpt = tensor.get_pass_by_value<bool>();
+    ASSERT_TRUE(boolOpt.has_value());
+    EXPECT_EQ(boolOpt.value(), true);
 }

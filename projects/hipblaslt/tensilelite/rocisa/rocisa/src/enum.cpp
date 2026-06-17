@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -137,6 +137,7 @@ void init_enum(nb::module_ m)
         .value("INST_B6_B8", rocisa::InstType::INST_B6_B8)
         .value("INST_CVT", rocisa::InstType::INST_CVT)
         .value("INST_MACRO", rocisa::InstType::INST_MACRO)
+        .value("INST_B192", rocisa::InstType::INST_B192)
         .value("INST_NOTYPE", rocisa::InstType::INST_NOTYPE)
         .export_values();
 
@@ -164,6 +165,25 @@ void init_enum(nb::module_ m)
         .value("SCOPE_SE", rocisa::CacheScope::SCOPE_SE)
         .value("SCOPE_DEV", rocisa::CacheScope::SCOPE_DEV)
         .value("SCOPE_SYS", rocisa::CacheScope::SCOPE_SYS)
+        .export_values();
+
+    nb::enum_<rocisa::TemporalHint>(m_enum, "TemporalHint")
+        .value("TH_NONE", rocisa::TemporalHint::TH_NONE)
+        .value("TH_RT", rocisa::TemporalHint::TH_RT)
+        .value("TH_NT", rocisa::TemporalHint::TH_NT)
+        .value("TH_HT", rocisa::TemporalHint::TH_HT)
+        .value("TH_LU", rocisa::TemporalHint::TH_LU)
+        .value("TH_NT_RT", rocisa::TemporalHint::TH_NT_RT)
+        .value("TH_RT_NT", rocisa::TemporalHint::TH_RT_NT)
+        .value("TH_NT_HT", rocisa::TemporalHint::TH_NT_HT)
+        .value("TH_RESERVED", rocisa::TemporalHint::TH_RESERVED)
+        .value("TH_WB", rocisa::TemporalHint::TH_WB)
+        .value("TH_NT_WB", rocisa::TemporalHint::TH_NT_WB)
+        .export_values();
+
+    nb::enum_<rocisa::NonVolatile>(m_enum, "NonVolatile")
+        .value("NV_NONE", rocisa::NonVolatile::NV_NONE)
+        .value("NV", rocisa::NonVolatile::NV)
         .export_values();
 
     nb::enum_<rocisa::CvtType>(m_enum, "CvtType")

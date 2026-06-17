@@ -4,38 +4,21 @@
 # OBJECT library with all implementation
 add_library(
     hip_kernel_provider_impl OBJECT
-    HipKernelHandle.cpp
-    HipKernelContainer.cpp
-    HipKernelPluginPublic.cpp
-    HipKernelUtils.cpp
-    engines/HipKernelEngine.cpp
-    hip/HipKernel.cpp
-    hip/HipProgram.cpp
-    ${KERNEL_GENERATED_SOURCES}
-    engines/plans/batchnorm/BatchnormPlanBuilder.cpp
-    engines/plans/batchnorm/BatchnormFwdInferencePlan.cpp
-    engines/plans/batchnorm/BatchnormFwdInferenceWithVariancePlan.cpp
-    engines/plans/batchnorm/BatchnormFwdTrainingPlan.cpp
-    engines/plans/batchnorm/BatchnormApplicabilityChecks.cpp
-    engines/plans/RMSnorm/RMSnormPlanBuilder.cpp
-    engines/plans/RMSnorm/RMSnormFwdPlan.cpp
-    engines/plans/RMSnorm/RMSnormApplicabilityChecks.cpp
-    engines/plans/RMSnorm/RMSnormBwdPlan.cpp
-    engines/plans/RMSnorm/RMSnormBwdPlanBuilder.cpp
-    engines/plans/layernorm/LayernormApplicabilityChecks.cpp
-    engines/plans/layernorm/LayernormFwdPlan.cpp
-    engines/plans/layernorm/LayernormPlanBuilder.cpp
-    engines/plans/layernorm/LayernormUtilities.cpp
-    engines/plans/ApplicabilityChecks.cpp
+    core/Handle.cpp
+    core/Container.cpp
+    core/PluginPublic.cpp
+    core/Utils.cpp
+    compilation/Kernel.cpp
+    compilation/Program.cpp
 )
-if(ENABLE_ASM_SDPA_ENGINE)
-    add_subdirectory(engines/asm_sdpa_engine)
-endif()
+
+add_subdirectory(engines)
+
 target_include_directories(hip_kernel_provider_impl PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/../include
     ${CMAKE_BINARY_DIR}
-    ${CMAKE_CURRENT_BINARY_DIR}/../kernels
+    ${CMAKE_CURRENT_BINARY_DIR}/engines/
 )
 dnn_provider_generate_version_header(hip_kernel_provider hip_kernel_provider_impl ${CMAKE_CURRENT_LIST_DIR}/..)
 target_link_libraries(hip_kernel_provider_impl PUBLIC hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc)
@@ -57,6 +40,10 @@ target_include_directories(hip_kernel_provider_private PUBLIC
 target_link_libraries(hip_kernel_provider_private PUBLIC hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip_kernel_provider_impl)
 if(ENABLE_ASM_SDPA_ENGINE)
     target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_ASM_SDPA=1)
+endif()
+
+if(ENABLE_HIP_MLOPS_ENGINE)
+    target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_HIP_MLOPS=1)
 endif()
 
 # hip_kernel_provider - SHARED library (the actual plugin)
@@ -92,7 +79,30 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
 
     # Keep this after all build folders have been added so they have a chance to register their tests
     # using add_*_test_target()
-    finalize_test_targets()
+    if(HIPKERNELPROVIDER_ENABLE_COVERAGE)
+        finalize_test_targets("${PROJECT_NAME}" ENABLE_COVERAGE)
+    else()
+        finalize_test_targets("${PROJECT_NAME}")
+    endif()
 
-    install_hip_kernel_provider_ctest_files()
+    install_provider_ctest_files("hip_kernel_provider")
 endif()
+
+# Process all kernels marked for inlining
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/KernelEmbedding.cmake")
+# Generate embedded kernel sources and includes at configure time
+embed_kernel_sources(
+    TARGET hip_kernel_provider_impl
+    OUTPUT_SRCS_CPP ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_sources.cpp
+    OUTPUT_SRCS_HPP ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_sources.hpp
+    OUTPUT_INCS_CPP ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_includes.cpp
+    OUTPUT_INCS_HPP ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_includes.hpp
+)
+
+set(HIP_KERNEL_PROVIDER_GENERATED_SOURCES
+    ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_sources.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_includes.cpp)
+
+set_source_files_properties(${HIP_KERNEL_PROVIDER_GENERATED_SOURCES} TARGET_DIRECTORY hip_kernel_provider_impl PROPERTIES COMPILE_OPTIONS "-Wno-overlength-strings")
+
+target_sources(hip_kernel_provider_impl PRIVATE "${HIP_KERNEL_PROVIDER_GENERATED_SOURCES}")

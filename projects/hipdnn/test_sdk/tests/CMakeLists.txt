@@ -33,9 +33,11 @@ add_executable(
     utilities/TestDynamicTolerancesBatchNorm.cpp
     utilities/TestDynamicTolerancesCommon.cpp
     utilities/TestDynamicTolerancesConv.cpp
+    utilities/TestDynamicTolerancesLayerNorm.cpp
     utilities/TestDynamicTolerancesMatmul.cpp
     utilities/TestDynamicTolerancesPointwise.cpp
     utilities/TestDynamicTolerancesRMSNorm.cpp
+    utilities/TestDynamicTolerancesSdpa.cpp
     utilities/TestGraphTestHelpers.cpp
     utilities/TestFlatbufferDatatypeMapping.cpp
     utilities/TestFlatbufferTensorAttributesUtils.cpp
@@ -77,6 +79,8 @@ add_executable(
     utilities/cpu_graph_executor/TestReductionSignatureKey.cpp
     utilities/cpu_graph_executor/TestRMSNormFwdPlan.cpp
     utilities/cpu_graph_executor/TestRMSNormFwdSignatureKey.cpp
+    utilities/cpu_graph_executor/TestRMSNormBwdPlan.cpp
+    utilities/cpu_graph_executor/TestRMSNormBwdSignatureKey.cpp
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaFwdPlan.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaFwdSignatureKey.cpp>
     TestVersion.cpp

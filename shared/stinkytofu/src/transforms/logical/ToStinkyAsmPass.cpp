@@ -36,6 +36,7 @@
 
 // For ArchHelper access
 using namespace stinkytofu;
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -196,7 +197,7 @@ class ToStinkyAsmPassImpl : public Pass {
         return PassName;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         GfxArchID arch =
             getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
                          passCtx.getGemmTileConfig().arch[2]);
@@ -208,6 +209,7 @@ class ToStinkyAsmPassImpl : public Pass {
 
             lowerToAsm(bb, arch);
         }
+        return PreservedAnalyses::none();
     }
 
    private:

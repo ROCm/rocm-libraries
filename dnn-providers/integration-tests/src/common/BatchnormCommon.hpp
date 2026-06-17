@@ -8,6 +8,7 @@
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <ostream>
 #include <random>
+#include <string>
 #include <vector>
 
 namespace test_bn_common
@@ -17,6 +18,7 @@ struct BatchnormTestCase
 {
     std::vector<int64_t> dims;
     unsigned int seed;
+    std::string note;
 
     BatchnormTestCase(std::vector<int64_t>&& dimsLocal, unsigned int seedLocal)
         : dims(std::move(dimsLocal))
@@ -27,6 +29,16 @@ struct BatchnormTestCase
             throw std::invalid_argument(
                 "dims must be 3D (N, C, L), 4D (N, C, H, W), or 5D (N, C, D, H, W)");
         }
+        note = generateNote();
+    }
+
+    std::string generateNote() const
+    {
+        if(dims[0] > 1)
+        {
+            return "Multi-batch";
+        }
+        return {};
     }
 
     friend std::ostream& operator<<(std::ostream& ss, const BatchnormTestCase& tc)
@@ -34,6 +46,10 @@ struct BatchnormTestCase
         ss << "(dims:";
         hipdnn_data_sdk::utilities::vecToStream(ss, tc.dims);
         ss << " seed:" << tc.seed;
+        if(!tc.note.empty())
+        {
+            ss << " note:" << tc.note;
+        }
         ss << ")";
 
         return ss;
@@ -46,7 +62,7 @@ inline std::vector<BatchnormTestCase> getBnFwdInference1dTestCases()
 
     return {
         {{1, 3, 224}, seed},
-        {{2, 16, 512}, seed}, // Multi-batch
+        {{2, 16, 512}, seed},
         {{1, 64, 1024}, seed}, // Longer sequence
         {{4, 3, 1}, seed}, // Minimal spatial (L=1)
     };

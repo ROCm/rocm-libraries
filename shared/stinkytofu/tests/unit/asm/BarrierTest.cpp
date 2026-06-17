@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 
 #include "TestHelpers.hpp"
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
@@ -39,6 +40,7 @@ class BarrierTest : public ::testing::Test {
     GemmTileConfig config;
     std::unique_ptr<Function> func;
     BasicBlock* bb = nullptr;
+    AnalysisManager am;
 
     void SetUp() override {
         config.arch[0] = 12;
@@ -47,6 +49,7 @@ class BarrierTest : public ::testing::Test {
         func = std::make_unique<Function>("barrier_test");
         setFunctionArch(*func, arch);
         bb = func->createBasicBlock("entry");
+        registerAllAnalyses(am);
     }
 
     void TearDown() override {
@@ -67,10 +70,10 @@ class BarrierTest : public ::testing::Test {
         }
 
         auto implicitDepPass = createStinkyBuildImplicitDependencyPass();
-        implicitDepPass->run(*func, ctx);
+        implicitDepPass->run(*func, ctx, am);
 
         auto dagSchedPass = createStinkyDAGSchedulerPass();
-        dagSchedPass->run(*func, ctx);
+        dagSchedPass->run(*func, ctx, am);
     }
 
     /// Create an s_barrier instruction in bb and return it.
@@ -83,7 +86,7 @@ class BarrierTest : public ::testing::Test {
 
     /// Create an s_barrier_signal instruction with the given literal operand.
     /// Optionally attach a MemTokenData modifier with \p memTokens.
-    StinkyInstruction* createSBarrierSignal(int literal, std::vector<int> memTokens = {}) {
+    StinkyInstruction* createSBarrierSignal(int literal, const std::vector<int>& memTokens = {}) {
         AsmIRBuilder builder(*bb, arch);
         const HwInstDesc* desc = getMCIDByUOp(GFX::s_barrier_signal, arch);
         if (!desc) return nullptr;
@@ -95,7 +98,7 @@ class BarrierTest : public ::testing::Test {
 
     /// Create an s_barrier_wait instruction with the given literal operand.
     /// Optionally attach a MemTokenData modifier with \p memTokens.
-    StinkyInstruction* createSBarrierWait(int literal, std::vector<int> memTokens = {}) {
+    StinkyInstruction* createSBarrierWait(int literal, const std::vector<int>& memTokens = {}) {
         AsmIRBuilder builder(*bb, arch);
         const HwInstDesc* desc = getMCIDByUOp(GFX::s_barrier_wait, arch);
         if (!desc) return nullptr;
@@ -196,9 +199,9 @@ TEST_F(BarrierTest, TokenGrouped_PassesPreserveOrderWithinGroup) {
     StinkyInstruction* g1_signal = createSBarrierSignal(-1, {1});
     StinkyInstruction* g1_wait = createSBarrierWait(-1, {1});
 
-    StinkyInstruction* wmma_1 = createWMMA(/*dest=*/32, /*src0=*/0, 8);
-    StinkyInstruction* wmma_2 = createWMMA(/*dest=*/32, /*src0=*/8, 0);
-    StinkyInstruction* wmma_3 = createWMMA(/*dest=*/32, /*src0=*/0, 0);
+    (void)createWMMA(/*dest=*/32, /*src0=*/0, 8);
+    (void)createWMMA(/*dest=*/32, /*src0=*/8, 0);
+    (void)createWMMA(/*dest=*/32, /*src0=*/0, 0);
 
     StinkyInstruction* g2_dsLoad1 = createDSLoadInBlock(bb, arch, /*dest=*/12, /*addr=*/28, {2});
     StinkyInstruction* g2_tensorLoad1 =

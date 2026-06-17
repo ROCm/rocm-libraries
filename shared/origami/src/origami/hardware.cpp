@@ -73,6 +73,26 @@ hardware_t::hardware_t(const hardware_t& other)
     , mem_bw_per_wg_coefficients(other.mem_bw_per_wg_coefficients)
     , NUM_XCD(other.NUM_XCD) {}
 
+namespace {
+// On RDNA, HIP runs in WGP (Work Group Processor) mode by default. In that mode CLR halves
+// the agent's compute-unit count, so hipDeviceProp_t::multiProcessorCount reports the number
+// of WGPs (2 CUs each) rather than physical CUs. Origami reasons in physical CUs, so scale
+// the reported count back up on the RDNA architectures. CDNA archs run in CU mode (factor 1).
+size_t cus_per_multiProcessorCount(hardware_t::architecture_t arch) {
+  switch (arch) {
+    case hardware_t::architecture_t::gfx1100:  // RDNA3
+    case hardware_t::architecture_t::gfx1150:  // RDNA3.5 (Strix)
+    case hardware_t::architecture_t::gfx1151:
+    case hardware_t::architecture_t::gfx1152:
+    case hardware_t::architecture_t::gfx1153:
+    case hardware_t::architecture_t::gfx1201:  // RDNA4
+      return 2;
+    default:
+      return 1;
+  }
+}
+}  // namespace
+
 hardware_t hardware_t::get_hardware_for_properties(hipDeviceProp_t properties,
                                                    size_t num_xcds_override) {
   auto arch_name = get_before_first_colon(properties.gcnArchName);
@@ -87,7 +107,7 @@ hardware_t hardware_t::get_hardware_for_properties(hipDeviceProp_t properties,
                       ? num_xcds_override
                       : get_default_num_xcds(arch_enum);
   return hardware_t(arch_enum,
-                    properties.multiProcessorCount,
+                    properties.multiProcessorCount * cus_per_multiProcessorCount(arch_enum),
                     properties.sharedMemPerBlock,
                     constants,
                     num_xcds,
@@ -96,11 +116,8 @@ hardware_t hardware_t::get_hardware_for_properties(hipDeviceProp_t properties,
                     properties.memoryClockRate / 1.e6);
 }
 
-hardware_t hardware_t::get_hardware_for_device(int deviceId) {
-  hipDeviceProp_t prop;
-  hipError_t e = hipGetDeviceProperties(&prop, deviceId);
-  if (e) { throw std::runtime_error(hipGetErrorString(e)); }
-
+hardware_t hardware_t::get_hardware_for_device(int deviceId,
+                                               hipDeviceProp_t const& prop) {
   size_t num_xcds = 0;
 #if HIP_VERSION_MAJOR >= 7
   int queried_xccs = 0;
@@ -111,6 +128,14 @@ hardware_t hardware_t::get_hardware_for_device(int deviceId) {
 #endif
 
   return get_hardware_for_properties(prop, num_xcds);
+}
+
+hardware_t hardware_t::get_hardware_for_device(int deviceId) {
+  hipDeviceProp_t prop;
+  hipError_t e = hipGetDeviceProperties(&prop, deviceId);
+  if (e) { throw std::runtime_error(hipGetErrorString(e)); }
+
+  return get_hardware_for_device(deviceId, prop);
 }
 
 hardware_t hardware_t::get_hardware_for_arch(architecture_t arch,
@@ -218,15 +243,36 @@ bool hardware_t::has_MALL() const {
     case architecture_t::gfx1201:
     case architecture_t::gfx1100:
     case architecture_t::gfx1151:
-    case architecture_t::gfx1250: return true;
+      return true;
     case architecture_t::gfx1150:
     case architecture_t::gfx1152:
-    case architecture_t::gfx1153: return false;
+    case architecture_t::gfx1153:
+    case architecture_t::gfx1250:
     case architecture_t::Count:
       // Count is not a valid architecture, this is to silence compiler warning
       return false;
   }
 }
+
+bool hardware_t::has_native_TF32() const {
+  switch (arch) {
+    case architecture_t::gfx942:
+      return true;
+    case architecture_t::gfx90a:
+    case architecture_t::gfx950:
+    case architecture_t::gfx1201:
+    case architecture_t::gfx1100:
+    case architecture_t::gfx1150:
+    case architecture_t::gfx1151:
+    case architecture_t::gfx1152:
+    case architecture_t::gfx1153:
+    case architecture_t::gfx1250:
+    case architecture_t::Count:
+      // Count is not a valid architecture, this is to silence compiler warning
+      return false;
+  }
+}
+
 
 std::string hardware_t::get_before_first_colon(const std::string& input) {
   size_t pos = input.find(':');

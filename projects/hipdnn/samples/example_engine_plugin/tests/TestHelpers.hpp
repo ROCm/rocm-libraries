@@ -103,8 +103,8 @@ inline flatbuffers::FlatBufferBuilder
 {
     flatbuffers::FlatBufferBuilder builder;
 
-    std::vector<int64_t> dims = {1, 1, 4};
-    std::vector<int64_t> strides = {4, 4, 1};
+    const std::vector<int64_t> dims = {1, 1, 4};
+    const std::vector<int64_t> strides = {4, 4, 1};
 
     std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
@@ -153,8 +153,8 @@ inline flatbuffers::FlatBufferBuilder createMultiNodeReluGraph()
 {
     flatbuffers::FlatBufferBuilder builder;
 
-    std::vector<int64_t> dims = {1, 1, 4};
-    std::vector<int64_t> strides = {4, 4, 1};
+    const std::vector<int64_t> dims = {1, 1, 4};
+    const std::vector<int64_t> strides = {4, 4, 1};
 
     std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
@@ -271,20 +271,20 @@ inline flatbuffers::FlatBufferBuilder createConvFwdGraph(int64_t inputUid = 1,
     flatbuffers::FlatBufferBuilder builder;
 
     // Compute output dimensions (accounting for dilation)
-    int64_t outH = (h + 2 * padH - (dilationH * (r - 1) + 1)) / strideH + 1;
-    int64_t outW = (w + 2 * padW - (dilationW * (s - 1) + 1)) / strideW + 1;
+    const int64_t outH = (h + 2 * padH - (dilationH * (r - 1) + 1)) / strideH + 1;
+    const int64_t outW = (w + 2 * padW - (dilationW * (s - 1) + 1)) / strideW + 1;
 
     // Input tensor: NCHW
-    std::vector<int64_t> inputDims = {n, c, h, w};
-    std::vector<int64_t> inputStrides = {c * h * w, h * w, w, 1};
+    const std::vector<int64_t> inputDims = {n, c, h, w};
+    const std::vector<int64_t> inputStrides = {c * h * w, h * w, w, 1};
 
     // Weight tensor: KCRS
-    std::vector<int64_t> weightDims = {k, c, r, s};
-    std::vector<int64_t> weightStrides = {c * r * s, r * s, s, 1};
+    const std::vector<int64_t> weightDims = {k, c, r, s};
+    const std::vector<int64_t> weightStrides = {c * r * s, r * s, s, 1};
 
     // Output tensor: NKHW (with output spatial dims)
-    std::vector<int64_t> outputDims = {n, k, outH, outW};
-    std::vector<int64_t> outputStrides = {k * outH * outW, outH * outW, outW, 1};
+    const std::vector<int64_t> outputDims = {n, k, outH, outW};
+    const std::vector<int64_t> outputStrides = {k * outH * outW, outH * outW, outW, 1};
 
     std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
@@ -314,10 +314,10 @@ inline flatbuffers::FlatBufferBuilder createConvFwdGraph(int64_t inputUid = 1,
         &outputDims));
 
     // Padding and stride vectors
-    std::vector<int64_t> prePadding = {padH, padW};
-    std::vector<int64_t> postPadding = {padH, padW};
-    std::vector<int64_t> stride = {strideH, strideW};
-    std::vector<int64_t> dilation = {dilationH, dilationW};
+    const std::vector<int64_t> prePadding = {padH, padW};
+    const std::vector<int64_t> postPadding = {padH, padW};
+    const std::vector<int64_t> stride = {strideH, strideW};
+    const std::vector<int64_t> dilation = {dilationH, dilationW};
 
     auto convAttrs = hipdnn_flatbuffers_sdk::data_objects::CreateConvolutionFwdAttributesDirect(
         builder,
@@ -357,20 +357,20 @@ inline flatbuffers::FlatBufferBuilder createMultiNodeConvGraph()
 
     // Use small 4x4 input with 3x3 filter -> 2x2 output for first conv
     // Second conv: 2x2 input with 1x1 filter -> 2x2 output
-    std::vector<int64_t> inputDims = {1, 1, 4, 4};
-    std::vector<int64_t> inputStrides = {16, 16, 4, 1};
+    const std::vector<int64_t> inputDims = {1, 1, 4, 4};
+    const std::vector<int64_t> inputStrides = {16, 16, 4, 1};
 
-    std::vector<int64_t> weight1Dims = {1, 1, 3, 3};
-    std::vector<int64_t> weight1Strides = {9, 9, 3, 1};
+    const std::vector<int64_t> weight1Dims = {1, 1, 3, 3};
+    const std::vector<int64_t> weight1Strides = {9, 9, 3, 1};
 
-    std::vector<int64_t> interDims = {1, 1, 2, 2};
-    std::vector<int64_t> interStrides = {4, 4, 2, 1};
+    const std::vector<int64_t> interDims = {1, 1, 2, 2};
+    const std::vector<int64_t> interStrides = {4, 4, 2, 1};
 
-    std::vector<int64_t> weight2Dims = {1, 1, 1, 1};
-    std::vector<int64_t> weight2Strides = {1, 1, 1, 1};
+    const std::vector<int64_t> weight2Dims = {1, 1, 1, 1};
+    const std::vector<int64_t> weight2Strides = {1, 1, 1, 1};
 
-    std::vector<int64_t> outputDims = {1, 1, 2, 2};
-    std::vector<int64_t> outputStrides = {4, 4, 2, 1};
+    const std::vector<int64_t> outputDims = {1, 1, 2, 2};
+    const std::vector<int64_t> outputStrides = {4, 4, 2, 1};
 
     std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
@@ -412,9 +412,9 @@ inline flatbuffers::FlatBufferBuilder createMultiNodeConvGraph()
         &outputStrides,
         &outputDims));
 
-    std::vector<int64_t> pad1 = {0, 0};
-    std::vector<int64_t> stride1 = {1, 1};
-    std::vector<int64_t> dilation1 = {1, 1};
+    const std::vector<int64_t> pad1 = {0, 0};
+    const std::vector<int64_t> stride1 = {1, 1};
+    const std::vector<int64_t> dilation1 = {1, 1};
 
     auto conv1 = hipdnn_flatbuffers_sdk::data_objects::CreateConvolutionFwdAttributesDirect(
         builder,
@@ -427,9 +427,9 @@ inline flatbuffers::FlatBufferBuilder createMultiNodeConvGraph()
         &dilation1,
         hipdnn_flatbuffers_sdk::data_objects::ConvMode::CROSS_CORRELATION);
 
-    std::vector<int64_t> pad2 = {0, 0};
-    std::vector<int64_t> stride2 = {1, 1};
-    std::vector<int64_t> dilation2 = {1, 1};
+    const std::vector<int64_t> pad2 = {0, 0};
+    const std::vector<int64_t> stride2 = {1, 1};
+    const std::vector<int64_t> dilation2 = {1, 1};
 
     auto conv2 = hipdnn_flatbuffers_sdk::data_objects::CreateConvolutionFwdAttributesDirect(
         builder,

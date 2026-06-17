@@ -24,6 +24,8 @@
 
 #include <memory>
 
+#include "stinkytofu/Export.hpp"
+
 namespace stinkytofu {
 class Pass;
 
@@ -66,6 +68,6 @@ class Pass;
 /// pm.addPass(createDeadCodeEliminationPass());   // Clean up
 /// pm.run();
 /// ```
-std::unique_ptr<Pass> createDeadCodeEliminationPass();
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createDeadCodeEliminationPass();
 
 }  // namespace stinkytofu

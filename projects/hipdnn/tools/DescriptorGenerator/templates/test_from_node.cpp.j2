@@ -12,9 +12,9 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/{{ op.fbs_generated_header }}>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/{{ op.fbs_generated_header }}>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/{{ op.effective_constants_include }}.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -24,7 +24,7 @@
 #include <vector>
 
 using namespace hipdnn_backend;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 using hipdnn_backend::test_utilities::verifyTensorDescriptor;
 using hipdnn_tests::toVec;
@@ -66,13 +66,13 @@ protected:
 {% endfor %}
 {% for taf in op.tensor_array_fields %}
 {% for uid in taf.test_uids %}
-        TensorAttributesT {{ taf.name }}Attrs{{ loop.index0 }};
-        {{ taf.name }}Attrs{{ loop.index0 }}.uid = {{ uid }};
-        {{ taf.name }}Attrs{{ loop.index0 }}.data_type = DataType::FLOAT;
-        {{ taf.name }}Attrs{{ loop.index0 }}.dims = {1};
-        {{ taf.name }}Attrs{{ loop.index0 }}.strides = {1};
+        TensorAttributesT {{ taf.camel_name }}Attrs{{ loop.index0 }};
+        {{ taf.camel_name }}Attrs{{ loop.index0 }}.uid = {{ uid }};
+        {{ taf.camel_name }}Attrs{{ loop.index0 }}.data_type = DataType::FLOAT;
+        {{ taf.camel_name }}Attrs{{ loop.index0 }}.dims = {1};
+        {{ taf.camel_name }}Attrs{{ loop.index0 }}.strides = {1};
 
-        _tensorMap[{{ uid }}] = TensorDescriptor::fromFlatBuffer({{ taf.name }}Attrs{{ loop.index0 }});
+        _tensorMap[{{ uid }}] = TensorDescriptor::fromFlatBuffer({{ taf.camel_name }}Attrs{{ loop.index0 }});
 {% endfor %}
 {% endfor %}
     }

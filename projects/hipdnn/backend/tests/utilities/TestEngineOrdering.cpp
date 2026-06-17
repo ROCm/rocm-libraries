@@ -125,3 +125,31 @@ TEST(TestEngineOrdering, StableOrderPreservedForOthers)
     EXPECT_EQ(engineIds[4], other4);
     EXPECT_EQ(engineIds[5], MIOPEN_ENGINE_DETERMINISTIC_ID);
 }
+
+TEST(TestEngineOrdering, IsIdempotent)
+{
+    std::vector<int64_t> engineIds
+        = {MIOPEN_ENGINE_DETERMINISTIC_ID, HIPBLASLT_ENGINE_ID, MIOPEN_ENGINE_ID};
+    sortEngineIds(engineIds);
+    const auto firstPass = engineIds;
+
+    sortEngineIds(engineIds);
+    EXPECT_EQ(engineIds, firstPass);
+}
+
+TEST(TestEngineOrdering, UnknownEngineIdsTreatedAsMiddlePriority)
+{
+    // Engine IDs that don't correspond to any known well-known name should
+    // sort into the middle bucket (between MIOPEN_ENGINE and
+    // MIOPEN_ENGINE_DETERMINISTIC) without crashing.
+    const auto unknown1 = static_cast<int64_t>(0x1234567890ABCDEF);
+    const auto unknown2 = static_cast<int64_t>(0xFEDCBA0987654321);
+
+    std::vector<int64_t> engineIds = {unknown1, MIOPEN_ENGINE_ID, unknown2};
+
+    EXPECT_NO_THROW(sortEngineIds(engineIds));
+    ASSERT_EQ(engineIds.size(), 3u);
+    EXPECT_EQ(engineIds[0], MIOPEN_ENGINE_ID);
+    EXPECT_EQ(engineIds[1], unknown1);
+    EXPECT_EQ(engineIds[2], unknown2);
+}

@@ -237,7 +237,7 @@ All targets support parallel builds with ninja.
 | `current-coverage` | Generate test coverage reports using coverage data already on disk (does not automatically run `check`; requires `-DHIPDNN_ENABLE_COVERAGE=ON`) |
 | `clean` | Clean build artifacts |
 | `validate_test_names` | Validates test names conform to naming rules |
-| `generate_hipdnn_data_sdk_headers` | Generate C++ headers from schema (`.fbs`) files |
+| `generate_hipdnn_flatbuffers_sdk_headers` | Generate C++ headers from schema (`.fbs`) files |
 
 The following example build commands are equivalent (depending on which generator was used) and will build the `check` target, to build and run all tests.
 
@@ -454,7 +454,7 @@ From here, follow the instructions in the [Quick Start Guide](#quick-start-guide
 
 * **Docker GPU access issues**
    - Ensure ROCm is installed on the host system
-   - Verify GPU is visible: `rocm-smi` or `rocminfo`
+   - Verify GPU is visible: `amd-smi` or `rocminfo`
    - Check user is in `video` and `render` groups:
      ```bash
      sudo usermod -a -G video,render $USER

@@ -185,7 +185,8 @@ TEST(TestTensorAttributes, ValidateDataType)
            {DataType::INT4, ErrorCode::OK},
            {DataType::FP6_E2M3, ErrorCode::OK},
            {DataType::FP6_E3M2, ErrorCode::OK},
-           {DataType::INT64, ErrorCode::OK}};
+           {DataType::INT64, ErrorCode::OK},
+           {DataType::BOOLEAN, ErrorCode::OK}};
 
     for(auto [dataType, errorCode] : expectedResults)
     {

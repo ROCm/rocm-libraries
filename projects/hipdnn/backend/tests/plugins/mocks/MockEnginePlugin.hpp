@@ -49,6 +49,22 @@ public:
                  const hipdnnPluginConstData_t* engineConfig,
                  const hipdnnPluginConstData_t* opGraph),
                 (const));
+    MOCK_METHOD(bool, supportsExecutionContextSerialization, (), (const));
+    MOCK_METHOD(void,
+                serializeExecutionContext,
+                (hipdnnEnginePluginHandle_t handle,
+                 hipdnnEnginePluginExecutionContext_t executionContext,
+                 hipdnnPluginConstData_t* serializedContext),
+                (const));
+    MOCK_METHOD(void,
+                destroySerializedExecutionContext,
+                (hipdnnEnginePluginHandle_t handle, hipdnnPluginConstData_t* serializedContext),
+                (const));
+    MOCK_METHOD(hipdnnEnginePluginExecutionContext_t,
+                createExecutionContextFromSerialized,
+                (hipdnnEnginePluginHandle_t handle,
+                 const hipdnnPluginConstData_t* serializedContext),
+                (const));
     MOCK_METHOD(void,
                 destroyExecutionContext,
                 (hipdnnEnginePluginHandle_t handle,
@@ -66,6 +82,20 @@ public:
                  void* workspace,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers),
+                (const));
+    MOCK_METHOD(bool, hasOverrideExecute, (), (const));
+    MOCK_METHOD(void,
+                executeOpGraphWithOverrides,
+                (hipdnnEnginePluginHandle_t handle,
+                 hipdnnEnginePluginExecutionContext_t executionContext,
+                 void* workspace,
+                 const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                 uint32_t numDeviceBuffers,
+                 uint32_t numOverrides,
+                 const int64_t* overrideUniqueIds,
+                 const uint32_t* overrideLengths,
+                 const int64_t* const* overrideShapes,
+                 const int64_t* const* overrideStrides),
                 (const));
 
     // Mock inherited methods from PluginBase

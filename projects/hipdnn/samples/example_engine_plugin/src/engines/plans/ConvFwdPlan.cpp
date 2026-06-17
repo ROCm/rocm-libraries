@@ -14,8 +14,8 @@
 namespace example_provider
 {
 
-ConvFwdPlan::ConvFwdPlan(ConvFwdParams&& params)
-    : _params(std::move(params))
+ConvFwdPlan::ConvFwdPlan(const ConvFwdParams& params)
+    : _params(params)
 {
 }
 
@@ -45,7 +45,7 @@ void ConvFwdPlan::execute(const ExampleProviderHandle& handle,
     auto* weight = static_cast<const float*>(weightBuffer.ptr);
     auto* output = static_cast<float*>(outputBuffer.ptr);
 
-    int64_t totalOutputElementsI64 = _params.n * _params.k * _params.outH * _params.outW;
+    const int64_t totalOutputElementsI64 = _params.n * _params.k * _params.outH * _params.outW;
     if(totalOutputElementsI64 > std::numeric_limits<unsigned int>::max())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -55,7 +55,7 @@ void ConvFwdPlan::execute(const ExampleProviderHandle& handle,
 
     auto totalOutputElements = static_cast<unsigned int>(totalOutputElementsI64);
     auto blockSizeU = static_cast<unsigned int>(_params.blockSize);
-    unsigned int gridSize = (totalOutputElements + blockSizeU - 1) / blockSizeU;
+    const unsigned int gridSize = (totalOutputElements + blockSizeU - 1) / blockSizeU;
 
     _kernel->setBlockSize(blockSizeU, 1, 1);
     _kernel->setGridSize(gridSize, 1, 1);

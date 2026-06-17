@@ -26,6 +26,7 @@
 #include <cstring>
 #include <iostream>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/ir/logical/IntrinsicCall.hpp"
 #include "stinkytofu/ir/logical/IntrinsicRegistry.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
@@ -35,17 +36,18 @@
 namespace stinkytofu {
 char IntrinsicExpansionPass::ID = 0;
 
-IntrinsicExpansionPass::IntrinsicExpansionPass() {}
+IntrinsicExpansionPass::IntrinsicExpansionPass() = default;
 
 IntrinsicExpansionPass::~IntrinsicExpansionPass() = default;
 
-void IntrinsicExpansionPass::run(Function& func, PassContext& passCtx) {
+PreservedAnalyses IntrinsicExpansionPass::run(Function& func, PassContext& passCtx,
+                                              AnalysisManager& /*AM*/) {
     // Check if intrinsic registry is initialized
     auto& registry = IntrinsicRegistry::instance();
     if (!registry.isInitialized()) {
         std::cerr << "[IntrinsicExpansionPass] Warning: IntrinsicRegistry not initialized, "
                   << "skipping intrinsic expansion\n";
-        return;
+        return preserveCFGAnalyses();
     }
 
     // Process all basic blocks
@@ -55,6 +57,7 @@ void IntrinsicExpansionPass::run(Function& func, PassContext& passCtx) {
 
         expandIntrinsicsInBlock(bb);
     }
+    return preserveCFGAnalyses();
 }
 
 void IntrinsicExpansionPass::expandIntrinsicsInBlock(BasicBlock& bb) {

@@ -26,6 +26,7 @@
 #include <memory>
 #include <unordered_map>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/PatternParser.hpp"
@@ -57,7 +58,7 @@ class IntrinsicExpansionPass : public Pass {
     IntrinsicExpansionPass();
     ~IntrinsicExpansionPass() override;
 
-    void run(Function& func, PassContext& passCtx) override;
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override;
 
     PassID getPassID() const override {
         return &ID;
@@ -113,6 +114,6 @@ class IntrinsicExpansionPass : public Pass {
  * @brief Factory function to create IntrinsicExpansionPass
  * @return Unique pointer to IntrinsicExpansionPass
  */
-std::unique_ptr<Pass> createIntrinsicExpansionPass();
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createIntrinsicExpansionPass();
 
 }  // namespace stinkytofu

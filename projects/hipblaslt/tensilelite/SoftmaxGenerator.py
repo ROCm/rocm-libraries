@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -228,18 +228,6 @@ class SoftmaxKernelGenerator:
     @property
     def bpe(self) -> int:
         return int(self.io_type.numBytes())
-
-    def shiftSrd(self, srdIdx):
-        module = Module()
-        if self.isa[0] == 12 and self.isa[1] == 5:
-            stmp = self.sgpr_pool.checkOutAligned(1, 1)
-            module.add(ri.SAndB32(sgpr(stmp), sgpr(srdIdx+2), 0x7F))
-            module.add(ri.SLShiftLeftB32(sgpr(stmp), 25, sgpr(stmp)))
-            module.add(ri.SAndB32(sgpr(srdIdx+1), sgpr(srdIdx+1), 0x1FFFFFF))
-            module.add(ri.SOrB32(sgpr(srdIdx+1), sgpr(srdIdx+1), sgpr(stmp)))
-            module.add(ri.SLShiftRightB32(sgpr(srdIdx+2), 7, sgpr(srdIdx+2)))
-            self.sgpr_pool.checkIn(stmp)
-        return module
 
     def shiftSrd(self, srdIdx):
         module = Module()

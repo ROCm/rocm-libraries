@@ -7,6 +7,8 @@
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/version.h>
 
+#include <array>
+
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::detail;
 using namespace hipdnn_data_sdk::utilities;
@@ -46,4 +48,25 @@ TEST(TestBackendInterface, VersionEqualsVersionString)
 {
     EXPECT_EQ(hipdnnBackend()->version(),
               Version{std::string_view(hipdnnBackend()->versionString())});
+}
+
+TEST(TestBackendInterface, BackendGetSerializedExecutionPlanExtForwardsToBackend)
+{
+    HipdnnBackendWrapper backendWrapper(Version{std::string_view(hipdnnVersionString_ext())});
+    size_t planByteSize = 0;
+
+    EXPECT_EQ(
+        backendWrapper.backendGetSerializedExecutionPlanExt(nullptr, 0, &planByteSize, nullptr),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+TEST(TestBackendInterface, BackendCreateAndDeserializeExecutionPlanExtForwardsToBackend)
+{
+    HipdnnBackendWrapper backendWrapper(Version{std::string_view(hipdnnVersionString_ext())});
+    hipdnnBackendDescriptor_t descriptor = nullptr;
+    const std::array<uint8_t, 1> serializedPlan{0};
+
+    EXPECT_EQ(backendWrapper.backendCreateAndDeserializeExecutionPlanExt(
+                  nullptr, &descriptor, serializedPlan.data(), serializedPlan.size()),
+              HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }

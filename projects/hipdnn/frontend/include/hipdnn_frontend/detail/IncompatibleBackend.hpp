@@ -111,6 +111,40 @@ public:
         return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
     }
 
+    hipdnnStatus_t backendGetSerializedExecutionPlanExt(hipdnnBackendDescriptor_t /*descriptor*/,
+                                                        size_t /*requestedByteSize*/,
+                                                        size_t* /*planByteSize*/,
+                                                        uint8_t* /*serializedPlan*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
+    hipdnnStatus_t
+        backendCreateAndDeserializeExecutionPlanExt(hipdnnHandle_t /*handle*/,
+                                                    hipdnnBackendDescriptor_t* /*descriptor*/,
+                                                    const uint8_t* /*serializedPlan*/,
+                                                    size_t /*planByteSize*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
+    hipdnnStatus_t backendGetSerializedBinaryGraphAndPlanExt(
+        hipdnnBackendDescriptor_t /*graphDescriptor*/,
+        hipdnnBackendDescriptor_t /*executionPlanDescriptor*/,
+        size_t /*requestedByteSize*/,
+        size_t* /*blobByteSize*/,
+        uint8_t* /*serializedBlob*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
+    hipdnnStatus_t backendGetSerializedBinaryContentsExt(const uint8_t* /*serializedBlob*/,
+                                                         size_t /*blobByteSize*/,
+                                                         int* /*contentFlags*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
     hipdnn_data_sdk::utilities::Version version() override
     {
         return hipdnn_data_sdk::utilities::Version{-1, 0, 0};
@@ -137,5 +171,28 @@ public:
     {
         return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
     }
+
+    // RFC 0007 Section 16: Heuristic policy enumeration
+    hipdnnStatus_t getHeuristicPolicyCount(hipdnnHandle_t /*handle*/,
+                                           size_t* /*numPolicies*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
+    hipdnnStatus_t getHeuristicPolicyInfo(hipdnnHandle_t /*handle*/,
+                                          size_t /*policyIndex*/,
+                                          int64_t* /*policyId*/,
+                                          char* /*policyName*/,
+                                          size_t* /*policyNameLen*/,
+                                          char* /*pluginName*/,
+                                          size_t* /*pluginNameLen*/,
+                                          char* /*pluginVersion*/,
+                                          size_t* /*pluginVersionLen*/,
+                                          char* /*apiVersion*/,
+                                          size_t* /*apiVersionLen*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
 };
+
 } // namespace hipdnn_frontend::detail

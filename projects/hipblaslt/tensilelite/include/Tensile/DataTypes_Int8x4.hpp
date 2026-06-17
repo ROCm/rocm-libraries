@@ -26,6 +26,10 @@
 
 #pragma once
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 namespace TensileLite
 {
     /**
@@ -84,3 +88,5 @@ namespace std
                + std::to_string(val.c) + ", " + std::to_string(val.d) + ")";
     }
 } // namespace std
+
+TENSILE_HIDDEN_END

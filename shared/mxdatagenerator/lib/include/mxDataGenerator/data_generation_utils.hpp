@@ -4,7 +4,7 @@
 #pragma once
 
 #include <cstdint>
-#include <iostream>
+#include <ostream>
 #include <tuple>
 #include <vector>
 
@@ -68,13 +68,13 @@ namespace DGen
             {
             }
 
-            void print()
+            void print(std::ostream& os) const
             {
                 for(const auto e : current)
                 {
-                    std::cout << e << " ";
+                    os << e << " ";
                 }
-                std::cout << "\n";
+                os << "\n";
             }
 
             const std::vector<index_t>& operator*() const

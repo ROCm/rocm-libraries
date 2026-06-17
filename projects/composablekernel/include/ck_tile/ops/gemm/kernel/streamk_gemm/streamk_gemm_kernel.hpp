@@ -6,6 +6,7 @@
 #include "ck_tile/ops/gemm/kernel/gemm_kernel.hpp"
 #include "ck_tile/ops/common.hpp"
 #include "ck_tile/host/concat.hpp"
+#include "ck_tile/host/device_prop.hpp"
 #include "streamk_gemm_coherency.hpp"
 
 namespace ck_tile {
@@ -119,7 +120,9 @@ struct StreamKKernel
 
     struct StreamKKernelArgs : ck_tile::UniversalGemmKernelArgs<>
     {
-        StreamKKernelArgs(const StreamKHostArgs& host_args, index_t max_active_wgs)
+        StreamKKernelArgs(const StreamKHostArgs& host_args,
+                          index_t max_active_wgs,
+                          int num_xccs_ = 1)
             : UniversalGemmKernelArgs{host_args.as_ptr,
                                       host_args.bs_ptr,
                                       host_args.ds_ptr,
@@ -136,7 +139,8 @@ struct StreamKKernel
               // instantiate the TilePartitioner to get the necessary size
               workspace_ptr{nullptr},
               tile_partitioner{
-                  TilePartitioner{host_args.M, host_args.N, host_args.K, max_active_wgs}}
+                  TilePartitioner{host_args.M, host_args.N, host_args.K, max_active_wgs}},
+              num_xccs{num_xccs_}
 
         {
         }
@@ -150,6 +154,11 @@ struct StreamKKernel
          * the C tensor.
          */
         TilePartitioner tile_partitioner;
+        /**
+         * @brief  An int for the number of xcds available on a given device for remapping the block
+         * indices to be contiguous.
+         */
+        int num_xccs;
     };
 
     using KernelArgs = StreamKKernelArgs;
@@ -209,8 +218,8 @@ struct StreamKKernel
                                                          int occupancy = Occupancy())
     {
         const index_t max_active_wgs = num_cu * occupancy;
-
-        return StreamKKernelArgs{host_args, max_active_wgs};
+        const int num_xccs           = get_num_xccs();
+        return StreamKKernelArgs{host_args, max_active_wgs, num_xccs};
     }
 
     template <bool UseDefaultScheduler = true>
@@ -354,7 +363,8 @@ struct StreamKKernel
 
             // Determine the total size along the K dimension the workgroup is using in this
             // iteration (used to construct tensor views).
-            index_t k_size = num_loop_sk * TilePartitioner::KPerBlock;
+            index_t k_size = amd_wave_read_first_lane(
+                kargs.tile_partitioner.get_k_size(num_loop_sk, local_iter_end));
 
             // Get the K offsets for the A and B tensors
             auto [i_k_a, i_k_b] = GetKOffsets<ALayout, BLayout>(
@@ -529,14 +539,19 @@ struct StreamKKernel
     CK_TILE_DEVICE void operator()(StreamKKernelArgs kargs) const
     {
         __shared__ char smem_ptr_0[UniversalGemmKernel::GetSmemSize()];
+        index_t block_idx         = ck_tile::get_block_1d_id();
+        index_t grid_size         = kargs.tile_partitioner.grid_size().x;
         const index_t dp_num_loop = kargs.tile_partitioner.get_iters_per_tile();
+
+        block_idx = kargs.tile_partitioner.remap_xcd(block_idx, grid_size, kargs.num_xccs);
 
         StreamKDispatch(
             kargs.tile_partitioner,
             [&](index_t tile_idx) {
                 BaseGemm(kargs, tile_idx, dp_num_loop, 0, 0, kargs.K, smem_ptr_0);
             },
-            [&](index_t sk_cta_idx) { StreamKGemm(kargs, sk_cta_idx, smem_ptr_0); });
+            [&](index_t sk_cta_idx) { StreamKGemm(kargs, sk_cta_idx, smem_ptr_0); },
+            block_idx);
     }
 
     private:
@@ -609,4 +624,5 @@ struct StreamKKernel
         return max(occupancy, 1);
     }
 };
+
 } // namespace ck_tile

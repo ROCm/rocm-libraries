@@ -153,6 +153,51 @@ Add:
 #endif
 ```
 
+### Step 6: Create Backend Pipeline and Register Anchor
+
+Each architecture needs an optimization pipeline registered with `BackendRegistry`. Create `src/pipeline/backend/GfxYourArchBackend.cpp` (copy from `Gfx1250Backend.cpp`) containing:
+
+1. A `buildGfxYourArchPipeline()` function that populates a `PassManager`
+2. A static registrar struct that calls `BackendRegistry::setArchPipeline()`
+3. An **anchor function** to prevent dead-stripping in static builds
+
+```cpp
+namespace stinkytofu {
+namespace {
+bool buildGfxYourArchPipeline(PassManager& pm, StinkyAsmModule& module) {
+    // Add passes here...
+    return true;
+}
+
+struct GfxYourArchRegistrar {
+    GfxYourArchRegistrar() {
+        BackendRegistry::setArchPipeline(
+            GFXYOURARCH_ARCH, {buildGfxYourArchPipeline, {"group0", "group1"}});
+    }
+};
+static GfxYourArchRegistrar s_gfxYourArchRegistrar;
+}  // namespace
+
+// Anchor: prevents linker from dead-stripping this TU in static builds.
+void anchorGfxYourArchBackend() {}
+
+}  // namespace stinkytofu
+```
+
+Then register the anchor in `BackendRegistry.cpp`:
+
+```cpp
+// In BackendRegistry::registerAllBackends():
+void anchorGfxYourArchBackend();  // Add declaration
+
+void BackendRegistry::registerAllBackends() {
+    anchorGfx1250Backend();
+    anchorGfxYourArchBackend();   // Add call
+}
+```
+
+Finally, add the source file to `src/pipeline/backend/CMakeLists.txt`.
+
 ---
 
 ## Summary Checklist
@@ -167,6 +212,9 @@ Add:
 - [ ] Update `tools/tablegen/CMakeLists.txt` -- add arch to INSTRUCTION_GEN_FILES and INSTRUCTION_DEF_FILES
 - [ ] Create `src/conversion/rocisa/GfxYourArchRocisaArchInfo.hpp`
 - [ ] Update `src/conversion/rocisa/RocisaArchInfo.hpp` -- add #include for new arch
+- [ ] Create `src/pipeline/backend/GfxYourArchBackend.cpp` with pipeline, registrar, and anchor function
+- [ ] Add anchor call to `BackendRegistry::registerAllBackends()` in `BackendRegistry.cpp`
+- [ ] Add source to `src/pipeline/backend/CMakeLists.txt`
 - [ ] Rebuild and test:
   ```bash
   cd build && cmake .. && cmake --build . -j && ctest -j

@@ -212,6 +212,8 @@ protected:
                           GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
+        bundle.sentinelFillOutputTensors();
+
         // Note: Epsilon and momentum are pass-by-value (set via set_value()), not buffers
 
         // X input: default range
@@ -266,6 +268,8 @@ protected:
                                     this->getTolerance(graphObj, outputs.nextRunningVariance));
         }
 
+        this->setTestCaseLayout(layout.name);
+        this->setTestCaseNote(bnTestCase.note);
         this->verifyGraph(graphObj, bnTestCase.seed);
     }
 };

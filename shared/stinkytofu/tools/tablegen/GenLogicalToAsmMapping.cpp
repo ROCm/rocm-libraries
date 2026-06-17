@@ -59,7 +59,8 @@ bool genLogicalToAsmMappingsImpl(GpuArchManager& manager, const std::string& out
        << "//===----------------------------------------------------------------------===//\n\n"
        << "#include <cstring>\n\n"
        << "namespace stinkytofu {\n"
-       << "inline const char* getMnemonicForLogicalOnArch(const char* logicalName, GfxArchID "
+       << "static inline const char* getMnemonicForLogicalOnArch(const char* logicalName, "
+          "GfxArchID "
           "arch)\n"
        << "{\n"
        << "    switch(arch)\n"
@@ -90,6 +91,7 @@ bool genLogicalToAsmMappingsImpl(GpuArchManager& manager, const std::string& out
 }  // namespace
 
 namespace stinkytofu {
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 bool genLogicalToAsmMappings(GpuArchManager& manager, const std::string& outdir) {
     return genLogicalToAsmMappingsImpl(manager, outdir);
 }

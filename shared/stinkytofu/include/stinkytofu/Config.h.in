@@ -34,3 +34,6 @@
 
 // List of all enabled architectures (for debugging/logging)
 #define STINKYTOFU_ENABLED_ARCHS "@STINKYTOFU_ARCHS@"
+
+// comgr support for runtime assembler capability probing (required)
+#cmakedefine STINKYTOFU_HAS_COMGR

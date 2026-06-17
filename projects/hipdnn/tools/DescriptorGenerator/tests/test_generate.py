@@ -3,8 +3,8 @@
 
 """Unit tests for generate.py.
 
-Tests cover _preview_files() correctness across all four modes,
-mode enum file inclusion, and CLI behavior (deprecated flags, errors).
+Tests cover _preview_files() correctness across the supported modes,
+mode enum file inclusion, and CLI behavior.
 """
 
 import subprocess
@@ -16,7 +16,6 @@ from generate import (
     MODE_BACKEND,
     MODE_FRONTEND,
     MODE_FULL,
-    MODE_LIFT_ONLY,
     _preview_files,
 )
 from codegen.config_loader import load_config
@@ -75,9 +74,9 @@ class TestPreviewFilesBackend:
 
     def test_backend_file_count(self, convolution_fwd_config):
         files = _preview_files(convolution_fwd_config, MODE_BACKEND)
-        # 9 file templates + 10 fragment templates + 4 per generatable mode field
+        # 9 file templates + 12 fragment templates + 4 per generatable mode field
         n_mode_files = 4 * len(convolution_fwd_config.generatable_mode_fields)
-        expected = 9 + 10 + n_mode_files
+        expected = 9 + 12 + n_mode_files
         assert len(files) == expected
 
     def test_backend_contains_descriptor_header(self, convolution_fwd_config):
@@ -133,6 +132,8 @@ class TestPreviewFilesBackend:
             "fragments/operation_unpacker_test.txt",
             "fragments/operation_type_enum.txt",
             "fragments/node_unpack_override.txt",
+            "fragments/packer_name_addition.txt",
+            "fragments/descriptor_lifting_additions.txt",
         ]
         for fragment in expected_fragments:
             assert fragment in files, f"Missing fragment: {fragment}"
@@ -156,15 +157,15 @@ class TestPreviewFilesFrontend:
 
     def test_frontend_contains_test_attributes(self, convolution_fwd_config):
         files = _preview_files(convolution_fwd_config, MODE_FRONTEND)
-        assert any("TestConvFpropAttributes.cpp" in f for f in files)
+        assert any("TestConvolutionFpropAttributes.cpp" in f for f in files)
 
     def test_frontend_contains_test_node(self, convolution_fwd_config):
         files = _preview_files(convolution_fwd_config, MODE_FRONTEND)
-        assert any("TestConvFpropNode.cpp" in f for f in files)
+        assert any("TestConvolutionFpropNode.cpp" in f for f in files)
 
     def test_frontend_contains_test_graph(self, convolution_fwd_config):
         files = _preview_files(convolution_fwd_config, MODE_FRONTEND)
-        assert any("TestGraphConvFprop.cpp" in f for f in files)
+        assert any("TestGraphConvolutionFprop.cpp" in f for f in files)
 
     def test_frontend_contains_all_fragments(self, convolution_fwd_config):
         files = _preview_files(convolution_fwd_config, MODE_FRONTEND)
@@ -189,7 +190,7 @@ class TestPreviewFilesFull:
         files = _preview_files(convolution_fwd_config, MODE_FULL)
         # Must contain both backend and frontend files
         assert any("ConvolutionFwdOperationDescriptor.hpp" in f for f in files)
-        assert any("ConvFpropAttributes.hpp" in f for f in files)
+        assert any("ConvolutionFpropAttributes.hpp" in f for f in files)
         assert any("factory_case.txt" in f for f in files)
         assert any("graph_method.txt" in f for f in files)
 
@@ -201,59 +202,6 @@ class TestPreviewFilesFull:
         # Mode enum files are only added for backend and full, not frontend
         # The full count should be backend + frontend (mode enums counted once in full)
         assert len(full) == len(backend) + len(frontend)
-
-
-class TestPreviewFilesLiftOnly:
-    """Verify lift-only mode produces the expected file list."""
-
-    def test_lift_only_file_count(self, convolution_fwd_config):
-        files = _preview_files(convolution_fwd_config, MODE_LIFT_ONLY)
-        # 3 files + 7 fragments = 10
-        assert len(files) == 10
-
-    def test_lift_only_contains_unpacker(self, convolution_fwd_config):
-        files = _preview_files(convolution_fwd_config, MODE_LIFT_ONLY)
-        assert any("Unpacker.hpp" in f for f in files)
-
-    def test_lift_only_contains_from_node_test(self, convolution_fwd_config):
-        files = _preview_files(convolution_fwd_config, MODE_LIFT_ONLY)
-        assert any("FromNode.cpp" in f for f in files)
-
-    def test_lift_only_contains_lifting_integration(self, convolution_fwd_config):
-        files = _preview_files(convolution_fwd_config, MODE_LIFT_ONLY)
-        assert any("DescriptorLifting.cpp" in f for f in files)
-
-    def test_lift_only_contains_all_fragments(self, convolution_fwd_config):
-        files = _preview_files(convolution_fwd_config, MODE_LIFT_ONLY)
-        expected_fragments = [
-            "fragments/node_factory_case.txt",
-            "fragments/operation_unpacker_case.txt",
-            "fragments/operation_unpacker_test.txt",
-            "fragments/operation_type_enum.txt",
-            "fragments/node_unpack_override.txt",
-            "fragments/descriptor_lifting_additions.txt",
-            "fragments/packer_name_addition.txt",
-        ]
-        for fragment in expected_fragments:
-            assert fragment in files, f"Missing fragment: {fragment}"
-
-    def test_lift_only_does_not_contain_descriptor_header(self, convolution_fwd_config):
-        files = _preview_files(convolution_fwd_config, MODE_LIFT_ONLY)
-        assert not any("OperationDescriptor.hpp" in f for f in files)
-
-    def test_lift_only_does_not_contain_packer(self, convolution_fwd_config):
-        files = _preview_files(convolution_fwd_config, MODE_LIFT_ONLY)
-        # Verify no packer file (but unpacker is expected)
-        packer_files = [
-            f for f in files if "Packer.hpp" in f and "Unpacker.hpp" not in f
-        ]
-        assert len(packer_files) == 0
-
-    def test_lift_only_no_mode_enum_files(self, config_with_mode_fields):
-        """Lift-only mode never includes mode enum files."""
-        files = _preview_files(config_with_mode_fields, MODE_LIFT_ONLY)
-        assert not any("HipdnnTestMode.h" in f for f in files)
-        assert not any("mode_backend_plumbing" in f for f in files)
 
 
 # ---------------------------------------------------------------------------
@@ -329,12 +277,12 @@ class TestPreviewFilesWithRealConfigs:
         assert not any("mode_frontend_plumbing" in f for f in files)
 
     def test_matmul_backend_exact_count(self, matmul_config):
-        """Matmul backend: 9 files + 10 fragments = 19, no mode enums.
+        """Matmul backend: 9 files + 12 fragments = 21, no mode enums.
 
         matmul_config has constants_include set, so no constants file is generated.
         """
         files = _preview_files(matmul_config, MODE_BACKEND)
-        assert len(files) == 19
+        assert len(files) == 21
 
 
 class TestPreviewFilesConstants:
@@ -350,14 +298,6 @@ class TestPreviewFilesConstants:
         """Config without constants_include gets a constants file in backend preview."""
         config = load_test_config("batchnorm_backward.yaml")
         files = _preview_files(config, MODE_BACKEND)
-        constants_files = [f for f in files if "constants/" in f]
-        assert len(constants_files) == 1
-        assert "BatchnormBackwardConstants.hpp" in constants_files[0]
-
-    def test_constants_in_lift_only_when_not_set(self, load_test_config):
-        """Config without constants_include gets a constants file in lift-only preview."""
-        config = load_test_config("batchnorm_backward.yaml")
-        files = _preview_files(config, MODE_LIFT_ONLY)
         constants_files = [f for f in files if "constants/" in f]
         assert len(constants_files) == 1
         assert "BatchnormBackwardConstants.hpp" in constants_files[0]
@@ -407,8 +347,8 @@ class TestCLIBehavior:
         assert result.returncode == 1
         assert "not found" in result.stderr
 
-    def test_lift_only_with_mode_conflicts(self, generate_script, python_exe, tmp_path):
-        """--lift-only combined with --mode frontend exits with error."""
+    def test_lift_only_flag_removed(self, generate_script, python_exe, tmp_path):
+        """The deprecated --lift-only flag is no longer accepted."""
         config_file = Path(__file__).parent.parent / "configs" / "matmul.yaml"
         result = subprocess.run(
             [
@@ -419,17 +359,18 @@ class TestCLIBehavior:
                 "--output-dir",
                 str(tmp_path / "out"),
                 "--lift-only",
-                "--mode",
-                "frontend",
             ],
             capture_output=True,
             text=True,
         )
-        assert result.returncode == 1
-        assert "cannot be combined" in result.stderr
+        # argparse exits with code 2 on unknown arguments
+        assert result.returncode == 2
+        assert (
+            "unrecognized arguments" in result.stderr or "--lift-only" in result.stderr
+        )
 
-    def test_lift_only_deprecation_warning(self, generate_script, python_exe, tmp_path):
-        """--lift-only prints deprecation warning and sets mode to lift-only."""
+    def test_mode_lift_only_value_rejected(self, generate_script, python_exe, tmp_path):
+        """--mode lift-only is rejected by argparse choices after the flag was removed."""
         config_file = Path(__file__).parent.parent / "configs" / "matmul.yaml"
         result = subprocess.run(
             [
@@ -439,16 +380,27 @@ class TestCLIBehavior:
                 str(config_file),
                 "--output-dir",
                 str(tmp_path / "out"),
-                "--lift-only",
-                "--dry-run",
+                "--mode",
+                "lift-only",
             ],
             capture_output=True,
             text=True,
         )
-        assert result.returncode == 0
-        assert "deprecated" in result.stderr.lower()
-        # Dry run with lift-only should show lifting files
-        assert "Dry run" in result.stdout
+        assert result.returncode == 2, (
+            f"Expected argparse rejection (rc=2), got {result.returncode}: "
+            f"stderr={result.stderr!r}"
+        )
+        assert "invalid choice" in result.stderr or "lift-only" in result.stderr
+
+    def test_mode_lift_only_constant_removed(self):
+        """MODE_LIFT_ONLY symbol no longer exists; the constant was folded into MODE_BACKEND."""
+        import generate
+
+        assert not hasattr(
+            generate, "MODE_LIFT_ONLY"
+        ), "MODE_LIFT_ONLY should have been folded into MODE_BACKEND when the lift-only mode was removed"
+        # The valid modes tuple should not contain a 'lift-only' entry.
+        assert "lift-only" not in generate.VALID_MODES
 
     def test_dry_run_no_files_written(self, generate_script, python_exe, tmp_path):
         """--dry-run does not create any files."""

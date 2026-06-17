@@ -46,13 +46,14 @@ class LogicalPeepholePassTest : public ::testing::Test {
 
     void runPass() {
         auto pass = createLogicalPeepholePass();
-        pass->run(func, *passCtx);
+        pass->run(func, *passCtx, am);
     }
 
     Function func{"kernel"};
     std::unique_ptr<PassContext> passCtx;
     BasicBlock* bb;
     GfxArchID arch;
+    AnalysisManager am;
 };
 
 // Test: Pass can be instantiated and run

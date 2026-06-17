@@ -55,6 +55,7 @@ class IntrinsicExpansionPassTest : public ::testing::Test {
 
     GemmTileConfig defaultConfig = {{12, 5, 0}, 128, 128, 64, 0, 0, 0};
     PassContext passCtx;
+    AnalysisManager am;
 };
 
 TEST_F(IntrinsicExpansionPassTest, ExpandSimpleIntrinsic) {
@@ -75,7 +76,7 @@ TEST_F(IntrinsicExpansionPassTest, ExpandSimpleIntrinsic) {
 
     // Run IntrinsicExpansionPass
     auto pass = createIntrinsicExpansionPass();
-    pass->run(func, passCtx);
+    pass->run(func, passCtx, am);
 
     // After expansion, IntrinsicCall should be replaced with expanded instructions
     // ReluF32 expands to 1 instruction (v_max_f32)
@@ -117,7 +118,7 @@ TEST_F(IntrinsicExpansionPassTest, UnknownIntrinsicFails) {
 
     // Run IntrinsicExpansionPass - should fail gracefully
     auto pass = createIntrinsicExpansionPass();
-    pass->run(func, passCtx);
+    pass->run(func, passCtx, am);
 
     // IntrinsicCall should still be there (expansion failed)
     bool hasIntrinsicCall = false;
@@ -153,7 +154,7 @@ TEST_F(IntrinsicExpansionPassTest, MultipleIntrinsicCalls) {
 
     // Run IntrinsicExpansionPass
     auto pass = createIntrinsicExpansionPass();
-    pass->run(func, passCtx);
+    pass->run(func, passCtx, am);
 
     // Should have 2 instructions (each ReluF32 expands to 1 v_max_f32)
     EXPECT_EQ(bb->size(), 2) << "Both IntrinsicCalls should be expanded to v_max_f32";

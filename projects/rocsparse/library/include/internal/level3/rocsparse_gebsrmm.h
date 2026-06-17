@@ -33,11 +33,11 @@ extern "C" {
 #endif
 
 /*! \ingroup level3_module
- *  \brief Sparse matrix dense matrix multiplication using GEneral BSR storage format
+ *  \brief Sparse matrix dense matrix multiplication using the general BSR storage format
  *
  *  \details
  *  \p rocsparse_gebsrmm multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times k\f$
- *  matrix \f$A\f$, defined in GEneral BSR storage format, and the column-oriented dense \f$k \times n\f$
+ *  matrix \f$A\f$, defined in general BSR storage format, and the column-oriented dense \f$k \times n\f$
  *  matrix \f$B\f$ and adds the result to the column-oriented dense \f$m \times n\f$ matrix \f$C\f$ that
  *  is multiplied by the scalar \f$\beta\f$, such that
  *  \f[
@@ -64,8 +64,8 @@ extern "C" {
  *
  *
  *  \note
- *  This function is non blocking and executed asynchronously with respect to the host.
- *  It may return before the actual computation has finished.
+ *  This function is non-blocking and executed asynchronously with respect to the host.
+ *  It can return before the actual computation has finished.
  *
  *  \note
  *  Currently, only \p trans_A == \ref rocsparse_operation_none is supported.
@@ -74,7 +74,7 @@ extern "C" {
  *  This routine supports execution in a hipGraph context.
  *
  *  @param[in]
- *  handle      handle to the rocsparse library context queue.
+ *  handle      handle to the rocSPARSE library context queue.
  *  @param[in]
  *  dir         the storage format of the blocks. Can be \ref rocsparse_direction_row or \ref rocsparse_direction_column.
  *  @param[in]
@@ -83,58 +83,58 @@ extern "C" {
  *  trans_B     matrix \f$B\f$ operation type. Currently, only \ref rocsparse_operation_none and rocsparse_operation_transpose
  *              are supported.
  *  @param[in]
- *  mb          number of block rows of the sparse GEneral BSR matrix \f$A\f$.
+ *  mb          number of block rows of the sparse general BSR matrix \f$A\f$.
  *  @param[in]
  *  n           number of columns of the column-oriented dense matrix \f$op(B)\f$ and \f$C\f$.
  *  @param[in]
- *  kb          number of block columns of the sparse GEneral BSR matrix \f$A\f$.
+ *  kb          number of block columns of the sparse general BSR matrix \f$A\f$.
  *  @param[in]
- *  nnzb        number of non-zero blocks of the sparse GEneral BSR matrix \f$A\f$.
+ *  nnzb        number of non-zero blocks of the sparse general BSR matrix \f$A\f$.
  *  @param[in]
  *  alpha       scalar \f$\alpha\f$.
  *  @param[in]
- *  descr       descriptor of the sparse GEneral BSR matrix \f$A\f$. Currently, only
+ *  descr       descriptor of the sparse general BSR matrix \f$A\f$. Currently, only
  *              \ref rocsparse_matrix_type_general is supported.
  *  @param[in]
- *  bsr_val     array of \p nnzb*row_block_dim*col_block_dim elements of the sparse GEneral BSR matrix \f$A\f$.
+ *  bsr_val     array of \p nnzb*row_block_dim*col_block_dim elements of the sparse general BSR matrix \f$A\f$.
  *  @param[in]
  *  bsr_row_ptr array of \p mb+1 elements that point to the start of every block row of the
- *              sparse GEneral BSR matrix \f$A\f$.
+ *              sparse general BSR matrix \f$A\f$.
  *  @param[in]
  *  bsr_col_ind array of \p nnzb elements containing the block column indices of the sparse
- *              GEneral BSR matrix \f$A\f$.
+ *              general BSR matrix \f$A\f$.
  *  @param[in]
- *  row_block_dim   row size of the blocks in the sparse GEneral BSR matrix.
+ *  row_block_dim   row size of the blocks in the sparse general BSR matrix.
  *  @param[in]
- *  col_block_dim   column size of the blocks in the sparse GEneral BSR matrix.
+ *  col_block_dim   column size of the blocks in the sparse general BSR matrix.
  *  @param[in]
  *  B           column-oriented dense matrix of dimension \f$ldb \times n\f$ (\f$op(B) == B\f$),
  *              \f$ldb \times k\f$ otherwise.
  *  @param[in]
- *  ldb         leading dimension of \f$B\f$, must be at least \f$\max{(1, k)}\f$ (\f$ op(B) == B\f$) where \f$k = col\_block\_dim \times kb\f$,
+ *  ldb         leading dimension of \f$B\f$, which must be at least \f$\max{(1, k)}\f$ (\f$ op(B) == B\f$) where \f$k = col\_block\_dim \times kb\f$,
  *  \f$\max{(1, n)}\f$ otherwise.
  *  @param[in]
  *  beta        scalar \f$\beta\f$.
  *  @param[inout]
  *  C           column-oriented dense matrix of dimension \f$ldc \times n\f$.
  *  @param[in]
- *  ldc         leading dimension of \f$C\f$, must be at least \f$\max{(1, m)}\f$ (\f$ op(A) == A\f$) where \f$m = row\_block\_dim \times mb\f$,
+ *  ldc         leading dimension of \f$C\f$, which must be at least \f$\max{(1, m)}\f$ (\f$ op(A) == A\f$) where \f$m = row\_block\_dim \times mb\f$,
  *  \f$\max{(1, k)}\f$ where \f$k = col\_block\_dim \times kb\f$ otherwise.
  *
  *  \retval     rocsparse_status_success the operation completed successfully.
  *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
- *  \retval     rocsparse_status_invalid_size \p mb, \p n, \p kb, \p nnzb, \p ldb, \p ldc, \p row_block_dim
+ *  \retval     rocsparse_status_invalid_size \p mb, \p n, \p kb, \p nnzb, \p ldb, \p ldc, \p row_block_dim,
  *              or \p col_block_dim is invalid.
  *  \retval     rocsparse_status_invalid_pointer \p descr, \p alpha, \p bsr_val,
- *              \p bsr_row_ptr, \p bsr_col_ind, \p B, \p beta or \p C pointer is invalid.
+ *              \p bsr_row_ptr, \p bsr_col_ind, \p B, \p beta, or \p C pointer is invalid.
  *  \retval     rocsparse_status_arch_mismatch the device is not supported.
  *  \retval     rocsparse_status_not_implemented
- *              \p trans_A != \ref rocsparse_operation_none or
- *              \p trans_B == \ref rocsparse_operation_conjugate_transpose or
+ *              \p trans_A != \ref rocsparse_operation_none,
+ *              \p trans_B == \ref rocsparse_operation_conjugate_transpose, or
  *              \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_general.
  *
  *  \par Example
- *  This example multiplies a GEneral BSR matrix with a column-oriented dense matrix.
+ *  This example multiplies a general BSR matrix with a column-oriented dense matrix.
  *  \snippet example_rocsparse_gebsrmm.cpp doc example
  */
 /**@{*/

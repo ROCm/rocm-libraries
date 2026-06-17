@@ -48,6 +48,7 @@ operation:
     graph_return_type: "array"
     graph_return_outputs:
       - "y"
+    node_type_enum: "NodeType::BATCHNORM"
 
   tensor_fields:
     - name: "x"

@@ -51,6 +51,7 @@ typedef enum hiptensorOperationType_t
     HIPTENSOR_ELEMENTWISE_BINARY  = 2,
     HIPTENSOR_ELEMENTWISE_TRINARY = 3,
     HIPTENSOR_REDUCTION           = 4,
+    HIPTENSOR_CONTRACTION_TRINARY = 5,
 } hiptensorOperationType_t;
 
 struct hiptensorOperationDescriptor
@@ -79,6 +80,10 @@ struct hiptensorOperationDescriptor
 
     hiptensorTensorDescriptor_t mDescD;
     std::vector<int32_t>        mModeD;
+    hiptensorOperator_t         mOpD;
+
+    hiptensorTensorDescriptor_t mDescE;
+    std::vector<int32_t>        mModeE;
 
     hiptensorOperator_t mOpAC;
     hiptensorOperator_t mOpABC;
@@ -119,6 +124,7 @@ struct hiptensorPlan
     std::unique_ptr<hiptensorTensorDescriptor>    mOwnedDescB;
     std::unique_ptr<hiptensorTensorDescriptor>    mOwnedDescC;
     std::unique_ptr<hiptensorTensorDescriptor>    mOwnedDescD;
+    std::unique_ptr<hiptensorTensorDescriptor>    mOwnedDescE;
     std::unique_ptr<hiptensorOperationDescriptor> mOwnedOpDesc;
     std::unique_ptr<hiptensorPlanPreference>      mOwnedPref;
 };

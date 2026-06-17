@@ -41,7 +41,9 @@ add_library(
     descriptors/LayernormOperationDescriptor.cpp
     descriptors/MatmulOperationDescriptor.cpp
     descriptors/PointwiseOperationDescriptor.cpp
+    descriptors/ResampleFwdOperationDescriptor.cpp
     descriptors/ReductionOperationDescriptor.cpp
+    descriptors/RMSNormBackwardOperationDescriptor.cpp
     descriptors/RMSNormOperationDescriptor.cpp
     descriptors/SdpaBwdOperationDescriptor.cpp
     descriptors/SdpaFwdOperationDescriptor.cpp
@@ -53,8 +55,15 @@ add_library(
     logging/GraphLogger.cpp
     logging/Logging.cpp
     FlatbufferUtilities.cpp
+    heuristics/DeviceProperties.cpp
+    heuristics/BuiltInHeuristics.cpp
+    heuristics/SelectionHeuristic.cpp
+    heuristics/config/ConfigBuiltIn.cpp
+    heuristics/static_ordering/StaticOrderingBuiltIn.cpp
     plugin/EnginePlugin.cpp
     plugin/EnginePluginResourceManager.cpp
+    plugin/HeuristicPlugin.cpp
+    plugin/HeuristicPluginResourceManager.cpp
     plugin/PluginCore.cpp
     plugin/SharedLibrary.cpp
     utilities/EngineOrdering.cpp
@@ -70,6 +79,12 @@ target_include_directories(
 
 target_compile_options(hipdnn_backend_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 target_link_libraries(hipdnn_backend_private PUBLIC hip::host hipdnn_data_sdk hipdnn_plugin_sdk hipdnn_flatbuffers_sdk)
+# Backend implementation files use nlohmann::json unconditionally (graph (de)serialization,
+# JSON logging). Link as PRIVATE so the dep stays inside the .so and isn't propagated to consumers.
+if(NOT TARGET nlohmann_json::nlohmann_json)
+    hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
+endif()
+hipdnn_add_dependency_includes(hipdnn_backend_private nlohmann_json::nlohmann_json)
 target_link_libraries(hipdnn_backend_private PRIVATE ${CMAKE_DL_LIBS})
 target_compile_definitions(hipdnn_backend_private PRIVATE HIPDNN_BACKEND_COMPILATION)
 

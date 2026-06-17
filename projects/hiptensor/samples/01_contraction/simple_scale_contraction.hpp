@@ -59,12 +59,12 @@ int scaleContractionSample(void* alpha)
 
     std::unordered_map<int, int64_t> extent;
 
-    extent['m'] = 4;
-    extent['n'] = 3;
-    extent['u'] = 4;
-    extent['v'] = 3;
-    extent['h'] = 6;
-    extent['k'] = 5;
+    extent['m'] = 128;
+    extent['n'] = 32;
+    extent['u'] = 48;
+    extent['v'] = 32;
+    extent['h'] = 64;
+    extent['k'] = 56;
 
     std::vector<int64_t> d_ms_ns_lengths;
     for(auto mode : modeD)
@@ -228,7 +228,7 @@ int scaleContractionSample(void* alpha)
    ***************************/
     hiptensorPlanPreference_t planPref;
     CHECK_HIPTENSOR_ERROR(hiptensorCreatePlanPreference(
-        handle, &planPref, HIPTENSOR_ALGO_ACTOR_CRITIC, HIPTENSOR_JIT_MODE_NONE));
+        handle, &planPref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE));
 
     /**********************
    * Query workspace

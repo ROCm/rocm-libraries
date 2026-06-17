@@ -18,7 +18,7 @@ namespace example_provider
 class HipRunnableKernel : public IRunnableKernel
 {
 public:
-    HipRunnableKernel(hipFunction_t function, const std::string& kernelName);
+    HipRunnableKernel(hipFunction_t function, std::string kernelName);
 
     void setBlockSize(unsigned int x, unsigned int y, unsigned int z) override;
     void setGridSize(unsigned int x, unsigned int y, unsigned int z) override;

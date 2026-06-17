@@ -26,6 +26,10 @@
 #include "../../common/utils_custom_type.hpp"
 #include "../../common/utils_device_ptr.hpp"
 
+// including Windows.h from test_utils_memory_check.hpp includes
+// macro definitions max and min which conflict with rocPRIM code.
+#define NOMINMAX
+
 // required test headers
 #include "indirect_iterator.hpp"
 #include "test_seed.hpp"
@@ -35,6 +39,7 @@
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
+#include "test_utils_memory_check.hpp"
 
 // required rocprim headers
 #include <rocprim/detail/various.hpp>
@@ -309,11 +314,12 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
 
     hipStream_t stream = 0; // default
 
+    rocprim::detail::target_arch arch;
+    HIP_CHECK(rocprim::detail::host_target_arch(stream, arch));
+
     // This test currently fails on gfx950 with key types of custom_type when BUILD_CODE_COVERAGE=ON.
     // Temporarily skip these cases while we investigate.
 #if defined(CODE_COVERAGE)
-    rocprim::detail::target_arch arch;
-    rocprim::detail::host_target_arch(stream, arch);
     if (common::is_custom_type<key_type>::value && arch == rocprim::detail::target_arch::gfx950)
     {
         std::cout << "Temporarily skipping custom_type test on gfx950." << std::endl;
@@ -334,19 +340,25 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
+        auto sizes = test_utils::get_sizes(seed_value);
+
         for(size_t size : test_utils::get_sizes(seed_value))
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             in_place = !in_place;
 
+            test_utils::MemCheck memcheck;
+
             // Generate data
+            MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, size)
             std::vector<key_type> keys_input = test_utils::get_random_data_wrapped<key_type>(
                 size,
                 -100,
                 100,
                 seed_value); // float16 can't exceed 65504
 
+            MEMCHECK_OR_BREAK_ALLOC_HOST(value_type, size)
             std::vector<value_type> values_input(size);
             test_utils::iota(values_input.begin(), values_input.end(), 0);
 
@@ -354,6 +366,11 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             common::device_ptr<key_type>   d_keys_output_alloc;
             common::device_ptr<value_type> d_values_input;
             common::device_ptr<value_type> d_values_output_alloc;
+
+            MEMCHECK_OR_BREAK_ALLOC_DEVICE(key_type, size)
+            MEMCHECK_OR_BREAK_ALLOC_DEVICE(key_type, in_place ? 0 : size)
+            MEMCHECK_OR_BREAK_ALLOC_DEVICE(value_type, size)
+            MEMCHECK_OR_BREAK_ALLOC_DEVICE(value_type, in_place ? 0 : size)
 
             if(!d_keys_input.resize_with_memory_check(size)
                || !d_keys_output_alloc.resize_with_memory_check(in_place ? 0 : size)
@@ -377,6 +394,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
 
             // Calculate expected results on host
             using key_value = std::pair<key_type, value_type>;
+            MEMCHECK_OR_BREAK_ALLOC_HOST(key_value, size)
             std::vector<key_value> expected(size);
             for(size_t i = 0; i < size; i++)
             {
@@ -418,6 +436,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             // allocate temporary storage
             common::device_ptr<void> d_temp_storage;
 
+            MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temp_storage_size_bytes)
             if(!d_temp_storage.resize_with_memory_check(temp_storage_size_bytes))
             {
                 std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
@@ -451,7 +470,10 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if output values are as expected
+            MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, expected.size())
             std::vector<key_type> expected_key(expected.size());
+
+            MEMCHECK_OR_BREAK_ALLOC_HOST(value_type, expected.size())
             std::vector<value_type> expected_value(expected.size());
             for(size_t i = 0; i < expected.size(); i++)
             {
@@ -463,11 +485,13 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
 
             {
                 // Copy output to host.  This is scoped so keys_output is freed immediately.
+                MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, size)
                 const auto keys_output   = d_keys_output.load();
                 ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected_key));
             }
             {
                 // Copy output to host.  This is scoped so values_output is freed immediately.
+                MEMCHECK_OR_BREAK_ALLOC_HOST(value_type, size)
                 const auto values_output = d_values_output.load();
                 ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, expected_value));
             }
@@ -482,8 +506,8 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
 
 TEST(RocprimDeviceSortTests, LargeIndices)
 {
-    if (should_skip(true))
-        GTEST_SKIP() << "Skipping large test under Valgrind";
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
 
     using key_type = uint8_t;
 
@@ -498,23 +522,20 @@ TEST(RocprimDeviceSortTests, LargeIndices)
     // at least some sizes that fit into device memory.
     using config = rocprim::merge_sort_config<256, 256, 1, 128, 128, 1, (1 << 17)>;
 
-    // On Windows, sizes above 2^34 cause issues that we can't currently catch by examining
-    // the hipMalloc return value or querying available memory. Workaround this for now
-    // by setting a different maximum size for that platform.
-#if defined(_WIN32)
-    const size_t max_pow2 = 34;
-#else
     const size_t max_pow2 = 37;
-#endif
+
     for(size_t size : test_utils::get_large_sizes<max_pow2>(seeds[0]))
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        test_utils::MemCheck memcheck;
 
         const auto input
             = rocprim::make_transform_iterator(rocprim::make_counting_iterator<size_t>(0),
                                                rocprim::identity<key_type>());
 
-        key_type*  d_output;
+        key_type* d_output;
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(size * sizeof(*d_output))
         hipError_t malloc_status = common::hipMallocHelper(&d_output, size * sizeof(*d_output));
         if(malloc_status == hipErrorOutOfMemory)
         {
@@ -544,6 +565,7 @@ TEST(RocprimDeviceSortTests, LargeIndices)
         ASSERT_GT(temp_storage_size_bytes, 0);
 
         // allocate temporary storage
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temp_storage_size_bytes)
         malloc_status = common::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes);
         if(malloc_status == hipErrorOutOfMemory)
         {
@@ -566,6 +588,7 @@ TEST(RocprimDeviceSortTests, LargeIndices)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Copy output to host
+        MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, size)
         std::vector<key_type> output(size);
         HIP_CHECK(hipMemcpy(output.data(),
                             d_output,

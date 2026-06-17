@@ -23,10 +23,12 @@
 
 #pragma once
 
+#include <cstdint>
 #include <iostream>
 #include <string>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/serialization/asm/PatternParser.hpp"
 
 namespace stinkytofu {
@@ -51,7 +53,7 @@ namespace stinkytofu {
  *     - Comment: string
  *     - Python binding: uint8_t (0/1)
  */
-class IRSerializer {
+class STINKYTOFU_EXPORT IRSerializer {
    public:
     /**
      * @brief Serialize an intrinsic definition to binary stream

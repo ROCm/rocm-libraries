@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -275,6 +275,16 @@ namespace rocisa
         }
     };
 
+    /// Returns true when vaddr is the MUBUF "off" keyword.
+    inline bool isOffVAddr(const std::shared_ptr<Container>& vaddr)
+    {
+        if(auto* regCont = dynamic_cast<const RegisterContainer*>(vaddr.get()))
+        {
+            return regCont->isOff;
+        }
+        return false;
+    }
+
     struct MUBUFReadInstruction : public GlobalReadInstruction
     {
         std::shared_ptr<Container>    vaddr;
@@ -352,6 +362,10 @@ namespace rocisa
             {
                 kStr += mubuf->toString();
             }
+            if((!mubuf || !mubuf->offen) && !isOffVAddr(vaddr))
+            {
+                kStr += " offen offset:0";
+            }
             kStr = formatWithComment(kStr);
             setMsb(kStr, {vaddr}, dst);
             return kStr;
@@ -378,6 +392,66 @@ namespace rocisa
             , dst(other.dst ? other.dst->clone() : nullptr)
             , srcs(other.srcs ? other.srcs->clone() : nullptr)
         {
+        }
+    };
+
+    struct SMemAtomicIncInstruction : public AtomicReadWriteInstruction
+    {
+        std::shared_ptr<Container>   base;
+        InstructionInput             soffset;
+        std::optional<SMEMModifiers> smem;
+
+        SMemAtomicIncInstruction(InstType                          instType,
+                                 const std::shared_ptr<Container>& dst,
+                                 const std::shared_ptr<Container>& base,
+                                 const InstructionInput&           soffset,
+                                 std::optional<SMEMModifiers>      smem    = std::nullopt,
+                                 const std::string&                comment = "")
+            : AtomicReadWriteInstruction(instType, dst, nullptr, comment)
+            , base(base)
+            , soffset(soffset)
+            , smem(smem)
+        {
+            instStr = "s_atomic_inc";
+        }
+
+        SMemAtomicIncInstruction(const SMemAtomicIncInstruction& other)
+            : AtomicReadWriteInstruction(other)
+            , base(other.base ? other.base->clone() : nullptr)
+            , soffset(copyInstructionInput(other.soffset))
+            , smem(other.smem)
+        {
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {dst, base, soffset};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {dst};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {base, soffset};
+        }
+
+        std::string getArgStr() const
+        {
+            return dst->toString() + ", " + base->toString() + ", " + InstructionInputToString(soffset);
+        }
+
+        std::string toString() const override
+        {
+            auto        newInstStr = preStr();
+            std::string kStr       = newInstStr + " " + getArgStr();
+            if(smem)
+            {
+                kStr += smem->toString();
+            }
+            return formatWithComment(kStr);
         }
     };
 
@@ -714,6 +788,10 @@ namespace rocisa
             {
                 kStr += mubuf->toString();
             }
+            if((!mubuf || !mubuf->offen) && !isOffVAddr(vaddr))
+            {
+                kStr += " offen offset:0";
+            }
             kStr = formatWithComment(kStr);
             setMsb(kStr, {vaddr}, srcData);
             return kStr;
@@ -1044,6 +1122,52 @@ namespace rocisa
         }
     };
 
+    struct BufferLoadB16 : public MUBUFReadInstruction
+    {
+        BufferLoadB16(const std::shared_ptr<RegisterContainer>& dst,
+                      const std::shared_ptr<RegisterContainer>& vaddr,
+                      const std::shared_ptr<RegisterContainer>& saddr,
+                      const InstructionInput&                   soffset,
+                      std::optional<MUBUFModifiers>             mubuf   = std::nullopt,
+                      const std::string&                        comment = "")
+            : MUBUFReadInstruction(InstType::INST_B16, dst, vaddr, saddr, soffset, mubuf, comment)
+        {
+        }
+
+        BufferLoadB16(const BufferLoadB16& other)
+            : MUBUFReadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<BufferLoadB16>(*this);
+        }
+    };
+
+    struct BufferLoadU16 : public MUBUFReadInstruction
+    {
+        BufferLoadU16(const std::shared_ptr<RegisterContainer>& dst,
+                      const std::shared_ptr<RegisterContainer>& vaddr,
+                      const std::shared_ptr<RegisterContainer>& saddr,
+                      const InstructionInput&                   soffset,
+                      std::optional<MUBUFModifiers>             mubuf   = std::nullopt,
+                      const std::string&                        comment = "")
+            : MUBUFReadInstruction(InstType::INST_U16, dst, vaddr, saddr, soffset, mubuf, comment)
+        {
+        }
+
+        BufferLoadU16(const BufferLoadU16& other)
+            : MUBUFReadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<BufferLoadU16>(*this);
+        }
+    };
+
     struct BufferLoadB32 : public MUBUFReadInstruction
     {
         BufferLoadB32(const std::shared_ptr<RegisterContainer>& dst,
@@ -1306,6 +1430,27 @@ namespace rocisa
         }
     };
 
+    struct FlatLoadB192 : public FLATReadInstruction
+    {
+        FlatLoadB192(const std::shared_ptr<RegisterContainer>& dst,
+                     const std::shared_ptr<RegisterContainer>& vaddr,
+                     std::optional<FLATModifiers>              flat    = std::nullopt,
+                     const std::string&                        comment = "")
+            : FLATReadInstruction(InstType::INST_B192, dst, vaddr, flat, comment)
+        {
+        }
+
+        FlatLoadB192(const FlatLoadB192& other)
+            : FLATReadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<FlatLoadB192>(*this);
+        }
+    };
+
     struct GlobalLoadTR8B64 : public GLOBALLoadInstruction
     {
         GlobalLoadTR8B64(const std::shared_ptr<RegisterContainer>& dst,
@@ -1347,27 +1492,6 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<GlobalLoadTR16B128>(*this);
-        }
-    };
-
-    struct FlatLoadB192 : public FLATReadInstruction
-    {
-        FlatLoadB192(const std::shared_ptr<RegisterContainer>& dst,
-                     const std::shared_ptr<RegisterContainer>& vaddr,
-                     std::optional<FLATModifiers>              flat    = std::nullopt,
-                     const std::string&                        comment = "")
-            : FLATReadInstruction(InstType::INST_B192, dst, vaddr, flat, comment)
-        {
-        }
-
-        FlatLoadB192(const FlatLoadB192& other)
-            : FLATReadInstruction(other)
-        {
-        }
-
-        std::shared_ptr<Item> clone() const override
-        {
-            return std::make_shared<FlatLoadB192>(*this);
         }
     };
 
@@ -1616,6 +1740,10 @@ namespace rocisa
             std::string kStr = instStr + " " + getArgStr();
             if(mubuf)
                 kStr += mubuf->toString();
+            if((!mubuf || !mubuf->offen) && !isOffVAddr(vaddr))
+            {
+                kStr += " offen offset:0";
+            }
             kStr = formatWithComment(kStr);
             setMsb(kStr, {vaddr}, srcData);
             return kStr;
@@ -1843,6 +1971,60 @@ namespace rocisa
 
     private:
         std::shared_ptr<RegisterContainer> tmp;
+    };
+
+    struct FlatAtomicDecU32 : public FLATStoreInstruction
+    {
+        FlatAtomicDecU32(const std::shared_ptr<RegisterContainer>& dst,
+                         const std::shared_ptr<RegisterContainer>& addr,
+                         const std::shared_ptr<RegisterContainer>& data,
+                         std::optional<FLATModifiers>              modifier = std::nullopt,
+                         const std::string&                        comment = "")
+            : FLATStoreInstruction(InstType::INST_B32, addr, data, modifier, comment)
+            , dst(dst)
+        {
+            setInst("flat_atomic_dec_u32");
+        }
+
+        FlatAtomicDecU32(const FlatAtomicDecU32& other)
+            : FLATStoreInstruction(other)
+            , dst(other.dst ? other.dst->clone2() : nullptr)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<FlatAtomicDecU32>(*this);
+        }
+
+        // Expose dst (atomic return value) to def-use chain consumers.
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {dst};
+        }
+
+        std::string getArgStr() const override
+        {
+            std::string kStr = dst ? dst->toString() + ", " : "";
+            return kStr + vaddr->toString() + ", " + srcData->toString();
+        }
+
+        std::string typeConvert() const override
+        {
+            return "";
+        }
+
+        std::string toString() const override
+        {
+            std::string kStr = instStr + " " + getArgStr();
+            kStr += " th:TH_ATOMIC_RETURN";
+            if(flat)
+                kStr += flat->toString();
+            kStr = formatWithComment(kStr);
+            return kStr;
+        }
+    private:
+        std::shared_ptr<RegisterContainer> dst;
     };
 
     struct DSLoadU8 : public DSLoadInstruction
@@ -2212,40 +2394,47 @@ namespace rocisa
             return dstCopy.toString() + ", " + srcs->toString();
         }
 
+        int getIssueLatency() const override
+        {
+            return issueLatency();
+        }
+
         std::string toString() const override
         {
-            std::string instStr = "ds_load_b128";
-            if(kernel().isaVersion[0] < 11)
-            {
-                instStr = "ds_read_b128";
-            }
+            // Prepare first instruction
+            std::string instStr = kernel().isaVersion[0] < 11 ?
+                "ds_read_b128":
+                "ds_load_b128";
             std::string kStr = instStr + " " + getArgStr2();
             if(ds)
                 kStr += ds->toString();
 
-            instStr = "ds_load_b64";
-            if(kernel().isaVersion[0] < 11)
-            {
-                instStr = "ds_read_b64";
-            }
+            // Prepare second instruction
+            instStr = kernel().isaVersion[0] < 11 ?
+                "ds_read_b64":
+                "ds_load_b64";
             std::string kStr2 = instStr + " " + getArgStr2(true);
             auto dsCopy = ds ? std::make_shared<DSModifiers>(*ds) : std::make_shared<DSModifiers>();
             dsCopy->offset += 16;
             kStr2 += dsCopy->toString();
-            kStr  = formatWithComment(kStr);
+
+            // Format both instructions
+            kStr = formatWithComment(kStr);
             kStr2 = formatWithComment(kStr2);
-            // compute 2 different dst vgpr msb
-            auto dstCopyPtr
-                = std::make_shared<RegisterContainer>(*dynamic_cast<RegisterContainer*>(dst.get()));
-            int idx            = dstCopyPtr->regName->offsets.size() - 1;
-            int regNum         = 4;
+
+            auto dstCopyPtr = std::make_shared<RegisterContainer>(*dynamic_cast<RegisterContainer*>(dst.get()));
+
+            int const idx = dstCopyPtr->regName->offsets.size() - 1;
+            int const regNum = 4;
             dstCopyPtr->regNum = regNum;
             dstCopyPtr->setMsb();
             setMsb(kStr, {srcs}, dstCopyPtr);
+
             dstCopyPtr->regName->offsets[idx] = dstCopyPtr->regName->offsets[idx] + regNum;
             dstCopyPtr->regNum                = 2;
             dstCopyPtr->setMsb();
             setMsb(kStr2, {srcs}, dstCopyPtr);
+
             return kStr + kStr2;
         }
     };
@@ -2560,6 +2749,7 @@ namespace rocisa
         }
     };
 
+
     struct DSStoreB192 : public DSStoreInstruction
     {
         DSStoreB192(const std::shared_ptr<RegisterContainer>& dstAddr,
@@ -2605,22 +2795,25 @@ namespace rocisa
             return dstAddr->toString() + ", " + srcCopy.toString();
         }
 
+        int getIssueLatency() const override
+        {
+            return issueLatency();
+        }
+
         std::string toString() const override
         {
-            std::string instStr = "ds_store_b128";
-            if(kernel().isaVersion[0] < 11)
-            {
-                instStr = "ds_write_b128";
-            }
+            // Prepare first instruction
+            std::string instStr = kernel().isaVersion[0] < 11 ?
+                "ds_write_b128" :
+                "ds_store_b128";
             std::string kStr = instStr + " " + getArgStr2();
             if(ds)
                 kStr += ds->toString();
 
-            instStr = "ds_store_b64";
-            if(kernel().isaVersion[0] < 11)
-            {
-                instStr = "ds_write_b64";
-            }
+            // Prepare second instruction
+            instStr = kernel().isaVersion[0] < 11 ?
+                "ds_write_b64" :
+                "ds_store_b64";
             std::string kStr2 = instStr + " " + getArgStr2(true);
             auto dsCopy = ds ? std::make_shared<DSModifiers>(*ds) : std::make_shared<DSModifiers>();
             dsCopy->offset += 16;
@@ -2639,6 +2832,7 @@ namespace rocisa
             srcCopyPtr->regNum                = 2;
             srcCopyPtr->setMsb();
             setMsb(kStr2, {dstAddr, srcCopyPtr}, nullptr);
+
             return kStr + kStr2;
         }
     };
@@ -2833,6 +3027,28 @@ namespace rocisa
         const std::shared_ptr<Container> getMsbDstParam() const override
         {
             return dstAddr;
+        }
+    };
+
+    struct SAtomicInc : public SMemAtomicIncInstruction
+    {
+        SAtomicInc(const std::shared_ptr<Container>& dst,
+                   const std::shared_ptr<Container>& base,
+                   const InstructionInput&           soffset,
+                   std::optional<SMEMModifiers>      smem    = std::nullopt,
+                   const std::string&                comment = "")
+            : SMemAtomicIncInstruction(InstType::INST_B32, dst, base, soffset, smem, comment)
+        {
+        }
+
+        SAtomicInc(const SAtomicInc& other)
+            : SMemAtomicIncInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SAtomicInc>(*this);
         }
     };
 
@@ -3174,5 +3390,87 @@ namespace rocisa
         RegContainerPtr group1;
         RegContainerPtr group2;
         RegContainerPtr group3;
+    };
+
+    struct GlobalPrefetchB8 : public Instruction
+    {
+        GlobalPrefetchB8(const std::shared_ptr<Container>&    v_addr,
+                         const std::shared_ptr<Container>&    s_addr,
+                         const std::optional<GLOBALModifiers> gm = std::nullopt,
+                         const std::string&             comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , v_addr(v_addr)
+            , s_addr(s_addr)
+            , gm(gm)
+        {
+            if(getAsmCaps()["HasGlobalPrefetch"])
+            {
+                setInst("global_prefetch_b8");
+            }
+            else
+            {
+                throw std::runtime_error("global_prefetch_b8 is not supported.");
+            }
+        }
+
+        GlobalPrefetchB8(const GlobalPrefetchB8& other)
+            : GlobalPrefetchB8(other.v_addr ? other.v_addr->clone() : nullptr,
+                               other.s_addr ? other.s_addr->clone() : nullptr,
+                               other.gm,
+                               other.comment)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalPrefetchB8>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {v_addr, s_addr};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {v_addr, s_addr};
+        }
+
+        std::string toString() const override
+        {
+            std::string kStr = instStr;
+            if(v_addr && !v_addr->toString().empty())
+            {
+                kStr += " " + v_addr->toString();
+            }
+            if(s_addr && !s_addr->toString().empty())
+            {
+                kStr += ", " + s_addr->toString();
+            }
+            else{
+                kStr += ", off";
+            }
+            if(gm)
+                kStr += gm->toString();
+
+            kStr = formatWithComment(kStr);
+            setMsb(kStr, {v_addr, s_addr}, nullptr);
+            return kStr;
+        }
+
+        // Read-only access to the temporal-hint / cache-scope modifiers
+        // (gfx1250 gl2-prefetch). Lets consumers (e.g. the StinkyTofu converter)
+        // read them directly instead of re-parsing the emitted instruction string.
+        const std::optional<GLOBALModifiers>& getModifier() const { return gm; }
+
+    private:
+        std::shared_ptr<Container> v_addr;
+        std::shared_ptr<Container> s_addr;
+        std::optional<GLOBALModifiers> gm;
     };
 } // namespace rocisa

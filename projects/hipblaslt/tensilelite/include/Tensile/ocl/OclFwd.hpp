@@ -35,6 +35,10 @@
 * where they are needed.
 */
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 // Fwd declarations
 namespace cl
 {
@@ -43,5 +47,7 @@ namespace cl
     class Device;
     class Buffer;
 } // namespace cl
+
+TENSILE_HIDDEN_END
 
 #endif // OCL_FWD_HPP

@@ -51,8 +51,7 @@ extern "C" {
 *  Currently, only \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
 *
 *  \deprecated
-*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be 
-*  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
+*  This function is deprecated and will be removed in a future release.
 *
 *  @param[in]
 *  handle          handle to the hipSPARSE library context queue.
@@ -100,7 +99,7 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not 
 *          \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
 */
-DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
+HIPSPARSE_DEPRECATED_MSG("This function is deprecated and will be removed in a future release")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseXcsrgeamNnz(hipsparseHandle_t         handle,
                                        int                       m,
@@ -141,6 +140,9 @@ hipsparseStatus_t hipsparseXcsrgeamNnz(hipsparseHandle_t         handle,
 *  \note Currently, only \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
 *  \note This function is non-blocking and executed asynchronously with respect to the
 *        host. It can return before the actual computation has finished.
+*
+*  \deprecated
+*  This function is deprecated and will be removed in a future release.
 *
 *  @param[in]
 *  handle          handle to the hipSPARSE library context queue.
@@ -199,7 +201,7 @@ hipsparseStatus_t hipsparseXcsrgeamNnz(hipsparseHandle_t         handle,
 *          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
 */
 /**@{*/
-DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
+HIPSPARSE_DEPRECATED_MSG("This function is deprecated and will be removed in a future release")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsrgeam(hipsparseHandle_t         handle,
                                     int                       m,
@@ -220,7 +222,7 @@ hipsparseStatus_t hipsparseScsrgeam(hipsparseHandle_t         handle,
                                     float*                    csrValC,
                                     int*                      csrRowPtrC,
                                     int*                      csrColIndC);
-DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
+HIPSPARSE_DEPRECATED_MSG("This function is deprecated and will be removed in a future release")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDcsrgeam(hipsparseHandle_t         handle,
                                     int                       m,
@@ -241,7 +243,7 @@ hipsparseStatus_t hipsparseDcsrgeam(hipsparseHandle_t         handle,
                                     double*                   csrValC,
                                     int*                      csrRowPtrC,
                                     int*                      csrColIndC);
-DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
+HIPSPARSE_DEPRECATED_MSG("This function is deprecated and will be removed in a future release")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCcsrgeam(hipsparseHandle_t         handle,
                                     int                       m,
@@ -262,7 +264,7 @@ hipsparseStatus_t hipsparseCcsrgeam(hipsparseHandle_t         handle,
                                     hipComplex*               csrValC,
                                     int*                      csrRowPtrC,
                                     int*                      csrColIndC);
-DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
+HIPSPARSE_DEPRECATED_MSG("This function is deprecated and will be removed in a future release")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseZcsrgeam(hipsparseHandle_t         handle,
                                     int                       m,

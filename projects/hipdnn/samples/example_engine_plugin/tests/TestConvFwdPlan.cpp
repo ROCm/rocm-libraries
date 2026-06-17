@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -21,131 +22,131 @@
 #include "mocks/MockRunnableKernel.hpp"
 
 using namespace example_provider;
-using ::testing::_;
+using ::testing::_; // NOLINT(bugprone-reserved-identifier)
 using ::testing::Return;
 
 class ConvFwdPlanTest : public ::testing::Test
 {
 protected:
     // Convolution dimensions: 1x1x4x4 input, 1x1x3x3 weight -> 1x1x2x2 output
-    static constexpr int64_t kInputUid = 1;
-    static constexpr int64_t kWeightUid = 2;
-    static constexpr int64_t kOutputUid = 3;
-    static constexpr int64_t kN = 1;
-    static constexpr int64_t kC = 1;
-    static constexpr int64_t kH = 4;
-    static constexpr int64_t kW = 4;
-    static constexpr int64_t kK = 1;
-    static constexpr int64_t kR = 3;
-    static constexpr int64_t kS = 3;
-    static constexpr int64_t kOutH = 2;
-    static constexpr int64_t kOutW = 2;
-    static constexpr int64_t kPadH = 0;
-    static constexpr int64_t kPadW = 0;
-    static constexpr int64_t kStrideH = 1;
-    static constexpr int64_t kStrideW = 1;
-    static constexpr int64_t kBlockSize = 256;
+    static constexpr int64_t INPUT_UID = 1;
+    static constexpr int64_t WEIGHT_UID = 2;
+    static constexpr int64_t OUTPUT_UID = 3;
+    static constexpr int64_t N = 1;
+    static constexpr int64_t C = 1;
+    static constexpr int64_t H = 4;
+    static constexpr int64_t W = 4;
+    static constexpr int64_t K = 1;
+    static constexpr int64_t R = 3;
+    static constexpr int64_t S = 3;
+    static constexpr int64_t OUT_H = 2;
+    static constexpr int64_t OUT_W = 2;
+    static constexpr int64_t PAD_H = 0;
+    static constexpr int64_t PAD_W = 0;
+    static constexpr int64_t STRIDE_H = 1;
+    static constexpr int64_t STRIDE_W = 1;
+    static constexpr int64_t BLOCK_SIZE = 256;
 
-    MockKernelCompiler mockCompiler;
-    ExampleProviderHandle handle;
+    MockKernelCompiler _mockCompiler;
+    ExampleProviderHandle _handle;
 
-    MockCompiledProgram* rawCompiledProgram = nullptr;
-    MockRunnableKernel* rawKernel = nullptr;
+    MockCompiledProgram* _rawCompiledProgram = nullptr;
+    MockRunnableKernel* _rawKernel = nullptr;
 
     std::unique_ptr<ConvFwdPlan> createAndCompilePlan()
     {
-        ConvFwdParams params{kInputUid,
-                             kWeightUid,
-                             kOutputUid,
-                             kN,
-                             kC,
-                             kH,
-                             kW,
-                             kK,
-                             kR,
-                             kS,
-                             kOutH,
-                             kOutW,
-                             kPadH,
-                             kPadW,
-                             kStrideH,
-                             kStrideW,
-                             kBlockSize};
-        auto plan = std::make_unique<ConvFwdPlan>(std::move(params));
+        const ConvFwdParams params{INPUT_UID,
+                                   WEIGHT_UID,
+                                   OUTPUT_UID,
+                                   N,
+                                   C,
+                                   H,
+                                   W,
+                                   K,
+                                   R,
+                                   S,
+                                   OUT_H,
+                                   OUT_W,
+                                   PAD_H,
+                                   PAD_W,
+                                   STRIDE_H,
+                                   STRIDE_W,
+                                   BLOCK_SIZE};
+        auto plan = std::make_unique<ConvFwdPlan>(params);
 
         auto compiledProgram = std::make_unique<MockCompiledProgram>();
-        rawCompiledProgram = compiledProgram.get();
+        _rawCompiledProgram = compiledProgram.get();
 
         auto kernel = std::make_unique<MockRunnableKernel>();
-        rawKernel = kernel.get();
+        _rawKernel = kernel.get();
 
-        EXPECT_CALL(mockCompiler, compile("ConvForwardNaive.cpp", _))
+        EXPECT_CALL(_mockCompiler, compile("ConvForwardNaive.cpp", _))
             .WillOnce(Return(testing::ByMove(std::move(compiledProgram))));
 
-        EXPECT_CALL(*rawCompiledProgram, getRunnableKernel("conv_forward_naive_kernel"))
+        EXPECT_CALL(*_rawCompiledProgram, getRunnableKernel("conv_forward_naive_kernel"))
             .WillOnce(Return(testing::ByMove(std::move(kernel))));
 
-        plan->compile(mockCompiler);
+        plan->compile(_mockCompiler);
         return plan;
     }
 };
 
 TEST_F(ConvFwdPlanTest, GetWorkspaceSize_ReturnsZero)
 {
-    ConvFwdParams params{kInputUid,
-                         kWeightUid,
-                         kOutputUid,
-                         kN,
-                         kC,
-                         kH,
-                         kW,
-                         kK,
-                         kR,
-                         kS,
-                         kOutH,
-                         kOutW,
-                         kPadH,
-                         kPadW,
-                         kStrideH,
-                         kStrideW,
-                         kBlockSize};
-    ConvFwdPlan plan{std::move(params)};
-    EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
+    const ConvFwdParams params{INPUT_UID,
+                               WEIGHT_UID,
+                               OUTPUT_UID,
+                               N,
+                               C,
+                               H,
+                               W,
+                               K,
+                               R,
+                               S,
+                               OUT_H,
+                               OUT_W,
+                               PAD_H,
+                               PAD_W,
+                               STRIDE_H,
+                               STRIDE_W,
+                               BLOCK_SIZE};
+    const ConvFwdPlan plan{params};
+    EXPECT_EQ(plan.getWorkspaceSize(_handle), 0u);
 }
 
 TEST_F(ConvFwdPlanTest, Compile_CallsCompilerWithCorrectFilename)
 {
-    ConvFwdParams params{kInputUid,
-                         kWeightUid,
-                         kOutputUid,
-                         kN,
-                         kC,
-                         kH,
-                         kW,
-                         kK,
-                         kR,
-                         kS,
-                         kOutH,
-                         kOutW,
-                         kPadH,
-                         kPadW,
-                         kStrideH,
-                         kStrideW,
-                         kBlockSize};
-    auto plan = std::make_unique<ConvFwdPlan>(std::move(params));
+    const ConvFwdParams params{INPUT_UID,
+                               WEIGHT_UID,
+                               OUTPUT_UID,
+                               N,
+                               C,
+                               H,
+                               W,
+                               K,
+                               R,
+                               S,
+                               OUT_H,
+                               OUT_W,
+                               PAD_H,
+                               PAD_W,
+                               STRIDE_H,
+                               STRIDE_W,
+                               BLOCK_SIZE};
+    auto plan = std::make_unique<ConvFwdPlan>(params);
 
     auto compiledProgram = std::make_unique<MockCompiledProgram>();
     auto* rawProgram = compiledProgram.get();
     auto kernel = std::make_unique<MockRunnableKernel>();
 
     // Verify the compiler receives the correct kernel filename with empty options.
-    EXPECT_CALL(mockCompiler, compile("ConvForwardNaive.cpp", std::vector<std::string>{}))
+    EXPECT_CALL(_mockCompiler, compile("ConvForwardNaive.cpp", std::vector<std::string>{}))
         .WillOnce(Return(testing::ByMove(std::move(compiledProgram))));
 
     EXPECT_CALL(*rawProgram, getRunnableKernel("conv_forward_naive_kernel"))
         .WillOnce(Return(testing::ByMove(std::move(kernel))));
 
-    plan->compile(mockCompiler);
+    plan->compile(_mockCompiler);
 }
 
 TEST_F(ConvFwdPlanTest, Execute_SetsGridAndBlockSizeAndLaunches)
@@ -154,36 +155,36 @@ TEST_F(ConvFwdPlanTest, Execute_SetsGridAndBlockSizeAndLaunches)
 
     // Total output elements: N*K*outH*outW = 1*1*2*2 = 4
     // blockSize=256, gridSize=ceil(4/256)=1
-    EXPECT_CALL(*rawKernel, setBlockSize(256, 1, 1));
-    EXPECT_CALL(*rawKernel, setGridSize(1, 1, 1));
-    EXPECT_CALL(*rawKernel, launchImpl(nullptr, _));
+    EXPECT_CALL(*_rawKernel, setBlockSize(256, 1, 1));
+    EXPECT_CALL(*_rawKernel, setGridSize(1, 1, 1));
+    EXPECT_CALL(*_rawKernel, launchImpl(nullptr, _));
 
-    std::vector<float> inputData(kN * kC * kH * kW, 1.0f);
-    std::vector<float> weightData(kK * kC * kR * kS, 1.0f);
-    std::vector<float> outputData(kN * kK * kOutH * kOutW, -999.0f);
+    std::vector<float> inputData(N * C * H * W, 1.0f);
+    std::vector<float> weightData(K * C * R * S, 1.0f);
+    std::vector<float> outputData(N * K * OUT_H * OUT_W, -999.0f);
 
-    hipdnnPluginDeviceBuffer_t buffers[3];
-    buffers[0].uid = kInputUid;
+    std::array<hipdnnPluginDeviceBuffer_t, 3> buffers;
+    buffers[0].uid = INPUT_UID;
     buffers[0].ptr = inputData.data();
-    buffers[1].uid = kWeightUid;
+    buffers[1].uid = WEIGHT_UID;
     buffers[1].ptr = weightData.data();
-    buffers[2].uid = kOutputUid;
+    buffers[2].uid = OUTPUT_UID;
     buffers[2].ptr = outputData.data();
 
-    plan->execute(handle, buffers, 3, nullptr);
+    plan->execute(_handle, buffers.data(), 3, nullptr);
 }
 
 TEST_F(ConvFwdPlanTest, Execute_MissingBuffer_Throws)
 {
     auto plan = createAndCompilePlan();
 
-    std::vector<float> inputData(kN * kC * kH * kW, 1.0f);
+    std::vector<float> inputData(N * C * H * W, 1.0f);
 
     // Only provide input buffer, missing weight and output
-    hipdnnPluginDeviceBuffer_t buffers[1];
-    buffers[0].uid = kInputUid;
+    std::array<hipdnnPluginDeviceBuffer_t, 1> buffers;
+    buffers[0].uid = INPUT_UID;
     buffers[0].ptr = inputData.data();
 
-    EXPECT_THROW(plan->execute(handle, buffers, 1, nullptr),
+    EXPECT_THROW(plan->execute(_handle, buffers.data(), 1, nullptr),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }

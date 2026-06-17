@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,7 @@
 #include "rocsparse_one.hpp"
 #include "rocsparse_utility.hpp"
 
+// LCOV_EXCL_START
 template <>
 const char* rocsparse::enum_utils::to_string(rocsparse_hyb_partition value)
 {
@@ -44,10 +45,9 @@ const char* rocsparse::enum_utils::to_string(rocsparse_hyb_partition value)
         CASE(rocsparse_hyb_partition_max);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
+// LCOV_EXCL_STOP
 
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_hyb_partition value)

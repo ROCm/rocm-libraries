@@ -29,16 +29,6 @@
 using namespace stinkytofu;
 using namespace stinkytofu::test;
 
-// Helper to create v_mov_b32 in a specific block
-static StinkyInstruction* createVMovInBlock(BasicBlock* bb, GfxArchID arch, int destReg,
-                                            int srcReg) {
-    AsmIRBuilder builder(*bb, arch);
-    StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_mov_b32, arch));
-    inst->addDestReg(StinkyRegister("v", destReg, 1));
-    inst->addSrcReg(StinkyRegister("v", srcReg, 1));
-    return inst;
-}
-
 // Helper to create an instruction with BARRIER (pseudo register) as dest.
 // Simulates s_waitcnt-like instructions used for dependency tracking.
 static StinkyInstruction* createBarrierDestInBlock(BasicBlock* bb, GfxArchID arch) {
@@ -112,7 +102,7 @@ TEST_F(DefUseChainTest, LoopBack_TwoBlocks) {
 // =============================================================================
 // CFG:
 //    A    v0 = v0 + v1
-//    | \
+//    | \.
 //    +--+
 // =============================================================================
 TEST_F(DefUseChainTest, LoopBack_SelfLoop) {
@@ -201,12 +191,13 @@ TEST_F(DefUseChainTest, ThreePredecessors_ABCBDA) {
     // PHI operands are ordered by A's predecessors: sources[i] = def from preds[i].
     const std::vector<BasicBlock*>& preds = A->getPredecessors();
     for (size_t i = 0; i < preds.size(); ++i) {
-        if (preds[i] == B)
+        if (preds[i] == B) {
             EXPECT_EQ(phi->getSources()[i], bAdd) << "PHI operand for B should be B's add";
-        else if (preds[i] == C)
+        } else if (preds[i] == C) {
             EXPECT_EQ(phi->getSources()[i], cAdd) << "PHI operand for C should be C's add";
-        else if (preds[i] == D)
+        } else if (preds[i] == D) {
             EXPECT_EQ(phi->getSources()[i], dAdd) << "PHI operand for D should be D's add";
+        }
     }
 
     // B, C, D each have 1 predecessor — they use the reaching def directly (no PHI).
@@ -219,7 +210,7 @@ TEST_F(DefUseChainTest, ThreePredecessors_ABCBDA) {
 // =============================================================================
 // CFG:
 //      Entry      v0 = v1 + v2
-//     /  |  \
+//     /  |  \.
 //    B   C   D    v0 = v0 + v3/v4/v5
 //     \  |  /
 //      Exit       v10 = v0 + v11
@@ -338,13 +329,13 @@ TEST_F(DefUseChainTest, PassThrough_ValueUsedBySuccessorsSuccessor) {
 // Edge order: Entry -> A, Entry -> F, Entry -> B (so C's preds = [A, F, B])
 //
 //       Entry
-//      /  |  \
+//      /  |  \.
 //     A   F   B
 //     |   |   |
 //   v0=x  |  v0=y  (F has no v0)
 //       \ | /
 //         C (pass-through, no v0)
-//        / \
+//        / \.
 //       D   E  (both use v0)
 // =============================================================================
 

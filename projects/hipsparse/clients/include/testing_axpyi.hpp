@@ -83,7 +83,7 @@ void testing_axpyi(const Arguments& argus)
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     int                  N        = argus.N;
     int                  nnz      = argus.nnz;
-    T                    h_alpha  = make_DataType<T>(argus.alpha);
+    T                    h_alpha  = argus.get_alpha<T>();
     hipsparseIndexBase_t idx_base = argus.baseA;
 
     hipsparseLocalHandle_t handle(argus);
@@ -175,7 +175,7 @@ void testing_axpyi(const Arguments& argus)
         gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
 
         double gflop_count = axpyi_gflop_count(nnz);
-        double gbyte_count = axpby_gbyte_count<T>(nnz);
+        double gbyte_count = axpyi_gbyte_count<T>(nnz);
 
         double gpu_gbyte  = get_gpu_gbyte(gpu_time_used, gbyte_count);
         double gpu_gflops = get_gpu_gflops(gpu_time_used, gflop_count);

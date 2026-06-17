@@ -26,6 +26,8 @@
 #include <string_view>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
+
 namespace stinkytofu {
 /// Token kinds for the IR lexer (MLIR-style format).
 enum class TokenKind {
@@ -119,7 +121,7 @@ class Token {
 
 /// Lexer for the StinkyTofu IR text format.
 /// Converts the input text into a stream of tokens.
-class IRLexer {
+class STINKYTOFU_EXPORT IRLexer {
    private:
     const char* bufferStart;
     const char* bufferEnd;

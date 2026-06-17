@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (C) 2016 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+* Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -57,7 +57,7 @@ int main()
         throw std::runtime_error("hipMemcpy failed.");
 
     // Create plan
-    rocfft_plan plan   = NULL;
+    rocfft_plan plan   = nullptr;
     size_t      length = N;
     if(rocfft_plan_create(&plan,
                           rocfft_placement_inplace,
@@ -66,7 +66,7 @@ int main()
                           1,
                           &length,
                           1,
-                          NULL)
+                          nullptr)
        != rocfft_status_success)
         throw std::runtime_error("rocfft_plan_create failed.");
 
@@ -88,7 +88,7 @@ int main()
     }
 
     // Execute plan
-    if(rocfft_execute(plan, (void**)&x, NULL, info) != rocfft_status_success)
+    if(rocfft_execute(plan, (void**)&x, nullptr, info) != rocfft_status_success)
         throw std::runtime_error("rocfft_execute failed.");
     if(hipDeviceSynchronize() != hipSuccess)
         throw std::runtime_error("hipDeviceSynchronize failed.");

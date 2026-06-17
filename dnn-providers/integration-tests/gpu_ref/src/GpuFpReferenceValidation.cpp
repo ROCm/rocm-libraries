@@ -43,12 +43,6 @@ bool GpuFpReferenceValidation<T>::allClose(
         return true;
     }
 
-    // GPU kernel uses linear indexing — only valid for packed (contiguous) tensors.
-    if(!reference.isPacked() || !implementation.isPacked())
-    {
-        throw std::runtime_error("GPU validator requires packed (contiguous) tensors");
-    }
-
     return gpuAllClose(reference, implementation);
 }
 
@@ -81,6 +75,28 @@ bool GpuFpReferenceValidation<T>::gpuAllClose(
     args.totalElements = totalElements;
     args.absoluteTolerance = static_cast<double>(_absoluteTolerance);
     args.relativeTolerance = static_cast<double>(_relativeTolerance);
+
+    // Populate stride/dim fields for non-contiguous tensors.
+    // ndim == 0 (from zero-init) signals the packed fast path.
+    if(!reference.isPacked() || !implementation.isPacked())
+    {
+        const auto& refStrides = reference.strides();
+        const auto& implStrides = implementation.strides();
+        const auto& dims = reference.dims();
+        auto ndim = dims.size();
+        if(ndim > 8)
+        {
+            throw std::runtime_error("GPU validator supports up to 8 dimensions, got "
+                                     + std::to_string(ndim));
+        }
+        args.ndim = static_cast<int>(ndim);
+        for(size_t d = 0; d < ndim; ++d)
+        {
+            args.refStrides[d] = static_cast<long long>(refStrides[d]);
+            args.implStrides[d] = static_cast<long long>(implStrides[d]);
+            args.dims[d] = static_cast<long long>(dims[d]);
+        }
+    }
 
     detail::launchValidatorKernel(kernel.function(), totalElements, args);
 

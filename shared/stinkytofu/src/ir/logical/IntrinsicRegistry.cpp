@@ -110,9 +110,18 @@ std::vector<std::string> IntrinsicRegistry::getSearchPaths() {
     std::vector<std::string> paths;
 
     // 1. Environment variable override (highest priority)
+#ifdef _WIN32
+    char* envPath = nullptr;
+    size_t envLen = 0;
+    _dupenv_s(&envPath, &envLen, "STINKYTOFU_INTRINSICS_PATH");
+#else
     const char* envPath = std::getenv("STINKYTOFU_INTRINSICS_PATH");
+#endif
     if (envPath) {
         paths.push_back(envPath);
+#ifdef _WIN32
+        free(envPath);
+#endif
     }
 
     // 2. Relative to the loaded shared library (PRIMARY)

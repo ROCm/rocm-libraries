@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -46,8 +46,14 @@
 #include "hipblaslt_e8.h"
 #include "hipblaslt_e5m3.h"
 #include <float.h>
+#include <complex>
 
 // Generic API
+
+#ifdef __cplusplus
+typedef std::complex<float>  hipblaslt_complex_float;
+typedef std::complex<double> hipblaslt_complex_double;
+#endif
 
 #ifdef __cplusplus
 extern "C" {

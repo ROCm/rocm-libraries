@@ -2,10 +2,12 @@
 // SPDX-License-Identifier:  MIT
 
 #include "BackendEnumStringUtils.hpp"
+#include "FlatbufferUtilities.hpp"
 #include "Helpers.hpp"
 #include "HipdnnException.hpp"
 #include "descriptors/BackendDescriptor.hpp"
 #include "descriptors/DescriptorFactory.hpp"
+#include "descriptors/ExecutionPlanDescriptor.hpp"
 #include "descriptors/GraphDescriptor.hpp"
 #include "descriptors/VariantDescriptor.hpp"
 #include "handle/Handle.hpp"
@@ -13,12 +15,16 @@
 #include "hipdnn_backend.h"
 #include "logging/Logging.hpp"
 #include "plugin/EnginePluginResourceManager.hpp"
+#include "plugin/HeuristicPluginResourceManager.hpp"
 
 #include <hipdnn_backend/version.h>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/serialized_graph_and_plan_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/SerializedGraphContainer.hpp>
 #include <hipdnn_plugin_sdk/FunctionNameMacro.hpp>
 
 #include <cstring>
+#include <vector>
 
 using namespace hipdnn_backend;
 
@@ -242,8 +248,27 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeGraph_ext(
                   graphByteSize);
 
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
-        hipdnn_backend::DescriptorFactory::createGraphExt(
-            descriptor, serializedGraph, graphByteSize);
+        if(hipdnn_backend::flatbuffer_utilities::isGraphAndPlanContainer(serializedGraph,
+                                                                         graphByteSize))
+        {
+            const auto* container
+                = hipdnn_backend::flatbuffer_utilities::verifyAndGetGraphAndPlanContainer(
+                    serializedGraph, graphByteSize);
+            const auto* graphBlob = container->graph_blob();
+
+            // Reject a container with no graph, matching createGraphExt's
+            // zero-byte-size HIPDNN_STATUS_BAD_PARAM behavior.
+            THROW_IF_TRUE(graphBlob == nullptr || graphBlob->empty(),
+                          HIPDNN_STATUS_BAD_PARAM,
+                          "Serialized graph-and-plan container carries no graph.");
+            hipdnn_backend::DescriptorFactory::createGraphExt(
+                descriptor, graphBlob->data(), graphBlob->size());
+        }
+        else
+        {
+            hipdnn_backend::DescriptorFactory::createGraphExt(
+                descriptor, serializedGraph, graphByteSize);
+        }
 
         LOG_API_SUCCESS(apiName, "created_descriptor={}", logPtr(*descriptor));
     });
@@ -326,6 +351,170 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
         }
 
         LOG_API_SUCCESS(apiName, "graphByteSize={}", *graphByteSize);
+    });
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnBackendGetSerializedExecutionPlan_ext(hipdnnBackendDescriptor_t descriptor,
+                                                size_t requestedByteSize,
+                                                size_t* planByteSize,
+                                                uint8_t* serializedPlan)
+{
+    LOG_API_ENTRY("descriptor={}, requestedByteSize={}, planByteSize_ptr={:p}, "
+                  "serializedPlan_ptr={:p}",
+                  logPtr(descriptor),
+                  requestedByteSize,
+                  static_cast<void*>(planByteSize),
+                  static_cast<void*>(serializedPlan));
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__]() {
+        throwIfInvalidDescriptor(descriptor);
+
+        auto executionPlanDesc
+            = descriptor->asDescriptor<hipdnn_backend::ExecutionPlanDescriptor>();
+        executionPlanDesc->serializeBackendPlan(requestedByteSize, planByteSize, serializedPlan);
+
+        LOG_API_SUCCESS(apiName, "planByteSize={}", *planByteSize);
+    });
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetSerializedBinaryGraphAndPlan_ext(
+    hipdnnBackendDescriptor_t graphDescriptor,
+    hipdnnBackendDescriptor_t executionPlanDescriptor,
+    size_t requestedByteSize,
+    size_t* blobByteSize,
+    uint8_t* serializedBlob)
+{
+    LOG_API_ENTRY("graphDescriptor={}, executionPlanDescriptor={}, requestedByteSize={}, "
+                  "blobByteSize_ptr={:p}, serializedBlob_ptr={:p}",
+                  logPtr(graphDescriptor),
+                  logPtr(executionPlanDescriptor),
+                  requestedByteSize,
+                  static_cast<void*>(blobByteSize),
+                  static_cast<void*>(serializedBlob));
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__]() {
+        throwIfInvalidDescriptor(graphDescriptor);
+        throwIfNull(blobByteSize);
+
+        auto graphDesc = graphDescriptor->asDescriptor<hipdnn_backend::GraphDescriptor>();
+        graphDesc->buildSerializedGraph();
+        auto graphData = graphDesc->getSerializedGraph();
+
+        std::vector<uint8_t> planBytes;
+        if(executionPlanDescriptor != nullptr)
+        {
+            throwIfInvalidDescriptor(executionPlanDescriptor);
+            auto executionPlanDesc
+                = executionPlanDescriptor->asDescriptor<hipdnn_backend::ExecutionPlanDescriptor>();
+
+            size_t planSize = 0;
+            executionPlanDesc->serializeBackendPlan(0, &planSize, nullptr);
+            planBytes.resize(planSize);
+            executionPlanDesc->serializeBackendPlan(planSize, &planSize, planBytes.data());
+        }
+
+        const auto container
+            = hipdnn_flatbuffers_sdk::flatbuffer_utilities::buildGraphAndPlanContainer(
+                graphData.ptr, graphData.size, planBytes.data(), planBytes.size());
+
+        *blobByteSize = container.size();
+
+        if(serializedBlob != nullptr)
+        {
+            THROW_IF_LT(requestedByteSize,
+                        container.size(),
+                        HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT,
+                        "Requested buffer size (" + std::to_string(requestedByteSize)
+                            + ") is smaller than the serialized graph-and-plan size ("
+                            + std::to_string(container.size()) + ")");
+            std::memcpy(serializedBlob, container.data(), container.size());
+        }
+
+        LOG_API_SUCCESS(apiName, "blobByteSize={}", *blobByteSize);
+    });
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetSerializedBinaryContents_ext(
+    const uint8_t* serializedBlob, size_t blobByteSize, int* contentFlags)
+{
+    LOG_API_ENTRY("serializedBlob_ptr={:p}, blobByteSize={}, contentFlags_ptr={:p}",
+                  static_cast<const void*>(serializedBlob),
+                  blobByteSize,
+                  static_cast<void*>(contentFlags));
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__]() {
+        throwIfNull(serializedBlob);
+        throwIfNull(contentFlags);
+
+        *contentFlags = 0;
+
+        if(hipdnn_backend::flatbuffer_utilities::isGraphAndPlanContainer(serializedBlob,
+                                                                         blobByteSize))
+        {
+            const auto* container
+                = hipdnn_backend::flatbuffer_utilities::verifyAndGetGraphAndPlanContainer(
+                    serializedBlob, blobByteSize);
+
+            if(container->graph_blob() != nullptr && !container->graph_blob()->empty())
+            {
+                *contentFlags |= HIPDNN_SERIALIZED_CONTENT_GRAPH;
+            }
+            if(container->plan_blob() != nullptr && !container->plan_blob()->empty())
+            {
+                *contentFlags |= HIPDNN_SERIALIZED_CONTENT_EXECUTION_PLAN;
+            }
+        }
+        else
+        {
+            // No container identifier (or too short to be one): legacy bare-graph blob.
+            *contentFlags = HIPDNN_SERIALIZED_CONTENT_GRAPH;
+        }
+
+        LOG_API_SUCCESS(apiName, "contentFlags={}", *contentFlags);
+    });
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnBackendCreateAndDeserializeExecutionPlan_ext(hipdnnHandle_t handle,
+                                                       hipdnnBackendDescriptor_t* descriptor,
+                                                       const uint8_t* serializedPlan,
+                                                       size_t planByteSize)
+{
+    LOG_API_ENTRY("handle={}, descriptor_ptr={:p}, serializedPlan_ptr={:p}, planByteSize={}",
+                  logPtr(handle),
+                  static_cast<void*>(descriptor),
+                  static_cast<const void*>(serializedPlan),
+                  planByteSize);
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__]() {
+        throwIfNull(handle);
+        throwIfNull(descriptor);
+
+        const uint8_t* planData = serializedPlan;
+        size_t planDataSize = planByteSize;
+
+        if(hipdnn_backend::flatbuffer_utilities::isGraphAndPlanContainer(serializedPlan,
+                                                                         planByteSize))
+        {
+            const auto* container
+                = hipdnn_backend::flatbuffer_utilities::verifyAndGetGraphAndPlanContainer(
+                    serializedPlan, planByteSize);
+            const auto* planBlob = container->plan_blob();
+
+            THROW_IF_TRUE(planBlob == nullptr || planBlob->empty(),
+                          HIPDNN_STATUS_BAD_PARAM,
+                          "Serialized graph-and-plan container carries no execution plan.");
+            planData = planBlob->data();
+            planDataSize = planBlob->size();
+        }
+
+        auto executionPlanDesc = std::make_shared<hipdnn_backend::ExecutionPlanDescriptor>();
+        executionPlanDesc->deserializeBackendPlan(
+            handle->getPluginResourceManager(), planData, planDataSize);
+        *descriptor = HipdnnBackendDescriptor::packDescriptor(executionPlanDesc);
+
+        LOG_API_SUCCESS(apiName, "created_descriptor={}", logPtr(*descriptor));
     });
 }
 
@@ -430,13 +619,47 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
     });
 }
 
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetHeuristicPluginPaths_ext(
+    size_t numPaths, const char* const* pluginPaths, hipdnnPluginLoadingMode_ext_t loadingMode)
+{
+    LOG_API_ENTRY("numPaths={}, pluginPaths_ptr={:p}, loadingMode={}",
+                  numPaths,
+                  static_cast<const void*>(pluginPaths),
+                  loadingMode);
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__] {
+        if(numPaths > 0)
+        {
+            throwIfNull(pluginPaths);
+        }
+
+        std::vector<std::filesystem::path> pathsVec;
+        pathsVec.reserve(numPaths);
+
+        for(size_t i = 0; i < numPaths; ++i)
+        {
+            throwIfNull(pluginPaths[i]);
+            pathsVec.emplace_back(pluginPaths[i]);
+        }
+
+        hipdnn_backend::plugin::HeuristicPluginResourceManager::setPluginPaths(pathsVec,
+                                                                               loadingMode);
+        LOG_API_SUCCESS(apiName, "set_heuristic_plugin_paths={}", loadingMode);
+        return HIPDNN_STATUS_SUCCESS;
+    });
+}
+
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t
     hipdnnSetPluginUnloadMode_ext(hipdnnPluginUnloadingMode_ext_t unloadingMode)
 {
     LOG_API_ENTRY("unloadingMode={}", unloadingMode);
 
     return hipdnn_backend::tryCatch([&, apiName = __func__] {
+        // Apply to both plugin resource managers so the public ABI behaves
+        // uniformly regardless of plugin kind.
         hipdnn_backend::plugin::EnginePluginResourceManager::setPluginUnloadingMode(unloadingMode);
+        hipdnn_backend::plugin::HeuristicPluginResourceManager::setPluginUnloadingMode(
+            unloadingMode);
         LOG_API_SUCCESS(apiName, "set_plugin_unloading_mode={}", unloadingMode);
         return HIPDNN_STATUS_SUCCESS;
     });
@@ -601,6 +824,116 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t hand
                         info.pluginName,
                         info.version,
                         info.type);
+    });
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetHeuristicPolicyCount_ext(hipdnnHandle_t handle,
+                                                                       size_t* numPolicies)
+{
+    LOG_API_ENTRY("handle={:p}, numPolicies_ptr={:p}",
+                  static_cast<void*>(handle),
+                  static_cast<void*>(numPolicies));
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__] {
+        throwIfNull(handle);
+        throwIfNull(numPolicies);
+
+        auto policyInfos = handle->getHeuristicPluginResourceManager()->getHeuristicPolicyInfos();
+        *numPolicies = policyInfos.size();
+
+        LOG_API_SUCCESS(apiName, "retrieved_numPolicies={}", *numPolicies);
+    });
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetHeuristicPolicyInfo_ext(hipdnnHandle_t handle,
+                                                                      size_t policyIndex,
+                                                                      int64_t* policyId,
+                                                                      char* policyName,
+                                                                      size_t* policyNameLen,
+                                                                      char* pluginName,
+                                                                      size_t* pluginNameLen,
+                                                                      char* pluginVersion,
+                                                                      size_t* pluginVersionLen,
+                                                                      char* apiVersion,
+                                                                      size_t* apiVersionLen)
+{
+    LOG_API_ENTRY("handle={:p}, policyIndex={}, policyId_ptr={:p}, policyName_ptr={:p}, "
+                  "pluginName_ptr={:p}, pluginVersion_ptr={:p}, apiVersion_ptr={:p}",
+                  static_cast<void*>(handle),
+                  policyIndex,
+                  static_cast<void*>(policyId),
+                  static_cast<void*>(policyName),
+                  static_cast<void*>(pluginName),
+                  static_cast<void*>(pluginVersion),
+                  static_cast<void*>(apiVersion));
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__] {
+        throwIfNull(handle);
+        throwIfNull(policyNameLen);
+        throwIfNull(pluginNameLen);
+        throwIfNull(pluginVersionLen);
+        throwIfNull(apiVersionLen);
+
+        // Built from an unordered_map; ordering is unspecified and may change
+        // between calls. If a stable enumeration is ever required, an explicit
+        // ordering must be applied here rather than relied on from the source map.
+        auto policyInfos = handle->getHeuristicPluginResourceManager()->getHeuristicPolicyInfos();
+        if(policyIndex >= policyInfos.size())
+        {
+            throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                                  "Policy index " + std::to_string(policyIndex) + " out of range ("
+                                      + std::to_string(policyInfos.size()) + " policies loaded).");
+        }
+
+        const auto& info = policyInfos[policyIndex];
+
+        if(policyId != nullptr)
+        {
+            *policyId = info.policyId;
+        }
+
+        const size_t requiredPolicyNameLen = info.policyName.size() + 1;
+        const size_t requiredPluginNameLen = info.pluginName.size() + 1;
+        const size_t requiredPluginVersionLen = info.pluginVersion.size() + 1;
+        const size_t requiredApiVersionLen = info.apiVersion.size() + 1;
+
+        // Query mode: return required sizes
+        if(policyName == nullptr || pluginName == nullptr || pluginVersion == nullptr
+           || apiVersion == nullptr)
+        {
+            *policyNameLen = requiredPolicyNameLen;
+            *pluginNameLen = requiredPluginNameLen;
+            *pluginVersionLen = requiredPluginVersionLen;
+            *apiVersionLen = requiredApiVersionLen;
+            return;
+        }
+
+        // Retrieve mode: check buffer sizes
+        if(*policyNameLen < requiredPolicyNameLen || *pluginNameLen < requiredPluginNameLen
+           || *pluginVersionLen < requiredPluginVersionLen
+           || *apiVersionLen < requiredApiVersionLen)
+        {
+            throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Insufficient buffer space provided.");
+        }
+
+        hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
+            policyName, info.policyName.c_str(), *policyNameLen);
+        hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
+            pluginName, info.pluginName.c_str(), *pluginNameLen);
+        hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
+            pluginVersion, info.pluginVersion.c_str(), *pluginVersionLen);
+        hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
+            apiVersion, info.apiVersion.c_str(), *apiVersionLen);
+
+        LOG_API_SUCCESS(apiName,
+                        "policy[{}]: policyId={}, policyName={}, pluginName={}, "
+                        "pluginVersion={}, apiVersion={}",
+                        policyIndex,
+                        info.policyId,
+                        info.policyName,
+                        info.pluginName,
+                        info.pluginVersion,
+                        info.apiVersion);
     });
 }
 

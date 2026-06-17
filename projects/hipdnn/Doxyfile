@@ -952,6 +952,7 @@ WARN_LOGFILE           =
 INPUT                  = ./frontend/include \
                          ./backend/include \
                          ./data_sdk/include \
+                         ./flatbuffers_sdk/include \
                          ./samples
 
 # This tag can be used to specify the character encoding of the source files
@@ -1058,7 +1059,7 @@ RECURSIVE              = YES
 
 EXCLUDE                = ./frontend/include/hipdnn_frontend/detail \
                          ./frontend/include/hipdnn_frontend/node/detail \
-                         ./data_sdk/include/hipdnn_data_sdk/utilities/json/Graph.hpp
+                         ./flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp
 
 # The EXCLUDE_SYMLINKS tag can be used to select whether or not files or
 # directories that are symbolic links (a Unix file system feature) are excluded

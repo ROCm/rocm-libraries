@@ -313,7 +313,7 @@ void batchNormSpatialHostBwdTrain(const tensor<XDataType>& x_input,
     if(activ_mode > 0)
     {
         tensor<AccDataType> input_norm =
-            tensor<AccDataType>{x_input.desc.GetLayout_t(), x_input.desc.GetLengths()};
+            tensor<AccDataType>{x_input.desc.GetLayoutEnum().value(), x_input.desc.GetLengths()};
         miopen::par_for(channels, 1, [&](int cidx) {
             double mean           = 0.0;
             double invVar         = 0.0;

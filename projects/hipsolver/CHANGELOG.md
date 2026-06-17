@@ -6,15 +6,6 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 ## (Unreleased) hipSOLVER
 
 ### Added
-
-* Added compatibility-only functions:
-  * syevBatched
-    * hipsolverDnXsyevBatched_bufferSize
-    * hipsolverDnXsyevBatched
-  * syevd
-    * hipsolverDnXsyevd_bufferSize
-    * hipsolverDnXsyevd
-
 ### Changed
 ### Removed
 ### Optimized
@@ -22,6 +13,31 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 ### Known issues
 ### Upcoming changes
 
+
+## hipSOLVER 3.4.0 for ROCm 7.13.0
+
+### Added
+
+* Added compatibility-only functions
+  * geev
+    * hipsolverDnXgeev_bufferSize
+    * hipsolverDnXgeev
+  * syevBatched
+    * hipsolverDnXsyevBatched_bufferSize
+    * hipsolverDnXsyevBatched
+  * syevd
+    * hipsolverDnXsyevd_bufferSize
+    * hipsolverDnXsyevd
+  * sytrs
+    * hipsolverDnXsytrs_bufferSize
+    * hipsolverDnXsytrs
+
+
+## hipSOLVER 3.3.0 for ROCm 7.12.0
+
+### Changed
+
+* Minor internal changes
 
 
 ## hipSOLVER 3.2.0 for ROCm 7.2.0

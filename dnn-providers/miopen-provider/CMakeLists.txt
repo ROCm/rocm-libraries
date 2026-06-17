@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.25.2)
 message(STATUS "Building miopen provider plugin standalone")
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 
-set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ClangToolChain.cmake"
     CACHE STRING "Toolchain file"
 )
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -43,8 +43,8 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${ROCM_PATH}/lib/cmake/hip
-     ${HIP_DIR}/cmake
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
+     ${CMAKE_CURRENT_SOURCE_DIR}/../cmake ${ROCM_PATH}/lib/cmake/hip ${HIP_DIR}/cmake
 )
 
 # Migrate HIP_DNN_SKIP_TESTS -> MIOPENPROVIDER_SKIP_TESTS
@@ -97,6 +97,16 @@ list(
     -Wswitch-default # Warn if a switch statement does not have a default case
 )
 
+if(WIN32)
+    # AMD clang reports `__declspec(dllimport)` as "not supported" on the
+    # x86_64-pc-windows-msvc target, even though the attribute is honored
+    # (verified via llvm-readobj --coff-exports on MIOpen.dll). This produces
+    # ~150k spurious warnings from the CMake-generated MIOPEN_EXPORT and
+    # MIOPEN_INTERNALS_EXPORT macros. Suppress until the compiler issue is
+    # resolved upstream.
+    list(PREPEND MIOPENPROVIDER_WARNING_COMPILE_OPTIONS -Wno-ignored-attributes)
+endif()
+
 # NOTE: Workaround until llvm & hip cmake modules fixes symlink logic in their config files;
 # remove when fixed. Added to prevent issues with not finding hip cmake.
 list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
@@ -121,6 +131,9 @@ include(ClangTidy)
 include(Sanitizers)
 
 include(Dependencies)
+if(NOT MIOPENPROVIDER_SKIP_TESTS)
+    fetch_gtest_dependency()
+endif()
 include(Tests)
 
 if(MIOPENPROVIDER_ENABLE_COVERAGE)
@@ -143,12 +156,30 @@ message(STATUS "Plugin build directory: ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}")
 message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
 file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
-find_package(miopen CONFIG REQUIRED)
+# When this provider is built standalone or against an installed MIOpen, locate
+# the package on disk. When built as part of a superbuild that also includes
+# projects/miopen as a sibling component, the MIOpen target is already in the
+# build graph and find_package would either fail or pull in a stale installed
+# copy.
+if(NOT TARGET MIOpen)
+    find_package(miopen CONFIG REQUIRED)
+endif()
+
+# Treat MIOpen headers as system headers so neither the compiler nor
+# clang-tidy emits diagnostics for code we do not own. MIOpen's exported
+# CMake package (both in-tree and the installed miopen-targets.cmake)
+# does not mark its include dirs SYSTEM, so we promote them here.
+# Requires CMake 3.25+ (SYSTEM target property); enforced by
+# cmake_minimum_required above.
+set_target_properties(MIOpen PROPERTIES SYSTEM TRUE)
 
 add_library(
     miopen_plugin_impl OBJECT
     engines/MiopenEngine.cpp
     engines/plans/MiopenBatchnormApplicabilityChecks.cpp
+    engines/plans/MiopenReluApplicabilityChecks.cpp
+    engines/plans/MiopenReluPlan.cpp
+    engines/plans/MiopenReluPlanBuilder.cpp
     engines/plans/MiopenBatchnormPlanBuilder.cpp
     engines/plans/MiopenBatchnormBwdPlan.cpp
     engines/plans/MiopenBatchnormFwdInferencePlan.cpp
@@ -169,6 +200,7 @@ add_library(
     MiopenTensor.cpp
     MiopenPluginPublic.cpp
 )
+
 target_include_directories(miopen_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(miopen_plugin_impl PUBLIC MIOpen hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
 
@@ -179,6 +211,13 @@ set_target_properties(miopen_plugin_impl PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
+# These sources only call MIOpen's host C API, but linking MIOpen pulls in
+# hip::device's `-x hip --offload-arch=...` interface flags, so each TU is
+# parsed as HIP. clang-tidy resolves to the system clang-tidy (the ROCm one
+# reports an unsupported version), which lacks ROCm's device-library bitcode
+# and errors with "cannot find ROCm device library". The objects are host-only
+# (no kernels, no embedded device code), so tell tidy to skip the device path.
+list(APPEND CLANG_TIDY_EXTRA_ARGS --extra-arg=-nogpulib)
 clang_tidy_check(miopen_plugin_impl)
 
 # Static library for unit tests to link against (provides access to internal implementation)
@@ -195,13 +234,17 @@ if(NOT WIN32)
 endif()
 
 target_compile_options(miopen_plugin PRIVATE ${MIOPENPROVIDER_WARNING_COMPILE_OPTIONS})
+
+# INSTALL_RPATH applies to the installed plugin only (plain `cmake --install`
+# to ${ROCM_PATH}). It is NOT used by TheRock, which overwrites INSTALL_RPATH
+# with $ORIGIN-relative paths via its global post-subproject hook.
 set_target_properties(
     miopen_plugin
     PROPERTIES CXX_VISIBILITY_PRESET hidden
                LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
                RUNTIME_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
                ARCHIVE_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
-               INSTALL_RPATH "${ROCM_PATH}/lib"
+               INSTALL_RPATH "\$ORIGIN/../.."
                INSTALL_RPATH_USE_LINK_PATH TRUE
                BUILD_WITH_INSTALL_RPATH TRUE
 )
@@ -222,11 +265,10 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
     # Finalize test targets with prefix to avoid collisions in superbuild mode
     # Keep this after all build folders have been added so they have a chance to register their tests
     # using add_*_test_target()
-    finalize_test_targets("${PROJECT_NAME}")
-
-    # For standalone builds we need to install the ctest files
-    if(NOT ROCM_LIBS_SUPERBUILD)
-        install_miopen_plugin_ctest_files()
+    if(MIOPENPROVIDER_ENABLE_COVERAGE)
+        finalize_test_targets("${PROJECT_NAME}" ENABLE_COVERAGE)
+    else()
+        finalize_test_targets("${PROJECT_NAME}")
     endif()
 
     if(NOT TARGET hipdnn_integration_tests)
@@ -235,17 +277,22 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
 
     if(TARGET hipdnn_integration_tests)
         add_external_integration_test_target(
-            TARGET_NAME   ${PROJECT_NAME}-external-integration-check
-            PLUGIN_TARGET miopen_plugin
-            ENGINE_NAME   MIOPEN_ENGINE
-            TEST_CONFIG   ${CMAKE_CURRENT_SOURCE_DIR}/config/MIOPEN_ENGINE.toml
-            GTEST_FILTER
-                *IsSupported*
-                *ConvFwd*
+            TARGET_NAME    ${PROJECT_NAME}-external-integration-check
+            PLUGIN_TARGET  miopen_plugin
+            ENGINE_NAME    MIOPEN_ENGINE
+            INSTALL_SUBDIR miopen_plugin
+            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/config/MIOPEN_ENGINE.toml
         )
         message(STATUS "Created ${PROJECT_NAME}-external-integration-check target")
     else()
         message(STATUS "hipdnn_integration_tests not found - skipping external-integration-check")
+    endif()
+
+    # For standalone builds we need to install the ctest files. Must run
+    # AFTER add_external_integration_test_target so the staged install-tree
+    # snippet for the cross-provider test is included.
+    if(NOT ROCM_LIBS_SUPERBUILD)
+        install_provider_ctest_files("miopen_plugin")
     endif()
 endif()
 

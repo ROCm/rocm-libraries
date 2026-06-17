@@ -281,4 +281,431 @@ float calculateBatchnormInvVarianceTolerance(double xMin,
     return static_cast<float>(tolerance);
 }
 
+/**
+ * @brief Calculates expected tolerance for Batch Norm Inference operations
+ *        using pre-computed invVariance.
+ *
+ * BN Inference: y = scale * (x - mean) * invVariance + bias
+ *
+ * Unlike conv/matmul/RMSNorm or BN training, this is a per-element operation with
+ * no accumulation or reduction. Error propagates through a fixed chain of elementary
+ * floating-point operations. The computeGamma() framework is not used.
+ *
+ * Error model (absolute, first-order):
+ *   Let P = max(|x - mean|) * max(|invVar|) * max(|scale|).
+ *   Chain error (sub, 2x mul):  3u * P
+ *   Bias addition error:        u * (P + max(|bias|))
+ *   Total:                      4u * P + u * max(|bias|)
+ *
+ * Uses shared helpers from DynamicTolerancesCommon.hpp:
+ * validateComputeType(), computeInputCastingError(), computeOutputCastingError(),
+ * validateToleranceRange().
+ *
+ * @tparam OutputType  Data type of y output tensor
+ * @tparam InputType   Data type of x input tensor
+ * @tparam ComputeType Data type for intermediate computation (default: float)
+ * @param xMin            Minimum value in input tensor x
+ * @param xMax            Maximum value in input tensor x
+ * @param meanMin         Minimum value in mean tensor
+ * @param meanMax         Maximum value in mean tensor
+ * @param invVarianceMin  Minimum value in invVariance tensor
+ * @param invVarianceMax  Maximum value in invVariance tensor
+ * @param scaleMin        Minimum value in scale tensor
+ * @param scaleMax        Maximum value in scale tensor
+ * @param biasMin         Minimum value in bias tensor
+ * @param biasMax         Maximum value in bias tensor
+ * @return Calculated tolerance value as float
+ *
+ * Known Limitations:
+ * - Black-box: does not use kernel implementation details
+ * - Conservative bound using triangle inequality for |x - mean|
+ * - No per-element tolerance (uses global max over all channels)
+ * - Does not account for FMA instructions (assumes separate mul+add)
+ * - Pre-computed statistics (mean, invVariance) treated as exact inputs;
+ *   any training-time error in these parameters is out of scope
+ */
+template <typename OutputType, typename InputType, typename ComputeType = float>
+float calculateBatchnormInferenceTolerance(double xMin,
+                                           double xMax,
+                                           double meanMin,
+                                           double meanMax,
+                                           double invVarianceMin,
+                                           double invVarianceMax,
+                                           double scaleMin,
+                                           double scaleMax,
+                                           double biasMin,
+                                           double biasMax)
+{
+    validateComputeType<ComputeType>();
+
+    const double maxAbsX = std::max(std::abs(xMin), std::abs(xMax));
+    const double maxAbsMean = std::max(std::abs(meanMin), std::abs(meanMax));
+    const double maxAbsInvVar = std::max(std::abs(invVarianceMin), std::abs(invVarianceMax));
+    const double maxAbsScale = std::max(std::abs(scaleMin), std::abs(scaleMax));
+    const double maxAbsBias = std::max(std::abs(biasMin), std::abs(biasMax));
+
+    // max(|x - mean|) <= max(|x|) + max(|mean|) (triangle inequality)
+    const double maxAbsDiff = maxAbsX + maxAbsMean;
+
+    const auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
+
+    // Main product magnitude: (x - mean) * invVar * scale
+    const double mainProduct = maxAbsDiff * maxAbsInvVar * maxAbsScale;
+
+    // Chain of 3 elementary ops (sub, mul(invVar), mul(scale)):
+    // relative error <= 3u, absolute error <= 3u * P
+    constexpr double CHAIN_OPS = 3.0;
+    const double mainTolerance = CHAIN_OPS * epsilon * mainProduct;
+
+    // Bias addition: fl(t3 + bias) = (t3 + bias)(1 + d), |d| <= u
+    // Absolute error: u * (|t3| + |bias|) = u * (P + B)
+    const double biasTolerance = epsilon * (mainProduct + maxAbsBias);
+
+    double totalTolerance = mainTolerance + biasTolerance;
+
+    // Input casting error (shared helper).
+    // BN inference casts one input tensor x per output element (numDistinctInputs=1).
+    totalTolerance += computeInputCastingError<InputType, ComputeType>(mainProduct, 1);
+
+    // Output casting error (shared helper).
+    const double maxOutputMagnitude = mainProduct + maxAbsBias;
+    totalTolerance += computeOutputCastingError<OutputType, ComputeType>(maxOutputMagnitude);
+
+    validateToleranceRange<OutputType>(totalTolerance);
+
+    return static_cast<float>(totalTolerance);
+}
+
+/**
+ * @brief Calculates expected tolerance for Batch Norm Inference operations
+ *        using raw variance (computes invVariance = 1/sqrt(var + eps) internally).
+ *
+ * Same error model as the pre-computed invVariance variant, but with 3 additional
+ * elementary operations for the invVariance computation (add epsilon, sqrt, reciprocal),
+ * bringing the total chain to 6 operations.
+ *
+ * Error model (absolute, first-order):
+ *   Let P = max(|x - mean|) * max(|invVar|) * max(|scale|).
+ *   Chain error (6 ops):   6u * P
+ *   Bias addition error:   u * (P + max(|bias|))
+ *   Total:                 7u * P + u * max(|bias|)
+ *
+ * @tparam OutputType  Data type of y output tensor
+ * @tparam InputType   Data type of x input tensor
+ * @tparam ComputeType Data type for intermediate computation (default: float)
+ * @param xMin            Minimum value in input tensor x
+ * @param xMax            Maximum value in input tensor x
+ * @param meanMin         Minimum value in mean tensor
+ * @param meanMax         Maximum value in mean tensor
+ * @param varianceMax     Maximum value in variance tensor (unused — bound depends only on varianceMin)
+ * @param varianceMax     Maximum value in variance tensor
+ * @param scaleMin        Minimum value in scale tensor
+ * @param scaleMax        Maximum value in scale tensor
+ * @param biasMin         Minimum value in bias tensor
+ * @param biasMax         Maximum value in bias tensor
+ * @param epsilonBn       Epsilon used in 1/sqrt(var + eps)
+ * @return Calculated tolerance value as float
+ */
+template <typename OutputType, typename InputType, typename ComputeType = float>
+float calculateBatchnormInferenceWithVarianceTolerance(double xMin,
+                                                       double xMax,
+                                                       double meanMin,
+                                                       double meanMax,
+                                                       double varianceMin,
+                                                       double varianceMax,
+                                                       double scaleMin,
+                                                       double scaleMax,
+                                                       double biasMin,
+                                                       double biasMax,
+                                                       double epsilonBn)
+{
+    validateComputeType<ComputeType>();
+
+    if(epsilonBn <= 0.0)
+    {
+        throw std::invalid_argument("epsilonBn must be positive.");
+    }
+
+    if(varianceMin < 0.0)
+    {
+        throw std::invalid_argument("varianceMin must be non-negative.");
+    }
+
+    const double maxAbsX = std::max(std::abs(xMin), std::abs(xMax));
+    const double maxAbsMean = std::max(std::abs(meanMin), std::abs(meanMax));
+    const double maxAbsScale = std::max(std::abs(scaleMin), std::abs(scaleMax));
+    const double maxAbsBias = std::max(std::abs(biasMin), std::abs(biasMax));
+    const double maxAbsDiff = maxAbsX + maxAbsMean;
+
+    // varianceMax is not used: the bound only needs varianceMin to derive the
+    // worst-case (largest) invVariance = 1/sqrt(smallestVariance + epsilonBn).
+    (void)varianceMax;
+
+    const auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
+
+    // Derive max(|invVariance|) from variance range.
+    // invVariance = 1/sqrt(variance + epsilonBn)
+    // Largest when variance is smallest non-negative value.
+    const double smallestVariance = varianceMin;
+
+    const double maxAbsInvVar = 1.0 / std::sqrt(smallestVariance + epsilonBn);
+    const double mainProduct = maxAbsDiff * maxAbsInvVar * maxAbsScale;
+
+    // 6 elementary ops in the chain: 3 for invVariance (add eps, sqrt, reciprocal)
+    // + 3 for normalize (sub, 2x mul)
+    constexpr double CHAIN_OPS_WITH_VARIANCE = 6.0;
+    const double mainTolerance = CHAIN_OPS_WITH_VARIANCE * epsilon * mainProduct;
+
+    // Bias addition: u * (|t3| + |bias|)
+    const double biasTolerance = epsilon * (mainProduct + maxAbsBias);
+
+    double totalTolerance = mainTolerance + biasTolerance;
+
+    totalTolerance += computeInputCastingError<InputType, ComputeType>(mainProduct, 1);
+
+    const double maxOutputMagnitude = mainProduct + maxAbsBias;
+    totalTolerance += computeOutputCastingError<OutputType, ComputeType>(maxOutputMagnitude);
+
+    validateToleranceRange<OutputType>(totalTolerance);
+
+    return static_cast<float>(totalTolerance);
+}
+
+/**
+ * @brief Calculates expected tolerance for Batch Norm Backward dbias output.
+ *
+ * dbias[c] = sum_{n,h,w} dy — pure summation of NHW terms.
+ *
+ * Error sources:
+ * 1. Summation of NHW terms: gamma_NHW * max|dy| (Higham bound)
+ * 2. Input casting: per-element cast of dy before accumulation
+ * 3. Output casting: final downcast of accumulated result
+ *
+ * No division by NHW (unlike mean), no variance computation.
+ *
+ * @tparam OutputType  Data type of dbias output tensor
+ * @tparam InputType   Data type of dy input tensor
+ * @tparam ComputeType Data type for intermediate computation (default: float)
+ * @param dyMin                Minimum value in gradient tensor dy
+ * @param dyMax                Maximum value in gradient tensor dy
+ * @param nElementsPerChannel  Number of elements per channel: N * H * W
+ * @return Calculated tolerance value as float
+ */
+template <typename OutputType, typename InputType, typename ComputeType = float>
+float calculateBatchnormBackwardDbiasTolerance(double dyMin,
+                                               double dyMax,
+                                               int64_t nElementsPerChannel)
+{
+    validateComputeType<ComputeType>();
+
+    if(nElementsPerChannel < 1)
+    {
+        throw std::invalid_argument("nElementsPerChannel must be at least 1.");
+    }
+
+    const double maxAbsDy = std::max(std::abs(dyMin), std::abs(dyMax));
+    const auto nhw = static_cast<uint64_t>(nElementsPerChannel);
+    const auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
+
+    const double gammaNHW = computeGamma(nhw, epsilon);
+    validateGamma(gammaNHW);
+
+    // dbias = sum dy: Higham accumulation bound
+    const double signalBound = static_cast<double>(nhw) * maxAbsDy;
+    double tolerance = gammaNHW * maxAbsDy;
+
+    // Input casting error (single tensor, factor 1).
+    tolerance += computeInputCastingError<InputType, ComputeType>(signalBound, 1);
+
+    // Output casting error: max output magnitude ~ NHW * max|dy|.
+    tolerance += computeOutputCastingError<OutputType, ComputeType>(signalBound);
+
+    validateToleranceRange<OutputType>(tolerance);
+
+    return static_cast<float>(tolerance);
+}
+
+/**
+ * @brief Calculates expected tolerance for Batch Norm Backward dscale output.
+ *
+ * dscale[c] = sum_{n,h,w}(xHat * dy) — dot-product accumulation.
+ *
+ * Error sources:
+ * 1. Per-element product rounding: fl(xHat_i * dy_i), adding u per term
+ * 2. Summation of NHW products: (gamma_NHW + u) * maxAbsXHat * max|dy|
+ * 3. Input casting: per-element cast of inputs
+ * 4. Output casting: final downcast of accumulated result
+ *
+ * @tparam OutputType  Data type of dscale output tensor
+ * @tparam InputType   Data type of x/dy input tensors
+ * @tparam ComputeType Data type for intermediate computation (default: float)
+ * @param dyMin                Minimum value in gradient tensor dy
+ * @param dyMax                Maximum value in gradient tensor dy
+ * @param xMin                 Minimum value in input tensor x
+ * @param xMax                 Maximum value in input tensor x
+ * @param nElementsPerChannel  Number of elements per channel: N * H * W
+ * @param epsilonBn            Batch norm epsilon (added to variance before sqrt)
+ * @return Calculated tolerance value as float
+ */
+template <typename OutputType, typename InputType, typename ComputeType = float>
+float calculateBatchnormBackwardDscaleTolerance(double dyMin,
+                                                double dyMax,
+                                                double xMin,
+                                                double xMax,
+                                                int64_t nElementsPerChannel,
+                                                double epsilonBn = 1e-5)
+{
+    validateComputeType<ComputeType>();
+
+    if(nElementsPerChannel < 1)
+    {
+        throw std::invalid_argument("nElementsPerChannel must be at least 1.");
+    }
+
+    if(epsilonBn <= 0.0)
+    {
+        throw std::invalid_argument("epsilonBn must be positive.");
+    }
+
+    const double maxAbsDy = std::max(std::abs(dyMin), std::abs(dyMax));
+    const double maxAbsX = std::max(std::abs(xMin), std::abs(xMax));
+    const auto nhw = static_cast<uint64_t>(nElementsPerChannel);
+    const auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
+
+    const double gammaNHW = computeGamma(nhw, epsilon);
+    validateGamma(gammaNHW);
+
+    if(maxAbsDy == 0.0)
+    {
+        return 0.0f;
+    }
+
+    // Estimate xHat magnitude: xHat = (x - mean) * invVar
+    const double varEstimate = std::max(maxAbsX * maxAbsX, epsilonBn);
+    const double invVarEstimate = 1.0 / std::sqrt(varEstimate + epsilonBn);
+    const double maxAbsXHat = maxAbsX * invVarEstimate;
+
+    // dscale = sum(xHat * dy)
+    // Accumulation: (gamma + u) * maxAbsXHat * max|dy|
+    //   The +u accounts for per-element product rounding fl(xHat_i * dy_i)
+    const double signalBound = static_cast<double>(nhw) * maxAbsXHat * maxAbsDy;
+    double tolerance = (gammaNHW + epsilon) * maxAbsXHat * maxAbsDy;
+
+    // Input casting error (two operands xHat and dy, factor 2).
+    tolerance += computeInputCastingError<InputType, ComputeType>(signalBound, 2);
+
+    // Output casting error.
+    tolerance += computeOutputCastingError<OutputType, ComputeType>(signalBound);
+
+    validateToleranceRange<OutputType>(tolerance);
+
+    return static_cast<float>(tolerance);
+}
+
+/**
+ * @brief Calculates expected tolerance for Batch Norm Backward dx output.
+ *
+ * dx = scale * invVar * (dy - meanDy - xHat * meanDyXhat)
+ *
+ * Error sources:
+ * 1. meanDy accumulation: (gamma_NHW + u) * max|dy|
+ * 2. meanDyXhat accumulation: (gamma_NHW + 2u) * maxAbsXHat * max|dy|
+ * 3. Element-wise ops (sub, mul, sub): 3 * u * maxAbsE
+ * 4. Scalar multiplications (scale, invVar): 2 * u * scalarCoef * maxAbsE
+ * 5. Input casting: per-element cast of inputs
+ * 6. Output casting: final downcast
+ *
+ * @tparam OutputType  Data type of dx output tensor
+ * @tparam InputType   Data type of x/dy input tensors
+ * @tparam ComputeType Data type for intermediate computation (default: float)
+ * @param dyMin                Minimum value in gradient tensor dy
+ * @param dyMax                Maximum value in gradient tensor dy
+ * @param xMin                 Minimum value in input tensor x
+ * @param xMax                 Maximum value in input tensor x
+ * @param scaleMin             Minimum value in scale tensor
+ * @param scaleMax             Maximum value in scale tensor
+ * @param nElementsPerChannel  Number of elements per channel: N * H * W
+ * @param epsilonBn            Batch norm epsilon (added to variance before sqrt)
+ * @return Calculated tolerance value as float
+ */
+template <typename OutputType, typename InputType, typename ComputeType = float>
+float calculateBatchnormBackwardDxTolerance(double dyMin,
+                                            double dyMax,
+                                            double xMin,
+                                            double xMax,
+                                            double scaleMin,
+                                            double scaleMax,
+                                            int64_t nElementsPerChannel,
+                                            double epsilonBn = 1e-5)
+{
+    validateComputeType<ComputeType>();
+
+    if(nElementsPerChannel < 1)
+    {
+        throw std::invalid_argument("nElementsPerChannel must be at least 1.");
+    }
+
+    if(epsilonBn <= 0.0)
+    {
+        throw std::invalid_argument("epsilonBn must be positive.");
+    }
+
+    const double maxAbsDy = std::max(std::abs(dyMin), std::abs(dyMax));
+    const double maxAbsX = std::max(std::abs(xMin), std::abs(xMax));
+    const double maxAbsScale = std::max(std::abs(scaleMin), std::abs(scaleMax));
+    const auto nhw = static_cast<uint64_t>(nElementsPerChannel);
+    const auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
+
+    const double gammaNHW = computeGamma(nhw, epsilon);
+    validateGamma(gammaNHW);
+
+    if(maxAbsDy == 0.0)
+    {
+        return 0.0f;
+    }
+
+    // Estimate xHat magnitude
+    const double varEstimate = std::max(maxAbsX * maxAbsX, epsilonBn);
+    const double invVarEstimate = 1.0 / std::sqrt(varEstimate + epsilonBn);
+    const double maxAbsXHat = maxAbsX * invVarEstimate;
+
+    // scalarCoef = |scale| * invVar
+    const double scalarCoef = maxAbsScale * invVarEstimate;
+
+    // Accumulation errors for the two reductions
+    const double deltaMeanDy = (gammaNHW + epsilon) * maxAbsDy;
+    const double deltaMeanDyXhat = (gammaNHW + 2.0 * epsilon) * maxAbsXHat * maxAbsDy;
+
+    // Max element magnitude: |E| = |dy - meanDy - xHat * meanDyXhat|
+    //   <= |dy| + |meanDy| + |xHat * meanDyXhat|
+    //   <= max|dy| + max|dy| + maxAbsXHat^2 * max|dy|
+    //   = (2 + maxAbsXHat^2) * max|dy|
+    const double maxAbsE = (2.0 + maxAbsXHat * maxAbsXHat) * maxAbsDy;
+
+    // Element-wise ops in the parenthesized expression: sub, mul, sub = 3
+    constexpr double ELEM_OPS = 3.0;
+    // Scalar multiplications: mul(scale), mul(invVar) = 2
+    constexpr double SCALE_OPS = 2.0;
+
+    // Total tolerance:
+    //   scalarCoef * (deltaMeanDy + maxAbsXHat * deltaMeanDyXhat + ELEM_OPS * u * maxAbsE)
+    //   + SCALE_OPS * u * scalarCoef * maxAbsE
+    double tolerance
+        = scalarCoef * (deltaMeanDy + maxAbsXHat * deltaMeanDyXhat + ELEM_OPS * epsilon * maxAbsE)
+          + SCALE_OPS * epsilon * scalarCoef * maxAbsE;
+
+    // maxAbsDx for casting bounds
+    const double maxAbsDx = scalarCoef * maxAbsE;
+
+    // Input casting error (two inputs: dy and x, factor 2).
+    tolerance += computeInputCastingError<InputType, ComputeType>(maxAbsDx, 2);
+
+    // Output casting error.
+    tolerance += computeOutputCastingError<OutputType, ComputeType>(maxAbsDx);
+
+    validateToleranceRange<OutputType>(tolerance);
+
+    return static_cast<float>(tolerance);
+}
+
 } // namespace hipdnn_test_sdk::utilities::batchnorm

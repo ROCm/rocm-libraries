@@ -52,7 +52,11 @@ namespace hipdnn_frontend::detail
     std::vector<int64_t> {{ df.camel_name }};
     HIPDNN_CHECK_ERROR(getDescriptorAttrVec(
         opDesc, {{ df.attr_name }}, {{ df.camel_name }}, "{{ op.effective_error_label }} {{ df.name }}"));
+{% if df.frontend_uses_member_access %}
+    attributes.{{ df.frontend_member_name }} = std::move({{ df.camel_name }});
+{% else %}
     attributes.{{ df.frontend_setter_name }}(std::move({{ df.camel_name }}));
+{% endif %}
 
 {% elif df.is_mode %}
     // Unpack {{ df.name }}
@@ -67,7 +71,11 @@ namespace hipdnn_frontend::detail
     {
         return {{ df.camel_name }}Err;
     }
+{% if df.frontend_uses_member_access %}
+    attributes.{{ df.frontend_member_name }} = {{ df.camel_name }}Result;
+{% else %}
     attributes.{{ df.frontend_setter_name }}({{ df.camel_name }}Result);
+{% endif %}
 
 {% elif df.is_enum %}
     // Unpack {{ df.name }}
@@ -77,7 +85,11 @@ namespace hipdnn_frontend::detail
                                                HIPDNN_TYPE_INT64,
                                                {{ df.camel_name }}Raw,
                                                "{{ op.effective_error_label }} {{ df.name }}"));
+{% if df.frontend_uses_member_access %}
+    attributes.{{ df.frontend_member_name }} = static_cast<{{ df.cpp_enum }}>({{ df.camel_name }}Raw);
+{% else %}
     attributes.{{ df.frontend_setter_name }}(static_cast<{{ df.cpp_enum }}>({{ df.camel_name }}Raw));
+{% endif %}
 
 {% elif df.is_optional_scalar %}
     // Unpack {{ df.name }} (optional)
@@ -90,7 +102,11 @@ namespace hipdnn_frontend::detail
                                                            "{{ op.effective_error_label }} {{ df.name }}"));
         if({{ df.camel_name }}.has_value())
         {
+{% if df.frontend_uses_member_access %}
+            attributes.{{ df.frontend_member_name }} = *{{ df.camel_name }};
+{% else %}
             attributes.{{ df.frontend_setter_name }}(*{{ df.camel_name }});
+{% endif %}
         }
     }
 
@@ -101,14 +117,18 @@ namespace hipdnn_frontend::detail
 {% elif df.type == "bool" %}
     bool {{ df.camel_name }} = false;
 {% else %}
-    int64_t {{ df.camel_name }} = 0;
+    {{ df.cpp_type }} {{ df.camel_name }} = 0;
 {% endif %}
     HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(opDesc,
                                                {{ df.attr_name }},
                                                {{ df.backend_type }},
                                                {{ df.camel_name }},
                                                "{{ op.effective_error_label }} {{ df.name }}"));
+{% if df.frontend_uses_member_access %}
+    attributes.{{ df.frontend_member_name }} = {{ df.camel_name }};
+{% else %}
     attributes.{{ df.frontend_setter_name }}({{ df.camel_name }});
+{% endif %}
 
 {% endif %}
 {% endfor %}
@@ -124,6 +144,44 @@ namespace hipdnn_frontend::detail
 
 {% endif %}
 {% endif %}
+{% for edt in op.extra_data_type_fields %}
+    // Unpack {{ edt.name }}
+    {
+{% if edt.sentinel %}
+        // Packer omits this attribute when the value is {{ edt.sentinel }}; the
+        // backend reports count=0 in that case and unpackGraphDataType returns
+        // DataType::NOT_SET, which is the default we want to keep. Real
+        // backend failures (descriptor errors, type-conversion failures) still
+        // propagate via the explicit Err check.
+{% endif %}
+        auto [{{ edt.camel_name }}, {{ edt.camel_name }}Err] = unpackGraphDataType(
+            opDesc, {{ edt.attr_name }}, "{{ op.effective_error_label }} {{ edt.effective_error_label }}");
+        if({{ edt.camel_name }}Err.is_bad())
+        {
+            return {{ edt.camel_name }}Err;
+        }
+{% if edt.frontend_uses_member_access %}
+        attributes.{{ edt.frontend_member_name }} = {{ edt.camel_name }};
+{% else %}
+        attributes.{{ edt.frontend_setter_name }}({{ edt.camel_name }});
+{% endif %}
+    }
+
+{% endfor %}
+{% for taf in op.tensor_array_fields %}
+    // Unpack {{ taf.name }} tensor array
+    {
+        std::vector<std::shared_ptr<graph::TensorAttributes>> {{ taf.camel_name }}Attrs;
+        HIPDNN_CHECK_ERROR(unpackAndRegisterTensorArray(
+            opDesc, {{ taf.attr_name }}, tensorMap, {{ taf.camel_name }}Attrs,
+            "{{ op.effective_error_label }} {{ taf.name }}"));
+        if(!{{ taf.camel_name }}Attrs.empty())
+        {
+            attributes.{{ taf.frontend_setter_name }}({{ taf.camel_name }}Attrs);
+        }
+    }
+
+{% endfor %}
     // Unpack operation name
     std::string opName;
     HIPDNN_CHECK_ERROR(

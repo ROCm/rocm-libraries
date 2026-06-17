@@ -786,3 +786,59 @@ TEST_F(TestLogRecorder, SharedAndIsolatedRecordersWorkTogether)
     // isolatedRecorder was created second when level was WARN (set by sharedRecorder)
     EXPECT_EQ(isolatedRecorder.getSavedLogLevel(), HIPDNN_SEV_WARN);
 }
+
+// === waitForLogCount ===
+
+TEST_F(TestLogRecorder, WaitForLogCountReturnsTrueWhenAlreadyMet)
+{
+    auto recorder = SharedLogRecorder::withCurrentLevel();
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "log 1");
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "log 2");
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "log 3");
+
+    EXPECT_TRUE(recorder.waitForLogCount(3, std::chrono::milliseconds(100)));
+}
+
+TEST_F(TestLogRecorder, WaitForLogCountReturnsFalseOnTimeout)
+{
+    auto recorder = SharedLogRecorder::withCurrentLevel();
+
+    const auto start = std::chrono::steady_clock::now();
+    EXPECT_FALSE(recorder.waitForLogCount(1, std::chrono::milliseconds(50)));
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+
+    const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+    EXPECT_GE(elapsedMs, 50) << "Should wait at least 50ms before timing out";
+    EXPECT_LE(elapsedMs, 20000) << "Should not wait significantly longer than the timeout";
+}
+
+TEST_F(TestLogRecorder, WaitForLogCountZeroTargetReturnsTrueImmediately)
+{
+    auto recorder = SharedLogRecorder::withCurrentLevel();
+    EXPECT_TRUE(recorder.waitForLogCount(0, std::chrono::milliseconds(100)));
+}
+
+// === waitForLogsContaining ===
+
+TEST_F(TestLogRecorder, WaitForLogsContainingReturnsTrueWhenAlreadyPresent)
+{
+    auto recorder = SharedLogRecorder::withCurrentLevel();
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "The gamma log");
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_WARN, "beta");
+
+    EXPECT_TRUE(recorder.waitForLogsContaining({"gamma", "beta"}, std::chrono::milliseconds(100)));
+}
+
+TEST_F(TestLogRecorder, WaitForLogsContainingReturnsFalseOnTimeout)
+{
+    auto recorder = SharedLogRecorder::withCurrentLevel();
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "The gamma log");
+
+    EXPECT_FALSE(recorder.waitForLogsContaining({"gamma", "beta"}, std::chrono::milliseconds(10)));
+}
+
+TEST_F(TestLogRecorder, WaitForLogsContainingEmptyListReturnsTrueImmediately)
+{
+    auto recorder = SharedLogRecorder::withCurrentLevel();
+    EXPECT_TRUE(recorder.waitForLogsContaining({}, std::chrono::milliseconds(100)));
+}

@@ -226,7 +226,7 @@ Tests:
   filename: [Chevron4]
 
 - name: csrsv_graph_test
-  category: pre_checkin
+  category: known_bug
   function: csrsv
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_quick

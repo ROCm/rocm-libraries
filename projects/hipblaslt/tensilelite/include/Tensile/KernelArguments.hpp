@@ -35,6 +35,7 @@
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/Macros.hpp>
 
+TENSILE_HIDDEN_BEGIN
 namespace TensileLite
 {
     template <typename T>
@@ -126,7 +127,7 @@ namespace TensileLite
     private:
         size_t         m_maxSize         = 0;
         size_t         m_currentLocation = 0;
-        T*             m_data            = nullptr;
+        T* m_data            = nullptr;
         size_t         m_dataSize;
         std::vector<T> m_vec_data;
     };
@@ -158,7 +159,7 @@ namespace TensileLite
         bool isFullyBound() const;
 
         void const* data() const;
-        uint8_t*    rawdata();
+        uint8_t* rawdata();
         size_t      size() const;
 
         friend std::ostream& operator<<(std::ostream& stream, const KernelArguments& t);
@@ -183,7 +184,7 @@ namespace TensileLite
             bool            operator==(const const_iterator& rhs) const;
             bool            operator!=(const const_iterator& rhs) const;
             ArgPair const&  operator*() const;
-            ArgPair const*  operator->() const;
+            ArgPair const* operator->() const;
             void            reset();
             template <typename T>
             operator T() const;
@@ -243,25 +244,187 @@ namespace TensileLite
                                         ConstantVariant const& value,
                                         rocisa::DataType       type)
     {
+        if(name == "alpha" || name == "beta")
+        {
+            // If type is NOT one of the standard 32/64-bit or Complex types, 
+            // it must be a small type (Half, BF16, Int8, Float8, BF8, etc.) 
+            // that causes misalignment. We promote these to 32-bit.
+            bool isStandardType = (type == rocisa::DataType::Float || 
+                                   type == rocisa::DataType::Double ||
+                                   type == rocisa::DataType::Int32 ||
+                                   type == rocisa::DataType::ComplexFloat ||
+                                   type == rocisa::DataType::ComplexDouble);
+
+            if (!isStandardType) 
+            {
+                if(type == rocisa::DataType::Int8)
+                {
+                    // Promote 8-bit int to 32-bit Int
+                    return append(name, value, rocisa::DataType::Int32);
+                }
+                else
+                {
+                    // Promote all small floats (Half, BF16, FP8, BF8, etc.) to 32-bit Float
+                    return append(name, value, rocisa::DataType::Float);
+                }
+            }
+        }
+        // =================================================================================
+
         switch(type)
         {
         case rocisa::DataType::Float:
-            return append<float>(name, (*std::get_if<float>(&value)), true);
+        {
+            if(auto* val = std::get_if<float>(&value))
+                return append<float>(name, *val, true);
+            if(auto* val = std::get_if<double>(&value))
+                return append<float>(name, static_cast<float>(*val), true);
+            if(auto* val = std::get_if<int32_t>(&value))
+                return append<float>(name, static_cast<float>(*val), true);
+            if(auto* val = std::get_if<Half>(&value))
+                return append<float>(name, static_cast<float>(*val), true);
+            if(auto* val = std::get_if<BFloat16>(&value))
+                return append<float>(name, static_cast<float>(*val), true);
+
+            // Complex -> Real
+            if(auto* val = std::get_if<std::complex<float>>(&value))
+                return append<float>(name, val->real(), true);
+            if(auto* val = std::get_if<std::complex<double>>(&value))
+                return append<float>(name, static_cast<float>(val->real()), true);
+
+            throw std::runtime_error(
+                "Type mismatch: variant expected Float but holds unsupported type.");
+        }
         case rocisa::DataType::Double:
-            return append<double>(name, (*std::get_if<double>(&value)), true);
+        {
+            if(auto* val = std::get_if<double>(&value))
+                return append<double>(name, *val, true);
+            if(auto* val = std::get_if<float>(&value))
+                return append<double>(name, static_cast<double>(*val), true);
+            if(auto* val = std::get_if<int32_t>(&value))
+                return append<double>(name, static_cast<double>(*val), true);
+
+            // Complex -> Real
+            if(auto* val = std::get_if<std::complex<double>>(&value))
+                return append<double>(name, val->real(), true);
+            if(auto* val = std::get_if<std::complex<float>>(&value))
+                return append<double>(name, static_cast<double>(val->real()), true);
+
+            throw std::runtime_error(
+                "Type mismatch: variant expected Double but holds unsupported type.");
+        }
         case rocisa::DataType::Half:
-            return append<Half>(name, (*std::get_if<Half>(&value)), true);
+        {
+            if(auto* val = std::get_if<Half>(&value))
+                return append<Half>(name, *val, true);
+            if(auto* val = std::get_if<float>(&value))
+                return append<Half>(name, static_cast<Half>(*val), true);
+            if(auto* val = std::get_if<double>(&value))
+                return append<Half>(name, static_cast<Half>(*val), true);
+
+            // Complex -> Real
+            if(auto* val = std::get_if<std::complex<float>>(&value))
+                return append<Half>(name, static_cast<Half>(val->real()), true);
+            if(auto* val = std::get_if<std::complex<double>>(&value))
+                return append<Half>(name, static_cast<Half>(val->real()), true);
+
+            throw std::runtime_error(
+                "Type mismatch: variant expected Half but holds unsupported type.");
+        }
         case rocisa::DataType::Int32:
-            return append<int32_t>(name, (*std::get_if<int32_t>(&value)), true);
+        {
+            if(auto* val = std::get_if<int32_t>(&value))
+                return append<int32_t>(name, *val, true);
+            if(auto* val = std::get_if<int8_t>(&value))
+                return append<int32_t>(name, static_cast<int32_t>(*val), true);
+            if(auto* val = std::get_if<float>(&value))
+                return append<int32_t>(name, static_cast<int32_t>(*val), true);
+            if(auto* val = std::get_if<double>(&value))
+                return append<int32_t>(name, static_cast<int32_t>(*val), true);
+
+            // Complex -> Real
+            if(auto* val = std::get_if<std::complex<float>>(&value))
+                return append<int32_t>(name, static_cast<int32_t>(val->real()), true);
+            if(auto* val = std::get_if<std::complex<double>>(&value))
+                return append<int32_t>(name, static_cast<int32_t>(val->real()), true);
+
+            throw std::runtime_error(
+                "Type mismatch: variant expected Int32 but holds unsupported type.");
+        }
         case rocisa::DataType::BFloat16:
-            return append<BFloat16>(name, (*std::get_if<BFloat16>(&value)), true);
+        {
+            if(auto* val = std::get_if<BFloat16>(&value))
+                return append<BFloat16>(name, *val, true);
+            if(auto* val = std::get_if<float>(&value))
+                return append<BFloat16>(name, static_cast<BFloat16>(*val), true);
+            if(auto* val = std::get_if<double>(&value))
+                return append<BFloat16>(name, static_cast<BFloat16>(*val), true);
+
+            // Complex -> Real
+            if(auto* val = std::get_if<std::complex<float>>(&value))
+                return append<BFloat16>(name, static_cast<BFloat16>(val->real()), true);
+            if(auto* val = std::get_if<std::complex<double>>(&value))
+                return append<BFloat16>(name, static_cast<BFloat16>(val->real()), true);
+
+            throw std::runtime_error(
+                "Type mismatch: variant expected BFloat16 but holds unsupported type.");
+        }
         case rocisa::DataType::Int8:
-            return append<int8_t>(name, (*std::get_if<int8_t>(&value)), true);
+        {
+            if(auto* val = std::get_if<int8_t>(&value))
+                return append<int8_t>(name, *val, true);
+            if(auto* val = std::get_if<int32_t>(&value))
+                return append<int8_t>(name, static_cast<int8_t>(*val), true);
+            if(auto* val = std::get_if<float>(&value))
+                return append<int8_t>(name, static_cast<int8_t>(*val), true);
+            if(auto* val = std::get_if<double>(&value))
+                return append<int8_t>(name, static_cast<int8_t>(*val), true);
+
+            // Complex -> Real
+            if(auto* val = std::get_if<std::complex<float>>(&value))
+                return append<int8_t>(name, static_cast<int8_t>(val->real()), true);
+            if(auto* val = std::get_if<std::complex<double>>(&value))
+                return append<int8_t>(name, static_cast<int8_t>(val->real()), true);
+
+            throw std::runtime_error(
+                "Type mismatch: variant expected Int8 but holds unsupported type.");
+        }
         case rocisa::DataType::ComplexFloat:
-            return append<std::complex<float>>(name, (*std::get_if<std::complex<float>>(&value)), true);    
+        {
+            if(auto* val = std::get_if<std::complex<float>>(&value))
+                return append<std::complex<float>>(name, *val, true);
+            if(auto* val = std::get_if<std::complex<double>>(&value))
+                return append<std::complex<float>>(
+                    name, static_cast<std::complex<float>>(*val), true);
+            if(auto* val = std::get_if<float>(&value))
+                return append<std::complex<float>>(
+                    name, std::complex<float>(*val, 0.0f), true);
+            if(auto* val = std::get_if<double>(&value))
+                return append<std::complex<float>>(
+                    name, std::complex<float>(static_cast<float>(*val), 0.0f), true);
+
+            throw std::runtime_error(
+                "Type mismatch: variant expected ComplexFloat but holds unsupported type.");
+        }
         case rocisa::DataType::ComplexDouble:
-            return append<std::complex<double>>(name, (*std::get_if<std::complex<double>>(&value)), true);
+        {
+            if(auto* val = std::get_if<std::complex<double>>(&value))
+                return append<std::complex<double>>(name, *val, true);
+            if(auto* val = std::get_if<std::complex<float>>(&value))
+                return append<std::complex<double>>(
+                    name, static_cast<std::complex<double>>(*val), true);
+            if(auto* val = std::get_if<double>(&value))
+                return append<std::complex<double>>(
+                    name, std::complex<double>(*val, 0.0), true);
+            if(auto* val = std::get_if<float>(&value))
+                return append<std::complex<double>>(
+                    name, std::complex<double>(static_cast<double>(*val), 0.0), true);
+
+            throw std::runtime_error(
+                "Type mismatch: variant expected ComplexDouble but holds unsupported type.");
+        }
         default:
+            // Fallback for new types (Float8, etc.) if not covered above, though they should be caught by the alpha/beta check.
             throw std::runtime_error("Unsupported ConstantVariant append type.");
         }
     }
@@ -269,6 +432,27 @@ namespace TensileLite
     inline void
         KernelArguments::append(std::string const& name, float const value, rocisa::DataType type)
     {
+        if(name == "alpha" || name == "beta")
+        {
+            bool isStandardType = (type == rocisa::DataType::Float || 
+                                   type == rocisa::DataType::Double ||
+                                   type == rocisa::DataType::Int32 ||
+                                   type == rocisa::DataType::ComplexFloat ||
+                                   type == rocisa::DataType::ComplexDouble);
+
+            if (!isStandardType)
+            {
+                if(type == rocisa::DataType::Int8)
+                {
+                    return append<int32_t>(name, static_cast<int32_t>(value), true);
+                }
+                else
+                {
+                    return append<float>(name, value, true);
+                }
+            }
+        }
+        
         switch(type)
         {
         case rocisa::DataType::Float:
@@ -439,27 +623,96 @@ namespace TensileLite
         inline void
             append(std::string const& name, ConstantVariant const& value, rocisa::DataType type)
         {
+            if(name == "alpha" || name == "beta")
+            {
+                bool isStandardType = (type == rocisa::DataType::Float || 
+                                       type == rocisa::DataType::Double ||
+                                       type == rocisa::DataType::Int32 ||
+                                       type == rocisa::DataType::ComplexFloat ||
+                                       type == rocisa::DataType::ComplexDouble);
+
+                if (!isStandardType)
+                {
+                    if(type == rocisa::DataType::Int8)
+                    {
+                        return append(name, value, rocisa::DataType::Int32);
+                    }
+                    else
+                    {
+                        return append(name, value, rocisa::DataType::Float);
+                    }
+                }
+            }
+
             switch(type)
             {
             case rocisa::DataType::Float:
-                return append<float>(name, (*std::get_if<float>(&value)));
+                if(auto* v = std::get_if<float>(&value)) return append<float>(name, *v);
+                if(auto* v = std::get_if<double>(&value)) return append<float>(name, static_cast<float>(*v));
+                if(auto* v = std::get_if<int32_t>(&value)) return append<float>(name, static_cast<float>(*v));
+                if(auto* v = std::get_if<Half>(&value)) return append<float>(name, static_cast<float>(*v));
+                if(auto* v = std::get_if<BFloat16>(&value)) return append<float>(name, static_cast<float>(*v));
+                if(auto* v = std::get_if<std::complex<float>>(&value)) return append<float>(name, v->real());
+                if(auto* v = std::get_if<std::complex<double>>(&value)) return append<float>(name, static_cast<float>(v->real()));
+                return;
+
             case rocisa::DataType::Double:
-                return append<double>(name, (*std::get_if<double>(&value)));
+                if(auto* v = std::get_if<double>(&value)) return append<double>(name, *v);
+                if(auto* v = std::get_if<float>(&value)) return append<double>(name, static_cast<double>(*v));
+                if(auto* v = std::get_if<std::complex<double>>(&value)) return append<double>(name, v->real());
+                return;
+
             case rocisa::DataType::Half:
-                return append<Half>(name, (*std::get_if<Half>(&value)));
+                if(auto* v = std::get_if<Half>(&value)) return append<Half>(name, *v);
+                if(auto* v = std::get_if<float>(&value)) return append<Half>(name, static_cast<Half>(*v));
+                return;
+
             case rocisa::DataType::Int32:
-                return append<int32_t>(name, (*std::get_if<int32_t>(&value)));
+                if(auto* v = std::get_if<int32_t>(&value)) return append<int32_t>(name, *v);
+                return;
+
             case rocisa::DataType::BFloat16:
-                return append<BFloat16>(name, (*std::get_if<BFloat16>(&value)));
+                if(auto* v = std::get_if<BFloat16>(&value)) return append<BFloat16>(name, *v);
+                if(auto* v = std::get_if<float>(&value)) return append<BFloat16>(name, static_cast<BFloat16>(*v));
+                return;
+
             case rocisa::DataType::Int8:
-                return append<int8_t>(name, (*std::get_if<int8_t>(&value)));
+                if(auto* v = std::get_if<int8_t>(&value)) return append<int8_t>(name, *v);
+                return;
+
+            case rocisa::DataType::ComplexFloat:
+                return append<std::complex<float>>(name, std::complex<float>{0,0});
+            case rocisa::DataType::ComplexDouble:
+                return append<std::complex<double>>(name, std::complex<double>{0,0});
+
             default:
-                throw std::runtime_error("Unsupported ConstantVariant append type.");
+                throw std::runtime_error("Unsupported ConstantVariant append type in Counter.");
             }
         }
 
         inline void append(std::string const& name, float const value, rocisa::DataType type)
         {
+            if(name == "alpha" || name == "beta")
+            {
+                bool isStandardType = (type == rocisa::DataType::Float || 
+                                       type == rocisa::DataType::Double ||
+                                       type == rocisa::DataType::Int32 ||
+                                       type == rocisa::DataType::ComplexFloat ||
+                                       type == rocisa::DataType::ComplexDouble);
+
+                if (!isStandardType)
+                {
+                    if(type == rocisa::DataType::Int8)
+                    {
+                        return append<int32_t>(name, static_cast<int32_t>(value));
+                    }
+                    else
+                    {
+                        return append<float>(name, value);
+                    }
+                }
+            }
+
             switch(type)
             {
             case rocisa::DataType::Float:
@@ -500,3 +753,4 @@ namespace TensileLite
         size_t counter = 0;
     };
 } // namespace TensileLite
+TENSILE_HIDDEN_END

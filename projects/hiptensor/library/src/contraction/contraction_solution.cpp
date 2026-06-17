@@ -296,6 +296,8 @@ namespace hiptensor
                       params->typeC(),
                       params->typeD(),
                       params->typeCompute(),
+                      params->opA(),
+                      params->opB(),
                       params->opCDE());
     }
 
@@ -304,7 +306,7 @@ namespace hiptensor
         return std::make_tuple(mM, mN, mK);
     }
 
-    ck::index_t ContractionSolution::problemBytes() const
+    std::size_t ContractionSolution::problemBytes() const
     {
         return mBytes;
     }

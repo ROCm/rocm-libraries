@@ -30,8 +30,10 @@ add_executable(
     engines/plans/TestMiopenConvFwdBiasActivPlanBuilder.cpp
     engines/plans/TestMiopenConvFwdPlan.cpp
     engines/plans/TestMiopenConvPlanBuilder.cpp
+    engines/plans/TestMiopenReluPlanBuilder.cpp
     engines/plans/TestMiopenConvWrwPlan.cpp
     engines/TestMiopenEngine.cpp
+    common/TestWorkarounds.cpp
     main.cpp
     TestMiopenActivationDescriptor.cpp
     TestMiopenConvDescriptor.cpp

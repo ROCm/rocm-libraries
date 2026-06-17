@@ -269,7 +269,7 @@ static void CheckExceptions(miopenDataType_t dataType)
 }
 
 template <typename T, typename disabled_mask, typename enabled_mask>
-static void CheckExceptionsWithSkip(miopenDataType_t dataType)
+static void CheckExceptionsWithSkip([[maybe_unused]] miopenDataType_t dataType)
 {
 #ifdef WORKAROUND_SWDEV_473387
     GTEST_SKIP();

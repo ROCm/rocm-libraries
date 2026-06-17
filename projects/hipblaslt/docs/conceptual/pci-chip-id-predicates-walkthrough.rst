@@ -8,14 +8,19 @@
 PCI chip ID predicates walkthrough
 *********************************************
 
-Predicates are one of the essential integration points between the tensilelite build system, and the hipBLASLt library runtime.
-Predicates are built into master solution libraries, files that contain information about which kernels are available 
+Predicates are one of the essential integration points between the TensileLite build system and the hipBLASLt library runtime.
+Predicates are built into the master solution libraries. They are files that contain information about which kernels are available 
 and their location. These files are loaded at runtime and used in the kernel selection process.
+
+.. note::
+
+   This guide covers advanced technical concepts and is intended for highly experienced users and developers only.
 
 Chip ID registry
 -----------------------
 
-The chip ID registry is a namespace in `Tensile/AMDGPUPredicates.hpp <../../tensilelite/include/Tensile/AMDGPUPredicates.hpp>` that
+The chip ID registry is a namespace in
+`Tensile/AMDGPUPredicates.hpp <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblaslt/tensilelite/include/Tensile/AMDGPUPredicates.hpp>`_ that
 contains the official mapping of supported PCI chip IDs and their fallback relationships.
 
 .. code-block:: yaml
@@ -28,7 +33,7 @@ Hardware predicates
 
 Hardware predicates are the most coarse-grained predicates. They are used to qualify, or reject, a kernel based on
 attributes that can be determined at runtime through system inspection. These include the processor type (for example, gfx1201),
-the compute-unit counter (for example, 128), and, as of `<https://github.com/ROCm/rocm-libraries/pull/3924>`_, the PCI chip ID (for example, 0x7890).
+the compute-unit counter (for example, 128), and, as of ROCm 7.13, the PCI chip ID (for example, 0x7890).
 
 Building hardware predicates
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -70,14 +75,14 @@ could appear as:
           - {type: PciChipId, value: 30583}
 
 That is, groups of solutions are co-resident in a LL file and marked by a set of ``Device xxxx`` strings. This allows solution filtering
-(predicate matching) to be performed at the lazy library level. Consequentially, any candidate libraries that don't at least match the
+(predicate matching) to be performed at the lazy library level. Consequently, any candidate libraries that don't at least match the
 processor and the current PCI chip ID (plus optional CU counts) will be skipped before the runtime code tries to load the library.
 
 Using hardware predicates
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 How does this play out during runtime? When the lazy solution library is loaded, it is deserialized and the predicates are matched
-against the known program constraints to determine which *loadable* libraries are relevant (match), and which are not (don't match).
+against the known program constraints to determine which **loadable** libraries are relevant (match), and which are not (don't match).
 Set ``TENSILE_DB`` to see how the chip IDs are matched at runtime. For example, take the output from a test library logic
 that has the gfx1201 chip ID (7550) and another, random one:
 
@@ -128,7 +133,7 @@ The build-time comparator for hardware rows applies chip-ID precedence as follow
    (farther from fallback roots first), then by chip ID value for deterministic tie-breaks.
 #. **The CU count**: if chip precedence does not decide the order, the higher ``CUCount`` sorts first.
 
-Minimal ordering example (same processor):
+Here is a minimal ordering example (for the same processor):
 
 .. code-block:: text
 

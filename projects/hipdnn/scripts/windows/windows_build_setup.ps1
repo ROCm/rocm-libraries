@@ -63,51 +63,47 @@ Write-Host "===================================================`n" -ForegroundCo
 if (-not $SkipPrerequisites) {
     Write-Host "`n=== Section 1: Installing Prerequisites ===" -ForegroundColor Yellow
 
-    # Install Chocolatey if not present
-    if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
-        Write-Status "Installing Chocolatey..."
-        Set-ExecutionPolicy Bypass -Scope Process -Force
-        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-        Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-        Write-Success "Chocolatey installed"
-    } else {
-        Write-Success "Chocolatey already installed"
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Error "winget is required but not found."
+        Write-Host "Install 'App Installer' from the Microsoft Store or update Windows."
+        exit 1
     }
+    Write-Success "winget found"
 
-    # Refresh environment variables
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+    $wingetArgs = @("--accept-package-agreements", "--accept-source-agreements")
 
-    # Install Visual Studio Build Tools
-    Write-Status "Installing Visual Studio 2022 Build Tools..."
-    $vsParams = "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 "
-    $vsParams += "--add Microsoft.VisualStudio.Component.VC.CMake.Project "
-    $vsParams += "--add Microsoft.VisualStudio.Component.VC.ATL "
-    $vsParams += "--add Microsoft.VisualStudio.Component.Windows11SDK.22621 "
-    $vsParams += "--installPath `"$VsBuildToolsPath`""
-
-    choco install visualstudio2022buildtools -y --params "`"$vsParams`"" 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq 3010) {
+    # Install Visual Studio Build Tools with Windows SDK
+    Write-Status "Installing Visual Studio 2022 Build Tools + Windows 11 SDK..."
+    $vsOverride = "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 "
+    $vsOverride += "--add Microsoft.VisualStudio.Component.VC.CMake.Project "
+    $vsOverride += "--add Microsoft.VisualStudio.Component.VC.ATL "
+    $vsOverride += "--add Microsoft.VisualStudio.Component.Windows11SDK.22621 "
+    $vsOverride += "--installPath `"$VsBuildToolsPath`" --quiet --wait"
+    winget install --id Microsoft.VisualStudio.2022.BuildTools --source winget --override "$vsOverride" @wingetArgs
+    if ($LASTEXITCODE -eq 0) {
         Write-Success "Visual Studio Build Tools installed/updated"
+    } else {
+        Write-Warning "VS Build Tools install exited with code $LASTEXITCODE (may already be installed)"
     }
 
     # Install Git
     Write-Status "Installing Git..."
-    choco install git.install -y --params "'/GitAndUnixToolsOnPath'" 2>&1 | Out-Null
+    winget install --id Git.Git -e --source winget --custom "/o:PathOption=CmdTools" @wingetArgs
     Write-Success "Git installed/updated"
 
     # Install CMake
-    Write-Status "Installing CMake..."
-    choco install cmake --version=$CMAKE_VERSION -y 2>&1 | Out-Null
+    Write-Status "Installing CMake $CMAKE_VERSION..."
+    winget install --id Kitware.CMake -v $CMAKE_VERSION @wingetArgs
     Write-Success "CMake installed/updated"
 
     # Install Ninja
     Write-Status "Installing Ninja..."
-    choco install ninja -y 2>&1 | Out-Null
+    winget install --id ninja-build.ninja @wingetArgs
     Write-Success "Ninja installed/updated"
 
     # Install Python
     Write-Status "Installing Python..."
-    choco install python -y 2>&1 | Out-Null
+    winget install --id Python.Python.3.12 @wingetArgs
     Write-Success "Python installed/updated"
 
     # Refresh PATH

@@ -16,27 +16,6 @@
     } while(0)
 #endif
 
-#if defined(ADDRESS_SANITIZER) || defined(THREAD_SANITIZER)
-#define SKIP_IF_NO_DEVICES()                                              \
-    do                                                                    \
-    {                                                                     \
-        GTEST_SKIP() << "Disable device tests when sanitizer is enabled"; \
-    } while(0)
-
-#else
-#define SKIP_IF_NO_DEVICES()                                        \
-    do                                                              \
-    {                                                               \
-        int device_count;                                           \
-        auto result = hipGetDeviceCount(&device_count);             \
-        if(result == hipErrorNoDevice || device_count == 0)         \
-        {                                                           \
-            GTEST_SKIP() << "No devices available. Skipping test."; \
-        }                                                           \
-    } while(0)
-
-#endif
-
 #ifdef ADDRESS_SANITIZER
 #define SKIP_IF_ASAN()                                            \
     do                                                            \
@@ -49,6 +28,17 @@
     {                  \
     } while(0)
 #endif
+
+#define SKIP_IF_NO_DEVICES()                                        \
+    do                                                              \
+    {                                                               \
+        int device_count;                                           \
+        auto result = hipGetDeviceCount(&device_count);             \
+        if(result == hipErrorNoDevice || device_count == 0)         \
+        {                                                           \
+            GTEST_SKIP() << "No devices available. Skipping test."; \
+        }                                                           \
+    } while(0)
 
 #ifdef THREAD_SANITIZER
 #define SKIP_IF_TSAN()                                            \

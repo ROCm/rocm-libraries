@@ -996,7 +996,10 @@ INSTANTIATE_TEST_SUITE_P(
             HIPDNN_ATTR_OPERATION_SDPA_FWD_AMAX_O_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
         QueryModeParam{
             HIPDNN_ATTR_SDPA_FWD_DIAGONAL_ALIGNMENT_EXT, HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT, 1},
-        QueryModeParam{HIPDNN_ATTR_SDPA_FWD_MMA_CORE_MODE_EXT, HIPDNN_TYPE_DATA_TYPE, 1},
+        // mma_core_mode is not set by setAllAttributesExcept; UNSET DataType
+        // reports count=0 via the count-query path (the same contract as graph
+        // compute/io/intermediate data types).
+        QueryModeParam{HIPDNN_ATTR_SDPA_FWD_MMA_CORE_MODE_EXT, HIPDNN_TYPE_DATA_TYPE, 0},
         QueryModeParam{
             HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT, HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT, 1},
         QueryModeParam{HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1}));

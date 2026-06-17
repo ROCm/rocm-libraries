@@ -835,10 +835,16 @@ if( BUILD_WITH_TENSILE )
     else()
       set( TENSILE_DATA_COMPONENT_NAME devel )
     endif()
+    # TensileManifest.txt is a build-time verification artifact whose contents
+    # are absolute paths into the build tree (e.g. /work/build-.../Tensile/library/...).
+    # Nothing at runtime reads it (rocBLAS opens TensileLibrary_lazy_<arch>.dat
+    # directly), and shipping it would also collide across kpack per-arch shards
+    # since the filename has no arch suffix.
     rocm_install(
       DIRECTORY ${CMAKE_BINARY_DIR}/Tensile/library
       DESTINATION ${ROCBLAS_TENSILE_LIBRARY_DIR}
-      COMPONENT ${TENSILE_DATA_COMPONENT_NAME}) # Use this cmake variable to be compatible with rocm-cmake 0.6 and 0.7
+      COMPONENT ${TENSILE_DATA_COMPONENT_NAME} # Use this cmake variable to be compatible with rocm-cmake 0.6 and 0.7
+      PATTERN "TensileManifest.txt" EXCLUDE)
   endif()
 endif()
 

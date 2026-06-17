@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -37,6 +37,7 @@
 #include <list>
 
 #include "../../shared/CLI11.hpp"
+#include "../../shared/client_except.h"
 #include "../../shared/concurrency.h"
 #include "../../shared/device_properties.h"
 #include "../../shared/environment.h"
@@ -58,7 +59,7 @@ size_t             random_seed;
 std::random_device default_seed_dev;
 // Overall probability of running conventional tests
 double test_prob;
-// Probability of running tests from the emulation suite
+// Probability of running tests from the emulation/simulation suite
 double emulation_prob;
 // Probability of running unit tests
 double unittest_prob;
@@ -84,8 +85,6 @@ int ngpus{};
 
 // Allow skipping tests if there is a runtime error
 bool skip_runtime_fails;
-// But count the number of failures
-int n_hip_failures = 0;
 
 // Pointer to a bitwise repro-db file
 std::unique_ptr<fft_hash_db> repro_db;
@@ -110,7 +109,7 @@ bool use_fftw_wisdom = false;
 bool fftw_compare = true;
 
 // Cache the last cpu fft that was requested
-last_cpu_fft_cache last_cpu_fft_data;
+reference_fft_data_t reference_fft_data_t::cached_data = reference_fft_data_t::make_default();
 
 // Number of devices to distribute the FFT to for manual tests
 int manual_devices = 1;
@@ -327,7 +326,11 @@ int main(int argc, char* argv[])
     app.add_option("-v, --verbose", verbose, "Print out detailed information for the tests")
         ->default_val(0);
     app.add_option("--nrand", n_random_tests, "Number of extra randomized tests")->default_val(0);
-
+    app.add_option("--R", ramgb_limit, "RAM limit in GiB for tests")
+        ->default_val(system_memory::singleton().get_total_gbytes());
+    app.add_option("--V", vramgb_limit, "VRAM limit in GiB for tests (per device)")
+        ->default_val(DivRoundingUp(
+            device_memory_accountant::singleton().get_max_total_mem_on_devices(), ONE_GiB));
     app.add_option("--ngpus", ngpus, "Number of GPUs to use per rank")
         ->default_val(-1)
         ->check(CLI::NonNegativeNumber);
@@ -337,8 +340,9 @@ int main(int argc, char* argv[])
     app.add_option("--unittest_prob", unittest_prob, "Probability of running individual unit tests")
         ->default_val(1.0)
         ->check(CLI::Range(0.0, 1.0));
-    app.add_option(
-           "--emulation_prob", emulation_prob, "Probability of running individual emulation tests")
+    app.add_option("--emulation_prob,--simulation_prob",
+                   emulation_prob,
+                   "Probability of running individual emulation/simulation tests")
         ->default_val(1.0)
         ->check(CLI::Range(0.0, 1.0));
     app.add_option("--real_prob",
@@ -360,19 +364,25 @@ int main(int argc, char* argv[])
     app.add_option("--callback_prob",
                    callback_prob_factor,
                    "Probability multiplier for running individual callback transforms")
-        ->default_val(0.1)
+        ->default_val(0.0)
         ->check(CLI::PositiveNumber);
 
-    constexpr std::array<std::string_view, 4> emulation_types
-        = {"none", "smoke", "regression", "extended"};
-    app.add_option("--emulation", "Run emulation tests")
-        ->check(CLI::IsMember(emulation_types))
+    constexpr auto emulation_quick      = "quick";
+    constexpr auto emulation_smoke      = "smoke";
+    constexpr auto emulation_regression = "regression";
+    constexpr auto emulation_extended   = "extended";
+    app.add_option("--emulation,--simulation",
+                   "Run emulation/simulation tests only (targeted scopes)")
+        ->check(CLI::IsMember(
+            {emulation_quick, emulation_smoke, emulation_regression, emulation_extended}))
+        ->expected(1)
+        ->excludes("--test_prob",
+                   "--emulation_prob",
+                   "--unittest_prob",
+                   "--nrand",
+                   "--callback_prob",
+                   "--R")
         ->each([&](const std::string& emulationtype) {
-            constexpr auto nidx = [emulation_types](const auto name) {
-                return std::find(emulation_types.begin(), emulation_types.end(), name)
-                       - emulation_types.begin();
-            };
-
             // Emulation test suites focus on well-established software paths; we are looking for
             // information about the hardware, which means that we aren't trying to find out a lot
             // of information about the software.  Thus, no randomly-generated tests.
@@ -384,29 +394,38 @@ int main(int argc, char* argv[])
             // Callbacks are not an emulation test target.
             callback_prob_factor = 0;
 
-            // We can do a switch on nidx(emulationtype) when we have C++20
-            // switch(nidx(emulationtype))
-            // {
-            // case nidx("smoke"):
-            // etc.
-
-            if(nidx(emulationtype) == nidx("smoke"))
+            if(emulationtype == emulation_quick)
+            {
+                // Configuration specific for "quick simulation test" category, the whole test run
+                // should complete under 2 hours in the simulation environment (configuration parameters
+                // based on observations)
+                vramgb_limit   = 2;
+                emulation_prob = 0.002;
+                test_prob      = 0;
+                unittest_prob  = 0;
+            }
+            else if(emulationtype == emulation_smoke)
             {
                 // 2GB vram limit, approx 1 minute GPU time with short tests.
                 vramgb_limit   = 2;
-                test_prob      = 0;
                 emulation_prob = 0.005;
+                test_prob      = 0;
+                unittest_prob  = 0;
             }
-            if(nidx(emulationtype) == nidx("regression"))
+            else if(emulationtype == emulation_regression)
             {
                 vramgb_limit   = 16;
                 emulation_prob = 1;
                 test_prob      = 0.01;
+                unittest_prob  = 0.01;
             }
-            if(nidx(emulationtype) == nidx("extended"))
+            else
             {
+                // emulationtype == emulation_extended given CLI11's check above
+                assert(emulationtype == emulation_extended);
                 emulation_prob = 1;
                 test_prob      = 0.02;
+                unittest_prob  = 0.02;
             }
         });
 
@@ -435,8 +454,9 @@ int main(int argc, char* argv[])
         ->needs("--mp_lib");
 
     app.add_flag("--smoketest", "Run a short (approx 5 minute) randomized selection of tests")
+        ->excludes("--emulation", "--test_prob", "--emulation_prob", "--unittest_prob", "--nrand")
         ->each([&](const std::string&) {
-            // The objective is to have an test that takes about 5 minutes, so just set the
+            // The objective is to have a test that takes about 5 minutes, so just set the
             // probability per test to a small value to achieve this result.
             test_prob      = 0.0005;
             emulation_prob = 0.005;
@@ -444,9 +464,9 @@ int main(int argc, char* argv[])
             n_random_tests = 10;
         });
 
-    app.add_flag("--callback", "Inject load/store callbacks")->each([&](const std::string&) {
-        manual_params.run_callbacks = true;
-    });
+    app.add_flag(
+           "--callback", manual_params.run_callbacks, "Inject load/store callbacks: none, funcptr")
+        ->default_val("none");
 
     app.add_option("--seed", random_seed, "Random seed; if unset, use an actual random seed")
         ->default_val(default_seed_dev());
@@ -531,11 +551,6 @@ int main(int argc, char* argv[])
     non_token->add_option("--ooffset", manual_params.ooffset, "Output offset");
     app.add_option("--isize", manual_params.isize, "Logical size of input buffer");
     app.add_option("--osize", manual_params.osize, "Logical size of output buffer");
-    app.add_option("--R", ramgb_limit, "RAM limit in GiB for tests")
-        ->default_val(system_memory::singleton().get_total_gbytes());
-    app.add_option("--V", vramgb_limit, "VRAM limit in GiB for tests (per device)")
-        ->default_val(DivRoundingUp(
-            device_memory_accountant::singleton().get_max_total_mem_on_devices(), ONE_GiB));
     app.add_option("--half_epsilon", half_epsilon)->default_val(9.77e-4);
     app.add_option("--single_epsilon", single_epsilon)->default_val(3.75e-5);
     app.add_option("--double_epsilon", double_epsilon)->default_val(1e-15);
@@ -794,7 +809,7 @@ int main(int argc, char* argv[])
     std::cout << "single precision max l2 epsilon:     " << max_l2_eps_single << "\n";
     std::cout << "double precision max l-inf epsilon: " << max_linf_eps_double << "\n";
     std::cout << "double precision max l2 epsilon:     " << max_l2_eps_double << "\n";
-    std::cout << "Number of runtime issues: " << n_hip_failures << "\n";
+    std::cout << "Number of runtime issues: " << hip_runtime_error::get_count() << "\n";
     std::cout << "Number of successful tests: "
               << ::testing::UnitTest::GetInstance()->successful_test_count() << "\n";
     std::cout << "Number of skipped tests: "
@@ -836,28 +851,7 @@ TEST(manual, vs_fftw) // MANUAL TESTS HERE
     {
         fft_vs_reference(params);
     }
-    catch(std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        // explicitly clear test cache
-        last_cpu_fft_data = last_cpu_fft_cache();
-        GTEST_SKIP() << e.what();
-    }
-    catch(const DEVICEBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
 TEST(manual, bitwise_reproducibility) // MANUAL TESTS HERE
@@ -884,25 +878,7 @@ TEST(manual, bitwise_reproducibility) // MANUAL TESTS HERE
     {
         bitwise_repro(params);
     }
-    catch(const std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const DEVICEBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
+
     SUCCEED();
 }

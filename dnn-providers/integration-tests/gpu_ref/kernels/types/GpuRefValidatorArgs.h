@@ -8,7 +8,8 @@
 #pragma once
 
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes,
-//             readability-identifier-naming)
+//             readability-identifier-naming,
+//             modernize-avoid-c-arrays)
 struct ValidatorArgs
 {
     const void* reference;
@@ -17,6 +18,15 @@ struct ValidatorArgs
     long long totalElements;
     double absoluteTolerance;
     double relativeTolerance;
+
+    // Stride-based indexing for non-contiguous (unpacked) tensors.
+    // ndim == 0 means packed mode (use linear indexing, ignore strides/dims).
+    // ndim > 0 means strided mode (decompose linear index using dims/strides).
+    long long refStrides[8];
+    long long implStrides[8];
+    long long dims[8];
+    int ndim;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes,
-//           readability-identifier-naming)
+//           readability-identifier-naming,
+//           modernize-avoid-c-arrays)

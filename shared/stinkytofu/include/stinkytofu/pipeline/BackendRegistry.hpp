@@ -27,7 +27,9 @@
 #include <string>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/pipeline/PassBuilder.hpp"
 
 namespace stinkytofu {
 class StinkyAsmModule;
@@ -42,11 +44,13 @@ class StinkyAsmModule;
 /// // Static registrar (runs when TU is linked)
 /// BackendRegistry::setArchPipeline({12, 5, 0}, {myBuilder, {"group0", "group1"}});
 /// @endcode
-class BackendRegistry {
+class STINKYTOFU_EXPORT BackendRegistry {
    public:
     /// Function type: builds the pipeline for a module into a PassManager.
+    /// The PassBuilder provides extension points where plugin passes
+    /// can be injected.
     /// Returns true if passes were added, false if nothing to do.
-    using PipelineBuilder = std::function<bool(PassManager&, StinkyAsmModule&)>;
+    using PipelineBuilder = std::function<bool(PassManager&, StinkyAsmModule&, const PassBuilder&)>;
 
     /// Per-architecture pipeline configuration.
     struct ArchPipeline {
@@ -66,8 +70,20 @@ class BackendRegistry {
     /// Remove all registered entries for \p arch.
     static void clearArch(const std::array<int, 3>& arch);
 
-    /// Format arch as arch name.
+    /// Return arch keys for all registered architectures (e.g. {"gfx1250"}).
+    static std::vector<std::string> getRegisteredArchKeys();
+
+    /// Format arch triple as "gfxMNS" string (stepping is a hex digit, e.g. gfx90a).
     static std::string makeArchKey(const std::array<int, 3>& arch);
+
+    /// Parse "gfxMNS" string back into {major, minor, stepping}.
+    /// Returns false if the format is invalid.
+    static bool parseArchKey(const std::string& archStr, std::array<int, 3>& out);
+
+    /// Ensure all backend TUs are linked. Call from main() or module init
+    /// to prevent the linker from dead-stripping self-registering backends
+    /// in static builds.
+    static void registerAllBackends();
 
    private:
     BackendRegistry() = default;

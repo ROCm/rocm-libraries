@@ -19,134 +19,151 @@ namespace hipdnn_backend
 namespace testing
 {
 
-// --- setInt64Vector ---
+// --- setScalarVector (int64_t) ---
 
-TEST(TestDescriptorAttributeUtils, SetInt64VectorThrowsOnNegativeElementCount)
+TEST(TestDescriptorAttributeUtils, SetScalarVectorInt64ThrowsOnNegativeElementCount)
 {
     std::vector<int64_t> target;
     std::array<int64_t, 3> data = {1, 2, 3};
 
-    ASSERT_THROW_HIPDNN_STATUS(setInt64Vector(target, HIPDNN_TYPE_INT64, -1, data.data(), "test"),
-                               HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(
+        setScalarVector<int64_t>(
+            target, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, -1, data.data(), "test"),
+        HIPDNN_STATUS_BAD_PARAM);
 }
 
-TEST(TestDescriptorAttributeUtils, SetInt64VectorThrowsOnZeroElementCount)
+TEST(TestDescriptorAttributeUtils, SetScalarVectorInt64ThrowsOnZeroElementCount)
 {
     std::vector<int64_t> target;
     std::array<int64_t, 3> data = {1, 2, 3};
 
-    ASSERT_THROW_HIPDNN_STATUS(setInt64Vector(target, HIPDNN_TYPE_INT64, 0, data.data(), "test"),
-                               HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(
+        setScalarVector<int64_t>(
+            target, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 0, data.data(), "test"),
+        HIPDNN_STATUS_BAD_PARAM);
 }
 
-TEST(TestDescriptorAttributeUtils, SetInt64VectorThrowsOnNullArrayOfElements)
+TEST(TestDescriptorAttributeUtils, SetScalarVectorInt64ThrowsOnNullArrayOfElements)
 {
     std::vector<int64_t> target;
 
-    ASSERT_THROW_HIPDNN_STATUS(setInt64Vector(target, HIPDNN_TYPE_INT64, 1, nullptr, "test"),
-                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+    ASSERT_THROW_HIPDNN_STATUS(
+        setScalarVector<int64_t>(target, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 1, nullptr, "test"),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
-TEST(TestDescriptorAttributeUtils, SetInt64VectorThrowsOnNullErrorPrefix)
-{
-    std::vector<int64_t> target;
-    std::array<int64_t, 3> data = {1, 2, 3};
-
-    ASSERT_THROW_HIPDNN_STATUS(setInt64Vector(target, HIPDNN_TYPE_INT64, 3, data.data(), nullptr),
-                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
-}
-
-TEST(TestDescriptorAttributeUtils, SetInt64VectorThrowsOnWrongAttributeType)
+TEST(TestDescriptorAttributeUtils, SetScalarVectorInt64ThrowsOnNullErrorPrefix)
 {
     std::vector<int64_t> target;
     std::array<int64_t, 3> data = {1, 2, 3};
 
-    ASSERT_THROW_HIPDNN_STATUS(setInt64Vector(target, HIPDNN_TYPE_BOOLEAN, 3, data.data(), "test"),
-                               HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(
+        setScalarVector<int64_t>(
+            target, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 3, data.data(), nullptr),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
-TEST(TestDescriptorAttributeUtils, SetInt64VectorSuccess)
+TEST(TestDescriptorAttributeUtils, SetScalarVectorInt64ThrowsOnWrongAttributeType)
+{
+    std::vector<int64_t> target;
+    std::array<int64_t, 3> data = {1, 2, 3};
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        setScalarVector<int64_t>(
+            target, HIPDNN_TYPE_INT64, HIPDNN_TYPE_BOOLEAN, 3, data.data(), "test"),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST(TestDescriptorAttributeUtils, SetScalarVectorInt64Success)
 {
     std::vector<int64_t> target;
     std::array<int64_t, 3> data = {10, 20, 30};
 
-    ASSERT_NO_THROW(setInt64Vector(target, HIPDNN_TYPE_INT64, 3, data.data(), "test"));
+    ASSERT_NO_THROW(setScalarVector<int64_t>(
+        target, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 3, data.data(), "test"));
     ASSERT_EQ(target.size(), 3u);
     EXPECT_EQ(target[0], 10);
     EXPECT_EQ(target[1], 20);
     EXPECT_EQ(target[2], 30);
 }
 
-// --- getInt64Vector ---
+// --- getScalarVector (int64_t) ---
 
-TEST(TestDescriptorAttributeUtils, GetInt64VectorThrowsOnNegativeRequestedElementCount)
+TEST(TestDescriptorAttributeUtils, GetScalarVectorInt64ThrowsOnNegativeRequestedElementCount)
 {
     const std::vector<int64_t> source = {1, 2, 3};
     std::array<int64_t, 3> output = {};
     int64_t count = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
-        getInt64Vector(source, HIPDNN_TYPE_INT64, -1, &count, output.data(), "test"),
+        getScalarVector<int64_t>(
+            source, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, -1, &count, output.data(), "test"),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
-TEST(TestDescriptorAttributeUtils, GetInt64VectorQueryReturnsSizeOnNullArray)
+TEST(TestDescriptorAttributeUtils, GetScalarVectorInt64QueryReturnsSizeOnNullArray)
 {
     const std::vector<int64_t> source = {1, 2, 3};
     int64_t count = 0;
 
-    ASSERT_NO_THROW(getInt64Vector(source, HIPDNN_TYPE_INT64, 3, &count, nullptr, "test"));
+    ASSERT_NO_THROW(getScalarVector<int64_t>(
+        source, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 3, &count, nullptr, "test"));
     ASSERT_EQ(count, 3);
 }
 
-TEST(TestDescriptorAttributeUtils, GetInt64VectorQueryReturnsSizeOnZeroRequestedCount)
+TEST(TestDescriptorAttributeUtils, GetScalarVectorInt64QueryReturnsSizeOnZeroRequestedCount)
 {
     const std::vector<int64_t> source = {10, 20, 30, 40};
     int64_t count = 0;
     std::array<int64_t, 4> output = {};
 
-    ASSERT_NO_THROW(getInt64Vector(source, HIPDNN_TYPE_INT64, 0, &count, output.data(), "test"));
+    ASSERT_NO_THROW(getScalarVector<int64_t>(
+        source, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 0, &count, output.data(), "test"));
     ASSERT_EQ(count, 4);
 }
 
-TEST(TestDescriptorAttributeUtils, GetInt64VectorQueryThrowsWhenBothPointersNull)
+TEST(TestDescriptorAttributeUtils, GetScalarVectorInt64QueryThrowsWhenBothPointersNull)
 {
     const std::vector<int64_t> source = {1, 2, 3};
 
     ASSERT_THROW_HIPDNN_STATUS(
-        getInt64Vector(source, HIPDNN_TYPE_INT64, 3, nullptr, nullptr, "test"),
+        getScalarVector<int64_t>(
+            source, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 3, nullptr, nullptr, "test"),
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
-TEST(TestDescriptorAttributeUtils, GetInt64VectorThrowsOnNullErrorPrefix)
+TEST(TestDescriptorAttributeUtils, GetScalarVectorInt64ThrowsOnNullErrorPrefix)
 {
     const std::vector<int64_t> source = {1, 2, 3};
     std::array<int64_t, 3> output = {};
     int64_t count = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
-        getInt64Vector(source, HIPDNN_TYPE_INT64, 3, &count, output.data(), nullptr),
+        getScalarVector<int64_t>(
+            source, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 3, &count, output.data(), nullptr),
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
-TEST(TestDescriptorAttributeUtils, GetInt64VectorThrowsOnWrongAttributeType)
+TEST(TestDescriptorAttributeUtils, GetScalarVectorInt64ThrowsOnWrongAttributeType)
 {
     const std::vector<int64_t> source = {1, 2, 3};
     std::array<int64_t, 3> output = {};
     int64_t count = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
-        getInt64Vector(source, HIPDNN_TYPE_BOOLEAN, 3, &count, output.data(), "test"),
+        getScalarVector<int64_t>(
+            source, HIPDNN_TYPE_INT64, HIPDNN_TYPE_BOOLEAN, 3, &count, output.data(), "test"),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
-TEST(TestDescriptorAttributeUtils, GetInt64VectorSuccess)
+TEST(TestDescriptorAttributeUtils, GetScalarVectorInt64Success)
 {
     const std::vector<int64_t> source = {10, 20, 30};
     std::array<int64_t, 3> output = {};
     int64_t count = 0;
 
-    ASSERT_NO_THROW(getInt64Vector(source, HIPDNN_TYPE_INT64, 3, &count, output.data(), "test"));
+    ASSERT_NO_THROW(getScalarVector<int64_t>(
+        source, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 3, &count, output.data(), "test"));
     ASSERT_EQ(count, 3);
     EXPECT_EQ(output[0], 10);
     EXPECT_EQ(output[1], 20);
@@ -384,6 +401,28 @@ TEST(TestDescriptorAttributeUtils, GetDataTypeSuccess)
         getDataType(DataType::FLOAT, HIPDNN_TYPE_DATA_TYPE, 1, &count, &output, "test"));
     ASSERT_EQ(count, 1);
     ASSERT_EQ(output, HIPDNN_DATA_FLOAT);
+}
+
+TEST(TestDescriptorAttributeUtils, GetDataTypeUnsetReturnsZeroCount)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    int64_t count = -1;
+    hipdnnDataType_t output = HIPDNN_DATA_FLOAT;
+
+    ASSERT_NO_THROW(
+        getDataType(DataType::UNSET, HIPDNN_TYPE_DATA_TYPE, 1, &count, &output, "test"));
+    ASSERT_EQ(count, 0);
+    ASSERT_EQ(output, HIPDNN_DATA_FLOAT);
+}
+
+TEST(TestDescriptorAttributeUtils, GetDataTypeUnsetThrowsOnNullElementCount)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    hipdnnDataType_t output = {};
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        getDataType(DataType::UNSET, HIPDNN_TYPE_DATA_TYPE, 1, nullptr, &output, "test"),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
 // --- setConvMode ---

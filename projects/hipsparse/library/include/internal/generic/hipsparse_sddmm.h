@@ -244,6 +244,8 @@ hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t           handle,
 *  <tr><th>A / B     <th>C         <th>compute_type
 *  <tr><td>HIP_R_16F <td>HIP_R_32F <td>HIP_R_32F
 *  <tr><td>HIP_R_16F <td>HIP_R_16F <td>HIP_R_32F
+*  <tr><td>HIP_R_16BF <td>HIP_R_32F <td>HIP_R_32F
+*  <tr><td>HIP_R_16BF <td>HIP_R_16BF <td>HIP_R_32F
 *  </table>
 *
 *  @param[in]

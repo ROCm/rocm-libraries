@@ -26,8 +26,9 @@ from . import BenchmarkProblems
 from . import ClientWriter
 from . import LibraryIO
 from . import LibraryLogic
-from .Common import globalParameters, print1, printWarning, ensurePath, assignGlobalParameters, \
-                    restoreDefaultGlobalParameters, HR, __version__
+from .Common.GlobalParameters import globalParameters, assignGlobalParameters, restoreDefaultGlobalParameters, __version__
+from .Common.Utilities import print1, printWarning, ensurePath as ensurePathUtil
+from .Common.Constants import HR
 from .Tensile import addCommonArguments, argUpdatedGlobalParameters
 from .SolutionStructs import ProblemSizes
 from .Toolchain.Validators import validateToolchain
@@ -65,30 +66,6 @@ def setWorkingPath( fullPathName ):
   workingDirectoryStack.append(globalParameters["WorkingPath"])
   globalParameters["WorkingPath"] = ensurePath(fullPathName)
 
-workingDirectoryStack = []
-def pushWorkingPath( foldername ):
-  # Warning: this is not thread-safe, modifies the global WorkingPath!
-  globalParameters["WorkingPath"] = \
-      os.path.join(globalParameters["WorkingPath"], foldername )
-  return ensurePath( globalParameters["WorkingPath"] )
-def popWorkingPath():
-  # Warning: this is not thread-safe, modifies the global WorkingPath!
-  if len(workingDirectoryStack) == 0:
-    globalParameters["WorkingPath"] = \
-      os.path.split(globalParameters["WorkingPath"])[0]
-  else:
-    globalParameters["WorkingPath"] = workingDirectoryStack.pop()
-def ensurePath(path):
-  try:
-    os.makedirs(path)
-  except FileExistsError:
-    pass
-  return path
-def setWorkingPath( fullPathName ):
-  # Warning: this is not thread-safe, modifies the global WorkingPath!
-  workingDirectoryStack.append(globalParameters["WorkingPath"])
-  globalParameters["WorkingPath"] = ensurePath(fullPathName)
-
 
 def parseCurrentLibrary(libPath, sizePath):
     libYaml = LibraryIO.read(libPath)
@@ -98,7 +75,7 @@ def parseCurrentLibrary(libPath, sizePath):
 
     # get performance metric
     if len(libYaml) > 10:
-        GlobalParameters.globalParameters["PerformanceMetric"] = libYaml[10]
+        globalParameters["PerformanceMetric"] = libYaml[10]
 
     # process exactLogic into ProblemSizes
     sizes = []

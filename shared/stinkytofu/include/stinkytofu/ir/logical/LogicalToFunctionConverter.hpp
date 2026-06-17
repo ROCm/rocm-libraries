@@ -2,6 +2,7 @@
 
 #include <unordered_map>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/bindings/python/LogicalModule.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
@@ -42,7 +43,7 @@ namespace stinkytofu {
  *   OptimizationPipeline::run(func, config);
  * @endcode
  */
-class LogicalToFunctionConverter {
+class STINKYTOFU_EXPORT LogicalToFunctionConverter {
    public:
     /**
      * @brief Construct a converter for a specific target architecture
@@ -80,8 +81,6 @@ class LogicalToFunctionConverter {
                                bool autoSplitBlocks = true);
 
    private:
-    GfxArchID arch;
-
     /**
      * @brief Identify label instructions in the instruction stream
      *

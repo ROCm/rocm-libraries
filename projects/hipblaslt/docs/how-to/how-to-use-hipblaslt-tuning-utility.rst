@@ -49,11 +49,11 @@ To run the tuning utility, use the ``find_exact.py`` script, which is found in t
 
 Follow these steps to run the tuning:
 
-#. Run the install script. See :ref:`installation` for more details.
+#. Build hipBLASLt. See :ref:`installation` for more details.
 
    .. code-block:: bash
 
-      ./install.sh
+      inv build
 
 #. Ensure the ``MatchTable.yaml`` file exists in the ``build/release/library`` directory.
 

@@ -83,17 +83,21 @@ struct IntegrationTestCase
 class IntegrationRMSNormForwardFp32 : public ::testing::TestWithParam<IntegrationTestCase>
 {
 protected:
-    // Simplified tensor bundle for RMSNorm frontend integration tests
+    // Simplified tensor bundle for RMSNorm frontend integration tests.
+    // Under validateScaleNormalizedShape's trailing-suffix rule:
+    //   - scale/bias match input except batch dim (e.g. [1, C, H, W] for [N, C, H, W])
+    //   - invRms is [N, 1, 1, 1] (scale fully reduces non-batch dims)
     template <typename Input_type, typename Intermediate_type>
     struct SimpleRMSNorm2DTensorBundle
     {
         SimpleRMSNorm2DTensorBundle(const std::vector<int64_t>& dims)
-            : derivedDims(getDerivedShape(dims))
+            : scaleBiasDims(makeScaleBiasDims(dims))
+            , invRmsDims(makeInvRmsDims(dims))
             , xTensor(Tensor<Input_type>(dims))
             , yTensor(Tensor<Input_type>(dims))
-            , scaleTensor(Tensor<Intermediate_type>(derivedDims))
-            , biasTensor(Tensor<Intermediate_type>(derivedDims))
-            , invRmsTensor(Tensor<Intermediate_type>(derivedDims))
+            , scaleTensor(Tensor<Intermediate_type>(scaleBiasDims))
+            , biasTensor(Tensor<Intermediate_type>(scaleBiasDims))
+            , invRmsTensor(Tensor<Intermediate_type>(invRmsDims))
         {
             // Initialize with simple constant values
             xTensor.fillWithValue(static_cast<Input_type>(1.0f));
@@ -103,7 +107,22 @@ protected:
             invRmsTensor.fillWithValue(static_cast<Intermediate_type>(0.0f));
         }
 
-        std::vector<int64_t> derivedDims;
+        static std::vector<int64_t> makeScaleBiasDims(const std::vector<int64_t>& dims)
+        {
+            auto d = dims;
+            d[0] = 1;
+            return d;
+        }
+
+        static std::vector<int64_t> makeInvRmsDims(const std::vector<int64_t>& dims)
+        {
+            std::vector<int64_t> d(dims.size(), 1);
+            d[0] = dims[0];
+            return d;
+        }
+
+        std::vector<int64_t> scaleBiasDims;
+        std::vector<int64_t> invRmsDims;
         Tensor<Input_type> xTensor;
         Tensor<Input_type> yTensor;
         Tensor<Intermediate_type> scaleTensor;

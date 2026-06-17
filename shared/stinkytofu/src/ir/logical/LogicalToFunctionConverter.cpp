@@ -7,7 +7,7 @@
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 
 namespace stinkytofu {
-LogicalToFunctionConverter::LogicalToFunctionConverter(GfxArchID arch) : arch(arch) {}
+LogicalToFunctionConverter::LogicalToFunctionConverter(GfxArchID /*arch*/) {}
 
 void LogicalToFunctionConverter::convert(PyLogicalModule* module, PyLogicalFunction& pyFunc) {
     assert(module && "PyLogicalModule cannot be null");

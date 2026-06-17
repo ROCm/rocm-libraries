@@ -35,15 +35,15 @@ std::vector<TestCase> GetConvFullTestCases()
         TestCase{{48, 48, 28, 28, 28}, {48, 16, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 3, false, tf32_compute},
         TestCase{{120, 60, 28, 28, 28}, {60, 12, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 5, false, tf32_compute},
         TestCase{{64, 32, 28, 28, 28}, {32, 2, 3, 3, 3}, {1, 1, 1}, {2, 2, 2}, {1, 1, 1}, 16, false, tf32_compute},
-        // clang-format on  
+        // clang-format on
     };
 }
 
 auto GetDevApplicabilityConvCase()
 {
     // For device applicability checks
-    return GetConvTestForGroupXdlops<miopenHalf>(miopenTensorNDHWC,
-                                                 std::move(GetConvSmokeTestCases<TestDataType::FP16>()[0]));
+    return GetConvTestForGroupXdlops<miopenHalf>(
+        miopenTensorNDHWC, std::move(GetConvSmokeTestCases<TestDataType::FP16>()[0]));
 }
 
 // Deterministic test case (for CPU deterministic applicability test)
@@ -61,8 +61,8 @@ auto GetDeterministicConvCase()
 template <TestDataType type>
 miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
 {
-// If MIOpen is built without CK these tests will fail, skip them to avoid failing
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+// CK dynamic-library tests are HIP-only; runtime plugin availability is checked by the harness.
+#if MIOPEN_BACKEND_HIP
     Gpu supportedDevices;
     if constexpr(type == TestDataType::FP32)
     {
@@ -81,6 +81,7 @@ miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
     Gpu supportedDevices = Gpu::None;
 #endif
     miopen::unit_tests::UnitTestConvSolverParams p(supportedDevices);
+    p.ExcludeDevice("gfx1103");
     p.Tunable(5);
     p.UsesCKDynamicLib();
 

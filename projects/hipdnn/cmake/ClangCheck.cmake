@@ -36,7 +36,7 @@ if(ENABLE_CLANG_FORMAT)
         -prune
         -o
         -path
-        "./data_sdk/include/hipdnn_data_sdk/data_objects"
+        "./flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects"
         -prune
         -o
     )

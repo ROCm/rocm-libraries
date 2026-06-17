@@ -23,26 +23,38 @@
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 
 #include <cassert>
+#include <cstdint>
 #include <iostream>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
 
 #define DEBUG_TYPE "StinkyBuildImplicitDependencyPass"
 
-// Implicit LDS dependency pass
-// ============================
-// Attaches RegType::LDS pseudo-registers to instructions based on their MemTokenData
-// token IDs.  The instruction type determines src vs dest placement:
+// Implicit dependency pass
+// ========================
+// Attaches implicit registers to instructions so that the def-use chain builder
+// can see dependencies that are not encoded as explicit operands. Two kinds of
+// implicit dependencies are handled:
 //
-//   tensor_load / ds_write  →  LDS token to dest  (LDS producer)
-//   ds_read                 →  LDS token to src   (LDS consumer)
-//   barrier / signal / wait →  LDS token to both  (synchronization point)
+// 1) Implicit special registers (SCC, VCC, EXEC) driven by HW flags
+//    (Flags.def: IF_ImplicitRead/WriteSCC, IF_ImplicitReadVCC,
+//     IF_ImplicitRead/WriteEXEC). The corresponding special register is added
+//    to src/dest if not already present.
 //
-// The def-use chain builder then sees:
-//   producer(def LDS[t]) → barrier(use+def LDS[t]) → consumer(use LDS[t])
-// which forces the scheduler to respect: producers → barrier → consumers.
+// 2) RegType::LDS pseudo-registers (keyed by MemTokenData token IDs). The
+//    instruction type determines src vs dest placement:
+//
+//      tensor_load / ds_write  →  LDS token to dest  (LDS producer)
+//      ds_read                 →  LDS token to src   (LDS consumer)
+//      barrier / signal / wait →  LDS token to both  (synchronization point)
+//
+//    The def-use chain builder then sees:
+//      producer(def LDS[t]) → barrier(use+def LDS[t]) → consumer(use LDS[t])
+//    which forces the scheduler to respect: producers → barrier → consumers.
 
 namespace {
 using namespace stinkytofu;
@@ -108,22 +120,16 @@ static void processLdsReader(StinkyInstruction& inst, const MemTokenData& mt,
 }
 
 void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx) {
-    if (!passCtx.getPassFeatureConfig().barrierConfig.unrollMovableBarrier) {
-        PASS_DEBUG(std::cerr << "[BuildImplicitDep] skip BB label=\"" << bb.getLabel()
-                             << "\" (unrollMovableBarrier=false)\n");
-        return;
-    }
-
+    const uint32_t wavefrontSize = passCtx.getWavefrontSize();
     for (auto it = bb.begin(); it != bb.end(); ++it) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (!inst) continue;
 
+        // Always attach implicit special registers (SCC/VCC/EXEC) declared by HW flags
+        legalizeImplicitSpecialRegisters(inst, wavefrontSize);
+
         const MemTokenData* mt = inst->getModifier<MemTokenData>();
-        if (!mt) {
-            assert(!isTensorLoad(*inst) && !isDSRead(*inst) && !isDSWrite(*inst) &&
-                   "tensor_load/ds_read/ds_write must have MemTokenData");
-            continue;
-        }
+        if (!mt) continue;
         assert(!mt->tokens.empty() && "MemTokenData with empty tokens");
 
         if (isBarrier(*inst))
@@ -134,7 +140,7 @@ void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx) {
             processLdsReader(*inst, *mt, bb.getLabel());
         else
             assert(false &&
-                   "instruction has MemTokenData but is not a barrier, "
+                   "instruction has MemTokenData but is not a barrier, fence, "
                    "tensor_load, ds_write, or ds_read");
     }
 }
@@ -151,10 +157,11 @@ class StinkyBuildImplicitDependencyPass : public StinkyInstPass {
         return &StinkyBuildImplicitDependencyPass::ID;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         for (BasicBlock& bb : func) {
             if (passCtx.shouldProcessBasicBlock(bb)) setPseudoRegistersInBlock(bb, passCtx);
         }
+        return preserveCFGAnalyses();
     }
 };
 

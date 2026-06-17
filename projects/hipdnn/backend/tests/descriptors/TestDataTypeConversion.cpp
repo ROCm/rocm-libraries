@@ -66,7 +66,8 @@ INSTANTIATE_TEST_SUITE_P(
         DataTypeConversionParam{HIPDNN_DATA_BFLOAT16, DataType::BFLOAT16, 2, "Bfloat16"},
         DataTypeConversionParam{HIPDNN_DATA_FP8_E4M3, DataType::FP8_E4M3, 1, "Fp8E4M3"},
         DataTypeConversionParam{HIPDNN_DATA_FP8_E5M2, DataType::FP8_E5M2, 1, "Fp8E5M2"},
-        DataTypeConversionParam{HIPDNN_DATA_INT64, DataType::INT64, 8, "Int64"}),
+        DataTypeConversionParam{HIPDNN_DATA_INT64, DataType::INT64, 8, "Int64"},
+        DataTypeConversionParam{HIPDNN_DATA_BOOLEAN, DataType::BOOLEAN, 1, "Boolean"}),
     [](const ::testing::TestParamInfo<DataTypeConversionParam>& info) { return info.param.name; });
 
 // =============================================================================

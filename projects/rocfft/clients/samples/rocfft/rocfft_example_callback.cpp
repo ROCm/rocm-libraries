@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (C) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+* Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -162,10 +162,12 @@ int main()
     {
         if(hipFree(work_buf) != hipSuccess)
             throw std::runtime_error("hipFree failed.");
-        if(rocfft_execution_info_destroy(info) != rocfft_status_success)
-            throw std::runtime_error("rocfft_execution_info_destroy failed.");
-        info = nullptr;
     }
+
+    // execution info is always created above; destroy it unconditionally
+    if(rocfft_execution_info_destroy(info) != rocfft_status_success)
+        throw std::runtime_error("rocfft_execution_info_destroy failed.");
+    info = nullptr;
 
     // Destroy plan
     if(rocfft_plan_destroy(plan) != rocfft_status_success)

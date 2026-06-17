@@ -9,11 +9,11 @@ Welcome! hiptensor is AMD's C++ library for accelerating tensor primitives using
 
 hipTensor currently supports the following AMDGPU architectures:
 
-* CDNA class GPU featuring matrix core support: gfx908, gfx90a, gfx942, gfx950 as 'gfx9'.
-* RDNA class GPU featuring matrix core support: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200 and gfx1201.
+* CDNA class GPU featuring matrix core support: gfx908, gfx90a, gfx942, gfx950 as 'gfx9'
+* RDNA class GPU featuring matrix core support: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201 and gfx1250.
 
 > [!NOTE]
-> Double precision FP64 datatype support requires gfx90a, gfx942 or gfx950.
+> Double precision FP64 datatype support requires gfx90a, gfx942, gfx950 or gfx1250.
 
 Dependencies:
 
@@ -133,15 +133,32 @@ cmake --install .
 
 ## Documentation
 
-For more comprehensive documentation on installation, samples and test contents, API reference and programmer's guide you can build the documentation locally using the following commands:
+For more comprehensive documentation on installation, samples and test contents, API reference and programmer's guide you can build the documentation locally.
+
+<details open>
+<summary>Standard</summary>
 
 ```bash
 cd docs
-
 pip3 install -r sphinx/requirements.txt
-
 python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
 ```
+
+</details>
+
+<details>
+<summary>Ubuntu 24.04+</summary>
+
+Ubuntu 24.04 and later enforce [PEP 668](https://peps.python.org/pep-0668/), which prevents system-wide pip installs. Use a virtual environment instead:
+
+```bash
+cd docs
+python3 -m venv .venv
+.venv/bin/pip install -r sphinx/requirements.txt
+.venv/bin/python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
+```
+
+</details>
 
 The HTML documentation can be viewed in your browser by opening the `docs/_build/html/index.html` result.
 

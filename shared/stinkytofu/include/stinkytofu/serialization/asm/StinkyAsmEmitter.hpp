@@ -25,6 +25,7 @@
 #include <iosfwd>
 #include <string>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
@@ -72,7 +73,7 @@ struct AsmEmitterOptions {
 ///
 /// (or) emitter.emit(func, std::cout);
 /// \endcode
-class StinkyAsmEmitter {
+class STINKYTOFU_EXPORT StinkyAsmEmitter {
    public:
     StinkyAsmEmitter() : options(AsmEmitterOptions()) {}
 

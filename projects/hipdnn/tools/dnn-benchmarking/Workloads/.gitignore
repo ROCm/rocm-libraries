@@ -1,0 +1,5 @@
+/bnorm_backward.tar.gz
+/bnorm_fwd.tar.gz
+/conv_dgrad.tar.gz
+/conv_fwd.tar.gz
+/conv_wgrad.tar.gz

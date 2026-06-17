@@ -1,4 +1,4 @@
-// Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -204,6 +204,27 @@ inline void validate_or_throw(fft_input_generator input_gen, const std::string& 
     }
 }
 
+inline bool is_host_generator(const fft_input_generator& gen)
+{
+    return gen == fft_input_generator::fft_input_random_generator_host
+           || gen == fft_input_generator::fft_input_generator_host;
+}
+inline bool is_device_generator(const fft_input_generator& gen)
+{
+    return gen == fft_input_generator::fft_input_random_generator_device
+           || gen == fft_input_generator::fft_input_generator_device;
+}
+inline bool is_random_generator(const fft_input_generator& gen)
+{
+    return gen == fft_input_generator::fft_input_random_generator_host
+           || gen == fft_input_generator::fft_input_random_generator_device;
+}
+inline bool is_deterministic_generator(const fft_input_generator& gen)
+{
+    return gen == fft_input_generator::fft_input_generator_host
+           || gen == fft_input_generator::fft_input_generator_device;
+}
+
 template <>
 struct is_fft_enum<fft_input_generator, true> : std::true_type
 {
@@ -219,6 +240,18 @@ enum fft_array_type
     fft_array_type_hermitian_planar,
     fft_array_type_unset,
 };
+
+inline bool array_type_is_planar(fft_array_type array_type)
+{
+    return array_type == fft_array_type_complex_planar
+           || array_type == fft_array_type_hermitian_planar;
+}
+
+inline bool array_type_is_interleaved(fft_array_type array_type)
+{
+    return array_type == fft_array_type_complex_interleaved
+           || array_type == fft_array_type_hermitian_interleaved;
+}
 
 inline void validate_or_throw(fft_array_type array_type, const std::string& func_name)
 {
@@ -248,6 +281,13 @@ enum fft_result_placement
 {
     fft_placement_inplace,
     fft_placement_notinplace,
+};
+
+// callback functions
+enum fft_callback_type
+{
+    fft_callback_type_none, // don't run callbacks
+    fft_callback_type_funcptr, // run callbacks specified via device function pointer
 };
 
 inline void validate_or_throw(fft_result_placement placement, const std::string& func_name)

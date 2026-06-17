@@ -22,6 +22,8 @@
  * ************************************************************************ */
 #include <nanobind/nanobind.h>
 
+#include "stinkytofu/pipeline/BackendRegistry.hpp"
+
 namespace nb = nanobind;
 
 void init_base(nb::module_ m);
@@ -39,6 +41,7 @@ void init_stinkytofu(nb::module_ m);
 
 NB_MODULE(_rocisa, m)
 {
+    stinkytofu::BackendRegistry::registerAllBackends();
     m.doc() = "Module rocisa.";
     init_base(m);
     init_containers(m);

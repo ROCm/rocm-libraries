@@ -13,6 +13,55 @@ TEST(TestTypes, HeuristicModeConversion)
               hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK);
 }
 
+TEST(TestTypes, BehaviorNoteFromBackend)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(fromHipdnnBehaviorNote(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION),
+              BehaviorNote::RUNTIME_COMPILATION);
+    EXPECT_EQ(fromHipdnnBehaviorNote(HIPDNN_BEHAVIOR_NOTE_REQUIRES_LAYOUT_TRANSFORM),
+              BehaviorNote::REQUIRES_LAYOUT_TRANSFORM);
+    EXPECT_EQ(fromHipdnnBehaviorNote(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE),
+              BehaviorNote::SUPPORTS_GRAPH_CAPTURE);
+    EXPECT_EQ(fromHipdnnBehaviorNote(HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY),
+              BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY);
+    EXPECT_EQ(fromHipdnnBehaviorNote(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION),
+              BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
+
+    constexpr hipdnnBackendBehaviorNote_t UNKNOWN_NOTE = HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT + 1;
+    EXPECT_EQ(fromHipdnnBehaviorNote(UNKNOWN_NOTE), static_cast<BehaviorNote>(UNKNOWN_NOTE));
+}
+
+TEST(TestTypes, IsKnownBehaviorNote)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_TRUE(isKnownBehaviorNote(BehaviorNote::RUNTIME_COMPILATION));
+    EXPECT_TRUE(isKnownBehaviorNote(BehaviorNote::REQUIRES_LAYOUT_TRANSFORM));
+    EXPECT_TRUE(isKnownBehaviorNote(BehaviorNote::SUPPORTS_GRAPH_CAPTURE));
+    EXPECT_TRUE(isKnownBehaviorNote(BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY));
+    EXPECT_TRUE(isKnownBehaviorNote(BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION));
+    EXPECT_FALSE(isKnownBehaviorNote(static_cast<BehaviorNote>(HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT)));
+}
+
+TEST(TestTypes, BehaviorNoteToString)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_STREQ(to_string(BehaviorNote::RUNTIME_COMPILATION), "RUNTIME_COMPILATION");
+    EXPECT_STREQ(to_string(BehaviorNote::REQUIRES_LAYOUT_TRANSFORM), "REQUIRES_LAYOUT_TRANSFORM");
+    EXPECT_STREQ(to_string(BehaviorNote::SUPPORTS_GRAPH_CAPTURE), "SUPPORTS_GRAPH_CAPTURE");
+    EXPECT_STREQ(to_string(BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY),
+                 "EXTERNAL_LIBRARY_DEPENDENCY");
+    EXPECT_STREQ(to_string(BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION),
+                 "SUPPORTS_EXECUTION_PLAN_SERIALIZATION");
+    EXPECT_STREQ(to_string(static_cast<BehaviorNote>(-1)), "unknown");
+
+    std::ostringstream oss;
+    oss << BehaviorNote::SUPPORTS_GRAPH_CAPTURE;
+    EXPECT_EQ(oss.str(), "SUPPORTS_GRAPH_CAPTURE");
+}
+
 TEST(TestTypes, GetDataTypeEnumFromType)
 {
     using namespace hipdnn_frontend;
@@ -27,6 +76,7 @@ TEST(TestTypes, GetDataTypeEnumFromType)
     EXPECT_EQ(getDataTypeEnumFromType<fp8_e4m3>(), DataType::FP8_E4M3);
     EXPECT_EQ(getDataTypeEnumFromType<fp8_e5m2>(), DataType::FP8_E5M2);
     EXPECT_EQ(getDataTypeEnumFromType<int64_t>(), DataType::INT64);
+    EXPECT_EQ(getDataTypeEnumFromType<bool>(), DataType::BOOLEAN);
 
     EXPECT_EQ(getDataTypeEnumFromType<float*>(), DataType::NOT_SET);
     EXPECT_EQ(getDataTypeEnumFromType<char>(), DataType::NOT_SET);
@@ -51,6 +101,7 @@ TEST(TestTypes, DataTypeToString)
     EXPECT_STREQ(to_string(DataType::FP6_E2M3), "fp6_e2m3");
     EXPECT_STREQ(to_string(DataType::FP6_E3M2), "fp6_e3m2");
     EXPECT_STREQ(to_string(DataType::INT64), "int64");
+    EXPECT_STREQ(to_string(DataType::BOOLEAN), "boolean");
     EXPECT_STREQ(to_string(DataType::NOT_SET), "unknown");
 }
 
@@ -187,6 +238,10 @@ TEST(TestTypes, DataTypeStreamOperator)
     EXPECT_EQ(oss.str(), "int64");
     oss.str("");
 
+    oss << DataType::BOOLEAN;
+    EXPECT_EQ(oss.str(), "boolean");
+    oss.str("");
+
     oss << DataType::NOT_SET;
     EXPECT_EQ(oss.str(), "unknown");
 }
@@ -261,6 +316,7 @@ TEST(TestTypes, ToHipdnnDataType)
     EXPECT_EQ(toHipdnnDataType(DataType::FP6_E2M3), HIPDNN_DATA_FP6_E2M3_EXT);
     EXPECT_EQ(toHipdnnDataType(DataType::FP6_E3M2), HIPDNN_DATA_FP6_E3M2_EXT);
     EXPECT_EQ(toHipdnnDataType(DataType::INT64), HIPDNN_DATA_INT64);
+    EXPECT_EQ(toHipdnnDataType(DataType::BOOLEAN), HIPDNN_DATA_BOOLEAN);
     EXPECT_EQ(toHipdnnDataType(DataType::NOT_SET), std::nullopt);
 }
 
@@ -290,6 +346,7 @@ TEST(TestTypes, FromHipdnnDataTypeAllValidTypes)
     check(HIPDNN_DATA_FP6_E2M3_EXT, DataType::FP6_E2M3);
     check(HIPDNN_DATA_FP6_E3M2_EXT, DataType::FP6_E3M2);
     check(HIPDNN_DATA_INT64, DataType::INT64);
+    check(HIPDNN_DATA_BOOLEAN, DataType::BOOLEAN);
 }
 
 TEST(TestTypes, FromHipdnnDataTypeUnknownReturnsError)
@@ -322,7 +379,8 @@ TEST(TestTypes, FromHipdnnDataTypeRoundTrip)
                    DataType::INT4,
                    DataType::FP6_E2M3,
                    DataType::FP6_E3M2,
-                   DataType::INT64})
+                   DataType::INT64,
+                   DataType::BOOLEAN})
     {
         auto hipdnnOpt = toHipdnnDataType(dt);
         ASSERT_TRUE(hipdnnOpt.has_value()) << "toHipdnnDataType failed for " << to_string(dt);

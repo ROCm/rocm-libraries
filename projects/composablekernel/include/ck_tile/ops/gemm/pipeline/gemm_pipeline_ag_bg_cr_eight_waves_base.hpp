@@ -24,6 +24,8 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
     static constexpr auto I1 = number<1>{};
     static constexpr auto I2 = number<2>{};
 
+    static constexpr bool LargeTensors = Problem::LargeTensors;
+
     static constexpr index_t BlockSize = Problem::kBlockSize;
 
     static constexpr index_t MPerBlock = BlockGemmShape::kM;
@@ -63,8 +65,11 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
                                        DstBlockTile& dst_block_tile,
                                        SrcTileWindow& lds_tile_window) const
     {
+        // swizzle factor limitation
+        using static_move_ys =
+            std::conditional_t<std::is_same_v<DataType, pk_fp6x16_t>, false_type, true_type>;
         lds_tile_window.set_bottom_tensor_view_data_ptr(smem);
-        lds_tile_window.load(dst_block_tile, number<-1>{}, true_type{}, true_type{});
+        lds_tile_window.load(dst_block_tile, number<-1>{}, true_type{}, static_move_ys{});
     }
 
     template <typename DataType, typename DstBlockTile, typename SrcTileWindow>
@@ -72,6 +77,9 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
                                        DstBlockTile& dst_block_tile,
                                        SrcTileWindow& lds_tile_window) const
     {
+        // swizzle factor limitation
+        using static_move_ys =
+            std::conditional_t<std::is_same_v<DataType, pk_fp6x16_t>, false_type, true_type>;
         lds_tile_window.set_bottom_tensor_view_data_ptr(smem);
         static_for_product<number<NIterPerWarp>, number<KIterPerWarp>>{}(
             [&](auto nIter, auto kIter) {
@@ -80,7 +88,7 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
                     dst_block_tile[nIter][kIter],
                     number<-1>{},
                     true_type{},
-                    true_type{});
+                    static_move_ys{});
             });
     }
 
@@ -199,6 +207,22 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
         return 0;
     }
 
+    template <typename AQDramBlockWindowTmp,
+              typename std::enable_if_t<std::is_same_v<AQDramBlockWindowTmp, NullTileWindowType>,
+                                        bool>* = nullptr>
+    CK_TILE_DEVICE static constexpr auto GetInstCountAQ(const AQDramBlockWindowTmp&)
+    {
+        return 0;
+    }
+
+    template <typename BQDramBlockWindowTmp,
+              typename std::enable_if_t<std::is_same_v<BQDramBlockWindowTmp, NullTileWindowType>,
+                                        bool>* = nullptr>
+    CK_TILE_DEVICE static constexpr auto GetInstCountBQ(const BQDramBlockWindowTmp&)
+    {
+        return 0;
+    }
+
     // A/B Quant
     template <typename AQDramBlockWindowTmp,
               typename std::enable_if_t<!std::is_same_v<AQDramBlockWindowTmp, NullTileWindowType>,
@@ -234,6 +258,22 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
         return Policy::template GetKStepBQ<Problem>();
     }
 
+    template <typename AQDramBlockWindowTmp,
+              typename std::enable_if_t<!std::is_same_v<AQDramBlockWindowTmp, NullTileWindowType>,
+                                        bool>* = nullptr>
+    CK_TILE_DEVICE static constexpr auto GetInstCountAQ(const AQDramBlockWindowTmp&)
+    {
+        return Policy::template GetInstCountAQ<Problem>();
+    }
+
+    template <typename BQDramBlockWindowTmp,
+              typename std::enable_if_t<!std::is_same_v<BQDramBlockWindowTmp, NullTileWindowType>,
+                                        bool>* = nullptr>
+    CK_TILE_DEVICE static constexpr auto GetInstCountBQ(const BQDramBlockWindowTmp&)
+    {
+        return Policy::template GetInstCountBQ<Problem>();
+    }
+
     template <bool HasHotLoop,
               TailNumber TailNum,
               typename ADramBlockWindowTmp,
@@ -257,14 +297,6 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
                                    : TailNum == TailNumber::Odd  ? 3
                                                                  : 0;
         static_assert(N_LOOP >= 1, "wrong!");
-
-        // Instructions Count
-        constexpr index_t VectorSizeB = Policy::template GetVectorSizeB<Problem>();
-        constexpr index_t B_LOAD_INST = NPerBlock * KPerBlock / BlockSize / VectorSizeB;
-        constexpr index_t AQ_LOAD_INST =
-            std::is_same_v<AQDramBlockWindowTmp, NullTileWindowType> ? 0 : MIterPerWarp;
-        constexpr index_t BQ_LOAD_INST =
-            std::is_same_v<BQDramBlockWindowTmp, NullTileWindowType> ? 0 : 1;
 
         // -----
         // Setup
@@ -313,6 +345,12 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
         constexpr BDramTileWindowStep b_move_step   = {0, Preshuffle ? kflatKPerBlock : KPerBlock};
         constexpr AQDramTileWindowStep aq_move_step = {0, GetKStepAQ(aq_copy_dram_window)};
         constexpr BQDramTileWindowStep bq_move_step = {0, GetKStepBQ(bq_copy_dram_window)};
+
+        // Instructions Count
+        constexpr index_t VectorSizeB  = Policy::template GetVectorSizeB<Problem>();
+        constexpr index_t B_LOAD_INST  = NPerBlock * KPerBlock / BlockSize / VectorSizeB;
+        constexpr index_t AQ_LOAD_INST = GetInstCountAQ(aq_copy_dram_window);
+        constexpr index_t BQ_LOAD_INST = GetInstCountBQ(bq_copy_dram_window);
 
         // -------
         // Lambdas

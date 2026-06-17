@@ -2,11 +2,41 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
-## rocPRIM 4.4.0 for ROCm 7.13
+## Since last release ROCm 7.13
+
+### Added
+
+* Added `generate_resource_spec.cpp` to the test directory and built as a new target by CMake. It generates the resource spec file required by CTest when running tests in parallel.
+* gfx1250 support
+
+* Added a parallel `device_topk`, which finds the largest/smallest K elements from an input array of keys.
+
+### Changed
+
+* Updated the documentation on how to run rocPrim tests on multiple GPUs in parallel.
+
+### Removed
+
+* Removed the `GenerateResourceSpec.cmake` script - it is replaced by the added `generate_resource_spec.cpp` code above.
+
+## Since last release ROCm 7.12
 
 ### Added
 
 * Added type trait definitions for `__hip_bfloat16`. This should resolve issues where this type did not work with radix-based algorithms.
+* Unit tests for config_types
+
+### Optimized
+
+* Reduced build times for unit tests.
+* Memory usage in unit tests.
+
+### Resolved issues
+
+* Fixed a silent overflow in `rocprim::device_segmented_reduce` where it could exceed the maximum number of HIP threads, resulting in missing output.
+* Certain large unit tests now properly detect if insufficient system memory is present and skip the test case accordingly.
+* Fixed out-of-bounds memory access in block run length decode.
+* Fixed memory leak in unit tests.
 
 ## rocPRIM 4.3.0 for ROCm 7.12
 
@@ -28,6 +58,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Benchmarking now requires [AMD SMI](https://rocm.docs.amd.com/projects/amdsmi/en/latest/) to be installed.
   * rocPRIM now uses the new single-header library 'primbench' for benchmarks, rather than Google Benchmark. primbench requires AMD SMI.
   * See `shared/primbench/README.md` for primbench its documentation.
+* Uses mold linker for compilation if availible.
 
 ### Removed
 
@@ -79,6 +110,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added a new CMake option `-DUSE_SYSTEM_LIB` to allow tests to be built from `ROCm` libraries provided by the system.
 * Added `rocprim::apply` which applies a function to a `rocprim::tuple`.
 
+
+### Known issues
+
+* benchmark_device_adjacent_difference build hangs due to https://github.com/ROCm/llvm-project/issues/2616.  Workaround is to build with -O1.
 
 ### Changed
 

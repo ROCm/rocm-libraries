@@ -137,8 +137,8 @@ struct MIOPEN_EXPORT Handle : miopenHandle
         auto ks = this->GetKernelsImpl(algorithm, network_config);
         if(ks.empty())
         {
-            MIOPEN_THROW("looking for default kernel (does not exist): " + algorithm + ", " +
-                         network_config);
+            MIOPEN_THROW(std::string("looking for default kernel (does not exist): ") + algorithm +
+                         ", " + network_config);
         }
         return this->Run(ks.front());
     }

@@ -61,10 +61,24 @@ TEST_F(TestCrossTypeConversion, Bfloat16ToFp8E4M3)
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
+TEST_F(TestCrossTypeConversion, Bfloat16ToFp8E4M3Fnuz)
+{
+    const bfloat16 a(4.0f);
+    const fp8_e4m3_fnuz b(a);
+    EXPECT_EQ(static_cast<float>(b), 4.0f);
+}
+
 TEST_F(TestCrossTypeConversion, Bfloat16ToFp8E5M2)
 {
     const bfloat16 a(4.0f);
     const fp8_e5m2 b(a);
+    EXPECT_EQ(static_cast<float>(b), 4.0f);
+}
+
+TEST_F(TestCrossTypeConversion, Bfloat16ToFp8E5M2Fnuz)
+{
+    const bfloat16 a(4.0f);
+    const fp8_e5m2_fnuz b(a);
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
@@ -128,10 +142,24 @@ TEST_F(TestCrossTypeConversion, HalfToFp8E4M3)
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
+TEST_F(TestCrossTypeConversion, HalfToFp8E4M3Fnuz)
+{
+    const half a(4.0f);
+    const fp8_e4m3_fnuz b(a);
+    EXPECT_EQ(static_cast<float>(b), 4.0f);
+}
+
 TEST_F(TestCrossTypeConversion, HalfToFp8E5M2)
 {
     const half a(4.0f);
     const fp8_e5m2 b(a);
+    EXPECT_EQ(static_cast<float>(b), 4.0f);
+}
+
+TEST_F(TestCrossTypeConversion, HalfToFp8E5M2Fnuz)
+{
+    const half a(4.0f);
+    const fp8_e5m2_fnuz b(a);
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
@@ -292,6 +320,45 @@ TEST_F(TestCrossTypeConversion, Fp8E4M3ToDouble)
 }
 
 // ============================================================================
+// fp8_e4m3_fnuz -> other types
+// ============================================================================
+
+TEST_F(TestCrossTypeConversion, Fp8E4M3FnuzToBfloat16)
+{
+    const fp8_e4m3_fnuz a(4.0f);
+    const bfloat16 b(a);
+    EXPECT_EQ(static_cast<float>(b), 4.0f);
+}
+
+TEST_F(TestCrossTypeConversion, Fp8E4M3FnuzToHalf)
+{
+    const fp8_e4m3_fnuz a(4.0f);
+    const half b(a);
+    EXPECT_EQ(static_cast<float>(b), 4.0f);
+}
+
+TEST_F(TestCrossTypeConversion, Fp8E4M3FnuzToFp8E5M2Fnuz)
+{
+    const fp8_e4m3_fnuz a(4.0f);
+    const fp8_e5m2_fnuz b(a);
+    EXPECT_EQ(static_cast<float>(b), 4.0f);
+}
+
+TEST_F(TestCrossTypeConversion, Fp8E4M3FnuzToFloat)
+{
+    const fp8_e4m3_fnuz a(8.0f);
+    auto b = static_cast<float>(a);
+    EXPECT_EQ(b, 8.0f);
+}
+
+TEST_F(TestCrossTypeConversion, Fp8E4M3FnuzToDouble)
+{
+    const fp8_e4m3_fnuz a(16.0f);
+    auto b = static_cast<double>(a);
+    EXPECT_EQ(b, 16.0);
+}
+
+// ============================================================================
 // fp8_e5m2 -> other types
 // ============================================================================
 
@@ -326,6 +393,45 @@ TEST_F(TestCrossTypeConversion, Fp8E5M2ToFloat)
 TEST_F(TestCrossTypeConversion, Fp8E5M2ToDouble)
 {
     const fp8_e5m2 a(16.0f);
+    auto b = static_cast<double>(a);
+    EXPECT_EQ(b, 16.0);
+}
+
+// ============================================================================
+// fp8_e5m2_fnuz -> other types
+// ============================================================================
+
+TEST_F(TestCrossTypeConversion, Fp8E5M2FnuzToBfloat16)
+{
+    const fp8_e5m2_fnuz a(4.0f);
+    const bfloat16 b(a);
+    EXPECT_EQ(static_cast<float>(b), 4.0f);
+}
+
+TEST_F(TestCrossTypeConversion, Fp8E5M2FnuzToHalf)
+{
+    const fp8_e5m2_fnuz a(4.0f);
+    const half b(a);
+    EXPECT_EQ(static_cast<float>(b), 4.0f);
+}
+
+TEST_F(TestCrossTypeConversion, Fp8E5M2FnuzToFp8E4M3Fnuz)
+{
+    const fp8_e5m2_fnuz a(4.0f);
+    const fp8_e4m3_fnuz b(a);
+    EXPECT_EQ(static_cast<float>(b), 4.0f);
+}
+
+TEST_F(TestCrossTypeConversion, Fp8E5M2FnuzToFloat)
+{
+    const fp8_e5m2_fnuz a(8.0f);
+    auto b = static_cast<float>(a);
+    EXPECT_EQ(b, 8.0f);
+}
+
+TEST_F(TestCrossTypeConversion, Fp8E5M2FnuzToDouble)
+{
+    const fp8_e5m2_fnuz a(16.0f);
     auto b = static_cast<double>(a);
     EXPECT_EQ(b, 16.0);
 }
@@ -408,10 +514,24 @@ TEST_F(TestCrossTypeConversion, FloatToFp8E4M3)
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
+TEST_F(TestCrossTypeConversion, FloatToFp8E4M3Fnuz)
+{
+    const float a = 4.0f;
+    const fp8_e4m3_fnuz b(a);
+    EXPECT_EQ(static_cast<float>(b), 4.0f);
+}
+
 TEST_F(TestCrossTypeConversion, FloatToFp8E5M2)
 {
     const float a = 4.0f;
     const fp8_e5m2 b(a);
+    EXPECT_EQ(static_cast<float>(b), 4.0f);
+}
+
+TEST_F(TestCrossTypeConversion, FloatToFp8E5M2Fnuz)
+{
+    const float a = 4.0f;
+    const fp8_e5m2_fnuz b(a);
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
@@ -468,10 +588,24 @@ TEST_F(TestCrossTypeConversion, DoubleToFp8E4M3)
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
+TEST_F(TestCrossTypeConversion, DoubleToFp8E4M3Fnuz)
+{
+    const double a = 4.0;
+    const fp8_e4m3_fnuz b(a);
+    EXPECT_EQ(static_cast<float>(b), 4.0f);
+}
+
 TEST_F(TestCrossTypeConversion, DoubleToFp8E5M2)
 {
     const double a = 4.0;
     const fp8_e5m2 b(a);
+    EXPECT_EQ(static_cast<float>(b), 4.0f);
+}
+
+TEST_F(TestCrossTypeConversion, DoubleToFp8E5M2Fnuz)
+{
+    const double a = 4.0;
+    const fp8_e5m2_fnuz b(a);
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
@@ -608,7 +742,9 @@ TEST_F(TestCrossTypeConversion, TypeTraitsVerification)
     EXPECT_TRUE(std::is_trivially_copyable_v<fp6_e2m3>);
     EXPECT_TRUE(std::is_trivially_copyable_v<fp6_e3m2>);
     EXPECT_TRUE(std::is_trivially_copyable_v<fp8_e4m3>);
+    EXPECT_TRUE(std::is_trivially_copyable_v<fp8_e4m3_fnuz>);
     EXPECT_TRUE(std::is_trivially_copyable_v<fp8_e5m2>);
+    EXPECT_TRUE(std::is_trivially_copyable_v<fp8_e5m2_fnuz>);
     EXPECT_TRUE(std::is_trivially_copyable_v<fp8_e8m0>);
 
     // Verify standard layout
@@ -618,6 +754,8 @@ TEST_F(TestCrossTypeConversion, TypeTraitsVerification)
     EXPECT_TRUE(std::is_standard_layout_v<fp6_e2m3>);
     EXPECT_TRUE(std::is_standard_layout_v<fp6_e3m2>);
     EXPECT_TRUE(std::is_standard_layout_v<fp8_e4m3>);
+    EXPECT_TRUE(std::is_standard_layout_v<fp8_e4m3_fnuz>);
     EXPECT_TRUE(std::is_standard_layout_v<fp8_e5m2>);
+    EXPECT_TRUE(std::is_standard_layout_v<fp8_e5m2_fnuz>);
     EXPECT_TRUE(std::is_standard_layout_v<fp8_e8m0>);
 }

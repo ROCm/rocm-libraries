@@ -18,6 +18,10 @@
 #include <type_traits>
 #include <vector>
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-invalidation"
+#endif
 static ck::index_t param_mask = 0xffffff;
 
 using FP32 = float;
@@ -302,3 +306,6 @@ int main(int argc, char** argv)
     }
     return RUN_ALL_TESTS();
 }
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

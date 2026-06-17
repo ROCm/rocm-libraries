@@ -19,16 +19,17 @@ namespace ck_tile {
 template <typename Problem, typename PipelinePolicy = GemmWPABQuantPipelineAgBgCrPolicy>
 struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRegV2<Problem>
 {
-    using Base            = WeightPreshufflePipelineAGmemBGmemCRegV2<Problem>;
-    using ADataType       = remove_cvref_t<typename Problem::ADataType>;
-    using AQDataType      = remove_cvref_t<typename Problem::AQDataType>;
-    using BDataType       = remove_cvref_t<typename Problem::BDataType>;
-    using BQDataType      = remove_cvref_t<typename Problem::BQDataType>;
-    using CDataType       = remove_cvref_t<typename Problem::CDataType>;
-    using ComputeDataType = remove_cvref_t<typename Problem::ComputeDataType>;
-    using BlockGemmShape  = remove_cvref_t<typename Problem::BlockGemmShape>;
-    using AQuantGroupSize = remove_cvref_t<typename Problem::AQuantGroupSize>;
-    using BQuantGroupSize = remove_cvref_t<typename Problem::BQuantGroupSize>;
+    using Base             = WeightPreshufflePipelineAGmemBGmemCRegV2<Problem>;
+    using ADataType        = remove_cvref_t<typename Problem::ADataType>;
+    using AQDataType       = remove_cvref_t<typename Problem::AQDataType>;
+    using BDataType        = remove_cvref_t<typename Problem::BDataType>;
+    using BQDataType       = remove_cvref_t<typename Problem::BQDataType>;
+    using CDataType        = remove_cvref_t<typename Problem::CDataType>;
+    using AComputeDataType = remove_cvref_t<typename Problem::AComputeDataType>;
+    using BComputeDataType = remove_cvref_t<typename Problem::BComputeDataType>;
+    using BlockGemmShape   = remove_cvref_t<typename Problem::BlockGemmShape>;
+    using AQuantGroupSize  = remove_cvref_t<typename Problem::AQuantGroupSize>;
+    using BQuantGroupSize  = remove_cvref_t<typename Problem::BQuantGroupSize>;
 
     using ALayout  = remove_cvref_t<typename Problem::ALayout>;
     using BLayout  = remove_cvref_t<typename Problem::BLayout>;
@@ -71,6 +72,9 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
     using Base::flatNPerWarp;
 
     using Base::m_preload;
+
+    using Base::WarpTileK;
+    using Base::WarpTileM;
 
     static constexpr index_t VectorLoadSize = Problem::VectorLoadSize;
 
@@ -143,7 +147,7 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
         // How often (in MFMA units) we should insert DS (LDS) operations.
         constexpr index_t ds_rep = mfma_inst / (ds_read_inst + ds_write_inst);
         // How often (in MFMA units) we should insert VMEM buffer loads.
-        // buffer_load_rep ≈ "MFMA per VMEM_READ", clamped so that one buffer_load
+        // buffer_load_rep ~= "MFMA per VMEM_READ", clamped so that one buffer_load
         // is assumed to cover at most 4 MFMA instructions.
         constexpr index_t buffer_load_rep =
             min(mfma_inst / buffer_load_inst, 4); // 1 buffer_load cover 4 mfma
@@ -262,9 +266,30 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
                              {0, 0},
                              a_dram_tile_distribution);
 
-        // ping-pong window for A LDS
+// ping-pong window for A LDS
+#ifdef __gfx125__
+        constexpr index_t MWarpBlock = WarpTileM / 16;
+
+        constexpr index_t KLane      = get_warp_size() / 16;
+        constexpr index_t KPerThread = WarpTileK / KLane;
+
+        constexpr index_t PackedSize    = numeric_traits<typename Problem::ADataType>::PackedSize;
+        constexpr index_t MaxVecSize    = 16 / sizeof(ADataType) * PackedSize;
+        constexpr index_t KItemsPerLoad = min(MaxVecSize, KPerThread);
+        constexpr index_t KFragment     = KPerThread / KItemsPerLoad;
+        constexpr auto a_block_inner_dstr_encoding = tile_distribution_encoding<
+            sequence<>,
+            tuple<sequence<MWarpBlock, 16>, sequence<KFragment, KLane, KItemsPerLoad>>,
+            tuple<sequence<2, 1>>,
+            tuple<sequence<1, 1>>,
+            sequence<1, 2, 2>,
+            sequence<0, 0, 2>>{};
+
+        auto a_warp_tile_distribution = make_static_tile_distribution(a_block_inner_dstr_encoding);
+#else
         auto a_warp_tile_distribution =
             make_static_tile_distribution(typename WG::AWarpDstrEncoding{});
+#endif
 
         auto a_warp_window_ping_tmp =
             make_tile_window(a_lds_block_ping,
@@ -322,7 +347,7 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
                 b_flat_distribution);
 
         using BTypeToUse =
-            mixed_prec_compute_type_from_input_t<BDataType, ADataType, ComputeDataType>;
+            mixed_prec_compute_type_from_input_t<BDataType, ADataType, AComputeDataType>;
         using BTileType = decltype(make_static_distributed_tensor<BTypeToUse>(b_flat_distribution));
 
         // pingpong buffer for B
@@ -612,8 +637,10 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
                                    const AQDramBlockWindowTmp& aq_dram_block_window_tmp,
                                    const BQDramBlockWindowTmp& bq_dram_block_window_tmp,
                                    index_t num_loop,
+                                   bool has_hot_loop,
                                    TailNumber tail_number,
                                    void* p_smem,
+                                   index_t m = 0,
                                    index_t n = 0) const
     {
         const auto RunPipeline = [&](auto bool_val, auto tail_num_) {
@@ -625,11 +652,14 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
                 b_flat_dram_block_window_tmp,
                 aq_dram_block_window_tmp,
                 bq_dram_block_window_tmp,
-                n, // dummy value, won't be used
+                // The preshuffle-B ABQuant pipeline currently ignores m and n; keep this
+                // runtime-tail wrapper aligned with the generic ABQuant pipeline signature.
+                m,
+                n,
                 num_loop,
                 p_smem);
         };
-        return Base::TailHandler(RunPipeline, true, tail_number);
+        return Base::TailHandler(RunPipeline, has_hot_loop, tail_number);
     }
 };
 } // namespace ck_tile

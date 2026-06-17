@@ -25,6 +25,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/Function.hpp"
 
 namespace stinkytofu {
@@ -58,6 +59,6 @@ struct DominanceInfo {
 
 /// Compute dominator tree and dominance frontiers for the given function.
 /// Returns an empty DominanceInfo if the function has no blocks.
-DominanceInfo computeDominanceInfo(Function& func);
+STINKYTOFU_EXPORT DominanceInfo computeDominanceInfo(Function& func);
 
 }  // namespace stinkytofu

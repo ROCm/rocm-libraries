@@ -31,6 +31,10 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/TensorDescriptor_Detail.hpp>
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 namespace TensileLite
 {
     template <>
@@ -250,3 +254,5 @@ namespace std
     };
 
 } // namespace std
+
+TENSILE_HIDDEN_END

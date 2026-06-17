@@ -41,25 +41,24 @@ operation:
     graph_return_type: "single"
     graph_return_outputs:
       - "dx"
+    node_type_enum: "NodeType::CONVOLUTION_DGRAD"
+    attributes_filename: "ConvolutionDgrad"
 
   tensor_fields:
     - name: "dy"
       fbs_field: "dy_tensor_uid"
       attr_suffix: "DY"
       required: true
-      frontend_getter: "get_dy()"
 
     - name: "w"
       fbs_field: "w_tensor_uid"
       attr_suffix: "W"
       required: true
-      frontend_getter: "get_w()"
 
     - name: "dx"
       fbs_field: "dx_tensor_uid"
       attr_suffix: "DX"
       required: true
-      frontend_getter: "get_dx()"
 
   data_fields:
     - name: "pre_padding"
@@ -102,7 +101,8 @@ operation:
       fbs_field: "conv_mode"
       attr_name: "HIPDNN_ATTR_CONVOLUTION_CONV_MODE"
       type: "mode"
-      cpp_enum: "hipdnn_data_sdk::data_objects::ConvMode"
+      cpp_enum: "hipdnn_flatbuffers_sdk::data_objects::ConvMode"
+      frontend_type: "ConvolutionMode"
       required: false
       frontend_getter: "get_convolution_mode()"
       backend_setter: "setConvMode"

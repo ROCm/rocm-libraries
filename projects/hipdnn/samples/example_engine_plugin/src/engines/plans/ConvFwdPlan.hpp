@@ -30,7 +30,7 @@ class IKernelCompiler;
 class ConvFwdPlan : public hipdnn_plugin_sdk::IPlan<ExampleProviderHandle>
 {
 public:
-    explicit ConvFwdPlan(ConvFwdParams&& params);
+    explicit ConvFwdPlan(const ConvFwdParams& params);
 
     ~ConvFwdPlan() override = default;
 

@@ -24,6 +24,26 @@ hipdnn_generate_version_header(hipdnn_frontend)
 
 target_link_libraries(hipdnn_frontend INTERFACE hipdnn_data_sdk hipdnn_backend)
 
+# Per-library JSON gate. Defaults from the umbrella HIPDNN_SKIP_JSON_LIB when
+# building as part of the top-level project; can be set independently when
+# frontend is built standalone. Same name as the C++ macro defined on the target.
+if(DEFINED HIPDNN_SKIP_JSON_LIB)
+    set(_hipdnn_frontend_skip_default ${HIPDNN_SKIP_JSON_LIB})
+else()
+    set(_hipdnn_frontend_skip_default OFF)
+endif()
+option(HIPDNN_FRONTEND_SKIP_JSON_LIB
+    "Skip nlohmann/json.hpp from frontend public headers."
+    ${_hipdnn_frontend_skip_default})
+unset(_hipdnn_frontend_skip_default)
+
+if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+    if(NOT TARGET nlohmann_json::nlohmann_json)
+        hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
+    endif()
+    hipdnn_add_dependency_includes(hipdnn_frontend nlohmann_json::nlohmann_json)
+endif()
+
 set(HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/frontend")
 
 target_include_directories(
@@ -37,6 +57,10 @@ set_target_properties(hipdnn_frontend PROPERTIES
         "$<INSTALL_INTERFACE:${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}>"
 )
 
+# Scope the SKIP_JSON_LIB macro to installed (downstream) consumers only.
+# In-tree consumers (frontend tests, etc.) keep access to the json serialize/
+# deserialize methods so the build always succeeds; only external consumers of
+# the installed package see the gated-out public API.
 target_compile_definitions(
     hipdnn_frontend INTERFACE
     $<$<BOOL:${HIPDNN_FRONTEND_SKIP_JSON_LIB}>:HIPDNN_FRONTEND_SKIP_JSON_LIB>
@@ -58,6 +82,11 @@ export(
 install(TARGETS hipdnn_frontend EXPORT hipdnn_frontend_targets COMPONENT Development)
 
 # cmake-lint: disable=E1122
+# The cuDNN-compatibility shim subtree (include/hipdnn_compatibility/) is excluded
+# here and installed separately, gated behind HIPDNN_ENABLE_CUDNN_COMPATIBILITY
+# below. REGEX matches each candidate file's full path (forward slashes), which
+# contains "/hipdnn_compatibility/"; any EXCLUDE match wins regardless of clause
+# order.
 install(
     DIRECTORY ${HIP_DNN_FRONTEND_INCLUDE_DIR}/
     DESTINATION ${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}
@@ -66,7 +95,21 @@ install(
     PATTERN "*.h"
     PATTERN "*.hpp"
     PATTERN "*.h.in" EXCLUDE
+    REGEX "/hipdnn_compatibility/" EXCLUDE
 )
+
+# cuDNN-compatibility shim headers — installed only when the shim is enabled,
+# alongside hipdnn_frontend headers in the Development component (RFC 0012 §8.5).
+if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
+    # cmake-lint: disable=E1122
+    install(
+        DIRECTORY ${HIP_DNN_FRONTEND_INCLUDE_DIR}/hipdnn_compatibility/
+        DESTINATION ${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}/hipdnn_compatibility
+        COMPONENT Development
+        FILES_MATCHING
+        PATTERN "*.h"
+    )
+endif()
 
 # Install generated version header
 install(

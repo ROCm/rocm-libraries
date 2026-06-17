@@ -47,9 +47,9 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
                            const float activ_gamma,
                            const miopen::TensorDescriptor& xDesc,
                            ConstData_t x,
-                           const miopen::TensorDescriptor& yDesc,
+                           const miopen::TensorDescriptor& /*yDesc*/,
                            Data_t y,
-                           const miopen::TensorDescriptor& bnScaleBiasMeanVarDesc,
+                           const miopen::TensorDescriptor& /*bnScaleBiasMeanVarDesc*/,
                            ConstData_t bnScale,
                            ConstData_t bnBias,
                            ConstData_t estimatedMean,
@@ -61,9 +61,9 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
     std::tie(n, c, h, w) = miopen::tien<4>(xDesc.GetLengths());
 
     // Setup the kernel launch parameters
-    bool is_layout_NHWC = (xDesc.GetLayout_t() == miopenTensorNHWC);
-    size_t read_len     = (bn_mode == miopenBNSpatial) ? (is_layout_NHWC ? c : h * w) : c * h * w;
-    size_t read_unit    = (read_len % 4 == 0) ? 4 : (read_len % 2 == 0) ? 2 : 1;
+    const bool is_layout_NHWC = (xDesc.GetLayoutEnum() == miopenTensorNHWC);
+    size_t read_len  = (bn_mode == miopenBNSpatial) ? (is_layout_NHWC ? c : h * w) : c * h * w;
+    size_t read_unit = (read_len % 4 == 0) ? 4 : (read_len % 2 == 0) ? 2 : 1;
     // For vectorized r/rw of the input/output data
     std::string READ_TYPE = (read_unit == 1) ? "_FLOAT" : "_FLOAT" + std::to_string(read_unit);
     size_t max_localsize  = 256;

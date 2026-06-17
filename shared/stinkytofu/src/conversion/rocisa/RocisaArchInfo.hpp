@@ -19,6 +19,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <unordered_map>
 #include <vector>

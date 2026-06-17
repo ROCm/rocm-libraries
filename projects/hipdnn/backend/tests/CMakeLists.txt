@@ -11,10 +11,10 @@ endif()
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
-set(TEST_PLUGIN1_NAME "hipdnn_test_plugin1")
-set(TEST_PLUGIN2_NAME "hipdnn_test_plugin2")
-set(TEST_NO_API_VERSION_PLUGIN_NAME "hipdnn_test_no_api_version_plugin_name")
-set(TEST_ENGINE_PLUGIN1_NAME "hipdnn_test_engine_plugin1")
+# Test plugin target names come from cmake/TestPluginNames.cmake (included by
+# the root CMakeLists.txt before any subdirectory). The targets themselves are
+# created later by tests/test_plugins/, but the names are needed here for
+# compile definitions and add_dependencies forward references.
 
 add_executable(
     hipdnn_backend_tests
@@ -74,11 +74,17 @@ add_executable(
     descriptors/TestGraphDescriptorReduction.cpp
     descriptors/TestRMSNormOperationDescriptor.cpp
     descriptors/TestRMSNormOperationFromNode.cpp
+    descriptors/TestRMSNormBackwardOperationDescriptor.cpp
+    descriptors/TestRMSNormBackwardOperationFromNode.cpp
+    descriptors/TestGraphDescriptorRMSNormBackward.cpp
     descriptors/TestSdpaBwdOperationDescriptor.cpp
     descriptors/TestSdpaBwdOperationFromNode.cpp
     descriptors/TestSdpaFwdOperationDescriptor.cpp
     descriptors/TestSdpaFwdOperationFromNode.cpp
     descriptors/TestGraphDescriptorSdpaBwd.cpp
+    descriptors/TestResampleFwdOperationDescriptor.cpp
+    descriptors/TestResampleFwdOperationFromNode.cpp
+    descriptors/TestGraphDescriptorResampleFwd.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
     descriptors/TestDataTypeConversion.cpp
     descriptors/TestDescriptorFromFlatBuffer.cpp
@@ -86,15 +92,30 @@ add_executable(
     descriptors/TestVariantPackDescriptor.cpp
     main.cpp
     TestEnginePluginResourceManager.cpp
+    TestExecutionPlanSerializationApi.cpp
+    TestGraphAndPlanSerializationApi.cpp
     TestLastErrorManager.cpp
     TestBackendEnumStringUtils.cpp
     TestFlatbufferUtilities.cpp
     TestHandle.cpp
     TestHelpers.cpp
+    IntegrationHeuristicPlugin.cpp
+    TestHeuristicPolicyFramework.cpp
+    IntegrationHeuristicPolicyPlugins.cpp
     TestBackendLogger.cpp
     TestGraphLogger.cpp
+    TestHeuristicPlugin.cpp
+    TestHeuristicPluginManager.cpp
+    TestHeuristicPluginManagerValidationPaths.cpp
+    TestSelectionHeuristic.cpp
+    TestHeuristicPluginResourceManager.cpp
+    heuristics/TestConfigBuiltIn.cpp
+    heuristics/TestDeviceProperties.cpp
+    heuristics/TestEngineOverrideConfig.cpp
+    heuristics/TestStaticOrderingBuiltIn.cpp
     TestUserLoggingApis.cpp
     TestPlatformUtils.cpp
+    TestEnginePluginOverride.cpp
     TestPlugin.cpp
     TestSharedLibrary.cpp
     TestVersion.cpp
@@ -117,6 +138,13 @@ target_compile_definitions(
             TEST_PLUGIN2_NAME="${TEST_PLUGIN2_NAME}"
             TEST_NO_API_VERSION_PLUGIN_NAME="${TEST_NO_API_VERSION_PLUGIN_NAME}"
             TEST_ENGINE_PLUGIN1_NAME="${TEST_ENGINE_PLUGIN1_NAME}"
+            TEST_GOOD_HEURISTIC_PLUGIN_NAME="${TEST_GOOD_HEURISTIC_PLUGIN_NAME}"
+            TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME="${TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME}"
+            TEST_NO_OPTIONAL_HEURISTIC_PLUGIN_NAME="${TEST_NO_OPTIONAL_HEURISTIC_PLUGIN_NAME}"
+            TEST_BAD_API_VERSION_HEURISTIC_PLUGIN_NAME="${TEST_BAD_API_VERSION_HEURISTIC_PLUGIN_NAME}"
+            TEST_EMPTY_NAME_HEURISTIC_PLUGIN_NAME="${TEST_EMPTY_NAME_HEURISTIC_PLUGIN_NAME}"
+            TEST_DUPLICATE_POLICY_ID_A_PLUGIN_NAME="${TEST_DUPLICATE_POLICY_ID_A_PLUGIN_NAME}"
+            TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME="${TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME}"
 )
 target_compile_options(hipdnn_backend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 clang_tidy_check(hipdnn_backend_tests)
@@ -186,6 +214,19 @@ set_target_properties(
 
 install(TARGETS ${TEST_NO_API_VERSION_PLUGIN_NAME} LIBRARY DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
         RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
+)
+
+# Add dependencies on heuristic test plugins (built in tests/test_plugins/)
+# Note: These targets are forward references - they will be created when tests/test_plugins/
+# is processed later. CMake resolves these dependencies at build time.
+add_dependencies(hipdnn_backend_tests
+    ${TEST_GOOD_HEURISTIC_PLUGIN_NAME}
+    ${TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME}
+    ${TEST_NO_OPTIONAL_HEURISTIC_PLUGIN_NAME}
+    ${TEST_BAD_API_VERSION_HEURISTIC_PLUGIN_NAME}
+    ${TEST_EMPTY_NAME_HEURISTIC_PLUGIN_NAME}
+    ${TEST_DUPLICATE_POLICY_ID_A_PLUGIN_NAME}
+    ${TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME}
 )
 
 add_unit_test_target(hipdnn_backend_tests ${CMAKE_CURRENT_BINARY_DIR})

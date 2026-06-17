@@ -35,6 +35,8 @@
 #include <cstdint>
 #include <string_view>
 
+#include "stinkytofu/Export.hpp"
+
 namespace stinkytofu {
 
 /**
@@ -71,14 +73,14 @@ enum Opcode : uint16_t {
  * @param opcode The logical IR opcode
  * @return String representation (e.g., "VAddF32")
  */
-const char* getOpcodeName(Opcode opcode);
+STINKYTOFU_EXPORT const char* getOpcodeName(Opcode opcode);
 
 /**
  * @brief Convert opcode to assembly mnemonic
  * @param opcode The logical IR opcode
  * @return Assembly mnemonic (e.g., "v_add_f32")
  */
-const char* getOpcodeMnemonic(Opcode opcode);
+STINKYTOFU_EXPORT const char* getOpcodeMnemonic(Opcode opcode);
 
 /**
  * @brief Parse opcode from string
@@ -89,7 +91,7 @@ const char* getOpcodeMnemonic(Opcode opcode);
  * - CamelCase: "VAddF32", "VMaxF32", "VCmpGTF32"
  * - snake_case: "v_add_f32", "v_max_f32", "v_cmp_gt_f32"
  */
-Opcode parseOpcode(const char* name);
+STINKYTOFU_EXPORT Opcode parseOpcode(const char* name);
 
 }  // namespace logical
 

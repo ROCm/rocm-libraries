@@ -45,22 +45,23 @@ class CFGBuilderPassImpl : public Pass {
         return &CFGBuilderPassImpl::ID;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         // If the function has more than one BasicBlock, it already has a CFG
-        if (func.size() > 1) return;
+        if (func.size() > 1) return PreservedAnalyses::none();
 
         // If the function is empty or has no entry block, nothing to do
         BasicBlock* flatBB = func.getEntryBlock();
-        if (!flatBB || flatBB->empty()) return;
+        if (!flatBB || flatBB->empty()) return PreservedAnalyses::none();
 
         // Check if we need to split - look for label instructions
-        if (!needsSplitting(flatBB)) return;
+        if (!needsSplitting(flatBB)) return PreservedAnalyses::none();
 
         // Split the flat BasicBlock into multiple BasicBlocks at label boundaries
         splitAtLabels(func, flatBB);
 
         // Build CFG edges based on branches and fall-through
         buildCFGEdges(func);
+        return PreservedAnalyses::none();
     }
 
    private:
@@ -118,7 +119,8 @@ class CFGBuilderPassImpl : public Pass {
                 labelName = labelData ? labelData->label : "";
                 count = 0;
             } else {
-                labelName = labelName + "_" + std::to_string(++count);
+                labelName += "_";
+                labelName += std::to_string(++count);
             }
 
             // Create a new BasicBlock for this label
@@ -172,10 +174,15 @@ class CFGBuilderPassImpl : public Pass {
             if (terminator) {
                 StinkyInstruction* termInst = cast<StinkyInstruction>(terminator);
                 if (isBranch(*termInst)) {
-                    // Get the branch target label using utility function
-                    std::string targetLabel = getBranchTarget(*termInst);
-                    auto targetIt = labelMap.find(targetLabel);
-                    if (targetIt != labelMap.end()) func.addEdge(&bb, targetIt->second);
+                    // Some valid indirect branches (for example bare s_setpc_b64 /
+                    // s_swappc_b64 without LabelData) do not have statically-known
+                    // targets. In that case getBranchTargets() returns an empty set
+                    // and we simply do not create any branch edges.
+                    const auto targets = getBranchTargets(*termInst);
+                    for (const std::string& targetLabel : targets) {
+                        auto targetIt = labelMap.find(targetLabel);
+                        if (targetIt != labelMap.end()) func.addEdge(&bb, targetIt->second);
+                    }
                 }
             }
 
@@ -189,15 +196,15 @@ class CFGBuilderPassImpl : public Pass {
                     }
                 }
 
-                // Check if prevBB should fall through to current bb
-                // This happens when prevBB has no terminator or has a conditional branch
+                // Fall-through when prevBB has no terminator, or when its terminator
+                // is a conditional branch (may not be taken). Unconditional branches
+                // do not fall through, including register-target branches such as
+                // s_setpc_b64 (without LabelData) and s_swappc_b64.
                 bool shouldFallThrough = true;
                 if (prevTerm) {
                     StinkyInstruction* prevTermInst = cast<StinkyInstruction>(prevTerm);
-                    if (isBranch(*prevTermInst)) {
-                        // Unconditional branches don't fall through
-                        // Conditional branches do fall through (when condition is false)
-                        shouldFallThrough = isConditionalBranch(*prevTermInst);
+                    if (isBranch(*prevTermInst) && !isConditionalBranch(*prevTermInst)) {
+                        shouldFallThrough = false;
                     }
                 }
 

@@ -40,7 +40,8 @@ std::string pathWithSuffix(const std::string& path, const std::string& newExtWit
 namespace stinkytofu {
 char DumpStinkyFunctionPass::ID = 0;
 
-void DumpStinkyFunctionPass::run(Function& func, PassContext&) {
+PreservedAnalyses DumpStinkyFunctionPass::run(Function& func, PassContext&,
+                                              AnalysisManager& /*AM*/) {
     if (!config_.stirPath.empty()) {
         std::ofstream out(config_.stirPath, std::ios::out | std::ios::trunc);
 
@@ -71,6 +72,7 @@ void DumpStinkyFunctionPass::run(Function& func, PassContext&) {
         StinkyAsmEmitter emitter(config_.emitterOptions);
         emitter.emit(out, func);
     }
+    return PreservedAnalyses::all();
 }
 
 std::unique_ptr<Pass> createDumpStinkyFunctionPass(DumpStinkyFunctionPassConfig config) {

@@ -26,6 +26,7 @@
 #include <string>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/Function.hpp"
 
 namespace stinkytofu {
@@ -80,7 +81,7 @@ class LogicalInstruction;
  *   # ... run passes ...
  * @endcode
  */
-class PyLogicalModule {
+class STINKYTOFU_EXPORT PyLogicalModule {
    public:
     /**
      * @brief Construct a new PyLogicalModule
@@ -163,7 +164,7 @@ class PyLogicalModule {
  * them. The caller owns the Function and must keep it alive while this
  * wrapper is in use.
  */
-class PyLogicalFunction {
+class STINKYTOFU_EXPORT PyLogicalFunction {
    public:
     /** @brief Take an external Function* (caller owns it; this wrapper does not). */
     explicit PyLogicalFunction(Function* func);

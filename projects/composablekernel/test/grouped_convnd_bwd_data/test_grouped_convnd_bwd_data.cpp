@@ -25,7 +25,11 @@ class TestGroupedConvndBwdData : public ::testing::Test
 
     std::vector<ck::utils::conv::ConvParam> conv_params;
     std::vector<ck::index_t> split_ks{1, 2};
-
+#if defined(CK_TEST_DISABLE_GPU_VALIDATION)
+    static constexpr int verify_ = 1; // CPU reference
+#else
+    static constexpr int verify_ = 2; // GPU reference
+#endif
     template <ck::index_t NDimSpatial>
     void Run()
     {
@@ -47,10 +51,10 @@ class TestGroupedConvndBwdData : public ::testing::Test
                                                                                        DataType,
                                                                                        DataType,
                                                                                        DataType>(
-                                   2,     // do_verification
-                                   1,     // init_method: integer value
-                                   false, // do_log
-                                   false, // time_kernel
+                                   verify_, // do_verification
+                                   1,       // init_method: integer value
+                                   false,   // do_log
+                                   false,   // time_kernel
                                    param,
                                    split_k,
                                    instance_index);
@@ -134,6 +138,15 @@ TYPED_TEST(TestGroupedConvndBwdData2d, Test2D)
     this->conv_params.push_back({2, 1, 1, 1, 32, {8, 8}, {16, 16}, {1, 1}, {1, 1}, {1, 1}, {1, 1}});
     this->conv_params.push_back({2, 1, 1, 64, 3, {8, 8}, {16, 16}, {1, 1}, {1, 1}, {1, 1}, {1, 1}});
     this->conv_params.push_back({2, 1, 1, 1, 1, {8, 8}, {16, 16}, {1, 1}, {1, 1}, {1, 1}, {1, 1}});
+
+    // G=1, stride>1, 2D, no D-tensors. gemms_count in {4, 9, 36}.
+    this->conv_params.push_back(
+        {2, 1, 16, 256, 128, {5, 5}, {40, 175}, {2, 2}, {1, 1}, {1, 1}, {1, 1}});
+    this->conv_params.push_back(
+        {2, 1, 4, 128, 64, {3, 3}, {28, 28}, {3, 3}, {1, 1}, {1, 1}, {1, 1}});
+    this->conv_params.push_back(
+        {2, 1, 2, 64, 64, {6, 6}, {28, 28}, {6, 6}, {1, 1}, {1, 1}, {1, 1}});
+
     this->template Run<2>();
 }
 

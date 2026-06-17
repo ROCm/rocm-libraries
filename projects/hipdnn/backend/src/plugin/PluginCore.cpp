@@ -4,6 +4,7 @@
 #include <cassert>
 
 #include "PluginCore.hpp"
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 
 namespace hipdnn_backend
 {
@@ -17,6 +18,7 @@ PluginBase::PluginBase(SharedLibrary&& lib)
 }
 
 PluginBase::PluginBase()
+    : _name("mock_plugin")
 {
     // This constructor is used for mocking purposes in tests.
 #ifndef NDEBUG
@@ -48,6 +50,8 @@ void PluginBase::resolveSymbols()
 #ifndef NDEBUG
     _initialized = true;
 #endif
+
+    _name = std::string(name());
 }
 
 std::string_view PluginBase::name() const
@@ -72,10 +76,33 @@ std::string_view PluginBase::apiVersion() const
     const char* version;
     if(_funcGetApiVersion == nullptr)
     {
-        return "0.0.0";
+        // Plugins without hipdnnPluginGetApiVersion predate API versioning.
+        return hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE;
     }
     invokePluginFunction("get plugin api version", _funcGetApiVersion, &version);
     return version;
+}
+
+const std::string& PluginBase::cachedName() const
+{
+    return _name;
+}
+
+std::optional<hipdnn_data_sdk::utilities::Version> PluginBase::parsedApiVersion() const
+{
+    const auto rawVersion = apiVersion();
+    try
+    {
+        return hipdnn_data_sdk::utilities::Version{rawVersion};
+    }
+    catch(const std::exception& e)
+    {
+        HIPDNN_BACKEND_LOG_WARN("Plugin '{}' has malformed API version string '{}': {}",
+                                cachedName(),
+                                std::string(rawVersion),
+                                e.what());
+        return std::nullopt;
+    }
 }
 
 hipdnnPluginType_t PluginBase::type() const

@@ -59,7 +59,8 @@ std::vector<unsigned> computeIDom(const std::vector<BasicBlock*>& rpo, const Blo
             unsigned newIdom = DominanceInfo::kUndef;
             for (BasicBlock* p : rpo[i]->getPredecessors()) {
                 auto it = blkIdx.find(p);
-                assert(it != blkIdx.end() && "Block index not found");
+                // RPO is entry-reachable only; skip unreachable predecessors.
+                if (it == blkIdx.end()) continue;
 
                 unsigned pi = it->second;
                 if (idom[pi] == DominanceInfo::kUndef) continue;
@@ -90,7 +91,8 @@ std::vector<std::vector<unsigned>> computeDF(const std::vector<BasicBlock*>& rpo
 
         for (BasicBlock* p : preds) {
             auto it = blkIdx.find(p);
-            assert(it != blkIdx.end() && "Block index not found");
+            // DF is computed for entry-reachable blocks only.
+            if (it == blkIdx.end()) continue;
 
             unsigned runner = it->second;
             while (runner != idom[j]) {

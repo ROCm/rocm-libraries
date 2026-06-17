@@ -24,6 +24,8 @@
 
 #include <memory>
 
+#include "stinkytofu/Export.hpp"
+
 namespace stinkytofu {
 class Pass;
 
@@ -68,6 +70,6 @@ class Pass;
 ///
 /// Note: This pass is designed to be simple and conservative. It can be extended
 /// to handle more instruction types by modifying isEligibleForRedundantMovElimination().
-std::unique_ptr<Pass> createRedundantMovEliminationPass();
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createRedundantMovEliminationPass();
 
 }  // namespace stinkytofu

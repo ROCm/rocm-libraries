@@ -32,10 +32,10 @@ namespace test {
 //          Entry (v0 = x)
 //            |
 //            A
-//           / \
-        //          B   C (v0 = y)
-//         / \   \
-        //        D   E   F
+//           / \.
+//          B   C (v0 = y)
+//         / \   \.
+//        D   E   F
 //        |    \ /
 //        |     G     <- PHI(v0) placed by DF(C)
 //        |     |
@@ -142,8 +142,8 @@ inline NestedLoopCfg buildNestedLoopCfg(Function& func, GfxArchID arch) {
 // 3. Self-loop at a join point  (self-referential PHI)
 //
 //        Entry
-//       /     \
-        //      A       B
+//       /     \.
+//      A       B
 //    v0=x    v0=y
 //       \     /
 //         C <--+   (self-loop C->C; uses v0)
@@ -190,8 +190,8 @@ inline SelfLoopJoinCfg buildSelfLoopJoinCfg(Function& func, GfxArchID arch) {
 // 4. Irreducible CFG  (mutually recursive PHIs)
 //
 //        Entry
-//       /     \
-        //      A       B
+//       /     \.
+//      A       B
 //      |       |
 //    v0=x    v0=y
 //      |       |
@@ -238,8 +238,8 @@ inline IrreducibleCfg buildIrreducibleCfg(Function& func, GfxArchID arch) {
 // 5. Multiple registers needing PHIs at the same join
 //
 //        Entry
-//       /     \
-        //      A       B
+//       /     \.
+//      A       B
 //      |       |
 //    v0=x    v0=y
 //    v1=a    v1=b
@@ -285,16 +285,16 @@ inline MultiRegJoinCfg buildMultiRegJoinCfg(Function& func, GfxArchID arch) {
 // 6. Chain of diamonds  (3 sequential merge points)
 //
 //        Entry (v0 = x)
-//         / \
-        //        A   B (v0 = y)
+//         / \.
+//        A   B (v0 = y)
 //         \ /
 //          C       <- PHI(v0)
-//         / \
-        //        D   E (v0 = z)
+//         / \.
+//        D   E (v0 = z)
 //         \ /
 //          F       <- PHI(v0)
-//         / \
-        //        G   H (v0 = w)
+//         / \.
+//        G   H (v0 = w)
 //         \ /
 //          I       <- PHI(v0)   (uses v0)
 // =================================================================
@@ -352,8 +352,8 @@ inline ChainOfDiamondsCfg buildChainOfDiamondsCfg(Function& func, GfxArchID arch
 // 7. Dead register  (defined but never used — semi-pruned SSA)
 //
 //        Entry
-//       /     \
-        //      A       B
+//       /     \.
+//      A       B
 //      |       |
 //    v0=x    v0=y    (v0 NEVER read anywhere)
 //       \   /
@@ -392,8 +392,8 @@ inline DeadRegCfg buildDeadRegCfg(Function& func, GfxArchID arch) {
 // 8. Re-definition within the same block  (lastDef shadows first)
 //
 //        Entry
-//       /     \
-        //      A       B
+//       /     \.
+//      A       B
 //      |       |
 //    v0=x    v0=y
 //    v0=w         (A defines v0 TWICE)
@@ -441,10 +441,10 @@ inline RedefSameBlockCfg buildRedefSameBlockCfg(Function& func, GfxArchID arch) 
 //          Entry (v[0:3] = load)
 //            |
 //            A
-//           / \
-        //          B   C (v0 = vadd)
-//         / \   \
-        //        D   E   F
+//           / \.
+//          B   C (v0 = vadd)
+//         / \   \.
+//        D   E   F
 //        |    \ /
 //        |     G     <- PHI(v0) placed by DF(C)
 //        |     |          uses v0 (from PHI) and v2 (from Entry)

@@ -90,7 +90,9 @@ set(DEFAULT_GPUS
   gfx1152
   gfx1153
   gfx1200
-  gfx1201)
+  gfx1201
+  gfx1250
+)
 
 if(BUILD_ADDRESS_SANITIZER)
   add_compile_options(-fsanitize=address)
@@ -177,7 +179,7 @@ message(STATUS "BUILD_WITH_COMPILER = " ${BUILD_WITH_COMPILER})
 # Version
 set ( HIPFFT_VERSION_MAJOR "1" )
 set ( HIPFFT_VERSION_MINOR "0" )
-set ( HIPFFT_VERSION_PATCH "23" )
+set ( HIPFFT_VERSION_PATCH "24" )
 set ( VERSION_STRING "${HIPFFT_VERSION_MAJOR}.${HIPFFT_VERSION_MINOR}.${HIPFFT_VERSION_PATCH}" )
 set( hipfft_SOVERSION 0.1 )
 set( hipfftw_SOVERSION 0.1 )

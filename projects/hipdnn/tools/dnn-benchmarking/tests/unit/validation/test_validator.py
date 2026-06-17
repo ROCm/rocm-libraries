@@ -133,10 +133,10 @@ class TestValidatorValidate:
         class MockTensorInfo:
             pass
 
-        passed, message = validator.validate(output_data, MockTensorInfo(), None)
+        result = validator.validate(output_data, MockTensorInfo(), None)
 
-        assert passed is True
-        assert "skipped" in message.lower()
+        assert result.passed is True
+        assert "skipped" in result.message.lower()
 
     def test_validate_with_matching_reference_passes(self) -> None:
         """Test validation with matching reference passes."""
@@ -147,12 +147,10 @@ class TestValidatorValidate:
         class MockTensorInfo:
             pass
 
-        passed, message = validator.validate(
-            output_data, MockTensorInfo(), reference_data
-        )
+        result = validator.validate(output_data, MockTensorInfo(), reference_data)
 
-        assert passed is True
-        assert "passed" in message.lower()
+        assert result.passed is True
+        assert result.max_abs_diff == 0.0
 
     def test_validate_with_mismatching_reference_fails(self) -> None:
         """Test validation with mismatching reference fails."""
@@ -163,22 +161,7 @@ class TestValidatorValidate:
         class MockTensorInfo:
             pass
 
-        passed, message = validator.validate(
-            output_data, MockTensorInfo(), reference_data
-        )
+        result = validator.validate(output_data, MockTensorInfo(), reference_data)
 
-        assert passed is False
-        assert "failed" in message.lower()
-
-
-class TestValidatorStub:
-    """Tests for Validator.validate_stub method."""
-
-    def test_stub_returns_true(self) -> None:
-        """Test that stub validation returns True."""
-        validator = Validator()
-
-        passed, message = validator.validate_stub()
-
-        assert passed is True
-        assert "not yet implemented" in message.lower()
+        assert result.passed is False
+        assert result.max_abs_diff > 0

@@ -28,6 +28,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/serialization/asm/PatternParser.hpp"
 
 namespace stinkytofu {
@@ -43,7 +44,7 @@ namespace stinkytofu {
  *       // Use intrinsic definition
  *   }
  */
-class IntrinsicLibrary {
+class STINKYTOFU_EXPORT IntrinsicLibrary {
    public:
     /**
      * @brief Load intrinsic library from .st.bc file

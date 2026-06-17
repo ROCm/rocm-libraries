@@ -25,6 +25,8 @@
 
 #include <memory>
 
+#include "stinkytofu/Export.hpp"
+
 namespace stinkytofu {
 class Pass;
 
@@ -51,6 +53,6 @@ class Pass;
 /// pm.addPass(createLogicalPeepholePass());
 /// pm.run();
 /// ```
-std::unique_ptr<Pass> createLogicalPeepholePass();
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createLogicalPeepholePass();
 
 }  // namespace stinkytofu

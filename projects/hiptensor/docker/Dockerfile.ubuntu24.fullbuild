@@ -39,6 +39,7 @@ RUN apt-get update && apt-get install -y \
     libopenblas-dev \
     libgtest-dev \
     libzstd-dev \
+    doxygen \
     clang-format-18 \
     clang-tidy-20 \
     llvm-20 \
@@ -155,6 +156,6 @@ COPY --from=install_therock_fullbuild /opt/rocm /opt/rocm
 
 ENV PATH="/opt/rocm/bin:/opt/rocm:${PATH}"
 ENV CMAKE_GENERATOR="Ninja"
-ENV LD_LIBRARY_PATH="/opt/rocm/lib:${LD_LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="/opt/rocm/lib"
 
 WORKDIR /workspace

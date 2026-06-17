@@ -1,4 +1,4 @@
-// Copyright (C) 2023 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -39,6 +39,7 @@
 #include "../shared/arithmetic.h"
 #include "../shared/array_validator.h"
 #include "../shared/client_data_layout_helpers.h"
+#include "../shared/client_except.h"
 #include "../shared/data_gen_device.h"
 #include "../shared/data_gen_host.h"
 #include "../shared/device_properties.h"
@@ -115,15 +116,8 @@ inline Tsize var_size(const fft_precision precision, const fft_array_type type)
         var_size = sizeof(double);
         break;
     }
-    switch(type)
-    {
-    case fft_array_type_complex_interleaved:
-    case fft_array_type_hermitian_interleaved:
+    if(array_type_is_interleaved(type))
         var_size *= 2;
-        break;
-    default:
-        break;
-    }
     return var_size;
 }
 
@@ -165,7 +159,7 @@ inline void set_input(std::vector<gpubuf>&       input,
             "Device random input generation is not available, as hipRAND support is not enabled");
 #endif // USE_HIPRAND
 
-    if(igen == fft_input_generator_host || igen == fft_input_random_generator_host)
+    if(is_host_generator(igen))
         throw std::runtime_error("Host input generation is not available for gpu buffers");
 
     auto isize = count_iters(whole_length) * nbatch;
@@ -312,7 +306,7 @@ inline void set_input(std::vector<hostbuf>&      input,
                       const Tint1                field_contig_stride,
                       const size_t               field_contig_dist)
 {
-    if(igen == fft_input_generator_device || igen == fft_input_random_generator_device)
+    if(is_device_generator(igen))
         throw std::runtime_error(
             "Device random input generation is not available for host buffers");
 
@@ -729,7 +723,7 @@ public:
     // expected size.  Optionally also check that each pointer is
     // non-null.  Throws an exception if a check fails.  The vector
     // itself can be null, as callbacks are optional.
-    static void check_callback_vec(std::vector<void*>* cb, size_t expected_size, bool nonnull)
+    static void check_callback_vec(const std::vector<void*>* cb, size_t expected_size, bool nonnull)
     {
         if(!cb)
             return;
@@ -746,7 +740,7 @@ public:
     size_t multiGPU = 0;
 
     // run testing load/store callbacks
-    bool                    run_callbacks   = false;
+    fft_callback_type       run_callbacks   = fft_callback_type_none;
     static constexpr double load_cb_scalar  = 0.457813941;
     static constexpr double store_cb_scalar = 0.391504938;
 
@@ -1076,8 +1070,14 @@ public:
             append_size_vec(ooffset);
         }
 
-        if(run_callbacks)
+        switch(run_callbacks)
+        {
+        case fft_callback_type_funcptr:
             ret += "_CB";
+            break;
+        case fft_callback_type_none:
+            break;
+        }
 
         if(scale_factor != 1.0)
             ret += "_scale";
@@ -1237,7 +1237,7 @@ public:
 
         if(pos < vals.size() && vals[pos] == "CB")
         {
-            run_callbacks = true;
+            run_callbacks = fft_callback_type_funcptr;
             ++pos;
         }
 
@@ -1921,21 +1921,11 @@ public:
     }
     bool is_interleaved() const
     {
-        if(itype == fft_array_type_complex_interleaved
-           || itype == fft_array_type_hermitian_interleaved)
-            return true;
-        if(otype == fft_array_type_complex_interleaved
-           || otype == fft_array_type_hermitian_interleaved)
-            return true;
-        return false;
+        return array_type_is_interleaved(itype) || array_type_is_interleaved(otype);
     }
     bool is_planar() const
     {
-        if(itype == fft_array_type_complex_planar || itype == fft_array_type_hermitian_planar)
-            return true;
-        if(otype == fft_array_type_complex_planar || otype == fft_array_type_hermitian_planar)
-            return true;
-        return false;
+        return array_type_is_planar(itype) || array_type_is_planar(otype);
     }
     bool is_real() const
     {
@@ -1943,7 +1933,7 @@ public:
     }
     bool is_callback() const
     {
-        return run_callbacks;
+        return run_callbacks != fft_callback_type_none;
     }
     // checks if the parameters are consistent with a "default" data layout (considering strides and distances)
     bool is_using_default_layout() const
@@ -2271,18 +2261,18 @@ public:
         }
     }
 
-    // A callback is expressed as a pair of device function pointer +
-    // device function data.
+    // A function pointer callback is expressed as a pair of device
+    // function pointer + device function data.
     //
     // Load and store callbacks are provided as vectors of those
     // pointers, as we need a separate function+data for each device
     // being loaded from or stored to.
-    virtual fft_status set_callbacks(std::vector<void*>* load_cb_func,
-                                     std::vector<void*>* load_cb_data,
-                                     std::vector<void*>* store_cb_func,
-                                     std::vector<void*>* store_cb_data,
-                                     size_t              load_cb_shared_mem_bytes,
-                                     size_t              store_cb_shared_mem_bytes)
+    virtual fft_status set_funcptr_callbacks(std::vector<void*>* load_cb_func,
+                                             std::vector<void*>* load_cb_data,
+                                             std::vector<void*>* store_cb_func,
+                                             std::vector<void*>* store_cb_data,
+                                             size_t              load_cb_shared_mem_bytes,
+                                             size_t              store_cb_shared_mem_bytes)
     {
         return fft_status_success;
     }
@@ -2369,11 +2359,13 @@ public:
 
     // Specific exception type for work buffer allocation failure.
     // Tests that hit this can't fit on the GPU and should be skipped.
-    struct work_buffer_alloc_failure : public std::runtime_error
+    struct work_buffer_alloc_failure : public hip_runtime_error
     {
         const size_t attempted_size;
-        work_buffer_alloc_failure(const std::string& s, size_t _attempted_size = 0)
-            : std::runtime_error(s)
+        work_buffer_alloc_failure(const std::string& s,
+                                  size_t             _attempted_size = 0,
+                                  hipError_t         hip_status      = hipErrorUnknown)
+            : hip_runtime_error(s, hip_status)
             , attempted_size(_attempted_size)
         {
         }
@@ -2460,10 +2452,10 @@ public:
      * @param[out] mgpu_obuffers vector of raw pointers to output device allocations as
      * needed for the multi-device transform that this object describes.
      */
-    virtual void multi_gpu_prepare(std::vector<hostbuf>& input_data_host,
-                                   std::vector<gpubuf>&  input_data_gpu,
-                                   std::vector<void*>&   mgpu_ibuffers,
-                                   std::vector<void*>&   mgpu_obuffers)
+    virtual void multi_gpu_prepare(const std::vector<hostbuf>& input_data_host,
+                                   const std::vector<gpubuf>&  input_data_gpu,
+                                   std::vector<void*>&         mgpu_ibuffers,
+                                   std::vector<void*>&         mgpu_obuffers)
     {
     }
 
@@ -2796,6 +2788,8 @@ public:
         ret.placement      = fft_placement_notinplace;
         ret.transform_type = transform_type;
         ret.nbatch         = nbatch;
+        ret.run_callbacks  = run_callbacks;
+        ret.scale_factor   = scale_factor;
         ret.itype          = is_real() ? (is_forward() ? fft_array_type_real
                                                        : fft_array_type_hermitian_interleaved)
                                        : fft_array_type_complex_interleaved;
@@ -2810,8 +2804,8 @@ public:
             transform_type, fft_placement_notinplace, fft_io::fft_io_in, length, nbatch);
         ret.odist = default_distance(
             transform_type, fft_placement_notinplace, fft_io::fft_io_out, length, nbatch);
-        ret.compute_isize();
-        ret.compute_osize();
+
+        ret.validate();
 
         // other ret's members should be irrelevant for cpu reference calculations
         // (default values)
@@ -2828,6 +2822,18 @@ static bool lexical_cast(const std::string& word, fft_params::fft_mp_lib& mp_lib
         mp_lib = fft_params::fft_mp_lib_mpi;
     else
         throw std::runtime_error("Invalid multi-process library specified");
+    return true;
+}
+
+// Used for CLI11 parsing of callbacks enum
+static bool lexical_cast(const std::string& word, fft_callback_type& cbtype)
+{
+    if(word == "none")
+        cbtype = fft_callback_type_none;
+    else if(word == "funcptr")
+        cbtype = fft_callback_type_funcptr;
+    else
+        throw std::runtime_error("Invalid callback type specified");
     return true;
 }
 
@@ -3369,25 +3375,25 @@ inline VectorNorms distance_1to1_complex(const Tcomplex*                        
                 const double rdiff
                     = std::abs(static_cast<double>(output[odx + ooffset[0]].real()) * output_scalar
                                - static_cast<double>(input[idx + ioffset[0]].real()));
-                cur_linf = std::max(rdiff, cur_linf);
-                if(cur_linf > linf_cutoff)
+                if(rdiff > linf_cutoff)
                 {
                     std::pair<size_t, size_t> fval(b, idx);
                     if(linf_failures)
                         linf_failures_private.push_back(fval);
                 }
+                cur_linf = std::max(rdiff, cur_linf);
                 cur_l2 += rdiff * rdiff;
 
                 const double idiff
                     = std::abs(static_cast<double>(output[odx + ooffset[0]].imag()) * output_scalar
                                - static_cast<double>(input[idx + ioffset[0]].imag()));
-                cur_linf = std::max(idiff, cur_linf);
-                if(cur_linf > linf_cutoff)
+                if(idiff > linf_cutoff)
                 {
                     std::pair<size_t, size_t> fval(b, idx);
                     if(linf_failures)
                         linf_failures_private.push_back(fval);
                 }
+                cur_linf = std::max(idiff, cur_linf);
                 cur_l2 += idiff * idiff;
 
             } while(increment_rowmajor(index, length));
@@ -3454,13 +3460,13 @@ inline VectorNorms distance_1to1_real(const Tfloat*                           in
                 const double diff
                     = std::abs(static_cast<double>(output[odx + ooffset[0]]) * output_scalar
                                - static_cast<double>(input[idx + ioffset[0]]));
-                cur_linf = std::max(diff, cur_linf);
-                if(cur_linf > linf_cutoff)
+                if(diff > linf_cutoff)
                 {
                     std::pair<size_t, size_t> fval(b, idx);
                     if(linf_failures)
                         linf_failures_private.push_back(fval);
                 }
+                cur_linf = std::max(diff, cur_linf);
                 cur_l2 += diff * diff;
 
             } while(increment_rowmajor(index, length));
@@ -3528,25 +3534,25 @@ inline VectorNorms distance_1to2(const rocfft_complex<Tval>*             input,
                 const double rdiff
                     = std::abs(static_cast<double>(output0[odx + ooffset[0]]) * output_scalar
                                - static_cast<double>(input[idx + ioffset[0]].real()));
-                cur_linf = std::max(rdiff, cur_linf);
-                if(cur_linf > linf_cutoff)
+                if(rdiff > linf_cutoff)
                 {
                     std::pair<size_t, size_t> fval(b, idx);
                     if(linf_failures)
                         linf_failures_private.push_back(fval);
                 }
+                cur_linf = std::max(rdiff, cur_linf);
                 cur_l2 += rdiff * rdiff;
 
                 const double idiff
                     = std::abs(static_cast<double>(output1[odx + ooffset[1]]) * output_scalar
                                - static_cast<double>(input[idx + ioffset[0]].imag()));
-                cur_linf = std::max(idiff, cur_linf);
-                if(cur_linf > linf_cutoff)
+                if(idiff > linf_cutoff)
                 {
                     std::pair<size_t, size_t> fval(b, idx);
                     if(linf_failures)
                         linf_failures_private.push_back(fval);
                 }
+                cur_linf = std::max(idiff, cur_linf);
                 cur_l2 += idiff * idiff;
 
             } while(increment_rowmajor(index, length));
@@ -4167,18 +4173,25 @@ inline VectorNorms norm(const std::vector<hostbuf>& input,
     }
 }
 
-// Given a data type and precision, the distance between batches, and
-// the batch size, allocate the required host buffer(s).
+// returns byte_sizes.size() host buffers of respective sizes byte_sizes[0], byte_sizes[1], ...
+static std::vector<hostbuf> allocate_host_buffer(const std::vector<size_t>& byte_sizes)
+{
+    std::vector<hostbuf> buffers(byte_sizes.size());
+    for(unsigned int i = 0; i < byte_sizes.size(); ++i)
+    {
+        buffers[i].alloc(byte_sizes[i]);
+    }
+    return buffers;
+}
+
 static std::vector<hostbuf> allocate_host_buffer(const fft_precision        precision,
                                                  const fft_array_type       type,
                                                  const std::vector<size_t>& size)
 {
-    std::vector<hostbuf> buffers(size.size());
-    for(unsigned int i = 0; i < size.size(); ++i)
-    {
-        buffers[i].alloc(size[i] * var_size<size_t>(precision, type));
-    }
-    return buffers;
+    std::vector<size_t> byte_sizes = size;
+    for(auto& sz : byte_sizes)
+        sz *= var_size<size_t>(precision, type);
+    return allocate_host_buffer(byte_sizes);
 }
 
 // Check if the required buffers fit in the device vram.

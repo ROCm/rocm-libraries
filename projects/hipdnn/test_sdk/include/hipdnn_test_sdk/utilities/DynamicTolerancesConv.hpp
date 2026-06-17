@@ -133,14 +133,14 @@ float calculateConvDgradTolerance(
 {
     hipdnn_test_sdk::utilities::validateComputeType<ComputeType>();
 
-    // wDims: [K, C, Spatial...] for 2D: [K, C, R, S], for 3D: [K, C, D, R, S]
+    // wDims: [K, C, Spatial...] for 1D: [K, C, W], 2D: [K, C, R, S], 3D: [K, C, D, R, S]
     // Accumulation for input gradients (dx) happens over K (output channels) and Spatial filter dimensions.
     // dx[n, c, h, w] = sum_{k, r, s} dy[n, k, p, q] * w[k, c, r, s]
 
-    if(wDims.empty() || wDims.size() < 4)
+    if(wDims.empty() || wDims.size() < 3)
     {
         throw std::invalid_argument(
-            "wDims must have at least 4 dimensions for 2D convolution [K, C, R, S].");
+            "wDims must have at least 3 dimensions for convolution [K, C, Spatial...].");
     }
 
     // Number of accumulations = K * (product of spatial dimensions)

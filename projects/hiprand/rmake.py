@@ -21,7 +21,7 @@ def parse_args():
     Checks build arguments
     """)
 
-    default_gpus = 'gfx906:xnack-,gfx1030,gfx1100,gfx1101,gfx1102,gfx1151,gfx1200,gfx1201'
+    default_gpus = 'gfx906:xnack-,gfx1030,gfx1100,gfx1101,gfx1102,gfx1150,gfx1151,gfx1152,gfx1153,gfx1200,gfx1201'
 
     parser.add_argument('-g', '--debug', required=False, default=False,  action='store_true',
                         help='Generate Debug build (default: False)')

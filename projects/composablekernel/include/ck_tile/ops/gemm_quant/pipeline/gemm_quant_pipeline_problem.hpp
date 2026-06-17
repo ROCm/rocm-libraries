@@ -33,23 +33,36 @@ struct GemmQuantPipelineProblemBase
           CDataType_,
           BlockGemmShape_,
           Traits_,
-          mixed_prec_compute_type_t<ComputeDataType_, ADataType_, BDataType_>>
+          mixed_prec_compute_type_from_input_t<
+              ADataType_,
+              BDataType_,
+              mixed_prec_compute_type_t<ComputeDataType_, ADataType_, BDataType_>>,
+          mixed_prec_compute_type_from_input_t<
+              BDataType_,
+              ADataType_,
+              mixed_prec_compute_type_t<ComputeDataType_, ADataType_, BDataType_>>>
 {
-
     using Base = GemmPipelineProblemBase<
         ADataType_,
         BDataType_,
         CDataType_,
         BlockGemmShape_,
         Traits_,
-        mixed_prec_compute_type_t<ComputeDataType_, ADataType_, BDataType_>>;
+        mixed_prec_compute_type_from_input_t<
+            ADataType_,
+            BDataType_,
+            mixed_prec_compute_type_t<ComputeDataType_, ADataType_, BDataType_>>,
+        mixed_prec_compute_type_from_input_t<
+            BDataType_,
+            ADataType_,
+            mixed_prec_compute_type_t<ComputeDataType_, ADataType_, BDataType_>>>;
 
     using Traits = typename Base::Traits;
 
     using typename Base::ADataType;
     using typename Base::BDataType;
     using typename Base::CDataType;
-    using typename Base::ComputeDataType;
+
     using AQDataType = remove_cvref_t<AQDataType_>;
     using BQDataType = remove_cvref_t<BQDataType_>;
 
@@ -87,6 +100,7 @@ struct GemmQuantPipelineProblemBase
     // pk_fp4_t from LDS in registers. But without this instruction,
     // the transpose is done in register between Vmem read and LDS write and
     // the implementation does not support 4 bit types
+    // TODO: Support gfx1250
 #ifdef __gfx950__
     static constexpr auto BCastPolicy = BCastPolicy_;
 #else
@@ -96,6 +110,9 @@ struct GemmQuantPipelineProblemBase
             ? CastPolicy::BeforeLDSWrite
             : BCastPolicy_;
 #endif
+
+    // async pipelines not supported for blockscale yet
+    static constexpr bool Async = false;
 
     static_assert(BlockGemmShape::kM % AQuantGroupSize::kM == 0);
     static_assert(BlockGemmShape::kK % AQuantGroupSize::kK == 0);

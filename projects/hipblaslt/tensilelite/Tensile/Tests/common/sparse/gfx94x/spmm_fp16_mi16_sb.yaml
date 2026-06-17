@@ -366,3 +366,59 @@ BenchmarkProblems:
         - FactorDimArgs: [0]
         - ActivationArgs:
           - [Enum: none]
+
+  - 
+    - OperationType: GEMM
+      DataType: H
+      DestDataType: H
+      ComputeDataType: S
+      HighPrecisionAccumulate: true
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      UseBias: 3
+      UseScaleAlphaVec: 3
+      Batched: True
+      Activation: True
+      ActivationType: all
+      Sparse: 2
+      SupportUserArgs: False
+    - InitialSolutionParameters: 
+      BenchmarkCommonParameters:
+      - KernelLanguage: [Assembly]
+      ForkParameters:
+      - 1LDSBuffer: [-1]
+      - DepthU: [64]
+      - GlobalReadVectorWidthA: [2]
+      - GlobalReadVectorWidthB: [4]
+      - VectorWidthA: [1]
+      - VectorWidthB: [2]
+      - WaveSeparateGlobalReadA: [0]
+      - WaveSeparateGlobalReadB: [0]
+      - UnrollLoopSwapGlobalReadOrder: [0]
+      - PrefetchGlobalRead: [2]
+      - PrefetchLocalRead: [1]
+      - SourceSwap: [1]
+      - NonTemporalD: [4]
+      - StaggerU: [16]
+      - NumElementsPerBatchStore: [-1]
+      - WorkGroupMapping: [8]
+      - WorkGroupMappingXCC: [8]
+      - GlobalSplitU: [-1]
+      - GlobalSplitUAlgorithm: [MultipleBuffer]
+      - GlobalSplitUCoalesced: [true]
+      - GlobalSplitUWorkGroupMappingRoundRobin: [true]
+      - TransposeLDSMetadata: [0]
+      - Groups:
+        - - MatrixInstruction: [16, 16, 32, 1, 1, 1, 10, 4, 1]  # sizes: 4
+      BenchmarkJoinParameters: 
+      BenchmarkFinalParameters:
+      - ProblemSizes:
+        - Exact: [ 16, 128, 1, 64 ]
+        - Exact: [ 16, 128, 1, 128 ]
+        - Exact: [ 16, 128, 1, 192 ]
+        - Exact: [ 16, 128, 1, 256 ]
+      - BiasTypeArgs: ["s"]
+      - FactorDimArgs: [1]
+      - ActivationArgs:
+        - [Enum: none]

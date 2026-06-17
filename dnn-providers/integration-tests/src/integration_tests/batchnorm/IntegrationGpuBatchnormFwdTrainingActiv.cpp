@@ -250,6 +250,8 @@ protected:
                           GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
+        bundle.sentinelFillOutputTensors();
+
         // X input: default range
         bundle.tensors.at(BatchnormFwdTrainingActivTensorIds::X_UID)
             ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
@@ -302,6 +304,8 @@ protected:
                                     this->getTolerance(graphObj, outputs.nextRunningVariance));
         }
 
+        this->setTestCaseLayout(layout.name);
+        this->setTestCaseNote(bnTestCase.note);
         this->verifyGraph(graphObj, bnTestCase.seed);
     }
 };

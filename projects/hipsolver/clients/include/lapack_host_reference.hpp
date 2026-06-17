@@ -341,3 +341,7 @@ void cpu_sytrd_hetrd(
 template <typename T>
 void cpu_sytrf(
     hipsolverFillMode_t uplo, int n, T* A, int lda, int* ipiv, T* work, int lwork, int* info);
+
+template <typename T>
+void cpu_sytrs(
+    hipsolverFillMode_t uplo, int n, int nrhs, T* A, int lda, int* ipiv, T* B, int ldb, int* info);

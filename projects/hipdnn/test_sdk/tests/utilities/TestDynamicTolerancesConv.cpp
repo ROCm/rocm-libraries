@@ -415,7 +415,8 @@ std::vector<ConvDgradToleranceTestCase>
         {-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
         {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
         {-1.0, 1.0, -1.0, 1.0, {1, 1}, 0.0, true},
-        {-1.0, 1.0, -1.0, 1.0, {1, 1, 1}, 0.0, true},
+        // wDims=[K=1, C=1, R=1] (1D). Accum = K * R = 1. Tol = 2 * 1^2 * 2^-23 = 2 * 2^-23
+        {-1.0, 1.0, -1.0, 1.0, {1, 1, 1}, 2.0 * hipdnn_data_sdk::types::pow(2.0, -23)},
         // wDims=[K=1, C=1, R=1, S=1]. Accum = 1 * 1 * 1 = 1. Tol = 2 * 1^2 * 2^-23 = 2 * 2^-23
         {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, 2.0 * hipdnn_data_sdk::types::pow(2.0, -23)},
         // wDims=[K=2, C=1, R=1, S=1]. Accum = 2. Tol = 2 * 2^2 * 2^-23 = 8 * 2^-23
@@ -482,7 +483,13 @@ std::vector<ConvDgradToleranceTestCase>
         {-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
         {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
         {-1.0, 1.0, -1.0, 1.0, {1, 1}, 0.0, true},
-        {-1.0, 1.0, -1.0, 1.0, {1, 1, 1}, 0.0, true},
+        // wDims=[K=1, C=1, R=1] (1D). Accum = 1. Tol = 2 * 2^-23 + 1 * 2^-7
+        {-1.0,
+         1.0,
+         -1.0,
+         1.0,
+         {1, 1, 1},
+         2.0 * hipdnn_data_sdk::types::pow(2.0, -23) + hipdnn_data_sdk::types::pow(2.0, -7)},
         // wDims=[1, 1, 1, 1]. Accum = 1. Tol = 2 * 2^-23 + 1 * 2^-7
         {-1.0,
          1.0,
@@ -516,7 +523,13 @@ std::vector<ConvDgradToleranceTestCase>
     return {{-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
             {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
             {-1.0, 1.0, -1.0, 1.0, {1, 1}, 0.0, true},
-            {-1.0, 1.0, -1.0, 1.0, {1, 1, 1}, 0.0, true},
+            // wDims=[K=1, C=1, R=1] (1D). Accum = 1. Tol = 6 * 1 * sqrt(2) * 2^-7
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             {1, 1, 1},
+             6.0 * hipdnn_data_sdk::types::sqrt(2.0) * hipdnn_data_sdk::types::pow(2.0, -7)},
             // wDims=[1, 1, 1, 1]. Accum = 1. Tol = 6 * 1 * sqrt(2) * 2^-7
             {-1.0,
              1.0,
@@ -546,7 +559,13 @@ std::vector<ConvDgradToleranceTestCase>
         {-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
         {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
         {-1.0, 1.0, -1.0, 1.0, {1, 1}, 0.0, true},
-        {-1.0, 1.0, -1.0, 1.0, {1, 1, 1}, 0.0, true},
+        // wDims=[K=1, C=1, R=1] (1D). Accum = 1. Tol = 2 * 2^-23 + 1 * 2^-10
+        {-1.0,
+         1.0,
+         -1.0,
+         1.0,
+         {1, 1, 1},
+         2.0 * hipdnn_data_sdk::types::pow(2.0, -23) + hipdnn_data_sdk::types::pow(2.0, -10)},
         // wDims=[1, 1, 1, 1]. Accum = 1. Tol = 2 * 2^-23 + 1 * 2^-10
         {-1.0,
          1.0,
@@ -582,7 +601,8 @@ std::vector<ConvDgradToleranceTestCase>
     return {{-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
             {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
             {-1.0, 1.0, -1.0, 1.0, {1, 1}, 0.0, true},
-            {-1.0, 1.0, -1.0, 1.0, {1, 1, 1}, 0.0, true},
+            // wDims=[K=1, C=1, R=1] (1D). Accum = 1. sumAbsProductBound = 1
+            {-1.0, 1.0, -1.0, 1.0, {1, 1, 1}, computeGamma(1, u) * 1.0},
             // wDims=[1, 1, 1, 1]. Accum = 1. sumAbsProductBound = 1
             {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, computeGamma(1, u) * 1.0},
             // wDims=[2, 1, 1, 1]. Accum = 2. sumAbsProductBound = 2

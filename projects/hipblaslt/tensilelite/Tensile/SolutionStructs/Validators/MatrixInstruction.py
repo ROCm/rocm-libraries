@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -61,6 +61,8 @@ def matrixInstructionToMIParameters(
 
     result = {}
     result["ISA"] = isa
+
+    isgfx950 = isa[:2] == (9, 5)
 
     # Enable F32 XDL math operation only when the input type is f32.
     enableF32xdl = (
@@ -136,11 +138,13 @@ def matrixInstructionToMIParameters(
     sparseB = False if not isSparse else True if isSparse == 2 else False
     result['MIInputPerThreadA'] = result['MIInputPerThreadA'] if not sparseA else result['MIInputPerThreadA'] // 2
     if ("MXBlockA" in problemType) and  problemType["MXBlockA"]:
-      duplicateFactor = 32 // result["MatrixInstM"]
+      # work around for gfx950. Use duplicateFactor = 1
+      duplicateFactor = 32 // result["MatrixInstM"] if not isgfx950 else 1
       result['MIInputPerThreadMXSA'] = result['MIInputPerThreadA'] // problemType["MXBlockA"] * duplicateFactor
     result['MIInputPerThreadB'] = result['MIInputPerThreadB'] if not sparseB else result['MIInputPerThreadB'] // 2
     if ("MXBlockB" in problemType) and problemType["MXBlockB"]:
-      duplicateFactor = 32 // result["MatrixInstN"]
+      # work around for gfx950. Use duplicateFactor = 1
+      duplicateFactor = 32 // result["MatrixInstN"] if not isgfx950 else 1
       result['MIInputPerThreadMXSB'] = result['MIInputPerThreadB'] // problemType["MXBlockB"] * duplicateFactor
     result['MIInputPerThreadMetadata'] = result['MIInputPerThread'] if not isSparse else result['MIInputPerThread'] // 8
 
@@ -194,11 +198,39 @@ def validateMIParameters(
 
     ptype = solution["ProblemType"]
     isSparse = ptype.get("Sparse", 0)
+    isX = solution.get("EnableF32XdlMathOp", False)
     miDataType = DataType(
         ptype["DataType"]
-        if not solution.get("EnableF32XdlMathOp", False)
+        if not isX
         else ptype["F32XdlMathOp"]
     )
+
+    # For MFMA validation, determine the key based on MAC data types.
+    # Library logic YAML often stores MacDataTypeA/B as raw enum integers; coerce to DataType.
+    def _as_mac_dtype(value):
+        return value if isinstance(value, DataType) else DataType(value)
+
+    macDataTypeA = _as_mac_dtype(ptype.get("MacDataTypeA", miDataType) if not isX else miDataType)
+    macDataTypeB = _as_mac_dtype(ptype.get("MacDataTypeB", miDataType) if not isX else miDataType)
+
+    # MFMA / SMFMA tables use keys like "F8F8", "B8B8", "B8F8", "4xi84xi8", or composite "B8F8"
+    # (not "B8F8B8F8"). Prefer ca+cb; for same MAC type fall back to doubled token only if listed,
+    # else single composite token (e.g. BFloat8Float8 -> "B8F8"). Check both MFMA and SMFMA maps
+    # (sparse path uses validSMFMA with the same key).
+    def _dtype_key_in_tables(k: str) -> bool:
+        return k in validMFMA or k in validSMFMA
+
+    ca, cb = macDataTypeA.toChar(), macDataTypeB.toChar()
+    miDataTypeKey = ca + cb
+    if not _dtype_key_in_tables(miDataTypeKey):
+        if macDataTypeA == macDataTypeB:
+            doubled = ca + ca
+            if _dtype_key_in_tables(doubled):
+                miDataTypeKey = doubled
+            elif _dtype_key_in_tables(ca):
+                miDataTypeKey = ca
+        elif _dtype_key_in_tables(cb + ca):
+            miDataTypeKey = cb + ca
 
     mi4 = solution[MI_KEY]
     miEnabled = solution[MI_ENABLED_KEY]
@@ -244,7 +276,7 @@ def validateMIParameters(
 
     if not isSparse:
         if hasMFMA:
-            if not (miDataType.toChar() in validMFMA and mi4 in validMFMA[miDataType.toChar()]):
+            if not (miDataTypeKey in validMFMA and mi4 in validMFMA[miDataTypeKey]):
                 if miDataType.isBFloat16() and mi4 in validMFMA["B1k"]:  # but is valid bf16 MFMA
                     assert solution["MFMA_BF16_1K"], elineno()
                 else:
@@ -258,7 +290,7 @@ def validateMIParameters(
                 solution, printSolutionRejectionReason, f"Invalid WMMA configuration: {solution}"
             )
     else:
-        if hasSMFMA and not (miDataType.toChar() in validSMFMA and mi4 in validSMFMA[miDataType.toChar()]):
+        if hasSMFMA and not (miDataTypeKey in validSMFMA and mi4 in validSMFMA[miDataTypeKey]):
             return not reject(
                 solution, printSolutionRejectionReason, f"Invalid SMFMA configuration: {solution}"
             )

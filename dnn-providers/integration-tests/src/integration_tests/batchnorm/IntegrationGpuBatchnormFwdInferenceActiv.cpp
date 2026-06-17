@@ -139,6 +139,8 @@ protected:
 
         this->registerValidator(outputs.out, this->getTolerance(graphObj, outputs.out));
 
+        this->setTestCaseLayout(layout.name);
+        this->setTestCaseNote(bnTestCase.note);
         this->verifyGraph(graphObj, bnTestCase.seed);
     }
 };

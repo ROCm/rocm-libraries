@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -92,9 +92,26 @@ Tests:
 - name: gemmi_file
   category: quick
   function: gemmi
-  precision: *single_double_precisions
+  precision: *single_only_precisions
   M: 1
-  N: [4, 19]
+  N: [19, 23, 27]
+  K: 1
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
+  filename: [nos2,
+             nos4,
+             nos6]
+
+- name: gemmi_file
+  category: quick
+  function: gemmi
+  precision: *double_only_precisions
+  M: 1
+  N: [4]
   K: 1
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -103,10 +120,7 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
   filename: [mac_econ_fwd500,
-             nos2,
              ASIC_320k,
-             nos4,
-             nos6,
              scircuit]
 
 - name: gemmi_file

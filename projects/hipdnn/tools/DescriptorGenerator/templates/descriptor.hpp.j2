@@ -78,7 +78,7 @@ private:
 {% for taf in op.tensor_array_fields %}
 
     // Tensor array: {{ taf.name }}
-    std::vector<std::shared_ptr<TensorDescriptor>> _{{ taf.name }}Descs;
+    std::vector<std::shared_ptr<TensorDescriptor>> _{{ taf.camel_name }}Descs;
 {% endfor %}
 {% if op.has_compute_data_type %}
 

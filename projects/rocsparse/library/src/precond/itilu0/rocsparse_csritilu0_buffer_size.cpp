@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,7 @@
 #include "rocsparse_csritilu0_driver.hpp"
 #include "rocsparse_enum_utils.hpp"
 
+// LCOV_EXCL_START
 template <>
 const char* rocsparse::enum_utils::to_string(rocsparse_itilu0_alg value)
 {
@@ -44,10 +45,9 @@ const char* rocsparse::enum_utils::to_string(rocsparse_itilu0_alg value)
         CASE(rocsparse_itilu0_alg_sync_split_fusion);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 };
+// LCOV_EXCL_STOP
 
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_itilu0_alg value)

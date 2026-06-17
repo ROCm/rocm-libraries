@@ -26,11 +26,15 @@
 
 #pragma once
 
+#include <Tensile/Macros.hpp>
+
 #ifdef TENSILE_USE_HIP
 #include <hip/hip_runtime.h>
 #endif
 
 #include <Tensile/DistinctType.hpp>
+
+TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {
@@ -62,3 +66,5 @@ namespace std
         return std::to_string(static_cast<float>(val));
     }
 } // namespace std
+
+TENSILE_HIDDEN_END

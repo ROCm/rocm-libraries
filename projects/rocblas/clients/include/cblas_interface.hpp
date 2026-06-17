@@ -94,6 +94,7 @@ inline void ref_asum(int64_t n, const rocblas_double_complex* x, int64_t incx, d
 template <typename T>
 void ref_axpy(int64_t n, T alpha, T* x, int64_t incx, T* y, int64_t incy);
 
+#if !(defined(WIN32) && !defined(BLIS_ENABLE_CBLAS)) // windows OpenBLAS bug override
 template <>
 inline void ref_axpy(int64_t n, float alpha, float* x, int64_t incx, float* y, int64_t incy)
 {
@@ -127,6 +128,7 @@ inline void ref_axpy(int64_t                 n,
 {
     cblas_zaxpy(n, &alpha, x, incx, y, incy);
 }
+#endif
 
 // copy
 template <typename T>

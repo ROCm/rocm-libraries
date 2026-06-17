@@ -1,5 +1,0 @@
-# CUDA PyTorch for NVIDIA GPUs.
-# This file installs ONLY torch (from the CUDA 12.4 wheel index). All other
-# deps live in pyproject.toml.
---index-url https://download.pytorch.org/whl/cu124
-torch>=2.0.0

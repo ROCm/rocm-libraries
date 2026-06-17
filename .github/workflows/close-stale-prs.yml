@@ -60,4 +60,4 @@ jobs:
           ascending: true
 
           # Maximum number of operations per run (to avoid API rate limits)
-          operations-per-run: 100
+          operations-per-run: 1000

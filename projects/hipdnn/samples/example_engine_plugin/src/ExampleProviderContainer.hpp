@@ -27,7 +27,7 @@ class ExampleProviderContainer
 {
 public:
     ExampleProviderContainer();
-    ~ExampleProviderContainer();
+    ~ExampleProviderContainer() noexcept;
 
     /// Copy engine IDs into a buffer.
     /// If maxEngines == 0: Does not copy, only queries total count.

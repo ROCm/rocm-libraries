@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 target_sources(stinkytofu PRIVATE
+    AnalysisManager.cpp
     IRBase.cpp
     BasicBlock.cpp
     Function.cpp

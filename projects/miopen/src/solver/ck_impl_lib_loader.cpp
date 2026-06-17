@@ -154,8 +154,9 @@ miopenStatus_t toMiopenStatus(ck_impl_status_t status)
     case CK_IMPL_STATUS_INVALID_VALUE: return miopenStatusInvalidValue;
     case CK_IMPL_STATUS_INTERNAL_ERROR: return miopenStatusInternalError;
     case CK_IMPL_STATUS_ALLOC_FAILED: return miopenStatusAllocFailed;
-    default: return miopenStatusInternalError;
     }
+
+    return miopenStatusInternalError;
 }
 
 } // namespace
@@ -328,6 +329,13 @@ void CkImplLibLoader::BindOptionalKernelTypeSymbols()
         if(member == nullptr)
             MIOPEN_LOG_I2("Optional CK symbol not found: " << symbol_name);
     };
+
+    bind_optional(solver_fns_[ToSolverIndex(CKSolverType::GrpConvFwd)].get_all_kernel_types,
+                  "ck_impl_fwd_get_all_kernel_type_strings");
+    bind_optional(solver_fns_[ToSolverIndex(CKSolverType::GrpConvBwd)].get_all_kernel_types,
+                  "ck_impl_bwd_get_all_kernel_type_strings");
+    bind_optional(solver_fns_[ToSolverIndex(CKSolverType::GrpConvWrw)].get_all_kernel_types,
+                  "ck_impl_wrw_get_all_kernel_type_strings");
 
     bind_optional(solver_fns_[ToSolverIndex(CKSolverType::GrpConv3dFwd)].get_all_kernel_types,
                   "ck_impl_3d_fwd_get_all_kernel_type_strings");

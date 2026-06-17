@@ -5,6 +5,8 @@
 
 #include <hipdnn_frontend/detail/IncompatibleBackend.hpp>
 
+#include <array>
+
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::detail;
 using namespace ::testing;
@@ -117,6 +119,27 @@ TEST(TestIncompatibleBackendWrapper, BackendCreateAndDeserializeGraphExt)
     hipdnnBackendDescriptor_t descriptor;
     const uint8_t* serializedGraph = nullptr;
     EXPECT_EQ(backendWrapper.backendCreateAndDeserializeGraphExt(&descriptor, serializedGraph, 0),
+              hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST(TestIncompatibleBackendWrapper, BackendGetSerializedExecutionPlanExt)
+{
+    IncompatibleBackendWrapper backendWrapper;
+    hipdnnBackendDescriptor_t descriptor = nullptr;
+    size_t planByteSize = 0;
+    EXPECT_EQ(
+        backendWrapper.backendGetSerializedExecutionPlanExt(descriptor, 0, &planByteSize, nullptr),
+        hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST(TestIncompatibleBackendWrapper, BackendCreateAndDeserializeExecutionPlanExt)
+{
+    IncompatibleBackendWrapper backendWrapper;
+    hipdnnHandle_t handle = nullptr;
+    hipdnnBackendDescriptor_t descriptor = nullptr;
+    const std::array<uint8_t, 1> serializedPlan{0};
+    EXPECT_EQ(backendWrapper.backendCreateAndDeserializeExecutionPlanExt(
+                  handle, &descriptor, serializedPlan.data(), serializedPlan.size()),
               hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
 }
 

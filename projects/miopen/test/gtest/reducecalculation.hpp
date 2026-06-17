@@ -55,7 +55,7 @@ void cpu_calculation_forward(tensor<T> input,
 
         T calculation = static_cast<T>(0);
 
-        miopen::ford(reduce_size)([&](size_t i) {
+        miopen::ford(reduce_size)([&](size_t /*i*/) {
             T val = input[input_idx];
             if(nanPropagation && std::isnan(val))
             {

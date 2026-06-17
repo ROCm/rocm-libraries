@@ -131,6 +131,8 @@ protected:
                           GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
+        bundle.sentinelFillOutputTensors();
+
         bundle.tensors.at(BatchnormBwdTensorIds::X_UID)
             ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
         bundle.tensors.at(BatchnormBwdTensorIds::DY_UID)
@@ -160,6 +162,8 @@ protected:
         this->registerValidator(outputs.dscale, this->getTolerance(graphObj, outputs.dscale));
         this->registerValidator(outputs.dbias, this->getTolerance(graphObj, outputs.dbias));
 
+        this->setTestCaseLayout(layout.name);
+        this->setTestCaseNote(bnTestCase.note);
         this->verifyGraph(graphObj, bnTestCase.seed);
     }
 };

@@ -303,7 +303,13 @@ bool ConvWinoRageRxSFused<Winodata, Winofilter>::IsApplicable(
         case miopenActivationTANH:
         case miopenActivationRELU:
         case miopenActivationLEAKYRELU: break;
-        default: return false;
+
+        case miopenActivationSOFTRELU:
+        case miopenActivationABS:
+        case miopenActivationPOWER:
+        case miopenActivationCLIPPEDRELU:
+        case miopenActivationELU:
+        case miopenActivationCLAMP: return false;
         }
     }
 

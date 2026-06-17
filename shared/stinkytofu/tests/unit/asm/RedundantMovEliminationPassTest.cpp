@@ -54,7 +54,7 @@ class RedundantMovEliminationPassTest : public ::testing::Test {
     Function* parseIR(const std::string& irString, StinkyIRConverter& converter) {
         Function* func = converter.convertToFunction(irString);
         if (!func) {
-            std::cerr << "Failed to parse IR" << std::endl;
+            std::cerr << "Failed to parse IR\n";
             return nullptr;
         }
         return func;
@@ -86,6 +86,7 @@ class RedundantMovEliminationPassTest : public ::testing::Test {
     }
 
     GemmTileConfig gemmConfig;
+    AnalysisManager am;
 };
 
 // Test 1: Eliminate redundant mov to same destination
@@ -106,7 +107,7 @@ TEST_F(RedundantMovEliminationPassTest, EliminateSimpleDuplicate) {
     passCtx.setGemmTileConfig(gemmConfig);
 
     auto dupElimPass = createRedundantMovEliminationPass();
-    dupElimPass->run(*func, passCtx);
+    dupElimPass->run(*func, passCtx, am);
 
     std::string result = getFunctionIR(*func);
 
@@ -134,7 +135,7 @@ TEST_F(RedundantMovEliminationPassTest, MultipleDuplicates) {
     passCtx.setGemmTileConfig(gemmConfig);
 
     auto dupElimPass = createRedundantMovEliminationPass();
-    dupElimPass->run(*func, passCtx);
+    dupElimPass->run(*func, passCtx, am);
 
     std::string result = getFunctionIR(*func);
 
@@ -160,7 +161,7 @@ TEST_F(RedundantMovEliminationPassTest, DontEliminateWithModifiedOperand) {
     passCtx.setGemmTileConfig(gemmConfig);
 
     auto dupElimPass = createRedundantMovEliminationPass();
-    dupElimPass->run(*func, passCtx);
+    dupElimPass->run(*func, passCtx, am);
 
     std::string result = getFunctionIR(*func);
 
@@ -185,7 +186,7 @@ TEST_F(RedundantMovEliminationPassTest, DifferentOperands) {
     passCtx.setGemmTileConfig(gemmConfig);
 
     auto dupElimPass = createRedundantMovEliminationPass();
-    dupElimPass->run(*func, passCtx);
+    dupElimPass->run(*func, passCtx, am);
 
     std::string result = getFunctionIR(*func);
 
@@ -206,7 +207,7 @@ TEST_F(RedundantMovEliminationPassTest, EmptyIR) {
     passCtx.setGemmTileConfig(gemmConfig);
 
     auto dupElimPass = createRedundantMovEliminationPass();
-    dupElimPass->run(*func, passCtx);
+    dupElimPass->run(*func, passCtx, am);
     // Empty IR should not cause any errors
 }
 
@@ -224,13 +225,11 @@ TEST_F(RedundantMovEliminationPassTest, NoDuplicates) {
     auto* func = parseIR(irString, converter);
     ASSERT_NE(func, nullptr);
 
-    std::string before = getFunctionIR(*func);
-
     PassContext passCtx;
     passCtx.setGemmTileConfig(gemmConfig);
 
     auto dupElimPass = createRedundantMovEliminationPass();
-    dupElimPass->run(*func, passCtx);
+    dupElimPass->run(*func, passCtx, am);
 
     std::string after = getFunctionIR(*func);
 

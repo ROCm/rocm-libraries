@@ -8,6 +8,7 @@ namespace hipdnn_flatbuffers_sdk.data_objects;
 table EngineDetails {
     engine_id: int64;
     knobs: [Knob];
+    behavior_notes: [int32];
 }
 
 root_type EngineDetails;

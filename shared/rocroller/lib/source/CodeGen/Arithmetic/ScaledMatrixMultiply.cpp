@@ -31,6 +31,14 @@ namespace rocRoller
             AssertFatal(scaleA != nullptr);
             AssertFatal(scaleB != nullptr);
 
+            // Special case for VGPR indexing:
+            //     v_wmma_ld_scale ignores the MODE register therefore
+            //     the scale data must be allocated sub v256.
+            AssertFatal(scaleA->getRegisterIds().begin()->regIndex < 256,
+                        ShowValue(scaleA->getRegisterIds().begin()->regIndex));
+            AssertFatal(scaleB->getRegisterIds().begin()->regIndex < 256,
+                        ShowValue(scaleB->getRegisterIds().begin()->regIndex));
+
             auto const lanesPerWavefront = m_context->targetArchitecture().GetCapability(
                 GPUCapability::DefaultWavefrontSize);
             AssertFatal(miSizes.m > 0 && miSizes.n > 0 && miSizes.k > 0 && lanesPerWavefront > 0,
@@ -149,6 +157,110 @@ namespace rocRoller
                                  {dest},
                                  {matA, matB, matC, scaleA, scaleB},
                                  {opselLo, opselHi, aType, bType},
+                                 "");
+
+                co_yield inst;
+            }
+            else if(arch.HasCapability(GPUCapability::HasWMMA_scale_f8f6f4))
+            {
+                AssertFatal((miSizes.m == 16 && miSizes.n == 16 && miSizes.k == 128)
+                                || (miSizes.m == 32 && miSizes.n == 16 && miSizes.k == 128),
+                            "Invalid wavetile {}x{}x{} for scaled WMMA instruction for {}.",
+                            miSizes.m,
+                            miSizes.n,
+                            miSizes.k,
+                            arch.target().toString());
+
+                std::string miSuffix = "_f8f6f4";
+
+                if(miSizes.m == 32 && miSizes.n == 16 && miSizes.k == 128)
+                {
+                    AssertFatal(
+                        isF4(typeA) && isF4(typeB),
+                        fmt::format(
+                            "Invalid types for A and B. Scaled {}x{}x{} WMMA instructions only "
+                            "support FP4.",
+                            miSizes.m,
+                            miSizes.n,
+                            miSizes.k),
+                        ShowValue(typeA),
+                        ShowValue(typeB));
+                    miSuffix = "_f4";
+                }
+
+                std::string mi;
+
+                if(maybeScaleBlockSize)
+                {
+                    auto scaleBlockSize = maybeScaleBlockSize.value();
+                    AssertFatal(arch.isSupportedScaleBlockSize(scaleBlockSize),
+                                fmt::format("Scale block size {} not supported on {}",
+                                            scaleBlockSize,
+                                            arch.target().toString()));
+
+                    if(scaleBlockSize == 32)
+                    {
+                        mi = concatenate("v_wmma_scale_f32_",
+                                         miSizes.m,
+                                         "x",
+                                         miSizes.n,
+                                         "x",
+                                         miSizes.k,
+                                         miSuffix);
+                    }
+                    else if(scaleBlockSize == 16)
+                    {
+                        AssertFatal(arch.HasCapability(GPUCapability::HasWMMA_scale16_f8f6f4));
+                        mi = concatenate("v_wmma_scale16_f32_",
+                                         miSizes.m,
+                                         "x",
+                                         miSizes.n,
+                                         "x",
+                                         miSizes.k,
+                                         miSuffix);
+                    }
+                    else
+                    {
+                        Throw<FatalError>(fmt::format(
+                            "Scaled Matrix Multiplication with block size {} is unimplemented {}",
+                            scaleBlockSize,
+                            arch.target().toString()));
+                    }
+                }
+                else
+                {
+                    mi = concatenate(
+                        "v_wmma_scale_f32_", miSizes.m, "x", miSizes.n, "x", miSizes.k, miSuffix);
+                }
+
+                auto scaleAType = scaleA->variableType().dataType;
+                auto scaleBType = scaleB->variableType().dataType;
+
+                AssertFatal(
+                    isValidDataTypeScaleTypeCombination(typeA, typeB, scaleAType, scaleBType),
+                    ShowValue(typeA),
+                    ShowValue(typeB),
+                    ShowValue(scaleAType),
+                    ShowValue(scaleBType));
+
+                auto aFmt = "matrix_a_fmt:" + Arithmetic::getModifier(typeA);
+                auto bFmt = "matrix_b_fmt:" + Arithmetic::getModifier(typeB);
+                auto aScaleFmt
+                    = "matrix_a_scale_fmt:" + Arithmetic::getScaleTypeModifier(scaleAType);
+                auto bScaleFmt
+                    = "matrix_b_scale_fmt:" + Arithmetic::getScaleTypeModifier(scaleBType);
+
+                if(miSuffix == "_f4")
+                {
+                    // _f4 only supports FP4 input types, so no need to specify formats
+                    aFmt = "";
+                    bFmt = "";
+                }
+
+                Instruction inst(mi,
+                                 {dest},
+                                 {matA, matB, matC, scaleA, scaleB},
+                                 {aFmt, bFmt, aScaleFmt, bScaleFmt},
                                  "");
 
                 co_yield inst;

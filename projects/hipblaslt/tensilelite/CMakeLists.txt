@@ -52,10 +52,27 @@ if(TENSILELITE_ENABLE_HOST)
             hip::device
     )
 
+    include(CheckCXXSourceCompiles)
+    set(CMAKE_REQUIRED_INCLUDES ${HIP_INCLUDE_DIRS})
+    set(CMAKE_REQUIRED_LIBRARIES hip::device)
+    check_cxx_source_compiles("
+        #include <hip/hip_runtime.h>
+        int main() {
+            hipLaunchAttributeID id = hipLaunchAttributeClusterDimension;
+            return 0;
+        }
+    " HIP_HAS_CLUSTER_LAUNCH)
+    if(HIP_HAS_CLUSTER_LAUNCH)
+        target_compile_definitions(tensilelite-host PRIVATE HIP_HAS_CLUSTER_LAUNCH)
+    endif()
+
     add_subdirectory(src)
     add_subdirectory(include)
 
     if(TENSILELITE_ENABLE_CLIENT)
+        # mxDataGenerator bootstrap and `hipblaslt::mxdatagen` helper target
+        # live in projects/hipblaslt/CMakeLists.txt and are guaranteed to be
+        # available before this subdirectory is processed.
         add_subdirectory(client)
     endif()
 

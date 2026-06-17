@@ -76,7 +76,16 @@ if(BUILD_FORTRAN_BINDINGS)
   # Create hipSOLVER Fortran module
   add_library(hipsolver_fortran ${hipsolver_f90_source})
   rocm_set_soversion(hipsolver_fortran ${hipsolver_SOVERSION})
-  rocm_install(TARGETS hipsolver_fortran)
+  if(EXPORT_FORTRAN_BINDINGS)
+    rocm_install(TARGETS hipsolver_fortran)
+  else()
+    # Install the shared object without adding it to the
+    # hipsolver-targets export set, so find_package(hipsolver)
+    # does not reference roc::hipsolver_fortran.
+    install(TARGETS hipsolver_fortran
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            COMPONENT runtime)
+  endif()
 endif()
 
 add_library(hipsolver
@@ -139,6 +148,12 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
       find_package(rocsolver REQUIRED CONFIG PATHS /opt/rocm /opt/rocm/rocsolver /usr/local/rocsolver)
     endif()
     list(APPEND static_depends PACKAGE rocsolver)
+  endif()
+
+  # TODO: This LAPACK dependency is only required to support geev
+  # It should be removed once geev is implemented in rocSOLVER
+  if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
+      target_link_libraries(hipsolver PRIVATE lapack_libraries)
   endif()
 
   target_link_libraries(hipsolver PRIVATE roc::rocblas roc::rocsolver)

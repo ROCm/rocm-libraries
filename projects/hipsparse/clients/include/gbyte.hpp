@@ -53,8 +53,16 @@ inline double get_gpu_time_msec(double gpu_time_used)
  *    level 1 SPARSE
  * ===========================================================================
  */
+template <typename X, typename Y, typename I>
+constexpr double axpby_gbyte_count(I nnz, I size)
+{
+    // axpby touches: the nnz sparse indices + the nnz sparse values, and the
+    // entire dense vector y once for the beta*y scaling (read + write).
+    return (nnz * sizeof(I) + nnz * sizeof(X) + (2.0 * size) * sizeof(Y)) / 1e9;
+}
+
 template <typename T, typename I>
-constexpr double axpby_gbyte_count(I nnz)
+constexpr double axpyi_gbyte_count(I nnz)
 {
     return (nnz * sizeof(I) + (3.0 * nnz) * sizeof(T)) / 1e9;
 }

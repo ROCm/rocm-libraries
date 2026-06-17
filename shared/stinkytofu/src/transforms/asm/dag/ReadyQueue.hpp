@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include <climits>
 #include <cmath>
 #include <iostream>  // TODO: don't use iostream.
 #include <map>
@@ -59,21 +60,6 @@ struct CompareByDAGid {
 
 using DAGNodeList = std::vector<DAGNode>;
 
-static void dumpDAGGraph(const std::vector<std::unordered_set<unsigned>>& dagGraph,
-                         const DAGNodeList& dagNodes) {
-    std::cerr << "*** DAG Graph Dump: ***\n";
-    for (unsigned i = 0; i < dagGraph.size(); ++i) {
-        std::cerr << "Node " << i << ": ";
-        dagNodes[i].inst->dump(std::cerr);
-        std::cerr << "  successors: ";
-        for (unsigned succId : dagGraph[i]) {
-            std::cerr << succId << " ";
-        }
-        std::cerr << "\n";
-    }
-    std::cerr << "\n\n";
-}
-
 static void addEdgeById(DAGNode* from, DAGNode* to,
                         std::vector<std::unordered_set<unsigned>>& dagGraph) {
     // Don't add duplicate edges, or self-loops.
@@ -89,6 +75,10 @@ static void addEdgeById(DAGNode* from, DAGNode* to,
 struct BBScheduleState {
     int gapCycles = 0;
     std::map<int, int> dsResiduals;
+    // Cross-BB tensor_load_to_lds credit state (see CDNA5ReadyQueue). Carried to
+    // successor BBs in a loop. Kept separate from dsResiduals.
+    int globalReadInflightCount = 0;  // credits still in flight at BB end
+    int globalReadResidual = 0;       // max remaining drain latency among them
 };
 
 // Cache for cross-BB scheduling state. Lives in the scheduler's run() scope
@@ -257,10 +247,8 @@ struct MFMAIssueConfig {
 };
 
 struct WMMAIssueConfig {
-    int latency = 0;                // original mfma latency
-    int avgIssueInterval = 0;       // average issue interval for mfma
-    int totalIssuedCycles = 0;      // total issued cycles in the region
-    int totalWmmaIssuedCycles = 0;  // total wmma issued cycles in the region
-    int issuedCount = 0;            // total wmma issued count in the region
+    int latency = 0;      // WMMA latencyCycles (for barrier threshold math)
+    int issueCycles = 1;  // single-WMMA issue cycles
+    int issuedCount = 0;  // WMMA count in region (for barrier threshold math)
 };
 }  // namespace

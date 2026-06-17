@@ -1,174 +1,100 @@
 .. meta::
-  :description: hipSOLVER installation guide
-  :keywords: hipSOLVER, rocSOLVER, ROCm, API, documentation, install
+   :description: Installation instructions for hipSOLVER
+   :keywords: lib, hipsolver, solver, algorithm, install, sdk, rocm
 
-.. _install-linux:
+.. _installation:
 
-*********************************
-Installing and building hipSOLVER
-*********************************
+*****************
+Install hipSOLVER
+*****************
 
-This topic explains how to install and build the hipSOLVER library on Linux.
+Before you begin, verify that your system is supported. For more information,
+see :ref:`ROCm Core SDK components <rocm:release-components>`.
 
-Install using prebuilt packages
-===============================
+For advanced workflows, source builds, or custom configurations, see
+:doc:`./build`.
 
-Download the ROCm packages from the package servers following the :doc:`ROCm installation guide <rocm-install-on-linux:index>`.
-Run the following command to install hipSOLVER using the package manager.
+.. _install-rocm:
 
-.. code-block:: shell
+Install the ROCm Core SDK
+=========================
 
-   sudo apt update && sudo apt install hipsolver
+hipSOLVER is included with the ROCm Core SDK on Linux and Windows. For the most
+complete installation on Linux, we recommend that developers use the
+``amdrocm-core-sdk`` meta package.
 
-Build and install the library using a script (Ubuntu only)
-==========================================================
+For instructions, see :doc:`Install AMD ROCm <rocm:install/rocm>`. Use the
+selector panel on that page to view instructions appropriate for your system
+environment.
 
-The root directory of the `hipSOLVER project <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsolver>`_
-in the `rocm-libraries GitHub <https://github.com/ROCm/rocm-libraries>`_ includes the ``install.sh`` bash
-script for building and installing hipSOLVER on Ubuntu with a single command.
-The script does not accept many options and hardcodes most configuration attributes,
-but it's a great way to get started quickly and serves as an example of how to build and install hipSOLVER.
-A more extensive set of options can be specified by invoking ``cmake`` directly.
-A few commands in the script require ``sudo`` access,
-so it might prompt you for a password.
+.. _install-base:
 
-.. note::
-
-   To build hipSOLVER for ROCm 7.0.2 and earlier, use the hipSOLVER repository at `<https://github.com/ROCm/hipSOLVER>`_.
-   For more information, see the documentation associated with the release you want to build.
-
-Here are some typical examples of using the script:
-
-.. note::
-
-   Run these commands from the ``rocm-libraries/projects/hipsolver`` directory.
-
-*  ``./install.sh -id``: Build the library and dependencies and install them (the ``-d`` flag only needs to be passed once on a system).
-*  ``./install.sh -ic``: Build library and clients (tests, benchmarks, and samples) and install them.
-
-To list more options, use the ``-h`` (help) option of the install script.
-
-.. code-block:: shell
-
-   ./install.sh -h
-
-Build and install the library manually
+Install ROCm solver libraries on Linux
 ======================================
 
-For a standard library installation, follow these steps:
+Alternatively, if you want to install hipSOLVER as part of the ROCm
+solver package (a subset of the ROCm Core SDK ``amdrocm-core-sdk``) without
+additional ROCm libraries and tools, install the ``amdrocm-solver`` package.
+This includes hipSOLVER and rocSOLVER.
 
-.. code-block:: bash
+1. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` to
+   install dependencies and configure GPU access permissions.
 
-   mkdir -p <HIPSOLVER_BUILD_DIR_PATH>/release
-   cd <HIPSOLVER_BUILD_DIR_PATH>/release
-   CXX=/opt/rocm/bin/hipcc cmake <HIPSOLVER_SOURCE_DIR_PATH>
-   make -j$(nproc)
-   sudo make install
+2. Install the ROCm solver package that matches your desired ROCm version,
+   development package needs, and AMD GPU architecture. Package names use the
+   following format:
 
-``sudo`` is required to install hipSOLVER to a system directory, such as ``/opt/rocm``,
-which is the default location.
+   .. code-block:: shell-session
 
-*  Use ``-DCMAKE_INSTALL_PREFIX=<other_path>`` to specify a different install directory.
-*  Use ``-DCMAKE_BUILD_TYPE=<other_configuration>`` to specify a build configuration, such as ``Debug``.
-   The default build configuration is ``Release``.
+      amdrocm-solver<-dev/-devel><rocm_version><-llvm_target>
 
-Library dependencies
----------------------
+   Where:
 
-The ROCm (rocSOLVER) backend has the following dependencies:
+   * ``<-dev/-devel>`` specifies whether to install the library files and
+     headers. Omit this suffix to only install runtime packages.
 
-*  `rocSOLVER <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocsolver>`_
-*  `rocBLAS <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas>`_
-*  `rocSPARSE <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocsparse>`_ (optional)
-*  `SuiteSparse <https://github.com/DrTimothyAldenDavis/SuiteSparse>`_:
-   ``CHOLMOD`` and ``SuiteSparse_config`` modules (optional)
+     * ``-dev`` is used on Debian-based distributions, including Ubuntu.
 
-rocSOLVER itself depends on rocBLAS and rocSPARSE, therefore all three libraries should be installed
-as part of a standard rocSOLVER installation. For more information
-about building and installing rocSOLVER, see the :doc:`rocSOLVER installation guide <rocsolver:installation/installlinux>`.
+     * ``-devel`` is used on RPM-based distributions, including RHEL and SLES.
 
-SuiteSparse is a third-party library which can be installed using the package managers of most distributions.
-Together with rocSPARSE, it is used to provide
-functionality for the ``hipsolverSp`` API. By default, both libraries are run-time dependencies.
-They are dynamically loaded by ``dlopen`` if they are
-present on the system. If the ``BUILD_WITH_SPARSE`` option is set to ``ON``,
-they become build-time dependencies instead and must be present on the
-system to build hipSOLVER.
+   * ``<rocm_version>`` is the ROCm Core SDK version to install. Omit this
+     suffix to install the latest available version.
 
-.. code-block:: shell
+   * ``<-llvm_target>`` (starting with ``gfx``) is used if you are installing
+     for a single AMD GPU architecture. Omit this to install for all
+     architectures at the cost of disk space.
 
-   DBUILD_WITH_SPARSE=ON
+   For example: ``amdrocm-solver-dev7.13-gfx950``
 
-Build the library, tests, benchmarks, and samples manually
-==========================================================
+   Use the following command to install the latest FFT development package
+   release for supported GPU architectures:
 
-The repository contains source code for client programs that serve as tests, benchmarks, and samples.
-The client source code can be found in the ``clients`` subdirectory.
+   .. tab-set::
 
-Client dependencies
---------------------
+      .. tab-item:: Debian-based distros
 
-The hipSOLVER samples have no external dependencies, but the unit test and benchmarking applications do.
-These clients introduce the following dependencies:
+         .. code-block:: bash
 
-*  `LAPACK <https://github.com/Reference-LAPACK/lapack-release>`_ (Adds a dependency on a Fortran compiler)
-*  `GoogleTest <https://github.com/google/googletest>`_
-*  `hipBLAS <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblas>`_ (Optional)
-*  `hipSPARSE <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparse>`_ (Optional, but required with the default settings)
+            sudo apt install amdrocm-solver-dev
 
-Many distributions do not provide a GoogleTest package with precompiled libraries,
-and the LAPACK packages do not have the necessary CMake configuration files to
-link to the CBLAS library. hipSOLVER provides a CMake script that builds
-LAPACK and GoogleTest from source. This is an optional step because you can provide your own builds
-of these dependencies, setting ``CMAKE_PREFIX_PATH`` to let CMake find them.
+      .. tab-item:: RHEL-based distros
 
-The following sequence of steps builds the dependencies and installs them to the default CMake directory ``/usr/local``:
+         .. code-block:: bash
 
-.. code-block:: bash
+            sudo dnf install amdrocm-solver-devel
 
-   mkdir -p <HIPSOLVER_BUILD_DIR_PATH>/release/deps
-   cd <HIPSOLVER_BUILD_DIR_PATH>/release/deps
-   cmake <HIPSOLVER_SOURCE_PATH>/deps
-   make -j$(nproc) install
+      .. tab-item:: SLES
 
-hipBLAS is only required if the ``BUILD_HIPBLAS_TESTS`` option is set to ``ON``. It's used to ensure
-compatibility between the hipBLAS enumerations defined
-separately by hipBLAS and hipSOLVER. hipSPARSE is required by default but the dependency is
-ignored if the ``BUILD_HIPSPARSE_TESTS`` option is set to ``OFF``. It's used
-to create objects required by tests for the ``hipsolverSp`` API.
+         .. code-block:: bash
 
-.. code-block:: shell
+            sudo zypper install amdrocm-solver-devel
 
-   DBUILD_HIPBLAS_TESTS=ON
-   DBUILD_HIPSPARSE_TESTS=OFF
+.. _install-nightly:
 
-Both libraries can be installed the same way as hipSOLVER. For example, the install scripts for
-hipBLAS and hipSPARSE can be invoked to build and
-install those libraries using the following command:
+Install a nightly build
+=======================
 
-.. code-block:: shell
-
-   ./install.sh -i
-
-For more details, see the :doc:`hipBLAS <hipblas:index>`
-and :doc:`hipSPARSE <hipsparse:index>` documentation.
-
-Library and clients
---------------------
-
-After the dependencies are installed on the system, you can configure which clients to build.
-This requires adding a few extra flags to the CMake configure script for the library.
-If the dependencies are not installed into the default system locations, like ``/usr/local``,
-pass the ``CMAKE_PREFIX_PATH`` to CMake so it can find them.
-
-.. code-block:: bash
-
-   -DCMAKE_PREFIX_PATH="<semicolon separated paths>"
-
-Follow this example to build the library and clients:
-
-.. code-block:: bash
-
-   CXX=/opt/rocm/bin/hipcc cmake -DBUILD_CLIENTS_TESTS=ON -DBUILD_CLIENTS_BENCHMARKS=ON [HIPSOLVER_SOURCE]
-   make -j$(nproc)
-   sudo make install   # sudo required if installing into system directory such as /opt/rocm
+The `TheRock <https://github.com/ROCm/TheRock>`__ build system also publishes
+nightly builds for the ROCm Core SDK and its components, including hipSOLVER.
+See `Nightly release status
+<https://github.com/ROCm/TheRock#nightly-release-status>`__ for details.

@@ -26,6 +26,10 @@
 
 #pragma once
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 #define TENSILE_USE_MX_SCALE
 
 #ifdef TENSILE_USE_MX_SCALE
@@ -163,3 +167,5 @@ namespace std
 } // namespace std
 
 #endif // TENSILE_USE_MX_SCALE
+
+TENSILE_HIDDEN_END
