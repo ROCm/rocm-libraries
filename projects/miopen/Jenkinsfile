@@ -491,6 +491,7 @@ CRON_SETTINGS = BRANCH_NAME == "develop" ? '''
 0 0 * * * % RUN_NIGHTLY_TESTS=true;BUILD_PACKAGE_AND_CHECKS=false;BUILD_FULL_TESTS=false;TARGET_GFX908=false;TARGET_GFX90A=true;TARGET_GFX942=true
 0 1 * * * % NONCRITICAL_HW_NIGHTLY=true;BUILD_PACKAGE_AND_CHECKS=false;BUILD_FULL_TESTS=false;TARGET_GFX908=true;TARGET_NAVI35=true;TARGET_GFX90A=false;TARGET_GFX942=false
 0 22 * * * % BUILD_THEROCK_DOCKER=true
+0 23 * * 0 % BUILD_ASAN_DOCKER=true;BUILD_DOCKER=false;BUILD_PACKAGE_AND_CHECKS=false;BUILD_FULL_TESTS=false
 ''' : ""
 
 
@@ -592,6 +593,10 @@ pipeline {
             name: "NONCRITICAL_HW_NIGHTLY",
             defaultValue: false,
             description: "Nightly builds for non-critical hardware (gfx908, Navi 3.5) (default: OFF)")
+        booleanParam(
+            name: "BUILD_ASAN_DOCKER",
+            defaultValue: false,
+            description: "Build and push rocm/miopen-dev:ci_asan_candidate ASAN Docker image (run weekly on Sundays)")
 
     }
 
@@ -661,16 +666,26 @@ pipeline {
                 }
             }
         }
+        stage('Build ASAN Docker for gfx942') {
+            when {
+                expression { params.BUILD_ASAN_DOCKER }
+            }
+            steps {
+                script {
+                    runAsanDockerBuild()
+                }
+            }
+        }
         stage("Full Tests") {
             when {
                 expression {
-                    params.BUILD_FULL_TESTS || params.BUILD_THEROCK_DOCKER
+                    params.BUILD_FULL_TESTS || params.BUILD_THEROCK_DOCKER || params.BUILD_ASAN_DOCKER
                 }
             }
             steps {
                 script {
                     ensureUtils()
-                    parallel utils.fullTestStages(params, env, this.&rocmnode, this.&withWorkingDir, this.&runDbSyncJob, this.&runBuildAndSingleGtestJob)
+                    parallel utils.fullTestStages(params, env, this.&rocmnode, this.&withWorkingDir, this.&runDbSyncJob, this.&runBuildAndSingleGtestJob, this.&runAsanTests, this.&cleanupAsanImage)
                 }
             }
         }
@@ -678,7 +693,7 @@ pipeline {
         stage('Build TheRock Docker: Promote') {
             when {
                 expression {
-                    params.BUILD_THEROCK_DOCKER && env.THEROCK_SKIP_UPDATE != 'true'
+                    params.BUILD_THEROCK_DOCKER && env.THEROCK_SKIP_UPDATE != 'true' && !params.BUILD_ASAN_DOCKER
                 }
             }
             steps {
@@ -687,10 +702,21 @@ pipeline {
                 }
             }
         }
+        // Promotes ci_asan_candidate to :asan only after the ASAN test in Full Tests passes.
+        stage('Promote ASAN Docker') {
+            when {
+                expression { params.BUILD_ASAN_DOCKER }
+            }
+            steps {
+                script {
+                    runAsanDockerPromote()
+                }
+            }
+        }
         // Publishes rocm/miopen-dev:multiarch_dev_<date> and :latest after CI passes.
         stage('Publish Dev Image') {
             when {
-                expression { params.BUILD_THEROCK_DOCKER }
+                expression { params.BUILD_THEROCK_DOCKER && !params.BUILD_ASAN_DOCKER }
             }
             steps {
                 script {

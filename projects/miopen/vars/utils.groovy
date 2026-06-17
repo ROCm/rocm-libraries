@@ -1149,7 +1149,7 @@ def packageAndStaticCheckStages(def pipelineParams, def pipelineEnv, def rocmnod
     return stages
 }
 
-def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def withWorkingDirFn, def runDbSyncJobFn, def runBuildAndSingleGtestJobFn) {
+def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def withWorkingDirFn, def runDbSyncJobFn, def runBuildAndSingleGtestJobFn, def runAsanTestsFn = null, def cleanupAsanImageFn = null) {
     def result = getPassedStagesFromPreviousBuild()
     def passedStages = result.passedStages
     echo "Selective rerun: ${result.debugMsg}"
@@ -1166,7 +1166,7 @@ def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def with
     def Build_timeout_minutes = pipelineEnv.Build_timeout_minutes as Integer
 
     def hipTidy = 'Hip Tidy'
-    addStageIf(stages, pipelineParams.RUN_HIP_TIDY && !passedStages.contains(hipTidy), hipTidy) {
+    addStageIf(stages, pipelineParams.RUN_HIP_TIDY && !pipelineParams.BUILD_ASAN_DOCKER && !passedStages.contains(hipTidy), hipTidy) {
         node(rocmnodeFn("nogpu")) {
             try {
                 withStageStatus {
@@ -1182,7 +1182,7 @@ def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def with
 
     // GFX90A Tests
     def dbsyncGfx90a = 'Dbsync gfx90a'
-    addStageIf(stages, pipelineParams.DBSYNC_TEST && pipelineParams.TARGET_GFX90A && !passedStages.contains(dbsyncGfx90a), dbsyncGfx90a) {
+    addStageIf(stages, pipelineParams.DBSYNC_TEST && pipelineParams.TARGET_GFX90A && !pipelineParams.BUILD_ASAN_DOCKER && !passedStages.contains(dbsyncGfx90a), dbsyncGfx90a) {
         node(rocmnodeFn("gfx90a")) {
             try {
                 withStageStatus { runDbSyncJobFn(gfx90a_flags, "ci") }
@@ -1191,7 +1191,7 @@ def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def with
     }
 
     def bf16Gfx90a = 'Bf16 Hip Install All gfx90a'
-    addStageIf(stages, pipelineParams.TARGET_GFX90A && pipelineParams.DATATYPE_BF16 && !passedStages.contains(bf16Gfx90a), bf16Gfx90a) {
+    addStageIf(stages, pipelineParams.TARGET_GFX90A && pipelineParams.DATATYPE_BF16 && !pipelineParams.BUILD_ASAN_DOCKER && !passedStages.contains(bf16Gfx90a), bf16Gfx90a) {
         node(rocmnodeFn("gfx90a")) {
             try {
                 withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + Bf16_flags + gfx90a_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
@@ -1200,7 +1200,7 @@ def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def with
     }
 
     def fp16Gfx90a = 'Fp16 Hip Install All gfx90a'
-    addStageIf(stages, pipelineParams.TARGET_GFX90A && pipelineParams.DATATYPE_FP16 && !passedStages.contains(fp16Gfx90a), fp16Gfx90a) {
+    addStageIf(stages, pipelineParams.TARGET_GFX90A && pipelineParams.DATATYPE_FP16 && !pipelineParams.BUILD_ASAN_DOCKER && !passedStages.contains(fp16Gfx90a), fp16Gfx90a) {
         node(rocmnodeFn("gfx90a")) {
             try {
                 withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + Fp16_flags + gfx90a_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
@@ -1209,7 +1209,7 @@ def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def with
     }
 
     def fp32Gfx90a = 'Fp32 Hip Install All gfx90a'
-    addStageIf(stages, pipelineParams.TARGET_GFX90A && pipelineParams.DATATYPE_FP32 && !passedStages.contains(fp32Gfx90a), fp32Gfx90a) {
+    addStageIf(stages, pipelineParams.TARGET_GFX90A && pipelineParams.DATATYPE_FP32 && !pipelineParams.BUILD_ASAN_DOCKER && !passedStages.contains(fp32Gfx90a), fp32Gfx90a) {
         node(rocmnodeFn("gfx90a")) {
             try {
                 withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + gfx90a_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
@@ -1217,9 +1217,23 @@ def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def with
         }
     }
 
-    // GFX942 Tests
+    // GFX942 Tests — ASAN declared first so it enters the gfx942 queue sooner
+    def asanGfx942 = 'ASAN Hip Install All gfx942'
+    addStageIf(stages, (pipelineParams.TARGET_GFX942 || pipelineParams.BUILD_ASAN_DOCKER) && runAsanTestsFn != null, asanGfx942) {
+        node(rocmnodeFn("gfx942")) {
+            try {
+                withStageStatus { runAsanTestsFn("gfx942", "gfx942") }
+            } finally {
+                junit allowEmptyResults: true, testResults: "shard_logs/asan_shard_*.xml"
+                archiveArtifacts artifacts: 'shard_logs/asan_shard_*.log', allowEmptyArchive: true
+                if (cleanupAsanImageFn != null) { cleanupAsanImageFn() }
+                cleanWs()
+            }
+        }
+    }
+
     def dbsyncGfx942 = 'Dbsync gfx942'
-    addStageIf(stages, pipelineParams.DBSYNC_TEST && pipelineParams.TARGET_GFX942 && !passedStages.contains(dbsyncGfx942), dbsyncGfx942) {
+    addStageIf(stages, pipelineParams.DBSYNC_TEST && pipelineParams.TARGET_GFX942 && !pipelineParams.BUILD_ASAN_DOCKER && !passedStages.contains(dbsyncGfx942), dbsyncGfx942) {
         node(rocmnodeFn("gfx942")) {
             try {
                 withStageStatus { runDbSyncJobFn(gfx942_flags, "ci") }
@@ -1228,7 +1242,7 @@ def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def with
     }
 
     def bf16Gfx942 = 'Bf16 Hip Install All gfx942'
-    addStageIf(stages, pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_BF16 && !passedStages.contains(bf16Gfx942), bf16Gfx942) {
+    addStageIf(stages, pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_BF16 && !pipelineParams.BUILD_ASAN_DOCKER && !passedStages.contains(bf16Gfx942), bf16Gfx942) {
         node(rocmnodeFn("gfx942")) {
             try {
                 withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + Bf16_flags + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
@@ -1237,7 +1251,7 @@ def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def with
     }
 
     def fp16Gfx942 = 'Fp16 Hip Install All gfx942'
-    addStageIf(stages, pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_FP16 && !passedStages.contains(fp16Gfx942), fp16Gfx942) {
+    addStageIf(stages, pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_FP16 && !pipelineParams.BUILD_ASAN_DOCKER && !passedStages.contains(fp16Gfx942), fp16Gfx942) {
         node(rocmnodeFn("gfx942")) {
             try {
                 withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + Fp16_flags + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
@@ -1246,7 +1260,7 @@ def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def with
     }
 
     def fp32Gfx942 = 'Fp32 Hip Install All gfx942'
-    addStageIf(stages, pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_FP32 && !passedStages.contains(fp32Gfx942), fp32Gfx942) {
+    addStageIf(stages, pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_FP32 && !pipelineParams.BUILD_ASAN_DOCKER && !passedStages.contains(fp32Gfx942), fp32Gfx942) {
         node(rocmnodeFn("gfx942")) {
             try {
                 withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
@@ -1255,7 +1269,7 @@ def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def with
     }
 
     def tf32Gfx942 = 'TF32 Hip Install All gfx942'
-    addStageIf(stages, pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_TF32 && !passedStages.contains(tf32Gfx942), tf32Gfx942) {
+    addStageIf(stages, pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_TF32 && !pipelineParams.BUILD_ASAN_DOCKER && !passedStages.contains(tf32Gfx942), tf32Gfx942) {
         node(rocmnodeFn("gfx942")) {
             try {
                 withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + Tf32_flags + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
@@ -1265,7 +1279,7 @@ def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def with
 
     // GFX1101 Tests
     def fp16Gfx1101 = 'Fp16 Hip Install All gfx1101'
-    addStageIf(stages, pipelineParams.TARGET_NAVI32 && pipelineParams.DATATYPE_FP16 && !passedStages.contains(fp16Gfx1101), fp16Gfx1101) {
+    addStageIf(stages, pipelineParams.TARGET_NAVI32 && pipelineParams.DATATYPE_FP16 && !pipelineParams.BUILD_ASAN_DOCKER && !passedStages.contains(fp16Gfx1101), fp16Gfx1101) {
         node(rocmnodeFn("navi32")) {
             try {
                 withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + Fp16_flags + gfx1101_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
@@ -1274,7 +1288,7 @@ def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def with
     }
 
     def fp32Gfx1101 = 'Fp32 Hip Install All gfx1101'
-    addStageIf(stages, pipelineParams.TARGET_NAVI32 && pipelineParams.DATATYPE_FP32 && !passedStages.contains(fp32Gfx1101), fp32Gfx1101) {
+    addStageIf(stages, pipelineParams.TARGET_NAVI32 && pipelineParams.DATATYPE_FP32 && !pipelineParams.BUILD_ASAN_DOCKER && !passedStages.contains(fp32Gfx1101), fp32Gfx1101) {
         node(rocmnodeFn("navi32")) {
             try {
                 withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + gfx1101_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
