@@ -29,7 +29,7 @@ protected:
 
     void SetUp() override
     {
-        _engine = std::make_unique<HipFlash2Engine>(HipFlash2Engine::staticId());
+        _engine = std::make_unique<HipFlash2Engine>();
         _engine->addPlanBuilder(std::make_unique<HipFlash2FwdPlanBuilder>());
     }
 };
@@ -128,8 +128,13 @@ TEST_F(TestHipFlash2Engine, IsApplicableReturnsFalseForUnsupportedHeadDim)
 
 // ── ID and name tests ─────────────────────────────────────────────────────────
 
-TEST_F(TestHipFlash2Engine, StaticIdMatchesEngineId)
+// id() always returns the compile-time constant HIP_FLASH2_ENGINE_ID.
+// The meaningful checks are that it is non-zero and distinct from other engines.
+TEST_F(TestHipFlash2Engine, EngineIdIsValid)
 {
+    EXPECT_NE(HipFlash2Engine::staticId(), 0);
+    EXPECT_NE(HipFlash2Engine::staticId(), hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_ID);
+    // id() must match the constant
     EXPECT_EQ(_engine->id(), HipFlash2Engine::staticId());
 }
 
@@ -174,7 +179,7 @@ TEST_F(TestHipFlash2Engine, MaxWorkspaceSizeIsZero)
     // Flash-Attention 2 uses only registers + LDS, no global workspace
     // We need a valid engine config to call getMaxWorkspaceSize
     // Use a stub since we just want to verify the zero-workspace property
-    EXPECT_EQ(_engine->id(), HipFlash2Engine::staticId()); // engine is valid
+    EXPECT_EQ(_engine->id(), HipFlash2Engine::staticId());
 }
 
 } // namespace
