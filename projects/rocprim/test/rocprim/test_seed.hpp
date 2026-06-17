@@ -34,7 +34,7 @@ static const char* env_p = common::__get_env("ROCPRIM_TEST_RUNS");
 static const size_t env_var = (env_p == nullptr) ? 0ul : std::atoi(env_p);
 
 // Predefined seeds.
-static constexpr seed_type seeds[]   = {0, 1997132004};
+static constexpr seed_type seeds[]   = {0, 81629060, 1997132004};
 static constexpr size_t    seed_size = sizeof(seeds) / sizeof(seeds[0]);
 
 // Calculate the number of random seeds.
