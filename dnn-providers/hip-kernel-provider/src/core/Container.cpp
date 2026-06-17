@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 
 #include "Container.hpp"
-
 #include "compilation/KernelCompiler.hpp"
 #include "device/CurrentDevicePropertyProvider.hpp"
 
@@ -30,11 +29,13 @@
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
-namespace hip_kernel_provider::core {
+namespace hip_kernel_provider::core
+{
 
 using namespace hipdnn_data_sdk::utilities;
 
-const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions() {
+const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions()
+{
     static const std::vector<EngineDefinition> s_engineDefinitions = {
     // HIP_MLOPS_ENGINE
 #ifdef HIPDNN_ENGINE_HIP_MLOPS
@@ -67,7 +68,7 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
              engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaBwdPlanBuilder>());
              return engine;
          }},
-#endif  // HIPDNN_ENGINE_ASM_SDPA
+#endif // HIPDNN_ENGINE_ASM_SDPA
 #ifdef HIPDNN_ENGINE_HIP_FLASH2
         // HIP_FLASH2_ENGINE: FP16 Flash-Attention 2 V7 (rocWMMA MFMA + causal tile skip)
         // Complements ASM_SDPA_ENGINE: handles FP16 on gfx942/gfx950.
@@ -78,26 +79,31 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
              -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
              auto engine =
                  std::make_unique<hip_flash2_engine::HipFlash2Engine>(HIP_FLASH2_ENGINE_ID);
-             engine->addPlanBuilder(std::make_unique<hip_flash2_engine::HipFlash2FwdPlanBuilder>());
+             engine->addPlanBuilder(
+                 std::make_unique<hip_flash2_engine::HipFlash2FwdPlanBuilder>(
+                     kernelCompiler, devicePropertyProvider));
              return engine;
          }},
-#endif  // HIPDNN_ENGINE_HIP_FLASH2
+#endif // HIPDNN_ENGINE_HIP_FLASH2
     };
 
     return s_engineDefinitions;
 }
 
-uint32_t Container::copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t& numEngines) {
+uint32_t Container::copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t& numEngines)
+{
     const auto& engineDefinitions = getEngineDefinitions();
     auto totalEngines = static_cast<uint32_t>(engineDefinitions.size());
 
-    if (maxEngines == 0) {
+    if(maxEngines == 0)
+    {
         numEngines = totalEngines;
         return totalEngines;
     }
 
     auto enginesToCopy = std::min(maxEngines, totalEngines);
-    for (uint32_t i = 0; i < enginesToCopy; ++i) {
+    for(uint32_t i = 0; i < enginesToCopy; ++i)
+    {
         engineIds[i] = engineDefinitions[i].id;
     }
 
@@ -107,25 +113,29 @@ uint32_t Container::copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint3
 }
 
 Container::Container()
-    : _devicePropertyProvider(std::make_unique<device::CurrentDevicePropertyProvider>()),
-      _kernelCompiler(std::make_unique<compilation::KernelCompiler>()) {
+    : _devicePropertyProvider(std::make_unique<device::CurrentDevicePropertyProvider>())
+    , _kernelCompiler(std::make_unique<compilation::KernelCompiler>())
+{
     HIPDNN_PLUGIN_LOG_INFO("Creating Container");
 
-    _engineManager =
-        std::make_unique<hipdnn_plugin_sdk::EngineManager<Handle, Settings, Context>>();
+    _engineManager
+        = std::make_unique<hipdnn_plugin_sdk::EngineManager<Handle, Settings, Context>>();
 
-    for (const auto& engineDefinition : getEngineDefinitions()) {
+    for(const auto& engineDefinition : getEngineDefinitions())
+    {
         _engineManager->addEngine(
             engineDefinition.createEngine(*_kernelCompiler, *_devicePropertyProvider));
     }
 }
 
-Container::~Container() {
+Container::~Container()
+{
     HIPDNN_PLUGIN_LOG_INFO("Destroying Container");
 }
 
-hipdnn_plugin_sdk::EngineManager<Handle, Settings, Context>& Container::getEngineManager() {
+hipdnn_plugin_sdk::EngineManager<Handle, Settings, Context>& Container::getEngineManager()
+{
     return *_engineManager;
 }
 
-}  // namespace hip_kernel_provider::core
+} // namespace hip_kernel_provider::core
