@@ -2360,6 +2360,78 @@ class TestVgprAllocatorSelection:
         sched = LogicalScheduler(cfg)
         assert sched._use_free_list_vgpr_allocation()
 
+    def test_pgr0_mx_multi_du_does_not_use_free_list(self):
+        """Gate is off for pgr=0 even when scaled and multi-DU: pgr=0 has no
+        prefetch double-buffer, so the deterministic allocator is used."""
+        cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=0)
+        assert cfg.hasScale
+        sched = LogicalScheduler(cfg)
+        assert sched._is_multi_du()
+        assert not sched._use_free_list_vgpr_allocation()
+
+    def test_non_scale_does_not_use_free_list(self):
+        """Gate requires scale tensors; plain BF16 (no scale) always uses the
+        deterministic allocator."""
+        cfg = make_cfg_bf16()
+        assert not cfg.hasScale
+        sched = LogicalScheduler(cfg)
+        assert not sched._use_free_list_vgpr_allocation()
+
+
+class TestFreeListVgprAllocation:
+    """Non-regression assertions for the MX multi-DU free-list VGPR allocator
+    (_assign_vgpr_tiles_free_list). Lifetime-based FIFO reuse must keep the
+    physical id set densely packed at [0, peak) so peak equals the maximum
+    number of concurrently-live tile groups, not the sum of all allocations.
+    """
+
+    def _collect_ids(self, sched):
+        """Gather every physical vgprTileId assigned per tensor."""
+        ids = {t: set() for t in sched.tile_peaks}
+        for slots in sched._partitions:
+            for slot in slots:
+                if slot.mfma:
+                    for tensor, maps in slot.mfma.vgpr_tile_maps.items():
+                        for tile_map in maps:
+                            ids[tensor].update(tile_map.values())
+                for lr in slot.lrs:
+                    for tile_map in lr.vgpr_tile_map:
+                        ids[lr.tensor].update(tile_map.values())
+        return ids
+
+    def test_free_list_ids_dense_and_capped_at_peak(self):
+        """FIFO reuse repacks freed ids: every id in [0, peak) is used and
+        none exceeds peak, so the live-id count never grows past the peak."""
+        cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=1)
+        sched = LogicalScheduler(cfg)
+        assert sched._use_free_list_vgpr_allocation()
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks == {'A': 16, 'B': 16, 'SA': 8, 'SB': 8}
+        ids = self._collect_ids(sched)
+        for tensor, peak in sched.tile_peaks.items():
+            assert ids[tensor] == set(range(peak)), (
+                f"{tensor}: ids {sorted(ids[tensor])} not densely packed "
+                f"into [0, {peak}) — free-list reuse regressed")
+
+    def test_free_list_distinct_ids_for_concurrent_groups(self):
+        """Within one MFMA slot's per-uid tile map, concurrently-live groups
+        each get a distinct physical id (no aliasing of live groups)."""
+        cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=1)
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        for slots in sched._partitions:
+            for slot in slots:
+                if not slot.mfma:
+                    continue
+                for tensor, maps in slot.mfma.vgpr_tile_maps.items():
+                    for ui, tile_map in enumerate(maps):
+                        vids = list(tile_map.values())
+                        assert len(vids) == len(set(vids)), (
+                            f"{tensor} uid={ui}: two concurrent groups share "
+                            f"one id in {tile_map}")
+
 
 # ══════════════════════════════════════════════════════════════
 # get_partition_candidates
