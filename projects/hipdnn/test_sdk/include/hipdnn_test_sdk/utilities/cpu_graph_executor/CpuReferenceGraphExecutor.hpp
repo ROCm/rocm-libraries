@@ -15,6 +15,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/LayernormFpropSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MatmulPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanBuilderRegistry.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanNotApplicableException.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwisePlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ReductionPlan.hpp>
@@ -92,8 +93,8 @@ private:
         if(!planBuilder.isApplicable(node, graph.getTensorMap()))
         {
             const std::string nodeName = node.name() == nullptr ? "" : " " + node.name()->str();
-            throw std::runtime_error("Plan builder is not applicable for the given node: "
-                                     + nodeName);
+            throw detail::PlanNotApplicableException(
+                "Plan builder is not applicable for the given node:" + nodeName);
         }
 
         return planBuilder.buildNodePlan(graph, node);

@@ -360,7 +360,7 @@ void SdpaFwdPlanBuilder::buildPlan(
     // Extract optional LSE output metadata
     int64_t lseUid = -1;
     unsigned int lseStrideHead = 0;
-    if(sdpaAttrs.generate_stats().has_value() && sdpaAttrs.generate_stats().value())
+    if(sdpaAttrs.generate_stats().value_or(false))
     {
         lseUid = sdpaAttrs.stats_tensor_uid().value();
         auto* lseTensor = tensorMap.at(lseUid);
