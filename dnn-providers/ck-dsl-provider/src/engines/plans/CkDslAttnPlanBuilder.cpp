@@ -175,20 +175,20 @@ bool CkDslAttnPlanBuilder::isApplicable(
     }
     try {
         auto params = CkDslAttnParamParser::parseSdpaGraph(opGraph);
+        if (params.is_bhsd) {
+            if (dbg) fprintf(stderr, "[ckdsl-attn] DECLINE: is_bhsd (physical BHSD)\n");
+            return false;
+        }
+        if (params.batch <= 0 || params.seqlen_q <= 0 || params.seqlen_k <= 0 ||
+            params.nhead_q <= 0 || params.nhead_k <= 0 || params.hdim_q <= 0) {
+            if (dbg) fprintf(stderr, "[ckdsl-attn] DECLINE: non-positive dim\n");
+            return false;
+        }
         if (c_jit_enabled()) {
             // C-JIT path: the kernel is generated on demand from the pure-C
             // engine, so applicability does NOT depend on the shipped
             // ArtifactStore/dispatcher catalog. Accept any well-formed SDPA in the
-            // BSHD layout (BHSD is rejected at plan build) with a supported dtype.
-            if (params.is_bhsd) {
-                if (dbg) fprintf(stderr, "[ckdsl-attn] DECLINE: is_bhsd (physical BHSD)\n");
-                return false;
-            }
-            if (params.batch <= 0 || params.seqlen_q <= 0 || params.seqlen_k <= 0 ||
-                params.nhead_q <= 0 || params.nhead_k <= 0 || params.hdim_q <= 0) {
-                if (dbg) fprintf(stderr, "[ckdsl-attn] DECLINE: non-positive dim\n");
-                return false;
-            }
+            // kernel-native BSHD layout with a supported dtype.
             const bool ok = params.dtype == "fp16" || params.dtype == "bf16";
             if (dbg)
                 fprintf(stderr, "[ckdsl-attn] %s (C-JIT) dtype=%s\n",

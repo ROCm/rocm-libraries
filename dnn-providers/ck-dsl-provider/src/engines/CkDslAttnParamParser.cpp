@@ -42,7 +42,12 @@ int mapBias(const fb::SdpaAttributes* a) {
     if (a->attn_mask_tensor_uid().value_or(0) != 0) return 1;
     return 0;
 }
+
 }  // namespace
+
+bool isPhysicalBhsdLayout(int64_t strideH, int64_t strideS) {
+    return strideH > strideS;
+}
 
 bool isSdpaGraph(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
     if (graph.nodeCount() != 1) return false;
@@ -95,16 +100,15 @@ ParsedAttnParams parseSdpaGraph(const hipdnn_flatbuffers_sdk::flatbuffer_utiliti
     //                                kernel's BSHD/paged layout is a follow-on.
     //   stride(S) > stride(H)  -> physical is already the kernel's native BSHD
     //                             memory -> run (is_bhsd=false).
-    // If strides are absent we cannot confirm BSHD, so conservatively decline.
+    // If strides are absent in the serialized graph, assume the kernel-native
+    // BSHD layout and let validation catch a true mismatch. This preserves prior
+    // run-all behavior rather than declining outright.
     const auto* qs = q->strides();
     if (qs != nullptr && qs->size() >= 3) {
         const int64_t stride_h = qs->Get(1);  // stride of the H axis (dim 1)
         const int64_t stride_s = qs->Get(2);  // stride of the S axis (dim 2)
-        p.is_bhsd = stride_h > stride_s;
+        p.is_bhsd = isPhysicalBhsdLayout(stride_h, stride_s);
     } else {
-        // Strides absent in the serialized graph: assume the kernel-native BSHD
-        // layout and let pytorch validation catch a true mismatch (matches prior
-        // run-all behavior rather than declining outright).
         p.is_bhsd = false;
     }
 

@@ -115,8 +115,7 @@ set_target_properties(ck_dsl_plugin PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     OUTPUT_NAME "ck_dsl_provider_plugin")
 
-# Host-only unit test for the GEMM B-operand layout detector. Links just the
-# parser's pure functions (object lib) -- no GPU, no hipDNN frontend.
+# Host-only unit tests for parser pure functions -- no GPU, no hipDNN frontend.
 if(CK_DSL_PROVIDER_BUILD_TESTS)
     add_executable(ck_dsl_gemm_blayout_test
         integration_tests/GemmBLayoutTest.cpp
@@ -124,8 +123,16 @@ if(CK_DSL_PROVIDER_BUILD_TESTS)
     target_include_directories(ck_dsl_gemm_blayout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_link_libraries(ck_dsl_gemm_blayout_test
         PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk ck_dsl_runtime hip::host)
+
+    add_executable(ck_dsl_attn_layout_test
+        integration_tests/AttnLayoutTest.cpp
+        src/engines/CkDslAttnParamParser.cpp)
+    target_include_directories(ck_dsl_attn_layout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(ck_dsl_attn_layout_test
+        PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk ck_dsl_runtime hip::host)
     enable_testing()
     add_test(NAME ck_dsl_gemm_blayout_test COMMAND ck_dsl_gemm_blayout_test)
+    add_test(NAME ck_dsl_attn_layout_test COMMAND ck_dsl_attn_layout_test)
 endif()
 
 if(DEFINED HIPDNN_BUILD_PLUGIN_ENGINE_DIR)
