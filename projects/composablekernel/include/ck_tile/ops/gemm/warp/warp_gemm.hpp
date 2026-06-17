@@ -548,6 +548,19 @@ using WarpGemmMfma_i32_16x16x32_i8_i8_CTransposed =
     WarpGemmImpl<WarpGemmAttributeMfmaTransposedCDistribution<
         WarpGemmAttributeMfmaImpl_i32_16x16x32_i8<WGAttrCtlEnum::Default_>>>;
 
+template <WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Single,
+          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA>
+using WarpGemmMfma_i32_16x16x64_i8_i8 = WarpGemmImpl<
+    WarpGemmAttributeMfma<WarpGemmAttributeMfmaImpl_i32_16x16x64_i8<WGAttrCtlEnum::Default_>,
+                          AttrNumAccessA,
+                          AttrNumAccessB>>;
+
+template <WGAttrNumAccessEnum AttrNumAccess>
+using WarpGemmMfma_i32_16x16x64_i8_i8_CTransposed =
+    WarpGemmImpl<WarpGemmAttributeMfmaTransposedCDistribution<
+        WarpGemmAttributeMfmaImpl_i32_16x16x64_i8<WGAttrCtlEnum::Default_>,
+        AttrNumAccess>>;
+
 template <index_t swizzle_factor = 2>
 using WarpGemmMfmaI8I8I32M32N32K32SwizzleBTransposedCDistribution =
     WarpGemmImpl<WarpGemmAttributeMfmaIterateKAndTransposedCDistribution_SwizzleB<

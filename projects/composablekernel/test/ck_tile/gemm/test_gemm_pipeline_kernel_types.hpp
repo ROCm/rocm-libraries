@@ -157,7 +157,8 @@ using KernelTypesCompV3AsyncRRR = ::testing::Types<
     std::tuple<    Row,     Row,     Row,       BF16,      BF16,        F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3>,
     std::tuple<    Row,     Row,     Row,       F8,        F8,          F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
     std::tuple<    Row,     Row,     Row,       BF8,       BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
-    std::tuple<    Row,     Row,     Row,       F8,        BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>
+    std::tuple<    Row,     Row,     Row,       F8,        BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Row,     Row,     Row,       INT8,      INT8,        INT32,     INT32,      I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>
 >;
 
 using KernelTypesCompV3AsyncRCR = ::testing::Types<
@@ -165,7 +166,8 @@ using KernelTypesCompV3AsyncRCR = ::testing::Types<
     std::tuple<    Row,     Col,     Row,       BF16,      BF16,        F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3>,
     std::tuple<    Row,     Col,     Row,       F8,        F8,          F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
     std::tuple<    Row,     Col,     Row,       BF8,       BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
-    std::tuple<    Row,     Col,     Row,       F8,        BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>
+    std::tuple<    Row,     Col,     Row,       F8,        BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Row,     Col,     Row,       INT8,      INT8,        INT32,     INT32,      I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>
 >;
 
 using KernelTypesCompV3AsyncCRR = ::testing::Types<
@@ -173,7 +175,8 @@ using KernelTypesCompV3AsyncCRR = ::testing::Types<
     std::tuple<    Col,     Row,     Row,       BF16,      BF16,        F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3>,
     std::tuple<    Col,     Row,     Row,       F8,        F8,          F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
     std::tuple<    Col,     Row,     Row,       BF8,       BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
-    std::tuple<    Col,     Row,     Row,       F8,        BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>
+    std::tuple<    Col,     Row,     Row,       F8,        BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Col,     Row,     Row,       INT8,      INT8,        INT32,     INT32,      I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>
 >;
 
 using KernelTypesCompV3AsyncCCR = ::testing::Types<
@@ -181,7 +184,8 @@ using KernelTypesCompV3AsyncCCR = ::testing::Types<
     std::tuple<    Col,     Col,     Row,       BF16,      BF16,        F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3>,
     std::tuple<    Col,     Col,     Row,       F8,        F8,          F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
     std::tuple<    Col,     Col,     Row,       BF8,       BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
-    std::tuple<    Col,     Col,     Row,       F8,        BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>
+    std::tuple<    Col,     Col,     Row,       F8,        BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Col,     Col,     Row,       INT8,      INT8,        INT32,     INT32,      I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>
 >;
 
 using KernelTypesCompV3AsyncPersistent = ::testing::Types<
