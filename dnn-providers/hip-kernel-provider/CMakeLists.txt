@@ -70,6 +70,8 @@ if(ENABLE_HIP_FLASH2_ENGINE)
     target_compile_definitions(hip_kernel_provider PRIVATE HIPDNN_ENGINE_HIP_FLASH2)
     target_sources(hip_kernel_provider PRIVATE
         src/engines/hip_flash2_engine/HipFlash2Engine.cpp
+        src/engines/hip_flash2_engine/HipFlash2FwdPlan.cpp
+        src/engines/hip_flash2_engine/HipFlash2FwdPlanBuilder.cpp
         src/engines/hip_flash2_engine/HipFlash2FwdPlan.hip)
 else()
     message(STATUS "HIP Flash2 SDPA engine disabled")
