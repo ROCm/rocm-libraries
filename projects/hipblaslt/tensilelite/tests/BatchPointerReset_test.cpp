@@ -277,7 +277,7 @@ TEST(BatchPointerReset, StructuralReinitWithoutPreProblem)
     // p1: small problem — aStride = 32*32 = 1024 elements
     auto p1 = makeBatchedProblem(32, 32, 32, BATCH);
     // p2: larger problem — aStride = 64*64 = 4096 elements
-    auto p2 = makeBatchedProblem(64, 64, 64, BATCH); // aStride = 64*64 = 4096 elements
+    auto p2 = makeBatchedProblem(64, 64, 64, BATCH);
 
     // Buffer must be sized for the largest problem.
     auto args = buildArgs({{64, 64, BATCH, 64}});
