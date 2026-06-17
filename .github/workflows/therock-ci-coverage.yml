@@ -15,6 +15,15 @@ on:
         type: string
       test_runs_on:
         type: string
+      projects_to_test:
+        type: string
+      test_type:
+        type: string
+      # TheRock revision pinned to a commit that exports llvm-cov / llvm-profdata
+      # in the dist. Kept as an input so the build, test and report stages stay in sync.
+      therock_ref:
+        type: string
+        default: 6afcd5ac5298e9a5cdb3d2c45ae7605739ad2b94
 
 permissions:
   contents: read
@@ -43,7 +52,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 6afcd5ac5298e9a5cdb3d2c45ae7605739ad2b94
+          ref: ${{ inputs.therock_ref }}
 
       - name: Install python deps
         run: |
@@ -95,6 +104,30 @@ jobs:
       - name: Build therock-archives and therock-dist
         run: cmake --build TheRock/build-coverage --target therock-archives therock-dist -- -k 0
 
+      - name: Stage coverage objects and llvm tools
+        run: |
+          set -euo pipefail
+          STAGE="${{ github.workspace }}/coverage-objects"
+          DIST="TheRock/build-coverage/dist/rocm"
+          LLVM_BIN="${DIST}/lib/llvm/bin"
+          LIB_NAME="lib$(echo '${{ inputs.cmake_target }}' | tr '[:upper:]' '[:lower:]')"
+          mkdir -p "${STAGE}/lib" "${STAGE}/bin"
+          # Instrumented shared libraries for the target component (used as llvm-cov -object).
+          find "${DIST}" -type f -name "${LIB_NAME}*.so*" -exec cp -av {} "${STAGE}/lib/" \;
+          # Version-matched coverage tooling, so the report job does not depend on the dist.
+          cp -av "${LLVM_BIN}/llvm-profdata" "${STAGE}/bin/"
+          cp -av "${LLVM_BIN}/llvm-cov" "${STAGE}/bin/"
+          echo "Staged coverage objects:"
+          ls -lR "${STAGE}"
+
+      - name: Upload coverage objects and llvm tools
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-objects-${{ inputs.project_name }}-${{ inputs.amdgpu_families }}
+          path: ${{ github.workspace }}/coverage-objects
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Report
         if: ${{ !cancelled() }}
         run: |
@@ -126,3 +159,85 @@ jobs:
             --artifact-group ${{ env.AMDGPU_FAMILIES }} \
             --build-dir TheRock/build-coverage \
             --upload
+
+  # Run the standard package test flow against the coverage-instrumented build.
+  # Each sharded component test uploads its llvm profraw data (see
+  # therock-test-component.yml) which the report job below merges.
+  therock-coverage-test:
+    name: Test Coverage (${{ inputs.project_name }} | ${{ inputs.amdgpu_families }})
+    needs: [therock-coverage-build]
+    if: ${{ inputs.test_runs_on != '' }}
+    uses: ./.github/workflows/therock-test-packages.yml
+    secrets: inherit
+    with:
+      therock_ref: ${{ inputs.therock_ref }}
+      projects_to_test: ${{ inputs.projects_to_test }}
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      test_runs_on: ${{ inputs.test_runs_on }}
+      platform: "linux"
+      test_type: ${{ inputs.test_type }}
+      coverage: true
+
+  # Merge the profraw files from all test shards and produce the coverage report
+  # using the version-matched llvm tools staged by the build job.
+  therock-coverage-report:
+    name: Coverage Report (${{ inputs.project_name }} | ${{ inputs.amdgpu_families }})
+    needs: [therock-coverage-test]
+    if: ${{ !cancelled() && needs.therock-coverage-test.result != 'skipped' }}
+    runs-on: ubuntu-24.04
+    env:
+      OBJECTS_DIR: ${{ github.workspace }}/coverage-objects
+      PROFRAW_DIR: ${{ github.workspace }}/coverage-profraw
+      REPORT_DIR: ${{ github.workspace }}/coverage-report
+    steps:
+      - name: Download coverage objects and llvm tools
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: coverage-objects-${{ inputs.project_name }}-${{ inputs.amdgpu_families }}
+          path: ${{ env.OBJECTS_DIR }}
+
+      - name: Download coverage profraw artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: coverage-profraw-${{ inputs.amdgpu_families }}-*
+          path: ${{ env.PROFRAW_DIR }}
+          merge-multiple: true
+
+      - name: Merge profraw and generate coverage report
+        run: |
+          set -euo pipefail
+          mkdir -p "${REPORT_DIR}"
+          chmod +x "${OBJECTS_DIR}/bin/llvm-profdata" "${OBJECTS_DIR}/bin/llvm-cov"
+          LLVM_PROFDATA="${OBJECTS_DIR}/bin/llvm-profdata"
+          LLVM_COV="${OBJECTS_DIR}/bin/llvm-cov"
+          LIB_NAME="lib$(echo '${{ inputs.cmake_target }}' | tr '[:upper:]' '[:lower:]')"
+
+          # Object files (instrumented libraries) for llvm-cov.
+          mapfile -t OBJECTS < <(find "${OBJECTS_DIR}/lib" -type f -name "*.so*")
+          if [[ ${#OBJECTS[@]} -eq 0 ]]; then
+            echo "No instrumented libraries were staged for ${LIB_NAME}."
+            exit 1
+          fi
+          OBJ_ARGS=()
+          for obj in "${OBJECTS[@]}"; do OBJ_ARGS+=("-object" "${obj}"); done
+
+          # Profraw files collected from every test shard.
+          mapfile -t PROFRAW < <(find "${PROFRAW_DIR}" -type f -name "*.profraw")
+          if [[ ${#PROFRAW[@]} -eq 0 ]]; then
+            echo "No profraw files were collected from the test runs."
+            exit 1
+          fi
+          echo "Merging ${#PROFRAW[@]} profraw file(s) for objects: ${OBJECTS[*]}"
+
+          "${LLVM_PROFDATA}" merge -sparse "${PROFRAW[@]}" -o "${REPORT_DIR}/${LIB_NAME}.profdata"
+          "${LLVM_COV}" report "${OBJ_ARGS[@]}" -instr-profile="${REPORT_DIR}/${LIB_NAME}.profdata" | tee "${REPORT_DIR}/coverage.report"
+          "${LLVM_COV}" show "${OBJ_ARGS[@]}" -instr-profile="${REPORT_DIR}/${LIB_NAME}.profdata" -format=html -output-dir="${REPORT_DIR}"
+          "${LLVM_COV}" export "${OBJ_ARGS[@]}" -instr-profile="${REPORT_DIR}/${LIB_NAME}.profdata" -format=lcov > "${REPORT_DIR}/coverage.info"
+
+      - name: Upload coverage report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-report-${{ inputs.project_name }}-${{ inputs.amdgpu_families }}
+          path: ${{ env.REPORT_DIR }}
+          if-no-files-found: warn
