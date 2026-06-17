@@ -341,7 +341,7 @@ def isRhel8() -> bool:
         content = f.read()
     match = re.search(pattern, content, re.DOTALL)
     if match:
-        printWarning("Rhel8 environments may not support all tools for system queries such as rocm-smi.")
+        printWarning("Rhel8 environments may not support all tools for system queries such as amd-smi.")
         return True
     return False
 

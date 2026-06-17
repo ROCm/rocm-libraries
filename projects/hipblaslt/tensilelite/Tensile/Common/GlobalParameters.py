@@ -58,7 +58,7 @@ globalParameters["PreciseKernelTime"] = (
 # timing between GSU / non-GSU kernels
 globalParameters["PinClocks"] = False  # T=pin gpu clocks and fan, F=don't
 globalParameters["HardwareMonitor"] = (
-    True  # False: disable benchmarking client monitoring clocks using rocm-smi.
+    True  # False: disable benchmarking client monitoring clocks using amd-smi.
 )
 globalParameters["MinFlopsPerSync"] = (
     1  # Minimum number of flops per sync to increase stability for small problems
@@ -258,7 +258,7 @@ globalParameters["LibraryUpdateComment"] = (
 )
 
 # internal, i.e., gets set during startup
-globalParameters["ROCmSMIPath"] = None  # /opt/rocm/bin/rocm-smi
+globalParameters["AMDSMIPath"] = None  # /usr/bin/amd-smi
 globalParameters["HipClangVersion"] = "0.0.0"
 
 # default runtime is selected based on operating system, user can override
@@ -711,10 +711,10 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
 
     globalParameters["ROCmBinPath"] = os.path.join(globalParameters["ROCmPath"], "bin")
     try:
-        globalParameters["ROCmSMIPath"] = locateExe(globalParameters["ROCmBinPath"], "rocm-smi")
+        globalParameters["AMDSMIPath"] = locateExe(globalParameters["ROCmBinPath"], "amd-smi")
     except OSError:
         if os.name == "nt":
-            # rocm-smi is not presently supported on Windows so do not require it.
+            # amd-smi is not presently supported on Windows so do not require it.
             pass
         else:
             raise
@@ -790,13 +790,15 @@ def setupRestoreClocks():
     import atexit
 
     def restoreClocks():
-        # Clocks will only be pinned if rocm-smi is available, therefore
+        # Clocks will only be pinned if amd-smi is available, therefore
         # we only need to restore if found.
         if globalParameters["PinClocks"]:
-            rsmi = globalParameters["ROCmSMIPath"]
-            if rsmi is not None:
-                subprocess.call([rsmi, "-d", "0", "--resetclocks"])
-                subprocess.call([rsmi, "-d", "0", "--setfan", "50"])
+            asmi = globalParameters["AMDSMIPath"]
+            if asmi is not None:
+                # amd-smi set/reset require elevated privileges.
+                # Reset clocks/overdrive to default and return fans to
+                # automatic (driver) control.
+                subprocess.call(["sudo", asmi, "reset", "-g", "0", "--clocks", "--fans"])
 
     atexit.register(restoreClocks)
 
