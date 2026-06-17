@@ -260,9 +260,9 @@ class ConfigureCITest(unittest.TestCase):
         self.assertEqual(plan.test_type, "quick")
 
     @patch("therock_configure_ci.get_modified_paths")
-    def test_benchmark_tool_only_runs_nightly(self, mock_get_modified):
-        # A tool-only PR is skippable (no build) but still runs the benchmark in
-        # nightly mode.
+    def test_benchmark_tool_only_triggers_build_run_id(self, mock_get_modified):
+        # Tool paths are no longer skippable — a tool-only PR triggers a full
+        # hipDNN build so the smoke gate runs against the PR's own artifacts.
         mock_get_modified.return_value = [
             "projects/hipdnn/tools/dnn-benchmarking/src/main.py",
         ]
@@ -271,8 +271,8 @@ class ConfigureCITest(unittest.TestCase):
             {"is_pull_request": True, "base_ref": "HEAD^"}
         )
 
-        self.assertEqual(plan.projects, [])
-        self.assertEqual(plan.benchmark, therock_configure_ci.BenchmarkMode.NIGHTLY)
+        self.assertIn("hipdnn", str(plan.projects))
+        self.assertEqual(plan.benchmark, therock_configure_ci.BenchmarkMode.RUN_ID)
 
     @patch("therock_configure_ci.get_modified_paths")
     def test_benchmark_ci_workflow_change_runs_nightly(self, mock_get_modified):

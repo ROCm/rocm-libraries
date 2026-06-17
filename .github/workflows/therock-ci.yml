@@ -218,17 +218,11 @@ jobs:
   hipdnn-benchmark:
     name: hipDNN benchmark (${{ needs.setup.outputs.benchmark_mode }})
     needs: [setup, therock-ci-linux]
-    # Single benchmark entry point. !cancelled() lets the nightly (tool-only) case
-    # run even though therock-ci-linux is skipped (skip != failure); the run-id
-    # case additionally requires the build to have succeeded so this run's
-    # freshly-built artifacts exist to install. The runner is guaranteed non-empty
-    # whenever mode != 'off' (setup's Extract benchmark runner step hard-fails
-    # otherwise), so no benchmark_runs_on != '' clause is needed here.
-    if: >-
-      ${{ !cancelled() &&
-          needs.setup.outputs.benchmark_mode != 'off' &&
-          (needs.setup.outputs.benchmark_mode == 'nightly' ||
-           needs['therock-ci-linux'].result == 'success') }}
+    # Single benchmark entry point. !cancelled() prevents propagation of a
+    # workflow-level cancel as a silent skip. mode != 'off' is the only gate;
+    # the artifact-download step fails loudly in run-id mode when the build
+    # did not succeed, rather than silently skipping here.
+    if: ${{ !cancelled() && needs.setup.outputs.benchmark_mode != 'off' }}
     uses: ./.github/workflows/hipdnn-tool-ci.yml
     secrets: inherit
     with:

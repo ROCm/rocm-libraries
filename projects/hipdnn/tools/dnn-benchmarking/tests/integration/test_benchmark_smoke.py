@@ -22,22 +22,16 @@ _TOOL_ROOT = Path(__file__).resolve().parents[2]
 
 def _skip_if_no_rocm() -> None:
     try:
-        import torch
+        import hipdnn_frontend as hipdnn
     except ImportError:
-        pytest.skip("PyTorch not available")
-
-    if not torch.cuda.is_available():
-        pytest.skip("PyTorch GPU not available")
-
-    if torch.version.hip is None:
-        pytest.skip("CUDA build detected; skipping AMD-only test")
+        pytest.fail(
+            "hipdnn_frontend not installed — ensure the --tests slice was installed"
+        )
 
     try:
-        import hipdnn_frontend as hipdnn
-
         hipdnn.Handle()
     except Exception as e:
-        pytest.skip(f"hipdnn_frontend not available or no GPU: {e}")
+        pytest.skip(f"No AMD GPU available: {e}")
 
 
 def test_benchmark_smoke_gate(plugin_path):

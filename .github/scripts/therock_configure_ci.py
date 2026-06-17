@@ -69,9 +69,6 @@ SKIPPABLE_PATH_PATTERNS = [
     "docs/*",
     "projects/*/.gitignore",
     "projects/*/docs/*",
-    # Tools are standalone scripts/utilities not part of the build or test pipeline.
-    # Changes here should not trigger CI builds.
-    "projects/hipdnn/tools/*",
     "shared/*/.gitignore",
     "shared/*/docs/*",
     "projects/composablekernel/Jenkinsfile",
@@ -267,8 +264,11 @@ def is_hipdnn_tool_path(path: str) -> bool:
 
 
 def is_hipdnn_benchmark_ci_path(path: str) -> bool:
-    """The reusable workflow that runs the hipDNN benchmark smoke gate."""
-    return fnmatch.fnmatch(path, ".github/workflows/hipdnn-tool-ci.yml")
+    """Workflows that drive the hipDNN benchmark smoke gate."""
+    return path in (
+        ".github/workflows/hipdnn-tool-ci.yml",
+        ".github/workflows/therock-ci.yml",
+    )
 
 
 def retrieve_projects(args):
@@ -307,15 +307,9 @@ def retrieve_projects(args):
             test_type = label_test_type
             logging.info(f"Test type overridden by label: {test_type}")
 
-        # If only skippable paths were modified and no test labels, skip CI. A
-        # tool-only PR still runs the benchmark (nightly install) even though the
-        # build is skipped.
         if not contains_non_skippable_files and not label_projects:
             logging.info("Only skippable paths were modified, skipping CI")
-            benchmark = (
-                BenchmarkMode.NIGHTLY if benchmark_changed else BenchmarkMode.OFF
-            )
-            return CIPlan([], test_type, benchmark)
+            return CIPlan([], test_type, BenchmarkMode.OFF)
 
         if "skip-therockci" in pr_labels:
             logging.info("`skip-therockci` label was added, skipping CI")
