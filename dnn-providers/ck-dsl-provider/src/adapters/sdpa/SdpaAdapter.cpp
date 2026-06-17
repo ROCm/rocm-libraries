@@ -484,7 +484,14 @@ SdpaSpec SdpaAdapter::buildSpec(const SdpaAttributes& sdpaAttr, const TensorMap&
             "(the kernel takes a single block table)");
     }
     bool isPaged = false;
-    std::int32_t blockSize = 0;
+    // Dense (non-paged) graphs carry no page table, so no block size is
+    // derivable from the graph. The unified tiled-2D kernel still runs them in
+    // single-block mode over contiguous KV (no reformat); default to its
+    // smallest supported block (16) so the applicability gate (which requires
+    // block_size in {16,32,64}) accepts dense SDPA. This mirrors the gtest
+    // harness, which constructs dense specs with block_size=16. The paged
+    // branch below overrides this with the page-table-derived value.
+    std::int32_t blockSize = 16;
     if (havePageK && havePageV) {
         const auto& pageTableK =
             lookupTensor(tensorMap, sdpaAttr.page_table_k_tensor_uid().value(), "page_table_k");
