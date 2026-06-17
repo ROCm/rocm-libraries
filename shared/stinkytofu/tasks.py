@@ -441,7 +441,9 @@ def coverage(c, build_dir=None, open_report=False, jobs=None, rocm_path=None):
     # response file (@file), which llvm-profdata expands into positional args.
     rsp = raw_dir / "profraw.rsp"
     rsp.write_text("\n".join(f'"{p.as_posix()}"' for p in profraws))
-    c.run(f'"{llvm_profdata}" merge -sparse "@{rsp.as_posix()}" -o "{profdata.as_posix()}"')
+    c.run(
+        f'"{llvm_profdata}" merge -sparse "@{rsp.as_posix()}" -o "{profdata.as_posix()}"'
+    )
 
     # 5. Collect the instrumented binaries to report on. The library carries the
     #    code we care about; the tools/test binaries add their own coverage.
@@ -456,7 +458,8 @@ def coverage(c, build_dir=None, open_report=False, jobs=None, rocm_path=None):
     objects = []
     for name in obj_names:
         objects += [
-            p for p in bld.rglob(f"{name}*")
+            p
+            for p in bld.rglob(f"{name}*")
             if p.is_file() and p.suffix.lower() in (".exe", ".dll")
         ]
     if not objects:
