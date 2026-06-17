@@ -217,7 +217,19 @@ int run_mx_flatmm_example(const ck_tile::ArgParser& arg_parser)
             else
                 throw std::runtime_error("Only support non-persistent kernel now!");
         }
-        // Sync 3xdwordx4 load variant for fp6xfp6.
+        // Sync 3xdwordx4 load variant for fp6xfp6 (16x16 warp tile).
+        else if(mx_prec == "fp6xfp6_sync16")
+        {
+            if(persistent_opt == 0)
+                return run_mx_flatmm_with_layouts<ck_tile::pk_fp6x16_t,
+                                                  ck_tile::pk_fp6x16_t,
+                                                  ck_tile::fp16_t,
+                                                  MXFlatmm_GFX950_FP6FP6_Sync16_Traits,
+                                                  false>(arg_parser, Row{}, Col{}, Row{});
+            else
+                throw std::runtime_error("Only support non-persistent kernel now!");
+        }
+        // Sync 3xdwordx4 load variant for fp6xfp6 (32x32 warp tile).
         else if(mx_prec == "fp6xfp6_sync")
         {
             if(persistent_opt == 0)

@@ -63,6 +63,17 @@ struct MXfp6_FlatmmConfigSync : public MXFlatmmConfigBase16
     static constexpr ck_tile::index_t K_Tile = 512;
 };
 
+// 32x32x64 scaled-f8f6f4 warp tile for fp6 sync (vs 16x16x128 base).
+// N_Tile=256 unchanged → N_Repeat = 256/32/4 = 2. K_Tile=256 → KIterPerWarp = 256/64 = 4.
+struct MXfp6_FlatmmConfig32 : public MXFlatmmConfigBase16
+{
+    static constexpr ck_tile::index_t M_Warp_Tile = 32;
+    static constexpr ck_tile::index_t N_Warp_Tile = 32;
+    static constexpr ck_tile::index_t K_Warp_Tile = 64;
+
+    static constexpr int N_Repeat = N_Tile / N_Warp_Tile / N_Warp; // 2
+};
+
 // Architecture traits for MX Flatmm - Primary template (gfx950 implementation)
 template <ck_tile::core::arch::TargetId Arch, typename FlatmmConfig>
 struct MXFlatmmArchTraits
@@ -189,10 +200,18 @@ using MXFlatmm_GFX950_FP4FP8_Traits =
 using MXFlatmm_GFX950_FP6FP6_K512_Traits =
     MXFlatmmArchTraits<ck_tile::core::arch::TargetId::GFX950, MXfp6_FlatmmConfigSync>;
 
-// Sync fp6xfp6 path: buffer_load_dwordx4→VGPR→ds_write instead of async buffer_load_lds.
-// K_Tile=256 (baseline). DRAM uses K1=4 so K0×K1×K2 = 3×4×16 = 192 = K_bytes.
-struct MXFlatmm_GFX950_FP6FP6_Sync_Traits
+// Sync fp6xfp6 path with 16x16x128 warp tile (original sync, K_Tile=256).
+struct MXFlatmm_GFX950_FP6FP6_Sync16_Traits
     : MXFlatmmArchTraits<ck_tile::core::arch::TargetId::GFX950, MXFlatmmConfigBase16>
+{
+    template <typename MXPipelineProblem>
+    using MXFlatmmPipeline =
+        ck_tile::MXFlatmmPipelineAGmemBGmemCRegV1Sync<MXPipelineProblem>;
+};
+
+// Sync fp6xfp6 path with 32x32x64 warp tile (MXfp6_FlatmmConfig32).
+struct MXFlatmm_GFX950_FP6FP6_Sync_Traits
+    : MXFlatmmArchTraits<ck_tile::core::arch::TargetId::GFX950, MXfp6_FlatmmConfig32>
 {
     template <typename MXPipelineProblem>
     using MXFlatmmPipeline =

@@ -442,6 +442,12 @@ using WarpGemmMfma_f32_16x16x128_fp4_fp4_CTransposed =
         WarpGemmAttributeMfmaImpl_f32_16x16x128_f8f6f4<pk_fp4_t, pk_fp4_t>,
         AttrNumAccess>>;
 
+// Non-transposed 32x32x64 scaled f8f6f4 (mirrors 16x16x128 generic above).
+// Used by the mxfp6 sync pipeline; A/B carry the concrete element type (e.g. pk_fp6x16_t).
+template <typename A, typename B, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Single>
+using WarpGemmMfma_f32_32x32x64_f8f6f4 = WarpGemmImpl<
+    WarpGemmAttributeMfma<WarpGemmAttributeMfmaImpl_f32_32x32x64_f8f6f4<A, B>, AttrNumAccess>>;
+
 template <WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Single>
 using WarpGemmMfma_f32_32x32x64_fp8_fp8 = WarpGemmImpl<
     WarpGemmAttributeMfma<WarpGemmAttributeMfmaImpl_f32_32x32x64_fp8_fp8<WGAttrCtlEnum::Default_>,

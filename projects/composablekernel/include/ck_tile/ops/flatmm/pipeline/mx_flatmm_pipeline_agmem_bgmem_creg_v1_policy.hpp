@@ -48,9 +48,9 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
     static constexpr index_t MPerXdl = TileShape::WarpTile::at(I0);
     static constexpr index_t NPerXdl = TileShape::WarpTile::at(I1);
     static constexpr index_t KPerXdl = TileShape::WarpTile::at(I2);
-    static_assert(MPerXdl == 16 && NPerXdl == 16);
-    static constexpr index_t K_Lane   = get_warp_size() / 16; // 4
-    static constexpr index_t K_Thread = KPerXdl / K_Lane;     // 32
+    static_assert((MPerXdl == 16 && NPerXdl == 16) || (MPerXdl == 32 && NPerXdl == 32));
+    static constexpr index_t K_Lane   = get_warp_size() / MPerXdl; // 4 (16x16) | 2 (32x32)
+    static constexpr index_t K_Thread = KPerXdl / K_Lane;          // 32
 
     public:
     static constexpr index_t AK1 = DWORDx4 * APackedSize;

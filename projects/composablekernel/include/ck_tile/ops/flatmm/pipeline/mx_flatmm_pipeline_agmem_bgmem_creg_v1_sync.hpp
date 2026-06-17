@@ -729,17 +729,18 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1Sync : FlatmmPipelineAGmemBGmemCRegV1<Pro
                             b_warp_tensor_ping(number<n_iter>{})(number<k_iter>{})),
                         scale_a_tile_tensor_ping(impack)(ikpack).get_thread_buffer()[0],
                         scale_b_tile_tensor_ping(inpack)(ikpack).get_thread_buffer()[0]);
-                    // preload next A from lds
-                    constexpr auto addr = m_iter % 2 + k_iter * 2 + m_iter / 2 * 4 + m_preload;
-                    if constexpr(addr < (KIterPerWarp * MIterPerWarp) &&
+                    // preload next A from lds: advance (impack, ikpack) in product-loop order
+                    constexpr auto next_im = (impack + 1) % MPackIterPerWarp;
+                    constexpr auto next_ik = ikpack + (impack + 1) / MPackIterPerWarp;
+                    if constexpr(next_ik < KPackIterPerWarp &&
                                  (n_iter == NIterPerWarp - 1))
                     {
-                        constexpr auto AmIter              = addr % 2 + addr / 4 * 2;
-                        constexpr auto AkIter              = addr / 2 % 2;
+                        constexpr auto next_m = next_im * MXdlPack + imxdl;
+                        constexpr auto next_k = next_ik * KXdlPack + ikxdl;
                         a_warp_tensor(number<APackIter>{}) = load_tile_with_offset( //
                             a_warp_window_ping,
-                            tuple<number<AmIter * WG::kM>,
-                                  number<sizeof(ADataType) * AkIter * WG::kK / APackedSize>>{});
+                            tuple<number<next_m * WG::kM>,
+                                  number<sizeof(ADataType) * next_k * WG::kK / APackedSize>>{});
                     }
                 });
             // barrier as ds_load A(2i) and buffer_load_lds A(2i + 1) finished
@@ -823,17 +824,18 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1Sync : FlatmmPipelineAGmemBGmemCRegV1<Pro
                             b_warp_tensor_pong(number<n_iter>{})(number<k_iter>{})),
                         scale_a_tile_tensor_pong(impack)(ikpack).get_thread_buffer()[0],  // scale A
                         scale_b_tile_tensor_pong(inpack)(ikpack).get_thread_buffer()[0]); // scale B
-                    // preload next A from lds
-                    constexpr auto addr = m_iter % 2 + k_iter * 2 + m_iter / 2 * 4 + m_preload;
-                    if constexpr(addr < (KIterPerWarp * MIterPerWarp) &&
+                    // preload next A from lds: advance (impack, ikpack) in product-loop order
+                    constexpr auto next_im = (impack + 1) % MPackIterPerWarp;
+                    constexpr auto next_ik = ikpack + (impack + 1) / MPackIterPerWarp;
+                    if constexpr(next_ik < KPackIterPerWarp &&
                                  (n_iter == NIterPerWarp - 1))
                     {
-                        constexpr auto AmIter              = addr % 2 + addr / 4 * 2;
-                        constexpr auto AkIter              = addr / 2 % 2;
+                        constexpr auto next_m = next_im * MXdlPack + imxdl;
+                        constexpr auto next_k = next_ik * KXdlPack + ikxdl;
                         a_warp_tensor(number<APackIter>{}) = load_tile_with_offset( //
                             a_warp_window_pong,
-                            tuple<number<AmIter * WG::kM>,
-                                  number<sizeof(ADataType) * AkIter * WG::kK / APackedSize>>{});
+                            tuple<number<next_m * WG::kM>,
+                                  number<sizeof(ADataType) * next_k * WG::kK / APackedSize>>{});
                     }
                 });
             // A buffer_loads (issued above) + B(2i+2) + Scale(2i+2) all complete.
@@ -916,17 +918,18 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1Sync : FlatmmPipelineAGmemBGmemCRegV1<Pro
                             b_warp_tensor_ping(number<n_iter>{})(number<k_iter>{})),
                         scale_a_tile_tensor_ping(impack)(ikpack).get_thread_buffer()[0],  // scale A
                         scale_b_tile_tensor_ping(inpack)(ikpack).get_thread_buffer()[0]); // scale B
-                    // preload next A from lds
-                    constexpr auto addr = m_iter % 2 + k_iter * 2 + m_iter / 2 * 4 + m_preload;
-                    if constexpr(addr < (KIterPerWarp * MIterPerWarp) &&
+                    // preload next A from lds: advance (impack, ikpack) in product-loop order
+                    constexpr auto next_im = (impack + 1) % MPackIterPerWarp;
+                    constexpr auto next_ik = ikpack + (impack + 1) / MPackIterPerWarp;
+                    if constexpr(next_ik < KPackIterPerWarp &&
                                  (n_iter == NIterPerWarp - 1))
                     {
-                        constexpr auto AmIter              = addr % 2 + addr / 4 * 2;
-                        constexpr auto AkIter              = addr / 2 % 2;
+                        constexpr auto next_m = next_im * MXdlPack + imxdl;
+                        constexpr auto next_k = next_ik * KXdlPack + ikxdl;
                         a_warp_tensor(number<APackIter>{}) = load_tile_with_offset( //
                             a_warp_window_ping,
-                            tuple<number<AmIter * WG::kM>,
-                                  number<sizeof(ADataType) * AkIter * WG::kK / APackedSize>>{});
+                            tuple<number<next_m * WG::kM>,
+                                  number<sizeof(ADataType) * next_k * WG::kK / APackedSize>>{});
                     }
                 });
             // barrier as ds_load A(2i) and buffer_load_lds A(2i + 1) finished
@@ -967,17 +970,18 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1Sync : FlatmmPipelineAGmemBGmemCRegV1<Pro
                             b_warp_tensor_pong(number<n_iter>{})(number<k_iter>{})),
                         scale_a_tile_tensor_pong(impack)(ikpack).get_thread_buffer()[0],  // scale A
                         scale_b_tile_tensor_pong(inpack)(ikpack).get_thread_buffer()[0]); // scale B
-                    // preload next A from lds
-                    constexpr auto addr = m_iter % 2 + k_iter * 2 + m_iter / 2 * 4 + m_preload;
-                    if constexpr(addr < (KIterPerWarp * MIterPerWarp) &&
+                    // preload next A from lds: advance (impack, ikpack) in product-loop order
+                    constexpr auto next_im = (impack + 1) % MPackIterPerWarp;
+                    constexpr auto next_ik = ikpack + (impack + 1) / MPackIterPerWarp;
+                    if constexpr(next_ik < KPackIterPerWarp &&
                                  (n_iter == NIterPerWarp - 1))
                     {
-                        constexpr auto AmIter              = addr % 2 + addr / 4 * 2;
-                        constexpr auto AkIter              = addr / 2 % 2;
+                        constexpr auto next_m = next_im * MXdlPack + imxdl;
+                        constexpr auto next_k = next_ik * KXdlPack + ikxdl;
                         a_warp_tensor(number<APackIter>{}) = load_tile_with_offset(
                             a_warp_window_pong,
-                            tuple<number<AmIter * WG::kM>,
-                                  number<sizeof(ADataType) * AkIter * WG::kK / APackedSize>>{});
+                            tuple<number<next_m * WG::kM>,
+                                  number<sizeof(ADataType) * next_k * WG::kK / APackedSize>>{});
                     }
                 });
             LastHotLoopScheduler();
@@ -1004,17 +1008,18 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1Sync : FlatmmPipelineAGmemBGmemCRegV1<Pro
                             b_warp_tensor_ping(number<n_iter>{})(number<k_iter>{})),
                         scale_a_tile_tensor_ping(impack)(ikpack).get_thread_buffer()[0],  // scale A
                         scale_b_tile_tensor_ping(inpack)(ikpack).get_thread_buffer()[0]); // scale B
-                    // preload next A from lds
-                    constexpr auto addr = m_iter % 2 + k_iter * 2 + m_iter / 2 * 4 + m_preload;
-                    if constexpr(addr < (KIterPerWarp * MIterPerWarp) &&
+                    // preload next A from lds: advance (impack, ikpack) in product-loop order
+                    constexpr auto next_im = (impack + 1) % MPackIterPerWarp;
+                    constexpr auto next_ik = ikpack + (impack + 1) / MPackIterPerWarp;
+                    if constexpr(next_ik < KPackIterPerWarp &&
                                  (n_iter == NIterPerWarp - 1))
                     {
-                        constexpr auto AmIter              = addr % 2 + addr / 4 * 2;
-                        constexpr auto AkIter              = addr / 2 % 2;
+                        constexpr auto next_m = next_im * MXdlPack + imxdl;
+                        constexpr auto next_k = next_ik * KXdlPack + ikxdl;
                         a_warp_tensor(number<APackIter>{}) = load_tile_with_offset(
                             a_warp_window_ping,
-                            tuple<number<AmIter * WG::kM>,
-                                  number<sizeof(ADataType) * AkIter * WG::kK / APackedSize>>{});
+                            tuple<number<next_m * WG::kM>,
+                                  number<sizeof(ADataType) * next_k * WG::kK / APackedSize>>{});
                     }
                 });
             LastHotLoopScheduler();

@@ -20,10 +20,13 @@ function(mx_flatmm_instance_generate FILE_LIST)
         # _Sync suffix is preserved through to the generated traits name
         # (MXFlatmm_GFX950_FP6FP6_Sync_Traits) but stripped before the AxB split
         # so A_DATA_TYPE/B_DATA_TYPE still resolve to plain FP6/FP6.
-        foreach(DATA_TYPE FP4xFP4 FP8xFP8 FP6xFP6 FP8xFP4 FP4xFP8 FP6xFP6_Sync FP6xFP6_K512)
+        foreach(DATA_TYPE FP4xFP4 FP8xFP8 FP6xFP6 FP8xFP4 FP4xFP8 FP6xFP6_Sync16 FP6xFP6_Sync FP6xFP6_K512)
             set(VARIANT_SUFFIX "")
             set(DATA_TYPE_BASE ${DATA_TYPE})
-            if(${DATA_TYPE} MATCHES "_Sync$")
+            if(${DATA_TYPE} MATCHES "_Sync16$")
+                string(REGEX REPLACE "_Sync16$" "" DATA_TYPE_BASE ${DATA_TYPE})
+                set(VARIANT_SUFFIX "_Sync16")
+            elseif(${DATA_TYPE} MATCHES "_Sync$")
                 string(REGEX REPLACE "_Sync$" "" DATA_TYPE_BASE ${DATA_TYPE})
                 set(VARIANT_SUFFIX "_Sync")
             elseif(${DATA_TYPE} MATCHES "_K512$")
