@@ -151,6 +151,7 @@ THEROCK_CI_PATTERNS = [
     ".github/actions/ci-env/action.yml",
 ]
 
+
 def is_path_workflow_file_related_to_ci(path: str) -> bool:
     return any(fnmatch.fnmatch(path, pattern) for pattern in THEROCK_CI_PATTERNS)
 
