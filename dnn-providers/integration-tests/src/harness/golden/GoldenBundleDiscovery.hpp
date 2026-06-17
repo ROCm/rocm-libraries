@@ -15,11 +15,14 @@
 namespace hipdnn_integration_tests::golden
 {
 
+// One registerable golden test: the derived GTest name (see DerivedTestName)
+// plus the bundle's graph .json path the harness loads at run time. This is the
+// unit discoverGoldenBundles returns — one per test that gets RegisterTest'd.
 struct DiscoveredBundle
 {
-    std::filesystem::path jsonPath;
-    std::string suiteName;
-    std::string testName;
+    std::filesystem::path jsonPath; // absolute path to the bundle graph .json
+    std::string suiteName; // GTest suite, e.g. "Standard/ConvFwd_nhwc_fp16"
+    std::string testName; // GTest test, e.g. "resnet50_layer3"
 };
 
 // Generic recursive file scanner: returns every file under `directory` whose
