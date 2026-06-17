@@ -770,7 +770,7 @@ struct SelectedKernel {{
             "batched_gemm",
         ]:
             instance_code += f"""
-    static constexpr bool UsePersistentKernel = {"true" if persistent_or_preshuffle_quant in [True, "true"] else "false"};
+    static constexpr bool UsePersistentKernel = {"true" if persistent in [True, "true"] else "false"};
     static constexpr bool UseStructuredSparsity = false;
     static constexpr ck_tile::index_t NumWaveGroups = 1;"""
 
