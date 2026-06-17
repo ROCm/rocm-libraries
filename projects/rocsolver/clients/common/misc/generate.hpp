@@ -51,20 +51,26 @@ T rand_value(DistType& dist)
 }
 
 //------------------------------------------------------------------------------
-// Fill in general m-by-n matrix A with random uniform values on unit square.
+// Fill in general m-by-n matrix A with random values drawn from dist.
+// Default distribution is uniform on [-1, 1).
 //
-// todo: pass dist into routine, with default = uniform [-1, 1]?
-//
-template <typename T>
-void gerand(rocblas_int m, rocblas_int n, T* A, rocblas_int lda)
+template <typename T,
+          typename S = decltype(std::real(T{})),
+          typename DistType = std::uniform_real_distribution<S>>
+void gerand(rocblas_int m,
+            rocblas_int n,
+            T* A,
+            rocblas_int lda,
+            bool seed_reset = false,
+            DistType dist = DistType(S(-1), S(1)))
 {
-    using S = decltype(std::real(T{}));
-    std::uniform_real_distribution<S> dist(S(-1), S(1));
-
     if(m < 0 || n < 0 || lda < m)
         throw rocblas_status_invalid_size;
     if(m && n && !A)
         throw rocblas_status_invalid_pointer;
+
+    if(seed_reset)
+        rocblas_seedrand();
 
     for(rocblas_int j = 0; j < n; ++j)
     {
@@ -83,18 +89,23 @@ void gerand(rocblas_int m, rocblas_int n, T* A, rocblas_int lda)
 // if uplo == rocblas_fill_full, both lower and upper triangles are set,
 // with upper being conjugate-transpose of lower.
 //
-// todo: pass dist into routine, with default = uniform [-1, 1]?
-//
-template <typename T>
-void herand(rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda)
+template <typename T,
+          typename S = decltype(std::real(T{})),
+          typename DistType = std::uniform_real_distribution<S>>
+void herand(rocblas_fill uplo,
+            rocblas_int n,
+            T* A,
+            rocblas_int lda,
+            bool seed_reset = false,
+            DistType dist = DistType(S(-1), S(1)))
 {
-    using S = decltype(std::real(T{}));
-    std::uniform_real_distribution<S> dist(S(-1), S(1));
-
     if(n < 0 || lda < n)
         throw rocblas_status_invalid_size;
     if(n && !A)
         throw rocblas_status_invalid_pointer;
+
+    if(seed_reset)
+        rocblas_seedrand();
 
     if(uplo == rocblas_fill_lower)
     {
@@ -144,18 +155,23 @@ void herand(rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda)
 // if uplo == rocblas_fill_upper, only upper triangle is set;
 // if uplo == rocblas_fill_full, both lower and upper triangles are set.
 //
-// todo: pass dist into routine, with default = uniform [-1, 1]?
-//
-template <typename T>
-void syrand(rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda)
+template <typename T,
+          typename S = decltype(std::real(T{})),
+          typename DistType = std::uniform_real_distribution<S>>
+void syrand(rocblas_fill uplo,
+            rocblas_int n,
+            T* A,
+            rocblas_int lda,
+            bool seed_reset = false,
+            DistType dist = DistType(S(-1), S(1)))
 {
-    using S = decltype(std::real(T{}));
-    std::uniform_real_distribution<S> dist(S(-1), S(1));
-
     if(n < 0 || lda < n)
         throw rocblas_status_invalid_size;
     if(n && !A)
         throw rocblas_status_invalid_pointer;
+
+    if(seed_reset)
+        rocblas_seedrand();
 
     if(uplo == rocblas_fill_lower)
     {
@@ -210,20 +226,26 @@ void syrand(rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda)
 //      [ b b b b . . ]  }
 //      [ c c c . . . ]  }  Because ku < kl, this diagonal is not copied to upper band.
 //
-// todo: pass dist into routine, with default = uniform [-1, 1]?
-//
-template <typename T>
-void hbrand(rocblas_int n, rocblas_int kl, rocblas_int ku, T* Aband, rocblas_int ldab)
+template <typename T,
+          typename S = decltype(std::real(T{})),
+          typename DistType = std::uniform_real_distribution<S>>
+void hbrand(rocblas_int n,
+            rocblas_int kl,
+            rocblas_int ku,
+            T* Aband,
+            rocblas_int ldab,
+            bool seed_reset = false,
+            DistType dist = DistType(S(-1), S(1)))
 {
-    using S = decltype(std::real(T{}));
-    std::uniform_real_distribution<S> dist(S(-1), S(1));
-
     T const nan = T(std::numeric_limits<S>::quiet_NaN());
 
     if(n < 0 || kl < 0 || ku < 0 || ldab < kl + ku + 1)
         throw rocblas_status_invalid_size;
     if(n && !Aband)
         throw rocblas_status_invalid_pointer;
+
+    if(seed_reset)
+        rocblas_seedrand();
 
     // Index of main diagonal.
     rocblas_int idiag = ku;

@@ -101,7 +101,7 @@ void sy2sb_he2hb_initData(const rocblas_handle handle,
 {
     if(CPU)
     {
-        herand(rocblas_fill_full, n, hA[0], lda);
+        herand(rocblas_fill_full, n, hA[0], lda, true);
     }
 
     if(GPU)
