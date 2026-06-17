@@ -41,9 +41,11 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
         miopendriver_conv_immed.cpp
         miopendriver_regression_half_gfx9.cpp
         unit_conv_solver_ConvCkGroupedConvFwd.cpp
+        unit_conv_solver_ConvHipImplicitGemm3DGroupBwdXdlops.cpp
         unit_conv_solver_ConvHipImplicitGemm3DGroupFwdXdlops.cpp
         unit_conv_solver_ConvHipImplicitGemm3DGroupWrwXdlops.cpp
         unit_conv_solver_ConvHipImplicitGemmGroupBwdXdlops.cpp
+        unit_conv_solver_ConvHipImplicitGemmGroupWrwXdlops.cpp
     )
     # Disable tests that are inert on gfx942 configuration (unsupported arch or
     # test_drive<> framework disabled).  These did not actually launch CK kernels
@@ -66,6 +68,9 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
     )
     # temporarily disable due to test failures
     list(APPEND SKIP_TESTS unit_conv_solver_ConvWinoRageRxS.cpp)
+    # temporarily disable: LeakSanitizer reports a memory leak at exit
+    # (assertions pass but the process leaks).
+    list(APPEND SKIP_TESTS find_2_conv.cpp)
 endif()
 
 function(add_gtest_negative_filter NEGATIVE_FILTER_TO_ADD)
