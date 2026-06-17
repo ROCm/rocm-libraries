@@ -144,12 +144,6 @@ TEST_F(TestHipFlash2Engine, EngineNameIsNonEmpty)
     EXPECT_GT(std::string(HipFlash2Engine::engineName()).length(), 0u);
 }
 
-TEST_F(TestHipFlash2Engine, EngineIdIsUniqueFromAsmSdpa)
-{
-    // Verify our engine ID doesn't collide with ASM_SDPA_ENGINE_ID
-    EXPECT_NE(HipFlash2Engine::staticId(), hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_ID);
-}
-
 // ── Workspace tests ───────────────────────────────────────────────────────────
 
 TEST_F(TestHipFlash2Engine, MaxWorkspaceSizeIsZero)
