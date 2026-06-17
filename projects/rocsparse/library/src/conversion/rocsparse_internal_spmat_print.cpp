@@ -86,7 +86,7 @@ namespace rocsparse
             rocsparse::internal_dnvec_print<int64_t>(out, nmemb, hind);
             break;
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             break;
         }
@@ -122,7 +122,7 @@ namespace rocsparse
             rocsparse::internal_dnmat_print<int64_t>(out, m, n, hind, m);
             break;
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             break;
         }
