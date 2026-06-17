@@ -77,6 +77,21 @@ else()
     message(STATUS "HIP Flash2 SDPA engine disabled")
 endif()
 
+# Wire up the external bundle-runner integration test target (Adam's PR #8228 pattern).
+# Falls back gracefully to cpu/gpu reference runners if golden DVC data is not available.
+if(TARGET hipdnn_integration_tests)
+    add_external_integration_test_target(
+        TARGET_NAME    hip-kernel-provider-external-flash2-integration-check
+        PLUGIN_TARGET  hip_kernel_provider
+        ENGINE_NAME    HIP_FLASH2_ENGINE
+        INSTALL_SUBDIR hip_kernel_provider
+        TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/src/engines/hip_flash2_engine/config/HIP_FLASH2_ENGINE.toml
+    )
+    message(STATUS "Created hip-kernel-provider-external-flash2-integration-check target")
+else()
+    message(STATUS "hipdnn_integration_tests not found - skipping flash2 external-integration-check")
+endif()
+
 if(ENABLE_HIP_MLOPS_ENGINE)
     message(STATUS "HIP kernel engine enabled")
 else()
