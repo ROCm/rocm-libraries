@@ -515,6 +515,73 @@ private:
     tensor<T> dout;
 };
 
+// Regression test: when beta=0 the kernel must not read the output buffer,
+// even if it contains NaN. Pre-poisoning y (forward) and dx (backward) with NaN exposes
+// the bug: without the guard, NaN * 0.0 == NaN propagates into the result.
+struct GPU_Softmax_BetaZeroNaN_FP32
+    : public testing::TestWithParam<std::tuple<miopenSoftmaxAlgorithm_t, miopenSoftmaxMode_t>>
+{
+    void RunForward()
+    {
+        auto&& handle                  = get_handle();
+        auto [algo, mode]              = GetParam();
+        const std::vector<size_t> dims = {2, 8, 4, 4};
+        const float alpha = 1.0f, beta = 0.0f;
+
+        auto input  = tensor<float>{miopenTensorNCHW, dims}.generate(tensor_elem_gen_integer{5});
+        auto output = tensor<float>{miopenTensorNCHW, dims};
+        std::fill(output.data.begin(), output.data.end(), std::numeric_limits<float>::quiet_NaN());
+
+        auto in_dev  = handle.Write(input.data);
+        auto out_dev = handle.Write(output.data);
+        miopen::SoftmaxForward(handle,
+                               &alpha,
+                               &beta,
+                               input.desc,
+                               in_dev.get(),
+                               output.desc,
+                               out_dev.get(),
+                               algo,
+                               mode);
+
+        auto result = handle.Read<float>(out_dev, output.data.size());
+        for(std::size_t i = 0; i < result.size(); ++i)
+            EXPECT_TRUE(std::isfinite(result[i])) << "NaN in forward output at index " << i;
+    }
+
+    void RunBackward()
+    {
+        auto&& handle                  = get_handle();
+        auto [algo, mode]              = GetParam();
+        const std::vector<size_t> dims = {2, 8, 4, 4};
+        const float alpha = 1.0f, beta = 0.0f;
+
+        auto output = tensor<float>{miopenTensorNCHW, dims}.generate(tensor_elem_gen_integer{5});
+        auto dout   = tensor<float>{miopenTensorNCHW, dims}.generate(tensor_elem_gen_integer{5});
+        auto dinput = tensor<float>{miopenTensorNCHW, dims};
+        std::fill(dinput.data.begin(), dinput.data.end(), std::numeric_limits<float>::quiet_NaN());
+
+        auto out_dev  = handle.Write(output.data);
+        auto dout_dev = handle.Write(dout.data);
+        auto din_dev  = handle.Write(dinput.data);
+        miopen::SoftmaxBackward(handle,
+                                &alpha,
+                                output.desc,
+                                out_dev.get(),
+                                dout.desc,
+                                dout_dev.get(),
+                                &beta,
+                                dinput.desc,
+                                din_dev.get(),
+                                algo,
+                                mode);
+
+        auto result = handle.Read<float>(din_dev, dinput.data.size());
+        for(std::size_t i = 0; i < result.size(); ++i)
+            EXPECT_TRUE(std::isfinite(result[i])) << "NaN in backward output at index " << i;
+    }
+};
+
 using GPU_Softmax_FP32  = SoftmaxCommon<float>;
 using GPU_Softmax_FP16  = SoftmaxCommon<half_float::half>;
 using GPU_Softmax_BFP16 = SoftmaxCommon<bfloat16>;
@@ -522,7 +589,16 @@ using GPU_Softmax_BFP16 = SoftmaxCommon<bfloat16>;
 TEST_P(GPU_Softmax_FP32, TestFloat) { this->Run(); }
 TEST_P(GPU_Softmax_FP16, TestFloat16) { this->Run(); }
 TEST_P(GPU_Softmax_BFP16, TestBFloat16) { this->Run(); }
+TEST_P(GPU_Softmax_BetaZeroNaN_FP32, ForwardTest) { RunForward(); }
+TEST_P(GPU_Softmax_BetaZeroNaN_FP32, BackwardTest) { RunBackward(); }
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Softmax_FP32, GetCases<float>());
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Softmax_FP16, GetCases<half_float::half>());
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Softmax_BFP16, GetCases<bfloat16>());
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Softmax_BetaZeroNaN_FP32,
+                         testing::Combine(testing::Values(MIOPEN_SOFTMAX_FAST,
+                                                          MIOPEN_SOFTMAX_ACCURATE,
+                                                          MIOPEN_SOFTMAX_LOG),
+                                          testing::Values(MIOPEN_SOFTMAX_MODE_INSTANCE,
+                                                          MIOPEN_SOFTMAX_MODE_CHANNEL)));

@@ -6,7 +6,7 @@
 ROCm Performance Primitives supported functionalities and variants
 ********************************************************************
 
-The following tables show the CPU and GPU support for ROCm Performance Primitives (RPP) functionalities and variants. 
+The following tables show the CPU and GPU support for ROCm Performance Primitives (RPP) functionalities and variants.
 
 CPU support is also referred to as HOST support.
 
@@ -198,7 +198,7 @@ Audio
   :header: "Type", "CPU", "GPU"
 
   "non Silent Region Detection", "✅", "✅"
-  "to Decibels", "✅", "✅"  
+  "to Decibels", "✅", "✅"
   "downmixing", "✅", "✅"
   "pre-emphasis Filter", "✅", "✅"
   "resample", "✅", "✅"

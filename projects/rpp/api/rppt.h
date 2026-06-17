@@ -37,18 +37,18 @@ SOFTWARE.
 extern "C" {
 #endif
 
+#include "rppt_tensor_arithmetic_operations.h"
+#include "rppt_tensor_audio_augmentations.h"
+#include "rppt_tensor_bitwise_operations.h"
 #include "rppt_tensor_color_augmentations.h"
 #include "rppt_tensor_data_exchange_operations.h"
 #include "rppt_tensor_effects_augmentations.h"
 #include "rppt_tensor_filter_augmentations.h"
 #include "rppt_tensor_geometric_augmentations.h"
 #include "rppt_tensor_morphological_operations.h"
-#include "rppt_tensor_arithmetic_operations.h"
 #include "rppt_tensor_statistical_operations.h"
-#include "rppt_tensor_audio_augmentations.h"
-#include "rppt_tensor_bitwise_operations.h"
 
 #ifdef __cplusplus
 }
 #endif
-#endif // RPPT_H
+#endif  // RPPT_H

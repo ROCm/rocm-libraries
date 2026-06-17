@@ -73,6 +73,7 @@ MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_CUSTOM_CACHE_DIR)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_LOG_LEVEL)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_LOG_BUFFER_SIZE, 0);
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_DEBUG_CONV_DIRECT_ASM_WRW1X1_PERF_VALS)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_NAIVE_DISABLE_IF_ALT, true)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_SKIP_ASAN_DISABLED_TESTS, true)
 
 namespace miopen {
@@ -103,7 +104,7 @@ struct LibEnvVar
 private:
     struct LibEnvVarBase
     {
-        virtual ~LibEnvVarBase(){};
+        virtual ~LibEnvVarBase() {};
         virtual std::optional<std::string> Get() const    = 0;
         virtual void Update(std::string_view value) const = 0;
         virtual void Clear() const                        = 0;
@@ -116,7 +117,7 @@ private:
         static_assert(is_type_bool<value_type> || is_type_int<value_type> ||
                       is_type_str<value_type>);
 
-        LibEnvVarImpl(const T& var_in) : var(var_in){};
+        LibEnvVarImpl(const T& var_in) : var(var_in) {};
 
         std::optional<std::string> Get() const override
         {
@@ -211,6 +212,7 @@ const LibEnvVar& FindEnvVariable(std::string_view name)
         {MIOPEN_FIND_ENFORCE.GetName(), MIOPEN_FIND_ENFORCE},
         {MIOPEN_FIND_MODE.GetName(), MIOPEN_FIND_MODE},
         {MIOPEN_FIND_MODE_FUSION.GetName(), MIOPEN_FIND_MODE_FUSION},
+        {MIOPEN_NAIVE_DISABLE_IF_ALT.GetName(), MIOPEN_NAIVE_DISABLE_IF_ALT},
         {MIOPEN_LOG_LEVEL.GetName(), MIOPEN_LOG_LEVEL},
         {MIOPEN_LOG_BUFFER_SIZE.GetName(), MIOPEN_LOG_BUFFER_SIZE},
         {MIOPEN_USER_DB_PATH.GetName(), MIOPEN_USER_DB_PATH},
