@@ -905,11 +905,11 @@ def cmake_build(Map conf=[:]){
                 else{ //run all tests
                     if(!setup_args.contains("gfx1250")){
                         echo "Full test suite requested (RUN_ALL_UNIT_TESTS=true or develop branch)"
-                        sh "ninja -j${nt} check"
+                        sh "ninja -j${nt} install check"
                     }
                     else{ //do not run tests on gfx1250, just build everything
                         echo "Building for gfx1250"
-                        sh "ninja -j${nt}"
+                        sh "ninja -j${nt} install"
                     }
                     if (params.RUN_ROCM_CK_TESTS) {
                         sh 'ninja check-rocm-ck'
