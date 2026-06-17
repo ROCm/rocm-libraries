@@ -63,8 +63,8 @@ RUN apt-get update && apt-get install -y --allow-unauthenticated \
     unzip \
     vim \
     wget \
-    xxd 
-    
+    xxd
+
 # Install DVC
 RUN mkdir -p /etc/apt/keyrings && \
     wget -qO - https://dvc.org/deb/iterative.asc | sudo gpg --dearmor -o /etc/apt/keyrings/packages.iterative.gpg && \
@@ -72,7 +72,7 @@ RUN mkdir -p /etc/apt/keyrings && \
     chmod 644 /etc/apt/keyrings/packages.iterative.gpg /etc/apt/sources.list.d/dvc.list && \
     apt-get update && apt-get install -y dvc && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/* 
+    rm -rf /var/lib/apt/lists/*
 
 # Purge packages conflicting with doc-requirements
 RUN apt-get remove --purge -y python3-pyparsing python3-cryptography python3-jwt
