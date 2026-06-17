@@ -400,7 +400,7 @@ int main(int argc, char** argv)
 {
     if(argc != 2)
     {
-        std::cerr << "Usage: " << argv[0] << " yaml-config.yaml" << std::endl;
+        hipblaslt_cerr << "Usage: " << argv[0] << " yaml-config.yaml" << std::endl;
         exit(1);
     }
     auto              inputFile = llvm::MemoryBuffer::getFile(argv[1]);
@@ -421,7 +421,7 @@ int main(int argc, char** argv)
         tmp.stability_interval  = rv.gs.stability_interval;
         if(const auto err = hipblaslt_bench::validate_adaptive_config(tmp); !err.empty())
         {
-            std::cerr << "error: " << err << std::endl;
+            hipblaslt_cerr << "error: " << err << std::endl;
             return 1;
         }
     }
@@ -434,7 +434,7 @@ int main(int argc, char** argv)
     std::vector<Layer>& layer = rv.layer;
     if(layer.size() == 0)
     {
-        std::cerr << "Test is empty!" << std::endl;
+        hipblaslt_cerr << "Test is empty!" << std::endl;
         exit(1);
     }
 
