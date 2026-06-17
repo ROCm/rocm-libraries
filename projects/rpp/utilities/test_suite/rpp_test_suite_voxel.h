@@ -668,7 +668,7 @@ inline void compare_output(Rpp32f* output, Rpp64u oBufferSize, string func, int 
 
     string refFile = scriptPath + "/../REFERENCE_OUTPUT_VOXEL/" + func + "/" + binName;
 
-    string line,word;
+    string line, word;
     float* refOutput = (float*)malloc(binOutputSize * sizeof(float));
 
     FILE* fp;

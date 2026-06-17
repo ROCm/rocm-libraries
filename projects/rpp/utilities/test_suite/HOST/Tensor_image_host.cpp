@@ -2369,8 +2369,8 @@ int main(int argc, char** argv) {
                 // allocated
                 RpptROI roiDefault;
                 RpptROIPtr roiPtrDefault = &roiDefault;
-                roiPtrDefault->xywhROI = {{0, 0}, static_cast<Rpp32s>(dstDescPtr->w),
-                                          static_cast<Rpp32s>(dstDescPtr->h)};
+                roiPtrDefault->xywhROI = {
+                    {0, 0}, static_cast<Rpp32s>(dstDescPtr->w), static_cast<Rpp32s>(dstDescPtr->h)};
                 for (int i = 0; i < dstDescPtr->n; i++) {
                     roiTensorPtrDst[i].xywhROI.roiWidth =
                         std::min(roiPtrDefault->xywhROI.roiWidth - roiTensorPtrDst[i].xywhROI.xy.x,

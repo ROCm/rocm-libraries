@@ -937,14 +937,14 @@ inline void convert_roi(RpptROI* roiTensorPtrSrc, RpptRoiType roiType, int batch
     if (roiType == RpptRoiType::LTRB) {
         for (int i = 0; i < batchSize; i++) {
             RpptRoiXywh roi = roiTensorPtrSrc[i].xywhROI;
-            roiTensorPtrSrc[i].ltrbROI = {{roi.xy.x, roi.xy.y}, 
+            roiTensorPtrSrc[i].ltrbROI = {{roi.xy.x, roi.xy.y},
                                           {roi.roiWidth - roi.xy.x, roi.roiHeight - roi.xy.y}};
         }
     } else {
         for (int i = 0; i < batchSize; i++) {
             RpptRoiLtrb roi = roiTensorPtrSrc[i].ltrbROI;
-            roiTensorPtrSrc[i].xywhROI = {{roi.lt.x, roi.lt.y}, roi.rb.x - roi.lt.x + 1, 
-                                          roi.rb.y - roi.lt.y + 1};
+            roiTensorPtrSrc[i].xywhROI = {
+                {roi.lt.x, roi.lt.y}, roi.rb.x - roi.lt.x + 1, roi.rb.y - roi.lt.y + 1};
         }
     }
 }
@@ -1116,7 +1116,7 @@ inline void convert_pkd3_to_pln3(Rpp8u* input, RpptDescPtr descPtr) {
     Rpp8u* inputCopy = (Rpp8u*)calloc(bufferSize, sizeof(Rpp8u));
     memcpy(inputCopy, input, bufferSize * sizeof(Rpp8u));
 
-    Rpp8u *inputTemp = input + descPtr->offsetInBytes;
+    Rpp8u* inputTemp = input + descPtr->offsetInBytes;
 
     omp_set_dynamic(0);
 #pragma omp parallel for num_threads(descPtr->n)
@@ -1840,15 +1840,22 @@ void inline init_ricap(int width, int height, int batchSize, Rpp32u* permutation
 
     int part0Width = std::round(randVal * width);
     int part0Height = std::round(randVal1 * height);
-    roiPtrInputCropRegion[0].xywhROI = {{randrange(0, width - part0Width - 8), randrange(0, height - part0Height)}, 
-                                        part0Width, 
-                                        part0Height}; // Subtracted x coordinate by 8 to avoid corruption when HIP processes 8 pixels at once
-    roiPtrInputCropRegion[1].xywhROI = {{randrange(0, part0Width - 8), randrange(0, height - part0Height)}, 
-                                        width - part0Width, part0Height};
-    roiPtrInputCropRegion[2].xywhROI = {{randrange(0, width - part0Width - 8), randrange(0, part0Height)}, 
-                                        part0Width, height - part0Height};
-    roiPtrInputCropRegion[3].xywhROI = {{randrange(0, part0Width - 8), randrange(0, part0Height)}, 
-                                        width - part0Width, height - part0Height};
+    roiPtrInputCropRegion[0].xywhROI = {
+        {randrange(0, width - part0Width - 8), randrange(0, height - part0Height)},
+        part0Width,
+        part0Height};  // Subtracted x coordinate by 8 to avoid corruption when HIP processes 8
+                       // pixels at once
+    roiPtrInputCropRegion[1].xywhROI = {
+        {randrange(0, part0Width - 8), randrange(0, height - part0Height)},
+        width - part0Width,
+        part0Height};
+    roiPtrInputCropRegion[2].xywhROI = {
+        {randrange(0, width - part0Width - 8), randrange(0, part0Height)},
+        part0Width,
+        height - part0Height};
+    roiPtrInputCropRegion[3].xywhROI = {{randrange(0, part0Width - 8), randrange(0, part0Height)},
+                                        width - part0Width,
+                                        height - part0Height};
 }
 
 void inline init_remap(RpptDescPtr tableDescPtr, RpptDescPtr srcDescPtr, RpptROIPtr roiTensorPtrSrc,
@@ -2004,14 +2011,12 @@ void inline init_erase(int batchSize, int boxesInEachImage, Rpp32u* numOfBoxes,
     }
 }
 
-void generate_channel_dropout_mask(Rpp8u* dropoutTensor, Rpp32f* dropoutProbability, int batchSize, 
-                                   int channels, int seed)
-{
+void generate_channel_dropout_mask(Rpp8u* dropoutTensor, Rpp32f* dropoutProbability, int batchSize,
+                                   int channels, int seed) {
     omp_set_dynamic(0);
 
 #pragma omp parallel for num_threads(omp_get_max_threads())
-    for (int batchCount = 0; batchCount < batchSize; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < batchSize; batchCount++) {
         std::mt19937 rng(seed + batchCount);
         std::bernoulli_distribution keepDist(1.0f - dropoutProbability[batchCount]);
         Rpp8u* maskPtrTemp = dropoutTensor + (batchCount * channels);
