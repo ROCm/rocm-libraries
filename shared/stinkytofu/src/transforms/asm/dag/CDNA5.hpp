@@ -335,10 +335,13 @@ int CDNA5ReadyQueue::computeValuAdvanceCycles(int issueCycles) const {
     return elapsed;
 }
 
-// After any picked instruction (including barriers): advance by issueCycles.
+// After a picked instruction: advance the co-issue timeline. Barriers use result latency
+// (latencyCycles); VALU/transcendentals use co-issue-aware issue progress; others use issueCycles.
 void CDNA5ReadyQueue::updateWMMAStatus(DAGNode* node) {
     int elapsedCycles = node->inst->issueCycles;
-    if (isVectorALU(*node->inst) || isTranscendental(*node->inst))
+    if (isBarrier(*node->inst))
+        elapsedCycles = node->inst->latencyCycles;
+    else if (isVectorALU(*node->inst) || isTranscendental(*node->inst))
         elapsedCycles = computeValuAdvanceCycles(node->inst->issueCycles);
     advanceTime(elapsedCycles);
 }
@@ -581,17 +584,23 @@ void CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart
     }
 }
 
-// Compute forceBarrierBeforeNthWmma_ for this region from register dependencies.
+// Compute "before" forced-barrier thresholds for this region.
 //
-//  Step 1  — for each barrier, find ds_reads whose src PSEUDO token matches.
-//  Step 2  — for each such ds_read, find the first WMMA whose src overlaps the
-//            ds_read's dest VGPRs; take the maximum such 1-based WMMA index across
-//            all matching ds_reads (MaximumWMMAIdx).
-//  Step 3  — residualCycles = max(0, targetDSLoadLatency
-//                                    - MaximumWMMAIdx * wmmaIssueConfig.latency)
-//  Step 4  — forceBarrierBeforeNthWmma = (residualCycles / wmmaIssueConfig.latency) + 1
-//            i.e. the barrier is suppressed from firing until WMMA count reaches this value,
-//            ensuring it fires before the computed WMMA slot.
+//  Step 1  — for each barrier, collect all ds_reads after the barrier whose src
+//            PSEUDO token matches a dest token produced by that barrier.
+//  Step 2  — for each matching ds_read, starting from its post-barrier WMMA index,
+//            find the first consumer WMMA whose src overlaps the ds_read dest VGPRs
+//            (scan ds_read -> regionEnd, then wrap regionStart -> ds_read). Keep the
+//            largest consumer index across ds_reads (MaximumWMMAIdx), and remember
+//            the latency of the ds_read that defines that max.
+//  Step 3  — residualCycles = max(0, MaximumWMMAIdx * wmmaIssueConfig.latency
+//                                    - targetDSLoadLatency)
+//  Step 4  — build candidate "before" caps from:
+//            - beforeN: residualCycles / wmmaIssueConfig.latency
+//            - maxFinalWmmaIdx: targetDSLoadLatency / wmmaIssueConfig.latency
+//            - wmmaWindowsNeeded: WMMA windows needed to issue all matching ds_reads.
+//            Final threshold = max(0, min(beforeN, totalRegionWmmas
+//                                             - max(maxFinalWmmaIdx, wmmaWindowsNeeded))).
 std::unordered_map<StinkyInstruction*, int> CDNA5ReadyQueue::computeBarrierBeforeThresholds(
     IRList::iterator regionStart, IRList::iterator regionEnd) {
     std::unordered_map<StinkyInstruction*, int> result;
@@ -604,71 +613,94 @@ std::unordered_map<StinkyInstruction*, int> CDNA5ReadyQueue::computeBarrierBefor
         struct DSReadMatch {
             uint32_t latency;
             std::unordered_set<uint32_t> destVGPRs;
+            IRList::iterator it;
+            int dsWmmaIdx;
         };
+        int dsWmmaIdx = 0;
         std::vector<DSReadMatch> matchingDSReads;
         bool isAfterBarrier = false;
         for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
             StinkyInstruction& inst = getStinkyInst(it);
             if (&inst == be.barrier) isAfterBarrier = true;
+            if (isMatrixInstruction(inst)) dsWmmaIdx++;
             if (!isDSRead(inst) || !isAfterBarrier) continue;
             for (const StinkyRegister& src : inst.getSrcRegs()) {
                 if (isPseudoReg(src) && be.tokens.count(src.reg.idx)) {
-                    matchingDSReads.push_back(
-                        {static_cast<uint32_t>(inst.latencyCycles), collectDestVGPRs(inst)});
+                    matchingDSReads.push_back({static_cast<uint32_t>(inst.latencyCycles),
+                                               collectDestVGPRs(inst), it, dsWmmaIdx});
                     break;
+                }
+            }
+            // Check whether another barrier also carries overlapping tokens.
+            if (isBarrier(inst) && &inst != be.barrier) {
+                for (const StinkyRegister& dest : inst.getDestRegs()) {
+                    if (isPseudoReg(dest) && be.tokens.count(dest.reg.idx)) {
+                        // Found one matching token on this barrier; no need to keep scanning
+                        // its remaining dest operands.
+                        break;
+                    }
                 }
             }
         }
         if (matchingDSReads.empty()) continue;
 
-        // Step 2: for each matching ds_read, find the first WMMA in [regionStart, regionEnd)
-        //         whose src VGPRs overlap the ds_read's dest VGPRs; take the maximum
-        //         1-based WMMA index across all ds_reads (MaximumWMMAIdx).
+        // Step 2: for each matching ds_read, find the first consumer WMMA (with wrap-around
+        //         search order) whose src VGPRs overlap the ds_read dest VGPRs; take the
+        //         maximum resulting WMMA index across all ds_reads (MaximumWMMAIdx).
         int maximumWMMAIdx = -1;
         int targetDSLoadLatency = 0;
         for (const DSReadMatch& dse : matchingDSReads) {
-            int wmmaIdx = 0;
-            for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
-                StinkyInstruction& inst = getStinkyInst(it);
-                if (!isMatrixInstruction(inst)) continue;
-                wmmaIdx++;
-                if (srcVGPRsOverlap(inst, dse.destVGPRs)) {
-                    if (wmmaIdx > maximumWMMAIdx) {
-                        maximumWMMAIdx = wmmaIdx;
-                        targetDSLoadLatency = (int)dse.latency;
+            int wmmaIdx = dse.dsWmmaIdx;
+            bool found = false;
+            // Scan in two segments: first from the ds_read position to regionEnd,
+            // then wrap around from regionStart up to (but not including) the ds_read.
+            auto scanWMMA = [&](IRList::iterator scanStart, IRList::iterator scanEnd) {
+                for (IRList::iterator it = scanStart; it != scanEnd; ++it) {
+                    StinkyInstruction& inst = getStinkyInst(it);
+                    if (!isMatrixInstruction(inst)) continue;
+                    wmmaIdx++;
+                    if (srcVGPRsOverlap(inst, dse.destVGPRs)) {
+                        if (wmmaIdx > maximumWMMAIdx) {
+                            maximumWMMAIdx = wmmaIdx;
+                            targetDSLoadLatency = (int)dse.latency;
+                        }
+                        found = true;
+                        return;  // Keep the first consumer WMMA for this ds_read.
                     }
-                    break;  // want the first, not the last
                 }
-            }
+            };
+            scanWMMA(dse.it, regionEnd);
+            if (!found) scanWMMA(regionStart, dse.it);
         }
         if (maximumWMMAIdx == -1) continue;
 
-        // Step 3: residualCycles = max(0, targetDSLoadLatency
-        //                               - MaximumWMMAIdx * wmmaIssueConfig.latency)
+        // Step 3: residualCycles = max(0, MaximumWMMAIdx * wmmaIssueConfig.latency
+        //                               - targetDSLoadLatency)
         int residualCycles =
-            std::max(0, targetDSLoadLatency - maximumWMMAIdx * (int)wmmaIssueConfig.latency);
+            std::max(0, maximumWMMAIdx * (int)wmmaIssueConfig.latency - targetDSLoadLatency);
 
-        // Step 4: beforeN = (residualCycles / wmmaIssueConfig.latency) + 1
-        int beforeN = (residualCycles / (int)wmmaIssueConfig.latency) + 1;
+        // Step 4: base before cap (in WMMA count units) from residual cycles.
+        int beforeN = (residualCycles / (int)wmmaIssueConfig.latency);
         int maxFinalWmmaIdx = targetDSLoadLatency / (int)wmmaIssueConfig.latency;
         // Step 4.1: Consider the number of ds_load to be issued in this range.
         int numDsLoad = matchingDSReads.size();
         int maxDsPerWmmaWindow =
             ((int)wmmaIssueConfig.latency - (int)wmmaIssueConfig.issueCycles) / 2;
-        int wmmaWindowsNeeded = (numDsLoad + maxDsPerWmmaWindow - 1) / maxDsPerWmmaWindow;
+        int wmmaWindowsNeeded = (numDsLoad + maxDsPerWmmaWindow - 1) / maxDsPerWmmaWindow + 1;
         // WMMA issue count that forces the barrier early enough for all dependent ds_reads.
         // Take the latest of three constraints, then subtract from total WMMAs in the region:
         //   beforeN — remaining latency after the last consumer WMMA
         //   maxFinalWmmaIdx — absolute cap after the 1st ds_load (DS load latency / WMMA latency)
-        //   wmmaWindowsNeeded — DS issue bandwidth (enough WMMA windows for all ds_loads)
+        //   wmmaWindowsNeeded — DS issue bandwidth (enough WMMA windows for all ds_loads), 1 is for
+        //   barrier reserved
         int beforeThreshold =
-            std::max(0, wmmaIssueConfig.issuedCount -
-                            std::max(beforeN, std::max(maxFinalWmmaIdx, wmmaWindowsNeeded)));
+            std::max(0, std::min(beforeN, wmmaIssueConfig.issuedCount -
+                                              std::max(maxFinalWmmaIdx, wmmaWindowsNeeded)));
         result[be.barrier] = beforeThreshold;
-        PASS_DEBUG(std::cerr << "[CDNA5 computeBarrierBeforeThresholds] barrier="
-                             << " beforeThreshold=" << beforeThreshold << " beforeN=" << beforeN
-                             << " maxFinalWmmaIdx=" << maxFinalWmmaIdx
-                             << " wmmaWindowsNeeded=" << wmmaWindowsNeeded << "\n");
+        (std::cerr << "[CDNA5 computeBarrierBeforeThresholds] barrier=" << " beforeThreshold="
+                   << beforeThreshold << " beforeN=" << beforeN << " maxFinalWmmaIdx="
+                   << maxFinalWmmaIdx << " wmmaWindowsNeeded=" << wmmaWindowsNeeded
+                   << " numDsLoad=" << numDsLoad << "\n");
     }
 
     return result;
