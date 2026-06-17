@@ -404,8 +404,7 @@ class TestPrintTypeMismatchSummary:
 class TestValidateProblemTypeParameterTypes:
     """Tests for the validateProblemTypeParameterTypes function.
 
-    Step 4 promoted the default behaviour to raise on mismatch. These
-    tests exercise the library-logic / collector mode by passing
+    These tests exercise the library-logic / collector mode by passing
     ``raiseOnMismatch=False``. See TestValidateProblemTypeRaiseMode for
     the strict-mode coverage.
     """
@@ -574,7 +573,7 @@ class TestValidateProblemTypeRaiseMode:
 
 
 class TestWorkerPassthroughBackstop:
-    """Step 4 (B1): worker re-raises ConfigTypeError past the broad except."""
+    """Worker re-raises ConfigTypeError past the broad except."""
 
     def _make_minimal_fixtures(self):
         """Build the minimal arguments needed to enter _generate_single_solution.

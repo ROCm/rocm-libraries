@@ -940,7 +940,6 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
 
     ignoreKeys = _GLOBAL_PARAMETER_IGNORE_KEYS
 
-
     _assertGlobalParametersAreValid(config, ignoreKeys)
     for key in config:
         if key in ignoreKeys:
