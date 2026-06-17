@@ -774,30 +774,45 @@ ROCWMMA_KERNEL void __launch_bounds__(TBLOCK_TOTAL) gemm_streamk_kernel(uint32_t
         auto localWarpOffset = localWarpCoord * warpTileSize;
 
         // ----- Stream-K work assignment -----
+        //
+        // Tile counts and iters_per_tile are bounded for any practical GEMM
+        // and stay 32-bit.  The *global work stream* (num_tiles, total_iters)
+        // and the derived per-worker iteration range are computed in 64-bit:
+        // total_iters = num_tiles * iters_per_tile can exceed 2^32 for large
+        // GEMMs (e.g. M=N=65536, K=65536), and a silent uint32_t overflow here
+        // would hand workers incorrect [start_iter, end_iter) ranges.  Tile ids
+        // are narrowed back to uint32_t once the iteration math is done.
         const uint32_t num_M_tiles    = m / MACRO_TILE_X;
         const uint32_t num_N_tiles    = n / MACRO_TILE_Y;
         const uint32_t iters_per_tile = k / MACRO_TILE_K;
-        const uint32_t num_tiles      = num_M_tiles * num_N_tiles;
-        const uint32_t total_iters    = num_tiles * iters_per_tile;
+        const uint64_t num_tiles      = static_cast<uint64_t>(num_M_tiles) * num_N_tiles;
+        const uint64_t total_iters    = num_tiles * iters_per_tile;
 
-        const uint32_t base       = total_iters / num_workers;
-        const uint32_t extra      = total_iters % num_workers;
-        const uint32_t start_iter = worker_id * base + (worker_id < extra ? worker_id : extra);
-        const uint32_t end_iter   = start_iter + base + (worker_id < extra ? 1u : 0u);
+        const uint64_t base  = total_iters / num_workers;
+        const uint64_t extra = total_iters % num_workers;
+        const uint64_t start_iter
+            = static_cast<uint64_t>(worker_id) * base + (worker_id < extra ? worker_id : extra);
+        const uint64_t end_iter = start_iter + base + (worker_id < extra ? 1u : 0u);
         if(start_iter >= end_iter)
             return; // worker has no work (can happen if num_workers > total_iters)
 
-        const uint32_t start_tile = start_iter / iters_per_tile;
-        const uint32_t end_tile   = (end_iter - 1u) / iters_per_tile;
+        // Tile ids are bounded by num_tiles; safe to narrow to 32-bit.
+        const uint32_t start_tile = static_cast<uint32_t>(start_iter / iters_per_tile);
+        const uint32_t end_tile   = static_cast<uint32_t>((end_iter - 1u) / iters_per_tile);
 
         HIP_DYNAMIC_SHARED(void*, localMemPtr);
 
         // ----- Walk every tile this worker touches -----
         for(uint32_t tile = start_tile; tile <= end_tile; ++tile)
         {
-            const uint32_t k_lo = (tile == start_tile) ? (start_iter - tile * iters_per_tile) : 0u;
-            const uint32_t k_hi
-                = (tile == end_tile) ? (end_iter - tile * iters_per_tile) : iters_per_tile;
+            // 64-bit tile base: tile * iters_per_tile can also exceed 2^32.
+            // k_lo / k_hi themselves are in [0, iters_per_tile] and fit uint32.
+            const uint64_t tile_iter_base = static_cast<uint64_t>(tile) * iters_per_tile;
+            const uint32_t k_lo
+                = (tile == start_tile) ? static_cast<uint32_t>(start_iter - tile_iter_base) : 0u;
+            const uint32_t k_hi = (tile == end_tile)
+                                      ? static_cast<uint32_t>(end_iter - tile_iter_base)
+                                      : iters_per_tile;
 
             const uint32_t tileX = tile / num_N_tiles;
             const uint32_t tileY = tile - tileX * num_N_tiles;
@@ -847,10 +862,13 @@ ROCWMMA_KERNEL void __launch_bounds__(TBLOCK_TOTAL) gemm_streamk_kernel(uint32_t
 ROCWMMA_KERNEL void
     gemm_streamk_finish_kernel(WorkspaceT const* workspace, OutputT* d, uint32_t total_elems)
 {
-    const uint32_t tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if(tid >= total_elems)
-        return;
-    d[tid] = static_cast<OutputT>(workspace[tid]);
+    if constexpr(!ROCWMMA_ARCH_HOST)
+    {
+        const uint32_t tid = blockIdx.x * blockDim.x + threadIdx.x;
+        if(tid >= total_elems)
+            return;
+        d[tid] = static_cast<OutputT>(workspace[tid]);
+    }
 }
 
 // =============================================================================
@@ -1119,7 +1137,7 @@ ROCWMMA_HOST void run_gemm_sample(uint32_t     m,
                                   d_workspace,
                                   lda,
                                   ldb,
-                                  /*ldd_ws=*/n,
+                                  /*ldd_ws=*/ldd,
                                   num_workers);
             CHECK_HIP_ERROR(hipGetLastError());
 
