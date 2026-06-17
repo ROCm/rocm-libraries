@@ -255,7 +255,6 @@ int main(int argc, char** argv) {
         // Generic random data filling based on BitDepthTestMode
         Rpp32f *inputF32 = NULL, *inputF32Second = NULL;
         inputF32 = static_cast<Rpp32f*>(calloc(iBufferSize, sizeof(Rpp32f)));
-        outputF32 = static_cast<Rpp32f*>(calloc(oBufferSize, sizeof(Rpp32f)));
         if ((testCase == CONCAT) || (broadCastCase))
             inputF32Second = static_cast<Rpp32f*>(calloc(iBufferSizeSecond, sizeof(Rpp32f)));
 
