@@ -52,6 +52,11 @@ namespace rocsparse
                                                     const Z* const*      z_arrays,
                                                     rocsparse_index_base idx_base)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+
         const int lid = hipThreadIdx_x & (WF_SIZE - 1);
 
         const J gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
@@ -120,6 +125,11 @@ namespace rocsparse
                                                     Y*                   y,
                                                     rocsparse_index_base idx_base)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+
         const int lid = hipThreadIdx_x & (WF_SIZE - 1);
 
         const J gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
@@ -241,6 +251,11 @@ namespace rocsparse
                                                      const Z* const*      z_arrays,
                                                      rocsparse_index_base idx_base)
     {
+        static_assert(WG_SIZE > 0 && (WG_SIZE & (WG_SIZE - 1)) == 0,
+                      "WG_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WG_SIZE == 0, "BLOCKSIZE must be a multiple of WG_SIZE.");
+
         __shared__ T partialSums[BLOCKSIZE];
 
         const int lid = hipThreadIdx_x;
@@ -310,6 +325,15 @@ namespace rocsparse
             // Stream all of this row block's matrix values into local memory.
             // Perform the matvec in parallel with this work.
             const I col = row_offset + lid - idx_base;
+#ifdef ROCSPARSE_WITH_ASAN
+            // Under ASAN, always use bounds-checked path to avoid intentional OOB reads
+            // in the fast path below (which are safe on dGPUs but trigger ASAN errors).
+            for(I i = 0; col + i < csr_row_ptr[stop_row] - idx_base; i += WG_SIZE)
+            {
+                partialSums[lid + i] = alpha * rocsparse::conj_val(csr_val[col + i], conj)
+                                       * x[csr_col_ind[col + i] - idx_base];
+            }
+#else
             if(col + BLOCKSIZE - WG_SIZE < nnz)
             {
                 for(J i = 0; i < BLOCKSIZE; i += WG_SIZE)
@@ -333,6 +357,7 @@ namespace rocsparse
                                            * x[csr_col_ind[col + i] - idx_base];
                 }
             }
+#endif
             __syncthreads();
 
             if(numThreadsForRed > 1)
@@ -938,6 +963,11 @@ namespace rocsparse
                                                   const Z* const*      z_arrays,
                                                   rocsparse_index_base idx_base)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+
         const int tid = hipThreadIdx_x;
         const int bid = hipBlockIdx_x;
 

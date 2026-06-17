@@ -37,6 +37,7 @@ namespace rocisa
             removeDuplicatedFunction(kernel->body);
         }
 
+        macroToInstruction(kernel->body);
         compositeToInstruction(kernel->body);
         // Convert text variables to registers
         convertTextVariablesToRegisters(kernel->body);

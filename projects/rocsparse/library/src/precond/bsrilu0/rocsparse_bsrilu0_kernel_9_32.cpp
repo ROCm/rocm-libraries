@@ -50,6 +50,9 @@ namespace rocsparse
                                                   double               boost_tol,
                                                   T                    boost_val)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % BBDIM == 0, "BLOCKSIZE must be a multiple of BBDIM.");
         static constexpr uint32_t DIMX = BBDIM;
         static constexpr uint32_t DIMY = BLOCKSIZE / BBDIM;
 
@@ -492,7 +495,7 @@ namespace rocsparse
         {
             return rocsparse::bsrilu0_kernel_9_32_launch<BLOCKSIZE, WF_SIZE, BBDIM, T, I, int64_t>;
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");
@@ -518,7 +521,7 @@ namespace rocsparse
             return rocsparse::transform_j_type<BLOCKSIZE, WF_SIZE, BBDIM, T, int64_t>(
                 std::forward<P>(p)...);
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");

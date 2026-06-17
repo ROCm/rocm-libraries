@@ -6,9 +6,10 @@
 #include "ck/utility/common_header.hpp"
 #include "ck/utility/multi_index.hpp"
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck {
 
 template <typename LowLength>
@@ -136,8 +137,10 @@ struct Pad
     {
         static_assert(LowIdx::Size() == 1 && UpIdx::Size() == 1,
                       "wrong! inconsistent # of dimension");
-
         idx_low(Number<0>{}) = idx_up[Number<0>{}] - left_pad_length_;
+#if defined(__gfx125__) && CK_WORKAROUND_SWDEV_XXXXXX_GFX1250_NEG_OFFSET_ISSUE
+        idx_low(Number<0>{}) = max(idx_low(Number<0>{}), 0);
+#endif
     }
 
     template <typename LowIdxDiff,
@@ -145,21 +148,29 @@ struct Pad
               typename LowIdx,
               typename UpIdx,
               index_t Hack>
-    __host__ __device__ static void UpdateLowerIndex(LowIdxDiff& idx_diff_low,
-                                                     const UpIdxDiff& idx_diff_up,
-                                                     LowIdx& idx_low,
-                                                     const UpIdx&,
-                                                     Number<Hack>)
+    __host__ __device__ void UpdateLowerIndex(LowIdxDiff& idx_diff_low,
+                                              [[maybe_unused]] const UpIdxDiff& idx_diff_up,
+                                              LowIdx& idx_low,
+                                              [[maybe_unused]] const UpIdx& idx_up,
+                                              Number<Hack>) const
     {
         static_assert(LowIdxDiff::Size() == 1 && UpIdxDiff::Size() == 1 && LowIdx::Size() == 1 &&
                           UpIdx::Size() == 1,
                       "wrong! inconsistent # of dimension");
+#if defined(__gfx125__) && CK_WORKAROUND_SWDEV_XXXXXX_GFX1250_NEG_OFFSET_ISSUE
+        const auto idx_low_old = idx_low;
+
+        CalculateLowerIndex(idx_low, idx_up);
+
+        idx_diff_low = idx_low - idx_low_old;
+#else
 
         constexpr auto I0 = Number<0>{};
 
         idx_diff_low(I0) = idx_diff_up[I0];
 
         idx_low += idx_diff_low;
+#endif
     }
 
     __host__ __device__ static constexpr bool IsLinearTransform() { return true; }
@@ -228,8 +239,10 @@ struct LeftPad
     {
         static_assert(LowIdx::Size() == 1 && UpIdx::Size() == 1,
                       "wrong! inconsistent # of dimension");
-
         idx_low(Number<0>{}) = idx_up[Number<0>{}] - left_pad_length_;
+#if defined(__gfx125__) && CK_WORKAROUND_SWDEV_XXXXXX_GFX1250_NEG_OFFSET_ISSUE
+        idx_low(Number<0>{}) = max(idx_low(Number<0>{}), 0);
+#endif
     }
 
     template <typename LowIdxDiff,
@@ -237,21 +250,29 @@ struct LeftPad
               typename LowIdx,
               typename UpIdx,
               index_t Hack>
-    __host__ __device__ static void UpdateLowerIndex(LowIdxDiff& idx_diff_low,
-                                                     const UpIdxDiff& idx_diff_up,
-                                                     LowIdx& idx_low,
-                                                     const UpIdx&,
-                                                     Number<Hack>)
+    __host__ __device__ void UpdateLowerIndex(LowIdxDiff& idx_diff_low,
+                                              [[maybe_unused]] const UpIdxDiff& idx_diff_up,
+                                              LowIdx& idx_low,
+                                              [[maybe_unused]] const UpIdx& idx_up,
+                                              Number<Hack>) const
     {
         static_assert(LowIdxDiff::Size() == 1 && UpIdxDiff::Size() == 1 && LowIdx::Size() == 1 &&
                           UpIdx::Size() == 1,
                       "wrong! inconsistent # of dimension");
 
+#if defined(__gfx125__) && CK_WORKAROUND_SWDEV_XXXXXX_GFX1250_NEG_OFFSET_ISSUE
+        const auto idx_low_old = idx_low;
+
+        CalculateLowerIndex(idx_low, idx_up);
+
+        idx_diff_low = idx_low - idx_low_old;
+#else
         constexpr auto I0 = Number<0>{};
 
         idx_diff_low(I0) = idx_diff_up[I0];
 
         idx_low += idx_diff_low;
+#endif
     }
 
     __host__ __device__ static constexpr bool IsLinearTransform() { return true; }
@@ -530,7 +551,7 @@ struct Merge_v1_carry_check
         static_assert(LowIdx::Size() == NDimLow && UpIdx::Size() == 1,
                       "wrong! inconsistent # of dimension");
 
-        index_t tmp = idx_up[Number<0>{}];
+        auto tmp = idx_up[Number<0>{}];
 
         // normal division
         static_for<0, NDimLow - 1, 1>{}([&](auto i) {
@@ -575,7 +596,7 @@ struct Merge_v1_carry_check
         LowerIndex idx_low_length_plus_idx_diff_low_const;
 
 #if !CK_HACK_MERGE_CALCULATE_IDX_DIFF_LOW_CONST_USE_AMD_GCN_READ_FIRST_LANE
-        index_t tmp = idx_diff_up[Number<0>{}];
+        auto tmp = idx_diff_up[Number<0>{}];
 
         static_for<0, NDimLow - 1, 1>{}([&](auto i) {
             idx_diff_low_const(i) = tmp / low_lengths_scan_[i];
@@ -591,7 +612,7 @@ struct Merge_v1_carry_check
         });
 #else
         // Hack: this force result into SGPR. Need to make sure the result is thread invariant
-        index_t tmp = idx_diff_up[Number<0>{}];
+        auto tmp = idx_diff_up[Number<0>{}];
 
         static_for<0, NDimLow - 1, 1>{}([&](auto i) {
             idx_diff_low_const(i) = __builtin_amdgcn_readfirstlane(tmp / low_lengths_scan_[i]);
@@ -613,10 +634,10 @@ struct Merge_v1_carry_check
         {
             // do carry check on each low dimension in reversed order
             // do not need to check the first dimension
-            index_t carry = 0;
+            auto carry = decltype(idx_low[Number<0>{}]){0};
 
             static_for<NDimLow - 1, 0, -1>{}([&](auto i) {
-                index_t idx_low_tmp = idx_low[i] + carry;
+                auto idx_low_tmp = idx_low[i] + carry;
 
                 bool do_carry = idx_low_tmp >= idx_low_length_minus_idx_diff_low_const[i];
 
@@ -636,10 +657,10 @@ struct Merge_v1_carry_check
         {
             // do carry check on each low dimension in reversed order
             // do not need to check the first dimension
-            index_t borrow = 0;
+            auto borrow = decltype(idx_low[Number<0>{}]){0};
 
             static_for<NDimLow - 1, 0, -1>{}([&](auto i) {
-                index_t idx_low_tmp = idx_low[i] - borrow;
+                auto idx_low_tmp = idx_low[i] - borrow;
 
                 bool do_borrow = idx_low_tmp < -idx_diff_low_const[i];
 
@@ -659,10 +680,10 @@ struct Merge_v1_carry_check
         {
             // do carry check on each low dimension in reversed order
             // do not need to check the first dimension
-            index_t carry = 0;
+            auto carry = decltype(idx_low[Number<0>{}]){0};
 
             static_for<NDimLow - 1, 0, -1>{}([&](auto i) {
-                index_t idx_low_tmp = idx_low[i] + carry;
+                auto idx_low_tmp = idx_low[i] + carry;
 
                 bool do_carry  = idx_low_tmp >= idx_low_length_minus_idx_diff_low_const[i];
                 bool do_borrow = idx_low_tmp < -idx_diff_low_const[i];
@@ -718,7 +739,7 @@ struct Merge_v1_carry_check
         LowerIndex idx_low_length_plus_idx_diff_low_const;
 
 #if !CK_HACK_MERGE_CALCULATE_IDX_DIFF_LOW_CONST_USE_AMD_GCN_READ_FIRST_LANE
-        index_t tmp = idx_diff_up[Number<0>{}];
+        auto tmp = idx_diff_up[Number<0>{}];
 
         static_for<0, NDimLow - 1, 1>{}([&](auto i) {
             idx_diff_low_const(i) = tmp / low_lengths_scan_[i];
@@ -734,7 +755,7 @@ struct Merge_v1_carry_check
         });
 #else
         // Hack: this force result into SGPR. Need to make sure the result is thread invariant
-        index_t tmp = idx_diff_up[Number<0>{}];
+        auto tmp = idx_diff_up[Number<0>{}];
 
         static_for<0, NDimLow - 1, 1>{}([&](auto i) {
             idx_diff_low_const(i) = __builtin_amdgcn_readfirstlane(tmp / low_lengths_scan_[i]);
@@ -755,10 +776,10 @@ struct Merge_v1_carry_check
         {
             // do carry check on each low dimension in reversed order
             // do not need to check the first dimension
-            index_t carry = 0;
+            auto carry = decltype(idx_low[Number<0>{}]){0};
 
             static_for<NDimLow - 1, 0, -1>{}([&](auto i) {
-                index_t idx_low_tmp = idx_low[i] + carry;
+                auto idx_low_tmp = idx_low[i] + carry;
 
                 bool do_carry = idx_low_tmp >= idx_low_length_minus_idx_diff_low_const[i];
 
@@ -778,10 +799,10 @@ struct Merge_v1_carry_check
         {
             // do carry check on each low dimension in reversed order
             // do not need to check the first dimension
-            index_t borrow = 0;
+            auto borrow = decltype(idx_low[Number<0>{}]){0};
 
             static_for<NDimLow - 1, 0, -1>{}([&](auto i) {
-                index_t negative_idx_low_tmp = borrow - idx_low[i];
+                auto negative_idx_low_tmp = borrow - idx_low[i];
 
                 bool do_borrow = negative_idx_low_tmp > idx_diff_low_const[i];
 
@@ -801,10 +822,10 @@ struct Merge_v1_carry_check
         {
             // do carry check on each low dimension in reversed order
             // do not need to check the first dimension
-            index_t carry = 0;
+            auto carry = decltype(idx_low[Number<0>{}]){0};
 
             static_for<NDimLow - 1, 0, -1>{}([&](auto i) {
-                index_t idx_low_tmp = idx_low[i] + carry;
+                auto idx_low_tmp = idx_low[i] + carry;
 
                 bool do_carry  = idx_low_tmp >= idx_low_length_minus_idx_diff_low_const[i];
                 bool do_borrow = idx_low_tmp < -idx_diff_low_const[i];
@@ -858,7 +879,7 @@ struct Merge_v1_carry_check
         LowerIndex idx_diff_low_const;
 
 #if !CK_HACK_MERGE_CALCULATE_IDX_DIFF_LOW_CONST_USE_AMD_GCN_READ_FIRST_LANE
-        index_t tmp = idx_diff_up[Number<0>{}];
+        auto tmp = idx_diff_up[Number<0>{}];
 
         static_for<0, NDimLow - 1, 1>{}([&](auto i) {
             idx_diff_low_const(i) = tmp / low_lengths_scan_[i];
@@ -868,7 +889,7 @@ struct Merge_v1_carry_check
         idx_diff_low_const(Number<NDimLow - 1>{}) = tmp;
 #else
         // Hack: this force result into SGPR. Need to make sure the result is thread invariant
-        index_t tmp = idx_diff_up[Number<0>{}];
+        auto tmp = idx_diff_up[Number<0>{}];
 
         static_for<0, NDimLow - 1, 1>{}([&](auto i) {
             idx_diff_low_const(i) = __builtin_amdgcn_readfirstlane(tmp / low_lengths_scan_[i]);
@@ -887,7 +908,7 @@ struct Merge_v1_carry_check
             static_for<NDimLow - 1, 0, -1>{}([&](auto i) {
                 idx_diff_low(i) = idx_diff_low_const[i] + do_carry;
 
-                index_t idx_low_tmp = idx_low[i] + idx_diff_low[i];
+                auto idx_low_tmp = idx_low[i] + idx_diff_low[i];
 
                 do_carry = idx_low_tmp >= low_lengths_[i];
 
@@ -902,8 +923,8 @@ struct Merge_v1_carry_check
                 idx_diff_low(i) = do_carry ? idx_diff_low[i] - low_lengths_[i] : idx_diff_low[i];
 #elif 1
                 // this use 2 VALU
-                index_t idx_diff_low_tmp = idx_diff_low[i] - low_lengths_[i];
-                idx_diff_low(i)          = do_carry ? idx_diff_low_tmp : idx_diff_low[i];
+                auto idx_diff_low_tmp = idx_diff_low[i] - low_lengths_[i];
+                idx_diff_low(i)       = do_carry ? idx_diff_low_tmp : idx_diff_low[i];
 #endif
 
                 idx_low(i) += idx_diff_low[i];
@@ -924,7 +945,7 @@ struct Merge_v1_carry_check
             static_for<NDimLow - 1, 0, -1>{}([&](auto i) {
                 idx_diff_low(i) = idx_diff_low_const[i] - do_borrow;
 
-                index_t idx_low_tmp = idx_low[i] + idx_diff_low[i];
+                auto idx_low_tmp = idx_low[i] + idx_diff_low[i];
 
                 do_borrow = idx_low_tmp < 0;
 
@@ -937,8 +958,8 @@ struct Merge_v1_carry_check
 #elif 1
                 idx_diff_low(i) = do_borrow ? idx_diff_low[i] + low_lengths_[i] : idx_diff_low[i];
 #elif 1
-                index_t idx_diff_low_tmp = idx_diff_low[i] + low_lengths_[i];
-                idx_diff_low(i)          = do_borrow ? idx_diff_low_tmp : idx_diff_low[i];
+                auto idx_diff_low_tmp = idx_diff_low[i] + low_lengths_[i];
+                idx_diff_low(i)       = do_borrow ? idx_diff_low_tmp : idx_diff_low[i];
 #endif
 
                 idx_low(i) += idx_diff_low[i];
@@ -1022,12 +1043,32 @@ struct lambda_merge_generate_MagicDivision_calculate_magic_multiplier
 };
 
 template <typename LowLengths>
+struct lambda_merge_generate_MagicDivision_calculate_magic_multiplier64
+{
+    template <index_t I>
+    __host__ __device__ constexpr auto operator()(Number<I> i) const
+    {
+        return MagicDivision::CalculateMagicMultiplier64(static_cast<uint32_t>(LowLengths{}[i]));
+    }
+};
+
+template <typename LowLengths>
 struct lambda_merge_generate_MagicDivision_calculate_magic_shift
 {
     template <index_t I>
     __host__ __device__ constexpr auto operator()(Number<I> i) const
     {
         return MagicDivision::CalculateMagicShift(LowLengths{}[i]);
+    }
+};
+
+template <typename LowLengths>
+struct lambda_merge_generate_MagicDivision_calculate_magic_shift64
+{
+    template <index_t I>
+    __host__ __device__ constexpr auto operator()(Number<I> i) const
+    {
+        return MagicDivision::CalculateMagicShift64(static_cast<uint32_t>(LowLengths{}[i]));
     }
 };
 
@@ -1054,13 +1095,31 @@ struct Merge_v2_magic_division
     using UpLengths =
         decltype(make_tuple(container_reduce(LowLengths{}, math::multiplies{}, Number<1>{})));
 
-    using LowLengthsMagicDivisorMultipiler = decltype(generate_tuple(
-        lambda_merge_generate_MagicDivision_calculate_magic_multiplier<LowLengths>{},
-        Number<NDimLow>{}));
+    // Detect whether the low lengths are 64-bit (long_index_t or LongNumber).
+    using Elem0Type = remove_cvref_t<decltype(LowLengths{}[Number<0>{}])>;
+    static constexpr bool IsLong =
+        std::is_same_v<Elem0Type, long_index_t> || is_long_number_v<Elem0Type>;
 
-    using LowLengthsMagicDivisorShift = decltype(generate_tuple(
-        lambda_merge_generate_MagicDivision_calculate_magic_shift<LowLengths>{},
-        Number<NDimLow>{}));
+    // 64-bit path: multiplier is uint64_t, shift stays uint32_t.
+    // 32-bit path: both are uint32_t (existing behaviour).
+    using MultiplierLambda = std::conditional_t<
+        IsLong,
+        lambda_merge_generate_MagicDivision_calculate_magic_multiplier64<LowLengths>,
+        lambda_merge_generate_MagicDivision_calculate_magic_multiplier<LowLengths>>;
+
+    using LowLengthsMagicDivisorMultipiler =
+        decltype(generate_tuple(MultiplierLambda{}, Number<NDimLow>{}));
+
+    using ShiftLambda =
+        std::conditional_t<IsLong,
+                           lambda_merge_generate_MagicDivision_calculate_magic_shift64<LowLengths>,
+                           lambda_merge_generate_MagicDivision_calculate_magic_shift<LowLengths>>;
+
+    using LowLengthsMagicDivisorShift = decltype(generate_tuple(ShiftLambda{}, Number<NDimLow>{}));
+
+    // Arithmetic type used for the upper-index dividend in CalculateLowerIndex /
+    // UpdateLowerIndex.
+    using TmpType = std::conditional_t<IsLong, long_index_t, index_t>;
 
     LowLengths low_lengths_;
     LowLengthsMagicDivisorMultipiler low_lengths_magic_divisor_multiplier_;
@@ -1072,10 +1131,22 @@ struct Merge_v2_magic_division
     __host__ __device__ constexpr Merge_v2_magic_division(const LowLengths& low_lengths)
         : low_lengths_{low_lengths},
           low_lengths_magic_divisor_multiplier_{generate_tuple(
-              [&](auto i) { return MagicDivision::CalculateMagicMultiplier(low_lengths[i]); },
+              [&](auto i) {
+                  if constexpr(IsLong)
+                      return MagicDivision::CalculateMagicMultiplier64(
+                          static_cast<uint32_t>(low_lengths[i]));
+                  else
+                      return MagicDivision::CalculateMagicMultiplier(low_lengths[i]);
+              },
               Number<NDimLow>{})},
           low_lengths_magic_divisor_shift_{generate_tuple(
-              [&](auto i) { return MagicDivision::CalculateMagicShift(low_lengths[i]); },
+              [&](auto i) {
+                  if constexpr(IsLong)
+                      return MagicDivision::CalculateMagicShift64(
+                          static_cast<uint32_t>(low_lengths[i]));
+                  else
+                      return MagicDivision::CalculateMagicShift(low_lengths[i]);
+              },
               Number<NDimLow>{})},
           up_lengths_{make_tuple(container_reduce(low_lengths, math::multiplies{}, Number<1>{}))}
     {
@@ -1098,10 +1169,10 @@ struct Merge_v2_magic_division
         static_assert(LowIdx::Size() == NDimLow && UpIdx::Size() == 1,
                       "wrong! inconsistent # of dimension");
 
-        index_t tmp = idx_up[Number<0>{}];
+        TmpType tmp = idx_up[Number<0>{}];
 
         static_for<NDimLow - 1, 0, -1>{}([&, this](auto i) {
-            index_t tmp2 =
+            TmpType tmp2 =
                 MagicDivision::DoMagicDivision(tmp,
                                                this->low_lengths_magic_divisor_multiplier_[i],
                                                this->low_lengths_magic_divisor_shift_[i]);
@@ -1127,15 +1198,15 @@ struct Merge_v2_magic_division
                           LowIdx::Size() == NDimLow && UpIdx::Size() == 1,
                       "wrong! inconsistent # of dimension");
 
-        index_t tmp = idx_up_new[Number<0>{}];
+        TmpType tmp = idx_up_new[Number<0>{}];
 
         static_for<NDimLow - 1, 0, -1>{}([&, this](auto i) {
-            index_t tmp2 =
+            TmpType tmp2 =
                 MagicDivision::DoMagicDivision(tmp,
                                                this->low_lengths_magic_divisor_multiplier_[i],
                                                this->low_lengths_magic_divisor_shift_[i]);
 
-            index_t idx_low_old = idx_low[i];
+            TmpType idx_low_old = idx_low[i];
 
             idx_low(i) = tmp - tmp2 * this->low_lengths_[i];
             tmp        = tmp2;
@@ -1256,7 +1327,7 @@ struct Merge_v2r2_magic_division
         static_assert(LowIdx::Size() == NDimLow && UpIdx::Size() == 1,
                       "wrong! inconsistent # of dimension");
 
-        index_t tmp = idx_up[Number<0>{}];
+        auto tmp = idx_up[Number<0>{}];
 
         static_for<0, NDimLow - 1, 1>{}([&, this](auto i) {
             idx_low(i) =
@@ -1285,10 +1356,10 @@ struct Merge_v2r2_magic_division
                           LowIdx::Size() == NDimLow && UpIdx::Size() == 1,
                       "wrong! inconsistent # of dimension");
 
-        index_t tmp = idx_up_new[Number<0>{}];
+        auto tmp = idx_up_new[Number<0>{}];
 
         static_for<0, NDimLow - 1, 1>{}([&, this](auto i) {
-            index_t idx_low_old = idx_low[i];
+            auto idx_low_old = idx_low[i];
 
             idx_low(i) =
                 MagicDivision::DoMagicDivision(tmp,
@@ -1393,7 +1464,7 @@ struct Merge_v3_division_mod
         static_assert(LowIdx::Size() == NDimLow && UpIdx::Size() == 1,
                       "wrong! inconsistent # of dimension");
 
-        index_t tmp = idx_up[Number<0>{}];
+        auto tmp = idx_up[Number<0>{}];
 
         // division and mod
         static_for<0, NDimLow - 1, 1>{}([&](auto i) {
@@ -1422,16 +1493,16 @@ struct Merge_v3_division_mod
         constexpr auto I0   = Number<0>{};
         constexpr auto INm1 = Number<NDimLow - 1>{};
 
-        index_t tmp = idx_up_new[I0];
+        auto tmp = idx_up_new[I0];
 
         static_for<0, NDimLow - 1, 1>{}([&](auto i) {
-            const index_t tmp2 = idx_low[i];
-            idx_low(i)         = tmp / this->low_lengths_scan_[i];
-            idx_diff_low(i)    = idx_low[i] - tmp2;
+            const auto tmp2 = idx_low[i];
+            idx_low(i)      = tmp / this->low_lengths_scan_[i];
+            idx_diff_low(i) = idx_low[i] - tmp2;
             tmp %= this->low_lengths_scan_[i];
         });
 
-        const index_t tmp2 = idx_low[INm1];
+        const auto tmp2    = idx_low[INm1];
         idx_low(INm1)      = tmp;
         idx_diff_low(INm1) = idx_low[INm1] - tmp2;
     }
@@ -1581,9 +1652,18 @@ struct UnMerge
  * convolution backward data operation to the corresponding indices (K0, M, K1) used in the
  * implicit GEMM computation. It encapsulates the necessary parameters and transformation logic
  * required to efficiently perform the index conversion.
+ *
+ * @tparam IndexType  The index type used for upper/lower indices. Must be either
+ *                    index_t (int32_t) or long_index_t (int64_t).
  */
+template <typename IndexType = index_t>
 struct ConvBwdDataImplicitGemmOutTransform
 {
+    static_assert(std::is_same_v<IndexType, index_t> || std::is_same_v<IndexType, long_index_t>,
+                  "IndexType must be index_t or long_index_t");
+
+    static constexpr bool IsLongIndex = std::is_same_v<IndexType, long_index_t>;
+
     static constexpr auto I0 = Number<0>{};
     static constexpr auto I1 = Number<1>{};
     static constexpr auto I2 = Number<2>{};
@@ -1592,42 +1672,42 @@ struct ConvBwdDataImplicitGemmOutTransform
     using LowerIndex = MultiIndex<4>; // N, Ho, Wo, K
     using UpperIndex = MultiIndex<3>; // K0, M, K1
 
-    index_t N_, Ho_, Wo_, K_;
-    index_t XDot_;
-    index_t HTilde_, WTilde_;
-    index_t WTildeSlice_, TildeSlice_;
-    index_t IHTildeSliceBegin_, IWTildeSliceBegin_;
-    index_t HRatio_, WRatio_;
-    index_t XDotSlice_K_;
-    index_t MPad_, KPad_;
-    Tuple<index_t, index_t, index_t> up_lengths_; // K0_, MPadded, K1_;
+    IndexType N_, Ho_, Wo_, K_;
+    IndexType XDot_;
+    IndexType HTilde_, WTilde_;
+    IndexType WTildeSlice_, TildeSlice_;
+    IndexType IHTildeSliceBegin_, IWTildeSliceBegin_;
+    IndexType HRatio_, WRatio_;
+    IndexType XDotSlice_K_;
+    IndexType MPad_, KPad_;
+    Tuple<IndexType, IndexType, IndexType> up_lengths_; // K0_, MPadded, K1_;
 
-    Tuple<index_t, index_t, index_t, index_t>
+    Tuple<IndexType, IndexType, IndexType, IndexType>
         low_lengths_magic_divisor_multiplier_; // XDotSlice_K_, K_, TildeSlice_, WTildeSlice_
-    Tuple<index_t, index_t, index_t, index_t>
+    Tuple<IndexType, IndexType, IndexType, IndexType>
         low_lengths_magic_divisor_shift_; // XDotSlice_K_, K_, TildeSlice_, WTildeSlice_
 
     __host__ __device__ ConvBwdDataImplicitGemmOutTransform() = default;
 
-    __host__ __device__ constexpr ConvBwdDataImplicitGemmOutTransform(index_t N,
-                                                                      index_t Ho,
-                                                                      index_t Wo,
-                                                                      index_t K,
-                                                                      index_t XDot,
-                                                                      index_t HTilde,
-                                                                      index_t WTilde,
-                                                                      index_t WTildeSlice,
-                                                                      index_t HWTildeSlice,
-                                                                      index_t IHTildeSliceBegin,
-                                                                      index_t IWTildeSliceBegin,
-                                                                      index_t HRatio,
-                                                                      index_t WRatio,
-                                                                      index_t XDotSlice_K,
-                                                                      index_t K0,
-                                                                      index_t MPadded,
-                                                                      index_t K1,
-                                                                      index_t MPad,
-                                                                      index_t KPad)
+    __host__ __device__ constexpr ConvBwdDataImplicitGemmOutTransform(IndexType N,
+                                                                      IndexType Ho,
+                                                                      IndexType Wo,
+                                                                      IndexType K,
+                                                                      IndexType XDot,
+                                                                      IndexType HTilde,
+                                                                      IndexType WTilde,
+                                                                      IndexType WTildeSlice,
+                                                                      IndexType HWTildeSlice,
+                                                                      IndexType IHTildeSliceBegin,
+                                                                      IndexType IWTildeSliceBegin,
+                                                                      IndexType HRatio,
+                                                                      IndexType WRatio,
+                                                                      IndexType XDotSlice_K,
+                                                                      IndexType K0,
+                                                                      IndexType MPadded,
+                                                                      IndexType K1,
+                                                                      IndexType MPad,
+                                                                      IndexType KPad)
         : N_{N},
           Ho_{Ho},
           Wo_{Wo},
@@ -1645,11 +1725,10 @@ struct ConvBwdDataImplicitGemmOutTransform
           MPad_{MPad},
           KPad_{KPad},
           up_lengths_{make_tuple(K0, MPadded, K1)},
-          low_lengths_magic_divisor_multiplier_{
-              MagicDivision::CalculateMagicMultiplier(XDotSlice_K_),
-              MagicDivision::CalculateMagicMultiplier(K_),
-              MagicDivision::CalculateMagicMultiplier(TildeSlice_),
-              MagicDivision::CalculateMagicMultiplier(WTildeSlice_)},
+          low_lengths_magic_divisor_multiplier_{CalculateMult(XDotSlice_K_),
+                                                CalculateMult(K_),
+                                                CalculateMult(TildeSlice_),
+                                                CalculateMult(WTildeSlice_)},
           low_lengths_magic_divisor_shift_{MagicDivision::CalculateMagicShift(XDotSlice_K_),
                                            MagicDivision::CalculateMagicShift(K_),
                                            MagicDivision::CalculateMagicShift(TildeSlice_),
@@ -1669,23 +1748,24 @@ struct ConvBwdDataImplicitGemmOutTransform
     template <typename UpIdx>
     __host__ __device__ constexpr auto CalculateLowerIndexN(const UpIdx& idx_up) const
     {
-        index_t NStep{0}, HStep{0}, WStep{0};
+        IndexType NStep{0}, HStep{0}, WStep{0};
+        const IndexType m_id = idx_up[I1];
         // Merge
         // NStep = M_id / TildeSlice_
-        NStep = MagicDivision::DoMagicDivision(idx_up[I1],
+        NStep = MagicDivision::DoMagicDivision(m_id,
                                                this->low_lengths_magic_divisor_multiplier_[I2],
                                                this->low_lengths_magic_divisor_shift_[I2]);
-        HStep = idx_up[I1] - NStep * TildeSlice_;
+        HStep = m_id - NStep * TildeSlice_;
         // HStep = HStep / WTildeSlice_
         HStep = MagicDivision::DoMagicDivision(HStep,
                                                this->low_lengths_magic_divisor_multiplier_[I3],
                                                this->low_lengths_magic_divisor_shift_[I3]);
-        WStep = idx_up[I1] - NStep * TildeSlice_ - HStep * WTildeSlice_;
+        WStep = m_id - NStep * TildeSlice_ - HStep * WTildeSlice_;
         // Slice
         HStep += IHTildeSliceBegin_;
         WStep += IWTildeSliceBegin_;
 
-        return make_tuple(NStep, HStep, WStep, 0);
+        return make_tuple(NStep, HStep, WStep, IndexType{0});
     }
 
     template <typename UpIdx>
@@ -1693,16 +1773,16 @@ struct ConvBwdDataImplicitGemmOutTransform
     {
         // UnMerge
         //  K_idx <- K0_idx * K1 + K1_idx
-        index_t K_idx = idx_up[I0] * up_lengths_[I2] + idx_up[I2];
+        IndexType K_idx = idx_up[I0] * up_lengths_[I2] + idx_up[I2];
         // Merge
         // YStep = K_idx / XDotSlice_K_
-        index_t YStep =
+        IndexType YStep =
             MagicDivision::DoMagicDivision(K_idx,
                                            this->low_lengths_magic_divisor_multiplier_[I0],
                                            this->low_lengths_magic_divisor_shift_[I0]);
-        index_t KStep = K_idx - YStep * XDotSlice_K_;
+        IndexType KStep = K_idx - YStep * XDotSlice_K_;
         // Xstep = KStep / K_
-        index_t XStep =
+        IndexType XStep =
             MagicDivision::DoMagicDivision(KStep,
                                            this->low_lengths_magic_divisor_multiplier_[I1],
                                            this->low_lengths_magic_divisor_shift_[I1]);
@@ -1711,7 +1791,7 @@ struct ConvBwdDataImplicitGemmOutTransform
         YStep *= HRatio_;
         XStep *= WRatio_;
 
-        return make_tuple(0, YStep, XStep, KStep);
+        return make_tuple(IndexType{0}, YStep, XStep, KStep);
     }
 
     template <typename LowIdx, typename UpIdx>
@@ -1766,6 +1846,15 @@ struct ConvBwdDataImplicitGemmOutTransform
         printf("up_lengths_");
         print_multi_index(up_lengths_);
         printf("}");
+    }
+
+    private:
+    __host__ __device__ static constexpr IndexType CalculateMult(IndexType divisor)
+    {
+        if constexpr(IsLongIndex)
+            return MagicDivision::CalculateMagicMultiplier64(divisor);
+        else
+            return MagicDivision::CalculateMagicMultiplier(divisor);
     }
 };
 
@@ -2260,4 +2349,6 @@ struct Xor
     }
 };
 } // namespace ck
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

@@ -39,8 +39,6 @@ struct DevicePropertiesT : public ::flatbuffers::NativeTable {
 ///
 /// Evolution: New optional fields can be added without breaking compatibility.
 /// Plugins verify and parse this buffer using flatbuffers::Verifier.
-///
-/// RFC 0007 Reference: Section 6 (Device Properties), Section 13.2 (Serialization)
 struct DeviceProperties FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef DevicePropertiesT NativeTableType;
   typedef DevicePropertiesBuilder Builder;

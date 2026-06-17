@@ -36,7 +36,7 @@
 namespace stinkytofu {
 char IntrinsicExpansionPass::ID = 0;
 
-IntrinsicExpansionPass::IntrinsicExpansionPass() {}
+IntrinsicExpansionPass::IntrinsicExpansionPass() = default;
 
 IntrinsicExpansionPass::~IntrinsicExpansionPass() = default;
 

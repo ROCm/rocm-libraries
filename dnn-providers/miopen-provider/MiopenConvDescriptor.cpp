@@ -201,19 +201,49 @@ void MiopenConvDescriptor::createDescriptorInternal(
     copyWithCheck(attrStride, stride, spatialDimCount, "attrStride", "spatialDimCount");
     copyWithCheck(attrDilation, dilation, spatialDimCount, "attrDilation", "spatialDimCount");
 
-    THROW_ON_MIOPEN_FAILURE(miopenCreateConvolutionDescriptor(&_descriptor));
-    THROW_ON_MIOPEN_FAILURE(miopenInitConvolutionNdDescriptor(_descriptor,
-                                                              static_cast<int>(spatialDimCount),
-                                                              padding.data(),
-                                                              stride.data(),
-                                                              dilation.data(),
-                                                              miopenConvolution));
-    THROW_ON_MIOPEN_FAILURE(miopenSetConvolutionGroupCount(_descriptor, groupCount));
-
-    if(deterministicEnabled)
+    if(!std::all_of(padding.begin(), padding.end(), [](int v) { return v >= 0; }))
     {
-        THROW_ON_MIOPEN_FAILURE(
-            miopenSetConvolutionAttribute(_descriptor, MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, 1));
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "MiopenConvDescriptor: padding values must be non-negative");
+    }
+
+    if(!std::all_of(stride.begin(), stride.end(), [](int v) { return v > 0; }))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "MiopenConvDescriptor: stride values must be positive");
+    }
+
+    if(!std::all_of(dilation.begin(), dilation.end(), [](int v) { return v > 0; }))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "MiopenConvDescriptor: dilation values must be positive");
+    }
+
+    THROW_ON_MIOPEN_FAILURE(miopenCreateConvolutionDescriptor(&_descriptor));
+
+    try
+    {
+        THROW_ON_MIOPEN_FAILURE(miopenInitConvolutionNdDescriptor(_descriptor,
+                                                                  static_cast<int>(spatialDimCount),
+                                                                  padding.data(),
+                                                                  stride.data(),
+                                                                  dilation.data(),
+                                                                  miopenConvolution));
+        THROW_ON_MIOPEN_FAILURE(miopenSetConvolutionGroupCount(_descriptor, groupCount));
+
+        if(deterministicEnabled)
+        {
+            THROW_ON_MIOPEN_FAILURE(miopenSetConvolutionAttribute(
+                _descriptor, MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, 1));
+        }
+    }
+    catch(...)
+    {
+        LOG_ON_MIOPEN_FAILURE(miopenDestroyConvolutionDescriptor(_descriptor));
+        _descriptor = nullptr;
+        throw;
     }
 }
 }

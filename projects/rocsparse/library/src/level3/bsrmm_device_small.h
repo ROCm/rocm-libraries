@@ -56,6 +56,11 @@ namespace rocsparse
                                                             rocsparse_order      order_C,
                                                             rocsparse_index_base idx_base)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+
         const int32_t tid  = hipThreadIdx_x;
         const J       gid  = hipBlockIdx_x * hipBlockDim_x + tid;
         const int32_t lid  = gid & (WF_SIZE - 1);
@@ -234,6 +239,11 @@ namespace rocsparse
                                                             rocsparse_order      order_C,
                                                             rocsparse_index_base idx_base)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+
         const int tid        = hipThreadIdx_x;
         const J   gid        = hipBlockIdx_x * hipBlockDim_x + tid;
         const J   block_row  = gid / (WF_SIZE * BSR_BLOCK_DIM);

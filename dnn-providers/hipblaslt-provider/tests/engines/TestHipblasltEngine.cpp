@@ -22,17 +22,17 @@ using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 
 TEST(TestHipblasltEngine, ConstructorAndId)
 {
-    HipblasltEngine engine(42);
+    HipblasltEngine const engine(42);
     EXPECT_EQ(engine.id(), 42);
 }
 
 TEST(TestHipblasltEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilders)
 {
-    HipblasltEngine engine(1);
+    HipblasltEngine const engine(1);
 
-    MockGraph mockGraph;
+    MockGraph const mockGraph;
 
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnEnginePluginHandle const dummyHandle;
     EXPECT_EQ(engine.getWorkspaceSize(dummyHandle, mockGraph), 0u);
 }
 
@@ -47,9 +47,9 @@ TEST(TestHipblasltEngine, WorkspaceSizeReturnsPlanBuilderWorkspace)
     HipblasltEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
-    MockGraph mockGraph;
+    MockGraph const mockGraph;
 
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnEnginePluginHandle const dummyHandle;
     EXPECT_EQ(engine.getWorkspaceSize(dummyHandle, mockGraph), 1337u);
 }
 
@@ -71,9 +71,9 @@ TEST(TestHipblasltEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
     engine.addPlanBuilder(std::move(mockPlanBuilder));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
-    MockGraph mockGraph;
+    MockGraph const mockGraph;
 
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnEnginePluginHandle const dummyHandle;
     EXPECT_EQ(engine.getWorkspaceSize(dummyHandle, mockGraph), 45000u);
 }
 
@@ -86,9 +86,9 @@ TEST(TestHipblasltEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
     HipblasltEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
-    MockGraph mockGraph;
+    MockGraph const mockGraph;
 
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnEnginePluginHandle const dummyHandle;
     EXPECT_EQ(engine.getWorkspaceSize(dummyHandle, mockGraph), 0u);
 }
 
@@ -102,7 +102,7 @@ TEST(TestHipblasltEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
     HipblasltEngine engine(0);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
-    MockGraph mockGraph;
+    MockGraph const mockGraph;
     auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
 
     HipdnnEnginePluginHandle dummyHandle;
@@ -122,7 +122,7 @@ TEST(TestHipblasltEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
-    MockGraph mockGraph;
+    MockGraph const mockGraph;
     auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
 
     HipdnnEnginePluginHandle dummyHandle;
@@ -131,9 +131,9 @@ TEST(TestHipblasltEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
 
 TEST(TestHipblasltEngine, IsApplicableReturnsFalseIfNoPlanBuilders)
 {
-    HipblasltEngine engine(0);
+    HipblasltEngine const engine(0);
 
-    MockGraph mockGraph;
+    MockGraph const mockGraph;
     auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
 
     HipdnnEnginePluginHandle dummyHandle;
@@ -149,7 +149,7 @@ TEST(TestHipblasltEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
     HipblasltEngine engine(0);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
-    MockGraph mockGraph;
+    MockGraph const mockGraph;
     auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
 
     HipdnnEnginePluginHandle dummyHandle;
@@ -158,14 +158,14 @@ TEST(TestHipblasltEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
 
 TEST(TestHipblasltEngine, GetDetailsReturnsSerializedEngineDetails)
 {
-    HipblasltEngine engine(hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
+    HipblasltEngine const engine(hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
     HipdnnEnginePluginHandle dummyHandle;
 
     hipdnnPluginConstData_t result;
     engine.getDetails(dummyHandle, result);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper engineDetails(result.ptr,
-                                                                                     result.size);
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper const engineDetails(
+        result.ptr, result.size);
     EXPECT_EQ(engineDetails.engineId(), hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
 }
 
@@ -185,8 +185,8 @@ TEST(TestHipblasltEngine, InitializeExecutionContextInvokesFirstApplicablePlanBu
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
-    MockGraph mockGraph;
-    HipdnnEnginePluginHandle dummyHandle;
+    MockGraph const mockGraph;
+    HipdnnEnginePluginHandle const dummyHandle;
     MockHipdnnEnginePluginExecutionContext ctx;
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, ctx);
@@ -209,8 +209,8 @@ TEST(TestHipblasltEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
-    MockGraph mockGraph;
-    HipdnnEnginePluginHandle dummyHandle;
+    MockGraph const mockGraph;
+    HipdnnEnginePluginHandle const dummyHandle;
     MockHipdnnEnginePluginExecutionContext ctx;
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, ctx);
@@ -232,8 +232,8 @@ TEST(TestHipblasltEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoAppl
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
-    MockGraph mockGraph;
-    HipdnnEnginePluginHandle dummyHandle;
+    MockGraph const mockGraph;
+    HipdnnEnginePluginHandle const dummyHandle;
     MockHipdnnEnginePluginExecutionContext ctx;
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, ctx);

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -306,14 +306,14 @@ rocsparse_status rocsparse::csxsldu_compute_template(rocsparse_handle handle_,
             if(m_ == n_)
             {
                 RETURN_IF_HIP_ERROR(
-                    hipMemsetAsync(uptr_, 0, sizeof(I) * (sizet + 1), handle_->stream));
+                    rocsparse_hipMemsetAsync(uptr_, 0, sizeof(I) * (sizet + 1), handle_->stream));
             }
             else
             {
                 if(ubase_ == rocsparse_index_base_zero)
                 {
-                    RETURN_IF_HIP_ERROR(
-                        hipMemsetAsync(uptr_, 0, sizeof(I) * (sizet + 1), handle_->stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+                        uptr_, 0, sizeof(I) * (sizet + 1), handle_->stream));
                 }
                 else
                 {
@@ -342,15 +342,15 @@ rocsparse_status rocsparse::csxsldu_compute_template(rocsparse_handle handle_,
             J* tmp_ind;
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMallocAsync(&tmp_ind, sizeof(J) * unnz_, handle_->stream));
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 tmp_ind, uind_, sizeof(J) * (unnz_), hipMemcpyDeviceToDevice, handle_->stream));
             T* tmp_val;
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMallocAsync(&tmp_val, sizeof(T) * unnz_, handle_->stream));
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 tmp_val, uval_, sizeof(T) * (unnz_), hipMemcpyDeviceToDevice, handle_->stream));
             I* tmp_uptr = uptr;
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle_->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::csr2csc_template(handle_,
                                                                   m_,
                                                                   n_,
@@ -376,15 +376,15 @@ rocsparse_status rocsparse::csxsldu_compute_template(rocsparse_handle handle_,
         {
             if(m_ == n_)
             {
-                RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                     lptr_, lptr, sizeof(I) * (m_ + 1), hipMemcpyDeviceToDevice, handle_->stream));
             }
             else
             {
                 if(lbase_ == rocsparse_index_base_zero)
                 {
-                    RETURN_IF_HIP_ERROR(
-                        hipMemsetAsync(lptr_, 0, sizeof(I) * (sizet + 1), handle_->stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+                        lptr_, 0, sizeof(I) * (sizet + 1), handle_->stream));
                 }
                 else
                 {
@@ -415,17 +415,17 @@ rocsparse_status rocsparse::csxsldu_compute_template(rocsparse_handle handle_,
             J* tmp_ind;
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMallocAsync(&tmp_ind, sizeof(J) * lnnz_, handle_->stream));
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 tmp_ind, lind_, sizeof(J) * (lnnz_), hipMemcpyDeviceToDevice, handle_->stream));
 
             T* tmp_val;
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMallocAsync(&tmp_val, sizeof(T) * lnnz_, handle_->stream));
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 tmp_val, lval_, sizeof(T) * (lnnz_), hipMemcpyDeviceToDevice, handle_->stream));
 
             I* tmp_lptr = lptr;
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle_->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::csr2csc_template(handle_,
                                                                   n_,
                                                                   m_,

@@ -4,6 +4,12 @@
 - Status: Implemented initial slice
 - Scope: frontend, backend, engine plugin API, fusilli sample implementation
 
+> **Status note:** The fusilli sample implementation referenced throughout
+> this RFC was removed from rocm-libraries / TheRock after the design was
+> implemented. The serialization envelope and plugin-payload contract
+> described here remain authoritative; the fusilli code blocks are
+> retained as the original worked example.
+
 ## Summary
 
 hipDNN can serialize a compiled execution plan to bytes, deserialize those bytes later, and execute
@@ -96,7 +102,6 @@ table SerializedExecutionPlan {
     engine_id: int64;
     workspace_size: int64;
     tensor_uids: [int64];
-    engine_config: [ubyte];
     plugin_payload: [ubyte];
 }
 
@@ -109,7 +114,6 @@ Field ownership:
 - `engine_id`: selected backend engine ID.
 - `workspace_size`: workspace size reported for the compiled plan.
 - `tensor_uids`: hipDNN-level tensor UID metadata needed for UID-based execution.
-- `engine_config`: serialized engine config bytes used to recreate the plugin execution context.
 - `plugin_payload`: opaque plugin-specific execution context bytes.
 
 There is deliberately no operation graph in the envelope. A backend may not use graph execution, and
@@ -132,7 +136,6 @@ hipdnnPluginStatus_t hipdnnEnginePluginDestroySerializedExecutionContext_ext(
 
 hipdnnPluginStatus_t hipdnnEnginePluginCreateExecutionContextFromSerialized_ext(
     hipdnnEnginePluginHandle_t handle,
-    const hipdnnPluginConstData_t* engineConfig,
     const hipdnnPluginConstData_t* serializedContext,
     hipdnnEnginePluginExecutionContext_t* executionContext);
 ```
@@ -161,7 +164,6 @@ The descriptor stores enough state to execute without `EngineConfig -> Engine ->
 - Engine ID.
 - Workspace size.
 - Tensor UIDs.
-- Serialized engine config bytes.
 - Plugin resource manager.
 - Plugin execution context wrapper.
 

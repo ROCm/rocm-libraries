@@ -292,7 +292,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
         if (!inst.getHwInstDesc()) return profile;
 
         const std::string mnemonic = toUpperASCII(inst.getHwInstDesc()->mnemonic);
-        if (mnemonic.find("V_WMMA_") != 0) return profile;
+        if (!mnemonic.starts_with("V_WMMA_")) return profile;
 
         // Keep a valid default when latency is absent/invalid.
         if (inst.latencyCycles <= 0) return profile;
@@ -380,7 +380,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
                                   std::unordered_map<std::string, int64_t>& vgprState,
                                   const std::unordered_map<std::string, int64_t>& sgprState) {
         // Try to cast to CommonInstruction first (most VALU instructions inherit from this)
-        auto dstReg = inst->getDestRegs();
+        const auto& dstReg = inst->getDestRegs();
 
         // v_add_co_u32: dst = src0 + src1 (with carry out, dst1 is vcc)
         if (GFX::v_add_co_u32 == inst->getUnifiedOpcode()) {
@@ -637,9 +637,6 @@ class EstimateAsmCyclesPassImpl : public Pass {
 
         // Initialize thread IDs (v[vgprSerial])
         std::string vgprSerial = "vgprSerial";
-        std::string vgprLocalReadAddrA = "vgprLocalReadAddrA";
-        std::string vgprLocalReadAddrB = "vgprLocalReadAddrB";
-
         // parse the basic block to find the local read addresses
         std::vector<StinkyInstruction*> instructions;
         for (IRBase& irNode : bb) {
@@ -862,7 +859,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
                 if (labelData != nullptr) {
                     const std::string& labelName = labelData->label;
                     auto pos = labelName.find("label_LoopBeginL");
-                    if (pos != std::string::npos && pos == 0) {
+                    if (pos == 0) {
                         break;
                     }
                 }
@@ -874,7 +871,8 @@ class EstimateAsmCyclesPassImpl : public Pass {
                 if (waitCntData != nullptr) {
                     int dlcnt = waitCntData->dlcnt;
                     int dscnt = waitCntData->dscnt;
-                    std::size_t numWaits = static_cast<std::size_t>(dlcnt + dscnt);
+                    std::size_t numWaits =
+                        static_cast<std::size_t>(dlcnt) + static_cast<std::size_t>(dscnt);
                     cycles = asmCycleEstimator.getLocalReadCompletionCycle(cycles + 1, lgkmLRFIFO,
                                                                            numWaits);
                 } else if (tensorCntData != nullptr) {
@@ -911,7 +909,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
                     // std::cout<<"srcReg: "<<srcReg.getSymbolicName()<<std::endl;
                     if (srcReg.isRegister()) {
                         auto srcStr = srcReg.getSymbolicName();
-                        if (srcStr.find("s") != std::string::npos) {
+                        if (srcStr.find('s') != std::string::npos) {
                             hasSgprOffset = true;
                         }
                     }
@@ -943,12 +941,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
             // Update total cycles
             if (!isLabel(*inst)) {
                 // inst->dump(std::cout, false, "AsmCycles "+std::to_string(cycles - totalCycles));
-                if (auto* c = inst->getModifier<CommentData>()) {
-                    c->comment = "<This is " + std::to_string(cycles) + "-cycle>";
-                } else {
-                    inst->addModifier<CommentData>(
-                        CommentData{"<This is " + std::to_string(cycles) + "-cycle>"});
-                }
+                appendComment(inst, "<This is " + std::to_string(cycles) + "-cycle>");
             }
             // std::cout << "cycles: " << cycles - totalCycles << std::endl;
             totalCycles = cycles;

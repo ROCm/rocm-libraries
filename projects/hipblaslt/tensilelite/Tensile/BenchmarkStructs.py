@@ -25,7 +25,7 @@
 from copy import deepcopy
 import itertools
 
-from Tensile.Common.ValidParameters import checkParametersAreValid
+from Tensile.Common.ValidParameters import checkParametersAreValid, validateInternalSupportParams
 from Tensile.Common import print1, print2, hasParam, printExit
 from Tensile.Common.GlobalParameters import defaultBenchmarkCommonParameters, globalParameters, \
                                             defaultBatchedBenchmarkFinalProblemSizes, \
@@ -64,6 +64,51 @@ def separateParameters(paramSetList):
     return singleVaules, multiValues
 
 
+def _isValidParameterValue(name, value):
+    """Return True if value is a scalar valid value for name."""
+    if name not in validParameters:
+        return False
+    validValues = validParameters[name]
+    return validValues == -1 or value in validValues
+
+
+def _groupedParameterValueOptions(name, value):
+    """Return scalar choices for one parameter inside a group entry."""
+    if not isinstance(value, list):
+        return [value]
+    if len(value) == 0:
+        printExit("You must specify value(s) for parameter \"{}\" in Groups".format(name))
+    if name == "MatrixInstruction" and all(not isinstance(v, list) for v in value):
+        return [value]
+    if name in validParameters and validParameters[name] != -1 and _isValidParameterValue(name, value):
+        return [value]
+    return value
+
+
+def _expandGroupedParameters(paramGroups):
+    """Expand list-valued entries inside Groups into scalar group entries.
+
+    Groups historically contained scalar dictionaries.  Keep list-valued scalar
+    parameters such as MatrixInstruction intact, but allow list-valued entries
+    like NonTemporalA: [0, 1] to expand within that group entry.
+    """
+    expandedParamGroups = []
+    for paramGroup in paramGroups:
+        expandedParamGroup = []
+        for groupEntry in paramGroup:
+            names = []
+            valueOptions = []
+            for name, value in groupEntry.items():
+                names.append(name)
+                valueOptions.append(_groupedParameterValueOptions(name, value))
+
+            for values in itertools.product(*valueOptions):
+                expandedParamGroup.append(dict(zip(names, values)))
+        expandedParamGroups.append(expandedParamGroup)
+
+    return expandedParamGroups
+
+
 def checkCDBufferAndStrides(problemType, problemSizes, isCEqualD):
     """Ensures ldd == ldc when CEqualD"""
     if isCEqualD and problemType["OperationType"] == "GEMM":
@@ -78,8 +123,16 @@ def checkCDBufferAndStrides(problemType, problemSizes, isCEqualD):
 class BenchmarkProcess:
     """Representation of benchmarking parameters and resulting steps"""
 
-    def __init__(self, problemTypeConfig, problemSizeGroupConfig, printIndexAssignmentInfo: bool):
-        """Create from the two sections of a config for a BenchmarkProblem"""
+    def __init__(self, problemTypeConfig, problemSizeGroupConfig, printIndexAssignmentInfo: bool,
+                 keyPathPrefix: str = "", srcFile: str = ""):
+        """Create from the two sections of a config for a BenchmarkProblem.
+
+        ``keyPathPrefix`` (e.g. ``BenchmarkProblems[i][1+groupIdx]``) and
+        ``srcFile`` are threaded through to ``checkParametersAreValid``
+        so type-mismatch errors carry the YAML location of the offending
+        key. Both are optional; an empty prefix produces the unqualified
+        keypath used by ad-hoc callers and tests.
+        """
         self.problemType = ProblemType(problemTypeConfig, printIndexAssignmentInfo)
         self.isBatched = "Batched" in problemTypeConfig and problemTypeConfig["Batched"]
         print2("# BenchmarkProcess beginning {}".format(self.problemType))
@@ -89,7 +142,8 @@ class BenchmarkProcess:
         self.multiValueParams = {}
         self.customKernels = []
         self.sizes = None
-        self.getConfigParameters(self.isBatched, problemSizeGroupConfig)
+        self.getConfigParameters(self.isBatched, problemSizeGroupConfig,
+                                 keyPathPrefix=keyPathPrefix, srcFile=srcFile)
 
         # convert parameter lists to steps
         # previously, multiple benchmark steps were possible
@@ -98,8 +152,17 @@ class BenchmarkProcess:
         self.benchmarkStepIdx = 0
         self.convertParametersToSteps()
 
-    def getConfigParameters(self, isbatched, config):
-        """Parse and validate benchmarking parameters in config"""
+    def getConfigParameters(self, isbatched, config, keyPathPrefix: str = "", srcFile: str = ""):
+        """Parse and validate benchmarking parameters in config.
+
+        ``keyPathPrefix`` is the YAML location of the surrounding
+        ``BenchmarkProblems[i][1+groupIdx]`` slice; per-section keypaths
+        (``.BenchmarkCommonParameters``, ``.ForkParameters``,
+        ``.ForkParameters.Groups[g][e]``) are appended by this method
+        when invoking ``checkParametersAreValid``. ``srcFile`` is
+        forwarded so error messages can include the YAML path and a
+        recovered line number.
+        """
         print2("")
         print2("####################################################################")
         print1("# Filling in Parameters With Defaults")
@@ -134,11 +197,18 @@ class BenchmarkProcess:
                 for x in getNonNoneFromConfig("BenchmarkCommonParameters", [])]))
         forkParams = dict(itertools.chain(*[x.items() \
                 for x in getNonNoneFromConfig("ForkParameters", [])]))
-        self.paramGroups = forkParams.pop("Groups") if "Groups" in forkParams else []
+        self.paramGroups = _expandGroupedParameters(forkParams.pop("Groups")) if "Groups" in forkParams else []
         self.customKernels = getNonNoneFromConfig("CustomKernels", [])
         self.internalSupportParams = getNonNoneFromConfig("InternalSupportParams", {})
         if self.customKernels == [] and self.internalSupportParams != {}:
             printExit("InternalSupportParams only supports Custom Kernels")
+
+        ispPrefix = f"{keyPathPrefix}.InternalSupportParams" if keyPathPrefix \
+                    else "InternalSupportParams"
+        validateInternalSupportParams(
+            self.internalSupportParams,
+            srcFile=srcFile, keyPathPrefix=ispPrefix,
+        )
 
         activationConf = ""
         biasTypesConf  = ""
@@ -178,19 +248,33 @@ class BenchmarkProcess:
         self.factorDimArgs  = FactorDimArgs(self.problemType, factorDimConf)
         self.icacheFlushArgs = icacheFlush
 
-        # validate parameter values
-        configParams = {**benchmarkCommonParams, **forkParams}
-        for param in configParams.items():
-            checkParametersAreValid(param, validParameters)
+        commonPrefix = f"{keyPathPrefix}.BenchmarkCommonParameters" if keyPathPrefix \
+                       else "BenchmarkCommonParameters"
+        forkPrefix = f"{keyPathPrefix}.ForkParameters" if keyPathPrefix else "ForkParameters"
+
+        for param in benchmarkCommonParams.items():
+            checkParametersAreValid(
+                param, validParameters,
+                keyPathPrefix=commonPrefix, srcFile=srcFile,
+            )
+        for param in forkParams.items():
+            checkParametersAreValid(
+                param, validParameters,
+                keyPathPrefix=forkPrefix, srcFile=srcFile,
+            )
 
         # TODO other checks on groups (same params for each entry? no dups between groups?)
-        for list in self.paramGroups:
-            for group in list:
+        for gIdx, list in enumerate(self.paramGroups):
+            for eIdx, group in enumerate(list):
+                groupsPrefix = f"{forkPrefix}.Groups[{gIdx}][{eIdx}]"
                 for k, v in group.items():
-                    checkParametersAreValid((k, [v]), validParameters)
+                    checkParametersAreValid(
+                        (k, [v]), validParameters,
+                        keyPathPrefix=groupsPrefix, srcFile=srcFile,
+                    )
 
         params = dict(itertools.chain(*[x.items() for x in defaultBenchmarkCommonParameters]))
-        params.update(configParams)
+        params.update({**benchmarkCommonParams, **forkParams})
         self.singleValueParams, self.multiValueParams = separateParameters(params)
 
         # print summary of parameter values
@@ -251,11 +335,16 @@ class BenchmarkProcess:
 
 class constructForkPermutations():
     def __init__(self, forkParams, paramGroups):
-        totalPermutations = 1
-        for values in forkParams.values():
-            totalPermutations *= len(values)
-        for group in paramGroups:
-            totalPermutations *= len(group)
+        totalPermutations = 0
+        for groups in itertools.product(*paramGroups):
+            group = set()
+            for g in groups:
+                group.update(g.keys())
+            groupPermutations = 1
+            for name, values in forkParams.items():
+                if name not in group:
+                    groupPermutations *= len(values)
+            totalPermutations += groupPermutations
 
         self.forkParams = forkParams
         self.paramGroups = paramGroups
@@ -277,23 +366,21 @@ class constructForkPermutations():
 def constructLazyForkPermutations(forkParams, paramGroups):
     """Constructs cartesian product of parameter values in forkParams and paramGroups"""
 
-    params_list = []
-    for name, values in forkParams.items():
-        params_list.append((name, values, False))
+    for groups in itertools.product(*paramGroups):
+        group = {}
+        for g in groups:
+            group.update(g)
+        params_list = list(forkParams)
+        for name in group:
+            if name not in forkParams:
+                params_list.append(name)
+        values = []
+        for name in params_list:
+            values.append([group[name]] if name in group else forkParams[name])
+        for combination in itertools.product(*reversed(values)):
+            permutation = dict(zip(params_list, reversed(combination)))
+            yield permutation
 
-    for i, group in enumerate(paramGroups):
-        params_list.append((f"_group{i}", group, True))
-
-    params_list_reversed = list(reversed(params_list))
-    values_reversed = [values for _, values, _ in params_list_reversed]
-    for combination in itertools.product(*values_reversed):
-        permutation = {}
-        for (name, _, isgroup), value in zip(params_list, reversed(combination)):
-            if isgroup:
-                permutation.update(value)
-            else:
-                permutation[name] = value
-        yield permutation
 
 class BenchmarkStep:
     """A single benchmark step which consists of constant and fork parameters and a set of sizes"""

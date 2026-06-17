@@ -23,15 +23,27 @@
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 cmake_policy(VERSION 3.18...3.25)
 
+# ROCm libraries root (for shared/ctest and other shared resources).
+# Only set the default when not already defined (e.g. by superproject /
+# rocm-libraries). The default assumes the standard
+# rocm-libraries/projects/hipcub layout.
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 # --------------------------------------
 # Update these variables at release time
 #
 # Set the library version
-set(VERSION_STRING "4.4.0")
+set(VERSION_STRING "4.5.0")
+# Set the CCCL-compatible version.
+set(HIPCUB_CCCL_VERSION_MAJOR 2)
+set(HIPCUB_CCCL_VERSION_MINOR 8)
+set(HIPCUB_CCCL_VERSION_PATCH 2)
 # Set the minimum required rocPRIM version
 set(MIN_ROCPRIM_PACKAGE_VERSION "4.1.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
 # Set download branch for dependency rocPRIM
-set(ROCM_DEP_RELEASE_BRANCH "release/therock-7.13" CACHE STRING "Download branch for ROCm dependencies")
+set(ROCM_DEP_RELEASE_BRANCH "release/therock-7.14" CACHE STRING "Download branch for ROCm dependencies")
 # --------------------------------------
 
 # Install prefix
@@ -145,7 +157,7 @@ elseif(NOT (CMAKE_CXX_COMPILER MATCHES ".*nvcc$" OR "${CMAKE_CXX_COMPILER_ID}" S
       )
     else()
       rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-        TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201"
+        TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250"
       )
     endif()
     set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
@@ -159,16 +171,10 @@ elseif(CMAKE_CUDA_COMPILER)
   set(CMAKE_CUDA_SOURCE_FILE_EXTENSIONS hip;cu)
 endif()
 
-# Compressed offload binaries are currently not working with the SPIR-V target
-if("amdgcnspirv" IN_LIST GPU_TARGETS)
-  if(BUILD_OFFLOAD_COMPRESS)
-    message(FATAL_ERROR "Cannot combine SPIR-V and BUILD_OFFLOAD_COMPRESS")
-  endif()
-endif()
-
 # Setup the library version
 rocm_setup_version(VERSION ${VERSION_STRING})
 math(EXPR hipcub_VERSION_NUMBER "${hipcub_VERSION_MAJOR} * 100000 + ${hipcub_VERSION_MINOR} * 100 + ${hipcub_VERSION_PATCH}")
+math(EXPR HIPCUB_CCCL_VERSION_NUMBER "${HIPCUB_CCCL_VERSION_MAJOR} * 100000 + ${HIPCUB_CCCL_VERSION_MINOR} * 100 + ${HIPCUB_CCCL_VERSION_PATCH}")
 
 # Find and verify HIP.
 include(VerifyCompiler)
@@ -184,7 +190,7 @@ endif()
 include(CheckCXXCompilerFlag)
 
 if(BUILD_OFFLOAD_COMPRESS)
-  # We need to pass '-x hip' since check_cxx_compiler_flag assumes c++ and not HIP. 
+  # We need to pass '-x hip' since check_cxx_compiler_flag assumes c++ and not HIP.
   check_cxx_compiler_flag("--offload-compress -x hip" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
   if(CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --offload-compress")

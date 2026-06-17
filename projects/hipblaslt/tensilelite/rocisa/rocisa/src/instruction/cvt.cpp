@@ -253,12 +253,12 @@ void cvt_inst(nb::module_ m_inst)
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const InstructionInput&,
                       const InstructionInput&,
-                      const std::optional<rocisa::VOP3PModifiers>&,
+                      const std::vector<int>&,
                       const std::string&>(),
              nb::arg("dst"),
              nb::arg("src0"),
              nb::arg("src1"),
-             nb::arg("vop3")    = std::nullopt,
+             nb::arg("sels")    = std::vector<int>({}),
              nb::arg("comment") = "")
         .def("__deepcopy__", [](const rocisa::VCvtSRF32toFP8& self, const nb::dict&) {
             return new rocisa::VCvtSRF32toFP8(self);
@@ -268,12 +268,12 @@ void cvt_inst(nb::module_ m_inst)
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const InstructionInput&,
                       const InstructionInput&,
-                      const std::optional<rocisa::VOP3PModifiers>&,
+                      const std::vector<int>&,
                       const std::string&>(),
              nb::arg("dst"),
              nb::arg("src0"),
              nb::arg("src1"),
-             nb::arg("vop3")    = std::nullopt,
+             nb::arg("sels")    = std::vector<int>({}),
              nb::arg("comment") = "")
         .def("__deepcopy__", [](const rocisa::VCvtSRF32toBF8& self, const nb::dict&) {
             return new rocisa::VCvtSRF32toBF8(self);

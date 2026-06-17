@@ -680,6 +680,10 @@ class MXScaleTilePair(TileGeometry):
 ################################################################################
 
 @dataclass(frozen=True)
+class GRTag_1x1:
+  """GR emit strategy: row-major (TLU=0), 1×1 block shape."""
+
+@dataclass(frozen=True)
 class GRTag_1x2:
   """GR emit strategy: row-major (TLU=0), 1×2 block shape."""
 
@@ -690,6 +694,10 @@ class GRTag_2x2:
 @dataclass(frozen=True)
 class GRTag_TLU1:
   """GR emit strategy: column-major (TLU=1), 8×1 block shape."""
+
+@dataclass(frozen=True)
+class LRTag_1x1:
+  """LR emit strategy: row-major (TLU=0), 1×1 subtile shape."""
 
 @dataclass(frozen=True)
 class LRTag_1x2:

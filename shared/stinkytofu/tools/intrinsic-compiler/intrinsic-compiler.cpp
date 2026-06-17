@@ -50,7 +50,7 @@
 
 using namespace stinkytofu;
 
-void printUsage(const char* progName) {
+static void printUsage(const char* progName) {
     std::cout << "StinkyTofu Intrinsic Compiler\n";
     std::cout << "==============================\n\n";
     std::cout << "Usage: " << progName << " [--verbose|-v] <input.intrinsic> <output.st.bc>\n\n";

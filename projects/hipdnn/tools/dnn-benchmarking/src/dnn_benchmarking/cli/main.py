@@ -26,11 +26,10 @@ for _var, _default in _LOCAL_CACHE_DEFAULTS.items():
 
 from ..common.exceptions import GraphLoadError
 from ..reporting.reporter import Reporter
-from .ab_runner_cli import run_ab_cli
+from .config_file import apply_config_file
+from .internal_profiling import run_internal_profiling
 from .parser import create_parser
-from .pytorch_runner_cli import run_pytorch_cli
 from .suite_runner_cli import run_suite_cli
-from .gpu_check import gpu_is_available
 
 
 def _resolve_graphs(args, reporter: Reporter):
@@ -60,44 +59,35 @@ def _resolve_graphs(args, reporter: Reporter):
 
 def main() -> int:
     """CLI entry point."""
-    parser = create_parser()
+    parser = create_parser(suppress_defaults=True)
     args = parser.parse_args()
-    reporter = Reporter()
+    try:
+        apply_config_file(args)
+    except ValueError as e:
+        parser.error(str(e))
 
-    if not gpu_is_available():
-        reporter.print_error(
-            "No GPU detected. A GPU with ROCm or CUDA support is required."
-        )
-        return 1
+    # Backend-specific startup is the authoritative GPU availability check:
+    # PyTorch mode requires GPU-enabled torch, while hipDNN mode creates a real
+    # hipdnn_frontend.Handle after applying any configured plugin paths. Do not
+    # gate here on telemetry tools such as amd-smi; they are optional
+    # and can be absent even when execution is valid.
+    if getattr(args, "internal_profiling_run", False):
+        return run_internal_profiling(args)
+    if not args.graph:
+        parser.error("--graph is required unless --config provides graphs")
+    reporter = Reporter()
 
     tmpdirs, resolved_files, tarball_source = _resolve_graphs(args, reporter)
     if resolved_files is None:
         return 1
 
     try:
-        if args.AId is not None or args.BId is not None:
-            if len(resolved_files) > 1:
-                reporter.print_error(
-                    "A/B testing requires a single graph file, not a glob pattern"
-                )
-                return 1
-            return run_ab_cli(args, Path(resolved_files[0]), reporter)
-
-        elif args.backend == "pytorch":
-            if len(resolved_files) > 1:
-                reporter.print_error(
-                    "Suite mode is not supported with --backend pytorch"
-                )
-                return 1
-            return run_pytorch_cli(args, Path(resolved_files[0]), reporter)
-
-        else:
-            return run_suite_cli(
-                args,
-                graph_paths=[Path(p) for p in resolved_files],
-                reporter=reporter,
-                tarball_source=tarball_source,
-            )
+        return run_suite_cli(
+            args,
+            graph_paths=[Path(p) for p in resolved_files],
+            reporter=reporter,
+            tarball_source=tarball_source,
+        )
     finally:
         if tmpdirs:
             for td in tmpdirs:

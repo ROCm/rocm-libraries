@@ -77,5 +77,5 @@ st.func @dag_wmma_prefetch_flow() {
   v[24:27] = "st.ds_load_b128"(v12) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
   v[30:33] = "st.ds_load_b128"(v13) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
   v[34:37] = "st.ds_load_b128"(v13) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [1] } }
-  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[20:27], v[30:37], v[0:7]) { mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[20:27], v[30:37], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
 }

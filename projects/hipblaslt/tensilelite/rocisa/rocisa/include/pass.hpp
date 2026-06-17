@@ -92,6 +92,7 @@ namespace rocisa
 
     void insertDelayAlu(std::shared_ptr<Module> module);
     void removeDuplicatedFunction(std::shared_ptr<Module> module);
+    void macroToInstruction(std::shared_ptr<Module>& module);
     void compositeToInstruction(std::shared_ptr<Module>& module);
     void convertTextVariablesToRegisters(std::shared_ptr<Module> module);
     Graph buildGraph(

@@ -209,6 +209,12 @@ public:
         case HIP_R_64F:
             (ArgumentsHelper::apply<Args>(print, arg, double{}), ...);
             break;
+        case HIP_C_32F:
+            (ArgumentsHelper::apply<Args>(print, arg, std::complex<float>{}), ...);
+            break;
+        case HIP_C_64F:
+            (ArgumentsHelper::apply<Args>(print, arg, std::complex<double>{}), ...);
+            break;
         case HIP_R_16F:
             (ArgumentsHelper::apply<Args>(print, arg, hipblasLtHalf{}), ...);
             break;
@@ -230,6 +236,12 @@ public:
             break;
         case HIP_R_64F:
             (void)(int[]){(ArgumentsHelper::apply<Args>{}()(print, arg, double{}), 0)...};
+            break;
+        case HIP_C_32F:
+            (void)(int[]){(ArgumentsHelper::apply<Args>{}()(print, arg, std::complex<float>{}), 0)...};
+            break;
+        case HIP_C_64F:
+            (void)(int[]){(ArgumentsHelper::apply<Args>{}()(print, arg, std::complex<double>{}), 0)...};
             break;
         case HIP_R_16F:
             (void)(int[]){(ArgumentsHelper::apply<Args>{}()(print, arg, hipblasLtHalf{}), 0)...};

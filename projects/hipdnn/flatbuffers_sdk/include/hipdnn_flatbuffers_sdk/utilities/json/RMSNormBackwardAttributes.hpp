@@ -36,10 +36,7 @@ inline void to_json(nlohmann::json& rmsnormBwdJson, const RMSNormBackwardAttribu
     inputs[keys::DY_TENSOR_UID] = rms.dy_tensor_uid();
     inputs[keys::X_TENSOR_UID] = rms.x_tensor_uid();
     inputs[keys::SCALE_TENSOR_UID] = rms.scale_tensor_uid();
-    if(rms.inv_rms_tensor_uid().has_value())
-    {
-        inputs[keys::INV_RMS_TENSOR_UID] = rms.inv_rms_tensor_uid().value();
-    }
+    inputs[keys::INV_RMS_TENSOR_UID] = rms.inv_rms_tensor_uid();
 
     auto& outputs = rmsnormBwdJson[keys::OUTPUTS] = {};
     outputs[keys::DX_TENSOR_UID] = rms.dx_tensor_uid();
@@ -62,12 +59,6 @@ inline auto to<data_objects::RMSNormBackwardAttributes>(flatbuffers::FlatBufferB
     auto& inputs = entry.at(keys::INPUTS);
     auto& outputs = entry.at(keys::OUTPUTS);
 
-    flatbuffers::Optional<int64_t> invRmsUid = flatbuffers::nullopt;
-    if(inputs.contains(keys::INV_RMS_TENSOR_UID))
-    {
-        invRmsUid = inputs[keys::INV_RMS_TENSOR_UID].get<int64_t>();
-    }
-
     flatbuffers::Optional<int64_t> dbiasUid = flatbuffers::nullopt;
     if(outputs.contains(keys::DBIAS_TENSOR_UID))
     {
@@ -79,7 +70,7 @@ inline auto to<data_objects::RMSNormBackwardAttributes>(flatbuffers::FlatBufferB
         inputs.at(keys::DY_TENSOR_UID).get<int64_t>(),
         inputs.at(keys::X_TENSOR_UID).get<int64_t>(),
         inputs.at(keys::SCALE_TENSOR_UID).get<int64_t>(),
-        invRmsUid,
+        inputs.at(keys::INV_RMS_TENSOR_UID).get<int64_t>(),
         outputs.at(keys::DX_TENSOR_UID).get<int64_t>(),
         outputs.at(keys::DSCALE_TENSOR_UID).get<int64_t>(),
         dbiasUid);

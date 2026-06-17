@@ -24,6 +24,6 @@ st.func @test() {
   v[64:67] = "st.ds_load_b128"(v101) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
   v[68:71] = "st.ds_load_b128"(v101) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 256, gds = false }, mod.memtoken = { tokens = [0] } }
   v[72:75] = "st.ds_load_b128"(v101) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 288, gds = false }, mod.memtoken = { tokens = [0] } }
-  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[60:67], v[0:7]) { mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
-  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[16:23], v[68:75], v[0:7]) { mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[60:67], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[16:23], v[68:75], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
 }

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,8 @@
  * ************************************************************************ */
 #ifndef HIPSPARSE_GENERIC_AUXILIARY_H
 #define HIPSPARSE_GENERIC_AUXILIARY_H
+
+#include "hipsparse-version.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -390,6 +392,56 @@ hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMa
                                                 hipsparseIndexBase_t        idxBase,
                                                 hipDataType                 valueType);
 #endif
+
+#ifdef HIPSPARSE_WITH_SPMV_BSR
+/*! \ingroup generic_module
+*  \brief Create a sparse BSR matrix descriptor.
+*  \details
+*  \p hipsparseCreateBsr creates a sparse BSR matrix descriptor. It should be
+*  destroyed at the end using \p hipsparseDestroySpMat.
+*/
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12011)
+HIPSPARSE_EXPORT
+hipsparseStatus_t hipsparseCreateBsr(hipsparseSpMatDescr_t* spMatDescr,
+                                     int64_t                mb,
+                                     int64_t                nb,
+                                     int64_t                nnzb,
+                                     int64_t                rowBlockDim,
+                                     int64_t                colBlockDim,
+                                     void*                  bsrRowPtr,
+                                     void*                  bsrColInd,
+                                     void*                  bsrValues,
+                                     hipsparseIndexType_t   bsrRowPtrType,
+                                     hipsparseIndexType_t   bsrColIndType,
+                                     hipsparseIndexBase_t   idxBase,
+                                     hipDataType            valueType,
+                                     hipsparseOrder_t       order);
+#endif
+
+/*! \ingroup generic_module
+*  \brief Create a sparse BSR matrix descriptor.
+*  \details
+*  \p hipsparseCreateConstBsr creates a sparse BSR matrix descriptor. It should be
+*  destroyed at the end using \p hipsparseDestroySpMat.
+*/
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12011)
+HIPSPARSE_EXPORT
+hipsparseStatus_t hipsparseCreateConstBsr(hipsparseConstSpMatDescr_t* spMatDescr,
+                                          int64_t                     mb,
+                                          int64_t                     nb,
+                                          int64_t                     nnzb,
+                                          int64_t                     rowBlockDim,
+                                          int64_t                     colBlockDim,
+                                          const void*                 bsrRowPtr,
+                                          const void*                 bsrColInd,
+                                          const void*                 bsrValues,
+                                          hipsparseIndexType_t        bsrRowPtrType,
+                                          hipsparseIndexType_t        bsrColIndType,
+                                          hipsparseIndexBase_t        idxBase,
+                                          hipDataType                 valueType,
+                                          hipsparseOrder_t            order);
+#endif
+#endif /* HIPSPARSE_WITH_SPMV_BSR */
 
 /*! \ingroup generic_module
 *  \brief Destroy a sparse matrix descriptor.

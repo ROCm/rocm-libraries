@@ -9,8 +9,10 @@ subtrees:
 
 - caption: Install
   entries:
+  - file: install/install
+    title: Install hipBLASLt
   - file: install/building-installing-hipblaslt
-    title: Installation guide
+    title: Build from source
 
 - caption: Conceptual
   entries:
@@ -31,6 +33,8 @@ subtrees:
     title: Use logging and heuristics
   - file: how-to/how-to-use-streamk
     title: Use Stream-K with hipBLASLt
+  - file: how-to/how-to-detect-nan
+    title: Detect NaN in GEMM output
 
 - caption: Examples
   entries:

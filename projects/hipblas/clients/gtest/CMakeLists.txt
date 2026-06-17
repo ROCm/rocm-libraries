@@ -185,6 +185,7 @@ if (CREATE_TEST_APP_LOCAL_DEPLOY AND WIN32)
     CONFIGURE_DEPENDS
     ${LAPACK_DIR}/bin/*.dll
     ${BLIS_DIR}/lib/*.dll
+    ${AOCL_ROOT}/amd-utils/lib/*aocl*.dll
     ${OPENBLAS_DIR}/bin/*.dll
     ${HIP_DIR}/bin/amd*.dll
     ${HIP_DIR}/bin/hiprt*.dll

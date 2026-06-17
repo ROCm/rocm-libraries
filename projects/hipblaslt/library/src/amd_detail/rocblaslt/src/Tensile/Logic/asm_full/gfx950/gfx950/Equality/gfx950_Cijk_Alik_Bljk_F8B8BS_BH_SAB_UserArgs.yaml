@@ -1,6 +1,6 @@
 - {MinimumRequiredVersion: 5.0.0}
 - gfx950
-- gfx950
+- {Architecture: gfx950, CUCount: 256}
 - [Device 75a0]
 - Activation: false
   ActivationComputeDataType: 0
@@ -68,8 +68,8 @@
   TileAwareSelection: false
   TileB: 1
   TotalIndices: 4
-  TransposeA: 1
-  TransposeB: 0
+  TransposeA: True
+  TransposeB: False
   UseBeta: true
   UseBias: 0
   UseE: false

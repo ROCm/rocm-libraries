@@ -49,6 +49,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Add our CMake helper files to the lookup path
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# Root of the rocm-libraries monorepo (for shared infrastructure like CTest categories)
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 # Get rocm-cmake
 include(get-rocm-cmake)
 
@@ -61,7 +66,7 @@ include(ROCMInstallSymlinks)
 include(ROCMClients)
 include(ROCMHeaderWrapper)
 
-set(VERSION_STRING "3.4.0")
+set(VERSION_STRING "3.5.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 if(NOT DEFINED ENV{HIP_PATH})
@@ -355,7 +360,7 @@ endif()
 # Package specific CPACK vars
 if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
   set(rocblas_minimum 4.2.0)
-  set(rocsolver_minimum 3.34.0)
+  set(rocsolver_minimum 3.35.0)
   rocm_package_add_dependencies(SHARED_DEPENDS "rocblas >= ${rocblas_minimum}" "rocsolver >= ${rocsolver_minimum}")
   rocm_package_add_rpm_dependencies(STATIC_DEPENDS "rocblas-static-devel >= ${rocblas_minimum}" "rocsolver-static-devel >= ${rocsolver_minimum}")
   rocm_package_add_deb_dependencies(STATIC_DEPENDS "rocblas-static-dev >= ${rocblas_minimum}" "rocsolver-static-dev >= ${rocsolver_minimum}")

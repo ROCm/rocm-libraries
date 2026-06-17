@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -183,7 +183,7 @@ void testing_spsm_ex_csr(Arguments argus)
     J                    m        = argus.M;
     J                    n        = argus.N;
     J                    k        = argus.K;
-    T                    h_alpha  = make_DataType<T>(argus.alpha);
+    T                    h_alpha  = argus.get_alpha<T>();
     hipsparseOperation_t transA   = argus.transA;
     hipsparseOperation_t transB   = argus.transB;
     hipsparseOrder_t     orderB   = argus.orderB;

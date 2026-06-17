@@ -1,0 +1,17 @@
+# hipDNN Test Categories Configuration (CTest)
+# hipDNN currently exposes a small set of CTest entries (one per test
+# executable). All of them are run in every category (quick, standard,
+# comprehensive, full), matching the blanket characterisation used for
+# hipRAND. Refine this file later if/when finer-grained tiers are needed.
+
+test_categories:
+  quick:
+    description: "hipDNN quick tests"
+    test_patterns:
+      - ".*"
+    exclude:
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"

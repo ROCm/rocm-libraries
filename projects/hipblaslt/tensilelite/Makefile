@@ -57,19 +57,19 @@ ifneq ($(filter gfx1250,$(TARGET_ARCH)),)
 endif
 
 .SECONDEXPANSION:
-co: COFILES = $(shell find ${TENSILE_OUT}/1_BenchmarkProblems/*/00_Final/source/library -name '*.co')
+co: COFILES = $(shell find ${TENSILE_OUT}/1_BenchmarkProblems/*/00_Final/caches/*/source/library -name '*.co')
 co: $$(COFILES)
 
 .SECONDEXPANSION:
 ${TENSILE_OUT}/1_BenchmarkProblems%.co: PROBLEM  = $(firstword $(subst /, ,$*))
-                                        SRCFILES = $(shell find ${TENSILE_OUT}/1_BenchmarkProblems/$(PROBLEM)/00_Final/source/build_tmp/SOURCE/assembly -name '*.s')
+                                        SRCFILES = $(shell find ${TENSILE_OUT}/1_BenchmarkProblems/$(PROBLEM)/00_Final/caches/*/source/build_tmp/SOURCE/assembly -name '*.s')
                                         OBJFILES = $(patsubst %.s,%.o,$(SRCFILES))
 ${TENSILE_OUT}/1_BenchmarkProblems%.co: $$(OBJFILES)
 	@echo relinking $(PROBLEM) $(lastword $(subst /, ,$@))
 	@$(LDD) -target amdgcn-amd-amdhsa -Xlinker --build-id=sha1 ${TRUE16_FEATURE} ${LINK_ARGS} -o $@ $^
 
 %.o: PROBLEM = $(word 3, $(subst /, ,$*))
-     COFILE = $(shell find ${TENSILE_OUT}/1_BenchmarkProblems/$(PROBLEM)/00_Final/source/library -name '*.co')
+     COFILE = $(shell find ${TENSILE_OUT}/1_BenchmarkProblems/$(PROBLEM)/00_Final/caches/*/source/library -name '*.co')
      ARCH ?= $(subst .co,,$(subst TensileLibrary_,,$(lastword $(subst /, ,$(COFILE)))))
 %.o: %.s
 	@echo rebuilding $(lastword $(subst /, ,$@)) for $(ARCH)

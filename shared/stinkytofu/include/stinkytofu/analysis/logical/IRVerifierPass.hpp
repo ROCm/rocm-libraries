@@ -48,8 +48,7 @@ class LogicalIRVerifierPass : public Pass {
    public:
     static char ID;
 
-    explicit LogicalIRVerifierPass(LogicalIRVerifierConfig config = {})
-        : config_(std::move(config)) {}
+    explicit LogicalIRVerifierPass(LogicalIRVerifierConfig config = {}) : config_(config) {}
 
     PassID getPassID() const override {
         return &ID;
@@ -64,6 +63,6 @@ class LogicalIRVerifierPass : public Pass {
 };
 
 inline std::unique_ptr<Pass> createLogicalIRVerifierPass(LogicalIRVerifierConfig config = {}) {
-    return std::make_unique<LogicalIRVerifierPass>(std::move(config));
+    return std::make_unique<LogicalIRVerifierPass>(config);
 }
 }  // namespace stinkytofu

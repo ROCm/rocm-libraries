@@ -1,21 +1,27 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <hip/hip_runtime.h>
-#include <gtest/gtest.h>
-
 #include "ck_tile/core/arch/arch.hpp"
 #include "ck_tile/core/arch/mma/amdgcn_mma.hpp"
+#include "ck_tile/core/arch/mma/mma_op_family.hpp"
 #include "ck_tile/core/arch/mma/mma_selector.hpp"
-#include "ck_tile/core/arch/mma/mma_wavewise.hpp"
-#include "ck_tile/core/utility/type_traits.hpp"
+#include "ck_tile/core/arch/mma/mma_traits.hpp"
+#include "ck_tile/core/config.hpp"
+#include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/host/hip_check_error.hpp"
 
-#include "get_wave_size_helper.hpp"
+#include "get_cmake_targets_helper.hpp"
+
+#include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
+
+#include <cstdint>
+#include <type_traits>
 
 using namespace ck_tile;
 using namespace ck_tile::core::arch;
 using namespace ck_tile::core::arch::mma;
+using namespace ck_tile::core::arch::testing;
 
 // Dummy values for testing
 constexpr uint32_t DummyTargetIdVal = 55555u;
@@ -249,8 +255,6 @@ TEST(TestAmdgcnMma, ArchUnsupportedExecDeviceOutput)
     HIP_CHECK_ERROR(hipFree(d_out));
 }
 
-#include "ck_tile/core/arch/mma/mma_traits.hpp"
-
 // Test MmaOpTraits for supported DummyAmdgcnMma, including all member variables
 TEST(TestAmdgcnMma, MmaOpTraitsSupportedMembers)
 {
@@ -309,6 +313,8 @@ TEST(TestAmdgcnMma, MmaDefaultSelectorUnsupported)
     EXPECT_TRUE((std::is_same<typename SelectedMma::OpType, Unsupported>::value));
     // IsSupported should be false
     EXPECT_FALSE(MmaOpTraits<SelectedMma>::IsSupported);
+    // Compile-time check that print is instantiable for the default MmaOp
+    (void)static_cast<void (*)(MmaOpTraits<SelectedMma> const&)>(print);
 }
 
 // Test MmaDefaultSelector for supported DummyAmdgcnMma on WaveTile sizes other than 16x16x16
@@ -479,7 +485,7 @@ TEST(TestAmdgcnMma, MmaSelector_F16_F16_F32_16x16x32_Real)
     HIP_CHECK_ERROR(hipMemcpy(d_b, h_b.data(), BSize, hipMemcpyHostToDevice));
     HIP_CHECK_ERROR(hipMemcpy(d_c, h_c.data(), CSize, hipMemcpyHostToDevice));
 
-    const auto wave_size = getDeviceWaveSize();
+    const auto wave_size = getCMakeWaveSize();
     test_accum_over_k<AType, BType, CType, WaveTileM, WaveTileN, WaveTileK>
         <<<1, wave_size>>>(d_a, d_b, d_c, d_out);
     HIP_CHECK_ERROR(hipDeviceSynchronize());
@@ -580,7 +586,7 @@ TEST(TestAmdgcnMma, MmaSelector_F16_F16_F32_112x112x128_Real)
     HIP_CHECK_ERROR(hipMemcpy(d_b, h_b.data(), BSize, hipMemcpyHostToDevice));
     HIP_CHECK_ERROR(hipMemcpy(d_c, h_c.data(), CSize, hipMemcpyHostToDevice));
 
-    const auto wave_size = getDeviceWaveSize();
+    const auto wave_size = getCMakeWaveSize();
     test_accum_over_k<AType, BType, CType, WaveTileM, WaveTileN, WaveTileK>
         <<<1, wave_size>>>(d_a, d_b, d_c, d_out);
     HIP_CHECK_ERROR(hipDeviceSynchronize());

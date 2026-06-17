@@ -84,6 +84,9 @@ public:
 protected:
     void runGraphTest() override
     {
+        // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
+        SKIP_IF_ASAN();
+
         const auto& testCase = this->GetParam();
         const auto& [layout, convTestCase] = testCase;
 
@@ -116,9 +119,14 @@ protected:
                           hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
+        bundle.sentinelFillOutputTensors();
+
         for(auto& tensorPair : bundle.tensors)
         {
-            bundle.randomizeTensor(tensorPair.first, -10.0f, 10.0f, seed);
+            if(!bundle.isOutput(tensorPair.first))
+            {
+                bundle.randomizeTensor(tensorPair.first, -10.0f, 10.0f, seed);
+            }
         }
     }
 };

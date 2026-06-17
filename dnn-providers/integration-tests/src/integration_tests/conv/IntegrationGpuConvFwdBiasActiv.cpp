@@ -129,6 +129,9 @@ public:
 protected:
     void runGraphTest() override
     {
+        // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
+        SKIP_IF_ASAN();
+
         const auto& testCase = this->GetParam();
         const auto& [layout, convTestCase, doBias, activTestCase] = testCase;
 

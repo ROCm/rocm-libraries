@@ -307,10 +307,18 @@ namespace TensileLite
     using TypedGemm_F4F6_S_S = TypedGemm<Float4x2, Float6x32, float, float, float, float, Float4x2, Float6x32>;
     using TypedGemm_F6F4_S_S = TypedGemm<Float6x32, Float4x2, float, float, float, float, Float6x32, Float4x2>;
 #endif // defined(TENSILE_USE_FP4) && defined(TENSILE_USE_FP6)
+#if defined(TENSILE_USE_FP4) && defined(TENSILE_USE_FP6) && defined(TENSILE_USE_BF16)
+    using TypedGemm_F4F6_B_S = TypedGemm<Float4x2, Float6x32, BFloat16, BFloat16, float, float, Float4x2, Float6x32>;
+    using TypedGemm_F6F4_B_S = TypedGemm<Float6x32, Float4x2, BFloat16, BFloat16, float, float, Float6x32, Float4x2>;
+#endif // defined(TENSILE_USE_FP4) && defined(TENSILE_USE_FP6) && defined(TENSILE_USE_BF16)
 #if defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF6)
     using TypedGemm_F4B6_S_S = TypedGemm<Float4x2, BFloat6x32, float, float, float, float, Float4x2, BFloat6x32>;
     using TypedGemm_B6F4_S_S = TypedGemm<BFloat6x32, Float4x2, float, float, float, float, BFloat6x32, Float4x2>;
 #endif // defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF6)
+#if defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF6) && defined(TENSILE_USE_BF16)
+    using TypedGemm_F4B6_B_S = TypedGemm<Float4x2, BFloat6x32, BFloat16, BFloat16, float, float, Float4x2, BFloat6x32>;
+    using TypedGemm_B6F4_B_S = TypedGemm<BFloat6x32, Float4x2, BFloat16, BFloat16, float, float, BFloat6x32, Float4x2>;
+#endif // defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF6) && defined(TENSILE_USE_BF16)
 #if defined(TENSILE_USE_FP8_BF8) && defined(TENSILE_USE_FP4)
     // DestDataType: S
     using TypedGemm_F8F4_S_S = TypedGemm<Float8, Float4x2, float, float, float, float, Float8, Float4x2>;

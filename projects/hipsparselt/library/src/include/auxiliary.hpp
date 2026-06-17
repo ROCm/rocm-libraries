@@ -131,6 +131,12 @@ constexpr const char* hip_datatype_to_string(hipDataType type)
     case HIP_R_8F_E5M2:
         return "bf8_r";
 #endif
+#if defined(HIP_FP8_TYPE_FNUZ)
+    case HIP_R_8F_E4M3_FNUZ:
+        return "f8_fnuz_r";
+    case HIP_R_8F_E5M2_FNUZ:
+        return "bf8_fnuz_r";
+#endif
     default:
         return "invalid";
     }
@@ -223,6 +229,18 @@ __host__ __device__ inline bool hipsparselt_isnan(__hip_fp8_e4m3 arg)
 __host__ __device__ inline bool hipsparselt_isnan(__hip_fp8_e5m2 arg)
 {
     return internal::hip_fp8_ocp_is_nan(arg, __HIP_E5M2);
+}
+#endif
+
+#ifdef HIP_FP8_TYPE_FNUZ
+__host__ __device__ inline bool hipsparselt_isnan(__hip_fp8_e4m3_fnuz arg)
+{
+    return internal::hip_fp8_fnuz_is_nan(arg.__x);
+}
+
+__host__ __device__ inline bool hipsparselt_isnan(__hip_fp8_e5m2_fnuz arg)
+{
+    return internal::hip_fp8_fnuz_is_nan(arg.__x);
 }
 #endif
 /*******************************************************************************

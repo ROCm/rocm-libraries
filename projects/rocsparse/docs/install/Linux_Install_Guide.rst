@@ -15,41 +15,13 @@ Prerequisites
 =============
 
 rocSPARSE requires a ROCm enabled platform. For more information, including a list of supported
-GPUs and Linux distributions, see the :doc:`ROCm on Linux install guide <rocm-install-on-linux:index>`.
-
-Installing pre-built packages
-=============================
-
-Use the following commands to install rocSPARSE on Ubuntu or Debian:
-
-.. code-block:: shell
-
-   sudo apt-get update
-   sudo apt-get install rocsparse
-
-Use the following commands to install rocSPARSE on RHEL-based platforms:
-
-.. code-block:: shell
-
-   sudo yum update
-   sudo yum install rocsparse
-
-Use the following commands to install rocSPARSE on SLES:
-
-.. code-block:: shell
-
-   sudo dnf upgrade
-   sudo dnf install rocsparse
-
-After rocSPARSE is installed, it can be used just like any other library with a C API.
-To call rocSPARSE, the header file must be included in the user code.
-This means the rocSPARSE shared library becomes a link-time and run-time dependency for the user application.
+GPUs and Linux distributions, see the :doc:`ROCm compatibility matrix <compatibility/compatibility-matrix>`.
 
 Building rocSPARSE from source
 ==============================
 
 It isn't necessary to build rocSPARSE from source because it's ready to use after installing
-the prebuilt packages, as described above.
+the prebuilt packages, as described in :doc:`Install rocSPARSE <./install>`.
 To build rocSPARSE from source, follow the instructions in this section.
 
 Requirements

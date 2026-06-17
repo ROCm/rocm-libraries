@@ -1,6 +1,6 @@
 - {MinimumRequiredVersion: 5.0.0}
 - gfx950
-- gfx950
+- {Architecture: gfx950, CUCount: 256}
 - [Device 75a0]
 - Activation: true
   ActivationComputeDataType: 0

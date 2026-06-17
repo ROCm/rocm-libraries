@@ -35,6 +35,8 @@ union computeTypeInterface
     double        f64;
     hipblasLtHalf f16;
     int32_t       i32;
+    std::complex<float> cf;
+    std::complex<double> cd;
 };
 
 template <typename T>
@@ -48,6 +50,10 @@ constexpr auto hipblaslt_type2datatype()
         return HIP_R_32F;
     if(std::is_same<T, double>{})
         return HIP_R_64F;
+    if(std::is_same<T, std::complex<float>>{})
+        return HIP_C_32F;
+    if(std::is_same<T, std::complex<double>>{})
+        return HIP_C_64F;  
     if(std::is_same<T, hipblaslt_f8_fnuz>{})
         return HIP_R_8F_E4M3_FNUZ;
     if(std::is_same<T, hipblaslt_bf8_fnuz>{})
@@ -111,6 +117,8 @@ inline std::size_t realDataTypeSize(hipDataType dtype)
         {HIP_R_8F_E5M2_FNUZ, 1},
         {HIP_R_8F_E4M3, 1},
         {HIP_R_8F_E5M2, 1},
+        {HIP_C_32F, 8},
+        {HIP_C_64F, 16}
     };
 
     return dtypeMap.at(dtype);

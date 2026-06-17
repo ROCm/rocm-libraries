@@ -86,7 +86,7 @@ class BarrierTest : public ::testing::Test {
 
     /// Create an s_barrier_signal instruction with the given literal operand.
     /// Optionally attach a MemTokenData modifier with \p memTokens.
-    StinkyInstruction* createSBarrierSignal(int literal, std::vector<int> memTokens = {}) {
+    StinkyInstruction* createSBarrierSignal(int literal, const std::vector<int>& memTokens = {}) {
         AsmIRBuilder builder(*bb, arch);
         const HwInstDesc* desc = getMCIDByUOp(GFX::s_barrier_signal, arch);
         if (!desc) return nullptr;
@@ -98,7 +98,7 @@ class BarrierTest : public ::testing::Test {
 
     /// Create an s_barrier_wait instruction with the given literal operand.
     /// Optionally attach a MemTokenData modifier with \p memTokens.
-    StinkyInstruction* createSBarrierWait(int literal, std::vector<int> memTokens = {}) {
+    StinkyInstruction* createSBarrierWait(int literal, const std::vector<int>& memTokens = {}) {
         AsmIRBuilder builder(*bb, arch);
         const HwInstDesc* desc = getMCIDByUOp(GFX::s_barrier_wait, arch);
         if (!desc) return nullptr;

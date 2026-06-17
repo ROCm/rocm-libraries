@@ -7,6 +7,8 @@
 #include "tensor_holder.hpp"
 
 #include "compare_helper.hpp"
+#include "gtest_desc_guard.hpp"
+#include "gtest_handle_guard.hpp"
 #include "../dropout_util.hpp"
 #include "../rnn_util.hpp"
 #include "../workspace.hpp"
@@ -90,7 +92,8 @@ void GRUFwdCPUVerify(const miopen::Handle& handle,
     std::vector<rocrand_state_xorwow> dropout_states_host;
     std::vector<unsigned char> dropout_reservespace_host;
     std::vector<T> dropout_hid_state;
-    miopenTensorDescriptor_t dropout_inputTensor{}, dropout_outputTensor{};
+    TensorDescGuard dropout_inputTensor;
+    TensorDescGuard dropout_outputTensor;
     if(use_dropout)
     {
         size_t states_size  = dropoutDesc.stateSizeInBytes / sizeof(rocrand_state_xorwow);
@@ -100,8 +103,6 @@ void GRUFwdCPUVerify(const miopen::Handle& handle,
         std::array<int, 2> drop_in_len  = {{batch_n, hy_h * bi}};
         std::array<int, 2> drop_in_str  = {{hy_stride, 1}};
         std::array<int, 2> drop_out_str = {{hy_h * bi, 1}};
-        miopenCreateTensorDescriptor(&dropout_inputTensor);
-        miopenCreateTensorDescriptor(&dropout_outputTensor);
         miopenSetTensorDescriptor(
             dropout_inputTensor, miopenFloat, 2, drop_in_len.data(), drop_in_str.data());
         miopenSetTensorDescriptor(
@@ -200,9 +201,9 @@ void GRUFwdCPUVerify(const miopen::Handle& handle,
 
                 DropoutForwardVerify<T>(handle,
                                         dropoutDesc,
-                                        miopen::deref(dropout_inputTensor),
+                                        miopen::deref(dropout_inputTensor.get()),
                                         rsvspace,
-                                        miopen::deref(dropout_outputTensor),
+                                        miopen::deref(dropout_outputTensor.get()),
                                         dropout_hid_state,
                                         dropout_reservespace_host,
                                         dropout_states_tmp,
@@ -854,13 +855,12 @@ void GRUBwdDataCPUVerify(bool use_dropout,
     }
 
     // initial dropoput
-    miopenTensorDescriptor_t dropout_inputTensor{};
+    TensorDescGuard dropout_inputTensor;
     std::vector<unsigned char> dropout_reservespace_host;
     if(use_dropout)
     {
         std::array<int, 2> drop_in_len = {{batch_n, hy_h * bi}};
         std::array<int, 2> drop_in_str = {{hy_stride, 1}};
-        miopenCreateTensorDescriptor(&dropout_inputTensor);
         miopenSetTensorDescriptor(
             dropout_inputTensor, miopenFloat, 2, drop_in_len.data(), drop_in_str.data());
 
@@ -921,9 +921,9 @@ void GRUBwdDataCPUVerify(bool use_dropout,
             if(use_dropout)
             {
                 DropoutBackwardVerify<T>(dropoutDesc,
-                                         miopen::deref(dropout_inputTensor),
+                                         miopen::deref(dropout_inputTensor.get()),
                                          wkspace,
-                                         miopen::deref(dropout_inputTensor),
+                                         miopen::deref(dropout_inputTensor.get()),
                                          wkspace,
                                          dropout_reservespace_host,
                                          hid_shift + bi * 3 * hy_h,
@@ -2952,25 +2952,27 @@ public:
 
         batch_n = std::accumulate(param.batchSeq.begin(), param.batchSeq.end(), 0);
 
-        miopenRNNDescriptor_t rnnDesc;
-        miopenCreateRNNDescriptor(&rnnDesc);
+        RNNDescGuard rnnDesc;
         miopenRNNAlgo_t algoMode = miopenRNNdefault;
 
-        miopenDropoutDescriptor_t DropoutDesc;
-        miopenCreateDropoutDescriptor(&DropoutDesc);
+        DropoutDescGuard DropoutDesc;
+
+        HandleGuard mio_handle;
+        void* dropout_state_buf = nullptr;
+
+        // See DestroyInternalRnnDropoutDesc — frees the descriptor allocated
+        // by miopenCreateRNNDescriptor that the upcoming Set* will leak.
+        DestroyInternalRnnDropoutDesc(rnnDesc);
 
         if(param.useDropout)
         {
-            miopenHandle_t mio_handle;
-            miopenCreateWithStream(&mio_handle, handle.GetStream());
+            mio_handle.create(handle.GetStream());
 
             float dropout_rate              = 0.5;
             unsigned long long dropout_seed = 0ULL;
             miopenDropoutGetStatesSize(mio_handle, &statesSizeInBytes);
 
-            void* dropout_state_buf;
-            [[maybe_unused]] auto err =
-                hipMalloc(static_cast<void**>(&dropout_state_buf), statesSizeInBytes);
+            (void)hipMalloc(static_cast<void**>(&dropout_state_buf), statesSizeInBytes);
 
             miopenSetDropoutDescriptor(DropoutDesc,
                                        mio_handle,
@@ -3175,6 +3177,15 @@ public:
         //                                        seqLength, numLayers,
         //                                        biasMode, dirMode,
         //                                        inputMode, inVecReal});
+
+        // Free the DropoutDescriptor that miopenSetRNNDescriptor just allocated.
+        // In the dropout path, the internal pointer aliases the user-owned
+        // DropoutDescGuard — freeing it would double-free.
+        if(!param.useDropout)
+            DestroyInternalRnnDropoutDesc(rnnDesc);
+
+        if(param.useDropout)
+            (void)hipFree(dropout_state_buf);
     }
 };
 

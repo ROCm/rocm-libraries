@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights
 // reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -24,7 +24,9 @@
 
 #include "../../shared/arithmetic.h"
 #include "../../shared/fft_params.h"
+#include "../../shared/hip_object_wrapper.h"
 #include "../../shared/params_gen.h" // hash_prob
+#include "../../shared/reference_fft_data.h"
 #include "../../shared/test_params.h" // externally-declared test parameters
 #include "../hipfft_params.h"
 #include <algorithm> // copy_n, any_of
@@ -441,21 +443,14 @@ static void allocate_buffer(gpubuf_t<T>& buffer, const size_t desired_size)
     auto ret = buffer.alloc(desired_size);
     if(ret != hipSuccess)
     {
-        n_hip_failures++;
         std::stringstream info;
-        info << "Test failed to allocate " << desired_size << " bytes for gpu data";
-        if(skip_runtime_fails)
-        {
-            GTEST_SKIP() << info.str();
-        }
-        else
-        {
-            GTEST_FAIL() << info.str();
-        }
+        info << "Test failed to allocate " << byte_size_to_str(desired_size) << " for gpu data";
+        throw hip_runtime_error(info.str(), ret);
     }
 }
 
 TEST_P(multiStreamTest, impulseSignalOnOutput)
+try
 {
     fft_status                            fft_error_code    = fft_status_success;
     hipError_t                            hip_error_code    = hipSuccess;
@@ -477,17 +472,12 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
         bool cb_is_enqueued;
 
     public:
-        struct init_failure : public std::exception
-        {
-        };
-        hipStream_t hip_stream;
+        hipStream_wrapper_t hip_stream;
         sub_dft_stream_t()
             : sub_dft_is_done(false)
             , cb_is_enqueued(false)
         {
-            auto ret = hipStreamCreate(&hip_stream);
-            if(ret != hipSuccess)
-                throw init_failure();
+            hip_stream.alloc();
         }
         hipError_t enqueue_host_callback()
         {
@@ -498,18 +488,19 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
             };
             const auto hip_status = hipStreamAddCallback(
                 hip_stream, mark_stream_work_done_callback, &sub_dft_is_done, 0 /* must be 0 */);
-            if(hip_status == hipSuccess)
-                cb_is_enqueued = true;
+            if(hip_status != hipSuccess)
+                throw hip_runtime_error("A host callback could not be enqueued to a stream",
+                                        hip_status);
+            cb_is_enqueued = true;
             return hip_status;
         }
 
         ~sub_dft_stream_t()
         {
-            if(cb_is_enqueued)
+            if(hip_stream && cb_is_enqueued)
             {
                 (void)hipStreamSynchronize(hip_stream);
             }
-            (void)hipStreamDestroy(hip_stream);
         }
 
         bool done() const
@@ -522,80 +513,35 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
         }
     };
     // create the test streams
-    std::vector<sub_dft_stream_t> test_streams;
-    try
-    {
-        test_streams.resize(ParamsForMultiStreamDFT::num_streams);
-    }
-    catch(const sub_dft_stream_t::init_failure& e)
-    {
-        n_hip_failures++;
-        info.str("");
-        info << "Test failed to create " << ParamsForMultiStreamDFT::num_streams << " streams";
-        if(skip_runtime_fails)
-        {
-            GTEST_SKIP() << info.str();
-        }
-        else
-        {
-            GTEST_FAIL() << info.str();
-        }
-    }
-    catch(...)
-    {
-        GTEST_FAIL() << "Issue caught when creating " << ParamsForMultiStreamDFT::num_streams
-                     << " streams";
-    }
+    std::vector<sub_dft_stream_t> test_streams(ParamsForMultiStreamDFT::num_streams);
     // construct plans for each step and stream:
     hipfft_params sub_dft[ParamsForMultiStreamDFT::num_steps][ParamsForMultiStreamDFT::num_streams];
-    try
+    for(size_t stream_id = 0; stream_id < ParamsForMultiStreamDFT::num_streams; stream_id++)
     {
-        for(size_t stream_id = 0; stream_id < ParamsForMultiStreamDFT::num_streams; stream_id++)
+        for(size_t step_id = 0; step_id < ParamsForMultiStreamDFT::num_steps; step_id++)
         {
-            for(size_t step_id = 0; step_id < ParamsForMultiStreamDFT::num_steps; step_id++)
-            {
-                hipfft_params& dft_op = sub_dft[step_id][stream_id];
+            hipfft_params& dft_op = sub_dft[step_id][stream_id];
 
-                dft_op         = parameters.make_sub_dft_params(step_id, stream_id);
-                fft_error_code = dft_op.create_plan();
-                if(fft_error_code != fft_status_success)
-                {
-                    GTEST_FAIL() << "Failed to create hipfft plan for step id " << step_id
-                                 << ", stream id " << stream_id
-                                 << " (sub-DFT token : " << dft_op.token() << ")";
-                }
-                hipfft_error_code = dft_op.set_stream(test_streams[stream_id].hip_stream);
-                if(hipfft_error_code != HIPFFT_SUCCESS)
-                {
-                    GTEST_FAIL() << "Failed to set stream for step id " << step_id << ", stream id "
-                                 << stream_id;
-                }
-                if(verbose > 1)
-                {
-                    std::cout << "token of sub-DFT created for step id " << step_id
-                              << " and stream id " << stream_id << ": " << dft_op.token()
-                              << std::endl;
-                }
+            dft_op         = parameters.make_sub_dft_params(step_id, stream_id);
+            fft_error_code = dft_op.create_plan();
+            if(fft_error_code != fft_status_success)
+            {
+                GTEST_FAIL() << "Failed to create hipfft plan for step id " << step_id
+                             << ", stream id " << stream_id
+                             << " (sub-DFT token : " << dft_op.token() << ")";
+            }
+            hipfft_error_code = dft_op.set_stream(test_streams[stream_id].hip_stream);
+            if(hipfft_error_code != HIPFFT_SUCCESS)
+            {
+                GTEST_FAIL() << "Failed to set stream for step id " << step_id << ", stream id "
+                             << stream_id;
+            }
+            if(verbose > 1)
+            {
+                std::cout << "token of sub-DFT created for step id " << step_id << " and stream id "
+                          << stream_id << ": " << dft_op.token() << std::endl;
             }
         }
-    }
-    catch(const fft_params::work_buffer_alloc_failure& e)
-    {
-        info.str("");
-        info << "Allocation failure detected during the creation of the sub-DFT plans";
-        ++n_hip_failures;
-        if(skip_runtime_fails)
-        {
-            GTEST_SKIP() << info.str();
-        }
-        else
-        {
-            GTEST_FAIL() << info.str();
-        }
-    }
-    catch(...)
-    {
-        GTEST_FAIL() << "The test failed to create the required sub-DFT plans";
     }
     // compute the full DFT described by parameters by decomposing work in
     // ParamsForMultiStreamDFT::num_streams different streams
@@ -615,22 +561,7 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
     }
 
     hostbuf hostbuffer;
-    try
-    {
-        hostbuffer.alloc(std::max(isize, osize));
-    }
-    catch(const std::bad_alloc& e)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const DEVICEBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
+    hostbuffer.alloc(std::max(isize, osize));
 
     std::vector<size_t> expected_harmonic(parameters.dim());
     for(size_t i = 0; i < parameters.dim(); i++)
@@ -657,17 +588,8 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
     hip_error_code = hipMemcpy(input_buf.data(), hostbuffer.data(), isize, hipMemcpyHostToDevice);
     if(hip_error_code != hipSuccess)
     {
-        n_hip_failures++;
-        info.str("");
-        info << "Test failed to copy initialized data set from host to device";
-        if(skip_runtime_fails)
-        {
-            GTEST_SKIP() << info.str();
-        }
-        else
-        {
-            GTEST_FAIL() << info.str();
-        }
+        throw hip_runtime_error("Test failed to copy initialized data set from host to device",
+                                hip_error_code);
     }
     // Computation of the full DFT described by parameters in 2 steps, each involving
     // ParamsForMultiStreamDFT::num_streams different streams. Synchronization done via
@@ -712,18 +634,10 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
             hip_error_code = test_streams[stream_id].enqueue_host_callback();
             if(hip_error_code != hipSuccess)
             {
-                n_hip_failures++;
                 info.str("");
                 info << "Test failed to add callback function forstep id " << step_id
                      << " and stream id " << stream_id;
-                if(skip_runtime_fails)
-                {
-                    GTEST_SKIP() << info.str();
-                }
-                else
-                {
-                    GTEST_FAIL() << info.str();
-                }
+                throw hip_runtime_error(info.str(), hip_error_code);
             }
             // increment stream data pointers for next submissions
             step_stream_input_data_ptr = static_cast<char*>(step_stream_input_data_ptr)
@@ -770,17 +684,8 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
         hipMemcpyDeviceToHost);
     if(hip_error_code != hipSuccess)
     {
-        n_hip_failures++;
-        info.str("");
-        info << "Test failed to copy results from device back to host";
-        if(skip_runtime_fails)
-        {
-            GTEST_SKIP() << info.str();
-        }
-        else
-        {
-            GTEST_FAIL() << info.str();
-        }
+        throw hip_runtime_error("Test failed to copy results from device back to host",
+                                hip_error_code);
     }
     // always using doubles for measured max error and error thresholds for convenience (no data loss)
     const double error_threshold
@@ -794,6 +699,7 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
 
     ASSERT_LE(measured_max_error, error_threshold);
 }
+ROCFFT_CATCH_TEST_EXCEPTIONS
 
 static std::vector<ParamsForMultiStreamDFT>
     generate_full_scope_for(const std::vector<std::vector<size_t>>& set_of_test_lengths)

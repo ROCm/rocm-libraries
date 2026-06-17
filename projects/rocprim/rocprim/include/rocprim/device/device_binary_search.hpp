@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -35,6 +35,8 @@
 /// @{
 
 BEGIN_ROCPRIM_NAMESPACE
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 namespace detail
 {
@@ -94,6 +96,8 @@ struct is_default_or_has_tag<default_config, Tag>
 };
 
 } // end of detail namespace
+
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /// \brief Parallel primitive that uses binary search for computing a lower bound on a given ordered
 /// range for each element of a given input.

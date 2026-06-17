@@ -18,10 +18,10 @@ find_package(hipdnn_frontend CONFIG REQUIRED)
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
-add_executable(example_provider_sample ExampleProviderSample.cpp)
+add_executable(hipdnn_example_provider_sample ExampleProviderSample.cpp)
 
 target_link_libraries(
-    example_provider_sample
+    hipdnn_example_provider_sample
     PRIVATE
         hipdnn_frontend
         hip::host
@@ -29,4 +29,4 @@ target_link_libraries(
         example_provider_compile_options
 )
 
-add_test(NAME example_provider_sample COMMAND example_provider_sample)
+add_test(NAME hipdnn_example_provider_sample COMMAND hipdnn_example_provider_sample)

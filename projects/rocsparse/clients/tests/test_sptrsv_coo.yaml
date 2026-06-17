@@ -112,7 +112,7 @@ Tests:
 - name: sptrsv_coo_file
   category: pre_checkin
   function: sptrsv_coo
-  indextype: *i64i32
+  indextype: *i64
   precision: *single_double_precisions_complex
   M: 1
   N: 1
@@ -129,7 +129,7 @@ Tests:
 - name: sptrsv_coo_file
   category: pre_checkin
   function: sptrsv_coo
-  indextype: *i64i32
+  indextype: *i32
   precision: *single_double_precisions_complex
   M: 1
   N: 1
@@ -182,7 +182,7 @@ Tests:
 - name: sptrsv_coo_file
   category: quick
   function: sptrsv_coo
-  indextype: *i64i32
+  indextype: *i64
   precision: *single_double_precisions_complex
   M: 1
   N: 1
@@ -250,7 +250,7 @@ Tests:
 - name: sptrsv_coo_file
   category: nightly
   function: sptrsv_coo
-  indextype: *i64i32
+  indextype: *i32
   precision: *single_double_precisions_complex
   M: 1
   N: 1
@@ -267,7 +267,7 @@ Tests:
 - name: sptrsv_coo_graph_test
   category: pre_checkin
   function: sptrsv_coo
-  indextype: *i64i32
+  indextype: *i64
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_quick
   alpha_alphai: *alpha_range_quick

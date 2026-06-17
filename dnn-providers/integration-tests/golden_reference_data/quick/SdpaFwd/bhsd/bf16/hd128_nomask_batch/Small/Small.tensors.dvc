@@ -1,0 +1,17 @@
+outs:
+- path: Small.tensor0.bin
+  md5: 437ad9f6e2b1db28ca900503e09f7a63
+  size: 524288
+  hash: md5
+- path: Small.tensor1.bin
+  md5: d7ebfe7c68541eb2b0583dec8d626700
+  size: 524288
+  hash: md5
+- path: Small.tensor2.bin
+  md5: 3c6f4153c81aeb2ec5fc0f16f6f5905b
+  size: 524288
+  hash: md5
+- path: Small.tensor3.bin
+  md5: 7fdc2d4e76c1d67e99776901b1f0c1d1
+  size: 524288
+  hash: md5

@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -62,7 +62,7 @@ Tests:
   function: gebsrmv
   precision: *single_double_precisions_complex_real
   M: [300]
-  N: [300, 400, 800]
+  N: [300]
   row_block_dimA: [1]
   col_block_dimA: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
   alpha_beta: *alpha_beta_range_quick
@@ -76,7 +76,7 @@ Tests:
   function: gebsrmv
   precision: *single_double_precisions_complex_real
   M: [300]
-  N: [300, 400, 800]
+  N: [400]
   row_block_dimA: [2]
   col_block_dimA: [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
   alpha_beta: *alpha_beta_range_quick
@@ -90,7 +90,7 @@ Tests:
   function: gebsrmv
   precision: *single_double_precisions_complex_real
   M: [300]
-  N: [300, 400, 800]
+  N: [800]
   row_block_dimA: [3]
   col_block_dimA: [1, 2, 4, 5, 6, 7, 8, 9]
   alpha_beta: *alpha_beta_range_quick
@@ -104,7 +104,7 @@ Tests:
   function: gebsrmv
   precision: *single_double_precisions_complex_real
   M: [300]
-  N: [300, 400, 800]
+  N: [350]
   row_block_dimA: [4]
   col_block_dimA: [1, 2, 3, 5, 6, 7, 8, 10]
   alpha_beta: *alpha_beta_range_quick

@@ -69,7 +69,7 @@ def test_code():
                                     sgprWorkGroup=(1, 1, 100),
                                     vgprWorkItem=1,
                                     flatWorkGroupSize=(256),
-                                    preloadKernArgs=True)
+                                    numSgprPreload=16)
     print(signature)
 
     vs = code.ValueSet("BufferLimit", 0xFFFFFFFF, format=1)

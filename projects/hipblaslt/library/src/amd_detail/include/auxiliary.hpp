@@ -125,6 +125,10 @@ constexpr const char* hip_datatype_to_string(hipDataType type)
         return "bf16_r";
     case HIP_R_8I:
         return "i8_r";
+    case HIP_C_32F:
+        return "f32_c";
+    case HIP_C_64F: 
+        return "f64_c";    
     case HIP_R_32I:
         return "i32_r";
     case HIP_R_8F_E4M3_FNUZ:
@@ -196,6 +200,8 @@ constexpr hipDataType string_to_hip_datatype(const std::string& value)
         value == "f16_r" || value == "h" ? HIP_R_16F :
         value == "bf16_r"                ? HIP_R_16BF :
         value == "i8_r" || value == "i8" ? HIP_R_8I :
+        value == "f32_c" || value == "c" ? HIP_C_32F  :
+        value == "f64_c" || value == "z" ? HIP_C_64F  :
         value == "f6_r"                  ? static_cast<hipDataType>(HIP_R_6F_E2M3) :
         value == "bf6_r"                 ? static_cast<hipDataType>(HIP_R_6F_E3M2) :
         value == "f4_r"                  ? static_cast<hipDataType>(HIP_R_4F_E2M1) :
@@ -225,9 +231,9 @@ HIPBLASLT_EXPORT
 constexpr hipblasComputeType_t string_to_hipblas_computetype(const std::string& value)
 {
     return
-        value == "f32_r" || value == "s" ? HIPBLAS_COMPUTE_32F  :
+        value == "f32_r" || value == "s" || value == "c" || value == "f32_c" ?  HIPBLAS_COMPUTE_32F  :
         value == "xf32_r" || value == "x" ? HIPBLAS_COMPUTE_32F_FAST_TF32 :
-        value == "f64_r" || value == "d" ? HIPBLAS_COMPUTE_64F :
+        value == "f64_r" || value == "d" || value == "z" || value == "f64_c" ? HIPBLAS_COMPUTE_64F :
         value == "i32_r" || value == "i" ? HIPBLAS_COMPUTE_32I :
         value == "f32_f16_r" ? HIPBLAS_COMPUTE_32F_FAST_16F :
         value == "f32_bf16_r" ? HIPBLAS_COMPUTE_32F_FAST_16BF :

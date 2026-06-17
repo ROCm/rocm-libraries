@@ -3,6 +3,7 @@
 
 target_sources(${INTEGRATION_TESTS_EXE}
     PRIVATE
+        IntegrationGoldenRefBatchnormFwdInference.cpp
         IntegrationGpuBatchnormBackward.cpp
         IntegrationGpuBatchnormBackwardActivation.cpp
         IntegrationGpuBatchnormForwardInference.cpp

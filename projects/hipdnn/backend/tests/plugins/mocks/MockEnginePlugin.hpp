@@ -63,7 +63,6 @@ public:
     MOCK_METHOD(hipdnnEnginePluginExecutionContext_t,
                 createExecutionContextFromSerialized,
                 (hipdnnEnginePluginHandle_t handle,
-                 const hipdnnPluginConstData_t* engineConfig,
                  const hipdnnPluginConstData_t* serializedContext),
                 (const));
     MOCK_METHOD(void,
@@ -83,6 +82,20 @@ public:
                  void* workspace,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers),
+                (const));
+    MOCK_METHOD(bool, hasOverrideExecute, (), (const));
+    MOCK_METHOD(void,
+                executeOpGraphWithOverrides,
+                (hipdnnEnginePluginHandle_t handle,
+                 hipdnnEnginePluginExecutionContext_t executionContext,
+                 void* workspace,
+                 const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                 uint32_t numDeviceBuffers,
+                 uint32_t numOverrides,
+                 const int64_t* overrideUniqueIds,
+                 const uint32_t* overrideLengths,
+                 const int64_t* const* overrideShapes,
+                 const int64_t* const* overrideStrides),
                 (const));
 
     // Mock inherited methods from PluginBase

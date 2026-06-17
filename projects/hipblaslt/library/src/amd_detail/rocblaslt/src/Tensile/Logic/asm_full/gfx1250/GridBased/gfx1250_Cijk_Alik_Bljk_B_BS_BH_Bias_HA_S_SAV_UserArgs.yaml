@@ -234,7 +234,7 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 0
-    PreloadKernArgs: false
+    PreloadKernArgs: true
     SFCWGM:
     - [1, 1]
     - [1, 1]
@@ -474,7 +474,7 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    PreloadKernArgs: false
+    PreloadKernArgs: true
     SFCWGM:
     - [1, 1]
     - [1, 1]

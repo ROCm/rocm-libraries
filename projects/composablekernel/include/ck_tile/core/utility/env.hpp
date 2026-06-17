@@ -6,9 +6,10 @@
 #include <iostream>
 #include <string>
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck_tile {
 
 template <typename... Args>
@@ -111,7 +112,10 @@ struct EnvVar
         is_unset = false;
         value    = val;
     }
-
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
     explicit EnvVar(const char* const name, const T& def_val)
     {
         // NOLINTNEXTLINE (concurrency-mt-unsafe)
@@ -126,6 +130,9 @@ struct EnvVar
             value = def_val;
         }
     }
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif
 };
 } // end namespace internal
 
@@ -217,4 +224,6 @@ void UpdateEnvVar(EnvVar, const std::string_view& val)
 // environment variable to enable logging:
 // export CK_TILE_LOGGING=ON or CK_TILE_LOGGING=1 or CK_TILE_LOGGING=ENABLED
 CK_TILE_DECLARE_ENV_VAR_BOOL(CK_TILE_LOGGING)
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

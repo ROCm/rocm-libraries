@@ -125,6 +125,20 @@ TargetType extractValueFromTensorValue(const data_objects::TensorAttributesT& te
             return static_cast<TargetType>(static_cast<float>(bfp8));
         }
         break;
+    case data_objects::DataType::FP8_E4M3_FNUZ:
+        if(auto val = tensorAttr.value.AsFloat8Value())
+        {
+            auto fp8 = hipdnn_data_sdk::types::fp8_e4m3_fnuz::from_bits(val->value());
+            return static_cast<TargetType>(static_cast<float>(fp8));
+        }
+        break;
+    case data_objects::DataType::FP8_E5M2_FNUZ:
+        if(auto val = tensorAttr.value.AsFloat8Value())
+        {
+            auto bfp8 = hipdnn_data_sdk::types::fp8_e5m2_fnuz::from_bits(val->value());
+            return static_cast<TargetType>(static_cast<float>(bfp8));
+        }
+        break;
     case data_objects::DataType::UNSET:
         throw std::runtime_error(std::string(paramName) + " tensor has UNSET data type");
     default:

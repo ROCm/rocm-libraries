@@ -342,6 +342,10 @@ void testing_gemv_strided_batched(const Arguments& arg)
     int64_t           stride_y    = arg.stride_y;
     int64_t           batch_count = arg.batch_count;
 
+    bool    ab_striding  = arg.alpha_beta_stride;
+    int64_t alpha_stride = ab_striding ? arg.stride_c : 0;
+    int64_t beta_stride  = ab_striding ? arg.stride_d : 0;
+
     rocblas_local_handle handle{arg};
 
     size_t dim_x, row_A;
@@ -393,23 +397,24 @@ void testing_gemv_strided_batched(const Arguments& arg)
     HOST_MEMCHECK(host_strided_batch_vector<Ti>, hx, (dim_x, incx, stride_x, batch_count));
     HOST_MEMCHECK(host_strided_batch_vector<To>, hy, (dim_y, incy, stride_y, batch_count));
     HOST_MEMCHECK(host_strided_batch_vector<To>, hy_gold, (dim_y, incy, stride_y, batch_count));
-    HOST_MEMCHECK(host_vector<Tex>, halpha, (1));
-    HOST_MEMCHECK(host_vector<Tex>, hbeta, (1));
-    halpha[0] = h_alpha;
-    hbeta[0]  = h_beta;
+    HOST_MEMCHECK(host_vector<Tex>, halpha, (batch_count, alpha_stride));
+    HOST_MEMCHECK(host_vector<Tex>, hbeta, (batch_count, beta_stride));
 
     // Allocate device memory
     DEVICE_MEMCHECK(device_strided_batch_matrix<Ti>, dA, (M, N, lda, stride_a, batch_count));
     DEVICE_MEMCHECK(device_strided_batch_vector<Ti>, dx, (dim_x, incx, stride_x, batch_count));
     DEVICE_MEMCHECK(device_strided_batch_vector<To>, dy, (dim_y, incy, stride_y, batch_count));
-    DEVICE_MEMCHECK(device_vector<Tex>, d_alpha, (1));
-    DEVICE_MEMCHECK(device_vector<Tex>, d_beta, (1));
+    DEVICE_MEMCHECK(device_vector<Tex>, d_alpha, (batch_count, alpha_stride));
+    DEVICE_MEMCHECK(device_vector<Tex>, d_beta, (batch_count, beta_stride));
 
     // Initialize data on host memory
     rocblas_init_matrix(
         hA, arg, rocblas_client_alpha_sets_nan, rocblas_client_general_matrix, true);
     rocblas_init_vector(hx, arg, rocblas_client_alpha_sets_nan, false, true);
     rocblas_init_vector(hy, arg, rocblas_client_beta_sets_nan);
+
+    rocblas_init_vector_alternating_sign(halpha, h_alpha);
+    rocblas_init_vector_alternating_sign(hbeta, h_beta);
 
     hy_gold.copy_from(hy);
 
@@ -511,8 +516,8 @@ void testing_gemv_strided_batched(const Arguments& arg)
                     DEVICE_MEMCHECK(device_strided_batch_vector<To>,
                                     dy_copy,
                                     (dim_y, incy, stride_y, batch_count));
-                    DEVICE_MEMCHECK(device_vector<Tex>, d_alpha_copy, (1));
-                    DEVICE_MEMCHECK(device_vector<Tex>, d_beta_copy, (1));
+                    DEVICE_MEMCHECK(device_vector<Tex>, d_alpha_copy, (batch_count, alpha_stride));
+                    DEVICE_MEMCHECK(device_vector<Tex>, d_beta_copy, (batch_count, beta_stride));
 
                     CHECK_HIP_ERROR(dA_copy.transfer_from(hA));
                     CHECK_HIP_ERROR(dx_copy.transfer_from(hx));
@@ -555,8 +560,17 @@ void testing_gemv_strided_batched(const Arguments& arg)
         cpu_time_used = get_time_us_no_sync();
         for(int64_t b = 0; b < batch_count; ++b)
         {
-            ref_gemv<Ti, To>(
-                transA, M, N, h_alpha, hA[b], lda, hx[b], incx, h_beta, hy_gold[b], incy);
+            ref_gemv<Ti, To>(transA,
+                             M,
+                             N,
+                             halpha[b * alpha_stride],
+                             hA[b],
+                             lda,
+                             hx[b],
+                             incx,
+                             hbeta[b * beta_stride],
+                             hy_gold[b],
+                             incy);
         }
         cpu_time_used = get_time_us_no_sync() - cpu_time_used;
 
@@ -601,6 +615,18 @@ void testing_gemv_strided_batched(const Arguments& arg)
 
         CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
 
+        Tex* alpha = &h_alpha;
+        Tex* beta  = &h_beta;
+        if(arg.alpha_beta_stride)
+        {
+            CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
+            CHECK_HIP_ERROR(d_alpha.transfer_from(halpha));
+            CHECK_HIP_ERROR(d_beta.transfer_from(hbeta));
+            alpha = d_alpha;
+            beta  = d_beta;
+            handle.pre_test(arg);
+        }
+
         hipStream_t stream;
         CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
 
@@ -614,14 +640,14 @@ void testing_gemv_strided_batched(const Arguments& arg)
                            transA,
                            M,
                            N,
-                           &h_alpha,
+                           alpha,
                            dA,
                            lda,
                            stride_a,
                            dx,
                            incx,
                            stride_x,
-                           &h_beta,
+                           beta,
                            dy,
                            incy,
                            stride_y,
@@ -629,6 +655,11 @@ void testing_gemv_strided_batched(const Arguments& arg)
         }
 
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+
+        if(arg.alpha_beta_stride)
+        {
+            handle.post_test(arg);
+        }
 
         ArgumentModel<e_transA,
                       e_M,

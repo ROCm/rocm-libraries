@@ -459,12 +459,30 @@ namespace rocisa
         VCvtSRF32toFP8(const std::shared_ptr<RegisterContainer>& dst,
                        const InstructionInput&                   src0,
                        const InstructionInput&                   src1,
-                       const std::optional<VOP3PModifiers>&      vop3    = std::nullopt,
+                       const std::vector<int>&                   sels,
                        const std::string&                        comment = "")
             : VCvtInstruction(
-                CvtType::CVT_SR_F32_to_FP8, dst, {src0, src1}, std::nullopt, vop3, std::vector<int>({}), comment)
+                CvtType::CVT_SR_F32_to_FP8, dst, {src0, src1}, std::nullopt, VOP3PModifiers(), std::vector<int>({}), comment)
         {
             setInst("v_cvt_sr_fp8_f32");
+            if(sels.empty()) return;
+
+            if(kernel().isaVersion[0] < 11)
+            {
+                vop3->op_sel = {0, 0};
+                vop3->op_sel.insert(vop3->op_sel.end(), sels.begin(), sels.end());
+            }
+            else
+            {
+                if(sels.size() == 1)
+                {
+                    vop3->byte_sel = { sels[0] };
+                }
+                else
+                {
+                    vop3->byte_sel = { sels[1] + (sels[0] << 1) };
+                }
+            }
         }
 
         VCvtSRF32toFP8(const VCvtSRF32toFP8& other)
@@ -492,12 +510,30 @@ namespace rocisa
         VCvtSRF32toBF8(const std::shared_ptr<RegisterContainer>& dst,
                        const InstructionInput&                   src0,
                        const InstructionInput&                   src1,
-                       const std::optional<VOP3PModifiers>&      vop3    = std::nullopt,
+                       const std::vector<int>&                   sels,
                        const std::string&                        comment = "")
             : VCvtInstruction(
-                CvtType::CVT_SR_F32_to_BF8, dst, {src0, src1}, std::nullopt, vop3, std::vector<int>({}), comment)
+                CvtType::CVT_SR_F32_to_BF8, dst, {src0, src1}, std::nullopt, VOP3PModifiers(), std::vector<int>({}), comment)
         {
             setInst("v_cvt_sr_bf8_f32");
+            if(sels.empty()) return;
+
+            if(kernel().isaVersion[0] < 11)
+            {
+                vop3->op_sel = {0, 0};
+                vop3->op_sel.insert(vop3->op_sel.end(), sels.begin(), sels.end());
+            }
+            else
+            {
+                if(sels.size() == 1)
+                {
+                    vop3->byte_sel = { sels[0] };
+                }
+                else
+                {
+                    vop3->byte_sel = { sels[1] + (sels[0] << 1) };
+                }
+            }
         }
 
         VCvtSRF32toBF8(const VCvtSRF32toBF8& other)

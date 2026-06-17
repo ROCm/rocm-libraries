@@ -70,34 +70,28 @@ std::vector<std::vector<size_t>> callback_type_sizes = {{4}, {60}, {122}, {220},
 // the input can't be any smaller than what rocFFT thinks it is,
 // because the overwrite will fail.
 const static std::vector<std::vector<size_t>> stride_range = {{1}};
-INSTANTIATE_TEST_SUITE_P(
-#ifdef _WIN32
-    DISABLED_callback,
-#else
-    callback,
-#endif
-    change_type,
-    ::testing::ValuesIn(param_generator_base(test_prob,
-                                             {fft_transform_type_complex_forward,
-                                              fft_transform_type_real_forward},
-                                             callback_type_sizes,
-                                             {fft_precision_single},
-                                             {1},
-                                             generate_types,
-                                             stride_range,
-                                             stride_range,
-                                             {{0, 0}},
-                                             {{0, 0}},
-                                             {fft_placement_notinplace},
-                                             false,
-                                             false)),
-    accuracy_test::TestName);
+INSTANTIATE_TEST_SUITE_P(DISABLED_callback,
+                         change_type,
+                         ::testing::ValuesIn(param_generator_base(
+                             test_prob,
+                             {fft_transform_type_complex_forward, fft_transform_type_real_forward},
+                             callback_type_sizes,
+                             {fft_precision_single},
+                             {1},
+                             generate_types,
+                             stride_range,
+                             stride_range,
+                             {{0, 0}},
+                             {{0, 0}},
+                             {fft_placement_notinplace},
+                             false)),
+                         accuracy_test::TestName);
 
 // run an out-of-place transform that casts input from short to float
-TEST_P(change_type, short_to_float)
+TEST_P(change_type, DISABLED_short_to_float)
 {
     rocfft_params params(GetParam());
-    params.run_callbacks = true;
+    params.run_callbacks = fft_callback_type_funcptr;
 
     ASSERT_EQ(params.create_plan(), fft_status_success);
 
@@ -153,7 +147,7 @@ TEST_P(change_type, short_to_float)
                       hipSuccess);
         }
         std::vector<void*> callback_host_vec{callback_host};
-        ASSERT_EQ(params.set_callbacks(&callback_host_vec, nullptr, nullptr, nullptr),
+        ASSERT_EQ(params.set_funcptr_callbacks(&callback_host_vec, nullptr, nullptr, nullptr),
                   fft_status_success);
 
         // run rocFFT

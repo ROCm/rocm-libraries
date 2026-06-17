@@ -63,7 +63,7 @@ list( APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/lib/cmake/hip /opt/rocm /opt/rocm/ll
 # rocm-cmake contains common cmake code for rocm projects to help setup and install
 include(dependencies)
 
-set ( VERSION_STRING "3.4.0" )
+set ( VERSION_STRING "3.5.0" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 option( BUILD_VERBOSE "Output additional build information" OFF )
@@ -199,7 +199,7 @@ endif( )
 
 # Package specific CPACK vars
 if(HIP_PLATFORM STREQUAL amd)
-  set(rocblas_minimum 5.4.0)
+  set(rocblas_minimum 5.5.0)
   set(rocsolver_minimum 3.33.0)
   rocm_package_add_dependencies(SHARED_DEPENDS "rocblas >= ${rocblas_minimum}" "rocsolver >= ${rocsolver_minimum}")
   rocm_package_add_rpm_dependencies(STATIC_DEPENDS "rocblas-static-devel >= ${rocblas_minimum}" "rocsolver-static-devel >= ${rocsolver_minimum}")

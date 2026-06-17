@@ -68,9 +68,9 @@ BenchmarkProblems:
         - LdsPadMetadata: [0]
         - LDSTrInst: [False]
         - TDMInst: [3]
-        - PrefetchGlobalRead: [1]
+        - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [0]
         - SourceSwap: [0]
         - StoreRemapVectorWidth: [0]
         - GlobalSplitU: [0]
@@ -95,6 +95,7 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 128, 1, 2048]
+          - Exact: [128, 128, 1, 1056]
           - Exact: [512, 512, 1, 2048]
         - ActivationArgs:
           - [Enum: none]

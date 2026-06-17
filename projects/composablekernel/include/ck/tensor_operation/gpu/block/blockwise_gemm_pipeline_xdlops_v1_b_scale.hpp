@@ -32,7 +32,8 @@ template <BlockGemmPipelineScheduler BlkGemmPipelineVer,
           index_t NPerXDL,
           index_t MRepeat,
           index_t NRepeat,
-          index_t KPacks>
+          index_t KPacks,
+          bool TransposeC>
 struct BlockwiseGemmXdlops_pipeline_v1_b_scale
 {
 };
@@ -55,9 +56,8 @@ template <index_t BlockSize,
           index_t NPerXDL,
           index_t MRepeat,
           index_t NRepeat,
-          index_t KPack
-          // ,bool TransposeC //disable transposec right now...
-          >
+          index_t KPack,
+          bool TransposeC>
 struct BlockwiseGemmXdlops_pipeline_v1_b_scale<BlockGemmPipelineScheduler::Intrawave,
                                                BlockSize,
                                                ADataType,
@@ -77,7 +77,8 @@ struct BlockwiseGemmXdlops_pipeline_v1_b_scale<BlockGemmPipelineScheduler::Intra
                                                NPerXDL,
                                                MRepeat,
                                                NRepeat,
-                                               KPack>
+                                               KPack,
+                                               TransposeC>
     : BlockwiseGemmXdlops_pipeline_base<BlockSize,
                                         ADataType,
                                         BDataType,
@@ -96,7 +97,8 @@ struct BlockwiseGemmXdlops_pipeline_v1_b_scale<BlockGemmPipelineScheduler::Intra
                                         NPerXDL,
                                         MRepeat,
                                         NRepeat,
-                                        KPack>
+                                        KPack,
+                                        TransposeC>
 
 {
     using Base = BlockwiseGemmXdlops_pipeline_base<BlockSize,
@@ -117,7 +119,8 @@ struct BlockwiseGemmXdlops_pipeline_v1_b_scale<BlockGemmPipelineScheduler::Intra
                                                    NPerXDL,
                                                    MRepeat,
                                                    NRepeat,
-                                                   KPack>;
+                                                   KPack,
+                                                   TransposeC>;
     using Base::I0;
     using Base::KRepeat;
     using Base::xdlops_gemm;
@@ -285,14 +288,26 @@ struct BlockwiseGemmXdlops_pipeline_v1_b_scale<BlockGemmPipelineScheduler::Intra
                         vector_type<ComputeDataTypeBuf, KPack> a_thread_vec;
                         vector_type<ComputeDataTypeBuf, KPack> b_thread_vec;
 
-                        static_for<0, KPack, 1>{}([&](auto ik) {
-                            a_thread_vec.template AsType<ComputeDataTypeBuf>()(ik) =
-                                a_thread_buf[Number<a_thread_desc_.CalculateOffset(
-                                    make_tuple(m0, I0, k0, ik))>{}];
-                            b_thread_vec.template AsType<ComputeDataTypeBuf>()(ik) =
-                                b_thread_buf[Number<b_thread_desc_.CalculateOffset(
-                                    make_tuple(n0, I0, k0, ik))>{}];
-                        });
+                        auto loadA = thread_buf_to_vec_loader<decltype(a_thread_vec),
+                                                              decltype(a_thread_buf),
+                                                              decltype(a_thread_desc_),
+                                                              ComputeDataTypeBuf,
+                                                              Number<m0>,
+                                                              Number<0>,
+                                                              Number<k0>,
+                                                              index_expression::Ik>{a_thread_vec,
+                                                                                    a_thread_buf};
+                        auto loadB = thread_buf_to_vec_loader<decltype(b_thread_vec),
+                                                              decltype(b_thread_buf),
+                                                              decltype(b_thread_desc_),
+                                                              ComputeDataTypeBuf,
+                                                              Number<n0>,
+                                                              Number<0>,
+                                                              Number<k0>,
+                                                              index_expression::Ik>{b_thread_vec,
+                                                                                    b_thread_buf};
+
+                        static_for<0, KPack, 1>{}(MakeFunctorInvoker(loadA, loadB));
 
                         using mfma_input_type =
                             typename vector_type<ComputeDataTypeBuf, xdlops_gemm.K1PerXdlops>::type;
@@ -365,12 +380,26 @@ struct BlockwiseGemmXdlops_pipeline_v1_b_scale<BlockGemmPipelineScheduler::Intra
                     vector_type<ComputeDataTypeBuf, KPack> a_thread_vec;
                     vector_type<ComputeDataTypeBuf, KPack> b_thread_vec;
 
-                    static_for<0, KPack, 1>{}([&](auto ik) {
-                        a_thread_vec.template AsType<ComputeDataTypeBuf>()(ik) = a_thread_buf
-                            [Number<a_thread_desc_.CalculateOffset(make_tuple(m0, I0, k0, ik))>{}];
-                        b_thread_vec.template AsType<ComputeDataTypeBuf>()(ik) = b_thread_buf
-                            [Number<b_thread_desc_.CalculateOffset(make_tuple(n0, I0, k0, ik))>{}];
-                    });
+                    auto loadA =
+                        thread_buf_to_vec_loader<decltype(a_thread_vec),
+                                                 decltype(a_thread_buf),
+                                                 decltype(a_thread_desc_),
+                                                 ComputeDataTypeBuf,
+                                                 Number<m0>,
+                                                 Number<0>,
+                                                 Number<k0>,
+                                                 index_expression::Ik>{a_thread_vec, a_thread_buf};
+                    auto loadB =
+                        thread_buf_to_vec_loader<decltype(b_thread_vec),
+                                                 decltype(b_thread_buf),
+                                                 decltype(b_thread_desc_),
+                                                 ComputeDataTypeBuf,
+                                                 Number<n0>,
+                                                 Number<0>,
+                                                 Number<k0>,
+                                                 index_expression::Ik>{b_thread_vec, b_thread_buf};
+
+                    static_for<0, KPack, 1>{}(MakeFunctorInvoker(loadA, loadB));
 
                     using mfma_input_type =
                         typename vector_type<ComputeDataTypeBuf, xdlops_gemm.K1PerXdlops>::type;
