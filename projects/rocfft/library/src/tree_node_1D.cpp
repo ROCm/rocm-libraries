@@ -670,6 +670,22 @@ void CC1DNode::AssignParams_internal()
         row2colPlan->iDist        = row2colPlan->length.front() * inStride.front();
         row2colPlan->oDist        = outStride.front();
         row2colPlan->outStride    = {1, row2colPlan->batch * outStride.front()};
+
+        // reorganize the Blue stride set the same way as the normal set
+        // above so the node reports a consistent layout; otherwise the
+        // buffer-size check and the kernel see disagreeing strides.
+        if(setBlueData)
+        {
+            col2colPlan->inStrideBlue  = col2colPlan->inStride;
+            col2colPlan->outStrideBlue = col2colPlan->outStride;
+            col2colPlan->iDistBlue     = col2colPlan->iDist;
+            col2colPlan->oDistBlue     = col2colPlan->oDist;
+
+            row2colPlan->inStrideBlue  = row2colPlan->inStride;
+            row2colPlan->outStrideBlue = row2colPlan->outStride;
+            row2colPlan->iDistBlue     = row2colPlan->iDist;
+            row2colPlan->oDistBlue     = row2colPlan->oDist;
+        }
     }
 }
 

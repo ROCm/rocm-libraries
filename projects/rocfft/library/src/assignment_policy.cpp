@@ -429,13 +429,21 @@ bool AssignmentPolicy::CheckAssignmentValid(ExecPlan& execPlan)
 
         if(input)
             return compute_ptrdiff(node->length, node->inStride, node->batch, node->iDist);
-        else
+
+        // Inner-batched fused-Bluestein nodes have a multi-dimensional
+        // output stride but a scalar lengthBlueN; sizing them the
+        // original way drops an axis.  Size them like the allocator does
+        // (full output length + Blue stride/dist).  Other nodes unchanged.
+        if(node->largeTwdBatchIsTransformCount && node->typeBlue == BT_MULTI_KERNEL_FUSED)
         {
-            return compute_ptrdiff(node->UseOutputLengthForPadding() ? outputLen : node->length,
-                                   node->outStride,
-                                   node->batch,
-                                   node->oDist);
+            auto fullLen = node->UseOutputLengthForPadding() ? node->GetOutputLength() : node->length;
+            return compute_ptrdiff(fullLen, node->outStrideBlue, node->batch, node->oDistBlue);
         }
+
+        return compute_ptrdiff(node->UseOutputLengthForPadding() ? outputLen : node->length,
+                               node->outStride,
+                               node->batch,
+                               node->oDist);
     };
 
     size_t sizeBufIn  = 0;
