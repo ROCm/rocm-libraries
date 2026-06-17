@@ -883,10 +883,13 @@ namespace TensileLite
                 // Re-init MX FP4/FP8 inputs once the solution is known (MI-based preSwizzle when enabled).
                 // Gate on m_mxScaleFormat so we only re-init when the user requested an MX scale layout;
                 // useScaleAB may be empty for MX kernels that use MXSA/MXSB, so do not gate on it.
+                // m_gpuInit is true once prepareGPUInputsInternal has run for the first time.  By the
+                // time preSolution fires, main.cpp guarantees prepareGPUInputs has been called for the
+                // current problem (preProblem → cancelAsyncReset → prepareGPUInputs → solution loop).
                 if(m_currentSolution != nullptr
                    && m_mxScaleFormat > 0
                    && m_currentGemmProblem != nullptr
-                   && !m_gpuPtrs.empty())
+                   && m_gpuInit)
                 {
                     bool isMX = isMXProblemExceptF6(*m_currentGemmProblem);
                     if(isMX)
