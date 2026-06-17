@@ -15,8 +15,8 @@ heuristics/
       feature_importances_tflops.json
       train_manifest.json     — data provenance (row count, timestamp)
   scripts/
-    generate_validation_shapes_conv.py — held-out validation shape set
-    convert_dsl_csv_to_parquet.py      — converts sweep CSV output to parquet
+    convert_dsl_csv_to_parquet.py        — converts sweep CSV output to parquet
+    generate_targeted_shapes_conv.py     — OOF analysis + targeted top-up shape generation
   sweep/
     ConvCandidateSweep.cpp  — enumerates all DSL candidates per shape,
                               compiles + times each, writes training CSV rows
@@ -245,36 +245,27 @@ git add $MODEL_DST
 git commit -m "[CK DSL] conv model: retrain fp16/gfx942 ($(date +%Y-%m-%d))"
 ```
 
-Validate heuristic efficiency on the held-out validation set before merging:
+Validate heuristic efficiency using the OOF predictions produced during training:
 
 ```bash
-# Generate held-out shapes from the training parquet.
-python3 $HEURISTICS/scripts/generate_validation_shapes_conv.py \
-    --parquet $WORK/data/conv_fp16_gfx942_dsl.parquet \
-    --out     $WORK/shapes/validation/all_shapes.csv \
-    --shards  4
+# Inspect per-subset efficiency from the last training run.
+python3 $HEURISTICS/scripts/generate_targeted_shapes_conv.py \
+    --oof      oof_predictions.parquet \
+    --train    conv_fp16_<arch>_dsl.parquet \
+    --analytics --dry-run
+# Target: mean efficiency >= 0.90 across all subsets.
+```
 
-# Run the oracle sweep against the validation shards.
-mkdir -p $WORK/validation
-BINARY=$WORK/sweep_build/conv_candidate_sweep
-for shard in $WORK/shapes/validation/shard_*.csv; do
-    name=$(basename $shard .csv)
-    $BINARY --shapes $shard --out $WORK/validation/${name}.csv
-done
-cat $WORK/validation/shard_*.csv > $WORK/validation/all.csv
+If subsets are below threshold, generate a targeted top-up shape set and re-sweep:
 
-# Convert validation sweep output to parquet.
-python3 $HEURISTICS/scripts/convert_dsl_csv_to_parquet.py \
-    --input  $WORK/validation/all.csv \
-    --output $WORK/validation/val.parquet \
-    --arch   gfx942 \
-    --run-id 99
+```bash
+# Generate shapes covering hard subsets (zero overlap with existing training data).
+python3 $HEURISTICS/scripts/generate_targeted_shapes_conv.py \
+    --oof   oof_predictions.parquet \
+    --train conv_fp16_<arch>_dsl.parquet \
+    --out   all_shapes.csv \
+    --shards 32
 
-# Score each shape: compare oracle-best TFLOPS against the kernel the model picks.
-# The model directory must contain model_tflops.lgbm (decompressed — see above).
-python3 $CK_HEURISTICS/validation/grouped_conv/validate_conv_ml_vs_oracle.py \
-    --model          $MODEL_DST \
-    --oracle-parquet $WORK/validation/val.parquet \
-    --output         $WORK/validation/results.csv
-# Target: mean efficiency >= 0.90.
+# Sweep the targeted shapes, convert, and warm-start retrain.
+# See sweep/build.sh and the full retraining workflow above.
 ```
