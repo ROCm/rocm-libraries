@@ -222,6 +222,8 @@ jobs:
       build_dir: ${{ matrix.projects.build_dir }}
       amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
+      projects_to_test: ${{ matrix.projects.projects_to_test }}
+      test_type: ${{ needs.setup.outputs.test_type }}
 
 
   therock_ci_summary:
