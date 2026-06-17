@@ -34,21 +34,21 @@ using ClusterDisable = std::false_type;
 using KernelTypesMxGemmCompTDMWmma = ::testing::Types<
     // --- Scale32 (WarpTile=32, CompTDMV1) ---
     std::tuple<    Row,     Col,     Row,       F8,        F8,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV1,  I32>,
-    // std::tuple<    Row,     Col,     Row,       F4,        F4,    E5M3,  E5M3,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV1,  I32>,  // F4 known broken
-    // std::tuple<    Row,     Col,     Row,       F4,        F4,    E4M3,  E4M3,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV1,  I32>,  // F4 known broken
+    std::tuple<    Row,     Col,     Row,       F4,        F4,    E5M3,  E5M3,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV1,  I32>,
+    std::tuple<    Row,     Col,     Row,       F4,        F4,    E4M3,  E4M3,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV1,  I32>,
     std::tuple<    Row,     Col,     Row,       F8,        F4,    E8M0,  E5M3,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV1,  I32>,
     std::tuple<    Row,     Col,     Row,       F4,        F8,    E5M3,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV1,  I32>,
     std::tuple<    Row,     Col,     Row,       BF8,       F8,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV1,  I32>,
     std::tuple<    Row,     Row,     Row,       BF8,       F8,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV1,  I32>,
     // --- Scale32 (WarpTile=32, CompTDMV2) ---
     std::tuple<    Row,     Col,     Row,       F8,        F8,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV2,  I32>,
-    // std::tuple<    Row,     Col,     Row,       F4,        F4,    E4M3,  E4M3,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV2,  I32>,  // F4 known broken
+    std::tuple<    Row,     Col,     Row,       F4,        F4,    E4M3,  E4M3,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV2,  I32>,
     std::tuple<    Row,     Col,     Row,       F8,        F4,    E8M0,  E5M3,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV2,  I32>,
     std::tuple<    Row,     Col,     Row,       F4,        F8,    E4M3,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV2,  I32>,
     std::tuple<    Row,     Col,     Row,       BF8,       F8,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV2,  I32>,
     std::tuple<    Row,     Row,     Row,       BF8,       F8,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV2,  I32>,
-    // std::tuple<    Row,     Row,     Row,       F4,        F4,    E5M3,  E5M3,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV1,  I32>,  // F4 known broken
-    // std::tuple<    Col,     Row,     Row,       F4,        F8,    E5M3,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV1,  I32>,  // F4 ColMajor known broken
+    std::tuple<    Row,     Row,     Row,       F4,        F4,    E5M3,  E5M3,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV1,  I32>,
+    std::tuple<    Col,     Row,     Row,       F4,        F8,    E5M3,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV1,  I32>,
     // --- Scale16 (WarpTile=16, CompTDMV1) ---
     std::tuple<    Row,     Col,     Row,       F8,        F8,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I128,       I16,        I16, Intrawave,        CompTDMV1,  I16>,
     std::tuple<    Row,     Col,     Row,      BF8,       BF8,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I128,       I16,        I16, Intrawave,        CompTDMV1,  I16>,
