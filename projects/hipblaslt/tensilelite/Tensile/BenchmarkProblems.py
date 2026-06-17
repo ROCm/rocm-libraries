@@ -456,8 +456,8 @@ def writeBenchmarkFiles(
     with timing_context("python_kernel_bench_postprocess"):
         with timing_context("python_benchpost_naming"):
             for s in solutions:
-                s["SolutionNameMin"] = getSolutionNameMin(solution, debugConfig.splitGSU)
-                s["KernelNameMin"]   = getKernelNameMin(solution, debugConfig.splitGSU)
+                s["SolutionNameMin"] = getSolutionNameMin(s, debugConfig.splitGSU)
+                s["KernelNameMin"]   = getKernelNameMin(s, debugConfig.splitGSU)
 
             # Benchmark builds always target a single base arch; pick its subdir.
             newLibraryDir = ensurePath(libraryDir(sourcePath, cmdLineArchs[0]))
