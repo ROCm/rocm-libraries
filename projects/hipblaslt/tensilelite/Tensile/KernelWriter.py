@@ -10332,16 +10332,122 @@ class KernelWriter(metaclass=abc.ABCMeta):
           return list(memTokenObj.tokens)
       return []
 
+    def _accessPhase(access):
+      return "writing" if access == "write" else "reading"
+
+    def _conflicts(access, state):
+      return (access == "read" and state == "writing") or \
+             (access == "write" and state == "reading")
+
+    def _isUnrollLoopBeginLabel(labelName):
+      # The repeating unroll loop is delimited by a "LoopBegin<char>" label and
+      # a backward branch that targets it. Tail-loop begin labels ("TailLoopBegin")
+      # are excluded - they are handled by their own pass and are not the main
+      # unroll loop we model the back-edge for.
+      return isinstance(labelName, str) and "LoopBegin" in labelName and "TailLoopBegin" not in labelName
+
+    def _detectLoopHeadInfo():
+      # Detect the real loop span(s) from the back-edge, not from module names.
+      # A module named "loopBody" also contains the odd/even-iter exit code and
+      # the loop-end label that execute AFTER the back-branch, so its last token
+      # access is not the loop tail. Instead, flatten leaves in program order,
+      # find each backward branch to a "LoopBegin" label, and treat
+      # [begin .. back-branch] as the loop body.
+      #
+      # Returns beginLabelName -> {token: [firstAccess, tailState]} where:
+      #   firstAccess: access ("read"/"write") of the token's FIRST occurrence in
+      #                the body (what the back-edge feeds into).
+      #   tailState:   phase ("reading"/"writing") of the token's LAST occurrence
+      #                in the body (the phase the back-edge carries out).
+      flatLeaves = []
+      def _flattenLeaves(mod: Module):
+        for item in mod.items():
+          if isinstance(item, Module):
+            _flattenLeaves(item)
+          else:
+            flatLeaves.append(item)
+      _flattenLeaves(rootModule)
+
+      labelDefIndex = {}
+      for idx, leaf in enumerate(flatLeaves):
+        if hasattr(leaf, "getLabelName") and not isinstance(leaf, Instruction):
+          name = leaf.getLabelName()
+          labelDefIndex.setdefault(name, idx)
+
+      # beginLabelName -> (beginIdx, backBranchIdx) using the widest back-edge span.
+      loopSpanByLabel = {}
+      for idx, leaf in enumerate(flatLeaves):
+        target = getattr(leaf, "labelName", None)
+        if target is None or not _isUnrollLoopBeginLabel(target):
+          continue
+        beginIdx = labelDefIndex.get(target, None)
+        if beginIdx is None or beginIdx >= idx:
+          continue  # forward branch, not a back-edge
+        prev = loopSpanByLabel.get(target)
+        if prev is None or idx > prev[1]:
+          loopSpanByLabel[target] = (beginIdx, idx)
+
+      headInfo = {}
+      for beginName, (beginIdx, branchIdx) in loopSpanByLabel.items():
+        info = {}
+        for k in range(beginIdx, branchIdx + 1):
+          leaf = flatLeaves[k]
+          if not isinstance(leaf, Instruction):
+            continue
+          access = _classifyTokenAccess(leaf)
+          tokens = _getTokenList(leaf)
+          if access is None or not tokens:
+            continue
+          phase = _accessPhase(access)
+          for token in tokens:
+            if token not in info:
+              info[token] = [access, phase]  # [firstAccess, tailState]
+            else:
+              info[token][1] = phase          # update tail to the last access
+        headInfo[beginName] = info
+      return headInfo
+
+    # Back-edge modeling is only needed for PrefetchGlobalRead < 2. With
+    # PrefetchGlobalRead >= 2 the pipelined prologue pre-stages the next
+    # iteration's LDS data, so the steady-state phase is already established and
+    # a plain single linear pass is correct - leaving loopHeadInfo empty makes
+    # _rewriteModuleInOrder degrade to exactly that linear pass.
+    loopEntryOverride = {}
+    loopPendingTokens = set()
+    loopHeadInfo = _detectLoopHeadInfo() if kernel["PrefetchGlobalRead"] < 2 else {}
+
     def _rewriteModuleInOrder(mod: Module):
       nonlocal insertedCount
       rewrittenItems = []
       for item in mod.items():
-        if hasattr(item, "getLabelName"):
+        if hasattr(item, "getLabelName") and not isinstance(item, Instruction):
           labelName = item.getLabelName()
           if _isOptNllEndLabelName(labelName) and labelName in branchTokenStateSnapshot:
             # recover token state from the snapshot
             tokenState.clear()
             tokenState.update(deepcopy(branchTokenStateSnapshot[labelName]))
+          if labelName in loopHeadInfo:
+            # Entering the unroll loop. The loop-head barrier is driven purely by
+            # the back-edge (loop-tail) state, so a steady-state iteration only
+            # gets a barrier when the carried phase truly conflicts with the
+            # first access. The first iteration's pre-loop conflict, if any and
+            # not already covered by a back-edge barrier, is satisfied ONCE by a
+            # barrier hoisted into the prologue (emitted right before the loop
+            # label) instead of one that re-fires every iteration.
+            prologueBarrierTokens = []
+            for token, (firstAccess, tailState) in loopHeadInfo[labelName].items():
+              preState = tokenState.get(token, "standby")
+              loopEntryOverride[token] = tailState
+              loopPendingTokens.add(token)
+              if _conflicts(firstAccess, preState) and not _conflicts(firstAccess, tailState):
+                prologueBarrierTokens.append(token)
+            if prologueBarrierTokens:
+              uniqueTokens = sorted(set(prologueBarrierTokens))
+              syncComments = ", ".join([f"sync LDS{token}" for token in uniqueTokens])
+              barrier = SBarrier(comment=f"auto token transition barrier (loop prologue), {syncComments}")
+              barrier.setMemToken(MemTokenData(uniqueTokens))
+              rewrittenItems.append(barrier)
+              insertedCount += 1
           rewrittenItems.append(item)
           continue
 
@@ -10357,6 +10463,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if _isOptNllEndLabelName(branchLabelName) and branchLabelName not in branchTokenStateSnapshot:
           # Save token state at the first branch to OptNLL_End.
           branchTokenStateSnapshot[branchLabelName] = deepcopy(tokenState)
+        if branchLabelName in loopHeadInfo:
+          # Reached the loop back-branch: drop any stale loop-entry overrides.
+          loopEntryOverride.clear()
+          loopPendingTokens.clear()
 
         access = _classifyTokenAccess(item)
         tokens = _getTokenList(item)
@@ -10368,10 +10478,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
         barrierTokens = []
         for token in tokens:
-          state = tokenState.get(token, "standby")
-          if access == "read" and state == "writing":
-            barrierTokens.append(token)
-          elif access == "write" and state == "reading":
+          if token in loopPendingTokens:
+            # First access of this token inside the loop body: evaluate it
+            # against the back-edge (loop-tail) state.
+            state = loopEntryOverride.get(token, tokenState.get(token, "standby"))
+            loopPendingTokens.discard(token)
+          else:
+            state = tokenState.get(token, "standby")
+          if _conflicts(access, state):
             barrierTokens.append(token)
 
         if barrierTokens:
@@ -10382,7 +10496,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           rewrittenItems.append(barrier)
           insertedCount += 1
 
-        nextState = "writing" if access == "write" else "reading"
+        nextState = _accessPhase(access)
         for token in tokens:
           tokenState[token] = nextState
 

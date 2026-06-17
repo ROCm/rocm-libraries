@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -119,6 +119,7 @@ add_example(rocprim/device/example_device_segmented_radix_sort.cpp)
 add_example(rocprim/device/example_device_segmented_reduce.cpp)
 add_example(rocprim/device/example_device_segmented_scan.cpp)
 add_example(rocprim/device/example_device_select.cpp)
+add_example(rocprim/device/example_device_topk.cpp)
 add_example(rocprim/device/example_device_transform.cpp)
 add_example(rocprim/intrinsics/example_arch.cpp)
 add_example(rocprim/types/example_future_value.cpp)
