@@ -730,6 +730,11 @@ ROCWMMA_KERNEL void __launch_bounds__(TBLOCK_X) flash_attn_v2_fwd(InputT const* 
 {
     if constexpr(!ROCWMMA_ARCH_HOST)
     {
+        // The batch count B is encoded in the grid (one CTA per Q-tile/head/
+        // batch via blockIdx.z); it is not needed inside the kernel body.
+        // Mark it used to avoid -Wunused-parameter on the device path.
+        (void)B;
+
         // ------------------------------------------------------------------
         // Block / wave / lane setup
         // ------------------------------------------------------------------
@@ -1030,7 +1035,10 @@ static void printDeviceInfo()
 // ---------------------------------------------------------------------------
 // Host driver
 // ---------------------------------------------------------------------------
-ROCWMMA_HOST void run_flash_attn_sample(uint32_t B,
+// Returns true if the sample actually ran to completion; false if it returned
+// early (unsupported architecture / wave size or invalid problem size) so the
+// caller can report an accurate final status.
+ROCWMMA_HOST bool run_flash_attn_sample(uint32_t B,
                                         uint32_t H,
                                         uint32_t N,
                                         bool     causal,
@@ -1045,18 +1053,28 @@ ROCWMMA_HOST void run_flash_attn_sample(uint32_t B,
     if((isGfx11() || isGfx12()) && warpSize != Constants::AMDGCN_WAVE_SIZE_32)
     {
         std::cout << "Unsupported wave size for gfx11/12!\n";
-        return;
+        return false;
     }
     if(isGfx9() && warpSize != Constants::AMDGCN_WAVE_SIZE_64)
     {
         std::cout << "Unsupported wave size for gfx9!\n";
-        return;
+        return false;
+    }
+
+    // Reject degenerate sizes before the alignment check: a zero B/H/N passes
+    // the modulo test but would yield an empty/invalid grid and out-of-bounds
+    // global reads in the kernel prologue (which unconditionally prefetches
+    // KV tile 0).
+    if(B == 0 || H == 0 || N == 0)
+    {
+        std::cout << "B, H, and N must all be non-zero.\n";
+        return false;
     }
 
     if(N % Br != 0 || N % Bc != 0)
     {
         std::cout << "N must be a multiple of " << Br << " (Br) and " << Bc << " (Bc).\n";
-        return;
+        return false;
     }
 
     uint32_t hTBLOCK_X = isGfx9() ? gfx9Params::TBLOCK_X : gfx11Params::TBLOCK_X;
@@ -1176,7 +1194,7 @@ ROCWMMA_HOST void run_flash_attn_sample(uint32_t B,
         CHECK_HIP_ERROR(hipFree(dV));
         CHECK_HIP_ERROR(hipFree(dO));
         std::cout << "Finished!\n";
-        return;
+        return true;
     }
 
     std::cout << "\nValidating against CPU reference...\n";
@@ -1198,6 +1216,7 @@ ROCWMMA_HOST void run_flash_attn_sample(uint32_t B,
     CHECK_HIP_ERROR(hipFree(dO));
 
     std::cout << "Finished!\n";
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1224,19 +1243,21 @@ int main(int argc, char** argv)
             skipValidation = true;
     }
 
+    bool ok = true;
+
     // Quick validation: small enough to run on any GPU.
-    run_flash_attn_sample(
+    ok &= run_flash_attn_sample(
         /*B=*/1, /*H=*/2, /*N=*/128, /*causal=*/false, /*printInfo=*/true, skipValidation);
-    run_flash_attn_sample(
+    ok &= run_flash_attn_sample(
         /*B=*/1, /*H=*/2, /*N=*/128, /*causal=*/true, /*printInfo=*/false, skipValidation);
 
     if(runAll)
     {
         // GPT-2 small style (D=64 head): N=1024, H=12.
-        run_flash_attn_sample(
+        ok &= run_flash_attn_sample(
             /*B=*/1, /*H=*/12, /*N=*/1024, /*causal=*/true, /*printInfo=*/false, skipValidation);
         // Longer context.
-        run_flash_attn_sample(
+        ok &= run_flash_attn_sample(
             /*B=*/1, /*H=*/12, /*N=*/2048, /*causal=*/true, /*printInfo=*/false, skipValidation);
     }
     else
@@ -1245,6 +1266,13 @@ int main(int argc, char** argv)
         std::cout << "Tip: pass --skip-validation to skip CPU validation.\n";
     }
 
-    std::cout << "Sample completed successfully!" << std::endl;
-    return 0;
+    if(ok)
+        std::cout << "Sample completed successfully!" << std::endl;
+    else
+        std::cout << "Sample finished, but one or more runs were skipped "
+                     "(unsupported architecture / wave size or invalid size); "
+                     "see messages above."
+                  << std::endl;
+
+    return ok ? 0 : 1;
 }
