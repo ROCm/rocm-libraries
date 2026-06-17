@@ -42,7 +42,10 @@ from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_con
                                                get_fp16_mt_config, get_fp32_mt_config
 from Tensile.Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams
-from Tensile.Common.ValidParameters import validParameters
+from Tensile.Common.ValidParameters import validParameters, \
+                                            _getExpectedTypes, \
+                                            _expectedParamTypes, \
+                                            _skipTypeCheck
 from Tensile.SolutionStructs.Naming import getSolutionNameFull
 from Tensile.SolutionStructs.Problem import ProblemType
 from Tensile.Toolchain.Component import Assembler
@@ -187,43 +190,12 @@ def _validateStreamKForceDPOnly(state, printRejectionReason):
   return True
 
 
-def _getExpectedTypes(validParams):
-  """Build a map from parameter name to the set of allowed Python types.
-
-  Uses the validParameters registry as the source of truth.  For each
-  parameter whose allowed-value list is not the sentinel ``-1``, we
-  collect the concrete ``type()`` of every allowed value.  Because
-  Python ``bool`` is a subclass of ``int``, we use ``type()`` (not
-  ``isinstance``) so that ``bool`` and ``int`` are kept distinct.
-
-  Returns:
-      dict[str, set[type]]: e.g. {"UseCustomMainLoopSchedule": {int},
-                                   "BufferLoad": {bool}, ...}
-  """
-  typeMap = {}
-  for name, allowedValues in validParams.items():
-    if allowedValues == -1:
-      continue
-    if isinstance(allowedValues, list) and len(allowedValues) > 0:
-      typeMap[name] = set(type(v) for v in allowedValues)
-  return typeMap
-
-# Pre-compute once at import time so the per-Solution cost is a dict lookup.
-_expectedParamTypes = _getExpectedTypes(validParameters)
-
-# Parameters to skip during type validation because YAML serialization
-# inherently produces a different type (e.g. [9, 0, 10] -> list) and the
-# conversion to the canonical type happens downstream in the pipeline.
-# Also skip DataType* parameters as they are converted from strings/ints to DataType objects.
-_skipTypeCheck = {
-    "ISA",
-    "DataType", "DataTypeA", "DataTypeB", "DataTypeC", "DataTypeD", "DataTypeE",
-    "MacDataTypeA", "MacDataTypeB",
-    "DataTypeAmaxD", "DataTypeAmaxC", "DataTypeAmaxA", "DataTypeAmaxB",
-    "DataTypeMXSA", "DataTypeMXSB",
-    "DestDataType", "ComputeDataType",
-    "F32XdlMathOp",  # Also converted to DataType
-}
+# _getExpectedTypes / _expectedParamTypes / _skipTypeCheck were moved into
+# Tensile/Common/ValidParameters.py to keep the registry and its derived
+# type map co-located (and to keep the Common -> Solution import direction).
+# They are re-imported above and re-exported here for the existing test
+# module (Tensile/Tests/unit/test_validateParameterTypes.py) that imports
+# them from Solution.
 
 _cacheHintTensors = ("A", "B", "C", "D", "E", "MXSA", "MXSB", "WS", "Metadata")
 _cacheHintLoadTensors = ("A", "B", "C", "E", "MXSA", "MXSB", "WS", "Metadata")
@@ -272,6 +244,36 @@ def mergeTypeMismatchCollector(data):
     _typeMismatchCollector[key]["files"] |= entry["files"]
 
 
+def mergeMismatchRecords(records):
+  """Fold a list of mismatch records into the module-level collector.
+
+  This is the single place that knows the collector's internal dict
+  shape. Each record is a ``(collectorKey, valueRepr, srcFile)`` tuple as
+  returned by :func:`validateParameterTypes`, where ``collectorKey`` is
+  ``(param_name, actual_type_name, expected_type_str)``.
+
+  The records are an in-process return value; this merge populates the
+  same module-level ``_typeMismatchCollector`` that
+  ``getTypeMismatchCollector`` snapshots across the joblib worker
+  boundary, so the cross-process transport is unchanged.
+
+  Args:
+      records: list of ``(collectorKey, valueRepr, srcFile)`` tuples.
+  """
+  for collectorKey, valueRepr, srcFile in records:
+    if collectorKey not in _typeMismatchCollector:
+      _typeMismatchCollector[collectorKey] = {
+        "count": 0,
+        "values": set(),
+        "files": set(),
+      }
+    entry = _typeMismatchCollector[collectorKey]
+    entry["count"] += 1
+    entry["values"].add(valueRepr)
+    if srcFile:
+      entry["files"].add(srcFile)
+
+
 def validateParameterTypes(state, srcFile=""):
   """Validate that every solution parameter has the correct Python type.
 
@@ -281,15 +283,22 @@ def validateParameterTypes(state, srcFile=""):
   are different Python types and produce different msgpack wire types,
   which causes ``std::bad_cast`` at C++ deserialization time.
 
-  Instead of raising on the first mismatch, mismatches are collected into
-  the module-level ``_typeMismatchCollector`` dict.  Call
-  ``printTypeMismatchSummary()`` at the end of the build to emit a
-  consolidated warning.
+  Instead of raising on the first mismatch, the function builds and
+  returns a list of mismatch records (one per offending key) without
+  touching module-level state. A record is a
+  ``(collectorKey, valueRepr, srcFile)`` tuple, where ``collectorKey`` is
+  ``(param_name, actual_type_name, expected_type_str)``. Returning ``[]``
+  means the state is clean. Callers fold the records into the warn-only
+  collector via :func:`mergeMismatchRecords`.
 
   Args:
       state: The solution state dict (parameter name -> value).
       srcFile: The YAML source file path, included in warning messages.
+
+  Returns:
+      list: mismatch records, empty if every parameter is well-typed.
   """
+  records = []
   for key, value in state.items():
     if key not in _expectedParamTypes or key in _skipTypeCheck:
       continue
@@ -299,17 +308,8 @@ def validateParameterTypes(state, srcFile=""):
     if actualType not in expectedTypes:
       expectedStr = " or ".join(sorted(t.__name__ for t in expectedTypes))
       collectorKey = (key, actualType.__name__, expectedStr)
-      if collectorKey not in _typeMismatchCollector:
-        _typeMismatchCollector[collectorKey] = {
-          "count": 0,
-          "values": set(),
-          "files": set(),
-        }
-      entry = _typeMismatchCollector[collectorKey]
-      entry["count"] += 1
-      entry["values"].add(repr(value))
-      if srcFile:
-        entry["files"].add(srcFile)
+      records.append((collectorKey, repr(value), srcFile))
+  return records
 
 
 def printTypeMismatchSummary(numFiles=0):
@@ -481,8 +481,9 @@ class Solution(collections.abc.Mapping):
     printIndexAssignmentInfo: bool,
     assembler: Assembler,
     isaInfoMap: Dict[IsaVersion, IsaInfo],
-    srcName: str = ""
+    srcName: str = "",
   ):
+    """Construct a Solution."""
 
     self._name = None
     self.assembler = assembler
@@ -512,8 +513,15 @@ class Solution(collections.abc.Mapping):
 
     # Validate parameter types against the validParameters registry.
     # Catches bool-vs-int mismatches (YAML false vs 0) that would cause
-    # std::bad_cast at C++ msgpack deserialization time.
-    validateParameterTypes(self._state, srcFile=srcName)
+    # std::bad_cast at C++ msgpack deserialization time. The mismatch
+    # records are folded into the module-level warn-only collector here;
+    # the library-logic path snapshots that collector across the joblib
+    # worker boundary for the end-of-run summary. On the input-YAML path
+    # the state was already type-checked strictly upstream
+    # (checkParametersAreValid in BenchmarkStructs, ProblemType's
+    # raise-mode validator), so validateParameterTypes returns [] and
+    # nothing is merged -- no duplicate collector noise.
+    mergeMismatchRecords(validateParameterTypes(self._state, srcFile=srcName))
 
     if 'ISA' not in self._state:
       if 'ISA' in config:

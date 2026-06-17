@@ -1138,6 +1138,58 @@ newMIValidParameters = {
     'WorkGroup': -1,
 }
 
+
+# Expected-type derivation for solution parameters --------------------------
+#
+# These helpers live here, next to `validParameters`, because that registry
+# is the source of truth for "what types this parameter is allowed to take".
+# Consumers (Solution.validateParameterTypes, and the input-YAML strict gate
+# in checkParametersAreValid) import them from this module. Keeping the
+# registry and its derived expected-types map co-located preserves the
+# Common -> Solution import direction; the prior layout (defined inside
+# Solution.py and imported back by ValidParameters extensions) would have
+# introduced a Common -> Solution reverse import.
+
+def _getExpectedTypes(validParams):
+    """Build a map from parameter name to the set of allowed Python types.
+
+    Uses the validParameters registry as the source of truth.  For each
+    parameter whose allowed-value list is not the sentinel ``-1``, we
+    collect the concrete ``type()`` of every allowed value.  Because
+    Python ``bool`` is a subclass of ``int``, we use ``type()`` (not
+    ``isinstance``) so that ``bool`` and ``int`` are kept distinct.
+
+    Returns:
+        dict[str, set[type]]: e.g. {"UseCustomMainLoopSchedule": {int},
+                                     "BufferLoad": {bool}, ...}
+    """
+    typeMap = {}
+    for name, allowedValues in validParams.items():
+        if allowedValues == -1:
+            continue
+        if isinstance(allowedValues, list) and len(allowedValues) > 0:
+            typeMap[name] = set(type(v) for v in allowedValues)
+    return typeMap
+
+# Pre-compute once at import time so the per-Solution cost is a dict lookup.
+_expectedParamTypes = _getExpectedTypes(validParameters)
+
+# Parameters to skip during type validation because YAML serialization
+# inherently produces a different type (e.g. [9, 0, 10] -> list) and the
+# conversion to the canonical type happens downstream in the pipeline.
+# Also skip DataType* parameters as they are converted from strings/ints to
+# DataType objects.
+_skipTypeCheck = {
+    "ISA",
+    "DataType", "DataTypeA", "DataTypeB", "DataTypeC", "DataTypeD", "DataTypeE",
+    "MacDataTypeA", "MacDataTypeB",
+    "DataTypeAmaxD", "DataTypeAmaxC", "DataTypeAmaxA", "DataTypeAmaxB",
+    "DataTypeMXSA", "DataTypeMXSB",
+    "DestDataType", "ComputeDataType",
+    "F32XdlMathOp",  # Also converted to DataType
+}
+
+
 def checkSpaceFillAlgoIsValid(name, value):
     if type(value) != list:
         msgBase = "Invalid parameter value: {} = {}\nMust be a list of values"
@@ -1170,12 +1222,40 @@ def checkSpaceFillAlgoWGMIsValid(name, value):
                     raise Exception(msgBase.format(name, value, dim))
 
 
-def checkParametersAreValid(param, validParams):
-    """Ensures paramaters in params exist and have valid values as specified by validParames"""
+def checkParametersAreValid(
+    param,
+    validParams,
+    *,
+    keyPathPrefix: str = "",
+    srcFile: str = "",
+):
+    """Ensures parameters in params exist and have valid values as specified by validParams.
+
+    In addition to the legacy name+value-membership checks, when the
+    parameter name has an entry in the derived ``_expectedParamTypes`` map
+    and is not in ``_skipTypeCheck``, each element of ``values`` is also
+    type-checked against the union of allowed-value types. ``type(value)``
+    is used (not ``isinstance``) so ``bool`` and ``int`` are distinguished.
+    Raises :class:`ConfigTypeError` immediately on the first type mismatch.
+
+    Args:
+        param: ``(name, values)`` tuple; ``values`` is the list of
+            candidate values.
+        validParams: registry to validate ``name``/``values`` against.
+        keyPathPrefix: dotted/bracketed prefix for the keypath in error
+            messages.
+        srcFile: YAML file path, used for src:line in messages.
+    """
+    # Defer imports of the shared error machinery so this module stays
+    # importable in any context that doesn't already pull in Common.
+    from .TypeValidationErrors import (
+        ConfigTypeError,
+        formatMismatch,
+        _STRICT_GATE_ENABLED,
+    )
+
     (name, values) = param
     if name == "ProblemSizes":
-        return
-    elif name == "InternalSupportParams":
         return
 
     if name not in validParams:
@@ -1185,7 +1265,13 @@ def checkParametersAreValid(param, validParams):
             )
         )
 
-    for value in values:
+    runTypeCheck = (
+        _STRICT_GATE_ENABLED
+        and name in _expectedParamTypes
+        and name not in _skipTypeCheck
+    )
+
+    for idx, value in enumerate(values):
         if validParams[name] != -1 and value not in validParams[name]:
             msgBase = "Invalid parameter value: {} = {}\nValid values for {} are {}{}."
             msgExt = (
@@ -1198,3 +1284,60 @@ def checkParametersAreValid(param, validParams):
             checkSpaceFillAlgoIsValid(name, value)
         elif name == "SFCWGM":
             checkSpaceFillAlgoWGMIsValid(name, value)
+
+        if runTypeCheck:
+            expectedTypes = _expectedParamTypes[name]
+            actualType = type(value)
+            if actualType not in expectedTypes:
+                # Build keypath. Lists of candidate values use [idx]; a
+                # single-element list (the common case for one value per
+                # key) still gets [0] so the location is unambiguous.
+                base = f"{keyPathPrefix}.{name}" if keyPathPrefix else name
+                keyPath = f"{base}[{idx}]" if len(values) > 1 else base
+                msg = formatMismatch(srcFile, keyPath, value, expectedTypes)
+                raise ConfigTypeError(msg)
+
+
+def validateInternalSupportParams(
+    d,
+    srcFile: str = "",
+    keyPathPrefix: str = "InternalSupportParams",
+):
+    """Validate an InternalSupportParams dict against defaultInternalSupportParams.
+
+    Sibling to ``checkParametersAreValid`` rather than a fold-in (per the
+    plan's B3): ``checkParametersAreValid`` has a ``(name, list)``
+    contract and ``InternalSupportParams`` arrives as a dict, so folding
+    would break the function's signature.
+
+    Each key in ``d`` must exist in ``defaultInternalSupportParams`` and
+    have ``type(default)``. Mismatches and unknown-key errors are
+    Raises :class:`ConfigTypeError` on the first bad key encountered. Strict is
+    the only behaviour.
+    """
+    if not d:
+        return
+
+    from .TypeValidationErrors import (
+        ConfigTypeError, formatMismatch, _STRICT_GATE_ENABLED,
+    )
+
+    if not _STRICT_GATE_ENABLED:
+        return
+
+    # defaultInternalSupportParams lives in Common/GlobalParameters; import
+    # lazily because that module pulls in a lot.
+    from .GlobalParameters import defaultInternalSupportParams
+
+    for key, value in d.items():
+        if key not in defaultInternalSupportParams:
+            raise ConfigTypeError(
+                f"{keyPathPrefix}.{key}: unknown key. "
+                f"Valid keys are {sorted(defaultInternalSupportParams.keys())}."
+            )
+        default = defaultInternalSupportParams[key]
+        expectedTypes = {type(default)}
+        if type(value) not in expectedTypes:
+            raise ConfigTypeError(formatMismatch(srcFile, f"{keyPathPrefix}.{key}", value, expectedTypes))
+
+

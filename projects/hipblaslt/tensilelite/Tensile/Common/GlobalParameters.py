@@ -609,6 +609,17 @@ defaultAnalysisParameters = {
     "SolutionImportanceMin": 0.01,  # = 0.01=1% total time saved by keeping this solution
 }
 
+# Per-key expected-type overrides for the LibraryLogic block. The
+# defaults map gives a single example value per key; for keys that
+# legitimately accept multiple Python types (e.g. DeviceNames can be a
+# single str like the default "fallback" OR a list of strings naming
+# multiple ASIC device IDs that share the same library logic), the
+# override widens the accepted type set. Without this widening the
+# strict gate in generateLogic() rejects the common list form.
+libraryLogicTypeOverrides = {
+    "DeviceNames": {str, list},
+}
+
 
 ################################################################################
 # Is query version compatible with current version
@@ -664,6 +675,138 @@ def printCapabilitiesTable(isaInfoMap: Dict[str, IsaInfo]):
     archCapRows = [capRow(isaInfoMap, cap, "archCaps") for cap in allArchCaps]
 
     printTable([headerRow] + asmCapRows + archCapRows)
+
+
+# Override table for globalParameters keys whose default value is None
+# (and therefore have no usable type to derive from type(default)). Each
+# entry is the set of permitted types for the user-supplied value.
+# Skipping None-defaulted keys wholesale was a coverage gap that allowed
+# e.g. RocProfCounter: 42 to pass silently.
+globalParameterTypeOverrides = {
+    "ClientExecutionLockPath": {type(None), str},   # path or unset
+    "ROCmSMIPath":             {type(None), str},   # path, populated at startup
+    "CmakeCxxCompiler":        {type(None), str},   # path, populated at startup
+    "RocProfCounter":          {type(None), str},   # counter spec or None
+}
+
+
+def _assertOverrideTableCovers(defaults_dict, override_dict):
+    """Coverage guard: every None-defaulted key has an override entry.
+
+    Asserts the invariant that any None-defaulted key in globalParameters
+    carries a corresponding type-override annotation. Exercised in CI by
+    test_assignGlobalParameters_types.py /
+    test_registry_disjoint_property.py rather than at module-import time,
+    so the coverage gap is caught by a failing test (with the same precise
+    message) instead of coupling the invariant to every import of this
+    module.
+    """
+    missing = [k for k, v in defaults_dict.items()
+               if v is None and k not in override_dict]
+    if missing:
+        raise RuntimeError(
+            "globalParameterTypeOverrides is missing entries for the "
+            f"following None-defaulted globalParameters: {missing!r}. "
+            "Add type annotations for each to "
+            "Tensile/Common/GlobalParameters.py."
+        )
+
+
+def _assertGlobalParametersAreValid(config, ignoreKeys):
+    """Raise ConfigTypeError for the first unknown or mistyped key in *config*.
+
+    No side effects: no subprocess, no ``locateExe``, no ISA mutation,
+    no writes into the module-level ``globalParameters`` registry.
+
+    Shared by production (``assignGlobalParameters``) and the corpus test
+    so the two never diverge on what counts as a clean GlobalParameters block.
+
+    Args:
+        config: the raw ``GlobalParameters:`` dict from the YAML.
+        ignoreKeys: keys with a sanctioned opt-out from the strict gate.
+    """
+    from .TypeValidationErrors import ConfigTypeError, formatMismatch
+
+    # MinimumRequiredVersion is validated separately at the top of
+    # assignGlobalParameters; skip it in the type loop here.
+    typeCheckSkip = {"MinimumRequiredVersion"}
+
+    for key in config:
+        if key in ignoreKeys:
+            continue
+        value = config[key]
+        if key not in globalParameters:
+            raise ConfigTypeError(
+                f"Unknown global parameter '{key}' = {value!r}. "
+                f"Add it to globalParameters in GlobalParameters.py if it is real, "
+                f"or remove it from the config."
+            )
+
+        if key in typeCheckSkip:
+            continue
+
+        if key in globalParameterTypeOverrides:
+            expectedTypes = globalParameterTypeOverrides[key]
+        else:
+            default = globalParameters[key]
+            if default is None:
+                continue
+            expectedTypes = {type(default)}
+
+        if type(value) not in expectedTypes:
+            raise ConfigTypeError(formatMismatch("", f"GlobalParameters.{key}", value, expectedTypes))
+
+
+# Keys that may appear in a GlobalParameters: block but are not (or no longer)
+# entries in the globalParameters registry. _assertGlobalParametersAreValid
+# skips these silently. Shared with the corpus test so the two never diverge.
+_GLOBAL_PARAMETER_IGNORE_KEYS = [
+    # --- CLI / TensileCreateLibrary-level config consumed outside the
+    #     globalParameters registry (each has its own argparse dest or
+    #     direct arguments[...] reader) ---
+    "Architecture",       # build-arch list, read directly in Tensile.py
+    "PrintLevel",         # verbosity, read by setVerbosity in TensileCreateLibrary/Run.py
+    "Device",             # device id, read from config in Tensile.py
+    "UseCompression",     # code-object compression toggle, set in ParseArguments / read in Run.py
+    "CxxCompiler",        # --cxx-compiler arg, resolved in Toolchain layer, not a registry value
+    "CCompiler",          # --c-compiler arg, resolved in Toolchain layer, not a registry value
+    "OffloadBundler",     # --offload-bundler arg, resolved in Toolchain layer
+    "Assembler",          # --assembler arg, resolved in Toolchain layer
+    "LogicPath",          # library-logic dir, read by TensileCreateLibrary/Run.py
+    "LogicFilter",        # logic-file glob, read by TensileCreateLibrary/Run.py
+    "OutputPath",         # positional output dir arg in Tensile.py / RetuneLibrary
+    "Experimental",       # --experimental logic-dir toggle in ParseArguments
+    "GenSolTable",        # --gen-sol-table toggle in ParseArguments
+    # Keys with a sanctioned opt-out from the strict gate. Three categories:
+    #   - Dead (no consumer anywhere; safe to silently drop):
+    "AMDGPUArchPath",          # removed dc2c963c Mar2025; arch detection moved to Toolchain/
+    "DataInitTypeeScaleE",     # never registered/consumed (double-e typo; scale-E init never implemented)
+    "DeviceLDS",               # removed 7770c97e May2025; superseded by archCaps["DeviceLDS"]
+    "MaxFileName",             # removed d170037b Feb2025; superseded by MAX_FILENAME_LENGTH constant
+    "MergeFiles",              # removed 2d2e1496 Jan2025; code always merges now
+    "MinKForGSU",              # removed dc2c963c Mar2025; superseded by MIN_K_FOR_GSU constant in Contractions.py
+    "NewClient",               # removed dc2c963c Mar2025; old "must be 2" guard is meaningless now
+    "ROCmAgentEnumeratorPath", # reverted 4a5aa3cb Mar2026; tool selection now via Toolchain/Validators.py
+    "UseGPUTimer",             # never registered; always a duplicate of KernelTime (the real key)
+    #   - Live but read via DebugConfig (makeDebugConfig in
+    #     Tensile/Common/Types.py) directly from the raw config dict
+    #     after assignGlobalParameters, bypassing the globalParameters
+    #     registry:
+    "ForceGenerateKernel",        # DebugConfig.forceGenerateKernel, read by makeDebugConfig
+    "PrintIndexAssignmentInfo",   # DebugConfig.printIndexAssignmentInfo, read by makeDebugConfig
+    "PrintSolutionRejectionReason", # DebugConfig.printSolutionRejectionReason, read by makeDebugConfig
+    #   - Dead predecessor of PrintIndexAssignmentInfo (renamed
+    #     dc2c963c Mar2025); kept so the one stale YAML
+    #     (sgemm_xf32_asm.yaml) does not trip the gate. Follow-up:
+    #     rename the YAML key to PrintIndexAssignmentInfo.
+    "PrintIndexAssignments",
+    #   - Misplaced solution parameter: registered in
+    #     defaultBenchmarkCommonParameters (solution-level), not
+    #     globalParameters; YAMLs that put it under GlobalParameters:
+    #     have the value silently dropped. Follow-up: relocate to
+    #     BenchmarkCommonParameters: / ForkParameters: in the YAMLs.
+    "MaxLDS",
+]
 
 
 def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
@@ -761,29 +904,25 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     except (subprocess.CalledProcessError, OSError) as e:
         printWarning("Error: {} running {} {} ".format("hipcc", "--version", e))
 
-    # The following keys may be present in the config, but are not (or no longer) global parameters.
-    ignoreKeys = [
-        "Architecture",
-        "PrintLevel",
-        "Device",
-        "UseCompression",
-        "CxxCompiler",
-        "CCompiler",
-        "OffloadBundler",
-        "Assembler",
-        "LogicPath",
-        "LogicFilter",
-        "OutputPath",
-        "Experimental",
-        "GenSolTable",
-    ]
+    ignoreKeys = _GLOBAL_PARAMETER_IGNORE_KEYS
+
+    from .TypeValidationErrors import _STRICT_GATE_ENABLED
+
+    if not _STRICT_GATE_ENABLED:
+        for key in config:
+            if key in ignoreKeys:
+                continue
+            value = config[key]
+            if key not in globalParameters:
+                printWarning("Global parameter %s = %s unrecognised." % (key, value))
+            globalParameters[key] = value
+        return
+
+    _assertGlobalParametersAreValid(config, ignoreKeys)
     for key in config:
         if key in ignoreKeys:
             continue
-        value = config[key]
-        if key not in globalParameters:
-            printWarning("Global parameter %s = %s unrecognised." % (key, value))
-        globalParameters[key] = value
+        globalParameters[key] = config[key]
 
 
 def setupRestoreClocks():
