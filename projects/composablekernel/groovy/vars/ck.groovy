@@ -892,23 +892,36 @@ def cmake_build(Map conf=[:]){
             if (!params.BUILD_INSTANCES_ONLY){
                 if (!runAllUnitTests && !setup_args.contains("gfx1250") ){
                     // Smart build is split into two stages so build and test get
-                    // independent pass/fail + timing, and so the test phase can
-                    // later move to a separate node (the build/ dir + build_mode.env
-                    // are the seam). Both run on this node for now.
+                    // independent pass/fail + timing, and so the test phase can move
+                    // to a separate node. The seam is the build/ dir: smart_build.sh
+                    // leaves build_mode.env + tests_to_run.json + the compiled test
+                    // binaries there, and smart_test.sh consumes only that dir - it
+                    // needs no source tree, NINJA_JOBS, or WORKSPACE_ROOT. To run the
+                    // test phase on a different node, carry build/ over (shared FS or
+                    // stash/unstash) and point BUILD_DIR at it. Both run here for now.
+                    // Env is scoped to each script invocation (inline assignment), not
+                    // exported into the stage shell.
                     stage("Smart Build (${arch_name})") {
                         sh """
-                            export WORKSPACE_ROOT=${env.WORKSPACE}
-                            export PARALLEL=32
-                            export NINJA_JOBS=${nt}
-                            export ARCH_NAME=${arch_name}
-                            export PROCESS_NINJA_TRACE=false
-                            export NINJA_FTIME_TRACE=false
+                            WORKSPACE_ROOT=${env.WORKSPACE} \\
+                            PARALLEL=32 \\
+                            NINJA_JOBS=${nt} \\
+                            ARCH_NAME=${arch_name} \\
+                            PROCESS_NINJA_TRACE=false \\
+                            NINJA_FTIME_TRACE=false \\
                             bash ../script/dependency-parser/smart_build.sh
                         """
                         archiveArtifacts artifacts: "tests_to_run.json,build_targets.txt,build_mode.env,smart_build.log", allowEmptyArchive: true
                     }
                     stage("Smart Test (${arch_name})") {
-                        sh "bash ../script/dependency-parser/smart_test.sh"
+                        // BUILD_DIR is the cross-node seam: it defaults to the build
+                        // dir we are in (same node); on a separate test node set it to
+                        // the carried-over build/. CTEST_PARALLEL is exposed as a tunable.
+                        sh """
+                            BUILD_DIR=\$(pwd) \\
+                            CTEST_PARALLEL=4 \\
+                            bash ../script/dependency-parser/smart_test.sh
+                        """
                         archiveArtifacts artifacts: "smart_test.log", allowEmptyArchive: true
                     }
                 }

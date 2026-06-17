@@ -660,6 +660,41 @@ python3 -m pytest tests/ --cov=src --cov-report=html
 | `tests/test_integration.py` | Integration tests with real build (9 tests) |
 | `README_legacy.md` | Documentation for legacy post-build approach |
 
+## Two-phase build/test and cross-node migration
+
+The smart build runs as two decoupled phases so build and test get independent
+pass/fail and timing, and so the test phase can move to a separate (e.g. GPU)
+node while the build runs on a cheaper node.
+
+**The seam is the `build/` directory.** `smart_build.sh` (build phase) leaves
+everything the test phase needs there:
+
+| Artifact | Producer | Consumed by `smart_test.sh` |
+|----------|----------|------------------------------|
+| compiled test/example binaries | `ninja` (selective targets or `check_prebuild`) | run by ctest |
+| `CTestTestfile.cmake` | cmake configure | test registry for ctest |
+| `build_mode.env` | `smart_build.sh` | selects full / selective / none |
+| `tests_to_run.json` | `smart_build_ci.sh` | `regex_chunks` for selective `ctest -R` |
+
+`smart_test.sh` consumes **only** the build dir plus `ctest`/`jq`/`bash` — it
+needs no source tree, no `WORKSPACE_ROOT`, and no `NINJA_JOBS`. Its only inputs
+are `BUILD_DIR` (defaults to the current directory) and `CTEST_PARALLEL`
+(defaults to 4).
+
+### Running the test phase on a separate node
+
+1. Make the `build/` directory available to the test node.
+2. Make `smart_test.sh` itself available there (a sparse checkout of
+   `script/dependency-parser/`, or stash just that file).
+3. Run `BUILD_DIR=<path-to-build> bash .../smart_test.sh`.
+
+**Constraint - identical absolute path.** CTest bakes the absolute path of each
+test binary into `CTestTestfile.cmake` at configure time (via
+`$<TARGET_FILE:...>`). The build dir must therefore live at the **same absolute
+path** on the test node, or ctest reports the tests as not found. This favors a
+shared filesystem mounted at the same path on both nodes over a
+stash/unstash that lands in a different workspace path.
+
 ## References
 
 - [CMake compile_commands.json](https://cmake.org/cmake/help/latest/variable/CMAKE_EXPORT_COMPILE_COMMANDS.html)
