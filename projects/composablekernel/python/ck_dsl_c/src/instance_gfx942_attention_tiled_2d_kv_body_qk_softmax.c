@@ -253,15 +253,30 @@ static ckc_value_t* fh_in_warp_row(ckc_gfx942_attn2d_build_ctx_t* ctx,
  * on the LDS path, so only the register-PV path needs to forward them -- which it
  * does through ctx->acc_cur scratch is NOT appropriate; the peer reads P_lds.   */
 
+/* REGISTER_PV scratch: P kept in registers, flattened [reg][n] (stride
+ * QK_N_TILES) to hand from the softmax sub-block to the narrow PV bucket within
+ * one emit_kv_body call (Python p_regs_f32[reg][n]). It is filled in the softmax
+ * emit and read in the PV emit of the SAME build, so it must outlive the softmax
+ * sub-block -- hence file scope rather than a stack local.
+ *
+ * Re-entrancy: the slots hold builder-bound ckc_value_t* that dangle once a
+ * build's arena is freed. Each build's fill loop overwrites only the slots its
+ * own (REGS_PER_LANE x QK_N_TILES) geometry touches, so a later build with a
+ * smaller extent could otherwise hand a previous build's freed pointer to the PV
+ * bucket. ckc_gfx942_attn2d_reset_softmax_scratch() zeroes the buffer at the
+ * build entry so every build starts from clean NULL. */
+static ckc_value_t* p_regs_f32_buf[CKC_GFX942_ATTN2D_MAX_REGS_PER_LANE
+                                   * CKC_GFX942_ATTN2D_MAX_N_TILES];
+
+/* Re-entrancy reset: clear the REGISTER_PV scratch before a new build. */
+void ckc_gfx942_attn2d_reset_softmax_scratch(void)
+{
+    memset(p_regs_f32_buf, 0, sizeof(p_regs_f32_buf));
+}
+
 void ckc_gfx942_attn2d_emit_kv_body(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
     ckc_ir_builder_t* b = ctx->b;
-
-    /* REGISTER_PV: P kept in registers, flattened [reg][n] (stride QK_N_TILES)
-     * to hand to the narrow PV bucket (Python p_regs_f32[reg][n]). Function-scope
-     * so it outlives the softmax sub-block where it is filled. */
-    static ckc_value_t* p_regs_f32_buf[CKC_GFX942_ATTN2D_MAX_REGS_PER_LANE
-                                       * CKC_GFX942_ATTN2D_MAX_N_TILES];
 
     /* ---- iter-start IGLP hint (line 3702-3703) ---- */
     if (ctx->USE_IGLP_OPT)

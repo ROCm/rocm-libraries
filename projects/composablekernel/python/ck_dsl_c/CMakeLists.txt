@@ -35,8 +35,23 @@ target_include_directories(ckc_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
 # R_X86_64_PC32 relocations the linker rejects for a PIC shared object.
 set_target_properties(ckc_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
+include(CTest)
+
 # Optional smoke test: cmake --build build --target ckc_smoke
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/smoke.c")
   add_executable(ckc_smoke tests/smoke.c)
   target_link_libraries(ckc_smoke PRIVATE ckc_core)
+endif()
+
+if(BUILD_TESTING)
+  add_executable(ckc_tiled_attention_2d_reentrancy
+                 tests/tiled_attention_2d_reentrancy.c)
+  target_link_libraries(ckc_tiled_attention_2d_reentrancy PRIVATE ckc_core)
+  if(UNIX)
+    target_link_libraries(ckc_tiled_attention_2d_reentrancy PRIVATE m)
+  endif()
+  add_test(NAME ckc_tiled_attention_2d_reentrancy
+           COMMAND ckc_tiled_attention_2d_reentrancy)
+  set_tests_properties(ckc_tiled_attention_2d_reentrancy
+                       PROPERTIES LABELS "ckc;unit;host")
 endif()
