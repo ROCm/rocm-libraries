@@ -1225,4 +1225,46 @@ namespace hipblaslt_ext
                       hipblasLtMatrixLayout_t Bdesc,
                       hipblasLtMatrixLayout_t Cdesc,
                       hipblasLtMatrixLayout_t Ddesc);
+
+    /*! \ingroup library_module
+     *  \brief Check if a solution is supported for the given heuristic result.
+     *
+     *  @param[in]
+     *  heuristicResultsArray Array of heuristic results to check.
+     *  @param[in]
+     *  handle The hipBLASLt context handle.
+     *  @param[in]
+     *  matmulDesc Handle to a previously created matrix multiplication descriptor.
+     *  @param[in]
+     *  alpha Pointer to the alpha scalar.
+     *  @param[in]
+     *  matA Handle to the matrix A layout descriptor.
+     *  @param[in]
+     *  matB Handle to the matrix B layout descriptor.
+     *  @param[in]
+     *  beta Pointer to the beta scalar.
+     *  @param[in]
+     *  matC Handle to the matrix C layout descriptor.
+     *  @param[in]
+     *  matD Handle to the matrix D layout descriptor.
+     *  @param[out]
+     *  workspaceSize Pointer to receive the required workspace size in bytes.
+     *  @param[in,out]
+     *  returnAlgoCount Pointer to the algorithm count, incremented if solution is supported.
+     *
+     *  \retval HIPBLAS_STATUS_SUCCESS If the operation completed successfully.
+     *  \retval HIPBLAS_STATUS_INVALID_VALUE If the algorithm is not supported.
+     */
+    HIPBLASLT_EXPORT
+    hipblasStatus_t isSolutionSupported(hipblasLtMatmulHeuristicResult_t* heuristicResultsArray,
+                                         hipblasLtHandle_t                  handle,
+                                         hipblasLtMatmulDesc_t              matmulDesc,
+                                         const void*                        alpha,
+                                         hipblasLtMatrixLayout_t            matA,
+                                         hipblasLtMatrixLayout_t            matB,
+                                         const void*                        beta,
+                                         hipblasLtMatrixLayout_t            matC,
+                                         hipblasLtMatrixLayout_t            matD,
+                                         size_t*                            workspaceSize,
+                                         int*                               returnAlgoCount);                      
 } // End of namespace hipblasltext

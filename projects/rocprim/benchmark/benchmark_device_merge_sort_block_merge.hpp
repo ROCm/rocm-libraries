@@ -91,8 +91,7 @@ private:
 
     // keys benchmark
     template<typename val = Value>
-    auto do_run(primbench::state&& state) const ->
-        typename std::enable_if<std::is_same<val, ::rocprim::empty_type>::value, void>::type
+    auto do_run(primbench::state&& state) const
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.size;
@@ -112,20 +111,56 @@ private:
         common::device_ptr<key_type> d_keys_input(keys_input);
         common::device_ptr<key_type> d_keys(items);
 
+        using value_ptr_type = std::
+            conditional_t<std::is_same_v<val, rocprim::empty_type>, rocprim::empty_type*, Value*>;
+
+        common::device_ptr<Value> d_values_input;
+
+        value_ptr_type values_ptr;
+        if constexpr(!std::is_same_v<val, rocprim::empty_type>)
+        {
+            using value_type = Value;
+
+            std::vector<value_type> values_input(items);
+            std::iota(values_input.begin(), values_input.end(), 0);
+
+            d_values_input = common::device_ptr<Value>(values_input);
+            common::device_ptr<value_type> d_values(items);
+            values_ptr = d_values.get();
+        }
+        else
+        {
+            values_ptr = nullptr;
+        }
+
         ::rocprim::less<key_type> lesser_op;
-        rocprim::empty_type*      values_ptr = nullptr;
 
         // Merge_sort_block_merge algorithm expects partially sorted input:
         unsigned int sorted_block_size;
-        HIP_CHECK(rocprim::detail::merge_sort_block_sort<block_sort_config>(d_keys_input.get(),
-                                                                            d_keys_input.get(),
-                                                                            values_ptr,
-                                                                            values_ptr,
-                                                                            items,
-                                                                            sorted_block_size,
-                                                                            lesser_op,
-                                                                            stream,
-                                                                            false));
+        if constexpr(std::is_same_v<val, rocprim::empty_type>)
+        {
+            HIP_CHECK(rocprim::detail::merge_sort_block_sort<block_sort_config>(d_keys_input.get(),
+                                                                                d_keys_input.get(),
+                                                                                values_ptr,
+                                                                                values_ptr,
+                                                                                items,
+                                                                                sorted_block_size,
+                                                                                lesser_op,
+                                                                                stream,
+                                                                                false));
+        }
+        {
+            HIP_CHECK(
+                rocprim::detail::merge_sort_block_sort<block_sort_config>(d_keys_input.get(),
+                                                                          d_keys_input.get(),
+                                                                          d_values_input.get(),
+                                                                          d_values_input.get(),
+                                                                          items,
+                                                                          sorted_block_size,
+                                                                          lesser_op,
+                                                                          stream,
+                                                                          false));
+        }
 
         size_t temporary_storage_bytes = 0;
         HIP_CHECK(rocprim::detail::merge_sort_block_merge<Config>(nullptr,
@@ -169,6 +204,14 @@ private:
                                          items * sizeof(key_type),
                                          hipMemcpyDeviceToDevice,
                                          stream));
+                if constexpr(!std::is_same_v<val, rocprim::empty_type>)
+                {
+                    HIP_CHECK(hipMemcpyAsync(values_ptr,
+                                             d_values_input.get(),
+                                             items * sizeof(Value),
+                                             hipMemcpyDeviceToDevice,
+                                             stream));
+                }
             });
 
         state.set_items(items);
@@ -181,117 +224,6 @@ private:
                                                                           temporary_storage_bytes,
                                                                           d_keys.get(),
                                                                           values_ptr,
-                                                                          items,
-                                                                          sorted_block_size,
-                                                                          lesser_op,
-                                                                          stream,
-                                                                          false));
-            });
-    }
-
-    // pairs benchmark
-    template<typename val = Value>
-    auto do_run(primbench::state&& state) const ->
-        typename std::enable_if<!std::is_same<val, ::rocprim::empty_type>::value, void>::type
-    {
-        const auto& stream = state.stream;
-        const auto& bytes  = state.size;
-        const auto& seed   = state.seed;
-
-        using key_type   = Key;
-        using value_type = Value;
-
-        size_t items = bytes / sizeof(key_type);
-
-        // Generate data
-        std::vector<key_type> keys_input
-            = get_random_data<key_type>(items,
-                                        common::generate_limits<key_type>::min(),
-                                        common::generate_limits<key_type>::max(),
-                                        seed);
-
-        std::vector<value_type> values_input(items);
-        std::iota(values_input.begin(), values_input.end(), 0);
-
-        common::device_ptr<key_type> d_keys_input(keys_input);
-        common::device_ptr<key_type> d_keys(items);
-
-        common::device_ptr<value_type> d_values_input(values_input);
-        common::device_ptr<value_type> d_values(items);
-
-        ::rocprim::less<key_type> lesser_op;
-
-        // Merge_sort_block_merge algorithm expects partially sorted input:
-        unsigned int sorted_block_size;
-        HIP_CHECK(rocprim::detail::merge_sort_block_sort<block_sort_config>(d_keys_input.get(),
-                                                                            d_keys_input.get(),
-                                                                            d_values_input.get(),
-                                                                            d_values_input.get(),
-                                                                            items,
-                                                                            sorted_block_size,
-                                                                            lesser_op,
-                                                                            stream,
-                                                                            false));
-
-        size_t temporary_storage_bytes = 0;
-        HIP_CHECK(rocprim::detail::merge_sort_block_merge<Config>(nullptr,
-                                                                  temporary_storage_bytes,
-                                                                  d_keys.get(),
-                                                                  d_values.get(),
-                                                                  items,
-                                                                  sorted_block_size,
-                                                                  lesser_op,
-                                                                  stream,
-                                                                  false));
-
-        common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
-
-        hipError_t err = rocprim::detail::merge_sort_block_merge<Config>(d_temporary_storage.get(),
-                                                                         temporary_storage_bytes,
-                                                                         d_keys.get(),
-                                                                         d_values.get(),
-                                                                         items,
-                                                                         sorted_block_size,
-                                                                         lesser_op,
-                                                                         stream,
-                                                                         false);
-        if(err == hipError_t::hipErrorAssert)
-        {
-            // state.gbench_state.SkipWithError("SKIPPING: block_sort_items_per_block >= "
-            //                                  "block_merge_items_per_block does not hold");
-            return;
-        }
-        else if(err != hipSuccess)
-        {
-            std::cout << "HIP error: " << err << " line: " << __LINE__ << std::endl;
-            exit(err);
-        }
-
-        state.run_before_every_iteration(
-            [&]
-            {
-                HIP_CHECK(hipMemcpyAsync(d_keys.get(),
-                                         d_keys_input.get(),
-                                         items * sizeof(key_type),
-                                         hipMemcpyDeviceToDevice,
-                                         stream));
-                HIP_CHECK(hipMemcpyAsync(d_values.get(),
-                                         d_values_input.get(),
-                                         items * sizeof(value_type),
-                                         hipMemcpyDeviceToDevice,
-                                         stream));
-            });
-
-        state.set_items(items);
-        state.add_reads<key_type>(items);
-
-        state.run(
-            [&]
-            {
-                HIP_CHECK(rocprim::detail::merge_sort_block_merge<Config>(d_temporary_storage.get(),
-                                                                          temporary_storage_bytes,
-                                                                          d_keys.get(),
-                                                                          d_values.get(),
                                                                           items,
                                                                           sorted_block_size,
                                                                           lesser_op,

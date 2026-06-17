@@ -4,7 +4,7 @@ from typing import Mapping
 from rocisa.code import Module
 from rocisa.instruction import SMulI32, SAndB32, SLShiftLeftB32, SAddU64, VMovB32,\
     VAndB32, VAddU32, VAddCOU32, VAddCCOU32, VAddNCU64, VLShiftRightB32, VMulLOU32, VMulHIU32, VLShiftLeftB32,\
-    GlobalPrefetchB8, SMovB64, VCmpGtU32, VCndMaskB32, SSubU32
+    GlobalPrefetchB8, SMovB64, VCmpGtU32, VCndMaskB32, SSubU32, SMovB32, SAddU32, SAddCU32
 from rocisa.container import sgpr, vgpr, RegisterContainer, VCC, GLOBALModifiers
 from rocisa.functions import vectorMultiply64Bpe, scalarMultiplyBpe
 from rocisa.enum import TemporalHint, CacheScope
@@ -46,18 +46,13 @@ class GL2PrefetchLoad(GL2Prefetch):
         subTc: str = tc[-1]
         bpe: float = tp["bpeGR"]
         if tc.startswith("MX"):
-            mod.addModuleAsFlatItems(writer.s_mul_u64_u32(
-                sgpr(f"GL2PrefetchInc{tc}"), sgpr(f"GL2PrefetchInc{tc}+1"),
-                sgpr("Size%s"%INDEX_CHARS[tIdx]), round(kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"] * bpe),
-                None, comment="addr increment"))
+            mod.add(SMulI32(sgpr(f"GL2PrefetchInc{tc}"), sgpr("Size%s"%INDEX_CHARS[tIdx]), \
+                round(kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"] * bpe), comment="addr increment"))
         elif tp["tlu"]:
             perpStride: str | RegisterContainer = writer.strideRef(subTc, 3)
-            mod.addModuleAsFlatItems(writer.s_mul_u64_u32(
-                sgpr(f"GL2PrefetchInc{tc}"), sgpr(f"GL2PrefetchInc{tc}+1"),
-                perpStride, round(kernel["DepthU"] * bpe),
-                None, comment="addr increment"))
+            mod.add(SMulI32(sgpr(f"GL2PrefetchInc{tc}"), perpStride, round(kernel["DepthU"] * bpe), comment="addr increment"))
         else:
-            mod.add(SMovB64(dst=sgpr(f"GL2PrefetchInc{tc}", 2), src=round(kernel["DepthU"] * bpe), comment="addr increment"))
+            mod.add(SMovB32(dst=sgpr(f"GL2PrefetchInc{tc}"), src=round(kernel["DepthU"] * bpe), comment="addr increment"))
         return mod
 
     def calculateStartAddr(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping) -> Module:
@@ -210,7 +205,9 @@ class GL2PrefetchLoad(GL2Prefetch):
                     mod.add(SAddU64(sgpr(tmpSgprIdx0, 2), sgpr(tmpSgprIdx0, 2), sgpr(tmpSgprIdx2, 2), \
                         comment="skip PGR loads"))
                 else:
-                    mod.add(SAddU64(sgpr(tmpSgprIdx0, 2), sgpr(tmpSgprIdx0, 2), sgpr(f"GL2PrefetchInc{tc}", 2), \
+                    mod.add(SAddU32(sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx0), sgpr(f"GL2PrefetchInc{tc}"), \
+                        comment="skip PGR loads"))
+                    mod.add(SAddCU32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), 0, \
                         comment="skip PGR loads"))
 
             # add all together
@@ -236,10 +233,12 @@ class GL2PrefetchLoad(GL2Prefetch):
     def incrementAddr(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping) -> Module:
         mod = Module()
         tc: str = tp["tensorChar"]
-        inc = sgpr(f"GL2PrefetchInc{tc}", 2)
+        inc = sgpr(f"GL2PrefetchInc{tc}")
         for i in range(tp["gl2nlp"]):
             for j in range(tp["gl2nlc"]):
                 addrName = f"GL2PrefetchAddr{tc}_{i}_{j}"
-                mod.add(VAddNCU64(vgpr(addrName, 2), vgpr(addrName, 2), inc))
+                addrNameHi = addrName + "+1"
+                mod.add(VAddCOU32(vgpr(addrName), VCC(), vgpr(addrName), inc))
+                mod.add(VAddCCOU32(vgpr(addrNameHi), VCC(), vgpr(addrNameHi), 0, VCC()))
 
         return mod

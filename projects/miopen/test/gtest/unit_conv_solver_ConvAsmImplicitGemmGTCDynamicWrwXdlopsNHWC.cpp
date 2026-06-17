@@ -97,7 +97,7 @@ auto GetConvHighTolTestCases(miopenDataType_t datatype)
 
     return std::vector{
         // clang-format off
-        // Regression tests for wo=1/ho=1 stride clamping bug  
+        // Regression tests for wo=1/ho=1 stride clamping bug
         TestCase{{32, 3, 1, 1}, {64, 3,  3,  5}, {1, 2}, {100, 7}, {1, 1}, datatype},
         TestCase{{32, 3, 2, 2}, {64, 3,  3,  5}, {2, 4}, {  4, 6}, {1, 1}, datatype},
         TestCase{{32, 3, 7, 9}, {64, 3, 10, 12}, {3, 3}, {  4, 5}, {1, 1}, datatype},

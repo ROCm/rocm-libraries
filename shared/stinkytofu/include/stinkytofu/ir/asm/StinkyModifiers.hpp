@@ -354,7 +354,9 @@ struct FLATModifiers : public TypedModifier<FLATModifiers> {
     static constexpr Modifier::Type Type = Modifier::Type::FLAT;
 
     FLATModifiers(int offset12 = 0, bool glc = false, bool slc = false, bool lds = false,
-                  bool isStore = false, bool hasGLCModifier = false, bool hasSC0Modifier = false)
+                  bool isStore = false, bool hasGLCModifier = false, bool hasSC0Modifier = false,
+                  MUBUFScope scope = MUBUFScope::SCOPE_NONE,
+                  TemporalHint th = TemporalHint::TH_NONE)
         : TypedModifier<FLATModifiers>(),
           offset12(offset12),
           glc(glc),
@@ -362,7 +364,9 @@ struct FLATModifiers : public TypedModifier<FLATModifiers> {
           lds(lds),
           isStore(isStore),
           hasGLCModifier(hasGLCModifier),
-          hasSC0Modifier(hasSC0Modifier) {}
+          hasSC0Modifier(hasSC0Modifier),
+          scope(scope),
+          th(th) {}
 
     int offset12;
     uint32_t glc : 1;
@@ -371,6 +375,9 @@ struct FLATModifiers : public TypedModifier<FLATModifiers> {
     uint32_t isStore : 1;
     uint32_t hasGLCModifier : 1;
     uint32_t hasSC0Modifier : 1;
+    // gfx12+ FLAT cache hints; default-NONE values are not emitted.
+    MUBUFScope scope;
+    TemporalHint th;
 };
 
 // Modifiers for global_* memory ops. Carries the immediate offset (offset:N)
@@ -395,7 +402,8 @@ struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
     MUBUFModifiers(bool offen = false, int offset12 = 0, bool glc = false, bool slc = false,
                    bool nt = false, bool lds = false, bool isStore = false,
                    bool hasMUBUFConst = false, bool hasGLCModifier = false,
-                   bool hasSC0Modifier = false, MUBUFScope scope = MUBUFScope::SCOPE_NONE)
+                   bool hasSC0Modifier = false, MUBUFScope scope = MUBUFScope::SCOPE_NONE,
+                   TemporalHint th = TemporalHint::TH_NONE)
         : TypedModifier<MUBUFModifiers>(),
           offset12(offset12),
           offen(offen),
@@ -407,7 +415,8 @@ struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
           hasMUBUFConst(hasMUBUFConst),
           hasGLCModifier(hasGLCModifier),
           hasSC0Modifier(hasSC0Modifier),
-          scope(scope) {}
+          scope(scope),
+          th(th) {}
 
     int offset12;
     uint32_t offen : 1;
@@ -420,6 +429,7 @@ struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
     uint32_t hasGLCModifier : 1;
     uint32_t hasSC0Modifier : 1;
     MUBUFScope scope;
+    TemporalHint th;
 };
 
 // Carries just the cache scope token for SOPP-format memory fences such as
@@ -918,6 +928,27 @@ struct SWaitAluData : public TypedModifier<SWaitAluData> {
     // Unified validity checker - check if field is used/set
     bool hasField(Field field) const {
         return validFields & (1 << field);
+    }
+
+    // Clear a single field (sets it back to "unused" / no-wait).
+    void clearField(Field field) {
+        validFields &= ~(1 << field);
+        switch (field) {
+                // clang-format off
+            case VA_VDST:  fieldsValue.va_vdst  = 0; break;
+            case VA_SDST:  fieldsValue.va_sdst  = 0; break;
+            case VA_SSRC:  fieldsValue.va_ssrc  = 0; break;
+            case HOLD_CNT: fieldsValue.hold_cnt = 0; break;
+            case VM_VSRC:  fieldsValue.vm_vsrc  = 0; break;
+            case VA_VCC:   fieldsValue.va_vcc   = 0; break;
+            case SA_SDST:  fieldsValue.sa_sdst  = 0; break;
+            default: break;  // clang-format on
+        }
+    }
+
+    // True when no field is currently valid (instruction is a no-op).
+    bool empty() const {
+        return validFields == 0;
     }
 
    private:

@@ -73,6 +73,53 @@ test_categories:
       - "comprehensive"
       - "full"
 
+  ffm-quick:
+    description: "Fast FFM tests (target: < 120 min)"
+    test_patterns:
+      - "HipcubBasicTests*"
+      - "HipcubCachingDeviceAllocatorTests*"
+      - "HipcubBlockAdjacentDifferenceSubtract*"
+      - "HipcubBlockDiscontinuity*"
+      - "HipcubBlockExchangeTests*"
+      - "HipcubBlockHistogramInputArrayTests*"
+      - "HipcubBlockLoadStoreTests*"
+      - "HipcubBlockMergeSort*"
+      - "HipcubBlockRadixRank*"
+      - "HipcubBlockReduceSingleValueTests*"
+      - "HipcubBlockReduceInputArrayTests*"
+      - "HipcubBlockRunLengthDecodeTest*"
+      - "HipcubBlockScanSingleValueTests*"
+      - "HipcubBlockScanInputArrayTests*"
+      - "HipcubBlockShuffleTests*"
+      - "DeviceBatchCopyTests*"
+      - "HipcubDeviceForTests*"
+      - "HipcubDeviceForEachInExtentsTests*"
+      - "HipcubDeviceForBulkTests*"
+      - "DeviceBatchMemcpyTests*"
+      - "HipcubDeviceRunLengthEncode*"
+      - "HipcubDeviceReduceByKey*"
+      - "HipcubDevicePartitionTests*"
+      - "HipcubUtilPtxTests*"
+      - "HipcubUtilDevice*"
+      - "HipcubVector*"
+      - "HipcubWarpExchangeTest*"
+      - "HipcubWarpLoadTest*"
+      - "HipcubWarpMergeSort*"
+      - "HipcubWarpReduceTests*"
+      - "HipcubWarpScanTests*"
+      - "HipcubWarpStoreTest*"
+      - "HipcubThreadOperationTests*"
+      - "HipcubThreadOperatorsTests*"
+      - "HipcubDivisionOperatorTests*"
+      - "HipcubNCThreadOperatorsTests*"
+      - "HipcubThreadSort*"
+      - "HipcubSinglePassScanTest*"
+      - "HipcubRunningPrefixTest*"
+    exclude:
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
 # No GPU-specific exclusions are defined yet for hipCUB. Add entries here if a
 # specific gfx target needs to skip particular suites (see rocPRIM's
 # test_categories.yaml for a worked example). The empty mapping is required so
@@ -85,3 +132,4 @@ execution_settings:
   category_timeouts:
     quick: 300          # 5 minutes
     standard: 14400     # 4 hours (longest tier the standard entry serves)
+    ffm-quick: 7200     # 2 hours

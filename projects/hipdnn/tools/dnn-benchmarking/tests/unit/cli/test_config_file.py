@@ -319,7 +319,7 @@ def test_sample_configs_parse_and_reference_existing_graphs() -> None:
     assert basic_args.warmup == 10
     assert basic_args.iters == 100
     assert basic_args.verbose is True
-    assert basic_args.plugin_path == [Path("/opt/rocm/lib/hipdnn_plugins/engines")]
+    assert basic_args.plugin_path is None
 
 
 def test_invalid_config_backend_errors_before_graph_resolution(
