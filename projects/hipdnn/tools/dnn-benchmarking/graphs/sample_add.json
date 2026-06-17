@@ -36,9 +36,16 @@
             "compute_data_type": "float",
             "inputs": {
                 "operation": "add",
+                "relu_lower_clip": null,
+                "relu_upper_clip": null,
+                "relu_lower_clip_slope": null,
+                "axis_tensor_uid": null,
                 "in_0_tensor_uid": 1,
                 "in_1_tensor_uid": 2,
-                "in_2_tensor_uid": null
+                "in_2_tensor_uid": null,
+                "swish_beta": null,
+                "elu_alpha": null,
+                "softplus_beta": null
             },
             "outputs": {
                 "out_0_tensor_uid": 3

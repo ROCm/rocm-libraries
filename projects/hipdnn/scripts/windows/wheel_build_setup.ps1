@@ -158,6 +158,7 @@ $RocmBin = "$RocmDevel\bin"
 
 Write-Host "Adding ROCm bin to PATH..." -ForegroundColor Yellow
 $env:PATH = "$RocmBin;$env:PATH"
+$env:ROCM_PATH = $RocmDevel
 
 # Convert to forward slashes for CMake compatibility
 $RocmDevelUnix = $RocmDevel -replace '\\', '/'
@@ -215,3 +216,6 @@ foreach ($pathEntry in $CurrentPathParts) {
 if (-not $HasRocmBinInCurrentPath) {
     $env:PATH = "$RocmBin;$env:PATH"
 }
+
+# Keep ROCM_PATH available in this terminal session after deactivation.
+$env:ROCM_PATH = $RocmDevel
