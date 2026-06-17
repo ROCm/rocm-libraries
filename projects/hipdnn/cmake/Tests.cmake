@@ -13,6 +13,32 @@ find_package(Python3 COMPONENTS Interpreter)
 
 findandcheckllvmsymbolizer()
 
+# YAML-driven CTest test categorisation for the *installed* tree only.
+# The shared helper apply_ctest_category_labels(yaml, install_test_file)
+# appends explicit set_property(TEST ...) blocks to the hand-rolled
+# install-tree CTestTestfile.cmake we generate in
+# install_hipdnn_ctest_files() below. Build-tree tests are intentionally
+# not labelled here -- if you need `ctest -L <tier>` in the build tree,
+# add per-directory apply_ctest_category_labels() calls in each
+# tests/CMakeLists.txt instead.
+set(_HIPDNN_TEST_CATEGORIES_YAML "${PROJECT_SOURCE_DIR}/test_categories.yaml")
+set(_HIPDNN_SHARED_CTEST "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+if(EXISTS "${_HIPDNN_SHARED_CTEST}" AND EXISTS "${_HIPDNN_TEST_CATEGORIES_YAML}")
+    include("${_HIPDNN_SHARED_CTEST}")
+    message(STATUS "hipDNN: YAML-based CTest categorization enabled (install tree only)")
+else()
+    if(NOT EXISTS "${_HIPDNN_SHARED_CTEST}")
+        message(STATUS
+            "hipDNN: shared/ctest not found at ${_HIPDNN_SHARED_CTEST}; skipping CTest categories"
+        )
+    endif()
+    if(NOT EXISTS "${_HIPDNN_TEST_CATEGORIES_YAML}")
+        message(STATUS
+            "hipDNN: ${_HIPDNN_TEST_CATEGORIES_YAML} not found; skipping CTest categories"
+        )
+    endif()
+endif()
+
 set(CHECK_DEPENDS_GLOBAL "" CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE)
 set(CHECK_EXECUTABLE_PATHS_GLOBAL "" CACHE INTERNAL "Accumulated global check executable paths" FORCE)
 
@@ -301,6 +327,23 @@ function(install_hipdnn_ctest_files)
     foreach(test_target ${all_tests})
         file(APPEND "${INSTALLED_CTEST_FILE}" "add_test(${test_target} \"../${test_target}\")\n")
     endforeach()
+
+    # Bake the YAML-driven category labels into the installed
+    # CTestTestfile.cmake so `ctest --test-dir $THEROCK_BIN_DIR/hipdnn -L
+    # <tier>` works against the install tree.
+    #
+    # Passing INSTALLED_CTEST_FILE as the 2nd argument signals the shared
+    # helper that the snippet will be evaluated by ctest's own script
+    # interpreter (which does not implement
+    # get_property(DIRECTORY ... PROPERTY TESTS)), so it emits explicit
+    # per-test set_property() lines after auto-discovering the test
+    # names from the add_test() lines we just wrote above.
+    if(COMMAND apply_ctest_category_labels AND all_tests)
+        apply_ctest_category_labels(
+            "${_HIPDNN_TEST_CATEGORIES_YAML}"
+            "${INSTALLED_CTEST_FILE}"
+        )
+    endif()
 
     # Install the generated CTestTestfile.cmake to HIPDNN_CTEST_FILE_INSTALL_PATH
     install(FILES "${INSTALLED_CTEST_FILE}" DESTINATION ${HIPDNN_CTEST_FILE_INSTALL_PATH}

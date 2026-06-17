@@ -30,6 +30,7 @@ import os
 import subprocess
 import sys
 import argparse
+import glob
 
 from datetime import datetime
 from pathlib import Path
@@ -77,6 +78,7 @@ def executeStepsInConfig(
         deviceId: int,
         probSolDict: dict,
         buildOnly: bool = False,
+        solutionPoolFiles: list = None,
    ):
     """Conducts the steps in the provided ``config`` according to the Tensile workflow.
 
@@ -95,6 +97,7 @@ def executeStepsInConfig(
         srcToolchain (SourceToolchain): The toolchain for making source kernels.
         cCompiler (str): The C compiler to use.
         buildOnly (bool): If True, generate and build kernels but skip benchmarking.
+        solutionPoolFiles (list): Resolved paths to library logic YAMLs to use as solution pools.
     """
 
     buildTmpPath = outputPath / "build_tmp"
@@ -119,6 +122,7 @@ def executeStepsInConfig(
                 isaInfoMap,
                 probSolDict,
                 buildOnly,
+                solutionPoolFiles,
             )
         print1("")
 
@@ -504,6 +508,11 @@ def Tensile(userArgs):
                  "First run using this flag, then rerun with --use-cache.")
     argParser.add_argument("--restore-from-log", type=str, dest="RestoreLog",
             help="A log file captured in previous tuning. ONLY RELIABLE when configs yaml not changes")
+    argParser.add_argument("--solution-pool", dest="solutionPool", default=None,
+            help="Glob pattern matching library logic YAML file(s). Solutions from the "
+                 "matching file (by ProblemType) will be used as the solution pool instead "
+                 "of generating from ForkParameters. "
+                 "Example: '3_LibraryLogic/*.yaml'")
     argParser.add_argument("--gpu-targets", dest="gpuTargets", default=None,
             help="Semicolon-separated GPU targets (e.g. gfx942). "
                  "Overrides ISA auto-detection and YAML config ISA.")
@@ -534,6 +543,18 @@ def Tensile(userArgs):
         prob_sol_map = restore_prob_sol_map(restoreLogPath)
         for key,value in prob_sol_map.items():
             print1(f'#  Restored Prob-Solution From Log: [Prob:{key},Sol:{value}]')
+
+    solutionPoolFiles = None
+    if args.solutionPool:
+        pool = args.solutionPool
+        if os.path.isdir(pool):
+            globPattern = os.path.join(pool, "**", "*.yaml")
+        else:
+            globPattern = pool
+        solutionPoolFiles = sorted(f for f in glob.iglob(globPattern, recursive=True) if os.path.isfile(f))
+        if not solutionPoolFiles:
+            printExit("--solution-pool '{}' matched no files".format(args.solutionPool))
+        print1("#  Solution pool: {} files".format(len(solutionPoolFiles)))
 
     # 2nd half of splash
     if len(configPaths) == 1:
@@ -664,7 +685,7 @@ def Tensile(userArgs):
     if "MaxFileName" in globalParameters or "MaxFileName" in config:
         printWarning("MaxFileName is no longer configurable, it will be automatically set to 64")
 
-    executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id, prob_sol_map, buildOnly)
+    executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id, prob_sol_map, buildOnly, solutionPoolFiles)
 
 def TensileConfigPath(*args):
     return os.path.join(os.path.dirname(os.path.realpath(__file__)), "Configs", *args)

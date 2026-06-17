@@ -79,6 +79,13 @@ for i in range(1, maxWGsInCluster + 1):
     if i * j <= maxWGsInCluster:
       validClusterDimensions.append([i, j])
 
+# Shared valid values for LdsBlockSizePerPadA and LdsBlockSizePerPadB so they stay in sync.
+validLdsBlockSizePerPad = [-1, 0, 16, 32, 64, 96, 128, 192, 256, 320, 384, 448, 512, 576, 640, 704, 768,
+                           832, 896, 960, 1024, 1088, 1152, 1216, 1280, 1344, 1408, 1472, 1536, 1600, 1664,
+                           1728, 1792, 1856, 1920, 1984, 2048, 2176, 2304, 2432, 2560, 2688, 2816, 2944,
+                           3072, 3200, 3328, 3456, 3584, 3712, 3840, 3968, 4096, 4352, 4608, 4864, 5120,
+                           5376, 5632, 6144, 6656, 7168, 7680, 8192]
+
 @lru_cache
 def makeValidWorkGroups():
     validWorkGroups = []
@@ -321,6 +328,11 @@ validParameters = { # we need to make sure this matches develop
     #    SIA3: 1LDSBuffer works only when PGR=True
     # TODO: optimize scheduling to support more cases.
     "1LDSBuffer": [-1, 0, 1],
+    # StreamK persistent loop: use the current tile's no-load-loop window to
+    # issue the first global-read group for the next persistent tile. The
+    # generated code keeps that first-PGR data durable and restores borrowed
+    # current-tile state before current tail/NLL code resumes.
+    "PrefetchAcrossPersistent": [0, 1],
     # Split the unroll summation into multiple sections and combine the sections
     # GSU applies only to the unroll summation dimension
     # Set to 0 to disable GSU, kernel code will be generated without GSU support
@@ -786,6 +798,12 @@ validParameters = { # we need to make sure this matches develop
     # The priority of these environment variables is defined as follows:
     # TENSILE_STREAMK_FIXED_GRID > TENSILE_STREAMK_DYNAMIC_GRID > TENSILE_STREAMK_MAX_CUS > TENSILE_STREAMK_GRID_MULTIPLIER
     "StreamK": [0, 1, 2, 3, 4],
+    # Force StreamK=3 to run all output tiles through the persistent DP path.
+    # When enabled, dispatch uses the single-kernel StreamK path, sets skTiles=0
+    # to skip the SK region, and keeps the normal StreamK grid selection policy.
+    # The invariant is no partial output tile fixup and no SK-region processing.
+    # Valid only with DP-first, non-atomic StreamK mode 3.
+    "StreamKForceDPOnly": [0, 1],
     # Determines if StreamK kernel uses atomics
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles
@@ -886,9 +904,9 @@ validParameters = { # we need to make sure this matches develop
     # is added (readOffset aware of the pad and adjusts offset value based on this parameter value).
     # Only support LdsBlockSizePerPad >= unrollDepth * BPE
     # 0 means disable LdsBlockSizePerPad
-    "LdsBlockSizePerPadA": [-1, 0, 64, 128, 256, 512, 1024, 2048],
+    "LdsBlockSizePerPadA": validLdsBlockSizePerPad,
     "LdsBlockSizePerPadMXSA": [-1, 0, 64, 128, 256, 512, 1024, 2048],
-    "LdsBlockSizePerPadB": [-1, 0, 64, 128, 256, 512, 1024, 2048],
+    "LdsBlockSizePerPadB": validLdsBlockSizePerPad,
     "LdsBlockSizePerPadMXSB": [-1, 0, 64, 128, 256, 512, 1024, 2048],
     "LdsBlockSizePerPadMetadata": [-1, 0, 64, 128, 256, 512, 1024, 2048],
     # Transpose LDS format. Local store in coalesced dimension , same as optimized global fetch dimension . applicable only in TLU=0 case for miSIMD(s)
@@ -1076,8 +1094,6 @@ validParameters = { # we need to make sure this matches develop
     #   "Auto":        triggers defaulting in Solution.assignDerivedParameters. The default is
     #                  TDM iff TDMInst != 0, otherwise BufferLoad.
     "MXLoadInst": ["Auto", "TDM", "BufferLoad", "GlobalLoad"],
-    # Enable cluster barrier.
-    "ClusterBarrier": [False, True],
     # Cluster dimension. Clusters have up to 16 work-groups in a cluster, but each work-group in a
     # cluster runs on a separate WGP.
     "ClusterDim": validClusterDimensions,

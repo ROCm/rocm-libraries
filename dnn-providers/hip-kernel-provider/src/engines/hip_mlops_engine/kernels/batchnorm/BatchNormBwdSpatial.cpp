@@ -679,7 +679,7 @@ struct BatchNormBwdSpatialImpl<3, FpType, FpPrecType, FpAccumType>
         FpPrecType ds = 0;
         FpPrecType db = 0;
 
-        // maybe unused if HIP_PLUGIN_BN_N >= HIP_PLUGIN_BN_MAXN
+        // Unused if hip_plugin_bn_config::n >= hip_plugin_bn_config::max_n
         FpPrecType batchvalues[hip_plugin_bn_config::n];
         FpPrecType dyvalues[hip_plugin_bn_config::n];
 

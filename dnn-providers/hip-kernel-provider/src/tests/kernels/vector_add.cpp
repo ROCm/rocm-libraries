@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// This kernel is used for testing in TestHipProgramAndKernel.cpp
+// This kernel is used for testing in TestProgramAndKernel.cpp
 
 extern "C" __global__ void vector_add(const float* a, const float* b, float* c, int n)
 {

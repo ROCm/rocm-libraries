@@ -13,6 +13,7 @@
 #include <rocRoller/KernelGraph/Transforms/AddPRNG.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddPrefetch.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddStreamK.hpp>
+#include <rocRoller/KernelGraph/Transforms/AddTDMToLDS.hpp>
 #include <rocRoller/KernelGraph/Transforms/AliasDataFlowTags.hpp>
 #include <rocRoller/KernelGraph/Transforms/AssignIndexExpressions.hpp>
 #include <rocRoller/KernelGraph/Transforms/CleanArguments.hpp>

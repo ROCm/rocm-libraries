@@ -1,0 +1,174 @@
+# ########################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: hipsparse_common.yaml
+
+
+Tests:
+# Quick
+- name: spmm_bsr
+  category: quick
+  function: spmm_bsr
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [800]
+  N: [16]
+  K: [804]
+  block_dim: [16]
+  alpha: [1.0]
+  alphai: [1.0]
+  beta: [1.0]
+  betai: [1.0]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
+  orderB: [HIPSPARSE_ORDER_COL]
+  orderC: [HIPSPARSE_ORDER_COL]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
+  spmm_alg: [HIPSPARSE_SPMM_ALG_DEFAULT, HIPSPARSE_SPMM_BSR_ALG1]
+
+- name: spmm_bsr
+  category: quick
+  function: spmm_bsr
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [500]
+  N: [25]
+  K: [804]
+  block_dim: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+  alpha: [2.0]
+  alphai: [0.5]
+  beta: [1.0]
+  betai: [-0.5]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  orderB: [HIPSPARSE_ORDER_COL]
+  orderC: [HIPSPARSE_ORDER_COL]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
+  spmm_alg: [HIPSPARSE_SPMM_BSR_ALG1]
+
+# Pre-checkin
+- name: spmm_bsr_bad_arg
+  category: pre_checkin
+  function: spmm_bsr_bad_arg
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+
+- name: spmm_bsr
+  category: pre_checkin
+  function: spmm_bsr
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: [8]
+  K: 1
+  block_dim: [2, 3, 4, 5, 6, 7, 8, 9]
+  alpha: [1.0]
+  alphai: [-1.0]
+  beta: [2.0]
+  betai: [1.0]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
+  orderB: [HIPSPARSE_ORDER_COL]
+  orderC: [HIPSPARSE_ORDER_COL]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
+  spmm_alg: [HIPSPARSE_SPMM_BSR_ALG1]
+  filename: [nos1,
+             nos2,
+             nos3,
+             nos4,
+             nos5,
+             nos6,
+             nos7]
+
+- name: spmm_bsr
+  category: pre_checkin
+  function: spmm_bsr
+  indextype: *i32
+  precision: *double_only_precisions
+  M: 1
+  N: [16]
+  K: 1
+  block_dim: [3]
+  alpha: [0.5]
+  alphai: [0.0]
+  beta: [1.2]
+  betai: [0.0]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  orderB: [HIPSPARSE_ORDER_COL]
+  orderC: [HIPSPARSE_ORDER_COL]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  dirA: [HIPSPARSE_DIRECTION_ROW]
+  spmm_alg: [HIPSPARSE_SPMM_BSR_ALG1]
+  filename: [scircuit,
+             shipsec1]
+
+# Nightly
+- name: spmm_bsr
+  category: nightly
+  function: spmm_bsr
+  indextype: *i32
+  precision: *double_only_precisions
+  M: 1
+  N: [17]
+  K: 1
+  block_dim: [4, 7]
+  alpha: [0.5]
+  alphai: [0.0]
+  beta: [1.2]
+  betai: [0.0]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  orderB: [HIPSPARSE_ORDER_COL]
+  orderC: [HIPSPARSE_ORDER_COL]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  dirA: [HIPSPARSE_DIRECTION_ROW]
+  spmm_alg: [HIPSPARSE_SPMM_BSR_ALG1]
+  filename: [scircuit,
+             shipsec1]
+
+- name: spmm_bsr
+  category: nightly
+  function: spmm_bsr
+  indextype: *i32
+  precision: *double_only_precisions_complex
+  M: 1
+  N: [32]
+  K: 1
+  block_dim: [2, 5, 8, 14]
+  alpha: [2.0]
+  alphai: [0.5]
+  beta: [0.4]
+  betai: [0.6]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  orderB: [HIPSPARSE_ORDER_COL]
+  orderC: [HIPSPARSE_ORDER_COL]
+  baseA: [HIPSPARSE_INDEX_BASE_ONE]
+  dirA: [HIPSPARSE_DIRECTION_COLUMN]
+  spmm_alg: [HIPSPARSE_SPMM_BSR_ALG1]
+  filename: [Chebyshev4]
