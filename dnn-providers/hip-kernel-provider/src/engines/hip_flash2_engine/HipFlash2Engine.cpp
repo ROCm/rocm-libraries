@@ -4,11 +4,12 @@
 #include "HipFlash2Engine.hpp"
 
 // Full IPlanBuilder implementation (supersedes stub HipFlash2FwdPlanBuilder.hpp)
-#include "HipFlash2FwdPlanBuilder_v2.hpp"
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
-#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+
+#include "HipFlash2FwdPlanBuilder_v2.hpp"
 
 namespace hip_flash2_engine
 {
@@ -45,13 +46,13 @@ void HipFlash2Engine::getDetails(
     hipdnnPluginConstData_t& detailsOut) const
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
-        builder, id(), nullptr);
+    auto engineDetails
+        = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(builder, id(), nullptr);
     builder.Finish(engineDetails);
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
-    detailsOut.ptr  = detachedBuffer->data();
+    detailsOut.ptr = detachedBuffer->data();
     detailsOut.size = detachedBuffer->size();
-    auto* dataPtr   = detachedBuffer->data();
+    auto* dataPtr = detachedBuffer->data();
     handle.storeEngineDetailsDetachedBuffer(dataPtr, std::move(detachedBuffer));
 }
 
