@@ -681,19 +681,50 @@ needs no source tree, no `WORKSPACE_ROOT`, and no `NINJA_JOBS`. Its only inputs
 are `BUILD_DIR` (defaults to the current directory) and `CTEST_PARALLEL`
 (defaults to 4).
 
-### Running the test phase on a separate node
+### Why a relocated `build/` breaks ctest
 
-1. Make the `build/` directory available to the test node.
-2. Make `smart_test.sh` itself available there (a sparse checkout of
-   `script/dependency-parser/`, or stash just that file).
-3. Run `BUILD_DIR=<path-to-build> bash .../smart_test.sh`.
+CTest bakes the **absolute** path of each test binary into `CTestTestfile.cmake`
+at configure time (via `$<TARGET_FILE:...>`). If the `build/` dir lands at a
+different absolute path on the test node, ctest looks for the binaries where they
+were built and reports the tests as "Not Run" / not found. Making the test phase
+relocatable is therefore a transport-layer concern, not a change to the split.
 
-**Constraint - identical absolute path.** CTest bakes the absolute path of each
-test binary into `CTestTestfile.cmake` at configure time (via
-`$<TARGET_FILE:...>`). The build dir must therefore live at the **same absolute
-path** on the test node, or ctest reports the tests as not found. This favors a
-shared filesystem mounted at the same path on both nodes over a
-stash/unstash that lands in a different workspace path.
+### Coercing ctest to work with stash/unstash
+
+Jenkins `stash`/`unstash` restores files relative to the current directory, so on
+its own it lands `build/` at whatever workspace path the test node happens to use.
+Two ways to satisfy the absolute-path rule above, neither of which touches
+`smart_build.sh` / `smart_test.sh` / `check_prebuild`:
+
+- **Identical absolute path (recommended).** Pin a deterministic workspace on both
+  nodes (`customWorkspace` / `ws('/fixed/path')`) so the unstashed `build/` sits at
+  the same absolute path the build node used. The baked paths then resolve and
+  plain `ctest` works. This rule applies equally to a shared filesystem (mount it
+  at the same path on both nodes).
+- **Post-unstash path rewrite (fallback).** After unstash, rewrite the build-node
+  path prefix to the test-node prefix in `CTestTestfile.cmake` (and any nested
+  `CTestTestfile.cmake`), e.g. with `sed`, before running ctest.
+
+**Caveat:** stashing the full `build/` moves many GB through the Jenkins
+controller; a shared filesystem avoids that data movement while obeying the same
+identical-path rule. Either way, also make `smart_test.sh` available on the test
+node — it is self-contained (no `SCRIPT_DIR`, no sourcing), so stash it alongside
+`build/` or rely on the source checkout.
+
+### Additive future checklist (does not change the split)
+
+When the test phase actually moves to its own node, the following are additive on
+top of the current two-stage layout:
+
+1. allocate the test phase in its own `node(<gpu-label>)`;
+2. make `build/` available there at the matching absolute path (shared FS, or
+   stash/unstash with an identical workspace / path rewrite);
+3. make `smart_test.sh` available there (checkout or stash);
+4. run `BUILD_DIR=<path> CTEST_PARALLEL=<n> bash .../smart_test.sh`.
+
+**Invariant:** the build-vs-test boundary — `smart_build.sh`, `smart_test.sh`,
+`check_prebuild`, and the `build_mode.env` / `build/` seam — is stable. Cross-node
+adds only a node and a transport mechanism; it does not reshape the split.
 
 ## References
 
