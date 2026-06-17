@@ -25,7 +25,9 @@
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/pipeline/PassBuilder.hpp"
 
-#ifndef STINKYTOFU_PLUGIN_HELLOWORLD_PATH
+// Static build of the example links the OBJECT lib and registers the pass directly,
+// so it needs the header; the shared build dlopens the MODULE instead (path define).
+#if defined(STINKYTOFU_BUILD_EXAMPLES) && !defined(STINKYTOFU_PLUGIN_HELLOWORLD_PATH)
 #include "HelloWorldPass.hpp"
 #endif
 
@@ -201,9 +203,10 @@ TEST(PluginDataTest, PassBuilderAccessFromModule) {
 }
 
 // --- HelloWorldPass example plugin integration test ---
+// Gated on STINKYTOFU_BUILD_EXAMPLES: only compiled when the example plugins are built.
 // LLVM-style: shared builds load the plugin dynamically via loadPlugin(),
 // static builds link the OBJECT lib and call registerHelloWorldPassPlugin() directly.
-
+#ifdef STINKYTOFU_BUILD_EXAMPLES
 TEST(PluginIntegrationTest, HelloWorldPassReadsAndWritesPluginData) {
 #ifdef STINKYTOFU_PLUGIN_HELLOWORLD_PATH
     ASSERT_TRUE(PassBuilder::loadPlugin(STINKYTOFU_PLUGIN_HELLOWORLD_PATH));
@@ -233,3 +236,4 @@ TEST(PluginIntegrationTest, HelloWorldPassReadsAndWritesPluginData) {
 
     PassBuilder::unloadPlugins();
 }
+#endif  // STINKYTOFU_BUILD_EXAMPLES

@@ -224,6 +224,15 @@ def main():
         default=None,
         help="Optional: Path to write install-time test definitions with relative paths",
     )
+    parser.add_argument(
+        "--resource-group",
+        default=None,
+        help=(
+            "Optional CTest RESOURCE_GROUPS token (e.g. 'gfx942' or 'gpus'). "
+            "When set, generated test names get a '_<resource>' segment after "
+            'the target name and each suite gets RESOURCE_GROUPS "1,<resource>:1" applied.'
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -231,6 +240,16 @@ def main():
     target_name = args.target_name
     working_dir = args.working_dir
     install_test_file = args.install_test_file
+    resource_group = args.resource_group
+    if resource_group is not None:
+        err = validate_identifier(resource_group)
+        if err is not None:
+            print(f"Error: invalid --resource-group value: {err}", file=sys.stderr)
+            sys.exit(1)
+    name_prefix = f"{target_name}_{resource_group}" if resource_group else target_name
+    resource_groups_prop = (
+        f' RESOURCE_GROUPS "1,{resource_group}:1"' if resource_group else ""
+    )
 
     config = load_yaml(yaml_file)
 
@@ -351,7 +370,7 @@ def main():
             # Write category test to CMake file and install file.
             # =======================================================================
             print("add_test(")
-            print(f"  NAME {target_name}_{category_name}_suite")
+            print(f"  NAME {name_prefix}_{category_name}_suite")
             print(
                 f"  COMMAND {target_name} --gtest_filter={pattern_string}{extra_args_string}"
             )
@@ -359,12 +378,14 @@ def main():
             print(")")
 
             print(
-                f"set_tests_properties({target_name}_{category_name}_suite PROPERTIES"
+                f"set_tests_properties({name_prefix}_{category_name}_suite PROPERTIES"
             )
             print(f"  LABELS {label_string}")
             print(f"  TIMEOUT {timeout}")
             if env_string:
                 print(f'  ENVIRONMENT "{env_string}"')
+            if resource_group:
+                print(f'  RESOURCE_GROUPS "1,{resource_group}:1"')
             print(")")
             print()
 
@@ -372,11 +393,11 @@ def main():
             if install_file_handle:
                 try:
                     install_file_handle.write(
-                        f'add_test({target_name}_{category_name}_suite "../{target_name}" --gtest_filter={pattern_string}{extra_args_string})\n'
+                        f'add_test({name_prefix}_{category_name}_suite "../{target_name}" --gtest_filter={pattern_string}{extra_args_string})\n'
                     )
                     env_prop = f' ENVIRONMENT "{env_string}"' if env_string else ""
                     install_file_handle.write(
-                        f"set_tests_properties({target_name}_{category_name}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop})\n\n"
+                        f"set_tests_properties({name_prefix}_{category_name}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop}{resource_groups_prop})\n\n"
                     )
                     install_file_handle.flush()
                 except OSError as e:
@@ -495,7 +516,7 @@ def main():
                 # =======================================================================
                 print(f"# GPU exclusion for {gpu_arch} - {category_name} category")
                 print("add_test(")
-                print(f"  NAME {target_name}_{category_name}_{gpu_arch}_suite")
+                print(f"  NAME {name_prefix}_{category_name}_{gpu_arch}_suite")
                 print(
                     f"  COMMAND {target_name} --gtest_filter={pattern_string}{cat_extra_args_string}"
                 )
@@ -503,12 +524,14 @@ def main():
                 print(")")
 
                 print(
-                    f"set_tests_properties({target_name}_{category_name}_{gpu_arch}_suite PROPERTIES"
+                    f"set_tests_properties({name_prefix}_{category_name}_{gpu_arch}_suite PROPERTIES"
                 )
                 print(f"  LABELS {label_string}")
                 print(f"  TIMEOUT {timeout}")
                 if env_string:
                     print(f'  ENVIRONMENT "{env_string}"')
+                if resource_group:
+                    print(f'  RESOURCE_GROUPS "1,{resource_group}:1"')
                 print(")")
                 print()
 
@@ -516,11 +539,11 @@ def main():
                 if install_file_handle:
                     try:
                         install_file_handle.write(
-                            f'add_test({target_name}_{category_name}_{gpu_arch}_suite "../{target_name}" --gtest_filter={pattern_string}{cat_extra_args_string})\n'
+                            f'add_test({name_prefix}_{category_name}_{gpu_arch}_suite "../{target_name}" --gtest_filter={pattern_string}{cat_extra_args_string})\n'
                         )
                         env_prop = f' ENVIRONMENT "{env_string}"' if env_string else ""
                         install_file_handle.write(
-                            f"set_tests_properties({target_name}_{category_name}_{gpu_arch}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop})\n\n"
+                            f"set_tests_properties({name_prefix}_{category_name}_{gpu_arch}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop}{resource_groups_prop})\n\n"
                         )
                         install_file_handle.flush()
                     except OSError as e:
