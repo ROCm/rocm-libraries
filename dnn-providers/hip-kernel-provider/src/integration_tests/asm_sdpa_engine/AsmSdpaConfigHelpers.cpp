@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "AsmSdpaConfigHelpers.hpp"
+#include "../../engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/SdpaConfigConstants.hpp"
 #include "hip_kernel_provider_common/SdpaConfigEnumerations.hpp"
 
@@ -12,6 +13,7 @@ namespace asm_sdpa_engine
 {
 using namespace hipdnn_frontend;
 using namespace hip_kernel_provider_common;
+using plan_utils::MaskType;
 
 static DataType toDataType(const std::string& configDataType)
 {

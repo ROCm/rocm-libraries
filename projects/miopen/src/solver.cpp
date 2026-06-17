@@ -304,12 +304,8 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
     RegisterWithSolver(registry, ++id, conv::ConvHipDirectFwd11x11{}, miopenConvolutionAlgoDirect);
     ++id; // removed ConvOclDirectFwdGen
     ++id; // removed ConvOclDirectFwd3x3
-    RegisterWithSolver(registry, ++id, conv::ConvOclDirectFwd{}, miopenConvolutionAlgoDirect);
-    Register(registry,
-             ++id,
-             Primitive::Fusion,
-             fusion::ConvOclDirectFwdFused{}.SolverDbId(),
-             miopenConvolutionAlgoDirect);
+    ++id; // removed ConvOclDirectFwd
+    ++id; // removed ConvOclDirectFwdFused
     ++id; // removed ConvOclDirectFwd1x1
     RegisterWithSolver(registry, ++id, conv::ConvBinWinograd3x3U{}, miopenConvolutionAlgoWinograd);
     RegisterWithSolver(registry, ++id, conv::ConvBinWinogradRxS{}, miopenConvolutionAlgoWinograd);
@@ -813,6 +809,12 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
                        miopenConvolutionAlgoWinograd);
 
     RegisterWithSolver(registry, ++id, conv::ConvDepthwiseFwd3D{}, miopenConvolutionAlgoDirect);
+    RegisterWithSolver(registry, ++id, conv::ConvHipDirectFwd{}, miopenConvolutionAlgoDirect);
+    Register(registry,
+             ++id,
+             Primitive::Fusion,
+             fusion::ConvHipDirectFwdFused{}.SolverDbId(),
+             miopenConvolutionAlgoDirect);
     //  IMPORTANT: New solvers should be added to the end of the function, and don't leave a white
     //  space between this comment and the newly registered solver(s)!
 }

@@ -150,7 +150,6 @@ template <typename HipKernelConfig,
           typename Architecture,
           int Variant,
           int NCHW,
-          int MaxN,
           int NElements,
           int N,
           int C,
@@ -170,7 +169,6 @@ struct proto_config
     static_assert(Vectorize == 0 || Vectorize == 1, "Vectorize must be 0 or 1");
     static_assert(UseNodpp == 0 || UseNodpp == 1, "UseNodpp must be 0 or 1");
     static_assert(NCHW >= 0, "HIP_PLUGIN_BN_NCHW should be always >= 0");
-    static_assert(MaxN >= 0, "HIP_PLUGIN_BN_MAXN should be always >= 0");
     static_assert(C >= 0, "HIP_PLUGIN_BN_C should be always >= 0");
     static_assert(N >= 0, "HIP_PLUGIN_BN_N should be always >= 0");
     static_assert(HW >= 0, "HIP_PLUGIN_BN_HW should be always >= 0");
@@ -196,7 +194,14 @@ struct proto_config
                      : 0); // TODO: not sure if 0 should be the default value of this.
     static constexpr auto launch_dim = LaunchDim{};
     static constexpr unsigned int nchw = static_cast<unsigned int>(NCHW);
-    static constexpr unsigned int max_n = static_cast<unsigned int>(MaxN);
+
+    // `max_n` is a limit on the number of batch elements from the x tensor that can be cached in per-thread memory as part of
+    // variant 3 kernels. If batchsize (n_elements) exceeds this limit then the kernel doesn't cache the global memory accesses.
+    // The constant of 65 is related to the heuristic used in `defaultConfigSpatialSingle` where Batchnorm plans select the kernel
+    // variant to use. In BN Fwd training, the heuristics only selects variant 3 when N <= 32, so the caching optimization is always
+    // used. In BN Bwd training, the heuristics only selects variant 3 when N > 64, so the caching optimization is never used. If
+    // there are future changes to how the heuristic selects variant 3 kernels, then it may be worth revisiting this caching limit.
+    static constexpr unsigned int max_n = 65;
     static constexpr unsigned int n_elements = static_cast<unsigned int>(NElements);
     static constexpr unsigned int n = static_cast<unsigned int>(N);
     static constexpr unsigned int c = static_cast<unsigned int>(C);
@@ -267,7 +272,6 @@ using config = hip_kernel_provider::batchnorm::detail::proto_config<
                                                                 HIP_PLUGIN_GFX115X>,
     HIP_PLUGIN_BN_VARIANT,
     HIP_PLUGIN_BN_NCHW,
-    HIP_PLUGIN_BN_MAXN,
     HIP_PLUGIN_BN_N_ELEMENTS,
     HIP_PLUGIN_BN_N,
     HIP_PLUGIN_BN_C,

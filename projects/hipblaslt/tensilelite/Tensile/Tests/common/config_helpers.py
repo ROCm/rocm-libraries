@@ -35,12 +35,12 @@ import yaml
 
 from Tensile.Common.DataType import DataType
 
+_TESTS_ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
+
 try:
     DEFAULT_YAML_LOADER = yaml.CSafeLoader
-except:
-    print('CSafeLoader is not installed.')
+except AttributeError:
     DEFAULT_YAML_LOADER = yaml.SafeLoader
-
 
 
 def get_rocm_version_or_none():
@@ -70,17 +70,19 @@ def walkDict(root, path=""):
                 keypath = path + "." + str(keypath)
             yield from walkDict(value, keypath)
     elif isinstance(root, list):
-        for i,obj in enumerate(root):
+        for i, obj in enumerate(root):
             keypath = str(i)
             if path != "":
                 keypath = path + "." + keypath
             yield from walkDict(obj, keypath)
+
 
 def markNamed(name):
     """
     Gets a mark by a name contained in a variable.
     """
     return getattr(pytest.mark, name)
+
 
 def configMarks(filepath, rootDir, availableArchs):
     """
@@ -160,24 +162,43 @@ def configMarks(filepath, rootDir, availableArchs):
 
     return marks
 
-def findAvailableArchs():
+def findAvailableArchs(gpu_targets=None):
+    """Detect available GPU architectures, or use an explicit override.
+
+    Args:
+        gpu_targets: Semicolon-separated GPU targets (e.g. "gfx942").
+            When provided, skips hardware detection entirely.
+
+    Returns:
+        List of architecture strings (e.g. ["gfx942"]).
+    """
+    if gpu_targets:
+        return [t.strip() for t in gpu_targets.split(";") if t.strip()]
+
     from Tensile.Tests.gpu_detection import get_available_archs
     return get_available_archs()
 
-def findConfigs(rootDir=None):
+
+def findConfigs(rootDir=None, availableArchs=None):
     """
     Walks rootDir (defaults to trying to find Tensile/Tests) and returns a
     list of test parameters, one for each YAML file.
+
+    Args:
+        rootDir: Directory to walk for YAML configs. Defaults to Tensile/Tests.
+        availableArchs: Pre-resolved list of GPU architectures.
+            When None, calls findAvailableArchs() to auto-detect.
     """
-    if rootDir ==  None:
-        rootDir = os.path.dirname(os.path.dirname(__file__))
+    if rootDir is None:
+        rootDir = _TESTS_ROOT_DIR
         printRoot = os.path.dirname(os.path.dirname(rootDir))
     else:
         printRoot = rootDir
 
-    availableArchs = findAvailableArchs()
-    globaParamArchsStr = ';'.join(availableArchs)
-    os.environ["PyTestBuildArchNames"] = globaParamArchsStr
+    if availableArchs is None:
+        availableArchs = findAvailableArchs()
+    globalParamArchsStr = ';'.join(availableArchs)
+    os.environ["PyTestBuildArchNames"] = globalParamArchsStr
 
     rocm_version = get_rocm_version_or_none()
 

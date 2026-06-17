@@ -41,7 +41,7 @@ namespace miopen {
 using hipModulePtr = MIOPEN_MANAGE_PTR(hipModule_t, hipModuleUnload);
 struct HIPOCProgramImpl
 {
-    HIPOCProgramImpl(){};
+    HIPOCProgramImpl() {};
     HIPOCProgramImpl(const fs::path& program_name, const fs::path& filespec);
 
     HIPOCProgramImpl(const fs::path& program_name, const std::vector<char>& blob);

@@ -18,9 +18,17 @@ namespace asm_sdpa_engine
 /**
  * @brief SDPA backward kernel plan.
  *
- * Orchestrates ASM kernels for the backward pass:
+ * Orchestrates 2 or 3 ASM kernels for the backward pass:
+ *   1. ODO        — D reduction: D[b,h,i] = sum_j(O * dO)
+ *   2. DQDKDV     — Main gradients: dQ (FP32 via A32, or direct BF16 via A16), dK, dV
+ *   3. DQ_CONVERT — Post-processing: FP32 dQ → BF16 (A32 path only)
+ *
+ * Accumulator type selects the path:
  *   - A32 (3-kernel path): ODO → DQDKDV → DQ_CONVERT
  *   - A16 (2-kernel path): ODO → DQDKDV (dQ written directly in BF16)
+ *
+ * When A16, `_postKernel` is std::nullopt and the DQ_CONVERT launch + dq_acc
+ * workspace are both skipped.
  */
 class SdpaBwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {
@@ -28,7 +36,7 @@ public:
     /// A32 constructor: requires all 3 kernels (ODO, DQDKDV, DQ_CONVERT).
     SdpaBwdPlan(HipModuleGuard odoKernel,
                 HipModuleGuard dqdkdvKernel,
-                HipModuleGuard postKernel,
+                std::optional<HipModuleGuard> postKernel,
                 SdpaBwdParams params);
 
     /// A16 constructor: requires only 2 kernels (ODO, DQDKDV).
@@ -51,7 +59,7 @@ public:
 private:
     HipModuleGuard _odoKernel;
     HipModuleGuard _dqdkdvKernel;
-    std::optional<HipModuleGuard> _postKernel;
+    std::optional<HipModuleGuard> _postKernel; // nullopt when A16 (dq_convert not needed)
     SdpaBwdParams _params;
 };
 
