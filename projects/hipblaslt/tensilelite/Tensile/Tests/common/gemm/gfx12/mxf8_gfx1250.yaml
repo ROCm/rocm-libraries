@@ -146,6 +146,7 @@ BenchmarkProblems:
         - DepthU: [256]
         - TDMInst: [3]
         - TDMIterateMode: [-1,0,1,2,3]
+        - TDMSplit: [False, True]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]

@@ -1,7 +1,13 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Integration tests for PyTorch CUDA benchmark mode."""
+"""Integration tests for the PyTorch executor benchmark mode.
+
+These exercise the PyTorch execution backend and run on any live GPU
+(ROCm or CUDA): the timing backend selected by the executor differs per
+platform (HIP events on ROCm, torch.cuda events on CUDA), so assertions
+use ``expected_timing_backend()`` rather than hardcoding one.
+"""
 
 import json
 from pathlib import Path
@@ -9,18 +15,16 @@ from pathlib import Path
 import pytest
 
 from dnn_benchmarking.config.benchmark_config import BenchmarkConfig
-from dnn_benchmarking.execution import pytorch_ops
 from dnn_benchmarking.execution.buffer_manager import generate_input_data
 from dnn_benchmarking.execution.pytorch_buffer_manager import PyTorchCudaBufferManager
 from dnn_benchmarking.execution.pytorch_executor import (
     PyTorchCudaExecutor,
     PyTorchExecutionError,
 )
-from dnn_benchmarking.execution.timing import _is_torch_available
 from dnn_benchmarking.graph.loader import GraphLoader
+from tests.conftest import expected_timing_backend, skip_if_no_gpu_torch
 
-# Skip all tests in this module if CUDA is not available
-pytestmark = pytest.mark.gpu
+pytestmark = [pytest.mark.gpu]
 
 
 @pytest.fixture
@@ -53,36 +57,12 @@ def sample_relu_graph():
     return loader.load_json(graph_path), graph_path
 
 
-class TestPyTorchOps:
-    """Tests for PyTorch operation handlers."""
-
-    def test_supported_operations(self):
-        """Test that expected operations are supported."""
-        supported = pytorch_ops.get_supported_operations()
-        assert "ConvolutionFwdAttributes" in supported
-        assert "MatmulAttributes" in supported
-        assert "PointwiseAttributes" in supported
-        assert "SdpaAttributes" in supported
-
-    def test_supports_graph(self, sample_conv_graph):
-        """Test graph support checking."""
-        graph_json, _ = sample_conv_graph
-        assert pytorch_ops.supports_graph(graph_json)
-
-    def test_get_unsupported_operations_empty(self, sample_conv_graph):
-        """Test that supported graph returns empty unsupported list."""
-        graph_json, _ = sample_conv_graph
-        unsupported = pytorch_ops.get_unsupported_operations(graph_json)
-        assert unsupported == []
-
-
 class TestPyTorchCudaBufferManager:
-    """Tests for PyTorch CUDA buffer management."""
+    """Tests for PyTorch GPU buffer management."""
 
     def test_allocate_and_fill(self, sample_conv_graph):
         """Test tensor allocation and random fill."""
-        if not _is_torch_available():
-            pytest.skip("PyTorch GPU not available")
+        skip_if_no_gpu_torch()
 
         graph_json, graph_path = sample_conv_graph
         loader = GraphLoader()
@@ -96,16 +76,12 @@ class TestPyTorchCudaBufferManager:
             tensors = buffer_manager.get_tensors()
             assert len(tensors) > 0
 
-            # Check tensors are on CUDA
-            import torch
-
             for uid, tensor in tensors.items():
                 assert tensor.is_cuda
 
     def test_reproducible_with_seed(self, sample_conv_graph):
         """Test that same seed produces same random data."""
-        if not _is_torch_available():
-            pytest.skip("PyTorch GPU not available")
+        skip_if_no_gpu_torch()
 
         graph_json, _ = sample_conv_graph
         loader = GraphLoader()
@@ -132,8 +108,7 @@ class TestPyTorchCudaBufferManager:
 
     def test_load_input_data_uses_shared_input_map(self, sample_conv_graph):
         """Pre-generated inputs can be loaded without regenerating per run."""
-        if not _is_torch_available():
-            pytest.skip("PyTorch GPU not available")
+        skip_if_no_gpu_torch()
 
         graph_json, _ = sample_conv_graph
         loader = GraphLoader()
@@ -151,12 +126,11 @@ class TestPyTorchCudaBufferManager:
 
 
 class TestPyTorchCudaExecutor:
-    """Tests for PyTorch CUDA executor."""
+    """Tests for the PyTorch GPU executor."""
 
     def test_prepare_validates_operations(self, sample_conv_graph):
         """Test that prepare validates graph operations."""
-        if not _is_torch_available():
-            pytest.skip("PyTorch GPU not available")
+        skip_if_no_gpu_torch()
 
         graph_json, graph_path = sample_conv_graph
         config = BenchmarkConfig(
@@ -170,8 +144,7 @@ class TestPyTorchCudaExecutor:
 
     def test_full_benchmark_conv(self, sample_conv_graph):
         """Test full benchmark workflow with convolution graph."""
-        if not _is_torch_available():
-            pytest.skip("PyTorch GPU not available")
+        skip_if_no_gpu_torch()
 
         graph_json, graph_path = sample_conv_graph
         loader = GraphLoader()
@@ -205,13 +178,12 @@ class TestPyTorchCudaExecutor:
             assert len(result.kernel_timings) == 5
             assert result.metadata is not None
             assert result.metadata.execution_backend == "pytorch"
-            assert result.metadata.gpu_backend == "torch"
+            assert result.metadata.timing_backend == expected_timing_backend()
             assert result.metadata.graph_name == "test_conv"
 
     def test_full_benchmark_matmul(self, sample_matmul_graph):
         """Test full benchmark workflow with matmul graph."""
-        if not _is_torch_available():
-            pytest.skip("PyTorch GPU not available")
+        skip_if_no_gpu_torch()
 
         graph_json, graph_path = sample_matmul_graph
         loader = GraphLoader()
@@ -240,8 +212,7 @@ class TestPyTorchCudaExecutor:
 
     def test_full_benchmark_relu(self, sample_relu_graph):
         """Test full benchmark workflow with relu graph."""
-        if not _is_torch_available():
-            pytest.skip("PyTorch GPU not available")
+        skip_if_no_gpu_torch()
 
         graph_json, graph_path = sample_relu_graph
         loader = GraphLoader()
@@ -278,8 +249,7 @@ class TestPyTorchCudaExecutor:
     )
     def test_full_benchmark_new_reference_graphs(self, graph_name):
         """Test PyTorch benchmark workflow for newly covered reference graphs."""
-        if not _is_torch_available():
-            pytest.skip("PyTorch GPU not available")
+        skip_if_no_gpu_torch()
 
         graph_path = Path(__file__).parent.parent.parent / "graphs" / graph_name
         loader = GraphLoader()
@@ -305,8 +275,7 @@ class TestPyTorchCudaExecutor:
 
     def test_json_export(self, sample_conv_graph, tmp_path):
         """Test that benchmark results can be exported to JSON."""
-        if not _is_torch_available():
-            pytest.skip("PyTorch GPU not available")
+        skip_if_no_gpu_torch()
 
         graph_json, graph_path = sample_conv_graph
         loader = GraphLoader()
@@ -342,12 +311,11 @@ class TestPyTorchCudaExecutor:
             assert "kernel_timings" in data
             assert "metadata" in data
             assert data["metadata"]["execution_backend"] == "pytorch"
-            assert data["metadata"]["gpu_backend"] == "torch"
+            assert data["metadata"]["timing_backend"] == expected_timing_backend()
 
     def test_not_prepared_raises(self, sample_conv_graph):
         """Test that running without prepare raises error."""
-        if not _is_torch_available():
-            pytest.skip("PyTorch GPU not available")
+        skip_if_no_gpu_torch()
 
         graph_json, graph_path = sample_conv_graph
         config = BenchmarkConfig(
@@ -359,13 +327,3 @@ class TestPyTorchCudaExecutor:
         # Should raise without prepare
         with pytest.raises(PyTorchExecutionError, match="not prepared"):
             executor.warmup({})
-
-
-class TestPyTorchCudaAvailability:
-    """Tests for CUDA availability checking."""
-
-    def test_executor_requires_cuda(self):
-        """Test that executor checks for CUDA availability."""
-        # This test runs regardless of CUDA availability
-        # to verify the check happens
-        pass  # The check is in __init__, tested implicitly

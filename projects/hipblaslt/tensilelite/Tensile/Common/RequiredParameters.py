@@ -103,6 +103,7 @@ def getRequiredParametersMin() -> set:
         'NumLoadsCoalescedA',
         'NumLoadsCoalescedB',
         'OptNoLoadLoop',
+        'PrefetchAcrossPersistent',
         'PrefetchGlobalRead',
         'PrefetchLocalRead',
         'PrefetchGL2',
@@ -157,6 +158,5 @@ def getRequiredParametersMin() -> set:
         'MinGRIncPerMfma',
         'UsePLRPack',
         'UseSubtileImpl',
-        'ClusterBarrier',
         'ClusterDim',
     })

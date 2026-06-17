@@ -131,19 +131,66 @@ Provenance and calibration data is stored in a **separate companion file** (`{Na
   {Name}.meta.json         # Provenance + calibrated tolerance (loaded by runner for tolerance)
 ```
 
+**Portable bundle** (CPU/framework reference — runs on any ASIC):
+
 ```json
 {
+  "format_version": 1,
   "generator": "reference_data_scripts/batchnorm_inference.py",
+  "generator_version": "1.0.0",
   "generated_at": "2026-05-11T14:30:00Z",
+  "rocm_version": "6.4.0",
   "reference_source": "PyTorch 2.3.0",
+  "reference_source_hash": "a3f8c2e1",
   "reference_strategy": "precision_uplift",
   "generation_command": "python generate_batchnorm_reference.py --name typical",
-  "rocm_version": "6.4.0",
-  "notes": "baseline for RFC 0011 migration"
+  "notes": "baseline for RFC 0011 migration",
+  "seed": 42,
+  "minimum_vram_mb": 8192
 }
 ```
 
+**Arch-specific bundle** (GPU reference — only valid on the generating ASIC):
+
+```json
+{
+  "format_version": 1,
+  "generator": "reference_data_scripts/generate_sdpa_fwd_golden.py",
+  "generator_version": "1.0.0",
+  "generated_at": "2026-06-01T10:00:00Z",
+  "gpu_architecture": "gfx942",
+  "rocm_version": "7.2",
+  "reference_source": "AITER 0.1.13",
+  "reference_source_hash": "b7d4e9f2",
+  "reference_strategy": "matched_precision",
+  "seed": 42,
+  "minimum_vram_mb": 16384
+}
+```
+
+When `gpu_architecture` is present, the arch guard skips the test if the current device doesn't match. When absent (as in the first example), the data is portable across all ASICs.
+
 The `.meta.json` file itself is optional for forward bundles. A bundle without one is valid: it falls back to the per-operation default tolerance (see [Tolerance Framework](#tolerance-framework)) and is never skipped or rejected on that basis — this is the expected state for bundles migrated from the old test system. When a `.meta.json` *is* present, the `generator`, `reference_source`, and `reference_strategy` fields are mandatory and the pre-commit bundle verifier rejects a `.meta.json` missing them. Remaining fields are optional. Generator scripts populate the metadata file automatically. (Backward bundles are the exception: they must include a `.meta.json` with a `forward_source` field — see [Forward-Backward Generation Constraint](#forward-backward-generation-constraint).)
+
+**Field reference:**
+
+| Field | Required | Type | Purpose |
+|-------|----------|------|---------|
+| `format_version` | Yes | integer | Schema version. Must be `1`. Reader rejects files with missing or unsupported versions to allow future schema evolution. |
+| `generator` | Yes | string | Path to the script that produced this bundle. |
+| `generator_version` | No | string | Version of the generator script. |
+| `generated_at` | No | string | ISO 8601 timestamp of generation. |
+| `gpu_architecture` | No | string | GPU arch that produced the reference data (e.g. `"gfx942"`). When present, the arch guard skips the test if the current device doesn't match. When absent, the data is assumed portable across all ASICs. Only set this when the reference source is a GPU-specific tool whose numerical output varies by architecture. |
+| `rocm_version` | No | string | ROCm version used during generation. |
+| `reference_source` | Yes | string | What computed the reference output (e.g. `"PyTorch 2.3.0"`, `"AITER 0.1.13"`, `"CpuReferenceGraphExecutor"`). Informational — used for traceability, not for guard logic. |
+| `reference_source_hash` | No | string | Commit hash or checksum of the reference source for traceability. |
+| `reference_strategy` | Yes | string | How reference precision was chosen (see table below). |
+| `generation_command` | No | string | Full command line used to generate the bundle. |
+| `notes` | No | string | Free-text notes for humans. |
+| `seed` | No | integer | RNG seed used for input generation. Enables reproducible regeneration. |
+| `minimum_vram_mb` | No | integer | Minimum device VRAM in MB required to run this bundle. The runner skips the test if the device has less. |
+
+Unknown fields are ignored by the reader, so generators may include additional fields without breaking compatibility.
 
 `reference_strategy` records how the reference precision was chosen (see [Generation Pipeline](#generation-pipeline)):
 

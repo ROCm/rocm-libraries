@@ -10,7 +10,7 @@ from functools import singledispatch
 from typing import Dict, List, NamedTuple, Optional, Tuple, Type
 from Tensile.Components.Subtile.LogicalScheduler import (
       LogicalScheduler, SchedulerConfig as MFMASchedulerConfig,
-      ReadGranularity)
+      ReadGranularity, GRPlacementStrategy)
 
 from ...Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion
@@ -470,6 +470,10 @@ class TileInfo:
       # Derived byte-counts for emit logic
       self.depthUBytes   = int(self.depthU * geometry.bpe)
       self.subIterKBytes = self.depthUBytes // self.localSubtileGrid[1]
+      # TDM path. We apply 16 Bytes padding to each row.
+      # TDM only exists on gfx1250, which is never swizzled (gfx950-only).
+      isTDM = kernel.get("enableTDM%s" % tc, False)
+      self.ldsRowPadBytes = 16 if isTDM else 0
 
       # Convenience counts for scheduler / diagram
       self.mmaTileLocalTotalCount = self.localMMATileGrid[0] * self.localMMATileGrid[1]
@@ -678,9 +682,9 @@ class TileInfo:
     # MXScaleTilePair offset registers
     # should be managed by scale-specific alloc in SubtileScaleEmit.py
     if isinstance(self.geometry, MXScaleTilePair):
-      self._sharedVgprGROffset = [writer.vgprPool.checkOut(1)]
-      self._sharedVgprLROffset = [writer.vgprPool.checkOut(1)]
-      self._sharedVgprLROffsetSwap = [writer.vgprPool.checkOut(1)]
+      self._sharedVgprGROffset = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprGROffset")]
+      self._sharedVgprLROffset = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprLROffset")]
+      self._sharedVgprLROffsetSwap = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprLROffsetSwap")]
 
   def allocVgprTileRegisters_legacy(self, writer, kernel):
     """Allocate data tile registers for A/B/D MMA operands.
@@ -708,7 +712,7 @@ class TileInfo:
       self.vgprTiles.append(RegisterTileInfo(pool, regType))
       if i % numMMATilesPerReg != 0:
         continue
-      vstart = pool.checkOutAligned(numDword, numDword)
+      vstart = pool.checkOutAligned(numDword, numDword, tag="allocVgprTileRegisters_legacy_vstart")
       for k in range(numDword):
         self.vgprTiles[-1].append(vstart + k)
 
@@ -918,7 +922,7 @@ def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
   numInst = totalRegs // regsPerInst
 
   if numInst > 0:
-    tmpVgpr = writer.vgprPool.checkOutAligned(2, 2)
+    tmpVgpr = writer.vgprPool.checkOutAligned(2, 2, tag="zeroRegRange_tmpVgpr")
     module.add(VMovB64(dst=vgpr(tmpVgpr, 2), src=0, comment="zero A/B"))
     module.add(SNop(waitState=1, comment="wait for vgpr before matrix inst"))
     for i in range(numInst):
@@ -1076,7 +1080,7 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
                                    comment=comment))
     else:
       # Fallback: use unit scale VGPR pre-initialized to 0x7f7f7f7f (scale=1.0 E8M0).
-      # Initialized once in mainLoop() before emitAllLoops() — VMovB32 cannot live here
+      # Initialized once in mainLoop() before emitMainAndExitLoops() — VMovB32 cannot live here
       # because InstructionScheduler drops non-MFMA instructions from the MFMA module.
       unitScaleVgpr = kernel.get("_subtileUnitScaleVgpr", -1)
       assert unitScaleVgpr >= 0, \
@@ -1270,6 +1274,9 @@ def mainLoop(writer, kernel):
   N = tiB.localMMATileGrid[0]
   candidates = [(M, N)] if pgr == 0 else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
   for partSizeM, partSizeN in candidates:
+      hasTDM = bool(kernel.get("enableTDMA")) and bool(kernel.get("enableTDMB"))
+      grPlacement = (GRPlacementStrategy.BUNCHED if hasTDM
+                     else GRPlacementStrategy.SPREAD)
       cfg = MFMASchedulerConfig(
           numMFMATilesM=M,
           numMFMATilesN=N,
@@ -1284,7 +1291,8 @@ def mainLoop(writer, kernel):
           grSB=grSBGran,
           partitionSizeM=partSizeM,
           partitionSizeN=partSizeN,
-          pgr=schedulerPgr
+          pgr=schedulerPgr,
+          grPlacement=grPlacement,
       )
 
       scheduler = LogicalScheduler(cfg)
@@ -1315,7 +1323,28 @@ def mainLoop(writer, kernel):
       tensorParametersA=tensorParametersA,
       tensorParametersB=tensorParametersB)
 
-  module.add(scheduler.emitMainAndExitLoops(writer, kernel))
+  # gfx1250: enable expert scheduling mode and disable WMMA arb stall
+  # before entering the mainloop / any wmma issue.
+  if writer.states.archCaps.get("HasWmmaArbStallBit", False):
+    module.add(SNop(waitState=0, comment="nop before SSetReg"))
+    module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0, 2]),
+                               src=2,
+                               comment="enable expert scheduling mode"))
+    module.add(SNop(waitState=0, comment="nop after SSetReg"))
+    module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[4, 1]),
+                               src=1,
+                               comment="Disable WMMA arb stall"))
+    module.add(SNop(waitState=0, comment="nop after SSetReg"))
+
+  module.add(scheduler.emitMainAndExitLoops(writer, kernel, tensorParametersA, tensorParametersB))
+
+  # gfx1250: disable expert scheduling mode after NLL.
+  if writer.states.archCaps.get("HasWmmaArbStallBit", False):
+    module.add(SNop(waitState=0, comment="nop before SSetReg"))
+    module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0, 2]),
+                               src=0,
+                               comment="disable expert scheduling mode"))
+    module.add(SNop(waitState=0, comment="nop after SSetReg"))
 
   # Wrap the tail loop with the runtime K%DU counter setup and skip branch,
   # mirroring the legacy KernelWriter pattern (KernelWriter.py:5237 / 5618).

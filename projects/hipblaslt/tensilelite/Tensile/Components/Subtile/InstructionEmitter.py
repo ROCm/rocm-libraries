@@ -269,7 +269,7 @@ class InstructionEmitter:
                 src0=sgpr("LoopCounterL"), src1=source.value,
                 comment=f"LoopCounter {source.compare} {source.value}?"))
         else:
-            with self.writer.allocTmpSgpr(1) as litSgprInfo:
+            with self.writer.allocTmpSgpr(1, tag="InstructionEmitter_skip_tmpSgpr") as litSgprInfo:
                 litSgpr = litSgprInfo.idx
                 module.add(SMovB32(
                     dst=sgpr(litSgpr), src=hex(source.value),
@@ -371,7 +371,7 @@ class InstructionEmitter:
                 writer.vgprPool.checkOut(1, f"tail_boundaryMask{i}")
                 for i in range(numBoundaryMasks)
             ]
-            with writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount) as tmpSgprInfo:
+            with writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount, tag="InstructionEmitter_mask_k_init_tmpSgpr") as tmpSgprInfo:
                 maskSgpr = tmpSgprInfo.idx
                 for i in range(numBoundaryMasks):
                     bm = self._tail_boundaryMask[i]
@@ -439,7 +439,7 @@ class InstructionEmitter:
         refIds = aIds or bIds
         vgprPerInUnroll = len(list(refTiles[refIds[0]])) if refIds else 0
 
-        with writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount) as tmpSgprInfo:
+        with writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount, tag="InstructionEmitter_mask_k_tmpSgpr") as tmpSgprInfo:
             maskSgpr = tmpSgprInfo.idx
 
             def _emit_cmp(cmpCls, literal, comment):
@@ -451,7 +451,7 @@ class InstructionEmitter:
                         src0=vgpr(self._tail_vDiff), src1=literal,
                         comment=comment))
                 else:
-                    with writer.allocTmpSgpr(1) as litSgprInfo:
+                    with writer.allocTmpSgpr(1, tag="InstructionEmitter_mask_k_litSgprInfo") as litSgprInfo:
                         litSgpr = litSgprInfo.idx
                         module.add(SMovB32(
                             dst=sgpr(litSgpr), src=hex(literal),

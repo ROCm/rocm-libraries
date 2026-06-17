@@ -50,7 +50,11 @@ exclude: |
     dnn-providers/integration-tests/golden_reference_data/.*|
     # Generated files (see rocrand/tools/ _generator.cpp files)
     projects/rocrand/library/.*constants\.(cpp|h)|
-    projects/rocrand/library/.*precomputed\.(cpp|h)
+    projects/rocrand/library/.*precomputed\.(cpp|h)|
+    # MIOpen exclusion list
+    projects/miopen/.*\.s$|
+    projects/miopen/.*\.inc$|
+    projects/miopen/.*\.model$
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -103,7 +107,8 @@ repos:
     rev: v0.6.10
     hooks:
       - id: cmake-lint
-        exclude: ^projects/miopen/CMakeLists\.txt$
+        # MIOpen CMake files have not been audited for cmake-lint compliance yet.
+        exclude: ^projects/miopen/.*
       # cmake-format is disabled due to undesirable formatting.
       # We can investigate changing the configuration before re-enabling or using an alternative tool.
       # - id: cmake-format

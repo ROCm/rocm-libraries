@@ -5,6 +5,11 @@ find_package(Python3 COMPONENTS Interpreter)
 
 # Function to apply category labels to discovered GTest tests
 # Optional 4th parameter: install_test_file - path to write install-time test definitions
+# Optional 5th parameter: resource_group - CTest RESOURCE_GROUPS token to apply to
+#   every generated category/GPU-exclusion suite (e.g. "gfx942" or "gpus"). When
+#   provided, the suite names also gain a "_<resource>" segment so that the same
+#   target can be wired in multiple times against different resource groups
+#   without colliding on test names.
 function(apply_test_category_labels target_name yaml_file working_dir)
     # Execute the Python script to generate CMake code
     if(NOT Python3_FOUND)
@@ -39,10 +44,17 @@ function(apply_test_category_labels target_name yaml_file working_dir)
 
     # Check if optional install_test_file parameter was provided
     set(install_test_file "${ARGV3}")
+    # Optional 5th parameter: resource_group token forwarded to the parser via
+    # --resource-group. Empty string means "not provided".
+    set(resource_group "${ARGV4}")
+    set(extra_args "")
+    if(resource_group)
+        list(APPEND extra_args "--resource-group" "${resource_group}")
+    endif()
     if(install_test_file)
-        set(python_args ${yaml_file} ${target_name} ${working_dir} ${install_test_file})
+        set(python_args ${extra_args} ${yaml_file} ${target_name} ${working_dir} ${install_test_file})
     else()
-        set(python_args ${yaml_file} ${target_name} ${working_dir})
+        set(python_args ${extra_args} ${yaml_file} ${target_name} ${working_dir})
     endif()
 
     execute_process(

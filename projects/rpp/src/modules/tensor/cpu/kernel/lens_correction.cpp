@@ -25,11 +25,11 @@ SOFTWARE.
 #include "host_tensor_executors.hpp"
 
 // Compute Inverse matrix (3x3)
-inline void get_inverse(float *mat, float *invMat)
-{
-    float det = mat[0] * (mat[4] * mat[8] - mat[7] * mat[5]) - mat[1] * (mat[3] * mat[8] - mat[5] * mat[6]) + mat[2] * (mat[3] * mat[7] - mat[4] * mat[6]);
-    if(det != 0)
-    {
+inline void get_inverse(float* mat, float* invMat) {
+    float det = mat[0] * (mat[4] * mat[8] - mat[7] * mat[5]) -
+                mat[1] * (mat[3] * mat[8] - mat[5] * mat[6]) +
+                mat[2] * (mat[3] * mat[7] - mat[4] * mat[6]);
+    if (det != 0) {
         float invDet = 1 / det;
         invMat[0] = (mat[4] * mat[8] - mat[7] * mat[5]) * invDet;
         invMat[1] = (mat[2] * mat[7] - mat[1] * mat[8]) * invDet;
@@ -43,40 +43,37 @@ inline void get_inverse(float *mat, float *invMat)
     }
 }
 
-void compute_lens_correction_remap_tables_host_tensor(RpptDescPtr srcDescPtr,
-                                                      Rpp32f *rowRemapTable,
-                                                      Rpp32f *colRemapTable,
-                                                      RpptDescPtr tableDescPtr,
-                                                      Rpp32f *cameraMatrixTensor,
-                                                      Rpp32f *distortionCoeffsTensor,
-                                                      RpptROIPtr roiTensorPtrSrc,
-                                                      rpp::Handle& handle)
-{
+void compute_lens_correction_remap_tables_host_tensor(
+    RpptDescPtr srcDescPtr, Rpp32f* rowRemapTable, Rpp32f* colRemapTable, RpptDescPtr tableDescPtr,
+    Rpp32f* cameraMatrixTensor, Rpp32f* distortionCoeffsTensor, RpptROIPtr roiTensorPtrSrc,
+    rpp::Handle& handle) {
     omp_set_dynamic(0);
     omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-    for(int batchCount = 0; batchCount < srcDescPtr->n; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < srcDescPtr->n; batchCount++) {
         Rpp32f *rowRemapTableTemp, *colRemapTableTemp;
         rowRemapTableTemp = rowRemapTable + batchCount * tableDescPtr->strides.nStride;
         colRemapTableTemp = colRemapTable + batchCount * tableDescPtr->strides.nStride;
 
-        // cameraMatrix is a 3x3 matrix thus increment by 9 to iterate from one tensor in a batch to another
-        Rpp32f *cameraMatrix = cameraMatrixTensor + batchCount * 9;
-        Rpp32f *distortionCoeffs = distortionCoeffsTensor + batchCount * 8;
+        // cameraMatrix is a 3x3 matrix thus increment by 9 to iterate from one tensor in a batch to
+        // another
+        Rpp32f* cameraMatrix = cameraMatrixTensor + batchCount * 9;
+        Rpp32f* distortionCoeffs = distortionCoeffsTensor + batchCount * 8;
         Rpp32s height = roiTensorPtrSrc[batchCount].xywhROI.roiHeight;
         Rpp32s width = roiTensorPtrSrc[batchCount].xywhROI.roiWidth;
         Rpp32u alignedLength = width & ~7;
         Rpp32s vectorIncrement = 8;
 
         Rpp32f invCameraMatrix[9];
-        std::fill(invCameraMatrix, invCameraMatrix + 9, 0.0f);  // initialize all values in invCameraMatrix to zero
+        std::fill(invCameraMatrix, invCameraMatrix + 9,
+                  0.0f);  // initialize all values in invCameraMatrix to zero
         get_inverse(cameraMatrix, invCameraMatrix);
-        Rpp32f *invMat = &invCameraMatrix[0];
+        Rpp32f* invMat = &invCameraMatrix[0];
 
         // Get radial and tangential distortion coefficients
-        Rpp32f rCoeff[6] = { distortionCoeffs[0], distortionCoeffs[1], distortionCoeffs[4], distortionCoeffs[5], distortionCoeffs[6], distortionCoeffs[7] };
-        Rpp32f tCoeff[2] = { distortionCoeffs[2], distortionCoeffs[3] };
+        Rpp32f rCoeff[6] = {distortionCoeffs[0], distortionCoeffs[1], distortionCoeffs[4],
+                            distortionCoeffs[5], distortionCoeffs[6], distortionCoeffs[7]};
+        Rpp32f tCoeff[2] = {distortionCoeffs[2], distortionCoeffs[3]};
 
         __m256 pRCoeff[6], pTCoeff[2];
         pRCoeff[0] = _mm256_set1_ps(rCoeff[0]);
@@ -88,8 +85,8 @@ void compute_lens_correction_remap_tables_host_tensor(RpptDescPtr srcDescPtr,
         pTCoeff[0] = _mm256_set1_ps(tCoeff[0]);
         pTCoeff[1] = _mm256_set1_ps(tCoeff[1]);
 
-        Rpp32f u0 = cameraMatrix[2],  v0 = cameraMatrix[5];
-        Rpp32f fx = cameraMatrix[0],  fy = cameraMatrix[4];
+        Rpp32f u0 = cameraMatrix[2], v0 = cameraMatrix[5];
+        Rpp32f fx = cameraMatrix[0], fy = cameraMatrix[4];
         __m256 pFx, pFy, pU0, pV0;
         pFx = _mm256_set1_ps(fx);
         pFy = _mm256_set1_ps(fy);
@@ -101,10 +98,9 @@ void compute_lens_correction_remap_tables_host_tensor(RpptDescPtr srcDescPtr,
         pInvMat3 = _mm256_set1_ps(invMat[3]);
         pInvMat6 = _mm256_set1_ps(invMat[6]);
 
-        for(int i = 0; i < height; i++)
-        {
-            Rpp32f *rowRemapTableRow = rowRemapTableTemp + i * tableDescPtr->strides.hStride;
-            Rpp32f *colRemapTableRow = colRemapTableTemp + i * tableDescPtr->strides.hStride;
+        for (int i = 0; i < height; i++) {
+            Rpp32f* rowRemapTableRow = rowRemapTableTemp + i * tableDescPtr->strides.hStride;
+            Rpp32f* colRemapTableRow = colRemapTableTemp + i * tableDescPtr->strides.hStride;
             Rpp32f xCamera = i * invMat[1] + invMat[2];
             Rpp32f yCamera = i * invMat[4] + invMat[5];
             Rpp32f zCamera = i * invMat[7] + invMat[8];
@@ -115,8 +111,7 @@ void compute_lens_correction_remap_tables_host_tensor(RpptDescPtr srcDescPtr,
 
             __m256 pPixelIndex = avx_pDstLocInit;
             int vectorLoopCount = 0;
-            for(; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement)
-            {
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
                 __m256 pXCamera = _mm256_fmadd_ps(pPixelIndex, pInvMat0, pXCameraBase);
                 __m256 pYCamera = _mm256_fmadd_ps(pPixelIndex, pInvMat3, pYCameraBase);
                 __m256 pZCamera = _mm256_fmadd_ps(pPixelIndex, pInvMat6, pZCameraBase);
@@ -133,16 +128,32 @@ void compute_lens_correction_remap_tables_host_tensor(RpptDescPtr srcDescPtr,
                 // float xyMul2 = 2*x*y;
                 __m256 p2xy = _mm256_mul_ps(avx_p2, _mm256_mul_ps(pX, pY));
 
-                // float kr = std::fmaf(std::fmaf(std::fmaf(rCoeff[2], r2, rCoeff[1]), r2, rCoeff[0]), r2, 1) / std::fmaf(std::fmaf(std::fmaf(rCoeff[5], r2, rCoeff[4]), r2, rCoeff[3]), r2, 1);
-                __m256 pNum = _mm256_fmadd_ps(_mm256_fmadd_ps(_mm256_fmadd_ps(pRCoeff[2], pR2, pRCoeff[1]), pR2, pRCoeff[0]), pR2, avx_p1);
-                __m256 pDen = _mm256_fmadd_ps(_mm256_fmadd_ps(_mm256_fmadd_ps(pRCoeff[5], pR2, pRCoeff[4]), pR2, pRCoeff[3]), pR2, avx_p1);
+                // float kr = std::fmaf(std::fmaf(std::fmaf(rCoeff[2], r2, rCoeff[1]), r2,
+                // rCoeff[0]), r2, 1) / std::fmaf(std::fmaf(std::fmaf(rCoeff[5], r2, rCoeff[4]), r2,
+                // rCoeff[3]), r2, 1);
+                __m256 pNum = _mm256_fmadd_ps(
+                    _mm256_fmadd_ps(_mm256_fmadd_ps(pRCoeff[2], pR2, pRCoeff[1]), pR2, pRCoeff[0]),
+                    pR2, avx_p1);
+                __m256 pDen = _mm256_fmadd_ps(
+                    _mm256_fmadd_ps(_mm256_fmadd_ps(pRCoeff[5], pR2, pRCoeff[4]), pR2, pRCoeff[3]),
+                    pR2, avx_p1);
                 __m256 pKR = _mm256_div_ps(pNum, pDen);
 
-                // float colLoc = std::fmaf(fx, (std::fmaf(tCoeff[1], (std::fmaf(2, xSquare, r2)), std::fmaf(x, kr, (tCoeff[0] * xyMul2)))), u0);
-                __m256 pColLoc = _mm256_fmadd_ps(pFx, _mm256_fmadd_ps(pTCoeff[1], _mm256_fmadd_ps(avx_p2, pXSquare, pR2), _mm256_fmadd_ps(pX, pKR,  _mm256_mul_ps(pTCoeff[0], p2xy))), pU0);
+                // float colLoc = std::fmaf(fx, (std::fmaf(tCoeff[1], (std::fmaf(2, xSquare, r2)),
+                // std::fmaf(x, kr, (tCoeff[0] * xyMul2)))), u0);
+                __m256 pColLoc = _mm256_fmadd_ps(
+                    pFx,
+                    _mm256_fmadd_ps(pTCoeff[1], _mm256_fmadd_ps(avx_p2, pXSquare, pR2),
+                                    _mm256_fmadd_ps(pX, pKR, _mm256_mul_ps(pTCoeff[0], p2xy))),
+                    pU0);
 
-                // float rowLoc = std::fmaf(fy, (std::fmaf(tCoeff[0], (std::fmaf(2, ySquare, r2)), std::fmaf(y, kr, (tCoeff[1] * xyMul2)))), v0);
-                __m256 pRowLoc = _mm256_fmadd_ps(pFy, _mm256_fmadd_ps(pTCoeff[0], _mm256_fmadd_ps(avx_p2, pYSquare, pR2), _mm256_fmadd_ps(pY, pKR,  _mm256_mul_ps(pTCoeff[1], p2xy))), pV0);
+                // float rowLoc = std::fmaf(fy, (std::fmaf(tCoeff[0], (std::fmaf(2, ySquare, r2)),
+                // std::fmaf(y, kr, (tCoeff[1] * xyMul2)))), v0);
+                __m256 pRowLoc = _mm256_fmadd_ps(
+                    pFy,
+                    _mm256_fmadd_ps(pTCoeff[0], _mm256_fmadd_ps(avx_p2, pYSquare, pR2),
+                                    _mm256_fmadd_ps(pY, pKR, _mm256_mul_ps(pTCoeff[1], p2xy))),
+                    pV0);
 
                 _mm256_storeu_ps(rowRemapTableRow, pRowLoc);
                 _mm256_storeu_ps(colRemapTableRow, pColLoc);
@@ -151,17 +162,25 @@ void compute_lens_correction_remap_tables_host_tensor(RpptDescPtr srcDescPtr,
 
                 pPixelIndex = _mm256_add_ps(pPixelIndex, avx_p8);
             }
-            for(; vectorLoopCount < width; vectorLoopCount++)
-            {
+            for (; vectorLoopCount < width; vectorLoopCount++) {
                 Rpp32f xCam = std::fmaf(vectorLoopCount, invMat[0], xCamera);
                 Rpp32f yCam = std::fmaf(vectorLoopCount, invMat[3], yCamera);
                 Rpp32f zCam = std::fmaf(vectorLoopCount, invMat[6], zCamera);
-                Rpp32f z = 1./zCam, x = xCam * z, y = yCam * z;
+                Rpp32f z = 1. / zCam, x = xCam * z, y = yCam * z;
                 Rpp32f xSquare = x * x, ySquare = y * y, r2 = xSquare + ySquare;
                 Rpp32f xyMul2 = 2 * x * y;
-                Rpp32f kr = std::fmaf(std::fmaf(std::fmaf(rCoeff[2], r2, rCoeff[1]), r2, rCoeff[0]), r2, 1) / std::fmaf(std::fmaf(std::fmaf(rCoeff[5], r2, rCoeff[4]), r2, rCoeff[3]), r2, 1);
-                Rpp32f colLoc = std::fmaf(fx, (std::fmaf(tCoeff[1], (std::fmaf(2, xSquare, r2)), std::fmaf(x, kr, (tCoeff[0] * xyMul2)))), u0);
-                Rpp32f rowLoc = std::fmaf(fy, (std::fmaf(tCoeff[0], (std::fmaf(2, ySquare, r2)), std::fmaf(y, kr, (tCoeff[1] * xyMul2)))), v0);
+                Rpp32f kr =
+                    std::fmaf(std::fmaf(std::fmaf(rCoeff[2], r2, rCoeff[1]), r2, rCoeff[0]), r2,
+                              1) /
+                    std::fmaf(std::fmaf(std::fmaf(rCoeff[5], r2, rCoeff[4]), r2, rCoeff[3]), r2, 1);
+                Rpp32f colLoc = std::fmaf(fx,
+                                          (std::fmaf(tCoeff[1], (std::fmaf(2, xSquare, r2)),
+                                                     std::fmaf(x, kr, (tCoeff[0] * xyMul2)))),
+                                          u0);
+                Rpp32f rowLoc = std::fmaf(fy,
+                                          (std::fmaf(tCoeff[0], (std::fmaf(2, ySquare, r2)),
+                                                     std::fmaf(y, kr, (tCoeff[1] * xyMul2)))),
+                                          v0);
                 *rowRemapTableRow++ = rowLoc;
                 *colRemapTableRow++ = colLoc;
             }

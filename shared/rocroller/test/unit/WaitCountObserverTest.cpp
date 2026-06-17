@@ -490,7 +490,7 @@ namespace rocRollerTest
 
         auto inst5 = Instruction("global_load_dword", {dst4}, {src1, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst5);
-        EXPECT_EQ(peeked.waitCount, WaitCount(arch, 0, -1, -1, -1, -1, -1));
+        EXPECT_EQ(peeked.waitCount, WaitCount(arch, 0, -1, -1, -1, -1, -1, -1));
         m_context->schedule(inst5);
 
         auto inst_end = Instruction("s_endpgm", {}, {}, {}, "");
@@ -874,7 +874,7 @@ namespace rocRollerTest
         EXPECT_EQ(peeked.waitCount, WaitCount());
         m_context->schedule(inst_wait_vm);
 
-        auto inst_wait = Instruction::Wait(WaitCount(arch, 80, -1, -1, 20, -1, 20));
+        auto inst_wait = Instruction::Wait(WaitCount(arch, 80, -1, -1, 20, -1, 20, -1));
         peeked         = m_context->observer()->peek(inst_wait);
         EXPECT_EQ(peeked.waitCount, WaitCount());
         m_context->schedule(inst_wait);
