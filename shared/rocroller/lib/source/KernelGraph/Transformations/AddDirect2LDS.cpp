@@ -18,8 +18,6 @@ namespace rocRoller
                 using namespace ControlGraph;
                 using namespace CoordinateGraph;
 
-                std::vector<std::pair<int, int>> result;
-
                 auto isDirect2LDSLoadTiled = [&kgraph](int tag) {
                     bool rv = false;
                     if(kgraph.control.get<LoadTiled>(tag))
@@ -31,46 +29,7 @@ namespace rocRoller
                     return rv;
                 };
 
-                for(auto loadGlobal : kgraph.control.findElements(isDirect2LDSLoadTiled))
-                {
-                    const auto storeLDSTags{
-                        getAssociatedOps<LoadTiled, StoreLDSTile>(kgraph, loadGlobal)};
-
-                    if(storeLDSTags.size() == 1)
-                    {
-                        result.push_back({loadGlobal, storeLDSTags[0]});
-                    }
-                    else
-                    {
-                        AssertFatal(storeLDSTags.size() >= 2,
-                                    "AddDirect2LDS: At least 2 Assign operations required for "
-                                    "StoreLDSTile.",
-                                    ShowValue(loadGlobal),
-                                    ShowValue(storeLDSTags.size()));
-                        for(const auto& storeLDS : storeLDSTags)
-                        {
-                            auto maybeForLoopOfLoad
-                                = findContainingOperation<ForLoopOp>(loadGlobal, kgraph);
-                            auto maybeForLoopOfStore
-                                = findContainingOperation<ForLoopOp>(storeLDS, kgraph);
-
-                            const auto isLoadInLoop  = maybeForLoopOfLoad.has_value();
-                            const auto isStoreInLoop = maybeForLoopOfStore.has_value();
-
-                            const auto bothInSameLoop
-                                = isLoadInLoop && isStoreInLoop
-                                  && maybeForLoopOfLoad.value() == maybeForLoopOfStore.value();
-
-                            const auto bothNotInLoop = not isLoadInLoop && not isStoreInLoop;
-
-                            if(bothInSameLoop || bothNotInLoop)
-                            {
-                                result.push_back({loadGlobal, storeLDS});
-                            }
-                        }
-                    }
-                }
-                return result;
+                return getLoadTiledStoreLDSTilePairs(kgraph, isDirect2LDSLoadTiled);
             }
 
             void replaceLoadTiled(KernelGraph& kgraph,

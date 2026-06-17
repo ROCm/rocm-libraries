@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -41,11 +41,12 @@
 #include <cstdio>
 #include <type_traits>
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup devicemodule
 /// @{
 
+BEGIN_ROCPRIM_NAMESPACE
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 namespace detail
 {
 
@@ -437,6 +438,8 @@ hipError_t partial_sort_impl(void*              temporary_storage,
 
 } // namespace detail
 
+#endif // DOXYGEN_SHOULD_SKIP_THIS
+
 /// \brief Rearranges elements such that the range [0, middle) contains the sorted middle smallest elements in the range [0, size).
 ///
 /// \par Overview
@@ -675,9 +678,9 @@ hipError_t partial_sort(void*          temporary_storage,
             decomposer);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_PARTIAL_SORT_HPP_

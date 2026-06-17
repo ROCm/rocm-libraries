@@ -55,6 +55,18 @@ std::vector<std::vector<size_t>> adhoc_sizes = {
 
     // 3D_BLOCK_CR
     {336, 336, 56},
+
+    // real-Stockham fusion boundary cases.
+    // 768, 1536, 3072 newly fuse on more LDS at sp/dp.
+    // 4096, 8192 verify the LDS-fit helper correctly refuses too-large fused
+    // kernels (negative test).  param_generator covers complex_forward and
+    // real_forward for each entry, and the round-trip in accuracy_test.h
+    // exercises C2R automatically.
+    {768},
+    {1536},
+    {3072},
+    {4096},
+    {8192},
 };
 
 const static std::vector<std::vector<size_t>> stride_range = {{1}};

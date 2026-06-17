@@ -85,7 +85,11 @@ _rocblaslt_handle::_rocblaslt_handle()
 #ifdef HIPBLASLT_USE_ROCROLLER
     rocroller_create_handle(&rocroller_handle);
     const char* rocRollerEnvVal = std::getenv("HIPBLASLT_USE_ROCROLLER");
-    if(rocRollerEnvVal)
+    if((std::string(properties.gcnArchName).find("gfx1250") != std::string::npos))
+    {
+        useRocRoller = 0;
+    }
+    else if(rocRollerEnvVal)
     {
         if(strncmp(rocRollerEnvVal, "1", 1) == 0)
         {

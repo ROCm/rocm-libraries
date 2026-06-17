@@ -19,6 +19,7 @@ from dnn_benchmarking.reporting.suite_results import (
     StatusCounts,
     SuiteMetadata,
     SuiteResult,
+    _format_cudnn_version,
     collect_environment_info,
 )
 
@@ -519,3 +520,34 @@ class TestCollectEnvironmentInfo:
         monkeypatch.setattr(sr_mod, "detect_arch", lambda: "gfx942")
         info = collect_environment_info()
         assert info["gpu_arch"] == "gfx942"
+
+    def test_includes_cuda_and_cudnn_keys(self):
+        """collect_environment_info always exposes the CUDA version keys.
+
+        The values are platform-dependent (populated only on a CUDA
+        host), but the keys must always be present so the JSON schema is
+        stable across ROCm and CUDA runs."""
+        info = collect_environment_info()
+        assert "cuda_version" in info
+        assert "cudnn_version" in info
+
+
+class TestFormatCudnnVersion:
+    """Tests for the packed-int cuDNN version decoder."""
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            (92000, "9.20.0"),
+            (90000, "9.0.0"),
+            (91300, "9.13.0"),
+            (90201, "9.2.1"),
+            (8907, "8.9.7"),  # pre-9 packing scheme
+        ],
+    )
+    def test_decodes_packed_int(self, raw, expected):
+        assert _format_cudnn_version(raw) == expected
+
+    @pytest.mark.parametrize("raw", [None, 0])
+    def test_missing_version_returns_none(self, raw):
+        assert _format_cudnn_version(raw) is None

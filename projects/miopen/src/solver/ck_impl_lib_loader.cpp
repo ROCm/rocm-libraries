@@ -154,8 +154,9 @@ miopenStatus_t toMiopenStatus(ck_impl_status_t status)
     case CK_IMPL_STATUS_INVALID_VALUE: return miopenStatusInvalidValue;
     case CK_IMPL_STATUS_INTERNAL_ERROR: return miopenStatusInternalError;
     case CK_IMPL_STATUS_ALLOC_FAILED: return miopenStatusAllocFailed;
-    default: return miopenStatusInternalError;
     }
+
+    return miopenStatusInternalError;
 }
 
 } // namespace
