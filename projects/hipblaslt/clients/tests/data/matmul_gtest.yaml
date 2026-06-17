@@ -2906,7 +2906,7 @@ Tests:
 # whole epilogue integer-valued so the harness can demand a bit-exact (tol=0)
 # match. K=256 stays under the 16-bit exact-representability cap.
 - name: matmul_size_t_output_overflow_bf16_ROCM25793
-  category: stress
+  category: pre_checkin
   function:
     matmul: *hpa_bf16_precision
   matrix_size: *size_t_output_overflow
