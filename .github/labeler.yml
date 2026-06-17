@@ -75,6 +75,10 @@
 - changed-files:
   - all-globs-to-all-files: ['!dnn-providers/**/*', '!projects/**/*', '!shared/**/*']
 
+"project: rocalution":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocalution/**/*'
+
 "project: rocblas":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocblas/**/*'
