@@ -122,9 +122,9 @@ struct DerivedTestName
 // Trade-off: folder labels are NOT validated against the graph's actual
 // dtype/layout, so a bundle can be mislabeled (an fp16 graph dropped under
 // "fp32/") and the test name will silently lie about its content.
-// FOLLOW-UP: add a discovery-time check that the {op}/{layout}/{dtype} labels
-// agree with the graph JSON (cheap to fold into the tolerance-lookup story,
-// which already parses op+dtype from the graph).
+// TODO: add a discovery-time check that the {op}/{layout}/{dtype} labels agree
+// with the graph JSON (cheap to fold into the tolerance-lookup story, which
+// already parses op+dtype from the graph).
 inline DerivedTestName deriveTestName(const std::filesystem::path& jsonPath,
                                       const std::string& tierName)
 {
