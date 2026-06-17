@@ -670,6 +670,17 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::SBarrier& self, nb::dict&) { return new rocisa::SBarrier(self); });
 
+    nb::class_<rocisa::SBarrierSignalIsFirst, rocisa::Instruction>(m_common,
+                                                                   "SBarrierSignalIsFirst")
+        .def(nb::init<bool, const std::string&>(),
+             nb::arg("clusterBarrier") = false,
+             nb::arg("comment") = "")
+        .def("getParams", &rocisa::SBarrierSignalIsFirst::getParams)
+        .def("__str__", &rocisa::SBarrierSignalIsFirst::toString)
+        .def("__deepcopy__", [](const rocisa::SBarrierSignalIsFirst& self, nb::dict&) {
+            return new rocisa::SBarrierSignalIsFirst(self);
+        });
+
     nb::class_<rocisa::SSchedulingFence, rocisa::Instruction>(m_common, "SSchedulingFence")
         .def(nb::init<const std::string&>(), nb::arg("comment") = "")
         .def("getParams", &rocisa::SSchedulingFence::getParams)
