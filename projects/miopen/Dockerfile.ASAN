@@ -1,0 +1,275 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+ARG BUILD_TYPE=prebuilt
+
+# ============================================================================
+# Common base image with all dependencies
+# ============================================================================
+FROM ubuntu:24.04 AS base
+
+ARG CCACHE_COMMIT=8c107aada09df2a40930d7064bbec8120ee76c91
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV HIP_PLATFORM=amd
+ENV APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=DontWarn
+
+# Setup ubsan environment to printstacktrace
+ENV UBSAN_OPTIONS=print_stacktrace=1
+ENV LC_ALL=C.UTF-8
+ENV LANG=C.UTF-8
+
+# TheRock build info
+ARG THEROCK_GIT_HASH=default
+ARG ROCM_LIBRARIES_REF=default
+ARG ROCM_SYSTEMS_REF=default
+
+# Install dependencies
+RUN apt-get update && apt-get install -y --allow-unauthenticated \
+    apt-utils \
+    automake \
+    bison \
+    build-essential \
+    ca-certificates \
+    cmake \
+    curl \
+    doxygen \
+    flex \
+    g++ \
+    gdb \
+    gfortran \
+    git \
+    git-lfs \
+    gnupg2 \
+    lbzip2 \
+    lcov \
+    libegl1-mesa-dev \
+    libncurses5-dev \
+    libnuma-dev \
+    libtool \
+    ninja-build \
+    patchelf \
+    pkg-config \
+    python3-dev \
+    python3-pip \
+    python3-venv \
+    redis \
+    rpm \
+    rsync \
+    software-properties-common \
+    stunnel \
+    sudo \
+    texinfo \
+    unzip \
+    vim \
+    wget \
+    xxd 
+    
+# Install DVC
+RUN mkdir -p /etc/apt/keyrings && \
+    wget -qO - https://dvc.org/deb/iterative.asc | sudo gpg --dearmor -o /etc/apt/keyrings/packages.iterative.gpg && \
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/packages.iterative.gpg] https://dvc.org/deb/ stable main" | sudo tee /etc/apt/sources.list.d/dvc.list && \
+    chmod 644 /etc/apt/keyrings/packages.iterative.gpg /etc/apt/sources.list.d/dvc.list && \
+    apt-get update && apt-get install -y dvc && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* 
+
+# Purge packages conflicting with doc-requirements
+RUN apt-get remove --purge -y python3-pyparsing python3-cryptography python3-jwt
+
+# Add requirements files
+ADD docs/sphinx/requirements.txt /doc-requirements.txt
+
+# Install doc requirements
+RUN pip3 install --break-system-packages -r /doc-requirements.txt && \
+# Install an init system
+    wget https://github.com/Yelp/dumb-init/releases/download/v1.2.0/dumb-init_1.2.0_amd64.deb && \
+    dpkg -i dumb-init_*.deb && rm dumb-init_*.deb && \
+# Install cget && rbuild
+    pip3 install --break-system-packages https://github.com/pfultz2/cget/archive/b5dd36cafa2804e6146c5021eb2469c4b2d3ad42.tar.gz && \
+    pip3 install --break-system-packages https://github.com/RadeonOpenCompute/rbuild/archive/c33b1a7e74ae7f72379364b523f73d30fd4d765c.tar.gz && \
+# groupadd render && video
+    groupadd -f render && \
+    groupadd -f video && \
+    usermod -a -G render,video root
+
+RUN git config --global user.email "docker@build.local" && \
+    git config --global user.name "Docker Build"
+
+# Clone TheRock — shallow at the specific commit if provided, else tip of default branch
+RUN if [ "$THEROCK_GIT_HASH" != "default" ]; then \
+        git clone --filter=blob:none --no-checkout https://github.com/ROCm/TheRock.git && \
+        git -C TheRock fetch --depth=1 origin "$THEROCK_GIT_HASH" && \
+        git -C TheRock checkout FETCH_HEAD; \
+    else \
+        git clone --depth=1 https://github.com/ROCm/TheRock.git; \
+    fi
+
+WORKDIR /TheRock
+
+RUN if [ "$ROCM_LIBRARIES_REF" != "default" ]; then \
+        git submodule update --init rocm-libraries && \
+        cd rocm-libraries && \
+        git fetch origin && \
+        git checkout $ROCM_LIBRARIES_REF && \
+        cd .. && \
+        git add rocm-libraries && \
+        git commit -m "Update rocm-libraries to $ROCM_LIBRARIES_REF"; \
+    fi
+
+RUN if [ "$ROCM_SYSTEMS_REF" != "default" ]; then \
+        git submodule update --init rocm-systems && \
+        cd rocm-systems && \
+        git fetch origin && \
+        git checkout $ROCM_SYSTEMS_REF && \
+        cd .. && \
+        git add rocm-systems && \
+        git commit -m "Update rocm-systems to $ROCM_SYSTEMS_REF"; \
+    fi
+
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install -r requirements.txt
+
+# ============================================================================
+# Download pre-built ASAN ROCm artifacts from TheRock S3 (no auth required)
+# ============================================================================
+FROM base AS therock_prebuilt
+
+ARG AMDGPU_FAMILIES=gfx94X-dcgpu
+ARG ASAN_ARTIFACTS_RUN_ID=25414061404
+ARG BUILD_JOBS=0
+
+ENV ROCM_PATH=/opt/rocm
+
+WORKDIR /TheRock
+
+# Download ROCm base + MIOpen + test artifacts (unauthenticated S3 download)
+RUN . /opt/venv/bin/activate && \
+    python build_tools/install_rocm_from_artifacts.py \
+        --run-id ${ASAN_ARTIFACTS_RUN_ID} \
+        --amdgpu-family ${AMDGPU_FAMILIES} \
+        --tests \
+        --output-dir ${ROCM_PATH}
+
+# ============================================================================
+# Source-build fallback: builds TheRock + MIOpen from source with ASAN preset.
+# Use this target when you need a custom TheRock hash or cannot use prebuilt artifacts.
+# Usage: docker build --build-arg BUILD_TYPE=source_build -f Dockerfile.ASAN .
+# ============================================================================
+FROM base AS therock_source_build
+
+ARG AMDGPU_FAMILIES=gfx94X-dcgpu
+ARG BUILD_JOBS=0
+# Distinct cache buster so ASAN-instrumented sccache entries don't collide
+# with the standard MiOpen-Docker-CK bucket used by non-ASAN builds.
+ARG ASAN_SCCACHE_CACHE_BUSTER="MiOpen-ASAN-Docker"
+
+ENV ROCM_PATH=/opt/rocm
+
+WORKDIR /TheRock
+
+RUN . /opt/venv/bin/activate && \
+    python ./build_tools/fetch_sources.py --depth 1
+
+RUN . /opt/venv/bin/activate && \
+    THEROCK_PKG_VERSION=$(python -c "import json; v=json.load(open('version.json'))['rocm-version']; print(v+'.dev0')") && \
+    export MIOPEN_SCCACHE_CUSTOM_CACHE_BUSTER="${ASAN_SCCACHE_CACHE_BUSTER}" && \
+    cmake -B build -GNinja . \
+        --preset linux-release-asan \
+        -DTHEROCK_AMDGPU_FAMILIES="${AMDGPU_FAMILIES}" \
+        -DBUILD_TESTING=ON \
+        -DCMAKE_INSTALL_PREFIX=/opt/rocm \
+        -DTHEROCK_ENABLE_ALL=OFF \
+        -DTHEROCK_ENABLE_PROFILER=ON \
+        -DTHEROCK_ENABLE_SYSDEPS=ON \
+        -DTHEROCK_ENABLE_BASE=ON \
+        -DTHEROCK_ENABLE_COMPILER=ON \
+        -DTHEROCK_ENABLE_CORE_RUNTIME=ON \
+        -DTHEROCK_ENABLE_HOST_BLAS=ON \
+        -DTHEROCK_ENABLE_HOST_SUITE_SPARSE=ON \
+        -DTHEROCK_ENABLE_HIP_RUNTIME=ON \
+        -DTHEROCK_ENABLE_OCL_RUNTIME=ON \
+        -DTHEROCK_ENABLE_ROCPROFV3=ON \
+        -DTHEROCK_ENABLE_ROCPROFILER_COMPUTE=ON \
+        -DTHEROCK_ENABLE_BLAS=ON \
+        -DTHEROCK_ENABLE_RAND=ON \
+        -DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON \
+        -DTHEROCK_ENABLE_ROCPROFSYS=ON \
+        -DTHEROCK_ENABLE_ROCPROF_TRACE_DECODER_BINARY=ON \
+        -DTHEROCK_ENABLE_ROCGDB=ON \
+        -DTHEROCK_FLAG_KPACK_SPLIT_ARTIFACTS=OFF \
+        -DTHEROCK_PACKAGE_VERSION="${THEROCK_PKG_VERSION}"
+
+RUN if [ "$BUILD_JOBS" = "0" ]; then \
+        cmake --build build; \
+    else \
+        echo "Building with $BUILD_JOBS parallel jobs"; \
+        cmake --build build -j$BUILD_JOBS; \
+    fi && \
+    cmake --install build
+
+# ============================================================================
+# Select which build stage to use
+# ============================================================================
+FROM therock_${BUILD_TYPE} AS therock
+
+# ================================================================================
+# REGULAR: Build and install other 3rd party deps using pre-built ROCm image
+# ================================================================================
+FROM base AS miopen_deps
+COPY --from=therock /opt/rocm /opt/rocm
+COPY --from=therock /opt/venv /opt/venv
+
+ARG PREFIX=/opt/rocm
+ARG AMDGPU_FAMILIES=gfx94X-dcgpu
+ARG GPU_ARCHS=gfx942
+ENV ROCM_PATH=/opt/rocm
+ARG USE_FIN="OFF"
+
+# Add requirements files
+ADD rbuild.ini /rbuild.ini
+ADD requirements.txt /requirements.txt
+ADD dev-requirements.txt /dev-requirements.txt
+
+# rbuild is used to trigger build of requirements.txt, dev-requirements.txt.
+# Remove components that are already built by TheRock (including CK).
+RUN cd / && \
+    sed -i '/composablekernel/d; /half/d; /nlohmann/d; /rocMLIR/d;' /requirements.txt && \
+    if [ "$USE_FIN" = "ON" ]; then \
+        rbuild prepare -s fin -d ${PREFIX} -DGPU_ARCHS="${GPU_ARCHS}"; \
+    else \
+        rbuild prepare -s develop -d ${PREFIX} -DGPU_ARCHS="${GPU_ARCHS}"; \
+    fi
+
+# ============================================================================
+# Final lean runtime image — only /opt/rocm and /opt/venv copied in
+# ============================================================================
+FROM base AS final
+COPY --from=miopen_deps /opt/rocm /opt/rocm
+COPY --from=miopen_deps /opt/venv /opt/venv
+
+ARG AMDGPU_FAMILIES=gfx94X-dcgpu
+
+# ASAN runtime environment — must match what the instrumented binaries expect
+ENV ROCM_PATH=/opt/rocm
+ENV PATH="${ROCM_PATH}/bin:${PATH}"
+ENV HIP_PATH=${ROCM_PATH}
+ENV HIP_DEVICE_LIB_PATH="${ROCM_PATH}/lib/llvm/amdgcn/bitcode"
+ENV LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib/clang/22/lib/linux:${LD_LIBRARY_PATH}"
+ENV LIBRARY_PATH="${ROCM_PATH}/lib:${LIBRARY_PATH}"
+ENV ROCM_DEVICE_LIB_PATH="${HIP_DEVICE_LIB_PATH}"
+ENV CPLUS_INCLUDE_PATH="${ROCM_PATH}/include:${CPLUS_INCLUDE_PATH}"
+ENV CPATH="${ROCM_PATH}/include:${CPATH}"
+ENV ASAN_SYMBOLIZER_PATH="${ROCM_PATH}/llvm/bin/llvm-symbolizer"
+ENV ASAN_OPTIONS=detect_odr_violation=0:quarantine_size_mb=600
+ENV HSA_XNACK=1
+ENV AMD_LOG_LEVEL=1
+# Expose artifact dir for test runner compatibility with TheRock's fetch_test_configurations
+ENV OUTPUT_ARTIFACTS_DIR=${ROCM_PATH}
+ENV THEROCK_BIN_DIR="${ROCM_PATH}/bin"
+ENV AMDGPU_FAMILIES=${AMDGPU_FAMILIES}
+ENV TEST_TYPE=full
+ENV HIP_PLATFORM=amd
+
+WORKDIR /workspace
