@@ -22,7 +22,7 @@ foreach(arch IN LISTS archs)
         set(WAVEFRONT "-mno-wavefrontsize64")
         # gfx11/gfx12 use true16 instruction syntax (.l/.h half-word operands)
         # which requires the +real-true16 assembler feature to be enabled.
-        set(TRUE16_FLAGS -Xclangas -target-feature -Xclangas +real-true16)
+        set(TRUE16_FLAGS "SHELL:-Xclangas -target-feature -Xclangas +real-true16")
     endif()
     add_library(extop-obj-${arch} OBJECT)
     target_compile_options(extop-obj-${arch}
