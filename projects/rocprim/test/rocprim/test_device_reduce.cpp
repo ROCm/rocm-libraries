@@ -33,6 +33,7 @@
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
+#include "test_utils_memory_check.hpp"
 
 // required rocprim headers
 #include <rocprim/block/block_reduce.hpp>
@@ -504,6 +505,8 @@ void testLargeIndices()
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
+            test_utils::MemCheck memcheck;
+
             const Iterator input {0};
 
             common::device_ptr<T> d_output(1);
@@ -520,6 +523,7 @@ void testLargeIndices()
                                       debug_synchronous));
 
             // allocate temporary storage
+            MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temp_storage_size_bytes)
             common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
             test_utils::GraphHelper gHelper;
