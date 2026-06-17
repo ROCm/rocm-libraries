@@ -2890,17 +2890,18 @@ class TestIntegration:
         finally:
             sched.deallocVgprTiles(writer)
 
-    def test_tailloop_no_data_kmask_for_mx_scale_fp4(self):
-        """MX-scaled (hasScale) tail loop must NOT emit the per-vgpr data
-        K-mask V_AND chain over A/B tile vgprs — the scale tensor's host
-        zero-padding underflows OOB lanes via v_mfma_scale, and the gfx950
-        cmp→cndmask→AND chain corrupts the v_mfma_scale operand bypass.
-        Scale-mask reuse (AND on scale vgprs) is still emitted."""
+    def test_tailloop_data_kmask_emitted_for_single_du_mx_fp4(self):
+        """Single-DU MX-scaled (hasScale) FP4 tail loop KEEPS develop's per-vgpr
+        data K-mask V_AND chain over A/B tile vgprs. The data-K-mask *skip* is
+        gated to multi-DU only (emit_mask_k: skip iff hasScale AND numUnroll>1),
+        so single-DU MXFP4 is develop-identical and emits "mask A[" / "mask B[".
+        Scale-mask reuse (AND on scale vgprs) is also emitted."""
         kernel = create_kernel(256, 256, fp4=True)
         writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
-        cfg = make_cfg_256x256_fp4()  # hasScale = True
+        cfg = make_cfg_256x256_fp4()  # hasScale = True, single-DU (numUnroll A/B = 1)
         assert cfg.hasScale
         sched = LogicalScheduler(cfg)
+        assert not sched._is_multi_du()
         sched.build()
         sched.allocVgprTiles(writer, tiA, tiB,
                              scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
@@ -2913,14 +2914,47 @@ class TestIntegration:
             )
             asm = str(sched.emitTailLoop(writer, kernel))
             # Data K-mask V_AND chain emits comments like "mask A[i] (K=...)".
-            assert "mask A[" not in asm, \
-                "MX-scaled tail loop must not emit data K-mask over A vgprs"
-            assert "mask B[" not in asm, \
-                "MX-scaled tail loop must not emit data K-mask over B vgprs"
-            # Scale-mask reuse should still fire (cndmask result is reused
-            # against scale vgprs even though it's a host-padding no-op).
+            assert "mask A[" in asm or "mask B[" in asm, \
+                "single-DU MX FP4 tail loop must keep develop's data K-mask V_AND chain"
+            # Scale-mask reuse fires as well (cndmask result reused against
+            # scale vgprs even though it's a host-padding no-op).
             assert "mask scale vgpr" in asm, \
                 "MX-scaled tail loop should still apply mask to scale vgprs"
+        finally:
+            sched.deallocVgprTiles(writer)
+
+    def test_tailloop_no_data_kmask_for_multi_du_mx_scale(self):
+        """Multi-DU MX-scaled (hasScale, numUnroll>1, i.e. MXFP8) tail loop must
+        NOT emit the per-vgpr data K-mask V_AND chain over A/B tile vgprs — the
+        scale tensor's host zero-padding underflows OOB lanes via v_mfma_scale,
+        and on gfx950 the cmp→cndmask→AND chain corrupts the v_mfma_scale operand
+        bypass. The skip is gated to multi-DU only. Scale-mask reuse (AND on
+        scale vgprs) is still emitted."""
+        kernel = create_kernel(256, 256, fp4=True)
+        writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
+        # grSA/SB k_gran=2 → numUnroll A/B = 2 → multi-DU MX (hasScale).
+        cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=1)
+        assert cfg.hasScale
+        assert cfg.numUnroll.get('A', 1) > 1 or cfg.numUnroll.get('B', 1) > 1
+        sched = LogicalScheduler(cfg)
+        assert sched._is_multi_du()
+        sched.build()
+        sched.allocVgprTiles(writer, tiA, tiB,
+                             scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+        try:
+            sched.populate_instructions(
+                writer, kernel,
+                tileInfoA=tiA, tileInfoB=tiB,
+                dtileInfo=dTileInfo,
+                scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
+            )
+            asm = str(sched.emitTailLoop(writer, kernel))
+            assert "mask A[" not in asm, \
+                "multi-DU MX tail loop must not emit data K-mask over A vgprs"
+            assert "mask B[" not in asm, \
+                "multi-DU MX tail loop must not emit data K-mask over B vgprs"
+            assert "mask scale vgpr" in asm, \
+                "multi-DU MX tail loop should still apply mask to scale vgprs"
         finally:
             sched.deallocVgprTiles(writer)
 
@@ -2948,14 +2982,50 @@ class TestIntegration:
         finally:
             sched.deallocVgprTiles(writer)
 
-    def test_pgr2_tail_lw_align_emitted_fp4(self):
-        """PGR=2 + tail loop: each NLL exit must emit s_xor_b32 to re-align
-        LocalWriteBaseAddr{A,B,MXSA,MXSB} parity with the LR vgpr (PRELOOP's
-        unbalanced +1 LW swap left LW pointing at the half NOT being read)."""
+    def test_pgr2_no_tail_lw_align_for_single_du_fp4(self):
+        """Single-DU PGR=2 FP4 must NOT emit the LW_base parity re-align.
+        The re-align is gated to multi-DU only: build_nll keeps the
+        MT-transition lr_inc for single-DU PGR=2 (develop behavior), so the
+        LW/LR parity invariant already holds and the s_xor_b32 re-align is
+        neither needed nor emitted. Single-DU MXFP4 is therefore develop-
+        identical here."""
         kernel = create_kernel(256, 256, fp4=True)
         writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
-        cfg = make_cfg_256x256_fp4(pgr=2)
+        cfg = make_cfg_256x256_fp4(pgr=2)  # single-DU (numUnroll A/B = 1)
         sched = LogicalScheduler(cfg)
+        assert not sched._is_multi_du()
+        sched.build()
+        sched.allocVgprTiles(writer, tiA, tiB,
+                             scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+        try:
+            sched.populate_instructions(
+                writer, kernel,
+                tileInfoA=tiA, tileInfoB=tiB,
+                dtileInfo=dTileInfo,
+                scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
+            )
+            asm = str(sched.emitMainAndExitLoops(writer, kernel))
+            assert "PGR=2 tail entry: re-align LW_base" not in asm, \
+                "single-DU PGR=2 FP4 must NOT emit the LW_base parity re-align"
+            assert "PGR=2 tail align" not in asm, \
+                "single-DU PGR=2 FP4 must NOT emit any PGR=2 align XOR"
+        finally:
+            sched.deallocVgprTiles(writer)
+
+    def test_pgr2_tail_lw_align_emitted_for_multi_du(self):
+        """Multi-DU PGR=2 (numUnroll>1) must emit s_xor_b32 to re-align
+        LocalWriteBaseAddr{A,B,MXSA,MXSB} parity with the LR vgpr at each NLL
+        exit. Multi-DU's build_nll drops the MT-transition lr_inc, leaving LW
+        one swap ahead of the LR vgpr (PRELOOP's unbalanced +1 LW swap), so the
+        tail entry must restore parity. This re-align is gated to multi-DU
+        (single-DU keeps lr_inc and needs no fix-up)."""
+        kernel = create_kernel(256, 256, fp4=True)
+        writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
+        # grSA/SB k_gran=2 → numUnroll A/B = 2 → multi-DU MX, PGR=2.
+        cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=2)
+        assert cfg.numUnroll.get('A', 1) > 1 or cfg.numUnroll.get('B', 1) > 1
+        sched = LogicalScheduler(cfg)
+        assert sched._is_multi_du()
         sched.build()
         sched.allocVgprTiles(writer, tiA, tiB,
                              scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
@@ -2968,7 +3038,7 @@ class TestIntegration:
             )
             asm = str(sched.emitMainAndExitLoops(writer, kernel))
             assert "PGR=2 tail entry: re-align LW_base" in asm, \
-                "PGR=2 must emit LW_base parity re-align before tail entry"
+                "multi-DU PGR=2 must emit LW_base parity re-align before tail entry"
             # Both A/B and (since hasScale) MX scale tensors must be re-aligned.
             for tc in ('A', 'B', 'MXSA', 'MXSB'):
                 assert f"PGR=2 tail align: parity-swap LW_base for {tc}" in asm, \
