@@ -50,6 +50,23 @@ def setGithubStatus(String context, String state, String description) {
     }
 }
 
+// Retry a flaky git network operation a few times with backoff. Handles
+// momentary DNS/connectivity blips (e.g. "Could not resolve host: github.com")
+// that would otherwise fail the whole build. Wrap each network-touching git
+// step (ref-repo clone/update, SCM checkout) so a transient blip retries
+// instead of failing the build.
+def gitNetRetry(String label, Closure body) {
+    int maxAttempts = 3
+    for (int i = 1; i <= maxAttempts; i++) {
+        try { body(); return }
+        catch (e) {
+            if (i == maxAttempts) throw e
+            echo "${label} failed (attempt ${i}/${maxAttempts}), retrying: ${e.message}"
+            sleep(time: 15, unit: 'SECONDS')
+        }
+    }
+}
+
 def cloneUpdateRefRepo() {
     def refRepoPath = "/var/jenkins/ref-repo/rocm-libraries"
     def lockLabel = "git ref repo lock - ${env.NODE_NAME}"
@@ -67,7 +84,7 @@ def cloneUpdateRefRepo() {
                 rm -rf ${refRepoPath} && mkdir -p ${refRepoPath}
                 git clone --mirror https://github.com/ROCm/rocm-libraries.git ${refRepoPath}
             """
-            sh(script: cloneCommand, label: "clone ref repo")
+            gitNetRetry("clone ref repo") { sh(script: cloneCommand, label: "clone ref repo") }
         }
         echo "Completed git clone, lock released"
     }
@@ -80,7 +97,7 @@ def cloneUpdateRefRepo() {
             git remote prune origin
             git remote update
         """
-        sh(script: fetchCommand, label: "update ref repo")
+        gitNetRetry("update ref repo") { sh(script: fetchCommand, label: "update ref repo") }
     }
     echo "Completed git ref repo fetch, lock released"
 }
@@ -90,7 +107,7 @@ def checkoutComposableKernel()
     //update ref repo
     cloneUpdateRefRepo()
     // checkout project
-    def scmVars = checkout scm
+    gitNetRetry("checkout scm") { checkout scm }
     // getGitHubCommitHash reads SCMRevisionAction recorded before any local merge,
     // giving the true PR branch tip (pullHash) or branch HEAD (hash).
     // Falls back to ORIG_HEAD (pre-merge HEAD set by git merge) when SCMRevisionAction
@@ -1011,14 +1028,16 @@ def buildAndTest(Map conf=[:]){
                         }
                         if (params.hipTensor_test && arch == "gfx90a" ){
                             // build and test hipTensor on gfx90a node
-                            sh """#!/bin/bash
-                                rm -rf rocm-libraries
-                                git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
-                                cd rocm-libraries
-                                git sparse-checkout init --cone
-                                git sparse-checkout set projects/hiptensor
-                                git checkout "${params.hipTensor_branch}"
-                            """
+                            gitNetRetry("clone hipTensor") {
+                                sh """#!/bin/bash
+                                    rm -rf rocm-libraries
+                                    git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
+                                    cd rocm-libraries
+                                    git sparse-checkout init --cone
+                                    git sparse-checkout set projects/hiptensor
+                                    git checkout "${params.hipTensor_branch}"
+                                """
+                            }
                             dir("rocm-libraries/projects/hiptensor"){
                                 sh """#!/bin/bash
                                     mkdir -p build
