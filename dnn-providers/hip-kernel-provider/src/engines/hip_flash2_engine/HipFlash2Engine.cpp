@@ -14,19 +14,9 @@
 namespace hip_flash2_engine
 {
 
-HipFlash2Engine::HipFlash2Engine(int64_t engineId)
-    : _id(engineId)
-{
-}
-
-void HipFlash2Engine::addPlanBuilder(std::unique_ptr<IPlanBuilder>&& planBuilder)
+void HipFlash2Engine::addPlanBuilder(std::unique_ptr<IPlanBuilder> planBuilder)
 {
     _planBuilders.emplace_back(std::move(planBuilder));
-}
-
-int64_t HipFlash2Engine::id() const
-{
-    return _id;
 }
 
 bool HipFlash2Engine::isApplicable(
@@ -84,8 +74,6 @@ void HipFlash2Engine::initializeExecutionContext(
     {
         if(pb->isApplicable(handle, opGraph))
         {
-            // buildPlan loads the .co, extracts params, and stores a HipFlash2FwdPlan
-            // in executionContext via executionContext.setPlan(...)
             pb->buildPlan(handle, opGraph, engineConfig, executionContext);
             return;
         }
