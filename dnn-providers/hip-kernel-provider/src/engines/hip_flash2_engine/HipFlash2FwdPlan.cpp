@@ -3,10 +3,10 @@
 
 #include "HipFlash2FwdPlan.hpp"
 
+#include <cmath>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <stdexcept>
 #include <unordered_map>
-#include <cmath>
 
 namespace hip_flash2_engine
 {
@@ -42,8 +42,8 @@ void HipFlash2FwdPlan::execute(const Handle& handle,
         {
             HIPDNN_PLUGIN_LOG_ERROR("HipFlash2FwdPlan::execute — missing buffer for tensor '"
                                     << name << "' (uid=" << uid << ")");
-            throw std::runtime_error(
-                std::string("HipFlash2FwdPlan: missing tensor buffer '") + name + "'");
+            throw std::runtime_error(std::string("HipFlash2FwdPlan: missing tensor buffer '") + name
+                                     + "'");
         }
         return it->second;
     };
@@ -60,13 +60,13 @@ void HipFlash2FwdPlan::execute(const Handle& handle,
     args.ptr_v = V;
     args.ptr_o = O;
 
-    args.batch       = _params.batch;
+    args.batch = _params.batch;
     args.num_heads_q = _params.num_heads_q;
     args.num_heads_k = _params.num_heads_k;
-    args.seq_len_q   = _params.seq_len_q;
-    args.seq_len_kv  = _params.seq_len_kv;
-    args.head_dim    = _params.head_dim;
-    args.causal      = _params.causal ? 1 : 0;
+    args.seq_len_q = _params.seq_len_q;
+    args.seq_len_kv = _params.seq_len_kv;
+    args.head_dim = _params.head_dim;
+    args.causal = _params.causal ? 1 : 0;
 
     // Attention scale: use provided value or default to 1/sqrt(head_dim)
     args.scale = (_params.attn_scale != 0.0f)
@@ -75,17 +75,17 @@ void HipFlash2FwdPlan::execute(const Handle& handle,
 
     // Strides (in elements, BHSD layout)
     args.q_stride_batch = static_cast<int>(_params.q_stride_batch);
-    args.q_stride_head  = static_cast<int>(_params.q_stride_head);
-    args.q_stride_seq   = static_cast<int>(_params.q_stride_seq);
+    args.q_stride_head = static_cast<int>(_params.q_stride_head);
+    args.q_stride_seq = static_cast<int>(_params.q_stride_seq);
     args.k_stride_batch = static_cast<int>(_params.k_stride_batch);
-    args.k_stride_head  = static_cast<int>(_params.k_stride_head);
-    args.k_stride_seq   = static_cast<int>(_params.k_stride_seq);
+    args.k_stride_head = static_cast<int>(_params.k_stride_head);
+    args.k_stride_seq = static_cast<int>(_params.k_stride_seq);
     args.v_stride_batch = static_cast<int>(_params.v_stride_batch);
-    args.v_stride_head  = static_cast<int>(_params.v_stride_head);
-    args.v_stride_seq   = static_cast<int>(_params.v_stride_seq);
+    args.v_stride_head = static_cast<int>(_params.v_stride_head);
+    args.v_stride_seq = static_cast<int>(_params.v_stride_seq);
     args.o_stride_batch = static_cast<int>(_params.o_stride_batch);
-    args.o_stride_head  = static_cast<int>(_params.o_stride_head);
-    args.o_stride_seq   = static_cast<int>(_params.o_stride_seq);
+    args.o_stride_head = static_cast<int>(_params.o_stride_head);
+    args.o_stride_seq = static_cast<int>(_params.o_stride_seq);
 
     // ── 3. Grid dimensions ────────────────────────────────────────────────────
     // V7 uses BQ=64 tile — one CTA per (tile_q, head, batch)
@@ -98,13 +98,8 @@ void HipFlash2FwdPlan::execute(const Handle& handle,
     constexpr unsigned int K_BLOCK_DIM = 256;
 
     // ── 4. Dispatch ───────────────────────────────────────────────────────────
-    const bool ok = launchFlash2Kernel(_kernel.function(),
-                                       args,
-                                       gridX,
-                                       gridY,
-                                       gridZ,
-                                       K_BLOCK_DIM,
-                                       handle.getStream());
+    const bool ok = launchFlash2Kernel(
+        _kernel.function(), args, gridX, gridY, gridZ, K_BLOCK_DIM, handle.getStream());
     if(!ok)
     {
         HIPDNN_PLUGIN_LOG_ERROR("HipFlash2FwdPlan::execute — kernel launch failed");
