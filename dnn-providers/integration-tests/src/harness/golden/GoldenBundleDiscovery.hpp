@@ -83,6 +83,13 @@ inline std::string tierPrefix(const std::string& tierName)
     return "";
 }
 
+// Maps any non-[alnum_] char to '_' so a path segment is a legal GTest name
+// component. Required, not redundant: golden tests register via RegisterTest(),
+// which (unlike INSTANTIATE_TEST_SUITE_P's IsValidParamName) performs NO name
+// validation — this is the only thing keeping golden test names legal. Repairs
+// rather than rejects because folder names legitimately contain '-'/'.' (e.g.
+// "resnet50-layer3.v2"). Assumes non-empty input; deriveTestName() rejects
+// empty path segments upstream.
 inline std::string sanitizeForGtest(const std::string& input)
 {
     std::string result;
