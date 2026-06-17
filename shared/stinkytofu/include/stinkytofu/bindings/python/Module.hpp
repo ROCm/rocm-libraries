@@ -64,6 +64,7 @@
     X(PrintBeforePass, std::string)    \
     X(PrintAfterPass, std::string)     \
     X(DebugPass, std::string)          \
+    X(VerifyEach, bool)                \
     X(EnableRemarks, bool)             \
     X(EnableWaitCntInsertion, bool)    \
     X(EnableESM2, bool)                \

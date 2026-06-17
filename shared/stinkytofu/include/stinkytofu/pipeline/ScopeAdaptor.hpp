@@ -34,6 +34,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
+#include "stinkytofu/support/StandardInstrumentations.hpp"
 
 namespace stinkytofu {
 // -----------------------------------------------------------------------
@@ -125,6 +126,20 @@ inline void configureDebugOutput(PassManager& pm, const StinkyAsmModule::ModuleO
     if (!opts.DebugPass.empty()) {
         forEachName(opts.DebugPass,
                     [](const std::string& n) { PassManagerDebugConfig::addDebugOnly(n); });
+    }
+}
+
+/// Single entry point for the standard pipeline observers (LLVM
+/// StandardInstrumentations style): debug IR printing plus, when
+/// ModuleOptions.VerifyEach is set, per-pass StinkyTofu ASM IR verification.
+/// Drivers (backend, opt) should call this instead of wiring each observer
+/// individually.
+inline void configureStandardInstrumentations(
+    PassManager& pm, const StinkyAsmModule::ModuleOptions& opts, const std::string& label,
+    const std::shared_ptr<DebugOutputStreams>& debugStreams) {
+    configureDebugOutput(pm, opts, label, debugStreams);
+    if (opts.VerifyEach) {
+        pm.addInstrumentation(std::make_shared<VerifyInstrumentation>());
     }
 }
 

@@ -11,6 +11,7 @@ Control StinkyTofu behavior through Tensile's `GlobalParameters` system -- eithe
 | `StinkyTofuPrintBeforePass` | comma-separated pass names | `""` | Print IR before specific passes |
 | `StinkyTofuPrintAfterPass` | comma-separated pass names | `""` | Print IR after specific passes |
 | `StinkyTofuDebugPass` | comma-separated pass names | `""` | PASS_DEBUG logging |
+| `StinkyTofuVerifyEach` | `0`, `1` | `0` | Verify StinkyTofu ASM IR after every pass |
 | `StinkyTofuEnableRemarks` | `0`, `1` | `0` | Emit optimization remarks to stderr |
 
 ---
