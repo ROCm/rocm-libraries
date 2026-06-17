@@ -715,14 +715,22 @@ class TileInfo:
     # AGPR (a partial VGPR/AGPR split). The split is bounded by vgprAccLimit below
     # so the peak register index stays inside the VGPR file.
     #
-    # VGPR-first accumulator policy for MXF4, including StreamK. The StreamK
-    # partials/fixup epilogue now routes accumulator reads through the same
-    # VGPR-first source map as the global-store path (see GlobalWriteBatch bias
-    # fix), and the conservative epilogue ceiling below spills to AGPR before the
-    # ValuC staging window can overflow the VGPR file.
+    # VGPR-first accumulator policy: enabled only when ALL three conditions hold:
+    #   * FP4 operand types (MXF4 on both A and B)
+    #   * UseSubtileImpl=1  (the subtile logical-scheduler path)
+    #   * StreamK > 0       (UseSubtileImpl mandates StreamK=3, but we check
+    #                         explicitly so the gate is self-documenting and
+    #                         safe if the invariant ever changes)
+    #
+    # The epiCeil below must subtract the main-loop VGPR cost (estimateSubtileMainLoopVgprs)
+    # because partialsWriteBatch runs while A/B tiles are still live in the pool.
+    # That subtraction is only correct when StreamK/UseSubtileImpl is active, so
+    # we narrow preferVgpr here rather than adding a conditional inside the block.
     preferVgpr = isDTile \
         and isFloat4Type(dataTypeA) \
-        and isFloat4Type(dataTypeB)
+        and isFloat4Type(dataTypeB) \
+        and bool(kernel.get("UseSubtileImpl", False)) \
+        and kernel.get("StreamK", 0) > 0
 
     # Fallback only: a coarse upper bound on the main-loop A/B/scale working set
     # used when the real A/B tile info is unavailable (e.g. the unit-test writer
@@ -820,46 +828,91 @@ class TileInfo:
       # reserve (valuCStage) is the size of that staging window; the accumulators
       # must end below maxVgpr - valuCStage - margin so the window stays in range.
       #
-      # The size of the staging window is macrotile-size dependent:
+      # The store always batches: refineOccupancy() (KernelWriterAssembly.py) sizes
+      # each batch to numVgprAvailable // numVgprsPerElement, capped at the whole
+      # tile (totalElems) and snapped to MIWaveTile[0] ("miwt0") columns. It also
+      # self-limits to the free pool via availableBlockMaxVgpr, so it never runs past
+      # v255 on its own -- EXCEPT it will grow the pool if not even the minimum batch
+      # fits. The reserve therefore only has to guarantee that one miwt0-aligned
+      # column batch fits above the accumulators.
       #
-      #   * Small/medium tiles (totalDTileRegs <= AGPR file): the whole D tile can be
-      #     staged at once, so the safe reserve is the whole-tile count. This is the
-      #     validated, conservative default and is REQUIRED for these tiles -- a
-      #     looser reserve lets the accumulators climb too high and the store's
-      #     ValuC/data window then runs past v255 (observed on MT192x128).
-      #
-      #   * Large tiles (totalDTileRegs > AGPR file): the whole tile cannot be staged
-      #     at once (it would need more than maxVgpr regs and forces the AGPR-first
-      #     fallback). The store therefore MUST batch, and refineOccupancy() sizes
-      #     each batch to the free pool while snapping to MIWaveTile[0] ("miwt0")
-      #     columns -- so the realized peak is one column-aligned batch, not the
-      #     whole tile. Reserving that single batch (miwt0 * perElem) lets these
-      #     large tiles keep a partial VGPR/AGPR split instead of falling back, while
-      #     the store self-limits the remaining batches under maxVgpr.
+      # perElem mirrors AsmStoreState.numVgprsPerElement exactly (real store gwvw,
+      # numVgprPerValuC = bpeCinternal//bpr, per-element address regs, beta C data,
+      # plus address+data for each enabled epilogue input). We size the reserve to
+      # one column (miwt0 * perElem), clamped by the whole-tile ValuC count so it
+      # never exceeds the prior conservative bound. The estimate uses the worst-case
+      # store sub-path (edge addressing -> no shared-column, factorDim==0 feature
+      # data) so it is safe across every store variant emitted in the kernel.
       statesC = getattr(writer.states, "c", None)
       wholeTileStage = getattr(statesC, "numVgprValu", 0) or _totalDTileRegs
-      if _totalDTileRegs > maxVgprBeforeAgpr:
+
+      def _preciseStorePerElem(gwvw):
+        st = writer.states
         pt = kernel["ProblemType"]
-        _ADDR = 2  # 64-bit buffer address pair (AsmStoreState numVgprsPerAddr)
-        # Upper bound on AsmStoreState.numVgprsPerElement for the worst
-        # (beta/bias/scaleVec/E) store path: ValuC + C/D data + D address, plus an
-        # address pair and data block per optional epilogue input.
-        perElem = 2 * numDword + _ADDR
-        if pt.get("UseBeta"):
-          perElem += _ADDR + numDword
+        # Defaults match the real KernelWriter constants so the production path uses
+        # exact state values while the unit-test writer stub (SimpleNamespace) still
+        # gets a representative estimate.
+        bpr = getattr(st, "bpr", 4)
+        bpeCinternal = getattr(st, "bpeCinternal", 4)
+        bpeCexternal = getattr(st, "bpeCexternal", bpeCinternal)
+        valuC = bpeCinternal // bpr                             # numVgprPerValuC
+        # Edge store path disables shared-column addressing, so each element keeps
+        # its own address regs: rpgo (buffer store) / rpga (flat).
+        addr = getattr(st, "rpgo", 1) if kernel.get("BufferStore", True) else getattr(st, "rpga", 2)
+        beta = pt.get("UseBeta")
+        dataPerVI = (bpeCexternal / bpr) if beta else 0.0
+        cdt = pt.get("ComputeDataType")
+        creg = int(math.ceil(cdt.numRegisters())) if cdt is not None else 1
+        gsu = kernel.get("GlobalSplitU", 1)
+        gacc = kernel.get("_GlobalAccumulation")
+        single = (gsu in (1, -1)) or gacc == "MultipleBufferSingleKernel"
+        p = valuC * gwvw + addr + int(math.ceil(dataPerVI * gwvw))
+        if pt.get("UseE") and gsu in (1, -1):
+          p += addr
+          if pt.get("Gradient") and pt.get("ActivationType") != 'none':
+            p += creg * gwvw
         if pt.get("UseBias"):
-          perElem += _ADDR + numDword
-        if pt.get("UseScaleAlphaVec") or pt.get("UseScaleAB"):
-          perElem += _ADDR + numDword
-        if pt.get("UseE"):
-          perElem += _ADDR + numDword
-        miwt0 = max(1, int(kernel["MIWaveTile"][0]))
-        valuCStage = min(wholeTileStage, miwt0 * perElem)
-        EPILOGUE_TEMP_MARGIN = 4
+          p += addr + creg * gwvw                               # factorDim==0 worst case
+        if pt.get("UseScaleAlphaVec") and single:
+          p += addr + creg * gwvw
+        if pt.get("UseScaleAB") == "Vector" and single:
+          p += 2 * addr + creg * gwvw + creg * min(gwvw, 2)
+        if kernel.get("GroupLoadStore") and beta:
+          p += addr
+        if gacc == "MultipleBufferSingleKernel":
+          p += addr
+        return p
+
+      miwt0 = max(1, int(kernel["MIWaveTile"][0]))
+      gwvw = kernel.get("StoreVectorWidth") or kernel.get("GlobalWriteVectorWidth") or 1
+      perElem = _preciseStorePerElem(gwvw)
+      # The store stages ValuC in batches (refineOccupancy / StreamK
+      # partialsWriteBatch): each batch covers numElementsPerBatch <= total tile
+      # elements, sized to numVgprAvailable // numVgprsPerElement, then snapped to a
+      # MIWaveTile[0] column. Before that, the store GROWS the pool to guarantee at
+      # least a data-type-dependent minElements floor (FP16/BF16 -> 2, 8-bit -> 4,
+      # else 1; see StreamKCommon.partialsWriteBatch / refineOccupancy). Reserve the
+      # larger of (one miwt0 column, that minElements floor) so one real batch always
+      # fits above the accumulators without the store growing the pool past v255.
+      dt = kernel["ProblemType"].get("DataType")
+      if dt is not None and (dt.isHalf() or dt.isBFloat16()):
+        minStoreElems = 2
+      elif dt is not None and hasattr(dt, "is8bitFloat") and dt.is8bitFloat():
+        minStoreElems = 4
       else:
-        valuCStage = wholeTileStage
-        EPILOGUE_TEMP_MARGIN = 32
-      epiCeil = maxVgprBeforeAgpr - valuCStage - EPILOGUE_TEMP_MARGIN
+        minStoreElems = 1
+      stageElems = max(miwt0, minStoreElems)
+      valuCStage = min(wholeTileStage, stageElems * perElem)
+      EPILOGUE_TEMP_MARGIN = 8  # coord0/1 + tmp scalars live during the store
+      # partialsWriteBatch runs while A/B tiles are still live in the VGPR pool
+      # (UseSubtileImpl+StreamK is always active here, see preferVgpr gate above).
+      # The staging VGPRs for AGPR tiles are therefore allocated above BOTH the
+      # accumulators AND the main-loop working set. Subtracting mainCeil's loop
+      # reserve from the epilogue ceiling ensures the staging window fits:
+      #   staging_start = acc_end + loop_vgprs
+      #   staging_end   = staging_start + valuCStage - 1
+      #   constraint:   staging_end < maxVgpr  =>  epiCeil = mainCeil - valuCStage - margin
+      epiCeil = mainCeil - valuCStage - EPILOGUE_TEMP_MARGIN
 
       vgprAccLimit = min(mainCeil, epiCeil)
 
@@ -871,7 +924,7 @@ class TileInfo:
       # Never reject: if no VGPR accumulator can fit under the epilogue ceiling
       # (or the mandatory VGPR floor would itself overflow it), fall back to pure
       # AGPR-first. That path matches develop, routes the epilogue through the
-      # compact AGPR staging, and is known to fit.
+      # compact per-batch AGPR staging, and is known to fit.
       if epiCeil < startVgprValu + numDword or startVgprValu + minVgprAccRegs > epiCeil:
         preferVgpr = False
         vgprAccLimit = maxVgpr

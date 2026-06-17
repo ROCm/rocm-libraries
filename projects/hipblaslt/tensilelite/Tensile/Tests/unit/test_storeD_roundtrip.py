@@ -1139,7 +1139,7 @@ def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
     writer, _, _, _ = create_writer(cfg, mi_wave_group=mi_wave_group)
 
     sgprs = _build_sgprs_for_test(writer)
-    tileInfoD, agpr_indices = _allocate_d_tile(kernel, writer)
+    tileInfoD, d_reg_indices = _allocate_d_tile(kernel, writer)
 
     kw = _build_kwa(kernel, writer, use_bf16=use_bf16)
     kw.states.d.tileInfo = tileInfoD
@@ -1166,7 +1166,7 @@ def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
     stride_d = round_mt0
 
     if init_mode == "wave_id":
-        prologue = _build_prologue(sgprs, len(agpr_indices), cfg.mt_a, cfg.mt_b,
+        prologue = _build_prologue(sgprs, len(d_reg_indices), cfg.mt_a, cfg.mt_b,
                                    stride_d=stride_d, use_input_buf=False)
         init_mod = _build_accvgpr_init_wave_id_asm(tileInfoD, tmp_v)
         args = [
@@ -1180,9 +1180,9 @@ def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
     elif init_mode == "random":
         vaddr = writer.vgprPool.checkOut(1, "vaddr", preventOverflow=False)
         vtmp2 = writer.vgprPool.checkOut(1, "vtmp2", preventOverflow=False)
-        prologue = _build_prologue(sgprs, len(agpr_indices), cfg.mt_a, cfg.mt_b,
+        prologue = _build_prologue(sgprs, len(d_reg_indices), cfg.mt_a, cfg.mt_b,
                                    stride_d=stride_d, use_input_buf=True)
-        init_mod = _build_accvgpr_init_matrix_asm(agpr_indices, kernel, tileInfoD, sgprs,
+        init_mod = _build_accvgpr_init_matrix_asm(d_reg_indices, kernel, tileInfoD, sgprs,
                                                   tmp_v, vaddr, vtmp2)
         args = [
             ("input",    8, "global_buffer", "u8"),
@@ -1198,9 +1198,9 @@ def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
     else:
         vaddr = writer.vgprPool.checkOut(1, "vaddr", preventOverflow=False)
         vtmp2 = writer.vgprPool.checkOut(1, "vtmp2", preventOverflow=False)
-        prologue = _build_prologue(sgprs, len(agpr_indices), cfg.mt_a, cfg.mt_b,
+        prologue = _build_prologue(sgprs, len(d_reg_indices), cfg.mt_a, cfg.mt_b,
                                    stride_d=stride_d, use_input_buf=True)
-        init_mod = _build_accvgpr_init_matrix_asm(agpr_indices, kernel, tileInfoD, sgprs,
+        init_mod = _build_accvgpr_init_matrix_asm(d_reg_indices, kernel, tileInfoD, sgprs,
                                                   tmp_v, vaddr, vtmp2)
         args = [
             ("input",    8, "global_buffer", "u8"),
@@ -1801,7 +1801,7 @@ def _run_storeD_beta(cfg, tmp_path, size_i, size_j, mi_wave_group=None, dump_asm
     writer, _, _, _ = create_writer(cfg, mi_wave_group=mi_wave_group)
     sgprs = _build_sgprs_for_beta_test(writer)
 
-    tileInfoD, agpr_indices = _allocate_d_tile(kernel, writer)
+    tileInfoD, d_reg_indices = _allocate_d_tile(kernel, writer)
     kw = _build_kwa(kernel, writer)
     kw.states.d.tileInfo = tileInfoD
 
@@ -2036,7 +2036,7 @@ def _run_storeD_cload_pagefault(cfg, tmp_path, size_i, size_j, mi_wave_group=Non
     writer, _, _, _ = create_writer(cfg, mi_wave_group=mi_wave_group)
     sgprs = _build_sgprs_for_beta_test(writer)
 
-    tileInfoD, agpr_indices = _allocate_d_tile(kernel, writer)
+    tileInfoD, d_reg_indices = _allocate_d_tile(kernel, writer)
     kw = _build_kwa(kernel, writer)
     kw.states.d.tileInfo = tileInfoD
 

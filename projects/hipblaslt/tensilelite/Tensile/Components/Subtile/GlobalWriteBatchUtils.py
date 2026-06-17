@@ -87,7 +87,10 @@ def _can_bypass_valu_c(kernel, edge: bool, atomic: bool, use_bias,
     NOT updated to those helpers must disable the bypass to avoid reading
     uninitialized staging registers:
 
-    * Bias read           - VAddF32/VAddPKF32 src1 uses raw "ValuC+%d".
+    * Bias read           - the VAddF32/VAddPKF32 bias add now reads src1 via
+      _valuCVgpr, so it is bypass-safe. The Int8/Int32 convertData path that runs
+      before the bias add still uses inputPrefix="ValuC+", so those dest/data-type
+      combos keep the bypass disabled.
     * Bias write (BiasSrc=D, not WorkGroupReduction)
                           - biasReductionModule addStore uses raw "ValuC+%d".
     * UseScaleCD          - scaleDModule uses raw "ValuC+%d".
@@ -118,7 +121,25 @@ def _can_bypass_valu_c(kernel, edge: bool, atomic: bool, use_bias,
     if pt.get("Gradient", False):
         return False
     if use_bias == DataDirection.READ:
-        return False
+        # The bias-add epilogue (VAddF32 / VAddPKF32, GlobalWriteBatch._epilogue)
+        # now resolves its ValuC src1 reads through _valuCVgpr, so bias read is
+        # bypass-safe for the common Single-compute path. Two sub-paths still read
+        # the raw "ValuC+%d" staging slot and must keep the bypass disabled:
+        #   * compute != f32 -> the bias branch raises today, but guard anyway.
+        #   * the Int8/Int32 convertData(CVT_I32_to_F32, inputPrefix="ValuC+") path
+        #     that runs before the bias add for integer dest / int8-in dest combos.
+        compute = pt.get("ComputeDataType")
+        if compute is None or not compute.isSingle():
+            return False
+        dest = pt.get("DestDataType")
+        dtype = pt.get("DataType")
+        biasConvertRawValuC = (
+            (dest is not None and (dest.isInt8() or dest.isInt32()))
+            or (dtype is not None and dtype.isInt8()
+                and dest is not None and (dest.isHalf() or dest.isBFloat16()))
+        )
+        if biasConvertRawValuC:
+            return False
     # biasReductionModule: stores "ValuC+%d" directly when BiasSrc=D and
     # WorkGroupReduction is off - that code was not updated for bypass.
     if (use_bias == DataDirection.WRITE

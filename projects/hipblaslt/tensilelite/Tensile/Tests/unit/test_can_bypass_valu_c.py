@@ -46,16 +46,21 @@ from Tensile.Common import DataDirection
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_dest_type(is_half=False, is_bf16=False, is_single=False):
-    """Return a mock DestDataType with controllable isHalf / isBFloat16 / isSingle.
+def _make_dest_type(is_half=False, is_bf16=False, is_single=False,
+                    is_int8=False, is_int32=False):
+    """Return a mock DestDataType with controllable type predicates.
 
-    All three flags default to False so that unspecified combinations do not
-    accidentally pass the HPA allow-list guard added for F32 support.
+    All flags default to False so that unspecified combinations do not
+    accidentally pass the HPA allow-list guard added for F32 support, nor
+    accidentally trip the bias-read Int8/Int32 convert guard (those predicates
+    would otherwise return a truthy MagicMock).
     """
     dt = MagicMock()
     dt.isHalf.return_value = is_half
     dt.isBFloat16.return_value = is_bf16
     dt.isSingle.return_value = is_single
+    dt.isInt8.return_value = is_int8
+    dt.isInt32.return_value = is_int32
     return dt
 
 
@@ -172,9 +177,58 @@ class TestBypassDisabledForEpilogueFeatures:
         assert _can_bypass_valu_c(k, edge=False, atomic=False,
                                   use_bias=DataDirection.NONE) is True
 
-    def test_bias_read(self):
-        """Bias addition uses vgpr("ValuC+%d"%idx) as src1."""
+    def test_bias_read_no_compute_type_disabled(self):
+        """Bias read without a known compute type stays conservatively disabled."""
         assert _can_bypass_valu_c(_base_kernel(), edge=False, atomic=False,
+                                  use_bias=DataDirection.READ) is False
+
+    def test_bias_read_f32_compute_bf16_dest_allowed(self):
+        """FP4->BF16 bias read: the VAddF32/VAddPKF32 add reads src1 via _valuCVgpr.
+
+        ComputeDataType=Single, DestDataType=BF16 (with HPA) -> bypass-safe.
+        This is the target subtile FP4->BF16 + bias kernel.
+        """
+        ct = _make_compute_type(is_single=True)
+        dest = _make_dest_type(is_bf16=True)
+        k = _base_kernel(dest_type=dest, compute_type=ct)
+        k["ProblemType"]["HighPrecisionAccumulate"] = True
+        assert _can_bypass_valu_c(k, edge=False, atomic=False,
+                                  use_bias=DataDirection.READ) is True
+
+    def test_bias_read_f32_compute_f32_dest_allowed(self):
+        """FP4->F32 bias read: F32 dest has no pack step; bias add uses _valuCVgpr."""
+        ct = _make_compute_type(is_single=True)
+        dest = _make_dest_type(is_single=True)
+        k = _base_kernel(dest_type=dest, compute_type=ct)
+        k["ProblemType"]["HighPrecisionAccumulate"] = True
+        assert _can_bypass_valu_c(k, edge=False, atomic=False,
+                                  use_bias=DataDirection.READ) is True
+
+    def test_bias_read_int32_dest_disabled(self):
+        """Int32 dest bias read: convertData(CVT_I32_to_F32) reads raw "ValuC+"."""
+        ct = _make_compute_type(is_single=True)
+        dest = _make_dest_type(is_int32=True)
+        k = _base_kernel(dest_type=dest, compute_type=ct)
+        assert _can_bypass_valu_c(k, edge=False, atomic=False,
+                                  use_bias=DataDirection.READ) is False
+
+    def test_bias_read_int8_dest_disabled(self):
+        """Int8 dest bias read: convertData reads raw "ValuC+" before the add."""
+        ct = _make_compute_type(is_single=True)
+        dest = _make_dest_type(is_int8=True)
+        k = _base_kernel(dest_type=dest, compute_type=ct)
+        assert _can_bypass_valu_c(k, edge=False, atomic=False,
+                                  use_bias=DataDirection.READ) is False
+
+    def test_bias_read_int8_in_bf16_dest_disabled(self):
+        """Int8 input + BF16 dest bias read: convertData path reads raw "ValuC+"."""
+        ct = _make_compute_type(is_single=True)
+        dest = _make_dest_type(is_bf16=True)
+        dtype = MagicMock()
+        dtype.isInt8.return_value = True
+        k = _base_kernel(dest_type=dest, compute_type=ct)
+        k["ProblemType"]["DataType"] = dtype
+        assert _can_bypass_valu_c(k, edge=False, atomic=False,
                                   use_bias=DataDirection.READ) is False
 
     def test_bias_write_is_allowed(self):
