@@ -1300,7 +1300,13 @@ def mainLoop(writer, kernel):
   # it once here, before the loop. emitMfmaInstruction will reference it via kernel dict.
   miK = kernel["MatrixInstK"]
   unitScaleVgpr = -1
-  if miK == 128 and not (scaleTiA or scaleTiB):
+  # The plain-FP8 MFMA fallback (emitMfmaInstruction) substitutes a unit scale
+  # for BOTH operands whenever either real scale VGPR is missing, so the unit
+  # scale must be allocated whenever either operand is unscaled (including the
+  # asymmetric mixed-scale case where one of A/B has an MX scale and the other
+  # does not). Requiring both unscaled would leave the fallback asserting on a
+  # missing _subtileUnitScaleVgpr.
+  if miK == 128 and (scaleTiA is None or scaleTiB is None):
       unitScaleVgpr = writer.vgprPool.checkOut(1)
       module.add(VMovB32(dst=vgpr(unitScaleVgpr), src=hex(0x7f7f7f7f),
                          comment="unit scale=1.0 (E8M0) for plain FP8 MFMA"))
