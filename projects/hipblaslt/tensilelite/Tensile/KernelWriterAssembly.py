@@ -16633,19 +16633,6 @@ class KernelWriterAssembly(KernelWriter):
       else kernel["ProblemType"]["ComputeDataType"].numRegisters()
     return gwvw * reg - numVgprs
 
-  def getSubtileVectorLdsSlotStrideBpe(self, kernel, dim):
-    """Byte stride between epilogue vector LDS slots (matches GW coordOffset spacing)."""
-    mi = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
-    mn = kernel["MatrixInstN"]
-    bpe = kernel["ProblemType"]["ComputeDataType"].numBytes()
-    ws = kernel["WavefrontSize"]
-    ovw = kernel["MIOutputVectorWidth"]
-    if dim == 0:
-      lanesPerIdx = ws // (mn if kernel["SourceSwap"] else mi)
-    else:
-      lanesPerIdx = ws // (mi if kernel["SourceSwap"] else mn)
-    return lanesPerIdx * ovw * bpe
-
   def getEpilogueGlobalLoadTurn(self, kernel, gwvw, dim):
     """Macro-tile coverage turns for epilogue vector global loads and LDS staging."""
     divisor = kernel["SubGroup0"] * kernel["SubGroup1"]
@@ -16661,9 +16648,6 @@ class KernelWriterAssembly(KernelWriter):
   def getTurn(self, kernel, gwvw, dim):
     """Epilogue vector turn count (global load + LDS staging). GW batch slot spacing uses coordOffset."""
     return self.getEpilogueGlobalLoadTurn(kernel, gwvw, dim)
-
-  def getVectorLdsTurnStrideBpe(self, kernel, gwvw, dim):
-    return self.getEpilogueGlobalLoadStrideBpe(kernel, gwvw, dim)
 
   def addVectorGlobalLoad(self, kernel, srdName: str, offsetVgpr, shiftOffset, dataType, bpe, gwvw, tmpVgpr1Res: ContinuousRegister, dstOffset, dim):
     module        = Module("")
