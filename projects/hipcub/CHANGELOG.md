@@ -15,7 +15,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Replace `#pragma unroll` by `_CCCL_PRAGMA_UNROLL_FULL()` and `_CCCL_PRAGMA_NOUNROLL()` by `_CCCL_PRAGMA_NOUNROLL()`.
 * Add `_CCCL_SORT_MAYBE_UNROLL()` in block merge sort and thread sort.
 * Update `WarpExchange` template parameters for CUB compatibility.
-* Benchmarking now uses `primbench` for its benchmarks instead of `Google Benchmark`.
+* Benchmarking now uses primbench for its benchmarks instead of Google Benchmark.
   * See `shared/primbench/README.md` for its documentation.
 
 ### Removed

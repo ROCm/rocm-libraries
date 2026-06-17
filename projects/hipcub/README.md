@@ -68,7 +68,7 @@ mkdir build; cd build
 #   BUILD_TEST                   - OFF by default,
 #   BUILD_BENCHMARK              - OFF by default.
 #   ROCPRIM_FETCH_METHOD         - One of PACKAGE (default), DOWNLOAD, and MONOREPO. See below for a description of each.
-#   EXTERNAL_DEPS_FORCE_DOWNLOAD - OFF by default, forces download for non-ROCm dependencies (eg. Google Test).
+#   EXTERNAL_DEPS_FORCE_DOWNLOAD - OFF by default, forces download for non-ROCm dependencies (e.g., Google Test).
 #   DOWNLOAD_CUB                 - OFF by default, (Nvidia CUB backend only) forces download of CUB instead of searching for an installed package.
 #   BUILD_OFFLOAD_COMPRESS       - ON by default, compresses device code to reduce the size of the generated binary.
 #   BUILD_EXAMPLE                - OFF by default, builds examples.
