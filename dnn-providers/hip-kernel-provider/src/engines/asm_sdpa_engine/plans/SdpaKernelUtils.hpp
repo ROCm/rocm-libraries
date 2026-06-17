@@ -268,14 +268,14 @@ using CachedModule = std::shared_ptr<HipModuleGuard>;
 
 inline CachedModule loadOrGetCachedModule(const std::string& coPath, const char* funcName)
 {
-    static std::mutex cacheMutex;
-    static std::unordered_map<std::string, CachedModule> cache;
+    static std::mutex s_cacheMutex;
+    static std::unordered_map<std::string, CachedModule> s_cache;
 
-    std::string key = coPath + "::" + funcName;
+    const std::string key = coPath + "::" + funcName;
 
-    std::lock_guard<std::mutex> lock(cacheMutex);
-    auto it = cache.find(key);
-    if(it != cache.end())
+    const std::lock_guard<std::mutex> lock(s_cacheMutex);
+    auto it = s_cache.find(key);
+    if(it != s_cache.end())
     {
         return it->second;
     }
@@ -286,7 +286,7 @@ inline CachedModule loadOrGetCachedModule(const std::string& coPath, const char*
         return nullptr;
     }
     auto cached = std::make_shared<HipModuleGuard>(std::move(*loaded));
-    cache.emplace(key, cached);
+    s_cache.emplace(key, cached);
     return cached;
 }
 

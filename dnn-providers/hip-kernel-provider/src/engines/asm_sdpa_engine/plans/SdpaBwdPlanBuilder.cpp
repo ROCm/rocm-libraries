@@ -1072,8 +1072,8 @@ void SdpaBwdPlanBuilder::buildPlan(
     std::shared_ptr<HipModuleGuard> postKernel;
     if(dqConvertResolved)
     {
-        postKernel = loadOrGetCachedModule(dqConvertResolved->coPath,
-                                           dqConvertResolved->knlName.c_str());
+        postKernel
+            = loadOrGetCachedModule(dqConvertResolved->coPath, dqConvertResolved->knlName.c_str());
         if(!postKernel)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
