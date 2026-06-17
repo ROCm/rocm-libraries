@@ -215,8 +215,11 @@ enum class DataType
     BOOLEAN = 16, ///< 8-bit boolean
     FP8_E4M3_FNUZ = 17, ///< 8-bit floating point (4 exponent, 3 mantissa bits, FNUZ)
     FP8_E5M2_FNUZ = 18, ///< 8-bit floating point (5 exponent, 2 mantissa bits, FNUZ)
+    // NOLINTNEXTLINE(readability-identifier-naming)
     INT8x4 = 19, ///< Four packed 8-bit signed integers (vectorized layout)
+    // NOLINTNEXTLINE(readability-identifier-naming)
     UINT8x4 = 20, ///< Four packed 8-bit unsigned integers (vectorized layout)
+    // NOLINTNEXTLINE(readability-identifier-naming)
     INT8x32 = 21, ///< Thirty-two packed 8-bit signed integers (vectorized layout)
     FAST_FLOAT_FOR_FP8 = 22, ///< Fast floating-point accumulation type for FP8
     COMPLEX_FP32 = 23, ///< Complex number with 32-bit floating-point components
