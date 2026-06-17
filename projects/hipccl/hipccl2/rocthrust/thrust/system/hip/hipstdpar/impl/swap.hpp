@@ -55,6 +55,7 @@ namespace std
 template <typename I0, typename I1, enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
 inline I1 swap_ranges(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1)
 {
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::swap_ranges(::thrust::device, f0, l0, f1);
 }
 

@@ -55,6 +55,7 @@ namespace std
 template <typename I0, typename I1, enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
 inline bool lexicographical_compare(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1)
 {
+  ::hipstd::warn_if_no_xnack();
   if (f0 == l0)
   {
     return f1 != l1;
@@ -93,6 +94,7 @@ template <typename I0,
           enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
 inline bool lexicographical_compare(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1, R r)
 {
+  ::hipstd::warn_if_no_xnack();
   if (f0 == l0)
   {
     return f1 != l1;
