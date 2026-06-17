@@ -92,8 +92,8 @@ RUN pip3 install --break-system-packages -r /doc-requirements.txt && \
 # Install cget && rbuild
     pip3 install --break-system-packages https://github.com/pfultz2/cget/archive/b5dd36cafa2804e6146c5021eb2469c4b2d3ad42.tar.gz && \
     pip3 install --break-system-packages https://github.com/RadeonOpenCompute/rbuild/archive/c33b1a7e74ae7f72379364b523f73d30fd4d765c.tar.gz && \
-# Install pre-commit
-    pip3 install --break-system-packages pre-commit && \
+# Install pre-commit and clang-format pinned to match .pre-commit-config.yaml mirrors-clang-format rev
+    pip3 install --break-system-packages pre-commit clang-format==18.1.4 && \
 # groupadd render && video
     groupadd -f render && \
     groupadd -f video && \
@@ -366,13 +366,12 @@ FROM base AS miopen
 COPY --from=build_ck /opt/rocm /opt/rocm
 COPY --from=build_ck /usr/local /usr/local
 
-# Install explicit version of tools that are supported for miopen development
-# (clang-format, clang-tidy)
+# Install clang-tidy-21 from the LLVM apt repo.
+# clang-format is installed via pip (see above) pinned to match .pre-commit-config.yaml.
 RUN wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add - && \
     echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-21 main" | sudo tee /etc/apt/sources.list.d/llvm21.list
 
 RUN apt-get update && apt-get install -y \
-    clang-format-18 \
     clang-tidy-21 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -380,8 +379,7 @@ RUN apt-get update && apt-get install -y \
 RUN mv /opt/rocm/llvm/bin/clang-tidy /opt/rocm/llvm/bin/clang-tidy.disabled || true
 RUN ln -sf /usr/bin/clang-tidy-21 /opt/rocm/llvm/bin/clang-tidy
 
-# Use update-alternatives to set default versions
-RUN update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 100
+# Use update-alternatives to set default clang-tidy version
 RUN update-alternatives --install /opt/rocm/llvm/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-21 100
 RUN update-alternatives --set clang-tidy /usr/bin/clang-tidy-21
 

@@ -59,6 +59,32 @@ public:
     {
         return _sub_nodes;
     }
+
+    // True when an execution plan descriptor is attached (created) to the graph.
+    // The plan may not yet be finalized; use isExecutionPlanFinalized() for that.
+    bool hasExecutionPlan() const
+    {
+        return _executionPlanDesc && _executionPlanDesc->valid();
+    }
+
+    // True only once the attached execution plan has been finalized (build_plans()/build()).
+    bool isExecutionPlanFinalized() const
+    {
+        return _executionPlanFinalized;
+    }
+
+    // Test seams for the capability-gated serialize path. Setting the captured
+    // engine id makes serialize() query that engine's behavior note (combo path
+    // when it reports support); clearing it forces the graph-only fallback (plan
+    // treated as not serializable, no query issued).
+    void setSelectedEngineId(int64_t id)
+    {
+        _selectedEngineId = id;
+    }
+    void clearSelectedEngineId()
+    {
+        _selectedEngineId.reset();
+    }
 };
 }
 
@@ -6867,3 +6893,1051 @@ INSTANTIATE_TEST_SUITE_P(GraphTopologies,
                          [](const ::testing::TestParamInfo<GraphTopologyParam>& info) {
                              return info.param.name;
                          });
+
+// ============================================================================
+// Serialize/deserialize graph-and-plan tests
+//
+// Pure unit tests on Mock_hipdnn_backend with the backend container framing
+// fully mocked: they assert which serialize/deserialize C-API wrappers are
+// invoked, with what arguments, and the resulting frontend state. No
+// flatbuffers / container byte-format assertions are made here.
+// ============================================================================
+
+namespace
+{
+// Drives a GraphTestUtils to a state with a valid (lowered) graph descriptor and
+// an execution plan: build_operation_graph() then create_execution_plans(), and
+// (when buildPlans is true) build_plans() to finalize the plan. The serialize
+// plan branch requires both descriptors valid and the plan finalized, which the
+// deserialize-attach path cannot supply. Pass buildPlans=false to stop after the
+// plan descriptor is created but before it is finalized.
+void buildGraphWithExecutionPlan(GraphTestUtils& graph,
+                                 ::testing::NiceMock<Mock_hipdnn_backend>& mockBackend,
+                                 hipdnnHandle_t handle,
+                                 bool buildPlans = true)
+{
+    using ::testing::_;
+    using ::testing::Return;
+
+    createBasicBatchnormGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(handle).is_good());
+
+    ON_CALL(mockBackend, backendCreateDescriptor(_, _))
+        .WillByDefault(Return(HIPDNN_STATUS_SUCCESS));
+    ON_CALL(mockBackend, backendSetAttribute(_, _, _, _, _))
+        .WillByDefault(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Generic getAttribute default: report a single element and succeed. This is
+    // sufficient for the heuristic/engine-config queries that build_plans drives.
+    ON_CALL(mockBackend, backendGetAttribute(_, _, _, _, _, _))
+        .WillByDefault([](hipdnnBackendDescriptor_t,
+                          hipdnnBackendAttributeName_t,
+                          hipdnnBackendAttributeType_t,
+                          int64_t,
+                          int64_t* elementCount,
+                          void*) {
+            if(elementCount != nullptr)
+            {
+                *elementCount = 1;
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    auto heurDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
+    ON_CALL(mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, _))
+        .WillByDefault([heurDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* desc) {
+            *desc = heurDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    auto engineConfigDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x2345);
+    ON_CALL(mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, _))
+        .WillByDefault(
+            [engineConfigDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* desc) {
+                *desc = engineConfigDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x3345);
+    ON_CALL(mockBackend,
+            backendGetAttribute(engineConfigDesc,
+                                HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                1,
+                                _,
+                                _))
+        .WillByDefault([engineDesc](hipdnnBackendDescriptor_t,
+                                    hipdnnBackendAttributeName_t,
+                                    hipdnnBackendAttributeType_t,
+                                    int64_t,
+                                    int64_t*,
+                                    void* arrayOfElements) {
+            *static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements) = engineDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    ON_CALL(mockBackend,
+            backendGetAttribute(
+                engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _, _))
+        .WillByDefault([](hipdnnBackendDescriptor_t,
+                          hipdnnBackendAttributeName_t,
+                          hipdnnBackendAttributeType_t,
+                          int64_t,
+                          int64_t*,
+                          void* arrayOfElements) {
+            *static_cast<int64_t*>(arrayOfElements) = 10;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    auto executionPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
+    ON_CALL(mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
+        .WillByDefault(
+            [executionPlanDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* desc) {
+                *desc = executionPlanDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    const std::vector<HeuristicMode> heurModes = {HeuristicMode::FALLBACK};
+    ASSERT_TRUE(graph.create_execution_plans(heurModes).is_good());
+
+    if(!buildPlans)
+    {
+        // Plan descriptor created but intentionally left unfinalized.
+        ASSERT_TRUE(graph.hasExecutionPlan());
+        ASSERT_FALSE(graph.isExecutionPlanFinalized());
+        return;
+    }
+
+    ASSERT_TRUE(graph.build_plans().is_good());
+    ASSERT_TRUE(graph.hasExecutionPlan());
+    ASSERT_TRUE(graph.isExecutionPlanFinalized());
+}
+
+// Installs backendGetAttribute ON_CALL defaults that reconstruct a single
+// unary-pointwise operation graph during deserialize, letting the
+// post-reconstruction contents-query + plan-attach logic run. Keying on the
+// attribute name alone works because tensor and operation/graph attributes
+// occupy disjoint name sets.
+void setupSuccessfulPointwiseGraphUnpack(::testing::NiceMock<Mock_hipdnn_backend>& mockBackend)
+{
+    using ::testing::_;
+
+    auto fakeOpDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xA100);
+    auto fakeTensorDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xA200);
+
+    ON_CALL(mockBackend, backendGetAttribute(_, _, _, _, _, _))
+        .WillByDefault([fakeOpDesc, fakeTensorDesc](hipdnnBackendDescriptor_t,
+                                                    hipdnnBackendAttributeName_t attrName,
+                                                    hipdnnBackendAttributeType_t,
+                                                    int64_t requestedCount,
+                                                    int64_t* elementCount,
+                                                    void* arrayOfElements) {
+            const bool isCountQuery = (arrayOfElements == nullptr);
+            auto setCount = [&](int64_t value) {
+                if(elementCount != nullptr)
+                {
+                    *elementCount = value;
+                }
+            };
+
+            switch(attrName)
+            {
+            // Operation-graph: exactly one operation descriptor.
+            case HIPDNN_ATTR_OPERATIONGRAPH_OPS:
+                if(isCountQuery)
+                {
+                    setCount(1);
+                }
+                else
+                {
+                    setCount(1);
+                    *static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements) = fakeOpDesc;
+                }
+                return HIPDNN_STATUS_SUCCESS;
+
+            // Operation type: unary pointwise (single IN_0 input).
+            case HIPDNN_ATTR_OPERATION_TYPE_EXT:
+                setCount(1);
+                *static_cast<hipdnnOperationType_ext_t*>(arrayOfElements)
+                    = HIPDNN_OPERATION_TYPE_POINTWISE_EXT;
+                return HIPDNN_STATUS_SUCCESS;
+
+            // Mandatory pointwise tensors return a tensor descriptor.
+            case HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT:
+            case HIPDNN_ATTR_OPERATION_POINTWISE_OUT_0_EXT:
+                setCount(1);
+                if(!isCountQuery)
+                {
+                    *static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements) = fakeTensorDesc;
+                }
+                return HIPDNN_STATUS_SUCCESS;
+
+            // Optional pointwise tensors are absent.
+            case HIPDNN_ATTR_OPERATION_POINTWISE_IN_1_EXT:
+            case HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT:
+                setCount(0);
+                return HIPDNN_STATUS_SUCCESS;
+
+            // Pointwise mode (mandatory scalar).
+            case HIPDNN_ATTR_POINTWISE_MODE:
+                setCount(1);
+                *static_cast<hipdnnPointwiseMode_t*>(arrayOfElements) = HIPDNN_POINTWISE_RELU_FWD;
+                return HIPDNN_STATUS_SUCCESS;
+
+            // Tensor scalar attributes.
+            case HIPDNN_ATTR_TENSOR_UNIQUE_ID:
+                setCount(1);
+                *static_cast<int64_t*>(arrayOfElements) = 1;
+                return HIPDNN_STATUS_SUCCESS;
+            case HIPDNN_ATTR_TENSOR_DATA_TYPE:
+                setCount(1);
+                *static_cast<hipdnnDataType_t*>(arrayOfElements) = HIPDNN_DATA_FLOAT;
+                return HIPDNN_STATUS_SUCCESS;
+            case HIPDNN_ATTR_TENSOR_DIMENSIONS:
+            case HIPDNN_ATTR_TENSOR_STRIDES:
+                if(isCountQuery)
+                {
+                    setCount(4);
+                }
+                else
+                {
+                    setCount(4);
+                    auto* dims = static_cast<int64_t*>(arrayOfElements);
+                    for(int64_t i = 0; i < requestedCount && i < 4; ++i)
+                    {
+                        dims[i] = 1;
+                    }
+                }
+                return HIPDNN_STATUS_SUCCESS;
+            case HIPDNN_ATTR_TENSOR_IS_VIRTUAL:
+            case HIPDNN_ATTR_TENSOR_IS_BY_VALUE:
+                setCount(1);
+                *static_cast<bool*>(arrayOfElements) = false;
+                return HIPDNN_STATUS_SUCCESS;
+
+            // Optional / unset attributes: report zero elements so the
+            // unpacker treats them as absent.
+            default:
+                setCount(0);
+                return HIPDNN_STATUS_SUCCESS;
+            }
+        });
+}
+} // namespace
+
+// No plan built: the bare graph serializer is used (byte-identical to a legacy
+// graph blob) and the combo container API is never invoked.
+TEST_F(TestGraph, SerializeNoPlanUsesGraphSerializerByteIdentical)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    const std::vector<uint8_t> fakeGraphBytes = {0x01, 0x02, 0x03};
+
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryGraphExt(_, _, _, _))
+        .WillByDefault([&fakeGraphBytes](hipdnnBackendDescriptor_t,
+                                         size_t requestedSize,
+                                         size_t* graphByteSize,
+                                         uint8_t* data) {
+            *graphByteSize = fakeGraphBytes.size();
+            if(data != nullptr && requestedSize >= fakeGraphBytes.size())
+            {
+                std::memcpy(data, fakeGraphBytes.data(), fakeGraphBytes.size());
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // The combo container API must not be touched when no plan exists.
+    EXPECT_CALL(*_mockBackend, backendGetSerializedBinaryGraphAndPlanExt(_, _, _, _, _)).Times(0);
+
+    std::vector<uint8_t> data;
+    auto err = graph.serialize(data);
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(data, fakeGraphBytes);
+}
+
+// A plan is built: the combo container API (two-call size/fill) is used and the
+// bare graph serializer is bypassed.
+TEST_F(TestGraph, SerializeWithPlanUsesComboContainerApi)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    buildGraphWithExecutionPlan(graph, *_mockBackend, _handle);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    // Select an engine and report the serialization note so serialize() takes
+    // the combo path (two-call count/fill behavior-note query).
+    graph.setSelectedEngineId(10);
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 0, _, nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 1;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 1, _, _))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void* arrayOfElements) {
+            *elementCount = 1;
+            auto* notes = static_cast<hipdnnBackendBehaviorNote_t*>(arrayOfElements);
+            notes[0] = HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    const std::vector<uint8_t> fakeContainerBytes = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE};
+
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryGraphAndPlanExt(_, _, _, _, _))
+        .WillByDefault([&fakeContainerBytes](hipdnnBackendDescriptor_t,
+                                             hipdnnBackendDescriptor_t,
+                                             size_t requestedByteSize,
+                                             size_t* blobByteSize,
+                                             uint8_t* serializedBlob) {
+            *blobByteSize = fakeContainerBytes.size();
+            if(serializedBlob != nullptr && requestedByteSize >= fakeContainerBytes.size())
+            {
+                std::memcpy(serializedBlob, fakeContainerBytes.data(), fakeContainerBytes.size());
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // The plan path must not fall back to the bare graph serializer.
+    EXPECT_CALL(*_mockBackend, backendGetSerializedBinaryGraphExt(_, _, _, _)).Times(0);
+
+    std::vector<uint8_t> data;
+    auto err = graph.serialize(data);
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(data, fakeContainerBytes);
+}
+
+// A plan descriptor was created (create_execution_plans()) but never finalized
+// via build_plans()/build(): serialize() must gate on the finalized state and
+// fall back to the bare graph serializer (byte-identical to a graph that never
+// had a plan). The combo container API and the engine capability query are both
+// short-circuited because the plan is not finalized. This guards against
+// embedding an unfinalized plan (PR #7975 review feedback): serialize must gate
+// on the finalized/compiled-plan state, not merely on plan-descriptor validity.
+TEST_F(TestGraph, SerializeWithUnfinalizedPlanUsesGraphSerializer)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    buildGraphWithExecutionPlan(graph, *_mockBackend, _handle, /*buildPlans=*/false);
+    EXPECT_FALSE(graph.isExecutionPlanFinalized());
+
+    // Select an engine that, if queried, would advertise support. This proves the
+    // graph-only fallback is forced by the finalization gate, not by a missing
+    // engine id or an unsupported engine.
+    graph.setSelectedEngineId(10);
+
+    const std::vector<uint8_t> fakeGraphBytes = {0x01, 0x02, 0x03};
+
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryGraphExt(_, _, _, _))
+        .WillByDefault([&fakeGraphBytes](hipdnnBackendDescriptor_t,
+                                         size_t requestedSize,
+                                         size_t* graphByteSize,
+                                         uint8_t* data) {
+            *graphByteSize = fakeGraphBytes.size();
+            if(data != nullptr && requestedSize >= fakeGraphBytes.size())
+            {
+                std::memcpy(data, fakeGraphBytes.data(), fakeGraphBytes.size());
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // The combo container API and the engine capability query must both be
+    // skipped: the unfinalized-plan gate short-circuits before either is reached.
+    EXPECT_CALL(*_mockBackend, backendGetSerializedBinaryGraphAndPlanExt(_, _, _, _, _)).Times(0);
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, _, _, _, _))
+        .Times(0);
+
+    std::vector<uint8_t> data;
+    auto err = graph.serialize(data);
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(data, fakeGraphBytes);
+}
+
+// The combo size-query succeeds but reports a zero-length blob: serialize fails
+// with a descriptive error and never issues the fill-call.
+TEST_F(TestGraph, SerializeWithPlanRejectsZeroLengthCombo)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    buildGraphWithExecutionPlan(graph, *_mockBackend, _handle);
+    ASSERT_TRUE(graph.hasExecutionPlan());
+    // Select an engine and report the serialization note so serialize() takes
+    // the combo path (two-call count/fill behavior-note query).
+    graph.setSelectedEngineId(10);
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 0, _, nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 1;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 1, _, _))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void* arrayOfElements) {
+            *elementCount = 1;
+            auto* notes = static_cast<hipdnnBackendBehaviorNote_t*>(arrayOfElements);
+            notes[0] = HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // The size-query succeeds but reports zero bytes; the fill-call must not run.
+    EXPECT_CALL(*_mockBackend, backendGetSerializedBinaryGraphAndPlanExt(_, _, 0, _, nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendDescriptor_t,
+                     size_t,
+                     size_t* blobByteSize,
+                     uint8_t*) {
+            *blobByteSize = 0;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend, backendGetSerializedBinaryGraphAndPlanExt(_, _, Gt(size_t{0}), _, _))
+        .Times(0);
+
+    std::vector<uint8_t> data;
+    auto result = graph.serialize(data);
+
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_NE(result.get_message().find("zero-length binary graph and plan"), std::string::npos)
+        << result.get_message();
+}
+
+// The combo size-query failure is propagated.
+TEST_F(TestGraph, SerializePropagatesComboSizeQueryFailure)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    buildGraphWithExecutionPlan(graph, *_mockBackend, _handle);
+    // Select an engine and report the serialization note so serialize() takes
+    // the combo path (two-call count/fill behavior-note query).
+    graph.setSelectedEngineId(10);
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 0, _, nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 1;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 1, _, _))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void* arrayOfElements) {
+            *elementCount = 1;
+            auto* notes = static_cast<hipdnnBackendBehaviorNote_t*>(arrayOfElements);
+            notes[0] = HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryGraphAndPlanExt(_, _, _, _, _))
+        .WillByDefault(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+
+    std::vector<uint8_t> data;
+    auto result = graph.serialize(data);
+
+    EXPECT_TRUE(result.is_bad());
+}
+
+// The combo fill-call failure (size succeeds) is propagated.
+TEST_F(TestGraph, SerializePropagatesComboFillFailure)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    buildGraphWithExecutionPlan(graph, *_mockBackend, _handle);
+    // Select an engine and report the serialization note so serialize() takes
+    // the combo path (two-call count/fill behavior-note query).
+    graph.setSelectedEngineId(10);
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 0, _, nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 1;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 1, _, _))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void* arrayOfElements) {
+            *elementCount = 1;
+            auto* notes = static_cast<hipdnnBackendBehaviorNote_t*>(arrayOfElements);
+            notes[0] = HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryGraphAndPlanExt(_, _, _, _, _))
+        .WillByDefault([](hipdnnBackendDescriptor_t,
+                          hipdnnBackendDescriptor_t,
+                          size_t requestedByteSize,
+                          size_t* blobByteSize,
+                          uint8_t*) {
+            *blobByteSize = 16;
+            if(requestedByteSize > 0)
+            {
+                return HIPDNN_STATUS_INTERNAL_ERROR;
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    std::vector<uint8_t> data;
+    auto result = graph.serialize(data);
+
+    EXPECT_TRUE(result.is_bad());
+}
+
+// A plan is built but no engine id is captured (e.g. the engine could not be
+// recovered). Serialize must short-circuit on the gate's
+// _selectedEngineId.has_value()==false branch -- without any behavior-note query --
+// and fall through to the byte-identical legacy bare-graph blob, never invoking the
+// combo container API. (The engine-reports-no-note path is covered separately by
+// SerializeWithPlanQueriesEngineAndUsesGraphOnlyWhenUnsupported.)
+TEST_F(TestGraph, SerializeWithPlanButNoSelectedEngineFallsBackToGraphOnly)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    buildGraphWithExecutionPlan(graph, *_mockBackend, _handle);
+    // Clear the captured engine id so serialize treats the plan as not
+    // serializable without a behavior-note query, forcing the graph-only path.
+    ASSERT_TRUE(graph.hasExecutionPlan());
+    graph.clearSelectedEngineId();
+
+    const std::vector<uint8_t> fakeGraphBytes = {0x01, 0x02, 0x03};
+
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryGraphExt(_, _, _, _))
+        .WillByDefault([&fakeGraphBytes](hipdnnBackendDescriptor_t,
+                                         size_t requestedSize,
+                                         size_t* graphByteSize,
+                                         uint8_t* data) {
+            *graphByteSize = fakeGraphBytes.size();
+            if(data != nullptr && requestedSize >= fakeGraphBytes.size())
+            {
+                std::memcpy(data, fakeGraphBytes.data(), fakeGraphBytes.size());
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // The combo container API must not be touched when the engine cannot
+    // serialize the plan; the graph-only fallback is taken instead.
+    EXPECT_CALL(*_mockBackend, backendGetSerializedBinaryGraphAndPlanExt(_, _, _, _, _)).Times(0);
+
+    std::vector<uint8_t> data;
+    auto err = graph.serialize(data);
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    // Output is the bare-graph bytes: the graph-only path was taken.
+    EXPECT_EQ(data, fakeGraphBytes);
+}
+
+// A plan exists but its engine cannot serialize it, so serialize falls through to
+// the bare-graph path; the graph size-query then reports zero bytes and serialize
+// fails with a descriptive error.
+TEST_F(TestGraph, SerializeGraphOnlyRejectsZeroLengthGraphAfterPlanFallback)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    buildGraphWithExecutionPlan(graph, *_mockBackend, _handle);
+    // Clear the captured engine id so serialize treats the plan as not
+    // serializable without a behavior-note query, forcing the graph-only path.
+    ASSERT_TRUE(graph.hasExecutionPlan());
+    graph.clearSelectedEngineId();
+
+    // The graph size-query succeeds but reports zero bytes.
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryGraphExt(_, _, _, _))
+        .WillByDefault([](hipdnnBackendDescriptor_t, size_t, size_t* graphByteSize, uint8_t*) {
+            *graphByteSize = 0;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // The combo container API must not be touched on the graph-only fallback.
+    EXPECT_CALL(*_mockBackend, backendGetSerializedBinaryGraphAndPlanExt(_, _, _, _, _)).Times(0);
+
+    std::vector<uint8_t> data;
+    auto result = graph.serialize(data);
+
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_NE(result.get_message().find("zero-length binary graph"), std::string::npos)
+        << result.get_message();
+}
+
+// Exercises the real engineSupportsPlanSerialization() branch (freshly built
+// plan, no test seam). The selected engine reports the serialization behavior
+// note, so serialize() queries the engine, finds it supported, and takes the
+// combo path; the bare graph serializer must not be invoked.
+TEST_F(TestGraph, SerializeWithPlanQueriesEngineAndUsesComboWhenSupported)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    buildGraphWithExecutionPlan(graph, *_mockBackend, _handle);
+    ASSERT_TRUE(graph.hasExecutionPlan());
+
+    // The selected engine reports the serialization note (two-call count/fill).
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 0, _, nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 1;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 1, _, _))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void* arrayOfElements) {
+            *elementCount = 1;
+            auto* notes = static_cast<hipdnnBackendBehaviorNote_t*>(arrayOfElements);
+            notes[0] = HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    const std::vector<uint8_t> combo = {0xAA, 0xBB, 0xCC};
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryGraphAndPlanExt(_, _, _, _, _))
+        .WillByDefault([&combo](hipdnnBackendDescriptor_t,
+                                hipdnnBackendDescriptor_t,
+                                size_t requestedByteSize,
+                                size_t* blobByteSize,
+                                uint8_t* serializedBlob) {
+            *blobByteSize = combo.size();
+            if(serializedBlob != nullptr && requestedByteSize >= combo.size())
+            {
+                std::memcpy(serializedBlob, combo.data(), combo.size());
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // The supported engine takes the combo path; the bare serializer is bypassed.
+    EXPECT_CALL(*_mockBackend, backendGetSerializedBinaryGraphExt(_, _, _, _)).Times(0);
+
+    std::vector<uint8_t> data;
+    auto err = graph.serialize(data);
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(data, combo);
+}
+
+// Companion to the above: the selected engine reports no behavior notes, so
+// serialize() queries the engine, finds the plan not serializable, and falls
+// back to the bare graph serializer; the combo API must not be invoked.
+TEST_F(TestGraph, SerializeWithPlanQueriesEngineAndUsesGraphOnlyWhenUnsupported)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    buildGraphWithExecutionPlan(graph, *_mockBackend, _handle);
+    ASSERT_TRUE(graph.hasExecutionPlan());
+
+    // The selected engine reports no notes (count-call returns 0).
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 0, _, nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 0;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    const std::vector<uint8_t> bare = {0x01, 0x02, 0x03};
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryGraphExt(_, _, _, _))
+        .WillByDefault([&bare](hipdnnBackendDescriptor_t,
+                               size_t requestedSize,
+                               size_t* graphByteSize,
+                               uint8_t* data) {
+            *graphByteSize = bare.size();
+            if(data != nullptr && requestedSize >= bare.size())
+            {
+                std::memcpy(data, bare.data(), bare.size());
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // The unsupported engine takes the graph-only fallback; the combo API is
+    // never invoked.
+    EXPECT_CALL(*_mockBackend, backendGetSerializedBinaryGraphAndPlanExt(_, _, _, _, _)).Times(0);
+
+    std::vector<uint8_t> data;
+    auto err = graph.serialize(data);
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(data, bare);
+}
+
+// The behavior-note query itself fails (count-call returns an error), so
+// engineSupportsPlanSerialization() treats the plan as not serializable and
+// serialize() falls back to the bare graph serializer; the combo API is never
+// invoked.
+TEST_F(TestGraph, SerializeWithPlanBehaviorNoteQueryFailureFallsBackToGraphOnly)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    buildGraphWithExecutionPlan(graph, *_mockBackend, _handle);
+    ASSERT_TRUE(graph.hasExecutionPlan());
+
+    // Keep the captured engine id so serialize queries the behavior note; the
+    // count-call fails, driving engineSupportsPlanSerialization() to false.
+    graph.setSelectedEngineId(10);
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 0, _, nullptr))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+
+    const std::vector<uint8_t> bare = {0x01, 0x02, 0x03};
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryGraphExt(_, _, _, _))
+        .WillByDefault([&bare](hipdnnBackendDescriptor_t,
+                               size_t requestedSize,
+                               size_t* graphByteSize,
+                               uint8_t* data) {
+            *graphByteSize = bare.size();
+            if(data != nullptr && requestedSize >= bare.size())
+            {
+                std::memcpy(data, bare.data(), bare.size());
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // The failed capability probe takes the graph-only fallback; the combo API is
+    // never invoked.
+    EXPECT_CALL(*_mockBackend, backendGetSerializedBinaryGraphAndPlanExt(_, _, _, _, _)).Times(0);
+
+    std::vector<uint8_t> data;
+    auto err = graph.serialize(data);
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(data, bare);
+}
+
+// A GRAPH-only contents flag leaves the execution plan null and never calls the
+// plan-deserialize wrapper.
+TEST_F(TestGraph, DeserializeNoPlanLeavesExecutionPlanNull)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    setupSuccessfulPointwiseGraphUnpack(*_mockBackend);
+
+    ON_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
+        .WillByDefault([](hipdnnBackendDescriptor_t* desc, const uint8_t*, size_t) {
+            *desc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xA000);
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryContentsExt(_, _, _))
+        .WillByDefault([](const uint8_t*, size_t, int* contentFlags) {
+            *contentFlags = HIPDNN_SERIALIZED_CONTENT_GRAPH;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeExecutionPlanExt(_, _, _, _)).Times(0);
+
+    const std::vector<uint8_t> data = {0x10, 0x11, 0x12, 0x13};
+    GraphTestUtils graph2;
+    auto result = graph2.deserialize(_handle, data);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_FALSE(graph2.hasExecutionPlan());
+    EXPECT_FALSE(graph2.getPrivateGraphSubnodes().empty());
+}
+
+// An EXECUTION_PLAN flag plus a handle attaches the plan; the plan-deserialize
+// wrapper receives the whole blob.
+TEST_F(TestGraph, DeserializeWithPlanFlagAndHandleAttachesPlan)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    setupSuccessfulPointwiseGraphUnpack(*_mockBackend);
+
+    ON_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
+        .WillByDefault([](hipdnnBackendDescriptor_t* desc, const uint8_t*, size_t) {
+            *desc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xA000);
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryContentsExt(_, _, _))
+        .WillByDefault([](const uint8_t*, size_t, int* contentFlags) {
+            *contentFlags
+                = HIPDNN_SERIALIZED_CONTENT_GRAPH | HIPDNN_SERIALIZED_CONTENT_EXECUTION_PLAN;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    const std::vector<uint8_t> data = {0x20, 0x21, 0x22, 0x23, 0x24};
+    auto fakePlan = reinterpret_cast<hipdnnBackendDescriptor_t>(0x7777);
+
+    const uint8_t* capturedPlanData = nullptr;
+    size_t capturedPlanSize = 0;
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeExecutionPlanExt(_handle, _, _, _))
+        .WillOnce([&](hipdnnHandle_t,
+                      hipdnnBackendDescriptor_t* descriptor,
+                      const uint8_t* serializedPlan,
+                      size_t planByteSize) {
+            capturedPlanData = serializedPlan;
+            capturedPlanSize = planByteSize;
+            *descriptor = fakePlan;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // The attach path recovers the engine backing the plan so serialize() can
+    // re-query its plan-serialization capability.
+    ON_CALL(*_mockBackend,
+            backendGetAttribute(fakePlan,
+                                HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT,
+                                HIPDNN_TYPE_INT64,
+                                1,
+                                _,
+                                _))
+        .WillByDefault([](hipdnnBackendDescriptor_t,
+                          hipdnnBackendAttributeName_t,
+                          hipdnnBackendAttributeType_t,
+                          int64_t,
+                          int64_t* elementCount,
+                          void* arrayOfElements) {
+            if(elementCount != nullptr)
+            {
+                *elementCount = 1;
+            }
+            *static_cast<int64_t*>(arrayOfElements) = 10;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    GraphTestUtils graph2;
+    auto result = graph2.deserialize(_handle, data);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_TRUE(graph2.hasExecutionPlan());
+    // The backend extracts the plan blob from the container, so the whole blob
+    // is handed to the plan-deserialize wrapper.
+    EXPECT_EQ(capturedPlanData, data.data());
+    EXPECT_EQ(capturedPlanSize, data.size());
+}
+
+// Mirrors DeserializeWithPlanFlagAndHandleAttachesPlan but the engine-id query on
+// the attached plan FAILS. The plan still attaches, but with no engine recovered
+// _selectedEngineId stays unset, so a subsequent serialize() must degrade to the
+// graph-only path (Graph.hpp's failure branch): the combo container API is never
+// invoked and the bare-graph bytes are emitted.
+TEST_F(TestGraph, DeserializeAttachWithEngineIdQueryFailureSerializesGraphOnly)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    setupSuccessfulPointwiseGraphUnpack(*_mockBackend);
+
+    ON_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
+        .WillByDefault([](hipdnnBackendDescriptor_t* desc, const uint8_t*, size_t) {
+            *desc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xA000);
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryContentsExt(_, _, _))
+        .WillByDefault([](const uint8_t*, size_t, int* contentFlags) {
+            *contentFlags
+                = HIPDNN_SERIALIZED_CONTENT_GRAPH | HIPDNN_SERIALIZED_CONTENT_EXECUTION_PLAN;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    const std::vector<uint8_t> data = {0x20, 0x21, 0x22, 0x23, 0x24};
+    auto fakePlan = reinterpret_cast<hipdnnBackendDescriptor_t>(0x7777);
+
+    ON_CALL(*_mockBackend, backendCreateAndDeserializeExecutionPlanExt(_handle, _, _, _))
+        .WillByDefault(
+            [&](hipdnnHandle_t, hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+                *descriptor = fakePlan;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    // The engine-id recovery on attach fails, so _selectedEngineId stays unset.
+    ON_CALL(*_mockBackend,
+            backendGetAttribute(fakePlan,
+                                HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT,
+                                HIPDNN_TYPE_INT64,
+                                1,
+                                _,
+                                _))
+        .WillByDefault(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+
+    GraphTestUtils graph2;
+    ASSERT_TRUE(graph2.deserialize(_handle, data).is_good());
+    // The plan attaches even though its engine could not be recovered.
+    ASSERT_TRUE(graph2.hasExecutionPlan());
+
+    // Serialize must take the graph-only path: no combo container call, just the
+    // bare-graph serializer.
+    const std::vector<uint8_t> fakeGraphBytes = {0x01, 0x02, 0x03};
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryGraphExt(_, _, _, _))
+        .WillByDefault([&fakeGraphBytes](hipdnnBackendDescriptor_t,
+                                         size_t requestedSize,
+                                         size_t* graphByteSize,
+                                         uint8_t* out) {
+            *graphByteSize = fakeGraphBytes.size();
+            if(out != nullptr && requestedSize >= fakeGraphBytes.size())
+            {
+                std::memcpy(out, fakeGraphBytes.data(), fakeGraphBytes.size());
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    EXPECT_CALL(*_mockBackend, backendGetSerializedBinaryGraphAndPlanExt(_, _, _, _, _)).Times(0);
+
+    std::vector<uint8_t> out;
+    auto err = graph2.serialize(out);
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(out, fakeGraphBytes);
+}
+
+// An EXECUTION_PLAN flag but no handle drops the plan and never calls the
+// plan-deserialize wrapper. (Warning text is asserted at the integration level.)
+TEST_F(TestGraph, DeserializeWithPlanFlagNoHandleDropsPlanAndWarns)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    setupSuccessfulPointwiseGraphUnpack(*_mockBackend);
+
+    ON_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
+        .WillByDefault([](hipdnnBackendDescriptor_t* desc, const uint8_t*, size_t) {
+            *desc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xA000);
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryContentsExt(_, _, _))
+        .WillByDefault([](const uint8_t*, size_t, int* contentFlags) {
+            *contentFlags
+                = HIPDNN_SERIALIZED_CONTENT_GRAPH | HIPDNN_SERIALIZED_CONTENT_EXECUTION_PLAN;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeExecutionPlanExt(_, _, _, _)).Times(0);
+
+    const std::vector<uint8_t> data = {0x30, 0x31, 0x32, 0x33};
+    GraphTestUtils graph2;
+    auto result = graph2.deserialize(data);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_FALSE(graph2.hasExecutionPlan());
+}
+
+// A failure of the contents-query wrapper is propagated.
+TEST_F(TestGraph, DeserializePropagatesContentsQueryFailure)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    setupSuccessfulPointwiseGraphUnpack(*_mockBackend);
+
+    ON_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
+        .WillByDefault([](hipdnnBackendDescriptor_t* desc, const uint8_t*, size_t) {
+            *desc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xA000);
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryContentsExt(_, _, _))
+        .WillByDefault(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+
+    const std::vector<uint8_t> data = {0x40, 0x41, 0x42, 0x43};
+    GraphTestUtils graph2;
+    auto result = graph2.deserialize(_handle, data);
+
+    EXPECT_TRUE(result.is_bad());
+}
+
+// A failure of the plan-deserialize wrapper is propagated.
+TEST_F(TestGraph, DeserializePropagatesPlanDeserializeFailure)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    setupSuccessfulPointwiseGraphUnpack(*_mockBackend);
+
+    ON_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
+        .WillByDefault([](hipdnnBackendDescriptor_t* desc, const uint8_t*, size_t) {
+            *desc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xA000);
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryContentsExt(_, _, _))
+        .WillByDefault([](const uint8_t*, size_t, int* contentFlags) {
+            *contentFlags
+                = HIPDNN_SERIALIZED_CONTENT_GRAPH | HIPDNN_SERIALIZED_CONTENT_EXECUTION_PLAN;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    ON_CALL(*_mockBackend, backendCreateAndDeserializeExecutionPlanExt(_, _, _, _))
+        .WillByDefault(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+
+    const std::vector<uint8_t> data = {0x50, 0x51, 0x52, 0x53};
+    GraphTestUtils graph2;
+    auto result = graph2.deserialize(_handle, data);
+
+    EXPECT_TRUE(result.is_bad());
+}
+
+// A legacy bare-graph blob reconstructs the graph only; the backend reports
+// GRAPH-only contents and the plan-deserialize wrapper is never called.
+TEST_F(TestGraph, DeserializeLegacyBareGraphBlobReconstructsGraphNoPlan)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    setupSuccessfulPointwiseGraphUnpack(*_mockBackend);
+
+    ON_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
+        .WillByDefault([](hipdnnBackendDescriptor_t* desc, const uint8_t*, size_t) {
+            *desc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xA000);
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryContentsExt(_, _, _))
+        .WillByDefault([](const uint8_t*, size_t, int* contentFlags) {
+            *contentFlags = HIPDNN_SERIALIZED_CONTENT_GRAPH;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeExecutionPlanExt(_, _, _, _)).Times(0);
+
+    const std::vector<uint8_t> data = {0xBB, 0xBB, 0xBB, 0xBB};
+    GraphTestUtils graph2;
+    auto result = graph2.deserialize(_handle, data);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_FALSE(graph2.getPrivateGraphSubnodes().empty());
+    EXPECT_FALSE(graph2.hasExecutionPlan());
+}

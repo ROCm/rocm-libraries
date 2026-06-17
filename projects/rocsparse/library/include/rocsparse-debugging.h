@@ -28,6 +28,7 @@
 #ifndef ROCSPARSE_DEBUGGING_H
 #define ROCSPARSE_DEBUGGING_H
 
+#include "rocsparse-types.h"
 #include "rocsparse/rocsparse-export.h"
 
 #ifdef __cplusplus
@@ -190,5 +191,7 @@ int rocsparse_state_debug_force_host_assert();
 #ifdef __cplusplus
 }
 #endif
+
+#include "internal/debugging/rocsparse_hip_debug.h"
 
 #endif /* ROCSPARSE_DEBUGGING_H */

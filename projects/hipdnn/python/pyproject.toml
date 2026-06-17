@@ -39,3 +39,8 @@ dev = [
 cmake.build-type = "Release"
 wheel.packages = []
 wheel.py-api = "cp312"
+
+[tool.pytest.ini_options]
+markers = [
+    "gpu: marks tests requiring GPU",
+]

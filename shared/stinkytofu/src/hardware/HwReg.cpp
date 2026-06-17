@@ -24,6 +24,7 @@
 #include "stinkytofu/hardware/HwReg.hpp"
 
 #include <algorithm>
+#include <cstdint>
 
 #include "stinkytofu/Config/Config.h"
 #include "stinkytofu/hardware/ArchHelper.hpp"
