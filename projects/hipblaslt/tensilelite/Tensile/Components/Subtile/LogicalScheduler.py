@@ -32,6 +32,31 @@ import math
 
 from rocisa.code import Module
 
+# Debug: emit `s_mov_b32 m0, LoopCounterL; s_ttracedata` at the start of
+# every mainloop iteration so SQTT / trace decoders can identify iterations.
+# Set to False to drop the markers (saves 2 instructions per iter).
+DEBUG_EMIT_MAINLOOP_TRACE_MARKER = False
+
+# ds_load_b128 reads 4 contiguous VGPRs.
+DS_B128_VGPRS = 4
+
+def _checkout_tile(pool, numRegs, tag):
+    """Check out one VGPR tile as a single contiguous, min(numRegs, 4)-aligned block (b128-aligned when numRegs >= 4)."""
+    from Tensile.Components.Subtile.Kernel import RegisterTileInfo
+    # min(): full b128 tiles get 4-VGPR alignment; smaller tiles aren't padded
+    # up to 4 (which would waste registers and can break occupancy).
+    align = min(numRegs, DS_B128_VGPRS)
+    base = pool.checkOutAligned(numRegs, align, tag=tag)
+    tile = RegisterTileInfo(pool)
+    for k in range(numRegs):
+        tile.append(base + k)
+    return tile
+
+
+def _checkin_tile(tile):
+    """Return a contiguous tile to its pool via its base-register handle."""
+    tile.regList.pool.checkIn(tile.regList.indices[0])
+
 
 class Pass(IntEnum):
     """Scheduler passes in dependency order.
@@ -128,6 +153,20 @@ class ReadGranularity:
         return MFMATileRange(ks, ks + self.k, ts, te)
 
 
+class GRPlacementStrategy(IntEnum):
+    """How Global Reads are spread across (partition, subIterK) slots.
+
+    SPREAD   — distribute GR atoms across all slots weighted by partition
+               MFMA count. Default for buffer-load GR (gfx9xx): spreading
+               avoids issue-slot pressure on the SIMD.
+    BUNCHED  — pin every GR atom to partition 0, subIterK 0. Suitable when
+               the GR instruction does not contend for SIMD issue slots
+               (e.g. TDM tensor_load_to_lds on gfx1250).
+    """
+    SPREAD  = 0
+    BUNCHED = 1
+
+
 @dataclass
 class SchedulerConfig:
     """Configuration for the MFMATile-based scheduler."""
@@ -145,6 +184,7 @@ class SchedulerConfig:
     partitionSizeM: Union[int, List[int]] = 0  # partition size(s) in M dimension (0 = full dim)
     partitionSizeN: Union[int, List[int]] = 0  # partition size(s) in N dimension (0 = full dim)
     pgr: int = 2              # Prefetch Global Read
+    grPlacement: GRPlacementStrategy = GRPlacementStrategy.SPREAD
 
     # Resolve a partition spec into per-partition sizes along one dimension.
     # spec is either:
@@ -1272,8 +1312,12 @@ class LogicalScheduler:
         slot_boundaries = [p * nAtoms for p in weight_prefix[1:]]
 
         for i, (tensor, mt_val, ts, te, ks, ke, last) in enumerate(atoms):
-            rel = min(bisect_left(slot_boundaries, i * total_weight + 1),
-                      len(dist_slots) - 1) if nAtoms else 0
+            if cfg.grPlacement == GRPlacementStrategy.BUNCHED:
+                # TDM: pin every GR atom to partition 0, subIterK 0.
+                rel = 0
+            else:
+                rel = min(bisect_left(slot_boundaries, i * total_weight + 1),
+                          len(dist_slots) - 1) if nAtoms else 0
             slot = dist_slots[rel]
             slot = min(slot, last)
             slot_idx = rel
@@ -3235,12 +3279,17 @@ class LogicalScheduler:
         for interleaving. When schedule=False, emits instructions sequentially.
         """
         from Tensile.Components.Subtile.InstructionScheduler import instructionSchedule
+        from Tensile.Components.Subtile.WaitAluInsertion import insertLRSwapWaitAlu
         from rocisa.code import Module, Label
         from rocisa.container import sgpr
         from rocisa.instruction import SCmpEQU32, SCBranchSCC0, SMovB32
 
         module = Module(label)
         module.addComment0(f"{label} start")
+        if kernel.get("ClusterBarrier"):
+            from Tensile.Components.Subtile.ClusterBarrier import subtileClusterBarrier
+            for inst in subtileClusterBarrier(writer, kernel, label=label).flatitems():
+                module.add(inst)
         use_pap_preloop_skip = (
             label == "PRELOOP"
             and kernel.get("UseSubtileImpl")
@@ -3280,6 +3329,9 @@ class LogicalScheduler:
             module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
                                comment="Subtile PAP: clear after first PRELOOP GR merge"))
         module.addComment0(f"{label} end")
+        # SCHED_MODE 2: guard the LR offset-swap -> ds_read RAW hazard once, against
+        # the final post-schedule order (no-op on other archs).
+        module = insertLRSwapWaitAlu(module, writer, kernel)
         return module
 
     def _emit_pgr2_tail_lw_align(self, kernel):
@@ -3416,7 +3468,18 @@ class LogicalScheduler:
 
         exitLabels = [Label(f"ExitC{ui}", "") for ui in range(uf - 1)]
         module.add(loopBegin)
+        if DEBUG_EMIT_MAINLOOP_TRACE_MARKER:
+            from rocisa.code import TextBlock
+            from rocisa.container import mgpr
+            from rocisa.instruction import SMovB32 as _SMovB32
         for ui in range(uf):
+            if DEBUG_EMIT_MAINLOOP_TRACE_MARKER:
+                # Mainloop iteration marker for SQTT / trace decoder: write
+                # LoopCounterL into M0 then emit it via s_ttracedata. Decoder
+                # only uses low 8 bits, so M0 wrap past 256 is fine.
+                module.add(_SMovB32(dst=mgpr(0), src=sgpr("LoopCounterL"),
+                                    comment="trace: M0 = LoopCounterL"))
+                module.add(TextBlock("s_ttracedata                                      // trace: emit M0 to SQTT\n"))
             module.add(self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}",
                                       self._emitted_per_unroll[ui]))
             module.add(SSubU32(dst=sgpr("LoopCounterL"),
@@ -3565,24 +3628,14 @@ class LogicalScheduler:
         """
         self._ensure_pass(Pass.VGPR_TILES)
 
-        from Tensile.Components.Subtile.Kernel import RegisterTileInfo
-
         cfg = self.config
 
         def _tile_vgpr_count(tileInfo, lrGran):
             return int(math.ceil(tileInfo.mmaTileRegCount * lrGran.k * lrGran.mn))
 
         def _alloc_tiles(count, numRegs):
-            tiles = []
-            for _ in range(count):
-                tile = RegisterTileInfo(writer.vgprPool)
-                for j in range(0, numRegs, 4):
-                    blockSize = min(4, numRegs - j)
-                    vstart = writer.vgprPool.checkOutAligned(blockSize, blockSize, tag="allocVgprTiles_vstart")
-                    for k in range(blockSize):
-                        tile.append(vstart + k)
-                tiles.append(tile)
-            return tiles
+            return [_checkout_tile(writer.vgprPool, numRegs, "allocVgprTiles_vstart")
+                    for _ in range(count)]
 
         self.vgprTilesA = _alloc_tiles(self.tile_peaks.get('A', 0),
                                        _tile_vgpr_count(tileInfoA, cfg.lrA))
@@ -3614,10 +3667,7 @@ class LogicalScheduler:
             for tid, tile in enumerate(tiles):
                 if tid in freed:
                     continue
-                pool = tile.regList.pool
-                for val in tile:
-                    if tile.index(val) % 4 == 0:
-                        pool.checkIn(val)
+                _checkin_tile(tile)
 
         _dealloc_tiles(self.vgprTilesA,  self._tail_freed_tile_ids['A'])
         _dealloc_tiles(self.vgprTilesB,  self._tail_freed_tile_ids['B'])
@@ -3715,11 +3765,7 @@ class LogicalScheduler:
                            'SA': self.vgprTilesSA, 'SB': self.vgprTilesSB}
         for tensor, tile_list in tiles_by_tensor.items():
             for tid in self._tail_unused_tile_ids.get(tensor, ()):
-                tile = tile_list[tid]
-                pool = tile.regList.pool
-                for j, v in enumerate(tile):
-                    if j % 4 == 0:                # match _alloc_tiles block stride
-                        pool.checkIn(v)
+                _checkin_tile(tile_list[tid])
                 self._tail_freed_tile_ids[tensor].add(tid)
 
     def _realloc_tail_tiles_flat(self, writer, peaks):
@@ -3731,8 +3777,6 @@ class LogicalScheduler:
         replace self.vgprTilesA/B/SA/SB; _tail_freed_tile_ids is cleared so
         deallocVgprTiles drops the flat set wholesale at kernel end.
         """
-        from Tensile.Components.Subtile.Kernel import RegisterTileInfo
-
         cfg = self.config
         info = self._alloc_tile_info
 
@@ -3741,22 +3785,11 @@ class LogicalScheduler:
 
         def _dealloc_all(tiles):
             for tile in tiles:
-                pool = tile.regList.pool
-                for j, v in enumerate(tile):
-                    if j % 4 == 0:
-                        pool.checkIn(v)
+                _checkin_tile(tile)
 
         def _alloc_tiles(count, numRegs):
-            tiles = []
-            for _ in range(count):
-                tile = RegisterTileInfo(writer.vgprPool)
-                for j in range(0, numRegs, 4):
-                    blockSize = min(4, numRegs - j)
-                    vstart = writer.vgprPool.checkOutAligned(blockSize, blockSize, tag="reallocTailTilesFlat_vstart")
-                    for k in range(blockSize):
-                        tile.append(vstart + k)
-                tiles.append(tile)
-            return tiles
+            return [_checkout_tile(writer.vgprPool, numRegs, "reallocTailTilesFlat_vstart")
+                    for _ in range(count)]
 
         def _swap(target, new_tiles):
             # In-place swap so the InstructionEmitter's references stay valid.

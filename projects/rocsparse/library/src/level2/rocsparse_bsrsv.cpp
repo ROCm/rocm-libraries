@@ -83,7 +83,7 @@ try
         return rocsparse_status_success;
     }
 
-    case rocsparse_indextype_u16:
+    case deprecated_rocsparse_indextype_u16:
     {
         RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                "rocsparse_indextype_u16 not supported");
