@@ -2,7 +2,7 @@ TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
 GlobalParameters:
   SyncsPerBenchmark: 1
-  NumElementsToValidate: -1
+  NumElementsToValidate: 0
   NumElementsToValidateWinner: -1
   KernelTime: False
   NewClient: 2
@@ -64,11 +64,22 @@ BenchmarkProblems:
         - ForceDisableShadowInit: [1]
         - MatrixInstruction:
           #- [16, 16, 128, 1,  1,  2, 2,  2, 2]
-          - [16, 16, 128, 1,  1,  2, 4,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 1,  2, 2]
           - [16, 16, 128, 1,  1,  4, 2,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 3,  2, 2]
           - [16, 16, 128, 1,  1,  4, 4,  2, 2]
-          - [16, 16, 128, 1,  1,  4, 8,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 5,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 6,  2, 2]
           - [16, 16, 128, 1,  1,  4, 7,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 8,  2, 2]
+          - [16, 16, 128, 1,  1,  8, 1,  2, 2]
+          - [16, 16, 128, 1,  1,  8, 2,  2, 2]
+          - [16, 16, 128, 1,  1,  8, 3,  2, 2]
+          - [16, 16, 128, 1,  1,  8, 4,  2, 2]
+          - [16, 16, 128, 1,  1,  8, 5,  2, 2]
+          - [16, 16, 128, 1,  1,  8, 6,  2, 2]
+          - [16, 16, 128, 1,  1,  8, 7,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 8,  2, 2]
           - [16, 16, 128, 1,  1,  8, 4,  2, 2]
           - [16, 16, 128, 1,  1,  7, 4,  2, 2]
           - [16, 16, 128, 1,  1,  8, 8,  2, 2]
@@ -96,7 +107,8 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
         - SourceSwap: [1]
-        - ClusterDim: [[1,1],[2,2],[2,4], [4,2],[4,4]]
+        #- ClusterDim: [[1,1],[2,2],[2,4], [4,2],[4,4]]
+        - ClusterDim: [[1,1]]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - WavefrontSize: [32]

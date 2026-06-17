@@ -2,7 +2,7 @@ TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
 GlobalParameters:
   SyncsPerBenchmark: 1
-  NumElementsToValidate: 0
+  NumElementsToValidate: -1
   NumElementsToValidateWinner: -1
   KernelTime: False
   NewClient: 2
@@ -38,12 +38,12 @@ BenchmarkProblems:
   -
     - # ProblemType, TN
       OperationType: GEMM
-      DataType: b
-      DestDataType: b
+      DataType: s
+      DestDataType: s
       ComputeDataType: s
       HighPrecisionAccumulate:  True
       TransposeA: False
-      TransposeB: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation: False
@@ -59,19 +59,19 @@ BenchmarkProblems:
         - ForceDisableShadowInit: [1]
         - MatrixInstruction:
           #- [16, 16, 128, 1,  1,  2, 2,  2, 2]
-          #- [16, 16, 32, 1,  1,  1, 1,  2, 2]
-          #- [16, 16, 32, 1,  1,  2, 2,  2, 2]
-          #- [16, 16, 32, 1,  1,  2, 4,  2, 2]
-          #- [16, 16, 32, 1,  1,  2, 4,  2, 2]
-          #- [16, 16, 32, 1,  1,  4, 2,  2, 2]
-          - [16, 16, 32, 1,  1,  4, 4,  2, 2]
-          - [16, 16, 32, 1,  1,  4, 8,  2, 2]
-          - [16, 16, 32, 1,  1,  4, 7,  2, 2]
-          - [16, 16, 32, 1,  1,  8, 4,  2, 2]
-          - [16, 16, 32, 1,  1,  7, 4,  2, 2]
-          - [16, 16, 32, 1,  1,  8, 8,  2, 2]
-        - DepthU: [64,128]
-        - HalfPLR: [0,1,2,3]
+          - [16, 16, 4, 1,  1,  1, 1,  2, 2]
+          - [16, 16, 4, 1,  1,  2, 2,  2, 2]
+          - [16, 16, 4, 1,  1,  2, 4,  2, 2]
+          - [16, 16, 4, 1,  1,  2, 4,  2, 2]
+          - [16, 16, 4, 1,  1,  4, 2,  2, 2]
+          - [16, 16, 4, 1,  1,  4, 4,  2, 2]
+          - [16, 16, 4, 1,  1,  4, 8,  2, 2]
+          - [16, 16, 4, 1,  1,  4, 7,  2, 2]
+          - [16, 16, 4, 1,  1,  8, 4,  2, 2]
+          - [16, 16, 4, 1,  1,  7, 4,  2, 2]
+          - [16, 16, 4, 1,  1,  8, 8,  2, 2]
+        - DepthU: [32,64]
+        - HalfPLR: [0]
         - TDMInst: [3]
           #- TDMSplit: [False, True]
         - TransposeLDS: [-1]
@@ -79,14 +79,14 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - LDSTrInst: [True]
+        - LDSTrInst: [False,True]
         - StaggerU: [0]
         - ScheduleIterAlg: [4]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - StoreRemapVectorWidth: [0]
-        - GlobalSplitU: [1,2,4,8,16]
-        - GlobalSplitUAlgorithm: [MultipleBufferSingleKernel]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - VectorWidthA: [-1]
@@ -94,7 +94,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
         - SourceSwap: [1]
-        - ClusterDim: [[1,1],[2,2],[2,4], [4,2],[4,4]]
+          #- ClusterDim: [[1,1],[2,2],[2,4], [4,2],[4,4]]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - WavefrontSize: [32]
@@ -104,14 +104,13 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [1024, 4096, 1, 512]
-          - Exact: [1536, 1536, 1, 65536]
-          - Exact: [3072, 3072, 1, 7168]
-          - Exact: [4096, 4096, 1, 16384]
-          - Exact: [7168, 4, 1, 4]
-          - Exact: [7168, 512, 1, 512]
-          - Exact: [7168, 1024, 1, 512]
-          - Exact: [7168, 129408, 1, 512]         
+          - Exact: [7168, 512, 1, 48]
+          - Exact: [7168, 512, 1, 96]
+          - Exact: [7168, 512, 1, 192]
+          - Exact: [7168, 512, 1, 384]
+          - Exact: [28672, 512, 1, 4]
+          - Exact: [28672, 512, 1, 24]          
+
 LibraryLogic:
     ScheduleName: "gfx1250"
     DeviceNames: ["Device 0073"]
