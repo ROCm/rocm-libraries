@@ -758,6 +758,12 @@ endif()
 if(NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTENSOR_REQ_LIBS_ONLY)
     # make check runs the entire set of examples and tests
     add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -C ${CMAKE_CFG_INTDIR} USES_TERMINAL)
+    # Build-only half of `check`: a command-less aggregate of the full test/example
+    # build closure. `check` depends on it (wired below, after the subdirectories
+    # are added), so `ninja check` still builds everything; the decoupled build
+    # phase runs `ninja check_prebuild` to build exactly what the test phase (ctest)
+    # runs, without running ctest itself.
+    add_custom_target(check_prebuild)
     # make smoke runs the tests and examples that runs within 30 seconds on gfx90a
     add_custom_target(smoke COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -C ${CMAKE_CFG_INTDIR} -L "SMOKE_TEST" USES_TERMINAL)
     # make regression runs the tests and examples that runs for more 30 seconds on gfx90a
@@ -848,8 +854,11 @@ if(NOT GPU_ARCHS AND USER_GPU_TARGETS AND NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTE
    endif()
    if(CK_ENABLE_ROCM_CK)
        add_subdirectory(rocm_ck)
-       if(TARGET check)
-           add_dependencies(check build-smoke-rocm-ck)
+       # Attach to check_prebuild (the build-only aggregate) so the build phase
+       # (ninja check_prebuild) builds the rocm_ck smoke binary too; check still
+       # builds+runs it transitively (check -> check_prebuild, wired below).
+       if(TARGET check_prebuild)
+           add_dependencies(check_prebuild build-smoke-rocm-ck)
        endif()
    endif()
    if(BUILD_TESTING)
@@ -858,6 +867,22 @@ if(NOT GPU_ARCHS AND USER_GPU_TARGETS AND NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTE
             PACKAGE_NAME tests # Prevent -static suffix on package name
        )
        add_subdirectory(test)
+   endif()
+
+   # Assemble the build-only closure now that the test/example aggregates exist,
+   # and make `check` build it. Routing through the canonical tests/examples
+   # aggregates (rather than per-exe check deps) keeps the full ctest run and the
+   # full build in lockstep, so the test phase never hits a Not Run target.
+   if(TARGET check_prebuild)
+       if(TARGET tests)
+           add_dependencies(check_prebuild tests)
+       endif()
+       if(TARGET examples)
+           add_dependencies(check_prebuild examples)
+       endif()
+       if(TARGET check)
+           add_dependencies(check check_prebuild)
+       endif()
    endif()
 endif()
 

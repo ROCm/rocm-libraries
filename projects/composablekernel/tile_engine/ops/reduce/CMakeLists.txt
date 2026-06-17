@@ -96,7 +96,11 @@ function(build_multi_reduce_for_datatype datatype variant)
 
         add_test(NAME ${test_target} COMMAND ${test_target})
         set_tests_properties(${test_target} PROPERTIES LABELS "multi_reduce")
-        add_dependencies(check ${test_target})
+        # Attach to check_prebuild (the build-only aggregate) rather than check
+        # directly: check depends on check_prebuild, so `ninja check` still builds
+        # these, and the decoupled build phase (ninja check_prebuild) picks them
+        # up too instead of leaving them Not Run under ctest.
+        add_dependencies(check_prebuild ${test_target})
     endforeach()
     add_custom_target(test_reduce_${variant}_${datatype} DEPENDS ${codegen_blobs})
 

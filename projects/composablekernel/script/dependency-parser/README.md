@@ -650,6 +650,9 @@ python3 -m pytest tests/ --cov=src --cov-report=html
 | File | Description |
 |------|-------------|
 | `main.py` | Unified CLI entry point |
+| `smart_build_ci.sh` | Selection: computes build mode + targets (writes `tests_to_run.json`, `build_targets.txt`) |
+| `smart_build.sh` | Build phase: selection + build only (selective targets, or `ninja check_prebuild` for full); records mode in `build_mode.env` |
+| `smart_test.sh` | Test phase: runs ctest per `build_mode.env` (selective `-R`, full suite, or none). Consumes the build phase's `build/` dir + artifacts |
 | `src/cmake_dependency_analyzer.py` | NEW: Pre-build dependency analyzer |
 | `src/enhanced_ninja_parser.py` | LEGACY: Post-build dependency parser |
 | `src/selective_test_filter.py` | Test selection based on git changes |
