@@ -6760,9 +6760,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
       numASubtiles = int(aTileInfo.globalSubtileGrid[0] * aTileInfo.globalSubtileGrid[1])
       numBSubtiles = int(bTileInfo.globalSubtileGrid[0] * bTileInfo.globalSubtileGrid[1])
       readSize = 2*aTileInfo.subtileSize
-      # Align A and B sizes to readSize for DTL 2xsubtile reads
-      sizeA = int(((numASubtiles * aTileInfo.subtileSize + readSize-1) // readSize) * readSize)
-      sizeB = int(((numBSubtiles * bTileInfo.subtileSize + readSize-1) // readSize) * readSize)
+      # Align A and B sizes to readSize for DTL 2xsubtile reads.
+      # TDM-based solution use padding per row. Take that into account for size calculation.
+      mtA = kernel["MacroTile0"]
+      mtB = kernel["MacroTile1"]
+      padA = int(getattr(aTileInfo, "ldsRowPadBytes", 0)) * mtA
+      padB = int(getattr(bTileInfo, "ldsRowPadBytes", 0)) * mtB
+      sizeA = int(((numASubtiles * aTileInfo.subtileSize + padA + readSize-1) // readSize) * readSize)
+      sizeB = int(((numBSubtiles * bTileInfo.subtileSize + padB + readSize-1) // readSize) * readSize)
       self.ldsStartOffsetB = sizeA
       sizeMXSA = 0
       sizeMXSB = 0

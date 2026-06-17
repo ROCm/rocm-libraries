@@ -33,10 +33,13 @@ import math
 
 from rocisa.code import Module
 
+# Debug: emit `s_mov_b32 m0, LoopCounterL; s_ttracedata` at the start of
+# every mainloop iteration so SQTT / trace decoders can identify iterations.
+# Set to False to drop the markers (saves 2 instructions per iter).
+DEBUG_EMIT_MAINLOOP_TRACE_MARKER = False
 
 # ds_load_b128 reads 4 contiguous VGPRs.
 DS_B128_VGPRS = 4
-
 
 def _checkout_tile(pool, numRegs, tag):
     """Check out one VGPR tile as a single contiguous, min(numRegs, 4)-aligned block (b128-aligned when numRegs >= 4)."""
@@ -149,6 +152,20 @@ class ReadGranularity:
         return MFMATileRange(ks, ks + self.k, ts, te)
 
 
+class GRPlacementStrategy(IntEnum):
+    """How Global Reads are spread across (partition, subIterK) slots.
+
+    SPREAD   — distribute GR atoms across all slots weighted by partition
+               MFMA count. Default for buffer-load GR (gfx9xx): spreading
+               avoids issue-slot pressure on the SIMD.
+    BUNCHED  — pin every GR atom to partition 0, subIterK 0. Suitable when
+               the GR instruction does not contend for SIMD issue slots
+               (e.g. TDM tensor_load_to_lds on gfx1250).
+    """
+    SPREAD  = 0
+    BUNCHED = 1
+
+
 @dataclass
 class SchedulerConfig:
     """Configuration for the MFMATile-based scheduler."""
@@ -166,6 +183,7 @@ class SchedulerConfig:
     partitionSizeM: Union[int, List[int]] = 0  # partition size(s) in M dimension (0 = full dim)
     partitionSizeN: Union[int, List[int]] = 0  # partition size(s) in N dimension (0 = full dim)
     pgr: int = 2              # Prefetch Global Read
+    grPlacement: GRPlacementStrategy = GRPlacementStrategy.SPREAD
 
     # Resolve a partition spec into per-partition sizes along one dimension.
     # spec is either:
@@ -1072,8 +1090,12 @@ class LogicalScheduler:
         slot_boundaries = [p * nAtoms for p in weight_prefix[1:]]
 
         for i, (tensor, mt_val, ts, te, ks, ke, last) in enumerate(atoms):
-            slot = min(bisect_left(slot_boundaries, i * total_weight + 1),
-                       last) if nAtoms else 0
+            if cfg.grPlacement == GRPlacementStrategy.BUNCHED:
+                # TDM: pin every GR atom to partition 0, subIterK 0.
+                slot = 0
+            else:
+                slot = min(bisect_left(slot_boundaries, i * total_weight + 1),
+                           last) if nAtoms else 0
             while (slot < last and
                    self._has_lr_conflict(lower, tensor, mt_val,
                                          slot // numK, slot % numK, ks, ke)):
@@ -2446,6 +2468,7 @@ class LogicalScheduler:
         for interleaving. When schedule=False, emits instructions sequentially.
         """
         from Tensile.Components.Subtile.InstructionScheduler import instructionSchedule
+        from Tensile.Components.Subtile.WaitAluInsertion import insertLRSwapWaitAlu
         from rocisa.code import Module, Label
         from rocisa.container import sgpr
         from rocisa.instruction import SCmpEQU32, SCBranchSCC0, SMovB32
@@ -2489,6 +2512,9 @@ class LogicalScheduler:
             module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
                                comment="Subtile PAP: clear after first PRELOOP GR merge"))
         module.addComment0(f"{label} end")
+        # SCHED_MODE 2: guard the LR offset-swap -> ds_read RAW hazard once, against
+        # the final post-schedule order (no-op on other archs).
+        module = insertLRSwapWaitAlu(module, writer, kernel)
         return module
 
     def emitMainAndExitLoops(self, writer, kernel, tensorParametersA=None, tensorParametersB=None):
@@ -2587,7 +2613,18 @@ class LogicalScheduler:
 
         exitLabels = [Label(f"ExitC{ui}", "") for ui in range(uf - 1)]
         module.add(loopBegin)
+        if DEBUG_EMIT_MAINLOOP_TRACE_MARKER:
+            from rocisa.code import TextBlock
+            from rocisa.container import mgpr
+            from rocisa.instruction import SMovB32 as _SMovB32
         for ui in range(uf):
+            if DEBUG_EMIT_MAINLOOP_TRACE_MARKER:
+                # Mainloop iteration marker for SQTT / trace decoder: write
+                # LoopCounterL into M0 then emit it via s_ttracedata. Decoder
+                # only uses low 8 bits, so M0 wrap past 256 is fine.
+                module.add(_SMovB32(dst=mgpr(0), src=sgpr("LoopCounterL"),
+                                    comment="trace: M0 = LoopCounterL"))
+                module.add(TextBlock("s_ttracedata                                      // trace: emit M0 to SQTT\n"))
             module.add(self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}",
                                       self._emitted_per_unroll[ui]))
             module.add(SSubU32(dst=sgpr("LoopCounterL"),

@@ -3812,6 +3812,18 @@ class Solution(collections.abc.Mapping):
               if depthUB < state["MatrixInstK"] * SwizzlePackK * state["LocalSplitU"]:
                 validDepthU = False
                 extraComment = ": DepthU(%u) < Min-DU for swizzleB + LSU(%u)"%(depthUB, state["LocalSplitU"])
+
+          # TDM pad_interval (padIntervalBytes = DepthU * bpeGR) max allowed value is
+          # 1024 bytes (256 DWORDs).
+          if state["UseSubtileImpl"]:
+            for tc in ["A", "B"]:
+              if not state["enableTDM%s" % tc]:
+                continue
+              padIntervalBytes = depthU * state["ProblemType"]["DataType%s" % tc].numBytes()
+              if padIntervalBytes > 1024:
+                validDepthU = False
+                extraComment = ": DepthU(%u)*bpeGR%s = %u exceeds TDM pad_interval limit of 1024 bytes" \
+                               % (depthU, tc, padIntervalBytes)
         # this depthU is valid, done unless user wants to double (for TN)
         if validDepthU:
           state["DepthU"] = depthU
