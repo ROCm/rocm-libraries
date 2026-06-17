@@ -74,6 +74,17 @@ hipblasStatus_t hipblasSetAtomicsModeFortran(hipblasHandle_t      handle,
 hipblasStatus_t hipblasGetAtomicsModeFortran(hipblasHandle_t       handle,
                                              hipblasAtomicsMode_t* atomics_mode);
 
+hipblasStatus_t hipblasSetBatchAlphaStrideFortran(hipblasHandle_t handle,
+                                                  hipblasStride   alpha_stride);
+
+hipblasStatus_t hipblasGetBatchAlphaStrideFortran(hipblasHandle_t handle,
+                                                  hipblasStride*  alpha_stride);
+
+hipblasStatus_t hipblasSetBatchBetaStrideFortran(hipblasHandle_t handle, hipblasStride beta_stride);
+
+hipblasStatus_t hipblasGetBatchBetaStrideFortran(hipblasHandle_t handle,
+                                                 hipblasStride*  beta_stride);
+
 /* ==========
  *    L3
  * ========== */

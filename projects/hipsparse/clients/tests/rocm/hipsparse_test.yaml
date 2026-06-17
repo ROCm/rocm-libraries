@@ -116,6 +116,7 @@ include: test_spgemmreuse_csr.yaml
 include: test_spmm_batched_coo.yaml
 include: test_spmm_batched_csc.yaml
 include: test_spmm_batched_csr.yaml
+include: test_spmm_bsr.yaml
 include: test_spmm_coo.yaml
 include: test_spmm_csc.yaml
 include: test_spmm_csr.yaml
