@@ -103,7 +103,7 @@ namespace TensileLite
         int    CUs              = 0;
     };
 
-    extern PerfModel perf;
+    extern TENSILELITEHOST_EXPORT PerfModel perf;
 
     struct BufferLoadCheckPacket
     {
@@ -710,10 +710,10 @@ namespace TensileLite
                            ContractionSolution::GroupedInputs const&        inputs,
                            DeviceUserArguments<TAct>*                       args);
 
-    std::ostream& operator<<(std::ostream&                                      stream,
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                                      stream,
                              ContractionSolution::StaticPerformanceModel const& spm);
-    std::ostream& operator<<(std::ostream&                                    stream,
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                                    stream,
                              ContractionSolution::ProjectedPerformance const& spm);
-    std::ostream& operator<<(std::ostream& stream, BufferLoadCheckPacket const& st);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, BufferLoadCheckPacket const& st);
 } // namespace TensileLite
 

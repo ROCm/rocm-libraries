@@ -305,9 +305,9 @@ namespace TensileLite
         }
     };
 
-    std::vector<std::string> generateArgNameList(size_t length, const char* name = "");
+    TENSILELITEHOST_EXPORT std::vector<std::string> generateArgNameList(size_t length, const char* name = "");
 
-    size_t greekToIndex(std::string name);
+    TENSILELITEHOST_EXPORT size_t greekToIndex(std::string name);
     /**
  * @}
  */

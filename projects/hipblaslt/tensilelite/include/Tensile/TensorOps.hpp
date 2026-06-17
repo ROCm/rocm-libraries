@@ -106,14 +106,14 @@ namespace TensileLite
         static std::map<std::string, Type> typeNames;
     };
 
-    std::string ToString(TensorOp::Type t);
-    std::string Suffix(TensorOp::Type t);
+    TENSILELITEHOST_EXPORT std::string ToString(TensorOp::Type t);
+    TENSILELITEHOST_EXPORT std::string Suffix(TensorOp::Type t);
 
-    std::ostream& operator<<(std::ostream& stream, TensorOp const& t);
-    std::istream& operator>>(std::istream& stream, TensorOp& t);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, TensorOp const& t);
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, TensorOp& t);
 
-    std::ostream& operator<<(std::ostream& stream, TensorOp::Type const& t);
-    std::istream& operator>>(std::istream& stream, TensorOp::Type& t);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, TensorOp::Type const& t);
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, TensorOp::Type& t);
 
     /**
  * @}

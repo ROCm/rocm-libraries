@@ -59,10 +59,10 @@ namespace TensileLite
         Count
     };
 
-    std::string   ToString(KernelLanguage d);
-    std::string   TypeAbbrev(KernelLanguage d);
-    std::ostream& operator<<(std::ostream& stream, KernelLanguage const& t);
-    std::istream& operator>>(std::istream& stream, KernelLanguage& t);
+    TENSILELITEHOST_EXPORT std::string   ToString(KernelLanguage d);
+    TENSILELITEHOST_EXPORT std::string   TypeAbbrev(KernelLanguage d);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, KernelLanguage const& t);
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, KernelLanguage& t);
 
     /**
  * \ingroup KernelLanguages

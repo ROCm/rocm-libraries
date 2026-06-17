@@ -69,10 +69,10 @@ namespace rocisa
  * @{
  */
 
-    std::string   TypeAbbrev(rocisa::DataType d);
-    float         GetElementSize(rocisa::DataType d);
-    std::ostream& operator<<(std::ostream& stream, rocisa::DataType const& t);
-    std::istream& operator>>(std::istream& stream, rocisa::DataType& t);
+    TENSILELITEHOST_EXPORT std::string   TypeAbbrev(rocisa::DataType d);
+    TENSILELITEHOST_EXPORT float         GetElementSize(rocisa::DataType d);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, rocisa::DataType const& t);
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, rocisa::DataType& t);
 
 } // namespace rocisa
 
@@ -491,9 +491,9 @@ namespace TensileLite
 #endif // !_WIN32 && TENSILE_USE_FP4
 
     TENSILELITEHOST_EXPORT std::string ToString(ConstantVariant d);
-    bool        CompareValue(const ConstantVariant& d, double value);
+    TENSILELITEHOST_EXPORT bool        CompareValue(const ConstantVariant& d, double value);
 
-    size_t multiplyElementSize(size_t element, float elementSize);
+    TENSILELITEHOST_EXPORT size_t multiplyElementSize(size_t element, float elementSize);
 
     /**
  * @}

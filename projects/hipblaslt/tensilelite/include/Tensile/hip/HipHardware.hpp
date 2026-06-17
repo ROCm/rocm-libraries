@@ -38,7 +38,7 @@ namespace TensileLite
 {
     namespace hip
     {
-        struct HipAMDGPU : public AMDGPU
+        struct TENSILELITEHOST_EXPORT HipAMDGPU : public AMDGPU
         {
             HipAMDGPU() = default;
             HipAMDGPU(hipDeviceProp_t const& prop,

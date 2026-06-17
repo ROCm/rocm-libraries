@@ -72,10 +72,10 @@ namespace TensileLite
         Count
     };
 
-    std::string   ToString(PerformanceMetric d);
-    std::string   TypeAbbrev(PerformanceMetric d);
-    std::ostream& operator<<(std::ostream& stream, PerformanceMetric const& t);
-    std::istream& operator>>(std::istream& stream, PerformanceMetric& t);
+    TENSILELITEHOST_EXPORT std::string   ToString(PerformanceMetric d);
+    TENSILELITEHOST_EXPORT std::string   TypeAbbrev(PerformanceMetric d);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, PerformanceMetric const& t);
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, PerformanceMetric& t);
 
     /**
  * \ingroup PerformanceMetrics

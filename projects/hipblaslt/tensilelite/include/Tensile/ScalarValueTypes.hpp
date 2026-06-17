@@ -61,10 +61,10 @@ namespace TensileLite
         Count
     };
 
-    std::string   ToString(ScalarValue d);
-    std::string   TypeAbbrev(ScalarValue d);
-    std::ostream& operator<<(std::ostream& stream, ScalarValue const& t);
-    std::istream& operator>>(std::istream& stream, ScalarValue& t);
+    TENSILELITEHOST_EXPORT std::string   ToString(ScalarValue d);
+    TENSILELITEHOST_EXPORT std::string   TypeAbbrev(ScalarValue d);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, ScalarValue const& t);
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, ScalarValue& t);
 
     /**
  * \ingroup ScalarValue
