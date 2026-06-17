@@ -659,10 +659,8 @@ int main(int argc, char** argv) {
         vector<string>::const_iterator imagesPathEnd = imagesPathStart + batchSize;
         vector<string>::const_iterator imageNamesStart =
             imageNames.begin() + (iterCount * batchSize);
-        vector<string>::const_iterator imageNamesEnd = imageNamesStart + batchSize;
         vector<string>::const_iterator imagesPathSecondStart =
             imageNamesPathSecond.begin() + (iterCount * batchSize);
-        vector<string>::const_iterator imagesPathSecondEnd = imagesPathSecondStart + batchSize;
 
         // Set ROIs for src/dst
         if ((testCase == YUV_TO_RGB || testCase == YUV_TO_RGB_CUBIC_V ||
@@ -2593,8 +2591,8 @@ int main(int argc, char** argv) {
                 // allocated
                 RpptROI roiDefault;
                 RpptROIPtr roiPtrDefault = &roiDefault;
-                roiPtrDefault->xywhROI = {0, 0, static_cast<Rpp32s>(dstDescPtr->w),
-                                          static_cast<Rpp32s>(dstDescPtr->h)};
+                roiPtrDefault->xywhROI = {
+                    {0, 0}, static_cast<Rpp32s>(dstDescPtr->w), static_cast<Rpp32s>(dstDescPtr->h)};
                 for (int i = 0; i < dstDescPtr->n; i++) {
                     roiTensorPtrDst[i].xywhROI.roiWidth =
                         std::min(roiPtrDefault->xywhROI.roiWidth - roiTensorPtrDst[i].xywhROI.xy.x,
