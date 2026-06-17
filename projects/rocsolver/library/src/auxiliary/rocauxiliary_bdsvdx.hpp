@@ -294,7 +294,7 @@ rocblas_status rocsolver_bdsvdx_template(rocblas_handle handle,
     rocblas_get_stream(handle, &stream);
 
     // set info = 0
-    rocblas_int blocksReset = (batch_count - 1) / BS1 + 1;
+    rocblas_int blocksReset = calculate_nblocks(batch_count, BS1);
     ROCSOLVER_LAUNCH_KERNEL(reset_info, dim3(blocksReset, 1, 1), dim3(BS1, 1, 1), 0, stream, info,
                             batch_count, 0);
 
@@ -303,7 +303,7 @@ rocblas_status rocsolver_bdsvdx_template(rocblas_handle handle,
         return rocblas_status_success;
 
     // zero out diagonal of tridiagonal matrix (Dtgk)
-    rocblas_int blocksZero = (2 * n * batch_count - 1) / BS1 + 1;
+    rocblas_int blocksZero = calculate_nblocks(2 * n * batch_count, BS1);
     ROCSOLVER_LAUNCH_KERNEL(reset_info, dim3(blocksZero, 1, 1), dim3(BS1, 1, 1), 0, stream, Dtgk,
                             2 * n * batch_count, 0);
 

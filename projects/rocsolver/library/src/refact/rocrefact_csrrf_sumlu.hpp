@@ -153,7 +153,7 @@ rocblas_status rocsolver_csrrf_sumlu_template(rocblas_handle handle,
     if(nnzL == n && nnzU == 0)
     {
         // set ptrT = 0
-        rocblas_int blocks = n / BS1 + 1;
+        rocblas_int blocks = calculate_nblocks(n + 1, BS1);
         dim3 grid(blocks, 1, 1);
         dim3 threads(BS1, 1, 1);
         ROCSOLVER_LAUNCH_KERNEL(reset_info, grid, threads, 0, stream, ptrT, n + 1, 0);

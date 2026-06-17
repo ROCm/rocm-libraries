@@ -236,7 +236,7 @@ rocblas_status rocsolver_syevdx_heevdx_template(rocblas_handle handle,
     // quick return with info = 0 and nev = 0
     if(n == 0)
     {
-        rocblas_int blocksReset = (batch_count - 1) / BS1 + 1;
+        rocblas_int blocksReset = calculate_nblocks(batch_count, BS1);
         dim3 gridReset(blocksReset, 1, 1);
         dim3 threads(BS1, 1, 1);
 

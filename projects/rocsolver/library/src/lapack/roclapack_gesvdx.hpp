@@ -347,7 +347,7 @@ rocblas_status rocsolver_gesvdx_template(rocblas_handle handle,
     rocblas_get_stream(handle, &stream);
 
     // set info = 0 and nsv = 0
-    rocblas_int blocksReset = (batch_count - 1) / BS1 + 1;
+    rocblas_int blocksReset = calculate_nblocks(batch_count, BS1);
     ROCSOLVER_LAUNCH_KERNEL(reset_info, dim3(blocksReset, 1, 1), dim3(BS1, 1, 1), 0, stream, info,
                             batch_count, 0);
     ROCSOLVER_LAUNCH_KERNEL(reset_info, dim3(blocksReset, 1, 1), dim3(BS1, 1, 1), 0, stream, nsv,

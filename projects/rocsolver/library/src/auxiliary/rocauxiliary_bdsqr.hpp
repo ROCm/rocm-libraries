@@ -1254,7 +1254,7 @@ rocblas_status rocsolver_bdsqr_template(rocblas_handle handle,
     rocblas_int nvuc_max = std::max(nv, nuc_max);
     rocblas_int split_groups;
 
-    dim3 gridReset(batch_count / BS1 + 1, 1, 1);
+    dim3 gridReset(calculate_nblocks(batch_count + 1, BS1), 1, 1);
     dim3 gridBasic(1, batch_count, 1);
     dim3 threadsReset(BS1, 1, 1);
     dim3 threadsBasic(1, 1, 1);

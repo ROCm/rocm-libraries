@@ -200,7 +200,7 @@ rocblas_status rocsolver_gecon_template(rocblas_handle handle,
     {
         if(rcond)
         {
-            rocblas_int blocks = (batch_count - 1) / BS1 + 1;
+            rocblas_int blocks = calculate_nblocks(batch_count, BS1);
             dim3 grid(blocks, 1, 1);
             dim3 threads(BS1, 1, 1);
             ROCSOLVER_LAUNCH_KERNEL(reset_info, grid, threads, 0, stream, rcond, batch_count, S(1));

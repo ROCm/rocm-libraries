@@ -3722,14 +3722,7 @@ rocblas_status rocsolver_lacn2_template(rocblas_handle handle,
     if(*h_kase == 0)
     {
         // initialize x = (1/n, ..., 1/n)
-        rocblas_int blocks = (n - 1) / LACN2_BLOCKSIZE + 1;
-
-        // Get device properties and cap grid size to maxGridSize[0]
-        int device;
-        HIP_CHECK(hipGetDevice(&device));
-        hipDeviceProp_t props;
-        HIP_CHECK(hipGetDeviceProperties(&props, device));
-        blocks = std::min(blocks, static_cast<rocblas_int>(props.maxGridSize[0]));
+        rocblas_int blocks = calculate_nblocks(n, static_cast<I>(LACN2_BLOCKSIZE));
 
         ROCSOLVER_LAUNCH_KERNEL((reset_info<T, I, T>), dim3(blocks), dim3(LACN2_BLOCKSIZE), 0,
                                 stream, *x, n, T(1) / T(n));

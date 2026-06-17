@@ -189,7 +189,7 @@ rocblas_status rocsolver_potrf_template(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    I blocksReset = (batch_count - 1) / BS1 + 1;
+    I blocksReset = calculate_nblocks(batch_count, BS1);
     dim3 gridReset(blocksReset, 1, 1);
     dim3 threads(BS1, 1, 1);
 

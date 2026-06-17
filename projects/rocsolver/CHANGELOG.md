@@ -12,6 +12,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Removed
 ### Optimized
 ### Resolved issues
+* Clamped rocSOLVER `reset_info` launch block counts to valid HIP grid/workgroup ranges across affected auxiliary, LAPACK, and refactor paths to avoid zero or oversized launches.
 ### Known issues
 ### Upcoming changes
 
@@ -22,11 +23,11 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Added
 
 * Computation of solution for LU factorization without pivoting
-    * GETRS_NPVT (with batched and strided\_batched versions)
-    * GETRS_NPVT_64 (with batched and strided\_batched versions)
+    * GETRS_NPVT (with batched and strided_batched versions)
+    * GETRS_NPVT_64 (with batched and strided_batched versions)
 * Linear solver routines for symmetric matrices
-    * SYTRS (with batched and strided\_batched versions)
-    * SYTRS_64 (with batched and strided\_batched versions)
+    * SYTRS (with batched and strided_batched versions)
+    * SYTRS_64 (with batched and strided_batched versions)
 
 ### Optimized
 
@@ -107,7 +108,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Hybrid computation support for existing routines:
     - STERF
 * SVD for general matrices based on Cuppen's Divide and Conquer algorithm:
-    - GESDD (with batched and strided\_batched versions)
+    - GESDD (with batched and strided_batched versions)
 
 ### Optimized
 
@@ -141,11 +142,11 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
     - LACGV_64
     - LARF_64
     - LARFG_64
-    - GEQR2_64 (with batched and strided\_batched versions)
-    - GEQRF_64 (with batched and strided\_batched versions)
-    - POTF2_64 (with batched and strided\_batched versions)
-    - POTRF_64 (with batched and strided\_batched versions)
-    - POTRS_64 (with batched and strided\_batched versions)
+    - GEQR2_64 (with batched and strided_batched versions)
+    - GEQRF_64 (with batched and strided_batched versions)
+    - POTF2_64 (with batched and strided_batched versions)
+    - POTRF_64 (with batched and strided_batched versions)
+    - POTRS_64 (with batched and strided_batched versions)
 * Support added for the gfx1151, gfx1200, and gfx1201 architectures
 
 ### Changed
@@ -179,16 +180,16 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Added
 
 * 64-bit APIs for existing functions:
-    * GETF2_64 (with batched and strided\_batched versions)
-    * GETRF_64 (with batched and strided\_batched versions)
-    * GETRS_64 (with batched and strided\_batched versions)
+    * GETF2_64 (with batched and strided_batched versions)
+    * GETRF_64 (with batched and strided_batched versions)
+    * GETRS_64 (with batched and strided_batched versions)
 * Added gfx900 to default build targets.
 * Partial eigenvalue decomposition routines for symmetric/hermitian matrices using Divide & Conquer and Bisection:
-    * SYEVDX (with batched and strided\_batched versions)
-    * HEEVDX (with batched and strided\_batched versions)
+    * SYEVDX (with batched and strided_batched versions)
+    * HEEVDX (with batched and strided_batched versions)
 * Partial generalized symmetric/hermitian-definite eigenvalue decomposition using Divide & Conquer and Bisection:
-    * SYGVDX (with batched and strided\_batched versions)
-    * HEGVDX (with batched and strided\_batched versions)
+    * SYGVDX (with batched and strided_batched versions)
+    * HEGVDX (with batched and strided_batched versions)
 
 ### Changed
 
@@ -211,11 +212,11 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Added
 
 * Eigensolver routines for symmetric/hermitian matrices using Divide & Conquer and Jacobi algorithm:
-    * SYEVDJ (with batched and strided\_batched versions)
-    * HEEVDJ (with batched and strided\_batched versions)
+    * SYEVDJ (with batched and strided_batched versions)
+    * HEEVDJ (with batched and strided_batched versions)
 * Generalized symmetric/hermitian-definite eigensolvers using Divide & Conquer and Jacobi algorithm:
-    * SYGVDJ (with batched and strided\_batched versions)
-    * HEGVDJ (with batched and strided\_batched versions)
+    * SYGVDJ (with batched and strided_batched versions)
+    * HEGVDJ (with batched and strided_batched versions)
 
 ### Changed
 
@@ -244,9 +245,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ## rocSOLVER 3.23.0 for ROCm 5.7.0
 ### Added
 - LU factorization without pivoting for block tridiagonal matrices:
-    - GEBLTTRF_NPVT now supports interleaved\_batched format
+    - GEBLTTRF_NPVT now supports interleaved_batched format
 - Linear system solver without pivoting for block tridiagonal matrices:
-    - GEBLTTRS_NPVT now supports interleaved\_batched format
+    - GEBLTTRS_NPVT now supports interleaved_batched format
 
 ### Fixed
 - Fixed stack overflow in sparse tests on Windows
@@ -278,11 +279,11 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ## rocSOLVER 3.21.0 for ROCm 5.5.0
 ### Added
 - SVD for general matrices using Jacobi algorithm:
-    - GESVDJ (with batched and strided\_batched versions)
+    - GESVDJ (with batched and strided_batched versions)
 - LU factorization without pivoting for block tridiagonal matrices:
-    - GEBLTTRF_NPVT (with batched and strided\_batched versions)
+    - GEBLTTRF_NPVT (with batched and strided_batched versions)
 - Linear system solver without pivoting for block tridiagonal matrices:
-    - GEBLTTRS_NPVT (with batched and strided\_batched versions)
+    - GEBLTTRS_NPVT (with batched and strided_batched versions)
 - Product of triangular matrices
     - LAUUM
 - Added experimental hipGraph support for rocSOLVER functions
@@ -296,7 +297,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Fixed
 - SYEVJ/HEEVJ should now be invariant under matrix scaling.
 - SYEVJ/HEEVJ should now properly output the eigenvalues when no sweeps are executed.
-- Fixed GETF2\_NPVT and GETRF\_NPVT input data initialization in tests and benchmarks.
+- Fixed GETF2_NPVT and GETRF_NPVT input data initialization in tests and benchmarks.
 - Fixed rocblas missing from the dependency list of the rocsolver deb and rpm packages.
 
 
@@ -305,7 +306,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 - Partial SVD for bidiagonal matrices:
     - BDSVDX
 - Partial SVD for general matrices:
-    - GESVDX (with batched and strided\_batched versions)
+    - GESVDX (with batched and strided_batched versions)
 
 ### Changed
 - Changed `ROCSOLVER_EMBED_FMT` default to `ON` for users building directly with CMake.
@@ -315,17 +316,17 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ## rocSOLVER 3.19.0 for ROCm 5.3.0
 ### Added
 - Partial eigensolver routines for symmetric/hermitian matrices:
-    - SYEVX (with batched and strided\_batched versions)
-    - HEEVX (with batched and strided\_batched versions)
+    - SYEVX (with batched and strided_batched versions)
+    - HEEVX (with batched and strided_batched versions)
 - Generalized symmetric- and hermitian-definite partial eigensolvers:
-    - SYGVX (with batched and strided\_batched versions)
-    - HEGVX (with batched and strided\_batched versions)
+    - SYGVX (with batched and strided_batched versions)
+    - HEGVX (with batched and strided_batched versions)
 - Eigensolver routines for symmetric/hermitian matrices using Jacobi algorithm:
-    - SYEVJ (with batched and strided\_batched versions)
-    - HEEVJ (with batched and strided\_batched versions)
+    - SYEVJ (with batched and strided_batched versions)
+    - HEEVJ (with batched and strided_batched versions)
 - Generalized symmetric- and hermitian-definite eigensolvers using Jacobi algorithm:
-    - SYGVJ (with batched and strided\_batched versions)
-    - HEGVJ (with batched and strided\_batched versions)
+    - SYGVJ (with batched and strided_batched versions)
+    - HEGVJ (with batched and strided_batched versions)
 - Added --profile_kernels option to rocsolver-bench, which will include kernel calls in the
   profile log (if profile logging is enabled with --profile).
 
@@ -376,10 +377,10 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Added
 - Symmetric matrix factorizations:
     - LASYF
-    - SYTF2, SYTRF (with batched and strided\_batched versions)
+    - SYTF2, SYTRF (with batched and strided_batched versions)
 - Added `rocsolver_get_version_string_size` to help with version string queries
 - Added `rocblas_layer_mode_ex` and the ability to print kernel calls in the trace and profile logs
-- Expanded batched and strided\_batched sample programs.
+- Expanded batched and strided_batched sample programs.
 
 ### Optimized
 - Improved general performance of LU factorization
@@ -398,26 +399,26 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Added
 - Eigensolver routines for symmetric/hermitian matrices using Divide and Conquer algorithm:
     - STEDC
-    - SYEVD (with batched and strided\_batched versions)
-    - HEEVD (with batched and strided\_batched versions)
+    - SYEVD (with batched and strided_batched versions)
+    - HEEVD (with batched and strided_batched versions)
 - Generalized symmetric- and hermitian-definite eigensolvers using Divide and Conquer algorithm:
-    - SYGVD (with batched and strided\_batched versions)
-    - HEGVD (with batched and strided\_batched versions)
-- Added --mem\_query option to rocsolver-bench, which will print the amount of device memory required
+    - SYGVD (with batched and strided_batched versions)
+    - HEGVD (with batched and strided_batched versions)
+- Added --mem_query option to rocsolver-bench, which will print the amount of device memory required
   by a function.
 - Added --profile option to rocsolver-bench, which will print profile logging results for a function.
 - RQ factorization routines:
-    - GERQ2, GERQF (with batched and strided\_batched versions)
+    - GERQ2, GERQF (with batched and strided_batched versions)
 - Linear solvers for general square systems:
-    - GESV (with batched and strided\_batched versions)
+    - GESV (with batched and strided_batched versions)
 - Linear solvers for symmetric/hermitian positive definite systems:
-    - POTRS (with batched and strided\_batched versions)
-    - POSV (with batched and strided\_batched versions)
+    - POTRS (with batched and strided_batched versions)
+    - POSV (with batched and strided_batched versions)
 - Inverse of symmetric/hermitian positive definite matrices:
-    - POTRI (with batched and strided\_batched versions)
+    - POTRI (with batched and strided_batched versions)
 - General matrix inversion without pivoting:
-    - GETRI\_NPVT (with batched and strided\_batched versions)
-    - GETRI\_NPVT\_OUTOFPLACE (with batched and strided\_batched versions)
+    - GETRI_NPVT (with batched and strided_batched versions)
+    - GETRI_NPVT_OUTOFPLACE (with batched and strided_batched versions)
 
 ### Optimized
 - Improved performance of LU factorization (especially for large matrix sizes)
@@ -445,9 +446,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 - Linear solvers for general non-square systems:
     - GELS now supports underdetermined and transposed cases
 - Inverse of triangular matrices
-    - TRTRI (with batched and strided\_batched versions)
+    - TRTRI (with batched and strided_batched versions)
 - Out-of-place general matrix inversion
-    - GETRI\_OUTOFPLACE (with batched and strided\_batched versions)
+    - GETRI_OUTOFPLACE (with batched and strided_batched versions)
 
 ### Optimized
 - Improved general performance of matrix inversion (GETRI)
@@ -457,7 +458,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Fixed
 - Fixed known issues with Thin-SVD. The problem was identified in the test specification, not in the thin-SVD
-  implementation or the rocBLAS gemm\_batched routines.
+  implementation or the rocBLAS gemm_batched routines.
 - Benchmark client will no longer crash as a result of leading dimension or stride arguments not being provided
   on the command line.
 
@@ -467,14 +468,14 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 - Multi-level logging functionality
 - Implementation of the Thin-SVD algorithm
 - Reductions of generalized symmetric- and hermitian-definite eigenproblems:
-    - SYGS2, SYGST (with batched and strided\_batched versions)
-    - HEGS2, HEGST (with batched and strided\_batched versions)
+    - SYGS2, SYGST (with batched and strided_batched versions)
+    - HEGS2, HEGST (with batched and strided_batched versions)
 - Symmetric and hermitian matrix eigensolvers:
-    - SYEV (with batched and strided\_batched versions)
-    - HEEV (with batched and strided\_batched versions)
+    - SYEV (with batched and strided_batched versions)
+    - HEEV (with batched and strided_batched versions)
 - Generalized symmetric- and hermitian-definite eigensolvers:
-    - SYGV (with batched and strided\_batched versions)
-    - HEGV (with batched and strided\_batched versions)
+    - SYGV (with batched and strided_batched versions)
+    - HEGV (with batched and strided_batched versions)
 
 ### Changed
 - Sorting method in STERF as original quick-sort was failing for large sizes.
@@ -491,7 +492,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Known Issues
 - Thin-SVD implementation is failing in some cases (in particular m=300, n=120) due to a possible
-  bug in the gemm\_batched routines of rocBLAS.
+  bug in the gemm_batched routines of rocBLAS.
 
 
 ## rocSOLVER 3.11.0 for ROCm 4.1.0
@@ -499,15 +500,15 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 - Eigensolver routines for symmetric/hermitian matrices:
     - STERF, STEQR
 - Linear solvers for general non-square systems:
-    - GELS (API added with batched and strided\_batched versions. Only the overdetermined
+    - GELS (API added with batched and strided_batched versions. Only the overdetermined
       non-transpose case is implemented in this release. Other cases will return
       `rocblas_status_not_implemented` status for now.)
 - Extended test coverage for functions returning info
 - Changelog file
 - Tridiagonalization routines for symmetric and hermitian matrices:
     - LATRD
-    - SYTD2, SYTRD (with batched and strided\_batched versions)
-    - HETD2, HETRD (with batched and strided\_batched versions)
+    - SYTD2, SYTRD (with batched and strided_batched versions)
+    - HETD2, HETRD (with batched and strided_batched versions)
 - Sample code and unit test for unified memory model/Heterogeneous Memory Management (HMM)
 
 ### Optimized
@@ -549,9 +550,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Added
 - Improved debug build mode for developers
 - QL factorization routines:
-    - GEQL2, GEQLF (with batched and strided\_batched versions)
+    - GEQL2, GEQLF (with batched and strided_batched versions)
 - SVD of general matrices routines:
-    - GESVD (with batched and strided\_batched versions)
+    - GESVD (with batched and strided_batched versions)
 
 ### Optimized
 - Improved performance of mid-size matrix inversion (64 < n <= 2048)
@@ -561,7 +562,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Added
 - Sample codes for C, C++ and FORTRAN
 - LU factorization without pivoting routines:
-    - GETF2\_NPVT, GETRF\_NPVT (with batched and strided\_batched versions)
+    - GETF2_NPVT, GETRF_NPVT (with batched and strided_batched versions)
 
 ### Optimized
 - Improved performance of LU factorization of mid-size matrices (64 < n <= 2048)
@@ -574,7 +575,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ## rocSOLVER 3.7.0 for ROCm 3.7.0
 ### Added
 - LU-factorization-based matrix inverse routines:
-    - GETRI (with batched and strided\_batched versions)
+    - GETRI (with batched and strided_batched versions)
 - SVD of bidiagonal matrices routine:
     - BDSQR
 
@@ -587,7 +588,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 - Complex precision support for all existing rocSOLVER functions
 - Bidiagonalization routines:
     - LABRD
-    - GEBD2, GEBRD (with batched and strided\_batched versions)
+    - GEBD2, GEBRD (with batched and strided_batched versions)
 - Integration of rocSOLVER to hipBLAS
 
 ### Optimized
@@ -614,4 +615,5 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Deprecated
 - rocSOLVER types and enumerations
 - hcc compiler support
+
 

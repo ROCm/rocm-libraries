@@ -27,6 +27,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 
 #include <hip/hip_runtime.h>
@@ -924,6 +925,21 @@ ROCSOLVER_KERNEL void init_ident(const rocblas_int m,
         else
             a[i + j * lda] = 0.0;
     }
+}
+
+template <typename I, typename J>
+inline I calculate_nblocks(const I n, const J nthreads_per_block)
+{
+    auto const min_threads = static_cast<I>(32);
+    auto const max_threads = static_cast<I>(1024);
+    auto const threads_per_block = static_cast<I>(nthreads_per_block);
+    auto const nthreads = std::max(min_threads, std::min(max_threads, threads_per_block));
+
+    auto const min_blocks = static_cast<I>(1);
+    auto const max_blocks = static_cast<I>(64 * 1024 - 1);
+    auto const blocks = n <= 0 ? min_blocks : (n - 1) / nthreads + 1;
+
+    return std::max(min_blocks, std::min(max_blocks, blocks));
 }
 
 template <typename T, typename I, typename U>

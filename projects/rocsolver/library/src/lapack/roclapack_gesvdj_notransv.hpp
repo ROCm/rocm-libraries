@@ -247,7 +247,7 @@ rocblas_status rocsolver_gesvdj_notransv_template(rocblas_handle handle,
     // quick return
     if(m == 0 || n == 0)
     {
-        rocblas_int blocksReset = (batch_count - 1) / BS1 + 1;
+        rocblas_int blocksReset = calculate_nblocks(batch_count, BS1);
         dim3 gridReset(blocksReset, 1, 1);
         dim3 threadsReset(BS1, 1, 1);
 

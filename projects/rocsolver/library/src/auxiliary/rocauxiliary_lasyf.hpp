@@ -734,7 +734,7 @@ rocblas_status rocsolver_lasyf_template(rocblas_handle handle,
     if(n == 0 || nb == 0)
     {
         // set info = 0
-        rocblas_int blocksReset = (batch_count - 1) / BS1 + 1;
+        rocblas_int blocksReset = calculate_nblocks(batch_count, BS1);
         dim3 gridReset(blocksReset, 1, 1);
         dim3 threadsReset(BS1, 1, 1);
         ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threadsReset, 0, stream, kb, batch_count, 0);

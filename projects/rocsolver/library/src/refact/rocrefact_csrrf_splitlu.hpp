@@ -531,7 +531,7 @@ rocblas_status rocsolver_csrrf_splitlu_template(rocblas_handle handle,
     if(nnzT == 0)
     {
         // set ptrU = 0
-        const rocblas_int blocks = (n - 1) / BS1 + 1;
+        const rocblas_int blocks = calculate_nblocks(n, BS1);
         dim3 grid(blocks, 1, 1);
         dim3 threads(BS1, 1, 1);
         ROCSOLVER_LAUNCH_KERNEL(reset_info, grid, threads, 0, stream, ptrU, n + 1, 0);
