@@ -29,6 +29,10 @@ Quantized weight GEMM: `matmul_nbits.py` ships the `MatMulNBits` instance
 Deep fusion: `deep_fused_conv_pool.py` ships the conv -> epilogue -> conv -> pool
 fused prototype with per-arch variants under `instances/{common,gfx950,gfx1151,gfx1201}/`.
 
+`architecture/portable_ir_schema.md` proposes a versioned CK-DSL IR artifact
+for Python-authored kernels to be imported and lowered by the pure-C backend in
+CPython-free runtimes.
+
 ## Convolution Family
 
 | File | Spec | Doc |
