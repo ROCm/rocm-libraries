@@ -24,11 +24,10 @@
 
 from Tensile import __version__
 from Tensile import LibraryIO
-from Tensile.Common.GlobalParameters import defaultBenchmarkCommonParameters
+from Tensile.Common.GlobalParameters import globalParameters, defaultBenchmarkCommonParameters
 from Tensile.Common.Constants import HR
 from Tensile.Common.ValidParameters import validParameters
 from Tensile.SolutionStructs.Problem import _defaultProblemType as defaultProblemType
-from Tensile.Common.GlobalParameters import globalParameters
 
 import argparse
 import ast
@@ -38,36 +37,84 @@ import sys
 import re
 import yaml
 from io import StringIO
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 
 class Quoted(str):
+    """Marker type for YAML double-quoted scalars."""
+
     pass
 
 
-# print ""
-def quotedPresenter(dumper, data):
+def quotedPresenter(dumper: Any, data: "Quoted") -> Any:
+    """YAML representer for :class:`Quoted` (double-quoted string style).
+
+    Args:
+        dumper: Active PyYAML dumper instance.
+        data: String value to emit as a double-quoted scalar.
+
+    Returns:
+        A YAML scalar node for *data*.
+
+    Raises:
+        None.
+    """
     return dumper.represent_scalar("tag:yaml.org,2002:str", data, style='"')
 
 
 class FlowList(list):
+    """Marker list type for YAML flow-style sequence output."""
+
     pass
 
 
-def makeFlow(value):
+def makeFlow(value: Any) -> Any:
+    """Wrap lists as :class:`FlowList` for flow-style YAML emission; pass through others.
+
+    Args:
+        value: A list to wrap, or any other value returned unchanged.
+
+    Returns:
+        ``FlowList(value)`` if *value* is a ``list``, else *value*.
+
+    Raises:
+        None.
+    """
     if isinstance(value, list):
         return FlowList(value)
     return value
 
 
-# print list in format of []
-def flowSeq(dumper, value):
+def flowSeq(dumper: Any, value: FlowList) -> Any:
+    """YAML representer for :class:`FlowList` (flow-style sequence).
+
+    Args:
+        dumper: Active PyYAML dumper instance.
+        value: List values to emit in flow style ``[...]``.
+
+    Returns:
+        A YAML sequence node with ``flow_style=True``.
+
+    Raises:
+        None.
+    """
     return dumper.represent_sequence("tag:yaml.org,2002:seq", value, flow_style=True)
 
 
-# ignore null
-def representNone(self, _):
-    return self.represent_scalar("tag:yaml.org,2002:null", "")
+def representNone(dumper: Any, _: Any) -> Any:
+    """YAML representer mapping Python ``None`` to an empty string scalar.
+
+    Args:
+        dumper: Active PyYAML dumper instance.
+        _: Ignored (PyYAML passes the serialized ``None``).
+
+    Returns:
+        An empty string scalar node.
+
+    Raises:
+        None.
+    """
+    return dumper.represent_scalar("tag:yaml.org,2002:null", "")
 
 
 yaml.add_representer(Quoted, quotedPresenter)
@@ -75,7 +122,7 @@ yaml.add_representer(FlowList, flowSeq)
 yaml.add_representer(type(None), representNone)
 
 
-def _format_compact_range(
+def _formatCompactRange(
     rng: Any, start_elements: int = 2, end_elements: int = 2
 ) -> str:
     """Return a short string for a valid-values sequence (same idea as TuningDriver GEKO).
@@ -103,8 +150,7 @@ def _format_compact_range(
     return f"[{start}, ..., {end}]"
 
 
-@functools.lru_cache(maxsize=1)
-def build_fork_parameter_comment_metadata() -> Dict[str, str]:
+def buildForkParameterCommentMetadata() -> Dict[str, str]:
     """Build trailing comment text per fork parameter for inline documentation.
 
     Merges ``defaultBenchmarkCommonParameters`` the same way as TuningDriver's
@@ -117,13 +163,13 @@ def build_fork_parameter_comment_metadata() -> Dict[str, str]:
     Raises:
         None.
     """
-    defaults_merged: Dict[str, Any] = {}
+    defaultsMerged: Dict[str, Any] = {}
     for param_dict in defaultBenchmarkCommonParameters:
-        defaults_merged.update(param_dict)
+        defaultsMerged.update(param_dict)
     meta: Dict[str, str] = {}
-    for name in set(validParameters.keys()) & set(defaults_merged.keys()):
-        default_list = defaults_merged[name]
-        range_str = _format_compact_range(validParameters[name])
+    for name in set(validParameters.keys()) & set(defaultsMerged.keys()):
+        default_list = defaultsMerged[name]
+        range_str = _formatCompactRange(validParameters[name])
         meta[name] = f" # Default Value: {default_list} # Range: {range_str}"
     return meta
 
@@ -139,7 +185,7 @@ _GROUP_WORKGROUP_RE = re.compile(r"^(?P<prefix>\s+WorkGroup)(?P<rest>:.*)$")
 _GROUP_MIARCH_VGPR_RE = re.compile(r"^(?P<prefix>\s+MIArchVgpr)(?P<rest>:.*)$")
 
 
-def parse_matrix_instruction_list_from_colon_rest(rest: str) -> Optional[List[int]]:
+def parseMatrixInstructionListFromColonRest(rest: str) -> Optional[List[int]]:
     """Parse the YAML list after ``MatrixInstruction:`` from the ``: [...]`` tail.
 
     Args:
@@ -176,8 +222,8 @@ def parse_matrix_instruction_list_from_colon_rest(rest: str) -> Optional[List[in
     return None
 
 
-def format_matrix_instruction_cms_comment(
-    mi: Sequence[int], wavefront_size: int = 64
+def formatMatrixInstructionCmsComment(
+    mi: Sequence[int], wavefrontSize: int = 64
 ) -> Optional[str]:
     """Build the GEKO-style ``#CMS — MT …`` suffix for a 9-deep MatrixInstruction.
 
@@ -187,7 +233,7 @@ def format_matrix_instruction_cms_comment(
     Args:
         mi: MatrixInstruction tuple (M, N, K, B, MIBlockM, WaveTileM, WaveTileN,
             WaveM, WaveN).
-        wavefront_size: Wavefront size in threads (default 64).
+        wavefrontSize: Wavefront size in threads (default 64).
 
     Returns:
         A string starting with ``' #CMS — MT …'``, or ``None`` if *mi* has fewer
@@ -199,23 +245,23 @@ def format_matrix_instruction_cms_comment(
     if len(mi) < 9:
         return None
     wave = (mi[7], mi[8])
-    mi_block_m = mi[4]
-    wave_tile_m, wave_tile_n = mi[5], mi[6]
-    matrix_inst_m = mi[0] * mi_block_m
-    mt0 = matrix_inst_m * wave_tile_m * wave[0]
-    matrix_inst_n = mi[1] / mi_block_m * mi[3]
-    mt1 = int(matrix_inst_n * wave_tile_n * wave[1])
-    tt0 = wave_tile_m
-    tt1 = wave_tile_n * mi[1]
-    wg0 = matrix_inst_m * wave[0]
-    wg1 = int(wave[0] * wave[1] * wavefront_size / wg0)
+    miBlockM = mi[4]
+    waveTileM, waveTileN = mi[5], mi[6]
+    matrixInstM = mi[0] * miBlockM
+    mt0 = matrixInstM * waveTileM * wave[0]
+    matrixInstN = mi[1] / miBlockM * mi[3]
+    mt1 = int(matrixInstN * waveTileN * wave[1])
+    tt0 = waveTileM
+    tt1 = waveTileN * mi[1]
+    wg0 = matrixInstM * wave[0]
+    wg1 = int(wave[0] * wave[1] * wavefrontSize / wg0)
     return (
-        f" #CMS — MT {mt0}x{mt1} - TT {tt0}x{tt1} - WG {wg0}x{wg1} - MIBlockM {mi_block_m}"
+        f" #CMS — MT {mt0}x{mt1} - TT {tt0}x{tt1} - WG {wg0}x{wg1} - MIBlockM {miBlockM}"
     )
 
 
-def inject_fork_parameter_inline_comments(
-    yaml_text: str, comment_by_key: Optional[Dict[str, str]] = None
+def injectForkParameterInlineComments(
+    yamlText: str, commentByKey: Optional[Dict[str, str]] = None
 ) -> str:
     """Append inline comments to ForkParameters and key lines under ``Groups``.
 
@@ -228,9 +274,9 @@ def inject_fork_parameter_inline_comments(
     are left unchanged (idempotent).
 
     Args:
-        yaml_text: Full document text produced by ``yaml.dump``.
-        comment_by_key: Optional pre-built metadata; defaults to
-            :func:`build_fork_parameter_comment_metadata`.
+        yamlText: Full document text produced by ``yaml.dump``.
+        commentByKey: Optional pre-built metadata; defaults to
+            :func:`buildForkParameterCommentMetadata`.
 
     Returns:
         Text with fork-parameter and group MI lines annotated where applicable.
@@ -238,69 +284,69 @@ def inject_fork_parameter_inline_comments(
     Raises:
         None.
     """
-    if comment_by_key is None:
-        comment_by_key = build_fork_parameter_comment_metadata()
-    lines = yaml_text.splitlines(keepends=True)
+    if commentByKey is None:
+        commentByKey = buildForkParameterCommentMetadata()
+    lines = yamlText.splitlines(keepends=True)
     out: List[str] = []
-    in_fork_block = False
-    in_groups_content = False
+    inForkBlock = False
+    inGroupsContent = False
     for line in lines:
-        if not in_fork_block and line.startswith("    ForkParameters:"):
-            in_fork_block = True
-            in_groups_content = False
+        if not inForkBlock and line.startswith("    ForkParameters:"):
+            inForkBlock = True
+            inGroupsContent = False
             out.append(line)
             continue
-        if in_fork_block and (
+        if inForkBlock and (
             line.startswith("    BenchmarkJoinParameters:")
             or line.startswith("    BenchmarkFinalParameters:")
         ):
-            in_fork_block = False
-            in_groups_content = False
+            inForkBlock = False
+            inGroupsContent = False
             out.append(line)
             continue
-        if in_fork_block:
+        if inForkBlock:
             stripped = line.rstrip("\n")
             if stripped.startswith("    - Groups:"):
-                in_groups_content = True
+                inGroupsContent = True
                 out.append(line)
                 continue
-            if in_groups_content:
+            if inGroupsContent:
                 if "Default Value:" not in stripped and "CMS —" not in stripped:
                     gm = _GROUP_MATRIX_INSTRUCTION_RE.match(stripped)
                     if gm:
-                        rest_clean = gm.group("rest").split("#", 1)[0].rstrip()
+                        restClean = gm.group("rest").split("#", 1)[0].rstrip()
                         prefix = gm.group("prefix")
-                        mi_vals = parse_matrix_instruction_list_from_colon_rest(
-                            rest_clean
+                        miVals = parseMatrixInstructionListFromColonRest(
+                            restClean
                         )
-                        cms_suffix = None
-                        if mi_vals is not None and len(mi_vals) >= 9:
-                            cms_suffix = format_matrix_instruction_cms_comment(mi_vals)
-                        if cms_suffix:
-                            line = prefix + rest_clean + cms_suffix + "\n"
-                        elif "MatrixInstruction" in comment_by_key:
+                        cmsSuffix = None
+                        if miVals is not None and len(miVals) >= 9:
+                            cmsSuffix = formatMatrixInstructionCmsComment(miVals)
+                        if cmsSuffix:
+                            line = prefix + restClean + cmsSuffix + "\n"
+                        elif "MatrixInstruction" in commentByKey:
                             line = (
                                 prefix
-                                + rest_clean
-                                + comment_by_key["MatrixInstruction"]
+                                + restClean
+                                + commentByKey["MatrixInstruction"]
                                 + "\n"
                             )
                     else:
                         gw = _GROUP_WORKGROUP_RE.match(stripped)
-                        if gw and "WorkGroup" in comment_by_key:
+                        if gw and "WorkGroup" in commentByKey:
                             line = (
                                 gw.group("prefix")
                                 + gw.group("rest")
-                                + comment_by_key["WorkGroup"]
+                                + commentByKey["WorkGroup"]
                                 + "\n"
                             )
                         else:
                             gmv = _GROUP_MIARCH_VGPR_RE.match(stripped)
-                            if gmv and "MIArchVgpr" in comment_by_key:
+                            if gmv and "MIArchVgpr" in commentByKey:
                                 line = (
                                     gmv.group("prefix")
                                     + gmv.group("rest")
-                                    + comment_by_key["MIArchVgpr"]
+                                    + commentByKey["MIArchVgpr"]
                                     + "\n"
                                 )
                 out.append(line)
@@ -309,24 +355,27 @@ def inject_fork_parameter_inline_comments(
             if (
                 m
                 and m.group("key") != "Groups"
-                and m.group("key") in comment_by_key
+                and m.group("key") in commentByKey
                 and "Default Value:" not in stripped
             ):
-                suffix = comment_by_key[m.group("key")]
+                suffix = commentByKey[m.group("key")]
                 line = stripped + suffix + "\n"
         out.append(line)
     return "".join(out)
 
 
-def tPrint(verbosity: int, arg) -> None:
-    """Conditionally prints input to stdout.
-
-    If the global print level is greater than or equal to the verbosity,
-    the argument is printed to stdout.
+def tPrint(verbosity: int, arg: Any) -> None:
+    """Print *arg* to stdout when the client log level is high enough.
 
     Args:
-        verbosity: Level to use for printing arg.
-        arg: Item to print to stdout.
+        verbosity: Minimum ``ClientLogLevel`` at which printing occurs.
+        arg: Object to print (passed to ``print``).
+
+    Returns:
+        None.
+
+    Raises:
+        None.
     """
     if globalParameters["ClientLogLevel"] >= verbosity:
         print(arg)
@@ -334,6 +383,18 @@ def tPrint(verbosity: int, arg) -> None:
 
 
 def setGlobalParams(versionString: dict, problemTypeState: dict) -> dict:
+    """Build ``GlobalParameters`` for a Tensile config from library logic metadata.
+
+    Args:
+        versionString: Mapping containing ``MinimumRequiredVersion``.
+        problemTypeState: Problem-type dict from library logic (uses ``DataType``).
+
+    Returns:
+        Global-parameter dict suitable for the output YAML ``GlobalParameters`` key.
+
+    Raises:
+        None.
+    """
     res = {}
     res["MinimumRequiredVersion"] = versionString["MinimumRequiredVersion"]
     res["SleepPercent"] = 0
@@ -353,6 +414,17 @@ def setGlobalParams(versionString: dict, problemTypeState: dict) -> dict:
 
 
 def formProblemTypeYamlData(problemTypeState: dict) -> dict:
+    """Select problem-type fields for ``BenchmarkProblems`` from full library problem type.
+
+    Args:
+        problemTypeState: Full problem-type mapping from library logic.
+
+    Returns:
+        Subset dict for the first benchmark-problem block.
+
+    Raises:
+        RuntimeError: If *problemTypeState* is empty.
+    """
     if len(problemTypeState) == 0:
         raise RuntimeError(
             "Length of problem Type Parameters is empty!!, Please re-check the library logic file !"
@@ -382,42 +454,81 @@ def formProblemTypeYamlData(problemTypeState: dict) -> dict:
     return data
 
 
-def formGroups(MIInstruction9Bits: dict) -> dict:
+def formGroups(groupRow: dict) -> dict:
+    """Wrap a single solution group row under ``ForkParameters: - Groups:``.
+
+    Args:
+        groupRow: Mapping (e.g. ``MatrixInstruction``, ``WorkGroup``, ``MIArchVgpr``).
+            An empty dict produces a single empty mapping under ``Groups``.
+
+    Returns:
+        Dict with key ``Groups`` whose value is ``[[ groupRow ]]`` (list of lists).
+
+    Raises:
+        None.
+    """
     data = {}
     data["Groups"] = [[]]
     group = {}
-    for forkKey, forkValue in MIInstruction9Bits.items():
+    for forkKey, forkValue in groupRow.items():
         group[forkKey] = forkValue
     data["Groups"][0].append(group)
     return data
 
 
 def form9BitMIInst(currentSolutionState: dict) -> dict:
-    MIBlock = currentSolutionState["MIBlock"]
-    MIWaveTile = currentSolutionState["MIWaveTile"]
-    MIWaveGroup = currentSolutionState["MIWaveGroup"]
+    """Build the ``MatrixInstruction`` / ``WorkGroup`` / ``MIArchVgpr`` group row from MI fields.
 
-    if len(MIBlock) == 0 or len(MIWaveTile) == 0 or len(MIWaveGroup) == 0:
+    Args:
+        currentSolutionState: Solution dict containing ``MIBlock``, ``MIWaveTile``,
+            ``MIWaveGroup``, ``WorkGroup``, and ``MIArchVgpr``.
+
+    Returns:
+        Mapping suitable for :func:`formGroups`.
+
+    Raises:
+        RuntimeError: If any of ``MIBlock``, ``MIWaveTile``, or ``MIWaveGroup`` is empty.
+    """
+    miBlock = currentSolutionState["MIBlock"]
+    miWaveTile = currentSolutionState["MIWaveTile"]
+    miWaveGroup = currentSolutionState["MIWaveGroup"]
+
+    if len(miBlock) == 0 or len(miWaveTile) == 0 or len(miWaveGroup) == 0:
         raise RuntimeError(
             "Length of MIBlock:{0}, MIWave Tile:{1},MIWaveGroup:{2} cannot be empty".format(
-                len(MIBlock), len(MIWaveTile), len(MIWaveGroup)
+                len(miBlock), len(miWaveTile), len(miWaveGroup)
             )
         )
 
-    MIBlock1 = MIBlock[0:5]
+    miBlockPrefix = miBlock[0:5]
 
-    MIInstruction9Bits = MIBlock1 + MIWaveTile + MIWaveGroup
+    miInstruction9 = miBlockPrefix + miWaveTile + miWaveGroup
 
     groups = {}
-    groups["MatrixInstruction"] = FlowList(MIInstruction9Bits)
+    groups["MatrixInstruction"] = FlowList(miInstruction9)
     groups["WorkGroup"] = FlowList(currentSolutionState["WorkGroup"])
     groups["MIArchVgpr"] = currentSolutionState["MIArchVgpr"]
 
     return groups
 
 
-def formForkParams(currentIndexSolution: dict, skipMI: bool) -> dict:
+def formForkParams(
+    currentIndexSolution: dict, skipMI: Optional[bool]
+) -> dict:
+    """Build the second benchmark-problem block (fork parameters and ``Groups``).
 
+    Args:
+        currentIndexSolution: One entry from ``allSolutionStates`` in library logic.
+        skipMI: If true, omit the MI-derived ``Groups`` row (empty group mapping).
+            ``None`` (CLI default when ``--skipMI`` is absent) is treated like false.
+
+    Returns:
+        Dict with ``InitialSolutionParameters``, ``BenchmarkCommonParameters``,
+        and ``ForkParameters``.
+
+    Raises:
+        None.
+    """
     data = {}
     data["InitialSolutionParameters"] = None
     kernelLang = {}
@@ -426,30 +537,28 @@ def formForkParams(currentIndexSolution: dict, skipMI: bool) -> dict:
 
     forkData = []
     for forkKey, forkValue in currentIndexSolution.items():
-        temp = {}
-        # # ignore MatrixInstruction
+        entry = {}
         if forkKey in ["MatrixInstruction", "WorkGroup"]:
             continue
-        # Find the matching index for fork key name from list of dictionaries => defaultBenchmarkCommonParameters
         index = next(
-            (i for i, d in enumerate(defaultBenchmarkCommonParameters) if forkKey in d),
+            (
+                i
+                for i, d in enumerate(defaultBenchmarkCommonParameters)
+                if forkKey in d
+            ),
             None,
         )
         if index is not None:
-            forkValue = [forkValue]  # convert to list
+            forkValue = [forkValue]
             if forkValue != defaultBenchmarkCommonParameters[index][forkKey]:
-                temp[forkKey] = FlowList(forkValue)
-                forkData.append(temp)
+                entry[forkKey] = FlowList(forkValue)
+                forkData.append(entry)
 
-    # Skip the MI calculation if 9 bit MI is not needed or MatrixInstruction field is disabled
     isMatrixInsEnabled = False
     if "EnableMatrixInstruction" in currentIndexSolution:
-        isMatrixInsEnabled = currentIndexSolution["EnableMatrixInstruction"]
-
-        if (
-            currentIndexSolution["EnableMatrixInstruction"]
-            and currentIndexSolution["MatrixInstruction"]
-        ):
+        enableMi = currentIndexSolution["EnableMatrixInstruction"]
+        isMatrixInsEnabled = enableMi
+        if enableMi and currentIndexSolution["MatrixInstruction"]:
             isMatrixInsEnabled = True
         else:
             tPrint(
@@ -457,13 +566,12 @@ def formForkParams(currentIndexSolution: dict, skipMI: bool) -> dict:
                 "Matrix instruction is disabled skipping the matrix instruction parameter ..",
             )
 
-    # Iterate over MIs in Group
-    if skipMI != True and isMatrixInsEnabled:
-        temp = form9BitMIInst(currentIndexSolution)
+    if skipMI is not True and isMatrixInsEnabled:
+        groupRow = form9BitMIInst(currentIndexSolution)
     else:
-        temp = "None"
+        groupRow = {}
 
-    forkData.append(formGroups(temp))
+    forkData.append(formGroups(groupRow))
 
     data["ForkParameters"] = forkData
 
@@ -475,12 +583,24 @@ def formProblemSize(
     solutionIndex: int,
     problemTypeStat: dict,
 ) -> dict:
+    """Build ``BenchmarkJoinParameters`` / ``BenchmarkFinalParameters`` for one solution.
+
+    Args:
+        exactLogic: List of ``(size, mapping)`` from library logic, or ``None`` for Origami.
+        solutionIndex: Solution index to match against ``mapping[0]``.
+        problemTypeStat: Problem-type dict (must include ``BiasDataTypeList``).
+
+    Returns:
+        Dict with ``BenchmarkJoinParameters`` and ``BenchmarkFinalParameters`` keys.
+
+    Raises:
+        None.
+    """
     data = {}
     data["BenchmarkJoinParameters"] = None
     data["BenchmarkFinalParameters"] = []
 
     temp = {}
-    # for origami exactLogic is not present so we need to create it
     if exactLogic is None:
         tPrint(
             1, "Warning: For Origami liblogics, Exact logic needs to be set manually"
@@ -505,8 +625,20 @@ def formProblemSize(
 def formLibraryLogic(
     scheduleName: str, deviceNames: list, architectureName: str
 ) -> dict:
+    """Build the top-level ``LibraryLogic`` block for the output config.
+
+    Args:
+        scheduleName: Schedule name from library logic.
+        deviceNames: Non-empty device name list (first entry is emitted).
+        architectureName: Architecture string from library logic.
+
+    Returns:
+        Dict with ``ScheduleName``, ``DeviceNames``, and ``ArchitectureName``.
+
+    Raises:
+        None.
+    """
     data = {}
-    # Form final library logic string
     data["ScheduleName"] = Quoted(scheduleName)
     data["DeviceNames"] = FlowList([Quoted(deviceNames[0])])
     data["ArchitectureName"] = Quoted(architectureName)
@@ -514,7 +646,9 @@ def formLibraryLogic(
     return data
 
 
-def writeToTensileYamlFile(tensileYamlFile: str, tensileYamlData: dict) -> Optional[str]:
+def writeToTensileYamlFile(
+    tensileYamlFile: str, tensileYamlData: dict
+) -> Optional[str]:
     """Write Tensile YAML to disk, with inline fork-parameter documentation.
 
     Args:
@@ -542,14 +676,14 @@ def writeToTensileYamlFile(tensileYamlFile: str, tensileYamlData: dict) -> Optio
             sort_keys=False,
             Dumper=yaml.Dumper,
         )
-        body = inject_fork_parameter_inline_comments(buf.getvalue())
+        body = injectForkParameterInlineComments(buf.getvalue())
 
         with open(tensileYamlFile, "w") as f:
             f.write(body)
         tPrint(1, "Config library is written to {}".format(tensileYamlFile))
         ret = tensileYamlFile
 
-    except (OSError, IOError):
+    except OSError:
         tPrint(
             1,
             "Error: Creating file {} Please provide file name in this format <filename>.yaml.".format(
@@ -560,29 +694,27 @@ def writeToTensileYamlFile(tensileYamlFile: str, tensileYamlData: dict) -> Optio
 
 
 def TensileLibLogicToYaml(
-    logicFilePath: str, solutionIndex: int, tensileYamlFile: str, skipMI: bool
+    logicFilePath: str,
+    solutionIndex: Union[int, str],
+    tensileYamlFile: str,
+    skipMI: Optional[bool],
 ) -> Optional[str]:
-    """Generate config from a library logic.
-
-    This function generates a config yaml by extracting a solution from a given a library
-    logic and a solution index.
+    """Generate a Tensile tuning config YAML from one row of a library logic file.
 
     Args:
-        logicFilePath: Yaml format file. Input library logic to extract from.
-        solutionIndex: Solution index to extract solution from the library.
-        tensileYamlFile: Config yaml file name. Creates the dir if path is given.
-        skipMI: If False ignores the MI instruction.
+        logicFilePath: Path to the library logic YAML (or msgpack) file.
+        solutionIndex: Solution index into ``allSolutionStates`` (may be ``""`` to
+            trigger validation errors for empty selection).
+        tensileYamlFile: Output path; parent directories are created when needed.
+        skipMI: When true, omit the MI-derived ``Groups`` content. When ``None``
+            (CLI default if ``--skipMI`` is omitted), matrix instructions are not skipped.
 
     Returns:
-        If generated the config file name otherwise None.
+        Output file path on success, or ``None`` if writing the file failed.
 
     Raises:
-        RuntimeError: If logicFilePath cannot be read.
-        RuntimeError: If solutionIndex is not in the logicFilePath.
-        RuntimeError: If tensileYamlFile string is empty or name is not valid.
-
-    Example:
-        TensileLibLogicToYaml("gfx950_Cijk_Alik_Bljk_BSS_BH_BiasS_HAS_SAV_UserArgs.yaml", 0, "config.yaml", False)
+        RuntimeError: If the library file yields empty data, ``solutionIndex`` is
+            ``""``, or the selected solution entry is empty.
     """
 
     tPrint(1, "")
@@ -603,7 +735,6 @@ def TensileLibLogicToYaml(
     if solutionIndex == "":
         raise RuntimeError("At least one solution idx should be provided")
 
-    # reads library logic file. AllSolutionStates=>has solution data for all solution index
     fields = LibraryIO.rawLibraryLogic(libYaml)
     (
         versionString,
@@ -618,7 +749,6 @@ def TensileLibLogicToYaml(
         _,  # otherFields
     ) = fields
 
-    # Extract the solution data for the user specified solution Index
     currentIndexSolution = allSolutionStates[solutionIndex]
 
     if currentIndexSolution == "":
@@ -630,7 +760,6 @@ def TensileLibLogicToYaml(
 
     tensileYamlFileData = {}
 
-    # Iterate over problem type parameters and form problem type yaml data
     tensileYamlFileData["GlobalParameters"] = setGlobalParams(
         versionString, problemTypeState
     )
@@ -638,7 +767,6 @@ def TensileLibLogicToYaml(
     benchmarkProblemsData = formProblemTypeYamlData(problemTypeState)
     benchmarkProblems[0].append(benchmarkProblemsData)
 
-    # # Iterate over Fork parameters and form the Yaml data
     benchmarkProblemsData = formForkParams(currentIndexSolution, skipMI)
     benchmarkProblemsData.update(
         formProblemSize(
@@ -651,22 +779,34 @@ def TensileLibLogicToYaml(
 
     tensileYamlFileData["BenchmarkProblems"] = benchmarkProblems
 
-    # # Forms the Library logic string
     problemSizeData = formLibraryLogic(scheduleName, deviceNames, architectureName)
 
     tensileYamlFileData["LibraryLogic"] = problemSizeData
 
-    # Write the Formed Yaml data into the Yaml File
     return writeToTensileYamlFile(tensileYamlFile, tensileYamlFileData)
 
 
-def parseArgs():
+def parseArgs() -> argparse.Namespace:
+    """Parse ``TensileLibLogicToYaml`` CLI arguments.
+
+    Args:
+        None (reads ``sys.argv``).
+
+    Returns:
+        Parsed ``argparse.Namespace`` (``--skipMI`` is ``None`` unless the flag is set).
+
+    Raises:
+        SystemExit: On argparse validation errors (e.g. missing required options).
+    """
     argParser = argparse.ArgumentParser()
     argHelp = {
         "input": "Library logic file to be converted to tensile input yaml file.",
         "indices": "Comma-separated list of Solution indices from library logic File to extract. Ex: 0,3,4,5",
         "output": "Base Output file name.",
-        "skipMI": "Skips the MatrixInstruction field in the tensile yaml file",
+        "skipMI": (
+            "Omit MI-derived Groups content. Omit this flag for normal behavior; "
+            "present means skip (store_true with default None)."
+        ),
     }
 
     argParser.add_argument(
@@ -708,15 +848,26 @@ def parseArgs():
     return argParser.parse_args()
 
 
-def main():
+def main() -> None:
+    """Run the ``TensileLibLogicToYaml`` command-line interface.
+
+    Args:
+        None (reads ``sys.argv``).
+
+    Returns:
+        None.
+
+    Raises:
+        SystemExit: Propagated from :func:`parseArgs` on invalid CLI input.
+    """
     args = parseArgs()
-    ids = [int(x.strip()) for x in args.indices.split(",")]
+    solutionIds = [int(x.strip()) for x in args.indices.split(",")]
     tensileYamlFiles = []
-    for id in ids:
-        if len(ids) == 1:
-            tensileYamlFile = args.output
+    for sid in solutionIds:
+        if len(solutionIds) == 1:
+            outPath = args.output
         else:
-            tensileYamlFile = re.sub(".yaml", f"_{int(id)}.yaml", args.output)
-        TensileLibLogicToYaml(args.input, int(id), tensileYamlFile, args.skipMI)
-        tensileYamlFiles.append(tensileYamlFile)
+            outPath = re.sub(".yaml", f"_{int(sid)}.yaml", args.output)
+        TensileLibLogicToYaml(args.input, int(sid), outPath, args.skipMI)
+        tensileYamlFiles.append(outPath)
     tPrint(1, f"Tensile Files generated: {tensileYamlFiles}")
