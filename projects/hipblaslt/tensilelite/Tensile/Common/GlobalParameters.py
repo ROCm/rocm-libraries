@@ -713,11 +713,17 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     try:
         globalParameters["AMDSMIPath"] = locateExe(globalParameters["ROCmBinPath"], "amd-smi")
     except OSError:
-        if os.name == "nt":
-            # amd-smi is not presently supported on Windows so do not require it.
-            pass
-        else:
-            raise
+        # amd-smi is only needed at runtime to pin clocks/fans during benchmarking
+        # and tuning; it is not required to build libraries or validate logic.
+        # It is also not presently supported on Windows. Treat a missing amd-smi as
+        # non-fatal: leave AMDSMIPath unset (None) so that clock pinning is skipped,
+        # rather than aborting the build in environments that do not ship amd-smi.
+        globalParameters["AMDSMIPath"] = None
+        if os.name != "nt":
+            printWarning(
+                "Could not locate amd-smi; GPU clock/fan pinning will be disabled. "
+                "Install the amdsmi package to enable it."
+            )
 
     if "AsanBuild" in config:
         globalParameters["AsanBuild"] = config["AsanBuild"]
