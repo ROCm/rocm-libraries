@@ -63,7 +63,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 2
+          fetch-depth: 0
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
 
@@ -73,15 +73,13 @@ jobs:
       - name: Determine changed projects from git diff
         id: configure
         env:
-          BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+          BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/develop' }}
         run: |
           echo "BASE_REF: $BASE_REF"
           echo "git log:"
           git log --oneline -5
           echo "git diff --name-only $BASE_REF:"
           git diff --name-only $BASE_REF || echo "git diff failed"
-          echo "git diff --name-only HEAD^:"
-          git diff --name-only HEAD^ || echo "git diff HEAD^ failed"
           CHANGED_PROJECTS=$(python3 .github/scripts/get_changed_projects.py)
           echo "Changed projects: $CHANGED_PROJECTS"
           echo "changed_projects=$CHANGED_PROJECTS" >> $GITHUB_OUTPUT
