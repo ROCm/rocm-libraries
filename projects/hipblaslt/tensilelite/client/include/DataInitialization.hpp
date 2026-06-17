@@ -320,8 +320,10 @@ namespace TensileLite
                     m_cachedGPUInputs = m_cachedInputsRing[0];
                 }
                 m_activeIdx = 0;
-                // Clear alt ring slots so initializeAltBufferSets re-runs
-                // for the new problem's data.
+                // Clear alt ring slots so initializeAltBufferSets re-runs for the
+                // new problem.  Without this, the guard in initializeAltBufferSets
+                // (!m_gpuPtrsRing[1].empty()) would short-circuit and leave stale
+                // data from the previous problem's layout in the alt slots.
                 for(size_t i = 1; i < MAX_BUFFER_SETS; i++)
                 {
                     m_gpuPtrsRing[i].clear();
@@ -337,8 +339,8 @@ namespace TensileLite
                     HIP_CHECK_EXC(hipStreamSynchronize(m_copyStream));
             }
 
-            // GPU-side wait: make computeStream wait for the copy into
-            // the active buffer slot to finish, without blocking the CPU.
+            // Insert a GPU-side dependency between m_copyStream and computeStream
+            // without blocking the CPU; hipStreamWaitEvent is a device-only barrier.
             void waitCopyDone(hipStream_t computeStream)
             {
                 if(!m_computeNeedsCopyBarrier)
@@ -361,11 +363,9 @@ namespace TensileLite
                 size_t targetIdx
                     = (m_activeIdx + m_availableSlots + 1) % m_numActiveBuffers;
 
-                // When the ring buffer is warm, all slots already have correct
-                // data from initializeAltBufferSets.  Input tensors are never
-                // modified by kernels, and output D is completely overwritten
-                // (D = alpha*A*B + beta*C), so no reset is needed.  Just
-                // advance the slot tracking and record an event.
+                // Warm path: A/B/C are read-only and D is fully overwritten by the next
+                // kernel (D = alpha*A*B + beta*C), so the existing slot data is still
+                // valid.  Skip the DMA; just record a no-op event as a sync marker.
                 if(m_altSlotsReady)
                 {
                     HIP_CHECK_EXC(
@@ -1039,8 +1039,9 @@ namespace TensileLite
             };
 
             // RAII guard: swaps gpuInput.current/batch to a target ring slot
-            // on construction, restores on destruction.  Guarantees restore
-            // even on early return or exception.
+            // on construction, restores on destruction.  The swap lets fillSlot
+            // reuse copyInputs/resetOutput/initializeGPUBatchedInputs (which all
+            // write to gpuInput.current) without modifying those call paths.
             class SlotGuard
             {
                 std::vector<VectorDataInitProperties>& m_vdata;
@@ -1089,6 +1090,8 @@ namespace TensileLite
 
             void allocNewGPUInputs();
 
+            // callerStream: when non-null, caller manages sync for m_copyStream;
+            //   DMA always submits on m_copyStream regardless of this parameter.
             void copyValidToGPUBuffer(ContractionProblemGemm const& problem,
                                       hipStream_t                   callerStream = nullptr);
 
@@ -1168,6 +1171,8 @@ namespace TensileLite
                 m_gpuBatchPtrs   = m_gpuBatchPtrsRing[m_activeIdx];
                 m_cachedGPUInputs = m_cachedInputsRing[m_activeIdx];
                 m_availableSlots--;
+                // The new active slot may have an outstanding DMA on m_copyStream;
+                // require waitCopyDone before the compute stream reads it.
                 m_computeNeedsCopyBarrier = true;
             }
 
@@ -1191,9 +1196,9 @@ namespace TensileLite
             // Multi-buffer ring control
             bool   m_hasAltBuffers    = false;
             size_t m_numActiveBuffers = 2;  // 2 for double-buffer, 3 for triple
-            size_t m_activeIdx        = 0;
-            size_t m_availableSlots    = 0;
-            bool   m_computeNeedsCopyBarrier  = false; // active buffer's DMA not yet synced
+            size_t m_activeIdx        = 0;  // Index of the slot the CPU and current kernel use
+            size_t m_availableSlots    = 0; // Count of slots filled but not yet consumed by advanceBuffer
+            bool   m_computeNeedsCopyBarrier  = false; // compute stream has not yet waited on the copy-done event for the active slot
 
             std::shared_ptr<ProblemInputs> m_cachedGPUInputs;
 

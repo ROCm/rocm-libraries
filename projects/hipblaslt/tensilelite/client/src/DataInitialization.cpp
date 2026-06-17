@@ -3667,6 +3667,9 @@ namespace TensileLite
         void DataInitialization::initializeAltBufferSets(
             ContractionProblemGemm const& problem)
         {
+            // Early-out when m_gpuPtrsRing[1] is already populated: prevents
+            // re-initialization if called redundantly before cancelAsyncReset
+            // has cleared the ring for a new problem.
             if(!m_hasAltBuffers || !m_gpuPtrsRing[1].empty())
                 return;
 
