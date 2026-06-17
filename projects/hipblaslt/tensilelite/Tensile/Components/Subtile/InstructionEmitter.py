@@ -224,24 +224,35 @@ class InstructionEmitter:
         counts = source.wait_gr_counts
         if counts is None:
             return []
-        
+
+        # force_drain means "wait for every outstanding global read to retire"
+        # (full vmcnt(0) drain); the per-tensor counts are kept only for the
+        # diagnostic comment. See WaitGROp.force_drain in LogicalScheduler.py.
+        force_drain = getattr(source, 'force_drain', False)
+
         if self.kernel.get("enableTDMA", False) and self.kernel.get("enableTDMB", False):
-            tdmCnt = counts.A + counts.B + counts.SA + counts.SB
+            tdmCnt = 0 if force_drain else (counts.A + counts.B + counts.SA + counts.SB)
+            label = "full drain" if force_drain else "tensor_load_to_lds"
             return [SWaitTensorcnt(tensorcnt=tdmCnt,
-                                   comment=f"Wait TDM (tensor_load_to_lds): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")]
+                                   comment=f"Wait TDM ({label}): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")]
 
         # TODO. Hardcoded for now, but we should just get this from atomic emit codes (emitSingleBufferLoad, ...)
         grMap = {'A': max(1,int(1.0/self.tileInfoA.loadRatioGR)),
                  'B':  max(1,int(1.0/self.tileInfoB.loadRatioGR)),
                  'SA': 1, 
                  'SB': 1}  
-        grCnt = (counts.A * grMap['A'] +
-                 counts.B * grMap['B'] +
-                 counts.SA * grMap['SA'] +
-                 counts.SB * grMap['SB'])
+        if force_drain:
+            grCnt = 0
+            label = "full drain"
+        else:
+            grCnt = (counts.A * grMap['A'] +
+                     counts.B * grMap['B'] +
+                     counts.SA * grMap['SA'] +
+                     counts.SB * grMap['SB'])
+            label = "per-subIterK"
         swait = SWaitCntEx(vlcnt=grCnt, vscnt=-1,
                            adjustVmcnt=source.adjustVmcnt,
-                           comment=f"Wait GR (per-subIterK): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")
+                           comment=f"Wait GR ({label}): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")
         return [swait]
 
     def emit_wait_lr(self):

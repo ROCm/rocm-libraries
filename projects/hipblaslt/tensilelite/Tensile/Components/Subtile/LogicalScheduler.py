@@ -418,6 +418,12 @@ class WaitGROp(BaseOp):
     wait_gr_counts: Optional[WaitGRCounts] = None
     has_sync: bool = False
     adjustVmcnt: bool = True
+    # When True the emitter ignores wait_gr_counts and forces a full vmcnt(0)
+    # drain (all outstanding global reads must retire). wait_gr_counts is still
+    # populated with the precise per-tensor inflight estimate for diagnostics,
+    # and force_drain survives _merge_preops so the min-count merge cannot
+    # silently weaken the drain back to a partial vmcnt.
+    force_drain: bool = False
 
     def __post_init__(self):
         self.kind = 'wait_gr'
@@ -2090,15 +2096,26 @@ class LogicalScheduler:
                                         or wait_dep.ref.subIterK_slot != lr.subIterK_slot)
                             counts = self._compute_inflight_loads(
                                 pi, lr.subIterK_slot, wait_dep.ref.tensor, wait_dep)
-                            # StreamK wrap-LR race fix (multi-DU only): force
-                            # vmcnt(0) for cross-iter consumers.
+                            # StreamK wrap-LR race fix (multi-DU only): wrap /
+                            # cross-iter consumers read an LDS buffer across a
+                            # body-iteration / MT-prefetch boundary. Under
+                            # StreamK the number of global-read atoms between the
+                            # producing buffer_load and the consumer is
+                            # grid-dependent, so the static per-tensor inflight
+                            # `counts` can be too weak -> stale LDS -> verify
+                            # failures. For these wraps the minimal correct
+                            # static wait is a full vmcnt(0) drain. Flag the op
+                            # force_drain (rather than zeroing `counts`) so the
+                            # precise estimate survives for diagnostics and so the
+                            # _merge_preops min-count merge cannot silently weaken
+                            # the drain back to a partial vmcnt.
                             any_wrap = (lr.mtIteration > 0
                                         or any(d.mt_offset != 0 for d in gr_deps))
-                            if self.config.pgr == 1 and any_wrap:
-                                counts = WaitGRCounts()
+                            force_drain = (self.config.pgr == 1 and any_wrap)
                             lr.preOps.append(WaitGROp(wait_gr_counts=counts,
                                                       has_sync=True,
-                                                      adjustVmcnt=is_cross))
+                                                      adjustVmcnt=is_cross,
+                                                      force_drain=force_drain))
                         else:
                             cross_set = set(id(d) for d in cross)
                             is_cross = id(dep) in cross_set
@@ -2287,9 +2304,16 @@ class LogicalScheduler:
                         if getattr(op.wait_gr_counts, t) > 0]
                     setattr(merged_counts, t, min(vals) if vals else 0)
                 adjust = all(op.adjustVmcnt for op, _ in wait_gr_by_lr)
+            # A full drain is the strictest possible wait, so if any merged LR
+            # requested force_drain the merged op must also drain (otherwise the
+            # min-count merge above would silently weaken it back to a partial
+            # vmcnt and re-introduce the wrap-LR race).
+            merged_force_drain = any(
+                getattr(op, 'force_drain', False) for op, _ in wait_gr_by_lr)
             result.append(WaitGROp(wait_gr_counts=merged_counts,
                                    has_sync=has_wait_gr_sync,
-                                   adjustVmcnt=adjust))
+                                   adjustVmcnt=adjust,
+                                   force_drain=merged_force_drain))
         result.extend(others)
         return result
 
