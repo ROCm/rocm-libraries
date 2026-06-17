@@ -179,6 +179,7 @@ namespace std
 template <typename I, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
 inline void sort(execution::parallel_unsequenced_policy, I f, I l)
 {
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::sort(::thrust::device, f, l);
 }
 
@@ -195,6 +196,7 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
 inline void sort(execution::parallel_unsequenced_policy, I f, I l, R r)
 {
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::sort(::thrust::device, f, l, ::std::move(r));
 }
 
@@ -220,6 +222,7 @@ inline void sort(execution::parallel_unsequenced_policy, I f, I l, R r)
 template <typename I, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
 inline void stable_sort(execution::parallel_unsequenced_policy, I f, I l)
 {
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::stable_sort(::thrust::device, f, l);
 }
 
@@ -236,6 +239,7 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
 inline void stable_sort(execution::parallel_unsequenced_policy, I f, I l, R r)
 {
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::stable_sort(::thrust::device, f, l, ::std::move(r));
 }
 
@@ -284,6 +288,7 @@ template <
 inline void
 partial_sort(execution::parallel_unsequenced_policy, KeysIt first, KeysIt middle, KeysIt last, CompareOp compare_op)
 {
+  ::hipstd::warn_if_no_xnack();
   ::thrust::__partial_sort(::thrust::device, first, middle, last, compare_op);
 }
 
@@ -301,6 +306,7 @@ inline void partial_sort(execution::parallel_unsequenced_policy, KeysIt first, K
 template <typename KeysIt, enable_if_t<hipstd::is_offloadable_iterator<KeysIt>()>* = nullptr>
 inline void partial_sort(execution::parallel_unsequenced_policy policy, KeysIt first, KeysIt middle, KeysIt last)
 {
+  ::hipstd::warn_if_no_xnack();
   using item_type = typename thrust::iterator_value<KeysIt>::type;
   std::partial_sort(policy, first, middle, last, thrust::less<item_type>());
 }
@@ -346,6 +352,7 @@ inline void partial_sort_copy(
   RandomIt d_last,
   CompareOp compare_op)
 {
+  ::hipstd::warn_if_no_xnack();
   ::thrust::__partial_sort_copy(::thrust::device, first, last, d_first, d_last, compare_op);
 }
 
@@ -370,6 +377,7 @@ template <typename ForwardIt,
 inline void partial_sort_copy(
   execution::parallel_unsequenced_policy policy, ForwardIt first, ForwardIt last, RandomIt d_first, RandomIt d_last)
 {
+  ::hipstd::warn_if_no_xnack();
   using item_type = typename thrust::iterator_value<ForwardIt>::type;
   std::partial_sort_copy(policy, first, last, d_first, d_last, thrust::less<item_type>());
 }
@@ -379,6 +387,7 @@ inline void partial_sort_copy(
 template <typename I, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
 inline bool is_sorted(execution::parallel_unsequenced_policy, I f, I l)
 {
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::is_sorted(::thrust::device, f, l);
 }
 
@@ -395,6 +404,7 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
 inline bool is_sorted(execution::parallel_unsequenced_policy, I f, I l, R r)
 {
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::is_sorted(::thrust::device, f, l, ::std::move(r));
 }
 
@@ -420,6 +430,7 @@ inline bool is_sorted(execution::parallel_unsequenced_policy, I f, I l, R r)
 template <typename I, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
 inline I is_sorted_until(execution::parallel_unsequenced_policy, I f, I l)
 {
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::is_sorted_until(::thrust::device, f, l);
 }
 
@@ -436,6 +447,7 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
 inline I is_sorted_until(execution::parallel_unsequenced_policy, I f, I l, R r)
 {
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::is_sorted_until(::thrust::device, f, l, ::std::move(r));
 }
 
@@ -484,6 +496,7 @@ template <
 inline void
 nth_element(execution::parallel_unsequenced_policy, KeysIt first, KeysIt nth, KeysIt last, CompareOp compare_op)
 {
+  ::hipstd::warn_if_no_xnack();
   ::thrust::__nth_element(::thrust::device, first, nth, last, compare_op);
 }
 
@@ -501,6 +514,7 @@ inline void nth_element(execution::parallel_unsequenced_policy, KeysIt first, Ke
 template <typename KeysIt, enable_if_t<hipstd::is_offloadable_iterator<KeysIt>()>* = nullptr>
 inline void nth_element(execution::parallel_unsequenced_policy policy, KeysIt first, KeysIt nth, KeysIt last)
 {
+  ::hipstd::warn_if_no_xnack();
   using item_type = typename thrust::iterator_value<KeysIt>::type;
   std::nth_element(policy, first, nth, last, thrust::less<item_type>());
 }
