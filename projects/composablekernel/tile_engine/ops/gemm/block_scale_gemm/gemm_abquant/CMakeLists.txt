@@ -237,7 +237,9 @@ else()
         endforeach()
     endforeach()
 
-    # Create pipeline-specific collection targets
+    # Create pipeline-specific collection targets.
+    # Must stay in sync with trait_config.pipeline.values in the config JSONs:
+    # if a new pipeline is added there, add it here too or add_dependencies() will fail at build time.
     set(GEMM_ABQUANT_PIPELINES "compv3")
     foreach(pipeline IN LISTS GEMM_ABQUANT_PIPELINES)
         add_custom_target(benchmark_gemm_abquant_${pipeline}_pipeline)
@@ -252,7 +254,12 @@ else()
         if(_abq_n_combos GREATER 0)
             math(EXPR GEMM_ABQUANT_MAX_INSTANCES
                 "${GEMM_ABQUANT_MAX_INSTANCES} / ${_abq_n_combos}")
-            message(STATUS "  gemm_abquant: per-combo budget = ${GEMM_ABQUANT_MAX_INSTANCES} (${_abq_n_combos} combos)")
+            if(GEMM_ABQUANT_MAX_INSTANCES EQUAL 0)
+                set(GEMM_ABQUANT_MAX_INSTANCES 1)
+                message(WARNING "  gemm_abquant: per-combo budget rounded to 0; clamped to 1 (total budget too small for ${_abq_n_combos} combos)")
+            else()
+                message(STATUS "  gemm_abquant: per-combo budget = ${GEMM_ABQUANT_MAX_INSTANCES} (${_abq_n_combos} combos)")
+            endif()
         endif()
     endif()
 

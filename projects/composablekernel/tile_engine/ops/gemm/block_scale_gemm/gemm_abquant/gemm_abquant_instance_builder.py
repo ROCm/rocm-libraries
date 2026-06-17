@@ -80,6 +80,14 @@ class GemmABQuantKernelBuilder(GemmKernelBuilder):
         else:
             self.group_size_n_values = [group_size_n_cfg]
 
+    @staticmethod
+    def _tile_config_to_str(tile_config):
+        return (
+            f"{tile_config['tile_m']}x{tile_config['tile_n']}x{tile_config['tile_k']}_"
+            f"{tile_config['warp_m']}x{tile_config['warp_n']}x{tile_config['warp_k']}_"
+            f"{tile_config['warp_tile_m']}x{tile_config['warp_tile_n']}x{tile_config['warp_tile_k']}"
+        )
+
     def _apply_sampling(self, kernel_list):
         """Apply RFC Sobol+LHS+maximin sampling for ABQuant kernels.
 
@@ -207,7 +215,7 @@ class GemmABQuantKernelBuilder(GemmKernelBuilder):
                 pipeline,
                 epilogue,
                 scheduler,
-                None,
+                b_preshuffle,
                 self.kernel_name_prefix,
                 self.layout,
             ):
@@ -249,11 +257,7 @@ class GemmABQuantKernelBuilder(GemmKernelBuilder):
                         f"gsn{group_size_n}"
                     )
 
-                    # Create tile configuration string
-                    tile_str = f"{tile_config['tile_m']}x{tile_config['tile_n']}x{tile_config['tile_k']}_"
-                    tile_str += f"{tile_config['warp_m']}x{tile_config['warp_n']}x{tile_config['warp_k']}_"
-                    tile_str += f"{tile_config['warp_tile_m']}x{tile_config['warp_tile_n']}x{tile_config['warp_tile_k']}"
-
+                    tile_str = self._tile_config_to_str(tile_config)
                     kernel_name += f"_{tile_str}"
 
                     kernel_list.append(
@@ -283,9 +287,7 @@ class GemmABQuantKernelBuilder(GemmKernelBuilder):
                 trait_combo = kernel["trait_combo"]
                 group_size_n = kernel["group_size_n"]
 
-                tile_str = f"{tile_config['tile_m']}x{tile_config['tile_n']}x{tile_config['tile_k']}_"
-                tile_str += f"{tile_config['warp_m']}x{tile_config['warp_n']}x{tile_config['warp_k']}_"
-                tile_str += f"{tile_config['warp_tile_m']}x{tile_config['warp_tile_n']}x{tile_config['warp_tile_k']}"
+                tile_str = self._tile_config_to_str(tile_config)
 
                 trait_str = (
                     f"{trait_combo[0]}_{trait_combo[1]}_{trait_combo[2]}_"
@@ -328,15 +330,7 @@ class GemmABQuantKernelBuilder(GemmKernelBuilder):
             f"gsn{group_size_n}"
         )
 
-        # Create tile configuration string
-        tile_str = (
-            f"{tile_config['tile_m']}x{tile_config['tile_n']}x{tile_config['tile_k']}_"
-        )
-        tile_str += (
-            f"{tile_config['warp_m']}x{tile_config['warp_n']}x{tile_config['warp_k']}_"
-        )
-        tile_str += f"{tile_config['warp_tile_m']}x{tile_config['warp_tile_n']}x{tile_config['warp_tile_k']}"
-
+        tile_str = self._tile_config_to_str(tile_config)
         kernel_name += f"_{tile_str}"
 
         # Pipeline maps

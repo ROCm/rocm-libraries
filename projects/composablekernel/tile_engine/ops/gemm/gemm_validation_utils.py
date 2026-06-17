@@ -301,6 +301,9 @@ def is_trait_combination_valid(
         # abquant only supports compv3 + intrawave
         if pipeline != "compv3" or scheduler != "intrawave":
             return False
+        # BPreshuffleQuant requires ColumnMajor BLayout (second char of layout is 'c')
+        if persistent_or_preshuffle_quant is True and len(layout) >= 2 and layout[1] != "c":
+            return False
         return True
     else:
         return (pipeline, epilogue, scheduler) not in TRAIT_UNSUPPORTED_COMBINATIONS

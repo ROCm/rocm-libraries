@@ -168,8 +168,10 @@ auto calculate_rtol_atol_abquant(const ck_tile::index_t K,
                                  const ck_tile::index_t kbatch,
                                  const float max_accumulated_value)
 {
-    using ComputeType =
-        std::conditional_t<sizeof(ADataType_) < sizeof(BDataType_), ADataType_, BDataType_>;
+    // Both A and B are the same FP8/BF8 type for abquant; assert so mixed-precision additions are caught.
+    static_assert(sizeof(ADataType_) == sizeof(BDataType_),
+                  "calculate_rtol_atol_abquant assumes equal-width A and B types");
+    using ComputeType = ADataType_;
     const auto rtol = ck_tile::get_relative_threshold<ComputeType, CDataType_, AccDataType_>(
         ck_tile::integer_divide_ceil(K, kbatch));
     const auto atol = ck_tile::get_absolute_threshold<ComputeType, CDataType_, AccDataType_>(
@@ -185,8 +187,8 @@ auto calculate_rtol_atol_abquant(const ck_tile::index_t K,
 bool compare_abquant(std::string instanceName,
                      ck_tile::index_t K,
                      ck_tile::index_t kbatch,
-                     ck_tile::HostTensor<CDataType>& c_m_n_dev_result,
-                     ck_tile::HostTensor<CDataType>& c_m_n_host_result)
+                     const ck_tile::HostTensor<CDataType>& c_m_n_dev_result,
+                     const ck_tile::HostTensor<CDataType>& c_m_n_host_result)
 {
     const float max_accumulated_value =
         std::abs(static_cast<float>(*std::max_element(c_m_n_host_result.mData.begin(),

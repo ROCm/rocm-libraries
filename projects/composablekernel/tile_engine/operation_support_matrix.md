@@ -15,6 +15,7 @@
 | GEMM | gemm_quant | | ❌ | | ❌ | | | | ❌ | | | | ❌ | ❌ | ❌ | ❌ | |
 | GEMM | block_scale_gemm/gemm_aquant<br>engine: block_scale_gemm/gemm_aquant/<br>example: 38_block_scale_gemm/ | | ✅ | | ✅ | | | | ✅ | | | | ❌ | ✅ | ✅ | ❌ | 0.0769 |
 | GEMM | block_scale_gemm/gemm_bquant<br>engine: block_scale_gemm/gemm_bquant/<br>example: 38_block_scale_gemm/ | | ✅ | | ✅ | | | | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | 0.0769 |
+| GEMM | block_scale_gemm/gemm_abquant<br>engine: block_scale_gemm/gemm_abquant/<br>example: 38_block_scale_gemm/ | | ✅ | | ✅ | | | | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ❌ | 0.0625 |
 | GEMM | grouped_gemm [10]<br>engine: grouped_gemm/<br>example: 17_grouped_gemm/ | ✅ | ✅ | | | | | | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | 0.0834 |
 | GEMM | grouped_gemm_quant/grouped_gemm_rowcolquant<br>engine: grouped_gemm_quant/grouped_gemm_rowcolquant/ | | ✅ | | ✅ | | | | ✅ | | | | | ✅ | ✅ | ✅ | 0.0833 |
 | GEMM | grouped_gemm_quant/grouped_gemm_tensorquant<br>engine: grouped_gemm_quant/grouped_gemm_tensorquant/ | | ✅ | | ✅ | | | | ✅ | | | | | ✅ | ✅ | ✅ | 0.0833 |

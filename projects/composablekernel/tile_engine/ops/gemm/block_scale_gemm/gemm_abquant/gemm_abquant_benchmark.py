@@ -83,6 +83,15 @@ class ABQuantGemmBenchmark:
         config_info = self.parse_detailed_config(name)
         info.update(config_info)
 
+        # Warn on fields that failed to parse — silent "unknown"/zero values hide name format drift.
+        unknown_fields = [k for k in ("data_type", "layout", "pipeline", "scheduler", "epilogue")
+                          if info.get(k) == "unknown"]
+        if unknown_fields:
+            print(f"Warning: could not parse {unknown_fields} from kernel name: {name}")
+        tile_sizes = info.get("tile_sizes", {})
+        if any(v == 0 for v in tile_sizes.values()):
+            print(f"Warning: zero tile dimension parsed from kernel name: {name} -> {tile_sizes}")
+
         info["config_id"] = self.generate_config_id(info)
         return info
 
