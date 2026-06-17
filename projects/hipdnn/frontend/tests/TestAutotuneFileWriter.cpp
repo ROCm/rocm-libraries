@@ -145,6 +145,18 @@ TEST(TestAutotuneFileWriter, BuildOverrideEntryBasic)
     EXPECT_FALSE(entry["autotune_metadata"].contains("knobs")); // No knobs → field absent
 }
 
+TEST(TestAutotuneFileWriter, BuildOverrideEntryWithCriteria)
+{
+    auto result = makeResult(1, "MIOPEN_ENGINE");
+    const std::vector<std::vector<int64_t>> tensorDims = {{2, 4, 16, 16}};
+    const Criteria criteria = {{"pointwise_mode", 34}};
+
+    auto entry = buildOverrideEntry(result, "pointwise", tensorDims, {}, criteria);
+
+    ASSERT_TRUE(entry.contains("criteria"));
+    EXPECT_EQ(entry["criteria"]["pointwise_mode"], 34);
+}
+
 TEST(TestAutotuneFileWriter, BuildOverrideEntryWithKnobs)
 {
     auto result = makeResult(1, "MIOPEN_ENGINE");
@@ -351,6 +363,32 @@ TEST(TestAutotuneFileWriter, ReplaceEntriesWithDifferentKnobs)
 
     EXPECT_EQ(json["engine_overrides"].size(), 1u);
     EXPECT_EQ(json["engine_overrides"][0]["engine_name"], "HIPBLASLT_ENGINE");
+}
+
+TEST(TestAutotuneFileWriter, CriteriaDifferentiatesSameOperationAndTensors)
+{
+    const TempFile tmpFile;
+    const std::vector<std::vector<int64_t>> dims = {{2, 4, 16, 16}, {2, 4, 16, 16}};
+
+    std::vector<AutotuneResult> addResults;
+    addResults.push_back(makeResult(1, "ADD_ENGINE", 1.0f, true, 0));
+    auto err = writeAutotuneResults(
+        tmpFile.path.string(), "pointwise", addResults, false, dims, {}, {{"pointwise_mode", 2}});
+    ASSERT_TRUE(err.is_good()) << err.get_message();
+
+    std::vector<AutotuneResult> mulResults;
+    mulResults.push_back(makeResult(2, "MUL_ENGINE", 1.0f, true, 0));
+    err = writeAutotuneResults(
+        tmpFile.path.string(), "pointwise", mulResults, false, dims, {}, {{"pointwise_mode", 30}});
+    ASSERT_TRUE(err.is_good()) << err.get_message();
+
+    std::ifstream file(tmpFile.path);
+    auto json = nlohmann::json::parse(file);
+    ASSERT_EQ(json["engine_overrides"].size(), 2u);
+    EXPECT_EQ(json["engine_overrides"][0]["engine_name"], "ADD_ENGINE");
+    EXPECT_EQ(json["engine_overrides"][0]["criteria"]["pointwise_mode"], 2);
+    EXPECT_EQ(json["engine_overrides"][1]["engine_name"], "MUL_ENGINE");
+    EXPECT_EQ(json["engine_overrides"][1]["criteria"]["pointwise_mode"], 30);
 }
 
 TEST(TestAutotuneFileWriter, ReplaceOnlyExactOperationAndTensorSignature)

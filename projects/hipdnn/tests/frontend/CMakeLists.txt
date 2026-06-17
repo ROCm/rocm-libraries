@@ -67,6 +67,7 @@ add_executable(
     IntegrationAutotuneEndToEnd.cpp
     IntegrationAutotuneExhaustive.cpp
     IntegrationAutotunePersistence.cpp
+    IntegrationAutotuneConfigRoundTrip.cpp
     IntegrationSetPluginPathsExt.cpp
     # cuDNN-compatibility shim integration coverage (ALMIOPEN-2034); only built
     # when the shim is enabled.

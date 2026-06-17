@@ -206,6 +206,54 @@ std::vector<uint8_t> buildConvWrwGraphBuffer(const std::vector<int64_t>& xDims,
     return {data, data + builder.GetSize()};
 }
 
+std::vector<uint8_t> buildPointwiseBinaryGraphBuffer(fb::PointwiseMode mode)
+{
+    flatbuffers::FlatBufferBuilder builder;
+
+    constexpr int64_t X_UID = 1;
+    constexpr int64_t Y_UID = 2;
+    constexpr int64_t OUT_UID = 3;
+    const std::vector<int64_t> dims{1, 3, 4, 4};
+    const std::vector<int64_t> strides{48, 16, 4, 1};
+
+    const std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
+        fb::CreateTensorAttributesDirect(builder, X_UID, "x", fb::DataType::FLOAT, &strides, &dims),
+        fb::CreateTensorAttributesDirect(builder, Y_UID, "y", fb::DataType::FLOAT, &strides, &dims),
+        fb::CreateTensorAttributesDirect(
+            builder, OUT_UID, "out", fb::DataType::FLOAT, nullptr, nullptr),
+    };
+
+    auto pointwiseAttrs = fb::CreatePointwiseAttributes(builder,
+                                                        mode,
+                                                        ::flatbuffers::nullopt,
+                                                        ::flatbuffers::nullopt,
+                                                        ::flatbuffers::nullopt,
+                                                        ::flatbuffers::nullopt,
+                                                        X_UID,
+                                                        Y_UID,
+                                                        ::flatbuffers::nullopt,
+                                                        OUT_UID);
+
+    const std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "pointwise",
+                             fb::DataType::FLOAT,
+                             fb::NodeAttributes::PointwiseAttributes,
+                             pointwiseAttrs.Union())};
+
+    auto graphOffset = fb::CreateGraphDirect(builder,
+                                             nullptr,
+                                             fb::DataType::UNSET,
+                                             fb::DataType::UNSET,
+                                             fb::DataType::UNSET,
+                                             &tensors,
+                                             &nodes,
+                                             ::flatbuffers::nullopt);
+    fb::FinishGraphBuffer(builder, graphOffset);
+    const auto* data = builder.GetBufferPointer();
+    return {data, data + builder.GetSize()};
+}
+
 /// RAII temp directory + JSON file. Returns a path that can be assigned to
 /// HIPDNN_HEUR_CONFIG_PATH; the directory is removed on destruction.
 class TempJsonOverrideFile
@@ -637,6 +685,37 @@ TEST_F(TestConfigBuiltIn, FinalizeMatchedRuleMovesEngineToFrontWrwNode)
     const auto sorted = _plugin->getSortedEngineIds(_desc);
     ASSERT_EQ(sorted.size(), 3u);
     EXPECT_EQ(sorted[0], MIOPEN_DETERMINISTIC_ID);
+}
+
+TEST_F(TestConfigBuiltIn, FinalizePointwiseCriteriaPreventsModeOvermatch)
+{
+    constexpr const char* JSON = R"({
+      "engine_overrides": [
+        {
+          "op": "pointwise",
+          "criteria": { "pointwise_mode": 2 },
+          "engine_name": "MIOPEN_ENGINE_DETERMINISTIC",
+          "tensors": [
+            { "dim": [1, 3, 4, 4] },
+            { "dim": [1, 3, 4, 4] }
+          ]
+        }
+      ]
+    })";
+    const TempJsonOverrideFile json(JSON);
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(OVERRIDE_ENV,
+                                                                          json.path());
+
+    setEngineIds({MIOPEN_ENGINE_ID, MIOPEN_DETERMINISTIC_ID});
+    setSerializedGraph(buildPointwiseBinaryGraphBuffer(fb::PointwiseMode::ADD));
+    ASSERT_TRUE(_plugin->finalize(_desc));
+    auto sorted = _plugin->getSortedEngineIds(_desc);
+    ASSERT_FALSE(sorted.empty());
+    EXPECT_EQ(sorted.front(), MIOPEN_DETERMINISTIC_ID);
+
+    setEngineIds({MIOPEN_ENGINE_ID, MIOPEN_DETERMINISTIC_ID});
+    setSerializedGraph(buildPointwiseBinaryGraphBuffer(fb::PointwiseMode::MUL));
+    EXPECT_FALSE(_plugin->finalize(_desc));
 }
 
 // ========== Logging callback / getLastErrorString ABI shape ==========

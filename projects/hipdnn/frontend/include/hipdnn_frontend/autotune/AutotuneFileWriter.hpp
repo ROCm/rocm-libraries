@@ -39,6 +39,26 @@ namespace hipdnn_frontend
 {
 namespace autotune
 {
+using Criteria = std::vector<std::pair<std::string, int64_t>>;
+
+inline nlohmann::json criteriaToJson(const Criteria& criteria)
+{
+    nlohmann::json result = nlohmann::json::object();
+    for(const auto& [key, value] : criteria)
+    {
+        result[key] = value;
+    }
+    return result;
+}
+
+inline nlohmann::json criteriaOrEmpty(const nlohmann::json& entry)
+{
+    if(entry.contains("criteria") && entry["criteria"].is_object())
+    {
+        return entry["criteria"];
+    }
+    return nlohmann::json::object();
+}
 
 /// Get the lowercase string representation of an AutotuneStrategy (for config file output)
 inline std::string strategyToLowerString(AutotuneStrategy strategy)
@@ -80,10 +100,15 @@ inline std::string tuneModeToLowerString(TuneMode mode)
 inline nlohmann::json buildOverrideEntry(const AutotuneResult& result,
                                          const std::string& opName,
                                          const std::vector<std::vector<int64_t>>& tensorDims,
-                                         const std::vector<std::vector<int64_t>>& tensorStrides)
+                                         const std::vector<std::vector<int64_t>>& tensorStrides,
+                                         const Criteria& criteria = {})
 {
     nlohmann::json entry;
     entry["op"] = opName;
+    if(!criteria.empty())
+    {
+        entry["criteria"] = criteriaToJson(criteria);
+    }
     entry["engine_name"] = result.engineName;
 
     // Tensor patterns (dimensions and strides)
@@ -182,7 +207,8 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
                                   const std::vector<AutotuneResult>& results,
                                   bool deleteAllExisting,
                                   const std::vector<std::vector<int64_t>>& tensorDims,
-                                  const std::vector<std::vector<int64_t>>& tensorStrides)
+                                  const std::vector<std::vector<int64_t>>& tensorStrides,
+                                  const Criteria& criteria = {})
 {
     try
     {
@@ -231,7 +257,7 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
                 continue;
             }
 
-            newEntry = buildOverrideEntry(result, opName, tensorDims, tensorStrides);
+            newEntry = buildOverrideEntry(result, opName, tensorDims, tensorStrides, criteria);
             break; // Only write the rank-0 winner
         }
 
@@ -255,6 +281,8 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
                                            [&](const nlohmann::json& existing) {
                                                return existing.contains("op")
                                                       && existing["op"] == (*newEntry)["op"]
+                                                      && criteriaOrEmpty(existing)
+                                                             == criteriaOrEmpty(*newEntry)
                                                       && existing.contains("tensors")
                                                       && existing["tensors"]
                                                              == (*newEntry)["tensors"];

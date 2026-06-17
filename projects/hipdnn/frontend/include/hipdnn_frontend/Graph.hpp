@@ -71,6 +71,7 @@
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
@@ -4305,27 +4306,14 @@ private:
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
         if(!storageConfig.filePath.empty())
         {
-            // An op unsupported for config round-trip yields an empty match key (no
-            // op-aware branch in detail::getMatchKeyTensors). Such an op cannot round-trip
-            // (the reader never matches a tensor-less entry), so skip writing an entry for
-            // it and warn that the autotune result was not persisted, naming the op.
-            auto allTensors = detail::getMatchKeyTensors(*this);
-            if(allTensors.empty())
+            const auto matchKey = detail::getAutotuneConfigMatchKey(_sub_nodes);
+            if(matchKey.has_value())
             {
-                HIPDNN_FE_LOG_WARN("autotune: op '"
-                                   << detail::getCoreOperationName(*this)
-                                   << "' is not supported for config round-trip; its autotune"
-                                      " result was not written to the config file "
-                                   << storageConfig.filePath);
-            }
-            else
-            {
-                // Collect tensor dimensions and strides from the graph's input/output tensors
                 std::vector<std::vector<int64_t>> tensorDims;
                 std::vector<std::vector<int64_t>> tensorStrides;
-                tensorDims.reserve(allTensors.size());
-                tensorStrides.reserve(allTensors.size());
-                for(const auto& tensor : allTensors)
+                tensorDims.reserve(matchKey->tensors.size());
+                tensorStrides.reserve(matchKey->tensors.size());
+                for(const auto& tensor : matchKey->tensors)
                 {
                     tensorDims.push_back(tensor->get_dim());
                     tensorStrides.push_back(tensor->get_stride());
@@ -4333,16 +4321,22 @@ private:
 
                 auto writeErr
                     = autotune::writeAutotuneResults(storageConfig.filePath,
-                                                     detail::getCoreOperationName(*this),
+                                                     matchKey->opName,
                                                      allResults,
                                                      storageConfig.deleteAllExistingFileContent,
                                                      tensorDims,
-                                                     tensorStrides);
+                                                     tensorStrides,
+                                                     matchKey->criteria);
                 if(writeErr.is_bad())
                 {
                     HIPDNN_FE_LOG_WARN("autotune: failed to write results to "
                                        << storageConfig.filePath << ": " << writeErr.get_message());
                 }
+            }
+            else
+            {
+                HIPDNN_FE_LOG_WARN("autotune: no supported config match key for graph "
+                                   << graph_attributes.get_name() << "; skipping config write");
             }
         }
 #else

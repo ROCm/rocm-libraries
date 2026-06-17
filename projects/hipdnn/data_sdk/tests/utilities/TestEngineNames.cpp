@@ -151,6 +151,38 @@ TEST_F(TestEngineNames, EnsureAllEngineNameToIdsBehaveTheSame)
     }
 }
 
+TEST_F(TestEngineNames, EngineNameOrIdParsesRegisteredName)
+{
+    EXPECT_EQ(engineNameOrIdToId(MIOPEN_ENGINE_NAME), MIOPEN_ENGINE_ID);
+}
+
+TEST_F(TestEngineNames, EngineNameOrIdPrefersRegisteredNumericName)
+{
+    [[maybe_unused]] static const EngineRegistrar s_numericEngine("8675309");
+
+    EXPECT_TRUE(isEngineNameRegistered("8675309"));
+    EXPECT_EQ(engineNameOrIdToId("8675309"), engineNameToId("8675309"));
+    EXPECT_NE(engineNameOrIdToId("8675309"), 8675309);
+}
+
+TEST_F(TestEngineNames, EngineNameOrIdParsesDecimalId)
+{
+    EXPECT_EQ(engineNameOrIdToId("12345"), 12345);
+    EXPECT_EQ(engineNameOrIdToId("-18"), -18);
+}
+
+TEST_F(TestEngineNames, EngineNameOrIdParsesHexId)
+{
+    EXPECT_EQ(engineNameOrIdToId("0x0000000000003039"), 12345);
+    EXPECT_EQ(engineNameOrIdToId("0xffffffffffffffee"), -18);
+}
+
+TEST_F(TestEngineNames, EngineNameOrIdTreatsLeadingWhitespaceAsName)
+{
+    EXPECT_EQ(engineNameOrIdToId(" 12345"), engineNameToId(" 12345"));
+    EXPECT_NE(engineNameOrIdToId(" 12345"), 12345);
+}
+
 TEST_F(TestEngineNames, MacroSingleArgGeneratesCorrectName)
 {
     // Single-argument form: _NAME should be the stringified identifier

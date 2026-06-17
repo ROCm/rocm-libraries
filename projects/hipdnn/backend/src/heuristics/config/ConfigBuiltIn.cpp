@@ -6,9 +6,9 @@
  * @brief Backend-internal implementation of the
  *        SelectionHeuristic::Config policy.
  *
- * The policy reads HIPDNN_HEUR_CONFIG_PATH (a JSON file mapping
- * conv-shape patterns to engine names via EngineOverrideConfig), walks
- * conv-like nodes in the serialized graph, and on the first matching rule
+ * The policy reads HIPDNN_HEUR_CONFIG_PATH (a JSON file mapping operation
+ * match criteria to engine names via EngineOverrideConfig), walks supported
+ * primary nodes in the serialized graph, and on the first matching rule
  * reorders the candidate engine IDs so the chosen engine is first. When the
  * env var is unset, the file is missing/invalid, no rule matches, or the
  * matched engine is not among the candidates, the policy declines so the
@@ -39,7 +39,10 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <optional>
+#include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace hipdnn_backend::heuristics::config
@@ -115,6 +118,14 @@ std::unordered_map<int64_t, TensorDimsStrides> indexTensorsByUid(const Graph* gr
     return out;
 }
 
+struct BackendAutotuneConfigMatchKey
+{
+    std::string op;
+    std::vector<Criterion> criteria;
+    std::vector<TensorView> tensors;
+    int priority = 0;
+};
+
 std::optional<int64_t>
     matchOverrideConfig(const EngineOverrideConfig& config,
                         const Graph* graph,
@@ -131,67 +142,290 @@ std::optional<int64_t>
         return it == tensorIndex.end() ? nullptr : &it->second;
     };
 
-    auto buildView = [&](const TensorDimsStrides* t) { return TensorView{&t->dims, &t->strides}; };
+    auto appendUid = [&](BackendAutotuneConfigMatchKey& key, int64_t uid) {
+        const auto* tensor = viewFor(uid);
+        if(tensor == nullptr)
+        {
+            return false;
+        }
+        key.tensors.push_back(TensorView{&tensor->dims, &tensor->strides});
+        return true;
+    };
 
+    auto appendOptionalUid
+        = [&](BackendAutotuneConfigMatchKey& key, const std::optional<int64_t>& uid) {
+              if(!uid.has_value())
+              {
+                  return true;
+              }
+              return appendUid(key, *uid);
+          };
+
+    auto appendUidVector
+        = [&](BackendAutotuneConfigMatchKey& key, const flatbuffers::Vector<int64_t>* uids) {
+              if(uids == nullptr)
+              {
+                  return true;
+              }
+              for(const int64_t uid : *uids)
+              {
+                  if(!appendUid(key, uid))
+                  {
+                      return false;
+                  }
+              }
+              return true;
+          };
+
+    auto makeKey = [](std::string op, int priority) {
+        BackendAutotuneConfigMatchKey key;
+        key.op = std::move(op);
+        key.priority = priority;
+        return key;
+    };
+
+    auto buildKeyForNode = [&](const auto* node) -> std::optional<BackendAutotuneConfigMatchKey> {
+        if(const auto* fwd = node->attributes_as_ConvolutionFwdAttributes())
+        {
+            auto key = makeKey("conv_fprop", 70);
+            if(!appendUid(key, fwd->x_tensor_uid()) || !appendUid(key, fwd->w_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* bwd = node->attributes_as_ConvolutionBwdAttributes())
+        {
+            auto key = makeKey("conv_dgrad", 70);
+            if(!appendUid(key, bwd->dy_tensor_uid()) || !appendUid(key, bwd->w_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* wrw = node->attributes_as_ConvolutionWrwAttributes())
+        {
+            auto key = makeKey("conv_wgrad", 70);
+            if(!appendUid(key, wrw->x_tensor_uid()) || !appendUid(key, wrw->dy_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* sdpa = node->attributes_as_SdpaAttributes())
+        {
+            auto key = makeKey("sdpa_fwd", 60);
+            if(!appendUid(key, sdpa->q_tensor_uid()) || !appendUid(key, sdpa->k_tensor_uid())
+               || !appendUid(key, sdpa->v_tensor_uid())
+               || !appendOptionalUid(key, sdpa->scale_tensor_uid())
+               || !appendOptionalUid(key, sdpa->attn_mask_tensor_uid())
+               || !appendOptionalUid(key, sdpa->seq_len_q_tensor_uid())
+               || !appendOptionalUid(key, sdpa->seq_len_kv_tensor_uid())
+               || !appendOptionalUid(key, sdpa->seed_tensor_uid())
+               || !appendOptionalUid(key, sdpa->offset_tensor_uid())
+               || !appendOptionalUid(key, sdpa->dropout_mask_tensor_uid())
+               || !appendOptionalUid(key, sdpa->dropout_scale_tensor_uid())
+               || !appendOptionalUid(key, sdpa->page_table_k_tensor_uid())
+               || !appendOptionalUid(key, sdpa->page_table_v_tensor_uid())
+               || !appendOptionalUid(key, sdpa->block_mask_tensor_uid())
+               || !appendOptionalUid(key, sdpa->sink_token_tensor_uid())
+               || !appendOptionalUid(key, sdpa->descale_q_tensor_uid())
+               || !appendOptionalUid(key, sdpa->descale_k_tensor_uid())
+               || !appendOptionalUid(key, sdpa->descale_v_tensor_uid())
+               || !appendOptionalUid(key, sdpa->descale_s_tensor_uid())
+               || !appendOptionalUid(key, sdpa->scale_s_tensor_uid())
+               || !appendOptionalUid(key, sdpa->scale_o_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* sdpa = node->attributes_as_SdpaBackwardAttributes())
+        {
+            auto key = makeKey("sdpa_bwd", 60);
+            if(!appendUid(key, sdpa->q_tensor_uid()) || !appendUid(key, sdpa->k_tensor_uid())
+               || !appendUid(key, sdpa->v_tensor_uid()) || !appendUid(key, sdpa->o_tensor_uid())
+               || !appendUid(key, sdpa->do_tensor_uid())
+               || !appendUid(key, sdpa->stats_tensor_uid())
+               || !appendOptionalUid(key, sdpa->scale_tensor_uid())
+               || !appendOptionalUid(key, sdpa->attn_mask_tensor_uid())
+               || !appendOptionalUid(key, sdpa->seq_len_q_tensor_uid())
+               || !appendOptionalUid(key, sdpa->seq_len_kv_tensor_uid())
+               || !appendOptionalUid(key, sdpa->seed_tensor_uid())
+               || !appendOptionalUid(key, sdpa->offset_tensor_uid())
+               || !appendOptionalUid(key, sdpa->dropout_mask_tensor_uid())
+               || !appendOptionalUid(key, sdpa->dropout_scale_tensor_uid())
+               || !appendOptionalUid(key, sdpa->dropout_scale_inv_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* matmul = node->attributes_as_MatmulAttributes())
+        {
+            auto key = makeKey("matmul", 50);
+            if(!appendUid(key, matmul->a_tensor_uid()) || !appendUid(key, matmul->b_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* batchnorm = node->attributes_as_BatchnormAttributes())
+        {
+            auto key = makeKey("batchnorm_training", 40);
+            if(!appendUid(key, batchnorm->x_tensor_uid())
+               || !appendUid(key, batchnorm->scale_tensor_uid())
+               || !appendUid(key, batchnorm->bias_tensor_uid())
+               || !appendUid(key, batchnorm->epsilon_tensor_uid())
+               || !appendUidVector(key, batchnorm->peer_stats_tensor_uid())
+               || !appendOptionalUid(key, batchnorm->prev_running_mean_tensor_uid())
+               || !appendOptionalUid(key, batchnorm->prev_running_variance_tensor_uid())
+               || !appendOptionalUid(key, batchnorm->momentum_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* batchnorm = node->attributes_as_BatchnormInferenceAttributes())
+        {
+            auto key = makeKey("batchnorm_inference", 40);
+            if(!appendUid(key, batchnorm->x_tensor_uid())
+               || !appendUid(key, batchnorm->mean_tensor_uid())
+               || !appendUid(key, batchnorm->inv_variance_tensor_uid())
+               || !appendUid(key, batchnorm->scale_tensor_uid())
+               || !appendUid(key, batchnorm->bias_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* batchnorm = node->attributes_as_BatchnormInferenceAttributesVarianceExt())
+        {
+            auto key = makeKey("batchnorm_inference_variance_ext", 40);
+            if(!appendUid(key, batchnorm->x_tensor_uid())
+               || !appendUid(key, batchnorm->mean_tensor_uid())
+               || !appendUid(key, batchnorm->variance_tensor_uid())
+               || !appendUid(key, batchnorm->scale_tensor_uid())
+               || !appendUid(key, batchnorm->bias_tensor_uid())
+               || !appendUid(key, batchnorm->epsilon_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* batchnorm = node->attributes_as_BatchnormBackwardAttributes())
+        {
+            auto key = makeKey("batchnorm_backward", 40);
+            if(!appendUid(key, batchnorm->dy_tensor_uid())
+               || !appendUid(key, batchnorm->x_tensor_uid())
+               || !appendUid(key, batchnorm->scale_tensor_uid())
+               || !appendOptionalUid(key, batchnorm->mean_tensor_uid())
+               || !appendOptionalUid(key, batchnorm->inv_variance_tensor_uid())
+               || !appendUidVector(key, batchnorm->peer_stats_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* layernorm = node->attributes_as_LayernormAttributes())
+        {
+            auto key = makeKey("layernorm", 30);
+            key.criteria.push_back(
+                Criterion{"norm_fwd_phase", static_cast<int64_t>(layernorm->forward_phase())});
+            if(!appendUid(key, layernorm->x_tensor_uid())
+               || !appendUid(key, layernorm->scale_tensor_uid())
+               || !appendUid(key, layernorm->bias_tensor_uid())
+               || !appendUid(key, layernorm->epsilon_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* rmsnorm = node->attributes_as_RMSNormAttributes())
+        {
+            auto key = makeKey("rmsnorm", 30);
+            key.criteria.push_back(
+                Criterion{"norm_fwd_phase", static_cast<int64_t>(rmsnorm->forward_phase())});
+            if(!appendUid(key, rmsnorm->x_tensor_uid())
+               || !appendUid(key, rmsnorm->scale_tensor_uid())
+               || !appendUid(key, rmsnorm->epsilon_tensor_uid())
+               || !appendOptionalUid(key, rmsnorm->bias_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* rmsnorm = node->attributes_as_RMSNormBackwardAttributes())
+        {
+            auto key = makeKey("rmsnorm_backward", 30);
+            if(!appendUid(key, rmsnorm->dy_tensor_uid()) || !appendUid(key, rmsnorm->x_tensor_uid())
+               || !appendUid(key, rmsnorm->scale_tensor_uid())
+               || !appendUid(key, rmsnorm->inv_rms_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* reduction = node->attributes_as_ReductionAttributes())
+        {
+            auto key = makeKey("reduction", 20);
+            key.criteria.push_back(
+                Criterion{"reduction_mode", static_cast<int64_t>(reduction->mode())});
+            if(!appendUid(key, reduction->in_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* resample = node->attributes_as_ResampleFwdAttributes())
+        {
+            auto key = makeKey("resample_fwd", 20);
+            key.criteria.push_back(
+                Criterion{"resample_mode", static_cast<int64_t>(resample->resample_mode())});
+            key.criteria.push_back(
+                Criterion{"padding_mode", static_cast<int64_t>(resample->padding_mode())});
+            if(!appendUid(key, resample->x_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* pointwise = node->attributes_as_PointwiseAttributes())
+        {
+            auto key = makeKey("pointwise", 10);
+            key.criteria.push_back(
+                Criterion{"pointwise_mode", static_cast<int64_t>(pointwise->operation())});
+            if(!appendUid(key, pointwise->in_0_tensor_uid())
+               || !appendOptionalUid(key, pointwise->in_1_tensor_uid())
+               || !appendOptionalUid(key, pointwise->in_2_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        return std::nullopt;
+    };
+
+    std::optional<BackendAutotuneConfigMatchKey> bestKey;
     for(const auto* node : *nodes)
     {
         if(node == nullptr)
         {
             continue;
         }
-
-        const char* op = nullptr;
-        std::vector<const TensorDimsStrides*> opTensors;
-
-        // CANONICAL-TENSOR-ORDER: the per-op tensor order supplied here is the
-        // op's flatbuffer `*_attributes.fbs` INPUT-field declaration order with
-        // the output field(s) dropped; the comparison is POSITIONAL (the views
-        // below are matched index-by-index against the config rule). This MUST
-        // stay in lockstep with the frontend writer/selector that produces these
-        // tensors: `hipdnn_frontend::detail::getMatchKeyTensors` in
-        // `frontend/include/hipdnn_frontend/detail/GraphMatchKey.hpp`. Any change
-        // to a per-op set/order here MUST be mirrored there and vice versa.
-        // Convolution (output excluded, 2 inputs each): conv_fprop → (x, w);
-        // conv_dgrad → (dy, w); conv_wgrad → (x, dy).
-        if(const auto* fwd = node->attributes_as_ConvolutionFwdAttributes())
+        auto candidate = buildKeyForNode(node);
+        if(candidate.has_value()
+           && (!bestKey.has_value() || candidate->priority > bestKey->priority))
         {
-            op = "conv_fprop";
-            opTensors = {viewFor(fwd->x_tensor_uid()), viewFor(fwd->w_tensor_uid())};
-        }
-        else if(const auto* bwd = node->attributes_as_ConvolutionBwdAttributes())
-        {
-            op = "conv_dgrad";
-            opTensors = {viewFor(bwd->dy_tensor_uid()), viewFor(bwd->w_tensor_uid())};
-        }
-        else if(const auto* wrw = node->attributes_as_ConvolutionWrwAttributes())
-        {
-            op = "conv_wgrad";
-            opTensors = {viewFor(wrw->x_tensor_uid()), viewFor(wrw->dy_tensor_uid())};
-        }
-
-        if(op == nullptr || opTensors.empty() || opTensors[0] == nullptr)
-        {
-            continue;
-        }
-
-        // Build the positional view vector from every required tensor that
-        // resolved; a null trailing tensor is dropped (matching prior behavior).
-        std::vector<TensorView> views;
-        views.reserve(opTensors.size());
-        for(const auto* t : opTensors)
-        {
-            if(t != nullptr)
-            {
-                views.push_back(buildView(t));
-            }
-        }
-        auto match = config.matchOperation(op, views);
-        if(match.has_value())
-        {
-            return match;
+            bestKey = std::move(candidate);
         }
     }
-    return std::nullopt;
+    if(!bestKey.has_value())
+    {
+        return std::nullopt;
+    }
+
+    return config.matchOperation(bestKey->op, bestKey->criteria, bestKey->tensors);
 }
 
 /// Validate the buffer and return the typed Graph root, or nullptr on failure.
@@ -521,8 +755,9 @@ hipdnnPluginStatus_t policyFinalize(hipdnnHeuristicPolicyDescriptor_t desc, int3
             = matchOverrideConfig(*config, graph, indexTensorsByUid(graph));
         if(!preferredEngineId.has_value())
         {
-            CONFIG_BUILTIN_LOG(HIPDNN_SEV_INFO,
-                               "policyFinalize: no rule matched any conv node; declining");
+            CONFIG_BUILTIN_LOG(
+                HIPDNN_SEV_INFO,
+                "policyFinalize: no rule matched any supported primary node; declining");
             return HIPDNN_PLUGIN_STATUS_SUCCESS;
         }
 

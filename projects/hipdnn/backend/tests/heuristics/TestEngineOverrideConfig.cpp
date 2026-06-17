@@ -187,6 +187,69 @@ TEST(TestEngineOverrideConfig, WrongOpNameReturnsNullopt)
     EXPECT_FALSE(config.matchOperation("matmul", viewsOf(tensors)).has_value());
 }
 
+TEST(TestEngineOverrideConfig, CriteriaMustMatch)
+{
+    OperationRule rule;
+    rule.op = "pointwise";
+    rule.engineName = MIOPEN_ENGINE_NAME;
+    rule.criteria = {Criterion{"pointwise_mode", 2}};
+    rule.tensors = {makePattern({2, 4, 16, 16}), makePattern({2, 4, 16, 16})};
+
+    const auto config = makeConfig({std::move(rule)});
+    const std::vector<TensorData> tensors = {{{2, 4, 16, 16}, {}}, {{2, 4, 16, 16}, {}}};
+
+    auto result
+        = config.matchOperation("pointwise", {Criterion{"pointwise_mode", 2}}, viewsOf(tensors));
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, MIOPEN_ENGINE_ID);
+
+    EXPECT_FALSE(
+        config.matchOperation("pointwise", {Criterion{"pointwise_mode", 34}}, viewsOf(tensors))
+            .has_value());
+}
+
+TEST(TestEngineOverrideConfig, MissingCriteriaDoesNotMatchSpecificRule)
+{
+    OperationRule rule;
+    rule.op = "pointwise";
+    rule.engineName = MIOPEN_ENGINE_NAME;
+    rule.criteria = {Criterion{"pointwise_mode", 2}};
+    rule.tensors = {makePattern({2, 4, 16, 16})};
+
+    const auto config = makeConfig({std::move(rule)});
+    const std::vector<TensorData> tensors = {{{2, 4, 16, 16}, {}}};
+
+    EXPECT_FALSE(config.matchOperation("pointwise", viewsOf(tensors)).has_value());
+}
+
+TEST(TestEngineOverrideConfig, SameShapeDifferentCriteriaSelectsDifferentEngines)
+{
+    OperationRule addRule;
+    addRule.op = "pointwise";
+    addRule.engineName = MIOPEN_ENGINE_NAME;
+    addRule.criteria = {Criterion{"pointwise_mode", 2}};
+    addRule.tensors = {makePattern({2, 4, 16, 16}), makePattern({2, 4, 16, 16})};
+
+    OperationRule mulRule;
+    mulRule.op = "pointwise";
+    mulRule.engineName = HIPBLASLT_ENGINE_NAME;
+    mulRule.criteria = {Criterion{"pointwise_mode", 30}};
+    mulRule.tensors = {makePattern({2, 4, 16, 16}), makePattern({2, 4, 16, 16})};
+
+    const auto config = makeConfig({std::move(addRule), std::move(mulRule)});
+    const std::vector<TensorData> tensors = {{{2, 4, 16, 16}, {}}, {{2, 4, 16, 16}, {}}};
+
+    auto addResult
+        = config.matchOperation("pointwise", {Criterion{"pointwise_mode", 2}}, viewsOf(tensors));
+    ASSERT_TRUE(addResult.has_value());
+    EXPECT_EQ(*addResult, MIOPEN_ENGINE_ID);
+
+    auto mulResult
+        = config.matchOperation("pointwise", {Criterion{"pointwise_mode", 30}}, viewsOf(tensors));
+    ASSERT_TRUE(mulResult.has_value());
+    EXPECT_EQ(*mulResult, HIPBLASLT_ENGINE_ID);
+}
+
 // ── Test 7: wrong tensor count in rule → nullopt ────────────────────────────
 
 TEST(TestEngineOverrideConfig, WrongTensorCountReturnsNullopt)
@@ -348,6 +411,35 @@ TEST(TestEngineOverrideConfig, LoadFromValidJsonFile)
     auto r2 = config->matchOperation("conv_fprop", viewsOf(other));
     ASSERT_TRUE(r2.has_value());
     EXPECT_EQ(*r2, HIP_MLOPS_ENGINE_ID);
+}
+
+TEST(TestEngineOverrideConfig, LoadFromJsonParsesCriteria)
+{
+    constexpr const char* CONTENTS = R"({
+  "engine_overrides": [
+    {
+      "op": "pointwise",
+      "criteria": { "pointwise_mode": 2 },
+      "engine_name": "MIOPEN_ENGINE",
+      "tensors": [
+        { "dim": [2, 4, 16, 16] },
+        { "dim": [2, 4, 16, 16] }
+      ]
+    }
+  ]
+})";
+
+    auto config = EngineOverrideConfig::loadFromContent(CONTENTS);
+    ASSERT_TRUE(config.has_value());
+
+    const std::vector<TensorData> tensors = {{{2, 4, 16, 16}, {}}, {{2, 4, 16, 16}, {}}};
+    auto result
+        = config->matchOperation("pointwise", {Criterion{"pointwise_mode", 2}}, viewsOf(tensors));
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, MIOPEN_ENGINE_ID);
+    EXPECT_FALSE(
+        config->matchOperation("pointwise", {Criterion{"pointwise_mode", 34}}, viewsOf(tensors))
+            .has_value());
 }
 
 TEST(TestEngineOverrideConfig, LoadFromMissingFileReturnsNullopt)
