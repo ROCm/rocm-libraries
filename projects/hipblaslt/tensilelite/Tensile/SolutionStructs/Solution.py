@@ -949,7 +949,11 @@ class Solution(collections.abc.Mapping):
     state["Multicast"] = False
     state["ClusterBarrier"] = False
     if state["ClusterDim"] != [1, 1]:
-      state["Multicast"] = True
+      # Subtile supports the cluster barrier/signal handshake but not the
+      # multicast TDM data path, so keep Multicast off there while still
+      # enabling the cluster barrier.
+      if not state["UseSubtileImpl"]:
+        state["Multicast"] = True
       # ClusterBarrier emits SCmp/branch on sgpr("WaveIdx"), which is only allocated when TDM is enabled.
       if state["TDMInst"] != 0 and isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
         state["ClusterBarrier"] = True
@@ -3812,6 +3816,18 @@ class Solution(collections.abc.Mapping):
               if depthUB < state["MatrixInstK"] * SwizzlePackK * state["LocalSplitU"]:
                 validDepthU = False
                 extraComment = ": DepthU(%u) < Min-DU for swizzleB + LSU(%u)"%(depthUB, state["LocalSplitU"])
+
+          # TDM pad_interval (padIntervalBytes = DepthU * bpeGR) max allowed value is
+          # 1024 bytes (256 DWORDs).
+          if state["UseSubtileImpl"]:
+            for tc in ["A", "B"]:
+              if not state["enableTDM%s" % tc]:
+                continue
+              padIntervalBytes = depthU * state["ProblemType"]["DataType%s" % tc].numBytes()
+              if padIntervalBytes > 1024:
+                validDepthU = False
+                extraComment = ": DepthU(%u)*bpeGR%s = %u exceeds TDM pad_interval limit of 1024 bytes" \
+                               % (depthU, tc, padIntervalBytes)
         # this depthU is valid, done unless user wants to double (for TN)
         if validDepthU:
           state["DepthU"] = depthU

@@ -13,6 +13,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Optimized
 * Refined `potf2_run_small` dispatch by `BS2` to avoid over-generating specialized kernels while preserving runtime bounds checks on `nb`.
 ### Resolved issues
+* Fixed an invalid kernel launch in the small-matrix LU factorization (GETF2/GETRF) for large batch counts.
 ### Known issues
 ### Upcoming changes
 

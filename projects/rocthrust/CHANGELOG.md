@@ -8,6 +8,7 @@ Documentation for rocThrust available at
 ### Added
 
 * gfx1250 support
+* For hipstdpar algorithms running on GPUs that support xnack, and __HIPSTDPAR_INTERPOSE_ALLOC__ or __HIPSTDPAR_INTERPOSE_ALLOC_V1__ are not enabled, emit a runtime warning once if xnack is off.
 
 ## Since last release ROCm 7.12
 
