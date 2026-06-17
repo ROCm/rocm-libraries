@@ -168,11 +168,12 @@ auto calculate_rtol_atol_abquant(const ck_tile::index_t K,
                                  const ck_tile::index_t kbatch,
                                  const float max_accumulated_value)
 {
-    // Both A and B are the same FP8/BF8 type for abquant; assert so mixed-precision additions are caught.
+    // Both A and B are the same FP8/BF8 type for abquant; assert so mixed-precision additions are
+    // caught.
     static_assert(sizeof(ADataType_) == sizeof(BDataType_),
                   "calculate_rtol_atol_abquant assumes equal-width A and B types");
     using ComputeType = ADataType_;
-    const auto rtol = ck_tile::get_relative_threshold<ComputeType, CDataType_, AccDataType_>(
+    const auto rtol   = ck_tile::get_relative_threshold<ComputeType, CDataType_, AccDataType_>(
         ck_tile::integer_divide_ceil(K, kbatch));
     const auto atol = ck_tile::get_absolute_threshold<ComputeType, CDataType_, AccDataType_>(
         max_accumulated_value / kbatch, ck_tile::integer_divide_ceil(K, kbatch));
