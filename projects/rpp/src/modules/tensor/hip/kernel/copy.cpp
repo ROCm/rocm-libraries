@@ -25,18 +25,13 @@ SOFTWARE.
 #include "hip_tensor_executors.hpp"
 
 template <typename T>
-__global__ void copy_pkd3_pln3_hip_tensor(T *srcPtr,
-                                          uint2 srcStridesNH,
-                                          T *dstPtr,
-                                          uint3 dstStridesNCH,
-                                          uint2 maxDim)
-{
+__global__ void copy_pkd3_pln3_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr,
+                                          uint3 dstStridesNCH, uint2 maxDim) {
     int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 8;
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y >= maxDim.y) || (id_x >= maxDim.x))
-    {
+    if ((id_y >= maxDim.y) || (id_x >= maxDim.x)) {
         return;
     }
 
@@ -49,18 +44,13 @@ __global__ void copy_pkd3_pln3_hip_tensor(T *srcPtr,
 }
 
 template <typename T>
-__global__ void copy_pln3_pkd3_hip_tensor(T *srcPtr,
-                                          uint3 srcStridesNCH,
-                                          T *dstPtr,
-                                          uint2 dstStridesNH,
-                                          uint2 maxDim)
-{
+__global__ void copy_pln3_pkd3_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
+                                          uint2 dstStridesNH, uint2 maxDim) {
     int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 8;
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y >= maxDim.y) || (id_x >= maxDim.x))
-    {
+    if ((id_y >= maxDim.y) || (id_x >= maxDim.x)) {
         return;
     }
 
@@ -73,46 +63,41 @@ __global__ void copy_pln3_pkd3_hip_tensor(T *srcPtr,
 }
 
 template <typename T>
-RppStatus hip_exec_copy_tensor(T *srcPtr,
-                               RpptDescPtr srcDescPtr,
-                               T *dstPtr,
-                               RpptDescPtr dstDescPtr,
-                               rpp::Handle& handle)
-{
-    if (srcDescPtr->layout == dstDescPtr->layout)
-    {
-        RPP_HIP_RETURN_IF_ERROR(hipMemcpy(dstPtr, srcPtr, dstDescPtr->n * dstDescPtr->strides.nStride * sizeof(T), hipMemcpyDeviceToDevice));
-    }
-    else if ((srcDescPtr->c == 3) && (dstDescPtr->c == 3))
-    {
+RppStatus hip_exec_copy_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr, RpptDescPtr dstDescPtr,
+                               rpp::Handle& handle) {
+    if (srcDescPtr->layout == dstDescPtr->layout) {
+        RPP_HIP_RETURN_IF_ERROR(hipMemcpy(dstPtr, srcPtr,
+                                          dstDescPtr->n * dstDescPtr->strides.nStride * sizeof(T),
+                                          hipMemcpyDeviceToDevice));
+    } else if ((srcDescPtr->c == 3) && (dstDescPtr->c == 3)) {
         int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
         int globalThreads_y = dstDescPtr->h;
         int globalThreads_z = handle.GetBatchSize();
 
-        if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW)) {
             hipLaunchKernelGGL(copy_pkd3_pln3_hip_tensor,
-                               dim3(ceil((float)globalThreads_x/LOCAL_THREADS_X), ceil((float)globalThreads_y/LOCAL_THREADS_Y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                               0,
-                               handle.GetStream(),
-                               srcPtr,
+                               dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
+                                    ceil((float)globalThreads_y / LOCAL_THREADS_Y),
+                                    ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
+                               handle.GetStream(), srcPtr,
                                make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
                                dstPtr,
-                               make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride, dstDescPtr->strides.hStride),
+                               make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
+                                          dstDescPtr->strides.hStride),
                                make_uint2(srcDescPtr->w, srcDescPtr->h));
             HIP_CHECK_LAUNCH_RETURN();
-        }
-        else if ((srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
+        } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
+                   (dstDescPtr->layout == RpptLayout::NHWC)) {
             globalThreads_x = (srcDescPtr->strides.hStride + 7) >> 3;
             hipLaunchKernelGGL(copy_pln3_pkd3_hip_tensor,
-                               dim3(ceil((float)globalThreads_x/LOCAL_THREADS_X), ceil((float)globalThreads_y/LOCAL_THREADS_Y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                               0,
-                               handle.GetStream(),
-                               srcPtr,
-                               make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride, srcDescPtr->strides.hStride),
+                               dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
+                                    ceil((float)globalThreads_y / LOCAL_THREADS_Y),
+                                    ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
+                               handle.GetStream(), srcPtr,
+                               make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride,
+                                          srcDescPtr->strides.hStride),
                                dstPtr,
                                make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
                                make_uint2(srcDescPtr->w, srcDescPtr->h));
@@ -122,26 +107,13 @@ RppStatus hip_exec_copy_tensor(T *srcPtr,
 
     return RPP_SUCCESS;
 }
-template RppStatus hip_exec_copy_tensor<Rpp8u>(Rpp8u*,
-                                               RpptDescPtr,
-                                               Rpp8u*,
-                                               RpptDescPtr,
+template RppStatus hip_exec_copy_tensor<Rpp8u>(Rpp8u*, RpptDescPtr, Rpp8u*, RpptDescPtr,
                                                rpp::Handle&);
 
-template RppStatus hip_exec_copy_tensor<half>(half*,
-                                              RpptDescPtr,
-                                              half*,
-                                              RpptDescPtr,
-                                              rpp::Handle&);
+template RppStatus hip_exec_copy_tensor<half>(half*, RpptDescPtr, half*, RpptDescPtr, rpp::Handle&);
 
-template RppStatus hip_exec_copy_tensor<Rpp32f>(Rpp32f*,
-                                                RpptDescPtr,
-                                                Rpp32f*,
-                                                RpptDescPtr,
+template RppStatus hip_exec_copy_tensor<Rpp32f>(Rpp32f*, RpptDescPtr, Rpp32f*, RpptDescPtr,
                                                 rpp::Handle&);
 
-template RppStatus hip_exec_copy_tensor<Rpp8s>(Rpp8s*,
-                                               RpptDescPtr,
-                                               Rpp8s*,
-                                               RpptDescPtr,
+template RppStatus hip_exec_copy_tensor<Rpp8s>(Rpp8s*, RpptDescPtr, Rpp8s*, RpptDescPtr,
                                                rpp::Handle&);

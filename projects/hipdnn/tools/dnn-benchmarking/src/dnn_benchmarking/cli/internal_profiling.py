@@ -92,8 +92,6 @@ def run_internal_profiling(args: argparse.Namespace) -> int:
         benchmark_iters=args.iters,
         seed=args.seed,
         engine_filter=[engine_id],
-        gpu_backend="auto",
-        reference_provider="none",
         verbose=False,
         metrics=MetricsConfig(tier="off"),
         plugin_paths=[plugin_path] if plugin_path is not None else None,
