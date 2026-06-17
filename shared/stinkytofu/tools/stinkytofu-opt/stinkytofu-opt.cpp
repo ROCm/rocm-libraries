@@ -113,14 +113,31 @@ void printAvailablePasses() {
     }
 }
 
-// Function to find and create a pass by name
-std::unique_ptr<Pass> createPassByName(const std::string& passName) {
+// A user-specified pass: bare name + optional comma-separated argument list
+// parsed out of `--PassName=arg1,arg2`.
+struct RequestedPass {
+    std::string name;
+    std::vector<std::string> args;
+};
+
+// Function to find and create a pass by name (with optional arguments)
+std::unique_ptr<Pass> createPassByName(const std::string& passName,
+                                       const std::vector<std::string>& args = {}) {
     for (const auto& passInfo : availablePasses) {
         if (passName == passInfo.name) {
-            return passInfo.creator();
+            return passInfo.creator(args);
         }
     }
     return nullptr;
+}
+
+static void trimWhitespace(std::string& s) {
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) {
+        s.erase(0, 1);
+    }
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) {
+        s.pop_back();
+    }
 }
 
 int extractOptLevel(int argc, char** argv) {
@@ -145,9 +162,13 @@ bool isKernelConfigArg(const std::string& arg) {
            arg == "--NumGRB" || arg == "--NumGRM" || arg == "--NumWaves";
 }
 
-// Function to parse command-line arguments for passes
-std::vector<std::string> parsePassNames(int argc, char** argv, int startIdx) {
-    std::vector<std::string> passNames;
+// Function to parse command-line arguments for passes.
+//
+// Accepts both `--PassName` and `--PassName=arg1,arg2,...` forms.
+// In the second form, the comma-separated tokens after `=` are passed
+// to the pass's creator function.
+std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
+    std::vector<RequestedPass> passes;
     for (int i = startIdx; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "-O0" || arg == "-O1" || arg == "-O2" || arg == "-O3") continue;
@@ -171,10 +192,29 @@ std::vector<std::string> parsePassNames(int argc, char** argv, int startIdx) {
                 ++i;  // skip the value argument
                 continue;
             }
-            passNames.push_back(arg.substr(2));  // Remove "--" prefix
+            std::string body = arg.substr(2);  // strip "--"
+            RequestedPass rp;
+            size_t eq = body.find('=');
+            if (eq == std::string::npos) {
+                rp.name = std::move(body);
+            } else {
+                rp.name = body.substr(0, eq);
+                std::string rest = body.substr(eq + 1);
+                size_t start = 0;
+                while (start <= rest.size()) {
+                    size_t comma = rest.find(',', start);
+                    std::string tok = rest.substr(
+                        start, comma == std::string::npos ? std::string::npos : comma - start);
+                    trimWhitespace(tok);
+                    if (!tok.empty()) rp.args.push_back(std::move(tok));
+                    if (comma == std::string::npos) break;
+                    start = comma + 1;
+                }
+            }
+            passes.push_back(std::move(rp));
         }
     }
-    return passNames;
+    return passes;
 }
 
 std::string extractPassOrderSnapshotJsonPath(int argc, char** argv) {
@@ -184,15 +224,6 @@ std::string extractPassOrderSnapshotJsonPath(int argc, char** argv) {
         if (a.starts_with(kPrefix)) return a.substr(std::strlen(kPrefix));
     }
     return {};
-}
-
-static void trimWhitespace(std::string& s) {
-    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) {
-        s.erase(0, 1);
-    }
-    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) {
-        s.pop_back();
-    }
 }
 
 static std::vector<std::string> splitCommaPassNames(const char* prefix, const std::string& a) {
@@ -500,7 +531,7 @@ int main(int argc, char** argv) {
     }
 
     // Parse and validate user-specified passes from command line
-    std::vector<std::string> requestedPasses = parsePassNames(argc, argv, passStartIdx);
+    std::vector<RequestedPass> requestedPasses = parsePassNames(argc, argv, passStartIdx);
     int optLevel = extractOptLevel(argc, argv);
 
     if (optLevel >= 0 && !requestedPasses.empty()) {
@@ -511,11 +542,17 @@ int main(int argc, char** argv) {
 
     if (!requestedPasses.empty()) {
         std::cerr << "\n=== Adding Passes ===\n";
-        for (const auto& passName : requestedPasses) {
-            if (createPassByName(passName))
-                std::cerr << "Adding pass: " << passName << "\n";
-            else {
-                std::cerr << "Warning: Unknown pass '" << passName << "' - skipping\n";
+        for (const auto& rp : requestedPasses) {
+            if (createPassByName(rp.name, rp.args)) {
+                std::cerr << "Adding pass: " << rp.name;
+                if (!rp.args.empty()) {
+                    std::cerr << " (args:";
+                    for (const auto& a : rp.args) std::cerr << " " << a;
+                    std::cerr << ")";
+                }
+                std::cerr << "\n";
+            } else {
+                std::cerr << "Warning: Unknown pass '" << rp.name << "' - skipping\n";
                 std::cerr << "Use --list-passes to see available passes\n";
             }
         }
@@ -776,8 +813,8 @@ int main(int argc, char** argv) {
             passManager.setAsmCapsConfig(caps);
             if (enableRemarks) passManager.getPassContext().setRemarksEnabled(true);
 
-            for (const auto& passName : requestedPasses) {
-                auto pass = createPassByName(passName);
+            for (const auto& rp : requestedPasses) {
+                auto pass = createPassByName(rp.name, rp.args);
                 if (pass) passManager.addPass(std::move(pass));
             }
 

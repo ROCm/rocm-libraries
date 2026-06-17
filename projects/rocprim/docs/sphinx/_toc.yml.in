@@ -30,7 +30,7 @@ subtrees:
   entries:
     - file: reference/rocPRIM-glossary.rst
       title: Glossary
-    - file: reference/data-type-support.rst
+    - file: reference/rocPRIM-data-type-support.rst
       title: Data type support
     - file: reference/reference.rst
       title: API reference

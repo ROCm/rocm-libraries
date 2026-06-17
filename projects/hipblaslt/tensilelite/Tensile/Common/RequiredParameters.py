@@ -103,6 +103,7 @@ def getRequiredParametersMin() -> set:
         'NumLoadsCoalescedA',
         'NumLoadsCoalescedB',
         'OptNoLoadLoop',
+        'PrefetchAcrossPersistent',
         'PrefetchGlobalRead',
         'PrefetchLocalRead',
         'PrefetchGL2',
