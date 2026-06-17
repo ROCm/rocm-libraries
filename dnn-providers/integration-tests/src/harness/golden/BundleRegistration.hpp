@@ -20,7 +20,7 @@
 #include "harness/CpuReferenceGraphExecutorAdapter.hpp"
 #include "harness/SharedHandle.hpp"
 #include "harness/TestConfig.hpp"
-#include "harness/golden/GoldenBundleDiscovery.hpp"
+#include "harness/golden/BundleDiscovery.hpp"
 #include "harness/golden/IntegrationGraphGoldenReferenceVerificationHarness.hpp"
 #include "harness/gpu_graph_executor/GpuReferenceGraphExecutor.hpp"
 
@@ -30,6 +30,11 @@ namespace hipdnn_integration_tests::golden
 namespace detail
 {
 
+// Registers one GTest test per discovered bundle for a single runner mode
+// (CpuRef / GpuRef / Engine). This is the runtime, macro-free equivalent of
+// TEST_F + INSTANTIATE_TEST_SUITE_P: the suite/test names and the "parameter"
+// (each bundle's .json path) come from the filesystem scan, so they cannot be
+// baked in at compile time the way the macros require.
 inline void registerBundlesForMode(
     const std::vector<DiscoveredBundle>& bundles,
     const std::string& runnerSuffix,
@@ -38,15 +43,22 @@ inline void registerBundlesForMode(
 {
     for(const auto& bundle : bundles)
     {
+        // Suffix the suite so the same bundle registers as a distinct test under
+        // each mode, e.g. "ConvFwd_nchw_fp16" -> "ConvFwd_nchw_fp16_CpuRef".
         auto suiteName = bundle.suiteName + "_" + runnerSuffix;
 
         ::testing::RegisterTest(
-            suiteName.c_str(),
-            bundle.testName.c_str(),
-            nullptr,
-            nullptr,
+            suiteName.c_str(), // GTest suite name (before the '.')
+            bundle.testName.c_str(), // GTest test name (after the '.')
+            nullptr, // type_param: unused (not a TYPED_TEST)
+            nullptr, // value_param: unused (no GetParam() string)
             __FILE__,
-            __LINE__,
+            __LINE__, // all bundles report this site; the harness prints the
+            // actual bundle path on failure (see buildFailureReport)
+            // Factory: GTest calls this to construct the test when it runs. Each
+            // bundle's factory captures its own path/executor, so test N loads
+            // bundle N. The fixture is the single shared harness, parameterized
+            // by the injected executor + requiresDevice rather than subclassed.
             [path = bundle.jsonPath, executor, requiresDevice]() -> ::testing::Test* {
                 auto* test = new IntegrationGraphGoldenReferenceVerificationHarness(executor,
                                                                                     requiresDevice);
@@ -56,8 +68,15 @@ inline void registerBundlesForMode(
     }
 }
 
+// In short: turns the list of discovered bundles into live GTest cases for one
+// runner mode at startup — each bundle becomes "{suite}_{mode}.{test}", built to
+// load and verify its own bundle when run.
+
 } // namespace detail
 
+// Resolves the bundle data root: an explicit CLI/env override from the shared
+// TestConfig singleton if one was provided, otherwise the conventional install
+// location next to the test binary (../lib/golden_reference_data).
 inline std::filesystem::path resolveDataDir()
 {
     auto& config = TestConfig::get();
@@ -76,30 +95,29 @@ inline void registerBundleTests()
         return;
     }
 
-    auto goldenDataDir = resolveDataDir();
-    if(!std::filesystem::exists(goldenDataDir))
+    auto dataDir = resolveDataDir();
+    if(!std::filesystem::exists(dataDir))
     {
-        std::cerr << "Warning: --allow-bundles enabled but golden data directory "
+        std::cerr << "Warning: --allow-bundles enabled but data directory "
                      "does not exist: "
-                  << goldenDataDir << '\n';
+                  << dataDir << '\n';
         return;
     }
 
     std::vector<DiscoveredBundle> bundles;
     try
     {
-        bundles = discoverGoldenBundles(goldenDataDir);
+        bundles = discoverBundles(dataDir);
     }
     catch(const std::exception& e)
     {
-        std::cerr << "Error during golden bundle discovery: " << e.what() << '\n';
+        std::cerr << "Error during bundle discovery: " << e.what() << '\n';
         throw;
     }
 
     if(bundles.empty())
     {
-        std::cerr << "Warning: --allow-bundles enabled but no golden bundles found in "
-                  << goldenDataDir << '\n';
+        std::cerr << "Warning: --allow-bundles enabled but no bundles found in " << dataDir << '\n';
         return;
     }
 
@@ -180,7 +198,7 @@ inline void registerBundleTests()
     detail::registerBundlesForMode(bundles, "Engine", engineExecutor, true);
 
     std::cout << "Registered " << bundles.size()
-              << " golden bundle(s) across CpuRef, GpuRef, and Engine runners\n";
+              << " bundle(s) across CpuRef, GpuRef, and Engine runners\n";
 }
 
 } // namespace hipdnn_integration_tests::golden

@@ -21,7 +21,7 @@
 #include "harness/SharedHandle.hpp"
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
-#include "harness/golden/GoldenBundleRegistration.hpp"
+#include "harness/golden/BundleRegistration.hpp"
 
 namespace
 {

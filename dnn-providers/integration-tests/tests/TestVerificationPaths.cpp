@@ -12,7 +12,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
-#include "harness/golden/GoldenBundleDiscovery.hpp"
+#include "harness/golden/BundleDiscovery.hpp"
 #include "harness/gpu_graph_executor/GpuReferenceGraphExecutor.hpp"
 
 // NOLINTBEGIN(readability-identifier-naming)
@@ -83,7 +83,7 @@ void writeMinimalBatchNormBundle(const std::filesystem::path& dir, const std::st
 // ---------------------------------------------------------------------------
 // Path 1 — CPU Reference against golden data (the "LayerNorm default" path)
 //
-// For ops without golden bundles AND without a GPU reference executor, the
+// For ops without bundles AND without a GPU reference executor, the
 // existing TestCpuFpReference* tests use CpuReferenceGraphExecutor as the
 // ground truth.  This test proves the golden comparison pipeline works
 // end-to-end by running the same CPU executor against a real batch-norm
@@ -94,7 +94,7 @@ TEST(TestGoldenVerificationCpuRefFp32, BatchNormSmallMatchesGoldenData)
     const auto bundlePath = batchNormSmallBundle();
     if(!std::filesystem::exists(bundlePath))
     {
-        GTEST_SKIP() << "Golden bundle not available (DVC not pulled?): " << bundlePath;
+        GTEST_SKIP() << "Bundle not available (DVC not pulled?): " << bundlePath;
     }
 
     hipdnn_test_sdk::utilities::GraphAndTensorMap graphAndTensors;
@@ -118,7 +118,7 @@ TEST(TestGoldenVerificationCpuRefFp32, BatchNormSmallMatchesGoldenData)
 // ---------------------------------------------------------------------------
 // Path 2 — GPU Reference against golden data (the "Conv default" path)
 //
-// For ops without golden bundles but with a GPU reference executor (e.g.
+// For ops without bundles but with a GPU reference executor (e.g.
 // convolution), the existing integration tests use GpuReferenceGraphExecutor.
 // Not all operations have GPU reference plans — batch norm does not, which
 // is exactly why it falls through to CPU reference.  This test verifies the
@@ -132,7 +132,7 @@ TEST(TestGpuGoldenVerificationRef, SkipsWhenNoPlanAvailable)
     const auto bundlePath = batchNormSmallBundle();
     if(!std::filesystem::exists(bundlePath))
     {
-        GTEST_SKIP() << "Golden bundle not available (DVC not pulled?): " << bundlePath;
+        GTEST_SKIP() << "Bundle not available (DVC not pulled?): " << bundlePath;
     }
 
     hipdnn_test_sdk::utilities::GraphAndTensorMap graphAndTensors;
@@ -177,41 +177,34 @@ TEST(TestGpuGoldenVerificationRef, SkipsWhenNoPlanAvailable)
 }
 
 // ---------------------------------------------------------------------------
-// Path 3 — Verification routing: golden bundles only exist for BatchNorm
+// Path 3 — Verification routing: bundles only exist for BatchNorm
 //
-// Proves that discoverGoldenBundles() finds ONLY the ops that have golden
-// bundle data (here: BatchNorm).  Ops without golden bundles (Conv,
-// LayerNorm) are NOT discovered — they fall through to the existing
-// CPU/GPU reference test infrastructure instead.
+// Proves that discoverBundles() finds ONLY the ops that have bundle data
+// (here: BatchNorm).  Ops without bundles (Conv, LayerNorm) are NOT
+// discovered — they fall through to the existing CPU/GPU reference test
+// infrastructure instead.
 // ---------------------------------------------------------------------------
-TEST(TestGoldenVerificationRouting, OnlyBatchNormDiscoveredConvAndLayerNormFallThrough)
+TEST(TestVerificationRouting, OnlyBatchNormDiscoveredConvAndLayerNormFallThrough)
 {
     auto path = std::filesystem::temp_directory_path() / "golden_routing_test";
     std::filesystem::remove_all(path);
     const hipdnn_test_sdk::utilities::ScopedDirectory tempDir(path);
 
-    writeMinimalBatchNormBundle(
-        tempDir.path() / "quick" / "BatchnormInference" / "nchw" / "fp32" / "q", "q");
-    writeMinimalBatchNormBundle(
-        tempDir.path() / "standard" / "BatchnormInference" / "nchw" / "fp32" / "s", "s");
-    writeMinimalBatchNormBundle(
-        tempDir.path() / "comprehensive" / "BatchnormInference" / "nchw" / "fp32" / "c", "c");
-    writeMinimalBatchNormBundle(
-        tempDir.path() / "full" / "BatchnormInference" / "nchw" / "fp32" / "f", "f");
+    writeMinimalBatchNormBundle(tempDir.path() / "BatchnormInference" / "nchw" / "fp32" / "Small",
+                                "Small");
 
-    const auto bundles = discoverGoldenBundles(tempDir.path());
-    ASSERT_EQ(bundles.size(), 4u);
+    const auto bundles = discoverBundles(tempDir.path());
+    ASSERT_EQ(bundles.size(), 1u);
 
     for(const auto& b : bundles)
     {
         EXPECT_EQ(b.suiteName.find("Conv"), std::string::npos)
-            << "Conv should NOT appear — no conv golden bundles exist";
+            << "Conv should NOT appear — no conv bundles exist";
         EXPECT_EQ(b.suiteName.find("LayerNorm"), std::string::npos)
-            << "LayerNorm should NOT appear — no layer norm golden bundles exist";
+            << "LayerNorm should NOT appear — no layer norm bundles exist";
     }
 
-    const auto* quickBundle = &bundles.front();
-    EXPECT_EQ(quickBundle->suiteName, "BatchnormInference_nchw_fp32");
+    EXPECT_EQ(bundles.front().suiteName, "BatchnormInference_nchw_fp32_Small");
 }
 
 // ---------------------------------------------------------------------------
@@ -222,22 +215,16 @@ TEST(TestGoldenVerificationRouting, OnlyBatchNormDiscoveredConvAndLayerNormFallT
 // system provides three independent cross-checks against the same golden
 // ground truth.
 // ---------------------------------------------------------------------------
-TEST(TestGoldenVerificationRouting, ThreeRunnerSuffixesProduceDistinctSuites)
+TEST(TestVerificationRouting, ThreeRunnerSuffixesProduceDistinctSuites)
 {
     auto path = std::filesystem::temp_directory_path() / "golden_suffix_test";
     std::filesystem::remove_all(path);
     const hipdnn_test_sdk::utilities::ScopedDirectory tempDir(path);
 
-    writeMinimalBatchNormBundle(
-        tempDir.path() / "quick" / "BatchnormInference" / "nchw" / "fp32" / "q", "q");
-    writeMinimalBatchNormBundle(
-        tempDir.path() / "standard" / "BatchnormInference" / "nchw" / "fp32" / "s", "s");
-    writeMinimalBatchNormBundle(
-        tempDir.path() / "comprehensive" / "BatchnormInference" / "nchw" / "fp32" / "c", "c");
-    writeMinimalBatchNormBundle(
-        tempDir.path() / "full" / "BatchnormInference" / "nchw" / "fp32" / "f", "f");
+    writeMinimalBatchNormBundle(tempDir.path() / "BatchnormInference" / "nchw" / "fp32" / "Small",
+                                "Small");
 
-    const auto bundles = discoverGoldenBundles(tempDir.path());
+    const auto bundles = discoverBundles(tempDir.path());
     ASSERT_FALSE(bundles.empty());
 
     const auto& bundle = bundles.front();

@@ -15,8 +15,8 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuConvolutionFwdSignatureKey.cpp
     TestGpuConvolutionFwdPlan.cpp
     TestReferenceGraphExecutorFactory.cpp
-    TestGoldenBundleDiscovery.cpp
-    TestGoldenVerificationPaths.cpp
+    TestBundleDiscovery.cpp
+    TestVerificationPaths.cpp
 )
 
 target_include_directories(hipdnn_integration_tests_unit_tests

@@ -9,7 +9,7 @@
 
 #include <nlohmann/json.hpp>
 
-// Pre-load classification for a golden bundle. loadGraphAndTensors() throws
+// Pre-load classification for a bundle. loadGraphAndTensors() throws
 // std::exception for two very different reasons — a malformed graph .json
 // (authoring error) and absent .bin tensor data (DVC not pulled) — and the
 // harness must react differently: FAIL on the former, SKIP on the latter
@@ -32,7 +32,7 @@ inline bool graphJsonParses(const std::filesystem::path& jsonPath)
 }
 
 // True if every tensor's companion .bin file exists on disk. The loader derives
-// each blob path as "{stem}.tensor{uid}.bin"; absence means the golden data was
+// each blob path as "{stem}.tensor{uid}.bin"; absence means the tensor data was
 // not fetched (DVC), which is a SKIP rather than a FAIL.
 inline bool tensorDataPresent(const std::filesystem::path& jsonPath)
 {

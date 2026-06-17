@@ -24,8 +24,9 @@
 
 #include "harness/IReferenceGraphExecutor.hpp"
 #include "harness/TestConfig.hpp"
-#include "harness/golden/GoldenBundleDiscovery.hpp"
-#include "harness/golden/GoldenBundleLoadCheck.hpp"
+#include "harness/golden/BundleDiscovery.hpp"
+#include "harness/golden/BundleLoadCheck.hpp"
+#include "harness/golden/IntegrationTestBundle.hpp"
 
 namespace hipdnn_integration_tests::golden
 {
@@ -93,7 +94,7 @@ protected:
         // then confirm the referenced .bin files exist (absent -> SKIP).
         if(!graphJsonParses(_bundlePath))
         {
-            FAIL() << "Unparseable golden bundle graph JSON: " << _bundlePath;
+            FAIL() << "Unparseable bundle graph JSON: " << _bundlePath;
         }
         if(!tensorDataPresent(_bundlePath))
         {
@@ -104,13 +105,12 @@ protected:
         // authoring/data errors, not missing data -> FAIL.
         try
         {
-            _graphAndTensors = hipdnn_test_sdk::utilities::loadGraphAndTensors(_bundlePath);
+            _bundle = loadIntegrationTestBundle(_bundlePath);
         }
         catch(const std::exception& e)
         {
-            FAIL() << "Failed to load golden bundle " << _bundlePath << ": " << e.what();
+            FAIL() << "Failed to load bundle " << _bundlePath << ": " << e.what();
         }
-        _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -123,21 +123,19 @@ private:
     ExecuteFunc _executeFunc;
     bool _requiresDevice;
     std::filesystem::path _bundlePath;
-    hipdnn_test_sdk::utilities::GraphAndTensorMap _graphAndTensors;
-    std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>
-        _referenceOutputTensors;
+    IntegrationTestBundle _bundle;
 
     void runGoldenComparison()
     {
-        ASSERT_NO_FATAL_FAILURE(_executeFunc(_graphAndTensors));
+        ASSERT_NO_FATAL_FAILURE(_executeFunc(_bundle.graphAndTensors));
 
-        auto wrapper = _graphAndTensors.createGraphWrapper();
+        auto wrapper = _bundle.graphAndTensors.createGraphWrapper();
         const auto& tensorAttrMap = wrapper.getTensorMap();
 
-        for(auto uid : _graphAndTensors.outputTensorUids)
+        for(auto uid : _bundle.graphAndTensors.outputTensorUids)
         {
-            auto& actualTensor = *_graphAndTensors.tensorMap.at(uid);
-            auto& expectedTensor = *_referenceOutputTensors.at(uid);
+            auto& actualTensor = *_bundle.graphAndTensors.tensorMap.at(uid);
+            auto& expectedTensor = *_bundle.goldenOutputs.at(uid);
 
             auto* attrs = tensorAttrMap.at(uid);
             auto dataType = attrs->data_type();
