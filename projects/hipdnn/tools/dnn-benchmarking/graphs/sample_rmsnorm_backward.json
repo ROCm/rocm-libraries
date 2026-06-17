@@ -1,0 +1,138 @@
+{
+    "name": "sample_rmsnorm_backward_2x3x4",
+    "compute_data_type": "float",
+    "io_data_type": "float",
+    "intermediate_data_type": "float",
+    "tensors": [
+        {
+            "uid": 1,
+            "name": "dy",
+            "dims": [
+                2,
+                3,
+                4
+            ],
+            "strides": [
+                12,
+                4,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 2,
+            "name": "input_x",
+            "dims": [
+                2,
+                3,
+                4
+            ],
+            "strides": [
+                12,
+                4,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 3,
+            "name": "scale",
+            "dims": [
+                1,
+                1,
+                4
+            ],
+            "strides": [
+                4,
+                4,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 4,
+            "name": "saved_inv_rms",
+            "dims": [
+                2,
+                3,
+                1
+            ],
+            "strides": [
+                3,
+                1,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 5,
+            "name": "dx",
+            "dims": [
+                2,
+                3,
+                4
+            ],
+            "strides": [
+                12,
+                4,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 6,
+            "name": "dscale",
+            "dims": [
+                1,
+                1,
+                4
+            ],
+            "strides": [
+                4,
+                4,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 7,
+            "name": "dbias",
+            "dims": [
+                1,
+                1,
+                4
+            ],
+            "strides": [
+                4,
+                4,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        }
+    ],
+    "nodes": [
+        {
+            "name": "rmsnorm_backward_node",
+            "type": "RMSNormBackwardAttributes",
+            "compute_data_type": "float",
+            "inputs": {
+                "dy_tensor_uid": 1,
+                "x_tensor_uid": 2,
+                "scale_tensor_uid": 3,
+                "inv_rms_tensor_uid": 4
+            },
+            "outputs": {
+                "dx_tensor_uid": 5,
+                "dscale_tensor_uid": 6,
+                "dbias_tensor_uid": 7
+            }
+        }
+    ]
+}
