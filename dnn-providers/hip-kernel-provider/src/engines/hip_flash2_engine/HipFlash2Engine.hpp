@@ -25,12 +25,14 @@ namespace hip_flash2_engine
 using IEngine = hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>;
 using IPlanBuilder = hipdnn_plugin_sdk::IPlanBuilder<Handle, Settings, Context>;
 
-class HipFlash2Engine : public hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>
+// final: this engine is not designed to be subclassed
+class HipFlash2Engine final : public hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>
 {
 public:
-    explicit HipFlash2Engine(int64_t engineId);
+    HipFlash2Engine() = default;
 
-    void addPlanBuilder(std::unique_ptr<IPlanBuilder>&& planBuilder);
+    // Takes ownership of the plan builder (pass by value communicates this clearly)
+    void addPlanBuilder(std::unique_ptr<IPlanBuilder> planBuilder);
 
     static int64_t staticId()
     {
@@ -42,7 +44,11 @@ public:
         return hipdnn_data_sdk::utilities::HIP_FLASH2_ENGINE_NAME;
     }
 
-    int64_t id() const override;
+    // id() returns the fixed constant — no per-instance ID needed
+    int64_t id() const override
+    {
+        return hipdnn_data_sdk::utilities::HIP_FLASH2_ENGINE_ID;
+    }
 
     bool isApplicable(
         Handle& handle,
@@ -67,7 +73,6 @@ public:
         Context& executionContext) const override;
 
 private:
-    int64_t _id;
     std::vector<std::unique_ptr<IPlanBuilder>> _planBuilders;
 };
 
