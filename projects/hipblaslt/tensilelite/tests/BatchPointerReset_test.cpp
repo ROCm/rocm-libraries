@@ -222,8 +222,9 @@ TEST(BatchPointerReset, StalePointersAcrossProblems)
 
     // --- Call 2: fast path (m_gpuInit=true, boundsCheck=Disable,
     //     !problemDependentData).
-    //     Simulate what main.cpp does when the problem changes:
-    //     preProblem resets m_batchInit so batch pointers are re-uploaded.
+    //     Simulate what main.cpp does when the problem changes: preProblem()
+    //     resets m_batchInitProblem to nullptr, so the pointer-identity check
+    //     in prepareGPUInputsInternal fires and re-uploads batch pointers.
     dataInit.preProblem(nullptr);
     auto inputs2 = dataInit.prepareGPUInputs(p2);
 
@@ -276,7 +277,7 @@ TEST(BatchPointerReset, StructuralReinitWithoutPreProblem)
     // p1: small problem — aStride = 32*32 = 1024 elements
     auto p1 = makeBatchedProblem(32, 32, 32, BATCH);
     // p2: larger problem — aStride = 64*64 = 4096 elements
-    auto p2 = makeBatchedProblem(64, 64, 64, BATCH);
+    auto p2 = makeBatchedProblem(64, 64, 64, BATCH); // aStride = 64*64 = 4096 elements
 
     // Buffer must be sized for the largest problem.
     auto args = buildArgs({{64, 64, BATCH, 64}});

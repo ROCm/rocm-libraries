@@ -896,8 +896,12 @@ namespace TensileLite
             {
                 m_currentGemmProblem
                     = dynamic_cast<ContractionProblemGemm const*>(problem);
-                m_currentSolution = nullptr;
-                m_batchInit       = false;
+                m_currentSolution  = nullptr;
+                // Belt-and-suspenders: the pointer-identity check in
+                // prepareGPUInputsInternal is the structural guard. This reset
+                // handles the edge case where the same ContractionProblemGemm
+                // object is reused for a logically different problem.
+                m_batchInitProblem = nullptr;
             }
             virtual void postProblem() override {}
             virtual void preSolution(ContractionSolution* const solution) override
@@ -1215,9 +1219,9 @@ namespace TensileLite
             std::shared_ptr<void>                 m_workspacePristine;
             std::vector<ConstDataInitProperties>  m_cdata;
 
-            bool m_cpuInit   = false;
-            bool m_gpuInit   = false;
-            bool m_batchInit = false;
+            bool                          m_cpuInit          = false;
+            bool                          m_gpuInit          = false;
+            ContractionProblemGemm const* m_batchInitProblem = nullptr;
 
             // Multi-buffer ring control
             bool   m_hasAltBuffers    = false;

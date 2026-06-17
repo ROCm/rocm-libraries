@@ -3494,11 +3494,11 @@ namespace TensileLite
                 kind = hipMemcpyHostToDevice;
             }
 
-            if(!m_batchInit)
+            if(m_batchInitProblem != &problem)
             {
                 ScopedTimer t("async_reset_batchedinit");
                 initializeGPUBatchedInputs(problem, targetStream);
-                m_batchInit = true;
+                m_batchInitProblem = &problem;
             }
 
             if(m_gpuInit && m_curBoundsCheck == BoundsCheckMode::Disable
