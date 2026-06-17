@@ -18,7 +18,6 @@
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <memory>
-#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -94,7 +93,7 @@ TEST_F(TestResampleBwdOperationFromNode, CreatesValidFinalizedDescriptor)
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
-    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR);
+    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR_EXT);
     EXPECT_EQ(desc->getData().dy_tensor_uid, K_TENSOR_DY_UID);
 }
 
@@ -138,18 +137,6 @@ TEST_F(TestResampleBwdOperationFromNode, PreservesComputeDataType)
     auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::HALF);
-}
-
-TEST_F(TestResampleBwdOperationFromNode, BuildNodeOmitsUnsetOptionalScalars)
-{
-    auto node = createStandardNode();
-    auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
-
-    auto rebuiltNode = desc->buildNode();
-    const auto* rebuiltAttrs = rebuiltNode->attributes.AsResampleBwdAttributes();
-    ASSERT_NE(rebuiltAttrs, nullptr);
-
-    EXPECT_FALSE(rebuiltAttrs->generate_index.has_value());
 }
 
 TEST_F(TestResampleBwdOperationFromNode, PreservesResampleMode)
@@ -316,27 +303,6 @@ TEST_F(TestResampleBwdOperationFromNode, BuildNodeRoundTrip)
     EXPECT_EQ(rebuiltAttrs->padding_mode, PaddingMode::ZERO_PAD);
 }
 
-TEST_F(TestResampleBwdOperationFromNode, FromNodePreservesGenerateIndex)
-{
-    auto attrs = createStandardResampleBwdAttrs();
-    attrs.generate_index = true;
-
-    NodeT node;
-    node.compute_data_type = DataType::FLOAT;
-    node.attributes.Set(attrs);
-
-    auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
-    ASSERT_NE(desc, nullptr);
-    EXPECT_TRUE(desc->getData().generate_index.has_value());
-    EXPECT_EQ(desc->getData().generate_index.value(), true);
-
-    const auto rebuiltNode = desc->buildNode();
-    const auto* rebuiltAttrs = rebuiltNode->attributes.AsResampleBwdAttributes();
-    ASSERT_NE(rebuiltAttrs, nullptr);
-    ASSERT_TRUE(rebuiltAttrs->generate_index.has_value());
-    EXPECT_EQ(rebuiltAttrs->generate_index.value(), true);
-}
-
 TEST_F(TestResampleBwdOperationFromNode, GetAttributeWorksAfterFromNode)
 {
     auto node = createStandardNode();
@@ -407,7 +373,7 @@ TEST_F(TestResampleBwdOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify dy tensor
     hipdnn_backend::ScopedDescriptor dyScoped;
     int64_t dyCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DY,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DY_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &dyCount,
@@ -420,7 +386,7 @@ TEST_F(TestResampleBwdOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify dx tensor
     hipdnn_backend::ScopedDescriptor dxScoped;
     int64_t dxCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DX,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DX_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &dxCount,
@@ -433,7 +399,7 @@ TEST_F(TestResampleBwdOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify index tensor (optional)
     hipdnn_backend::ScopedDescriptor indexScoped;
     int64_t indexCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_INDEX,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_INDEX_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &indexCount,
@@ -452,7 +418,7 @@ TEST_F(TestResampleBwdOperationFromNode, GetAttributeWorksAfterFromNode)
     desc->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
     ASSERT_EQ(opTypeCount, 1);
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_RESAMPLE_BWD);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_RESAMPLE_BWD_EXT);
 }
 
 TEST_F(TestResampleBwdOperationFromNode, NamePreservedFromNode)

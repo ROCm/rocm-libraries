@@ -21,6 +21,4 @@ table ResampleBwdAttributes {
     resample_mode: ResampleMode;
     padding_mode: PaddingMode;
 
-    // Whether index input is used (for max resample backward)
-    generate_index: bool = null;
 }

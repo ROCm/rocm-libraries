@@ -5,7 +5,7 @@ operation:
   fbs_generated_header: "resample_bwd_attributes_generated.h"
 
   descriptor_type:
-    enum_name: "HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR"
+    enum_name: "HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR_EXT"
 
   operation_attr_prefix: "HIPDNN_ATTR_OPERATION_RESAMPLE_BWD"
 
@@ -16,7 +16,7 @@ operation:
   data_fields_section_label: "Resample Parameters"
   build_node_attrs_var: "poolAttrs"
 
-  operation_type_enum: "HIPDNN_OPERATION_TYPE_RESAMPLE_BWD"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_RESAMPLE_BWD_EXT"
 
   frontend:
     packer_function: "createResampleBwdOperation"
@@ -69,19 +69,19 @@ operation:
   tensor_fields:
     - name: "dy"
       fbs_field: "dy_tensor_uid"
-      attr_suffix: "DY"
+      attr_suffix: "DY_EXT"
       required: true
       frontend_getter: "get_dy()"
 
     - name: "dx"
       fbs_field: "dx_tensor_uid"
-      attr_suffix: "DX"
+      attr_suffix: "DX_EXT"
       required: true
       frontend_getter: "get_dx()"
 
     - name: "index"
       fbs_field: "index_tensor_uid"
-      attr_suffix: "INDEX"
+      attr_suffix: "INDEX_EXT"
       required: false
       frontend_getter: "get_index()"
 
@@ -183,19 +183,6 @@ operation:
           - { name: "PADDING_NOT_SET", value: 0, sentinel: true, frontend_name: "NOT_SET" }
           - { name: "NEG_INF_PAD", value: 1, description: "Pad with negative infinity" }
           - { name: "ZERO_PAD", value: 2, description: "Pad with zeros" }
-
-    - name: "generate_index"
-      fbs_field: "generate_index"
-      attr_name: "HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT"
-      type: "bool"
-      default_value: "false"
-      required: false
-      shared: true
-      fbs_optional: true
-      frontend_getter: "get_generate_index()"
-      backend_type_name: "HIPDNN_TYPE_BOOLEAN"
-      test_value: false
-      test_alt_value: true
 
   tensor_array_fields: []
 

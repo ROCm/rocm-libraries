@@ -1208,18 +1208,18 @@ typedef enum
 
     /**
      * @name Resample Backward Operation Attributes (3310-3399)
-     * Attributes for HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR
+     * Attributes for HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR_EXT
      * @{
      */
 
     /** @brief Gradient of output tensor for backward resample */
-    HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DY = 3310,
+    HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DY_EXT = 3310,
 
     /** @brief Gradient of input tensor for backward resample */
-    HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DX = 3311,
+    HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DX_EXT = 3311,
 
     /** @brief Optional index tensor for max resample backward */
-    HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_INDEX = 3312,
+    HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_INDEX_EXT = 3312,
 
     /** @} */
 

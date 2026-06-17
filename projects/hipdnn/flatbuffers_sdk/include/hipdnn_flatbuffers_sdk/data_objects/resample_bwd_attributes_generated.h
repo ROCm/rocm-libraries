@@ -36,7 +36,6 @@ struct ResampleBwdAttributesT : public ::flatbuffers::NativeTable {
   std::vector<int64_t> window{};
   hipdnn_flatbuffers_sdk::data_objects::ResampleMode resample_mode = hipdnn_flatbuffers_sdk::data_objects::ResampleMode::NOT_SET;
   hipdnn_flatbuffers_sdk::data_objects::PaddingMode padding_mode = hipdnn_flatbuffers_sdk::data_objects::PaddingMode::PADDING_NOT_SET;
-  ::flatbuffers::Optional<bool> generate_index = ::flatbuffers::nullopt;
 };
 
 struct ResampleBwdAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
@@ -51,8 +50,7 @@ struct ResampleBwdAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Ta
     VT_STRIDE = 14,
     VT_WINDOW = 16,
     VT_RESAMPLE_MODE = 18,
-    VT_PADDING_MODE = 20,
-    VT_GENERATE_INDEX = 22
+    VT_PADDING_MODE = 20
   };
   int64_t dy_tensor_uid() const {
     return GetField<int64_t>(VT_DY_TENSOR_UID, 0);
@@ -108,12 +106,6 @@ struct ResampleBwdAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Ta
   bool mutate_padding_mode(hipdnn_flatbuffers_sdk::data_objects::PaddingMode _padding_mode = static_cast<hipdnn_flatbuffers_sdk::data_objects::PaddingMode>(0)) {
     return SetField<int8_t>(VT_PADDING_MODE, static_cast<int8_t>(_padding_mode), 0);
   }
-  ::flatbuffers::Optional<bool> generate_index() const {
-    return GetOptional<uint8_t, bool>(VT_GENERATE_INDEX);
-  }
-  bool mutate_generate_index(bool _generate_index) {
-    return SetField<uint8_t>(VT_GENERATE_INDEX, static_cast<uint8_t>(_generate_index));
-  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<int64_t>(verifier, VT_DY_TENSOR_UID, 8) &&
@@ -129,7 +121,6 @@ struct ResampleBwdAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Ta
            verifier.VerifyVector(window()) &&
            VerifyField<int8_t>(verifier, VT_RESAMPLE_MODE, 1) &&
            VerifyField<int8_t>(verifier, VT_PADDING_MODE, 1) &&
-           VerifyField<uint8_t>(verifier, VT_GENERATE_INDEX, 1) &&
            verifier.EndTable();
   }
   ResampleBwdAttributesT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -168,9 +159,6 @@ struct ResampleBwdAttributesBuilder {
   void add_padding_mode(hipdnn_flatbuffers_sdk::data_objects::PaddingMode padding_mode) {
     fbb_.AddElement<int8_t>(ResampleBwdAttributes::VT_PADDING_MODE, static_cast<int8_t>(padding_mode), 0);
   }
-  void add_generate_index(bool generate_index) {
-    fbb_.AddElement<uint8_t>(ResampleBwdAttributes::VT_GENERATE_INDEX, static_cast<uint8_t>(generate_index));
-  }
   explicit ResampleBwdAttributesBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -192,8 +180,7 @@ inline ::flatbuffers::Offset<ResampleBwdAttributes> CreateResampleBwdAttributes(
     ::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> stride = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> window = 0,
     hipdnn_flatbuffers_sdk::data_objects::ResampleMode resample_mode = hipdnn_flatbuffers_sdk::data_objects::ResampleMode::NOT_SET,
-    hipdnn_flatbuffers_sdk::data_objects::PaddingMode padding_mode = hipdnn_flatbuffers_sdk::data_objects::PaddingMode::PADDING_NOT_SET,
-    ::flatbuffers::Optional<bool> generate_index = ::flatbuffers::nullopt) {
+    hipdnn_flatbuffers_sdk::data_objects::PaddingMode padding_mode = hipdnn_flatbuffers_sdk::data_objects::PaddingMode::PADDING_NOT_SET) {
   ResampleBwdAttributesBuilder builder_(_fbb);
   if(index_tensor_uid) { builder_.add_index_tensor_uid(*index_tensor_uid); }
   builder_.add_dx_tensor_uid(dx_tensor_uid);
@@ -202,7 +189,6 @@ inline ::flatbuffers::Offset<ResampleBwdAttributes> CreateResampleBwdAttributes(
   builder_.add_stride(stride);
   builder_.add_post_padding(post_padding);
   builder_.add_pre_padding(pre_padding);
-  if(generate_index) { builder_.add_generate_index(*generate_index); }
   builder_.add_padding_mode(padding_mode);
   builder_.add_resample_mode(resample_mode);
   return builder_.Finish();
@@ -218,8 +204,7 @@ inline ::flatbuffers::Offset<ResampleBwdAttributes> CreateResampleBwdAttributesD
     const std::vector<int64_t> *stride = nullptr,
     const std::vector<int64_t> *window = nullptr,
     hipdnn_flatbuffers_sdk::data_objects::ResampleMode resample_mode = hipdnn_flatbuffers_sdk::data_objects::ResampleMode::NOT_SET,
-    hipdnn_flatbuffers_sdk::data_objects::PaddingMode padding_mode = hipdnn_flatbuffers_sdk::data_objects::PaddingMode::PADDING_NOT_SET,
-    ::flatbuffers::Optional<bool> generate_index = ::flatbuffers::nullopt) {
+    hipdnn_flatbuffers_sdk::data_objects::PaddingMode padding_mode = hipdnn_flatbuffers_sdk::data_objects::PaddingMode::PADDING_NOT_SET) {
   auto pre_padding__ = pre_padding ? _fbb.CreateVector<int64_t>(*pre_padding) : 0;
   auto post_padding__ = post_padding ? _fbb.CreateVector<int64_t>(*post_padding) : 0;
   auto stride__ = stride ? _fbb.CreateVector<int64_t>(*stride) : 0;
@@ -234,8 +219,7 @@ inline ::flatbuffers::Offset<ResampleBwdAttributes> CreateResampleBwdAttributesD
       stride__,
       window__,
       resample_mode,
-      padding_mode,
-      generate_index);
+      padding_mode);
 }
 
 ::flatbuffers::Offset<ResampleBwdAttributes> CreateResampleBwdAttributes(::flatbuffers::FlatBufferBuilder &_fbb, const ResampleBwdAttributesT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -251,8 +235,7 @@ inline bool operator==(const ResampleBwdAttributesT &lhs, const ResampleBwdAttri
       (lhs.stride == rhs.stride) &&
       (lhs.window == rhs.window) &&
       (lhs.resample_mode == rhs.resample_mode) &&
-      (lhs.padding_mode == rhs.padding_mode) &&
-      (lhs.generate_index == rhs.generate_index);
+      (lhs.padding_mode == rhs.padding_mode);
 }
 
 inline bool operator!=(const ResampleBwdAttributesT &lhs, const ResampleBwdAttributesT &rhs) {
@@ -278,7 +261,6 @@ inline void ResampleBwdAttributes::UnPackTo(ResampleBwdAttributesT *_o, const ::
   { auto _e = window(); if (_e) { _o->window.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->window[_i] = _e->Get(_i); } } else { _o->window.resize(0); } }
   { auto _e = resample_mode(); _o->resample_mode = _e; }
   { auto _e = padding_mode(); _o->padding_mode = _e; }
-  { auto _e = generate_index(); _o->generate_index = _e; }
 }
 
 inline ::flatbuffers::Offset<ResampleBwdAttributes> ResampleBwdAttributes::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const ResampleBwdAttributesT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -298,7 +280,6 @@ inline ::flatbuffers::Offset<ResampleBwdAttributes> CreateResampleBwdAttributes(
   auto _window = _o->window.size() ? _fbb.CreateVector(_o->window) : 0;
   auto _resample_mode = _o->resample_mode;
   auto _padding_mode = _o->padding_mode;
-  auto _generate_index = _o->generate_index;
   return hipdnn_flatbuffers_sdk::data_objects::CreateResampleBwdAttributes(
       _fbb,
       _dy_tensor_uid,
@@ -309,8 +290,7 @@ inline ::flatbuffers::Offset<ResampleBwdAttributes> CreateResampleBwdAttributes(
       _stride,
       _window,
       _resample_mode,
-      _padding_mode,
-      _generate_index);
+      _padding_mode);
 }
 
 }  // namespace data_objects

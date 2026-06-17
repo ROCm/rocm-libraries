@@ -5730,12 +5730,15 @@ public:
      * @brief Add a resample backward (pooling gradient) operation to the graph
      *
      * @param dy: Input gradient tensor
-     * @param attributes: Resample backward operation attributes
+    * @param attributes: Resample backward operation attributes
+    * @param index: Optional max-pool index tensor produced by resample_fwd
      * @return dx: Output gradient tensor
      */
     // NOLINTBEGIN(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> resample_bwd(std::shared_ptr<TensorAttributes> dy,
-                                                   ResampleBwdAttributes attributes)
+                                                   ResampleBwdAttributes attributes,
+                                                   std::shared_ptr<TensorAttributes> index
+                                                   = nullptr)
     // NOLINTEND(readability-identifier-naming)
     {
         if(attributes.get_name().empty())
@@ -5746,10 +5749,18 @@ public:
         {
             dy->set_name(attributes.get_name() + "::DY");
         }
+        if(index && index->get_name().empty())
+        {
+            index->set_name(attributes.get_name() + "::INDEX");
+        }
 
         auto dx = outputTensor(attributes.get_name() + "::DX");
 
         attributes.set_dy(std::move(dy));
+        if(index)
+        {
+            attributes.set_index(std::move(index));
+        }
         attributes.set_dx(dx);
 
         _sub_nodes.emplace_back(

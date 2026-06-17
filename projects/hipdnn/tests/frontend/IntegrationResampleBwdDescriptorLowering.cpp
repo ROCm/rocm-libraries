@@ -59,6 +59,30 @@ protected:
 
         return lowerAndDeserialize(*graph, _handle);
     }
+
+    hipdnn_flatbuffers_sdk::data_objects::GraphT
+        buildAndDeserializeWithIndex(ResampleBwdAttributes& attrs)
+    {
+        auto graph = std::make_shared<TestableGraphLowering>();
+        graph->set_name("ResampleBwdIntegrationTest")
+            .set_compute_data_type(DataType::FLOAT)
+            .set_intermediate_data_type(DataType::FLOAT)
+            .set_io_data_type(DataType::FLOAT);
+
+        auto dy = std::make_shared<TensorAttributes>();
+        dy->set_uid(K_TENSOR_DY_UID).set_name("dy").set_data_type(DataType::FLOAT);
+        dy->set_dim(toVec(K_TENSOR_DY_DIMS)).set_stride(toVec(K_TENSOR_DY_STRIDES));
+
+        auto index = std::make_shared<TensorAttributes>();
+        index->set_uid(K_TENSOR_INDEX_UID).set_name("index").set_data_type(DataType::FLOAT);
+        index->set_dim(toVec(K_TENSOR_INDEX_DIMS)).set_stride(toVec(K_TENSOR_INDEX_STRIDES));
+
+        auto dx = graph->resample_bwd(dy, attrs, index);
+        dx->set_uid(K_TENSOR_DX_UID).set_output(true).set_name("dx");
+        dx->set_dim(toVec(K_TENSOR_DX_DIMS)).set_stride(toVec(K_TENSOR_DX_STRIDES));
+
+        return lowerAndDeserialize(*graph, _handle);
+    }
 };
 
 // Lowering round-trip: builds a graph, lowers via descriptors, and verifies
@@ -118,26 +142,30 @@ TEST_F(IntegrationResampleBwdDescriptorLowering, ResampleBwdLoweringRoundTrip)
     EXPECT_EQ(opNode->window, toVec(K_WINDOW));
 }
 
-TEST_F(IntegrationResampleBwdDescriptorLowering, GenerateIndexPreservedInRoundTrip)
+TEST_F(IntegrationResampleBwdDescriptorLowering, IndexTensorPreservedInRoundTrip)
 {
     ResampleBwdAttributes attrs;
-    attrs.set_name("test_generate_index");
+    attrs.set_name("test_index");
     attrs.set_resample_mode(ResampleMode::MAXPOOL);
     attrs.set_padding_mode(PaddingMode::ZERO_PAD);
     attrs.set_pre_padding(toVec(K_PRE_PADDING));
     attrs.set_post_padding(toVec(K_POST_PADDING));
     attrs.set_stride(toVec(K_STRIDE));
     attrs.set_window(toVec(K_WINDOW));
-    attrs.set_generate_index(true);
 
-    auto graphT = buildAndDeserialize(attrs);
+    auto graphT = buildAndDeserializeWithIndex(attrs);
+
+    ASSERT_EQ(graphT.tensors.size(), 3u);
+    auto tensorMap = buildTensorMap(graphT);
+    ASSERT_NE(tensorMap.count(K_TENSOR_INDEX_UID), 0u);
+    EXPECT_EQ(tensorMap[K_TENSOR_INDEX_UID]->dims, toVec(K_TENSOR_INDEX_DIMS));
+    EXPECT_EQ(tensorMap[K_TENSOR_INDEX_UID]->strides, toVec(K_TENSOR_INDEX_STRIDES));
 
     ASSERT_EQ(graphT.nodes.size(), 1u);
     auto* opNode = graphT.nodes[0]->attributes.AsResampleBwdAttributes();
     ASSERT_NE(opNode, nullptr);
-
-    ASSERT_TRUE(opNode->generate_index.has_value());
-    EXPECT_EQ(opNode->generate_index.value(), true);
+    ASSERT_TRUE(opNode->index_tensor_uid.has_value());
+    EXPECT_EQ(opNode->index_tensor_uid.value(), K_TENSOR_INDEX_UID);
 }
 
 TEST_F(IntegrationResampleBwdDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)

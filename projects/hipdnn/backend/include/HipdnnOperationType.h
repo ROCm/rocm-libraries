@@ -43,5 +43,5 @@ typedef enum
     HIPDNN_OPERATION_TYPE_RESAMPLE_FWD = 18, ///< Resample forward operation
     HIPDNN_OPERATION_TYPE_RMSNORM_BACKWARD_EXT = 19, ///< RMS normalization backward
     HIPDNN_OPERATION_TYPE_LAYERNORM_BACKWARD_EXT = 20, ///< Layer normalization backward
-    HIPDNN_OPERATION_TYPE_RESAMPLE_BWD = 21, ///< Resample backward operation
+    HIPDNN_OPERATION_TYPE_RESAMPLE_BWD_EXT = 21, ///< Resample backward operation
 } hipdnnOperationType_ext_t;

@@ -140,7 +140,7 @@ namespace hipdnn_frontend::detail
         return {std::make_shared<graph::LayernormBackwardNode>(graph::LayernormBackwardAttributes{},
                                                                graphAttrs),
                 {}};
-    case HIPDNN_OPERATION_TYPE_RESAMPLE_BWD:
+    case HIPDNN_OPERATION_TYPE_RESAMPLE_BWD_EXT:
         return {
             std::make_shared<graph::ResampleBwdNode>(graph::ResampleBwdAttributes{}, graphAttrs),
             {}};

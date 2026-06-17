@@ -140,7 +140,7 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
     case HIPDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR:
         privateDesc = std::make_shared<ResampleFwdOperationDescriptor>();
         break;
-    case HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR:
+    case HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<ResampleBwdOperationDescriptor>();
         break;
     case HIPDNN_BACKEND_OPERATION_RMSNORM_BACKWARD_DESCRIPTOR_EXT:

@@ -504,7 +504,7 @@ TEST(TestCreateNodeForType, CreatesResampleFwdNode)
 TEST(TestCreateNodeForType, CreatesResampleBwdNode)
 {
     const GraphAttributes graphAttrs;
-    auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_RESAMPLE_BWD, graphAttrs);
+    auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_RESAMPLE_BWD_EXT, graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
     auto typedNode = std::dynamic_pointer_cast<ResampleBwdNode>(node);
