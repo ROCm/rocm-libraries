@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "Container.hpp"
+
 #include "compilation/KernelCompiler.hpp"
 #include "device/CurrentDevicePropertyProvider.hpp"
 
