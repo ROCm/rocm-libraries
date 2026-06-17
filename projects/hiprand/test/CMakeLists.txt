@@ -93,7 +93,7 @@ if(HIPRAND_ENABLE_COVERAGE)
     LLVM_PROFDATA
     llvm-profdata
     REQUIRED
-    HINTS ${ROCM_PATH}/llvm/bin
+    HINTS ${LLVM_TOOLS_SEARCH_PREFIX}/bin ${ROCM_PATH}/llvm/bin
     PATHS /opt/rocm/llvm/bin
   )
 
@@ -101,7 +101,7 @@ if(HIPRAND_ENABLE_COVERAGE)
     LLVM_COV
     llvm-cov
     REQUIRED
-    HINTS ${ROCM_PATH}/llvm/bin
+    HINTS ${LLVM_TOOLS_SEARCH_PREFIX}/bin ${ROCM_PATH}/llvm/bin
     PATHS /opt/rocm/llvm/bin
   )
 
@@ -109,9 +109,9 @@ if(HIPRAND_ENABLE_COVERAGE)
     coverage
     DEPENDS coverage_analysis
     COMMAND ${LLVM_PROFDATA} merge -sparse ${PROFILE_DIR}/profraw/hiprand-coverage_*.profraw -o ${PROFILE_DIR}/hiprand.profdata
-    COMMAND ${LLVM_COV} report -object ${CMAKE_BINARY_DIR}/library/libhiprand-d.so -instr-profile=${PROFILE_DIR}/hiprand.profdata
-    COMMAND ${LLVM_COV} show -object ${CMAKE_BINARY_DIR}/library/libhiprand-d.so -instr-profile=${PROFILE_DIR}/hiprand.profdata -format=html -output-dir=${PROFILE_DIR}
-    COMMAND ${LLVM_COV} export -object ${CMAKE_BINARY_DIR}/library/libhiprand-d.so -instr-profile=${PROFILE_DIR}/hiprand.profdata -format=lcov > ${PROFILE_DIR}/coverage.info
+    COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hiprand> -instr-profile=${PROFILE_DIR}/hiprand.profdata
+    COMMAND ${LLVM_COV} show -object $<TARGET_FILE:hiprand> -instr-profile=${PROFILE_DIR}/hiprand.profdata -format=html -output-dir=${PROFILE_DIR}
+    COMMAND ${LLVM_COV} export -object $<TARGET_FILE:hiprand> -instr-profile=${PROFILE_DIR}/hiprand.profdata -format=lcov > ${PROFILE_DIR}/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 endif()

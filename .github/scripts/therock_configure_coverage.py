@@ -12,10 +12,12 @@ from therock_configure_ci import get_modified_paths  # reuse existing helper
 logging.basicConfig(level=logging.INFO)
 SCRIPT_DIR = Path(__file__).resolve().parent
 
-# Coverage-enabled projects: project key -> (cmake_target, build_subdir)
-# Only projects listed here will get coverage jobs
+# Coverage-enabled projects: project key -> (cmake_target, build_subdir, cmake_options)
+# Only projects listed here will get coverage jobs. cmake_options pins the build
+# to just this project so the coverage job does not inherit the (possibly merged)
+# mega-group options that would otherwise build unrelated components.
 COVERAGE_PROJECT_METADATA = {
-    "hiprand": ("hipRAND", "ml-libs/hipRAND"),
+    "hiprand": ("hipRAND", "ml-libs/hipRAND", "-DTHEROCK_ENABLE_RAND=ON -DTHEROCK_ENABLE_ALL=OFF"),
 }
 
 
@@ -23,14 +25,15 @@ def get_build_metadata(project_key: str, base_dir: str = "TheRock/build-coverage
     """Get CMake target and build directory for a coverage-enabled project.
 
     Returns:
-        Tuple of (uppercase_name, cmake_target, build_dir) or None if not coverage-enabled
+        Tuple of (uppercase_name, cmake_target, build_dir, cmake_options) or None if not
+        coverage-enabled
     """
     if project_key not in COVERAGE_PROJECT_METADATA:
         return None
 
-    cmake_target, build_subdir = COVERAGE_PROJECT_METADATA[project_key]
+    cmake_target, build_subdir, cmake_options = COVERAGE_PROJECT_METADATA[project_key]
     build_dir = f"{base_dir}/{build_subdir}/build"
-    return project_key.upper(), cmake_target, build_dir
+    return project_key.upper(), cmake_target, build_dir, cmake_options
 
 
 def get_changed_subtrees_only():
@@ -81,10 +84,13 @@ def main():
             continue
 
         # Add coverage metadata
-        uppercase_name, cmake_target, build_dir = metadata
+        uppercase_name, cmake_target, build_dir, cmake_options = metadata
         proj["project_name"] = uppercase_name
         proj["cmake_target"] = cmake_target
         proj["build_dir"] = build_dir
+        # Pin to this project's own options so we don't build the merged
+        # mega-group (which pulls in unrelated components like hipdnn/providers).
+        proj["cmake_options"] = cmake_options
 
         coverage_projects.append(proj)
 
