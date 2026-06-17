@@ -48,14 +48,13 @@ def get_changed_projects(base_ref: str) -> str:
     if not modified_paths:
         return ""
 
-    # TODO: Uncomment after testing
-    # # If CI workflow files changed, run all tests
-    # if check_for_workflow_file_related_to_ci(modified_paths):
-    #     return ""
+    # If CI workflow files changed, run all tests
+    if check_for_workflow_file_related_to_ci(modified_paths):
+        return ""
 
-    # # If only skippable files changed, skip
-    # if not check_for_non_skippable_path(modified_paths):
-    #     return ""
+    # If only skippable files changed, skip
+    if not check_for_non_skippable_path(modified_paths):
+        return ""
 
     repo_config_path = SCRIPT_DIR / ".." / "repos-config.json"
     config = load_repo_config(str(repo_config_path))
