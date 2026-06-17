@@ -414,12 +414,13 @@ ROCWMMA_KERNEL void __launch_bounds__(kBlockThreads)
         WorkItem const wi = work_list[blockIdx.x];
 
         uint32_t expert_start = expert_offsets[wi.expert_id];
-        uint32_t expert_end   = expert_offsets[wi.expert_id + 1];
-        uint32_t expert_m     = expert_end - expert_start;
 
-        // Base pointers for this expert
+        // Base pointers for this expert.  The per-expert weight stride is
+        // k * ldb (rows x leading dimension), not k * n: if the weight
+        // leading dimension is ever padded (ldb != n) the base pointer must
+        // still advance by ldb to land on the correct expert.
         InputT const* a_base = tokens + expert_start * lda;
-        InputT const* b_base = expert_weights + wi.expert_id * k * n;
+        InputT const* b_base = expert_weights + wi.expert_id * k * ldb;
         OutputT*      d_base = output + expert_start * ldd;
 
         // ------------------------------------------------------------------
@@ -434,10 +435,14 @@ ROCWMMA_KERNEL void __launch_bounds__(kBlockThreads)
         auto localWarpOffset = localWarpCoord * warpTileSize;
         auto warpTileCoord   = macroTileCoord + localWarpOffset;
 
-        // Skip warps outside this expert's output tile
-        auto warpTileBound = warpTileCoord + warpTileSize;
-        if(get<0>(warpTileBound) > expert_m || get<1>(warpTileBound) > n)
-            return;
+        // No per-warp boundary guard here.  This sample requires
+        // tokens_per_expert % MACRO_TILE_X == 0 and n % MACRO_TILE_Y == 0
+        // (see Requirements / Known limitations), and the host work list only
+        // emits full macro tiles, so every warp tile is guaranteed to lie
+        // fully inside the expert's output (warpTileBound <= {expert_m, n}).
+        // A per-warp early return would be non-uniform across the CTA and
+        // could deadlock the synchronize_workgroup() barriers below, so it is
+        // intentionally omitted rather than made conditional.
 
         // ------------------------------------------------------------------
         // Global read address setup
@@ -591,7 +596,7 @@ static void grouped_gemm_moe_cpu_ref(uint32_t        num_experts,
     {
         uint32_t      m_e   = expert_offsets[e + 1] - expert_offsets[e];
         InputT const* x_e   = tokens + expert_offsets[e] * lda;
-        InputT const* w_e   = expert_weights + e * k * n;
+        InputT const* w_e   = expert_weights + e * k * ldb; // per-expert stride = k * ldb
         OutputT*      out_e = output + expert_offsets[e] * ldd;
 
         for(uint32_t i = 0; i < m_e; i++)
@@ -829,9 +834,14 @@ ROCWMMA_HOST void run_grouped_gemm_moe_sample(uint32_t num_experts,
     double tFlopsPerSec
         = gFlopsPerRun * recordRuns / (static_cast<double>(elapsedMs) * 1e-3) * 1e-3;
 
+    // The time and GFlops columns below are totals across all `recordRuns`
+    // timed launches (TFlops/s is the sustained rate).  Label the time column
+    // with the run count so it is not misread as a single-launch latency.
+    std::string elapsedHdr = "totalMs(" + std::to_string(recordRuns) + "x)";
+
     std::cout << std::left << std::setw(10) << "Experts" << std::setw(10) << "TokPerExp"
               << std::setw(8) << "MatK" << std::setw(8) << "MatN" << std::setw(12) << "WorkItems"
-              << std::setw(14) << "elapsedMs" << std::setw(14) << "GFlops" << std::setw(12)
+              << std::setw(14) << elapsedHdr << std::setw(14) << "GFlops" << std::setw(12)
               << "TFlops/s"
               << "\n";
 
