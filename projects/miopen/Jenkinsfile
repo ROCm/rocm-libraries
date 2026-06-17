@@ -264,6 +264,228 @@ def runTheRockDockerPromote() {
     }
 }
 
+def cleanupAsanImage() {
+    def imageToRemove = env.ASAN_CANDIDATE_IMAGE ?: "${env.MIOPEN_DOCKER_IMAGE_URL}:ci_asan"
+    sh label: 'Remove ASAN Docker image', script: "docker rmi ${imageToRemove} || true"
+}
+
+def runAsanTests(String gpuLabel, String gfxFamily) {
+    withWorkingDir {
+        def variant = env.STAGE_NAME
+        def asanImage = env.ASAN_CANDIDATE_IMAGE?.trim() ? env.ASAN_CANDIDATE_IMAGE : "${env.MIOPEN_DOCKER_IMAGE_URL}:asan"
+        def video_id = sh(returnStdout: true, script: 'getent group video | cut -d: -f3').trim()
+        def render_id = sh(returnStdout: true, script: 'getent group render | cut -d: -f3').trim()
+        def dockerOpts = "--user root " +
+                         "--device=/dev/kfd --device=/dev/dri " +
+                         "--group-add video --group-add render " +
+                         "--cap-add=SYS_PTRACE --security-opt seccomp=unconfined " +
+                         "--group-add=${video_id} --group-add=${render_id} " +
+                         "-v ${env.WORKSPACE}:${env.WORKSPACE}"
+        utils.setGithubStatus(variant, 'pending', 'In progress')
+        try {
+            withDockerRegistry([credentialsId: "docker_test_cred", url: ""]) {
+                docker.image(asanImage).pull()
+            }
+            withDockerContainer(image: asanImage, args: dockerOpts) {
+                timeout(time: 420, unit: 'MINUTES') {
+                    sh label: 'Build MIOpen with ASAN', script: """
+                        set -e
+                        echo "Running as: \$(whoami)"
+                        cd ${env.WORKSPACE}/${env.MIOPEN_DIR}
+                        LOGNAME=temp-user dvc pull -v
+                        rm -rf build && mkdir build && cd build
+
+                        export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:\$(dirname \$(\${ROCM_PATH}/llvm/bin/clang --print-file-name libclang_rt.asan-x86_64.so))
+
+                        CXX=\${ROCM_PATH}/llvm/bin/clang++ cmake \\
+                            -DMIOPEN_TEST_FLAGS="--disable-verification-cache" \\
+                            -DCMAKE_BUILD_TYPE=RelWithDebInfo \\
+                            -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O2 -g1" \\
+                            -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g -shared-libasan" \\
+                            -DCMAKE_INSTALL_PREFIX=\${ROCM_PATH} \\
+                            -DCMAKE_PREFIX_PATH="\${ROCM_PATH};\${ROCM_PATH}/lib" \\
+                            -DMIOPEN_USE_MLIR=OFF \\
+                            -DMIOPEN_USE_COMPOSABLEKERNEL=ON \\
+                            -DMIOPEN_TEST_DISCRETE=OFF \\
+                            -DMIOPEN_GPU_SYNC=OFF \\
+                            -DGTEST_PARALLEL_LEVEL=4 \\
+                            -DMIOPEN_INSTALL_GPU_DATABASES=${gfxFamily} \\
+                            -DGPU_TARGETS="${gfxFamily}:xnack+" \\
+                            -DHIP_PLATFORM=amd \\
+                            -DBUILD_TESTING=ON \\
+                            -DTHEROCK_SANITIZER=ASAN \\
+                            ..
+
+                        ASAN_OPTIONS=detect_leaks=0 make -j\$(nproc) install
+                    """.stripIndent()
+                    def shardExit = sh label: 'Run ASAN shard tests', returnStatus: true, script: """#!/bin/bash
+                        export LD_PRELOAD=\$(\${ROCM_PATH}/llvm/bin/clang --print-file-name libclang_rt.asan-x86_64.so)
+                        export ASAN_OPTIONS="\${ASAN_OPTIONS}:print_stats=1"
+                        . /opt/venv/bin/activate
+                        cd /TheRock
+                        SHARD_LOGS_DIR=${env.WORKSPACE}/shard_logs
+                        mkdir -p \$SHARD_LOGS_DIR
+                        overall_exit=0
+                        pids=()
+                        for i in \$(seq 1 4); do
+                            (
+                                THEROCK_BIN_DIR=\${ROCM_PATH}/bin \\
+                                AMDGPU_FAMILIES=${gfxFamily} \\
+                                TEST_TYPE=full \\
+                                SHARD_INDEX=\$i \\
+                                TOTAL_SHARDS=4 \\
+                                GTEST_OUTPUT="xml:\$SHARD_LOGS_DIR/asan_shard_\$i.xml" \\
+                                python build_tools/github_actions/test_executable_scripts/test_miopen.py
+                                echo \$? > \$SHARD_LOGS_DIR/asan_shard_\$i.exit
+                            ) 2>&1 | tee \$SHARD_LOGS_DIR/asan_shard_\$i.log | sed "s/^/[shard \$i] /" &
+                            pids+=(\$!)
+                        done
+                        for pid in "\${pids[@]}"; do
+                            wait \$pid
+                        done
+                        for i in \$(seq 1 4); do
+                            shard_exit=\$(cat \$SHARD_LOGS_DIR/asan_shard_\$i.exit 2>/dev/null || echo 1)
+                            if [ "\$shard_exit" != "0" ]; then
+                                echo "[shard \$i] FAILED with exit code \$shard_exit"
+                                overall_exit=1
+                            fi
+                        done
+                        exit \$overall_exit
+                    """.stripIndent()
+                    // Always fix permissions so cleanWs() can delete root-owned files,
+                    // even when shards failed
+                    sh label: 'Fix workspace permissions', script: "chmod -R a+w ${env.WORKSPACE} || true"
+                    if (shardExit != 0) {
+                        error("ASAN shard tests failed")
+                    }
+                }
+            }
+            utils.setGithubStatus(variant, 'success', 'Completed successfully')
+        }
+        catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
+            utils.setGithubStatus(variant, 'error', 'Job cancelled or aborted')
+            throw e
+        }
+        catch (Exception ex) {
+            utils.setGithubStatus(variant, 'failure', 'Stage failed')
+            throw ex
+        }
+    }
+}
+
+def runAsanDockerBuild() {
+    node(rocmnode("docker")) {
+        try {
+            withWorkingDir {
+                def candidateTag = buildAsanDockerImage(amdgpuFamilies: "gfx94X-dcgpu", amdgpuArchs: "gfx942")
+                env.ASAN_CANDIDATE_IMAGE = candidateTag
+            }
+        } finally {
+            sh "docker buildx rm ci-builder || true"
+            sh "docker rmi ${env.ASAN_CANDIDATE_IMAGE} || true"
+            cleanWs()
+        }
+    }
+}
+
+def promoteAsanDockerImage() {
+    def variant = env.STAGE_NAME
+    def candidateTag = "${env.MIOPEN_DOCKER_IMAGE_URL}:ci_asan_candidate"
+    def finalTag = "${env.MIOPEN_DOCKER_IMAGE_URL}:asan"
+    utils.setGithubStatus(variant, 'pending', 'In progress')
+    try {
+        withDockerRegistry([credentialsId: "docker_test_cred", url: ""]) {
+            sh """
+                docker pull ${candidateTag}
+                docker tag ${candidateTag} ${finalTag}
+                docker push ${finalTag}
+            """.stripIndent()
+        }
+        utils.setGithubStatus(variant, 'success', 'Completed successfully')
+    }
+    catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
+        utils.setGithubStatus(variant, 'error', 'Job cancelled or aborted')
+        throw e
+    }
+    catch (Exception ex) {
+        utils.setGithubStatus(variant, 'failure', 'Stage failed')
+        throw ex
+    }
+}
+
+def runAsanDockerPromote() {
+    node(rocmnode("docker")) {
+        try {
+            withWorkingDir {
+                promoteAsanDockerImage()
+            }
+        } finally {
+            sh "docker rmi ${env.MIOPEN_DOCKER_IMAGE_URL}:ci_asan_candidate || true"
+            sh "docker rmi ${env.MIOPEN_DOCKER_IMAGE_URL}:asan || true"
+            cleanWs()
+        }
+    }
+}
+
+def buildAsanDockerImage(Map conf=[:]) {
+    def variant = env.STAGE_NAME
+    env.DOCKER_BUILDKIT = 1
+    def asanTag = "${env.MIOPEN_DOCKER_IMAGE_URL}:ci_asan_candidate"
+    def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:asan_source_cache"
+    def amdgpuFamilies = conf.get("amdgpuFamilies", "gfx94X-dcgpu")
+    def amdgpuArchs = conf.get("amdgpuArchs", "gfx942")
+
+    // Read TheRock hash from the single source of truth (same pattern as buildTheRockDockerImage)
+    def theRockHash = sh(
+        script: """
+            grep -A 2 'therock-ref:' ${env.WORKSPACE}/.github/actions/ci-env/action.yml \
+            | grep 'value:' | awk '{print \$2}' | tr -d '"'
+        """.stripIndent(),
+        returnStdout: true
+    ).trim()
+
+    def dockerArgs = "--build-arg BUILD_TYPE=source_build " +
+                     "--build-arg AMDGPU_FAMILIES=\"${amdgpuFamilies}\" " +
+                     "--build-arg GPU_ARCHS=\"${amdgpuArchs}\" " +
+                     "--build-arg THEROCK_GIT_HASH=\"${theRockHash}\" " +
+                     "--build-arg ASAN_SCCACHE_CACHE_BUSTER=\"MiOpen-ASAN-Docker\" " +
+                     " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile.ASAN "
+    def buildContext = "${env.WORKSPACE}/${env.MIOPEN_DIR}/."
+    def dockerCacheArgs = "--cache-from type=registry,ref=${cacheRef} " +
+                          "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=min "
+
+    echo "Building ASAN image ${asanTag} from source (TheRock=${theRockHash}, families=${amdgpuFamilies})"
+    utils.setGithubStatus(variant, 'pending', 'In progress')
+    try {
+        withDockerRegistry([credentialsId: "docker_test_cred", url: ""]) {
+            sh label: 'Set up Docker Buildx', script: """
+                docker buildx inspect ci-builder >/dev/null 2>&1 || \
+                docker buildx create --name ci-builder --driver docker-container --use
+                docker buildx use ci-builder
+                docker buildx inspect --bootstrap
+            """.stripIndent()
+            sh label: 'Build and push ASAN Docker image', script: """
+                DOCKER_BUILDKIT=1 docker buildx build \
+                  --push \
+                  --tag ${asanTag} \
+                  ${dockerCacheArgs} \
+                  ${dockerArgs} \
+                  ${buildContext}
+            """.stripIndent()
+        }
+        utils.setGithubStatus(variant, 'success', 'Completed successfully')
+    }
+    catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
+        utils.setGithubStatus(variant, 'error', 'Job cancelled or aborted')
+        throw e
+    }
+    catch (Exception ex) {
+        utils.setGithubStatus(variant, 'failure', 'Stage failed')
+        throw ex
+    }
+    return asanTag
+}
+
 //launch develop branch nightly/weekly jobs
 CRON_SETTINGS = BRANCH_NAME == "develop" ? '''
 0 0 * * * % RUN_NIGHTLY_TESTS=true;BUILD_PACKAGE_AND_CHECKS=false;BUILD_FULL_TESTS=false;TARGET_GFX908=false;TARGET_GFX90A=true;TARGET_GFX942=true
