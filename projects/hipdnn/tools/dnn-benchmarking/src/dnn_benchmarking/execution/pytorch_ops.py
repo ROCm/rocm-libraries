@@ -104,7 +104,7 @@ def get_reference_warnings(graph_json: Dict[str, Any]) -> List[str]:
         op_type = str(node.get("type", ""))
         name = str(node.get("name") or op_type)
 
-        if op_type in ("LayernormAttributes", "LayerNormAttributes"):
+        if op_type == "LayernormAttributes":
             if (
                 _node_uid(node, "mean_tensor_uid", ("outputs",), required=False)
                 is not None
@@ -119,7 +119,7 @@ def get_reference_warnings(graph_json: Dict[str, Any]) -> List[str]:
                     "PyTorch reference timing is not solely built-in PyTorch operator time."
                 )
 
-        elif op_type in ("RMSNormAttributes", "RmsNormAttributes"):
+        elif op_type == "RMSNormAttributes":
             reasons: List[str] = []
             if not hasattr(F, "rms_norm"):
                 reasons.append("torch.nn.functional.rms_norm is unavailable")
@@ -1331,7 +1331,6 @@ def handle_batchnorm_backward(
     _store_channel_tensor(tensors, dbias_uid, dbias.to(dtype=scale.dtype), x.ndim)
 
 
-@register_handler("LayerNormAttributes")
 @register_handler("LayernormAttributes")
 def handle_layernorm(
     node: Dict[str, Any],
@@ -1385,7 +1384,6 @@ def handle_layernorm(
             )
 
 
-@register_handler("RmsNormAttributes")
 @register_handler("RMSNormAttributes")
 def handle_rmsnorm(
     node: Dict[str, Any],

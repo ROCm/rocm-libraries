@@ -312,7 +312,7 @@ class TestComputeFlops:
             "nodes": [
                 {
                     "name": "ln",
-                    "type": "LayerNormAttributes",
+                    "type": "LayernormAttributes",
                     "inputs": {"x_tensor_uid": 1},
                     "outputs": {"y_tensor_uid": 2},
                 }

@@ -91,8 +91,6 @@ _FLOP_HANDLERS = {
     "BatchnormBackwardAttributes": batchnorm_backward_flops,
     "BatchnormBwdAttributes": batchnorm_backward_flops,
     "LayernormAttributes": layernorm_flops,
-    "LayerNormAttributes": layernorm_flops,
-    "RmsNormAttributes": layernorm_flops,
     "RMSNormAttributes": layernorm_flops,
     "SoftmaxAttributes": softmax_flops,
     "ReductionAttributes": reduction_flops,
