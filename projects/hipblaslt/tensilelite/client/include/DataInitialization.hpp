@@ -205,31 +205,15 @@ namespace TensileLite
             std::shared_ptr<ProblemInputs>
                 prepareCPUInputs(ContractionProblemGroupedGemm const& problem)
             {
-                if(m_cpuInit && m_curBoundsCheck == BoundsCheckMode::Disable
-                   && !m_problemDependentData)
-                {
-                    std::vector<void**> bPtr;
-                    if(m_elementsToValidate)
-                        resetOutput(m_cpuPtrs,
-                                    bPtr,
-                                    m_maxElements,
-                                    m_groupedOffsets,
-                                    problem.gemms[0],
-                                    hipMemcpyHostToHost);
-                }
-                else
-                {
-                    if(m_problemDependentData)
-                        initializeCPUInputs(problem);
-                    std::vector<void**> bPtr;
-                    copyInputs(m_cpuPtrs,
-                               bPtr,
-                               m_maxElements,
-                               m_groupedOffsets,
-                               problem.gemms[0],
-                               hipMemcpyHostToHost);
-                    m_cpuInit = false;
-                }
+                if(m_problemDependentData)
+                    initializeCPUInputs(problem);
+                std::vector<void**> bPtr;
+                copyInputs(m_cpuPtrs,
+                           bPtr,
+                           m_maxElements,
+                           m_groupedOffsets,
+                           problem.gemms[0],
+                           hipMemcpyHostToHost);
                 initializeConstantInputs(problem.gemms[0]);
 
                 return ConvertToProblemInputs(problem.gemms[0], false);
@@ -237,31 +221,15 @@ namespace TensileLite
 
             std::shared_ptr<ProblemInputs> prepareCPUInputs(ContractionProblemGemm const& problem)
             {
-                if(m_cpuInit && m_curBoundsCheck == BoundsCheckMode::Disable
-                   && !m_problemDependentData)
-                {
-                    std::vector<void**> bPtr;
-                    if(m_elementsToValidate)
-                        resetOutput(m_cpuPtrs,
-                                    bPtr,
-                                    m_maxElements,
-                                    m_groupedOffsets,
-                                    problem,
-                                    hipMemcpyHostToHost);
-                }
-                else
-                {
-                    if(m_problemDependentData)
-                        initializeCPUInputs(problem);
-                    std::vector<void**> bPtr;
-                    copyInputs(m_cpuPtrs,
-                               bPtr,
-                               m_maxElements,
-                               m_groupedOffsets,
-                               problem,
-                               hipMemcpyHostToHost);
-                    m_cpuInit = false;
-                }
+                if(m_problemDependentData)
+                    initializeCPUInputs(problem);
+                std::vector<void**> bPtr;
+                copyInputs(m_cpuPtrs,
+                           bPtr,
+                           m_maxElements,
+                           m_groupedOffsets,
+                           problem,
+                           hipMemcpyHostToHost);
                 initializeConstantInputs(problem);
 
                 return ConvertToProblemInputs(problem, false);
@@ -1224,7 +1192,6 @@ namespace TensileLite
             std::shared_ptr<void>                 m_workspacePristine;
             std::vector<ConstDataInitProperties>  m_cdata;
 
-            bool                          m_cpuInit          = false;
             bool                          m_gpuInit          = false;
             ContractionProblemGemm const* m_batchInitProblem = nullptr;
 
