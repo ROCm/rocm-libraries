@@ -112,22 +112,14 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // share one region adaptor. Either gate is enough to enter this block.
     if (runScheduler || moduleOptions.EnableWaitCntInsertion) {
         PassFeatureConfig passFeatureConfig;
-        std::shared_ptr<DAGScheduleJsonCollector> snapshotCollector;
         if (runScheduler) {
             passFeatureConfig.loopConfig.unrollGemm = true;
             passFeatureConfig.dagFeatures.distributeGlobalRead = true;
-            passFeatureConfig.passOrderSnapshot.jsonPath = moduleOptions.PassOrderSnapshotJson;
-            snapshotCollector = createPassOrderSnapshotCollector(passFeatureConfig, moduleOptions,
-                                                                 module.getName());
-            passFeatureConfig.passOrderSnapshot.titlePrefix = "loopWithPrefetch+noLoadLoopBody";
         }
 
         PassManager innerPM;
         registerAllAnalyses(innerPM.getAnalysisManager());
         innerPM.setPassFeatureConfig(passFeatureConfig);
-        if (snapshotCollector) {
-            configurePassOrderSnapshot(innerPM, snapshotCollector);
-        }
         configureDebugOutput(innerPM, moduleOptions, "loopWithPrefetch+noLoadLoopBody",
                              debugStreams);
         PB.applyExtensionPoint(PipelineExtensionPoint::InnerRegionBegin, innerPM, module);

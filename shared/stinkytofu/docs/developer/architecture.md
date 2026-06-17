@@ -72,7 +72,3 @@ Pre-defined high-level operations (e.g., ReLU, Clamp) are defined in `src/ir/log
 ## stinkytofu-opt
 
 `tools/stinkytofu-opt/` is the standalone IR driver for testing passes. Pass registry is in `stinkytofu-opt.hpp::availablePasses`. FileCheck tests use `stinkytofu-check` to run a `RUN:` command and verify stdout against `CHECK:` directives. See [stinkytofu-opt README](../../tools/stinkytofu-opt/README.md).
-
-## JSON Snapshot
-
-`--pass-order-snapshot-json=<path>` writes before/after instruction-order JSON (schema `stinkytofu-dag-schedule-v1`) for visualization. Controlled via `StinkyTofuPassOrderSnapshotJson` global parameter. See [Global Parameters](../user/global-parameters.md).
