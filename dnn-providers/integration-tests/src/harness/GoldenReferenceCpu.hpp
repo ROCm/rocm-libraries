@@ -16,7 +16,6 @@
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanNotApplicableException.hpp>
 
 namespace hipdnn_integration_tests
 {
@@ -56,18 +55,8 @@ protected:
 
         auto tensorMap = _graphAndTensors.hostBufferMap();
 
-        try
-        {
-            hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
-                _graphAndTensors.graphBuffer.data(),
-                _graphAndTensors.graphBuffer.size(),
-                tensorMap);
-        }
-        catch(const hipdnn_test_sdk::utilities::detail::PlanNotApplicableException& e)
-        {
-            // NOLINTNEXTLINE(readability-implicit-bool-conversion)
-            GTEST_SKIP() << "CPU reference executor: " << e.what();
-        }
+        hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
+            _graphAndTensors.graphBuffer.data(), _graphAndTensors.graphBuffer.size(), tensorMap);
 
         EXPECT_TRUE(_graphAndTensors.validateTensors(
             _referenceOutputTensors, absoluteTolerance, relativeTolerance));
