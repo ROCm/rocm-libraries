@@ -14,6 +14,7 @@ from .executor import Executor
 from .timing import (
     GpuTimer,
     GpuTimerInterface,
+    HipGpuTimer,
     Timer,
     TorchGpuTimer,
     create_gpu_timer,
@@ -26,6 +27,7 @@ __all__ = [
     "Executor",
     "GpuTimer",
     "GpuTimerInterface",
+    "HipGpuTimer",
     "Timer",
     "TorchGpuTimer",
     "create_gpu_timer",

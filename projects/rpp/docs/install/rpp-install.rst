@@ -1,6 +1,6 @@
 .. meta::
-  :description: RPP installation
-  :keywords: install, RPP, AMD, ROCm, installation, prerequisites, dependencies, requirements
+  :description: Installing ROCm Performance Primitives
+  :keywords: rpp, ROCm Performance Primitives, ROCm, documentation, installing
 
 .. _installation:
 

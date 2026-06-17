@@ -11,6 +11,7 @@ warmup = 10
 iters = 100
 verbose = true
 
-# Generic ROCm hipDNN engine plugin directory. With no [[engines]] entries,
-# dnn-benchmark discovers and runs all engines available in this directory.
-plugin_path = "/opt/rocm/lib/hipdnn_plugins/engines"
+# Optional plugin discovery directory. setup.sh prints the selected prefix; pass
+# <selected-prefix>/lib/hipdnn_plugins/engines when plugin discovery is not
+# already configured by the runtime environment.
+# plugin_path = "<selected-prefix>/lib/hipdnn_plugins/engines"

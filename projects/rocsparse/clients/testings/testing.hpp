@@ -28,6 +28,9 @@
 #include "gbyte.hpp"
 #include "rocsparse.hpp"
 #include "rocsparse_check.hpp"
+#ifdef ROCSPARSE_DEBUGGING
+#include "rocsparse_clients_test_hip_debug_wrappers.hpp"
+#endif
 #include "rocsparse_graph.hpp"
 #include "rocsparse_matrix_factory.hpp"
 #include "rocsparse_reproducibility.hpp"

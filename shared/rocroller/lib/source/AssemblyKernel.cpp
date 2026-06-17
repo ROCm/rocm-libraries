@@ -5,8 +5,10 @@
 
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
+#include <rocRoller/CodeGen/BranchGenerator.hpp>
 #include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/InstructionValues/LabelAllocator.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
 
 namespace rocRoller
@@ -34,18 +36,10 @@ namespace rocRoller
         co_yield ctx->argLoader()->allocatePreloadedRegisters(m_preloadedRegOffset,
                                                               m_numPreloadedRegs);
 
-        if(ctx->targetArchitecture().HasCapability(GPUCapability::WorkgroupIdxViaTTMP))
-        {
-            m_workgroupIndex[0] = ctx->getTTMP9();
-            m_workgroupIndex[0]->setName("Workgroup Index X");
-        }
-        else
-        {
-            m_workgroupIndex[0]
-                = Register::Value::Placeholder(ctx, Register::Type::Scalar, DataType::UInt32, 1);
-            m_workgroupIndex[0]->setName("Workgroup Index X");
-            co_yield m_workgroupIndex[0]->allocate();
-        }
+        m_workgroupIndex[0]
+            = Register::Value::Placeholder(ctx, Register::Type::Scalar, DataType::UInt32, 1);
+        m_workgroupIndex[0]->setName("Workgroup Index X");
+        co_yield m_workgroupIndex[0]->allocate();
 
         if(m_kernelDimensions > 1)
         {
@@ -62,35 +56,40 @@ namespace rocRoller
             co_yield m_workgroupIndex[2]->allocate();
         }
 
+        Register::AllocationOptions allocOptions = {};
+
+        if(ctx->targetArchitecture().HasCapability(GPUCapability::HasVGPRIndexing))
+            allocOptions.forceReservedRegion = true;
+
         bool packedWorkitem
             = m_kernelDimensions > 1
               && ctx->targetArchitecture().HasCapability(GPUCapability::PackedWorkitemIDs);
 
         if(packedWorkitem)
         {
-            m_packedWorkitemIndex
-                = Register::Value::Placeholder(ctx, Register::Type::Vector, DataType::Raw32, 1);
+            m_packedWorkitemIndex = Register::Value::Placeholder(
+                ctx, Register::Type::Vector, DataType::Raw32, 1, allocOptions);
             m_packedWorkitemIndex->setName("Packed Workitem Index");
             co_yield m_packedWorkitemIndex->allocate();
         }
 
-        m_workitemIndex[0]
-            = Register::Value::Placeholder(ctx, Register::Type::Vector, DataType::UInt32, 1);
+        m_workitemIndex[0] = Register::Value::Placeholder(
+            ctx, Register::Type::Vector, DataType::UInt32, 1, allocOptions);
         m_workitemIndex[0]->setName("Workitem Index X");
         co_yield m_workitemIndex[0]->allocate();
 
         if(m_kernelDimensions > 1)
         {
-            m_workitemIndex[1]
-                = Register::Value::Placeholder(ctx, Register::Type::Vector, DataType::UInt32, 1);
+            m_workitemIndex[1] = Register::Value::Placeholder(
+                ctx, Register::Type::Vector, DataType::UInt32, 1, allocOptions);
             m_workitemIndex[1]->setName("Workitem Index Y");
             co_yield m_workitemIndex[1]->allocate();
         }
 
         if(m_kernelDimensions > 2)
         {
-            m_workitemIndex[2]
-                = Register::Value::Placeholder(ctx, Register::Type::Vector, DataType::UInt32, 1);
+            m_workitemIndex[2] = Register::Value::Placeholder(
+                ctx, Register::Type::Vector, DataType::UInt32, 1, allocOptions);
             m_workitemIndex[2]->setName("Workitem Index Z");
             co_yield m_workitemIndex[2]->allocate();
         }
@@ -99,7 +98,7 @@ namespace rocRoller
     Generator<Instruction> AssemblyKernel::preamble()
     {
         m_startedCodeGeneration = true;
-        auto archName           = m_context.lock()->targetArchitecture().target().toString();
+        auto archName = m_context.lock()->targetArchitecture().target().toAssemblerString();
 
         co_yield Instruction::Comment("Kernel Arguments:");
         for(auto const& arg : m_arguments)
@@ -144,6 +143,9 @@ namespace rocRoller
 
         if(ctx->targetArchitecture().HasCapability(GPUCapability::WorkgroupIdxViaTTMP))
         {
+            co_yield Instruction(
+                "s_mov_b32", {m_workgroupIndex[0]}, {ctx->getTTMP9()}, {}, "Load workgroup ID X");
+
             if(m_kernelDimensions > 1)
             {
                 co_yield generateOp(
@@ -160,6 +162,99 @@ namespace rocRoller
                     ctx->getTTMP7(),
                     Expression::BitFieldExtract{
                         {nullptr, "Extract 16 bit Z coordinate"}, DataType::UInt32, 16, 16});
+            }
+
+            /*
+             * Compute (X,Y,Z) position of WG in the grid when workgroup clusters are used.
+             * If workgroup clusters are enabled:
+             *   For each dimension (X, Y, Z):
+             *     Extract cluster ID and number of workgroups from ttmp6
+             *     Compute:
+             *        m_workgroupIndex[dim] = clusterID_dim * numWgInCluster_dim + wgIdxInCluster_dim
+             */
+            if(ctx->targetArchitecture().HasCapability(GPUCapability::HasWorkgroupClusters))
+            {
+                auto notInCluster = ctx->labelAllocator()->label("NotInCluster");
+
+                // Read ib_sts2 register
+                // TODO fix this by adding special hwreg support, maybe a special s_getreg variant?
+                auto temp = Register::Value::Placeholder(
+                    ctx, Register::Type::Scalar, DataType::UInt32, 1);
+                co_yield Instruction(
+                    "s_getreg_b32", {temp}, {}, {"hwreg(HW_REG_IB_STS2, 6, 4)"}, "Read ib_sts2");
+                // Check if clusters are enabled with a branch if zero
+                co_yield ctx->brancher()->branchIfZero(
+                    notInCluster,
+                    temp,
+                    "Not in a workgroup cluster, skip cluster-specific workgroupIndex "
+                    "calculations");
+
+                auto wgTemp = Register::Value::Placeholder(
+                    ctx, Register::Type::Scalar, DataType::UInt32, 1);
+                wgTemp->setName("wgTemp for wgidx calc");
+
+                auto nwgTemp = Register::Value::Placeholder(
+                    ctx, Register::Type::Scalar, DataType::UInt32, 1);
+                nwgTemp->setName("nwgTemp for wgidx calc");
+
+                // X dimension
+                co_yield generateOp<Expression::BitwiseAnd>(
+                    wgTemp, ctx->getTTMP6(), Register::Value::Literal(0xf));
+
+                co_yield generateOp(nwgTemp,
+                                    ctx->getTTMP6(),
+                                    Expression::BitFieldExtract{
+                                        {nullptr, "Extract 4 bit nwg_x"}, DataType::UInt32, 12, 4});
+
+                co_yield generateOp<Expression::Add>(nwgTemp, nwgTemp, Register::Value::Literal(1));
+
+                co_yield generateOp<Expression::MultiplyAdd>(
+                    m_workgroupIndex[0], m_workgroupIndex[0], nwgTemp, wgTemp);
+
+                // Y dimension
+                if(m_kernelDimensions > 1)
+                {
+                    co_yield generateOp(
+                        wgTemp,
+                        ctx->getTTMP6(),
+                        Expression::BitFieldExtract{
+                            {nullptr, "Extract 4 bit wg_y"}, DataType::UInt32, 4, 4});
+
+                    co_yield generateOp(
+                        nwgTemp,
+                        ctx->getTTMP6(),
+                        Expression::BitFieldExtract{
+                            {nullptr, "Extract 4 bit nwg_y"}, DataType::UInt32, 16, 4});
+
+                    co_yield generateOp<Expression::Add>(
+                        nwgTemp, nwgTemp, Register::Value::Literal(1));
+
+                    co_yield generateOp<Expression::MultiplyAdd>(
+                        m_workgroupIndex[1], m_workgroupIndex[1], nwgTemp, wgTemp);
+                }
+
+                // Z dimension
+                if(m_kernelDimensions > 2)
+                {
+                    co_yield generateOp(
+                        wgTemp,
+                        ctx->getTTMP6(),
+                        Expression::BitFieldExtract{
+                            {nullptr, "Extract 4 bit wg_z"}, DataType::UInt32, 8, 4});
+
+                    co_yield generateOp(
+                        nwgTemp,
+                        ctx->getTTMP6(),
+                        Expression::BitFieldExtract{
+                            {nullptr, "Extract 4 bit nwg_z"}, DataType::UInt32, 20, 4});
+
+                    co_yield generateOp<Expression::Add>(
+                        nwgTemp, nwgTemp, Register::Value::Literal(1));
+
+                    co_yield generateOp<Expression::MultiplyAdd>(
+                        m_workgroupIndex[2], m_workgroupIndex[2], nwgTemp, wgTemp);
+                }
+                co_yield_(Instruction::Label(notInCluster));
             }
         }
 

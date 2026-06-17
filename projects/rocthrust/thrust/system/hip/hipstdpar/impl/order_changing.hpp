@@ -55,6 +55,7 @@ namespace std
 template <typename I, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
 inline void reverse(execution::parallel_unsequenced_policy, I f, I l)
 {
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::reverse(::thrust::device, f, l);
 }
 
@@ -71,6 +72,7 @@ inline void reverse(execution::parallel_unsequenced_policy, I f, I l)
 template <typename I, typename O, enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
 inline void reverse_copy(execution::parallel_unsequenced_policy, I fi, I li, O fo)
 {
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::reverse_copy(::thrust::device, fi, li, fo);
 }
 
