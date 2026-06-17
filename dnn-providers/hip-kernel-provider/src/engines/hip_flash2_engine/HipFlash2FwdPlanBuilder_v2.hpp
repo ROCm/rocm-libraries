@@ -16,12 +16,13 @@
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 #include <vector>
 
-#include "HipFlash2FwdPlanBuilder.hpp"  // Flash2FwdParams, useFlash2ForShape
+#include "HipFlash2FwdPlanBuilder.hpp" // Flash2FwdParams, useFlash2ForShape
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
 
-namespace hip_flash2_engine {
+namespace hip_flash2_engine
+{
 
 /**
  * @brief Plan builder for Flash-Attention 2 V7 forward pass.
@@ -31,8 +32,9 @@ namespace hip_flash2_engine {
  * loads the arch-specific precompiled .co, and stores a HipFlash2FwdPlan
  * in the execution context.
  */
-class HipFlash2FwdPlanBuilder : public hipdnn_plugin_sdk::IPlanBuilder<Handle, Settings, Context> {
-   public:
+class HipFlash2FwdPlanBuilder : public hipdnn_plugin_sdk::IPlanBuilder<Handle, Settings, Context>
+{
+public:
     // ── IPlanBuilder interface ────────────────────────────────────────────────
 
     bool isApplicable(
@@ -44,7 +46,8 @@ class HipFlash2FwdPlanBuilder : public hipdnn_plugin_sdk::IPlanBuilder<Handle, S
                                const Settings& executionSettings) const override;
 
     void initializeExecutionSettings(
-        const Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const Handle& handle,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
         Settings& executionSettings) const override;
 
@@ -66,11 +69,11 @@ class HipFlash2FwdPlanBuilder : public hipdnn_plugin_sdk::IPlanBuilder<Handle, S
         const Handle& handle,
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 
-   private:
+private:
     /// Extract Flash2FwdParams from a validated SDPA graph.
-    Flash2FwdParams extractParams(
-        const Handle& handle,
-        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const;
+    Flash2FwdParams
+        extractParams(const Handle& handle,
+                      const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const;
 };
 
-}  // namespace hip_flash2_engine
+} // namespace hip_flash2_engine
