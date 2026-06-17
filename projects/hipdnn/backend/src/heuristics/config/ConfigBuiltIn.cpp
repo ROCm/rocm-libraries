@@ -41,6 +41,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -142,40 +143,43 @@ std::optional<int64_t>
         return it == tensorIndex.end() ? nullptr : &it->second;
     };
 
-    auto appendUid = [&](BackendAutotuneConfigMatchKey& key, int64_t uid) {
-        const auto* tensor = viewFor(uid);
-        if(tensor == nullptr)
-        {
-            return false;
-        }
-        key.tensors.push_back(TensorView{&tensor->dims, &tensor->strides});
-        return true;
-    };
-
-    auto appendOptionalUid
-        = [&](BackendAutotuneConfigMatchKey& key, const std::optional<int64_t>& uid) {
-              if(!uid.has_value())
+    auto appendUid
+        = [&](BackendAutotuneConfigMatchKey& key, std::string_view tensorId, int64_t uid) {
+              const auto* tensor = viewFor(uid);
+              if(tensor == nullptr)
               {
-                  return true;
+                  return false;
               }
-              return appendUid(key, *uid);
-          };
-
-    auto appendUidVector
-        = [&](BackendAutotuneConfigMatchKey& key, const flatbuffers::Vector<int64_t>* uids) {
-              if(uids == nullptr)
-              {
-                  return true;
-              }
-              for(const int64_t uid : *uids)
-              {
-                  if(!appendUid(key, uid))
-                  {
-                      return false;
-                  }
-              }
+              key.tensors.push_back(TensorView{tensorId, &tensor->dims, &tensor->strides});
               return true;
           };
+
+    auto appendOptionalUid = [&](BackendAutotuneConfigMatchKey& key,
+                                 std::string_view tensorId,
+                                 const std::optional<int64_t>& uid) {
+        if(!uid.has_value())
+        {
+            return true;
+        }
+        return appendUid(key, tensorId, *uid);
+    };
+
+    auto appendUidVector = [&](BackendAutotuneConfigMatchKey& key,
+                               std::string_view tensorId,
+                               const flatbuffers::Vector<int64_t>* uids) {
+        if(uids == nullptr)
+        {
+            return true;
+        }
+        for(const int64_t uid : *uids)
+        {
+            if(!appendUid(key, tensorId, uid))
+            {
+                return false;
+            }
+        }
+        return true;
+    };
 
     auto makeKey = [](std::string op, int priority) {
         BackendAutotuneConfigMatchKey key;
@@ -188,7 +192,8 @@ std::optional<int64_t>
         if(const auto* fwd = node->attributes_as_ConvolutionFwdAttributes())
         {
             auto key = makeKey("conv_fprop", 70);
-            if(!appendUid(key, fwd->x_tensor_uid()) || !appendUid(key, fwd->w_tensor_uid()))
+            if(!appendUid(key, "x_tensor_uid", fwd->x_tensor_uid())
+               || !appendUid(key, "w_tensor_uid", fwd->w_tensor_uid()))
             {
                 return std::nullopt;
             }
@@ -197,7 +202,8 @@ std::optional<int64_t>
         if(const auto* bwd = node->attributes_as_ConvolutionBwdAttributes())
         {
             auto key = makeKey("conv_dgrad", 70);
-            if(!appendUid(key, bwd->dy_tensor_uid()) || !appendUid(key, bwd->w_tensor_uid()))
+            if(!appendUid(key, "dy_tensor_uid", bwd->dy_tensor_uid())
+               || !appendUid(key, "w_tensor_uid", bwd->w_tensor_uid()))
             {
                 return std::nullopt;
             }
@@ -206,7 +212,8 @@ std::optional<int64_t>
         if(const auto* wrw = node->attributes_as_ConvolutionWrwAttributes())
         {
             auto key = makeKey("conv_wgrad", 70);
-            if(!appendUid(key, wrw->x_tensor_uid()) || !appendUid(key, wrw->dy_tensor_uid()))
+            if(!appendUid(key, "x_tensor_uid", wrw->x_tensor_uid())
+               || !appendUid(key, "dy_tensor_uid", wrw->dy_tensor_uid()))
             {
                 return std::nullopt;
             }
@@ -215,26 +222,31 @@ std::optional<int64_t>
         if(const auto* sdpa = node->attributes_as_SdpaAttributes())
         {
             auto key = makeKey("sdpa_fwd", 60);
-            if(!appendUid(key, sdpa->q_tensor_uid()) || !appendUid(key, sdpa->k_tensor_uid())
-               || !appendUid(key, sdpa->v_tensor_uid())
-               || !appendOptionalUid(key, sdpa->scale_tensor_uid())
-               || !appendOptionalUid(key, sdpa->attn_mask_tensor_uid())
-               || !appendOptionalUid(key, sdpa->seq_len_q_tensor_uid())
-               || !appendOptionalUid(key, sdpa->seq_len_kv_tensor_uid())
-               || !appendOptionalUid(key, sdpa->seed_tensor_uid())
-               || !appendOptionalUid(key, sdpa->offset_tensor_uid())
-               || !appendOptionalUid(key, sdpa->dropout_mask_tensor_uid())
-               || !appendOptionalUid(key, sdpa->dropout_scale_tensor_uid())
-               || !appendOptionalUid(key, sdpa->page_table_k_tensor_uid())
-               || !appendOptionalUid(key, sdpa->page_table_v_tensor_uid())
-               || !appendOptionalUid(key, sdpa->block_mask_tensor_uid())
-               || !appendOptionalUid(key, sdpa->sink_token_tensor_uid())
-               || !appendOptionalUid(key, sdpa->descale_q_tensor_uid())
-               || !appendOptionalUid(key, sdpa->descale_k_tensor_uid())
-               || !appendOptionalUid(key, sdpa->descale_v_tensor_uid())
-               || !appendOptionalUid(key, sdpa->descale_s_tensor_uid())
-               || !appendOptionalUid(key, sdpa->scale_s_tensor_uid())
-               || !appendOptionalUid(key, sdpa->scale_o_tensor_uid()))
+            if(!appendUid(key, "q_tensor_uid", sdpa->q_tensor_uid())
+               || !appendUid(key, "k_tensor_uid", sdpa->k_tensor_uid())
+               || !appendUid(key, "v_tensor_uid", sdpa->v_tensor_uid())
+               || !appendOptionalUid(key, "scale_tensor_uid", sdpa->scale_tensor_uid())
+               || !appendOptionalUid(key, "attn_mask_tensor_uid", sdpa->attn_mask_tensor_uid())
+               || !appendOptionalUid(key, "seq_len_q_tensor_uid", sdpa->seq_len_q_tensor_uid())
+               || !appendOptionalUid(key, "seq_len_kv_tensor_uid", sdpa->seq_len_kv_tensor_uid())
+               || !appendOptionalUid(key, "seed_tensor_uid", sdpa->seed_tensor_uid())
+               || !appendOptionalUid(key, "offset_tensor_uid", sdpa->offset_tensor_uid())
+               || !appendOptionalUid(
+                   key, "dropout_mask_tensor_uid", sdpa->dropout_mask_tensor_uid())
+               || !appendOptionalUid(
+                   key, "dropout_scale_tensor_uid", sdpa->dropout_scale_tensor_uid())
+               || !appendOptionalUid(
+                   key, "page_table_k_tensor_uid", sdpa->page_table_k_tensor_uid())
+               || !appendOptionalUid(
+                   key, "page_table_v_tensor_uid", sdpa->page_table_v_tensor_uid())
+               || !appendOptionalUid(key, "block_mask_tensor_uid", sdpa->block_mask_tensor_uid())
+               || !appendOptionalUid(key, "sink_token_tensor_uid", sdpa->sink_token_tensor_uid())
+               || !appendOptionalUid(key, "descale_q_tensor_uid", sdpa->descale_q_tensor_uid())
+               || !appendOptionalUid(key, "descale_k_tensor_uid", sdpa->descale_k_tensor_uid())
+               || !appendOptionalUid(key, "descale_v_tensor_uid", sdpa->descale_v_tensor_uid())
+               || !appendOptionalUid(key, "descale_s_tensor_uid", sdpa->descale_s_tensor_uid())
+               || !appendOptionalUid(key, "scale_s_tensor_uid", sdpa->scale_s_tensor_uid())
+               || !appendOptionalUid(key, "scale_o_tensor_uid", sdpa->scale_o_tensor_uid()))
             {
                 return std::nullopt;
             }
@@ -243,19 +255,24 @@ std::optional<int64_t>
         if(const auto* sdpa = node->attributes_as_SdpaBackwardAttributes())
         {
             auto key = makeKey("sdpa_bwd", 60);
-            if(!appendUid(key, sdpa->q_tensor_uid()) || !appendUid(key, sdpa->k_tensor_uid())
-               || !appendUid(key, sdpa->v_tensor_uid()) || !appendUid(key, sdpa->o_tensor_uid())
-               || !appendUid(key, sdpa->do_tensor_uid())
-               || !appendUid(key, sdpa->stats_tensor_uid())
-               || !appendOptionalUid(key, sdpa->scale_tensor_uid())
-               || !appendOptionalUid(key, sdpa->attn_mask_tensor_uid())
-               || !appendOptionalUid(key, sdpa->seq_len_q_tensor_uid())
-               || !appendOptionalUid(key, sdpa->seq_len_kv_tensor_uid())
-               || !appendOptionalUid(key, sdpa->seed_tensor_uid())
-               || !appendOptionalUid(key, sdpa->offset_tensor_uid())
-               || !appendOptionalUid(key, sdpa->dropout_mask_tensor_uid())
-               || !appendOptionalUid(key, sdpa->dropout_scale_tensor_uid())
-               || !appendOptionalUid(key, sdpa->dropout_scale_inv_tensor_uid()))
+            if(!appendUid(key, "q_tensor_uid", sdpa->q_tensor_uid())
+               || !appendUid(key, "k_tensor_uid", sdpa->k_tensor_uid())
+               || !appendUid(key, "v_tensor_uid", sdpa->v_tensor_uid())
+               || !appendUid(key, "o_tensor_uid", sdpa->o_tensor_uid())
+               || !appendUid(key, "do_tensor_uid", sdpa->do_tensor_uid())
+               || !appendUid(key, "stats_tensor_uid", sdpa->stats_tensor_uid())
+               || !appendOptionalUid(key, "scale_tensor_uid", sdpa->scale_tensor_uid())
+               || !appendOptionalUid(key, "attn_mask_tensor_uid", sdpa->attn_mask_tensor_uid())
+               || !appendOptionalUid(key, "seq_len_q_tensor_uid", sdpa->seq_len_q_tensor_uid())
+               || !appendOptionalUid(key, "seq_len_kv_tensor_uid", sdpa->seq_len_kv_tensor_uid())
+               || !appendOptionalUid(key, "seed_tensor_uid", sdpa->seed_tensor_uid())
+               || !appendOptionalUid(key, "offset_tensor_uid", sdpa->offset_tensor_uid())
+               || !appendOptionalUid(
+                   key, "dropout_mask_tensor_uid", sdpa->dropout_mask_tensor_uid())
+               || !appendOptionalUid(
+                   key, "dropout_scale_tensor_uid", sdpa->dropout_scale_tensor_uid())
+               || !appendOptionalUid(
+                   key, "dropout_scale_inv_tensor_uid", sdpa->dropout_scale_inv_tensor_uid()))
             {
                 return std::nullopt;
             }
@@ -264,7 +281,8 @@ std::optional<int64_t>
         if(const auto* matmul = node->attributes_as_MatmulAttributes())
         {
             auto key = makeKey("matmul", 50);
-            if(!appendUid(key, matmul->a_tensor_uid()) || !appendUid(key, matmul->b_tensor_uid()))
+            if(!appendUid(key, "a_tensor_uid", matmul->a_tensor_uid())
+               || !appendUid(key, "b_tensor_uid", matmul->b_tensor_uid()))
             {
                 return std::nullopt;
             }
@@ -273,14 +291,17 @@ std::optional<int64_t>
         if(const auto* batchnorm = node->attributes_as_BatchnormAttributes())
         {
             auto key = makeKey("batchnorm_training", 40);
-            if(!appendUid(key, batchnorm->x_tensor_uid())
-               || !appendUid(key, batchnorm->scale_tensor_uid())
-               || !appendUid(key, batchnorm->bias_tensor_uid())
-               || !appendUid(key, batchnorm->epsilon_tensor_uid())
-               || !appendUidVector(key, batchnorm->peer_stats_tensor_uid())
-               || !appendOptionalUid(key, batchnorm->prev_running_mean_tensor_uid())
-               || !appendOptionalUid(key, batchnorm->prev_running_variance_tensor_uid())
-               || !appendOptionalUid(key, batchnorm->momentum_tensor_uid()))
+            if(!appendUid(key, "x_tensor_uid", batchnorm->x_tensor_uid())
+               || !appendUid(key, "scale_tensor_uid", batchnorm->scale_tensor_uid())
+               || !appendUid(key, "bias_tensor_uid", batchnorm->bias_tensor_uid())
+               || !appendUid(key, "epsilon_tensor_uid", batchnorm->epsilon_tensor_uid())
+               || !appendUidVector(key, "peer_stats_tensor_uid", batchnorm->peer_stats_tensor_uid())
+               || !appendOptionalUid(
+                   key, "prev_running_mean_tensor_uid", batchnorm->prev_running_mean_tensor_uid())
+               || !appendOptionalUid(key,
+                                     "prev_running_variance_tensor_uid",
+                                     batchnorm->prev_running_variance_tensor_uid())
+               || !appendOptionalUid(key, "momentum_tensor_uid", batchnorm->momentum_tensor_uid()))
             {
                 return std::nullopt;
             }
@@ -289,11 +310,11 @@ std::optional<int64_t>
         if(const auto* batchnorm = node->attributes_as_BatchnormInferenceAttributes())
         {
             auto key = makeKey("batchnorm_inference", 40);
-            if(!appendUid(key, batchnorm->x_tensor_uid())
-               || !appendUid(key, batchnorm->mean_tensor_uid())
-               || !appendUid(key, batchnorm->inv_variance_tensor_uid())
-               || !appendUid(key, batchnorm->scale_tensor_uid())
-               || !appendUid(key, batchnorm->bias_tensor_uid()))
+            if(!appendUid(key, "x_tensor_uid", batchnorm->x_tensor_uid())
+               || !appendUid(key, "mean_tensor_uid", batchnorm->mean_tensor_uid())
+               || !appendUid(key, "inv_variance_tensor_uid", batchnorm->inv_variance_tensor_uid())
+               || !appendUid(key, "scale_tensor_uid", batchnorm->scale_tensor_uid())
+               || !appendUid(key, "bias_tensor_uid", batchnorm->bias_tensor_uid()))
             {
                 return std::nullopt;
             }
@@ -302,12 +323,12 @@ std::optional<int64_t>
         if(const auto* batchnorm = node->attributes_as_BatchnormInferenceAttributesVarianceExt())
         {
             auto key = makeKey("batchnorm_inference_variance_ext", 40);
-            if(!appendUid(key, batchnorm->x_tensor_uid())
-               || !appendUid(key, batchnorm->mean_tensor_uid())
-               || !appendUid(key, batchnorm->variance_tensor_uid())
-               || !appendUid(key, batchnorm->scale_tensor_uid())
-               || !appendUid(key, batchnorm->bias_tensor_uid())
-               || !appendUid(key, batchnorm->epsilon_tensor_uid()))
+            if(!appendUid(key, "x_tensor_uid", batchnorm->x_tensor_uid())
+               || !appendUid(key, "mean_tensor_uid", batchnorm->mean_tensor_uid())
+               || !appendUid(key, "variance_tensor_uid", batchnorm->variance_tensor_uid())
+               || !appendUid(key, "scale_tensor_uid", batchnorm->scale_tensor_uid())
+               || !appendUid(key, "bias_tensor_uid", batchnorm->bias_tensor_uid())
+               || !appendUid(key, "epsilon_tensor_uid", batchnorm->epsilon_tensor_uid()))
             {
                 return std::nullopt;
             }
@@ -316,12 +337,14 @@ std::optional<int64_t>
         if(const auto* batchnorm = node->attributes_as_BatchnormBackwardAttributes())
         {
             auto key = makeKey("batchnorm_backward", 40);
-            if(!appendUid(key, batchnorm->dy_tensor_uid())
-               || !appendUid(key, batchnorm->x_tensor_uid())
-               || !appendUid(key, batchnorm->scale_tensor_uid())
-               || !appendOptionalUid(key, batchnorm->mean_tensor_uid())
-               || !appendOptionalUid(key, batchnorm->inv_variance_tensor_uid())
-               || !appendUidVector(key, batchnorm->peer_stats_tensor_uid()))
+            if(!appendUid(key, "dy_tensor_uid", batchnorm->dy_tensor_uid())
+               || !appendUid(key, "x_tensor_uid", batchnorm->x_tensor_uid())
+               || !appendUid(key, "scale_tensor_uid", batchnorm->scale_tensor_uid())
+               || !appendOptionalUid(key, "mean_tensor_uid", batchnorm->mean_tensor_uid())
+               || !appendOptionalUid(
+                   key, "inv_variance_tensor_uid", batchnorm->inv_variance_tensor_uid())
+               || !appendUidVector(
+                   key, "peer_stats_tensor_uid", batchnorm->peer_stats_tensor_uid()))
             {
                 return std::nullopt;
             }
@@ -332,10 +355,10 @@ std::optional<int64_t>
             auto key = makeKey("layernorm", 30);
             key.criteria.push_back(
                 Criterion{"norm_fwd_phase", static_cast<int64_t>(layernorm->forward_phase())});
-            if(!appendUid(key, layernorm->x_tensor_uid())
-               || !appendUid(key, layernorm->scale_tensor_uid())
-               || !appendUid(key, layernorm->bias_tensor_uid())
-               || !appendUid(key, layernorm->epsilon_tensor_uid()))
+            if(!appendUid(key, "x_tensor_uid", layernorm->x_tensor_uid())
+               || !appendUid(key, "scale_tensor_uid", layernorm->scale_tensor_uid())
+               || !appendUid(key, "bias_tensor_uid", layernorm->bias_tensor_uid())
+               || !appendUid(key, "epsilon_tensor_uid", layernorm->epsilon_tensor_uid()))
             {
                 return std::nullopt;
             }
@@ -346,10 +369,10 @@ std::optional<int64_t>
             auto key = makeKey("rmsnorm", 30);
             key.criteria.push_back(
                 Criterion{"norm_fwd_phase", static_cast<int64_t>(rmsnorm->forward_phase())});
-            if(!appendUid(key, rmsnorm->x_tensor_uid())
-               || !appendUid(key, rmsnorm->scale_tensor_uid())
-               || !appendUid(key, rmsnorm->epsilon_tensor_uid())
-               || !appendOptionalUid(key, rmsnorm->bias_tensor_uid()))
+            if(!appendUid(key, "x_tensor_uid", rmsnorm->x_tensor_uid())
+               || !appendUid(key, "scale_tensor_uid", rmsnorm->scale_tensor_uid())
+               || !appendUid(key, "epsilon_tensor_uid", rmsnorm->epsilon_tensor_uid())
+               || !appendOptionalUid(key, "bias_tensor_uid", rmsnorm->bias_tensor_uid()))
             {
                 return std::nullopt;
             }
@@ -358,9 +381,10 @@ std::optional<int64_t>
         if(const auto* rmsnorm = node->attributes_as_RMSNormBackwardAttributes())
         {
             auto key = makeKey("rmsnorm_backward", 30);
-            if(!appendUid(key, rmsnorm->dy_tensor_uid()) || !appendUid(key, rmsnorm->x_tensor_uid())
-               || !appendUid(key, rmsnorm->scale_tensor_uid())
-               || !appendUid(key, rmsnorm->inv_rms_tensor_uid()))
+            if(!appendUid(key, "dy_tensor_uid", rmsnorm->dy_tensor_uid())
+               || !appendUid(key, "x_tensor_uid", rmsnorm->x_tensor_uid())
+               || !appendUid(key, "scale_tensor_uid", rmsnorm->scale_tensor_uid())
+               || !appendUid(key, "inv_rms_tensor_uid", rmsnorm->inv_rms_tensor_uid()))
             {
                 return std::nullopt;
             }
@@ -371,7 +395,7 @@ std::optional<int64_t>
             auto key = makeKey("reduction", 20);
             key.criteria.push_back(
                 Criterion{"reduction_mode", static_cast<int64_t>(reduction->mode())});
-            if(!appendUid(key, reduction->in_tensor_uid()))
+            if(!appendUid(key, "in_tensor_uid", reduction->in_tensor_uid()))
             {
                 return std::nullopt;
             }
@@ -384,7 +408,7 @@ std::optional<int64_t>
                 Criterion{"resample_mode", static_cast<int64_t>(resample->resample_mode())});
             key.criteria.push_back(
                 Criterion{"padding_mode", static_cast<int64_t>(resample->padding_mode())});
-            if(!appendUid(key, resample->x_tensor_uid()))
+            if(!appendUid(key, "x_tensor_uid", resample->x_tensor_uid()))
             {
                 return std::nullopt;
             }
@@ -395,9 +419,9 @@ std::optional<int64_t>
             auto key = makeKey("pointwise", 10);
             key.criteria.push_back(
                 Criterion{"pointwise_mode", static_cast<int64_t>(pointwise->operation())});
-            if(!appendUid(key, pointwise->in_0_tensor_uid())
-               || !appendOptionalUid(key, pointwise->in_1_tensor_uid())
-               || !appendOptionalUid(key, pointwise->in_2_tensor_uid()))
+            if(!appendUid(key, "in_0_tensor_uid", pointwise->in_0_tensor_uid())
+               || !appendOptionalUid(key, "in_1_tensor_uid", pointwise->in_1_tensor_uid())
+               || !appendOptionalUid(key, "in_2_tensor_uid", pointwise->in_2_tensor_uid()))
             {
                 return std::nullopt;
             }
@@ -406,7 +430,8 @@ std::optional<int64_t>
         return std::nullopt;
     };
 
-    std::optional<BackendAutotuneConfigMatchKey> bestKey;
+    std::vector<BackendAutotuneConfigMatchKey> bestKeys;
+    int bestPriority = 0;
     for(const auto* node : *nodes)
     {
         if(node == nullptr)
@@ -414,18 +439,30 @@ std::optional<int64_t>
             continue;
         }
         auto candidate = buildKeyForNode(node);
-        if(candidate.has_value()
-           && (!bestKey.has_value() || candidate->priority > bestKey->priority))
+        if(!candidate.has_value())
         {
-            bestKey = std::move(candidate);
+            continue;
+        }
+        if(candidate->priority > bestPriority)
+        {
+            bestPriority = candidate->priority;
+            bestKeys.clear();
+        }
+        if(candidate->priority == bestPriority)
+        {
+            bestKeys.push_back(std::move(*candidate));
         }
     }
-    if(!bestKey.has_value())
-    {
-        return std::nullopt;
-    }
 
-    return config.matchOperation(bestKey->op, bestKey->criteria, bestKey->tensors);
+    for(const auto& key : bestKeys)
+    {
+        auto match = config.matchOperation(key.op, key.criteria, key.tensors);
+        if(match.has_value())
+        {
+            return match;
+        }
+    }
+    return std::nullopt;
 }
 
 /// Validate the buffer and return the typed Graph root, or nullptr on failure.

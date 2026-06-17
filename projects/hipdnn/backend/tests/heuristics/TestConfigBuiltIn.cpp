@@ -117,6 +117,73 @@ std::vector<uint8_t> buildConvFwdGraphBuffer(const std::vector<int64_t>& xDims,
     return {data, data + builder.GetSize()};
 }
 
+/// Build a serialized Graph with two same-priority ConvolutionFwd nodes. The
+/// first node intentionally has different tensor shapes from the common test
+/// override while the second node matches it.
+std::vector<uint8_t> buildTwoConvFwdGraphBuffer()
+{
+    flatbuffers::FlatBufferBuilder builder;
+
+    constexpr int64_t X0_UID = 1;
+    constexpr int64_t W0_UID = 2;
+    constexpr int64_t Y0_UID = 3;
+    constexpr int64_t X1_UID = 4;
+    constexpr int64_t W1_UID = 5;
+    constexpr int64_t Y1_UID = 6;
+
+    const std::vector<int64_t> firstXDims{9, 3, 4, 4};
+    const std::vector<int64_t> firstXStrides{48, 16, 4, 1};
+    const std::vector<int64_t> firstWDims{8, 3, 1, 1};
+    const std::vector<int64_t> firstWStrides{3, 1, 1, 1};
+    const std::vector<int64_t> secondXDims{1, 3, 4, 4};
+    const std::vector<int64_t> secondXStrides{48, 16, 4, 1};
+    const std::vector<int64_t> secondWDims{2, 3, 1, 1};
+    const std::vector<int64_t> secondWStrides{3, 1, 1, 1};
+
+    const std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
+        fb::CreateTensorAttributesDirect(
+            builder, X0_UID, "x0", fb::DataType::FLOAT, &firstXStrides, &firstXDims),
+        fb::CreateTensorAttributesDirect(
+            builder, W0_UID, "w0", fb::DataType::FLOAT, &firstWStrides, &firstWDims),
+        fb::CreateTensorAttributesDirect(
+            builder, Y0_UID, "y0", fb::DataType::FLOAT, nullptr, nullptr),
+        fb::CreateTensorAttributesDirect(
+            builder, X1_UID, "x1", fb::DataType::FLOAT, &secondXStrides, &secondXDims),
+        fb::CreateTensorAttributesDirect(
+            builder, W1_UID, "w1", fb::DataType::FLOAT, &secondWStrides, &secondWDims),
+        fb::CreateTensorAttributesDirect(
+            builder, Y1_UID, "y1", fb::DataType::FLOAT, nullptr, nullptr),
+    };
+
+    auto firstConvAttrs = fb::CreateConvolutionFwdAttributesDirect(builder, X0_UID, W0_UID, Y0_UID);
+    auto secondConvAttrs
+        = fb::CreateConvolutionFwdAttributesDirect(builder, X1_UID, W1_UID, Y1_UID);
+
+    const std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "conv0",
+                             fb::DataType::FLOAT,
+                             fb::NodeAttributes::ConvolutionFwdAttributes,
+                             firstConvAttrs.Union()),
+        fb::CreateNodeDirect(builder,
+                             "conv1",
+                             fb::DataType::FLOAT,
+                             fb::NodeAttributes::ConvolutionFwdAttributes,
+                             secondConvAttrs.Union())};
+
+    auto graphOffset = fb::CreateGraphDirect(builder,
+                                             nullptr,
+                                             fb::DataType::UNSET,
+                                             fb::DataType::UNSET,
+                                             fb::DataType::UNSET,
+                                             &tensors,
+                                             &nodes,
+                                             ::flatbuffers::nullopt);
+    fb::FinishGraphBuffer(builder, graphOffset);
+    const auto* data = builder.GetBufferPointer();
+    return {data, data + builder.GetSize()};
+}
+
 /// Build a serialized Graph with a single ConvolutionBwd node referencing
 /// (dy, w) tensors. Mirrors buildConvFwdGraphBuffer; matchOverrideConfig pulls
 /// the rule's first two tensors against (dy, w) for "conv_dgrad".
@@ -581,6 +648,33 @@ TEST_F(TestConfigBuiltIn, FinalizeMatchedRuleMovesEngineToFront)
     EXPECT_EQ(sorted[0], MIOPEN_DETERMINISTIC_ID);
     EXPECT_EQ(sorted[1], MIOPEN_ENGINE_ID);
     EXPECT_EQ(sorted[2], CUSTOM_ENGINE_ID);
+}
+
+TEST_F(TestConfigBuiltIn, FinalizeTriesLaterSamePriorityNodeAfterFirstMiss)
+{
+    constexpr const char* JSON = R"({
+      "engine_overrides": [
+        {
+          "op": "conv_fprop",
+          "engine_name": "MIOPEN_ENGINE_DETERMINISTIC",
+          "tensors": [
+            { "tensor_id": "x_tensor_uid", "dim": [1, 3, 4, 4] },
+            { "tensor_id": "w_tensor_uid", "dim": [2, 3, 1, 1] }
+          ]
+        }
+      ]
+    })";
+    const TempJsonOverrideFile json(JSON);
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(OVERRIDE_ENV,
+                                                                          json.path());
+
+    setEngineIds({MIOPEN_ENGINE_ID, CUSTOM_ENGINE_ID, MIOPEN_DETERMINISTIC_ID});
+    setSerializedGraph(buildTwoConvFwdGraphBuffer());
+
+    ASSERT_TRUE(_plugin->finalize(_desc));
+    const auto sorted = _plugin->getSortedEngineIds(_desc);
+    ASSERT_EQ(sorted.size(), 3u);
+    EXPECT_EQ(sorted.front(), MIOPEN_DETERMINISTIC_ID);
 }
 
 TEST_F(TestConfigBuiltIn, FinalizeRereadsEnvOnEachInvocation)

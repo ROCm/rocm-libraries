@@ -4311,22 +4311,26 @@ private:
             {
                 std::vector<std::vector<int64_t>> tensorDims;
                 std::vector<std::vector<int64_t>> tensorStrides;
+                std::vector<std::string> tensorIds;
                 tensorDims.reserve(matchKey->tensors.size());
                 tensorStrides.reserve(matchKey->tensors.size());
+                tensorIds.reserve(matchKey->tensors.size());
                 for(const auto& tensor : matchKey->tensors)
                 {
                     tensorDims.push_back(tensor->get_dim());
                     tensorStrides.push_back(tensor->get_stride());
+                    tensorIds.emplace_back(tensor.tensorId);
                 }
 
-                auto writeErr
-                    = autotune::writeAutotuneResults(storageConfig.filePath,
-                                                     matchKey->opName,
-                                                     allResults,
-                                                     storageConfig.deleteAllExistingFileContent,
-                                                     tensorDims,
-                                                     tensorStrides,
-                                                     matchKey->criteria);
+                auto writeErr = autotune::detail::writeAutotuneResults(
+                    storageConfig.filePath,
+                    matchKey->opName,
+                    allResults,
+                    storageConfig.deleteAllExistingFileContent,
+                    tensorDims,
+                    tensorStrides,
+                    matchKey->criteria,
+                    tensorIds);
                 if(writeErr.is_bad())
                 {
                     HIPDNN_FE_LOG_WARN("autotune: failed to write results to "

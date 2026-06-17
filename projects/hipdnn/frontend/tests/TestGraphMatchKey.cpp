@@ -9,6 +9,8 @@
 #include <hipdnn_frontend/detail/GraphMatchKey.hpp>
 #include <hipdnn_test_sdk/utilities/SelectorUnitGraph.hpp>
 
+#include <string_view>
+
 using namespace hipdnn_frontend;
 using hipdnn_test_sdk::utilities::OperationType;
 using hipdnn_test_sdk::utilities::SelectorUnitGraph;
@@ -28,6 +30,16 @@ void expectTensorUidOrder(const detail::AutotuneConfigMatchKey& key,
     }
 }
 
+void expectTensorIdOrder(const detail::AutotuneConfigMatchKey& key,
+                         const std::vector<std::string_view>& tensorIds)
+{
+    ASSERT_EQ(key.tensors.size(), tensorIds.size());
+    for(size_t i = 0; i < tensorIds.size(); ++i)
+    {
+        EXPECT_EQ(key.tensors[i].tensorId, tensorIds[i]);
+    }
+}
+
 } // namespace
 
 class TestGraphMatchKey : public ::testing::Test
@@ -43,6 +55,7 @@ TEST_F(TestGraphMatchKey, ConvFpropOpStringAndTensorOrder)
     EXPECT_EQ(key->opName, "conv_fprop");
     EXPECT_TRUE(key->criteria.empty());
     expectTensorUidOrder(*key, {unitGraph.byName("x"), unitGraph.byName("w")});
+    expectTensorIdOrder(*key, {"x_tensor_uid", "w_tensor_uid"});
 }
 
 TEST_F(TestGraphMatchKey, ConvDgradOpStringAndTensorOrder)
@@ -112,4 +125,5 @@ TEST_F(TestGraphMatchKey, PointwiseBinaryIncludesPointwiseModeCriterion)
     EXPECT_EQ(key->criteria,
               (detail::AutotuneConfigCriteria{{"pointwise_mode", HIPDNN_POINTWISE_ADD}}));
     expectTensorUidOrder(*key, {unitGraph.byName("x"), unitGraph.byName("y")});
+    expectTensorIdOrder(*key, {"in_0_tensor_uid", "in_1_tensor_uid"});
 }

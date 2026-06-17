@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <ctime>
 #include <exception>
@@ -33,6 +34,8 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <type_traits>
+#include <variant>
 #include <vector>
 
 namespace hipdnn_frontend
@@ -60,6 +63,115 @@ inline nlohmann::json criteriaOrEmpty(const nlohmann::json& entry)
     return nlohmann::json::object();
 }
 
+namespace detail
+{
+
+inline nlohmann::json tensorEntryWithoutId(nlohmann::json entry)
+{
+    entry.erase("tensor_id");
+    return entry;
+}
+
+inline bool tensorsMatchByIdIgnoringOrder(const nlohmann::json& existing,
+                                          const nlohmann::json& replacement)
+{
+    std::vector<uint8_t> used(existing.size(), 0);
+    for(const auto& replacementTensor : replacement)
+    {
+        const auto replacementId = replacementTensor.at("tensor_id").get<std::string>();
+        bool matched = false;
+        for(size_t i = 0; i < existing.size(); ++i)
+        {
+            if(used[i] != 0 || !existing[i].contains("tensor_id")
+               || existing[i]["tensor_id"].get<std::string>() != replacementId)
+            {
+                continue;
+            }
+            if(tensorEntryWithoutId(existing[i]) == tensorEntryWithoutId(replacementTensor))
+            {
+                used[i] = 1;
+                matched = true;
+                break;
+            }
+        }
+        if(!matched)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+inline bool tensorsMatchByPositionIgnoringIds(const nlohmann::json& existing,
+                                              const nlohmann::json& replacement)
+{
+    for(size_t i = 0; i < existing.size(); ++i)
+    {
+        if(tensorEntryWithoutId(existing[i]) != tensorEntryWithoutId(replacement[i]))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+inline bool tensorSignaturesMatch(const nlohmann::json& existing, const nlohmann::json& replacement)
+{
+    if(existing == replacement)
+    {
+        return true;
+    }
+    if(!existing.is_array() || !replacement.is_array() || existing.size() != replacement.size())
+    {
+        return false;
+    }
+
+    const bool existingAllNamed
+        = std::all_of(existing.begin(), existing.end(), [](const nlohmann::json& tensor) {
+              return tensor.contains("tensor_id");
+          });
+    const bool replacementAllNamed
+        = std::all_of(replacement.begin(), replacement.end(), [](const nlohmann::json& tensor) {
+              return tensor.contains("tensor_id");
+          });
+    if(existingAllNamed && replacementAllNamed)
+    {
+        return tensorsMatchByIdIgnoringOrder(existing, replacement);
+    }
+    return tensorsMatchByPositionIgnoringIds(existing, replacement);
+}
+
+} // namespace detail
+
+/// Serialize a KnobSetting to a JSON object.
+inline nlohmann::json knobSettingToJson(const KnobSetting& setting)
+{
+    nlohmann::json knob;
+    knob["knob_id"] = setting.knobId();
+
+    std::visit(
+        [&knob](const auto& value) {
+            using T = std::decay_t<decltype(value)>;
+            if constexpr(std::is_same_v<T, int64_t>)
+            {
+                knob["type"] = "int";
+                knob["value"] = value;
+            }
+            else if constexpr(std::is_same_v<T, double>)
+            {
+                knob["type"] = "double";
+                knob["value"] = value;
+            }
+            else if constexpr(std::is_same_v<T, std::string>)
+            {
+                knob["type"] = "string";
+                knob["value"] = value;
+            }
+        },
+        setting.value());
+
+    return knob;
+}
 /// Get the lowercase string representation of an AutotuneStrategy (for config file output)
 inline std::string strategyToLowerString(AutotuneStrategy strategy)
 {
@@ -90,6 +202,9 @@ inline std::string tuneModeToLowerString(TuneMode mode)
     }
 }
 
+namespace detail
+{
+
 /// Build a single JSON engine_overrides entry from an AutotuneResult.
 ///
 /// @param result The autotune result to serialize
@@ -101,7 +216,8 @@ inline nlohmann::json buildOverrideEntry(const AutotuneResult& result,
                                          const std::string& opName,
                                          const std::vector<std::vector<int64_t>>& tensorDims,
                                          const std::vector<std::vector<int64_t>>& tensorStrides,
-                                         const Criteria& criteria = {})
+                                         const Criteria& criteria = {},
+                                         const std::vector<std::string>& tensorIds = {})
 {
     nlohmann::json entry;
     entry["op"] = opName;
@@ -117,6 +233,10 @@ inline nlohmann::json buildOverrideEntry(const AutotuneResult& result,
     {
         nlohmann::json t;
         t["dim"] = tensorDims[i];
+        if(i < tensorIds.size() && !tensorIds[i].empty())
+        {
+            t["tensor_id"] = tensorIds[i];
+        }
         if(i < tensorStrides.size() && !tensorStrides[i].empty())
         {
             t["stride"] = tensorStrides[i];
@@ -208,7 +328,8 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
                                   bool deleteAllExisting,
                                   const std::vector<std::vector<int64_t>>& tensorDims,
                                   const std::vector<std::vector<int64_t>>& tensorStrides,
-                                  const Criteria& criteria = {})
+                                  const Criteria& criteria = {},
+                                  const std::vector<std::string>& tensorIds = {})
 {
     try
     {
@@ -257,7 +378,8 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
                 continue;
             }
 
-            newEntry = buildOverrideEntry(result, opName, tensorDims, tensorStrides, criteria);
+            newEntry
+                = buildOverrideEntry(result, opName, tensorDims, tensorStrides, criteria, tensorIds);
             break; // Only write the rank-0 winner
         }
 
@@ -284,8 +406,8 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
                                                       && criteriaOrEmpty(existing)
                                                              == criteriaOrEmpty(*newEntry)
                                                       && existing.contains("tensors")
-                                                      && existing["tensors"]
-                                                             == (*newEntry)["tensors"];
+                                                      && tensorSignaturesMatch(existing["tensors"],
+                                                                               (*newEntry)["tensors"]);
                                            }),
                             overrides.end());
         }
@@ -347,6 +469,37 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
     {
         return {ErrorCode::INVALID_VALUE, e.what()};
     }
+}
+
+} // namespace detail
+
+/// Build a single JSON engine_overrides entry from an AutotuneResult.
+///
+/// @param result The autotune result to serialize
+/// @param opName The operation name for the entry (e.g. "conv_fprop")
+/// @param tensorDims Tensor dimensions for the entry (one vector<int64_t> per tensor)
+/// @param tensorStrides Tensor strides for the entry (one vector<int64_t> per tensor)
+/// @return A nlohmann::json object representing the entry
+inline nlohmann::json buildOverrideEntry(const AutotuneResult& result,
+                                         const std::string& opName,
+                                         const std::vector<std::vector<int64_t>>& tensorDims,
+                                         const std::vector<std::vector<int64_t>>& tensorStrides,
+                                         const Criteria& criteria = {})
+{
+    return detail::buildOverrideEntry(result, opName, tensorDims, tensorStrides, criteria);
+}
+
+/// Write autotuning results to a JSON file in heuristic config format.
+inline Error writeAutotuneResults(const std::filesystem::path& filePath,
+                                  const std::string& opName,
+                                  const std::vector<AutotuneResult>& results,
+                                  bool deleteAllExisting,
+                                  const std::vector<std::vector<int64_t>>& tensorDims,
+                                  const std::vector<std::vector<int64_t>>& tensorStrides,
+                                  const Criteria& criteria = {})
+{
+    return detail::writeAutotuneResults(
+        filePath, opName, results, deleteAllExisting, tensorDims, tensorStrides, criteria);
 }
 
 } // namespace autotune

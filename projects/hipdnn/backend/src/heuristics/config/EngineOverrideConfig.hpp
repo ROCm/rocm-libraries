@@ -14,6 +14,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -24,23 +25,25 @@ namespace hipdnn_backend::heuristics::config
 /// Dimension value meaning "match any value in this slot".
 inline constexpr int64_t WILDCARD_DIM = -1;
 
-/// View into one tensor: pointers to the live dim and stride vectors.
-/// The matcher does not own this data; callers must keep the underlying
-/// vectors alive for the duration of the match call.
+/// View into one logical tensor: its schema tensor field name plus pointers to
+/// live dim and stride vectors. The matcher does not own this data; callers
+/// must keep the underlying vectors alive for the duration of the match call.
 struct TensorView
 {
+    std::string_view tensorId;
     const std::vector<int64_t>* dim;
     const std::vector<int64_t>* stride;
 };
 
-/// Pattern for a single tensor: a list of expected dimensions and optional strides,
-/// with -1 as a per-slot wildcard. When `stride` is empty no stride matching is
-/// performed.
+/// Pattern for a single tensor: an optional schema tensor field name, a list of
+/// expected dimensions, and optional strides, with -1 as a per-slot wildcard.
+/// When `stride` is empty no stride matching is performed. Missing tensor IDs
+/// are legacy config entries and fall back to the historical positional order.
 struct TensorPattern
 {
+    std::optional<std::string> tensorId;
     std::vector<int64_t> dim;
     std::vector<int64_t> stride;
-
     bool matches(const TensorView& tensor) const
     {
         const auto& tdim = *tensor.dim;
@@ -103,6 +106,51 @@ struct OperationRule
                 return false;
             }
         }
+        return matchesTensors(inputs);
+    }
+
+private:
+    bool matchesTensors(const std::vector<TensorView>& inputs) const
+    {
+        bool hasLogicalTensorIds = false;
+        for(const auto& tensor : tensors)
+        {
+            if(tensor.tensorId.has_value())
+            {
+                hasLogicalTensorIds = true;
+                break;
+            }
+        }
+
+        if(!hasLogicalTensorIds)
+        {
+            return matchesLegacyPositional(inputs);
+        }
+
+        std::vector<uint8_t> used(inputs.size(), 0);
+        for(size_t i = 0; i < tensors.size(); ++i)
+        {
+            const auto& pattern = tensors[i];
+            if(pattern.tensorId.has_value())
+            {
+                if(!matchesNamed(pattern, inputs, used))
+                {
+                    return false;
+                }
+                continue;
+            }
+
+            if(used[i] != 0 || !pattern.matches(inputs[i]))
+            {
+                return false;
+            }
+            used[i] = 1;
+        }
+        return true;
+    }
+
+    bool matchesLegacyPositional(const std::vector<TensorView>& inputs) const
+    {
         for(size_t i = 0; i < tensors.size(); ++i)
         {
             if(!tensors[i].matches(inputs[i]))
@@ -111,6 +159,22 @@ struct OperationRule
             }
         }
         return true;
+    }
+
+    static bool matchesNamed(const TensorPattern& pattern,
+                             const std::vector<TensorView>& inputs,
+                             std::vector<uint8_t>& used)
+    {
+        for(size_t i = 0; i < inputs.size(); ++i)
+        {
+            if(used[i] == 0 && inputs[i].tensorId == *pattern.tensorId
+               && pattern.matches(inputs[i]))
+            {
+                used[i] = 1;
+                return true;
+            }
+        }
+        return false;
     }
 };
 
@@ -277,6 +341,10 @@ private:
             for(const auto& t : entry.at("tensors"))
             {
                 TensorPattern pat;
+                if(t.contains("tensor_id"))
+                {
+                    pat.tensorId = t.at("tensor_id").get<std::string>();
+                }
                 pat.dim = t.at("dim").get<std::vector<int64_t>>();
                 if(t.contains("stride"))
                 {

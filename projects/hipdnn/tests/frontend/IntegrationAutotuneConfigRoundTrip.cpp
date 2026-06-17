@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <filesystem>
 #include <fstream>
@@ -82,7 +83,8 @@ struct ConfigRoundTripCase
 {
     OperationType op;
     const char* expectedOpName;
-    hipdnn_frontend::autotune::Criteria expectedCriteria;
+    std::vector<std::pair<std::string, int64_t>> expectedCriteria;
+    std::vector<const char*> expectedTensorIds;
 };
 
 class IntegrationAutotuneConfigRoundTrip : public hipdnn_tests::AutotuneIntegrationFixture,
@@ -168,6 +170,26 @@ protected:
         out << json.dump(2) << '\n';
     }
 
+    void reverseFirstEntryTensors()
+    {
+        std::ifstream in(_configFile);
+        ASSERT_TRUE(in.is_open()) << "Could not open config file for tensor rewrite: "
+                                  << _configFile;
+        nlohmann::json json;
+        in >> json;
+        in.close();
+
+        ASSERT_TRUE(json.contains("engine_overrides"));
+        ASSERT_FALSE(json["engine_overrides"].empty());
+        auto& tensors = json["engine_overrides"][0]["tensors"];
+        ASSERT_TRUE(tensors.is_array());
+        std::reverse(tensors.begin(), tensors.end());
+
+        std::ofstream out(_configFile, std::ios::trunc);
+        ASSERT_TRUE(out.is_open()) << "Could not open config file for write: " << _configFile;
+        out << json.dump(2) << '\n';
+    }
+
     void assertConfigEntryMatchesCase(const ConfigRoundTripCase& testCase)
     {
         std::ifstream in(_configFile);
@@ -180,7 +202,14 @@ protected:
         const auto& entry = json["engine_overrides"][0];
         EXPECT_EQ(entry["op"], testCase.expectedOpName);
         ASSERT_TRUE(entry.contains("tensors"));
-        ASSERT_FALSE(entry["tensors"].empty());
+        ASSERT_EQ(entry["tensors"].size(), testCase.expectedTensorIds.size());
+        for(size_t i = 0; i < testCase.expectedTensorIds.size(); ++i)
+        {
+            const auto& tensor = entry["tensors"][i];
+            ASSERT_TRUE(tensor.contains("tensor_id"));
+            ASSERT_TRUE(tensor["tensor_id"].is_string());
+            EXPECT_EQ(tensor["tensor_id"], testCase.expectedTensorIds[i]);
+        }
 
         nlohmann::json expectedCriteria = nlohmann::json::object();
         for(const auto& [key, value] : testCase.expectedCriteria)
@@ -246,6 +275,7 @@ TEST_P(IntegrationAutotuneConfigRoundTrip, EngineSelectionRoundTripsThroughConfi
         ASSERT_EQ(results.size(), 1u);
         EXPECT_EQ(results[0].engineId, engineAId);
         assertConfigEntryMatchesCase(testCase);
+        reverseFirstEntryTensors();
     }
 
     {
@@ -267,26 +297,55 @@ INSTANTIATE_TEST_SUITE_P(
     SupportedOps,
     IntegrationAutotuneConfigRoundTrip,
     ::testing::Values(
-        ConfigRoundTripCase{OperationType::CONV_FORWARD, "conv_fprop", {}},
-        ConfigRoundTripCase{OperationType::CONV_BACKWARD_DATA, "conv_dgrad", {}},
-        ConfigRoundTripCase{OperationType::CONV_BACKWARD_WEIGHTS, "conv_wgrad", {}},
-        ConfigRoundTripCase{OperationType::CONV_FWD_BIAS_ACTIV, "conv_fprop", {}},
-        ConfigRoundTripCase{OperationType::MATMUL, "matmul", {}},
-        ConfigRoundTripCase{OperationType::BATCHNORM_TRAINING, "batchnorm_training", {}},
-        ConfigRoundTripCase{OperationType::BATCHNORM_INFERENCE, "batchnorm_inference", {}},
-        ConfigRoundTripCase{OperationType::BATCHNORM_BACKWARD, "batchnorm_backward", {}},
         ConfigRoundTripCase{
-            OperationType::LAYERNORM, "layernorm", {{"norm_fwd_phase", HIPDNN_NORM_FWD_INFERENCE}}},
+            OperationType::CONV_FORWARD, "conv_fprop", {}, {"x_tensor_uid", "w_tensor_uid"}},
         ConfigRoundTripCase{
-            OperationType::RMSNORM, "rmsnorm", {{"norm_fwd_phase", HIPDNN_NORM_FWD_INFERENCE}}},
+            OperationType::CONV_BACKWARD_DATA, "conv_dgrad", {}, {"dy_tensor_uid", "w_tensor_uid"}},
+        ConfigRoundTripCase{OperationType::CONV_BACKWARD_WEIGHTS,
+                            "conv_wgrad",
+                            {},
+                            {"x_tensor_uid", "dy_tensor_uid"}},
         ConfigRoundTripCase{
-            OperationType::REDUCTION, "reduction", {{"reduction_mode", HIPDNN_REDUCE_TENSOR_ADD}}},
+            OperationType::CONV_FWD_BIAS_ACTIV, "conv_fprop", {}, {"x_tensor_uid", "w_tensor_uid"}},
+        ConfigRoundTripCase{OperationType::MATMUL, "matmul", {}, {"a_tensor_uid", "b_tensor_uid"}},
+        ConfigRoundTripCase{
+            OperationType::BATCHNORM_TRAINING,
+            "batchnorm_training",
+            {},
+            {"x_tensor_uid", "scale_tensor_uid", "bias_tensor_uid", "epsilon_tensor_uid"}},
+        ConfigRoundTripCase{OperationType::BATCHNORM_INFERENCE,
+                            "batchnorm_inference",
+                            {},
+                            {"x_tensor_uid",
+                             "mean_tensor_uid",
+                             "inv_variance_tensor_uid",
+                             "scale_tensor_uid",
+                             "bias_tensor_uid"}},
+        ConfigRoundTripCase{OperationType::BATCHNORM_BACKWARD,
+                            "batchnorm_backward",
+                            {},
+                            {"dy_tensor_uid", "x_tensor_uid", "scale_tensor_uid"}},
+        ConfigRoundTripCase{
+            OperationType::LAYERNORM,
+            "layernorm",
+            {{"norm_fwd_phase", HIPDNN_NORM_FWD_INFERENCE}},
+            {"x_tensor_uid", "scale_tensor_uid", "bias_tensor_uid", "epsilon_tensor_uid"}},
+        ConfigRoundTripCase{OperationType::RMSNORM,
+                            "rmsnorm",
+                            {{"norm_fwd_phase", HIPDNN_NORM_FWD_INFERENCE}},
+                            {"x_tensor_uid", "scale_tensor_uid", "epsilon_tensor_uid"}},
+        ConfigRoundTripCase{OperationType::REDUCTION,
+                            "reduction",
+                            {{"reduction_mode", HIPDNN_REDUCE_TENSOR_ADD}},
+                            {"in_tensor_uid"}},
         ConfigRoundTripCase{OperationType::POINTWISE_UNARY,
                             "pointwise",
-                            {{"pointwise_mode", HIPDNN_POINTWISE_RELU_FWD}}},
+                            {{"pointwise_mode", HIPDNN_POINTWISE_RELU_FWD}},
+                            {"in_0_tensor_uid"}},
         ConfigRoundTripCase{OperationType::POINTWISE_BINARY,
                             "pointwise",
-                            {{"pointwise_mode", HIPDNN_POINTWISE_ADD}}}),
+                            {{"pointwise_mode", HIPDNN_POINTWISE_ADD}},
+                            {"in_0_tensor_uid", "in_1_tensor_uid"}}),
     [](const ::testing::TestParamInfo<ConfigRoundTripCase>& info) {
         return hipdnn_test_sdk::utilities::operationTypeToString(info.param.op);
     });

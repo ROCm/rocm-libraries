@@ -15,6 +15,8 @@
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
 #include <cstdint>
+#include <string>
+#include <string_view>
 #include <vector>
 
 using namespace hipdnn_backend::heuristics::config;
@@ -31,7 +33,12 @@ struct TensorData
 
 TensorView viewOf(const TensorData& t)
 {
-    return TensorView{&t.dim, &t.stride};
+    return TensorView{"", &t.dim, &t.stride};
+}
+
+TensorView namedViewOf(std::string_view tensorId, const TensorData& t)
+{
+    return TensorView{tensorId, &t.dim, &t.stride};
 }
 
 std::vector<TensorView> viewsOf(const std::vector<TensorData>& ts)
@@ -57,6 +64,14 @@ TensorPattern makePatternWithStride(std::vector<int64_t> dim, std::vector<int64_
     TensorPattern p;
     p.dim = std::move(dim);
     p.stride = std::move(stride);
+    return p;
+}
+
+TensorPattern makeNamedPattern(std::string tensorId, std::vector<int64_t> dim)
+{
+    TensorPattern p;
+    p.tensorId = std::move(tensorId);
+    p.dim = std::move(dim);
     return p;
 }
 
@@ -248,6 +263,87 @@ TEST(TestEngineOverrideConfig, SameShapeDifferentCriteriaSelectsDifferentEngines
         = config.matchOperation("pointwise", {Criterion{"pointwise_mode", 30}}, viewsOf(tensors));
     ASSERT_TRUE(mulResult.has_value());
     EXPECT_EQ(*mulResult, HIPBLASLT_ENGINE_ID);
+}
+
+TEST(TestEngineOverrideConfig, NamedTensorRulesIgnoreConfigTensorOrder)
+{
+    constexpr const char* CONTENTS = R"({
+  "engine_overrides": [
+    {
+      "op": "pointwise",
+      "criteria": { "pointwise_mode": 2 },
+      "engine_name": "MIOPEN_ENGINE",
+      "tensors": [
+        { "tensor_id": "in_1_tensor_uid", "dim": [5, 6] },
+        { "tensor_id": "in_0_tensor_uid", "dim": [2, 4] }
+      ]
+    }
+  ]
+})";
+
+    auto config = EngineOverrideConfig::loadFromContent(CONTENTS);
+    ASSERT_TRUE(config.has_value());
+
+    const TensorData x{{2, 4}, {}};
+    const TensorData y{{5, 6}, {}};
+    const std::vector<TensorView> tensors{namedViewOf("in_0_tensor_uid", x),
+                                          namedViewOf("in_1_tensor_uid", y)};
+
+    auto result = config->matchOperation("pointwise", {Criterion{"pointwise_mode", 2}}, tensors);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, MIOPEN_ENGINE_ID);
+}
+
+TEST(TestEngineOverrideConfig, NamedTensorRulesRejectSameShapeWrongRole)
+{
+    OperationRule rule;
+    rule.op = "sdpa_fwd";
+    rule.engineName = MIOPEN_ENGINE_NAME;
+    rule.tensors = {makeNamedPattern("q_tensor_uid", {2, 4}),
+                    makeNamedPattern("k_tensor_uid", {2, 4}),
+                    makeNamedPattern("v_tensor_uid", {2, 4}),
+                    makeNamedPattern("scale_tensor_uid", {1})};
+
+    const auto config = makeConfig({std::move(rule)});
+    const TensorData q{{2, 4}, {}};
+    const TensorData k{{2, 4}, {}};
+    const TensorData v{{2, 4}, {}};
+    const TensorData bias{{1}, {}};
+    const std::vector<TensorView> tensors{namedViewOf("q_tensor_uid", q),
+                                          namedViewOf("k_tensor_uid", k),
+                                          namedViewOf("v_tensor_uid", v),
+                                          namedViewOf("attn_mask_tensor_uid", bias)};
+
+    EXPECT_FALSE(config.matchOperation("sdpa_fwd", tensors).has_value());
+}
+
+TEST(TestEngineOverrideConfig, LegacyRuleWithoutTensorIdsUsesPositionalOrder)
+{
+    constexpr const char* CONTENTS = R"({
+  "engine_overrides": [
+    {
+      "op": "conv_fprop",
+      "engine_name": "MIOPEN_ENGINE",
+      "tensors": [
+        { "dim": [1, 3, 4, 4] },
+        { "dim": [2, 3, 1, 1] }
+      ]
+    }
+  ]
+})";
+
+    auto config = EngineOverrideConfig::loadFromContent(CONTENTS);
+    ASSERT_TRUE(config.has_value());
+
+    const TensorData x{{1, 3, 4, 4}, {}};
+    const TensorData w{{2, 3, 1, 1}, {}};
+    const std::vector<TensorView> matching{namedViewOf("x_tensor_uid", x),
+                                           namedViewOf("w_tensor_uid", w)};
+    const std::vector<TensorView> reversed{namedViewOf("w_tensor_uid", w),
+                                           namedViewOf("x_tensor_uid", x)};
+
+    EXPECT_TRUE(config->matchOperation("conv_fprop", matching).has_value());
+    EXPECT_FALSE(config->matchOperation("conv_fprop", reversed).has_value());
 }
 
 // ── Test 7: wrong tensor count in rule → nullopt ────────────────────────────

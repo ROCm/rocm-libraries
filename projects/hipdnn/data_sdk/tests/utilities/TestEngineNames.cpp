@@ -171,6 +171,16 @@ TEST_F(TestEngineNames, EngineNameOrIdParsesDecimalId)
     EXPECT_EQ(engineNameOrIdToId("-18"), -18);
 }
 
+TEST_F(TestEngineNames, EngineNameOrIdParsesPlusSignedDecimalId)
+{
+    EXPECT_EQ(engineNameOrIdToId("+12345"), 12345);
+}
+
+TEST_F(TestEngineNames, EngineNameOrIdTreatsBarePlusAsName)
+{
+    EXPECT_EQ(engineNameOrIdToId("+"), engineNameToId("+"));
+}
+
 TEST_F(TestEngineNames, EngineNameOrIdParsesHexId)
 {
     EXPECT_EQ(engineNameOrIdToId("0x0000000000003039"), 12345);
