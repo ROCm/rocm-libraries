@@ -199,7 +199,7 @@ TEST(TestLoadGraphAndTensors, Valid)
 
     const std::filesystem::path filepath
         = getCurrentExecutableDirectory()
-          / "../lib/golden_reference_data/quick/BatchnormFwdInference/nchw/fp32/Small/Small.json";
+          / "../lib/integration_test_bundles/quick/BatchnormFwdInference/nchw/fp32/Small/Small.json";
 
     // TODO: Temporary fix until reference data can be properly installed
     if(!std::filesystem::exists(filepath))
@@ -251,7 +251,7 @@ TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
 {
     const std::filesystem::path filepath
         = getCurrentExecutableDirectory()
-          / "../lib/golden_reference_data/quick/BatchnormFwdInference/nchw/fp32/Small/Small.json";
+          / "../lib/integration_test_bundles/quick/BatchnormFwdInference/nchw/fp32/Small/Small.json";
 
     // TODO: Temporary fix until reference data can be properly installed
     if(!std::filesystem::exists(filepath))

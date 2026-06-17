@@ -1,7 +1,12 @@
-# Golden Reference Data
+# Integration Test Bundles
 
-Pre-computed reference tensors for integration tests. Binary data is stored
-in S3 via [DVC](https://dvc.org) — git only tracks small `.dvc` pointer files.
+Pre-computed reference tensors for integration tests. Bundles are **optional** —
+tests can run without them using `--verification-mode gpu` or
+`--verification-mode cpu`. Bundles enable golden-comparison mode, which is more
+sensitive but requires data to be fetched first.
+
+Binary data is stored in S3 via [DVC](https://dvc.org) — git only tracks small
+`.dvc` pointer files.
 
 | Key            | Value                                |
 |----------------|--------------------------------------|
@@ -12,7 +17,7 @@ in S3 via [DVC](https://dvc.org) — git only tracks small `.dvc` pointer files.
 ## Folder Convention
 
 ```
-golden_reference_data/{Tier}/{Operation}/{Layout}/{DataType}/{Name}/
+integration_test_bundles/{Tier}/{Operation}/{Layout}/{DataType}/{Name}/
     {Name}.json              # graph description (committed to git)
     {Name}.tensors.dvc       # DVC pointer tracking all of this bundle's .bin files (committed to git)
     {Name}.tensor0.bin       # binary tensor data (DVC-tracked)
@@ -30,6 +35,9 @@ golden_reference_data/{Tier}/{Operation}/{Layout}/{DataType}/{Name}/
 
 ## Pull Data Locally
 
+Bundles are optional. Skip this step if you only need computed (GPU/CPU)
+verification.
+
 ```bash
 # From the repo root:
 
@@ -37,7 +45,7 @@ golden_reference_data/{Tier}/{Operation}/{Layout}/{DataType}/{Name}/
 dvc pull
 
 # Pull only quick-tier bundles (sufficient for smoke tests)
-dvc pull dnn-providers/integration-tests/golden_reference_data/quick/
+dvc pull dnn-providers/integration-tests/integration_test_bundles/quick/
 ```
 
 The Linux CI workflow (`therock-ci-linux.yml`) runs `dvc pull` automatically. Other pipelines (Windows, superbuild) may need it wired in separately — see backlog.
@@ -48,15 +56,15 @@ The Linux CI workflow (`therock-ci-linux.yml`) runs `dvc pull` automatically. Ot
 
 ```bash
 # 1. Create the bundle directory
-mkdir -p dnn-providers/integration-tests/golden_reference_data/quick/ConvFwd/nhwc/fp16/resnet50_layer3/
+mkdir -p dnn-providers/integration-tests/integration_test_bundles/quick/ConvFwd/nhwc/fp16/resnet50_layer3/
 
 # 2. Copy your files in
-cp resnet50_layer3.json        dnn-providers/integration-tests/golden_reference_data/quick/ConvFwd/nhwc/fp16/resnet50_layer3/
-cp resnet50_layer3.tensor*.bin dnn-providers/integration-tests/golden_reference_data/quick/ConvFwd/nhwc/fp16/resnet50_layer3/
+cp resnet50_layer3.json        dnn-providers/integration-tests/integration_test_bundles/quick/ConvFwd/nhwc/fp16/resnet50_layer3/
+cp resnet50_layer3.tensor*.bin dnn-providers/integration-tests/integration_test_bundles/quick/ConvFwd/nhwc/fp16/resnet50_layer3/
 
 # 3. Author a single per-bundle DVC pointer listing every .bin, then let DVC fill in the hashes.
 #    DVC cannot generate a multi-file pointer itself, so we write the `outs:` list and `dvc commit`.
-BUNDLE=dnn-providers/integration-tests/golden_reference_data/quick/ConvFwd/nhwc/fp16/resnet50_layer3
+BUNDLE=dnn-providers/integration-tests/integration_test_bundles/quick/ConvFwd/nhwc/fp16/resnet50_layer3
 { echo "outs:"; for f in "$BUNDLE"/*.tensor*.bin; do echo "- path: $(basename "$f")"; done; } > "$BUNDLE/resnet50_layer3.tensors.dvc"
 dvc commit -f "$BUNDLE/resnet50_layer3.tensors.dvc"
 
@@ -72,7 +80,7 @@ git push
 ## Update an Existing Bundle
 
 ```bash
-BUNDLE=dnn-providers/integration-tests/golden_reference_data/quick/ConvFwd/nhwc/fp16/resnet50_layer3
+BUNDLE=dnn-providers/integration-tests/integration_test_bundles/quick/ConvFwd/nhwc/fp16/resnet50_layer3
 
 # 1. Overwrite the files in the bundle directory
 cp new_tensors/*.bin "$BUNDLE/"
@@ -97,10 +105,10 @@ old `.dvc` pointer, and `dvc pull` fetches the previous version.
 
 ```bash
 # 1. Remove DVC tracking for the bundle
-dvc remove dnn-providers/integration-tests/golden_reference_data/quick/ConvFwd/nhwc/fp16/resnet50_layer3/resnet50_layer3.tensors.dvc
+dvc remove dnn-providers/integration-tests/integration_test_bundles/quick/ConvFwd/nhwc/fp16/resnet50_layer3/resnet50_layer3.tensors.dvc
 
 # 2. Delete the bundle directory
-rm -rf dnn-providers/integration-tests/golden_reference_data/quick/ConvFwd/nhwc/fp16/resnet50_layer3/
+rm -rf dnn-providers/integration-tests/integration_test_bundles/quick/ConvFwd/nhwc/fp16/resnet50_layer3/
 
 # 3. Commit
 git commit -m "Remove ConvFwd resnet50_layer3 bundle"
@@ -115,9 +123,9 @@ If DVC tracking needs to be rolled back:
 
 ```bash
 # Pull the data if not on disk, then remove DVC tracking and re-add to git
-dvc pull dnn-providers/integration-tests/golden_reference_data/quick/BatchnormFwdInference/nchw/fp32/Small/Small.tensors.dvc
-dvc remove dnn-providers/integration-tests/golden_reference_data/quick/BatchnormFwdInference/nchw/fp32/Small/Small.tensors.dvc
-git add -f dnn-providers/integration-tests/golden_reference_data/quick/BatchnormFwdInference/nchw/fp32/Small/*.bin
+dvc pull dnn-providers/integration-tests/integration_test_bundles/quick/BatchnormFwdInference/nchw/fp32/Small/Small.tensors.dvc
+dvc remove dnn-providers/integration-tests/integration_test_bundles/quick/BatchnormFwdInference/nchw/fp32/Small/Small.tensors.dvc
+git add -f dnn-providers/integration-tests/integration_test_bundles/quick/BatchnormFwdInference/nchw/fp32/Small/*.bin
 git commit -m "Revert Small bundle from DVC to git tracking"
 ```
 
@@ -160,4 +168,4 @@ resnet50_layer3/
 | `.tensors.dvc` exists but no data on disk | `dvc pull path/to/Name.tensors.dvc` |
 | `.bin` accidentally committed to git | `git rm --cached path/to/file.bin`, then re-record with `dvc commit path/to/Name.tensors.dvc` |
 | Added/removed tensor files in a bundle | Re-author the `outs:` list in `Name.tensors.dvc`, then `dvc commit -f` it |
-| Tests can't find reference data | `dvc pull` then `dvc status` to check for drift |
+| Tests can't find bundle data | `dvc pull` then `dvc status` to check for drift; or run with `--verification-mode gpu` to skip bundle comparison |
