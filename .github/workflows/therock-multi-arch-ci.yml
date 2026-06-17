@@ -67,6 +67,9 @@ jobs:
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
 
+      - name: Install dependencies
+        run: pip install pydantic
+
       - name: Determine changed projects from git diff
         id: configure
         env:
