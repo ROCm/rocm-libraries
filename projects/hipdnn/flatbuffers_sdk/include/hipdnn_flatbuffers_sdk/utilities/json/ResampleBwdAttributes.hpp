@@ -26,10 +26,6 @@ inline void to_json(nlohmann::json& j, const ResampleBwdAttributes& attr)
     j["window"] = attr.window();
     j["resample_mode"] = attr.resample_mode();
     j["padding_mode"] = attr.padding_mode();
-    if(attr.generate_index().has_value())
-    {
-        j["generate_index"] = attr.generate_index().value();
-    }
 }
 
 }
@@ -52,9 +48,6 @@ inline auto to<data_objects::ResampleBwdAttributes>(flatbuffers::FlatBufferBuild
     auto window = builder.CreateVector(entry.at("window").get<std::vector<int64_t>>());
     auto resampleMode = entry.at("resample_mode").get<data_objects::ResampleMode>();
     auto paddingMode = entry.at("padding_mode").get<data_objects::PaddingMode>();
-    auto generateIndex = entry.contains("generate_index")
-                             ? ::flatbuffers::Optional<bool>(entry.at("generate_index").get<bool>())
-                             : ::flatbuffers::nullopt;
 
     return data_objects::CreateResampleBwdAttributes(builder,
                                                      dyUid,
@@ -65,8 +58,7 @@ inline auto to<data_objects::ResampleBwdAttributes>(flatbuffers::FlatBufferBuild
                                                      stride,
                                                      window,
                                                      resampleMode,
-                                                     paddingMode,
-                                                     generateIndex);
+                                                     paddingMode);
 }
 
 }

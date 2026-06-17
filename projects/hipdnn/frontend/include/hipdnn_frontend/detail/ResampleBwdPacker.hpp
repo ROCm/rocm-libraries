@@ -19,7 +19,7 @@ inline Error createResampleBwdOperation(
     std::vector<ScopedHipdnnBackendDescriptor>& operations)
 {
     // Create operation descriptor
-    ScopedHipdnnBackendDescriptor opDesc(HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR);
+    ScopedHipdnnBackendDescriptor opDesc(HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR_EXT);
     if(!opDesc.valid())
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -28,17 +28,17 @@ inline Error createResampleBwdOperation(
 
     // Create tensor descriptors (if needed) and set them on the operation
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DY,
+                                             HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DY_EXT,
                                              attributes.get_dy(),
                                              tensorDescs,
                                              "resample DY"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DX,
+                                             HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DX_EXT,
                                              attributes.get_dx(),
                                              tensorDescs,
                                              "resample DX"));
     HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
-                                                     HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_INDEX,
+                                                     HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_INDEX_EXT,
                                                      attributes.get_index(),
                                                      tensorDescs,
                                                      "resample INDEX"));
@@ -88,15 +88,6 @@ inline Error createResampleBwdOperation(
                                                HIPDNN_TYPE_PADDING_MODE,
                                                *paddingMode,
                                                "resample mode"));
-    if(attributes.get_generate_index().has_value())
-    {
-        HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
-                                                   HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT,
-                                                   HIPDNN_TYPE_BOOLEAN,
-                                                   *attributes.get_generate_index(),
-                                                   "resample generate_index"));
-    }
-
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
                                                  HIPDNN_ATTR_RESAMPLE_COMP_TYPE,
                                                  attributes.compute_data_type,

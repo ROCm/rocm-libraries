@@ -62,7 +62,7 @@ void ResampleBwdOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t a
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DY:
+    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DY_EXT:
         setTensorDescriptor(_dyDesc,
                             _data.dy_tensor_uid,
                             attributeType,
@@ -70,7 +70,7 @@ void ResampleBwdOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t a
                             arrayOfElements,
                             "ResampleBwdOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DX:
+    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DX_EXT:
         setTensorDescriptor(_dxDesc,
                             _data.dx_tensor_uid,
                             attributeType,
@@ -78,7 +78,7 @@ void ResampleBwdOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t a
                             arrayOfElements,
                             "ResampleBwdOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_INDEX:
+    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_INDEX_EXT:
         setOptionalTensorDescriptor(_indexDesc,
                                     _data.index_tensor_uid,
                                     attributeType,
@@ -132,13 +132,6 @@ void ResampleBwdOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t a
                        arrayOfElements,
                        "ResampleBwdOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT:
-        setOptionalScalar<HIPDNN_TYPE_BOOLEAN>(_data.generate_index,
-                                               attributeType,
-                                               elementCount,
-                                               arrayOfElements,
-                                               "ResampleBwdOperationDescriptor::setAttribute()");
-        break;
     case HIPDNN_ATTR_RESAMPLE_COMP_TYPE:
         setDataType(_computeDataType,
                     attributeType,
@@ -176,7 +169,7 @@ void ResampleBwdOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t a
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DY:
+    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DY_EXT:
         getTensorDescriptor(_dyDesc,
                             attributeType,
                             requestedElementCount,
@@ -184,7 +177,7 @@ void ResampleBwdOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t a
                             arrayOfElements,
                             "ResampleBwdOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DX:
+    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DX_EXT:
         getTensorDescriptor(_dxDesc,
                             attributeType,
                             requestedElementCount,
@@ -192,7 +185,7 @@ void ResampleBwdOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t a
                             arrayOfElements,
                             "ResampleBwdOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_INDEX:
+    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_INDEX_EXT:
         getOptionalTensorDescriptor(_indexDesc,
                                     attributeType,
                                     requestedElementCount,
@@ -252,14 +245,6 @@ void ResampleBwdOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t a
                        arrayOfElements,
                        "ResampleBwdOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT:
-        getOptionalScalar<HIPDNN_TYPE_BOOLEAN>(_data.generate_index,
-                                               attributeType,
-                                               requestedElementCount,
-                                               elementCount,
-                                               arrayOfElements,
-                                               "ResampleBwdOperationDescriptor::getAttribute()");
-        break;
     case HIPDNN_ATTR_RESAMPLE_COMP_TYPE:
         getDataType(_computeDataType,
                     attributeType,
@@ -277,7 +262,7 @@ void ResampleBwdOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t a
                   "ResampleBwdOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_TYPE_EXT:
-        getOperationType(HIPDNN_OPERATION_TYPE_RESAMPLE_BWD,
+        getOperationType(HIPDNN_OPERATION_TYPE_RESAMPLE_BWD_EXT,
                          attributeType,
                          requestedElementCount,
                          elementCount,
@@ -318,7 +303,7 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT>
 
 hipdnnBackendDescriptorType_t ResampleBwdOperationDescriptor::getStaticType()
 {
-    return HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR;
+    return HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR_EXT;
 }
 
 std::string ResampleBwdOperationDescriptor::toString() const
@@ -340,9 +325,6 @@ std::string ResampleBwdOperationDescriptor::toString() const
     str += ", padding_mode="
            + std::string(
                hipdnn_flatbuffers_sdk::data_objects::EnumNamePaddingMode(_data.padding_mode));
-    str += ", generate_index="
-           + (_data.generate_index ? std::to_string(static_cast<int>(*_data.generate_index))
-                                   : "nullopt");
     str += ", compute_data_type=";
     str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
     str += "}";

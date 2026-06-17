@@ -21,7 +21,6 @@
 
 #include <array>
 #include <memory>
-#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -41,23 +40,22 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                                  HipdnnBackendDescriptor* dxDesc,
                                  HipdnnBackendDescriptor* indexDesc = nullptr,
                                  hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT,
-                                 const std::string& name = "",
-                                 std::optional<bool> generateIndex = std::nullopt)
+                                 const std::string& name = "")
 {
     auto wrapper = createDescriptor<ResampleBwdOperationDescriptor>();
     auto desc = wrapper->asDescriptor<ResampleBwdOperationDescriptor>();
 
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DY,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DY_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&dyDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DX,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DX_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&dxDesc));
     if(indexDesc != nullptr)
     {
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_INDEX,
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_INDEX_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
                            static_cast<const void*>(&indexDesc));
@@ -102,12 +100,6 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                            HIPDNN_TYPE_CHAR,
                            static_cast<int64_t>(name.size()),
                            name.data());
-    }
-
-    if(generateIndex.has_value())
-    {
-        bool val = generateIndex.value();
-        desc->setAttribute(HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT, HIPDNN_TYPE_BOOLEAN, 1, &val);
     }
 
     desc->finalize();
@@ -313,17 +305,17 @@ TEST_F(TestGraphDescriptorResampleBwd, ResampleBwdAttributesPreserved)
     auto opDesc = wrapper->asDescriptor<ResampleBwdOperationDescriptor>();
 
     HipdnnBackendDescriptor* dyPtr = dyDesc.get();
-    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DY,
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DY_EXT,
                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                          1,
                          static_cast<const void*>(&dyPtr));
     HipdnnBackendDescriptor* dxPtr = dxDesc.get();
-    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DX,
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DX_EXT,
                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                          1,
                          static_cast<const void*>(&dxPtr));
     HipdnnBackendDescriptor* indexPtr = indexDesc.get();
-    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_INDEX,
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_INDEX_EXT,
                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                          1,
                          static_cast<const void*>(&indexPtr));
@@ -514,36 +506,6 @@ TEST_F(TestGraphDescriptorResampleBwd, BuildFromOperationWithoutOptionalTensors)
     EXPECT_EQ(attrs->dy_tensor_uid, K_TENSOR_DY_UID);
     EXPECT_EQ(attrs->dx_tensor_uid, K_TENSOR_DX_UID);
     EXPECT_FALSE(attrs->index_tensor_uid.has_value());
-}
-
-TEST_F(TestGraphDescriptorResampleBwd, GenerateIndexPreservedInSerialization)
-{
-    auto dyDesc = createFinalizedTensor(
-        K_TENSOR_DY_UID, toVec(K_TENSOR_DY_DIMS), toVec(K_TENSOR_DY_STRIDES));
-    auto dxDesc = createFinalizedTensor(
-        K_TENSOR_DX_UID, toVec(K_TENSOR_DX_DIMS), toVec(K_TENSOR_DX_STRIDES));
-    auto indexDesc = createFinalizedTensor(
-        K_TENSOR_INDEX_UID, toVec(K_TENSOR_INDEX_DIMS), toVec(K_TENSOR_INDEX_STRIDES));
-    auto opDesc = createFinalizedResampleBwdOp(
-        dyDesc.get(), dxDesc.get(), indexDesc.get(), HIPDNN_DATA_FLOAT, "", true);
-
-    auto desc = getDescriptor();
-    setHandle();
-    std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
-    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(ops.data()));
-    desc->finalize();
-
-    auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
-    ASSERT_EQ(graphT->nodes.size(), 1);
-
-    auto* attrs = graphT->nodes[0]->attributes.AsResampleBwdAttributes();
-    ASSERT_NE(attrs, nullptr);
-    ASSERT_TRUE(attrs->generate_index.has_value());
-    EXPECT_EQ(attrs->generate_index.value(), true);
 }
 
 } // namespace

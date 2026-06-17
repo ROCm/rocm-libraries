@@ -44,3 +44,35 @@ TEST(TestGraphResampleBwd, BuildGraph)
     auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
+
+TEST(TestGraphResampleBwd, BuildGraphWithIndex)
+{
+    Graph graph;
+    graph.set_compute_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto dy = std::make_shared<TensorAttributes>();
+    dy->set_dim({1, 3, 16, 16}).set_stride({768, 256, 16, 1}).set_data_type(DataType::FLOAT);
+
+    auto index = std::make_shared<TensorAttributes>();
+    index->set_dim({1, 3, 16, 16}).set_stride({768, 256, 16, 1}).set_data_type(DataType::FLOAT);
+
+    ResampleBwdAttributes attributes;
+    attributes.set_name("ResampleBwdNode");
+    attributes.set_pre_padding({1, 1});
+    attributes.set_post_padding({1, 1});
+    attributes.set_stride({2, 2});
+    attributes.set_window({3, 3});
+    attributes.set_resample_mode(ResampleMode::MAXPOOL);
+    attributes.set_padding_mode(PaddingMode::ZERO_PAD);
+
+    auto dx = graph.resample_bwd(dy, attributes, index);
+
+    ASSERT_NE(dx, nullptr);
+    EXPECT_EQ(dx->get_name(), "ResampleBwdNode::DX");
+    EXPECT_EQ(index->get_name(), "ResampleBwdNode::INDEX");
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}

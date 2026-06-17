@@ -2748,7 +2748,8 @@ inline flatbuffers::FlatBufferBuilder createValidReductionGraph()
     return builder;
 }
 
-inline flatbuffers::FlatBufferBuilder createValidResampleFwdGraph()
+inline flatbuffers::FlatBufferBuilder createValidResampleFwdGraph(std::optional<bool> generateIndex
+                                                                  = std::nullopt)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -2763,6 +2764,19 @@ inline flatbuffers::FlatBufferBuilder createValidResampleFwdGraph()
         builder, 1, "x", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &xStrides, &xDims));
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 2, "y", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &yStrides, &yDims));
+    ::flatbuffers::Optional<int64_t> indexTensorUid = ::flatbuffers::nullopt;
+    if(generateIndex.has_value() && generateIndex.value())
+    {
+        indexTensorUid = 3;
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                *indexTensorUid,
+                "index",
+                hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                &yStrides,
+                &yDims));
+    }
 
     const std::vector<int64_t> prePadding = {0, 0};
     const std::vector<int64_t> postPadding = {0, 0};
@@ -2773,13 +2787,14 @@ inline flatbuffers::FlatBufferBuilder createValidResampleFwdGraph()
         builder,
         1,
         2,
-        ::flatbuffers::nullopt,
+        indexTensorUid,
         &prePadding,
         &postPadding,
         &stride,
         &window,
         hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL,
-        hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD);
+        hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD,
+        generateIndex);
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(

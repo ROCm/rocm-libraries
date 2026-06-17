@@ -15,7 +15,6 @@
 #include "TensorAttributes.hpp"
 #include <hipdnn_frontend/Types.hpp>
 #include <memory>
-#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -37,41 +36,39 @@ public:
         DY = 0,
         INDEX = 1
     };
-    typedef InputNames input_names; ///< @brief Type alias for InputNames
+    typedef InputNames input_names; // NOLINT(readability-identifier-naming)
 
     /// Output tensor identifiers
     enum class OutputNames
     {
         DX = 0
     };
-    typedef OutputNames output_names; ///< @brief Type alias for OutputNames
+    typedef OutputNames output_names; // NOLINT(readability-identifier-naming)
 
-    std::unordered_map<InputNames, std::shared_ptr<TensorAttributes>> inputs; ///< Input tensors
-    std::unordered_map<OutputNames, std::shared_ptr<TensorAttributes>> outputs; ///< Output tensors
+    std::unordered_map<InputNames, std::shared_ptr<TensorAttributes>> inputs;
+    std::unordered_map<OutputNames, std::shared_ptr<TensorAttributes>> outputs;
 
     // NOLINTBEGIN(readability-identifier-naming)
-    std::vector<int64_t> pre_padding; ///< Pre Padding
-    std::vector<int64_t> post_padding; ///< Post Padding
-    std::vector<int64_t> stride; ///< Stride
-    std::vector<int64_t> window; ///< Window
-    ResampleMode resample_mode = ResampleMode::MAXPOOL; ///< Resample Mode
-    PaddingMode padding_mode = PaddingMode::ZERO_PAD; ///< Padding Mode
-    std::optional<bool> generate_index = std::nullopt; ///< Generate Index
+    std::vector<int64_t> pre_padding;
+    std::vector<int64_t> post_padding;
+    std::vector<int64_t> stride;
+    std::vector<int64_t> window;
+    ResampleMode resample_mode = ResampleMode::NOT_SET;
+    PaddingMode padding_mode = PaddingMode::NOT_SET;
     // NOLINTEND(readability-identifier-naming)
 
-    /// @brief Get the dy input tensor
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> get_dy() const
     {
         return getInput(InputNames::DY);
     }
-    /// @brief Get the index input tensor
+
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> get_index() const
     {
         return getInput(InputNames::INDEX);
     }
-    /// @brief Get the dx output tensor
+
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> get_dx() const
     {
@@ -255,19 +252,6 @@ public:
     PaddingMode get_padding_mode() const
     {
         return padding_mode;
-    }
-
-    // NOLINTNEXTLINE(readability-identifier-naming)
-    ResampleBwdAttributes& set_generate_index(bool value)
-    {
-        generate_index = value;
-        return *this;
-    }
-
-    // NOLINTNEXTLINE(readability-identifier-naming)
-    std::optional<bool> get_generate_index() const
-    {
-        return generate_index;
     }
 };
 typedef ResampleBwdAttributes Resample_bwd_attributes; ///< @brief Compatibility alias

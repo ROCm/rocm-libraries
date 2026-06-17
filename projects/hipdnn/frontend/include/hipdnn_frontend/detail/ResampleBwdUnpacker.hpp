@@ -7,7 +7,6 @@
 #include <hipdnn_frontend/attributes/ResampleBwdAttributes.hpp>
 #include <hipdnn_frontend/detail/DescriptorUnpackHelpers.hpp>
 #include <memory>
-#include <optional>
 #include <unordered_map>
 
 namespace hipdnn_frontend::detail
@@ -20,20 +19,26 @@ namespace hipdnn_frontend::detail
 {
     // Unpack dy tensor
     std::shared_ptr<graph::TensorAttributes> dyTensor;
-    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
-        opDesc, HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DY, tensorMap, dyTensor, "resample DY tensor"));
+    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
+                                               HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DY_EXT,
+                                               tensorMap,
+                                               dyTensor,
+                                               "resample DY tensor"));
     attributes.set_dy(dyTensor);
 
     // Unpack dx tensor
     std::shared_ptr<graph::TensorAttributes> dxTensor;
-    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
-        opDesc, HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DX, tensorMap, dxTensor, "resample DX tensor"));
+    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
+                                               HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DX_EXT,
+                                               tensorMap,
+                                               dxTensor,
+                                               "resample DX tensor"));
     attributes.set_dx(dxTensor);
 
     // Unpack index tensor
     std::shared_ptr<graph::TensorAttributes> indexTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_INDEX,
+                                            HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_INDEX_EXT,
                                             tensorMap,
                                             indexTensor,
                                             "resample INDEX tensor"));
@@ -93,20 +98,6 @@ namespace hipdnn_frontend::detail
         return paddingModeErr;
     }
     attributes.set_padding_mode(paddingModeResult);
-
-    // Unpack generate_index (optional)
-    {
-        std::optional<bool> generateIndex;
-        HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(opDesc,
-                                                           HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT,
-                                                           HIPDNN_TYPE_BOOLEAN,
-                                                           generateIndex,
-                                                           "resample generate_index"));
-        if(generateIndex.has_value())
-        {
-            attributes.set_generate_index(*generateIndex);
-        }
-    }
 
     // Unpack compute data type
     auto [dt, dtErr]
