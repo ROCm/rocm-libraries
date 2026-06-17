@@ -73,13 +73,10 @@ jobs:
       - name: Determine changed projects from git diff
         id: configure
         env:
-          BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/develop' }}
+          # For PRs: compare against the base commit
+          # For pushes: compare against the previous commit
+          BASE_REF: ${{ github.event.pull_request.base.sha || 'HEAD^' }}
         run: |
-          echo "BASE_REF: $BASE_REF"
-          echo "git log:"
-          git log --oneline -5
-          echo "git diff --name-only $BASE_REF:"
-          git diff --name-only $BASE_REF || echo "git diff failed"
           CHANGED_PROJECTS=$(python3 .github/scripts/get_changed_projects.py)
           echo "Changed projects: $CHANGED_PROJECTS"
           echo "changed_projects=$CHANGED_PROJECTS" >> $GITHUB_OUTPUT
