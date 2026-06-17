@@ -16,7 +16,7 @@
 
 #ifdef HIPDNN_ENGINE_HIP_FLASH2
 #include "engines/hip_flash2_engine/HipFlash2Engine.hpp"
-#include "engines/hip_flash2_engine/HipFlash2FwdPlanBuilder.hpp"
+#include "engines/hip_flash2_engine/HipFlash2FwdPlanBuilder_v2.hpp"
 #endif
 
 #ifdef HIPDNN_ENGINE_ASM_SDPA
