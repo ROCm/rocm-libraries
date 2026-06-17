@@ -1011,21 +1011,14 @@ def buildAndTest(Map conf=[:]){
                         }
                         if (params.hipTensor_test && arch == "gfx90a" ){
                             // build and test hipTensor on gfx90a node
-                            dir("rocm-libraries"){
-                               sh """#!/bin/bash
-                                  git sparse-checkout add projects/hiptensor
-                                  git checkout "${params.hipTensor_branch}"
-                               """
-                            }
-                            dir("rocm-libraries/projects/hiptensor"){
-                                sh """#!/bin/bash
-                                    mkdir -p build
-                                    ls -ltr
-                                    CC=hipcc CXX=hipcc cmake -Bbuild . -D CMAKE_PREFIX_PATH="${env.WORKSPACE}/install"
-                                    cmake --build build -- -j
-                                    ctest --test-dir build
-                                """
-                            }
+                            sh """#!/bin/bash
+                                git sparse-checkout add projects/hiptensor
+                                git checkout "${params.hipTensor_branch}"
+                                cd projects/hiptensor && mkdir -p build &&
+                                CC=hipcc CXX=hipcc cmake -Bbuild . -D CMAKE_PREFIX_PATH="${env.WORKSPACE}/install" &&
+                                cmake --build build -- -j &&
+                                ctest --test-dir build
+                            """
                         }
                     }
                 }
