@@ -40,11 +40,30 @@
 #include <cstddef>
 #include <vector>
 
+enum benchmark_variant
+{
+    PartialMatch, // The case where there are a lot of partial matches for the key.
+    RandomNoKey, // No matches of any kind.
+    RandomKeyAtStart, // Best case of the match being at the start of the input.
+};
+
+const char* get_variant_name(benchmark_variant variant)
+{
+    switch(variant)
+    {
+        case PartialMatch: return "Partial Match";
+        case RandomNoKey: return "Random, No Key";
+        case RandomKeyAtStart: return "Random, Key At Start";
+    }
+
+    return "Unknown";
+}
+
 template<typename Key = int, bool find_end = false, typename Config = rocprim::default_config>
 struct device_search_benchmark : public primbench::benchmark_interface
 {
-    device_search_benchmark(size_t key_size, bool repeating)
-        : m_key_size(key_size), m_repeating(repeating)
+    device_search_benchmark(size_t key_size, benchmark_variant variant)
+        : m_key_size(key_size), m_variant(variant)
     {}
 
     constexpr const char* get_algo_name() const
@@ -57,7 +76,7 @@ struct device_search_benchmark : public primbench::benchmark_interface
         return primbench::json{}
             .add("lvl", "device")
             .add("algo", get_algo_name())
-            .add("repeating", m_repeating)
+            .add("variant", get_variant_name(m_variant))
             .add("key_size", m_key_size)
             .add("value_type", primbench::name<Key>())
             .add("cfg", "default");
@@ -95,26 +114,33 @@ struct device_search_benchmark : public primbench::benchmark_interface
                                         common::generate_limits<key_type>::max(),
                                         seed);
 
-        std::vector<key_type> input(items);
-        if(m_repeating)
-        {
-            // If we're using the find_end variant we must modify the start of the key instead of the end
-            const size_t index = find_end ? 0 : key_size - 1;
+        // Fill the input with random data, This might get changed or competely overwritten below.
+        std::vector<key_type> input
+            = get_random_data<key_type>(items,
+                                        common::generate_limits<key_type>::min(),
+                                        common::generate_limits<key_type>::max(),
+                                        seed + 1);
 
-            // Repeating similar pattern without early exits.
-            keys_input[index] = 0;
-            for(size_t i = 0; i < items; ++i)
-            {
-                input[i] = keys_input[i % key_size];
-            }
-            keys_input[index] = 1;
-        }
-        else
+        switch(m_variant)
         {
-            input = get_random_data<key_type>(items,
-                                              common::generate_limits<key_type>::min(),
-                                              common::generate_limits<key_type>::max(),
-                                              seed + 1);
+            case PartialMatch:
+                {
+                    // If we're using the find_end variant we must modify the start of the key instead of the end
+                    const size_t index = find_end ? 0 : key_size - 1;
+
+                    // Repeating similar pattern without early exits.
+                    keys_input[index] = 0;
+                    for(size_t i = 0; i < items; ++i)
+                    {
+                        input[i] = keys_input[i % key_size];
+                    }
+                    keys_input[index] = 1;
+                }
+                break;
+            case RandomNoKey: break;
+            case RandomKeyAtStart:
+                std::copy(keys_input.begin(), keys_input.end(), input.begin());
+                break;
         }
 
         common::device_ptr<key_type>    d_keys_input(keys_input);
@@ -159,5 +185,5 @@ struct device_search_benchmark : public primbench::benchmark_interface
 
 private:
     size_t m_key_size  = 10;
-    bool   m_repeating = false;
+    benchmark_variant m_variant   = benchmark_variant::RandomNoKey;
 };
