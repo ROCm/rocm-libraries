@@ -23,7 +23,6 @@ struct FmhaFwdVSAKernel
     static constexpr ck_tile::index_t kBlockSize  = FmhaPipeline::kBlockSize;
     static constexpr ck_tile::index_t kBlockPerCu = FmhaPipeline::kBlockPerCu;
     static_assert(kBlockPerCu > 0);
-    static constexpr ck_tile::index_t kBlockPerCuInput = FmhaPipeline::Problem::kBlockPerCu;
 
     using QDataType    = ck_tile::remove_cvref_t<typename FmhaPipeline::QDataType>;
     using KDataType    = ck_tile::remove_cvref_t<typename FmhaPipeline::KDataType>;
@@ -348,6 +347,11 @@ struct FmhaFwdVSAKernel
 
     CK_TILE_DEVICE static constexpr auto GetTileIndex(const Kargs& kargs)
     {
+        // Masked M-tile reversal below assumes a single N1 tile spans hdim_v (num_tile_n1 == 1),
+        // i.e. hdim_v <= kN1.
+        static_assert(FmhaPipeline::kN1 >= FmhaPipeline::kQKHeaddim,
+                      "vsa masked M-tile reversal assumes a single N1 tile "
+                      "(hdim_v <= kN1)");
         const index_t num_tile_n1 = ck_tile::integer_divide_ceil(kargs.hdim_v, FmhaPipeline::kN1);
 
         const index_t i_block = blockIdx.x;
@@ -364,7 +368,7 @@ struct FmhaFwdVSAKernel
 
         if constexpr(kHasMask)
         {
-            // assumes num_tile_n1 == 1
+            // Reverse M tile so masked (top) rows run last (assumes num_tile_n1 == 1).
             return ck_tile::make_tuple(gridDim.x - 1 - i_tile_m, i_tile_n, i_nhead, i_batch);
         }
         else

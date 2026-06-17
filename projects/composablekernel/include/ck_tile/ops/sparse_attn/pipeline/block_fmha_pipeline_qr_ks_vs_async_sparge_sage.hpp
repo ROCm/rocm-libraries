@@ -30,10 +30,12 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                   "SpargeSage pipeline requires PDataType == VDataType for the PV gemm");
     static_assert(std::is_same_v<QDataType, half_t> || std::is_same_v<QDataType, bf16_t> ||
                       std::is_same_v<PDataType, fp8_t>,
-                  "SpargeSage pipeline requires PDataType = fp8_t");
+                  "SpargeSage pipeline requires PDataType = fp8_t when Q/K are quantized "
+                  "(or half/bf16 Q for the unquantized SageAttn path)");
     static_assert(std::is_same_v<QDataType, half_t> || std::is_same_v<QDataType, bf16_t> ||
                       std::is_same_v<VDataType, fp8_t>,
-                  "SpargeSage pipeline requires VDataType = fp8_t");
+                  "SpargeSage pipeline requires VDataType = fp8_t when Q/K are quantized "
+                  "(or half/bf16 Q for the unquantized SageAttn path)");
     using OaccDataType     = remove_cvref_t<typename Problem::OaccDataType>;
     using ODataType        = remove_cvref_t<typename Problem::ODataType>;
     using AttentionVariant = remove_cvref_t<typename Problem::AttentionVariant>;

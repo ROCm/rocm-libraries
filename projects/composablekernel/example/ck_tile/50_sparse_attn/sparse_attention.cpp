@@ -397,7 +397,9 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
                                     const std::vector<int32_t>& seqstart_k_host,
                                     const std::vector<int32_t>& seqstart_q_block_host,
                                     const std::vector<int32_t>& seqstart_k_block_host,
-                                    const std::vector<int32_t>& mask_batch_offsets)
+                                    const std::vector<int32_t>& mask_batch_offsets,
+                                    std::vector<int32_t>* out_lut,
+                                    std::vector<int32_t>* out_vbn)
 {
     static_assert(std::is_same_v<DataType_, ck_tile::half_t> ||
                       std::is_same_v<DataType_, ck_tile::bf16_t>,
@@ -517,6 +519,13 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
     fmha_traits.is_group_mode = is_group_mode;
 
     fmha_sparge_fwd_args args;
+    // Group-mode seqlen convention (sparge): args.seqlen_q/k carry the PACKED TOTALS
+    // (total_q_tokens/total_k_tokens), since the sparge codegen indexes the variable-length
+    // group layout directly off seqlen_q/k and has no separate total_*_tokens field. This
+    // DIFFERS from sparge_sage below, which puts MAX seqlen in seqlen_q/k and the totals in
+    // args.total_q_tokens/total_k_tokens. Each entry is internally consistent with its own
+    // codegen; the same-named field means different things, so do NOT unify one without the
+    // other -- they must stay matched with their respective codegen.
     fill_common_args(args, q_buf, k_buf, v_buf, o_buf,
                      batch, nhead, nhead_k, total_q_tokens, total_k_tokens, max_seqlen_q,
                      hdim_q, hdim_v, st, mask, scale_s, bias, logits_soft_cap);
@@ -538,11 +547,11 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
     }
 
     {
-        const size_t workspace_bytes = is_group_mode
+        const auto ws = is_group_mode
             ? compute_sparge_workspace_layout_group(
-                  args, args.total_q_blocks, args.total_k_blocks, args.total_qk_blocks).total_bytes
-            : compute_sparge_workspace_layout(args).total_bytes;
-        ck_tile::DeviceMem workspace(workspace_bytes);
+                  args, args.total_q_blocks, args.total_k_blocks, args.total_qk_blocks)
+            : compute_sparge_workspace_layout(args);
+        ck_tile::DeviceMem workspace(ws.total_bytes);
         args.workspace_ptr = workspace.GetDeviceBuffer();
 
         float ave_time = fmha_sparge_fwd(fmha_traits, args, stream_config);
@@ -555,6 +564,25 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
 
         HIP_CHECK_ERROR(hipStreamSynchronize(stream_config.stream_id_));
         o_buf.FromDevice(Y.data(), Y.get_element_space_size_in_bytes());
+
+        // Optionally hand back the device's LUT + valid-block counts (lut / vbn regions)
+        // so validation can reference the kernel's actual selection.
+        if(out_lut != nullptr)
+        {
+            out_lut->resize(ws.lut_bytes / sizeof(int32_t));
+            HIP_CHECK_ERROR(hipMemcpy(out_lut->data(),
+                                      static_cast<const char*>(workspace.GetDeviceBuffer()) +
+                                          ws.lut_off,
+                                      ws.lut_bytes, hipMemcpyDeviceToHost));
+        }
+        if(out_vbn != nullptr)
+        {
+            out_vbn->resize(ws.vbn_bytes / sizeof(int32_t));
+            HIP_CHECK_ERROR(hipMemcpy(out_vbn->data(),
+                                      static_cast<const char*>(workspace.GetDeviceBuffer()) +
+                                          ws.vbn_off,
+                                      ws.vbn_bytes, hipMemcpyDeviceToHost));
+        }
         return ave_time;
     }
 }
@@ -672,7 +700,13 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
                               hdim_q, hdim_v, i_perm, o_perm, is_v_rowmajor);
 
     fmha_sparge_sage_fwd_args args;
-    // Group: seqlen_q/k carry the MAX (mask smem + grid m-tiles); per-batch lengths in seqstart.
+    // Group-mode seqlen convention (sparge_sage): args.seqlen_q/k carry the MAX seqlen
+    // (sizes mask smem + grid m-tiles); per-batch lengths live in seqstart, and the PACKED
+    // TOTALS are stored separately in args.total_q_tokens/total_k_tokens (set below). This
+    // DIFFERS from plain sparge above, which packs the totals directly into seqlen_q/k and
+    // has no total_*_tokens field. The same-named seqlen_q/k field thus means different
+    // things between the two entries; keep each matched with its respective codegen and do
+    // NOT unify one side in isolation.
     fill_common_args(args, q_buf, k_buf, v_buf, o_buf,
                      batch, nhead, nhead_k, seqlen_q, seqlen_k, seqlen_q,
                      hdim_q, hdim_v, st, mask, scale_s, bias, logits_soft_cap);
@@ -693,6 +727,21 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
             ck_tile::TileSageAttnTraits<false, false, false, false, QSE::PERTENSOR>::kBlockScaleSizeQ == 128 &&
             ck_tile::TileSageAttnTraits<false, false, false, false, QSE::PERTENSOR>::kBlockScaleSizeK == 128,
             "host block_scale_size literals must match TileSageAttnTraits::kBlockScaleSizeQ/K");
+        // Guard the group workspace's scales-per-block (spb = pp_block_size / block_scale_size,
+        // see compute_sparge_sage_workspace_layout_group): block_scale_size must not exceed the
+        // (only supported) pp_block_size=128, else integer division collapses spb to 0 and the
+        // q/k_scale region is sized to zero. All literals above are <=128; assert it holds.
+        constexpr int kPpBlockSize = 128; // enforced by the hdim/block_size==128 check above
+        static_assert(
+            ck_tile::TileSageAttnTraits<false, false, false, false, QSE::PERWARP>::kBlockScaleSizeQ <= kPpBlockSize &&
+            ck_tile::TileSageAttnTraits<false, false, false, false, QSE::PERWARP>::kBlockScaleSizeK <= kPpBlockSize &&
+            ck_tile::TileSageAttnTraits<false, false, false, false, QSE::PERTHREAD>::kBlockScaleSizeQ <= kPpBlockSize &&
+            ck_tile::TileSageAttnTraits<false, false, false, false, QSE::PERTHREAD>::kBlockScaleSizeK <= kPpBlockSize &&
+            ck_tile::TileSageAttnTraits<false, false, false, false, QSE::BLOCKSCALE>::kBlockScaleSizeQ <= kPpBlockSize &&
+            ck_tile::TileSageAttnTraits<false, false, false, false, QSE::BLOCKSCALE>::kBlockScaleSizeK <= kPpBlockSize &&
+            ck_tile::TileSageAttnTraits<false, false, false, false, QSE::PERTENSOR>::kBlockScaleSizeQ <= kPpBlockSize &&
+            ck_tile::TileSageAttnTraits<false, false, false, false, QSE::PERTENSOR>::kBlockScaleSizeK <= kPpBlockSize,
+            "block_scale_size must be <= pp_block_size (=128) or workspace scales-per-block (spb) collapses to 0");
     }
     if(qscale == "perblock" || qscale == "pertensor")
     {
@@ -726,6 +775,9 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         args.total_q_blocks       = seqstart_q_block_host.back();
         args.total_k_blocks       = seqstart_k_block_host.back();
         args.total_qk_blocks      = mask_batch_offsets.back();
+        // Packed token totals kept separate from seqlen_q/k (which hold MAX, see above): the
+        // sparge_sage codegen reads variable-length group data off total_*_tokens, unlike plain
+        // sparge which overloads seqlen_q/k for the totals. Must stay matched with the codegen.
         args.total_q_tokens       = total_q_tokens;
         args.total_k_tokens       = total_k_tokens;
     }
@@ -887,7 +939,8 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
                                               const std::vector<int32_t>&,            \
                                               const std::vector<int32_t>&,            \
                                               const std::vector<int32_t>&,            \
-                                              const std::vector<int32_t>&)
+                                              const std::vector<int32_t>&,            \
+                                              std::vector<int32_t>*, std::vector<int32_t>*)
 
 INSTANTIATE_JENGA(ck_tile::half_t);
 INSTANTIATE_JENGA(ck_tile::bf16_t);
@@ -900,3 +953,4 @@ INSTANTIATE_SPARGE_SAGE(ck_tile::bf16_t);
 #undef INSTANTIATE_JENGA
 #undef INSTANTIATE_VSA
 #undef INSTANTIATE_SPARGE
+#undef INSTANTIATE_SPARGE_SAGE

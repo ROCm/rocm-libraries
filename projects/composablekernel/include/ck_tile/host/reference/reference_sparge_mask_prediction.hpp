@@ -46,11 +46,15 @@ HostTensor<float> compute_block_means(
 // Block self-similarity = mean of the pairwise cosine Gram matrix, matching upstream SpargeAttn
 // (L2-normalize tokens, sim = sum(x@x^T)/BS^2). Via the identity
 // sum_{i,j} <u_i,u_j> = ||sum_i u_i||^2 we accumulate the unit-vector sum u and report
-// ||u||^2 / count^2. `means` is unused here but kept for signature compatibility.
+// ||u||^2 / count^2.
+// `km` (nullable): per-channel K-mean [B,H,D]. When provided (smooth_k, K side), each token
+// element is centered by km[d] BEFORE both the per-token L2-norm and the unit-vector
+// accumulation -- mirroring the device (block_sparge_mask_pipelines.hpp ~568 and ~598). Q side
+// passes nullptr (device never centers Q); smooth_k off also passes nullptr (raw, as before).
 template <typename T>
 HostTensor<float> compute_block_similarity(
     const HostTensor<T>& data_bhsd,
-    [[maybe_unused]] const HostTensor<float>& means,
+    const HostTensor<float>* km, // [B,H,D] or nullptr (no centering)
     index_t batch,
     index_t nhead,
     index_t num_blocks,
@@ -58,6 +62,9 @@ HostTensor<float> compute_block_similarity(
     index_t seqlen,
     index_t hdim)
 {
+    auto kmv = [&](index_t b, index_t h, index_t d) {
+        return km ? (*km)(b, h, d) : 0.0f;
+    };
     HostTensor<float> sim({batch, nhead, num_blocks});
     for(index_t b = 0; b < batch; ++b)
         for(index_t h = 0; h < nhead; ++h)
@@ -72,13 +79,13 @@ HostTensor<float> compute_block_similarity(
                     float tok_norm_sq = 0.0f;
                     for(index_t d = 0; d < hdim; ++d)
                     {
-                        float v = type_convert<float>(data_bhsd(b, h, s, d));
+                        float v = type_convert<float>(data_bhsd(b, h, s, d)) - kmv(b, h, d);
                         tok_norm_sq += v * v;
                     }
                     float inv_norm = 1.0f / std::sqrt(tok_norm_sq + 1e-8f);
                     for(index_t d = 0; d < hdim; ++d)
                     {
-                        float v = type_convert<float>(data_bhsd(b, h, s, d));
+                        float v = type_convert<float>(data_bhsd(b, h, s, d)) - kmv(b, h, d);
                         u[static_cast<size_t>(d)] += v * inv_norm;
                     }
                 }
@@ -374,23 +381,33 @@ reference_sparge_mask_prediction(const HostTensor<T>& q_bhsd,
                                ? params.scale
                                : 1.0f / std::sqrt(static_cast<float>(hdim));
 
+    // Q side is never centered by the device (km_ptr == nullptr): pass null.
     auto q_means = compute_block_means(q_bhsd, batch, nhead, num_q_blocks,
                                        block_size_q, seqlen_q, hdim);
-    auto q_sim = compute_block_similarity(q_bhsd, q_means, batch, nhead, num_q_blocks,
+    auto q_sim = compute_block_similarity(q_bhsd, nullptr, batch, nhead, num_q_blocks,
                                           block_size_q, seqlen_q, hdim);
+
+    // K side centers by global per-channel km iff smooth_k -- this must happen BEFORE k_sim so the
+    // similarity is computed on km-centered tokens (matching the device), not just k_means.
+    const bool have_km = params.smooth_k;
+    std::vector<HostTensor<float>> km_storage; // 0 or 1 element (HostTensor has no default ctor)
+    if(have_km)
+        km_storage.push_back(
+            compute_global_k_mean(k_bhsd, batch, nhead_k, seqlen_k, hdim));
+    const HostTensor<float>* km = have_km ? &km_storage.front() : nullptr;
 
     auto k_means = compute_block_means(k_bhsd, batch, nhead_k, num_k_blocks,
                                        block_size_k, seqlen_k, hdim);
-    auto k_sim   = compute_block_similarity(k_bhsd, k_means, batch, nhead_k, num_k_blocks,
+    auto k_sim   = compute_block_similarity(k_bhsd, km,
+                                            batch, nhead_k, num_k_blocks,
                                             block_size_k, seqlen_k, hdim);
-    if(params.smooth_k)
+    if(have_km)
     {
-        const auto km = compute_global_k_mean(k_bhsd, batch, nhead_k, seqlen_k, hdim);
         for(index_t b = 0; b < batch; ++b)
             for(index_t h = 0; h < nhead_k; ++h)
                 for(index_t blk = 0; blk < num_k_blocks; ++blk)
                     for(index_t d = 0; d < hdim; ++d)
-                        k_means(b, h, blk, d) -= km(b, h, d);
+                        k_means(b, h, blk, d) -= (*km)(b, h, d);
     }
 
     HostTensor<float> k_means_expand({batch, nhead, num_k_blocks, hdim});

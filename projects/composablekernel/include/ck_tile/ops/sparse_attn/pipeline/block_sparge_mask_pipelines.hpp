@@ -605,8 +605,11 @@ struct BlockSpargePreprocessPipeline
         if constexpr(kNeedCrossWarpSync)
             reduce_xwarp(u_tile, s_reduce, add_func);
 
-        // sim = ||u||^2 / count^2. Stash each channel's u into LDS (reusing the now-free km slots),
+        // sim = ||u||^2 / count^2. Stash each channel's u into LDS by overwriting s_km; the barrier
+        // below makes this reuse of the km slots safe (the X-tile distribution already gives each warp
+        // a disjoint set of M channels for the read above and the write below, so this is defensive),
         // then sum u[m]^2 over the hidden axis in one strided pass.
+        block_sync_lds();
         sweep_tile_span(decltype(u_tile)::get_distributed_spans()[number<0>{}], [&](auto idx0) {
             constexpr auto m_idx = make_tuple(idx0);
             const auto tile_idx  = get_x_indices_from_distributed_indices(
@@ -882,6 +885,13 @@ struct BlockSpargeMaskPredictionPipeline
     static constexpr index_t kReduceScratchSlots = (kBlockSize + 31) / 32;
     // OOB sentinel: finite (not -INF) so softmax max-subtract avoids inf-inf=NaN.
     static constexpr float   kScoreOOB           = -1.0e30f;
+    // scores_smem is reused across three phases for one M-tile of K-block scores:
+    //   1. raw scores      = dot(q_mean, k_means[k])      -> any real value (incl. kScoreOOB).
+    //   2. exp probs       = softmax over the raw scores  -> values in (0, 1].
+    //   3. selection flag  = kScoreSelected               -> marks a K-block as picked.
+    // The phase-3 sentinel is -2.0, which can never appear as a phase-2 prob (those are in
+    // (0, 1]) nor as a phase-1 OOB score (-1e30), so the float `== kScoreSelected` test that
+    // reads back the selection flag is unambiguous and collision-free.
     static constexpr float   kScoreSelected      = -2.0f;
 
     static constexpr index_t kHdim = 128;
@@ -1006,6 +1016,7 @@ struct BlockSpargeMaskPredictionPipeline
         const index_t tid = get_thread_id();
 
         assert(hdim == kHdim && "sparge mask tile score path requires hdim == 128");
+        assert(num_k_blocks <= kMaxKBlocksPow2 && "num_k_blocks exceeds sort capacity");
 
         float* q_mean_smem = reinterpret_cast<float*>(smem);
         float* scores_smem = q_mean_smem + hdim;

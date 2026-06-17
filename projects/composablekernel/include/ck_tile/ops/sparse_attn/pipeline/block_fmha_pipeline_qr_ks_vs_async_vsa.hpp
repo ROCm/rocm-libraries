@@ -78,10 +78,6 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
     }();
     static constexpr index_t kAlignmentO = Policy::template GetAlignmentO<Problem>();
 
-#if CK_TILE_FMHA_FWD_FAST_EXP2
-    static constexpr auto R_LOG2E = 1.0 / log2e_v<SaccDataType>;
-#endif
-
     static constexpr index_t kBlockPerCu = []() {
         if constexpr(Problem::kBlockPerCu != -1)
             return Problem::kBlockPerCu;
@@ -446,6 +442,11 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
                 s.get_tile_distribution());
 
             __builtin_amdgcn_sched_barrier(0x7F);
+            // K tail and V share this LDS buffer: barrier so gemm_0's K reads finish before V store.
+            if constexpr(LdsSeq.at(number<k0_loops - 1>{}) == LdsSeq.at(number<k0_loops>{}))
+            {
+                __builtin_amdgcn_s_barrier();
+            }
             if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
             {
                 auto v_shuffle_tmp = make_static_distributed_tensor<VDataType>(

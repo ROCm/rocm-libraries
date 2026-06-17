@@ -324,7 +324,11 @@ bool validate_tensors(const ck_tile::HostTensor<T>& gpu_bhsd,
         max_diff     = std::max(max_diff, diff);
         max_rel_diff = std::max(max_rel_diff, rel_diff);
 
-        if(diff > atol && rel_diff > rtol)
+        // CK's standard check_err combined threshold: error iff diff exceeds
+        // atol + rtol*|ref|. (The old `diff>atol && rel_diff>rtol` passed a point
+        // if it was within EITHER bound, masking large-abs-near-large-ref and
+        // large-rel-near-zero errors.)
+        if(diff > atol + rtol * std::abs(ref_val))
         {
             num_errors++;
             if(mismatch_msgs.size() < kMaxMismatchPrint)
@@ -746,6 +750,44 @@ slice_packed_mask_to_b1(const ck_tile::HostTensor<uint8_t>& packed_mask,
     return sub;
 }
 
+// Shared per-(b,h,q) row helpers for LUT delta-encode/decode. Both encoders (batch + group) and both
+// decoders (batch + group) call these on a contiguous row; only the base-offset math differs upstream.
+
+// Encode one row: block-map[num_block_k] (0/1, >0.5f test) -> delta-encoded LUT row, zero-padded to
+// num_block_k, returns valid_block_num. First selected block is stored absolute (delta-from-0); each
+// subsequent one is (kb - prev). Mirrors the original inner loops exactly.
+inline int32_t encode_lut_row(const uint8_t* map_row, int32_t* lut_row, int32_t num_block_k)
+{
+    int32_t valid = 0;
+    int32_t prev  = -1;
+    for(int32_t kb = 0; kb < num_block_k; ++kb)
+    {
+        if(static_cast<float>(map_row[kb]) > 0.5f)
+        {
+            lut_row[valid] = (prev < 0) ? kb : (kb - prev);
+            prev           = kb;
+            ++valid;
+        }
+    }
+    for(int32_t i = valid; i < num_block_k; ++i)
+        lut_row[i] = 0;
+    return valid;
+}
+
+// Decode one row: delta LUT row + valid_block_num -> block-map[num_block_k] set to 1 for selected
+// blocks (in-range writes only). e is capped at both vbn and num_block_k; acc is a cumulative sum
+// (e==0 is absolute). Mirrors the original inner loops exactly.
+inline void decode_lut_row(const int32_t* lut_row, int32_t vbn, uint8_t* map_row, int32_t num_block_k)
+{
+    int32_t acc = 0;
+    for(int32_t e = 0; e < vbn && e < num_block_k; ++e)
+    {
+        acc += lut_row[e];
+        if(acc >= 0 && acc < num_block_k)
+            map_row[acc] = 1;
+    }
+}
+
 // Packed jenga mask -> VSA group (LUT, VBN), batch-outer/head-mid packed layout:
 //   lut: mask_base*nhead + h*(qb_n*kb_n) + qb*kb_n + col   (delta-encoded K idx, zero-padded/row)
 //   vbn: vbn_base*nhead  + h*qb_n        + qb
@@ -779,21 +821,9 @@ inline void block_map_to_lut_group(
                                      static_cast<int64_t>(h) * qb_n;
             for(int32_t qb = 0; qb < qb_n; ++qb)
             {
-                int32_t valid = 0;
-                int32_t prev  = -1;
-                for(int32_t kb = 0; kb < kb_n; ++kb)
-                {
-                    if(static_cast<float>(mask_data[lut_blk0 + qb * kb_n + kb]) > 0.5f)
-                    {
-                        lut_data[lut_blk0 + qb * kb_n + valid] =
-                            (prev < 0) ? kb : (kb - prev);
-                        prev = kb;
-                        ++valid;
-                    }
-                }
-                vbn_data[vbn_blk0 + qb] = valid;
-                for(int32_t i = valid; i < kb_n; ++i)
-                    lut_data[lut_blk0 + qb * kb_n + i] = 0;
+                const int64_t row = lut_blk0 + static_cast<int64_t>(qb) * kb_n;
+                vbn_data[vbn_blk0 + qb] =
+                    encode_lut_row(mask_data + row, lut_data + row, kb_n);
             }
         }
     }
@@ -809,24 +839,17 @@ inline void block_map_to_lut(const ck_tile::HostTensor<uint8_t>& block_map,
     ck_tile::index_t num_q_blocks  = lens[2];
     ck_tile::index_t num_k_blocks  = lens[3];
 
+    const uint8_t* map_data = block_map.data();
+    int32_t*       lut_data = lut.data();
+
     for(ck_tile::index_t b = 0; b < batch; ++b)
         for(ck_tile::index_t h = 0; h < nhead; ++h)
             for(ck_tile::index_t qb = 0; qb < num_q_blocks; ++qb)
             {
-                ck_tile::index_t valid = 0;
-                ck_tile::index_t prev  = -1;
-                for(ck_tile::index_t kb = 0; kb < num_k_blocks; ++kb)
-                {
-                    if(static_cast<float>(block_map(b, h, qb, kb)) > 0.5f)
-                    {
-                        lut(b, h, qb, valid) = static_cast<int32_t>((prev < 0) ? kb : (kb - prev));
-                        prev                 = kb;
-                        valid++;
-                    }
-                }
-                valid_block_num(b, h, qb) = static_cast<int32_t>(valid);
-                for(ck_tile::index_t i = valid; i < num_k_blocks; ++i)
-                    lut(b, h, qb, i) = 0;
+                const size_t row =
+                    ((static_cast<size_t>(b) * nhead + h) * num_q_blocks + qb) * num_k_blocks;
+                valid_block_num(b, h, qb) = encode_lut_row(
+                    map_data + row, lut_data + row, static_cast<int32_t>(num_k_blocks));
             }
 }
 
@@ -843,19 +866,16 @@ inline ck_tile::HostTensor<uint8_t> device_lut_to_block_map(
     ck_tile::HostTensor<uint8_t> block_map({batch, nhead, num_q_blocks, num_k_blocks});
     for(auto& v : block_map.mData)
         v = 0;
+    uint8_t* map_data = block_map.data();
     for(ck_tile::index_t b = 0; b < batch; ++b)
         for(ck_tile::index_t h = 0; h < nhead; ++h)
             for(ck_tile::index_t qb = 0; qb < num_q_blocks; ++qb)
             {
                 const size_t row = (static_cast<size_t>(b) * nhead + h) * num_q_blocks + qb;
-                const int32_t n  = vbn[row];
-                int32_t acc      = 0;
-                for(int32_t e = 0; e < n && e < num_k_blocks; ++e)
-                {
-                    acc += lut[row * num_k_blocks + e]; // cumulative sum (e==0 is absolute)
-                    if(acc >= 0 && acc < num_k_blocks)
-                        block_map(b, h, qb, acc) = 1;
-                }
+                decode_lut_row(lut.data() + row * num_k_blocks,
+                               vbn[row],
+                               map_data + row * num_k_blocks,
+                               static_cast<int32_t>(num_k_blocks));
             }
     return block_map;
 }
@@ -875,24 +895,48 @@ inline ck_tile::HostTensor<uint8_t> device_lut_to_block_map_group(
     ck_tile::HostTensor<uint8_t> bm({1, nhead, qb_b, kb_b});
     for(auto& v : bm.mData)
         v = 0;
+    uint8_t* bm_data = bm.data();
     for(ck_tile::index_t h = 0; h < nhead; ++h)
         for(ck_tile::index_t qb = 0; qb < qb_b; ++qb)
         {
             const size_t vidx = static_cast<size_t>(vbn_base) * nhead +
                                 static_cast<size_t>(h) * qb_b + qb;
-            const int32_t n = vbn[vidx];
             const size_t lbase = static_cast<size_t>(mask_base) * nhead +
                                  static_cast<size_t>(h) * qb_b * kb_b +
                                  static_cast<size_t>(qb) * kb_b;
-            int32_t acc = 0;
-            for(int32_t e = 0; e < n && e < kb_b; ++e)
-            {
-                acc += lut[lbase + static_cast<size_t>(e)];
-                if(acc >= 0 && acc < kb_b)
-                    bm(0, h, qb, acc) = 1;
-            }
+            const size_t mbase = (static_cast<size_t>(h) * qb_b + qb) * kb_b;
+            decode_lut_row(lut.data() + lbase,
+                           vbn[vidx],
+                           bm_data + mbase,
+                           static_cast<int32_t>(kb_b));
         }
     return bm;
+}
+
+// Selection soft-check: device vs host predicted block-mask agreement. Near-tie score flips
+// (float reduction-order, ALIBI, top-k ties) make exact match impossible, so this only HARD-FAILS
+// on gross divergence; otherwise it just reports the agreement rate.
+inline bool check_selection_agreement(const ck_tile::HostTensor<uint8_t>& device_mask,
+                                      const ck_tile::HostTensor<uint8_t>& host_mask,
+                                      const std::string& label)
+{
+    const size_t n = device_mask.mData.size();
+    size_t agree = 0, dev_sel = 0, host_sel = 0;
+    for(size_t i = 0; i < n; ++i) {
+        const bool d = device_mask.mData[i] != 0, h = host_mask.mData[i] != 0;
+        if(d == h) ++agree;
+        dev_sel += d; host_sel += h;
+    }
+    const double rate = n ? double(agree) / double(n) : 1.0;
+    std::cout << ", sel_agree=" << rate;
+    // gross-divergence guard: tolerant of near-tie noise, catches a broken selector.
+    const bool gross = (rate < 0.5)
+        || (host_sel > 0 && (double(dev_sel) / double(host_sel) < 0.5
+                             || double(dev_sel) / double(host_sel) > 2.0));
+    if(gross)
+        std::cout << " [SELECTION MISMATCH " << label << ": dev_sel=" << dev_sel
+                  << " host_sel=" << host_sel << "]";
+    return !gross;
 }
 
 inline std::size_t compute_sparse_attn_flop(
@@ -1640,6 +1684,8 @@ sparse_attn_result sparse_attn_fwd_run(
         // Opt-in actual sparsity (extra hipMemcpy + host sum); else TFlops uses the -sparsity input,
         // which diverges from the realised ratio when CDF / sim / sink kick in.
         float actual_sparsity = -1.0f;
+        // Device-selected block LUT + valid-block counts (consumed by the next validation task).
+        std::vector<int32_t> dev_lut, dev_vbn;
         try
         {
             ave_time = sparge_sparse_attention<T>(q_host, k_host, v_host, output_host,
@@ -1647,7 +1693,10 @@ sparse_attn_result sparse_attn_fwd_run(
                 i_perm, o_perm, is_v_rowmajor, hp, mask_str, attention_sink,
                 block_size, seqlen_q, seqlen_k,
                 print_sparsity ? &actual_sparsity : nullptr,
-                stream_config, bias_args, scale_s_user, logits_soft_cap_user);
+                stream_config, bias_args, scale_s_user, logits_soft_cap_user,
+                /*seqstart_q_host=*/{}, /*seqstart_k_host=*/{},
+                /*seqstart_q_block_host=*/{}, /*seqstart_k_block_host=*/{},
+                /*mask_batch_offsets=*/{}, &dev_lut, &dev_vbn);
         }
         catch(const std::exception& e)
         {
@@ -1694,18 +1743,24 @@ sparse_attn_result sparse_attn_fwd_run(
             cp.window_left            = mask_decoded.left;
             cp.window_right           = mask_decoded.right;
 
-            auto cpu_mask = ck_tile::reference_sparge_mask_prediction<T>(
+            // Numeric reference = the device's actual selection (decoded LUT); host prediction is the
+            // selection soft-check oracle. See check_selection_agreement.
+            const ck_tile::index_t nqb = (seqlen_q + block_size - 1) / block_size;
+            const ck_tile::index_t nkb = (seqlen_k + block_size - 1) / block_size;
+            auto device_mask = device_lut_to_block_map(dev_lut, dev_vbn, batch, nhead, nqb, nkb);
+            auto host_mask = ck_tile::reference_sparge_mask_prediction<T>(
                 q_ref, k_ref, batch, nhead, nhead_k, seqlen_q, seqlen_k,
                 hdim_q, block_size, block_size, rp, cp);
+            const bool sel_ok = check_selection_agreement(device_mask, host_mask, "sparge");
 
             if(bi.type == bias_enum::elementwise_bias)
             {
                 pass = validate_vs_blocked_ref_with_bias<T, BiasT, DataTypeConfig>(
-                    q_host, k_host, v_host, output_host, cpu_mask,
+                    q_host, k_host, v_host, output_host, device_mask,
                     *bs.elementwise_host, bi.rank_info,
                     batch, nhead, seqlen_q, hdim_v, block_size, scale,
                     causal_type, mask_decoded.left, mask_decoded.right,
-                    i_perm, o_perm, "Sparge+bias vs CPU ref", /*print_result=*/true,
+                    i_perm, o_perm, "Sparge+bias vs CPU ref", /*print_result=*/false,
                     logits_soft_cap_user,
                     scalar_pvthreshd, ph.h_pvthreshd.empty() ? nullptr : &ph.h_pvthreshd);
             }
@@ -1715,24 +1770,26 @@ sparse_attn_result sparse_attn_fwd_run(
                 auto alibi_dense = alibi_to_dense<float>(bs.alibi_slopes_host, nhead, seqlen_q, seqlen_k,
                     mask_decoded.left, mask_decoded.right, causal_type);
                 pass = validate_vs_blocked_ref_with_bias<T, float, DataTypeConfig>(
-                    q_host, k_host, v_host, output_host, cpu_mask,
+                    q_host, k_host, v_host, output_host, device_mask,
                     alibi_dense, /*rank=*/1,
                     batch, nhead, seqlen_q, hdim_v, block_size, scale,
                     causal_type, mask_decoded.left, mask_decoded.right,
-                    i_perm, o_perm, "Sparge+alibi vs CPU ref", /*print_result=*/true,
+                    i_perm, o_perm, "Sparge+alibi vs CPU ref", /*print_result=*/false,
                     logits_soft_cap_user,
                     scalar_pvthreshd, ph.h_pvthreshd.empty() ? nullptr : &ph.h_pvthreshd);
             }
             else
             {
                 pass = validate_vs_blocked_ref<T, DataTypeConfig>(
-                    q_host, k_host, v_host, output_host, cpu_mask,
+                    q_host, k_host, v_host, output_host, device_mask,
                     batch, nhead, seqlen_q, hdim_v, block_size, scale,
                     causal_type, mask_decoded.left, mask_decoded.right,
                     i_perm, o_perm, "Sparge vs CPU ref",
-                    /*print_result=*/true, logits_soft_cap_user,
+                    /*print_result=*/false, logits_soft_cap_user,
                     scalar_pvthreshd, ph.h_pvthreshd.empty() ? nullptr : &ph.h_pvthreshd);
             }
+            pass = pass && sel_ok;
+            std::cout << ", valid:" << (pass ? "y" : "n") << std::flush << std::endl;
         }
     }
     else if(api == "sparge_sage" && mode == sparse_attn_mode::batch)
@@ -1830,7 +1887,20 @@ sparse_attn_result sparse_attn_fwd_run(
                 // near-tied block scores, which ALIBI amplifies.
                 const ck_tile::index_t nqb = (seqlen_q + block_size - 1) / block_size;
                 const ck_tile::index_t nkb = (seqlen_k + block_size - 1) / block_size;
-                auto cpu_mask = device_lut_to_block_map(dev_lut, dev_vbn, batch, nhead, nqb, nkb);
+                auto device_mask = device_lut_to_block_map(dev_lut, dev_vbn, batch, nhead, nqb, nkb);
+                // Selection soft-check: host predicts on bf16 q/k the same way the sparge path does
+                // (mask kernel runs on bf16 means), then compares to the device's actual selection.
+                auto sage_rp = make_sparge_predict_params(scalar_cdf, scalar_topk, scalar_sim, ph,
+                                                          attention_sink, smooth_k, scale);
+                ck_tile::sparge_causal_params sage_cp;
+                sage_cp.causal_type  = causal_type;
+                sage_cp.window_left  = mask_decoded.left;
+                sage_cp.window_right = mask_decoded.right;
+                auto host_mask = ck_tile::reference_sparge_mask_prediction<T>(
+                    q_ref, k_ref, batch, nhead, nhead_k, seqlen_q, seqlen_k,
+                    hdim_q, block_size, block_size, sage_rp, sage_cp);
+                const bool sel_ok =
+                    check_selection_agreement(device_mask, host_mask, "sparge_sage");
 
                 // Dequantize Q/K at this qscale's granularity (tokens/scale Q/K: perwarp 32/64,
                 // perthread 4/16, perblock 128/128, pertensor = whole (b,h)).
@@ -1981,7 +2051,7 @@ sparse_attn_result sparse_attn_fwd_run(
                         bs_sage.alibi_slopes_host, nhead, seqlen_q, seqlen_k,
                         mask_decoded.left, mask_decoded.right, causal_type);
                     ck_tile::reference_blocked_attention<T, uint8_t, BiasT>(
-                        q_deq, k_deq, v_dequant, cpu_mask, ref_out, block_size, block_size, scale,
+                        q_deq, k_deq, v_dequant, device_mask, ref_out, block_size, block_size, scale,
                         causal_type, mask_decoded.left, mask_decoded.right,
                         logits_soft_cap_user, &alibi_dense, /*bias_rank=*/1,
                         scalar_pvthreshd, ph.h_pvthreshd.empty() ? nullptr : &ph.h_pvthreshd,
@@ -1991,7 +2061,7 @@ sparse_attn_result sparse_attn_fwd_run(
                 {
                     using BiasT = float;
                     ck_tile::reference_blocked_attention<T, uint8_t, BiasT>(
-                        q_deq, k_deq, v_dequant, cpu_mask, ref_out, block_size, block_size, scale,
+                        q_deq, k_deq, v_dequant, device_mask, ref_out, block_size, block_size, scale,
                         causal_type, mask_decoded.left, mask_decoded.right,
                         logits_soft_cap_user, &(*bs_sage.elementwise_host), bi_sage.rank_info,
                         scalar_pvthreshd, ph.h_pvthreshd.empty() ? nullptr : &ph.h_pvthreshd,
@@ -2002,7 +2072,7 @@ sparse_attn_result sparse_attn_fwd_run(
                     // NO_BIAS: model the device Stage-2 pv-skip (only wired for NO_BIAS); host diff
                     // on dequantized QK matches the device m_local on the descaled QK.
                     ck_tile::reference_blocked_attention<T, uint8_t, T>(
-                        q_deq, k_deq, v_dequant, cpu_mask, ref_out, block_size, block_size, scale,
+                        q_deq, k_deq, v_dequant, device_mask, ref_out, block_size, block_size, scale,
                         causal_type, mask_decoded.left, mask_decoded.right,
                         /*logits_soft_cap=*/logits_soft_cap_user,
                         /*bias=*/static_cast<const ck_tile::HostTensor<T>*>(nullptr),
@@ -2014,7 +2084,9 @@ sparse_attn_result sparse_attn_fwd_run(
                 const double q_rtol = sage_qk_fp8 ? 0.15 : 0.1;
                 const double q_atol = sage_qk_fp8 ? 0.18 : 0.07;
                 pass = validate_tensors(gpu_out, ref_out, q_rtol, q_atol,
-                                        "sparge_sage vs dequant ref");
+                                        "sparge_sage vs dequant ref", /*print_result=*/false);
+                pass = pass && sel_ok;
+                std::cout << ", valid:" << (pass ? "y" : "n") << std::flush << std::endl;
             }
         }
     }
@@ -2088,6 +2160,8 @@ sparse_attn_result sparse_attn_fwd_run(
             return sparse_attn_result::failure;
 
         float actual_sparsity = -1.0f;
+        // Device-selected block LUT + valid-block counts (consumed by the next validation task).
+        std::vector<int32_t> dev_lut, dev_vbn;
         try
         {
             ave_time = sparge_sparse_attention<T>(
@@ -2101,7 +2175,8 @@ sparse_attn_result sparse_attn_fwd_run(
                 print_sparsity ? &actual_sparsity : nullptr,
                 stream_config, bs.args, scale_s_user, logits_soft_cap_user,
                 seqstart_q_host, seqstart_k_host,
-                seqstart_q_block_host, seqstart_k_block_host, mask_batch_offsets);
+                seqstart_q_block_host, seqstart_k_block_host, mask_batch_offsets,
+                &dev_lut, &dev_vbn);
         }
         catch(const std::exception& e)
         {
@@ -2153,9 +2228,17 @@ sparse_attn_result sparse_attn_fwd_run(
 
                 auto q_ref_b = to_bhsd(q_b, i_perm);
                 auto k_ref_b = to_bhsd(k_b, i_perm);
-                auto cpu_mask_b = ck_tile::reference_sparge_mask_prediction<T>(
+                // Numeric reference = device's actual selection (decoded packed LUT for this sub-batch);
+                // host prediction is the selection soft-check oracle.
+                auto device_mask_b = device_lut_to_block_map_group(
+                    dev_lut, dev_vbn, nhead, /*mask_base=*/mask_batch_offsets[b],
+                    /*vbn_base=*/seqstart_q_block_host[b], q_blocks_g[b], k_blocks_g[b]);
+                auto host_mask_b = ck_tile::reference_sparge_mask_prediction<T>(
                     q_ref_b, k_ref_b, /*batch=*/1, nhead, nhead_k, sq, sk,
                     hdim_q, block_size, block_size, rp, cp);
+                const bool sel_ok_b = check_selection_agreement(
+                    device_mask_b, host_mask_b,
+                    std::string("sparge group sub-batch ") + std::to_string(b));
 
                 bool sub_pass;
                 if(bi.type == bias_enum::elementwise_bias)
@@ -2163,7 +2246,7 @@ sparse_attn_result sparse_attn_fwd_run(
                     auto bias_b_sub = slice_elementwise_bias_to_b1<BiasT>(
                         *bs.elementwise_host, bi.rank_info, b, nhead, sq, sk);
                     sub_pass = validate_vs_blocked_ref_with_bias<T, BiasT, DataTypeConfig>(
-                        q_b, k_b, v_b, o_b, cpu_mask_b,
+                        q_b, k_b, v_b, o_b, device_mask_b,
                         bias_b_sub, bi.rank_info,
                         /*batch=*/1, nhead, sq, hdim_v, block_size, scale,
                         causal_type, mask_decoded.left, mask_decoded.right,
@@ -2179,7 +2262,7 @@ sparse_attn_result sparse_attn_fwd_run(
                         bs.alibi_slopes_host, nhead, sq, sk,
                         mask_decoded.left, mask_decoded.right, causal_type);
                     sub_pass = validate_vs_blocked_ref_with_bias<T, float, DataTypeConfig>(
-                        q_b, k_b, v_b, o_b, cpu_mask_b,
+                        q_b, k_b, v_b, o_b, device_mask_b,
                         alibi_dense, /*rank=*/1,
                         /*batch=*/1, nhead, sq, hdim_v, block_size, scale,
                         causal_type, mask_decoded.left, mask_decoded.right,
@@ -2191,7 +2274,7 @@ sparse_attn_result sparse_attn_fwd_run(
                 else
                 {
                     sub_pass = validate_vs_blocked_ref<T, DataTypeConfig>(
-                        q_b, k_b, v_b, o_b, cpu_mask_b,
+                        q_b, k_b, v_b, o_b, device_mask_b,
                         /*batch=*/1, nhead, sq, hdim_v, block_size, scale,
                         causal_type, mask_decoded.left, mask_decoded.right,
                         i_perm, o_perm,
@@ -2199,7 +2282,7 @@ sparse_attn_result sparse_attn_fwd_run(
                         /*print_result=*/false, logits_soft_cap_user,
                         scalar_pvthreshd, ph.h_pvthreshd.empty() ? nullptr : &ph.h_pvthreshd);
                 }
-                pass = pass && sub_pass;
+                pass = pass && sub_pass && sel_ok_b;
             }
             std::cout << ", valid:" << (pass ? "y" : "n") << std::flush << std::endl;
         }
@@ -2362,11 +2445,25 @@ sparse_attn_result sparse_attn_fwd_run(
 
                     auto q_ref_b = to_bhsd(q_b, i_perm);
                     auto k_ref_b = to_bhsd(k_b, i_perm);
-                    // Reference the kernel's decoded LUT, not a host re-prediction: top-k diverges
-                    // at near-tied block scores, corrupting ALIBI rows (see batch path).
-                    auto cpu_mask_b = device_lut_to_block_map_group(
+                    // Numeric reference = the kernel's decoded LUT (truth); top-k diverges at near-tied
+                    // block scores, corrupting ALIBI rows (see batch path).
+                    auto device_mask_b = device_lut_to_block_map_group(
                         dev_lut, dev_vbn, nhead, /*mask_base=*/lut_off_g[b],
                         /*vbn_base=*/q_block_off_g[b], q_blocks_g[b], k_blocks_g[b]);
+                    // Selection soft-check: host predicts on bf16 q/k the same way the sparge path
+                    // does, then compares to the device's actual selection.
+                    auto sage_rp = make_sparge_predict_params(
+                        scalar_cdf, scalar_topk, scalar_sim, ph, attention_sink, smooth_k, scale);
+                    ck_tile::sparge_causal_params sage_cp;
+                    sage_cp.causal_type  = causal_type;
+                    sage_cp.window_left  = mask_decoded.left;
+                    sage_cp.window_right = mask_decoded.right;
+                    auto host_mask_b = ck_tile::reference_sparge_mask_prediction<T>(
+                        q_ref_b, k_ref_b, /*batch=*/1, nhead, nhead_k, sq, sk,
+                        hdim_q, block_size, block_size, sage_rp, sage_cp);
+                    const bool sel_ok_b = check_selection_agreement(
+                        device_mask_b, host_mask_b,
+                        std::string("sparge_sage group sub-batch ") + std::to_string(b));
 
                     // Dequantize this sub-batch's Q/K at the qscale granularity. PERTENSOR uses one
                     // global scale per (seq,head).
@@ -2507,7 +2604,7 @@ sparse_attn_result sparse_attn_fwd_run(
                             bs_sage.alibi_slopes_host, nhead, sq, sk,
                             mask_decoded.left, mask_decoded.right, causal_type);
                         ck_tile::reference_blocked_attention<T, uint8_t, BiasT>(
-                            q_deq, k_deq, v_deq_b, cpu_mask_b, ref_out, block_size, block_size,
+                            q_deq, k_deq, v_deq_b, device_mask_b, ref_out, block_size, block_size,
                             scale, causal_type, mask_decoded.left, mask_decoded.right,
                             logits_soft_cap_user, &alibi_dense, /*bias_rank=*/1,
                             scalar_pvthreshd, ph.h_pvthreshd.empty() ? nullptr : &ph.h_pvthreshd,
@@ -2519,7 +2616,7 @@ sparse_attn_result sparse_attn_fwd_run(
                         auto bias_b = slice_elementwise_bias_to_b1<BiasT>(
                             *bs_sage.elementwise_host, bi_sage.rank_info, b, nhead, sq, sk);
                         ck_tile::reference_blocked_attention<T, uint8_t, BiasT>(
-                            q_deq, k_deq, v_deq_b, cpu_mask_b, ref_out, block_size, block_size,
+                            q_deq, k_deq, v_deq_b, device_mask_b, ref_out, block_size, block_size,
                             scale, causal_type, mask_decoded.left, mask_decoded.right,
                             logits_soft_cap_user, &bias_b, bi_sage.rank_info,
                             scalar_pvthreshd, ph.h_pvthreshd.empty() ? nullptr : &ph.h_pvthreshd,
@@ -2529,7 +2626,7 @@ sparse_attn_result sparse_attn_fwd_run(
                     {
                         // NO_BIAS: model the device Stage-2 pv-skip (scalar + per-head pvthreshd).
                         ck_tile::reference_blocked_attention<T, uint8_t, T>(
-                            q_deq, k_deq, v_deq_b, cpu_mask_b, ref_out, block_size, block_size,
+                            q_deq, k_deq, v_deq_b, device_mask_b, ref_out, block_size, block_size,
                             scale, causal_type, mask_decoded.left, mask_decoded.right,
                             /*logits_soft_cap=*/logits_soft_cap_user,
                             /*bias=*/static_cast<const ck_tile::HostTensor<T>*>(nullptr),
@@ -2542,7 +2639,7 @@ sparse_attn_result sparse_attn_fwd_run(
                     bool sub_pass = validate_tensors(
                         gpu_out_b, ref_out, g_rtol, g_atol,
                         std::string("sparge_sage group sub-batch ") + std::to_string(b));
-                    pass = pass && sub_pass;
+                    pass = pass && sub_pass && sel_ok_b;
                 }
                 std::cout << ", valid:" << (pass ? "y" : "n") << std::flush << std::endl;
             }

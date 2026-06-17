@@ -330,16 +330,27 @@ float fmha_sparge_fwd_<trait_{F_idx}>(const ck_tile::stream_config& s, fmha_spar
             ? static_cast<size_t>(a.nhead_q) * a.total_q_blocks
             : static_cast<size_t>(a.batch) * a.nhead_q * num_q_blocks;
         std::vector<int32_t> h_vbn(n_vbn, 0);
-        (void)hipMemcpy(h_vbn.data(), d_vbn, ws_layout.vbn_bytes, hipMemcpyDeviceToHost);
-        size_t total_selected = 0;
-        for(size_t i = 0; i < n_vbn; ++i)
-            total_selected += static_cast<size_t>(h_vbn[i]);
-        const size_t total_possible = is_group
-            ? static_cast<size_t>(a.nhead_q) * a.total_qk_blocks
-            : n_vbn * static_cast<size_t>(num_k_blocks);
-        *a.sparsity_out = total_possible > 0
-            ? 1.0f - static_cast<float>(total_selected) / static_cast<float>(total_possible)
-            : 0.0f;
+        const hipError_t cp_err =
+            hipMemcpy(h_vbn.data(), d_vbn, ws_layout.vbn_bytes, hipMemcpyDeviceToHost);
+        if(cp_err != hipSuccess)
+        {{
+            // Readback failed -> h_vbn is garbage; report a safe 0 rather than a bogus sparsity.
+            std::cerr << "[sparge] sparsity readback hipMemcpy failed: "
+                      << hipGetErrorString(cp_err) << std::endl;
+            *a.sparsity_out = 0.0f;
+        }}
+        else
+        {{
+            size_t total_selected = 0;
+            for(size_t i = 0; i < n_vbn; ++i)
+                total_selected += static_cast<size_t>(h_vbn[i]);
+            const size_t total_possible = is_group
+                ? static_cast<size_t>(a.nhead_q) * a.total_qk_blocks
+                : n_vbn * static_cast<size_t>(num_k_blocks);
+            *a.sparsity_out = total_possible > 0
+                ? 1.0f - static_cast<float>(total_selected) / static_cast<float>(total_possible)
+                : 0.0f;
+        }}
     }}
 
     if(own_workspace)

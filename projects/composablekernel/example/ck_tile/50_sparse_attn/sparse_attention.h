@@ -125,7 +125,11 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
                                     const std::vector<int32_t>& seqstart_k_host       = {},
                                     const std::vector<int32_t>& seqstart_q_block_host = {},
                                     const std::vector<int32_t>& seqstart_k_block_host = {},
-                                    const std::vector<int32_t>& mask_batch_offsets    = {});
+                                    const std::vector<int32_t>& mask_batch_offsets    = {},
+                                    // Optional: download the device's selected-block LUT + valid-block
+                                    // counts so validation can reference the kernel's actual selection.
+                                    std::vector<int32_t>* out_lut = nullptr,
+                                    std::vector<int32_t>* out_vbn = nullptr);
 
 // sparge_sage (quantized sparge): bf16 Q/K (device-quantized in the fused preprocess),
 // caller-provided FP8 V + per-channel v_descale. Returns GPU time in ms (negative on error).

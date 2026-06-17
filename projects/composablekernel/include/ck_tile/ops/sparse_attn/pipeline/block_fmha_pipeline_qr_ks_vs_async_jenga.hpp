@@ -77,9 +77,6 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
             return kPadSeqLenK ? 1 : Policy::template GetAlignmentV<Problem>();
     }();
     static constexpr index_t kAlignmentO = Policy::template GetAlignmentO<Problem>();
-#if CK_TILE_FMHA_FWD_FAST_EXP2
-    static constexpr auto R_LOG2E = 1.0 / log2e_v<SaccDataType>;
-#endif
 
     static constexpr index_t kBlockPerCu = []() {
         if constexpr(Problem::kBlockPerCu != -1)
@@ -482,6 +479,11 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
                 s.get_tile_distribution());
 
             __builtin_amdgcn_sched_barrier(0x7F);
+            // K tail and V share this LDS buffer: barrier so gemm_0's K reads finish before V store.
+            if constexpr(LdsSeq.at(number<k0_loops - 1>{}) == LdsSeq.at(number<k0_loops>{}))
+            {
+                __builtin_amdgcn_s_barrier();
+            }
             auto v_shuffle_tmp = make_static_distributed_tensor<VDataType>(
                 Policy::template MakeShuffledVRegBlockDescriptor<Problem>());
             shuffle_tile(v_shuffle_tmp, v_buf);
@@ -568,7 +570,12 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
                 });
             });
 
-            const auto p = cast_tile<PDataType>(p_compute);
+            const auto p = [&]() {
+                if constexpr(std::is_same_v<PDataType, fp16_t>)
+                    return impl::cast_tile_pkrtz_fp16_fp32<PDataType>(p_compute);
+                else
+                    return cast_tile<PDataType>(p_compute);
+            }();
 
             if constexpr(k1_loops > 1)
             {

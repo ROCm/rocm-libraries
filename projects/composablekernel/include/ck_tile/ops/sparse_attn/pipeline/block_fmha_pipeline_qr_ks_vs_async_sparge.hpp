@@ -468,6 +468,11 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
             const bool skip_block = compute_skip_flag(m_local, m);
 
             __builtin_amdgcn_sched_barrier(0x7F);
+            // K tail and V share this LDS buffer: barrier so gemm_0's K reads finish before V store.
+            if constexpr(LdsSeq.at(number<k0_loops - 1>{}) == LdsSeq.at(number<k0_loops>{}))
+            {
+                __builtin_amdgcn_s_barrier();
+            }
             if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
             {
                 auto v_shuffle_tmp = make_static_distributed_tensor<VDataType>(
