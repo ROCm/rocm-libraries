@@ -33,9 +33,7 @@
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-#include "stinkytofu/support/DAGScheduleJsonWriter.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
-#include "stinkytofu/support/PassOrderSnapshotJson.hpp"
 
 namespace stinkytofu {
 // -----------------------------------------------------------------------
@@ -128,47 +126,6 @@ inline void configureDebugOutput(PassManager& pm, const StinkyAsmModule::ModuleO
         forEachName(opts.DebugPass,
                     [](const std::string& n) { PassManagerDebugConfig::addDebugOnly(n); });
     }
-}
-
-// -----------------------------------------------------------------------
-// Pass-order snapshot utility
-// -----------------------------------------------------------------------
-
-/// Create a shared DAGScheduleJsonCollector and populate
-/// passFeatureCfg.passOrderSnapshot from ModuleOptions.
-///
-/// Returns nullptr when PassOrderSnapshotJson is empty (feature disabled).
-///
-/// DebugPass (comma-separated pass names) serves as the allow-list for
-/// instruction-order snapshots.  When DebugPass is empty and jsonPath is
-/// set, only StinkyDAGSchedulerPass is recorded by default.
-inline std::shared_ptr<DAGScheduleJsonCollector> createPassOrderSnapshotCollector(
-    PassFeatureConfig& passFeatureCfg, const StinkyAsmModule::ModuleOptions& opts,
-    const std::string& moduleName) {
-    if (opts.PassOrderSnapshotJson.empty()) return nullptr;
-
-    passFeatureCfg.passOrderSnapshot.jsonPath = opts.PassOrderSnapshotJson;
-
-    if (!opts.DebugPass.empty()) {
-        std::istringstream stream(opts.DebugPass);
-        std::string name;
-        while (std::getline(stream, name, ',')) {
-            auto s = name.find_first_not_of(' ');
-            auto e = name.find_last_not_of(' ');
-            if (s != std::string::npos)
-                passFeatureCfg.passOrderSnapshot.dumpAfterPasses.push_back(
-                    name.substr(s, e - s + 1));
-        }
-    }
-
-    return std::make_shared<DAGScheduleJsonCollector>(opts.PassOrderSnapshotJson, moduleName);
-}
-
-/// Add PassOrderSnapshotInstrumentation to \p pm when \p collector is non-null.
-inline void configurePassOrderSnapshot(PassManager& pm,
-                                       const std::shared_ptr<DAGScheduleJsonCollector>& collector) {
-    if (collector)
-        pm.addInstrumentation(std::make_shared<PassOrderSnapshotInstrumentation>(collector));
 }
 
 // -----------------------------------------------------------------------

@@ -45,8 +45,6 @@
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 #include "stinkytofu/serialization/asm/RawAsmParser.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
-#include "stinkytofu/support/DAGScheduleJsonWriter.hpp"
-#include "stinkytofu/support/PassOrderSnapshotJson.hpp"
 
 using namespace stinkytofu;
 
@@ -173,10 +171,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
         std::string arg = argv[i];
         if (arg == "-O0" || arg == "-O1" || arg == "-O2" || arg == "-O3") continue;
         if (arg.substr(0, 2) == "--") {
-            static constexpr char kSnapJson[] = "--pass-order-snapshot-json=";
-            static constexpr char kSnapAfter[] = "--pass-order-snapshot-after-passes=";
-            if (arg.starts_with(kSnapJson) || arg.starts_with(kSnapAfter) ||
-                arg == "--print-output" || arg == "--emit-asm" || arg == "--remarks" ||
+            if (arg == "--print-output" || arg == "--emit-asm" || arg == "--remarks" ||
                 arg == "--preserve-symbolic-regs" || arg == "--preserve-comments" ||
                 arg.starts_with("--ds-read-order=") || arg.starts_with("--vgpr-msb-mode=") ||
                 arg == "--from-label" || arg == "--to-label" || isKernelConfigArg(arg))
@@ -215,46 +210,6 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
         }
     }
     return passes;
-}
-
-std::string extractPassOrderSnapshotJsonPath(int argc, char** argv) {
-    static constexpr char kPrefix[] = "--pass-order-snapshot-json=";
-    for (int i = 1; i < argc; ++i) {
-        std::string a = argv[i];
-        if (a.starts_with(kPrefix)) return a.substr(std::strlen(kPrefix));
-    }
-    return {};
-}
-
-static std::vector<std::string> splitCommaPassNames(const char* prefix, const std::string& a) {
-    if (!a.starts_with(prefix)) return {};
-    std::string rest = a.substr(std::strlen(prefix));
-    std::vector<std::string> out;
-    size_t start = 0;
-    while (start < rest.size()) {
-        size_t comma = rest.find(',', start);
-        std::string token =
-            rest.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
-        trimWhitespace(token);
-        if (!token.empty()) {
-            out.push_back(std::move(token));
-        }
-        if (comma == std::string::npos) {
-            break;
-        }
-        start = comma + 1;
-    }
-    return out;
-}
-
-/// Comma-separated `Pass::getName()` strings; if omitted, default is StinkyDAGSchedulerPass only.
-std::vector<std::string> extractPassOrderSnapshotAfterPasses(int argc, char** argv) {
-    static constexpr char kPrefix[] = "--pass-order-snapshot-after-passes=";
-    for (int i = 1; i < argc; ++i) {
-        std::vector<std::string> v = splitCommaPassNames(kPrefix, argv[i]);
-        if (!v.empty()) return v;
-    }
-    return {};
 }
 
 static bool parseUint32Value(const std::string& value, uint32_t& out) {
@@ -345,10 +300,6 @@ int main(int argc, char** argv) {
         std::cerr << "  --arch <arch>    Target architecture. Supported:";
         for (const auto& key : BackendRegistry::getRegisteredArchKeys()) std::cerr << " " << key;
         std::cerr << "\n";
-        std::cerr << "  --pass-order-snapshot-json=<path>  Before/after instruction order JSON "
-                     "(stinkytofu-analysis)\n";
-        std::cerr << "  --pass-order-snapshot-after-passes=A,B  Pass::getName() allow-list "
-                     "(optional; default: scheduler only)\n";
         std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
         std::cerr << "  --remarks        Enable optimization remarks on stderr\n";
         std::cerr << "  --list-passes    List all available passes\n";
@@ -406,10 +357,6 @@ int main(int argc, char** argv) {
         std::cerr << "  --arch <arch>    Target architecture. Supported:";
         for (const auto& key : BackendRegistry::getRegisteredArchKeys()) std::cerr << " " << key;
         std::cerr << "\n";
-        std::cerr << "  --pass-order-snapshot-json=<path>  Before/after instruction order JSON "
-                     "(stinkytofu-analysis)\n";
-        std::cerr << "  --pass-order-snapshot-after-passes=A,B  Pass::getName() allow-list "
-                     "(optional; default: scheduler only)\n";
         std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
         std::cerr << "  --remarks        Enable optimization remarks on stderr\n";
         std::cerr << "  --list-passes    List all available passes\n";
@@ -488,9 +435,6 @@ int main(int argc, char** argv) {
     }
 
     stinkytofu::PassFeatureConfig passFeatureConfig = getPassFeatureConfig();
-    passFeatureConfig.passOrderSnapshot.jsonPath = extractPassOrderSnapshotJsonPath(argc, argv);
-    passFeatureConfig.passOrderSnapshot.dumpAfterPasses =
-        extractPassOrderSnapshotAfterPasses(argc, argv);
 
     // Parse --vgpr-msb-mode=none|msb8|msb16 (override of ToolchainCaps::probe).
     // Useful when running on a host whose comgr doesn't know the target ISA,
@@ -798,13 +742,6 @@ int main(int argc, char** argv) {
             stinkytofu::registerAllAnalyses(passManager.getAnalysisManager());
 
             passManager.addInstrumentation(createDebugPrintInstrumentation());
-            if (!passFeatureConfig.passOrderSnapshot.jsonPath.empty()) {
-                auto collector = std::make_shared<stinkytofu::DAGScheduleJsonCollector>(
-                    passFeatureConfig.passOrderSnapshot.jsonPath, parsedFunc->funcName);
-                passManager.addInstrumentation(
-                    std::make_shared<stinkytofu::PassOrderSnapshotInstrumentation>(
-                        std::move(collector)));
-            }
             passManager.setPassFeatureConfig(passFeatureConfig);
             gemmTileConfig.arch = arch;
             passManager.setGemmTileConfig(gemmTileConfig);
