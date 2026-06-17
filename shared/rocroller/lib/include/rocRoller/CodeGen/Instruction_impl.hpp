@@ -489,6 +489,16 @@ namespace rocRoller
         m_nopCount = std::max(m_nopCount, count);
     }
 
+    inline void Instruction::setModeRegister(uint8_t mode)
+    {
+        m_MODESetValue = mode;
+    }
+
+    inline std::optional<uint8_t> Instruction::getModeRegister() const
+    {
+        return m_MODESetValue;
+    }
+
     inline void Instruction::allocateNow()
     {
         // Before allocating the destination register(s), assert that the source register(s)

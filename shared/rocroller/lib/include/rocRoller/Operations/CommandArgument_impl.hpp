@@ -126,6 +126,10 @@ namespace rocRoller
             return getValue<bool>(args);
         case DataType::E8M0:
             return getValue<E8M0>(args);
+        case DataType::E5M3:
+            return getValue<E5M3>(args);
+        case DataType::E4M3:
+            return getValue<E4M3>(args);
         case DataType::Count:
         default:
             Throw<FatalError>("Unsupported argument type ", ShowValue(m_variableType));
@@ -148,6 +152,24 @@ namespace rocRoller
                 if constexpr(std::integral<T>)
                 {
                     return static_cast<unsigned int>(value);
+                }
+                else
+                {
+                    throw std::runtime_error("Not integer type");
+                }
+            },
+            val);
+    }
+
+    inline uint64_t getUInt64(CommandArgumentValue val)
+    {
+        return visit(
+            [](auto value) -> uint64_t {
+                using T = std::decay_t<decltype(value)>;
+
+                if constexpr(std::integral<T>)
+                {
+                    return static_cast<uint64_t>(value);
                 }
                 else
                 {

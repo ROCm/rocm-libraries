@@ -24,6 +24,9 @@ using I64  = ck_tile::number<64>;
 using I128 = ck_tile::number<128>;
 using I256 = ck_tile::number<256>;
 
+using ClusterEnable  = std::true_type;
+using ClusterDisable = std::false_type;
+
 // clang-format off
 // MX GEMM kernel types using TDM pipeline with scale support
 // Tuple format:
@@ -69,6 +72,9 @@ using KernelTypesMxGemmCompTDMWmma = ::testing::Types<
     std::tuple<    Row,     Col,     Row,      BF8,       BF8,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV2,  I16>,
     std::tuple<    Row,     Col,     Row,       F8,       BF8,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV2,  I16>,
     std::tuple<    Row,     Col,     Row,      BF8,        F8,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV2,  I16>,
-    std::tuple<    Row,     Row,     Row,      BF8,        F8,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV2,  I16>  // RRR (non-RCR) layout
+    std::tuple<    Row,     Row,     Row,      BF8,        F8,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV2,  I16>,  // RRR (non-RCR) layout
+    // --- Scale32 cluster launch (from develop; ScaleBlockSize=I32 at idx 16, ClusterEnable at idx 17) ---
+    std::tuple<    Row,     Col,     Row,       F8,        F8,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV1,  I32, ClusterEnable>,
+    std::tuple<    Row,     Col,     Row,       F8,        F8,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV2,  I32, ClusterEnable>
 >;
 // clang-format on

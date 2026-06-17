@@ -1,0 +1,4 @@
+# All binary tensor data must go through DVC, never committed to git directly.
+# Each bundle's .bin files are tracked by its <Name>.tensors.dvc pointer; this
+# rule is a catch-all safety net so raw .bin can never be staged by accident.
+*.bin

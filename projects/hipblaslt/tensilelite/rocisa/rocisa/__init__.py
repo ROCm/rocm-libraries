@@ -3,6 +3,17 @@
 
 import sys
 import types
+
+from pathlib import Path as _Path
+
+if any(_Path(__file__).parent.glob("_rocisa.abi3.*")) and sys.version_info < (3, 12):
+    raise ImportError(
+        f"rocisa stable-ABI extension requires Python >= 3.12 "
+        f"(running {sys.version_info.major}.{sys.version_info.minor}). "
+        f"Install a non-stable-ABI build or upgrade Python."
+    )
+del _Path
+
 from ._rocisa import *
 from . import _rocisa
 
