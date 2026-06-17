@@ -34,7 +34,7 @@ TYPED_TEST(TEST_SUITE_NAME, SmallM)
 TYPED_TEST(TEST_SUITE_NAME, MidLargeM)
 {
     std::vector<int> Ms{32, 64, 128, 256};
-    std::vector<int> Ns{96, 128}; // 96 tests non-tile-aligned N
+    std::vector<int> Ns{TestFixture::N_Tile};
     std::vector<int> Ks;
     for(auto K_count : {2, 3, 4})
     {

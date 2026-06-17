@@ -99,10 +99,10 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
     static constexpr index_t MPerBlockPerIter = MPerBlock / MIterPerWarp;
     static constexpr index_t KPerBlockPerIter = KPerBlock / KIterPerWarp;
 
-    static constexpr index_t ScaleGranularityK = 32;
-    static constexpr index_t MXdlPack          = 2;
-    static constexpr index_t NXdlPack          = 2;
-    static constexpr index_t KXdlPack          = 2;
+    static constexpr index_t ScaleBlockSize = 32;
+    static constexpr index_t MXdlPack       = 2;
+    static constexpr index_t NXdlPack       = 2;
+    static constexpr index_t KXdlPack       = 2;
 
     static constexpr index_t AK1 = 16 * APackedSize / sizeof(ADataType);
     static constexpr index_t BK1 = 16 * BPackedSize / sizeof(BDataType);
@@ -123,9 +123,9 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
     static constexpr index_t Bload_num_perK = NPerBlock * WarpGemm::kK / NWarp / BK1 / WaveSize;
     static constexpr index_t Bload_num      = Bload_num_perK * KIterPerWarp;
     static constexpr index_t ScaleBload_num =
-        NPerBlock * KPerBlock / NWarp / ScaleGranularityK / NXdlPack / KXdlPack / WaveSize;
+        NPerBlock * KPerBlock / NWarp / ScaleBlockSize / NXdlPack / KXdlPack / WaveSize;
     static constexpr index_t ScaleAload_num =
-        MPerBlock * KPerBlock / MWarp / ScaleGranularityK / MXdlPack / KXdlPack / WaveSize;
+        MPerBlock * KPerBlock / MWarp / ScaleBlockSize / MXdlPack / KXdlPack / WaveSize;
 
     static constexpr index_t HalfMIter        = (MIterPerWarp + 1) / 2;
     static constexpr index_t Bload_rep        = (Bload_num_perK + HalfMIter - 1) / HalfMIter;
@@ -301,7 +301,7 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
                         impack * scale_a_dram_step_m + ikpack * scale_a_dram_step_k);
                 });
             });
-            move_tile_window(scale_a_dram_window, {0, KPerBlock / (ScaleGranularityK * KXdlPack)});
+            move_tile_window(scale_a_dram_window, {0, KPerBlock / (ScaleBlockSize * KXdlPack)});
 
             static_for<0, NPackIterPerWarp, 1>{}([&](auto inpack) {
                 static_for<0, KPackIterPerWarp, 1>{}([&](auto ikpack) {
@@ -310,7 +310,7 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
                         inpack * scale_b_dram_step_n + ikpack * scale_b_dram_step_k);
                 });
             });
-            move_tile_window(scale_b_dram_window, {0, KPerBlock / (ScaleGranularityK * KXdlPack)});
+            move_tile_window(scale_b_dram_window, {0, KPerBlock / (ScaleBlockSize * KXdlPack)});
             __builtin_amdgcn_sched_barrier(0);
 
             if constexpr(HasHotLoop || TailNum == TailNumber::Even)
@@ -370,10 +370,8 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
                 Base::GlobalPrefetchAsync(
                     a_store_lds_window_ping, a_dram_window, a_dram_tile_window_step);
 
-                move_tile_window(scale_a_dram_window,
-                                 {0, KPerBlock / (ScaleGranularityK * KXdlPack)});
-                move_tile_window(scale_b_dram_window,
-                                 {0, KPerBlock / (ScaleGranularityK * KXdlPack)});
+                move_tile_window(scale_a_dram_window, {0, KPerBlock / (ScaleBlockSize * KXdlPack)});
+                move_tile_window(scale_b_dram_window, {0, KPerBlock / (ScaleBlockSize * KXdlPack)});
 
                 block_gemm.LocalPrefetch(a_load_windows_pong);
                 HotLoopScheduler();
@@ -415,10 +413,8 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
 
                 Base::GlobalPrefetchAsync(
                     a_store_lds_window_pong, a_dram_window, a_dram_tile_window_step);
-                move_tile_window(scale_a_dram_window,
-                                 {0, KPerBlock / (ScaleGranularityK * KXdlPack)});
-                move_tile_window(scale_b_dram_window,
-                                 {0, KPerBlock / (ScaleGranularityK * KXdlPack)});
+                move_tile_window(scale_a_dram_window, {0, KPerBlock / (ScaleBlockSize * KXdlPack)});
+                move_tile_window(scale_b_dram_window, {0, KPerBlock / (ScaleBlockSize * KXdlPack)});
 
                 block_gemm.LocalPrefetch(a_load_windows_ping);
                 HotLoopScheduler();

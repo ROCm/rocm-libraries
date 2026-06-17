@@ -102,7 +102,7 @@ struct MxGemmKernel
     static constexpr int NThreadPerXdl = BlockGemmShape::WarpTile::at(number<1>{});
 
     static constexpr int BlockScaleSize = MxGemmPipeline::ScaleBlockSize;
-    using ScalePtrType                 = const int32_t*;
+    using ScalePtrType                  = const int32_t*;
     // Padding flags pulled from pipeline so the kernel can pad the (unscaled) C and scale views
     // consistently with the A/B views that the pipeline already pads via
     // Underlying::MakeA/BBlockWindows.
@@ -230,7 +230,6 @@ struct MxGemmKernel
         // consecutive K elements. Every split-K boundary must land on that granularity so that
         // each split can compute a packed-scale K offset. K1 is the WarpTile K, which is a
         // multiple of that granularity for all shipped configs, but be defensive.
-        static constexpr int BlockScaleSize   = 32;
         constexpr index_t scale_granularity_k = BlockScaleSize * KXdlPackEff;
         if(kargs.k_batch > 1)
         {

@@ -202,10 +202,10 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
             ? Policy::KXdlPack
             : 1;
 
-    static constexpr index_t ScaleGranularityK = 32;
+    static constexpr index_t ScaleBlockSize = 32;
 
     // Packed scale dimensions
-    static constexpr index_t ScaleKDimPerBlock = KPerBlock / ScaleGranularityK / KXdlPackEff;
+    static constexpr index_t ScaleKDimPerBlock = KPerBlock / ScaleBlockSize / KXdlPackEff;
 
     [[nodiscard]] CK_TILE_HOST static const std::string GetPipelineName()
     {

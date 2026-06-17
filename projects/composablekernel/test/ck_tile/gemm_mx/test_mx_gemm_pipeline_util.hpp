@@ -202,7 +202,7 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
     static constexpr auto Scheduler    = ck_tile::GemmPipelineScheduler::Intrawave;
     static constexpr auto PipelineType = std::tuple_element_t<14, Tuple>::value;
     static constexpr bool PermuteN =
-        ck_tile::tuple_element_or_default_t<Tuple, 15, std::false_type>::value;
+        ck_tile::tuple_element_or_default_t<Tuple, 16, std::false_type>::value;
 
     static constexpr ck_tile::index_t M_Tile = std::tuple_element_t<9, Tuple>{};
     static constexpr ck_tile::index_t N_Tile = std::tuple_element_t<10, Tuple>{};
@@ -223,7 +223,7 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
     static constexpr bool ClusterLaunch =
         ck_tile::tuple_element_or_default_t<Tuple, 17, std::false_type>::value;
 
-    static constexpr ck_tile::index_t ScaleBlockSize = std::tuple_element_t<16, Tuple>{};
+    static constexpr ck_tile::index_t ScaleBlockSize = std::tuple_element_t<15, Tuple>{};
 
     static constexpr ck_tile::index_t M_Warp =
         PipelineType == MxGemmPipelineType::WeightPreshuffle
@@ -483,8 +483,7 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         // so M must be padded to at least MNPack * MPerXdlops = 32.
         constexpr index_t ScaleShuffleAlign = 32;
         const index_t scale_padded_M        = integer_least_multiple(
-            static_cast<index_t>(M),
-            static_cast<index_t>(ck_tile::max(M_Tile, ScaleShuffleAlign)));
+            static_cast<index_t>(M), static_cast<index_t>(ck_tile::max(M_Tile, ScaleShuffleAlign)));
 
         HostTensor<AScaleDataType> scale_a(
             {static_cast<std::size_t>(scale_padded_M), static_cast<std::size_t>(num_scale_k)},

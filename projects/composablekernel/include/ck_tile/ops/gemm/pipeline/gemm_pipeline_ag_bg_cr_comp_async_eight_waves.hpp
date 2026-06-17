@@ -90,6 +90,8 @@ struct GemmPipelineAgBgCrCompAsyncEightWaves : public BaseGemmPipelineAgBgCrComp
 
     static constexpr auto Scheduler = Problem::Scheduler;
 
+    static constexpr index_t ScaleBlockSize = 32;
+
     [[nodiscard]] CK_TILE_HOST static const std::string GetPipelineName()
     {
         // clang-format off
