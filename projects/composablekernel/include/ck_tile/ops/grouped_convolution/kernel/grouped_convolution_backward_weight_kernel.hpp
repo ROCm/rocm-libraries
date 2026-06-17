@@ -1131,15 +1131,17 @@ struct GroupedConvolutionBackwardWeightKernel
 
     CK_TILE_DEVICE void RunStreamK(GroupedConvBwdWeightKernelArgsSpecialized& kargs) const
     {
-        // Device-side compile-time arch check - complements the runtime check in
-        // IsSupportedArgument(). Both are needed: the runtime check runs on the host
-        // (where get_compiler_target() isn't available since HIP's host pass doesn't
-        // define __gfx*__ macros), while this catches misuse at device compile time.
+// Device-side compile-time arch check - complements the runtime check in
+// IsSupportedArgument(). Both are needed: the runtime check runs on the host
+// (where get_compiler_target() isn't available since HIP's host pass doesn't
+// define __gfx*__ macros), while this catches misuse at device compile time.
+#if !defined(__gfx1250__)
         static_assert(
             StreamKCoherency<decltype(core::arch::get_compiler_target())>::BUFFER_COHERENCE !=
                 amd_buffer_coherence_enum::coherence_default,
             "StreamK requires cross-CU buffer coherence (StreamKCoherency specialization). "
             "Currently supported: gfx90a, gfx942, gfx950.");
+#endif
 
         __shared__ char smem_ptr[GetSmemSize()];
 
