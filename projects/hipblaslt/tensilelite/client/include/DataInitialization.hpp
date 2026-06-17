@@ -361,8 +361,27 @@ namespace TensileLite
                     else if(auto groupedProblem
                             = dynamic_cast<ContractionProblemGroupedGemm const*>(
                                 problem))
+                    {
+                        // gemms[0] is representative for element byte sizes: the
+                        // m_vdata model allocates one buffer per (tensor, DataType)
+                        // shared across all gemms, so mixed-type groups cannot be
+                        // constructed.  Assert the invariant in debug builds.
+                        assert(std::all_of(
+                            groupedProblem->gemms.begin(),
+                            groupedProblem->gemms.end(),
+                            [&](ContractionProblemGemm const& g) {
+                                return g.a().dataType()
+                                           == groupedProblem->gemms[0].a().dataType()
+                                       && g.b().dataType()
+                                              == groupedProblem->gemms[0].b().dataType()
+                                       && g.c().dataType()
+                                              == groupedProblem->gemms[0].c().dataType()
+                                       && g.d().dataType()
+                                              == groupedProblem->gemms[0].d().dataType();
+                            }));
                         fillSlot(
                             targetIdx, groupedProblem->gemms[0], m_copyStream);
+                    }
                 }
 
                 HIP_CHECK_EXC(
@@ -385,6 +404,8 @@ namespace TensileLite
                         initializeCPUInputs(problem);
                 }
 
+                // gemms[0] is representative for element byte sizes (see
+                // beginAsyncReset fast path for the invariant and assert).
                 return prepareGPUInputsInternal(problem.gemms[0], nullptr);
             }
 
