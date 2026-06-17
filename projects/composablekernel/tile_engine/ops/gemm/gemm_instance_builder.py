@@ -466,7 +466,7 @@ class GemmKernelBuilder:
                 pad_m_values,
                 pad_n_values,
                 pad_k_values,
-                persistent_or_preshuffle_quant,
+                persistent_values,
             )
         )
 
