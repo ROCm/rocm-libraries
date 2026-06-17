@@ -61,7 +61,7 @@ program example_fortran_scal
             use iso_c_binding
             implicit none
             integer(c_int) :: hipMalloc
-            type(c_ptr), intent(out) :: ptr
+            type(c_ptr), value :: ptr
             integer(c_size_t), value :: size
         end function hipMalloc
     end interface
