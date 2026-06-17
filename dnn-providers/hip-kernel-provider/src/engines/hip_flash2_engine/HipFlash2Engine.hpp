@@ -9,32 +9,37 @@
 
 #pragma once
 
-#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
-#include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
-#include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
-#include <memory>
-#include <vector>
-
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
 
-namespace hip_flash2_engine {
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
+#include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
+
+#include <memory>
+#include <vector>
+
+namespace hip_flash2_engine
+{
 
 using IEngine = hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>;
 using IPlanBuilder = hipdnn_plugin_sdk::IPlanBuilder<Handle, Settings, Context>;
 
-class HipFlash2Engine : public hipdnn_plugin_sdk::IEngine<Handle, Settings, Context> {
-   public:
+class HipFlash2Engine : public hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>
+{
+public:
     explicit HipFlash2Engine(int64_t engineId);
 
     void addPlanBuilder(std::unique_ptr<IPlanBuilder>&& planBuilder);
 
-    static int64_t staticId() {
+    static int64_t staticId()
+    {
         return hipdnn_data_sdk::utilities::HIP_FLASH2_ENGINE_ID;
     }
 
-    static const char* engineName() {
+    static const char* engineName()
+    {
         return hipdnn_data_sdk::utilities::HIP_FLASH2_ENGINE_NAME;
     }
 
@@ -49,21 +54,22 @@ class HipFlash2Engine : public hipdnn_plugin_sdk::IEngine<Handle, Settings, Cont
                     hipdnnPluginConstData_t& detailsOut) const override;
 
     size_t
-    // NOLINTNEXTLINE(portability-template-virtual-member-function)
-    getMaxWorkspaceSize(const Handle& handle,
-                        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
-                        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
-                            engineConfig) const override;
+        // NOLINTNEXTLINE(portability-template-virtual-member-function)
+        getMaxWorkspaceSize(const Handle& handle,
+                            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+                            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
+                                engineConfig) const override;
 
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
     void initializeExecutionContext(
-        const Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const Handle& handle,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
         Context& executionContext) const override;
 
-   private:
+private:
     int64_t _id;
     std::vector<std::unique_ptr<IPlanBuilder>> _planBuilders;
 };
 
-}  // namespace hip_flash2_engine
+} // namespace hip_flash2_engine
