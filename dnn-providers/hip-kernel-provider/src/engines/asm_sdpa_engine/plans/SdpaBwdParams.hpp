@@ -115,7 +115,9 @@ struct SdpaBwdParams
         {
             unsigned int gd = ts == 0U ? 0U : (extent + ts - 1U) / ts;
             if(isCausal)
+            {
                 gd = (gd + 1U) / 2U;
+            }
             return gd;
         }
     };

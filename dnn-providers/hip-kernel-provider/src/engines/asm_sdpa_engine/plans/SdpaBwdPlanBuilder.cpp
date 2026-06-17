@@ -692,7 +692,6 @@ bool SdpaBwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(!dqdkdvCfgOpt,
                                "Failed to resolve dqdkdv config for byte-stride validation");
     const bool useA32 = (dqdkdvTuple.atomic32 == static_cast<int>(AccumulatorMode::A32));
-    const auto numHeadsQ = qTensor->dims()->Get(1);
     const int64_t seqLenQ = qTensor->dims()->Get(2);
     HIP_KERNEL_RETURN_FALSE_IF(!wouldBwdByteStridesFitUint32(*qTensor,
                                                              *kTensor,
