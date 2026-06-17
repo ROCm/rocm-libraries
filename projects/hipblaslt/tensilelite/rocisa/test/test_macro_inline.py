@@ -45,7 +45,7 @@ def _run_pass(body):
 
 
 def _all_common_instructions(item):
-    """Recursively collect every CommonInstruction under a Module/KernelBody item."""
+    """Recursively collect every CommonInstruction under a Module item."""
     result = []
     if isinstance(item, Module):
         for child in item.items():
