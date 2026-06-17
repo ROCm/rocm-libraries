@@ -66,8 +66,11 @@ def main():
             (p for p in pts_list if p in COVERAGE_PROJECT_METADATA),
             pts_list[0] if pts_list else "",
         )
+        # Only let a changed project override the choice if it is itself
+        # coverage-enabled (otherwise a changed-but-uncovered project such as
+        # hipdnn would displace a covered one like hiprand in a merged group).
         for p in pts_list:
-            if p in changed_project_keys:
+            if p in changed_project_keys and p in COVERAGE_PROJECT_METADATA:
                 primary = p
                 break
 
