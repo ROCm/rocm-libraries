@@ -106,6 +106,20 @@ inline std::string sanitizeForGtest(const std::string& input)
     return result;
 }
 
+// The two halves of a GTest identifier, as registered via RegisterTest().
+// GTest joins them with '.' to form the full name: "{suiteName}.{testName}".
+//
+//   suiteName — computational identity: [{Tier}/]{op}_{layout}_{dtype}
+//               (the tier prefix keeps its trailing '/', empty for the quick
+//               tier; see tierPrefix). Shared by every bundle of the same
+//               op/layout/dtype.
+//   testName  — scenario identity: the bundle directory name (why the test
+//               exists), e.g. "resnet50_layer3".
+//
+// Example: standard/ConvFwd/nhwc/fp16/resnet50_layer3/graph.json
+//   suiteName = "Standard/ConvFwd_nhwc_fp16"
+//   testName  = "resnet50_layer3"
+//   full GTest name = "Standard/ConvFwd_nhwc_fp16.resnet50_layer3"
 struct DerivedTestName
 {
     std::string suiteName;
