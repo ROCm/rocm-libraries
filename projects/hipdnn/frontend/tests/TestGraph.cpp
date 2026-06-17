@@ -23,6 +23,7 @@
 #include <array>
 #include <cstring>
 #include <functional>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <utility>
@@ -269,6 +270,11 @@ public:
     void clearSelectedEngineId()
     {
         _selectedEngineId.reset();
+    }
+
+    std::optional<int64_t> selectedEngineIdForTest() const
+    {
+        return _selectedEngineId;
     }
 };
 }
@@ -9593,6 +9599,94 @@ void buildGraphWithExecutionPlan(GraphTestUtils& graph,
     ASSERT_TRUE(graph.isExecutionPlanFinalized());
 }
 
+void setupEngineWithNoKnobs(::testing::NiceMock<Mock_hipdnn_backend>& mockBackend)
+{
+    ON_CALL(mockBackend,
+            backendGetAttribute(
+                _, HIPDNN_ATTR_ENGINE_KNOB_INFO, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, _, nullptr))
+        .WillByDefault([](hipdnnBackendDescriptor_t,
+                          hipdnnBackendAttributeName_t,
+                          hipdnnBackendAttributeType_t,
+                          int64_t,
+                          int64_t* elementCount,
+                          void*) {
+            if(elementCount != nullptr)
+            {
+                *elementCount = 0;
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+}
+
+void expectEngineSupportsPlanSerialization(::testing::NiceMock<Mock_hipdnn_backend>& mockBackend)
+{
+    EXPECT_CALL(mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 0, _, nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 1;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 1, _, _))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void* arrayOfElements) {
+            *elementCount = 1;
+            auto* notes = static_cast<hipdnnBackendBehaviorNote_t*>(arrayOfElements);
+            notes[0] = HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+}
+
+void expectGraphOnlySerialization(::testing::NiceMock<Mock_hipdnn_backend>& mockBackend,
+                                  const std::vector<uint8_t>& fakeGraphBytes)
+{
+    EXPECT_CALL(mockBackend, backendGetSerializedBinaryGraphAndPlanExt(_, _, _, _, _)).Times(0);
+    EXPECT_CALL(mockBackend, backendGetSerializedBinaryGraphExt(_, _, _, _))
+        .Times(2)
+        .WillRepeatedly([&fakeGraphBytes](hipdnnBackendDescriptor_t,
+                                          size_t requestedSize,
+                                          size_t* graphByteSize,
+                                          uint8_t* data) {
+            *graphByteSize = fakeGraphBytes.size();
+            if(data != nullptr && requestedSize >= fakeGraphBytes.size())
+            {
+                std::memcpy(data, fakeGraphBytes.data(), fakeGraphBytes.size());
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+}
+
+void expectComboContainerSerialization(::testing::NiceMock<Mock_hipdnn_backend>& mockBackend,
+                                       const std::vector<uint8_t>& fakeContainerBytes)
+{
+    EXPECT_CALL(mockBackend, backendGetSerializedBinaryGraphExt(_, _, _, _)).Times(0);
+    EXPECT_CALL(mockBackend, backendGetSerializedBinaryGraphAndPlanExt(_, _, _, _, _))
+        .Times(2)
+        .WillRepeatedly([&fakeContainerBytes](hipdnnBackendDescriptor_t,
+                                              hipdnnBackendDescriptor_t,
+                                              size_t requestedByteSize,
+                                              size_t* blobByteSize,
+                                              uint8_t* serializedBlob) {
+            *blobByteSize = fakeContainerBytes.size();
+            if(serializedBlob != nullptr && requestedByteSize >= fakeContainerBytes.size())
+            {
+                std::memcpy(serializedBlob, fakeContainerBytes.data(), fakeContainerBytes.size());
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+}
+
 // Installs backendGetAttribute ON_CALL defaults that reconstruct a single
 // unary-pointwise operation graph during deserialize, letting the
 // post-reconstruction contents-query + plan-attach logic run. Keying on the
@@ -9847,6 +9941,339 @@ TEST_F(TestGraph, SerializeWithUnfinalizedPlanUsesGraphSerializer)
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_EQ(data, fakeGraphBytes);
+}
+
+TEST_F(TestGraph, CreateExecutionPlanExtResetsActivePlanSerializationState)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    buildGraphWithExecutionPlan(graph, *_mockBackend, _handle);
+    ASSERT_TRUE(graph.isExecutionPlanFinalized());
+
+    graph.setSelectedEngineId(777);
+
+    ON_CALL(*_mockBackend, backendCreateDescriptor(_, _))
+        .WillByDefault([this](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* desc) {
+            *desc = reinterpret_cast<hipdnnBackendDescriptor_t>(
+                &_fakeDescs[_nextFakeDescIdx++ % _fakeDescs.size()]);
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    setupEngineWithNoKnobs(*_mockBackend);
+
+    const int64_t engineId = -2;
+    auto result = graph.create_execution_plan_ext(engineId, {});
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+
+    EXPECT_EQ(graph.getCompiledPlansCount(), 1u);
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_TRUE(graph.hasExecutionPlan());
+    EXPECT_FALSE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), engineId);
+
+    const std::vector<uint8_t> fakeGraphBytes = {0x01, 0x02, 0x03};
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, _, _, _, _))
+        .Times(0);
+    expectGraphOnlySerialization(*_mockBackend, fakeGraphBytes);
+
+    std::vector<uint8_t> data;
+    auto err = graph.serialize(data);
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(data, fakeGraphBytes);
+}
+
+TEST_F(TestGraph, CreateExecutionPlanExtBuildPlansSerializesComboContainer)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    setupEngineWithNoKnobs(*_mockBackend);
+
+    const int64_t engineId = -2;
+    auto result = graph.create_execution_plan_ext(engineId, {});
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    ASSERT_FALSE(graph.isExecutionPlanFinalized());
+
+    result = graph.build_plans();
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), engineId);
+
+    expectEngineSupportsPlanSerialization(*_mockBackend);
+    const std::vector<uint8_t> fakeContainerBytes = {0xAA, 0xBB, 0xCC};
+    expectComboContainerSerialization(*_mockBackend, fakeContainerBytes);
+
+    std::vector<uint8_t> data;
+    auto err = graph.serialize(data);
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(data, fakeContainerBytes);
+}
+
+TEST_F(TestGraph, BuildPlansAllMarksFirstSuccessfulPlanSerializable)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    graph.injectValidCompiledPlan(/*engineId=*/-2, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/-3, /*workspaceSize=*/-1, /*barred=*/false);
+
+    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), -2);
+
+    expectEngineSupportsPlanSerialization(*_mockBackend);
+    const std::vector<uint8_t> fakeContainerBytes = {0xBA, 0xAD, 0xF0, 0x0D};
+    expectComboContainerSerialization(*_mockBackend, fakeContainerBytes);
+
+    std::vector<uint8_t> data;
+    auto err = graph.serialize(data);
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(data, fakeContainerBytes);
+}
+
+TEST_F(TestGraph, BuildPlanAtIndexUpdatesSerializableActivePlan)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    graph.injectValidCompiledPlan(/*engineId=*/-2, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/-3, /*workspaceSize=*/-1, /*barred=*/false);
+
+    auto result = graph.build_plan_at_index(1);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), -3);
+
+    expectEngineSupportsPlanSerialization(*_mockBackend);
+    const std::vector<uint8_t> fakeContainerBytes = {0x20, 0x21, 0x22};
+    expectComboContainerSerialization(*_mockBackend, fakeContainerBytes);
+
+    std::vector<uint8_t> data;
+    auto err = graph.serialize(data);
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(data, fakeContainerBytes);
+}
+
+TEST_F(TestGraph, CompiledPlanAutotuneWinnerUpdatesSerializableActivePlan)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    graph.injectValidCompiledPlan(/*engineId=*/-2, /*workspaceSize=*/0, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/-3, /*workspaceSize=*/0, /*barred=*/false);
+
+    AutotuneConfig config;
+    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.warmupIterations = 0;
+    config.rankingFn = [](std::vector<AutotuneResult>& results) {
+        std::reverse(results.begin(), results.end());
+    };
+
+    std::vector<AutotuneResult> results;
+    const std::unordered_map<int64_t, void*> variantPack = {{1, reinterpret_cast<void*>(0x1)},
+                                                            {2, reinterpret_cast<void*>(0x2)},
+                                                            {3, reinterpret_cast<void*>(0x3)},
+                                                            {4, reinterpret_cast<void*>(0x4)},
+                                                            {5, reinterpret_cast<void*>(0x5)}};
+    auto result = graph.autotune(_handle, variantPack, nullptr, config, {}, &results);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    ASSERT_EQ(results.size(), 2u);
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), -3);
+
+    expectEngineSupportsPlanSerialization(*_mockBackend);
+    const std::vector<uint8_t> fakeContainerBytes = {0x30, 0x31, 0x32};
+    expectComboContainerSerialization(*_mockBackend, fakeContainerBytes);
+
+    std::vector<uint8_t> data;
+    auto err = graph.serialize(data);
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(data, fakeContainerBytes);
+}
+
+TEST_F(TestGraph, CompiledPlanAutotuneFailurePreservesActivePlanState)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    graph.injectValidCompiledPlan(/*engineId=*/-2, /*workspaceSize=*/0, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/-3, /*workspaceSize=*/0, /*barred=*/false);
+
+    auto result = graph.build_plan_at_index(1);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    ASSERT_EQ(graph.getActivePlanIndex(), 1u);
+    ASSERT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    ASSERT_EQ(*graph.selectedEngineIdForTest(), -3);
+
+    AutotuneConfig config;
+    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.warmupIterations = 0;
+    config.engineIdFilter = {-999};
+
+    std::vector<AutotuneResult> results;
+    const std::unordered_map<int64_t, void*> variantPack = {{1, reinterpret_cast<void*>(0x1)},
+                                                            {2, reinterpret_cast<void*>(0x2)},
+                                                            {3, reinterpret_cast<void*>(0x3)},
+                                                            {4, reinterpret_cast<void*>(0x4)},
+                                                            {5, reinterpret_cast<void*>(0x5)}};
+    result = graph.autotune(_handle, variantPack, nullptr, config, {}, &results);
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), -3);
+
+    expectEngineSupportsPlanSerialization(*_mockBackend);
+    const std::vector<uint8_t> fakeContainerBytes = {0x33, 0x44, 0x55};
+    expectComboContainerSerialization(*_mockBackend, fakeContainerBytes);
+
+    std::vector<uint8_t> data;
+    auto err = graph.serialize(data);
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(data, fakeContainerBytes);
+}
+
+TEST_F(TestGraph, PlanSpecAutotuneWinnerUpdatesSerializableActivePlan)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    setupEngineWithNoKnobs(*_mockBackend);
+
+    EngineConfigInfo engineA;
+    engineA.engineId = -2;
+    engineA.estimatedWorkspaceSize = 0;
+    EngineConfigInfo engineB;
+    engineB.engineId = -3;
+    engineB.estimatedWorkspaceSize = 0;
+    auto addResult = graph.add_engine_configs({engineA, engineB});
+    ASSERT_TRUE(addResult.is_good()) << addResult.get_message();
+
+    AutotuneConfig config;
+    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.warmupIterations = 0;
+    config.rankingFn = [](std::vector<AutotuneResult>& results) {
+        std::reverse(results.begin(), results.end());
+    };
+
+    std::vector<AutotuneResult> results;
+    const std::unordered_map<int64_t, void*> variantPack = {{1, reinterpret_cast<void*>(0x1)},
+                                                            {2, reinterpret_cast<void*>(0x2)},
+                                                            {3, reinterpret_cast<void*>(0x3)},
+                                                            {4, reinterpret_cast<void*>(0x4)},
+                                                            {5, reinterpret_cast<void*>(0x5)}};
+    auto result = graph.autotune(_handle, variantPack, nullptr, 0, config, {}, &results);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    ASSERT_EQ(results.size(), 2u);
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), -3);
+
+    expectEngineSupportsPlanSerialization(*_mockBackend);
+    const std::vector<uint8_t> fakeContainerBytes = {0x40, 0x41, 0x42};
+    expectComboContainerSerialization(*_mockBackend, fakeContainerBytes);
+
+    std::vector<uint8_t> data;
+    auto err = graph.serialize(data);
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(data, fakeContainerBytes);
+}
+
+TEST_F(TestGraph, PlanSpecAutotuneFailureLeavesCompiledPlanUnfinalized)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    setupEngineWithNoKnobs(*_mockBackend);
+
+    ON_CALL(*_mockBackend,
+            backendGetAttribute(
+                _, HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, nullptr, _))
+        .WillByDefault([](hipdnnBackendDescriptor_t,
+                          hipdnnBackendAttributeName_t,
+                          hipdnnBackendAttributeType_t,
+                          int64_t,
+                          int64_t*,
+                          void* arrayOfElements) {
+            *static_cast<int64_t*>(arrayOfElements) = 1024;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    EngineConfigInfo engine;
+    engine.engineId = -2;
+    engine.estimatedWorkspaceSize = 1024;
+    auto addResult = graph.add_engine_configs({engine});
+    ASSERT_TRUE(addResult.is_good()) << addResult.get_message();
+
+    AutotuneConfig config;
+    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.warmupIterations = 0;
+
+    std::vector<AutotuneResult> results;
+    const std::unordered_map<int64_t, void*> variantPack = {{1, reinterpret_cast<void*>(0x1)},
+                                                            {2, reinterpret_cast<void*>(0x2)},
+                                                            {3, reinterpret_cast<void*>(0x3)},
+                                                            {4, reinterpret_cast<void*>(0x4)},
+                                                            {5, reinterpret_cast<void*>(0x5)}};
+
+    auto result = graph.autotune(_handle, variantPack, nullptr, 2048, config, {}, &results);
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_FALSE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), -2);
+
+    const std::vector<uint8_t> fakeGraphBytes = {0x66, 0x77, 0x88};
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, _, _, _, _))
+        .Times(0);
+    expectGraphOnlySerialization(*_mockBackend, fakeGraphBytes);
+
+    std::vector<uint8_t> data;
+    auto err = graph.serialize(data);
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(data, fakeGraphBytes);
+}
+
+TEST_F(TestGraph, SerializeCompiledPlanRejectsUnfinalizedActivePlan)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    buildGraphWithExecutionPlan(graph, *_mockBackend, _handle, /*buildPlans=*/false);
+    ASSERT_TRUE(graph.hasExecutionPlan());
+    ASSERT_FALSE(graph.isExecutionPlanFinalized());
+
+    EXPECT_CALL(*_mockBackend, backendGetSerializedExecutionPlanExt(_, _, _, _)).Times(0);
+
+    std::vector<uint8_t> data;
+    auto err = graph.serialize_compiled_plan(data);
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
 }
 
 // The combo size-query succeeds but reports a zero-length blob: serialize fails
