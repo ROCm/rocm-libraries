@@ -110,83 +110,8 @@ struct device_radix_sort_onesweep_benchmark : public primbench::benchmark_interf
     }
 
 private:
-    // keys benchmark
     template<typename val = Value>
-    auto do_run(primbench::state&& state) const ->
-        typename std::enable_if<std::is_same<val, ::rocprim::empty_type>::value, void>::type
-    {
-        const auto& stream = state.stream;
-        const auto& bytes  = state.size;
-        const auto& seed   = state.seed;
-
-        using key_type = Key;
-
-        size_t items = bytes / sizeof(key_type);
-
-        std::vector<key_type> keys_input
-            = get_random_data<key_type>(items,
-                                        common::generate_limits<key_type>::min(),
-                                        common::generate_limits<key_type>::max(),
-                                        seed);
-
-        common::device_ptr<key_type> d_keys_input(keys_input);
-        common::device_ptr<key_type> d_keys_output(items);
-
-        common::device_ptr<void> d_temporary_storage;
-        size_t                   temporary_storage_bytes = 0;
-
-        bool                 is_result_in_output = true;
-        rocprim::empty_type* d_values_ptr        = nullptr;
-        HIP_CHECK((
-            rocprim::detail::radix_sort_onesweep_impl<Config, false>(d_temporary_storage.get(),
-                                                                     temporary_storage_bytes,
-                                                                     d_keys_input.get(),
-                                                                     nullptr,
-                                                                     d_keys_output.get(),
-                                                                     d_values_ptr,
-                                                                     nullptr,
-                                                                     d_values_ptr,
-                                                                     items,
-                                                                     is_result_in_output,
-                                                                     rocprim::identity_decomposer{},
-                                                                     0,
-                                                                     sizeof(key_type) * 8,
-                                                                     stream,
-                                                                     false,
-                                                                     false)));
-
-        d_temporary_storage.resize(temporary_storage_bytes);
-
-        state.set_items(items);
-        state.add_reads<key_type>(items);
-
-        state.run(
-            [&]
-            {
-                HIP_CHECK((rocprim::detail::radix_sort_onesweep_impl<Config, false>(
-                    d_temporary_storage.get(),
-                    temporary_storage_bytes,
-                    d_keys_input.get(),
-                    nullptr,
-                    d_keys_output.get(),
-                    d_values_ptr,
-                    nullptr,
-                    d_values_ptr,
-                    items,
-                    is_result_in_output,
-                    rocprim::identity_decomposer{},
-                    0,
-                    sizeof(key_type) * 8,
-                    stream,
-                    false,
-                    false)));
-            });
-    }
-
-    // pairs benchmark
-    template<typename val = Value>
-    auto do_run(primbench::state&& state) const ->
-        typename std::enable_if<!std::is_same<val, ::rocprim::empty_type>::value, void>::type
+    auto do_run(primbench::state&& state) const
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.size;
@@ -204,16 +129,30 @@ private:
                                         seed);
 
         std::vector<value_type> values_input(items);
-        for(size_t i = 0; i < items; ++i)
+
+        using value_pointer_type
+            = std::conditional_t<!std::is_same<val, rocprim::empty_type>::value,
+                                 value_type*,
+                                 rocprim::empty_type*>;
+
+        value_pointer_type d_values_input_ptr  = nullptr;
+        value_pointer_type d_values_output_ptr = nullptr;
+
+        if constexpr(!std::is_same<value_type, rocprim::empty_type>::value)
         {
-            values_input[i] = value_type(i);
+            for(size_t i = 0; i < items; ++i)
+            {
+                values_input[i] = value_type(i);
+            }
+
+            common::device_ptr<value_type> d_values_input_tmp(values_input);
+            common::device_ptr<value_type> d_values_output_tmp(items);
+            d_values_input_ptr  = d_values_input_tmp.get();
+            d_values_output_ptr = d_values_output_tmp.get();
         }
 
         common::device_ptr<key_type> d_keys_input(keys_input);
         common::device_ptr<key_type> d_keys_output(items);
-
-        common::device_ptr<value_type> d_values_input(values_input);
-        common::device_ptr<value_type> d_values_output(items);
 
         common::device_ptr<void> d_temporary_storage;
         size_t                   temporary_storage_bytes = 0;
@@ -225,9 +164,9 @@ private:
                                                                      d_keys_input.get(),
                                                                      nullptr,
                                                                      d_keys_output.get(),
-                                                                     d_values_input.get(),
+                                                                     d_values_input_ptr,
                                                                      nullptr,
-                                                                     d_values_output.get(),
+                                                                     d_values_output_ptr,
                                                                      items,
                                                                      is_result_in_output,
                                                                      rocprim::identity_decomposer{},
@@ -241,7 +180,10 @@ private:
 
         state.set_items(items);
         state.add_reads<key_type>(items);
-        state.add_reads<value_type>(items);
+        if constexpr(!std::is_same<value_type, rocprim::empty_type>::value)
+        {
+            state.add_reads<value_type>(items);
+        }
 
         state.run(
             [&]
@@ -252,9 +194,9 @@ private:
                     d_keys_input.get(),
                     nullptr,
                     d_keys_output.get(),
-                    d_values_input.get(),
+                    d_values_input_ptr,
                     nullptr,
-                    d_values_output.get(),
+                    d_values_output_ptr,
                     items,
                     is_result_in_output,
                     rocprim::identity_decomposer{},

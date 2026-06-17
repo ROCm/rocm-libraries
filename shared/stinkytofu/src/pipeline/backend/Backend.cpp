@@ -40,7 +40,7 @@ bool Backend::runOptimization() {
     if (!pipeline || !pipeline->builder) return true;
 
     PassManager pm;
-    if (!pipeline->builder(pm, module)) return true;
+    if (!pipeline->builder(pm, module, module.getPassBuilder())) return true;
 
     configurePassManager(pm);
     pm.run(module.getFunction());

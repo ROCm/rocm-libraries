@@ -102,7 +102,7 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
     if(kernel["StreamK"] != 0 and kernel["WorkGroupMappingXCC"] == -1):
         # We need to get WGMXCC from WGM
         # This value will be used as number of XCCs for both chunked and non-chunked remapping
-        SgprWGMXCC = writer.sgprPool.checkOut(1)
+        SgprWGMXCC = writer.sgprPool.checkOut(1, tag="wgmXCC_SgprWGMXCC")
         module.add(SLShiftRightB32(dst=sgpr(SgprWGMXCC), shiftHex=hex(16), src=sgpr(sgprWGM), comment="Get WGMXCC"))
         module.add(SAndB32(dst=sgpr(SgprWGMXCC), src0=sgpr(SgprWGMXCC), src1=hex(63), comment="Get WGMXCC"))
         module.add(SCmpGtU32(src0=sgpr(SgprWGMXCC), src1=1, comment="No mapping if WGMXCC <= 1"))
@@ -112,7 +112,7 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
         Use chiplet_transform_chunk, skip classic wgmxcc remapping
         """        
         SgprIndex = "WorkGroup0"
-        SgprChunkSize = writer.sgprPool.checkOut(1, preventOverflow=False)
+        SgprChunkSize = writer.sgprPool.checkOut(1, tag="wgmXCC_SgprChunkSize", preventOverflow=False)
         module.add(SLShiftRightB32(dst=sgpr(SgprChunkSize), shiftHex=hex(22), src=sgpr(sgprWGM), comment="Get WGMCHUNK"))
         module.add(SAndB32(dst=sgpr(SgprChunkSize), src0=sgpr(SgprChunkSize), src1=hex(1023), comment="Get WGMCHUNK"))
         module.addComment0("remap WGs if WGMCHUNK > 1")
@@ -132,7 +132,7 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
         offset = 0 if g < r else r
         new    = x + offset + g * group
         """
-        with writer.allocTmpSgpr(6, 2) as tmpSgprRes:
+        with writer.allocTmpSgpr(6, 2, tag="wgmXCC_tmpSgprRes") as tmpSgprRes:
             SgprX      = tmpSgprRes.idx + 1
             SgprG      = tmpSgprRes.idx + 2
             SgprQ      = tmpSgprRes.idx + 3
@@ -142,7 +142,7 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
             tmpSgpr = SgprWGMXCC
             group   = SgprQ
 
-            tmpVgpr     = writer.vgprPool.checkOutAligned(4,2)
+            tmpVgpr     = writer.vgprPool.checkOutAligned(4,2, tag="wgmXCC_tmpVgpr")
             tmpVgprRes  = ContinuousRegister(tmpVgpr, 4)
 
             module.addComment0("divmod(old_wg, WGMXCC)")
@@ -164,7 +164,7 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
         writer.sgprPool.checkIn(SgprWGMXCC)
         module.add(label_skipWGMXCC)
     else:
-        with writer.allocTmpSgpr(6, 2) as tmpSgprRes:
+        with writer.allocTmpSgpr(6, 2, tag="wgmXCC_tmpSgprRes2") as tmpSgprRes:
             tmpSgpr      = tmpSgprRes.idx
             tmpSgpr0     = tmpSgpr+1
             tmpSgpr1     = tmpSgpr0+1
@@ -181,7 +181,7 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
             module.add(SCBranchSCC0(label_skipWGMXCC.getLabelName()))
 
             module.addComment0("only remap WGs in the range")
-            tmpVgpr     = writer.vgprPool.checkOutAligned(4,2)
+            tmpVgpr     = writer.vgprPool.checkOutAligned(4,2, tag="wgmXCC_tmpVgpr2")
             tmpVgprRes  = ContinuousRegister(tmpVgpr, 4)
             module.add(SLShiftRightB32(dst=sgpr(tmpSgpr0), shiftHex=sgpr(WGMXCCSgpr), src=sgpr(tmpSgprNumWorkGroups)))
             module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr0), shiftHex=sgpr(WGMXCCSgpr), src=sgpr(tmpSgpr0)))
@@ -234,7 +234,7 @@ def DefaultWGM(writer, kernel, sgprWGM):
     # Restore WGM
 
     # We allocate a temp sgpr and keep sgpr[WGM] untouched.
-    tmpWGM = writer.sgprPool.checkOut(1)
+    tmpWGM = writer.sgprPool.checkOut(1, tag="DefaultWGM_tmpWGM")
 
     module.add(SMovB32(dst=sgpr(tmpWGM), src=sgpr(sgprWGM), comment="Restore WGM"))
     module.add(SSExtI16toI32(dst=sgpr(tmpWGM), src=sgpr(tmpWGM), comment="Restore WGM"))
@@ -248,7 +248,7 @@ def DefaultWGM(writer, kernel, sgprWGM):
 
     module.add(SCmpGtI32(src0=sgpr(tmpWGM), src1=1, comment="WGM > 1 ?"))
     module.add(SCBranchSCC1(labelName=wgmLabelPositive.getLabelName(), comment="branch if WGM > 1"))
-    with writer.allocTmpSgprList(nums=[2,1,1]) as tmpSgprInfoList:
+    with writer.allocTmpSgprList(nums=[2,1,1], tag="DefaultWGM_tmpSgprInfoList") as tmpSgprInfoList:
         wgmDivisor = tmpSgprInfoList[0].idx
         wgmDivisor2 = tmpSgprInfoList[0].idx + 1
         blockId2 = tmpSgprInfoList[1].idx
@@ -316,15 +316,15 @@ def DefaultWGM(writer, kernel, sgprWGM):
 def chiplet_transform_chunked(writer, kernel, sgprNumXCC, sgprIndex, sgprNumWG, sgprChunkSize):
     module = Module()
 
-    sgprTmp  = writer.sgprPool.checkOut(1, preventOverflow=False)
-    sgprTmp2 = writer.sgprPool.checkOut(1, preventOverflow=False)
+    sgprTmp  = writer.sgprPool.checkOut(1, tag="chiplet_transform_chunked_sgprTmp", preventOverflow=False)
+    sgprTmp2 = writer.sgprPool.checkOut(1, tag="chiplet_transform_chunked_sgprTmp2", preventOverflow=False)
 
-    sgprLocalId = writer.sgprPool.checkOut(1, preventOverflow=False)
-    sgprChunkId = writer.sgprPool.checkOut(1, preventOverflow=False)
-    sgprPosInChunk = writer.sgprPool.checkOut(1, preventOverflow=False)
-    sgprXCC = writer.sgprPool.checkOut(1, preventOverflow=False)
+    sgprLocalId = writer.sgprPool.checkOut(1, tag="chiplet_transform_chunked_sgprLocalId", preventOverflow=False)
+    sgprChunkId = writer.sgprPool.checkOut(1, tag="chiplet_transform_chunked_sgprChunkId", preventOverflow=False)
+    sgprPosInChunk = writer.sgprPool.checkOut(1, tag="chiplet_transform_chunked_sgprPosInChunk", preventOverflow=False)
+    sgprXCC = writer.sgprPool.checkOut(1, tag="chiplet_transform_chunked_sgprXCC", preventOverflow=False)
 
-    tmpVgpr = writer.vgprPool.checkOutAligned(6,2,"tmpVgpr")
+    tmpVgpr = writer.vgprPool.checkOutAligned(6,2, tag="chiplet_transform_chunked_tmpVgpr")
     tmpVgprRes = ContinuousRegister(tmpVgpr, 6)
 
     labelEnd = Label(writer.labels.getUniqueNamePrefix("ChipletTransformChunkEnd"), comment="")
@@ -369,15 +369,15 @@ def chiplet_transform(writer, kernel, sgprIndex, sgprNumTilesM, sgprNumTilesN):
     numXCC = 8
     module = Module()
 
-    sgprXCC = writer.sgprPool.checkOut(1)
-    sgprPOSINXCC = writer.sgprPool.checkOut(1)
-    sgprNumXCC = writer.sgprPool.checkOut(1)
+    sgprXCC = writer.sgprPool.checkOut(1, tag="chiplet_transform_sgprXCC")
+    sgprPOSINXCC = writer.sgprPool.checkOut(1, tag="chiplet_transform_sgprPOSINXCC")
+    sgprNumXCC = writer.sgprPool.checkOut(1, tag="chiplet_transform_sgprNumXCC")
 
-    sgprMinPerXCC = writer.sgprPool.checkOut(1)
-    sgprExtraWG = writer.sgprPool.checkOut(1)
-    sgprTmp = writer.sgprPool.checkOut(1)
+    sgprMinPerXCC = writer.sgprPool.checkOut(1, tag="chiplet_transform_sgprMinPerXCC")
+    sgprExtraWG = writer.sgprPool.checkOut(1, tag="chiplet_transform_sgprExtraWG")
+    sgprTmp = writer.sgprPool.checkOut(1, tag="chiplet_transform_sgprTmp")
 
-    tmpVgpr = writer.vgprPool.checkOutAligned(6,2,"tmpVgpr")
+    tmpVgpr = writer.vgprPool.checkOutAligned(6,2, tag="chiplet_transform_tmpVgpr")
     tmpVgprRes = ContinuousRegister(tmpVgpr, 6)
 
     module.add(SMovB32(dst=sgpr(sgprNumXCC), src=numXCC, comment=""))
@@ -433,7 +433,7 @@ def SpaceFillingCurveWalk(writer, kernel, sgprWGM):
     checkWGMForZeroes = False
     if checkWGMForZeroes:
         # if gridDim is zero in wgm, set to 1.
-        ts = writer.sgprPool.checkOut(1)
+        ts = writer.sgprPool.checkOut(1, tag="SpaceFillingCurveWalk_ts")
         for i in range(4):
             module.add(SAndB32(dst=sgpr(ts), src0=sgpr(sgprWGM), src1=hex(0x000000ff << (i * 8)), comment=""))
             module.add(SCmpEQU32(src0=sgpr(ts), src1=0, comment=""))
@@ -445,7 +445,7 @@ def SpaceFillingCurveWalk(writer, kernel, sgprWGM):
     # For StreamK we store the global tile index when its computed in skIndexToWG(...) in StreamK.py
     sgprIndex = "WorkGroup0"
     if not kernel["StreamK"]:
-        sgprTmp = writer.sgprPool.checkOut(1)
+        sgprTmp = writer.sgprPool.checkOut(1, tag="SpaceFillingCurveWalk_sgprTmp")
         # Recompute the 1D ID from 2D IDs
         module.add(SMulI32(dst=sgpr(sgprTmp), src0=sgpr("WorkGroup1"), src1=sgpr("NumWorkGroups0"), comment=""))
         module.add(SAddU32(dst=sgpr(sgprIndex), src0=sgpr("WorkGroup0"), src1=sgpr(sgprTmp), comment=""))
@@ -455,8 +455,8 @@ def SpaceFillingCurveWalk(writer, kernel, sgprWGM):
 
     # Global number of WGs in M, N directions.
     # sgprNumTiles{M,N} may be overwritten so we store NumWorkGroups{0,1} values in them.
-    sgprNumTilesM = writer.sgprPool.checkOut(1)
-    sgprNumTilesN = writer.sgprPool.checkOut(1)
+    sgprNumTilesM = writer.sgprPool.checkOut(1, tag="SpaceFillingCurveWalk_sgprNumTilesM")
+    sgprNumTilesN = writer.sgprPool.checkOut(1, tag="spaceFillingCurveWalk_sgprNumTilesN")
     module.add(SMovB32(dst=sgpr(sgprNumTilesM), src=sgpr("NumWorkGroups0")))
     module.add(SMovB32(dst=sgpr(sgprNumTilesN), src=sgpr("NumWorkGroups1")))
 
@@ -467,7 +467,7 @@ def SpaceFillingCurveWalk(writer, kernel, sgprWGM):
                     "WorkGroup2", "StreamKLocalStart", "StreamKIterEnd", \
                     "LoopCounterL", "OrigLoopCounterL", "SizesSum"]
     if len(sgprsToStore):
-        vgprSgprPool = writer.vgprPool.checkOut(1)
+        vgprSgprPool = writer.vgprPool.checkOut(1, tag="SpaceFillingCurveWalk_vgprSgprPool")
     for sgprVarsId in range(len(sgprsToStore)):
         sgprVars = sgprsToStore[sgprVarsId]
         if sgprVars not in writer.sgprs:
@@ -483,7 +483,7 @@ def SpaceFillingCurveWalk(writer, kernel, sgprWGM):
 
 
     # Starting (M,N) tile offset
-    sgprGlobal       = writer.sgprPool.checkOutAligned(2,2)
+    sgprGlobal       = writer.sgprPool.checkOutAligned(2,2, tag="SpaceFillingCurveWalk_sgprGlobal")
     sgprGlobalY      = sgprGlobal
     sgprGlobalX      = sgprGlobal+1
 
@@ -517,17 +517,17 @@ def SpaceFillingCurveWalk(writer, kernel, sgprWGM):
     ##############################################################################################
 
         # Allocate as 64b aligned to use b64 SALUs when possible
-        sgprNumTilesMN1 = writer.sgprPool.checkOutAligned(2,2)
-        sgprNumTilesMN2 = writer.sgprPool.checkOutAligned(2,2)
+        sgprNumTilesMN1 = writer.sgprPool.checkOutAligned(2,2, tag="SpaceFillingCurveWalk_sgprNumTilesMN1")
+        sgprNumTilesMN2 = writer.sgprPool.checkOutAligned(2,2, tag="SpaceFillingCurveWalk_sgprNumTilesMN2")
         sgprNumTilesM1 = sgprNumTilesMN1
         sgprNumTilesN1 = sgprNumTilesMN1+1
         sgprNumTilesM2 = sgprNumTilesMN2
         sgprNumTilesN2 = sgprNumTilesMN2+1
 
-        sgprTemp = writer.sgprPool.checkOut(1)
-        sgprTemp2 = writer.sgprPool.checkOut(1)
+        sgprTemp = writer.sgprPool.checkOut(1, tag="SpaceFillingCurveWalk_sgprTemp")
+        sgprTemp2 = writer.sgprPool.checkOut(1, tag="SpaceFillingCurveWalk_sgprTemp2")
 
-        tmpVgpr = writer.vgprPool.checkOutAligned(6,2,"tmpVgpr")
+        tmpVgpr = writer.vgprPool.checkOutAligned(6,2, tag="SpaceFillingCurveWalk_tmpVgpr")
         tmpVgprRes = ContinuousRegister(tmpVgpr, 6)
         # Fetch GridM_L1, GridM_L2 and calculate GridM_L1 * GridM_L2
         module.add(SAndB32(dst=sgpr(sgprNumTilesM1), src0=sgpr(sgprWGM), src1="0x000000ff"))
@@ -655,18 +655,18 @@ def TransformNLevels(writer, kernel, sgprIndex, sgprNumTilesM, sgprNumTilesN, sg
     module = Module()
     numLevels = min(numLevels, writer.states.WGMTransformLevels)
 
-    sgprCumulativeDenominator = writer.sgprPool.checkOut(1)
+    sgprCumulativeDenominator = writer.sgprPool.checkOut(1, tag="TransformNLevels_sgprCumulativeDenominator")
 
     if numLevels > 1:
-        sgprCumulativeX = writer.sgprPool.checkOut(1)
-        sgprCumulativeY = writer.sgprPool.checkOut(1)
-        sgprBlockM       = writer.sgprPool.checkOut(1)
-        sgprBlockN       = writer.sgprPool.checkOut(1)
+        sgprCumulativeX = writer.sgprPool.checkOut(1, tag="TransformNLevels_sgprCumulativeX")
+        sgprCumulativeY = writer.sgprPool.checkOut(1, tag="TransformNLevels_sgprCumulativeY")
+        sgprBlockM       = writer.sgprPool.checkOut(1, tag="TransformNLevels_sgprBlockM")
+        sgprBlockN       = writer.sgprPool.checkOut(1, tag="TransformNLevels_sgprBlockN")
 
-    sgprLocalXY      = writer.sgprPool.checkOutAligned(2,2)
+    sgprLocalXY      = writer.sgprPool.checkOutAligned(2,2, tag="TransformNLevels_sgprLocalXY")
     sgprLocalY       = sgprLocalXY
     sgprLocalX       = sgprLocalXY + 1
-    sgprTemp         = writer.sgprPool.checkOut(1)
+    sgprTemp         = writer.sgprPool.checkOut(1, tag="TransformNLevels_sgprTemp")
 
     SFCO = kernel["SpaceFillingAlgo"]
 
@@ -689,7 +689,7 @@ def TransformNLevels(writer, kernel, sgprIndex, sgprNumTilesM, sgprNumTilesN, sg
                 module.add(SLShiftRightB32(dst=sgpr(sgprBlockN), src=sgpr(sgprBlockN), shiftHex=8, comment=""))
             else:
                 # Compute grid dims from current level using dims from previous levels
-                tmpVgpr = writer.vgprPool.checkOutAligned(6,2,"tmpVgpr")
+                tmpVgpr = writer.vgprPool.checkOutAligned(6,2, tag="TransformNLevels_tmpVgpr")
                 tmpVgprRes = ContinuousRegister(tmpVgpr, 6)
                 # Fetch numTilesM for the particular level
                 module.add(SAndB32(dst=sgpr(sgprBlockM), src0=sgpr(sgprWGM), src1="0x000000ff"))
@@ -780,8 +780,8 @@ def TransformNLevels(writer, kernel, sgprIndex, sgprNumTilesM, sgprNumTilesN, sg
 def OrderingPreamble(writer, kernel, sgprIndex, sgprGridY, sgprGridX, sgprCumulativeDenominator, sgprLocalIndex, lvl):
     module = Module()
 
-    sgprTemp = writer.sgprPool.checkOut(1)
-    tmpVgpr = writer.vgprPool.checkOutAligned(4,2,"tmpVgpr")
+    sgprTemp = writer.sgprPool.checkOut(1, tag="OrderingPreamble_sgprTemp")
+    tmpVgpr = writer.vgprPool.checkOutAligned(4,2, tag="OrderingPreamble_tmpVgpr")
     tmpVgprRes = ContinuousRegister(tmpVgpr, 4)
     module.addComment0("Computing local indices for level-%u"%lvl)
     # index // cumulativeDenom
@@ -816,14 +816,14 @@ def OrderingPreamble(writer, kernel, sgprIndex, sgprGridY, sgprGridX, sgprCumula
 def ColRowMajor(writer, kernel, sgprIndex, sgprGridY, sgprGridX, sgprLocalY, sgprLocalX, sgprCumulativeDenominator, lvl, isCol):
     module = Module("RowMajor")
 
-    sgprLocalIndex   = writer.sgprPool.checkOut(1)
+    sgprLocalIndex   = writer.sgprPool.checkOut(1, tag="ColRowMajor_sgprLocalIndex")
 
     module.addComment0("Start of Col/Row Major ordering transform")
     # Calculate local index for this order, and update cumulativedenom
     module.add(OrderingPreamble(writer, kernel, sgprIndex, sgprGridY, sgprGridX, sgprCumulativeDenominator, sgprLocalIndex, lvl))
 
     # Temp vpgr for div, rem calcs
-    tmpVgpr = writer.vgprPool.checkOutAligned(4,2,"tmpVgpr")
+    tmpVgpr = writer.vgprPool.checkOutAligned(4,2, tag="ColRowMajor_tmpVgpr")
     tmpVgprRes = ContinuousRegister(tmpVgpr, 4)
 
     qReg   = sgprLocalX if isCol else sgprLocalY
@@ -849,10 +849,10 @@ def SpaceFillCurveSimpleImpl(writer, kernel, sgprIndex, sgprGridY, sgprGridX, sg
 
     module = Module()
 
-    sgprLocalIndex   = writer.sgprPool.checkOut(1)
+    sgprLocalIndex   = writer.sgprPool.checkOut(1, tag="SpaceFillCurveSimpleImpl_sgprLocalIndex")
 
     # Stores GridY/GridX values, since tmp vgprs, since these will need to be updated.
-    sgprNumTilesMN    = writer.sgprPool.checkOutAligned(2,2)
+    sgprNumTilesMN    = writer.sgprPool.checkOutAligned(2,2, tag="SpaceFillCurveSimpleImpl_sgprNumTilesMN")
     sgprNumTilesM     = sgprNumTilesMN
     sgprNumTilesN     = sgprNumTilesMN + 1
     module.add(SMovB64(dst=sgpr(sgprNumTilesM,2), src=sgpr(sgprGridY,2)))
@@ -862,14 +862,14 @@ def SpaceFillCurveSimpleImpl(writer, kernel, sgprIndex, sgprGridY, sgprGridX, sg
     # Init local XY offsets to 0
     module.add(SMovB64(dst=sgpr(sgprLocalY,2), src=0))
 
-    tmpSgprCurDir        = writer.sgprPool.checkOut(1)
-    sgprNumTilesMN1      = writer.sgprPool.checkOutAligned(2,2)
+    tmpSgprCurDir        = writer.sgprPool.checkOut(1, tag="SpaceFillCurveSimpleImpl_tmpSgprCurDir")
+    sgprNumTilesMN1      = writer.sgprPool.checkOutAligned(2,2, tag="SpaceFillCurveSimpleImpl_sgprNumTilesMN1")
     sgprNumTilesM1      = sgprNumTilesMN1
     sgprNumTilesN1      = sgprNumTilesMN1 + 1
-    sgprNumTilesM2       = writer.sgprPool.checkOut(1)
-    sgprNumTilesN2       = writer.sgprPool.checkOut(1)
+    sgprNumTilesM2       = writer.sgprPool.checkOut(1, tag="SpaceFillCurveSimpleImpl_sgprNumTilesM2")
+    sgprNumTilesN2       = writer.sgprPool.checkOut(1, tag="SpaceFillCurveSimpleImpl_sgprNumTilesN2")
 
-    tmpSgpr = writer.sgprPool.checkOut(1)
+    tmpSgpr = writer.sgprPool.checkOut(1, tag="SpaceFillCurveSimpleImpl_tmpSgpr")
 
     block0 = [sgprNumTilesM1, sgprNumTilesN1]
     block1 = [sgprNumTilesM2, sgprNumTilesN1]

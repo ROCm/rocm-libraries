@@ -1,4 +1,4 @@
-#*******************************************************************************
+# *******************************************************************************
 #
 # MIT License
 #
@@ -22,31 +22,45 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 #
-#*******************************************************************************
+# *******************************************************************************
 import os
 import re
 import logging
 
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
-FOLDER_PATH = "../../test/gtest"
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+FOLDER_PATH = os.path.join(_SCRIPT_DIR, "..", "gtest")
 
 # Ignore list: Add test names or file paths you want to exclude
 #              (keep the list sorted to min. git conflicts)
 IGNORE_LIST = {
-    "../../test/gtest/binary_tensor_ops.cpp",
-    "../../test/gtest/graphapi_conv_bias_res_add_activ_fwd.cpp",
-    "../../test/gtest/graphapi_operation_rng.cpp",
-    "../../test/gtest/layout_transpose.cpp",
-    "../../test/gtest/reduce_custom_fp32.cpp",
-    "../../test/gtest/unary_tensor_ops.cpp",
+    "binary_tensor_ops.cpp",
+    "graphapi_conv_bias_res_add_activ_fwd.cpp",
+    "graphapi_operation_rng.cpp",
+    "layout_transpose.cpp",
+    "reduce_custom_fp32.cpp",
+    "unary_tensor_ops.cpp",
     "CPU_MIOpenDriverRegressionBigTensorTest_FP32",
     "GPU_UnitTestConvSolverAsmBwdWrW3x3Wrw_FP32",
 }
 
 # Valid enums and Regex for validation
 VALID_HW_TYPES = {"CPU", "GPU"}
-VALID_DATATYPES = {"FP8", "FP16", "FP32", "TF32", "FP64", "BFP16", "BFP8", "I64", "I32", "I16", "I8", "NONE"}
+VALID_DATATYPES = {
+    "FP8",
+    "FP16",
+    "FP32",
+    "TF32",
+    "FP64",
+    "BFP16",
+    "BFP8",
+    "I64",
+    "I32",
+    "I16",
+    "I8",
+    "NONE",
+}
 # Our suite (or fixture) naming convention: must start with CPU or GPU, followed by one or more alphanum groups, and end with a valid datatype.
 TESTSUITE_REGEX = re.compile(
     r"^(CPU|GPU)_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*_(" + "|".join(VALID_DATATYPES) + r")$"
@@ -55,21 +69,15 @@ TESTSUITE_REGEX = re.compile(
 TEST_TYPE_REGEX = re.compile(r"^(Smoke|Standard|Full|Perf|Unit)([A-Za-z0-9]*)?$")
 
 # Updated regexes that do not allow newlines in the macro arguments
-TEST_P_REGEX = re.compile(
-    r"\bTEST_P\(\s*([^\n,]+?)\s*,\s*([^\n\)]+?)\s*\)"
-)
+TEST_P_REGEX = re.compile(r"\bTEST_P\(\s*([^\n,]+?)\s*,\s*([^\n\)]+?)\s*\)")
 INSTANTIATE_TEST_REGEX = re.compile(
     r"\bINSTANTIATE_TEST_SUITE_P\(\s*([^\n,]+?)\s*,\s*([^\n,]+?)\s*,"
 )
 ALLOW_UNINSTANTIATED_REGEX = re.compile(
     r"\bGTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST\(\s*([^\n\)]+?)\s*\)"
 )
-TEST_REGEX = re.compile(
-    r"\bTEST\(\s*([^\n,]+?)\s*,\s*([^\n\)]+?)\s*\)"
-)
-TEST_F_REGEX = re.compile(
-    r"\bTEST_F\(\s*([^\n,]+?)\s*,\s*([^\n\)]+?)\s*\)"
-)
+TEST_REGEX = re.compile(r"\bTEST\(\s*([^\n,]+?)\s*,\s*([^\n\)]+?)\s*\)")
+TEST_F_REGEX = re.compile(r"\bTEST_F\(\s*([^\n,]+?)\s*,\s*([^\n\)]+?)\s*\)")
 
 
 def analyze_tests(folder_path):
@@ -84,7 +92,7 @@ def analyze_tests(folder_path):
             file_path = os.path.join(root, file)
 
             # Skip file if it is in the ignore list
-            if file_path in IGNORE_LIST:
+            if os.path.basename(file_path) in IGNORE_LIST:
                 logging.info(f"Skipping ignored file: {file_path}")
                 continue
 
@@ -99,11 +107,13 @@ def analyze_tests(folder_path):
             # Dictionaries to record macro definitions.
             # For TEST_P, TEST, and TEST_F we key on (suite_or_fixture, test_name)
             test_p_definitions = {}  # key: (suite, test_name) -> line number
-            test_definitions = {}    # key: (suite, test_name) -> line number
+            test_definitions = {}  # key: (suite, test_name) -> line number
             test_f_definitions = {}  # key: (fixture, test_name) -> line number
 
             # For INSTANTIATE_TEST_SUITE_P we group by test suite; for each suite, instantiation names must be unique.
-            instantiations = {}  # key: suite -> dict of {instantiation_name: line number}
+            instantiations = (
+                {}
+            )  # key: suite -> dict of {instantiation_name: line number}
 
             # For GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST, we store a list of line numbers per suite.
             allowed_uninstantiated = {}  # key: suite -> list of line numbers
@@ -116,7 +126,9 @@ def analyze_tests(folder_path):
                     logging.info(f"Skipping ignored test suite: {suite}")
                     continue
                 if not TESTSUITE_REGEX.match(suite):
-                    errors.append(f"{file_path}:{line}: Invalid TESTSUITE_NAME '{suite}' in TEST_P.")
+                    errors.append(
+                        f"{file_path}:{line}: Invalid TESTSUITE_NAME '{suite}' in TEST_P."
+                    )
                 key = (suite, test_name)
                 if key in test_p_definitions:
                     prev_line = test_p_definitions[key]
@@ -134,7 +146,9 @@ def analyze_tests(folder_path):
                     logging.info(f"Skipping ignored test suite: {suite}")
                     continue
                 if not TESTSUITE_REGEX.match(suite):
-                    errors.append(f"{file_path}:{line}: Invalid TEST suite name '{suite}' in TEST.")
+                    errors.append(
+                        f"{file_path}:{line}: Invalid TEST suite name '{suite}' in TEST."
+                    )
                 key = (suite, test_name)
                 if key in test_definitions:
                     prev_line = test_definitions[key]
@@ -152,7 +166,9 @@ def analyze_tests(folder_path):
                     logging.info(f"Skipping ignored test fixture: {fixture}")
                     continue
                 if not TESTSUITE_REGEX.match(fixture):
-                    errors.append(f"{file_path}:{line}: Invalid TEST_F fixture name '{fixture}'.")
+                    errors.append(
+                        f"{file_path}:{line}: Invalid TEST_F fixture name '{fixture}'."
+                    )
                 key = (fixture, test_name)
                 if key in test_f_definitions:
                     prev_line = test_f_definitions[key]
@@ -192,7 +208,9 @@ def analyze_tests(folder_path):
                 suite = m.group(1).strip()
                 line = get_line_number(m.start())
                 if suite in IGNORE_LIST:
-                    logging.info(f"Skipping ignored allowed uninstantiated suite: {suite}")
+                    logging.info(
+                        f"Skipping ignored allowed uninstantiated suite: {suite}"
+                    )
                     continue
                 allowed_uninstantiated.setdefault(suite, []).append(line)
 
@@ -206,7 +224,9 @@ def analyze_tests(folder_path):
             # === Validate INSTANTIATE_TEST_SUITE_P references an existing TEST_P suite ===
             for suite, inst_map in instantiations.items():
                 # If there is no TEST_P for this suite, then flag an error for each instantiation occurrence.
-                if not any(suite == tp_suite for (tp_suite, _) in test_p_definitions.keys()):
+                if not any(
+                    suite == tp_suite for (tp_suite, _) in test_p_definitions.keys()
+                ):
                     for instantiation_name, line in inst_map.items():
                         errors.append(
                             f"{file_path}:{line}: INSTANTIATE_TEST_SUITE_P references non-existent TEST_P suite '{suite}'."
