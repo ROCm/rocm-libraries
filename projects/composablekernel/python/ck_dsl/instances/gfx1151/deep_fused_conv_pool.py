@@ -3227,12 +3227,14 @@ def run_deep_fused_conv_pool_i8i4_manifest_problem(
 
     def check(rt: Runtime, ptrs):
         if not verify:
-            return 0.0, 0, pool_ho * pool_wo * K1
+            return 0.0, 0, 0.0, 0, pool_ho * pool_wo * K1
         rt.memcpy_d2h(as_u8_buffer(Y), ptrs[2], nbytes(Y))
         got = _unpack_deep_fused_y(np, Y, K1)
         ref = _deep_fused_i8i4_reference(np, X, W0, W1_codes, manifest)
-        diff = np.abs(got - ref)
-        max_diff = int(diff.max()) if diff.size else 0
-        return float(max_diff), int(np.count_nonzero(diff > tol)), got.size
+        ref_f = ref.astype(np.float64)
+        diff_abs = np.abs(got.astype(np.float64) - ref_f)
+        diff_rel = diff_abs / (np.abs(ref_f) + 1e-8)  # avoid div-by-zero when ref is 0
+        max_diff = float(diff_abs.max()) if diff_abs.size else 0.0
+        return float(diff_rel.max()), int(np.count_nonzero(diff_rel > tol)), max_diff, int(np.count_nonzero(diff_abs > tol)), got.size
 
     return make_args, grid, block, flop, bytes_xfer, check

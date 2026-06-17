@@ -115,15 +115,16 @@ def run_matmul_nbits_manifest_problem(
 
     def check(rt: Runtime, ptrs):
         if not verify:
-            return 0.0, 0, C.size
+            return 0.0, 0, 0.0, 0, C.size
         rt.memcpy_d2h(as_u8_buffer(C), ptrs[3], nbytes(C))
         ref = matmul_nbits_reference(A, packed, scales, spec).astype(np.float16)
         Cf = C.astype(np.float32)
         reff = ref.astype(np.float32)
-        diff = np.abs(Cf - reff)
+        diff_abs = np.abs(Cf - reff)
+        diff_rel = diff_abs / (np.abs(reff) + 1e-8)  # avoid div-by-zero when ref is 0
         if os.environ.get("CKDSL_NBITS_DEBUG"):
-            _nbits_debug_dump(np, Cf, reff, diff, M, N, K, group)
-        return float(diff.max()), int(np.count_nonzero(diff > 0)), C.size
+            _nbits_debug_dump(np, Cf, reff, diff_abs, M, N, K, group)
+        return float(diff_rel.max()), int(np.count_nonzero(diff_rel > 0)), float(diff_abs.max()), int(np.count_nonzero(diff_abs > 0)), C.size
 
     return make_args, grid, block, flop, bytes_xfer, check
 

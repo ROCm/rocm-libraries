@@ -54,7 +54,7 @@ def run_simple_op_manifest_problem(
 
         def check(rt: Runtime, ptrs):
             if not verify:
-                return 0.0, 0, C.size
+                return 0.0, 0, 0.0, 0, C.size
             C_dev = ptrs[-1]
             rt.memcpy_d2h(as_u8_buffer(C), C_dev, nbytes(C))
             A_f32 = A.astype(np.float32)
@@ -86,8 +86,10 @@ def run_simple_op_manifest_problem(
             else:
                 raise ValueError(f"no reference for elementwise op {op!r}")
             ref_h = ref.astype(np_dtype)
-            diff = np.abs(C.astype(np.float32) - ref_h.astype(np.float32))
-            return float(diff.max()), int(np.count_nonzero(diff > 1e-2)), C.size
+            ref_f32 = ref_h.astype(np.float32)
+            diff_abs = np.abs(C.astype(np.float32) - ref_f32)
+            diff_rel = diff_abs / (np.abs(ref_f32) + 1e-8)  # avoid div-by-zero when ref is 0
+            return float(diff_rel.max()), int(np.count_nonzero(diff_rel > 1e-2)), float(diff_abs.max()), int(np.count_nonzero(diff_abs > 1e-2)), C.size
 
         return make_args, grid, block, flop, bytes_xfer, check
 
@@ -110,7 +112,7 @@ def run_simple_op_manifest_problem(
 
         def check(rt: Runtime, ptrs):
             if not verify:
-                return 0.0, 0, Y.size
+                return 0.0, 0, 0.0, 0, Y.size
             rt.memcpy_d2h(as_u8_buffer(Y), ptrs[1], nbytes(Y))
             X_f32 = X.astype(np.float32)
             if op == "sum":
@@ -122,8 +124,10 @@ def run_simple_op_manifest_problem(
             else:
                 raise ValueError(f"no reference for reduce op {op!r}")
             ref_h = ref.astype(np_dtype)
-            diff = np.abs(Y.astype(np.float32) - ref_h.astype(np.float32))
-            return float(diff.max()), int(np.count_nonzero(diff > 5e-2)), Y.size
+            ref_f32 = ref_h.astype(np.float32)
+            diff_abs = np.abs(Y.astype(np.float32) - ref_f32)
+            diff_rel = diff_abs / (np.abs(ref_f32) + 1e-8)  # avoid div-by-zero when ref is 0
+            return float(diff_rel.max()), int(np.count_nonzero(diff_rel > 5e-2)), float(diff_abs.max()), int(np.count_nonzero(diff_abs > 5e-2)), Y.size
 
         return make_args, grid, block, flop, bytes_xfer, check
 
@@ -161,7 +165,7 @@ def run_simple_op_manifest_problem(
 
         def check(rt: Runtime, ptrs):
             if not verify:
-                return 0.0, 0, Y.size
+                return 0.0, 0, 0.0, 0, Y.size
             Y_dev = ptrs[-1] if not is_layernorm else ptrs[3]
             rt.memcpy_d2h(as_u8_buffer(Y), Y_dev, nbytes(Y))
             x32 = X.astype(np.float32)
@@ -180,9 +184,11 @@ def run_simple_op_manifest_problem(
             ref_h = ref.astype(np_dtype)
             atol = 1e-1 if is_layernorm else 5e-3
             rtol = 2e-1 if is_layernorm else 5e-2
-            diff = np.abs(Y.astype(np.float32) - ref_h.astype(np.float32))
-            tol = atol + rtol * np.abs(ref_h.astype(np.float32))
-            return float(diff.max()), int(np.count_nonzero(diff > tol)), Y.size
+            ref_f32 = ref_h.astype(np.float32)
+            diff_abs = np.abs(Y.astype(np.float32) - ref_f32)
+            tol = atol + rtol * np.abs(ref_f32)
+            diff_rel = diff_abs / (np.abs(ref_f32) + 1e-8)  # avoid div-by-zero when ref is 0
+            return float(diff_rel.max()), int(np.count_nonzero(diff_abs > tol)), float(diff_abs.max()), int(np.count_nonzero(diff_abs > tol)), Y.size
 
         return make_args, grid, block, flop, bytes_xfer, check
 
@@ -211,11 +217,13 @@ def run_simple_op_manifest_problem(
 
         def check(rt: Runtime, ptrs):
             if not verify:
-                return 0.0, 0, Y.size
+                return 0.0, 0, 0.0, 0, Y.size
             rt.memcpy_d2h(as_u8_buffer(Y), ptrs[1], nbytes(Y))
             ref = X.T.copy()
-            diff = np.abs(Y.astype(np.float32) - ref.astype(np.float32))
-            return float(diff.max()), int(np.count_nonzero(diff > 0)), Y.size
+            ref_f32 = ref.astype(np.float32)
+            diff_abs = np.abs(Y.astype(np.float32) - ref_f32)
+            diff_rel = diff_abs / (np.abs(ref_f32) + 1e-8)  # avoid div-by-zero when ref is 0
+            return float(diff_rel.max()), int(np.count_nonzero(diff_rel > 0)), float(diff_abs.max()), int(np.count_nonzero(diff_abs > 0)), Y.size
 
         return make_args, grid, block, flop, bytes_xfer, check
 
