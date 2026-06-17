@@ -40,8 +40,8 @@ namespace {
 // express without XFAIL -- so it is covered here with a gtest death test.
 //
 // `ds_load` is a MemToken candidate (IF_DSRead); `mod.memtoken` attaches the
-// token. Two candidates are needed before the check engages: with only-tokened
-// or only-untokened candidates the pass short-circuits (no diagnostic).
+// token. Two candidates are needed before the check engages: with only-tokenized
+// or only-untokenized candidates the pass short-circuits (no diagnostic).
 class MemTokenConsistencyCheckPassTest : public ::testing::Test {
    protected:
     std::array<int, 3> arch{12, 5, 0};
