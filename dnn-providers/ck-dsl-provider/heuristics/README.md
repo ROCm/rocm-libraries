@@ -16,6 +16,7 @@ heuristics/
       train_manifest.json     — data provenance (row count, timestamp)
   scripts/
     convert_dsl_csv_to_parquet.py        — converts sweep CSV output to parquet
+    generate_targeted_shapes_conv.py     — OOF analysis + targeted top-up shape generation
   sweep/
     ConvCandidateSweep.cpp  — enumerates all DSL candidates per shape,
                               compiles + times each, writes training CSV rows
@@ -348,6 +349,31 @@ cp $MODEL_SRC/train_manifest.json             $MODEL_DST/
 
 git add $MODEL_DST
 git commit -m "[CK DSL] conv model: retrain fp16/gfx942 ($(date +%Y-%m-%d))"
+```
+
+Validate heuristic efficiency using the OOF predictions produced during training:
+
+```bash
+# Inspect per-subset efficiency from the last training run.
+python3 $HEURISTICS/scripts/generate_targeted_shapes_conv.py \
+    --oof      oof_predictions.parquet \
+    --train    conv_fp16_<arch>_dsl.parquet \
+    --analytics --dry-run
+# Target: mean efficiency >= 0.90 across all subsets.
+```
+
+If subsets are below threshold, generate a targeted top-up shape set and re-sweep:
+
+```bash
+# Generate shapes covering hard subsets (zero overlap with existing training data).
+python3 $HEURISTICS/scripts/generate_targeted_shapes_conv.py \
+    --oof   oof_predictions.parquet \
+    --train conv_fp16_<arch>_dsl.parquet \
+    --out   all_shapes.csv \
+    --shards 32
+
+# Sweep the targeted shapes, convert, and warm-start retrain.
+# See sweep/build.sh and the full retraining workflow above.
 ```
 
 ---
