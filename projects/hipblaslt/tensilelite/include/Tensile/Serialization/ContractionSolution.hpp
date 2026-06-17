@@ -137,6 +137,7 @@ namespace TensileLite
                 iot::mapRequired(io, "nonTemporalB", s.nonTemporalB);
                 iot::mapOptional(io, "adaptiveGemmNTAB", s.adaptiveGemmNTAB);
                 iot::mapRequired(io, "customMainLoopScheduling", s.customMainLoopScheduling);
+                iot::mapOptional(io, "useSubtileImpl", s.useSubtileImpl);
                 iot::mapRequired(io, "NonTemporalD", s.NonTemporalD);
                 iot::mapRequired(io, "WaveSeparateGlobalReadA", s.WaveSeparateGlobalReadA);
                 iot::mapRequired(io, "WaveSeparateGlobalReadB", s.WaveSeparateGlobalReadB);

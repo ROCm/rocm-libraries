@@ -1846,6 +1846,13 @@ double compute_total_latency(const problem_t& problem,
                              size_t max_cus) {
   assert(config.is_valid());
 
+  // Heuristic-driven kernel rejection (e.g. subtile kernels with small K).
+  // When a matching heuristic marks the config as rejected, report the maximum
+  // latency so rank_configs() drops the kernel from selection entirely.
+  if (get_heuristic_params(problem, hardware, config).reject) {
+    return std::numeric_limits<double>::max();
+  }
+
   // Use Formocast simulation model if prediction_mode is set to simulation
   if (config.prediction_mode == prediction_modes_t::simulation) {
     return compute_formocast_latency(problem, hardware, config);
