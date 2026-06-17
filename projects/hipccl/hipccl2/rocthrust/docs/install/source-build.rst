@@ -60,8 +60,6 @@ The develop branch is intended for users who want to preview new features or con
 
 If you don't intend to contribute to the rocThrust code base and won't be previewing features, use a branch that matches the version of ROCm installed on your system.
 
-For build instructions, see :doc:`./build`.
-
 .. _rocthrust-build-linux:
 
 Build on Linux
