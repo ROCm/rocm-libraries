@@ -15,6 +15,7 @@ add_custom_command(
                                         ${CMAKE_CURRENT_SOURCE_DIR}/data/hipblaslt_common.yaml
                                         ${CMAKE_CURRENT_SOURCE_DIR}/data/matmul_common.yaml
                                         ${CMAKE_CURRENT_SOURCE_DIR}/data/matmul_gtest.yaml
+                                        ${CMAKE_CURRENT_SOURCE_DIR}/data/matmul_stress_gtest.yaml
                                         ${CMAKE_CURRENT_SOURCE_DIR}/data/auxiliary_gtest.yaml
                                         ${CMAKE_CURRENT_SOURCE_DIR}/data/smoke_gtest.yaml
                                         ${CMAKE_CURRENT_SOURCE_DIR}/data/rocroller_gtest.yaml

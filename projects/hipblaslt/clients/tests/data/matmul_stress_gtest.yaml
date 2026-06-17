@@ -1,0 +1,1266 @@
+---
+# GENERATED FILE - DO NOT EDIT BY HAND.
+# Tile-boundary StreamK stress suite (ROCM-26298 hardening).
+# Generated: 2026-06-17T21:56:14.340775+00:00
+# Regenerate with:
+#   python3 generate_tile_boundary_stress.py --logic-dir ../../library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx950 --out data/matmul_stress_gtest.yaml --manifest tile_boundary_stress_manifest.md --max-shapes 12 --max-rems 4 --target-tiles 242 --leg-a-k 2048 --leg-b-k 256
+#
+# Category 'stress' is on-demand: excluded from quick/pre_checkin/nightly.
+# Leg A: heuristic (algo_method 0), large K, NaN guard-pad + norm_check.
+# Leg B: integer_exact (K<=256, alpha=2/beta in {0,-2}), bitwise unit_check;
+#        SK3 solution pinned via --pin-map when available, else heuristic.
+include: hipblaslt_common.yaml
+include: known_bugs.yaml
+include: matmul_common.yaml
+
+Tests:
+- name: stress_TN_MT256x256_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:    5632, N:    2815, K:  2048 }  # Nedge N partial tile rem=255/256 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2808, K:  2048 }  # Nedge N partial tile rem=248/256 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2800, K:  2048 }  # Nedge N partial tile rem=240/256 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2793, K:  2048 }  # Nedge N partial tile rem=233/256 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2816, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    2815, N:    5632, K:  2048 }  # Medge M partial tile rem=255/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2808, N:    5632, K:  2048 }  # Medge M partial tile rem=248/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2800, N:    5632, K:  2048 }  # Medge M partial tile rem=240/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2793, N:    5632, K:  2048 }  # Medge M partial tile rem=233/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2816, N:    5632, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT256x256_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:    5632, N:    2815, K:   256 }  # Nedge N partial tile rem=255/256 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2808, K:   256 }  # Nedge N partial tile rem=248/256 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2800, K:   256 }  # Nedge N partial tile rem=240/256 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2793, K:   256 }  # Nedge N partial tile rem=233/256 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2816, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    2815, N:    5632, K:   256 }  # Medge M partial tile rem=255/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2808, N:    5632, K:   256 }  # Medge M partial tile rem=248/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2800, N:    5632, K:   256 }  # Medge M partial tile rem=240/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2793, N:    5632, K:   256 }  # Medge M partial tile rem=233/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2816, N:    5632, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT64x64_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:    1408, N:     703, K:  2048 }  # Nedge N partial tile rem=63/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     698, K:  2048 }  # Nedge N partial tile rem=58/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     696, K:  2048 }  # Nedge N partial tile rem=56/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     692, K:  2048 }  # Nedge N partial tile rem=52/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     704, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:     703, N:    1408, K:  2048 }  # Medge M partial tile rem=63/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     698, N:    1408, K:  2048 }  # Medge M partial tile rem=58/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     696, N:    1408, K:  2048 }  # Medge M partial tile rem=56/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     692, N:    1408, K:  2048 }  # Medge M partial tile rem=52/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     704, N:    1408, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT64x64_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:    1408, N:     703, K:   256 }  # Nedge N partial tile rem=63/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     698, K:   256 }  # Nedge N partial tile rem=58/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     696, K:   256 }  # Nedge N partial tile rem=56/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     692, K:   256 }  # Nedge N partial tile rem=52/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     704, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:     703, N:    1408, K:   256 }  # Medge M partial tile rem=63/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     698, N:    1408, K:   256 }  # Medge M partial tile rem=58/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     696, N:    1408, K:   256 }  # Medge M partial tile rem=56/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     692, N:    1408, K:   256 }  # Medge M partial tile rem=52/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     704, N:    1408, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT128x128_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:    2816, N:    1407, K:  2048 }  # Nedge N partial tile rem=127/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1400, K:  2048 }  # Nedge N partial tile rem=120/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1396, K:  2048 }  # Nedge N partial tile rem=116/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1392, K:  2048 }  # Nedge N partial tile rem=112/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1408, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    1407, N:    2816, K:  2048 }  # Medge M partial tile rem=127/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1400, N:    2816, K:  2048 }  # Medge M partial tile rem=120/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1396, N:    2816, K:  2048 }  # Medge M partial tile rem=116/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1392, N:    2816, K:  2048 }  # Medge M partial tile rem=112/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1408, N:    2816, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT128x128_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:    2816, N:    1407, K:   256 }  # Nedge N partial tile rem=127/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1400, K:   256 }  # Nedge N partial tile rem=120/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1396, K:   256 }  # Nedge N partial tile rem=116/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1392, K:   256 }  # Nedge N partial tile rem=112/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1408, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    1407, N:    2816, K:   256 }  # Medge M partial tile rem=127/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1400, N:    2816, K:   256 }  # Medge M partial tile rem=120/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1396, N:    2816, K:   256 }  # Medge M partial tile rem=116/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1392, N:    2816, K:   256 }  # Medge M partial tile rem=112/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1408, N:    2816, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT64x48_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:    1408, N:     527, K:  2048 }  # Nedge N partial tile rem=47/48 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     524, K:  2048 }  # Nedge N partial tile rem=44/48 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     520, K:  2048 }  # Nedge N partial tile rem=40/48 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     519, K:  2048 }  # Nedge N partial tile rem=39/48 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     528, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:     703, N:    1056, K:  2048 }  # Medge M partial tile rem=63/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     698, N:    1056, K:  2048 }  # Medge M partial tile rem=58/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     696, N:    1056, K:  2048 }  # Medge M partial tile rem=56/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     692, N:    1056, K:  2048 }  # Medge M partial tile rem=52/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     704, N:    1056, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT64x48_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:    1408, N:     527, K:   256 }  # Nedge N partial tile rem=47/48 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     524, K:   256 }  # Nedge N partial tile rem=44/48 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     520, K:   256 }  # Nedge N partial tile rem=40/48 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     519, K:   256 }  # Nedge N partial tile rem=39/48 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     528, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:     703, N:    1056, K:   256 }  # Medge M partial tile rem=63/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     698, N:    1056, K:   256 }  # Medge M partial tile rem=58/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     696, N:    1056, K:   256 }  # Medge M partial tile rem=56/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     692, N:    1056, K:   256 }  # Medge M partial tile rem=52/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     704, N:    1056, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT256x224_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:    5632, N:    2463, K:  2048 }  # Nedge N partial tile rem=223/224 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2456, K:  2048 }  # Nedge N partial tile rem=216/224 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2448, K:  2048 }  # Nedge N partial tile rem=208/224 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2444, K:  2048 }  # Nedge N partial tile rem=204/224 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2464, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    2815, N:    4928, K:  2048 }  # Medge M partial tile rem=255/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2808, N:    4928, K:  2048 }  # Medge M partial tile rem=248/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2800, N:    4928, K:  2048 }  # Medge M partial tile rem=240/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2793, N:    4928, K:  2048 }  # Medge M partial tile rem=233/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2816, N:    4928, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT256x224_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:    5632, N:    2463, K:   256 }  # Nedge N partial tile rem=223/224 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2456, K:   256 }  # Nedge N partial tile rem=216/224 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2448, K:   256 }  # Nedge N partial tile rem=208/224 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2444, K:   256 }  # Nedge N partial tile rem=204/224 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2464, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    2815, N:    4928, K:   256 }  # Medge M partial tile rem=255/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2808, N:    4928, K:   256 }  # Medge M partial tile rem=248/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2800, N:    4928, K:   256 }  # Medge M partial tile rem=240/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2793, N:    4928, K:   256 }  # Medge M partial tile rem=233/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2816, N:    4928, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT32x32_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:     704, N:     351, K:  2048 }  # Nedge N partial tile rem=31/32 (svw=8); tiles~=22x11=242 near 242
+    - { M:     704, N:     349, K:  2048 }  # Nedge N partial tile rem=29/32 (svw=8); tiles~=22x11=242 near 242
+    - { M:     704, N:     346, K:  2048 }  # Nedge N partial tile rem=26/32 (svw=8); tiles~=22x11=242 near 242
+    - { M:     704, N:     344, K:  2048 }  # Nedge N partial tile rem=24/32 (svw=8); tiles~=22x11=242 near 242
+    - { M:     704, N:     352, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:     351, N:     704, K:  2048 }  # Medge M partial tile rem=31/32 (svw=8); tiles~=11x22=242 near 242
+    - { M:     349, N:     704, K:  2048 }  # Medge M partial tile rem=29/32 (svw=8); tiles~=11x22=242 near 242
+    - { M:     346, N:     704, K:  2048 }  # Medge M partial tile rem=26/32 (svw=8); tiles~=11x22=242 near 242
+    - { M:     344, N:     704, K:  2048 }  # Medge M partial tile rem=24/32 (svw=8); tiles~=11x22=242 near 242
+    - { M:     352, N:     704, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT32x32_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:     704, N:     351, K:   256 }  # Nedge N partial tile rem=31/32 (svw=8); tiles~=22x11=242 near 242
+    - { M:     704, N:     349, K:   256 }  # Nedge N partial tile rem=29/32 (svw=8); tiles~=22x11=242 near 242
+    - { M:     704, N:     346, K:   256 }  # Nedge N partial tile rem=26/32 (svw=8); tiles~=22x11=242 near 242
+    - { M:     704, N:     344, K:   256 }  # Nedge N partial tile rem=24/32 (svw=8); tiles~=22x11=242 near 242
+    - { M:     704, N:     352, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:     351, N:     704, K:   256 }  # Medge M partial tile rem=31/32 (svw=8); tiles~=11x22=242 near 242
+    - { M:     349, N:     704, K:   256 }  # Medge M partial tile rem=29/32 (svw=8); tiles~=11x22=242 near 242
+    - { M:     346, N:     704, K:   256 }  # Medge M partial tile rem=26/32 (svw=8); tiles~=11x22=242 near 242
+    - { M:     344, N:     704, K:   256 }  # Medge M partial tile rem=24/32 (svw=8); tiles~=11x22=242 near 242
+    - { M:     352, N:     704, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT128x160_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:    2816, N:    1759, K:  2048 }  # Nedge N partial tile rem=159/160 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1752, K:  2048 }  # Nedge N partial tile rem=152/160 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1746, K:  2048 }  # Nedge N partial tile rem=146/160 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1744, K:  2048 }  # Nedge N partial tile rem=144/160 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1760, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    1407, N:    3520, K:  2048 }  # Medge M partial tile rem=127/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1400, N:    3520, K:  2048 }  # Medge M partial tile rem=120/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1396, N:    3520, K:  2048 }  # Medge M partial tile rem=116/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1392, N:    3520, K:  2048 }  # Medge M partial tile rem=112/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1408, N:    3520, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT128x160_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:    2816, N:    1759, K:   256 }  # Nedge N partial tile rem=159/160 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1752, K:   256 }  # Nedge N partial tile rem=152/160 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1746, K:   256 }  # Nedge N partial tile rem=146/160 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1744, K:   256 }  # Nedge N partial tile rem=144/160 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1760, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    1407, N:    3520, K:   256 }  # Medge M partial tile rem=127/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1400, N:    3520, K:   256 }  # Medge M partial tile rem=120/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1396, N:    3520, K:   256 }  # Medge M partial tile rem=116/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1392, N:    3520, K:   256 }  # Medge M partial tile rem=112/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1408, N:    3520, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT128x96_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:    2816, N:    1055, K:  2048 }  # Nedge N partial tile rem=95/96 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1048, K:  2048 }  # Nedge N partial tile rem=88/96 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1047, K:  2048 }  # Nedge N partial tile rem=87/96 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1040, K:  2048 }  # Nedge N partial tile rem=80/96 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1056, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    1407, N:    2112, K:  2048 }  # Medge M partial tile rem=127/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1400, N:    2112, K:  2048 }  # Medge M partial tile rem=120/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1396, N:    2112, K:  2048 }  # Medge M partial tile rem=116/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1392, N:    2112, K:  2048 }  # Medge M partial tile rem=112/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1408, N:    2112, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT128x96_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:    2816, N:    1055, K:   256 }  # Nedge N partial tile rem=95/96 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1048, K:   256 }  # Nedge N partial tile rem=88/96 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1047, K:   256 }  # Nedge N partial tile rem=87/96 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1040, K:   256 }  # Nedge N partial tile rem=80/96 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1056, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    1407, N:    2112, K:   256 }  # Medge M partial tile rem=127/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1400, N:    2112, K:   256 }  # Medge M partial tile rem=120/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1396, N:    2112, K:   256 }  # Medge M partial tile rem=116/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1392, N:    2112, K:   256 }  # Medge M partial tile rem=112/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1408, N:    2112, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT16x16_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:     352, N:     175, K:  2048 }  # Nedge N partial tile rem=15/16 (svw=4); tiles~=22x11=242 near 242
+    - { M:     352, N:     173, K:  2048 }  # Nedge N partial tile rem=13/16 (svw=4); tiles~=22x11=242 near 242
+    - { M:     352, N:     172, K:  2048 }  # Nedge N partial tile rem=12/16 (svw=4); tiles~=22x11=242 near 242
+    - { M:     352, N:     168, K:  2048 }  # Nedge N partial tile rem=8/16 (svw=4); tiles~=22x11=242 near 242
+    - { M:     352, N:     176, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:     175, N:     352, K:  2048 }  # Medge M partial tile rem=15/16 (svw=4); tiles~=11x22=242 near 242
+    - { M:     173, N:     352, K:  2048 }  # Medge M partial tile rem=13/16 (svw=4); tiles~=11x22=242 near 242
+    - { M:     172, N:     352, K:  2048 }  # Medge M partial tile rem=12/16 (svw=4); tiles~=11x22=242 near 242
+    - { M:     168, N:     352, K:  2048 }  # Medge M partial tile rem=8/16 (svw=4); tiles~=11x22=242 near 242
+    - { M:     176, N:     352, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT16x16_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:     352, N:     175, K:   256 }  # Nedge N partial tile rem=15/16 (svw=4); tiles~=22x11=242 near 242
+    - { M:     352, N:     173, K:   256 }  # Nedge N partial tile rem=13/16 (svw=4); tiles~=22x11=242 near 242
+    - { M:     352, N:     172, K:   256 }  # Nedge N partial tile rem=12/16 (svw=4); tiles~=22x11=242 near 242
+    - { M:     352, N:     168, K:   256 }  # Nedge N partial tile rem=8/16 (svw=4); tiles~=22x11=242 near 242
+    - { M:     352, N:     176, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:     175, N:     352, K:   256 }  # Medge M partial tile rem=15/16 (svw=4); tiles~=11x22=242 near 242
+    - { M:     173, N:     352, K:   256 }  # Medge M partial tile rem=13/16 (svw=4); tiles~=11x22=242 near 242
+    - { M:     172, N:     352, K:   256 }  # Medge M partial tile rem=12/16 (svw=4); tiles~=11x22=242 near 242
+    - { M:     168, N:     352, K:   256 }  # Medge M partial tile rem=8/16 (svw=4); tiles~=11x22=242 near 242
+    - { M:     176, N:     352, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT64x32_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:    1408, N:     351, K:  2048 }  # Nedge N partial tile rem=31/32 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     349, K:  2048 }  # Nedge N partial tile rem=29/32 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     346, K:  2048 }  # Nedge N partial tile rem=26/32 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     344, K:  2048 }  # Nedge N partial tile rem=24/32 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     352, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:     703, N:     704, K:  2048 }  # Medge M partial tile rem=63/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     698, N:     704, K:  2048 }  # Medge M partial tile rem=58/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     696, N:     704, K:  2048 }  # Medge M partial tile rem=56/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     692, N:     704, K:  2048 }  # Medge M partial tile rem=52/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     704, N:     704, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT64x32_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:    1408, N:     351, K:   256 }  # Nedge N partial tile rem=31/32 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     349, K:   256 }  # Nedge N partial tile rem=29/32 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     346, K:   256 }  # Nedge N partial tile rem=26/32 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     344, K:   256 }  # Nedge N partial tile rem=24/32 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     352, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:     703, N:     704, K:   256 }  # Medge M partial tile rem=63/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     698, N:     704, K:   256 }  # Medge M partial tile rem=58/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     696, N:     704, K:   256 }  # Medge M partial tile rem=56/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     692, N:     704, K:   256 }  # Medge M partial tile rem=52/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     704, N:     704, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT256x192_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:    5632, N:    2111, K:  2048 }  # Nedge N partial tile rem=191/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2104, K:  2048 }  # Nedge N partial tile rem=184/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2096, K:  2048 }  # Nedge N partial tile rem=176/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2095, K:  2048 }  # Nedge N partial tile rem=175/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2112, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    2815, N:    4224, K:  2048 }  # Medge M partial tile rem=255/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2808, N:    4224, K:  2048 }  # Medge M partial tile rem=248/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2800, N:    4224, K:  2048 }  # Medge M partial tile rem=240/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2793, N:    4224, K:  2048 }  # Medge M partial tile rem=233/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2816, N:    4224, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT256x192_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:    5632, N:    2111, K:   256 }  # Nedge N partial tile rem=191/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2104, K:   256 }  # Nedge N partial tile rem=184/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2096, K:   256 }  # Nedge N partial tile rem=176/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2095, K:   256 }  # Nedge N partial tile rem=175/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2112, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    2815, N:    4224, K:   256 }  # Medge M partial tile rem=255/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2808, N:    4224, K:   256 }  # Medge M partial tile rem=248/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2800, N:    4224, K:   256 }  # Medge M partial tile rem=240/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2793, N:    4224, K:   256 }  # Medge M partial tile rem=233/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2816, N:    4224, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT64x96_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:    1408, N:    1055, K:  2048 }  # Nedge N partial tile rem=95/96 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:    1048, K:  2048 }  # Nedge N partial tile rem=88/96 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:    1047, K:  2048 }  # Nedge N partial tile rem=87/96 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:    1040, K:  2048 }  # Nedge N partial tile rem=80/96 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:    1056, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:     703, N:    2112, K:  2048 }  # Medge M partial tile rem=63/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     698, N:    2112, K:  2048 }  # Medge M partial tile rem=58/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     696, N:    2112, K:  2048 }  # Medge M partial tile rem=56/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     692, N:    2112, K:  2048 }  # Medge M partial tile rem=52/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     704, N:    2112, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT64x96_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:    1408, N:    1055, K:   256 }  # Nedge N partial tile rem=95/96 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:    1048, K:   256 }  # Nedge N partial tile rem=88/96 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:    1047, K:   256 }  # Nedge N partial tile rem=87/96 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:    1040, K:   256 }  # Nedge N partial tile rem=80/96 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:    1056, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:     703, N:    2112, K:   256 }  # Medge M partial tile rem=63/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     698, N:    2112, K:   256 }  # Medge M partial tile rem=58/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     696, N:    2112, K:   256 }  # Medge M partial tile rem=56/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     692, N:    2112, K:   256 }  # Medge M partial tile rem=52/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     704, N:    2112, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT128x192_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:    2816, N:    2111, K:  2048 }  # Nedge N partial tile rem=191/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    2104, K:  2048 }  # Nedge N partial tile rem=184/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    2096, K:  2048 }  # Nedge N partial tile rem=176/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    2095, K:  2048 }  # Nedge N partial tile rem=175/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    2112, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    1407, N:    4224, K:  2048 }  # Medge M partial tile rem=127/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1400, N:    4224, K:  2048 }  # Medge M partial tile rem=120/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1396, N:    4224, K:  2048 }  # Medge M partial tile rem=116/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1392, N:    4224, K:  2048 }  # Medge M partial tile rem=112/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1408, N:    4224, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_TN_MT128x192_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:    2816, N:    2111, K:   256 }  # Nedge N partial tile rem=191/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    2104, K:   256 }  # Nedge N partial tile rem=184/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    2096, K:   256 }  # Nedge N partial tile rem=176/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    2095, K:   256 }  # Nedge N partial tile rem=175/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    2112, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    1407, N:    4224, K:   256 }  # Medge M partial tile rem=127/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1400, N:    4224, K:   256 }  # Medge M partial tile rem=120/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1396, N:    4224, K:   256 }  # Medge M partial tile rem=116/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1392, N:    4224, K:   256 }  # Medge M partial tile rem=112/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1408, N:    4224, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT256x256_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:    5632, N:    2815, K:  2048 }  # Nedge N partial tile rem=255/256 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2808, K:  2048 }  # Nedge N partial tile rem=248/256 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2800, K:  2048 }  # Nedge N partial tile rem=240/256 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2793, K:  2048 }  # Nedge N partial tile rem=233/256 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2816, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    2815, N:    5632, K:  2048 }  # Medge M partial tile rem=255/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2808, N:    5632, K:  2048 }  # Medge M partial tile rem=248/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2800, N:    5632, K:  2048 }  # Medge M partial tile rem=240/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2793, N:    5632, K:  2048 }  # Medge M partial tile rem=233/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2816, N:    5632, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT256x256_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:    5632, N:    2815, K:   256 }  # Nedge N partial tile rem=255/256 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2808, K:   256 }  # Nedge N partial tile rem=248/256 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2800, K:   256 }  # Nedge N partial tile rem=240/256 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2793, K:   256 }  # Nedge N partial tile rem=233/256 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    2816, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    2815, N:    5632, K:   256 }  # Medge M partial tile rem=255/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2808, N:    5632, K:   256 }  # Medge M partial tile rem=248/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2800, N:    5632, K:   256 }  # Medge M partial tile rem=240/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2793, N:    5632, K:   256 }  # Medge M partial tile rem=233/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2816, N:    5632, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT16x16_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:     352, N:     175, K:  2048 }  # Nedge N partial tile rem=15/16 (svw=4); tiles~=22x11=242 near 242
+    - { M:     352, N:     173, K:  2048 }  # Nedge N partial tile rem=13/16 (svw=4); tiles~=22x11=242 near 242
+    - { M:     352, N:     172, K:  2048 }  # Nedge N partial tile rem=12/16 (svw=4); tiles~=22x11=242 near 242
+    - { M:     352, N:     168, K:  2048 }  # Nedge N partial tile rem=8/16 (svw=4); tiles~=22x11=242 near 242
+    - { M:     352, N:     176, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:     175, N:     352, K:  2048 }  # Medge M partial tile rem=15/16 (svw=4); tiles~=11x22=242 near 242
+    - { M:     173, N:     352, K:  2048 }  # Medge M partial tile rem=13/16 (svw=4); tiles~=11x22=242 near 242
+    - { M:     172, N:     352, K:  2048 }  # Medge M partial tile rem=12/16 (svw=4); tiles~=11x22=242 near 242
+    - { M:     168, N:     352, K:  2048 }  # Medge M partial tile rem=8/16 (svw=4); tiles~=11x22=242 near 242
+    - { M:     176, N:     352, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT16x16_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:     352, N:     175, K:   256 }  # Nedge N partial tile rem=15/16 (svw=4); tiles~=22x11=242 near 242
+    - { M:     352, N:     173, K:   256 }  # Nedge N partial tile rem=13/16 (svw=4); tiles~=22x11=242 near 242
+    - { M:     352, N:     172, K:   256 }  # Nedge N partial tile rem=12/16 (svw=4); tiles~=22x11=242 near 242
+    - { M:     352, N:     168, K:   256 }  # Nedge N partial tile rem=8/16 (svw=4); tiles~=22x11=242 near 242
+    - { M:     352, N:     176, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:     175, N:     352, K:   256 }  # Medge M partial tile rem=15/16 (svw=4); tiles~=11x22=242 near 242
+    - { M:     173, N:     352, K:   256 }  # Medge M partial tile rem=13/16 (svw=4); tiles~=11x22=242 near 242
+    - { M:     172, N:     352, K:   256 }  # Medge M partial tile rem=12/16 (svw=4); tiles~=11x22=242 near 242
+    - { M:     168, N:     352, K:   256 }  # Medge M partial tile rem=8/16 (svw=4); tiles~=11x22=242 near 242
+    - { M:     176, N:     352, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT128x128_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:    2816, N:    1407, K:  2048 }  # Nedge N partial tile rem=127/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1400, K:  2048 }  # Nedge N partial tile rem=120/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1396, K:  2048 }  # Nedge N partial tile rem=116/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1392, K:  2048 }  # Nedge N partial tile rem=112/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1408, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    1407, N:    2816, K:  2048 }  # Medge M partial tile rem=127/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1400, N:    2816, K:  2048 }  # Medge M partial tile rem=120/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1396, N:    2816, K:  2048 }  # Medge M partial tile rem=116/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1392, N:    2816, K:  2048 }  # Medge M partial tile rem=112/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1408, N:    2816, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT128x128_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:    2816, N:    1407, K:   256 }  # Nedge N partial tile rem=127/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1400, K:   256 }  # Nedge N partial tile rem=120/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1396, K:   256 }  # Nedge N partial tile rem=116/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1392, K:   256 }  # Nedge N partial tile rem=112/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1408, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    1407, N:    2816, K:   256 }  # Medge M partial tile rem=127/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1400, N:    2816, K:   256 }  # Medge M partial tile rem=120/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1396, N:    2816, K:   256 }  # Medge M partial tile rem=116/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1392, N:    2816, K:   256 }  # Medge M partial tile rem=112/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1408, N:    2816, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT256x128_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:    5632, N:    1407, K:  2048 }  # Nedge N partial tile rem=127/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    1400, K:  2048 }  # Nedge N partial tile rem=120/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    1396, K:  2048 }  # Nedge N partial tile rem=116/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    1392, K:  2048 }  # Nedge N partial tile rem=112/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    1408, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    2815, N:    2816, K:  2048 }  # Medge M partial tile rem=255/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2808, N:    2816, K:  2048 }  # Medge M partial tile rem=248/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2800, N:    2816, K:  2048 }  # Medge M partial tile rem=240/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2793, N:    2816, K:  2048 }  # Medge M partial tile rem=233/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2816, N:    2816, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT256x128_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:    5632, N:    1407, K:   256 }  # Nedge N partial tile rem=127/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    1400, K:   256 }  # Nedge N partial tile rem=120/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    1396, K:   256 }  # Nedge N partial tile rem=116/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    1392, K:   256 }  # Nedge N partial tile rem=112/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    1408, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    2815, N:    2816, K:   256 }  # Medge M partial tile rem=255/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2808, N:    2816, K:   256 }  # Medge M partial tile rem=248/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2800, N:    2816, K:   256 }  # Medge M partial tile rem=240/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2793, N:    2816, K:   256 }  # Medge M partial tile rem=233/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2816, N:    2816, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT64x64_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:    1408, N:     703, K:  2048 }  # Nedge N partial tile rem=63/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     698, K:  2048 }  # Nedge N partial tile rem=58/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     696, K:  2048 }  # Nedge N partial tile rem=56/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     692, K:  2048 }  # Nedge N partial tile rem=52/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     704, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:     703, N:    1408, K:  2048 }  # Medge M partial tile rem=63/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     698, N:    1408, K:  2048 }  # Medge M partial tile rem=58/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     696, N:    1408, K:  2048 }  # Medge M partial tile rem=56/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     692, N:    1408, K:  2048 }  # Medge M partial tile rem=52/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     704, N:    1408, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT64x64_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:    1408, N:     703, K:   256 }  # Nedge N partial tile rem=63/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     698, K:   256 }  # Nedge N partial tile rem=58/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     696, K:   256 }  # Nedge N partial tile rem=56/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     692, K:   256 }  # Nedge N partial tile rem=52/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    1408, N:     704, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:     703, N:    1408, K:   256 }  # Medge M partial tile rem=63/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     698, N:    1408, K:   256 }  # Medge M partial tile rem=58/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     696, N:    1408, K:   256 }  # Medge M partial tile rem=56/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     692, N:    1408, K:   256 }  # Medge M partial tile rem=52/64 (svw=8); tiles~=11x22=242 near 242
+    - { M:     704, N:    1408, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT128x192_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:    2816, N:    2111, K:  2048 }  # Nedge N partial tile rem=191/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    2104, K:  2048 }  # Nedge N partial tile rem=184/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    2096, K:  2048 }  # Nedge N partial tile rem=176/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    2095, K:  2048 }  # Nedge N partial tile rem=175/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    2112, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    1407, N:    4224, K:  2048 }  # Medge M partial tile rem=127/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1400, N:    4224, K:  2048 }  # Medge M partial tile rem=120/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1396, N:    4224, K:  2048 }  # Medge M partial tile rem=116/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1392, N:    4224, K:  2048 }  # Medge M partial tile rem=112/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1408, N:    4224, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT128x192_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:    2816, N:    2111, K:   256 }  # Nedge N partial tile rem=191/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    2104, K:   256 }  # Nedge N partial tile rem=184/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    2096, K:   256 }  # Nedge N partial tile rem=176/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    2095, K:   256 }  # Nedge N partial tile rem=175/192 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:    2112, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    1407, N:    4224, K:   256 }  # Medge M partial tile rem=127/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1400, N:    4224, K:   256 }  # Medge M partial tile rem=120/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1396, N:    4224, K:   256 }  # Medge M partial tile rem=116/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1392, N:    4224, K:   256 }  # Medge M partial tile rem=112/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1408, N:    4224, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT256x160_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:    5632, N:    1759, K:  2048 }  # Nedge N partial tile rem=159/160 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    1752, K:  2048 }  # Nedge N partial tile rem=152/160 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    1746, K:  2048 }  # Nedge N partial tile rem=146/160 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    1744, K:  2048 }  # Nedge N partial tile rem=144/160 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    1760, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    2815, N:    3520, K:  2048 }  # Medge M partial tile rem=255/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2808, N:    3520, K:  2048 }  # Medge M partial tile rem=248/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2800, N:    3520, K:  2048 }  # Medge M partial tile rem=240/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2793, N:    3520, K:  2048 }  # Medge M partial tile rem=233/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2816, N:    3520, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT256x160_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:    5632, N:    1759, K:   256 }  # Nedge N partial tile rem=159/160 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    1752, K:   256 }  # Nedge N partial tile rem=152/160 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    1746, K:   256 }  # Nedge N partial tile rem=146/160 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    1744, K:   256 }  # Nedge N partial tile rem=144/160 (svw=8); tiles~=22x11=242 near 242
+    - { M:    5632, N:    1760, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    2815, N:    3520, K:   256 }  # Medge M partial tile rem=255/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2808, N:    3520, K:   256 }  # Medge M partial tile rem=248/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2800, N:    3520, K:   256 }  # Medge M partial tile rem=240/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2793, N:    3520, K:   256 }  # Medge M partial tile rem=233/256 (svw=8); tiles~=11x22=242 near 242
+    - { M:    2816, N:    3520, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT128x160_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:    2816, N:    1759, K:  2048 }  # Nedge N partial tile rem=159/160 (svw=4); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1756, K:  2048 }  # Nedge N partial tile rem=156/160 (svw=4); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1752, K:  2048 }  # Nedge N partial tile rem=152/160 (svw=4); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1746, K:  2048 }  # Nedge N partial tile rem=146/160 (svw=4); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1760, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    1407, N:    3520, K:  2048 }  # Medge M partial tile rem=127/128 (svw=4); tiles~=11x22=242 near 242
+    - { M:    1404, N:    3520, K:  2048 }  # Medge M partial tile rem=124/128 (svw=4); tiles~=11x22=242 near 242
+    - { M:    1400, N:    3520, K:  2048 }  # Medge M partial tile rem=120/128 (svw=4); tiles~=11x22=242 near 242
+    - { M:    1396, N:    3520, K:  2048 }  # Medge M partial tile rem=116/128 (svw=4); tiles~=11x22=242 near 242
+    - { M:    1408, N:    3520, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT128x160_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:    2816, N:    1759, K:   256 }  # Nedge N partial tile rem=159/160 (svw=4); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1756, K:   256 }  # Nedge N partial tile rem=156/160 (svw=4); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1752, K:   256 }  # Nedge N partial tile rem=152/160 (svw=4); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1746, K:   256 }  # Nedge N partial tile rem=146/160 (svw=4); tiles~=22x11=242 near 242
+    - { M:    2816, N:    1760, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    1407, N:    3520, K:   256 }  # Medge M partial tile rem=127/128 (svw=4); tiles~=11x22=242 near 242
+    - { M:    1404, N:    3520, K:   256 }  # Medge M partial tile rem=124/128 (svw=4); tiles~=11x22=242 near 242
+    - { M:    1400, N:    3520, K:   256 }  # Medge M partial tile rem=120/128 (svw=4); tiles~=11x22=242 near 242
+    - { M:    1396, N:    3520, K:   256 }  # Medge M partial tile rem=116/128 (svw=4); tiles~=11x22=242 near 242
+    - { M:    1408, N:    3520, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT128x64_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:    2816, N:     703, K:  2048 }  # Nedge N partial tile rem=63/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:     698, K:  2048 }  # Nedge N partial tile rem=58/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:     696, K:  2048 }  # Nedge N partial tile rem=56/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:     692, K:  2048 }  # Nedge N partial tile rem=52/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:     704, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    1407, N:    1408, K:  2048 }  # Medge M partial tile rem=127/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1400, N:    1408, K:  2048 }  # Medge M partial tile rem=120/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1396, N:    1408, K:  2048 }  # Medge M partial tile rem=116/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1392, N:    1408, K:  2048 }  # Medge M partial tile rem=112/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1408, N:    1408, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT128x64_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:    2816, N:     703, K:   256 }  # Nedge N partial tile rem=63/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:     698, K:   256 }  # Nedge N partial tile rem=58/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:     696, K:   256 }  # Nedge N partial tile rem=56/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:     692, K:   256 }  # Nedge N partial tile rem=52/64 (svw=8); tiles~=22x11=242 near 242
+    - { M:    2816, N:     704, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    1407, N:    1408, K:   256 }  # Medge M partial tile rem=127/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1400, N:    1408, K:   256 }  # Medge M partial tile rem=120/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1396, N:    1408, K:   256 }  # Medge M partial tile rem=116/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1392, N:    1408, K:   256 }  # Medge M partial tile rem=112/128 (svw=8); tiles~=11x22=242 near 242
+    - { M:    1408, N:    1408, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT192x256_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:    4224, N:    2815, K:  2048 }  # Nedge N partial tile rem=255/256 (svw=4); tiles~=22x11=242 near 242
+    - { M:    4224, N:    2812, K:  2048 }  # Nedge N partial tile rem=252/256 (svw=4); tiles~=22x11=242 near 242
+    - { M:    4224, N:    2808, K:  2048 }  # Nedge N partial tile rem=248/256 (svw=4); tiles~=22x11=242 near 242
+    - { M:    4224, N:    2800, K:  2048 }  # Nedge N partial tile rem=240/256 (svw=4); tiles~=22x11=242 near 242
+    - { M:    4224, N:    2816, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    2111, N:    5632, K:  2048 }  # Medge M partial tile rem=191/192 (svw=4); tiles~=11x22=242 near 242
+    - { M:    2108, N:    5632, K:  2048 }  # Medge M partial tile rem=188/192 (svw=4); tiles~=11x22=242 near 242
+    - { M:    2104, N:    5632, K:  2048 }  # Medge M partial tile rem=184/192 (svw=4); tiles~=11x22=242 near 242
+    - { M:    2096, N:    5632, K:  2048 }  # Medge M partial tile rem=176/192 (svw=4); tiles~=11x22=242 near 242
+    - { M:    2112, N:    5632, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT192x256_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:    4224, N:    2815, K:   256 }  # Nedge N partial tile rem=255/256 (svw=4); tiles~=22x11=242 near 242
+    - { M:    4224, N:    2812, K:   256 }  # Nedge N partial tile rem=252/256 (svw=4); tiles~=22x11=242 near 242
+    - { M:    4224, N:    2808, K:   256 }  # Nedge N partial tile rem=248/256 (svw=4); tiles~=22x11=242 near 242
+    - { M:    4224, N:    2800, K:   256 }  # Nedge N partial tile rem=240/256 (svw=4); tiles~=22x11=242 near 242
+    - { M:    4224, N:    2816, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    2111, N:    5632, K:   256 }  # Medge M partial tile rem=191/192 (svw=4); tiles~=11x22=242 near 242
+    - { M:    2108, N:    5632, K:   256 }  # Medge M partial tile rem=188/192 (svw=4); tiles~=11x22=242 near 242
+    - { M:    2104, N:    5632, K:   256 }  # Medge M partial tile rem=184/192 (svw=4); tiles~=11x22=242 near 242
+    - { M:    2096, N:    5632, K:   256 }  # Medge M partial tile rem=176/192 (svw=4); tiles~=11x22=242 near 242
+    - { M:    2112, N:    5632, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT512x128_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:   11264, N:    1407, K:  2048 }  # Nedge N partial tile rem=127/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:   11264, N:    1400, K:  2048 }  # Nedge N partial tile rem=120/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:   11264, N:    1396, K:  2048 }  # Nedge N partial tile rem=116/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:   11264, N:    1392, K:  2048 }  # Nedge N partial tile rem=112/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:   11264, N:    1408, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    5631, N:    2816, K:  2048 }  # Medge M partial tile rem=511/512 (svw=8); tiles~=11x22=242 near 242
+    - { M:    5624, N:    2816, K:  2048 }  # Medge M partial tile rem=504/512 (svw=8); tiles~=11x22=242 near 242
+    - { M:    5616, N:    2816, K:  2048 }  # Medge M partial tile rem=496/512 (svw=8); tiles~=11x22=242 near 242
+    - { M:    5586, N:    2816, K:  2048 }  # Medge M partial tile rem=466/512 (svw=8); tiles~=11x22=242 near 242
+    - { M:    5632, N:    2816, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT512x128_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:   11264, N:    1407, K:   256 }  # Nedge N partial tile rem=127/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:   11264, N:    1400, K:   256 }  # Nedge N partial tile rem=120/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:   11264, N:    1396, K:   256 }  # Nedge N partial tile rem=116/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:   11264, N:    1392, K:   256 }  # Nedge N partial tile rem=112/128 (svw=8); tiles~=22x11=242 near 242
+    - { M:   11264, N:    1408, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:    5631, N:    2816, K:   256 }  # Medge M partial tile rem=511/512 (svw=8); tiles~=11x22=242 near 242
+    - { M:    5624, N:    2816, K:   256 }  # Medge M partial tile rem=504/512 (svw=8); tiles~=11x22=242 near 242
+    - { M:    5616, N:    2816, K:   256 }  # Medge M partial tile rem=496/512 (svw=8); tiles~=11x22=242 near 242
+    - { M:    5586, N:    2816, K:   256 }  # Medge M partial tile rem=466/512 (svw=8); tiles~=11x22=242 near 242
+    - { M:    5632, N:    2816, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT64x48_legA
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0
+  norm_check: 1
+  unit_check: 0
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:    1408, N:     527, K:  2048 }  # Nedge N partial tile rem=47/48 (svw=4); tiles~=22x11=242 near 242
+    - { M:    1408, N:     524, K:  2048 }  # Nedge N partial tile rem=44/48 (svw=4); tiles~=22x11=242 near 242
+    - { M:    1408, N:     520, K:  2048 }  # Nedge N partial tile rem=40/48 (svw=4); tiles~=22x11=242 near 242
+    - { M:    1408, N:     519, K:  2048 }  # Nedge N partial tile rem=39/48 (svw=4); tiles~=22x11=242 near 242
+    - { M:    1408, N:     528, K:  2048 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:     703, N:    1056, K:  2048 }  # Medge M partial tile rem=63/64 (svw=4); tiles~=11x22=242 near 242
+    - { M:     700, N:    1056, K:  2048 }  # Medge M partial tile rem=60/64 (svw=4); tiles~=11x22=242 near 242
+    - { M:     698, N:    1056, K:  2048 }  # Medge M partial tile rem=58/64 (svw=4); tiles~=11x22=242 near 242
+    - { M:     696, N:    1056, K:  2048 }  # Medge M partial tile rem=56/64 (svw=4); tiles~=11x22=242 near 242
+    - { M:     704, N:    1056, K:  2048 }  # Mctrl M tile-aligned control; tiles=11x22
+
+- name: stress_NN_MT64x48_legB
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  transA: N
+  transB: N
+  gpu_arch: '950'
+  algo_method: 0  # heuristic (no pin map); see --pin-map
+  initialization: integer_exact
+  norm_check: 0
+  unit_check: 1
+  alpha_beta:
+    - { alpha: 2, beta: 0 }
+    - { alpha: 2, beta: -2 }
+  matrix_size:
+    - { M:    1408, N:     527, K:   256 }  # Nedge N partial tile rem=47/48 (svw=4); tiles~=22x11=242 near 242
+    - { M:    1408, N:     524, K:   256 }  # Nedge N partial tile rem=44/48 (svw=4); tiles~=22x11=242 near 242
+    - { M:    1408, N:     520, K:   256 }  # Nedge N partial tile rem=40/48 (svw=4); tiles~=22x11=242 near 242
+    - { M:    1408, N:     519, K:   256 }  # Nedge N partial tile rem=39/48 (svw=4); tiles~=22x11=242 near 242
+    - { M:    1408, N:     528, K:   256 }  # Nctrl N tile-aligned control; tiles=22x11
+    - { M:     703, N:    1056, K:   256 }  # Medge M partial tile rem=63/64 (svw=4); tiles~=11x22=242 near 242
+    - { M:     700, N:    1056, K:   256 }  # Medge M partial tile rem=60/64 (svw=4); tiles~=11x22=242 near 242
+    - { M:     698, N:    1056, K:   256 }  # Medge M partial tile rem=58/64 (svw=4); tiles~=11x22=242 near 242
+    - { M:     696, N:    1056, K:   256 }  # Medge M partial tile rem=56/64 (svw=4); tiles~=11x22=242 near 242
+    - { M:     704, N:    1056, K:   256 }  # Mctrl M tile-aligned control; tiles=11x22
+
