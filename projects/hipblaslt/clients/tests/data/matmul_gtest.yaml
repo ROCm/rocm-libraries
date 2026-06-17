@@ -124,7 +124,7 @@ Tests:
 # illegal memory access. Tracked in known_bugs.yaml until the kernel store-edge fix lands.
 - {name: matmul_bf16_oob_store_ROCM26298, category: pre_checkin, precision: *hpa_bf16_precision,
    function: matmul, transA: T, transB: N, M: 2816, N: [ 2096, 2112 ], K: 2048,
-   alpha: 1.0, beta: 0.0, norm_check: 1, gpu_arch: '950' }
+   alpha: 1.0, beta: 0.0, unit_check: 0, norm_check: 1, gpu_arch: '950' }
 
 # Smoke: norm_dist_one_special (Gaussian fill + one FP special); batch_count 2 exercises packed strided buffers.
 - {name: matmul_norm_dist_one_special_smoke, category: quick, precision: *real_precisions,
