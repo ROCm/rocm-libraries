@@ -1,14 +1,1 @@
 .tox/
-
-# Generated TensileLite run outputs/results.
-out/*
-out/run_id/
-
-# Local debug yaml scratch files.
-debug-yaml/
-
-# Generated assembly/debug artifacts.
-*_artifacts*/
-
-# Local run log.
-log.txt
