@@ -171,8 +171,6 @@ int main(int argc, char** argv) {
     int missingFuncFlag = 0;
     int i = 0, j = 0;
     int maxHeight = 0, maxWidth = 0;
-    int maxDstHeight = 0, maxDstWidth = 0;
-    Rpp64u count = 0;
     Rpp64u ioBufferSize = 0;
     Rpp64u oBufferSize = 0;
     static int noOfImages = 0;
@@ -267,12 +265,7 @@ int main(int argc, char** argv) {
         static_cast<RpptImagePatch*>(calloc(batchSize, sizeof(RpptImagePatch)));
 
     // Set ROI tensors types for src/dst
-    RpptRoiType roiTypeSrc, roiTypeDst;
-    roiTypeSrc = RpptRoiType::XYWH;
-    roiTypeDst = RpptRoiType::XYWH;
-
-    // Initialize roi that can be updated in case-wise augmentations if needed
-    RpptROI roi;
+    RpptRoiType roiTypeSrc = RpptRoiType::XYWH;
 
     Rpp32u outputChannels = inputChannels;
     if (pln1OutTypeCase) outputChannels = 1;
@@ -316,10 +309,6 @@ int main(int argc, char** argv) {
     Rpp8u* inputu8 = static_cast<Rpp8u*>(calloc(ioBufferSizeInBytes_u8, 1));
     Rpp8u* inputu8Second = static_cast<Rpp8u*>(calloc(ioBufferSizeInBytes_u8, 1));
     Rpp8u* outputu8 = static_cast<Rpp8u*>(calloc(oBufferSizeInBytes_u8, 1));
-
-    Rpp8u *offsettedInput, *offsettedInputSecond;
-    offsettedInput = inputu8 + srcDescPtr->offsetInBytes;
-    offsettedInputSecond = inputu8Second + srcDescPtr->offsetInBytes;
 
     void *input, *input_second, *output;
 
@@ -479,8 +468,8 @@ int main(int argc, char** argv) {
 
         for (int perfRunCount = 0; perfRunCount < numRuns; perfRunCount++) {
             RppStatus errorCodeCapture = RPP_SUCCESS;
-            clock_t startCpuTime, endCpuTime;
-            double startWallTime, endWallTime;
+            clock_t startCpuTime = 0, endCpuTime;
+            double startWallTime = 0.0, endWallTime;
             switch (testCase) {
                 case BRIGHTNESS: {
                     testCaseName = "brightness";
@@ -1046,7 +1035,6 @@ int main(int argc, char** argv) {
                     Rpp32f colorBuffer[batchSize * boxesInEachImage];
                     RpptRoiLtrb anchorBoxInfoTensor[batchSize * boxesInEachImage];
                     Rpp32u numOfBoxes[batchSize];
-                    int idx;
 
                     init_erase(batchSize, boxesInEachImage, numOfBoxes, anchorBoxInfoTensor,
                                roiTensorPtrSrc, srcDescPtr->c, colorBuffer, BitDepthTestMode);
@@ -2381,8 +2369,8 @@ int main(int argc, char** argv) {
                 // allocated
                 RpptROI roiDefault;
                 RpptROIPtr roiPtrDefault = &roiDefault;
-                roiPtrDefault->xywhROI = {0, 0, static_cast<Rpp32s>(dstDescPtr->w),
-                                          static_cast<Rpp32s>(dstDescPtr->h)};
+                roiPtrDefault->xywhROI = {
+                    {0, 0}, static_cast<Rpp32s>(dstDescPtr->w), static_cast<Rpp32s>(dstDescPtr->h)};
                 for (int i = 0; i < dstDescPtr->n; i++) {
                     roiTensorPtrDst[i].xywhROI.roiWidth =
                         std::min(roiPtrDefault->xywhROI.roiWidth - roiTensorPtrDst[i].xywhROI.xy.x,
