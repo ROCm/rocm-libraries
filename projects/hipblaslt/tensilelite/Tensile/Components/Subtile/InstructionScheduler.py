@@ -193,9 +193,11 @@ _isDsRead = lambda x: isinstance(x, LocalReadInstruction)
 _isBufferLoad = lambda x: isinstance(x, GlobalReadInstruction)
 _isWaitCnt = lambda x: isinstance(x, SWaitCnt)
 _isM0Update = lambda x: isinstance(x, CommonInstruction) and hasattr(x, 'dst') and hasattr(x.dst, 'regType') and x.dst.regType == 'm'
-# Typed op detection (see SWaitCntEx.isWaitGr / SBarrier) rather than matching
-# substrings in the instruction comment, which is brittle to comment edits.
-_isWaitGr = lambda x: _isWaitCnt(x) and getattr(x, "isWaitGr", False)
+# Typed op detection rather than matching substrings in the instruction
+# comment, which is brittle to comment edits. wait_gr is the only vmcnt-bearing
+# wait emitted on this path, so vlcnt != -1 identifies it; wait_lr uses
+# vlcnt=-1 (force_drain wait_gr still emits vlcnt=0, so drains stay wait_gr).
+_isWaitGr = lambda x: _isWaitCnt(x) and x.vlcnt != -1
 _isBarrier = lambda x: isinstance(x, SBarrier)
 
 

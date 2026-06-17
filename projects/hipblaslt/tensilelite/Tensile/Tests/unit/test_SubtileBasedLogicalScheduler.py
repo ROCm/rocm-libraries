@@ -3878,3 +3878,37 @@ class TestBuildTailloopPGR0:
 
         finally:
             sched.deallocVgprTiles(writer)
+
+
+class TestIsWaitGrClassification:
+    """Guard the wait_gr classifier in the instruction scheduler.
+
+    The scheduler infers "this is the wait_gr" from vlcnt != -1 (a wait_gr
+    carries vlcnt=grCnt>=0, see emit_wait_gr; a wait_lr carries vlcnt=-1, see
+    emit_wait_lr). These tests guard against a future vmcnt-bearing non-GR wait
+    being silently misclassified as the wait_gr.
+    """
+
+    def test_wait_lr_not_classified_as_wait_gr(self):
+        from rocisa.instruction import SWaitCnt
+        from Tensile.Components.Subtile.InstructionScheduler import _isWaitGr
+        # Mirrors emit_wait_lr(): a wait_lr carries vlcnt=-1.
+        wait_lr = SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                           comment="Wait for LR to complete")
+        assert not _isWaitGr(wait_lr)
+
+    def test_wait_gr_is_classified_as_wait_gr(self):
+        from Tensile.Components.Subtile.InstructionEmitter import SWaitCntEx
+        from Tensile.Components.Subtile.InstructionScheduler import _isWaitGr
+        # Mirrors emit_wait_gr(): a wait_gr carries vlcnt=grCnt>=0.
+        wait_gr = SWaitCntEx(vlcnt=4, vscnt=-1,
+                             comment="Wait GR (per-subIterK): A=1 B=1 SA=1 SB=1")
+        assert _isWaitGr(wait_gr)
+
+    def test_force_drain_wait_gr_is_classified_as_wait_gr(self):
+        from Tensile.Components.Subtile.InstructionEmitter import SWaitCntEx
+        from Tensile.Components.Subtile.InstructionScheduler import _isWaitGr
+        # A force_drain wait_gr still emits vlcnt=0 (!= -1), so it stays wait_gr.
+        drain_gr = SWaitCntEx(vlcnt=0, vscnt=-1,
+                              comment="Wait GR (full drain): A=0 B=0 SA=0 SB=0")
+        assert _isWaitGr(drain_gr)
