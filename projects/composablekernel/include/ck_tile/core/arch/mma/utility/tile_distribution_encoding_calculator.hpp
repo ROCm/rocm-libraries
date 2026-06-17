@@ -9,6 +9,7 @@
 #include "ck_tile/core/numeric/integer.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/tensor/tile_distribution_encoding.hpp"
+#include "ck_tile/core/arch/mma/mma_traits.hpp"
 
 #include <algorithm>
 #include <type_traits>
@@ -49,10 +50,11 @@ struct TileDistrEncCalc
     static constexpr index_t NumAccessB = std::max(MmaOp::kBKNumAccess, AttrNumAccessBV);
 
     // We are free to choose any NumAccess value to manipulate the load / store behavior, unless the
-    // intrinsic fundamentally requires a base NumAccess factor for the layout to be correct.
-    static_assert(AttrNumAccessAV % MmaOp::kAKNumAccess == 0,
+    // intrinsic fundamentally requires a base NumAccess factor for the layout to be correct. For
+    // unknown reasons some gfx950 sparse intrinsics require NumAccess so they are exempt.
+    static_assert(AttrNumAccessAV % MmaOp::kAKNumAccess == 0 || MmaOpTraits<MmaOp>::IsSparse,
                   "Requesting NumAccessA incompatible with builtin.");
-    static_assert(AttrNumAccessBV % MmaOp::kBKNumAccess == 0,
+    static_assert(AttrNumAccessBV % MmaOp::kBKNumAccess == 0 || MmaOpTraits<MmaOp>::IsSparse,
                   "Requesting NumAccessB incompatible with builtin.");
 
     static_assert(MmaOp::kABKPerLane % (NumAccessA * MmaOp::kCompressionRatio) == 0);

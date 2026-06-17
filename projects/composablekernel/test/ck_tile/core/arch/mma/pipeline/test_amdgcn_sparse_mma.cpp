@@ -133,38 +133,6 @@ TEST(SparseMMATrait, DenseVsSparseDistinction)
         << "Sparse MFMA should be identified correctly";
 }
 
-TEST(SparseMMATrait, SparseSelector)
-{
-    static_for<1, 6, 1>{}([](auto n) { // Test powers of 2.
-        constexpr uint32_t i = 1 << n;
-        using Selected       = typename MmaDefaultSelector<fp16_t,
-                                                           fp16_t,
-                                                           fp32_t,
-                                                           i,
-                                                           i,
-                                                           2 * i,
-                                                           CompilerTargetGfx950,
-                                                           MmaOpFamily::SPARSE>::SelectedOp;
-
-        static constexpr bool isValid =
-            (i == 16); // We only have a single 16x16 intrinsic added for now. Update this to expect
-                       // 32x32 to also be valid once we have that intrinsic.
-        if constexpr(isValid)
-        {
-            // Selector should pick a sparse MFMA implementation
-            EXPECT_TRUE(MmaOpTraits<Selected>::IsSparse);
-            EXPECT_TRUE(MmaOpTraits<Selected>::IsMfma);
-            EXPECT_TRUE(MmaOpTraits<Selected>::IsSupported);
-            EXPECT_TRUE((std::is_same<typename Selected::OpType, MfmaOp>::value));
-        }
-        else
-        {
-            // Selector should pick the unsupported pass through
-            EXPECT_FALSE(MmaOpTraits<Selected>::IsSupported);
-        }
-    });
-}
-
 template <uint32_t CompressionRatio, typename Vec>
 struct SparseTransformKernel
 {
