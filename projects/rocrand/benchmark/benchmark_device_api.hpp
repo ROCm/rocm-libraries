@@ -93,18 +93,110 @@ void init_kernel(EngineState*             states,
     states[state_id] = state;
 }
 
+/// Return how many elements an engine can emit in one iteration.
+template<typename EngineState, distribution D, typename T>
+constexpr int get_vectorization()
+{
+    // Sobol doesn't support vectorization.
+    // Mtgp32 does support box-muller, but is not implemented in benchmarks.
+    constexpr bool is_sobol  = std::is_same_v<EngineState, rand_state_sobol32_t>
+                               || std::is_same_v<EngineState, rand_state_sobol64_t>
+                               || std::is_same_v<EngineState, rand_state_scrambled_sobol32_t>
+                               || std::is_same_v<EngineState, rand_state_scrambled_sobol64_t>;
+    constexpr bool is_mtgp32 = std::is_same_v<EngineState, rand_state_mtgp32_t>;
+    if constexpr(is_sobol || is_mtgp32)
+    {
+        return 1;
+    }
+
+    // Philox4x supports all vectorized distrubutions.
+    constexpr bool is_philox4x32_10 = std::is_same_v<EngineState, rocrand_state_philox4x32_10>;
+    if constexpr(is_philox4x32_10)
+    {
+        return 4;
+    }
+
+    // We can use box-muller for vectorization.
+    if constexpr(D == DISTRIBUTION_NORMAL || D == DISTRIBUTION_LOG_NORMAL)
+    {
+        return 2;
+    }
+
+    constexpr bool is_threefry2x32_20 = std::is_same_v<EngineState, rocrand_state_threefry2x32_20>;
+    constexpr bool is_threefry2x64_20 = std::is_same_v<EngineState, rocrand_state_threefry2x64_20>;
+    constexpr bool is_threefry4x32_20 = std::is_same_v<EngineState, rocrand_state_threefry4x32_20>;
+    constexpr bool is_threefry4x64_20 = std::is_same_v<EngineState, rocrand_state_threefry4x64_20>;
+
+    // Threefry generators can generate more raw values.
+    if constexpr(D == DISTRIBUTION_UNIFORM && std::is_integral_v<T>)
+    {
+        if constexpr(is_threefry4x32_20 || is_threefry4x64_20)
+        {
+            return 4;
+        }
+
+        if constexpr(is_threefry2x32_20 || is_threefry2x64_20)
+        {
+            return 2;
+        }
+    }
+
+    // All other generators and distributions have no vectorization!
+    return 1;
+}
+
+template<typename EngineState, distribution D, typename T>
+constexpr int vectorization = get_vectorization<EngineState, D, T>();
+
+/// This struct unrolls a device generator. It automatically
+/// checks if the generator can be vectorized. The operator
+/// will write `n` items to a given `ptr`.
+template<typename Generator, typename T, typename EngineState>
+struct unrolled
+{
+    /// Number of elements in generated vector.
+    __device__
+    static constexpr int n = Generator::n;
+
+    __device__
+    unrolled(Generator& gen)
+        : gen(gen)
+    { }
+    Generator& gen;
+
+    __device__
+    void       operator()(EngineState* state, T* ptr) const
+    {
+        static_assert(n >= 1, "Generator must produce at least 1 element!");
+        const auto v = gen(state);
+        if constexpr(n == 1)
+        {
+            ptr[0] = v;
+        }
+        else
+        {
+#pragma unroll
+            for(int i = 0; i < n; ++i)
+            {
+                ptr[i] = v[i];
+            }
+        }
+    }
+};
+
 template<typename EngineState, typename T, typename Generator>
 __global__ __launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
 void generate_kernel(EngineState* states, T* data, const size_t size, Generator generator)
 {
-    const unsigned int state_id = blockIdx.x * blockDim.x + threadIdx.x;
-    const unsigned int stride   = gridDim.x * blockDim.x;
+    const auto         f        = unrolled<Generator, T, EngineState>(generator);
+    const unsigned int state_id = (blockIdx.x * blockDim.x) + threadIdx.x;
+    const unsigned int stride   = (gridDim.x * blockDim.x) * f.n;
 
     EngineState  state = states[state_id];
-    unsigned int index = state_id;
+    unsigned int index = state_id * f.n;
     while(index < size)
     {
-        data[index] = generator(&state);
+        f(&state, data + index);
         index += stride;
     }
     states[state_id] = state;
@@ -151,6 +243,8 @@ template<typename T, typename Generator>
 __global__ __launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
 void generate_kernel(rand_state_mtgp32_t* states, T* data, const size_t size, Generator generator)
 {
+    const auto f = unrolled<Generator, T, rand_state_mtgp32_t>(generator);
+    static_assert(f.n == 1, "mtgp32 does not support vectorized generation!");
     const unsigned int  state_id  = blockIdx.x;
     const unsigned int  thread_id = threadIdx.x;
     unsigned int        index     = blockIdx.x * blockDim.x + thread_id;
@@ -172,14 +266,17 @@ void generate_kernel(rand_state_mtgp32_t* states, T* data, const size_t size, Ge
     const size_t size_rounded_up   = r == 0 ? size : size_rounded_down + blockDim.x;
     while(index < size_rounded_down)
     {
-        data[index] = generator(&state);
+        f(&state, data + index);
         index += stride;
     }
     while(index < size_rounded_up)
     {
-        auto value = generator(&state);
+        T value;
+        f(&state, &value);
         if(index < size)
+        {
             data[index] = value;
+        }
         index += stride;
     }
 
@@ -333,6 +430,8 @@ template<typename EngineState, typename T, typename Generator>
 __global__ __launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
 void generate_sobol_kernel(EngineState* states, T* data, const size_t size, Generator generator)
 {
+    const auto f = unrolled<Generator, T, EngineState>(generator);
+    static_assert(f.n == 1, "sobol does not support vectorized generation!");
     const unsigned int dimension = blockIdx.y;
     const unsigned int state_id  = blockIdx.x * blockDim.x + threadIdx.x;
     const unsigned int stride    = gridDim.x * blockDim.x;
@@ -342,7 +441,7 @@ void generate_sobol_kernel(EngineState* states, T* data, const size_t size, Gene
     unsigned int index  = state_id;
     while(index < size)
     {
-        data[offset + index] = generator(&state);
+        f(&state, data + offset + index);
         skipahead(stride - 1, &state);
         index += stride;
     }
@@ -620,124 +719,55 @@ struct generator_type
     static void destroy() {}
 };
 
-template<typename Engine>
-struct generator_uint : public generator_type
+/// Benchmarkable generators.
+template<distribution Distribution, typename T, typename Engine>
+struct generator : public generator_type
 {
-    typedef unsigned int data_type;
+    static constexpr int n = vectorization<Engine, Distribution, T>;
+    using device_api       = wrappers::gpu_rand<Distribution, n, T>;
 
     __device__
-    data_type            operator()(Engine* state) const
+    auto operator()(Engine* state) const
     {
-        return gpu_rand(state);
+        return device_api{}(state);
     }
 };
 
-template<typename Engine>
-struct generator_ullong : public generator_type
+template<typename T, typename Engine>
+struct generator<DISTRIBUTION_LOG_NORMAL, T, Engine> : public generator_type
 {
-    typedef unsigned long long int data_type;
+    static constexpr int n = vectorization<Engine, DISTRIBUTION_LOG_NORMAL, T>;
+    using device_api       = wrappers::gpu_rand<DISTRIBUTION_LOG_NORMAL, n, T>;
 
     __device__
-    data_type                      operator()(Engine* state) const
+    auto operator()(Engine* state) const
     {
-        return gpu_rand(state);
+        return device_api{}(state, 0.f, 1.f);
     }
 };
 
-template<typename Engine>
-struct generator_uniform : public generator_type
+template<typename T, typename Engine>
+struct generator<DISTRIBUTION_POISSON, T, Engine> : public generator_type
 {
-    typedef float data_type;
-
-    __device__
-    data_type     operator()(Engine* state) const
-    {
-        return gpu_rand_uniform(state);
-    }
-};
-
-template<typename Engine>
-struct generator_uniform_double : public generator_type
-{
-    typedef double data_type;
-
-    __device__
-    data_type      operator()(Engine* state) const
-    {
-        return gpu_rand_uniform_double(state);
-    }
-};
-
-template<typename Engine>
-struct generator_normal : public generator_type
-{
-    typedef float data_type;
-
-    __device__
-    data_type     operator()(Engine* state) const
-    {
-        return gpu_rand_normal(state);
-    }
-};
-
-template<typename Engine>
-struct generator_normal_double : public generator_type
-{
-    typedef double data_type;
-
-    __device__
-    data_type      operator()(Engine* state) const
-    {
-        return gpu_rand_normal_double(state);
-    }
-};
-
-template<typename Engine>
-struct generator_log_normal : public generator_type
-{
-    typedef float data_type;
-
-    __device__
-    data_type     operator()(Engine* state) const
-    {
-        return gpu_rand_log_normal(state, 0.f, 1.f);
-    }
-};
-
-template<typename Engine>
-struct generator_log_normal_double : public generator_type
-{
-    typedef double data_type;
-
-    __device__
-    data_type      operator()(Engine* state) const
-    {
-        return gpu_rand_log_normal_double(state, 0., 1.);
-    }
-};
-
-template<typename Engine>
-struct generator_poisson : public generator_type
-{
-    generator_poisson(double l) : lambda(l) {}
-
-    typedef unsigned int data_type;
-
-    __device__
-    data_type            operator()(Engine* state) const
-    {
-        return gpu_rand_poisson(state, lambda);
-    }
-
+    generator(double l) : lambda(l) { }
     double lambda;
+
+    static constexpr int n = vectorization<Engine, DISTRIBUTION_POISSON, T>;
+    using device_api       = wrappers::gpu_rand<DISTRIBUTION_POISSON, n, T>;
+
+    __device__
+    auto operator()(Engine* state) const
+    {
+        return device_api{}(state, lambda);
+    }
 };
 
-template<typename Engine>
-struct generator_discrete_poisson : public generator_type
+template<typename T, typename Engine>
+struct generator<DISTRIBUTION_DISCRETE_POISSON, T, Engine> : public generator_type
 {
-    generator_discrete_poisson(double l) : lambda(l) {}
-
-    typedef unsigned int data_type;
+    generator(double l) : lambda(l) { }
+    rand_discrete_distribution_t discrete_distribution;
+    double                       lambda;
 
     void create()
     {
@@ -749,21 +779,21 @@ struct generator_discrete_poisson : public generator_type
         RAND_CHECK(rand_destroy_discrete_distribution(discrete_distribution));
     }
 
-    __device__
-    data_type operator()(Engine* state) const
-    {
-        return rand_discrete(state, discrete_distribution);
-    }
+    static constexpr int n = vectorization<Engine, DISTRIBUTION_DISCRETE_POISSON, T>;
+    using device_api       = wrappers::gpu_rand<DISTRIBUTION_DISCRETE_POISSON, n, T>;
 
-    rand_discrete_distribution_t discrete_distribution;
-    double                       lambda;
+    __device__
+    auto operator()(Engine* state) const
+    {
+        return device_api{}(state, discrete_distribution);
+    }
 };
 
 #ifdef __HIP__
-template<typename Engine>
-struct generator_discrete_custom : public generator_type
+template<typename T, typename Engine>
+struct generator<DISTRIBUTION_DISCRETE_CUSTOM, T, Engine> : public generator_type
 {
-    typedef unsigned int data_type;
+    rand_discrete_distribution_t discrete_distribution;
 
     void create()
     {
@@ -786,13 +816,14 @@ struct generator_discrete_custom : public generator_type
         RAND_CHECK(rand_destroy_discrete_distribution(discrete_distribution));
     }
 
-    __device__
-    data_type operator()(Engine* state) const
-    {
-        return rand_discrete(state, discrete_distribution);
-    }
+    static constexpr int n = vectorization<Engine, DISTRIBUTION_DISCRETE_CUSTOM, T>;
+    using device_api       = wrappers::gpu_rand<DISTRIBUTION_DISCRETE_CUSTOM, n, T>;
 
-    rand_discrete_distribution_t discrete_distribution;
+    __device__
+    auto operator()(Engine* state) const
+    {
+        return device_api{}(state, discrete_distribution);
+    }
 };
 #endif
 

@@ -22,12 +22,7 @@
 
 #include <vector>
 
-template<template<typename> class Gen,
-         typename T,
-         typename State,
-         auto Dist,
-         typename EngineType,
-         typename... Args>
+template<typename T, typename State, auto Dist, typename EngineType, typename... Args>
 void queue_device_bench(primbench::executor& executor,
                         EngineType           engine,
                         size_t               blocks,
@@ -36,13 +31,14 @@ void queue_device_bench(primbench::executor& executor,
                         size_t               offset,
                         Args... args)
 {
-    executor.queue<device_api_benchmark<Gen<State>, State, T, Dist>>(Gen<State>(args...),
-                                                                     engine,
-                                                                     blocks,
-                                                                     threads,
-                                                                     dimensions,
-                                                                     offset,
-                                                                     args...);
+    using G = generator<Dist, T, State>;
+    executor.queue<device_api_benchmark<G, State, T, Dist>>(G(args...),
+                                                            engine,
+                                                            blocks,
+                                                            threads,
+                                                            dimensions,
+                                                            offset,
+                                                            args...);
 }
 
 template<typename State>
@@ -71,91 +67,85 @@ void queue_device_permutations(primbench::executor&       executor,
 {
     if constexpr(uses_64bit_int_v<State>)
     {
-        queue_device_bench<generator_ullong, unsigned long long, State, DISTRIBUTION_UNIFORM>(
-            executor,
-            Engine,
-            blocks,
-            threads,
-            dimensions,
-            offset);
-    }
-    else
-    {
-        queue_device_bench<generator_uint, uint32_t, State, DISTRIBUTION_UNIFORM>(executor,
-                                                                                  Engine,
-                                                                                  blocks,
-                                                                                  threads,
-                                                                                  dimensions,
-                                                                                  offset);
-    }
-
-    queue_device_bench<generator_uniform, float, State, DISTRIBUTION_UNIFORM>(executor,
-                                                                              Engine,
-                                                                              blocks,
-                                                                              threads,
-                                                                              dimensions,
-                                                                              offset);
-    queue_device_bench<generator_uniform_double, double, State, DISTRIBUTION_UNIFORM>(executor,
-                                                                                      Engine,
-                                                                                      blocks,
-                                                                                      threads,
-                                                                                      dimensions,
-                                                                                      offset);
-    queue_device_bench<generator_normal, float, State, DISTRIBUTION_NORMAL>(executor,
+        queue_device_bench<unsigned long long, State, DISTRIBUTION_UNIFORM>(executor,
                                                                             Engine,
                                                                             blocks,
                                                                             threads,
                                                                             dimensions,
                                                                             offset);
-    queue_device_bench<generator_normal_double, double, State, DISTRIBUTION_NORMAL>(executor,
-                                                                                    Engine,
-                                                                                    blocks,
-                                                                                    threads,
-                                                                                    dimensions,
-                                                                                    offset);
-    queue_device_bench<generator_log_normal, float, State, DISTRIBUTION_LOG_NORMAL>(executor,
-                                                                                    Engine,
-                                                                                    blocks,
-                                                                                    threads,
-                                                                                    dimensions,
-                                                                                    offset);
-    queue_device_bench<generator_log_normal_double, double, State, DISTRIBUTION_LOG_NORMAL>(
-        executor,
-        Engine,
-        blocks,
-        threads,
-        dimensions,
-        offset);
-
-    for(double lambda : poisson_lambdas)
+    }
+    else
     {
-        queue_device_bench<generator_poisson, uint32_t, State, DISTRIBUTION_POISSON>(executor,
-                                                                                     Engine,
-                                                                                     blocks,
-                                                                                     threads,
-                                                                                     dimensions,
-                                                                                     offset,
-                                                                                     lambda);
-        queue_device_bench<generator_discrete_poisson,
-                           uint32_t,
-                           State,
-                           DISTRIBUTION_DISCRETE_POISSON>(executor,
+        queue_device_bench<uint32_t, State, DISTRIBUTION_UNIFORM>(executor,
+                                                                  Engine,
+                                                                  blocks,
+                                                                  threads,
+                                                                  dimensions,
+                                                                  offset);
+    }
+
+    queue_device_bench<float, State, DISTRIBUTION_UNIFORM>(executor,
+                                                           Engine,
+                                                           blocks,
+                                                           threads,
+                                                           dimensions,
+                                                           offset);
+    queue_device_bench<double, State, DISTRIBUTION_UNIFORM>(executor,
+                                                            Engine,
+                                                            blocks,
+                                                            threads,
+                                                            dimensions,
+                                                            offset);
+    queue_device_bench<float, State, DISTRIBUTION_NORMAL>(executor,
                                                           Engine,
                                                           blocks,
                                                           threads,
                                                           dimensions,
-                                                          offset,
-                                                          lambda);
+                                                          offset);
+    queue_device_bench<double, State, DISTRIBUTION_NORMAL>(executor,
+                                                           Engine,
+                                                           blocks,
+                                                           threads,
+                                                           dimensions,
+                                                           offset);
+    queue_device_bench<float, State, DISTRIBUTION_LOG_NORMAL>(executor,
+                                                              Engine,
+                                                              blocks,
+                                                              threads,
+                                                              dimensions,
+                                                              offset);
+    queue_device_bench<double, State, DISTRIBUTION_LOG_NORMAL>(executor,
+                                                               Engine,
+                                                               blocks,
+                                                               threads,
+                                                               dimensions,
+                                                               offset);
+
+    for(double lambda : poisson_lambdas)
+    {
+        queue_device_bench<uint32_t, State, DISTRIBUTION_POISSON>(executor,
+                                                                  Engine,
+                                                                  blocks,
+                                                                  threads,
+                                                                  dimensions,
+                                                                  offset,
+                                                                  lambda);
+        queue_device_bench<uint32_t, State, DISTRIBUTION_DISCRETE_POISSON>(executor,
+                                                                           Engine,
+                                                                           blocks,
+                                                                           threads,
+                                                                           dimensions,
+                                                                           offset,
+                                                                           lambda);
     }
 
 #ifdef __HIP__
-    queue_device_bench<generator_discrete_custom, uint32_t, State, DISTRIBUTION_DISCRETE_CUSTOM>(
-        executor,
-        Engine,
-        blocks,
-        threads,
-        dimensions,
-        offset);
+    queue_device_bench<uint32_t, State, DISTRIBUTION_DISCRETE_CUSTOM>(executor,
+                                                                      Engine,
+                                                                      blocks,
+                                                                      threads,
+                                                                      dimensions,
+                                                                      offset);
 #endif
 }
 
