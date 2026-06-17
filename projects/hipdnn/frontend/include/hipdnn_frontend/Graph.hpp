@@ -3886,7 +3886,7 @@ private:
             }
 
             replaceCompiledPlans(
-                std::move(compiledPlans), 0, detail::ActivePlanFinalization::FINALIZED);
+                std::move(compiledPlans), 0, detail::ActivePlanFinalization::UNFINALIZED);
         }
         else
         {

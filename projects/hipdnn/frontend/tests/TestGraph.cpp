@@ -10202,6 +10202,64 @@ TEST_F(TestGraph, PlanSpecAutotuneWinnerUpdatesSerializableActivePlan)
     EXPECT_EQ(data, fakeContainerBytes);
 }
 
+TEST_F(TestGraph, PlanSpecAutotuneFailureLeavesCompiledPlanUnfinalized)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    setupEngineWithNoKnobs(*_mockBackend);
+
+    ON_CALL(*_mockBackend,
+            backendGetAttribute(
+                _, HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, nullptr, _))
+        .WillByDefault([](hipdnnBackendDescriptor_t,
+                          hipdnnBackendAttributeName_t,
+                          hipdnnBackendAttributeType_t,
+                          int64_t,
+                          int64_t*,
+                          void* arrayOfElements) {
+            *static_cast<int64_t*>(arrayOfElements) = 1024;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    EngineConfigInfo engine;
+    engine.engineId = -2;
+    engine.estimatedWorkspaceSize = 1024;
+    auto addResult = graph.add_engine_configs({engine});
+    ASSERT_TRUE(addResult.is_good()) << addResult.get_message();
+
+    AutotuneConfig config;
+    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.warmupIterations = 0;
+
+    std::vector<AutotuneResult> results;
+    const std::unordered_map<int64_t, void*> variantPack = {{1, reinterpret_cast<void*>(0x1)},
+                                                            {2, reinterpret_cast<void*>(0x2)},
+                                                            {3, reinterpret_cast<void*>(0x3)},
+                                                            {4, reinterpret_cast<void*>(0x4)},
+                                                            {5, reinterpret_cast<void*>(0x5)}};
+
+    auto result = graph.autotune(_handle, variantPack, nullptr, 2048, config, {}, &results);
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_FALSE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), -2);
+
+    const std::vector<uint8_t> fakeGraphBytes = {0x66, 0x77, 0x88};
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, _, _, _, _))
+        .Times(0);
+    expectGraphOnlySerialization(*_mockBackend, fakeGraphBytes);
+
+    std::vector<uint8_t> data;
+    auto err = graph.serialize(data);
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(data, fakeGraphBytes);
+}
+
 TEST_F(TestGraph, SerializeCompiledPlanRejectsUnfinalizedActivePlan)
 {
     ::testing::FLAGS_gmock_verbose = "error";
