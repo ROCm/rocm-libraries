@@ -68,6 +68,7 @@ target_sources(origami-headers
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
         "${PROJECT_BINARY_DIR}/include"
     FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/attention.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/gemm.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/hardware.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/heuristics.hpp"
