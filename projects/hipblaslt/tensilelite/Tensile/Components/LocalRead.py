@@ -111,7 +111,7 @@ class LocalReadVALU(LocalRead):
                 valuIdx += blockWidth
 
                 # TODO - handle vector-load
-                with writer.allocTmpSgpr(1) as tmpSgprInfo:
+                with writer.allocTmpSgpr(1, tag="LocalReadVALU_tmpSgprInfo") as tmpSgprInfo:
                     tmpSgpr = tmpSgprInfo.idx
                     if writer.db["CheckValue1%s" % tc]:
                         dbgVgpr = destVgpr
@@ -1671,7 +1671,7 @@ class LocalReadMFMA(LocalRead):
 
                             self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds, module=localReadCodeT, comment=comment)
                             # TODO - handle vector-load
-                            with writer.allocTmpSgpr(1) as tmpSgprInfo:
+                            with writer.allocTmpSgpr(1, tag="LocalReadVALU_tmpSgprInfo2") as tmpSgprInfo:
                                 tmpSgpr = tmpSgprInfo.idx
                                 if writer.db["CheckValue1%s"%tc] and not writer.inTailLoop:
 

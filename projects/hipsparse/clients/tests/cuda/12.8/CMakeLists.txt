@@ -74,6 +74,7 @@ set(HIPSPARSE_TEST_SOURCES
     test_spmm_coo.cpp
     test_spmm_csc.cpp
     test_spmm_csr.cpp
+    test_spmm_bsr.cpp
     test_spmv_coo.cpp
     test_spmv_coo_aos.cpp
     test_spmv_csr.cpp
@@ -156,6 +157,7 @@ set(HIPSPARSE_TEST_YAMLS
     cuda/12.8/test_spmm_coo.yaml
     cuda/12.8/test_spmm_csc.yaml
     cuda/12.8/test_spmm_csr.yaml
+    cuda/12.8/test_spmm_bsr.yaml
     cuda/12.8/test_spmv_coo.yaml
     cuda/12.8/test_spmv_coo_aos.yaml
     cuda/12.8/test_spmv_csr.yaml

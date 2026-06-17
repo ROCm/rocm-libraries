@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,13 +23,13 @@
  * ************************************************************************ */
 
 #pragma once
-
 #include "rocsparse_control.hpp"
 #include "rocsparse_datatype_utils.hpp"
 #include "rocsparse_indextype_utils.hpp"
 #include "rocsparse_pivot_info_t.hpp"
 #include "rocsparse_trm_info.hpp"
 #include <memory>
+
 namespace rocsparse
 {
     template <typename I, typename J, typename T>

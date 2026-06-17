@@ -106,9 +106,7 @@ class TestReporter:
         output = io.StringIO()
         reporter = Reporter(output=output)
 
-        reporter.print_validation(
-            True, "Validation stubbed - CPU reference not available"
-        )
+        reporter.print_validation(True, "Validation skipped - reference unavailable")
 
         result = output.getvalue()
         assert "SKIPPED" in result

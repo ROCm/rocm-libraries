@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,34 +33,137 @@
 
 #include "rocsparse.h"
 #include "rocsparse_traits.hpp"
+#ifndef GOOGLE_TEST
 
-#define REAL_TEMPLATE(NAME_, ...)                              \
-    template <typename T>                                      \
-    inline rocsparse_status (*rocsparse_##NAME_)(__VA_ARGS__); \
-    template <>                                                \
-    inline auto rocsparse_##NAME_<float> = rocsparse_s##NAME_; \
-    template <>                                                \
-    inline auto rocsparse_##NAME_<double> = rocsparse_d##NAME_
+#define REAL_TEMPLATE(NAME_, ...)                                                       \
+    template <typename T>                                                               \
+    using rocsparse_##NAME_##_fn = rocsparse_status (*)(__VA_ARGS__);                   \
+    template <typename T>                                                               \
+    inline rocsparse_##NAME_##_fn<T> rocsparse_##NAME_;                                 \
+    template <>                                                                         \
+    inline rocsparse_##NAME_##_fn<float> rocsparse_##NAME_<float> = rocsparse_s##NAME_; \
+    template <>                                                                         \
+    inline rocsparse_##NAME_##_fn<double> rocsparse_##NAME_<double> = rocsparse_d##NAME_
 
-#define COMPLEX_TEMPLATE(NAME_, ...)                                             \
-    template <typename T>                                                        \
-    inline rocsparse_status (*rocsparse_##NAME_)(__VA_ARGS__);                   \
-    template <>                                                                  \
-    inline auto rocsparse_##NAME_<rocsparse_float_complex> = rocsparse_c##NAME_; \
-    template <>                                                                  \
-    inline auto rocsparse_##NAME_<rocsparse_double_complex> = rocsparse_z##NAME_
+#define COMPLEX_TEMPLATE(NAME_, ...)                                     \
+    template <typename T>                                                \
+    using rocsparse_##NAME_##_fn = rocsparse_status (*)(__VA_ARGS__);    \
+    template <typename T>                                                \
+    inline rocsparse_##NAME_##_fn<T> rocsparse_##NAME_;                  \
+    template <>                                                          \
+    inline rocsparse_##NAME_##_fn<rocsparse_float_complex>               \
+        rocsparse_##NAME_<rocsparse_float_complex> = rocsparse_c##NAME_; \
+    template <>                                                          \
+    inline rocsparse_##NAME_##_fn<rocsparse_double_complex>              \
+        rocsparse_##NAME_<rocsparse_double_complex> = rocsparse_z##NAME_
 
-#define REAL_COMPLEX_TEMPLATE(NAME_, ...)                                        \
-    template <typename T>                                                        \
-    inline rocsparse_status (*rocsparse_##NAME_)(__VA_ARGS__);                   \
-    template <>                                                                  \
-    inline auto rocsparse_##NAME_<float> = rocsparse_s##NAME_;                   \
-    template <>                                                                  \
-    inline auto rocsparse_##NAME_<double> = rocsparse_d##NAME_;                  \
-    template <>                                                                  \
-    inline auto rocsparse_##NAME_<rocsparse_float_complex> = rocsparse_c##NAME_; \
-    template <>                                                                  \
-    inline auto rocsparse_##NAME_<rocsparse_double_complex> = rocsparse_z##NAME_
+#define REAL_COMPLEX_TEMPLATE(NAME_, ...)                                                 \
+    template <typename T>                                                                 \
+    using rocsparse_##NAME_##_fn = rocsparse_status (*)(__VA_ARGS__);                     \
+    template <typename T>                                                                 \
+    inline rocsparse_##NAME_##_fn<T> rocsparse_##NAME_;                                   \
+    template <>                                                                           \
+    inline rocsparse_##NAME_##_fn<float> rocsparse_##NAME_<float> = rocsparse_s##NAME_;   \
+    template <>                                                                           \
+    inline rocsparse_##NAME_##_fn<double> rocsparse_##NAME_<double> = rocsparse_d##NAME_; \
+    template <>                                                                           \
+    inline rocsparse_##NAME_##_fn<rocsparse_float_complex>                                \
+        rocsparse_##NAME_<rocsparse_float_complex> = rocsparse_c##NAME_;                  \
+    template <>                                                                           \
+    inline rocsparse_##NAME_##_fn<rocsparse_double_complex>                               \
+        rocsparse_##NAME_<rocsparse_double_complex> = rocsparse_z##NAME_
+
+#else
+
+#ifdef ROCSPARSE_DEBUGGING
+
+#include "rocsparse_clients_test_hip_debug_wrappers.hpp"
+
+#define REAL_TEMPLATE(NAME_, ...)                                      \
+    template <typename T>                                              \
+    using rocsparse_##NAME_##_fn = rocsparse_status (*)(__VA_ARGS__);  \
+    template <typename T>                                              \
+    inline rocsparse_##NAME_##_fn<T> rocsparse_##NAME_;                \
+    template <>                                                        \
+    inline rocsparse_##NAME_##_fn<float>                               \
+        rocsparse_##NAME_<float> = rocsparse_wrap_s##NAME_##_t::apply; \
+    template <>                                                        \
+    inline rocsparse_##NAME_##_fn<double>                              \
+        rocsparse_##NAME_<double> = rocsparse_wrap_d##NAME_##_t::apply
+
+#define COMPLEX_TEMPLATE(NAME_, ...)                                                     \
+    template <typename T>                                                                \
+    using rocsparse_##NAME_##_fn = rocsparse_status (*)(__VA_ARGS__);                    \
+    template <typename T>                                                                \
+    inline rocsparse_##NAME_##_fn<T> rocsparse_##NAME_;                                  \
+    template <>                                                                          \
+    inline rocsparse_##NAME_##_fn<rocsparse_float_complex>                               \
+        rocsparse_##NAME_<rocsparse_float_complex> = rocsparse_wrap_c##NAME_##_t::apply; \
+    template <>                                                                          \
+    inline rocsparse_##NAME_##_fn<rocsparse_double_complex>                              \
+        rocsparse_##NAME_<rocsparse_double_complex> = rocsparse_wrap_z##NAME_##_t::apply
+
+#define REAL_COMPLEX_TEMPLATE(NAME_, ...)                                                \
+    template <typename T>                                                                \
+    using rocsparse_##NAME_##_fn = rocsparse_status (*)(__VA_ARGS__);                    \
+    template <typename T>                                                                \
+    inline rocsparse_##NAME_##_fn<T> rocsparse_##NAME_;                                  \
+    template <>                                                                          \
+    inline rocsparse_##NAME_##_fn<float>                                                 \
+        rocsparse_##NAME_<float> = rocsparse_wrap_s##NAME_##_t::apply;                   \
+    template <>                                                                          \
+    inline rocsparse_##NAME_##_fn<double>                                                \
+        rocsparse_##NAME_<double> = rocsparse_wrap_d##NAME_##_t::apply;                  \
+    template <>                                                                          \
+    inline rocsparse_##NAME_##_fn<rocsparse_float_complex>                               \
+        rocsparse_##NAME_<rocsparse_float_complex> = rocsparse_wrap_c##NAME_##_t::apply; \
+    template <>                                                                          \
+    inline rocsparse_##NAME_##_fn<rocsparse_double_complex>                              \
+        rocsparse_##NAME_<rocsparse_double_complex> = rocsparse_wrap_z##NAME_##_t::apply
+
+#else
+
+#define REAL_TEMPLATE(NAME_, ...)                                                       \
+    template <typename T>                                                               \
+    using rocsparse_##NAME_##_fn = rocsparse_status (*)(__VA_ARGS__);                   \
+    template <typename T>                                                               \
+    inline rocsparse_##NAME_##_fn<T> rocsparse_##NAME_;                                 \
+    template <>                                                                         \
+    inline rocsparse_##NAME_##_fn<float> rocsparse_##NAME_<float> = rocsparse_s##NAME_; \
+    template <>                                                                         \
+    inline rocsparse_##NAME_##_fn<double> rocsparse_##NAME_<double> = rocsparse_d##NAME_
+
+#define COMPLEX_TEMPLATE(NAME_, ...)                                     \
+    template <typename T>                                                \
+    using rocsparse_##NAME_##_fn = rocsparse_status (*)(__VA_ARGS__);    \
+    template <typename T>                                                \
+    inline rocsparse_##NAME_##_fn<T> rocsparse_##NAME_;                  \
+    template <>                                                          \
+    inline rocsparse_##NAME_##_fn<rocsparse_float_complex>               \
+        rocsparse_##NAME_<rocsparse_float_complex> = rocsparse_c##NAME_; \
+    template <>                                                          \
+    inline rocsparse_##NAME_##_fn<rocsparse_double_complex>              \
+        rocsparse_##NAME_<rocsparse_double_complex> = rocsparse_z##NAME_
+
+#define REAL_COMPLEX_TEMPLATE(NAME_, ...)                                                 \
+    template <typename T>                                                                 \
+    using rocsparse_##NAME_##_fn = rocsparse_status (*)(__VA_ARGS__);                     \
+    template <typename T>                                                                 \
+    inline rocsparse_##NAME_##_fn<T> rocsparse_##NAME_;                                   \
+    template <>                                                                           \
+    inline rocsparse_##NAME_##_fn<float> rocsparse_##NAME_<float> = rocsparse_s##NAME_;   \
+    template <>                                                                           \
+    inline rocsparse_##NAME_##_fn<double> rocsparse_##NAME_<double> = rocsparse_d##NAME_; \
+    template <>                                                                           \
+    inline rocsparse_##NAME_##_fn<rocsparse_float_complex>                                \
+        rocsparse_##NAME_<rocsparse_float_complex> = rocsparse_c##NAME_;                  \
+    template <>                                                                           \
+    inline rocsparse_##NAME_##_fn<rocsparse_double_complex>                               \
+        rocsparse_##NAME_<rocsparse_double_complex> = rocsparse_z##NAME_
+
+#endif
+
+#endif
 
 /*
  * ===========================================================================
@@ -312,14 +415,14 @@ REAL_COMPLEX_TEMPLATE(gthrz,
 
 // roti
 REAL_TEMPLATE(roti,
-              rocsparse_handle     handle,
-              rocsparse_int        nnz,
-              T*                   x_val,
-              const rocsparse_int* x_ind,
-              T*                   y,
-              const T*             c,
-              const T*             s,
-              rocsparse_index_base idx_base);
+              rocsparse_handle,
+              rocsparse_int,
+              T*,
+              const rocsparse_int*,
+              T*,
+              const T*,
+              const T*,
+              rocsparse_index_base);
 
 // sctr
 REAL_COMPLEX_TEMPLATE(sctr,
@@ -1374,9 +1477,9 @@ REAL_COMPLEX_TEMPLATE(gtsv_interleaved_batch,
                       rocsparse_handle               handle,
                       rocsparse_gtsv_interleaved_alg alg,
                       rocsparse_int                  m,
-                      const T*                       dl,
-                      const T*                       d,
-                      const T*                       du,
+                      T*                             dl,
+                      T*                             d,
+                      T*                             du,
                       T*                             x,
                       rocsparse_int                  batch_count,
                       rocsparse_int                  batch_stride,
@@ -1401,11 +1504,11 @@ REAL_COMPLEX_TEMPLATE(gpsv_interleaved_batch,
                       rocsparse_handle               handle,
                       rocsparse_gpsv_interleaved_alg alg,
                       rocsparse_int                  m,
-                      const T*                       ds,
-                      const T*                       dl,
-                      const T*                       d,
-                      const T*                       du,
-                      const T*                       dw,
+                      T*                             ds,
+                      T*                             dl,
+                      T*                             d,
+                      T*                             du,
+                      T*                             dw,
                       T*                             x,
                       rocsparse_int                  batch_count,
                       rocsparse_int                  batch_stride,
@@ -1698,8 +1801,8 @@ REAL_COMPLEX_TEMPLATE(bsrpad_value,
                       T                         value,
                       const rocsparse_mat_descr bsr_descr,
                       T*                        bsr_val,
-                      rocsparse_int*            bsr_row_ptr,
-                      rocsparse_int*            bsr_col_ind);
+                      const rocsparse_int*      bsr_row_ptr,
+                      const rocsparse_int*      bsr_col_ind);
 
 // csr2gebsr_buffer_size
 REAL_COMPLEX_TEMPLATE(csr2gebsr_buffer_size,

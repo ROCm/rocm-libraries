@@ -7,6 +7,7 @@
 #include <rocRoller/Scheduling/Observers/FileWritingObserver.hpp>
 #include <rocRoller/Scheduling/Observers/RegisterLivenessObserver.hpp>
 #include <rocRoller/Scheduling/Observers/SupportedInstructionObserver.hpp>
+#include <rocRoller/Scheduling/Observers/VGPRIndexingObserver.hpp>
 
 #include <rocRoller/Scheduling/Observers/FunctionalUnit/MEMObserver.hpp>
 #include <rocRoller/Scheduling/Observers/FunctionalUnit/MFMAObserver.hpp>
@@ -34,6 +35,10 @@
 #include <rocRoller/Scheduling/Observers/WaitState/VALUWriteSGPRVMEM.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/VALUWriteVCCVDIVFMAS.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/VCMPXWrite94x.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/WMMA/VALUReadDAfterWMMAOrSWMMAC.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/WMMA/VALUWriteAfterWMMAOrSWMMACRead.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/WMMA/VALUWriteAfterWMMAOrSWMMACWrite.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/WMMA/WMMAOrSWMMACReadDAfterWMMA.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/WMMA/WMMAReadSrcD.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/WMMA/WMMAWrite.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/WMMA/WMMAWriteSrcD.hpp>
@@ -73,6 +78,10 @@ namespace rocRoller
                 WMMAReadSrcD,
                 WMMAWriteSrcD,
                 WMMAWrite,
+                WMMAOrSWMMACReadDAfterWMMA,
+                VALUReadDAfterWMMAOrSWMMAC,
+                VALUWriteAfterWMMAOrSWMMACWrite,
+                VALUWriteAfterWMMAOrSWMMACRead,
                 XDLReadSrcC908,
                 XDLReadSrcC90a,
                 XDLReadSrcC94x,
@@ -82,7 +91,8 @@ namespace rocRoller
                 // Other Observers
                 FileWritingObserver,
                 RegisterLivenessObserver,
-                SupportedInstructionObserver>
+                SupportedInstructionObserver,
+                VGPRIndexingObserver>
                 potentialObservers;
 
             return createMetaObserver(ctx, potentialObservers);

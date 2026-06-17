@@ -1026,7 +1026,10 @@ struct ReduceCommon : public testing::TestWithParam<TestCase>
         case MIOPEN_REDUCE_TENSOR_AMAX:
             inputTensor = tensor<T>{this->inLengths}.generate(gen_value_amax);
             break;
-        default: inputTensor = tensor<T>{this->inLengths}.generate(gen_value_min_max);
+
+        case MIOPEN_REDUCE_TENSOR_MIN:
+        case MIOPEN_REDUCE_TENSOR_MAX:
+            inputTensor = tensor<T>{this->inLengths}.generate(gen_value_min_max);
         };
 
         auto outputTensor = tensor<T>{outLengths};

@@ -104,6 +104,10 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/rocthrust/**/*'
 
+"project: rpp":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rpp/**/*'
+
 "shared: mxdatagenerator":
 - changed-files:
   - any-glob-to-any-file: 'shared/mxdatagenerator/**/*'
