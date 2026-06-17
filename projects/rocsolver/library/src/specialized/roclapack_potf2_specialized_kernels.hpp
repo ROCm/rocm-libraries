@@ -377,8 +377,8 @@ rocblas_status potf2_run_small(rocblas_handle handle,
         {
             return rocblas_status_internal_error;
         }
-        ROCSOLVER_LAUNCH_KERNEL(kernel[nb - 1], dim3(1, 1, batch_count), dim3(BS2, BS2, 1), lmemsize,
-                                stream, is_upper, n, A, shiftA, lda, strideA, info);
+        ROCSOLVER_LAUNCH_KERNEL(kernel[nb - 1], dim3(1, 1, batch_count), dim3(BS2, BS2, 1),
+                                lmemsize, stream, is_upper, n, A, shiftA, lda, strideA, info);
     }
     else if constexpr(BS2 == 32)
     {
@@ -391,8 +391,8 @@ rocblas_status potf2_run_small(rocblas_handle handle,
         {
             return rocblas_status_internal_error;
         }
-        ROCSOLVER_LAUNCH_KERNEL(kernel[nb - 1], dim3(1, 1, batch_count), dim3(BS2, BS2, 1), lmemsize,
-                                stream, is_upper, n, A, shiftA, lda, strideA, info);
+        ROCSOLVER_LAUNCH_KERNEL(kernel[nb - 1], dim3(1, 1, batch_count), dim3(BS2, BS2, 1),
+                                lmemsize, stream, is_upper, n, A, shiftA, lda, strideA, info);
     }
     else
     {
