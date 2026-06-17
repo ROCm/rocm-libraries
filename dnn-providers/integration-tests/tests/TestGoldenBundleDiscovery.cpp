@@ -9,6 +9,7 @@
 #include <optional>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 
 #include "harness/golden/GoldenBundleDiscovery.hpp"
 
@@ -196,6 +197,22 @@ TEST(TestSanitizeForGtest, ReplacesInvalidChars)
     EXPECT_EQ(sanitizeForGtest("hello world!"), "hello_world_");
     EXPECT_EQ(sanitizeForGtest("Conv-Fprop.v2"), "Conv_Fprop_v2");
     EXPECT_EQ(sanitizeForGtest("already_valid_123"), "already_valid_123");
+}
+
+TEST_F(TestGoldenBundleDiscoveryFixture, UnparseableJsonIsDiscoveredButLoadThrows)
+{
+    populateAllTiers();
+    auto badDir = _tempDir / "quick" / "BadOp" / "nchw" / "fp32" / "Malformed";
+    std::filesystem::create_directories(badDir);
+    std::ofstream(badDir / "Malformed.json") << "{{NOT VALID JSON AT ALL";
+
+    auto bundles = discoverGoldenBundles(_tempDir);
+    auto it = std::find_if(bundles.begin(), bundles.end(), [](const DiscoveredBundle& b) {
+        return b.testName == "Malformed";
+    });
+    ASSERT_NE(it, bundles.end()) << "Malformed bundle should be discovered (valid .json path)";
+
+    EXPECT_THROW(hipdnn_test_sdk::utilities::loadGraphAndTensors(it->jsonPath), std::exception);
 }
 
 TEST(TestTierPrefix, MatchesRfcScheme)
