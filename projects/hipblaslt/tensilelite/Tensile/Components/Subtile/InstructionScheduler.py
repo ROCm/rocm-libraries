@@ -108,6 +108,18 @@ class _SlotPlacer:
         if self._onPlace:
             self._onPlace(self, pos, item[1])
 
+    def _placeOne(self, item: Tuple[int, object], limit: int, reverse: bool) -> int:
+        """Place a single item: adjust limit (forward only), find a slot,
+        force-place when none is free, and return the chosen position."""
+        mid, inst = item
+        if not reverse:
+            limit = self.adjustLimit(limit, inst)
+        pos = self.findSlot(mid, inst, limit, reverse=reverse)
+        if pos is None:
+            pos = self._forceSlot(mid, limit, reverse)
+        self.place(pos, item, reverse=reverse)
+        return pos
+
     def placePath(self, pathInsts: List[Tuple[int, object]], reverse: bool = False,
                   multiDU: bool = False):
         """Place a sequence of (moduleId, instruction) items into slots.
@@ -122,30 +134,15 @@ class _SlotPlacer:
         insert m0 setup between them.
         """
         limit = (self.totalSlots - 1) if reverse else 0
-        if not multiDU:
-            for item in pathInsts:
-                mid, inst = item
-                if not reverse:
-                    limit = self.adjustLimit(limit, inst)
-                pos = self.findSlot(mid, inst, limit, reverse=reverse)
-                if pos is None:
-                    pos = self._forceSlot(mid, limit, reverse)
-                self.place(pos, item, reverse=reverse)
-                limit = (pos - 1) if reverse else (pos + 1)
-            return
-
         idx = 0
         while idx < len(pathInsts):
             item = pathInsts[idx]
-            mid, inst = item
-            if (not reverse and idx + 1 < len(pathInsts)
+            _, inst = item
+            if (multiDU and not reverse and idx + 1 < len(pathInsts)
                     and _isWaitGr(inst) and _isBarrier(pathInsts[idx + 1][1])):
-                if not reverse:
-                    limit = self.adjustLimit(limit, inst)
-                pos = self.findSlot(mid, inst, limit, reverse=reverse)
-                if pos is None:
-                    pos = self._forceSlot(mid, limit, reverse)
-                self.place(pos, item, reverse=reverse)
+                # Atomic wait_gr+barrier pair: keep contiguous so no
+                # interleaved path injects a GR between them.
+                pos = self._placeOne(item, limit, reverse)
                 sync_item = pathInsts[idx + 1]
                 if self._canPlace(pos, sync_item[1]):
                     self.place(pos, sync_item, reverse=reverse)
@@ -159,12 +156,7 @@ class _SlotPlacer:
                 limit = (pos - 1) if reverse else (pos + 1)
                 idx += 2
                 continue
-            if not reverse:
-                limit = self.adjustLimit(limit, inst)
-            pos = self.findSlot(mid, inst, limit, reverse=reverse)
-            if pos is None:
-                pos = self._forceSlot(mid, limit, reverse)
-            self.place(pos, item, reverse=reverse)
+            pos = self._placeOne(item, limit, reverse)
             limit = (pos - 1) if reverse else (pos + 1)
             idx += 1
 
