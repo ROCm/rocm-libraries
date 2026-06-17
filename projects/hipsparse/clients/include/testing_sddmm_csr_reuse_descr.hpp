@@ -387,17 +387,8 @@ static void call_sddmm_shared_buffer(hipsparseHandle_t&                       ha
                                                                             buffer));
                         }
 
-                        CHECK_HIPSPARSE_ERROR(hipsparseSDDMM(handle,
-                                                             transA,
-                                                             transB,
-                                                             &alpha,
-                                                             A,
-                                                             B,
-                                                             &beta,
-                                                             matC,
-                                                             typeT,
-                                                             alg,
-                                                             buffer));
+                        CHECK_HIPSPARSE_ERROR(hipsparseSDDMM(
+                            handle, transA, transB, &alpha, A, B, &beta, matC, typeT, alg, buffer));
 
                         std::vector<T> hval_out(nnz);
                         CHECK_HIP_ERROR(hipMemcpy(
