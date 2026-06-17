@@ -31,18 +31,28 @@ from rocisa.code import Label
 
 
 class SWaitCntEx(SWaitCnt):
-    """SWaitCnt with adjustVmcnt flag for the instruction scheduler post-pass."""
-    def __init__(self, adjustVmcnt=True, **kwargs):
+    """SWaitCnt with adjustVmcnt flag for the instruction scheduler post-pass.
+
+    isWaitGr is a typed marker the instruction scheduler uses to identify the
+    wait_gr SWaitCnt (instead of substring-matching the instruction comment).
+    """
+    def __init__(self, adjustVmcnt=True, isWaitGr=True, **kwargs):
         super().__init__(**kwargs)
         self._adjustVmcnt = adjustVmcnt
+        self._isWaitGr = isWaitGr
 
     @property
     def adjustVmcnt(self):
         return self._adjustVmcnt
 
+    @property
+    def isWaitGr(self):
+        return self._isWaitGr
+
     def __deepcopy__(self, memo):
         return SWaitCntEx(
             adjustVmcnt=self._adjustVmcnt,
+            isWaitGr=self._isWaitGr,
             vlcnt=self.vlcnt, vscnt=self.vscnt,
             dscnt=self.dscnt, kmcnt=self.kmcnt,
             comment=self.comment)

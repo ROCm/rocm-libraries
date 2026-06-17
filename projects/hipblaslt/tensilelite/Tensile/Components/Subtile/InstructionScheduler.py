@@ -9,7 +9,7 @@ with pluggable scheduling rules.
 
 from typing import List, Tuple, Optional
 from rocisa.code import Module
-from rocisa.instruction import SWaitCnt, MFMAInstruction, MXMFMAInstruction, \
+from rocisa.instruction import SWaitCnt, SBarrier, MFMAInstruction, MXMFMAInstruction, \
     LocalReadInstruction, GlobalReadInstruction, CommonInstruction
 
 
@@ -193,8 +193,10 @@ _isDsRead = lambda x: isinstance(x, LocalReadInstruction)
 _isBufferLoad = lambda x: isinstance(x, GlobalReadInstruction)
 _isWaitCnt = lambda x: isinstance(x, SWaitCnt)
 _isM0Update = lambda x: isinstance(x, CommonInstruction) and hasattr(x, 'dst') and hasattr(x.dst, 'regType') and x.dst.regType == 'm'
-_isWaitGr = lambda x: _isWaitCnt(x) and "Wait GR" in (getattr(x, "comment", "") or "")
-_isBarrier = lambda x: "Barrier" in (getattr(x, "comment", "") or "")
+# Typed op detection (see SWaitCntEx.isWaitGr / SBarrier) rather than matching
+# substrings in the instruction comment, which is brittle to comment edits.
+_isWaitGr = lambda x: _isWaitCnt(x) and getattr(x, "isWaitGr", False)
+_isBarrier = lambda x: isinstance(x, SBarrier)
 
 
 class _SchedulingRules:
