@@ -23,6 +23,7 @@
 
 include: test_axpby.yaml
 include: test_axpyi.yaml
+include: test_hip_debug.yaml
 include: test_doti.yaml
 include: test_dotci.yaml
 include: test_gather.yaml
