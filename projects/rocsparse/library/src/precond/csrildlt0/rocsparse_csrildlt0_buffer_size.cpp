@@ -1,5 +1,6 @@
+/*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,21 +22,25 @@
  *
  * ************************************************************************ */
 
-/*!\file
- * \brief rocsparse-version.h provides the configured version and settings
- */
+#include "../csric0/rocsparse_csric0.hpp"
+#include "rocsparse_csrildlt0.hpp"
+#include "rocsparse_utility.hpp"
 
-#ifndef ROCSPARSE_VERSION_H
-#define ROCSPARSE_VERSION_H
+namespace rocsparse
+{
+    // ILDLT(0) uses the same buffer layout as IC(0): purely symbolic, no dependency on
+    // factorization type.
+    rocsparse_status csrildlt0_analysis_buffer_size(rocsparse_handle            handle,
+                                                    rocsparse_const_spmat_descr A,
+                                                    size_t*                     buffer_size)
+    {
+        return rocsparse::csric0_analysis_buffer_size(handle, A, buffer_size);
+    }
 
-/* clang-format off */
-#define ROCSPARSE_VERSION_MAJOR     @rocsparse_VERSION_MAJOR@
-#define ROCSPARSE_VERSION_MINOR     @rocsparse_VERSION_MINOR@
-#define ROCSPARSE_VERSION_PATCH     @rocsparse_VERSION_PATCH@
-#define ROCSPARSE_VERSION_TWEAK     @rocsparse_VERSION_TWEAK@
-/* clang-format on */
-
-/* Feature flags baked in at build time. */
-#cmakedefine ROCSPARSE_WITH_ILDLT0
-
-#endif /* ROCSPARSE_VERSION_H */
+    rocsparse_status csrildlt0_solve_buffer_size(rocsparse_handle            handle,
+                                                 rocsparse_const_spmat_descr A,
+                                                 size_t*                     buffer_size)
+    {
+        return rocsparse::csric0_solve_buffer_size(handle, A, buffer_size);
+    }
+}

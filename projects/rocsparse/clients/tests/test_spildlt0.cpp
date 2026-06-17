@@ -1,5 +1,6 @@
+/*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,21 +22,16 @@
  *
  * ************************************************************************ */
 
-/*!\file
- * \brief rocsparse-version.h provides the configured version and settings
- */
+#include "test.hpp"
+#include "testing_spildlt0.hpp"
 
-#ifndef ROCSPARSE_VERSION_H
-#define ROCSPARSE_VERSION_H
-
-/* clang-format off */
-#define ROCSPARSE_VERSION_MAJOR     @rocsparse_VERSION_MAJOR@
-#define ROCSPARSE_VERSION_MINOR     @rocsparse_VERSION_MINOR@
-#define ROCSPARSE_VERSION_PATCH     @rocsparse_VERSION_PATCH@
-#define ROCSPARSE_VERSION_TWEAK     @rocsparse_VERSION_TWEAK@
-/* clang-format on */
-
-/* Feature flags baked in at build time. */
-#cmakedefine ROCSPARSE_WITH_ILDLT0
-
-#endif /* ROCSPARSE_VERSION_H */
+TEST_ROUTINE_WITH_CONFIG(spildlt0,
+                         precond,
+                         rocsparse_test_config_ijt,
+                         arg.formatA,
+                         arg.batch_count,
+                         arg.M,
+                         arg.baseA,
+                         arg.apol,
+                         arg.matrix,
+                         arg.graph_test);

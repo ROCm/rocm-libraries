@@ -1,5 +1,6 @@
+/*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,21 +22,10 @@
  *
  * ************************************************************************ */
 
-/*!\file
- * \brief rocsparse-version.h provides the configured version and settings
- */
+#pragma once
 
-#ifndef ROCSPARSE_VERSION_H
-#define ROCSPARSE_VERSION_H
+#include "rocsparse_csric0_info.hpp"
 
-/* clang-format off */
-#define ROCSPARSE_VERSION_MAJOR     @rocsparse_VERSION_MAJOR@
-#define ROCSPARSE_VERSION_MINOR     @rocsparse_VERSION_MINOR@
-#define ROCSPARSE_VERSION_PATCH     @rocsparse_VERSION_PATCH@
-#define ROCSPARSE_VERSION_TWEAK     @rocsparse_VERSION_TWEAK@
-/* clang-format on */
-
-/* Feature flags baked in at build time. */
-#cmakedefine ROCSPARSE_WITH_ILDLT0
-
-#endif /* ROCSPARSE_VERSION_H */
+// ILDLT(0) reuses IC(0)'s info structure: same symbolic data + singularity tracking.
+using _rocsparse_csrildlt0_info = _rocsparse_csric0_info;
+typedef _rocsparse_csrildlt0_info* rocsparse_csrildlt0_info;
