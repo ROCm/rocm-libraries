@@ -1,52 +1,54 @@
-# TheRock Change Required
+# TheRock / Packaging Notes
 
-To integrate `HipFlash2Engine` into the full build, the following change is
-needed in `ROCm/TheRock/ml-libs/CMakeLists.txt`.
+## Multi-arch Approach: Precompiled .co (Code Objects)
 
-Add `rocwmma` as a build-time dependency for `hipkernelprovider`:
+Following discussion with Brian Harrison (2026-06-17), we use the **precompiled
+hsaco approach** (Option 2) rather than hipRTC or static compilation.
 
-```cmake
-# In therock_cmake_subproject_declare(hipkernelprovider ...) section
-# Add rocwmma to BUILD_DEPS (after therock-nlohmann-json):
-    BUILD_DEPS
-      hipDNN
-      therock-googletest
-      therock-flatbuffers
-      therock-nlohmann-json
-      rocwmma              # <-- ADD THIS
+**Rationale:**
+- rocWMMA is NOT hipRTC-friendly (C++ template library, not single-header)
+- hipRTC compile overhead would be ~10s+ on first use
+- Precompiled `.co` files are arch-specific, no rocWMMA dependency at runtime
+
+### Precompiled Kernels (in this PR)
+
+```
+kernels/
+├── hip_flash2_fwd_gfx942.co   # MI300X / MI325X (CDNA3, 145KB)
+└── hip_flash2_fwd_gfx950.co   # MI355X / MI350X (CDNA4, 131KB)
 ```
 
-Also add the CMake arg to point to rocWMMA:
+Generated on Alola (2026-06-17) using:
+```bash
+clang++ --offload-arch=gfx942 -O3 -std=c++17 --cuda-device-only \
+    -I/opt/rocm-7.2.0/include -x hip HipFlash2FwdPlan.hip \
+    -o kernels/hip_flash2_fwd_gfx942.co
 
-```cmake
-    CMAKE_ARGS
-      -DHIP_PLATFORM=amd
-      -DROCM_PATH=
-      -DROCM_DIR=
-      -DHIPKERNELPROVIDER_ENABLE_TESTS=${THEROCK_BUILD_TESTING}
-      -DENABLE_HIP_FLASH2_ENGINE=${THEROCK_ENABLE_HIPKERNELPROVIDER}  # <-- ADD
-      -DENABLE_CLANG_TIDY=OFF
-      -DENABLE_CLANG_FORMAT=OFF
+clang++ --offload-arch=gfx950 -O3 -std=c++17 --cuda-device-only \
+    -I/opt/rocm-7.2.0/include -x hip HipFlash2FwdPlan.hip \
+    -o kernels/hip_flash2_fwd_gfx950.co
 ```
 
-## Multi-arch Notes
+### TheRock Change (simplified - NO rocWMMA needed)
 
-Brian Harrison noted that static compiled kernels are non-preferred for
-packaging. Two options discussed:
+Since the kernel is pre-compiled, **no build-time dependency on rocWMMA**.
 
-**Option A (hipRTC — preferred for no pre-compiled binaries):**
-Compile the kernel at first use via hipRTC. rocWMMA headers would need to
-be bundled as string literals. Adds ~1-2s JIT warmup on first call.
+The only TheRock change needed is to install the `.co` files with the package:
 
-**Option B (precompiled hsaco — current approach):**
-Pre-compile for each arch offline, ship as binary data:
-  - `gfx942.hsaco` → MI300X/MI325X
-  - `gfx950.hsaco` → MI355X/MI350X
+```cmake
+# In artifact-hipkernelprovider.toml or CMakeLists.txt install rules:
+install(FILES
+    src/engines/hip_flash2_engine/kernels/hip_flash2_fwd_gfx942.co
+    src/engines/hip_flash2_engine/kernels/hip_flash2_fwd_gfx950.co
+    DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/hip_flash2_kernels
+)
+```
 
-**Current implementation uses static compilation** (Option B variant via
-`--offload-arch=gfx942;gfx950` CMake flag). This is the simplest path to
-validate correctness. Migration to hsaco loading follows the ASM_SDPA_ENGINE
-pattern and can be done after performance/correctness validation.
+And set the compile definition:
+```cmake
+-DHIP_FLASH2_KERNEL_DIR="${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/hip_flash2_kernels"
+```
 
-Brian and Daryl have indicated they can guide on the preferred approach for
-their packaging requirements.
+### Runtime Loading
+
+The `HipFlas
