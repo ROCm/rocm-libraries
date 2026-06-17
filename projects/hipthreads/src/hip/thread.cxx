@@ -33,6 +33,10 @@
     #include <thread>
 #endif
 
+#ifndef HIPTHREADS_VCORES_PER_WGP
+#define HIPTHREADS_VCORES_PER_WGP 16
+#endif
+
 namespace cuda {
 
 enum {
@@ -714,8 +718,7 @@ __host__ unsigned int thread::hardware_concurrency() noexcept {
             // __LIBHIPTHREADS_HIP_CHECK__(hipDeviceGetAttribute(&physicalMultiProcessorCount, hipDeviceAttributePhysicalMultiProcessorCount, 0));
             return temp;
         }();
-        // TODO: Make this multiplier configurable
-        return multiprocessorCount * 16;
+        return multiprocessorCount * HIPTHREADS_VCORES_PER_WGP;
     }
     catch (...) {
         ::std::cerr << "Exception while fetching multiprocessorCount\n";
