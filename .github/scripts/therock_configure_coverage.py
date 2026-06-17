@@ -91,6 +91,9 @@ def main():
         # Pin to this project's own options so we don't build the merged
         # mega-group (which pulls in unrelated components like hipdnn/providers).
         proj["cmake_options"] = cmake_options
+        # Only run the coverage project's own tests, not every test in the
+        # (possibly merged) group, so the test stage matches the pinned build.
+        proj["projects_to_test"] = primary
 
         coverage_projects.append(proj)
 

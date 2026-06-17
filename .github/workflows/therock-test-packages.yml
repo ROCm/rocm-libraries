@@ -16,6 +16,10 @@ on:
         type: string
       test_type:
         type: string
+      coverage:
+        description: "When true, collect llvm profraw data from the test runs for a coverage report."
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -78,4 +82,5 @@ jobs:
       test_runs_on: ${{ inputs.test_runs_on }}
       platform: ${{ inputs.platform }}
       component: ${{ toJSON(matrix.components) }}
+      coverage: ${{ inputs.coverage }}
     secrets: inherit
