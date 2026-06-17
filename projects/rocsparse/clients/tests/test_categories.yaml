@@ -82,7 +82,6 @@ test_categories:
     description: "Quick level1 and level2 tests only"
     test_patterns:
       - "quick/*.level1*"
-      - "quick/*.level2*"
     exclude:
       - "*known_bug*"
     labels:
@@ -92,7 +91,6 @@ test_categories:
     description: "Alias of ffm-quick: quick level1 and level2 tests only"
     test_patterns:
       - "quick/*.level1*"
-      - "quick/*.level2*"
     exclude:
       - "*known_bug*"
     labels:
@@ -102,7 +100,6 @@ test_categories:
     description: "Alias of ffm-quick: quick level1 and level2 tests only"
     test_patterns:
       - "quick/*.level1*"
-      - "quick/*.level2*"
     exclude:
       - "*known_bug*"
     labels:
@@ -112,7 +109,6 @@ test_categories:
     description: "Alias of ffm-quick: quick level1 and level2 tests only"
     test_patterns:
       - "quick/*.level1*"
-      - "quick/*.level2*"
     exclude:
       - "*known_bug*"
     labels:
