@@ -83,6 +83,17 @@ class GeneratedStreamKKernelInstance : public KernelInstance
         return true;
     }
 
+    /// Device workspace (bytes) needed for `problem`. 0 for Atomic; >0 for
+    /// Linear/Tree. The Dispatcher uses this to size the buffer it owns and then
+    /// passes that buffer to the workspace-aware run() below.
+    std::size_t get_workspace_size(const Problem& problem) const override
+    {
+        return SelectedKernel::GetWorkSpaceSize(make_args(problem));
+    }
+
+    /// No-workspace entry point: delegates to the workspace-aware overload with a
+    /// null buffer, so the generated launch() falls back to its internal
+    /// (self-allocating) path. Used when the caller does not own a workspace.
     float run(const void* a_ptr,
               const void* b_ptr,
               void* c_ptr,
@@ -90,21 +101,23 @@ class GeneratedStreamKKernelInstance : public KernelInstance
               const Problem& problem,
               void* stream) const override
     {
+        return run(a_ptr, b_ptr, c_ptr, d_ptrs, /*workspace=*/nullptr, problem, stream);
+    }
+
+    /// Workspace-aware execution (PR-D). `workspace` is the Dispatcher-owned
+    /// reduction buffer (may be null for Atomic, which needs none). When non-null
+    /// the generated launch() binds it instead of allocating its own DeviceMem.
+    float run(const void* a_ptr,
+              const void* b_ptr,
+              void* c_ptr,
+              const void** d_ptrs,
+              void* workspace,
+              const Problem& problem,
+              void* stream) const override
+    {
         (void)d_ptrs; // Not used for Stream-K GEMM
 
-        // rcr strides: row-major A (K), column-major B (K), row-major C (N).
-        // k_batch is owned by the Stream-K tile partitioner, not passed here.
-        // StreamKHostArgs uses ck_tile::index_t (int32); cast from Problem's int64.
-        using idx = ck_tile::index_t;
-        ck_tile::StreamKHostArgs args{a_ptr,
-                                      b_ptr,
-                                      c_ptr,
-                                      static_cast<idx>(problem.M),
-                                      static_cast<idx>(problem.N),
-                                      static_cast<idx>(problem.K),
-                                      static_cast<idx>(problem.K),
-                                      static_cast<idx>(problem.K),
-                                      static_cast<idx>(problem.N)};
+        auto args = make_args(problem, a_ptr, b_ptr, c_ptr);
 
         const bool bench = this->benchmarking_;
         ck_tile::stream_config stream_cfg;
@@ -117,9 +130,8 @@ class GeneratedStreamKKernelInstance : public KernelInstance
         stream_cfg.flush_cache_    = false;
         stream_cfg.rotating_count_ = 1; // atomic accumulates into C; never rotate
 
-        // PR-C: workspace + reset are owned inside the generated launch().
-        // PR-D will switch to the workspace-aware run() overload so the
-        // Dispatcher owns the buffer.
+        if(workspace != nullptr)
+            return SelectedKernel::launch(args, stream_cfg, workspace);
         return SelectedKernel::launch(args, stream_cfg);
     }
 
@@ -140,6 +152,28 @@ class GeneratedStreamKKernelInstance : public KernelInstance
     }
 
     private:
+    /// Build StreamKHostArgs for `problem`. rcr strides: row-major A (K),
+    /// column-major B (K), row-major C (N). k_batch is owned by the Stream-K tile
+    /// partitioner, not passed here. Pointers default to null for sizing-only use
+    /// (GetWorkSpaceSize). StreamKHostArgs uses ck_tile::index_t (int32); cast
+    /// from Problem's int64.
+    ck_tile::StreamKHostArgs make_args(const Problem& problem,
+                                       const void* a_ptr = nullptr,
+                                       const void* b_ptr = nullptr,
+                                       void* c_ptr       = nullptr) const
+    {
+        using idx = ck_tile::index_t;
+        return ck_tile::StreamKHostArgs{a_ptr,
+                                        b_ptr,
+                                        c_ptr,
+                                        static_cast<idx>(problem.M),
+                                        static_cast<idx>(problem.N),
+                                        static_cast<idx>(problem.K),
+                                        static_cast<idx>(problem.K),
+                                        static_cast<idx>(problem.K),
+                                        static_cast<idx>(problem.N)};
+    }
+
     KernelKey key_;
     std::string name_;
 };
