@@ -34,6 +34,7 @@
 #include "ClientProblemFactory.hpp"
 #include "Rotating.hpp"
 
+#include <cassert>
 #include <cstddef>
 #include <random>
 
@@ -275,9 +276,13 @@ namespace TensileLite
             {
                 if(m_availableSlots > 0)
                 {
-                    // Advance to the next pre-filled buffer in the ring.
-                    // Caller must waitCopyDone() before the buffer is
-                    // actually used (done in main.cpp before benchmark_runs).
+                    // The ring is only ever filled under ringEligible() (enforced in
+                    // beginAsyncReset), i.e. BoundsCheck::Disable and !problemDependent.
+                    // Under those conditions the typed overloads' GuardPage flip and
+                    // conditional CPU-init are both no-ops, so bypassing the dynamic_cast
+                    // dispatch is exact, not approximate.  Caller must waitCopyDone()
+                    // before use (main.cpp before benchmark_runs).
+                    assert(ringEligible());
                     advanceBuffer();
                     return m_cachedGPUInputs;
                 }
@@ -355,7 +360,7 @@ namespace TensileLite
             // using the buffer (done in main.cpp before benchmark_runs).
             void beginAsyncReset(ContractionProblem const* problem)
             {
-                if(!m_hasAltBuffers || !m_copyStream)
+                if(!ringEligible())
                     return;
                 if(m_availableSlots >= m_numActiveBuffers - 1)
                     return; // all non-active slots already have pending DMA
@@ -1156,6 +1161,27 @@ namespace TensileLite
                           hipStream_t                   targetStream);
 
             void initializeAltBufferSets(ContractionProblemGemm const& problem);
+
+            // True when the ring may serve pre-filled slots in place of re-running the
+            // typed prepareGPUInputs dispatch.  This is the SINGLE source of truth for
+            // "ring is usable"; every site that fills, advances, or consumes a slot must
+            // agree with it.
+            //
+            // m_availableSlots > 0 is only a valid proxy for "safe to bypass dispatch"
+            // when this predicate holds.  Gating beginAsyncReset on ringEligible() makes
+            // that implication provable: the only writer that increments m_availableSlots
+            // has already verified all three conditions below.
+            //
+            // NOTE: swizzle/MX are handled by fillSlot degrading to its slow path;
+            // they do not disqualify the ring, they only force a full re-fill.
+            bool ringEligible() const
+            {
+                return m_hasAltBuffers
+                    && m_copyStream
+                    && m_gpuInit
+                    && m_curBoundsCheck == BoundsCheckMode::Disable
+                    && !m_problemDependentData;
+            }
 
             // Advance to the next buffer in the ring.
             void advanceBuffer()
