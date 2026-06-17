@@ -52,6 +52,7 @@
     "block_size",
     "gemm_m_per_block",
     "gemm_n_per_block",
+    "gemm_k_per_block",
     "pipeline",
     "num_warps",
     "tile_volume",
