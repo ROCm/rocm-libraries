@@ -72,9 +72,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
             hipdnn_data_sdk::utilities::engineNameToId(config.engine_name));
     }
 
-    auto qAttr = createTensor({batch, numHeads, seqLen, headDim}, inputType, layout);
-    auto kAttr = createTensor({batch, numHeads, seqLen, headDim}, inputType, layout);
-    auto vAttr = createTensor({batch, numHeads, seqLen, headDim}, inputType, layout);
+    auto qAttr = createTensor({BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM}, inputType, layout);
+    auto kAttr = createTensor({BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM}, inputType, layout);
+    auto vAttr = createTensor({BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM}, inputType, layout);
 
     graph::SdpaAttributes sdpaAttributes;
     sdpaAttributes.set_name("sdpa_fprop_node");

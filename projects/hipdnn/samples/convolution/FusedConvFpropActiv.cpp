@@ -77,9 +77,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     graph::ConvFpropAttributes convAttributes;
     convAttributes.set_name("conv_fprop_node");
-    convAttributes.set_padding({PAD_H, PAD_W});
-    convAttributes.set_stride({U, V});
-    convAttributes.set_dilation({DIL_H, DIL_W});
+    convAttributes.set_padding({padH, padW});
+    convAttributes.set_stride({u, v});
+    convAttributes.set_dilation({dilH, dilW});
 
     auto yAttr = graph->conv_fprop(xAttr, wAttr, convAttributes);
     yAttr->set_output(false);
@@ -135,7 +135,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<InputType> pointwiseOutRefTensor(pointwiseOutAttr->get_dim(), layout);
 
         hipdnn_test_sdk::utilities::CpuFpReferenceConvolution::fprop(
-            xTensor, wTensor, yRefTensor, {U, V}, {DIL_H, DIL_W}, {PAD_H, PAD_W});
+            xTensor, wTensor, yRefTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
         hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
             hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,

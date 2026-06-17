@@ -303,19 +303,19 @@ bool run(F&& f)
 
 // TENSOR HELPERS
 
-inline std::shared_ptr<hipdnn_frontend::graph::Tensor_attributes>
+inline std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>
     createTensor(const std::vector<int64_t>& dims,
                  hipdnn_frontend::DataType_t dataType,
                  const TensorLayout& layout = TensorLayout::NCHW)
 {
-    auto tensor = std::make_shared<hipdnn_frontend::graph::Tensor_attributes>();
+    auto tensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     tensor->set_dim(dims).set_data_type(dataType).set_stride(
         hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder));
     return tensor;
 }
 
 inline int64_t
-    getTensorElementCount(const std::shared_ptr<hipdnn_frontend::graph::Tensor_attributes>& tensor)
+    getTensorElementCount(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& tensor)
 {
     int64_t count = 1;
     for(auto dim : tensor->get_dim())

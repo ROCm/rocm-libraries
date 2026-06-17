@@ -22,9 +22,9 @@ namespace
 template <typename InputType>
 void executeConvFpropGraph(graph::Graph& graph,
                            hipdnnHandle_t handle,
-                           const std::shared_ptr<graph::Tensor_attributes>& xAttr,
-                           const std::shared_ptr<graph::Tensor_attributes>& wAttr,
-                           const std::shared_ptr<graph::Tensor_attributes>& yAttr,
+                           const std::shared_ptr<graph::TensorAttributes>& xAttr,
+                           const std::shared_ptr<graph::TensorAttributes>& wAttr,
+                           const std::shared_ptr<graph::TensorAttributes>& yAttr,
                            utilities::Tensor<InputType>& xTensor,
                            utilities::Tensor<InputType>& wTensor,
                            utilities::Tensor<InputType>& yTensor)

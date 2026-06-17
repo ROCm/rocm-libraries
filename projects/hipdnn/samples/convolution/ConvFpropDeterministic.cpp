@@ -76,14 +76,14 @@ bool SampleRunner::operator()(const TensorLayout& layout)
             hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID);
     }
 
-    auto xAttr = createTensor({N, C, H, W}, inputType, layout);
-    auto wAttr = createTensor({K, C, R, S}, inputType, layout);
+    auto xAttr = createTensor({n, c, h, w}, inputType, layout);
+    auto wAttr = createTensor({k, c, r, s}, inputType, layout);
 
     graph::ConvFpropAttributes convAttributes;
     convAttributes.set_name("conv_fprop_deterministic_node");
-    convAttributes.set_padding({PAD_H, PAD_W});
-    convAttributes.set_stride({U, V});
-    convAttributes.set_dilation({DIL_H, DIL_W});
+    convAttributes.set_padding({padH, padW});
+    convAttributes.set_stride({u, v});
+    convAttributes.set_dilation({dilH, dilW});
 
     auto yAttr = graph->conv_fprop(xAttr, wAttr, convAttributes);
     yAttr->set_output(true);
@@ -176,7 +176,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<InputType> yRefTensor(yAttr->get_dim(), layout);
 
         hipdnn_test_sdk::utilities::CpuFpReferenceConvolution::fprop(
-            xTensor, wTensor, yRefTensor, {U, V}, {DIL_H, DIL_W}, {PAD_H, PAD_W});
+            xTensor, wTensor, yRefTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
         auto tolerance = hipdnn_test_sdk::utilities::conv::getToleranceFwd<InputType>();
 

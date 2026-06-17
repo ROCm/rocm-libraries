@@ -74,14 +74,14 @@ bool SampleRunner::operator()(const TensorLayout& layout)
             hipdnn_data_sdk::utilities::engineNameToId(config.engine_name));
     }
 
-    auto xAttr = createTensor({N, C, H, W}, inputType, layout);
-    auto wAttr = createTensor({K, C, R, S}, inputType, layout);
+    auto xAttr = createTensor({n, c, h, w}, inputType, layout);
+    auto wAttr = createTensor({k, c, r, s}, inputType, layout);
 
     graph::ConvFpropAttributes convAttributes;
     convAttributes.set_name("conv_fprop_node");
-    convAttributes.set_padding({PAD_H, PAD_W});
-    convAttributes.set_stride({U, V});
-    convAttributes.set_dilation({DIL_H, DIL_W});
+    convAttributes.set_padding({padH, padW});
+    convAttributes.set_stride({u, v});
+    convAttributes.set_dilation({dilH, dilW});
 
     auto convOutAttr = graph->conv_fprop(xAttr, wAttr, convAttributes);
     // Explicitly set output dimensions and strides so we can derive the bias shape.
@@ -159,7 +159,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         // Step 1: Compute convolution output
         utilities::Tensor<InputType> convRefTensor(convOutAttr->get_dim(), layout);
         hipdnn_test_sdk::utilities::CpuFpReferenceConvolution::fprop(
-            xTensor, wTensor, convRefTensor, {U, V}, {DIL_H, DIL_W}, {PAD_H, PAD_W});
+            xTensor, wTensor, convRefTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
         // Step 2: Add bias using pointwise ADD with broadcasting
         utilities::Tensor<InputType> biasRefTensor(convOutAttr->get_dim(), layout);

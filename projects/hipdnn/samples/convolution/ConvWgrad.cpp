@@ -77,10 +77,10 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     graph::ConvWgradAttributes convAttributes;
     convAttributes.set_name("conv_backward_weights_node");
-    convAttributes.set_pre_padding({PAD_H, PAD_W});
-    convAttributes.set_post_padding({PAD_H, PAD_W});
-    convAttributes.set_stride({U, V});
-    convAttributes.set_dilation({DIL_H, DIL_W});
+    convAttributes.set_pre_padding({padH, padW});
+    convAttributes.set_post_padding({padH, padW});
+    convAttributes.set_stride({u, v});
+    convAttributes.set_dilation({dilH, dilW});
 
     auto dwAttr = graph->conv_wgrad(dyAttr, xAttr, convAttributes);
     dwAttr->set_output(true);
@@ -128,7 +128,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<InputType> dwRefTensor(dwAttr->get_dim(), layout);
 
         hipdnn_test_sdk::utilities::CpuFpReferenceConvolution::wgrad(
-            xTensor, dwRefTensor, dyTensor, {U, V}, {DIL_H, DIL_W}, {PAD_H, PAD_W});
+            xTensor, dwRefTensor, dyTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
         auto absoluteTolerance = hipdnn_test_sdk::utilities::conv::
             calculateConvWrwTolerance<InputType, InputType, float>(
