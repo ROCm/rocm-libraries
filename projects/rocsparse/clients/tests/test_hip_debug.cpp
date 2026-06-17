@@ -1,5 +1,6 @@
+/*! \file */
 /* ************************************************************************
- * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,17 +22,7 @@
  *
  * ************************************************************************ */
 
-#pragma once
+#include "test.hpp"
+#include "testing_hip_debug.hpp"
 
-#include <memory>
-
-#include "stinkytofu/Export.hpp"
-
-namespace stinkytofu {
-class Pass;
-
-/// Creates a pass that schedules local reads later in the block to hide
-/// latency (schedule-final-LRs-with-latency heuristic).
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createScheduleLastLRsPass();
-
-}  // namespace stinkytofu
+TEST_ROUTINE(hip_debug, auxiliary, arg.M, arg.nnz);

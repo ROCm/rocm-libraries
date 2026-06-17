@@ -20,18 +20,34 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-
 #pragma once
 
-#include <memory>
+// Interface for post-dataflow rewriters that improve a WaitInsertionPlan.
+//
+// Optimizers run AFTER WaitDataflow has produced a sound (conservative) plan
+// and BEFORE the emit phase materialises waits in IR. They may relax anchor
+// waits and record predecessor-tail drains, but they must never make the
+// plan less safe.
 
-#include "stinkytofu/Export.hpp"
+#include "stinkytofu/transforms/asm/waitcnt/WaitDataflow.hpp"
+#include "stinkytofu/transforms/asm/waitcnt/WaitPlan.hpp"
 
 namespace stinkytofu {
-class Pass;
+class Function;
 
-/// Creates a pass that schedules local reads earlier in the block to hide
-/// latency (schedule-first-LRs-with-latency heuristic).
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createScheduleFirstLRsPass();
+namespace waitcnt {
 
+class WaitPlanOptimizer {
+   public:
+    virtual ~WaitPlanOptimizer() = default;
+
+    /// Human-readable name for debug / logging.
+    virtual const char* getName() const = 0;
+
+    /// Rewrite `plan` in place. `dfr` is the converged dataflow result
+    /// (per-block entry/exit states). `func` gives access to CFG structure.
+    virtual void rewrite(WaitInsertionPlan& plan, const DataflowResult& dfr, Function& func) = 0;
+};
+
+}  // namespace waitcnt
 }  // namespace stinkytofu

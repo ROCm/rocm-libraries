@@ -129,6 +129,12 @@ test_categories:
       - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16.ConvHipImplicitGemmV4R1Fwd/0"
       - "Full/GPU_MIOpenDriverConv2dTransTest*"
       - "Full/GPU_MIOpenDriverRegressionBigTensorTest_FP32"
+      - "Full/GPU_UnitTestConvSolverImplicitGemmGroupFwdXdlops_LargeStride_*"
+      - "Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_LargeStride_*"
+      - "Full/GPU_UnitTestConvSolverImplicitGemmGroupBwdXdlops_LargeStride_*"
+      - "Full/GPU_UnitTestConvSolverImplicitGemm3DGroupBwdXdlops_LargeStride_*"
+      - "Full/GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_LargeStride_*"
+      - "Full/GPU_UnitTestConvSolverImplicitGemm3DGroupWrwXdlops_LargeStride_*"
       # Large BN tests - full suite only
       - "Full/GPU_BNCKFWDTrainLarge2D_*"
       - "Full/GPU_BNOCLFWDTrainLarge2D_*"
@@ -222,6 +228,10 @@ test_categories:
       - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16.ConvHipImplicitGemmV4R1Fwd/0"
       - "Full/GPU_MIOpenDriverConv2dTransTest*"
       - "Full/GPU_MIOpenDriverRegressionBigTensorTest_FP32"
+      # Exclude FP16 and FP32 (the _FP* glob matches both but not BFP16) — they
+      # share the same dispatch code path and stay in full. Keep BFP16 in
+      # comprehensive (nightly) for coverage.
+      - "Full/GPU_UnitTestConvSolverImplicitGemm*Xdlops_LargeStride_FP*"
       # Only exclude explicitly disabled tests
       - "*DISABLED*"
 

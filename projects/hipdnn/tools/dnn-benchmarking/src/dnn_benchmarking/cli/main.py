@@ -69,7 +69,7 @@ def main() -> int:
     # Backend-specific startup is the authoritative GPU availability check:
     # PyTorch mode requires GPU-enabled torch, while hipDNN mode creates a real
     # hipdnn_frontend.Handle after applying any configured plugin paths. Do not
-    # gate here on telemetry tools such as rocm-smi/amdsmi; they are optional
+    # gate here on telemetry tools such as amd-smi; they are optional
     # and can be absent even when execution is valid.
     if getattr(args, "internal_profiling_run", False):
         return run_internal_profiling(args)
