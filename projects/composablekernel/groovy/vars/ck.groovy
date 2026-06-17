@@ -1011,14 +1011,12 @@ def buildAndTest(Map conf=[:]){
                         }
                         if (params.hipTensor_test && arch == "gfx90a" ){
                             // build and test hipTensor on gfx90a node
-                            sh """#!/bin/bash
-                                rm -rf rocm-libraries
-                                git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
-                                cd rocm-libraries
-                                git sparse-checkout init --cone
-                                git sparse-checkout set projects/hiptensor
-                                git checkout "${params.hipTensor_branch}"
-                            """
+                            dir("rocm-libraries"){
+                               sh """#!/bin/bash
+                                  git sparse-checkout add projects/hiptensor
+                                  git checkout "${params.hipTensor_branch}"
+                               """
+                            }
                             dir("rocm-libraries/projects/hiptensor"){
                                 sh """#!/bin/bash
                                     mkdir -p build
