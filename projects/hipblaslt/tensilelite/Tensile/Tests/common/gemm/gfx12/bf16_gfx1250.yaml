@@ -68,6 +68,7 @@ BenchmarkProblems:
           - [16, 16, 32, 1,  1,  1, 1,  2, 1 ]
           - [16, 16, 32, 1,  1,  1, 1,  2, 1 ]
           - [16, 16, 32, 1,  1,  1, 1,  1, 1]
+          - [16, 16, 32, 1,  1,  4, 4,  2, 2 ]
 
         - DepthU: [32]
         - TransposeLDS: [-1]
@@ -93,6 +94,15 @@ BenchmarkProblems:
         - AssertFree0ElementMultiple: [1]
         - AssertFree1ElementMultiple: [1]
         # - AssertSummationElementMultiple: [32]
+        - Groups:
+          -
+            - SourceSwap: True
+            - StoreRemapVectorWidth: 0
+          -
+            - SourceSwap: False
+            - StoreRemapVectorWidth: -1
+            - VectorWidthA: 1
+            - VectorWidthB: 1
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -142,6 +152,7 @@ BenchmarkProblems:
           - [16, 16, 32, 1,  1,  1, 1,  2, 1 ]
           - [16, 16, 32, 1,  1,  1, 1,  2, 1 ]
           - [16, 16, 32, 1,  1,  1, 1,  1, 1]
+          - [16, 16, 32, 1,  1,  4, 4,  2, 2 ]
 
         - DepthU: [32]
         - TransposeLDS: [-1]
@@ -167,6 +178,15 @@ BenchmarkProblems:
         - AssertFree0ElementMultiple: [1]
         - AssertFree1ElementMultiple: [1]
         # - AssertSummationElementMultiple: [32]
+        - Groups:
+          -
+            - SourceSwap: True
+            - StoreRemapVectorWidth: 0
+          -
+            - SourceSwap: False
+            - StoreRemapVectorWidth: -1
+            - VectorWidthA: 1
+            - VectorWidthB: 1
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -216,6 +236,7 @@ BenchmarkProblems:
           - [16, 16, 32, 1,  1,  1, 1,  2, 1 ]
           - [16, 16, 32, 1,  1,  1, 1,  2, 1 ]
           - [16, 16, 32, 1,  1,  1, 1,  1, 1]
+          - [16, 16, 32, 1,  1,  4, 4,  2, 2 ]
 
         - DepthU: [32]
         - TransposeLDS: [-1]
@@ -241,6 +262,15 @@ BenchmarkProblems:
         - AssertFree0ElementMultiple: [1]
         - AssertFree1ElementMultiple: [1]
         # - AssertSummationElementMultiple: [32]
+        - Groups:
+          -
+            - SourceSwap: True
+            - StoreRemapVectorWidth: 0
+          -
+            - SourceSwap: False
+            - StoreRemapVectorWidth: -1
+            - VectorWidthA: 1
+            - VectorWidthB: 1
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -290,6 +320,7 @@ BenchmarkProblems:
           - [16, 16, 32, 1,  1,  1, 1,  2, 1 ]
           - [16, 16, 32, 1,  1,  1, 1,  2, 1 ]
           - [16, 16, 32, 1,  1,  1, 1,  1, 1]
+          - [16, 16, 32, 1,  1,  4, 4,  2, 2 ]
 
         - DepthU: [32]
         - TransposeLDS: [-1]
@@ -315,6 +346,15 @@ BenchmarkProblems:
         - AssertFree0ElementMultiple: [1]
         - AssertFree1ElementMultiple: [1]
         # - AssertSummationElementMultiple: [32]
+        - Groups:
+          -
+            - SourceSwap: True
+            - StoreRemapVectorWidth: 0
+          -
+            - SourceSwap: False
+            - StoreRemapVectorWidth: -1
+            - VectorWidthA: 1
+            - VectorWidthB: 1
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:

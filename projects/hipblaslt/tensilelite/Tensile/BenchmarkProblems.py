@@ -40,7 +40,8 @@ from Tensile.KernelWriter import DebugConfig
 from Tensile.KernelHelperNaming import KernelHelperEnum, initHelperKernelObjects
 from Tensile.Toolchain.Component import Assembler
 from Tensile.SolutionStructs.Problem import ProblemType, ProblemSizes
-from Tensile.SolutionStructs.Solution import Solution, printTypeMismatchSummary
+from Tensile.SolutionStructs.Solution import Solution
+from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, \
                                                                  validateMIParameters
 from Tensile.SolutionStructs.Naming import getKeyNoInternalArgs, getSolutionNameMin, getKernelNameMin
@@ -195,7 +196,7 @@ def _build_and_validate_solution(solution, assembler, debugConfig, isaInfoMap, s
                 debugConfig.printSolutionRejectionReason,
                 debugConfig.printIndexAssignmentInfo,
                 assembler,
-                isaInfoMap
+                isaInfoMap,
             )
             if solutionObject["Valid"]:
                 return solutionObject
@@ -203,6 +204,9 @@ def _build_and_validate_solution(solution, assembler, debugConfig, isaInfoMap, s
                 print1("rejecting solution " + str(solution))
         elif not silent and debugConfig.printSolutionRejectionReason:
             print1("rejecting solution " + str(solution))
+    except ConfigTypeError:
+        # Re-raise so this is not swallowed by the generic except below.
+        raise
     except Exception as e:
         if not silent:
             print(f"Error processing permutation: {e}")
@@ -263,7 +267,7 @@ def _getCustomKernelSolutionObj(
                debugConfig.printSolutionRejectionReason,
                debugConfig.printIndexAssignmentInfo,
                assembler,
-               isaInfoMap
+               isaInfoMap,
            )
 
     return sol
@@ -524,7 +528,8 @@ def writeBenchmarkFiles(
     return codeObjectFiles, libraryFileRel
 
 
-def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConfig, problemSizeGroupIdx, useCache,
+def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConfig, problemSizeGroupIdx,
+                          outerBenchmarkIdx, configPath, useCache,
                          asmToolchain: AssemblyToolchain, srcToolchain: SourceToolchain, cCompiler: str,
                          buildTmpPath: Path, benchmarkProblemsPath: Path,
                          debugConfig: DebugConfig, deviceId: int,
@@ -548,7 +553,13 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
     print1("# Converting Config to BenchmarkProcess Object")
     print1(HR)
     print1("")
-    benchmarkProcess = BenchmarkProcess(problemTypeConfig, problemSizeGroupConfig, debugConfig.printIndexAssignmentInfo)
+    # Pass the YAML location prefix so type-mismatch errors carry a clear
+    # path like ``BenchmarkProblems[<outer>][<1+sizeGroup>].ForkParameters.<Key>``.
+    keyPathPrefix = f"BenchmarkProblems[{outerBenchmarkIdx}][{1 + problemSizeGroupIdx}]"
+    benchmarkProcess = BenchmarkProcess(
+        problemTypeConfig, problemSizeGroupConfig, debugConfig.printIndexAssignmentInfo,
+        keyPathPrefix=keyPathPrefix, srcFile=configPath,
+    )
 
     enableTileSelection = benchmarkProcess.problemType["TileAwareSelection"]
     groupName = "{}_{:02d}".format(str(benchmarkProcess.problemType), problemSizeGroupIdx)
@@ -839,7 +850,13 @@ def main(
     benchmarkDataPath = ensurePath(outputPath / BENCHMARK_DATA_DIR)
 
     totalTestFails = 0
-    for benchmarkProblemTypeConfig in config:
+    # Recover the originating YAML path (or first of a list) so input-YAML
+    # validation errors can carry a file:line prefix in their message.
+    configPath = globalParameters.get("ConfigPath", "")
+    if isinstance(configPath, (list, tuple)):
+        configPath = configPath[0] if configPath else ""
+
+    for outerIdx, benchmarkProblemTypeConfig in enumerate(config):
         problemTypeConfig = benchmarkProblemTypeConfig[0]
         if len(benchmarkProblemTypeConfig) < 2:
             problemSizeGroupConfigs = [{}]
@@ -872,6 +889,8 @@ def main(
                             problemTypeConfig=problemTypeConfig,
                             problemSizeGroupConfig=sizeGroupConfig,
                             problemSizeGroupIdx=idx,
+                            outerBenchmarkIdx=outerIdx,
+                            configPath=configPath,
                             useCache=useCache,
                             asmToolchain=asmToolchain,
                             srcToolchain=srcToolchain,
@@ -907,9 +926,6 @@ def main(
             else:
                 print1("# {}_{:02d} already benchmarked; skipping." \
                         .format(str(problemTypeObj), idx) )
-
-    # Print summary of any parameter type mismatches found during ProblemType creation
-    printTypeMismatchSummary()
 
     if globalParameters["ExitOnFails"] and totalTestFails:
         sys.exit(1)

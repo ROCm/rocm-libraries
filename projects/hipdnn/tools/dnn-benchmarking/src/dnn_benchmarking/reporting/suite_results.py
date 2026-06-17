@@ -356,7 +356,11 @@ class SuiteMetadata:
         fail_combinations: Combinations that failed correctness.
         skip_combinations: Combinations skipped (unsupported).
         error_combinations: Combinations that errored during execution.
-        rocm_version: ROCm version string.
+        rocm_version: ROCm/HIP version string (None on CUDA hosts).
+        cuda_version: CUDA toolkit version the torch wheel was built
+            against (None on ROCm hosts).
+        cudnn_version: cuDNN version string, decoded major.minor.patch
+            (None on ROCm hosts or when cuDNN is unavailable).
         gpu_model: GPU model name.
         gpu_arch: GPU gfx target (e.g. "gfx90a", "gfx942"). Useful for
             keying arch-specific PMC counter sets when analysing the
@@ -392,6 +396,8 @@ class SuiteMetadata:
     skip_combinations: int
     error_combinations: int
     rocm_version: Optional[str] = None
+    cuda_version: Optional[str] = None
+    cudnn_version: Optional[str] = None
     gpu_model: Optional[str] = None
     gpu_arch: Optional[str] = None
     python_version: Optional[str] = None
@@ -422,6 +428,8 @@ class SuiteMetadata:
             "skip_combinations": self.skip_combinations,
             "error_combinations": self.error_combinations,
             "rocm_version": self.rocm_version,
+            "cuda_version": self.cuda_version,
+            "cudnn_version": self.cudnn_version,
             "gpu_model": self.gpu_model,
             "gpu_arch": self.gpu_arch,
             "python_version": self.python_version,
@@ -503,6 +511,8 @@ class SuiteResult:
             skip_combinations=total_skip,
             error_combinations=total_error,
             rocm_version=env_info.get("rocm_version"),
+            cuda_version=env_info.get("cuda_version"),
+            cudnn_version=env_info.get("cudnn_version"),
             gpu_model=env_info.get("gpu_model"),
             gpu_arch=env_info.get("gpu_arch"),
             python_version=env_info.get("python_version"),
@@ -555,20 +565,42 @@ class SuiteResult:
         p.write_text(self.to_json())
 
 
+def _format_cudnn_version(raw: Optional[int]) -> Optional[str]:
+    """Decode the packed integer from ``torch.backends.cudnn.version()``.
+
+    torch exposes cuDNN's version only as a packed int (e.g. ``92000``),
+    so we decode it to a human-readable ``major.minor.patch`` string.
+    cuDNN 9+ packs as ``major*10000 + minor*100 + patch``; earlier
+    releases used ``major*1000 + minor*100 + patch``. Returns ``None``
+    for a missing/zero version.
+    """
+    if not raw:
+        return None
+    if raw >= 90000:
+        major, minor, patch = raw // 10000, (raw % 10000) // 100, raw % 100
+    else:
+        major, minor, patch = raw // 1000, (raw % 1000) // 100, raw % 100
+    return f"{major}.{minor}.{patch}"
+
+
 def collect_environment_info() -> Dict[str, Any]:
-    """Collect ROCm/GPU/Python/hipDNN versions plus static machine metadata.
+    """Collect ROCm/CUDA/GPU/Python/hipDNN versions plus static machine metadata.
 
     Combines the legacy version probes (torch hip, hipdnn_frontend) with
     the host- and GPU-side static info from
-    :func:`metrics.machine_info.collect_machine_info`. Never raises;
-    missing values are ``None`` so :class:`SuiteMetadata` can serialise
-    a stable shape.
+    :func:`metrics.machine_info.collect_machine_info`. On a CUDA host the
+    ROCm/hipDNN probes stay ``None`` and ``cuda_version``/``cudnn_version``
+    are populated instead (and vice versa on ROCm). Never raises; missing
+    values are ``None`` so :class:`SuiteMetadata` can serialise a stable
+    shape.
     """
     python_version = (
         f"{sys.version_info.major}.{sys.version_info.minor}"
         f".{sys.version_info.micro}"
     )
     rocm_version: Optional[str] = None
+    cuda_version: Optional[str] = None
+    cudnn_version: Optional[str] = None
     gpu_model: Optional[str] = None
     hipdnn_version: Optional[str] = None
 
@@ -578,6 +610,14 @@ def collect_environment_info() -> Dict[str, Any]:
 
             if hasattr(torch.version, "hip"):
                 rocm_version = torch.version.hip
+            if torch_support.is_cuda_build():
+                cuda_version = getattr(torch.version, "cuda", None)
+                try:
+                    cudnn_version = _format_cudnn_version(
+                        torch.backends.cudnn.version()
+                    )
+                except Exception:
+                    cudnn_version = None
             if torch_support.gpu_available():
                 gpu_model = torch.cuda.get_device_name(0)
     except Exception:
@@ -598,6 +638,8 @@ def collect_environment_info() -> Dict[str, Any]:
 
     info: Dict[str, Any] = {
         "rocm_version": rocm_version,
+        "cuda_version": cuda_version,
+        "cudnn_version": cudnn_version,
         "gpu_model": gpu_model,
         "gpu_arch": gpu_arch,
         "python_version": python_version,

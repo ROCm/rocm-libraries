@@ -75,7 +75,7 @@ Independent dependency-checks for Unit + Performance + QA tests in utilities/tes
 - libsnd (For AUDIO tests - if RPP_AUDIO_AUGMENTATIONS_SUPPORT is enabled, to decide if RPP Audio tests script can be built and executed)
 - NIFTI (For VOXEL tests - to decide if RPP Voxel QA tests script can be built and executed)
 - OpenCV (Optional — enables decoder_type 1, unit image dumps, voxel slice JPGs; Tensor_image/voxel build without it when absent)
-- RGB inputs (decoder_type 0): Tensor-Image tests expect pre-decoded ``.rgb`` files with an embedded 24-byte header; 
+- RGB inputs (decoder_type 0): Tensor-Image tests expect pre-decoded ``.rgb`` files with an embedded 24-byte header;
     Generate or refresh them with the scripts under ``utilities/test_suite/scripts/`` (see ``scripts/README.md``)
 ]]
 

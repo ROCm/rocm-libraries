@@ -441,6 +441,8 @@ def test_benchmark_problem_type_passes_backend_config_and_runner(monkeypatch, tm
         problemTypeConfig={"OperationType": "GEMM", "DataType": "f32"},
         problemSizeGroupConfig=_minimal_problem_size_group_cfg(),
         problemSizeGroupIdx=0,
+        outerBenchmarkIdx=0,
+        configPath="/tmp/cfg.yaml",
         useCache=False,
         asmToolchain=types.SimpleNamespace(assembler=object()),
         srcToolchain=types.SimpleNamespace(compiler="cc"),
@@ -475,7 +477,6 @@ def test_main_ignores_solution_pool_for_backend_without_support(monkeypatch, tmp
     monkeypatch.setattr(BP, "_loadSolutionPool", lambda _files: (_ for _ in ()).throw(AssertionError("should not load pool")))
     monkeypatch.setattr(BP, "_benchmarkProblemType", lambda **_kw: (str(tmp_path / "res"), 0))
     monkeypatch.setattr(BP, "printWarning", lambda *_a, **_kw: None)
-    monkeypatch.setattr(BP, "printTypeMismatchSummary", lambda: None)
     monkeypatch.setitem(BP.globalParameters, "ForceRedoBenchmarkProblems", True)
     monkeypatch.setitem(BP.globalParameters, "CSVExportWinner", False)
     monkeypatch.setitem(BP.globalParameters, "ExitOnFails", False)
@@ -554,7 +555,6 @@ def test_main_invalid_backend_type_exits(monkeypatch, tmp_path):
 def test_main_backend_config_none_is_normalized(monkeypatch, tmp_path):
     captured = {}
     monkeypatch.setattr(BP, "_benchmarkProblemType", lambda **kw: (captured.setdefault("backend", kw["backendConfig"]), ("results.csv", 0))[1])
-    monkeypatch.setattr(BP, "printTypeMismatchSummary", lambda: None)
     monkeypatch.setitem(BP.globalParameters, "ForceRedoBenchmarkProblems", True)
     monkeypatch.setitem(BP.globalParameters, "CSVExportWinner", False)
     monkeypatch.setitem(BP.globalParameters, "ExitOnFails", False)
@@ -615,7 +615,6 @@ def test_main_loads_solution_pool_when_backend_supports_it(monkeypatch, tmp_path
     monkeypatch.setattr(BP.BackendFactory, "create", lambda _name: _PoolBackend())
     monkeypatch.setattr(BP, "_loadSolutionPool", lambda files: loaded.setdefault("files", files) or {"k": []})
     monkeypatch.setattr(BP, "_benchmarkProblemType", lambda **_kw: (str(tmp_path / "res"), 0))
-    monkeypatch.setattr(BP, "printTypeMismatchSummary", lambda: None)
     monkeypatch.setitem(BP.globalParameters, "ForceRedoBenchmarkProblems", True)
     monkeypatch.setitem(BP.globalParameters, "CSVExportWinner", False)
     monkeypatch.setitem(BP.globalParameters, "ExitOnFails", False)
@@ -684,6 +683,8 @@ def test_benchmark_problem_type_cached_runner_build_only_path(monkeypatch, tmp_p
         problemTypeConfig={"OperationType": "GEMM", "DataType": "f32"},
         problemSizeGroupConfig=_minimal_problem_size_group_cfg(),
         problemSizeGroupIdx=0,
+        outerBenchmarkIdx=0,
+        configPath="/tmp/cfg.yaml",
         useCache=True,
         asmToolchain=types.SimpleNamespace(assembler=object()),
         srcToolchain=types.SimpleNamespace(compiler="cc"),
