@@ -370,13 +370,12 @@ namespace TensileLite
 
                 // Warm path: this slot was filled by fillSlot (via
                 // initializeAltBufferSets) and no kernel has ever written to
-                // it — the benchmark loop only dispatches kernels to the
-                // active slot, never to alt slots.  Therefore A/B/C/D still
-                // hold the values fillSlot put there.  D's initialized value
-                // is irrelevant because the next kernel fully overwrites it,
-                // but that is a secondary observation, not the safety
-                // justification.  Skip the DMA; record a no-op event as a
-                // sync marker.
+                // it — the benchmark loop only dispatches to the active slot,
+                // never to alt slots.  A/B/C/D therefore hold exactly what
+                // fillSlot put there.  D's initialized value is irrelevant
+                // (the next kernel fully overwrites it), but the skip is safe
+                // because the slot is kernel-write-free.  Record a no-op
+                // event as a sync marker.
                 if(m_altSlotsFilled)
                 {
                     HIP_CHECK_EXC(
