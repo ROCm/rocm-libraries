@@ -1,0 +1,130 @@
+{
+    "name": "sample_rmsnorm_2x3x4x4",
+    "compute_data_type": "float",
+    "io_data_type": "float",
+    "intermediate_data_type": "float",
+    "tensors": [
+        {
+            "uid": 1,
+            "name": "input_x",
+            "dims": [
+                2,
+                3,
+                4,
+                4
+            ],
+            "strides": [
+                48,
+                16,
+                4,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 2,
+            "name": "scale",
+            "dims": [
+                1,
+                1,
+                4,
+                4
+            ],
+            "strides": [
+                16,
+                16,
+                4,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 3,
+            "name": "epsilon",
+            "dims": [
+                1
+            ],
+            "strides": [
+                1
+            ],
+            "data_type": "double",
+            "virtual": false,
+            "value_type": "Float64Value",
+            "value": 1e-05
+        },
+        {
+            "uid": 4,
+            "name": "bias",
+            "dims": [
+                1,
+                1,
+                4,
+                4
+            ],
+            "strides": [
+                16,
+                16,
+                4,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 5,
+            "name": "output_y",
+            "dims": [
+                2,
+                3,
+                4,
+                4
+            ],
+            "strides": [
+                48,
+                16,
+                4,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 6,
+            "name": "saved_inv_rms",
+            "dims": [
+                2,
+                3,
+                1,
+                1
+            ],
+            "strides": [
+                3,
+                1,
+                1,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        }
+    ],
+    "nodes": [
+        {
+            "name": "rmsnorm_node",
+            "type": "RMSNormAttributes",
+            "compute_data_type": "float",
+            "inputs": {
+                "x_tensor_uid": 1,
+                "scale_tensor_uid": 2,
+                "epsilon_tensor_uid": 3,
+                "bias_tensor_uid": 4
+            },
+            "outputs": {
+                "y_tensor_uid": 5,
+                "inv_rms_tensor_uid": 6
+            },
+            "forward_phase": "TRAINING"
+        }
+    ]
+}
