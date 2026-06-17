@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""Generate a targeted top-up shape set for the DSL conv heuristic.
+"""Generate a targeted top-up shape set for a grouped-conv heuristic.
 
 Reads OOF predictions from train.py (oof_predictions.parquet) to identify
 shape subsets where the model is inaccurate, then generates a dense grid of
 new shapes covering only those subsets.  Produced shapes are guaranteed to
 have zero overlap with the existing training parquet so they can be fed
-directly to the sweep binary and merged into the next training run.
+directly to a sweep binary and merged into the next training run.
 
 Typical usage
 -------------
-  # Identify hard subsets and generate targeted shapes
+  # Identify hard subsets, generate targeted shapes, sample to target count
   python3 generate_targeted_shapes_conv.py \\
-      --oof   oof_predictions.parquet \\
-      --train conv_fp16_<arch>_dsl.parquet \\
-      --out   all_shapes.csv \\
-      --shards 32
+      --oof    oof_predictions.parquet \\
+      --train  conv_fp16_<arch>_dsl.parquet \\
+      --out    all_shapes.csv \\
+      --target 500 --shards 32
 
   # Full analytics report (global stats, worst shapes) without generating shapes
   python3 generate_targeted_shapes_conv.py \\
@@ -46,6 +46,7 @@ The training parquet must contain the same shape columns.
 import argparse
 import csv
 import math
+import random
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -59,12 +60,10 @@ HEADER = ["N", "G", "C", "K", "Hi", "Wi", "Y", "X",
 SHAPE_COLS = ["N", "G", "C", "K", "Hi", "Wi", "Y", "X",
               "stride_h", "stride_w", "pad_h", "pad_w"]
 
-# Canonical tile-size set used by ConvCandidateSweep — drop shapes where any
-# GEMM dimension is smaller than the smallest tile.
+# Drop shapes where any GEMM dimension is smaller than the smallest tile.
 MIN_TILE = 32
 
-# Hard-coded dimension pools for the generator grid.
-# These span the realistic operating range for DSL grouped-conv kernels.
+# Dimension pools for the generator grid.
 _N_VALUES    = [1, 2, 4, 8, 16, 32, 64, 128]
 _C_VALUES    = [32, 64, 128, 256, 512, 1024, 2048]
 _K_VALUES    = [32, 64, 128, 256, 512, 1024, 2048]
@@ -75,7 +74,7 @@ _G_VALUES    = [1, 2, 4, 8]
 
 
 # ---------------------------------------------------------------------------
-# Shape categorisation helpers (mirrors sample_conv_shapes.py buckets)
+# Shape categorisation helpers (mirrors sample_shapes_conv.py buckets)
 # ---------------------------------------------------------------------------
 
 def _spatial_bucket(Hi: int) -> str:
@@ -189,7 +188,7 @@ def print_analytics(per_shape: pd.DataFrame, summary: pd.DataFrame,
 def _valid(N, G, C, K, Hi, Wi, Y, X, sh, sw, ph, pw) -> bool:
     if C % G != 0 or K % G != 0:
         return False
-    # Per-group channel counts must be 8-aligned (DSL kernel alignment).
+    # Per-group channel counts must be 8-aligned.
     if (C // G) % 8 != 0 or (K // G) % 8 != 0:
         return False
     Ho = (Hi + 2 * ph - Y) // sh + 1
@@ -296,6 +295,50 @@ def generate_targeted(
     return sorted(shapes)
 
 
+def _bucket_key(shape: tuple) -> tuple:
+    """Stratification key matching sample_shapes_conv.py buckets."""
+    N, G, C, K, Hi = shape[0], shape[1], shape[2], shape[3], shape[4]
+    Y, X = shape[6], shape[7]
+    filter_size = f"{Y}x{X}"
+    sh = shape[8]
+    stride_cat = "stride1" if sh == 1 else "stride2"
+    return (filter_size, stride_cat, _group_type(G, C, K),
+            _spatial_bucket(Hi), _channel_bucket(C, K))
+
+
+def stratified_sample(shapes: list[tuple], target: int, seed: int) -> list[tuple]:
+    """Round-robin across stratification buckets until target count is reached."""
+    if len(shapes) <= target:
+        return shapes
+
+    rng = random.Random(seed)
+
+    buckets: dict[tuple, list[tuple]] = defaultdict(list)
+    for s in shapes:
+        buckets[_bucket_key(s)].append(s)
+
+    for v in buckets.values():
+        rng.shuffle(v)
+
+    # Round-robin: cycle through non-empty buckets, take one per pass
+    bucket_lists = list(buckets.values())
+    pointers = [0] * len(bucket_lists)
+    selected: list[tuple] = []
+    while len(selected) < target:
+        made_progress = False
+        for i, bl in enumerate(bucket_lists):
+            if pointers[i] < len(bl):
+                selected.append(bl[pointers[i]])
+                pointers[i] += 1
+                made_progress = True
+                if len(selected) == target:
+                    break
+        if not made_progress:
+            break
+
+    return selected
+
+
 # ---------------------------------------------------------------------------
 # Shard writer (same format as other shape generators)
 # ---------------------------------------------------------------------------
@@ -348,6 +391,9 @@ def main():
                          "Multiple tokens allowed.")
     ap.add_argument("--density", type=int, default=1, choices=[1, 2, 3],
                     help="Grid density multiplier (1=default, 2=denser, default: 1)")
+    ap.add_argument("--target", type=int, default=None,
+                    help="Maximum number of output shapes; stratified sampling "
+                         "is applied when the generated pool exceeds this value")
     ap.add_argument("--analytics", action="store_true",
                     help="Print global efficiency stats and worst 20 shapes")
     ap.add_argument("--analytics-out", type=Path, default=None,
@@ -429,6 +475,11 @@ def main():
 
     overlap = set(shapes) & training_set
     assert len(overlap) == 0, f"BUG: {len(overlap)} shapes overlap with training set"
+
+    if args.target is not None and len(shapes) > args.target:
+        shapes = stratified_sample(shapes, args.target, args.seed)
+        print(f"  Sampled {len(shapes):,} shapes (--target {args.target}, "
+              f"seed={args.seed})", file=sys.stderr)
 
     write_csv(shapes, args.out)
     print(f"Wrote {len(shapes):,} shapes to {args.out}", file=sys.stderr)

@@ -16,7 +16,6 @@ heuristics/
       train_manifest.json     — data provenance (row count, timestamp)
   scripts/
     convert_dsl_csv_to_parquet.py        — converts sweep CSV output to parquet
-    generate_targeted_shapes_conv.py     — OOF analysis + targeted top-up shape generation
   sweep/
     ConvCandidateSweep.cpp  — enumerates all DSL candidates per shape,
                               compiles + times each, writes training CSV rows
@@ -34,9 +33,10 @@ projects/composablekernel/dispatcher/heuristics/
   data_pipeline.py                — parquet loader / builder used by train.py
   feature_engine_grouped_conv.py  — 97-feature extractor for grouped conv
   feature_engine.py               — base class imported by feature_engine_grouped_conv.py
-  generate_wide_coverage_conv.py  — wide-coverage training shapes
-  generate_edge_dims_conv.py      — edge-case training shapes
-  sample_conv_shapes.py           — stratified merge + shard
+  generate_wide_coverage_conv.py      — wide-coverage training shapes
+  generate_edge_dims_conv.py          — edge-case training shapes
+  generate_targeted_shapes_conv.py    — OOF-driven targeted top-up shape generation
+  sample_shapes_conv.py               — stratified merge + shard
 ```
 
 ## How the model is used at runtime
@@ -105,7 +105,7 @@ pip install lightgbm pandas pyarrow scikit-learn
 
 ### Step 2 — Generate training shapes
 
-Two generators produce complementary sets; `sample_conv_shapes.py` merges,
+Two generators produce complementary sets; `sample_shapes_conv.py` merges,
 deduplicates, and shards the result for parallel sweep runs.
 
 ```bash
@@ -115,7 +115,7 @@ python3 $CK_HEURISTICS/generate_wide_coverage_conv.py \
 python3 $CK_HEURISTICS/generate_edge_dims_conv.py \
     --out $WORK/shapes/edge_dims_conv.csv
 
-python3 $CK_HEURISTICS/sample_conv_shapes.py \
+python3 $CK_HEURISTICS/sample_shapes_conv.py \
     --inputs    $WORK/shapes/wide_coverage_conv.csv \
                 $WORK/shapes/edge_dims_conv.csv \
     --out       $WORK/shapes/all_shapes.csv \
@@ -249,7 +249,7 @@ Validate heuristic efficiency using the OOF predictions produced during training
 
 ```bash
 # Inspect per-subset efficiency from the last training run.
-python3 $HEURISTICS/scripts/generate_targeted_shapes_conv.py \
+python3 $CK_HEURISTICS/generate_targeted_shapes_conv.py \
     --oof      oof_predictions.parquet \
     --train    conv_fp16_<arch>_dsl.parquet \
     --analytics --dry-run
@@ -260,7 +260,7 @@ If subsets are below threshold, generate a targeted top-up shape set and re-swee
 
 ```bash
 # Generate shapes covering hard subsets (zero overlap with existing training data).
-python3 $HEURISTICS/scripts/generate_targeted_shapes_conv.py \
+python3 $CK_HEURISTICS/generate_targeted_shapes_conv.py \
     --oof   oof_predictions.parquet \
     --train conv_fp16_<arch>_dsl.parquet \
     --out   all_shapes.csv \

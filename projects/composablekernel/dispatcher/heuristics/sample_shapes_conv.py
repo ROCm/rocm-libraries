@@ -20,12 +20,12 @@ Bucket key: (filter_size, stride_cat, group_type, spatial_bucket, channel_bucket
 
 Usage:
     # merge wide + edge, sample to 2000
-    python3 sample_conv_shapes.py \\
+    python3 sample_shapes_conv.py \\
         --inputs wide_coverage_conv.csv edge_dims_conv.csv \\
         --out all_shapes.csv --target 2000
 
     # also write per-shard CSVs for the slurm array job
-    python3 sample_conv_shapes.py \\
+    python3 sample_shapes_conv.py \\
         --inputs wide_coverage_conv.csv edge_dims_conv.csv \\
         --out all_shapes.csv --target 2000 --shards 32 --shard_dir shards/
 """

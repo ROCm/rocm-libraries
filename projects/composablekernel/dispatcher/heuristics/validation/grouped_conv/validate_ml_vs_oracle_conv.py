@@ -22,11 +22,11 @@ Methodology:
   5. Report percentile efficiency, oracle-match rate, and the 10 worst shapes.
 
 Usage:
-    python validation/grouped_conv/validate_conv_ml_vs_oracle.py \\
+    python validation/grouped_conv/validate_ml_vs_oracle_conv.py \\
         --model        models/grouped_conv_forward_fp16_gfx942 \\
         --oracle-parquet /path/to/conv_fp16_gfx942.parquet
 
-    python validation/grouped_conv/validate_conv_ml_vs_oracle.py \\
+    python validation/grouped_conv/validate_ml_vs_oracle_conv.py \\
         --model        models/grouped_conv_forward_bf16_gfx950 \\
         --oracle-parquet /path/to/conv_bf16_gfx950.parquet \\
         --output       /tmp/results.csv
