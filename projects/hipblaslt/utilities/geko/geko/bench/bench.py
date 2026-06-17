@@ -476,6 +476,7 @@ def compare(
             res = run(
                 hipblaslt_path, verif_file, log_file,
                 custom_lib_dir=custom_lib_dir, devices=devices, cache=cache, bench_freq=bench_freq,
+                silent=True
             )
             res.rename({c: c + "_tuned" for c in UNIQ_COLS}, axis=1, inplace=True)
             error.append(res)
