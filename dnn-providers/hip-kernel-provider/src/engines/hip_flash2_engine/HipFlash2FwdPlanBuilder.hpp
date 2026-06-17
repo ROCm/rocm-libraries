@@ -10,13 +10,15 @@
 #include <cstdint>
 #include <string>
 
-namespace hip_flash2_engine {
+namespace hip_flash2_engine
+{
 
 // =============================================================================
 // Flash2FwdParams — extracted from the hipDNN graph at buildPlan() time.
 // Holds everything execute() needs to dispatch the kernel.
 // =============================================================================
-struct Flash2FwdParams {
+struct Flash2FwdParams
+{
     // Tensor UIDs (used to look up device pointers in the variant pack)
     int64_t qUid = 0;
     int64_t kUid = 0;
@@ -26,10 +28,10 @@ struct Flash2FwdParams {
     // Attention geometry — BHSD layout: [B, H, S, D]
     int batch = 1;
     int num_heads_q = 32;
-    int num_heads_k = 32;  // GQA: num_heads_q / num_heads_k = gqa_ratio
+    int num_heads_k = 32; // GQA: num_heads_q / num_heads_k = gqa_ratio
     int seq_len_q = 2048;
     int seq_len_kv = 2048;
-    int head_dim = 128;  // head_dim_qk (== head_dim_v for our kernel)
+    int head_dim = 128; // head_dim_qk (== head_dim_v for our kernel)
 
     // Attention scale (0 → use 1/sqrt(head_dim) at runtime)
     float attn_scale = 0.0f;
@@ -59,12 +61,14 @@ struct Flash2FwdParams {
 // Dispatch heuristic: Flash2 is profitable for prefill shapes.
 // Matches UseFlash2ForROCm() from the original FlashInfer benchmark.
 // =============================================================================
-inline bool useFlash2ForShape(int seq_len_q, int seq_len_kv) {
+inline bool useFlash2ForShape(int seq_len_q, int seq_len_kv)
+{
     // Decode (seq_q == 1): Flash2 brings no benefit, use batched GEMM instead
-    if (seq_len_q <= 1) return false;
+    if(seq_len_q <= 1)
+        return false;
     const uint32_t cta_q_blocks = (static_cast<uint32_t>(seq_len_q) + 63u) / 64u;
-    return (static_cast<uint64_t>(seq_len_q) * static_cast<uint64_t>(seq_len_kv)) >
-           (static_cast<uint64_t>(cta_q_blocks) * 6000u);
+    return (static_cast<uint64_t>(seq_len_q) * static_cast<uint64_t>(seq_len_kv))
+           > (static_cast<uint64_t>(cta_q_blocks) * 6000u);
 }
 
-}  // namespace hip_flash2_engine
+} // namespace hip_flash2_engine
