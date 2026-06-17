@@ -209,8 +209,8 @@ nullptr, d_type, ldd, batch_count, compute_type, algo, solution_index, flags));
 
 // the following tests still output to D
 
-// If K==0, then alpha, A and B can be nullptr without issue.
-DAPI_CHECK(rocblas_gemm_batched_ex_fn, (handle, transA, transB, M, N, 0, nullptr,
+// If K==0, then A and B can be nullptr without issue.
+DAPI_CHECK(rocblas_gemm_batched_ex_fn, (handle, transA, transB, M, N, 0, alpha,
 nullptr, a_type, lda, nullptr, b_type, ldb, beta, dC.ptr_on_device(), c_type, ldc,
 dD.ptr_on_device(), d_type, ldd, batch_count, compute_type, algo, solution_index, flags));
 

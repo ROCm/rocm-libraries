@@ -401,11 +401,41 @@ constexpr auto hipsparse_spmmalg2string(hipsparseSpMMAlg_t alg)
         return "csr_alg3";
     case HIPSPARSE_SPMM_BLOCKED_ELL_ALG1:
         return "bell_alg1";
+    case HIPSPARSE_SPMM_BSR_ALG1:
+        return "bsr_alg1";
     }
     return "invalid";
 }
 #else
-#if(CUDART_VERSION >= 12000)
+#if(CUDART_VERSION >= 12051)
+constexpr auto hipsparse_spmmalg2string(hipsparseSpMMAlg_t alg)
+{
+    switch(alg)
+    {
+    case HIPSPARSE_SPMM_ALG_DEFAULT:
+        return "default";
+    case HIPSPARSE_SPMM_COO_ALG1:
+        return "coo_alg1";
+    case HIPSPARSE_SPMM_COO_ALG2:
+        return "coo_alg2";
+    case HIPSPARSE_SPMM_COO_ALG3:
+        return "coo_alg3";
+    case HIPSPARSE_SPMM_COO_ALG4:
+        return "coo_alg4";
+    case HIPSPARSE_SPMM_CSR_ALG1:
+        return "csr_alg1";
+    case HIPSPARSE_SPMM_CSR_ALG2:
+        return "csr_alg2";
+    case HIPSPARSE_SPMM_CSR_ALG3:
+        return "csr_alg3";
+    case HIPSPARSE_SPMM_BLOCKED_ELL_ALG1:
+        return "bell_alg1";
+    case HIPSPARSE_SPMM_BSR_ALG1:
+        return "bsr_alg1";
+    }
+    return "invalid";
+}
+#elif(CUDART_VERSION >= 12000 && CUDART_VERSION < 12051)
 constexpr auto hipsparse_spmmalg2string(hipsparseSpMMAlg_t alg)
 {
     switch(alg)

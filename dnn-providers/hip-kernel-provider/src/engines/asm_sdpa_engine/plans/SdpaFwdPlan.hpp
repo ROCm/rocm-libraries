@@ -5,10 +5,9 @@
 
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
-#include "HipKernelHandle.hpp"
-#include "HipKernelSettings.hpp"
 #include "SdpaFwdParams.hpp"
 #include "SdpaKernelUtils.hpp"
+#include "core/Handle.hpp"
 
 namespace asm_sdpa_engine
 {
@@ -16,7 +15,7 @@ namespace asm_sdpa_engine
 /**
 * @brief SDPA forward kernel plan.
 */
-class SdpaFwdPlan : public hipdnn_plugin_sdk::IPlan<HipKernelHandle>
+class SdpaFwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {
 public:
     /**
@@ -34,9 +33,9 @@ public:
     SdpaFwdPlan(SdpaFwdPlan&&) noexcept = default;
     SdpaFwdPlan& operator=(SdpaFwdPlan&&) noexcept = default;
 
-    size_t getWorkspaceSize(const HipKernelHandle& handle) const override;
+    size_t getWorkspaceSize(const Handle& handle) const override;
 
-    void execute(const HipKernelHandle& handle,
+    void execute(const Handle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace = nullptr) const override;

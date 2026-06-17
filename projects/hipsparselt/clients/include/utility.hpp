@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -278,7 +278,11 @@ public:
         this->m_status = hipsparseLtMatmulAlgSelectionInit(handle, &this->m_alg_sel, matmul, alg);
     }
 
-    ~hipsparselt_local_matmul_alg_selection() {}
+    ~hipsparselt_local_matmul_alg_selection() 
+    {
+        if(this->m_status == HIPSPARSE_STATUS_SUCCESS)        
+            hipsparseLtMatmulAlgSelectionDestroy(&this->m_alg_sel);
+    }
 
     hipsparselt_local_matmul_alg_selection(const hipsparselt_local_matmul_alg_selection&) = delete;
     hipsparselt_local_matmul_alg_selection(hipsparselt_local_matmul_alg_selection&&)      = delete;

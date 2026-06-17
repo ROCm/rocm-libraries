@@ -164,6 +164,8 @@ if(NOT DISABLE_DL_KERNELS AND GPU_TARGETS MATCHES "gfx101|gfx103|gfx10-1|gfx10-3
     set(DL_KERNELS "ON")
     set(CK_ENABLE_DL_KERNELS "ON")
 endif()
+message(STATUS "Disabling DPP kernels by default")
+option(DISABLE_DPP_KERNELS "Disable DPP kernels by default" ON)
 if(NOT DISABLE_DPP_KERNELS)
     add_definitions(-DDPP_KERNELS)
     set(DPP_KERNELS "ON")
@@ -765,8 +767,6 @@ if(NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTENSOR_REQ_LIBS_ONLY)
 endif()
 
 
-option(MIOPEN_REQ_LIBS_ONLY "Build only the MIOpen required libraries" OFF)
-option(HIPTENSOR_REQ_LIBS_ONLY "Build only the HipTensor required libraries" OFF)
 option(DISABLE_OFFLOAD_COMPRESS "Disable offload compress compiler flag when building instances" OFF)
 option(BUILD_MHA_LIB "Build the static library for flash attention" OFF)
 option(BUILD_CK_DEVICE_INSTANCES "Build device operation instances in library/" ON)

@@ -30,7 +30,10 @@ DEF_ARCH(Gfx1250,
     .major = 12, .minor = 5, .stepping = 0,
     .wavefront = 32,
     .maxVGPR = 256, .maxSGPR = 102, .maxAGPR = 0,
-    .defaultCycle = 1, .defaultLatency = 1)
+    .totalVgprPerSimd = 1024,  // physical VGPR file per SIMD (wave32)
+    .vgprAllocGranule = 8,     // VGPR allocation granule (wave32, static allocation)
+    .defaultCycle = 1, .defaultLatency = 1,
+    .d16Writes32BitVgpr = 1)
 
 //------------------------------------------------------------------------------
 // Tablegen emits a per-arch (name -> id) lookup table into <Arch>_hwreg.inc,

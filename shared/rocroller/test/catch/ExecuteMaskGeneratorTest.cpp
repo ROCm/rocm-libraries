@@ -1,6 +1,8 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <sstream>
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
@@ -12,6 +14,7 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/GPUArchitecture/GPUCapability.hpp>
 #include <rocRoller/KernelArguments.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 
@@ -26,6 +29,30 @@ using namespace Catch::Matchers;
 namespace ExecuteMaskGeneratorTest
 {
     namespace kg = rocRoller::KernelGraph;
+
+    // Remove lines belonging to the workgroup-cluster prolog branch so that
+    // codegen assertions can reject unexpected s_cbranch_vcc without tripping
+    // on the legitimate s_cbranch_vccz emitted by the cluster detection in
+    // AssemblyKernel::prolog().  Returns the input unchanged when the target
+    // does not support workgroup clusters.
+    std::string StripClusterBranchLines(const std::string& asmOutput, ContextPtr ctx)
+    {
+        if(!ctx->targetArchitecture().HasCapability(GPUCapability::HasWorkgroupClusters))
+            return asmOutput;
+
+        std::istringstream stream(asmOutput);
+        std::string        result;
+        std::string        line;
+        while(std::getline(stream, line))
+        {
+            if(line.find("NotInCluster") == std::string::npos)
+            {
+                result += line;
+                result += '\n';
+            }
+        }
+        return result;
+    }
 
     /**
      * Builds a minimal KernelGraph for testing Exec and BranchAndExec ConditionalOp modes.
@@ -117,7 +144,7 @@ namespace ExecuteMaskGeneratorTest
             // Exec mode uses EXEC masking, not scalar SCC-based branches.
             CHECK_THAT(output, !ContainsSubstring("s_cbranch_scc0"));
             // Exec mode uses EXEC masking, not VCC-based branches.
-            CHECK_THAT(output, !ContainsSubstring("s_cbranch_vcc"));
+            CHECK_THAT(StripClusterBranchLines(output, ctx), !ContainsSubstring("s_cbranch_vcc"));
         }
     }
 
@@ -151,7 +178,7 @@ namespace ExecuteMaskGeneratorTest
             // Exec mode uses EXEC masking, not scalar SCC-based branches.
             CHECK_THAT(output, !ContainsSubstring("s_cbranch_scc0"));
             // Exec mode uses EXEC masking, not VCC-based branches.
-            CHECK_THAT(output, !ContainsSubstring("s_cbranch_vcc"));
+            CHECK_THAT(StripClusterBranchLines(output, ctx), !ContainsSubstring("s_cbranch_vcc"));
         }
     }
 
@@ -191,7 +218,7 @@ namespace ExecuteMaskGeneratorTest
             // BranchAndExec does not use scalar SCC-based branches.
             CHECK_THAT(output, !ContainsSubstring("s_cbranch_scc0"));
             // BranchAndExec does not use VCC-based branches.
-            CHECK_THAT(output, !ContainsSubstring("s_cbranch_vcc"));
+            CHECK_THAT(StripClusterBranchLines(output, ctx), !ContainsSubstring("s_cbranch_vcc"));
         }
     }
 
@@ -233,7 +260,7 @@ namespace ExecuteMaskGeneratorTest
             // BranchAndExec does not use scalar SCC-based branches.
             CHECK_THAT(output, !ContainsSubstring("s_cbranch_scc0"));
             // BranchAndExec does not use VCC-based branches.
-            CHECK_THAT(output, !ContainsSubstring("s_cbranch_vcc"));
+            CHECK_THAT(StripClusterBranchLines(output, ctx), !ContainsSubstring("s_cbranch_vcc"));
         }
     }
 

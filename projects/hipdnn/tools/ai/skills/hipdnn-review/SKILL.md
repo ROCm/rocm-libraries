@@ -130,14 +130,39 @@ Assess:
 - Weak tests: shallow assertions, excessive mocking, nondeterminism, or poor isolation.
 - Recommended tests: concrete test names or scenarios to add.
 
+### ASIC / Multi-Arch Coverage
+
+Every review must judge whether the PR's test coverage spans the GPU architectures (ASICs) the change can affect. Decide the required coverage from the diff content, not the file path, then compare it against what the PR actually tested and claimed.
+
+Classify the change's blast radius:
+
+- ASIC-independent wiring, plumbing, or core capability that does not change kernel selection, support surface, or default behavior: passing PR CI is sufficient.
+- Frontend or default-setting changes, or dispatch-behavior changes, that existing test cases exercise: a multi-arch CI run is warranted, since the change can shift existing test-case behavior per architecture.
+- Provider changes adding or extending ops or support surface: a full multi-arch sweep is warranted, unless the ops are scoped to specific architectures, in which case only those.
+- Arch-specific changes (for example, a gfx950-only kernel or code path): only the affected ASICs.
+- Expanding or newly enabling generic integration test cases (for example, activating a suite in a provider lane): a full sweep across all supported GFX families is warranted — not just the default CI test families — since a newly added or activated generic case can fail on any target.
+- Docs-only, comments-only, or skill-only changes: no ASIC coverage needed.
+
+Then reconcile against the PR:
+
+- Read the PR body's `## ASIC Coverage` section (the one the PR summary produces) and its testing checklist. Flag when it is absent for a change that has ASIC impact.
+- Flag when the claimed or completed coverage is narrower than the content warrants — for example, a generic integration test added but only one ASIC tested, or a provider op added with no sweep run.
+- Flag when a change is described as targeting a specific ASIC but that ASIC was not tested.
+- Flag a behavior-shifting change (defaults or dispatch) that has no covering tests: it needs both new tests and the corresponding multi-arch run; absent coverage is a gap, not an exemption from the run.
+- Do not over-escalate: an ASIC-independent change fully covered by passing PR CI does not need a sweep, and saying so is a valid outcome.
+
+Discover the supported architectures and test labels rather than assuming a fixed list; they drift. The GPU families and labels are discoverable from the in-repo multi-arch CI workflow (`.github/workflows/therock-multi-arch-ci.yml`, with `workflow_dispatch` inputs `linux_amdgpu_families` and `linux_test_labels`) and TheRock's GPU-family matrix. The workflow's default `linux_amdgpu_families` is a routine-CI subset, and a family may build but skip tests when its runner is disabled for capacity; when the content requires a full sweep, judge against the supported family matrix, not that default, and treat a build-only-but-untested architecture as uncovered. Names like `gfx90a`, `gfx942`, `gfx950` (specific architectures) and `gfx94X`, `gfx120X` (family-group keys covering multiple architectures) are illustrative only.
+
+When coverage is insufficient, flag the gap as a testing finding and note that the missing coverage can be obtained by launching a TheRock multi-arch integration CI run on the required architectures, so the recommendation is actionable.
+
 ## Delegation
 
 When the active host and user request permit reviewer delegation, split broad reviews by affected scope bucket and add cross-cutting testing and reuse reviews. If delegation is unavailable, disallowed, or unnecessary, perform a direct single-pass review using the same checklist.
 
 ## Severity
 
-- **Critical**: likely correctness failure, data corruption, leak/crash in normal use, ABI/API break, or a defect serious enough to block merge.
-- **Major**: real behavioral risk, missing essential validation, meaningful test gap, compatibility issue, or maintainability issue likely to cause defects.
+- **Critical**: likely correctness failure, data corruption, leak/crash in normal use, ABI/API break, an untested broad-blast-radius change to a default or shipping path that could silently break an architecture, or a defect serious enough to block merge.
+- **Major**: real behavioral risk, missing essential validation, meaningful test gap, missing required ASIC or multi-arch coverage that the change's content warrants, compatibility issue, or maintainability issue likely to cause defects.
 - **Minor**: localized quality issue, unclear docs, low-risk edge case, or non-blocking cleanup.
 - **Suggestion**: optional improvement, refactor, or broader follow-up.
 
@@ -157,6 +182,14 @@ Use this shape:
 - Missing: ...
 - Weak tests: ...
 - Recommended: ...
+
+## ASIC Coverage Assessment
+
+- Blast radius: <ASIC-independent / behavior-shifting / arch-scoped, with the affected architectures>.
+- Required: <coverage that must pass before merge: passing PR CI, specific ASICs, or a full multi-arch sweep>.
+- Claimed/Done: <what the PR states and what actually passed>.
+- Gap: <mismatch, if any>.
+- Recommendation: <coverage to add; a TheRock multi-arch integration CI run can supply it when needed>.
 
 ## Open Questions
 

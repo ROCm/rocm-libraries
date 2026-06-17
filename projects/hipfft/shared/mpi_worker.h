@@ -780,7 +780,6 @@ std::vector<unsigned int> compute_final_grid(const std::vector<unsigned int>& mp
     return final_grid;
 }
 
-int  n_hip_failures     = 0;
 bool skip_runtime_fails = false;
 
 // AllParams is a callable that returns a container of fft_params

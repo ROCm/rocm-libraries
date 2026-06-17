@@ -35,6 +35,7 @@
 /projects/rocsparse/                                @ROCm/sparses-reviewers
 /projects/rocthrust/                                @ROCm/prims-rands-reviewers
 /projects/rocwmma/                                  @ROCm/rocwmma-reviewers
+/projects/rpp/                                      @ROCm/rpp-reviewers
 /shared/origami/                                    @ROCm/origami-reviewers
 /shared/mxdatagenerator/                            @ROCm/rocroller-developers
 /shared/rocroller/                                  @ROCm/rocroller-developers
@@ -184,3 +185,8 @@
 /projects/composablekernel/**/*.rst                 @ROCm/ck-reviewers @ROCm/ck-docs-reviewers
 /projects/composablekernel/**/.readthedocs.yaml     @ROCm/ck-reviewers @ROCm/ck-docs-reviewers
 /projects/composablekernel/docs/                    @ROCm/ck-reviewers @ROCm/ck-docs-reviewers
+
+/projects/rpp/**/*.md                               @ROCm/rpp-reviewers @ROCm/rpp-docs-reviewers
+/projects/rpp/**/*.rst                              @ROCm/rpp-reviewers @ROCm/rpp-docs-reviewers
+/projects/rpp/**/.readthedocs.yaml                  @ROCm/rpp-reviewers @ROCm/rpp-docs-reviewers
+/projects/rpp/**/docs/                              @ROCm/rpp-reviewers @ROCm/rpp-docs-reviewers

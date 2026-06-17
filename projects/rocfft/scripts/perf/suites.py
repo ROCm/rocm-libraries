@@ -107,6 +107,24 @@ lengths = {
         (336, 18816),
     ],
 
+    # Large real lengths whose fused Stockham kernel needs most of the
+    # available LDS.  Exercises the LDS-aware real fusion path.
+    'real_fusion_lds_1d': [
+        4096,
+        6144,
+        8000,
+        12288,
+        16384,
+        24576,
+        32768,
+    ],
+
+    'real_fusion_lds_2d': [
+        (256, 256),
+        (256, 12288),
+        (256, 24576),
+    ],
+
     'simpleL1D': [
         6561,
         8192,
@@ -526,6 +544,24 @@ def misc3d():
     """Miscellaneous 3D sizes."""
 
     yield from default_length_params("misc3d", lengths['misc3d'], 1)
+
+
+def real_fusion_lds_1d():
+    """1D real lengths that stress the LDS-aware fusion path."""
+
+    yield from default_length_params("real_fusion_lds_1d",
+                                     lengths['real_fusion_lds_1d'],
+                                     10000,
+                                     reals=[True])
+
+
+def real_fusion_lds_2d():
+    """2D real lengths that stress the LDS-aware fusion path."""
+
+    yield from default_length_params("real_fusion_lds_2d",
+                                     lengths['real_fusion_lds_2d'],
+                                     1000,
+                                     reals=[True])
 
 
 def simpleL1D():

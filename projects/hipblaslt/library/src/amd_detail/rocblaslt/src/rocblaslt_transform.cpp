@@ -43,42 +43,42 @@
 
 namespace
 {
-    std::filesystem::path transformCodeObjectPath()
+    std::optional<std::filesystem::path> transformCodeObjectPath()
     {
-#ifdef _WIN32
-        constexpr char DEFAULT_CO_PATH[]
-            = "C:\\opt\\rocm\\bin\\hipblaslt\\library\\hipblasltTransform.hsaco";
-#else
-        constexpr char DEFAULT_CO_PATH[]
-            = "/opt/rocm/lib/hipblaslt/library/hipblasltTransform.hsaco";
-#endif
-
         int             deviceId{};
         hipDeviceProp_t props{};
-        if(hipGetDevice(&deviceId) == hipSuccess
-           && hipGetDeviceProperties(&props, deviceId) == hipSuccess)
+        if(hipGetDevice(&deviceId) != hipSuccess
+           || hipGetDeviceProperties(&props, deviceId) != hipSuccess)
         {
-            std::string archName = props.gcnArchName;
-            auto        colonPos = archName.find(':');
-            if(colonPos != std::string::npos)
-                archName = archName.substr(0, colonPos);
-
-            auto perArchPath = rocblaslt_find_library_relative_path(
-                std::filesystem::path("hipblasltTransform_" + archName + ".hsaco"));
-            if(perArchPath)
-                return *perArchPath;
+            rocblaslt_log_error("transformCodeObjectPath",
+                                "hipGetDevice/hipGetDeviceProperties",
+                                "failed to query device for matrix-transform arch lookup");
+            return std::nullopt;
         }
 
-        auto path = rocblaslt_find_library_relative_path(
-            std::filesystem::path("hipblasltTransform.hsaco"));
-        if(path)
-            return *path;
-        return std::filesystem::path(DEFAULT_CO_PATH);
+        std::string archName = props.gcnArchName;
+        auto        colonPos = archName.find(':');
+        if(colonPos != std::string::npos)
+            archName = archName.substr(0, colonPos);
+
+        auto relpath = std::filesystem::path(archName)
+                       / ("hipblasltTransform_" + archName + ".hsaco");
+        auto perArchPath = rocblaslt_find_library_relative_path(relpath);
+        if(!perArchPath)
+        {
+            rocblaslt_log_error("transformCodeObjectPath",
+                                "rocblaslt_find_library_relative_path",
+                                relpath.string().c_str());
+        }
+        return perArchPath;
     }
 
     const std::string& transformCodeObjectFileName()
     {
-        static const std::string name = transformCodeObjectPath().filename().string();
+        static const std::string name = [] {
+            auto path = transformCodeObjectPath();
+            return path ? path->filename().string() : std::string{};
+        }();
         return name;
     }
 
@@ -93,8 +93,15 @@ namespace
             {
                 adapters.emplace_back(new TensileLite::hip::SolutionAdapter);
             }
-            auto              coPath   = transformCodeObjectPath();
-            const std::string coFolder = coPath.parent_path().string();
+            auto coPath = transformCodeObjectPath();
+            if(!coPath)
+            {
+                rocblaslt_log_error("transformAdapter",
+                                    "transformCodeObjectPath",
+                                    "matrix-transform code object not found under per-base layout");
+                return adapters;
+            }
+            const std::string coFolder = coPath->parent_path().string();
             try
             {
                 for(auto& adp : adapters)
@@ -105,7 +112,7 @@ namespace
             catch(const std::runtime_error& e)
             {
                 rocblaslt_log_error(
-                    "transformCodeObject", "TransformCodeObjectPath", coFolder.c_str());
+                    "transformAdapter", "codeObjectDir", coFolder.c_str());
             }
             return adapters;
         }();

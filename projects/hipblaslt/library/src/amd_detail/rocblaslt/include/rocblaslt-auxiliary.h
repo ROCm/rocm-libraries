@@ -436,16 +436,24 @@ bool rocblaslt_internal_test_path(const std::string&);
 // Gets the absolute path of the so/dll/exe containing this function.
 std::string rocblaslt_internal_get_so_path();
 
-// Finds a path relative to the hipblaslt "library" directory, and returns the full path
-// if it exists.
-// Without `default_lib_dir` specified, this will first attempt to locate a plausible
-// library directory relative to the hosting shared library. On Windows, this will
-// search the containing "bin" directory and its sibling "lib" directory. Searching
-// the "bin" directory is for backwards compatibility with the original Windows
-// build system and should be considered deprecated in favor of the standard Posix
-// layout.
-// If `default_lib_dir` is given, then no shared library relative search heuristic
-// is used and the given directory is taken verbatim.
+// Resolve a path inside the hipblaslt "library" directory.
+//
+// Semantics are strict:
+//   - When `relpath` is supplied, the returned path is the absolute file path
+//     (library_root / relpath) IF AND ONLY IF that file exists. The function
+//     never returns a bare library_root when the requested file is missing —
+//     that mode silently masked file-not-found and caused callers to append a
+//     filename to the wrong root.
+//   - When `relpath` is not supplied, the function returns the first library
+//     root directory that exists (or nullopt if none do).
+//
+// Without `default_lib_dir` specified, the function locates the library
+// directory relative to the hosting shared library. On Windows the containing
+// "bin" directory and its sibling "lib" directory are searched; the "bin"
+// search is retained for backwards compatibility with the original Windows
+// build system and should be considered deprecated in favor of the standard
+// Posix layout. If `default_lib_dir` is given, no shared-library-relative
+// search heuristic is used and the given directory is taken verbatim.
 std::optional<std::filesystem::path>
     rocblaslt_find_library_relative_path(const std::optional<std::filesystem::path>& relpath,
                                          const std::optional<std::filesystem::path>& default_lib_dir

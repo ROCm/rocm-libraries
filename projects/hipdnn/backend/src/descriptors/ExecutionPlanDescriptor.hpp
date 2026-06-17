@@ -30,6 +30,11 @@ private:
     int64_t _engineId = INVALID_ENGINE_ID;
     bool _isOverrideShapeEnabled = false;
 
+    // Cached serialized execution-plan blob. Populated lazily on the first
+    // serializeBackendPlan() call and reused by all subsequent size/fill calls.
+    // A finalized plan is immutable, so this never needs invalidation.
+    mutable std::vector<uint8_t> _serializedPlanCache;
+
     void getWorkspaceSize(hipdnnBackendAttributeType_t attributeType,
                           int64_t requestedElementCount,
                           int64_t* elementCount,

@@ -515,7 +515,7 @@ std::string TensorDescriptor::toString() const
             break;
         }
     }
-    str += "}";
+    str += '}';
     return str;
 }
 
