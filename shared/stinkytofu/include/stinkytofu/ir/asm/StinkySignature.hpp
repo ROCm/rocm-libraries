@@ -261,6 +261,12 @@ struct SignatureArgument {
 /***************************************
  * Signature Kernel Descriptor
  ***************************************/
+
+/// Function-metadata key (uint64) carrying SignatureKernelDescriptor::totalVgprs
+/// (the value emitted as `.amdhsa_next_free_vgpr`). Signature producers stamp it
+/// onto Function; occupancy-aware passes read it. Absent or 0 means "unknown".
+inline constexpr const char* kSigTotalVgprsMetaKey = "SignatureKernelDescriptor.totalVgprs";
+
 struct SignatureKernelDescriptor {
     std::string kernelName;
     int totalVgprs;

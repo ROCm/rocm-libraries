@@ -32,10 +32,9 @@ int main(int argc, char** argv)
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
     listeners.Append(new hipdnn_test_sdk::utilities::HipErrorHandler);
 
-    // Frontend integration tests don't exercise heuristic-plugin behavior; they just
-    // need a generic working heuristic so engine selection succeeds. Wire the
-    // engine-agnostic test_good_heuristic_plugin in once before any test runs (no
-    // active handles allowed when changing heuristic plugin paths).
+    // Wire the engine-agnostic test_good_heuristic_plugin in globally so engine
+    // selection succeeds without depending on any production heuristic plugin.
+    // Must run before any handle is created.
     const std::array<const char*, 1> heuristicPaths
         = {hipdnn_tests::plugin_constants::testGoodHeuristicPluginPath().c_str()};
     if(hipdnnSetHeuristicPluginPaths_ext(

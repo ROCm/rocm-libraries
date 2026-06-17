@@ -2738,18 +2738,23 @@ namespace KernelGraphTest
 
         m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
 
-        if(m_context->targetArchitecture().HasCapability(GPUCapability::WorkgroupIdxViaTTMP))
+        EXPECT_THAT(output(), testing::HasSubstr("s_cmp_lt_i32 s3, 1"));
+        EXPECT_THAT(output(), testing::HasSubstr("s_cbranch_scc0")); //Branch for False
+        EXPECT_THAT(output(), testing::HasSubstr("s_branch")); //Branch after True
+
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasVGPRIndexing))
         {
-            EXPECT_THAT(output(), testing::HasSubstr("s_cmp_lt_i32 s2, 1"));
+            int idx = Register::RegisterAllocatorDetail::ReservedRegionSize();
+            EXPECT_THAT(output(),
+                        testing::HasSubstr(fmt::format("v_mov_b32 v{}, 1", idx))); //True Body
+            EXPECT_THAT(output(),
+                        testing::HasSubstr(fmt::format("v_mov_b32 v{}, 0", idx))); //False Body
         }
         else
         {
-            EXPECT_THAT(output(), testing::HasSubstr("s_cmp_lt_i32 s3, 1"));
+            EXPECT_THAT(output(), testing::HasSubstr(fmt::format("v_mov_b32 v1, 1"))); //True Body
+            EXPECT_THAT(output(), testing::HasSubstr(fmt::format("v_mov_b32 v1, 0"))); //False Body
         }
-        EXPECT_THAT(output(), testing::HasSubstr("s_cbranch_scc0")); //Branch for False
-        EXPECT_THAT(output(), testing::HasSubstr("s_branch")); //Branch after True
-        EXPECT_THAT(output(), testing::HasSubstr("v_mov_b32 v1, 1")); //True Body
-        EXPECT_THAT(output(), testing::HasSubstr("v_mov_b32 v1, 0")); //False Body
     }
 
     TEST_F(KernelGraphTestGPU, GPU_ConditionalExecute)

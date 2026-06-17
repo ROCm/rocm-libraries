@@ -14,13 +14,11 @@
 #include "utilities/EngineOrdering.hpp"
 
 // Heuristics framework
+#include "heuristics/DeviceProperties.hpp"
 #include "heuristics/SelectionHeuristic.hpp"
 #include "logging/Logging.hpp"
 #include "plugin/HeuristicPlugin.hpp"
 #include "plugin/HeuristicPluginResourceManager.hpp"
-#include <flatbuffers/flatbuffers.h>
-#include <hip/hip_runtime.h>
-#include <hipdnn_flatbuffers_sdk/data_objects/device_properties_generated.h>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
@@ -207,43 +205,11 @@ void EngineHeuristicDescriptor::finalize()
         return;
     }
 
-    // Query and serialize device properties for the device the handle's stream
-    // is bound to.
-    int deviceId = 0;
-    auto status = hipStreamGetDevice(handle->getStream(), &deviceId);
-    if(status != hipSuccess)
-    {
-        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
-                              "Failed to get device from handle's stream");
-    }
-
-    hipDeviceProp_t hipProps;
-    status = hipGetDeviceProperties(&hipProps, deviceId);
-    if(status != hipSuccess)
-    {
-        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR, "Failed to get device properties");
-    }
-
-    // Create DevicePropertiesT from HIP device properties
-    hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT devProps;
-    devProps.device_id = deviceId;
-    devProps.multi_processor_count = hipProps.multiProcessorCount;
-    devProps.total_global_mem = hipProps.totalGlobalMem;
-    devProps.architecture_name = hipProps.gcnArchName;
-
-    // Serialize DevicePropertiesT using FlatBuffers
-    flatbuffers::FlatBufferBuilder builder(256);
-    auto offset = hipdnn_flatbuffers_sdk::data_objects::DeviceProperties::Pack(builder, &devProps);
-    builder.Finish(offset, "HDDP");
-
-    // Copy serialized data to persistent storage
-    std::vector<uint8_t> devicePropsSerialized(builder.GetBufferPointer(),
-                                               builder.GetBufferPointer() + builder.GetSize());
-
-    // Wrap serialized buffer in hipdnnPluginConstData_t
-    hipdnnPluginConstData_t devicePropsWrapper;
-    devicePropsWrapper.ptr = devicePropsSerialized.data();
-    devicePropsWrapper.size = devicePropsSerialized.size();
+    // devicePropsSerialized must outlive devicePropsWrapper — the wrapper aliases its storage.
+    const auto devProps = heuristics::queryDeviceProperties(handle);
+    const auto devicePropsSerialized = heuristics::serializeDeviceProperties(devProps);
+    const hipdnnPluginConstData_t devicePropsWrapper
+        = heuristics::wrapSerializedDeviceProperties(devicePropsSerialized);
 
     // Get serialized graph from GraphDescriptor
     const hipdnnPluginConstData_t serializedGraph = _graph->getSerializedGraph();
@@ -773,9 +739,9 @@ std::string EngineHeuristicDescriptor::toString() const
             }
             str += hipdnn_data_sdk::utilities::formatEngineIdHex(_policyOrder[i]);
         }
-        str += "]";
+        str += ']';
     }
-    str += "}";
+    str += '}';
     return str;
 }
 

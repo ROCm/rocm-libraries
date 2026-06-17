@@ -251,7 +251,8 @@ rocsparse_status
         const bool on_host = handle->pointer_mode == rocsparse_pointer_mode_host;
         if(on_host && *scalar_device_host == static_cast<T>(0))
         {
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(array, 0, sizeof(A) * length, handle->stream));
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMemsetAsync(array, 0, sizeof(A) * length, handle->stream));
         }
         else if((on_host && *scalar_device_host != static_cast<T>(1)) || on_host == false)
         {

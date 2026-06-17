@@ -151,8 +151,8 @@ nullptr, lda, nullptr, ldb, one, nullptr, ldc));
 
 // the following tests still output to C
 
-// If K==0, then alpha, A and B can be nullptr without issue.
-DAPI_CHECK(rocblas_gemm_fn, (handle, transA, transB, M, N, 0, nullptr,
+// If K==0, then A and B can be nullptr without issue.
+DAPI_CHECK(rocblas_gemm_fn, (handle, transA, transB, M, N, 0, alpha,
 nullptr, lda, nullptr, ldb, beta, dC, ldc));
 
 // If alpha==0, then A and B can be nullptr without issue.

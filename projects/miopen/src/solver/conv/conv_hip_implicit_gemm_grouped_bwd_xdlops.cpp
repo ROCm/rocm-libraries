@@ -312,7 +312,7 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
     if(!loader.IsLoaded())
         return;
 
-    const bool is_deterministic = problem.GetConv().attribute.deterministic;
+    [[maybe_unused]] const bool is_deterministic = problem.GetConv().attribute.deterministic;
 
     // AI heuristics (if enabled)
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
@@ -495,8 +495,6 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsApplicable(
     if(env::enabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_GROUP_BWD_XDLOPS))
         return false;
     if(problem.HasMixedDataTypes())
-        return false;
-    if(!problem.AllTensorsDimsFitIntoInt())
         return false;
     if(problem.IsTensorsCasted())
         return false;

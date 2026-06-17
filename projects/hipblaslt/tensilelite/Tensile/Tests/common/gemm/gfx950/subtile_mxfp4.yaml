@@ -47,8 +47,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -141,8 +141,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -204,8 +204,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -270,8 +270,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation: True
@@ -320,8 +320,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -387,8 +387,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation: True
@@ -444,8 +444,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation: True
@@ -496,8 +496,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation: True
@@ -552,8 +552,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -610,8 +610,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -675,8 +675,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True

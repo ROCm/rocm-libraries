@@ -234,13 +234,13 @@ void PerformanceConfigSoftmax::HeuristicInit(const miopen::softmax::ProblemDescr
     case miopenHalf:
     case miopenFloat:
     case miopenBFloat16: local_size = PerformanceConfigSoftmax::start_local_size; break;
+
     case miopenDouble:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
     case miopenInt8:
     case miopenInt32:
-    case miopenInt64:
-    default: MIOPEN_THROW("Unsupported datatype");
+    case miopenInt64: MIOPEN_THROW("Unsupported datatype");
     }
 #endif
     initialized = true;
@@ -282,13 +282,13 @@ bool PerformanceConfigSoftmax::IsValid(const ExecutionContext&,
     case miopenHalf:
     case miopenFloat:
     case miopenBFloat16: return true;
+
     case miopenDouble:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
     case miopenInt8:
     case miopenInt32:
-    case miopenInt64:
-    default: MIOPEN_THROW("Unsupported datatype");
+    case miopenInt64: MIOPEN_THROW("Unsupported datatype");
     }
 #endif
 }

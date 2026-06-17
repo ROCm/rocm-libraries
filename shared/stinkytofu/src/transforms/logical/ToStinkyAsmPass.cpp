@@ -36,6 +36,7 @@
 
 // For ArchHelper access
 using namespace stinkytofu;
+#include <cstdint>
 #include <string>
 #include <vector>
 

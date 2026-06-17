@@ -16,7 +16,7 @@ Organized by pass:
 """
 import pytest
 from Tensile.Components.Subtile.Kernel import (
-    TileInfo, AB_B16, AB_B4, MXSA_B4, MXSB_B4, CD_F32,
+    TileInfo, AB_B8, AB_B16, AB_B4, MXSA_B4, MXSB_B4, CD_F32,
 )
 from Tensile.Components.Subtile.LogicalScheduler import (
     LogicalScheduler,
@@ -31,6 +31,7 @@ from Tensile.Components.Subtile.LogicalScheduler import (
     fmt_mt,
 )
 from unittest.mock import MagicMock
+from rocisa.code import Module
 
 
 def makeTileInfo(tc, kernel):
@@ -198,6 +199,57 @@ def make_cfg_bf16_pgr1(MT0=256, MT1=256, depthU=128, partSizeM=0, partSizeN=0):
     )
 
 
+def create_kernel_fp8(MT0, MT1, waveGroup, depthU=128):
+    """Create a plain FP8 kernel config (bpe=1, matrixInstK=128, no MX scale)."""
+    dtype = _mock_dtype(1)
+    return {
+        "DepthU": depthU,
+        "_DepthUA": depthU,
+        "_DepthUB": depthU,
+        "MacroTileA": MT0,
+        "MacroTileB": MT1,
+        "MacroTile0": MT0,
+        "MacroTile1": MT1,
+        "MatrixInstM": 16,
+        "MatrixInstN": 16,
+        "MatrixInstK": 128,
+        "MIWaveGroup": list(waveGroup),
+        "WavefrontSize": 64,
+        "SourceSwap": False,
+        "MIArchVgpr": False,
+        "NonTemporalA": 0,
+        "NonTemporalB": 0,
+        "NonTemporalMXSA": 0,
+        "NonTemporalMXSB": 0,
+        "ProblemType": {
+            "DataTypeA": dtype,
+            "DataTypeB": dtype,
+            "ComputeDataType": _mock_dtype(4),
+        },
+    }
+
+
+def make_cfg_fp8(MT0, MT1, waveGroup, depthU=128, pgr=2):
+    """Build plain FP8 config (AB_B8, matrixInstK=128, no scale tensors).
+
+    GR granularity matches production: mn=subtileShape[0]=1, k=subtileShape[1]=1.
+    With DU=128 and matrixInstK=128: numSubIterK=1, flat_len=numPartitions.
+    """
+    kernel = create_kernel_fp8(MT0, MT1, waveGroup, depthU)
+    tiA = TileInfo(AB_B8, 'A', None, kernel)
+    tiB = TileInfo(AB_B8, 'B', None, kernel)
+    return SchedulerConfig(
+        numMFMATilesM=tiA.localMMATileGrid[0],
+        numMFMATilesN=tiB.localMMATileGrid[0],
+        numSubIterK=tiA.localMMATileGrid[1],
+        lrA=ReadGranularity(mn=1, k=1),
+        lrB=ReadGranularity(mn=1, k=1),
+        grA=ReadGranularity(mn=tiA.subtileShape[0], k=tiA.subtileShape[1]),
+        grB=ReadGranularity(mn=tiB.subtileShape[0], k=tiB.subtileShape[1]),
+        pgr=pgr,
+    )
+
+
 def make_example_granularities_1():
     """Example Granularities 1 from the design doc: LR A,B=1x1, LR SA,SB=2x2."""
     return SchedulerConfig(
@@ -224,10 +276,11 @@ def make_writer_and_tileinfos(kernel, fp4=False):
     from Tensile.Common.RegisterPool import allocTmpGpr
 
     ri = rocIsa.getInstance()
-    if not ri.isInit():
-        import shutil
-        asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
-        ri.init((9, 5, 0), asmpath)
+    import shutil
+    asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
+    # Always re-init to gfx950: rocisa is a process-wide singleton and
+    # gfx1250 codegen tests may have changed it in the same pytest session.
+    ri.init((9, 5, 0), asmpath)
     ri.setKernel((9, 5, 0), 64)
 
     tiA = makeTileInfo('A', kernel)
@@ -243,6 +296,7 @@ def make_writer_and_tileinfos(kernel, fp4=False):
         regCaps={"MaxSgpr": 106, "MaxVgpr": 256, "PhysicalMaxVgpr": 512},
         unrollIdx=0,
         laneSGPRCount=2,
+        subtileLdsSwizzle=True,
     )
     writer.allocTmpSgpr = lambda num, alignment=None, tag=None: allocTmpGpr(
         writer.sgprPool, num, writer.states.regCaps["MaxSgpr"], alignment, tag, None)
@@ -1455,6 +1509,64 @@ class TestComputeInflightLoads:
         assert lr_a1.preOps[0].wait_gr_counts.SA == 1
         assert lr_a1.preOps[0].wait_gr_counts.SB == 1
 
+    def test_fp8_DU128_asymmetric_A_lt_B(self):
+        """FP8 DU=128, MT=128x192, waveGroup=(2,2), PGR=2.
+
+        Regression for _compute_inflight_loads bug (commit 055ecc8):
+        With flat_len=1 (1 partition × 1 subIterK), wraps_needed=1
+        (cross-MT dep), consumer_flat==dep_flat==0, the old wrap-counting
+        code walked the single slot twice instead of once — overcounting all
+        GRs in the slot as extra inflight.
+
+        Correct behavior: walk exactly wraps_needed*flat_len=1 step; on the
+        final step stop immediately at the dep GR (A), yielding A=0.  The B
+        GRs that were emitted after A (higher sort key) are still counted.
+
+        Old (buggy) counts for LR A: A=4, B=12.
+        New (correct) counts for LR A: A=0, B=6.
+        """
+        cfg = make_cfg_fp8(128, 192, waveGroup=(2, 2))
+        assert cfg.numSubIterK == 1, "FP8 DU=128 / matrixInstK=128 → single subIterK"
+        sched = LogicalScheduler(cfg)
+        sched.remove_cross_deps()
+
+        s0 = sched._partitions[0][0]
+
+        # LR A: dep is GR A (emitted first → last in reverse order).
+        # All B GRs (emitted after A, encountered first in backward walk) are inflight.
+        lr_a = _get_lr(s0, 'A')
+        assert lr_a.preOps[0].wait_gr_counts.A == 0
+        assert lr_a.preOps[0].wait_gr_counts.B == 6  # 6 B tiles in MT192 / wg2
+
+        # LR B: dep is GR B (emitted last → first in reverse order); nothing after it.
+        lr_b = _get_lr(s0, 'B')
+        assert lr_b.preOps[0].wait_gr_counts.A == 0
+        assert lr_b.preOps[0].wait_gr_counts.B == 0
+
+    def test_fp8_DU128_asymmetric_A_gt_B(self):
+        """FP8 DU=128, MT=448x64, waveGroup=(4,1), PGR=2.
+
+        Same _compute_inflight_loads regression as test_fp8_DU128_asymmetric_A_lt_B
+        but with more A tiles than B tiles (7A vs 4B).
+
+        Old (buggy) counts for LR A: A=7, B=8.
+        New (correct) counts for LR A: A=0, B=4.
+        """
+        cfg = make_cfg_fp8(448, 64, waveGroup=(4, 1))
+        assert cfg.numSubIterK == 1
+        sched = LogicalScheduler(cfg)
+        sched.remove_cross_deps()
+
+        s0 = sched._partitions[0][0]
+
+        lr_a = _get_lr(s0, 'A')
+        assert lr_a.preOps[0].wait_gr_counts.A == 0
+        assert lr_a.preOps[0].wait_gr_counts.B == 4  # 4 B tiles in MT64 / wg1
+
+        lr_b = _get_lr(s0, 'B')
+        assert lr_b.preOps[0].wait_gr_counts.A == 0
+        assert lr_b.preOps[0].wait_gr_counts.B == 0
+
 
 # ══════════════════════════════════════════════════════════════
 # Step 8: Group LR/GR
@@ -2077,6 +2189,58 @@ class TestIntegration:
                 assert "NGLL" in asm
                 assert "NLL" in asm
 
+        finally:
+            sched.deallocVgprTiles(writer)
+
+    def test_emitMainAndExitLoops_pap_mx_inserts_preloop_skip_and_nll_hooks(self):
+        """Subtile PAP is scheduler-owned and applies to MX PRELOOP/NLL paths."""
+        kernel = create_kernel(256, 256, fp4=True)
+        kernel.update({
+            "UseSubtileImpl": True,
+            "PrefetchAcrossPersistent": 1,
+            "PrefetchGlobalRead": 2,
+            "StreamK": 3,
+        })
+        writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
+
+        def _pap_hook(_kernel, _tPA, _tPB, _preloop_gr, skipBarrier=False):
+            module = Module("Subtile PAP test hook")
+            module.addComment0("Subtile PAP test hook")
+            return module
+
+        writer.prefetchAcrossPersistentSubtile = MagicMock(side_effect=_pap_hook)
+
+        cfg = make_cfg_256x256_fp4()
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.allocVgprTiles(writer, tiA, tiB,
+                              scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+        try:
+            sched.populate_instructions(
+                writer, kernel,
+                tileInfoA=tiA, tileInfoB=tiB,
+                dtileInfo=dTileInfo,
+                scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
+            )
+
+            module = sched.emitMainAndExitLoops(writer, kernel)
+            asm = str(module)
+
+            assert "Subtile PAP: first PRELOOP GR already issued?" in asm
+            assert "SubtilePAPPreloopFirstGRMerge" in asm
+            assert "Subtile PAP test hook" in asm
+            assert writer.prefetchAcrossPersistentSubtile.call_count == sched.unroll_factor
+            assert all(call.kwargs["skipBarrier"] for call in writer.prefetchAcrossPersistentSubtile.call_args_list)
+
+            pap_idx = asm.index("Subtile PAP test hook")
+            nll_idx = asm.rfind("NLL_C", 0, pap_idx)
+            assert nll_idx != -1
+            wait_gr_idx = asm.rfind("Wait GR", nll_idx, pap_idx)
+            barrier_idx = asm.rfind("Barrier", nll_idx, pap_idx)
+            assert nll_idx < wait_gr_idx < barrier_idx < pap_idx
+            mfma_idx = asm.find("MFMA C[", pap_idx)
+            assert mfma_idx != -1
+            assert pap_idx < mfma_idx
         finally:
             sched.deallocVgprTiles(writer)
 

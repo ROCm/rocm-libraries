@@ -96,6 +96,18 @@ public:
                  const uint8_t* serializedPlan,
                  size_t planByteSize),
                 (override));
+    MOCK_METHOD(hipdnnStatus_t,
+                backendGetSerializedBinaryGraphAndPlanExt,
+                (hipdnnBackendDescriptor_t graphDescriptor,
+                 hipdnnBackendDescriptor_t executionPlanDescriptor,
+                 size_t requestedByteSize,
+                 size_t* blobByteSize,
+                 uint8_t* serializedBlob),
+                (override));
+    MOCK_METHOD(hipdnnStatus_t,
+                backendGetSerializedBinaryContentsExt,
+                (const uint8_t* serializedBlob, size_t blobByteSize, int* contentFlags),
+                (override));
     MOCK_METHOD(void, loggingCallbackExt, (hipdnnSeverity_t severity, const char* msg), ());
     MOCK_METHOD(hipdnnStatus_t,
                 setEnginePluginPathsExt,
@@ -108,6 +120,24 @@ public:
         getLoadedEnginePluginPathsExt,
         (hipdnnHandle_t handle, size_t* numPluginPaths, char** pluginPaths, size_t* maxStringLen),
         ());
+    MOCK_METHOD(hipdnnStatus_t,
+                getHeuristicPolicyCount,
+                (hipdnnHandle_t handle, size_t* numPolicies),
+                (override));
+    MOCK_METHOD(hipdnnStatus_t,
+                getHeuristicPolicyInfo,
+                (hipdnnHandle_t handle,
+                 size_t policyIndex,
+                 int64_t* policyId,
+                 char* policyName,
+                 size_t* policyNameLen,
+                 char* pluginName,
+                 size_t* pluginNameLen,
+                 char* pluginVersion,
+                 size_t* pluginVersionLen,
+                 char* apiVersion,
+                 size_t* apiVersionLen),
+                (override));
 };
 
 // NOLINTEND

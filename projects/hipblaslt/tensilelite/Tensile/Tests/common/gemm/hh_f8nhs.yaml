@@ -29,8 +29,8 @@ BenchmarkProblems:
       ComputeDataType: S
       HighPrecisionAccumulate: True
       StochasticRounding: True #
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       UseBias: 1
@@ -91,8 +91,8 @@ BenchmarkProblems:
       ComputeDataType: S
       HighPrecisionAccumulate: True
       StochasticRounding: True #
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
       UseBias: 1
@@ -153,8 +153,8 @@ BenchmarkProblems:
       ComputeDataType: S
       HighPrecisionAccumulate: True
       StochasticRounding: True #
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
       UseBias: 1
@@ -215,8 +215,8 @@ BenchmarkProblems:
       ComputeDataType: S
       HighPrecisionAccumulate: True
       StochasticRounding: True #
-      TransposeA: 1
-      TransposeB: 1
+      TransposeA: True
+      TransposeB: True
       UseBeta: True
       Batched: True
       UseBias: 1
@@ -278,8 +278,8 @@ BenchmarkProblems:
       ComputeDataType: S
       HighPrecisionAccumulate: True
       StochasticRounding: True #
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       UseBias: 1
@@ -340,8 +340,8 @@ BenchmarkProblems:
       ComputeDataType: S
       HighPrecisionAccumulate: True
       StochasticRounding: True #
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
       UseBias: 1
@@ -402,8 +402,8 @@ BenchmarkProblems:
       ComputeDataType: S
       HighPrecisionAccumulate: True
       StochasticRounding: True #
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
       UseBias: 1
@@ -464,8 +464,8 @@ BenchmarkProblems:
       ComputeDataType: S
       HighPrecisionAccumulate: True
       StochasticRounding: True #
-      TransposeA: 1
-      TransposeB: 1
+      TransposeA: True
+      TransposeB: True
       UseBeta: True
       Batched: True
       UseBias: 1
@@ -527,8 +527,8 @@ BenchmarkProblems:
       ComputeDataType: S
       HighPrecisionAccumulate: True
       StochasticRounding: True #
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       UseBias: 1
@@ -589,8 +589,8 @@ BenchmarkProblems:
       ComputeDataType: S
       HighPrecisionAccumulate: True
       StochasticRounding: True #
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
       UseBias: 1
@@ -651,8 +651,8 @@ BenchmarkProblems:
       ComputeDataType: S
       HighPrecisionAccumulate: True
       StochasticRounding: True #
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
       UseBias: 1
@@ -713,8 +713,8 @@ BenchmarkProblems:
       ComputeDataType: S
       HighPrecisionAccumulate: True
       StochasticRounding: True #
-      TransposeA: 1
-      TransposeB: 1
+      TransposeA: True
+      TransposeB: True
       UseBeta: True
       Batched: True
       UseBias: 1

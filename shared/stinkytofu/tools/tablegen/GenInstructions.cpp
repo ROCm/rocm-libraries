@@ -40,6 +40,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -89,8 +90,13 @@ struct ArchDef {
     int maxVGPR = 256;
     int maxSGPR = 102;
     int maxAGPR = 0;
+    int totalVgprPerSimd = 0;
+    int vgprAllocGranule = 0;
     int defaultCycle = 4;
     int defaultLatency = 4;
+    // ECC presence: D16 VMEM zero-fills the non-data half and True16 VALU does
+    // a HW RMW at full-DWORD granularity.
+    int d16Writes32BitVgpr = 0;
     std::vector<HwRegEntry> hwRegs;
 };
 
@@ -459,8 +465,11 @@ class DefTParser {
                     parseFieldInt(block, ".maxVGPR", arch_.maxVGPR);
                     parseFieldInt(block, ".maxSGPR", arch_.maxSGPR);
                     parseFieldInt(block, ".maxAGPR", arch_.maxAGPR);
+                    parseFieldInt(block, ".totalVgprPerSimd", arch_.totalVgprPerSimd);
+                    parseFieldInt(block, ".vgprAllocGranule", arch_.vgprAllocGranule);
                     parseFieldInt(block, ".defaultCycle", arch_.defaultCycle);
                     parseFieldInt(block, ".defaultLatency", arch_.defaultLatency);
+                    parseFieldInt(block, ".d16Writes32BitVgpr", arch_.d16Writes32BitVgpr);
                 }
             }
         } else {
@@ -1795,12 +1804,18 @@ static bool emitArchHeader(const ArchDef& arch, const std::string& outputPath) {
         << "{\n"
         << "    " << arch.name << "ArchInfo()\n"
         << "        : ArchInfo(" << arch.major << ", " << arch.minor << ", " << arch.stepping
-        << ", " << arch.wavefront << " /* waveFrontSize */)\n"
+        << ", " << arch.wavefront << " /* waveFrontSize */" << ", " << arch.totalVgprPerSimd
+        << " /* totalVgprPerSimd */" << ", " << arch.vgprAllocGranule
+        << " /* vgprAllocGranule */)\n"
         << "    {\n"
         << "    }\n\n"
         << "    IsaOpcode getIsaOpcode(UnifiedOpcode unifiedOpcode) const override\n"
         << "    {\n"
         << "        return get" << arch.name << "Opcode(unifiedOpcode);\n"
+        << "    }\n\n"
+        << "    bool hasD16Writes32BitVgpr() const override\n"
+        << "    {\n"
+        << "        return " << (arch.d16Writes32BitVgpr ? "true" : "false") << ";\n"
         << "    }\n\n"
         << "    const HwInstDesc* getMCIDTable() const override\n"
         << "    {\n"

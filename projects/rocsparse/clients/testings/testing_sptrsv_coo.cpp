@@ -315,7 +315,6 @@ void testing_sptrsv_coo(const Arguments& arg)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
     CHECK_ROCSPARSE_ERROR(rocsparse_destroy_sptrsv_descr(sptrsv_descr));
 }
 

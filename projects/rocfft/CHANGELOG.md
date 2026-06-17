@@ -47,7 +47,7 @@ Documentation for rocFFT is available at
 * Removed Boost as a dependency for clients and samples.
 * Split the precompiled kernel cache file (`rocfft_kernel_cache.db`) into per-architecture files (`rocfft_kernel_cache_gfx950.db`, `rocfft_kernel_cache_gfx1201.db`, etc).
 * `rocfft_plan_create` returns `rocfft_status_invalid_offset` for any usage of non-zero offsets in plan descriptions. The feature is not supported yet.
-* Callback functions will be deprecated in a future release.
+* Callback functions specified as function pointers on execution info handles will be deprecated in a future release.
 
 ### Resolved issues
 

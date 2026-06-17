@@ -740,7 +740,7 @@ std::string SdpaBwdOperationDescriptor::toString() const
     str += ", diagonal_alignment=" + std::to_string(static_cast<int>(_data.diagonal_alignment));
     str += ", compute_data_type=";
     str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
-    str += "}";
+    str += '}';
     return str;
 }
 

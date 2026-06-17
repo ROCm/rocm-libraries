@@ -138,8 +138,6 @@ void mfma_inst(nb::module_ m_mfma)
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::optional<InstructionInput>&,
                       bool,
-                      bool,
-                      bool,
                       const std::string&>(),
              nb::arg("instType"),
              nb::arg("accType"),
@@ -150,8 +148,6 @@ void mfma_inst(nb::module_ m_mfma)
              nb::arg("b"),
              nb::arg("acc2")    = nb::none(),
              nb::arg("neg")     = false,
-             nb::arg("reuseA")  = false,
-             nb::arg("reuseB")  = false,
              nb::arg("comment") = "")
         .def_rw("a", &rocisa::MFMAInstruction::a)
         .def_rw("b", &rocisa::MFMAInstruction::b)
@@ -172,8 +168,6 @@ void mfma_inst(nb::module_ m_mfma)
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const int,
                       bool,
-                      bool,
-                      bool,
                       const std::string&>(),
              nb::arg("instType"),
              nb::arg("accType"),
@@ -184,8 +178,6 @@ void mfma_inst(nb::module_ m_mfma)
              nb::arg("b"),
              nb::arg("acc2_imm") = 0,
              nb::arg("neg")      = false,
-             nb::arg("reuseA")   = false,
-             nb::arg("reuseB")   = false,
              nb::arg("comment")  = "")
         .def_rw("a", &rocisa::MFMAInstruction::a)
         .def_rw("b", &rocisa::MFMAInstruction::b)
@@ -218,8 +210,6 @@ void mfma_inst(nb::module_ m_mfma)
                       rocisa::InstType,
                       rocisa::InstType,
                       int,
-                      bool,
-                      bool,
                       const std::string&>(),
              nb::kw_only(),
              nb::arg("instType"),
@@ -235,8 +225,6 @@ void mfma_inst(nb::module_ m_mfma)
              nb::arg("mxScaleAType") = rocisa::InstType::INST_F32,
              nb::arg("mxScaleBType") = rocisa::InstType::INST_F32,
              nb::arg("block")        = 0,
-             nb::arg("reuseA")       = false,
-             nb::arg("reuseB")       = false,
              nb::arg("comment")      = "")
         .def_rw("a", &rocisa::MXMFMAInstruction::a)
         .def_rw("b", &rocisa::MXMFMAInstruction::b)
@@ -264,8 +252,6 @@ void mfma_inst(nb::module_ m_mfma)
                       rocisa::InstType,
                       rocisa::InstType,
                       int,
-                      bool,
-                      bool,
                       const std::string&>(),
              nb::kw_only(),
              nb::arg("instType"),
@@ -281,8 +267,6 @@ void mfma_inst(nb::module_ m_mfma)
              nb::arg("mxScaleAType") = rocisa::InstType::INST_F32,
              nb::arg("mxScaleBType") = rocisa::InstType::INST_F32,
              nb::arg("block")        = 0,
-             nb::arg("reuseA")       = false,
-             nb::arg("reuseB")       = false,
              nb::arg("comment")      = "")
         .def_rw("a", &rocisa::MXMFMAInstruction::a)
         .def_rw("b", &rocisa::MXMFMAInstruction::b)

@@ -296,6 +296,7 @@ ConvSolution ConvBinWinogradRxSf2x3g1Fused::GetSolution(const FusionContext& con
             case miopenActivationLOGISTIC: return SIGMOID;
             case miopenActivationTANH: return SCALED_TANH;
             case miopenActivationLEAKYRELU: return LEAKY_RELU;
+
             case miopenActivationPASTHRU:
             case miopenActivationRELU:
             case miopenActivationSOFTRELU:
@@ -303,7 +304,7 @@ ConvSolution ConvBinWinogradRxSf2x3g1Fused::GetSolution(const FusionContext& con
             case miopenActivationPOWER:
             case miopenActivationCLIPPEDRELU:
             case miopenActivationELU:
-            default: return IDENTITY;
+            case miopenActivationCLAMP: return IDENTITY;
             };
         }
         return IDENTITY;

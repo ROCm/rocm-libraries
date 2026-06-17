@@ -538,6 +538,8 @@ namespace hipsparse
             return rocsparse_spmm_alg_csr;
         case HIPSPARSE_SPMM_BLOCKED_ELL_ALG1:
             return rocsparse_spmm_alg_bell;
+        case HIPSPARSE_SPMM_BSR_ALG1:
+            return rocsparse_spmm_alg_bsr;
         default:
             throw "Non existent hipsparseSpMMAlg_t";
         }

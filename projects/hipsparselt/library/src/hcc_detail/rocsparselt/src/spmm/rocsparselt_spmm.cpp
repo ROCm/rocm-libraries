@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -54,7 +54,7 @@ rocsparselt_status rocsparselt_matmul_get_workspace(const rocsparselt_handle*   
     auto _handle = reinterpret_cast<const _rocsparselt_handle*>(handle);
     if(!check_is_init_handle(_handle))
     {
-        hipsparselt_cerr << "handle did not initialized or already destroyed" << std::endl;
+        hipsparselt_cerr << "handle was not initialized or has already been destroyed" << std::endl;
         return rocsparselt_status_invalid_handle;
     }
 
@@ -66,7 +66,7 @@ rocsparselt_status rocsparselt_matmul_get_workspace(const rocsparselt_handle*   
     auto _plan = reinterpret_cast<const _rocsparselt_matmul_plan*>(plan);
     if(!check_is_init_plan(_plan))
     {
-        log_error(_handle, __func__, "plan did not initialized or already destroyed");
+        log_error(_handle, __func__, "plan was not initialized or has already been destroyed");
         return rocsparselt_status_invalid_handle;
     }
 
@@ -116,7 +116,7 @@ rocsparselt_status rocsparselt_matmul_impl(const char*                    caller
     auto _handle = reinterpret_cast<const _rocsparselt_handle*>(handle);
     if(!check_is_init_handle(_handle))
     {
-        hipsparselt_cerr << "handle did not initialized or already destroyed" << std::endl;
+        hipsparselt_cerr << "handle was not initialized or has already been destroyed" << std::endl;
         return rocsparselt_status_invalid_handle;
     }
 
@@ -128,7 +128,7 @@ rocsparselt_status rocsparselt_matmul_impl(const char*                    caller
     auto _plan = reinterpret_cast<const _rocsparselt_matmul_plan*>(plan);
     if(!check_is_init_plan(_plan))
     {
-        log_error(_handle, caller, "plan did not initialized or already destroyed");
+        log_error(_handle, caller, "plan was not initialized or has already been destroyed");
         return rocsparselt_status_invalid_handle;
     }
 

@@ -235,6 +235,10 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
 
     add_test(NAME ${TARGET} COMMAND ${TARGET} WORKING_DIRECTORY ${WORKING_DIR})
     set_tests_properties(${TARGET} PROPERTIES LABELS "${ALL_LABELS}")
+
+    if(TEST_ENVIRONMENT)
+        set_tests_properties(${TARGET} PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}")
+    endif()
 endfunction()
 
 # ~~~
@@ -351,6 +355,12 @@ function(add_tiered_test_target TARGET WORKING_DIR)
     set_tests_properties(${TARGET}_full PROPERTIES
         LABELS "full;slow" TIMEOUT ${ARG_FULL_TIMEOUT}
         FAIL_REGULAR_EXPRESSION "${_no_tests_re}")
+
+    if(TEST_ENVIRONMENT)
+        set_tests_properties(
+            ${TARGET}_quick ${TARGET}_standard ${TARGET}_comprehensive ${TARGET}_full
+            PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}")
+    endif()
 
     # -- Install staging: smoke only --
     # Accumulated in a global property so install_integration_tests_ctest_files()

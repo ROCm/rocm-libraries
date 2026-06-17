@@ -53,28 +53,29 @@ struct TensorDescriptor
         return unique_sort_all_dim_ids::Size();
     }
 
+    // Helper to get length of a visible dimension from transforms
+    template <index_t I>
+    __host__ __device__ static constexpr auto
+    GetVisibleDimLengthFromTransforms(const Transforms& transforms)
+    {
+        constexpr auto result =
+            find_in_tuple_of_sequences<VisibleDimensionIds::At(Number<I>{})>(UpperDimensionIdss{});
+        static_assert(result.found, "wrong! not found matching transformation and upper-dimension");
+        return transforms[Number<result.itran>{}].GetUpperLengths()[Number<result.idim_up>{}];
+    }
+
+    // Compute element size using pack expansion instead of generate_tuple with lambda
+    template <index_t... Is>
+    __host__ __device__ static constexpr auto ComputeElementSizeImpl(const Transforms& transforms,
+                                                                     Sequence<Is...>)
+    {
+        return (GetVisibleDimLengthFromTransforms<Is>(transforms) * ...);
+    }
+
     __host__ __device__ static constexpr auto InitializeElementSize(const Transforms& transforms)
     {
-        const auto lengths = generate_tuple(
-            [&](auto idim_visible) {
-                constexpr auto tmp = GetTransformAndItsUpperDimension(idim_visible);
-
-                constexpr index_t itran   = tmp[Number<0>{}];
-                constexpr index_t idim_up = tmp[Number<1>{}];
-                constexpr bool found      = tmp[Number<2>{}];
-
-                static_assert(found == true,
-                              "wrong! not found matching transformation and upper-dimension");
-
-                const auto length =
-                    transforms[Number<itran>{}].GetUpperLengths()[Number<idim_up>{}];
-
-                return length;
-            },
-            Number<ndim_visible_>{});
-
-        // TODO: make container_reduce support tuple of Number and index_t
-        return container_reduce(lengths, math::multiplies{}, Number<1>{});
+        return ComputeElementSizeImpl(
+            transforms, typename arithmetic_sequence_gen<0, ndim_visible_, 1>::type{});
     }
 
     template <index_t IDim>
@@ -84,24 +85,13 @@ struct TensorDescriptor
 
         constexpr index_t idim_hidden = VisibleDimensionIds::At(idim_visible);
 
-        index_t itran_found   = 0;
-        index_t idim_up_found = 0;
-        bool found            = false;
+        // Use compile-time search helper instead of nested static_for loops.
+        // This significantly reduces applier::operator() template instantiations
+        // by replacing nested lambda-based loops with a single constexpr search.
+        // See sequence_helper.hpp::find_in_tuple_of_sequences for details.
+        constexpr auto result = find_in_tuple_of_sequences<idim_hidden>(UpperDimensionIdss{});
 
-        static_for<0, ntransform_, 1>{}([&](auto itran) {
-            constexpr auto up_dim_ids = UpperDimensionIdss{}[itran];
-
-            static_for<0, up_dim_ids.Size(), 1>{}([&](auto idim_up) {
-                if constexpr(up_dim_ids[idim_up] == idim_hidden)
-                {
-                    itran_found   = itran;
-                    idim_up_found = idim_up;
-                    found         = true;
-                }
-            });
-        });
-
-        return make_tuple(itran_found, idim_up_found, found);
+        return make_tuple(result.itran, result.idim_up, result.found);
     }
 
     constexpr static index_t ntransform_   = GetNumOfTransform();
@@ -173,7 +163,7 @@ struct TensorDescriptor
     __host__ __device__ constexpr auto GetElementSpaceSize() const { return element_space_size_; }
 
     template <typename Idx>
-    __host__ __device__ constexpr index_t CalculateOffset(const Idx& idx) const
+    __host__ __device__ constexpr auto CalculateOffset(const Idx& idx) const
     {
         static_assert(Idx::Size() == GetNumOfDimension(), "wrong! inconsistent # of dimension");
 
@@ -475,6 +465,8 @@ __host__ __device__ constexpr auto make_tensor_coordinate_step(const TensorDesc&
                                                                const VisibleIndex& idx_diff_visible,
                                                                UpdateLowerIndexHack)
 {
+    using IndexType = remove_cvref_t<decltype(idx_diff_visible[Number<0>{}])>;
+
     static_assert(TensorDesc::GetNumOfDimension() == VisibleIndex::Size(),
                   "wrong! # of dimension inconsistent");
 
@@ -490,7 +482,7 @@ __host__ __device__ constexpr auto make_tensor_coordinate_step(const TensorDesc&
     auto is_non_zero_diff = make_zero_multi_index<ndim_hidden>();
 
     // decide do_transform by checkout non-zero index diff components
-    MultiIndex<VisibleIndex::Size()> non_zero_diff_pick_visible;
+    MultiIndex<VisibleIndex::Size(), IndexType> non_zero_diff_pick_visible;
 
     static_for<0, ndim_visible, 1>{}(
         [&](auto i) { non_zero_diff_pick_visible(i) = (idx_diff_visible[i] != 0); });
@@ -503,7 +495,7 @@ __host__ __device__ constexpr auto make_tensor_coordinate_step(const TensorDesc&
 
         const auto non_zero_diff_pick_up = get_container_subset(is_non_zero_diff, dims_up);
 
-        MultiIndex<dims_low.Size()> non_zero_diff_pick_low;
+        MultiIndex<dims_low.Size(), IndexType> non_zero_diff_pick_low;
 
         // if any of upper index diff components is non-zero, then
         //   1) Need to do this transform
@@ -539,6 +531,8 @@ __host__ __device__ constexpr void move_tensor_coordinate(const TensorDesc& tens
                                                           TensorCoord& coord,
                                                           const TensorCoordStep& coord_step)
 {
+    using IndexType = remove_cvref_t<decltype(coord.GetOffset())>;
+
     constexpr index_t ndim_hidden = TensorDesc::GetNumOfHiddenDimension();
     constexpr index_t ntransform  = TensorDesc::GetNumOfTransform();
 
@@ -572,7 +566,7 @@ __host__ __device__ constexpr void move_tensor_coordinate(const TensorDesc& tens
             auto idx_low           = get_container_subset(idx_hidden, dims_low);
             const auto idx_diff_up = get_container_subset(idx_diff_hidden, dims_up);
 
-            MultiIndex<dims_low.Size()> idx_diff_low;
+            MultiIndex<dims_low.Size(), IndexType> idx_diff_low;
 
             // HACK: control UpdateLowerIndex for Merge using hack
             constexpr index_t Hack = decltype(coord_step.update_lower_index_hack_)::At(itran);

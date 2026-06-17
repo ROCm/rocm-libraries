@@ -326,6 +326,11 @@ HIPDNN_BACKEND_EXPORT void hipdnnPeekLastErrorString_ext(char* message, size_t m
  * into the descriptor. The serialized graph is provided as an input byte array, and the size of
  * the graph in bytes is specified. The created descriptor will encapsulate the deserialized graph.
  *
+ * Container-aware: when @p serializedGraph is a graph-and-plan container blob (as produced by
+ * hipdnnBackendGetSerializedBinaryGraphAndPlan_ext()), the embedded graph payload is extracted and
+ * deserialized; any embedded execution plan is ignored on this path. A legacy bare-graph blob is
+ * deserialized directly. The returned graph descriptor is unfinalized in both cases.
+ *
  * IMPORTANT: Hipdnn expects that the serialized graph is sorted in topological order, has no cycles,
  * and is fully connected (no orphan nodes). Additionally, all tensors in the graph must have unique uids.
  *
@@ -431,9 +436,17 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
 /*!
  * @brief Creates and deserializes a backend execution plan descriptor.
  *
+ * Container-aware: when @p serializedPlan is a graph-and-plan container blob (as produced by
+ * hipdnnBackendGetSerializedBinaryGraphAndPlan_ext()), the embedded execution plan payload is
+ * extracted and deserialized. A container that carries no execution plan is rejected with
+ * HIPDNN_STATUS_BAD_PARAM. A bare execution-plan blob (as produced by
+ * hipdnnBackendGetSerializedExecutionPlan_ext()) is deserialized directly. The returned execution
+ * plan descriptor is finalized in both cases.
+ *
  * @param [in]  handle         A hipDNN handle used to access loaded engine plugins.
  * @param [out] descriptor     Pointer to the created execution plan descriptor.
- * @param [in]  serializedPlan Pointer to bytes produced by hipdnnBackendGetSerializedExecutionPlan_ext().
+ * @param [in]  serializedPlan Pointer to bytes produced by hipdnnBackendGetSerializedExecutionPlan_ext()
+ *                             or hipdnnBackendGetSerializedBinaryGraphAndPlan_ext().
  * @param [in]  planByteSize   Size of @p serializedPlan in bytes.
  */
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t
@@ -441,6 +454,89 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
                                                        hipdnnBackendDescriptor_t* descriptor,
                                                        const uint8_t* serializedPlan,
                                                        size_t planByteSize);
+
+/*!
+ * @brief Bitmask describing the payloads carried by a serialized binary blob.
+ *
+ * Returned through the @p contentFlags out-parameter of
+ * hipdnnBackendGetSerializedBinaryContents_ext(). Values are combined with
+ * bitwise OR; a blob that carries a graph and a plan reports
+ * (HIPDNN_SERIALIZED_CONTENT_GRAPH | HIPDNN_SERIALIZED_CONTENT_EXECUTION_PLAN).
+ */
+typedef enum
+{
+    HIPDNN_SERIALIZED_CONTENT_GRAPH = 1,
+    HIPDNN_SERIALIZED_CONTENT_EXECUTION_PLAN = 2
+} hipdnnSerializedContentFlags_t;
+
+/*!
+ * @brief Serializes a graph together with an optional execution plan into a single binary blob.
+ *
+ * Frames the graph and (optionally) the execution plan into one self-contained
+ * container blob. The graph is always written. When @p executionPlanDescriptor
+ * is non-null its serialized execution plan is embedded alongside the graph;
+ * when it is null the container carries the graph only (a graph-only container,
+ * still tagged with the container identifier). The resulting blob can be
+ * inspected with hipdnnBackendGetSerializedBinaryContents_ext(). It is always
+ * accepted by hipdnnBackendCreateAndDeserializeGraph_ext(), which reads the
+ * embedded graph. It is accepted by
+ * hipdnnBackendCreateAndDeserializeExecutionPlan_ext() only when it carries an
+ * execution plan; a graph-only container passed to that API fails with
+ * HIPDNN_STATUS_BAD_PARAM.
+ *
+ * Uses the standard two-call pattern: call first with @p serializedBlob set to
+ * @c nullptr to query the required buffer size, then call again with a
+ * caller-allocated buffer to receive the data.
+ *
+ * @param [in]  graphDescriptor         An operation graph descriptor (required).
+ * @param [in]  executionPlanDescriptor A finalized execution plan descriptor to embed,
+ *                                      or @c nullptr to produce a graph-only container.
+ * @param [in]  requestedByteSize       Size of the caller-allocated buffer in bytes.
+ *                                      Ignored when @p serializedBlob is @c nullptr.
+ * @param [out] blobByteSize            Pointer to receive the size of the container blob in bytes.
+ *                                      ALWAYS written on success, including when
+ *                                      @p serializedBlob is @c nullptr (size query).
+ * @param [out] serializedBlob          Caller-allocated buffer to receive the container blob,
+ *                                      or @c nullptr to query the required size only.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS                      The blob was produced, or the size query
+ *                                                    completed successfully.
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER       graphDescriptor or blobByteSize is null.
+ * @retval HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT  requestedByteSize is smaller than the blob size.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR               An internal error occurred during serialization.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetSerializedBinaryGraphAndPlan_ext(
+    hipdnnBackendDescriptor_t graphDescriptor,
+    hipdnnBackendDescriptor_t executionPlanDescriptor,
+    size_t requestedByteSize,
+    size_t* blobByteSize,
+    uint8_t* serializedBlob);
+
+/*!
+ * @brief Reports which payloads a serialized binary blob carries.
+ *
+ * Inspects @p serializedBlob without fully deserializing it and writes a bitmask
+ * of hipdnnSerializedContentFlags_t to @p contentFlags. A blob produced by
+ * hipdnnBackendGetSerializedBinaryGraphAndPlan_ext() reports
+ * HIPDNN_SERIALIZED_CONTENT_GRAPH, and additionally
+ * HIPDNN_SERIALIZED_CONTENT_EXECUTION_PLAN when it embeds a non-empty plan.
+ *
+ * A legacy bare-graph blob (and any blob lacking the container identifier, or
+ * any blob shorter than a container header) is reported as
+ * HIPDNN_SERIALIZED_CONTENT_GRAPH only. A bare execution-plan blob is therefore
+ * also reported as a graph on this path and must not be routed through it; use
+ * the standalone plan-deserialize API for bare plan blobs.
+ *
+ * @param [in]  serializedBlob   Pointer to the serialized blob (required).
+ * @param [in]  blobByteSize     Size of @p serializedBlob in bytes.
+ * @param [out] contentFlags     Pointer to receive the content bitmask. Always written on success.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS                 The contents were queried successfully.
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER  serializedBlob or contentFlags is null.
+ * @retval HIPDNN_STATUS_BAD_PARAM               The container failed verification.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetSerializedBinaryContents_ext(
+    const uint8_t* serializedBlob, size_t blobByteSize, int* contentFlags);
 
 /*!
  * @brief Creates and deserializes a graph from a JSON string into a backend descriptor.
