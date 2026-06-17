@@ -249,3 +249,62 @@ TEST(BatchPointerReset, StalePointersAcrossProblems)
                "initializeGPUBatchedInputs was not re-invoked on the fast path.";
     }
 }
+
+// ---------------------------------------------------------------------------
+// Structural invariant: switching to a different ContractionProblemGemm
+// object must trigger batch-pointer re-upload even when preProblem() is not
+// called in between.
+//
+// With the old bool m_batchInit approach, skipping preProblem() leaves
+// m_batchInit=true, so initializeGPUBatchedInputs is skipped and the caller
+// gets batch pointers from the first problem's strides — silently wrong.
+//
+// The fix replaces the bool with ContractionProblemGemm const*
+// m_batchInitProblem and checks (m_batchInitProblem != &problem) in
+// prepareGPUInputsInternal.  Because p1 and p2 are distinct objects, their
+// addresses differ, so the check fires and re-uploads correctly — no
+// preProblem() needed to make it work.
+//
+// This test therefore fails with the boolean implementation and passes after
+// the pointer-identity fix.  It is the regression test for the structural
+// guarantee, not just the call-site-discipline guarantee.
+// ---------------------------------------------------------------------------
+TEST(BatchPointerReset, StructuralReinitWithoutPreProblem)
+{
+    constexpr size_t BATCH = 4;
+
+    // p1: small problem — aStride = 32*32 = 1024 elements
+    auto p1 = makeBatchedProblem(32, 32, 32, BATCH);
+    // p2: larger problem — aStride = 64*64 = 4096 elements
+    auto p2 = makeBatchedProblem(64, 64, 64, BATCH);
+
+    // Buffer must be sized for the largest problem.
+    auto args = buildArgs({{64, 64, BATCH, 64}});
+
+    ClientProblemFactory factory(args);
+    DataInitialization   dataInit(args, factory);
+
+    // First call: slow path — initialises batch pointers for p1.
+    dataInit.prepareGPUInputs(p1);
+
+    // Second call: switch to p2 WITHOUT calling preProblem().
+    // The structural pointer-identity check must detect the different problem
+    // object and re-upload batch pointers for p2.
+    auto inputs2 = dataInit.prepareGPUInputs(p2);
+
+    auto* ci2 = dynamic_cast<ContractionInputs*>(inputs2.get());
+    ASSERT_NE(ci2, nullptr);
+    ASSERT_NE(ci2->batchA, nullptr);
+
+    void* batchA_p2[BATCH];
+    HIP_CHECK_EXC(hipMemcpy(
+        batchA_p2, ci2->batchA, BATCH * sizeof(void*), hipMemcpyDeviceToHost));
+
+    ptrdiff_t stride   = (uint8_t*)batchA_p2[1] - (uint8_t*)batchA_p2[0];
+    ptrdiff_t expected = ptrdiff_t(64 * 64); // p2's aStride in elements
+    EXPECT_EQ(stride, expected)
+        << "Batch pointer stride must match p2 (" << expected
+        << " elements) even without an intervening preProblem() call. "
+           "Got " << stride << ". This means initializeGPUBatchedInputs was "
+           "skipped — the structural pointer-identity guard is missing.";
+}
