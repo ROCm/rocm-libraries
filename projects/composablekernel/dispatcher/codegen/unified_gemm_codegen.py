@@ -224,6 +224,9 @@ class KernelConfig:
     elementwise_op: str = "PassThrough"
     num_d_tensors: int = 0
     d_layout: str = "r"  # Layout for D tensors (r=row, c=col) - same for all D tensors
+    # Stream-K reduction strategy: "atomic" (partials atomic-add into C),
+    # "linear", or "tree" (partials accumulate through a device workspace).
+    reduction_strategy: str = "atomic"
 
     # Fixed parameters
     block_size: int = 256
@@ -286,6 +289,11 @@ class KernelConfig:
             parts.append(f"nd{self.num_d_tensors}")
             parts.append(f"dly_{self.d_layout}")
 
+        # Stream-K variant: reduction strategy distinguishes otherwise-identical
+        # kernels (each strategy is a separate compiled binary).
+        if self.variant == GemmVariant.STREAM_K:
+            parts.append(f"redux_{self.reduction_strategy}")
+
         # Occupancy parameters (only if non-default)
         if self.num_wave_groups != 1:
             parts.append(f"wg{self.num_wave_groups}")
@@ -343,6 +351,10 @@ class KernelNaming:
             name += f"_multid_{config.elementwise_op}_d{config.num_d_tensors}"
         elif config.variant == GemmVariant.STREAM_K:
             name += "_streamk"
+            # Atomic keeps the bare "_streamk" suffix for name parity with the
+            # original single-strategy bridge; linear/tree are disambiguated.
+            if config.reduction_strategy != "atomic":
+                name += f"_{config.reduction_strategy}"
 
         return name
 
@@ -750,14 +762,21 @@ using CLayout = {ns_name}::CLayout;
         (which takes an external workspace pointer), the dispatcher allocates the
         workspace INTERNALLY via DeviceMem inside launch(args, stream).
 
-        Uses the Atomic reduction strategy: partial tiles atomic-add into C, so C
-        must be zeroed before every kernel invocation (handled by the preprocess
-        callback passed to launch_kernel_time_mask).
+        The reduction strategy is taken from the config (atomic/linear/tree).
+        Atomic: partial tiles atomic-add into C, so C is zeroed before every
+        kernel invocation. Linear/Tree: partials accumulate through the device
+        workspace, which is zeroed instead. Both are handled by the preprocess
+        callback passed to launch_kernel_time_mask.
         """
+        reduction_ck = {
+            "atomic": "Atomic",
+            "linear": "Linear",
+            "tree": "Tree",
+        }[config.reduction_strategy]
         return f"""
     static float launch(const ck_tile::StreamKHostArgs& args, const stream_config& stream) {{
         constexpr auto scheduler = {self.tm.SCHEDULER_TO_CK[config.trait.scheduler]};
-        constexpr auto ReductionStrategy = ck_tile::StreamKReductionStrategy::Atomic;
+        constexpr auto ReductionStrategy = ck_tile::StreamKReductionStrategy::{reduction_ck};
 
         using GemmUniversalTraits = TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuffer,
                                             ALayout, BLayout, CLayout, TransposeC,
@@ -1024,6 +1043,10 @@ class UnifiedGemmCodegen:
                 "elementwise_ops": ["MultiDAdd", "MultiDMultiply"],
                 "num_d_tensors": [1, 2],
             },
+            "streamk_config": {
+                # Each reduction strategy compiles to a separate kernel binary.
+                "reduction_strategy": ["atomic", "linear", "tree"],
+            },
         }
 
     def generate_all(self, parallel: bool = True) -> Dict:
@@ -1123,11 +1146,21 @@ class UnifiedGemmCodegen:
 
             elif variant == GemmVariant.STREAM_K:
                 # Stream-K reuses the standard trait space but requires the cshuffle
-                # epilogue (the only epilogue the stream-K kernel supports).
+                # epilogue (the only epilogue the stream-K kernel supports). Each
+                # reduction strategy (atomic/linear/tree) is a distinct compiled
+                # kernel, so we expand one config per requested strategy.
                 if trait.epilogue == "cshuffle":
-                    configs.append(
-                        KernelConfig(tile=tile, trait=trait, variant=variant)
-                    )
+                    streamk_cfg = self.config.get("streamk_config", {})
+                    strategies = streamk_cfg.get("reduction_strategy", ["atomic"])
+                    for reduction_strategy in strategies:
+                        configs.append(
+                            KernelConfig(
+                                tile=tile,
+                                trait=trait,
+                                variant=variant,
+                                reduction_strategy=reduction_strategy,
+                            )
+                        )
 
             elif variant == GemmVariant.PRESHUFFLE:
                 # Preshuffle needs specific pipeline (preshufflev2) and scheduler (default)
