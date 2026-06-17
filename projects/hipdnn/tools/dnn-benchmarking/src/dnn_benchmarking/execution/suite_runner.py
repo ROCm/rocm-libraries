@@ -978,8 +978,14 @@ def run(
     """
     import hipdnn_frontend as hipdnn
 
-    set_plugin_path(hipdnn, config.plugin_path)
-    handle = hipdnn.Handle()
+    # Multiple plugin paths: each engine must load its own path via a
+    # per-engine handle created inside run_graph_all_providers (handle=None).
+    # Single/no path: create one shared handle here for all engines.
+    if config.plugin_paths and len(config.plugin_paths) > 1:
+        handle = None
+    else:
+        set_plugin_path(hipdnn, config.plugin_path)
+        handle = hipdnn.Handle()
 
     loader = GraphLoader()
     graph_results: List[GraphResult] = []
