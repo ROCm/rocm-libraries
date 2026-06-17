@@ -2725,7 +2725,8 @@ namespace TensileLite
                 {
                     HIP_CHECK_EXC(hipMemcpyAsync(p.gpuInput.valid.get(),
                                                  p.cpuInput.valid.get(),
-                                                 desc.elementBytes() * p.maxElements,
+                                                 multiplyElementSize(p.maxElements,
+                                                                     desc.elementBytes()),
                                                  hipMemcpyHostToDevice,
                                                  m_copyStream));
                 }
@@ -2733,7 +2734,8 @@ namespace TensileLite
                 {
                     HIP_CHECK_EXC(hipMemcpy(p.gpuInput.valid.get(),
                                             p.cpuInput.valid.get(),
-                                            desc.elementBytes() * p.maxElements,
+                                            multiplyElementSize(p.maxElements,
+                                                                desc.elementBytes()),
                                             hipMemcpyHostToDevice));
                 }
             }
