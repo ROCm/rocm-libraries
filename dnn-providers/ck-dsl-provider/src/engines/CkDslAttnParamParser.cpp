@@ -76,18 +76,37 @@ ParsedAttnParams parseSdpaGraph(const hipdnn_flatbuffers_sdk::flatbuffer_utiliti
     const auto* qd = q->dims();
     const auto* kd = k->dims();
     const auto* vd = v->dims();
-    // ck_dsl unified attention is BSHD-native (query[pos, head, d]); KV cache is
-    // position-major. Interpret the rank-4 graph tensors as [B,S,H,D]. (BHSD
-    // inputs would need a transpose into BSHD/paged layout -- a follow-on; the
-    // CkDslAttnPlan rejects is_bhsd cleanly.)
-    p.is_bhsd = false;
+    // hipDNN SDPA tensors are *logical* BHSD: dims are [B, H, S, D] (matching the
+    // asm_sdpa engine and the benchmark graph naming bN_hN_sN_dN). Read the
+    // logical extents accordingly.
     p.batch = qd->Get(0);
-    p.seqlen_q = qd->Get(1);
-    p.nhead_q = qd->Get(2);
+    p.nhead_q = qd->Get(1);
+    p.seqlen_q = qd->Get(2);
     p.hdim_q = qd->Get(3);
-    p.seqlen_k = kd->Get(1);
-    p.nhead_k = kd->Get(2);
+    p.nhead_k = kd->Get(1);
+    p.seqlen_k = kd->Get(2);
     p.hdim_v = vd->Get(3);
+
+    // Applicability is driven by the *physical* memory layout, read from Q's
+    // strides (aligned to the logical dims [B,H,S,D]). The ck_dsl kernel is
+    // BSHD-native (S-major-over-H: the S axis must be stored outside H). So:
+    //   stride(H) > stride(S)  -> physical is BHSD-contiguous (H-major-over-S)
+    //                             -> decline (is_bhsd=true); a transpose into the
+    //                                kernel's BSHD/paged layout is a follow-on.
+    //   stride(S) > stride(H)  -> physical is already the kernel's native BSHD
+    //                             memory -> run (is_bhsd=false).
+    // If strides are absent we cannot confirm BSHD, so conservatively decline.
+    const auto* qs = q->strides();
+    if (qs != nullptr && qs->size() >= 3) {
+        const int64_t stride_h = qs->Get(1);  // stride of the H axis (dim 1)
+        const int64_t stride_s = qs->Get(2);  // stride of the S axis (dim 2)
+        p.is_bhsd = stride_h > stride_s;
+    } else {
+        // Strides absent in the serialized graph: assume the kernel-native BSHD
+        // layout and let pytorch validation catch a true mismatch (matches prior
+        // run-all behavior rather than declining outright).
+        p.is_bhsd = false;
+    }
 
     p.mask_type = mapMask(attr);
     p.bias_type = mapBias(attr);

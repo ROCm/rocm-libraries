@@ -45,6 +45,8 @@ extern "C" {
 #include "ckc/instance_attention_unified.h"
 #include "ckc/instance_conv_implicit_gemm.h"
 #include "ckc/instance_gemm_universal.h"
+#include "ckc/instance_gfx942_attention_tiled_2d.h"
+#include "ckc/instance_gfx950_attention_tiled_2d.h"
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
 }
@@ -63,6 +65,16 @@ struct CEngineResult {
     Manifest manifest;
     std::array<unsigned, 3> grid{1, 1, 1};
     unsigned block = 0;
+};
+
+// Thrown by build_sdpa_tiled when the tiled MFMA attention kernel does not admit
+// the problem (arch not gfx942/gfx950, head_size/block_size/GQA outside the tiled
+// gate, etc.). The caller catches this to fall back to the scalar build_sdpa,
+// distinguishing an expected "not applicable" from a genuine build failure
+// (which is reported via the base std::runtime_error from fail()).
+struct TiledUnsupported : std::runtime_error {
+    explicit TiledUnsupported(const std::string& why)
+        : std::runtime_error("CEngine::build_sdpa_tiled: " + why) {}
 };
 
 // --------------------------------------------------------------------------
@@ -137,6 +149,12 @@ struct CEngine {
     static CEngineResult build_gemm(const GemmProblem& p);
     static CEngineResult build_conv(const ConvProblem& p);
     static CEngineResult build_sdpa(const SdpaProblem& p);
+    // Tiled MFMA attention build (the fast path). Reproduces the shipped
+    // ck_dsl_uattn2d_tiled_* kernel geometry, overlaying the heuristic's
+    // num_warps / tile_size / block_q. Throws TiledUnsupported when the problem
+    // is outside the tiled gate (caller falls back to build_sdpa); throws the
+    // base runtime_error on a genuine build/lower failure.
+    static CEngineResult build_sdpa_tiled(const SdpaProblem& p);
 
    private:
     // Common manifest header for every op.
@@ -385,6 +403,202 @@ inline CEngineResult CEngine::build_sdpa(const SdpaProblem& p) {
     // head_size). That IS the launch grid -- NOT the tiled CK paged-KV
     // {num_kv_heads, ceil(total_q/block_q)+num_seqs, 1} block space (which
     // belongs to a different, shipped tiled kernel). Launch with the scalar grid.
+    r.grid = {static_cast<unsigned>(g[0]), static_cast<unsigned>(g[1]),
+              static_cast<unsigned>(g[2])};
+    r.manifest.grid_explicit = std::array<int, 3>{g[0], g[1], g[2]};
+    return r;
+}
+
+// ==========================================================================
+// SDPA (unified-attention 2D TILED MFMA forward) -- the fast path.
+//   Reproduces the shipped, validated ck_dsl_uattn2d_tiled_* kernel geometry:
+//   the 32x32 wide-atom path (use_mfma_32x32 + use_transposed_qk_32x32,
+//   block_m_per_warp=32) that the prebuilt artifact encodes (mfma32 / stqk /
+//   mw32), overlaid with the heuristic-chosen num_warps / tile_size / block_q.
+//   ABI is byte-identical to build_sdpa (same 18-arg paged-KV signature).
+//   block = num_warps * 64 (THREADS); grid = {num_kv_heads,
+//   total_q/BLOCK_Q + num_seqs, 1} matching the CK unified-attention block-id
+//   space (block_id_x = kv head, block_id_y = q-block).
+// ==========================================================================
+inline CEngineResult CEngine::build_sdpa_tiled(const SdpaProblem& p) {
+    const bool is_gfx950 = p.arch && std::string(p.arch) == "gfx950";
+    const bool is_gfx942 = p.arch && std::string(p.arch) == "gfx942";
+    if (!is_gfx950 && !is_gfx942)
+        throw TiledUnsupported(std::string("tiled attention requires gfx942/gfx950, got ") +
+                               (p.arch ? p.arch : "null"));
+
+    if (p.num_kv_heads <= 0) throw TiledUnsupported("num_kv_heads must be positive");
+    const int num_queries_per_kv = p.num_query_heads / p.num_kv_heads;
+    if (num_queries_per_kv <= 0 || p.num_query_heads % p.num_kv_heads != 0)
+        throw TiledUnsupported("num_query_heads must be a positive multiple of num_kv_heads");
+
+    // Spec: start from the dataclass defaults, then set the problem dims and the
+    // proven feature flags the shipped artifact uses. block_size is the KV block
+    // tile; prefer the heuristic-overlaid block_q (folded by apply_attn_knobs).
+    ckc_attention_tiled_2d_spec_t spec = ckc_attention_tiled_2d_spec_default();
+    spec.head_size = p.head_size;
+    spec.block_size = p.block_q > 0 ? p.block_q : p.block_size;
+    spec.num_query_heads = p.num_query_heads;
+    spec.num_kv_heads = p.num_kv_heads;
+    spec.dtype = (p.dtype && std::string(p.dtype) == "bf16") ? "bf16" : "fp16";
+    spec.use_sinks = false;
+    spec.sliding_window = p.sliding_window;
+    spec.has_softcap = p.softcap != 0.0;
+    // num_warps from the heuristic (default 4, the shipped w4 geometry).
+    spec.num_warps = p.num_warps > 0 ? p.num_warps : 4;
+    // The shipped artifact's wide-atom 32x32 transposed-QK geometry (mfma32 /
+    // stqk / mw32). These are baked into the validated kernel identity, not a
+    // tunable knob the heuristic carries.
+    spec.use_mfma_32x32 = true;
+    spec.use_transposed_qk_32x32 = true;
+    spec.block_m_per_warp = 32;
+    // tile_size for the wide-atom 32x32 transposed-QK path.
+    //
+    // The QK GEMM tiles the KV dimension into N-tiles of QK_MFMA_N = 32 columns
+    // (the 32x32x16 atom), so the build emits exactly ``QK_N_TILES = tile_size_eff
+    // / 32`` softmax P-register tiles. ``tile_size_eff`` falls back to
+    // ``block_size`` when no tile_size is set, and the default block_size is 16:
+    // QK_N_TILES would collapse to 16/32 == 0, the per-tile P-register array
+    // (pt32_g*) would be left fully NULL, and the transposed-PV register pack
+    // would hand a NULL operand to warp_shuffle_xor at build time (a hard
+    // failure, not a clean decline). The __post_init__ validator catches this
+    // ("use_mfma_32x32 requires tile_size to be a multiple of 32") but it is the
+    // gfx942 narrow-path validator and is deliberately not run here, and the
+    // arch supports gate does not re-check it -- so derive a valid tile_size_eff
+    // explicitly. This mirrors the provider's SdpaCandidateSelector, where every
+    // use_mfma_32x32 candidate carries a tile_size with tile_size_eff % 32 == 0.
+    //
+    // tile_size must be a positive multiple of block_size (paged-KV slab
+    // alignment) AND a multiple of 32 (one full QK N-tile). The smallest such
+    // value is lcm(block_size, 32); for the shipped geometry (block_size=16)
+    // that is 32, reproducing the validated artifact's t32. A heuristic-supplied
+    // tile_size is honored only when it already satisfies both; otherwise it is
+    // rounded up to the nearest valid multiple so the chosen KV-tile size is
+    // never silently shrunk below a full N-tile.
+    {
+        const int bs = spec.block_size;
+        // lcm(bs, 32) via gcd; bs is in {16,32,64} for the tiled gate.
+        auto gcd = [](int x, int y) {
+            while (y) {
+                const int t = x % y;
+                x = y;
+                y = t;
+            }
+            return x;
+        };
+        const int step = bs > 0 ? (bs / gcd(bs, 32)) * 32 : 32;  // lcm(bs,32)
+        int ts = p.tile_size > 0 ? p.tile_size : step;
+        // Round up to the nearest multiple of ``step`` so tile_size_eff is both a
+        // multiple of block_size and of 32 (one whole QK N-tile).
+        if (step > 0 && ts % step != 0) ts = ((ts + step - 1) / step) * step;
+        spec.has_tile_size = true;
+        spec.tile_size = ts;
+    }
+
+    // Admission gate (arch-specific). A reject is an expected "fall back to
+    // scalar", not a hard failure. The spec's __post_init__ validator
+    // (ckc_attention_tiled_2d_spec_validate) is the gfx942 narrow-path validator
+    // and unconditionally rejects the gfx950 wide-atom knobs (use_mfma_32x32 /
+    // transposed-QK), so it is NOT called here; the arch-specific supports gate
+    // and the build/lower entry each run their own arch-correct validation.
+    char reason[CKC_ERR_MSG_CAP] = {0};
+    if (is_gfx950) {
+        ckc_gfx950_attention_tiled_2d_supports_args_t a =
+            ckc_gfx950_attention_tiled_2d_supports_args_default();
+        a.head_size = spec.head_size;
+        a.block_size = spec.block_size;
+        a.dtype = spec.dtype;
+        a.num_queries_per_kv = num_queries_per_kv;
+        a.num_warps = spec.num_warps;
+        a.block_m_per_warp = spec.block_m_per_warp;
+        a.has_tile_size = spec.has_tile_size;
+        a.tile_size = spec.tile_size;
+        a.arch = p.arch;
+        a.use_transposed_qk_32x32 = spec.use_transposed_qk_32x32;
+        if (!ckc_gfx950_attention_tiled_2d_supports(&a, reason, sizeof reason))
+            throw TiledUnsupported(reason[0] ? reason : "gfx950 supports gate rejected");
+    } else {
+        ckc_gfx942_attention_tiled_2d_supports_args_t a =
+            ckc_gfx942_attention_tiled_2d_supports_args_default();
+        a.head_size = spec.head_size;
+        a.block_size = spec.block_size;
+        a.dtype = spec.dtype;
+        a.num_queries_per_kv = num_queries_per_kv;
+        a.num_warps = spec.num_warps;
+        a.block_m_per_warp = spec.block_m_per_warp;
+        a.has_tile_size = spec.has_tile_size;
+        a.tile_size = spec.tile_size;
+        a.arch = p.arch;
+        a.use_mfma_32x32x8 = false;
+        a.use_transposed_qk_32x32 = spec.use_transposed_qk_32x32;
+        if (!ckc_gfx942_attention_tiled_2d_supports(&a, reason, sizeof reason))
+            throw TiledUnsupported(reason[0] ? reason : "gfx942 supports gate rejected");
+    }
+
+    // Build the kernel, then lower to .ll. The arch-specific *_new entry inits a
+    // builder named spec.kernel_name() and emits the kernel; the kernel name is
+    // read back from the kernel_def. The arch-specific *_lower_to_llvm convenience
+    // is deliberately NOT used: the gfx950 convenience routes through the gfx942
+    // config_from_spec/validator and rejects the wide-atom knobs; the direct
+    // build + ckc_lower_kernel_to_llvm_ex sequence is the arch-correct path.
+    ckc_ir_builder_t b;
+    ckc_kernel_def_t* kernel =
+        is_gfx950 ? ckc_gfx950_build_unified_attention_2d_tiled_new(&b, &spec, p.arch)
+                  : ckc_build_unified_attention_2d_tiled_scalar_new(&b, &spec, p.arch);
+    if (!kernel) {
+        std::string berr = ckc_ir_builder_error(&b) ? ckc_ir_builder_error(&b) : "";
+        ckc_ir_builder_free(&b);
+        fail("sdpa_tiled", berr.empty() ? "tiled build failed" : berr.c_str());
+    }
+    const std::string kname = kernel->name ? kernel->name : "";
+    // THREADS = num_warps * wavefront (the kernel's max_workgroup_size).
+    const int threads = ckc_kernel_max_workgroup_size(kernel);
+
+    char* ll = nullptr;
+    char err[CKC_ERR_MSG_CAP] = {0};
+    const ckc_status_t st =
+        ckc_lower_kernel_to_llvm_ex(kernel, CKC_LLVM_FLAVOR_AUTO, p.arch, &ll, err, sizeof err);
+    ckc_ir_builder_free(&b);
+    if (st != CKC_OK || !ll) fail("sdpa_tiled", err[0] ? err : "lower_to_llvm failed");
+
+    CEngineResult r;
+    r.llvm_ir.assign(ll);
+    free(ll);
+
+    r.manifest = base_manifest("attention_unified", kname, threads);
+    r.manifest.grid_order = "MN";  // explicit grid below; grid_order unused
+    r.manifest.sig_has_bytes = false;
+    // Byte-identical paged-KV ABI to build_sdpa (the launch setup is shared).
+    r.manifest.args_signature = {
+        arg("output_ptr", "ptr<f16, global>", 8),
+        arg("query_ptr", "ptr<f16, global>", 8),
+        arg("key_cache_ptr", "ptr<f16, global>", 8),
+        arg("value_cache_ptr", "ptr<f16, global>", 8),
+        arg("sink_ptr", "ptr<f16, global>", 8),
+        arg("block_tables_ptr", "ptr<i32, global>", 8),
+        arg("seq_lens_ptr", "ptr<i32, global>", 8),
+        arg("alibi_slopes_ptr", "ptr<f32, global>", 8),
+        arg("qq_bias_ptr", "ptr<f32, global>", 8),
+        arg("query_start_len_ptr", "ptr<i32, global>", 8),
+        arg("scale", "f32", 4),
+        arg("k_scale", "f32", 4),
+        arg("v_scale", "f32", 4),
+        arg("out_scale", "f32", 4),
+        arg("softcap", "f32", 4),
+        arg("num_seqs", "i32", 4),
+        arg("block_table_stride", "i32", 4),
+        arg("qq_bias_stride_0", "i32", 4),
+    };
+
+    r.block = static_cast<unsigned>(threads);
+
+    // Grid: block_id_x = kv head, block_id_y = q-block over BLOCK_Q-sized chunks
+    // plus one per-sequence boundary block (the CK unified-attention block space).
+    const int block_m = spec.block_m_per_warp * spec.num_warps;
+    const int block_q = block_m / num_queries_per_kv;
+    const long total_q = p.total_q;
+    const int gy = static_cast<int>(total_q / std::max(block_q, 1) + p.num_seqs);
+    const int g[3] = {p.num_kv_heads, gy, 1};
     r.grid = {static_cast<unsigned>(g[0]), static_cast<unsigned>(g[1]),
               static_cast<unsigned>(g[2])};
     r.manifest.grid_explicit = std::array<int, 3>{g[0], g[1], g[2]};

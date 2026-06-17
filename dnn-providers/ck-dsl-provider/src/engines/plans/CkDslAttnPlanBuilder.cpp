@@ -3,6 +3,7 @@
 
 #include "CkDslAttnPlanBuilder.hpp"
 
+#include <cstdio>
 #include <cstdlib>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <memory>
@@ -23,6 +24,14 @@ namespace {
 bool c_jit_enabled() {
     static const bool on = [] {
         const char* v = std::getenv("CK_DSL_C_JIT");
+        return v && (v[0] == '1' || v[0] == 't' || v[0] == 'T' || v[0] == 'y' || v[0] == 'Y');
+    }();
+    return on;
+}
+
+bool debug_enabled() {
+    static const bool on = [] {
+        const char* v = std::getenv("CK_DSL_DEBUG");
         return v && (v[0] == '1' || v[0] == 't' || v[0] == 'T' || v[0] == 'y' || v[0] == 'Y');
     }();
     return on;
@@ -86,20 +95,54 @@ std::unique_ptr<ck_dsl::Kernel> make_c_jit_attn_kernel(
     // otherwise) and, if one wins, JIT the scalar SDPA kernel with that
     // candidate's attention knobs (apply_attn_knobs, mirroring the GEMM/conv
     // builders). No registry -> keep the scalar defaults.
+    bool sel_valid = false, store_has = false;
+    const bool dbg = debug_enabled();
     try {
         auto problem = CkDslAttnParamParser::buildProblem(params, handle.gfxArch());
         auto choice = handle.dispatcher().select(problem);
-        if (choice.valid() && handle.store().has(choice.cache_key)) {
+        sel_valid = choice.valid();
+        store_has = sel_valid && handle.store().has(choice.cache_key);
+        if (store_has) {
             const auto& m = handle.store().at(choice.cache_key).manifest;
             apply_attn_knobs(prob, m, problem);
         }
+    } catch (const std::exception& e) {
+        if (dbg) fprintf(stderr, "[ckdsl-cfg] select/knobs exception: %s\n", e.what());
     } catch (...) {
         // No registry / heuristic failure: keep the default knobs.
     }
+    // Prefer the tiled MFMA attention kernel (the fast path); fall back to the
+    // scalar 2D reference when the tiled gate declines the problem (arch not
+    // gfx942/gfx950, head_size/block_size/GQA outside the tiled admission, ...).
+    // build_sdpa_tiled throws TiledUnsupported on a decline (expected fallback)
+    // and the base runtime_error on a genuine build failure (also falls back so
+    // the engine still serves the graph via the reference kernel).
+    ck_dsl::CEngineResult r;
+    const char* path = "scalar";
+    try {
+        r = ck_dsl::CEngine::build_sdpa_tiled(prob);
+        path = "tiled";
+    } catch (const ck_dsl::TiledUnsupported& e) {
+        if (dbg)
+            fprintf(stderr, "[ckdsl-cfg] tiled declined (%s); falling back to scalar\n", e.what());
+        r = ck_dsl::CEngine::build_sdpa(prob);
+    } catch (const std::exception& e) {
+        if (dbg)
+            fprintf(stderr, "[ckdsl-cfg] tiled build failed (%s); falling back to scalar\n",
+                    e.what());
+        r = ck_dsl::CEngine::build_sdpa(prob);
+    }
 
-    auto r = ck_dsl::CEngine::build_sdpa(prob);
+    if (dbg) {
+        fprintf(stderr,
+                "[ckdsl-cfg] B=%d Hq=%d Hkv=%d S=%d D=%d dtype=%s sel_valid=%d store_has=%d "
+                "-> block_size=%d block_q=%d tile_size=%d num_warps=%d path=%s kernel=%s\n",
+                prob.num_seqs, prob.num_query_heads, prob.num_kv_heads, prob.max_seqlen_q,
+                prob.head_size, prob.dtype, (int)sel_valid, (int)store_has, prob.block_size,
+                prob.block_q, prob.tile_size, prob.num_warps, path, r.manifest.kernel_name.c_str());
+    }
 
-    // The block size build_sdpa actually used (block_q overlay folded in).
+    // The block size the build actually used (block_q overlay folded in).
     const int used_block = prob.block_q > 0 ? prob.block_q : prob.block_size;
 
     // Inject attention_config so CkDslAttnPlan (which reads block_size/block_q
@@ -123,25 +166,45 @@ std::unique_ptr<ck_dsl::Kernel> make_c_jit_attn_kernel(
 bool CkDslAttnPlanBuilder::isApplicable(
     const CkDslHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const {
-    if (!CkDslAttnParamParser::isSdpaGraph(opGraph)) return false;
+    const bool dbg = debug_enabled();
+    if (!CkDslAttnParamParser::isSdpaGraph(opGraph)) {
+        if (dbg)
+            fprintf(stderr, "[ckdsl-attn] DECLINE: not isSdpaGraph (nodeCount=%d)\n",
+                    (int)opGraph.nodeCount());
+        return false;
+    }
     try {
         auto params = CkDslAttnParamParser::parseSdpaGraph(opGraph);
         if (c_jit_enabled()) {
             // C-JIT path: the kernel is generated on demand from the pure-C
             // engine, so applicability does NOT depend on the shipped
-            // ArtifactStore/dispatcher catalog (which is empty unless
-            // CK_DSL_KERNEL_LIB_PATH is set). Accept any well-formed SDPA in the
-            // BSHD layout (BHSD is rejected at plan build) with a dtype the C
-            // engine supports.
-            if (params.is_bhsd) return false;
-            if (params.batch <= 0 || params.seqlen_q <= 0 || params.seqlen_k <= 0 ||
-                params.nhead_q <= 0 || params.nhead_k <= 0 || params.hdim_q <= 0)
+            // ArtifactStore/dispatcher catalog. Accept any well-formed SDPA in the
+            // BSHD layout (BHSD is rejected at plan build) with a supported dtype.
+            if (params.is_bhsd) {
+                if (dbg) fprintf(stderr, "[ckdsl-attn] DECLINE: is_bhsd (physical BHSD)\n");
                 return false;
-            return params.dtype == "fp16" || params.dtype == "bf16";
+            }
+            if (params.batch <= 0 || params.seqlen_q <= 0 || params.seqlen_k <= 0 ||
+                params.nhead_q <= 0 || params.nhead_k <= 0 || params.hdim_q <= 0) {
+                if (dbg) fprintf(stderr, "[ckdsl-attn] DECLINE: non-positive dim\n");
+                return false;
+            }
+            const bool ok = params.dtype == "fp16" || params.dtype == "bf16";
+            if (dbg)
+                fprintf(stderr, "[ckdsl-attn] %s (C-JIT) dtype=%s\n",
+                        ok ? "ACCEPT" : "DECLINE: dtype", params.dtype.c_str());
+            return ok;
         }
         auto problem = CkDslAttnParamParser::buildProblem(params, handle.gfxArch());
-        return handle.dispatcher().select(problem).valid();
+        bool ok = handle.dispatcher().select(problem).valid();
+        if (dbg && !ok)
+            fprintf(stderr, "[ckdsl-attn] DECLINE: dispatcher.select invalid (no C-JIT)\n");
+        return ok;
+    } catch (const std::exception& e) {
+        if (dbg) fprintf(stderr, "[ckdsl-attn] DECLINE (exception): %s\n", e.what());
+        return false;
     } catch (...) {
+        if (dbg) fprintf(stderr, "[ckdsl-attn] DECLINE (unknown exception)\n");
         return false;
     }
 }
