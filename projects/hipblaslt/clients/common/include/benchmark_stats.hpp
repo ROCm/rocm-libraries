@@ -27,10 +27,11 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
-// Dependency-free config/result types for the adaptive timing routine in
-// benchmark_timing.hpp, separated so argument_model.hpp can use TimingResult
-// without including the timing implementation's HIP/test-harness headers.
+// Dependency-free config/result types (and their validation) for the adaptive
+// timing routine in benchmark_timing.hpp, separated so argument_model.hpp can
+// use TimingResult without including the timing implementation's HIP headers.
 
 namespace hipblaslt_bench
 {
@@ -53,6 +54,26 @@ namespace hipblaslt_bench
         int32_t stability_interval  = 0; // record a rel_iqr reading every N samples (>= 1)
         bool    use_gpu_timer       = false; // hipEvent timing vs CPU wall clock
     };
+
+    // Validate the semantic constraints of an adaptive TimingConfig. Returns an empty
+    // string on success, or a human-readable error description on failure. All entry
+    // points (CLI, YAML, run_measurement) call this as their single source of truth.
+    inline std::string validate_adaptive_config(const TimingConfig& cfg)
+    {
+        if(cfg.max_iters > 0 && cfg.min_iters > cfg.max_iters)
+            return "min_iters (" + std::to_string(cfg.min_iters) + ") > max_iters ("
+                   + std::to_string(cfg.max_iters) + ")";
+        if(cfg.max_measure_time > 0.0f && cfg.measure_time > cfg.max_measure_time)
+            return "measure_time (" + std::to_string(cfg.measure_time)
+                   + " ms) > max_measure_time (" + std::to_string(cfg.max_measure_time) + " ms)";
+        if(cfg.max_measure_time <= 0.0f && cfg.max_iters <= 0)
+            return "adaptive timing requires a ceiling: set max_measure_time or max_iters > 0";
+        if(cfg.stability_threshold > 0.0f
+           && (cfg.stability_window < 2 || cfg.stability_interval < 1))
+            return "stability_threshold > 0 requires stability_window >= 2 and "
+                   "stability_interval >= 1";
+        return {};
+    }
 
     // Default values for the --adaptive preset, used as the CLI/YAML defaults so they
     // appear directly in --help. Keep hipblaslt_common.yaml's Defaults block in sync.

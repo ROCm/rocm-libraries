@@ -408,22 +408,22 @@ int main(int argc, char** argv)
     llvm::yaml::Input yin((*inputFile)->getMemBufferRef());
     yin >> rv;
 
-    // Under Adaptive, a ceiling is required so a non-converging run stays bounded.
-    if(rv.gs.adaptive && rv.gs.max_measure_time <= 0.0f && rv.gs.max_iters <= 0)
+    if(rv.gs.adaptive)
     {
-        std::cerr << "error: Adaptive requires AdaptiveMaxMeasureTime or AdaptiveMaxIters > 0"
-                  << std::endl;
-        return 1;
-    }
-    // An enabled stability fallback needs an in-range window/interval, else it silently
-    // disables instead.
-    if(rv.gs.adaptive && rv.gs.stability_threshold > 0.0f
-       && (rv.gs.stability_window < 2 || rv.gs.stability_interval < 1))
-    {
-        std::cerr << "error: with AdaptiveStabilityThreshold > 0, AdaptiveStabilityWindow must "
-                     "be >= 2 and AdaptiveStabilityInterval >= 1"
-                  << std::endl;
-        return 1;
+        hipblaslt_bench::TimingConfig tmp;
+        tmp.min_iters           = rv.gs.min_iters;
+        tmp.max_iters           = rv.gs.max_iters;
+        tmp.measure_time        = rv.gs.measure_time;
+        tmp.max_measure_time    = rv.gs.max_measure_time;
+        tmp.noise_threshold     = rv.gs.noise_threshold;
+        tmp.stability_threshold = rv.gs.stability_threshold;
+        tmp.stability_window    = rv.gs.stability_window;
+        tmp.stability_interval  = rv.gs.stability_interval;
+        if(const auto err = hipblaslt_bench::validate_adaptive_config(tmp); !err.empty())
+        {
+            std::cerr << "error: " << err << std::endl;
+            return 1;
+        }
     }
 
     uint32_t rotating           = rv.gs.rotating * 1024 * 1024;

@@ -721,8 +721,8 @@ try
 
     // Reject misuse rather than silently ignore, so a misconfigured run never
     // reports mislabeled numbers. The --adaptive_* options require --adaptive;
-    // conversely --iters/--cold_iters have no effect under --adaptive (warmup and
-    // batch are sized adaptively).
+    // conversely --iters/--cold_iters cannot be used with --adaptive (warmup and
+    // batch are sized adaptively) -- passing either is an error.
     if(!arg.adaptive)
     {
         for(const char* opt : {"adaptive_warmup_time",
@@ -755,23 +755,21 @@ try
                 return EXIT_FAILURE;
             }
         }
-        // A ceiling is required so a run that never converges is still bounded.
-        if(arg.max_measure_time <= 0.0f && arg.max_iters <= 0)
         {
-            hipblaslt_cerr << "error: --adaptive requires a ceiling: set "
-                              "--adaptive_max_measure_time or --adaptive_max_iters > 0"
-                           << std::endl;
-            return EXIT_FAILURE;
-        }
-        // If the stability fallback is enabled, its window/interval must be in range; an
-        // out-of-range value would silently disable the fallback instead.
-        if(arg.stability_threshold > 0.0f && (arg.stability_window < 2 || arg.stability_interval < 1))
-        {
-            hipblaslt_cerr << "error: with --adaptive_stability_threshold > 0, "
-                              "--adaptive_stability_window must be >= 2 and "
-                              "--adaptive_stability_interval >= 1"
-                           << std::endl;
-            return EXIT_FAILURE;
+            hipblaslt_bench::TimingConfig tmp;
+            tmp.min_iters           = arg.min_iters;
+            tmp.max_iters           = arg.max_iters;
+            tmp.measure_time        = arg.measure_time;
+            tmp.max_measure_time    = arg.max_measure_time;
+            tmp.noise_threshold     = arg.noise_threshold;
+            tmp.stability_threshold = arg.stability_threshold;
+            tmp.stability_window    = arg.stability_window;
+            tmp.stability_interval  = arg.stability_interval;
+            if(const auto err = hipblaslt_bench::validate_adaptive_config(tmp); !err.empty())
+            {
+                hipblaslt_cerr << "error: " << err << std::endl;
+                return EXIT_FAILURE;
+            }
         }
     }
 

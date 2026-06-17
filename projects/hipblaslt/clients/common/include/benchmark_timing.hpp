@@ -268,7 +268,8 @@ namespace hipblaslt_bench
             }
             const bool ceiling = (bounds.max_us > 0.0 && total_us >= bounds.max_us)
                                  || (cfg.max_iters > 0 && total_iters >= cfg.max_iters);
-            return (floor_met && (converged || stable)) || ceiling;
+            // Floors take precedence: the ceiling can only fire after the floor is satisfied.
+            return floor_met && (converged || stable || ceiling);
         }
 
     } // namespace detail
@@ -277,8 +278,7 @@ namespace hipblaslt_bench
     // enqueue for a monotonically increasing global index `i` (the callee handles any
     // `i % block_count` rotation and per-iteration icache flush). Fixed-count mode times one
     // batch of cfg.iters; adaptive mode self-sizes the batch and collects samples until the
-    // mean converges, the robust spread plateaus, or a ceiling is hit. Precondition (adaptive):
-    // a ceiling is set (max_measure_time or max_iters > 0) -- the caller validates this.
+    // mean converges, the robust spread plateaus, or a ceiling is hit.
     template <typename Launch>
     inline void run_measurement(Launch&&                     launch,
                                 const TimingConfig&          cfg,
@@ -307,6 +307,13 @@ namespace hipblaslt_bench
             out.adaptive         = false;
             out.noise_active     = false;
             out.converged        = false;
+            return;
+        }
+
+        // Reject invalid configs before touching the GPU.
+        if(const auto err = validate_adaptive_config(cfg); !err.empty())
+        {
+            std::cerr << "hipblaslt adaptive timing: invalid config: " << err << "\n";
             return;
         }
 

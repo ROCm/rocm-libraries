@@ -5607,6 +5607,15 @@ void testing_matmul_with_bias(const Arguments& arg,
             timingCfg.stability_window    = arg.stability_window;
             timingCfg.stability_interval  = arg.stability_interval;
         }
+        if(arg.adaptive)
+        {
+            if(const auto err = hipblaslt_bench::validate_adaptive_config(timingCfg); !err.empty())
+            {
+                hipblaslt_cerr << "error: invalid adaptive timing config: " << err << std::endl;
+                return;
+            }
+        }
+
         hipblaslt_bench::TimingResult timing;
         // Stop the sample loop if a launch hits a gtest fatal failure.
         auto timingAbort = []() -> bool {
