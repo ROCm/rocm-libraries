@@ -221,7 +221,7 @@ if(irlist) {
         // Create pass manager and add passes
         PassManager pm;
         pm.addPass(std::make_unique<StinkyDAGSchedulerPass>());
-        pm.addPass(std::make_unique<StinkyConfigurableWaitCntPass>());
+        pm.addPass(std::make_unique<StinkyWaitCntInsertionPass>());
 
         // Run the passes
         pm.run(*ctx);

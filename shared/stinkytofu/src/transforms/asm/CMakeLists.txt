@@ -14,11 +14,8 @@ target_sources(stinkytofu PRIVATE
     DeadCodeEliminationPass.cpp
     RedundantMovEliminationPass.cpp
     LegalizationUtils.cpp
-    ScheduleLastLRsPass.cpp
     StinkyDAGSchedulerPass.cpp
     SetMatrixReusePass.cpp
-    StinkyConfigurableWaitCntPass.cpp
-    ScheduleFirstLRsPass.cpp
     StinkyWaitCntInsertionPass.cpp
     waitcnt/WaitDataflow.cpp
     waitcnt/ShallowPredPromotion.cpp
