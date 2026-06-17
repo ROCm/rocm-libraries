@@ -470,16 +470,16 @@ python3 generate_test_dataset.py
   - Override with `--threads N` command-line argument
   - Thread count only applies when built with `ENABLE_PARALLEL_THREADS=ON`
   - Uses OpenMP for parallel processing (can be disabled at build time with `-DENABLE_PARALLEL_THREADS=OFF`)
-  
+
 - **Benchmark Iterations:**
   - Each operation runs 100 times by default for stable average timings
   - Adjustable via `NUM_RUNS` in `benchmarks_common.h` (requires rebuild)
-  
+
 - **Performance Variability:**
   - Results vary based on CPU architecture, memory bandwidth, and system load
   - Close other resource-intensive applications for accurate comparisons
   - Test with different thread counts to find optimal performance for your system
-  
+
 - **Parallel vs Single-threaded Comparison:**
   - Build with `ENABLE_PARALLEL_THREADS=ON` and run with different `--threads` values
   - Build with `ENABLE_PARALLEL_THREADS=OFF` for single-threaded baseline

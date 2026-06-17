@@ -25,8 +25,7 @@ SOFTWARE.
 #include "benchmarks_common.h"
 #include <cstring>
 
-void printUsage(const char* programName)
-{
+void printUsage(const char* programName) {
     cout << "Usage: " << programName << " [OPTIONS]\n" << endl;
     cout << "Options:" << endl;
     cout << "  -t, --threads <N>        Number of threads to use (default: auto-detect)" << endl;
@@ -42,13 +41,10 @@ void printUsage(const char* programName)
     cout << endl;
 }
 
-int main(int argc, char* argv[])
-{
+int main(int argc, char* argv[]) {
     // Parse command-line arguments
-    for (int i = 1; i < argc; i++)
-    {
-        if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0)
-        {
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             printUsage(argv[0]);
             return 0;
         }
