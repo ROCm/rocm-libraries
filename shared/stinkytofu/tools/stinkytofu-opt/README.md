@@ -95,12 +95,15 @@ names and strips comments unless the flag is set.
 ./stinkytofu-opt --list-passes
 ```
 
-Output:
+Output (illustrative — the authoritative, up-to-date list is whatever the tool
+prints, sourced from `availablePasses` in `tools/stinkytofu-opt/stinkytofu-opt.hpp`):
 ```
 Available passes:
 =================
-  --StinkyClusterDSReadPass
   --StinkyDAGSchedulerPass
+  --StinkyWaitCntInsertionPass
+  --DeadCodeEliminationPass
+  ...
 ```
 
 **Note:** Passes are applied in the order they appear on the command line, after the initial deserialization pass.
@@ -135,8 +138,8 @@ Apply multiple optimization passes in sequence:
 ```bash
 ./build/tools/stinkytofu-opt/stinkytofu-opt \
     --arch gfx1250 tools/stinkytofu-opt/tests/func.arch-gfx1250.stir \
-    --StinkyClusterDSReadPass \
-    --StinkyDAGSchedulerPass
+    --StinkyDAGSchedulerPass \
+    --StinkyWaitCntInsertionPass
 ```
 
 #### Example 4: Round-Trip Raw Assembly
@@ -216,13 +219,17 @@ struct PassInfo
     std::function<std::unique_ptr<Pass>()> creator; // Factory function to create the pass
 };
 
+// Illustrative — see the actual, up-to-date registry in stinkytofu-opt.hpp.
 const std::vector<PassInfo> availablePasses = {
-    { "StinkyClusterDSReadPass", []() { return createStinkyClusterDSReadPass(); } },
-    { "StinkyDAGSchedulerPass", []() { return createStinkyDAGSchedulerPass(); } },
+    { "StinkyDAGSchedulerPass", [](const auto&) { return createStinkyDAGSchedulerPass(); } },
+    { "StinkyWaitCntInsertionPass", [](const auto&) { return createStinkyWaitCntInsertionPass(); } },
+    // ...
 };
 ```
 
-**Purpose:** This registry allows dynamic pass creation based on command-line arguments.
+**Purpose:** This registry allows dynamic pass creation based on command-line
+arguments. The authoritative list lives in
+`tools/stinkytofu-opt/stinkytofu-opt.hpp::availablePasses`.
 
 #### 2. Debug Print Instrumentation (`createDebugPrintInstrumentation()`)
 
