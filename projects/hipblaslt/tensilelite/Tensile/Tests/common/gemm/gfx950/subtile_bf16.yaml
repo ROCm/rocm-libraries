@@ -2,6 +2,7 @@ TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
 
 GlobalParameters:
+  PrintSolutionRejectionReason: True
   NumElementsToValidate: -1
   MinimumRequiredVersion: 5.0.0
   PrintLevel: 3
@@ -49,8 +50,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -219,8 +220,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -268,8 +269,8 @@ BenchmarkProblems:
       DestDataType: s
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -327,8 +328,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -377,8 +378,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation: True
@@ -419,8 +420,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation: True
@@ -469,8 +470,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation: True
@@ -528,8 +529,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation: True
@@ -583,8 +584,8 @@ BenchmarkProblems:
       DestDataType: s
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation: True
@@ -617,3 +618,56 @@ BenchmarkProblems:
         - ActivationArgs:
           - [Enum: none]
           - [Enum: relu]
+
+  ########################################
+  # BBS TN — TAIL loop sweep (bias + ScaleAlphaVec + hipblaslt_all)
+  #
+  # Sweeps K = 8..128 (step 1) at M=N=160 with MT 128x128, exercising
+  # every tail-loop remainder size for DU=64 and DU=128. PGR=0/1/2,
+  # StreamK=3, WGM=16/XCC=4 to match the production scheduler path.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+      ActivationFuncCall: True
+      UseBias: 1
+      BiasDataTypeList: [b]
+      UseScaleAlphaVec: 1
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 4, 4,  2, 2]  # MT 128x128
+          - [16, 16, 32, 1,  1, 10, 10, 2, 2] # MT 320x320 (large symmetric using multi-paritions)
+          - [16, 16, 32, 1,  1, 3, 4,  2, 2]  # MT 96x128  (odd-M wavetile: sub-lane mask × per-wave layout)
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchLocalRead: [1]
+        - ActivationFuncCall: [0]
+        - DepthU: [64, 128]
+        - TransposeLDS: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [1]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [4]
+        - UseSubtileImpl: [1]
+        - UseCustomMainLoopSchedule: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[400], [400], [1], [1, 1, 128]]
+        - BiasTypeArgs: ['b']

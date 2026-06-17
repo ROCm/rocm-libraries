@@ -288,7 +288,7 @@ std::string RMSNormOperationDescriptor::toString() const
     str += ", forward_phase=" + std::to_string(static_cast<int>(_data.forward_phase));
     str += ", compute_data_type=";
     str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
-    str += "}";
+    str += '}';
     return str;
 }
 

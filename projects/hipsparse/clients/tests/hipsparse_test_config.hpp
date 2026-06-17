@@ -93,15 +93,22 @@ struct hipsparse_test_config_scatter
                                      hipsparse_test_numeric_types_enum::scatter>
 {
 };
+
+struct hipsparse_test_config_gather
+    : hipsparse_test_config_template<hipsparse_test_dispatch_enum::gather,
+                                     hipsparse_test_numeric_types_enum::gather>
+{
+};
+
 struct hipsparse_test_config_axpby
     : hipsparse_test_config_template<hipsparse_test_dispatch_enum::axpby,
                                      hipsparse_test_numeric_types_enum::all>
 {
 };
 
-struct hipsparse_test_config_gather
-    : hipsparse_test_config_template<hipsparse_test_dispatch_enum::gather,
-                                     hipsparse_test_numeric_types_enum::gather>
+struct hipsparse_test_config_spvv
+    : hipsparse_test_config_template<hipsparse_test_dispatch_enum::spvv,
+                                     hipsparse_test_numeric_types_enum::spvv>
 {
 };
 

@@ -27,6 +27,7 @@
 #include <sstream>
 
 #include "ModifierSerializer.hpp"
+#include "stinkytofu/hardware/HwRegHelpers.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
 namespace stinkytofu {
@@ -66,6 +67,9 @@ void AsmPrinter::printRegister(const StinkyRegister& reg) {
             break;
         case StinkyRegister::Type::LiteralString:
             os << reg.getLiteralString();
+            break;
+        case StinkyRegister::Type::HwReg:
+            HwReg::printOperand(os, reg);
             break;
         case StinkyRegister::Type::Invalid:
             os << "<invalid>";

@@ -107,6 +107,24 @@ lengths = {
         (336, 18816),
     ],
 
+    # Large real lengths whose fused Stockham kernel needs most of the
+    # available LDS.  Exercises the LDS-aware real fusion path.
+    'real_fusion_lds_1d': [
+        4096,
+        6144,
+        8000,
+        12288,
+        16384,
+        24576,
+        32768,
+    ],
+
+    'real_fusion_lds_2d': [
+        (256, 256),
+        (256, 12288),
+        (256, 24576),
+    ],
+
     'simpleL1D': [
         6561,
         8192,
@@ -528,6 +546,24 @@ def misc3d():
     yield from default_length_params("misc3d", lengths['misc3d'], 1)
 
 
+def real_fusion_lds_1d():
+    """1D real lengths that stress the LDS-aware fusion path."""
+
+    yield from default_length_params("real_fusion_lds_1d",
+                                     lengths['real_fusion_lds_1d'],
+                                     10000,
+                                     reals=[True])
+
+
+def real_fusion_lds_2d():
+    """2D real lengths that stress the LDS-aware fusion path."""
+
+    yield from default_length_params("real_fusion_lds_2d",
+                                     lengths['real_fusion_lds_2d'],
+                                     1000,
+                                     reals=[True])
+
+
 def simpleL1D():
     """Basic C2C Large 1D sizes."""
 
@@ -942,6 +978,20 @@ def tuning_2D_example():
                                      inplaces=[False],
                                      reals=[False],
                                      max_wgs=1024)
+
+def real_2D_single_kernel():
+    """Some 2D real single-precision transforms computed via a single kernel"""
+
+    lengths = [(32,32), (64,32), (32,64), (64,64), (96,96), (100,100)] 
+    # batch size set to make 32x32 data size 1 GiB 
+    batch_sz = 1024*1024*1024//(32*32*4)
+
+    yield from default_length_params("2D_SINGLE",
+                                     lengths,
+                                     batch_sz,
+                                     precisions=['single'],
+                                     inplaces=[False],
+                                     reals=[True])
 
 
 def tuning_suite():

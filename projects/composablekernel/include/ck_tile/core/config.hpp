@@ -3,6 +3,15 @@
 
 #pragma once
 
+#include "hip/hip_version.h"
+#ifndef CK_TILE_DONT_USE_HIP_RUNTIME_HEADERS
+#include "hip/hip_fp16.h"
+#include "hip/hip_runtime.h"
+#endif
+
+#include <cstdint>
+#include <type_traits>
+
 #if defined(__gfx908__) || defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) || \
     defined(__gfx9_4_generic__)
 #define __gfx9__
@@ -41,12 +50,6 @@
 #define __gfx12__
 #endif
 
-#include "hip/hip_version.h"
-#ifndef CK_TILE_DONT_USE_HIP_RUNTIME_HEADERS
-#include "hip/hip_runtime.h"
-#include "hip/hip_fp16.h"
-#endif
-
 #ifdef __HIPCC__
 #define CK_TILE_HOST inline __host__
 #define CK_TILE_DEVICE inline __device__
@@ -77,6 +80,13 @@
 #endif
 #ifndef CK_TILE_USE_CUSTOM_DATA_TYPE
 #define CK_TILE_USE_CUSTOM_DATA_TYPE 0 // custom data type will generate extra move/bfi code
+#endif
+
+#define CK_TILE_FLOAT_TO_TF32_TRUNC 0
+#define CK_TILE_FLOAT_TO_TF32_RNE 1
+
+#ifndef CK_TILE_FLOAT_TO_TF32_DEFAULT
+#define CK_TILE_FLOAT_TO_TF32_DEFAULT CK_TILE_FLOAT_TO_TF32_TRUNC
 #endif
 
 #define CK_TILE_FLOAT_TO_BFLOAT16_STANDARD 0
@@ -173,12 +183,14 @@
 #endif
 
 // buffer atomic add: floating point
+#ifndef CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT
 #ifndef __HIP_DEVICE_COMPILE__ // for host code
 #define CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 1
 #elif defined(__gfx9__) || defined(__gfx12__) // for GPU code
 #define CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 1
 #else // for GPU code
 #define CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 0
+#endif
 #endif
 
 #if(defined(__gfx90a__) || defined(__gfx94__)) // for GPU code
@@ -348,6 +360,12 @@
 // Will enforce encoding to check Y not pointed to R if set to zero
 #ifndef CK_TILE_ENC_SUPPORT_Y_TO_R
 #define CK_TILE_ENC_SUPPORT_Y_TO_R 0
+#endif
+
+#if defined(_MSC_VER)
+#define CK_TILE_NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
+#else
+#define CK_TILE_NO_UNIQUE_ADDRESS [[no_unique_address]]
 #endif
 
 // Mark unsupported features with a deprecation warning in debug builds
@@ -591,13 +609,13 @@ struct amdgcn_compiler_target_state
 template <typename T, typename... Ts>
 // TODO: c++20 concept    requires((std::is_convertible<Ts, T>::value && ...) && (sizeof...(Ts) >=
 // 1))
-CK_TILE_HOST_DEVICE static constexpr uint32_t count_values_of(T search, Ts... searchList)
+CK_TILE_HOST_DEVICE static constexpr std::uint32_t count_values_of(T search, Ts... searchList)
 {
     static_assert((std::is_convertible<Ts, T>::value && ...),
                   "All search list values must be convertible to the search value type");
     static_assert(sizeof...(Ts) >= 1, "At least one value must be provided to search in");
 
-    return (static_cast<uint32_t>(search == static_cast<T>(searchList)) + ...);
+    return (static_cast<std::uint32_t>(search == static_cast<T>(searchList)) + ...);
 }
 
 #define CK_TILE_COMPILER_TARGETS_LIST                               \

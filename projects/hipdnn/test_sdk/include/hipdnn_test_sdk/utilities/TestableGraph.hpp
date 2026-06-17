@@ -20,6 +20,14 @@ public:
     {
         return _sub_nodes;
     }
+
+    /// Test accessor for the protected plan descriptor: true when the graph
+    /// carries a finalized execution plan. Lets serialize-with-plan tests assert
+    /// a plan was attached or dropped during deserialize.
+    bool hasExecutionPlan() const
+    {
+        return _executionPlanDesc && _executionPlanDesc->valid();
+    }
 };
 
 /// Exposes protected Graph methods needed by lowering integration tests.

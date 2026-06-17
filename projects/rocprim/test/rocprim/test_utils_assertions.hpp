@@ -106,6 +106,20 @@ void inline protected_assert_eq(T val, T expected)
     }
 }
 
+template<class T, class U, bool UseGTestAssert = is_printable<T> && is_printable<U>>
+void inline protected_assert_eq(std::pair<T, U> val, std::pair<T, U> expected, size_t index)
+{
+    if constexpr(UseGTestAssert)
+    {
+        ASSERT_EQ(val, expected) << "where index = " << index;
+    }
+    else
+    {
+        const bool result = (val == expected);
+        ASSERT_TRUE(result) << "where index = " << index;
+    }
+}
+
 } // end anonymous namespace
 
 // begin assert_eq

@@ -505,7 +505,7 @@ std::string GraphDescriptor::toString() const
     str += _handle != nullptr ? fmt::format("{:p}", static_cast<const void*>(_handle)) : "null";
     str += ", name=" + (_name.empty() ? std::string("(empty)") : _name);
     str += ", serializedGraphSize=" + std::to_string(_graphSerializedBuffer.size());
-    str += "}";
+    str += '}';
     return str;
 }
 

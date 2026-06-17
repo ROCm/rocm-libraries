@@ -21,10 +21,9 @@ BenchmarkProblems:
     - # ProblemType
       OperationType: GEMM
       DataType: s
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
-      Batched: True
       UseBias: 1
       Batched: True
       Activation: True

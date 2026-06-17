@@ -8,7 +8,7 @@ name: hipDNN Superbuild CI
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
+    types: [opened, synchronize, reopened]
     paths:
       - 'projects/hipdnn/**'
       - 'dnn-providers/**'
@@ -20,41 +20,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
   cancel-in-progress: true
 
-env:
-  # Labels that trigger this workflow. Extend this list to gate on additional labels.
-  TRIGGER_LABELS: '["project: hipdnn", "project: miopen-provider", "project: hipblaslt-provider", "project: hip-kernel-provider", "project: hipdnn-integration-tests"]'
-
 jobs:
-  gate:
-    name: Check Labels
-    runs-on: ubuntu-24.04
-    outputs:
-      should_run: ${{ steps.check.outputs.should_run }}
-    steps:
-      - name: Evaluate PR labels
-        id: check
-        env:
-          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
-        run: |
-          echo "PR labels: $PR_LABELS"
-
-          # Check if any trigger label is present
-          TRIGGER='${{ env.TRIGGER_LABELS }}'
-          MATCH=$(echo "$PR_LABELS" | jq -e --argjson trigger "$TRIGGER" \
-            '[.[] | select(. as $l | $trigger | index($l))] | length > 0')
-
-          if [ "$MATCH" = "true" ]; then
-            echo "Trigger label found"
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "No trigger label found"
-            echo "should_run=false" >> "$GITHUB_OUTPUT"
-          fi
-
   hipdnn-windows-superbuild:
     name: HipDNN Windows Superbuild
-    needs: gate
-    if: needs.gate.outputs.should_run == 'true'
     runs-on: azure-windows-scale-rocm
     defaults:
       run:
@@ -157,8 +125,6 @@ jobs:
 
   hipdnn-linux-superbuild:
     name: HipDNN Linux Superbuild
-    needs: gate
-    if: needs.gate.outputs.should_run == 'true'
     runs-on: azure-linux-scale-rocm
     env:
       GPU_TARGET: gfx94X-dcgpu
@@ -241,7 +207,6 @@ jobs:
     name: hipDNN Superbuild Summary
     if: always()
     needs:
-      - gate
       - hipdnn-windows-superbuild
       - hipdnn-linux-superbuild
     runs-on: ubuntu-24.04

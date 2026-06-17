@@ -96,6 +96,7 @@ int main(int argc, char** argv) {
         std::string costsFile = outputDir + "/" + arch + "_costs.inc";
         std::string operFile = outputDir + "/" + arch + "_operands.inc";
         std::string initFile = outputDir + "/" + arch + "_init.inc";
+        std::string hwregFile = outputDir + "/" + arch + "_hwreg.inc";
 
         if (!std::filesystem::exists(costsFile)) {
             std::cerr << "FAIL: Cost file not generated: " << costsFile << "\n";
@@ -112,6 +113,11 @@ int main(int argc, char** argv) {
             return 1;
         }
 
+        if (!std::filesystem::exists(hwregFile)) {
+            std::cerr << "FAIL: HwReg file not generated: " << hwregFile << "\n";
+            return 1;
+        }
+
         // Check init file contains v_add_f32 (all instructions should be in init file)
         if (!fileContains(initFile, "v_add_f32")) {
             std::cerr << "FAIL: Init file doesn't contain v_add_f32\n";
@@ -122,6 +128,20 @@ int main(int argc, char** argv) {
         // costs)
         if (!fileContains(costsFile, "InstructionCost")) {
             std::cerr << "FAIL: Cost file missing header\n";
+            return 1;
+        }
+
+        // Check hwreg file has both per-arch sorted arrays and a known entry.
+        if (!fileContains(hwregFile, "kHwregByName_" + arch)) {
+            std::cerr << "FAIL: HwReg file missing kHwregByName_" << arch << " array\n";
+            return 1;
+        }
+        if (!fileContains(hwregFile, "kHwregById_" + arch)) {
+            std::cerr << "FAIL: HwReg file missing kHwregById_" << arch << " array\n";
+            return 1;
+        }
+        if (!fileContains(hwregFile, "HW_REG_WAVE_SCHED_MODE")) {
+            std::cerr << "FAIL: HwReg file missing HW_REG_WAVE_SCHED_MODE entry\n";
             return 1;
         }
 

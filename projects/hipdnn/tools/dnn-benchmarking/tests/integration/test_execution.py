@@ -5,18 +5,24 @@
 
 import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import numpy as np
 import pytest
 
 from dnn_benchmarking.config import BenchmarkConfig
+from dnn_benchmarking.config.benchmark_config import (
+    MetricsConfig,
+    SuiteConfig,
+    ValidationConfig,
+)
 from dnn_benchmarking.execution import BufferManager, Executor
+from dnn_benchmarking.execution.suite_runner import run_graph_all_providers
 from dnn_benchmarking.graph import GraphLoader
 from dnn_benchmarking.validation import ArrayComparator, ReferenceProviderRegistry
 
 
-def _setup_hipdnn():
+def _setup_hipdnn(plugin_paths: List[str]):
     """Import hipdnn_frontend with plugin path configured, or skip."""
     try:
         import torch
@@ -29,22 +35,9 @@ def _setup_hipdnn():
     try:
         import hipdnn_frontend
 
-        # Auto-discover and set plugin path
-        project_root = Path(__file__).parent.parent.parent
-        candidates = [
-            project_root.parent.parent.parent.parent
-            / "dnn-providers"
-            / "miopen-provider"
-            / "build"
-            / "lib"
-            / "hipdnn_plugins"
-            / "engines",
-            Path("/opt/rocm/lib/hipdnn_plugins/engines"),
-        ]
-        for p in candidates:
-            if p.is_dir() and any(p.glob("*.so")):
-                hipdnn_frontend.set_engine_plugin_paths([str(p)])
-                break
+        hipdnn_frontend.set_engine_plugin_paths(
+            plugin_paths, hipdnn_frontend.PluginLoadingMode.ABSOLUTE
+        )
 
         hipdnn_frontend.Handle()
         return hipdnn_frontend
@@ -57,9 +50,9 @@ class TestExecution:
     """Integration tests for graph execution requiring GPU."""
 
     @pytest.fixture
-    def hipdnn(self):
+    def hipdnn(self, plugin_paths: List[str]):
         """Get hipdnn_frontend module or skip if not available."""
-        return _setup_hipdnn()
+        return _setup_hipdnn(plugin_paths)
 
     def test_executor_prepare(
         self, hipdnn, sample_conv_fwd_json: Dict[str, Any]
@@ -363,9 +356,9 @@ class TestExecutionErrors:
     """Tests for execution error handling."""
 
     @pytest.fixture
-    def hipdnn(self):
+    def hipdnn(self, plugin_paths: List[str]):
         """Get hipdnn_frontend module or skip if not available."""
-        return _setup_hipdnn()
+        return _setup_hipdnn(plugin_paths)
 
     def test_execute_without_prepare_raises(
         self, hipdnn, sample_conv_fwd_json: Dict[str, Any]
@@ -407,9 +400,9 @@ class TestPyTorchReferenceValidation:
     """Integration tests for PyTorch reference validation with GPU execution."""
 
     @pytest.fixture
-    def hipdnn(self):
+    def hipdnn(self, plugin_paths: List[str]):
         """Get hipdnn_frontend module or skip if not available."""
-        return _setup_hipdnn()
+        return _setup_hipdnn(plugin_paths)
 
     @pytest.fixture
     def pytorch_provider(self):
@@ -486,6 +479,133 @@ class TestPyTorchReferenceValidation:
             assert (
                 result.passed
             ), f"hipDNN output does not match PyTorch reference: {result.message}"
+
+    def test_conv_fwd_bfloat16_validates_against_pytorch_when_supported(
+        self,
+        hipdnn,
+        sample_conv_fwd_json: Dict[str, Any],
+    ) -> None:
+        """BF16 hipDNN output decode validates against a BF16 PyTorch reference."""
+        graph_json = json.loads(json.dumps(sample_conv_fwd_json))
+        graph_json["name"] = "sample_conv_fwd_bfloat16"
+        graph_json["compute_data_type"] = "float"
+        graph_json["io_data_type"] = "bfloat16"
+        graph_json["intermediate_data_type"] = "bfloat16"
+        for tensor in graph_json["tensors"]:
+            tensor["data_type"] = "bfloat16"
+
+        loader = GraphLoader()
+        tensor_infos = loader.extract_tensor_info(graph_json)
+        config = SuiteConfig(
+            warmup_iters=1,
+            benchmark_iters=1,
+            seed=42,
+            validation=ValidationConfig(provider="pytorch"),
+            metrics=MetricsConfig(tier="off"),
+        )
+
+        result = run_graph_all_providers(
+            graph_path=Path("/test/graph_bfloat16.json"),
+            graph_json=graph_json,
+            tensor_infos=tensor_infos,
+            config=config,
+            handle=hipdnn.Handle(),
+        )
+
+        engine_rows = [row for row in result.results if row.role == "engine"]
+        successful_rows = [row for row in engine_rows if row.status == "success"]
+        if not successful_rows:
+            reasons = "; ".join(
+                row.skip_reason or row.error_message or "no details"
+                for row in engine_rows
+            )
+            pytest.skip(
+                f"No hipDNN engine supports BF16 conv validation graph: {reasons}"
+            )
+
+        assert any(
+            row.correctness is not None and row.correctness.passed
+            for row in successful_rows
+        )
+
+    @pytest.mark.parametrize("graph_name", ["sample_sdpa.json", "sample_mha_sdpa.json"])
+    def test_sdpa_validates_against_pytorch_when_supported(
+        self,
+        hipdnn,
+        graph_name: str,
+    ) -> None:
+        """Supported SDPA engines validate against the PyTorch reference."""
+        graph_path = Path(__file__).parent.parent.parent / "graphs" / graph_name
+        loader = GraphLoader()
+        graph_json = loader.load_json(graph_path)
+        tensor_infos = loader.extract_tensor_info(graph_json)
+        config = SuiteConfig(
+            warmup_iters=1,
+            benchmark_iters=1,
+            seed=42,
+            validation=ValidationConfig(provider="pytorch"),
+            metrics=MetricsConfig(tier="off"),
+        )
+
+        result = run_graph_all_providers(
+            graph_path=graph_path,
+            graph_json=graph_json,
+            tensor_infos=tensor_infos,
+            config=config,
+            handle=hipdnn.Handle(),
+        )
+
+        reference_rows = [row for row in result.results if row.role == "reference"]
+        engine_rows = [row for row in result.results if row.role == "engine"]
+        successful_rows = [row for row in engine_rows if row.status == "success"]
+        if not successful_rows:
+            reasons = "; ".join(
+                row.skip_reason or row.error_message or "no details"
+                for row in engine_rows
+            )
+            pytest.skip(f"No hipDNN engine supports {graph_name}: {reasons}")
+
+        assert len(reference_rows) == 1
+        assert reference_rows[0].status == "success"
+        assert any(
+            row.correctness is not None and row.correctness.passed
+            for row in successful_rows
+        )
+
+    def test_suite_validate_pytorch_reports_timed_reference_row(
+        self,
+        hipdnn,
+        sample_conv_fwd_json: Dict[str, Any],
+    ) -> None:
+        """Suite validation reports PyTorch and hipDNN timing rows side by side."""
+        loader = GraphLoader()
+        tensor_infos = loader.extract_tensor_info(sample_conv_fwd_json)
+        config = SuiteConfig(
+            warmup_iters=1,
+            benchmark_iters=2,
+            seed=42,
+            validation=ValidationConfig(provider="pytorch"),
+            metrics=MetricsConfig(tier="off"),
+        )
+
+        result = run_graph_all_providers(
+            graph_path=Path("/test/graph.json"),
+            graph_json=sample_conv_fwd_json,
+            tensor_infos=tensor_infos,
+            config=config,
+            handle=hipdnn.Handle(),
+        )
+
+        reference_rows = [row for row in result.results if row.role == "reference"]
+        engine_rows = [row for row in result.results if row.role == "engine"]
+
+        assert len(reference_rows) == 1
+        assert reference_rows[0].provider == "pytorch"
+        assert reference_rows[0].status == "success"
+        assert reference_rows[0].e2e_stats is not None
+        assert reference_rows[0].gpu_kernel_stats is not None
+        assert engine_rows
+        assert any(row.status == "success" for row in engine_rows)
 
     @pytest.mark.xfail(reason="MIOpen plugin doesn't support pointwise operations yet")
     def test_relu_validates_against_pytorch(self, hipdnn, pytorch_provider) -> None:
@@ -616,3 +736,60 @@ class TestPyTorchReferenceValidation:
             assert (
                 result.passed
             ), f"hipDNN Add output does not match PyTorch: {result.message}"
+
+
+@pytest.mark.gpu
+class TestHardEngineSelectBindings:
+    """Real-backend coverage for the hard-select / read-back Graph bindings.
+
+    Drives a live Graph through create_execution_plan_ext() -> build_plans() ->
+    get_execution_plan_engine_id(), exercising the actual nanobind surface and
+    the C++ getter (which the executor unit tests stub out).
+    """
+
+    @pytest.fixture
+    def hipdnn(self, plugin_paths: List[str]):
+        """Get hipdnn_frontend module or skip if not available."""
+        return _setup_hipdnn(plugin_paths)
+
+    def _built_graph(self, graph_json_str: str, handle):
+        """Return a Graph with the operation graph built (no execution plan yet).
+
+        Reuses Executor's graph construction (which normalises the JSON) and
+        hands back the raw hipdnn_frontend.Graph so the test can drive the
+        execution-plan bindings directly.
+        """
+        config = BenchmarkConfig(
+            graph_path=Path("/test/graph.json"), warmup_iters=0, benchmark_iters=1
+        )
+        executor = Executor(graph_json_str, config)
+        executor._build_through_operation_graph(handle)
+        return executor._graph
+
+    def test_hard_select_and_read_back_matches(
+        self, hipdnn, sample_conv_fwd_json: Dict[str, Any]
+    ) -> None:
+        """Hard-selecting a ranked engine builds, and the read-back reports it."""
+        handle = hipdnn.Handle()
+        graph_json_str = json.dumps(sample_conv_fwd_json)
+
+        discovery_graph = self._built_graph(graph_json_str, handle)
+        ranked = [int(e) for e in discovery_graph.get_ranked_engine_ids()]
+        assert ranked, "expected at least one ranked engine for the graph"
+        engine = ranked[0]
+
+        graph = self._built_graph(graph_json_str, handle)
+        result = graph.create_execution_plan_ext(engine)
+        assert not result.is_bad(), result.get_message()
+        assert not graph.build_plans().is_bad()
+        # The getter returns the engine that actually backs the built plan.
+        assert graph.get_execution_plan_engine_id() == engine
+
+    def test_hard_select_inapplicable_engine_is_bad(
+        self, hipdnn, sample_conv_fwd_json: Dict[str, Any]
+    ) -> None:
+        """Hard-selecting an engine id the backend cannot honor returns is_bad()."""
+        handle = hipdnn.Handle()
+        graph = self._built_graph(json.dumps(sample_conv_fwd_json), handle)
+        result = graph.create_execution_plan_ext(123456789)
+        assert result.is_bad()

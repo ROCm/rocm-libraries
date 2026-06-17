@@ -5,9 +5,10 @@ to detect unintended regressions.
 """
 
 from Tensile.Components.Subtile.Kernel import (
-    TileInfo, AB_B16, AB_B4, MXSA_B4, MXSB_B4, CD_F32,
+    TileInfo, AB_B8, AB_B16, AB_B4, MXSA_B4, MXSB_B4, CD_F32,
 )
 from Tensile.Components.Subtile.LogicalScheduler import (
+    GRPlacementStrategy,
     LogicalScheduler,
     ReadGranularity,
     SchedulerConfig,
@@ -208,6 +209,81 @@ def test_256x256_bf16_partition_1x1():
     assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_BF16_1x1, (
         f"Emit dependency order mismatch.\n"
         f"--- Expected ---\n{EXPECTED_EMIT_DEP_ORDER_256x256_BF16_1x1}\n"
+        f"--- Actual ---\n{actual}"
+    )
+
+
+EXPECTED_EMIT_DEP_ORDER_256x256_BF16_GFX1250_TDM = """\
+MAINLOOP (dependency paths):
+  Partition 0:
+    subIterK=0:
+      MFMA: [ 0] MFMAs (MT n, subIterK 0  ) A : [0-7] , B : [0-7] <- [5]
+      preMFMA path 0:
+        [ 5] wait_lr    wait_lr
+      path 0:
+        [ 1] lr         LR A  (MT n, subIterK [1]) [0-7]
+        [ 2] lr         LR B  (MT n, subIterK [1]) [0-7]
+        [ 6] wait_lr    wait_lr
+        [ 7] sync       sync
+        [ 8] gr_inc     gr_inc(A)
+        [ 3] gr         GR A (MT n+2, subIterK [0,1]) ids [0-7]
+        [ 9] gr_inc     gr_inc(B)
+        [ 4] gr         GR B (MT n+2, subIterK [0,1]) ids [0-7]
+    subIterK=1:
+      MFMA: [ 0] MFMAs (MT n, subIterK 1  ) A : [0-7] , B : [0-7] <- [3]
+      preMFMA path 0:
+        [ 3] wait_lr    wait_lr
+      path 0:
+        [ 4] wait_gr    wait_gr(A=8,B=8)
+        [ 5] sync       sync
+        [ 6] lr_inc     lr_inc(A)
+        [ 7] lr_inc     lr_inc(B)
+        [ 1] lr         LR A  (MT n+1, subIterK [0]) [0-7]
+        [ 2] lr         LR B  (MT n+1, subIterK [0]) [0-7]
+"""
+
+
+def make_256x256_bf16_gfx1250_tdm():
+    """gfx1250 TDM variant of make_256x256_bf16.
+
+    Equivalent CLI: --arch gfx1250 --mt0 256 --mt1 256 --du 64 --dtype bf16
+                    --pgr 2 --wg 2x2 --partition-size 0x0
+
+    TDM enabled on both A and B (gfx1250). With TDM on, GR uses
+    tensor_load_to_lds and does not need to be spread across subIterKs —
+    GRPlacementStrategy.BUNCHED pins all GR atoms to partition 0 / subIterK 0.
+    """
+    kernel = create_kernel(256, 256, fp4=False, depthU=64)
+    kernel["enableTDMA"] = True
+    kernel["enableTDMB"] = True
+    tiA = makeTileInfo('A', kernel)
+    tiB = makeTileInfo('B', kernel)
+    return SchedulerConfig(
+        numMFMATilesM=tiA.localMMATileGrid[0],
+        numMFMATilesN=tiB.localMMATileGrid[0],
+        numSubIterK=tiA.localMMATileGrid[1],
+        lrA=ReadGranularity(mn=1, k=1),
+        lrB=ReadGranularity(mn=1, k=1),
+        grA=ReadGranularity(mn=1, k=2),
+        grB=ReadGranularity(mn=1, k=2),
+        grPlacement=GRPlacementStrategy.BUNCHED,
+    )
+
+
+def test_256x256_bf16_gfx1250_tdm_partition_1x1():
+    """Exact check of emit dep order for 256x256 BF16 gfx1250+TDM, 1x1 partition.
+
+    With TDM, every GR atom is pinned to subIterK=0 (grAllInFirstSlot=True).
+    The expected output below differs from the non-TDM case in that the GR B
+    placement moves from subIterK=1 to subIterK=0.
+    """
+    cfg = make_256x256_bf16_gfx1250_tdm()
+    sched = LogicalScheduler(cfg)
+    sched.emit()
+    actual = sched.print_emit_dep_order()
+    assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_BF16_GFX1250_TDM, (
+        f"Emit dependency order mismatch.\n"
+        f"--- Expected ---\n{EXPECTED_EMIT_DEP_ORDER_256x256_BF16_GFX1250_TDM}\n"
         f"--- Actual ---\n{actual}"
     )
 
@@ -530,6 +606,115 @@ def test_256x256_fp4_partition_1x1():
     assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_FP4_1x1, (
         f"Emit dependency order mismatch.\n"
         f"--- Expected ---\n{EXPECTED_EMIT_DEP_ORDER_256x256_FP4_1x1}\n"
+        f"--- Actual ---\n{actual}"
+    )
+
+
+def make_256x256_fp8(pgr=2):
+    from unittest.mock import MagicMock
+    dtype = MagicMock()
+    dtype.numBytes.return_value = 1
+    kernel = {
+        "DepthU": 128, "_DepthUA": 128, "_DepthUB": 128,
+        "MacroTileA": 256, "MacroTileB": 256,
+        "MacroTile0": 256, "MacroTile1": 256,
+        "MatrixInstM": 16, "MatrixInstN": 16, "MatrixInstK": 128,
+        "MIWaveGroup": [2, 2], "WavefrontSize": 64,
+        "SourceSwap": False, "MIArchVgpr": False,
+        "NonTemporalA": 0, "NonTemporalB": 0,
+        "NonTemporalMXSA": 0, "NonTemporalMXSB": 0,
+        "ProblemType": {"DataTypeA": dtype, "DataTypeB": dtype,
+                        "ComputeDataType": MagicMock(**{"numBytes.return_value": 4})},
+    }
+    tiA = TileInfo(AB_B8, 'A', None, kernel)
+    tiB = TileInfo(AB_B8, 'B', None, kernel)
+    return SchedulerConfig(
+        numMFMATilesM=tiA.localMMATileGrid[0],
+        numMFMATilesN=tiB.localMMATileGrid[0],
+        numSubIterK=tiA.localMMATileGrid[1],
+        lrA=ReadGranularity(mn=1, k=1),
+        lrB=ReadGranularity(mn=1, k=1),
+        grA=ReadGranularity(mn=tiA.subtileShape[0], k=tiA.subtileShape[1]),
+        grB=ReadGranularity(mn=tiB.subtileShape[0], k=tiB.subtileShape[1]),
+        pgr=pgr,
+    )
+
+
+EXPECTED_EMIT_DEP_ORDER_256x256_FP8_PGR1 = """\
+MAINLOOP (dependency paths):
+  Partition 0:
+    subIterK=0:
+      MFMA: [ 0] MFMAs (MT n, subIterK 0  ) A : [0-7] , B : [0-7] <- [5]
+      preMFMA path 0:
+        [ 5] wait_lr    wait_lr
+      path 0:
+        [10] gr_inc     gr_inc(A)
+        [ 3] gr         GR A (MT n+1, subIterK [0]) ids [0-7]
+        [11] gr_inc     gr_inc(B)
+        [ 4] gr         GR B (MT n+1, subIterK [0]) ids [0-7]
+        [ 6] wait_gr    wait_gr(0)
+        [ 7] sync       sync
+        [ 8] lr_inc     lr_inc(A)
+        [ 9] lr_inc     lr_inc(B)
+        [ 1] lr         LR A  (MT n+1, subIterK [0]) [0-7]
+        [ 2] lr         LR B  (MT n+1, subIterK [0]) [0-7]
+"""
+
+EXPECTED_EMIT_DEP_ORDER_256x256_FP8_PGR2 = """\
+MAINLOOP (dependency paths):
+  Partition 0:
+    subIterK=0:
+      MFMA: [ 0] MFMAs (MT n, subIterK 0  ) A : [0-7] , B : [0-7] <- [5]
+      preMFMA path 0:
+        [ 5] wait_lr    wait_lr
+      path 0:
+        [ 6] wait_gr    wait_gr(0)
+        [ 7] sync       sync
+        [ 8] lr_inc     lr_inc(A)
+        [ 9] lr_inc     lr_inc(B)
+        [ 1] lr         LR A  (MT n+1, subIterK [0]) [0-7]
+        [ 2] lr         LR B  (MT n+1, subIterK [0]) [0-7]
+      path 1:
+        [10] sync       sync
+        [11] gr_inc     gr_inc(A)
+        [ 3] gr         GR A (MT n+2, subIterK [0]) ids [0-7]
+        [12] gr_inc     gr_inc(B)
+        [ 4] gr         GR B (MT n+2, subIterK [0]) ids [0-7]
+"""
+
+
+def test_256x256_fp8_partition_1x1_pgr1():
+    """Exact check of emit dependency order for 256x256 FP8, 1x1 partition, PGR=1.
+
+    PGR=1: GR and LR are in the same path — GR issues for MT n+1 then
+    wait_gr(0) then LR, all in one sequential chain.
+    """
+    cfg = make_256x256_fp8(pgr=1)
+    sched = LogicalScheduler(cfg)
+    sched.emit()
+    actual = sched.print_emit_dep_order()
+    assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_FP8_PGR1, (
+        f"Emit dependency order mismatch.\n"
+        f"--- Expected ---\n{EXPECTED_EMIT_DEP_ORDER_256x256_FP8_PGR1}\n"
+        f"--- Actual ---\n{actual}"
+    )
+
+
+def test_256x256_fp8_partition_1x1_pgr2():
+    """Exact check of emit dependency order for 256x256 FP8, 1x1 partition, PGR=2.
+
+    PGR=2: GR and LR split into two independent paths — LR in path 0
+    (wait_gr(0) then LR for MT n+1), GR in path 1 (GR for MT n+2).
+    wait_gr(0) confirms _compute_inflight_loads yields vmcnt=0 for the
+    symmetric case after the inflight-loads bug fix.
+    """
+    cfg = make_256x256_fp8(pgr=2)
+    sched = LogicalScheduler(cfg)
+    sched.emit()
+    actual = sched.print_emit_dep_order()
+    assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_FP8_PGR2, (
+        f"Emit dependency order mismatch.\n"
+        f"--- Expected ---\n{EXPECTED_EMIT_DEP_ORDER_256x256_FP8_PGR2}\n"
         f"--- Actual ---\n{actual}"
     )
 

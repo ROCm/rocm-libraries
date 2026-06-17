@@ -4,6 +4,7 @@
 """Unit tests for suite CLI argument parsing and run_suite() workflow."""
 
 import json
+import importlib
 import os
 import sys
 import tempfile
@@ -15,7 +16,7 @@ import pytest
 
 from dnn_benchmarking.cli.parser import create_parser
 from dnn_benchmarking.cli.suite_runner_cli import run_suite_benchmark
-from dnn_benchmarking.config.benchmark_config import SuiteConfig
+from dnn_benchmarking.config.benchmark_config import SuiteConfig, ValidationConfig
 from dnn_benchmarking.reporting.reporter import Reporter
 from dnn_benchmarking.reporting.suite_results import (
     CorrectnessResult,
@@ -24,6 +25,8 @@ from dnn_benchmarking.reporting.suite_results import (
     SuiteMetadata,
     SuiteResult,
 )
+
+MAIN_MODULE = importlib.import_module("dnn_benchmarking.cli.main")
 
 
 def _mock_hipdnn():
@@ -80,14 +83,23 @@ class TestParserGlobAndFilters:
         args = parser.parse_args(["--graph", "g.json"])
         assert args.engine is None
 
-    def test_engine_flag_deduplicates_preserving_order(self) -> None:
-        """--engine 1,1,1 -> [1]; '3,1,3,2' -> [3, 1, 2] (first-seen order)."""
+    def test_engine_flag_preserves_duplicates(self) -> None:
+        """--engine entries are ordered execution selections, not a set."""
         parser = create_parser()
         args = parser.parse_args(["--graph", "g.json", "--engine", "1,1,1"])
-        assert args.engine == [1]
+        assert args.engine == [1, 1, 1]
 
+    def test_engine_flag_preserves_order(self) -> None:
+        parser = create_parser()
         args = parser.parse_args(["--graph", "g.json", "--engine", "3,1,3,2"])
-        assert args.engine == [3, 1, 2]
+        assert args.engine == [3, 1, 3, 2]
+
+    def test_plugin_path_accepts_comma_separated_list(self) -> None:
+        parser = create_parser()
+        args = parser.parse_args(
+            ["--graph", "g.json", "--plugin-path", "/plugins/a,/plugins/b"]
+        )
+        assert args.plugin_path == [Path("/plugins/a"), Path("/plugins/b")]
 
     def test_verbose_flag_default_false(self) -> None:
         """No -v / --verbose => args.verbose is False."""
@@ -120,10 +132,9 @@ class TestMainRouting:
             paths.append(str(p))
         return paths
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.main.run_suite_cli")
     def test_multi_file_glob_routes_to_orchestrator(
-        self, mock_orchestrate: MagicMock, mock_gpu: MagicMock
+        self, mock_orchestrate: MagicMock
     ) -> None:
         """Multi-file glob routes to the unified orchestrator."""
         mock_orchestrate.return_value = 0
@@ -147,10 +158,9 @@ class TestMainRouting:
             assert len(graph_paths) == 3
             assert result == 0
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.main.run_suite_cli")
     def test_single_file_also_routes_to_orchestrator(
-        self, mock_orchestrate: MagicMock, mock_gpu: MagicMock
+        self, mock_orchestrate: MagicMock
     ) -> None:
         """Single file routes through the unified orchestrator (no separate run_benchmark)."""
         mock_orchestrate.return_value = 0
@@ -173,10 +183,9 @@ class TestMainRouting:
             assert len(graph_paths) == 1
             assert result == 0
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
     def test_verbose_flag_propagates_to_suite_config(
-        self, mock_benchmark: MagicMock, mock_gpu: MagicMock
+        self, mock_benchmark: MagicMock
     ) -> None:
         """-v sets SuiteConfig.verbose=True when routing through the orchestrator."""
         mock_benchmark.return_value = 0
@@ -192,10 +201,9 @@ class TestMainRouting:
         suite_config = mock_benchmark.call_args.kwargs["config"]
         assert suite_config.verbose is True
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
     def test_engine_list_propagates_to_suite_config(
-        self, mock_benchmark: MagicMock, mock_gpu: MagicMock
+        self, mock_benchmark: MagicMock
     ) -> None:
         """--engine 1,2 lands in SuiteConfig.engine_filter as [1, 2]."""
         mock_benchmark.return_value = 0
@@ -214,17 +222,117 @@ class TestMainRouting:
         suite_config = mock_benchmark.call_args.kwargs["config"]
         assert suite_config.engine_filter == [1, 2]
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
-    @patch("dnn_benchmarking.cli.main.run_pytorch_cli")
+    @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
+    def test_plugin_paths_propagate_to_suite_config(
+        self, mock_benchmark: MagicMock
+    ) -> None:
+        mock_benchmark.return_value = 0
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = self._create_graph_files(Path(tmpdir), 1)
+
+            from dnn_benchmarking.cli.main import main
+
+            with patch(
+                "sys.argv",
+                [
+                    "dnn-benchmark",
+                    "--graph",
+                    paths[0],
+                    "--engine",
+                    "2,1",
+                    "--plugin-path",
+                    "/plugins/b,/plugins/a",
+                ],
+            ):
+                main()
+
+        suite_config = mock_benchmark.call_args.kwargs["config"]
+        assert suite_config.engine_filter == [2, 1]
+        assert suite_config.plugin_paths == [Path("/plugins/b"), Path("/plugins/a")]
+
+    @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
+    def test_rocm_path_env_used_when_plugin_path_absent(
+        self, mock_benchmark: MagicMock
+    ) -> None:
+        mock_benchmark.return_value = 0
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = self._create_graph_files(Path(tmpdir), 1)
+
+            from dnn_benchmarking.cli.main import main
+
+            with patch.dict(os.environ, {"ROCM_PATH": "/rocm/env"}):
+                with patch("sys.argv", ["dnn-benchmark", "--graph", paths[0]]):
+                    main()
+
+        suite_config = mock_benchmark.call_args.kwargs["config"]
+        assert suite_config.plugin_paths == [
+            Path("/rocm/env/lib/hipdnn_plugins/engines")
+        ]
+
+    @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
+    def test_same_engine_plugin_paths_propagate_as_ordered_selections(
+        self, mock_benchmark: MagicMock
+    ) -> None:
+        mock_benchmark.return_value = 0
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = self._create_graph_files(Path(tmpdir), 1)
+
+            from dnn_benchmarking.cli.main import main
+
+            with patch(
+                "sys.argv",
+                [
+                    "dnn-benchmark",
+                    "--graph",
+                    paths[0],
+                    "--engine",
+                    "1,1",
+                    "--plugin-path",
+                    "/plugins/a,/plugins/b",
+                ],
+            ):
+                main()
+
+        suite_config = mock_benchmark.call_args.kwargs["config"]
+        selections = suite_config.engine_selections_for(suite_config.engine_filter)
+        assert suite_config.engine_filter == [1, 1]
+        assert [s.plugin_path for s in selections] == [
+            Path("/plugins/a"),
+            Path("/plugins/b"),
+        ]
+
+    def test_plugin_path_count_mismatch_rejected_at_cli_layer(self) -> None:
+        from dnn_benchmarking.cli.suite_runner_cli import run_suite_cli
+
+        parser = create_parser()
+        args = parser.parse_args(
+            [
+                "--graph",
+                "g.json",
+                "--engine",
+                "1,2,3",
+                "--plugin-path",
+                "/plugins/a,/plugins/b",
+            ]
+        )
+        reporter = MagicMock(spec=Reporter)
+
+        rc = run_suite_cli(args, graph_paths=[Path("g.json")], reporter=reporter)
+
+        assert rc == 1
+        reporter.print_error.assert_called_once()
+        assert "entry count" in reporter.print_error.call_args[0][0]
+
     @patch("dnn_benchmarking.cli.main.run_suite_cli")
-    def test_pytorch_backend_single_file_uses_pytorch_path(
+    def test_pytorch_backend_single_file_routes_to_suite(
         self,
         mock_orchestrate: MagicMock,
-        mock_run_pytorch: MagicMock,
-        mock_gpu: MagicMock,
     ) -> None:
-        """--backend pytorch on single file goes to run_pytorch_cli, not unified."""
-        mock_run_pytorch.return_value = 0
+        """--backend pytorch on a single file shares the suite execution path."""
+        mock_orchestrate.return_value = 0
 
         with tempfile.TemporaryDirectory() as tmpdir:
             paths = self._create_graph_files(Path(tmpdir), 1)
@@ -237,13 +345,19 @@ class TestMainRouting:
             ):
                 result = main()
 
-            mock_run_pytorch.assert_called_once()
-            mock_orchestrate.assert_not_called()
+            mock_orchestrate.assert_called_once()
+            args = mock_orchestrate.call_args.args[0]
+            assert args.backend == "pytorch"
             assert result == 0
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
-    def test_pytorch_backend_multi_file_rejected(self, mock_gpu: MagicMock) -> None:
-        """--backend pytorch with a glob exits 1 (suite not supported)."""
+    @patch("dnn_benchmarking.cli.main.run_suite_cli")
+    def test_pytorch_backend_multi_file_routes_to_suite(
+        self,
+        mock_orchestrate: MagicMock,
+    ) -> None:
+        """--backend pytorch with a glob runs the full suite (command parity)."""
+        mock_orchestrate.return_value = 0
+
         with tempfile.TemporaryDirectory() as tmpdir:
             self._create_graph_files(Path(tmpdir), 3)
             glob_pattern = os.path.join(tmpdir, "*.json")
@@ -256,12 +370,19 @@ class TestMainRouting:
             ):
                 result = main()
 
-            assert result == 1
+            mock_orchestrate.assert_called_once()
+            call_args = mock_orchestrate.call_args
+            graph_paths = (
+                call_args.args[1]
+                if len(call_args.args) > 1
+                else call_args.kwargs["graph_paths"]
+            )
+            assert len(graph_paths) == 3
+            assert result == 0
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.main.run_suite_cli")
     def test_recursive_glob_matches_nested_directories(
-        self, mock_orchestrate: MagicMock, mock_gpu: MagicMock
+        self, mock_orchestrate: MagicMock
     ) -> None:
         """`**` glob with recursive=True matches graphs in nested directories."""
         mock_orchestrate.return_value = 0
@@ -389,7 +510,7 @@ class TestRunSuiteWorkflow:
             paths.append(p)
         return paths
 
-    @patch("dnn_benchmarking.cli.suite_runner_cli.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.hipdnn_suite_runner.run_graph_all_providers")
     @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
     @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_all_pass_returns_zero_exit_code(
@@ -414,13 +535,12 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
         assert result == 0
 
-    @patch("dnn_benchmarking.cli.suite_runner_cli.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.hipdnn_suite_runner.run_graph_all_providers")
     @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
     @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_one_failure_still_processes_second(
@@ -445,14 +565,13 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
         assert mock_run.call_count == 2
         assert result == 1
 
-    @patch("dnn_benchmarking.cli.suite_runner_cli.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.hipdnn_suite_runner.run_graph_all_providers")
     @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
     @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_correctness_failure_returns_two(
@@ -491,13 +610,12 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
         assert result == 2
 
-    @patch("dnn_benchmarking.cli.suite_runner_cli.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.hipdnn_suite_runner.run_graph_all_providers")
     @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
     @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_json_output_written_when_output_specified(
@@ -520,7 +638,6 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=output_file,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -529,7 +646,7 @@ class TestRunSuiteWorkflow:
             assert "metadata" in data
             assert "graphs" in data
 
-    @patch("dnn_benchmarking.cli.suite_runner_cli.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.hipdnn_suite_runner.run_graph_all_providers")
     @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
     @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_no_json_output_when_output_not_specified(
@@ -554,7 +671,6 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -562,7 +678,7 @@ class TestRunSuiteWorkflow:
             new_files = inputs_after - inputs_before
             assert new_files == set(), f"Unexpected JSON files written: {new_files}"
 
-    @patch("dnn_benchmarking.cli.suite_runner_cli.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.hipdnn_suite_runner.run_graph_all_providers")
     @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
     @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_warmup_iters_passed_per_graph(
@@ -584,7 +700,6 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -594,7 +709,7 @@ class TestRunSuiteWorkflow:
             assert passed_config.warmup_iters == 20
             assert passed_config.benchmark_iters == 200
 
-    @patch("dnn_benchmarking.cli.suite_runner_cli.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.hipdnn_suite_runner.run_graph_all_providers")
     @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
     @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_empty_nodes_graph_records_error_and_continues(
@@ -623,14 +738,13 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
         assert mock_run.call_count == 1
         assert result == 1
 
-    @patch("dnn_benchmarking.cli.suite_runner_cli.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.hipdnn_suite_runner.run_graph_all_providers")
     @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
     @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_graph_load_error_continues_to_next(
@@ -656,7 +770,6 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -664,67 +777,15 @@ class TestRunSuiteWorkflow:
         assert result == 1
 
 
-class TestEngineFlagModeRejection:
-    """--engine list is incompatible with A/B and PyTorch single-engine modes."""
+class TestBackendEngineRouting:
+    """Tests for engine selection rules across execution backends."""
 
     def _create_graph(self, tmpdir: Path) -> Path:
         p = tmpdir / "g.json"
         p.write_text(json.dumps({"name": "g", "nodes": [], "tensors": []}))
         return p
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
-    def test_engine_list_with_ab_mode_rejected(self, mock_gpu: MagicMock) -> None:
-        from dnn_benchmarking.cli.main import main
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            graph = self._create_graph(Path(tmpdir))
-            with patch(
-                "sys.argv",
-                [
-                    "dnn-benchmark",
-                    "--graph",
-                    str(graph),
-                    "--engine",
-                    "1,2",
-                    "--AId",
-                    "1",
-                    "--BId",
-                    "2",
-                ],
-            ):
-                result = main()
-        assert result == 1
-
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
-    def test_single_engine_with_ab_mode_also_rejected(
-        self, mock_gpu: MagicMock
-    ) -> None:
-        """Even a single-element --engine list is rejected in A/B (it has --AId/--BId)."""
-        from dnn_benchmarking.cli.main import main
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            graph = self._create_graph(Path(tmpdir))
-            with patch(
-                "sys.argv",
-                [
-                    "dnn-benchmark",
-                    "--graph",
-                    str(graph),
-                    "--engine",
-                    "5",
-                    "--AId",
-                    "1",
-                    "--BId",
-                    "2",
-                ],
-            ):
-                result = main()
-        assert result == 1
-
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
-    def test_engine_list_with_pytorch_backend_rejected(
-        self, mock_gpu: MagicMock
-    ) -> None:
+    def test_engine_list_with_pytorch_backend_rejected(self) -> None:
         from dnn_benchmarking.cli.main import main
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -744,13 +805,8 @@ class TestEngineFlagModeRejection:
                 result = main()
         assert result == 1
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
-    @patch("dnn_benchmarking.cli.pytorch_runner_cli.run_pytorch_benchmark")
-    def test_single_engine_with_pytorch_backend_accepted(
-        self, mock_run_pytorch: MagicMock, mock_gpu: MagicMock
-    ) -> None:
-        """A single --engine ID is fine with --backend pytorch."""
-        mock_run_pytorch.return_value = 0
+    def test_single_engine_with_pytorch_backend_rejected(self) -> None:
+        """--engine has no meaning for the PyTorch backend and is rejected."""
         from dnn_benchmarking.cli.main import main
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -768,33 +824,44 @@ class TestEngineFlagModeRejection:
                 ],
             ):
                 result = main()
-        assert result == 0
-        mock_run_pytorch.assert_called_once()
-        cfg = mock_run_pytorch.call_args.args[0]
-        assert cfg.engine_id == 3
+        assert result == 1
+
+    def _run_main_with_args(self, graph: Path, extra: list) -> int:
+        from dnn_benchmarking.cli.main import main
+
+        with patch(
+            "sys.argv",
+            ["dnn-benchmark", "--graph", str(graph), "--backend", "pytorch"] + extra,
+        ):
+            return main()
+
+    def test_plugin_path_with_pytorch_backend_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            graph = self._create_graph(Path(tmpdir))
+            assert self._run_main_with_args(graph, ["--plugin-path", "/plugins"]) == 1
+
+    def test_validate_pytorch_with_pytorch_backend_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            graph = self._create_graph(Path(tmpdir))
+            assert self._run_main_with_args(graph, ["--validate", "pytorch"]) == 1
+
+    def test_profiling_flags_with_pytorch_backend_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            graph = self._create_graph(Path(tmpdir))
+            assert self._run_main_with_args(graph, ["--pmc", "basic"]) == 1
 
 
 class TestValidationStartupGate:
     """--validate is a hard gate. If the reference provider isn't registered
     or available, the orchestrator returns 1 before iterating any graph."""
 
-    @patch("dnn_benchmarking.cli.suite_runner_cli.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.suite_runner_cli.ReferenceProviderRegistry")
+    @patch("dnn_benchmarking.cli.hipdnn_suite_runner.run_graph_all_providers")
     def test_unregistered_reference_provider_fails_at_startup(
-        self, mock_run: MagicMock
+        self, mock_run: MagicMock, mock_registry: MagicMock
     ) -> None:
-
-        config = SuiteConfig.__new__(SuiteConfig)
-        # Bypass the SuiteConfig validator (which restricts reference_provider
-        # to the known set) so we can simulate an unregistered name.
-        config.warmup_iters = 1
-        config.benchmark_iters = 1
-        config.seed = None
-        config.engine_filter = None
-        config.rtol = 1e-5
-        config.atol = 1e-8
-        config.gpu_backend = "none"
-        config.reference_provider = "definitely_not_registered"
-        config.verbose = False
+        mock_registry.get_provider.side_effect = ValueError("unknown")
+        config = SuiteConfig(validation=ValidationConfig(provider="pytorch"))
 
         with tempfile.TemporaryDirectory() as tmpdir:
             graph = Path(tmpdir) / "g.json"
@@ -803,7 +870,6 @@ class TestValidationStartupGate:
                 graph_paths=[graph],
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -812,7 +878,7 @@ class TestValidationStartupGate:
         mock_run.assert_not_called()
 
     @patch("dnn_benchmarking.cli.suite_runner_cli.ReferenceProviderRegistry")
-    @patch("dnn_benchmarking.cli.suite_runner_cli.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.hipdnn_suite_runner.run_graph_all_providers")
     def test_unavailable_reference_provider_fails_at_startup(
         self, mock_run: MagicMock, mock_registry: MagicMock
     ) -> None:
@@ -821,7 +887,7 @@ class TestValidationStartupGate:
         provider_mock.is_available.return_value = False
         mock_registry.get_provider.return_value = provider_mock
 
-        config = SuiteConfig(reference_provider="pytorch")
+        config = SuiteConfig(validation=ValidationConfig(provider="pytorch"))
 
         with tempfile.TemporaryDirectory() as tmpdir:
             graph = Path(tmpdir) / "g.json"
@@ -830,7 +896,6 @@ class TestValidationStartupGate:
                 graph_paths=[graph],
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -838,7 +903,7 @@ class TestValidationStartupGate:
         mock_run.assert_not_called()
 
     @patch("dnn_benchmarking.cli.suite_runner_cli.ReferenceProviderRegistry")
-    @patch("dnn_benchmarking.cli.suite_runner_cli.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.hipdnn_suite_runner.run_graph_all_providers")
     @patch("dnn_benchmarking.reporting.suite_results.collect_environment_info")
     @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_available_reference_provider_proceeds_to_graph_iteration(
@@ -878,7 +943,7 @@ class TestValidationStartupGate:
             ],
         )
 
-        config = SuiteConfig(reference_provider="pytorch")
+        config = SuiteConfig(validation=ValidationConfig(provider="pytorch"))
 
         with tempfile.TemporaryDirectory() as tmpdir:
             graph = Path(tmpdir) / "g.json"
@@ -931,32 +996,11 @@ class TestValidationStartupGate:
                 graph_paths=[graph],
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
         assert result == 0
         mock_run.assert_called_once()
-
-
-class TestNoGpuDetected:
-    """main() returns 1 when no GPU is detected (check is centralized in main)."""
-
-    @patch("dnn_benchmarking.cli.main._resolve_graphs")
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=False)
-    def test_main_returns_one_when_no_gpu(
-        self, mock_gpu: MagicMock, mock_resolve: MagicMock
-    ) -> None:
-        from dnn_benchmarking.cli.main import main
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            graph = Path(tmpdir) / "g.json"
-            graph.write_text(json.dumps({"name": "g", "nodes": [], "tensors": []}))
-            with patch("sys.argv", ["dnn-benchmark", "--graph", str(graph)]):
-                result = main()
-
-        assert result == 1
-        mock_resolve.assert_not_called()
 
 
 class TestProfilingFlagParsing:

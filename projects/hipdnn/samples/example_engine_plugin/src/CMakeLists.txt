@@ -11,6 +11,22 @@
 # are built from these same object files.
 # =============================================================================
 add_library(
+    example_provider_impl_kernel_sources OBJECT
+    ${KERNEL_GENERATED_SOURCES}
+)
+
+add_dependencies(example_provider_impl_kernel_sources example_provider_kernel_embed)
+
+target_include_directories(example_provider_impl_kernel_sources PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/../kernels)
+target_link_libraries(example_provider_impl_kernel_sources PRIVATE example_provider_compile_options)
+
+set_target_properties(example_provider_impl_kernel_sources PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    POSITION_INDEPENDENT_CODE ON
+    CXX_CLANG_TIDY ""
+)
+
+add_library(
     example_provider_impl OBJECT
     ExampleProviderHandle.cpp
     ExampleProviderContainer.cpp
@@ -22,10 +38,7 @@ add_library(
     engines/plans/ConvFwdPlan.cpp
     hip/HipCompiledProgram.cpp
     hip/HipRunnableKernel.cpp
-    ${KERNEL_GENERATED_SOURCES}
 )
-
-add_dependencies(example_provider_impl example_provider_kernel_embed)
 
 target_include_directories(example_provider_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(example_provider_impl PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/../kernels)
@@ -41,7 +54,10 @@ set_target_properties(example_provider_impl PROPERTIES
 # Static library: exposes plugin internals for unit tests to link against.
 # This is not installed or distributed. It exists only for testability.
 # =============================================================================
-add_library(example_provider_private STATIC $<TARGET_OBJECTS:example_provider_impl>)
+add_library(example_provider_private STATIC
+    $<TARGET_OBJECTS:example_provider_impl>
+    $<TARGET_OBJECTS:example_provider_impl_kernel_sources>
+)
 target_include_directories(example_provider_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(example_provider_private PUBLIC hipdnn_plugin_sdk hipdnn_data_sdk example_provider_impl)
 
@@ -49,7 +65,10 @@ target_link_libraries(example_provider_private PUBLIC hipdnn_plugin_sdk hipdnn_d
 # Shared library: the actual plugin loaded at runtime by hipDNN.
 # Visibility is set to hidden so only the C entry points are exported.
 # =============================================================================
-add_library(example_provider_plugin SHARED $<TARGET_OBJECTS:example_provider_impl>)
+add_library(example_provider_plugin SHARED
+    $<TARGET_OBJECTS:example_provider_impl>
+    $<TARGET_OBJECTS:example_provider_impl_kernel_sources>
+)
 target_link_libraries(example_provider_plugin PRIVATE hipdnn_plugin_sdk hipdnn_data_sdk hip::host hiprtc::hiprtc)
 
 if(NOT WIN32)

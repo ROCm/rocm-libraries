@@ -26,15 +26,5 @@
  * Macros
  ******************************************************************************/
 
-#ifdef DEVICE_GRID_YZ_16BIT
-#undef DEVICE_GRID_YZ_16BIT
-#endif
-
-#if defined(__HIP_DEVICE_COMPILE__)
-#define DEVICE_GRID_YZ_16BIT 1
-#else
-#define DEVICE_GRID_YZ_16BIT 0
-#endif
-
 #define WARP_32 32
 #define WARP_64 64

@@ -11,17 +11,17 @@
   AssignedDerivedParameters: true
   Batched: true
   BetaOnlyUseBias: 0
-  BiasDataTypeList: [0, 7]
+  BiasDataTypeList: [0, 4]
   BiasSrc: D
   ComplexConjugateA: false
   ComplexConjugateB: false
   ComputeDataType: 0
-  DataType: 7
-  DataTypeA: 7
+  DataType: 4
+  DataTypeA: 4
   DataTypeAmaxD: 0
-  DataTypeB: 7
-  DataTypeE: 7
-  DestDataType: 7
+  DataTypeB: 4
+  DataTypeE: 4
+  DestDataType: 4
   F32XdlMathOp: 0
   Gradient: false
   GroupedGemm: false

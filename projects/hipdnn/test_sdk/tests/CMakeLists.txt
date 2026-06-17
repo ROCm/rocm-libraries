@@ -79,6 +79,8 @@ add_executable(
     utilities/cpu_graph_executor/TestReductionSignatureKey.cpp
     utilities/cpu_graph_executor/TestRMSNormFwdPlan.cpp
     utilities/cpu_graph_executor/TestRMSNormFwdSignatureKey.cpp
+    utilities/cpu_graph_executor/TestRMSNormBwdPlan.cpp
+    utilities/cpu_graph_executor/TestRMSNormBwdSignatureKey.cpp
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaFwdPlan.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaFwdSignatureKey.cpp>
     TestVersion.cpp

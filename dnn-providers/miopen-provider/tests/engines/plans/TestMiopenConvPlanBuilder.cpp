@@ -376,6 +376,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeWrw)
 
 TEST_P(TestGpuMiopenConvPlanBuilderShapes, WorkspaceRangeIsConsistentAndExecutableFwd)
 {
+    SKIP_IF_ASAN(); // CK/MIOpen Fwd convolution hangs under ASAN on gfx942 (xnack+)
     const auto& tc = GetParam();
     auto xStrides = hipdnn_data_sdk::utilities::generateStrides(tc.xDims);
     auto wStrides = hipdnn_data_sdk::utilities::generateStrides(tc.wDims);
