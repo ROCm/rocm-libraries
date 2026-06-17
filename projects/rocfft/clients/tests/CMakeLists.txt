@@ -377,10 +377,13 @@ set_target_properties(rtc_helper_crash
                       RUNTIME_OUTPUT_DIRECTORY 
                       ${TESTS_OUT_DIR})
 
-# Always include amdgcnspirv target so the clients work on an architecture
-# that the runtime supports but was not specified a build time
-target_compile_options( rocfft-test PRIVATE --offload-arch=amdgcnspirv )
-target_link_options( rocfft-test PRIVATE --offload-arch=amdgcnspirv )
+# On Linux, always include amdgcnspirv target so the clients work
+# on an architecture that the runtime supports but was not
+# specified a build time
+if( NOT WIN32 )
+  target_compile_options( rocfft-test PRIVATE --offload-arch=amdgcnspirv )
+  target_link_options( rocfft-test PRIVATE --offload-arch=amdgcnspirv )
+endif()
 
 rocm_install(TARGETS rocfft-test rtc_helper_crash COMPONENT tests)
 
@@ -500,10 +503,13 @@ if( ROCFFT_MPI_ENABLE )
                           ${TESTS_OUT_DIR})
     rocm_install(TARGETS ${worker} COMPONENT tests)
 
-    # Always include amdgcnspirv target so the clients work on an architecture
-    # that the runtime supports but was not specified a build time
-    target_compile_options( ${worker} PRIVATE --offload-arch=amdgcnspirv )
-    target_link_options( ${worker} PRIVATE --offload-arch=amdgcnspirv )
+    # On Linux, always include amdgcnspirv target so the clients work
+    # on an architecture that the runtime supports but was not
+    # specified a build time
+    if( NOT WIN32 )
+      target_compile_options( ${worker} PRIVATE --offload-arch=amdgcnspirv )
+      target_link_options( ${worker} PRIVATE --offload-arch=amdgcnspirv )
+    endif()
   endforeach()
 
   # link normal MPI worker against rocFFT

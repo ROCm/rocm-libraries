@@ -81,11 +81,13 @@ foreach( bench ${bench_list})
 
   target_compile_options( ${bench} PRIVATE ${WARNING_FLAGS} -Wno-cpp )
 
-  # Always include amdgcnspirv target so the clients work on an architecture
-  # that the runtime supports but was not specified a build time
-  target_compile_options( ${bench} PRIVATE --offload-arch=amdgcnspirv )
-  target_link_options( ${bench} PRIVATE --offload-arch=amdgcnspirv )
-
+  # On Linux, always include amdgcnspirv target so the clients work
+  # on an architecture that the runtime supports but was not
+  # specified a build time
+  if( NOT WIN32 )
+    target_compile_options( ${bench} PRIVATE --offload-arch=amdgcnspirv )
+    target_link_options( ${bench} PRIVATE --offload-arch=amdgcnspirv )
+  endif()
   # NB: hip-clang includes omp.h, so we need to specify the location
   # of ROCM_CLANG_ROOT at cmake config time if we are using clang++.
 
