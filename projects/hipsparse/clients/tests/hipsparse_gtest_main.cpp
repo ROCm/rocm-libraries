@@ -26,6 +26,7 @@
 
 #include <hip/hip_runtime_api.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -67,6 +68,64 @@ static bool hipsparse_log_device_memory(const char* context)
             status,
             hipGetErrorString(status));
     return false;
+}
+
+// Per-test stream-ordered mempool management for memory-constrained runners.
+//
+// hipSPARSE delegates to rocSPARSE, which allocates temporaries via
+// hipMallocAsync/hipFreeAsync on the device default pool. With a non-zero pool
+// release threshold (e.g. on Windows) freed blocks are cached rather than
+// returned to the device, so across a large single-process suite the reserved
+// pool grows monotonically and exhausts a small (4 GB) card. Trimming the pool
+// after each test returns cached blocks to the device and bounds peak usage.
+//
+// Both behaviors are opt-in via environment variables so default runs are
+// byte-for-byte unchanged:
+//   HIPSPARSE_TEST_TRIM_POOL=1  -> hipMemPoolTrimTo(pool, 0) after each test
+//   HIPSPARSE_TEST_VRAM_LOG=1   -> log device free/used + pool reserved/test
+static void hipsparse_test_pool_maintenance(const TestInfo& test_info)
+{
+    static const bool trim = []() {
+        const char* e = getenv("HIPSPARSE_TEST_TRIM_POOL");
+        return e && atoi(e) != 0;
+    }();
+    static const bool vram_log = []() {
+        const char* e = getenv("HIPSPARSE_TEST_VRAM_LOG");
+        return e && atoi(e) != 0;
+    }();
+
+    if(!trim && !vram_log)
+    {
+        return;
+    }
+
+    hipMemPool_t pool;
+    if(hipDeviceGetDefaultMemPool(&pool, 0) != hipSuccess)
+    {
+        return;
+    }
+
+    if(trim)
+    {
+        (void)hipMemPoolTrimTo(pool, 0);
+    }
+
+    if(vram_log)
+    {
+        size_t   free_b = 0, total_b = 0;
+        uint64_t reserved = 0, used = 0;
+        (void)hipMemGetInfo(&free_b, &total_b);
+        (void)hipMemPoolGetAttribute(pool, hipMemPoolAttrReservedMemCurrent, &reserved);
+        (void)hipMemPoolGetAttribute(pool, hipMemPoolAttrUsedMemCurrent, &used);
+        fprintf(stderr,
+                "[vram] %s.%s free=%zuMB used=%zuMB pool_reserved=%lluMB pool_used=%lluMB\n",
+                test_info.test_case_name(),
+                test_info.name(),
+                (total_b - free_b) >> 20,
+                free_b >> 20,
+                (unsigned long long)(reserved >> 20),
+                (unsigned long long)(used >> 20));
+    }
 }
 
 // Print the currently running test on a fatal signal so a single crashed CI run
@@ -198,6 +257,8 @@ public:
         {
             eventListener->OnTestEnd(test_info);
         }
+
+        hipsparse_test_pool_maintenance(test_info);
     }
 
     void OnTestCaseEnd(const TestCase& test_case) override

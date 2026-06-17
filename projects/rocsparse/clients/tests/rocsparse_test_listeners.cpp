@@ -23,6 +23,72 @@
  * ************************************************************************ */
 #include "rocsparse_test_listeners.hpp"
 
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <hip/hip_runtime.h>
+
+namespace
+{
+    // Per-test stream-ordered mempool management for memory-constrained runners.
+    //
+    // rocSPARSE allocates temporaries via hipMallocAsync/hipFreeAsync on the
+    // device default pool. With a non-zero pool release threshold (e.g. on
+    // Windows), freed blocks are cached rather than returned to the device, so
+    // across a large single-process suite the reserved pool grows monotonically
+    // and exhausts a small (4 GB) card. Trimming the pool after each test
+    // returns cached blocks to the device and bounds peak usage.
+    //
+    // Both behaviors are opt-in via environment variables so default runs are
+    // byte-for-byte unchanged:
+    //   ROCSPARSE_TEST_TRIM_POOL=1  -> hipMemPoolTrimTo(pool, 0) after each test
+    //   ROCSPARSE_TEST_VRAM_LOG=1   -> log device free/used + pool reserved/test
+    void rocsparse_test_pool_maintenance(const testing::TestInfo& test_info)
+    {
+        static const bool trim = []() {
+            const char* e = getenv("ROCSPARSE_TEST_TRIM_POOL");
+            return e && atoi(e) != 0;
+        }();
+        static const bool vram_log = []() {
+            const char* e = getenv("ROCSPARSE_TEST_VRAM_LOG");
+            return e && atoi(e) != 0;
+        }();
+
+        if(!trim && !vram_log)
+        {
+            return;
+        }
+
+        hipMemPool_t pool;
+        if(hipDeviceGetDefaultMemPool(&pool, 0) != hipSuccess)
+        {
+            return;
+        }
+
+        if(trim)
+        {
+            (void)hipMemPoolTrimTo(pool, 0);
+        }
+
+        if(vram_log)
+        {
+            size_t   free_b = 0, total_b = 0;
+            uint64_t reserved = 0, used = 0;
+            (void)hipMemGetInfo(&free_b, &total_b);
+            (void)hipMemPoolGetAttribute(pool, hipMemPoolAttrReservedMemCurrent, &reserved);
+            (void)hipMemPoolGetAttribute(pool, hipMemPoolAttrUsedMemCurrent, &used);
+            fprintf(stderr,
+                    "[vram] %s.%s free=%zuMB used=%zuMB pool_reserved=%lluMB pool_used=%lluMB\n",
+                    test_info.test_suite_name(),
+                    test_info.name(),
+                    (total_b - free_b) / 1048576u,
+                    free_b / 1048576u,
+                    (unsigned long long)(reserved / 1048576u),
+                    (unsigned long long)(used / 1048576u));
+        }
+    }
+} // namespace
+
 rocsparse_clients::configurable_event_listener::configurable_event_listener(
     testing::TestEventListener* theEventListener)
     : m_eventListener(theEventListener)
@@ -158,6 +224,8 @@ void rocsparse_clients::configurable_event_listener::OnTestEnd(const testing::Te
         m_eventListener->OnTestEnd(test_info);
     }
     m_pendingTestInfo = nullptr;
+
+    rocsparse_test_pool_maintenance(test_info);
 }
 
 void rocsparse_clients::configurable_event_listener::OnTestCaseEnd(
