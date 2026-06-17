@@ -115,7 +115,7 @@ logicalIR correspondence (strict name match):
 from __future__ import annotations
 
 from copy import deepcopy as _deepcopy
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from ._dummy import make_dummy_class, make_dummy_func
 from .enum import InstType
@@ -2457,9 +2457,251 @@ GlobalPrefetchB8 = make_dummy_class(f"{_P}.GlobalPrefetchB8")
 # MFMA / SMFMA / MXMFMA instructions
 # source: rocisa/rocisa/src/instruction/mfma.cpp
 # ==========================================================================
-MFMAInstruction = make_dummy_class(f"{_P}.MFMAInstruction")
-MXMFMAInstruction = make_dummy_class(f"{_P}.MXMFMAInstruction")
-SMFMAInstruction = make_dummy_class(f"{_P}.SMFMAInstruction")
+
+_INST_TYPE_TO_STR: Dict[Any, str] = {}
+
+
+def _inst_type_to_str(it: Any) -> str:
+    """Convert an InstType enum value to the string used by logicalIR MFMA factories."""
+    if not _INST_TYPE_TO_STR:
+        _INST_TYPE_TO_STR.update({
+            InstType.INST_F8: "fp8", InstType.INST_F16: "f16",
+            InstType.INST_F32: "f32", InstType.INST_F64: "f64",
+            InstType.INST_BF16: "bf16", InstType.INST_XF32: "xf32",
+            InstType.INST_BF8: "bf8", InstType.INST_I8: "i8",
+            InstType.INST_I32: "i32", InstType.INST_U8: "u8",
+            InstType.INST_F4: "f4", InstType.INST_F6: "f6",
+            InstType.INST_BF6: "bf6", InstType.INST_B8: "b8",
+            InstType.INST_E5M3: "e5m3", InstType.INST_E8: "e8",
+        })
+    if it in _INST_TYPE_TO_STR:
+        return _INST_TYPE_TO_STR[it]
+    s = str(it)
+    if "INST_" in s:
+        return s.split("INST_")[-1].lower()
+    return s
+
+
+class MFMAInstruction(Instruction):
+    """``v_mfma_*`` shim (rocisa ``MFMAInstruction``)."""
+
+    __slots__ = ("accType", "variant", "mfma1k", "acc", "a", "b", "acc2", "neg")
+
+    def __init__(self, instType: Any = None, accType: Any = None,
+                 variant: Any = None, mfma1k: bool = False,
+                 acc: Any = None, a: Any = None, b: Any = None,
+                 acc2: Any = None, neg: bool = False,
+                 comment: str = "", **kw):
+        _ = kw
+        super().__init__(instType, comment)
+        self.accType = accType
+        self.variant = variant if variant is not None else []
+        self.mfma1k = mfma1k
+        self.acc = acc
+        self.a = a
+        self.b = b
+        self.acc2 = acc2
+        self.neg = neg
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st
+        m = self.variant[0] if len(self.variant) > 0 else 0
+        n = self.variant[1] if len(self.variant) > 1 else 0
+        k = self.variant[2] if len(self.variant) > 2 else 0
+        blocks = self.variant[3] if len(self.variant) > 3 else 1
+        return _st.MFMA(
+            _inst_type_to_str(self.instType),
+            _inst_type_to_str(self.accType),
+            m, n, k, blocks, self.neg,
+            _to_stinky_register(self.acc),
+            _to_stinky_register(self.a),
+            _to_stinky_register(self.b),
+            comment=self.comment)
+
+    def getParams(self):
+        return [self.acc, self.a, self.b]
+
+    def getDstParams(self):
+        return [self.acc]
+
+    def getSrcParams(self):
+        return [self.a, self.b]
+
+    def getIssueLatency(self) -> int:
+        m = self.variant[0] if len(self.variant) > 0 else 16
+        blocks = self.variant[3] if len(self.variant) > 3 else 1
+        return getMFMAIssueLatency(None, m, blocks)[0]
+
+    def __deepcopy__(self, memo):
+        clone = self.__class__.__new__(self.__class__)
+        memo[id(self)] = clone
+        Instruction.__init__(clone, self.instType, self.comment)
+        clone.outputInlineAsm = self.outputInlineAsm
+        clone.instStr = self.instStr
+        clone.m_memToken = None
+        clone.accType = self.accType
+        clone.variant = list(self.variant)
+        clone.mfma1k = self.mfma1k
+        clone.acc = _deepcopy(self.acc, memo) if self.acc is not None else None
+        clone.a = _deepcopy(self.a, memo) if self.a is not None else None
+        clone.b = _deepcopy(self.b, memo) if self.b is not None else None
+        clone.acc2 = _deepcopy(self.acc2, memo) if self.acc2 is not None else None
+        clone.neg = self.neg
+        return clone
+
+
+class MXMFMAInstruction(Instruction):
+    """``v_wmma_scale_*`` / ``v_mfma_scale_*`` shim (rocisa ``MXMFMAInstruction``)."""
+
+    __slots__ = ("accType", "mxScaleAType", "mxScaleBType", "variant",
+                 "acc", "a", "b", "acc2", "mxsa", "mxsb", "vop3", "mxCBSZ")
+
+    def __init__(self, *, instType: Any = None, accType: Any = None,
+                 variant: Any = None, acc: Any = None,
+                 a: Any = None, b: Any = None,
+                 acc2: Any = None, mxsa: Any = None, mxsb: Any = None,
+                 vop3: Any = None,
+                 mxScaleAType: Any = None, mxScaleBType: Any = None,
+                 mxCBSZ: int = 0,
+                 comment: str = "", **kw):
+        _ = kw
+        super().__init__(instType, comment)
+        self.accType = accType
+        self.mxScaleAType = mxScaleAType
+        self.mxScaleBType = mxScaleBType
+        self.variant = variant if variant is not None else []
+        self.acc = acc
+        self.a = a
+        self.b = b
+        self.acc2 = acc2
+        self.mxsa = mxsa
+        self.mxsb = mxsb
+        self.vop3 = vop3
+        self.mxCBSZ = mxCBSZ
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st
+        m = self.variant[0] if len(self.variant) > 0 else 0
+        n = self.variant[1] if len(self.variant) > 1 else 0
+        k = self.variant[2] if len(self.variant) > 2 else 0
+        blocks = self.variant[3] if len(self.variant) > 3 else 1
+        return _st.MXMFMA(
+            _inst_type_to_str(self.instType),
+            _inst_type_to_str(self.accType),
+            _inst_type_to_str(self.mxScaleAType) if self.mxScaleAType else "f32",
+            _inst_type_to_str(self.mxScaleBType) if self.mxScaleBType else "f32",
+            m, n, k, blocks,
+            _to_stinky_register(self.acc),
+            _to_stinky_register(self.a),
+            _to_stinky_register(self.b),
+            _to_stinky_register(self.acc2) if self.acc2 else None,
+            _to_stinky_register(self.mxsa) if self.mxsa else None,
+            _to_stinky_register(self.mxsb) if self.mxsb else None,
+            comment=self.comment)
+
+    def getParams(self):
+        return [self.acc, self.a, self.b]
+
+    def getDstParams(self):
+        return [self.acc]
+
+    def getSrcParams(self):
+        return [self.a, self.b]
+
+    def getIssueLatency(self) -> int:
+        m = self.variant[0] if len(self.variant) > 0 else 16
+        blocks = self.variant[3] if len(self.variant) > 3 else 1
+        return getMFMAIssueLatency(None, m, blocks)[0]
+
+    def __deepcopy__(self, memo):
+        clone = self.__class__.__new__(self.__class__)
+        memo[id(self)] = clone
+        Instruction.__init__(clone, self.instType, self.comment)
+        clone.outputInlineAsm = self.outputInlineAsm
+        clone.instStr = self.instStr
+        clone.m_memToken = None
+        clone.accType = self.accType
+        clone.mxScaleAType = self.mxScaleAType
+        clone.mxScaleBType = self.mxScaleBType
+        clone.variant = list(self.variant)
+        clone.acc = _deepcopy(self.acc, memo) if self.acc is not None else None
+        clone.a = _deepcopy(self.a, memo) if self.a is not None else None
+        clone.b = _deepcopy(self.b, memo) if self.b is not None else None
+        clone.acc2 = _deepcopy(self.acc2, memo) if self.acc2 is not None else None
+        clone.mxsa = _deepcopy(self.mxsa, memo) if self.mxsa is not None else None
+        clone.mxsb = _deepcopy(self.mxsb, memo) if self.mxsb is not None else None
+        clone.vop3 = self.vop3
+        clone.mxCBSZ = self.mxCBSZ
+        return clone
+
+
+class SMFMAInstruction(Instruction):
+    """``v_smfma_*`` shim (rocisa ``SMFMAInstruction``)."""
+
+    __slots__ = ("accType", "variant", "mfma1k", "acc", "a", "b", "metadata", "neg")
+
+    def __init__(self, instType: Any = None, accType: Any = None,
+                 variant: Any = None, mfma1k: bool = False,
+                 acc: Any = None, a: Any = None, b: Any = None,
+                 metadata: Any = None, neg: bool = False,
+                 comment: str = "", **kw):
+        _ = kw
+        super().__init__(instType, comment)
+        self.accType = accType
+        self.variant = variant if variant is not None else []
+        self.mfma1k = mfma1k
+        self.acc = acc
+        self.a = a
+        self.b = b
+        self.metadata = metadata
+        self.neg = neg
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st
+        m = self.variant[0] if len(self.variant) > 0 else 0
+        n = self.variant[1] if len(self.variant) > 1 else 0
+        k = self.variant[2] if len(self.variant) > 2 else 0
+        blocks = self.variant[3] if len(self.variant) > 3 else 1
+        return _st.SMFMA(
+            _inst_type_to_str(self.instType),
+            _inst_type_to_str(self.accType),
+            m, n, k, blocks, self.neg,
+            _to_stinky_register(self.acc),
+            _to_stinky_register(self.a),
+            _to_stinky_register(self.b),
+            _to_stinky_register(self.metadata),
+            comment=self.comment)
+
+    def getParams(self):
+        return [self.acc, self.a, self.b, self.metadata]
+
+    def getDstParams(self):
+        return [self.acc]
+
+    def getSrcParams(self):
+        return [self.a, self.b, self.metadata]
+
+    def getIssueLatency(self) -> int:
+        m = self.variant[0] if len(self.variant) > 0 else 16
+        blocks = self.variant[3] if len(self.variant) > 3 else 1
+        return getSMFMAIssueLatency(None, m, blocks)[0]
+
+    def __deepcopy__(self, memo):
+        clone = self.__class__.__new__(self.__class__)
+        memo[id(self)] = clone
+        Instruction.__init__(clone, self.instType, self.comment)
+        clone.outputInlineAsm = self.outputInlineAsm
+        clone.instStr = self.instStr
+        clone.m_memToken = None
+        clone.accType = self.accType
+        clone.variant = list(self.variant)
+        clone.mfma1k = self.mfma1k
+        clone.acc = _deepcopy(self.acc, memo) if self.acc is not None else None
+        clone.a = _deepcopy(self.a, memo) if self.a is not None else None
+        clone.b = _deepcopy(self.b, memo) if self.b is not None else None
+        clone.metadata = _deepcopy(self.metadata, memo) if self.metadata is not None else None
+        clone.neg = self.neg
+        return clone
 def getMFMAIssueLatency(dataType, matrixInstM, matrixInstB):
     """Workaround port of ``rocisa::getMFMAIssueLatency<false>``.
 
