@@ -15,9 +15,35 @@
 namespace hipdnn_integration_tests::golden
 {
 
-// One registerable golden test: the derived GTest name (see DerivedTestName)
-// plus the bundle's graph .json path the harness loads at run time. This is the
-// unit discoverGoldenBundles returns — one per test that gets RegisterTest'd.
+// Naming types, kept together. DerivedTestName is the output of deriveTestName()
+// (naming only); DiscoveredBundle is what discoverGoldenBundles() returns for
+// registration — the same two name fields plus the graph .json path to load.
+// They overlap by design: one is a short-lived intermediate, the other the
+// stored record. See deriveTestName() below for how the names are built.
+
+// The two halves of a GTest identifier, as registered via RegisterTest().
+// GTest joins them with '.' to form the full name: "{suiteName}.{testName}".
+//
+//   suiteName — computational identity: [{Tier}/]{op}_{layout}_{dtype}
+//               (the tier prefix keeps its trailing '/', empty for the quick
+//               tier; see tierPrefix). Shared by every bundle of the same
+//               op/layout/dtype.
+//   testName  — scenario identity: the bundle directory name (why the test
+//               exists), e.g. "resnet50_layer3".
+//
+// Example: standard/ConvFwd/nhwc/fp16/resnet50_layer3/graph.json
+//   suiteName = "Standard/ConvFwd_nhwc_fp16"
+//   testName  = "resnet50_layer3"
+//   full GTest name = "Standard/ConvFwd_nhwc_fp16.resnet50_layer3"
+struct DerivedTestName
+{
+    std::string suiteName;
+    std::string testName;
+};
+
+// One registerable golden test: a DerivedTestName plus the bundle's graph .json
+// path the harness loads at run time. This is the unit discoverGoldenBundles
+// returns — one per test that gets RegisterTest'd.
 struct DiscoveredBundle
 {
     std::filesystem::path jsonPath; // absolute path to the bundle graph .json
@@ -108,26 +134,6 @@ inline std::string sanitizeForGtest(const std::string& input)
     }
     return result;
 }
-
-// The two halves of a GTest identifier, as registered via RegisterTest().
-// GTest joins them with '.' to form the full name: "{suiteName}.{testName}".
-//
-//   suiteName — computational identity: [{Tier}/]{op}_{layout}_{dtype}
-//               (the tier prefix keeps its trailing '/', empty for the quick
-//               tier; see tierPrefix). Shared by every bundle of the same
-//               op/layout/dtype.
-//   testName  — scenario identity: the bundle directory name (why the test
-//               exists), e.g. "resnet50_layer3".
-//
-// Example: standard/ConvFwd/nhwc/fp16/resnet50_layer3/graph.json
-//   suiteName = "Standard/ConvFwd_nhwc_fp16"
-//   testName  = "resnet50_layer3"
-//   full GTest name = "Standard/ConvFwd_nhwc_fp16.resnet50_layer3"
-struct DerivedTestName
-{
-    std::string suiteName;
-    std::string testName;
-};
 
 // Derives the GTest suite and test names from the bundle's folder path.
 // Path convention: {tier}/{op}/{layout}/{dtype}/{bundle_name}/{file}.json
