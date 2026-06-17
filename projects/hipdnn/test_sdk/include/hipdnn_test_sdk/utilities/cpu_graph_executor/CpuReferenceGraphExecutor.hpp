@@ -92,7 +92,7 @@ private:
         if(!planBuilder.isApplicable(node, graph.getTensorMap()))
         {
             const std::string nodeName = node.name() == nullptr ? "" : " " + node.name()->str();
-            throw std::runtime_error("Plan builder is not applicable for the given node:"
+            throw std::runtime_error("Plan builder is not applicable for the given node: "
                                      + nodeName);
         }
 
