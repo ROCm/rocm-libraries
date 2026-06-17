@@ -1,28 +1,21 @@
 ########################################
 # Multi-DU MXFP8 + Bias / ScaleAlphaVec (SAV) epilogue coverage (gfx950).
 #
-# WHY THIS TEST EXISTS
-# --------------------
-# "Multi-DU" = numUnroll>1, i.e. DepthU > MatrixInstK so the unroll splits into
-# sub-iterations. With MI-K=128 and DepthU=256 (numSubIterK=2) every kernel here
-# is multi-DU (_DepthUA/_DepthUB = 128 < DepthU = 256).
+# Multi-DU means numUnroll>1 (DepthU > MatrixInstK, so the unroll splits into
+# sub-iterations). With MI-K=128 and DepthU=256 every kernel here is multi-DU
+# (_DepthUA/_DepthUB = 128 < DepthU = 256).
 #
-# The pre-existing subtile MXFP8 coverage (subtile_mxfp8.yaml) exercises the
-# multi-DU path but with NO Bias and NO ScaleAlphaVec, while mx32f8_tn.yaml
-# (which DOES use Bias+SAV) is skip-gfx950. So multi-DU x (Bias and/or SAV) was
-# entirely uncovered on gfx950.
-#
-# That gap is exactly the code path gated multi-DU-only in GlobalWriteBatch.py:
+# This covers the multi-DU-only epilogue paths in GlobalWriteBatch.py that other
+# gfx950 subtile MXFP8 tests do not exercise:
 #   - the bias/SAV drain s_barrier ordering (SWaitCnt(dscnt=0) + SBarrier before
 #     the subtile paired stores), and
 #   - the ScaleAlphaVec subtile LDS-reference vgpr (None on the multi-DU path).
 # Both fire only when UseSubtileImpl AND (UseBias or UseScaleAlphaVec) AND
-# multi-DU. With no test hitting all three, that epilogue change could not be
-# validated. These cases close that gap.
+# multi-DU.
 #
-# Bias/SAV data init defaults to type 3 (nonzero), so the epilogue genuinely
-# contributes to the result and a regression in the drain-barrier / SAV LDS-ref
-# ordering would corrupt validation.
+# Bias/SAV data init defaults to type 3 (nonzero) so the epilogue contributes to
+# the result and a regression in the drain-barrier / SAV LDS-ref ordering would
+# fail validation.
 ########################################
 
 TestParameters:

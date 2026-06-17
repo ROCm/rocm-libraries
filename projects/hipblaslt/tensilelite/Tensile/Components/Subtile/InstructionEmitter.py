@@ -528,10 +528,8 @@ class InstructionEmitter:
             # corrupts the v_mfma_scale operand bypass and double-zeros
             # valid residual lanes (~0.5% wrong outputs at K%MIK!=0).
             #
-            # [mxfp4_restore] Gate the skip to MULTI-DU only. Single-DU MX
-            # (MXFP4) reverts to develop's behavior (emit the data K-mask)
-            # so its codegen is develop-identical; multi-DU (MXFP8) keeps
-            # the skip exactly as on the branch.
+            # Only skip the data K-mask for multi-DU MX kernels; single-DU MX
+            # paths still emit it.
             _emit_mask_multi_du = (self.config.numUnroll.get('A', 1) > 1
                                    or self.config.numUnroll.get('B', 1) > 1)
             if not (self.hasScale and _emit_mask_multi_du):

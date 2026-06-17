@@ -253,13 +253,11 @@ class StoreState:
             else:
                 self.sharedColEVgprs = None
             if kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
-                # [mxfp4_restore #2] Gate the UseSubtileImpl ScaleAlphaVec address
-                # vgpr to MULTI-DU only. Non-multi-DU reuses the Bias column
-                # address (localReferenceVgpr) for the SAV LDS read, so a
-                # separate SAV address vgpr would only trigger a redundant
-                # per-read recompute in emitLdChange. Leaving it None for
-                # non-multi-DU restores develop's hoisted addressing (byte
-                # identical); multi-DU keeps its own SAV address.
+                # Only allocate a separate ScaleAlphaVec column-address vgpr for
+                # multi-DU kernels. Non-multi-DU reuses the Bias column address
+                # (localReferenceVgpr) for the SAV LDS read, so a dedicated SAV
+                # address would only force a redundant per-read recompute in
+                # emitLdChange.
                 _du = kernel["DepthU"]
                 _isMultiDU = kernel.get("_DepthUA", _du) < _du or kernel.get("_DepthUB", _du) < _du
                 if (kernel.get("UseSubtileImpl") and self.useBias == DataDirection.READ and _isMultiDU) or \
@@ -306,9 +304,8 @@ class StoreState:
             else:
                 self.sharedColEVgprs = None
             if kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
-                # [mxfp4_restore #2] Gate the UseSubtileImpl ScaleAlphaVec address
-                # vgpr to MULTI-DU only (see note above; restores develop's
-                # hoisted SAV addressing for non-multi-DU).
+                # Only allocate a separate ScaleAlphaVec column-address vgpr for
+                # multi-DU kernels (see note above).
                 _du = kernel["DepthU"]
                 _isMultiDU = kernel.get("_DepthUA", _du) < _du or kernel.get("_DepthUB", _du) < _du
                 if (kernel.get("UseSubtileImpl") and self.useBias == DataDirection.READ and _isMultiDU) or \

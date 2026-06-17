@@ -16925,11 +16925,9 @@ class KernelWriterAssembly(KernelWriter):
           storeModule.setMemToken(MemTokenData([self.states.memTokenLdsBuffer0]))
         module.add(storeModule)
 
-    # [mxfp4_restore] GATE(non-multi-DU byte-identity): this epilogue
-    # vector-LDS drain barrier is a subtile addition that merge-base/develop
-    # does not emit. Gate it to MULTI-DU only (matching the GlobalWriteBatch
-    # bias/SAV barrier gating on this same branch) so single-DU MX (MXFP4)
-    # is develop-identical, while multi-DU (MXFP8) keeps the on-branch sync.
+    # Emit the epilogue vector-LDS drain barrier for multi-DU kernels only
+    # (matches the GlobalWriteBatch bias/SAV barrier gating). Single-DU MX
+    # kernels do not need it.
     _du = kernel["DepthU"]
     _isMultiDU = (kernel.get("_DepthUA", _du) < _du
                   or kernel.get("_DepthUB", _du) < _du)

@@ -196,11 +196,10 @@ class GlobalWriteBatchWriter:
     assert self._checkAtomicPreconditions()
     module = Module(self.moduleName)
     self._prolog(module)
-    # GATE(non-multi-DU byte-identity): the bias/SAV drain barrier ordering is a
-    # multi-DU-only hardening (prevents cross-wave LDS corruption from ds_bpermute).
-    # Multi-DU keeps the on-branch order (drain+barrier BEFORE _emitAdd subtile
-    # stores); non-multi-DU restores merge-base order (_emitAdd before the drain)
-    # so non-multi-DU codegen is byte-identical to merge-base.
+    # The bias/SAV drain barrier ordering is a multi-DU-only hardening that
+    # prevents cross-wave LDS corruption from ds_bpermute. Multi-DU emits the
+    # drain+barrier before the _emitAdd subtile stores; non-multi-DU emits
+    # _emitAdd first.
     _du = self.kernel["DepthU"]
     isMultiDU = self.kernel.get("_DepthUA", _du) < _du or self.kernel.get("_DepthUB", _du) < _du
     drainBiasSav = self.kernel.get("UseSubtileImpl") and \
@@ -580,9 +579,8 @@ class GlobalWriteBatchWriter:
 
       if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
         modGwvwScaleAlpha = Module("GwvwScaleAlpha")
-        # GATE(non-multi-DU byte-identity): the on-branch subtile ScaleAlphaVec
-        # epilogue load passes None as the LDS reference vgpr (multi-DU path); for
-        # non-multi-DU restore the merge-base localReferenceVgpr so codegen matches.
+        # For multi-DU, the subtile ScaleAlphaVec epilogue load passes None as the
+        # LDS reference vgpr; non-multi-DU uses localReferenceVgpr.
         _savDu = self.kernel["DepthU"]
         savIsMultiDU = self.kernel.get("_DepthUA", _savDu) < _savDu or self.kernel.get("_DepthUB", _savDu) < _savDu
         if savIsMultiDU:
@@ -1230,12 +1228,12 @@ class GlobalWriteBatchWriter:
           # the elementSumIdx has indicated the VGPRs from LSU.
           # Don't use the ValuC prefix here.
           enableValuC = False
-        # NOTE: gradientInput is an ABSOLUTE vgpr index (= elementSumIdx). The
+        # gradientInput is an absolute vgpr index (= elementSumIdx). The
         # ActivationFuncCall/copyData and getActivationDestDataType consumers below
-        # address it directly as an absolute vgpr, so it must stay absolute here.
-        # Only getActivationActivationComputeType() renders on the "ValuC+N"
-        # relative namespace (when enableValuC is set); the startVgprValu offset is
-        # applied locally at that call site (see below).
+        # address it directly as an absolute vgpr, so keep it absolute here. Only
+        # getActivationActivationComputeType() uses the "ValuC+N" relative namespace
+        # (when enableValuC is set); that startVgprValu offset is applied at its
+        # call site below.
       if self.kernel["ActivationFuncCall"]:
         if (activationCDataType == self.kernel["ProblemType"]["DestDataType"]) and \
           (activationCDataType != self.kernel["ProblemType"]["ComputeDataType"]) and ((self.kernel["ProblemType"]["UseScaleCD"] == False) or (self.kernel["ProblemType"]["UseScaleAlphaVec"] == False)):
@@ -1259,10 +1257,9 @@ class GlobalWriteBatchWriter:
             SaturateTypeInt8 = SaturateCastType.DO_NOTHING
             satInt8 = True
         # getActivationActivationComputeType emits on the "ValuC+N" relative
-        # register namespace when enableValuC is set, so its input index must be
-        # made relative to startVgprValu. (This is the case ee90c582898 intended
-        # to fix; here the offset is scoped to this consumer only, leaving the
-        # absolute-vgpr consumers above untouched.)
+        # register namespace when enableValuC is set, so make its input index
+        # relative to startVgprValu. The offset is scoped to this consumer only;
+        # the absolute-vgpr consumers above are left untouched.
         actComputeInput = gradientInput
         if enableValuC:
           actComputeInput = gradientInput - self.parentWriter.states.c.startVgprValu
