@@ -917,12 +917,49 @@ class DispatcherWrapperGenerator:
         output_dtype = self.tm.get_output_dtype(self.datatype)
         rel_path = kernel_path.relative_to(output_dir)
 
+        # Stream-K kernels need the Stream-K backend (StreamKHostArgs launch) and
+        # the SK key fields, so the registry can tell atomic/linear/tree apart and
+        # the right launch path compiles. All other variants use the regular backend.
+        is_streamk = config.variant == GemmVariant.STREAM_K
+        backend_inc = (
+            "generated_tile_backend_streamk.hpp"
+            if is_streamk
+            else "generated_kernel_backend.hpp"
+        )
+
+        sk_fields = ""
+        if is_streamk:
+            rs = {"atomic": "Atomic", "linear": "Linear", "tree": "Tree"}[
+                config.reduction_strategy
+            ]
+            ws = str(config.reduction_strategy != "atomic").lower()
+            sk_fields = f"""
+    key.algorithm.pad_m = {str(config.trait.pad_m).lower()};
+    key.algorithm.pad_n = {str(config.trait.pad_n).lower()};
+    key.algorithm.pad_k = {str(config.trait.pad_k).lower()};
+    key.algorithm.streamk = true;
+    key.algorithm.reduction_strategy = ::ck_tile::dispatcher::ReductionStrategy::{rs};
+    key.algorithm.workspace = {ws};"""
+
+        if is_streamk:
+            ret_stmt = (
+                "return backends::create_generated_streamk_kernel<KernelStruct, "
+                "KernelStruct::ADataType, KernelStruct::BDataType, "
+                "KernelStruct::CDataType, KernelStruct::AccDataType>"
+                f'(key, "{kernel_name}");'
+            )
+        else:
+            ret_stmt = (
+                "return std::make_shared<backends::GeneratedKernelInstance<KernelStruct>>"
+                f'(key, "{kernel_name}");'
+            )
+
         return f"""// SPDX-License-Identifier: MIT
 // Auto-generated dispatcher wrapper
 #pragma once
 
 #include "ck_tile/dispatcher.hpp"
-#include "ck_tile/dispatcher/backends/generated_kernel_backend.hpp"
+#include "ck_tile/dispatcher/backends/{backend_inc}"
 #include "{rel_path}"
 
 namespace ck_tile {{
@@ -973,11 +1010,11 @@ inline KernelInstancePtr make_{kernel_name}(const std::string& gfx_arch = "gfx94
     key.algorithm.persistent = {str(config.trait.persistent).lower()};
     key.algorithm.preshuffle = {str(config.preshuffle).lower()};
     key.algorithm.transpose_c = false;
-    key.algorithm.num_wave_groups = {config.num_wave_groups};
-    
+    key.algorithm.num_wave_groups = {config.num_wave_groups};{sk_fields}
+
     key.gfx_arch = gfx_arch;
-    
-    return std::make_shared<backends::GeneratedKernelInstance<KernelStruct>>(key, "{kernel_name}");
+
+    {ret_stmt}
 }}
 
 }}}}}}
