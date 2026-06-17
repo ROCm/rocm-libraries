@@ -16925,7 +16925,15 @@ class KernelWriterAssembly(KernelWriter):
           storeModule.setMemToken(MemTokenData([self.states.memTokenLdsBuffer0]))
         module.add(storeModule)
 
-    if kernel.get("UseSubtileImpl"):
+    # [mxfp4_restore] GATE(non-multi-DU byte-identity): this epilogue
+    # vector-LDS drain barrier is a subtile addition that merge-base/develop
+    # does not emit. Gate it to MULTI-DU only (matching the GlobalWriteBatch
+    # bias/SAV barrier gating on this same branch) so single-DU MX (MXFP4)
+    # is develop-identical, while multi-DU (MXFP8) keeps the on-branch sync.
+    _du = kernel["DepthU"]
+    _isMultiDU = (kernel.get("_DepthUA", _du) < _du
+                  or kernel.get("_DepthUB", _du) < _du)
+    if kernel.get("UseSubtileImpl") and _isMultiDU:
       module.add(SWaitCnt(dscnt=0, comment="drain epilogue vector LDS writes"))
       module.add(SBarrier(comment="sync waves after epilogue vector LDS writes"))
 

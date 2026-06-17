@@ -527,7 +527,14 @@ class InstructionEmitter:
             # gfx950, the per-lane V_AND against the cndmask-derived mask
             # corrupts the v_mfma_scale operand bypass and double-zeros
             # valid residual lanes (~0.5% wrong outputs at K%MIK!=0).
-            if not self.hasScale:
+            #
+            # [mxfp4_restore] Gate the skip to MULTI-DU only. Single-DU MX
+            # (MXFP4) reverts to develop's behavior (emit the data K-mask)
+            # so its codegen is develop-identical; multi-DU (MXFP8) keeps
+            # the skip exactly as on the branch.
+            _emit_mask_multi_du = (self.config.numUnroll.get('A', 1) > 1
+                                   or self.config.numUnroll.get('B', 1) > 1)
+            if not (self.hasScale and _emit_mask_multi_du):
                 for label, ids, tilesDict in (("A", aIds, self.vgprTilesA),
                                               ("B", bIds, self.vgprTilesB)):
                     for tid in ids:
