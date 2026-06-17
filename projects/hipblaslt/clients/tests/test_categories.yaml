@@ -1,0 +1,96 @@
+# hipBLASLt Test Categories Configuration
+#
+# Purpose: define cumulative test tiers for TheRock so hipblaslt-test can be run
+# by category via `ctest --preset` (quick / standard / comprehensive / full)
+# instead of bespoke --gtest_filter strings.
+#
+# How the patterns select tests:
+#   hipBLASLt instantiates every test under a single gtest suite ("_") and encodes
+#   the test's internal category as the LEADING token of each test's parameter name
+#   (see PrintToStringParamName / INSTANTIATE_TEST_CATEGORY in the clients tests).
+#   gtest registers value-parameterized tests as:
+#       _/<Fixture>.<Method>/<category>_<name_suffix>
+#   e.g.  _/matmul_test.matmul/pre_checkin_matmul_chunk_f32_r...
+#   so "*pre_checkin*" selects the tests whose category is pre_checkin.
+#
+#   Categories present in clients/tests/data today: smoke, quick, pre_checkin,
+#   nightly, HMM, plus known_bug (assigned dynamically, including per-GPU via
+#   known_bug_platforms). There are currently no multi_gpu tests.
+#
+# These tiers are TheRock ctest presets; they are NOT a port of hipBLASLt's
+# rocJenkins job filters (those are wired differently).
+#
+# Note: patterns are loose substrings. A scan of all current test defs shows no
+#       cross-category name collisions, so these select exactly their category
+#       today. If a future test's name embeds another category's keyword, the
+#       patterns can be tightened to the "/<category>_" boundary (e.g.
+#       "*/pre_checkin_*") after confirming gtest names with
+#       `hipblaslt-test --gtest_list_tests`.
+
+test_categories:
+  quick:
+    description: "Smoke surface for fast PR gating (target: ~5 min)"
+    test_patterns:
+      - "*smoke*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "quick"
+      - "smoke"
+
+  standard:
+    description: "smoke + quick + pre_checkin (target: ~30 min)"
+    test_patterns:
+      - "*smoke*"
+      - "*quick*"
+      - "*pre_checkin*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "standard + nightly (target: ~2 h)"
+    test_patterns:
+      - "*smoke*"
+      - "*quick*"
+      - "*pre_checkin*"
+      - "*nightly*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "comprehensive + HMM; requires a managed-memory (HMM) capable host"
+    test_patterns:
+      - "*smoke*"
+      - "*quick*"
+      - "*pre_checkin*"
+      - "*nightly*"
+      - "*HMM*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "full"
+      - "weekly"
+      - "hmm"
+
+# GPU-specific exclusions can be added here when needed (see shared/ctest/README.md).
+# exclude_gpu:
+#   exclude_gpu_gfxXXXX:
+#     test_patterns: [...]
+#     labels: ["quick", "standard", "comprehensive", "full", "ex_gpu_gfxXXXX"]
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600          # smoke can exceed 300s on some hosts
+    standard: 1800      # 30 min
+    comprehensive: 7200 # 2 h
+    full: 86400         # 24 h

@@ -755,6 +755,13 @@ namespace TensileLite
         // in General Batched GEMM
         if(sizeMapping.streamK != 0)
         {
+			if(gsu > 1)
+			{
+				std::cerr << "Warning: Stream-K Data Parallel does not support GSU > 1, "
+						  << "setting GSU to 1." << std::endl;
+				gsu = 1;
+			}
+
             // Dynamic Stream-K uses a different kernel argument layout from Stream-K 1/2/3.
             if(sizeMapping.streamK == 4)
             {
@@ -817,13 +824,6 @@ namespace TensileLite
                 }
                 else if(sizeMapping.streamK >= 2) // Two-tile SK
                 {
-                    if(sk.reduction == origami::reduction_t::parallel)
-                    {
-                        std::cerr << "Warning: Stream-K Data Parallel does not support GSU > 1, "
-                                  << "setting GSU to 1." << std::endl;
-                        gsu = 1;
-                    }
-
                     if(sk.reduction == origami::reduction_t::parallel)
                     {
                         uint32_t skSplit

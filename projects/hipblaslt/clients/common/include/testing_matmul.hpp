@@ -5222,15 +5222,25 @@ void testing_matmul_with_bias(const Arguments& arg,
                 {
                     // Note: for MX types, pass the reference float instead so there is
                     //       no need to convert them to float in cblas_gemm
+                    
+                    // Added this logic to mimic the rocblas test quick_gemm_batched_bad_arg_f32_r_bad_arg_F
+                    // This rocblas test passes alpha, A and B as 0 but beta as non-zero with valid C and D
+                    // To mimic this behavior if --sizek is passed as 0 in hipblaslt-bench for --batch_mode 1, size_dA and size_dB
+                    // will be set to 0 since A is MxK and B is KxN. In this case, we pass the pointer array A and B for 
+                    // General batched GEMM as nullptr and introduced an explicit check for AddressA and AddressB != 0
+                    // in KernelWriterAssembly.py since the dereference of AddressA and AddressB for 
+                    // General Batched GEMM happens before the alphaNonZero check.                    
+                    void *ptrA = (size_dA[0]) ? hA[batchIdx].as<char>() : nullptr;
+                    void *ptrB = (size_dB[0]) ? hB[batchIdx].as<char>() : nullptr;                    
                     cblas_gemm(transA,
                                transB,
                                M[gemmIdx],
                                N[gemmIdx],
                                K[gemmIdx],
                                alpha,
-                               hA[batchIdx].as<char>(),
+                               ptrA,
                                lda[gemmIdx],
-                               hB[batchIdx].as<char>(),
+                               ptrB,
                                ldb[gemmIdx],
                                betaTemp,
                                hD_gold[batchIdx].as<char>(),
@@ -5390,12 +5400,21 @@ void testing_matmul_with_bias(const Arguments& arg,
                 else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
                 {
                     CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+                    // Added this logic to mimic the rocblas test quick_gemm_batched_bad_arg_f32_r_bad_arg_F
+                    // This rocblas test passes alpha, A and B as 0 but beta as non-zero with valid C and D
+                    // To mimic this behavior if --sizek is passed as 0 in hipblaslt-bench for --batch_mode 1, size_dA and size_dB
+                    // will be set to 0 since A is MxK and B is KxN. In this case, we pass the pointer array A and B for 
+                    // General batched GEMM as nullptr and introduced an explicit check for AddressA and AddressB != 0
+                    // in KernelWriterAssembly.py since the dereference of AddressA and AddressB for 
+                    // General Batched GEMM happens before the alphaNonZero check.
+                    void *ptrA = (size_dA[0]) ? dda[0] : nullptr;
+                    void *ptrB = (size_dB[0]) ? ddb[0] : nullptr;                    
                     EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
                                                           matmul[0][0],
                                                           alpha_in[0],
-                                                          dda[0],
+                                                          ptrA,
                                                           matA[0],
-                                                          ddb[0],
+                                                          ptrB,
                                                           matB[0],
                                                           &(h_beta[0]),
                                                           ddc[0],
@@ -5672,13 +5691,21 @@ void testing_matmul_with_bias(const Arguments& arg,
                                               ? (dScaleAlphaVec[0].as<char>())
                                                    + (i % block_count) * size_scaleAlphaVec[0]
                                               : alpha_in[0];
-
+                        // Added this logic to mimic the rocblas test quick_gemm_batched_bad_arg_f32_r_bad_arg_F
+                        // This rocblas test passes alpha, A and B as 0 but beta as non-zero with valid C and D
+                        // To mimic this behavior if --sizek is passed as 0 in hipblaslt-bench for --batch_mode 1, size_dA and size_dB
+                        // will be set to 0 since A is MxK and B is KxN. In this case, we pass the pointer array A and B for 
+                        // General batched GEMM as nullptr and introduced an explicit check for AddressA and AddressB != 0
+                        // in KernelWriterAssembly.py since the dereference of AddressA and AddressB for 
+                        // General Batched GEMM happens before the alphaNonZero check.                                              
+                        void *ptrA = (size_dA[0]) ? dda[i % block_count] : nullptr;
+                        void *ptrB = (size_dB[0]) ? ddb[i % block_count] : nullptr;
                         EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
                                                               ptr_matmul,
                                                               ptr_alpha,
-                                                              dda[i % block_count],
+                                                              ptrA,
                                                               matA[0],
-                                                              ddb[i % block_count],
+                                                              ptrB,
                                                               matB[0],
                                                               &(h_beta[0]),
                                                               ddc[i % block_count],
@@ -5723,12 +5750,21 @@ void testing_matmul_with_bias(const Arguments& arg,
                                               ? (dScaleAlphaVec[0].as<char>())
                                                    + (i % block_count) * size_scaleAlphaVec[0]
                                               : alpha_in[0];
+                        // Added this logic to mimic the rocblas test quick_gemm_batched_bad_arg_f32_r_bad_arg_F
+                        // This rocblas test passes alpha, A and B as 0 but beta as non-zero with valid C and D
+                        // To mimic this behavior if --sizek is passed as 0 in hipblaslt-bench for --batch_mode 1, size_dA and size_dB
+                        // will be set to 0 since A is MxK and B is KxN. In this case, we pass the pointer array A and B for 
+                        // General batched GEMM as nullptr and introduced an explicit check for AddressA and AddressB != 0
+                        // in KernelWriterAssembly.py since the dereference of AddressA and AddressB for 
+                        // General Batched GEMM happens before the alphaNonZero check.                                              
+                        void *ptrA = (size_dA[0]) ? dda[i % block_count] : nullptr;
+                        void *ptrB = (size_dB[0]) ? ddb[i % block_count] : nullptr;                                              
                         EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
                                                               ptr_matmul,
                                                               ptr_alpha,
-                                                              dda[i % block_count],
+                                                              ptrA,
                                                               matA[0],
-                                                              ddb[i % block_count],
+                                                              ptrB,
                                                               matB[0],
                                                               &(h_beta[0]),
                                                               ddc[i % block_count],
