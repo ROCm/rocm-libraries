@@ -3,8 +3,11 @@
 
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <ostream>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 
@@ -15,6 +18,7 @@
 #include <hipdnn_test_sdk/utilities/BundleMetadata.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -127,9 +131,74 @@ private:
 
             auto validator
                 = hipdnn_test_sdk::utilities::createAllCloseValidator(dataType, atol, rtol);
-            ASSERT_TRUE(validator->allClose(expectedTensor, actualTensor))
-                << "Mismatch in output tensor uid=" << uid << " for bundle " << _bundlePath;
+            EXPECT_TRUE(validator->allClose(expectedTensor, actualTensor)) << buildFailureReport(
+                uid, *attrs, dataType, expectedTensor, actualTensor, atol, rtol);
         }
+    }
+
+    // Rich, developer-facing failure report (RFC 0011 §4.3 "What a failure looks
+    // like"): bundle path, tensor UID/name, shape + dtype, max abs/rel error vs
+    // tolerance, worst-element index with expected/actual, and mismatch count.
+    std::string
+        buildFailureReport(int64_t uid,
+                           const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
+                           hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                           hipdnn_data_sdk::utilities::ITensor& expected,
+                           hipdnn_data_sdk::utilities::ITensor& actual,
+                           float atol,
+                           float rtol) const
+    {
+        const auto* name = attrs.name();
+        const std::string tensorLabel
+            = (name != nullptr && !name->empty()) ? name->str() : ("uid=" + std::to_string(uid));
+
+        std::ostringstream os;
+        os << "\nGolden comparison FAILED\n"
+           << "  Bundle: " << _bundlePath << "\n"
+           << "  Tensor: " << tensorLabel << " (UID " << uid << ", output)\n"
+           << "  Shape:  " << hipdnn_test_sdk::utilities::StreamVec(expected.dims()) << "  "
+           << dataTypeName(dataType) << "\n"
+           << "  Tolerance: atol=" << atol << " rtol=" << rtol << "\n";
+        appendTensorDiff(os, dataType, tensorLabel, expected, actual, atol, rtol);
+        return os.str();
+    }
+
+    static void appendTensorDiff(std::ostream& os,
+                                 hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                                 const std::string& tensorLabel,
+                                 hipdnn_data_sdk::utilities::ITensor& expected,
+                                 hipdnn_data_sdk::utilities::ITensor& actual,
+                                 float atol,
+                                 float rtol)
+    {
+        using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
+        using hipdnn_data_sdk::types::bfloat16;
+        using hipdnn_data_sdk::types::half;
+        namespace util = hipdnn_test_sdk::utilities;
+
+        switch(dataType)
+        {
+        case DT::FLOAT:
+            util::printTensorDiff<float>(os, tensorLabel, expected, actual, atol, rtol);
+            break;
+        case DT::HALF:
+            util::printTensorDiff<half>(os, tensorLabel, expected, actual, atol, rtol);
+            break;
+        case DT::BFLOAT16:
+            util::printTensorDiff<bfloat16>(os, tensorLabel, expected, actual, atol, rtol);
+            break;
+        case DT::DOUBLE:
+            util::printTensorDiff<double>(os, tensorLabel, expected, actual, atol, rtol);
+            break;
+        default:
+            os << "  (no element-wise diff available for this data type)\n";
+            break;
+        }
+    }
+
+    static std::string dataTypeName(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
+    {
+        return hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType);
     }
 
     static std::unordered_map<int64_t, void*>

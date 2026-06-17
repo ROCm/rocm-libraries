@@ -12,8 +12,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-
 namespace hipdnn_integration_tests::golden
 {
 
@@ -96,174 +94,6 @@ inline std::string sanitizeForGtest(const std::string& input)
     return result;
 }
 
-inline std::string dataTypeToShortString(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
-{
-    using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
-    switch(dataType)
-    {
-    case DT::FLOAT:
-        return "fp32";
-    case DT::HALF:
-        return "fp16";
-    case DT::BFLOAT16:
-        return "bfp16";
-    case DT::INT8:
-        return "int8";
-    case DT::FP8_E4M3:
-        return "fp8e4m3";
-    case DT::FP8_E5M2:
-        return "fp8e5m2";
-    case DT::INT32:
-        return "int32";
-    case DT::INT64:
-        return "int64";
-    case DT::DOUBLE:
-        return "fp64";
-    case DT::BOOLEAN:
-        return "bool";
-    default:
-        return "unknown";
-    }
-}
-
-struct OpMeta
-{
-    const char* name;
-    int64_t (*primaryInputUid)(const hipdnn_flatbuffers_sdk::data_objects::Node*);
-};
-
-// -Wswitch-enum enforces that opMeta() handles every NodeAttributes enumerator;
-// -Wswitch-default is suppressed here because a default: would defeat that check.
-#pragma clang diagnostic push
-#pragma clang diagnostic error "-Wswitch-enum"
-#pragma clang diagnostic ignored "-Wswitch-default"
-inline OpMeta opMeta(const hipdnn_flatbuffers_sdk::data_objects::Node* node)
-{
-    using NA = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
-    using Node = hipdnn_flatbuffers_sdk::data_objects::Node;
-    switch(node->attributes_type())
-    {
-    case NA::ConvolutionFwdAttributes:
-        return {"ConvFprop", [](const Node* n) {
-                    return n->attributes_as_ConvolutionFwdAttributes()->x_tensor_uid();
-                }};
-    case NA::ConvolutionBwdAttributes:
-        return {"ConvDgrad", [](const Node* n) {
-                    return n->attributes_as_ConvolutionBwdAttributes()->dy_tensor_uid();
-                }};
-    case NA::ConvolutionWrwAttributes:
-        return {"ConvWgrad", [](const Node* n) {
-                    return n->attributes_as_ConvolutionWrwAttributes()->x_tensor_uid();
-                }};
-    case NA::BatchnormInferenceAttributes:
-        return {"BatchnormInference", [](const Node* n) {
-                    return n->attributes_as_BatchnormInferenceAttributes()->x_tensor_uid();
-                }};
-    case NA::BatchnormInferenceAttributesVarianceExt:
-        return {
-            "BatchnormInferenceVarianceExt", [](const Node* n) {
-                return n->attributes_as_BatchnormInferenceAttributesVarianceExt()->x_tensor_uid();
-            }};
-    case NA::BatchnormAttributes:
-        return {"Batchnorm", [](const Node* n) {
-                    return n->attributes_as_BatchnormAttributes()->x_tensor_uid();
-                }};
-    case NA::BatchnormBackwardAttributes:
-        return {"BatchnormBackward", [](const Node* n) {
-                    return n->attributes_as_BatchnormBackwardAttributes()->x_tensor_uid();
-                }};
-    case NA::PointwiseAttributes:
-        return {"Pointwise", [](const Node*) -> int64_t { return -1; }};
-    case NA::MatmulAttributes:
-        return {"Matmul",
-                [](const Node* n) { return n->attributes_as_MatmulAttributes()->a_tensor_uid(); }};
-    case NA::RMSNormAttributes:
-        return {"RmsNorm",
-                [](const Node* n) { return n->attributes_as_RMSNormAttributes()->x_tensor_uid(); }};
-    case NA::RMSNormBackwardAttributes:
-        return {"RmsNormBwd", [](const Node* n) {
-                    return n->attributes_as_RMSNormBackwardAttributes()->x_tensor_uid();
-                }};
-    case NA::LayernormAttributes:
-        return {"LayerNorm", [](const Node* n) {
-                    return n->attributes_as_LayernormAttributes()->x_tensor_uid();
-                }};
-    case NA::LayernormBackwardAttributes:
-        return {"LayerNormBwd", [](const Node* n) {
-                    return n->attributes_as_LayernormBackwardAttributes()->x_tensor_uid();
-                }};
-    case NA::SdpaAttributes:
-        return {"SdpaFwd",
-                [](const Node* n) { return n->attributes_as_SdpaAttributes()->q_tensor_uid(); }};
-    case NA::SdpaBackwardAttributes:
-        return {"SdpaBwd", [](const Node* n) {
-                    return n->attributes_as_SdpaBackwardAttributes()->q_tensor_uid();
-                }};
-    case NA::BlockScaleQuantizeAttributes:
-        return {"BlockScaleQuantize", [](const Node* n) {
-                    return n->attributes_as_BlockScaleQuantizeAttributes()->x_tensor_uid();
-                }};
-    case NA::BlockScaleDequantizeAttributes:
-        return {"BlockScaleDequantize", [](const Node* n) {
-                    return n->attributes_as_BlockScaleDequantizeAttributes()->x_tensor_uid();
-                }};
-    case NA::ReductionAttributes:
-        return {"Reduction", [](const Node* n) {
-                    return n->attributes_as_ReductionAttributes()->in_tensor_uid();
-                }};
-    case NA::ResampleFwdAttributes:
-        return {"ResampleFwd", [](const Node* n) {
-                    return n->attributes_as_ResampleFwdAttributes()->x_tensor_uid();
-                }};
-    case NA::CustomOpAttributes:
-        return {"CustomOp", [](const Node* n) -> int64_t {
-                    const auto* uids = n->attributes_as_CustomOpAttributes()->input_tensor_uids();
-                    if(uids != nullptr && !uids->empty())
-                    {
-                        return uids->Get(0);
-                    }
-                    return -1;
-                }};
-    case NA::NONE:
-        throw std::runtime_error(std::string{"opMeta(): unhandled NodeAttributes value: "}
-                                 + hipdnn_flatbuffers_sdk::data_objects::EnumNameNodeAttributes(
-                                     node->attributes_type()));
-    }
-    throw std::runtime_error(
-        std::string{"opMeta(): unhandled NodeAttributes value: "}
-        + hipdnn_flatbuffers_sdk::data_objects::EnumNameNodeAttributes(node->attributes_type()));
-}
-#pragma clang diagnostic pop
-
-inline std::string
-    deriveOperationName(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper)
-{
-    std::string opName;
-    auto nodeCount = wrapper.nodeCount();
-    for(uint32_t i = 0; i < nodeCount; ++i)
-    {
-        auto& node = wrapper.getNode(i);
-        auto name = opMeta(&node).name;
-        if(!opName.empty())
-        {
-            opName += "_";
-        }
-        opName += name;
-    }
-    return opName.empty() ? "UnknownOp" : opName;
-}
-
-inline bool isPointwiseOp(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType)
-{
-    return attrType == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes;
-}
-
-inline bool isSdpaOp(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType)
-{
-    using NA = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
-    return attrType == NA::SdpaAttributes || attrType == NA::SdpaBackwardAttributes;
-}
-
 struct DerivedTestName
 {
     std::string suiteName;
@@ -295,13 +125,6 @@ inline DerivedTestName deriveTestName(const std::filesystem::path& jsonPath,
     return {suite, test};
 }
 
-// Recursively discovers golden bundles under each tier directory.
-//
-// Per ALMIOPEN-1968, structural problems are hard errors (throw), not warnings:
-//   - a stray top-level directory that is not one of the four tiers
-//   - a tier directory that is missing or empty
-//   - a bundle placed at the wrong directory depth
-//   - a generated test-name collision
 // Scans a single tier directory for bundle .json files: a recursive scan with
 // the golden-ref meta-file filter layered on top. This is the "recursive .json
 // scan per tier" the ticket (ALMIOPEN-1968) describes. It deliberately does NOT
@@ -322,6 +145,14 @@ inline std::vector<std::filesystem::path> scanTier(const std::filesystem::path& 
     return jsonPaths;
 }
 
+// Recursively discovers golden bundles across every tier directory.
+//
+// Per ALMIOPEN-1968, structural problems are hard errors (throw), not warnings:
+//   - a stray top-level directory that is not one of the four tiers
+//   - a tier directory that is missing or empty
+//   - a bundle placed at the wrong directory depth
+//   - a generated test-name collision
+//
 // The caller registers tests only on success, so any throw aborts startup and
 // surfaces the authoring mistake loudly rather than silently dropping coverage.
 inline std::vector<DiscoveredBundle>

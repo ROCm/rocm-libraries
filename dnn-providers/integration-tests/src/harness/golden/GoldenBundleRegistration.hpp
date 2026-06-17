@@ -30,11 +30,11 @@ namespace hipdnn_integration_tests::golden
 namespace detail
 {
 
-inline void
-    registerBundlesForMode(const std::vector<DiscoveredBundle>& bundles,
-                           const std::string& runnerSuffix,
-                           IntegrationGraphGoldenReferenceVerificationHarness::ExecuteFunc executor,
-                           bool requiresDevice)
+inline void registerBundlesForMode(
+    const std::vector<DiscoveredBundle>& bundles,
+    const std::string& runnerSuffix,
+    const IntegrationGraphGoldenReferenceVerificationHarness::ExecuteFunc& executor,
+    bool requiresDevice)
 {
     for(const auto& bundle : bundles)
     {
