@@ -273,7 +273,7 @@ namespace TensileLite
             // A temporarily wrapper
             std::shared_ptr<ProblemInputs> prepareGPUInputs(ContractionProblem const* problem)
             {
-                if(m_pendingResets > 0)
+                if(m_availableSlots > 0)
                 {
                     // Advance to the next pre-filled buffer in the ring.
                     // Caller must waitCopyDone() before the buffer is
@@ -299,11 +299,11 @@ namespace TensileLite
             // (e.g., when switching to a new problem whose data differs).
             void cancelAsyncReset()
             {
-                if(m_pendingResets > 0 || m_activeNeedsSync)
+                if(m_availableSlots > 0 || m_computeNeedsCopyBarrier)
                 {
                     syncCopyStream();
-                    m_pendingResets    = 0;
-                    m_activeNeedsSync = false;
+                    m_availableSlots    = 0;
+                    m_computeNeedsCopyBarrier = false;
                 }
                 // Resync working state to slot 0 BEFORE resetting m_activeIdx
                 // (otherwise the guard is dead code).
@@ -328,7 +328,7 @@ namespace TensileLite
                     m_gpuBatchPtrsRing[i].clear();
                     m_cachedInputsRing[i].reset();
                 }
-                m_ringBufferWarm = false;
+                m_altSlotsReady = false;
             }
 
             void syncCopyStream()
@@ -341,11 +341,11 @@ namespace TensileLite
             // the active buffer slot to finish, without blocking the CPU.
             void waitCopyDone(hipStream_t computeStream)
             {
-                if(!m_activeNeedsSync)
+                if(!m_computeNeedsCopyBarrier)
                     return;
                 HIP_CHECK_EXC(hipStreamWaitEvent(
                     computeStream, m_copyDoneEvents[m_activeIdx], 0));
-                m_activeNeedsSync = false;
+                m_computeNeedsCopyBarrier = false;
             }
 
             // Kick off async reset of the next free buffer slot in the ring
@@ -355,22 +355,22 @@ namespace TensileLite
             {
                 if(!m_hasAltBuffers || !m_copyStream)
                     return;
-                if(m_pendingResets >= m_numActiveBuffers - 1)
+                if(m_availableSlots >= m_numActiveBuffers - 1)
                     return; // all non-active slots already have pending DMA
 
                 size_t targetIdx
-                    = (m_activeIdx + m_pendingResets + 1) % m_numActiveBuffers;
+                    = (m_activeIdx + m_availableSlots + 1) % m_numActiveBuffers;
 
                 // When the ring buffer is warm, all slots already have correct
                 // data from initializeAltBufferSets.  Input tensors are never
                 // modified by kernels, and output D is completely overwritten
                 // (D = alpha*A*B + beta*C), so no reset is needed.  Just
                 // advance the slot tracking and record an event.
-                if(m_ringBufferWarm)
+                if(m_altSlotsReady)
                 {
                     HIP_CHECK_EXC(
                         hipEventRecord(m_copyDoneEvents[targetIdx], m_copyStream));
-                    m_pendingResets++;
+                    m_availableSlots++;
                     return;
                 }
 
@@ -389,7 +389,7 @@ namespace TensileLite
 
                 HIP_CHECK_EXC(
                     hipEventRecord(m_copyDoneEvents[targetIdx], m_copyStream));
-                m_pendingResets++;
+                m_availableSlots++;
             }
 
             std::shared_ptr<ProblemInputs>
@@ -1090,12 +1090,12 @@ namespace TensileLite
             void allocNewGPUInputs();
 
             void copyValidToGPUBuffer(ContractionProblemGemm const& problem,
-                                      hipStream_t                   asyncStream = nullptr);
+                                      hipStream_t                   callerStream = nullptr);
 
             void copySwizzledToGPUBuffer(ContractionProblemGemm const& problem);
 
             void initializeGPUBatchedInputs(ContractionProblemGemm const& problem,
-                                            hipStream_t                   asyncStream = nullptr);
+                                            hipStream_t                   targetStream = nullptr);
 
             void initializeCPUInputs(ContractionProblemGroupedGemm const& problem);
             void initializeCPUInputs(ContractionProblemGemm const& problem);
@@ -1110,7 +1110,7 @@ namespace TensileLite
                             std::vector<std::vector<size_t>>& offsets,
                             ContractionProblemGemm const&     problem,
                             hipMemcpyKind                     kind,
-                            hipStream_t                       asyncStream = nullptr);
+                            hipStream_t                       targetStream = nullptr);
 
             void resetOutput(std::vector<void*>&               ptrs,
                              std::vector<void**>&              batchPtrs,
@@ -1118,7 +1118,7 @@ namespace TensileLite
                              std::vector<std::vector<size_t>>& offsets,
                              ContractionProblemGemm const&     problem,
                              hipMemcpyKind                     kind,
-                             hipStream_t                       asyncStream = nullptr);
+                             hipStream_t                       targetStream = nullptr);
 
             template <typename T>
             void setContractionInputs(std::vector<T*>&                      ptrs,
@@ -1150,7 +1150,7 @@ namespace TensileLite
 
             void fillSlot(size_t                       slotIdx,
                           ContractionProblemGemm const& problem,
-                          hipStream_t                   asyncStream);
+                          hipStream_t                   targetStream);
 
             void initializeAltBufferSets(ContractionProblemGemm const& problem);
 
@@ -1167,13 +1167,13 @@ namespace TensileLite
                 m_gpuPtrs        = m_gpuPtrsRing[m_activeIdx];
                 m_gpuBatchPtrs   = m_gpuBatchPtrsRing[m_activeIdx];
                 m_cachedGPUInputs = m_cachedInputsRing[m_activeIdx];
-                m_pendingResets--;
-                m_activeNeedsSync = true;
+                m_availableSlots--;
+                m_computeNeedsCopyBarrier = true;
             }
 
             std::shared_ptr<ProblemInputs>
                 prepareGPUInputsInternal(ContractionProblemGemm const& problem,
-                                         hipStream_t                   asyncStream);
+                                         hipStream_t                   targetStream);
 
             std::vector<VectorDataInitProperties> m_vdata;
             std::vector<void*>                    m_cpuPtrs;
@@ -1192,8 +1192,8 @@ namespace TensileLite
             bool   m_hasAltBuffers    = false;
             size_t m_numActiveBuffers = 2;  // 2 for double-buffer, 3 for triple
             size_t m_activeIdx        = 0;
-            size_t m_pendingResets    = 0;
-            bool   m_activeNeedsSync  = false; // active buffer's DMA not yet synced
+            size_t m_availableSlots    = 0;
+            bool   m_computeNeedsCopyBarrier  = false; // active buffer's DMA not yet synced
 
             std::shared_ptr<ProblemInputs> m_cachedGPUInputs;
 
@@ -1230,7 +1230,7 @@ namespace TensileLite
             /// current problem.  Cleared by cancelAsyncReset on problem change.
             /// When set, beginAsyncReset can skip the full re-copy and use the
             /// fast path (resetOutput only) even with problem-dependent data.
-            bool m_ringBufferWarm = false;
+            bool m_altSlotsReady = false;
 
             /// If set "::NaN", we will initialize all out-of-bounds inputs to NaN, and
             /// all out-of-bounds outputs to a known value. This allows us to
