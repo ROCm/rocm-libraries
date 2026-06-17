@@ -176,10 +176,10 @@ TEST_F(TestHipFlash2Engine, MaxWorkspaceSizeIsZero)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
-    // Flash-Attention 2 uses only registers + LDS, no global workspace
-    // We need a valid engine config to call getMaxWorkspaceSize
-    // Use a stub since we just want to verify the zero-workspace property
-    EXPECT_EQ(_engine->id(), HipFlash2Engine::staticId());
+    // Flash-Attention 2 uses only registers + LDS — zero global workspace.
+    // Use a stub engine config since we just want to verify the zero-workspace property.
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfig;
+    EXPECT_EQ(_engine->getMaxWorkspaceSize(_handle, graph, engineConfig), 0u);
 }
 
 } // namespace
