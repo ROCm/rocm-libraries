@@ -498,19 +498,21 @@ void testing_cholqr(Arguments& argus)
 
     // get arguments
     rocblas_local_handle handle;
+    char cholshift_char = argus.get<char>("cholshift");
+    rocblas_int cholnum = argus.get<rocblas_int>("cholnum");
     I m = argus.get<I>("m");
     I n = argus.get<I>("n", m);
     I mn = std::min(m, n);
     I lda = argus.get<I>("lda", m);
     I ldw = argus.get<I>("ldw", mn);
+    S sigma = S(argus.get<double>("sigma", 0));
     rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
     rocblas_stride stW = argus.get<rocblas_stride>("strideW", ldw * mn);
-    char cholshift_char = argus.get<char>("cholshift");
+
     rocsolver_cholqr_shift cholshift = char2rocsolver_cholqr_shift(cholshift_char);
-    rocblas_int cholnum = argus.get<rocblas_int>("cholnum");
     I bc = argus.batch_count;
-    S sigma = S(argus.get<double>("sigma", 0));
     rocblas_int hot_calls = argus.iters;
+
     rocblas_stride stARes = (argus.unit_check || argus.norm_check) ? stA : 0;
     rocblas_stride stWRes = (argus.unit_check || argus.norm_check) ? stW : 0;
 
