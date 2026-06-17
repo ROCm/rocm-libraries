@@ -253,7 +253,16 @@ class StoreState:
             else:
                 self.sharedColEVgprs = None
             if kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
-                if (kernel.get("UseSubtileImpl") and self.useBias == DataDirection.READ) or \
+                # [mxfp4_restore #2] Gate the UseSubtileImpl ScaleAlphaVec address
+                # vgpr to MULTI-DU only. Non-multi-DU reuses the Bias column
+                # address (localReferenceVgpr) for the SAV LDS read, so a
+                # separate SAV address vgpr would only trigger a redundant
+                # per-read recompute in emitLdChange. Leaving it None for
+                # non-multi-DU restores develop's hoisted addressing (byte
+                # identical); multi-DU keeps its own SAV address.
+                _du = kernel["DepthU"]
+                _isMultiDU = kernel.get("_DepthUA", _du) < _du or kernel.get("_DepthUB", _du) < _du
+                if (kernel.get("UseSubtileImpl") and self.useBias == DataDirection.READ and _isMultiDU) or \
                    (self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha"):
                     self.sharedColScaleAlphaVecVgprs = kernelWriter.vgprPool.checkOut(self.numAddrVgpr, "sharedColScaleAlphaVecVgprs for packed elements")
                 else:
@@ -297,7 +306,12 @@ class StoreState:
             else:
                 self.sharedColEVgprs = None
             if kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
-                if (kernel.get("UseSubtileImpl") and self.useBias == DataDirection.READ) or \
+                # [mxfp4_restore #2] Gate the UseSubtileImpl ScaleAlphaVec address
+                # vgpr to MULTI-DU only (see note above; restores develop's
+                # hoisted SAV addressing for non-multi-DU).
+                _du = kernel["DepthU"]
+                _isMultiDU = kernel.get("_DepthUA", _du) < _du or kernel.get("_DepthUB", _du) < _du
+                if (kernel.get("UseSubtileImpl") and self.useBias == DataDirection.READ and _isMultiDU) or \
                    (self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha"):
                     self.sharedColScaleAlphaVecVgprs = kernelWriter.vgprPool.checkOut(1, "sharedColScaleAlphaVecVgprs for packed elements")
                 else:
