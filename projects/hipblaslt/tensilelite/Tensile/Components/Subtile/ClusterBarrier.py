@@ -11,7 +11,7 @@ explicitly to keep cluster logic in Subtile/ rather than KernelWriterAssembly.
 from __future__ import annotations
 
 from rocisa.code import Label, Module, TextBlock
-from rocisa.instruction import SBarrier, SCBranchSCC0
+from rocisa.instruction import SBarrier, SBarrierSignalIsFirst, SCBranchSCC0
 
 
 def subtileClusterBarrier(writer, kernel, label="") -> Module:
@@ -20,7 +20,7 @@ def subtileClusterBarrier(writer, kernel, label="") -> Module:
     # Workgroup barrier via isfirst: the first wave to arrive gets SCC=1 and so
     # is the single wave that signals the cluster barrier (one arrival per WG).
     skipPreSignal = Label(writer.labels.getUniqueNamePrefix("skipCBPreSignal"), "")
-    mod.add(TextBlock("s_barrier_signal_isfirst -1\n"))
+    mod.add(SBarrierSignalIsFirst(False, "workgroup barrier signal (isfirst)"))
     mod.add(SBarrier(True, True, False, "workgroup barrier wait"))
     mod.add(SCBranchSCC0(skipPreSignal.getLabelName(), "only the first-arriving wave signals the cluster"))
     mod.add(SBarrier(True, False, True, "cluster_barrier signal"))
