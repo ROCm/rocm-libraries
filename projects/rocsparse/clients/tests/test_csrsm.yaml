@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -149,7 +149,7 @@ Tests:
 - name: csrsm
   category: pre_checkin
   function: csrsm
-  precision: *single_double_precisions
+  precision: *single_double_precisions_complex_real
   M_N: *M_N_range_checkin
   K: [0, 1, 8]
   alpha_alphai: *alpha_range_checkin
@@ -228,7 +228,7 @@ Tests:
   spol: [rocsparse_solve_policy_auto]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mc2depi, 
+  filename: [mc2depi,
              qc2534]
 
 - name: csrsm_graph_test

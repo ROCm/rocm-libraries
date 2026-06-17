@@ -101,7 +101,7 @@ class BenchmarkMetadata:
         warmup_iters: Number of warmup iterations.
         benchmark_iters: Number of benchmark iterations.
         engine_id: Engine ID used for execution.
-        gpu_backend: GPU timer backend used ("torch" or "").
+        timing_backend: GPU timer backend used ("hip" or "").
         execution_backend: Execution backend used ("hipdnn", "pytorch", or "").
         hostname: Machine hostname where benchmark was run.
     """
@@ -112,7 +112,7 @@ class BenchmarkMetadata:
     warmup_iters: int = 0
     benchmark_iters: int = 0
     engine_id: int = 0
-    gpu_backend: str = ""
+    timing_backend: str = ""
     execution_backend: str = ""
     hostname: str = field(default_factory=_get_hostname)
 
@@ -140,10 +140,10 @@ class BenchmarkResult:
         return self.kernel_timings is not None and len(self.kernel_timings) > 0
 
     @property
-    def gpu_backend(self) -> str:
-        """Return GPU backend used for kernel timing."""
+    def timing_backend(self) -> str:
+        """Return backend used for kernel timing."""
         if self.metadata:
-            return self.metadata.gpu_backend
+            return self.metadata.timing_backend
         return ""
 
     def to_dict(self) -> Dict[str, Any]:
@@ -191,7 +191,11 @@ class BenchmarkResult:
         """
         metadata = None
         if "metadata" in data and data["metadata"]:
-            metadata = BenchmarkMetadata(**data["metadata"])
+            metadata_dict = dict(data["metadata"])
+            legacy_gpu_backend = metadata_dict.pop("gpu_backend", None)
+            if "timing_backend" not in metadata_dict and legacy_gpu_backend is not None:
+                metadata_dict["timing_backend"] = legacy_gpu_backend
+            metadata = BenchmarkMetadata(**metadata_dict)
         return cls(
             e2e_timings=data["e2e_timings"],
             kernel_timings=data.get("kernel_timings"),

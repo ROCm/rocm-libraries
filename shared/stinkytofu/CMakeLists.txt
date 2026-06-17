@@ -203,6 +203,19 @@ endif()
 add_subdirectory(src)
 
 ##===----------------------------------------------------------------------===##
+# Example plugins
+##===----------------------------------------------------------------------===##
+# Single switch for everything example-related: the example plugins themselves and
+# the unit tests that exercise them. Default OFF so integrated/ROCm builds never
+# build or package examples; standalone builds opt in via tasks.py. Added before
+# tests/, which gate their plugin coverage on this same flag. New example tests
+# should hook in under STINKYTOFU_BUILD_EXAMPLES too.
+option(STINKYTOFU_BUILD_EXAMPLES "Build StinkyTofu example plugins (and their tests)" OFF)
+if(STINKYTOFU_BUILD_EXAMPLES)
+    add_subdirectory(examples/plugins)
+endif()
+
+##===----------------------------------------------------------------------===##
 # Unit tests
 ##===----------------------------------------------------------------------===##
 # Option to build unit tests

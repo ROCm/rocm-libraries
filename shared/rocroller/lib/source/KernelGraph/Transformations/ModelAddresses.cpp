@@ -102,6 +102,15 @@ namespace rocRoller::KernelGraph
         if(tile.memoryType == MemoryType::WAVE || tile.memoryType == MemoryType::WAVE_SWIZZLE
            || tile.memoryType == MemoryType::WAVE_FROM_GLOBAL)
         {
+
+            auto maybeVGPRBlockSets = GetVGPRBlockSetDimSize(graph, tag);
+            if(maybeVGPRBlockSets.has_value())
+            {
+                const uint numVGPRBlockSets = maybeVGPRBlockSets.value();
+                auto [vgprBlockSetTag, _]   = graph.getDimension<VGPRBlockSet>(tag);
+                coords.setCoordinate(vgprBlockSetTag, Expression::literal(numVGPRBlockSets));
+            }
+
             auto [vgprTag, vgpr] = graph.getDimension<VGPR>(tag);
             coords.setCoordinate(vgprTag, Expression::literal(0));
         }
@@ -145,6 +154,12 @@ namespace rocRoller::KernelGraph
                     {
                         Throw<FatalError>("Cannot extract LDS address from "
                                           "rocRoller::Buffer");
+                        return size_t{0};
+                    }
+                    else if constexpr(std::is_same_v<T, rocRoller::TDM>)
+                    {
+                        Throw<FatalError>("Cannot extract LDS address from "
+                                          "rocRoller::TDM");
                         return size_t{0};
                     }
                     else

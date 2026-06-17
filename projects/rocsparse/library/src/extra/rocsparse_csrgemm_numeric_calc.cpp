@@ -484,13 +484,13 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
     J h_group_size[CSRGEMM_MAXGROUPS + 1];
 
     // Copy group sizes to host
-    RETURN_IF_HIP_ERROR(hipMemcpyAsync(h_group_size,
-                                       d_group_size,
-                                       sizeof(J) * (CSRGEMM_MAXGROUPS + 1),
-                                       hipMemcpyDeviceToHost,
-                                       handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(h_group_size,
+                                                 d_group_size,
+                                                 sizeof(J) * (CSRGEMM_MAXGROUPS + 1),
+                                                 hipMemcpyDeviceToHost,
+                                                 handle->stream));
     // Wait for host transfer to finish
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
     J nnz_max = h_group_size[CSRGEMM_MAXGROUPS];
     if(nnz_max > 16)

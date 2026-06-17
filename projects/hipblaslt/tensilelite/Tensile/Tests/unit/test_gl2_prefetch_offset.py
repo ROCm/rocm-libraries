@@ -350,7 +350,7 @@ def build_kernel(cfg):
         w.sgprs[n] = w.sgprPool.checkOut(1, n, preventOverflow=False)
     for t in cfg.tensors:
         w.sgprs[f"Address{t.tc}"] = w.sgprPool.checkOutAligned(2, 2, f"Address{t.tc}", preventOverflow=False)
-        w.sgprs[f"GL2PrefetchInc{t.tc}"] = w.sgprPool.checkOutAligned(2, 2, f"GL2PrefetchInc{t.tc}", preventOverflow=False)
+        w.sgprs[f"GL2PrefetchInc{t.tc}"] = w.sgprPool.checkOut(1, f"GL2PrefetchInc{t.tc}", preventOverflow=False)
         if cfg.batched:    # batch stride Stride{tc}K (index 2 -> 'K')
             w.sgprs[f"Stride{t.tc}K"] = w.sgprPool.checkOut(1, f"Stride{t.tc}K", preventOverflow=False)
 

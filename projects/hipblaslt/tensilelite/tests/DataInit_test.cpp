@@ -30,7 +30,7 @@
 using TensileLite::ContractionProblemGemm;
 using TensileLite::DataTypeInfo;
 using TensileLite::TensorDescriptor;
-using TensileLite::Client::isMXProblem;
+using TensileLite::Client::isMXProblemExceptF6;
 using TensileLite::Client::isMXTensor;
 
 // Shorthand for the production helper namespace under test (MX builds only).
@@ -46,7 +46,7 @@ namespace
     // side independently. mxBlock==0 means "do NOT call setMXScale*", so the
     // problem's mxBlockA() / mxBlockB() stays 0 and isMXTensor returns
     // false on that side. This is exactly the lever needed to drive every
-    // branch of isMXProblem.
+    // branch of isMXProblemExceptF6.
     // -----------------------------------------------------------------------
     ContractionProblemGemm makeProblem(rocisa::DataType aType,
                                        rocisa::DataType bType,
@@ -134,67 +134,68 @@ INSTANTIATE_TEST_SUITE_P(
 );
 
 // =============================================================================
-//   Section 2 - TensileLite::Client::isMXProblem
+//   Section 2 - TensileLite::Client::isMXProblemExceptF6
 //
 //   Contract:
-//       isMXProblem(P)
-//         = isMXTensor(P.a, P.mxBlockA)
-//        || isMXTensor(P.b, P.mxBlockB)
+//       isMXProblemExceptF6(P)
+//         = !(isF6(P.a) || isF6(P.b))
+//        && (isMXTensor(P.a, P.mxBlockA)
+//            || isMXTensor(P.b, P.mxBlockB))
 // =============================================================================
 TEST(IsMXProblem, BothFP4)
 {
     auto p = makeProblem(rocisa::DataType::Float4, rocisa::DataType::Float4,
                          /*mxBlockA=*/32, /*mxBlockB=*/32);
-    EXPECT_TRUE(isMXProblem(p));
+    EXPECT_TRUE(isMXProblemExceptF6(p));
 }
 TEST(IsMXProblem, BothFP8)
 {
     auto p = makeProblem(rocisa::DataType::Float8, rocisa::DataType::Float8,
                          /*mxBlockA=*/32, /*mxBlockB=*/32);
-    EXPECT_TRUE(isMXProblem(p));
+    EXPECT_TRUE(isMXProblemExceptF6(p));
 }
 TEST(IsMXProblem, BothBFloat8)
 {
     auto p = makeProblem(rocisa::DataType::BFloat8, rocisa::DataType::BFloat8,
                          /*mxBlockA=*/32, /*mxBlockB=*/32);
-    EXPECT_TRUE(isMXProblem(p));
+    EXPECT_TRUE(isMXProblemExceptF6(p));
 }
 TEST(IsMXProblem, MixedFP4AandFP8B)
 {
     auto p = makeProblem(rocisa::DataType::Float4, rocisa::DataType::Float8,
                          /*mxBlockA=*/32, /*mxBlockB=*/32);
-    EXPECT_TRUE(isMXProblem(p));
+    EXPECT_TRUE(isMXProblemExceptF6(p));
 }
 TEST(IsMXProblem, MixedBFloat8AandFP4B)
 {
     auto p = makeProblem(rocisa::DataType::BFloat8, rocisa::DataType::Float4,
                          /*mxBlockA=*/32, /*mxBlockB=*/32);
-    EXPECT_TRUE(isMXProblem(p));
+    EXPECT_TRUE(isMXProblemExceptF6(p));
 }
 TEST(IsMXProblem, OnlyA_isMX_BIsBF16)
 {
     // First disjunct true, second disjunct short-circuits false (mxBlockB=0).
     auto p = makeProblem(rocisa::DataType::Float8, rocisa::DataType::BFloat16,
                          /*mxBlockA=*/32, /*mxBlockB=*/0);
-    EXPECT_TRUE(isMXProblem(p));
+    EXPECT_TRUE(isMXProblemExceptF6(p));
 }
 TEST(IsMXProblem, OnlyB_isMX_AIsBF16)
 {
     auto p = makeProblem(rocisa::DataType::BFloat16, rocisa::DataType::Float4,
                          /*mxBlockA=*/0, /*mxBlockB=*/32);
-    EXPECT_TRUE(isMXProblem(p));
+    EXPECT_TRUE(isMXProblemExceptF6(p));
 }
 TEST(IsMXProblem, NeitherIsMX)
 {
     auto p = makeProblem(rocisa::DataType::BFloat16, rocisa::DataType::BFloat16,
                          /*mxBlockA=*/0, /*mxBlockB=*/0);
-    EXPECT_FALSE(isMXProblem(p));
+    EXPECT_FALSE(isMXProblemExceptF6(p));
 }
 TEST(IsMXProblem, FloatABIsFalse)
 {
     auto p = makeProblem(rocisa::DataType::Float, rocisa::DataType::Float,
                          /*mxBlockA=*/0, /*mxBlockB=*/0);
-    EXPECT_FALSE(isMXProblem(p));
+    EXPECT_FALSE(isMXProblemExceptF6(p));
 }
 
 // =============================================================================

@@ -21,6 +21,7 @@ GlobalParameters:
   DataInitTypeA: 12
   DataInitTypeB: 13
   SleepPercent: 0
+  IcacheRotateCopies: -1
 
 BenchmarkProblems:
   ########################################

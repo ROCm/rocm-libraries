@@ -200,6 +200,11 @@ namespace rocRoller
             }
         }
 
+        if(m_MODESetValue)
+        {
+            os << "s_set_vgpr_msb " << static_cast<uint16_t>(*m_MODESetValue) << "\n";
+        }
+
         auto pos = os.tellp();
 
         coreInstructionString(os);
@@ -260,7 +265,7 @@ namespace rocRoller
                 {
                     os << ", ";
                 }
-                dst->toStream(os);
+                dst->toStream(os, true);
                 firstDstArg = false;
             }
         }
@@ -283,7 +288,7 @@ namespace rocRoller
                 {
                     os << ", ";
                 }
-                src->toStream(os);
+                src->toStream(os, true);
                 firstSrcArg = false;
             }
         }
