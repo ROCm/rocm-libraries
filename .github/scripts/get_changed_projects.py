@@ -3,10 +3,10 @@
 
 import fnmatch
 import os
-import subprocess
 from pathlib import Path
 from typing import Iterable, Optional
 
+from ci_utils import get_modified_paths, matches_paths
 from config_loader import load_repo_config
 from pr_detect_changed_subtrees import get_valid_prefixes, find_matched_subtrees
 
@@ -36,48 +36,30 @@ def check_for_non_skippable_path(paths: Optional[Iterable[str]]) -> bool:
     return any(not is_path_skippable(p) for p in paths)
 
 
-def matches_paths(paths: Iterable[str], patterns: list[str]) -> bool:
-    return any(fnmatch.fnmatch(p, pattern) for p in paths for pattern in patterns)
-
-
 def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> bool:
     if paths is None:
         return False
     return matches_paths(paths, THEROCK_CI_PATTERNS)
 
 
-def get_changed_files(base_ref: str) -> list[str]:
-    """Get list of changed files from git diff."""
-    try:
-        result = subprocess.run(
-            ["git", "diff", "--name-only", base_ref],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return [f.strip() for f in result.stdout.splitlines() if f.strip()]
-    except subprocess.CalledProcessError:
-        return []
-
-
 def get_changed_projects(base_ref: str) -> str:
     """Get comma-separated list of changed project paths validated against repos-config.json."""
-    changed_files = get_changed_files(base_ref)
-    if not changed_files:
+    modified_paths = get_modified_paths(base_ref)
+    if not modified_paths:
         return ""
 
     # If CI workflow files changed, run all tests
-    if check_for_workflow_file_related_to_ci(changed_files):
+    if check_for_workflow_file_related_to_ci(modified_paths):
         return ""
 
     # If only skippable files changed, skip
-    if not check_for_non_skippable_path(changed_files):
+    if not check_for_non_skippable_path(modified_paths):
         return ""
 
     repo_config_path = SCRIPT_DIR / ".." / "repos-config.json"
     config = load_repo_config(str(repo_config_path))
     valid_prefixes = get_valid_prefixes(config)
-    matched_subtrees = find_matched_subtrees(changed_files, valid_prefixes)
+    matched_subtrees = find_matched_subtrees(list(modified_paths), valid_prefixes)
 
     return ",".join(matched_subtrees)
 
