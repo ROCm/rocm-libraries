@@ -335,7 +335,7 @@ namespace TensileLite
                     m_gpuBatchPtrsRing[i].clear();
                     m_cachedInputsRing[i].reset();
                 }
-                m_altSlotsReady = false;
+                m_altSlotsFilled = false;
             }
 
             void syncCopyStream()
@@ -368,10 +368,16 @@ namespace TensileLite
                 size_t targetIdx
                     = (m_activeIdx + m_availableSlots + 1) % m_numActiveBuffers;
 
-                // Warm path: A/B/C are read-only and D is fully overwritten by the next
-                // kernel (D = alpha*A*B + beta*C), so the existing slot data is still
-                // valid.  Skip the DMA; just record a no-op event as a sync marker.
-                if(m_altSlotsReady)
+                // Warm path: this slot was filled by fillSlot (via
+                // initializeAltBufferSets) and no kernel has ever written to
+                // it — the benchmark loop only dispatches kernels to the
+                // active slot, never to alt slots.  Therefore A/B/C/D still
+                // hold the values fillSlot put there.  D's initialized value
+                // is irrelevant because the next kernel fully overwrites it,
+                // but that is a secondary observation, not the safety
+                // justification.  Skip the DMA; record a no-op event as a
+                // sync marker.
+                if(m_altSlotsFilled)
                 {
                     HIP_CHECK_EXC(
                         hipEventRecord(m_copyDoneEvents[targetIdx], m_copyStream));
@@ -1265,7 +1271,7 @@ namespace TensileLite
             /// current problem.  Cleared by cancelAsyncReset on problem change.
             /// When set, beginAsyncReset can skip the full re-copy and use the
             /// fast path (resetOutput only) even with problem-dependent data.
-            bool m_altSlotsReady = false;
+            bool m_altSlotsFilled = false;
 
             /// If set "::NaN", we will initialize all out-of-bounds inputs to NaN, and
             /// all out-of-bounds outputs to a known value. This allows us to

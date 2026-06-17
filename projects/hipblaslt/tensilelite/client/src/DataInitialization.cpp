@@ -3678,7 +3678,7 @@ namespace TensileLite
             for(size_t slot = 1; slot < m_numActiveBuffers; slot++)
                 fillSlot(slot, problem, /*targetStream=*/nullptr);
 
-            m_altSlotsReady = true;
+            m_altSlotsFilled = true;
         }
 
         DataInitialization::~DataInitialization()
