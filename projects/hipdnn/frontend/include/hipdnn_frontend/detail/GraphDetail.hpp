@@ -13,6 +13,17 @@
 namespace hipdnn_frontend::detail
 {
 
+enum class ActivePlanFinalization
+{
+    UNFINALIZED,
+    FINALIZED
+};
+
+constexpr bool isFinalized(ActivePlanFinalization finalization) noexcept
+{
+    return finalization == ActivePlanFinalization::FINALIZED;
+}
+
 inline Error hasEngineConfigs(hipdnnBackendDescriptor_t engineHeuristicDesc)
 {
     int64_t availableEngineCount = 0;

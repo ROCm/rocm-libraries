@@ -145,22 +145,6 @@
 #include <nlohmann/json.hpp>
 #endif
 
-namespace hipdnn_frontend::detail
-{
-
-enum class ActivePlanFinalization
-{
-    UNFINALIZED,
-    FINALIZED
-};
-
-constexpr bool isFinalized(ActivePlanFinalization finalization) noexcept
-{
-    return finalization == ActivePlanFinalization::FINALIZED;
-}
-
-} // namespace hipdnn_frontend::detail
-
 namespace hipdnn_frontend::graph
 {
 
