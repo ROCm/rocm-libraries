@@ -3611,59 +3611,31 @@ namespace TensileLite
             auto localMaxElements = m_maxElements;
             auto localOffsets     = m_groupedOffsets;
 
-            bool slotInitialized = !m_gpuPtrsRing[slotIdx].empty();
+            // Full path: initialize all tensors into target slot
+            if(m_cpuPtrs.empty() && m_problemDependentData)
+                initializeCPUInputs(problem);
+            if(m_problemDependentData)
+                copyValidToGPUBuffer(problem, targetStream);
+            if(needSwizzle || needMXSwizzle)
+                copySwizzledToGPUBuffer(problem);
 
-            if(slotInitialized && m_gpuInit
-               && m_curBoundsCheck == BoundsCheckMode::Disable
-               && !m_problemDependentData && !needSwizzle && !needMXSwizzle)
-            {
-                // Fast path: slot already has data, only reset output D
-                if(m_elementsToValidate)
-                {
-                    resetOutput(m_gpuPtrsRing[slotIdx],
-                                m_gpuBatchPtrsRing[slotIdx],
-                                localMaxElements,
-                                localOffsets,
-                                problem,
-                                kind,
-                                targetStream);
-                    m_cachedInputsRing[slotIdx] = buildGPUProblemInputs(
-                        m_gpuPtrsRing[slotIdx],
-                        m_gpuBatchPtrsRing[slotIdx],
-                        localMaxElements,
-                        localOffsets,
-                        problem);
-                }
-                // else: pointers unchanged, reuse existing m_cachedInputsRing[slotIdx]
-            }
-            else
-            {
-                // Full path: initialize all tensors into target slot
-                if(m_cpuPtrs.empty() && m_problemDependentData)
-                    initializeCPUInputs(problem);
-                if(m_problemDependentData)
-                    copyValidToGPUBuffer(problem, targetStream);
-                if(needSwizzle || needMXSwizzle)
-                    copySwizzledToGPUBuffer(problem);
+            // Clear offsets before copyInputs (it push_back's, doesn't clear)
+            localOffsets.clear();
+            copyInputs(m_gpuPtrsRing[slotIdx],
+                       m_gpuBatchPtrsRing[slotIdx],
+                       localMaxElements,
+                       localOffsets,
+                       problem,
+                       kind,
+                       targetStream);
+            initializeGPUBatchedInputs(problem, targetStream);
 
-                // Clear offsets before copyInputs (it push_back's, doesn't clear)
-                localOffsets.clear();
-                copyInputs(m_gpuPtrsRing[slotIdx],
-                           m_gpuBatchPtrsRing[slotIdx],
-                           localMaxElements,
-                           localOffsets,
-                           problem,
-                           kind,
-                           targetStream);
-                initializeGPUBatchedInputs(problem, targetStream);
-
-                m_cachedInputsRing[slotIdx] = buildGPUProblemInputs(
-                    m_gpuPtrsRing[slotIdx],
-                    m_gpuBatchPtrsRing[slotIdx],
-                    localMaxElements,
-                    localOffsets,
-                    problem);
-            }
+            m_cachedInputsRing[slotIdx] = buildGPUProblemInputs(
+                m_gpuPtrsRing[slotIdx],
+                m_gpuBatchPtrsRing[slotIdx],
+                localMaxElements,
+                localOffsets,
+                problem);
         }
 
         void DataInitialization::initializeAltBufferSets(
