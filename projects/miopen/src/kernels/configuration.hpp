@@ -246,11 +246,12 @@ struct proto_config
         MiopenConfig::use_amdgcn &&
         !(target_arch == architecture::gfx103x || target_arch == architecture::gfx110x ||
           target_arch == architecture::gfx115x || target_arch == architecture::gfx120x ||
-          target_arch == architecture::gfx125x)&&
+          target_arch == architecture::gfx125x) &&
+        !(use_nodpp && (variant != 0));
 #else
     static constexpr bool use_amdgcn = false;
 #endif
-        static constexpr unsigned int vec_size = vectorize ? VecSize : 1;
+    static constexpr unsigned int vec_size = vectorize ? VecSize : 1;
     static constexpr unsigned int vec_size_x =
         vectorize && MiopenConfig::layout_nhwc ? vec_size : 1;
     static constexpr unsigned int vec_size_y =
