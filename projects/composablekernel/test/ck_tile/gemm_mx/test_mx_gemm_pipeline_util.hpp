@@ -122,23 +122,33 @@ template <typename ScaleType, ck_tile::index_t ScaleBlockSize, bool KStride>
 void preShuffleScaleBuffer_gfx1250(const ScaleType* src,
                                    ScaleType* dst,
                                    ck_tile::index_t MN,
-                                   ck_tile::index_t K)
+                                   ck_tile::index_t K,
+                                   ck_tile::index_t MThreadPerXdl = 0)
 {
     static_assert((ScaleBlockSize == 32 || ScaleBlockSize == 16) && sizeof(ScaleType) == 1,
                   "wrong! only support 8-bit scale with ScaleBlockSize=32 or 16");
 
-    // ScaleBlockSize == 16: the natural row-major scale layout already matches the gfx1250
-    // wmma scale distribution (one e8m0 per 16 K-elements lands warp-aligned), so the
-    // device-side shuffle is the identity transform for all K.
+    // ScaleBlockSize == 16: write the M/N-fastest layout [packs_mn, packs_k, MThreadPerXdl]
+    // expected by the unified mx_gemm scale descriptor, so the per-K-iteration device scale load
+    // is coalesced (consecutive lanes -> consecutive addresses). This is a transpose of the
+    // natural [packs_mn, MThreadPerXdl, packs_k] order; the scale values are unchanged.
     if constexpr(ScaleBlockSize == 16)
     {
+        constexpr ck_tile::index_t PackSize = 4; // e8m0 scales packed per int32
+        const ck_tile::index_t packs_k      = K / PackSize;
         for(ck_tile::index_t mn = 0; mn < MN; ++mn)
             for(ck_tile::index_t k = 0; k < K; ++k)
             {
+                const ck_tile::index_t pm  = mn / MThreadPerXdl;
+                const ck_tile::index_t mt  = mn % MThreadPerXdl;
+                const ck_tile::index_t pk  = k / PackSize;
+                const ck_tile::index_t sub = k % PackSize;
+                const ck_tile::index_t dst_idx =
+                    ((pm * packs_k + pk) * MThreadPerXdl + mt) * PackSize + sub;
                 if constexpr(KStride)
-                    dst[mn * K + k] = src[mn * K + k];
+                    dst[dst_idx] = src[mn * K + k];
                 else
-                    dst[mn * K + k] = src[k * MN + mn];
+                    dst[dst_idx] = src[k * MN + mn];
             }
         return;
     }
@@ -493,14 +503,14 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
             {static_cast<std::size_t>(N), static_cast<std::size_t>(num_scale_k)},
             {static_cast<std::size_t>(num_scale_k), static_cast<std::size_t>(1)});
 
-        // Pre-shuffle for gfx1250 (WaveSize=32, WMMA)
-        // Scales start in natural tensor layout and are pre-shuffled into the device layout
-        // for both scale block sizes (the shuffle is the identity for ScaleBlockSize==16,
-        // whose natural layout already matches the warp scale distribution).
+        // Pre-shuffle for gfx1250 (WaveSize=32, WMMA). Scales start in natural tensor layout and
+        // are pre-shuffled into the device (M/N-fastest) layout so the per-K-iteration device
+        // scale load is coalesced for both scale block sizes.
         preShuffleScaleBuffer_gfx1250<AScaleDataType, ScaleBlockSize, true>(
-            scale_a.mData.data(), scale_a_shuffled.mData.data(), scale_padded_M, num_scale_k);
+            scale_a.mData.data(), scale_a_shuffled.mData.data(), scale_padded_M, num_scale_k,
+            M_Warp_Tile);
         preShuffleScaleBuffer_gfx1250<BScaleDataType, ScaleBlockSize, true>(
-            scale_b.mData.data(), scale_b_shuffled.mData.data(), N, num_scale_k);
+            scale_b.mData.data(), scale_b_shuffled.mData.data(), N, num_scale_k, N_Warp_Tile);
 
         // Allocate device memory
         DeviceMem a_m_k_dev_buf(a_m_k.get_element_space_size_in_bytes());
