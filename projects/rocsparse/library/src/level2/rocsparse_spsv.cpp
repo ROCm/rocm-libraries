@@ -129,9 +129,9 @@ namespace rocsparse
 
             case rocsparse_spsv_stage_preprocess:
             {
-                if(mat->analysed == false)
+                rocsparse_csrsv_info csrsv_info = mat->info->get_csrsv_info();
+                if(csrsv_info->get(trans, mat->descr->fill_mode) == nullptr)
                 {
-                    rocsparse_csrsv_info csrsv_info = mat->info->get_csrsv_info();
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::csrsv_analysis(handle,
                                                    trans,
@@ -140,7 +140,6 @@ namespace rocsparse
                                                    rocsparse_solve_policy_auto,
                                                    &csrsv_info,
                                                    temp_buffer)));
-                    mat->analysed = true;
                 }
 
                 return rocsparse_status_success;
@@ -187,9 +186,9 @@ namespace rocsparse
             }
             case rocsparse_spsv_stage_preprocess:
             {
-                if(mat->analysed == false)
+                rocsparse_csrsv_info csrsv_info = mat->info->get_csrsv_info();
+                if(csrsv_info->get(trans, mat->descr->fill_mode) == nullptr)
                 {
-                    rocsparse_csrsv_info csrsv_info = mat->info->get_csrsv_info();
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::coosv_analysis(handle,
                                                    trans,
@@ -198,7 +197,6 @@ namespace rocsparse
                                                    rocsparse_solve_policy_auto,
                                                    &csrsv_info,
                                                    temp_buffer)));
-                    mat->analysed = true;
                 }
                 return rocsparse_status_success;
             }
