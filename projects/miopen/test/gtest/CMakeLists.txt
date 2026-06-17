@@ -187,11 +187,13 @@ function(add_gtest TEST_NAME TEST_CPP)
 
     # cmake-lint: disable=E1120
     foreach(i RANGE 1 ${GTEST_PARALLEL_LEVEL})
+      math(EXPR SHARD_INDEX "${i} - 1")
       add_test(NAME ${TEST_NAME}_shard${i}
-        COMMAND ${TEST_NAME} --gtest_filter=${MIOPEN_GTEST_FILTER}
+        COMMAND ${TEST_NAME}
+          --gtest_filter=${MIOPEN_GTEST_FILTER}
+          --gtest_output=xml:${PROJECT_BINARY_DIR}/test_results/${TEST_NAME}_shard${i}.xml
         WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
       )
-      math(EXPR SHARD_INDEX "${i} - 1")
       set_tests_properties(${TEST_NAME}_shard${i} PROPERTIES
         ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};MIOPEN_INVOKED_FROM_CTEST=1;GTEST_TOTAL_SHARDS=${GTEST_PARALLEL_LEVEL};GTEST_SHARD_INDEX=${SHARD_INDEX}"
       )
