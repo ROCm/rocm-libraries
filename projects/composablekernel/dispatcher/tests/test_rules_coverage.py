@@ -34,13 +34,37 @@ from typing import Dict, FrozenSet, List, Set, Tuple
 SCRIPT_DIR = Path(__file__).parent.resolve()
 DISPATCHER_DIR = SCRIPT_DIR.parent
 sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
+sys.path.insert(0, str(DISPATCHER_DIR / "codegen" / "grouped_conv"))
 
 from unified_grouped_conv_codegen import (                                         # noqa: E402
     DepthwiseConvKernelConfig,
     GroupedConvKernelConfig,
+    GroupedConvTraitConfig,
     GroupedConvVariant,
+    StreamKConfig,
+    StreamKReductionStrategy,
+    TileConfig,
     get_default_configs,
 )
+
+# CK Builder native codegen — the .conf parsers are used here as the
+# independent ground-truth reference (see CKBuilderEquivalenceTest below).
+_BUILDER_DIR = (
+    DISPATCHER_DIR.parent
+    / "experimental"
+    / "grouped_convolution_tile_instances"
+)
+sys.path.insert(0, str(_BUILDER_DIR))
+
+import generate_instances as gi                                                    # noqa: E402
+from grouped_config_rules_builder import (                                         # noqa: E402
+    map_pipeline_version,
+    map_scheduler,
+    map_specialization,
+)
+
+# CK Builder .conf source directory.
+_BUILDER_CONFIGS_DIR = _BUILDER_DIR / "configs"
 
 # ---------------------------------------------------------------------------
 # Generation parameters — cover the full instance space so the subset checks
@@ -299,6 +323,248 @@ for _label, _sub, _sup in _RELATIONSHIPS:
         )
 
 del _label, _sub, _sup, _arch
+
+
+# ===========================================================================
+# CK Builder equivalence
+# ===========================================================================
+#
+# The dispatcher's "profiler" and "tests" rule sets are derived from the CK
+# Builder ``.conf`` configurations. These tests assert exact equivalence: the
+# instance set produced by each dispatcher rule set is identical (same count,
+# same instances) to the set produced by the corresponding CK Builder mode
+# ("profiler" / "tests").
+#
+# The reference is built independently of the dispatcher's builder rule-set
+# module by calling the CK Builder's own native parsers
+# (``generate_instances.parse_*_instances``) directly on the ``.conf`` files,
+# then converting each parsed instance to a dispatcher config with the same
+# canonical key used everywhere else in this file. The only logic shared with
+# the dispatcher is the pure field-mapping helpers (``map_pipeline_version`` /
+# ``map_scheduler`` / ``map_specialization``), which are CK Builder field
+# translations, not generation logic.
+#
+
+# (config_dir, configs_list, native_parser, dispatcher_variant_enum).
+# Each .conf lives at configs/<config_dir>/<mode>/<cfg>.conf.
+_CKB_SPECS = [
+    ("forward",         gi.fwd_configs,        gi.parse_fwd_instances,        GroupedConvVariant.FORWARD),
+    ("backward_weight", gi.bwd_weight_configs, gi.parse_bwd_weight_instances, GroupedConvVariant.BACKWARD_WEIGHT),
+    ("backward_data",   gi.bwd_data_configs,   gi.parse_bwd_data_instances,   GroupedConvVariant.BACKWARD_DATA),
+]
+
+
+def _ckb_layout_of(cfg_name: str) -> str:
+    """Layout token of a CK Builder config name (e.g. 'nhwgc_fp16' -> 'nhwgc')."""
+    return cfg_name.split("_")[0]
+
+
+def _ckb_dtype_of(cfg_name: str) -> str:
+    """Datatype token of a CK Builder config name (e.g. 'nhwgc_fp16' -> 'fp16')."""
+    return cfg_name.split("_")[1]
+
+
+def _ckb_ndim_of(cfg_name: str) -> int:
+    """Spatial dims of a CK Builder config: nhwgc -> 2D, ndhwgc -> 3D."""
+    return 2 if cfg_name.startswith("nhwgc") else 3
+
+
+def _ckb_param_to_config(p, variant, ndim, dtype, layout, arch):
+    """Convert one ``ConvInstanceTemplateParams`` (CK Builder) into a dispatcher
+    ``GroupedConvKernelConfig``.
+
+    The reference must reflect what the CK Builder ``profiler`` / ``tests`` modes
+    actually emit — the ground truth. The CK Builder native
+    parsers already apply CK Builder's own validity filtering (the WMMA / native
+    warp-tile checks), so the parsed instances are exactly the CK Builder set.
+
+    This conversion therefore applies only the one transform the dispatcher
+    builder path genuinely performs and that CK Builder mirrors: the bwd_weight
+    ``compv2`` / ``basic_v2`` skip (that pipeline is not compatible with CK
+    Tile's ``GroupedConvolutionBackwardWeightKernel``). It deliberately does
+    not apply the dispatcher's ``is_valid_for_arch()`` filter: that filter is
+    a dispatcher-side gate that CK Builder does not apply, so folding it into the
+    reference would hide any over-/under-filtering regression in the dispatcher
+    builder rule set (e.g. wrongly dropping valid ``warp_k=2`` instances). The
+    dispatcher rule set is required to reproduce the full CK Builder set.
+
+    Returns ``None`` only for the bwd_weight compv2/basic_v2 instances that
+    neither CK Builder nor the dispatcher emit.
+    """
+    pipeline = map_pipeline_version(p.pipeline_version)
+    scheduler = map_scheduler(p.scheduler)
+    specialization = map_specialization(p.specialization)
+
+    # compv2/basic_v2 (GemmPipelineAGmemBGmemCRegV2) is not compatible with CK
+    # Tile's GroupedConvolutionBackwardWeightKernel — the dispatcher skips it.
+    if variant == GroupedConvVariant.BACKWARD_WEIGHT and pipeline in ("compv2", "basic_v2"):
+        return None
+
+    trait = GroupedConvTraitConfig(
+        pipeline=pipeline,
+        scheduler=scheduler,
+        epilogue="cshuffle",
+        pad_m=True,
+        pad_n=True,
+        pad_k=True,
+        double_smem_buffer=p.double_smem_buffer,
+        num_groups_to_merge=p.num_groups_to_merge,
+        split_image=p.split_image,
+        explicit_gemm=p.explicit_gemm,
+        two_stage=p.is_two_stage_instance,
+        specialization=specialization,
+        streamk_config=StreamKConfig(
+            streamk_enabled=p.streamk_enabled,
+            strategy=StreamKReductionStrategy(p.streamk_reduction_strategy),
+            streamk_persistent=p.streamk_persistent,
+        ) if p.streamk_enabled else StreamKConfig(),
+    )
+
+    config = GroupedConvKernelConfig(
+        tile=TileConfig(
+            tile_m=p.tile_size[0],
+            tile_n=p.tile_size[1],
+            tile_k=p.tile_size[2],
+            warp_m=p.warps[0],
+            warp_n=p.warps[1],
+            warp_k=p.warps[2],
+            warp_tile_m=p.warp_tile[0],
+            warp_tile_n=p.warp_tile[1],
+            warp_tile_k=p.warp_tile[2],
+        ),
+        trait=trait,
+        variant=variant,
+        ndim_spatial=ndim,
+        arch=arch,
+        layout=layout,
+        vector_size_a=p.scalar_per_vector[0],
+        vector_size_b=p.scalar_per_vector[1],
+        vector_size_c=p.scalar_per_vector[2],
+        num_wave_groups=p.num_wave_groups,
+    )
+    config.datatype = dtype
+    return config
+
+
+# Cache the independently-built CK Builder reference key sets by (mode, arch).
+_CKB_REF_CACHE: Dict[Tuple[str, str], Set[FrozenSet]] = {}
+
+
+def _ckb_reference_keys(mode: str, arch: str) -> Set[FrozenSet]:
+    """Build the CK Builder reference key set for ``mode`` ("profiler"/"tests")
+    by parsing the ``.conf`` files with the native CK Builder parsers."""
+    cache_key = (mode, arch)
+    if cache_key in _CKB_REF_CACHE:
+        return _CKB_REF_CACHE[cache_key]
+
+    # The CK Builder parsers derive warp_k from the architecture warp size
+    # (64 for CDNA gfx9, 32 for RDNA). It must be passed explicitly to match the
+    # dispatcher's builder rule set, which does the same; otherwise the parser
+    # default of 32 doubles warp_k on gfx9 and the reference would not match.
+    warp_size = gi.get_warp_size(arch)
+
+    keys: Set[FrozenSet] = set()
+    for config_dir, cfg_list, parser, variant in _CKB_SPECS:
+        for cfg_name in cfg_list:
+            layout = _ckb_layout_of(cfg_name)
+            dtype = _ckb_dtype_of(cfg_name)
+            ndim = _ckb_ndim_of(cfg_name)
+            conf_path = _BUILDER_CONFIGS_DIR / config_dir / mode / f"{cfg_name}.conf"
+            if not conf_path.exists():
+                continue
+            with open(conf_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            problem_name = f"grouped_convolution_{config_dir}_tile_{cfg_name}"
+            raw = parser(lines, problem_name, warp_size=warp_size, verbose=False)
+            for p in raw:
+                cfg = _ckb_param_to_config(p, variant, ndim, dtype, layout, arch)
+                if cfg is not None:
+                    keys.add(_config_to_key(cfg))
+
+    _CKB_REF_CACHE[cache_key] = keys
+    return keys
+
+
+class CKBuilderEquivalenceTest(unittest.TestCase):
+    """Assert each dispatcher builder-derived rule set ("profiler" / "tests")
+    produces exactly the same instances as the corresponding CK Builder mode."""
+
+    def assert_equivalent(self, rule_set: str, mode: str, arch: str) -> None:
+        """Assert the dispatcher ``rule_set`` and CK Builder ``mode`` produce an
+        identical instance set on ``arch`` (matching count, then content)."""
+        ref_keys = _ckb_reference_keys(mode, arch)
+        gen_keys = _rule_set_keys(rule_set, arch)
+
+        self.assertGreater(
+            len(ref_keys), 0,
+            f"[{arch}] CK Builder mode '{mode}' produced no reference instances",
+        )
+
+        # Counts first (per the requested test method), then content.
+        missing = ref_keys - gen_keys   # in CK Builder, not emitted by dispatcher
+        extra = gen_keys - ref_keys     # emitted by dispatcher, not in CK Builder
+
+        print("\n" + "=" * 70)
+        print(f"CK BUILDER EQUIVALENCE  [arch={arch}]")
+        print(f"Dispatcher rule set: '{rule_set}'   CK Builder mode: '{mode}'")
+        print("=" * 70)
+        print(f"CK Builder reference instances: {len(ref_keys)}")
+        print(f"Dispatcher rule-set instances:  {len(gen_keys)}")
+        print(f"Missing from dispatcher:        {len(missing)}")
+        print(f"Extra in dispatcher:            {len(extra)}")
+        print("=" * 70)
+
+        self.assertEqual(
+            len(gen_keys), len(ref_keys),
+            f"[{arch}] instance count mismatch: dispatcher '{rule_set}' has "
+            f"{len(gen_keys)} vs CK Builder '{mode}' {len(ref_keys)}",
+        )
+
+        if missing or extra:
+            details = []
+            if missing:
+                preview = "\n".join(_format_key(k) for k in sorted(missing, key=str)[:20])
+                more = f"\n  ... and {len(missing) - 20} more." if len(missing) > 20 else ""
+                details.append(
+                    f"{len(missing)} CK Builder instances missing from dispatcher "
+                    f"'{rule_set}':\n{preview}{more}"
+                )
+            if extra:
+                preview = "\n".join(_format_key(k) for k in sorted(extra, key=str)[:20])
+                more = f"\n  ... and {len(extra) - 20} more." if len(extra) > 20 else ""
+                details.append(
+                    f"{len(extra)} dispatcher '{rule_set}' instances not in "
+                    f"CK Builder '{mode}':\n{preview}{more}"
+                )
+            self.fail(f"[{arch}] " + "\n".join(details))
+
+
+# (test label, dispatcher rule set, CK Builder mode).
+_EQUIVALENCE_PAIRS: List[Tuple[str, str, str]] = [
+    ("profiler_matches_ck_builder", "profiler", "profiler"),
+    ("tests_matches_ck_builder",    "tests",    "tests"),
+]
+
+
+def _make_equivalence_test(rule_set: str, mode: str, arch: str):
+    def test(self: CKBuilderEquivalenceTest) -> None:
+        self.assert_equivalent(rule_set, mode, arch)
+
+    test.__doc__ = (
+        f"[{arch}] dispatcher '{rule_set}' must equal CK Builder '{mode}'."
+    )
+    return test
+
+
+for _label, _rs, _mode in _EQUIVALENCE_PAIRS:
+    for _arch in ARCHS:
+        setattr(
+            CKBuilderEquivalenceTest,
+            f"test_{_label}_{_arch}",
+            _make_equivalence_test(_rs, _mode, _arch),
+        )
+
+del _label, _rs, _mode, _arch
 
 
 if __name__ == "__main__":

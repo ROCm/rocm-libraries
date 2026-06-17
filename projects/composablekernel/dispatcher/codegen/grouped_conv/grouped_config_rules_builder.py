@@ -54,6 +54,7 @@ from generate_instances import (
     fwd_configs,
     bwd_data_configs,
     bwd_weight_configs,
+    get_warp_size,
     parse_fwd_instances,
     parse_depthwise_config,
     parse_bwd_weight_instances,
@@ -168,12 +169,15 @@ def _conv_params_to_dict(p: ConvInstanceTemplateParams) -> dict:
     }
 
 
-def _build_data(input_path, variant, layout, datatype, ndim, specialization, verbose=False) -> dict:
+def _build_data(input_path, variant, layout, datatype, ndim, specialization, warp_size, verbose=False) -> dict:
     """Parse a single CK Builder .conf file into an in-memory config dict.
 
     Equivalent to the old ``convert_config_file`` but returns the dict directly
     instead of writing JSON. The dict shape matches what the loaders below
     expect: ``{variant, ndim_spatial, layout, datatype, instances}``.
+
+    ``warp_size`` must match the target architecture's warp size (64 for CDNA
+    gfx9, 32 for RDNA). 
     """
     with open(input_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
@@ -182,13 +186,13 @@ def _build_data(input_path, variant, layout, datatype, ndim, specialization, ver
     problem_name = f"grouped_convolution_{variant}_tile_{layout}_{datatype}"
 
     if variant == "bwd_weight":
-        raw = parse_bwd_weight_instances(lines, problem_name, verbose=verbose)
+        raw = parse_bwd_weight_instances(lines, problem_name, warp_size=warp_size, verbose=verbose)
     elif variant == "forward" and specialization == Specialization.Default:
-        raw = parse_fwd_instances(lines, problem_name, verbose=verbose)
+        raw = parse_fwd_instances(lines, problem_name, warp_size=warp_size, verbose=verbose)
     elif variant == "forward" and specialization == Specialization.Depthwise:
         raw = parse_depthwise_config(input_path, verbose=verbose)
     elif variant == "bwd_data":
-        raw = parse_bwd_data_instances(lines, problem_name, verbose=verbose)
+        raw = parse_bwd_data_instances(lines, problem_name, warp_size=warp_size, verbose=verbose)
     else:
         raise RuntimeError(
             f"Variant '{variant}' with specialization '{specialization}' is not yet implemented."
@@ -423,8 +427,7 @@ def _load_gemm_configs(data: dict, arch: str) -> List:
         # the kernel only for that datatype (an untagged config is compiled for
         # every datatype).
         config.datatype = datatype
-        if config.is_valid_for_arch():
-            configs.append(config)
+        configs.append(config)
 
     log.debug(
         f"Loaded {len(configs)} configs (variant={data['variant']}, layout={layout}, dtype={datatype})"
@@ -480,6 +483,8 @@ def get_configs(
     want_ndims = set(ndims) if ndims else None
     want_dtypes = set(datatypes) if datatypes else None
 
+    warp_size = get_warp_size(arch)
+
     configs: List = []
     for (variant_name, source_cfg, target_cfg, layout, datatype, ndim, spec) in _builder_config_list():
         if to_enum(variant_name, spec) not in want_variants:
@@ -494,7 +499,7 @@ def get_configs(
             log.warning(f"Builder config not found: {input_path}")
             continue
 
-        data = _build_data(input_path, variant_name, layout, datatype, ndim, spec, verbose=verbose)
+        data = _build_data(input_path, variant_name, layout, datatype, ndim, spec, warp_size, verbose=verbose)
         if data["variant"] == "forward_depthwise":
             configs.extend(_load_depthwise_configs(data, arch))
         else:

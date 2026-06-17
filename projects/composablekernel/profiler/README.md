@@ -333,10 +333,10 @@ cmake                                                                           
   -D CK_EXPERIMENTAL_BUILDER=ON                                                                   \
   -D CK_TILE_DISPATCHER=ON                                                                        \
   -D CMAKE_CXX_STANDARD=20                                                                        \
-  -D DISPATCHER_RULE_SET=profiler                                                                 \
+  -D DISPATCHER_RULE_SET=full                                                                 \
   -D CK_PROFILER_OP_FILTER="_tile"                                                                \
   -G Ninja                                                                                        \
   ..
 ```
 
-to generate a full set of kernel instances for comprehensive benchmarking.
+to generate a full set of kernel instances for comprehensive benchmarking. Changing the the rule set allows increase/decrease the number of instances available for the profiler.

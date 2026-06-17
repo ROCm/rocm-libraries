@@ -54,8 +54,8 @@ _FWD_TILES: Dict[Tuple[int, str], List[Tuple[int, int, int]]] = {
 }
 
 _BWD_DATA_TILES: Dict[Tuple[int, str], List[Tuple[int, int, int]]] = {
-    (2, 'bf16'): [(16, 64, 32), (32, 64, 32), (32, 128, 32), (64, 16, 16), (64, 16, 32), (64, 16, 64), (64, 32, 32), (64, 64, 32), (64, 128, 32), (128, 32, 16), (128, 32, 32), (128, 32, 64), (128, 64, 32), (128, 128, 32), (128, 256, 32), (256, 128, 32)],
-    (2, 'fp16'): [(16, 64, 32), (32, 64, 32), (32, 128, 32), (64, 16, 16), (64, 16, 32), (64, 16, 64), (64, 32, 32), (64, 64, 32), (64, 128, 32), (128, 32, 16), (128, 32, 32), (128, 32, 64), (128, 64, 32), (128, 128, 32), (128, 256, 32), (256, 128, 32)],
+    (2, 'bf16'): [(16, 64, 32), (32, 64, 32), (32, 128, 32), (64, 16, 16), (64, 16, 32), (64, 16, 64), (64, 32, 32), (64, 64, 32), (64, 64, 64), (64, 128, 32), (128, 32, 16), (128, 32, 32), (128, 32, 64), (128, 64, 32), (128, 64, 64), (128, 128, 32), (128, 256, 32), (256, 32, 64), (256, 128, 32), (256, 128, 64)],
+    (2, 'fp16'): [(16, 64, 32), (32, 64, 32), (32, 128, 32), (64, 16, 16), (64, 16, 32), (64, 16, 64), (64, 32, 32), (64, 64, 32), (64, 64, 64), (64, 128, 32), (128, 32, 16), (128, 32, 32), (128, 32, 64), (128, 64, 32), (128, 64, 64), (128, 128, 32), (128, 256, 32), (256, 32, 64), (256, 128, 32), (256, 128, 64)],
     (2, 'fp32'): [(16, 64, 32), (32, 64, 32), (32, 128, 32), (64, 16, 16), (64, 16, 32), (64, 32, 32), (64, 64, 32), (64, 128, 32), (128, 32, 16), (128, 32, 32), (128, 64, 32), (128, 128, 32), (128, 256, 32), (256, 128, 32)],
     (3, 'bf16'): [(16, 64, 32), (32, 64, 32), (32, 128, 32), (64, 16, 16), (64, 16, 32), (64, 16, 64), (64, 32, 32), (64, 64, 32), (64, 128, 32), (128, 32, 16), (128, 32, 32), (128, 32, 64), (128, 64, 32), (128, 128, 32), (128, 256, 32), (256, 128, 32)],
     (3, 'fp16'): [(16, 64, 32), (32, 64, 32), (32, 128, 32), (64, 16, 16), (64, 16, 32), (64, 16, 64), (64, 32, 32), (64, 64, 32), (64, 128, 32), (128, 32, 16), (128, 32, 32), (128, 32, 64), (128, 64, 32), (128, 128, 32), (128, 256, 32), (256, 128, 32)],
@@ -192,7 +192,7 @@ _BASE_TILE_WAVE_STRATEGIES: Dict[Tuple[int, int, int], List[WaveStrategy]] = {
     (16, 128, 64): [WaveStrategy.SPLIT_N],
     (16, 256, 32): [WaveStrategy.SINGLE],
     (16, 256, 64): [WaveStrategy.SPLIT_N4],
-    (32, 16, 64): [WaveStrategy.SPLIT_M],
+    (32, 16, 64): [WaveStrategy.SPLIT_M, WaveStrategy.SPLIT_MK],
     (32, 32, 32): [WaveStrategy.SINGLE],
     (32, 64, 16): [WaveStrategy.SINGLE],
     (32, 64, 32): [WaveStrategy.SINGLE],
@@ -203,7 +203,7 @@ _BASE_TILE_WAVE_STRATEGIES: Dict[Tuple[int, int, int], List[WaveStrategy]] = {
     (32, 256, 64): [WaveStrategy.SPLIT_N4],
     (64, 16, 16): [WaveStrategy.SINGLE],
     (64, 16, 32): [WaveStrategy.SINGLE, WaveStrategy.SPLIT_M4],
-    (64, 16, 64): [WaveStrategy.SPLIT_M],
+    (64, 16, 64): [WaveStrategy.SPLIT_M, WaveStrategy.SPLIT_MK],
     (64, 32, 16): [WaveStrategy.SINGLE],
     (64, 32, 32): [WaveStrategy.SINGLE],
     (64, 32, 64): [WaveStrategy.SPLIT_M],
@@ -214,7 +214,7 @@ _BASE_TILE_WAVE_STRATEGIES: Dict[Tuple[int, int, int], List[WaveStrategy]] = {
     (64, 128, 16): [WaveStrategy.SPLIT_N, WaveStrategy.SPLIT_MN],
     (64, 128, 32): [WaveStrategy.SPLIT_N, WaveStrategy.SPLIT_MN],
     (64, 128, 64): [WaveStrategy.SPLIT_MN],
-    (128, 16, 64): [WaveStrategy.SPLIT_M],
+    (128, 16, 64): [WaveStrategy.SPLIT_M, WaveStrategy.SPLIT_MK],
     (128, 32, 16): [WaveStrategy.SPLIT_M],
     (128, 32, 32): [WaveStrategy.SPLIT_M, WaveStrategy.SPLIT_MK],
     (128, 32, 64): [WaveStrategy.SPLIT_M],
@@ -234,6 +234,7 @@ _BASE_TILE_WAVE_STRATEGIES: Dict[Tuple[int, int, int], List[WaveStrategy]] = {
     (256, 64, 8): [WaveStrategy.SPLIT_MN],
     (256, 128, 16): [WaveStrategy.SPLIT_MN],
     (256, 128, 32): [WaveStrategy.SPLIT_MN],
+    (256, 128, 64): [WaveStrategy.SPLIT_MN],
     (256, 224, 64): [WaveStrategy.SPLIT_MN],
     (256, 256, 32): [WaveStrategy.SPLIT_MN],
 }
@@ -275,6 +276,13 @@ _WARP_MN_EXCEPTIONS: Dict[
     ("forward", (128, 128, 64), (2, 2, 1)): [(16, 16), (32, 32)],
     ("forward", (256, 256, 32), (2, 2, 1)): [(16, 16), (32, 32)],
     ("bwd_weight", (64, 64, 64), (2, 2, 1)): [(16, 16), (32, 32)],
+    # bwd_data wavelet tiles: wavelet instances use a 16x16 MFMA
+    # warp tile (warp_tile_k=32 for half) even though the per-wave tile is 32x32.
+    ("bwd_data", (64, 64, 64), (2, 2, 1)): [(16, 16)],
+    ("bwd_data", (128, 64, 64), (2, 2, 1)): [(16, 16)],
+    ("bwd_data", (256, 32, 64), (4, 1, 1)): [(16, 16)],
+    ("bwd_data", (256, 128, 32), (2, 2, 1)): [(16, 16), (32, 32)],
+    ("bwd_data", (256, 128, 64), (2, 2, 1)): [(16, 16)],
 }
 
 
@@ -765,10 +773,15 @@ _EXTRA_VEC_TRIPLES: Dict[str, Dict[Tuple[int, int, int], Dict[str, List[Tuple[in
     "bwd_data": {
         (64, 16, 32): {"float": [(8, 1, 1), (8, 2, 2)]},
         (64, 16, 64): {"half": [(16, 1, 1), (16, 2, 2)]},
+        (64, 64, 64): {"half": [(8, 8, 4), (8, 8, 8)]},
         (128, 32, 16): {"half": [(4, 2, 2)]},
         (128, 32, 32): {"float": [(8, 1, 1), (8, 2, 2)]},
         (128, 32, 64): {"half": [(16, 1, 1), (16, 2, 2), (16, 8, 8)]},
+        (128, 64, 64): {"half": [(8, 8, 8)]},
         (128, 256, 32): {"half": [(8, 4, 8)]},
+        (256, 32, 64): {"half": [(8, 8, 8)]},
+        (256, 128, 32): {"half": [(4, 8, 8)]},
+        (256, 128, 64): {"half": [(8, 8, 4), (8, 8, 8)]},
     },
     "bwd_weight": {
         (16, 16, 32): {"float": [(1, 1, 2)]},
@@ -899,14 +912,18 @@ _BWD_DATA_TILE_PIPELINES: Dict[Tuple[int, int, int], List[Tuple[str, str]]] = {
     (64, 16, 64): [('compv1', 'intrawave')],
     (64, 32, 32): [('compv1', 'intrawave')],
     (64, 64, 32): [('compv1', 'intrawave')],
+    (64, 64, 64): [('wavelet', 'intrawave')],
     (64, 128, 32): [('compv1', 'intrawave')],
     (128, 32, 16): [('compv1', 'intrawave')],
     (128, 32, 32): [('compv1', 'intrawave')],
     (128, 32, 64): [('compv1', 'intrawave')],
     (128, 64, 32): [('compv1', 'intrawave')],
+    (128, 64, 64): [('wavelet', 'intrawave')],
     (128, 128, 32): [('compv1', 'intrawave')],
     (128, 256, 32): [('compv1', 'intrawave')],
-    (256, 128, 32): [('compv1', 'intrawave')],
+    (256, 32, 64): [('wavelet', 'intrawave')],
+    (256, 128, 32): [('compv1', 'intrawave'), ('wavelet', 'intrawave')],
+    (256, 128, 64): [('wavelet', 'intrawave')],
 }
 
 _BWD_WEIGHT_TILE_PIPELINES: Dict[Tuple[int, int, int], List[Tuple[str, str]]] = {
@@ -1192,7 +1209,15 @@ VARIANT_FEATURES: Dict[str, List[FeatureSpec]] = {
         FeatureSpec(num_groups_to_merge=16, tile_override=[(64, 16, 16)]),
         FeatureSpec(num_groups_to_merge=32, tile_override=[(64, 16, 16)]),
     ],
-    "bwd_data": [],
+    "bwd_data": [
+        # num_groups_to_merge=32 wavelet instance for the 256x32x64 tile
+        FeatureSpec(
+            num_groups_to_merge=32,
+            tile_override=[(256, 32, 64)],
+            pipeline_override=[("wavelet", "intrawave")],
+            dtype_classes=["half"],
+        ),
+    ],
     "bwd_weight": [
         # explicit_gemm / two_stage / num_groups_to_merge are half-only:
         # the fp32 bwd_weight profiler JSON contains none of these features.

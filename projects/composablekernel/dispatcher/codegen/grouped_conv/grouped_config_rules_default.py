@@ -290,10 +290,9 @@ def check_tile_coverage(
     Return false when there is more threads than data to read.
     """
     if pipeline_version == "compv6":
-        if tile_k < 64:
-            return False
         # V6 pipeline computes A/B_Buffer_Load_Inst_Num as integer division;
-        # if either is 0 the scheduler divides by zero at compile time.
+        # if either is 0 the scheduler divides by zero at compile time. 
+        # tile_k=32 compv6 instances are valid as long as both load-instruction counts stay >= 1.
         if (tile_m * tile_k) // (block_size * vec_a) < 1:
             return False
         if (tile_n * tile_k) // (block_size * vec_b) < 1:
