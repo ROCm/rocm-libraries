@@ -14,20 +14,23 @@ target_sources(stinkytofu PRIVATE
     DeadCodeEliminationPass.cpp
     RedundantMovEliminationPass.cpp
     LegalizationUtils.cpp
-    ScheduleLastLRsPass.cpp
     StinkyDAGSchedulerPass.cpp
     SetMatrixReusePass.cpp
-    StinkyConfigurableWaitCntPass.cpp
-    ScheduleFirstLRsPass.cpp
     StinkyWaitCntInsertionPass.cpp
+    waitcnt/WaitDataflow.cpp
+    waitcnt/ShallowPredPromotion.cpp
     StinkyRemoveWaitCntPass.cpp
     StinkyRemoveNopPass.cpp
     StinkyBuildImplicitDependencyPass.cpp
     MemTokenConsistencyCheckPass.cpp
     InsertVgprMsbPass.cpp
+    InsertClusterBarrierPass.cpp
     RaiseVgprMsbPass.cpp
     RemoveDelayAluPass.cpp
     InsertDelayAluPass.cpp
     LoopRegionRemarkPass.cpp
+    RemoveWaitAluPass.cpp
+    InsertWaitAluPass.cpp
+    RederiveExpertScopePass.cpp
     EstimateAsmCyclesPass.cpp
 )

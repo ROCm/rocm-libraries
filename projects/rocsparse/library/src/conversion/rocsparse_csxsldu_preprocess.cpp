@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -227,11 +227,11 @@ rocsparse_status rocsparse::csxsldu_preprocess_template(rocsparse_handle     han
     {
     case rocsparse_direction_row:
     {
-        RETURN_IF_HIP_ERROR(
-            hipMemcpyAsync(lptr, &lbase, sizeof(I), hipMemcpyHostToDevice, handle_->stream));
-        RETURN_IF_HIP_ERROR(
-            hipMemcpyAsync(uptr, &ubase, sizeof(I), hipMemcpyHostToDevice, handle_->stream));
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle_->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+            lptr, &lbase, sizeof(I), hipMemcpyHostToDevice, handle_->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+            uptr, &ubase, sizeof(I), hipMemcpyHostToDevice, handle_->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
         J    nblocks = (m_ - 1) / nthreads_per_block + 1;
         dim3 blocks(nblocks);
         rocsparse::csxtril_count_kernel_dispatch<nthreads_per_block, I, J>(
@@ -253,11 +253,11 @@ rocsparse_status rocsparse::csxsldu_preprocess_template(rocsparse_handle     han
     }
     }
 
-    RETURN_IF_HIP_ERROR(
-        hipMemcpyAsync(host_lnnz_, &lptr[m_], sizeof(I), hipMemcpyDeviceToHost, handle_->stream));
-    RETURN_IF_HIP_ERROR(
-        hipMemcpyAsync(host_unnz_, &uptr[m_], sizeof(I), hipMemcpyDeviceToHost, handle_->stream));
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle_->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+        host_lnnz_, &lptr[m_], sizeof(I), hipMemcpyDeviceToHost, handle_->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+        host_unnz_, &uptr[m_], sizeof(I), hipMemcpyDeviceToHost, handle_->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
 
     host_lnnz_[0] -= lbase;
     host_unnz_[0] -= ubase;

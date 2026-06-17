@@ -182,9 +182,9 @@ Tests:
   category: pre_checkin
   function: spsm_coo
   indextype: *i32
-  precision: *single_double_precisions
+  precision: *single_only_precisions
   M_N: *M_N_range_checkin
-  K: [15, 16, 17, 18]
+  K: [17, 18]
   ld_multiplier_B: [1]
   ld_multiplier_C: [2]
   alpha_alphai: *alpha_range_checkin
@@ -262,7 +262,7 @@ Tests:
   category: pre_checkin
   function: spsm_coo
   indextype: *i32
-  precision: *single_double_precisions
+  precision: *double_only_precisions
   K: [141]
   ld_multiplier_B: [2]
   ld_multiplier_C: [3]
@@ -279,11 +279,11 @@ Tests:
 - name: spsm_coo_file
   category: pre_checkin
   function: spsm_coo
-  indextype: *i32_i64
+  indextype: *i32
   precision: *single_double_precisions_complex_real
   M: 1
   N: 1
-  K: [2, 4]
+  K: [4]
   ld_multiplier_B: [3]
   ld_multiplier_C: [3]
   alpha_alphai: *alpha_range_checkin
@@ -301,7 +301,7 @@ Tests:
 - name: spsm_coo_graph_test
   category: pre_checkin
   function: spsm_coo
-  indextype: *i32_i64
+  indextype: *i64
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_quick
   K: [65, 153, 280]

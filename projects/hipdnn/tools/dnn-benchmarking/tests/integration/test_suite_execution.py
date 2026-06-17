@@ -507,16 +507,29 @@ class TestSuiteCLIIntegration:
             eid in (0, 1) for eid in engine_ids
         ), f"Expected engines 0 or 1, got {engine_ids}"
 
-    def test_pytorch_backend_single_graph_still_works(self, project_root: Path) -> None:
-        """--backend pytorch on a single graph remains on the dedicated PyTorch path."""
-        try:
-            import torch
 
-            if not torch.cuda.is_available():
-                pytest.skip("PyTorch GPU not available")
-        except ImportError:
-            pytest.skip("PyTorch not available")
+@pytest.mark.gpu
+class TestPyTorchBackendCLIIntegration:
+    """Suite-CLI tests for --backend pytorch (no hipDNN/plugins required).
 
+    Separate from TestSuiteCLIIntegration so these run on CUDA-only hosts,
+    where setup.sh --torch-mode cuda intentionally skips hipDNN and plugins.
+    Each test only needs a torch GPU.
+    """
+
+    @pytest.fixture(autouse=True)
+    def check_deps(self):
+        """Skip unless a torch GPU is available (no hipDNN dependency)."""
+        _require_gpu()
+
+    @pytest.fixture
+    def project_root(self) -> Path:
+        return Path(__file__).parent.parent.parent
+
+    def test_pytorch_backend_single_graph_uses_suite_path(
+        self, project_root: Path
+    ) -> None:
+        """--backend pytorch on a single graph runs through the suite path."""
         result = subprocess.run(
             [
                 sys.executable,
@@ -536,34 +549,55 @@ class TestSuiteCLIIntegration:
             cwd=project_root,
         )
 
-        assert result.returncode in (
-            0,
-            1,
-        ), f"Unexpected exit code {result.returncode}. stderr: {result.stderr}"
-        # PyTorch path uses its own header
-        assert "PyTorch CUDA Benchmark" in result.stdout
-        # And specifically does NOT use the suite wrapper
-        assert "hipDNN Benchmark Suite" not in result.stdout
+        assert result.returncode == 0, (
+            f"Unexpected exit code {result.returncode}. "
+            f"stdout: {result.stdout} stderr: {result.stderr}"
+        )
+        # The PyTorch backend shares the suite wrapper for command parity.
+        assert "hipDNN Benchmark Suite" in result.stdout
+        # The hipDNN handle is never constructed for the PyTorch backend.
+        assert "Initializing hipDNN" not in result.stdout
 
-    def test_pytorch_backend_multi_graph_rejected(self, project_root: Path) -> None:
-        """--backend pytorch with a glob exits 1 with the not-supported message."""
+    def test_pytorch_backend_multi_graph_suite_json(
+        self, project_root: Path, tmp_path: Path
+    ) -> None:
+        """--backend pytorch with multiple graphs emits one SuiteResult JSON."""
+        output_file = tmp_path / "pytorch_results.json"
         result = subprocess.run(
             [
                 sys.executable,
                 "-m",
                 "dnn_benchmarking",
                 "--graph",
-                str(_graphs_dir() / "*.json"),
+                str(_graphs_dir() / "sample_conv_fwd.json"),
+                str(_graphs_dir() / "sample_relu.json"),
                 "--backend",
                 "pytorch",
                 "--warmup",
                 "1",
                 "--iters",
                 "2",
+                "-o",
+                str(output_file),
             ],
             capture_output=True,
             text=True,
             cwd=project_root,
         )
-        assert result.returncode == 1
-        assert "not supported with --backend pytorch" in result.stdout
+
+        assert result.returncode == 0, (
+            f"Unexpected exit code {result.returncode}. "
+            f"stdout: {result.stdout} stderr: {result.stderr}"
+        )
+        assert output_file.exists(), result.stdout
+        data = json.loads(output_file.read_text())
+        assert len(data["graphs"]) == 2
+        for graph in data["graphs"]:
+            providers = {r["provider"] for r in graph["results"]}
+            assert providers == {"pytorch"}
+            for row in graph["results"]:
+                assert row["status"] == "success", row
+                assert row["e2e_stats"], row
+                # "auto" timing yields HIP events on ROCm and torch.cuda
+                # events on CUDA, so kernel stats exist on both.
+                assert row["gpu_kernel_stats"], row
