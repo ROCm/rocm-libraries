@@ -64,6 +64,12 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     # HIP is required to build _rocisa (via hip::host).  Set the search prefix
     # so find_package works both in developer environments and in the temporary
     # build sandbox created by scikit-build-core / uv.
+    # ROCM_PATH may arrive as a CMake variable (-DROCM_PATH=...) or only as an
+    # environment variable (e.g. tox setenv); honor both so find_package(hip)
+    # works in the isolated scikit-build-core / uv build sandbox.
+    if(NOT ROCM_PATH AND DEFINED ENV{ROCM_PATH})
+        set(ROCM_PATH "$ENV{ROCM_PATH}")
+    endif()
     if(ROCM_PATH)
         list(APPEND CMAKE_PREFIX_PATH "${ROCM_PATH}")
     endif()
