@@ -112,6 +112,7 @@ additional_options = {
         "projects_to_test": [
             "hipdnn",
             "hipdnn_install",
+            "hipdnn_python_bindings",
             "hipdnn-samples",
             "miopenprovider",
             "hipblasltprovider",
