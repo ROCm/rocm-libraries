@@ -222,6 +222,28 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     VAShiftRightI32,
     VPackF16toB32,
     VLShiftLeftOrB32,
+    VCvtF16toF32,
+    VCvtF32toF16,
+    VCvtF32toU32,
+    VCvtU32toF32,
+    VCvtI32toF32,
+    VCvtF32toI32,
+    VCvtFP8toF32,
+    VCvtBF8toF32,
+    VCvtPkFP8toF32,
+    VCvtPkBF8toF32,
+    VCvtPkF32toBF8,
+    VCvtSRF32toFP8,
+    VCvtSRF32toBF8,
+    VCvtPkF32toFP8,
+    VCvtPkF32toBF16,
+    VCvtScalePkFP8toF16,
+    VCvtScalePkBF8toF16,
+    VCvtScaleFP8toF16,
+    VCvtScalePkF16toFP8,
+    VCvtScalePkF16toBF8,
+    VCvtScaleSRF16toFP8,
+    VCvtScaleSRF16toBF8,
     _to_stinky_register,
 )
 
@@ -1851,6 +1873,153 @@ class TestVAShiftRightI32Construction(unittest.TestCase):
         m = Module()
         m.add(VAShiftRightI32(dst=vgpr(0), shiftHex=vgpr(1), src=vgpr(2)))
         self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+# ===========================================================================
+# Step 7 — Conversion (VCvt*) instructions
+# ===========================================================================
+
+_CVT_UNARY = [
+    (VCvtF16toF32, "v_cvt_f32_f16", InstType.INST_NOTYPE),
+    (VCvtF32toF16, "v_cvt_f16_f32", InstType.INST_NOTYPE),
+    (VCvtF32toU32, "v_cvt_u32_f32", InstType.INST_NOTYPE),
+    (VCvtU32toF32, "v_cvt_f32_u32", InstType.INST_NOTYPE),
+    (VCvtI32toF32, "v_cvt_f32_i32", InstType.INST_NOTYPE),
+    (VCvtF32toI32, "v_cvt_i32_f32", InstType.INST_NOTYPE),
+    (VCvtFP8toF32, "v_cvt_f32_fp8", InstType.INST_NOTYPE),
+    (VCvtBF8toF32, "v_cvt_f32_bf8", InstType.INST_NOTYPE),
+    (VCvtPkFP8toF32, "v_cvt_pk_f32_fp8", InstType.INST_NOTYPE),
+    (VCvtPkBF8toF32, "v_cvt_pk_f32_bf8", InstType.INST_NOTYPE),
+]
+
+_CVT_BINARY = [
+    (VCvtPkF32toBF8, "v_cvt_pk_bf8_f32", InstType.INST_NOTYPE),
+    (VCvtSRF32toFP8, "v_cvt_sr_fp8_f32", InstType.INST_NOTYPE),
+    (VCvtSRF32toBF8, "v_cvt_sr_bf8_f32", InstType.INST_NOTYPE),
+    (VCvtPkF32toFP8, "v_cvt_pk_fp8_f32", InstType.INST_NOTYPE),
+    (VCvtPkF32toBF16, "v_cvt_pk_bf16_f32", InstType.INST_NOTYPE),
+]
+
+_CVT_SCALE = [
+    (VCvtScalePkFP8toF16, "v_cvt_scalef32_pk_f16_fp8", InstType.INST_NOTYPE),
+    (VCvtScalePkBF8toF16, "v_cvt_scalef32_pk_f16_bf8", InstType.INST_NOTYPE),
+    (VCvtScaleFP8toF16, "v_cvt_scalef32_f16_fp8", InstType.INST_NOTYPE),
+    (VCvtScalePkF16toFP8, "v_cvt_scalef32_pk_fp8_f16", InstType.INST_NOTYPE),
+    (VCvtScalePkF16toBF8, "v_cvt_scalef32_pk_bf8_f16", InstType.INST_NOTYPE),
+    (VCvtScaleSRF16toFP8, "v_cvt_scalef32_sr_fp8_f16", InstType.INST_NOTYPE),
+    (VCvtScaleSRF16toBF8, "v_cvt_scalef32_sr_bf8_f16", InstType.INST_NOTYPE),
+]
+
+
+class TestCvtUnaryConstruction(unittest.TestCase):
+    """Unary conversion shims (dst, src)."""
+
+    def test_construction_and_str(self):
+        for cls, mnemonic, itype in _CVT_UNARY:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src=vgpr(1), comment="cvt")
+                self.assertIsInstance(inst, CommonInstruction)
+                self.assertEqual(inst.instStr, mnemonic)
+                self.assertEqual(inst.instType, itype)
+                self.assertEqual(len(inst.srcs), 1)
+                text = str(inst)
+                self.assertIn(mnemonic, text)
+
+    def test_deepcopy(self):
+        for cls, _, _ in _CVT_UNARY:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(4), src=vgpr(5))
+                c = copy.deepcopy(inst)
+                self.assertIsInstance(c, cls)
+                self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        for cls, _, _ in _CVT_UNARY:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src=vgpr(1))
+                self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        for cls, _, _ in _CVT_UNARY:
+            with self.subTest(cls=cls.__name__):
+                m = Module()
+                m.add(cls(dst=vgpr(0), src=vgpr(1)))
+                self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestCvtBinaryConstruction(unittest.TestCase):
+    """Binary conversion shims (dst, src0, src1)."""
+
+    def test_construction_and_str(self):
+        for cls, mnemonic, itype in _CVT_BINARY:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2), comment="cvt2")
+                self.assertIsInstance(inst, CommonInstruction)
+                self.assertEqual(inst.instStr, mnemonic)
+                self.assertEqual(inst.instType, itype)
+                self.assertEqual(len(inst.srcs), 2)
+                text = str(inst)
+                self.assertIn(mnemonic, text)
+
+    def test_deepcopy(self):
+        for cls, _, _ in _CVT_BINARY:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(4), src0=vgpr(5), src1=vgpr(6))
+                c = copy.deepcopy(inst)
+                self.assertIsInstance(c, cls)
+                self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        for cls, _, _ in _CVT_BINARY:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2))
+                self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        for cls, _, _ in _CVT_BINARY:
+            with self.subTest(cls=cls.__name__):
+                m = Module()
+                m.add(cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
+                self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestCvtScaleConstruction(unittest.TestCase):
+    """Scale conversion shims (dst, src, scale)."""
+
+    def test_construction_and_str(self):
+        for cls, mnemonic, itype in _CVT_SCALE:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src=vgpr(1), scale=vgpr(2), comment="sc")
+                self.assertIsInstance(inst, CommonInstruction)
+                self.assertEqual(inst.instStr, mnemonic)
+                self.assertEqual(inst.instType, itype)
+                self.assertEqual(len(inst.srcs), 2)
+                text = str(inst)
+                self.assertIn(mnemonic, text)
+
+    def test_deepcopy(self):
+        for cls, _, _ in _CVT_SCALE:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(4), src=vgpr(5), scale=vgpr(6))
+                c = copy.deepcopy(inst)
+                self.assertIsInstance(c, cls)
+                self.assertEqual(str(c), str(inst))
+
+    def test_has_to_stinky_logical(self):
+        for cls, _, _ in _CVT_SCALE:
+            with self.subTest(cls=cls.__name__):
+                inst = cls(dst=vgpr(0), src=vgpr(1), scale=vgpr(2))
+                self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        for cls, _, _ in _CVT_SCALE:
+            with self.subTest(cls=cls.__name__):
+                m = Module()
+                m.add(cls(dst=vgpr(0), src=vgpr(1), scale=vgpr(2)))
+                self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
 # ===========================================================================

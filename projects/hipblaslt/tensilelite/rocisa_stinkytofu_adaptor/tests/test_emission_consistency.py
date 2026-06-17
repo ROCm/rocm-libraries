@@ -1249,5 +1249,197 @@ class TestVPackF16toB32Emission(unittest.TestCase, _ThreePathEqualityCase):
 ## assemble successfully in all test environments.
 
 
+# ===========================================================================
+# Step 7 — Conversion (VCvt*) emission consistency tests
+# ===========================================================================
+
+
+class TestVCvtF16toF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_cvt_f32_f16 v0, v1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VCvtF16toF32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VCvtF16toF32(dst=vgpr(0), src=vgpr(1)))
+    """)
+
+
+class TestVCvtF32toF16Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_cvt_f16_f32 v0, v1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VCvtF32toF16
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VCvtF32toF16(dst=vgpr(0), src=vgpr(1)))
+    """)
+
+
+class TestVCvtF32toU32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_cvt_u32_f32 v0, v1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VCvtF32toU32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VCvtF32toU32(dst=vgpr(0), src=vgpr(1)))
+    """)
+
+
+class TestVCvtU32toF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_cvt_f32_u32 v0, v1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VCvtU32toF32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VCvtU32toF32(dst=vgpr(0), src=vgpr(1)))
+    """)
+
+
+class TestVCvtI32toF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_cvt_f32_i32 v0, v1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VCvtI32toF32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VCvtI32toF32(dst=vgpr(0), src=vgpr(1)))
+    """)
+
+
+class TestVCvtF32toI32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_cvt_i32_f32 v0, v1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VCvtF32toI32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VCvtF32toI32(dst=vgpr(0), src=vgpr(1)))
+    """)
+
+
+class TestVCvtFP8toF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_cvt_f32_fp8 v0, v1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VCvtFP8toF32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VCvtFP8toF32(dst=vgpr(0), src=vgpr(1)))
+    """)
+
+
+class TestVCvtBF8toF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_cvt_f32_bf8 v0, v1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VCvtBF8toF32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VCvtBF8toF32(dst=vgpr(0), src=vgpr(1)))
+    """)
+
+
+class TestVCvtPkFP8toF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_cvt_pk_f32_fp8 v0, v1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VCvtPkFP8toF32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VCvtPkFP8toF32(dst=vgpr(0), src=vgpr(1)))
+    """)
+
+
+class TestVCvtPkBF8toF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_cvt_pk_f32_bf8 v0, v1``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VCvtPkBF8toF32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VCvtPkBF8toF32(dst=vgpr(0), src=vgpr(1)))
+    """)
+
+
+class TestVCvtPkF32toBF8Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_cvt_pk_bf8_f32 v0, v1, v2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VCvtPkF32toBF8
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VCvtPkF32toBF8(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
+    """)
+
+
+class TestVCvtSRF32toFP8Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_cvt_sr_fp8_f32 v0, v1, v2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VCvtSRF32toFP8
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VCvtSRF32toFP8(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
+    """)
+
+
+class TestVCvtSRF32toBF8Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_cvt_sr_bf8_f32 v0, v1, v2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VCvtSRF32toBF8
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VCvtSRF32toBF8(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
+    """)
+
+
+class TestVCvtPkF32toFP8Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_cvt_pk_fp8_f32 v0, v1, v2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VCvtPkF32toFP8
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VCvtPkF32toFP8(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
+    """)
+
+
+class TestVCvtPkF32toBF16Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_cvt_pk_bf16_f32 v0, v1, v2``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VCvtPkF32toBF16
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VCvtPkF32toBF16(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
+    """)
+
+
+## VCvtScale* emission consistency tests are skipped: these instructions are in
+## SKIP_LOWERING in LogicalToAsmMultiArchTest.cpp because the standard lowering
+## pass cannot handle them (they require scale-specific patterns not yet in the
+## lowering pipeline). The adaptor correctly constructs them with to_stinky_logical()
+## but the asm emission cannot be compared end-to-end yet.
+
+
 if __name__ == "__main__":
     unittest.main()

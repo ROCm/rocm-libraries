@@ -84,10 +84,13 @@ Not yet done (dummy):
       ``VCmpXClassF32`` … ``VCmpXNeU32``,
       the Scalar Min/Max batch (``SAbsI32``, ``SMaxI32``, ``SMaxU32``,
       ``SMinI32``, ``SMinU32``),
-      and the Vector Unary/Misc batch: ``VExpF16`` … ``VRsqIFlagF32``,
+      the Vector Unary/Misc batch: ``VExpF16`` … ``VRsqIFlagF32``,
       ``VNotB32``, ``VPrngB32``, ``VRndneF32``, ``VMaxF16`` … ``VMinI32``,
       ``VMed3I32``, ``VMed3F32``, ``VAShiftRightI32``,
-      ``VPackF16toB32``, ``VLShiftLeftOrB32``.
+      ``VPackF16toB32``, ``VLShiftLeftOrB32``,
+      and the Conversion batch: ``VCvtF16toF32`` … ``VCvtPkBF8toF32``
+      (unary), ``VCvtPkF32toBF8`` … ``VCvtPkF32toBF16`` (binary),
+      ``VCvtScalePkFP8toF16`` … ``VCvtScaleSRF16toBF8`` (scale).
     - ``CompositeInstruction`` still dummy (no concrete subclass
       promoted yet). ``MacroInstruction`` is real (KernelWriter emits
       it 16+ times via ``V_MAGIC_DIV`` / ``GLOBAL_OFFSET_*`` /
@@ -1872,57 +1875,85 @@ SSchedulingFence = make_dummy_class(f"{_P}.SSchedulingFence")
 # Conversion instructions
 # source: rocisa/rocisa/src/instruction/cvt.cpp
 # ==========================================================================
-VCvtInstruction = make_dummy_class(f"{_P}.VCvtInstruction")
-# logicalIR: VCvtF16toF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCvtF16toF32 = make_dummy_class(f"{_P}.VCvtF16toF32")
-# logicalIR: VCvtF32toF16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCvtF32toF16 = make_dummy_class(f"{_P}.VCvtF32toF16")
+
+
+def _make_cvt_scale_class(class_name: str, mnemonic: str, inst_type: "InstType"):
+    """Factory for scale CVT shim classes with (dst, src, scale) rocisa API."""
+
+    def __init__(self, dst: Any, src: Any = None, scale: Any = None,
+                 sdwa: Any = None, vop3: Any = None, comment: str = "", **kw):
+        _ = kw
+        CommonInstruction.__init__(
+            self,
+            instType=inst_type,
+            dst=dst,
+            srcs=[src, scale],
+            dpp=None,
+            sdwa=sdwa,
+            vop3=vop3,
+            comment=comment,
+        )
+        self.setInst(mnemonic)
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        dst_reg = _to_stinky_register(self.dst)
+        src_reg = _to_stinky_register(self.srcs[0])
+        scale_reg = _to_stinky_register(self.srcs[1])
+        factory = getattr(_st, class_name)
+        return factory(dst_reg, src_reg, scale_reg, comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+    cls = type(class_name, (CommonInstruction,), {
+        "__init__": __init__,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+    })
+    cls.__qualname__ = class_name
+    return cls
+
+
+# VCvtInstruction is a base class — rarely instantiated directly by KernelWriter.
+VCvtInstruction = CommonInstruction
+
+# --- Unary CVTs: (dst, src) → logicalIR(dst, src) ---
+VCvtF16toF32 = _make_scalar_unary_class("VCvtF16toF32", "v_cvt_f32_f16", InstType.INST_NOTYPE)
+VCvtF32toF16 = _make_scalar_unary_class("VCvtF32toF16", "v_cvt_f16_f32", InstType.INST_NOTYPE)
+VCvtF32toU32 = _make_scalar_unary_class("VCvtF32toU32", "v_cvt_u32_f32", InstType.INST_NOTYPE)
+VCvtU32toF32 = _make_scalar_unary_class("VCvtU32toF32", "v_cvt_f32_u32", InstType.INST_NOTYPE)
+VCvtI32toF32 = _make_scalar_unary_class("VCvtI32toF32", "v_cvt_f32_i32", InstType.INST_NOTYPE)
+VCvtF32toI32 = _make_scalar_unary_class("VCvtF32toI32", "v_cvt_i32_f32", InstType.INST_NOTYPE)
+VCvtFP8toF32 = _make_scalar_unary_class("VCvtFP8toF32", "v_cvt_f32_fp8", InstType.INST_NOTYPE)
+VCvtBF8toF32 = _make_scalar_unary_class("VCvtBF8toF32", "v_cvt_f32_bf8", InstType.INST_NOTYPE)
+VCvtPkFP8toF32 = _make_scalar_unary_class("VCvtPkFP8toF32", "v_cvt_pk_f32_fp8", InstType.INST_NOTYPE)
+VCvtPkBF8toF32 = _make_scalar_unary_class("VCvtPkBF8toF32", "v_cvt_pk_f32_bf8", InstType.INST_NOTYPE)
+
+# --- Binary CVTs: (dst, src0, src1) → logicalIR(dst, src0, src1) ---
+VCvtPkF32toBF8 = _make_scalar_alu_class("VCvtPkF32toBF8", "v_cvt_pk_bf8_f32", InstType.INST_NOTYPE)
+VCvtSRF32toFP8 = _make_scalar_alu_class("VCvtSRF32toFP8", "v_cvt_sr_fp8_f32", InstType.INST_NOTYPE)
+VCvtSRF32toBF8 = _make_scalar_alu_class("VCvtSRF32toBF8", "v_cvt_sr_bf8_f32", InstType.INST_NOTYPE)
+VCvtPkF32toFP8 = _make_scalar_alu_class("VCvtPkF32toFP8", "v_cvt_pk_fp8_f32", InstType.INST_NOTYPE)
+VCvtPkF32toBF16 = _make_scalar_alu_class("VCvtPkF32toBF16", "v_cvt_pk_bf16_f32", InstType.INST_NOTYPE)
+
+# --- Scale CVTs: (dst, src, scale) → logicalIR(dst, src, scale) ---
+VCvtScalePkFP8toF16 = _make_cvt_scale_class("VCvtScalePkFP8toF16", "v_cvt_scalef32_pk_f16_fp8", InstType.INST_NOTYPE)
+VCvtScalePkBF8toF16 = _make_cvt_scale_class("VCvtScalePkBF8toF16", "v_cvt_scalef32_pk_f16_bf8", InstType.INST_NOTYPE)
+VCvtScaleFP8toF16 = _make_cvt_scale_class("VCvtScaleFP8toF16", "v_cvt_scalef32_f16_fp8", InstType.INST_NOTYPE)
+VCvtScalePkF16toFP8 = _make_cvt_scale_class("VCvtScalePkF16toFP8", "v_cvt_scalef32_pk_fp8_f16", InstType.INST_NOTYPE)
+VCvtScalePkF16toBF8 = _make_cvt_scale_class("VCvtScalePkF16toBF8", "v_cvt_scalef32_pk_bf8_f16", InstType.INST_NOTYPE)
+VCvtScaleSRF16toFP8 = _make_cvt_scale_class("VCvtScaleSRF16toFP8", "v_cvt_scalef32_sr_fp8_f16", InstType.INST_NOTYPE)
+VCvtScaleSRF16toBF8 = _make_cvt_scale_class("VCvtScaleSRF16toBF8", "v_cvt_scalef32_sr_bf8_f16", InstType.INST_NOTYPE)
+
+# --- No logicalIR mapping (remain as dummy) ---
 VCvtPkF32toF16 = make_dummy_class(f"{_P}.VCvtPkF32toF16")
 VCvtPkF32toFP16 = make_dummy_class(f"{_P}.VCvtPkF32toFP16")
-# logicalIR: VCvtF32toU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCvtF32toU32 = make_dummy_class(f"{_P}.VCvtF32toU32")
-# logicalIR: VCvtU32toF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCvtU32toF32 = make_dummy_class(f"{_P}.VCvtU32toF32")
 VCvtF64toU32 = make_dummy_class(f"{_P}.VCvtF64toU32")
 VCvtU32toF64 = make_dummy_class(f"{_P}.VCvtU32toF64")
-# logicalIR: VCvtI32toF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCvtI32toF32 = make_dummy_class(f"{_P}.VCvtI32toF32")
-# logicalIR: VCvtF32toI32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCvtF32toI32 = make_dummy_class(f"{_P}.VCvtF32toI32")
-# logicalIR: VCvtFP8toF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCvtFP8toF32 = make_dummy_class(f"{_P}.VCvtFP8toF32")
-# logicalIR: VCvtBF8toF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCvtBF8toF32 = make_dummy_class(f"{_P}.VCvtBF8toF32")
-# logicalIR: VCvtPkFP8toF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCvtPkFP8toF32 = make_dummy_class(f"{_P}.VCvtPkFP8toF32")
-# logicalIR: VCvtPkBF8toF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCvtPkBF8toF32 = make_dummy_class(f"{_P}.VCvtPkBF8toF32")
-# logicalIR: VCvtPkF32toBF8  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCvtPkF32toBF8 = make_dummy_class(f"{_P}.VCvtPkF32toBF8")
-# logicalIR: VCvtSRF32toFP8  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCvtSRF32toFP8 = make_dummy_class(f"{_P}.VCvtSRF32toFP8")
-# logicalIR: VCvtSRF32toBF8  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCvtSRF32toBF8 = make_dummy_class(f"{_P}.VCvtSRF32toBF8")
-# logicalIR: VCvtScalePkFP8toF16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCvtScalePkFP8toF16 = make_dummy_class(f"{_P}.VCvtScalePkFP8toF16")
-# logicalIR: VCvtScalePkBF8toF16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCvtScalePkBF8toF16 = make_dummy_class(f"{_P}.VCvtScalePkBF8toF16")
-# logicalIR: VCvtScaleFP8toF16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCvtScaleFP8toF16 = make_dummy_class(f"{_P}.VCvtScaleFP8toF16")
 VCvtFP8toF16 = make_dummy_class(f"{_P}.VCvtFP8toF16")
-# logicalIR: VCvtScalePkF16toFP8  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCvtScalePkF16toFP8 = make_dummy_class(f"{_P}.VCvtScalePkF16toFP8")
-# logicalIR: VCvtScalePkF16toBF8  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCvtScalePkF16toBF8 = make_dummy_class(f"{_P}.VCvtScalePkF16toBF8")
-# logicalIR: VCvtScaleSRF16toFP8  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCvtScaleSRF16toFP8 = make_dummy_class(f"{_P}.VCvtScaleSRF16toFP8")
-# logicalIR: VCvtScaleSRF16toBF8  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCvtScaleSRF16toBF8 = make_dummy_class(f"{_P}.VCvtScaleSRF16toBF8")
-# logicalIR: VCvtPkF32toFP8  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCvtPkF32toFP8 = make_dummy_class(f"{_P}.VCvtPkF32toFP8")
 PVCvtBF16toFP32 = make_dummy_class(f"{_P}.PVCvtBF16toFP32")
-# logicalIR: VCvtPkF32toBF16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
-VCvtPkF32toBF16 = make_dummy_class(f"{_P}.VCvtPkF32toBF16")
 
 
 # ==========================================================================
