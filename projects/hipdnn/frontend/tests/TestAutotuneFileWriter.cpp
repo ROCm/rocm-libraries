@@ -169,6 +169,9 @@ TEST(TestAutotuneFileWriter, BuildOverrideEntryWithMetadata)
     EXPECT_EQ(meta["mode"], "exhaustive");
     EXPECT_EQ(meta["strategy"], "fixed_average");
     EXPECT_EQ(meta["rank"], 0);
+    EXPECT_FLOAT_EQ(meta["avg_time_ms"].get<float>(), 2.0f);
+    EXPECT_FLOAT_EQ(meta["stddev_ms"].get<float>(), 0.1f);
+    EXPECT_EQ(meta["workspace_size"], 1024);
     EXPECT_TRUE(meta.contains("timestamp"));
     // Timestamp should be ISO 8601 format (basic check for 'T' and 'Z')
     auto ts = meta["timestamp"].get<std::string>();
@@ -200,6 +203,31 @@ TEST(TestAutotuneFileWriter, WriteToNewFile)
     ASSERT_TRUE(json.contains("engine_overrides"));
     EXPECT_EQ(json["engine_overrides"].size(), 1u);
     EXPECT_EQ(json["engine_overrides"][0]["engine_name"], "MIOPEN_ENGINE");
+}
+
+TEST(TestAutotuneFileWriter, WriteReplacesNonArrayEngineOverrides)
+{
+    const TempFile tmpFile;
+
+    {
+        std::ofstream file(tmpFile.path);
+        file << R"({"engine_overrides":{"not":"an array"},"preserved":true})";
+    }
+
+    std::vector<AutotuneResult> results;
+    results.push_back(makeResult(1, "MIOPEN_ENGINE", 1.0f, true, 0));
+    const std::vector<std::vector<int64_t>> tensorDims = {{1, 3, 224, 224}};
+
+    auto err
+        = writeAutotuneResults(tmpFile.path.string(), "conv_fprop", results, false, tensorDims, {});
+    ASSERT_TRUE(err.is_good()) << err.get_message();
+
+    std::ifstream file(tmpFile.path);
+    auto json = nlohmann::json::parse(file);
+    ASSERT_TRUE(json["engine_overrides"].is_array());
+    ASSERT_EQ(json["engine_overrides"].size(), 1u);
+    EXPECT_EQ(json["engine_overrides"][0]["engine_name"], "MIOPEN_ENGINE");
+    EXPECT_TRUE(json["preserved"].get<bool>());
 }
 
 TEST(TestAutotuneFileWriter, WriteSkipsFailedResults)
@@ -316,6 +344,39 @@ TEST(TestAutotuneFileWriter, ReplaceEntriesWithDifferentKnobs)
 
     EXPECT_EQ(json["engine_overrides"].size(), 1u);
     EXPECT_EQ(json["engine_overrides"][0]["engine_name"], "HIPBLASLT_ENGINE");
+}
+
+TEST(TestAutotuneFileWriter, ReplaceOnlyExactOperationAndTensorSignature)
+{
+    const TempFile tmpFile;
+    const std::vector<std::vector<int64_t>> matchingDims = {{1, 3, 224, 224}};
+    const std::vector<std::vector<int64_t>> otherDims = {{2, 3, 224, 224}};
+
+    nlohmann::json root;
+    root["engine_overrides"] = nlohmann::json::array(
+        {{{"engine_name", "MISSING_OP"}, {"tensors", nlohmann::json::array()}},
+         {{"op", "conv_fprop"}, {"engine_name", "MISSING_TENSORS"}},
+         buildOverrideEntry(makeResult(7, "OTHER_TENSORS"), "conv_fprop", otherDims, {}),
+         buildOverrideEntry(makeResult(8, "OLD_MATCH"), "conv_fprop", matchingDims, {})});
+    {
+        std::ofstream file(tmpFile.path);
+        file << root.dump(2) << '\n';
+    }
+
+    std::vector<AutotuneResult> results;
+    results.push_back(makeResult(9, "NEW_MATCH", 0.5f, true, 0));
+    auto err = writeAutotuneResults(
+        tmpFile.path.string(), "conv_fprop", results, false, matchingDims, {});
+    ASSERT_TRUE(err.is_good()) << err.get_message();
+
+    std::ifstream file(tmpFile.path);
+    auto json = nlohmann::json::parse(file);
+    const auto& overrides = json["engine_overrides"];
+    ASSERT_EQ(overrides.size(), 4u);
+    EXPECT_EQ(overrides[0]["engine_name"], "MISSING_OP");
+    EXPECT_EQ(overrides[1]["engine_name"], "MISSING_TENSORS");
+    EXPECT_EQ(overrides[2]["engine_name"], "OTHER_TENSORS");
+    EXPECT_EQ(overrides[3]["engine_name"], "NEW_MATCH");
 }
 
 TEST(TestAutotuneFileWriter, DeleteAllExistingContent)
@@ -456,6 +517,12 @@ TEST(TestAutotuneFileWriter, TuneModeToLowerString)
 {
     EXPECT_EQ(tuneModeToLowerString(TuneMode::AUTO), "auto");
     EXPECT_EQ(tuneModeToLowerString(TuneMode::EXHAUSTIVE), "exhaustive");
+}
+
+TEST(TestAutotuneFileWriter, UnknownEnumsUseUnknownLowercaseStrings)
+{
+    EXPECT_EQ(strategyToLowerString(static_cast<AutotuneStrategy>(999)), "unknown");
+    EXPECT_EQ(tuneModeToLowerString(static_cast<TuneMode>(999)), "unknown");
 }
 
 // ── Error handling Tests ────────────────────────────────────────────────────

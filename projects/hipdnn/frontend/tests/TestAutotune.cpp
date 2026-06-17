@@ -326,6 +326,64 @@ TEST(TestAutotune, RunFixedAverageRunsAllIterations)
     EXPECT_EQ(static_cast<int>(outcome.timings.size()), 10);
 }
 
+TEST(TestAutotune, RunFixedAverageFailureMidLoopBreaks)
+{
+    ScriptedTimer timer{{7.0f, 8.0f, 9.0f}, 2, 0};
+    auto outcome = runFixedAverage(/*timedIterations=*/5, timer, noopFixedAverageLog);
+
+    EXPECT_FALSE(outcome.converged);
+    EXPECT_TRUE(outcome.benchmarkFailed);
+    ASSERT_EQ(outcome.timings.size(), 2u);
+    EXPECT_FLOAT_EQ(outcome.timings[0], 7.0f);
+    EXPECT_FLOAT_EQ(outcome.timings[1], 8.0f);
+    EXPECT_NE(outcome.errorMessage.find("iteration 2"), std::string::npos);
+    EXPECT_NE(outcome.errorMessage.find("scripted failure"), std::string::npos);
+}
+
+TEST(TestAutotune, RunFixedAverageInvokesCallbackForEachSuccessfulIteration)
+{
+    ScriptedTimer timer{{4.0f, 5.0f, 6.0f}, -1, 0};
+    std::vector<int> callbackIterations;
+    std::vector<float> callbackElapsedMs;
+    auto onIteration = [&](int iteration, float elapsedMs) {
+        callbackIterations.push_back(iteration);
+        callbackElapsedMs.push_back(elapsedMs);
+    };
+
+    auto outcome = runFixedAverage(/*timedIterations=*/3, timer, onIteration);
+
+    EXPECT_TRUE(outcome.converged);
+    EXPECT_FALSE(outcome.benchmarkFailed);
+    EXPECT_EQ(callbackIterations, (std::vector<int>{0, 1, 2}));
+    ASSERT_EQ(callbackElapsedMs.size(), 3u);
+    EXPECT_FLOAT_EQ(callbackElapsedMs[0], 4.0f);
+    EXPECT_FLOAT_EQ(callbackElapsedMs[1], 5.0f);
+    EXPECT_FLOAT_EQ(callbackElapsedMs[2], 6.0f);
+}
+
+TEST(TestAutotune, RunUntilStableReportsCovValidityToCallback)
+{
+    ScriptedTimer timer{{10.0f}, -1, 0};
+    std::vector<bool> covValidByIteration;
+    std::vector<float> covByIteration;
+    auto onIteration = [&](int, float, float cov, bool covValid) {
+        covValidByIteration.push_back(covValid);
+        covByIteration.push_back(cov);
+    };
+
+    auto outcome
+        = runUntilStable(MAX_ITERATIONS, WINDOW_SIZE, STABILITY_THRESHOLD, timer, onIteration);
+
+    EXPECT_TRUE(outcome.converged);
+    ASSERT_EQ(covValidByIteration.size(), 3u);
+    EXPECT_FALSE(covValidByIteration[0]);
+    EXPECT_FALSE(covValidByIteration[1]);
+    EXPECT_TRUE(covValidByIteration[2]);
+    EXPECT_FLOAT_EQ(covByIteration[0], 0.0f);
+    EXPECT_FLOAT_EQ(covByIteration[1], 0.0f);
+    EXPECT_FLOAT_EQ(covByIteration[2], 0.0f);
+}
+
 // ============================================================================
 // D2: maxIterations >= windowSize validation for RUN_UNTIL_STABLE
 // ============================================================================

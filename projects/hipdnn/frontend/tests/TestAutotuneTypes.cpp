@@ -234,6 +234,54 @@ TEST(TestAutotuneTypes, CartesianProductAtExactLimit)
     EXPECT_EQ(result.size(), 10000u);
 }
 
+TEST(TestAutotuneTypes, CartesianProductPreservesMixedValueTypesAndAxisOrder)
+{
+    const std::vector<KnobSweepAxis> axes = {{"INT_AXIS", {int64_t{1}}},
+                                             {"DOUBLE_AXIS", {0.25}},
+                                             {"STRING_AXIS", {std::string("fast")}}};
+    std::vector<std::vector<KnobSetting>> result;
+
+    auto error = autotune::computeCartesianProduct(axes, result);
+
+    ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
+    ASSERT_EQ(result.size(), 1u);
+    ASSERT_EQ(result[0].size(), 3u);
+    EXPECT_EQ(result[0][0].knobId(), "INT_AXIS");
+    EXPECT_EQ(std::get<int64_t>(result[0][0].value()), 1);
+    EXPECT_EQ(result[0][1].knobId(), "DOUBLE_AXIS");
+    EXPECT_DOUBLE_EQ(std::get<double>(result[0][1].value()), 0.25);
+    EXPECT_EQ(result[0][2].knobId(), "STRING_AXIS");
+    EXPECT_EQ(std::get<std::string>(result[0][2].value()), "fast");
+}
+
+TEST(TestAutotuneTypes, CartesianProductAboveWarningThresholdStillProducesAllCombinations)
+{
+    std::vector<KnobValueVariant> values40;
+    values40.reserve(40);
+    for(int64_t i = 0; i < 40; ++i)
+    {
+        values40.emplace_back(i);
+    }
+    std::vector<KnobValueVariant> values30;
+    values30.reserve(30);
+    for(int64_t i = 0; i < 30; ++i)
+    {
+        values30.emplace_back(i);
+    }
+
+    const std::vector<KnobSweepAxis> axes = {{"A", values40}, {"B", values30}};
+    std::vector<std::vector<KnobSetting>> result;
+
+    auto error = autotune::computeCartesianProduct(axes, result);
+
+    ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
+    ASSERT_EQ(result.size(), 1200u);
+    EXPECT_EQ(std::get<int64_t>(result.front()[0].value()), 0);
+    EXPECT_EQ(std::get<int64_t>(result.front()[1].value()), 0);
+    EXPECT_EQ(std::get<int64_t>(result.back()[0].value()), 39);
+    EXPECT_EQ(std::get<int64_t>(result.back()[1].value()), 29);
+}
+
 // ============================================================================
 // BenchmarkStatistics Tests
 // ============================================================================
@@ -457,6 +505,16 @@ TEST(TestAutotuneTypes, AutotuneStrategyValues)
     EXPECT_NE(AutotuneStrategy::SINGLE_SHOT, AutotuneStrategy::FIXED_AVERAGE);
     EXPECT_NE(AutotuneStrategy::FIXED_AVERAGE, AutotuneStrategy::RUN_UNTIL_STABLE);
     EXPECT_NE(AutotuneStrategy::SINGLE_SHOT, AutotuneStrategy::RUN_UNTIL_STABLE);
+}
+
+TEST(TestAutotuneTypes, TuneModeToStringUnknownReturnsUnknown)
+{
+    EXPECT_EQ(tuneModeToString(static_cast<TuneMode>(999)), "UNKNOWN");
+}
+
+TEST(TestAutotuneTypes, AutotuneStrategyToStringUnknownReturnsUnknown)
+{
+    EXPECT_EQ(strategyToString(static_cast<AutotuneStrategy>(999)), "UNKNOWN");
 }
 
 // ============================================================================
