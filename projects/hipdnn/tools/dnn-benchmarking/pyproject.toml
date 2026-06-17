@@ -44,8 +44,8 @@ where = ["src"]
 testpaths = ["tests"]
 markers = [
     "gpu: marks tests requiring GPU (deselect with '-m \"not gpu\"')",
-    "amd: marks tests requiring AMD ROCm GPUs",
-    "nvidia: marks tests requiring NVIDIA CUDA GPUs",
+    "rocm: marks tests requiring AMD ROCm GPUs (deselect with '-m \"not rocm\"')",
+    "cuda: marks tests requiring NVIDIA CUDA GPUs (deselect with '-m \"not cuda\"')",
     "slow: marks slow integration tests",
     "rocprofv3: requires rocprofv3 binary on PATH",
     "perf: requires Linux perf binary on PATH and perf_event_paranoid <= 1",

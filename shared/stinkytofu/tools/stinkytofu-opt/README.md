@@ -44,8 +44,7 @@ The binary will be located at: `build/tools/stinkytofu-opt/stinkytofu-opt`
 # Apply optimization passes
 ./build/tools/stinkytofu-opt/stinkytofu-opt \
     --arch gfx1250 func.arch-gfx1250.stir \
-    --StinkyDAGSchedulerPass \
-    --ScheduleFirstLRsPass
+    --StinkyDAGSchedulerPass
 ```
 
 ---
@@ -102,9 +101,6 @@ Available passes:
 =================
   --StinkyClusterDSReadPass
   --StinkyDAGSchedulerPass
-  --StinkyConfigurableWaitCntPass
-  --ScheduleLastLRsPass
-  --ScheduleFirstLRsPass
 ```
 
 **Note:** Passes are applied in the order they appear on the command line, after the initial deserialization pass.
@@ -223,9 +219,6 @@ struct PassInfo
 const std::vector<PassInfo> availablePasses = {
     { "StinkyClusterDSReadPass", []() { return createStinkyClusterDSReadPass(); } },
     { "StinkyDAGSchedulerPass", []() { return createStinkyDAGSchedulerPass(); } },
-    { "StinkyUnrollWaitCntPass", []() { return createStinkyUnrollWaitCntPass(); } },
-    { "ScheduleLastLRsPass", []() { return createScheduleLastLRsPass(); } },
-    { "ScheduleFirstLRsPass", []() { return createScheduleFirstLRsPass(); } },
 };
 ```
 
