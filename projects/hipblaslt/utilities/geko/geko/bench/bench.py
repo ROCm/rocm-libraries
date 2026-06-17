@@ -164,11 +164,12 @@ def run(
     if mute_for_progress:
         logger.setLevel(logging.WARNING)
 
+    using_cache = cache and verify_output(output_file, bench_file)
+    if using_cache:  # Using an old benchmark
+        logger.info(f"Using cached output in '{output_file}'")
+        return parse_benchmark_output(output_file)
+    
     if len(devices) == 1:
-        using_cache = cache and verify_output(output_file, bench_file)
-        if using_cache:  # Using an old benchmark
-            logger.info(f"Using cached output in '{output_file}'")
-            return parse_benchmark_output(output_file)
         logger.info(
             f"Running hipblaslt-bench for '{bench_file}' in device {devices[0]}, output will be saved in '{output_file}'"
         )
@@ -463,9 +464,6 @@ def compare(
             custom_lib_dir=custom_lib_dir, devices=devices, cache=cache, bench_freq=bench_freq,
             silent=True
         )
-        # Tag the tuned-side library bucket too, so consumers can see e.g. an
-        # Equality kernel being replaced by a Free-size kernel.
-        res = update_lib_source(res, matchtable_path)
         res.rename({c: c + "_tuned" for c in UNIQ_COLS}, axis=1, inplace=True)
         tuned.append(res)
 
