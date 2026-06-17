@@ -20,6 +20,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <type_traits>
 
 #include "ck_tile/dispatcher/dispatcher.hpp"
 #include "ck_tile/dispatcher/registry.hpp"
@@ -119,9 +120,20 @@ int dispatcher_initialize()
     key.signature.dtype_b             = DataType::FP16;
     key.signature.dtype_c             = DataType::FP16;
     key.signature.dtype_acc           = DataType::FP32;
-    key.signature.layout_a            = LayoutTag::RowMajor;
-    key.signature.layout_b            = LayoutTag::ColMajor;
-    key.signature.layout_c            = LayoutTag::RowMajor;
+    // Derive A/B/C layouts from the force-included kernel's own layout types
+    // instead of hardcoding rcr. The dispatcher's supports() gate is layout-aware
+    // (it only constrains a dimension that an operand's inner axis maps to), so a
+    // wrong key layout makes it reject valid problems -- e.g. a crr kernel does not
+    // gate K, but with a hardcoded rcr key supports() would apply rcr's K-gate and
+    // reject TileK=192 problems that Old-TE runs. ALayout/BLayout/CLayout are the
+    // global aliases exported by the kernel header under CK_TILE_SINGLE_KERNEL_INCLUDE.
+    using RowMajorLayout = ck_tile::tensor_layout::gemm::RowMajor;
+    key.signature.layout_a =
+        std::is_same_v<ALayout, RowMajorLayout> ? LayoutTag::RowMajor : LayoutTag::ColMajor;
+    key.signature.layout_b =
+        std::is_same_v<BLayout, RowMajorLayout> ? LayoutTag::RowMajor : LayoutTag::ColMajor;
+    key.signature.layout_c =
+        std::is_same_v<CLayout, RowMajorLayout> ? LayoutTag::RowMajor : LayoutTag::ColMajor;
     key.signature.transpose_a         = false;
     key.signature.transpose_b         = false;
     key.signature.grouped             = false;
