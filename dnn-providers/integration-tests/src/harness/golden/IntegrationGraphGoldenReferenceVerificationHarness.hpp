@@ -25,6 +25,7 @@
 #include "harness/IReferenceGraphExecutor.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/golden/GoldenBundleDiscovery.hpp"
+#include "harness/golden/GoldenBundleLoadCheck.hpp"
 
 namespace hipdnn_integration_tests::golden
 {
@@ -85,13 +86,29 @@ protected:
 
         applyMetadataGuards();
 
+        // A malformed graph .json is an authoring error and must FAIL, but
+        // missing .bin tensor data is an environment issue (DVC not pulled)
+        // and should SKIP. loadGraphAndTensors() throws std::exception for both,
+        // so disambiguate up front: parse the graph (parse failure -> FAIL),
+        // then confirm the referenced .bin files exist (absent -> SKIP).
+        if(!graphJsonParses(_bundlePath))
+        {
+            FAIL() << "Unparseable golden bundle graph JSON: " << _bundlePath;
+        }
+        if(!tensorDataPresent(_bundlePath))
+        {
+            GTEST_SKIP() << "Tensor data not available (DVC not pulled?): " << _bundlePath;
+        }
+
+        // Remaining loader failures (schema mismatch, tensor size mismatch) are
+        // authoring/data errors, not missing data -> FAIL.
         try
         {
             _graphAndTensors = hipdnn_test_sdk::utilities::loadGraphAndTensors(_bundlePath);
         }
         catch(const std::exception& e)
         {
-            GTEST_SKIP() << "Tensor data not available (DVC not pulled?): " << e.what();
+            FAIL() << "Failed to load golden bundle " << _bundlePath << ": " << e.what();
         }
         _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();
     }

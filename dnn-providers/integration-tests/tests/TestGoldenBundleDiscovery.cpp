@@ -12,6 +12,7 @@
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 
 #include "harness/golden/GoldenBundleDiscovery.hpp"
+#include "harness/golden/GoldenBundleLoadCheck.hpp"
 
 using namespace hipdnn_integration_tests::golden;
 
@@ -221,6 +222,47 @@ TEST(TestTierPrefix, MatchesRfcScheme)
     EXPECT_EQ(tierPrefix("standard"), "Standard/");
     EXPECT_EQ(tierPrefix("comprehensive"), "Comprehensive/");
     EXPECT_EQ(tierPrefix("full"), "Full/");
+}
+
+// The harness uses graphJsonParses() to distinguish a malformed bundle (FAIL)
+// from absent tensor data (SKIP). It must return false only for genuinely
+// unparseable JSON, regardless of whether .bin files are present.
+TEST_F(TestGoldenBundleDiscoveryFixture, GraphJsonParsesRejectsMalformedAcceptsValid)
+{
+    auto dir = _tempDir / "bundle";
+    std::filesystem::create_directories(dir);
+
+    const auto goodPath = dir / "good.json";
+    std::ofstream(goodPath) << R"({"tensors": []})";
+    EXPECT_TRUE(graphJsonParses(goodPath));
+
+    const auto badPath = dir / "bad.json";
+    std::ofstream(badPath) << "{{NOT VALID JSON AT ALL";
+    EXPECT_FALSE(graphJsonParses(badPath));
+
+    EXPECT_FALSE(graphJsonParses(dir / "does_not_exist.json"));
+}
+
+// tensorDataPresent() drives the SKIP decision: true only when every tensor's
+// companion .bin exists. A valid graph with no .bin files (DVC not pulled) must
+// return false so the harness skips rather than fails.
+TEST_F(TestGoldenBundleDiscoveryFixture, TensorDataPresentDetectsMissingBinFiles)
+{
+    auto dir = _tempDir / "bundle";
+    std::filesystem::create_directories(dir);
+    const auto jsonPath = dir / "b.json";
+    std::ofstream(jsonPath) << R"({"tensors": [{"uid": 0}, {"uid": 1}]})";
+
+    // No .bin files yet -> data not present.
+    EXPECT_FALSE(tensorDataPresent(jsonPath));
+
+    // Only one of two blobs present -> still not present.
+    std::ofstream(dir / "b.tensor0.bin") << "x";
+    EXPECT_FALSE(tensorDataPresent(jsonPath));
+
+    // Both blobs present -> data present.
+    std::ofstream(dir / "b.tensor1.bin") << "y";
+    EXPECT_TRUE(tensorDataPresent(jsonPath));
 }
 
 // NOLINTEND(readability-identifier-naming)
