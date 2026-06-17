@@ -225,9 +225,10 @@ class InstructionEmitter:
         if counts is None:
             return []
 
-        # force_drain means "wait for every outstanding global read to retire"
-        # (full vmcnt(0) drain); the per-tensor counts are kept only for the
-        # diagnostic comment. See WaitGROp.force_drain in LogicalScheduler.py.
+        # force_drain -> emit a full vmcnt(0) drain instead of the per-tensor
+        # counts (which are then kept only for the diagnostic comment). See
+        # WaitGROp.force_drain in LogicalScheduler.py for why a static count is
+        # not used here.
         force_drain = getattr(source, 'force_drain', False)
 
         if self.kernel.get("enableTDMA", False) and self.kernel.get("enableTDMB", False):

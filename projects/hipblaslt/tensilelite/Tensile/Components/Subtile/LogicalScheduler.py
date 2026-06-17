@@ -458,11 +458,20 @@ class WaitGROp(BaseOp):
     wait_gr_counts: Optional[WaitGRCounts] = None
     has_sync: bool = False
     adjustVmcnt: bool = True
-    # When True the emitter ignores wait_gr_counts and forces a full vmcnt(0)
-    # drain (all outstanding global reads must retire). wait_gr_counts is still
-    # populated with the precise per-tensor inflight estimate for diagnostics,
-    # and force_drain survives _merge_preops so the min-count merge cannot
-    # silently weaken the drain back to a partial vmcnt.
+    # Authoritative rationale for force_drain (referenced from the emitter and
+    # from _merge_preops):
+    #
+    # When True the emitter ignores wait_gr_counts and emits a full vmcnt(0)
+    # drain (all outstanding global reads must retire). It is set for StreamK
+    # wrap / cross-iter LRs, where no precise static wait count is correct:
+    # StreamK splits K across workgroups at runtime, so the number of in-flight
+    # GR atoms between the producing buffer_load and the consumer is
+    # grid-dependent and any static per-tensor count can be too weak (stale LDS).
+    #
+    # It is kept as a distinct flag rather than a bare count of 0 so that (a) the
+    # precise per-tensor estimate in wait_gr_counts survives for diagnostics, and
+    # (b) the min-count merge in _merge_preops cannot silently weaken the drain
+    # back to a partial vmcnt and re-introduce the wrap-LR race.
     force_drain: bool = False
 
     def __post_init__(self):
@@ -2141,18 +2150,13 @@ class LogicalScheduler:
                             counts = self._compute_inflight_loads(
                                 pi, lr.subIterK_slot, wait_dep.ref.tensor, wait_dep)
                             # StreamK wrap-LR race fix (multi-DU only): wrap /
-                            # cross-iter consumers read an LDS buffer across a
-                            # body-iteration / MT-prefetch boundary. Under
-                            # StreamK the number of global-read atoms between the
-                            # producing buffer_load and the consumer is
-                            # grid-dependent, so the static per-tensor inflight
-                            # `counts` can be too weak -> stale LDS -> verify
-                            # failures. For these wraps the minimal correct
-                            # static wait is a full vmcnt(0) drain. Flag the op
-                            # force_drain (rather than zeroing `counts`) so the
-                            # precise estimate survives for diagnostics and so the
-                            # _merge_preops min-count merge cannot silently weaken
-                            # the drain back to a partial vmcnt.
+                            # cross-iter consumers (mtIteration > 0, or a GR dep
+                            # with mt_offset != 0) read an LDS buffer across an
+                            # iteration boundary. Under StreamK (pgr == 1) the
+                            # only correct static wait for these is a full
+                            # vmcnt(0) drain, so flag the op force_drain rather
+                            # than emitting `counts`. See WaitGROp.force_drain for
+                            # the full rationale.
                             any_wrap = (lr.mtIteration > 0
                                         or any(d.mt_offset != 0 for d in gr_deps))
                             force_drain = (self.config.pgr == 1 and any_wrap)
@@ -2348,10 +2352,9 @@ class LogicalScheduler:
                         if getattr(op.wait_gr_counts, t) > 0]
                     setattr(merged_counts, t, min(vals) if vals else 0)
                 adjust = all(op.adjustVmcnt for op, _ in wait_gr_by_lr)
-            # A full drain is the strictest possible wait, so if any merged LR
-            # requested force_drain the merged op must also drain (otherwise the
-            # min-count merge above would silently weaken it back to a partial
-            # vmcnt and re-introduce the wrap-LR race).
+            # Preserve force_drain across the merge: a drain is the strictest
+            # possible wait, so if any merged op requested it the merged op must
+            # drain too (see WaitGROp.force_drain).
             merged_force_drain = any(
                 getattr(op, 'force_drain', False) for op, _ in wait_gr_by_lr)
             result.append(WaitGROp(wait_gr_counts=merged_counts,
