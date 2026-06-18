@@ -909,9 +909,9 @@ def cmake_build(Map conf=[:]){
                         // most useful for debugging.
                         try {
                             sh """
-                                WORKSPACE_ROOT=${env.WORKSPACE} \\
-                                NINJA_JOBS=${nt} \\
-                                ARCH_NAME=${arch_name} \\
+                                WORKSPACE_ROOT="${env.WORKSPACE}" \\
+                                NINJA_JOBS="${nt}" \\
+                                ARCH_NAME="${arch_name}" \\
                                 bash ../script/dependency-parser/smart_build.sh
                             """
                         } finally {
@@ -937,7 +937,7 @@ def cmake_build(Map conf=[:]){
                         def junitFile = "junit_${sanitizedJobName}_${env.BUILD_NUMBER}_${arch_name}_smarttest.xml"
                         try {
                             sh """
-                                JUNIT_OUTPUT=${junitFile} \\
+                                JUNIT_OUTPUT="${junitFile}" \\
                                 bash ../script/dependency-parser/smart_test.sh
                             """
                         } finally {
