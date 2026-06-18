@@ -82,7 +82,12 @@ const std::vector<PassInfo> availablePasses = {
      [](const auto&) { return createStinkyBuildImplicitDependencyPass(); }},
     {"StinkyRemoveWaitCntPass", [](const auto&) { return createStinkyRemoveWaitCntPass(); }},
     {"StinkyRemoveNopPass", [](const auto&) { return createStinkyRemoveNopPass(); }},
-    {"StinkyWaitCntInsertionPass", [](const auto&) { return createStinkyWaitCntInsertionPass(); }},
+    {"StinkyWaitCntInsertionPass",
+     [](const std::vector<std::string>& args) {
+         WaitCntInsertionOptions options;
+         options.enableLoopCarriedTokenDeps = hasPassArg(args, "enableLoopCarriedTokenDeps");
+         return createStinkyWaitCntInsertionPass(options);
+     }},
     // BuildUseDefChainPass accepts:
     //   includePseudo    — also build chains for pseudo registers (memtokens)
     //   noClearExisting  — keep any existing PHIs/chains
