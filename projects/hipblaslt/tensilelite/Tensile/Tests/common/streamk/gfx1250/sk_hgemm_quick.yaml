@@ -21,7 +21,6 @@ GlobalParameters:
   EnqueuesPerSync: 1
   # NumBenchmarks: 10
   SleepPercent: 50
-  ISA: [[12, 5, 0]]
 
 
 BenchmarkProblems:

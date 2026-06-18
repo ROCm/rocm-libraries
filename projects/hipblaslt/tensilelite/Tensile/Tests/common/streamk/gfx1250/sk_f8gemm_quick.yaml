@@ -19,7 +19,6 @@ GlobalParameters:
   DataInitTypeScaleAlphaVec: 21
   MaxWorkspaceSize: 134217728
   # PrintSolutionRejectionReason: True
-  ISA: [[12, 5, 0]]
 
 BenchmarkProblems:
   - # F8SS NN
