@@ -9,7 +9,7 @@ with pluggable scheduling rules.
 
 from typing import List, Tuple, Optional
 from rocisa.code import Module
-from rocisa.instruction import SWaitCnt, SBarrier, MFMAInstruction, MXMFMAInstruction, \
+from rocisa.instruction import SWaitCnt, MFMAInstruction, MXMFMAInstruction, \
     LocalReadInstruction, GlobalReadInstruction, CommonInstruction
 
 
@@ -120,8 +120,7 @@ class _SlotPlacer:
         self.place(pos, item, reverse=reverse)
         return pos
 
-    def placePath(self, pathInsts: List[Tuple[int, object]], reverse: bool = False,
-                  multiDU: bool = False):
+    def placePath(self, pathInsts: List[Tuple[int, object]], reverse: bool = False):
         """Place a sequence of (moduleId, instruction) items into slots.
 
         Walks pathInsts in order, applying adjusters (forward only) and
@@ -129,33 +128,14 @@ class _SlotPlacer:
         the closest valid position respecting dependencies (allowing >2
         items per slot).
 
-        When multiDU is True, wait_gr immediately followed by barrier is
-        placed as an atomic pair in the same slot so other paths cannot
-        insert m0 setup between them.
+        wait_gr/sync adjacency is carried by the logical SyncOp.before edge,
+        so no instruction-scheduler special-case is needed to keep them
+        contiguous.
         """
         limit = (self.totalSlots - 1) if reverse else 0
         idx = 0
         while idx < len(pathInsts):
             item = pathInsts[idx]
-            _, inst = item
-            if (multiDU and not reverse and idx + 1 < len(pathInsts)
-                    and _isWaitGr(inst) and _isBarrier(pathInsts[idx + 1][1])):
-                # Atomic wait_gr+barrier pair: keep contiguous so no
-                # interleaved path injects a GR between them.
-                pos = self._placeOne(item, limit, reverse)
-                sync_item = pathInsts[idx + 1]
-                if self._canPlace(pos, sync_item[1]):
-                    self.place(pos, sync_item, reverse=reverse)
-                else:
-                    sync_pos = self.findSlot(sync_item[0], sync_item[1],
-                                             pos + 1, reverse=reverse)
-                    if sync_pos is None:
-                        sync_pos = self._forceSlot(sync_item[0], pos + 1, reverse)
-                    self.place(sync_pos, sync_item, reverse=reverse)
-                    pos = sync_pos
-                limit = (pos - 1) if reverse else (pos + 1)
-                idx += 2
-                continue
             pos = self._placeOne(item, limit, reverse)
             limit = (pos - 1) if reverse else (pos + 1)
             idx += 1
@@ -190,8 +170,6 @@ _isM0Update = lambda x: isinstance(x, CommonInstruction) and hasattr(x, 'dst') a
 # wait emitted on this path, so vlcnt != -1 identifies it; wait_lr uses
 # vlcnt=-1 (force_drain wait_gr still emits vlcnt=0, so drains stay wait_gr).
 _isWaitGr = lambda x: _isWaitCnt(x) and x.vlcnt != -1
-_isBarrier = lambda x: isinstance(x, SBarrier)
-
 
 class _SchedulingRules:
     """Scheduling rules for slot placement: validators, adjusters, and placement hooks.
@@ -471,7 +449,7 @@ def instructionSchedule(emittedModules, multiDU: bool = False):
         rules.resetPath()
         if not hasWaitGR:
             rules.setupBufLoadSpreading(placer, pathInsts, order)
-        placer.placePath(pathInsts, reverse=reverse, multiDU=multiDU)
+        placer.placePath(pathInsts, reverse=reverse)
 
     scheduled = Module()
     _emitPreMfma(scheduled)
