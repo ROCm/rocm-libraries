@@ -18,6 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#ifndef SPIRV
+
 #include "test_callbacks.h"
 #include "rocfft_complex.h"
 
@@ -778,3 +780,5 @@ void get_rank_store_callbacks_funcptr(const fft_params&                         
         }
     }
 }
+
+#endif
