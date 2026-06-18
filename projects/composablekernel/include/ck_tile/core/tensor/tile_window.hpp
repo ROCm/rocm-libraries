@@ -798,7 +798,7 @@ struct tile_window_with_static_distribution
                             const auto coord_ys_offset = make_tensor_coordinate(
                                 this->get_bottom_tensor_view().get_tensor_descriptor(),
                                 idx_ys_offset);
-                            return coord_ys_offset.get_offset();
+                            return amd_wave_read_first_lane(coord_ys_offset.get_offset());
                         }
                         else
                             return 0;
