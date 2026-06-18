@@ -29,6 +29,7 @@ add_executable(
     TestHipblasltHipdnnPluginExecutionContext.cpp
     TestHipblasltMatmulDesc.cpp
     TestHipblasltMatrixLayout.cpp
+    TestHipblasltMatrixTransformDesc.cpp
     TestHipblasltPluginApi.cpp
     TestHipblasltUtils.cpp
 )

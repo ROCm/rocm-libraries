@@ -150,6 +150,7 @@ add_library(
     engines/plans/HipblasltMxMatmulPlanBuilder.cpp
     HipblasltMatmulDesc.cpp
     HipblasltMatrixLayout.cpp
+    HipblasltMatrixTransformDesc.cpp
 )
 target_include_directories(hipblaslt_plugin_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 dnn_provider_generate_version_header(hipblaslt_provider hipblaslt_plugin_private ${CMAKE_CURRENT_LIST_DIR})
