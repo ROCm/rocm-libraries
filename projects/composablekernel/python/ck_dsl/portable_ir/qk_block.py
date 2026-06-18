@@ -59,7 +59,7 @@ def build_qk_block(D: int, dtype: str = "f16"):
 
 
 def record_qk_block():
-    from recipe_recorder import RecipeRecorder, IExpr
+    from ck_dsl.portable_ir.recipe_recorder import RecipeRecorder, IExpr
 
     rec = RecipeRecorder(
         "ckdsl_qk_block_d{D}_{dtype}",

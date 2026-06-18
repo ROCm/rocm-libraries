@@ -32,7 +32,7 @@ cc -std=c99 -O2 -I "$ROCM/include" "$HERE/comgr_compile_ll.c" -L"$ROCM/lib" -lam
 
 echo ""
 echo ">> converting production build_unified_attention_2d ($DTYPE D$D) -> recipe"
-python3 "$HERE/kerneldef_to_recipe.py" --emit recipe --D "$D" --dtype "$DTYPE" --arch "$ARCH" \
+python3 -m ck_dsl.portable_ir.kerneldef_to_recipe --emit recipe --D "$D" --dtype "$DTYPE" --arch "$ARCH" \
     > "$OUT/attn2d.recipe.json" 2> "$OUT/conv.err" || { echo "convert FAIL"; cat "$OUT/conv.err"; exit 1; }
 echo "   recipe: $(wc -c < "$OUT/attn2d.recipe.json") bytes"
 
@@ -40,7 +40,7 @@ echo ">> recipe VM -> .ll"
 "$OUT/recipe_run" "$OUT/attn2d.recipe.json" --arch "$ARCH" > "$OUT/vm.ll" 2> "$OUT/vm.err" || {
     echo "VM FAIL: $(cat "$OUT/vm.err")"; exit 1; }
 echo ">> production lower -> .ll"
-python3 "$HERE/kerneldef_to_recipe.py" --emit ll --D "$D" --dtype "$DTYPE" --arch "$ARCH" \
+python3 -m ck_dsl.portable_ir.kerneldef_to_recipe --emit ll --D "$D" --dtype "$DTYPE" --arch "$ARCH" \
     > "$OUT/ref.ll" 2> "$OUT/ref.err" || { echo "REF FAIL"; cat "$OUT/ref.err"; exit 1; }
 
 echo ">> comgr both -> HSACO"

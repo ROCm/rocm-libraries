@@ -30,7 +30,7 @@ cc -std=c99 -O2 -I "$CKC/include" "$HERE/recipe_run.c" "$OUT/libckc.a" -lm -o "$
 cc -std=c99 -O2 -I "$ROCM/include" "$HERE/comgr_compile_ll.c" -L"$ROCM/lib" -lamd_comgr -o "$OUT/comgr" || {
     echo "comgr tool build FAILED"; exit 1; }
 
-python3 "$HERE/recipe_toy.py" --emit recipe > "$OUT/toy.recipe.json"
+python3 -m ck_dsl.portable_ir.recipe_toy --emit recipe > "$OUT/toy.recipe.json"
 echo ""
 echo "ONE recipe artifact: $(wc -c < "$OUT/toy.recipe.json") bytes (covers every D)"
 echo ""
@@ -40,7 +40,7 @@ for D in 64 128 256; do
     # Recipe VM (pure C): one recipe + runtime D -> specialized kernel -> .ll
     "$OUT/recipe_run" "$OUT/toy.recipe.json" --arch "$ARCH" --int "D=$D" --str dtype=f32 > "$OUT/vm_$D.ll" 2> "$OUT/vm_$D.err" || { echo "VM FAIL D=$D: $(cat "$OUT/vm_$D.err")"; rc=1; continue; }
     # Python reference kernel -> .ll
-    python3 "$HERE/recipe_toy.py" --emit ll --D "$D" --dtype f32 --arch "$ARCH" > "$OUT/ref_$D.ll" 2> "$OUT/ref_$D.err" || { echo "REF FAIL D=$D"; rc=1; continue; }
+    python3 -m ck_dsl.portable_ir.recipe_toy --emit ll --D "$D" --dtype f32 --arch "$ARCH" > "$OUT/ref_$D.ll" 2> "$OUT/ref_$D.err" || { echo "REF FAIL D=$D"; rc=1; continue; }
     # comgr-compile both to HSACO and compare bytes.
     vmsz=$("$OUT/comgr" "$OUT/vm_$D.ll" "$OUT/vm_$D.hsaco" "$ARCH") || { echo "comgr VM FAIL D=$D"; rc=1; continue; }
     refsz=$("$OUT/comgr" "$OUT/ref_$D.ll" "$OUT/ref_$D.hsaco" "$ARCH") || { echo "comgr REF FAIL D=$D"; rc=1; continue; }
