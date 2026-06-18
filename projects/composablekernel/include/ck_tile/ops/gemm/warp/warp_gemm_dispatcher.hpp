@@ -352,21 +352,35 @@ template <typename AType,
           WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA,
           bool IsScale16                     = false>
 #if USE_NEW_UNIFIED_FRAMEWORK
-using WarpGemmDispatcher = typename impl::warp_gemm_dispatcher::UnificationDispatcher<
+// Now that we convert SwizzleA bool to SwizzleFactor. This used to be hardcoded in a number of
+// places in the original dispatcher / warpgemms, always using 2 for the cases where the dispatcher
+// was used.
+using WarpGemmDispatcher =
+    typename impl::warp_gemm_dispatcher::UnificationDispatcher<AType,
+                                                               BType,
+                                                               AccType,
+                                                               MPerWave,
+                                                               NPerWave,
+                                                               KPerWave,
+                                                               TransposeC,
+                                                               SwizzleA ? 2 : 1,
+                                                               UseStructuredSparsity,
+                                                               AttrNumAccessA,
+                                                               AttrNumAccessB,
+                                                               IsScale16>::Type;
 #else
-using WarpGemmDispatcher = typename impl::warp_gemm_dispatcher::Dispatcher<
+using WarpGemmDispatcher = typename impl::warp_gemm_dispatcher::Dispatcher<AType,
+                                                                           BType,
+                                                                           AccType,
+                                                                           MPerWave,
+                                                                           NPerWave,
+                                                                           KPerWave,
+                                                                           TransposeC,
+                                                                           SwizzleA,
+                                                                           UseStructuredSparsity,
+                                                                           AttrNumAccessA,
+                                                                           AttrNumAccessB,
+                                                                           IsScale16>::Type;
 #endif
-    AType,
-    BType,
-    AccType,
-    MPerWave,
-    NPerWave,
-    KPerWave,
-    TransposeC,
-    SwizzleA,
-    UseStructuredSparsity,
-    AttrNumAccessA,
-    AttrNumAccessB,
-    IsScale16>::Type;
 
 } // namespace ck_tile

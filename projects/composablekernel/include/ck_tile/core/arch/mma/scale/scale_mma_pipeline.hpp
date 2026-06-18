@@ -133,7 +133,7 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
         MmaOpTraits<MmaOp>::IsSupported ? AttrNumAccessBV : 1;
 
     // TODO: TileDistrEncCalc only supports K composition (kIter) and always gives post-compression
-    // A layout. No Swizzle support yet.
+    // A layout.
     using EncCalc           = TileDistrEncCalc<MmaOp,
                                                CTranspose,
                                                SwizzleFactor,

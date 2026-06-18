@@ -139,7 +139,7 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<WaveWiseMmaPipeline<ADataTyp
     };
 
     // TODO: TileDistrEncCalc only supports K composition (kIter) and always gives post-compression
-    // A layout. No Swizzle support yet.
+    // A layout.
     using EncCalc           = TileDistrEncCalc<MmaOp,
                                                CTranspose,
                                                SwizzleFactor,
