@@ -15,6 +15,7 @@
 
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
 
+#include <hipdnn_data_sdk/detail/AutotuneConfigNames.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
@@ -40,6 +41,10 @@ namespace hipdnn_frontend
 {
 namespace autotune
 {
+namespace detail
+{
+namespace config_json = hipdnn_data_sdk::detail::autotune_config::json;
+} // namespace detail
 using Criteria = std::vector<std::pair<std::string, int64_t>>;
 
 inline nlohmann::json criteriaToJson(const Criteria& criteria)
@@ -54,9 +59,10 @@ inline nlohmann::json criteriaToJson(const Criteria& criteria)
 
 inline nlohmann::json criteriaOrEmpty(const nlohmann::json& entry)
 {
-    if(entry.contains("criteria") && entry["criteria"].is_object())
+    if(entry.contains(detail::config_json::CRITERIA)
+       && entry[detail::config_json::CRITERIA].is_object())
     {
-        return entry["criteria"];
+        return entry[detail::config_json::CRITERIA];
     }
     return nlohmann::json::object();
 }
@@ -66,7 +72,7 @@ namespace detail
 
 inline nlohmann::json tensorEntryWithoutId(nlohmann::json entry)
 {
-    entry.erase("tensor_id");
+    entry.erase(config_json::TENSOR_ID);
     return entry;
 }
 
@@ -76,12 +82,12 @@ inline bool tensorsMatchByIdIgnoringOrder(const nlohmann::json& existing,
     std::vector<uint8_t> used(existing.size(), 0);
     for(const auto& replacementTensor : replacement)
     {
-        const auto replacementId = replacementTensor.at("tensor_id").get<std::string>();
+        const auto replacementId = replacementTensor.at(config_json::TENSOR_ID).get<std::string>();
         bool matched = false;
         for(size_t i = 0; i < existing.size(); ++i)
         {
-            if(used[i] != 0 || !existing[i].contains("tensor_id")
-               || existing[i]["tensor_id"].get<std::string>() != replacementId)
+            if(used[i] != 0 || !existing[i].contains(config_json::TENSOR_ID)
+               || existing[i][config_json::TENSOR_ID].get<std::string>() != replacementId)
             {
                 continue;
             }
@@ -126,11 +132,11 @@ inline bool tensorSignaturesMatch(const nlohmann::json& existing, const nlohmann
 
     const bool existingAllNamed
         = std::all_of(existing.begin(), existing.end(), [](const nlohmann::json& tensor) {
-              return tensor.contains("tensor_id");
+              return tensor.contains(config_json::TENSOR_ID);
           });
     const bool replacementAllNamed
         = std::all_of(replacement.begin(), replacement.end(), [](const nlohmann::json& tensor) {
-              return tensor.contains("tensor_id");
+              return tensor.contains(config_json::TENSOR_ID);
           });
     if(existingAllNamed && replacementAllNamed)
     {
@@ -189,30 +195,30 @@ inline nlohmann::json buildOverrideEntry(const AutotuneResult& result,
                                          const std::vector<std::string>& tensorIds = {})
 {
     nlohmann::json entry;
-    entry["op"] = opName;
+    entry[config_json::OP] = opName;
     if(!criteria.empty())
     {
-        entry["criteria"] = criteriaToJson(criteria);
+        entry[config_json::CRITERIA] = criteriaToJson(criteria);
     }
-    entry["engine_name"] = result.engineName;
+    entry[config_json::ENGINE_NAME] = result.engineName;
 
     // Tensor patterns (dimensions and strides)
     nlohmann::json tensors = nlohmann::json::array();
     for(size_t i = 0; i < tensorDims.size(); ++i)
     {
         nlohmann::json t;
-        t["dim"] = tensorDims[i];
+        t[config_json::DIM] = tensorDims[i];
         if(i < tensorIds.size() && !tensorIds[i].empty())
         {
-            t["tensor_id"] = tensorIds[i];
+            t[config_json::TENSOR_ID] = tensorIds[i];
         }
         if(i < tensorStrides.size() && !tensorStrides[i].empty())
         {
-            t["stride"] = tensorStrides[i];
+            t[config_json::STRIDE] = tensorStrides[i];
         }
         tensors.push_back(std::move(t));
     }
-    entry["tensors"] = std::move(tensors);
+    entry[config_json::TENSORS] = std::move(tensors);
 
     // Autotune metadata
     nlohmann::json metadata;
@@ -332,9 +338,10 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
             root = nlohmann::json::object();
         }
 
-        if(!root.contains("engine_overrides") || !root["engine_overrides"].is_array())
+        if(!root.contains(config_json::ENGINE_OVERRIDES)
+           || !root[config_json::ENGINE_OVERRIDES].is_array())
         {
-            root["engine_overrides"] = nlohmann::json::array();
+            root[config_json::ENGINE_OVERRIDES] = nlohmann::json::array();
         }
 
         // Build the single new entry from the rank-0 winner (the first succeeded
@@ -363,22 +370,24 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
         // unconditionally replaced.
         // Replace-match is exact (operation, tensor shape) only. It does NOT match the
         // reader's -1 wildcard patterns (TensorPattern::matches).
-        auto& overrides = root["engine_overrides"];
+        auto& overrides = root[config_json::ENGINE_OVERRIDES];
 
         if(!overrides.empty())
         {
-            overrides.erase(
-                std::remove_if(overrides.begin(),
-                               overrides.end(),
-                               [&](const nlohmann::json& existing) {
-                                   return existing.contains("op")
-                                          && existing["op"] == (*newEntry)["op"]
-                                          && criteriaOrEmpty(existing) == criteriaOrEmpty(*newEntry)
-                                          && existing.contains("tensors")
-                                          && tensorSignaturesMatch(existing["tensors"],
-                                                                   (*newEntry)["tensors"]);
-                               }),
-                overrides.end());
+            overrides.erase(std::remove_if(overrides.begin(),
+                                           overrides.end(),
+                                           [&](const nlohmann::json& existing) {
+                                               return existing.contains(config_json::OP)
+                                                      && existing[config_json::OP]
+                                                             == (*newEntry)[config_json::OP]
+                                                      && criteriaOrEmpty(existing)
+                                                             == criteriaOrEmpty(*newEntry)
+                                                      && existing.contains(config_json::TENSORS)
+                                                      && tensorSignaturesMatch(
+                                                          existing[config_json::TENSORS],
+                                                          (*newEntry)[config_json::TENSORS]);
+                                           }),
+                            overrides.end());
         }
 
         overrides.push_back(*newEntry);

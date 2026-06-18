@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
+#include <hipdnn_data_sdk/detail/AutotuneConfigNames.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
@@ -21,6 +22,7 @@
 
 namespace hipdnn_backend::heuristics::config
 {
+namespace config_json = hipdnn_data_sdk::detail::autotune_config::json;
 
 /// Dimension value meaning "match any value in this slot".
 inline constexpr int64_t WILDCARD_DIM = -1;
@@ -303,14 +305,14 @@ private:
     static EngineOverrideConfig parseJson(const nlohmann::json& j)
     {
         std::vector<OperationRule> rules;
-        for(const auto& entry : j.at("engine_overrides"))
+        for(const auto& entry : j.at(config_json::ENGINE_OVERRIDES))
         {
             OperationRule rule;
-            rule.op = entry.at("op").get<std::string>();
-            rule.engineName = entry.at("engine_name").get<std::string>();
-            if(entry.contains("criteria"))
+            rule.op = entry.at(config_json::OP).get<std::string>();
+            rule.engineName = entry.at(config_json::ENGINE_NAME).get<std::string>();
+            if(entry.contains(config_json::CRITERIA))
             {
-                const auto& criteria = entry.at("criteria");
+                const auto& criteria = entry.at(config_json::CRITERIA);
                 if(!criteria.is_object())
                 {
                     throw nlohmann::json::type_error::create(
@@ -321,17 +323,17 @@ private:
                     rule.criteria.push_back(Criterion{item.key(), item.value().get<int64_t>()});
                 }
             }
-            for(const auto& t : entry.at("tensors"))
+            for(const auto& t : entry.at(config_json::TENSORS))
             {
                 TensorPattern pat;
-                if(t.contains("tensor_id"))
+                if(t.contains(config_json::TENSOR_ID))
                 {
-                    pat.tensorId = t.at("tensor_id").get<std::string>();
+                    pat.tensorId = t.at(config_json::TENSOR_ID).get<std::string>();
                 }
-                pat.dim = t.at("dim").get<std::vector<int64_t>>();
-                if(t.contains("stride"))
+                pat.dim = t.at(config_json::DIM).get<std::vector<int64_t>>();
+                if(t.contains(config_json::STRIDE))
                 {
-                    pat.stride = t.at("stride").get<std::vector<int64_t>>();
+                    pat.stride = t.at(config_json::STRIDE).get<std::vector<int64_t>>();
                 }
                 rule.tensors.push_back(std::move(pat));
             }
