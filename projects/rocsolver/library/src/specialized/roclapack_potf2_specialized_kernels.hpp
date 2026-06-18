@@ -362,13 +362,42 @@ rocblas_status potf2_run_small(rocblas_handle handle,
     }
 
     bool const is_upper = (uplo == rocblas_fill_upper);
-    auto kernel = std::array{
-        potf2_kernel_small<1, BS2, T, I, INFO, U>, potf2_kernel_small<2, BS2, T, I, INFO, U>,
-        potf2_kernel_small<3, BS2, T, I, INFO, U>, potf2_kernel_small<4, BS2, T, I, INFO, U>,
-        potf2_kernel_small<5, BS2, T, I, INFO, U>, potf2_kernel_small<6, BS2, T, I, INFO, U>,
-        potf2_kernel_small<7, BS2, T, I, INFO, U>, potf2_kernel_small<8, BS2, T, I, INFO, U>};
-    ROCSOLVER_LAUNCH_KERNEL(kernel[nb - 1], dim3(1, 1, batch_count), dim3(BS2, BS2, 1), lmemsize,
-                            stream, is_upper, n, A, shiftA, lda, strideA, info);
+    if constexpr(BS2 == 16)
+    {
+        auto kernel = std::array{
+            potf2_kernel_small<1, BS2, T, I, INFO, U>,  potf2_kernel_small<2, BS2, T, I, INFO, U>,
+            potf2_kernel_small<3, BS2, T, I, INFO, U>,  potf2_kernel_small<4, BS2, T, I, INFO, U>,
+            potf2_kernel_small<5, BS2, T, I, INFO, U>,  potf2_kernel_small<6, BS2, T, I, INFO, U>,
+            potf2_kernel_small<7, BS2, T, I, INFO, U>,  potf2_kernel_small<8, BS2, T, I, INFO, U>,
+            potf2_kernel_small<9, BS2, T, I, INFO, U>,  potf2_kernel_small<10, BS2, T, I, INFO, U>,
+            potf2_kernel_small<11, BS2, T, I, INFO, U>, potf2_kernel_small<12, BS2, T, I, INFO, U>,
+            potf2_kernel_small<13, BS2, T, I, INFO, U>, potf2_kernel_small<14, BS2, T, I, INFO, U>,
+            potf2_kernel_small<15, BS2, T, I, INFO, U>, potf2_kernel_small<16, BS2, T, I, INFO, U>};
+        if(nb < 1 || static_cast<size_t>(nb) > kernel.size())
+        {
+            return rocblas_status_internal_error;
+        }
+        ROCSOLVER_LAUNCH_KERNEL(kernel[nb - 1], dim3(1, 1, batch_count), dim3(BS2, BS2, 1),
+                                lmemsize, stream, is_upper, n, A, shiftA, lda, strideA, info);
+    }
+    else if constexpr(BS2 == 32)
+    {
+        auto kernel = std::array{
+            potf2_kernel_small<1, BS2, T, I, INFO, U>, potf2_kernel_small<2, BS2, T, I, INFO, U>,
+            potf2_kernel_small<3, BS2, T, I, INFO, U>, potf2_kernel_small<4, BS2, T, I, INFO, U>,
+            potf2_kernel_small<5, BS2, T, I, INFO, U>, potf2_kernel_small<6, BS2, T, I, INFO, U>,
+            potf2_kernel_small<7, BS2, T, I, INFO, U>, potf2_kernel_small<8, BS2, T, I, INFO, U>};
+        if(nb < 1 || static_cast<size_t>(nb) > kernel.size())
+        {
+            return rocblas_status_internal_error;
+        }
+        ROCSOLVER_LAUNCH_KERNEL(kernel[nb - 1], dim3(1, 1, batch_count), dim3(BS2, BS2, 1),
+                                lmemsize, stream, is_upper, n, A, shiftA, lda, strideA, info);
+    }
+    else
+    {
+        return rocblas_status_internal_error;
+    }
 
     return rocblas_status_success;
 }
