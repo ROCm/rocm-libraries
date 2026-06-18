@@ -440,7 +440,18 @@ inline CEngineResult CEngine::build_sdpa_tiled(const SdpaProblem& p) {
     spec.block_size = p.block_q > 0 ? p.block_q : p.block_size;
     spec.num_query_heads = p.num_query_heads;
     spec.num_kv_heads = p.num_kv_heads;
-    spec.dtype = (p.dtype && std::string(p.dtype) == "bf16") ? "bf16" : "fp16";
+    // Validate dtype explicitly rather than treating "anything not bf16" as
+    // fp16: silently coercing an unexpected dtype (or nullptr) would build/launch
+    // the wrong kernel. Throw TiledUnsupported so the caller falls back to the
+    // scalar build_sdpa, which rejects the bad dtype cleanly via
+    // ckc_unified_attention_supports_scalar.
+    if (p.dtype == nullptr) throw TiledUnsupported("dtype must be set");
+    if (std::string(p.dtype) == "bf16")
+        spec.dtype = "bf16";
+    else if (std::string(p.dtype) == "fp16")
+        spec.dtype = "fp16";
+    else
+        throw TiledUnsupported(std::string("unsupported dtype '") + p.dtype + "'");
     spec.use_sinks = false;
     spec.sliding_window = p.sliding_window;
     spec.has_softcap = p.softcap != 0.0;

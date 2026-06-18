@@ -187,12 +187,30 @@ bool CkDslAttnPlanBuilder::isApplicable(
         if (c_jit_enabled()) {
             // C-JIT path: the kernel is generated on demand from the pure-C
             // engine, so applicability does NOT depend on the shipped
-            // ArtifactStore/dispatcher catalog. Accept any well-formed SDPA in the
-            // kernel-native BSHD layout with a supported dtype.
-            const bool ok = params.dtype == "fp16" || params.dtype == "bf16";
+            // ArtifactStore/dispatcher catalog. The gate must still MATCH what
+            // the C-JIT build can actually deliver, or buildPlan() will throw
+            // after we already reported applicable.
+            //
+            // buildPlan() prefers the tiled MFMA kernel and falls back to the
+            // scalar 2D reference (build_sdpa). The scalar gate is the broadest
+            // capability, and on a scalar reject build_sdpa throws -- which is
+            // NOT caught on the C-JIT path -- so admit exactly what the scalar
+            // backend (ckc_unified_attention_supports_scalar) accepts:
+            //   - dtype in {fp16, bf16}
+            //   - head_size in {64, 128, 256}
+            // (block_size is fixed to the valid 16 on this build path.)
+            // Grouped-query attention additionally requires num_query_heads to
+            // be a positive multiple of num_kv_heads.
+            const bool dtype_ok = params.dtype == "fp16" || params.dtype == "bf16";
+            const bool hdim_ok =
+                params.hdim_q == 64 || params.hdim_q == 128 || params.hdim_q == 256;
+            const bool gqa_ok = params.nhead_k > 0 && (params.nhead_q % params.nhead_k == 0);
+            const bool ok = dtype_ok && hdim_ok && gqa_ok;
             if (dbg)
-                fprintf(stderr, "[ckdsl-attn] %s (C-JIT) dtype=%s\n",
-                        ok ? "ACCEPT" : "DECLINE: dtype", params.dtype.c_str());
+                fprintf(stderr,
+                        "[ckdsl-attn] %s (C-JIT) dtype=%s hdim_q=%ld nhead_q=%ld nhead_k=%ld\n",
+                        ok ? "ACCEPT" : "DECLINE", params.dtype.c_str(), params.hdim_q,
+                        params.nhead_q, params.nhead_k);
             return ok;
         }
         auto problem = CkDslAttnParamParser::buildProblem(params, handle.gfxArch());

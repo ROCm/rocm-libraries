@@ -81,6 +81,16 @@ ParsedAttnParams parseSdpaGraph(const hipdnn_flatbuffers_sdk::flatbuffer_utiliti
     const auto* qd = q->dims();
     const auto* kd = k->dims();
     const auto* vd = v->dims();
+    // SDPA Q/K/V are rank-4 [B,H,S,D]. Validate the dims vectors exist and carry
+    // all four extents before indexing (a malformed/unsupported graph could omit
+    // dims or carry a lower rank). flatbuffers::Vector::Get only guards with
+    // FLATBUFFERS_ASSERT, which is compiled out under NDEBUG, so an unchecked
+    // Get() on a null/short vector is an out-of-bounds read in release builds.
+    // Throw a clear error instead; isApplicable() catches it and declines.
+    // Mirrors the rank checks in CkDslParamParser::parseGemmGraph.
+    if (qd == nullptr || kd == nullptr || vd == nullptr || qd->size() < 4 ||
+        kd->size() < 4 || vd->size() < 4)
+        throw std::runtime_error("CkDslAttn: expected rank-4 [B,H,S,D] Q/K/V dims");
     // hipDNN SDPA tensors are *logical* BHSD: dims are [B, H, S, D] (matching the
     // asm_sdpa engine and the benchmark graph naming bN_hN_sN_dN). Read the
     // logical extents accordingly.
@@ -107,7 +117,13 @@ ParsedAttnParams parseSdpaGraph(const hipdnn_flatbuffers_sdk::flatbuffer_utiliti
     if (qs != nullptr && qs->size() >= 3) {
         const int64_t stride_h = qs->Get(1);  // stride of the H axis (dim 1)
         const int64_t stride_s = qs->Get(2);  // stride of the S axis (dim 2)
-        p.is_bhsd = isPhysicalBhsdLayout(stride_h, stride_s);
+        // Only classify when both strides are well-formed (positive). Zero /
+        // broadcast / negative strides are not a real physical layout and would
+        // make the stride-order comparison meaningless, so treat them like
+        // absent strides and fall back to the conservative kernel-native default
+        // (not BHSD). Mirrors detectBLayout's `stride <= 0 -> Unknown` guard.
+        p.is_bhsd =
+            (stride_h > 0 && stride_s > 0) && isPhysicalBhsdLayout(stride_h, stride_s);
     } else {
         p.is_bhsd = false;
     }
