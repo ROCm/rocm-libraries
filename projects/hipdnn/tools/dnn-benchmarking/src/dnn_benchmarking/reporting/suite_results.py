@@ -110,6 +110,8 @@ class ProviderEngineResult:
         correctness: Correctness comparison result.
         error_message: Error message only (no partial timing on error).
         skip_reason: Reason this combination was skipped.
+        warnings: Non-fatal warnings for this row, such as reference timing
+            paths that are not solely built-in PyTorch operators.
         workspace_bytes: hipDNN-reserved workspace size in bytes.
         analytical_flops: Total analytical FLOPs across compute nodes
             (None for purely bandwidth-bound graphs).
@@ -165,6 +167,7 @@ class ProviderEngineResult:
     correctness: Optional[CorrectnessResult] = None
     error_message: Optional[str] = None
     skip_reason: Optional[str] = None
+    warnings: Optional[List[str]] = None
     # Always-on metrics (None when collection failed or skipped)
     workspace_bytes: Optional[int] = None
     analytical_flops: Optional[int] = None
@@ -210,6 +213,8 @@ class ProviderEngineResult:
             d["role"] = self.role
         if self.plugin_path is not None:
             d["plugin_path"] = self.plugin_path
+        if self.warnings:
+            d["warnings"] = list(self.warnings)
         # extra_metrics is exclusively populated by the opt-in
         # profiling orchestrator, which the suite runner only fires on
         # the success path. Asserting the invariant here makes it

@@ -2043,6 +2043,17 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::VMovB32& self, nb::dict&) { return new rocisa::VMovB32(self); });
 
+    nb::class_<rocisa::VMovRelsD2B32, rocisa::CommonInstruction>(m_common, "VMovRelsD2B32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VMovRelsD2B32& self, nb::dict&) {
+            return new rocisa::VMovRelsD2B32(self);
+        });
+
     nb::class_<rocisa::_VMovB64, rocisa::CommonInstruction>(m_common, "_VMovB64")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,
