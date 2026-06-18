@@ -252,7 +252,30 @@ template<> struct Dispatcher<fp8_t, fp8_t, float, 16, 16,  64, true> { using Typ
 template<> struct Dispatcher<bf8_t, bf8_t, float, 16, 16,  64, true> { using Type = WarpGemmMfma_f32_16x16x64_bf8_bf8_CTransposed; };
 #endif
 
-template<typename A, typename B, bool TransposeC, WGAttrNumAccessEnum AttrNumAccessA, WGAttrNumAccessEnum AttrNumAccessB, bool IsScale16> struct Dispatcher<A, B, float, 32, 32, 128, TransposeC, false, false, AttrNumAccessA, AttrNumAccessB, IsScale16> : WmmaTag { using Type = WarpGemmWmma_f32_32x32x128_f8f6f4<A, B, TransposeC, AttrNumAccessA, AttrNumAccessB>; };
+template<typename A,
+         typename B,
+         bool TransposeC,
+         WGAttrNumAccessEnum AttrNumAccessA,
+         WGAttrNumAccessEnum AttrNumAccessB,
+         bool IsScale16>
+struct Dispatcher<A,
+                  B,
+                  float,
+                  32,
+                  32,
+                  128,
+                  TransposeC,
+                  false,
+                  false,
+                  AttrNumAccessA,
+                  AttrNumAccessB,
+                  IsScale16> : WmmaTag
+{
+    using Type =
+        std::conditional_t<IsScale16,
+                           WarpGemmWmma_f32_32x32x128_f8f6f4_scale16<A, B, TransposeC, AttrNumAccessA, AttrNumAccessB>,
+                           WarpGemmWmma_f32_32x32x128_f8f6f4<A, B, TransposeC, AttrNumAccessA, AttrNumAccessB>>;
+};
 
 template<bool TransposeC, WGAttrNumAccessEnum AttrNumAccess> struct Dispatcher<fp8_t, fp8_t, half_t, 16, 16,  64, TransposeC, false, false, AttrNumAccess, AttrNumAccess> : WmmaTag { using Type =WarpGemmWmma_f16_16x16x64_f8_f8<TransposeC, AttrNumAccess>; };
 template<bool TransposeC, WGAttrNumAccessEnum AttrNumAccess> struct Dispatcher<bf8_t, bf8_t, half_t, 16, 16,  64, TransposeC, false, false, AttrNumAccess, AttrNumAccess> : WmmaTag { using Type =WarpGemmWmma_f16_16x16x64_bf8_bf8<TransposeC, AttrNumAccess>; };

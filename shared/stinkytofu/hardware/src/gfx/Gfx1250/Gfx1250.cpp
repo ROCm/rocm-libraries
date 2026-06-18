@@ -306,6 +306,7 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
         {"_VAddLShiftLeftU32", "v_add_lshl_u32"},
         {"VLShiftLeftAddU32", "v_lshl_add_u32"},
         {"_VLShiftLeftAddU32", "v_lshl_add_u32"},
+        {"VMovRelsD2B32", "v_movrelsd_2_b32"},
         {"VMovB32", "v_mov_b32"},
         {"VMovB64", "v_mov_b64"},
         {"_VMovB64", "v_mov_b64"},
