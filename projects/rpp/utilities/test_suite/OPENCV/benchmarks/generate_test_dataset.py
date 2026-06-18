@@ -49,7 +49,7 @@ def create_output_dir():
 
 def generate_gradient_image(index, output_path):
     """Generate a gradient image."""
-    img = Image.new('RGB', (WIDTH, HEIGHT))
+    img = Image.new("RGB", (WIDTH, HEIGHT))
     draw = ImageDraw.Draw(img)
 
     # Random gradient direction
@@ -60,13 +60,13 @@ def generate_gradient_image(index, output_path):
         draw.line([(0, y), (WIDTH, y)], fill=(r, g, b))
 
     filename = os.path.join(output_path, f"gradient_{index:03d}.jpg")
-    img.save(filename, 'JPEG', quality=95)
+    img.save(filename, "JPEG", quality=95)
     return filename
 
 
 def generate_checkerboard_image(index, output_path):
     """Generate a checkerboard pattern."""
-    img = Image.new('RGB', (WIDTH, HEIGHT))
+    img = Image.new("RGB", (WIDTH, HEIGHT))
     draw = ImageDraw.Draw(img)
 
     tile_size = 40 + (index * 2) % 60
@@ -81,14 +81,14 @@ def generate_checkerboard_image(index, output_path):
                 draw.rectangle([x, y, x + tile_size, y + tile_size], fill=color2)
 
     filename = os.path.join(output_path, f"checkerboard_{index:03d}.png")
-    img.save(filename, 'PNG')
+    img.save(filename, "PNG")
     return filename
 
 
 def generate_circle_image(index, output_path):
     """Generate random circles."""
     bg_color = (random.randint(0, 100), random.randint(0, 100), random.randint(0, 100))
-    img = Image.new('RGB', (WIDTH, HEIGHT), color=bg_color)
+    img = Image.new("RGB", (WIDTH, HEIGHT), color=bg_color)
     draw = ImageDraw.Draw(img)
 
     num_circles = 10 + (index % 20)
@@ -97,11 +97,12 @@ def generate_circle_image(index, output_path):
         y = random.randint(0, HEIGHT)
         radius = random.randint(20, 200)
         color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
-        draw.ellipse([x - radius, y - radius, x + radius, y + radius],
-                     fill=color, outline=color)
+        draw.ellipse(
+            [x - radius, y - radius, x + radius, y + radius], fill=color, outline=color
+        )
 
     filename = os.path.join(output_path, f"circles_{index:03d}.jpg")
-    img.save(filename, 'JPEG', quality=95)
+    img.save(filename, "JPEG", quality=95)
     return filename
 
 
@@ -109,16 +110,16 @@ def generate_noise_image(index, output_path):
     """Generate random noise."""
     # Vectorized numpy array creation is 100-1000x faster than pixel loops
     noise_array = np.random.randint(0, 256, (HEIGHT, WIDTH, 3), dtype=np.uint8)
-    img = Image.fromarray(noise_array, 'RGB')
+    img = Image.fromarray(noise_array, "RGB")
 
     filename = os.path.join(output_path, f"noise_{index:03d}.png")
-    img.save(filename, 'PNG')
+    img.save(filename, "PNG")
     return filename
 
 
 def generate_stripes_image(index, output_path):
     """Generate striped pattern."""
-    img = Image.new('RGB', (WIDTH, HEIGHT))
+    img = Image.new("RGB", (WIDTH, HEIGHT))
     draw = ImageDraw.Draw(img)
 
     stripe_width = 10 + (index * 3) % 50
@@ -135,7 +136,7 @@ def generate_stripes_image(index, output_path):
             draw.rectangle([x, 0, x + stripe_width, HEIGHT], fill=color2)
 
     filename = os.path.join(output_path, f"stripes_{index:03d}.jpg")
-    img.save(filename, 'JPEG', quality=95)
+    img.save(filename, "JPEG", quality=95)
     return filename
 
 
@@ -145,10 +146,10 @@ def generate_solid_color_image(index, output_path):
     g = (index * 31) % 256
     b = (index * 47) % 256
 
-    img = Image.new('RGB', (WIDTH, HEIGHT), color=(r, g, b))
+    img = Image.new("RGB", (WIDTH, HEIGHT), color=(r, g, b))
 
     filename = os.path.join(output_path, f"solid_{index:03d}.jpg")
-    img.save(filename, 'JPEG', quality=95)
+    img.save(filename, "JPEG", quality=95)
     return filename
 
 
@@ -163,7 +164,7 @@ def generate_radial_pattern_image(index, output_path):
     X, Y = np.meshgrid(x, y)
 
     # Calculate distance from center for all pixels at once
-    dist = np.sqrt((X - cx)**2 + (Y - cy)**2)
+    dist = np.sqrt((X - cx) ** 2 + (Y - cy) ** 2)
     intensity = (dist / max_dist * 255).astype(np.uint8)
 
     # Calculate RGB channels
@@ -173,10 +174,10 @@ def generate_radial_pattern_image(index, output_path):
 
     # Stack channels to create RGB image
     img_array = np.stack([r, g, b], axis=-1).astype(np.uint8)
-    img = Image.fromarray(img_array, 'RGB')
+    img = Image.fromarray(img_array, "RGB")
 
     filename = os.path.join(output_path, f"radial_{index:03d}.png")
-    img.save(filename, 'PNG')
+    img.save(filename, "PNG")
     return filename
 
 

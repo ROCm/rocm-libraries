@@ -157,21 +157,22 @@ void printResult(const string& name, int batchSize, bool isColor, double totalMs
         benchmarkTimes[key].opencvTime = avgTime;
         benchmarkTimes[key].opencvCalled = true;
 
-        // If parameters weren't set by RPP (e.g., SobelFilter OpenCV has no params), use OpenCV params
+        // If parameters weren't set by RPP (e.g., SobelFilter OpenCV has no params), use OpenCV
+        // params
         if (benchmarkTimes[key].parameters.empty() && !params.empty())
             benchmarkTimes[key].parameters = params;
 
         // After OpenCV result, record the pair
         auto& data = benchmarkTimes[key];
         // Only add if both RPP and OpenCV have been called
-        if (data.rppCalled && data.opencvCalled)
-        {
+        if (data.rppCalled && data.opencvCalled) {
             if (isColor)
                 rgbResults.emplace_back(displayName, data.parameters, data.opencvTime, data.rppTime,
-                                       rgbImageSize, rgbImageDtype, rgbBatchSize, NUM_RUNS);
+                                        rgbImageSize, rgbImageDtype, rgbBatchSize, NUM_RUNS);
             else
-                grayscaleResults.emplace_back(displayName, data.parameters, data.opencvTime, data.rppTime,
-                                             grayImageSize, grayImageDtype, grayBatchSize, NUM_RUNS);
+                grayscaleResults.emplace_back(displayName, data.parameters, data.opencvTime,
+                                              data.rppTime, grayImageSize, grayImageDtype,
+                                              grayBatchSize, NUM_RUNS);
         }
     }
 }
@@ -212,8 +213,7 @@ string getMemoryInfo() {
 // Helper to get OS information
 string getOSInfo() {
     struct utsname unameData;
-    if (uname(&unameData) == 0)
-    {
+    if (uname(&unameData) == 0) {
         ostringstream oss;
         oss << unameData.sysname << " " << unameData.release;
         return oss.str();
@@ -243,15 +243,23 @@ string getCurrentDateTime() {
 string getDtypeString(int cvType) {
     int depth = cvType & CV_MAT_DEPTH_MASK;
 
-    switch(depth) {
-        case CV_8U:  return "U8";
-        case CV_8S:  return "S8";
-        case CV_16U: return "U16";
-        case CV_16S: return "S16";
-        case CV_32S: return "S32";
-        case CV_32F: return "F32";
-        case CV_64F: return "F64";
-        default:     return "Unknown";
+    switch (depth) {
+        case CV_8U:
+            return "U8";
+        case CV_8S:
+            return "S8";
+        case CV_16U:
+            return "U16";
+        case CV_16S:
+            return "S16";
+        case CV_32S:
+            return "S32";
+        case CV_32F:
+            return "F32";
+        case CV_64F:
+            return "F64";
+        default:
+            return "Unknown";
     }
 }
 
@@ -270,7 +278,7 @@ RpptDesc createRppDescriptor(const Mat& img, RpptLayout layout) {
         desc.strides.hStride = desc.w * desc.c;
         desc.strides.wStride = desc.c;
         desc.strides.cStride = 1;
-    } else { // NCHW
+    } else {  // NCHW
         desc.strides.cStride = desc.h * desc.w;
         desc.strides.hStride = desc.w;
         desc.strides.wStride = 1;
@@ -307,7 +315,7 @@ RpptGenericDesc toGenericDesc(const RpptDesc& desc) {
         genericDesc.strides[1] = desc.strides.hStride;
         genericDesc.strides[2] = desc.strides.wStride;
         genericDesc.strides[3] = desc.strides.cStride;
-    } else { // NCHW
+    } else {  // NCHW
         // NCHW: dims = [N, C, H, W]
         genericDesc.dims[0] = desc.n;
         genericDesc.dims[1] = desc.c;
@@ -335,41 +343,41 @@ RpptROI3D createFullImageROI3D(const Mat& img) {
 }
 
 // ==================== RPP COLOR AUGMENTATIONS ====================
-bool writeResultsToExcel(const string& filename,
-                        const vector<BenchmarkResult>& grayResults,
-                        const vector<BenchmarkResult>& colorResults) {
-    lxw_workbook  *workbook  = workbook_new(filename.c_str());
+bool writeResultsToExcel(const string& filename, const vector<BenchmarkResult>& grayResults,
+                         const vector<BenchmarkResult>& colorResults) {
+    lxw_workbook* workbook = workbook_new(filename.c_str());
     if (!workbook) {
         cerr << "Error: Failed to create Excel workbook: " << filename << endl;
-        cerr << "       Possible causes: insufficient permissions, invalid path, or disk full" << endl;
+        cerr << "       Possible causes: insufficient permissions, invalid path, or disk full"
+             << endl;
         return false;
     }
 
     // Create formats
-    lxw_format *header_format = workbook_add_format(workbook);
+    lxw_format* header_format = workbook_add_format(workbook);
     format_set_bold(header_format);
     format_set_bg_color(header_format, 0x4472C4);
     format_set_font_color(header_format, LXW_COLOR_WHITE);
     format_set_align(header_format, LXW_ALIGN_CENTER);
 
-    lxw_format *info_label_format = workbook_add_format(workbook);
+    lxw_format* info_label_format = workbook_add_format(workbook);
     format_set_bold(info_label_format);
 
-    lxw_format *speedup_format = workbook_add_format(workbook);
+    lxw_format* speedup_format = workbook_add_format(workbook);
     format_set_num_format(speedup_format, "0.00\"x\"");
 
-    lxw_format *time_format = workbook_add_format(workbook);
+    lxw_format* time_format = workbook_add_format(workbook);
     format_set_num_format(time_format, "0.00");
 
     // Sheet 1: System Information
-    lxw_worksheet *info_sheet = workbook_add_worksheet(workbook, "System Information");
+    lxw_worksheet* info_sheet = workbook_add_worksheet(workbook, "System Information");
 
     worksheet_set_column(info_sheet, 0, 0, 25, NULL);
     worksheet_set_column(info_sheet, 1, 1, 40, NULL);
 
     int row = 0;
     worksheet_write_string(info_sheet, row++, 0, "Parameter", header_format);
-    worksheet_write_string(info_sheet, row-1, 1, "Value", header_format);
+    worksheet_write_string(info_sheet, row - 1, 1, "Value", header_format);
 
     worksheet_write_string(info_sheet, row, 0, "Benchmark Date & Time", info_label_format);
     worksheet_write_string(info_sheet, row++, 1, getCurrentDateTime().c_str(), NULL);
@@ -396,7 +404,7 @@ bool writeResultsToExcel(const string& filename,
     worksheet_write_number(info_sheet, row++, 1, NUM_RUNS, NULL);
 
     // Sheet 2: Grayscale Results
-    lxw_worksheet *gray_sheet = workbook_add_worksheet(workbook, "Grayscale Benchmarks");
+    lxw_worksheet* gray_sheet = workbook_add_worksheet(workbook, "Grayscale Benchmarks");
 
     worksheet_set_column(gray_sheet, 0, 0, 30, NULL);
     worksheet_set_column(gray_sheet, 1, 1, 40, NULL);
@@ -430,7 +438,7 @@ bool writeResultsToExcel(const string& filename,
     }
 
     // Sheet 3: RGB Results
-    lxw_worksheet *rgb_sheet = workbook_add_worksheet(workbook, "RGB Benchmarks");
+    lxw_worksheet* rgb_sheet = workbook_add_worksheet(workbook, "RGB Benchmarks");
 
     worksheet_set_column(rgb_sheet, 0, 0, 30, NULL);
     worksheet_set_column(rgb_sheet, 1, 1, 40, NULL);
@@ -465,7 +473,8 @@ bool writeResultsToExcel(const string& filename,
 
     lxw_error error = workbook_close(workbook);
     if (error != LXW_NO_ERROR) {
-        cerr << "Error: Failed to close Excel workbook: " << filename << " (Error code: " << error << ")" << endl;
+        cerr << "Error: Failed to close Excel workbook: " << filename << " (Error code: " << error
+             << ")" << endl;
         cerr << "       The file may be corrupted or incomplete" << endl;
         return false;
     }
@@ -476,9 +485,9 @@ bool writeResultsToExcel(const string& filename,
 
 // ==================== MAIN ====================
 
-
 // Helper to initialize RICAP boxes for 4-way cutmix
-void init_ricap_boxes(int maxWidth, int maxHeight, int batchSize, Rpp32u* permutationTensor, RpptROI* roiPtrInputCropRegion) {
+void init_ricap_boxes(int maxWidth, int maxHeight, int batchSize, Rpp32u* permutationTensor,
+                      RpptROI* roiPtrInputCropRegion) {
     // Simple RICAP: divide output into 4 quadrants
     int halfW = maxWidth / 2;
     int halfH = maxHeight / 2;
@@ -513,11 +522,12 @@ void init_ricap_boxes(int maxWidth, int maxHeight, int batchSize, Rpp32u* permut
 }
 
 // Helper to initialize grid dropout boxes
-void init_grid_dropout_boxes(int batchCount, RpptRoiLtrb* anchorBoxInfoTensor, RpptROI* roiTensorPtrSrc,
-                             Rpp32u gridH, Rpp32u gridW, Rpp32u &maxHoleW, Rpp32u &maxHoleH, Rpp32f holeRatio, int seed) {
+void init_grid_dropout_boxes(int batchCount, RpptRoiLtrb* anchorBoxInfoTensor,
+                             RpptROI* roiTensorPtrSrc, Rpp32u gridH, Rpp32u gridW, Rpp32u& maxHoleW,
+                             Rpp32u& maxHoleH, Rpp32f holeRatio, int seed) {
     std::mt19937 rng(seed);
 
-    for(int i = 0; i < batchCount; i++) {
+    for (int i = 0; i < batchCount; i++) {
         Rpp32u roiW = roiTensorPtrSrc[i].xywhROI.roiWidth;
         Rpp32u roiH = roiTensorPtrSrc[i].xywhROI.roiHeight;
         Rpp32s x_base = roiTensorPtrSrc[i].xywhROI.xy.x;
@@ -527,10 +537,8 @@ void init_grid_dropout_boxes(int batchCount, RpptRoiLtrb* anchorBoxInfoTensor, R
         Rpp32u cellH = std::max(1u, roiH / gridH);
         Rpp32u holeW = std::max(1u, static_cast<Rpp32u>(cellW * holeRatio));
         Rpp32u holeH = std::max(1u, static_cast<Rpp32u>(cellH * holeRatio));
-        if (holeW > maxHoleW)
-            maxHoleW = holeW;
-        if (holeH > maxHoleH)
-            maxHoleH = holeH;
+        if (holeW > maxHoleW) maxHoleW = holeW;
+        if (holeH > maxHoleH) maxHoleH = holeH;
 
         std::uniform_int_distribution<int> distX(0, (cellW > holeW) ? cellW - holeW : 0);
         std::uniform_int_distribution<int> distY(0, (cellH > holeH) ? cellH - holeH : 0);
@@ -563,7 +571,8 @@ void init_grid_dropout_boxes(int batchCount, RpptRoiLtrb* anchorBoxInfoTensor, R
 }
 
 // Dropout helper function for channel dropout
-void generate_channel_dropout_mask(Rpp8u* dropoutTensor, Rpp32f* dropoutProbability, int batchSize, int channels, int seed) {
+void generate_channel_dropout_mask(Rpp8u* dropoutTensor, Rpp32f* dropoutProbability, int batchSize,
+                                   int channels, int seed) {
     int numThreads = NUM_THREADS;
     omp_set_dynamic(0);
 
@@ -571,7 +580,7 @@ void generate_channel_dropout_mask(Rpp8u* dropoutTensor, Rpp32f* dropoutProbabil
     for (int batchCount = 0; batchCount < batchSize; batchCount++) {
         std::mt19937 rng(seed + batchCount);
         std::bernoulli_distribution keepDist(1.0f - dropoutProbability[batchCount]);
-        Rpp8u *maskPtrTemp = dropoutTensor + (batchCount * channels);
+        Rpp8u* maskPtrTemp = dropoutTensor + (batchCount * channels);
         bool atLeastOne = false;
 
         for (int channel = 0; channel < channels; channel++) {
@@ -579,21 +588,22 @@ void generate_channel_dropout_mask(Rpp8u* dropoutTensor, Rpp32f* dropoutProbabil
             atLeastOne |= maskPtrTemp[channel];
         }
 
-        if (!atLeastOne)
-            maskPtrTemp[rng() % channels] = 1;
+        if (!atLeastOne) maskPtrTemp[rng() % channels] = 1;
     }
 }
 
 // Dropout helper function for cutout dropout
-void init_cutout_dropout(int batchSize, int maxBoxesPerImage, Rpp32u* numOfBoxes, RpptRoiLtrb* anchorBoxInfoTensor, RpptROIPtr roiTensorPtrSrc, int channels, int BitDepthTestMode, int seed, int dropoutType, void *colorBuffer) {
+void init_cutout_dropout(int batchSize, int maxBoxesPerImage, Rpp32u* numOfBoxes,
+                         RpptRoiLtrb* anchorBoxInfoTensor, RpptROIPtr roiTensorPtrSrc, int channels,
+                         int BitDepthTestMode, int seed, int dropoutType, void* colorBuffer) {
     std::mt19937 rng(seed);
     std::uniform_real_distribution<float> pos_ratio(0.1f, 0.9f);
     std::uniform_real_distribution<float> wh_ratio_cutout(0.4f, 0.6f);
 
-    Rpp8u *colors8u = reinterpret_cast<Rpp8u *>(colorBuffer);
-    Rpp16f *colors16f = reinterpret_cast<Rpp16f *>(colorBuffer);
-    Rpp32f *colors32f = reinterpret_cast<Rpp32f *>(colorBuffer);
-    Rpp8s *colors8s = reinterpret_cast<Rpp8s *>(colorBuffer);
+    Rpp8u* colors8u = reinterpret_cast<Rpp8u*>(colorBuffer);
+    Rpp16f* colors16f = reinterpret_cast<Rpp16f*>(colorBuffer);
+    Rpp32f* colors32f = reinterpret_cast<Rpp32f*>(colorBuffer);
+    Rpp8s* colors8s = reinterpret_cast<Rpp8s*>(colorBuffer);
 
     for (int i = 0; i < batchSize; i++) {
         numOfBoxes[i] = maxBoxesPerImage;
@@ -625,13 +635,13 @@ void init_cutout_dropout(int batchSize, int maxBoxesPerImage, Rpp32u* numOfBoxes
             // Set random color for the box
             for (int c = 0; c < channels; c++) {
                 int colorIdx = idx * channels + c;
-                if (BitDepthTestMode == 0) // U8
+                if (BitDepthTestMode == 0)  // U8
                     colors8u[colorIdx] = static_cast<Rpp8u>(rng() % 256);
-                else if (BitDepthTestMode == 2) // F32
+                else if (BitDepthTestMode == 2)  // F32
                     colors32f[colorIdx] = static_cast<Rpp32f>(rng() % 256) / 255.0f;
-                else if (BitDepthTestMode == 1) // F16
+                else if (BitDepthTestMode == 1)  // F16
                     colors16f[colorIdx] = static_cast<Rpp16f>(rng() % 256) / 255.0f;
-                else if (BitDepthTestMode == 6) // I8
+                else if (BitDepthTestMode == 6)  // I8
                     colors8s[colorIdx] = static_cast<Rpp8s>((rng() % 256) - 128);
             }
         }

@@ -37,10 +37,13 @@ void printUsage(const char* programName) {
          << ")" << endl;
     cout << "  -h, --help               Display this help message" << endl;
     cout << "\nExamples:" << endl;
-    cout << "  " << programName << "                           # Auto-detect threads, 100 runs (default)" << endl;
+    cout << "  " << programName
+         << "                           # Auto-detect threads, 100 runs (default)" << endl;
     cout << "  " << programName << " --threads 64              # Use 64 threads" << endl;
-    cout << "  " << programName << " -t 32 -n 50               # Use 32 threads with 50 runs" << endl;
-    cout << "  " << programName << " -t 32 -g ./my_images/     # Use 32 threads with custom dataset" << endl;
+    cout << "  " << programName << " -t 32 -n 50               # Use 32 threads with 50 runs"
+         << endl;
+    cout << "  " << programName << " -t 32 -g ./my_images/     # Use 32 threads with custom dataset"
+         << endl;
     cout << endl;
 }
 
@@ -187,12 +190,12 @@ int main(int argc, char* argv[]) {
     cout << "CPU: " << getCPUInfo() << endl;
     cout << "Memory: " << getMemoryInfo() << endl;
     cout << "\n--- Benchmark Configuration ---" << endl;
-    cout << "Number of Threads: " << NUM_THREADS << " (max available: " << maxAvailableThreads << ")" << endl;
+    cout << "Number of Threads: " << NUM_THREADS << " (max available: " << maxAvailableThreads
+         << ")" << endl;
     cout << "Number of Runs: " << NUM_RUNS << endl;
     cout << "Grayscale Dataset: " << GRAY_IMAGE_PATH << endl;
     cout << "RGB Dataset: " << RGB_IMAGE_PATH << endl;
     cout << "========================================" << endl;
-
 
     // ==================== GRAYSCALE ====================
     if (!imgsGray.empty()) {
@@ -237,13 +240,16 @@ int main(int argc, char* argv[]) {
         benchmark_RPP_Crop(imgsGray, false, cropW, cropH, handle);
         benchmark_OpenCV_Crop(imgsGray, false, cropW, cropH);
 
-        benchmark_RPP_Resize(imgsGray, false, resizeW, resizeH, RpptInterpolationType::NEAREST_NEIGHBOR, "Nearest", handle);
+        benchmark_RPP_Resize(imgsGray, false, resizeW, resizeH,
+                             RpptInterpolationType::NEAREST_NEIGHBOR, "Nearest", handle);
         benchmark_OpenCV_Resize(imgsGray, false, resizeW, resizeH, INTER_NEAREST, "Nearest");
 
-        benchmark_RPP_Resize(imgsGray, false, resizeW, resizeH, RpptInterpolationType::BILINEAR, "Bilinear", handle);
+        benchmark_RPP_Resize(imgsGray, false, resizeW, resizeH, RpptInterpolationType::BILINEAR,
+                             "Bilinear", handle);
         benchmark_OpenCV_Resize(imgsGray, false, resizeW, resizeH, INTER_LINEAR, "Bilinear");
 
-        benchmark_RPP_Resize(imgsGray, false, resizeW, resizeH, RpptInterpolationType::BICUBIC, "Bicubic", handle);
+        benchmark_RPP_Resize(imgsGray, false, resizeW, resizeH, RpptInterpolationType::BICUBIC,
+                             "Bicubic", handle);
         benchmark_OpenCV_Resize(imgsGray, false, resizeW, resizeH, INTER_CUBIC, "Bicubic");
 
         benchmark_RPP_Flip(imgsGray, false, 1, handle);
@@ -355,7 +361,7 @@ int main(int argc, char* argv[]) {
         benchmark_RPP_Phase(imgsGray, false, handle);
         benchmark_OpenCV_Phase(imgsGray, false);
 
-        //benchmark_RPP_Normalize(imgsGray, false, handle);
+        // benchmark_RPP_Normalize(imgsGray, false, handle);
         benchmark_RPP_Normalize_SingleImage(imgsGray, false, handle);
         benchmark_OpenCV_Normalize(imgsGray, false);
 
@@ -364,7 +370,6 @@ int main(int argc, char* argv[]) {
 
         benchmark_RPP_Remap(imgsGray, false, handle);
         benchmark_OpenCV_Remap(imgsGray, false);
-
     }
     // ==================== RGB ====================
     if (!imgsRGB.empty()) {
@@ -417,13 +422,16 @@ int main(int argc, char* argv[]) {
         benchmark_RPP_Crop(imgsRGB, true, cropW, cropH, handle);
         benchmark_OpenCV_Crop(imgsRGB, true, cropW, cropH);
 
-        benchmark_RPP_Resize(imgsRGB, true, resizeW, resizeH, RpptInterpolationType::NEAREST_NEIGHBOR, "Nearest", handle);
+        benchmark_RPP_Resize(imgsRGB, true, resizeW, resizeH,
+                             RpptInterpolationType::NEAREST_NEIGHBOR, "Nearest", handle);
         benchmark_OpenCV_Resize(imgsRGB, true, resizeW, resizeH, INTER_NEAREST, "Nearest");
 
-        benchmark_RPP_Resize(imgsRGB, true, resizeW, resizeH, RpptInterpolationType::BILINEAR, "Bilinear", handle);
+        benchmark_RPP_Resize(imgsRGB, true, resizeW, resizeH, RpptInterpolationType::BILINEAR,
+                             "Bilinear", handle);
         benchmark_OpenCV_Resize(imgsRGB, true, resizeW, resizeH, INTER_LINEAR, "Bilinear");
 
-        benchmark_RPP_Resize(imgsRGB, true, resizeW, resizeH, RpptInterpolationType::BICUBIC, "Bicubic", handle);
+        benchmark_RPP_Resize(imgsRGB, true, resizeW, resizeH, RpptInterpolationType::BICUBIC,
+                             "Bicubic", handle);
         benchmark_OpenCV_Resize(imgsRGB, true, resizeW, resizeH, INTER_CUBIC, "Bicubic");
 
         benchmark_RPP_Flip(imgsRGB, true, 1, handle);
@@ -581,7 +589,7 @@ int main(int argc, char* argv[]) {
         benchmark_RPP_Phase(imgsRGB, true, handle);
         benchmark_OpenCV_Phase(imgsRGB, true);
 
-        //benchmark_RPP_Normalize(imgsRGB, true, handle);
+        // benchmark_RPP_Normalize(imgsRGB, true, handle);
         benchmark_RPP_Normalize_SingleImage(imgsRGB, true, handle);
         benchmark_OpenCV_Normalize(imgsRGB, true);
 
@@ -603,7 +611,6 @@ int main(int argc, char* argv[]) {
 
         benchmark_RPP_ResizeCropMirror(imgsRGB, true, handle);
         benchmark_OpenCV_ResizeCropMirror(imgsRGB, true);
-
     }
 
     cout << "\n========================================" << endl;
@@ -619,8 +626,11 @@ int main(int argc, char* argv[]) {
     cout << "Exporting results to: " << excelFilename << endl;
     bool exportSuccess = writeResultsToExcel(excelFilename, grayscaleResults, rgbResults);
     if (!exportSuccess) {
-        cerr << "\nWarning: Benchmark completed successfully, but failed to export results to Excel." << endl;
-        cerr << "         Benchmark data is still available in memory but not saved to disk." << endl;
+        cerr
+            << "\nWarning: Benchmark completed successfully, but failed to export results to Excel."
+            << endl;
+        cerr << "         Benchmark data is still available in memory but not saved to disk."
+             << endl;
     } else {
         cout << "Results successfully exported to: " << excelFilename << endl;
     }
