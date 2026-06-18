@@ -286,7 +286,7 @@ __forceinline__ __device__ void dpp_interleaved_reduction_welford(FloatAccum& te
             /*14 */ "v_fma_f32 %1 %4 %5 %1\n" /* %4, %5 and %1 should already have been properly offset with the required number of lanes for the reduction */ \
             /*15 */ "v_nop\n"\
             /*16 */ "v_nop\n" /* NOPs necessary because the next instr needs %4 and has DPP, dependency between 14 and 1 */\
-            
+
     __asm__ volatile(
         "s_nop 4\n" /* necessary because it's not guaranteed that the compiler puts a VALU instruction that writes EXEC */
         REDUCTION_STEP("row_shr:1 bound_ctrl:0")
@@ -301,17 +301,17 @@ __forceinline__ __device__ void dpp_interleaved_reduction_welford(FloatAccum& te
             : "=v"(temp_mean), "=v"(temp_var), "=v" (temp_count), "=v" (count_mult), "=v" (delta), "=v" (n_rcp)
             : "0"(temp_mean), "1"(temp_var), "2" (temp_count), "3" (count_mult), "4" (delta), "5" (n_rcp)
             : "vcc");
-    // The last list in the assembly block is the clobbers -- 
+    // The last list in the assembly block is the clobbers --
     // those are registers (or other special arguments) that get
-    // modified in the assembly block that are not specified as either 
+    // modified in the assembly block that are not specified as either
     // inputs or outputs. In this case, the "vcc" register is the only
     // register that gets modified in this way. If "vcc" is not added,
-    // this can lead to bugs in some test cases, specifically when the 
-    // vcc register is used to store some value needed after the execution 
+    // this can lead to bugs in some test cases, specifically when the
+    // vcc register is used to store some value needed after the execution
     // of this block. After adding this register to the clobbers, the three
     // input parameters to this function no longer need to be volatile.
 
-    // The macro REDUCTION_STEP is necessary only for this function; 
+    // The macro REDUCTION_STEP is necessary only for this function;
     // if left defined, it would be exposed when the header is included
     #undef REDUCTION_STEP
 
