@@ -98,11 +98,6 @@ inline bool entryUsesNamedTensorIds(const nlohmann::json& entry)
               });
 }
 
-inline int64_t configVersionForEntry(const nlohmann::json& entry)
-{
-    return entryUsesNamedTensorIds(entry) ? config_version::CURRENT : config_version::DEFAULT;
-}
-
 inline nlohmann::json tensorEntryWithoutId(nlohmann::json entry)
 {
     entry.erase(config_json::TENSOR_ID);
@@ -139,31 +134,11 @@ inline bool tensorsMatchByIdIgnoringOrder(const nlohmann::json& existing,
     return true;
 }
 
-inline bool tensorsMatchByPositionIgnoringIds(const nlohmann::json& existing,
-                                              const nlohmann::json& replacement)
-{
-    for(size_t i = 0; i < existing.size(); ++i)
-    {
-        if(tensorEntryWithoutId(existing[i]) != tensorEntryWithoutId(replacement[i]))
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-inline bool tensorSignaturesMatch(const nlohmann::json& existing,
-                                  const nlohmann::json& replacement,
-                                  int64_t configVersion)
+inline bool tensorSignaturesMatch(const nlohmann::json& existing, const nlohmann::json& replacement)
 {
     if(!existing.is_array() || !replacement.is_array() || existing.size() != replacement.size())
     {
         return false;
-    }
-
-    if(!usesNamedTensorIds(configVersion))
-    {
-        return tensorsMatchByPositionIgnoringIds(existing, replacement);
     }
 
     const bool existingAllNamed
@@ -342,8 +317,9 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
     try
     {
         nlohmann::json root;
+        bool loadedExistingConfig = false;
 
-        // Load existing file content unless we're overwriting it all
+        // Load existing file content unless we're overwriting it all.
         if(!deleteAllExisting && std::filesystem::exists(filePath))
         {
             try
@@ -352,26 +328,35 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
                 if(existingFile.is_open())
                 {
                     root = nlohmann::json::parse(existingFile);
+                    loadedExistingConfig = true;
                 }
             }
             catch(const nlohmann::json::exception& e)
             {
-                HIPDNN_FE_LOG_ERROR("autotune: existing config file "
-                                    << filePath
-                                    << " contains invalid JSON and could not be read: " << e.what()
-                                    << ". Existing content will be replaced with new results.");
-                root = nlohmann::json::object();
+                return {ErrorCode::INVALID_VALUE,
+                        std::string("AutotuneFileWriter: existing config file is not valid JSON: ")
+                            + e.what()};
             }
         }
 
-        // A valid-but-non-object config file (array, scalar, ...) would make the
-        // object-style accesses below throw; reset it to an empty object first.
-        if(!root.is_object())
+        if(loadedExistingConfig)
+        {
+            if(!root.is_object())
+            {
+                return {ErrorCode::INVALID_VALUE,
+                        "AutotuneFileWriter: existing config file is not a versioned object"};
+            }
+            const int64_t existingConfigVersion = getConfigVersion(root);
+            if(!usesNamedTensorIds(existingConfigVersion))
+            {
+                return {ErrorCode::INVALID_VALUE,
+                        "AutotuneFileWriter: refusing to update legacy autotune config file"};
+            }
+        }
+        else
         {
             root = nlohmann::json::object();
         }
-
-        const int64_t existingConfigVersion = getConfigVersion(root);
 
         if(!root.contains(config_json::ENGINE_OVERRIDES)
            || !root[config_json::ENGINE_OVERRIDES].is_array())
@@ -400,7 +385,13 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
             return {ErrorCode::OK, ""};
         }
 
-        root[config_json::VERSION] = configVersionForEntry(*newEntry);
+        if(!entryUsesNamedTensorIds(*newEntry))
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "AutotuneFileWriter: tensor IDs are required for versioned config files"};
+        }
+
+        root[config_json::VERSION] = config_version::CURRENT;
 
         // Remove the pre-existing entry that matches the new entry's (op, tensors)
         // signature, then append the new entry. The knob configuration is
@@ -422,8 +413,7 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
                                                       && existing.contains(config_json::TENSORS)
                                                       && tensorSignaturesMatch(
                                                           existing[config_json::TENSORS],
-                                                          (*newEntry)[config_json::TENSORS],
-                                                          existingConfigVersion);
+                                                          (*newEntry)[config_json::TENSORS]);
                                            }),
                             overrides.end());
         }
@@ -503,19 +493,6 @@ inline nlohmann::json buildOverrideEntry(const AutotuneResult& result,
                                          const Criteria& criteria = {})
 {
     return detail::buildOverrideEntry(result, opName, tensorDims, tensorStrides, criteria);
-}
-
-/// Write autotuning results to a JSON file in heuristic config format.
-inline Error writeAutotuneResults(const std::filesystem::path& filePath,
-                                  const std::string& opName,
-                                  const std::vector<AutotuneResult>& results,
-                                  bool deleteAllExisting,
-                                  const std::vector<std::vector<int64_t>>& tensorDims,
-                                  const std::vector<std::vector<int64_t>>& tensorStrides,
-                                  const Criteria& criteria = {})
-{
-    return detail::writeAutotuneResults(
-        filePath, opName, results, deleteAllExisting, tensorDims, tensorStrides, criteria);
 }
 
 } // namespace autotune

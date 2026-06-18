@@ -84,6 +84,44 @@ AutotuneResult makeResult(int64_t engineId,
     return r;
 }
 
+std::vector<std::string> tensorIdsFor(std::string_view opName, size_t tensorCount)
+{
+    std::vector<std::string> ids;
+    if(opName == config_op::CONV_DGRAD)
+    {
+        ids = {config_tensor::DY, config_tensor::W};
+    }
+    else if(opName == config_op::POINTWISE)
+    {
+        ids = {config_tensor::IN_0, config_tensor::IN_1, config_tensor::IN_2};
+    }
+    else
+    {
+        ids = {config_tensor::X, config_tensor::W, config_tensor::DY};
+    }
+    ids.resize(tensorCount);
+    return ids;
+}
+
+Error writeVersionedAutotuneResults(const std::filesystem::path& filePath,
+                                    const std::string& opName,
+                                    const std::vector<AutotuneResult>& results,
+                                    bool deleteAllExisting,
+                                    const std::vector<std::vector<int64_t>>& tensorDims,
+                                    const std::vector<std::vector<int64_t>>& tensorStrides,
+                                    const Criteria& criteria = {})
+{
+    return hipdnn_frontend::autotune::detail::writeAutotuneResults(
+        filePath,
+        opName,
+        results,
+        deleteAllExisting,
+        tensorDims,
+        tensorStrides,
+        criteria,
+        tensorIdsFor(opName, tensorDims.size()));
+}
+
 } // namespace
 
 // ── KnobSetting to_json Tests ───────────────────────────────────────────────
@@ -176,14 +214,14 @@ TEST(TestAutotuneFileWriter, BuildOverrideEntryWritesTensorIds)
               std::vector<int64_t>({147, 49, 7, 1}));
 }
 
-TEST(TestAutotuneFileWriter, NamedEntryReplacesLegacyEntryWithSamePositionalSignature)
+TEST(TestAutotuneFileWriter, NamedEntryRejectsLegacyEntryWithSamePositionalSignature)
 {
     const TempFile tmpFile;
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
     const std::vector<std::string> tensorIds = {config_tensor::X, config_tensor::W};
 
     nlohmann::json root;
-    // No version field: existing entry is treated as legacy positional format.
+    // No version field: existing entry is legacy and must not be updated by the writer.
     root[config_json::ENGINE_OVERRIDES] = nlohmann::json::array(
         {buildOverrideEntry(makeResult(1, "OLD"), config_op::CONV_FPROP, dims, {})});
     {
@@ -195,16 +233,7 @@ TEST(TestAutotuneFileWriter, NamedEntryReplacesLegacyEntryWithSamePositionalSign
     results.push_back(makeResult(2, "NEW", 0.5f, true, 0));
     auto err = hipdnn_frontend::autotune::detail::writeAutotuneResults(
         tmpFile.path, config_op::CONV_FPROP, results, false, dims, {}, {}, tensorIds);
-    ASSERT_TRUE(err.is_good()) << err.get_message();
-
-    std::ifstream file(tmpFile.path);
-    auto json = nlohmann::json::parse(file);
-    ASSERT_EQ(json[config_json::ENGINE_OVERRIDES].size(), 1u);
-    EXPECT_EQ(json[config_json::VERSION], config_version::CURRENT);
-    EXPECT_EQ(json[config_json::ENGINE_OVERRIDES][0][config_json::ENGINE_NAME], "NEW");
-    EXPECT_EQ(
-        json[config_json::ENGINE_OVERRIDES][0][config_json::TENSORS][0][config_json::TENSOR_ID],
-        config_tensor::X);
+    EXPECT_FALSE(err.is_good());
 }
 
 TEST(TestAutotuneFileWriter, NamedEntryReplacesExistingEntryWithReorderedNamedTensors)
@@ -271,6 +300,7 @@ TEST(TestAutotuneFileWriter, BuildOverrideEntryWithKnobs)
     ASSERT_TRUE(entry.contains("autotune_metadata"));
     ASSERT_TRUE(entry["autotune_metadata"].contains("knobs"));
     ASSERT_EQ(entry["autotune_metadata"]["knobs"].size(), 2u);
+
     EXPECT_EQ(entry["autotune_metadata"]["knobs"][0]["knob_id"], "TILE_SIZE");
     EXPECT_EQ(entry["autotune_metadata"]["knobs"][0]["value"], 128);
     EXPECT_EQ(entry["autotune_metadata"]["knobs"][1]["knob_id"], "SPLIT_K");
@@ -307,7 +337,6 @@ TEST(TestAutotuneFileWriter, BuildOverrideEntryWithMetadata)
     EXPECT_NE(ts.find('Z'), std::string::npos);
     EXPECT_TRUE(meta["ran_exhaustive"].get<bool>());
 }
-
 // ── writeAutotuneResults Tests ──────────────────────────────────────────────
 
 TEST(TestAutotuneFileWriter, WriteToNewFile)
@@ -319,7 +348,8 @@ TEST(TestAutotuneFileWriter, WriteToNewFile)
 
     const std::vector<std::vector<int64_t>> tensorDims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
 
-    auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, tensorDims, {});
+    auto err = writeVersionedAutotuneResults(
+        tmpFile.path, config_op::CONV_FPROP, results, false, tensorDims, {});
     ASSERT_TRUE(err.is_good()) << err.get_message();
 
     // Verify file exists and is valid JSON
@@ -328,12 +358,12 @@ TEST(TestAutotuneFileWriter, WriteToNewFile)
     auto json = nlohmann::json::parse(file);
 
     ASSERT_TRUE(json.contains(config_json::ENGINE_OVERRIDES));
-    EXPECT_EQ(json[config_json::VERSION], config_version::DEFAULT);
+    EXPECT_EQ(json[config_json::VERSION], config_version::CURRENT);
     EXPECT_EQ(json[config_json::ENGINE_OVERRIDES].size(), 1u);
     EXPECT_EQ(json[config_json::ENGINE_OVERRIDES][0][config_json::ENGINE_NAME], "MIOPEN_ENGINE");
 }
 
-TEST(TestAutotuneFileWriter, WriteReplacesNonArrayEngineOverrides)
+TEST(TestAutotuneFileWriter, WriteRejectsLegacyExistingFile)
 {
     const TempFile tmpFile;
 
@@ -346,15 +376,9 @@ TEST(TestAutotuneFileWriter, WriteReplacesNonArrayEngineOverrides)
     results.push_back(makeResult(1, "MIOPEN_ENGINE", 1.0f, true, 0));
     const std::vector<std::vector<int64_t>> tensorDims = {{1, 3, 224, 224}};
 
-    auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, tensorDims, {});
-    ASSERT_TRUE(err.is_good()) << err.get_message();
-
-    std::ifstream file(tmpFile.path);
-    auto json = nlohmann::json::parse(file);
-    ASSERT_TRUE(json["engine_overrides"].is_array());
-    ASSERT_EQ(json["engine_overrides"].size(), 1u);
-    EXPECT_EQ(json["engine_overrides"][0]["engine_name"], "MIOPEN_ENGINE");
-    EXPECT_TRUE(json["preserved"].get<bool>());
+    auto err = writeVersionedAutotuneResults(
+        tmpFile.path, config_op::CONV_FPROP, results, false, tensorDims, {});
+    EXPECT_FALSE(err.is_good());
 }
 
 TEST(TestAutotuneFileWriter, WriteSkipsFailedResults)
@@ -368,7 +392,8 @@ TEST(TestAutotuneFileWriter, WriteSkipsFailedResults)
 
     const std::vector<std::vector<int64_t>> tensorDims = {{1, 3, 224, 224}};
 
-    auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, tensorDims, {});
+    auto err = writeVersionedAutotuneResults(
+        tmpFile.path, config_op::CONV_FPROP, results, false, tensorDims, {});
     ASSERT_TRUE(err.is_good());
 
     std::ifstream file(tmpFile.path);
@@ -388,7 +413,8 @@ TEST(TestAutotuneFileWriter, AppendToExistingFile)
     results1.push_back(makeResult(1, "MIOPEN_ENGINE", 1.0f, true, 0));
 
     const std::vector<std::vector<int64_t>> dims1 = {{1, 3, 224, 224}, {64, 3, 7, 7}};
-    auto err1 = writeAutotuneResults(tmpFile.path, "conv_fprop", results1, false, dims1, {});
+    auto err1 = writeVersionedAutotuneResults(
+        tmpFile.path, config_op::CONV_FPROP, results1, false, dims1, {});
     ASSERT_TRUE(err1.is_good());
 
     // Write new results for conv_dgrad (different op)
@@ -396,7 +422,8 @@ TEST(TestAutotuneFileWriter, AppendToExistingFile)
     results2.push_back(makeResult(2, "HIPBLASLT_ENGINE", 2.0f, true, 0));
 
     const std::vector<std::vector<int64_t>> dims2 = {{8, 64, 56, 56}};
-    auto err2 = writeAutotuneResults(tmpFile.path, "conv_dgrad", results2, false, dims2, {});
+    auto err2 = writeVersionedAutotuneResults(
+        tmpFile.path, config_op::CONV_DGRAD, results2, false, dims2, {});
     ASSERT_TRUE(err2.is_good());
 
     // Both entries should be in the file
@@ -417,14 +444,16 @@ TEST(TestAutotuneFileWriter, ReplaceMatchingEntryWithSameKnobs)
     results1.push_back(makeResult(1, "MIOPEN_ENGINE", 5.0f, true, 0));
 
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
-    auto err1 = writeAutotuneResults(tmpFile.path, "conv_fprop", results1, false, dims, {});
+    auto err1 = writeVersionedAutotuneResults(
+        tmpFile.path, config_op::CONV_FPROP, results1, false, dims, {});
     ASSERT_TRUE(err1.is_good());
 
     // Write updated result for same op + tensors + same (empty) knobs
     std::vector<AutotuneResult> results2;
     results2.push_back(makeResult(2, "HIPBLASLT_ENGINE", 1.0f, true, 0));
 
-    auto err2 = writeAutotuneResults(tmpFile.path, "conv_fprop", results2, false, dims, {});
+    auto err2 = writeVersionedAutotuneResults(
+        tmpFile.path, config_op::CONV_FPROP, results2, false, dims, {});
     ASSERT_TRUE(err2.is_good());
 
     // Should have replaced the matching entry (same op + same tensors + same knobs)
@@ -446,7 +475,8 @@ TEST(TestAutotuneFileWriter, ReplaceEntriesWithDifferentKnobs)
     results1.push_back(r1);
 
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
-    auto err1 = writeAutotuneResults(tmpFile.path, "conv_fprop", results1, false, dims, {});
+    auto err1 = writeVersionedAutotuneResults(
+        tmpFile.path, config_op::CONV_FPROP, results1, false, dims, {});
     ASSERT_TRUE(err1.is_good());
 
     // Write new result for same op + tensors but DIFFERENT knobs (SPLIT_K=4)
@@ -455,7 +485,8 @@ TEST(TestAutotuneFileWriter, ReplaceEntriesWithDifferentKnobs)
     r2.knobSettings.emplace_back("SPLIT_K", int64_t{4});
     results2.push_back(r2);
 
-    auto err2 = writeAutotuneResults(tmpFile.path, "conv_fprop", results2, false, dims, {});
+    auto err2 = writeVersionedAutotuneResults(
+        tmpFile.path, config_op::CONV_FPROP, results2, false, dims, {});
     ASSERT_TRUE(err2.is_good());
 
     // The old entry should be replaced (matching by op + tensors only)
@@ -474,13 +505,27 @@ TEST(TestAutotuneFileWriter, CriteriaDifferentiatesSameOperationAndTensors)
     std::vector<AutotuneResult> addResults;
     addResults.push_back(makeResult(1, "ADD_ENGINE", 1.0f, true, 0));
     auto err = hipdnn_frontend::autotune::detail::writeAutotuneResults(
-        tmpFile.path.string(), "pointwise", addResults, false, dims, {}, {{"pointwise_mode", 2}});
+        tmpFile.path.string(),
+        config_op::POINTWISE,
+        addResults,
+        false,
+        dims,
+        {},
+        {{config_criterion::POINTWISE_MODE, 2}},
+        tensorIdsFor(config_op::POINTWISE, dims.size()));
     ASSERT_TRUE(err.is_good()) << err.get_message();
 
     std::vector<AutotuneResult> mulResults;
     mulResults.push_back(makeResult(2, "MUL_ENGINE", 1.0f, true, 0));
     err = hipdnn_frontend::autotune::detail::writeAutotuneResults(
-        tmpFile.path.string(), "pointwise", mulResults, false, dims, {}, {{"pointwise_mode", 30}});
+        tmpFile.path.string(),
+        config_op::POINTWISE,
+        mulResults,
+        false,
+        dims,
+        {},
+        {{config_criterion::POINTWISE_MODE, 30}},
+        tensorIdsFor(config_op::POINTWISE, dims.size()));
     ASSERT_TRUE(err.is_good()) << err.get_message();
 
     std::ifstream file(tmpFile.path);
@@ -499,11 +544,16 @@ TEST(TestAutotuneFileWriter, ReplaceOnlyExactOperationAndTensorSignature)
     const std::vector<std::vector<int64_t>> otherDims = {{2, 3, 224, 224}};
 
     nlohmann::json root;
-    root["engine_overrides"] = nlohmann::json::array(
-        {{{"engine_name", "MISSING_OP"}, {"tensors", nlohmann::json::array()}},
-         {{"op", "conv_fprop"}, {"engine_name", "MISSING_TENSORS"}},
-         buildOverrideEntry(makeResult(7, "OTHER_TENSORS"), "conv_fprop", otherDims, {}),
-         buildOverrideEntry(makeResult(8, "OLD_MATCH"), "conv_fprop", matchingDims, {})});
+    const std::vector<std::string> tensorIds = {config_tensor::X};
+    root[config_json::VERSION] = config_version::CURRENT;
+    root[config_json::ENGINE_OVERRIDES] = nlohmann::json::array(
+        {{{config_json::ENGINE_NAME, "MISSING_OP"},
+          {config_json::TENSORS, nlohmann::json::array()}},
+         {{config_json::OP, config_op::CONV_FPROP}, {config_json::ENGINE_NAME, "MISSING_TENSORS"}},
+         hipdnn_frontend::autotune::detail::buildOverrideEntry(
+             makeResult(7, "OTHER_TENSORS"), config_op::CONV_FPROP, otherDims, {}, {}, tensorIds),
+         hipdnn_frontend::autotune::detail::buildOverrideEntry(
+             makeResult(8, "OLD_MATCH"), config_op::CONV_FPROP, matchingDims, {}, {}, tensorIds)});
     {
         std::ofstream file(tmpFile.path);
         file << root.dump(2) << '\n';
@@ -511,7 +561,8 @@ TEST(TestAutotuneFileWriter, ReplaceOnlyExactOperationAndTensorSignature)
 
     std::vector<AutotuneResult> results;
     results.push_back(makeResult(9, "NEW_MATCH", 0.5f, true, 0));
-    auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, matchingDims, {});
+    auto err = writeVersionedAutotuneResults(
+        tmpFile.path, config_op::CONV_FPROP, results, false, matchingDims, {});
     ASSERT_TRUE(err.is_good()) << err.get_message();
 
     std::ifstream file(tmpFile.path);
@@ -532,14 +583,16 @@ TEST(TestAutotuneFileWriter, DeleteAllExistingContent)
     std::vector<AutotuneResult> results1;
     results1.push_back(makeResult(1, "MIOPEN_ENGINE", 1.0f, true, 0));
     const std::vector<std::vector<int64_t>> dims1 = {{1, 3, 224, 224}};
-    auto err1 = writeAutotuneResults(tmpFile.path, "conv_fprop", results1, false, dims1, {});
+    auto err1 = writeVersionedAutotuneResults(
+        tmpFile.path, config_op::CONV_FPROP, results1, false, dims1, {});
     ASSERT_TRUE(err1.is_good());
 
     // Write new results with deleteAllExisting=true
     std::vector<AutotuneResult> results2;
     results2.push_back(makeResult(2, "HIPBLASLT_ENGINE", 2.0f, true, 0));
     const std::vector<std::vector<int64_t>> dims2 = {{8, 64, 56, 56}};
-    auto err2 = writeAutotuneResults(tmpFile.path, "conv_dgrad", results2, true, dims2, {});
+    auto err2 = writeVersionedAutotuneResults(
+        tmpFile.path, config_op::CONV_DGRAD, results2, true, dims2, {});
     ASSERT_TRUE(err2.is_good());
 
     // Only the new results should be in the file
@@ -564,7 +617,8 @@ TEST(TestAutotuneFileWriter, RoundTripWriteThenLoad)
     results.push_back(result);
 
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
-    auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, true, dims, {});
+    auto err = writeVersionedAutotuneResults(
+        tmpFile.path, config_op::CONV_FPROP, results, true, dims, {});
     ASSERT_TRUE(err.is_good());
 
     // Verify by parsing the JSON directly
@@ -617,7 +671,8 @@ TEST(TestAutotuneFileWriter, RoundTripNoKnobs)
     results.push_back(makeResult(MIOPEN_ENGINE_ID, "MIOPEN_ENGINE", 1.0f, true, 0));
 
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
-    auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, true, dims, {});
+    auto err = writeVersionedAutotuneResults(
+        tmpFile.path, config_op::CONV_FPROP, results, true, dims, {});
     ASSERT_TRUE(err.is_good());
 
     // Verify by parsing the JSON directly
@@ -678,12 +733,12 @@ TEST(TestAutotuneFileWriter, WriteToInvalidPathFails)
     results.push_back(makeResult(1, "MIOPEN_ENGINE"));
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
 
-    auto err = writeAutotuneResults("/nonexistent/deep/path/that/does/not/exist/file.json",
-                                    "conv_fprop",
-                                    results,
-                                    true,
-                                    dims,
-                                    {});
+    auto err = writeVersionedAutotuneResults("/nonexistent/deep/path/that/does/not/exist/file.json",
+                                             config_op::CONV_FPROP,
+                                             results,
+                                             true,
+                                             dims,
+                                             {});
 
     EXPECT_TRUE(err.is_bad());
 }
@@ -697,7 +752,8 @@ TEST(TestAutotuneFileWriter, WriteNoSucceededResultsIsOk)
     results.push_back(makeResult(1, "MIOPEN_ENGINE", 0.0f, false, -1));
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
 
-    auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, true, dims, {});
+    auto err = writeVersionedAutotuneResults(
+        tmpFile.path, config_op::CONV_FPROP, results, true, dims, {});
 
     // Should succeed (no error) but write nothing
     EXPECT_TRUE(err.is_good());
@@ -718,14 +774,10 @@ TEST(TestAutotuneFileWriter, HandleCorruptExistingFile)
     results.push_back(makeResult(1, "MIOPEN_ENGINE"));
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
 
-    auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, dims, {});
+    auto err = writeVersionedAutotuneResults(
+        tmpFile.path, config_op::CONV_FPROP, results, false, dims, {});
 
-    ASSERT_TRUE(err.is_good());
-
-    // Verify valid JSON was written
-    std::ifstream file(tmpFile.path);
-    auto json = nlohmann::json::parse(file);
-    EXPECT_EQ(json["engine_overrides"].size(), 1u);
+    EXPECT_FALSE(err.is_good());
 }
 
 // ── Non-object existing-file hardening tests ──────────────────────────
@@ -745,15 +797,9 @@ TEST(TestAutotuneFileWriter, HandleExistingTopLevelArray)
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
 
     Error err;
-    ASSERT_NO_THROW(err
-                    = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, dims, {}));
-    ASSERT_TRUE(err.is_good()) << err.get_message();
-
-    std::ifstream file(tmpFile.path);
-    auto json = nlohmann::json::parse(file);
-    ASSERT_TRUE(json.is_object());
-    ASSERT_TRUE(json["engine_overrides"].is_array());
-    EXPECT_EQ(json["engine_overrides"].size(), 1u);
+    ASSERT_NO_THROW(err = writeVersionedAutotuneResults(
+                        tmpFile.path, config_op::CONV_FPROP, results, false, dims, {}));
+    EXPECT_FALSE(err.is_good());
 }
 
 TEST(TestAutotuneFileWriter, HandleExistingBareScalar)
@@ -771,14 +817,9 @@ TEST(TestAutotuneFileWriter, HandleExistingBareScalar)
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
 
     Error err;
-    ASSERT_NO_THROW(err
-                    = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, dims, {}));
-    ASSERT_TRUE(err.is_good()) << err.get_message();
-
-    std::ifstream file(tmpFile.path);
-    auto json = nlohmann::json::parse(file);
-    ASSERT_TRUE(json.is_object());
-    EXPECT_EQ(json["engine_overrides"].size(), 1u);
+    ASSERT_NO_THROW(err = writeVersionedAutotuneResults(
+                        tmpFile.path, config_op::CONV_FPROP, results, false, dims, {}));
+    EXPECT_FALSE(err.is_good());
 }
 
 TEST(TestAutotuneFileWriter, HandleInvalidJsonDoesNotThrow)
@@ -796,14 +837,9 @@ TEST(TestAutotuneFileWriter, HandleInvalidJsonDoesNotThrow)
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
 
     Error err;
-    ASSERT_NO_THROW(err
-                    = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, dims, {}));
-    ASSERT_TRUE(err.is_good()) << err.get_message();
-
-    std::ifstream file(tmpFile.path);
-    auto json = nlohmann::json::parse(file);
-    ASSERT_TRUE(json.is_object());
-    EXPECT_EQ(json["engine_overrides"].size(), 1u);
+    ASSERT_NO_THROW(err = writeVersionedAutotuneResults(
+                        tmpFile.path, config_op::CONV_FPROP, results, false, dims, {}));
+    EXPECT_FALSE(err.is_good());
 }
 
 TEST(TestAutotuneFileWriter, HandleWellFormedObjectPreservesOtherKeys)
@@ -821,16 +857,9 @@ TEST(TestAutotuneFileWriter, HandleWellFormedObjectPreservesOtherKeys)
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
 
     Error err;
-    ASSERT_NO_THROW(err
-                    = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, dims, {}));
-    ASSERT_TRUE(err.is_good()) << err.get_message();
-
-    std::ifstream file(tmpFile.path);
-    auto json = nlohmann::json::parse(file);
-    ASSERT_TRUE(json.is_object());
-    EXPECT_TRUE(json["unrelated"].get<bool>());
-    ASSERT_TRUE(json["engine_overrides"].is_array());
-    EXPECT_EQ(json["engine_overrides"].size(), 1u);
+    ASSERT_NO_THROW(err = writeVersionedAutotuneResults(
+                        tmpFile.path, config_op::CONV_FPROP, results, false, dims, {}));
+    EXPECT_FALSE(err.is_good());
 }
 
 // ── ran_exhaustive / converged metadata tests ───────────────────────────────
@@ -936,7 +965,8 @@ TEST(TestAutotuneFileWriter, WritesOnlyRank0Winner)
 
     const std::vector<std::vector<int64_t>> tensorDims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
 
-    auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, tensorDims, {});
+    auto err = writeVersionedAutotuneResults(
+        tmpFile.path, config_op::CONV_FPROP, results, false, tensorDims, {});
     ASSERT_TRUE(err.is_good()) << err.get_message();
 
     std::ifstream file(tmpFile.path);
@@ -962,7 +992,8 @@ TEST(TestAutotuneFileWriter, WritesRank0WinnerSkippingLeadingFailures)
 
     const std::vector<std::vector<int64_t>> tensorDims = {{4, 64, 56, 56}};
 
-    auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, tensorDims, {});
+    auto err = writeVersionedAutotuneResults(
+        tmpFile.path, config_op::CONV_FPROP, results, false, tensorDims, {});
     ASSERT_TRUE(err.is_good()) << err.get_message();
 
     std::ifstream file(tmpFile.path);
@@ -985,7 +1016,8 @@ TEST(TestAutotuneFileWriter, Rank0WinnerReplacesExistingEntry)
     {
         std::vector<AutotuneResult> results;
         results.push_back(makeResult(1, "OLD_WINNER", 2.0f, true, 0));
-        auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, dims, {});
+        auto err = writeVersionedAutotuneResults(
+            tmpFile.path, config_op::CONV_FPROP, results, false, dims, {});
         ASSERT_TRUE(err.is_good());
     }
 
@@ -994,7 +1026,8 @@ TEST(TestAutotuneFileWriter, Rank0WinnerReplacesExistingEntry)
         std::vector<AutotuneResult> results;
         results.push_back(makeResult(5, "NEW_WINNER", 0.8f, true, 0));
         results.push_back(makeResult(6, "NEW_RUNNER_UP", 1.2f, true, 1));
-        auto err = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, dims, {});
+        auto err = writeVersionedAutotuneResults(
+            tmpFile.path, config_op::CONV_FPROP, results, false, dims, {});
         ASSERT_TRUE(err.is_good());
     }
 
