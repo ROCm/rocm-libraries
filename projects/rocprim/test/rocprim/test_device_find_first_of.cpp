@@ -29,7 +29,6 @@
 #include "test_utils.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
-#include "test_utils_memory_check.hpp"
 
 // required common headers
 #include "../../common/utils_device_ptr.hpp"

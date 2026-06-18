@@ -34,7 +34,6 @@
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
-#include "test_utils_memory_check.hpp"
 
 // required rocprim headers
 #include <rocprim/config.hpp>
@@ -403,6 +402,7 @@ void large_indices_reduce_by_key()
                                                       debug_synchronous));
 
         ASSERT_GT(temporary_storage_bytes, 0);
+
         common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
         test_utils::GraphHelper gHelper;
@@ -544,6 +544,7 @@ void large_segment_count_reduce_by_key()
                                                       debug_synchronous));
 
         ASSERT_GT(temporary_storage_bytes, 0);
+
         common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
         test_utils::GraphHelper gHelper;
