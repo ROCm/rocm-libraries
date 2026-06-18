@@ -195,13 +195,14 @@ namespace
     } while(0)
 
     template <typename T>
-    __global__ void addOffsetKernel(T* dPtr, size_t offset, int size)
+    __global__ void addOffsetKernel(T* dOutputPtr, T* dInputPtr, size_t offset, int size)
     {
         int i = blockIdx.x * blockDim.x + threadIdx.x;
         if(i < size)
         {
-            T** ptr = reinterpret_cast<T**>(dPtr);
-            ptr[i] += offset;
+            T** input  = reinterpret_cast<T**>(dInputPtr);
+            T** output = reinterpret_cast<T**>(dOutputPtr);
+            output[i]  = input[i] + offset;
         }
     }
 
@@ -212,19 +213,15 @@ namespace
                              size_t      offset,
                              hipStream_t stream)
     {
-        THROW_IF_HIP_ERROR(hipMemcpyAsync(output_device_pointer_array,
-                                          input_device_pointer_array,
-                                          sizeof(void*) * batch_count,
-                                          hipMemcpyDeviceToDevice,
-                                          stream));
         int threadsPerBlock = 256;
-        int blocksPerGrid   = (batch_count + threadsPerBlock - 1) / threadsPerBlock;
+        int blocksPerGrid   = (batch_count - 1) / threadsPerBlock + 1;
         hipLaunchKernelGGL(addOffsetKernel,
                            dim3(blocksPerGrid),
                            dim3(threadsPerBlock),
                            0,
                            stream,
                            output_device_pointer_array,
+                           static_cast<T1*>(input_device_pointer_array),
                            offset,
                            batch_count);
         return rocblas_status_success;
@@ -569,6 +566,7 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
     hipblasLtMatmulDesc_t       matmulDesc;
     hipblasLtMatmulPreference_t pref;
     size_t                      workspaceSize = 0;
+    rocblas_status              status        = rocblas_status_success;
     try
     {
         if(!prob.strided_batch)
@@ -838,46 +836,38 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                                                      workspaceSize,
                                                      prob.handle->get_stream()));
         }
-        THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmulDesc));
-        THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matA));
-        THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matB));
-        THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matC));
-        THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matD));
-        THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceDestroy(pref));
-        if(workspaceSize > 0)
-            THROW_IF_HIP_ERROR(hipFreeAsync(workspace, prob.handle->get_stream()));
-        if(devicePtrArray_A)
-            THROW_IF_HIP_ERROR(hipFreeAsync(devicePtrArray_A, prob.handle->get_stream()));
-        if(devicePtrArray_B)
-            THROW_IF_HIP_ERROR(hipFreeAsync(devicePtrArray_B, prob.handle->get_stream()));
-        if(devicePtrArray_C)
-            THROW_IF_HIP_ERROR(hipFreeAsync(devicePtrArray_C, prob.handle->get_stream()));
-        if(devicePtrArray_D)
-            THROW_IF_HIP_ERROR(hipFreeAsync(devicePtrArray_D, prob.handle->get_stream()));
+    }
+    catch(rocblas_status& e)
+    {
+        rocblas_internal_ostream msg;
+        print_if_verbose(msg << "rocBLAS error: hipBLASLt execution failed with rocblas_status: "
+                             << rocblas_status_to_string(e));
+        status = e;
     }
     catch(std::exception& e)
     {
         rocblas_internal_ostream msg;
         print_if_verbose(msg << "rocBLAS error: hipBLASLt execution failed with exception: "
                              << e.what());
-        RETURN_IF_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmulDesc));
-        RETURN_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matA));
-        RETURN_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matB));
-        RETURN_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matC));
-        RETURN_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matD));
-        RETURN_IF_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceDestroy(pref));
-        if(workspaceSize > 0)
-            RETURN_IF_HIP_ERROR(hipFreeAsync(workspace, prob.handle->get_stream()));
-        if(devicePtrArray_A)
-            RETURN_IF_HIP_ERROR(hipFreeAsync(devicePtrArray_A, prob.handle->get_stream()));
-        if(devicePtrArray_B)
-            RETURN_IF_HIP_ERROR(hipFreeAsync(devicePtrArray_B, prob.handle->get_stream()));
-        if(devicePtrArray_C)
-            RETURN_IF_HIP_ERROR(hipFreeAsync(devicePtrArray_C, prob.handle->get_stream()));
-        if(devicePtrArray_D)
-            RETURN_IF_HIP_ERROR(hipFreeAsync(devicePtrArray_D, prob.handle->get_stream()));
-        return rocblas_status_internal_error;
+        status = rocblas_status_internal_error;
     }
+    if(devicePtrArray_D)
+        THROW_IF_HIP_ERROR(hipFreeAsync(devicePtrArray_D, prob.handle->get_stream()));
+    if(devicePtrArray_C)
+        THROW_IF_HIP_ERROR(hipFreeAsync(devicePtrArray_C, prob.handle->get_stream()));
+    if(devicePtrArray_B)
+        THROW_IF_HIP_ERROR(hipFreeAsync(devicePtrArray_B, prob.handle->get_stream()));
+    if(devicePtrArray_A)
+        THROW_IF_HIP_ERROR(hipFreeAsync(devicePtrArray_A, prob.handle->get_stream()));
+    if(workspaceSize > 0)
+        THROW_IF_HIP_ERROR(hipFreeAsync(workspace, prob.handle->get_stream()));
+    THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceDestroy(pref));
+    THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmulDesc));
+    THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matD));
+    THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matC));
+    THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matB));
+    THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matA));
+    return status;
 #else
     bool solution_query = algo == rocblas_gemm_algo_solution_index
                           && prob.flags & rocblas_gemm_flags_check_solution_index;
@@ -985,8 +975,8 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
             return rocblas_status_internal_error;
         }
     }
-#endif
     return rocblas_status_success;
+#endif
 }
 
 template <typename Ti, typename To, typename Tc>
