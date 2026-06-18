@@ -46,11 +46,8 @@
 #include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveWaitAluPass.hpp"
-#include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
-#include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
 #include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
-#include "stinkytofu/transforms/asm/StinkyConfigurableWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
@@ -81,14 +78,11 @@ inline bool hasPassArg(const std::vector<std::string>& args, const char* flag) {
 const std::vector<PassInfo> availablePasses = {
     {"StinkyDAGSchedulerPass", [](const auto&) { return createStinkyDAGSchedulerPass(); }},
     {"SetMatrixReusePass", [](const auto&) { return createSetMatrixReusePass(); }},
-    {"StinkyUnrollWaitCntPass", [](const auto&) { return createStinkyUnrollWaitCntPass(); }},
     {"StinkyBuildImplicitDependencyPass",
      [](const auto&) { return createStinkyBuildImplicitDependencyPass(); }},
     {"StinkyRemoveWaitCntPass", [](const auto&) { return createStinkyRemoveWaitCntPass(); }},
     {"StinkyRemoveNopPass", [](const auto&) { return createStinkyRemoveNopPass(); }},
     {"StinkyWaitCntInsertionPass", [](const auto&) { return createStinkyWaitCntInsertionPass(); }},
-    {"ScheduleLastLRsPass", [](const auto&) { return createScheduleLastLRsPass(); }},
-    {"ScheduleFirstLRsPass", [](const auto&) { return createScheduleFirstLRsPass(); }},
     // BuildUseDefChainPass accepts:
     //   includePseudo    — also build chains for pseudo registers (memtokens)
     //   noClearExisting  — keep any existing PHIs/chains
