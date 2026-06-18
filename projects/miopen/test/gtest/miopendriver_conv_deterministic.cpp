@@ -210,7 +210,6 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, BitExactAcrossRuns)
     ASSERT_GT(compared, 0) << "No .bin output files found — nothing was compared";
 }
 
-// 3D WRW
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_MIOpenDriverConvDeterministicTest_FP32,
