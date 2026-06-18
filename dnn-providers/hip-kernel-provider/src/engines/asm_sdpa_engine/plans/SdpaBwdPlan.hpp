@@ -41,9 +41,7 @@ public:
                 SdpaBwdParams params);
 
     /// A16 constructor: requires only 2 kernels (ODO, DQDKDV).
-    SdpaBwdPlan(CachedModule odoKernel,
-                CachedModule dqdkdvKernel,
-                SdpaBwdParams params);
+    SdpaBwdPlan(CachedModule odoKernel, CachedModule dqdkdvKernel, SdpaBwdParams params);
 
     ~SdpaBwdPlan() override = default;
 

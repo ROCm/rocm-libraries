@@ -1072,8 +1072,8 @@ void SdpaBwdPlanBuilder::buildPlan(
     std::optional<CachedModule> postKernel;
     if(dqConvertResolved)
     {
-        auto loaded
-            = moduleCache().getOrLoad(dqConvertResolved->coPath, dqConvertResolved->knlName.c_str());
+        auto loaded = moduleCache().getOrLoad(dqConvertResolved->coPath,
+                                              dqConvertResolved->knlName.c_str());
         if(!loaded)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -1149,8 +1149,8 @@ void SdpaBwdPlanBuilder::buildPlan(
     }
     else
     {
-        executionContext.setPlan(std::make_unique<SdpaBwdPlan>(
-            std::move(odoKernel), std::move(dqdkdvKernel), params));
+        executionContext.setPlan(
+            std::make_unique<SdpaBwdPlan>(std::move(odoKernel), std::move(dqdkdvKernel), params));
     }
 }
 

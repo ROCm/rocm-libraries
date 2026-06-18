@@ -3,10 +3,10 @@
 
 #pragma once
 
+#include "SdpaKernelUtils.hpp"
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
-#include "SdpaKernelUtils.hpp"
 
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 

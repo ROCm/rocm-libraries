@@ -396,9 +396,7 @@ SdpaBwdPlan::SdpaBwdPlan(CachedModule odoKernel,
 {
 }
 
-SdpaBwdPlan::SdpaBwdPlan(CachedModule odoKernel,
-                         CachedModule dqdkdvKernel,
-                         SdpaBwdParams params)
+SdpaBwdPlan::SdpaBwdPlan(CachedModule odoKernel, CachedModule dqdkdvKernel, SdpaBwdParams params)
     : _odoKernel(std::move(odoKernel))
     , _dqdkdvKernel(std::move(dqdkdvKernel))
     , _postKernel(std::nullopt)
