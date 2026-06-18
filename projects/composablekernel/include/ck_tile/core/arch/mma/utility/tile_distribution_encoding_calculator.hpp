@@ -59,16 +59,6 @@ struct TileDistrEncCalc
 
     static_assert(MmaOp::kABKPerLane % (NumAccessA * MmaOp::kCompressionRatio) == 0);
     static_assert(MmaOp::kABKPerLane % NumAccessB == 0);
-
-    // Swizzle seems like a very special modifier and may not work in many cases.
-    // static_assert(SFactor == 1 || MmaOp::kCMBlocks == 1, "Swizzle with blocks is untested!");
-    // static_assert(SFactor == 1 || MmaOp::kCNBlocks == 1, "Swizzle with blocks is untested!");
-    // static_assert(SFactor == 1 || MmaOp::kARepeat == 1, "Swizzle with repeat is untested!");
-    // static_assert(SFactor == 1 || MmaOp::kBRepeat == 1, "Swizzle with repeat is untested!");
-    // static_assert(SFactor == 1 || NumAccessA == 1, "Swizzle with numAccess is untested!");
-    // static_assert(SFactor == 1 || NumAccessB == 1, "Swizzle with numAccess is untested!");
-    // static_assert(SFactor == 1 || MmaOp::kCompressionRatio == 1, "Swizzle with compression is
-    // untested!");
     static_assert(MmaOp::kCMNumAccess % SFactor == 0, "kCMNumAccess must be multiple of SFactor");
 
     template <index_t MajorDimSize, index_t Repeat, index_t NumAccess, index_t CompressionRatio = 1>
