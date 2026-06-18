@@ -19,11 +19,19 @@ on:
         type: string
       test_type:
         type: string
-      # TheRock revision pinned to a commit that exports llvm-cov / llvm-profdata
-      # in the dist. Kept as an input so the build, test and report stages stay in sync.
+      # TheRock revision for the BUILD stage. Pinned to a commit that exports
+      # llvm-cov / llvm-profdata in the dist (a feature branch not yet on main).
       therock_ref:
         type: string
         default: 6afcd5ac5298e9a5cdb3d2c45ae7605739ad2b94
+      # TheRock revision for the TEST stage. Uses a current commit (which has
+      # build_tools/github_actions/cleanup_processes.sh) so the shared test flow
+      # does not fail in its post-job cleanup. The build ref above lacks that
+      # script, and current TheRock lacks the llvm export, so the two stages use
+      # different refs until the export work lands on main.
+      test_therock_ref:
+        type: string
+        default: 2d417fa49bc4e657bcbcf0ae549238784175f0fe
 
 permissions:
   contents: read
@@ -176,7 +184,7 @@ jobs:
     uses: ./.github/workflows/therock-test-packages.yml
     secrets: inherit
     with:
-      therock_ref: ${{ inputs.therock_ref }}
+      therock_ref: ${{ inputs.test_therock_ref }}
       projects_to_test: ${{ inputs.projects_to_test }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
       test_runs_on: ${{ inputs.test_runs_on }}
