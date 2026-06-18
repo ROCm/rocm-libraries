@@ -98,6 +98,12 @@ def _group_type(G: int, C: int, K: int) -> str:
     return "standard"
 
 
+def _filter_bucket(Y: int, X: int) -> str:
+    if Y == 1 and X == 1: return "pointwise"
+    if Y <= 3 and X <= 3: return "small"
+    return "large"
+
+
 # ---------------------------------------------------------------------------
 # OOF analysis
 # ---------------------------------------------------------------------------
@@ -119,13 +125,14 @@ def _build_per_shape(oof_df: pd.DataFrame) -> pd.DataFrame:
     best["group_type"]  = best.apply(lambda r: _group_type(int(r.G), int(r.C), int(r.K)), axis=1)
     best["spatial_bkt"] = best["Hi"].apply(lambda h: _spatial_bucket(int(h)))
     best["channel_bkt"] = best.apply(lambda r: _channel_bucket(int(r.C), int(r.K)), axis=1)
+    best["filter_bkt"]  = best.apply(lambda r: _filter_bucket(int(r.Y), int(r.X)), axis=1)
     return best.sort_values("efficiency").reset_index(drop=True)
 
 
 def _build_summary(per_shape: pd.DataFrame) -> pd.DataFrame:
     """Aggregate per-shape efficiency into subset summary, sorted worst first."""
     return (
-        per_shape.groupby(["N", "group_type", "spatial_bkt", "channel_bkt"])
+        per_shape.groupby(["N", "group_type", "spatial_bkt", "channel_bkt", "filter_bkt"])
         .agg(
             n_shapes       = ("efficiency", "count"),
             mean_efficiency= ("efficiency", "mean"),
@@ -140,13 +147,14 @@ def _build_summary(per_shape: pd.DataFrame) -> pd.DataFrame:
 
 def print_analysis(summary: pd.DataFrame, threshold: float) -> None:
     print("\n=== OOF Subset Analysis (worst first) ===", file=sys.stderr)
-    print(f"{'N':>4}  {'group_type':<12}  {'spatial':<8}  {'channel':<8}  "
+    print(f"{'N':>4}  {'group_type':<12}  {'spatial':<8}  {'channel':<8}  {'filter':<10}  "
           f"{'n_shapes':>8}  {'mean_eff':>8}  {'p10_eff':>7}  {'p50_eff':>7}",
           file=sys.stderr)
-    print("-" * 75, file=sys.stderr)
+    print("-" * 87, file=sys.stderr)
     for _, r in summary.iterrows():
         flag = " <-- TARGETED" if r.mean_efficiency < threshold else ""
         print(f"{int(r.N):>4}  {r.group_type:<12}  {r.spatial_bkt:<8}  {r.channel_bkt:<8}  "
+              f"{r.filter_bkt:<10}  "
               f"{int(r.n_shapes):>8}  {r.mean_efficiency:>8.3f}  "
               f"{r.p10_efficiency:>7.3f}  {r.p50_efficiency:>7.3f}{flag}",
               file=sys.stderr)
@@ -173,7 +181,7 @@ def print_analytics(per_shape: pd.DataFrame, summary: pd.DataFrame,
 
     if analytics_out is not None:
         out_cols = SHAPE_COLS + ["oracle_tflops", "tflops", "efficiency",
-                                  "group_type", "spatial_bkt", "channel_bkt"]
+                                  "group_type", "spatial_bkt", "channel_bkt", "filter_bkt"]
         analytics_out.parent.mkdir(parents=True, exist_ok=True)
         per_shape[out_cols].rename(columns={"tflops": "pred_best_tflops"}).to_csv(
             analytics_out, index=False
@@ -220,7 +228,7 @@ def _parse_force_subset(token: str) -> dict:
     return pred
 
 
-def _matches_subset(N, G, C, K, Hi, group_type, spatial_bkt, channel_bkt,
+def _matches_subset(N, G, C, K, Hi, group_type, spatial_bkt, channel_bkt, filter_bkt,
                     pred: dict) -> bool:
     """Return True if (N, …) satisfies all predicates in pred."""
     if "N" in pred and int(pred["N"]) != N:
@@ -230,6 +238,8 @@ def _matches_subset(N, G, C, K, Hi, group_type, spatial_bkt, channel_bkt,
     if "spatial" in pred and pred["spatial"] != spatial_bkt:
         return False
     if "channel" in pred and pred["channel"] != channel_bkt:
+        return False
+    if "filter" in pred and pred["filter"] != filter_bkt:
         return False
     return True
 
@@ -268,8 +278,9 @@ def generate_targeted(
         gt  = _group_type(G, C, K)
         sb  = _spatial_bucket(Hi)
         cb  = _channel_bucket(C, K)
+        fb  = _filter_bucket(Y, X)
         for pred in targeted_subsets:
-            if _matches_subset(N, G, C, K, Hi, gt, sb, cb, pred):
+            if _matches_subset(N, G, C, K, Hi, gt, sb, cb, fb, pred):
                 shapes.add(t)
                 return
 
@@ -442,6 +453,7 @@ def main():
             "group_type": r.group_type,
             "spatial":    r.spatial_bkt,
             "channel":    r.channel_bkt,
+            "filter":     r.filter_bkt,
         })
 
     for token in args.force_subsets:

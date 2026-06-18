@@ -24,17 +24,17 @@ heuristics/
     build.sh                — self-contained build driver; run inside a ROCm container
 ```
 
-Training scripts live in `projects/composablekernel/dispatcher/heuristics/`
+Training and shape-generation scripts live in `projects/composablekernel/dispatcher/heuristics/`
 and are called directly from there:
 
 ```
 projects/composablekernel/dispatcher/heuristics/
   train.py                        — LightGBM training (GroupKFold CV, IHEM, warm-start)
   data_pipeline.py                — parquet loader / builder used by train.py
-  feature_engine_grouped_conv.py  — 97-feature extractor for grouped conv
+  feature_engine_grouped_conv.py  — 101-feature extractor for grouped conv (see Features)
   feature_engine.py               — base class imported by feature_engine_grouped_conv.py
-  generate_wide_coverage_conv.py      — wide-coverage training shapes
-  generate_edge_dims_conv.py          — edge-case training shapes
+  generate_wide_coverage_conv.py      — wide-coverage training shapes (full retrain)
+  generate_edge_dims_conv.py          — edge-case training shapes (full retrain)
   generate_targeted_shapes_conv.py    — OOF-driven targeted top-up shape generation
   sample_shapes_conv.py               — stratified merge + shard
 ```
@@ -226,7 +226,93 @@ python3 $CK_HEURISTICS/train.py \
 
 ---
 
-### Step 7 — Update the in-repo model
+### Step 7 — Evaluate OOF efficiency and decide whether to iterate
+
+`train.py` writes `oof_predictions.parquet` alongside the model. This contains
+one row per (shape, candidate) with the model's out-of-fold prediction — the
+same prediction the model would make on data it has never seen. Use
+`generate_targeted_shapes_conv.py` to turn these into a per-subset efficiency
+report:
+
+```bash
+python3 $CK_HEURISTICS/generate_targeted_shapes_conv.py \
+    --oof     $WORK/models/grouped_conv_forward_fp16_gfx942/oof_predictions.parquet \
+    --train   $WORK/data/conv_fp16_gfx942_dsl.parquet \
+    --analytics --dry-run
+```
+
+This prints:
+- Global mean/P10/P50/P90 top-1 efficiency
+- Per-subset breakdown sorted worst-first (N × group_type × spatial × channel)
+- Worst 20 individual shapes
+
+**Target: mean ≥ 0.90 and P10 ≥ 0.75 across all subsets.**
+
+If satisfied, proceed to Step 8. If subsets are below threshold, run a targeted
+top-up sweep (Step 7a) before updating the model.
+
+---
+
+### Step 7a — Targeted top-up (if OOF reveals hard subsets)
+
+`generate_targeted_shapes_conv.py` identifies the subset buckets where the
+model's top-1 pick is worst, then generates a dense grid of new shapes covering
+only those buckets. The grid spans `_N_VALUES × _C_VALUES × _K_VALUES ×
+_HW_VALUES × _FILTER_PADS × _STRIDES × _G_VALUES`, filtered to shapes that
+(a) fall in a targeted subset and (b) are not already in the training set.
+`--density 2` expands the grid with intermediate values; `--target N` applies
+stratified sampling to cap the output.
+
+```bash
+# Generate 500 targeted shapes, single shard (no array needed for top-up)
+python3 $CK_HEURISTICS/generate_targeted_shapes_conv.py \
+    --oof       $WORK/models/grouped_conv_forward_fp16_gfx942/oof_predictions.parquet \
+    --train     $WORK/data/conv_fp16_gfx942_dsl.parquet \
+    --out       $WORK/shapes/topup/shard_00.csv \
+    --shards    1 \
+    --target    500 \
+    --density   2 \
+    --threshold 0.90
+```
+
+Key flags:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--oof` | required | `oof_predictions.parquet` from `train.py` |
+| `--train` | required | Training parquet; generated shapes are guaranteed non-overlapping |
+| `--out` | required | Output CSV path |
+| `--target` | all | Cap on output shapes; stratified sampling preserves bucket diversity |
+| `--density` | 1 | `2` = denser grid (adds intermediate N/spatial/channel values) |
+| `--threshold` | 0.90 | Mean efficiency below which a subset is targeted |
+| `--force-subsets` | — | Always target named subsets, e.g. `"N=1,grouped"` `"spatial=large"` |
+| `--analytics` | off | Print global stats and worst 20 shapes |
+| `--dry-run` | off | Analyse only; do not write shape files |
+
+Sweep the generated shapes (Steps 3–5 above), place the resulting parquet in
+the same data directory as the original training parquet (or pass both to
+`train.py --data_dir`), then warm-start retrain:
+
+```bash
+python3 $CK_HEURISTICS/train.py \
+    --data_dir   $WORK/data/topup \
+    --out_dir    $WORK/models/grouped_conv_forward_fp16_gfx942_v2 \
+    --operation  grouped_conv \
+    --dtype      fp16 \
+    --arch       gfx942 \
+    --targets    tflops \
+    --warm_start $WORK/models/grouped_conv_forward_fp16_gfx942
+```
+
+Warm-start adds trees on top of the existing model without disturbing prior
+trees. It requires an identical feature schema — if `feature_engine_grouped_conv.py`
+has changed (features added/removed), a full retrain from scratch is necessary.
+
+Repeat Steps 6–7a until OOF targets are met.
+
+---
+
+### Step 8 — Update the in-repo model
 
 When CV efficiency is satisfactory, compress and commit:
 
@@ -245,27 +331,27 @@ git add $MODEL_DST
 git commit -m "[CK DSL] conv model: retrain fp16/gfx942 ($(date +%Y-%m-%d))"
 ```
 
-Validate heuristic efficiency using the OOF predictions produced during training:
+---
 
-```bash
-# Inspect per-subset efficiency from the last training run.
-python3 $CK_HEURISTICS/generate_targeted_shapes_conv.py \
-    --oof      oof_predictions.parquet \
-    --train    conv_fp16_<arch>_dsl.parquet \
-    --analytics --dry-run
-# Target: mean efficiency >= 0.90 across all subsets.
-```
+## Features
 
-If subsets are below threshold, generate a targeted top-up shape set and re-sweep:
+`feature_engine_grouped_conv.py` extracts per-(shape, candidate) features fed
+to the LightGBM model. Features fall into four tiers:
 
-```bash
-# Generate shapes covering hard subsets (zero overlap with existing training data).
-python3 $CK_HEURISTICS/generate_targeted_shapes_conv.py \
-    --oof   oof_predictions.parquet \
-    --train conv_fp16_<arch>_dsl.parquet \
-    --out   all_shapes.csv \
-    --shards 32
+| Tier | Description | Count |
+|------|-------------|-------|
+| Shape | N, G, C, K, Hi, Wi, filter, stride, pad, derived spatial/channel dims | ~30 |
+| Candidate tile | gemm_m/n/k per block, pipeline, wave_mode, block_size, has_dsb/si | ~15 |
+| Hardware | CU count, SIMD/CU, shader engines, clock, wavefront size, cache sizes | ~15 |
+| Interaction | K_per_C (K/C), GEMM M/N/K, occupancy estimates, bucket indicators | ~39 |
 
-# Sweep the targeted shapes, convert, and warm-start retrain.
-# See sweep/build.sh and the full retraining workflow above.
-```
+`K_per_C = K / C` is the directional channel ratio. It allows the model to
+distinguish `C=64, K=256` (K/C=4: more outputs than inputs) from `C=256, K=64`
+(K/C=0.25: more inputs than outputs) in a single split, rather than requiring a
+two-condition conjunction from raw C and K values. This is important because the
+GEMM mapping is asymmetric: C maps to GEMM K_gemm (contraction dimension) and K
+maps to GEMM N (output dimension), so the optimal tile differs between the two cases.
+
+The feature schema version is recorded in `feature_spec.json` alongside each
+trained model. Warm-start retraining requires an identical schema — any change
+to feature count or order forces a full retrain from scratch.

@@ -8,7 +8,7 @@
 //   GEMM     — 72 features (byte-identical to CK Tile feature_spec.json;
 //               the CK Tile gemm_universal_fp16_gfx950 model is reusable)
 //   FMHA     — 68 features
-//   Conv-fwd — 98 features (grouped_conv_forward_fp16_{gfx90a,gfx942,gfx950})
+//   Conv-fwd — 101 features (grouped_conv_forward_fp16_{gfx90a,gfx942,gfx950})
 #pragma once
 
 #include <algorithm>
@@ -382,7 +382,7 @@ inline std::array<double, CKDSL_FMHA_NUM_FEATURES> ml_extract_fmha_features(
 }
 
 // ---- Conv ML features, mirroring ConvImplicitGemmScorer.cpp ----
-// 98 features (gfx90a/gfx942 fp16 and gfx950 bf16 conv models use this schema).
+// 101 features (grouped_conv_forward_fp16_{gfx90a,gfx942,gfx950}).
 
 struct ConvHwProfile {
     int num_cus = 304, simds_per_cu = 4, shader_engines = 38, max_clock_mhz = 2400,
@@ -432,7 +432,7 @@ struct ConvHwProfile {
     }
 };
 
-static constexpr int CKDSL_CONV_NUM_FEATURES = 98;
+static constexpr int CKDSL_CONV_NUM_FEATURES = 101;
 
 inline int conv_encode_pipeline(const std::string& p) {
     if (p == "compv3") return 0;
@@ -451,7 +451,7 @@ inline double conv_dtype_bytes(const std::string& dt) {
     return 2.0;
 }
 
-// Direct C++ mirror of GroupedConvFeatureEngine.extract() (2D conv, 98 features).
+// Direct C++ mirror of GroupedConvFeatureEngine.extract() (2D conv, 101 features).
 // Feature order matches feature_spec.json for grouped_conv_forward_fp16_gfx90a,
 // grouped_conv_forward_fp16_gfx942, and grouped_conv_forward_2d3d_suffix_bf16_gfx950.
 // k.tile_k (== manifest block_k) is gemm_k_per_block — the tile size along the K
@@ -515,6 +515,7 @@ inline std::array<double, CKDSL_CONV_NUM_FEATURES> ml_extract_conv_features(
     const double cprod = cpg * ocpg;
     const double batch_group = (double)N * G;
     const double is_small_batch_grouped = (N < 8 && G > 1) ? 1.0 : 0.0;
+    const double k_per_c = (double)K / std::max(C, 1);
 
     // Kernel features
     const std::string pipeline_str = MlKernelConfig::dec_pipeline(k.pipeline);
@@ -567,6 +568,8 @@ inline std::array<double, CKDSL_CONV_NUM_FEATURES> ml_extract_conv_features(
                  rk = gemm_k / std::max(tile_k, 1);
     const double psm = (gemm_m < tile_m) ? 1.0 : 0.0, psn = (gemm_n < tile_n) ? 1.0 : 0.0,
                  psk = (gemm_k < tile_k) ? 1.0 : 0.0;
+    const double log_gemm_m_n_ratio = std::log(std::max(gemm_m, 1.0) / std::max(gemm_n, 1.0));
+    const double log_total_output_tiles = std::log(std::max(tot_tiles, 1.0));
 
     return {{
         // Problem (30)
@@ -582,9 +585,10 @@ inline std::array<double, CKDSL_CONV_NUM_FEATURES> ml_extract_conv_features(
         (double)Di, (double)Z3d, (double)Do,
         (double)stride_d, (double)pad_d,
         (double)dilation_h, (double)dilation_w,
-        // Group (8)
+        // Group (9)
         log2_cpg, log2_ocpg, is_depthwise, group_density,
         is_small_group, cprod, batch_group, is_small_batch_grouped,
+        k_per_c,
         // Kernel (16)
         (double)block_size, (double)tile_m, (double)tile_n, (double)tile_k,
         (double)pipeline_code, num_warps, tile_vol, tile_mn,
@@ -592,11 +596,12 @@ inline std::array<double, CKDSL_CONV_NUM_FEATURES> ml_extract_conv_features(
         is_compv3, is_compv4, is_compv5,
         // Suffix (6)
         is_intrawave, has_dsb, has_si, is_basic, is_compv6, is_mem,
-        // Interaction (18)
+        // Interaction (20)
         gemm_m, gemm_n, gemm_k,
         ntm, ntn, ntk, tot_tiles,
         te_m, te_n, te_k, overall_eff, cu_util,
         rm, rn, rk, psm, psn, psk,
+        log_gemm_m_n_ratio, log_total_output_tiles,
         // Hardware (12)
         (double)hw.num_cus, (double)hw.simds_per_cu, (double)hw.total_simds(),
         (double)hw.shader_engines, (double)hw.max_clock_mhz, (double)hw.max_waves_per_cu,
@@ -638,7 +643,7 @@ class DslMlHeuristic {
     }
 
     // Predict TFLOPS for one candidate, dispatching by op.
-    // Conv: dedicated 98-feature conv model when loaded, else GEMM approximation.
+    // Conv: dedicated 101-feature conv model when loaded, else GEMM approximation.
     double predict_tflops(const Problem& prob, const Manifest& m) const {
         if (prob.op == "attention") {
             if (!fmha_booster_) return 0;

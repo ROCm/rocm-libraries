@@ -1,7 +1,7 @@
 {
   "op_type": "grouped_conv",
   "dtype": "fp16",
-  "arch": "gfx942",
+  "arch": "gfx950",
   "feature_names": [
     "N",
     "C",
