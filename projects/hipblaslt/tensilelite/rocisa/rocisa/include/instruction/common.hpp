@@ -407,34 +407,6 @@ namespace rocisa
         }
     };
 
-    struct SMulLOU32 : public CommonInstruction
-    {
-        SMulLOU32(const std::shared_ptr<RegisterContainer>& dst,
-                  const InstructionInput&                   src0,
-                  const InstructionInput&                   src1,
-                  const std::string&                        comment = "")
-            : CommonInstruction(InstType::INST_HI_U32,
-                                dst,
-                                {src0, src1},
-                                std::nullopt,
-                                std::nullopt,
-                                std::nullopt,
-                                comment)
-        {
-            setInst("s_mul_lo_u32");
-        }
-
-        SMulLOU32(const SMulLOU32& other)
-            : CommonInstruction(other)
-        {
-        }
-
-        std::shared_ptr<Item> clone() const override
-        {
-            return std::make_shared<SMulLOU32>(*this);
-        }
-    };
-
     struct SSubI32 : public CommonInstruction
     {
         SSubI32(const std::shared_ptr<RegisterContainer>& dst,

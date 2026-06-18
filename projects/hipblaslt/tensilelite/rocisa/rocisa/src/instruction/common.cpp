@@ -197,19 +197,6 @@ void common_inst(nb::module_ m_common)
             return new rocisa::SMulHIU32(self);
         });
 
-    nb::class_<rocisa::SMulLOU32, rocisa::CommonInstruction>(m_common, "SMulLOU32")
-        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
-                      const InstructionInput&,
-                      const InstructionInput&,
-                      const std::string&>(),
-             nb::arg("dst"),
-             nb::arg("src0"),
-             nb::arg("src1"),
-             nb::arg("comment") = "")
-        .def("__deepcopy__", [](const rocisa::SMulLOU32& self, const nb::dict&) {
-            return new rocisa::SMulLOU32(self);
-        });
-
     nb::class_<rocisa::SSubI32, rocisa::CommonInstruction>(m_common, "SSubI32")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const InstructionInput&,
