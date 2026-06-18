@@ -20,6 +20,7 @@ add_executable(
     IntegrationGpuMatmulBias.cpp
     IntegrationGpuMatmulBiasActiv.cpp
     IntegrationGpuMxMatmul.cpp
+    IntegrationGpuMxMatmulUnsupported.cpp
     TestTestWorkarounds.cpp
 )
 

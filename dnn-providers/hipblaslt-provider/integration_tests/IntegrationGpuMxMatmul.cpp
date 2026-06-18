@@ -64,17 +64,16 @@ protected:
 
         // A from the case (transA → col-major, opA=T).
         auto aAttr = graph::makeTensorAttributes(
-            "a", inType, aDims, this->generateInputStrideOrder(aDims, testParams.transA));
+            "a", inType, aDims, generateInputStrideOrder(aDims, testParams.transA));
         auto aTensor = std::make_shared<graph::TensorAttributes>(std::move(aAttr));
 
         // Scale_A mirrors A's shape with the K axis split into 32-wide blocks.
         std::vector<int64_t> scaleADims = aDims;
         scaleADims.back() = scaleK;
-        auto scaleAAttr
-            = graph::makeTensorAttributes("scale_a",
-                                          hipdnn_frontend::DataType::FP8_E8M0,
-                                          scaleADims,
-                                          this->generateInputStrideOrder(scaleADims, false));
+        auto scaleAAttr = graph::makeTensorAttributes("scale_a",
+                                                      hipdnn_frontend::DataType::FP8_E8M0,
+                                                      scaleADims,
+                                                      generateInputStrideOrder(scaleADims, false));
         auto scaleATensor = std::make_shared<graph::TensorAttributes>(std::move(scaleAAttr));
 
         graph::BlockScaleDequantizeAttributes deqAttrA;
@@ -83,17 +82,16 @@ protected:
 
         // B from the case (transB → row-major, opB=N).
         auto bAttr = graph::makeTensorAttributes(
-            "b", inType, bDims, this->generateInputStrideOrder(bDims, testParams.transB));
+            "b", inType, bDims, generateInputStrideOrder(bDims, testParams.transB));
         auto bTensor = std::make_shared<graph::TensorAttributes>(std::move(bAttr));
 
         // Scale_B mirrors B's shape with the K axis split into 32-wide blocks.
         std::vector<int64_t> scaleBDims = bDims;
         scaleBDims[scaleBDims.size() - 2] = scaleK;
-        auto scaleBAttr
-            = graph::makeTensorAttributes("scale_b",
-                                          hipdnn_frontend::DataType::FP8_E8M0,
-                                          scaleBDims,
-                                          this->generateInputStrideOrder(scaleBDims, false));
+        auto scaleBAttr = graph::makeTensorAttributes("scale_b",
+                                                      hipdnn_frontend::DataType::FP8_E8M0,
+                                                      scaleBDims,
+                                                      generateInputStrideOrder(scaleBDims, false));
         auto scaleBTensor = std::make_shared<graph::TensorAttributes>(std::move(scaleBAttr));
 
         // B is [..., K, N]: the 32-wide blocks run along K, the second-to-last

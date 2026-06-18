@@ -37,19 +37,6 @@ protected:
         this->verifyGraph(graphObj, getSeed(this->GetParam()));
     }
 
-    static std::vector<int64_t> generateInputStrideOrder(const std::vector<int64_t>& dims,
-                                                         bool transpose)
-    {
-        std::vector<int64_t> strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-        if(transpose)
-        {
-            const size_t rank = dims.size();
-            strides[rank - 1] = dims[rank - 2];
-            strides[rank - 2] = 1;
-        }
-        return strides;
-    }
-
     // NOLINTBEGIN(portability-template-virtual-member-function)
     virtual std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>
         initGraph(const TestParamsType& testParams, hipdnn_frontend::graph::Graph& graphObj) const
