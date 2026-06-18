@@ -33,6 +33,11 @@ struct Problem {
     long batch = 0, nhead_q = 0, nhead_k = 0, seqlen_q = 0, seqlen_k = 0, hdim_q = 0, hdim_v = 0;
     int mask_type = 0;  // 0=none,1=causal/top_left,...
     bool use_sinks = false;
+    // Conv-specific dims (set by the conv parser; used by the conv ML feature
+    // extractor). Zero when op != "conv".
+    long conv_N = 0, conv_C = 0, conv_K = 0, conv_G = 1;
+    long Hi = 0, Wi = 0, Y = 0, X = 0;
+    int stride_h = 1, stride_w = 1, pad_h = 0, pad_w = 0, dilation_h = 1, dilation_w = 1;
 };
 
 // Selection strategy, mirroring the CK Tile dispatcher: FirstFit (priority /
@@ -105,6 +110,22 @@ class Dispatcher {
             if (m.block_m <= 0 || m.block_n <= 0 || m.block_k <= 0) return false;
             // No-padding kernels require exact divisibility.
             return (p.M % m.block_m == 0) && (p.N % m.block_n == 0) && (p.K % m.block_k == 0);
+        }
+        if (p.op == "conv") {
+            // Baked conv kernels have fixed problem dims encoded in manifest["conv"]
+            // as [N, Hi, Wi, C, K, R, S, sH, sW, pH, pW, dH, dW]. If the array is
+            // absent the kernel is shape-generic (C-JIT path); accept all shapes.
+            if (!m.raw.has("conv")) return true;
+            const auto& arr = m.raw.at("conv").as_array();
+            if (arr.size() < 13) return true;
+            return p.conv_N == arr[0].as_int() && p.Hi == arr[1].as_int() &&
+                   p.Wi == arr[2].as_int() && p.conv_C == arr[3].as_int() &&
+                   p.conv_K == arr[4].as_int() && p.Y == arr[5].as_int() &&
+                   p.X == arr[6].as_int() && p.stride_h == arr[7].as_int() &&
+                   p.stride_w == arr[8].as_int() && p.pad_h == arr[9].as_int() &&
+                   p.pad_w == arr[10].as_int() && p.dilation_h == arr[11].as_int() &&
+                   p.dilation_w == arr[12].as_int() &&
+                   p.conv_G == m.raw.get_int("groups", 1);
         }
         return true;  // other ops: shape support refined per-engine
     }

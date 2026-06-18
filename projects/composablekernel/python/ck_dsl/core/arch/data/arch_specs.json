@@ -2,6 +2,31 @@
   "version": 1,
   "_comment": "CK_DSL-owned architecture SSOT. Hardware facts only (no pipeline/scheduler vocabulary). MFMA atom sets are hardware-verified on alola (see dsl_docs/architecture/multi_arch_data_layout.md). Each MMA row: {family,a,b,c,m,n,k,op_id}; op_id is the opaque backend handle (matches IRBuilder.mfma_* today).",
   "arches": {
+    "gfx90a": {
+      "_comment": "CDNA2 (MI200 / Aldebaran). Wave64, 64 KB LDS. No fp8/bf8 native MFMA (those arrived with gfx940/gfx942). No async_lds. bf16 32x32x8 is hardware-verified on MI200 series. Hardware-verified MMA set matches AMD ISA manual v3 (GFX9 MFMA section).",
+      "family": "cdna",
+      "target_family": "gfx9_mfma",
+      "wave_size": 64,
+      "lds_capacity_bytes": 65536,
+      "vmcnt_bits": 4,
+      "memory": {
+        "has_async_lds": false,
+        "has_ds_read_tr": false,
+        "buffer_load_max_dwords": 4
+      },
+      "limits": {
+        "max_threads_per_block": 1024,
+        "vgprs": 512,
+        "agprs": 256,
+        "sgprs": 102
+      },
+      "mma": [
+        {"family": "mma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "mfma_f32_16x16x16_f16"},
+        {"family": "mma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 32, "n": 32, "k": 8,  "op_id": "mfma_f32_32x32x8_f16"},
+        {"family": "mma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "mfma_f32_16x16x16_bf16"},
+        {"family": "mma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 32, "n": 32, "k": 8,  "op_id": "mfma_f32_32x32x8_bf16"}
+      ]
+    },
     "gfx942": {
       "family": "cdna",
       "target_family": "gfx9_mfma",

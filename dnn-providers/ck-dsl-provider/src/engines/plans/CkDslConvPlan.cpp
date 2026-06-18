@@ -3,6 +3,7 @@
 
 #include "CkDslConvPlan.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <unordered_map>
@@ -34,7 +35,7 @@ void CkDslConvPlan::execute(const CkDslHandle& handle,
     int Ho = p.Ho(), Wo = p.Wo();
     int elt = 2;  // fp16/bf16
     uint64_t a_bytes = (uint64_t)p.N * p.Hi * p.Wi * p.C * elt;
-    uint64_t b_bytes = (uint64_t)p.K * p.R * p.S * p.C * elt;
+    uint64_t b_bytes = (uint64_t)p.K * p.R * p.S * (p.C / std::max(p.G, 1)) * elt;
     uint64_t d_bytes = (uint64_t)p.N * Ho * Wo * p.K * elt;
 
     const auto& m = kernel_->manifest();

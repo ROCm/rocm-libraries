@@ -543,6 +543,21 @@ static const ckc_layout_map_t lm_wmma_gfx12_c = {
  * through as the lowercased spelling "fp4"/"fp6" (Python identity fallthrough).
  */
 
+/* ----------------------------- gfx90a (CDNA2) ---------------------------- */
+/* MI200 (Aldebaran): wave64, 64 KB LDS, no async_lds, no fp8/bf8 native MFMA.
+ * bf16 32x32x8 is hardware-supported (same MFMA atom dimensions as fp16 32x32x8;
+ * bf16 arrived in CDNA2 with the same layout maps as fp16 for those shapes). */
+static const ckc_mma_op_t k_mma_gfx90a[] = {
+    {"mma", "fp16", "fp16", "fp32", 16, 16, 16, "mfma_f32_16x16x16_f16",
+     4, 4, 4, 64, &lm_mfma_16x16x16_a, &lm_mfma_16x16x16_b, &lm_mfma_16x16x16_c},
+    {"mma", "fp16", "fp16", "fp32", 32, 32, 8, "mfma_f32_32x32x8_f16",
+     4, 4, 16, 64, &lm_mfma_32x32x8_a, &lm_mfma_32x32x8_b, &lm_mfma_32x32x8_c},
+    {"mma", "bf16", "bf16", "fp32", 16, 16, 16, "mfma_f32_16x16x16_bf16",
+     4, 4, 4, 64, &lm_mfma_16x16x16_a, &lm_mfma_16x16x16_b, &lm_mfma_16x16x16_c},
+    {"mma", "bf16", "bf16", "fp32", 32, 32, 8, "mfma_f32_32x32x8_bf16",
+     4, 4, 16, 64, &lm_mfma_32x32x8_a, &lm_mfma_32x32x8_b, &lm_mfma_32x32x8_c},
+};
+
 /* ----------------------------- gfx942 (CDNA) ----------------------------- */
 static const ckc_mma_op_t k_mma_gfx942[] = {
     {"mma", "fp16", "fp16", "fp32", 16, 16, 16, "mfma_f32_16x16x16_f16",
@@ -635,6 +650,13 @@ static const ckc_mma_op_t k_mma_gfx11_generic[] = {
 
 #define K_NUM(arr) ((int)(sizeof(arr) / sizeof((arr)[0])))
 
+static const ckc_arch_target_t k_target_gfx90a = {
+    "gfx90a", "cdna", "gfx9_mfma", 64, 65536, 4,
+    {k_mma_gfx90a, K_NUM(k_mma_gfx90a)},
+    {false, false, 4},
+    {1024, 512, 256, 102},
+};
+
 static const ckc_arch_target_t k_target_gfx942 = {
     "gfx942", "cdna", "gfx9_mfma", 64, 65536, 4,
     {k_mma_gfx942, K_NUM(k_mma_gfx942)},
@@ -675,8 +697,9 @@ static const ckc_arch_target_t k_target_gfx11_generic = {
  * =========================================================================
  *
  * Python known_arches() returns tuple(sorted(specs)); sorted() on the gfx
- * strings yields: "gfx11-generic", "gfx1151", "gfx1201", "gfx942", "gfx950".
- * ('-' (0x2D) < '1' (0x31), so "gfx11-generic" sorts before "gfx1151".)
+ * strings yields: "gfx11-generic", "gfx1151", "gfx1201", "gfx90a", "gfx942",
+ * "gfx950". ('-' (0x2D) < '1' (0x31), so "gfx11-generic" sorts before
+ * "gfx1151"; '0' < '4' so "gfx90a" sorts before "gfx942".)
  * The registry is kept in this same sorted order so ckc_known_arches can return
  * ckc_ati_known_arches directly.
  */
@@ -685,17 +708,19 @@ const ckc_ati_arch_row_t ckc_ati_arch_registry[] = {
     {"gfx11-generic", &k_target_gfx11_generic},
     {"gfx1151", &k_target_gfx1151},
     {"gfx1201", &k_target_gfx1201},
+    {"gfx90a", &k_target_gfx90a},
     {"gfx942", &k_target_gfx942},
     {"gfx950", &k_target_gfx950},
     {NULL, NULL}, /* terminator */
 };
 
-const int ckc_ati_arch_registry_len = 5;
+const int ckc_ati_arch_registry_len = 6;
 
 const char *const ckc_ati_known_arches[] = {
     "gfx11-generic",
     "gfx1151",
     "gfx1201",
+    "gfx90a",
     "gfx942",
     "gfx950",
     NULL,

@@ -40,10 +40,11 @@ CkDslHandle::CkDslHandle() {
 
     dispatcher_ = std::make_unique<ck_dsl::Dispatcher>(*store_);
 
-    // Trained-model kernel selection (mirrors the CK Tile dispatcher's ML
-    // heuristic): when CK_DSL_ML_MODEL_PATH points at a LightGBM model, rank
+    // Trained-model kernel selection: when CK_DSL_ML_MODEL_DIR is set, rank
     // candidates by predicted TFLOPS instead of FirstFit.
-    // CK_DSL_ML_MODEL_DIR holds per-op LightGBM models (<dir>/gemm/, <dir>/fmha/).
+    // Expected layout: <dir>/gemm/model_tflops.lgbm
+    //                  <dir>/fmha/model_tflops.lgbm
+    //                  <dir>/conv/model_tflops.lgbm
     const char* model = std::getenv("CK_DSL_ML_MODEL_DIR");
     bool ml = false;
     if (model != nullptr) {
@@ -61,7 +62,9 @@ CkDslHandle::CkDslHandle() {
     }
 
     HIPDNN_PLUGIN_LOG_INFO("CkDslHandle: arch=" << gfx_arch_ << " kernels=" << n << " selection="
-                                                << (ml ? "ml_heuristic" : "firstfit"));
+                                                << (ml ? "ml_heuristic" : "firstfit")
+                                                << (ml && ml_heuristic_->has_conv() ? " conv_model=yes"
+                                                                                    : ""));
 }
 
 CkDslHandle::~CkDslHandle() = default;
