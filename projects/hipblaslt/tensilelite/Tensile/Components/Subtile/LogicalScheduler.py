@@ -33,10 +33,7 @@ import math
 
 from rocisa.code import Module
 
-# Debug: emit `s_mov_b32 m0, LoopCounterL; s_ttracedata` at the start of
-# every mainloop iteration so SQTT / trace decoders can identify iterations.
-# Set to False to drop the markers (saves 2 instructions per iter).
-DEBUG_EMIT_MAINLOOP_TRACE_MARKER = True
+from ...Common.GlobalParameters import globalParameters
 
 # ds_load_b128 reads 4 contiguous VGPRs.
 DS_B128_VGPRS = 4
@@ -2633,12 +2630,16 @@ class LogicalScheduler:
 
         exitLabels = [Label(f"ExitC{ui}", "") for ui in range(uf - 1)]
         module.add(loopBegin)
-        if DEBUG_EMIT_MAINLOOP_TRACE_MARKER:
+        # Debug: emit `s_mov_b32 m0, LoopCounterL; s_ttracedata` at the start of
+        # every mainloop iteration so SQTT / trace decoders can identify iterations
+        # (adds 2 instructions per iter). Gated by the EmitMainloopTraceMarker global.
+        emitTraceMarker = globalParameters.get("EmitMainloopTraceMarker", False)
+        if emitTraceMarker:
             from rocisa.container import mgpr
             from rocisa.instruction import SMovB32 as _SMovB32
             from rocisa.instruction import STtraceData as _STtraceData
         for ui in range(uf):
-            if DEBUG_EMIT_MAINLOOP_TRACE_MARKER:
+            if emitTraceMarker:
                 # Mainloop iteration marker for SQTT / trace decoder: write
                 # LoopCounterL into M0 then emit it via s_ttracedata. Decoder
                 # only uses low 8 bits, so M0 wrap past 256 is fine.
