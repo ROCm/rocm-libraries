@@ -1015,8 +1015,10 @@ namespace TensileLite
 
             // Determine ring policy from benchmark/validation settings.
             {
-                m_ringPolicy = chooseRingPolicy(makeRingPolicyInputs(args));
-                m_ring       = RingSlotController(m_ringPolicy.activeBufferCount);
+                auto const ringPolicyInputs = makeRingPolicyInputs(args);
+                m_ringPolicy                = chooseRingPolicy(ringPolicyInputs);
+                m_warmOutputResetRequired   = hasValidationDriver(ringPolicyInputs);
+                m_ring                      = RingSlotController(m_ringPolicy.activeBufferCount);
             }
 
             m_rotatingBuffer

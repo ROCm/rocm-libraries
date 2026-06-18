@@ -350,6 +350,11 @@ namespace TensileLite
                 // marker.
                 if(m_altSlotsFilled)
                 {
+                    if(m_warmOutputResetRequired)
+                    {
+                        ScopedTimer resetTimer("async_reset_warm_resetoutput");
+                        resetOutputsForRingSlot(targetSlot, problem);
+                    }
                     HIP_CHECK_EXC(
                         hipEventRecord(m_copyDoneEvents[targetSlot], m_copyStream));
                     m_ring.markSlotPrimed();
@@ -1200,7 +1205,43 @@ namespace TensileLite
                     && m_copyStream
                     && m_gpuInit
                     && m_curBoundsCheck == BoundsCheckMode::Disable
-                    && !m_problemDependentData;
+                    && !m_problemDependentData
+                    && (!m_warmOutputResetRequired || m_keepPristineCopyOnGPU);
+            }
+
+            void resetOutputsForRingSlot(size_t targetSlot, ContractionProblem const* problem)
+            {
+                SlotGuard guard(m_vdata, targetSlot);
+
+                auto localMaxElements = m_maxElements;
+                auto localOffsets     = m_groupedOffsets;
+                if(localMaxElements.size() < m_vdata.size())
+                    localMaxElements.resize(m_vdata.size());
+                if(localOffsets.size() < m_vdata.size())
+                    localOffsets.resize(m_vdata.size());
+
+                if(auto gemmProblem = dynamic_cast<ContractionProblemGemm const*>(problem))
+                {
+                    resetOutput(m_gpuPtrsRing[targetSlot],
+                                m_gpuBatchPtrsRing[targetSlot],
+                                localMaxElements,
+                                localOffsets,
+                                *gemmProblem,
+                                hipMemcpyDeviceToDevice,
+                                m_copyStream);
+                }
+                else if(auto groupedProblem
+                        = dynamic_cast<ContractionProblemGroupedGemm const*>(problem))
+                {
+                    assertGroupedRingFastPathInvariant(*groupedProblem);
+                    resetOutput(m_gpuPtrsRing[targetSlot],
+                                m_gpuBatchPtrsRing[targetSlot],
+                                localMaxElements,
+                                localOffsets,
+                                groupedProblem->gemms[0],
+                                hipMemcpyDeviceToDevice,
+                                m_copyStream);
+                }
             }
 
             uint8_t** pinnedBatchStagingSlice(size_t bufferSlot, size_t tensorIdx) const
@@ -1276,6 +1317,7 @@ namespace TensileLite
             bool                  m_hasAltBuffers = false;
             RingPolicy            m_ringPolicy;
             RingSlotController    m_ring;
+            bool                  m_warmOutputResetRequired = false;
 
             std::shared_ptr<ProblemInputs> m_cachedGPUInputs;
 
