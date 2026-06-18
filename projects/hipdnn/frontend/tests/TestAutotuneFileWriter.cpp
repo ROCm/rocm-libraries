@@ -8,6 +8,7 @@
 #include <hipdnn_frontend/knob/KnobSetting.hpp>
 
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+#include <hipdnn_data_sdk/detail/AutotuneConfigNames.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_frontend/autotune/AutotuneFileWriter.hpp>
 
@@ -29,6 +30,10 @@ using namespace hipdnn_data_sdk::utilities;
 
 namespace
 {
+namespace config_criterion = hipdnn_data_sdk::detail::autotune_config::criterion;
+namespace config_json = hipdnn_data_sdk::detail::autotune_config::json;
+namespace config_op = hipdnn_data_sdk::detail::autotune_config::op;
+namespace config_tensor = hipdnn_data_sdk::detail::autotune_config::tensor;
 
 /// Create a temporary file path for testing, cleaned up by destructor.
 struct TempFile
@@ -133,15 +138,19 @@ TEST(TestAutotuneFileWriter, BuildOverrideEntryBasic)
     const std::vector<std::vector<int64_t>> tensorStrides
         = {{150528, 50176, 224, 1}, {147, 49, 7, 1}};
 
-    auto entry = buildOverrideEntry(result, "conv_fprop", tensorDims, tensorStrides);
+    auto entry = buildOverrideEntry(result, config_op::CONV_FPROP, tensorDims, tensorStrides);
 
-    EXPECT_EQ(entry["op"], "conv_fprop");
-    EXPECT_EQ(entry["engine_name"], "MIOPEN_ENGINE");
-    ASSERT_EQ(entry["tensors"].size(), 2u);
-    EXPECT_EQ(entry["tensors"][0]["dim"], std::vector<int64_t>({1, 3, 224, 224}));
-    EXPECT_EQ(entry["tensors"][1]["dim"], std::vector<int64_t>({64, 3, 7, 7}));
-    EXPECT_EQ(entry["tensors"][0]["stride"], std::vector<int64_t>({150528, 50176, 224, 1}));
-    EXPECT_EQ(entry["tensors"][1]["stride"], std::vector<int64_t>({147, 49, 7, 1}));
+    EXPECT_EQ(entry[config_json::OP], config_op::CONV_FPROP);
+    EXPECT_EQ(entry[config_json::ENGINE_NAME], "MIOPEN_ENGINE");
+    ASSERT_EQ(entry[config_json::TENSORS].size(), 2u);
+    EXPECT_EQ(entry[config_json::TENSORS][0][config_json::DIM],
+              std::vector<int64_t>({1, 3, 224, 224}));
+    EXPECT_EQ(entry[config_json::TENSORS][1][config_json::DIM],
+              std::vector<int64_t>({64, 3, 7, 7}));
+    EXPECT_EQ(entry[config_json::TENSORS][0][config_json::STRIDE],
+              std::vector<int64_t>({150528, 50176, 224, 1}));
+    EXPECT_EQ(entry[config_json::TENSORS][1][config_json::STRIDE],
+              std::vector<int64_t>({147, 49, 7, 1}));
     ASSERT_TRUE(entry.contains("autotune_metadata"));
     EXPECT_FALSE(entry["autotune_metadata"].contains("knobs")); // No knobs → field absent
 }
@@ -152,27 +161,29 @@ TEST(TestAutotuneFileWriter, BuildOverrideEntryWritesTensorIds)
     const std::vector<std::vector<int64_t>> tensorDims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
     const std::vector<std::vector<int64_t>> tensorStrides
         = {{150528, 50176, 224, 1}, {147, 49, 7, 1}};
-    const std::vector<std::string> tensorIds = {"x_tensor_uid", "w_tensor_uid"};
+    const std::vector<std::string> tensorIds = {config_tensor::X, config_tensor::W};
 
     auto entry = hipdnn_frontend::autotune::detail::buildOverrideEntry(
-        result, "conv_fprop", tensorDims, tensorStrides, {}, tensorIds);
+        result, config_op::CONV_FPROP, tensorDims, tensorStrides, {}, tensorIds);
 
-    ASSERT_EQ(entry["tensors"].size(), 2u);
-    EXPECT_EQ(entry["tensors"][0]["tensor_id"], "x_tensor_uid");
-    EXPECT_EQ(entry["tensors"][1]["tensor_id"], "w_tensor_uid");
-    EXPECT_EQ(entry["tensors"][0]["dim"], std::vector<int64_t>({1, 3, 224, 224}));
-    EXPECT_EQ(entry["tensors"][1]["stride"], std::vector<int64_t>({147, 49, 7, 1}));
+    ASSERT_EQ(entry[config_json::TENSORS].size(), 2u);
+    EXPECT_EQ(entry[config_json::TENSORS][0][config_json::TENSOR_ID], config_tensor::X);
+    EXPECT_EQ(entry[config_json::TENSORS][1][config_json::TENSOR_ID], config_tensor::W);
+    EXPECT_EQ(entry[config_json::TENSORS][0][config_json::DIM],
+              std::vector<int64_t>({1, 3, 224, 224}));
+    EXPECT_EQ(entry[config_json::TENSORS][1][config_json::STRIDE],
+              std::vector<int64_t>({147, 49, 7, 1}));
 }
 
 TEST(TestAutotuneFileWriter, NamedEntryReplacesLegacyEntryWithSamePositionalSignature)
 {
     const TempFile tmpFile;
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
-    const std::vector<std::string> tensorIds = {"x_tensor_uid", "w_tensor_uid"};
+    const std::vector<std::string> tensorIds = {config_tensor::X, config_tensor::W};
 
     nlohmann::json root;
-    root["engine_overrides"]
-        = nlohmann::json::array({buildOverrideEntry(makeResult(1, "OLD"), "conv_fprop", dims, {})});
+    root[config_json::ENGINE_OVERRIDES] = nlohmann::json::array(
+        {buildOverrideEntry(makeResult(1, "OLD"), config_op::CONV_FPROP, dims, {})});
     {
         std::ofstream file(tmpFile.path);
         file << root.dump(2) << '\n';
@@ -181,28 +192,30 @@ TEST(TestAutotuneFileWriter, NamedEntryReplacesLegacyEntryWithSamePositionalSign
     std::vector<AutotuneResult> results;
     results.push_back(makeResult(2, "NEW", 0.5f, true, 0));
     auto err = hipdnn_frontend::autotune::detail::writeAutotuneResults(
-        tmpFile.path, "conv_fprop", results, false, dims, {}, {}, tensorIds);
+        tmpFile.path, config_op::CONV_FPROP, results, false, dims, {}, {}, tensorIds);
     ASSERT_TRUE(err.is_good()) << err.get_message();
 
     std::ifstream file(tmpFile.path);
     auto json = nlohmann::json::parse(file);
-    ASSERT_EQ(json["engine_overrides"].size(), 1u);
-    EXPECT_EQ(json["engine_overrides"][0]["engine_name"], "NEW");
-    EXPECT_EQ(json["engine_overrides"][0]["tensors"][0]["tensor_id"], "x_tensor_uid");
+    ASSERT_EQ(json[config_json::ENGINE_OVERRIDES].size(), 1u);
+    EXPECT_EQ(json[config_json::ENGINE_OVERRIDES][0][config_json::ENGINE_NAME], "NEW");
+    EXPECT_EQ(
+        json[config_json::ENGINE_OVERRIDES][0][config_json::TENSORS][0][config_json::TENSOR_ID],
+        config_tensor::X);
 }
 
 TEST(TestAutotuneFileWriter, NamedEntryReplacesExistingEntryWithReorderedNamedTensors)
 {
     const TempFile tmpFile;
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
-    const std::vector<std::string> tensorIds = {"x_tensor_uid", "w_tensor_uid"};
+    const std::vector<std::string> tensorIds = {config_tensor::X, config_tensor::W};
 
     auto oldEntry = hipdnn_frontend::autotune::detail::buildOverrideEntry(
-        makeResult(1, "OLD"), "conv_fprop", dims, {}, {}, tensorIds);
-    std::reverse(oldEntry["tensors"].begin(), oldEntry["tensors"].end());
+        makeResult(1, "OLD"), config_op::CONV_FPROP, dims, {}, {}, tensorIds);
+    std::reverse(oldEntry[config_json::TENSORS].begin(), oldEntry[config_json::TENSORS].end());
 
     nlohmann::json root;
-    root["engine_overrides"] = nlohmann::json::array({oldEntry});
+    root[config_json::ENGINE_OVERRIDES] = nlohmann::json::array({oldEntry});
     {
         std::ofstream file(tmpFile.path);
         file << root.dump(2) << '\n';
@@ -211,28 +224,32 @@ TEST(TestAutotuneFileWriter, NamedEntryReplacesExistingEntryWithReorderedNamedTe
     std::vector<AutotuneResult> results;
     results.push_back(makeResult(2, "NEW", 0.5f, true, 0));
     auto err = hipdnn_frontend::autotune::detail::writeAutotuneResults(
-        tmpFile.path, "conv_fprop", results, false, dims, {}, {}, tensorIds);
+        tmpFile.path, config_op::CONV_FPROP, results, false, dims, {}, {}, tensorIds);
     ASSERT_TRUE(err.is_good()) << err.get_message();
 
     std::ifstream file(tmpFile.path);
     auto json = nlohmann::json::parse(file);
-    ASSERT_EQ(json["engine_overrides"].size(), 1u);
-    EXPECT_EQ(json["engine_overrides"][0]["engine_name"], "NEW");
-    EXPECT_EQ(json["engine_overrides"][0]["tensors"][0]["tensor_id"], "x_tensor_uid");
-    EXPECT_EQ(json["engine_overrides"][0]["tensors"][1]["tensor_id"], "w_tensor_uid");
+    ASSERT_EQ(json[config_json::ENGINE_OVERRIDES].size(), 1u);
+    EXPECT_EQ(json[config_json::ENGINE_OVERRIDES][0][config_json::ENGINE_NAME], "NEW");
+    EXPECT_EQ(
+        json[config_json::ENGINE_OVERRIDES][0][config_json::TENSORS][0][config_json::TENSOR_ID],
+        config_tensor::X);
+    EXPECT_EQ(
+        json[config_json::ENGINE_OVERRIDES][0][config_json::TENSORS][1][config_json::TENSOR_ID],
+        config_tensor::W);
 }
 
 TEST(TestAutotuneFileWriter, BuildOverrideEntryWithCriteria)
 {
     auto result = makeResult(1, "MIOPEN_ENGINE");
     const std::vector<std::vector<int64_t>> tensorDims = {{2, 4, 16, 16}};
-    const Criteria criteria = {{"pointwise_mode", 34}};
+    const Criteria criteria = {{config_criterion::POINTWISE_MODE, 34}};
 
     auto entry = hipdnn_frontend::autotune::detail::buildOverrideEntry(
-        result, "pointwise", tensorDims, {}, criteria);
+        result, config_op::POINTWISE, tensorDims, {}, criteria);
 
-    ASSERT_TRUE(entry.contains("criteria"));
-    EXPECT_EQ(entry["criteria"]["pointwise_mode"], 34);
+    ASSERT_TRUE(entry.contains(config_json::CRITERIA));
+    EXPECT_EQ(entry[config_json::CRITERIA][config_criterion::POINTWISE_MODE], 34);
 }
 
 TEST(TestAutotuneFileWriter, BuildOverrideEntryWithKnobs)

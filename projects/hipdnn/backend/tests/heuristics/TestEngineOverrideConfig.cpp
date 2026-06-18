@@ -12,6 +12,7 @@
 #include "heuristics/config/EngineOverrideConfig.hpp"
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/detail/AutotuneConfigNames.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
 #include <cstdint>
@@ -24,6 +25,9 @@ using namespace hipdnn_data_sdk::utilities;
 
 namespace
 {
+namespace config_criterion = hipdnn_data_sdk::detail::autotune_config::criterion;
+namespace config_op = hipdnn_data_sdk::detail::autotune_config::op;
+namespace config_tensor = hipdnn_data_sdk::detail::autotune_config::tensor;
 
 struct TensorData
 {
@@ -226,18 +230,19 @@ TEST(TestEngineOverrideConfig, CriteriaMustMatch)
 TEST(TestEngineOverrideConfig, CriteriaOrderIsNormalizedBeforeMatch)
 {
     OperationRule rule;
-    rule.op = "resample_fwd";
+    rule.op = config_op::RESAMPLE_FWD;
     rule.engineName = MIOPEN_ENGINE_NAME;
-    rule.criteria = {Criterion{"resample_mode", 1}, Criterion{"padding_mode", 2}};
+    rule.criteria = {Criterion{config_criterion::RESAMPLE_MODE, 1},
+                     Criterion{config_criterion::PADDING_MODE, 2}};
     rule.tensors = {makePattern({2, 4, 16, 16})};
 
     const auto config = makeConfig({std::move(rule)});
     const std::vector<TensorData> tensors = {{{2, 4, 16, 16}, {}}};
 
-    auto result
-        = config.matchOperation("resample_fwd",
-                                {Criterion{"padding_mode", 2}, Criterion{"resample_mode", 1}},
-                                viewsOf(tensors));
+    auto result = config.matchOperation(config_op::RESAMPLE_FWD,
+                                        {Criterion{config_criterion::PADDING_MODE, 2},
+                                         Criterion{config_criterion::RESAMPLE_MODE, 1}},
+                                        viewsOf(tensors));
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(*result, MIOPEN_ENGINE_ID);
 }
@@ -305,10 +310,11 @@ TEST(TestEngineOverrideConfig, NamedTensorRulesIgnoreConfigTensorOrder)
 
     const TensorData x{{2, 4}, {}};
     const TensorData y{{5, 6}, {}};
-    const std::vector<TensorView> tensors{namedViewOf("in_0_tensor_uid", x),
-                                          namedViewOf("in_1_tensor_uid", y)};
+    const std::vector<TensorView> tensors{namedViewOf(config_tensor::IN_0, x),
+                                          namedViewOf(config_tensor::IN_1, y)};
 
-    auto result = config->matchOperation("pointwise", {Criterion{"pointwise_mode", 2}}, tensors);
+    auto result = config->matchOperation(
+        config_op::POINTWISE, {Criterion{config_criterion::POINTWISE_MODE, 2}}, tensors);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(*result, MIOPEN_ENGINE_ID);
 }
@@ -316,24 +322,24 @@ TEST(TestEngineOverrideConfig, NamedTensorRulesIgnoreConfigTensorOrder)
 TEST(TestEngineOverrideConfig, NamedTensorRulesRejectSameShapeWrongRole)
 {
     OperationRule rule;
-    rule.op = "sdpa_fwd";
+    rule.op = config_op::SDPA_FWD;
     rule.engineName = MIOPEN_ENGINE_NAME;
-    rule.tensors = {makeNamedPattern("q_tensor_uid", {2, 4}),
-                    makeNamedPattern("k_tensor_uid", {2, 4}),
-                    makeNamedPattern("v_tensor_uid", {2, 4}),
-                    makeNamedPattern("scale_tensor_uid", {1})};
+    rule.tensors = {makeNamedPattern(config_tensor::Q, {2, 4}),
+                    makeNamedPattern(config_tensor::K, {2, 4}),
+                    makeNamedPattern(config_tensor::V, {2, 4}),
+                    makeNamedPattern(config_tensor::SCALE, {1})};
 
     const auto config = makeConfig({std::move(rule)});
     const TensorData q{{2, 4}, {}};
     const TensorData k{{2, 4}, {}};
     const TensorData v{{2, 4}, {}};
     const TensorData bias{{1}, {}};
-    const std::vector<TensorView> tensors{namedViewOf("q_tensor_uid", q),
-                                          namedViewOf("k_tensor_uid", k),
-                                          namedViewOf("v_tensor_uid", v),
-                                          namedViewOf("attn_mask_tensor_uid", bias)};
+    const std::vector<TensorView> tensors{namedViewOf(config_tensor::Q, q),
+                                          namedViewOf(config_tensor::K, k),
+                                          namedViewOf(config_tensor::V, v),
+                                          namedViewOf(config_tensor::ATTN_MASK, bias)};
 
-    EXPECT_FALSE(config.matchOperation("sdpa_fwd", tensors).has_value());
+    EXPECT_FALSE(config.matchOperation(config_op::SDPA_FWD, tensors).has_value());
 }
 
 TEST(TestEngineOverrideConfig, LegacyRuleWithoutTensorIdsUsesPositionalOrder)

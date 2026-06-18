@@ -27,6 +27,7 @@
 #include <string>
 #include <vector>
 
+#include <hipdnn_data_sdk/detail/AutotuneConfigNames.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/FrontendGraphFactory.hpp>
@@ -40,6 +41,7 @@ using namespace hipdnn_data_sdk::utilities;
 
 namespace
 {
+namespace config_json = hipdnn_data_sdk::detail::autotune_config::json;
 
 class IntegrationAutotuneConfigRoundTripUnsupportedOp
     : public hipdnn_tests::AutotuneIntegrationFixture
@@ -140,9 +142,9 @@ TEST_F(IntegrationAutotuneConfigRoundTripUnsupportedOp, UnsupportedOpWritesNoCon
         ASSERT_TRUE(in.is_open());
         nlohmann::json j;
         ASSERT_NO_THROW(in >> j);
-        if(j.contains("engine_overrides"))
+        if(j.contains(config_json::ENGINE_OVERRIDES))
         {
-            EXPECT_TRUE(j["engine_overrides"].empty())
+            EXPECT_TRUE(j[config_json::ENGINE_OVERRIDES].empty())
                 << "Writer must not persist an override entry for an unsupported op";
         }
     }

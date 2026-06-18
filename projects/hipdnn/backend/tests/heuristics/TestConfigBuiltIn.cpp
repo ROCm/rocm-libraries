@@ -20,6 +20,7 @@
 #include "heuristics/config/ConfigBuiltIn.hpp"
 #include "plugin/HeuristicPlugin.hpp"
 
+#include <hipdnn_data_sdk/detail/AutotuneConfigNames.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -29,12 +30,14 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include <array>
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -46,10 +49,18 @@ using hipdnn_data_sdk::utilities::engineNameToId;
 
 namespace
 {
+namespace config_criterion = hipdnn_data_sdk::detail::autotune_config::criterion;
+namespace config_json = hipdnn_data_sdk::detail::autotune_config::json;
+namespace config_op = hipdnn_data_sdk::detail::autotune_config::op;
+namespace config_tensor = hipdnn_data_sdk::detail::autotune_config::tensor;
 
-const int64_t MIOPEN_ENGINE_ID = engineNameToId("MIOPEN_ENGINE");
-const int64_t MIOPEN_DETERMINISTIC_ID = engineNameToId("MIOPEN_ENGINE_DETERMINISTIC");
-const int64_t CUSTOM_ENGINE_ID = engineNameToId("Plugin1::CustomEngine");
+constexpr const char* MIOPEN_ENGINE_NAME = "MIOPEN_ENGINE";
+constexpr const char* MIOPEN_DETERMINISTIC_ENGINE_NAME = "MIOPEN_ENGINE_DETERMINISTIC";
+constexpr const char* CUSTOM_ENGINE_NAME = "Plugin1::CustomEngine";
+
+const int64_t MIOPEN_ENGINE_ID = engineNameToId(MIOPEN_ENGINE_NAME);
+const int64_t MIOPEN_DETERMINISTIC_ID = engineNameToId(MIOPEN_DETERMINISTIC_ENGINE_NAME);
+const int64_t CUSTOM_ENGINE_ID = engineNameToId(CUSTOM_ENGINE_NAME);
 
 const int64_t CONFIG_POLICY_ID
     = hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::Config");
@@ -303,7 +314,7 @@ std::vector<uint8_t> buildPointwiseBinaryGraphBuffer(fb::PointwiseMode mode)
 
     const std::vector<flatbuffers::Offset<fb::Node>> nodes{
         fb::CreateNodeDirect(builder,
-                             "pointwise",
+                             config_op::POINTWISE,
                              fb::DataType::FLOAT,
                              fb::NodeAttributes::PointwiseAttributes,
                              pointwiseAttrs.Union())};
@@ -350,7 +361,7 @@ std::vector<uint8_t> buildPointwiseBinaryGraphBufferWithoutSecondInputTensor()
 
     const std::vector<flatbuffers::Offset<fb::Node>> nodes{
         fb::CreateNodeDirect(builder,
-                             "pointwise",
+                             config_op::POINTWISE,
                              fb::DataType::FLOAT,
                              fb::NodeAttributes::PointwiseAttributes,
                              pointwiseAttrs.Union())};
@@ -416,7 +427,7 @@ std::vector<uint8_t> buildPointwiseThenConvGraphBuffer()
 
     const std::vector<flatbuffers::Offset<fb::Node>> nodes{
         fb::CreateNodeDirect(builder,
-                             "pointwise",
+                             config_op::POINTWISE,
                              fb::DataType::FLOAT,
                              fb::NodeAttributes::PointwiseAttributes,
                              pointwiseAttrs.Union()),
@@ -541,6 +552,27 @@ private:
     hipdnn_test_sdk::utilities::ScopedDirectory _dir;
     std::filesystem::path _path;
 };
+nlohmann::json makeRuleTensor(std::vector<int64_t> dim)
+{
+    return {{config_json::DIM, std::move(dim)}};
+}
+
+nlohmann::json makeNamedRuleTensor(const char* tensorId, std::vector<int64_t> dim)
+{
+    auto tensor = makeRuleTensor(std::move(dim));
+    tensor[config_json::TENSOR_ID] = tensorId;
+    return tensor;
+}
+
+nlohmann::json makeOverrideConfig(std::initializer_list<nlohmann::json> rules)
+{
+    auto overrides = nlohmann::json::array();
+    for(const auto& rule : rules)
+    {
+        overrides.push_back(rule);
+    }
+    return {{config_json::ENGINE_OVERRIDES, std::move(overrides)}};
+}
 
 constexpr const char* DETERMINISTIC_RULE_JSON = R"({
   "engine_overrides": [
@@ -1000,20 +1032,16 @@ TEST_F(TestConfigBuiltIn, FinalizeMatchedRuleMovesEngineToFrontWrwNode)
 
 TEST_F(TestConfigBuiltIn, FinalizePointwiseCriteriaPreventsModeOvermatch)
 {
-    constexpr const char* JSON = R"({
-      "engine_overrides": [
-        {
-          "op": "pointwise",
-          "criteria": { "pointwise_mode": 2 },
-          "engine_name": "MIOPEN_ENGINE_DETERMINISTIC",
-          "tensors": [
-            { "dim": [1, 3, 4, 4] },
-            { "dim": [1, 3, 4, 4] }
-          ]
-        }
-      ]
-    })";
-    const TempJsonOverrideFile json(JSON);
+    const TempJsonOverrideFile json(
+        makeOverrideConfig({
+                               {{config_json::OP, config_op::POINTWISE},
+                                {config_json::CRITERIA, {{config_criterion::POINTWISE_MODE, 2}}},
+                                {config_json::ENGINE_NAME, MIOPEN_DETERMINISTIC_ENGINE_NAME},
+                                {config_json::TENSORS,
+                                 nlohmann::json::array({makeRuleTensor({1, 3, 4, 4}),
+                                                        makeRuleTensor({1, 3, 4, 4})})}},
+                           })
+            .dump(2));
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(OVERRIDE_ENV,
                                                                           json.path());
 
@@ -1031,28 +1059,22 @@ TEST_F(TestConfigBuiltIn, FinalizePointwiseCriteriaPreventsModeOvermatch)
 
 TEST_F(TestConfigBuiltIn, FinalizeUsesConstructedPriorityToPreferConvOverEarlierPointwise)
 {
-    constexpr const char* JSON = R"({
-      "engine_overrides": [
-        {
-          "op": "pointwise",
-          "criteria": { "pointwise_mode": 2 },
-          "engine_name": "MIOPEN_ENGINE_DETERMINISTIC",
-          "tensors": [
-            { "tensor_id": "in_0_tensor_uid", "dim": [1, 3, 4, 4] },
-            { "tensor_id": "in_1_tensor_uid", "dim": [1, 3, 4, 4] }
-          ]
-        },
-        {
-          "op": "conv_fprop",
-          "engine_name": "Plugin1::CustomEngine",
-          "tensors": [
-            { "tensor_id": "x_tensor_uid", "dim": [1, 3, 4, 4] },
-            { "tensor_id": "w_tensor_uid", "dim": [2, 3, 1, 1] }
-          ]
-        }
-      ]
-    })";
-    const TempJsonOverrideFile json(JSON);
+    const TempJsonOverrideFile json(
+        makeOverrideConfig(
+            {
+                {{config_json::OP, config_op::POINTWISE},
+                 {config_json::CRITERIA, {{config_criterion::POINTWISE_MODE, 2}}},
+                 {config_json::ENGINE_NAME, MIOPEN_DETERMINISTIC_ENGINE_NAME},
+                 {config_json::TENSORS,
+                  nlohmann::json::array({makeNamedRuleTensor(config_tensor::IN_0, {1, 3, 4, 4}),
+                                         makeNamedRuleTensor(config_tensor::IN_1, {1, 3, 4, 4})})}},
+                {{config_json::OP, config_op::CONV_FPROP},
+                 {config_json::ENGINE_NAME, CUSTOM_ENGINE_NAME},
+                 {config_json::TENSORS,
+                  nlohmann::json::array({makeNamedRuleTensor(config_tensor::X, {1, 3, 4, 4}),
+                                         makeNamedRuleTensor(config_tensor::W, {2, 3, 1, 1})})}},
+            })
+            .dump(2));
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(OVERRIDE_ENV,
                                                                           json.path());
 
@@ -1067,20 +1089,17 @@ TEST_F(TestConfigBuiltIn, FinalizeUsesConstructedPriorityToPreferConvOverEarlier
 
 TEST_F(TestConfigBuiltIn, FinalizeRejectsMissingOptionalTensorUidWhenPresent)
 {
-    constexpr const char* JSON = R"({
-      "engine_overrides": [
-        {
-          "op": "pointwise",
-          "criteria": { "pointwise_mode": 2 },
-          "engine_name": "MIOPEN_ENGINE_DETERMINISTIC",
-          "tensors": [
-            { "tensor_id": "in_0_tensor_uid", "dim": [1, 3, 4, 4] },
-            { "tensor_id": "in_1_tensor_uid", "dim": [1, 3, 4, 4] }
-          ]
-        }
-      ]
-    })";
-    const TempJsonOverrideFile json(JSON);
+    const TempJsonOverrideFile json(
+        makeOverrideConfig(
+            {
+                {{config_json::OP, config_op::POINTWISE},
+                 {config_json::CRITERIA, {{config_criterion::POINTWISE_MODE, 2}}},
+                 {config_json::ENGINE_NAME, MIOPEN_DETERMINISTIC_ENGINE_NAME},
+                 {config_json::TENSORS,
+                  nlohmann::json::array({makeNamedRuleTensor(config_tensor::IN_0, {1, 3, 4, 4}),
+                                         makeNamedRuleTensor(config_tensor::IN_1, {1, 3, 4, 4})})}},
+            })
+            .dump(2));
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(OVERRIDE_ENV,
                                                                           json.path());
 
@@ -1092,22 +1111,19 @@ TEST_F(TestConfigBuiltIn, FinalizeRejectsMissingOptionalTensorUidWhenPresent)
 
 TEST_F(TestConfigBuiltIn, FinalizeBatchnormPeerStatsVectorMatchesAndRejectsMissingUid)
 {
-    constexpr const char* JSON = R"({
-      "engine_overrides": [
-        {
-          "op": "batchnorm_training",
-          "engine_name": "MIOPEN_ENGINE_DETERMINISTIC",
-          "tensors": [
-            { "tensor_id": "x_tensor_uid", "dim": [1, 3, 4, 4] },
-            { "tensor_id": "scale_tensor_uid", "dim": [3] },
-            { "tensor_id": "bias_tensor_uid", "dim": [3] },
-            { "tensor_id": "epsilon_tensor_uid", "dim": [1] },
-            { "tensor_id": "peer_stats_tensor_uid", "dim": [3] }
-          ]
-        }
-      ]
-    })";
-    const TempJsonOverrideFile json(JSON);
+    const TempJsonOverrideFile json(
+        makeOverrideConfig(
+            {
+                {{config_json::OP, config_op::BATCHNORM_TRAINING},
+                 {config_json::ENGINE_NAME, MIOPEN_DETERMINISTIC_ENGINE_NAME},
+                 {config_json::TENSORS,
+                  nlohmann::json::array({makeNamedRuleTensor(config_tensor::X, {1, 3, 4, 4}),
+                                         makeNamedRuleTensor(config_tensor::SCALE, {3}),
+                                         makeNamedRuleTensor(config_tensor::BIAS, {3}),
+                                         makeNamedRuleTensor(config_tensor::EPSILON, {1}),
+                                         makeNamedRuleTensor(config_tensor::PEER_STATS, {3})})}},
+            })
+            .dump(2));
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(OVERRIDE_ENV,
                                                                           json.path());
 

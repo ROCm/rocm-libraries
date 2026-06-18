@@ -6,6 +6,7 @@
 // operation string, criteria, and canonical input tensor order the writer emits.
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/detail/AutotuneConfigNames.hpp>
 #include <hipdnn_frontend/detail/GraphMatchKey.hpp>
 #include <hipdnn_test_sdk/utilities/SelectorUnitGraph.hpp>
 
@@ -17,6 +18,9 @@ using hipdnn_test_sdk::utilities::SelectorUnitGraph;
 
 namespace
 {
+namespace config_criterion = hipdnn_data_sdk::detail::autotune_config::criterion;
+namespace config_op = hipdnn_data_sdk::detail::autotune_config::op;
+namespace config_tensor = hipdnn_data_sdk::detail::autotune_config::tensor;
 
 void expectTensorUidOrder(const detail::AutotuneConfigMatchKey& key,
                           const std::vector<std::shared_ptr<graph::TensorAttributes>>& tensors)
@@ -52,10 +56,10 @@ TEST_F(TestGraphMatchKey, ConvFpropOpStringAndTensorOrder)
 
     const auto key = detail::getAutotuneConfigMatchKey(unitGraph.graph());
     ASSERT_TRUE(key.has_value());
-    EXPECT_EQ(key->opName, "conv_fprop");
+    EXPECT_EQ(key->opName, config_op::CONV_FPROP);
     EXPECT_TRUE(key->criteria.empty());
     expectTensorUidOrder(*key, {unitGraph.byName("x"), unitGraph.byName("w")});
-    expectTensorIdOrder(*key, {"x_tensor_uid", "w_tensor_uid"});
+    expectTensorIdOrder(*key, {config_tensor::X, config_tensor::W});
 }
 
 TEST_F(TestGraphMatchKey, ConvDgradOpStringAndTensorOrder)
@@ -64,7 +68,7 @@ TEST_F(TestGraphMatchKey, ConvDgradOpStringAndTensorOrder)
 
     const auto key = detail::getAutotuneConfigMatchKey(unitGraph.graph());
     ASSERT_TRUE(key.has_value());
-    EXPECT_EQ(key->opName, "conv_dgrad");
+    EXPECT_EQ(key->opName, config_op::CONV_DGRAD);
     EXPECT_TRUE(key->criteria.empty());
     expectTensorUidOrder(*key, {unitGraph.byName("dy"), unitGraph.byName("w")});
 }
@@ -75,7 +79,7 @@ TEST_F(TestGraphMatchKey, ConvWgradOpStringAndTensorOrder)
 
     const auto key = detail::getAutotuneConfigMatchKey(unitGraph.graph());
     ASSERT_TRUE(key.has_value());
-    EXPECT_EQ(key->opName, "conv_wgrad");
+    EXPECT_EQ(key->opName, config_op::CONV_WGRAD);
     EXPECT_TRUE(key->criteria.empty());
     expectTensorUidOrder(*key, {unitGraph.byName("x"), unitGraph.byName("dy")});
 }
@@ -86,7 +90,7 @@ TEST_F(TestGraphMatchKey, FusedConvBiasActivUsesConvPrimaryKey)
 
     const auto key = detail::getAutotuneConfigMatchKey(unitGraph.graph());
     ASSERT_TRUE(key.has_value());
-    EXPECT_EQ(key->opName, "conv_fprop");
+    EXPECT_EQ(key->opName, config_op::CONV_FPROP);
     EXPECT_TRUE(key->criteria.empty());
     expectTensorUidOrder(*key, {unitGraph.byName("x"), unitGraph.byName("w")});
 }
@@ -97,9 +101,10 @@ TEST_F(TestGraphMatchKey, ReductionIncludesReductionModeCriterion)
 
     const auto key = detail::getAutotuneConfigMatchKey(unitGraph.graph());
     ASSERT_TRUE(key.has_value());
-    EXPECT_EQ(key->opName, "reduction");
+    EXPECT_EQ(key->opName, config_op::REDUCTION);
     EXPECT_EQ(key->criteria,
-              (detail::AutotuneConfigCriteria{{"reduction_mode", HIPDNN_REDUCE_TENSOR_ADD}}));
+              (detail::AutotuneConfigCriteria{
+                  {config_criterion::REDUCTION_MODE, HIPDNN_REDUCE_TENSOR_ADD}}));
     expectTensorUidOrder(*key, {unitGraph.byName("x")});
 }
 
@@ -109,9 +114,10 @@ TEST_F(TestGraphMatchKey, PointwiseUnaryIncludesPointwiseModeCriterion)
 
     const auto key = detail::getAutotuneConfigMatchKey(unitGraph.graph());
     ASSERT_TRUE(key.has_value());
-    EXPECT_EQ(key->opName, "pointwise");
+    EXPECT_EQ(key->opName, config_op::POINTWISE);
     EXPECT_EQ(key->criteria,
-              (detail::AutotuneConfigCriteria{{"pointwise_mode", HIPDNN_POINTWISE_RELU_FWD}}));
+              (detail::AutotuneConfigCriteria{
+                  {config_criterion::POINTWISE_MODE, HIPDNN_POINTWISE_RELU_FWD}}));
     expectTensorUidOrder(*key, {unitGraph.byName("x")});
 }
 
@@ -121,9 +127,10 @@ TEST_F(TestGraphMatchKey, PointwiseBinaryIncludesPointwiseModeCriterion)
 
     const auto key = detail::getAutotuneConfigMatchKey(unitGraph.graph());
     ASSERT_TRUE(key.has_value());
-    EXPECT_EQ(key->opName, "pointwise");
-    EXPECT_EQ(key->criteria,
-              (detail::AutotuneConfigCriteria{{"pointwise_mode", HIPDNN_POINTWISE_ADD}}));
+    EXPECT_EQ(key->opName, config_op::POINTWISE);
+    EXPECT_EQ(
+        key->criteria,
+        (detail::AutotuneConfigCriteria{{config_criterion::POINTWISE_MODE, HIPDNN_POINTWISE_ADD}}));
     expectTensorUidOrder(*key, {unitGraph.byName("x"), unitGraph.byName("y")});
-    expectTensorIdOrder(*key, {"in_0_tensor_uid", "in_1_tensor_uid"});
+    expectTensorIdOrder(*key, {config_tensor::IN_0, config_tensor::IN_1});
 }
