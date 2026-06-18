@@ -85,29 +85,29 @@ struct MIOPEN_INTERNALS_EXPORT ConvBiasActivAsm1x1U
     float GetWti(const FusionContext&, const FusionDescription&) const override;
 };
 
-using PerformanceConfigConvOclDirectFwdFused = LegacyPerformanceConfig;
-struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwdFused final
+using PerformanceConfigConvHipDirectFwdFused = LegacyPerformanceConfig;
+struct MIOPEN_INTERNALS_EXPORT ConvHipDirectFwdFused final
     : FusionTunableSolver<LegacyPerformanceConfig>
 {
     const std::string& SolverDbId() const override
     {
-        return GetSolverDbId<ConvOclDirectFwdFused>();
+        return GetSolverDbId<ConvHipDirectFwdFused>();
     }
 
     bool IsApplicable(const FusionContext& context,
                       const FusionDescription& problem) const override;
     ConvSolution GetSolution(const FusionContext& context,
                              const FusionDescription& problem,
-                             const PerformanceConfigConvOclDirectFwdFused&) const override;
-    PerformanceConfigConvOclDirectFwdFused
+                             const PerformanceConfigConvHipDirectFwdFused&) const override;
+    PerformanceConfigConvHipDirectFwdFused
     GetDefaultPerformanceConfig(const FusionContext&, const FusionDescription&) const override;
-    PerformanceConfigConvOclDirectFwdFused
+    PerformanceConfigConvHipDirectFwdFused
     Search(const FusionContext&,
            const FusionDescription&,
            const AnyInvokeParams& invoke_params) const override;
     bool IsValidPerformanceConfig(const FusionContext&,
                                   const FusionDescription&,
-                                  const PerformanceConfigConvOclDirectFwdFused&) const override;
+                                  const PerformanceConfigConvHipDirectFwdFused&) const override;
     float GetWti(const FusionContext&, const FusionDescription& problem) const override;
 };
 

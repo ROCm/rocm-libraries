@@ -73,6 +73,17 @@ jobs:
             checkout_paths: ["shared/stinkytofu", "cmake/modules"]
           }'))
 
+          # MIOpen
+          LIBS+=($(jq -cn '{
+            name:           "miopen",
+            path_filters:   [
+              "projects/miopen/**/*.{c,h,cpp,hpp,cxx,hxx}",
+              "projects/miopen/cmake/ClangTidy.cmake",
+              "projects/miopen/.clang-tidy"
+            ],
+            checkout_paths: ["projects/miopen", "shared/ctest"]
+          }'))
+
           # Disabled: see https://github.com/ROCm/rocm-libraries/issues/5067
           # LIBS+=($(jq -cn '{
           #   name:           "miopen-provider",
@@ -190,6 +201,26 @@ jobs:
           . .venv/bin/activate
           pip install -r shared/stinkytofu/requirements.txt
 
+      - name: Install deps (miopen)
+        if: matrix.name == 'miopen'
+        run: |
+          . .venv/bin/activate
+          # cmake 4.x removed compat with cmake_minimum_required(VERSION <3.5);
+          # several MIOpen deps (e.g. bzip2@1.0.8) still declare old minimums.
+          pip install 'cmake<4' \
+            https://github.com/pfultz2/cget/archive/b5dd36cafa2804e6146c5021eb2469c4b2d3ad42.tar.gz \
+            https://github.com/RadeonOpenCompute/rbuild/archive/c33b1a7e74ae7f72379364b523f73d30fd4d765c.tar.gz
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 21
+          sudo apt-get install -y clang-tidy-21
+          cp projects/miopen/requirements.txt     /tmp/requirements.txt
+          cp projects/miopen/rbuild.ini           /tmp/rbuild.ini
+          cp projects/miopen/dev-requirements.txt /tmp/dev-requirements.txt
+          # Strip deps not available/needed on CI runner
+          sed -i '/composablekernel/d; /half/d; /rocMLIR/d' /tmp/requirements.txt
+          cd /tmp && CMAKE_GENERATOR=Ninja rbuild prepare -s develop -d /tmp/miopen-deps
+
       # Disabled: see https://github.com/ROCm/rocm-libraries/issues/5067
       # To re-enable: uncomment the LIBS entry above and these two steps.
       # - name: Install deps (miopen-provider)
@@ -228,6 +259,22 @@ jobs:
           cd shared/stinkytofu
           invoke build
           invoke tidy
+
+      - name: Run clang-tidy (miopen)
+        if: matrix.name == 'miopen'
+        run: |
+          . .venv/bin/activate
+          export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+          export CXX=/opt/rocm/llvm/bin/clang++
+          # TODO: remove -DMIOPEN_USE_MLIR=OFF once rocMLIR is removed from MIOpen
+          cmake -S projects/miopen -B build-miopen -G Ninja \
+            -DMIOPEN_BACKEND=HIP \
+            -DBUILD_DEV=ON \
+            -DMIOPEN_USE_MLIR=OFF \
+            -DCLANG_TIDY_EXE=/usr/bin/clang-tidy-21 \
+            -DCMAKE_PREFIX_PATH="/opt/rocm;/tmp/miopen-deps" \
+            -DROCM_PATH=/opt/rocm
+          ninja -C build-miopen analyze
 
       # Disabled: see https://github.com/ROCm/rocm-libraries/issues/5067
       # - name: Run clang-tidy (miopen-provider)

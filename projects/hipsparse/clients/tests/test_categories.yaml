@@ -79,24 +79,40 @@ test_categories:
       - "weekly"
 
   ffm-quick:
-    description: "FFM NPI simulation tests for PR pipelines (target: < 2 hours on FFM runner)"
+    description: "Quick level1 and level2 tests only"
     test_patterns:
-      - "quick/*"
+      - "quick/*.level1*"
     exclude:
       - "*known_bug*"
     labels:
       - "ffm-quick"
-      - "ffm"
 
   ffm-full:
-    description: "FFM NPI nightly tests (initially alias for ffm-quick; expand as capacity grows)"
+    description: "Alias of ffm-quick: quick level1 and level2 tests only"
     test_patterns:
-      - "quick/*"
+      - "quick/*.level1*"
     exclude:
       - "*known_bug*"
     labels:
       - "ffm-full"
-      - "ffm"
+
+  emulation-quick:
+    description: "Alias of ffm-quick: quick level1 and level2 tests only"
+    test_patterns:
+      - "quick/*.level1*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "emulation-quick"
+
+  emulation-full:
+    description: "Alias of ffm-quick: quick level1 and level2 tests only"
+    test_patterns:
+      - "quick/*.level1*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "emulation-full"
 
 # GPU-specific CTest suites (hipsparse-test_{category}_gfx1151_suite) exclude f64 real/complex
 # parameterized tests on Strix Halo (gfx1151). Run those *_gfx1151_* tests on that hardware;
@@ -120,5 +136,7 @@ execution_settings:
     standard: 1800
     comprehensive: 14400
     full: 28800
-    ffm-quick: 7200    # 2 hours — hard FFM PR budget
-    ffm-full: 7200     # 2 hours — initially same as ffm-quick
+    ffm-quick: 7200
+    ffm-full: 7200
+    emulation-quick: 7200
+    emulation-full: 7200

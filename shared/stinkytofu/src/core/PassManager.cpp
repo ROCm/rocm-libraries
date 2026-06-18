@@ -19,6 +19,7 @@
  * ************************************************************************ */
 #include "stinkytofu/core/PassManager.hpp"
 
+#include <cstdint>
 #include <iostream>
 
 #include "stinkytofu/hardware/ArchHelper.hpp"

@@ -25,15 +25,19 @@ SOFTWARE.
 #ifndef GUARD_RPP_COMMON_HPP_
 #define GUARD_RPP_COMMON_HPP_
 
-#include "rpp.h"
 #include "manage_ptr.hpp"
+#include "rpp.h"
 
 #ifdef GPU_SUPPORT
-using Data_t        = void*;
-using ConstData_t   = const void*;
+using Data_t = void*;
+using ConstData_t = const void*;
 using ManageDataPtr = RPP_MANAGE_PTR(void, hipFree);
-inline Data_t DataCast(void* p) { return p; }
-inline ConstData_t DataCast(const void* p) { return p; }
+inline Data_t DataCast(void* p) {
+    return p;
+}
+inline ConstData_t DataCast(const void* p) {
+    return p;
+}
 #endif
 
-#endif    // GUARD_RPP_COMMON_HPP_
+#endif  // GUARD_RPP_COMMON_HPP_

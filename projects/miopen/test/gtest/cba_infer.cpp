@@ -167,9 +167,9 @@ TEST_P(GPU_ConvBiasActivInfer_FP32, ConvBiasActivAsm1x1UFloat)
 {
     RunTunableSolver<miopen::solver::fusion::ConvBiasActivAsm1x1U>();
 }
-TEST_P(GPU_ConvBiasActivInfer_FP32, ConvOclDirectFwdFused)
+TEST_P(GPU_ConvBiasActivInfer_FP32, ConvHipDirectFwdFused)
 {
-    RunTunableSolver<miopen::solver::fusion::ConvOclDirectFwdFused>();
+    RunTunableSolver<miopen::solver::fusion::ConvHipDirectFwdFused>();
 }
 TEST_P(GPU_ConvBiasActivInfer_FP32, ConvBinWinogradRxSFused)
 {
@@ -220,13 +220,13 @@ TEST_P(GPU_ConvGrpBiasActivInfer3D_FP32, ConvCKIgemmGrpFwdBiasActivFused)
 
 #if MIOPEN_BACKEND_HIP
 
-TEST_P(GPU_ConvBiasActivInferFusionCompileStep_FP32, ConvBiasActivAsm1x1UFloat_testCompile)
+TEST_P(GPU_ConvBiasActivInferFusionCompileStep_FP32, ConvHipDirectFwdFused_testCompile)
 {
     ScopedEnvironment<std::string> find_enforce_env(MIOPEN_FIND_ENFORCE, "SEARCH_DB_UPDATE");
     ScopedEnvironment<int> find_enforce_tuning_iter_env(wa::MIOPEN_DEBUG_TUNING_ITERATIONS_MAX, 5);
 
     fusePlanDesc.Compile(get_handle());
-    RunTunableSolver<miopen::solver::fusion::ConvOclDirectFwdFused>();
+    RunTunableSolver<miopen::solver::fusion::ConvHipDirectFwdFused>();
 }
 
 INSTANTIATE_TEST_SUITE_P(

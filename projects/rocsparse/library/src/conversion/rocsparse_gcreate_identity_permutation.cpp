@@ -37,7 +37,7 @@ rocsparse_status rocsparse::gcreate_identity_permutation(rocsparse_handle    han
     switch(idx_type)
     {
     // LCOV_EXCL_START
-    case rocsparse_indextype_u16:
+    case deprecated_rocsparse_indextype_u16:
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
     }

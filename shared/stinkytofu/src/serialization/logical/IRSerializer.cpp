@@ -23,6 +23,7 @@
 
 #include "stinkytofu/serialization/logical/IRSerializer.hpp"
 
+#include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <iomanip>

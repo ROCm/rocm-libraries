@@ -99,6 +99,7 @@ set(HIPSPARSE_TEST_SOURCES
     test_spmm_batched_csc.cpp
     test_spmm_batched_csr.cpp
     test_spmm_bell.cpp
+    test_spmm_bsr.cpp
     test_spmm_coo.cpp
     test_spmm_csc.cpp
     test_spmm_csr.cpp
@@ -207,6 +208,7 @@ set(HIPSPARSE_TEST_YAMLS
     rocm/test_spmm_batched_coo.yaml
     rocm/test_spmm_batched_csc.yaml
     rocm/test_spmm_batched_csr.yaml
+    rocm/test_spmm_bsr.yaml
     rocm/test_spmm_coo.yaml
     rocm/test_spmm_csc.yaml
     rocm/test_spmm_csr.yaml
