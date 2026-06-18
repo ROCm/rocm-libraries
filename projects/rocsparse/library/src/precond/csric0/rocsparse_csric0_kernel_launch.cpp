@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -51,10 +51,10 @@ rocsparse_status rocsparse::csric0_kernel_launch(rocsparse_handle      handle,
         launch = rocsparse::find_csric0_kernel_hash_launch(handle, csric0_info, A);
     }
 
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
-                                       0,
-                                       sizeof(int32_t) * A->rows * A->batch_count,
-                                       handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
+                                                 0,
+                                                 sizeof(int32_t) * A->rows * A->batch_count,
+                                                 handle->stream));
 
     RETURN_IF_ROCSPARSE_ERROR(launch(handle, csric0_info, A, buffer_size, buffer));
 

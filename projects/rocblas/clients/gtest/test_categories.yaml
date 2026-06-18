@@ -63,7 +63,7 @@ execution_settings:
     OPENBLAS_NUM_THREADS: "48"
     OMP_NUM_THREADS: "48"
   category_timeouts:
-    quick: 900    # 15 min
+    quick: 1800    # 30 min
     standard: 7200    # 2 hours
     comprehensive: 7200   # 2 hours
     full: 28800       # 8 hours

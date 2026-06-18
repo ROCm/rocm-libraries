@@ -25,53 +25,59 @@ SOFTWARE.
 #ifndef RPPT_VALIDATE_OPERATIONS_FUNCTIONS
 #define RPPT_VALIDATE_OPERATIONS_FUNCTIONS
 
-#include <iostream>
 #include <stdlib.h>
+
+#include <iostream>
 
 #include "rpp.h"
 #include "rppdefs.h"
 
-inline RppLayoutParams get_layout_params(RpptLayout layout, Rpp32u channels)
-{
+inline RppLayoutParams get_layout_params(RpptLayout layout, Rpp32u channels) {
     RppLayoutParams layoutParams;
-    if(layout == RpptLayout::NCHW || layout == RpptLayout::NCDHW)
-    {
-        if (channels == 1) // PLN1
+    if (layout == RpptLayout::NCHW || layout == RpptLayout::NCDHW) {
+        if (channels == 1)  // PLN1
         {
             layoutParams.channelParam = 1;
             layoutParams.bufferMultiplier = 1;
-        }
-        else if (channels == 3) // PLN3
+        } else if (channels == 3)  // PLN3
         {
             layoutParams.channelParam = 3;
             layoutParams.bufferMultiplier = 1;
         }
-    }
-    else if(layout == RpptLayout::NHWC || layout == RpptLayout::NDHWC)
-    {
-        //PKD
+    } else if (layout == RpptLayout::NHWC || layout == RpptLayout::NDHWC) {
+        // PKD
         layoutParams.channelParam = 1;
         layoutParams.bufferMultiplier = channels;
     }
     return layoutParams;
 }
 
-inline int check_roi_out_of_bounds(RpptROIPtr roiPtrImage, RpptDescPtr srcDescPtr, RpptRoiType type)
-{
+inline int check_roi_out_of_bounds(RpptROIPtr roiPtrImage, RpptDescPtr srcDescPtr,
+                                   RpptRoiType type) {
     int x = 0, y = 0, w = 0, h = 0;
-    if (type == RpptRoiType::XYWH)
-    {
-        x = ((0 <= roiPtrImage->xywhROI.xy.x) && (roiPtrImage->xywhROI.xy.x < srcDescPtr->w)) ? roiPtrImage->xywhROI.xy.x : -1;
-        y = ((0 <= roiPtrImage->xywhROI.xy.y) && (roiPtrImage->xywhROI.xy.y < srcDescPtr->h)) ? roiPtrImage->xywhROI.xy.y : -1;
+    if (type == RpptRoiType::XYWH) {
+        x = ((0 <= roiPtrImage->xywhROI.xy.x) && (roiPtrImage->xywhROI.xy.x < srcDescPtr->w))
+                ? roiPtrImage->xywhROI.xy.x
+                : -1;
+        y = ((0 <= roiPtrImage->xywhROI.xy.y) && (roiPtrImage->xywhROI.xy.y < srcDescPtr->h))
+                ? roiPtrImage->xywhROI.xy.y
+                : -1;
         w = ((roiPtrImage->xywhROI.roiWidth) <= srcDescPtr->w) ? roiPtrImage->xywhROI.roiWidth : -1;
-        h = ((roiPtrImage->xywhROI.roiHeight) <= srcDescPtr->h) ? roiPtrImage->xywhROI.roiHeight : -1;
-    }
-    else if (type == RpptRoiType::LTRB)
-    {
-        x = ((0 <= roiPtrImage->ltrbROI.lt.x) && (roiPtrImage->ltrbROI.lt.x < srcDescPtr->w)) ? roiPtrImage->ltrbROI.lt.x : -1;
-        y = ((0 <= roiPtrImage->ltrbROI.lt.y) && (roiPtrImage->ltrbROI.lt.y < srcDescPtr->h)) ? roiPtrImage->ltrbROI.lt.y : -1;
-        w = ((0 <= roiPtrImage->ltrbROI.rb.x) && (roiPtrImage->ltrbROI.rb.x < srcDescPtr->w)) ? roiPtrImage->ltrbROI.rb.x - roiPtrImage->ltrbROI.lt.x + 1 : -1;
-        h = ((0 <= roiPtrImage->ltrbROI.rb.y) && (roiPtrImage->ltrbROI.rb.y < srcDescPtr->h)) ? roiPtrImage->ltrbROI.rb.y - roiPtrImage->ltrbROI.lt.y + 1 : -1;
+        h = ((roiPtrImage->xywhROI.roiHeight) <= srcDescPtr->h) ? roiPtrImage->xywhROI.roiHeight
+                                                                : -1;
+    } else if (type == RpptRoiType::LTRB) {
+        x = ((0 <= roiPtrImage->ltrbROI.lt.x) && (roiPtrImage->ltrbROI.lt.x < srcDescPtr->w))
+                ? roiPtrImage->ltrbROI.lt.x
+                : -1;
+        y = ((0 <= roiPtrImage->ltrbROI.lt.y) && (roiPtrImage->ltrbROI.lt.y < srcDescPtr->h))
+                ? roiPtrImage->ltrbROI.lt.y
+                : -1;
+        w = ((0 <= roiPtrImage->ltrbROI.rb.x) && (roiPtrImage->ltrbROI.rb.x < srcDescPtr->w))
+                ? roiPtrImage->ltrbROI.rb.x - roiPtrImage->ltrbROI.lt.x + 1
+                : -1;
+        h = ((0 <= roiPtrImage->ltrbROI.rb.y) && (roiPtrImage->ltrbROI.rb.y < srcDescPtr->h))
+                ? roiPtrImage->ltrbROI.rb.y - roiPtrImage->ltrbROI.lt.y + 1
+                : -1;
     } else {
         // Invalid ROI type
         return -1;
@@ -80,8 +86,8 @@ inline int check_roi_out_of_bounds(RpptROIPtr roiPtrImage, RpptDescPtr srcDescPt
     if ((x < 0) || (y < 0) || (w < 0) || (h < 0)) {
         return -1;
     }
-    
+
     return 0;
 }
 
-#endif // RPPT_VALIDATE_OPERATIONS_FUNCTIONS
+#endif  // RPPT_VALIDATE_OPERATIONS_FUNCTIONS

@@ -74,9 +74,11 @@ class FakeHandle:
         return self.stream
 
 
-def _make_executor(timing_backend: str) -> executor_module.Executor:
+def _make_executor(collect_kernel_timing: bool = True) -> executor_module.Executor:
     config = BenchmarkConfig(graph_path="dummy.json", warmup_iters=0, benchmark_iters=1)
-    executor = executor_module.Executor("{}", config, timing_backend=timing_backend)
+    executor = executor_module.Executor(
+        "{}", config, collect_kernel_timing=collect_kernel_timing
+    )
     executor._graph = DummyGraph()
     executor._workspace_ptr = 0
     return executor
@@ -100,7 +102,7 @@ def test_warmup_synchronizes_once_after_untimed_iterations(monkeypatch) -> None:
     )
 
     config = BenchmarkConfig(graph_path="dummy.json", warmup_iters=3, benchmark_iters=1)
-    executor = executor_module.Executor("{}", config, timing_backend="none")
+    executor = executor_module.Executor("{}", config, collect_kernel_timing=False)
     executor._graph = TrackingGraph()
     executor._workspace_ptr = 0
 
@@ -119,7 +121,7 @@ def test_warmup_zero_iterations_does_not_synchronize(monkeypatch) -> None:
         lambda stream=0: pytest.fail("zero warmup must not synchronize"),
     )
 
-    executor = _make_executor("none")
+    executor = _make_executor(collect_kernel_timing=False)
     executor.warmup(handle=None, variant_pack={})
 
     assert calls == []
@@ -143,7 +145,7 @@ def test_benchmark_synchronizes_each_measured_iteration(monkeypatch) -> None:
     )
 
     config = BenchmarkConfig(graph_path="dummy.json", warmup_iters=0, benchmark_iters=3)
-    executor = executor_module.Executor("{}", config, timing_backend="none")
+    executor = executor_module.Executor("{}", config, collect_kernel_timing=False)
     executor._graph = TrackingGraph()
     executor._workspace_ptr = 0
 
@@ -161,7 +163,7 @@ def test_benchmark_uses_handle_stream_for_timing_and_sync(monkeypatch) -> None:
     monkeypatch.setattr(
         executor_module,
         "create_gpu_timer",
-        lambda backend, stream=0: timer_streams.append(stream) or DummyHipTimer(),
+        lambda stream=0: timer_streams.append(stream) or DummyHipTimer(),
     )
     monkeypatch.setattr(
         executor_module,
@@ -169,10 +171,10 @@ def test_benchmark_uses_handle_stream_for_timing_and_sync(monkeypatch) -> None:
         lambda stream=0: sync_streams.append(stream) or TrackingStreamTimer([], stream),
     )
 
-    timed_executor = _make_executor("hip")
+    timed_executor = _make_executor(collect_kernel_timing=True)
     timed_result = timed_executor.benchmark(handle=FakeHandle(123), variant_pack={})
 
-    fallback_executor = _make_executor("none")
+    fallback_executor = _make_executor(collect_kernel_timing=False)
     fallback_executor.benchmark(handle=FakeHandle(456), variant_pack={})
 
     assert timer_streams == [123]
@@ -182,7 +184,7 @@ def test_benchmark_uses_handle_stream_for_timing_and_sync(monkeypatch) -> None:
 
 def test_handle_stream_change_after_prepare_raises() -> None:
     """Reject hipDNN handle stream drift so warmup and benchmark use one stream."""
-    executor = _make_executor("none")
+    executor = _make_executor(collect_kernel_timing=False)
     executor._execution_stream = 123
 
     with pytest.raises(executor_module.ExecutionError, match="stream changed"):
@@ -237,10 +239,10 @@ def test_gpu_timer_start_stop_elapsed_inside_timed_region(monkeypatch) -> None:
     monkeypatch.setattr(
         executor_module,
         "create_gpu_timer",
-        lambda backend, stream=0: TrackingGpuTimer(),
+        lambda stream=0: TrackingGpuTimer(),
     )
 
-    executor = _make_executor("hip")
+    executor = _make_executor(collect_kernel_timing=True)
     result = executor.benchmark(handle=None, variant_pack={})
 
     # start(), stop(), and elapsed_ms() should be called inside the timer context.
@@ -288,11 +290,11 @@ def test_e2e_timing_at_least_as_long_as_kernel(monkeypatch) -> None:
     monkeypatch.setattr(
         executor_module,
         "create_gpu_timer",
-        lambda backend, stream=0: SlowSyncGpuTimer(),
+        lambda stream=0: SlowSyncGpuTimer(),
     )
 
     config = BenchmarkConfig(graph_path="dummy.json", warmup_iters=0, benchmark_iters=5)
-    executor = executor_module.Executor("{}", config, timing_backend="hip")
+    executor = executor_module.Executor("{}", config, collect_kernel_timing=True)
     executor._graph = DummyGraph()
     executor._workspace_ptr = 0
 
@@ -329,7 +331,7 @@ def test_e2e_timings_recorded_without_gpu_timing(monkeypatch) -> None:
         lambda stream=0: TrackingStreamTimer([], stream),
     )
 
-    executor = _make_executor("none")
+    executor = _make_executor(collect_kernel_timing=False)
     result = executor.benchmark(handle=None, variant_pack={})
 
     assert result.e2e_timings == [2.0]
@@ -357,7 +359,7 @@ def test_cpu_only_torch_does_not_affect_hip_synchronization(monkeypatch) -> None
         lambda stream=0: TrackingStreamTimer(sync_calls, stream),
     )
 
-    executor = _make_executor("none")
+    executor = _make_executor(collect_kernel_timing=False)
     result = executor.benchmark(handle=None, variant_pack={})
 
     assert result.e2e_timings

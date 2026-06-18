@@ -7,7 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from dnn_benchmarking.config.benchmark_config import MetricsConfig, SuiteConfig
+from dnn_benchmarking.config.benchmark_config import (
+    MetricsConfig,
+    ReferenceProviderName,
+    SuiteConfig,
+)
 
 
 class TestMetricsConfigDefaults:
@@ -51,6 +55,14 @@ class TestSuiteConfigEmbedding:
         sc2 = SuiteConfig()
         assert sc.metrics is not sc2.metrics
         assert sc.metrics.tier == "basic"
+
+    def test_validation_default_factory(self):
+        sc = SuiteConfig()
+        # Each SuiteConfig must own its own ValidationConfig (not a shared
+        # mutable default).
+        sc2 = SuiteConfig()
+        assert sc.validation is not sc2.validation
+        assert sc.validation.provider is ReferenceProviderName.NONE
 
     def test_metrics_can_be_overridden(self):
         sc = SuiteConfig(metrics=MetricsConfig(tier="off"))

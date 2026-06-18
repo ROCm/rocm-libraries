@@ -1973,6 +1973,60 @@ namespace rocisa
         std::shared_ptr<RegisterContainer> tmp;
     };
 
+    struct FlatAtomicDecU32 : public FLATStoreInstruction
+    {
+        FlatAtomicDecU32(const std::shared_ptr<RegisterContainer>& dst,
+                         const std::shared_ptr<RegisterContainer>& addr,
+                         const std::shared_ptr<RegisterContainer>& data,
+                         std::optional<FLATModifiers>              modifier = std::nullopt,
+                         const std::string&                        comment = "")
+            : FLATStoreInstruction(InstType::INST_B32, addr, data, modifier, comment)
+            , dst(dst)
+        {
+            setInst("flat_atomic_dec_u32");
+        }
+
+        FlatAtomicDecU32(const FlatAtomicDecU32& other)
+            : FLATStoreInstruction(other)
+            , dst(other.dst ? other.dst->clone2() : nullptr)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<FlatAtomicDecU32>(*this);
+        }
+
+        // Expose dst (atomic return value) to def-use chain consumers.
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {dst};
+        }
+
+        std::string getArgStr() const override
+        {
+            std::string kStr = dst ? dst->toString() + ", " : "";
+            return kStr + vaddr->toString() + ", " + srcData->toString();
+        }
+
+        std::string typeConvert() const override
+        {
+            return "";
+        }
+
+        std::string toString() const override
+        {
+            std::string kStr = instStr + " " + getArgStr();
+            kStr += " th:TH_ATOMIC_RETURN";
+            if(flat)
+                kStr += flat->toString();
+            kStr = formatWithComment(kStr);
+            return kStr;
+        }
+    private:
+        std::shared_ptr<RegisterContainer> dst;
+    };
+
     struct DSLoadU8 : public DSLoadInstruction
     {
         DSLoadU8(const std::shared_ptr<RegisterContainer>& dst,
