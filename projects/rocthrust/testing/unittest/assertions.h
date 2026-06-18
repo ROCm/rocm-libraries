@@ -790,4 +790,4 @@ void check_assert_throws(
   }
 }
 
-}; // end namespace unittest
+} // end namespace unittest
