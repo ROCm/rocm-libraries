@@ -89,21 +89,114 @@ class AddrCalculation:
             self.globalOffsetE = 0
             self.globalOffsetInternal = 0
 
-    def addScaled(self, destV, src0, src1, scale1, tmpS01, comment=""):
+    def addScaled(self, destV, src0, src1, scale1, tmpS01, comment="", comment1="", comment2="scale stride"):
         """
         Use minimally efficient instructions to add stride*scale
         """
 
         module = Module("addScaled")
         if scale1 == 1:
-            module.add(VAddU32(dst=destV, src0=src0, src1=src1, comment=comment))
+            module.add(VAddU32(dst=destV, src0=src0, src1=src1, comment=comment1 if comment1!="" else comment))
         else:
-            module.add(SMulI32(dst=sgpr(tmpS01), src0=src1, src1=scale1, comment="scale stride"))
-            module.add(VAddI32(dst=destV, src0=src0, src1=sgpr(tmpS01), comment=comment))
+            module.add(SMulI32(dst=sgpr(tmpS01), src0=src1, src1=scale1, comment=comment2))
+            if comment1!="":
+                module.add(VAddU32(dst=destV, src0=src0, src1=sgpr(tmpS01), comment=comment))
+            else:
+                module.add(VAddI32(dst=destV, src0=src0, src1=sgpr(tmpS01), comment=comment))
+        return module
+
+    def emitCoord1Advance(self, rowInc, tmpS01, d0=0, vc0=0, comment=None, scomment=None):
+        """
+        Advance the shared coord1 VGPR (kernelWriter.vgprs.coord1) in place by
+        `rowInc` rows. This is the single canonical "coord1 += rowInc" emitter,
+        shared by the per-element cross-row advance (emitAddressCoordIncrement)
+        and the CLS look-ahead at batch end (GlobalWriteBatch.emit()).
+          rowInc == 0      -> nothing
+          0 < rowInc <= 64 -> v_add_co_u32 with immediate
+          rowInc > 64      -> s_mov + v_add_co_u32
+          rowInc < 0       -> s_mov + v_add_nc_i32
+        `comment`/`scomment` override the v_add / s_mov comments (used by the CLS
+        look-ahead to keep its "coord1.la ... (look-ahead)" marker); when None the
+        canonical per-element comments (coord1.1/.2/.3) are emitted so the
+        per-element / non-CLS .s stays byte-identical.
+        """
+        module = Module("coord1Advance")
+        coord1 = self.kernelWriter.vgprs.coord1
+        if scomment is None:
+            scomment = "rowInc d1=%u vc1=%u"%(d0, vc0)
+        if rowInc == 0:
+            pass
+        elif 0 < rowInc <= 64:
+            module.add(VAddCOU32(dst=vgpr(coord1), dst1=VCC(), src0=vgpr(coord1), \
+                      src1=rowInc, comment=comment if comment else "coord1.1: coord1Vgpr += d1*sg1*VW + vc1"))
+        elif rowInc > 64:
+            module.add(SMovB32(dst=sgpr(tmpS01), src=rowInc, comment=scomment))
+            module.add(VAddCOU32(dst=vgpr(coord1), dst1=VCC(), src0=vgpr(coord1), \
+                      src1=sgpr(tmpS01), comment=comment if comment else "coord1.2: coord1 += d1*sg1*VW + vc1"))
+        else:  # rowInc < 0
+            module.add(SMovB32(dst=sgpr(tmpS01), src=rowInc, comment=scomment))
+            module.add(VAddI32(dst=vgpr(coord1), src0=vgpr(coord1), \
+                      src1=sgpr(tmpS01), comment=comment if comment else "coord1.3: coord1 += d1*sg1*VW + vc1"))
+        return module
+
+    def emitRowPtrAdvance(self, kernel, ss, tmpS01, rowInc, lookahead=False):
+        """
+        Advance the row-pointer VGPRs (cinRowPtr / coutRowPtrD / coutRowPtrE /
+        coutRowPtrBias, or packed-C1 extract) by `rowInc` rows. This is the single
+        canonical row-pointer advance, shared by:
+          - the per-element cross-row advance in emitAddressSetupCode (lookahead=False)
+          - the CLS look-ahead at batch end in GlobalWriteBatch.emit() (lookahead=True)
+        Same spirit as the delayed-primer reuse of incrementToNextRow: the look-ahead
+        does NOT re-implement the advance, it produces it from the same source -- so it
+        automatically covers E / Bias / packed-C1 with the exact same conditions.
+
+        `lookahead` only switches comment text (.la markers) and skips the per-element
+        bookkeeping (rowIncDirtyRowPtr + the "Fix for UseInitialStridesCD" banner). The
+        emitted instructions are otherwise identical, so non-CLS / per-element .s stays
+        byte-identical.
+        """
+        module = Module("emitRowPtrAdvance")
+        kw = self.kernelWriter
+        if not lookahead:
+            self.rowIncDirtyRowPtr = 1
+            #assert (not kernel["ProblemType"]["UseInitialStridesCD"])
+            module.addComment1("Fix for UseInitialStridesCD, emitAddressSetupCode")
+
+        if len(kernel["PackedC1IndicesX"]) == 1:
+            strideChar = self.kernelWriter.states.indexChars[kernel["PackedC1IndicesX"][0]]
+            if lookahead:
+                module.add(self.addScaled(vgpr(kw.vgprs.cinRowPtr),  vgpr(kw.vgprs.cinRowPtr),  \
+                          sgpr("StrideC%s"%strideChar), rowInc, tmpS01, \
+                          comment="cinRowPtr.la: += StrideC%s*rowInc"%strideChar, \
+                          comment1="cinRowPtr.la: += StrideC%s"%strideChar, \
+                          comment2="scale StrideC%s for look-ahead"%strideChar))
+                module.add(self.addScaled(vgpr(kw.vgprs.coutRowPtrD), vgpr(kw.vgprs.coutRowPtrD), \
+                          sgpr("StrideD%s"%strideChar), rowInc, tmpS01, \
+                          comment="coutRowPtrD.la: += StrideD%s*rowInc"%strideChar, \
+                          comment1="coutRowPtrD.la: += StrideD%s"%strideChar, \
+                          comment2="scale StrideD%s for look-ahead"%strideChar))
+            else:
+                module.add(self.addScaled(vgpr(kw.vgprs.cinRowPtr),  vgpr(kw.vgprs.cinRowPtr),  \
+                          sgpr("StrideC%s"%strideChar), rowInc, tmpS01, "ROWINC- Move cinRowPtr to next row"))
+                module.add(self.addScaled(vgpr(kw.vgprs.coutRowPtrD), vgpr(kw.vgprs.coutRowPtrD), \
+                          sgpr("StrideD%s"%strideChar), rowInc, tmpS01, "Move coutRowPtrD to next row"))
+            if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+                ecomment = "coutRowPtrE.la: += StrideE%s*rowInc"%strideChar if lookahead else "Move coutRowPtrE to next row"
+                module.add(self.addScaled(vgpr(kw.vgprs.coutRowPtrE), vgpr(kw.vgprs.coutRowPtrE), \
+                          sgpr("StrideE%s"%strideChar), rowInc, tmpS01, ecomment))
+            if kw.vgprs.coutRowPtrBias != -1:
+                index = kernel["PackedC1IndicesX"][0] - 1
+                strideW1 = "Size%s" % "I" if index == 0 else ("J" if index == 1 else (kw.states.indexChars[index]))
+                bcomment = "coutRowPtrBias.la: += %s*rowInc"%strideW1 if lookahead else "Move coutRowPtrBias to next row"
+                module.add(self.addScaled(vgpr(kw.vgprs.coutRowPtrBias), vgpr(kw.vgprs.coutRowPtrBias), \
+                          sgpr(strideW1), rowInc, tmpS01, bcomment))
+        elif len(kernel["PackedC1IndicesX"]) > 1:
+            module.add(kw.extractPackedCoord1ToRowStart(kernel, kernel["PackedC1IndicesX"] , self.coord1Vgpr, 'D'))
         return module
 
 
-    def emitAddressCoordIncrement(self, kernel, ss, tmpVgpr, tmpS01, updateCoord1):
+    def emitAddressCoordIncrement(self, kernel, ss, tmpVgpr, tmpS01, updateCoord1,
+                                  skipCrossBatchCoord1Inc=False):
         """
         Emit code that computes the coord0 and coord1 for this element
         sets self.coord0Vgpr with the address that holds the coord0 value for this element.
@@ -141,22 +234,13 @@ class AddrCalculation:
                 if not kernel["BufferStore"] or updateCoord1:
                     if self.rowInc== 0:
                         None
-                    elif self.rowInc <= 64 and self.rowInc > 0:
-                        # rowInc fits in instruction:
-                        module.add(VAddCOU32(dst=vgpr(self.coord1Vgpr), dst1=VCC(), \
-                                  src0=vgpr(self.kernelWriter.vgprs.coord1), src1=self.rowInc, \
-                                  comment="coord1.1: coord1Vgpr += d1*sg1*VW + vc1"))
-                    elif self.rowInc > 0:
-                        module.add(SMovB32(dst=sgpr(tmpS01), src=self.rowInc, comment="rowInc d1=%u vc1=%u"%(d0, vc0)))
-                        module.add(VAddCOU32(dst=vgpr(self.coord1Vgpr), dst1=VCC(), \
-                                  src0=vgpr(self.kernelWriter.vgprs.coord1), src1=sgpr(tmpS01), \
-                                  comment="coord1.2: coord1 += d1*sg1*VW + vc1"))
+                    elif skipCrossBatchCoord1Inc:
+                        module.addComment0("coord1Vgpr cross-batch inc skipped (CLS look-ahead)")
                     else:
-                        # rowInc < 0
-                        module.add(SMovB32(dst=sgpr(tmpS01), src=self.rowInc, comment="rowInc d1=%u vc1=%u"%(d0, vc0)))
-                        module.add(VAddI32(dst=vgpr(self.coord1Vgpr), \
-                                  src0=vgpr(self.kernelWriter.vgprs.coord1), src1=sgpr(tmpS01), \
-                                  comment="coord1.3: coord1 += d1*sg1*VW + vc1"))
+                        # coord1 += rowInc (canonical, shared with CLS look-ahead).
+                        # self.coord1Vgpr == kernelWriter.vgprs.coord1 (set in
+                        # AsmStoreState), so this is an in-place advance.
+                        module.add(self.emitCoord1Advance(self.rowInc, tmpS01, d0, vc0))
         return module
 
     def getRowPtr(self, kw, tc):
@@ -553,7 +637,8 @@ class AddrCalculation:
         return module
 
     # TODO - mask should be part of AddrCalc state not passed as parm
-    def emitAddressSetupCode(self, kernel, tPB, ss, tmpVgpr, tmpS01, edge, beta, atomic, elementIdx, addrVgpr):
+    def emitAddressSetupCode(self, kernel, tPB, ss, tmpVgpr, tmpS01, edge, beta, atomic, elementIdx, addrVgpr,
+                             skipCrossBatchAdvance=False):
         """
         Generate code to set up the address vgpr
         Input:
@@ -568,7 +653,8 @@ class AddrCalculation:
         kw = self.kernelWriter
 
         updateCoord1 = (edge or len(kernel["PackedC1IndicesX"]) > 1)
-        module.add(self.emitAddressCoordIncrement(kernel, ss, tmpVgpr, tmpS01, updateCoord1))
+        module.add(self.emitAddressCoordIncrement(kernel, ss, tmpVgpr, tmpS01, updateCoord1,
+                                                  skipCrossBatchCoord1Inc=skipCrossBatchAdvance))
 
         # calculate flat load offset
         if not kernel["BufferStore"]:
@@ -595,27 +681,13 @@ class AddrCalculation:
         # Move the row ptr VGPR
         # optSrdIncForRow moves the SRD so don't move here
         if not ss.optSrdIncForRow and kernel["BufferStore"]:
-            if self.rowInc != 0:
+            if self.rowInc != 0 and skipCrossBatchAdvance:
                 self.rowIncDirtyRowPtr = 1
-                #assert (not kernel["ProblemType"]["UseInitialStridesCD"])
-                module.addComment1("Fix for UseInitialStridesCD, emitAddressSetupCode")
-
-                if len(kernel["PackedC1IndicesX"]) == 1:
-                    strideChar = self.kernelWriter.states.indexChars[kernel["PackedC1IndicesX"][0]]
-                    module.add(self.addScaled(vgpr(kw.vgprs.cinRowPtr),  vgpr(kw.vgprs.cinRowPtr),  \
-                              sgpr("StrideC%s"%strideChar), self.rowInc, tmpS01, "ROWINC- Move cinRowPtr to next row"))
-                    module.add(self.addScaled(vgpr(kw.vgprs.coutRowPtrD), vgpr(kw.vgprs.coutRowPtrD), \
-                              sgpr("StrideD%s"%strideChar), self.rowInc, tmpS01, "Move coutRowPtrD to next row"))
-                    if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
-                        module.add(self.addScaled(vgpr(kw.vgprs.coutRowPtrE), vgpr(kw.vgprs.coutRowPtrE), \
-                                  sgpr("StrideE%s"%strideChar), self.rowInc, tmpS01, "Move coutRowPtrE to next row"))
-                    if kw.vgprs.coutRowPtrBias != -1:
-                        index = kernel["PackedC1IndicesX"][0] - 1
-                        strideW1 = "Size%s" % "I" if index == 0 else ("J" if index == 1 else (kw.states.indexChars[index]))
-                        module.add(self.addScaled(vgpr(kw.vgprs.coutRowPtrBias), vgpr(kw.vgprs.coutRowPtrBias), \
-                                  sgpr(strideW1), self.rowInc, tmpS01, "Move coutRowPtrBias to next row"))
-                elif len(kernel["PackedC1IndicesX"]) > 1:
-                    module.add(kw.extractPackedCoord1ToRowStart(kernel, kernel["PackedC1IndicesX"] , self.coord1Vgpr, 'D'))
+                module.addComment1("rowPtr cross-batch advance skipped (CLS look-ahead)")
+            elif self.rowInc != 0:
+                # Per-element cross-row advance via the canonical single-source helper
+                # (also used by the CLS look-ahead in GlobalWriteBatch.emit()).
+                module.add(self.emitRowPtrAdvance(kernel, ss, tmpS01, self.rowInc, lookahead=False))
 
         # Shift Pointer for MFMA:
         #   For MFMA shift pointer, correct data is stored in another thread.
@@ -815,11 +887,33 @@ class AddrCalculation:
                                         comment="incToNextRow: gra SRD -= inc(upper)" ))
         return module
 
-    def incrementToNextRow(self, kernel, tc, ss, stmp, bpeType=None, dst=-1):
+    def incrementToNextRow(self, kernel, tc, ss, stmp, forceinitrow0=0,
+                           overrideAfterPrimerRows=0, bpeType=None, dst=-1):
         """
         Generate code to move to the next row(s)
         If optSrdIncForRow, this will move the SRD forward
         If not, this could generate some other instructions
+
+        CompactLoopStore (CLS-loop mode) uses a DELAYED primer pattern: s_add
+        uses s[stmp] prepared by the PREVIOUS call, and the stride compute
+        (s_lshl/s_mul) at the END primes s[stmp] for the NEXT call. Every elt
+        must emit (including rowInc==0) to preserve the s[stmp] chain --
+        elt-0's s_add is a no-op (s[stmp]=0 from preamble init) + s_lshl that
+        primes s[stmp]=StrideCD1<<log2(bpe) for elt-1's real advance. Caller
+        passes `forceinitrow0=1` to allow this chain-seed emit when rowInc==0.
+
+        `overrideAfterPrimerRows` > 0 replaces the AFTER-primer's numRows with
+        the given value. The caller (GlobalWriteBatch) computes this as the
+        rowInc of the NEXT EMITTING elt (look-ahead), so the primer that
+        elt-N writes to s[stmp] is exactly the increment elt-(N+1) needs.
+        Without override, the primer would carry elt-N's own rowInc, which
+        elt-(N+1) would then erroneously consume -- the off-by-one root cause.
+        0 means no override (default delayed chain, primer = own numRows).
+
+        Legacy path (CompactLoopStore=False): emit stride compute BEFORE s_add
+        (each call self-contained, gated by rowInc != 0). `forceinitrow0=0`
+        and `overrideAfterPrimerRows=0` defaults keep legacy behaviour.
+
         """
 
         module = Module("incrementToNextRow")
@@ -828,7 +922,10 @@ class AddrCalculation:
         if (tc == 'C' or tc == 'TD') and (kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
             tmpBpe = int(self.kernelWriter.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters())
         if ss.optSrdIncForRow:
-            if numRows:
+            # CLS chain seed: when caller asks for `forceinitrow0=1` we must
+            # also emit on rowInc==0 to keep s[stmp] primed; otherwise legacy
+            # behaviour: skip when no advance is needed.
+            if numRows or forceinitrow0:
                 packedC1 = kernel["PackedC1IndicesX"]
                 assert(len(packedC1) == 1)  # would need to extract each dim and scale
                 if tc == 'Bias' and (not kernel["WorkGroupReduction"]):
@@ -837,21 +934,33 @@ class AddrCalculation:
                 else:
                     td = "D" if tc == 'TD' else tc
                     strideCD1 = "Stride%s%s"%(td ,self.kernelWriter.states.indexChars[packedC1[0]])
-                if numRows > 1:
-                    module.add(SMulI32(dst=sgpr(stmp), \
-                                src0=sgpr(strideCD1), \
-                                src1=numRows*tmpBpe, \
-                                comment="scale Stride%s *= numRows(%u) * bpe"%(tc,numRows)))
-                elif numRows < 0:
-                    module.add(SMulI32(dst=sgpr(stmp), \
-                                src0=sgpr(strideCD1), \
-                                src1=(-numRows)*tmpBpe, \
-                                comment="scale Stride%s *= numRows(%u) * bpe"%(tc,numRows)))
-                else:
-                    module.add(SLShiftLeftB32(dst=sgpr(stmp), \
-                                src=sgpr(strideCD1), \
-                                shiftHex=log2(tmpBpe), \
-                                comment="incToNextRow: Scale by BPE"))
+
+                # Build a strideCompute block for a given numRows. Used for
+                # BOTH the legacy "before s_add" emit (with the call's own
+                # numRows) and the CLS delayed "after s_add" primer.
+                def _buildStrideCompute(nr):
+                    sc = Module("strideCompute")
+                    if nr > 1:
+                        sc.add(SMulI32(dst=sgpr(stmp), \
+                                    src0=sgpr(strideCD1), \
+                                    src1=nr*tmpBpe, \
+                                    comment="scale Stride%s *= numRows(%u) * bpe"%(tc,nr)))
+                    elif nr < 0:
+                        sc.add(SMulI32(dst=sgpr(stmp), \
+                                    src0=sgpr(strideCD1), \
+                                    src1=(-nr)*tmpBpe, \
+                                    comment="scale Stride%s *= numRows(%u) * bpe"%(tc,nr)))
+                    else:
+                        sc.add(SLShiftLeftB32(dst=sgpr(stmp), \
+                                    src=sgpr(strideCD1), \
+                                    shiftHex=log2(tmpBpe), \
+                                    comment="incToNextRow: Scale by BPE"))
+                    return sc
+
+                # Legacy (non-CompactLoopStore): stride compute BEFORE s_add,
+                # using the call's own numRows.
+                if not kernel["CompactLoopStore"]:
+                    module.add(_buildStrideCompute(numRows))
 
                 if dst == -1:
                     dstLow = "Srd%s+0"%(tc)
@@ -878,5 +987,16 @@ class AddrCalculation:
                                         src0=sgpr(dstHigh), \
                                         src1=0, \
                                         comment="incToNextRow: gra SRD -= inc(upper)" ))
+
+                # CompactLoopStore: stride compute AFTER s_add (primes s[stmp]
+                # for the NEXT call's s_add). When caller passes
+                # `overrideAfterPrimerRows > 0`, use it as the primer rows --
+                # this is the look-ahead value = NEXT EMITTING elt's rowInc,
+                # so elt-(N+1)'s s_add reads exactly its own advance. Without
+                # override, primer uses elt-N's own numRows (off-by-one for
+                # CLS, but kept as the documented fallback).
+                if kernel["CompactLoopStore"]:
+                    primerRows = overrideAfterPrimerRows if overrideAfterPrimerRows else numRows
+                    module.add(_buildStrideCompute(primerRows))
 
         return module

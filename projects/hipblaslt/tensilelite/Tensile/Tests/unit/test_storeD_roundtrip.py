@@ -206,6 +206,7 @@ def _build_store_kernel(cfg, mi_wave_group=None, use_bf16=False):
     kernel["GlobalSplitU"] = 0
     kernel["_GlobalAccumulation"] = None
     kernel["StreamK"] = 0
+    kernel["CompactLoopStore"] = False
     kernel["LocalSplitU"] = 1
     kernel["StoreRemapVectorWidth"] = 0
     kernel["SourceSwap"] = False
