@@ -133,10 +133,10 @@ def handle_batchnorm_training(
     bias = _channel_values(_tensor(tensors, bias_uid, node), x)
     epsilon = _scalar_value(tensors, epsilon_uid, node)
 
-    # Fused batchnorm forward-training: a single op that dispatches to MIOpen on
-    # ROCm and returns (y, save_mean, save_invstd). x/scale/bias keep their graph
-    # dtypes so the timed reference measures the same precision workload as the
-    # engine, not a promoted-fp32 kernel plus surrounding casts. save_mean and
+    # Fused batchnorm forward-training: a single op returning (y, save_mean,
+    # save_invstd). x/scale/bias keep their graph dtypes so the timed reference
+    # measures the same precision workload as the graph under test, not a
+    # promoted-fp32 kernel plus surrounding casts. save_mean and
     # save_invstd come back as float32 from the primitive.
     y, mean, inv_variance = torch.native_batch_norm(
         x, scale, bias, None, None, True, 0.0, epsilon
@@ -226,8 +226,8 @@ def handle_batchnorm_backward(
             _channel_values(_tensor(tensors, int(inv_uid), node), x), "inv_variance"
         )
 
-    # Fused batchnorm backward: a single op that dispatches to MIOpen on ROCm and
-    # returns (dx, dscale, dbias), replacing the hand-rolled gradient reduction.
+    # Fused batchnorm backward: a single op returning (dx, dscale, dbias),
+    # replacing the hand-rolled gradient reduction.
     # dy/x keep their graph dtype; saved mean/inv_variance are float32 as the
     # primitive requires.
     dx, dscale, dbias = torch.ops.aten.native_batch_norm_backward(

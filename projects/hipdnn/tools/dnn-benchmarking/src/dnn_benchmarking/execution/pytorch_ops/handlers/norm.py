@@ -200,9 +200,9 @@ def handle_layernorm(
     stat_shape = x.shape[: x.ndim - len(normalized_shape)] + (1,) * len(
         normalized_shape
     )
-    # Fused layernorm: a single op (dispatches to a native/MIOpen kernel on ROCm)
-    # returns (y, mean, rstd) so the saved statistics come from the primitive
-    # rather than separate hand-rolled mean/variance reductions.
+    # Fused layernorm: a single op returning (y, mean, rstd) so the saved
+    # statistics come from the primitive rather than separate hand-rolled
+    # mean/variance reductions.
     out, mean, rstd = torch.ops.aten.native_layer_norm(
         x, normalized_shape, weight, bias_value, epsilon
     )

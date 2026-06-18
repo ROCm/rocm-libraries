@@ -32,7 +32,7 @@ def get_reference_warnings(graph_json: Dict[str, Any]) -> List[str]:
             warnings.append(
                 f"{name}: graph compute_data_type={cdt!r} is not float32; the PyTorch "
                 f"reference assumes float32 accumulation and does not honor other compute "
-                f"types, so its results and timing may not match the engine."
+                f"types, so its results and timing may diverge from the graph's execution."
             )
 
         if op_type == "RMSNormAttributes":

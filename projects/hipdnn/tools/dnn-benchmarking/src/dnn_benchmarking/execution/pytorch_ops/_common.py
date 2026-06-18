@@ -169,15 +169,16 @@ def _is_float32_compute(node: Dict[str, Any], graph_json: Dict[str, Any]) -> boo
 
 
 def _require_fp32_stat(values: torch.Tensor, name: str) -> torch.Tensor:
-    """Several hipDNN providers hard-require float32 for a saved-statistic tensor
-    (batchnorm mean/variance/inv_variance, RMSNorm inv_rms, SDPA log-sum-exp);
-    a non-fp32 stat tensor is GRAPH_NOT_SUPPORTED on the engine and cannot be
-    faithfully matched, so the reference declares such a graph inapplicable rather
-    than silently promoting the stat to float32."""
+    """Saved-statistic tensors (batchnorm mean/variance/inv_variance, RMSNorm
+    inv_rms, SDPA log-sum-exp) are produced and consumed in float32 by this
+    reference. A graph that declares such a stat tensor in a lower precision
+    cannot be represented faithfully — the fp32 value the reference computes is
+    not what the graph carries — so the reference declares the graph inapplicable
+    rather than silently promoting the stat to float32."""
     if values.dtype != torch.float32:
         raise UnsupportedGraphError(
-            f"Reference requires a float32 {name} stat tensor; graph declares "
-            f"{values.dtype}, which the engine reports as unsupported"
+            f"reference requires a float32 {name} stat tensor; graph declares "
+            f"{values.dtype}"
         )
     return values
 

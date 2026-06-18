@@ -1040,6 +1040,31 @@ class TestPyTorchOpsNewHandlers:
 
         torch.testing.assert_close(tensors[2], expected)
 
+    def test_reduction_accumulates_in_fp32(self) -> None:
+        # A bf16 reduction must accumulate in float32 and store at the graph
+        # dtype: the result equals the fp32 reduction rounded to bf16, which for a
+        # product differs from a low-precision accumulation (104.0 vs 102.5 here).
+        x = torch.full((1, 48), 1.1, dtype=torch.bfloat16)
+        graph_json = {
+            "tensors": [{"uid": 2, "dims": [1, 1]}],
+            "nodes": [
+                {
+                    "type": "ReductionAttributes",
+                    "inputs": {"in_tensor_uid": 1},
+                    "outputs": {"out_tensor_uid": 2},
+                    "attributes": {"mode": "MUL"},
+                }
+            ],
+        }
+        tensors = {1: x}
+
+        pytorch_ops.execute_graph(graph_json, tensors)
+
+        expected = x.to(torch.float32).prod(dim=1, keepdim=True).to(torch.bfloat16)
+        assert tensors[2].dtype == torch.bfloat16
+        assert tensors[2] != x.prod(dim=1, keepdim=True)  # not naive bf16 accumulation
+        torch.testing.assert_close(tensors[2], expected)
+
     def test_resample_maxpool_matches_torch_and_indices(self) -> None:
         x = torch.arange(16, dtype=torch.float32).reshape(1, 1, 4, 4)
         graph_json = {
