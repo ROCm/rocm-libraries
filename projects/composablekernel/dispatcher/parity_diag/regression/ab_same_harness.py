@@ -18,12 +18,21 @@ old TE's own generated header and runs BOTH the bridge kernel and the old-TE
 kernel through the SAME worker (run_one_gemm_kernel.py). Measured this way the
 gap collapses to ~1%, which is the honest result.
 
+The old-TE generated-header directory is derived per stem as
+``<OLD_TE_GEN_BASE>/<dtype>/<layout>/`` (e.g. fp16/rcr, bf16/crr), so a single
+run covers every dtype/layout. Set OLD_TE_GEN to pin one explicit leaf dir for
+all stems (legacy behavior); set OLD_TE_GEN_BASE to relocate the base.
+
 Usage:
-  python3 ab_same_harness.py                 # default kernel list + shapes
-  python3 ab_same_harness.py <stem> [<stem>...]
+  python3 ab_same_harness.py                       # default kernel list + shapes
+  python3 ab_same_harness.py <stem> [<stem>...]    # explicit stems
+  python3 ab_same_harness.py --stems-file F [--csv OUT]   # sweep a stems file
 """
+import argparse
+import csv
 import json
 import os
+import statistics
 import subprocess
 import sys
 from pathlib import Path
@@ -36,13 +45,16 @@ SRC = DISP / "bindings" / "ctypes" / "gemm_ctypes_lib.cpp"
 STATIC = DISP / "build" / "libck_tile_dispatcher.a"
 BR_SO_DIR = DISP / "build" / "examples"
 WORKER = ROOT / "tile_engine/ops/gemm/run_one_gemm_kernel.py"
-# old-TE generated single-kernel headers. Override with OLD_TE_GEN; the default
-# points at a sibling develop-parity worktree under the rocm-libraries root.
-OLD_GEN = Path(os.environ.get(
-    "OLD_TE_GEN",
+# Base dir of old-TE generated single-kernel headers; the per-stem leaf
+# (<dtype>/<layout>) is appended in old_gen_dir(). Points at a sibling
+# develop-parity worktree under the rocm-libraries root by default.
+OLD_GEN_BASE = Path(os.environ.get(
+    "OLD_TE_GEN_BASE",
     str(ROOT.parents[1] / ".claude/worktrees/develop-parity"
-        "/projects/composablekernel/build/tile_engine/ops/gemm/gemm_universal/fp16/rcr"),
+        "/projects/composablekernel/build/tile_engine/ops/gemm/gemm_universal"),
 ))
+# Legacy explicit override: when set, this exact leaf dir is used for ALL stems.
+OLD_GEN_PIN = os.environ.get("OLD_TE_GEN")
 OUT = DISP / "parity_diag" / "regression" / "_ab_same_harness_build"
 ARCH = os.environ.get("GFX_ARCH", "gfx942")
 DEVICE = os.environ.get("PARITY_DEVICE", "0")
@@ -60,9 +72,23 @@ DEFAULT_STEMS = [
 PYPATH = os.pathsep.join([str(DISP / "python"), str(ROOT / "tile_engine/ops/gemm")])
 
 
+def old_gen_dir(stem: str) -> Path:
+    """Old-TE header dir for a stem: <base>/<dtype>/<layout> (or the pinned dir).
+
+    Stems are named ``<dtype>_<layout>_...`` (e.g. fp16_rcr_..., bf16_crr_...),
+    which is exactly the develop-parity gen-tree layout, so the leaf is derived
+    from the stem itself -- no per-layout hardcoding.
+    """
+    if OLD_GEN_PIN:
+        return Path(OLD_GEN_PIN)
+    parts = stem.split("_")
+    dtype, layout = parts[0], parts[1]
+    return OLD_GEN_BASE / dtype / layout
+
+
 def build_old_so(stem: str) -> Path | None:
     """Compile old TE's generated kernel header into a bridge-loadable .so."""
-    hdr = OLD_GEN / f"gemm_universal_single_{stem}.hpp"
+    hdr = old_gen_dir(stem) / f"gemm_universal_single_{stem}.hpp"
     if not hdr.exists():
         return None
     OUT.mkdir(parents=True, exist_ok=True)
@@ -86,6 +112,9 @@ def build_old_so(stem: str) -> Path | None:
 
 
 def meas(so: Path, M: int, N: int, K: int) -> float | None:
+    """Median TFLOPS over REPEATS worker calls (each call does its own
+    warmup=50/repeat=100 internally). Median, not max, to match the sweep
+    methodology and stay robust to the occasional clock-warmup outlier."""
     if not so or not Path(so).exists():
         return None
     payload = json.dumps({"so_path": str(so), "problem": {"M": M, "N": N, "K": K},
@@ -93,7 +122,7 @@ def meas(so: Path, M: int, N: int, K: int) -> float | None:
     env = os.environ.copy()
     env["HIP_VISIBLE_DEVICES"] = DEVICE
     env["GEMM_PYPATH"] = PYPATH
-    best = None
+    samples = []
     for _ in range(REPEATS):
         p = subprocess.run([sys.executable, str(WORKER)], input=payload.encode(),
                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env)
@@ -103,12 +132,74 @@ def meas(so: Path, M: int, N: int, K: int) -> float | None:
             except json.JSONDecodeError:
                 continue
             if d.get("ok"):
-                best = d["tflops"] if best is None else max(best, d["tflops"])
-    return best
+                samples.append(d["tflops"])
+    return statistics.median(samples) if samples else None
+
+
+def pipeline_of(stem: str) -> str:
+    for p in ("compv3", "compv4", "mem"):
+        if f"_{p}_" in stem:
+            return p
+    return "other"
 
 
 def main():
-    stems = sys.argv[1:] or DEFAULT_STEMS
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("stems", nargs="*", help="kernel stems to A/B")
+    ap.add_argument("--stems-file", help="file with one stem per line")
+    ap.add_argument("--csv", help="write results to CSV (resume-aware)")
+    args = ap.parse_args()
+
+    stems = list(args.stems)
+    if args.stems_file:
+        stems += [l.strip() for l in Path(args.stems_file).read_text().splitlines()
+                  if l.strip()]
+    stems = stems or DEFAULT_STEMS
+
+    # CSV sweep mode: same columns as the (now-corrected) sweep, resume-aware.
+    if args.csv:
+        fields = ["stem", "pipeline", "dtype", "layout", "shape",
+                  "bridge_tflops", "old_tflops", "gap_pct", "oldte_built"]
+        out = Path(args.csv)
+        done = set()
+        if out.exists():
+            with open(out) as f:
+                for row in csv.DictReader(f):
+                    done.add((row["stem"], row["shape"]))
+        mode = "a" if done else "w"
+        print(f"stems={len(stems)} shapes={len(SHAPES)} resume={len(done)} -> {out}",
+              flush=True)
+        with open(out, mode, newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=fields)
+            if mode == "w":
+                w.writeheader()
+            for stem in stems:
+                todo = [(M, N, K) for (M, N, K) in SHAPES
+                        if (stem, f"{M}x{N}x{K}") not in done]
+                if not todo:
+                    continue
+                parts = stem.split("_")
+                dtype, layout = parts[0], parts[1]
+                old_so = build_old_so(stem)
+                br_so = BR_SO_DIR / f"libgemm_{stem}.so"
+                for (M, N, K) in todo:
+                    shape = f"{M}x{N}x{K}"
+                    b = meas(br_so, M, N, K)
+                    o = meas(old_so, M, N, K) if old_so else None
+                    gap = (b - o) / o * 100 if (b and o) else float("nan")
+                    w.writerow(dict(
+                        stem=stem, pipeline=pipeline_of(stem), dtype=dtype,
+                        layout=layout, shape=shape,
+                        bridge_tflops=f"{b:.4f}" if b is not None else "nan",
+                        old_tflops=f"{o:.4f}" if o is not None else "nan",
+                        gap_pct=f"{gap:.4f}" if gap == gap else "nan",
+                        oldte_built=str(old_so is not None)))
+                    fh.flush()
+                print(f"  done {stem[:60]}", flush=True)
+        print(f"DONE -> {out}", flush=True)
+        return
+
+    # Pretty-print mode.
     print(f"{'shape':>14} {'bridge':>9} {'oldTE':>9} {'gap%':>7}  kernel")
     for stem in stems:
         old_so = build_old_so(stem)
