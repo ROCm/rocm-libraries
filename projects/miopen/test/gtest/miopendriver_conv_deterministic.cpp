@@ -57,11 +57,15 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, NoDeterministicLog)
     const auto tmp_dir = std::string{"/tmp/miopen_det_test_noflag"};
     miopen::fs::remove_all(tmp_dir);
 
-    testing::internal::CaptureStderr();
-    RunMIOpenDriverTestCommand({GetParam().base_args}, MakeEnv(tmp_dir));
-    const auto output = testing::internal::GetCapturedStderr();
-
-    EXPECT_THAT(output,
+    // MIOpenDriver runs as a subprocess; its stderr is redirected into ss via
+    // popen(... + " 2>&1"). CaptureStderr() only hooks the test process's own
+    // fd 2 and would always return "". Read ss.str() directly instead.
+    miopen::Process p{MIOpenDriverExePath().string()};
+    std::stringstream ss;
+    int rc = 0;
+    EXPECT_NO_THROW(rc = p(GetParam().base_args, "", &ss, MakeEnv(tmp_dir)));
+    EXPECT_EQ(rc, 0);
+    EXPECT_THAT(ss.str(),
                 Not(testing::HasSubstr("Restricting convolution to deterministic kernels.")));
 
     miopen::fs::remove_all(tmp_dir);
@@ -76,11 +80,12 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, RunsSuccessfullyAndLogsOverri
     const auto tmp_dir = std::string{"/tmp/miopen_det_test_enabled"};
     miopen::fs::remove_all(tmp_dir);
 
-    testing::internal::CaptureStderr();
-    RunMIOpenDriverTestCommand({GetParam().valid_args}, MakeEnv(tmp_dir));
-    const auto output = testing::internal::GetCapturedStderr();
-
-    EXPECT_THAT(output, testing::HasSubstr("Restricting convolution to deterministic kernels."));
+    miopen::Process p{MIOpenDriverExePath().string()};
+    std::stringstream ss;
+    int rc = 0;
+    EXPECT_NO_THROW(rc = p(GetParam().valid_args, "", &ss, MakeEnv(tmp_dir)));
+    EXPECT_EQ(rc, 0);
+    EXPECT_THAT(ss.str(), testing::HasSubstr("Restricting convolution to deterministic kernels."));
 
     miopen::fs::remove_all(tmp_dir);
 }
