@@ -71,8 +71,7 @@ class TestGetExpectedTypes:
         assert _expectedParamTypes == fresh
 
     def test_streamk_valid_modes_exclude_removed_modes(self):
-        """Stream-K modes 1 and 2 should stay rejected at parameter validation."""
-        assert validParameters["StreamK"] == [0, 3, 4]
+        assert validParameters["StreamK"] == [0, 3, 4, 5]
 
 
 class TestValidateParameterTypes:

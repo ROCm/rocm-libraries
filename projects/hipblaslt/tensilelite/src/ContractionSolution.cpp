@@ -761,6 +761,13 @@ namespace TensileLite
                                          "use StreamK=3, 4, or 5");
             }
 
+            if(gsu > 1)
+            {
+                std::cerr << "Warning: Stream-K Data Parallel does not support GSU > 1, "
+                          << "setting GSU to 1." << std::endl;
+                gsu = 1;
+            }
+
             // Dynamic Stream-K uses a different kernel argument layout from Stream-K 3.
             if(sizeMapping.streamK == 4)
             {
@@ -917,13 +924,6 @@ namespace TensileLite
                 }
 
                 // Stream-K 3 uses the two-tile ABI.
-                if(sk.reduction == origami::reduction_t::parallel)
-                {
-                    std::cerr << "Warning: Stream-K Data Parallel does not support GSU > 1, "
-                              << "setting GSU to 1." << std::endl;
-                    gsu = 1;
-                }
-
                 if(sk.reduction == origami::reduction_t::parallel)
                 {
                     uint32_t skSplit
