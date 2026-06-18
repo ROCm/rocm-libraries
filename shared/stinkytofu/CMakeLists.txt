@@ -200,6 +200,8 @@ set(STINKYTOFU_PUBLIC_INCLUDE_DIRS
 # stinkytofu targets and the test-only stinkytofu_static target all reuse
 # these object files, avoiding redundant compilation.
 add_library(stinkytofu_objs OBJECT ${STINKYTOFU_GENERATED_SOURCES})
+# OBJECT libraries don't inherit -fPIC from their consumers on Linux; set it explicitly.
+set_property(TARGET stinkytofu_objs PROPERTY POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(stinkytofu_objs PRIVATE ${STINKYTOFU_PRIVATE_LINK_LIBS})
 # CMake auto-defines <target>_EXPORTS for SHARED/STATIC targets but not for
 # OBJECT libraries. Explicitly define stinkytofu_EXPORTS so STINKYTOFU_EXPORT
