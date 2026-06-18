@@ -217,10 +217,6 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_bsrpad_value.cpp
 )
 
-if(BUILD_WITH_ILDLT0)
-  list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_spildlt0.cpp)
-endif()
-
 add_executable(rocsparse-bench ${ROCSPARSE_BENCHMARK_SOURCES} ${ROCSPARSE_CLIENTS_COMMON} ${ROCSPARSE_CLIENTS_TESTINGS})
 
 # Target compile options

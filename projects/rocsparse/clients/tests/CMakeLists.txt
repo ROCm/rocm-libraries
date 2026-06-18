@@ -234,10 +234,6 @@ if(BUILD_ROCSPARSE_DEBUGGING)
     )
 endif()
 
-if(BUILD_WITH_ILDLT0)
-  list(APPEND ROCSPARSE_TEST_SOURCES test_spildlt0.cpp)
-endif()
-
 set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_axpby.cpp
 ../testings/testing_axpyi.cpp
@@ -388,10 +384,6 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_bsrpad_value.cpp
 rocsparse_test_listeners.cpp
   )
-
-if(BUILD_WITH_ILDLT0)
-  list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_spildlt0.cpp)
-endif()
 
 
 

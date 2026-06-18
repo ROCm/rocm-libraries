@@ -25,13 +25,6 @@
 #include "rocsparse_arguments.hpp"
 
 // clang-format off
-#ifdef ROCSPARSE_WITH_ILDLT0
-#define ROCSPARSE_FOREACH_ROUTINE_ILDLT0    \
-ROCSPARSE_DO_ROUTINE(spildlt0)
-#else
-#define ROCSPARSE_FOREACH_ROUTINE_ILDLT0
-#endif
-
 #define ROCSPARSE_FOREACH_ROUTINE			\
 ROCSPARSE_DO_ROUTINE(axpyi)						\
 ROCSPARSE_DO_ROUTINE(bellmm)						\
@@ -86,7 +79,6 @@ ROCSPARSE_DO_ROUTINE(csrsv)					\
 ROCSPARSE_DO_ROUTINE(csritsv)					\
 ROCSPARSE_DO_ROUTINE(spitsv_csr)				\
 ROCSPARSE_DO_ROUTINE(spic0)				\
-ROCSPARSE_FOREACH_ROUTINE_ILDLT0			\
 ROCSPARSE_DO_ROUTINE(spilu0)				\
 ROCSPARSE_DO_ROUTINE(sptrsv)				\
 ROCSPARSE_DO_ROUTINE(csr2dense)					\
