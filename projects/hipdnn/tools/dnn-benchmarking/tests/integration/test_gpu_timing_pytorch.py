@@ -1,7 +1,11 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Integration tests for PyTorch executor timing with direct HIP events."""
+"""Integration tests for PyTorch executor timing with direct HIP events.
+
+ROCm-specific: asserts the executor selects the direct HIP event timing
+backend. The CUDA counterpart lives in test_gpu_timing_cuda.py.
+"""
 
 from pathlib import Path
 
@@ -11,34 +15,14 @@ from dnn_benchmarking.config.benchmark_config import BenchmarkConfig
 from dnn_benchmarking.execution.pytorch_buffer_manager import PyTorchCudaBufferManager
 from dnn_benchmarking.execution.pytorch_executor import PyTorchCudaExecutor
 from dnn_benchmarking.graph.loader import GraphLoader
+from tests.conftest import skip_if_no_rocm_torch
 
-pytestmark = [pytest.mark.gpu, pytest.mark.amd]
-
-
-def _skip_if_no_rocm_torch() -> None:
-    try:
-        import torch
-    except ImportError:
-        pytest.skip("PyTorch not available")
-
-    if not torch.cuda.is_available():
-        pytest.skip("PyTorch GPU not available")
-
-    if torch.version.hip is None:
-        pytest.skip("ROCm PyTorch build required for direct HIP timing")
-
-    try:
-        import hipdnn_frontend as hipdnn
-
-        if hipdnn.hip_get_device_count() <= 0:
-            pytest.skip("No HIP GPU available")
-    except Exception as e:
-        pytest.skip(f"hipdnn_frontend HIP bindings not available: {e}")
+pytestmark = [pytest.mark.gpu, pytest.mark.rocm]
 
 
 def test_pytorch_gpu_timing_rocm() -> None:
     """Validate PyTorch executor E2E and kernel timings with HIP events."""
-    _skip_if_no_rocm_torch()
+    skip_if_no_rocm_torch()
 
     graph_path = Path(__file__).parent.parent.parent / "graphs" / "sample_conv_fwd.json"
     if not graph_path.exists():

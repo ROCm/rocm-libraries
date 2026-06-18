@@ -12,6 +12,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Removed
 ### Optimized
 ### Resolved issues
+* Fixed an invalid kernel launch in the small-matrix LU factorization (GETF2/GETRF) for large batch counts.
 ### Known issues
 ### Upcoming changes
 

@@ -457,8 +457,9 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
       module.add(VAndB32(dst=vgpr(waveId), src0=hex(wgM - 1), src1=vgpr(waveId), comment="waveIdM = waveId %% %d" % wgM))
     elif tc == 'B' and wgM > 1:
       module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(wgM.bit_length()-1), src=vgpr(waveId), comment="waveIdN = waveId / %d" % wgM))
-    # LDS offset per wave = waveId_axis * (mt / numWavesThisAxis * du * bpe)
-    ldsPerWave = int(mt // numWavesThisAxis * du * bpe)
+    # LDS offset per wave = waveId_axis * (mt / numWavesThisAxis * (du*bpe + pad))
+    rowBytes = int(du * bpe) + int(getattr(tileInfo, "ldsRowPadBytes", 0))
+    ldsPerWave = int(mt // numWavesThisAxis) * rowBytes
     tmpSgpr = writer.sgprPool.checkOut(1)
     module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(ldsPerWave), comment="LDS bytes per wave for %s" % tc))
     module.add(VMulLOU32(dst=vgpr(waveId), src1=vgpr(waveId), src0=sgpr(tmpSgpr), comment="waveOffset"))
@@ -596,6 +597,8 @@ def _lraTileAssignment_legacy(writer, kernel):
   ldsRowBankSize = writer.states.archCaps["LDSBankCount"] * writer.states.archCaps["LDSBankWidth"]
   # With LDS swizzling (gfx950), K-row is one subtile group; without, full DepthU.
   ldsKBytes = subIterKBytes if writer.states.subtileLdsSwizzle else tileInfoA.depthUBytes
+  padBytes = int(getattr(tileInfoA, "ldsRowPadBytes", 0))
+  ldsRowStride = ldsKBytes + padBytes
   numRowsPerLDSBanks = ldsRowBankSize // ldsKBytes
   blockSize = ldsKBytes // loadWidth
   tmpVgpr = writer.vgprPool.checkOut(6, tag="_lraTileAssignment_legacy_tmpVgpr")
@@ -615,7 +618,14 @@ def _lraTileAssignment_legacy(writer, kernel):
   module.add(VAndB32(dst=vgpr(colOffset), src0=vgpr(colOffset), src1=hex(blockSize-1), comment="colOffset = colOffset %% blockSize"))
   # Without swizzling, the LDS M-row stride is depthUBytes (contiguous K row).
   # With swizzling, GR writes individual subtile K-groups, so subIterKBytes applies.
-  module.add(VLShiftLeftB32(dst=vgpr(rowOffset), shiftHex=hex(ldsKBytes.bit_length()-1), src=vgpr(lane16), comment="offsetRow = %d*lane16" % ldsKBytes))
+  # TDM pad adds 16B per row, breaking pow2; fall back to VMul when padded.
+  if padBytes == 0:
+    module.add(VLShiftLeftB32(dst=vgpr(rowOffset), shiftHex=hex(ldsRowStride.bit_length()-1), src=vgpr(lane16), comment="offsetRow = %d*lane16" % ldsRowStride))
+  else:
+    rowStrideSgpr = writer.sgprPool.checkOut(1)
+    module.add(SMovB32(dst=sgpr(rowStrideSgpr), src=hex(ldsRowStride), comment="LDS row stride (incl 16B TDM pad)"))
+    module.add(VMulLOU32(dst=vgpr(rowOffset), src0=sgpr(rowStrideSgpr), src1=vgpr(lane16), comment="offsetRow = %d*lane16" % ldsRowStride))
+    writer.sgprPool.checkIn(rowStrideSgpr)
   _computeLROffset(module, tileInfoA, colOffset, rowOffset, writer.states.subtileLdsSwizzle)
   _computeLROffset(module, tileInfoB, colOffset, rowOffset, writer.states.subtileLdsSwizzle)
   writer.vgprPool.checkIn(tmpVgpr)
@@ -669,7 +679,10 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
     subtileShapeM = int(tileInfo.subtileShape[0])
     subtileShapeK = int(tileInfo.subtileShape[1])
     depthUBytes = int(tileInfo.depthUBytes)
-    offsetStride = subtileShapeM * instM * depthUBytes
+    # Add padding
+    rowPadBytes = getattr(tileInfo, "ldsRowPadBytes", 0)
+    rowStride = depthUBytes + rowPadBytes
+    offsetStride = subtileShapeM * instM * rowStride
     offset = sId0 * offsetStride + sId1 * subtileShapeK * instK * int(tileInfo.bpe)
 
   dstVgpr = dstTile.regList.indices[0]

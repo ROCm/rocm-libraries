@@ -89,6 +89,21 @@ Tests:
   transB: N
   fortran: [ false, true ]
 
+# Added this test to mimic the rocblas test quick_gemm_batched_bad_arg_f32_r_bad_arg_F 
+# which passes alpha, A and B as 0 but beta as non-zero with valid C and D.
+- name: matmul_general_batch_bad_arg
+  category: pre_checkin
+  function:
+    - matmul_mul: *real_precisions
+  transA: N
+  transB: N
+  batch_count: 3
+  batch_mode: 1
+  alpha: 0
+  beta: 1
+  matrix_size:
+    - { M:  128,  N:  128,  K:  0  }
+
 # Tests confirm no NaN propagation when alpha = 0, 2 and beta = 0. Value .NaN is converted into zero
 - {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *real_precisions,
    function: matmul, transA: N, transB: N, M: 256, N: 128, K:  64, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }

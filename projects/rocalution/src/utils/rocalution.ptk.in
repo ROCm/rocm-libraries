@@ -1,0 +1,14 @@
+<rocalution.pc>
+prefix=${CMAKE_BINARY_DIR}
+exec_prefix=${CMAKE_BINARY_DIR}
+libdir=${LIB_BUILD_DIR}
+includedir=${INC_BUILD_DIR}
+
+Name: librocalution
+Description: rocALUTION
+Version: ${rocALUTION_VERSION}
+Requires:
+Libs: -L${LIB_BUILD_DIR} -lrocalution
+Libs.private:
+Cflags: -I${INC_BUILD_DIR}
+</rocalution.pc>
