@@ -22,6 +22,11 @@ Documentation for rocRAND is available at
 * gfx1150,gfx1152 and gfx1153 support
 * rocrand.dll now contains embedded file version metadata.
 
+### Changed
+
+* Device API benchmark now utilize vectorized distributions if available.
+  * For example, philox will now be benchmarked via `rocrand4(...)` instead of `rocrand(...)`.
+
 ### Resolved Issues
 
 * Fixed memory leak in unit tests.
