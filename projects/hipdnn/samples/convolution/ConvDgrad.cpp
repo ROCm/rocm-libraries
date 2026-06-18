@@ -63,6 +63,8 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     convAttributes.set_dilation({DIL_H, DIL_W});
 
     auto dxAttr = graph->conv_dgrad(dyAttr, wAttr, convAttributes);
+    // dx dimensions must be set explicitly; they match the original forward input x.
+    dxAttr->set_dim({N, C, H, W});
     dxAttr->set_output(true);
 
     HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));

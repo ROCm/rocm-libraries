@@ -113,6 +113,9 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     convBwdAttrs.set_convolution_mode(hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION);
 
     auto dxTensorAttr = graph->conv_dgrad(dyTensorAttr, wTensorAttr, convBwdAttrs);
+    // dx dimensions must be set explicitly; use the bundle's dx tensor, which is the
+    // original forward input shape the test was constructed with.
+    dxTensorAttr->set_dim(tensorBundle.dxTensor.dims());
 
     if(!dxTensorAttr->has_uid())
     {

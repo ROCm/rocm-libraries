@@ -1323,6 +1323,10 @@ TEST_F(TestGraph, ConvolutionDgradNodeCreation)
 
     auto dx = graph.conv_dgrad(dy, w, attributes);
 
+    // dx dimensions must be set explicitly; they are no longer inferred from
+    // dy and w. in = 1*(32-1) + 3 - 1 - 1 = 32 for each spatial dimension.
+    dx->set_dim({1, 3, 32, 32});
+
     EXPECT_EQ(dx->get_name(), "ConvolutionDgradNode::DX");
     EXPECT_TRUE(dx->get_is_virtual());
 

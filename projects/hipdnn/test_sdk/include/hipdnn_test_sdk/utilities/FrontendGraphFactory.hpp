@@ -155,6 +155,8 @@ public:
             {1, 1});
 
         auto dxAttr = graphObj.conv_dgrad(dyTensorAttr, wTensorAttr, convAttrs);
+        // dx dimensions must be set explicitly; they match the original forward input x.
+        dxAttr->set_dim({1, 16, 16, 16});
         dxAttr->set_output(true);
 
         return graphObj;

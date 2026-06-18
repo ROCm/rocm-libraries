@@ -3272,13 +3272,16 @@ public:
      * @param w Filter/weight tensor
      * @param attributes Convolution parameters: padding, stride, dilation
      *        (must match forward pass)
-     * @return dx: Gradient w.r.t. input (same shape as forward input)
+     * @return dx: Gradient w.r.t. input. Its dimensions are NOT inferred and
+     *         MUST be set explicitly by the caller (via `set_dim` on the
+     *         returned tensor) to match the original forward input `x`.
      *
-     * @note If `dx` dimensions are not provided, the channel count is
-     *       inferred assuming `groups = 1`. For grouped convolutions,
-     *       set dimensions on the returned `dx` tensor before graph
-     *       validation/finalization to avoid an incorrect channel count
-     *       on the inferred input-gradient tensor.
+     * @note `dx` dimensions cannot be inferred from `dy` and `w`: the forward
+     *       pass uses floor division, so under stride > 1 multiple input
+     *       spatial sizes map to the same output, and the group count is not
+     *       recoverable. Set the returned `dx` tensor's dimensions explicitly
+     *       (to the original forward input shape) before graph
+     *       validation/finalization; otherwise validation fails.
      *
      * @see hipdnn_frontend::graph::ConvDgradAttributes
      */

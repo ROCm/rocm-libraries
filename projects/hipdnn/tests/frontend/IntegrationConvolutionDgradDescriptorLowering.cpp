@@ -82,6 +82,8 @@ TEST_F(IntegrationConvolutionDgradDescriptorLowering, ConvDgradGraphRoundTrip)
     convAttrs.set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
 
     auto dx = graph->conv_dgrad(dy, w, convAttrs);
+    // dx dimensions must be set explicitly; they match the forward input x shape.
+    dx->set_dim(toVec(K_DGRAD_TENSOR_DX_DIMS));
     dx->set_uid(K_DGRAD_TENSOR_DX_UID).set_output(true).set_name("DX");
 
     auto graphT = lowerAndDeserialize(*graph, _handle);
@@ -163,7 +165,15 @@ TEST_F(IntegrationConvolutionDgradDescriptorLowering, AutoAssignedUidsPreservedI
     convAttrs.set_stride(toVec(K_AUTO_STRIDE));
     convAttrs.set_dilation(toVec(K_AUTO_DILATION));
 
+    // Forward input x shape for dy={1,16,6,6}, w={16,3,3,3}, pad 0, stride 1,
+    // dilation 1 (groups=1):
+    //   in_i = stride*(out_i - 1) - pre_pad - post_pad + dilation*(kernel - 1) + 1
+    //   H = 5 - 0 - 0 + 2 + 1 = 8,  W = 8
+    constexpr std::array<int64_t, 4> K_AUTO_DX_DIMS = {1, 3, 8, 8};
+
     auto dx = graph->conv_dgrad(dy, w, convAttrs);
+    // dx dimensions must be set explicitly; they match the forward input x shape.
+    dx->set_dim(toVec(K_AUTO_DX_DIMS));
     dx->set_output(true);
 
     auto graphT = lowerAndDeserialize(*graph, _handle);

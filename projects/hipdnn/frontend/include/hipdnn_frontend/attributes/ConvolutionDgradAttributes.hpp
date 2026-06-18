@@ -29,10 +29,14 @@ namespace hipdnn_frontend::graph
  * the convolution with respect to the input data (dgrad operation):
  * dx = conv_bwd(dy, w)
  *
+ * The returned dx tensor's dimensions are not inferred and must be set
+ * explicitly to match the original forward input x.
+ *
  * @code{.cpp}
  * auto dx = graph.conv_dgrad(dy, w, ConvDgradAttributes()
  *              .set_padding({1, 1})
  *              .set_stride({1, 1}));
+ * dx->set_dim({N, C, H, W}); // forward input shape; required for dgrad
  * @endcode
  *
  * @see Graph::conv_dgrad(), ConvFpropAttributes, ConvWgradAttributes

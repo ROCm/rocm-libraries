@@ -59,6 +59,8 @@ protected:
         attrs.set_dilation(toVec(K_DGRAD_CONV_DILATION));
 
         auto dx = graph->conv_dgrad(dy, w, attrs);
+        // dx dimensions must be set explicitly; they match the forward input x shape.
+        dx->set_dim(toVec(K_DGRAD_TENSOR_DX_DIMS));
         dx->set_uid(K_DGRAD_TENSOR_DX_UID).set_output(true).set_name("dx");
 
         return graph;
@@ -244,7 +246,13 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, AutoAssignedUidsPreservedInLi
     convAttrs.set_dilation({1, 1});
     convAttrs.set_convolution_mode(ConvolutionMode::CONVOLUTION);
 
+    // Forward input x shape for dy={1,64,32,32}, w={64,3,3,3}, pad 1, stride 1,
+    // dilation 1 (groups=1): {1, 3, 32, 32}.
+    constexpr std::array<int64_t, 4> K_AUTO_DX_DIMS = {1, 3, 32, 32};
+
     auto dx = graph->conv_dgrad(dy, w, convAttrs);
+    // dx dimensions must be set explicitly; they match the forward input x shape.
+    dx->set_dim(toVec(K_AUTO_DX_DIMS));
     dx->set_output(true).set_name("dx");
 
     auto liftedGraph = liftGraph(*graph, _handle);
@@ -315,7 +323,15 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, AsymmetricPaddingPreservedInL
     convAttrs.set_dilation({1, 1});
     convAttrs.set_convolution_mode(ConvolutionMode::CONVOLUTION);
 
+    // Forward input x shape for dy={1,64,32,32}, w={64,3,3,3}, pre_pad={1,0},
+    // post_pad={0,1}, stride 1, dilation 1 (groups=1):
+    //   in_i = stride*(out_i - 1) - pre_pad - post_pad + dilation*(kernel - 1) + 1
+    //   H = 31 - 1 - 0 + 2 + 1 = 33,  W = 31 - 0 - 1 + 2 + 1 = 33
+    constexpr std::array<int64_t, 4> K_ASYM_DX_DIMS = {1, 3, 33, 33};
+
     auto dx = graph->conv_dgrad(dy, w, convAttrs);
+    // dx dimensions must be set explicitly; they match the forward input x shape.
+    dx->set_dim(toVec(K_ASYM_DX_DIMS));
     dx->set_uid(K_DGRAD_TENSOR_DX_UID).set_output(true).set_name("dx");
 
     auto liftedGraph = liftGraph(*graph, _handle);

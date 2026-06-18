@@ -179,6 +179,9 @@ protected:
 
         // Create the convolution backward data operation
         tensors.dx = graph->conv_dgrad(tensors.dy, tensors.w, convAttrs);
+        // dx dimensions must be set explicitly; they match the bundle's dx tensor,
+        // i.e. the original forward input shape.
+        tensors.dx->set_dim(tensorBundle.dxTensor.dims());
 
         if(useManualUids)
         {
