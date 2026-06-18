@@ -195,3 +195,39 @@ TEST(TestTensorAttributes, ValidateDataType)
         EXPECT_EQ(result.code, errorCode) << "For " + std::string(to_string(dataType));
     }
 }
+
+TEST(TestAttributes, TensorLogicalAndStrictEquality)
+{
+    auto tensorA = TensorAttributes()
+                       .set_dim({1, 64, 28, 28})
+                       .set_stride({50176, 784, 28, 1})
+                       .set_data_type(DataType::HALF)
+                       .set_name("Tensor_A");
+
+    auto tensorB = TensorAttributes()
+                       .set_dim({1, 64, 28, 28})
+                       .set_stride({50176, 784, 28, 1})
+                       .set_data_type(DataType::HALF)
+                       .set_name("Tensor_B");
+
+    EXPECT_TRUE(tensorA.LogicallyEquals(tensorB));
+    EXPECT_TRUE(tensorB.LogicallyEquals(tensorA));
+
+    EXPECT_FALSE(tensorA == tensorB);
+    EXPECT_TRUE(tensorA != tensorB);
+
+    tensorB.set_name("Tensor_A");
+    EXPECT_TRUE(tensorA == tensorB);
+    EXPECT_FALSE(tensorA != tensorB);
+
+    tensorB.set_is_virtual(true);
+    EXPECT_FALSE(tensorA.LogicallyEquals(tensorB));
+    EXPECT_FALSE(tensorA == tensorB);
+
+    TensorAttributes scalarA(2.5f);
+    TensorAttributes scalarB(2.5f);
+    TensorAttributes scalarC(3.5f);
+
+    EXPECT_TRUE(scalarA.LogicallyEquals(scalarB));
+    EXPECT_FALSE(scalarA.LogicallyEquals(scalarC));
+}
