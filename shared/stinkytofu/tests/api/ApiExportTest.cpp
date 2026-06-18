@@ -34,6 +34,7 @@
 
 #include <array>
 #include <memory>
+#include <sstream>
 #include <string>
 
 // --- rocisa consumer headers ---

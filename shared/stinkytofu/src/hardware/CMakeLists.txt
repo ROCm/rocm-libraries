@@ -1,4 +1,4 @@
-﻿# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
 # GfxXXX.hpp are generated in build/hardware/arch_headers/ by hardware/CMakeLists.txt
