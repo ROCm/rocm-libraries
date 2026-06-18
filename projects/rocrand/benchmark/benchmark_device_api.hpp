@@ -110,7 +110,7 @@ constexpr int get_vectorization()
     }
 
     // Philox4x supports all vectorized distrubutions.
-    constexpr bool is_philox4x32_10 = std::is_same_v<EngineState, rocrand_state_philox4x32_10>;
+    constexpr bool is_philox4x32_10 = std::is_same_v<EngineState, rand_state_philox4x32_10_t>;
     if constexpr(is_philox4x32_10)
     {
         return 4;
@@ -122,6 +122,7 @@ constexpr int get_vectorization()
         return 2;
     }
 
+#ifdef __HIP__
     constexpr bool is_threefry2x32_20 = std::is_same_v<EngineState, rocrand_state_threefry2x32_20>;
     constexpr bool is_threefry2x64_20 = std::is_same_v<EngineState, rocrand_state_threefry2x64_20>;
     constexpr bool is_threefry4x32_20 = std::is_same_v<EngineState, rocrand_state_threefry4x32_20>;
@@ -140,6 +141,7 @@ constexpr int get_vectorization()
             return 2;
         }
     }
+#endif
 
     // All other generators and distributions have no vectorization!
     return 1;
@@ -155,7 +157,6 @@ template<typename Generator, typename T, typename EngineState>
 struct unrolled
 {
     /// Number of elements in generated vector.
-    __device__
     static constexpr int n
         = Generator::n;
 
