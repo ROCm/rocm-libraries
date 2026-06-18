@@ -12,6 +12,7 @@
 
 #include "HipblasltMatmulDesc.hpp"
 #include "HipblasltMatrixLayout.hpp"
+#include "HipblasltMatrixTransformDesc.hpp"
 #include "PlanInterface.hpp"
 
 namespace hipblaslt_plugin
@@ -44,6 +45,11 @@ public:
     int64_t aScaleUid() const;
     int64_t bScaleUid() const;
 
+    // Logical GEMM M and the number of 32-wide K blocks (K / 32). Used to
+    // transpose scale_A from [M, K/32] to [K/32, M] for hipBLASLt's B_SCALE.
+    int64_t m() const;
+    int64_t kBlocks() const;
+
 private:
     HipblasltMatmulDesc _matmulDesc;
     HipblasltMatrixLayout _matrixLayoutA;
@@ -51,6 +57,8 @@ private:
     HipblasltMatrixLayout _matrixLayoutC;
     int64_t _aScaleUid;
     int64_t _bScaleUid;
+    int64_t _m;
+    int64_t _kBlocks;
 };
 
 class MxMatmulPlan : public IPlan
@@ -75,7 +83,17 @@ public:
 private:
     mutable MxMatmulParams _params;
     hipblasLtMatmulHeuristicResult_t _heuristicResult;
+
+    // hipBLASLt matmul workspace size (from the heuristic).
     size_t _workspaceSize = 0;
+
+    // Aligned front region of the workspace reserved for the transposed scale_A.
+    size_t _scaleBufferBytes = 0;
+
+    // Prebuilt descriptors for the on-device scale_A transpose (fed as B_SCALE).
+    HipblasltMatrixTransformDesc _scaleTransposeDesc;
+    HipblasltMatrixLayout _scaleSrcLayout;
+    HipblasltMatrixLayout _scaleDstLayout;
 
     static constexpr float ALPHA = 1.f;
     static constexpr float BETA = 0.f;
