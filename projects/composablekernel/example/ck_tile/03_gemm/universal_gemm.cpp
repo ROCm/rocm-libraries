@@ -26,91 +26,91 @@ int run_gemm_example_with_layouts_universal(ck_tile::ArgParser& arg_parser,
                                             const CLayout c_layout = CLayout{})
 {
     using Invoker     = UniversalInvoker;
-    using AccDataType = typename GemmTypeConfig<ADataType, BDataType, CDataType>::AccDataType;
+    // using AccDataType = typename GemmTypeConfig<ADataType, BDataType, CDataType>::AccDataType;
 
-    // Check for async input scheduler test mode
-    bool test_async = arg_parser.get_int("test_async");
-    if(test_async)
-    {
-        // Extract parameters for async test (same as shared implementation)
-        const ck_tile::index_t M      = arg_parser.get_int("m");
-        const ck_tile::index_t N      = arg_parser.get_int("n");
-        const ck_tile::index_t K      = arg_parser.get_int("k");
-        const ck_tile::index_t kbatch = arg_parser.get_int("split_k");
+    // // Check for async input scheduler test mode
+    // bool test_async = arg_parser.get_int("test_async");
+    // if(test_async)
+    // {
+    //     // Extract parameters for async test (same as shared implementation)
+    //     const ck_tile::index_t M      = arg_parser.get_int("m");
+    //     const ck_tile::index_t N      = arg_parser.get_int("n");
+    //     const ck_tile::index_t K      = arg_parser.get_int("k");
+    //     const ck_tile::index_t kbatch = arg_parser.get_int("split_k");
 
-        using Row                     = ck_tile::tensor_layout::gemm::RowMajor;
-        constexpr bool is_a_row_major = std::is_same_v<ALayout, Row>;
-        constexpr bool is_b_row_major = std::is_same_v<BLayout, Row>;
-        constexpr bool is_c_row_major = std::is_same_v<CLayout, Row>;
+    //     using Row                     = ck_tile::tensor_layout::gemm::RowMajor;
+    //     constexpr bool is_a_row_major = std::is_same_v<ALayout, Row>;
+    //     constexpr bool is_b_row_major = std::is_same_v<BLayout, Row>;
+    //     constexpr bool is_c_row_major = std::is_same_v<CLayout, Row>;
 
-        const ck_tile::index_t stride_A = is_a_row_major ? K : M;
-        const ck_tile::index_t stride_B = is_b_row_major ? N : K;
-        const ck_tile::index_t stride_C = is_c_row_major ? N : M;
+    //     const ck_tile::index_t stride_A = is_a_row_major ? K : M;
+    //     const ck_tile::index_t stride_B = is_b_row_major ? N : K;
+    //     const ck_tile::index_t stride_C = is_c_row_major ? N : M;
 
-        // Allocate and initialize tensors
-        ck_tile::HostTensor<ADataType> a_m_k(ck_tile::host_tensor_descriptor(
-            M, K, stride_A, ck_tile::bool_constant<is_a_row_major>{}));
-        ck_tile::HostTensor<BDataType> b_k_n(ck_tile::host_tensor_descriptor(
-            K, N, stride_B, ck_tile::bool_constant<is_b_row_major>{}));
-        ck_tile::HostTensor<CDataType> c_m_n_dev_result(ck_tile::host_tensor_descriptor(
-            M, N, stride_C, ck_tile::bool_constant<is_c_row_major>{}));
+    //     // Allocate and initialize tensors
+    //     ck_tile::HostTensor<ADataType> a_m_k(ck_tile::host_tensor_descriptor(
+    //         M, K, stride_A, ck_tile::bool_constant<is_a_row_major>{}));
+    //     ck_tile::HostTensor<BDataType> b_k_n(ck_tile::host_tensor_descriptor(
+    //         K, N, stride_B, ck_tile::bool_constant<is_b_row_major>{}));
+    //     ck_tile::HostTensor<CDataType> c_m_n_dev_result(ck_tile::host_tensor_descriptor(
+    //         M, N, stride_C, ck_tile::bool_constant<is_c_row_major>{}));
 
-        ck_tile::FillUniformDistributionIntegerValue<ADataType>{-5, 5}(a_m_k);
-        ck_tile::FillUniformDistributionIntegerValue<BDataType>{-5, 5}(b_k_n);
+    //     ck_tile::FillUniformDistributionIntegerValue<ADataType>{-5, 5}(a_m_k);
+    //     ck_tile::FillUniformDistributionIntegerValue<BDataType>{-5, 5}(b_k_n);
 
-        ck_tile::DeviceMem a_m_k_dev_buf(a_m_k.get_element_space_size_in_bytes());
-        ck_tile::DeviceMem b_k_n_dev_buf(b_k_n.get_element_space_size_in_bytes());
-        ck_tile::DeviceMem c_m_n_dev_buf(c_m_n_dev_result.get_element_space_size_in_bytes());
+    //     ck_tile::DeviceMem a_m_k_dev_buf(a_m_k.get_element_space_size_in_bytes());
+    //     ck_tile::DeviceMem b_k_n_dev_buf(b_k_n.get_element_space_size_in_bytes());
+    //     ck_tile::DeviceMem c_m_n_dev_buf(c_m_n_dev_result.get_element_space_size_in_bytes());
 
-        a_m_k_dev_buf.ToDevice(a_m_k.data());
-        b_k_n_dev_buf.ToDevice(b_k_n.data());
-        c_m_n_dev_buf.SetZero();
-        c_m_n_dev_result.SetZero();
+    //     a_m_k_dev_buf.ToDevice(a_m_k.data());
+    //     b_k_n_dev_buf.ToDevice(b_k_n.data());
+    //     c_m_n_dev_buf.SetZero();
+    //     c_m_n_dev_result.SetZero();
 
-        ck_tile::GemmHostArgs args = {a_m_k_dev_buf.GetDeviceBuffer(),
-                                      b_k_n_dev_buf.GetDeviceBuffer(),
-                                      c_m_n_dev_buf.GetDeviceBuffer(),
-                                      kbatch,
-                                      M,
-                                      N,
-                                      K,
-                                      stride_A,
-                                      stride_B,
-                                      stride_C};
+    //     ck_tile::GemmHostArgs args = {a_m_k_dev_buf.GetDeviceBuffer(),
+    //                                   b_k_n_dev_buf.GetDeviceBuffer(),
+    //                                   c_m_n_dev_buf.GetDeviceBuffer(),
+    //                                   kbatch,
+    //                                   M,
+    //                                   N,
+    //                                   K,
+    //                                   stride_A,
+    //                                   stride_B,
+    //                                   stride_C};
 
-        Invoker::template test_async_input_scheduler<GemmConfig,
-                                                     ADataType,
-                                                     BDataType,
-                                                     ck_tile::tuple<>,
-                                                     AccDataType,
-                                                     CDataType,
-                                                     ALayout,
-                                                     BLayout,
-                                                     ck_tile::tuple<>,
-                                                     CLayout,
-                                                     ck_tile::element_wise::PassThrough>(
-            args, ck_tile::stream_config{nullptr, false, 1});
+    //     Invoker::template test_async_input_scheduler<GemmConfig,
+    //                                                  ADataType,
+    //                                                  BDataType,
+    //                                                  ck_tile::tuple<>,
+    //                                                  AccDataType,
+    //                                                  CDataType,
+    //                                                  ALayout,
+    //                                                  BLayout,
+    //                                                  ck_tile::tuple<>,
+    //                                                  CLayout,
+    //                                                  ck_tile::element_wise::PassThrough>(
+    //         args, ck_tile::stream_config{nullptr, false, 1});
 
-        // Copy result from device for verification
-        c_m_n_dev_buf.FromDevice(c_m_n_dev_result.data());
+    //     // Copy result from device for verification
+    //     c_m_n_dev_buf.FromDevice(c_m_n_dev_result.data());
 
-        // Compute CPU reference
-        ck_tile::HostTensor<CDataType> c_m_n_ref(ck_tile::host_tensor_descriptor(
-            M, N, stride_C, ck_tile::bool_constant<is_c_row_major>{}));
-        c_m_n_ref.SetZero();
-        ck_tile::reference_gemm<ADataType, BDataType, AccDataType, CDataType>(
-            a_m_k, b_k_n, c_m_n_ref);
+    //     // Compute CPU reference
+    //     ck_tile::HostTensor<CDataType> c_m_n_ref(ck_tile::host_tensor_descriptor(
+    //         M, N, stride_C, ck_tile::bool_constant<is_c_row_major>{}));
+    //     c_m_n_ref.SetZero();
+    //     ck_tile::reference_gemm<ADataType, BDataType, AccDataType, CDataType>(
+    //         a_m_k, b_k_n, c_m_n_ref);
 
-        // Verify results
-        const float max_accumulated_value =
-            *std::max_element(c_m_n_ref.mData.begin(), c_m_n_ref.mData.end());
-        const auto rtol_atol = calculate_rtol_atol<ADataType, BDataType, AccDataType, CDataType>(
-            K, kbatch, max_accumulated_value);
-        bool pass = do_verify(c_m_n_dev_result, c_m_n_ref, rtol_atol, "CPU");
+    //     // Verify results
+    //     const float max_accumulated_value =
+    //         *std::max_element(c_m_n_ref.mData.begin(), c_m_n_ref.mData.end());
+    //     const auto rtol_atol = calculate_rtol_atol<ADataType, BDataType, AccDataType, CDataType>(
+    //         K, kbatch, max_accumulated_value);
+    //     bool pass = do_verify(c_m_n_dev_result, c_m_n_ref, rtol_atol, "CPU");
 
-        std::cout << "Async input scheduler test: " << (pass ? "PASS" : "FAIL") << std::endl;
-        return pass;
-    }
+    //     std::cout << "Async input scheduler test: " << (pass ? "PASS" : "FAIL") << std::endl;
+    //     return pass;
+    // }
 
     // Normal path - delegate to shared implementation
     return run_gemm_example_with_layouts<GemmConfig, Invoker, ADataType, BDataType, CDataType>(

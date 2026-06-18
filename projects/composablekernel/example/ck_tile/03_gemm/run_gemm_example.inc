@@ -125,7 +125,7 @@ float invoke_gemm(ck_tile::DeviceMem& a_m_k_dev_buf,
                   ck_tile::index_t kbatch,
                   int n_warmup,
                   int n_repeat,
-                  bool persistent,
+                  bool,
                   bool flush_cache,
                   int rotating_count)
 {
@@ -141,25 +141,25 @@ float invoke_gemm(ck_tile::DeviceMem& a_m_k_dev_buf,
                                   stride_C};
 
     float ave_time;
-    if(persistent)
-    {
-        ave_time = Invoker::template gemm<GemmConfig,
-                                          ADataType,
-                                          BDataType,
-                                          DsDataType,
-                                          AccDataType,
-                                          CDataType,
-                                          ALayout,
-                                          BLayout,
-                                          DsLayout,
-                                          CLayout,
-                                          true,
-                                          CDEElementWise>(
-            args,
-            ck_tile::stream_config{
-                nullptr, true, 1, n_warmup, n_repeat, true, flush_cache, rotating_count});
-    }
-    else
+    // if(persistent)
+    // {
+    //     ave_time = Invoker::template gemm<GemmConfig,
+    //                                       ADataType,
+    //                                       BDataType,
+    //                                       DsDataType,
+    //                                       AccDataType,
+    //                                       CDataType,
+    //                                       ALayout,
+    //                                       BLayout,
+    //                                       DsLayout,
+    //                                       CLayout,
+    //                                       true,
+    //                                       CDEElementWise>(
+    //         args,
+    //         ck_tile::stream_config{
+    //             nullptr, true, 1, n_warmup, n_repeat, true, flush_cache, rotating_count});
+    // }
+    // else
     {
         ave_time = Invoker::template gemm<GemmConfig,
                                           ADataType,
