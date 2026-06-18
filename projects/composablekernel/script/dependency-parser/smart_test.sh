@@ -6,7 +6,7 @@
 #
 # Phase 2 of the decoupled smart-build pipeline. Consumes the build/ directory
 # and selection artifacts produced by smart_build.sh and runs the tests:
-#   - selective: runs only the affected tests (ctest -R over regex_chunks)
+#   - selective: runs only the affected tests (ctest --tests-from-file)
 #   - full:      runs the whole ctest suite (equivalent to the `check` target run)
 #   - none:      runs nothing (no CK code affected)
 # The build mode is read from build_mode.env, so smart_build.sh MUST have run

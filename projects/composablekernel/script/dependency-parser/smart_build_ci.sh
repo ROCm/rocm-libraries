@@ -16,8 +16,10 @@
 #
 # Output files:
 #   tests_to_run.json - Selected tests and executables
+#   tests_to_run.txt - One ctest test name per line (emitted by the selector;
+#                      consumed by smart_test.sh via `ctest --tests-from-file`)
 #   build_targets.txt - Space-separated list of ninja targets to build
-#   build_mode.env - Environment variables (SMART_BUILD_MODE=selective|full)
+# (build_mode.env is written by smart_build.sh, not this script.)
 
 set -e
 
@@ -120,7 +122,7 @@ fi
 
 # Step 5: Extract build targets (executables)
 echo ""
-echo "Step 4: Extracting build targets..."
+echo "Step 5: Extracting build targets..."
 # Validate .executables the same way as .tests_to_run above: it must be a
 # non-empty array here (num_tests>0 was just confirmed). A missing/null/wrong
 # shape would otherwise slip through and, combined with the jq extraction below,
@@ -150,8 +152,8 @@ echo "Tests to run: ${num_tests}"
 echo "Build targets: ${num_targets}"
 echo "Output files:"
 echo "  - tests_to_run.json (test selection)"
+echo "  - tests_to_run.txt (ctest --tests-from-file list)"
 echo "  - build_targets.txt (ninja targets)"
-echo "  - build_mode.env (SMART_BUILD_MODE=selective)"
 echo "========================================="
 
 # Show first few targets for verification

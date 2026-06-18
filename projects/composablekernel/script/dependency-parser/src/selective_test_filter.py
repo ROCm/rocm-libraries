@@ -157,6 +157,72 @@ def select_tests(file_to_executables, changed_files, filter_mode, ctest_only=Fal
     return sorted(affected)
 
 
+def export_selection(tests, changed_files, output_json):
+    """Write the selection payload to ``output_json`` and a sibling ``.txt``.
+
+    The JSON carries the full payload (tests, executables, regex, regex_chunks,
+    changed files, statistics) for the various consumers. The sibling
+    ``<output_json stem>.txt`` holds one ctest test name (basename) per line and
+    is what ``smart_test.sh`` feeds to ``ctest --tests-from-file`` - a single
+    invocation with exact-name matching, no ``-R`` regex length limit, hence no
+    chunking.
+
+    Returns the path to the sibling .txt file.
+    """
+    # Generate ctest regex from test names.
+    # Split into chunks to avoid regex length limits in CTest.
+    regex_chunks = []
+    chunk_size = 50  # Max tests per regex pattern
+
+    if tests:
+        # Extract basenames for regex (e.g., bin/test_gemm -> test_gemm)
+        test_names = [os.path.basename(t) for t in tests]
+
+        # Anchor each name with ^...$ and escape regex metacharacters so that
+        # `ctest -R` does exact-name matching rather than substring matching
+        # (otherwise e.g. 'test_grouped_convnd_bwd_weight' would substring-match
+        # 'test_grouped_convnd_bwd_weight_bilinear' and try to run an
+        # executable that was never built).
+        anchored = [f"^{re.escape(n)}$" for n in test_names]
+
+        # Split into chunks
+        for i in range(0, len(anchored), chunk_size):
+            chunk = anchored[i:i + chunk_size]
+            regex_chunks.append("|".join(chunk))
+
+        # Keep single regex for backward compatibility (but may be too long)
+        regex = "|".join(anchored)
+    else:
+        regex = ""
+
+    # Output format matches Jenkinsfile usage and documentation
+    output = {
+        "tests_to_run": tests,  # For backward compatibility and length check
+        "executables": tests,  # Used by Jenkinsfile for ninja build
+        "regex": regex,  # Used by Jenkinsfile for ctest (deprecated for large test sets)
+        "regex_chunks": regex_chunks,  # Multiple regex patterns for large test sets
+        "changed_files": sorted(changed_files),
+        "statistics": {
+            "total_changed_files": len(changed_files),
+            "total_affected_executables": len(tests),
+            "num_regex_chunks": len(regex_chunks),
+        },
+    }
+
+    with open(output_json, "w") as f:
+        json.dump(output, f, indent=2)
+
+    # Emit a sibling test-list file (one ctest test name per line) for
+    # `ctest --tests-from-file`. The JSON keeps regex/regex_chunks for other
+    # consumers; this file is what smart_test.sh reads.
+    list_file = os.path.splitext(output_json)[0] + ".txt"
+    with open(list_file, "w") as f:
+        for name in (os.path.basename(t) for t in tests):
+            f.write(f"{name}\n")
+
+    return list_file
+
+
 def main():
     if "--audit" in sys.argv:
         if len(sys.argv) < 2:
@@ -243,58 +309,7 @@ def main():
     else:
         tests = select_tests(file_to_executables, changed_files, filter_mode, ctest_only, build_dir)
 
-    # Generate ctest regex from test names
-    # Split into chunks to avoid regex length limits in CTest
-    regex_chunks = []
-    chunk_size = 50  # Max tests per regex pattern
-
-    if tests:
-        # Extract basenames for regex (e.g., bin/test_gemm -> test_gemm)
-        test_names = [os.path.basename(t) for t in tests]
-
-        # Anchor each name with ^...$ and escape regex metacharacters so that
-        # `ctest -R` does exact-name matching rather than substring matching
-        # (otherwise e.g. 'test_grouped_convnd_bwd_weight' would substring-match
-        # 'test_grouped_convnd_bwd_weight_bilinear' and try to run an
-        # executable that was never built).
-        anchored = [f"^{re.escape(n)}$" for n in test_names]
-
-        # Split into chunks
-        for i in range(0, len(anchored), chunk_size):
-            chunk = anchored[i:i + chunk_size]
-            regex_chunks.append("|".join(chunk))
-
-        # Keep single regex for backward compatibility (but may be too long)
-        regex = "|".join(anchored)
-    else:
-        regex = ""
-
-    # Output format matches Jenkinsfile usage and documentation
-    output = {
-        "tests_to_run": tests,  # For backward compatibility and length check
-        "executables": tests,  # Used by Jenkinsfile for ninja build
-        "regex": regex,  # Used by Jenkinsfile for ctest (deprecated for large test sets)
-        "regex_chunks": regex_chunks,  # Multiple regex patterns for large test sets
-        "changed_files": sorted(changed_files),
-        "statistics": {
-            "total_changed_files": len(changed_files),
-            "total_affected_executables": len(tests),
-            "num_regex_chunks": len(regex_chunks),
-        },
-    }
-
-    with open(output_json, "w") as f:
-        json.dump(output, f, indent=2)
-
-    # Emit a sibling test-list file (one ctest test name per line) for
-    # `ctest --tests-from-file`. This lets the test phase run every selected test
-    # in a single ctest invocation - no `-R` regex length limit, hence no
-    # chunking, and exact-name matching for free. The JSON keeps regex/
-    # regex_chunks for other consumers; this file is what smart_test.sh reads.
-    list_file = os.path.splitext(output_json)[0] + ".txt"
-    with open(list_file, "w") as f:
-        for name in (os.path.basename(t) for t in tests):
-            f.write(f"{name}\n")
+    list_file = export_selection(tests, changed_files, output_json)
 
     # Print summary
     print(f"Exported {len(tests)} tests to run to {output_json}")
