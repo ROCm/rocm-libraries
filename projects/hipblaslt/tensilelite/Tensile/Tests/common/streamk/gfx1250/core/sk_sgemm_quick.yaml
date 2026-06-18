@@ -11,19 +11,9 @@ GlobalParameters:
   DataInitTypeA: 12
   DataInitTypeB: 13
   DataInitTypeC: 12
-  # PrintTensorA: 1
-  # PrintTensorB: 1
-  # PrintTensorD: 2
-  # PrintTensorRef: 2
-  # DataInitTypeC: 1
-  # ValidationPrintValids: True
   MaxWorkspaceSize: 134217728
-  # PrintSolutionRejectionReason: True
-  # ForceGenerateKernel: True
-  # GenerateSourcesAndExit: True
   NumWarmups: 0
   EnqueuesPerSync: 1
-  # NumBenchmarks: 10
   SleepPercent: 50
 
 BenchmarkProblems:
@@ -51,7 +41,6 @@ BenchmarkProblems:
         - ExpandPointerSwap: [False]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
-        # - LocalReadVectorWidth: [2]
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1,1, 1,2]
           - [16, 16, 4, 1, 1, 1,1, 2,1]
@@ -61,7 +50,6 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - SourceSwap: [True]
         - StoreRemapVectorWidth: [0]
-        # - StoreVectorWidth: [4]
         - TransposeLDS: [0]
         - VectorWidthA: [1]
         - VectorWidthB: [1]
@@ -78,11 +66,6 @@ BenchmarkProblems:
           - Exact: [511, 511, 1, 511]
           - Exact: [512, 512, 1, 512]
           - Exact: [513, 513, 1, 513]
-          # - Exact: [4096, 4096, 1, 1024]
-          # - Exact: [4103, 4096, 1, 1024]
-          # - Exact: [4096, 4103, 1, 1024]
-          # - Exact: [4096, 4096, 1, 1031]
-          # - Exact: [4103, 4103, 1, 1031]
 
     - # SGEMM NT - Test DepthU, WGM, VW
       InitialSolutionParameters:
@@ -98,9 +81,7 @@ BenchmarkProblems:
         - ExpandPointerSwap: [False]
         - GlobalReadVectorWidthA: [1, 2, 4]
         - GlobalReadVectorWidthB: [1, 2, 4]
-        # - LocalReadVectorWidth: [2]
         - MatrixInstruction:
-          # - [16, 16, 4, 1, 1, 8,8, 2,2]
           - [16, 16, 4, 1, 1, 4,4, 1,2]
         - MIArchVgpr: [0]
         - PrefetchGlobalRead: [2]
@@ -108,7 +89,6 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - SourceSwap: [True]
         - StoreRemapVectorWidth: [0]
-        # - StoreVectorWidth: [4]
         - TransposeLDS: [0]
         - VectorWidthA: [1, 2, 4]
         - VectorWidthB: [1, 2, 4]
@@ -125,9 +105,3 @@ BenchmarkProblems:
           - Exact: [511, 511, 1, 511]
           - Exact: [512, 512, 1, 512]
           - Exact: [513, 513, 1, 513]
-          # - Exact: [4096, 4096, 1, 1024]
-          # - Exact: [4103, 4096, 1, 1024]
-          # - Exact: [4096, 4103, 1, 1024]
-          # - Exact: [4096, 4096, 1, 1031]
-          # - Exact: [4103, 4103, 1, 1031]
-          # - Exact: [2055, 2055, 1, 1031]
