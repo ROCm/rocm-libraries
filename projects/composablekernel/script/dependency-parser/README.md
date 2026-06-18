@@ -198,7 +198,10 @@ python3 main.py select deps.json abc123 def456 --all
 ```
 
 **Note on regex_chunks:**
-For large test sets (>50 tests), the single `regex` field may exceed CTest's regex length limit. Use the `regex_chunks` array instead, which splits tests into chunks of up to 50 tests per regex pattern. Each chunk can be run separately with ctest.
+For large test sets (>50 tests), the single `regex` field may exceed CTest's regex length limit. The `regex_chunks` array splits tests into chunks of up to 50 tests per regex pattern, each runnable separately with `ctest -R`. These fields are retained for consumers that match by regex.
+
+**Sibling `tests_to_run.txt`:**
+Alongside the JSON, `select` writes `tests_to_run.txt` (one ctest test name per line). `smart_test.sh` runs the selection with `ctest --tests-from-file tests_to_run.txt`, which runs every selected test in a single invocation with exact-name matching - no regex length limit, so no chunking is needed.
 
 ### audit
 
@@ -652,7 +655,7 @@ python3 -m pytest tests/ --cov=src --cov-report=html
 | `main.py` | Unified CLI entry point |
 | `smart_build_ci.sh` | Selection: computes build mode + targets (writes `tests_to_run.json`, `build_targets.txt`) |
 | `smart_build.sh` | Build phase: selection + build only (selective targets, or `ninja check_prebuild` for full); records mode in `build_mode.env` |
-| `smart_test.sh` | Test phase: runs ctest per `build_mode.env` (selective `-R`, full suite, or none). Consumes the build phase's `build/` dir + artifacts |
+| `smart_test.sh` | Test phase: runs ctest per `build_mode.env` (selective via `--tests-from-file`, full suite, or none) and writes a JUnit report (`--output-junit`). Consumes the build phase's `build/` dir + artifacts |
 | `src/cmake_dependency_analyzer.py` | NEW: Pre-build dependency analyzer |
 | `src/enhanced_ninja_parser.py` | LEGACY: Post-build dependency parser |
 | `src/selective_test_filter.py` | Test selection based on git changes |
@@ -674,12 +677,13 @@ everything the test phase needs there:
 | compiled test/example binaries | `ninja` (selective targets or `check_prebuild`) | run by ctest |
 | `CTestTestfile.cmake` | cmake configure | test registry for ctest |
 | `build_mode.env` | `smart_build.sh` | selects full / selective / none |
-| `tests_to_run.json` | `smart_build_ci.sh` | `regex_chunks` for selective `ctest -R` |
+| `tests_to_run.txt` | `smart_build_ci.sh` (via `selective_test_filter.py`) | one ctest test name per line for selective `ctest --tests-from-file` |
 
-`smart_test.sh` consumes **only** the build dir plus `ctest`/`jq`/`bash` — it
-needs no source tree, no `WORKSPACE_ROOT`, and no `NINJA_JOBS`. Its only inputs
-are `BUILD_DIR` (defaults to the current directory) and `CTEST_PARALLEL`
-(defaults to 4).
+`smart_test.sh` consumes **only** the build dir plus `ctest`/`bash` - it needs no
+source tree, no `WORKSPACE_ROOT`, no `NINJA_JOBS`, and (unlike the build phase)
+no `jq`. Its inputs are `BUILD_DIR` (defaults to the current directory),
+`CTEST_PARALLEL` (defaults to 4), and `JUNIT_OUTPUT` (the JUnit report path,
+defaults to `junit.xml`; CI sets a job/run/arch/stage-unique name).
 
 ### Why a relocated `build/` breaks ctest
 
