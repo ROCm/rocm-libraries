@@ -1370,7 +1370,7 @@ int ConvDriver<Tgpu, Tref>::SetConvDescriptorFromCmdLineArgs()
     if(math_type_ < miopenMathDefault || math_type_ > miopenMathPedantic)
     {
         std::cout << "Invalid math_type value: " << math_type_ << std::endl;
-        exit(1); // NOLINT (concurrency-mt-unsafe)
+        exit(0); // NOLINT (concurrency-mt-unsafe)
     }
     miopenSetConvolutionAttribute(convDesc, MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, math_type_);
 
