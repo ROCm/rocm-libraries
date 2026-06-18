@@ -30,13 +30,13 @@
 extern fft_params::fft_mp_lib mp_lib;
 extern int                    mp_ranks;
 
-static const std::vector<std::vector<size_t>> multi_process_sizes = {
+static const std::vector<std::vector<size_t>> multi_gpu_sizes = {
     {128, 256},
     {192, 768},
     {64, 128, 256},
     {96, 160, 192},
 };
-static const std::vector<size_t>        multi_process_batch_range = {1};
+static const std::vector<size_t>        multi_gpu_batch_range = {1};
 static std::vector<std::vector<size_t>> ioffset_range_zero    = {{0, 0}};
 static std::vector<std::vector<size_t>> ooffset_range_zero    = {{0, 0}};
 
@@ -56,7 +56,7 @@ enum SplitType
     PENCIL_3D,
 };
 
-std::vector<fft_params> param_generator_multi_process(const std::optional<SplitType> type,
+std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType> type,
                                                   fft_auto_allocation            auto_alloc_setting
                                                   = fft_auto_allocation_default)
 {
@@ -84,9 +84,9 @@ std::vector<fft_params> param_generator_multi_process(const std::optional<SplitT
     for(auto run_callbacks : {false, true})
     {
         auto params = param_generator_complex(test_prob,
-                                              multi_process_sizes,
+                                              multi_gpu_sizes,
                                               precision_range_sp_dp,
-                                              multi_process_batch_range,
+                                              multi_gpu_batch_range,
                                               stride_generator(stride_range),
                                               stride_generator(stride_range),
                                               ioffset_range_zero,
@@ -98,9 +98,9 @@ std::vector<fft_params> param_generator_multi_process(const std::optional<SplitT
         std::copy(params.begin(), params.end(), std::back_inserter(params_single));
 
         params = param_generator_real(test_prob,
-                                      multi_process_sizes,
+                                      multi_gpu_sizes,
                                       precision_range_sp_dp,
-                                      multi_process_batch_range,
+                                      multi_gpu_batch_range,
                                       stride_generator(stride_range),
                                       stride_generator(stride_range),
                                       ioffset_range_zero,
@@ -213,44 +213,44 @@ std::vector<fft_params> param_generator_multi_process(const std::optional<SplitT
 }
 
 // split both input and output on slowest FFT dim
-INSTANTIATE_TEST_SUITE_P(multi_process_slowest_dim,
+INSTANTIATE_TEST_SUITE_P(multi_gpu_slowest_dim,
                          accuracy_test,
-                         ::testing::ValuesIn(param_generator_multi_process(SLOW_INOUT)),
+                         ::testing::ValuesIn(param_generator_multi_gpu(SLOW_INOUT)),
                          accuracy_test::TestName);
 
 // split slowest FFT dim only on input, or only on output
-INSTANTIATE_TEST_SUITE_P(multi_process_slowest_input_dim,
+INSTANTIATE_TEST_SUITE_P(multi_gpu_slowest_input_dim,
                          accuracy_test,
-                         ::testing::ValuesIn(param_generator_multi_process(SLOW_IN)),
+                         ::testing::ValuesIn(param_generator_multi_gpu(SLOW_IN)),
                          accuracy_test::TestName);
-INSTANTIATE_TEST_SUITE_P(multi_process_slowest_output_dim,
+INSTANTIATE_TEST_SUITE_P(multi_gpu_slowest_output_dim,
                          accuracy_test,
-                         ::testing::ValuesIn(param_generator_multi_process(SLOW_OUT)),
+                         ::testing::ValuesIn(param_generator_multi_gpu(SLOW_OUT)),
                          accuracy_test::TestName);
 
 // split input on slowest FFT and output on fastest, to minimize data
 // movement (only makes sense for rank-2 and higher FFTs)
-INSTANTIATE_TEST_SUITE_P(multi_process_slowin_fastout,
+INSTANTIATE_TEST_SUITE_P(multi_gpu_slowin_fastout,
                          accuracy_test,
-                         ::testing::ValuesIn(param_generator_multi_process(SLOW_IN_FAST_OUT)),
+                         ::testing::ValuesIn(param_generator_multi_gpu(SLOW_IN_FAST_OUT)),
                          accuracy_test::TestName);
 
 // 3D pencil decompositions
-INSTANTIATE_TEST_SUITE_P(multi_process_3d_pencils,
+INSTANTIATE_TEST_SUITE_P(multi_gpu_3d_pencils,
                          accuracy_test,
-                         ::testing::ValuesIn(param_generator_multi_process(PENCIL_3D)),
+                         ::testing::ValuesIn(param_generator_multi_gpu(PENCIL_3D)),
                          accuracy_test::TestName);
 
 // library-decided splits
-INSTANTIATE_TEST_SUITE_P(multi_process,
+INSTANTIATE_TEST_SUITE_P(multi_gpu,
                          accuracy_test,
-                         ::testing::ValuesIn(param_generator_multi_process({})),
+                         ::testing::ValuesIn(param_generator_multi_gpu({})),
                          accuracy_test::TestName);
 
 // Note: disabled for now due to implementation issues and
 // unimplemented features in hipFFT (to fix first)
-INSTANTIATE_TEST_SUITE_P(various_multi_process,
+INSTANTIATE_TEST_SUITE_P(various_multi_gpu,
                          accuracy_test,
-                         ::testing::ValuesIn(param_generator_multi_process({},
+                         ::testing::ValuesIn(param_generator_multi_gpu({},
                                                                        fft_auto_allocation_off)),
                          accuracy_test::TestName);
