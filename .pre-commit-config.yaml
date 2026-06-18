@@ -55,6 +55,12 @@ exclude: |
     projects/miopen/.*\.s$|
     projects/miopen/.*\.inc$|
     projects/miopen/.*\.model$
+    # RPP exclusion list
+    projects/rpp/utilities/test_suite/TEST_IMAGES/three_images_yuv/.*|
+    projects/rpp/utilities/test_suite/REFERENCE_OUTPUT/yuv_to_rgb/.*|
+    projects/rpp/utilities/test_suite/REFERENCE_OUTPUT/yuv_to_rgb_cubic_v/.*|
+    projects/rpp/utilities/test_suite/REFERENCE_OUTPUT/yuv_to_rgb-linear_v/.*|
+    
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
