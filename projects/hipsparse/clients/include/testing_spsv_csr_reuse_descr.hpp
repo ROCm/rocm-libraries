@@ -177,20 +177,20 @@ static void call_spsv(hipsparseHandle_t&     handle,
 // SpSV descriptor is created per configuration while the same sparse-matrix
 // descriptor and the same user-provided buffer are reused throughout.
 template <typename I, typename J, typename T>
-static void call_spsv_shared_buffer(hipsparseHandle_t&                        handle,
-                                    hipsparseSpMatDescr_t&                    matA,
-                                    J                                         m,
-                                    I                                         nnz,
-                                    std::vector<I>&                           hcsr_row_ptr,
-                                    std::vector<J>&                           hcsr_col_ind,
-                                    std::vector<T>&                           hcsr_val,
-                                    T                                         alpha,
-                                    hipsparseIndexBase_t                      idx_base,
-                                    const std::vector<hipsparseOperation_t>&  ops,
-                                    const std::vector<hipsparseFillMode_t>&   uplos,
-                                    const std::vector<hipsparseDiagType_t>&   diags,
-                                    const std::vector<hipsparseSpSVAlg_t>&    algs,
-                                    int                                       number_of_passes)
+static void call_spsv_shared_buffer(hipsparseHandle_t&                       handle,
+                                    hipsparseSpMatDescr_t&                   matA,
+                                    J                                        m,
+                                    I                                        nnz,
+                                    std::vector<I>&                          hcsr_row_ptr,
+                                    std::vector<J>&                          hcsr_col_ind,
+                                    std::vector<T>&                          hcsr_val,
+                                    T                                        alpha,
+                                    hipsparseIndexBase_t                     idx_base,
+                                    const std::vector<hipsparseOperation_t>& ops,
+                                    const std::vector<hipsparseFillMode_t>&  uplos,
+                                    const std::vector<hipsparseDiagType_t>&  diags,
+                                    const std::vector<hipsparseSpSVAlg_t>&   algs,
+                                    int                                      number_of_passes)
 {
     hipDataType typeT = getDataType<T>();
 
@@ -280,8 +280,8 @@ static void call_spsv_shared_buffer(hipsparseHandle_t&                        ha
 
                         CHECK_HIPSPARSE_ERROR(hipsparseSpSV_analysis(
                             handle, op, &alpha, matA, x, y, typeT, alg, descr, buffer));
-                        CHECK_HIPSPARSE_ERROR(hipsparseSpSV_solve(
-                            handle, op, &alpha, matA, x, y, typeT, alg, descr));
+                        CHECK_HIPSPARSE_ERROR(
+                            hipsparseSpSV_solve(handle, op, &alpha, matA, x, y, typeT, alg, descr));
 
                         std::vector<T> hy_out(m);
                         CHECK_HIP_ERROR(
