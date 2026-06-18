@@ -375,6 +375,55 @@ module hipblas
         end function hipblasGetAtomicsMode
     end interface
 
+    ! batch alpha/beta stride
+    interface
+        function hipblasSetBatchAlphaStride(handle, alpha_stride) &
+            bind(c, name='hipblasSetBatchAlphaStride')
+            use iso_c_binding
+            use hipblas_enums
+            implicit none
+            integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSetBatchAlphaStride
+            type(c_ptr), value :: handle
+            integer(c_int64_t), value :: alpha_stride
+        end function hipblasSetBatchAlphaStride
+    end interface
+
+    interface
+        function hipblasGetBatchAlphaStride(handle, alpha_stride) &
+            bind(c, name='hipblasGetBatchAlphaStride')
+            use iso_c_binding
+            use hipblas_enums
+            implicit none
+            integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasGetBatchAlphaStride
+            type(c_ptr), value :: handle
+            type(c_ptr), value :: alpha_stride
+        end function hipblasGetBatchAlphaStride
+    end interface
+
+    interface
+        function hipblasSetBatchBetaStride(handle, beta_stride) &
+            bind(c, name='hipblasSetBatchBetaStride')
+            use iso_c_binding
+            use hipblas_enums
+            implicit none
+            integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSetBatchBetaStride
+            type(c_ptr), value :: handle
+            integer(c_int64_t), value :: beta_stride
+        end function hipblasSetBatchBetaStride
+    end interface
+
+    interface
+        function hipblasGetBatchBetaStride(handle, beta_stride) &
+            bind(c, name='hipblasGetBatchBetaStride')
+            use iso_c_binding
+            use hipblas_enums
+            implicit none
+            integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasGetBatchBetaStride
+            type(c_ptr), value :: handle
+            type(c_ptr), value :: beta_stride
+        end function hipblasGetBatchBetaStride
+    end interface
+
     !--------!
     ! blas 1 !
     !--------!

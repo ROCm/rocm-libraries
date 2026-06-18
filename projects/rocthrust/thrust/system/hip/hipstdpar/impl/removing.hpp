@@ -56,6 +56,7 @@ namespace std
 template <typename I, typename T, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
 inline I remove(execution::parallel_unsequenced_policy, I f, I l, const T& x)
 {
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::remove(::thrust::device, f, l, x);
 }
 
@@ -74,6 +75,7 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline I remove_if(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::remove_if(::thrust::device, f, l, ::std::move(p));
 }
 
@@ -99,6 +101,7 @@ inline I remove_if(execution::parallel_unsequenced_policy, I f, I l, P p)
 template <typename I, typename O, typename T, enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
 inline O remove_copy(execution::parallel_unsequenced_policy, I fi, I li, O fo, const T& x)
 {
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::remove_copy(::thrust::device, fi, li, fo, x);
 }
 
@@ -119,6 +122,7 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I, O>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline O remove_copy_if(execution::parallel_unsequenced_policy, I fi, I li, O fo, P p)
 {
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::remove_copy_if(::thrust::device, fi, li, fo, ::std::move(p));
 }
 
@@ -146,6 +150,7 @@ inline O remove_copy_if(execution::parallel_unsequenced_policy, I fi, I li, O fo
 template <typename I, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
 inline I unique(execution::parallel_unsequenced_policy, I f, I l)
 {
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::unique(::thrust::device, f, l);
 }
 
@@ -162,6 +167,7 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
 inline I unique(execution::parallel_unsequenced_policy, I f, I l, R r)
 {
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::unique(::thrust::device, f, l, ::std::move(r));
 }
 
@@ -187,6 +193,7 @@ inline I unique(execution::parallel_unsequenced_policy, I f, I l, R r)
 template <typename I, typename O, enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
 inline O unique_copy(execution::parallel_unsequenced_policy, I fi, I li, O fo)
 {
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::unique_copy(::thrust::device, fi, li, fo);
 }
 
@@ -205,6 +212,7 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I, O>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
 inline O unique_copy(execution::parallel_unsequenced_policy, I fi, I li, O fo, R r)
 {
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::unique_copy(::thrust::device, fi, li, fo, ::std::move(r));
 }
 

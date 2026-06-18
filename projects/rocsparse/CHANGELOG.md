@@ -3,6 +3,14 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## Since last release (ROCm 7.13)
+
+### Added
+* Added the `rocsparse_spildlt0` routine for incomplete LDL' factorization with zero fill-in (ILDLT(0)) for symmetric (real) or hermitian (complex) sparse matrices in CSR format, with strided batched computations enabled.
+
+### Upcoming changes
+* Deprecated the `rocsparse_indextype_u16` index type. It is  no longer supported and will be removed in a future release. Users should use `rocsparse_indextype_i32` or `rocsparse_indextype_i64` going forward.
+
 ## rocSPARSE 4.6.0 for ROCm 7.13.0
 
 ### Added

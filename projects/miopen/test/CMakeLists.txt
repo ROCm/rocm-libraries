@@ -80,7 +80,7 @@ if(NOT ENABLE_ASAN_PACKAGING AND MIOPEN_TEST_PERF)
         DESTINATION ${DATA_INSTALL_DIR}/perf_models)
     foreach(MODEL_FILE ${MODEL_FILES})
        get_filename_component(MODEL_FILE_FILENAME "${MODEL_FILE}" NAME)
-       configure_file("${MODEL_FILE}" "${PROJECT_BINARY_DIR}/${DATA_INSTALL_DIR}/perf_models/${MODEL_FILE_FILENAME}" COPYONLY)
+       configure_file("${MODEL_FILE}" "${CMAKE_BINARY_DIR}/${DATA_INSTALL_DIR}/perf_models/${MODEL_FILE_FILENAME}" COPYONLY)
     endforeach()
 endif()
 
@@ -220,19 +220,30 @@ else()
     add_definitions(-DMIOPEN_TEST_DRIVER_MODE=1)
 endif()
 
-# Exclude *_suite tests added as part of test filter standardization(#3513) from check target to avoid running them during build.
-add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure --verbose -C ${CMAKE_CFG_INTDIR} --exclude-regex ".*_suite")
-add_custom_target(tests)
+# Project-prefixed targets avoid collisions when included via add_subdirectory in a superbuild.
+# Unprefixed `check` / `tests` / `gpu_detection_check` aliases are created standalone-only.
+add_custom_target(miopen-check
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${PROJECT_BINARY_DIR}/test_results
+  COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure --verbose -C ${CMAKE_CFG_INTDIR} --exclude-regex ".*_suite" COMMENT "Running MIOpen tests"
+)
+add_custom_target(miopen-tests COMMENT "Aggregate target for MIOpen tests")
+
+if(NOT ROCM_LIBS_SUPERBUILD)
+    add_custom_target(check DEPENDS miopen-check COMMENT "Back-compat alias for miopen-check")
+    add_custom_target(tests DEPENDS miopen-tests COMMENT "Back-compat alias for miopen-tests")
+endif()
 
 if(MIOPEN_TEST_GPU_DETECTION_FAILED AND NOT (MIOPEN_NO_GPU))
-    add_custom_target(gpu_detection_check COMMAND echo "*** FATAL: GPU DETECTION FAILED DURING CMAKE PHASE, CHECK CMAKE WARNINGS ***" COMMAND exit 1)
-    add_dependencies(check gpu_detection_check)
+    add_custom_target(miopen-gpu-detection-check COMMAND echo "*** FATAL: GPU DETECTION FAILED DURING CMAKE PHASE, CHECK CMAKE WARNINGS ***" COMMAND exit 1 COMMENT "Reporting failed GPU detection")
+    add_dependencies(miopen-check miopen-gpu-detection-check)
+    if(NOT ROCM_LIBS_SUPERBUILD)
+        add_custom_target(gpu_detection_check DEPENDS miopen-gpu-detection-check COMMENT "Back-compat alias for miopen-gpu-detection-check")
+    endif()
 endif()
 
 if(MIOPEN_TEST_WITH_MIOPENDRIVER)
-    add_dependencies(check MIOpenDriver)
+    add_dependencies(miopen-check MIOpenDriver)
 endif()
-
 
 set(MIOPEN_GTEST_SUFFIX)
 set(MIOPEN_TEST_FLOAT_ARG)
@@ -349,6 +360,7 @@ message(STATUS "SKIP_ALL_EXCEPT_TESTS: ${SKIP_ALL_EXCEPT_TESTS}")
 # If XNACK is enabled on the GPU, then the testing mode must be changed by the --xnack 1 option.
 set(XNACK_TESTS test_mdgraph)
 
+# Register a ctest entry for NAME, honoring skip lists and GDB/Windows modes.
 function(add_test_command NAME EXE)
     if( (NOT (NAME IN_LIST SKIP_ALL_EXCEPT_TESTS) AND SKIP_ALL_EXCEPT_TESTS)
         OR (NAME IN_LIST SKIP_TESTS)
@@ -356,7 +368,7 @@ function(add_test_command NAME EXE)
         add_test(NAME ${NAME} COMMAND echo skipped)
         set_tests_properties(${NAME} PROPERTIES DISABLED On)
     elseif(WIN32)
-        add_test(NAME ${NAME} COMMAND $<TARGET_FILE:${EXE}> ${ARGN} WORKING_DIRECTORY "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}")
+        add_test(NAME ${NAME} COMMAND $<TARGET_FILE:${EXE}> ${ARGN} WORKING_DIRECTORY "${KERNELS_BINARY_DIR}")
     else()
         if(MIOPEN_TEST_GDB)
             file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/test_${NAME}.cmake"
@@ -379,7 +391,9 @@ endfunction()
 
 separate_arguments(MIOPEN_TEST_FLAGS_ARGS NATIVE_COMMAND ${MIOPEN_TEST_FLAGS})
 
+# Build a test executable, wire up its libraries, and register it with ctest.
 function(add_test_executable TEST_NAME)
+    # cmake-lint: disable=R0912
     add_executable (${TEST_NAME} EXCLUDE_FROM_ALL ${ARGN})
     if(WIN32)
         target_compile_definitions(${TEST_NAME} PRIVATE NOMINMAX)
@@ -410,8 +424,8 @@ function(add_test_executable TEST_NAME)
 
     add_test_command(${TEST_NAME} ${TEST_COMMAND})
     rate_added_test(${TEST_NAME})
-    add_dependencies(tests ${TEST_NAME})
-    add_dependencies(check ${TEST_NAME})
+    add_dependencies(miopen-tests ${TEST_NAME})
+    add_dependencies(miopen-check ${TEST_NAME})
     set_tests_properties(${TEST_NAME} PROPERTIES FAIL_REGULAR_EXPRESSION "FAILED")
     if(WORKAROUND_ISSUE_1148
         AND (${TEST_NAME} MATCHES "test_soft_max") )
@@ -449,6 +463,7 @@ foreach(SANTIZER address thread)
     endif()
 endforeach()
 
+# Build sanitizer-instrumented variants of a test for each enabled sanitizer.
 function(add_sanitize_test TEST_SOURCE)
     get_filename_component(BASE_NAME ${TEST_SOURCE} NAME_WE)
     foreach(SANTIZER ${MIOPEN_TEST_SANITIZERS})
@@ -474,6 +489,7 @@ set(LONG_TESTS
     test_conv_ck_igemm_fwd_v6r1_dlops_nchw
     )
 
+# Assign a ctest COST to a test so long-running tests are scheduled first.
 function(rate_added_test NAME)
     if(${NAME} IN_LIST LONG_TESTS)
         set_tests_properties(${NAME} PROPERTIES COST 800)
@@ -520,6 +536,7 @@ endif()
 # add_sanitize_test(tensor_test.cpp)
 # add_sanitize_test(type_name.cpp)
 
+# Set result to TRUE when the two boolean arguments are equal (XNOR).
 function(bool_equality_f first_arg sec_arg result)
     if(${first_arg})
         if(${sec_arg})
@@ -534,6 +551,7 @@ function(bool_equality_f first_arg sec_arg result)
     endif()
 endfunction()
 
+# Set result to the logical AND of the two boolean arguments.
 function(bool_and_f first_arg sec_arg result)
     if(${first_arg} AND ${sec_arg})
         set(${result} TRUE PARENT_SCOPE)
@@ -542,6 +560,7 @@ function(bool_and_f first_arg sec_arg result)
     endif()
 endfunction()
 
+# Set result to the logical OR of the two boolean arguments.
 function(bool_or_f first_arg sec_arg result)
     if(${first_arg} OR ${sec_arg})
         set(${result} TRUE PARENT_SCOPE)
@@ -550,6 +569,7 @@ function(bool_or_f first_arg sec_arg result)
     endif()
 endfunction()
 
+# Set result to the logical NOT of the boolean argument.
 function(bool_not_f first_arg result)
     if(${first_arg})
         set(${result} FALSE PARENT_SCOPE)
@@ -558,6 +578,7 @@ function(bool_not_f first_arg result)
     endif()
 endfunction()
 
+# Resolve an enabled/disabled/default tri-state option into a boolean result.
 function(option_support_check is_enabled is_disabled default_result result)
     if(${is_enabled} AND ${is_disabled})
         message(FATAL_ERROR " Incompatible options used")
@@ -596,8 +617,8 @@ endfunction()
 # Backend: HIP HIP_NOGPU
 #   These attributes can be enabled or disabled by using '_ENABLED' and '_DISABLED' suffix.
 #   Default: HIP_ENABLED HIP_NOGPU_DISABLED.
-
 function(add_custom_test NAME)
+    # cmake-lint: disable=R0915
     set(options
         BF16_ENABLED BF16_DISABLED HALF_ENABLED HALF_DISABLED INT8_ENABLED INT8_DISABLED TF32_ENABLED TF32_DISABLED FLOAT_ENABLED FLOAT_DISABLED
         GFX900_ENABLED GFX900_DISABLED GFX906_ENABLED GFX906_DISABLED GFX908_ENABLED GFX908_DISABLED
@@ -688,7 +709,7 @@ function(add_custom_test NAME)
     bool_not_f(${PARSE_SKIP_UNLESS_ALL} is_full_check)
     bool_or_f(${is_full_check} ${MIOPEN_TEST_ALL} is_full_check)
 
-    add_custom_target(${NAME} ${PARSE_UNPARSED_ARGUMENTS})
+    add_custom_target(${NAME} ${PARSE_UNPARSED_ARGUMENTS} COMMENT "Building custom test ${NAME}")
     add_test(NAME ${NAME} COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target ${NAME})
     foreach(__environment ${PARSE_ENVIRONMENT})
         set_tests_properties(${NAME} PROPERTIES ENVIRONMENT "${__environment}")

@@ -24,6 +24,7 @@
 
 #include <cctype>
 #include <climits>
+#include <cstdint>
 #include <cstdlib>
 #include <iomanip>
 #include <ostream>

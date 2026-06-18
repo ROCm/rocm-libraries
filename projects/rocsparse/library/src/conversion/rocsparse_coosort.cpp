@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -317,7 +317,7 @@ rocsparse_status rocsparse::coosort_by_row_template(rocsparse_handle handle,
         // Copy sorted rows, if stored in buffer
         if(output != coo_row_ind)
         {
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 coo_row_ind, output, sizeof(J) * nnz, hipMemcpyDeviceToDevice, stream));
         }
 
@@ -329,10 +329,10 @@ rocsparse_status rocsparse::coosort_by_row_template(rocsparse_handle handle,
 
         J nsegm;
         RETURN_IF_HIP_ERROR(
-            hipMemcpyAsync(&nsegm, work3, sizeof(J), hipMemcpyDeviceToHost, stream));
+            rocsparse_hipMemcpyAsync(&nsegm, work3, sizeof(J), hipMemcpyDeviceToHost, stream));
 
         // Wait for host transfer to finish
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::primitives::exclusive_scan_buffer_size<J, J>(
             handle, static_cast<J>(0), nsegm + 1, &size)));
@@ -392,15 +392,15 @@ rocsparse_status rocsparse::coosort_by_row_template(rocsparse_handle handle,
         // Copy sorted columns, if stored in buffer
         if(output != coo_col_ind)
         {
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 coo_col_ind, output, sizeof(J) * nnz, hipMemcpyDeviceToDevice, stream));
         }
 
         // Copy reordered permutation, if stored in buffer
         if(mapping != perm)
         {
-            RETURN_IF_HIP_ERROR(
-                hipMemcpyAsync(perm, mapping, sizeof(J) * nnz, hipMemcpyDeviceToDevice, stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                perm, mapping, sizeof(J) * nnz, hipMemcpyDeviceToDevice, stream));
         }
     }
     else
@@ -420,7 +420,7 @@ rocsparse_status rocsparse::coosort_by_row_template(rocsparse_handle handle,
         // Copy sorted rows, if stored in buffer
         if(output != coo_row_ind)
         {
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 coo_row_ind, output, sizeof(J) * nnz, hipMemcpyDeviceToDevice, stream));
         }
 
@@ -432,10 +432,10 @@ rocsparse_status rocsparse::coosort_by_row_template(rocsparse_handle handle,
 
         J nsegm;
         RETURN_IF_HIP_ERROR(
-            hipMemcpyAsync(&nsegm, work3, sizeof(J), hipMemcpyDeviceToHost, stream));
+            rocsparse_hipMemcpyAsync(&nsegm, work3, sizeof(J), hipMemcpyDeviceToHost, stream));
 
         // Wait for host transfer to finish
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::primitives::exclusive_scan_buffer_size<J, J>(
             handle, static_cast<J>(0), nsegm + 1, &size)));
@@ -456,7 +456,7 @@ rocsparse_status rocsparse::coosort_by_row_template(rocsparse_handle handle,
         // Copy sorted columns, if stored in buffer
         if(output != coo_col_ind)
         {
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 coo_col_ind, output, sizeof(J) * nnz, hipMemcpyDeviceToDevice, stream));
         }
     }
