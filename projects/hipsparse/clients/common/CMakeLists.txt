@@ -27,15 +27,11 @@ target_compile_definitions(hipsparse-clients-common PRIVATE GOOGLE_TEST)
 # GTest is required for arg_check.cpp and unit.cpp
 find_package(GTest REQUIRED)
 
-# yaml-cpp is required for cusparse_routine_support.cpp
-find_package(yaml-cpp REQUIRED)
-
 target_link_libraries(hipsparse-clients-common 
     PUBLIC 
         roc::hipsparse
     PRIVATE
         GTest::gtest
-        yaml-cpp
 )
 
 if(NOT WIN32)

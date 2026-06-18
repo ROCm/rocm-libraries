@@ -25,105 +25,314 @@
 #include "cusparse_routine_support.hpp"
 
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 
-#include <yaml-cpp/yaml.h>
+// ── Minimal YAML parser ───────────────────────────────────────────────────────
+//
+// Parses the specific subset of YAML used by cusparse_support.yaml without any
+// third-party dependency.  Supported constructs:
+//
+//   top-level keys, indented block mappings, block sequences (- item),
+//   inline mappings { k: v, k: v }, inline integer sequences [1, 2, 3],
+//   double-quoted strings, integer scalars, inline # comments.
+//
+// Indentation is always 2 spaces per nesting level (as written in the file).
 
-// ── Loading helpers ───────────────────────────────────────────────────────────
-
-// Parses a single algorithm entry node { default_value, description, supported_values }.
-static AlgorithmEntry parse_algorithm_entry(const YAML::Node& node)
+namespace
 {
-    AlgorithmEntry e;
-    if(!node || !node.IsMap())
-        return e;
-    if(node["default_value"])
-        e.default_value = node["default_value"].as<int>();
-    if(node["description"])
-        e.description = node["description"].as<std::string>();
-    if(node["supported_values"] && node["supported_values"].IsSequence())
-    {
-        for(const auto& v : node["supported_values"])
-            e.supported_values.push_back(v.as<int>());
-    }
-    return e;
+
+static std::string trim_str(const std::string& s)
+{
+    const size_t b = s.find_first_not_of(" \t\r\n");
+    if(b == std::string::npos)
+        return {};
+    const size_t e = s.find_last_not_of(" \t\r\n");
+    return s.substr(b, e - b + 1);
 }
+
+static int leading_spaces(const std::string& line)
+{
+    int n = 0;
+    for(char c : line)
+    {
+        if(c == ' ')
+            ++n;
+        else
+            break;
+    }
+    return n;
+}
+
+// Split "key: everything-after-first-colon" on the FIRST colon only.
+static bool split_kv(const std::string& s, std::string& key, std::string& val)
+{
+    const size_t pos = s.find(':');
+    if(pos == std::string::npos)
+        return false;
+    key = trim_str(s.substr(0, pos));
+    val = trim_str(s.substr(pos + 1));
+    return true;
+}
+
+// Strip an inline # comment, respecting double-quoted strings.
+static std::string strip_comment(const std::string& line)
+{
+    bool in_quote = false;
+    for(size_t i = 0; i < line.size(); ++i)
+    {
+        if(line[i] == '"')
+            in_quote = !in_quote;
+        if(!in_quote && line[i] == '#' && (i == 0 || std::isspace((unsigned char)line[i - 1])))
+            return line.substr(0, i);
+    }
+    return line;
+}
+
+// Parse "{ k: v, k: v }" into a flat string->string map.
+// Only used for the simple integer-valued inline maps in the routines section.
+static std::unordered_map<std::string, std::string> parse_inline_map(const std::string& s)
+{
+    std::unordered_map<std::string, std::string> m;
+    const size_t a = s.find('{'), b = s.rfind('}');
+    if(a == std::string::npos || b == std::string::npos || b <= a)
+        return m;
+    std::istringstream ss(s.substr(a + 1, b - a - 1));
+    std::string token;
+    while(std::getline(ss, token, ','))
+    {
+        std::string k, v;
+        if(split_kv(trim_str(token), k, v))
+            m[k] = v;
+    }
+    return m;
+}
+
+// Parse "[1, 2, 3]" into a vector<int>.
+static std::vector<int> parse_int_list(const std::string& s)
+{
+    std::vector<int> result;
+    const size_t a = s.find('['), b = s.rfind(']');
+    if(a == std::string::npos || b == std::string::npos || b <= a)
+        return result;
+    std::istringstream ss(s.substr(a + 1, b - a - 1));
+    std::string tok;
+    while(std::getline(ss, tok, ','))
+    {
+        tok = trim_str(tok);
+        if(!tok.empty())
+            try
+            {
+                result.push_back(std::stoi(tok));
+            }
+            catch(...)
+            {
+            }
+    }
+    return result;
+}
+
+// Remove surrounding double-quotes.
+static std::string unquote(const std::string& s)
+{
+    if(s.size() >= 2 && s.front() == '"' && s.back() == '"')
+        return s.substr(1, s.size() - 2);
+    return s;
+}
+
+// Apply a key/value pair to an AlgorithmEntry.
+static void apply_entry_field(const std::string& key,
+                               const std::string& val,
+                               AlgorithmEntry&    entry)
+{
+    if(key == "default_value")
+        try
+        {
+            entry.default_value = std::stoi(val);
+        }
+        catch(...)
+        {
+        }
+    else if(key == "description")
+        entry.description = unquote(val);
+    else if(key == "supported_values")
+        entry.supported_values = parse_int_list(val);
+}
+
+} // namespace
 
 // ── Loading ───────────────────────────────────────────────────────────────────
 
 bool CusparseRoutineSupport::load(const std::string& filepath)
 {
+    std::ifstream file(filepath);
+    if(!file.is_open())
+    {
+        std::cerr << "Warning: cannot open cusparse support file '" << filepath << "'\n";
+        return false;
+    }
+
+    // Parser state machine.
+    // The file has a fixed two-space-per-level indentation; we key off indent
+    // depth to know which section/sub-section we are currently inside.
+    enum class Ctx
+    {
+        Top,        // between top-level sections
+        Routines,   // inside routines:
+        AlgSupport, // inside algorithm_support:
+        AlgType,    // inside a named algorithm entry
+        Rocm,       // inside rocm: block
+        CudaRanges, // inside cuda_version_ranges: list
+        CudaRange   // inside one - item of that list
+    };
+
+    Ctx        ctx          = Ctx::Top;
+    std::string alg_type;
+    AlgorithmCudaRange pending_range;
+    bool               has_pending = false;
+
+    // Flush the accumulated range item into the current algorithm's list.
+    auto flush_pending = [&]() {
+        if(has_pending)
+        {
+            algorithm_support_[alg_type].cuda_ranges.push_back(std::move(pending_range));
+            pending_range  = {};
+            has_pending    = false;
+        }
+    };
+
     try
     {
-        YAML::Node root = YAML::LoadFile(filepath);
-
-        // ── routines ─────────────────────────────────────────────────────
-        const YAML::Node& routines_node = root["routines"];
-        if(!routines_node || !routines_node.IsMap())
+        std::string raw;
+        while(std::getline(file, raw))
         {
-            std::cerr << "Warning: cusparse_support.yaml: missing or invalid 'routines' map in '"
-                      << filepath << "'\n";
-            return false;
-        }
+            if(!raw.empty() && raw.back() == '\r')
+                raw.pop_back();
 
-        for(const auto& entry : routines_node)
-        {
-            const std::string     name = entry.first.as<std::string>();
-            CudaVersionConstraint constraint;
-            const YAML::Node&     val = entry.second;
+            std::string line = strip_comment(raw);
+            if(trim_str(line).empty())
+                continue;
 
-            if(val && val.IsMap())
+            const int   ind = leading_spaces(line);
+            std::string t   = trim_str(line);
+            std::string key, val;
+
+            // ── Top-level section header (indent 0) ──────────────────────
+            if(ind == 0)
             {
-                if(val["min_cuda_version"])
-                    constraint.min_version = val["min_cuda_version"].as<int>();
-                if(val["max_cuda_version"])
-                    constraint.max_version = val["max_cuda_version"].as<int>();
+                flush_pending();
+                if(t == "routines:")
+                    ctx = Ctx::Routines;
+                else if(t == "algorithm_support:")
+                    ctx = Ctx::AlgSupport;
+                else
+                    ctx = Ctx::Top;
+                continue;
             }
 
-            routines_[name] = constraint;
-        }
-
-        // ── algorithm_support ────────────────────────────────────────────
-        const YAML::Node& alg_node = root["algorithm_support"];
-        if(alg_node && alg_node.IsMap())
-        {
-            for(const auto& alg_entry : alg_node)
+            // ── routines: entries (indent 2) ─────────────────────────────
+            if(ctx == Ctx::Routines && ind == 2)
             {
-                const std::string  alg_type = alg_entry.first.as<std::string>();
-                const YAML::Node&  alg_val  = alg_entry.second;
-                AlgorithmSupport   support;
-
-                if(alg_val["rocm"])
-                    support.rocm_entry = parse_algorithm_entry(alg_val["rocm"]);
-
-                if(alg_val["cuda_version_ranges"] && alg_val["cuda_version_ranges"].IsSequence())
+                if(!split_kv(t, key, val))
+                    continue;
+                CudaVersionConstraint c;
+                if(!val.empty() && val != "{}")
                 {
-                    for(const auto& range_node : alg_val["cuda_version_ranges"])
-                    {
-                        AlgorithmCudaRange range;
-                        if(range_node["min_cuda_version"])
-                            range.min_cuda_version = range_node["min_cuda_version"].as<int>();
-                        if(range_node["max_cuda_version"])
-                            range.max_cuda_version = range_node["max_cuda_version"].as<int>();
-                        range.entry = parse_algorithm_entry(range_node);
-                        support.cuda_ranges.push_back(std::move(range));
-                    }
+                    auto m = parse_inline_map(val);
+                    if(m.count("min_cuda_version"))
+                        try { c.min_version = std::stoi(m["min_cuda_version"]); } catch(...) {}
+                    if(m.count("max_cuda_version"))
+                        try { c.max_version = std::stoi(m["max_cuda_version"]); } catch(...) {}
+                }
+                routines_[key] = c;
+                continue;
+            }
+
+            // ── algorithm_support: sub-structure ─────────────────────────
+            if(ctx == Ctx::AlgSupport || ctx == Ctx::AlgType || ctx == Ctx::Rocm
+               || ctx == Ctx::CudaRanges || ctx == Ctx::CudaRange)
+            {
+                if(ind == 2) // algorithm type name, e.g. "  spmm:"
+                {
+                    flush_pending();
+                    if(!split_kv(t, key, val))
+                        continue;
+                    alg_type                    = key;
+                    algorithm_support_[alg_type] = {};
+                    ctx                         = Ctx::AlgType;
+                    continue;
                 }
 
-                algorithm_support_[alg_type] = std::move(support);
+                if(ind == 4) // "    rocm:" or "    cuda_version_ranges:"
+                {
+                    flush_pending();
+                    if(t == "rocm:")
+                        ctx = Ctx::Rocm;
+                    else if(t == "cuda_version_ranges:")
+                        ctx = Ctx::CudaRanges;
+                    continue;
+                }
+
+                if(ind == 6)
+                {
+                    if(ctx == Ctx::Rocm) // fields of the rocm: block
+                    {
+                        if(split_kv(t, key, val))
+                            apply_entry_field(key, val, algorithm_support_[alg_type].rocm_entry);
+                    }
+                    else if(ctx == Ctx::CudaRanges || ctx == Ctx::CudaRange)
+                    {
+                        // Sequence item: "      - key: val"
+                        if(t.size() >= 2 && t[0] == '-' && t[1] == ' ')
+                        {
+                            flush_pending();
+                            pending_range = {};
+                            has_pending   = true;
+                            ctx           = Ctx::CudaRange;
+
+                            // Parse the field that appears on the same line as "-"
+                            const std::string rest = trim_str(t.substr(2));
+                            if(!rest.empty() && split_kv(rest, key, val))
+                            {
+                                if(key == "min_cuda_version")
+                                    try { pending_range.min_cuda_version = std::stoi(val); } catch(...) {}
+                                else if(key == "max_cuda_version")
+                                    try { pending_range.max_cuda_version = std::stoi(val); } catch(...) {}
+                                else
+                                    apply_entry_field(key, val, pending_range.entry);
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+                if(ind == 8 && ctx == Ctx::CudaRange) // continuation fields of a range item
+                {
+                    if(split_kv(t, key, val))
+                    {
+                        if(key == "min_cuda_version")
+                            try { pending_range.min_cuda_version = std::stoi(val); } catch(...) {}
+                        else if(key == "max_cuda_version")
+                            try { pending_range.max_cuda_version = std::stoi(val); } catch(...) {}
+                        else
+                            apply_entry_field(key, val, pending_range.entry);
+                    }
+                    continue;
+                }
             }
         }
 
-        loaded_ = true;
-        return true;
+        flush_pending();
     }
     catch(const std::exception& ex)
     {
-        std::cerr << "Warning: failed to load cusparse support file '" << filepath
-                  << "': " << ex.what() << '\n';
+        std::cerr << "Warning: error parsing '" << filepath << "': " << ex.what() << '\n';
         return false;
     }
+
+    loaded_ = (!routines_.empty() || !algorithm_support_.empty());
+    return loaded_;
 }
 
 // ── Querying ──────────────────────────────────────────────────────────────────
