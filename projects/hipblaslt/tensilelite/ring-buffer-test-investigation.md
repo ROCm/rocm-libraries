@@ -1,384 +1,451 @@
-# Ring-Buffer Alt Slot Usage — Test Investigation
+# Ring-Buffer Alt Slot Usage - Revised Test Plan
 
-**Question:** How do we write tests that verify ring-buffer alt slots (slots 1 and 2) are actually
-being consumed — i.e., that `advanceBuffer()` fires and the ring fast path is exercised — in the
-no-benchmark case?
+## Question
+
+How do we test that ring-buffer alt slots are actually consumed in the no-benchmark path?
+
+The behavior we need to prove has two distinct parts:
+
+1. `DataInitialization` can rotate from slot 0 to an initialized alt slot when the ring is primed.
+2. The no-benchmark production path actually primes the ring by calling `beginAsyncReset()` at the
+   right point in the solution flow.
+
+Tests that call `beginAsyncReset()` directly only prove the first point. They do not prove the
+`main.cpp` no-benchmark regression is fixed.
 
 ---
 
 ## Context
 
-The ring fast path in `prepareGPUInputs(ContractionProblem*)` (header line ~245) fires when
-`m_availableSlots > 0`, calling `advanceBuffer()` to rotate the active slot and returning
-`m_cachedGPUInputs` without re-running tensor copy.
+The ring fast path in `DataInitialization::prepareGPUInputs(ContractionProblem const*)` fires when
+`m_availableSlots > 0`. It calls `advanceBuffer()`, rotates `m_activeIdx`, updates the active GPU
+pointer vectors, and returns `m_cachedGPUInputs`.
 
-The bug being tested: when `noBenchmarkRuns=true`, `beginAsyncReset()` is never called (it only
-exists inside the benchmark while-loop body in `main.cpp`), so `m_availableSlots` stays 0 and the
-fast path never fires. Slots 1 and 2 are allocated and filled by `initializeAltBufferSets` but
-permanently idle.
+The bug under investigation is a production scheduling bug:
 
-The proposed fix adds `beginAsyncReset` calls after the warmup block in the no-benchmark solution
-path. The tests here verify that fix works and guard against regressions.
+- In no-benchmark mode, `num-benchmarks == 0` or `num-enqueues-per-sync == 0` or
+  `num-syncs-per-benchmark == 0`.
+- That mode selects triple buffering with `m_numActiveBuffers = 3`.
+- The existing `beginAsyncReset()` calls live inside the benchmark-loop body.
+- In the no-benchmark path, that loop does not execute, so `m_availableSlots` stays 0.
+- Slots 1 and 2 may be allocated and initialized, but they are never consumed by the ring fast path.
 
----
+The intended fix is to submit `beginAsyncReset()` after warmup in the no-benchmark solution path, so
+the next solution can consume an alt slot.
 
-## Testability Assessment
-
-### What is accessible today (no production changes)
-
-Ring-buffer state fields are **`protected`**, not `private`:
-
-```
-m_availableSlots      — count of filled-but-not-consumed slots
-m_activeIdx           — which ring slot is currently active (0, 1, 2)
-m_numActiveBuffers     — 2 (benchmark) or 3 (no-benchmark)
-m_hasAltBuffers       — whether alt allocations succeeded
-m_altSlotsFilled      — whether initializeAltBufferSets has run
-m_cachedGPUInputs     — active slot's cached shared_ptr<ProblemInputs>
-m_cachedInputsRing[]  — per-slot cached inputs (distinct allocations)
-m_gpuPtrsRing[]       — per-slot GPU pointer vectors
-```
-
-A test subclass can expose all of these via public accessors without touching production code.
-
-### Public methods tests can call directly
-
-```
-prepareGPUInputs(ContractionProblem*)   — ring fast path fires inside this
-beginAsyncReset(ContractionProblem const*)  — increments m_availableSlots
-cancelAsyncReset()                      — resets m_availableSlots and m_activeIdx to 0
-waitCopyDone(hipStream_t)               — insert GPU-side barrier before kernel
-syncCopyStream()                        — CPU-block until copy stream is idle
-preProblem(ContractionProblem*)         — resets m_batchInitProblem, m_currentSolution
-```
-
-### The pointer-identity shortcut (no subclassing)
-
-`m_cachedInputsRing[0]`, `[1]`, and `[2]` are distinct `shared_ptr` objects built by separate
-`fillSlot` calls. After `advanceBuffer()`, `m_cachedGPUInputs` is set to
-`m_cachedInputsRing[m_activeIdx]`. So the GPU pointer embedded in the returned `ProblemInputs`
-(e.g. `ContractionInputs::a`) differs between slot 0 and slot 1. A test can detect ring
-advancement purely via the public API by comparing these pointers.
+The test strategy must therefore include one test that observes the production scheduling decision,
+not only tests that manually prime `DataInitialization`.
 
 ---
 
-## Setup: `buildRingArgs` helper
+## Critique Of The Earlier Test Plan
 
-The existing `buildArgs` in `BatchPointerReset_test.cpp` does not set `num-benchmarks`,
-`num-enqueues-per-sync`, or `num-syncs-per-benchmark`. These must be added (the DataInitialization
-constructor reads them at line ~988 of `DataInitialization.cpp`). Setting all three to 0 triggers
-`noBenchmarkRuns = true`, which sets `m_numActiveBuffers = 3`.
+The earlier A/B/C/D proposal had useful pieces, but it overclaimed what those tests proved.
+
+### Manual Priming Does Not Test The Production Fix
+
+Approaches A, B, and C called `dataInit.beginAsyncReset(&p)` directly. Those tests would still pass
+if the `main.cpp` no-benchmark call-site fix were deleted.
+
+They are valid `DataInitialization` integration tests, but they are not regression tests for
+"`beginAsyncReset()` was not called in the no-benchmark production path."
+
+### The Synchronization Order Was Wrong
+
+The proposed snippets called `waitCopyDone(stream)` before the fast-path `prepareGPUInputs()` call.
+That is not the production order.
+
+Correct order:
 
 ```cpp
-// In the test file's anonymous namespace alongside buildArgs / makeBatchedProblem:
-po::variables_map buildRingArgs(std::vector<std::vector<size_t>> problemSizes)
-{
-    auto args = buildArgs(std::move(problemSizes));
-
-    // Trigger noBenchmarkRuns=true → m_numActiveBuffers=3 (triple-buffering)
-    args["num-benchmarks"]          = vv(std::any(int(0)));
-    args["num-enqueues-per-sync"]   = vv(std::any(int(0)));
-    args["num-syncs-per-benchmark"] = vv(std::any(int(0)));
-
-    return args;
-}
+dataInit.beginAsyncReset(problem);
+auto inputs = dataInit.prepareGPUInputs(problem); // calls advanceBuffer()
+dataInit.waitCopyDone(stream);                    // waits for the newly active slot
+// now the compute stream may use inputs
 ```
+
+`advanceBuffer()` sets `m_computeNeedsCopyBarrier = true`. Calling `waitCopyDone()` before the
+advance is a no-op and does not test the important event/barrier transition.
+
+### Readback Alone Does Not Prove Slot Rotation
+
+Reading tensor A from the returned inputs and expecting `2.0f` is not enough. Slot 0 and every alt
+slot are initialized from the same source data. If the ring failed to advance and returned slot 0,
+the readback would still pass.
+
+Data validation must be paired with slot identity:
+
+- Capture slot-0 pointer.
+- Prime and advance the ring.
+- Assert the returned pointer differs from slot 0.
+- Then verify the returned alt-slot data is valid.
+
+### Reset-Boundary Coverage Stopped Too Early
+
+Checking that `cancelAsyncReset()` clears `m_availableSlots`, `m_activeIdx`, and
+`m_altSlotsFilled` is not enough. The important behavior is that the next problem does not consume
+stale alt-slot data from the previous problem.
+
+A useful boundary test must switch from p1 to p2, prime an alt slot for p2, advance into it, and
+verify the alt slot reflects p2.
+
+### White-Box State Is Diagnostic, Not The Best Public Contract
+
+A subclass exposing `m_activeIdx` and `m_availableSlots` is useful for debugging the state machine,
+but it couples the test to implementation details. Public accessors for these fields would make
+internal slot indices part of the API surface without a product-facing need.
+
+If slot arithmetic deserves direct unit testing, extract a small HIP-free state machine and test it
+directly.
 
 ---
 
-## Approach A — Subclass accessor (recommended primary test)
+## Recommended Test Shape
 
-Create a thin subclass in the test file that exposes the protected fields. No production code
-changes required.
+Use three layers.
+
+### Layer 1: HIP-Free Slot State Machine Unit Tests
+
+Best architecture seam: extract the slot accounting from `DataInitialization` into a small class,
+for example `RingSlotController` or `AsyncSlotRing`.
+
+This class should not know about HIP streams, events, tensors, or `ProblemInputs`. It should own
+only the slot state:
 
 ```cpp
-class TestableDataInit : public DataInitialization
+class RingSlotController
 {
 public:
-    using DataInitialization::DataInitialization;
-    size_t activeIdx()      const { return m_activeIdx; }
-    size_t availableSlots() const { return m_availableSlots; }
-    bool   altSlotsFilled() const { return m_altSlotsFilled; }
-    size_t numActiveBuffers()const { return m_numActiveBuffers; }
+    explicit RingSlotController(size_t activeBufferCount);
+
+    size_t activeIndex() const;
+    size_t availableSlots() const;
+    bool   needsCopyBarrier() const;
+
+    bool canPrime() const;
+    size_t nextPrimeIndex() const;
+    void markPrimed();
+
+    size_t advance();
+    void markBarrierWaited();
+    void cancel();
 };
 ```
 
-### Test: slot index advances on fast path
+The exact API can differ, but the state transitions should be isolated enough to test without a GPU.
+
+Recommended tests:
+
+| Test | What It Proves |
+|------|----------------|
+| `PrimeDoesNotOverfill` | Priming stops at `numActiveBuffers - 1`. |
+| `AdvanceConsumesAvailableSlot` | Advancing increments active index and decrements available count. |
+| `AdvanceWrapsModuloActiveBufferCount` | Slot rotation wraps from slot 2 to slot 0 in triple-buffer mode. |
+| `AdvanceMarksCopyBarrierRequired` | A consumed slot requires a later copy-done wait. |
+| `MarkBarrierWaitedClearsBarrier` | The compute-side wait clears the barrier flag. |
+| `CancelResetsToSlotZero` | Cancel returns to slot 0, clears pending availability, and clears barrier state. |
+
+These tests give deterministic coverage of the ring arithmetic and avoid GPU runtime cost.
+
+If extracting this seam is too large for the current patch, keep one temporary white-box
+`DataInitialization` test for `m_activeIdx` and `m_availableSlots`, but do not add public production
+accessors solely for tests.
+
+### Layer 2: `DataInitialization` GPU Integration Tests
+
+These tests prove that the state machine is wired correctly to real GPU buffers and
+`ProblemInputs`.
+
+They may call `beginAsyncReset()` directly because their scope is `DataInitialization`, not
+`main.cpp` scheduling. The test names and comments should say that explicitly.
+
+#### Test 2.1: Fast Path Returns Distinct Valid Alt Slot
+
+Purpose: prove that, once primed, `prepareGPUInputs()` returns a different GPU allocation and that
+the alt allocation contains valid initialized data.
+
+Sketch:
 
 ```cpp
-// ---------------------------------------------------------------------------
-// Verifies that calling beginAsyncReset() primes m_availableSlots and that
-// subsequent prepareGPUInputs() calls consume those slots via advanceBuffer(),
-// incrementing m_activeIdx from 0 → 1 → 2.
-//
-// This is the direct test of the ring-buffer fast path.  It fails if:
-//   - beginAsyncReset() does not increment m_availableSlots (ring not primed)
-//   - prepareGPUInputs() does not call advanceBuffer() when m_availableSlots>0
-//   - advanceBuffer() does not update m_activeIdx
-// ---------------------------------------------------------------------------
-TEST(RingBuffer, SlotIndexAdvancesOnFastPath)
+TEST(RingBufferDataInit, FastPathReturnsDistinctValidAltSlot)
 {
-    constexpr size_t M = 64, N = 64, K = 64;
-    auto args = buildRingArgs({{M, N, 1, K}});
-    ClientProblemFactory factory(args);
-    TestableDataInit     dataInit(args, factory);
+    auto args = buildRingArgs({{32, 32, 1, 32}}, InitMode::Two);
 
-    ASSERT_EQ(dataInit.numActiveBuffers(), 3u)
-        << "noBenchmarkRuns=true must select triple-buffering";
-
-    auto p = makePlainProblem(M, N, K); // non-batched ContractionProblemGemm
-
-    // Slow path: fills slot 0, initializeAltBufferSets fills slots 1 and 2
-    dataInit.prepareGPUInputs(&p);
-    EXPECT_EQ(dataInit.activeIdx(), 0u);
-    EXPECT_TRUE(dataInit.altSlotsFilled());
-    EXPECT_EQ(dataInit.availableSlots(), 0u);
-
-    // Prime ring: warm path records no-op events, increments m_availableSlots
-    dataInit.beginAsyncReset(&p);
-    EXPECT_EQ(dataInit.availableSlots(), 1u);
-    dataInit.beginAsyncReset(&p);
-    EXPECT_EQ(dataInit.availableSlots(), 2u);
-
-    hipStream_t stream;
-    HIP_CHECK_EXC(hipStreamCreate(&stream));
-
-    // Fast-path call 1: advanceBuffer → m_activeIdx=1, m_availableSlots=1
-    dataInit.waitCopyDone(stream);
-    dataInit.prepareGPUInputs(&p);
-    EXPECT_EQ(dataInit.activeIdx(), 1u);
-    EXPECT_EQ(dataInit.availableSlots(), 1u);
-
-    // Fast-path call 2: advanceBuffer → m_activeIdx=2, m_availableSlots=0
-    dataInit.beginAsyncReset(&p);  // refill slot that was just vacated
-    dataInit.waitCopyDone(stream);
-    dataInit.prepareGPUInputs(&p);
-    EXPECT_EQ(dataInit.activeIdx(), 2u);
-
-    HIP_CHECK_EXC(hipStreamDestroy(stream));
-}
-```
-
-**Strength:** Unambiguous — directly observes `m_activeIdx` changing. No inference required.
-
----
-
-## Approach B — Black-box pointer identity (no subclassing)
-
-Each slot is filled by a separate `fillSlot` call, which allocates separate GPU buffers. After
-`advanceBuffer()`, the `ContractionInputs::a` pointer returned by `prepareGPUInputs` differs from
-slot 0's pointer. This is detectable via the public API alone.
-
-```cpp
-// ---------------------------------------------------------------------------
-// Verifies that the ring fast path returns a different GPU allocation than
-// the initial slow-path call, proving advanceBuffer() rotated to an alt slot.
-//
-// Does not require subclassing.  Fails if prepareGPUInputs() returns slot 0's
-// pointer when the ring should have advanced to slot 1.
-// ---------------------------------------------------------------------------
-TEST(RingBuffer, FastPathReturnsDifferentGPUPointer)
-{
-    constexpr size_t M = 64, N = 64, K = 64;
-    auto args = buildRingArgs({{M, N, 1, K}});
     ClientProblemFactory factory(args);
     DataInitialization   dataInit(args, factory);
 
-    auto p = makePlainProblem(M, N, K);
+    auto p = makePlainProblem(32, 32, 32);
 
-    // Slow path: get slot 0's GPU pointer for tensor A
     auto inputs0 = dataInit.prepareGPUInputs(&p);
-    auto* ci0    = dynamic_cast<ContractionInputs*>(inputs0.get());
+    auto* ci0 = dynamic_cast<ContractionInputs*>(inputs0.get());
     ASSERT_NE(ci0, nullptr);
-    void* ptr_a_slot0 = ci0->a;
+    ASSERT_NE(ci0->a, nullptr);
+    void* slot0A = ci0->a;
 
-    // Prime ring with 1 available slot
     dataInit.beginAsyncReset(&p);
 
-    hipStream_t stream;
-    HIP_CHECK_EXC(hipStreamCreate(&stream));
-    dataInit.waitCopyDone(stream);
-
-    // Fast path: should return slot 1's inputs
-    auto inputs1 = dataInit.prepareGPUInputs(&p);
-    auto* ci1    = dynamic_cast<ContractionInputs*>(inputs1.get());
-    ASSERT_NE(ci1, nullptr);
-    void* ptr_a_slot1 = ci1->a;
-
-    EXPECT_NE(ptr_a_slot0, ptr_a_slot1)
-        << "Fast path must return alt-slot GPU pointer for tensor A.  "
-           "Identical pointers mean the ring did not advance — "
-           "beginAsyncReset was not called or the fast-path guard failed.";
-
-    HIP_CHECK_EXC(hipStreamDestroy(stream));
-}
-```
-
-**Strength:** Pure public API, survives field renames. Catches the regression where the fix to
-`main.cpp` is reverted (no `beginAsyncReset` in the no-benchmark path → same pointer returned).
-
----
-
-## Approach C — GPU data readback (strongest correctness guarantee)
-
-Reads tensor A back from the alt slot and verifies it contains the correct initialized values.
-This proves the alt slot holds valid data — not just that a pointer changed.
-
-```cpp
-// ---------------------------------------------------------------------------
-// Verifies that the alt slot (slot 1) served by the ring fast path contains
-// valid tensor data initialized to InitMode::Two (value 2.0f for tensor A).
-//
-// Proves: initializeAltBufferSets correctly filled the alt slot, AND
-//         advanceBuffer rotated to it, AND the data survived intact.
-// ---------------------------------------------------------------------------
-TEST(RingBuffer, AltSlotContainsValidInitializedData)
-{
-    constexpr size_t M = 32, N = 32, K = 32;
-    constexpr size_t CHECK_ELEMS = 8;
-
-    // init-a = InitMode::Two → every element of tensor A = 2.0f
-    auto args = buildRingArgs({{M, N, 1, K}}, /*initA=*/InitMode::Two);
-    ClientProblemFactory factory(args);
-    DataInitialization   dataInit(args, factory);
-
-    auto p = makePlainProblem(M, N, K);
-
-    // Slow path: fills slot 0 and alt slots via initializeAltBufferSets
-    dataInit.prepareGPUInputs(&p);
-
-    // Prime ring: warm path records event, m_availableSlots=1
-    dataInit.beginAsyncReset(&p);
-    dataInit.syncCopyStream(); // ensure event is fully recorded
+    auto inputs1 = dataInit.prepareGPUInputs(&p); // advances to slot 1
 
     hipStream_t stream;
     HIP_CHECK_EXC(hipStreamCreate(&stream));
     dataInit.waitCopyDone(stream);
     HIP_CHECK_EXC(hipStreamSynchronize(stream));
 
-    // Fast path: advance to slot 1
-    auto inputs1 = dataInit.prepareGPUInputs(&p);
-    auto* ci1    = dynamic_cast<ContractionInputs*>(inputs1.get());
-    ASSERT_NE(ci1,      nullptr);
-    ASSERT_NE(ci1->a,   nullptr);
+    auto* ci1 = dynamic_cast<ContractionInputs*>(inputs1.get());
+    ASSERT_NE(ci1, nullptr);
+    ASSERT_NE(ci1->a, nullptr);
 
-    // Read back CHECK_ELEMS floats from tensor A in slot 1
-    float host_a[CHECK_ELEMS];
-    HIP_CHECK_EXC(hipMemcpy(host_a, ci1->a,
-                            CHECK_ELEMS * sizeof(float), hipMemcpyDeviceToHost));
+    EXPECT_NE(slot0A, ci1->a)
+        << "The ring fast path must return an alt-slot allocation.";
 
-    for(size_t i = 0; i < CHECK_ELEMS; i++)
-        EXPECT_EQ(host_a[i], 2.0f)
-            << "Alt-slot tensor A[" << i << "] must equal 2.0f (InitMode::Two). "
-               "Got " << host_a[i] << ". "
-               "This means either initializeAltBufferSets did not fill the slot "
-               "or advanceBuffer did not rotate to it.";
+    std::array<float, 8> hostA{};
+    HIP_CHECK_EXC(hipMemcpy(
+        hostA.data(), ci1->a, hostA.size() * sizeof(float), hipMemcpyDeviceToHost));
+
+    for(size_t i = 0; i < hostA.size(); ++i)
+        EXPECT_EQ(hostA[i], 2.0f);
 
     HIP_CHECK_EXC(hipStreamDestroy(stream));
 }
 ```
 
-**Strength:** End-to-end correctness proof. Fails if alt slot data is corrupt, uninitialized, or
-if the wrong slot was served.
+Notes:
 
----
+- The important assertions are both pointer inequality and data validity.
+- The wait happens after `prepareGPUInputs()` advances the ring.
+- Use an RAII stream wrapper in real code so assertion failures do not leak the HIP stream.
+- If `vv` is not in scope, define `using vv = po::variable_value;` in the helper or call site.
 
-## Approach D — cancelAsyncReset regression (ring reset correctness)
+#### Test 2.2: Problem Change Refreshes Alt Slot Data
 
-Verifies that `cancelAsyncReset` correctly returns the ring to slot 0 and clears `m_altSlotsFilled`,
-so the next problem gets fresh slots.
+Purpose: prove `cancelAsyncReset()` prevents stale alt slots from a previous problem.
+
+Use batched p1 and p2 with different strides. Slot 1 must reflect p2 after the problem switch.
+
+Sketch:
 
 ```cpp
-// ---------------------------------------------------------------------------
-// Verifies that cancelAsyncReset resets m_activeIdx to 0, clears
-// m_availableSlots, and forces initializeAltBufferSets to re-run on the
-// next prepareGPUInputs call (m_altSlotsFilled cleared).
-//
-// Regression guard for the problem-boundary ring reset.
-// ---------------------------------------------------------------------------
-TEST(RingBuffer, CancelAsyncResetRestoresSlot0)
+TEST(RingBufferDataInit, ProblemChangeRefreshesAltSlotData)
 {
-    auto args = buildRingArgs({{64, 64, 1, 64}});
+    constexpr size_t Batch = 4;
+
+    auto p1 = makeBatchedProblem(32, 32, 32, Batch); // aStride = 1024
+    auto p2 = makeBatchedProblem(64, 64, 64, Batch); // aStride = 4096
+
+    auto args = buildRingArgs({{64, 64, Batch, 64}});
     ClientProblemFactory factory(args);
-    TestableDataInit     dataInit(args, factory);
+    DataInitialization   dataInit(args, factory);
 
-    auto p = makePlainProblem(64, 64, 64);
+    dataInit.prepareGPUInputs(&p1); // fills slot 0 and initializes p1 alt slots
 
-    // Prime and advance to slot 1
-    dataInit.prepareGPUInputs(&p);
-    dataInit.beginAsyncReset(&p);
-    hipStream_t stream; HIP_CHECK_EXC(hipStreamCreate(&stream));
-    dataInit.waitCopyDone(stream);
-    dataInit.prepareGPUInputs(&p);
-    EXPECT_EQ(dataInit.activeIdx(), 1u);
-
-    // Simulate problem change
-    dataInit.preProblem(nullptr);
+    dataInit.preProblem(&p2);
     dataInit.cancelAsyncReset();
 
-    EXPECT_EQ(dataInit.activeIdx(),      0u);
-    EXPECT_EQ(dataInit.availableSlots(), 0u);
-    EXPECT_FALSE(dataInit.altSlotsFilled());
+    dataInit.prepareGPUInputs(&p2); // prepares active slot for p2
+    dataInit.beginAsyncReset(&p2);  // cold-fills an alt slot for p2
+
+    auto inputs2Alt = dataInit.prepareGPUInputs(&p2); // advances into p2 alt slot
+
+    hipStream_t stream;
+    HIP_CHECK_EXC(hipStreamCreate(&stream));
+    dataInit.waitCopyDone(stream);
+    HIP_CHECK_EXC(hipStreamSynchronize(stream));
+
+    auto* ci = dynamic_cast<ContractionInputs*>(inputs2Alt.get());
+    ASSERT_NE(ci, nullptr);
+    ASSERT_NE(ci->batchA, nullptr);
+
+    void* batchA[Batch]{};
+    HIP_CHECK_EXC(hipMemcpy(
+        batchA, ci->batchA, Batch * sizeof(void*), hipMemcpyDeviceToHost));
+
+    ptrdiff_t observedStride = static_cast<uint8_t*>(batchA[1])
+                             - static_cast<uint8_t*>(batchA[0]);
+    EXPECT_EQ(observedStride, ptrdiff_t(64 * 64))
+        << "Alt slot must contain p2 batch pointers, not stale p1 pointers.";
 
     HIP_CHECK_EXC(hipStreamDestroy(stream));
 }
 ```
 
----
+This test is stronger than checking `m_altSlotsFilled == false` because it validates the observable
+postcondition after the next alt-slot consumption.
 
-## Additional thoughts
+#### Test 2.3: Targeted Ineligibility Guards
 
-### What the tests collectively catch
+Add only the negative cases that protect likely regressions. Do not build a full combinatorial
+matrix.
 
-| Regression | Caught by |
-|-----------|-----------|
-| `beginAsyncReset` not called in no-benchmark `main.cpp` path | A, B, C (fast path never fires) |
-| `advanceBuffer()` broken (m_activeIdx not updated) | A (direct assertion) |
-| `initializeAltBufferSets` skipped / early-return broken | C (data not 2.0f), A (altSlotsFilled false) |
-| `m_altSlotsFilled` warm path records wrong event | A (availableSlots count wrong) |
-| `cancelAsyncReset` fails to clear ring state | D |
-| Alt slot holds corrupt or stale data | C |
+Recommended guards:
 
-### Optional production change: 2-line public accessors
+| Test | Setup | Expected Behavior |
+|------|-------|-------------------|
+| `BoundsCheckDoesNotPrimeRing` | `bounds-check != Disable` | `beginAsyncReset()` does not make the next `prepareGPUInputs()` return an alt pointer. |
+| `ProblemDependentDataDoesNotFastPath` | Use `InitMode::SerialIdx`, `SerialDim0`, `Identity`, or another `IsProblemDependent()` mode | The ring does not bypass typed input preparation incorrectly. |
+| `BenchmarkModeDoesNotUseNoBenchmarkPath` | Nonzero benchmark counts | The no-benchmark scheduling hook does not submit extra resets. |
 
-If subclassing is undesirable, add to `DataInitialization.hpp`'s public section:
+Use black-box pointer behavior where possible. Use white-box availability counters only if there is
+no stable observable behavior.
 
-```cpp
-size_t getActiveSlotIndex()   const { return m_activeIdx; }
-size_t getAvailableSlots()    const { return m_availableSlots; }
-```
+### Layer 3: Production Flow / Scheduler Test
 
-This documents that these values are part of the observable ring contract. All Approach A tests
-would then use these directly on `DataInitialization` without a subclass.
+This is the missing test in the earlier proposal.
 
-### File locations
+Purpose: prove the no-benchmark solution path calls `beginAsyncReset()` after warmup. This cannot be
+proven by directly calling `DataInitialization::beginAsyncReset()` in a unit test.
 
-| File | Action |
-|------|--------|
-| `tests/RingBuffer_test.cpp` | New file — contains all tests above |
-| `tests/CMakeLists.txt` | Add `ring-buffer-test` target mirroring `batch-pointer-test` (same source list) |
-| `client/include/DataInitialization.hpp` | No changes required; optional 2-line accessors |
-
-### Recommended test ordering
-
-1. Implement Approach A first — it gives the most direct signal and is easiest to debug.
-2. Add Approach B as a public-API regression guard (survives future refactors).
-3. Add Approach C after the fix is confirmed working — it is the behavioral correctness proof.
-4. Add Approach D to round out the problem-boundary reset coverage.
-
-### Note on `makePlainProblem`
-
-The existing `makeBatchedProblem` helper creates a batched GEMM with `setStridedBatched(false)`.
-For ring-buffer tests that focus on slot rotation rather than batch pointer correctness, a simpler
-non-batched helper avoids the `initializeGPUBatchedInputs` complexity:
+Recommended architecture seam:
 
 ```cpp
-ContractionProblemGemm makePlainProblem(size_t m, size_t n, size_t k)
+class RingResetSink
 {
-    auto f32 = rocisa::DataType::Float;
-    return ContractionProblemGemm::GEMM_Strides(
-        false, false, f32, f32, f32, f32,
-        m, n, k, /*batch=*/1,
-        m, m*k, k, k*n, m, m*n, m, m*n, 0.0);
+public:
+    virtual ~RingResetSink() = default;
+    virtual void beginAsyncReset(ContractionProblem const* problem) = 0;
+};
+
+void submitNoBenchmarkRingResets(RingResetSink& sink,
+                                 ContractionProblem const* problem,
+                                 bool noBenchmarkRuns)
+{
+    if(!noBenchmarkRuns)
+        return;
+
+    sink.beginAsyncReset(problem);
+    sink.beginAsyncReset(problem);
 }
 ```
+
+The real implementation can be a smaller helper, a policy object, or part of a larger extracted
+solution runner. The key is that the no-benchmark scheduling decision must be testable with a fake
+or spy.
+
+Recommended tests:
+
+| Test | What It Proves |
+|------|----------------|
+| `NoBenchmarkPathSubmitsTwoRingResetsAfterWarmup` | The no-benchmark path primes both alt slots. |
+| `BenchmarkPathDoesNotUseNoBenchmarkResetHook` | The hook is gated and does not perturb benchmark runs. |
+| `ResetSubmissionHappensBeforePostSolutionOrNextPrepare` | Ordering matches the intended pipeline. |
+
+Spy example:
+
+```cpp
+class SpyRingResetSink : public RingResetSink
+{
+public:
+    void beginAsyncReset(ContractionProblem const* problem) override
+    {
+        calls.push_back(problem);
+    }
+
+    std::vector<ContractionProblem const*> calls;
+};
+
+TEST(RingBufferScheduling, NoBenchmarkPathSubmitsTwoRingResets)
+{
+    SpyRingResetSink sink;
+    auto problem = makePlainProblem(1, 1, 1);
+
+    submitNoBenchmarkRingResets(sink, &problem, true);
+
+    ASSERT_EQ(sink.calls.size(), 2u);
+    EXPECT_EQ(sink.calls[0], &problem);
+    EXPECT_EQ(sink.calls[1], &problem);
+}
+```
+
+The helper should not inspect the problem; it only forwards the pointer to the reset sink.
+
+This layer is the actual regression guard for the no-benchmark call-site bug.
+
+---
+
+## Test Helpers
+
+The existing `BatchPointerReset_test.cpp` has useful setup code, but it should not be copied into
+every new GPU regression test.
+
+Recommended helper extraction:
+
+| Helper | Location | Notes |
+|--------|----------|-------|
+| `buildBaseDataInitArgs` | `tests/include/DataInitTestUtils.hpp` or similar | Shared complete `po::variables_map` defaults. |
+| `buildRingArgs` | same helper header | Sets no-benchmark counts to zero and allows init-mode overrides. |
+| `makePlainProblem` | same helper header | Non-batched GEMM for slot-rotation tests. |
+| `makeBatchedProblem` | same helper header | Batched GEMM for stale batch-pointer tests. |
+| `HipStreamGuard` | same helper header | RAII wrapper around `hipStreamCreate` / `hipStreamDestroy`. |
+
+`buildRingArgs` should be compile-ready and support the init-mode override used by the data
+readback test:
+
+```cpp
+po::variables_map buildRingArgs(std::vector<std::vector<size_t>> problemSizes,
+                                InitMode initA = InitMode::Random)
+{
+    using vv = po::variable_value;
+
+    auto args = buildBaseDataInitArgs(std::move(problemSizes));
+
+    args["num-benchmarks"]          = vv(std::any(int(0)));
+    args["num-enqueues-per-sync"]   = vv(std::any(int(0)));
+    args["num-syncs-per-benchmark"] = vv(std::any(int(0)));
+    args["num-elements-to-validate"] = vv(std::any(int(1)));
+    args["init-a"]                  = vv(std::any(initA));
+
+    return args;
+}
+```
+
+Set `num-elements-to-validate` nonzero in tests that are meant to model a real no-benchmark
+validation flow. Direct `DataInitialization` integration tests may not strictly need validation,
+but using a realistic no-benchmark configuration reduces drift from production behavior.
+
+---
+
+## CMake Organization
+
+Avoid adding a separate copied CMake target for every `DataInitialization` regression.
+
+Preferred options:
+
+1. Add a single client data-initialization GPU test target, for example
+   `client-data-init-test`, containing `BatchPointerReset_test.cpp`,
+   `RingBufferDataInit_test.cpp`, and shared helpers.
+2. Or add `RingBufferDataInit_test.cpp` to the existing `batch-pointer-test` target and rename the
+   target later when convenient.
+
+Do not duplicate the long source list from `tests/CMakeLists.txt` unless there is a concrete reason
+to split binaries.
+
+---
+
+## What The Final Tests Should Catch
+
+| Regression | Test Layer |
+|------------|------------|
+| No-benchmark production path stops calling `beginAsyncReset()` | Layer 3 scheduler test |
+| Ring slot arithmetic breaks | Layer 1 state-machine test |
+| `advanceBuffer()` does not update returned `ProblemInputs` | Layer 2 distinct-pointer integration test |
+| Alt slot contains uninitialized or corrupt tensor data | Layer 2 data-readback integration test |
+| `waitCopyDone()` is ordered incorrectly relative to advancement | Layer 1 barrier state test plus Layer 2 production-order integration test |
+| Problem switch serves stale p1 alt-slot data for p2 | Layer 2 two-problem batched stale-slot test |
+| Bounds-check or problem-dependent data incorrectly uses ring fast path | Layer 2 targeted negative tests |
+| Benchmark path is perturbed by no-benchmark reset hook | Layer 3 benchmark-mode negative test |
+
+---
+
+## Recommended Implementation Order
+
+1. Add or extract shared `DataInitialization` test helpers.
+2. Add the production scheduling seam and spy test. This is the required regression guard for the
+   no-benchmark call-site fix.
+3. Add the `DataInitialization` distinct-valid-alt-slot integration test using the correct
+   `prepareGPUInputs()` then `waitCopyDone()` order.
+4. Add the two-problem stale-alt-slot test.
+5. Extract the HIP-free ring slot controller if the implementation is still changing or if more
+   state-machine cases are needed.
+6. Add targeted negative tests for the highest-risk `ringEligible()` guards.
+
+This keeps the GPU-heavy tests small and makes the highest-value regression test the one that
+actually observes the production behavior that failed.
