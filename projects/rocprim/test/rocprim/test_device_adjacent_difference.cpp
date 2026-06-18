@@ -33,7 +33,6 @@
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
-#include "test_utils_memory_check.hpp"
 
 #include <rocprim/block/block_load.hpp>
 #include <rocprim/block/block_store.hpp>
@@ -576,6 +575,7 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
                                                            debug_synchronous));
 
             ASSERT_GT(temp_storage_size, 0);
+
             common::device_ptr<void> d_temp_storage(temp_storage_size);
 
             test_utils::GraphHelper gHelper;
