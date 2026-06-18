@@ -201,6 +201,10 @@ namespace TensileLite
     {
         origami::reduction_t reduction = origami::reduction_t::tree;
         size_t               grid      = 0;
+        // StreamK=5 tri-state (0=OFF default/SK3, 1=ON/SK4, 2=AUTO); see
+        // hipblasLtStreamKTileSchedulingMode_t. Ignored when streamK != 5.
+        int                  streamKTileSchedulingMode = 0;
+        int                  smCountTarget = 0; // 0 = use all device CUs; >0 engages origami heuristic when mode is OFF
     };
 
     struct GSUSettings
@@ -363,6 +367,18 @@ namespace TensileLite
                                        Hardware const&      hardware,
                                        size_t               tiles,
                                        origami::reduction_t reductionStrat) const;
+        // Resolve the effective StreamK=5 hybrid sub-mode for a launch: returns
+        // true for the dynamic (SK4) path, false for the static (SK3) path.
+        // Precedence (highest first): the TENSILE_STREAMK5_FORCE_MODE debug env
+        // override (0=force static, 1=force dynamic), then the problem tri-state
+        // streamKTileSchedulingMode (0=OFF/static unless smCountTarget()>0,
+        // 1=ON/dynamic), then AUTO (2) via the origami hybrid-mode heuristic.
+        // Only meaningful when
+        // sizeMapping.streamK == 5. This is the single source of truth shared by
+        // grid sizing (getSKGrid) and kernel-arg packing (generateSingleCall) so
+        // the launch grid and the packed args can never disagree.
+        bool                 streamK5EffectiveDynamic(Problem const&  problem,
+                                                      Hardware const& hardware) const;
         size_t               partialTileSize(size_t skGrid) const;
 
         static float computeGranularity(float x);

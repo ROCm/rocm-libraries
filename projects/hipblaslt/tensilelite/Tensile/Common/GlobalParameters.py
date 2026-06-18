@@ -197,6 +197,20 @@ globalParameters["DataInitTypeScaleAlphaVec"] = 3
 globalParameters["DataInitTypeMXSA"] = 1
 globalParameters["DataInitTypeMXSB"] = 1
 globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
+# StreamK=5 hybrid-mode toggle values driven by the benchmark client.
+# Each list entry causes ClientProblemFactory to replay every base
+# problem with setParams().setStreamKTileSchedulingMode(value). Accepts
+# the full tri-state {0=OFF (static), 1=ON (dynamic per-XCD work-queue),
+# 2=AUTO (heuristic)}. Set to [0, 1] in YAML GlobalParameters to
+# deterministically exercise both SK5 sub-paths in a single sweep run;
+# AUTO is supported as well, but in a sweep it leaves the per-launch
+# sub-path up to the runtime heuristic, so [0, 1] is preferred when
+# the YAML's job is sub-path coverage. AUTO is most useful when
+# overriding from the command line (e.g. `--streamk-hybrid-mode 2`)
+# to run the heuristic end-to-end on a real problem. Ignored at the
+# host for non-SK5 solutions. Default keeps behavior unchanged for
+# existing tests.
+globalParameters["StreamKHybridMode"] = [0]
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
 )

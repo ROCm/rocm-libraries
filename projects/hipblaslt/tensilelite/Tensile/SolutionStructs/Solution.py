@@ -921,15 +921,16 @@ class Solution(collections.abc.Mapping):
       if state["_ScheduleIterAlg"] == 1 or state["_ScheduleIterAlg"] == 2:
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support ScheduleIterAlg")
       if state["StreamK"] == 0:
-        # Subtile has no GSU reduction path, so it can only run data-parallel
-        # (GSU=1). GSU is also a runtime parameter, so disable the user GSU
-        # override too (mirrors Stream-K / PrefetchGL2) instead of only
-        # rejecting the build-time value.
         if state["GlobalSplitU"] != 1:
           reject(state, printRejectionReason, "UseSubtileImpl=1 with StreamK=0 requires GlobalSplitU=1 (no GSU reduction support)")
         state["InternalSupportParams"]["SupportUserGSU"] = False
-      if state["StreamK"] not in (0, 3, 4):
-        reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK in {0, 3, 4}")
+      # Lazy import: Components/StreamK.py pulls ..Component which
+      # back-imports the Components package and would deadlock at
+      # module-load time if pulled from Solution.py's top-level
+      # imports.
+      from Tensile.Components.StreamK import streamKVariantClass
+      if state["StreamK"] != 0 and not streamKVariantClass(state["StreamK"]).supportsSubtileImpl:
+        reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK in {0, 3, 4, 5}")
       if state["DebugStreamK"] != 0:
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support DebugStreamK (must be 0)")
       if state["PrefetchAcrossPersistent"]:
@@ -1586,6 +1587,8 @@ class Solution(collections.abc.Mapping):
       if state["StreamKAtomic"] == 1:
         if state["StreamK"] == 4:
           reject(state, printRejectionReason, "Atomic Stream-K is not supported with dynamic work queue mode")
+        if state["StreamK"] == 5:
+          reject(state, printRejectionReason, "Atomic Stream-K is not supported with hybrid mode (StreamK=5)")
         if not state["ProblemType"]["DataType"].isSingle():
           reject(state, printRejectionReason, "Atomic Stream-K currently only tested for SGEMM")
         if not state["BufferStore"]:
