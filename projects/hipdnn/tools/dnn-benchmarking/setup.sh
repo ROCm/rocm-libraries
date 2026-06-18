@@ -532,12 +532,17 @@ install_torch() {
         rocm)
             local index_url="$TORCH_INDEX_URL"
             if [ -z "$index_url" ]; then
-                local gpu_arch index_arch
+                local gpu_arch index_bucket
                 gpu_arch=$(detect_gpu_arch)
+                # ROCm nightly bucket per GPU arch. gfx90a's current torch +
+                # ROCm SDK builds live in the bare "gfx90a" bucket; the older
+                # "gfx90X-dcgpu" family bucket is frozen at a release that
+                # predates several SDK libraries (e.g. hipdnn). gfx942/gfx950
+                # are still served by their "-dcgpu" family buckets.
                 case "$gpu_arch" in
-                    gfx90a) index_arch="gfx90X" ;;
-                    gfx942) index_arch="gfx94X" ;;
-                    gfx950) index_arch="gfx950" ;;
+                    gfx90a) index_bucket="gfx90a" ;;
+                    gfx942) index_bucket="gfx94X-dcgpu" ;;
+                    gfx950) index_bucket="gfx950-dcgpu" ;;
                     *)
                         echo "ERROR: Unsupported GPU architecture '${gpu_arch:-none}'." >&2
                         echo "Supported: gfx90a (MI200/MI210/MI250), gfx942 (MI300X/MI300A), gfx950 (MI350)" >&2
@@ -545,7 +550,7 @@ install_torch() {
                         exit 1
                         ;;
                 esac
-                index_url="https://rocm.nightlies.amd.com/v2-staging/${index_arch}-dcgpu/"
+                index_url="https://rocm.nightlies.amd.com/v2-staging/${index_bucket}/"
                 echo "Detected GPU: $gpu_arch"
             fi
             RESOLVED_TORCH_INDEX_URL="$index_url"
