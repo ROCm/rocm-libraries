@@ -5249,25 +5249,64 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.checkResources(kernel, moduleKernelBody) # check resource available or not
 
 
-    # TODO: Check what does this do and enable this if needed
-    # Tensile instruction pass, temporarily disable due to build time.
-    # Kernels with epilog especially with activation is too long (50000~ lines).
-    # Need to refactor global write elements.
-    #ripo = rocIsaPassOption()
-    #ripo.removeDupFunc = bool(kernel["ActivationFuncCall"])
-    #ripo.numWaves = kernel["NumThreads"] // kernel["WavefrontSize"]
-    #if kernel["ProblemType"]["ActivationType"] == "all":
-    #  ripo.removeDupAssign = False
-    #if self.states.archCaps["HasSchedMode"]:
-    #  ripo.insertDelayAlu = True
-    #passResult = rocIsaPass(moduleKernelBody, ripo)
-    #kernel["MathClocksUnrolledLoop"] = passResult.cycles
-
+    # StinkyTofu O0 pass for subtile: runs only VgprMsb, SetMatrixReuse,
+    # AccumulateInstructionSize, and SwPrefetchInsertion.  No scheduling,
+    # no waitcnt rewrite, no ESM2 — the subtile instruction ordering is
+    # preserved.  Gated on SwPrefetchScratch SGPR availability so it is
+    # a no-op when SwInstructionPrefetch is disabled.
+    stModule = None
+    swPrefetchSgpr = int(self.sgprs.get("SwPrefetchScratch", -1))
+    if swPrefetchSgpr >= 0 and rocisa.isSupportedByStinkyTofu(self.states.version):
+      print2("StinkyTofu (subtile O0): converting kernel for SW instruction prefetch...")
+      moduleKernelBody.body.setParent()
+      stinky_module_options = {
+        "OptLevel":                0,
+        "EnableRemarks":           bool(globalParameters.get("StinkyTofuEnableRemarks") or False),
+        "DebugLevel":              int(globalParameters.get("StinkyTofuDebugLevel") or 0),
+        "PrintBeforePass":         str(globalParameters.get("StinkyTofuPrintBeforePass") or ""),
+        "PrintAfterPass":          str(globalParameters.get("StinkyTofuPrintAfterPass") or ""),
+        "DebugPass":               str(globalParameters.get("StinkyTofuDebugPass") or ""),
+        "PassOrderSnapshotJson":   str(globalParameters.get("StinkyTofuPassOrderSnapshotJson") or ""),
+        "EnableWaitCntInsertion":   False,
+        "EnableESM2":              False,
+        "TileA0":                  kernel["ThreadTile0"],
+        "TileB0":                  kernel["ThreadTile1"],
+        "TileM0":                  kernel["MacroTile0"],
+        "wavefrontSize":           kernel["WavefrontSize"],
+        "SubGroup0":               kernel["SubGroup0"],
+        "SubGroup1":               kernel["SubGroup1"],
+        "WaveGroup0":              kernel["MIWaveGroup"][0],
+        "WaveGroup1":              kernel["MIWaveGroup"][1],
+        "VectorWidthA":            kernel["VectorWidthA"],
+        "VectorWidthB":            kernel["VectorWidthB"],
+        "GlobalReadVectorWidthA":  kernel["GlobalReadVectorWidthA"],
+        "GlobalReadVectorWidthB":  kernel["GlobalReadVectorWidthB"],
+        "DirectToLdsA":            bool(kernel["DirectToLdsA"]),
+        "DirectToLdsB":            bool(kernel["DirectToLdsB"]),
+        "UseSgprForGRO":           kernel["_UseSgprForGRO"],
+        "SwPrefetchScratchSgpr":   swPrefetchSgpr,
+        "ClusterBarrier":          bool(kernel.get("ClusterBarrier", False)),
+        "PrefetchGlobalRead":      int(kernel.get("PrefetchGlobalRead", 1)),
+        "PrefetchLocalRead":       int(kernel.get("PrefetchLocalRead", 1)),
+      }
+      print2(f"StinkyTofu (subtile O0) module options: {stinky_module_options}")
+      t_st_start = time.perf_counter()
+      stModule = rocisa.toStinkyTofuModule(moduleKernelBody.body, self.states.version, "kernel_name",
+                                            signature=fs,
+                                            options=stinky_module_options)
+      stModule.runOptimizationPipeline()
+      t_st_end = time.perf_counter()
+      print2(f"StinkyTofu (subtile O0) pipeline: {t_st_end - t_st_start:.4f}s")
 
     error = self.states.overflowedResources
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")
 
-    return (error, str(moduleKernelBody))
+    if stModule is not None:
+      st_asm = stModule.emitAssembly()
+      print2("StinkyTofu (subtile O0): using stinkytofu assembly with SW instruction prefetch")
+      return (error, st_asm)
+    else:
+      return (error, str(moduleKernelBody))
 
 
   ##############################################################################
