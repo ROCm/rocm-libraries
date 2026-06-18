@@ -1,12 +1,12 @@
 ---
 name: hipblaslt-pr-quality
-description: "hipBLASlt supplements to the ROCm PR quality base skill. Use for hipBLASlt PR author, review, or pre-merge gating (target branch develop; product paths projects/hipblaslt/**, tensilelite/**). Adds and tightens base rules; never relaxes a base MUST."
+description: "hipBLASLt supplements to the ROCm PR quality base skill. Use for hipBLASLt PR author, review, or pre-merge gating (target branch develop; product paths under projects/hipblaslt/**, including tensilelite/). Adds and tightens base rules; never relaxes a base MUST."
 argument-hint: "[author | review | pre-merge] [PR URL | branch:<name> | local]"
 extends: rocm-pr-quality
 allowed-tools: Bash, Read, Grep, Glob, Task, WebFetch
 ---
 
-# hipBLASlt PR Quality (overlay)
+# hipBLASLt PR Quality (overlay)
 
 ## Dependency (mandatory — do this first)
 
@@ -22,7 +22,8 @@ On any conflict, the base MUST-rule wins.
 ## Scope
 
 - **Target branch:** `develop`.
-- **Product paths:** `projects/hipblaslt/**`, `tensilelite/**`.
+- **Product paths:** `projects/hipblaslt/**` (the hipBLASLt component root, including `tensilelite/`).
+- Paths below are written relative to the repo root; in a standalone hipBLASLt checkout they are relative to `projects/hipblaslt/`.
 - Changes outside these (docs, repo tooling) follow the base bar only.
 
 ---
@@ -30,15 +31,15 @@ On any conflict, the base MUST-rule wins.
 ## Supplements
 
 ### Scoping of base rules (adds)
-Bind the base change-classes and scope buckets to hipBLASlt paths:
-- Frontend / API: `projects/hipblaslt/include/**`, `library/src/**` public surface.
-- Tensile / kernel generation: `tensilelite/**`, especially `KernelWriter*.py`.
+Bind the base change-classes and scope buckets to hipBLASLt paths:
+- Frontend / API: `projects/hipblaslt/library/include/hipblaslt/**` (public headers), `projects/hipblaslt/library/src/**`.
+- Tensile / kernel generation: `projects/hipblaslt/tensilelite/**`, especially `KernelWriter*.py`.
 - Tests/clients: `projects/hipblaslt/clients/**`.
 
 ### Tightens M1 (defect-fix regression test)
 The regression test for a defect fix must run in a **shared CI lane** (TheRock GitHub Actions or
 Math CI; not local-only) for the affected gfx arch. A local-only repro does not satisfy M1 for
-hipBLASlt.
+hipBLASLt.
 
 ### Adds H1 — known-bug two-PR flow
 Known-bug entries live in `projects/hipblaslt/clients/tests/data/known_bugs.yaml` with a tracker
@@ -65,7 +66,7 @@ Overlap with the base branch on any of these since the PR diverged → **mandato
 (base default is strong-recommend).
 
 ### Tightens — approvals
-Changes to the high-coupling files above need **≥ 2 hipBLASlt code-owner approvals** after the
+Changes to the high-coupling files above need **≥ 2 hipBLASLt code-owner approvals** after the
 local team review (stricter than a generic base approval count).
 
 ### Adds — `W-TUNE`
@@ -77,7 +78,7 @@ auto-linking, creating the reverse edge automatically. Prefer this so M5's links
 directions.
 
 ### Adds — risky-moment region (configure the base timing gate)
-hipBLASlt spans a Taiwan-based team (MI300 focus) and a North-American team (MI350 focus). The
+hipBLASLt spans a Taiwan-based team (MI300 focus) and a North-American team (MI350 focus). The
 pre-merge timing gate should weigh the **owning team's** region/timezone for "going into the
 weekend / end of day," not just the author's local clock. (Set the concrete regions/hours here as
 the team confirms them.)
