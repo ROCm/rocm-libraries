@@ -133,11 +133,6 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     endif()
     if(HIPBLASLT_ENABLE_COVERAGE)
         target_compile_definitions(hipblaslt-test PRIVATE CODE_COVERAGE)
-        target_compile_definitions(hipblaslt-test PRIVATE ROCBLASLT_INTERNAL_API)
-        # Add stub implementations for internal symbols used by coverage tests
-        target_sources(hipblaslt-test PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/src/coverage_stubs.cpp
-        )
     endif()
 
     add_subdirectory(tests)
