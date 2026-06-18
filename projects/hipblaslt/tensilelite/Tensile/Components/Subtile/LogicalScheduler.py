@@ -401,9 +401,8 @@ class GRPlacement(Emittable):
         self.kind = 'gr'
 
     def __str__(self):
-        uid = f" uid={self.unrollId}" if self.unrollId else ""
         return (f"GR {self.tensor} (MT {fmt_mt(self.mtIteration)}, "
-                f"subIterK {self.tiles.fmt_k()}) ids {self.tiles.fmt_tiles()}{uid}")
+                f"subIterK {self.tiles.fmt_k()}) ids {self.tiles.fmt_tiles()}")
 
 
 # ── Per-subIterK container ──────────────────────────────────
@@ -513,6 +512,10 @@ class LRIncOp(BaseOp):
     """LDS buffer swap for local reads on a specific tensor."""
     tensor: str = ""
     isUnrollSwap: bool = False  # True when swap is at a unrollId boundary; preserved in NLL
+    # Destination double-buffer (unrollId) this swap points LR at. Display-only:
+    # surfaced by print_emit_dep_order so an unroll-swap is not mistaken for a bug
+    # when the following same-MT LR belongs to a different uid. Ignored by codegen.
+    unrollId: int = 0
 
     def __post_init__(self):
         self.kind = 'lr_inc'
@@ -531,8 +534,7 @@ class GRIncOp(BaseOp):
         self.kind = 'gr_inc'
 
     def __str__(self):
-        uid = f" uid={self.unrollId}" if self.unrollId else ""
-        return f"gr_inc({self.tensor}{uid})"
+        return f"gr_inc({self.tensor})"
 
 
 @dataclass
@@ -2222,13 +2224,13 @@ class LogicalScheduler:
                     mt_changed = tensor in last_lr_mt and last_lr_mt[tensor] != mt
                     uid_changed = tensor in last_lr_uid and last_lr_uid[tensor] != lr_uid
                     if mt_changed and uid_changed:
-                        lr.preOps.append(LRIncOp(tensor=tensor, isUnrollSwap=True))
+                        lr.preOps.append(LRIncOp(tensor=tensor, isUnrollSwap=True, unrollId=lr_uid))
                         lr_inc_tensors.add(tensor)
                     elif mt_changed:
-                        lr.preOps.append(LRIncOp(tensor=tensor))
+                        lr.preOps.append(LRIncOp(tensor=tensor, unrollId=lr_uid))
                         lr_inc_tensors.add(tensor)
                     elif uid_changed:
-                        lr.preOps.append(LRIncOp(tensor=tensor, isUnrollSwap=True))
+                        lr.preOps.append(LRIncOp(tensor=tensor, isUnrollSwap=True, unrollId=lr_uid))
                     last_lr[tensor] = lr
                     last_lr_mt[tensor] = mt
                     last_lr_uid[tensor] = lr_uid
@@ -2260,21 +2262,23 @@ class LogicalScheduler:
                         last_gr_per_key[(gr.tensor, gr.unrollId)] = gr
             for tensor in self._LR_GR_ORDER:
                 if tensor in last_lr and tensor in last_lr_mt:
-                    last_lr[tensor].postOps.append(LRIncOp(tensor=tensor))
+                    last_lr[tensor].postOps.append(
+                        LRIncOp(tensor=tensor, unrollId=last_lr_uid.get(tensor, 0)))
             for (tensor, uid), gr in last_gr_per_key.items():
                 if (tensor, uid) in last_gr_mt:
                     gr.postOps.append(GRIncOp(tensor=tensor, unrollId=uid))
         else:
             for tensor, lr in first_lr.items():
                 if tensor not in lr_inc_tensors:
-                    lr.preOps.append(LRIncOp(tensor=tensor))
+                    first_uid = lr.tiles.subIterK_start // self._per_uid_k(tensor)
+                    lr.preOps.append(LRIncOp(tensor=tensor, unrollId=first_uid))
 
             if self._is_multi_du():
                 for tensor, lr in first_lr.items():
                     per_uid_k = self._per_uid_k(tensor)
                     first_uid = lr.tiles.subIterK_start // per_uid_k
                     if first_uid != 0:
-                        lr.preOps.insert(0, LRIncOp(tensor=tensor, isUnrollSwap=True))
+                        lr.preOps.insert(0, LRIncOp(tensor=tensor, isUnrollSwap=True, unrollId=first_uid))
 
         self._completed.add(Pass.GR_INC)
 
@@ -4086,6 +4090,26 @@ class LogicalScheduler:
                     buf.write(f"      [{em.moduleId:2d}] {em.opType:10s} {em.source}{before_str}\n")
         return buf.getvalue()
 
+    def _dep_uid_suffix(self, src) -> str:
+        """uid tag for multi-DU dep-path dumps.
+
+        Surfaces which double-buffer (unrollId) each lr/gr/lr_inc/gr_inc targets,
+        so an inc that advances one uid's pointer is not mistaken for a bug when a
+        following same-MT read belongs to a different uid. Display-only: derived
+        purely from the placement/op and never consulted by codegen. Returns ""
+        for single-DU configs so their dumps are unchanged.
+        """
+        if not self._is_multi_du():
+            return ""
+        if isinstance(src, GRPlacement):
+            return f" uid={src.unrollId}"
+        if isinstance(src, (GRIncOp, LRIncOp)):
+            return f" uid={src.unrollId}"
+        if isinstance(src, LRPlacement):
+            per_uid_k = self._per_uid_k(src.tensor)
+            return f" uid={src.tiles.subIterK_start // per_uid_k}"
+        return ""
+
     def print_emit_dep_order(self, all_partitions: List[List[List[EmittedModule]]] = None) -> str:
         """Print emit output as dependency paths (same decomposition as _extractPathsFromBeforeDeps)."""
         from Tensile.Components.Subtile.InstructionScheduler import extractPathsFromBeforeDeps
@@ -4106,9 +4130,11 @@ class LogicalScheduler:
                 for i, path in enumerate(preMfmaPaths):
                     buf.write(f"      preMFMA path {i}:\n")
                     for idx in path:
-                        buf.write(f"        [{emitted[idx].moduleId:2d}] {emitted[idx].opType:10s} {emitted[idx].source}\n")
+                        src = emitted[idx].source
+                        buf.write(f"        [{emitted[idx].moduleId:2d}] {emitted[idx].opType:10s} {src}{self._dep_uid_suffix(src)}\n")
                 for i, path in enumerate(paths):
                     buf.write(f"      path {i}:\n")
                     for idx in path:
-                        buf.write(f"        [{emitted[idx].moduleId:2d}] {emitted[idx].opType:10s} {emitted[idx].source}\n")
+                        src = emitted[idx].source
+                        buf.write(f"        [{emitted[idx].moduleId:2d}] {emitted[idx].opType:10s} {src}{self._dep_uid_suffix(src)}\n")
         return buf.getvalue()
