@@ -56,6 +56,15 @@ HipblasltMatrixLayout::HipblasltMatrixLayout(
                                     ld));
 }
 
+HipblasltMatrixLayout::HipblasltMatrixLayout(hipDataType dataType,
+                                             uint64_t rows,
+                                             uint64_t cols,
+                                             int64_t ld)
+{
+    THROW_ON_HIPBLASLT_FAILURE(
+        hipblasLtMatrixLayoutCreate(&_matrixLayout, dataType, rows, cols, ld));
+}
+
 HipblasltMatrixLayout::HipblasltMatrixLayout(HipblasltMatrixLayout&& other) noexcept
     : _uid(other._uid)
     , _matrixLayout(other._matrixLayout)

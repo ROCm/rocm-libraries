@@ -16,6 +16,10 @@ public:
     HipblasltMatrixLayout(
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor);
 
+    // Low-level layout from explicit dimensions (no associated tensor uid). Used
+    // for auxiliary buffers such as scale transposes.
+    HipblasltMatrixLayout(hipDataType dataType, uint64_t rows, uint64_t cols, int64_t ld);
+
     HipblasltMatrixLayout(const HipblasltMatrixLayout&) = delete;
     HipblasltMatrixLayout& operator=(const HipblasltMatrixLayout&) = delete;
 
