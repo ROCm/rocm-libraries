@@ -571,7 +571,8 @@ nlohmann::json makeOverrideConfig(std::initializer_list<nlohmann::json> rules)
     {
         overrides.push_back(rule);
     }
-    return {{config_json::ENGINE_OVERRIDES, std::move(overrides)}};
+    return {{config_json::VERSION, hipdnn_data_sdk::detail::autotune_config::version::CURRENT},
+            {config_json::ENGINE_OVERRIDES, std::move(overrides)}};
 }
 
 constexpr const char* DETERMINISTIC_RULE_JSON = R"({
@@ -1033,14 +1034,15 @@ TEST_F(TestConfigBuiltIn, FinalizeMatchedRuleMovesEngineToFrontWrwNode)
 TEST_F(TestConfigBuiltIn, FinalizePointwiseCriteriaPreventsModeOvermatch)
 {
     const TempJsonOverrideFile json(
-        makeOverrideConfig({
-                               {{config_json::OP, config_op::POINTWISE},
-                                {config_json::CRITERIA, {{config_criterion::POINTWISE_MODE, 2}}},
-                                {config_json::ENGINE_NAME, MIOPEN_DETERMINISTIC_ENGINE_NAME},
-                                {config_json::TENSORS,
-                                 nlohmann::json::array({makeRuleTensor({1, 3, 4, 4}),
-                                                        makeRuleTensor({1, 3, 4, 4})})}},
-                           })
+        makeOverrideConfig(
+            {
+                {{config_json::OP, config_op::POINTWISE},
+                 {config_json::CRITERIA, {{config_criterion::POINTWISE_MODE, 2}}},
+                 {config_json::ENGINE_NAME, MIOPEN_DETERMINISTIC_ENGINE_NAME},
+                 {config_json::TENSORS,
+                  nlohmann::json::array({makeNamedRuleTensor(config_tensor::IN_0, {1, 3, 4, 4}),
+                                         makeNamedRuleTensor(config_tensor::IN_1, {1, 3, 4, 4})})}},
+            })
             .dump(2));
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(OVERRIDE_ENV,
                                                                           json.path());

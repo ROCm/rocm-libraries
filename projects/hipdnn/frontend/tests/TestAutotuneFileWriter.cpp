@@ -34,6 +34,7 @@ namespace config_criterion = hipdnn_data_sdk::detail::autotune_config::criterion
 namespace config_json = hipdnn_data_sdk::detail::autotune_config::json;
 namespace config_op = hipdnn_data_sdk::detail::autotune_config::op;
 namespace config_tensor = hipdnn_data_sdk::detail::autotune_config::tensor;
+namespace config_version = hipdnn_data_sdk::detail::autotune_config::version;
 
 /// Create a temporary file path for testing, cleaned up by destructor.
 struct TempFile
@@ -182,6 +183,7 @@ TEST(TestAutotuneFileWriter, NamedEntryReplacesLegacyEntryWithSamePositionalSign
     const std::vector<std::string> tensorIds = {config_tensor::X, config_tensor::W};
 
     nlohmann::json root;
+    // No version field: existing entry is treated as legacy positional format.
     root[config_json::ENGINE_OVERRIDES] = nlohmann::json::array(
         {buildOverrideEntry(makeResult(1, "OLD"), config_op::CONV_FPROP, dims, {})});
     {
@@ -198,6 +200,7 @@ TEST(TestAutotuneFileWriter, NamedEntryReplacesLegacyEntryWithSamePositionalSign
     std::ifstream file(tmpFile.path);
     auto json = nlohmann::json::parse(file);
     ASSERT_EQ(json[config_json::ENGINE_OVERRIDES].size(), 1u);
+    EXPECT_EQ(json[config_json::VERSION], config_version::CURRENT);
     EXPECT_EQ(json[config_json::ENGINE_OVERRIDES][0][config_json::ENGINE_NAME], "NEW");
     EXPECT_EQ(
         json[config_json::ENGINE_OVERRIDES][0][config_json::TENSORS][0][config_json::TENSOR_ID],
@@ -215,6 +218,7 @@ TEST(TestAutotuneFileWriter, NamedEntryReplacesExistingEntryWithReorderedNamedTe
     std::reverse(oldEntry[config_json::TENSORS].begin(), oldEntry[config_json::TENSORS].end());
 
     nlohmann::json root;
+    root[config_json::VERSION] = config_version::CURRENT;
     root[config_json::ENGINE_OVERRIDES] = nlohmann::json::array({oldEntry});
     {
         std::ofstream file(tmpFile.path);
@@ -230,6 +234,7 @@ TEST(TestAutotuneFileWriter, NamedEntryReplacesExistingEntryWithReorderedNamedTe
     std::ifstream file(tmpFile.path);
     auto json = nlohmann::json::parse(file);
     ASSERT_EQ(json[config_json::ENGINE_OVERRIDES].size(), 1u);
+    EXPECT_EQ(json[config_json::VERSION], config_version::CURRENT);
     EXPECT_EQ(json[config_json::ENGINE_OVERRIDES][0][config_json::ENGINE_NAME], "NEW");
     EXPECT_EQ(
         json[config_json::ENGINE_OVERRIDES][0][config_json::TENSORS][0][config_json::TENSOR_ID],
@@ -322,9 +327,10 @@ TEST(TestAutotuneFileWriter, WriteToNewFile)
     std::ifstream file(tmpFile.path);
     auto json = nlohmann::json::parse(file);
 
-    ASSERT_TRUE(json.contains("engine_overrides"));
-    EXPECT_EQ(json["engine_overrides"].size(), 1u);
-    EXPECT_EQ(json["engine_overrides"][0]["engine_name"], "MIOPEN_ENGINE");
+    ASSERT_TRUE(json.contains(config_json::ENGINE_OVERRIDES));
+    EXPECT_EQ(json[config_json::VERSION], config_version::DEFAULT);
+    EXPECT_EQ(json[config_json::ENGINE_OVERRIDES].size(), 1u);
+    EXPECT_EQ(json[config_json::ENGINE_OVERRIDES][0][config_json::ENGINE_NAME], "MIOPEN_ENGINE");
 }
 
 TEST(TestAutotuneFileWriter, WriteReplacesNonArrayEngineOverrides)

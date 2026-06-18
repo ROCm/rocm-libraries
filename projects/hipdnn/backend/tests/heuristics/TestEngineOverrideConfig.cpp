@@ -14,6 +14,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/detail/AutotuneConfigNames.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <nlohmann/json.hpp>
 
 #include <cstdint>
 #include <string>
@@ -291,21 +292,55 @@ TEST(TestEngineOverrideConfig, SameShapeDifferentCriteriaSelectsDifferentEngines
 
 TEST(TestEngineOverrideConfig, NamedTensorRulesIgnoreConfigTensorOrder)
 {
-    constexpr const char* CONTENTS = R"({
-  "engine_overrides": [
-    {
-      "op": "pointwise",
-      "criteria": { "pointwise_mode": 2 },
-      "engine_name": "MIOPEN_ENGINE",
-      "tensors": [
-        { "tensor_id": "in_1_tensor_uid", "dim": [5, 6] },
-        { "tensor_id": "in_0_tensor_uid", "dim": [2, 4] }
-      ]
-    }
-  ]
-})";
+    auto config = EngineOverrideConfig::loadFromContent(nlohmann::json{
+        {hipdnn_data_sdk::detail::autotune_config::json::VERSION,
+         hipdnn_data_sdk::detail::autotune_config::version::CURRENT},
+        {hipdnn_data_sdk::detail::autotune_config::json::ENGINE_OVERRIDES,
+         nlohmann::json::array(
+             {{{hipdnn_data_sdk::detail::autotune_config::json::OP, config_op::POINTWISE},
+               {hipdnn_data_sdk::detail::autotune_config::json::CRITERIA,
+                {{config_criterion::POINTWISE_MODE, 2}}},
+               {hipdnn_data_sdk::detail::autotune_config::json::ENGINE_NAME, MIOPEN_ENGINE_NAME},
+               {hipdnn_data_sdk::detail::autotune_config::json::TENSORS,
+                nlohmann::json::array(
+                    {{{hipdnn_data_sdk::detail::autotune_config::json::TENSOR_ID,
+                       config_tensor::IN_1},
+                      {hipdnn_data_sdk::detail::autotune_config::json::DIM, {5, 6}}},
+                     {{hipdnn_data_sdk::detail::autotune_config::json::TENSOR_ID,
+                       config_tensor::IN_0},
+                      {hipdnn_data_sdk::detail::autotune_config::json::DIM, {2, 4}}}})}}})}}
+                                                            .dump());
+    ASSERT_TRUE(config.has_value());
 
-    auto config = EngineOverrideConfig::loadFromContent(CONTENTS);
+    const TensorData x{{2, 4}, {}};
+    const TensorData y{{5, 6}, {}};
+    const std::vector<TensorView> tensors{namedViewOf(config_tensor::IN_0, x),
+                                          namedViewOf(config_tensor::IN_1, y)};
+
+    auto result = config->matchOperation(
+        config_op::POINTWISE, {Criterion{config_criterion::POINTWISE_MODE, 2}}, tensors);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, MIOPEN_ENGINE_ID);
+}
+
+TEST(TestEngineOverrideConfig, MissingVersionUsesLegacyPositionalTensorMatchingEvenWithTensorIds)
+{
+    auto config = EngineOverrideConfig::loadFromContent(nlohmann::json{
+        {hipdnn_data_sdk::detail::autotune_config::json::ENGINE_OVERRIDES,
+         nlohmann::json::array(
+             {{{hipdnn_data_sdk::detail::autotune_config::json::OP, config_op::POINTWISE},
+               {hipdnn_data_sdk::detail::autotune_config::json::CRITERIA,
+                {{config_criterion::POINTWISE_MODE, 2}}},
+               {hipdnn_data_sdk::detail::autotune_config::json::ENGINE_NAME, MIOPEN_ENGINE_NAME},
+               {hipdnn_data_sdk::detail::autotune_config::json::TENSORS,
+                nlohmann::json::array(
+                    {{{hipdnn_data_sdk::detail::autotune_config::json::TENSOR_ID,
+                       config_tensor::IN_1},
+                      {hipdnn_data_sdk::detail::autotune_config::json::DIM, {2, 4}}},
+                     {{hipdnn_data_sdk::detail::autotune_config::json::TENSOR_ID,
+                       config_tensor::IN_0},
+                      {hipdnn_data_sdk::detail::autotune_config::json::DIM, {5, 6}}}})}}})}}
+                                                            .dump());
     ASSERT_TRUE(config.has_value());
 
     const TensorData x{{2, 4}, {}};
@@ -324,6 +359,7 @@ TEST(TestEngineOverrideConfig, NamedTensorRulesRejectSameShapeWrongRole)
     OperationRule rule;
     rule.op = config_op::SDPA_FWD;
     rule.engineName = MIOPEN_ENGINE_NAME;
+    rule.useNamedTensorIds = true;
     rule.tensors = {makeNamedPattern(config_tensor::Q, {2, 4}),
                     makeNamedPattern(config_tensor::K, {2, 4}),
                     makeNamedPattern(config_tensor::V, {2, 4}),

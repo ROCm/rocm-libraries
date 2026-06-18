@@ -44,6 +44,7 @@ namespace autotune
 namespace detail
 {
 namespace config_json = hipdnn_data_sdk::detail::autotune_config::json;
+namespace config_version = hipdnn_data_sdk::detail::autotune_config::version;
 } // namespace detail
 using Criteria = std::vector<std::pair<std::string, int64_t>>;
 
@@ -69,6 +70,38 @@ inline nlohmann::json criteriaOrEmpty(const nlohmann::json& entry)
 
 namespace detail
 {
+
+inline int64_t getConfigVersion(const nlohmann::json& root)
+{
+    if(root.is_object() && root.contains(config_json::VERSION))
+    {
+        return root.at(config_json::VERSION).get<int64_t>();
+    }
+    return config_version::DEFAULT;
+}
+
+inline bool usesNamedTensorIds(int64_t configVersion)
+{
+    return configVersion >= config_version::NAMED_TENSOR_IDS;
+}
+
+inline bool entryUsesNamedTensorIds(const nlohmann::json& entry)
+{
+    if(!entry.contains(config_json::TENSORS) || !entry[config_json::TENSORS].is_array())
+    {
+        return false;
+    }
+    const auto& tensors = entry[config_json::TENSORS];
+    return !tensors.empty()
+           && std::all_of(tensors.begin(), tensors.end(), [](const nlohmann::json& tensor) {
+                  return tensor.contains(config_json::TENSOR_ID);
+              });
+}
+
+inline int64_t configVersionForEntry(const nlohmann::json& entry)
+{
+    return entryUsesNamedTensorIds(entry) ? config_version::CURRENT : config_version::DEFAULT;
+}
 
 inline nlohmann::json tensorEntryWithoutId(nlohmann::json entry)
 {
@@ -119,15 +152,18 @@ inline bool tensorsMatchByPositionIgnoringIds(const nlohmann::json& existing,
     return true;
 }
 
-inline bool tensorSignaturesMatch(const nlohmann::json& existing, const nlohmann::json& replacement)
+inline bool tensorSignaturesMatch(const nlohmann::json& existing,
+                                  const nlohmann::json& replacement,
+                                  int64_t configVersion)
 {
-    if(existing == replacement)
-    {
-        return true;
-    }
     if(!existing.is_array() || !replacement.is_array() || existing.size() != replacement.size())
     {
         return false;
+    }
+
+    if(!usesNamedTensorIds(configVersion))
+    {
+        return tensorsMatchByPositionIgnoringIds(existing, replacement);
     }
 
     const bool existingAllNamed
@@ -138,11 +174,8 @@ inline bool tensorSignaturesMatch(const nlohmann::json& existing, const nlohmann
         = std::all_of(replacement.begin(), replacement.end(), [](const nlohmann::json& tensor) {
               return tensor.contains(config_json::TENSOR_ID);
           });
-    if(existingAllNamed && replacementAllNamed)
-    {
-        return tensorsMatchByIdIgnoringOrder(existing, replacement);
-    }
-    return tensorsMatchByPositionIgnoringIds(existing, replacement);
+    return existingAllNamed && replacementAllNamed
+           && tensorsMatchByIdIgnoringOrder(existing, replacement);
 }
 
 } // namespace detail
@@ -338,6 +371,8 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
             root = nlohmann::json::object();
         }
 
+        const int64_t existingConfigVersion = getConfigVersion(root);
+
         if(!root.contains(config_json::ENGINE_OVERRIDES)
            || !root[config_json::ENGINE_OVERRIDES].is_array())
         {
@@ -365,6 +400,8 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
             return {ErrorCode::OK, ""};
         }
 
+        root[config_json::VERSION] = configVersionForEntry(*newEntry);
+
         // Remove the pre-existing entry that matches the new entry's (op, tensors)
         // signature, then append the new entry. The knob configuration is
         // unconditionally replaced.
@@ -385,7 +422,8 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
                                                       && existing.contains(config_json::TENSORS)
                                                       && tensorSignaturesMatch(
                                                           existing[config_json::TENSORS],
-                                                          (*newEntry)[config_json::TENSORS]);
+                                                          (*newEntry)[config_json::TENSORS],
+                                                          existingConfigVersion);
                                            }),
                             overrides.end());
         }

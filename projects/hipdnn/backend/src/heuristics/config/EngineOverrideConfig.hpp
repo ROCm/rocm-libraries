@@ -23,6 +23,7 @@
 namespace hipdnn_backend::heuristics::config
 {
 namespace config_json = hipdnn_data_sdk::detail::autotune_config::json;
+namespace config_version = hipdnn_data_sdk::detail::autotune_config::version;
 
 /// Dimension value meaning "match any value in this slot".
 inline constexpr int64_t WILDCARD_DIM = -1;
@@ -39,8 +40,7 @@ struct TensorView
 
 /// Pattern for a single tensor: an optional schema tensor field name, a list of
 /// expected dimensions, and optional strides, with -1 as a per-slot wildcard.
-/// When `stride` is empty no stride matching is performed. Missing tensor IDs
-/// are legacy config entries and fall back to the historical positional order.
+/// When `stride` is empty no stride matching is performed.
 struct TensorPattern
 {
     std::optional<std::string> tensorId;
@@ -92,6 +92,7 @@ struct OperationRule
     std::string engineName;
     std::vector<Criterion> criteria;
     std::vector<TensorPattern> tensors;
+    bool useNamedTensorIds = false;
 
     bool matches(const std::vector<Criterion>& actualCriteria,
                  const std::vector<TensorView>& inputs) const
@@ -114,11 +115,7 @@ struct OperationRule
 private:
     bool matchesTensors(const std::vector<TensorView>& inputs) const
     {
-        // Config entries are either legacy positional (no tensor_id fields) or
-        // logical-name based (tensor_id on every tensor). The writer never
-        // emits mixed entries, and mixed hand-authored entries are not safe to
-        // interpret, so the first tensor selects the matching mode.
-        if(tensors.empty() || !tensors.front().tensorId.has_value())
+        if(!useNamedTensorIds)
         {
             return matchesLegacyPositional(inputs);
         }
@@ -302,12 +299,28 @@ private:
         rule.criteria = normalizeCriteria(std::move(rule.criteria));
     }
 
+    static int64_t getConfigVersion(const nlohmann::json& j)
+    {
+        if(j.contains(config_json::VERSION))
+        {
+            return j.at(config_json::VERSION).get<int64_t>();
+        }
+        return config_version::DEFAULT;
+    }
+
+    static bool usesNamedTensorIds(int64_t configVersion)
+    {
+        return configVersion >= config_version::NAMED_TENSOR_IDS;
+    }
+
     static EngineOverrideConfig parseJson(const nlohmann::json& j)
     {
+        const bool useNamedTensorIds = usesNamedTensorIds(getConfigVersion(j));
         std::vector<OperationRule> rules;
         for(const auto& entry : j.at(config_json::ENGINE_OVERRIDES))
         {
             OperationRule rule;
+            rule.useNamedTensorIds = useNamedTensorIds;
             rule.op = entry.at(config_json::OP).get<std::string>();
             rule.engineName = entry.at(config_json::ENGINE_NAME).get<std::string>();
             if(entry.contains(config_json::CRITERIA))

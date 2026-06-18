@@ -39,6 +39,7 @@ namespace config_criterion = hipdnn_data_sdk::detail::autotune_config::criterion
 namespace config_json = hipdnn_data_sdk::detail::autotune_config::json;
 namespace config_op = hipdnn_data_sdk::detail::autotune_config::op;
 namespace config_tensor = hipdnn_data_sdk::detail::autotune_config::tensor;
+namespace config_version = hipdnn_data_sdk::detail::autotune_config::version;
 
 class GraphTensorBundle
 {
@@ -203,6 +204,8 @@ protected:
         in >> json;
 
         ASSERT_TRUE(json.contains(config_json::ENGINE_OVERRIDES));
+        ASSERT_TRUE(json.contains(config_json::VERSION));
+        EXPECT_EQ(json[config_json::VERSION], config_version::CURRENT);
         ASSERT_EQ(json[config_json::ENGINE_OVERRIDES].size(), 1u);
         const auto& entry = json[config_json::ENGINE_OVERRIDES][0];
         EXPECT_EQ(entry[config_json::OP], testCase.expectedOpName);

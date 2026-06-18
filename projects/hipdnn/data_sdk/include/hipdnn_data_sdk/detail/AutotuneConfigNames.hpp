@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 namespace hipdnn_data_sdk::detail::autotune_config
 {
 
@@ -28,6 +30,7 @@ inline constexpr const char* POINTWISE = "pointwise";
 
 namespace json
 {
+inline constexpr const char* VERSION = "version";
 inline constexpr const char* ENGINE_OVERRIDES = "engine_overrides";
 inline constexpr const char* OP = "op";
 inline constexpr const char* CRITERIA = "criteria";
@@ -37,6 +40,13 @@ inline constexpr const char* TENSOR_ID = "tensor_id";
 inline constexpr const char* DIM = "dim";
 inline constexpr const char* STRIDE = "stride";
 } // namespace json
+
+namespace version
+{
+inline constexpr int64_t DEFAULT = 1;
+inline constexpr int64_t NAMED_TENSOR_IDS = 2;
+inline constexpr int64_t CURRENT = NAMED_TENSOR_IDS;
+} // namespace version
 
 namespace criterion
 {
