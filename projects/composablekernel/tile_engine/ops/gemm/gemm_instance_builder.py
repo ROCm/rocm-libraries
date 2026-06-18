@@ -502,7 +502,7 @@ class GemmKernelBuilder:
             pad_m,
             pad_n,
             pad_k,
-            persistent,
+            persistent_or_preshuffle_quant,
         ) = self._normalize_trait_combo(trait_combo)
 
         kernel_name = self._format_kernel_name(trait_combo, tile_config)
