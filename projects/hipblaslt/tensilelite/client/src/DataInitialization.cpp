@@ -2702,7 +2702,8 @@ namespace TensileLite
                                                           p.gpuInput.valid.get(),
                                                           p.gpuInput.bad.get(),
                                                           p.maxElements,
-                                                          kind);
+                                                          kind,
+                                                          useAsync ? copyStream : nullptr);
                         }
                         else
                         {

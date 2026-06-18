@@ -96,6 +96,7 @@ set(CLIENT_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")
 
 add_executable(batch-pointer-test
     "${CMAKE_CURRENT_SOURCE_DIR}/BatchPointerReset_test.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/DataInitializationAsyncReset_test.cpp"
     "${CLIENT_SRC_DIR}/ClientProblemFactory.cpp"
     "${CLIENT_SRC_DIR}/DataInitialization.cpp"
     "${CLIENT_SRC_DIR}/ProgramOptions.cpp"
