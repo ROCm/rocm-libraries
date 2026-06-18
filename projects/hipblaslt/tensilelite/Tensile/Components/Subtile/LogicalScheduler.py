@@ -2563,21 +2563,60 @@ class LogicalScheduler:
         """
         self._ensure_pass(Pass.REMOVE_WAIT_LR_SYNC)
 
-        if not self._is_multi_du() or self.config.numPartitions <= 1:
+        if not self._is_multi_du():
             self._completed.add(Pass.REMOVE_WAIT_GR_SYNC)
             return
 
-        last_pi = self.config.numPartitions - 1
-        for pi, slots in enumerate(self._partitions):
-            for si, slot in enumerate(slots):
-                if si == 0 or pi == last_pi:
-                    continue
-                for lr in slot.lrs:
-                    lr.preOps = [
-                        op for op in lr.preOps
-                        if not isinstance(op, WaitGROp)]
+        if self.config.numPartitions > 1:
+            last_pi = self.config.numPartitions - 1
+            for pi, slots in enumerate(self._partitions):
+                for si, slot in enumerate(slots):
+                    if si == 0 or pi == last_pi:
+                        continue
+                    for lr in slot.lrs:
+                        lr.preOps = [
+                            op for op in lr.preOps
+                            if not isinstance(op, WaitGROp)]
 
+        self._insert_gr_defer_edges()
         self._completed.add(Pass.REMOVE_WAIT_GR_SYNC)
+
+    def _insert_gr_defer_edges(self):
+        """Multi-DU LDS double-buffer-reuse hazard, as explicit logical edges.
+
+        In a wait_gr slot the post-barrier LRs (the LR chain headed by a
+        surviving wait_gr_sync) are still consuming an LDS buffer that the
+        next-iteration GRs scheduled in the same slot will overwrite once their
+        gr_inc swaps the write buffer. Make the GR chain's head depend on the
+        last post-barrier LR so the next GR is ordered after those reads.
+
+        This relocates onto a real before-chain edge the ordering the
+        instruction scheduler used to re-derive from slot placement (the
+        post-wait_gr ds_read fence). Keying on the wait_gr that survives the
+        prior passes matches the old fence, which keyed on the final wait_gr
+        position. The edge is therefore visible in the dep-path dump and
+        enforced by the topology alone.
+        """
+        order = self._LR_GR_ORDER
+        for slots in self._partitions:
+            for slot in slots:
+                if not slot.lrs or not slot.grs:
+                    continue
+                ordered_lrs = sorted(slot.lrs, key=lambda lr: order.index(lr.tensor))
+                head_lr = ordered_lrs[0]
+                last_lr = ordered_lrs[-1]
+                if not any(isinstance(op, WaitGROp) for op in head_lr.preOps):
+                    continue
+                slot_gr_set = set(id(gr) for gr in slot.grs)
+                # Skip slots where an LR already depends on a same-slot GR
+                # (group_lr_gr merged GR -> LR); a reverse edge would cycle.
+                if any(id(d.ref) in slot_gr_set
+                       for lr in slot.lrs for d in lr.deps):
+                    continue
+                first_gr = min(slot.grs, key=self._gr_sort_key)
+                if first_gr.deps:
+                    continue
+                first_gr.deps = [Dep(ref=last_lr, mt_offset=0)]
 
     def _split_deps(self, deps: List[Dep], consumer_pi: int,
                     consumer_slot: int) -> Tuple[List[Dep], List[Dep]]:

@@ -3912,3 +3912,77 @@ class TestIsWaitGrClassification:
         drain_gr = SWaitCntEx(vlcnt=0, vscnt=-1,
                               comment="Wait GR (full drain): A=0 B=0 SA=0 SB=0")
         assert _isWaitGr(drain_gr)
+
+
+class TestGrDeferAfterPostBarrierLr:
+    """The multi-DU LDS double-buffer-reuse hazard as an explicit logical edge.
+
+    In a wait_gr slot the post-barrier LRs are still consuming an LDS buffer
+    that the next-iteration GRs will overwrite once their gr_inc swaps the
+    write buffer. The scheduler expresses this as a before-chain edge from the
+    GR chain head onto the last post-barrier LR, so the GR is ordered after
+    those reads. This used to be re-derived by an instruction-scheduler fence;
+    now it is visible in the dep-path dump and enforced by the topology.
+
+    For single-DU the hazard does not exist (no per-uid double buffering of the
+    A/B tensors), so no such edge is added and the next GR keeps its own path.
+    """
+
+    @staticmethod
+    def _waitgr_slots(sched):
+        """Yield (path_optypes) for every regular path in a slot that has a
+        wait_gr somewhere in that subIterK."""
+        from Tensile.Components.Subtile.InstructionScheduler import (
+            extractPathsFromBeforeDeps,
+        )
+        for partition_emitted in sched._emitted:
+            for emitted in partition_emitted:
+                _, paths, _ = extractPathsFromBeforeDeps(emitted)
+                slot_optypes = [emitted[idx].opType for path in paths for idx in path]
+                if 'wait_gr' not in slot_optypes:
+                    continue
+                yield [[emitted[idx].opType for idx in path] for path in paths]
+
+    @classmethod
+    def _gr_shares_waitgr_path(cls, sched):
+        """True if a GR is ordered into the same path as a wait_gr (the edge)."""
+        for paths in cls._waitgr_slots(sched):
+            for ops in paths:
+                if 'wait_gr' in ops and 'gr' in ops:
+                    return True
+        return False
+
+    def test_edge_present_for_multi_du(self):
+        cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=1)
+        assert cfg.numUnroll['A'] == 2 and cfg.numUnroll['B'] == 2
+        sched = LogicalScheduler(cfg)
+        sched.emit()
+        assert sched._is_multi_du()
+        assert self._gr_shares_waitgr_path(sched), (
+            "multi-DU: the next-iteration GR must be ordered after the "
+            "post-barrier LRs (GR-defer edge missing)")
+
+    def test_edge_absent_for_single_du(self):
+        cfg = make_cfg_256x256_fp4(pgr=1)
+        assert cfg.numUnroll['A'] == 1 and cfg.numUnroll['B'] == 1
+        sched = LogicalScheduler(cfg)
+        sched.emit()
+        assert not sched._is_multi_du()
+        assert not self._gr_shares_waitgr_path(sched), (
+            "single-DU: no LDS double-buffer hazard, so the GR must keep its "
+            "own path (no GR-defer edge expected)")
+
+    def test_wait_gr_and_sync_stay_contiguous_multi_du(self):
+        """The wait_gr+sync pair must remain inseparable: in every path that
+        contains a wait_gr it is immediately followed by its sync, with no
+        gr/lr inserted between them (the F-residual atomicity guarantee)."""
+        cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=1)
+        sched = LogicalScheduler(cfg)
+        sched.emit()
+        for paths in self._waitgr_slots(sched):
+            for ops in paths:
+                for i, op in enumerate(ops):
+                    if op == 'wait_gr':
+                        assert i + 1 < len(ops) and ops[i + 1] == 'sync', (
+                            f"wait_gr must be immediately followed by sync, "
+                            f"got path {ops}")
