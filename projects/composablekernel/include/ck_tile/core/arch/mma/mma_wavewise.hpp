@@ -138,6 +138,7 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<dense::wavewise::detail::get
         struct Impl
         {
             static constexpr index_t kCNLane = MmaOp::kN / MmaOp::kCNBlocks;
+            static constexpr index_t kK      = MmaOp::kK;
         };
     };
 

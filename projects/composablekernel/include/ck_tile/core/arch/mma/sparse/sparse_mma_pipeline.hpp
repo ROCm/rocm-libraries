@@ -121,6 +121,7 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
         struct Impl
         {
             static constexpr index_t kCNLane = MmaOp::kN / MmaOp::kCNBlocks;
+            static constexpr index_t kK      = MmaOp::kK;
         };
     };
     // TODO: TileDistrEncCalc only supports K composition (kIter). Setting UncompressedA to true
