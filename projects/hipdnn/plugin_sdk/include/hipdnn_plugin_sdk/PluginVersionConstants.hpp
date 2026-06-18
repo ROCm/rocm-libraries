@@ -21,4 +21,10 @@ inline constexpr std::string_view K_ENGINE_PLUGIN_API_VERSION_BASELINE = "1.0.0"
 // strictly less than this when the graph opts into overridable shapes.
 inline constexpr std::string_view K_OVERRIDE_EXECUTE_MIN_API_VERSION = "1.1.0";
 
+// Minimum engine plugin C ABI version that advertises support for ragged
+// tensors (RFC 0014). Introduced in engine plugin API 1.2.0. The host's
+// applicability filter rejects any plugin reporting an API version strictly
+// less than this when the graph contains ragged tensors.
+inline constexpr std::string_view K_RAGGED_TENSOR_MIN_API_VERSION = "1.2.0";
+
 } // namespace hipdnn_plugin_sdk

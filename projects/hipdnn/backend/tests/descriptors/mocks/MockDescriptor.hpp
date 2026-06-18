@@ -142,6 +142,8 @@ public:
     MOCK_METHOD(hipdnnHandle_t, getHandle, (), (const, override));
     MOCK_METHOD(hipdnnPluginConstData_t, getSerializedGraph, (), (const, override));
     MOCK_METHOD(bool, isOverrideShapeEnabled, (), (const, override));
+    // isRaggedTensorEnabled() is NOT mocked — the base class returns _isRaggedTensorEnabled
+    // (default false), so existing tests get false without any expectation setup.
 
     static hipdnnBackendDescriptorType_t getStaticType()
     {

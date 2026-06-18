@@ -235,6 +235,9 @@ typedef enum
     /** @brief Whether execute-time override shapes are enabled for this graph (bool, extension) */
     HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT = 609,
 
+    /** @brief Whether any tensor in the graph carries a ragged-offset; gates ragged-aware plugins (bool, extension) */
+    HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT = 610,
+
     /** @} */
 
     /**
@@ -453,6 +456,12 @@ typedef enum
 
     /** @brief Read-only: whether a pass-by-value scalar is set on this tensor (extension) */
     HIPDNN_ATTR_TENSOR_IS_BY_VALUE = 1307,
+
+    /** @brief Required byte alignment of the tensor's physical buffer pointer */
+    HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT = 1308,
+
+    /** @brief UID of the ragged-offset aux tensor for this tensor (int64_t, optional) */
+    HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC = 1309,
 
     /** @} */
 

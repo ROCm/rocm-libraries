@@ -83,14 +83,25 @@ bool readIsOverrideShapeEnabled(const GraphDescriptor& graphDesc)
     return flag;
 }
 
+bool readIsRaggedTensorEnabled(const GraphDescriptor& graphDesc)
+{
+    return graphDesc.isRaggedTensorEnabled();
+}
+
 const hipdnn_data_sdk::utilities::Version&
-    computeMinimumPluginApiVersion(bool isOverrideShapeEnabled)
+    computeMinimumPluginApiVersion(bool isOverrideShapeEnabled, bool isRaggedTensorEnabled)
 {
     static const hipdnn_data_sdk::utilities::Version s_baselineVersion{
         hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE};
     static const hipdnn_data_sdk::utilities::Version s_overrideExecuteMinVersion{
         hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION};
+    static const hipdnn_data_sdk::utilities::Version s_raggedTensorMinVersion{
+        hipdnn_plugin_sdk::K_RAGGED_TENSOR_MIN_API_VERSION};
 
+    if(isRaggedTensorEnabled)
+    {
+        return s_raggedTensorMinVersion;
+    }
     if(isOverrideShapeEnabled)
     {
         return s_overrideExecuteMinVersion;
@@ -350,7 +361,9 @@ std::vector<int64_t>
     // and graphs that opt in to overridable tensor shapes require the extended
     // override-execute SDK surface. Older explicit API versions are skipped.
     const bool isOverrideShapeEnabled = readIsOverrideShapeEnabled(*graphDesc);
-    const auto& requiredVersion = computeMinimumPluginApiVersion(isOverrideShapeEnabled);
+    const bool isRaggedTensorEnabled = readIsRaggedTensorEnabled(*graphDesc);
+    const auto& requiredVersion
+        = computeMinimumPluginApiVersion(isOverrideShapeEnabled, isRaggedTensorEnabled);
 
     std::vector<int64_t> engineIds;
 
@@ -695,7 +708,7 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
 
         const auto pluginApiVersion = plugin->parsedApiVersion();
         THROW_IF_FALSE(pluginApiVersion.has_value()
-                           && *pluginApiVersion >= computeMinimumPluginApiVersion(true),
+                           && *pluginApiVersion >= computeMinimumPluginApiVersion(true, false),
                        HIPDNN_STATUS_NOT_SUPPORTED,
                        "Selected plugin API version does not support "
                        "hipdnnEnginePluginExecuteOpGraphWithOverrides.");

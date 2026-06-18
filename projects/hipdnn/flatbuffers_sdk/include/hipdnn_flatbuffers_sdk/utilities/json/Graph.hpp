@@ -147,6 +147,7 @@ inline void to_json(nlohmann::json& graphJson, const data_objects::Graph& graph)
     graphJson["name"] = flatbuffers::safeStr(graph.name());
     graphJson["tensors"] = graph.tensors();
     graphJson["is_override_shape_enabled"] = graph.is_override_shape_enabled();
+    graphJson["is_ragged_tensor_enabled"] = graph.is_ragged_tensor_enabled();
     if(graph.preferred_engine_id().has_value())
     {
         graphJson["preferred_engine_id"] = graph.preferred_engine_id().value();
@@ -236,6 +237,7 @@ inline auto to<data_objects::Graph>(flatbuffers::FlatBufferBuilder& builder,
         preferredEngineId = entry["preferred_engine_id"].get<int64_t>();
     }
     const bool isOverrideShapeEnabled = entry.value("is_override_shape_enabled", false);
+    const bool isRaggedTensorEnabled = entry.value("is_ragged_tensor_enabled", false);
 
     auto nodes = toVector<Node>(builder, entry.at("nodes"));
     auto tensors = toVector<TensorAttributes>(builder, entry.at("tensors"));
@@ -247,7 +249,8 @@ inline auto to<data_objects::Graph>(flatbuffers::FlatBufferBuilder& builder,
                                            &tensors,
                                            &nodes,
                                            preferredEngineId,
-                                           isOverrideShapeEnabled);
+                                           isOverrideShapeEnabled,
+                                           isRaggedTensorEnabled);
 }
 
 }

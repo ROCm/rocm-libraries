@@ -57,6 +57,9 @@ private:
     // Opt-in flag for overridable tensor shapes (RFC 0008).
     bool _isOverrideShapeEnabled = false;
 
+    // Set when any tensor in the graph carries a ragged-offset (RFC 0014).
+    bool _isRaggedTensorEnabled = false;
+
     // Optional human-readable name for the graph, empty when unset.
     std::string _name;
 
@@ -138,6 +141,7 @@ public:
 
     virtual hipdnnHandle_t getHandle() const;
     virtual bool isOverrideShapeEnabled() const;
+    virtual bool isRaggedTensorEnabled() const;
 
     static hipdnnBackendDescriptorType_t getStaticType();
 

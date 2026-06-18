@@ -59,4 +59,6 @@ table TensorAttributes {
     dims: [long];
     virtual: bool;
     value: TensorValue;
+    ragged_offset_tensor_uid: long = null;
+    alignment: long = 16;
 }

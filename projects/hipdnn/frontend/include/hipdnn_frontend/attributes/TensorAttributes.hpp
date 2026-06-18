@@ -16,6 +16,7 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
+#include <memory>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -334,6 +335,56 @@ public:
     }
 
     /**
+     * @brief Get the ragged-offset aux tensor for this tensor
+     * @return Shared pointer to the ragged-offset TensorAttributes, or nullptr if not ragged
+     */
+    std::shared_ptr<TensorAttributes> get_ragged_offset() // NOLINT(readability-identifier-naming)
+    {
+        return _raggedOffset;
+    }
+
+    /**
+     * @brief Set the ragged-offset aux tensor for this tensor
+     * @param value Shared pointer to the TensorAttributes of the ragged-offset aux tensor
+     * @return Reference to this for method chaining
+     */
+    TensorAttributes& set_ragged_offset( // NOLINT(readability-identifier-naming)
+        const std::shared_ptr<TensorAttributes>& value)
+    {
+        _raggedOffset = value;
+        return *this;
+    }
+
+    /**
+     * @brief Check whether this tensor has a ragged-offset aux tensor set
+     * @return true if a ragged-offset aux has been set
+     */
+    bool has_ragged_offset() const // NOLINT(readability-identifier-naming)
+    {
+        return _raggedOffset != nullptr;
+    }
+
+    /**
+     * @brief Get the required byte alignment of the tensor's physical buffer pointer
+     * @return Alignment in bytes (default 16)
+     */
+    int64_t get_alignment() const // NOLINT(readability-identifier-naming)
+    {
+        return _alignment;
+    }
+
+    /**
+     * @brief Set the required byte alignment of the tensor's physical buffer pointer
+     * @param value Alignment in bytes; must be >= 1
+     * @return Reference to this for method chaining
+     */
+    TensorAttributes& set_alignment(const int64_t value) // NOLINT(readability-identifier-naming)
+    {
+        _alignment = value;
+        return *this;
+    }
+
+    /**
      * @brief Fill unset attributes from graph context
      * @param graphAttributes The graph attributes to inherit from
      * @return Reference to this for method chaining
@@ -394,6 +445,10 @@ public:
                                ErrorCode::INVALID_VALUE,
                                "Tensor " + _name + " must have only positive dimensions");
 
+        HIPDNN_RETURN_IF_TRUE(_alignment < 1,
+                              ErrorCode::INVALID_VALUE,
+                              "Tensor " + _name + " alignment must be >= 1");
+
         return {ErrorCode::OK, ""};
     }
 
@@ -406,6 +461,8 @@ private:
     std::vector<int64_t> _dim;
     bool _isVirtual = false;
     ValueVariant _value;
+    std::shared_ptr<TensorAttributes> _raggedOffset; ///< nullptr = non-ragged
+    int64_t _alignment = 16; ///< byte alignment of the physical buffer pointer (default 16)
 };
 typedef TensorAttributes Tensor_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph

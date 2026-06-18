@@ -204,6 +204,8 @@ private:
 
     bool _isOverrideShapeEnabled = false;
 
+    bool _isRaggedTensorEnabled = false;
+
     /// Apply validated knob settings to the engine config descriptor via
     /// the descriptor-based C API path.
     Error applyKnobSettingsToEngineConfig(const std::vector<KnobSetting>& validatedSettings)
@@ -463,6 +465,37 @@ private:
         // toHipdnnDataType() and are skipped by assembleGraphDescriptor().
         // This is intentional -- graphs can have unset graph-level data types
         // as long as individual tensors have their types set.
+
+        // Auto-detect ragged-tensor flag: set if any tensor in any node carries a ragged_offset.
+        _isRaggedTensorEnabled = false;
+        for(const auto& node : _sub_nodes)
+        {
+            for(const auto& t : node->getNodeInputTensorAttributes())
+            {
+                if(t && t->has_ragged_offset())
+                {
+                    _isRaggedTensorEnabled = true;
+                    break;
+                }
+            }
+            if(_isRaggedTensorEnabled)
+            {
+                break;
+            }
+            for(const auto& t : node->getNodeOutputTensorAttributes())
+            {
+                if(t && t->has_ragged_offset())
+                {
+                    _isRaggedTensorEnabled = true;
+                    break;
+                }
+            }
+            if(_isRaggedTensorEnabled)
+            {
+                break;
+            }
+        }
+
         std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> desc;
         if(handle.has_value())
         {
@@ -474,6 +507,7 @@ private:
                 toHipdnnDataType(graph_attributes.get_io_data_type()),
                 _preferredEngineId,
                 _isOverrideShapeEnabled,
+                _isRaggedTensorEnabled,
                 graph_attributes.get_name(),
                 desc));
             setGraphDesc(std::move(desc), true);
@@ -487,6 +521,7 @@ private:
                 toHipdnnDataType(graph_attributes.get_io_data_type()),
                 _preferredEngineId,
                 _isOverrideShapeEnabled,
+                _isRaggedTensorEnabled,
                 graph_attributes.get_name(),
                 desc));
             setGraphDesc(std::move(desc), false);
