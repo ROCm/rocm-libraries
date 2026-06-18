@@ -611,7 +611,7 @@ struct ConvInputLoader
             // overflow DRAM read is consistent with the main load path when
             // block_q is not a multiple of BLOCK_C8.
             const int ov_c8_dram = swizzled_c8(bc.block_q + ov_spatial, ov_c8);
-            overflow_voffset = static_cast<ck_tile::index_t>((input_x * bc.C + ov_c8_dram * 8) *
+            overflow_voffset     = static_cast<ck_tile::index_t>((input_x * bc.C + ov_c8_dram * 8) *
                                                              static_cast<int>(sizeof(ElementType)));
 
             // Reduction-channel padding: record the swizzled channel-8 block this
@@ -650,10 +650,10 @@ struct ConvInputLoader
         // zeroed by weights.
         if constexpr(Padded)
         {
-            const int main_c8  = tid % TC::BLOCK_C8;
+            const int main_c8     = tid % TC::BLOCK_C8;
             const int main_global = bc.block_q + tid / TC::BLOCK_C8;
-            pad_main_c8_dram   = swizzled_c8(main_global, main_c8);
-            pad_c8_ceil        = (bc.C + 7) / 8; // ceil(C_in / 8)
+            pad_main_c8_dram      = swizzled_c8(main_global, main_c8);
+            pad_c8_ceil           = (bc.C + 7) / 8; // ceil(C_in / 8)
         }
     }
 
@@ -811,7 +811,7 @@ struct WeightLoader : direct_conv::WeightAccessor8<
                         ElementType vals[8];
                         ck_tile::static_for<0, 8, 1>{}([&](auto j_n) {
                             constexpr int J = j_n.value;
-                            vals[J] = (c_base + J < C_total) ? src[J] : ElementType{0};
+                            vals[J]         = (c_base + J < C_total) ? src[J] : ElementType{0};
                         });
                         __builtin_memcpy(&wave_lds[flat_idx], vals, sizeof(uint4));
                         continue;
@@ -881,7 +881,7 @@ struct WeightLoader : direct_conv::WeightAccessor8<
                         ElementType vals[8];
                         ck_tile::static_for<0, 8, 1>{}([&](auto j_n) {
                             constexpr int J = j_n.value;
-                            vals[J] = (c_base + J < C_total) ? src[J] : ElementType{0};
+                            vals[J]         = (c_base + J < C_total) ? src[J] : ElementType{0};
                         });
                         __builtin_memcpy(&wave_lds[flat_idx], vals, sizeof(uint4));
                         continue;
@@ -1037,8 +1037,8 @@ struct OutputWriterV3
             // Derive per-group output-channel validity from the pad-transform
             // descriptor (computed once, here in the ctor — off the hot path).
             const int k_base = bc.block_k_out + k_offset;
-            const auto kdesc = direct_conv::DenseSharedDescriptors<TC>::Output::
-                MakeChannelPadDescriptor(bc.K);
+            const auto kdesc =
+                direct_conv::DenseSharedDescriptors<TC>::Output::MakeChannelPadDescriptor(bc.K);
             int count = 0;
             ck_tile::static_for<0, 4, 1>{}([&](auto j_n) {
                 constexpr int J = j_n.value;
@@ -1183,8 +1183,8 @@ struct OutputWriterV3Lds
                 // Derive the contiguous 8-K block's in-range count from the
                 // pad-transform descriptor (computed once, off the hot path).
                 const int k_base = bc.block_k_out + store_k8 * 8;
-                const auto kdesc = direct_conv::DenseSharedDescriptors<TC>::Output::
-                    MakeChannelPadDescriptor(bc.K);
+                const auto kdesc =
+                    direct_conv::DenseSharedDescriptors<TC>::Output::MakeChannelPadDescriptor(bc.K);
                 int count = 0;
                 ck_tile::static_for<0, 8, 1>{}([&](auto j_n) {
                     constexpr int J  = j_n.value;
@@ -1395,9 +1395,9 @@ inline void launch_kernel(const LaunchParams& lp,
     // Determine whether channel padding is required at runtime: the reduction
     // channel count (C_in) is smaller than the config's full total_block_c(),
     // or the output channel count (K_out) is not a multiple of block_k_size.
-    const int C_in        = (cfg.direction == Direction::Dgrad) ? par.k_tot : par.c_tot;
-    const int K_out       = (cfg.direction == Direction::Dgrad) ? par.c_tot : par.k_tot;
-    const bool needs_pad  = (C_in != cfg.total_block_c()) || (K_out % cfg.block_k_size() != 0);
+    const int C_in       = (cfg.direction == Direction::Dgrad) ? par.k_tot : par.c_tot;
+    const int K_out      = (cfg.direction == Direction::Dgrad) ? par.c_tot : par.k_tot;
+    const bool needs_pad = (C_in != cfg.total_block_c()) || (K_out % cfg.block_k_size() != 0);
 
     // The non-grouped v3 kernel is compute-bound and register-hungry.
     // Using the default min-2-blocks/CU caps registers and spills.

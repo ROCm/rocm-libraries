@@ -208,7 +208,10 @@ struct KernelConfigurations
         // --- reduction <= 32 (waves_per_wg=1, keys 60-63) ---
         {60, {.waves_per_wg = 1, .direction = Direction::Dgrad}},
         {61, {.waves_per_wg = 1}},
-        {62, {.waves_per_wg = 1, .direction = Direction::Dgrad, .swizzle_type = SwizzleType::CyclicShift}},
+        {62,
+         {.waves_per_wg = 1,
+          .direction    = Direction::Dgrad,
+          .swizzle_type = SwizzleType::CyclicShift}},
         {63, {.waves_per_wg = 1, .swizzle_type = SwizzleType::CyclicShift}},
         // --- covering-window gap fill (keys 64-67) ---
         // W=9: waves_per_wg=3, c_slices_per_wave=3 (CyclicShift; non-pow2 waves)

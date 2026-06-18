@@ -198,7 +198,7 @@ CK_TILE_DEVICE void conv_compute_loop_v3(const ElementType* __restrict__ in,
     // OutputWriterV3::flush guards on wave_id == 0 internally.
     // OutputWriterV3Lds::flush has all threads participate in barriers.
     auto reduce_and_flush = [&](AccType& slot, int p_out) {
-        if constexpr (NUM_WAVES > 1)
+        if constexpr(NUM_WAVES > 1)
         {
             cross_wave_reduce<NUM_WAVES>(slot, reduce_lds, wave_id);
         }

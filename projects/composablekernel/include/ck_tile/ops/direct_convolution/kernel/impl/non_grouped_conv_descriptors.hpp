@@ -66,10 +66,9 @@ struct DenseSharedDescriptors
             {
                 return ck_tile::transform_tensor_descriptor(
                     desc_raw,
-                    ck_tile::make_tuple(
-                        ck_tile::make_xor_transform(ck_tile::make_tuple(
-                            spatial_len, ck_tile::number<TC::BLOCK_C8>{})),
-                        ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
+                    ck_tile::make_tuple(ck_tile::make_xor_transform(ck_tile::make_tuple(
+                                            spatial_len, ck_tile::number<TC::BLOCK_C8>{})),
+                                        ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
                     ck_tile::make_tuple(ck_tile::sequence<0, 1>{}, ck_tile::sequence<2>{}),
                     ck_tile::make_tuple(ck_tile::sequence<0, 1>{}, ck_tile::sequence<2>{}));
             }
@@ -78,8 +77,8 @@ struct DenseSharedDescriptors
                 return ck_tile::transform_tensor_descriptor(
                     desc_raw,
                     ck_tile::make_tuple(
-                        ck_tile::make_inverse_cyclic_shift_transform(ck_tile::make_tuple(
-                            spatial_len, ck_tile::number<TC::BLOCK_C8>{})),
+                        ck_tile::make_inverse_cyclic_shift_transform(
+                            ck_tile::make_tuple(spatial_len, ck_tile::number<TC::BLOCK_C8>{})),
                         ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
                     ck_tile::make_tuple(ck_tile::sequence<0, 1>{}, ck_tile::sequence<2>{}),
                     ck_tile::make_tuple(ck_tile::sequence<0, 1>{}, ck_tile::sequence<2>{}));

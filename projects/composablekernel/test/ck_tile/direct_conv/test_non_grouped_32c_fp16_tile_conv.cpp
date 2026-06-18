@@ -1588,7 +1588,8 @@ TEST_F(DirectConvNonGrouped32cFp16V3OutputPadSwizzleFpropTest, Fprop_Cfg56_Cycli
     ASSERT_TRUE((RunFprop<56>(1, 8, 8, 1, 256, 256, 3, 3, 1, 1)));
 }
 
-TEST_F(DirectConvNonGrouped32cFp16V3OutputPadSwizzleFpropTest, Fprop_Cfg56_CyclicShift_C256_K36_LargerSpatial)
+TEST_F(DirectConvNonGrouped32cFp16V3OutputPadSwizzleFpropTest,
+       Fprop_Cfg56_CyclicShift_C256_K36_LargerSpatial)
 {
     ASSERT_TRUE((RunFprop<56>(2, 16, 16, 1, 256, 36, 3, 3, 1, 1)));
 }
@@ -1662,7 +1663,8 @@ TEST_F(DirectConvNonGrouped32cFp16V3ReductionPadSwizzleFpropTest, Fprop_Cfg7_CS_
     ASSERT_TRUE((RunFprop<7>(1, 8, 8, 1, 44, 64, 3, 3, 1, 1)));
 }
 
-TEST_F(DirectConvNonGrouped32cFp16V3ReductionPadSwizzleFpropTest, Fprop_Cfg7_CS_C48_K24_LargerSpatial)
+TEST_F(DirectConvNonGrouped32cFp16V3ReductionPadSwizzleFpropTest,
+       Fprop_Cfg7_CS_C48_K24_LargerSpatial)
 {
     ASSERT_TRUE((RunFprop<7>(2, 16, 16, 1, 48, 24, 3, 3, 1, 1)));
 }
@@ -1684,7 +1686,8 @@ TEST_F(DirectConvNonGrouped32cFp16V3ReductionPadSwizzleFpropTest, Fprop_Cfg6_CS_
     ASSERT_TRUE((RunFprop<6>(1, 8, 8, 1, 112, 64, 3, 3, 1, 1)));
 }
 
-TEST_F(DirectConvNonGrouped32cFp16V3ReductionPadSwizzleFpropTest, Fprop_Cfg6_CS_C100_K40_LargerSpatial)
+TEST_F(DirectConvNonGrouped32cFp16V3ReductionPadSwizzleFpropTest,
+       Fprop_Cfg6_CS_C100_K40_LargerSpatial)
 {
     ASSERT_TRUE((RunFprop<6>(2, 16, 16, 1, 100, 40, 3, 3, 1, 1)));
 }
@@ -1732,7 +1735,8 @@ TEST_F(DirectConvNonGrouped32cFp16V3ReductionPadSwizzleDgradTest, Dgrad_Cfg4_CS_
 }
 
 // Config 8 (XOR, Dgrad, 4-wave).
-TEST_F(DirectConvNonGrouped32cFp16V3ReductionPadSwizzleDgradTest, Dgrad_Cfg8_XOR_C128_K112_LargerSpatial)
+TEST_F(DirectConvNonGrouped32cFp16V3ReductionPadSwizzleDgradTest,
+       Dgrad_Cfg8_XOR_C128_K112_LargerSpatial)
 {
     ASSERT_TRUE((RunDgrad<8>(2, 16, 16, 1, 128, 112, 3, 3, 1, 1)));
 }
@@ -1771,7 +1775,8 @@ TEST_F(DirectConvNonGrouped32cFp16V3OutputPadSwizzleCspw1FpropTest, Fprop_Cfg11_
     ASSERT_TRUE((RunFprop<11>(1, 8, 8, 1, 64, 24, 3, 3, 1, 1)));
 }
 
-TEST_F(DirectConvNonGrouped32cFp16V3OutputPadSwizzleCspw1FpropTest, Fprop_Cfg11_XOR_C64_K72_LargerSpatial)
+TEST_F(DirectConvNonGrouped32cFp16V3OutputPadSwizzleCspw1FpropTest,
+       Fprop_Cfg11_XOR_C64_K72_LargerSpatial)
 {
     ASSERT_TRUE((RunFprop<11>(2, 16, 16, 1, 64, 72, 3, 3, 1, 1)));
 }
@@ -1813,7 +1818,8 @@ TEST_F(DirectConvNonGrouped32cFp16V3OutputPadSwizzleCspw1DgradTest, Dgrad_Cfg9_X
 }
 
 // Config 4 (CyclicShift, Dgrad, 4-wave): K=128 clean, C padded.
-TEST_F(DirectConvNonGrouped32cFp16V3OutputPadSwizzleCspw1DgradTest, Dgrad_Cfg4_CS_C72_K128_LargerSpatial)
+TEST_F(DirectConvNonGrouped32cFp16V3OutputPadSwizzleCspw1DgradTest,
+       Dgrad_Cfg4_CS_C72_K128_LargerSpatial)
 {
     ASSERT_TRUE((RunDgrad<4>(2, 16, 16, 1, 72, 128, 3, 3, 1, 1)));
 }
@@ -1860,7 +1866,8 @@ TEST_F(DirectConvNonGrouped32cFp16V3ReductionPadSwizzleCspwFpropTest, Fprop_Cfg4
     ASSERT_TRUE((RunFprop<48>(1, 8, 8, 1, 100, 128, 3, 3, 1, 1)));
 }
 
-TEST_F(DirectConvNonGrouped32cFp16V3ReductionPadSwizzleCspwFpropTest, Fprop_Cfg48_CS_C112_K64_LargerSpatial)
+TEST_F(DirectConvNonGrouped32cFp16V3ReductionPadSwizzleCspwFpropTest,
+       Fprop_Cfg48_CS_C112_K64_LargerSpatial)
 {
     ASSERT_TRUE((RunFprop<48>(2, 16, 16, 1, 112, 64, 3, 3, 1, 1)));
 }
@@ -1930,7 +1937,8 @@ TEST_F(DirectConvNonGrouped32cFp16V3ReductionPadSwizzleCspwDgradTest, Dgrad_Cfg5
     ASSERT_TRUE((RunDgrad<57>(1, 8, 8, 1, 256, 240, 3, 3, 1, 1)));
 }
 
-TEST_F(DirectConvNonGrouped32cFp16V3ReductionPadSwizzleCspwDgradTest, Dgrad_Cfg57_CS_C256_K232_LargerSpatial)
+TEST_F(DirectConvNonGrouped32cFp16V3ReductionPadSwizzleCspwDgradTest,
+       Dgrad_Cfg57_CS_C256_K232_LargerSpatial)
 {
     ASSERT_TRUE((RunDgrad<57>(2, 16, 16, 1, 256, 232, 3, 3, 1, 1)));
 }
@@ -2217,7 +2225,8 @@ TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwLdsFpropTest, Fprop_Cfg82_cspw6_C1
     ASSERT_TRUE((RunFprop<82>(1, 8, 8, 1, 192, 64, 3, 3, 1, 1)));
 }
 
-TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwLdsFpropTest, Fprop_Cfg82_cspw6_C192_K128_LargerSpatial)
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwLdsFpropTest,
+       Fprop_Cfg82_cspw6_C192_K128_LargerSpatial)
 {
     ASSERT_TRUE((RunFprop<82>(2, 16, 16, 1, 192, 128, 3, 3, 1, 1)));
 }
@@ -2320,7 +2329,8 @@ TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwLdsDgradTest, Dgrad_Cfg83_cspw6_C6
     ASSERT_TRUE((RunDgrad<83>(1, 8, 8, 1, 64, 192, 3, 3, 1, 1)));
 }
 
-TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwLdsDgradTest, Dgrad_Cfg83_cspw6_C128_K192_LargerSpatial)
+TEST_F(DirectConvNonGrouped32cFp16V3Waves1CspwLdsDgradTest,
+       Dgrad_Cfg83_cspw6_C128_K192_LargerSpatial)
 {
     ASSERT_TRUE((RunDgrad<83>(2, 16, 16, 1, 128, 192, 3, 3, 1, 1)));
 }
