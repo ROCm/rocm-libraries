@@ -351,7 +351,7 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
         key.opName = config_op::REDUCTION;
         if(!mode.has_value()
            || !addCriterion(key, config_criterion::REDUCTION_MODE, toBackendReductionMode(*mode))
-           || !appendRequiredMatchTensor(key, config_tensor::IN, reduction.attributes.get_x()))
+           || !appendRequiredMatchTensor(key, config_tensor::INPUT, reduction.attributes.get_x()))
         {
             return std::nullopt;
         }

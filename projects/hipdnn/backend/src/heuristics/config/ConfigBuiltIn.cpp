@@ -384,7 +384,7 @@ public:
             BackendAutotuneConfigMatchKey key(config_op::REDUCTION, K_REDUCTION_PRIORITY);
             key.addCriterion(config_criterion::REDUCTION_MODE,
                              static_cast<int64_t>(reduction->mode()));
-            if(!appendUid(key, config_tensor::IN, reduction->in_tensor_uid()))
+            if(!appendUid(key, config_tensor::INPUT, reduction->in_tensor_uid()))
             {
                 return std::nullopt;
             }
