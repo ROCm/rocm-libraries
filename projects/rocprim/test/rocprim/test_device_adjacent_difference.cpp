@@ -535,8 +535,6 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-            test_utils::MemCheck memcheck;
-
             common::device_ptr<flag_type> d_incorrect_flag(1);
             HIP_CHECK(hipMemset(d_incorrect_flag.get(),
                                 0,
@@ -578,7 +576,6 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
                                                            debug_synchronous));
 
             ASSERT_GT(temp_storage_size, 0);
-            MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temp_storage_size)
             common::device_ptr<void> d_temp_storage(temp_storage_size);
 
             test_utils::GraphHelper gHelper;
