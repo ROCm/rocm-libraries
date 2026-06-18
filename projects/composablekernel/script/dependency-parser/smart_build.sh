@@ -120,8 +120,8 @@ fi
 echo "SMART_BUILD_MODE=selective" > build_mode.env
 echo "[OK] Selective build - building only affected targets"
 echo "Building targets: ${BUILD_TARGETS}"
-# Word-split BUILD_TARGETS intentionally: targets are space-separated basenames
-# that never contain spaces (ninja target naming convention).
+# Word-split BUILD_TARGETS intentionally: it is a space-joined list of ninja
+# target tokens (from .executables), none of which contain embedded spaces.
 # shellcheck disable=SC2086
 ninja -j"${NINJA_JOBS}" ${BUILD_TARGETS}
 

@@ -19,6 +19,9 @@
 # Environment variables:
 #   BUILD_DIR - Build directory (defaults to current directory)
 #   CTEST_PARALLEL - ctest parallel level (default: 4)
+#   CTEST_CONFIG - ctest configuration passed via -C (default: ".", matching the
+#                  single-config CMAKE_CFG_INTDIR the `check` target expands to).
+#                  Override on multi-config generators to select the right config.
 #   JUNIT_OUTPUT - JUnit XML report path written by ctest (default: junit.xml).
 #                  CI sets this to a globally-unique name (job/run/arch/stage).
 
@@ -26,6 +29,7 @@ set -e
 
 BUILD_DIR="${BUILD_DIR:-$(pwd)}"
 CTEST_PARALLEL="${CTEST_PARALLEL:-4}"
+CTEST_CONFIG="${CTEST_CONFIG:-.}"
 JUNIT_OUTPUT="${JUNIT_OUTPUT:-junit.xml}"
 
 # Tee all output to a per-phase log so the test stage can archive it
@@ -41,6 +45,7 @@ echo "Smart Test (test execution)"
 echo "========================================="
 echo "BUILD_DIR: ${BUILD_DIR}"
 echo "CTEST_PARALLEL: ${CTEST_PARALLEL}"
+echo "CTEST_CONFIG: ${CTEST_CONFIG}"
 echo "JUNIT_OUTPUT: ${JUNIT_OUTPUT}"
 echo "-----------------------------------------"
 
@@ -72,7 +77,7 @@ case "${MODE}" in
     full)
         echo ""
         echo "Full mode - running the complete ctest suite..."
-        CTEST_PARALLEL_LEVEL=${CTEST_PARALLEL} ctest --output-on-failure --output-junit "${JUNIT_OUTPUT}"
+        CTEST_PARALLEL_LEVEL=${CTEST_PARALLEL} ctest --output-on-failure -C "${CTEST_CONFIG}" --output-junit "${JUNIT_OUTPUT}"
         echo ""
         echo "[OK] Smart test complete (full mode)"
         exit 0
@@ -97,7 +102,7 @@ case "${MODE}" in
         NUM_TESTS=$(grep -c '[^[:space:]]' tests_to_run.txt)
         echo ""
         echo "Selective mode - running ${NUM_TESTS} affected test(s)..."
-        CTEST_PARALLEL_LEVEL=${CTEST_PARALLEL} ctest --output-on-failure --tests-from-file tests_to_run.txt --output-junit "${JUNIT_OUTPUT}"
+        CTEST_PARALLEL_LEVEL=${CTEST_PARALLEL} ctest --output-on-failure -C "${CTEST_CONFIG}" --tests-from-file tests_to_run.txt --output-junit "${JUNIT_OUTPUT}"
         echo ""
         echo "[OK] Smart test complete (selective mode)"
         exit 0
