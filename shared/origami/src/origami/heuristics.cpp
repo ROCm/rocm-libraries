@@ -62,6 +62,9 @@ void heuristic_params_t::merge_with(const heuristic_params_t& other) {
 
   // Main loop efficiency
   main_loop_efficiency = other.main_loop_efficiency;
+
+  // Kernel rejection
+  reject = other.reject;
 }
 
 // ============================================================================
@@ -84,6 +87,7 @@ bool heuristic_key_t::matches(const problem_t& problem,
   if (hand_optimized_main_loop.has_value() &&
       hand_optimized_main_loop.value() != config.hand_optimized_main_loop)
     return false;
+  if (subtile.has_value() && subtile.value() != config.subtile) return false;
 
   // Problem size ranges
   if (min_m.has_value() && problem.size.m < min_m.value()) return false;
@@ -108,6 +112,7 @@ size_t heuristic_key_t::specificity() const {
   if (mt_n.has_value()) count++;
   if (mt_k.has_value()) count++;
   if (hand_optimized_main_loop.has_value()) count++;
+  if (subtile.has_value()) count++;
   if (min_m.has_value()) count++;
   if (max_m.has_value()) count++;
   if (min_n.has_value()) count++;
@@ -420,6 +425,45 @@ void heuristics_database_t::initialize_defaults() {
       params.main_loop_efficiency = cfg.eff;
       add_entry(key, params);
     }
+  }
+
+  // ========================================================================
+  // HEURISTIC 3: Reject gfx950 BF16 TN subtile kernels for small K with a
+  //              large free dim
+  // ========================================================================
+  // Subtile kernels are not competitive when the reduction dimension is small
+  // (K < 512) and either free dimension is large (M > 1024 or N > 1024). Force
+  // their latency to the maximum (rank_configs drops max-latency configs) in
+  // that regime. Scoped to gfx950 BF16 TN (a_transpose=T, b_transpose=N).
+  //
+  // A single heuristic_key_t ANDs all of its fields, so the (M > 1024 OR
+  // N > 1024) condition is expressed as two entries: if either matches, the
+  // merged params set reject = true. (min_m = 1025 matches M > 1024.)
+  {
+    heuristic_params_t reject_params;
+    reject_params.reject = true;
+
+    // K < 512 AND M > 1024
+    heuristic_key_t key_m;
+    key_m.arch        = hardware_t::architecture_t::gfx950;
+    key_m.mi_dtype    = data_type_t::BFloat16;
+    key_m.a_transpose = transpose_t::T;
+    key_m.b_transpose = transpose_t::N;
+    key_m.subtile     = true;
+    key_m.max_k       = 511;
+    key_m.min_m       = 1025;
+    add_entry(key_m, reject_params);
+
+    // K < 512 AND N > 1024
+    heuristic_key_t key_n;
+    key_n.arch        = hardware_t::architecture_t::gfx950;
+    key_n.mi_dtype    = data_type_t::BFloat16;
+    key_n.a_transpose = transpose_t::T;
+    key_n.b_transpose = transpose_t::N;
+    key_n.subtile     = true;
+    key_n.max_k       = 511;
+    key_n.min_n       = 1025;
+    add_entry(key_n, reject_params);
   }
 }
 
