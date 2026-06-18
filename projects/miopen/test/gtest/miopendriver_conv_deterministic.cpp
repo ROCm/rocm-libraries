@@ -43,11 +43,6 @@ miopen::ProcessEnvironmentMap MakeEnv(const std::string& tmp_dir)
     return envs;
 }
 
-class GPU_MIOpenDriverConvDeterministicTest_FP32
-    : public testing::TestWithParam<ConvDeterministicTestCase>
-{
-};
-
 // Skip when MIOPEN_BUILD_DRIVER=OFF or the GPU is unsupported.
 static void CheckShouldRun()
 {
@@ -64,14 +59,21 @@ static std::string TmpDir(const std::string& suffix)
     return std::string{"/tmp/miopen_det_"} + info->name() + "_" + suffix;
 }
 
+} // namespace miopen_conv_deterministic
+
+class GPU_MIOpenDriverConvDeterministicTest_FP32
+    : public testing::TestWithParam<miopen_conv_deterministic::ConvDeterministicTestCase>
+{
+};
+
 // ----------------------------------------------------------------------------
 // Test 1: Without --deterministic being set, log must not mention
 // "Restricting convolution to deterministic kernels."
 // ----------------------------------------------------------------------------
 TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, NoDeterministicLog)
 {
-    CheckShouldRun();
-    const auto tmp_dir = TmpDir("db");
+    miopen_conv_deterministic::CheckShouldRun();
+    const auto tmp_dir = miopen_conv_deterministic::TmpDir("db");
     miopen::fs::remove_all(tmp_dir);
 
     // MIOpenDriver runs as a subprocess; its stderr is redirected into ss via
@@ -80,7 +82,7 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, NoDeterministicLog)
     miopen::Process p{MIOpenDriverExePath().string()};
     std::stringstream ss;
     int rc = 0;
-    EXPECT_NO_THROW(rc = p(GetParam().base_args, "", &ss, MakeEnv(tmp_dir)));
+    EXPECT_NO_THROW(rc = p(GetParam().base_args, "", &ss, miopen_conv_deterministic::MakeEnv(tmp_dir)));
     EXPECT_EQ(rc, 0);
     EXPECT_THAT(ss.str(),
                 Not(testing::HasSubstr("Restricting convolution to deterministic kernels.")));
@@ -94,14 +96,14 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, NoDeterministicLog)
 // ----------------------------------------------------------------------------
 TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, RunsSuccessfullyAndLogsOverride)
 {
-    CheckShouldRun();
-    const auto tmp_dir = TmpDir("db");
+    miopen_conv_deterministic::CheckShouldRun();
+    const auto tmp_dir = miopen_conv_deterministic::TmpDir("db");
     miopen::fs::remove_all(tmp_dir);
 
     miopen::Process p{MIOpenDriverExePath().string()};
     std::stringstream ss;
     int rc = 0;
-    EXPECT_NO_THROW(rc = p(GetParam().valid_args, "", &ss, MakeEnv(tmp_dir)));
+    EXPECT_NO_THROW(rc = p(GetParam().valid_args, "", &ss, miopen_conv_deterministic::MakeEnv(tmp_dir)));
     EXPECT_EQ(rc, 0);
     EXPECT_THAT(ss.str(), testing::HasSubstr("Restricting convolution to deterministic kernels."));
 
@@ -113,14 +115,14 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, RunsSuccessfullyAndLogsOverri
 // ----------------------------------------------------------------------------
 TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, ExitsOnInvalidValue)
 {
-    CheckShouldRun();
-    const auto tmp_dir = TmpDir("db");
+    miopen_conv_deterministic::CheckShouldRun();
+    const auto tmp_dir = miopen_conv_deterministic::TmpDir("db");
     miopen::fs::remove_all(tmp_dir);
 
     int result = 0;
     miopen::Process p{MIOpenDriverExePath().string()};
     std::stringstream ss;
-    EXPECT_NO_THROW(result = p(GetParam().invalid_args, "", &ss, MakeEnv(tmp_dir)));
+    EXPECT_NO_THROW(result = p(GetParam().invalid_args, "", &ss, miopen_conv_deterministic::MakeEnv(tmp_dir)));
     EXPECT_NE(result, 0) << "Should exit with a non-zero code on invalid deterministic value";
     EXPECT_THAT(ss.str(), testing::HasSubstr("Invalid deterministic value"));
 
@@ -133,9 +135,9 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, ExitsOnInvalidValue)
 // ----------------------------------------------------------------------------
 TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, BitExactAcrossRuns)
 {
-    CheckShouldRun();
-    const auto run1_dir = TmpDir("run1");
-    const auto run2_dir = TmpDir("run2");
+    miopen_conv_deterministic::CheckShouldRun();
+    const auto run1_dir = miopen_conv_deterministic::TmpDir("run1");
+    const auto run2_dir = miopen_conv_deterministic::TmpDir("run2");
     miopen::fs::remove_all(run1_dir);
     miopen::fs::remove_all(run2_dir);
     miopen::fs::create_directories(run1_dir);
@@ -218,6 +220,4 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, BitExactAcrossRuns)
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_MIOpenDriverConvDeterministicTest_FP32,
-    testing::ValuesIn(GetTestCases(miopendriver::basearg::conv::Float, shape_3d, 4)));
-
-} // namespace miopen_conv_deterministic
+    testing::ValuesIn(miopen_conv_deterministic::GetTestCases(miopendriver::basearg::conv::Float, miopen_conv_deterministic::shape_3d, 4)));
