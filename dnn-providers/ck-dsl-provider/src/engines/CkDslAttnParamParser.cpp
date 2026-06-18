@@ -42,7 +42,12 @@ int mapBias(const fb::SdpaAttributes* a) {
     if (a->attn_mask_tensor_uid().value_or(0) != 0) return 1;
     return 0;
 }
+
 }  // namespace
+
+bool isPhysicalBhsdLayout(int64_t strideH, int64_t strideS) {
+    return strideH > strideS;
+}
 
 bool isSdpaGraph(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
     if (graph.nodeCount() != 1) return false;
@@ -76,18 +81,52 @@ ParsedAttnParams parseSdpaGraph(const hipdnn_flatbuffers_sdk::flatbuffer_utiliti
     const auto* qd = q->dims();
     const auto* kd = k->dims();
     const auto* vd = v->dims();
-    // ck_dsl unified attention is BSHD-native (query[pos, head, d]); KV cache is
-    // position-major. Interpret the rank-4 graph tensors as [B,S,H,D]. (BHSD
-    // inputs would need a transpose into BSHD/paged layout -- a follow-on; the
-    // CkDslAttnPlan rejects is_bhsd cleanly.)
-    p.is_bhsd = false;
+    // SDPA Q/K/V are rank-4 [B,H,S,D]. Validate the dims vectors exist and carry
+    // all four extents before indexing (a malformed/unsupported graph could omit
+    // dims or carry a lower rank). flatbuffers::Vector::Get only guards with
+    // FLATBUFFERS_ASSERT, which is compiled out under NDEBUG, so an unchecked
+    // Get() on a null/short vector is an out-of-bounds read in release builds.
+    // Throw a clear error instead; isApplicable() catches it and declines.
+    // Mirrors the rank checks in CkDslParamParser::parseGemmGraph.
+    if (qd == nullptr || kd == nullptr || vd == nullptr || qd->size() < 4 ||
+        kd->size() < 4 || vd->size() < 4)
+        throw std::runtime_error("CkDslAttn: expected rank-4 [B,H,S,D] Q/K/V dims");
+    // hipDNN SDPA tensors are *logical* BHSD: dims are [B, H, S, D] (matching the
+    // asm_sdpa engine and the benchmark graph naming bN_hN_sN_dN). Read the
+    // logical extents accordingly.
     p.batch = qd->Get(0);
-    p.seqlen_q = qd->Get(1);
-    p.nhead_q = qd->Get(2);
+    p.nhead_q = qd->Get(1);
+    p.seqlen_q = qd->Get(2);
     p.hdim_q = qd->Get(3);
-    p.seqlen_k = kd->Get(1);
-    p.nhead_k = kd->Get(2);
+    p.nhead_k = kd->Get(1);
+    p.seqlen_k = kd->Get(2);
     p.hdim_v = vd->Get(3);
+
+    // Applicability is driven by the *physical* memory layout, read from Q's
+    // strides (aligned to the logical dims [B,H,S,D]). The ck_dsl kernel is
+    // BSHD-native (S-major-over-H: the S axis must be stored outside H). So:
+    //   stride(H) > stride(S)  -> physical is BHSD-contiguous (H-major-over-S)
+    //                             -> decline (is_bhsd=true); a transpose into the
+    //                                kernel's BSHD/paged layout is a follow-on.
+    //   stride(S) > stride(H)  -> physical is already the kernel's native BSHD
+    //                             memory -> run (is_bhsd=false).
+    // If strides are absent in the serialized graph, assume the kernel-native
+    // BSHD layout and let validation catch a true mismatch. This preserves prior
+    // run-all behavior rather than declining outright.
+    const auto* qs = q->strides();
+    if (qs != nullptr && qs->size() >= 3) {
+        const int64_t stride_h = qs->Get(1);  // stride of the H axis (dim 1)
+        const int64_t stride_s = qs->Get(2);  // stride of the S axis (dim 2)
+        // Only classify when both strides are well-formed (positive). Zero /
+        // broadcast / negative strides are not a real physical layout and would
+        // make the stride-order comparison meaningless, so treat them like
+        // absent strides and fall back to the conservative kernel-native default
+        // (not BHSD). Mirrors detectBLayout's `stride <= 0 -> Unknown` guard.
+        p.is_bhsd =
+            (stride_h > 0 && stride_s > 0) && isPhysicalBhsdLayout(stride_h, stride_s);
+    } else {
+        p.is_bhsd = false;
+    }
 
     p.mask_type = mapMask(attr);
     p.bias_type = mapBias(attr);

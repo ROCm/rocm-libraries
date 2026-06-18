@@ -26,6 +26,11 @@ struct ParsedAttnParams {
     float scale = 0.0f;  // 0 -> 1/sqrt(hdim_q)
 };
 
+// hipDNN SDPA tensors use logical dims [B,H,S,D]. Return true when those
+// logical strides describe physical BHSD-contiguous storage (H-major over S),
+// which the current ck_dsl attention kernel cannot consume directly.
+bool isPhysicalBhsdLayout(int64_t strideH, int64_t strideS);
+
 bool isSdpaGraph(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph);
 ParsedAttnParams parseSdpaGraph(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph);
 ck_dsl::Problem buildProblem(const ParsedAttnParams& p, const std::string& arch);
