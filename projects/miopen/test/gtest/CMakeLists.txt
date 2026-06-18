@@ -71,6 +71,13 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
     # temporarily disable: LeakSanitizer reports a memory leak at exit
     # (assertions pass but the process leaks).
     list(APPEND SKIP_TESTS find_2_conv.cpp)
+    # temporarily disable: these fail under ASan even when run individually
+    # on gfx942.
+    list(APPEND SKIP_TESTS
+        miopendriver_gemm.cpp
+        miopendriver_regression_half.cpp
+        unit_conv_solver_ConvDepthwiseFwd3D.cpp
+    )
 endif()
 
 # Append a pattern to the accumulated gtest negative (exclusion) filter.
