@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -107,12 +107,6 @@ double get_time_us_no_sync();
 
 /*! \brief Get warp size of the current device */
 int get_device_warp_size();
-
-#ifdef ROCSOLVER_LIBRARY
-/*! \brief Get warp size of the device bound to the rocBLAS handle (from the handle's cached
-    device properties, so no per-call device query is performed) */
-int get_device_warp_size(rocblas_handle handle);
-#endif
 
 /* =============================================================================================== */
 /* Print functions.                                                                                */

@@ -32,7 +32,6 @@
 
 #pragma once
 
-#include "common_host_helpers.hpp"
 #include "lapack_device_functions.hpp"
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
@@ -138,10 +137,10 @@ void rocsolver_trtri_getMemorySize(rocblas_handle handle,
     // requirements for TRTI2
     rocblas_int nn = (blk == 1) ? n : blk;
 #ifdef OPTIMAL
-    // the optimized small-size kernel is warp-synchronous, so it is only valid for n <= wavefront
-    // size (get_device_warp_size(handle) reads the handle's cached device props)
-    const rocblas_int wavefront = get_device_warp_size(handle);
-    if(nn <= std::min(TRTRI_MAX_COLS, wavefront))
+    // the optimized small-size kernel is warp-synchronous, so it is only valid for
+    // n <= wavefront size
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+    if(nn <= std::min(TRTRI_MAX_COLS, props->warpSize))
     {
         // if very small size, no workspace needed
         w1a = 0;
@@ -237,10 +236,9 @@ void trti2(rocblas_handle handle,
            T* alphas)
 {
 #ifdef OPTIMAL
-    // if very small size, use optimized kernel (warp-synchronous, so only valid for n <= wavefront);
-    // get_device_warp_size(handle) reads the handle's cached device props
-    const rocblas_int wavefront = get_device_warp_size(handle);
-    if(n <= std::min(TRTRI_MAX_COLS, wavefront))
+    // if very small size, use optimized kernel (warp-synchronous, so only valid for n <= wavefront)
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+    if(n <= std::min(TRTRI_MAX_COLS, props->warpSize))
     {
         trti2_run_small<T>(handle, uplo, diag, n, A, shiftA, lda, strideA, batch_count);
         return;

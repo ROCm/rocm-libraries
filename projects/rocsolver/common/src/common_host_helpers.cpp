@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,8 +30,6 @@
 #include "common_host_helpers.hpp"
 
 #ifdef ROCSOLVER_LIBRARY
-#include <rocblas/internal/rocblas-exported-proto.hpp>
-
 ROCSOLVER_BEGIN_NAMESPACE
 #endif
 
@@ -101,14 +99,6 @@ int get_device_warp_size()
 
     return warp_size;
 }
-
-#ifdef ROCSOLVER_LIBRARY
-/*! \brief Get warp size of the device bound to the rocBLAS handle (from cached device properties) */
-int get_device_warp_size(rocblas_handle handle)
-{
-    return rocblas_internal_get_device_prop(handle)->warpSize;
-}
-#endif
 
 #ifdef ROCSOLVER_LIBRARY
 ROCSOLVER_END_NAMESPACE
