@@ -22,17 +22,15 @@
 #include <gtest/gtest.h>
 #include <stdexcept>
 
-// Cover function_pool write/miss paths: add_new_kernel emplace, missing-key
-// throws, and the PPFMKey overload.  Uses the LDS-only constructor so the test
-// needs no live GPU - get_actual_key falls back to the key itself when no
-// device-specific entries match, and lds_size_bytes is not part of key identity.
+// Exercises add/lookup/miss paths.  The LDS-only constructor avoids needing
+// a live GPU.
 TEST(rocfft_internal, function_pool_runtime_paths)
 {
-    // Representative LDS size; the constructor rejects 0.
+    // The constructor rejects 0.
     constexpr unsigned int lds_bytes = 64 * 1024;
     function_pool          pool(lds_bytes);
 
-    // Pick a prime length the AOT generator shouldn't have populated; skip if it did.
+    // A prime length the AOT generator shouldn't have populated.
     FMKey runtime_key(99991, rocfft_precision_single, CS_KERNEL_STOCKHAM);
     if(pool.has_function(runtime_key))
         GTEST_SKIP() << "runtime_key unexpectedly pre-populated";
@@ -42,7 +40,7 @@ TEST(rocfft_internal, function_pool_runtime_paths)
     EXPECT_TRUE(pool.has_function(runtime_key));
     EXPECT_NO_THROW(pool.get_kernel(runtime_key));
 
-    // PPFMKey overload: a partial-pass key that is never populated at runtime.
+    // PPFMKey overload, never populated at runtime.
     PPFMKey pp_key(
         99991, 1, 1, rocfft_precision_single, rocfft_transform_type_complex_forward, CS_3D_PP);
     EXPECT_FALSE(pool.has_function(pp_key));

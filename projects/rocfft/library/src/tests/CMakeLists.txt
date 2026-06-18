@@ -18,10 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-# Internal unit tests link rocFFT object libraries directly so they can
-# exercise non-exported functionality (e.g. function_pool) without going
-# through the public API.  GTest must be pre-installed; if it is not
-# found, the suite is skipped rather than downloaded.
+# GTest must be pre-installed; skip the suite if it isn't.
 find_package( GTest QUIET )
 if( NOT GTest_FOUND )
   message( WARNING
@@ -47,10 +44,8 @@ set_target_properties( rocfft-internal-test PROPERTIES
   CXX_STANDARD_REQUIRED ON
 )
 
-# Link the function-pool object library directly for the generated
-# function_pool_data() definition.  Do NOT also link roc::rocfft - it
-# already absorbs rocfft-function-pool, which would duplicate the
-# function_pool_data singleton.
+# Link rocfft-function-pool directly (not roc::rocfft, which would
+# duplicate the function_pool_data singleton).
 target_link_libraries( rocfft-internal-test PRIVATE
   rocfft-function-pool
   hip::host
@@ -58,16 +53,12 @@ target_link_libraries( rocfft-internal-test PRIVATE
   GTest::gtest_main
 )
 
-# Register with ctest.  gtest_discover_tests adds one ctest entry per
-# TEST, so e.g. "ctest -R function_pool" works.
 include( GoogleTest )
 gtest_discover_tests( rocfft-internal-test )
 
-# Opt-in: also run the tests automatically when the executable is built,
-# so a test failure fails the build.  ROCFFT_INTERNAL_TESTS_FILTER (if set)
-# restricts which tests run via GoogleTest's --gtest_filter.  The run goes
-# through run_internal_tests.cmake, which also fails the build if the filter
-# selects no tests (gtest would otherwise exit 0 on an empty selection).
+# Optionally run the tests at build time, failing the build on test
+# failure.  run_internal_tests.cmake applies the filter and also fails
+# if the filter selects nothing (gtest exits 0 on an empty selection).
 if( ROCFFT_RUN_INTERNAL_TESTS )
   add_custom_command( TARGET rocfft-internal-test POST_BUILD
     COMMAND ${CMAKE_COMMAND}

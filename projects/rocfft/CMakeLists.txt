@@ -218,15 +218,11 @@ if( ROCFFT_MPI_ENABLE )
   include_directories(SYSTEM ${MPI_INCLUDE_PATH})
 endif()
 
-# Internal (library-side) unit tests that link rocFFT object libraries
-# directly, to test non-exported functionality.  enable_testing() must
-# be called here (an ancestor of library/src) so ctest can discover
-# tests registered under library/src.
+# Internal (library-side) unit tests.  enable_testing() must be called
+# here, an ancestor of library/src, for ctest to discover them.
 option( ROCFFT_BUILD_INTERNAL_TESTS "Build internal (library-side) unit tests" OFF )
-# Opt-in: run the internal tests automatically as part of the build.
 option( ROCFFT_RUN_INTERNAL_TESTS "Run internal tests as part of the build" OFF )
-# GoogleTest filter for the build-time run, e.g. "function_pool*" or
-# "-*slow*".  Empty means run all internal tests.
+# GoogleTest filter for the build-time run; empty = all.
 set( ROCFFT_INTERNAL_TESTS_FILTER "" CACHE STRING
   "GoogleTest filter applied to internal tests run at build time (empty = all)" )
 if( ROCFFT_BUILD_INTERNAL_TESTS )
