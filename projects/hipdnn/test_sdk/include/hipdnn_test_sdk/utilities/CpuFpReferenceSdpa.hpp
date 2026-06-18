@@ -483,10 +483,32 @@ public:
                                : (static_cast<ComputeDataType>(1.0)
                                   / std::sqrt(static_cast<ComputeDataType>(headDim)));
 
-        // Initialize output gradient tensors to zero
-        dQ.fillWithValue(hipdnn_test_sdk::detail::safeConvert<DQDataType>(0.0));
-        dK.fillWithValue(hipdnn_test_sdk::detail::safeConvert<DKDataType>(0.0));
-        dV.fillWithValue(hipdnn_test_sdk::detail::safeConvert<DVDataType>(0.0));
+        // Accumulate gradients in FP32 to match GPU kernel behavior.
+        // The GPU ASM kernel uses FP32 accumulators (A32 path) and only converts
+        // to the output type at the very end. Accumulating directly in the output
+        // type (e.g. BF16) truncates the running sum at every iteration, producing
+        // significantly worse precision than the GPU — especially for BF16 where
+        // the 7-bit mantissa causes large cumulative rounding error over S iterations.
+        const auto totalDqElements = static_cast<size_t>(batch * numHeadsQ * seqQ * headDim);
+        const auto totalDkElements = static_cast<size_t>(batch * numHeadsK * seqKv * headDim);
+        const auto totalDvElements = static_cast<size_t>(batch * numHeadsV * seqKv * headDimV);
+
+        std::vector<ComputeDataType> dqAccum(totalDqElements, ComputeDataType(0));
+        std::vector<ComputeDataType> dkAccum(totalDkElements, ComputeDataType(0));
+        std::vector<ComputeDataType> dvAccum(totalDvElements, ComputeDataType(0));
+
+        // Helper lambdas for contiguous indexing into accumulation buffers.
+        // Layout: [B, H, S, D] with contiguous strides.
+        auto dqIdx = [&](int64_t bIdx, int64_t hIdx, int64_t sIdx, int64_t dIdx) -> size_t {
+            return static_cast<size_t>(((bIdx * numHeadsQ + hIdx) * seqQ + sIdx) * headDim + dIdx);
+        };
+        auto dkIdx = [&](int64_t bIdx, int64_t hIdx, int64_t sIdx, int64_t dIdx) -> size_t {
+            return static_cast<size_t>(((bIdx * numHeadsK + hIdx) * seqKv + sIdx) * headDim + dIdx);
+        };
+        auto dvIdx = [&](int64_t bIdx, int64_t hIdx, int64_t sIdx, int64_t dIdx) -> size_t {
+            return static_cast<size_t>(((bIdx * numHeadsV + hIdx) * seqKv + sIdx) * headDimV
+                                       + dIdx);
+        };
 
         // Sequential loop over [B, H_q, Sq]: multiple sq positions accumulate
         // into the same dK/dV entries, and in GQA multiple Q heads also share
@@ -661,12 +683,7 @@ public:
                                 k.getHostValue(std::vector<int64_t>{b, kvHeadK, skv, d}));
                             const auto dqContrib = dsScaled * kVal;
 
-                            const auto currentDq
-                                = dQ.getHostValue(std::vector<int64_t>{b, hQ, sq, d});
-                            dQ.setHostValue(
-                                hipdnn_test_sdk::detail::safeConvert<DQDataType>(
-                                    static_cast<ComputeDataType>(currentDq) + dqContrib),
-                                std::vector<int64_t>{b, hQ, sq, d});
+                            dqAccum[dqIdx(b, hQ, sq, d)] += dqContrib;
                         }
 
                         // dK[b, kvHeadK, skv, d] += dS[skv] * Q[b, hQ, sq, d] * scale
@@ -677,12 +694,7 @@ public:
                                 q.getHostValue(std::vector<int64_t>{b, hQ, sq, d}));
                             const auto dkContrib = dsScaled * qVal;
 
-                            const auto currentDk
-                                = dK.getHostValue(std::vector<int64_t>{b, kvHeadK, skv, d});
-                            dK.setHostValue(
-                                hipdnn_test_sdk::detail::safeConvert<DKDataType>(
-                                    static_cast<ComputeDataType>(currentDk) + dkContrib),
-                                std::vector<int64_t>{b, kvHeadK, skv, d});
+                            dkAccum[dkIdx(b, kvHeadK, skv, d)] += dkContrib;
                         }
 
                         // dV[b, kvHeadV, skv, dv] += P[skv] * dO[b, hQ, sq, dv]
@@ -692,13 +704,56 @@ public:
                                 dO.getHostValue(std::vector<int64_t>{b, hQ, sq, dv}));
                             const auto dvContrib = probs[static_cast<size_t>(skv)] * doVal;
 
-                            const auto currentDv
-                                = dV.getHostValue(std::vector<int64_t>{b, kvHeadV, skv, dv});
-                            dV.setHostValue(
-                                hipdnn_test_sdk::detail::safeConvert<DVDataType>(
-                                    static_cast<ComputeDataType>(currentDv) + dvContrib),
-                                std::vector<int64_t>{b, kvHeadV, skv, dv});
+                            dvAccum[dvIdx(b, kvHeadV, skv, dv)] += dvContrib;
                         }
+                    }
+                }
+            }
+        }
+
+        // Convert FP32 accumulators to output type — single conversion at the end,
+        // matching the GPU kernel's dq_convert behavior.
+        for(int64_t b = 0; b < batch; ++b)
+        {
+            for(int64_t h = 0; h < numHeadsQ; ++h)
+            {
+                for(int64_t s = 0; s < seqQ; ++s)
+                {
+                    for(int64_t d = 0; d < headDim; ++d)
+                    {
+                        dQ.setHostValue(hipdnn_test_sdk::detail::safeConvert<DQDataType>(
+                                            dqAccum[dqIdx(b, h, s, d)]),
+                                        std::vector<int64_t>{b, h, s, d});
+                    }
+                }
+            }
+        }
+        for(int64_t b = 0; b < batch; ++b)
+        {
+            for(int64_t h = 0; h < numHeadsK; ++h)
+            {
+                for(int64_t s = 0; s < seqKv; ++s)
+                {
+                    for(int64_t d = 0; d < headDim; ++d)
+                    {
+                        dK.setHostValue(hipdnn_test_sdk::detail::safeConvert<DKDataType>(
+                                            dkAccum[dkIdx(b, h, s, d)]),
+                                        std::vector<int64_t>{b, h, s, d});
+                    }
+                }
+            }
+        }
+        for(int64_t b = 0; b < batch; ++b)
+        {
+            for(int64_t h = 0; h < numHeadsV; ++h)
+            {
+                for(int64_t s = 0; s < seqKv; ++s)
+                {
+                    for(int64_t d = 0; d < headDimV; ++d)
+                    {
+                        dV.setHostValue(hipdnn_test_sdk::detail::safeConvert<DVDataType>(
+                                            dvAccum[dvIdx(b, h, s, d)]),
+                                        std::vector<int64_t>{b, h, s, d});
                     }
                 }
             }

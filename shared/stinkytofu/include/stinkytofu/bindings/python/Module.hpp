@@ -67,9 +67,14 @@
     X(PassOrderSnapshotJson, std::string) \
     X(EnableRemarks, bool)                \
     X(EnableWaitCntInsertion, bool)       \
+    X(EnableLoopCarriedTokenDeps, bool)   \
+    X(EnableESM2, bool)                   \
     X(VgprMsbMode, int)                   \
     X(EnableSwPrefetchInsertion, bool)    \
-    X(SwPrefetchScratchSgpr, int)
+    X(SwPrefetchScratchSgpr, int)         \
+    X(ClusterBarrier, bool)               \
+    X(PrefetchGlobalRead, int)            \
+    X(PrefetchLocalRead, int)
 
 namespace stinkytofu {
 /**

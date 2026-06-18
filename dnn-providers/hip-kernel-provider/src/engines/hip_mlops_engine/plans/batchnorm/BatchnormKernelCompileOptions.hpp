@@ -54,7 +54,6 @@ private:
         add("HIP_PLUGIN_BN_VARIANT", 255);
         add("HIP_PLUGIN_BN_USESAVED", 0);
         add("HIP_PLUGIN_BN_NCHW", 1);
-        add("HIP_PLUGIN_BN_MAXN", 65);
         add("HIP_PLUGIN_BN_VECTORIZE", 0);
         add("HIP_PLUGIN_BN_VEC_SIZE", 1);
         add("HIP_PLUGIN_BN_STASH_METHOD", 0);

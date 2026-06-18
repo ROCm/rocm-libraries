@@ -186,6 +186,7 @@ set_target_properties( rocblas-test PROPERTIES
   IMPORT_SUFFIX ".lib"
   LINKER_LANGUAGE CXX
   RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+  ENABLE_EXPORTS ON
 )
 
 file(GLOB yaml_files "${CMAKE_CURRENT_SOURCE_DIR}/*.yaml")
