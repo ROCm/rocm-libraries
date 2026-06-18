@@ -44,6 +44,85 @@ ROCSOLVER_BEGIN_NAMESPACE
 /***************** Kernels/Device functions *******************************************/
 /**************************************************************************************/
 
+// --------------------------------------------------------------------
+// use nontemporal load of read-only data to by-pass the cache
+//
+// Intended to avoid cache pollution for data that is used only once
+// --------------------------------------------------------------------
+
+#include "hip/hip_vector_types.h"
+
+#define USE_SCALAR_TYPE
+#if defined(__gfx90a__) || defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
+#undef USE_SCALAR_TYPE
+#endif
+
+static inline __device__ rocblas_double_complex nontemporal_load(rocblas_double_complex const* const p)
+{
+#ifdef USE_SCALAR_TYPE
+    double const* const __restrict__ p2 = (double const*)p;
+    return (rocblas_double_complex{*p2, *(p2 + 1)});
+#else
+    auto const p2 = (const double2*)p;
+    auto const val = __builtin_nontemporal_load(p2);
+    return (rocblas_double_complex{val.x, val.y});
+#endif
+}
+
+static inline __device__ rocblas_float_complex nontemporal_load(rocblas_float_complex const* const p)
+{
+#ifdef USE_SCALAR_TYPE
+    float const* const __restrict__ p2 = (float const*)p;
+    return (rocblas_float_complex{*p2, *(p2 + 1)});
+#else
+    auto const p2 = (const float2*)p;
+    auto const val = __builtin_nontemporal_load(p2);
+    return (rocblas_float_complex{val.x, val.y});
+#endif
+}
+
+static inline __device__ double nontemporal_load(double const* const p)
+{
+    return (__builtin_nontemporal_load(p));
+}
+
+static inline __device__ float nontemporal_load(float const* const p)
+{
+    return (__builtin_nontemporal_load(p));
+}
+
+// --------------------------------------------------------------------
+// use nontemporal store of write-once data to by-pass the cache
+//
+// Intended to avoid cache pollution for data that is touched only once
+// --------------------------------------------------------------------
+
+static inline __device__ void nontemporal_store(float const val, float* const ptr)
+{
+    __builtin_nontemporal_store(val, ptr);
+}
+
+static inline __device__ void nontemporal_store(double const val, double* const ptr)
+{
+    __builtin_nontemporal_store(val, ptr);
+}
+
+static inline __device__ void nontemporal_store(rocblas_double_complex const val,
+                                                rocblas_double_complex* const ptr)
+{
+    double* const p2 = (double*)ptr;
+    __builtin_nontemporal_store(std::real(val), p2);
+    __builtin_nontemporal_store(std::imag(val), p2 + 1);
+}
+
+static inline __device__ void nontemporal_store(rocblas_float_complex const val,
+                                                rocblas_float_complex* const ptr)
+{
+    float* const p2 = (float*)ptr;
+    __builtin_nontemporal_store(std::real(val), p2);
+    __builtin_nontemporal_store(std::imag(val), p2 + 1);
+}
+
 /***** Kernel to reduce results inter-groups *****/
 /*************************************************/
 template <typename T, typename U>
@@ -393,7 +472,7 @@ ROCSOLVER_KERNEL void latrd_upper_computeW_gemvt_kernel(const rocblas_int mm,
     int it = (i < mm) ? i : i - mm;
     const T* __restrict__ a = (i < mm) ? A1 : A2;
     int ld = (i < mm) ? lda1 : lda2;
-    T* y = (i < mm) ? y1 : y2;
+    T* __restrict__ y = (i < mm) ? y1 : y2;
 
     if(tx < n)
         a += tx;
@@ -412,10 +491,16 @@ ROCSOLVER_KERNEL void latrd_upper_computeW_gemvt_kernel(const rocblas_int mm,
     {
 #pragma unroll 4
         for(rocblas_int j = 0; j < n_full; j += NB_X)
-            res += conj(a[j]) * x[tx + j];
+        {
+            auto const aj = nontemporal_load(&(a[j]));
+            res += conj(aj) * x[tx + j];
+        }
 
         if(tx + n_full < n)
-            res += conj(a[n_full]) * x[tx + n_full];
+        {
+            auto const a_n_full = nontemporal_load(&(a[n_full]));
+            res += conj(a_n_full) * x[tx + n_full];
+        }
 
         // reduction of partial sums
         res += shift_left(res, 1);
@@ -439,7 +524,8 @@ ROCSOLVER_KERNEL void latrd_upper_computeW_gemvt_kernel(const rocblas_int mm,
 
     if(tx == 0)
     {
-        y[it] = res;
+        // y[it] = res;
+        nontemporal_store(res, &(y[it]));
     }
 }
 
@@ -482,7 +568,7 @@ ROCSOLVER_KERNEL void latrd_lower_computeW_gemvt_kernel(const rocblas_int mm,
     const T* __restrict__ a = (i < c) ? A1 : A2;
     int ld = (i < c) ? lda1 : lda2;
     int it2 = it - c - 1;
-    T* y = (i < c) ? y1 : y2;
+    T* __restrict__ y = (i < c) ? y1 : y2;
 
     if(tx < n)
         a += tx;
@@ -501,10 +587,16 @@ ROCSOLVER_KERNEL void latrd_lower_computeW_gemvt_kernel(const rocblas_int mm,
     {
 #pragma unroll 4
         for(rocblas_int j = 0; j < n_full; j += NB_X)
-            res += conj(a[j]) * x[tx + j];
+        {
+            auto const aj = nontemporal_load(&(a[j]));
+            res += conj(aj) * x[tx + j];
+        }
 
         if(tx + n_full < n)
-            res += conj(a[n_full]) * x[tx + n_full];
+        {
+            auto const a_n_full = nontemporal_load(&(a[n_full]));
+            res += conj(a_n_full) * x[tx + n_full];
+        }
 
         // reduction of partial sums
         res += shift_left(res, 1);
@@ -528,7 +620,8 @@ ROCSOLVER_KERNEL void latrd_lower_computeW_gemvt_kernel(const rocblas_int mm,
 
     if(tx == 0)
     {
-        y[it] = res;
+        // y[it] = res;
+        nontemporal_store(res, &(y[it]));
     }
 }
 
@@ -1004,4 +1097,5 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
     return rocblas_status_success;
 }
 
+#undef USE_SCALAR_TYPE
 ROCSOLVER_END_NAMESPACE
