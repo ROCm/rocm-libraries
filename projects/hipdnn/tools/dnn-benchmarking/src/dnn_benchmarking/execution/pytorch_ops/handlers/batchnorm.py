@@ -10,6 +10,7 @@ import torch.nn.functional as F
 
 from .._common import *  # noqa: F401,F403
 from .._registry import register_handler
+from ....common.exceptions import UnsupportedGraphError
 
 
 def _bn_reduce_dims(x: torch.Tensor) -> Tuple[int, ...]:
@@ -49,6 +50,7 @@ def handle_batchnorm_inference(
     graph_json: Dict[str, Any],
 ) -> None:
     """Handle batchnorm inference with precomputed inverse variance."""
+    _require_fp32_compute(node, graph_json, "Batchnorm inference")
     x_uid = _required_input_uid(node, "x_tensor_uid")
     mean_uid = _required_input_uid(node, "mean_tensor_uid")
     inv_uid = _required_input_uid(node, "inv_variance_tensor_uid")
@@ -79,6 +81,7 @@ def handle_batchnorm_inference_variance(
     timed reference row measures the PyTorch batchnorm primitive rather than
     hand-rolled elementwise glue.
     """
+    _require_fp32_compute(node, graph_json, "Batchnorm inference (variance ext)")
     x_uid = _required_input_uid(node, "x_tensor_uid")
     mean_uid = _required_input_uid(node, "mean_tensor_uid")
     variance_uid = _required_input_uid(node, "variance_tensor_uid")
@@ -88,26 +91,30 @@ def handle_batchnorm_inference_variance(
     y_uid = _required_output_uid(node, "y_tensor_uid")
 
     x = _tensor(tensors, x_uid, node)
-    x_float = x.to(dtype=torch.float32)
-    running_mean = _channel_values(_tensor(tensors, mean_uid, node), x).to(
-        torch.float32
-    )
-    running_var = _channel_values(_tensor(tensors, variance_uid, node), x).to(
-        torch.float32
-    )
-    weight = _channel_values(_tensor(tensors, scale_uid, node), x).to(torch.float32)
-    bias = _channel_values(_tensor(tensors, bias_uid, node), x).to(torch.float32)
+    running_mean = _channel_values(_tensor(tensors, mean_uid, node), x, dtype=None)
+    running_var = _channel_values(_tensor(tensors, variance_uid, node), x, dtype=None)
+    weight = _channel_values(_tensor(tensors, scale_uid, node), x, dtype=None)
+    bias = _channel_values(_tensor(tensors, bias_uid, node), x, dtype=None)
     epsilon = _scalar_value(tensors, epsilon_uid, node)
 
-    y = F.batch_norm(
-        x_float,
-        running_mean,
-        running_var,
-        weight=weight,
-        bias=bias,
-        training=False,
-        eps=epsilon,
-    ).to(dtype=x.dtype)
+    # Native I/O dtype: F.batch_norm runs the graph-dtype kernel (matching the
+    # engine workload) and computes in float32 internally. Any dtype it cannot
+    # consume is inapplicability, not a hard error.
+    try:
+        y = F.batch_norm(
+            x,
+            running_mean,
+            running_var,
+            weight=weight,
+            bias=bias,
+            training=False,
+            eps=epsilon,
+        )
+    except RuntimeError as e:
+        raise UnsupportedGraphError(
+            f"Batchnorm inference (variance ext): graph dtypes unsupported by "
+            f"F.batch_norm: {e}"
+        ) from e
     _store_tensor(tensors, y_uid, y)
 
 
@@ -119,6 +126,7 @@ def handle_batchnorm_training(
 ) -> None:
     """Handle batchnorm forward training."""
     _reject_peer_stats(node, "Batchnorm forward training")
+    _require_fp32_compute(node, graph_json, "Batchnorm forward training")
     x_uid = _required_input_uid(node, "x_tensor_uid")
     scale_uid = _required_input_uid(node, "scale_tensor_uid")
     bias_uid = _required_input_uid(node, "bias_tensor_uid")
@@ -128,17 +136,23 @@ def handle_batchnorm_training(
     x = _tensor(tensors, x_uid, node)
     scale = _channel_values(_tensor(tensors, scale_uid, node), x, dtype=None)
     bias = _channel_values(_tensor(tensors, bias_uid, node), x, dtype=None)
-    _validate_bn_param_dtype(x, "Batchnorm forward training", scale, bias)
     epsilon = _scalar_value(tensors, epsilon_uid, node)
 
     # Fused batchnorm forward-training: a single op that dispatches to MIOpen on
     # ROCm and returns (y, save_mean, save_invstd). x/scale/bias keep their graph
     # dtypes so the timed reference measures the same precision workload as the
     # engine, not a promoted-fp32 kernel plus surrounding casts. save_mean and
-    # save_invstd come back as float32 from the primitive.
-    y, mean, inv_variance = torch.native_batch_norm(
-        x, scale, bias, None, None, True, 0.0, epsilon
-    )
+    # save_invstd come back as float32 from the primitive. A graph dtype the op
+    # cannot consume is inapplicability, not a hard error.
+    try:
+        y, mean, inv_variance = torch.native_batch_norm(
+            x, scale, bias, None, None, True, 0.0, epsilon
+        )
+    except RuntimeError as e:
+        raise UnsupportedGraphError(
+            f"Batchnorm forward training: graph dtypes unsupported by "
+            f"native_batch_norm: {e}"
+        ) from e
     _store_tensor(tensors, y_uid, y)
 
     _store_channel_tensor(tensors, _optional_uid(node, "mean_tensor_uid"), mean, x.ndim)
@@ -193,6 +207,7 @@ def handle_batchnorm_backward(
 ) -> None:
     """Handle batchnorm backward."""
     _reject_peer_stats(node, "Batchnorm backward")
+    _require_fp32_compute(node, graph_json, "Batchnorm backward")
     dy_uid = _required_input_uid(node, "dy_tensor_uid")
     x_uid = _required_input_uid(node, "x_tensor_uid")
     scale_uid = _required_input_uid(node, "scale_tensor_uid")
@@ -202,12 +217,7 @@ def handle_batchnorm_backward(
 
     dy = _tensor(tensors, dy_uid, node)
     x = _tensor(tensors, x_uid, node)
-    if dy.dtype != x.dtype:
-        raise ValueError(
-            f"Batchnorm backward: dy dtype {dy.dtype} must match x dtype {x.dtype}"
-        )
     scale = _channel_values(_tensor(tensors, scale_uid, node), x, dtype=None)
-    _validate_bn_param_dtype(x, "Batchnorm backward", scale)
     mean_uid = _optional_uid(node, "mean_tensor_uid")
     inv_uid = _optional_uid(node, "inv_variance_tensor_uid")
     if (mean_uid is None) != (inv_uid is None):
@@ -224,19 +234,26 @@ def handle_batchnorm_backward(
     # Fused batchnorm backward: a single op that dispatches to MIOpen on ROCm and
     # returns (dx, dscale, dbias), replacing the hand-rolled gradient reduction.
     # dy/x keep their graph dtype; saved mean/inv_variance are float32 as the
-    # primitive requires.
-    dx, dscale, dbias = torch.ops.aten.native_batch_norm_backward(
-        dy,
-        x,
-        scale,
-        None,
-        None,
-        mean,
-        inv_variance,
-        True,
-        1e-5,
-        [True, True, True],
-    )
+    # primitive requires. A graph dtype the op cannot consume (e.g. dy/x dtype
+    # mismatch, ineligible scale) is inapplicability, not a hard error.
+    try:
+        dx, dscale, dbias = torch.ops.aten.native_batch_norm_backward(
+            dy,
+            x,
+            scale,
+            None,
+            None,
+            mean,
+            inv_variance,
+            True,
+            1e-5,
+            [True, True, True],
+        )
+    except RuntimeError as e:
+        raise UnsupportedGraphError(
+            f"Batchnorm backward: graph dtypes unsupported by "
+            f"native_batch_norm_backward: {e}"
+        ) from e
 
     _store_tensor(tensors, dx_uid, dx)
     _store_channel_tensor(tensors, dscale_uid, dscale, x.ndim)

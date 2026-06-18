@@ -490,6 +490,14 @@ def _run_timed_pytorch_row(
                 )
             result.status = "success"
 
+        except UnsupportedGraphError as e:
+            result.status = "skipped"
+            result.skip_reason = str(e)
+            if role == "engine":
+                rtol, atol = _fallback_tolerance_for_config(config)
+                result.correctness = CorrectnessResult.failed(
+                    rtol=rtol, atol=atol, error_message=str(e)
+                )
         except Exception as e:
             if role == "engine":
                 msg = str(e)
