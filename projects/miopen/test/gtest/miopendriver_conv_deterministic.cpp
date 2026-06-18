@@ -46,6 +46,21 @@ miopen::ProcessEnvironmentMap MakeEnv(const std::string& tmp_dir)
 class GPU_MIOpenDriverConvDeterministicTest_FP32
     : public testing::TestWithParam<ConvDeterministicTestCase>
 {
+protected:
+    void SetUp() override
+    {
+        using e_mask = enabled<Gpu::All>;
+        using d_mask = disabled<Gpu::None>;
+        if(!ShouldRunMIOpenDriverTest<d_mask, e_mask>())
+            GTEST_SKIP();
+    }
+
+    // Return a per-test tmp path to avoid collisions when tests run in parallel.
+    static std::string TmpDir(const std::string& suffix)
+    {
+        const auto* info = testing::UnitTest::GetInstance()->current_test_info();
+        return std::string{"/tmp/miopen_det_"} + info->name() + "_" + suffix;
+    }
 };
 
 // ----------------------------------------------------------------------------
@@ -54,7 +69,7 @@ class GPU_MIOpenDriverConvDeterministicTest_FP32
 // ----------------------------------------------------------------------------
 TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, NoDeterministicLog)
 {
-    const auto tmp_dir = std::string{"/tmp/miopen_det_test_noflag"};
+    const auto tmp_dir = TmpDir("db");
     miopen::fs::remove_all(tmp_dir);
 
     // MIOpenDriver runs as a subprocess; its stderr is redirected into ss via
@@ -77,7 +92,7 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, NoDeterministicLog)
 // ----------------------------------------------------------------------------
 TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, RunsSuccessfullyAndLogsOverride)
 {
-    const auto tmp_dir = std::string{"/tmp/miopen_det_test_enabled"};
+    const auto tmp_dir = TmpDir("db");
     miopen::fs::remove_all(tmp_dir);
 
     miopen::Process p{MIOpenDriverExePath().string()};
@@ -95,7 +110,7 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, RunsSuccessfullyAndLogsOverri
 // ----------------------------------------------------------------------------
 TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, ExitsOnInvalidValue)
 {
-    const auto tmp_dir = std::string{"/tmp/miopen_det_test_invalid"};
+    const auto tmp_dir = TmpDir("db");
     miopen::fs::remove_all(tmp_dir);
 
     int result = 0;
@@ -114,8 +129,8 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, ExitsOnInvalidValue)
 // ----------------------------------------------------------------------------
 TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, BitExactAcrossRuns)
 {
-    const auto run1_dir = std::string{"/tmp/miopen_det_repro_run1"};
-    const auto run2_dir = std::string{"/tmp/miopen_det_repro_run2"};
+    const auto run1_dir = TmpDir("run1");
+    const auto run2_dir = TmpDir("run2");
     miopen::fs::remove_all(run1_dir);
     miopen::fs::remove_all(run2_dir);
     miopen::fs::create_directories(run1_dir);
