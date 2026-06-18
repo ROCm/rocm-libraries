@@ -976,17 +976,22 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.defineSgpr("tdmABIncs", 1))
 
       if kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]:
-        if kernel["NumWaves"] > 1:
-          module.add(self.defineSgpr("tdmABGlobalSplitIncs", 1))
-          module.add(self.defineSgpr("tdmABLdsSplitIncs", 1))
-        else:
-          module.add(self.defineSgpr("tdmAGlobalSplitIncs", 1))
-          module.add(self.defineSgpr("tdmALdsSplitIncs", 1))
-          module.add(self.defineSgpr("tdmBGlobalSplitIncs", 1))
-          module.add(self.defineSgpr("tdmBLdsSplitIncs", 1))
+        module.add(self.defineSgpr("tdmABGlobalSplitIncs", 1))
+        module.add(self.defineSgpr("tdmABLdsSplitIncs", 1))
+        module.add(self.defineSgpr("tdmABSplitDim1H0", 1))
+        module.add(self.defineSgpr("tdmABSplitDim1H1", 1))
 
       if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
         module.add(self.defineSgpr("tdmMXSAMXSBIncs", 1))
+
+    # Single-wave (NumWaves == 1): descriptors are independent, so TDMSplit
+    # uses per-tensor increment SGPRs instead of the aliased AB pair.
+    if (kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] == 1
+        and kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]):
+      module.add(self.defineSgpr("tdmAGlobalSplitIncs", 1))
+      module.add(self.defineSgpr("tdmALdsSplitIncs", 1))
+      module.add(self.defineSgpr("tdmBGlobalSplitIncs", 1))
+      module.add(self.defineSgpr("tdmBLdsSplitIncs", 1))
         
     if kernel["enableTDMMetadata"]:
       module.add(self.defineSgpr("tdmMetadataGroup0", 4, 4))
@@ -11153,8 +11158,12 @@ class KernelWriterAssembly(KernelWriter):
         imod.middle.add(SAddU32(sgpr(f"tdm{tc}Group0+1"), sgpr(f"tdm{tc}Group0+1"), sgpr(ldsIncSgprName)))
         imod.middle.add(SAddU32(sgpr(f"tdm{tc}Group0+2"), sgpr(f"tdm{tc}Group0+2"), sgpr(globalIncSgprName)))
         imod.middle.add(SAddCU32(sgpr(f"tdm{tc}Group0+3"), sgpr(f"tdm{tc}Group0+3"), 0, f"tdm{tc} split carry"))
+        if numWaves > 1:
+          imod.middle.add(comp.setTensorDim1(f"tdm{tc}Group1", "tdmABSplitDim1H1", self))
         comp.setMemToken([self.states.memTokenLdsSplit[tdmParity][1]])
         imod.middle.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", tdmAGroup2, tdmAGroup3))
+        if numWaves > 1:
+          imod.middle.add(comp.setTensorDim1(f"tdm{tc}Group1", "tdmABSplitDim1H0", self))
       return imod
 
     if tc == "MXSA" and kernel["enableTDMA"]:
@@ -18996,10 +19005,15 @@ class KernelWriterAssembly(KernelWriter):
           if unrolledMajor:
             mod.add(VReadfirstlaneB32(sgpr(tmpSgprWaveOffset), vgpr("Serial"), "first tId"))
             mod.add(SLShiftRightB32(sgpr(tmpSgprWaveOffset), ceil(log2(wavelen)) + 1, sgpr(tmpSgprWaveOffset), "wId=fTid // wavelen // 2"))
-            mod.add(SMulI32(sgpr(tmpSgprWaveOffset), sgpr(tmpSgprWaveOffset), round(mt // numComp), "woffset = wId * (mt // numComp)"))
+            mod.add(SMulI32(sgpr(tmpSgprWaveOffset), sgpr(tmpSgprWaveOffset), round(mt // numComp // dim1Divisor), "woffset = wId * (mt // numComp // dim1Divisor)"))
             mod.add(SSubU32(sgpr(dim1), sgpr(dim1), sgpr(tmpSgprWaveOffset), "consider multiple waves"))
             mod.add(SCMovB32(sgpr(dim1), 0, "set to 0 for waves that no enough data to load"))
           mod.add(comp.setTensorDim1(descSgprName(1), dim1, self, 0, False, isSparseTrack if not unrolledMajor else False, isMetadata if not unrolledMajor else False))
+          if unrolledMajor and kernel["TDMSplit"] and not ("MXS" in tc) and not kernel["ProblemType"]["Sparse"]:
+            halfRows = round(mt) // dim1Divisor
+            mod.add(SMovB32(sgpr("tdmABSplitDim1H0"), sgpr(dim1), "save half-0 dim1"))
+            mod.add(SSubU32(sgpr(tmpSgprWaveOffset), sgpr(dim1), halfRows, f"half-1 dim1 = dim1 - {halfRows}"))
+            mod.add(SCSelectB32(sgpr("tdmABSplitDim1H1"), 0, sgpr(tmpSgprWaveOffset), "clamp to 0"))
 
     if tc.startswith("MX"):
       #reset to 0 since scale of sizeTile0 and stride for MX is not required
@@ -19043,7 +19057,6 @@ class KernelWriterAssembly(KernelWriter):
       strRefSplit = strideRefName()
       strArgSplit = strRefSplit if isinstance(strRefSplit, RegisterContainer) else sgpr(strRefSplit)
       mod.add(SMulI32(sgpr("tdmABGlobalSplitIncs"), strArgSplit, round(mt * bpe) // dim1Divisor, comment=f"tdm{tc} Global Split Incs(stride * {mt * bpe // dim1Divisor})"))
-
     if isTdmIter:
       self._emitTdmIterateInit(mod, kernel, tc, dtype, du, mt,
                                perIssueLoadRowDivisor=numComp * dim1Divisor,

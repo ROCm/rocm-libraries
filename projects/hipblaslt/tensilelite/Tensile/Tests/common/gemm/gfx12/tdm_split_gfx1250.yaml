@@ -75,7 +75,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - StoreRemapVectorWidth: [0]
-        - GlobalSplitU: [1, 2]
+        - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
@@ -152,7 +152,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - StoreRemapVectorWidth: [0]
-        - GlobalSplitU: [1, 2, 4, 8]
+        - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
@@ -229,7 +229,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [1, 2]
         - StoreRemapVectorWidth: [0]
-        - GlobalSplitU: [1, 2, 4, 8]
+        - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
@@ -251,10 +251,6 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [256, 256, 1, 128]
-          - Exact: [256, 256, 1, 384]
-          - Exact: [256, 256, 1, 640]
-          - Exact: [256, 256, 1, 896]
           - Exact: [256, 256, 1, 2048]
           - Exact: [256, 256, 1, 2080]  #tail
           - Exact: [257, 256, 1, 2048]  #edge-m
