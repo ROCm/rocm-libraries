@@ -1015,7 +1015,7 @@ def buildAndTest(Map conf=[:]){
                                 git sparse-checkout add projects/hiptensor
                                 git checkout "${params.hipTensor_branch}"
                                 cd projects/hiptensor && mkdir -p build &&
-                                CC=hipcc CXX=hipcc cmake -Bbuild . -D CMAKE_PREFIX_PATH="${env.WORKSPACE}/install" &&
+                                CC=hipcc CXX=hipcc cmake -Bbuild . -D CMAKE_PREFIX_PATH="${env.WORKSPACE}/projects/composablekernel/install" &&
                                 cmake --build build -- -j &&
                                 ctest --test-dir build
                             """
