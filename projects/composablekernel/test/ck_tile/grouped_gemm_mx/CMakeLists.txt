@@ -21,6 +21,21 @@ endif()
 if(GPU_TARGETS MATCHES "gfx950")
     add_gtest_executable(test_ck_tile_grouped_gemm_mx_comp_async test_mx_grouped_gemm_comp_async.cpp)
     # target_compile_options(test_ck_tile_grouped_gemm_mx_tdm PRIVATE --save-temps)
+
+    # Large-tensor / decomposition cases. Built so it does not bitrot, but NOT
+    # registered with ctest (plain add_executable, no add_test) -> excluded from the default CI
+    # test pass; run explicitly (mirrors the CK *_large_cases convention). Allocates multi-GB
+    # device buffers to exercise the int32 element-count / decomposition boundary.
+    set(_mx_large_cases_src test_mx_grouped_gemm_comp_async_large_cases.cpp)
+    set_source_files_properties(${_mx_large_cases_src} PROPERTIES LANGUAGE HIP)
+    add_executable(test_ck_tile_grouped_gemm_mx_comp_async_large_cases ${_mx_large_cases_src})
+    set_property(TARGET test_ck_tile_grouped_gemm_mx_comp_async_large_cases
+                 PROPERTY HIP_ARCHITECTURES ${SUPPORTED_GPU_TARGETS})
+    target_compile_options(test_ck_tile_grouped_gemm_mx_comp_async_large_cases
+                           PRIVATE -Wno-global-constructors -Wno-undef)
+    target_link_libraries(test_ck_tile_grouped_gemm_mx_comp_async_large_cases
+                          PRIVATE gtest_main getopt::getopt)
+    add_dependencies(tests test_ck_tile_grouped_gemm_mx_comp_async_large_cases)
 endif()
 
 if(GPU_TARGETS MATCHES "gfx950|gfx1250")
