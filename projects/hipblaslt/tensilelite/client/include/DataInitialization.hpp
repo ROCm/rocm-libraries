@@ -179,6 +179,13 @@ namespace TensileLite
         class DataInitialization : public RunListener
         {
         public:
+            // Owned host storage for async swizzle/MX uploads.
+            struct SwizzleUpload
+            {
+                std::vector<char> bytes;
+                size_t            totalElements = 0;
+            };
+
             static double GetRepresentativeBetaValue(po::variables_map const& args);
 
             DataInitialization(po::variables_map const&    args,
@@ -303,6 +310,7 @@ namespace TensileLite
                     m_gpuPtrsRing[i].clear();
                     m_gpuBatchPtrsRing[i].clear();
                     m_cachedInputsRing[i].reset();
+                    m_swizzleUploadStaging[i].clear();
                 }
                 m_altSlotsFilled = false;
             }
@@ -1090,12 +1098,17 @@ namespace TensileLite
 
             void allocNewGPUInputs();
 
-            // callerStream: when non-null, caller manages sync for m_copyStream;
-            //   DMA always submits on m_copyStream regardless of this parameter.
+            // callerStream: when non-null, copies enqueue on callerStream and the caller
+            //   manages synchronization; otherwise m_copyStream is used when available.
             void copyValidToGPUBuffer(ContractionProblemGemm const& problem,
                                       hipStream_t                   callerStream = nullptr);
 
-            void copySwizzledToGPUBuffer(ContractionProblemGemm const& problem);
+            // callerStream: when non-null, swizzle/MX uploads enqueue on callerStream.
+            //   Async callers must provide swizzleStaging to keep temporary host sources
+            //   alive until the copy stream reaches the recorded event.
+            void copySwizzledToGPUBuffer(ContractionProblemGemm const& problem,
+                                         hipStream_t                   callerStream = nullptr,
+                                         std::vector<SwizzleUpload>*   swizzleStaging = nullptr);
 
             void initializeGPUBatchedInputs(ContractionProblemGemm const& problem,
                                             hipStream_t                   targetStream = nullptr,
@@ -1325,6 +1338,8 @@ namespace TensileLite
             std::vector<void*>             m_gpuPtrsRing[MAX_BUFFER_SETS];
             std::vector<void**>            m_gpuBatchPtrsRing[MAX_BUFFER_SETS];
             std::shared_ptr<ProblemInputs> m_cachedInputsRing[MAX_BUFFER_SETS];
+            // Per-ring-slot host staging for async swizzle uploads.
+            std::vector<SwizzleUpload>     m_swizzleUploadStaging[MAX_BUFFER_SETS];
 
             hipStream_t m_copyStream = nullptr;
             hipEvent_t  m_copyDoneEvents[MAX_BUFFER_SETS] = {};

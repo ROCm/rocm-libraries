@@ -2806,8 +2806,31 @@ namespace TensileLite
                 HIP_CHECK_EXC(hipStreamSynchronize(m_copyStream));
         }
 
-        void DataInitialization::copySwizzledToGPUBuffer(ContractionProblemGemm const& problem)
+        void DataInitialization::copySwizzledToGPUBuffer(
+            ContractionProblemGemm const& problem,
+            hipStream_t                   callerStream,
+            std::vector<SwizzleUpload>*   swizzleStaging)
         {
+            using ManipTensor = ::Tensor::Manipulation::Tensor;
+
+            hipStream_t copyStream = callerStream ? callerStream : m_copyStream;
+            bool const  useAsync   = copyStream != nullptr;
+
+            if(callerStream && swizzleStaging == nullptr)
+                throw std::logic_error("Async swizzle uploads require staging storage.");
+
+            std::vector<SwizzleUpload> localSwizzleStaging;
+            auto& uploadStaging = swizzleStaging ? *swizzleStaging : localSwizzleStaging;
+
+            auto stageTensor = [&](ManipTensor const& source) -> SwizzleUpload& {
+                auto& upload         = uploadStaging.emplace_back();
+                upload.totalElements = source.getDesc().flattenSize();
+                upload.bytes.resize(source.getNumBytes());
+                if(!upload.bytes.empty())
+                    memcpy(upload.bytes.data(), source.as<void>(), upload.bytes.size());
+                return upload;
+            };
+
             for(size_t i = 0; i < m_vdata.size(); i++)
             {
                 auto& desc = problem.tensors()[i];
@@ -2842,7 +2865,6 @@ namespace TensileLite
 
                 if(needSwizzle)
                 {
-                    using Tensor = Tensor::Manipulation::Tensor;
                     // currently, if A then it means MiM = 16, if B then it means MiN = 16
                     size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
                     calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK);
@@ -2859,12 +2881,25 @@ namespace TensileLite
                     {
                         if(swizzleKey != g_swizzleCache.back())
                         {
-                            Tensor& permuted = g_swizzleCache.at(swizzleKey);
-                            ptr              = copyInputBuffers(desc,
+                            auto& permuted = g_swizzleCache.at(swizzleKey);
+                            if(useAsync)
+                            {
+                                auto& staged = stageTensor(permuted);
+                                ptr          = copyInputBuffers(desc,
                                                    p.gpuInput.valid.get(),
-                                                   permuted.as<void>(),
-                                                   permuted.getDesc().flattenSize(),
-                                                   hipMemcpyHostToDevice);
+                                                   staged.bytes.data(),
+                                                   staged.totalElements,
+                                                   hipMemcpyHostToDevice,
+                                                   copyStream);
+                            }
+                            else
+                            {
+                                ptr = copyInputBuffers(desc,
+                                                       p.gpuInput.valid.get(),
+                                                       permuted.as<void>(),
+                                                       permuted.getDesc().flattenSize(),
+                                                       hipMemcpyHostToDevice);
+                            }
                         }
                         else
                         {
@@ -2873,7 +2908,7 @@ namespace TensileLite
                     }
                     else
                     {
-                        auto tmpTensor = Tensor({tiledSize, unrolledSize}, desc.elementBytes());
+                        ManipTensor tmpTensor({tiledSize, unrolledSize}, desc.elementBytes());
 
                         memcpy(
                             tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
@@ -2886,13 +2921,27 @@ namespace TensileLite
                                               paddedShape[1] / (MiK * PackK),
                                               MiK / MiKv,
                                               MiKv * PackK});
-                        Tensor permuted = permute(paddedTensor, {0, 2, 3, 1, 4});
-                        ptr             = copyInputBuffers(desc,
-                                               p.gpuInput.valid.get(),
-                                               permuted.as<void>(),
-                                               permuted.getDesc().flattenSize(),
-                                               hipMemcpyHostToDevice);
+                        ManipTensor permuted = permute(paddedTensor, {0, 2, 3, 1, 4});
                         g_swizzleCache.emplace(swizzleKey, std::move(permuted));
+                        auto& cachedPermuted = g_swizzleCache.at(swizzleKey);
+                        if(useAsync)
+                        {
+                            auto& staged = stageTensor(cachedPermuted);
+                            ptr          = copyInputBuffers(desc,
+                                                       p.gpuInput.valid.get(),
+                                                       staged.bytes.data(),
+                                                       staged.totalElements,
+                                                       hipMemcpyHostToDevice,
+                                                       copyStream);
+                        }
+                        else
+                        {
+                            ptr = copyInputBuffers(desc,
+                                                   p.gpuInput.valid.get(),
+                                                   cachedPermuted.as<void>(),
+                                                   cachedPermuted.getDesc().flattenSize(),
+                                                   hipMemcpyHostToDevice);
+                        }
                     }
                 }
                 else if (needMXSwizzle)
@@ -2922,7 +2971,8 @@ namespace TensileLite
                                                p.gpuInput.valid.get(),
                                                p.cpuInput.valid.get(),
                                                p.maxElements,
-                                               hipMemcpyHostToDevice);
+                                               hipMemcpyHostToDevice,
+                                               copyStream);
                     }
                     else if (m_isMXPreswizzleArch && preswizzledAlready)
                     {
@@ -2939,7 +2989,8 @@ namespace TensileLite
                                                p.gpuInput.valid.get(),
                                                p.cpuInput.valid.get(),
                                                p.maxElements,
-                                               hipMemcpyHostToDevice);
+                                               hipMemcpyHostToDevice,
+                                               copyStream);
                     }
                     else
                     {
@@ -2947,7 +2998,6 @@ namespace TensileLite
                         // gfx950 is excluded by the branches above.
                         // Batch dim (if present) goes at the front; pad/reshape/permute
                         // operate natively on N-D so all batches are processed at once.
-                        using Tensor = Tensor::Manipulation::Tensor;
                         size_t batch = desc.sizes().size() > 2 ? desc.sizes()[2] : 1;
 
                         if (unrollMajor)
@@ -2955,7 +3005,8 @@ namespace TensileLite
                             auto unrolledSize = desc.sizes()[0];
                             auto tiledSize    = desc.sizes()[1];
                             size_t dimk       = 128 / MX;
-                            auto tmpTensor    = Tensor({batch, tiledSize, unrolledSize}, desc.elementBytes());
+                            ManipTensor tmpTensor({batch, tiledSize, unrolledSize},
+                                                  desc.elementBytes());
                             ::Tensor::Manipulation::Shape paddedShape{
                                 batch, tiledSize, (unrolledSize + dimk - 1) / dimk * dimk};
 
@@ -2968,19 +3019,33 @@ namespace TensileLite
                                                   paddedShape[1],
                                                   paddedShape[2] / dimk,
                                                   dimk});
-                            Tensor permuted = permute(paddedTensor, {0, 2, 1, 3});
-                            ptr             = copyInputBuffers(desc,
+                            ManipTensor permuted = permute(paddedTensor, {0, 2, 1, 3});
+                            if(useAsync)
+                            {
+                                auto& staged = stageTensor(permuted);
+                                ptr          = copyInputBuffers(desc,
                                                    p.gpuInput.valid.get(),
-                                                   permuted.as<void>(),
-                                                   permuted.getDesc().flattenSize(),
-                                                   hipMemcpyHostToDevice);
+                                                   staged.bytes.data(),
+                                                   staged.totalElements,
+                                                   hipMemcpyHostToDevice,
+                                                   copyStream);
+                            }
+                            else
+                            {
+                                ptr = copyInputBuffers(desc,
+                                                       p.gpuInput.valid.get(),
+                                                       permuted.as<void>(),
+                                                       permuted.getDesc().flattenSize(),
+                                                       hipMemcpyHostToDevice);
+                            }
                         }
                         else
                         {
                             auto unrolledSize = desc.sizes()[1];
                             auto tiledSize    = desc.sizes()[0];
                             size_t dimk       = 128 / MX;
-                            auto tmpTensor    = Tensor({batch, unrolledSize, tiledSize}, desc.elementBytes());
+                            ManipTensor tmpTensor({batch, unrolledSize, tiledSize},
+                                                  desc.elementBytes());
                             ::Tensor::Manipulation::Shape paddedShape{
                                 batch, (unrolledSize + dimk - 1) / dimk * dimk, tiledSize};
 
@@ -2993,12 +3058,25 @@ namespace TensileLite
                                                   paddedShape[1] / dimk,
                                                   dimk,
                                                   paddedShape[2]});
-                            Tensor permuted = permute(paddedTensor, {0, 1, 3, 2});
-                            ptr             = copyInputBuffers(desc,
+                            ManipTensor permuted = permute(paddedTensor, {0, 1, 3, 2});
+                            if(useAsync)
+                            {
+                                auto& staged = stageTensor(permuted);
+                                ptr          = copyInputBuffers(desc,
                                                    p.gpuInput.valid.get(),
-                                                   permuted.as<void>(),
-                                                   permuted.getDesc().flattenSize(),
-                                                   hipMemcpyHostToDevice);
+                                                   staged.bytes.data(),
+                                                   staged.totalElements,
+                                                   hipMemcpyHostToDevice,
+                                                   copyStream);
+                            }
+                            else
+                            {
+                                ptr = copyInputBuffers(desc,
+                                                       p.gpuInput.valid.get(),
+                                                       permuted.as<void>(),
+                                                       permuted.getDesc().flattenSize(),
+                                                       hipMemcpyHostToDevice);
+                            }
                         }
                     }
                 }
@@ -3008,12 +3086,15 @@ namespace TensileLite
                                            p.gpuInput.valid.get(),
                                            p.cpuInput.valid.get(),
                                            p.maxElements,
-                                           hipMemcpyHostToDevice);
+                                           hipMemcpyHostToDevice,
+                                           copyStream);
                 }
 
                 if(ptr == nullptr)
                     std::__throw_runtime_error("error");
             }
+            if(useAsync && !callerStream)
+                HIP_CHECK_EXC(hipStreamSynchronize(copyStream));
         }
 
         template <typename T>
@@ -3597,7 +3678,7 @@ namespace TensileLite
                     if(needSwizzle || needMXSwizzle)
                     {
                         ScopedTimer t2("async_reset_swizzle");
-                        copySwizzledToGPUBuffer(problem);
+                        copySwizzledToGPUBuffer(problem, targetStream);
                     }
                 }
 
@@ -3666,6 +3747,12 @@ namespace TensileLite
 
             bool needSwizzle = problem.swizzleTensorA() || problem.swizzleTensorB();
             bool needMXSwizzle = (problem.mxBlockA() != 0) || (problem.mxBlockB() != 0);
+            std::vector<SwizzleUpload>* swizzleStaging = nullptr;
+            if(targetStream)
+            {
+                swizzleStaging = &m_swizzleUploadStaging[slotIdx];
+                swizzleStaging->clear();
+            }
 
             // Local copies — critical: copyInputs doesn't clear offsets (only
             // ptrs/batchPtrs/maxElements), so reusing m_groupedOffsets across
@@ -3680,7 +3767,7 @@ namespace TensileLite
             if(m_problemDependentData)
                 copyValidToGPUBuffer(problem, targetStream);
             if(needSwizzle || needMXSwizzle)
-                copySwizzledToGPUBuffer(problem);
+                copySwizzledToGPUBuffer(problem, targetStream, swizzleStaging);
 
             // Clear offsets before copyInputs (it push_back's, doesn't clear)
             localOffsets.clear();
