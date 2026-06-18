@@ -990,7 +990,7 @@ namespace TensileLite
                 int numSyncsPerBench = args["num-syncs-per-benchmark"].as<int>();
                 bool noBenchmarkRuns = (numBenchmarks == 0 || numEnqPerSync == 0
                                         || numSyncsPerBench == 0);
-                m_numActiveBuffers   = noBenchmarkRuns ? 3 : 2;
+                m_ring = RingSlotController(noBenchmarkRuns ? 3 : 2);
             }
 
             m_rotatingBuffer
@@ -3647,7 +3647,7 @@ namespace TensileLite
             if(!m_hasAltBuffers || !m_gpuPtrsRing[1].empty())
                 return;
 
-            for(size_t slot = 1; slot < m_numActiveBuffers; slot++)
+            for(size_t slot = 1; slot < m_ring.activeBufferCount(); slot++)
                 fillSlot(slot, problem, /*targetStream=*/nullptr);
 
             m_altSlotsFilled = true;

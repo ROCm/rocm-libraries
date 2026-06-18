@@ -27,6 +27,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInit_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInitializationTestUtils_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HipStreamGuard_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/RingSlotController_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/GEMMKernelTest.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/GEMMKernelTest_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/HipStreamGuard.hpp"

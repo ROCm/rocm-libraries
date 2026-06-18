@@ -27,6 +27,7 @@
 #pragma once
 
 #include "ProgramOptions.hpp"
+#include "RingSlotController.hpp"
 
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/hip/HipUtils.hpp>
@@ -242,7 +243,7 @@ namespace TensileLite
             // A temporarily wrapper
             std::shared_ptr<ProblemInputs> prepareGPUInputs(ContractionProblem const* problem)
             {
-                if(m_availableSlots > 0)
+                if(m_ring.hasAvailableSlot())
                 {
                     // The ring is only ever filled under ringEligible() (enforced in
                     // beginAsyncReset), i.e. BoundsCheck::Disable and !problemDependent.
@@ -272,27 +273,21 @@ namespace TensileLite
             // (e.g., when switching to a new problem whose data differs).
             void cancelAsyncReset()
             {
-                if(m_availableSlots > 0 || m_computeNeedsCopyBarrier)
-                {
+                auto const oldActiveSlot  = m_ring.activeSlot();
+                bool const hadPendingWork = m_ring.hasPendingWork();
+
+                if(hadPendingWork)
                     syncCopyStream();
-                    m_availableSlots    = 0;
-                    m_computeNeedsCopyBarrier = false;
-                }
-                // Resync working state to slot 0 BEFORE resetting m_activeIdx
-                // (otherwise the guard is dead code).
-                if(m_activeIdx != 0)
+
+                m_ring.cancel();
+
+                // Restore the cached slot-0 aliases before clearing alternate-ring
+                // storage.  We capture the old active slot up front so this still
+                // happens even when no sync was needed.
+                if(oldActiveSlot != 0)
                 {
-                    for(auto& vd : m_vdata)
-                        for(auto& [dt, pu] : vd.pristine)
-                        {
-                            pu.gpuInput.current = pu.gpuInput.buffers[0];
-                            pu.gpuInput.batch   = pu.gpuInput.batchBufs[0];
-                        }
-                    m_gpuPtrs         = m_gpuPtrsRing[0];
-                    m_gpuBatchPtrs    = m_gpuBatchPtrsRing[0];
-                    m_cachedGPUInputs = m_cachedInputsRing[0];
+                    activateRingSlot(0);
                 }
-                m_activeIdx = 0;
                 // Clear alt ring slots so initializeAltBufferSets re-runs for the
                 // new problem.  Without this, the guard in initializeAltBufferSets
                 // (!m_gpuPtrsRing[1].empty()) would short-circuit and leave stale
@@ -316,11 +311,11 @@ namespace TensileLite
             // without blocking the CPU; hipStreamWaitEvent is a device-only barrier.
             void waitCopyDone(hipStream_t computeStream)
             {
-                if(!m_computeNeedsCopyBarrier)
+                if(!m_ring.needsCopyBarrier())
                     return;
                 HIP_CHECK_EXC(hipStreamWaitEvent(
-                    computeStream, m_copyDoneEvents[m_activeIdx], 0));
-                m_computeNeedsCopyBarrier = false;
+                    computeStream, m_copyDoneEvents[m_ring.activeSlot()], 0));
+                m_ring.markBarrierWaited();
             }
 
             // Kick off async reset of the next free buffer slot in the ring
@@ -330,11 +325,10 @@ namespace TensileLite
             {
                 if(!ringEligible())
                     return;
-                if(m_availableSlots >= m_numActiveBuffers - 1)
+                auto targetIdx = m_ring.nextPrimeSlot();
+                if(!targetIdx)
                     return; // all non-active slots already have pending DMA
-
-                size_t targetIdx
-                    = (m_activeIdx + m_availableSlots + 1) % m_numActiveBuffers;
+                size_t const targetSlot = *targetIdx;
 
                 // Warm path: this slot was filled by fillSlot (via
                 // initializeAltBufferSets) and no kernel has ever written to
@@ -347,8 +341,8 @@ namespace TensileLite
                 if(m_altSlotsFilled)
                 {
                     HIP_CHECK_EXC(
-                        hipEventRecord(m_copyDoneEvents[targetIdx], m_copyStream));
-                    m_availableSlots++;
+                        hipEventRecord(m_copyDoneEvents[targetSlot], m_copyStream));
+                    m_ring.markSlotPrimed();
                     return;
                 }
 
@@ -357,7 +351,7 @@ namespace TensileLite
                     ScopedTimer prepTimer("async_reset_prepare");
                     if(auto gemmProblem
                        = dynamic_cast<ContractionProblemGemm const*>(problem))
-                        fillSlot(targetIdx, *gemmProblem, m_copyStream);
+                        fillSlot(targetSlot, *gemmProblem, m_copyStream);
                     else if(auto groupedProblem
                             = dynamic_cast<ContractionProblemGroupedGemm const*>(
                                 problem))
@@ -380,13 +374,13 @@ namespace TensileLite
                                               == groupedProblem->gemms[0].d().dataType();
                             }));
                         fillSlot(
-                            targetIdx, groupedProblem->gemms[0], m_copyStream);
+                            targetSlot, groupedProblem->gemms[0], m_copyStream);
                     }
                 }
 
                 HIP_CHECK_EXC(
-                    hipEventRecord(m_copyDoneEvents[targetIdx], m_copyStream));
-                m_availableSlots++;
+                    hipEventRecord(m_copyDoneEvents[targetSlot], m_copyStream));
+                m_ring.markSlotPrimed();
             }
 
             std::shared_ptr<ProblemInputs>
@@ -1168,10 +1162,11 @@ namespace TensileLite
             // "ring is usable"; every site that fills, advances, or consumes a slot must
             // agree with it.
             //
-            // m_availableSlots > 0 is only a valid proxy for "safe to bypass dispatch"
-            // when this predicate holds.  Gating beginAsyncReset on ringEligible() makes
-            // that implication provable: the only writer that increments m_availableSlots
-            // has already verified all three conditions below.
+            // m_ring.hasAvailableSlot() is only a valid proxy for "safe to bypass
+            // dispatch" when this predicate holds.  Gating beginAsyncReset on
+            // ringEligible() makes that implication provable: the only writer that
+            // increments the controller's available-slot count has already verified
+            // all three conditions below.
             //
             // NOTE: swizzle/MX are handled by fillSlot degrading to its slow path;
             // they do not disqualify the ring, they only force a full re-fill.
@@ -1184,23 +1179,27 @@ namespace TensileLite
                     && !m_problemDependentData;
             }
 
-            // Advance to the next buffer in the ring.
-            void advanceBuffer()
+            void activateRingSlot(size_t slot)
             {
-                m_activeIdx = (m_activeIdx + 1) % m_numActiveBuffers;
                 for(auto& vd : m_vdata)
                     for(auto& [dt, pu] : vd.pristine)
                     {
-                        pu.gpuInput.current = pu.gpuInput.buffers[m_activeIdx];
-                        pu.gpuInput.batch   = pu.gpuInput.batchBufs[m_activeIdx];
+                        pu.gpuInput.current = pu.gpuInput.buffers[slot];
+                        pu.gpuInput.batch   = pu.gpuInput.batchBufs[slot];
                     }
-                m_gpuPtrs        = m_gpuPtrsRing[m_activeIdx];
-                m_gpuBatchPtrs   = m_gpuBatchPtrsRing[m_activeIdx];
-                m_cachedGPUInputs = m_cachedInputsRing[m_activeIdx];
-                m_availableSlots--;
+                m_gpuPtrs        = m_gpuPtrsRing[slot];
+                m_gpuBatchPtrs   = m_gpuBatchPtrsRing[slot];
+                m_cachedGPUInputs = m_cachedInputsRing[slot];
+            }
+
+            // Advance to the next buffer in the ring.
+            void advanceBuffer()
+            {
+                auto newActiveSlot = m_ring.advance();
+                assert(newActiveSlot.has_value());
+                activateRingSlot(*newActiveSlot);
                 // The new active slot may have an outstanding DMA on m_copyStream;
                 // require waitCopyDone before the compute stream reads it.
-                m_computeNeedsCopyBarrier = true;
             }
 
             std::shared_ptr<ProblemInputs>
@@ -1220,11 +1219,8 @@ namespace TensileLite
             ContractionProblemGemm const* m_batchInitProblem = nullptr;
 
             // Multi-buffer ring control
-            bool   m_hasAltBuffers    = false;
-            size_t m_numActiveBuffers = 2;  // 2 for double-buffer, 3 for triple
-            size_t m_activeIdx        = 0;  // Index of the slot the CPU and current kernel use
-            size_t m_availableSlots    = 0; // Count of slots filled but not yet consumed by advanceBuffer
-            bool   m_computeNeedsCopyBarrier  = false; // compute stream has not yet waited on the copy-done event for the active slot
+            bool                  m_hasAltBuffers = false;
+            RingSlotController    m_ring;
 
             std::shared_ptr<ProblemInputs> m_cachedGPUInputs;
 
