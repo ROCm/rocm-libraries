@@ -1,0 +1,77 @@
+# TensileLite Test Categories Configuration
+# Aligned with Test Filter Standardization (RFC0010) for pytest-based components.
+#
+# Unlike gtest/ctest components (which use ctest labels via shared/ctest), the
+# TensileLite tests are Python/pytest. TheRock's pytest_runner.py consumes this
+# file directly: it collects tests from `test_paths`, filters by the pytest
+# marker expression built from `pytest_markers` / `exclude_markers`, applies
+# GPU-arch `skip-gfxXXXX` markers (registered in pytest.ini), shards the result,
+# and runs pytest from the installed share/hipblaslt/tensilelite/ tree.
+#
+# Category mapping is derived from the legacy
+# TheRock/build_tools/github_actions/test_executable_scripts/test_tensilelite.py,
+# which ran two suites unconditionally:
+#   - rocisa_tests/            (rocisa pytest modules)
+#   - Tensile/Tests/unit/      (TensileLite unit tests, incl. GPU subtile tests)
+#
+# comprehensive/full reproduce that legacy set exactly (GPU tests included).
+# quick/standard run the same suites minus GPU-hardware tests (marker `gpu`) so
+# the pre-commit / PR tiers stay fast and host-only.
+#
+# test_paths are relative to the installed component root
+# (share/hipblaslt/tensilelite/), which is the pytest working directory.
+
+test_categories:
+  quick:
+    description: "Fast host-only sanity checks (rocisa + TensileLite unit, no GPU)"
+    test_paths:
+      - "rocisa_tests"
+      - "Tensile/Tests/unit"
+    exclude_markers:
+      - "gpu"
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Pre-checkin validation (rocisa + TensileLite unit, no GPU)"
+    test_paths:
+      - "rocisa_tests"
+      - "Tensile/Tests/unit"
+    exclude_markers:
+      - "gpu"
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "Nightly comprehensive run (rocisa + TensileLite unit, incl. GPU)"
+    test_paths:
+      - "rocisa_tests"
+      - "Tensile/Tests/unit"
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Complete suite (rocisa + TensileLite unit, incl. GPU)"
+    test_paths:
+      - "rocisa_tests"
+      - "Tensile/Tests/unit"
+    labels:
+      - "full"
+      - "all"
+
+execution_settings:
+  # TensileLite GPU unit tests assemble/run kernels and the legacy runner ran
+  # them serially; pytest-xdist worker isolation (HIP_VISIBLE_DEVICES) is set up
+  # in conftest.py, so this can be raised once parallel GPU runs are validated.
+  parallel_workers: 1
+  category_timeouts:
+    quick: 300            # 5 minutes
+    standard: 2700        # 45 minutes
+    comprehensive: 25200  # 7 hours
+    full: 28800           # 8 hours
