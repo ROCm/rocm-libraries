@@ -1301,11 +1301,11 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputFlagged)
 
         size_t expected_output_size = rocprim::detail::ceiling_div(size, flag_selector);
 
-        MEMCHECK_OR_BREAK_ALLOC_DEVICE<size_t>(expected_output_size)
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE(size_t, expected_output_size)
         common::device_ptr<size_t> d_output(expected_output_size);
 
         // Calculate expected results on host
-        MEMCHECK_OR_BREAK_ALLOC_HOST<size_t>(expected_output_size)
+        MEMCHECK_OR_BREAK_ALLOC_HOST(size_t, expected_output_size)
         std::vector<size_t> expected_output(expected_output_size);
         for(size_t i = 0; i < expected_output_size; i++)
         {
@@ -1360,7 +1360,7 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputFlagged)
         ASSERT_EQ(selected_count_output, expected_output_size);
 
         // Check if output values are as expected
-        MEMCHECK_OR_BREAK_ALLOC_HOST<size_t>(expected_output_size)
+        MEMCHECK_OR_BREAK_ALLOC_HOST(size_t, expected_output_size)
         const auto output = d_output.load();
 
         ASSERT_NO_FATAL_FAILURE(
@@ -1428,11 +1428,11 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputSelectOp)
 
         size_t expected_output_size = selected_input;
 
-        MEMCHECK_OR_BREAK_ALLOC_DEVICE<size_t>(expected_output_size)
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE(size_t, expected_output_size)
         common::device_ptr<size_t> d_output(expected_output_size);
 
         // Calculate expected results on host
-        MEMCHECK_OR_BREAK_ALLOC_HOST<size_t>(expected_output_size)
+        MEMCHECK_OR_BREAK_ALLOC_HOST(size_t, expected_output_size)
         std::vector<size_t> expected_output(expected_output_size);
         std::iota(expected_output.begin(), expected_output.end(), 0);
 
@@ -1488,7 +1488,7 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputSelectOp)
         ASSERT_EQ(selected_count_output, expected_output_size);
 
         // Check if output values are as expected
-        MEMCHECK_OR_BREAK_ALLOC_HOST<size_t>(expected_output_size)
+        MEMCHECK_OR_BREAK_ALLOC_HOST(size_t, expected_output_size)
         const auto output = d_output.load();
 
         ASSERT_NO_FATAL_FAILURE(
@@ -1549,11 +1549,11 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputSelectFlagged)
 
         size_t expected_output_size = selected_flags;
 
-        MEMCHECK_OR_BREAK_ALLOC_DEVICE<size_t>(expected_output_size)
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE(size_t, expected_output_size)
         common::device_ptr<size_t> d_output(expected_output_size);
 
         // Calculate expected results on host
-        MEMCHECK_OR_BREAK_ALLOC_HOST<size_t>(expected_output_size)
+        MEMCHECK_OR_BREAK_ALLOC_HOST(size_t, expected_output_size)
         std::vector<size_t> expected_output(expected_output_size);
         std::iota(expected_output.begin(), expected_output.end(), 0);
 
@@ -1611,7 +1611,7 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputSelectFlagged)
         ASSERT_EQ(selected_count_output, expected_output_size);
 
         // Check if output values are as expected
-        MEMCHECK_OR_BREAK_ALLOC_HOST<size_t>(expected_output_size)
+        MEMCHECK_OR_BREAK_ALLOC_HOST(size_t, expected_output_size)
         const auto output = d_output.load();
         ASSERT_NO_FATAL_FAILURE(
             test_utils::assert_eq(output, expected_output, expected_output.size()));
@@ -1662,11 +1662,11 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputUnique)
                                                          { return i / segment_length; });
 
         const size_t expected_output_size = rocprim::detail::ceiling_div(size, segment_length);
-        MEMCHECK_OR_BREAK_ALLOC_HOST<size_t>(expected_output_size)
+        MEMCHECK_OR_BREAK_ALLOC_HOST(size_t, expected_output_size)
         std::vector<size_t> expected_output(expected_output_size);
         std::iota(expected_output.begin(), expected_output.end(), 0);
 
-        MEMCHECK_OR_BREAK_ALLOC_DEVICE<size_t>(expected_output_size)
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE(size_t, expected_output_size)
         common::device_ptr<size_t> d_output(expected_output_size);
         common::device_ptr<size_t> d_unique_count_output(1);
 
@@ -1709,7 +1709,7 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputUnique)
         const auto unique_count_output = d_unique_count_output.load()[0];
         ASSERT_EQ(unique_count_output, expected_output_size);
 
-        MEMCHECK_OR_BREAK_ALLOC_HOST<size_t>(expected_output_size)
+        MEMCHECK_OR_BREAK_ALLOC_HOST(size_t, expected_output_size)
         const auto output = d_output.load();
         ASSERT_NO_FATAL_FAILURE(
             test_utils::assert_eq(output, expected_output, expected_output.size()));
