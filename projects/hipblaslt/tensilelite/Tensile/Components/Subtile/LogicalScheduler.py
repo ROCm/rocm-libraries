@@ -197,11 +197,12 @@ class SchedulerConfig:
     # If no solution exists, we return [total] (single partition).
     @staticmethod
     def _uid_range(numUnroll: dict) -> int:
-        """Size of the uid dimension that indexes the scale span over data DUs.
+        """Realized uid range from the per-data-tensor unroll multiplicity.
 
-        The data (smaller-DU) tensors are sliced into one uid per data-DU window
-        within the scale span, so the uid range is the data tensors' unroll
-        multiplicity. Single-DU configs have uid_range == 1.
+        This is the largest number of data-DU windows any data tensor is sliced
+        into (max over A/B). It is the equivalence reference for the symmetric
+        DU-ratio derivation (see the `uid_range` property) and the multi-DU gate;
+        the two must coincide for every constructible config.
         """
         return max(numUnroll.get('A', 1), numUnroll.get('B', 1))
 
@@ -280,6 +281,26 @@ class SchedulerConfig:
             self.numSubIterK = original_numSubIterK
             self.numUnroll = {t: 1 for t in grans}
 
+        # uid_range is the size of the uid dimension that indexes the scale span
+        # over data DUs.  Derive it directly from the scale/data DU ratio: the
+        # scale GR granularity (maxGrK) spans the full scale DU in k, while the
+        # original numSubIterK is the data DU's k extent, so
+        #     uid_range = scaleDU / dataDU = max(numSubIterK, maxGrK) // numSubIterK.
+        # This is a symmetric quantity — independent of which data tensor realises
+        # the multiplicity — unlike the per-data-tensor numUnroll max it replaces.
+        # numUnroll stays the realized per-tensor multiplicity (it may be
+        # asymmetric, e.g. {A:2, B:1}); uid_range is its DU-ratio summary and the
+        # two must coincide for every constructible config.  The assert turns any
+        # future divergence into a loud failure rather than a silent codegen
+        # change (a non-dividing GR granularity is already rejected upstream by
+        # the maxGrK % g.k == 0 check, so it can never reach here).
+        self._uid_range_val = (expanded_k // original_numSubIterK) if data_multi_du else 1
+        assert self._uid_range_val == self._uid_range(self.numUnroll), (
+            f"uid_range DU-ratio derivation ({self._uid_range_val}) diverged from "
+            f"realized max(numUnroll)={self._uid_range(self.numUnroll)} "
+            f"(numUnroll={self.numUnroll}, numSubIterK={original_numSubIterK}, "
+            f"maxGrK={maxGrK}); this is a behavior change, not value-preserving")
+
         mn_M = max((g.mn for g in (self.lrA, self.lrSA) if g is not None), default=1)
         mn_N = max((g.mn for g in (self.lrB, self.lrSB) if g is not None), default=1)
         self._partitionSizesM = self._normalize_partition_sizes(
@@ -298,8 +319,12 @@ class SchedulerConfig:
 
     @property
     def uid_range(self) -> int:
-        """Size of the uid dimension indexing the scale span (1 == single-DU)."""
-        return SchedulerConfig._uid_range(self.numUnroll) if self.numUnroll else 1
+        """Size of the uid dimension indexing the scale span (1 == single-DU).
+
+        Derived from the scale/data DU ratio in __post_init__ (scaleDU/dataDU),
+        not from the per-data-tensor numUnroll max.
+        """
+        return self._uid_range_val
 
     @property
     def partitionSizesM(self) -> List[int]:
@@ -871,11 +896,11 @@ class LogicalScheduler:
         return self._is_multi_du()
 
     def _uid_range(self) -> int:
-        """Size of the uid dimension indexing the scale span (1 == single-DU)."""
-        cfg = self.config
-        if not cfg.numUnroll:
-            return 1
-        return SchedulerConfig._uid_range(cfg.numUnroll)
+        """Size of the uid dimension indexing the scale span (1 == single-DU).
+
+        Reads the config's DU-ratio uid_range (scaleDU/dataDU) directly.
+        """
+        return self.config.uid_range
 
     def _is_multi_du(self) -> bool:
         """True when the uid dimension is non-trivial (uid_range > 1)."""
