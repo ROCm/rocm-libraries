@@ -28,6 +28,22 @@ using namespace TensileLite::Client;
 namespace
 {
     using TensileLite::testing::makeBatchedProblem;
+
+    ::testing::AssertionResult hasHipDevice()
+    {
+        int        deviceCount = 0;
+        hipError_t err         = hipGetDeviceCount(&deviceCount);
+        if(err != hipSuccess)
+        {
+            return ::testing::AssertionFailure()
+                   << "hipGetDeviceCount failed: " << hipGetErrorString(err);
+        }
+        if(deviceCount <= 0)
+        {
+            return ::testing::AssertionFailure() << "No HIP devices available";
+        }
+        return ::testing::AssertionSuccess();
+    }
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -51,6 +67,12 @@ namespace
 // ---------------------------------------------------------------------------
 TEST(BatchPointerReset, StalePointersAcrossProblems)
 {
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
     constexpr size_t BATCH = 4;
 
     // Problem 1: small — A tensor stride delta = 32*32 bytes.
@@ -140,6 +162,12 @@ TEST(BatchPointerReset, StalePointersAcrossProblems)
 // ---------------------------------------------------------------------------
 TEST(BatchPointerReset, StructuralReinitWithoutPreProblem)
 {
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
     constexpr size_t BATCH = 4;
 
     // p1: small problem — A tensor stride delta = 32*32 bytes.

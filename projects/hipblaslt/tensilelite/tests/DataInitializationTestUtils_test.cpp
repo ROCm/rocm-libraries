@@ -5,6 +5,8 @@
 
 #include <Tensile/DataTypes.hpp>
 
+#include <type_traits>
+
 #include "DataInitializationTestUtils.hpp"
 
 namespace
@@ -15,7 +17,31 @@ namespace
                      T const&                                      expected)
     {
         ASSERT_EQ(args.count(key), 1u) << "missing option: " << key;
-        EXPECT_EQ(args.at(key).as<T>(), expected) << "option: " << key;
+        auto const& actual = args.at(key).as<T>();
+        if constexpr(std::is_enum_v<T>)
+        {
+            using Underlying = std::underlying_type_t<T>;
+            EXPECT_EQ(static_cast<Underlying>(actual), static_cast<Underlying>(expected))
+                << "option: " << key;
+        }
+        else
+        {
+            EXPECT_EQ(actual, expected) << "option: " << key;
+        }
+    }
+
+    void expectArgEq(TensileLite::Client::po::variables_map const& args,
+                     char const*                                   key,
+                     std::vector<rocisa::DataType> const&          expected)
+    {
+        ASSERT_EQ(args.count(key), 1u) << "missing option: " << key;
+        auto const& actual = args.at(key).as<std::vector<rocisa::DataType>>();
+        ASSERT_EQ(actual.size(), expected.size()) << "option: " << key;
+        for(size_t i = 0; i < actual.size(); ++i)
+        {
+            EXPECT_EQ(static_cast<int>(actual[i]), static_cast<int>(expected[i]))
+                << "option: " << key << " index: " << i;
+        }
     }
 
     void expectRingArgs(TensileLite::Client::po::variables_map const& args,
