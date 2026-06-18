@@ -19,39 +19,39 @@ All the required dependencies are installed when the package installation method
 Use the following commands to install only the RPP runtime package:
 
 .. tab-set::
- 
+
   .. tab-item:: Ubuntu
 
     .. code:: shell
 
         sudo apt install rpp
 
-  
+
   .. tab-item:: RHEL
 
     .. code:: shell
 
-        sudo yum install rpp 
+        sudo yum install rpp
 
 
   .. tab-item:: SLES
 
     .. code:: shell
-  
+
         sudo zypper install rpp
 
 
 Use the following commands to install all three RPP packages:
 
 .. tab-set::
- 
+
   .. tab-item:: Ubuntu
 
     .. code:: shell
 
         sudo apt install rpp rpp-dev rpp-test
 
-  
+
   .. tab-item:: RHEL
 
     .. code:: shell
@@ -62,6 +62,5 @@ Use the following commands to install all three RPP packages:
   .. tab-item:: SLES
 
     .. code:: shell
-  
-        sudo zypper install rpp rpp-devel rpp-test
 
+        sudo zypper install rpp rpp-devel rpp-test

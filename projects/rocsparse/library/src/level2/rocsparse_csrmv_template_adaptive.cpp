@@ -380,12 +380,11 @@ rocsparse_status
 
         // Temporary arrays to hold device data
         std::vector<I> hptr(m + 1);
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             hptr.data(), csr_row_ptr, sizeof(I) * (m + 1), hipMemcpyDeviceToHost, stream));
 
         // Wait for host transfer to finish
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
-
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
         // Determine row blocks array size
         ComputeRowBlocks<I, J>((I*)NULL,
                                (J*)NULL,
@@ -430,23 +429,24 @@ rocsparse_status
                                                          handle->stream));
 
             // Copy row blocks information to device
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(csrmv_info->adaptive.row_blocks,
-                                               row_blocks.data(),
-                                               sizeof(I) * csrmv_info->adaptive.size,
-                                               hipMemcpyHostToDevice,
-                                               stream));
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(csrmv_info->adaptive.wg_flags,
-                                               0,
-                                               sizeof(uint32_t) * csrmv_info->adaptive.size,
-                                               stream));
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(csrmv_info->adaptive.wg_ids,
-                                               wg_ids.data(),
-                                               sizeof(J) * csrmv_info->adaptive.size,
-                                               hipMemcpyHostToDevice,
-                                               stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(csrmv_info->adaptive.row_blocks,
+                                                         row_blocks.data(),
+                                                         sizeof(I) * csrmv_info->adaptive.size,
+                                                         hipMemcpyHostToDevice,
+                                                         stream));
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMemsetAsync(csrmv_info->adaptive.wg_flags,
+                                         0,
+                                         sizeof(uint32_t) * csrmv_info->adaptive.size,
+                                         stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(csrmv_info->adaptive.wg_ids,
+                                                         wg_ids.data(),
+                                                         sizeof(J) * csrmv_info->adaptive.size,
+                                                         hipMemcpyHostToDevice,
+                                                         stream));
 
             // Wait for device transfer to finish
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
         }
     }
     // Store some pointers to verify correct execution

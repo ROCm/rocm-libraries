@@ -126,6 +126,7 @@ inline std::map<std::string, int>
     rv["HasScalarStore"]
         = tryAssembler(isaVersion, assemblerPath, "s_store_dword s79, s[70:71], s77", isDebug)
           || tryAssembler(isaVersion, assemblerPath, "s_store_b32 s79, s[70:71], s77", isDebug);
+    rv["HasSAtomic"] = tryAssembler(isaVersion, assemblerPath, "s_atomic_dec s11, s[0:1]", isDebug);
     rv["HasMFMA_explictB"] = tryAssembler(
         isaVersion, assemblerPath, "v_mfma_f32_32x32x1_2b_f32 a[0:31], v0, v1, a[0:31]", isDebug);
     rv["HasMFMA"] = tryAssembler(isaVersion,
@@ -312,6 +313,7 @@ inline std::map<std::string, int>
     rv["s_add_u64"]
         = tryAssembler(isaVersion, assemblerPath, "s_add_u64 s[0:1], s[0:1], s[2:3]", isDebug);
     rv["v_add_nc_u64"] = tryAssembler(isaVersion, assemblerPath, "v_add_nc_u64 v[0:1], v[2:3], v[4:5]", isDebug);
+
     rv["HasBF16CVT"] = tryAssembler(isaVersion, assemblerPath, "v_cvt_f32_bf16 v0, v1", isDebug);
 
     rv["HasPkF16CVT"] = tryAssembler(isaVersion, assemblerPath, "v_cvt_pk_f16_f32 v0, v1, v2", isDebug);
@@ -451,6 +453,10 @@ inline std::map<std::string, int>
     rv["HasNewBarrier"] = tryAssembler(isaVersion, assemblerPath, "s_barrier_wait -1", isDebug);
     rv["HasClusterBarrier"] = tryAssembler(isaVersion, assemblerPath, "s_barrier_wait -3", isDebug);
     rv["HasTDM"] = tryAssembler(isaVersion, assemblerPath, "tensor_load_to_lds s[0:3], s[4:11]", isDebug);
+    // v_movrelsd_2_b32: indirect-VGPR-write move used by CompactLoopStore's
+    // per-iter "copy MI out reg" body. Only some archs (gfx1250) have it, so
+    // probe the assembler and gate CompactLoopStore on this cap in Solution.py.
+    rv["HasMovRelsD2B32"] = tryAssembler(isaVersion, assemblerPath, "v_movrelsd_2_b32 v0, v1", isDebug);
 
     rv["s_delay_alu"]
         = tryAssembler(isaVersion, assemblerPath, "s_delay_alu instid0(VALU_DEP_1)", isDebug);
@@ -537,6 +543,8 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["HasSchedMode"]       = checkInList(isaVersion[0], {12});
     rv["HasAccCD"]           = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["ArchAccUnifiedRegs"] = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
+    // Max concurrent waves per SIMD: 8 for ArchAccUnifiedRegs (gfx90a/gfx942/gfx950), 10 otherwise.
+    rv["MaxWavesPerSimd"]    = rv["ArchAccUnifiedRegs"] ? 8 : 10;
     rv["CrosslaneWait"]      = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}});
     rv["TransOpWait"]        = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
     rv["SDWAWait"]           = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
@@ -569,6 +577,7 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     // therefore reorder w.r.t. a subsequent volatile/atomic VMEM. An
     // `s_wait_xcnt 0` must precede the volatile/atomic VMEM op.
     rv["RequiresXCntForVolatileVMEM"]  = checkInList(isaVersion, {{12, 5, 0}});
+    rv["DefaultScopeIsCULocal"]        = checkInList(isaVersion, {{12, 5, 0}});
 
     // LDS bank geometry — used for swizzle/rotation in subtile-based tiling.
     rv["LDSBankCount"] = 64;
