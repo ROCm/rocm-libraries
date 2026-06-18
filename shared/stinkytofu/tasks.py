@@ -447,11 +447,12 @@ def coverage(c, build_dir=None, open_report=False, jobs=None, rocm_path=None):
 
     # 5. Collect the instrumented binaries to report on. The library carries the
     #    code we care about; the tools/test binaries add their own coverage.
-    # unit_tests links stinkytofu_static, so its executable already embeds all
-    # stinkytofu coverage mappings. Passing stinkytofu.dll alongside it would
-    # produce the same function hashes from two different binaries → mass
-    # "mismatched data" warnings and an empty report. Only list executables.
+    # unit_tests links stinkytofu_static (coverage embedded in the exe).
+    # api_tests links stinkytofu shared, so include the shared lib too so
+    # llvm-cov can resolve its binary ID and avoid "mismatched data" warnings.
     obj_names = (
+        "libstinkytofu.so",
+        "stinkytofu.dll",
         "unit_tests",
         "api_tests",
         "stinkytofu-opt",
@@ -463,7 +464,7 @@ def coverage(c, build_dir=None, open_report=False, jobs=None, rocm_path=None):
         objects += [
             p
             for p in bld.rglob(f"{name}*")
-            if p.is_file() and p.suffix.lower() in (".exe", "")
+            if p.is_file() and p.suffix.lower() in (".exe", ".dll", ".so", "")
         ]
     if not objects:
         raise SystemExit("ERROR: no instrumented binaries found to report on.")
