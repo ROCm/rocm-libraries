@@ -121,15 +121,27 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, BitExactAcrossRuns)
     miopen::fs::create_directories(run1_dir);
     miopen::fs::create_directories(run2_dir);
 
+    // RAII guard: clean up even when an ASSERT_ aborts the test body.
+    struct Cleanup
+    {
+        const std::string& d1;
+        const std::string& d2;
+        ~Cleanup()
+        {
+            miopen::fs::remove_all(d1);
+            miopen::fs::remove_all(d2);
+        }
+    } cleanup{run1_dir, run2_dir};
+
     auto make_env = [](const std::string& tmp) {
         miopen::ProcessEnvironmentMap envs;
         envs["MIOPEN_DEBUG_FIND_ONLY_SOLVER"] = "ConvHipImplicitGemm3DGroupWrwXdlops";
-        envs["MIOPEN_LOG_LEVEL"]              = "4";
+        envs["MIOPEN_LOG_LEVEL"]              = "5";
         envs["MIOPEN_USER_DB_PATH"]           = tmp;
         return envs;
     };
 
-    // --dump_output writes binary output files to the working directory.
+    // -o 1 (--dump_output) writes binary output files to the working directory.
     // Run the driver twice from separate directories to get separate output files.
     const std::string det_args = GetParam().valid_args + " -o 1";
 
@@ -141,7 +153,7 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, BitExactAcrossRuns)
         int rc = 0;
         // Change CWD so dump files land in run1_dir
         EXPECT_NO_THROW(rc = p(det_args, run1_dir, &ss, envs));
-        EXPECT_EQ(rc, 0);
+        ASSERT_EQ(rc, 0) << "First driver run failed:\n" << ss.str();
     }
     {
         auto envs = make_env(run2_dir + "/db");
@@ -150,10 +162,11 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, BitExactAcrossRuns)
         std::stringstream ss;
         int rc = 0;
         EXPECT_NO_THROW(rc = p(det_args, run2_dir, &ss, envs));
-        EXPECT_EQ(rc, 0);
+        ASSERT_EQ(rc, 0) << "Second driver run failed:\n" << ss.str();
     }
 
-    // Compare all dump_*.bin files between the two runs
+    // Compare all dump_*.bin files between the two runs.
+    int compared = 0;
     for(const auto& entry : miopen::fs::directory_iterator(run1_dir))
     {
         const auto& p1 = entry.path();
@@ -176,10 +189,10 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, BitExactAcrossRuns)
         f1.read(buf1.data(), static_cast<std::streamsize>(sz1));
         f2.read(buf2.data(), static_cast<std::streamsize>(sz2));
         EXPECT_EQ(buf1, buf2) << "Bit-exact mismatch in " << p1.filename().string();
+        ++compared;
     }
 
-    miopen::fs::remove_all(run1_dir);
-    miopen::fs::remove_all(run2_dir);
+    ASSERT_GT(compared, 0) << "No .bin output files found — nothing was compared";
 }
 
 // 3D WRW
