@@ -22,11 +22,19 @@ set(TEST_INCLUDE_DIRS
     ${TABLEGEN_OUTPUT_DIR}
 )
 
-# Common link libraries for all tests
+# Common link libraries for all tests.
+# unit_tests links the static lib so all symbols (including non-exported ones)
+# are accessible for white-box coverage testing. When BUILD_SHARED_LIBS=OFF,
+# stinkytofu itself is already static so no separate target is needed.
+if(BUILD_SHARED_LIBS)
+    set(_stinkytofu_test_lib stinkytofu_static)
+else()
+    set(_stinkytofu_test_lib stinkytofu)
+endif()
 set(TEST_LINK_LIBS
     GTest::gtest
     Threads::Threads
-    stinkytofu
+    ${_stinkytofu_test_lib}
 )
 
 # =============================================================================
@@ -155,10 +163,43 @@ if(UNIX AND NOT APPLE AND BUILD_SHARED_LIBS AND CMAKE_READELF)
 endif()
 
 # =============================================================================
+# API Export Tests
+# Links stinkytofu as a SHARED library (or static when BUILD_SHARED_LIBS=OFF).
+# Purpose: verify that every symbol used by real consumers (rocisa,
+# stinkytofu-opt) is properly exported. A linker failure here means a symbol
+# was accidentally un-exported.
+# Only meaningful when BUILD_SHARED_LIBS=ON; skipped otherwise since all
+# symbols are always visible in a static build.
+# =============================================================================
+if(BUILD_SHARED_LIBS)
+    add_executable(api_tests
+        ${TEST_MAIN}
+        ${CMAKE_CURRENT_SOURCE_DIR}/api/ApiExportTest.cpp
+    )
+    target_link_libraries(api_tests PRIVATE stinkytofu-warnings)
+    target_link_libraries(api_tests PUBLIC
+        GTest::gtest
+        Threads::Threads
+        stinkytofu  # shared lib — only exported symbols visible
+    )
+    target_include_directories(api_tests PRIVATE ${TEST_INCLUDE_DIRS})
+    add_dependencies(api_tests tablegen_generated)
+
+    gtest_discover_tests(api_tests
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        TIMEOUT 60
+        PROPERTIES LABELS "api_tests"
+    )
+endif()
+
+# =============================================================================
 # All Tests Target (convenience target to build all test executables)
 # =============================================================================
 add_custom_target(tests COMMENT "Build all test executables")
 add_dependencies(tests unit_tests)
+if(BUILD_SHARED_LIBS)
+    add_dependencies(tests api_tests)
+endif()
 
 # Note: Future test executables can be added here, e.g.:
 # add_executable(integration_tests ...)
