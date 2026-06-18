@@ -1461,6 +1461,12 @@ def test_320x320_bf16_preloop_1x5_offset_all():
 # golden dep-path dumps lock the current multi-DU schedule (including the
 # force_drain "wait_gr(0)" and the uid-tagged wrap-around GRs) before any
 # future scheduler refactor.
+#
+# LDS double-buffer-reuse hazard: in a wait_gr slot the next-iteration GRs are
+# chained after the last post-barrier LR (so they share the wait_gr path rather
+# than forming a separate GR path). This explicit before-chain edge replaces the
+# instruction-scheduler fence that used to enforce the same ordering implicitly;
+# the GR sub-chain order is unchanged, only its path attribution moved.
 
 def make_256x256_mxfp8_multi_du(partitionSizeN=0):
     kernel = create_kernel(256, 256, fp4=True, depthU=256)
@@ -1511,7 +1517,6 @@ MAINLOOP (dependency paths):
         [ 1] lr         LR A  (MT n, subIterK [2]) [0-7]
         [ 2] lr         LR B  (MT n, subIterK [2]) [0-7]
         [ 3] lr         LR SB (MT n, subIterK [2,3]) [0-7]
-      path 1:
         [ 4] gr         GR A (MT n+1, subIterK [0,1]) ids [5-7]
         [ 6] gr_inc     gr_inc(A)
         [ 5] gr         GR B (MT n+1, subIterK [0,1]) ids [0-0]
@@ -1524,7 +1529,6 @@ MAINLOOP (dependency paths):
         [11] sync       sync
         [ 1] lr         LR A  (MT n, subIterK [3]) [0-7]
         [ 2] lr         LR B  (MT n, subIterK [3]) [0-7]
-      path 1:
         [ 3] gr         GR B (MT n+1, subIterK [0,1]) ids [1-7]
         [ 6] gr_inc     gr_inc(B)
         [ 4] gr         GR SA (MT n+1, subIterK [0,3]) ids [0-7]
@@ -1546,7 +1550,6 @@ MAINLOOP (dependency paths):
         [ 2] lr         LR B  (MT n+1, subIterK [0]) [0-7]
         [ 3] lr         LR SA (MT n+1, subIterK [0,1]) [0-7]
         [ 4] lr         LR SB (MT n+1, subIterK [0,1]) [0-7]
-      path 1:
         [ 5] gr         GR A (MT n+1, subIterK [2,3]) ids [0-3] uid=1
         [ 6] gr         GR A (MT n+1, subIterK [2,3]) ids [4-7] uid=1
         [ 8] gr_inc     gr_inc(A uid=1)
@@ -1626,7 +1629,6 @@ MAINLOOP (dependency paths):
         [ 5] wait_gr    wait_gr(B=3)
         [ 6] sync       sync
         [ 1] lr         LR B  (MT n, subIterK [1]) [6-7]
-      path 1:
         [ 2] gr         GR SA (MT n+1, subIterK [0,3]) ids [0-7]
         [ 3] gr_inc     gr_inc(SA)
     subIterK=1:
@@ -1639,7 +1641,6 @@ MAINLOOP (dependency paths):
         [ 8] lr_inc     lr_inc(B)
         [ 1] lr         LR B  (MT n, subIterK [2]) [6-7]
         [ 2] lr         LR SB (MT n, subIterK [2,3]) [6-7]
-      path 1:
         [ 3] gr         GR SB (MT n+1, subIterK [0,3]) ids [0-7]
         [ 4] gr_inc     gr_inc(SB)
     subIterK=2:
@@ -1650,7 +1651,6 @@ MAINLOOP (dependency paths):
         [ 5] wait_gr    wait_gr(SB=1)
         [ 6] sync       sync
         [ 1] lr         LR B  (MT n, subIterK [3]) [6-7]
-      path 1:
         [ 2] gr         GR B (MT n+1, subIterK [0,1]) ids [6-7]
         [ 3] gr_inc     gr_inc(B)
     subIterK=3:
@@ -1668,7 +1668,6 @@ MAINLOOP (dependency paths):
         [ 2] lr         LR B  (MT n+1, subIterK [0]) [0-5]
         [ 3] lr         LR SA (MT n+1, subIterK [0,1]) [0-7]
         [ 4] lr         LR SB (MT n+1, subIterK [0,1]) [0-5]
-      path 1:
         [ 5] gr         GR A (MT n+1, subIterK [2,3]) ids [0-2] uid=1
         [ 6] gr         GR A (MT n+1, subIterK [2,3]) ids [3-5] uid=1
         [ 7] gr         GR A (MT n+1, subIterK [2,3]) ids [6-7] uid=1
