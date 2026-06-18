@@ -21,6 +21,10 @@ Documentation for rocFFT is available at
 
 ## rocFFT 1.0.37 for ROCm 7.13
 
+### Added
+
+* Support for the gfx90c compilation target.
+
 ### Optimized
 
 * Allow plans to share hipModules if they use the same kernels.  This reduces time spent and memory used when

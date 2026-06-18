@@ -29,12 +29,13 @@
 #pragma once
 #ifndef UTILITY_HPP
 #define UTILITY_HPP
-
 #include "rocsparse_clients_float16.hpp"
 #include "rocsparse_clients_routine_trace.hpp"
+#ifdef ROCSPARSE_DEBUGGING
+#include "rocsparse_clients_test_hip_debug_wrappers.hpp"
+#endif
 #include "rocsparse_matrix.hpp"
 #include "rocsparse_test.hpp"
-
 #include <hip/hip_runtime_api.h>
 #include <vector>
 

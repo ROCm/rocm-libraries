@@ -132,6 +132,7 @@ set(DEFAULT_GPUS
   gfx906
   gfx908
   gfx90a
+  gfx90c
   gfx942
   gfx950
   gfx1030
@@ -260,6 +261,7 @@ if( BUILD_CLIENTS_SAMPLES
     set( HIPRAND_DEP hiprand )
   endif()
   if(BUILD_CLIENTS_TESTS)
+    enable_testing()
     rocm_package_setup_client_component(
       tests
       DEPENDS

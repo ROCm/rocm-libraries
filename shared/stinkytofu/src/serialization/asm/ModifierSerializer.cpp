@@ -24,6 +24,7 @@
 #include "ModifierSerializer.hpp"
 
 #include <climits>
+#include <cstdint>
 #include <cstdlib>
 #include <string>
 #include <unordered_map>
@@ -147,9 +148,18 @@ bool serializeVisit(const FLATModifiers& mod, std::ostream& os) {
     return true;
 }
 
-// GLOBALModifiers
+// GLOBALModifiers — offset plus the temporal hint / cache scope used by
+// global_prefetch_b8 (gl2-prefetch). Serialized so the .stir IR roundtrip
+// preserves the hint/scope; TH_NONE / SCOPE_NONE are omitted.
 bool serializeVisit(const GLOBALModifiers& mod, std::ostream& os) {
-    os << ", mod.global = { offset = " << mod.offset << " }";
+    os << ", mod.global = { offset = " << mod.offset;
+    if (hasTemporalHint(mod.th)) {
+        os << ", th = \"" << toString(mod.th) << "\"";
+    }
+    if (mod.scope != MUBUFScope::SCOPE_NONE) {
+        os << ", scope = \"" << toString(mod.scope) << "\"";
+    }
+    os << " }";
     return true;
 }
 
@@ -161,6 +171,9 @@ bool serializeVisit(const MUBUFModifiers& mod, std::ostream& os) {
        << ", nt = " << (mod.nt ? "true" : "false") << ", lds = " << (mod.lds ? "true" : "false");
     if (mod.scope != MUBUFScope::SCOPE_NONE) {
         os << ", scope = \"" << toString(mod.scope) << "\"";
+    }
+    if (hasTemporalHint(mod.th)) {
+        os << ", th = \"" << toString(mod.th) << "\"";
     }
     os << " }";
     return true;
@@ -392,6 +405,13 @@ bool serializeVisit(const MemTokenData& mod, std::ostream& os) {
     return true;
 }
 
+// LabelData
+bool serializeVisit(const LabelData& mod, std::ostream& os) {
+    os << ", mod.label = { label = \"" << mod.label << "\""
+       << ", alignment = " << static_cast<int>(mod.alignment) << " }";
+    return true;
+}
+
 template <typename ModifierType, typename... Rest, unsigned Dummy = 0>
 bool serializeVisit(const Modifier& mod, std::ostream& os) {
     if (auto* modifier = dyn_cast<ModifierType>(&mod)) {
@@ -406,7 +426,7 @@ bool ModifierSerializer::serialize(const Modifier& mod, std::ostream& os) {
                           CacheScopeModifiers, SMEMModifiers, SDWAModifiers, DPPModifiers,
                           VOP3Modifiers, VOP3PModifiers, True16Modifiers, EXEC, VCC, SWaitCntData,
                           SWaitTensorCntData, SWaitStoreCntData, SDelayAluData, SWaitAluData,
-                          MFMAModifiers, MatrixFmtModifiers, MemTokenData>(mod, os);
+                          MFMAModifiers, MatrixFmtModifiers, MemTokenData, LabelData>(mod, os);
 }
 
 /*
@@ -428,14 +448,17 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
             FLATModifiers(getInt(fields, "offset12", 0), getBool(fields, "glc", false),
                           getBool(fields, "slc", false), getBool(fields, "lds", false)));
     } else if (attrKey == "mod.global") {
-        inst->addModifier(GLOBALModifiers(getInt(fields, "offset", 0)));
+        inst->addModifier(GLOBALModifiers(getInt(fields, "offset", 0),
+                                          parseTemporalHint(getStr(fields, "th", "")),
+                                          parseMUBUFScope(getStr(fields, "scope", ""))));
     } else if (attrKey == "mod.mubuf") {
         MUBUFScope scope = parseMUBUFScope(getStr(fields, "scope", ""));
+        TemporalHint th = parseTemporalHint(getStr(fields, "th", ""));
         inst->addModifier(
             MUBUFModifiers(getBool(fields, "offen", false), getInt(fields, "offset12", 0),
                            getBool(fields, "glc", false), getBool(fields, "slc", false),
                            getBool(fields, "nt", false), getBool(fields, "lds", false), false,
-                           false, false, false, scope));
+                           false, false, false, scope, th));
     } else if (attrKey == "mod.cache_scope") {
         inst->addModifier(CacheScopeModifiers(parseMUBUFScope(getStr(fields, "scope", ""))));
     } else if (attrKey == "mod.smem") {
@@ -536,6 +559,9 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
         if (fields.contains("tokens")) {
             inst->addModifier(MemTokenData(getIntVector(fields, "tokens")));
         }
+    } else if (attrKey == "mod.label") {
+        inst->addModifier(LabelData(getStr(fields, "label", ""),
+                                    static_cast<uint16_t>(getInt(fields, "alignment", 1))));
     }
     // mod.sdwa, mod.vop3p, mod.true16: no deserialize support yet
 }
