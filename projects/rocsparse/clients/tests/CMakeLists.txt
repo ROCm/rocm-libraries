@@ -234,6 +234,10 @@ if(BUILD_ROCSPARSE_DEBUGGING)
     )
 endif()
 
+if(BUILD_WITH_ILDLT0)
+  list(APPEND ROCSPARSE_TEST_SOURCES test_spildlt0.cpp)
+endif()
+
 set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_axpby.cpp
 ../testings/testing_axpyi.cpp
@@ -385,6 +389,10 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 rocsparse_test_listeners.cpp
   )
 
+if(BUILD_WITH_ILDLT0)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_spildlt0.cpp)
+endif()
+
 
 
 if(BUILD_ROCSPARSE_DEBUGGING)
@@ -455,7 +463,10 @@ endif()
 target_compile_definitions(rocsparse-test PRIVATE GOOGLE_TEST)
 
 # Target compile options
-target_compile_options(rocsparse-test PRIVATE -ffp-contract=on -mfma -Wno-deprecated -Wno-unused-command-line-argument -Wall)
+target_compile_options(rocsparse-test PRIVATE -ffp-contract=on -Wno-deprecated -Wno-unused-command-line-argument -Wall)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+  target_compile_options(rocsparse-test PRIVATE -mfma)
+endif()
 
 # Internal common header
 target_include_directories(rocsparse-test PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)

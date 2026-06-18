@@ -90,13 +90,13 @@ inline std::vector<std::filesystem::path>
     return paths;
 }
 
-/// Scan golden reference data directory for bundle JSON files.
+/// Scan integration test bundles directory for bundle JSON files.
 /// Returns a gtest parameter generator. On failure or empty directory, returns
 /// a sentinel empty-path so SetUp() can GTEST_SKIP() gracefully.
 inline auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
 {
     auto dir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
-               / "../lib/golden_reference_data" / subDirectory;
+               / "../lib/integration_test_bundles" / subDirectory;
 
     auto paths = scanBundleJsonFiles(dir);
     if(paths.empty())

@@ -6,7 +6,7 @@
 Building rocThrust for different backends
 *******************************************
 
-API calls can run either on the device (GPU) system or on the host (CPU) system. The system on which computations are run depends on the execution policy used in the code, as well as the options that were set when rocThrust was :doc:`built and installed <../install/rocThrust-install-overview>`. 
+API calls can run either on the device (GPU) system or on the host (CPU) system. The system on which computations are run depends on the execution policy used in the code, as well as the options that were set when rocThrust was :ref:`built and installed from source <build-from-source>`. 
 
 Two build options are used to set the backend when the different execution policies are used. ``THRUST_DEVICE_SYSTEM`` sets the backend for the ``thrust::device`` execution policy and  ``THRUST_HOST_SYSTEM`` sets the backend for the ``thrust::host`` policy.
 
@@ -81,7 +81,7 @@ For example, to build rocThrust with no device acceleration, using only the g++ 
 
     `ROCM_PATH=/opt/rocm CXX=g++ cmake -B build -DBUILD_BENCHMARK=OFF -DBUILD_TEST=OFF -DTHRUST_HOST_SYSTEM=CPP -DTHRUST_DEVICE_SYSTEM=CPP -DLINK_HIP_DEVICE_LIBS=OFF`
  
-For more information about build options and how to set them, see :doc:`building rocThrust with CMake <../install/rocThrust-install-with-cmake>` and :doc:`building rocThrust with rmake <../install/rocThrust-rmake-install>`.
+For more information about build options and how to set them, see :doc:`Build rocThrust from source <../install/source-build>`.
 
 
 .. |reg| raw:: html
