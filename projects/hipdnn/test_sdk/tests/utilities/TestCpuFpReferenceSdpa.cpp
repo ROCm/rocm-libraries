@@ -1441,14 +1441,14 @@ using hipdnn_test_sdk::detail::compareGradients;
 using hipdnn_test_sdk::detail::computeDotProductLoss;
 using hipdnn_test_sdk::detail::numericalGradient;
 
-void checkGradient(Tensor<float>& input,
-                   const Tensor<float>& analyticalGrad,
-                   const std::vector<int64_t>& shape,
-                   const std::function<double()>& fwdLoss,
-                   const std::string& label,
-                   double eps = 1e-3,
-                   double relTol = 1e-2,
-                   double absTol = 1e-4)
+static void checkGradient(Tensor<float>& input,
+                          const Tensor<float>& analyticalGrad,
+                          const std::vector<int64_t>& shape,
+                          const std::function<double()>& fwdLoss,
+                          const std::string& label,
+                          double eps = 1e-3,
+                          double relTol = 1e-2,
+                          double absTol = 1e-4)
 {
     Tensor<float> numericalGrad(shape);
     numericalGradient(input, numericalGrad, eps, fwdLoss);
