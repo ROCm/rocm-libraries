@@ -34,12 +34,21 @@ python3 ../script/dependency-parser/main.py select \
   --ctest-only \
   --output tests_to_run.json
 
-# 4. Build only affected tests
-ninja $(jq -r '.executables | join(" ")' tests_to_run.json)
-
-# 5. Run affected tests (one invocation, exact-name matching, no regex limit)
-ctest --tests-from-file tests_to_run.txt --output-on-failure
+# 4-5. Build and run only affected tests, in one invocation each (exact-name
+#      matching, no regex limit). An empty selection means no tests were
+#      affected, so this is a no-op - guard it so `ninja` is not invoked with
+#      zero targets (which would build the default target set instead).
+TARGETS=$(jq -r '.executables | join(" ")' tests_to_run.json)
+if [ -n "$TARGETS" ]; then
+  ninja $TARGETS
+  ctest --tests-from-file tests_to_run.txt --output-on-failure
+else
+  echo "No tests affected by changes - nothing to build or run"
+fi
 ```
+
+> The `smart_build.sh` / `smart_test.sh` scripts encapsulate this guard as the
+> `none` mode; the snippets above are the unrolled illustration of what they do.
 
 ### Post-Build Approach (Legacy)
 
@@ -250,12 +259,19 @@ stage('Selective Test') {
                     --output tests_to_run.json
             '''
 
-            // Build only affected tests
-            sh 'ninja $(jq -r ".executables | join(\" \")" tests_to_run.json)'
-
-            // Run affected tests in a single invocation (exact-name matching,
-            // no regex length limit, so no chunking needed)
-            sh 'ctest --tests-from-file tests_to_run.txt --output-on-failure'
+            // Build and run only affected tests in a single invocation each
+            // (exact-name matching, no regex length limit, so no chunking
+            // needed). Skip when the selection is empty so ninja is not invoked
+            // with zero targets (which would build the default target set).
+            sh '''
+                TARGETS=$(jq -r '.executables | join(" ")' tests_to_run.json)
+                if [ -n "$TARGETS" ]; then
+                    ninja $TARGETS
+                    ctest --tests-from-file tests_to_run.txt --output-on-failure
+                else
+                    echo "No tests affected by changes - nothing to build or run"
+                fi
+            '''
         }
     }
 }
@@ -286,12 +302,16 @@ stage('Selective Test') {
 - name: Build and Test
   run: |
     cd build
+    # Build and run affected tests in a single invocation each (exact-name
+    # matching, no regex length limit). An empty selection is a no-op - guard it
+    # so ninja is not invoked with zero targets (which builds the default set).
     TARGETS=$(jq -r '.executables | join(" ")' tests_to_run.json)
-    ninja $TARGETS
-
-    # Run affected tests in a single invocation (exact-name matching,
-    # no regex length limit, so no chunking needed)
-    ctest --tests-from-file tests_to_run.txt --output-on-failure
+    if [ -n "$TARGETS" ]; then
+      ninja $TARGETS
+      ctest --tests-from-file tests_to_run.txt --output-on-failure
+    else
+      echo "No tests affected by changes - nothing to build or run"
+    fi
 ```
 
 ### Jenkins Integration with Safety Checks
@@ -324,8 +344,15 @@ stage('Build and Test') {
                         compile_commands.json build.ninja --parallel 32
                     python3 script/dependency-parser/main.py select \
                         cmake_dependency_mapping.json origin/${CHANGE_TARGET} HEAD
-                    ninja $(jq -r '.executables | join(" ")' tests_to_run.json)
-                    ctest --tests-from-file tests_to_run.txt --output-on-failure
+                    # Empty selection = no tests affected; skip so ninja is not
+                    # invoked with zero targets (which builds the default set).
+                    TARGETS=$(jq -r '.executables | join(" ")' tests_to_run.json)
+                    if [ -n "$TARGETS" ]; then
+                        ninja $TARGETS
+                        ctest --tests-from-file tests_to_run.txt --output-on-failure
+                    else
+                        echo "No tests affected by changes - nothing to build or run"
+                    fi
                 '''
             } else {
                 // Full build path
