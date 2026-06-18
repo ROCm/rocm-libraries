@@ -97,6 +97,12 @@ _MMA_C_FRAG_LEN: Dict[str, int] = {
     "wmma_i32_16x16x16_iu4": 8,
     "wmma_gfx12_f32_16x16x16_f16": 8,
     "wmma_gfx12_f32_16x16x16_bf16": 8,
+    "wmma_gfx1250_f32_16x16x32_f16": 8,
+    "wmma_gfx1250_f32_16x16x32_bf16": 8,
+    "wmma_gfx1250_f32_16x16x64_fp8_fp8": 8,
+    "wmma_gfx1250_f32_16x16x64_fp8_bf8": 8,
+    "wmma_gfx1250_f32_16x16x64_bf8_fp8": 8,
+    "wmma_gfx1250_f32_16x16x64_bf8_bf8": 8,
 }
 
 # op_id -> accumulator/result *element* type. Float atoms accumulate in f32;
@@ -1595,6 +1601,53 @@ class IRBuilder:
         :meth:`mma`."""
         return self.mma("wmma_gfx12_f32_16x16x16_bf16", a, b, c)
 
+    def wmma_gfx1250_f32_16x16x32_f16(self, a: Value, b: Value, c: Value) -> Value:
+        """gfx1250 (gfx1250) WMMA: D[16x16] += A[16x32] * B[32x16], f16 in / f32 acc.
+
+        The gfx1250 (CDNA, GFX12 programming model) fp16 WMMA atom is K=32. Per
+        lane ``a`` and ``b`` are ``<16 x half>`` (16 K-elements, the K dimension
+        split across the two lane-halves) and the accumulator ``c`` / result are
+        ``<8 x float>`` (same 16x16 column-distributed layout as gfx12). Lowered
+        via :meth:`ck_dsl.core.isa.Gfx1250Backend.emit_wmma` to the 8-operand
+        intrinsic ``llvm.amdgcn.wmma.f32.16x16x32.f16.v8f32.v16f16``. Thin
+        wrapper over :meth:`mma`."""
+        return self.mma("wmma_gfx1250_f32_16x16x32_f16", a, b, c)
+
+    def wmma_gfx1250_f32_16x16x32_bf16(self, a: Value, b: Value, c: Value) -> Value:
+        """gfx1250 (gfx1250) WMMA bf16 variant. Same ``<16 x half>``-style K=32
+        fragment layout as :meth:`wmma_gfx1250_f32_16x16x32_f16` but with
+        ``<16 x bfloat>`` operands passed directly to the intrinsic
+        ``llvm.amdgcn.wmma.f32.16x16x32.bf16.v8f32.v16bf16`` (no i16 bitcast,
+        unlike gfx11/gfx12). Thin wrapper over :meth:`mma`."""
+        return self.mma("wmma_gfx1250_f32_16x16x32_bf16", a, b, c)
+
+    def wmma_gfx1250_f32_16x16x64_fp8_fp8(self, a: Value, b: Value, c: Value) -> Value:
+        """gfx1250 (gfx1250) FP8 WMMA: D[16x16] += A[16x64] * B[64x16], f32 acc.
+
+        The gfx1250 low-bit WMMA atom is **K=64** (distinct from the gfx12
+        16x16x16 FP8 form, which is not selectable on gfx1250). Per lane ``a``
+        and ``b`` are 32 fp8 bytes carried as ``<8 x i32>`` and the accumulator
+        ``c`` / result are ``<8 x float>``. Lowered through
+        :meth:`ck_dsl.core.isa.Gfx1250Backend.emit_wmma` to
+        ``llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8.v8f32.v8i32``. Thin wrapper over
+        :meth:`mma`."""
+        return self.mma("wmma_gfx1250_f32_16x16x64_fp8_fp8", a, b, c)
+
+    def wmma_gfx1250_f32_16x16x64_fp8_bf8(self, a: Value, b: Value, c: Value) -> Value:
+        """gfx1250 (gfx1250) mixed FP8(A)/BF8(B) K=64 WMMA. Same ``<8 x i32>``
+        fragment ABI as :meth:`wmma_gfx1250_f32_16x16x64_fp8_fp8`. Thin wrapper
+        over :meth:`mma`."""
+        return self.mma("wmma_gfx1250_f32_16x16x64_fp8_bf8", a, b, c)
+
+    def wmma_gfx1250_f32_16x16x64_bf8_fp8(self, a: Value, b: Value, c: Value) -> Value:
+        """gfx1250 (gfx1250) mixed BF8(A)/FP8(B) K=64 WMMA. Thin wrapper over
+        :meth:`mma`."""
+        return self.mma("wmma_gfx1250_f32_16x16x64_bf8_fp8", a, b, c)
+
+    def wmma_gfx1250_f32_16x16x64_bf8_bf8(self, a: Value, b: Value, c: Value) -> Value:
+        """gfx1250 (gfx1250) BF8 K=64 WMMA. Thin wrapper over :meth:`mma`."""
+        return self.mma("wmma_gfx1250_f32_16x16x64_bf8_bf8", a, b, c)
+
     def mfma_f32_16x16x16_f16(self, a: Value, b: Value, c: Value) -> Value:
         return self.mma("mfma_f32_16x16x16_f16", a, b, c)
 
@@ -2139,6 +2192,36 @@ class IRBuilder:
             result_name_hint="dpp",
         ).result
 
+    def dpp_xor(self, data: Value, xor_mask: int) -> Value:
+        """``v_mov_b32_dpp`` ``row_xmask`` — cross-lane XOR permute on the
+        **VALU** (NOT the LDS port).
+
+        Lane ``L`` reads ``data`` from lane ``(L & ~0xF) | ((L & 0xF) ^
+        xor_mask)`` — i.e. an XOR butterfly *within* each 16-lane DPP row.
+        ``xor_mask`` must be in 1..15 so the partner stays in the same row.
+
+        This is the RDNA (gfx11/gfx12) replacement for the gfx9/gfx95
+        :meth:`ds_swizzle_xor` softmax-reduction butterfly. ``ds_swizzle``
+        is an LDS-bus op that costs ``lgkmcnt`` and serialises on the LDS
+        port; ``row_xmask`` runs entirely in the VALU pipeline, and LLVM's
+        DPP-combine folds a single-use ``update.dpp`` + ``fmax``/``fadd``
+        into one ``v_max_f32_dpp`` / ``v_add_f32_dpp``. Lowered through
+        ``llvm.amdgcn.update.dpp.i32`` with ``dpp_ctrl = 0x160 | mask``
+        (the AMDGPU ``DPP_ROW_XMASK`` encoding). Data must be ``i32``."""
+        if data.type.name != "i32":
+            raise ValueError("dpp_xor requires i32 data")
+        if not (1 <= xor_mask <= 15):
+            raise ValueError(
+                f"dpp_xor xor_mask must be 1..15 (intra-16-lane row), got {xor_mask}"
+            )
+        return self._op(
+            "tile.dpp_xor",
+            [data],
+            [I32],
+            attrs={"xor_mask": int(xor_mask)},
+            result_name_hint="dppx",
+        ).result
+
     def ds_bpermute_b64(self, addr: Value, data: Value) -> Value:
         """Packed 64-bit ``ds_bpermute`` — single LDS op for paired
         ``(val, idx)`` cross-lane shuffles (gfx9+).
@@ -2349,6 +2432,66 @@ class IRBuilder:
         if v.type.name == "i32":
             return self.ds_bpermute(addr_shl, v)
         raise ValueError(f"warp_shuffle_xor: unsupported type {v.type.name}")
+
+    def vop2_f32_dpp_xor(self, v: Value, xor_mask: int, mnemonic: str) -> Value:
+        """One **fused** VALU reduce step: ``<mnemonic>_dpp d, v, v
+        row_xmask:mask`` — the cross-lane XOR shuffle *and* the f32 combine in
+        a single instruction (``v_max_f32_dpp`` / ``v_add_f32_dpp``).
+
+        This is the fused form of a softmax row-reduce stage. LLVM's
+        GCNDPPCombine pass refuses to fold a ``row_xmask`` ``v_mov_b32_dpp``
+        into the consuming ``v_max``/``v_add`` (verified on gfx1250: the mov
+        survives), so we emit the fused op directly via inline asm — halving
+        the VALU op count of the reduction vs the unfused
+        :meth:`warp_shuffle_xor_dpp` + ``fmax``/``fadd``.
+
+        The DPP modifier applies to the first source, so ``d = mnemonic(
+        shuffle(v), v)`` — correct for the commutative max/add reduction.
+        ``convergent`` (reads other lanes), ``bound_ctrl:1`` (partner always
+        in-row for mask 1..15). Operand + result are f32."""
+        if v.type.name != "f32":
+            raise ValueError("vop2_f32_dpp_xor requires f32 data")
+        if not (1 <= xor_mask <= 15):
+            raise ValueError(
+                f"vop2_f32_dpp_xor xor_mask must be 1..15, got {xor_mask}"
+            )
+        if mnemonic not in ("v_max_f32", "v_add_f32"):
+            raise ValueError(
+                f"vop2_f32_dpp_xor mnemonic must be v_max_f32/v_add_f32, "
+                f"got {mnemonic!r}"
+            )
+        tmpl = (
+            f"{mnemonic}_dpp $0, $1, $1 "
+            f"row_xmask:{xor_mask} row_mask:0xf bank_mask:0xf bound_ctrl:1"
+        )
+        return self.inline_asm(
+            tmpl, "=v,v", [v], result_type=F32,
+            sideeffect=False, convergent=True, result_name_hint="dppr",
+        )
+
+    def warp_shuffle_xor_dpp(self, v: Value, lane_xor: int) -> Value:
+        """VALU XOR shuffle (lane ``l`` gets ``v`` from lane ``l ^ lane_xor``)
+        via :meth:`dpp_xor` ``row_xmask`` — the RDNA replacement for the
+        :meth:`warp_shuffle_xor` ``ds_swizzle`` path.
+
+        ``lane_xor`` must be in 1..15 (the XOR partner stays inside the
+        16-lane DPP row, which is exactly the WMMA 16-lane softmax
+        row-group). Runs on the VALU (no LDS port / ``lgkmcnt``); LLVM's
+        DPP-combine folds the single-use result into the consuming
+        ``v_max_f32``/``v_add_f32`` to give one ``v_*_f32_dpp`` per stage.
+        Handles f32 by bitcasting through i32 (matching
+        :meth:`warp_shuffle_xor`)."""
+        if not (1 <= lane_xor <= 15):
+            raise ValueError(
+                f"warp_shuffle_xor_dpp lane_xor must be 1..15, got {lane_xor}"
+            )
+        if v.type.name == "f32":
+            v_i = self.bitcast(v, I32)
+            r = self.dpp_xor(v_i, int(lane_xor))
+            return self.bitcast(r, F32)
+        if v.type.name == "i32":
+            return self.dpp_xor(v, int(lane_xor))
+        raise ValueError(f"warp_shuffle_xor_dpp: unsupported type {v.type.name}")
 
     def ds_read_tr16_b64(
         self, smem: Value, *indices: Value, dtype: Type = F16
@@ -2587,6 +2730,65 @@ class IRBuilder:
         self._op(
             "tile.s_waitcnt",
             attrs={"vmcnt": int(vmcnt), "lgkmcnt": int(lgkmcnt), "expcnt": int(expcnt)},
+        )
+
+    def s_wait_asynccnt(self, n: int = 0) -> None:
+        """Wait until at most ``n`` gfx1250 async global->LDS copies remain
+        outstanding (``s_wait_asynccnt n``).
+
+        gfx1250 (GFX12 / gfx1250) tracks ``global_load_async_to_lds`` /
+        ``global_store_async_from_lds`` completion on a DEDICATED ``ASYNCcnt``
+        counter — separate from ``loadcnt`` (VMEM register loads) and ``dscnt``
+        (LDS ds_read/ds_write). This gives true partial-drain control for an
+        async-DMA ping-pong: issue the next tile's copies, then
+        ``s_wait_asynccnt(n_next)`` to drain the *current* tile while the next
+        tile's copies keep streaming. ``n=0`` fully drains.
+
+        On non-gfx1250 backends this is a no-op (the counter does not exist);
+        callers must only emit it on the gfx1250 async-to-LDS path.
+        """
+        self._op("tile.s_wait_asynccnt", attrs={"n": int(n)})
+
+    def global_load_async_to_lds(
+        self,
+        src_ptr: Value,
+        src_index: Value,
+        lds_smem: Value,
+        lds_indices,
+        *,
+        width_bytes: int,
+        coherency: int = 0,
+        offset_bytes: int = 0,
+    ) -> None:
+        """gfx1250 async global->LDS copy (``global_load_async_to_lds_b{32,64,128}``).
+
+        Each lane copies ``width_bytes`` (4/8/16) from
+        ``src_ptr[src_index]`` (a ``global`` element offset) into
+        ``lds_smem[*lds_indices]`` (a typed LDS element slot). Unlike the gfx9
+        ``buffer_load_lds`` family — which is NOT selectable on gfx1250 — each
+        lane writes its own explicit LDS address, so no ``M0`` lane-contiguous
+        base trick is needed.
+
+        Completion is tracked on the ASYNC counter; drain with
+        :meth:`s_wait_asynccnt` before reading the staged LDS. ``coherency`` is
+        the gfx12 cachepolicy immediate (bits[0:2]=th, bits[3:4]=scope); 0 is
+        the default, 2 (``CACHE_STREAM``/SLC) suits one-shot streaming loads.
+        """
+        if width_bytes not in (4, 8, 16):
+            raise ValueError(
+                f"global_load_async_to_lds width_bytes must be 4, 8, or 16 "
+                f"(got {width_bytes})"
+            )
+        if coherency not in (0, 1, 2, 3):
+            raise ValueError(f"coherency must be 0..3 (got {coherency})")
+        self._op(
+            "tile.global_load_async_to_lds",
+            [src_ptr, src_index, lds_smem, *lds_indices],
+            attrs={
+                "width_bytes": int(width_bytes),
+                "cpol": int(coherency),
+                "offset_bytes": int(offset_bytes),
+            },
         )
 
     def iglp_opt(self, level: int = 0) -> None:
@@ -3237,6 +3439,7 @@ PURE_OP_NAMES = {
     "arith.cvt_scalef32_pk_bf8_f32",
     "tile.ds_read_tr_b8",
     "tile.ds_swizzle_xor",
+    "tile.dpp_xor",
     "tile.permlane32_swap",
     "tile.perm_b32",
     "tile.permlanex16",

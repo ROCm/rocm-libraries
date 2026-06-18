@@ -136,6 +136,20 @@ def _silu_mul_f32(
     return b.fmul(silu, u)
 
 
+def _require_mfma_expert_gemm(arch: str, where: str) -> None:
+    """Reject wave32 targets before entering MFMA-specific MoE GEMM bodies."""
+    from ...core.arch import ArchTarget
+
+    target = ArchTarget.from_gfx(arch)
+    if target.wave_size == 32:
+        raise NotImplementedError(
+            f"{where} is currently MFMA-only; {arch} uses WMMA. "
+            "The gfx1250 day-0 MoE path must use the packed BF16 batched "
+            "GEMM + streaming SiLU/reduce path until WMMA MoE expert GEMMs "
+            "are implemented."
+        )
+
+
 def _pad_in_bounds(
     b: IRBuilder,
     c_m: Value,
@@ -720,6 +734,8 @@ def build_moe_gate_up_silu_gemm(
     structured error here instead of crashing comgr at lower time.
     """
 
+    _require_mfma_expert_gemm(arch, "fused gate/up/silu GEMM")
+    _require_mfma_expert_gemm(arch, "interleaved gate/up/silu GEMM")
     u = spec.to_universal_spec()
     ok, why = is_valid_gemm_spec(u, arch=arch)
     if not ok:
@@ -1153,6 +1169,7 @@ def build_moe_interleaved_gate_up_silu_gemm(
     error before comgr.
     """
 
+    _require_mfma_expert_gemm(arch, "fused down/reduce GEMM")
     u = spec.to_universal_spec()
     ok, why = is_valid_gemm_spec(u, arch=arch)
     if not ok:

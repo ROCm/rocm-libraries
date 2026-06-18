@@ -143,6 +143,51 @@ class ISABackend:
         )
         lowerer.lower_op(legacy)
 
+    @property
+    def emits_legacy_s_waitcnt(self) -> bool:
+        """Whether ``llvm.amdgcn.s.waitcnt`` is selectable on this target.
+
+        gfx9 / gfx10 / gfx11 support the monolithic ``s_waitcnt`` intrinsic, so
+        the lowerer emits an explicit ``s_waitcnt`` before LDS barriers. gfx1250
+        (gfx1250) removed it in favour of split wait counters and overrides this
+        to ``False`` (see :class:`Gfx1250Backend`)."""
+        return True
+
+    @property
+    def has_async_lds_counter(self) -> bool:
+        """Whether the target has the gfx1250 dedicated async-DMA counter
+        (``s_wait_asynccnt`` + ``global_load_async_to_lds``). Only gfx1250
+        (gfx1250) overrides this to ``True``; elsewhere the async-to-LDS
+        instructions do not exist, so ``s_wait_asynccnt`` lowers to nothing."""
+        return False
+
+    @property
+    def ds_tr16_b128_spec(self):
+        """``(need_key, intrinsic, llvm_ret_ty)`` for the wide 16-bit
+        transpose-LDS read used to feed the MFMA/WMMA B operand.
+
+        Default is the gfx950 ``ds_read_b128_tr_b16`` (returns ``<8 x i16>``).
+        gfx1250 (gfx1250) overrides with its wave32 ``ds_load_tr16_b128`` opcode,
+        which returns ``<8 x bfloat>`` directly. NOTE: the two have different
+        wave widths, so the per-lane data distribution differs — kernels must
+        use the layout appropriate to the target."""
+        return ("ds.read.tr16.b128", "llvm.amdgcn.ds.read.tr16.b128", "<8 x i16>")
+
+    def emit_lds_barrier_drain(self, lowerer, *, drain_vmem: bool) -> None:
+        """Emit the memory wait that must precede an LDS workgroup barrier.
+
+        An ``s_barrier`` only synchronises waves; it does not drain outstanding
+        LDS (and, when ``drain_vmem``, VMEM->LDS) traffic. Without this wait a
+        post-barrier reader can observe stale LDS — and on a single-wave
+        workgroup (where the barrier is a NOP) the same-wave LDS write->read is
+        unordered entirely. gfx9/10/11 use the monolithic ``s_waitcnt``
+        (lgkmcnt[, vmcnt]); gfx1250 (gfx1250) overrides this with split counters."""
+        mask = self.encode_waitcnt(
+            vmcnt=0 if drain_vmem else -1, expcnt=-1, lgkmcnt=0
+        )
+        lowerer._need("s.waitcnt")
+        lowerer._current().emit(f"  call void @llvm.amdgcn.s.waitcnt(i32 {mask})")
+
     def emit_wmma(self, lowerer, op) -> None:
         """Emit an RDNA WMMA matrix op. Only RDNA backends implement this;
         CDNA/MFMA targets reject it (MFMA ops lower inline in ``_Lowerer``)."""
@@ -234,6 +279,50 @@ _RDNA_GFX12_WMMA = {
         "llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v8i16",
         "bfloat",
         "i16",
+    ),
+}
+
+
+# gfx1250 (gfx1250) WMMA. CDNA multi-chip on the GFX12 programming model. The
+# primary fp16/bf16 atom is K=32 (not gfx1201's K=16): A/B are <16 x ...> per
+# lane and the intrinsic takes the gfx1250 8-operand form
+# (i1 negA, A, i1 negB, B, i16 fmt, C, i1 reuseA, i1 reuseB). Unlike gfx11/gfx12,
+# bf16 lowers to <16 x bfloat> directly (v16bf16), so there is no i16 bitcast.
+# op.name -> (decl key, fully-mangled intrinsic, SSA/call operand element type).
+_GFX1250_WMMA = {
+    "tile.wmma_gfx1250_f32_16x16x32_f16": (
+        "wmma.gfx1250.f32.16x16x32.f16",
+        "llvm.amdgcn.wmma.f32.16x16x32.f16.v8f32.v16f16",
+        "half",
+    ),
+    "tile.wmma_gfx1250_f32_16x16x32_bf16": (
+        "wmma.gfx1250.f32.16x16x32.bf16",
+        "llvm.amdgcn.wmma.f32.16x16x32.bf16.v8f32.v16bf16",
+        "bfloat",
+    ),
+}
+
+
+# gfx1250 (gfx1250) FP8/BF8 WMMA, K=64. A/B are 32 low-bit bytes per lane carried
+# as <8 x i32> at the intrinsic boundary; the 6-operand form is
+# (A, B, i16 fmt, C, i1, i1) -- no leading neg flags, unlike the K=32 f16/bf16
+# form. op.name -> (decl key, fully-mangled intrinsic).
+_GFX1250_WMMA_FP8 = {
+    "tile.wmma_gfx1250_f32_16x16x64_fp8_fp8": (
+        "wmma.gfx1250.f32.16x16x64.fp8.fp8",
+        "llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8.v8f32.v8i32",
+    ),
+    "tile.wmma_gfx1250_f32_16x16x64_fp8_bf8": (
+        "wmma.gfx1250.f32.16x16x64.fp8.bf8",
+        "llvm.amdgcn.wmma.f32.16x16x64.fp8.bf8.v8f32.v8i32",
+    ),
+    "tile.wmma_gfx1250_f32_16x16x64_bf8_fp8": (
+        "wmma.gfx1250.f32.16x16x64.bf8.fp8",
+        "llvm.amdgcn.wmma.f32.16x16x64.bf8.fp8.v8f32.v8i32",
+    ),
+    "tile.wmma_gfx1250_f32_16x16x64_bf8_bf8": (
+        "wmma.gfx1250.f32.16x16x64.bf8.bf8",
+        "llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8.v8f32.v8i32",
     ),
 }
 
@@ -390,6 +479,100 @@ class Gfx12RdnaBackend(Gfx11RdnaBackend):
         )
 
 
+class Gfx1250Backend(Gfx12RdnaBackend):
+    """gfx1250-class (gfx1250) CDNA device on the GFX12 programming model.
+    **wave32**, **WMMA** (no MFMA), with the K=32 fp16/bf16 atom. Datalayout /
+    triple are byte-identical to gfx950/gfx1201 (verified on ROCm 7.13), so they
+    are inherited. Only :meth:`emit_wmma` diverges: the gfx1250 16x16x32 form has
+    16-wide operands and the 8-operand intrinsic signature, and bf16 lowers to
+    ``<16 x bfloat>`` directly (no i16 bitcast).
+
+    NOTE (gfx1250 model): the inherited buffer SRD word3 and gfx11
+    ``s_waitcnt`` layout are placeholders adequate for flat-global WMMA GEMM
+    bring-up; the gfx1250 57-bit SRD and split wait-counter model are deferred
+    (see gfx1250_universal_attention_plan.md, Leg A Phase 2/3)."""
+
+    @property
+    def emits_legacy_s_waitcnt(self) -> bool:
+        # gfx1250 (gfx1250) replaced the monolithic ``s_waitcnt`` with split wait
+        # counters (``s_wait_dscnt`` / ``s_wait_loadcnt`` / ...). The
+        # ``llvm.amdgcn.s.waitcnt`` intrinsic is NOT selectable on gfx1250.
+        return False
+
+    @property
+    def has_async_lds_counter(self) -> bool:
+        # gfx1250 (gfx1250) has ``global_load_async_to_lds`` tracked by a
+        # dedicated ``ASYNCcnt`` drained via ``s_wait_asynccnt``.
+        return True
+
+    @property
+    def ds_tr16_b128_spec(self):
+        # gfx1250 (gfx1250) wave32 ``ds_load_tr16_b128`` -> <8 x bfloat>.
+        return (
+            "ds.load.tr16.b128.v8bf16",
+            "llvm.amdgcn.ds.load.tr16.b128.v8bf16",
+            "<8 x bfloat>",
+        )
+
+    def emit_lds_barrier_drain(self, lowerer, *, drain_vmem: bool) -> None:
+        # gfx1250 split counters. The raw ``llvm.amdgcn.s.barrier`` does NOT get
+        # an auto-inserted pre-barrier ``s_wait_dscnt``, so the LDS write->read
+        # (e.g. P-staging -> PV read) would race and read stale LDS -> NaN. Emit
+        # the explicit drain: dscnt for LDS, plus loadcnt for the VMEM->LDS chain.
+        # clang fuses these into ``s_wait_loadcnt_dscnt 0`` before the barrier.
+        if drain_vmem:
+            lowerer._need("s.wait.loadcnt")
+            lowerer._current().emit(
+                "  call void @llvm.amdgcn.s.wait.loadcnt(i16 0)"
+            )
+        lowerer._need("s.wait.dscnt")
+        lowerer._current().emit("  call void @llvm.amdgcn.s.wait.dscnt(i16 0)")
+
+    def emit_wmma(self, lowerer, op) -> None:
+        fp8_spec = _GFX1250_WMMA_FP8.get(op.name)
+        if fp8_spec is not None:
+            self._emit_wmma_fp8(lowerer, op, fp8_spec)
+            return
+        spec = _GFX1250_WMMA.get(op.name)
+        if spec is None:
+            raise NotImplementedError(
+                f"WMMA op {op.name!r} not yet wired for {self.arch.gfx}; "
+                f"known: {sorted(_GFX1250_WMMA) + sorted(_GFX1250_WMMA_FP8)}"
+            )
+        decl_key, intrinsic, elt = spec
+        a, b, c = op.operands
+        lowerer._need(decl_key)
+        a_arg = lowerer._operand(a)
+        b_arg = lowerer._operand(b)
+        # gfx1250 8-operand form: (i1 negA, A, i1 negB, B, i16 fmt, C, i1, i1).
+        # bf16 operands are <16 x bfloat> directly (no i16 bitcast).
+        lowerer._current().emit(
+            f"  {op.result.name} = call <8 x float> @{intrinsic}("
+            f"i1 false, <16 x {elt}> {a_arg}, "
+            f"i1 false, <16 x {elt}> {b_arg}, "
+            f"i16 0, <8 x float> {lowerer._operand(c)}, "
+            f"i1 false, i1 false)"
+        )
+
+    def _emit_wmma_fp8(self, lowerer, op, spec) -> None:
+        """Emit a gfx1250 K=64 FP8/BF8 WMMA call.
+
+        The A/B fragments arrive in SSA as ``<8 x i32>`` (32 low-bit bytes per
+        lane). The 6-operand form is ``(A, B, i16 fmt, C, i1, i1)`` with the
+        format / reuse immediates pinned to 0 (plain unscaled MMA).
+        """
+        decl_key, intrinsic = spec
+        a, b, c = op.operands
+        lowerer._need(decl_key)
+        lowerer._current().emit(
+            f"  {op.result.name} = call <8 x float> @{intrinsic}("
+            f"<8 x i32> {lowerer._operand(a)}, "
+            f"<8 x i32> {lowerer._operand(b)}, "
+            f"i16 0, <8 x float> {lowerer._operand(c)}, "
+            f"i1 false, i1 false)"
+        )
+
+
 # gfx -> backend class. Adding a CDNA gfx is one row here plus, when its codegen
 # actually diverges, a new subclass.
 #
@@ -407,6 +590,7 @@ BACKEND_REGISTRY: Dict[str, Callable[[ArchTarget], ISABackend]] = {
     "gfx950": Gfx950Backend,
     "gfx1151": Gfx11RdnaBackend,
     "gfx1201": Gfx12RdnaBackend,
+    "gfx1250": Gfx1250Backend,
     "gfx11-generic": Gfx11RdnaBackend,
 }
 

@@ -15,20 +15,33 @@ threadgroup, the full MoE per-expert path:
 See ``examples/gfx950/fused_mega_moe/docs/BUILD_SPEC.md`` for the authoritative
 build specification.
 
-STAGING STATUS (incremental implementation per BUILD_SPEC Phase plan):
+STATUS: COMPLETE (f16 + bf16, single launch).
 
-* Phase 0 + Phase 1 (THIS FILE, current state): kernel signature, grid
-  function, block/thread prelude, the gate+up GEMM via the reused
-  ``_emit_moe_prefetch_kloop`` (dual-B, shared A read), the SiLU(gate)*up
-  activation, and staging the f16 result into a PERSISTENT LDS ``Hidden_smem``
-  buffer via ``_emit_cshuffle_stage`` (NOT to HBM).
-* Phase 2 (NEXT, stubbed here): the down GEMM (``_emit_moe_down_kloop_lds_a``
-  reading ``Hidden_smem`` as the LDS-resident A operand) + the weighted atomic
-  reduce into Y via ``_emit_down_reduce_epilogue_atomic``.
+The full gate+up+silu+down+reduce path is implemented in one kernel:
+
+* Phase 0 + Phase 1: kernel signature, grid function, block/thread prelude, the
+  gate+up GEMM via the reused ``_emit_moe_prefetch_kloop`` (dual-B, shared A
+  read), the SiLU(gate)*up activation, and staging the f16/bf16 result into a
+  PERSISTENT LDS ``Hidden_smem`` buffer via ``_emit_cshuffle_stage`` (NOT HBM).
+* Phase 2: the down GEMM (``_emit_moe_down_kloop_lds_a`` reading ``Hidden_smem``
+  as the LDS-resident A operand) + the weighted, token-validity-masked atomic
+  reduce into ``Y`` via ``_emit_down_reduce_epilogue_atomic``.
+
+The single-launch fusion is structural: the kernel signature exposes only the
+inputs (``A``, ``WGate``, ``WUp``, ``WDown``, routing) and the output ``Y`` --
+there is NO ``GateOut`` / ``UpOut`` / ``Hidden`` / ``DownOut`` HBM buffer, so
+every intermediate stays in registers / LDS. Verified to lower (LLVM-direct) and
+assemble (comgr -> HSACO) for gfx950 in both f16 and bf16.
 
 All MFMA / LDS geometry and the gate+up k-loop are 100% reused from
-``moe_gemm_fused.py`` (imported, never modified). This file adds ONLY the new
-mega-kernel builder + (in Phase 2) one trimmed LDS-A k-loop variant.
+``moe_gemm_fused.py`` (imported, never modified). This file adds the mega-kernel
+builder + one trimmed LDS-A down k-loop variant.
+
+Structure + codegen are covered by ``tests/test_moe_fused_mega.py`` (single-
+launch signature, f16/bf16 LLVM lowering with MFMA + atomic reduce, wave32
+rejection). On-device numeric validation must run on a gfx950 (CDNA4 / MFMA)
+device -- the body uses MFMA atoms and cannot run on a wave32 / WMMA target
+(gfx1250).
 """
 
 from __future__ import annotations
@@ -434,15 +447,18 @@ def _emit_moe_down_kloop_lds_a(
 def build_moe_fused_mega_gemm(
     spec: FusedMegaKernelSpec, arch: str = "gfx950"
 ) -> KernelDef:
-    """Build the single-launch fused-MoE mega-kernel.
+    """Build the single-launch fused-MoE mega-kernel (f16/bf16).
 
-    Current implementation covers Phase 0 + Phase 1 (gate+up+silu -> persistent
-    LDS Hidden). The down GEMM + atomic reduce (Phase 2) is left as a documented
-    stub at the end of the body.
+    Implements the full fused path in one kernel: gate+up GEMM (dual-B, shared
+    LDS A) -> SiLU(gate)*up -> persistent LDS ``Hidden_smem`` -> down GEMM
+    (LDS-resident A) -> weighted atomic reduce into ``Y``. No intermediate is
+    written to HBM (the signature exposes only inputs + ``Y``).
 
     ``arch`` selects the target GPU for MFMA-atom validation; an atom not in the
     arch catalog (e.g. a gfx950-only wide atom requested with ``arch="gfx942"``)
     raises a structured error here instead of crashing comgr at lower time.
+    Requires an MFMA (CDNA) target; wave32/WMMA targets (gfx1250) are rejected
+    by the GEMM-spec validator.
     """
 
     u_gu = spec.gate_up_universal_spec()

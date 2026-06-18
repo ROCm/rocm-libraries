@@ -75,6 +75,14 @@ Coverage: fp16 / bf16, head_size in `{128, 256}`, block_size in `{16, 64}`, caus
 
 FP8 K/V cache + output scale/clamp is the next coverage step (see attention parity README).
 
+Planned work: `examples/gfx1250/attention/gfx1250_universal_attention_plan.md` tracks the
+gfx1250 universal-attention port, **scoped to the 2D (prefill) path for now**
+(3D split-KV decode deferred). gfx1250 is a CDNA multi-chip (gfx1250-class)
+device using the GFX12 programming model (wave32/WMMA) — distinct from the RDNA4
+gfx1201 family. The plan spans three phases (functional correctness, gfx950 perf parity
+on prefill `seq_len 64/128` + the `aiter_ua_2_shapes.json` trace cohort, then
+roofline), split into parallel core/helpers/instances/examples legs.
+
 ## Small Ops
 
 | File | Spec | Doc |

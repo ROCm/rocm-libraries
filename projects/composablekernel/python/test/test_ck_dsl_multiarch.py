@@ -24,8 +24,32 @@ _CKDSL_ROOT = pathlib.Path(__file__).resolve().parents[1] / "ck_dsl"
 
 class TestArchTarget(unittest.TestCase):
     def test_known_arches(self):
-        # CDNA (gfx942/gfx950, MFMA) + RDNA3.5 (gfx1151, WMMA/wave32).
-        self.assertEqual(set(known_arches()), {"gfx942", "gfx950", "gfx1151"})
+        # CDNA MFMA (gfx942/gfx950) + RDNA WMMA/wave32 (gfx1151 RDNA3.5, gfx1201
+        # RDNA4, gfx11-generic) + gfx1250-class CDNA/GFX12 WMMA.
+        self.assertEqual(
+            set(known_arches()),
+            {"gfx942", "gfx950", "gfx1151", "gfx1201", "gfx1250", "gfx11-generic"},
+        )
+
+    def test_gfx1250_facts(self):
+        t = ArchTarget.from_gfx("gfx1250")
+        self.assertEqual(t.wave_size, 32)
+        self.assertEqual(t.family, "cdna")
+        self.assertEqual(t.target_family, "gfx12_cdna")
+        self.assertEqual(t.isa_triple, "amdgcn-amd-amdhsa--gfx1250")
+        # WMMA catalog (no MFMA): primary fp16/bf16 atom is 16x16x32 (K=32),
+        # distinct from gfx1201's 16x16x16.
+        self.assertEqual(
+            t.mma.enumerate(a_dtype="fp16", b_dtype="fp16", c_dtype="fp32"), []
+        )
+        wmma = t.mma.enumerate(
+            family="wmma", a_dtype="fp16", b_dtype="fp16", c_dtype="fp32"
+        )
+        self.assertEqual([o.shape for o in wmma], [(16, 16, 32)])
+        from ck_dsl.core.isa import backend_for
+        from ck_dsl.core.isa.backend import Gfx1250Backend
+
+        self.assertIsInstance(backend_for("gfx1250"), Gfx1250Backend)
 
     def test_gfx1151_rdna_facts(self):
         t = ArchTarget.from_gfx("gfx1151")
