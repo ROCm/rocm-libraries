@@ -165,7 +165,7 @@ cmake                                                                           
   -D CMAKE_CXX_STANDARD=20                                                                        \
   -D CK_PROFILER_OP_FILTER="_tile"                                                                \
   -D DISABLE_IMPLICIT_GEMM_INSTANCES=ON                                                           \
-  -D DISPATCHER_CONFIG_SET=profiler                                                               \
+  -D DISPATCHER_RULE_SET=full                                                                     \
   -G Ninja                                                                                        \
   ..
 ```
@@ -188,6 +188,16 @@ Switch
 ```
 
 ensures that we always use the full set implicit GEMM instances. 
+
+One can toggle between diffrerent instance sets using the CMake configure flag `DISPATCHER_RULE_SET`. The current options are
+
+| Rule set | Description |
+|---|---|
+| `profiler` | Curated configurations for CK Profiler benchmarking. |
+| `tests` | Instances for integration tests, a subset of the `profiler` configurations. |
+| `full` | The full rule-derived set (all per-(variant, datatype) instances). |
+| `full-tests` | A smaller, stratified ~20% subset of the `full` rule set, for faster builds. |
+| `tiny` | A minimal subset of the `full-tests` rule set, for quick development/iteration builds. |
 
 ## Testing
 
