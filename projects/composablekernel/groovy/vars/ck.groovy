@@ -54,14 +54,19 @@ def setGithubStatus(String context, String state, String description) {
 // momentary DNS/connectivity blips (e.g. "Could not resolve host: github.com")
 // that would otherwise fail the whole build. Wrap each network-touching git
 // step (ref-repo clone/update, SCM checkout) so a transient blip retries
-// instead of failing the build.
+// instead of failing the build. If all attempts fail, the node likely can't
+// reach github at all, so escalate to a NodeFault: runOnHealthyNode then
+// excludes this node and reruns the stage on another one.
 def gitNetRetry(String label, Closure body) {
     int maxAttempts = 3
     for (int i = 1; i <= maxAttempts; i++) {
         try { body(); return }
         catch (e) {
-            if (i == maxAttempts) throw e
-            echo "${label} failed (attempt ${i}/${maxAttempts}), retrying: ${e.message}"
+            if (i == maxAttempts) {
+                echo "${label} failed all ${maxAttempts} attempts on ${env.NODE_NAME}; treating as node fault to reroute to another node: ${e.message}"
+                throw new org.ck.NodeFault("${label}: ${e.message}")
+            }
+            echo "${label} failed (attempt ${i}/${maxAttempts}) on ${env.NODE_NAME}, retrying in 15s: ${e.message}"
             sleep(time: 15, unit: 'SECONDS')
         }
     }
