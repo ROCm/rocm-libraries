@@ -485,8 +485,8 @@ public:
    */
   allocator_type get_allocator() const;
 
-  THRUST_SYNTHESIZE_SEQUENCE_ACCESS(vector_base, const_iterator);
-  THRUST_SYNTHESIZE_SEQUENCE_REVERSE_ACCESS(vector_base, const_reverse_iterator);
+  THRUST_SYNTHESIZE_SEQUENCE_ACCESS(vector_base, const_iterator)
+  THRUST_SYNTHESIZE_SEQUENCE_REVERSE_ACCESS(vector_base, const_reverse_iterator)
 
 protected:
   // Our storage
