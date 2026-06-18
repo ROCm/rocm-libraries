@@ -305,7 +305,6 @@ Key flags:
 | `--target` | all | Cap on output shapes; stratified sampling preserves bucket diversity |
 | `--density` | 1 | `2` = denser grid (adds intermediate N/spatial/channel values) |
 | `--threshold` | 0.90 | Mean efficiency below which a subset is targeted |
-| `--force-subsets` | — | Always target named subsets, e.g. `"N=1,grouped"` `"spatial=large"` |
 | `--analytics` | off | Print global stats and worst 20 shapes |
 | `--dry-run` | off | Analyse only; do not write shape files |
 
