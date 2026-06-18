@@ -196,9 +196,19 @@ class SchedulerConfig:
     # Single-int specs are rounded DOWN to an mn-multiple (smaller partition, less VGPR usage).
     # If no solution exists, we return [total] (single partition).
     @staticmethod
+    def _uid_range(numUnroll: dict) -> int:
+        """Size of the uid dimension that indexes the scale span over data DUs.
+
+        The data (smaller-DU) tensors are sliced into one uid per data-DU window
+        within the scale span, so the uid range is the data tensors' unroll
+        multiplicity. Single-DU configs have uid_range == 1.
+        """
+        return max(numUnroll.get('A', 1), numUnroll.get('B', 1))
+
+    @staticmethod
     def _data_tensors_multi_du(numUnroll: dict) -> bool:
-        """True when A/B use numUnroll > 1 (MX multi-DU data path)."""
-        return numUnroll.get('A', 1) > 1 or numUnroll.get('B', 1) > 1
+        """True when the uid dimension is non-trivial (uid_range > 1)."""
+        return SchedulerConfig._uid_range(numUnroll) > 1
 
     @staticmethod
     def _normalize_partition_sizes(spec: Union[int, List[int]], total: int, dim: str,
@@ -285,6 +295,11 @@ class SchedulerConfig:
         self.offsetPartition = 1 if self.pgr >= 2 else 0
         if self.pgr == 0:
             assert self.numPartitions == 1, "pgr=0 requires numPartitions=1"
+
+    @property
+    def uid_range(self) -> int:
+        """Size of the uid dimension indexing the scale span (1 == single-DU)."""
+        return SchedulerConfig._uid_range(self.numUnroll) if self.numUnroll else 1
 
     @property
     def partitionSizesM(self) -> List[int]:
@@ -855,10 +870,16 @@ class LogicalScheduler:
             return False
         return self._is_multi_du()
 
-    def _is_multi_du(self) -> bool:
-        """True when A/B use numUnroll > 1 (MX multi-DU data path)."""
+    def _uid_range(self) -> int:
+        """Size of the uid dimension indexing the scale span (1 == single-DU)."""
         cfg = self.config
-        return bool(cfg.numUnroll) and SchedulerConfig._data_tensors_multi_du(cfg.numUnroll)
+        if not cfg.numUnroll:
+            return 1
+        return SchedulerConfig._uid_range(cfg.numUnroll)
+
+    def _is_multi_du(self) -> bool:
+        """True when the uid dimension is non-trivial (uid_range > 1)."""
+        return self._uid_range() > 1
 
     def assign_vgpr_tiles(self):
         """Assign physical vgprTileIds to all placements (A, B, SA, SB)."""
