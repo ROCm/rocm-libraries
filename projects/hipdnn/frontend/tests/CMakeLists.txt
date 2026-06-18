@@ -36,9 +36,10 @@ add_executable(
     TestConvolutionDgradNode.cpp
     TestConvolutionNode.cpp
     TestConvolutionWgradAttributes.cpp
-    # cuDNN-compatibility shim umbrella compile/link test (ALMIOPEN-2034 AC#1);
+    # cuDNN-compatibility shim tests (ALMIOPEN-2034 AC#1, ALMIOPEN-2036 AC#3);
     # only built when the shim is enabled.
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimUmbrellaCompiles.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimHandle.cpp>
     TestDescriptorHelpers.cpp
     TestDescriptorUnpackHelpers.cpp
     TestConvolutionWgradNode.cpp
