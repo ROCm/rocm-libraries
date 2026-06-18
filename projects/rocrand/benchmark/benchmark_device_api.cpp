@@ -174,8 +174,8 @@ int main(int argc, char* argv[])
     settings.hot                  = true;
     primbench::executor executor(argc, argv, settings);
 
-    auto blocks     = executor.get<size_t>("blocks", 256, "Number of blocks");
-    auto threads    = executor.get<size_t>("threads", 256, "Threads per block");
+    auto blocks     = executor.get<size_t>("blocks", 0, "Number of blocks");
+    auto threads    = executor.get<size_t>("threads", 0, "Threads per block");
     auto dimensions = executor.get<size_t>("dimensions", 1, "Number of quasi-random dimensions");
     auto offset     = executor.get<size_t>("offset", 0, "Offset of generated pseudo-random values");
     auto poisson_lambdas
