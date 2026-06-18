@@ -221,6 +221,8 @@ void MxMatmulPlan::execute(const HipdnnEnginePluginHandle& handle,
     // operand is our B and its B operand is our A:
     //   A_SCALE ← our scale_B ([K/32, N]) — already in the expected layout.
     //   B_SCALE ← our scale_A transposed from [M, K/32] to [K/32, M].
+    // The operands are swapped for free via their layout handles (below), but
+    // scale pointers carry no layout, so scale_A must be physically transposed.
     THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatrixTransform(handle.hipblasltHandle,
                                                         _scaleTransposeDesc.transformDesc(),
                                                         &ALPHA,
