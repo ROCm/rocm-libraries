@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -139,4 +139,4 @@ THRUST_NS_QUALIFIER::host_vector<T> random_samples(const size_t N)
   return vec;
 }
 
-}; // end namespace unittest
+} // end namespace unittest
