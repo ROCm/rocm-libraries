@@ -28,11 +28,9 @@ SOFTWARE.
 
 // Templated erode row compute function - works for any filter size (3, 5, 7, 9)
 template <int filterSize, typename T>
-__device__ void erode_row_hip_compute(T *srcPtr, d_float8 *dst_f8)
-{
-    #pragma unroll
-    for (int k = 0; k < 8; k++)
-    {
+__device__ void erode_row_hip_compute(T* srcPtr, d_float8* dst_f8) {
+#pragma unroll
+    for (int k = 0; k < 8; k++) {
         float minVal = static_cast<float>(srcPtr[k]);
         for (int j = 1; j < filterSize; j++)
             minVal = fminf(minVal, static_cast<float>(srcPtr[k + j]));
@@ -44,14 +42,9 @@ __device__ void erode_row_hip_compute(T *srcPtr, d_float8 *dst_f8)
 
 // kernelSize = 3
 template <typename T>
-__global__ void erode_3x3_pkd_hip_tensor(T *srcPtr,
-                                         uint2 srcStridesNH,
-                                         T *dstPtr,
-                                         uint2 dstStridesNH,
-                                         uint padLength,
-                                         uint2 tileSize,
-                                         RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void erode_3x3_pkd_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr,
+                                         uint2 dstStridesNH, uint padLength, uint2 tileSize,
+                                         RpptROIPtr roiTensorPtrSrc) {
     int hipThreadIdx_x8 = hipThreadIdx_x << 3;
     int id_x_o = (hipBlockIdx_x * tileSize.x * 8) + hipThreadIdx_x8;
     int id_y_o = hipBlockIdx_y * tileSize.y + hipThreadIdx_y;
@@ -69,7 +62,8 @@ __global__ void erode_3x3_pkd_hip_tensor(T *srcPtr,
     using SharedType = typename FilterDispatch<T>::SharedType;
     __shared__ SharedType src_smem[SMEM_LENGTH_Y_3C][SMEM_LENGTH_X];
 
-    int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) + ((id_x_i + roiBeginX) * 3);
+    int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) +
+                 ((id_x_i + roiBeginX) * 3);
     int dstIdx = (id_z * dstStridesNH.x) + (id_y_o * dstStridesNH.y) + id_x_o * 3;
     sum_f24.f4[0] = FLOAT4_255;
     sum_f24.f4[1] = FLOAT4_255;
@@ -83,52 +77,54 @@ __global__ void erode_3x3_pkd_hip_tensor(T *srcPtr,
     hipThreadIdx_y_channel.y = hipThreadIdx_y + 16;
     hipThreadIdx_y_channel.z = hipThreadIdx_y + 32;
 
-    SharedType *src_smem_channel[3];
+    SharedType* src_smem_channel[3];
     src_smem_channel[0] = &src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8];
     src_smem_channel[1] = &src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8];
     src_smem_channel[2] = &src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8];
 
     if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
         FilterDispatch<T>::rpp_hip_load24_pkd3_to_pln3(srcPtr + srcIdx, src_smem_channel);
-    else
-    {
+    else {
         // Nearest-neighbor padding
-        for (int i = 0; i < 8; i++)
-        {
+        for (int i = 0; i < 8; i++) {
             int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
             int clampedIdx = (id_z * srcStridesNH.x) + (clampedY * srcStridesNH.y) + (clampedX * 3);
 
-            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];     // R
-            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 1]; // G
-            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 2]; // B
+            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];      // R
+            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 1];  // G
+            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 2];  // B
         }
     }
     __syncthreads();
-    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) && (hipThreadIdx_y < tileSize.y))
-    {
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.x    ][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.y    ][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.z    ][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8], &sum_f24.f8[2]);
+    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+        (hipThreadIdx_y < tileSize.y)) {
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
         rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &sum_f24);
     }
 }
 
 // kernelSize = 5
 template <typename T>
-__global__ void erode_5x5_pkd_hip_tensor(T *srcPtr,
-                                         uint2 srcStridesNH,
-                                         T *dstPtr,
-                                         uint2 dstStridesNH,
-                                         uint padLength,
-                                         uint2 tileSize,
-                                         RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void erode_5x5_pkd_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr,
+                                         uint2 dstStridesNH, uint padLength, uint2 tileSize,
+                                         RpptROIPtr roiTensorPtrSrc) {
     int hipThreadIdx_x8 = hipThreadIdx_x << 3;
     int id_x_o = (hipBlockIdx_x * tileSize.x * 8) + hipThreadIdx_x8;
     int id_y_o = hipBlockIdx_y * tileSize.y + hipThreadIdx_y;
@@ -146,7 +142,8 @@ __global__ void erode_5x5_pkd_hip_tensor(T *srcPtr,
     using SharedType = typename FilterDispatch<T>::SharedType;
     __shared__ SharedType src_smem[SMEM_LENGTH_Y_3C][SMEM_LENGTH_X];
 
-    int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) + ((id_x_i + roiBeginX) * 3);
+    int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) +
+                 ((id_x_i + roiBeginX) * 3);
     int dstIdx = (id_z * dstStridesNH.x) + (id_y_o * dstStridesNH.y) + id_x_o * 3;
     sum_f24.f4[0] = FLOAT4_255;
     sum_f24.f4[1] = FLOAT4_255;
@@ -160,58 +157,66 @@ __global__ void erode_5x5_pkd_hip_tensor(T *srcPtr,
     hipThreadIdx_y_channel.y = hipThreadIdx_y + 16;
     hipThreadIdx_y_channel.z = hipThreadIdx_y + 32;
 
-    SharedType *src_smem_channel[3];
+    SharedType* src_smem_channel[3];
     src_smem_channel[0] = &src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8];
     src_smem_channel[1] = &src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8];
     src_smem_channel[2] = &src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8];
 
     if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
         FilterDispatch<T>::rpp_hip_load24_pkd3_to_pln3(srcPtr + srcIdx, src_smem_channel);
-    else
-    {
+    else {
         // Nearest-neighbor padding
-        for (int i = 0; i < 8; i++)
-        {
+        for (int i = 0; i < 8; i++) {
             int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
             int clampedIdx = (id_z * srcStridesNH.x) + (clampedY * srcStridesNH.y) + (clampedX * 3);
 
-            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];     // R
-            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 1]; // G
-            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 2]; // B
+            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];      // R
+            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 1];  // G
+            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 2];  // B
         }
     }
     __syncthreads();
-    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) && (hipThreadIdx_y < tileSize.y))
-    {
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x    ][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y    ][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z    ][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 3][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 3][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 3][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 4][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 4][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 4][hipThreadIdx_x8], &sum_f24.f8[2]);
+    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+        (hipThreadIdx_y < tileSize.y)) {
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
         rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &sum_f24);
     }
 }
 
 // kernelSize = 7
 template <typename T>
-__global__ void erode_7x7_pkd_hip_tensor(T *srcPtr,
-                                     uint2 srcStridesNH,
-                                     T *dstPtr,
-                                     uint2 dstStridesNH,
-                                     uint padLength,
-                                     uint2 tileSize,
-                                     RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void erode_7x7_pkd_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr,
+                                         uint2 dstStridesNH, uint padLength, uint2 tileSize,
+                                         RpptROIPtr roiTensorPtrSrc) {
     int hipThreadIdx_x8 = hipThreadIdx_x << 3;
     int id_x_o = (hipBlockIdx_x * tileSize.x * 8) + hipThreadIdx_x8;
     int id_y_o = hipBlockIdx_y * tileSize.y + hipThreadIdx_y;
@@ -229,7 +234,8 @@ __global__ void erode_7x7_pkd_hip_tensor(T *srcPtr,
     using SharedType = typename FilterDispatch<T>::SharedType;
     __shared__ SharedType src_smem[SMEM_LENGTH_Y_3C][SMEM_LENGTH_X];
 
-    int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) + ((id_x_i + roiBeginX) * 3);
+    int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) +
+                 ((id_x_i + roiBeginX) * 3);
     int dstIdx = (id_z * dstStridesNH.x) + (id_y_o * dstStridesNH.y) + id_x_o * 3;
     sum_f24.f4[0] = FLOAT4_255;
     sum_f24.f4[1] = FLOAT4_255;
@@ -243,64 +249,78 @@ __global__ void erode_7x7_pkd_hip_tensor(T *srcPtr,
     hipThreadIdx_y_channel.y = hipThreadIdx_y + 16;
     hipThreadIdx_y_channel.z = hipThreadIdx_y + 32;
 
-    SharedType *src_smem_channel[3];
+    SharedType* src_smem_channel[3];
     src_smem_channel[0] = &src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8];
     src_smem_channel[1] = &src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8];
     src_smem_channel[2] = &src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8];
 
     if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
         FilterDispatch<T>::rpp_hip_load24_pkd3_to_pln3(srcPtr + srcIdx, src_smem_channel);
-    else
-    {
+    else {
         // Nearest-neighbor padding
-        for (int i = 0; i < 8; i++)
-        {
+        for (int i = 0; i < 8; i++) {
             int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
             int clampedIdx = (id_z * srcStridesNH.x) + (clampedY * srcStridesNH.y) + (clampedX * 3);
 
-            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];     // R
-            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 1]; // G
-            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 2]; // B
+            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];      // R
+            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 1];  // G
+            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 2];  // B
         }
     }
     __syncthreads();
-    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) && (hipThreadIdx_y < tileSize.y))
-    {
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x    ][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y    ][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z    ][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 3][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 3][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 3][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 4][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 4][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 4][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 5][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 5][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 5][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 6][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 6][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 6][hipThreadIdx_x8], &sum_f24.f8[2]);
+    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+        (hipThreadIdx_y < tileSize.y)) {
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 5][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 5][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 5][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 6][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 6][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 6][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
         rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &sum_f24);
     }
 }
 
 // kernelSize = 9
 template <typename T>
-__global__ void erode_9x9_pkd_hip_tensor(T *srcPtr,
-                                     uint2 srcStridesNH,
-                                     T *dstPtr,
-                                     uint2 dstStridesNH,
-                                     uint padLength,
-                                     uint2 tileSize,
-                                     RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void erode_9x9_pkd_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr,
+                                         uint2 dstStridesNH, uint padLength, uint2 tileSize,
+                                         RpptROIPtr roiTensorPtrSrc) {
     int hipThreadIdx_x8 = hipThreadIdx_x << 3;
     int id_x_o = (hipBlockIdx_x * tileSize.x * 8) + hipThreadIdx_x8;
     int id_y_o = hipBlockIdx_y * tileSize.y + hipThreadIdx_y;
@@ -318,7 +338,8 @@ __global__ void erode_9x9_pkd_hip_tensor(T *srcPtr,
     using SharedType = typename FilterDispatch<T>::SharedType;
     __shared__ SharedType src_smem[SMEM_LENGTH_Y_3C][SMEM_LENGTH_X];
 
-    int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) + ((id_x_i + roiBeginX) * 3);
+    int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) +
+                 ((id_x_i + roiBeginX) * 3);
     int dstIdx = (id_z * dstStridesNH.x) + (id_y_o * dstStridesNH.y) + id_x_o * 3;
     sum_f24.f4[0] = FLOAT4_255;
     sum_f24.f4[1] = FLOAT4_255;
@@ -332,56 +353,81 @@ __global__ void erode_9x9_pkd_hip_tensor(T *srcPtr,
     hipThreadIdx_y_channel.y = hipThreadIdx_y + 16;
     hipThreadIdx_y_channel.z = hipThreadIdx_y + 32;
 
-    SharedType *src_smem_channel[3];
+    SharedType* src_smem_channel[3];
     src_smem_channel[0] = &src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8];
     src_smem_channel[1] = &src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8];
     src_smem_channel[2] = &src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8];
 
     if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
         FilterDispatch<T>::rpp_hip_load24_pkd3_to_pln3(srcPtr + srcIdx, src_smem_channel);
-    else
-    {
+    else {
         // Nearest-neighbor padding
-        for (int i = 0; i < 8; i++)
-        {
+        for (int i = 0; i < 8; i++) {
             int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
             int clampedIdx = (id_z * srcStridesNH.x) + (clampedY * srcStridesNH.y) + (clampedX * 3);
 
-            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];     // R
-            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 1]; // G
-            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 2]; // B
+            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];      // R
+            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 1];  // G
+            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 2];  // B
         }
     }
     __syncthreads();
-    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) && (hipThreadIdx_y < tileSize.y))
-    {
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x    ][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y    ][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z    ][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 3][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 3][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 3][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 4][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 4][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 4][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 5][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 5][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 5][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 6][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 6][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 6][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 7][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 7][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 7][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 8][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 8][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 8][hipThreadIdx_x8], &sum_f24.f8[2]);
+    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+        (hipThreadIdx_y < tileSize.y)) {
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 5][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 5][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 5][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 6][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 6][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 6][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 7][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 7][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 7][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 8][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 8][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 8][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
         rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &sum_f24);
     }
 }
@@ -390,15 +436,9 @@ __global__ void erode_9x9_pkd_hip_tensor(T *srcPtr,
 
 // kernelSize = 3
 template <typename T>
-__global__ void erode_3x3_pln_hip_tensor(T *srcPtr,
-                                         uint3 srcStridesNCH,
-                                         T *dstPtr,
-                                         uint3 dstStridesNCH,
-                                         int channelsDst,
-                                         uint padLength,
-                                         uint2 tileSize,
-                                         RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void erode_3x3_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
+                                         uint3 dstStridesNCH, int channelsDst, uint padLength,
+                                         uint2 tileSize, RpptROIPtr roiTensorPtrSrc) {
     int hipThreadIdx_x8 = hipThreadIdx_x << 3;
     int id_x_o = (hipBlockIdx_x * tileSize.x * 8) + hipThreadIdx_x8;
     int id_y_o = hipBlockIdx_y * tileSize.y + hipThreadIdx_y;
@@ -416,54 +456,55 @@ __global__ void erode_3x3_pln_hip_tensor(T *srcPtr,
     using SharedType = typename FilterDispatch<T>::SharedType;
     __shared__ SharedType src_smem[SMEM_LENGTH_Y_1C][SMEM_LENGTH_X];
 
-    int srcIdx = (id_z * srcStridesNCH.x) + ((id_y_i + roiBeginY) * srcStridesNCH.z) + (id_x_i + roiBeginX);
+    int srcIdx =
+        (id_z * srcStridesNCH.x) + ((id_y_i + roiBeginY) * srcStridesNCH.z) + (id_x_i + roiBeginX);
     int dstIdx = (id_z * dstStridesNCH.x) + (id_y_o * dstStridesNCH.z) + id_x_o;
     sum_f8.f4[0] = FLOAT4_255;
     sum_f8.f4[1] = FLOAT4_255;
     if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
-        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx, &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
-    else
-    {
+        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
+                                         &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
+    else {
         // Nearest-neighbor padding
-        for (int i = 0; i < 8; i++)
-        {
+        for (int i = 0; i < 8; i++) {
             int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
             int clampedIdx = (id_z * srcStridesNCH.x) + (clampedY * srcStridesNCH.z) + clampedX;
-            src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];  // Load nearest pixel
+            src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] =
+                srcPtr[clampedIdx];  // Load nearest pixel
         }
     }
     __syncthreads();
-    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) && (hipThreadIdx_y < tileSize.y))
-    {
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y    ][hipThreadIdx_x8], &sum_f8);
+    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+        (hipThreadIdx_y < tileSize.y)) {
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y][hipThreadIdx_x8], &sum_f8);
         erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y + 1][hipThreadIdx_x8], &sum_f8);
         erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y + 2][hipThreadIdx_x8], &sum_f8);
         rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &sum_f8);
     }
 
-    if (channelsDst == 3)
-    {
+    if (channelsDst == 3) {
         __syncthreads();
         srcIdx += srcStridesNCH.y;
         dstIdx += dstStridesNCH.y;
         sum_f8.f4[0] = FLOAT4_255;
         sum_f8.f4[1] = FLOAT4_255;
         if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
-            FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx, &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
-        else
-        {
+            FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
+                                             &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
+        else {
             // Nearest-neighbor padding
-            for (int i = 0; i < 8; i++)
-            {
+            for (int i = 0; i < 8; i++) {
                 int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
-                int clampedIdx = (id_z * srcStridesNCH.x) + srcStridesNCH.y + (clampedY * srcStridesNCH.z) + clampedX;
-                src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];  // Load nearest pixel
+                int clampedIdx = (id_z * srcStridesNCH.x) + srcStridesNCH.y +
+                                 (clampedY * srcStridesNCH.z) + clampedX;
+                src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] =
+                    srcPtr[clampedIdx];  // Load nearest pixel
             }
         }
         __syncthreads();
-        if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) && (hipThreadIdx_y < tileSize.y))
-        {
-            erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y    ][hipThreadIdx_x8], &sum_f8);
+        if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+            (hipThreadIdx_y < tileSize.y)) {
+            erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y][hipThreadIdx_x8], &sum_f8);
             erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y + 1][hipThreadIdx_x8], &sum_f8);
             erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y + 2][hipThreadIdx_x8], &sum_f8);
             rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &sum_f8);
@@ -475,21 +516,22 @@ __global__ void erode_3x3_pln_hip_tensor(T *srcPtr,
         sum_f8.f4[0] = FLOAT4_255;
         sum_f8.f4[1] = FLOAT4_255;
         if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
-            FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx, &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
-        else
-        {
+            FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
+                                             &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
+        else {
             // Nearest-neighbor padding
-            for (int i = 0; i < 8; i++)
-            {
+            for (int i = 0; i < 8; i++) {
                 int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
-                int clampedIdx = (id_z * srcStridesNCH.x) + (2 * srcStridesNCH.y) + (clampedY * srcStridesNCH.z) + clampedX;
-                src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];  // Load nearest pixel
+                int clampedIdx = (id_z * srcStridesNCH.x) + (2 * srcStridesNCH.y) +
+                                 (clampedY * srcStridesNCH.z) + clampedX;
+                src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] =
+                    srcPtr[clampedIdx];  // Load nearest pixel
             }
         }
         __syncthreads();
-        if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) && (hipThreadIdx_y < tileSize.y))
-        {
-            erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y    ][hipThreadIdx_x8], &sum_f8);
+        if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+            (hipThreadIdx_y < tileSize.y)) {
+            erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y][hipThreadIdx_x8], &sum_f8);
             erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y + 1][hipThreadIdx_x8], &sum_f8);
             erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y + 2][hipThreadIdx_x8], &sum_f8);
             rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &sum_f8);
@@ -499,15 +541,9 @@ __global__ void erode_3x3_pln_hip_tensor(T *srcPtr,
 
 // kernelSize = 5
 template <typename T>
-__global__ void erode_5x5_pln_hip_tensor(T *srcPtr,
-                                         uint3 srcStridesNCH,
-                                         T *dstPtr,
-                                         uint3 dstStridesNCH,
-                                         int channelsDst,
-                                         uint padLength,
-                                         uint2 tileSize,
-                                         RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void erode_5x5_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
+                                         uint3 dstStridesNCH, int channelsDst, uint padLength,
+                                         uint2 tileSize, RpptROIPtr roiTensorPtrSrc) {
     int hipThreadIdx_x8 = hipThreadIdx_x << 3;
     int id_x_o = (hipBlockIdx_x * tileSize.x * 8) + hipThreadIdx_x8;
     int id_y_o = hipBlockIdx_y * tileSize.y + hipThreadIdx_y;
@@ -525,26 +561,27 @@ __global__ void erode_5x5_pln_hip_tensor(T *srcPtr,
     using SharedType = typename FilterDispatch<T>::SharedType;
     __shared__ SharedType src_smem[SMEM_LENGTH_Y_1C][SMEM_LENGTH_X];
 
-    int srcIdx = (id_z * srcStridesNCH.x) + ((id_y_i + roiBeginY) * srcStridesNCH.z) + (id_x_i + roiBeginX);
+    int srcIdx =
+        (id_z * srcStridesNCH.x) + ((id_y_i + roiBeginY) * srcStridesNCH.z) + (id_x_i + roiBeginX);
     int dstIdx = (id_z * dstStridesNCH.x) + (id_y_o * dstStridesNCH.z) + id_x_o;
     sum_f8.f4[0] = FLOAT4_255;
     sum_f8.f4[1] = FLOAT4_255;
     if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
-        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx, &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
-    else
-    {
+        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
+                                         &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
+    else {
         // Nearest-neighbor padding
-        for (int i = 0; i < 8; i++)
-        {
+        for (int i = 0; i < 8; i++) {
             int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
             int clampedIdx = (id_z * srcStridesNCH.x) + (clampedY * srcStridesNCH.z) + clampedX;
-            src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];  // Load nearest pixel
+            src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] =
+                srcPtr[clampedIdx];  // Load nearest pixel
         }
     }
     __syncthreads();
-    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) && (hipThreadIdx_y < tileSize.y))
-    {
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y    ][hipThreadIdx_x8], &sum_f8);
+    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+        (hipThreadIdx_y < tileSize.y)) {
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y][hipThreadIdx_x8], &sum_f8);
         erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y + 1][hipThreadIdx_x8], &sum_f8);
         erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y + 2][hipThreadIdx_x8], &sum_f8);
         erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y + 3][hipThreadIdx_x8], &sum_f8);
@@ -552,29 +589,29 @@ __global__ void erode_5x5_pln_hip_tensor(T *srcPtr,
         rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &sum_f8);
     }
 
-    if (channelsDst == 3)
-    {
+    if (channelsDst == 3) {
         __syncthreads();
         srcIdx += srcStridesNCH.y;
         dstIdx += dstStridesNCH.y;
         sum_f8.f4[0] = FLOAT4_255;
         sum_f8.f4[1] = FLOAT4_255;
         if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
-            FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx, &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
-        else
-        {
+            FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
+                                             &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
+        else {
             // Nearest-neighbor padding
-            for (int i = 0; i < 8; i++)
-            {
+            for (int i = 0; i < 8; i++) {
                 int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
-                int clampedIdx = (id_z * srcStridesNCH.x) + srcStridesNCH.y + (clampedY * srcStridesNCH.z) + clampedX;
-                src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];  // Load nearest pixel
+                int clampedIdx = (id_z * srcStridesNCH.x) + srcStridesNCH.y +
+                                 (clampedY * srcStridesNCH.z) + clampedX;
+                src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] =
+                    srcPtr[clampedIdx];  // Load nearest pixel
             }
         }
         __syncthreads();
-        if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) && (hipThreadIdx_y < tileSize.y))
-        {
-            erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y    ][hipThreadIdx_x8], &sum_f8);
+        if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+            (hipThreadIdx_y < tileSize.y)) {
+            erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y][hipThreadIdx_x8], &sum_f8);
             erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y + 1][hipThreadIdx_x8], &sum_f8);
             erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y + 2][hipThreadIdx_x8], &sum_f8);
             erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y + 3][hipThreadIdx_x8], &sum_f8);
@@ -588,21 +625,22 @@ __global__ void erode_5x5_pln_hip_tensor(T *srcPtr,
         sum_f8.f4[0] = FLOAT4_255;
         sum_f8.f4[1] = FLOAT4_255;
         if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
-            FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx, &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
-        else
-        {
+            FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
+                                             &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
+        else {
             // Nearest-neighbor padding
-            for (int i = 0; i < 8; i++)
-            {
+            for (int i = 0; i < 8; i++) {
                 int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
-                int clampedIdx = (id_z * srcStridesNCH.x) + (2 * srcStridesNCH.y) + (clampedY * srcStridesNCH.z) + clampedX;
-                src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];  // Load nearest pixel
+                int clampedIdx = (id_z * srcStridesNCH.x) + (2 * srcStridesNCH.y) +
+                                 (clampedY * srcStridesNCH.z) + clampedX;
+                src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] =
+                    srcPtr[clampedIdx];  // Load nearest pixel
             }
         }
         __syncthreads();
-        if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) && (hipThreadIdx_y < tileSize.y))
-        {
-            erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y    ][hipThreadIdx_x8], &sum_f8);
+        if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+            (hipThreadIdx_y < tileSize.y)) {
+            erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y][hipThreadIdx_x8], &sum_f8);
             erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y + 1][hipThreadIdx_x8], &sum_f8);
             erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y + 2][hipThreadIdx_x8], &sum_f8);
             erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y + 3][hipThreadIdx_x8], &sum_f8);
@@ -614,15 +652,9 @@ __global__ void erode_5x5_pln_hip_tensor(T *srcPtr,
 
 // kernelSize = 7
 template <typename T>
-__global__ void erode_7x7_pln_hip_tensor(T *srcPtr,
-                                         uint3 srcStridesNCH,
-                                         T *dstPtr,
-                                         uint3 dstStridesNCH,
-                                         int channelsDst,
-                                         uint padLength,
-                                         uint2 tileSize,
-                                         RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void erode_7x7_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
+                                         uint3 dstStridesNCH, int channelsDst, uint padLength,
+                                         uint2 tileSize, RpptROIPtr roiTensorPtrSrc) {
     int hipThreadIdx_x8 = hipThreadIdx_x << 3;
     int id_x_o = (hipBlockIdx_x * tileSize.x * 8) + hipThreadIdx_x8;
     int id_y_o = hipBlockIdx_y * tileSize.y + hipThreadIdx_y;
@@ -640,26 +672,27 @@ __global__ void erode_7x7_pln_hip_tensor(T *srcPtr,
     using SharedType = typename FilterDispatch<T>::SharedType;
     __shared__ SharedType src_smem[SMEM_LENGTH_Y_1C][SMEM_LENGTH_X];
 
-    int srcIdx = (id_z * srcStridesNCH.x) + ((id_y_i + roiBeginY) * srcStridesNCH.z) + (id_x_i + roiBeginX);
+    int srcIdx =
+        (id_z * srcStridesNCH.x) + ((id_y_i + roiBeginY) * srcStridesNCH.z) + (id_x_i + roiBeginX);
     int dstIdx = (id_z * dstStridesNCH.x) + (id_y_o * dstStridesNCH.z) + id_x_o;
     sum_f8.f4[0] = FLOAT4_255;
     sum_f8.f4[1] = FLOAT4_255;
     if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
-        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx, &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
-    else
-    {
+        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
+                                         &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
+    else {
         // Nearest-neighbor padding
-        for (int i = 0; i < 8; i++)
-        {
+        for (int i = 0; i < 8; i++) {
             int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
             int clampedIdx = (id_z * srcStridesNCH.x) + (clampedY * srcStridesNCH.z) + clampedX;
-            src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];  // Load nearest pixel
+            src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] =
+                srcPtr[clampedIdx];  // Load nearest pixel
         }
     }
     __syncthreads();
-    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) && (hipThreadIdx_y < tileSize.y))
-    {
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y    ][hipThreadIdx_x8], &sum_f8);
+    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+        (hipThreadIdx_y < tileSize.y)) {
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y][hipThreadIdx_x8], &sum_f8);
         erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y + 1][hipThreadIdx_x8], &sum_f8);
         erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y + 2][hipThreadIdx_x8], &sum_f8);
         erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y + 3][hipThreadIdx_x8], &sum_f8);
@@ -669,29 +702,29 @@ __global__ void erode_7x7_pln_hip_tensor(T *srcPtr,
         rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &sum_f8);
     }
 
-    if (channelsDst == 3)
-    {
+    if (channelsDst == 3) {
         __syncthreads();
         srcIdx += srcStridesNCH.y;
         dstIdx += dstStridesNCH.y;
         sum_f8.f4[0] = FLOAT4_255;
         sum_f8.f4[1] = FLOAT4_255;
         if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
-            FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx, &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
-        else
-        {
+            FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
+                                             &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
+        else {
             // Nearest-neighbor padding
-            for (int i = 0; i < 8; i++)
-            {
+            for (int i = 0; i < 8; i++) {
                 int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
-                int clampedIdx = (id_z * srcStridesNCH.x) + (srcStridesNCH.y) + (clampedY * srcStridesNCH.z) + clampedX;
-                src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];  // Load nearest pixel
+                int clampedIdx = (id_z * srcStridesNCH.x) + (srcStridesNCH.y) +
+                                 (clampedY * srcStridesNCH.z) + clampedX;
+                src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] =
+                    srcPtr[clampedIdx];  // Load nearest pixel
             }
         }
         __syncthreads();
-        if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) && (hipThreadIdx_y < tileSize.y))
-        {
-            erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y    ][hipThreadIdx_x8], &sum_f8);
+        if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+            (hipThreadIdx_y < tileSize.y)) {
+            erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y][hipThreadIdx_x8], &sum_f8);
             erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y + 1][hipThreadIdx_x8], &sum_f8);
             erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y + 2][hipThreadIdx_x8], &sum_f8);
             erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y + 3][hipThreadIdx_x8], &sum_f8);
@@ -707,21 +740,22 @@ __global__ void erode_7x7_pln_hip_tensor(T *srcPtr,
         sum_f8.f4[0] = FLOAT4_255;
         sum_f8.f4[1] = FLOAT4_255;
         if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
-            FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx, &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
-        else
-        {
+            FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
+                                             &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
+        else {
             // Nearest-neighbor padding
-            for (int i = 0; i < 8; i++)
-            {
+            for (int i = 0; i < 8; i++) {
                 int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
-                int clampedIdx = (id_z * srcStridesNCH.x) + (2 * srcStridesNCH.y) + (clampedY * srcStridesNCH.z) + clampedX;
-                src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];  // Load nearest pixel
+                int clampedIdx = (id_z * srcStridesNCH.x) + (2 * srcStridesNCH.y) +
+                                 (clampedY * srcStridesNCH.z) + clampedX;
+                src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] =
+                    srcPtr[clampedIdx];  // Load nearest pixel
             }
         }
         __syncthreads();
-        if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) && (hipThreadIdx_y < tileSize.y))
-        {
-            erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y    ][hipThreadIdx_x8], &sum_f8);
+        if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+            (hipThreadIdx_y < tileSize.y)) {
+            erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y][hipThreadIdx_x8], &sum_f8);
             erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y + 1][hipThreadIdx_x8], &sum_f8);
             erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y + 2][hipThreadIdx_x8], &sum_f8);
             erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y + 3][hipThreadIdx_x8], &sum_f8);
@@ -735,15 +769,9 @@ __global__ void erode_7x7_pln_hip_tensor(T *srcPtr,
 
 // kernelSize = 9
 template <typename T>
-__global__ void erode_9x9_pln_hip_tensor(T *srcPtr,
-                                     uint3 srcStridesNCH,
-                                     T *dstPtr,
-                                     uint3 dstStridesNCH,
-                                     int channelsDst,
-                                     uint padLength,
-                                     uint2 tileSize,
-                                     RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void erode_9x9_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
+                                         uint3 dstStridesNCH, int channelsDst, uint padLength,
+                                         uint2 tileSize, RpptROIPtr roiTensorPtrSrc) {
     int hipThreadIdx_x8 = hipThreadIdx_x << 3;
     int id_x_o = (hipBlockIdx_x * tileSize.x * 8) + hipThreadIdx_x8;
     int id_y_o = hipBlockIdx_y * tileSize.y + hipThreadIdx_y;
@@ -761,26 +789,27 @@ __global__ void erode_9x9_pln_hip_tensor(T *srcPtr,
     using SharedType = typename FilterDispatch<T>::SharedType;
     __shared__ SharedType src_smem[SMEM_LENGTH_Y_1C][SMEM_LENGTH_X];
 
-    int srcIdx = (id_z * srcStridesNCH.x) + ((id_y_i + roiBeginY) * srcStridesNCH.z) + (id_x_i + roiBeginX);
+    int srcIdx =
+        (id_z * srcStridesNCH.x) + ((id_y_i + roiBeginY) * srcStridesNCH.z) + (id_x_i + roiBeginX);
     int dstIdx = (id_z * dstStridesNCH.x) + (id_y_o * dstStridesNCH.z) + id_x_o;
     sum_f8.f4[0] = FLOAT4_255;
     sum_f8.f4[1] = FLOAT4_255;
     if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
-        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx, &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
-    else
-    {
+        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
+                                         &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
+    else {
         // Nearest-neighbor padding
-        for (int i = 0; i < 8; i++)
-        {
+        for (int i = 0; i < 8; i++) {
             int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
             int clampedIdx = (id_z * srcStridesNCH.x) + (clampedY * srcStridesNCH.z) + clampedX;
-            src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];  // Load nearest pixel
+            src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] =
+                srcPtr[clampedIdx];  // Load nearest pixel
         }
     }
     __syncthreads();
-    if((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) && (hipThreadIdx_y < tileSize.y))
-    {
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y    ][hipThreadIdx_x8], &sum_f8);
+    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+        (hipThreadIdx_y < tileSize.y)) {
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y][hipThreadIdx_x8], &sum_f8);
         erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y + 1][hipThreadIdx_x8], &sum_f8);
         erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y + 2][hipThreadIdx_x8], &sum_f8);
         erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y + 3][hipThreadIdx_x8], &sum_f8);
@@ -792,29 +821,29 @@ __global__ void erode_9x9_pln_hip_tensor(T *srcPtr,
         rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &sum_f8);
     }
 
-    if (channelsDst == 3)
-    {
+    if (channelsDst == 3) {
         __syncthreads();
         srcIdx += srcStridesNCH.y;
         dstIdx += dstStridesNCH.y;
         sum_f8.f4[0] = FLOAT4_255;
         sum_f8.f4[1] = FLOAT4_255;
         if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
-            FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx, &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
-        else
-        {
+            FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
+                                             &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
+        else {
             // Nearest-neighbor padding
-            for (int i = 0; i < 8; i++)
-            {
+            for (int i = 0; i < 8; i++) {
                 int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
-                int clampedIdx = (id_z * srcStridesNCH.x) + (srcStridesNCH.y) + (clampedY * srcStridesNCH.z) + clampedX;
-                src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];  // Load nearest pixel
+                int clampedIdx = (id_z * srcStridesNCH.x) + (srcStridesNCH.y) +
+                                 (clampedY * srcStridesNCH.z) + clampedX;
+                src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] =
+                    srcPtr[clampedIdx];  // Load nearest pixel
             }
         }
         __syncthreads();
-        if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) && (hipThreadIdx_y < tileSize.y))
-        {
-            erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y    ][hipThreadIdx_x8], &sum_f8);
+        if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+            (hipThreadIdx_y < tileSize.y)) {
+            erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y][hipThreadIdx_x8], &sum_f8);
             erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y + 1][hipThreadIdx_x8], &sum_f8);
             erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y + 2][hipThreadIdx_x8], &sum_f8);
             erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y + 3][hipThreadIdx_x8], &sum_f8);
@@ -832,21 +861,22 @@ __global__ void erode_9x9_pln_hip_tensor(T *srcPtr,
         sum_f8.f4[0] = FLOAT4_255;
         sum_f8.f4[1] = FLOAT4_255;
         if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
-            FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx, &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
-        else
-        {
+            FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
+                                             &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
+        else {
             // Nearest-neighbor padding
-            for (int i = 0; i < 8; i++)
-            {
+            for (int i = 0; i < 8; i++) {
                 int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
-                int clampedIdx = (id_z * srcStridesNCH.x) + (2 * srcStridesNCH.y) + (clampedY * srcStridesNCH.z) + clampedX;
-                src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];  // Load nearest pixel
+                int clampedIdx = (id_z * srcStridesNCH.x) + (2 * srcStridesNCH.y) +
+                                 (clampedY * srcStridesNCH.z) + clampedX;
+                src_smem[hipThreadIdx_y][hipThreadIdx_x8 + i] =
+                    srcPtr[clampedIdx];  // Load nearest pixel
             }
         }
         __syncthreads();
-        if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) && (hipThreadIdx_y < tileSize.y))
-        {
-            erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y    ][hipThreadIdx_x8], &sum_f8);
+        if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+            (hipThreadIdx_y < tileSize.y)) {
+            erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y][hipThreadIdx_x8], &sum_f8);
             erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y + 1][hipThreadIdx_x8], &sum_f8);
             erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y + 2][hipThreadIdx_x8], &sum_f8);
             erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y + 3][hipThreadIdx_x8], &sum_f8);
@@ -864,14 +894,9 @@ __global__ void erode_9x9_pln_hip_tensor(T *srcPtr,
 
 // kernelSize = 3
 template <typename T>
-__global__ void erode_3x3_pkd3_pln3_hip_tensor(T *srcPtr,
-                                               uint2 srcStridesNH,
-                                               T *dstPtr,
-                                               uint3 dstStridesNCH,
-                                               uint padLength,
-                                               uint2 tileSize,
-                                               RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void erode_3x3_pkd3_pln3_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr,
+                                               uint3 dstStridesNCH, uint padLength, uint2 tileSize,
+                                               RpptROIPtr roiTensorPtrSrc) {
     int hipThreadIdx_x8 = hipThreadIdx_x << 3;
     int id_x_o = (hipBlockIdx_x * tileSize.x * 8) + hipThreadIdx_x8;
     int id_y_o = hipBlockIdx_y * tileSize.y + hipThreadIdx_y;
@@ -889,7 +914,8 @@ __global__ void erode_3x3_pkd3_pln3_hip_tensor(T *srcPtr,
     using SharedType = typename FilterDispatch<T>::SharedType;
     __shared__ SharedType src_smem[SMEM_LENGTH_Y_3C][SMEM_LENGTH_X];
 
-    int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) + ((id_x_i + roiBeginX) * 3);
+    int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) +
+                 ((id_x_i + roiBeginX) * 3);
     int dstIdx = (id_z * dstStridesNCH.x) + (id_y_o * dstStridesNCH.z) + id_x_o;
     sum_f24.f4[0] = FLOAT4_255;
     sum_f24.f4[1] = FLOAT4_255;
@@ -903,54 +929,54 @@ __global__ void erode_3x3_pkd3_pln3_hip_tensor(T *srcPtr,
     hipThreadIdx_y_channel.y = hipThreadIdx_y + 16;
     hipThreadIdx_y_channel.z = hipThreadIdx_y + 32;
 
-    SharedType *src_smem_channel[3];
+    SharedType* src_smem_channel[3];
     src_smem_channel[0] = &src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8];
     src_smem_channel[1] = &src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8];
     src_smem_channel[2] = &src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8];
 
-    if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
-    {
+    if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight)) {
         FilterDispatch<T>::rpp_hip_load24_pkd3_to_pln3(srcPtr + srcIdx, src_smem_channel);
-    }
-    else
-    {
+    } else {
         // Nearest-neighbor padding
-        for (int i = 0; i < 8; i++)
-        {
+        for (int i = 0; i < 8; i++) {
             int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
             int clampedIdx = (id_z * srcStridesNH.x) + (clampedY * srcStridesNH.y) + (clampedX * 3);
 
-            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];     // R
-            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 1]; // G
-            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 2]; // B
+            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];      // R
+            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 1];  // G
+            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 2];  // B
         }
     }
     __syncthreads();
-    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) && (hipThreadIdx_y < tileSize.y))
-    {
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.x    ][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.y    ][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.z    ][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8], &sum_f24.f8[2]);
+    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+        (hipThreadIdx_y < tileSize.y)) {
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
         rpp_hip_pack_float24_pln3_and_store24_pln3(dstPtr + dstIdx, dstStridesNCH.y, &sum_f24);
     }
 }
 
 // kernelSize = 5
 template <typename T>
-__global__ void erode_5x5_pkd3_pln3_hip_tensor(T *srcPtr,
-                                           uint2 srcStridesNH,
-                                           T *dstPtr,
-                                           uint3 dstStridesNCH,
-                                           uint padLength,
-                                           uint2 tileSize,
-                                           RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void erode_5x5_pkd3_pln3_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr,
+                                               uint3 dstStridesNCH, uint padLength, uint2 tileSize,
+                                               RpptROIPtr roiTensorPtrSrc) {
     int hipThreadIdx_x8 = hipThreadIdx_x << 3;
     int id_x_o = (hipBlockIdx_x * tileSize.x * 8) + hipThreadIdx_x8;
     int id_y_o = hipBlockIdx_y * tileSize.y + hipThreadIdx_y;
@@ -968,7 +994,8 @@ __global__ void erode_5x5_pkd3_pln3_hip_tensor(T *srcPtr,
     using SharedType = typename FilterDispatch<T>::SharedType;
     __shared__ SharedType src_smem[SMEM_LENGTH_Y_3C][SMEM_LENGTH_X];
 
-    int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) + ((id_x_i + roiBeginX) * 3);
+    int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) +
+                 ((id_x_i + roiBeginX) * 3);
     int dstIdx = (id_z * dstStridesNCH.x) + (id_y_o * dstStridesNCH.z) + id_x_o;
     sum_f24.f4[0] = FLOAT4_255;
     sum_f24.f4[1] = FLOAT4_255;
@@ -982,60 +1009,66 @@ __global__ void erode_5x5_pkd3_pln3_hip_tensor(T *srcPtr,
     hipThreadIdx_y_channel.y = hipThreadIdx_y + 16;
     hipThreadIdx_y_channel.z = hipThreadIdx_y + 32;
 
-    SharedType *src_smem_channel[3];
+    SharedType* src_smem_channel[3];
     src_smem_channel[0] = &src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8];
     src_smem_channel[1] = &src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8];
     src_smem_channel[2] = &src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8];
 
-    if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
-    {
+    if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight)) {
         FilterDispatch<T>::rpp_hip_load24_pkd3_to_pln3(srcPtr + srcIdx, src_smem_channel);
-    }
-    else
-    {
+    } else {
         // Nearest-neighbor padding
-        for (int i = 0; i < 8; i++)
-        {
+        for (int i = 0; i < 8; i++) {
             int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
             int clampedIdx = (id_z * srcStridesNH.x) + (clampedY * srcStridesNH.y) + (clampedX * 3);
 
-            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];     // R
-            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 1]; // G
-            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 2]; // B
+            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];      // R
+            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 1];  // G
+            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 2];  // B
         }
     }
     __syncthreads();
-    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) && (hipThreadIdx_y < tileSize.y))
-    {
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x    ][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y    ][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z    ][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 3][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 3][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 3][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 4][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 4][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 4][hipThreadIdx_x8], &sum_f24.f8[2]);
+    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+        (hipThreadIdx_y < tileSize.y)) {
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
         rpp_hip_pack_float24_pln3_and_store24_pln3(dstPtr + dstIdx, dstStridesNCH.y, &sum_f24);
     }
 }
 
 // kernelSize = 7
 template <typename T>
-__global__ void erode_7x7_pkd3_pln3_hip_tensor(T *srcPtr,
-                                               uint2 srcStridesNH,
-                                               T *dstPtr,
-                                               uint3 dstStridesNCH,
-                                               uint padLength,
-                                               uint2 tileSize,
-                                               RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void erode_7x7_pkd3_pln3_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr,
+                                               uint3 dstStridesNCH, uint padLength, uint2 tileSize,
+                                               RpptROIPtr roiTensorPtrSrc) {
     int hipThreadIdx_x8 = hipThreadIdx_x << 3;
     int id_x_o = (hipBlockIdx_x * tileSize.x * 8) + hipThreadIdx_x8;
     int id_y_o = hipBlockIdx_y * tileSize.y + hipThreadIdx_y;
@@ -1053,7 +1086,8 @@ __global__ void erode_7x7_pkd3_pln3_hip_tensor(T *srcPtr,
     using SharedType = typename FilterDispatch<T>::SharedType;
     __shared__ SharedType src_smem[SMEM_LENGTH_Y_3C][SMEM_LENGTH_X];
 
-    int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) + ((id_x_i + roiBeginX) * 3);
+    int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) +
+                 ((id_x_i + roiBeginX) * 3);
     int dstIdx = (id_z * dstStridesNCH.x) + (id_y_o * dstStridesNCH.z) + id_x_o;
     sum_f24.f4[0] = FLOAT4_255;
     sum_f24.f4[1] = FLOAT4_255;
@@ -1067,66 +1101,78 @@ __global__ void erode_7x7_pkd3_pln3_hip_tensor(T *srcPtr,
     hipThreadIdx_y_channel.y = hipThreadIdx_y + 16;
     hipThreadIdx_y_channel.z = hipThreadIdx_y + 32;
 
-    SharedType *src_smem_channel[3];
+    SharedType* src_smem_channel[3];
     src_smem_channel[0] = &src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8];
     src_smem_channel[1] = &src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8];
     src_smem_channel[2] = &src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8];
 
-    if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
-    {
+    if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight)) {
         FilterDispatch<T>::rpp_hip_load24_pkd3_to_pln3(srcPtr + srcIdx, src_smem_channel);
-    }
-    else
-    {
+    } else {
         // Nearest-neighbor padding
-        for (int i = 0; i < 8; i++)
-        {
+        for (int i = 0; i < 8; i++) {
             int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
             int clampedIdx = (id_z * srcStridesNH.x) + (clampedY * srcStridesNH.y) + (clampedX * 3);
 
-            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];     // R
-            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 1]; // G
-            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 2]; // B
+            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];      // R
+            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 1];  // G
+            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 2];  // B
         }
     }
     __syncthreads();
-    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) && (hipThreadIdx_y < tileSize.y))
-    {
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x    ][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y    ][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z    ][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 3][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 3][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 3][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 4][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 4][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 4][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 5][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 5][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 5][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 6][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 6][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 6][hipThreadIdx_x8], &sum_f24.f8[2]);
+    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+        (hipThreadIdx_y < tileSize.y)) {
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 5][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 5][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 5][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 6][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 6][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 6][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
         rpp_hip_pack_float24_pln3_and_store24_pln3(dstPtr + dstIdx, dstStridesNCH.y, &sum_f24);
     }
 }
 
 // kernelSize = 9
 template <typename T>
-__global__ void erode_9x9_pkd3_pln3_hip_tensor(T *srcPtr,
-                                               uint2 srcStridesNH,
-                                               T *dstPtr,
-                                               uint3 dstStridesNCH,
-                                               uint padLength,
-                                               uint2 tileSize,
-                                               RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void erode_9x9_pkd3_pln3_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr,
+                                               uint3 dstStridesNCH, uint padLength, uint2 tileSize,
+                                               RpptROIPtr roiTensorPtrSrc) {
     int hipThreadIdx_x8 = hipThreadIdx_x << 3;
     int id_x_o = (hipBlockIdx_x * tileSize.x * 8) + hipThreadIdx_x8;
     int id_y_o = hipBlockIdx_y * tileSize.y + hipThreadIdx_y;
@@ -1144,7 +1190,8 @@ __global__ void erode_9x9_pkd3_pln3_hip_tensor(T *srcPtr,
     using SharedType = typename FilterDispatch<T>::SharedType;
     __shared__ SharedType src_smem[SMEM_LENGTH_Y_3C][SMEM_LENGTH_X];
 
-    int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) + ((id_x_i + roiBeginX) * 3);
+    int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) +
+                 ((id_x_i + roiBeginX) * 3);
     int dstIdx = (id_z * dstStridesNCH.x) + (id_y_o * dstStridesNCH.z) + id_x_o;
     sum_f24.f4[0] = FLOAT4_255;
     sum_f24.f4[1] = FLOAT4_255;
@@ -1158,58 +1205,81 @@ __global__ void erode_9x9_pkd3_pln3_hip_tensor(T *srcPtr,
     hipThreadIdx_y_channel.y = hipThreadIdx_y + 16;
     hipThreadIdx_y_channel.z = hipThreadIdx_y + 32;
 
-    SharedType *src_smem_channel[3];
+    SharedType* src_smem_channel[3];
     src_smem_channel[0] = &src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8];
     src_smem_channel[1] = &src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8];
     src_smem_channel[2] = &src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8];
 
-    if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
-    {
+    if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight)) {
         FilterDispatch<T>::rpp_hip_load24_pkd3_to_pln3(srcPtr + srcIdx, src_smem_channel);
-    }
-    else
-    {
+    } else {
         // Nearest-neighbor padding
-        for (int i = 0; i < 8; i++)
-        {
+        for (int i = 0; i < 8; i++) {
             int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
             int clampedIdx = (id_z * srcStridesNH.x) + (clampedY * srcStridesNH.y) + (clampedX * 3);
 
-            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];     // R
-            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 1]; // G
-            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 2]; // B
+            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];      // R
+            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 1];  // G
+            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx + 2];  // B
         }
     }
     __syncthreads();
-    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) && (hipThreadIdx_y < tileSize.y))
-    {
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x    ][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y    ][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z    ][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 3][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 3][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 3][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 4][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 4][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 4][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 5][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 5][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 5][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 6][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 6][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 6][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 7][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 7][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 7][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 8][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 8][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 8][hipThreadIdx_x8], &sum_f24.f8[2]);
+    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+        (hipThreadIdx_y < tileSize.y)) {
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 5][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 5][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 5][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 6][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 6][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 6][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 7][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 7][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 7][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 8][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 8][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 8][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
         rpp_hip_pack_float24_pln3_and_store24_pln3(dstPtr + dstIdx, dstStridesNCH.y, &sum_f24);
     }
 }
@@ -1218,14 +1288,9 @@ __global__ void erode_9x9_pkd3_pln3_hip_tensor(T *srcPtr,
 
 // kernelSize = 3
 template <typename T>
-__global__ void erode_3x3_pln3_pkd3_hip_tensor(T *srcPtr,
-                                           uint3 srcStridesNCH,
-                                           T *dstPtr,
-                                           uint2 dstStridesNH,
-                                           uint padLength,
-                                           uint2 tileSize,
-                                           RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void erode_3x3_pln3_pkd3_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
+                                               uint2 dstStridesNH, uint padLength, uint2 tileSize,
+                                               RpptROIPtr roiTensorPtrSrc) {
     int hipThreadIdx_x8 = hipThreadIdx_x << 3;
     int id_x_o = (hipBlockIdx_x * tileSize.x * 8) + hipThreadIdx_x8;
     int id_y_o = hipBlockIdx_y * tileSize.y + hipThreadIdx_y;
@@ -1244,7 +1309,8 @@ __global__ void erode_3x3_pln3_pkd3_hip_tensor(T *srcPtr,
     __shared__ SharedType src_smem[SMEM_LENGTH_Y_3C][SMEM_LENGTH_X];
 
     int3 srcIdx;
-    srcIdx.x = (id_z * srcStridesNCH.x) + ((id_y_i + roiBeginY) * srcStridesNCH.z) + (id_x_i + roiBeginX);
+    srcIdx.x =
+        (id_z * srcStridesNCH.x) + ((id_y_i + roiBeginY) * srcStridesNCH.z) + (id_x_i + roiBeginX);
     srcIdx.y = srcIdx.x + srcStridesNCH.y;
     srcIdx.z = srcIdx.y + srcStridesNCH.y;
     int dstIdx = (id_z * dstStridesNH.x) + (id_y_o * dstStridesNH.y) + id_x_o * 3;
@@ -1260,53 +1326,56 @@ __global__ void erode_3x3_pln3_pkd3_hip_tensor(T *srcPtr,
     hipThreadIdx_y_channel.y = hipThreadIdx_y + 16;
     hipThreadIdx_y_channel.z = hipThreadIdx_y + 32;
 
-    if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
-    {
-        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.x, &src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8]);
-        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.y, &src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8]);
-        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.z, &src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8]);
-    }
-    else
-    {
+    if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight)) {
+        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.x,
+                                         &src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8]);
+        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.y,
+                                         &src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8]);
+        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.z,
+                                         &src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8]);
+    } else {
         // Nearest-neighbor padding
-        for (int i = 0; i < 8; i++)
-        {
+        for (int i = 0; i < 8; i++) {
             int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
             int clampedIdx0 = (id_z * srcStridesNCH.x) + (clampedY * srcStridesNCH.z) + clampedX;
             int clampedIdx1 = clampedIdx0 + srcStridesNCH.y;
             int clampedIdx2 = clampedIdx1 + srcStridesNCH.y;
 
-            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx0]; // R
-            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx1]; // G
-            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx2]; // B
+            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx0];  // R
+            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx1];  // G
+            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx2];  // B
         }
     }
     __syncthreads();
-    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) && (hipThreadIdx_y < tileSize.y))
-    {
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.x    ][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.y    ][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.z    ][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8], &sum_f24.f8[2]);
+    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+        (hipThreadIdx_y < tileSize.y)) {
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
         rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &sum_f24);
     }
 }
 
 // kernelSize = 5
 template <typename T>
-__global__ void erode_5x5_pln3_pkd3_hip_tensor(T *srcPtr,
-                                               uint3 srcStridesNCH,
-                                               T *dstPtr,
-                                               uint2 dstStridesNH,
-                                               uint padLength,
-                                               uint2 tileSize,
-                                               RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void erode_5x5_pln3_pkd3_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
+                                               uint2 dstStridesNH, uint padLength, uint2 tileSize,
+                                               RpptROIPtr roiTensorPtrSrc) {
     int hipThreadIdx_x8 = hipThreadIdx_x << 3;
     int id_x_o = (hipBlockIdx_x * tileSize.x * 8) + hipThreadIdx_x8;
     int id_y_o = hipBlockIdx_y * tileSize.y + hipThreadIdx_y;
@@ -1325,7 +1394,8 @@ __global__ void erode_5x5_pln3_pkd3_hip_tensor(T *srcPtr,
     __shared__ SharedType src_smem[SMEM_LENGTH_Y_3C][SMEM_LENGTH_X];
 
     int3 srcIdx;
-    srcIdx.x = (id_z * srcStridesNCH.x) + ((id_y_i + roiBeginY) * srcStridesNCH.z) + (id_x_i + roiBeginX);
+    srcIdx.x =
+        (id_z * srcStridesNCH.x) + ((id_y_i + roiBeginY) * srcStridesNCH.z) + (id_x_i + roiBeginX);
     srcIdx.y = srcIdx.x + srcStridesNCH.y;
     srcIdx.z = srcIdx.y + srcStridesNCH.y;
     int dstIdx = (id_z * dstStridesNH.x) + (id_y_o * dstStridesNH.y) + id_x_o * 3;
@@ -1341,62 +1411,69 @@ __global__ void erode_5x5_pln3_pkd3_hip_tensor(T *srcPtr,
     hipThreadIdx_y_channel.y = hipThreadIdx_y + 16;
     hipThreadIdx_y_channel.z = hipThreadIdx_y + 32;
 
-    if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
-    {
-        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.x, &src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8]);
-        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.y, &src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8]);
-        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.z, &src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8]);
-    }
-    else
-    {
+    if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight)) {
+        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.x,
+                                         &src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8]);
+        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.y,
+                                         &src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8]);
+        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.z,
+                                         &src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8]);
+    } else {
         // Nearest-neighbor padding
-        for (int i = 0; i < 8; i++)
-        {
+        for (int i = 0; i < 8; i++) {
             int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
             int clampedIdx0 = (id_z * srcStridesNCH.x) + (clampedY * srcStridesNCH.z) + clampedX;
             int clampedIdx1 = clampedIdx0 + srcStridesNCH.y;
             int clampedIdx2 = clampedIdx1 + srcStridesNCH.y;
 
-            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx0]; // R
-            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx1]; // G
-            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx2]; // B
+            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx0];  // R
+            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx1];  // G
+            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx2];  // B
         }
     }
     __syncthreads();
     if ((id_x_o < roiTensorPtrSrc[id_z].xywhROI.roiWidth) &&
-        (id_y_o < roiTensorPtrSrc[id_z].xywhROI.roiHeight) &&
-        (hipThreadIdx_x < tileSize.x) &&
-        (hipThreadIdx_y < tileSize.y))
-    {
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x    ][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y    ][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z    ][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 3][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 3][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 3][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 4][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 4][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 4][hipThreadIdx_x8], &sum_f24.f8[2]);
+        (id_y_o < roiTensorPtrSrc[id_z].xywhROI.roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+        (hipThreadIdx_y < tileSize.y)) {
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.x + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.y + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
         rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &sum_f24);
     }
 }
 
 // kernelSize = 7
 template <typename T>
-__global__ void erode_7x7_pln3_pkd3_hip_tensor(T *srcPtr,
-                                               uint3 srcStridesNCH,
-                                               T *dstPtr,
-                                               uint2 dstStridesNH,
-                                               uint padLength,
-                                               uint2 tileSize,
-                                               RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void erode_7x7_pln3_pkd3_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
+                                               uint2 dstStridesNH, uint padLength, uint2 tileSize,
+                                               RpptROIPtr roiTensorPtrSrc) {
     int hipThreadIdx_x8 = hipThreadIdx_x << 3;
     int id_x_o = (hipBlockIdx_x * tileSize.x * 8) + hipThreadIdx_x8;
     int id_y_o = hipBlockIdx_y * tileSize.y + hipThreadIdx_y;
@@ -1415,7 +1492,8 @@ __global__ void erode_7x7_pln3_pkd3_hip_tensor(T *srcPtr,
     __shared__ SharedType src_smem[SMEM_LENGTH_Y_3C][SMEM_LENGTH_X];
 
     int3 srcIdx;
-    srcIdx.x = (id_z * srcStridesNCH.x) + ((id_y_i + roiBeginY) * srcStridesNCH.z) + (id_x_i + roiBeginX);
+    srcIdx.x =
+        (id_z * srcStridesNCH.x) + ((id_y_i + roiBeginY) * srcStridesNCH.z) + (id_x_i + roiBeginX);
     srcIdx.y = srcIdx.x + srcStridesNCH.y;
     srcIdx.z = srcIdx.y + srcStridesNCH.y;
     int dstIdx = (id_z * dstStridesNH.x) + (id_y_o * dstStridesNH.y) + id_x_o * 3;
@@ -1431,65 +1509,80 @@ __global__ void erode_7x7_pln3_pkd3_hip_tensor(T *srcPtr,
     hipThreadIdx_y_channel.y = hipThreadIdx_y + 16;
     hipThreadIdx_y_channel.z = hipThreadIdx_y + 32;
 
-    if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
-    {
-        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.x, &src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8]);
-        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.y, &src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8]);
-        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.z, &src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8]);
-    }
-    else
-    {
+    if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight)) {
+        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.x,
+                                         &src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8]);
+        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.y,
+                                         &src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8]);
+        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.z,
+                                         &src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8]);
+    } else {
         // Nearest-neighbor padding
-        for (int i = 0; i < 8; i++)
-        {
+        for (int i = 0; i < 8; i++) {
             int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
             int clampedIdx0 = (id_z * srcStridesNCH.x) + (clampedY * srcStridesNCH.z) + clampedX;
             int clampedIdx1 = clampedIdx0 + srcStridesNCH.y;
             int clampedIdx2 = clampedIdx1 + srcStridesNCH.y;
 
-            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx0]; // R
-            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx1]; // G
-            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx2]; // B
+            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx0];  // R
+            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx1];  // G
+            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx2];  // B
         }
     }
     __syncthreads();
-    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) && (hipThreadIdx_y < tileSize.y))
-    {
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x    ][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y    ][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z    ][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 3][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 3][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 3][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 4][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 4][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 4][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 5][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 5][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 5][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 6][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 6][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 6][hipThreadIdx_x8], &sum_f24.f8[2]);
+    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+        (hipThreadIdx_y < tileSize.y)) {
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 5][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 5][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 5][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.x + 6][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.y + 6][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 6][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
         rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &sum_f24);
     }
 }
 
 // kernelSize = 9
 template <typename T>
-__global__ void erode_9x9_pln3_pkd3_hip_tensor(T *srcPtr,
-                                               uint3 srcStridesNCH,
-                                               T *dstPtr,
-                                               uint2 dstStridesNH,
-                                               uint padLength,
-                                               uint2 tileSize,
-                                               RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void erode_9x9_pln3_pkd3_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
+                                               uint2 dstStridesNH, uint padLength, uint2 tileSize,
+                                               RpptROIPtr roiTensorPtrSrc) {
     int hipThreadIdx_x8 = hipThreadIdx_x << 3;
     int id_x_o = (hipBlockIdx_x * tileSize.x * 8) + hipThreadIdx_x8;
     int id_y_o = hipBlockIdx_y * tileSize.y + hipThreadIdx_y;
@@ -1508,7 +1601,8 @@ __global__ void erode_9x9_pln3_pkd3_hip_tensor(T *srcPtr,
     __shared__ SharedType src_smem[SMEM_LENGTH_Y_3C][SMEM_LENGTH_X];
 
     int3 srcIdx;
-    srcIdx.x = (id_z * srcStridesNCH.x) + ((id_y_i + roiBeginY) * srcStridesNCH.z) + (id_x_i + roiBeginX);
+    srcIdx.x =
+        (id_z * srcStridesNCH.x) + ((id_y_i + roiBeginY) * srcStridesNCH.z) + (id_x_i + roiBeginX);
     srcIdx.y = srcIdx.x + srcStridesNCH.y;
     srcIdx.z = srcIdx.y + srcStridesNCH.y;
     int dstIdx = (id_z * dstStridesNH.x) + (id_y_o * dstStridesNH.y) + id_x_o * 3;
@@ -1524,57 +1618,83 @@ __global__ void erode_9x9_pln3_pkd3_hip_tensor(T *srcPtr,
     hipThreadIdx_y_channel.y = hipThreadIdx_y + 16;
     hipThreadIdx_y_channel.z = hipThreadIdx_y + 32;
 
-    if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
-    {
-        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.x, &src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8]);
-        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.y, &src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8]);
-        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.z, &src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8]);
-    }
-    else
-    {
+    if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight)) {
+        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.x,
+                                         &src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8]);
+        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.y,
+                                         &src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8]);
+        FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx.z,
+                                         &src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8]);
+    } else {
         // Nearest-neighbor padding
-        for (int i = 0; i < 8; i++)
-        {
+        for (int i = 0; i < 8; i++) {
             int clampedX = roiBeginX + max(0, min(id_x_i + i, (roiWidth - 1)));
             int clampedIdx0 = (id_z * srcStridesNCH.x) + (clampedY * srcStridesNCH.z) + clampedX;
             int clampedIdx1 = clampedIdx0 + srcStridesNCH.y;
             int clampedIdx2 = clampedIdx1 + srcStridesNCH.y;
 
-            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx0]; // R
-            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx1]; // G
-            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx2]; // B
+            src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx0];  // R
+            src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8 + i] = srcPtr[clampedIdx1];  // G
+            src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8 + i] = srcPtr[clampedIdx2];  // B
         }
     }
     __syncthreads();
-    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) && (hipThreadIdx_y < tileSize.y))
-    {
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x    ][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y    ][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z    ][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 3][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 3][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 3][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 4][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 4][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 4][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 5][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 5][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 5][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 6][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 6][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 6][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 7][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 7][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 7][hipThreadIdx_x8], &sum_f24.f8[2]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 8][hipThreadIdx_x8], &sum_f24.f8[0]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 8][hipThreadIdx_x8], &sum_f24.f8[1]);
-        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 8][hipThreadIdx_x8], &sum_f24.f8[2]);
+    if ((id_x_o < roiWidth) && (id_y_o < roiHeight) && (hipThreadIdx_x < tileSize.x) &&
+        (hipThreadIdx_y < tileSize.y)) {
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 1][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 3][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 4][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 5][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 5][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 5][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 6][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 6][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 6][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 7][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 7][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 7][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.x + 8][hipThreadIdx_x8],
+                                 &sum_f24.f8[0]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.y + 8][hipThreadIdx_x8],
+                                 &sum_f24.f8[1]);
+        erode_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 8][hipThreadIdx_x8],
+                                 &sum_f24.f8[2]);
         rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &sum_f24);
     }
 }
@@ -1582,17 +1702,11 @@ __global__ void erode_9x9_pln3_pkd3_hip_tensor(T *srcPtr,
 // -------------------- Set 5 - Kernel Executors --------------------
 
 template <typename T>
-RppStatus hip_exec_erode_tensor(T *srcPtr,
-                                RpptDescPtr srcDescPtr,
-                                T *dstPtr,
-                                RpptDescPtr dstDescPtr,
-                                Rpp32u kernelSize,
-                                RpptROIPtr roiTensorPtrSrc,
-                                RpptRoiType roiType,
-                                rpp::Handle& handle)
-{
-    if (roiType == RpptRoiType::LTRB)
-        hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+RppStatus hip_exec_erode_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
+                                RpptDescPtr dstDescPtr, Rpp32u kernelSize,
+                                RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                rpp::Handle& handle) {
+    if (roiType == RpptRoiType::LTRB) hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
 
     int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;
@@ -1604,281 +1718,223 @@ RppStatus hip_exec_erode_tensor(T *srcPtr,
     tileSize.x = (128 - padLengthTwice) / 8;
     tileSize.y = 16 - padLengthTwice;
 
-    if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NHWC))
-    {
+    if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NHWC)) {
         globalThreads_x = (dstDescPtr->strides.hStride / 3 + 7) >> 3;
 
-        if (kernelSize == 3)
-        {
-            hipLaunchKernelGGL(erode_3x3_pkd_hip_tensor,
-                               dim3(ceil((float)globalThreads_x/tileSize.x), ceil((float)globalThreads_y/tileSize.y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                               0,
-                               handle.GetStream(),
-                               srcPtr,
-                               make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
-                               dstPtr,
-                               make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
-                               padLength,
-                               tileSize,
-                               roiTensorPtrSrc);
+        if (kernelSize == 3) {
+            hipLaunchKernelGGL(
+                erode_3x3_pkd_hip_tensor,
+                dim3(ceil((float)globalThreads_x / tileSize.x),
+                     ceil((float)globalThreads_y / tileSize.y),
+                     ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0, handle.GetStream(),
+                srcPtr, make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
+                dstPtr, make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
+                padLength, tileSize, roiTensorPtrSrc);
+            HIP_CHECK_LAUNCH_RETURN();
+        } else if (kernelSize == 5) {
+            hipLaunchKernelGGL(
+                erode_5x5_pkd_hip_tensor,
+                dim3(ceil((float)globalThreads_x / tileSize.x),
+                     ceil((float)globalThreads_y / tileSize.y),
+                     ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0, handle.GetStream(),
+                srcPtr, make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
+                dstPtr, make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
+                padLength, tileSize, roiTensorPtrSrc);
+            HIP_CHECK_LAUNCH_RETURN();
+        } else if (kernelSize == 7) {
+            hipLaunchKernelGGL(
+                erode_7x7_pkd_hip_tensor,
+                dim3(ceil((float)globalThreads_x / tileSize.x),
+                     ceil((float)globalThreads_y / tileSize.y),
+                     ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0, handle.GetStream(),
+                srcPtr, make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
+                dstPtr, make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
+                padLength, tileSize, roiTensorPtrSrc);
+            HIP_CHECK_LAUNCH_RETURN();
+        } else if (kernelSize == 9) {
+            hipLaunchKernelGGL(
+                erode_9x9_pkd_hip_tensor,
+                dim3(ceil((float)globalThreads_x / tileSize.x),
+                     ceil((float)globalThreads_y / tileSize.y),
+                     ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0, handle.GetStream(),
+                srcPtr, make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
+                dstPtr, make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
+                padLength, tileSize, roiTensorPtrSrc);
             HIP_CHECK_LAUNCH_RETURN();
         }
-        else if (kernelSize == 5)
-        {
-            hipLaunchKernelGGL(erode_5x5_pkd_hip_tensor,
-                               dim3(ceil((float)globalThreads_x/tileSize.x), ceil((float)globalThreads_y/tileSize.y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                               0,
-                               handle.GetStream(),
-                               srcPtr,
-                               make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
-                               dstPtr,
-                               make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
-                               padLength,
-                               tileSize,
-                               roiTensorPtrSrc);
-            HIP_CHECK_LAUNCH_RETURN();
-        }
-        else if (kernelSize == 7)
-        {
-            hipLaunchKernelGGL(erode_7x7_pkd_hip_tensor,
-                               dim3(ceil((float)globalThreads_x/tileSize.x), ceil((float)globalThreads_y/tileSize.y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                               0,
-                               handle.GetStream(),
-                               srcPtr,
-                               make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
-                               dstPtr,
-                               make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
-                               padLength,
-                               tileSize,
-                               roiTensorPtrSrc);
-            HIP_CHECK_LAUNCH_RETURN();
-        }
-        else if (kernelSize == 9)
-        {
-            hipLaunchKernelGGL(erode_9x9_pkd_hip_tensor,
-                               dim3(ceil((float)globalThreads_x/tileSize.x), ceil((float)globalThreads_y/tileSize.y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                               0,
-                               handle.GetStream(),
-                               srcPtr,
-                               make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
-                               dstPtr,
-                               make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
-                               padLength,
-                               tileSize,
-                               roiTensorPtrSrc);
-            HIP_CHECK_LAUNCH_RETURN();
-        }
-    }
-    else if ((srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW))
-    {
-        if (kernelSize == 3)
-        {
+    } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
+               (dstDescPtr->layout == RpptLayout::NCHW)) {
+        if (kernelSize == 3) {
             hipLaunchKernelGGL(erode_3x3_pln_hip_tensor,
-                               dim3(ceil((float)globalThreads_x/tileSize.x), ceil((float)globalThreads_y/tileSize.y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                               0,
-                               handle.GetStream(),
-                               srcPtr,
-                               make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride, srcDescPtr->strides.hStride),
+                               dim3(ceil((float)globalThreads_x / tileSize.x),
+                                    ceil((float)globalThreads_y / tileSize.y),
+                                    ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
+                               handle.GetStream(), srcPtr,
+                               make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride,
+                                          srcDescPtr->strides.hStride),
                                dstPtr,
-                               make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride, dstDescPtr->strides.hStride),
-                               dstDescPtr->c,
-                               padLength,
-                               tileSize,
-                               roiTensorPtrSrc);
+                               make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
+                                          dstDescPtr->strides.hStride),
+                               dstDescPtr->c, padLength, tileSize, roiTensorPtrSrc);
             HIP_CHECK_LAUNCH_RETURN();
-        }
-        else if (kernelSize == 5)
-        {
+        } else if (kernelSize == 5) {
             hipLaunchKernelGGL(erode_5x5_pln_hip_tensor,
-                               dim3(ceil((float)globalThreads_x/tileSize.x), ceil((float)globalThreads_y/tileSize.y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                               0,
-                               handle.GetStream(),
-                               srcPtr,
-                               make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride, srcDescPtr->strides.hStride),
+                               dim3(ceil((float)globalThreads_x / tileSize.x),
+                                    ceil((float)globalThreads_y / tileSize.y),
+                                    ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
+                               handle.GetStream(), srcPtr,
+                               make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride,
+                                          srcDescPtr->strides.hStride),
                                dstPtr,
-                               make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride, dstDescPtr->strides.hStride),
-                               dstDescPtr->c,
-                               padLength,
-                               tileSize,
-                               roiTensorPtrSrc);
+                               make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
+                                          dstDescPtr->strides.hStride),
+                               dstDescPtr->c, padLength, tileSize, roiTensorPtrSrc);
             HIP_CHECK_LAUNCH_RETURN();
-        }
-        else if (kernelSize == 7)
-        {
+        } else if (kernelSize == 7) {
             hipLaunchKernelGGL(erode_7x7_pln_hip_tensor,
-                               dim3(ceil((float)globalThreads_x/tileSize.x), ceil((float)globalThreads_y/tileSize.y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                               0,
-                               handle.GetStream(),
-                               srcPtr,
-                               make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride, srcDescPtr->strides.hStride),
+                               dim3(ceil((float)globalThreads_x / tileSize.x),
+                                    ceil((float)globalThreads_y / tileSize.y),
+                                    ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
+                               handle.GetStream(), srcPtr,
+                               make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride,
+                                          srcDescPtr->strides.hStride),
                                dstPtr,
-                               make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride, dstDescPtr->strides.hStride),
-                               dstDescPtr->c,
-                               padLength,
-                               tileSize,
-                               roiTensorPtrSrc);
+                               make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
+                                          dstDescPtr->strides.hStride),
+                               dstDescPtr->c, padLength, tileSize, roiTensorPtrSrc);
             HIP_CHECK_LAUNCH_RETURN();
-        }
-        else if (kernelSize == 9)
-        {
+        } else if (kernelSize == 9) {
             hipLaunchKernelGGL(erode_9x9_pln_hip_tensor,
-                               dim3(ceil((float)globalThreads_x/tileSize.x), ceil((float)globalThreads_y/tileSize.y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                               0,
-                               handle.GetStream(),
-                               srcPtr,
-                               make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride, srcDescPtr->strides.hStride),
+                               dim3(ceil((float)globalThreads_x / tileSize.x),
+                                    ceil((float)globalThreads_y / tileSize.y),
+                                    ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
+                               handle.GetStream(), srcPtr,
+                               make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride,
+                                          srcDescPtr->strides.hStride),
                                dstPtr,
-                               make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride, dstDescPtr->strides.hStride),
-                               dstDescPtr->c,
-                               padLength,
-                               tileSize,
-                               roiTensorPtrSrc);
+                               make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
+                                          dstDescPtr->strides.hStride),
+                               dstDescPtr->c, padLength, tileSize, roiTensorPtrSrc);
             HIP_CHECK_LAUNCH_RETURN();
         }
-    }
-    else if ((srcDescPtr->c == 3) && (dstDescPtr->c == 3))
-    {
-        if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
-            if (kernelSize == 3)
-            {
-                hipLaunchKernelGGL(erode_3x3_pkd3_pln3_hip_tensor,
-                                   dim3(ceil((float)globalThreads_x/tileSize.x), ceil((float)globalThreads_y/tileSize.y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                                   dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                                   0,
-                                   handle.GetStream(),
-                                   srcPtr,
-                                   make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
-                                   dstPtr,
-                                   make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride, dstDescPtr->strides.hStride),
-                                   padLength,
-                                   tileSize,
-                                   roiTensorPtrSrc);
+    } else if ((srcDescPtr->c == 3) && (dstDescPtr->c == 3)) {
+        if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW)) {
+            if (kernelSize == 3) {
+                hipLaunchKernelGGL(
+                    erode_3x3_pkd3_pln3_hip_tensor,
+                    dim3(ceil((float)globalThreads_x / tileSize.x),
+                         ceil((float)globalThreads_y / tileSize.y),
+                         ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                    dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0, handle.GetStream(),
+                    srcPtr, make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
+                    dstPtr,
+                    make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
+                               dstDescPtr->strides.hStride),
+                    padLength, tileSize, roiTensorPtrSrc);
+                HIP_CHECK_LAUNCH_RETURN();
+            } else if (kernelSize == 5) {
+                hipLaunchKernelGGL(
+                    erode_5x5_pkd3_pln3_hip_tensor,
+                    dim3(ceil((float)globalThreads_x / tileSize.x),
+                         ceil((float)globalThreads_y / tileSize.y),
+                         ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                    dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0, handle.GetStream(),
+                    srcPtr, make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
+                    dstPtr,
+                    make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
+                               dstDescPtr->strides.hStride),
+                    padLength, tileSize, roiTensorPtrSrc);
+                HIP_CHECK_LAUNCH_RETURN();
+            } else if (kernelSize == 7) {
+                hipLaunchKernelGGL(
+                    erode_7x7_pkd3_pln3_hip_tensor,
+                    dim3(ceil((float)globalThreads_x / tileSize.x),
+                         ceil((float)globalThreads_y / tileSize.y),
+                         ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                    dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0, handle.GetStream(),
+                    srcPtr, make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
+                    dstPtr,
+                    make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
+                               dstDescPtr->strides.hStride),
+                    padLength, tileSize, roiTensorPtrSrc);
+                HIP_CHECK_LAUNCH_RETURN();
+            } else if (kernelSize == 9) {
+                hipLaunchKernelGGL(
+                    erode_9x9_pkd3_pln3_hip_tensor,
+                    dim3(ceil((float)globalThreads_x / tileSize.x),
+                         ceil((float)globalThreads_y / tileSize.y),
+                         ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                    dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0, handle.GetStream(),
+                    srcPtr, make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
+                    dstPtr,
+                    make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
+                               dstDescPtr->strides.hStride),
+                    padLength, tileSize, roiTensorPtrSrc);
                 HIP_CHECK_LAUNCH_RETURN();
             }
-            else if (kernelSize == 5)
-            {
-                hipLaunchKernelGGL(erode_5x5_pkd3_pln3_hip_tensor,
-                                   dim3(ceil((float)globalThreads_x/tileSize.x), ceil((float)globalThreads_y/tileSize.y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                                   dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                                   0,
-                                   handle.GetStream(),
-                                   srcPtr,
-                                   make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
-                                   dstPtr,
-                                   make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride, dstDescPtr->strides.hStride),
-                                   padLength,
-                                   tileSize,
-                                   roiTensorPtrSrc);
-                HIP_CHECK_LAUNCH_RETURN();
-            }
-            else if (kernelSize == 7)
-            {
-                hipLaunchKernelGGL(erode_7x7_pkd3_pln3_hip_tensor,
-                                   dim3(ceil((float)globalThreads_x/tileSize.x), ceil((float)globalThreads_y/tileSize.y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                                   dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                                   0,
-                                   handle.GetStream(),
-                                   srcPtr,
-                                   make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
-                                   dstPtr,
-                                   make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride, dstDescPtr->strides.hStride),
-                                   padLength,
-                                   tileSize,
-                                   roiTensorPtrSrc);
-                HIP_CHECK_LAUNCH_RETURN();
-            }
-            else if (kernelSize == 9)
-            {
-                hipLaunchKernelGGL(erode_9x9_pkd3_pln3_hip_tensor,
-                                   dim3(ceil((float)globalThreads_x/tileSize.x), ceil((float)globalThreads_y/tileSize.y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                                   dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                                   0,
-                                   handle.GetStream(),
-                                   srcPtr,
-                                   make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
-                                   dstPtr,
-                                   make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride, dstDescPtr->strides.hStride),
-                                   padLength,
-                                   tileSize,
-                                   roiTensorPtrSrc);
-                HIP_CHECK_LAUNCH_RETURN();
-            }
-        }
-        else if ((srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
+        } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
+                   (dstDescPtr->layout == RpptLayout::NHWC)) {
             globalThreads_x = (srcDescPtr->strides.hStride + 7) >> 3;
 
-            if (kernelSize == 3)
-            {
-                hipLaunchKernelGGL(erode_3x3_pln3_pkd3_hip_tensor,
-                                   dim3(ceil((float)globalThreads_x/tileSize.x), ceil((float)globalThreads_y/tileSize.y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                                   dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                                   0,
-                                   handle.GetStream(),
-                                   srcPtr,
-                                   make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride, srcDescPtr->strides.hStride),
-                                   dstPtr,
-                                   make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
-                                   padLength,
-                                   tileSize,
-                                   roiTensorPtrSrc);
+            if (kernelSize == 3) {
+                hipLaunchKernelGGL(
+                    erode_3x3_pln3_pkd3_hip_tensor,
+                    dim3(ceil((float)globalThreads_x / tileSize.x),
+                         ceil((float)globalThreads_y / tileSize.y),
+                         ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                    dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0, handle.GetStream(),
+                    srcPtr,
+                    make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride,
+                               srcDescPtr->strides.hStride),
+                    dstPtr, make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
+                    padLength, tileSize, roiTensorPtrSrc);
                 HIP_CHECK_LAUNCH_RETURN();
-            }
-            else if (kernelSize == 5)
-            {
-                hipLaunchKernelGGL(erode_5x5_pln3_pkd3_hip_tensor,
-                                   dim3(ceil((float)globalThreads_x/tileSize.x), ceil((float)globalThreads_y/tileSize.y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                                   dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                                   0,
-                                   handle.GetStream(),
-                                   srcPtr,
-                                   make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride, srcDescPtr->strides.hStride),
-                                   dstPtr,
-                                   make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
-                                   padLength,
-                                   tileSize,
-                                   roiTensorPtrSrc);
+            } else if (kernelSize == 5) {
+                hipLaunchKernelGGL(
+                    erode_5x5_pln3_pkd3_hip_tensor,
+                    dim3(ceil((float)globalThreads_x / tileSize.x),
+                         ceil((float)globalThreads_y / tileSize.y),
+                         ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                    dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0, handle.GetStream(),
+                    srcPtr,
+                    make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride,
+                               srcDescPtr->strides.hStride),
+                    dstPtr, make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
+                    padLength, tileSize, roiTensorPtrSrc);
                 HIP_CHECK_LAUNCH_RETURN();
-            }
-            else if (kernelSize == 7)
-            {
-                hipLaunchKernelGGL(erode_7x7_pln3_pkd3_hip_tensor,
-                                   dim3(ceil((float)globalThreads_x/tileSize.x), ceil((float)globalThreads_y/tileSize.y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                                   dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                                   0,
-                                   handle.GetStream(),
-                                   srcPtr,
-                                   make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride, srcDescPtr->strides.hStride),
-                                   dstPtr,
-                                   make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
-                                   padLength,
-                                   tileSize,
-                                   roiTensorPtrSrc);
+            } else if (kernelSize == 7) {
+                hipLaunchKernelGGL(
+                    erode_7x7_pln3_pkd3_hip_tensor,
+                    dim3(ceil((float)globalThreads_x / tileSize.x),
+                         ceil((float)globalThreads_y / tileSize.y),
+                         ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                    dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0, handle.GetStream(),
+                    srcPtr,
+                    make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride,
+                               srcDescPtr->strides.hStride),
+                    dstPtr, make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
+                    padLength, tileSize, roiTensorPtrSrc);
                 HIP_CHECK_LAUNCH_RETURN();
-            }
-            else if (kernelSize == 9)
-            {
-                hipLaunchKernelGGL(erode_9x9_pln3_pkd3_hip_tensor,
-                                   dim3(ceil((float)globalThreads_x/tileSize.x), ceil((float)globalThreads_y/tileSize.y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                                   dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                                   0,
-                                   handle.GetStream(),
-                                   srcPtr,
-                                   make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride, srcDescPtr->strides.hStride),
-                                   dstPtr,
-                                   make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
-                                   padLength,
-                                   tileSize,
-                                   roiTensorPtrSrc);
+            } else if (kernelSize == 9) {
+                hipLaunchKernelGGL(
+                    erode_9x9_pln3_pkd3_hip_tensor,
+                    dim3(ceil((float)globalThreads_x / tileSize.x),
+                         ceil((float)globalThreads_y / tileSize.y),
+                         ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                    dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0, handle.GetStream(),
+                    srcPtr,
+                    make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride,
+                               srcDescPtr->strides.hStride),
+                    dstPtr, make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
+                    padLength, tileSize, roiTensorPtrSrc);
                 HIP_CHECK_LAUNCH_RETURN();
             }
         }
@@ -1887,38 +1943,14 @@ RppStatus hip_exec_erode_tensor(T *srcPtr,
     return RPP_SUCCESS;
 }
 
-template RppStatus hip_exec_erode_tensor<Rpp8u>(Rpp8u*,
-                                                RpptDescPtr,
-                                                Rpp8u*,
-                                                RpptDescPtr,
-                                                Rpp32u,
-                                                RpptROIPtr,
-                                                RpptRoiType,
-                                                rpp::Handle&);
+template RppStatus hip_exec_erode_tensor<Rpp8u>(Rpp8u*, RpptDescPtr, Rpp8u*, RpptDescPtr, Rpp32u,
+                                                RpptROIPtr, RpptRoiType, rpp::Handle&);
 
-template RppStatus hip_exec_erode_tensor<half>(half*,
-                                               RpptDescPtr,
-                                               half*,
-                                               RpptDescPtr,
-                                               Rpp32u,
-                                               RpptROIPtr,
-                                               RpptRoiType,
-                                               rpp::Handle&);
+template RppStatus hip_exec_erode_tensor<half>(half*, RpptDescPtr, half*, RpptDescPtr, Rpp32u,
+                                               RpptROIPtr, RpptRoiType, rpp::Handle&);
 
-template RppStatus hip_exec_erode_tensor<Rpp32f>(Rpp32f*,
-                                                 RpptDescPtr,
-                                                 Rpp32f*,
-                                                 RpptDescPtr,
-                                                 Rpp32u,
-                                                 RpptROIPtr,
-                                                 RpptRoiType,
-                                                 rpp::Handle&);
+template RppStatus hip_exec_erode_tensor<Rpp32f>(Rpp32f*, RpptDescPtr, Rpp32f*, RpptDescPtr, Rpp32u,
+                                                 RpptROIPtr, RpptRoiType, rpp::Handle&);
 
-template RppStatus hip_exec_erode_tensor<Rpp8s>(Rpp8s*,
-                                                RpptDescPtr,
-                                                Rpp8s*,
-                                                RpptDescPtr,
-                                                Rpp32u,
-                                                RpptROIPtr,
-                                                RpptRoiType,
-                                                rpp::Handle&);
+template RppStatus hip_exec_erode_tensor<Rpp8s>(Rpp8s*, RpptDescPtr, Rpp8s*, RpptDescPtr, Rpp32u,
+                                                RpptROIPtr, RpptRoiType, rpp::Handle&);

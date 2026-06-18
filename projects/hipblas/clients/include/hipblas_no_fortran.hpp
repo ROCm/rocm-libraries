@@ -48,6 +48,10 @@
 #define hipblasGetMatrixAsyncFortran hipblasGetMatrixAsync
 #define hipblasSetAtomicsModeFortran hipblasSetAtomicsMode
 #define hipblasGetAtomicsModeFortran hipblasGetAtomicsMode
+#define hipblasSetBatchAlphaStrideFortran hipblasSetBatchAlphaStride
+#define hipblasGetBatchAlphaStrideFortran hipblasGetBatchAlphaStride
+#define hipblasSetBatchBetaStrideFortran hipblasSetBatchBetaStride
+#define hipblasGetBatchBetaStrideFortran hipblasGetBatchBetaStride
 
 /* ==========
  *    L1

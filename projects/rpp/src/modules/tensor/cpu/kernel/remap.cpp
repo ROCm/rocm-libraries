@@ -26,18 +26,20 @@ SOFTWARE.
 #include "rpp_cpu_geometric.hpp"
 #include "rpp_cpu_interpolation.hpp"
 
-inline void compute_remap_src_loc_sse(Rpp32f *rowRemapTablePtr, Rpp32f *colRemapTablePtr, Rpp32s *locArray, __m128 &pStride, __m128 &pWidthLimit, __m128 &pHeightLimit, const __m128 &pChannel = xmm_p1)
-{
+inline void compute_remap_src_loc_sse(Rpp32f* rowRemapTablePtr, Rpp32f* colRemapTablePtr,
+                                      Rpp32s* locArray, __m128& pStride, __m128& pWidthLimit,
+                                      __m128& pHeightLimit, const __m128& pChannel = xmm_p1) {
     __m128 pRowRemapVal = _mm_loadu_ps(rowRemapTablePtr);
     pRowRemapVal = _mm_max_ps(_mm_min_ps(pRowRemapVal, pHeightLimit), xmm_p0);
     __m128 pColRemapVal = _mm_loadu_ps(colRemapTablePtr);
     pColRemapVal = _mm_max_ps(_mm_min_ps(pColRemapVal, pWidthLimit), xmm_p0);
-    __m128i pxRemappedSrcLoc = _mm_cvtps_epi32(_mm_fmadd_ps(pRowRemapVal, pStride, _mm_mul_ps(pColRemapVal, pChannel)));
-    _mm_storeu_si128((__m128i*) locArray, pxRemappedSrcLoc);
+    __m128i pxRemappedSrcLoc =
+        _mm_cvtps_epi32(_mm_fmadd_ps(pRowRemapVal, pStride, _mm_mul_ps(pColRemapVal, pChannel)));
+    _mm_storeu_si128((__m128i*)locArray, pxRemappedSrcLoc);
 }
 
-inline void compute_remap_src_loc(Rpp32f rowLoc, Rpp32f colLoc, Rpp32s &srcLoc, Rpp32s stride, Rpp32f widthLimit, Rpp32f heightLimit, Rpp32s channels = 1)
-{
+inline void compute_remap_src_loc(Rpp32f rowLoc, Rpp32f colLoc, Rpp32s& srcLoc, Rpp32s stride,
+                                  Rpp32f widthLimit, Rpp32f heightLimit, Rpp32s channels = 1) {
     rowLoc = std::max(0.0f, std::min(rowLoc, heightLimit));
     colLoc = std::max(0.0f, std::min(colLoc, widthLimit));
     srcLoc = (rowLoc * stride) + colLoc * channels;
@@ -45,27 +47,19 @@ inline void compute_remap_src_loc(Rpp32f rowLoc, Rpp32f colLoc, Rpp32s &srcLoc, 
 
 /************* NEAREST NEIGHBOR INTERPOLATION *************/
 
-RppStatus remap_nn_u8_u8_host_tensor(Rpp8u *srcPtr,
-                                     RpptDescPtr srcDescPtr,
-                                     Rpp8u *dstPtr,
-                                     RpptDescPtr dstDescPtr,
-                                     Rpp32f *rowRemapTable,
-                                     Rpp32f *colRemapTable,
-                                     RpptDescPtr remapTableDescPtr,
-                                     RpptROIPtr roiTensorPtrSrc,
-                                     RpptRoiType roiType,
-                                     RppLayoutParams layoutParams,
-                                     rpp::Handle& handle)
-{
+RppStatus remap_nn_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* dstPtr,
+                                     RpptDescPtr dstDescPtr, Rpp32f* rowRemapTable,
+                                     Rpp32f* colRemapTable, RpptDescPtr remapTableDescPtr,
+                                     RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                     RppLayoutParams layoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     __m128 pSrcChannel = _mm_set1_ps(srcDescPtr->c);
     __m128 pSrcStride = _mm_set1_ps(srcDescPtr->strides.hStride);
 
-omp_set_dynamic(0);
-omp_set_num_threads(handle.GetNumThreads());
+    omp_set_dynamic(0);
+    omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-    for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
@@ -73,32 +67,33 @@ omp_set_num_threads(handle.GetNumThreads());
         Rpp8u *srcPtrChannel, *dstPtrChannel, *srcPtrImage, *dstPtrImage;
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) + (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
         dstPtrChannel = dstPtrImage;
 
         Rpp32f *rowRemapTableImage, *colRemapTableImage;
         rowRemapTableImage = rowRemapTable + batchCount * remapTableDescPtr->strides.nStride;
         colRemapTableImage = colRemapTable + batchCount * remapTableDescPtr->strides.nStride;
-        Rpp32u alignedLength = roi.xywhROI.roiWidth & ~3;   // Align dst width to process 4 dst pixels per iteration
+        Rpp32u alignedLength =
+            roi.xywhROI.roiWidth & ~3;  // Align dst width to process 4 dst pixels per iteration
         Rpp32s vectorIncrementPerChannel = 4;
         Rpp32s vectorIncrement = 12;
         Rpp32s remappedSrcLoc;
-        Rpp32s remapSrcLocArray[4] = {0};     // Since 4 dst pixels are processed per iteration
+        Rpp32s remapSrcLocArray[4] = {0};  // Since 4 dst pixels are processed per iteration
         Rpp32f widthLimit = roi.xywhROI.roiWidth - 1;
         Rpp32f heightLimit = roi.xywhROI.roiHeight - 1;
         __m128 pWidthLimit = _mm_set1_ps(widthLimit);
         __m128 pHeightLimit = _mm_set1_ps(heightLimit);
 
         // Remap with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+            (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp8u *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
                 Rpp8u *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 dstPtrTempR = dstPtrRowR;
                 dstPtrTempG = dstPtrRowG;
@@ -108,21 +103,26 @@ omp_set_num_threads(handle.GetNumThreads());
                 colRemapTableTemp = colRemapTableImage;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m128i pxRow;
-                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp, remapSrcLocArray, pSrcStride, pWidthLimit, pHeightLimit, pSrcChannel);
-                    rpp_simd_load(rpp_resize_nn_load_u8pkd3, srcPtrChannel, remapSrcLocArray, pxRow);
-                    rpp_simd_store(rpp_store12_u8pkd3_to_u8pln3, dstPtrTempR, dstPtrTempG, dstPtrTempB, pxRow);
+                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp,
+                                              remapSrcLocArray, pSrcStride, pWidthLimit,
+                                              pHeightLimit, pSrcChannel);
+                    rpp_simd_load(rpp_resize_nn_load_u8pkd3, srcPtrChannel, remapSrcLocArray,
+                                  pxRow);
+                    rpp_simd_store(rpp_store12_u8pkd3_to_u8pln3, dstPtrTempR, dstPtrTempG,
+                                   dstPtrTempB, pxRow);
                     dstPtrTempR += vectorIncrementPerChannel;
                     dstPtrTempG += vectorIncrementPerChannel;
                     dstPtrTempB += vectorIncrementPerChannel;
                     rowRemapTableTemp += vectorIncrementPerChannel;
                     colRemapTableTemp += vectorIncrementPerChannel;
                 }
-                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                {
-                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++, remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit, heightLimit, srcDescPtr->c);
+                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++) {
+                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++,
+                                          remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit,
+                                          heightLimit, srcDescPtr->c);
                     *dstPtrTempR++ = *(srcPtrChannel + remappedSrcLoc);
                     *dstPtrTempG++ = *(srcPtrChannel + 1 + remappedSrcLoc);
                     *dstPtrTempB++ = *(srcPtrChannel + 2 + remappedSrcLoc);
@@ -136,39 +136,44 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
             Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB;
             srcPtrRowR = srcPtrChannel;
             srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
             srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            Rpp8u *dstPtrRow;
+            Rpp8u* dstPtrRow;
             dstPtrRow = dstPtrChannel;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
-                Rpp8u *dstPtrTemp;
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
+                Rpp8u* dstPtrTemp;
                 dstPtrTemp = dstPtrRow;
                 Rpp32f *rowRemapTableTemp, *colRemapTableTemp;
                 rowRemapTableTemp = rowRemapTableImage;
                 colRemapTableTemp = colRemapTableImage;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m128i pxRow[3];
-                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp, remapSrcLocArray, pSrcStride, pWidthLimit, pHeightLimit);
-                    rpp_simd_load(rpp_resize_nn_load_u8pln1, srcPtrRowR, remapSrcLocArray, pxRow[0]);
-                    rpp_simd_load(rpp_resize_nn_load_u8pln1, srcPtrRowG, remapSrcLocArray, pxRow[1]);
-                    rpp_simd_load(rpp_resize_nn_load_u8pln1, srcPtrRowB, remapSrcLocArray, pxRow[2]);
+                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp,
+                                              remapSrcLocArray, pSrcStride, pWidthLimit,
+                                              pHeightLimit);
+                    rpp_simd_load(rpp_resize_nn_load_u8pln1, srcPtrRowR, remapSrcLocArray,
+                                  pxRow[0]);
+                    rpp_simd_load(rpp_resize_nn_load_u8pln1, srcPtrRowG, remapSrcLocArray,
+                                  pxRow[1]);
+                    rpp_simd_load(rpp_resize_nn_load_u8pln1, srcPtrRowB, remapSrcLocArray,
+                                  pxRow[2]);
                     rpp_simd_store(rpp_store12_u8pln3_to_u8pkd3, dstPtrTemp, pxRow);
                     dstPtrTemp += vectorIncrement;
                     rowRemapTableTemp += vectorIncrementPerChannel;
                     colRemapTableTemp += vectorIncrementPerChannel;
                 }
-                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                {
-                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++, remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit, heightLimit);
+                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++) {
+                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++,
+                                          remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit,
+                                          heightLimit);
                     *dstPtrTemp++ = *(srcPtrRowR + remappedSrcLoc);
                     *dstPtrTemp++ = *(srcPtrRowG + remappedSrcLoc);
                     *dstPtrTemp++ = *(srcPtrRowB + remappedSrcLoc);
@@ -180,33 +185,36 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap without fused output-layout toggle (NHWC -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
-            Rpp8u *dstPtrRow;
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
+            Rpp8u* dstPtrRow;
             dstPtrRow = dstPtrChannel;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
-                Rpp8u *dstPtrTemp;
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
+                Rpp8u* dstPtrTemp;
                 dstPtrTemp = dstPtrRow;
                 Rpp32f *rowRemapTableTemp, *colRemapTableTemp;
                 rowRemapTableTemp = rowRemapTableImage;
                 colRemapTableTemp = colRemapTableImage;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m128i pxRow;
-                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp, remapSrcLocArray, pSrcStride, pWidthLimit, pHeightLimit, pSrcChannel);
-                    rpp_simd_load(rpp_resize_nn_load_u8pkd3, srcPtrChannel, remapSrcLocArray, pxRow);
+                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp,
+                                              remapSrcLocArray, pSrcStride, pWidthLimit,
+                                              pHeightLimit, pSrcChannel);
+                    rpp_simd_load(rpp_resize_nn_load_u8pkd3, srcPtrChannel, remapSrcLocArray,
+                                  pxRow);
                     rpp_simd_store(rpp_store12_u8_to_u8, dstPtrTemp, pxRow);
                     dstPtrTemp += vectorIncrement;
                     rowRemapTableTemp += vectorIncrementPerChannel;
                     colRemapTableTemp += vectorIncrementPerChannel;
                 }
-                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                {
-                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++, remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit, heightLimit, srcDescPtr->c);
+                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++) {
+                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++,
+                                          remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit,
+                                          heightLimit, srcDescPtr->c);
                     *dstPtrTemp++ = *(srcPtrChannel + remappedSrcLoc);
                     *dstPtrTemp++ = *(srcPtrChannel + 1 + remappedSrcLoc);
                     *dstPtrTemp++ = *(srcPtrChannel + 2 + remappedSrcLoc);
@@ -218,31 +226,32 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap without fused output-layout toggle (NCHW -> NCHW for 1 channel and 3 channel)
-        else if ((srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
-            Rpp8u *dstPtrRow;
+        else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NCHW)) {
+            Rpp8u* dstPtrRow;
             dstPtrRow = dstPtrChannel;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
-                Rpp8u *dstPtrTemp;
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
+                Rpp8u* dstPtrTemp;
                 dstPtrTemp = dstPtrRow;
                 Rpp32f *rowRemapTableTemp, *colRemapTableTemp;
                 rowRemapTableTemp = rowRemapTableImage;
                 colRemapTableTemp = colRemapTableImage;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     Rpp8u *srcPtrTempChn, *dstPtrTempChn;
                     srcPtrTempChn = srcPtrChannel;
                     dstPtrTempChn = dstPtrTemp;
-                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp, remapSrcLocArray, pSrcStride, pWidthLimit, pHeightLimit);
+                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp,
+                                              remapSrcLocArray, pSrcStride, pWidthLimit,
+                                              pHeightLimit);
 
-                    for (int c = 0; c < dstDescPtr->c; c++)
-                    {
+                    for (int c = 0; c < dstDescPtr->c; c++) {
                         __m128i pxRow;
-                        rpp_simd_load(rpp_resize_nn_load_u8pln1, srcPtrTempChn, remapSrcLocArray, pxRow);
+                        rpp_simd_load(rpp_resize_nn_load_u8pln1, srcPtrTempChn, remapSrcLocArray,
+                                      pxRow);
                         rpp_simd_store(rpp_storeu_si32, dstPtrTempChn, pxRow);
                         srcPtrTempChn += srcDescPtr->strides.cStride;
                         dstPtrTempChn += dstDescPtr->strides.cStride;
@@ -251,13 +260,13 @@ omp_set_num_threads(handle.GetNumThreads());
                     rowRemapTableTemp += vectorIncrementPerChannel;
                     colRemapTableTemp += vectorIncrementPerChannel;
                 }
-                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                {
-                    Rpp8u * dstPtrTempChannel = dstPtrTemp;
-                    Rpp8u * srcPtrTempChannel = srcPtrChannel;
-                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++, remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit, heightLimit);
-                    for (int c = 0; c < dstDescPtr->c; c++)
-                    {
+                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++) {
+                    Rpp8u* dstPtrTempChannel = dstPtrTemp;
+                    Rpp8u* srcPtrTempChannel = srcPtrChannel;
+                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++,
+                                          remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit,
+                                          heightLimit);
+                    for (int c = 0; c < dstDescPtr->c; c++) {
                         *dstPtrTempChannel = *(srcPtrTempChannel + remappedSrcLoc);
                         dstPtrTempChannel += dstDescPtr->strides.cStride;
                         srcPtrTempChannel += srcDescPtr->strides.cStride;
@@ -274,27 +283,19 @@ omp_set_num_threads(handle.GetNumThreads());
     return RPP_SUCCESS;
 }
 
-RppStatus remap_nn_f32_f32_host_tensor(Rpp32f *srcPtr,
-                                       RpptDescPtr srcDescPtr,
-                                       Rpp32f *dstPtr,
-                                       RpptDescPtr dstDescPtr,
-                                       Rpp32f *rowRemapTable,
-                                       Rpp32f *colRemapTable,
-                                       RpptDescPtr remapTableDescPtr,
-                                       RpptROIPtr roiTensorPtrSrc,
-                                       RpptRoiType roiType,
-                                       RppLayoutParams layoutParams,
-                                       rpp::Handle& handle)
-{
+RppStatus remap_nn_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr,
+                                       RpptDescPtr dstDescPtr, Rpp32f* rowRemapTable,
+                                       Rpp32f* colRemapTable, RpptDescPtr remapTableDescPtr,
+                                       RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                       RppLayoutParams layoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     __m128 pSrcChannel = _mm_set1_ps(srcDescPtr->c);
     __m128 pSrcStride = _mm_set1_ps(srcDescPtr->strides.hStride);
 
-omp_set_dynamic(0);
-omp_set_num_threads(handle.GetNumThreads());
+    omp_set_dynamic(0);
+    omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-    for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
@@ -302,32 +303,33 @@ omp_set_num_threads(handle.GetNumThreads());
         Rpp32f *srcPtrChannel, *dstPtrChannel, *srcPtrImage, *dstPtrImage;
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) + (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
         dstPtrChannel = dstPtrImage;
 
         Rpp32f *rowRemapTableImage, *colRemapTableImage;
         rowRemapTableImage = rowRemapTable + batchCount * remapTableDescPtr->strides.nStride;
         colRemapTableImage = colRemapTable + batchCount * remapTableDescPtr->strides.nStride;
-        Rpp32u alignedLength = roi.xywhROI.roiWidth & ~3;   // Align dst width to process 4 dst pixels per iteration
+        Rpp32u alignedLength =
+            roi.xywhROI.roiWidth & ~3;  // Align dst width to process 4 dst pixels per iteration
         Rpp32s vectorIncrementPerChannel = 4;
         Rpp32s vectorIncrement = 12;
         Rpp32s remappedSrcLoc;
-        Rpp32s remapSrcLocArray[4] = {0};     // Since 4 dst pixels are processed per iteration
+        Rpp32s remapSrcLocArray[4] = {0};  // Since 4 dst pixels are processed per iteration
         Rpp32f widthLimit = roi.xywhROI.roiWidth - 1;
         Rpp32f heightLimit = roi.xywhROI.roiHeight - 1;
         __m128 pWidthLimit = _mm_set1_ps(widthLimit);
         __m128 pHeightLimit = _mm_set1_ps(heightLimit);
 
         // Remap with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+            (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp32f *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
                 Rpp32f *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 dstPtrTempR = dstPtrRowR;
                 dstPtrTempG = dstPtrRowG;
@@ -337,21 +339,26 @@ omp_set_num_threads(handle.GetNumThreads());
                 colRemapTableTemp = colRemapTableImage;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m128 pRow[3];
-                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp, remapSrcLocArray, pSrcStride, pWidthLimit, pHeightLimit, pSrcChannel);
-                    rpp_simd_load(rpp_resize_nn_load_f32pkd3_to_f32pln3, srcPtrChannel, remapSrcLocArray, pRow);
-                    rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTempR, dstPtrTempG, dstPtrTempB, pRow);
+                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp,
+                                              remapSrcLocArray, pSrcStride, pWidthLimit,
+                                              pHeightLimit, pSrcChannel);
+                    rpp_simd_load(rpp_resize_nn_load_f32pkd3_to_f32pln3, srcPtrChannel,
+                                  remapSrcLocArray, pRow);
+                    rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTempR, dstPtrTempG,
+                                   dstPtrTempB, pRow);
                     dstPtrTempR += vectorIncrementPerChannel;
                     dstPtrTempG += vectorIncrementPerChannel;
                     dstPtrTempB += vectorIncrementPerChannel;
                     rowRemapTableTemp += vectorIncrementPerChannel;
                     colRemapTableTemp += vectorIncrementPerChannel;
                 }
-                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                {
-                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++, remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit, heightLimit, srcDescPtr->c);
+                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++) {
+                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++,
+                                          remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit,
+                                          heightLimit, srcDescPtr->c);
                     *dstPtrTempR++ = *(srcPtrChannel + remappedSrcLoc);
                     *dstPtrTempG++ = *(srcPtrChannel + 1 + remappedSrcLoc);
                     *dstPtrTempB++ = *(srcPtrChannel + 2 + remappedSrcLoc);
@@ -365,39 +372,44 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
             Rpp32f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB;
             srcPtrRowR = srcPtrChannel;
             srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
             srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            Rpp32f *dstPtrRow;
+            Rpp32f* dstPtrRow;
             dstPtrRow = dstPtrChannel;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
-                Rpp32f *dstPtrTemp;
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
+                Rpp32f* dstPtrTemp;
                 dstPtrTemp = dstPtrRow;
                 Rpp32f *rowRemapTableTemp, *colRemapTableTemp;
                 rowRemapTableTemp = rowRemapTableImage;
                 colRemapTableTemp = colRemapTableImage;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m128 pRow[4];
-                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp, remapSrcLocArray, pSrcStride, pWidthLimit, pHeightLimit);
-                    rpp_simd_load(rpp_resize_nn_load_f32pln1, srcPtrRowR, remapSrcLocArray, pRow[0]);
-                    rpp_simd_load(rpp_resize_nn_load_f32pln1, srcPtrRowG, remapSrcLocArray, pRow[1]);
-                    rpp_simd_load(rpp_resize_nn_load_f32pln1, srcPtrRowB, remapSrcLocArray, pRow[2]);
+                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp,
+                                              remapSrcLocArray, pSrcStride, pWidthLimit,
+                                              pHeightLimit);
+                    rpp_simd_load(rpp_resize_nn_load_f32pln1, srcPtrRowR, remapSrcLocArray,
+                                  pRow[0]);
+                    rpp_simd_load(rpp_resize_nn_load_f32pln1, srcPtrRowG, remapSrcLocArray,
+                                  pRow[1]);
+                    rpp_simd_load(rpp_resize_nn_load_f32pln1, srcPtrRowB, remapSrcLocArray,
+                                  pRow[2]);
                     rpp_simd_store(rpp_store12_f32pln3_to_f32pkd3, dstPtrTemp, pRow);
                     dstPtrTemp += vectorIncrement;
                     rowRemapTableTemp += vectorIncrementPerChannel;
                     colRemapTableTemp += vectorIncrementPerChannel;
                 }
-                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                {
-                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++, remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit, heightLimit);
+                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++) {
+                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++,
+                                          remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit,
+                                          heightLimit);
                     *dstPtrTemp++ = *(srcPtrRowR + remappedSrcLoc);
                     *dstPtrTemp++ = *(srcPtrRowG + remappedSrcLoc);
                     *dstPtrTemp++ = *(srcPtrRowB + remappedSrcLoc);
@@ -409,24 +421,24 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap without fused output-layout toggle (NHWC -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
-            Rpp32f *dstPtrRow;
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
+            Rpp32f* dstPtrRow;
             dstPtrRow = dstPtrChannel;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
-                Rpp32f *dstPtrTemp;
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
+                Rpp32f* dstPtrTemp;
                 dstPtrTemp = dstPtrRow;
                 Rpp32f *rowRemapTableTemp, *colRemapTableTemp;
                 rowRemapTableTemp = rowRemapTableImage;
                 colRemapTableTemp = colRemapTableImage;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                {
+                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++) {
                     __m128 pRow;
-                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp, remapSrcLocArray, pSrcStride, pWidthLimit, pHeightLimit, pSrcChannel);
+                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp,
+                                              remapSrcLocArray, pSrcStride, pWidthLimit,
+                                              pHeightLimit, pSrcChannel);
                     rpp_simd_load(rpp_load4_f32_to_f32, (srcPtrChannel + *remapSrcLocArray), &pRow);
                     rpp_simd_store(rpp_store4_f32_to_f32, dstPtrTemp, &pRow);
                     dstPtrTemp += 3;
@@ -440,31 +452,32 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap without fused output-layout toggle (NCHW -> NCHW for 1 channel and 3 channel)
-        else if ((srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
-            Rpp32f *dstPtrRow;
+        else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NCHW)) {
+            Rpp32f* dstPtrRow;
             dstPtrRow = dstPtrChannel;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
-                Rpp32f *dstPtrTemp;
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
+                Rpp32f* dstPtrTemp;
                 dstPtrTemp = dstPtrRow;
                 Rpp32f *rowRemapTableTemp, *colRemapTableTemp;
                 rowRemapTableTemp = rowRemapTableImage;
                 colRemapTableTemp = colRemapTableImage;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     Rpp32f *srcPtrTempChn, *dstPtrTempChn;
                     srcPtrTempChn = srcPtrChannel;
                     dstPtrTempChn = dstPtrTemp;
-                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp, remapSrcLocArray, pSrcStride, pWidthLimit, pHeightLimit);
+                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp,
+                                              remapSrcLocArray, pSrcStride, pWidthLimit,
+                                              pHeightLimit);
 
-                    for (int c = 0; c < dstDescPtr->c; c++)
-                    {
+                    for (int c = 0; c < dstDescPtr->c; c++) {
                         __m128 pRow;
-                        rpp_simd_load(rpp_resize_nn_load_f32pln1, srcPtrTempChn, remapSrcLocArray, pRow);
+                        rpp_simd_load(rpp_resize_nn_load_f32pln1, srcPtrTempChn, remapSrcLocArray,
+                                      pRow);
                         rpp_simd_store(rpp_store4_f32_to_f32, dstPtrTempChn, &pRow);
                         srcPtrTempChn += srcDescPtr->strides.cStride;
                         dstPtrTempChn += dstDescPtr->strides.cStride;
@@ -473,13 +486,13 @@ omp_set_num_threads(handle.GetNumThreads());
                     rowRemapTableTemp += vectorIncrementPerChannel;
                     colRemapTableTemp += vectorIncrementPerChannel;
                 }
-                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                {
-                    Rpp32f * dstPtrTempChannel = dstPtrTemp;
-                    Rpp32f * srcPtrTempChannel = srcPtrChannel;
-                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++, remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit, heightLimit);
-                    for (int c = 0; c < dstDescPtr->c; c++)
-                    {
+                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++) {
+                    Rpp32f* dstPtrTempChannel = dstPtrTemp;
+                    Rpp32f* srcPtrTempChannel = srcPtrChannel;
+                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++,
+                                          remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit,
+                                          heightLimit);
+                    for (int c = 0; c < dstDescPtr->c; c++) {
                         *dstPtrTempChannel = *(srcPtrTempChannel + remappedSrcLoc);
                         dstPtrTempChannel += dstDescPtr->strides.cStride;
                         srcPtrTempChannel += srcDescPtr->strides.cStride;
@@ -496,27 +509,19 @@ omp_set_num_threads(handle.GetNumThreads());
     return RPP_SUCCESS;
 }
 
-RppStatus remap_nn_i8_i8_host_tensor(Rpp8s *srcPtr,
-                                     RpptDescPtr srcDescPtr,
-                                     Rpp8s *dstPtr,
-                                     RpptDescPtr dstDescPtr,
-                                     Rpp32f *rowRemapTable,
-                                     Rpp32f *colRemapTable,
-                                     RpptDescPtr remapTableDescPtr,
-                                     RpptROIPtr roiTensorPtrSrc,
-                                     RpptRoiType roiType,
-                                     RppLayoutParams layoutParams,
-                                     rpp::Handle& handle)
-{
+RppStatus remap_nn_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s* dstPtr,
+                                     RpptDescPtr dstDescPtr, Rpp32f* rowRemapTable,
+                                     Rpp32f* colRemapTable, RpptDescPtr remapTableDescPtr,
+                                     RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                     RppLayoutParams layoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     __m128 pSrcChannel = _mm_set1_ps(srcDescPtr->c);
     __m128 pSrcStride = _mm_set1_ps(srcDescPtr->strides.hStride);
 
-omp_set_dynamic(0);
-omp_set_num_threads(handle.GetNumThreads());
+    omp_set_dynamic(0);
+    omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-    for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
@@ -524,32 +529,33 @@ omp_set_num_threads(handle.GetNumThreads());
         Rpp8s *srcPtrChannel, *dstPtrChannel, *srcPtrImage, *dstPtrImage;
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) + (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
         dstPtrChannel = dstPtrImage;
 
         Rpp32f *rowRemapTableImage, *colRemapTableImage;
         rowRemapTableImage = rowRemapTable + batchCount * remapTableDescPtr->strides.nStride;
         colRemapTableImage = colRemapTable + batchCount * remapTableDescPtr->strides.nStride;
-        Rpp32u alignedLength = roi.xywhROI.roiWidth & ~3;   // Align dst width to process 4 dst pixels per iteration
+        Rpp32u alignedLength =
+            roi.xywhROI.roiWidth & ~3;  // Align dst width to process 4 dst pixels per iteration
         Rpp32s vectorIncrementPerChannel = 4;
         Rpp32s vectorIncrement = 12;
         Rpp32s remappedSrcLoc;
-        Rpp32s remapSrcLocArray[4] = {0};     // Since 4 dst pixels are processed per iteration
+        Rpp32s remapSrcLocArray[4] = {0};  // Since 4 dst pixels are processed per iteration
         Rpp32f widthLimit = roi.xywhROI.roiWidth - 1;
         Rpp32f heightLimit = roi.xywhROI.roiHeight - 1;
         __m128 pWidthLimit = _mm_set1_ps(widthLimit);
         __m128 pHeightLimit = _mm_set1_ps(heightLimit);
 
         // Remap with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+            (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp8s *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
                 Rpp8s *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 dstPtrTempR = dstPtrRowR;
                 dstPtrTempG = dstPtrRowG;
@@ -559,21 +565,26 @@ omp_set_num_threads(handle.GetNumThreads());
                 colRemapTableTemp = colRemapTableImage;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m128i pxRow;
-                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp, remapSrcLocArray, pSrcStride, pWidthLimit, pHeightLimit, pSrcChannel);
-                    rpp_simd_load(rpp_resize_nn_load_i8pkd3, srcPtrChannel, remapSrcLocArray, pxRow);
-                    rpp_simd_store(rpp_store12_i8pkd3_to_i8pln3, dstPtrTempR, dstPtrTempG, dstPtrTempB, pxRow);
+                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp,
+                                              remapSrcLocArray, pSrcStride, pWidthLimit,
+                                              pHeightLimit, pSrcChannel);
+                    rpp_simd_load(rpp_resize_nn_load_i8pkd3, srcPtrChannel, remapSrcLocArray,
+                                  pxRow);
+                    rpp_simd_store(rpp_store12_i8pkd3_to_i8pln3, dstPtrTempR, dstPtrTempG,
+                                   dstPtrTempB, pxRow);
                     dstPtrTempR += vectorIncrementPerChannel;
                     dstPtrTempG += vectorIncrementPerChannel;
                     dstPtrTempB += vectorIncrementPerChannel;
                     rowRemapTableTemp += vectorIncrementPerChannel;
                     colRemapTableTemp += vectorIncrementPerChannel;
                 }
-                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                {
-                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++, remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit, heightLimit, srcDescPtr->c);
+                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++) {
+                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++,
+                                          remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit,
+                                          heightLimit, srcDescPtr->c);
                     *dstPtrTempR++ = *(srcPtrChannel + remappedSrcLoc);
                     *dstPtrTempG++ = *(srcPtrChannel + 1 + remappedSrcLoc);
                     *dstPtrTempB++ = *(srcPtrChannel + 2 + remappedSrcLoc);
@@ -587,39 +598,44 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
             Rpp8s *srcPtrRowR, *srcPtrRowG, *srcPtrRowB;
             srcPtrRowR = srcPtrChannel;
             srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
             srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            Rpp8s *dstPtrRow;
+            Rpp8s* dstPtrRow;
             dstPtrRow = dstPtrChannel;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
-                Rpp8s *dstPtrTemp;
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
+                Rpp8s* dstPtrTemp;
                 dstPtrTemp = dstPtrRow;
                 Rpp32f *rowRemapTableTemp, *colRemapTableTemp;
                 rowRemapTableTemp = rowRemapTableImage;
                 colRemapTableTemp = colRemapTableImage;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m128i pxRow[3];
-                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp, remapSrcLocArray, pSrcStride, pWidthLimit, pHeightLimit);
-                    rpp_simd_load(rpp_resize_nn_load_i8pln1, srcPtrRowR, remapSrcLocArray, pxRow[0]);
-                    rpp_simd_load(rpp_resize_nn_load_i8pln1, srcPtrRowG, remapSrcLocArray, pxRow[1]);
-                    rpp_simd_load(rpp_resize_nn_load_i8pln1, srcPtrRowB, remapSrcLocArray, pxRow[2]);
+                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp,
+                                              remapSrcLocArray, pSrcStride, pWidthLimit,
+                                              pHeightLimit);
+                    rpp_simd_load(rpp_resize_nn_load_i8pln1, srcPtrRowR, remapSrcLocArray,
+                                  pxRow[0]);
+                    rpp_simd_load(rpp_resize_nn_load_i8pln1, srcPtrRowG, remapSrcLocArray,
+                                  pxRow[1]);
+                    rpp_simd_load(rpp_resize_nn_load_i8pln1, srcPtrRowB, remapSrcLocArray,
+                                  pxRow[2]);
                     rpp_simd_store(rpp_store12_i8pln3_to_i8pkd3, dstPtrTemp, pxRow);
                     dstPtrTemp += vectorIncrement;
                     rowRemapTableTemp += vectorIncrementPerChannel;
                     colRemapTableTemp += vectorIncrementPerChannel;
                 }
-                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                {
-                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++, remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit, heightLimit);
+                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++) {
+                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++,
+                                          remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit,
+                                          heightLimit);
                     *dstPtrTemp++ = *(srcPtrRowR + remappedSrcLoc);
                     *dstPtrTemp++ = *(srcPtrRowG + remappedSrcLoc);
                     *dstPtrTemp++ = *(srcPtrRowB + remappedSrcLoc);
@@ -631,33 +647,36 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap without fused output-layout toggle (NHWC -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
-            Rpp8s *dstPtrRow;
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
+            Rpp8s* dstPtrRow;
             dstPtrRow = dstPtrChannel;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
-                Rpp8s *dstPtrTemp;
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
+                Rpp8s* dstPtrTemp;
                 dstPtrTemp = dstPtrRow;
                 Rpp32f *rowRemapTableTemp, *colRemapTableTemp;
                 rowRemapTableTemp = rowRemapTableImage;
                 colRemapTableTemp = colRemapTableImage;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m128i pxRow;
-                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp, remapSrcLocArray, pSrcStride, pWidthLimit, pHeightLimit, pSrcChannel);
-                    rpp_simd_load(rpp_resize_nn_load_i8pkd3, srcPtrChannel, remapSrcLocArray, pxRow);
+                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp,
+                                              remapSrcLocArray, pSrcStride, pWidthLimit,
+                                              pHeightLimit, pSrcChannel);
+                    rpp_simd_load(rpp_resize_nn_load_i8pkd3, srcPtrChannel, remapSrcLocArray,
+                                  pxRow);
                     rpp_simd_store(rpp_store12_i8_to_i8, dstPtrTemp, pxRow);
                     dstPtrTemp += vectorIncrement;
                     rowRemapTableTemp += vectorIncrementPerChannel;
                     colRemapTableTemp += vectorIncrementPerChannel;
                 }
-                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                {
-                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++, remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit, heightLimit, srcDescPtr->c);
+                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++) {
+                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++,
+                                          remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit,
+                                          heightLimit, srcDescPtr->c);
                     *dstPtrTemp++ = *(srcPtrChannel + remappedSrcLoc);
                     *dstPtrTemp++ = *(srcPtrChannel + 1 + remappedSrcLoc);
                     *dstPtrTemp++ = *(srcPtrChannel + 2 + remappedSrcLoc);
@@ -669,31 +688,32 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap without fused output-layout toggle (NCHW -> NCHW for 1 channel and 3 channel)
-        else if ((srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
-            Rpp8s *dstPtrRow;
+        else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NCHW)) {
+            Rpp8s* dstPtrRow;
             dstPtrRow = dstPtrChannel;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
-                Rpp8s *dstPtrTemp;
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
+                Rpp8s* dstPtrTemp;
                 dstPtrTemp = dstPtrRow;
                 Rpp32f *rowRemapTableTemp, *colRemapTableTemp;
                 rowRemapTableTemp = rowRemapTableImage;
                 colRemapTableTemp = colRemapTableImage;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     Rpp8s *srcPtrTempChn, *dstPtrTempChn;
                     srcPtrTempChn = srcPtrChannel;
                     dstPtrTempChn = dstPtrTemp;
-                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp, remapSrcLocArray, pSrcStride, pWidthLimit, pHeightLimit);
+                    compute_remap_src_loc_sse(rowRemapTableTemp, colRemapTableTemp,
+                                              remapSrcLocArray, pSrcStride, pWidthLimit,
+                                              pHeightLimit);
 
-                    for (int c = 0; c < dstDescPtr->c; c++)
-                    {
+                    for (int c = 0; c < dstDescPtr->c; c++) {
                         __m128i pxRow;
-                        rpp_simd_load(rpp_resize_nn_load_i8pln1, srcPtrTempChn, remapSrcLocArray, pxRow);
+                        rpp_simd_load(rpp_resize_nn_load_i8pln1, srcPtrTempChn, remapSrcLocArray,
+                                      pxRow);
                         rpp_simd_store(rpp_storeu_si32, dstPtrTempChn, pxRow);
                         srcPtrTempChn += srcDescPtr->strides.cStride;
                         dstPtrTempChn += dstDescPtr->strides.cStride;
@@ -702,13 +722,13 @@ omp_set_num_threads(handle.GetNumThreads());
                     rowRemapTableTemp += vectorIncrementPerChannel;
                     colRemapTableTemp += vectorIncrementPerChannel;
                 }
-                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                {
-                    Rpp8s * dstPtrTempChannel = dstPtrTemp;
-                    Rpp8s * srcPtrTempChannel = srcPtrChannel;
-                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++, remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit, heightLimit);
-                    for (int c = 0; c < dstDescPtr->c; c++)
-                    {
+                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++) {
+                    Rpp8s* dstPtrTempChannel = dstPtrTemp;
+                    Rpp8s* srcPtrTempChannel = srcPtrChannel;
+                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++,
+                                          remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit,
+                                          heightLimit);
+                    for (int c = 0; c < dstDescPtr->c; c++) {
                         *dstPtrTempChannel = *(srcPtrTempChannel + remappedSrcLoc);
                         dstPtrTempChannel += dstDescPtr->strides.cStride;
                         srcPtrTempChannel += srcDescPtr->strides.cStride;
@@ -725,25 +745,17 @@ omp_set_num_threads(handle.GetNumThreads());
     return RPP_SUCCESS;
 }
 
-RppStatus remap_nn_f16_f16_host_tensor(Rpp16f *srcPtr,
-                                       RpptDescPtr srcDescPtr,
-                                       Rpp16f *dstPtr,
-                                       RpptDescPtr dstDescPtr,
-                                       Rpp32f *rowRemapTable,
-                                       Rpp32f *colRemapTable,
-                                       RpptDescPtr remapTableDescPtr,
-                                       RpptROIPtr roiTensorPtrSrc,
-                                       RpptRoiType roiType,
-                                       RppLayoutParams layoutParams,
-                                       rpp::Handle& handle)
-{
+RppStatus remap_nn_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, Rpp16f* dstPtr,
+                                       RpptDescPtr dstDescPtr, Rpp32f* rowRemapTable,
+                                       Rpp32f* colRemapTable, RpptDescPtr remapTableDescPtr,
+                                       RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                       RppLayoutParams layoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
 
-omp_set_dynamic(0);
-omp_set_num_threads(handle.GetNumThreads());
+    omp_set_dynamic(0);
+    omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-    for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
@@ -751,7 +763,8 @@ omp_set_num_threads(handle.GetNumThreads());
         Rpp16f *srcPtrChannel, *dstPtrChannel, *srcPtrImage, *dstPtrImage;
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) + (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
         dstPtrChannel = dstPtrImage;
 
         Rpp32f *rowRemapTableImage, *colRemapTableImage;
@@ -761,8 +774,7 @@ omp_set_num_threads(handle.GetNumThreads());
         Rpp32f widthLimit = roi.xywhROI.roiWidth - 1;
         Rpp32f heightLimit = roi.xywhROI.roiHeight - 1;
         // Remap with 3 channel inputs and outputs
-        if (srcDescPtr->c == 3 && dstDescPtr->c == 3)
-        {
+        if (srcDescPtr->c == 3 && dstDescPtr->c == 3) {
             Rpp16f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB;
             srcPtrRowR = srcPtrChannel;
             srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
@@ -772,8 +784,7 @@ omp_set_num_threads(handle.GetNumThreads());
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
                 Rpp16f *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 dstPtrTempR = dstPtrRowR;
                 dstPtrTempG = dstPtrRowG;
@@ -783,13 +794,14 @@ omp_set_num_threads(handle.GetNumThreads());
                 colRemapTableTemp = colRemapTableImage;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                {
+                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++) {
                     Rpp32s remappedSrcLoc;
-                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++, remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit, heightLimit, layoutParams.bufferMultiplier);
-                    *dstPtrTempR = (Rpp16f)*(srcPtrRowR + remappedSrcLoc);
-                    *dstPtrTempG = (Rpp16f)*(srcPtrRowG + remappedSrcLoc);
-                    *dstPtrTempB = (Rpp16f)*(srcPtrRowB + remappedSrcLoc);
+                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++,
+                                          remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit,
+                                          heightLimit, layoutParams.bufferMultiplier);
+                    *dstPtrTempR = (Rpp16f) * (srcPtrRowR + remappedSrcLoc);
+                    *dstPtrTempG = (Rpp16f) * (srcPtrRowG + remappedSrcLoc);
+                    *dstPtrTempB = (Rpp16f) * (srcPtrRowB + remappedSrcLoc);
                     dstPtrTempR = dstPtrTempR + dstDescPtr->strides.wStride;
                     dstPtrTempG = dstPtrTempG + dstDescPtr->strides.wStride;
                     dstPtrTempB = dstPtrTempB + dstDescPtr->strides.wStride;
@@ -803,26 +815,25 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap with single channel inputs and outputs
-        else
-        {
+        else {
             Rpp16f *srcPtrRow, *dstPtrRow;
             srcPtrRow = srcPtrChannel;
             dstPtrRow = dstPtrChannel;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
-                Rpp16f *dstPtrTemp;
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
+                Rpp16f* dstPtrTemp;
                 dstPtrTemp = dstPtrRow;
                 Rpp32f *rowRemapTableTemp, *colRemapTableTemp;
                 rowRemapTableTemp = rowRemapTableImage;
                 colRemapTableTemp = colRemapTableImage;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                {
+                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++) {
                     Rpp32s remappedSrcLoc;
-                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++, remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit, heightLimit);
-                    *dstPtrTemp++ = (Rpp16f)*(srcPtrRow + remappedSrcLoc);
+                    compute_remap_src_loc(*rowRemapTableTemp++, *colRemapTableTemp++,
+                                          remappedSrcLoc, srcDescPtr->strides.hStride, widthLimit,
+                                          heightLimit);
+                    *dstPtrTemp++ = (Rpp16f) * (srcPtrRow + remappedSrcLoc);
                 }
                 dstPtrRow += dstDescPtr->strides.hStride;
                 rowRemapTableImage += remapTableDescPtr->strides.hStride;
@@ -836,18 +847,11 @@ omp_set_num_threads(handle.GetNumThreads());
 
 /************* BILINEAR INTERPOLATION *************/
 
-RppStatus remap_bilinear_u8_u8_host_tensor(Rpp8u *srcPtr,
-                                           RpptDescPtr srcDescPtr,
-                                           Rpp8u *dstPtr,
-                                           RpptDescPtr dstDescPtr,
-                                           Rpp32f *rowRemapTable,
-                                           Rpp32f *colRemapTable,
-                                           RpptDescPtr remapTableDescPtr,
-                                           RpptROIPtr roiTensorPtrSrc,
-                                           RpptRoiType roiType,
-                                           RppLayoutParams layoutParams,
-                                           rpp::Handle& handle)
-{
+RppStatus remap_bilinear_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* dstPtr,
+                                           RpptDescPtr dstDescPtr, Rpp32f* rowRemapTable,
+                                           Rpp32f* colRemapTable, RpptDescPtr remapTableDescPtr,
+                                           RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                           RppLayoutParams layoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
 #if __AVX2__
     __m256 pSrcStrideH = _mm256_set1_ps(srcDescPtr->strides.hStride);
@@ -857,11 +861,10 @@ RppStatus remap_bilinear_u8_u8_host_tensor(Rpp8u *srcPtr,
     pxSrcStridesCHW[2] = _mm256_set1_epi32(srcDescPtr->strides.wStride);
 #endif
 
-omp_set_dynamic(0);
-omp_set_num_threads(handle.GetNumThreads());
+    omp_set_dynamic(0);
+    omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-    for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi, roiLTRB;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
@@ -877,7 +880,8 @@ omp_set_num_threads(handle.GetNumThreads());
         rowRemapTableImage = rowRemapTable + batchCount * remapTableDescPtr->strides.nStride;
         colRemapTableImage = colRemapTable + batchCount * remapTableDescPtr->strides.nStride;
 
-        Rpp32u alignedLength = roi.xywhROI.roiWidth & ~7;   // Align dst width to process 8 dst pixels per iteration
+        Rpp32u alignedLength =
+            roi.xywhROI.roiWidth & ~7;  // Align dst width to process 8 dst pixels per iteration
         Rpp32s vectorIncrementPerChannel = 8;
         Rpp32s vectorIncrement = 24;
 
@@ -892,15 +896,14 @@ omp_set_num_threads(handle.GetNumThreads());
 #endif
 
         // Remap with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+            (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp8u *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
                 Rpp8u *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 dstPtrTempR = dstPtrRowR;
                 dstPtrTempG = dstPtrRowG;
@@ -912,15 +915,21 @@ omp_set_num_threads(handle.GetNumThreads());
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 pSrcX = _mm256_loadu_ps(colRemapTableTemp);
                     __m256 pSrcY = _mm256_loadu_ps(rowRemapTableTemp);
                     __m256 pSrc[12], pDst[3];
-                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs, pSrcStrideH, pxSrcStridesCHW, srcDescPtr->c, pRoiLTRB, true);
-                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp8u>, srcPtrChannel, srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB, pSrc);  // Load input pixels required for bilinear interpolation
-                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs, pDst); // Compute Bilinear interpolation
-                    rpp_simd_store(rpp_store24_f32pln3_to_u8pln3_avx, dstPtrTempR, dstPtrTempG, dstPtrTempB, pDst); // Store dst pixels
+                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs,
+                                                            pSrcStrideH, pxSrcStridesCHW,
+                                                            srcDescPtr->c, pRoiLTRB, true);
+                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp8u>, srcPtrChannel,
+                                  srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB,
+                                  pSrc);  // Load input pixels required for bilinear interpolation
+                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs,
+                                                          pDst);  // Compute Bilinear interpolation
+                    rpp_simd_store(rpp_store24_f32pln3_to_u8pln3_avx, dstPtrTempR, dstPtrTempG,
+                                   dstPtrTempB, pDst);  // Store dst pixels
                     dstPtrTempR += vectorIncrementPerChannel;
                     dstPtrTempG += vectorIncrementPerChannel;
                     dstPtrTempB += vectorIncrementPerChannel;
@@ -929,7 +938,9 @@ omp_set_num_threads(handle.GetNumThreads());
                 }
 #endif
                 for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                    compute_generic_bilinear_interpolation_pkd3_to_pln3(*rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTempR++, dstPtrTempG++, dstPtrTempB++, srcPtrChannel, srcDescPtr);
+                    compute_generic_bilinear_interpolation_pkd3_to_pln3(
+                        *rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTempR++,
+                        dstPtrTempG++, dstPtrTempB++, srcPtrChannel, srcDescPtr);
 
                 dstPtrRowR += dstDescPtr->strides.hStride;
                 dstPtrRowG += dstDescPtr->strides.hStride;
@@ -940,14 +951,13 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
-            Rpp8u *dstPtrRow;
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
+            Rpp8u* dstPtrRow;
             dstPtrRow = dstPtrChannel;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
-                Rpp8u *dstPtrTemp;
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
+                Rpp8u* dstPtrTemp;
                 dstPtrTemp = dstPtrRow;
 
                 Rpp32f *rowRemapTableTemp, *colRemapTableTemp;
@@ -956,23 +966,30 @@ omp_set_num_threads(handle.GetNumThreads());
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 pSrcX = _mm256_loadu_ps(colRemapTableTemp);
                     __m256 pSrcY = _mm256_loadu_ps(rowRemapTableTemp);
                     __m256 pSrc[12], pDst[3];
-                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs, pSrcStrideH, pxSrcStridesCHW, srcDescPtr->c, pRoiLTRB, false);
-                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp8u>, srcPtrChannel, srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB, pSrc);  // Load input pixels required for bilinear interpolation
-                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs, pDst); // Compute Bilinear interpolation
-                    rpp_simd_store(rpp_store24_f32pln3_to_u8pkd3_avx, dstPtrTemp, pDst); // Store dst pixels
+                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs,
+                                                            pSrcStrideH, pxSrcStridesCHW,
+                                                            srcDescPtr->c, pRoiLTRB, false);
+                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp8u>, srcPtrChannel,
+                                  srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB,
+                                  pSrc);  // Load input pixels required for bilinear interpolation
+                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs,
+                                                          pDst);  // Compute Bilinear interpolation
+                    rpp_simd_store(rpp_store24_f32pln3_to_u8pkd3_avx, dstPtrTemp,
+                                   pDst);  // Store dst pixels
                     dstPtrTemp += vectorIncrement;
                     rowRemapTableTemp += vectorIncrementPerChannel;
                     colRemapTableTemp += vectorIncrementPerChannel;
                 }
 #endif
-                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                {
-                    compute_generic_bilinear_interpolation_pln3pkd3_to_pkd3(*rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp, srcPtrChannel, srcDescPtr);
+                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++) {
+                    compute_generic_bilinear_interpolation_pln3pkd3_to_pkd3(
+                        *rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp,
+                        srcPtrChannel, srcDescPtr);
                     dstPtrTemp += 3;
                 }
 
@@ -983,14 +1000,13 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap without fused output-layout toggle (NHWC -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
-            Rpp8u *dstPtrRow;
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
+            Rpp8u* dstPtrRow;
             dstPtrRow = dstPtrChannel;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
-                Rpp8u *dstPtrTemp;
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
+                Rpp8u* dstPtrTemp;
                 dstPtrTemp = dstPtrRow;
 
                 Rpp32f *rowRemapTableTemp, *colRemapTableTemp;
@@ -999,23 +1015,30 @@ omp_set_num_threads(handle.GetNumThreads());
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 pSrcX = _mm256_loadu_ps(colRemapTableTemp);
                     __m256 pSrcY = _mm256_loadu_ps(rowRemapTableTemp);
                     __m256 pSrc[12], pDst[3];
-                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs, pSrcStrideH, pxSrcStridesCHW, srcDescPtr->c, pRoiLTRB, true);
-                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp8u>, srcPtrChannel, srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB, pSrc);  // Load input pixels required for bilinear interpolation
-                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs, pDst); // Compute Bilinear interpolation
-                    rpp_simd_store(rpp_store24_f32pln3_to_u8pkd3_avx, dstPtrTemp, pDst); // Store dst pixels
+                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs,
+                                                            pSrcStrideH, pxSrcStridesCHW,
+                                                            srcDescPtr->c, pRoiLTRB, true);
+                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp8u>, srcPtrChannel,
+                                  srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB,
+                                  pSrc);  // Load input pixels required for bilinear interpolation
+                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs,
+                                                          pDst);  // Compute Bilinear interpolation
+                    rpp_simd_store(rpp_store24_f32pln3_to_u8pkd3_avx, dstPtrTemp,
+                                   pDst);  // Store dst pixels
                     dstPtrTemp += vectorIncrement;
                     rowRemapTableTemp += vectorIncrementPerChannel;
                     colRemapTableTemp += vectorIncrementPerChannel;
                 }
 #endif
-                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                {
-                    compute_generic_bilinear_interpolation_pln3pkd3_to_pkd3(*rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp, srcPtrChannel, srcDescPtr);
+                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++) {
+                    compute_generic_bilinear_interpolation_pln3pkd3_to_pkd3(
+                        *rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp,
+                        srcPtrChannel, srcDescPtr);
                     dstPtrTemp += 3;
                 }
 
@@ -1026,15 +1049,14 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap without fused output-layout toggle (NCHW -> NCHW)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp8u *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp8u *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 dstPtrTempR = dstPtrRowR;
                 dstPtrTempG = dstPtrRowG;
@@ -1046,15 +1068,21 @@ omp_set_num_threads(handle.GetNumThreads());
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 pSrcX = _mm256_loadu_ps(colRemapTableTemp);
                     __m256 pSrcY = _mm256_loadu_ps(rowRemapTableTemp);
                     __m256 pSrc[12], pDst[3];
-                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs, pSrcStrideH, pxSrcStridesCHW, srcDescPtr->c, pRoiLTRB, false);
-                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp8u>, srcPtrChannel, srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB, pSrc);  // Load input pixels required for bilinear interpolation
-                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs, pDst); // Compute Bilinear interpolation
-                    rpp_simd_store(rpp_store24_f32pln3_to_u8pln3_avx, dstPtrTempR, dstPtrTempG, dstPtrTempB, pDst); // Store dst pixels
+                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs,
+                                                            pSrcStrideH, pxSrcStridesCHW,
+                                                            srcDescPtr->c, pRoiLTRB, false);
+                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp8u>, srcPtrChannel,
+                                  srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB,
+                                  pSrc);  // Load input pixels required for bilinear interpolation
+                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs,
+                                                          pDst);  // Compute Bilinear interpolation
+                    rpp_simd_store(rpp_store24_f32pln3_to_u8pln3_avx, dstPtrTempR, dstPtrTempG,
+                                   dstPtrTempB, pDst);  // Store dst pixels
                     dstPtrTempR += vectorIncrementPerChannel;
                     dstPtrTempG += vectorIncrementPerChannel;
                     dstPtrTempB += vectorIncrementPerChannel;
@@ -1063,7 +1091,9 @@ omp_set_num_threads(handle.GetNumThreads());
                 }
 #endif
                 for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                    compute_generic_bilinear_interpolation_pln_to_pln(*rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTempR++, srcPtrChannel, srcDescPtr, dstDescPtr);
+                    compute_generic_bilinear_interpolation_pln_to_pln(
+                        *rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTempR++,
+                        srcPtrChannel, srcDescPtr, dstDescPtr);
 
                 dstPtrRowR += dstDescPtr->strides.hStride;
                 dstPtrRowG += dstDescPtr->strides.hStride;
@@ -1074,14 +1104,13 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap without fused output-layout toggle single channel (NCHW -> NCHW)
-        else if ((srcDescPtr->c == 1) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
-            Rpp8u *dstPtrRow;
+        else if ((srcDescPtr->c == 1) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NCHW)) {
+            Rpp8u* dstPtrRow;
             dstPtrRow = dstPtrChannel;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
-                Rpp8u *dstPtrTemp;
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+                Rpp8u* dstPtrTemp;
                 dstPtrTemp = dstPtrRow;
 
                 Rpp32f *rowRemapTableTemp, *colRemapTableTemp;
@@ -1090,22 +1119,29 @@ omp_set_num_threads(handle.GetNumThreads());
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 pSrcX = _mm256_loadu_ps(colRemapTableTemp);
                     __m256 pSrcY = _mm256_loadu_ps(rowRemapTableTemp);
                     __m256 pSrc[4], pDst;
-                    compute_generic_bilinear_srclocs_1c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs, pSrcStrideH, pxSrcStridesCHW, pRoiLTRB);
-                    rpp_simd_load(rpp_generic_bilinear_load_1c_avx<Rpp8u>, srcPtrChannel, srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB, pSrc);  // Load input pixels required for bilinear interpolation
-                    compute_bilinear_interpolation_1c_avx(pSrc, pBilinearCoeffs, pDst); // Compute Bilinear interpolation
-                    rpp_simd_store(rpp_store8_f32pln1_to_u8pln1_avx, dstPtrTemp, pDst); // Store dst pixels
+                    compute_generic_bilinear_srclocs_1c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs,
+                                                            pSrcStrideH, pxSrcStridesCHW, pRoiLTRB);
+                    rpp_simd_load(rpp_generic_bilinear_load_1c_avx<Rpp8u>, srcPtrChannel,
+                                  srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB,
+                                  pSrc);  // Load input pixels required for bilinear interpolation
+                    compute_bilinear_interpolation_1c_avx(pSrc, pBilinearCoeffs,
+                                                          pDst);  // Compute Bilinear interpolation
+                    rpp_simd_store(rpp_store8_f32pln1_to_u8pln1_avx, dstPtrTemp,
+                                   pDst);  // Store dst pixels
                     dstPtrTemp += vectorIncrementPerChannel;
                     rowRemapTableTemp += vectorIncrementPerChannel;
                     colRemapTableTemp += vectorIncrementPerChannel;
                 }
 #endif
                 for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                    compute_generic_bilinear_interpolation_pln_to_pln(*rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp++, srcPtrChannel, srcDescPtr, dstDescPtr);
+                    compute_generic_bilinear_interpolation_pln_to_pln(
+                        *rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp++,
+                        srcPtrChannel, srcDescPtr, dstDescPtr);
 
                 dstPtrRow += dstDescPtr->strides.hStride;
                 rowRemapTableImage += remapTableDescPtr->strides.hStride;
@@ -1117,18 +1153,11 @@ omp_set_num_threads(handle.GetNumThreads());
     return RPP_SUCCESS;
 }
 
-RppStatus remap_bilinear_f32_f32_host_tensor(Rpp32f *srcPtr,
-                                             RpptDescPtr srcDescPtr,
-                                             Rpp32f *dstPtr,
-                                             RpptDescPtr dstDescPtr,
-                                             Rpp32f *rowRemapTable,
-                                             Rpp32f *colRemapTable,
-                                             RpptDescPtr remapTableDescPtr,
-                                             RpptROIPtr roiTensorPtrSrc,
-                                             RpptRoiType roiType,
-                                             RppLayoutParams layoutParams,
-                                             rpp::Handle& handle)
-{
+RppStatus remap_bilinear_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr,
+                                             RpptDescPtr dstDescPtr, Rpp32f* rowRemapTable,
+                                             Rpp32f* colRemapTable, RpptDescPtr remapTableDescPtr,
+                                             RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                             RppLayoutParams layoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
 #if __AVX2__
     __m256 pSrcStrideH = _mm256_set1_ps(srcDescPtr->strides.hStride);
@@ -1138,11 +1167,10 @@ RppStatus remap_bilinear_f32_f32_host_tensor(Rpp32f *srcPtr,
     pxSrcStridesCHW[2] = _mm256_set1_epi32(srcDescPtr->strides.wStride);
 #endif
 
-omp_set_dynamic(0);
-omp_set_num_threads(handle.GetNumThreads());
+    omp_set_dynamic(0);
+    omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-    for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi, roiLTRB;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
@@ -1158,7 +1186,8 @@ omp_set_num_threads(handle.GetNumThreads());
         rowRemapTableImage = rowRemapTable + batchCount * remapTableDescPtr->strides.nStride;
         colRemapTableImage = colRemapTable + batchCount * remapTableDescPtr->strides.nStride;
 
-        Rpp32u alignedLength = roi.xywhROI.roiWidth & ~7;   // Align dst width to process 8 dst pixels per iteration
+        Rpp32u alignedLength =
+            roi.xywhROI.roiWidth & ~7;  // Align dst width to process 8 dst pixels per iteration
         Rpp32s vectorIncrementPerChannel = 8;
         Rpp32s vectorIncrement = 24;
 
@@ -1173,15 +1202,14 @@ omp_set_num_threads(handle.GetNumThreads());
 #endif
 
         // Remap with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+            (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp32f *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
                 Rpp32f *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 dstPtrTempR = dstPtrRowR;
                 dstPtrTempG = dstPtrRowG;
@@ -1193,15 +1221,21 @@ omp_set_num_threads(handle.GetNumThreads());
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 pSrcX = _mm256_loadu_ps(colRemapTableTemp);
                     __m256 pSrcY = _mm256_loadu_ps(rowRemapTableTemp);
                     __m256 pSrc[12], pDst[3];
-                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs, pSrcStrideH, pxSrcStridesCHW, srcDescPtr->c, pRoiLTRB, true);
-                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp32f>, srcPtrChannel, srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB, pSrc);  // Load input pixels required for bilinear interpolation
-                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs, pDst); // Compute Bilinear interpolation
-                    rpp_simd_store(rpp_store24_f32pln3_to_f32pln3_avx, dstPtrTempR, dstPtrTempG, dstPtrTempB, pDst); // Store dst pixels
+                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs,
+                                                            pSrcStrideH, pxSrcStridesCHW,
+                                                            srcDescPtr->c, pRoiLTRB, true);
+                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp32f>, srcPtrChannel,
+                                  srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB,
+                                  pSrc);  // Load input pixels required for bilinear interpolation
+                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs,
+                                                          pDst);  // Compute Bilinear interpolation
+                    rpp_simd_store(rpp_store24_f32pln3_to_f32pln3_avx, dstPtrTempR, dstPtrTempG,
+                                   dstPtrTempB, pDst);  // Store dst pixels
                     dstPtrTempR += vectorIncrementPerChannel;
                     dstPtrTempG += vectorIncrementPerChannel;
                     dstPtrTempB += vectorIncrementPerChannel;
@@ -1210,7 +1244,9 @@ omp_set_num_threads(handle.GetNumThreads());
                 }
 #endif
                 for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                    compute_generic_bilinear_interpolation_pkd3_to_pln3(*rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTempR++, dstPtrTempG++, dstPtrTempB++, srcPtrChannel, srcDescPtr);
+                    compute_generic_bilinear_interpolation_pkd3_to_pln3(
+                        *rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTempR++,
+                        dstPtrTempG++, dstPtrTempB++, srcPtrChannel, srcDescPtr);
 
                 dstPtrRowR += dstDescPtr->strides.hStride;
                 dstPtrRowG += dstDescPtr->strides.hStride;
@@ -1221,14 +1257,13 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
-            Rpp32f *dstPtrRow;
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
+            Rpp32f* dstPtrRow;
             dstPtrRow = dstPtrChannel;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
-                Rpp32f *dstPtrTemp;
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
+                Rpp32f* dstPtrTemp;
                 dstPtrTemp = dstPtrRow;
 
                 Rpp32f *rowRemapTableTemp, *colRemapTableTemp;
@@ -1237,23 +1272,30 @@ omp_set_num_threads(handle.GetNumThreads());
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 pSrcX = _mm256_loadu_ps(colRemapTableTemp);
                     __m256 pSrcY = _mm256_loadu_ps(rowRemapTableTemp);
                     __m256 pSrc[12], pDst[3];
-                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs, pSrcStrideH, pxSrcStridesCHW, srcDescPtr->c, pRoiLTRB, false);
-                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp32f>, srcPtrChannel, srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB, pSrc);  // Load input pixels required for bilinear interpolation
-                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs, pDst); // Compute Bilinear interpolation
-                    rpp_simd_store(rpp_store24_f32pln3_to_f32pkd3_avx, dstPtrTemp, pDst); // Store dst pixels
+                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs,
+                                                            pSrcStrideH, pxSrcStridesCHW,
+                                                            srcDescPtr->c, pRoiLTRB, false);
+                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp32f>, srcPtrChannel,
+                                  srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB,
+                                  pSrc);  // Load input pixels required for bilinear interpolation
+                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs,
+                                                          pDst);  // Compute Bilinear interpolation
+                    rpp_simd_store(rpp_store24_f32pln3_to_f32pkd3_avx, dstPtrTemp,
+                                   pDst);  // Store dst pixels
                     dstPtrTemp += vectorIncrement;
                     rowRemapTableTemp += vectorIncrementPerChannel;
                     colRemapTableTemp += vectorIncrementPerChannel;
                 }
 #endif
-                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                {
-                    compute_generic_bilinear_interpolation_pln3pkd3_to_pkd3(*rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp, srcPtrChannel, srcDescPtr);
+                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++) {
+                    compute_generic_bilinear_interpolation_pln3pkd3_to_pkd3(
+                        *rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp,
+                        srcPtrChannel, srcDescPtr);
                     dstPtrTemp += 3;
                 }
 
@@ -1264,14 +1306,13 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap without fused output-layout toggle (NHWC -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
-            Rpp32f *dstPtrRow;
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
+            Rpp32f* dstPtrRow;
             dstPtrRow = dstPtrChannel;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
-                Rpp32f *dstPtrTemp;
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
+                Rpp32f* dstPtrTemp;
                 dstPtrTemp = dstPtrRow;
 
                 Rpp32f *rowRemapTableTemp, *colRemapTableTemp;
@@ -1280,23 +1321,30 @@ omp_set_num_threads(handle.GetNumThreads());
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 pSrcX = _mm256_loadu_ps(colRemapTableTemp);
                     __m256 pSrcY = _mm256_loadu_ps(rowRemapTableTemp);
                     __m256 pSrc[12], pDst[3];
-                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs, pSrcStrideH, pxSrcStridesCHW, srcDescPtr->c, pRoiLTRB, true);
-                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp32f>, srcPtrChannel, srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB, pSrc);  // Load input pixels required for bilinear interpolation
-                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs, pDst); // Compute Bilinear interpolation
-                    rpp_simd_store(rpp_store24_f32pln3_to_f32pkd3_avx, dstPtrTemp, pDst); // Store dst pixels
+                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs,
+                                                            pSrcStrideH, pxSrcStridesCHW,
+                                                            srcDescPtr->c, pRoiLTRB, true);
+                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp32f>, srcPtrChannel,
+                                  srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB,
+                                  pSrc);  // Load input pixels required for bilinear interpolation
+                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs,
+                                                          pDst);  // Compute Bilinear interpolation
+                    rpp_simd_store(rpp_store24_f32pln3_to_f32pkd3_avx, dstPtrTemp,
+                                   pDst);  // Store dst pixels
                     dstPtrTemp += vectorIncrement;
                     rowRemapTableTemp += vectorIncrementPerChannel;
                     colRemapTableTemp += vectorIncrementPerChannel;
                 }
 #endif
-                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                {
-                    compute_generic_bilinear_interpolation_pln3pkd3_to_pkd3(*rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp, srcPtrChannel, srcDescPtr);
+                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++) {
+                    compute_generic_bilinear_interpolation_pln3pkd3_to_pkd3(
+                        *rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp,
+                        srcPtrChannel, srcDescPtr);
                     dstPtrTemp += 3;
                 }
 
@@ -1307,15 +1355,14 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap without fused output-layout toggle (NCHW -> NCHW)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp32f *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp32f *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 dstPtrTempR = dstPtrRowR;
                 dstPtrTempG = dstPtrRowG;
@@ -1327,15 +1374,21 @@ omp_set_num_threads(handle.GetNumThreads());
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 pSrcX = _mm256_loadu_ps(colRemapTableTemp);
                     __m256 pSrcY = _mm256_loadu_ps(rowRemapTableTemp);
                     __m256 pSrc[12], pDst[3];
-                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs, pSrcStrideH, pxSrcStridesCHW, srcDescPtr->c, pRoiLTRB, false);
-                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp32f>, srcPtrChannel, srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB, pSrc);  // Load input pixels required for bilinear interpolation
-                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs, pDst); // Compute Bilinear interpolation
-                    rpp_simd_store(rpp_store24_f32pln3_to_f32pln3_avx, dstPtrTempR, dstPtrTempG, dstPtrTempB, pDst); // Store dst pixels
+                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs,
+                                                            pSrcStrideH, pxSrcStridesCHW,
+                                                            srcDescPtr->c, pRoiLTRB, false);
+                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp32f>, srcPtrChannel,
+                                  srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB,
+                                  pSrc);  // Load input pixels required for bilinear interpolation
+                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs,
+                                                          pDst);  // Compute Bilinear interpolation
+                    rpp_simd_store(rpp_store24_f32pln3_to_f32pln3_avx, dstPtrTempR, dstPtrTempG,
+                                   dstPtrTempB, pDst);  // Store dst pixels
                     dstPtrTempR += vectorIncrementPerChannel;
                     dstPtrTempG += vectorIncrementPerChannel;
                     dstPtrTempB += vectorIncrementPerChannel;
@@ -1344,7 +1397,9 @@ omp_set_num_threads(handle.GetNumThreads());
                 }
 #endif
                 for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                    compute_generic_bilinear_interpolation_pln_to_pln(*rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTempR++, srcPtrChannel, srcDescPtr, dstDescPtr);
+                    compute_generic_bilinear_interpolation_pln_to_pln(
+                        *rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTempR++,
+                        srcPtrChannel, srcDescPtr, dstDescPtr);
 
                 dstPtrRowR += dstDescPtr->strides.hStride;
                 dstPtrRowG += dstDescPtr->strides.hStride;
@@ -1355,14 +1410,13 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap without fused output-layout toggle single channel (NCHW -> NCHW)
-        else if ((srcDescPtr->c == 1) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
-            Rpp32f *dstPtrRow;
+        else if ((srcDescPtr->c == 1) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NCHW)) {
+            Rpp32f* dstPtrRow;
             dstPtrRow = dstPtrChannel;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
-                Rpp32f *dstPtrTemp;
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+                Rpp32f* dstPtrTemp;
                 dstPtrTemp = dstPtrRow;
 
                 Rpp32f *rowRemapTableTemp, *colRemapTableTemp;
@@ -1371,22 +1425,29 @@ omp_set_num_threads(handle.GetNumThreads());
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 pSrcX = _mm256_loadu_ps(colRemapTableTemp);
                     __m256 pSrcY = _mm256_loadu_ps(rowRemapTableTemp);
                     __m256 pSrc[4], pDst;
-                    compute_generic_bilinear_srclocs_1c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs, pSrcStrideH, pxSrcStridesCHW, pRoiLTRB);
-                    rpp_simd_load(rpp_generic_bilinear_load_1c_avx<Rpp32f>, srcPtrChannel, srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB, pSrc);  // Load input pixels required for bilinear interpolation
-                    compute_bilinear_interpolation_1c_avx(pSrc, pBilinearCoeffs, pDst); // Compute Bilinear interpolation
-                    rpp_simd_store(rpp_store8_f32pln1_to_f32pln1_avx, dstPtrTemp, pDst); // Store dst pixels
+                    compute_generic_bilinear_srclocs_1c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs,
+                                                            pSrcStrideH, pxSrcStridesCHW, pRoiLTRB);
+                    rpp_simd_load(rpp_generic_bilinear_load_1c_avx<Rpp32f>, srcPtrChannel,
+                                  srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB,
+                                  pSrc);  // Load input pixels required for bilinear interpolation
+                    compute_bilinear_interpolation_1c_avx(pSrc, pBilinearCoeffs,
+                                                          pDst);  // Compute Bilinear interpolation
+                    rpp_simd_store(rpp_store8_f32pln1_to_f32pln1_avx, dstPtrTemp,
+                                   pDst);  // Store dst pixels
                     dstPtrTemp += vectorIncrementPerChannel;
                     rowRemapTableTemp += vectorIncrementPerChannel;
                     colRemapTableTemp += vectorIncrementPerChannel;
                 }
 #endif
                 for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                    compute_generic_bilinear_interpolation_pln_to_pln(*rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp++, srcPtrChannel, srcDescPtr, dstDescPtr);
+                    compute_generic_bilinear_interpolation_pln_to_pln(
+                        *rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp++,
+                        srcPtrChannel, srcDescPtr, dstDescPtr);
 
                 dstPtrRow += dstDescPtr->strides.hStride;
                 rowRemapTableImage += remapTableDescPtr->strides.hStride;
@@ -1398,18 +1459,11 @@ omp_set_num_threads(handle.GetNumThreads());
     return RPP_SUCCESS;
 }
 
-RppStatus remap_bilinear_i8_i8_host_tensor(Rpp8s *srcPtr,
-                                           RpptDescPtr srcDescPtr,
-                                           Rpp8s *dstPtr,
-                                           RpptDescPtr dstDescPtr,
-                                           Rpp32f *rowRemapTable,
-                                           Rpp32f *colRemapTable,
-                                           RpptDescPtr remapTableDescPtr,
-                                           RpptROIPtr roiTensorPtrSrc,
-                                           RpptRoiType roiType,
-                                           RppLayoutParams ,
-                                           rpp::Handle& handle)
-{
+RppStatus remap_bilinear_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s* dstPtr,
+                                           RpptDescPtr dstDescPtr, Rpp32f* rowRemapTable,
+                                           Rpp32f* colRemapTable, RpptDescPtr remapTableDescPtr,
+                                           RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                           RppLayoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
 #if __AVX2__
     __m256 pSrcStrideH = _mm256_set1_ps(srcDescPtr->strides.hStride);
@@ -1419,11 +1473,10 @@ RppStatus remap_bilinear_i8_i8_host_tensor(Rpp8s *srcPtr,
     pxSrcStridesCHW[2] = _mm256_set1_epi32(srcDescPtr->strides.wStride);
 #endif
 
-omp_set_dynamic(0);
-omp_set_num_threads(handle.GetNumThreads());
+    omp_set_dynamic(0);
+    omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-    for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi, roiLTRB;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
@@ -1439,7 +1492,8 @@ omp_set_num_threads(handle.GetNumThreads());
         rowRemapTableImage = rowRemapTable + batchCount * remapTableDescPtr->strides.nStride;
         colRemapTableImage = colRemapTable + batchCount * remapTableDescPtr->strides.nStride;
 
-        Rpp32u alignedLength = roi.xywhROI.roiWidth & ~7;   // Align dst width to process 8 dst pixels per iteration
+        Rpp32u alignedLength =
+            roi.xywhROI.roiWidth & ~7;  // Align dst width to process 8 dst pixels per iteration
         Rpp32s vectorIncrementPerChannel = 8;
         Rpp32s vectorIncrement = 24;
 
@@ -1454,15 +1508,14 @@ omp_set_num_threads(handle.GetNumThreads());
 #endif
 
         // Remap with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+            (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp8s *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
                 Rpp8s *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 dstPtrTempR = dstPtrRowR;
                 dstPtrTempG = dstPtrRowG;
@@ -1474,16 +1527,22 @@ omp_set_num_threads(handle.GetNumThreads());
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 pSrcX = _mm256_loadu_ps(colRemapTableTemp);
                     __m256 pSrcY = _mm256_loadu_ps(rowRemapTableTemp);
                     __m256 pSrc[12], pDst[3];
-                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs, pSrcStrideH, pxSrcStridesCHW, srcDescPtr->c, pRoiLTRB, true);
-                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp8s>, srcPtrChannel, srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB, pSrc);  // Load input pixels required for bilinear interpolation
-                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs, pDst); // Compute Bilinear interpolation
+                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs,
+                                                            pSrcStrideH, pxSrcStridesCHW,
+                                                            srcDescPtr->c, pRoiLTRB, true);
+                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp8s>, srcPtrChannel,
+                                  srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB,
+                                  pSrc);  // Load input pixels required for bilinear interpolation
+                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs,
+                                                          pDst);  // Compute Bilinear interpolation
                     compute_offset_i8_3c_avx(pDst);
-                    rpp_simd_store(rpp_store24_f32pln3_to_i8pln3_avx, dstPtrTempR, dstPtrTempG, dstPtrTempB, pDst); // Store dst pixels
+                    rpp_simd_store(rpp_store24_f32pln3_to_i8pln3_avx, dstPtrTempR, dstPtrTempG,
+                                   dstPtrTempB, pDst);  // Store dst pixels
                     dstPtrTempR += vectorIncrementPerChannel;
                     dstPtrTempG += vectorIncrementPerChannel;
                     dstPtrTempB += vectorIncrementPerChannel;
@@ -1492,7 +1551,9 @@ omp_set_num_threads(handle.GetNumThreads());
                 }
 #endif
                 for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                    compute_generic_bilinear_interpolation_pkd3_to_pln3(*rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTempR++, dstPtrTempG++, dstPtrTempB++, srcPtrChannel, srcDescPtr);
+                    compute_generic_bilinear_interpolation_pkd3_to_pln3(
+                        *rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTempR++,
+                        dstPtrTempG++, dstPtrTempB++, srcPtrChannel, srcDescPtr);
 
                 dstPtrRowR += dstDescPtr->strides.hStride;
                 dstPtrRowG += dstDescPtr->strides.hStride;
@@ -1503,14 +1564,13 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
-            Rpp8s *dstPtrRow;
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
+            Rpp8s* dstPtrRow;
             dstPtrRow = dstPtrChannel;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
-                Rpp8s *dstPtrTemp;
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
+                Rpp8s* dstPtrTemp;
                 dstPtrTemp = dstPtrRow;
 
                 Rpp32f *rowRemapTableTemp, *colRemapTableTemp;
@@ -1519,24 +1579,31 @@ omp_set_num_threads(handle.GetNumThreads());
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 pSrcX = _mm256_loadu_ps(colRemapTableTemp);
                     __m256 pSrcY = _mm256_loadu_ps(rowRemapTableTemp);
                     __m256 pSrc[12], pDst[3];
-                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs, pSrcStrideH, pxSrcStridesCHW, srcDescPtr->c, pRoiLTRB, false);
-                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp8s>, srcPtrChannel, srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB, pSrc);  // Load input pixels required for bilinear interpolation
-                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs, pDst); // Compute Bilinear interpolation
+                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs,
+                                                            pSrcStrideH, pxSrcStridesCHW,
+                                                            srcDescPtr->c, pRoiLTRB, false);
+                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp8s>, srcPtrChannel,
+                                  srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB,
+                                  pSrc);  // Load input pixels required for bilinear interpolation
+                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs,
+                                                          pDst);  // Compute Bilinear interpolation
                     compute_offset_i8_3c_avx(pDst);
-                    rpp_simd_store(rpp_store24_f32pln3_to_i8pkd3_avx, dstPtrTemp, pDst); // Store dst pixels
+                    rpp_simd_store(rpp_store24_f32pln3_to_i8pkd3_avx, dstPtrTemp,
+                                   pDst);  // Store dst pixels
                     dstPtrTemp += vectorIncrement;
                     rowRemapTableTemp += vectorIncrementPerChannel;
                     colRemapTableTemp += vectorIncrementPerChannel;
                 }
 #endif
-                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                {
-                    compute_generic_bilinear_interpolation_pln3pkd3_to_pkd3(*rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp, srcPtrChannel, srcDescPtr);
+                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++) {
+                    compute_generic_bilinear_interpolation_pln3pkd3_to_pkd3(
+                        *rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp,
+                        srcPtrChannel, srcDescPtr);
                     dstPtrTemp += 3;
                 }
 
@@ -1547,14 +1614,13 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap without fused output-layout toggle (NHWC -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
-            Rpp8s *dstPtrRow;
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
+            Rpp8s* dstPtrRow;
             dstPtrRow = dstPtrChannel;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
-                Rpp8s *dstPtrTemp;
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
+                Rpp8s* dstPtrTemp;
                 dstPtrTemp = dstPtrRow;
 
                 Rpp32f *rowRemapTableTemp, *colRemapTableTemp;
@@ -1563,24 +1629,31 @@ omp_set_num_threads(handle.GetNumThreads());
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 pSrcX = _mm256_loadu_ps(colRemapTableTemp);
                     __m256 pSrcY = _mm256_loadu_ps(rowRemapTableTemp);
                     __m256 pSrc[12], pDst[3];
-                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs, pSrcStrideH, pxSrcStridesCHW, srcDescPtr->c, pRoiLTRB, true);
-                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp8s>, srcPtrChannel, srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB, pSrc);  // Load input pixels required for bilinear interpolation
-                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs, pDst); // Compute Bilinear interpolation
+                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs,
+                                                            pSrcStrideH, pxSrcStridesCHW,
+                                                            srcDescPtr->c, pRoiLTRB, true);
+                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp8s>, srcPtrChannel,
+                                  srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB,
+                                  pSrc);  // Load input pixels required for bilinear interpolation
+                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs,
+                                                          pDst);  // Compute Bilinear interpolation
                     compute_offset_i8_3c_avx(pDst);
-                    rpp_simd_store(rpp_store24_f32pln3_to_i8pkd3_avx, dstPtrTemp, pDst); // Store dst pixels
+                    rpp_simd_store(rpp_store24_f32pln3_to_i8pkd3_avx, dstPtrTemp,
+                                   pDst);  // Store dst pixels
                     dstPtrTemp += vectorIncrement;
                     rowRemapTableTemp += vectorIncrementPerChannel;
                     colRemapTableTemp += vectorIncrementPerChannel;
                 }
 #endif
-                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                {
-                    compute_generic_bilinear_interpolation_pln3pkd3_to_pkd3(*rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp, srcPtrChannel, srcDescPtr);
+                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++) {
+                    compute_generic_bilinear_interpolation_pln3pkd3_to_pkd3(
+                        *rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp,
+                        srcPtrChannel, srcDescPtr);
                     dstPtrTemp += 3;
                 }
 
@@ -1591,15 +1664,14 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap without fused output-layout toggle (NCHW -> NCHW)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp8s *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp8s *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 dstPtrTempR = dstPtrRowR;
                 dstPtrTempG = dstPtrRowG;
@@ -1611,16 +1683,22 @@ omp_set_num_threads(handle.GetNumThreads());
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 pSrcX = _mm256_loadu_ps(colRemapTableTemp);
                     __m256 pSrcY = _mm256_loadu_ps(rowRemapTableTemp);
                     __m256 pSrc[12], pDst[3];
-                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs, pSrcStrideH, pxSrcStridesCHW, srcDescPtr->c, pRoiLTRB, false);
-                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp8s>, srcPtrChannel, srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB, pSrc);  // Load input pixels required for bilinear interpolation
-                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs, pDst); // Compute Bilinear interpolation
+                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs,
+                                                            pSrcStrideH, pxSrcStridesCHW,
+                                                            srcDescPtr->c, pRoiLTRB, false);
+                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp8s>, srcPtrChannel,
+                                  srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB,
+                                  pSrc);  // Load input pixels required for bilinear interpolation
+                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs,
+                                                          pDst);  // Compute Bilinear interpolation
                     compute_offset_i8_3c_avx(pDst);
-                    rpp_simd_store(rpp_store24_f32pln3_to_i8pln3_avx, dstPtrTempR, dstPtrTempG, dstPtrTempB, pDst); // Store dst pixels
+                    rpp_simd_store(rpp_store24_f32pln3_to_i8pln3_avx, dstPtrTempR, dstPtrTempG,
+                                   dstPtrTempB, pDst);  // Store dst pixels
                     dstPtrTempR += vectorIncrementPerChannel;
                     dstPtrTempG += vectorIncrementPerChannel;
                     dstPtrTempB += vectorIncrementPerChannel;
@@ -1629,7 +1707,9 @@ omp_set_num_threads(handle.GetNumThreads());
                 }
 #endif
                 for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                    compute_generic_bilinear_interpolation_pln_to_pln(*rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTempR++, srcPtrChannel, srcDescPtr, dstDescPtr);
+                    compute_generic_bilinear_interpolation_pln_to_pln(
+                        *rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTempR++,
+                        srcPtrChannel, srcDescPtr, dstDescPtr);
 
                 dstPtrRowR += dstDescPtr->strides.hStride;
                 dstPtrRowG += dstDescPtr->strides.hStride;
@@ -1640,14 +1720,13 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap without fused output-layout toggle single channel (NCHW -> NCHW)
-        else if ((srcDescPtr->c == 1) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
-            Rpp8s *dstPtrRow;
+        else if ((srcDescPtr->c == 1) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NCHW)) {
+            Rpp8s* dstPtrRow;
             dstPtrRow = dstPtrChannel;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
-                Rpp8s *dstPtrTemp;
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+                Rpp8s* dstPtrTemp;
                 dstPtrTemp = dstPtrRow;
 
                 Rpp32f *rowRemapTableTemp, *colRemapTableTemp;
@@ -1656,23 +1735,30 @@ omp_set_num_threads(handle.GetNumThreads());
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 pSrcX = _mm256_loadu_ps(colRemapTableTemp);
                     __m256 pSrcY = _mm256_loadu_ps(rowRemapTableTemp);
                     __m256 pSrc[4], pDst;
-                    compute_generic_bilinear_srclocs_1c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs, pSrcStrideH, pxSrcStridesCHW, pRoiLTRB);
-                    rpp_simd_load(rpp_generic_bilinear_load_1c_avx<Rpp8s>, srcPtrChannel, srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB, pSrc);  // Load input pixels required for bilinear interpolation
-                    compute_bilinear_interpolation_1c_avx(pSrc, pBilinearCoeffs, pDst); // Compute Bilinear interpolation
+                    compute_generic_bilinear_srclocs_1c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs,
+                                                            pSrcStrideH, pxSrcStridesCHW, pRoiLTRB);
+                    rpp_simd_load(rpp_generic_bilinear_load_1c_avx<Rpp8s>, srcPtrChannel,
+                                  srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB,
+                                  pSrc);  // Load input pixels required for bilinear interpolation
+                    compute_bilinear_interpolation_1c_avx(pSrc, pBilinearCoeffs,
+                                                          pDst);  // Compute Bilinear interpolation
                     compute_offset_i8_1c_avx(pDst);
-                    rpp_simd_store(rpp_store8_f32pln1_to_i8pln1_avx, dstPtrTemp, pDst); // Store dst pixels
+                    rpp_simd_store(rpp_store8_f32pln1_to_i8pln1_avx, dstPtrTemp,
+                                   pDst);  // Store dst pixels
                     dstPtrTemp += vectorIncrementPerChannel;
                     rowRemapTableTemp += vectorIncrementPerChannel;
                     colRemapTableTemp += vectorIncrementPerChannel;
                 }
 #endif
                 for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                    compute_generic_bilinear_interpolation_pln_to_pln(*rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp++, srcPtrChannel, srcDescPtr, dstDescPtr);
+                    compute_generic_bilinear_interpolation_pln_to_pln(
+                        *rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp++,
+                        srcPtrChannel, srcDescPtr, dstDescPtr);
 
                 dstPtrRow += dstDescPtr->strides.hStride;
                 rowRemapTableImage += remapTableDescPtr->strides.hStride;
@@ -1684,18 +1770,11 @@ omp_set_num_threads(handle.GetNumThreads());
     return RPP_SUCCESS;
 }
 
-RppStatus remap_bilinear_f16_f16_host_tensor(Rpp16f *srcPtr,
-                                             RpptDescPtr srcDescPtr,
-                                             Rpp16f *dstPtr,
-                                             RpptDescPtr dstDescPtr,
-                                             Rpp32f *rowRemapTable,
-                                             Rpp32f *colRemapTable,
-                                             RpptDescPtr remapTableDescPtr,
-                                             RpptROIPtr roiTensorPtrSrc,
-                                             RpptRoiType roiType,
-                                             RppLayoutParams layoutParams,
-                                             rpp::Handle& handle)
-{
+RppStatus remap_bilinear_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, Rpp16f* dstPtr,
+                                             RpptDescPtr dstDescPtr, Rpp32f* rowRemapTable,
+                                             Rpp32f* colRemapTable, RpptDescPtr remapTableDescPtr,
+                                             RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                             RppLayoutParams layoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
 #if __AVX2__
     __m256 pSrcStrideH = _mm256_set1_ps(srcDescPtr->strides.hStride);
@@ -1705,11 +1784,10 @@ RppStatus remap_bilinear_f16_f16_host_tensor(Rpp16f *srcPtr,
     pxSrcStridesCHW[2] = _mm256_set1_epi32(srcDescPtr->strides.wStride);
 #endif
 
-omp_set_dynamic(0);
-omp_set_num_threads(handle.GetNumThreads());
+    omp_set_dynamic(0);
+    omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-    for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi, roiLTRB;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
@@ -1725,7 +1803,8 @@ omp_set_num_threads(handle.GetNumThreads());
         rowRemapTableImage = rowRemapTable + batchCount * remapTableDescPtr->strides.nStride;
         colRemapTableImage = colRemapTable + batchCount * remapTableDescPtr->strides.nStride;
 
-        Rpp32u alignedLength = roi.xywhROI.roiWidth & ~7;   // Align dst width to process 8 dst pixels per iteration
+        Rpp32u alignedLength =
+            roi.xywhROI.roiWidth & ~7;  // Align dst width to process 8 dst pixels per iteration
         Rpp32s vectorIncrementPerChannel = 8;
         Rpp32s vectorIncrement = 24;
 
@@ -1740,15 +1819,14 @@ omp_set_num_threads(handle.GetNumThreads());
 #endif
 
         // Remap with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+            (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp16f *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
                 Rpp16f *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 dstPtrTempR = dstPtrRowR;
                 dstPtrTempG = dstPtrRowG;
@@ -1760,21 +1838,26 @@ omp_set_num_threads(handle.GetNumThreads());
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 pSrcX = _mm256_loadu_ps(colRemapTableTemp);
                     __m256 pSrcY = _mm256_loadu_ps(rowRemapTableTemp);
                     __m256 pSrc[12], pDst[3];
                     Rpp32f dstPtrTempR_ps[8], dstPtrTempG_ps[8], dstPtrTempB_ps[8];
-                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs, pSrcStrideH, pxSrcStridesCHW, srcDescPtr->c, pRoiLTRB, true);
-                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp16f>, srcPtrChannel, srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB, pSrc);  // Load input pixels required for bilinear interpolation
-                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs, pDst); // Compute Bilinear interpolation
-                    rpp_simd_store(rpp_store24_f32pln3_to_f32pln3_avx, dstPtrTempR_ps, dstPtrTempG_ps, dstPtrTempB_ps, pDst); // Store dst pixels
-                    for(int cnt = 0; cnt < vectorIncrementPerChannel; cnt++)
-                    {
-                        dstPtrTempR[cnt] = (Rpp16f) dstPtrTempR_ps[cnt];
-                        dstPtrTempG[cnt] = (Rpp16f) dstPtrTempG_ps[cnt];
-                        dstPtrTempB[cnt] = (Rpp16f) dstPtrTempB_ps[cnt];
+                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs,
+                                                            pSrcStrideH, pxSrcStridesCHW,
+                                                            srcDescPtr->c, pRoiLTRB, true);
+                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp16f>, srcPtrChannel,
+                                  srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB,
+                                  pSrc);  // Load input pixels required for bilinear interpolation
+                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs,
+                                                          pDst);  // Compute Bilinear interpolation
+                    rpp_simd_store(rpp_store24_f32pln3_to_f32pln3_avx, dstPtrTempR_ps,
+                                   dstPtrTempG_ps, dstPtrTempB_ps, pDst);  // Store dst pixels
+                    for (int cnt = 0; cnt < vectorIncrementPerChannel; cnt++) {
+                        dstPtrTempR[cnt] = (Rpp16f)dstPtrTempR_ps[cnt];
+                        dstPtrTempG[cnt] = (Rpp16f)dstPtrTempG_ps[cnt];
+                        dstPtrTempB[cnt] = (Rpp16f)dstPtrTempB_ps[cnt];
                     }
                     dstPtrTempR += vectorIncrementPerChannel;
                     dstPtrTempG += vectorIncrementPerChannel;
@@ -1784,7 +1867,9 @@ omp_set_num_threads(handle.GetNumThreads());
                 }
 #endif
                 for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                    compute_generic_bilinear_interpolation_pkd3_to_pln3(*rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTempR++, dstPtrTempG++, dstPtrTempB++, srcPtrChannel, srcDescPtr);
+                    compute_generic_bilinear_interpolation_pkd3_to_pln3(
+                        *rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTempR++,
+                        dstPtrTempG++, dstPtrTempB++, srcPtrChannel, srcDescPtr);
 
                 dstPtrRowR += dstDescPtr->strides.hStride;
                 dstPtrRowG += dstDescPtr->strides.hStride;
@@ -1795,14 +1880,13 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
-            Rpp16f *dstPtrRow;
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
+            Rpp16f* dstPtrRow;
             dstPtrRow = dstPtrChannel;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
-                Rpp16f *dstPtrTemp;
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
+                Rpp16f* dstPtrTemp;
                 dstPtrTemp = dstPtrRow;
 
                 Rpp32f *rowRemapTableTemp, *colRemapTableTemp;
@@ -1811,26 +1895,33 @@ omp_set_num_threads(handle.GetNumThreads());
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 pSrcX = _mm256_loadu_ps(colRemapTableTemp);
                     __m256 pSrcY = _mm256_loadu_ps(rowRemapTableTemp);
                     __m256 pSrc[12], pDst[3];
                     Rpp32f dstPtrTemp_ps[25];
-                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs, pSrcStrideH, pxSrcStridesCHW, srcDescPtr->c, pRoiLTRB, false);
-                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp16f>, srcPtrChannel, srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB, pSrc);  // Load input pixels required for bilinear interpolation
-                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs, pDst); // Compute Bilinear interpolation
-                    rpp_simd_store(rpp_store24_f32pln3_to_f32pkd3_avx, dstPtrTemp_ps, pDst); // Store dst pixels
-                    for(int cnt = 0; cnt < vectorIncrement; cnt++)
-                        dstPtrTemp[cnt] = (Rpp16f) dstPtrTemp_ps[cnt];
+                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs,
+                                                            pSrcStrideH, pxSrcStridesCHW,
+                                                            srcDescPtr->c, pRoiLTRB, false);
+                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp16f>, srcPtrChannel,
+                                  srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB,
+                                  pSrc);  // Load input pixels required for bilinear interpolation
+                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs,
+                                                          pDst);  // Compute Bilinear interpolation
+                    rpp_simd_store(rpp_store24_f32pln3_to_f32pkd3_avx, dstPtrTemp_ps,
+                                   pDst);  // Store dst pixels
+                    for (int cnt = 0; cnt < vectorIncrement; cnt++)
+                        dstPtrTemp[cnt] = (Rpp16f)dstPtrTemp_ps[cnt];
                     dstPtrTemp += vectorIncrement;
                     rowRemapTableTemp += vectorIncrementPerChannel;
                     colRemapTableTemp += vectorIncrementPerChannel;
                 }
 #endif
-                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                {
-                    compute_generic_bilinear_interpolation_pln3pkd3_to_pkd3(*rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp, srcPtrChannel, srcDescPtr);
+                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++) {
+                    compute_generic_bilinear_interpolation_pln3pkd3_to_pkd3(
+                        *rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp,
+                        srcPtrChannel, srcDescPtr);
                     dstPtrTemp += 3;
                 }
 
@@ -1841,14 +1932,13 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap without fused output-layout toggle (NHWC -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
-            Rpp16f *dstPtrRow;
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
+            Rpp16f* dstPtrRow;
             dstPtrRow = dstPtrChannel;
 
-            for(int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++)
-            {
-                Rpp16f *dstPtrTemp;
+            for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
+                Rpp16f* dstPtrTemp;
                 dstPtrTemp = dstPtrRow;
 
                 Rpp32f *rowRemapTableTemp, *colRemapTableTemp;
@@ -1857,26 +1947,33 @@ omp_set_num_threads(handle.GetNumThreads());
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 pSrcX = _mm256_loadu_ps(colRemapTableTemp);
                     __m256 pSrcY = _mm256_loadu_ps(rowRemapTableTemp);
                     __m256 pSrc[12], pDst[3];
                     Rpp32f dstPtrTemp_ps[25];
-                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs, pSrcStrideH, pxSrcStridesCHW, srcDescPtr->c, pRoiLTRB, true);
-                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp16f>, srcPtrChannel, srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB, pSrc);  // Load input pixels required for bilinear interpolation
-                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs, pDst); // Compute Bilinear interpolation
-                    rpp_simd_store(rpp_store24_f32pln3_to_f32pkd3_avx, dstPtrTemp_ps, pDst); // Store dst pixels
-                    for(int cnt = 0; cnt < vectorIncrement; cnt++)
-                        dstPtrTemp[cnt] = (Rpp16f) dstPtrTemp_ps[cnt];
+                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs,
+                                                            pSrcStrideH, pxSrcStridesCHW,
+                                                            srcDescPtr->c, pRoiLTRB, true);
+                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp16f>, srcPtrChannel,
+                                  srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB,
+                                  pSrc);  // Load input pixels required for bilinear interpolation
+                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs,
+                                                          pDst);  // Compute Bilinear interpolation
+                    rpp_simd_store(rpp_store24_f32pln3_to_f32pkd3_avx, dstPtrTemp_ps,
+                                   pDst);  // Store dst pixels
+                    for (int cnt = 0; cnt < vectorIncrement; cnt++)
+                        dstPtrTemp[cnt] = (Rpp16f)dstPtrTemp_ps[cnt];
                     dstPtrTemp += vectorIncrement;
                     rowRemapTableTemp += vectorIncrementPerChannel;
                     colRemapTableTemp += vectorIncrementPerChannel;
                 }
 #endif
-                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                {
-                    compute_generic_bilinear_interpolation_pln3pkd3_to_pkd3(*rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp, srcPtrChannel, srcDescPtr);
+                for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++) {
+                    compute_generic_bilinear_interpolation_pln3pkd3_to_pkd3(
+                        *rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp,
+                        srcPtrChannel, srcDescPtr);
                     dstPtrTemp += 3;
                 }
 
@@ -1887,15 +1984,14 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap without fused output-layout toggle (NCHW -> NCHW)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp16f *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp16f *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 dstPtrTempR = dstPtrRowR;
                 dstPtrTempG = dstPtrRowG;
@@ -1907,21 +2003,26 @@ omp_set_num_threads(handle.GetNumThreads());
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 pSrcX = _mm256_loadu_ps(colRemapTableTemp);
                     __m256 pSrcY = _mm256_loadu_ps(rowRemapTableTemp);
                     __m256 pSrc[12], pDst[3];
                     Rpp32f dstPtrTempR_ps[8], dstPtrTempG_ps[8], dstPtrTempB_ps[8];
-                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs, pSrcStrideH, pxSrcStridesCHW, srcDescPtr->c, pRoiLTRB, false);
-                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp16f>, srcPtrChannel, srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB, pSrc);  // Load input pixels required for bilinear interpolation
-                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs, pDst); // Compute Bilinear interpolation
-                    rpp_simd_store(rpp_store24_f32pln3_to_f32pln3_avx, dstPtrTempR_ps, dstPtrTempG_ps, dstPtrTempB_ps, pDst); // Store dst pixels
-                    for(int cnt = 0; cnt < vectorIncrementPerChannel; cnt++)
-                    {
-                        dstPtrTempR[cnt] = (Rpp16f) dstPtrTempR_ps[cnt];
-                        dstPtrTempG[cnt] = (Rpp16f) dstPtrTempG_ps[cnt];
-                        dstPtrTempB[cnt] = (Rpp16f) dstPtrTempB_ps[cnt];
+                    compute_generic_bilinear_srclocs_3c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs,
+                                                            pSrcStrideH, pxSrcStridesCHW,
+                                                            srcDescPtr->c, pRoiLTRB, false);
+                    rpp_simd_load(rpp_generic_bilinear_load_3c_avx<Rpp16f>, srcPtrChannel,
+                                  srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB,
+                                  pSrc);  // Load input pixels required for bilinear interpolation
+                    compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs,
+                                                          pDst);  // Compute Bilinear interpolation
+                    rpp_simd_store(rpp_store24_f32pln3_to_f32pln3_avx, dstPtrTempR_ps,
+                                   dstPtrTempG_ps, dstPtrTempB_ps, pDst);  // Store dst pixels
+                    for (int cnt = 0; cnt < vectorIncrementPerChannel; cnt++) {
+                        dstPtrTempR[cnt] = (Rpp16f)dstPtrTempR_ps[cnt];
+                        dstPtrTempG[cnt] = (Rpp16f)dstPtrTempG_ps[cnt];
+                        dstPtrTempB[cnt] = (Rpp16f)dstPtrTempB_ps[cnt];
                     }
                     dstPtrTempR += vectorIncrementPerChannel;
                     dstPtrTempG += vectorIncrementPerChannel;
@@ -1931,7 +2032,9 @@ omp_set_num_threads(handle.GetNumThreads());
                 }
 #endif
                 for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                    compute_generic_bilinear_interpolation_pln_to_pln(*rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTempR++, srcPtrChannel, srcDescPtr, dstDescPtr);
+                    compute_generic_bilinear_interpolation_pln_to_pln(
+                        *rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTempR++,
+                        srcPtrChannel, srcDescPtr, dstDescPtr);
 
                 dstPtrRowR += dstDescPtr->strides.hStride;
                 dstPtrRowG += dstDescPtr->strides.hStride;
@@ -1942,14 +2045,13 @@ omp_set_num_threads(handle.GetNumThreads());
         }
 
         // Remap without fused output-layout toggle single channel (NCHW -> NCHW)
-        else if ((srcDescPtr->c == 1) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
-            Rpp16f *dstPtrRow;
+        else if ((srcDescPtr->c == 1) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NCHW)) {
+            Rpp16f* dstPtrRow;
             dstPtrRow = dstPtrChannel;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
-                Rpp16f *dstPtrTemp;
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+                Rpp16f* dstPtrTemp;
                 dstPtrTemp = dstPtrRow;
 
                 Rpp32f *rowRemapTableTemp, *colRemapTableTemp;
@@ -1958,25 +2060,32 @@ omp_set_num_threads(handle.GetNumThreads());
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 pSrcX = _mm256_loadu_ps(colRemapTableTemp);
                     __m256 pSrcY = _mm256_loadu_ps(rowRemapTableTemp);
                     __m256 pSrc[4], pDst;
                     Rpp32f dstPtrTemp_ps[8];
-                    compute_generic_bilinear_srclocs_1c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs, pSrcStrideH, pxSrcStridesCHW, pRoiLTRB);
-                    rpp_simd_load(rpp_generic_bilinear_load_1c_avx<Rpp16f>, srcPtrChannel, srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB, pSrc);  // Load input pixels required for bilinear interpolation
-                    compute_bilinear_interpolation_1c_avx(pSrc, pBilinearCoeffs, pDst); // Compute Bilinear interpolation
-                    rpp_simd_store(rpp_store8_f32pln1_to_f32pln1_avx, dstPtrTemp_ps, pDst); // Store dst pixels
-                    for(int cnt = 0; cnt < vectorIncrementPerChannel; cnt++)
-                        dstPtrTemp[cnt] = (Rpp16f) dstPtrTemp_ps[cnt];
+                    compute_generic_bilinear_srclocs_1c_avx(pSrcY, pSrcX, srcLocs, pBilinearCoeffs,
+                                                            pSrcStrideH, pxSrcStridesCHW, pRoiLTRB);
+                    rpp_simd_load(rpp_generic_bilinear_load_1c_avx<Rpp16f>, srcPtrChannel,
+                                  srcDescPtr, srcLocs, pSrcY, pSrcX, pRoiLTRB,
+                                  pSrc);  // Load input pixels required for bilinear interpolation
+                    compute_bilinear_interpolation_1c_avx(pSrc, pBilinearCoeffs,
+                                                          pDst);  // Compute Bilinear interpolation
+                    rpp_simd_store(rpp_store8_f32pln1_to_f32pln1_avx, dstPtrTemp_ps,
+                                   pDst);  // Store dst pixels
+                    for (int cnt = 0; cnt < vectorIncrementPerChannel; cnt++)
+                        dstPtrTemp[cnt] = (Rpp16f)dstPtrTemp_ps[cnt];
                     dstPtrTemp += vectorIncrementPerChannel;
                     rowRemapTableTemp += vectorIncrementPerChannel;
                     colRemapTableTemp += vectorIncrementPerChannel;
                 }
 #endif
                 for (; vectorLoopCount < roi.xywhROI.roiWidth; vectorLoopCount++)
-                    compute_generic_bilinear_interpolation_pln_to_pln(*rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp++, srcPtrChannel, srcDescPtr, dstDescPtr);
+                    compute_generic_bilinear_interpolation_pln_to_pln(
+                        *rowRemapTableTemp++, *colRemapTableTemp++, &roiLTRB, dstPtrTemp++,
+                        srcPtrChannel, srcDescPtr, dstDescPtr);
 
                 dstPtrRow += dstDescPtr->strides.hStride;
                 rowRemapTableImage += remapTableDescPtr->strides.hStride;
