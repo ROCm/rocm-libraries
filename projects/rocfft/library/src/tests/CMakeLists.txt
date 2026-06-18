@@ -65,14 +65,15 @@ gtest_discover_tests( rocfft-internal-test )
 
 # Opt-in: also run the tests automatically when the executable is built,
 # so a test failure fails the build.  ROCFFT_INTERNAL_TESTS_FILTER (if set)
-# restricts which tests run via GoogleTest's --gtest_filter.
+# restricts which tests run via GoogleTest's --gtest_filter.  The run goes
+# through run_internal_tests.cmake, which also fails the build if the filter
+# selects no tests (gtest would otherwise exit 0 on an empty selection).
 if( ROCFFT_RUN_INTERNAL_TESTS )
-  set( internal_tests_run_args "" )
-  if( ROCFFT_INTERNAL_TESTS_FILTER )
-    set( internal_tests_run_args --gtest_filter=${ROCFFT_INTERNAL_TESTS_FILTER} )
-  endif()
   add_custom_command( TARGET rocfft-internal-test POST_BUILD
-    COMMAND rocfft-internal-test ${internal_tests_run_args}
+    COMMAND ${CMAKE_COMMAND}
+      -DTEST_EXE=$<TARGET_FILE:rocfft-internal-test>
+      -DTEST_FILTER=${ROCFFT_INTERNAL_TESTS_FILTER}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/run_internal_tests.cmake
     COMMENT "Running internal tests..."
     VERBATIM )
 endif()
