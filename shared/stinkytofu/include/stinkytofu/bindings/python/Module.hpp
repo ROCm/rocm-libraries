@@ -43,6 +43,7 @@
 #define MODULE_OPTIONS_LIST(X)            \
     X(DebugLevel, int)                    \
     X(OptLevel, int)                      \
+    X(MsbOnly, bool)                      \
     X(TileA0, int)                        \
     X(TileB0, int)                        \
     X(TileM0, int)                        \

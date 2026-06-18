@@ -98,6 +98,15 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     auto debugStreams = createDebugOutputStreams(moduleOptions);
     configureDebugOutput(pm, moduleOptions, "kernel-OuterPM", debugStreams);
 
+    // MsbOnly: minimal pipeline used by paths (e.g. the Subtile kernel body) that
+    // emit their own scheduled assembly and only need VGPR-MSB legalization on the
+    // flat, freshly-converted IR. InsertVgprMsbPass is self-contained (per-BB, no
+    // analysis or CFG dependency), so no other pass is required here.
+    if (moduleOptions.MsbOnly) {
+        pm.addPass(createInsertVgprMsbPass());
+        return true;
+    }
+
     const bool runScheduler = optLevel != OptLevel::O0;
     if (runScheduler || moduleOptions.EnableESM2) {
         // strip delay_alu before scheduling

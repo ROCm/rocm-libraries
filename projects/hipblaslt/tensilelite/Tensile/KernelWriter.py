@@ -5205,6 +5205,39 @@ class KernelWriter(metaclass=abc.ABCMeta):
     error = self.states.overflowedResources
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")
 
+    # The Subtile path emits its own scheduled assembly, so it does not run the
+    # full StinkyTofu optimization pipeline. On supported architectures it still
+    # needs VGPR-MSB legalization for kernels that use VGPRs above 256. Run a
+    # minimal StinkyTofu pipeline (MsbOnly) that executes only InsertVgprMsbPass
+    # on the flat, freshly-converted IR.
+    if rocisa.isSupportedByStinkyTofu(self.states.version):
+      print2(f"StinkyTofu: Running MSB-only pass for subtile kernel on gfx{self.states.version[0]}{self.states.version[1]}{self.states.version[2]}...")
+      moduleKernelBody.body.setParent()
+      stinky_module_options = {"OptLevel": 0,
+                               "MsbOnly": True,
+                               "wavefrontSize": kernel["WavefrontSize"],
+                               "TileA0": kernel["ThreadTile0"],
+                               "TileB0": kernel["ThreadTile1"],
+                               "TileM0": kernel["MacroTile0"],
+                               "SubGroup0": kernel["SubGroup0"],
+                               "SubGroup1": kernel["SubGroup1"],
+                               "WaveGroup0": kernel["MIWaveGroup"][0],
+                               "WaveGroup1": kernel["MIWaveGroup"][1],
+                               "VectorWidthA": kernel["VectorWidthA"],
+                               "VectorWidthB": kernel["VectorWidthB"],
+                               "GlobalReadVectorWidthA": kernel["GlobalReadVectorWidthA"],
+                               "GlobalReadVectorWidthB": kernel["GlobalReadVectorWidthB"],
+                               "DirectToLdsA": bool(kernel["DirectToLdsA"]),
+                               "DirectToLdsB": bool(kernel["DirectToLdsB"]),
+                               "UseSgprForGRO": kernel["_UseSgprForGRO"]}
+      stModule = rocisa.toStinkyTofuModule(moduleKernelBody.body, self.states.version, "kernel_name",
+                                           signature=fs,
+                                           options=stinky_module_options)
+      stModule.runOptimizationPipeline()
+      st_asm = stModule.emitAssembly()
+      print2(f"Using StinkyTofu Assembly (MSB-only) for subtile kernel")
+      return (error, st_asm)
+
     return (error, str(moduleKernelBody))
 
 
