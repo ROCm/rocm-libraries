@@ -8,6 +8,7 @@ using Row = ck_tile::tensor_layout::gemm::RowMajor;
 using Col = ck_tile::tensor_layout::gemm::ColumnMajor;
 using F4  = ck_tile::pk_fp4_t;
 using F8  = ck_tile::fp8_t;
+using B8  = ck_tile::bf8_t;
 
 // clang-format off
 using MxTypes = ::testing::Types<std::tuple<F4, F4, MX_GemmConfig16,               Row, Col, Row>,
@@ -46,7 +47,17 @@ using MxTypesTranspose = ::testing::Types<
     std::tuple<F8, F8, MXfp8_GemmConfig32, Row, Col, Row>,
     std::tuple<F8, F8, MXfp8_GemmConfig32, Row, Row, Row>,
     std::tuple<F8, F8, MXfp8_GemmConfig32, Col, Col, Row>,
-    std::tuple<F8, F8, MXfp8_GemmConfig32, Col, Row, Row>>;
+    std::tuple<F8, F8, MXfp8_GemmConfig32, Col, Row, Row>,
+    // bf8/bf8 and mixed fp8/bf8 exercise the float8 paths newly consolidated into the generic
+    // 32x32x64 f8/f6/f4 dispatcher (previously distinct per-type code paths).
+    std::tuple<B8, B8, MXfp8_GemmConfig32, Row, Col, Row>,
+    std::tuple<B8, B8, MXfp8_GemmConfig32, Row, Row, Row>,
+    std::tuple<B8, B8, MXfp8_GemmConfig32, Col, Col, Row>,
+    std::tuple<B8, B8, MXfp8_GemmConfig32, Col, Row, Row>,
+    std::tuple<F8, B8, MXfp8_GemmConfig32, Row, Col, Row>,
+    std::tuple<F8, B8, MXfp8_GemmConfig32, Row, Row, Row>,
+    std::tuple<F8, B8, MXfp8_GemmConfig32, Col, Col, Row>,
+    std::tuple<F8, B8, MXfp8_GemmConfig32, Col, Row, Row>>;
 // clang-format on
 
 template <typename TypeParam>
