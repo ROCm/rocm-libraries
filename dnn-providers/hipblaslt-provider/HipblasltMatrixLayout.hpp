@@ -33,7 +33,7 @@ public:
 
 private:
     int64_t _uid{0};
-    hipblasLtMatrixLayout_t _matrix_layout{nullptr};
+    hipblasLtMatrixLayout_t _matrixLayout{nullptr};
 };
 
 } // namespace hipblaslt_plugin

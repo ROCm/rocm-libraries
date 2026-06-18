@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -104,7 +104,7 @@ int main(int argc, char* argv[])
     HIP_CHECK(hipMalloc((void**)&dy, sizeof(float) * m));
     HIP_CHECK(hipMemcpy(dy, hy.data(), sizeof(float) * m, hipMemcpyHostToDevice));
 
-    hipsparseDnMatDescr_t vecY;
+    hipsparseDnVecDescr_t vecY;
     HIPSPARSE_CHECK(hipsparseCreateDnVec(&vecY, m, dy, HIP_R_32F));
 
     // Compute buffersize

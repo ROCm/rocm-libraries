@@ -120,9 +120,13 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
   createLibraryScript = getBuildClientLibraryScript(clientLibraryPath, libraryLogicPath, str(assembler.path), targetGfx)
   subprocess.run(shlex.split(createLibraryScript), env=env, cwd=clientLibraryPath)
   archs = [isaToGfx(isa) for isa in isaInfoMap.keys()]
-  libraryGlobBase = libraryDir(clientLibraryPath, archs)
-  coList = glob(os.path.join(libraryGlobBase, "*.co"))
-  yamlList = glob(os.path.join(libraryGlobBase, "*.yaml"))
+  # Kernels fan out into one per-base subdir per arch; union the globs across them.
+  coList = []
+  yamlList = []
+  for arch in archs:
+    archDir = libraryDir(clientLibraryPath, arch)
+    coList.extend(glob(os.path.join(archDir, "*.co")))
+    yamlList.extend(glob(os.path.join(archDir, "*.yaml")))
 
   clientParametersPaths = []
   splitGSU = False
@@ -359,7 +363,7 @@ fi
   else:
     mxScaleFormatFlag = " --mx-scale-format {}".format(globalParameters["MXScaleFormat"]) if globalParameters["MXScaleFormat"] else ""
     for configFile in configPaths:
-      runScriptFile.write("{} --config-file {} --best-solution 1{}\n".format(getClientExecutablePath(), configFile, mxScaleFormatFlag))
+      runScriptFile.write("{} --config-file {} --best-solution{}\n".format(getClientExecutablePath(), configFile, mxScaleFormatFlag))
 
   if os.name != "nt":
     runScriptFile.write("exit $ERR\n")
@@ -558,17 +562,18 @@ def pruneModeName(mode):
     if mode == 5: return 'Prune0X0X'
     if mode == 6: return 'Prune00XX'
 
-def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, problemType, sourceDir, codeObjectFiles, resultsFileName, parametersFilePath, deviceId: int, gfxName: str, libraryFile=None, probSolMap={}):
+def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, problemType, sourceDir, codeObjectFiles, resultsFileName, parametersFilePath, deviceId: int, gfxName: str, libraryFile, probSolMap={}):
 
     assert os.path.exists(sourceDir), f"sourceDir={sourceDir} does not exist"
+    # libraryFile must point at the per-base TensileLibrary{,.yaml,.dat}; the
+    # previous flat default `<sourceDir>/library/TensileLibrary.{dat,yaml}`
+    # silently masked the per-base layout when callers forgot to compute it.
+    assert libraryFile, "libraryFile is required; pass the per-base TensileLibrary path"
 
     with open(parametersFilePath, "w") as f:
         def param(key, value):
             f.write("{}={}\n".format(key, value))
 
-        if libraryFile is None:
-          libraryFilename = "TensileLibrary.yaml" if globalParameters["LibraryFormat"] == "yaml" else "TensileLibrary.dat"
-          libraryFile = os.path.join(sourceDir, "library", libraryFilename)
         param("library-file", libraryFile)
 
         for coFile in codeObjectFiles:
@@ -643,6 +648,13 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('activation-no-guard', problemType.activationNoGuard)
         if globalParameters["DataInitValueActivationArgs"]:
           param('activation-additional-args', ','.join(map(str, globalParameters["DataInitValueActivationArgs"])))
+        # Only emit non-default StreamKHybridMode values to keep
+        # existing tests' INIs byte-identical. The C++ client defaults
+        # to a single-element vector [0], which is the same as omitting
+        # the INI key entirely.
+        if globalParameters["StreamKHybridMode"] not in ([0], (0,)):
+          for v in globalParameters["StreamKHybridMode"]:
+            param('streamk-hybrid-mode', int(v))
 
         param("device-idx",               deviceId)
 
@@ -715,6 +727,8 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param("use-user-args",            globalParameters["UseUserArgs"])
         param("rotating-buffer-size",     globalParameters["RotatingBufferSize"])
         param("rotating-buffer-mode",     globalParameters["RotatingMode"])
+        param("icache-rotate-copies",     globalParameters["IcacheRotateCopies"])
+        param("icache-rotate-size",       globalParameters["IcacheRotateSize"])
         if globalParameters["RocProfCounter"]:
             for counter in globalParameters["RocProfCounter"]:
                 param("rocprof-counter", counter)
@@ -735,7 +749,8 @@ def writeClientConfig(
       deviceId: int,
       gfxName: str,
       configBase = "ClientParameters",
-      libraryFile = None,
+      *,
+      libraryFile,
       probSolMap = {},
       sourceDir = None
     ):
@@ -764,7 +779,19 @@ def writeClientConfig(
 
 def CreateBenchmarkClientParametersForSizes(libraryRootPath, problemSizes, dataFilePath, configFile, deviceId, gfxName, problemTypeDict=None, archs=None):
 
-    libraryPath = libraryDir(libraryRootPath, archs or [])
+    # Benchmarking operates on a single arch at a time. Resolve the per-base
+    # dir from the arch the caller already holds (archs, else gfxName) via the
+    # same prescription used to write it; an unknown arch is a hard error, not
+    # a filesystem guess.
+    if archs:
+        libraryPath = libraryDir(libraryRootPath, archs[0])
+    elif gfxName:
+        libraryPath = libraryDir(libraryRootPath, gfxName)
+    else:
+        raise RuntimeError(
+            "CreateBenchmarkClientParametersForSizes: arch is required; "
+            "pass archs=[...] or a non-empty gfxName"
+        )
     libraryFiles = [os.path.join(str(libraryPath), f) for f in os.listdir(libraryPath)]
     codeObjectFiles = [f for f in libraryFiles if f.endswith("co")]
 
@@ -779,7 +806,9 @@ def CreateBenchmarkClientParametersForSizes(libraryRootPath, problemSizes, dataF
       problemTypeDict = metaData["ProblemType"]
       problemType = ContractionsProblemType.FromOriginalState(problemTypeDict)
 
-    writeClientConfigIni(True, problemSizes, "", "", "", "", problemType, libraryRootPath, codeObjectFiles, dataFilePath, configFile, deviceId, gfxName)
+    libraryExt = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat"
+    libraryFile = str(libraryPath / ("TensileLibrary" + libraryExt))
+    writeClientConfigIni(True, problemSizes, "", "", "", "", problemType, libraryRootPath, codeObjectFiles, dataFilePath, configFile, deviceId, gfxName, libraryFile=libraryFile)
 
 def getClientExecutablePath():
   clientExe = globalParameters.get("PrebuiltClient")

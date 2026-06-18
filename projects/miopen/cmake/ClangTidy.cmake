@@ -47,6 +47,7 @@ find_program(CLANG_TIDY_EXE
         /usr/local/opt/llvm/bin
 )
 
+# Query the clang-tidy executable and return its version string in VAR.
 function(find_clang_tidy_version VAR)
     execute_process(COMMAND ${CLANG_TIDY_EXE} -version OUTPUT_VARIABLE VERSION_OUTPUT)
     separate_arguments(VERSION_OUTPUT_LIST NATIVE_COMMAND "${VERSION_OUTPUT}")
@@ -84,6 +85,7 @@ set(CLANG_TIDY_FIXIT_DIR ${CMAKE_BINARY_DIR}/fixits)
 file(MAKE_DIRECTORY ${CLANG_TIDY_FIXIT_DIR})
 set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_MAKE_CLEAN_FILES ${CLANG_TIDY_FIXIT_DIR})
 
+# Configure clang-tidy and create the miopen-tidy analyzer targets.
 macro(enable_clang_tidy)
     set(options ANALYZE_TEMPORARY_DTORS ALL)
     set(oneValueArgs HEADER_FILTER)
@@ -138,15 +140,26 @@ macro(enable_clang_tidy)
         # You can apply them by /opt/rocm/llvm/bin/clang-apply-replacements fixits/
         # -fix-errors
     )
-    add_custom_target(tidy ${CLANG_TIDY_ALL})
-    mark_as_analyzer(tidy)
-    add_custom_target(tidy-base)
-    add_custom_target(tidy-make-fixit-dir COMMAND ${CMAKE_COMMAND} -E make_directory ${CLANG_TIDY_FIXIT_DIR})
-    add_custom_target(tidy-rm-fixit-dir COMMAND ${CMAKE_COMMAND} -E remove_directory ${CLANG_TIDY_FIXIT_DIR})
-    add_dependencies(tidy-make-fixit-dir tidy-rm-fixit-dir)
-    add_dependencies(tidy-base tidy-make-fixit-dir)
+    # Project-prefixed tidy targets avoid collisions with sibling projects when
+    # MIOpen is included via add_subdirectory in a superbuild. Unprefixed
+    # aliases are only created in standalone builds for back-compat.
+    add_custom_target(miopen-tidy ${CLANG_TIDY_ALL} COMMENT "Aggregate target for clang-tidy checks")
+    mark_as_analyzer(miopen-tidy)
+    add_custom_target(miopen-tidy-base COMMENT "Base setup target for clang-tidy checks")
+    add_custom_target(miopen-tidy-make-fixit-dir COMMAND ${CMAKE_COMMAND} -E make_directory ${CLANG_TIDY_FIXIT_DIR} COMMENT "Creating clang-tidy fixit directory")
+    add_custom_target(miopen-tidy-rm-fixit-dir COMMAND ${CMAKE_COMMAND} -E remove_directory ${CLANG_TIDY_FIXIT_DIR} COMMENT "Removing clang-tidy fixit directory")
+    add_dependencies(miopen-tidy-make-fixit-dir miopen-tidy-rm-fixit-dir)
+    add_dependencies(miopen-tidy-base miopen-tidy-make-fixit-dir)
+
+    if(NOT ROCM_LIBS_SUPERBUILD)
+        add_custom_target(tidy DEPENDS miopen-tidy COMMENT "Back-compat alias for miopen-tidy")
+        add_custom_target(tidy-base DEPENDS miopen-tidy-base COMMENT "Back-compat alias for miopen-tidy-base")
+        add_custom_target(tidy-make-fixit-dir DEPENDS miopen-tidy-make-fixit-dir COMMENT "Back-compat alias for miopen-tidy-make-fixit-dir")
+        add_custom_target(tidy-rm-fixit-dir DEPENDS miopen-tidy-rm-fixit-dir COMMENT "Back-compat alias for miopen-tidy-rm-fixit-dir")
+    endif()
 endmacro()
 
+# Add a per-source clang-tidy check target for every source file of TARGET.
 function(clang_tidy_check TARGET)
     get_target_property(SOURCES ${TARGET} SOURCES)
     # TODO: Use generator expressions instead
@@ -163,8 +176,8 @@ function(clang_tidy_check TARGET)
                 COMMENT "clang-tidy: Running clang-tidy on target ${SOURCE}..."
             )
             add_dependencies(${tidy_target} ${TARGET})
-            add_dependencies(${tidy_target} tidy-base)
-            add_dependencies(tidy ${tidy_target})
+            add_dependencies(${tidy_target} miopen-tidy-base)
+            add_dependencies(miopen-tidy ${tidy_target})
         endif()
     endforeach()
 endfunction()

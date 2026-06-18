@@ -107,7 +107,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -372,7 +372,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -640,7 +640,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -907,7 +907,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -1175,7 +1175,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -1440,7 +1440,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -1705,7 +1705,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -1970,7 +1970,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -2235,7 +2235,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -2500,7 +2500,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -2765,7 +2765,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -3030,7 +3030,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -3295,7 +3295,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -3560,7 +3560,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -3826,7 +3826,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -4092,7 +4092,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -4357,7 +4357,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -4623,7 +4623,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -4889,7 +4889,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -5154,7 +5154,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -5419,7 +5419,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -5684,7 +5684,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -5949,7 +5949,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -6214,7 +6214,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -6480,7 +6480,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -6745,7 +6745,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -7011,7 +7011,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -7277,7 +7277,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -7543,7 +7543,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -7809,7 +7809,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -8074,7 +8074,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -8340,7 +8340,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -8605,7 +8605,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -8870,7 +8870,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -9135,7 +9135,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -9400,7 +9400,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -9666,7 +9666,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -9931,7 +9931,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -10196,7 +10196,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -10463,7 +10463,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -10730,7 +10730,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -10997,7 +10997,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false

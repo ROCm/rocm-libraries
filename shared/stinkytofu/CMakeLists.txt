@@ -83,6 +83,17 @@ endforeach(arch)
 
 message(STATUS "Using archs: ${STINKYTOFU_ARCHS}")
 
+# AMD comgr for runtime assembler capability probing (must be before configure_file)
+if(DEFINED ENV{ROCM_PATH})
+    list(APPEND CMAKE_PREFIX_PATH "$ENV{ROCM_PATH}")
+endif()
+find_package(amd_comgr CONFIG)
+if(NOT amd_comgr_FOUND)
+    message(FATAL_ERROR
+        "amd_comgr not found. Set ROCM_PATH or CMAKE_PREFIX_PATH to your ROCm installation.")
+endif()
+set(STINKYTOFU_HAS_COMGR 1)
+
 configure_file(hardware/hardware.def.in include/Config/Archs.def @ONLY)
 configure_file(include/stinkytofu/Config.h.in include/stinkytofu/Config/Config.h)
 
@@ -109,6 +120,29 @@ target_compile_options(stinkytofu-warnings INTERFACE -Wall)
 if(STINKYTOFU_ENABLE_WERROR)
     target_compile_options(stinkytofu-warnings INTERFACE
         -Werror -Wno-error=deprecated-declarations -Wno-error=comment)
+endif()
+
+##===----------------------------------------------------------------------===##
+# Code coverage
+##===----------------------------------------------------------------------===##
+# LLVM source-based coverage for amdclang/Clang (gcov-style for GCC). Applied
+# globally (before any targets are defined) so the library, tools, and tests are
+# all instrumented — the FileCheck and Python tests exercise library code via
+# separate processes, so the library itself must carry the instrumentation.
+# Drive it with `invoke coverage`; reports filter out tests/examples/deps.
+option(STINKYTOFU_CODE_COVERAGE "Build with code coverage instrumentation" OFF)
+if(STINKYTOFU_CODE_COVERAGE)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
+        add_link_options(-fprofile-instr-generate -fcoverage-mapping)
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        add_compile_options(--coverage)
+        add_link_options(--coverage)
+    else()
+        message(FATAL_ERROR
+            "STINKYTOFU_CODE_COVERAGE is not supported for compiler: ${CMAKE_CXX_COMPILER_ID}")
+    endif()
+    message(STATUS "StinkyTofu: code coverage instrumentation enabled")
 endif()
 
 ##===----------------------------------------------------------------------===##
@@ -173,8 +207,43 @@ add_dependencies(stinkytofu tablegen_generated)
 find_package(Threads REQUIRED)
 target_link_libraries(stinkytofu PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
 
+target_link_libraries(stinkytofu PRIVATE amd_comgr)
+
+# On Windows, delay-load amd_comgr.dll so it is resolved at first use rather
+# than at process startup.  A delay-load hook in ComgrProbe.cpp uses
+# LoadLibraryExA to load the DLL from ROCM_PATH\bin.
+if(WIN32)
+    if(BUILD_SHARED_LIBS)
+        target_link_options(stinkytofu PRIVATE "LINKER:/DELAYLOAD:$<TARGET_FILE_NAME:amd_comgr>")
+        target_link_libraries(stinkytofu PRIVATE delayimp)
+    else()
+        target_link_options(stinkytofu INTERFACE "LINKER:/DELAYLOAD:$<TARGET_FILE_NAME:amd_comgr>")
+        target_link_libraries(stinkytofu INTERFACE delayimp)
+    endif()
+endif()
+
 # Add source files from src/ subdirectory
 add_subdirectory(src)
+
+##===----------------------------------------------------------------------===##
+# Example plugins
+##===----------------------------------------------------------------------===##
+# Single switch for everything example-related: the example plugins themselves and
+# the unit tests that exercise them. Default OFF so integrated/ROCm builds never
+# build or package examples; standalone builds opt in via tasks.py. Added before
+# tests/, which gate their plugin coverage on this same flag. New example tests
+# should hook in under STINKYTOFU_BUILD_EXAMPLES too.
+option(STINKYTOFU_BUILD_EXAMPLES "Build StinkyTofu example plugins (and their tests)" OFF)
+
+# Single source of truth for where plugins live relative to libstinkytofu's lib dir.
+# Shared by the install rule, the compiled-in runtime lookup (PassBuilder::examplePluginPath),
+# and consumers that vendor libstinkytofu (rocisa) so they install plugins to a matching path.
+set(STINKYTOFU_PLUGIN_INSTALL_RELDIR "stinkytofu/plugins"
+    CACHE STRING "Plugin directory relative to the libstinkytofu lib dir")
+
+if(STINKYTOFU_BUILD_EXAMPLES)
+    add_subdirectory(examples/plugins)
+endif()
 
 ##===----------------------------------------------------------------------===##
 # Unit tests

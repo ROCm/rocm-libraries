@@ -1,25 +1,15 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-# This file creates targets of the form ExtOp<ID>_<arch> where ID is:
-#   - Obj: targets that map *.s into *.o
-#   - Library: target associated creation of .dat
-
 set(ops_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite")
 set(output_dir "${CMAKE_CURRENT_BINARY_DIR}")
 string(REGEX MATCHALL "gfx[a-z0-9]+" archs "${GPU_TARGETS}")
 list(REMOVE_DUPLICATES archs)
 message(STATUS "Architectures to process: ${archs}")
 
-# Serializing extop-library targets: Generating hipblasltExtOpLibrary.dat
-# per architecture is fast compared to other build tasks and not on the
-# critical path. Concurrent access to intermediate files is not well
-# supported on certain file systems or operating systems. Therefore, we
-# serialize by adding dependencies between each target and the previous one.
 set(previous_target "")
 
 foreach(arch IN LISTS archs)
-    #  Start of arch configuration
     message(STATUS "hipblaslt device library extops: Configuring target for architecture ${arch} for hipblasltExtOpLibrary")
     set(WAVEFRONT "-mwavefrontsize64")
     if(arch MATCHES "^gfx1[12][0-9][0-9]$")
@@ -87,10 +77,10 @@ foreach(arch IN LISTS archs)
             ${HIPBLASLT_PYTHON_DEPS}
             ${previous_target}
         COMMAND ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/ExtOpCreateLibrary.py" --src=${CMAKE_CURRENT_BINARY_DIR} --co=${output_code_object_file} --output=${output_dir} --arch=${arch}
-        COMMAND ${CMAKE_COMMAND} -E copy "${output_dir}/hipblasltExtOpLibrary.dat" "${HIPBLASLT_TENSILE_LIBPATH}/library/hipblasltExtOpLibrary_${arch}.dat"
-        COMMAND ${CMAKE_COMMAND} -E copy "${output_code_object_file}" "${HIPBLASLT_TENSILE_LIBPATH}/library"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${HIPBLASLT_TENSILE_LIBPATH}/library/${arch}"
+        COMMAND ${CMAKE_COMMAND} -E copy "${output_dir}/hipblasltExtOpLibrary.dat" "${HIPBLASLT_TENSILE_LIBPATH}/library/${arch}/hipblasltExtOpLibrary_${arch}.dat"
+        COMMAND ${CMAKE_COMMAND} -E copy "${output_code_object_file}" "${HIPBLASLT_TENSILE_LIBPATH}/library/${arch}"
         COMMENT "Creating hipblasltExtOpLibrary_${arch}.dat"
     )
-    # Update previous target for next iteration
     set(previous_target "extop-library-${arch}")
 endforeach()

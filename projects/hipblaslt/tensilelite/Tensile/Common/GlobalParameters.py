@@ -197,6 +197,20 @@ globalParameters["DataInitTypeScaleAlphaVec"] = 3
 globalParameters["DataInitTypeMXSA"] = 1
 globalParameters["DataInitTypeMXSB"] = 1
 globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
+# StreamK=5 hybrid-mode toggle values driven by the benchmark client.
+# Each list entry causes ClientProblemFactory to replay every base
+# problem with setParams().setStreamKTileSchedulingMode(value). Accepts
+# the full tri-state {0=OFF (static), 1=ON (dynamic per-XCD work-queue),
+# 2=AUTO (heuristic)}. Set to [0, 1] in YAML GlobalParameters to
+# deterministically exercise both SK5 sub-paths in a single sweep run;
+# AUTO is supported as well, but in a sweep it leaves the per-launch
+# sub-path up to the runtime heuristic, so [0, 1] is preferred when
+# the YAML's job is sub-path coverage. AUTO is most useful when
+# overriding from the command line (e.g. `--streamk-hybrid-mode 2`)
+# to run the heuristic end-to-end on a real problem. Ignored at the
+# host for non-SK5 solutions. Default keeps behavior unchanged for
+# existing tests.
+globalParameters["StreamKHybridMode"] = [0]
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
 )
@@ -314,6 +328,20 @@ globalParameters["RotatingMode"] = (
 )
 # Mode 0 requires memcpy everytime when the problem changes to reset the data, but mode 1 doesn't.
 
+# I-cache rotation (used by client --icache-rotate-copies / --icache-rotate-size).
+# IcacheRotateCopies: number of EXTRA hipModule_t copies of each --code-object to load
+#   for I-cache cold-miss tests. 0 = disabled (default). N (>0) = load N extras
+#   (total = N+1 modules). -1 = auto: extras = max(rotating buffer num,
+#   cache-overflow term). The cache-overflow term is
+#   IcacheRotateSize * 2 * 1024 / min(kernel_start->label_GW_End) on Linux, and
+#   IcacheRotateSize directly on non-Linux (no <elf.h> available).
+globalParameters["IcacheRotateCopies"] = 0
+# IcacheRotateSize: cache budget (in KB) used by the auto path's cache-overflow term.
+#   Linux: effective bytes = IcacheRotateSize * 2 * 1024. Default 64 -> 128 KB,
+#   loosely targeting ~2x a typical L1 I-cache.
+#   Non-Linux: used directly as the raw extras count (no ELF parsing).
+globalParameters["IcacheRotateSize"] = 64
+
 globalParameters["BuildIdKind"] = "sha1"
 globalParameters["AsmDebug"] = (
     False  # Set to True to keep debug information for compiled code objects
@@ -356,6 +384,14 @@ globalParameters["StinkyTofuDebugPass"] = ""
 # Note: multiple kernels may overwrite the same file unless you use a unique path per build.
 globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 
+# StinkyTofu optimization remarks (stderr).  Unlike PASS_DEBUG (for compiler
+# developers), remarks are for kernel developers who want to understand generated
+# code quality — e.g. how many regions a loop was split into, what caused the
+# splits, and how many s_nop cycles were wasted.
+globalParameters["StinkyTofuEnableRemarks"] = False
+
+globalParameters["DisableSTWaitCnt"] = True
+
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 # we should do this here...
 defaultGlobalParameters = deepcopy(globalParameters)
@@ -391,14 +427,14 @@ defaultBenchmarkCommonParameters = [
     {"InnerUnroll": [1]},
     {"KernelLanguage": ["Assembly"]},
     {"LdsPadA": [-1]},
-    {"LdsPadMXSA": [ 0 ] },
+    {"LdsPadMXSA": [ -1 ] },
     {"LdsPadB": [-1]},
-    {"LdsPadMXSB": [ 0 ] },
+    {"LdsPadMXSB": [ -1 ] },
     {"LdsPadMetadata": [0]},
     {"LdsBlockSizePerPadA": [-1]},
-    {"LdsBlockSizePerPadMXSA": [ 0 ] },
+    {"LdsBlockSizePerPadMXSA": [ -1 ] },
     {"LdsBlockSizePerPadB": [-1]},
-    {"LdsBlockSizePerPadMXSB": [ 0 ] },
+    {"LdsBlockSizePerPadMXSB": [ -1 ] },
     {"LdsBlockSizePerPadMetadata": [0]},
     {"TransposeLDS": [-1]},
     {"TransposeLDSMetadata": [-1]},
@@ -419,6 +455,7 @@ defaultBenchmarkCommonParameters = [
     {"UnrollLoopSwapGlobalReadOrder": [0]},
     {"PrefetchGlobalRead": [1]},
     {"PrefetchLocalRead": [1]},
+    {"PrefetchGL2": [0]},
     {"ClusterLocalRead": [1]},
     {"SuppressNoLoadLoop": [False]},
     {"ExpandPointerSwap": [True]},
@@ -431,6 +468,7 @@ defaultBenchmarkCommonParameters = [
     {"OptNoLoadLoop": [1]},
     {"BufferLoad": [True]},
     {"BufferStore": [True]},
+    {"CompactLoopStore": [False]},
     {"DirectToVgprA": [False]},
     {"DirectToVgprB": [False]},
     {"DirectToVgprMXSA": [False]},
@@ -477,6 +515,26 @@ defaultBenchmarkCommonParameters = [
     {"NonTemporalWS": [0]},
     {"NonTemporalMetadata": [0]},
     {"NonTemporal": [-1]},
+    {"TemporalHint": [-1]},
+    {"TemporalHintE": [0]},
+    {"TemporalHintD": [0]},
+    {"TemporalHintC": [0]},
+    {"TemporalHintA": [0]},
+    {"TemporalHintMXSA": [0]},
+    {"TemporalHintB": [0]},
+    {"TemporalHintMXSB": [0]},
+    {"TemporalHintWS": [0]},
+    {"TemporalHintMetadata": [0]},
+    {"NonVolatile": [-1]},
+    {"NonVolatileE": [0]},
+    {"NonVolatileD": [0]},
+    {"NonVolatileC": [0]},
+    {"NonVolatileA": [0]},
+    {"NonVolatileMXSA": [0]},
+    {"NonVolatileB": [0]},
+    {"NonVolatileMXSB": [0]},
+    {"NonVolatileWS": [0]},
+    {"NonVolatileMetadata": [0]},
     {"PreloadKernArgs": [True]},
     {"CustomKernelName": [""]},
     {"NoReject": [False]},
@@ -488,24 +546,29 @@ defaultBenchmarkCommonParameters = [
     {"GroupLoadStore": [False]},
     {"MIArchVgpr": [False]},
     {"StreamK": [0]},
+    {"StreamKForceDPOnly": [0]},
     {"StreamKAtomic": [0]},
     {"StreamKXCCMapping": [0]},
     {"StreamKFixupTreeReduction": [0]},
     {"DebugStreamK": [0]},
+    {"DebugPersistentKernelLoopForever": [False]},
     {"ActivationFused": [True]},
     {"ActivationFuncCall": [True]},
     {"ActivationAlt": [False]},
     {"WorkGroupReduction": [False]},
     {"ConvertAfterDS": [False]},
     {"ForceDisableShadowInit": [False]},
+    {"InitCIterWmma": [0]},
     {"LDSTrInst": [False]},
     {"WaveSplitK": [ False ]},
     {"MbskPrefetchMethod": [-1]},
+    {"PrefetchAcrossPersistent": [0]},
     {"UseCustomMainLoopSchedule": [-1]},
     {"SpaceFillingAlgo": [[]]},
     {"SFCWGM": [[[1,1],[1,1]]]},
     {"AdaptiveGemm": [0]},
     {"AdaptiveGemmGSUA": [0]},
+    {"AdaptiveGemmNTAB": [0]},
     {"ExtraMiLatencyLeft": [-1]},
     {"ExtraLatencyForLR": [0]},
     {"TailloopInNll": [False]},
@@ -524,7 +587,12 @@ defaultBenchmarkCommonParameters = [
     # code evicted from the I-cache before it runs. Software prefetch helps keep instruction fetch
     # ahead of execution. False: no SGPR reserved; Stinky prefetch pass disabled for that kernel.
     {"SwInstructionPrefetch": [True]},
+    # ClusterDim — workgroup cluster dimensions [x, y] for clustered kernel launch.
+    # [1, 1] disables clustering. Non-[1, 1] enables Multicast so workgroups within
+    # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.
     {"ClusterDim": [[1, 1]]},
+    {"HalfPLR": [0]},
+    {"TDMIterateMode": [0]}
 ]
 
 # dictionary of defaults comprised of default option for each parameter
@@ -554,6 +622,17 @@ defaultAnalysisParameters = {
     "ArchitectureName": "gfx000",
     "LibraryType": "GridBased",
     "SolutionImportanceMin": 0.01,  # = 0.01=1% total time saved by keeping this solution
+}
+
+# Per-key expected-type overrides for the LibraryLogic block. The
+# defaults map gives a single example value per key; for keys that
+# legitimately accept multiple Python types (e.g. DeviceNames can be a
+# single str like the default "fallback" OR a list of strings naming
+# multiple ASIC device IDs that share the same library logic), the
+# override widens the accepted type set. Without this widening the
+# strict gate in generateLogic() rejects the common list form.
+libraryLogicTypeOverrides = {
+    "DeviceNames": {str, list},
 }
 
 
@@ -611,6 +690,138 @@ def printCapabilitiesTable(isaInfoMap: Dict[str, IsaInfo]):
     archCapRows = [capRow(isaInfoMap, cap, "archCaps") for cap in allArchCaps]
 
     printTable([headerRow] + asmCapRows + archCapRows)
+
+
+# Override table for globalParameters keys whose default value is None
+# (and therefore have no usable type to derive from type(default)). Each
+# entry is the set of permitted types for the user-supplied value.
+# Skipping None-defaulted keys wholesale was a coverage gap that allowed
+# e.g. RocProfCounter: 42 to pass silently.
+globalParameterTypeOverrides = {
+    "ClientExecutionLockPath": {type(None), str},   # path or unset
+    "ROCmSMIPath":             {type(None), str},   # path, populated at startup
+    "CmakeCxxCompiler":        {type(None), str},   # path, populated at startup
+    "RocProfCounter":          {type(None), str},   # counter spec or None
+}
+
+
+def _assertOverrideTableCovers(defaults_dict, override_dict):
+    """Coverage guard: every None-defaulted key has an override entry.
+
+    Asserts the invariant that any None-defaulted key in globalParameters
+    carries a corresponding type-override annotation. Exercised in CI by
+    test_assignGlobalParameters_types.py /
+    test_registry_disjoint_property.py rather than at module-import time,
+    so the coverage gap is caught by a failing test (with the same precise
+    message) instead of coupling the invariant to every import of this
+    module.
+    """
+    missing = [k for k, v in defaults_dict.items()
+               if v is None and k not in override_dict]
+    if missing:
+        raise RuntimeError(
+            "globalParameterTypeOverrides is missing entries for the "
+            f"following None-defaulted globalParameters: {missing!r}. "
+            "Add type annotations for each to "
+            "Tensile/Common/GlobalParameters.py."
+        )
+
+
+def _assertGlobalParametersAreValid(config, ignoreKeys):
+    """Raise ConfigTypeError for the first unknown or mistyped key in *config*.
+
+    No side effects: no subprocess, no ``locateExe``, no ISA mutation,
+    no writes into the module-level ``globalParameters`` registry.
+
+    Shared by production (``assignGlobalParameters``) and the corpus test
+    so the two never diverge on what counts as a clean GlobalParameters block.
+
+    Args:
+        config: the raw ``GlobalParameters:`` dict from the YAML.
+        ignoreKeys: keys with a sanctioned opt-out from the strict gate.
+    """
+    from .TypeValidationErrors import ConfigTypeError, formatMismatch
+
+    # MinimumRequiredVersion is validated separately at the top of
+    # assignGlobalParameters; skip it in the type loop here.
+    typeCheckSkip = {"MinimumRequiredVersion"}
+
+    for key in config:
+        if key in ignoreKeys:
+            continue
+        value = config[key]
+        if key not in globalParameters:
+            raise ConfigTypeError(
+                f"Unknown global parameter '{key}' = {value!r}. "
+                f"Add it to globalParameters in GlobalParameters.py if it is real, "
+                f"or remove it from the config."
+            )
+
+        if key in typeCheckSkip:
+            continue
+
+        if key in globalParameterTypeOverrides:
+            expectedTypes = globalParameterTypeOverrides[key]
+        else:
+            default = globalParameters[key]
+            if default is None:
+                continue
+            expectedTypes = {type(default)}
+
+        if type(value) not in expectedTypes:
+            raise ConfigTypeError(formatMismatch("", f"GlobalParameters.{key}", value, expectedTypes))
+
+
+# Keys that may appear in a GlobalParameters: block but are not (or no longer)
+# entries in the globalParameters registry. _assertGlobalParametersAreValid
+# skips these silently. Shared with the corpus test so the two never diverge.
+_GLOBAL_PARAMETER_IGNORE_KEYS = [
+    # --- CLI / TensileCreateLibrary-level config consumed outside the
+    #     globalParameters registry (each has its own argparse dest or
+    #     direct arguments[...] reader) ---
+    "Architecture",       # build-arch list, read directly in Tensile.py
+    "PrintLevel",         # verbosity, read by setVerbosity in TensileCreateLibrary/Run.py
+    "Device",             # device id, read from config in Tensile.py
+    "UseCompression",     # code-object compression toggle, set in ParseArguments / read in Run.py
+    "CxxCompiler",        # --cxx-compiler arg, resolved in Toolchain layer, not a registry value
+    "CCompiler",          # --c-compiler arg, resolved in Toolchain layer, not a registry value
+    "OffloadBundler",     # --offload-bundler arg, resolved in Toolchain layer
+    "Assembler",          # --assembler arg, resolved in Toolchain layer
+    "LogicPath",          # library-logic dir, read by TensileCreateLibrary/Run.py
+    "LogicFilter",        # logic-file glob, read by TensileCreateLibrary/Run.py
+    "OutputPath",         # positional output dir arg in Tensile.py / RetuneLibrary
+    "Experimental",       # --experimental logic-dir toggle in ParseArguments
+    "GenSolTable",        # --gen-sol-table toggle in ParseArguments
+    # Keys with a sanctioned opt-out from the strict gate. Three categories:
+    #   - Dead (no consumer anywhere; safe to silently drop):
+    "AMDGPUArchPath",          # removed dc2c963c Mar2025; arch detection moved to Toolchain/
+    "DataInitTypeeScaleE",     # never registered/consumed (double-e typo; scale-E init never implemented)
+    "DeviceLDS",               # removed 7770c97e May2025; superseded by archCaps["DeviceLDS"]
+    "MaxFileName",             # removed d170037b Feb2025; superseded by MAX_FILENAME_LENGTH constant
+    "MergeFiles",              # removed 2d2e1496 Jan2025; code always merges now
+    "MinKForGSU",              # removed dc2c963c Mar2025; superseded by MIN_K_FOR_GSU constant in Contractions.py
+    "NewClient",               # removed dc2c963c Mar2025; old "must be 2" guard is meaningless now
+    "ROCmAgentEnumeratorPath", # reverted 4a5aa3cb Mar2026; tool selection now via Toolchain/Validators.py
+    "UseGPUTimer",             # never registered; always a duplicate of KernelTime (the real key)
+    #   - Live but read via DebugConfig (makeDebugConfig in
+    #     Tensile/Common/Types.py) directly from the raw config dict
+    #     after assignGlobalParameters, bypassing the globalParameters
+    #     registry:
+    "ForceGenerateKernel",        # DebugConfig.forceGenerateKernel, read by makeDebugConfig
+    "PrintIndexAssignmentInfo",   # DebugConfig.printIndexAssignmentInfo, read by makeDebugConfig
+    "PrintSolutionRejectionReason", # DebugConfig.printSolutionRejectionReason, read by makeDebugConfig
+    #   - Dead predecessor of PrintIndexAssignmentInfo (renamed
+    #     dc2c963c Mar2025); kept so the one stale YAML
+    #     (sgemm_xf32_asm.yaml) does not trip the gate. Follow-up:
+    #     rename the YAML key to PrintIndexAssignmentInfo.
+    "PrintIndexAssignments",
+    #   - Misplaced solution parameter: registered in
+    #     defaultBenchmarkCommonParameters (solution-level), not
+    #     globalParameters; YAMLs that put it under GlobalParameters:
+    #     have the value silently dropped. Follow-up: relocate to
+    #     BenchmarkCommonParameters: / ForkParameters: in the YAMLs.
+    "MaxLDS",
+]
 
 
 def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
@@ -708,29 +919,25 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     except (subprocess.CalledProcessError, OSError) as e:
         printWarning("Error: {} running {} {} ".format("hipcc", "--version", e))
 
-    # The following keys may be present in the config, but are not (or no longer) global parameters.
-    ignoreKeys = [
-        "Architecture",
-        "PrintLevel",
-        "Device",
-        "UseCompression",
-        "CxxCompiler",
-        "CCompiler",
-        "OffloadBundler",
-        "Assembler",
-        "LogicPath",
-        "LogicFilter",
-        "OutputPath",
-        "Experimental",
-        "GenSolTable",
-    ]
+    ignoreKeys = _GLOBAL_PARAMETER_IGNORE_KEYS
+
+    from .TypeValidationErrors import _STRICT_GATE_ENABLED
+
+    if not _STRICT_GATE_ENABLED:
+        for key in config:
+            if key in ignoreKeys:
+                continue
+            value = config[key]
+            if key not in globalParameters:
+                printWarning("Global parameter %s = %s unrecognised." % (key, value))
+            globalParameters[key] = value
+        return
+
+    _assertGlobalParametersAreValid(config, ignoreKeys)
     for key in config:
         if key in ignoreKeys:
             continue
-        value = config[key]
-        if key not in globalParameters:
-            printWarning("Global parameter %s = %s unrecognised." % (key, value))
-        globalParameters[key] = value
+        globalParameters[key] = config[key]
 
 
 def setupRestoreClocks():

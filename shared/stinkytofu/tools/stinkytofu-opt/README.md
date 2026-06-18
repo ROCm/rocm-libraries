@@ -44,8 +44,7 @@ The binary will be located at: `build/tools/stinkytofu-opt/stinkytofu-opt`
 # Apply optimization passes
 ./build/tools/stinkytofu-opt/stinkytofu-opt \
     --arch gfx1250 func.arch-gfx1250.stir \
-    --StinkyDAGSchedulerPass \
-    --ScheduleFirstLRsPass
+    --StinkyDAGSchedulerPass
 ```
 
 ---
@@ -64,6 +63,7 @@ stinkytofu-opt [options] <ir_file> [--pass1] [--pass2] ...
 
 **Options:**
 - `--arch <arch>`: Target GPU architecture (default: gfx1250). Supported: `gfx1250`
+- `--remarks`: Enable optimization remarks on stderr (e.g. loop region diagnostics)
 - `--list-passes`: Display all available optimization passes
 - `--help`: Show usage information
 
@@ -95,15 +95,15 @@ names and strips comments unless the flag is set.
 ./stinkytofu-opt --list-passes
 ```
 
-Output:
+Output (illustrative — the authoritative, up-to-date list is whatever the tool
+prints, sourced from `availablePasses` in `tools/stinkytofu-opt/stinkytofu-opt.hpp`):
 ```
 Available passes:
 =================
-  --StinkyClusterDSReadPass
   --StinkyDAGSchedulerPass
-  --StinkyConfigurableWaitCntPass
-  --ScheduleLastLRsPass
-  --ScheduleFirstLRsPass
+  --StinkyWaitCntInsertionPass
+  --DeadCodeEliminationPass
+  ...
 ```
 
 **Note:** Passes are applied in the order they appear on the command line, after the initial deserialization pass.
@@ -138,8 +138,8 @@ Apply multiple optimization passes in sequence:
 ```bash
 ./build/tools/stinkytofu-opt/stinkytofu-opt \
     --arch gfx1250 tools/stinkytofu-opt/tests/func.arch-gfx1250.stir \
-    --StinkyClusterDSReadPass \
-    --StinkyDAGSchedulerPass
+    --StinkyDAGSchedulerPass \
+    --StinkyWaitCntInsertionPass
 ```
 
 #### Example 4: Round-Trip Raw Assembly
@@ -219,16 +219,17 @@ struct PassInfo
     std::function<std::unique_ptr<Pass>()> creator; // Factory function to create the pass
 };
 
+// Illustrative — see the actual, up-to-date registry in stinkytofu-opt.hpp.
 const std::vector<PassInfo> availablePasses = {
-    { "StinkyClusterDSReadPass", []() { return createStinkyClusterDSReadPass(); } },
-    { "StinkyDAGSchedulerPass", []() { return createStinkyDAGSchedulerPass(); } },
-    { "StinkyUnrollWaitCntPass", []() { return createStinkyUnrollWaitCntPass(); } },
-    { "ScheduleLastLRsPass", []() { return createScheduleLastLRsPass(); } },
-    { "ScheduleFirstLRsPass", []() { return createScheduleFirstLRsPass(); } },
+    { "StinkyDAGSchedulerPass", [](const auto&) { return createStinkyDAGSchedulerPass(); } },
+    { "StinkyWaitCntInsertionPass", [](const auto&) { return createStinkyWaitCntInsertionPass(); } },
+    // ...
 };
 ```
 
-**Purpose:** This registry allows dynamic pass creation based on command-line arguments.
+**Purpose:** This registry allows dynamic pass creation based on command-line
+arguments. The authoritative list lives in
+`tools/stinkytofu-opt/stinkytofu-opt.hpp::availablePasses`.
 
 #### 2. Debug Print Instrumentation (`createDebugPrintInstrumentation()`)
 
@@ -340,3 +341,24 @@ Successors: ^next
 ```
 
 See `tests/unit/asm/IRParserTest.cpp` and the serialization layer (`StinkyAsmPrinter`, `IRParser`) for more examples.
+
+---
+
+## Optimization Remarks
+
+Use `--remarks` to enable optimization remarks on stderr. Remarks report code quality diagnostics (loop region count, s_nop waste, etc.) without requiring `PASS_DEBUG`.
+
+```bash
+# Run the full gfx1250 pipeline with remarks
+./build/tools/stinkytofu-opt/stinkytofu-opt \
+    --arch gfx1250 kernel.s -O2 --remarks --emit-asm
+
+# Run individual passes with remarks
+./build/tools/stinkytofu-opt/stinkytofu-opt \
+    --arch gfx1250 input.stir \
+    --from-label loop_start --to-label loop_end \
+    --StinkyDAGSchedulerPass --InsertDelayAluPass --LoopRegionRemarkPass \
+    --remarks --print-output
+```
+
+See [Global Parameters](../../docs/user/global-parameters.md) for the `StinkyTofuEnableRemarks` equivalent in the Tensile/KernelWriter path.

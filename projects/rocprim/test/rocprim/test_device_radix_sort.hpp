@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -89,33 +89,6 @@ public:
 };
 
 TYPED_TEST_SUITE_P(RocprimDeviceRadixSort);
-
-template<class KeyIter>
-auto generate_key_input(KeyIter keys_input, size_t size, engine_type& rng_engine)
-    -> std::enable_if_t<
-        rocprim::is_floating_point<typename std::iterator_traits<KeyIter>::value_type>::value>
-{
-    using key_type = typename std::iterator_traits<KeyIter>::value_type;
-    test_utils::generate_random_data_n(keys_input,
-                                       size,
-                                       static_cast<key_type>(-1000),
-                                       static_cast<key_type>(+1000),
-                                       rng_engine);
-    test_utils::add_special_values(keys_input, size, rng_engine);
-}
-
-template<class KeyIter>
-auto generate_key_input(KeyIter keys_input, size_t size, engine_type& rng_engine)
-    -> std::enable_if_t<
-        !rocprim::is_floating_point<typename std::iterator_traits<KeyIter>::value_type>::value>
-{
-    using key_type = typename std::iterator_traits<KeyIter>::value_type;
-    test_utils::generate_random_data_n(keys_input,
-                                       size,
-                                       rocprim::numeric_limits<key_type>::min(),
-                                       rocprim::numeric_limits<key_type>::max(),
-                                       rng_engine);
-}
 
 // Working around custom_float_test_type, which is both a float and a common::custom_type
 template<class T>
@@ -293,7 +266,7 @@ void sort_keys()
 
             // Generate data
             auto keys_input = std::make_unique<key_type[]>(size);
-            generate_key_input(keys_input.get(), size, rng_engine);
+            test_utils::generate_key_input(keys_input.get(), size, rng_engine);
 
             common::device_ptr<key_type>  d_keys_input(keys_input, size);
             common::device_ptr<key_type>  d_keys_output_alloc;
@@ -555,7 +528,7 @@ void sort_pairs()
 
             // Generate data
             auto keys_input = std::make_unique<key_type[]>(size);
-            generate_key_input(keys_input.get(), size, rng_engine);
+            test_utils::generate_key_input(keys_input.get(), size, rng_engine);
 
             std::vector<value_type> values_input(size);
             test_utils::iota(values_input.begin(), values_input.end(), 0);
@@ -835,7 +808,7 @@ void sort_keys_double_buffer()
 
             // Generate data
             auto keys_input = std::make_unique<key_type[]>(size);
-            generate_key_input(keys_input.get(), size, rng_engine);
+            test_utils::generate_key_input(keys_input.get(), size, rng_engine);
 
             common::device_ptr<key_type> d_keys_input(keys_input, size);
             common::device_ptr<key_type> d_keys_output(size);
@@ -1069,7 +1042,7 @@ void sort_pairs_double_buffer()
 
             // Generate data
             auto keys_input = std::make_unique<key_type[]>(size);
-            generate_key_input(keys_input.get(), size, rng_engine);
+            test_utils::generate_key_input(keys_input.get(), size, rng_engine);
 
             std::vector<value_type> values_input(size);
             test_utils::iota(values_input.begin(), values_input.end(), 0);
@@ -1291,17 +1264,8 @@ inline void sort_keys_large_sizes()
 
     hipStream_t stream = 0;
 
-    // Currently, CI enforces a hard limit of 96 GB on memory allocations.
-    // Temporarily use sizes that will require less space than the limit.
-    // On Windows, sizes above 2^34 (that are still under the 96 GB limit)
-    // can hang due to issues that we can't currently catch by examining
-    // the hipMalloc return value or querying available memory. Workaround
-    // this for now by setting a different maximum size for that platform.
-#if defined(_WIN32)
-    const size_t max_pow2 = 34;
-#else
     const size_t max_pow2 = 35;
-#endif
+
     rocprim::detail::target_arch arch;
     HIP_CHECK(rocprim::detail::host_target_arch(stream, arch));
 
@@ -1310,18 +1274,9 @@ inline void sort_keys_large_sizes()
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-        // QA is also testing on APU platforms with only 32GB of system memory
-        // shared amongst the host and device.  Trim maximum size under these
-        // conditions.  This is a temporary coding workaround until we come up
-        // with a properly-engineered memory management system for the unit tests.
-        bool is_apu = test_utils::is_apu(arch);
-        if (is_apu && test_utils::get_total_system_memory(true) <= test_utils::minimum_memory_required_bytes
-            && size >= (size_t{1} << 33))
-        {
-            std::cout << "Insufficient APU sytstem memory. Skipping test for size = " << size << std::endl;
-            break;
-        }
+        test_utils::MemCheck memcheck;
 
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE(key_type, size)
         common::device_ptr<key_type> d_keys;
         if(!d_keys.resize_with_memory_check(size))
         {
@@ -1330,6 +1285,7 @@ inline void sort_keys_large_sizes()
         }
 
         // Generate data
+        MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, size)
         std::vector<key_type> keys_input(size);
         std::iota(keys_input.begin(), keys_input.end(), 0);
         d_keys.store(keys_input);
@@ -1343,8 +1299,9 @@ inline void sort_keys_large_sizes()
                                            start_bit,
                                            end_bit,
                                            stream));
-
         ASSERT_GT(temporary_storage_bytes, 0U);
+
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temporary_storage_bytes)
         common::device_ptr<void> d_temporary_storage;
         if(!d_temporary_storage.resize_with_memory_check(temporary_storage_bytes))
         {
@@ -1361,6 +1318,7 @@ inline void sort_keys_large_sizes()
                                            end_bit,
                                            stream));
 
+        MEMCHECK_OR_BREAK_ALLOC_HOST_BYTES(d_keys.msize())
         const auto keys_output = d_keys.load();
 
         // Check if output values are as expected

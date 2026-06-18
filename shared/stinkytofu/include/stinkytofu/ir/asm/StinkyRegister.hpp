@@ -117,7 +117,7 @@ struct STINKYTOFU_EXPORT StinkyRegister {
     // cause obvious failures.
     static constexpr uint32_t kVirtualBit = 1u << 31;
 
-    enum class Type { Register, LiteralInt, LiteralDouble, LiteralString, Invalid };
+    enum class Type { Register, LiteralInt, LiteralDouble, LiteralString, HwReg, Invalid };
 
     Type dataType;
 
@@ -144,6 +144,13 @@ struct STINKYTOFU_EXPORT StinkyRegister {
 
         int32_t literalInt;
         double literalDouble;
+
+        // For HwReg type: structured hwreg(id, offset, size) operand of s_setreg/s_getreg.
+        struct {
+            uint16_t id;
+            uint16_t offset;
+            uint16_t size;
+        } hwreg;
     };
 
     // For LiteralString type - kept separate as std::string is non-trivial
@@ -167,6 +174,10 @@ struct STINKYTOFU_EXPORT StinkyRegister {
                 return literalDouble < other.literalDouble;
             case Type::LiteralString:
                 return literalValue < other.literalValue;
+            case Type::HwReg:
+                if (hwreg.id != other.hwreg.id) return hwreg.id < other.hwreg.id;
+                if (hwreg.offset != other.hwreg.offset) return hwreg.offset < other.hwreg.offset;
+                return hwreg.size < other.hwreg.size;
             case Type::Invalid:
                 return false;
         }
@@ -188,6 +199,9 @@ struct STINKYTOFU_EXPORT StinkyRegister {
                 return literalDouble == other.literalDouble;
             case Type::LiteralString:
                 return literalValue == other.literalValue;
+            case Type::HwReg:
+                return hwreg.id == other.hwreg.id && hwreg.offset == other.hwreg.offset &&
+                       hwreg.size == other.hwreg.size;
             case Type::Invalid:
                 return true;  // Two invalid registers are equal
         }
@@ -269,6 +283,16 @@ struct STINKYTOFU_EXPORT StinkyRegister {
 
     static StinkyRegister getSCCRegister() {
         return StinkyRegister(RegType::SCC, 0, 1);
+    }
+
+    // Structured hwreg(id, offset, size) operand for s_setreg/s_getreg.
+    static StinkyRegister Hwreg(uint16_t id, uint16_t offset, uint16_t size) {
+        StinkyRegister r;
+        r.dataType = Type::HwReg;
+        r.hwreg.id = id;
+        r.hwreg.offset = offset;
+        r.hwreg.size = size;
+        return r;
     }
 
     static StinkyRegister getVCCRegister(uint32_t wavefrontSize) {

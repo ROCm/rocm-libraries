@@ -55,6 +55,7 @@ namespace std
 template <typename I0, typename I1, typename O, enable_if_t<::hipstd::is_offloadable_iterator<I0, I1, O>()>* = nullptr>
 inline O merge(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1, O fo)
 {
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::merge(::thrust::device, f0, l0, f1, l1, fo);
 }
 
@@ -76,6 +77,7 @@ template <
   enable_if_t<::hipstd::is_offloadable_iterator<I0, I1, O>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
 inline O merge(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1, O fo, R r)
 {
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::merge(::thrust::device, f0, l0, f1, l1, fo, ::std::move(r));
 }
 

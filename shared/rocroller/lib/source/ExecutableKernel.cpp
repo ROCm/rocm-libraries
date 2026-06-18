@@ -9,10 +9,13 @@
 #endif /* ROCROLLER_USE_HIP */
 
 #include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 
 #include <rocRoller/Assemblers/Assembler.hpp>
+#include <rocRoller/Context.hpp>
 #include <rocRoller/ExecutableKernel.hpp>
 #include <rocRoller/Utilities/HipUtils.hpp>
+#include <rocRoller/WorkgroupClusters_detail.hpp>
 
 namespace rocRoller
 {
@@ -40,9 +43,10 @@ namespace rocRoller
         }
     };
 
-    ExecutableKernel::ExecutableKernel()
+    ExecutableKernel::ExecutableKernel(GPUArchitectureTarget target)
         : m_kernelLoaded(false)
         , m_hipData(std::make_shared<HIPData>())
+        , m_target(target)
     {
     }
 
@@ -153,25 +157,113 @@ namespace rocRoller
                                    &argsSize,
                                    HIP_LAUNCH_PARAM_END};
 
+        int idx = -1, currDeviceAsicRevisionId = -1;
+        HIP_CHECK(hipGetDevice(&idx));
+        HIP_CHECK(
+            hipDeviceGetAttribute(&currDeviceAsicRevisionId, hipDeviceAttributeAsicRevision, idx));
+        if(m_target.gfx == GPUArchitectureGFX::GFX1250)
+        {
+            if(currDeviceAsicRevisionId == 2)
+            {
+                int newRevId = Settings::Get(Settings::GFX1250AsicRevisionId);
+                Log::warn("Overriding current device asic revision id from {} to {}",
+                          currDeviceAsicRevisionId,
+                          newRevId);
+                currDeviceAsicRevisionId = newRevId;
+            }
+            AssertFatal(m_target.asicRevisionId == currDeviceAsicRevisionId,
+                        "The kernel and current device must have the same target revision id.",
+                        ShowValue(m_target.asicRevisionId),
+                        ShowValue(currDeviceAsicRevisionId));
+        }
+
         if(timer)
             HIP_TIC(timer, iteration);
 
-        HIP_CHECK(hipExtModuleLaunchKernel(m_hipData->function,
-                                           invocation.workitemCount[0],
-                                           invocation.workitemCount[1],
-                                           invocation.workitemCount[2],
-                                           invocation.workgroupSize[0],
-                                           invocation.workgroupSize[1],
-                                           invocation.workgroupSize[2],
-                                           invocation.sharedMemBytes,
-                                           stream,
-                                           nullptr,
-                                           (void**)&hipLaunchParams,
-                                           nullptr, // event
-                                           nullptr // event
-                                           ));
+        if(invocation.workgroupClusterSize)
+        {
+#ifdef ROCROLLER_HAS_HIP_WORKGROUP_CLUSTERS
+            auto const workgroupClusterSize = *invocation.workgroupClusterSize;
+            auto const numWorkgroupsX = invocation.workitemCount[0] / invocation.workgroupSize[0];
+            auto const numWorkgroupsY = invocation.workitemCount[1] / invocation.workgroupSize[1];
+            auto const numWorkgroupsZ = invocation.workitemCount[2] / invocation.workgroupSize[2];
+
+            // TODO Can/should we validate earlier? (i.e. not immediately before launch)
+            AssertFatal(WorkgroupClustersDetail::IsValidWorkgroupClusterSize(
+                            workgroupClusterSize, {numWorkgroupsX, numWorkgroupsY, numWorkgroupsZ}),
+                        fmt::format("Invalid cluster size: [{},{},{}].\n"
+                                    "The number of workgroups [{},{},{}] in each dimension must "
+                                    "be divisible by the cluster size in that dimension.\n"
+                                    "Valid cluster sizes:{}",
+                                    workgroupClusterSize[0],
+                                    workgroupClusterSize[1],
+                                    workgroupClusterSize[2],
+                                    numWorkgroupsX,
+                                    numWorkgroupsY,
+                                    numWorkgroupsZ,
+                                    [=]() {
+                                        std::string s;
+                                        auto const  valid
+                                            = WorkgroupClustersDetail::ValidWorkgroupClusterSizes(
+                                                {numWorkgroupsX, numWorkgroupsY, numWorkgroupsZ});
+                                        for(const auto& v : valid)
+                                            s += fmt::format(" [{},{},{}]", v[0], v[1], v[2]);
+                                        return s;
+                                    }()));
+
+            hipLaunchAttribute attribute[1];
+            HIP_LAUNCH_CONFIG  config = {0};
+
+            config.gridDimX  = numWorkgroupsX;
+            config.gridDimY  = numWorkgroupsY;
+            config.gridDimZ  = numWorkgroupsZ;
+            config.blockDimX = invocation.workgroupSize[0];
+            config.blockDimY = invocation.workgroupSize[1];
+            config.blockDimZ = invocation.workgroupSize[2];
+
+            attribute[0].id               = hipLaunchAttributeClusterDimension;
+            attribute[0].val.clusterDim.x = workgroupClusterSize[0];
+            attribute[0].val.clusterDim.y = workgroupClusterSize[1];
+            attribute[0].val.clusterDim.z = workgroupClusterSize[2];
+            config.attrs                  = attribute;
+            config.numAttrs               = 1;
+            config.sharedMemBytes         = invocation.sharedMemBytes;
+
+            Log::debug("Launching kernel {} with Clusters: [{}, {}, {}]",
+                       m_kernelName,
+                       workgroupClusterSize[0],
+                       workgroupClusterSize[1],
+                       workgroupClusterSize[2]);
+
+            const HIP_LAUNCH_CONFIG* pConfig = &config;
+            HIP_CHECK(hipDrvLaunchKernelEx(
+                pConfig, m_hipData->function, nullptr, (void**)&hipLaunchParams));
+#else
+            Throw<FatalError>(
+                "Workgroup cluster launch requested but the installed ROCm/HIP version does not "
+                "support hipLaunchAttributeClusterDimension. "
+                "Please upgrade to a ROCm version that includes workgroup cluster support.");
+#endif /* ROCROLLER_HAS_HIP_WORKGROUP_CLUSTERS */
+        }
+        else
+        {
+            HIP_CHECK(hipExtModuleLaunchKernel(m_hipData->function,
+                                               invocation.workitemCount[0],
+                                               invocation.workitemCount[1],
+                                               invocation.workitemCount[2],
+                                               invocation.workgroupSize[0],
+                                               invocation.workgroupSize[1],
+                                               invocation.workgroupSize[2],
+                                               invocation.sharedMemBytes,
+                                               stream,
+                                               nullptr,
+                                               (void**)&hipLaunchParams,
+                                               nullptr, // event
+                                               nullptr // event
+                                               ));
+        }
+
         if(timer)
             HIP_TOC(timer, iteration);
     }
-
 }

@@ -6,6 +6,8 @@
 #include "ck_tile/core.hpp"
 #include "warp_gemm_params.hpp"
 
+#include <type_traits>
+
 namespace ck_tile {
 
 // TODO: refactor warp-gemm
@@ -201,8 +203,8 @@ struct WarpGemmAttributeMfmaImplF32F32F32M32N32K16Tf32Gfx950
 {
     static constexpr WGAttrCtlEnum Ctrl = Ctrl_;
 
-    using ADataType = float;
-    using BDataType = float;
+    using ADataType = tf32_t;
+    using BDataType = tf32_t;
     using CDataType = float;
 
     // Input: 8 floats for K=16 (each lane holds 8 elements, kABKPerLane=8)
@@ -264,8 +266,8 @@ struct WarpGemmAttributeMfmaImplF32F32F32M16N16K32Tf32Gfx950
 {
     static constexpr WGAttrCtlEnum Ctrl = Ctrl_;
 
-    using ADataType = float;
-    using BDataType = float;
+    using ADataType = tf32_t;
+    using BDataType = tf32_t;
     using CDataType = float;
 
     // Input: 8 floats for K=32 (each lane holds 8 elements, kABKPerLane=8)
@@ -2110,9 +2112,8 @@ struct WarpGemmAttributeMfmaImpl_i32_16x16x64_i8
         DISPATCH_MFMA_CTRL_("v_mfma_i32_16x16x64_i8", Ctrl)
         else
         {
-#if defined(__gfx95__)
-            c_vec = __builtin_amdgcn_mfma_i32_16x16x64_i8(
-                bit_cast<int64_t>(a_vec), bit_cast<int64_t>(b_vec), c_vec, 0, 0, 0);
+#if defined(__gfx950__)
+            c_vec = __builtin_amdgcn_mfma_i32_16x16x64_i8(a_vec, b_vec, c_vec, 0, 0, 0);
 #else
             ck_tile::ignore = c_vec;
             ck_tile::ignore = a_vec;

@@ -121,7 +121,6 @@ protected:
     void verifyGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
     {
         hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle, refBundle;
-        std::vector<int64_t> outputTensorIds;
 
         // Check engine support and set preferred engine before building execution plans.
         // build_operation_graph() was already called by buildGraph() in the test subclass.
@@ -190,7 +189,7 @@ protected:
         result = graph.build_plans();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        generateBundles(graph, refBundle, gpuBundle, outputTensorIds);
+        generateBundles(graph, refBundle, gpuBundle);
 
         initializeBundle(graph, gpuBundle, seed);
         initializeBundle(graph, refBundle, seed);
@@ -198,11 +197,12 @@ protected:
         ASSERT_NO_FATAL_FAILURE(executeGpuGraph(getSharedHandle(), graph, gpuBundle));
         ASSERT_NO_FATAL_FAILURE(executeReferenceGraph(graph, refBundle));
 
-        ASSERT_GE(outputTensorIds.size(), 1)
+        ASSERT_GE(gpuBundle.outputTensorIds.size(), 1)
             << "At least one output tensor id must be specified for "
                "validation.";
 
-        HIPDNN_PLUGIN_LOG_INFO("Validating " << outputTensorIds.size() << " output tensors");
+        HIPDNN_PLUGIN_LOG_INFO("Validating " << gpuBundle.outputTensorIds.size()
+                                             << " output tensors");
 
         // Lazily register validators after graph execution since tensor Ids and types may be
         // inferred during graph finalization
@@ -213,7 +213,7 @@ protected:
 
         const bool referenceUsesDevice = getReferenceExecutor().requiresDeviceMemory();
 
-        for(const auto& tensorId : outputTensorIds)
+        for(const auto& tensorId : gpuBundle.outputTensorIds)
         {
             auto& refTensor = refBundle.tensors.at(tensorId);
             auto& gpuTensor = gpuBundle.tensors.at(tensorId);
@@ -313,15 +313,16 @@ protected:
 
     virtual void generateBundles(hipdnn_frontend::graph::Graph& graph,
                                  hipdnn_test_sdk::utilities::GraphTensorBundle& refBundle,
-                                 hipdnn_test_sdk::utilities::GraphTensorBundle& gpuBundle,
-                                 std::vector<int64_t>& outputTensorIds)
+                                 hipdnn_test_sdk::utilities::GraphTensorBundle& gpuBundle)
     {
         graph.visit([&](const hipdnn_frontend::graph::INode& node) {
             for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
             {
                 if(tryAddTensorToBundles(tensorAttr, refBundle, gpuBundle))
                 {
-                    outputTensorIds.push_back(tensorAttr->get_uid());
+                    auto uid = tensorAttr->get_uid();
+                    refBundle.outputTensorIds.insert(uid);
+                    gpuBundle.outputTensorIds.insert(uid);
                 }
             }
             for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
@@ -335,9 +336,14 @@ protected:
                                   hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
                                   unsigned int seed)
     {
+        bundle.sentinelFillOutputTensors();
+
         for(auto& tensorPair : bundle.tensors)
         {
-            bundle.randomizeTensor(tensorPair.first, -1.0f, 1.0f, seed);
+            if(!bundle.isOutput(tensorPair.first))
+            {
+                bundle.randomizeTensor(tensorPair.first, -1.0f, 1.0f, seed);
+            }
         }
     }
 

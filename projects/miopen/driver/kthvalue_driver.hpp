@@ -294,7 +294,7 @@ int KthvalueDriver<TIO>::RunForwardGPU()
                               outputDesc,
                               output_dev->GetMem(),
                               indicesDesc,
-                              (size_t*)indices_dev->GetMem(),
+                              static_cast<size_t*>(indices_dev->GetMem()),
                               k,
                               dim,
                               keepDim);

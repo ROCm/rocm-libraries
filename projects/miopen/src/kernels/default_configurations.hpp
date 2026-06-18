@@ -112,6 +112,10 @@
 #define MIO_BN_GFX120X 0
 #endif
 
+#ifndef MIO_BN_GFX125X
+#define MIO_BN_GFX125X 0
+#endif
+
 #ifndef MIO_BN_VARIANT
 #define MIO_BN_VARIANT 255
 #endif
@@ -145,7 +149,8 @@
 #endif
 
 #ifndef MIO_BN_LDSGCN_SIZE
-#define MIO_BN_LDSGCN_SIZE 16
+// 4 SIMD with up to 16 wave each => at most 64 waves
+#define MIO_BN_LDSGCN_SIZE 64
 #endif
 
 #ifndef MIO_BN_LDS_SIZE

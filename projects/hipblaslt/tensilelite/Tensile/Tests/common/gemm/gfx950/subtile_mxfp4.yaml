@@ -2,6 +2,7 @@ TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
 
 GlobalParameters:
+  PrintSolutionRejectionReason: True
   NumElementsToValidate: -1
   MinimumRequiredVersion: 5.0.0
   PrintLevel: 3
@@ -46,8 +47,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -140,8 +141,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -203,8 +204,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -269,8 +270,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation: True
@@ -319,8 +320,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -386,8 +387,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation: True
@@ -443,8 +444,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation: True
@@ -495,8 +496,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation: True
@@ -551,8 +552,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -609,8 +610,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -674,8 +675,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -703,3 +704,59 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [256, 256, 1, 768]   # K = 3*DU (triggers failure)
+
+  ########################################
+  # F4BS TN — TAIL loop sweep (bias + ScaleAlphaVec + hipblaslt_all)
+  #
+  # Sweeps K = 32..512 (step 32, the FP4 K-granularity) at M=N=256 with
+  # MT 128x128, exercising tail-loop remainders for DU=256 and DU=512.
+  # PGR=0/1/2, StreamK=3, WGM=16/XCC=4 to match the production scheduler path.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+      ActivationFuncCall: True
+      UseBias: 1
+      BiasDataTypeList: [s]
+      UseScaleAlphaVec: 1
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128
+          - [16, 16, 128, 1,  1, 2, 2,  2, 2]  # MT 64x64   (single-wave, smaller scale-tile geometry)
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchLocalRead: [1]
+        - ActivationFuncCall: [0]
+        - DepthU: [256, 512, 768]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - TransposeLDS: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [1]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [4]
+        - UseSubtileImpl: [1]
+        - UseCustomMainLoopSchedule: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[256], [256], [1], [32, 32, 512]]
+        - BiasTypeArgs: ['s']

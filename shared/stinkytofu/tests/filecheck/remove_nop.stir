@@ -1,0 +1,22 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyRemoveNopPass --print-output
+#
+# StinkyRemoveNopPass: remove s_nop / v_nop only in basic blocks that contain
+# at least one matrix instruction.
+
+#--- NOPs are removed when the same block contains a matrix instruction.
+# CHECK-LABEL: @remove_nop_in_matrix_block
+# CHECK: v_add_f32
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK: v_mul_f32
+# CHECK-NOT: s_nop
+# CHECK-NOT: v_nop
+st.func @remove_nop_in_matrix_block() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+  "st.v_nop"() { issueCycles = 1, latencyCycles = 1 }
+  a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], a[10:17]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+  "st.v_nop"() { issueCycles = 1, latencyCycles = 1 }
+  v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+}

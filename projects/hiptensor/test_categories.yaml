@@ -1,0 +1,68 @@
+# hipTensor Test Categories Configuration (CTest)
+#
+# Labels here are applied to the *installed-tree* CTestTestfile.cmake
+# fragments (full / smoke / regression) by calls to
+# apply_ctest_category_labels(yaml, install_test_file) in
+# projects/hiptensor/test/CMakeLists.txt, after every test subdirectory
+# has appended its add_test() lines. The shared parser scans those lines
+# for test names and emits explicit set_tests_properties(... LABELS ...)
+# entries, the only label form ctest's script interpreter exposes through
+# `--print-labels` / `-L` at install time.
+#
+# Tiers (parse_ctest_categories.py applies these automatically):
+#   quick         -> quick, standard, comprehensive, full
+#   standard      -> standard, comprehensive, full
+#   comprehensive -> comprehensive, full
+#   full          -> full
+#
+# `test_patterns` are regexes matched against the test names registered
+# in each install fragment. The full fragment registers bare names
+# (e.g. `logger_test`); the smoke / regression fragments register
+# suffixed names (e.g. `logger_test smoke`), so patterns allow an
+# optional trailing ` smoke` / ` regression`.
+#
+# `quick` mirrors rtest.xml's <emulation sets="smoke"> membership: every
+# registered test except plan_cache_test, plan_lifetime_test, and
+# interface_test (which smoke does not run). standard/comprehensive/full
+# are the full suite.
+
+test_categories:
+  quick:
+    description: "hipTensor quick tests - mirrors rtest.xml smoke set"
+    test_patterns:
+      - "^contraction_mode_test( (smoke|regression))?$"
+      - "^elementwise_cpu_test( (smoke|regression))?$"
+      - "^elementwise_op_test( (smoke|regression))?$"
+      - "^hiptensor_options_test( (smoke|regression))?$"
+      - "^logger_test( (smoke|regression))?$"
+      - "^reduction_cpu_impl_test( (smoke|regression))?$"
+      - "^util_test( (smoke|regression))?$"
+      - "^yaml_test( (smoke|regression))?$"
+      - "^(complex_)?(bilinear|scale)_contraction_test_m[1-6]n[1-6]k[1-6]( (smoke|regression))?$"
+      - "^(bilinear|scale)_contraction_with_unary_ops_test( (smoke|regression))?$"
+      - "^trinary_(bilinear|scale)_contraction_test( (smoke|regression))?$"
+      - "^rank[1-6]_reduction_test( (smoke|regression))?$"
+      - "^rank[2-6]_elementwise_(permute|binary_op|trinary_op)_test( (smoke|regression))?$"
+    labels:
+      - "quick"
+
+  standard:
+    description: "hipTensor standard tests - full suite"
+    test_patterns:
+      - ".*"
+    labels:
+      - "standard"
+
+  comprehensive:
+    description: "hipTensor comprehensive tests - full suite"
+    test_patterns:
+      - ".*"
+    labels:
+      - "comprehensive"
+
+  full:
+    description: "hipTensor full test suite"
+    test_patterns:
+      - ".*"
+    labels:
+      - "full"

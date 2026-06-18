@@ -6,6 +6,9 @@ on:
       artifact_run_id:
         type: string
         default: ""
+      therock_ref:
+        type: string
+        required: true
       amdgpu_families:
         type: string
       test_runs_on:
@@ -53,7 +56,6 @@ jobs:
       TEST_COMPONENT: ${{ fromJSON(inputs.component).job_name }}
     steps:
       - name: "Fetch 'build_tools' from repository"
-        if: ${{ runner.os == 'Windows' }}
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
@@ -66,18 +68,23 @@ jobs:
         shell: powershell
         run: . '${{ github.workspace }}\prejob\build_tools\github_actions\cleanup_processes.ps1'
 
+      - name: Pre-job cleanup GPU processes on Linux
+        if: ${{ runner.os == 'Linux' }}
+        timeout-minutes: 5
+        run: bash ./prejob/build_tools/github_actions/cleanup_processes.sh
+
       - name: Checkout Repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: e44b42bbcc7452328ccf12bcac319bda5ede4a6a # 2026-05-20 commit
+          ref: ${{ inputs.therock_ref }}
 
       - name: Configure git for long paths on Windows
         if: ${{ runner.os == 'Windows' }}
         run: git config --global core.longpaths true
 
       - name: Checkout rocm-libraries repository for scripts
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           path: rocm-libraries
 
@@ -108,7 +115,8 @@ jobs:
           mkdir -p ./test_logs
 
           # Run test and capture output (still display to console)
-          ${{ fromJSON(inputs.component).test_script }} 2>&1 | tee ./test_logs/test_output.log
+          python ./build_tools/memory_monitor.py --phase "Test ${{ fromJSON(inputs.component).job_name }}" -- \
+            bash -c '${{ fromJSON(inputs.component).test_script }}' 2>&1 | tee ./test_logs/test_output.log
 
       - name: Notify Teams Channel on Failure
         if: ${{ failure() && !github.event.pull_request.head.repo.fork }}
@@ -129,3 +137,8 @@ jobs:
         timeout-minutes: 5
         shell: powershell
         run: . '${{ github.workspace }}\build_tools\github_actions\cleanup_processes.ps1'
+
+      - name: Post-job cleanup GPU processes on Linux
+        if: ${{ always() && runner.os == 'Linux' }}
+        timeout-minutes: 5
+        run: bash ./build_tools/github_actions/cleanup_processes.sh

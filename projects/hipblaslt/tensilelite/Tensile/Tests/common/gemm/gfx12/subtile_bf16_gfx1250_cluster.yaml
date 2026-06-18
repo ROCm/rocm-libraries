@@ -1,0 +1,163 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  KernelTime: True
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 2
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  CpuThreads: 1
+  RotatingBufferSize: 0
+  Architecture: gfx1250
+  ISA: [[12, 5, 0]]
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 2, 2,  2, 2]  # MT 64x64   WG 2x2
+        - DepthU: [64, 128]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [0, 2]
+        - ScheduleIterAlg: [3]
+        - UseSubtileImpl: [1]
+        - StreamK: [0]
+        - TDMInst: [3]
+        - StaggerU: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - GlobalSplitU: [1]
+        - PreloadKernArgs: [False]
+        # Clustered launch enables the cluster-scope barrier automatically
+        # (subtile derives ClusterBarrier from ClusterDim + TDM; no multicast).
+        - ClusterDim: [[2, 2]]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # MT 64x64, ClusterDim 2x2: every size yields an even WG grid
+          # (ceil(M/64) and ceil(N/64) both divisible by 2), as required by the
+          # host ClusterDimCheck launch predicate.
+          - Exact: [128, 128, 1, 128]  # WG 2x2, aligned
+          - Exact: [96,  96,  1, 128]  # WG 2x2, mult-of-32 edge
+          - Exact: [256, 256, 1, 256]  # WG 4x4, larger K
+          - Exact: [128, 256, 1, 128]  # WG 2x4, asymmetric
+          - Exact: [256, 128, 1, 384]  # WG 4x2, larger K
+          - Exact: [96,  224, 1, 128]  # WG 2x4, asymmetric edges
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 4, 4,  2, 2]  # MT 128x128 WG 2x2
+        - DepthU: [64, 128]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [0, 2]
+        - ScheduleIterAlg: [3]
+        - UseSubtileImpl: [1]
+        - StreamK: [0]
+        - TDMInst: [3]
+        - StaggerU: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - GlobalSplitU: [1]
+        - PreloadKernArgs: [False]
+        - ClusterDim: [[2, 2]]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # MT 128x128, ClusterDim 2x2: ceil(M/128), ceil(N/128) both even.
+          - Exact: [256, 256, 1, 128]  # WG 2x2, aligned
+          - Exact: [160, 160, 1, 128]  # WG 2x2, mult-of-32 edge
+          - Exact: [512, 512, 1, 256]  # WG 4x4, larger K
+          - Exact: [256, 512, 1, 128]  # WG 2x4, asymmetric
+          - Exact: [224, 256, 1, 384]  # WG 2x2, edge + larger K
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]  # MT 256x256 WG 2x2
+        - DepthU: [64, 128]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [0, 2]
+        - ScheduleIterAlg: [3]
+        - UseSubtileImpl: [1]
+        - StreamK: [0]
+        - TDMInst: [3]
+        - StaggerU: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - GlobalSplitU: [1]
+        - PreloadKernArgs: [False]
+        - ClusterDim: [[2, 2]]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # MT 256x256, ClusterDim 2x2: ceil(M/256), ceil(N/256) both even.
+          - Exact: [512, 512, 1, 128]  # WG 2x2, aligned
+          - Exact: [384, 384, 1, 128]  # WG 2x2, mult-of-128 edge
+          - Exact: [512, 512, 1, 384]  # WG 2x2, larger K
+          - Exact: [384, 512, 1, 256]  # WG 2x2, asymmetric
+          - Exact: [257, 512, 1, 128]  # WG 2x2, non-aligned edge
