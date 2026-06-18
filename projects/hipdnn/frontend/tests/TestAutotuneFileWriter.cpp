@@ -11,6 +11,7 @@
 #include <hipdnn_data_sdk/detail/AutotuneConfigNames.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_frontend/autotune/AutotuneFileWriter.hpp>
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -19,6 +20,7 @@
 #include <fstream>
 #include <iterator>
 #include <nlohmann/json.hpp>
+#include <set>
 #endif
 
 using namespace hipdnn_frontend;
@@ -37,26 +39,23 @@ namespace config_op = hipdnn_data_sdk::detail::autotune_config::op;
 namespace config_tensor = hipdnn_data_sdk::detail::autotune_config::tensor;
 namespace config_version = hipdnn_data_sdk::detail::autotune_config::version;
 
-/// Create a temporary file path for testing, cleaned up by destructor.
+inline std::filesystem::path makeUniqueTempDir()
+{
+    static std::atomic<int> s_counter{0};
+    const auto unique = std::to_string(::testing::UnitTest::GetInstance()->random_seed()) + "_"
+                        + std::to_string(s_counter++);
+    return std::filesystem::temp_directory_path() / ("hipdnn_test_" + unique);
+}
+
 struct TempFile
 {
+    hipdnn_test_sdk::utilities::ScopedDirectory dir;
     std::filesystem::path path;
 
     TempFile()
+        : dir(makeUniqueTempDir())
+        , path(dir.path() / "config.json")
     {
-        static std::atomic<int> s_counter{0};
-        path = std::filesystem::temp_directory_path()
-               / ("hipdnn_test_" + std::to_string(s_counter++) + ".json");
-    }
-
-    ~TempFile()
-    {
-        std::error_code ec;
-        std::filesystem::remove(path, ec);
-        // Also remove any .tmp file
-        std::filesystem::path tmp = path;
-        tmp += ".tmp";
-        std::filesystem::remove(tmp, ec);
     }
 
     TempFile(const TempFile&) = delete;
@@ -101,6 +100,27 @@ std::string writeJsonFile(const std::filesystem::path& path, const nlohmann::jso
     const auto contents = json.dump(2) + '\n';
     writeTextFile(path, contents);
     return contents;
+}
+
+// Collect all "<base>.corrupt-*" sibling files currently present next to `base`.
+std::set<std::filesystem::path> collectCorruptSiblings(const std::filesystem::path& base)
+{
+    std::set<std::filesystem::path> out;
+    const auto dir = base.parent_path();
+    const auto prefix = base.filename().string() + ".corrupt-";
+    std::error_code ec;
+    if(!std::filesystem::exists(dir, ec))
+    {
+        return out;
+    }
+    for(const auto& entry : std::filesystem::directory_iterator(dir, ec))
+    {
+        if(entry.path().filename().string().rfind(prefix, 0) == 0)
+        {
+            out.insert(entry.path());
+        }
+    }
+    return out;
 }
 
 nlohmann::json makeExistingVersionedRoot(int64_t version = config_version::CURRENT)
@@ -881,15 +901,25 @@ TEST(TestAutotuneFileWriter, HandleCorruptExistingFile)
         outFile << "{ this is not valid json ]}}";
     }
 
-    // Write valid results — corrupt existing JSON must be rejected and left untouched.
     std::vector<AutotuneResult> results;
     results.push_back(makeResult(1, "MIOPEN_ENGINE"));
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
 
-    auto err = writeVersionedAutotuneResults(
-        tmpFile.path, config_op::CONV_FPROP, results, false, dims, {});
+    // During write, corrupt file is moved aside; writer starts fresh and returns OK.
+    Error err;
+    ASSERT_NO_THROW(err = writeVersionedAutotuneResults(
+                        tmpFile.path, config_op::CONV_FPROP, results, false, dims, {}));
+    EXPECT_TRUE(err.is_good()) << err.get_message();
 
-    EXPECT_FALSE(err.is_good());
+    EXPECT_EQ(collectCorruptSiblings(tmpFile.path).size(), 1u);
+
+    ASSERT_TRUE(std::filesystem::exists(tmpFile.path));
+    std::ifstream freshFile(tmpFile.path);
+    ASSERT_TRUE(freshFile.is_open());
+    nlohmann::json json;
+    ASSERT_NO_THROW(json = nlohmann::json::parse(freshFile));
+    ASSERT_TRUE(json.is_object());
+    EXPECT_EQ(json[config_json::ENGINE_OVERRIDES].size(), 1u);
 }
 
 // ── Non-object existing-file hardening tests ──────────────────────────
@@ -948,10 +978,21 @@ TEST(TestAutotuneFileWriter, HandleInvalidJsonDoesNotThrow)
     results.push_back(makeResult(1, "MIOPEN_ENGINE"));
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
 
+    // Must not throw; corrupt file is moved aside; a fresh file is written; OK returned.
     Error err;
     ASSERT_NO_THROW(err = writeVersionedAutotuneResults(
                         tmpFile.path, config_op::CONV_FPROP, results, false, dims, {}));
-    EXPECT_FALSE(err.is_good());
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+
+    EXPECT_EQ(collectCorruptSiblings(tmpFile.path).size(), 1u);
+
+    ASSERT_TRUE(std::filesystem::exists(tmpFile.path));
+    std::ifstream freshFile(tmpFile.path);
+    ASSERT_TRUE(freshFile.is_open());
+    nlohmann::json json;
+    ASSERT_NO_THROW(json = nlohmann::json::parse(freshFile));
+    ASSERT_TRUE(json.is_object());
+    EXPECT_EQ(json[config_json::ENGINE_OVERRIDES].size(), 1u);
 }
 
 TEST(TestAutotuneFileWriter, HandleWellFormedObjectPreservesOtherKeys)

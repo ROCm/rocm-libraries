@@ -3634,6 +3634,45 @@ private:
                         continue;
                     }
 
+                    // Ensure compiled plan's workspace size fits the provided workspace size.
+                    int64_t comopiledPlanWsSize = 0;
+                    detail::hipdnnBackend()->backendGetAttribute(
+                        primingPlan.executionPlanDesc->get(),
+                        HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE,
+                        HIPDNN_TYPE_INT64,
+                        1,
+                        nullptr,
+                        &comopiledPlanWsSize);
+                    const bool primingWsNullMismatch
+                        = (workspace == nullptr && comopiledPlanWsSize > 0);
+                    const bool primingWsOverBudget
+                        = (maxWorkspaceSize >= 0 && comopiledPlanWsSize > maxWorkspaceSize);
+                    if(primingWsNullMismatch || primingWsOverBudget)
+                    {
+                        // Log a warning and add a priming failure reason if the estimated workspace
+                        // size would have fit (compiled workspace size was larger than estimate),
+                        // then skip executing this plan but still allow it to be compiled and checked
+                        // again for the benchmark loop.
+                        const bool estimateFit = (workspace == nullptr)
+                                                     ? (spec.workspaceSize <= 0)
+                                                     : (spec.workspaceSize <= maxWorkspaceSize);
+                        if(estimateFit)
+                        {
+                            const std::string reason
+                                = "Priming skipped: compiled plan workspace size "
+                                  + std::to_string(comopiledPlanWsSize)
+                                  + (workspace == nullptr
+                                         ? " exceeds provided workspace (null pointer)"
+                                         : " exceeds provided workspace size "
+                                               + std::to_string(maxWorkspaceSize));
+                            HIPDNN_FE_LOG_WARN("autotune: EXHAUSTIVE "
+                                               << reason << " for engine " << spec.engineId
+                                               << " (continuing without priming)");
+                            primingFailureReasons[specIdx] = reason;
+                        }
+                        continue;
+                    }
+
                     // Execute priming plan once
                     auto execErr = executeWithPlan(
                         handle, *primingPlan.executionPlanDesc, variantPack, workspace);
@@ -4186,7 +4225,7 @@ private:
                     timings.push_back(elapsed);
                     result.converged = true;
                 }
-                result.iterationsRun = 1;
+                result.iterationsRun = static_cast<int>(timings.size());
             }
             else if(config.strategy == AutotuneStrategy::FIXED_AVERAGE)
             {

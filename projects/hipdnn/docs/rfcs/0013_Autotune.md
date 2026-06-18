@@ -54,7 +54,7 @@ Deep learning operations can be computed by many algorithms, each with different
 ## 3. Requirements
 
 1. **Two tuning modes**: Auto-tune (simple wall-time) and Exhaustive-tune (internal priming via temporary plans + wall-time)
-2. **Config file output**: Write ranked winners to engine override JSON files, enabling reuse via `HIPDNN_HEUR_CONFIG_PATH`
+2. **Config file output**: Write ranked winner to engine override JSON files, enabling reuse via `HIPDNN_HEUR_CONFIG_PATH`
 3. **Benchmarking strategies**: Single-shot, fixed-average, run-until-stable
 4. **Separated phases**: Inspect/filter engines between discovery and plan spec collection
 5. **Knob variant autotuning**: Benchmark the same engine with different knob configurations
@@ -88,7 +88,7 @@ Deep learning operations can be computed by many algorithms, each with different
 │  │ Autotuning      │    │ Config File Writer                      │  │
 │  │ Runtime         │───▶│ (EngineOverrideConfig JSON format)      │  │
 │  │                 │    │                                         │  │
-│  │ • AUTO mode     │    │ • Write ranked winners                  │  │
+│  │ • AUTO mode     │    │ • Write ranked winner                   │  │
 │  │ • EXHAUSTIVE    │    │ • Append to existing file               │  │
 │  │   mode          │    │ • Replace matching (op, tensors)        │  │
 │  │ • Strategies    │    │ • Autotune metadata                     │  │
@@ -498,6 +498,7 @@ If both or neither path's artifacts are present, `autotune()` returns an error. 
 - `variantPack` fails tensor UID validation (`INVALID_VALUE`): all non-virtual tensor UIDs required by the graph must be present. Missing UIDs are reported in the error message.
 - Workspace pointer null but plans require workspace
 - No autotuning candidates (no plan specs and no compiled plans)
+- No candidates remain after filtering: `engineIdFilter` and/or `deselect_*` criteria exclude every candidate.
 - EXHAUSTIVE mode requested on compiled-plan path
 - `RUN_UNTIL_STABLE` parameter validation fails (see `AutotuneConfig` constraints in § 6.1)
 
@@ -529,42 +530,46 @@ Failed entries (`succeeded = false`) are always placed after successful entries,
 1. Plan-spec path: compile all plan specs into execution plans
    Compiled-plan path: use pre-compiled plans as-is
 2. For each compiled plan:
-     a. device synchronize (ensure GPU is idle before this plan's benchmarking)
-     b. warmup iterations (discard timing)
-     c. device synchronize
-     d. [strategy-specific timed iteration loop]
-     e. compute avgTimeMs and track minTimeMs
+     a. warmup iterations (discard timing)
+     b. device synchronize (ensure GPU is idle before this plan's timed runs)
+     c. [strategy-specific timed iteration loop]
+     d. compute avgTimeMs and track minTimeMs
 sort by minTimeMs ascending (or user rankingFn)
 ```
 
 **EXHAUSTIVE mode** (plan-spec path only):
 ```
 1. For each plan spec where the engine's supportsExhaustive is true:
-     * build a temporary priming plan using the plan spec's knob settings plus global.benchmarking = 1
-     * execute the priming plan once
+     * build and finalize a temporary priming plan using the plan spec's knob settings
+       plus global.benchmarking = 1
+     * filter by the compiled plan's workspace size (but still benchmark filtered plans);
+       this is a skip, not a priming failure, so continueOnPrimingFailure does not apply
+       but a log is generated if a filter'sd plan's estimated size would have fit.
+     * otherwise, execute the priming plan once
      * discard the priming plan
-     * On priming failure:
+     * On priming failure (build/finalize/execute error, distinct from a workspace skip):
        - If continueOnPrimingFailure is false (default): abort, return error
        - If continueOnPrimingFailure is true: mark engine as unprimed, continue
 2. Compile all plan specs into execution plans (engines are now primed)
 3. For each compiled plan:
-     a. device synchronize (ensure GPU is idle before this plan's benchmarking)
-     b. warmup iterations (discard timing)
-     c. device synchronize
-     d. [strategy-specific timed iteration loop]
-     e. compute avgTimeMs and track minTimeMs
+     a. warmup iterations (discard timing)
+     b. device synchronize (ensure GPU is idle before this plan's timed runs)
+     c. [strategy-specific timed iteration loop]
+     d. compute avgTimeMs and track minTimeMs
 sort by minTimeMs ascending (or user rankingFn)
 ```
 
 > **Stream**: `autotune()` uses the stream set on the handle via `hipdnnSetStream()`.
 
-> **Synchronization**: Device synchronization is performed before and after warmup (before timed runs), preventing cross-plan interference. Event synchronization is used between timed iterations. Stream synchronization is not used during autotuning.
+> **Synchronization**: Device synchronization is performed after warmup (before timed runs), preventing cross-plan interference. Event synchronization is used between timed iterations. Stream synchronization is not used during autotuning.
 >
 > **Backend abstraction**: Because hipDNN is a header-only library, it does not call HIP runtime functions directly. Device synchronization is performed through backend profiling descriptors (`HIPDNN_BACKEND_PROFILING_CONTROL_EXT` with `HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT`). Event-based timing similarly uses backend profiling descriptors rather than direct HIP event APIs.
 
 Engines where `supportsExhaustive` is false skip priming and are compiled and benchmarked normally.
 
 When `continueOnPrimingFailure` is `true` and priming fails, the engine is still benchmarked (unprimed). Its `AutotuneResult::ranExhaustive` is `false`, and `errorMessage` notes the priming failure even though `succeeded` may be `true`.
+
+When priming is skipped because the priming plan's compiled workspace does not fit the provided workspace, the engine is always benchmarked unprimed regardless of `continueOnPrimingFailure` (a workspace skip is not a priming failure). Its `AutotuneResult::ranExhaustive` is `false`. An `errorMessage` is attached only when the pre-compile plan-spec estimate indicated the plan would fit but the larger compiled workspace did not; when the estimate also did not fit, the skip is expected and no message is recorded. This mirrors the post-compile workspace skip behavior in the main benchmarking flow. The plan is then subject to the normal post-compile workspace check, which may skip it from benchmarking entirely if its compiled workspace still exceeds the provided size.
 
 **Strategy implementations**:
 
@@ -585,7 +590,7 @@ Log messages cover the following categories:
 - **Failures**: Benchmark failures (WARN level) with engine name and error message
 - **Ranking and winner**: Final succeeded/failed counts and winner selection
 
-> **Open question (stddev formula)**: `stddevMs` currently uses population standard deviation (divide by N). cuDNN uses sample standard deviation (divide by N-1). Should the default match cuDNN's sample stddev for compatibility, with a separate method or option for population stddev? Feedback welcome.
+> **Standard deviation formula**: `stddevMs` uses population standard deviation (divide by N) across the timed iterations.
 
 ### 6.5 Config File Output
 
@@ -647,7 +652,7 @@ Reuses the `EngineOverrideConfig` JSON format with autotuning metadata added:
 - `rank`: 0-based ranking (0 = fastest)
 - `min_time_ms`: minimum observed time (used for ranking)
 - `avg_time_ms`: average time across timed iterations
-- `stddev_ms`: standard deviation (0.0 for SINGLE_SHOT)
+- `stddev_ms`: population standard deviation, divide by N (0.0 for SINGLE_SHOT)
 - `workspace_size`: workspace bytes required
 - `mode`: `"auto"` or `"exhaustive"`
 - `ran_exhaustive`: `true` if primed via temporary benchmarking plan, `false` otherwise
@@ -665,7 +670,10 @@ The config file is a lightweight engine *selection* hint; plan serialization is 
 
 `AutotuneStorageConfig::deleteAllExistingFileContent` (default `false`) controls whether unrelated entries are preserved. When `false`, only the matching entry is replaced; other entries for different operations or tensor shapes are kept. When `true`, all existing content is deleted before writing.
 
-**Corrupt file recovery**: If the existing config file contains invalid JSON, behavior depends on `deleteAllExistingFileContent`. When `true`, the file is replaced. When `false` (append mode), an error is logged indicating the file could not be read and the existing content is replaced with the new result.
+**Corrupt file recovery**: If the existing config file contains invalid JSON, behavior depends on `deleteAllExistingFileContent`. When `true`, the file is replaced. When `false` (append mode), the corrupt file is preserved by being moved aside to a `<filePath>.corrupt-<Unix epoch seconds>` sibling (so its accumulated entries remain recoverable, and repeated corrupt-recoveries do not overwrite each other), an error is logged, and a fresh file is
+written with the new result. If the corrupt file cannot be moved aside, a warning is
+logged and the corrupt file is overwritten with the new result (the freshly computed
+results take priority over preserving unreadable data).
 
 **Concurrent access**: Config file append is not safe for concurrent writers. For concurrent scenarios, use separate output files per process and merge afterward.
 

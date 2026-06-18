@@ -354,6 +354,7 @@ TEST_F(IntegrationAutotuneCompiledPlanPath, PlanSpecAutotuneWithEngineIdFilter)
     result = bundle.graph->autotune(
         _handle, bundle.variantPack, workspace.get(), maxWs, config, {}, &results);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_FALSE(results.empty()) << "No results from engine A found";
 
     // Only engine A's plan specs should be benchmarked
     for(const auto& r : results)

@@ -7514,7 +7514,7 @@ INSTANTIATE_TEST_SUITE_P(GraphTopologies,
                              return info.param.name;
                          });
 
-// ── CompiledPlan Infrastructure Tests (Phase 2) ─────────────────────────
+// ── CompiledPlan Infrastructure Tests ───────────────────────────────────
 
 // Verify that accessor helpers return nullptr / throw when no plans exist.
 TEST_F(TestGraph, ActiveAccessorsReturnNullptrWhenEmpty)
@@ -7823,7 +7823,7 @@ TEST_F(TestGraph, DeserializeCompiledPlanUsesVectorModel)
 }
 
 // ---------------------------------------------------------------------------
-// Stage 1B.6: Mutual Exclusion Guard Tests
+// Mutual Exclusion Guard Tests
 // ---------------------------------------------------------------------------
 
 TEST_F(TestGraph, CreateExecutionPlansRejectsAfterAddEngine)
@@ -7860,7 +7860,7 @@ TEST_F(TestGraph, AddAllEnginesRejectsAfterCreateExecutionPlans)
 }
 
 // ---------------------------------------------------------------------------
-// Stage 1B.6: Plan-Indexed Access Tests
+// Plan-Indexed Access Tests
 // ---------------------------------------------------------------------------
 
 TEST_F(TestGraph, GetExecutionPlanCountReturnsZeroWhenEmpty)
@@ -8077,7 +8077,7 @@ TEST_F(TestGraph, DeselectEnginesNoOp)
 }
 
 // ---------------------------------------------------------------------------
-// Stage 14: Knob Validation at add_engine_*() Time
+// Knob Validation at add_engine_*() Time
 // ---------------------------------------------------------------------------
 
 // Helper to mock knob info query that can be called multiple times.
@@ -8506,7 +8506,7 @@ TEST_F(TestGraph, WindowSizeValidationOnlyForRunUntilStable)
 }
 
 // ---------------------------------------------------------------------------
-// Stage 16: Final Conformance and Cleanup
+// Final Conformance and Cleanup
 // ---------------------------------------------------------------------------
 
 TEST_F(TestGraph, AddEngineConfigsRejectsBeforeGraphBuild)
@@ -8705,7 +8705,7 @@ TEST_F(TestGraph, AutotuneRejectsMissingTensorUids)
     graph.injectDummyPlanSpec();
 
     // Provide variantPack with only UID 1 (missing UIDs 2–5).
-    // Use Tier 2 overload (with workspaceSize) because plan specs are present.
+    // Use the general overload (with workspaceSize) because plan specs are present.
     const std::unordered_map<int64_t, void*> pack = {{1, reinterpret_cast<void*>(0x1)}};
     const auto result = graph.autotune(_handle, pack, nullptr, int64_t{0});
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
@@ -8730,7 +8730,7 @@ TEST_F(TestGraph, AutotuneAcceptsCompleteVariantPack)
     graph.injectDummyPlanSpec();
 
     // Provide variantPack with all required UIDs (1–5).
-    // Use Tier 2 overload (with workspaceSize) because plan specs are present.
+    // Use the general overload (with workspaceSize) because plan specs are present.
     const std::unordered_map<int64_t, void*> pack = {{1, reinterpret_cast<void*>(0x1)},
                                                      {2, reinterpret_cast<void*>(0x2)},
                                                      {3, reinterpret_cast<void*>(0x3)},
@@ -8758,7 +8758,7 @@ TEST_F(TestGraph, AutotuneAcceptsExtraUidsInVariantPack)
     graph.injectDummyPlanSpec();
 
     // Provide variantPack with all required UIDs (1–5) AND an extra UID 99.
-    // Use Tier 2 overload (with workspaceSize) because plan specs are present.
+    // Use the general overload (with workspaceSize) because plan specs are present.
     const std::unordered_map<int64_t, void*> pack = {{1, reinterpret_cast<void*>(0x1)},
                                                      {2, reinterpret_cast<void*>(0x2)},
                                                      {3, reinterpret_cast<void*>(0x3)},
@@ -8775,7 +8775,7 @@ TEST_F(TestGraph, AutotuneAcceptsExtraUidsInVariantPack)
 }
 
 // ============================================================================
-// Stage 18: add_engines() batch method tests
+// add_engines() batch method tests
 // ============================================================================
 
 TEST_F(TestGraph, AddEnginesCreatesMultiplePlanSpecs)
@@ -8844,7 +8844,7 @@ TEST_F(TestGraph, AddEnginesEmptyInputReturnsError)
 }
 
 // ============================================================================
-// Stage 18: deselect_engines() by ID tests
+// deselect_engines() by ID tests
 // ============================================================================
 
 TEST_F(TestGraph, DeselectEnginesByIdRemovesFromPlanSpecs)
@@ -8885,7 +8885,7 @@ TEST_F(TestGraph, DeselectEnginesByIdEmptyVector)
 }
 
 // ============================================================================
-// Stage 18: Tier 3 autotune overload tests
+// cuDNN-compatible autotune overload tests
 // ============================================================================
 
 TEST_F(TestGraph, Tier3AutotuneRequiresCompiledPlans)
@@ -8898,9 +8898,9 @@ TEST_F(TestGraph, Tier3AutotuneRequiresCompiledPlans)
 }
 
 // ============================================================================
-// Tier 1 Compiled-Plan-Only Guard Tests (Stage 3)
+// Compiled-Plan-Only Guard Tests
 //
-// RFC 6.3: The Tier 1 autotune overloads (no workspaceSize parameter) are
+// RFC 6.3: The compiled-plan autotune overloads (no workspaceSize parameter) are
 // compiled-plan path only and must return an error if plan specs exist.
 // ============================================================================
 
@@ -8941,7 +8941,7 @@ TEST_F(TestGraph, AutotuneTier2AcceptsPlanSpecs)
     const std::unordered_map<int64_t, void*> dummyPack = {{1, reinterpret_cast<void*>(0x1)}};
     const AutotuneConfig config;
 
-    // Tier 2 overload accepts workspaceSize
+    // The general overload accepts workspaceSize
     auto result = graph.autotune(nullptr, dummyPack, nullptr, int64_t{1024}, config);
     // Should fail at handle validation, NOT at plan-spec guard
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
@@ -8956,7 +8956,7 @@ TEST_F(TestGraph, AutotuneTier2RejectsNegativeWorkspaceSize)
 
     const std::unordered_map<int64_t, void*> dummyPack = {{1, reinterpret_cast<void*>(0x1)}};
 
-    // Negative workspaceSize must be rejected at the Tier 2 entry point
+    // Negative workspaceSize must be rejected at the general-overload entry point
     auto result = graph.autotune(nullptr, dummyPack, nullptr, int64_t{-1});
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(result.err_msg.find("workspaceSize"), std::string::npos)
@@ -8964,7 +8964,7 @@ TEST_F(TestGraph, AutotuneTier2RejectsNegativeWorkspaceSize)
 }
 
 // ============================================================================
-// F6: build_plans() guards empty _compiledPlans
+// build_plans() guards empty _compiledPlans
 // ============================================================================
 
 TEST_F(TestGraph, BuildPlansHeuristicsChoiceRejectsEmptyCompiledPlans)
@@ -8985,7 +8985,7 @@ TEST_F(TestGraph, BuildPlansAllRejectsEmptyCompiledPlans)
 }
 
 // ============================================================================
-// F8/F1: All-plans-exceed-workspace and all-barred early returns (host, no GPU)
+// All-plans-exceed-workspace and all-barred early returns (host, no GPU)
 //
 // Both early-returns fire before the benchmark loop, so no real GPU op runs;
 // the mocked backend (TestGraph fixture) is sufficient.
@@ -9036,7 +9036,7 @@ TEST_F(TestGraph, AutotuneAllPlansBarredReturnsInvalidValueAndKeepsIndices)
     ASSERT_TRUE(buildResult.is_good()) << buildResult.err_msg;
 
     // Compiled-plan path: all candidates are barred (e.g. by deselect_engines()).
-    // Barred plans stay in _compiledPlans for cuDNN index-stability; F1's
+    // Barred plans stay in _compiledPlans for cuDNN index-stability; the
     // all-barred check fires instead of the workspace early-return.
     const int candidateCount = 2;
     graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/512, /*barred=*/true);
@@ -9072,7 +9072,7 @@ TEST_F(TestGraph, AutotuneAllPlansBarredReturnsInvalidValueAndKeepsIndices)
 }
 
 // ============================================================================
-// F2: Ranking tests driving the real Graph::rankAndSelectWinner
+// Ranking tests driving the real Graph::rankAndSelectWinner
 // ============================================================================
 
 namespace
@@ -9224,7 +9224,7 @@ TEST_F(TestGraph, RankAndSelectWinnerCustomRankingFnChangesWinnerThroughProducti
 }
 
 // ============================================================================
-// F2: dedup / strip / max driving real production APIs
+// dedup / strip / max driving real production APIs
 // ============================================================================
 
 TEST_F(TestGraph, AddEngineDedupPreventsDuplicatePlanSpecs)
@@ -9297,7 +9297,7 @@ TEST_F(TestGraph, GetEstimatedMaxWorkspaceReturnsMaxOfPlanSpecs)
 }
 
 // ============================================================================
-// F2: engine-ID filter, variant→knob-settings conversion, exhaustive-priming
+// engine-ID filter, variant→knob-settings conversion, exhaustive-priming
 // knob injection — all driving the real production autotune APIs (host, no GPU).
 //
 // These replace deleted reimplemented-logic unit tests that re-ran std::find /
@@ -9341,7 +9341,7 @@ TEST_F(TestGraph, EngineIdFilterSelectsSubset)
         config.engineIdFilter = {20};
 
         std::vector<AutotuneResult> results;
-        // Tier-1 compiled-plan overload with a null workspace pointer.
+        // The compiled-plan overload with a null workspace pointer.
         auto result = graph.autotune(_handle, pack, /*workspace=*/nullptr, config, {}, &results);
 
         EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
@@ -9510,7 +9510,7 @@ TEST_F(TestGraph, ExhaustivePrimingKnobInjection)
     config.mode = TuneMode::EXHAUSTIVE;
 
     std::vector<AutotuneResult> results;
-    // Tier-2 plan-spec overload with maxWorkspaceSize=0 (all plans exceed it).
+    // The general plan-spec overload with maxWorkspaceSize=0 (all plans exceed it).
     auto result
         = graph.autotune(_handle, pack, /*workspace=*/nullptr, int64_t{0}, config, {}, &results);
 
@@ -9529,6 +9529,146 @@ TEST_F(TestGraph, ExhaustivePrimingKnobInjection)
         = {{hipdnn_frontend::autotune::BENCHMARKING_KNOB_NAME, int64_t{1}}};
     EXPECT_EQ(captured, expected)
         << "EXHAUSTIVE priming must inject exactly (global.benchmarking, 1)";
+}
+
+// Drives the post-compile workspace-growth skip branch in autotuneImpl
+// alongside a sibling plan that fits, proving the guard discriminates per plan.
+//
+// Two engines reach the workspace query; both estimates fit within the limit,
+// but only one stays within after compilation:
+//   - engine A (the fitting plan): estimate 512, compiled 1024 <= limit 1500 ->
+//     benchmarked and selected as the winner.
+//   - engine B (the growing plan): estimate 1024 <= limit 1500 < compiled 4096 ->
+//     skipped (not benchmarked) and surfaced as a failed AutotuneResult.
+//
+// Estimates are set directly via injectPlanSpec; per-plan compiled workspace is
+// returned in compile order by the EXECUTION_PLAN_WORKSPACE_SIZE mock (A first,
+// B second). AUTO mode skips priming, and the benchmark path runs entirely
+// through the mocked backend (execute + profiling elapsed-ms), so no GPU is
+// needed. The scenario is non-degenerate: both estimates are positive and within
+// a positive limit, and only B's compiled workspace grows past it.
+TEST_F(TestGraph, AutotuneSkipsPlanWhoseCompiledWorkspaceGrowsPastLimit)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    // Built operation graph plus AnyNumber create/set/finalize/get mocks so the
+    // plan-spec compile, engine-config set-attr, and finalize all succeed.
+    buildGraphAndMockEngineRepeated(_mockBackend, graph, _handle);
+
+    const int64_t fitEngineId = 41;
+    const int64_t growEngineId = 42;
+    const int64_t fitEstimate = 512; // within the limit, compiles to a fitting size
+    const int64_t growEstimate = 1024; // within the limit pre-compile, grows past it after
+    const int64_t maxWorkspaceSize = 1500; // binding limit, between both estimates and growCompiled
+    const int64_t fitCompiled = 1024; // post-compile, still within the limit
+    const int64_t growCompiled = 4096; // post-compile, grows past the limit
+
+    // Two plan specs with positive estimates that both fit pre-compile. The fit
+    // engine is inserted first, so it is compiled (and workspace-queried) first.
+    graph.injectPlanSpec(fitEngineId, fitEstimate);
+    graph.injectPlanSpec(growEngineId, growEstimate);
+
+    // Return the compiled workspace per plan in compile order: A (fits) then
+    // B (grows). The compile loop iterates plan specs in insertion order.
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, nullptr, _))
+        .Times(AnyNumber())
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t*,
+                     void* out) {
+            *static_cast<int64_t*>(out) = fitCompiled;
+            return HIPDNN_STATUS_SUCCESS;
+        })
+        .WillRepeatedly([](hipdnnBackendDescriptor_t,
+                           hipdnnBackendAttributeName_t,
+                           hipdnnBackendAttributeType_t,
+                           int64_t,
+                           int64_t*,
+                           void* out) {
+            *static_cast<int64_t*>(out) = growCompiled;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // The fitting plan is benchmarked: its execution and profiling go through the
+    // mocked backend. Execute succeeds; the profiling elapsed-ms query returns a
+    // positive time so the benchmark produces a valid measurement.
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
+        .Times(AnyNumber())
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, nullptr, _))
+        .Times(AnyNumber())
+        .WillRepeatedly([](hipdnnBackendDescriptor_t,
+                           hipdnnBackendAttributeName_t,
+                           hipdnnBackendAttributeType_t,
+                           int64_t,
+                           int64_t*,
+                           void* out) {
+            *static_cast<float*>(out) = 1.0f;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    const std::unordered_map<int64_t, void*> pack = {{1, reinterpret_cast<void*>(0x1)},
+                                                     {2, reinterpret_cast<void*>(0x2)},
+                                                     {3, reinterpret_cast<void*>(0x3)},
+                                                     {4, reinterpret_cast<void*>(0x4)},
+                                                     {5, reinterpret_cast<void*>(0x5)}};
+
+    const AutotuneConfig config; // AUTO mode: no EXHAUSTIVE priming
+
+    // The fitting plan needs workspace, so a non-null workspace pointer is
+    // required to pass the null-workspace guard. The pointer is never
+    // dereferenced (execution is mocked).
+    auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
+
+    std::vector<AutotuneResult> results;
+    // The general plan-spec overload with the binding workspace limit.
+    auto result = graph.autotune(_handle, pack, workspace, maxWorkspaceSize, config, {}, &results);
+
+    // The fitting plan succeeded, so autotune returns OK.
+    EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Both engines appear in the results: the fitting winner and the skipped
+    // grown plan.
+    ASSERT_EQ(results.size(), 2u);
+
+    auto findResult = [&](int64_t engineId) -> const AutotuneResult* {
+        for(const auto& r : results)
+        {
+            if(r.engineId == engineId)
+            {
+                return &r;
+            }
+        }
+        return nullptr;
+    };
+
+    const auto* fit = findResult(fitEngineId);
+    const auto* grow = findResult(growEngineId);
+    ASSERT_NE(fit, nullptr);
+    ASSERT_NE(grow, nullptr);
+
+    // The fitting plan was benchmarked: it succeeded, ranked winner, and its
+    // compiled workspace stayed within the limit.
+    EXPECT_TRUE(fit->succeeded);
+    EXPECT_EQ(fit->rank, 0);
+    EXPECT_EQ(fit->workspaceSize, fitCompiled);
+    EXPECT_LE(fit->workspaceSize, maxWorkspaceSize);
+
+    // The growing plan was skipped: not succeeded, rank -1, and its estimate
+    // and compiled size DIFFER — the estimate fit, the compiled size grew past.
+    EXPECT_FALSE(grow->succeeded);
+    EXPECT_EQ(grow->rank, -1);
+    EXPECT_EQ(grow->estimatedWorkspaceSize, growEstimate);
+    EXPECT_EQ(grow->workspaceSize, growCompiled);
+    EXPECT_NE(grow->estimatedWorkspaceSize, grow->workspaceSize);
+    EXPECT_LE(grow->estimatedWorkspaceSize, maxWorkspaceSize);
+    EXPECT_GT(grow->workspaceSize, maxWorkspaceSize);
 }
 
 // ============================================================================

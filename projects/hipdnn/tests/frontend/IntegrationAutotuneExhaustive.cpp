@@ -28,7 +28,7 @@ using IntegrationAutotuneExhaustive = hipdnn_tests::AutotuneIntegrationFixture;
 
 // Test: EXHAUSTIVE mode with continueOnPrimingFailure=true verifies per-engine behavior.
 //
-// This consolidated test verifies the RFC's autotune behavior for all engine types:
+// This consolidated test verifies autotune behavior for all engine types:
 // - Engine A (main): has benchmarking knob, priming succeeds, benchmark succeeds
 //   → ranExhaustive=true, succeeded=true
 // - Engine B: no benchmarking knob, priming skipped, benchmark succeeds
@@ -40,9 +40,9 @@ using IntegrationAutotuneExhaustive = hipdnn_tests::AutotuneIntegrationFixture;
 // - EnginePrimingOnlyFails: has benchmarking knob, priming fails, benchmark succeeds
 //   → ranExhaustive=false, succeeded=true, errorMessage contains priming failure
 //
-// RFC § 6.4: "When continueOnPrimingFailure is true and priming fails, the engine
-// is still benchmarked (unprimed). Its AutotuneResult::ranExhaustive is false,
-// and errorMessage notes the priming failure even though succeeded may be true."
+// When continueOnPrimingFailure is true and priming fails, the engine is still
+// benchmarked (unprimed): AutotuneResult::ranExhaustive is false, and errorMessage
+// notes the priming failure even though succeeded may be true.
 TEST_F(IntegrationAutotuneExhaustive, ExhaustiveModeWithContinueOnPrimingFailure)
 {
     ConvGraphBundle bundle;
@@ -126,7 +126,7 @@ TEST_F(IntegrationAutotuneExhaustive, ExhaustiveModeWithContinueOnPrimingFailure
         {
             foundEnginePrimingOnlyFails = true;
             // EnginePrimingOnlyFails: priming fails, but benchmark succeeds
-            // This tests the RFC case "succeeded may be true"
+            // This tests the case where succeeded may be true despite a priming failure
             EXPECT_TRUE(r.succeeded)
                 << "EnginePrimingOnlyFails benchmark should succeed despite priming failure";
             EXPECT_FALSE(r.ranExhaustive)
@@ -178,6 +178,80 @@ TEST_F(IntegrationAutotuneExhaustive, AutoModeDoesNotRunCachePriming)
         EXPECT_FALSE(r.ranExhaustive)
             << "Engine " << r.engineId << " should not have ran exhaustive in AUTO mode";
     }
+}
+
+// Test: EXHAUSTIVE priming is SKIPPED (not failed) when the priming plan's
+// compiled workspace exceeds the provided budget; the plan is still benchmarked
+// unprimed.
+//
+// AutotunePluginEngineWorkspaceGrows reports estimated workspace 1024 and an exhaustive
+// compiled workspace of 8192 for its priming plan (benchmarking knob enabled)
+// but only 1024 for its non-exhaustie real plan. With an allocated workspace
+// size of 4096:
+//   - exhaustive compiled size (8192) > 4096 -> priming skipped
+//   - estimated size (1024) <= 4096          -> triggers warning + errorMessage
+//   - non-exhaustive compiled (1024) <= 4096 -> benchmarked normally -> succeeded
+//
+// A workspace skip during priming always continues, allowing the plan to run through
+// the benchmarking loop un-primed, regardless of continueOnPrimingFailure. The skipped
+// plan's result has ranExhaustive = false, and an errorMessage is also attached but
+// only when the pre-compile estimate fit but the larger compiled workspace did not.
+TEST_F(IntegrationAutotuneExhaustive, ExhaustivePrimingWorkspaceSkipBenchmarksUnprimed)
+{
+    constexpr int64_t ENGINE_WORKSPACE_GROWS_ID
+        = hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineWorkspaceGrows>();
+
+    // Budget between the engine's estimate (1024) and its priming compiled
+    // workspace (8192), and >= its real compiled workspace (1024).
+    constexpr int64_t WORKSPACE_BUDGET = 4096;
+
+    ConvGraphBundle bundle;
+    createBuiltConvGraph("autotune_exhaustive_test_conv", bundle);
+
+    auto result = bundle.graph->add_engines({ENGINE_WORKSPACE_GROWS_ID});
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    int64_t estimatedWs = 0;
+    result = bundle.graph->get_estimated_max_workspace_size(estimatedWs);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_LE(estimatedWs, WORKSPACE_BUDGET)
+        << "Estimated workspace (" << estimatedWs << ") must fit the budget (" << WORKSPACE_BUDGET
+        << ") for this test to exercise the estimate-fit priming-skip branch";
+
+    const Workspace workspace(static_cast<size_t>(WORKSPACE_BUDGET));
+
+    AutotuneConfig config;
+    config.mode = TuneMode::EXHAUSTIVE;
+    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.warmupIterations = 1;
+    // A workspace skip is not a priming failure: even with this false, the run
+    // must continue and benchmark the plan unprimed rather than aborting.
+    config.continueOnPrimingFailure = false;
+
+    std::vector<AutotuneResult> results;
+    result = bundle.graph->autotune(
+        _handle, bundle.variantPack, workspace.get(), WORKSPACE_BUDGET, config, {}, &results);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    bool foundWorkspaceGrows = false;
+    for(const auto& r : results)
+    {
+        if(r.engineId != ENGINE_WORKSPACE_GROWS_ID)
+        {
+            continue;
+        }
+        foundWorkspaceGrows = true;
+        EXPECT_TRUE(r.succeeded) << "WorkspaceGrows real plan fits the budget and should benchmark";
+        EXPECT_FALSE(r.ranExhaustive)
+            << "WorkspaceGrows priming was skipped for workspace, so ranExhaustive must be false";
+        EXPECT_FALSE(r.errorMessage.empty())
+            << "WorkspaceGrows estimate fit but priming compiled did not, so an errorMessage "
+               "describing the workspace skip should be attached";
+        EXPECT_NE(r.errorMessage.find("workspace"), std::string::npos)
+            << "errorMessage should mention the workspace skip; got: " << r.errorMessage;
+    }
+
+    EXPECT_TRUE(foundWorkspaceGrows) << "WorkspaceGrows engine not found in results";
 }
 
 // Test: continueOnPrimingFailure=false hard-fails when an engine fails priming.

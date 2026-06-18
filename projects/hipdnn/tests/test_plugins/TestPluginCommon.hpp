@@ -366,16 +366,6 @@ public:
         return getNumApplicableEngines() > 0;
     }
 
-    // Workspace sizes - derived classes override for per-engine behavior
-    virtual size_t getEstimatedWorkspaceSize() const
-    {
-        return 1024;
-    }
-    virtual size_t getCompiledWorkspaceSize() const
-    {
-        return 2048;
-    }
-
     // Execute graph - derived classes override this for custom behavior
     virtual void executeGraph() const
     {
@@ -750,7 +740,7 @@ public:
                     "No engines available - cannot get workspace size");
             }
 
-            *workspaceSize = getInstance()->getEstimatedWorkspaceSize();
+            *workspaceSize = 1024;
 
             LOG_API_SUCCESS(apiName, "workspaceSize=" << *workspaceSize);
         });
@@ -778,7 +768,7 @@ public:
                     "No engines available - cannot get workspace size");
             }
 
-            *workspaceSize = getInstance()->getCompiledWorkspaceSize();
+            *workspaceSize = 2048;
 
             LOG_API_SUCCESS(apiName, "workspaceSize=" << *workspaceSize);
         });

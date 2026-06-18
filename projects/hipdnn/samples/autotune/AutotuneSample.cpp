@@ -264,12 +264,12 @@ static void demonstrateExhaustiveAutotune(hipdnnHandle_t handle, bool largeMode)
 ///   4. Run autotune() on the pre-filtered set
 ///
 /// This avoids compiling engines whose estimated workspace exceeds the budget,
-/// saving time compared to the Tier 2 overload (which compiles all engines
+/// saving time compared to the general overload (which compiles all engines
 /// first, then filters by actual compiled workspace size).
 ///
-/// Alternative: Tier 2 autotune with workspace limit parameter
+/// Alternative: general autotune overload with workspace limit parameter
 /// ─────────────────────────────────────────────────────────────
-/// Instead of pre-filtering, you can use the Tier 2 autotune() overload that
+/// Instead of pre-filtering, you can use the general autotune() overload that
 /// takes a workspaceSize parameter. This compiles and benchmarks all candidates,
 /// then filters out any plan whose actual (compiled) workspace exceeds the limit:
 ///
@@ -283,11 +283,11 @@ static void demonstrateExhaustiveAutotune(hipdnnHandle_t handle, bool largeMode)
 ///
 ///   int64_t workspaceBudget = 256 * 1024 * 1024;  // 256 MB limit
 ///   std::vector<AutotuneResult> results;
-///   // Tier 2 overload: pass workspaceBudget as the 4th argument
+///   // General overload: pass workspaceBudget as the 4th argument
 ///   graph->autotune(handle, variantPack, workspace.get(),
 ///                   workspaceBudget, config, {}, &results);
 ///
-/// In the Tier 2 overload, plans exceeding the workspace limit appear in
+/// In the general overload, plans exceeding the workspace limit appear in
 /// results with succeeded=false. If the fastest plan is too large, the
 /// next-best plan that fits is selected automatically.
 static void demonstrateFilteredAutotune(hipdnnHandle_t handle, bool largeMode)

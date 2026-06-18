@@ -339,9 +339,29 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
             }
             catch(const nlohmann::json::exception& e)
             {
-                return {ErrorCode::INVALID_VALUE,
-                        std::string("AutotuneFileWriter: existing config file is not valid JSON: ")
-                            + e.what()};
+                // The existing file is corrupt. Attempt to move aside.
+                const auto epochSeconds = std::chrono::duration_cast<std::chrono::seconds>(
+                                              std::chrono::system_clock::now().time_since_epoch())
+                                              .count();
+                std::filesystem::path corruptPath = filePath;
+                corruptPath += ".corrupt-" + std::to_string(epochSeconds);
+                std::error_code renameEc;
+                std::filesystem::rename(filePath, corruptPath, renameEc);
+                if(renameEc)
+                {
+                    HIPDNN_FE_LOG_ERROR("autotune: existing config file "
+                                        << filePath << " contains invalid JSON (" << e.what()
+                                        << ") and could not be moved aside (" << renameEc.message()
+                                        << "); overwriting it with new results");
+                }
+                else
+                {
+                    HIPDNN_FE_LOG_WARN(
+                        "autotune: existing config file "
+                        << filePath << " contains invalid JSON and could not be read: " << e.what()
+                        << ". Moved aside to " << corruptPath << "; writing fresh results.");
+                }
+                root = nlohmann::json::object();
             }
         }
 

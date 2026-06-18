@@ -54,3 +54,4 @@ HIPDNN_MAP_TO_ID(AutotunePluginEngineB, -19);
 HIPDNN_MAP_TO_ID(AutotunePluginEngineC, -20);
 HIPDNN_MAP_TO_ID(AutotunePluginEngineFails, -21);
 HIPDNN_MAP_TO_ID(AutotunePluginEnginePrimingOnlyFails, -22);
+HIPDNN_MAP_TO_ID(AutotunePluginEngineWorkspaceGrows, -23);

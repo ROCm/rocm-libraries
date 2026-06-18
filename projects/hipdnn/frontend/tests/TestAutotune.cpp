@@ -172,7 +172,7 @@ TEST(TestAutotune, EngineConfigInfoDefaults)
 // These drive the real production loop helpers (runUntilStable /
 // runFixedAverage) with a scripted timing sequence, replacing the prior cases
 // that re-implemented the convergence gating inline against literal arrays.
-// Fixed params per the F3 plan: windowSize=3, stabilityThreshold=0.05,
+// Fixed params: windowSize=3, stabilityThreshold=0.05,
 // maxIterations=10. Every row asserts an EXACT iteration count so an
 // off-by-one in the window slice cannot pass.
 // ============================================================================

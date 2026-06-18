@@ -17,6 +17,16 @@ thread_local char
     hipdnn_plugin_sdk::PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH]
     = "";
 
+// Workspace sizes for AutotunePluginEngineWorkspaceGrows: the pre-compile
+// estimate fits a modest budget, but the compiled (execution-plan) workspace is
+// larger. A test sets a budget between the two so EXHAUSTIVE priming is skipped
+// for this engine while the normal benchmark still runs.
+namespace
+{
+constexpr size_t WORKSPACE_DEFAULT_SIZE = 1024;
+constexpr size_t WORKSPACE_LARGE_COMPILED_SIZE = 8192;
+} // namespace
+
 class AutotunePlugin : public TestPluginBase
 {
 public:
@@ -42,17 +52,12 @@ public:
 
     uint32_t getNumEngines() const override
     {
-        return 5;
+        return 6;
     }
 
     uint32_t getNumApplicableEngines() const override
     {
-        return 5;
-    }
-
-    size_t getCompiledWorkspaceSize() const override
-    {
-        return 1024;
+        return 6;
     }
 
     static hipdnnPluginStatus_t
@@ -68,7 +73,7 @@ public:
             }
             hipdnn_plugin_sdk::throwIfNull(numEngines);
 
-            constexpr uint32_t TOTAL_ENGINES = 5;
+            constexpr uint32_t TOTAL_ENGINES = 6;
             // When maxEngines=0, return total count for discovery; otherwise return actual count
             *numEngines = (maxEngines == 0) ? TOTAL_ENGINES : std::min(maxEngines, TOTAL_ENGINES);
 
@@ -93,6 +98,11 @@ public:
             {
                 engineIds[4] = hipdnn_tests::plugin_constants::engineId<
                     AutotunePluginEnginePrimingOnlyFails>();
+            }
+            if(maxEngines >= 6)
+            {
+                engineIds[5] = hipdnn_tests::plugin_constants::engineId<
+                    AutotunePluginEngineWorkspaceGrows>();
             }
 
             LOG_API_SUCCESS(apiName, "numEngines=" << *numEngines);
@@ -120,7 +130,7 @@ public:
             }
             hipdnn_plugin_sdk::throwIfNull(numEngines);
 
-            constexpr uint32_t TOTAL_ENGINES = 5;
+            constexpr uint32_t TOTAL_ENGINES = 6;
             // When maxEngines=0, return total count for discovery; otherwise return actual count
             *numEngines = (maxEngines == 0) ? TOTAL_ENGINES : std::min(maxEngines, TOTAL_ENGINES);
 
@@ -145,6 +155,11 @@ public:
             {
                 engineIds[4] = hipdnn_tests::plugin_constants::engineId<
                     AutotunePluginEnginePrimingOnlyFails>();
+            }
+            if(maxEngines >= 6)
+            {
+                engineIds[5] = hipdnn_tests::plugin_constants::engineId<
+                    AutotunePluginEngineWorkspaceGrows>();
             }
 
             LOG_API_SUCCESS(apiName, "numEngines=" << *numEngines);
@@ -254,6 +269,63 @@ public:
             handle, executionContext, workspace, deviceBuffers, numDeviceBuffers);
     }
 
+    static hipdnnPluginStatus_t getWorkspaceSize(hipdnnEnginePluginHandle_t handle,
+                                                 const hipdnnPluginConstData_t* engineConfig,
+                                                 const hipdnnPluginConstData_t* opGraph,
+                                                 size_t* workspaceSize)
+    {
+        LOG_API_ENTRY("handle=" << static_cast<void*>(handle)
+                                << ", engineConfig=" << static_cast<const void*>(engineConfig)
+                                << ", opGraph=" << static_cast<const void*>(opGraph)
+                                << ", workspaceSize=" << static_cast<void*>(workspaceSize));
+
+        return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+            hipdnn_plugin_sdk::throwIfNull(handle);
+            hipdnn_plugin_sdk::throwIfNull(engineConfig);
+            hipdnn_plugin_sdk::throwIfNull(opGraph);
+            hipdnn_plugin_sdk::throwIfNull(workspaceSize);
+
+            *workspaceSize = WORKSPACE_DEFAULT_SIZE;
+
+            LOG_API_SUCCESS(apiName, "workspaceSize=" << *workspaceSize);
+        });
+    }
+
+    // Compiled (execution-plan) workspace size, keyed on the engine ID and benchmarking
+    // knob state stored im the execution context, allowing each engines to produce different
+    // behaviors needed for the varioius test scenarios.
+    static hipdnnPluginStatus_t
+        getWorkspaceSizeFromExecutionContext(hipdnnEnginePluginHandle_t handle,
+                                             hipdnnEnginePluginExecutionContext_t executionContext,
+                                             size_t* workspaceSize)
+    {
+        LOG_API_ENTRY("handle=" << static_cast<void*>(handle)
+                                << ", executionContext=" << static_cast<void*>(executionContext)
+                                << ", workspaceSize=" << static_cast<void*>(workspaceSize));
+
+        return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+            hipdnn_plugin_sdk::throwIfNull(handle);
+            hipdnn_plugin_sdk::throwIfNull(executionContext);
+            hipdnn_plugin_sdk::throwIfNull(workspaceSize);
+            hipdnn_plugin_sdk::throwIfNull(getInstance());
+
+            const auto* ctx = static_cast<HipdnnEnginePluginExecutionContext*>(executionContext);
+
+            if(ctx->engineId
+               == hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineWorkspaceGrows>())
+            {
+                *workspaceSize = ctx->hasBenchmarkingKnobEnabled ? WORKSPACE_LARGE_COMPILED_SIZE
+                                                                 : WORKSPACE_DEFAULT_SIZE;
+            }
+            else
+            {
+                *workspaceSize = WORKSPACE_DEFAULT_SIZE;
+            }
+
+            LOG_API_SUCCESS(apiName, "workspaceSize=" << *workspaceSize);
+        });
+    }
+
     // Override to return knobs that support the autotune workflow
     static hipdnnPluginStatus_t getEngineDetails(hipdnnEnginePluginHandle_t handle,
                                                  int64_t engineId,
@@ -288,13 +360,18 @@ public:
                 = hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineFails>();
             const auto enginePrimingOnlyFails
                 = hipdnn_tests::plugin_constants::engineId<AutotunePluginEnginePrimingOnlyFails>();
+            const auto engineWorkspaceGrows
+                = hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineWorkspaceGrows>();
 
-            if(engineId == engineFails || engineId == enginePrimingOnlyFails)
+            if(engineId == engineFails || engineId == enginePrimingOnlyFails
+               || engineId == engineWorkspaceGrows)
             {
-                // Both failing engines need the benchmarking knob so they are selected
-                // for EXHAUSTIVE priming. EngineFails fails unconditionally, while
+                // These engines need the benchmarking knob so they are selected for
+                // EXHAUSTIVE priming. EngineFails fails unconditionally;
                 // EnginePrimingOnlyFails fails only during priming (testing RFC's
-                // "succeeded may be true" case).
+                // "succeeded may be true" case); EngineWorkspaceGrows reports a
+                // larger workspace size that can be too large for the budget so
+                // priming can be  skipped (not failed) while the real plan still benchmarks.
                 knobOffsets.push_back(hipdnn_plugin_sdk::KnobFactory::createIntKnob(
                     builder,
                     "global.benchmarking",
@@ -458,8 +535,7 @@ HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
                                        const hipdnnPluginConstData_t* opGraph,
                                        size_t* workspaceSize)
 {
-    return TestPluginBase::enginePluginGetWorkspaceSize(
-        handle, engineConfig, opGraph, workspaceSize);
+    return AutotunePlugin::getWorkspaceSize(handle, engineConfig, opGraph, workspaceSize);
 }
 
 HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
@@ -468,7 +544,8 @@ HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
         hipdnnEnginePluginExecutionContext_t executionContext,
         size_t* workspaceSize)
 {
-    return TestPluginBase::enginePluginGetWorkspaceSize(handle, executionContext, workspaceSize);
+    return AutotunePlugin::getWorkspaceSizeFromExecutionContext(
+        handle, executionContext, workspaceSize);
 }
 
 HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
