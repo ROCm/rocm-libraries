@@ -390,16 +390,13 @@ def instructionSchedule(emittedModules, multiDU: bool = False):
       - Module-internal instruction order is preserved.
       - GR path is spread as much as possible across remaining valid slots.
 
-    When multiDU is False (single-DU / legacy path):
-      - LR path containing a WAIT_GR is packed from the end backwards.
-
-    When multiDU is True (MX multi-DU path):
-      - LR path containing a WAIT_GR is placed forward (wait_gr → sync → LR insts).
-      - wait_gr+barrier stay contiguous.
+    Wait_gr packing (both single-DU and multi-DU):
+      - An LR path containing a WAIT_GR is packed from the end backwards so the
+        wait_gr lands late, regardless of unroll depth.
       The GR-defer hazard (next-iteration GR must not overwrite an LDS buffer
-      still being read post-barrier) is modeled as a logical dependency edge in
-      the LogicalScheduler, so it is enforced by module ordering rather than by
-      a placement rule here.
+      still being read post-barrier) and the wait_gr/sync contiguity are modeled
+      as logical dependency edges in the LogicalScheduler, so they are enforced
+      by module ordering rather than by a placement rule here.
 
       TODO : To be tested on multi-partition setup.
     """
@@ -444,7 +441,7 @@ def instructionSchedule(emittedModules, multiDU: bool = False):
     for order, hasWaitGR in paths:
         if not order:
             continue
-        reverse = (not multiDU) and hasWaitGR
+        reverse = hasWaitGR
         pathInsts = _flattenPath(order, emittedModules, reverse=reverse)
         rules.resetPath()
         if not hasWaitGR:
