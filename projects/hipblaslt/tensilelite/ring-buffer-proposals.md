@@ -27,7 +27,7 @@ bool ringEligible() const {
 
 ---
 
-## Proposal 1: D-only async reset on the warm path
+## Proposal 1: Async output reset on the warm path
 
 ### Problem
 
@@ -42,51 +42,112 @@ if(m_altSlotsFilled)
 }
 ```
 
-The comment justifying this reads: "D's initialized value is irrelevant (the next kernel fully overwrites it)." That is true for pure benchmarking — the kernel unconditionally writes every element of D. However, it does not hold when `m_elementsToValidate > 0`: the validation listener compares the kernel's output D against a reference computed from the same initial inputs. If D in the alt slot was not reset from `gpuInput.valid` before the kernel ran, the comparison is still valid (the kernel fully overwrites D regardless), but the divergence from develop's explicit reset contract is a latent risk as the code evolves.
+The comment justifying this says the slot is kernel-write-free and that D's initialized value is irrelevant because the next kernel fully overwrites it. That is too strong. It is only true before an alt slot's first use. Once `prepareGPUInputs` calls `advanceBuffer`, that alt slot becomes the active slot, the kernel writes its output tensors, and a later `beginAsyncReset` may target that previously active slot while `m_altSlotsFilled` is still true.
 
-More concretely: develop always calls `resetOutput` before using a slot, whether via its own fast path (`prepareGPUInputsInternal`) or elsewhere. The ring's warm path bypasses this entirely. Any future change that conditions validation on D's pre-kernel value (e.g. for partial-write kernels or masked output modes) would silently break the ring path without any assertion or guard.
+The safer invariant is narrower:
 
-Separately, the warm path was designed for the benchmark case where no validation occurs. For no-benchmark runs (validation-only / warmup-only), the warm path fires on every slot advance, meaning D is never reset between solutions within a problem for those runs.
+- Under `ringEligible()`, non-output tensors are stable across solutions (`!m_problemDependentData`) and kernels should not write A/B/C or other input-only tensors.
+- Output tensors may be dirty once their slot has been used by a kernel.
+- When validation is enabled, the ring path should preserve the same "reset outputs before reuse" contract as `prepareGPUInputsInternal`.
+
+This is not strictly a current correctness failure for ordinary GEMM benchmarking, because the standard GEMM kernel overwrites D. It is still a real parity and maintenance problem: develop's fast path resets output tensors when `m_elementsToValidate > 0`, while the ring fast path bypasses that reset entirely. Any output mode that depends on the pre-kernel value, any partial-write/masked-output evolution, or any future validation of an output that is not unconditionally overwritten would silently diverge on the warm ring path.
+
+Also, this should not be called "D-only." `resetOutput` resets every tensor whose descriptor has `isOutput()`: D is always an output, but E, gradient bias, and AMAXD can also be outputs. The warm-path fix should therefore reset output tensors, not just D.
 
 ### Proposed change
 
-Replace the no-op event record in the warm path with an async D-only reset:
+When the ring warm path is used and validation is enabled, reset output tensors in the target slot on `m_copyStream` before recording the copy-done event. When validation is disabled, keep the no-op event path to avoid benchmark-only DMA traffic.
 
 ```cpp
 if(m_altSlotsFilled)
 {
-    // Reset D in the target slot asynchronously on m_copyStream.
-    // A/B/C are invariant within a problem (see invariant below) and are not re-copied.
-    SlotGuard guard(m_vdata, targetIdx);
-    resetOutput(m_gpuPtrsRing[targetIdx],
-                m_gpuBatchPtrsRing[targetIdx],
-                m_maxElements,
-                m_groupedOffsets,
-                problem,
-                hipMemcpyDeviceToDevice,
-                m_copyStream);
+    if(m_elementsToValidate)
+    {
+        auto resetWarmOutputs = [&](ContractionProblemGemm const& gemm) {
+            // Redirect gpuInput.current/batch to targetIdx for resetOutput.
+            SlotGuard guard(m_vdata, targetIdx);
+            resetOutput(m_gpuPtrsRing[targetIdx],
+                        m_gpuBatchPtrsRing[targetIdx],
+                        m_maxElements,
+                        m_groupedOffsets,
+                        gemm,
+                        hipMemcpyDeviceToDevice,
+                        m_copyStream);
+        };
+
+        if(auto gemmProblem = dynamic_cast<ContractionProblemGemm const*>(problem))
+        {
+            resetWarmOutputs(*gemmProblem);
+        }
+        else if(auto groupedProblem
+                = dynamic_cast<ContractionProblemGroupedGemm const*>(problem))
+        {
+            assert(std::all_of(
+                groupedProblem->gemms.begin(),
+                groupedProblem->gemms.end(),
+                [&](ContractionProblemGemm const& g) {
+                    return g.a().dataType() == groupedProblem->gemms[0].a().dataType()
+                        && g.b().dataType() == groupedProblem->gemms[0].b().dataType()
+                        && g.c().dataType() == groupedProblem->gemms[0].c().dataType()
+                        && g.d().dataType() == groupedProblem->gemms[0].d().dataType();
+                }));
+            resetWarmOutputs(groupedProblem->gemms[0]);
+        }
+        else
+        {
+            throw std::runtime_error("Failed to cast to any ContractionProblem.");
+        }
+    }
+
     HIP_CHECK_EXC(hipEventRecord(m_copyDoneEvents[targetIdx], m_copyStream));
     m_availableSlots++;
     return;
 }
 ```
 
-The `SlotGuard` RAII type already exists in `fillSlot` to redirect `gpuInput.current`/`batch` to the target slot for the duration of the call; the same guard is required here so that `resetOutput` writes into `targetIdx`'s buffers, not the active slot's.
+The `SlotGuard` RAII type already exists in `fillSlot` to redirect `gpuInput.current`/`batch` to the target slot for the duration of the call. The same guard is required here because `resetOutput` writes through `p.gpuInput.current`; the `ptrs` vector is updated after the copy, but it is not the source of the destination pointer. Without `SlotGuard`, the reset would write into the active slot, not `targetIdx`.
 
-`resetOutput` is an async-capable function: it takes a `targetStream` parameter and uses `hipMemcpyDeviceToDevice` with that stream when `kind == hipMemcpyDeviceToDevice`. The D-only reset is genuinely asynchronous and will overlap with the previous solution's post-benchmark work.
+`resetOutput` is async-capable for D2D output resets: it takes a `targetStream` parameter and uses `hipMemcpyAsync` when `kind == hipMemcpyDeviceToDevice` and a stream is supplied. Recording `m_copyDoneEvents[targetIdx]` after `resetOutput` on the same stream makes the existing `waitCopyDone` barrier sufficient before the slot is consumed by the compute stream.
 
-The existing `waitCopyDone` call in `main.cpp` (before kernel launch) ensures the reset DMA is complete before the slot is consumed by the compute stream.
+### Required eligibility guard
 
-### Why A/B/C are safe to skip
+The warm-path implementation above uses `hipMemcpyDeviceToDevice`, so it is only correct when the pristine GPU copy is populated. Today `ringEligible()` does not require this:
 
-A/B/C in an alt slot are safe to skip on the warm path because:
+```cpp
+bool ringEligible() const {
+    return m_hasAltBuffers
+        && m_copyStream
+        && m_gpuInit
+        && m_curBoundsCheck == BoundsCheckMode::Disable
+        && !m_problemDependentData;
+}
+```
 
-1. `initializeAltBufferSets` (called at first problem entry, after `prepareGPUInputsInternal` returns slot 0's inputs) calls `fillSlot` for each alt slot, copying A/B/C from the same `gpuInput.valid` source used for slot 0.
-2. A/B/C do not change between solutions within the same problem — they are input tensors whose values are fixed by the problem's initialization.
-3. Alt slots are never written by the compute kernel — the benchmark loop dispatches only to `m_activeIdx` (the active slot). `beginAsyncReset` targets alt slots, never the active slot.
-4. When the problem changes, `cancelAsyncReset` is called (main.cpp line ~1240, at `preProblem`), which clears `m_altSlotsFilled` and clears `m_gpuPtrsRing[1..N]`. The subsequent first call to `beginAsyncReset` for the new problem will have `m_altSlotsFilled == false` and will take the cold path (`fillSlot`), re-copying all tensors including A/B/C.
+If `--pristine-on-gpu=false`, `prepareGPUInputsInternal` uses host-to-device copies for output reset. In that mode, a D2D warm reset would read from `gpuInput.valid`, which is allocated but not guaranteed to contain the pristine output data. Proposal 1 must therefore also add `m_keepPristineCopyOnGPU` to `ringEligible()`:
 
-Therefore, on the warm path, A/B/C in the target slot are guaranteed to match the current problem's data.
+```cpp
+bool ringEligible() const {
+    return m_hasAltBuffers
+        && m_copyStream
+        && m_gpuInit
+        && m_curBoundsCheck == BoundsCheckMode::Disable
+        && !m_problemDependentData
+        && m_keepPristineCopyOnGPU;
+}
+```
+
+An alternative is to teach `resetOutput` to perform stream-aware H2D resets and mirror `prepareGPUInputsInternal`'s `kind` selection in the warm path. That is a larger change. The smaller and safer Proposal 1 fix is to keep the ring warm reset D2D-only and disable the ring when no pristine GPU copy exists.
+
+### Why non-output tensors are safe to skip
+
+Non-output tensors in an alt slot are safe to skip on the warm path because:
+
+1. `initializeAltBufferSets` fills the alt slots for the current problem by calling `fillSlot`.
+2. `ringEligible()` excludes problem-dependent data, so tensor values do not change between solutions for the same problem.
+3. Kernels consume A/B/C and other input-only tensors but should not write them.
+4. `cancelAsyncReset` is called at the problem boundary, synchronizes any pending copy work, clears alt ring metadata, and clears `m_altSlotsFilled`, so stale alt slots are not reused for a different problem.
+
+Output tensors do not share that invariant. A slot that has been active may contain previous kernel output and must be reset when validation is enabled.
 
 ### Interaction with correctness validation
 
@@ -101,73 +162,98 @@ if(m_elementsToValidate)
 return m_cachedGPUInputs;
 ```
 
-The warm-path fix should mirror this condition: only issue the async D reset when `m_elementsToValidate > 0`. When `m_elementsToValidate == 0` (pure benchmarking), the no-op event path is correct and avoids unnecessary DMA traffic.
+The warm-path fix should mirror this condition. When `m_elementsToValidate == 0`, the no-op event path is correct and avoids unnecessary DMA traffic in pure benchmark runs.
+
+One caveat: `m_altSlotsFilled` is set only by `initializeAltBufferSets`, not by the cold path in `beginAsyncReset`. Proposal 1 should not assume that a cold fill transitions the ring into the warm state. It only changes the behavior once the existing warm state is already true.
 
 ### Files and functions to change
 
 | File | Function | Change |
 |------|----------|--------|
-| `client/include/DataInitialization.hpp` | `beginAsyncReset` | Replace no-op event record in the `m_altSlotsFilled` branch with `SlotGuard` + `resetOutput` (D2D, `m_copyStream`), guarded on `m_elementsToValidate` |
-| `client/include/DataInitialization.hpp` | `beginAsyncReset` | `problem` parameter must be typed (`ContractionProblemGemm const&`) or the call must dynamic-cast, as `resetOutput` requires the concrete type |
+| `client/include/DataInitialization.hpp` | `beginAsyncReset` | In the `m_altSlotsFilled` branch, when `m_elementsToValidate > 0`, use `SlotGuard` + `resetOutput` to reset output tensors in `targetIdx` on `m_copyStream`, then record the copy-done event |
+| `client/include/DataInitialization.hpp` | `beginAsyncReset` | Preserve the existing `ContractionProblem const*` API and mirror the cold path's GEMM/grouped-GEMM casts; do not make `beginAsyncReset` GEMM-only |
+| `client/include/DataInitialization.hpp` | `ringEligible()` | Add `&& m_keepPristineCopyOnGPU` so the warm D2D reset never reads from an unpopulated GPU pristine buffer |
 
-No changes to `main.cpp`, `DataInitialization.cpp`, or the cold path are required.
+No changes to `main.cpp`, `DataInitialization.cpp`, or the cold path are required for this smaller fix.
+
+### Tests to add
+
+- A ring warm-path validation test that advances into a slot, lets a kernel or test hook dirty its output buffer, calls `beginAsyncReset`, advances into that same slot again, and verifies the output tensor was reset before reuse.
+- A `--pristine-on-gpu=false` coverage case proving the ring does not become eligible, so validation falls back to the synchronous `prepareGPUInputsInternal` reset path.
 
 ---
 
-## Proposal 2: Async copy only for no-benchmark runs
+## Proposal 2: Make ring usage explicit and allocation-aware
 
 ### Problem
 
-The constructor assigns `m_numActiveBuffers` based on whether benchmark runs will execute:
+The constructor currently assigns ring depth from whether the benchmark timer has timed enqueue work:
 
 ```cpp
 bool noBenchmarkRuns = (numBenchmarks == 0 || numEnqPerSync == 0 || numSyncsPerBench == 0);
 m_numActiveBuffers = noBenchmarkRuns ? 3 : 2;
 ```
 
-This is inverted. `beginAsyncReset` is called exclusively inside the `while(listeners.needMoreRunsInSolution())` loop body (main.cpp lines ~1521–1522), which never executes when `noBenchmarkRuns == true` because `m_numEnqueuesPerSolution = numEnqPerSync * numSyncsPerBench = 0` causes `needMoreRunsInSolution()` to return false immediately. The consequences:
+The old proposal treated `noBenchmarkRuns` as equivalent to "the solution loop never executes." That is not true. The outer and inner loops are driven by the union of all listeners, not only by `BenchmarkTimer`:
 
-- **No-benchmark runs** (validation-only, warmup-only): triple-buffering is allocated (`m_numActiveBuffers = 3`), but `beginAsyncReset` is never called, so the extra GPU buffer set for every tensor is permanently idle. This wastes device memory.
-- **Benchmark runs**: double-buffering is used (`m_numActiveBuffers = 2`). `beginAsyncReset` is called, so the ring fires, but with only one alt slot the overlap depth is minimal. More critically, async DMA running during warmup can perturb cache state and DRAM bandwidth measurements even when not concurrent with the measured kernel.
+- `BenchmarkTimer::needMoreRunsInSolution()` returns false when `numEnqPerSync * numSyncsPerBench == 0`.
+- `ReferenceValidator::needMoreRunsInSolution()` returns true until validation has run, even when `num-benchmarks=0`.
+- `MetaRunListener::needMoreRunsInSolution()` ORs those listener results.
 
-### Design rationale: benchmarks must be clean
+Therefore validation-only runs can already enter the solution loop and can already reach the existing `beginAsyncReset` calls after the `benchmark_runs` block. "Warmup-only" with validation disabled and zero benchmark enqueues is not a real current execution mode: warmups live inside the same solution loop, so no listener drives the loop and warmups do not run.
 
-During benchmark runs, async DMA should be disabled entirely. `waitCopyDone` prevents the DMA from overlapping with the measured kernel launch, but the DMA traffic during warmup — which occurs in the same temporal window as kernel pre-scheduling — can:
-- Evict A/B/C data from the GPU's L2 cache before the kernel reads it, biasing bandwidth measurements.
-- Introduce DRAM bandwidth contention that is not reproducible in production workloads.
+There is a separate allocation bug: `m_numActiveBuffers` controls ring indexing, but it does not control physical allocation. `allocNewGPUInputs()` allocates alternate buffers for `slot < MAX_BUFFER_SETS`, not `slot < m_numActiveBuffers`, so benchmark mode still physically allocates slot 2 even when `m_numActiveBuffers == 2`.
 
-The benchmark path should match develop exactly: synchronous D-only `resetOutput` per solution (already handled by `prepareGPUInputsInternal`'s fast path), no background DMA. The ring is unnecessary for benchmark runs because the per-solution setup cost is dominated by kernel launch overhead and post-sync, not by the D reset.
+Finally, disabling only `ringEligible()` is not enough to match develop. `initializeAltBufferSets()` is called after the initial GPU input preparation and fills alt slots according to `m_numActiveBuffers`; that path is not gated by `ringEligible()`.
+
+### Design rationale
+
+Separate three concepts that are currently conflated:
+
+1. **Timed benchmark enqueues**: `numBenchmarks > 0 && numEnqPerSync > 0 && numSyncsPerBench > 0`.
+2. **Listener-driven untimed solution runs**: validation/printing can drive the solution loop even with no timed benchmark enqueues.
+3. **Physical ring allocation**: whether extra GPU buffer sets should be allocated and filled at all.
+
+This proposal chooses benchmark cleanliness and develop parity for timed benchmark enqueues: no ring consumption, no background reset submission, and no physical alt-buffer allocation for that path. Validation-driven untimed runs may use the ring, because they are not producing timed performance numbers and can benefit from preparing the next slot while the CPU moves through reporting and next-solution setup.
 
 ### Proposed change
 
-**For benchmark runs (`noBenchmarkRuns == false`):**
-- Disable the ring. `ringEligible()` should add `!m_hasBenchmarkRuns` as a sixth term, or the `beginAsyncReset` call site in main.cpp should be gated on `noBenchmarkRuns`.
-- `prepareGPUInputs` always takes the slow path through `prepareGPUInputsInternal`, which already handles the synchronous D reset via `resetOutput` when `m_elementsToValidate > 0`.
-- `m_numActiveBuffers = 2`: double-buffer is allocated (consistent with current code) but the ring fast path never fires.
-
-**For no-benchmark runs (`noBenchmarkRuns == true`):**
-- Enable the ring with triple-buffering: `m_numActiveBuffers = 3` (one active, one DMA in-flight, one spare).
-- Add a `beginAsyncReset(problem)` call in `main.cpp` after each solution's warmup block (after `postWarmup`, before `postSolution`) so the DMA for the next slot overlaps with correctness checking. With triple-buffering, two calls to `beginAsyncReset` can be made to fill both alt slots ahead.
-- The existing `waitCopyDone` call (before kernel launch) already ensures the DMA is complete before the slot is consumed.
-
-**The assignment becomes correct under this design:**
+Introduce explicit policy state based on timed benchmark enqueues, not the broader phrase "benchmark runs":
 
 ```cpp
-m_numActiveBuffers = noBenchmarkRuns ? 3 : 2;
+bool hasTimedBenchmarkEnqueues = numBenchmarks > 0
+                              && numEnqPerSync > 0
+                              && numSyncsPerBench > 0;
+bool hasValidationOrPrintWork = referenceValidatorWouldRun(args);
+
+m_ringAllowed = !hasTimedBenchmarkEnqueues && hasValidationOrPrintWork;
+m_numActiveBuffers = m_ringAllowed ? 3 : 1;
 ```
 
-Triple-buffering is used when and only when the ring's async path fires (no-benchmark runs). Benchmark runs use double-buffering with the ring disabled.
+`referenceValidatorWouldRun(args)` should be a shared helper or an exact duplicate of `ReferenceValidator`'s enable predicate (`m_elementsToValidate != 0 || m_printAny`). Do not hand-maintain a similar-but-different list of print flags in `DataInitialization`; otherwise the ring can be enabled for a mode that does not actually drive the solution loop. `m_ringAllowed` should be a member because the same policy is needed by allocation, initialization, and `ringEligible()`. `m_numActiveBuffers = 1` means "no ring"; slot 0 is still used normally and no alt slot is addressed.
+
+Proposal 1's `m_keepPristineCopyOnGPU` guard remains required. The ring warm path performs D2D output resets and must not read from an unpopulated GPU pristine buffer.
+
+### Physical allocation and fill policy
+
+Change alt-buffer allocation to respect `m_numActiveBuffers`:
+
+```cpp
+m_hasAltBuffers = (m_numActiveBuffers > 1);
+
+for(size_t slot = 1; m_hasAltBuffers && slot < m_numActiveBuffers; slot++)
+{
+    ...
+}
+```
+
+This fixes the current mismatch where benchmark mode indexes only slots 0 and 1 but still allocates slot 2 because the loop uses `MAX_BUFFER_SETS`.
+
+`initializeAltBufferSets()` already loops to `m_numActiveBuffers`, and its existing `!m_hasAltBuffers` guard becomes meaningful once allocation initializes `m_hasAltBuffers = false` for `m_numActiveBuffers == 1`.
 
 ### Interaction with `ringEligible()`
 
-The cleanest implementation adds `m_hasBenchmarkRuns` as a member set in the constructor alongside `m_numActiveBuffers`:
-
-```cpp
-m_hasBenchmarkRuns = !noBenchmarkRuns;
-m_numActiveBuffers = noBenchmarkRuns ? 3 : 2;
-```
-
-Then `ringEligible()` adds one term:
+`ringEligible()` should use the explicit ring policy, not infer policy from buffer presence alone:
 
 ```cpp
 bool ringEligible() const {
@@ -176,37 +262,37 @@ bool ringEligible() const {
         && m_gpuInit
         && m_curBoundsCheck == BoundsCheckMode::Disable
         && !m_problemDependentData
-        && !m_hasBenchmarkRuns;   // ring is for no-benchmark paths only
+        && m_keepPristineCopyOnGPU
+        && m_ringAllowed;
 }
 ```
 
-This gates `beginAsyncReset` at its entry point (the existing `if(!ringEligible()) return;` guard), so the main.cpp call sites at lines 1521–1522 do not need to be conditioned — they become no-ops when benchmark runs are active.
+This makes the existing `beginAsyncReset` call pair harmless in timed benchmark mode: it becomes a no-op. If the goal is to avoid even the call overhead and timing label, the call site can also be guarded in `main.cpp`, but correctness should not depend on that.
 
-### New `beginAsyncReset` call site for no-benchmark runs
+### Call-site policy
 
-Currently `beginAsyncReset` is called only after `postSyncs` inside the benchmark loop. For no-benchmark runs, there is no benchmark loop. The DMA must be triggered from somewhere in the solution loop. The correct location is after the warmup block completes (after `postWarmup`, before `postSolution`):
+Do not add the old proposed call after `postWarmup`. In the current code, validation happens in `listeners.validateWarmups()` before `postWarmup`, so a reset submitted after `postWarmup` does not overlap correctness checking.
 
-```cpp
-// After postWarmup, before postSolution:
-if(noBenchmarkRuns) {
-    ScopedTimer timer("async_reset_submit");
-    dataInit->beginAsyncReset(problem);
-    dataInit->beginAsyncReset(problem);  // fill both alt slots for triple-buffer
-}
-```
+The minimal implementation should keep the existing call pair after the `benchmark_runs` block. Validation-only runs can already reach that location when `ReferenceValidator` drives the solution loop. With `m_ringAllowed == true` and `m_numActiveBuffers == 3`, both calls can be useful: the first prepares one non-active slot and the second prepares the other.
 
-The `waitCopyDone` call already present before the first kernel launch ensures correctness on the next solution iteration.
+If a later change wants to overlap reset DMA with validation readback or CPU comparison, the candidate location is between the first warmup launch and `listeners.validateWarmups()`, guarded by `m_ringAllowed`. That is a more aggressive scheduling change and should be tested separately for copy-engine contention with validation readback.
 
 ### Files and functions to change
 
 | File | Function / Location | Change |
 |------|---------------------|--------|
-| `client/src/DataInitialization.cpp` | Constructor (~line 991) | Add `m_hasBenchmarkRuns = !noBenchmarkRuns;` alongside existing `m_numActiveBuffers` assignment |
-| `client/include/DataInitialization.hpp` | `ringEligible()` | Add `&& !m_hasBenchmarkRuns` |
-| `client/include/DataInitialization.hpp` | Member declarations | Add `bool m_hasBenchmarkRuns = false;` |
-| `client/main.cpp` | After `postWarmup` block | Add `beginAsyncReset` call pair, guarded on `noBenchmarkRuns` |
+| `client/src/DataInitialization.cpp` | Constructor (~line 991) | Compute `hasTimedBenchmarkEnqueues`, use a shared/helper predicate matching `ReferenceValidator` enablement to determine whether validation/printing can drive untimed solution runs, set `m_ringAllowed`, and set `m_numActiveBuffers = m_ringAllowed ? 3 : 1` |
+| `client/src/DataInitialization.cpp` | `allocNewGPUInputs` | Initialize `m_hasAltBuffers = (m_numActiveBuffers > 1)` and allocate alternate buffers only for `slot < m_numActiveBuffers` |
+| `client/include/DataInitialization.hpp` | Member declarations | Add `bool m_ringAllowed = false;` |
+| `client/include/DataInitialization.hpp` | `ringEligible()` | Add `&& m_ringAllowed`; keep Proposal 1's `&& m_keepPristineCopyOnGPU` |
+| `client/main.cpp` | Existing `beginAsyncReset` call pair | Leave in place or guard for timing cleanliness; do not add the old post-`postWarmup` call |
 
-The two existing `beginAsyncReset` calls inside the benchmark loop (main.cpp lines 1521–1522) become permanently dead for benchmark runs once `ringEligible()` returns false for that path. They can be removed or left with a comment; removing them is cleaner.
+### Tests to add
+
+- Timed benchmark configuration (`num-benchmarks > 0`, `num-enqueues-per-sync > 0`, `num-syncs-per-benchmark > 0`) should not allocate alt slots and should not advance the ring.
+- Validation-only configuration (`num-benchmarks=0`, `num-elements-to-validate > 0`) should use three active ring slots and the existing `beginAsyncReset` call pair should make subsequent `prepareGPUInputs` calls advance slots.
+- Zero-enqueue / no-validation configuration should not claim warmup-only ring behavior; the solution loop should not run unless another listener drives it.
+- Allocation test: slot 2 should not be allocated when `m_numActiveBuffers == 1`.
 
 ---
 
@@ -214,21 +300,23 @@ The two existing `beginAsyncReset` calls inside the benchmark loop (main.cpp lin
 
 ### Before (current branch state)
 
-| Mode | `m_numActiveBuffers` | Ring fires? | D reset per solution |
-|------|---------------------|-------------|---------------------|
-| No-benchmark runs | 3 (triple) | No (`beginAsyncReset` never called) | Via `prepareGPUInputsInternal` fast path (synchronous) |
-| Benchmark runs | 2 (double) | Yes (async DMA during warmup) | Via ring warm path: no-op (D not reset); or cold path: full `fillSlot` |
+| Mode | `m_numActiveBuffers` | Physical alt allocation | Ring fires? | Output reset per solution |
+|------|---------------------|-------------------------|-------------|---------------------------|
+| Timed benchmark enqueues | 2 | Slots 1 and 2 are allocated (`MAX_BUFFER_SETS`) even though only slot 1 is indexed | Yes, via existing `beginAsyncReset` calls | Warm path records no-op event; cold path full-fills |
+| Validation-only / print-only, no timed enqueues | 3 | Slots 1 and 2 allocated | Yes when validation/printing drives the solution loop | Warm path records no-op event today; Proposal 1 fixes this |
+| Zero enqueues and no validation/printing | 3 | Slots 1 and 2 allocated | No solution loop, so no useful ring activity | Initial preparation only |
 
 ### After (both proposals applied)
 
-| Mode | `m_numActiveBuffers` | Ring fires? | D reset per solution |
-|------|---------------------|-------------|---------------------|
-| No-benchmark runs | 3 (triple) | Yes — `beginAsyncReset` called after warmup, overlaps correctness checking | Async `hipMemcpyDeviceToDevice` on `m_copyStream` in warm path, complete before next kernel via `waitCopyDone` |
-| Benchmark runs | 2 (double) | No — `ringEligible()` returns false; ring disabled | Synchronous `resetOutput` in `prepareGPUInputsInternal` fast path (develop parity) |
+| Mode | `m_numActiveBuffers` | Physical alt allocation | Ring fires? | Output reset per solution |
+|------|---------------------|-------------------------|-------------|---------------------------|
+| Timed benchmark enqueues | 1 | No alt slots | No — `ringEligible()` returns false | Synchronous `resetOutput` in `prepareGPUInputsInternal` fast path when validation is enabled |
+| Validation-only / print-only, no timed enqueues | 3 | Slots 1 and 2 allocated | Yes, via the existing post-`benchmark_runs` call pair | Proposal 1 async output reset on `m_copyStream`, fenced by `waitCopyDone` |
+| Zero enqueues and no validation/printing | 1 | No alt slots | No solution loop and no ring | Initial preparation only |
 
 ### Key invariants preserved after both proposals
 
-- D in every slot consumed by the compute kernel has been reset from `gpuInput.valid` before the kernel runs, whether via sync or async DMA.
-- A/B/C in alt slots are always valid for the current problem (filled by `initializeAltBufferSets`; invalidated by `cancelAsyncReset` on problem change).
-- Benchmark measurements are free of DMA-induced cache and bandwidth contention.
-- `m_numActiveBuffers = noBenchmarkRuns ? 3 : 2` is semantically correct: triple-buffering is allocated when and only when the async pipeline is active.
+- Output tensors in every consumed slot are reset before validation-sensitive reuse, whether by the synchronous fast path or Proposal 1's async warm path.
+- Non-output tensors in ring slots are valid because either `initializeAltBufferSets` filled the slots or the cold `beginAsyncReset` / `fillSlot` path filled them after a problem-boundary invalidation.
+- Timed benchmark measurements do not consume ring slots or submit background reset work.
+- Physical allocation matches policy: no alt slots are allocated when the ring is disabled.
