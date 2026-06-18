@@ -107,7 +107,9 @@ jobs:
       - name: Stage coverage objects and llvm tools
         run: |
           set -euo pipefail
-          STAGE="${{ github.workspace }}/coverage-objects"
+          # Use $GITHUB_WORKSPACE (container path) rather than the github.workspace
+          # expression (host path) so the staged dir matches what upload-artifact reads.
+          STAGE="${GITHUB_WORKSPACE}/coverage-objects"
           DIST="TheRock/build-coverage/dist/rocm"
           LLVM_BIN="${DIST}/lib/llvm/bin"
           LIB_NAME="lib$(echo '${{ inputs.cmake_target }}' | tr '[:upper:]' '[:lower:]')"
@@ -124,7 +126,8 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-objects-${{ inputs.project_name }}-${{ inputs.amdgpu_families }}
-          path: ${{ github.workspace }}/coverage-objects
+          # Relative path resolves against the container workspace, matching the staging step.
+          path: coverage-objects
           if-no-files-found: error
           retention-days: 1
 
